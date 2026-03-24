@@ -7,13 +7,30 @@ target_include_directories(pulp-audio
         $<INSTALL_INTERFACE:include>
 )
 
-target_sources(pulp-audio PRIVATE
-    src/placeholder.cpp
-)
-
-# Placeholder source to make the library valid
-file(WRITE ${CMAKE_CURRENT_SOURCE_DIR}/src/placeholder.cpp
-    "// pulp-audio: placeholder — replaced in Phase 2+\nnamespace pulp::audio {}\n"
-)
-
 target_link_libraries(pulp-audio PUBLIC pulp::runtime)
+
+# Platform-specific sources
+if(APPLE AND NOT IOS)
+    target_sources(pulp-audio PRIVATE
+        platform/mac/coreaudio_device.mm
+    )
+    target_link_libraries(pulp-audio PRIVATE
+        "-framework CoreAudio"
+        "-framework AudioToolbox"
+        "-framework CoreFoundation"
+    )
+elseif(WIN32)
+    target_sources(pulp-audio PRIVATE
+        src/placeholder.cpp
+    )
+    file(WRITE ${CMAKE_CURRENT_SOURCE_DIR}/src/placeholder.cpp
+        "// pulp-audio: WASAPI backend — Phase 4+\nnamespace pulp::audio {}\n"
+    )
+elseif(UNIX AND NOT APPLE)
+    target_sources(pulp-audio PRIVATE
+        src/placeholder.cpp
+    )
+    file(WRITE ${CMAKE_CURRENT_SOURCE_DIR}/src/placeholder.cpp
+        "// pulp-audio: ALSA backend — Phase 4+\nnamespace pulp::audio {}\n"
+    )
+endif()

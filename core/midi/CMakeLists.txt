@@ -7,13 +7,18 @@ target_include_directories(pulp-midi
         $<INSTALL_INTERFACE:include>
 )
 
-target_sources(pulp-midi PRIVATE
-    src/placeholder.cpp
-)
-
-# Placeholder source to make the library valid
-file(WRITE ${CMAKE_CURRENT_SOURCE_DIR}/src/placeholder.cpp
-    "// pulp-midi: placeholder — replaced in Phase 2+\nnamespace pulp::midi {}\n"
-)
-
 target_link_libraries(pulp-midi PUBLIC pulp::runtime)
+
+if(APPLE AND NOT IOS)
+    target_sources(pulp-midi PRIVATE
+        platform/mac/coremidi_device.mm
+    )
+    target_link_libraries(pulp-midi PRIVATE
+        "-framework CoreMIDI"
+        "-framework CoreFoundation"
+    )
+else()
+    target_sources(pulp-midi PRIVATE src/placeholder.cpp)
+    file(WRITE ${CMAKE_CURRENT_SOURCE_DIR}/src/placeholder.cpp
+        "// pulp-midi: platform backend pending\nnamespace pulp::midi {}\n")
+endif()
