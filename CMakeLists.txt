@@ -60,6 +60,10 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(choc)
 
+# VST3 SDK (MIT license) — format adapter headers
+# SDK is fetched separately via explore/vst3-sdk worktree or manual setup
+# For now, format adapters compile against our own adapter interfaces
+
 # ── Core Subsystems ─────────────────────────────────────────────────────────
 # Order matters: dependencies first
 add_subdirectory(core/platform)
