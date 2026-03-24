@@ -2,7 +2,7 @@
 # Each example validates a phase of the framework
 
 # Phase 2-3: PulpGain (trivial gain plugin)
-# add_subdirectory(pulp-gain)
+add_subdirectory(pulp-gain)
 
 # Phase 4: PulpTone (oscillator synth + musical typing)
 # add_subdirectory(pulp-tone)

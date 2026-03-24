@@ -1,0 +1,100 @@
+#pragma once
+
+// PulpGain — the simplest possible Pulp plugin
+// A stereo gain effect with input gain, output gain, and bypass parameters.
+// Validates the full pipeline: Processor → format adapter → loadable bundle.
+
+#include <pulp/format/processor.hpp>
+#include <cmath>
+
+namespace pulp::examples {
+
+// Parameter IDs — stable across versions
+enum GainParams : state::ParamID {
+    kInputGain  = 1,
+    kOutputGain = 2,
+    kBypass     = 3,
+};
+
+class PulpGainProcessor : public format::Processor {
+public:
+    format::PluginDescriptor descriptor() const override {
+        return {
+            .name = "PulpGain",
+            .manufacturer = "Pulp",
+            .bundle_id = "com.pulp.gain",
+            .version = "1.0.0",
+            .category = format::PluginCategory::Effect,
+            .default_input_channels = 2,
+            .default_output_channels = 2,
+            .accepts_midi = false,
+            .produces_midi = false,
+            .tail_samples = 0,
+        };
+    }
+
+    void define_parameters(state::StateStore& store) override {
+        store.add_parameter({
+            .id = kInputGain,
+            .name = "Input Gain",
+            .unit = "dB",
+            .range = {-60.0f, 24.0f, 0.0f, 0.1f},
+        });
+        store.add_parameter({
+            .id = kOutputGain,
+            .name = "Output Gain",
+            .unit = "dB",
+            .range = {-60.0f, 24.0f, 0.0f, 0.1f},
+        });
+        store.add_parameter({
+            .id = kBypass,
+            .name = "Bypass",
+            .unit = "",
+            .range = {0.0f, 1.0f, 0.0f, 1.0f}, // step=1 makes it boolean
+        });
+    }
+
+    void prepare(const format::PrepareContext&) override {}
+
+    void process(
+        audio::BufferView<float>& output,
+        const audio::BufferView<const float>& input,
+        midi::MidiBuffer&,
+        midi::MidiBuffer&,
+        const format::ProcessContext&) override
+    {
+        bool bypass = state().get_value(kBypass) >= 0.5f;
+
+        if (bypass) {
+            // Pass-through
+            for (std::size_t ch = 0; ch < output.num_channels() && ch < input.num_channels(); ++ch) {
+                auto in = input.channel(ch);
+                auto out = output.channel(ch);
+                for (std::size_t i = 0; i < output.num_samples(); ++i) {
+                    out[i] = in[i];
+                }
+            }
+            return;
+        }
+
+        float input_db = state().get_value(kInputGain);
+        float output_db = state().get_value(kOutputGain);
+        float input_gain = std::pow(10.0f, input_db / 20.0f);
+        float output_gain = std::pow(10.0f, output_db / 20.0f);
+        float total_gain = input_gain * output_gain;
+
+        for (std::size_t ch = 0; ch < output.num_channels() && ch < input.num_channels(); ++ch) {
+            auto in = input.channel(ch);
+            auto out = output.channel(ch);
+            for (std::size_t i = 0; i < output.num_samples(); ++i) {
+                out[i] = in[i] * total_gain;
+            }
+        }
+    }
+};
+
+inline std::unique_ptr<format::Processor> create_pulp_gain() {
+    return std::make_unique<PulpGainProcessor>();
+}
+
+} // namespace pulp::examples
