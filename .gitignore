@@ -1,0 +1,37 @@
+# Planning and internal docs (not for public repo)
+/planning/
+/research/
+
+# Build artifacts
+/build/
+/build-*/
+/out/
+
+# IDE
+.vscode/
+.idea/
+*.xcworkspace/
+*.xcuserdata/
+xcuserdata/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Dependencies (fetched at build time)
+/external/*/
+
+# Node (for web/WASM builds)
+node_modules/
+
+# Rust (if Tauri tooling is used)
+target/
+
+# Python
+__pycache__/
+*.pyc
+
+# Secrets
+.env
+.env.*
+!.env.example
