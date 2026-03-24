@@ -60,9 +60,51 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(choc)
 
-# VST3 SDK (MIT license) — format adapter headers
-# SDK is fetched separately via explore/vst3-sdk worktree or manual setup
-# For now, format adapters compile against our own adapter interfaces
+# VST3 SDK (MIT license) — cloned into external/vst3sdk/
+set(VST3_SDK_DIR "${CMAKE_CURRENT_SOURCE_DIR}/external/vst3sdk")
+if(EXISTS "${VST3_SDK_DIR}/pluginterfaces")
+    set(PULP_HAS_VST3 TRUE)
+
+    # Build the minimal VST3 SDK base library
+    file(GLOB_RECURSE VST3_BASE_SOURCES
+        "${VST3_SDK_DIR}/base/source/*.cpp"
+    )
+    file(GLOB_RECURSE VST3_PLUGIF_SOURCES
+        "${VST3_SDK_DIR}/pluginterfaces/base/*.cpp"
+    )
+    file(GLOB_RECURSE VST3_SDK_SOURCES
+        "${VST3_SDK_DIR}/public.sdk/source/vst/vstaudioeffect.cpp"
+        "${VST3_SDK_DIR}/public.sdk/source/vst/vstbus.cpp"
+        "${VST3_SDK_DIR}/public.sdk/source/vst/vstcomponent.cpp"
+        "${VST3_SDK_DIR}/public.sdk/source/vst/vstcomponentbase.cpp"
+        "${VST3_SDK_DIR}/public.sdk/source/vst/vstinitiids.cpp"
+        "${VST3_SDK_DIR}/public.sdk/source/vst/vstparameters.cpp"
+        "${VST3_SDK_DIR}/public.sdk/source/vst/vstsinglecomponenteffect.cpp"
+        "${VST3_SDK_DIR}/public.sdk/source/common/pluginfactory.cpp"
+        "${VST3_SDK_DIR}/public.sdk/source/common/commoniids.cpp"
+    )
+
+    add_library(vst3-sdk STATIC
+        ${VST3_BASE_SOURCES}
+        ${VST3_PLUGIF_SOURCES}
+        ${VST3_SDK_SOURCES}
+    )
+    target_include_directories(vst3-sdk PUBLIC
+        ${VST3_SDK_DIR}
+    )
+    if(CMAKE_BUILD_TYPE STREQUAL "Release")
+        target_compile_definitions(vst3-sdk PUBLIC RELEASE=1)
+    else()
+        target_compile_definitions(vst3-sdk PUBLIC DEVELOPMENT=1)
+    endif()
+    # Suppress warnings in third-party code
+    target_compile_options(vst3-sdk PRIVATE -w)
+
+    message(STATUS "Pulp: VST3 SDK found at ${VST3_SDK_DIR}")
+else()
+    set(PULP_HAS_VST3 FALSE)
+    message(STATUS "Pulp: VST3 SDK not found — VST3 format disabled")
+endif()
 
 # ── Core Subsystems ─────────────────────────────────────────────────────────
 # Order matters: dependencies first
