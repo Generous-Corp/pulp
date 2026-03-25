@@ -34,3 +34,16 @@ if(PULP_HAS_CLAP)
     target_link_libraries(pulp-format PRIVATE clap)
     target_compile_definitions(pulp-format PRIVATE PULP_CLAP=1)
 endif()
+
+# AU adapter (macOS/iOS only)
+if(APPLE)
+    target_sources(pulp-format PRIVATE
+        src/au_adapter.mm
+    )
+    target_link_libraries(pulp-format PRIVATE
+        "-framework AudioToolbox"
+        "-framework AVFoundation"
+        "-framework Foundation"
+    )
+    target_compile_definitions(pulp-format PRIVATE PULP_AU=1)
+endif()
