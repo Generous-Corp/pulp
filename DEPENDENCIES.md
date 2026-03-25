@@ -18,6 +18,7 @@ All dependencies must be compatible with MIT licensing. No copyleft (GPL, LGPL, 
 | CLAP | 1.2.2 | MIT | CLAP plugin format headers | pulp-format | 2026-03-24 |
 | nanosvg | master | zlib | SVG parsing and rasterization | pulp-canvas | 2026-03-25 |
 | SDL3 | 3.2.12 | zlib | Cross-platform windowing, input, GPU context | pulp-view | 2026-03-25 |
+| Skia Graphite + Dawn | m144 | BSD-3-Clause | GPU 2D rendering + WebGPU (pre-built via skia-builder) | pulp-canvas, pulp-render | 2026-03-25 |
 | VST3 SDK | 3.7.12 | MIT | VST3 plugin format (pluginterfaces + base) | pulp-format | 2026-03-24 |
 | wgpu-native | 24.0.3.1 | Apache-2.0/MIT | WebGPU GPU abstraction (pre-built binary) | pulp-render | 2026-03-25 |
 
