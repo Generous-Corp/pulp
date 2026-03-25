@@ -34,7 +34,7 @@
             <key>version</key>
             <integer>65536</integer>
             <key>factoryFunction</key>
-            <string>PulpAUFactory</string>
+            <string>PulpGainAUFactory</string>
             <key>sandboxSafe</key>
             <true/>
         </dict>

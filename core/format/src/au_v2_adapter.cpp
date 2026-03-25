@@ -1,0 +1,259 @@
+// Audio Unit v2 adapter for Pulp
+// Uses Apple's AudioUnitSDK (Apache 2.0) for proper AU v2 hosting contract
+// Subclasses AUEffectBase and overrides ProcessBufferLists for multi-channel
+
+#include <AudioUnitSDK/AUEffectBase.h>
+#include <AudioUnitSDK/AUPlugInDispatch.h>
+
+#include <pulp/format/processor.hpp>
+#include <pulp/format/registry.hpp>
+#include <pulp/runtime/log.hpp>
+
+#include <memory>
+#include <vector>
+#include <cmath>
+
+namespace pulp::format::au {
+
+// Parameter IDs for the AU system map 1:1 from Pulp ParamIDs
+// AU uses AudioUnitParameterID (UInt32) which matches our state::ParamID
+
+class PulpAUEffect : public ausdk::AUEffectBase {
+public:
+    explicit PulpAUEffect(AudioComponentInstance ci)
+        : AUEffectBase(ci, /*inProcessesInPlace=*/true)
+    {
+        auto factory = registered_factory();
+        if (factory) {
+            processor_ = factory();
+            if (processor_) {
+                processor_->set_state_store(&store_);
+                processor_->define_parameters(store_);
+            }
+        }
+    }
+
+    // ── Parameter system ────────────────────────────────────────────────
+
+    OSStatus GetParameterList(AudioUnitScope inScope,
+                              AudioUnitParameterID* outParameterList,
+                              UInt32& outNumParameters) override
+    {
+        if (inScope != kAudioUnitScope_Global) {
+            outNumParameters = 0;
+            return noErr;
+        }
+
+        outNumParameters = static_cast<UInt32>(store_.param_count());
+        if (outParameterList) {
+            auto params = store_.all_params();
+            for (std::size_t i = 0; i < params.size(); ++i) {
+                outParameterList[i] = static_cast<AudioUnitParameterID>(params[i].id);
+            }
+        }
+        return noErr;
+    }
+
+    OSStatus GetParameterInfo(AudioUnitScope inScope,
+                              AudioUnitParameterID inParameterID,
+                              AudioUnitParameterInfo& outParameterInfo) override
+    {
+        if (inScope != kAudioUnitScope_Global)
+            return kAudioUnitErr_InvalidParameter;
+
+        const auto* param = store_.info(static_cast<state::ParamID>(inParameterID));
+        if (!param) return kAudioUnitErr_InvalidParameter;
+
+        outParameterInfo.flags = kAudioUnitParameterFlag_IsWritable
+                               | kAudioUnitParameterFlag_IsReadable
+                               | kAudioUnitParameterFlag_HasCFNameString;
+
+        // Copy name
+        CFStringRef name = CFStringCreateWithCString(
+            kCFAllocatorDefault, param->name.c_str(), kCFStringEncodingUTF8);
+        outParameterInfo.cfNameString = name;
+        // Also copy to the fixed-size C string field
+        strlcpy(reinterpret_cast<char*>(outParameterInfo.name),
+                param->name.c_str(), sizeof(outParameterInfo.name));
+
+        outParameterInfo.minValue = param->range.min;
+        outParameterInfo.maxValue = param->range.max;
+        outParameterInfo.defaultValue = param->range.default_value;
+
+        // Unit
+        if (param->unit == "dB") {
+            outParameterInfo.unit = kAudioUnitParameterUnit_Decibels;
+        } else if (param->unit == "Hz") {
+            outParameterInfo.unit = kAudioUnitParameterUnit_Hertz;
+        } else if (param->unit == "%") {
+            outParameterInfo.unit = kAudioUnitParameterUnit_Percent;
+        } else if (param->range.step >= 1.0f
+                   && param->range.min == 0.0f
+                   && param->range.max == 1.0f) {
+            outParameterInfo.unit = kAudioUnitParameterUnit_Boolean;
+        } else {
+            outParameterInfo.unit = kAudioUnitParameterUnit_Generic;
+        }
+
+        return noErr;
+    }
+
+    OSStatus GetParameterValueStrings(AudioUnitScope inScope,
+                                      AudioUnitParameterID inParameterID,
+                                      CFArrayRef* outStrings) override
+    {
+        // No indexed value strings for now
+        return kAudioUnitErr_InvalidPropertyValue;
+    }
+
+    // ── Lifecycle ───────────────────────────────────────────────────────
+
+    OSStatus Initialize() override {
+        auto result = AUEffectBase::Initialize();
+        if (result != noErr) return result;
+
+        if (processor_) {
+            PrepareContext ctx;
+            ctx.sample_rate = GetSampleRate();
+            ctx.max_buffer_size = GetMaxFramesPerSlice();
+            ctx.input_channels = static_cast<int>(GetNumberOfChannels());
+            ctx.output_channels = static_cast<int>(GetNumberOfChannels());
+            processor_->prepare(ctx);
+
+            // Set initial parameter values from defaults
+            for (const auto& param : store_.all_params()) {
+                Globals()->SetParameter(
+                    static_cast<AudioUnitParameterID>(param.id),
+                    param.range.default_value);
+            }
+        }
+
+        runtime::log_info("AU v2: initialized with {} channels at {} Hz",
+                          GetNumberOfChannels(), GetSampleRate());
+        return noErr;
+    }
+
+    void Cleanup() override {
+        if (processor_) processor_->release();
+        AUEffectBase::Cleanup();
+    }
+
+    // ── Processing (multi-channel) ──────────────────────────────────────
+
+    OSStatus ProcessBufferLists(AudioUnitRenderActionFlags& ioActionFlags,
+                                const AudioBufferList& inBuffer,
+                                AudioBufferList& outBuffer,
+                                UInt32 inFramesToProcess) override
+    {
+        if (!processor_) {
+            // Silence output
+            for (UInt32 i = 0; i < outBuffer.mNumberBuffers; ++i) {
+                memset(outBuffer.mBuffers[i].mData, 0,
+                       outBuffer.mBuffers[i].mDataByteSize);
+            }
+            return noErr;
+        }
+
+        // Sync AU parameter values → Pulp StateStore
+        for (const auto& param : store_.all_params()) {
+            auto au_id = static_cast<AudioUnitParameterID>(param.id);
+            float value = GetParameter(au_id);
+            store_.set_value(param.id, value);
+        }
+
+        // Build buffer views
+        UInt32 in_channels = inBuffer.mNumberBuffers;
+        UInt32 out_channels = outBuffer.mNumberBuffers;
+
+        input_ptrs_.resize(in_channels);
+        output_ptrs_.resize(out_channels);
+
+        for (UInt32 i = 0; i < in_channels; ++i) {
+            input_ptrs_[i] = static_cast<const float*>(inBuffer.mBuffers[i].mData);
+        }
+        for (UInt32 i = 0; i < out_channels; ++i) {
+            output_ptrs_[i] = static_cast<float*>(outBuffer.mBuffers[i].mData);
+        }
+
+        audio::BufferView<const float> input_view(
+            input_ptrs_.data(), in_channels, inFramesToProcess);
+        audio::BufferView<float> output_view(
+            output_ptrs_.data(), out_channels, inFramesToProcess);
+
+        // Empty MIDI for effects (no MIDI I/O in v2 effects)
+        midi::MidiBuffer midi_in, midi_out;
+
+        ProcessContext ctx;
+        ctx.sample_rate = GetSampleRate();
+        ctx.num_samples = static_cast<int>(inFramesToProcess);
+
+        processor_->process(output_view, input_view, midi_in, midi_out, ctx);
+
+        return noErr;
+    }
+
+    // ── State ───────────────────────────────────────────────────────────
+
+    OSStatus SaveState(CFPropertyListRef* outData) override {
+        auto result = AUEffectBase::SaveState(outData);
+        if (result != noErr) return result;
+
+        // Add Pulp state data to the dictionary
+        auto data = store_.serialize();
+        CFDataRef cfData = CFDataCreate(kCFAllocatorDefault,
+                                        data.data(),
+                                        static_cast<CFIndex>(data.size()));
+        if (cfData && *outData) {
+            CFMutableDictionaryRef dict = CFDictionaryCreateMutableCopy(
+                kCFAllocatorDefault, 0,
+                static_cast<CFDictionaryRef>(*outData));
+            CFDictionarySetValue(dict,
+                                 CFSTR("pulp-state"),
+                                 cfData);
+            CFRelease(*outData);
+            *outData = dict;
+            CFRelease(cfData);
+        }
+        return noErr;
+    }
+
+    OSStatus RestoreState(CFPropertyListRef plist) override {
+        auto result = AUEffectBase::RestoreState(plist);
+        if (result != noErr) return result;
+
+        // Restore Pulp state
+        if (CFGetTypeID(plist) == CFDictionaryGetTypeID()) {
+            auto dict = static_cast<CFDictionaryRef>(plist);
+            auto cfData = static_cast<CFDataRef>(
+                CFDictionaryGetValue(dict, CFSTR("pulp-state")));
+            if (cfData && CFGetTypeID(cfData) == CFDataGetTypeID()) {
+                auto* bytes = CFDataGetBytePtr(cfData);
+                auto length = CFDataGetLength(cfData);
+                store_.deserialize({bytes, static_cast<size_t>(length)});
+
+                // Sync restored values to AU parameter system
+                for (const auto& param : store_.all_params()) {
+                    Globals()->SetParameter(
+                        static_cast<AudioUnitParameterID>(param.id),
+                        store_.get_value(param.id));
+                }
+            }
+        }
+        return noErr;
+    }
+
+    // ── Component info ──────────────────────────────────────────────────
+
+    bool SupportsTail() override { return true; }
+
+    Float64 GetTailTime() override { return 0.0; }
+    Float64 GetLatency() override { return 0.0; }
+
+private:
+    std::unique_ptr<Processor> processor_;
+    state::StateStore store_;
+    std::vector<const float*> input_ptrs_;
+    std::vector<float*> output_ptrs_;
+};
+
+} // namespace pulp::format::au

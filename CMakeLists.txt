@@ -119,6 +119,28 @@ FetchContent_MakeAvailable(clap)
 set(PULP_HAS_CLAP TRUE)
 message(STATUS "Pulp: CLAP SDK available")
 
+# Apple AudioUnitSDK (Apache 2.0) — for AU v2 plugin support
+set(AUSDK_DIR "${CMAKE_CURRENT_SOURCE_DIR}/external/AudioUnitSDK")
+if(APPLE AND EXISTS "${AUSDK_DIR}/include/AudioUnitSDK/AUBase.h")
+    set(PULP_HAS_AUSDK TRUE)
+
+    file(GLOB AUSDK_SOURCES "${AUSDK_DIR}/src/AudioUnitSDK/*.cpp")
+    add_library(ausdk STATIC ${AUSDK_SOURCES})
+    target_include_directories(ausdk PUBLIC "${AUSDK_DIR}/include")
+    target_link_libraries(ausdk PUBLIC
+        "-framework AudioToolbox"
+        "-framework CoreFoundation"
+        "-framework CoreAudio"
+    )
+    target_compile_options(ausdk PRIVATE -w)  # Suppress third-party warnings
+    target_compile_features(ausdk PUBLIC cxx_std_23)  # AudioUnitSDK 1.4 requires std::expected
+
+    message(STATUS "Pulp: AudioUnitSDK found — AU v2 support enabled")
+else()
+    set(PULP_HAS_AUSDK FALSE)
+    message(STATUS "Pulp: AudioUnitSDK not found — AU v2 format disabled")
+endif()
+
 # ── Core Subsystems ─────────────────────────────────────────────────────────
 # Order matters: dependencies first
 add_subdirectory(core/platform)

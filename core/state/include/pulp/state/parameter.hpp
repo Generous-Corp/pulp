@@ -4,6 +4,7 @@
 #include <atomic>
 #include <functional>
 #include <cstdint>
+#include <cmath>
 #include <algorithm>
 
 namespace pulp::state {
