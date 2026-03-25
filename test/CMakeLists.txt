@@ -15,6 +15,11 @@ add_executable(pulp-test-codesign test_codesign.cpp)
 target_link_libraries(pulp-test-codesign PRIVATE pulp::ship Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-codesign)
 
+# Sync primitives tests (SeqLock, TripleBuffer)
+add_executable(pulp-test-sync test_sync_primitives.cpp)
+target_link_libraries(pulp-test-sync PRIVATE pulp::runtime Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-sync)
+
 # Drag-and-drop tests
 add_executable(pulp-test-dnd test_drag_drop.cpp)
 target_link_libraries(pulp-test-dnd PRIVATE pulp::view Catch2::Catch2WithMain)
