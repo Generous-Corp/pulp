@@ -47,17 +47,16 @@ if(PULP_HAS_VST3)
         BUNDLE_EXTENSION "vst3"
         OUTPUT_NAME "PulpGain"
         LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/VST3"
-        MACOSX_BUNDLE_GUI_IDENTIFIER "com.pulp.gain"
-        MACOSX_BUNDLE_BUNDLE_VERSION "1.0.0"
-        MACOSX_BUNDLE_SHORT_VERSION_STRING "1.0.0"
+        MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/Info.plist.vst3"
     )
 
-    if(APPLE)
-        set_target_properties(PulpGain_VST3 PROPERTIES
-            XCODE_ATTRIBUTE_GENERATE_INFOPLIST_FILE YES
-            XCODE_ATTRIBUTE_WRAPPER_EXTENSION "vst3"
-        )
-    endif()
+    # Copy moduleinfo.json into the bundle for fast DAW scanning
+    add_custom_command(TARGET PulpGain_VST3 POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy
+            "${CMAKE_CURRENT_SOURCE_DIR}/moduleinfo.json"
+            "${CMAKE_BINARY_DIR}/VST3/PulpGain.vst3/Contents/moduleinfo.json"
+        COMMENT "Copying moduleinfo.json into VST3 bundle"
+    )
 endif()
 
 # CLAP plugin bundle
