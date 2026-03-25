@@ -16,7 +16,7 @@ MIT-licensed. No royalties. No revenue thresholds. No copyleft.
 - **Zero-boilerplate entry points** — one-line macros for each format
 - **Parameter system** — thread-safe, automatable, with state serialization
 - **Headless processing** — test and batch-process without a DAW
-- **53 automated tests** — unit tests, golden-file audio tests, format validators
+- **270 automated tests** — unit tests, golden-file audio tests, format validators
 
 ### Example: Create a Plugin
 
