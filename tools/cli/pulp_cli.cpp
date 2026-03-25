@@ -614,59 +614,148 @@ static int docs_show_support(const fs::path& docs_dir, const std::string& thing)
         return 1;
     }
 
-    // Search for lines containing the query in the support matrix
+    // Structured YAML lookup: parse section > entry > fields
+    // The YAML has this structure:
+    //   section_name:        (indent 0)
+    //     entry_name:        (indent 2) — or "  - name: X" style not used here
+    //       field: value     (indent 4)
+    //
+    // We match `thing` as either a section name or an entry name (exact, case-insensitive).
+
     std::istringstream stream(content);
     std::string line;
     bool found = false;
-    bool in_section = false;
-    std::string section_name;
 
+    std::string section_name;
+    std::string entry_name;
+
+    // Lowercase version of query for matching
+    std::string query_lower = thing;
+    for (auto& c : query_lower) c = static_cast<char>(std::tolower(c));
+
+    // First pass: try exact match on section or entry names
     while (std::getline(stream, line)) {
         std::string trimmed = trim(line);
+        if (trimmed.empty() || trimmed[0] == '#') continue;
 
-        // Track top-level sections (lines ending with ':' and not starting with '-')
-        if (!trimmed.empty() && trimmed.back() == ':' && trimmed.front() != '-'
-            && line.find_first_not_of(' ') == 0) {
+        auto indent = line.find_first_not_of(' ');
+        if (indent == std::string::npos) continue;
+
+        // Top-level section (indent 0, ends with ':')
+        if (indent == 0 && !trimmed.empty() && trimmed.back() == ':') {
             section_name = trimmed.substr(0, trimmed.size() - 1);
-            in_section = false;
+            continue;
         }
 
-        if (icontains(trimmed, thing)) {
-            if (!found) {
-                std::cout << "Support info for \"" << thing << "\":\n\n";
-                found = true;
-            }
-            if (!section_name.empty()) {
-                std::cout << "[" << section_name << "]\n";
-                section_name.clear();
-            }
-            std::cout << "  " << trimmed << "\n";
+        // Entry-level key (indent 2, ends with ':')
+        if (indent == 2 && !trimmed.empty() && trimmed.back() == ':') {
+            entry_name = trimmed.substr(0, trimmed.size() - 1);
 
-            // Print subsequent indented lines (details of this entry)
-            auto current_indent = line.find_first_not_of(' ');
-            in_section = true;
-            std::streampos pos = stream.tellg();
-            std::string next;
-            while (std::getline(stream, next)) {
-                auto next_indent = next.find_first_not_of(' ');
-                if (next_indent != std::string::npos && next_indent > current_indent) {
-                    std::cout << "  " << trim(next) << "\n";
-                } else {
-                    // Put it back by seeking
-                    stream.seekg(pos);
-                    // Re-read to restore position properly
-                    stream.clear();
-                    stream.seekg(pos);
-                    break;
+            std::string entry_lower = entry_name;
+            for (auto& c : entry_lower) c = static_cast<char>(std::tolower(c));
+
+            if (entry_lower == query_lower) {
+                if (!found) {
+                    std::cout << "Support info for \"" << thing << "\":\n\n";
+                    found = true;
                 }
-                pos = stream.tellg();
+                std::cout << "  Section:  " << section_name << "\n";
+                std::cout << "  Entry:    " << entry_name << "\n";
+
+                // Read child fields (indent > 2)
+                while (std::getline(stream, line)) {
+                    auto ni = line.find_first_not_of(' ');
+                    if (ni == std::string::npos || ni <= 2) {
+                        // Push back by re-processing this line next iteration
+                        // We can't seek reliably on stringstream, so just break
+                        break;
+                    }
+                    std::string field = trim(line);
+                    if (field.empty() || field[0] == '#') continue;
+                    auto colon = field.find(':');
+                    if (colon != std::string::npos) {
+                        auto key = trim(field.substr(0, colon));
+                        auto val = trim(field.substr(colon + 1));
+                        // Capitalize first letter of key for display
+                        if (!key.empty()) key[0] = static_cast<char>(std::toupper(key[0]));
+                        std::cout << "  " << key << ": " << val << "\n";
+                    }
+                }
+                std::cout << "\n";
+            }
+            continue;
+        }
+
+        // Check if this is a "key: value" line at indent 2 inside subsystems section
+        // (subsystems uses "module_name: status" format at indent 2)
+        if (indent == 2 && !trimmed.empty() && trimmed.back() != ':') {
+            auto colon = trimmed.find(':');
+            if (colon != std::string::npos) {
+                auto key = trim(trimmed.substr(0, colon));
+                auto val = trim(trimmed.substr(colon + 1));
+                std::string key_lower = key;
+                for (auto& c : key_lower) c = static_cast<char>(std::tolower(c));
+
+                if (key_lower == query_lower) {
+                    if (!found) {
+                        std::cout << "Support info for \"" << thing << "\":\n\n";
+                        found = true;
+                    }
+                    std::cout << "  Section: " << section_name << "\n";
+                    std::cout << "  " << key << ": " << val << "\n\n";
+                }
+            }
+        }
+    }
+
+    // If exact match failed, try section-level match
+    if (!found) {
+        stream.clear();
+        stream.str(content);
+        section_name.clear();
+
+        std::string section_lower;
+        bool in_matching_section = false;
+
+        while (std::getline(stream, line)) {
+            std::string trimmed = trim(line);
+            if (trimmed.empty() || trimmed[0] == '#') continue;
+
+            auto indent = line.find_first_not_of(' ');
+            if (indent == std::string::npos) continue;
+
+            if (indent == 0 && !trimmed.empty() && trimmed.back() == ':') {
+                section_name = trimmed.substr(0, trimmed.size() - 1);
+                section_lower = section_name;
+                for (auto& c : section_lower) c = static_cast<char>(std::tolower(c));
+                in_matching_section = (section_lower == query_lower);
+                if (in_matching_section && !found) {
+                    std::cout << "Support info for \"" << thing << "\":\n\n";
+                    std::cout << "[" << section_name << "]\n";
+                    found = true;
+                }
+                continue;
+            }
+
+            if (in_matching_section && indent >= 2) {
+                auto colon = trimmed.find(':');
+                if (colon != std::string::npos && trimmed[0] != '-') {
+                    auto key = trim(trimmed.substr(0, colon));
+                    auto val = trim(trimmed.substr(colon + 1));
+                    if (!val.empty()) {
+                        std::cout << "  " << key << ": " << val << "\n";
+                    } else {
+                        std::cout << "  " << key << ":\n";
+                    }
+                }
             }
         }
     }
 
     if (!found) {
         std::cerr << "No support info found for \"" << thing << "\"\n";
-        std::cerr << "Check docs/status/support-matrix.yaml for available entries.\n";
+        std::cerr << "Available sections: platforms, formats, audio_io, midi_io, rendering, subsystems\n";
+        std::cerr << "Available entries: macos, windows, linux, vst3, au_v2, clap, standalone, etc.\n";
         return 1;
     }
     return 0;
@@ -685,26 +774,102 @@ static int docs_show_command(const fs::path& docs_dir, const std::string& name) 
         return 1;
     }
 
+    // Parse the YAML to find the matching command entry and collect its fields
     std::istringstream stream(content);
     std::string line;
     bool found = false;
     bool in_entry = false;
+    bool in_subcommands = false;
+    bool in_args = false;
+    bool in_sub_args = false;
+
+    std::string cmd_status, cmd_summary, cmd_docs;
+    struct SubCmd { std::string name; std::string summary; };
+    struct Arg { std::string name; std::string required; std::string description; std::string kind; };
+    std::vector<SubCmd> subcommands;
+    std::vector<Arg> top_args;
 
     while (std::getline(stream, line)) {
+        std::string trimmed = trim(line);
+        auto indent = line.find_first_not_of(' ');
+        if (indent == std::string::npos) indent = 0;
+
         auto n = yaml_value(line, "name");
-        if (!n.empty()) {
-            if (in_entry) break;  // We already printed our match, stop at next entry
+
+        // Top-level command entry (indent <= 4, typically "  - name: X")
+        if (!n.empty() && indent <= 4) {
+            if (in_entry) break;  // We already found our match, stop at next top-level entry
             if (n == name) {
                 found = true;
                 in_entry = true;
-                std::cout << "Command: " << n << "\n";
             }
             continue;
         }
-        if (in_entry) {
-            std::string trimmed = trim(line);
-            if (trimmed.empty() || trimmed == "-") continue;
-            std::cout << "  " << trimmed << "\n";
+
+        if (!in_entry) continue;
+
+        // Detect section transitions within the entry
+        if (trimmed.find("subcommands:") == 0) {
+            in_subcommands = true;
+            in_args = false;
+            in_sub_args = false;
+            continue;
+        }
+        if (trimmed.find("args:") == 0 && !in_subcommands) {
+            in_args = true;
+            in_subcommands = false;
+            in_sub_args = false;
+            continue;
+        }
+
+        // Inside subcommands list
+        if (in_subcommands) {
+            // Sub-args within a subcommand -- skip arg entries for display
+            if (trimmed.find("args:") == 0) {
+                in_sub_args = true;
+                continue;
+            }
+            if (in_sub_args) {
+                // A new subcommand entry (- name: at subcommand indent) ends sub-args
+                if (!n.empty() && indent <= 6) {
+                    in_sub_args = false;
+                } else {
+                    continue;  // Skip arg detail lines
+                }
+            }
+            if (!n.empty()) {
+                subcommands.push_back({n, {}});
+                continue;
+            }
+            auto s = yaml_value(line, "summary");
+            if (!s.empty() && !subcommands.empty()) {
+                subcommands.back().summary = s;
+                continue;
+            }
+        }
+
+        // Inside top-level args list
+        if (in_args) {
+            if (!n.empty()) {
+                top_args.push_back({n, {}, {}, {}});
+                continue;
+            }
+            auto r = yaml_value(line, "required");
+            if (!r.empty() && !top_args.empty()) { top_args.back().required = r; continue; }
+            auto d = yaml_value(line, "description");
+            if (!d.empty() && !top_args.empty()) { top_args.back().description = d; continue; }
+            auto k = yaml_value(line, "kind");
+            if (!k.empty() && !top_args.empty()) { top_args.back().kind = k; continue; }
+        }
+
+        // Top-level scalar fields
+        if (!in_subcommands && !in_args) {
+            auto st = yaml_value(line, "status");
+            if (!st.empty()) { cmd_status = st; continue; }
+            auto su = yaml_value(line, "summary");
+            if (!su.empty()) { cmd_summary = su; continue; }
+            auto dc = yaml_value(line, "docs");
+            if (!dc.empty()) { cmd_docs = dc; continue; }
         }
     }
 
@@ -712,6 +877,30 @@ static int docs_show_command(const fs::path& docs_dir, const std::string& name) 
         std::cerr << "No command found for \"" << name << "\"\n";
         std::cerr << "Check docs/status/cli-commands.yaml for available commands.\n";
         return 1;
+    }
+
+    // Render the output
+    std::cout << "Command: " << name << "\n";
+    if (!cmd_status.empty())  std::cout << "  Status:  " << cmd_status << "\n";
+    if (!cmd_summary.empty()) std::cout << "  Summary: " << cmd_summary << "\n";
+
+    if (!top_args.empty()) {
+        std::cout << "\n  Arguments:\n";
+        for (auto& a : top_args) {
+            std::cout << "    " << a.name;
+            if (!a.kind.empty()) std::cout << " (" << a.kind << ")";
+            if (!a.description.empty()) std::cout << " — " << a.description;
+            std::cout << "\n";
+        }
+    }
+
+    if (!subcommands.empty()) {
+        std::cout << "\n  Subcommands:\n";
+        for (auto& sc : subcommands) {
+            std::cout << "    " << sc.name;
+            if (!sc.summary.empty()) std::cout << " — " << sc.summary;
+            std::cout << "\n";
+        }
     }
 
     std::cout << "\nSee also: docs/reference/cli.md\n";
@@ -828,10 +1017,36 @@ static int cmd_docs(const std::vector<std::string>& args) {
         std::cout << "  show command <name>      Look up a CLI command\n";
         std::cout << "  show cmake <name>        Look up a CMake function\n";
         std::cout << "  show style               Show code style rules\n";
+        std::cout << "  check                    Validate docs consistency\n";
+        std::cout << "  build-site               Generate static docs site\n";
         return 0;
     }
 
     std::string sub = args[0];
+
+    if (sub == "build-site") {
+        auto script = root / "tools" / "build-docs.py";
+        if (!fs::exists(script)) {
+            std::cerr << "Error: build script not found at " << script.string() << "\n";
+            return 1;
+        }
+        std::string cmd = "python3 \"" + script.string() + "\"";
+        // Pass through extra args
+        for (size_t i = 1; i < args.size(); ++i) {
+            cmd += " " + args[i];
+        }
+        return run(cmd);
+    }
+
+    if (sub == "check") {
+        // Run the docs consistency check script
+        auto script = root / "tools" / "check-docs.sh";
+        if (!fs::exists(script)) {
+            std::cerr << "Error: check script not found at " << script.string() << "\n";
+            return 1;
+        }
+        return run("bash \"" + script.string() + "\"");
+    }
 
     if (sub == "index") {
         return docs_index(docs_dir);

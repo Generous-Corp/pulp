@@ -5,7 +5,7 @@ modules:
   - name: runtime
     summary: Lock-free primitives, logging, assertions
     status: stable
-    dependencies: []
+    dependencies: [platform]
     docs: reference/modules.md#runtime
 
   - name: events
@@ -29,7 +29,7 @@ modules:
   - name: signal
     summary: DSP algorithms -- filters, oscillators, effects
     status: usable
-    dependencies: [runtime]
+    dependencies: []
     docs: reference/modules.md#signal
 
   - name: state
@@ -53,23 +53,23 @@ modules:
   - name: canvas
     summary: 2D drawing abstraction (CoreGraphics, Skia), SVG, effects
     status: experimental
-    dependencies: [platform]
+    dependencies: [runtime]
     docs: reference/modules.md#canvas
 
   - name: render
     summary: GPU surface management (Dawn, Skia Graphite)
     status: experimental
-    dependencies: [canvas]
+    dependencies: [runtime, canvas]
     docs: reference/modules.md#render
 
   - name: view
     summary: Widgets, themes, JS scripting, hot-reload, inspector
     status: experimental
-    dependencies: [render, events, state]
+    dependencies: [canvas, events, state]
     docs: reference/modules.md#view
 
   - name: osc
     summary: Open Sound Control messaging
     status: experimental
-    dependencies: []
+    dependencies: [runtime]
     docs: reference/modules.md#osc

@@ -1,0 +1,20 @@
+name: Docs Consistency
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  docs-check:
+    runs-on: ubuntu-latest
+    name: Validate docs consistency
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check docs consistency
+        run: |
+          chmod +x tools/check-docs.sh
+          tools/check-docs.sh

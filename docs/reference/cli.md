@@ -99,6 +99,7 @@ pulp docs show support <thing>    # Look up support status
 pulp docs show command <name>     # Look up a CLI command
 pulp docs show cmake <name>       # Look up a CMake function
 pulp docs show style              # Show code style rules
+pulp docs check                   # Validate docs consistency
 ```
 
 **Subcommands**:
@@ -112,6 +113,7 @@ pulp docs show style              # Show code style rules
 | `show command <name>` | Look up a CLI command from `cli-commands.yaml` |
 | `show cmake <name>` | Look up a CMake function from `cmake-functions.yaml` |
 | `show style` | Display style rules from `style-rules.yaml` with links to policy docs |
+| `check` | Validate docs consistency: manifest links, index completeness, status vocabulary, module dependencies vs CMake |
 
 ### clean
 

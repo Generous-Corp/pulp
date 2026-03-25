@@ -29,10 +29,55 @@ docs:
     kind: guide
     summary: Running tests, validation, writing new tests
 
+  - slug: docs-maintenance
+    path: guides/docs-maintenance.md
+    kind: guide
+    summary: How docs stay consistent with code across tools and branches
+
   - slug: examples
     path: guides/examples.md
     kind: guide
     summary: Walkthroughs of all example plugins
+
+  - slug: examples-index
+    path: examples/index.md
+    kind: guide
+    summary: Gallery index of all example projects by category
+
+  - slug: example-pulp-gain
+    path: examples/pulp-gain.md
+    kind: guide
+    summary: PulpGain — stereo gain effect (reference example)
+
+  - slug: example-pulp-tone
+    path: examples/pulp-tone.md
+    kind: guide
+    summary: PulpTone — polyphonic oscillator synth with MIDI input
+
+  - slug: example-pulp-effect
+    path: examples/pulp-effect.md
+    kind: guide
+    summary: PulpEffect — biquad filter with diverse parameter types
+
+  - slug: example-pulp-compressor
+    path: examples/pulp-compressor.md
+    kind: guide
+    summary: PulpCompressor — sidechain compressor with multi-bus input
+
+  - slug: example-pulp-synth
+    path: examples/pulp-synth.md
+    kind: guide
+    summary: PulpSynth — macro oscillator synth using the signal DSP library
+
+  - slug: example-pulp-drums
+    path: examples/pulp-drums.md
+    kind: guide
+    summary: PulpDrums — generative drum sequencer with MIDI output
+
+  - slug: example-ui-preview
+    path: examples/ui-preview.md
+    kind: guide
+    summary: UI Preview — standalone app for view/widget rendering pipeline
 
   # Reference
   - slug: cli
@@ -44,6 +89,11 @@ docs:
     path: reference/cmake.md
     kind: reference
     summary: CMake functions for plugins and apps
+
+  - slug: capabilities
+    path: reference/capabilities.md
+    kind: reference
+    summary: All current capabilities organized by area with status
 
   - slug: modules
     path: reference/modules.md

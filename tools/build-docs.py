@@ -1,0 +1,607 @@
+#!/usr/bin/env python3
+"""build-docs.py — Generate a static docs site from Pulp's docs/ tree.
+
+Reads docs/status/docs-index.yaml for navigation structure.
+Converts Markdown to HTML with a simple regex-based converter.
+Outputs to build/site/ (or a custom directory via --output).
+
+No external dependencies — stdlib only.
+"""
+
+import argparse
+import html
+import os
+import re
+import shutil
+import sys
+from pathlib import Path
+
+
+# ── Markdown to HTML converter (stdlib only) ─────────────────────────────────
+
+def md_to_html(md: str) -> str:
+    """Convert Markdown to HTML. Handles headings, code blocks, tables,
+    lists, bold, italic, inline code, links, and paragraphs."""
+    lines = md.split('\n')
+    out = []
+    in_code = False
+    in_table = False
+    in_ul = False
+    in_ol = False
+    code_lang = ''
+    para = []
+
+    def flush_para():
+        if para:
+            text = ' '.join(para)
+            out.append(f'<p>{inline(text)}</p>')
+            para.clear()
+
+    def flush_list():
+        nonlocal in_ul, in_ol
+        if in_ul:
+            out.append('</ul>')
+            in_ul = False
+        if in_ol:
+            out.append('</ol>')
+            in_ol = False
+
+    def flush_table():
+        nonlocal in_table
+        if in_table:
+            out.append('</tbody></table>')
+            in_table = False
+
+    def inline(text):
+        # Code spans first (protect from other transforms)
+        parts = re.split(r'(`[^`]+`)', text)
+        result = []
+        for part in parts:
+            if part.startswith('`') and part.endswith('`'):
+                result.append(f'<code>{html.escape(part[1:-1])}</code>')
+            else:
+                p = part
+                p = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', p)
+                p = re.sub(r'__(.+?)__', r'<strong>\1</strong>', p)
+                p = re.sub(r'\*(.+?)\*', r'<em>\1</em>', p)
+                p = re.sub(r'_(.+?)_', r'<em>\1</em>', p)
+                # Links: [text](url)
+                p = re.sub(r'\[([^\]]+)\]\(([^)]+)\)', r'<a href="\2">\1</a>', p)
+                result.append(p)
+        return ''.join(result)
+
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+
+        # Fenced code blocks
+        if line.strip().startswith('```'):
+            if not in_code:
+                flush_para()
+                flush_list()
+                flush_table()
+                code_lang = line.strip()[3:].strip()
+                cls = f' class="language-{html.escape(code_lang)}"' if code_lang else ''
+                out.append(f'<pre><code{cls}>')
+                in_code = True
+            else:
+                out.append('</code></pre>')
+                in_code = False
+            i += 1
+            continue
+
+        if in_code:
+            out.append(html.escape(line))
+            i += 1
+            continue
+
+        stripped = line.strip()
+
+        # Empty line
+        if not stripped:
+            flush_para()
+            flush_list()
+            flush_table()
+            i += 1
+            continue
+
+        # Headings
+        m = re.match(r'^(#{1,6})\s+(.+)$', stripped)
+        if m:
+            flush_para()
+            flush_list()
+            flush_table()
+            level = len(m.group(1))
+            text = m.group(2)
+            slug = re.sub(r'[^a-z0-9]+', '-', text.lower()).strip('-')
+            out.append(f'<h{level} id="{slug}">{inline(text)}</h{level}>')
+            i += 1
+            continue
+
+        # Tables
+        if '|' in stripped and stripped.startswith('|'):
+            cells = [c.strip() for c in stripped.split('|')[1:-1]]
+            if cells:
+                # Check if next line is separator
+                if not in_table:
+                    flush_para()
+                    flush_list()
+                    # Check if this is a header row (next line is ---)
+                    if i + 1 < len(lines) and re.match(r'^\|[\s\-:|]+\|$', lines[i + 1].strip()):
+                        out.append('<table><thead><tr>')
+                        for c in cells:
+                            out.append(f'<th>{inline(c)}</th>')
+                        out.append('</tr></thead><tbody>')
+                        in_table = True
+                        i += 2  # skip separator
+                        continue
+                    else:
+                        out.append('<table><tbody>')
+                        in_table = True
+                if in_table:
+                    # Skip separator rows
+                    if re.match(r'^[\s\-:|]+$', stripped.replace('|', '')):
+                        i += 1
+                        continue
+                    out.append('<tr>')
+                    for c in cells:
+                        out.append(f'<td>{inline(c)}</td>')
+                    out.append('</tr>')
+                    i += 1
+                    continue
+
+        # Unordered list
+        m = re.match(r'^(\s*)[-*]\s+(.+)$', stripped)
+        if m:
+            flush_para()
+            flush_table()
+            if not in_ul:
+                flush_list()
+                out.append('<ul>')
+                in_ul = True
+            out.append(f'<li>{inline(m.group(2))}</li>')
+            i += 1
+            continue
+
+        # Ordered list
+        m = re.match(r'^(\s*)\d+\.\s+(.+)$', stripped)
+        if m:
+            flush_para()
+            flush_table()
+            if not in_ol:
+                flush_list()
+                out.append('<ol>')
+                in_ol = True
+            out.append(f'<li>{inline(m.group(2))}</li>')
+            i += 1
+            continue
+
+        # Horizontal rule
+        if re.match(r'^[-*_]{3,}$', stripped):
+            flush_para()
+            flush_list()
+            flush_table()
+            out.append('<hr>')
+            i += 1
+            continue
+
+        # Regular text → paragraph
+        flush_list()
+        flush_table()
+        para.append(stripped)
+        i += 1
+
+    flush_para()
+    flush_list()
+    flush_table()
+
+    return '\n'.join(out)
+
+
+# ── YAML parser (minimal, stdlib only) ────────────────────────────────────────
+
+def parse_docs_index(path: Path) -> list[dict]:
+    """Parse docs-index.yaml into a list of {slug, path, kind, summary}."""
+    entries = []
+    current = {}
+    with open(path) as f:
+        for line in f:
+            line = line.rstrip()
+            if not line.strip() or line.strip().startswith('#'):
+                continue
+            m = re.match(r'\s+-\s+slug:\s+(.+)', line)
+            if m:
+                if current:
+                    entries.append(current)
+                current = {'slug': m.group(1).strip()}
+                continue
+            for key in ('path', 'kind', 'summary'):
+                m = re.match(rf'\s+{key}:\s+(.+)', line)
+                if m:
+                    current[key] = m.group(1).strip()
+        if current:
+            entries.append(current)
+    return entries
+
+
+# ── Navigation ────────────────────────────────────────────────────────────────
+
+NAV_SECTIONS = [
+    ('Overview', [
+        ('overview', 'Overview'),
+        ('architecture', 'Architecture'),
+    ]),
+    ('Getting Started', [
+        ('getting-started', 'Getting Started'),
+        ('build', 'Building'),
+        ('testing', 'Testing'),
+        ('docs-maintenance', 'Docs Maintenance'),
+    ]),
+    ('Support', [
+        ('capabilities', 'Capabilities'),
+    ]),
+    ('Modules', [
+        ('modules', 'Module Reference'),
+    ]),
+    ('Examples', [
+        ('examples-index', 'Example Gallery'),
+        ('examples', 'Example Walkthroughs'),
+        ('example-pulp-gain', 'PulpGain'),
+        ('example-pulp-tone', 'PulpTone'),
+        ('example-pulp-effect', 'PulpEffect'),
+        ('example-pulp-compressor', 'PulpCompressor'),
+        ('example-pulp-synth', 'PulpSynth'),
+        ('example-pulp-drums', 'PulpDrums'),
+        ('example-ui-preview', 'UI Preview'),
+    ]),
+    ('CLI & CMake', [
+        ('cli', 'CLI Reference'),
+        ('cmake', 'CMake Reference'),
+    ]),
+    ('Policies', [
+        ('code-style', 'Code Style'),
+        ('agent-rules', 'Agent Rules'),
+    ]),
+]
+
+
+def build_nav_html(current_slug: str, base_url: str) -> str:
+    """Build the sidebar navigation HTML."""
+    parts = []
+    for section_title, items in NAV_SECTIONS:
+        parts.append(f'<div class="nav-section">{html.escape(section_title)}</div>')
+        parts.append('<ul>')
+        for slug, label in items:
+            active = ' class="active"' if slug == current_slug else ''
+            parts.append(f'<li><a href="{base_url}{slug}.html"{active}>{html.escape(label)}</a></li>')
+        parts.append('</ul>')
+    return '\n'.join(parts)
+
+
+# ── HTML template ─────────────────────────────────────────────────────────────
+
+def page_html(title: str, content: str, nav: str, base_url: str, branch: str) -> str:
+    return f'''<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{html.escape(title)} — Pulp</title>
+<style>
+:root {{
+  --bg: #1a1a2e;
+  --surface: #16213e;
+  --surface2: #0f3460;
+  --text: #e0e0e0;
+  --text-muted: #a0a0b0;
+  --accent: #e94560;
+  --accent2: #533483;
+  --link: #64b5f6;
+  --border: #2a2a4a;
+  --code-bg: #0d1117;
+  --nav-width: 240px;
+}}
+* {{ margin: 0; padding: 0; box-sizing: border-box; }}
+body {{
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.6;
+}}
+a {{ color: var(--link); text-decoration: none; }}
+a:hover {{ text-decoration: underline; }}
+
+/* Header */
+.header {{
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  padding: 12px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  height: 48px;
+}}
+.header-left {{
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}}
+.header h1 {{
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--accent);
+  letter-spacing: 1px;
+}}
+.branch-badge {{
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: var(--accent2);
+  color: #ddd;
+  font-weight: 500;
+}}
+.header-right a {{
+  color: var(--text-muted);
+  font-size: 13px;
+  margin-left: 16px;
+}}
+
+/* Sidebar */
+.sidebar {{
+  position: fixed;
+  top: 48px;
+  left: 0;
+  bottom: 0;
+  width: var(--nav-width);
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+  padding: 16px 0;
+}}
+.nav-section {{
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--text-muted);
+  padding: 12px 20px 4px;
+}}
+.sidebar ul {{
+  list-style: none;
+  margin: 0 0 8px;
+}}
+.sidebar li a {{
+  display: block;
+  padding: 4px 20px;
+  font-size: 13px;
+  color: var(--text);
+  border-left: 3px solid transparent;
+}}
+.sidebar li a:hover {{
+  background: var(--surface2);
+  text-decoration: none;
+}}
+.sidebar li a.active {{
+  border-left-color: var(--accent);
+  color: var(--accent);
+  background: rgba(233, 69, 96, 0.08);
+}}
+
+/* Content */
+.content {{
+  margin-left: var(--nav-width);
+  margin-top: 48px;
+  padding: 32px 48px;
+  max-width: 900px;
+}}
+.content h1 {{ font-size: 28px; margin: 0 0 16px; color: #fff; }}
+.content h2 {{ font-size: 22px; margin: 32px 0 12px; color: #fff; border-bottom: 1px solid var(--border); padding-bottom: 8px; }}
+.content h3 {{ font-size: 17px; margin: 24px 0 8px; color: #ddd; }}
+.content h4 {{ font-size: 15px; margin: 20px 0 6px; color: #ccc; }}
+.content p {{ margin: 8px 0; }}
+.content ul, .content ol {{ margin: 8px 0 8px 24px; }}
+.content li {{ margin: 4px 0; }}
+.content hr {{ border: none; border-top: 1px solid var(--border); margin: 24px 0; }}
+
+/* Code */
+.content code {{
+  font-family: "SF Mono", "Fira Code", monospace;
+  font-size: 13px;
+  background: var(--code-bg);
+  padding: 2px 6px;
+  border-radius: 4px;
+}}
+.content pre {{
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 16px;
+  overflow-x: auto;
+  margin: 12px 0;
+}}
+.content pre code {{
+  background: none;
+  padding: 0;
+  font-size: 13px;
+  line-height: 1.5;
+}}
+
+/* Tables */
+.content table {{
+  border-collapse: collapse;
+  width: 100%;
+  margin: 12px 0;
+  font-size: 14px;
+}}
+.content th, .content td {{
+  padding: 8px 12px;
+  text-align: left;
+  border: 1px solid var(--border);
+}}
+.content th {{
+  background: var(--surface2);
+  font-weight: 600;
+  color: #fff;
+}}
+.content tr:nth-child(even) {{
+  background: rgba(255,255,255,0.02);
+}}
+
+/* Strong in tables for status badges */
+.content td strong {{
+  font-weight: 600;
+}}
+
+/* Responsive */
+@media (max-width: 768px) {{
+  .sidebar {{ display: none; }}
+  .content {{ margin-left: 0; padding: 24px 16px; }}
+}}
+</style>
+</head>
+<body>
+<header class="header">
+  <div class="header-left">
+    <h1>PULP</h1>
+    <span class="branch-badge">{html.escape(branch)}</span>
+  </div>
+  <div class="header-right">
+    <a href="https://github.com/danielraffel/pulp">GitHub</a>
+  </div>
+</header>
+<nav class="sidebar">
+{nav}
+</nav>
+<main class="content">
+{content}
+</main>
+</body>
+</html>'''
+
+
+# ── Landing page ──────────────────────────────────────────────────────────────
+
+def build_landing_page(base_url: str) -> str:
+    return f'''<h1>Pulp Documentation</h1>
+<p>Pulp is a cross-platform framework for building audio plugins and applications.
+MIT-licensed. No royalties. No copyleft.</p>
+
+<h2>What is supported today</h2>
+<ul>
+<li><strong>Formats</strong>: VST3, Audio Unit v2, CLAP, standalone</li>
+<li><strong>Platform</strong>: macOS (ARM64 + x86_64)</li>
+<li><strong>Audio</strong>: CoreAudio device I/O, buffer processing</li>
+<li><strong>MIDI</strong>: CoreMIDI, note/CC/pitchbend events</li>
+<li><strong>DSP</strong>: 19 signal processors (filters, oscillators, effects)</li>
+<li><strong>Parameters</strong>: thread-safe, automatable, serializable</li>
+</ul>
+
+<h2>Where to start</h2>
+<ul>
+<li><a href="{base_url}getting-started.html">Getting Started</a> — build your first plugin</li>
+<li><a href="{base_url}examples-index.html">Examples</a> — browse example projects</li>
+<li><a href="{base_url}capabilities.html">Capabilities</a> — what Pulp can do today</li>
+</ul>
+
+<h2>Reference</h2>
+<ul>
+<li><a href="{base_url}modules.html">Modules</a> — subsystem reference</li>
+<li><a href="{base_url}cli.html">CLI Reference</a> — <code>pulp</code> command reference</li>
+<li><a href="{base_url}cmake.html">CMake Reference</a> — build system functions</li>
+</ul>
+'''
+
+
+# ── Build ─────────────────────────────────────────────────────────────────────
+
+def main():
+    parser = argparse.ArgumentParser(description='Build Pulp docs site')
+    parser.add_argument('--output', '-o', default='build/site',
+                        help='Output directory (default: build/site)')
+    parser.add_argument('--base-url', default='/pulp/',
+                        help='Base URL path (default: /pulp/)')
+    parser.add_argument('--branch', default=None,
+                        help='Branch name for badge (auto-detected if omitted)')
+    args = parser.parse_args()
+
+    # Find project root
+    script_dir = Path(__file__).resolve().parent
+    root = script_dir.parent
+    docs_dir = root / 'docs'
+    output_dir = Path(args.output)
+    if not output_dir.is_absolute():
+        output_dir = root / output_dir
+    base_url = args.base_url
+    if not base_url.endswith('/'):
+        base_url += '/'
+
+    # Auto-detect branch
+    branch = args.branch
+    if not branch:
+        try:
+            import subprocess
+            branch = subprocess.check_output(
+                ['git', 'branch', '--show-current'],
+                cwd=root, text=True
+            ).strip()
+        except Exception:
+            branch = 'main'
+
+    # Parse docs index
+    index_path = docs_dir / 'status' / 'docs-index.yaml'
+    if not index_path.exists():
+        print(f'Error: {index_path} not found', file=sys.stderr)
+        return 1
+    entries = parse_docs_index(index_path)
+
+    # Clean and create output
+    if output_dir.exists():
+        shutil.rmtree(output_dir)
+    output_dir.mkdir(parents=True)
+
+    built = 0
+
+    # Build each doc page
+    for entry in entries:
+        slug = entry['slug']
+        doc_path = docs_dir / entry.get('path', '')
+        if not doc_path.exists():
+            print(f'  SKIP: {entry.get("path", "?")} (file not found)')
+            continue
+
+        md_content = doc_path.read_text(encoding='utf-8')
+        html_content = md_to_html(md_content)
+        nav = build_nav_html(slug, base_url)
+
+        # Extract title from first heading
+        title_match = re.match(r'^#\s+(.+)', md_content)
+        title = title_match.group(1) if title_match else slug.replace('-', ' ').title()
+
+        page = page_html(title, html_content, nav, base_url, branch)
+        out_file = output_dir / f'{slug}.html'
+        out_file.write_text(page, encoding='utf-8')
+        built += 1
+
+    # Build landing page (index.html)
+    nav = build_nav_html('', base_url)
+    landing = build_landing_page(base_url)
+    index_page = page_html('Documentation', landing, nav, base_url, branch)
+    (output_dir / 'index.html').write_text(index_page, encoding='utf-8')
+    built += 1
+
+    # Copy assets if they exist
+    assets_dir = docs_dir / 'assets'
+    if assets_dir.exists():
+        shutil.copytree(assets_dir, output_dir / 'assets')
+
+    print(f'Built {built} pages in {output_dir}')
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main() or 0)

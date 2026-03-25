@@ -7,6 +7,8 @@ A cross-platform framework for building audio plugins and applications.
 
 MIT-licensed. No royalties. No revenue thresholds. No copyleft.
 
+**[Documentation](https://www.generouscorp.com/pulp/)** · **[Examples](https://www.generouscorp.com/pulp/examples-index.html)** · **[Capabilities](https://www.generouscorp.com/pulp/capabilities.html)**
+
 ## What Works Today
 
 - **Three plugin formats** — VST3, AU v2, CLAP — validated with pluginval and auval
@@ -60,7 +62,7 @@ Build all formats:
 cmake -B build && cmake --build build
 ```
 
-See [docs/getting-started.md](docs/getting-started.md) for the full walkthrough.
+See the [Getting Started guide](https://www.generouscorp.com/pulp/getting-started.html) for the full walkthrough.
 
 ## Building
 

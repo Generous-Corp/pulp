@@ -5,10 +5,10 @@ Each Pulp subsystem is a separate CMake library under `core/`. This page lists e
 ## runtime
 
 **Status**: stable
-**Dependencies**: none (std:: only)
+**Dependencies**: platform
 **Headers**: `pulp/runtime/runtime.hpp`, `pulp/runtime/spsc_queue.hpp`, `pulp/runtime/seqlock.hpp`, `pulp/runtime/triple_buffer.hpp`, `pulp/runtime/log.hpp`, `pulp/runtime/assert.hpp`, `pulp/runtime/scope_guard.hpp`
 
-Lock-free synchronization primitives, logging, and assertions. Provides `SeqLock<T>`, `TripleBuffer<T>`, `SPSCQueue<T>`, `ScopeGuard`. The foundation layer with no internal dependencies.
+Lock-free synchronization primitives, logging, and assertions. Provides `SeqLock<T>`, `TripleBuffer<T>`, `SPSCQueue<T>`, `ScopeGuard`. Depends on `platform` for OS detection and types.
 
 ## events
 
@@ -37,7 +37,7 @@ MIDI message types, buffer management, device I/O (CoreMIDI on macOS), and MIDI 
 ## signal
 
 **Status**: usable
-**Dependencies**: runtime
+**Dependencies**: none (header-only INTERFACE library)
 **Headers**: `pulp/signal/signal.hpp`, and individual algorithm headers
 
 DSP algorithm library. Includes:
@@ -47,7 +47,7 @@ DSP algorithm library. Includes:
 - Effects: delay line, chorus, phaser, reverb, waveshaper, compressor, noise gate
 - Utilities: gain, panner, ADSR, smoothed value, oversampling, FFT, windowing
 
-Each algorithm is a standalone class with no framework coupling beyond `runtime`.
+Each algorithm is a standalone header-only class with no framework coupling.
 
 ## state
 
@@ -78,7 +78,7 @@ Platform detection, native file dialogs, popup menus, clipboard access, and nati
 ## canvas
 
 **Status**: experimental
-**Dependencies**: platform
+**Dependencies**: runtime
 **Headers**: `pulp/canvas/canvas.hpp`, `pulp/canvas/cg_canvas.hpp`, `pulp/canvas/skia_canvas.hpp`, `pulp/canvas/svg.hpp`, `pulp/canvas/effects.hpp`
 
 2D drawing abstraction with CoreGraphics and Skia backends. Provides SVG rendering support and post-processing effects (blur, shadow, bloom, color adjustment).
@@ -86,7 +86,7 @@ Platform detection, native file dialogs, popup menus, clipboard access, and nati
 ## render
 
 **Status**: experimental
-**Dependencies**: canvas
+**Dependencies**: runtime, canvas
 **Headers**: `pulp/render/gpu_surface.hpp`, `pulp/render/skia_surface.hpp`
 
 GPU surface management. Creates Dawn (WebGPU) GPU contexts and Skia Graphite rendering surfaces. Metal backend on macOS.
@@ -94,7 +94,7 @@ GPU surface management. Creates Dawn (WebGPU) GPU contexts and Skia Graphite ren
 ## view
 
 **Status**: experimental
-**Dependencies**: render, events, state
+**Dependencies**: canvas, events, state
 **Headers**: `pulp/view/view.hpp`, `pulp/view/widgets.hpp`, `pulp/view/theme.hpp`, `pulp/view/script_engine.hpp`, `pulp/view/hot_reload.hpp`, `pulp/view/inspector.hpp`, `pulp/view/animation.hpp`, `pulp/view/audio_bridge.hpp`, `pulp/view/auto_ui.hpp`, `pulp/view/drag_drop.hpp`, `pulp/view/screenshot.hpp`, `pulp/view/window_host.hpp`
 
 Widget system with JS scripting (QuickJS), theme/design tokens, hot-reload, drag-and-drop, animation, screenshot capture, audio visualization bridge, automatic UI generation, and a component inspector. SDL window host available.
@@ -102,7 +102,7 @@ Widget system with JS scripting (QuickJS), theme/design tokens, hot-reload, drag
 ## osc
 
 **Status**: experimental
-**Dependencies**: none
+**Dependencies**: runtime
 **Headers**: `pulp/osc/osc.hpp`
 
-Open Sound Control messaging. Standalone module with no internal dependencies.
+Open Sound Control messaging. Depends on `runtime` for logging and assertions.

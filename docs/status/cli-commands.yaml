@@ -68,6 +68,8 @@ commands:
         summary: Look up a CMake function
       - name: show style
         summary: Show code style rules
+      - name: check
+        summary: Validate docs consistency against codebase
     docs: reference/cli.md#docs
 
   - name: clean

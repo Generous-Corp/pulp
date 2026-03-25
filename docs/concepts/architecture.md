@@ -5,29 +5,35 @@
 Pulp's subsystems form a directed acyclic graph. Lower-level subsystems do not depend on higher-level ones.
 
 ```
-view  -->  render  -->  canvas
-  |           |
-  v           v
-format  -->  state  -->  runtime
-  |           |
-  v           v
-audio  -->  midi  -->  events  -->  platform
-  |
-  v
-signal
-  |
-  v
-osc (standalone)
+                      platform (leaf — no deps)
+                          ^
+                       runtime
+                     ^  ^  ^  ^
+                    /  /    \  \
+          events --+  /      \  +-- osc
+                     /        \
+    canvas ---------+          +--- state
+      ^  ^                      ^  ^
+      |   \               ____/  /
+      |    +-- render     /     /
+      |                  /     /
+      +---- view -------+    /
+                 \           /
+          audio --+-- format
+          midi ---+
+
+    signal (header-only, no link dependencies)
 ```
 
 Key rules:
 
-- `runtime` has no internal dependencies (only `std::`)
+- `platform` has no internal dependencies (OS detection, native types)
+- `runtime` depends on `platform` only
 - `state` depends on `runtime` only
 - `format` depends on `state`, `audio`, `midi` -- not on `view` or `render`
 - `view` and `render` are optional -- plugins can be built and tested headless
-- `signal` is a leaf -- pure DSP, no framework dependencies beyond `runtime`
-- `osc` is standalone with no internal dependencies
+- `signal` is a header-only leaf -- pure DSP, no framework link dependencies
+- `osc` depends on `runtime` for logging and assertions
 
 ## Public vs Internal Surfaces
 
