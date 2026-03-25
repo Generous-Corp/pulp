@@ -5,6 +5,7 @@
 #include "include/core/SkCanvas.h"
 #include "include/core/SkPaint.h"
 #include "include/core/SkPath.h"
+#include "include/core/SkPathBuilder.h"
 #include "include/core/SkFont.h"
 #include "include/core/SkFontMgr.h"
 #include "include/core/SkTypeface.h"
@@ -93,11 +94,10 @@ void SkiaCanvas::stroke_circle(float cx, float cy, float radius) {
 
 void SkiaCanvas::stroke_arc(float cx, float cy, float radius,
                            float start_angle, float end_angle) {
-    SkPath path;
     float start_deg = start_angle * 180.0f / 3.14159265f;
     float sweep_deg = (end_angle - start_angle) * 180.0f / 3.14159265f;
     SkRect oval = SkRect::MakeXYWH(cx - radius, cy - radius, radius * 2, radius * 2);
-    path.addArc(oval, start_deg, sweep_deg);
+    SkPath path = SkPathBuilder().addArc(oval, start_deg, sweep_deg).detach();
     canvas_->drawPath(path, make_stroke_paint(stroke_color_, line_width_));
 }
 

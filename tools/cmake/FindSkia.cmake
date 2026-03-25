@@ -86,34 +86,37 @@ find_library(DAWN_LIBRARY
 
 if(SKIA_LIBRARY AND EXISTS "${_skia_include_dir}")
     set(SKIA_FOUND TRUE)
-    set(SKIA_INCLUDE_DIRS "${_skia_include_dir}")
-    set(SKIA_LIBRARIES ${SKIA_LIBRARY})
-
-    if(DAWN_LIBRARY)
-        list(APPEND SKIA_LIBRARIES ${DAWN_LIBRARY})
+    # Include dirs: Skia headers + Dawn headers (both source and generated)
+    set(SKIA_INCLUDE_DIRS
+        "${_skia_include_dir}"
+        "${_skia_include_dir}/include"
+    )
+    # Dawn headers from skia-builder
+    if(EXISTS "${_skia_include_dir}/third_party/externals/dawn/include")
+        list(APPEND SKIA_INCLUDE_DIRS "${_skia_include_dir}/third_party/externals/dawn/include")
     endif()
+    # Generated Dawn headers
+    if(EXISTS "${_skia_include_dir}/dawn")
+        list(APPEND SKIA_INCLUDE_DIRS "${_skia_include_dir}")
+    endif()
+    # Collect ALL static libraries in the lib dir
+    file(GLOB _skia_all_libs "${_skia_lib_dir}/*.a" "${_skia_lib_dir}/*.lib")
+    set(SKIA_LIBRARIES ${_skia_all_libs})
 
-    # Create imported target
+    # Create imported interface target that links everything
     if(NOT TARGET skia::skia)
-        add_library(skia::skia STATIC IMPORTED)
+        add_library(skia::skia INTERFACE IMPORTED)
         set_target_properties(skia::skia PROPERTIES
-            IMPORTED_LOCATION "${SKIA_LIBRARY}"
             INTERFACE_INCLUDE_DIRECTORIES "${SKIA_INCLUDE_DIRS}"
+            INTERFACE_COMPILE_DEFINITIONS "SK_GRAPHITE;SK_DAWN"
+            INTERFACE_LINK_LIBRARIES "${SKIA_LIBRARIES}"
         )
 
         # Platform frameworks
         if(APPLE)
-            set_target_properties(skia::skia PROPERTIES
+            set_property(TARGET skia::skia APPEND PROPERTY
                 INTERFACE_LINK_LIBRARIES
                     "-framework Metal;-framework MetalKit;-framework CoreFoundation;-framework CoreGraphics;-framework CoreText;-framework Foundation;-framework IOKit;-framework IOSurface;-framework QuartzCore"
-            )
-        endif()
-
-        # Add Dawn if found
-        if(DAWN_LIBRARY)
-            add_library(skia::dawn STATIC IMPORTED)
-            set_target_properties(skia::dawn PROPERTIES
-                IMPORTED_LOCATION "${DAWN_LIBRARY}"
             )
         endif()
     endif()

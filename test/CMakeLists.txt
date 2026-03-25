@@ -99,6 +99,11 @@ if(PULP_ENABLE_GPU)
     add_executable(pulp-test-gpu-surface test_gpu_surface.cpp)
     target_link_libraries(pulp-test-gpu-surface PRIVATE pulp::render Catch2::Catch2WithMain)
     catch_discover_tests(pulp-test-gpu-surface)
+
+    # Skia surface test
+    add_executable(pulp-test-skia-surface test_skia_surface.cpp)
+    target_link_libraries(pulp-test-skia-surface PRIVATE pulp::render Catch2::Catch2WithMain)
+    catch_discover_tests(pulp-test-skia-surface)
 endif()
 
 # Animation tests
