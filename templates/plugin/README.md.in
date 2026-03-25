@@ -1,0 +1,23 @@
+# @PLUGIN_NAME@
+
+A @CATEGORY_LOWER@ audio plugin built with [Pulp](https://github.com/danielraffel/pulp).
+
+## Building
+
+```bash
+cmake -B build
+cmake --build build
+```
+
+## Plugin Formats
+
+| Format | Location |
+|--------|----------|
+| VST3 | `build/VST3/@PLUGIN_NAME@.vst3` |
+| CLAP | `build/CLAP/@PLUGIN_NAME@.clap` |
+| AU | `build/AU/@PLUGIN_NAME@.component` |
+| Standalone | `build/@PLUGIN_NAME@` |
+
+## License
+
+MIT

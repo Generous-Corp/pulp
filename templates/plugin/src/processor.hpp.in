@@ -1,0 +1,82 @@
+#pragma once
+
+// @PLUGIN_NAME@ — Pulp Audio Plugin
+// @DESCRIPTION@
+
+#include <pulp/format/processor.hpp>
+#include <cmath>
+
+namespace @NAMESPACE@ {
+
+enum Params : pulp::state::ParamID {
+    kGain    = 1,
+    kBypass  = 2,
+};
+
+class @PLUGIN_NAME@Processor : public pulp::format::Processor {
+public:
+    pulp::format::PluginDescriptor descriptor() const override {
+        return {
+            .name = "@PLUGIN_NAME@",
+            .manufacturer = "@MANUFACTURER@",
+            .bundle_id = "@BUNDLE_ID@",
+            .version = "@VERSION@",
+            .category = pulp::format::PluginCategory::@CATEGORY@,
+            .default_input_channels = 2,
+            .default_output_channels = 2,
+        };
+    }
+
+    void define_parameters(pulp::state::StateStore& store) override {
+        store.add_parameter({
+            .id = kGain,
+            .name = "Gain",
+            .unit = "dB",
+            .range = {-60.0f, 24.0f, 0.0f, 0.1f},
+        });
+        store.add_parameter({
+            .id = kBypass,
+            .name = "Bypass",
+            .unit = "",
+            .range = {0.0f, 1.0f, 0.0f, 1.0f},
+        });
+    }
+
+    void prepare(const pulp::format::PrepareContext&) override {}
+
+    void process(
+        pulp::audio::BufferView<float>& output,
+        const pulp::audio::BufferView<const float>& input,
+        pulp::midi::MidiBuffer&,
+        pulp::midi::MidiBuffer&,
+        const pulp::format::ProcessContext&) override
+    {
+        bool bypass = state().get_value(kBypass) >= 0.5f;
+
+        if (bypass) {
+            for (std::size_t ch = 0; ch < output.num_channels() && ch < input.num_channels(); ++ch) {
+                auto in = input.channel(ch);
+                auto out = output.channel(ch);
+                for (std::size_t i = 0; i < output.num_samples(); ++i)
+                    out[i] = in[i];
+            }
+            return;
+        }
+
+        float db = state().get_value(kGain);
+        float gain = std::pow(10.0f, db / 20.0f);
+
+        for (std::size_t ch = 0; ch < output.num_channels() && ch < input.num_channels(); ++ch) {
+            auto in = input.channel(ch);
+            auto out = output.channel(ch);
+            for (std::size_t i = 0; i < output.num_samples(); ++i)
+                out[i] = in[i] * gain;
+        }
+    }
+};
+
+inline std::unique_ptr<pulp::format::Processor> create_@PLUGIN_NAME_LOWER@() {
+    return std::make_unique<@PLUGIN_NAME@Processor>();
+}
+
+} // namespace @NAMESPACE@
