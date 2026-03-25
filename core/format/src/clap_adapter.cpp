@@ -1,7 +1,7 @@
 // CLAP Adapter implementation
 // Implements the CLAP C API wrapping a Pulp Processor
 
-#include "clap_adapter.hpp"
+#include <pulp/format/clap_adapter.hpp>
 #include <pulp/runtime/log.hpp>
 #include <cstring>
 

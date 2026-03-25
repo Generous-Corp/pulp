@@ -40,6 +40,15 @@ add_executable(pulp-test-headless test_headless.cpp)
 target_link_libraries(pulp-test-headless PRIVATE pulp::format Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-headless)
 
+# CLAP entry point macro test
+if(PULP_HAS_CLAP)
+    add_executable(pulp-test-clap-entry test_clap_entry.cpp
+        ${CMAKE_SOURCE_DIR}/core/format/src/clap_adapter.cpp
+    )
+    target_link_libraries(pulp-test-clap-entry PRIVATE pulp::format clap Catch2::Catch2WithMain)
+    catch_discover_tests(pulp-test-clap-entry)
+endif()
+
 # Golden-file audio tests (uses HeadlessHost + PulpGain)
 add_executable(pulp-test-golden test_golden_audio.cpp)
 target_link_libraries(pulp-test-golden PRIVATE pulp::format Catch2::Catch2WithMain)
