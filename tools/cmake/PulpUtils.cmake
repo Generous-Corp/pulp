@@ -131,10 +131,20 @@ function(_pulp_add_vst3 target name bundle_id version manufacturer category)
         LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/VST3"
     )
 
-    # Use custom Info.plist if available
+    # Info.plist: use custom if available, otherwise generate from template
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/Info.plist.vst3")
         set_target_properties(${target}_VST3 PROPERTIES
             MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/Info.plist.vst3")
+    elseif(EXISTS "${CMAKE_SOURCE_DIR}/tools/cmake/PulpInfoPlist.vst3.in")
+        set(PULP_PLUGIN_NAME "${name}")
+        set(PULP_BUNDLE_ID "${bundle_id}")
+        set(PULP_VERSION "${version}")
+        configure_file(
+            "${CMAKE_SOURCE_DIR}/tools/cmake/PulpInfoPlist.vst3.in"
+            "${CMAKE_CURRENT_BINARY_DIR}/${target}_Info.plist.vst3"
+            @ONLY)
+        set_target_properties(${target}_VST3 PROPERTIES
+            MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_BINARY_DIR}/${target}_Info.plist.vst3")
     endif()
 
     # Copy moduleinfo.json if available
@@ -207,10 +217,33 @@ function(_pulp_add_au target name bundle_id version manufacturer category plugin
         LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/AU"
     )
 
-    # Use custom Info.plist if available
+    # Info.plist: use custom if available, otherwise generate from template
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/Info.plist.au")
         set_target_properties(${target}_AU PROPERTIES
             MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/Info.plist.au")
+    elseif(EXISTS "${CMAKE_SOURCE_DIR}/tools/cmake/PulpInfoPlist.au.in")
+        set(PULP_PLUGIN_NAME "${name}")
+        set(PULP_BUNDLE_ID "${bundle_id}")
+        set(PULP_VERSION "${version}")
+        set(PULP_MANUFACTURER "${manufacturer}")
+        set(PULP_MANUFACTURER_CODE "${manufacturer_code}")
+        set(PULP_PLUGIN_CODE "${plugin_code}")
+        # Determine AU type from category
+        if("${category}" STREQUAL "Instrument")
+            set(PULP_AU_TYPE "aumu")
+        elseif("${category}" STREQUAL "MidiEffect")
+            set(PULP_AU_TYPE "aumi")
+        else()
+            set(PULP_AU_TYPE "aufx")
+        endif()
+        # Factory function name follows the AUSDK_COMPONENT_ENTRY convention
+        set(PULP_AU_FACTORY_NAME "${target}AUFactory")
+        configure_file(
+            "${CMAKE_SOURCE_DIR}/tools/cmake/PulpInfoPlist.au.in"
+            "${CMAKE_CURRENT_BINARY_DIR}/${target}_Info.plist.au"
+            @ONLY)
+        set_target_properties(${target}_AU PROPERTIES
+            MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_BINARY_DIR}/${target}_Info.plist.au")
     endif()
 endfunction()
 

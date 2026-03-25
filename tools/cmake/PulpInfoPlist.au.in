@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>en</string>
+    <key>CFBundleExecutable</key>
+    <string>@PULP_PLUGIN_NAME@</string>
+    <key>CFBundleIdentifier</key>
+    <string>@PULP_BUNDLE_ID@.au</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleName</key>
+    <string>@PULP_PLUGIN_NAME@</string>
+    <key>CFBundlePackageType</key>
+    <string>BNDL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>@PULP_VERSION@</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>AudioComponents</key>
+    <array>
+        <dict>
+            <key>name</key>
+            <string>@PULP_MANUFACTURER@: @PULP_PLUGIN_NAME@</string>
+            <key>description</key>
+            <string>@PULP_PLUGIN_NAME@</string>
+            <key>manufacturer</key>
+            <string>@PULP_MANUFACTURER_CODE@</string>
+            <key>type</key>
+            <string>@PULP_AU_TYPE@</string>
+            <key>subtype</key>
+            <string>@PULP_PLUGIN_CODE@</string>
+            <key>version</key>
+            <integer>65536</integer>
+            <key>factoryFunction</key>
+            <string>@PULP_AU_FACTORY_NAME@</string>
+            <key>sandboxSafe</key>
+            <true/>
+        </dict>
+    </array>
+</dict>
+</plist>
