@@ -7,6 +7,121 @@
 using namespace pulp::signal;
 using Catch::Matchers::WithinAbs;
 
+// ── DelayLine ────────────────────────────────────────────────────────────────
+
+TEST_CASE("DelayLine integer delay", "[signal][delay]") {
+    DelayLine dl;
+    dl.prepare(100);
+
+    // Push 10 samples: 1, 2, 3, ..., 10
+    for (int i = 1; i <= 10; ++i) dl.push(static_cast<float>(i));
+
+    // Read at delay 0 = most recent = 10
+    REQUIRE_THAT(dl.read(0), WithinAbs(10.0, 0.01));
+
+    // Read at delay 5 = 5 samples ago = 5
+    REQUIRE_THAT(dl.read(5), WithinAbs(5.0, 0.01));
+}
+
+TEST_CASE("DelayLine fractional delay", "[signal][delay]") {
+    DelayLine dl;
+    dl.prepare(100);
+
+    for (int i = 0; i < 10; ++i) dl.push(static_cast<float>(i));
+
+    // Delay 0.5 should interpolate between two samples
+    float val = dl.read(0.5f);
+    REQUIRE(val > 8.0f);
+    REQUIRE(val < 9.5f);
+}
+
+TEST_CASE("DelayLine process", "[signal][delay]") {
+    DelayLine dl;
+    dl.prepare(10);
+
+    // Process with delay of 3
+    dl.process(1.0f, 3.0f);
+    dl.process(2.0f, 3.0f);
+    dl.process(3.0f, 3.0f);
+    float out = dl.process(4.0f, 3.0f);
+
+    // After 4 pushes with delay 3, should get the first value
+    REQUIRE_THAT(out, WithinAbs(1.0, 0.01));
+}
+
+// ── Gain ─────────────────────────────────────────────────────────────────────
+
+TEST_CASE("Gain dB conversion", "[signal][gain]") {
+    REQUIRE_THAT(db_to_linear(0.0f), WithinAbs(1.0, 0.001));
+    REQUIRE_THAT(db_to_linear(6.0f), WithinAbs(1.995, 0.01));
+    REQUIRE_THAT(db_to_linear(-6.0f), WithinAbs(0.501, 0.01));
+
+    REQUIRE_THAT(linear_to_db(1.0f), WithinAbs(0.0, 0.01));
+    REQUIRE_THAT(linear_to_db(2.0f), WithinAbs(6.02, 0.1));
+}
+
+TEST_CASE("Gain processor", "[signal][gain]") {
+    Gain g;
+    g.set_gain_db(-6.0f);
+
+    float out = g.process(1.0f);
+    REQUIRE(out > 0.49f);
+    REQUIRE(out < 0.51f);
+}
+
+TEST_CASE("DryWetMixer", "[signal][mix]") {
+    DryWetMixer mixer;
+
+    mixer.set_mix(0.0f); // Fully dry
+    REQUIRE_THAT(mixer.process(1.0f, 0.5f), WithinAbs(1.0, 0.001));
+
+    mixer.set_mix(1.0f); // Fully wet
+    REQUIRE_THAT(mixer.process(1.0f, 0.5f), WithinAbs(0.5, 0.001));
+
+    mixer.set_mix(0.5f); // 50/50
+    REQUIRE_THAT(mixer.process(1.0f, 0.0f), WithinAbs(0.5, 0.001));
+}
+
+// ── Compressor ───────────────────────────────────────────────────────────────
+
+TEST_CASE("Compressor reduces loud signals", "[signal][comp]") {
+    Compressor comp;
+    comp.set_sample_rate(44100.0f);
+    comp.set_params({-20.0f, 4.0f, 0.1f, 50.0f, 0.0f, 0.0f});
+
+    // Process a loud signal
+    float loud = 1.0f; // 0 dBFS
+    float compressed = 0;
+    for (int i = 0; i < 1000; ++i) {
+        compressed = comp.process(loud);
+    }
+    REQUIRE(std::abs(compressed) < 0.9f); // Should be reduced
+}
+
+TEST_CASE("Compressor passes quiet signals", "[signal][comp]") {
+    Compressor comp;
+    comp.set_sample_rate(44100.0f);
+    comp.set_params({-10.0f, 4.0f, 1.0f, 50.0f, 0.0f, 0.0f});
+
+    float quiet = 0.01f; // -40 dBFS, well below threshold
+    float out = comp.process(quiet);
+    REQUIRE_THAT(out, WithinAbs(quiet, 0.001));
+}
+
+// ── Limiter ──────────────────────────────────────────────────────────────────
+
+TEST_CASE("Limiter caps at threshold", "[signal][limiter]") {
+    Limiter lim;
+    lim.set_sample_rate(44100.0f);
+    lim.set_threshold_db(-6.0f); // ~0.5 linear
+
+    // Process loud signal
+    for (int i = 0; i < 100; ++i) {
+        float out = lim.process(1.0f);
+        REQUIRE(std::abs(out) <= 0.55f); // Should be limited near 0.5
+    }
+}
+
 // ── SmoothedValue ────────────────────────────────────────────────────────────
 
 TEST_CASE("SmoothedValue immediate set", "[signal][smooth]") {
