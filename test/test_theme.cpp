@@ -6,13 +6,13 @@ using namespace pulp::view;
 using Catch::Matchers::WithinAbs;
 
 TEST_CASE("Color from hex", "[view][theme]") {
-    auto c = Color::from_hex(0xFF8800);
+    auto c = color_from_hex(0xFF8800);
     REQUIRE(c.r == 0xFF);
     REQUIRE(c.g == 0x88);
     REQUIRE(c.b == 0x00);
     REQUIRE(c.a == 0xFF);
 
-    auto c2 = Color::from_hex_alpha(0xFF880080);
+    auto c2 = color_from_hex_alpha(0xFF880080);
     REQUIRE(c2.r == 0xFF);
     REQUIRE(c2.g == 0x88);
     REQUIRE(c2.b == 0x00);
@@ -62,7 +62,7 @@ TEST_CASE("Theme pro_audio has required tokens", "[view][theme]") {
 TEST_CASE("Theme apply_overrides", "[view][theme]") {
     auto base = Theme::dark();
     Theme overrides;
-    overrides.colors["bg.primary"] = Color::from_hex(0xFF0000);
+    overrides.colors["bg.primary"] = color_from_hex(0xFF0000);
     overrides.dimensions["spacing.md"] = 99.0f;
 
     base.apply_overrides(overrides);

@@ -21,6 +21,10 @@ struct Color {
                 static_cast<uint8_t>((rgb >> 8) & 0xFF),
                 static_cast<uint8_t>(rgb & 0xFF), 255};
     }
+
+    bool operator==(const Color& other) const {
+        return r == other.r && g == other.g && b == other.b && a == other.a;
+    }
 };
 
 // ── Paint ────────────────────────────────────────────────────────────────────

@@ -11,6 +11,7 @@ target_sources(pulp-view PRIVATE
     src/script_engine.cpp
     src/theme.cpp
     src/view.cpp
+    src/widgets.cpp
 )
 
 # CHOC headers (JS engine, utilities)

@@ -2,14 +2,12 @@
 
 #include <pulp/view/geometry.hpp>
 #include <pulp/view/theme.hpp>
+#include <pulp/canvas/canvas.hpp>
 #include <vector>
 #include <memory>
 #include <string>
 
 namespace pulp::view {
-
-// Forward declarations
-class Canvas;
 
 // Base class for all UI elements
 // Views form a tree: each view has zero or more children and one optional parent
@@ -66,8 +64,14 @@ public:
     // Perform flex layout on children
     void layout_children();
 
+    // ── Painting ──────────────────────────────────────────────────────────
+
+    // Paint this view and all children into a canvas
+    void paint_all(canvas::Canvas& canvas);
+
     // ── Lifecycle (override in subclasses) ────────────────────────────────
 
+    virtual void paint(canvas::Canvas&) {}
     virtual void on_resized() {}
     virtual void on_attached() {}
     virtual void on_detached() {}

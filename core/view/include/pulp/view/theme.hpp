@@ -1,5 +1,6 @@
 #pragma once
 
+#include <pulp/canvas/canvas.hpp>
 #include <string>
 #include <unordered_map>
 #include <optional>
@@ -7,32 +8,24 @@
 
 namespace pulp::view {
 
-// RGBA color (0-255 per channel)
-struct Color {
-    uint8_t r = 0, g = 0, b = 0, a = 255;
+// Use the canvas Color type throughout the view system
+using Color = canvas::Color;
 
-    static Color from_hex(uint32_t hex) {
-        return {
-            static_cast<uint8_t>((hex >> 16) & 0xFF),
-            static_cast<uint8_t>((hex >> 8) & 0xFF),
-            static_cast<uint8_t>(hex & 0xFF),
-            255
-        };
-    }
+// Convenience helpers for hex color creation
+inline Color color_from_hex(uint32_t hex) {
+    return Color::rgba(
+        static_cast<uint8_t>((hex >> 16) & 0xFF),
+        static_cast<uint8_t>((hex >> 8) & 0xFF),
+        static_cast<uint8_t>(hex & 0xFF));
+}
 
-    static Color from_hex_alpha(uint32_t hex) {
-        return {
-            static_cast<uint8_t>((hex >> 24) & 0xFF),
-            static_cast<uint8_t>((hex >> 16) & 0xFF),
-            static_cast<uint8_t>((hex >> 8) & 0xFF),
-            static_cast<uint8_t>(hex & 0xFF)
-        };
-    }
-
-    bool operator==(const Color& other) const {
-        return r == other.r && g == other.g && b == other.b && a == other.a;
-    }
-};
+inline Color color_from_hex_alpha(uint32_t hex) {
+    return Color::rgba(
+        static_cast<uint8_t>((hex >> 24) & 0xFF),
+        static_cast<uint8_t>((hex >> 16) & 0xFF),
+        static_cast<uint8_t>((hex >> 8) & 0xFF),
+        static_cast<uint8_t>(hex & 0xFF));
+}
 
 // Design tokens define the visual language
 // Tokens are named values — colors, dimensions, strings

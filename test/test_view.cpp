@@ -112,7 +112,7 @@ TEST_CASE("View theme resolution", "[view][theme]") {
 
     // Child can override
     Theme override_theme;
-    override_theme.colors["bg.primary"] = Color::from_hex(0xFF0000);
+    override_theme.colors["bg.primary"] = color_from_hex(0xFF0000);
     child_ptr->set_theme(override_theme);
 
     auto c2 = child_ptr->resolve_color("bg.primary");

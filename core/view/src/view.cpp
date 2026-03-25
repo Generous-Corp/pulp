@@ -4,6 +4,22 @@
 
 namespace pulp::view {
 
+void View::paint_all(canvas::Canvas& canvas) {
+    if (!visible_) return;
+
+    canvas.save();
+    canvas.translate(bounds_.x, bounds_.y);
+    canvas.clip_rect(0, 0, bounds_.width, bounds_.height);
+
+    paint(canvas);
+
+    for (auto& child : children_) {
+        child->paint_all(canvas);
+    }
+
+    canvas.restore();
+}
+
 void View::set_bounds(Rect r) {
     if (bounds_ == r) return;
     bounds_ = r;

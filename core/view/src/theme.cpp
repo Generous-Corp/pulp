@@ -31,8 +31,8 @@ void Theme::apply_overrides(const Theme& overrides) {
 static Color parse_hex_color(const std::string& hex) {
     if (hex.empty() || hex[0] != '#') return {};
     auto val = std::stoul(hex.substr(1), nullptr, 16);
-    if (hex.size() == 7) return Color::from_hex(static_cast<uint32_t>(val));
-    if (hex.size() == 9) return Color::from_hex_alpha(static_cast<uint32_t>(val));
+    if (hex.size() == 7) return color_from_hex(static_cast<uint32_t>(val));
+    if (hex.size() == 9) return color_from_hex_alpha(static_cast<uint32_t>(val));
     return {};
 }
 
@@ -101,28 +101,28 @@ Theme Theme::dark() {
     Theme t;
 
     // Background
-    t.colors["bg.primary"]     = Color::from_hex(0x1E1E2E);
-    t.colors["bg.secondary"]   = Color::from_hex(0x2A2A3C);
-    t.colors["bg.surface"]     = Color::from_hex(0x313244);
-    t.colors["bg.elevated"]    = Color::from_hex(0x45475A);
+    t.colors["bg.primary"]     = color_from_hex(0x1E1E2E);
+    t.colors["bg.secondary"]   = color_from_hex(0x2A2A3C);
+    t.colors["bg.surface"]     = color_from_hex(0x313244);
+    t.colors["bg.elevated"]    = color_from_hex(0x45475A);
 
     // Text
-    t.colors["text.primary"]   = Color::from_hex(0xCDD6F4);
-    t.colors["text.secondary"] = Color::from_hex(0xA6ADC8);
-    t.colors["text.disabled"]  = Color::from_hex(0x6C7086);
+    t.colors["text.primary"]   = color_from_hex(0xCDD6F4);
+    t.colors["text.secondary"] = color_from_hex(0xA6ADC8);
+    t.colors["text.disabled"]  = color_from_hex(0x6C7086);
 
     // Accent
-    t.colors["accent.primary"]   = Color::from_hex(0x89B4FA);
-    t.colors["accent.secondary"] = Color::from_hex(0xF5C2E7);
-    t.colors["accent.success"]   = Color::from_hex(0xA6E3A1);
-    t.colors["accent.warning"]   = Color::from_hex(0xFAB387);
-    t.colors["accent.error"]     = Color::from_hex(0xF38BA8);
+    t.colors["accent.primary"]   = color_from_hex(0x89B4FA);
+    t.colors["accent.secondary"] = color_from_hex(0xF5C2E7);
+    t.colors["accent.success"]   = color_from_hex(0xA6E3A1);
+    t.colors["accent.warning"]   = color_from_hex(0xFAB387);
+    t.colors["accent.error"]     = color_from_hex(0xF38BA8);
 
     // Controls
-    t.colors["control.track"]    = Color::from_hex(0x45475A);
-    t.colors["control.fill"]     = Color::from_hex(0x89B4FA);
-    t.colors["control.thumb"]    = Color::from_hex(0xCDD6F4);
-    t.colors["control.border"]   = Color::from_hex(0x585B70);
+    t.colors["control.track"]    = color_from_hex(0x45475A);
+    t.colors["control.fill"]     = color_from_hex(0x89B4FA);
+    t.colors["control.thumb"]    = color_from_hex(0xCDD6F4);
+    t.colors["control.border"]   = color_from_hex(0x585B70);
 
     // Dimensions
     t.dimensions["spacing.xs"]   = 2.0f;
@@ -156,25 +156,25 @@ Theme Theme::dark() {
 Theme Theme::light() {
     Theme t;
 
-    t.colors["bg.primary"]     = Color::from_hex(0xEFF1F5);
-    t.colors["bg.secondary"]   = Color::from_hex(0xE6E9EF);
-    t.colors["bg.surface"]     = Color::from_hex(0xDCE0E8);
-    t.colors["bg.elevated"]    = Color::from_hex(0xCCD0DA);
+    t.colors["bg.primary"]     = color_from_hex(0xEFF1F5);
+    t.colors["bg.secondary"]   = color_from_hex(0xE6E9EF);
+    t.colors["bg.surface"]     = color_from_hex(0xDCE0E8);
+    t.colors["bg.elevated"]    = color_from_hex(0xCCD0DA);
 
-    t.colors["text.primary"]   = Color::from_hex(0x4C4F69);
-    t.colors["text.secondary"] = Color::from_hex(0x6C6F85);
-    t.colors["text.disabled"]  = Color::from_hex(0x9CA0B0);
+    t.colors["text.primary"]   = color_from_hex(0x4C4F69);
+    t.colors["text.secondary"] = color_from_hex(0x6C6F85);
+    t.colors["text.disabled"]  = color_from_hex(0x9CA0B0);
 
-    t.colors["accent.primary"]   = Color::from_hex(0x1E66F5);
-    t.colors["accent.secondary"] = Color::from_hex(0xEA76CB);
-    t.colors["accent.success"]   = Color::from_hex(0x40A02B);
-    t.colors["accent.warning"]   = Color::from_hex(0xFE640B);
-    t.colors["accent.error"]     = Color::from_hex(0xD20F39);
+    t.colors["accent.primary"]   = color_from_hex(0x1E66F5);
+    t.colors["accent.secondary"] = color_from_hex(0xEA76CB);
+    t.colors["accent.success"]   = color_from_hex(0x40A02B);
+    t.colors["accent.warning"]   = color_from_hex(0xFE640B);
+    t.colors["accent.error"]     = color_from_hex(0xD20F39);
 
-    t.colors["control.track"]    = Color::from_hex(0xCCD0DA);
-    t.colors["control.fill"]     = Color::from_hex(0x1E66F5);
-    t.colors["control.thumb"]    = Color::from_hex(0xFFFFFF);
-    t.colors["control.border"]   = Color::from_hex(0xACB0BE);
+    t.colors["control.track"]    = color_from_hex(0xCCD0DA);
+    t.colors["control.fill"]     = color_from_hex(0x1E66F5);
+    t.colors["control.thumb"]    = color_from_hex(0xFFFFFF);
+    t.colors["control.border"]   = color_from_hex(0xACB0BE);
 
     // Same dimensions and strings as dark
     auto dark_theme = dark();
@@ -187,25 +187,25 @@ Theme Theme::light() {
 Theme Theme::pro_audio() {
     Theme t;
 
-    t.colors["bg.primary"]     = Color::from_hex(0x141414);
-    t.colors["bg.secondary"]   = Color::from_hex(0x1C1C1C);
-    t.colors["bg.surface"]     = Color::from_hex(0x242424);
-    t.colors["bg.elevated"]    = Color::from_hex(0x2C2C2C);
+    t.colors["bg.primary"]     = color_from_hex(0x141414);
+    t.colors["bg.secondary"]   = color_from_hex(0x1C1C1C);
+    t.colors["bg.surface"]     = color_from_hex(0x242424);
+    t.colors["bg.elevated"]    = color_from_hex(0x2C2C2C);
 
-    t.colors["text.primary"]   = Color::from_hex(0xD4D4D4);
-    t.colors["text.secondary"] = Color::from_hex(0x8A8A8A);
-    t.colors["text.disabled"]  = Color::from_hex(0x505050);
+    t.colors["text.primary"]   = color_from_hex(0xD4D4D4);
+    t.colors["text.secondary"] = color_from_hex(0x8A8A8A);
+    t.colors["text.disabled"]  = color_from_hex(0x505050);
 
-    t.colors["accent.primary"]   = Color::from_hex(0x3B82F6);
-    t.colors["accent.secondary"] = Color::from_hex(0x8B5CF6);
-    t.colors["accent.success"]   = Color::from_hex(0x22C55E);
-    t.colors["accent.warning"]   = Color::from_hex(0xF59E0B);
-    t.colors["accent.error"]     = Color::from_hex(0xEF4444);
+    t.colors["accent.primary"]   = color_from_hex(0x3B82F6);
+    t.colors["accent.secondary"] = color_from_hex(0x8B5CF6);
+    t.colors["accent.success"]   = color_from_hex(0x22C55E);
+    t.colors["accent.warning"]   = color_from_hex(0xF59E0B);
+    t.colors["accent.error"]     = color_from_hex(0xEF4444);
 
-    t.colors["control.track"]    = Color::from_hex(0x2C2C2C);
-    t.colors["control.fill"]     = Color::from_hex(0x3B82F6);
-    t.colors["control.thumb"]    = Color::from_hex(0xE5E5E5);
-    t.colors["control.border"]   = Color::from_hex(0x3A3A3A);
+    t.colors["control.track"]    = color_from_hex(0x2C2C2C);
+    t.colors["control.fill"]     = color_from_hex(0x3B82F6);
+    t.colors["control.thumb"]    = color_from_hex(0xE5E5E5);
+    t.colors["control.border"]   = color_from_hex(0x3A3A3A);
 
     // Tighter spacing for pro audio
     auto dark_theme = dark();
