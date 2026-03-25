@@ -35,6 +35,11 @@ add_executable(pulp-test-state test_state.cpp)
 target_link_libraries(pulp-test-state PRIVATE pulp::state Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-state)
 
+# Binding tests
+add_executable(pulp-test-binding test_binding.cpp)
+target_link_libraries(pulp-test-binding PRIVATE pulp::state Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-binding)
+
 # Headless adapter tests
 add_executable(pulp-test-headless test_headless.cpp)
 target_link_libraries(pulp-test-headless PRIVATE pulp::format Catch2::Catch2WithMain)
