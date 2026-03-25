@@ -17,4 +17,12 @@ if(APPLE)
         platform/mac/codesign_mac.mm
     )
     target_link_libraries(pulp-ship PRIVATE "-framework Security")
+elseif(WIN32)
+    target_sources(pulp-ship PRIVATE
+        platform/win/codesign_win.cpp
+    )
+elseif(UNIX)
+    target_sources(pulp-ship PRIVATE
+        platform/linux/package_linux.cpp
+    )
 endif()

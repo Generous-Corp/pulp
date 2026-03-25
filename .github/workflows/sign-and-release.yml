@@ -115,6 +115,25 @@ jobs:
             xcrun stapler staple "$pkg" || true
           done
 
+      - name: Generate appcast
+        run: |
+          VERSION=${GITHUB_REF_NAME#v}
+          DATE=$(date -u '+%a, %d %b %Y %H:%M:%S +0000')
+          cat > artifacts/appcast.xml << XMLEOF
+          <?xml version="1.0" encoding="utf-8"?>
+          <rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+            <channel>
+              <title>Pulp Updates</title>
+              <item>
+                <title>Version ${VERSION}</title>
+                <pubDate>${DATE}</pubDate>
+                <sparkle:version>${VERSION}</sparkle:version>
+                <sparkle:minimumSystemVersion>12.0</sparkle:minimumSystemVersion>
+              </item>
+            </channel>
+          </rss>
+          XMLEOF
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
