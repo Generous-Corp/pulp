@@ -7,7 +7,16 @@ target_include_directories(pulp-audio
         $<INSTALL_INTERFACE:include>
 )
 
+target_sources(pulp-audio PRIVATE
+    src/audio_file.cpp
+)
+
 target_link_libraries(pulp-audio PUBLIC pulp::runtime)
+
+# CHOC headers (audio file I/O)
+target_include_directories(pulp-audio PRIVATE
+    $<BUILD_INTERFACE:${choc_SOURCE_DIR}>
+)
 
 # Platform-specific sources
 if(APPLE AND NOT IOS)

@@ -25,6 +25,11 @@ add_executable(pulp-test-events test_events.cpp)
 target_link_libraries(pulp-test-events PRIVATE pulp::events Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-events)
 
+# Audio file I/O tests
+add_executable(pulp-test-audio-file test_audio_file.cpp)
+target_link_libraries(pulp-test-audio-file PRIVATE pulp::audio Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-audio-file)
+
 # Audio tests
 add_executable(pulp-test-audio test_audio.cpp)
 target_link_libraries(pulp-test-audio PRIVATE pulp::audio Catch2::Catch2WithMain)
