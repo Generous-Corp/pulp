@@ -130,6 +130,21 @@ while IFS= read -r line; do
     fi
 done < "$STATUS/modules.yaml"
 
+# ── 8. README test count accuracy ─────────────────────────────────────────────
+echo "Checking README accuracy..."
+
+if [ -f "$ROOT/README.md" ] && [ -d "$ROOT/build" ]; then
+    # Extract test count from README
+    readme_count=$(grep -oE '[0-9]+ automated tests' "$ROOT/README.md" 2>/dev/null | grep -oE '[0-9]+')
+    if [ -n "$readme_count" ]; then
+        # Get actual test count from build
+        actual_count=$(ctest --test-dir "$ROOT/build" -N 2>/dev/null | grep "Total Tests:" | grep -oE '[0-9]+')
+        if [ -n "$actual_count" ] && [ "$readme_count" != "$actual_count" ]; then
+            warn "README.md says '$readme_count automated tests' but build has $actual_count tests"
+        fi
+    fi
+fi
+
 # ── Summary ───────────────────────────────────────────────────────────────────
 echo ""
 if [ $ERRORS -gt 0 ]; then
