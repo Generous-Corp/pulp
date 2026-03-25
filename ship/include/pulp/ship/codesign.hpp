@@ -55,4 +55,28 @@ bool create_pkg(const std::string& component_path,
                 const std::string& version,
                 const std::string& signing_identity = "");
 
+// Create a macOS .dmg disk image with an Applications alias
+bool create_dmg(const std::string& source_path,
+                const std::string& output_path,
+                const std::string& volume_name);
+
+// Create a combined multi-format installer (.pkg) via productbuild
+// components: list of {path, install_location} pairs
+struct InstallComponent {
+    std::string path;           // Path to .component, .vst3, .clap, or .app
+    std::string install_location; // e.g. "/Library/Audio/Plug-Ins/VST3"
+};
+
+bool create_combined_pkg(const std::vector<InstallComponent>& components,
+                         const std::string& output_path,
+                         const std::string& identifier,
+                         const std::string& version,
+                         const std::string& signing_identity = "");
+
+// ── Entitlements ────────────────────────────────────────────────────────
+
+// Generate a default entitlements plist for audio plugins
+// Includes: audio-input, network-client (for updates)
+std::string default_audio_entitlements();
+
 } // namespace pulp::ship

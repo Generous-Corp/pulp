@@ -7,6 +7,7 @@
 #include <sstream>
 #include <array>
 #include <regex>
+#include <unistd.h>
 
 namespace pulp::ship {
 
@@ -141,6 +142,82 @@ bool create_pkg(const std::string& component_path,
     return exec_status(cmd) == 0;
 }
 
+bool create_dmg(const std::string& source_path,
+                const std::string& output_path,
+                const std::string& volume_name) {
+    // Create a temporary directory with the source and an Applications alias
+    std::string tmp_dir = "/tmp/pulp-dmg-staging-" + std::to_string(getpid());
+    exec_status("rm -rf \"" + tmp_dir + "\"");
+    exec_status("mkdir -p \"" + tmp_dir + "\"");
+    exec_status("cp -R \"" + source_path + "\" \"" + tmp_dir + "/\"");
+    exec_status("ln -s /Applications \"" + tmp_dir + "/Applications\"");
+
+    // Remove existing DMG if present
+    exec_status("rm -f \"" + output_path + "\"");
+
+    std::string cmd = "hdiutil create"
+        " -volname \"" + volume_name + "\""
+        " -srcfolder \"" + tmp_dir + "\""
+        " -ov -format UDZO"
+        " \"" + output_path + "\" 2>/dev/null";
+    bool ok = exec_status(cmd) == 0;
+
+    exec_status("rm -rf \"" + tmp_dir + "\"");
+    return ok;
+}
+
+bool create_combined_pkg(const std::vector<InstallComponent>& components,
+                         const std::string& output_path,
+                         const std::string& identifier,
+                         const std::string& version,
+                         const std::string& signing_identity) {
+    // Build individual component packages, then combine with productbuild
+    std::string tmp_dir = "/tmp/pulp-pkg-staging-" + std::to_string(getpid());
+    exec_status("mkdir -p \"" + tmp_dir + "\"");
+
+    std::vector<std::string> pkg_paths;
+    int idx = 0;
+    for (const auto& comp : components) {
+        std::string pkg_name = tmp_dir + "/component_" + std::to_string(idx++) + ".pkg";
+        std::string cmd = "pkgbuild --component \"" + comp.path + "\""
+            " --identifier \"" + identifier + ".c" + std::to_string(idx) + "\""
+            " --version \"" + version + "\""
+            " --install-location \"" + comp.install_location + "\""
+            " \"" + pkg_name + "\" 2>/dev/null";
+        if (exec_status(cmd) != 0) {
+            exec_status("rm -rf \"" + tmp_dir + "\"");
+            return false;
+        }
+        pkg_paths.push_back(pkg_name);
+    }
+
+    // Combine with productbuild
+    std::string cmd = "productbuild";
+    for (const auto& p : pkg_paths)
+        cmd += " --package \"" + p + "\"";
+    if (!signing_identity.empty())
+        cmd += " --sign \"" + signing_identity + "\"";
+    cmd += " \"" + output_path + "\" 2>/dev/null";
+    bool ok = exec_status(cmd) == 0;
+
+    exec_status("rm -rf \"" + tmp_dir + "\"");
+    return ok;
+}
+
+std::string default_audio_entitlements() {
+    return R"(<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>com.apple.security.device.audio-input</key>
+    <true/>
+    <key>com.apple.security.network.client</key>
+    <true/>
+</dict>
+</plist>
+)";
+}
+
 } // namespace pulp::ship
 
 #else // !__APPLE__
@@ -154,6 +231,9 @@ NotarizationStatus notarize_check(const std::string&) { return {}; }
 bool notarize_staple(const std::string&) { return false; }
 std::vector<std::string> list_signing_identities() { return {}; }
 bool create_pkg(const std::string&, const std::string&, const std::string&, const std::string&, const std::string&) { return false; }
+bool create_dmg(const std::string&, const std::string&, const std::string&) { return false; }
+bool create_combined_pkg(const std::vector<InstallComponent>&, const std::string&, const std::string&, const std::string&, const std::string&) { return false; }
+std::string default_audio_entitlements() { return {}; }
 }
 
 #endif

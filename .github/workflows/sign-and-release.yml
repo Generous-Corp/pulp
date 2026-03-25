@@ -60,7 +60,8 @@ jobs:
           for plugin in build/VST3/*.vst3 build/CLAP/*.clap build/AU/*.component; do
             [ -e "$plugin" ] || continue
             echo "Signing $(basename $plugin)..."
-            codesign --force --sign "$SIGNING_IDENTITY" --timestamp --options runtime "$plugin"
+            codesign --force --sign "$SIGNING_IDENTITY" --timestamp --options runtime \
+              --entitlements ship/templates/entitlements.plist "$plugin"
           done
 
       - name: Create installer package
@@ -85,6 +86,15 @@ jobs:
               --version "$VERSION" \
               --install-location "/Library/Audio/Plug-Ins/CLAP/" \
               "artifacts/${NAME}-CLAP-${VERSION}.pkg" || true
+          done
+          for plugin in build/AU/*.component; do
+            [ -e "$plugin" ] || continue
+            NAME=$(basename "$plugin" .component)
+            pkgbuild --component "$plugin" \
+              --identifier "com.pulp.${NAME}.au" \
+              --version "$VERSION" \
+              --install-location "$HOME/Library/Audio/Plug-Ins/Components/" \
+              "artifacts/${NAME}-AU-${VERSION}.pkg" || true
           done
 
       - name: Notarize packages
