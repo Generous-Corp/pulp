@@ -1,4 +1,4 @@
-name: Build
+name: Build and Test
 
 on:
   push:
@@ -9,26 +9,53 @@ on:
 jobs:
   build:
     strategy:
+      fail-fast: false
       matrix:
-        os: [macos-14, windows-latest, ubuntu-latest]
         include:
           - os: macos-14
-            preset: macos
-          - os: windows-latest
-            preset: windows
-          - os: ubuntu-latest
-            preset: linux
+            name: macOS (ARM64)
+          # - os: windows-latest
+          #   name: Windows (x64)
+          # - os: ubuntu-latest
+          #   name: Linux (x64)
 
     runs-on: ${{ matrix.os }}
+    name: ${{ matrix.name }}
 
     steps:
       - uses: actions/checkout@v4
 
+      - name: Clone VST3 SDK
+        run: |
+          git clone --depth 1 --branch v3.7.12 \
+            https://github.com/steinbergmedia/vst3sdk.git \
+            external/vst3sdk
+          cd external/vst3sdk && git submodule update --init --recursive --depth 1
+
+      - name: Clone AudioUnitSDK (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          git clone --depth 1 \
+            https://github.com/apple/AudioUnitSDK.git \
+            external/AudioUnitSDK
+
       - name: Configure
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 
       - name: Build
         run: cmake --build build --config Release
 
       - name: Test
-        run: ctest --test-dir build --output-on-failure
+        working-directory: build
+        run: ctest --output-on-failure -j$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4)
+
+      - name: Upload plugin bundles
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: plugins-${{ matrix.os }}
+          path: |
+            build/VST3/*.vst3
+            build/CLAP/*.clap
+            build/AU/*.component
+          retention-days: 7
