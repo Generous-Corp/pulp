@@ -259,6 +259,28 @@ If it's not tested, it doesn't work. Every subsystem has tests. Every feature ha
 - Buffer size stress tests (32 to 4096 samples)
 - Sample rate tests (44.1k to 192k)
 
+### Plugin Install Policy
+
+**NEVER install a plugin to system folders without passing validation first.**
+
+The build process for plugin formats follows this pipeline:
+
+```
+Build → Validate → Install
+```
+
+- `pulp build` — builds the plugin bundle(s) in the build directory
+- `pulp build --test` — builds + runs validation (auval for AU, pluginval for VST3, clap-validator for CLAP)
+- `pulp build --install` — builds + validates + installs to system folders (only if validation passes)
+- `pulp build --install --skip-validation` — builds + installs WITHOUT validation (for debugging adapter code only, never for normal use)
+
+**System plugin folders** (where DAWs scan):
+- AU: `~/Library/Audio/Plug-Ins/Components/`
+- VST3: `~/Library/Audio/Plug-Ins/VST3/`
+- CLAP: `~/Library/Audio/Plug-Ins/CLAP/`
+
+A plugin that crashes a DAW during scan is worse than no plugin at all. Validation is the gate. The `--skip-validation` flag exists for debugging but defaults OFF.
+
 ### Test in Every Worktree
 
 Tests must pass in the worktree before creating a PR. CI runs the full matrix on PR. No merging with red tests.
