@@ -16,6 +16,7 @@ target_sources(pulp-view PRIVATE
     src/hot_reload.cpp
     src/inspector.cpp
     src/sdl_window_host.cpp
+    src/auto_ui.cpp
 )
 
 # CHOC headers (JS engine, utilities)

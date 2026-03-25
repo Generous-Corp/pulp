@@ -71,6 +71,16 @@ if(PULP_ENABLE_GPU)
     catch_discover_tests(pulp-test-gpu-surface)
 endif()
 
+# Animation tests
+add_executable(pulp-test-animation test_animation.cpp)
+target_link_libraries(pulp-test-animation PRIVATE pulp::view Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-animation)
+
+# Auto UI tests
+add_executable(pulp-test-auto-ui test_auto_ui.cpp)
+target_link_libraries(pulp-test-auto-ui PRIVATE pulp::view Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-auto-ui)
+
 # Script engine tests
 add_executable(pulp-test-script test_script_engine.cpp)
 target_link_libraries(pulp-test-script PRIVATE pulp::view Catch2::Catch2WithMain)
