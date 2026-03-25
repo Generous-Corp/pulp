@@ -5,6 +5,7 @@
 #import <AudioToolbox/AudioToolbox.h>
 #import <AVFoundation/AVFoundation.h>
 #include <pulp/format/processor.hpp>
+#include <pulp/format/registry.hpp>
 #include <pulp/runtime/log.hpp>
 #include <memory>
 
@@ -45,30 +46,64 @@ struct AUBridge {
                                          error:outError];
     if (!self) return nil;
 
-    // Create the processor
-    if (_bridge.factory) {
-        _bridge.processor = _bridge.factory();
-        if (_bridge.processor) {
-            _bridge.processor->set_state_store(&_bridge.store);
-            _bridge.processor->define_parameters(_bridge.store);
+    // Get the processor factory from the global registry
+    _bridge.factory = pulp::format::registered_factory();
+    if (!_bridge.factory) {
+        pulp::runtime::log_error("AU: no processor factory registered — did you use PULP_REGISTER_PLUGIN?");
+        if (outError) {
+            *outError = [NSError errorWithDomain:@"com.pulp" code:-1
+                userInfo:@{NSLocalizedDescriptionKey: @"No processor factory registered"}];
         }
+        return nil;
     }
 
-    // Create output bus (stereo)
-    AVAudioFormat *defaultFormat = [[AVAudioFormat alloc]
-        initStandardFormatWithSampleRate:48000.0 channels:2];
+    // Create the processor
+    _bridge.processor = _bridge.factory();
+    if (!_bridge.processor) {
+        pulp::runtime::log_error("AU: processor factory returned null");
+        if (outError) {
+            *outError = [NSError errorWithDomain:@"com.pulp" code:-2
+                userInfo:@{NSLocalizedDescriptionKey: @"Processor factory returned null"}];
+        }
+        return nil;
+    }
+    _bridge.processor->set_state_store(&_bridge.store);
+    _bridge.processor->define_parameters(_bridge.store);
 
-    _outputBus = [[AUAudioUnitBus alloc] initWithFormat:defaultFormat error:outError];
-    if (!_outputBus) return nil;
+    auto desc = _bridge.processor->descriptor();
+
+    // Create buses based on processor descriptor
+    AVAudioFormat *defaultFormat = [[AVAudioFormat alloc]
+        initStandardFormatWithSampleRate:48000.0
+        channels:static_cast<AVAudioChannelCount>(desc.default_output_channels)];
+
+    NSMutableArray *outputBusses = [NSMutableArray new];
+    NSMutableArray *inputBusses = [NSMutableArray new];
+
+    if (desc.default_output_channels > 0) {
+        _outputBus = [[AUAudioUnitBus alloc] initWithFormat:defaultFormat error:outError];
+        if (!_outputBus) return nil;
+        [outputBusses addObject:_outputBus];
+    }
+
+    if (desc.default_input_channels > 0) {
+        AVAudioFormat *inputFormat = [[AVAudioFormat alloc]
+            initStandardFormatWithSampleRate:48000.0
+            channels:static_cast<AVAudioChannelCount>(desc.default_input_channels)];
+        AUAudioUnitBus *inputBus = [[AUAudioUnitBus alloc] initWithFormat:inputFormat error:outError];
+        if (!inputBus) return nil;
+        [inputBusses addObject:inputBus];
+    }
 
     _outputBusArray = [[AUAudioUnitBusArray alloc]
-        initWithAudioUnit:self busType:AUAudioUnitBusTypeOutput busses:@[_outputBus]];
+        initWithAudioUnit:self busType:AUAudioUnitBusTypeOutput busses:outputBusses];
     _inputBusArray = [[AUAudioUnitBusArray alloc]
-        initWithAudioUnit:self busType:AUAudioUnitBusTypeInput busses:@[]];
+        initWithAudioUnit:self busType:AUAudioUnitBusTypeInput busses:inputBusses];
 
     self.maximumFramesToRender = 512;
 
-    pulp::runtime::log_info("AU: initialized");
+    pulp::runtime::log_info("AU: initialized '{}' (in:{} out:{})",
+        desc.name, desc.default_input_channels, desc.default_output_channels);
     return self;
 }
 
@@ -90,8 +125,9 @@ struct AUBridge {
         pulp::format::PrepareContext ctx;
         ctx.sample_rate = _bridge.sample_rate;
         ctx.max_buffer_size = static_cast<int>(_bridge.max_frames);
-        ctx.output_channels = 2;
-        ctx.input_channels = 0;
+        auto desc = _bridge.processor->descriptor();
+        ctx.output_channels = desc.default_output_channels;
+        ctx.input_channels = desc.default_input_channels;
         _bridge.processor->prepare(ctx);
     }
 
@@ -139,7 +175,31 @@ struct AUBridge {
             bridge->output_ptrs.size(),
             frameCount);
 
-        pulp::audio::BufferView<const float> input_view; // No input for instruments
+        // Pull input audio if this is an effect (has input channels)
+        pulp::audio::BufferView<const float> input_view;
+        AudioBufferList inputBufferList;
+        if (pullInputBlock) {
+            // Set up input buffer list matching output format
+            inputBufferList.mNumberBuffers = outputData->mNumberBuffers;
+            for (UInt32 i = 0; i < outputData->mNumberBuffers; ++i) {
+                inputBufferList.mBuffers[i].mNumberChannels = 1;
+                inputBufferList.mBuffers[i].mDataByteSize = frameCount * sizeof(float);
+                inputBufferList.mBuffers[i].mData = outputData->mBuffers[i].mData; // In-place
+            }
+
+            AudioUnitRenderActionFlags pullFlags = 0;
+            AUAudioUnitStatus pullStatus = pullInputBlock(&pullFlags, timestamp, frameCount, 0, &inputBufferList);
+            if (pullStatus == noErr) {
+                bridge->input_ptrs.resize(inputBufferList.mNumberBuffers);
+                for (UInt32 i = 0; i < inputBufferList.mNumberBuffers; ++i) {
+                    bridge->input_ptrs[i] = static_cast<const float*>(inputBufferList.mBuffers[i].mData);
+                }
+                input_view = pulp::audio::BufferView<const float>(
+                    bridge->input_ptrs.data(),
+                    bridge->input_ptrs.size(),
+                    frameCount);
+            }
+        }
 
         // Process MIDI events from the render event list
         pulp::midi::MidiBuffer midi_in, midi_out;

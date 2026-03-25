@@ -1,18 +1,30 @@
-// Audio Unit v2 component entry point
-// Provides the AudioComponentFactoryFunction that the AU host calls
+// Audio Unit component entry point
+// The processor factory must be registered via PULP_REGISTER_PLUGIN before this is called.
 
 #import <AudioToolbox/AudioToolbox.h>
 #import <AVFoundation/AVFoundation.h>
+#include <pulp/format/registry.hpp>
+#include <pulp/runtime/log.hpp>
 
-// Forward declaration of our AUAudioUnit subclass
 @class PulpAudioUnit;
 
-// The factory function — called by the AU host to create instances
 extern "C" void* PulpAUFactory(const AudioComponentDescription* desc) {
-    // AUv3-in-v2 wrapper: create the AUAudioUnit subclass
-    // The host provides the component description, we return an AUAudioUnit
-    return (__bridge_retained void*)[[PulpAudioUnit alloc]
+    if (!pulp::format::registered_factory()) {
+        pulp::runtime::log_error("AU: no processor registered — use PULP_REGISTER_PLUGIN");
+        return nullptr;
+    }
+
+    NSError* error = nil;
+    PulpAudioUnit* unit = [[PulpAudioUnit alloc]
         initWithComponentDescription:*desc
         options:0
-        error:nil];
+        error:&error];
+
+    if (error) {
+        pulp::runtime::log_error("AU: init error: {}",
+            [error.localizedDescription UTF8String]);
+        return nullptr;
+    }
+
+    return (__bridge_retained void*)unit;
 }
