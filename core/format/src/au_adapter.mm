@@ -1,6 +1,6 @@
 // Audio Unit v3 adapter for Pulp
 // Implements AUAudioUnit wrapping a Pulp Processor
-// Built from Apple AudioToolbox documentation (AUAudioUnit class reference)
+// Built from Apple AudioToolbox documentation
 
 #import <AudioToolbox/AudioToolbox.h>
 #import <AVFoundation/AVFoundation.h>
@@ -8,19 +8,29 @@
 #include <pulp/format/registry.hpp>
 #include <pulp/runtime/log.hpp>
 #include <memory>
+#include <array>
 
 namespace pulp::format::au {
 
-// C++ bridge: holds the Pulp processor and state
+static constexpr int kMaxChannels = 8;
+
 struct AUBridge {
     std::unique_ptr<Processor> processor;
     state::StateStore store;
-    ProcessorFactory factory;
     double sample_rate = 48000.0;
     AUAudioFrameCount max_frames = 512;
+    int input_channels = 0;
+    int output_channels = 0;
 
-    std::vector<float*> output_ptrs;
-    std::vector<const float*> input_ptrs;
+    // Pre-allocated — no heap allocation on audio thread
+    float* output_ptrs[kMaxChannels] = {};
+    const float* input_ptrs[kMaxChannels] = {};
+
+    // Pre-allocated input buffer list for pulling input (stereo max for now)
+    struct InputBufferStorage {
+        UInt32 mNumberBuffers;
+        AudioBuffer mBuffers[kMaxChannels];
+    } input_abl = {};
 };
 
 } // namespace pulp::format::au
@@ -29,9 +39,10 @@ struct AUBridge {
 
 @interface PulpAudioUnit : AUAudioUnit {
     pulp::format::au::AUBridge _bridge;
+    AUAudioUnitBus *_inputBus;
     AUAudioUnitBus *_outputBus;
-    AUAudioUnitBusArray *_outputBusArray;
     AUAudioUnitBusArray *_inputBusArray;
+    AUAudioUnitBusArray *_outputBusArray;
 }
 @end
 
@@ -46,10 +57,9 @@ struct AUBridge {
                                          error:outError];
     if (!self) return nil;
 
-    // Get the processor factory from the global registry
-    _bridge.factory = pulp::format::registered_factory();
-    if (!_bridge.factory) {
-        pulp::runtime::log_error("AU: no processor factory registered — did you use PULP_REGISTER_PLUGIN?");
+    // Get processor factory from global registry
+    auto factory = pulp::format::registered_factory();
+    if (!factory) {
         if (outError) {
             *outError = [NSError errorWithDomain:@"com.pulp" code:-1
                 userInfo:@{NSLocalizedDescriptionKey: @"No processor factory registered"}];
@@ -57,10 +67,8 @@ struct AUBridge {
         return nil;
     }
 
-    // Create the processor
-    _bridge.processor = _bridge.factory();
+    _bridge.processor = factory();
     if (!_bridge.processor) {
-        pulp::runtime::log_error("AU: processor factory returned null");
         if (outError) {
             *outError = [NSError errorWithDomain:@"com.pulp" code:-2
                 userInfo:@{NSLocalizedDescriptionKey: @"Processor factory returned null"}];
@@ -71,34 +79,34 @@ struct AUBridge {
     _bridge.processor->define_parameters(_bridge.store);
 
     auto desc = _bridge.processor->descriptor();
+    _bridge.input_channels = desc.default_input_channels;
+    _bridge.output_channels = desc.default_output_channels;
 
-    // Create buses based on processor descriptor
-    AVAudioFormat *defaultFormat = [[AVAudioFormat alloc]
+    // Create buses
+    AVAudioFormat *format = [[AVAudioFormat alloc]
         initStandardFormatWithSampleRate:48000.0
-        channels:static_cast<AVAudioChannelCount>(desc.default_output_channels)];
+        channels:static_cast<AVAudioChannelCount>(std::max(desc.default_output_channels, 1))];
 
-    NSMutableArray *outputBusses = [NSMutableArray new];
-    NSMutableArray *inputBusses = [NSMutableArray new];
+    NSMutableArray *outBusses = [NSMutableArray new];
+    NSMutableArray *inBusses = [NSMutableArray new];
 
-    if (desc.default_output_channels > 0) {
-        _outputBus = [[AUAudioUnitBus alloc] initWithFormat:defaultFormat error:outError];
-        if (!_outputBus) return nil;
-        [outputBusses addObject:_outputBus];
-    }
+    _outputBus = [[AUAudioUnitBus alloc] initWithFormat:format error:outError];
+    if (!_outputBus) return nil;
+    [outBusses addObject:_outputBus];
 
     if (desc.default_input_channels > 0) {
-        AVAudioFormat *inputFormat = [[AVAudioFormat alloc]
+        AVAudioFormat *inFormat = [[AVAudioFormat alloc]
             initStandardFormatWithSampleRate:48000.0
             channels:static_cast<AVAudioChannelCount>(desc.default_input_channels)];
-        AUAudioUnitBus *inputBus = [[AUAudioUnitBus alloc] initWithFormat:inputFormat error:outError];
-        if (!inputBus) return nil;
-        [inputBusses addObject:inputBus];
+        _inputBus = [[AUAudioUnitBus alloc] initWithFormat:inFormat error:outError];
+        if (!_inputBus) return nil;
+        [inBusses addObject:_inputBus];
     }
 
     _outputBusArray = [[AUAudioUnitBusArray alloc]
-        initWithAudioUnit:self busType:AUAudioUnitBusTypeOutput busses:outputBusses];
+        initWithAudioUnit:self busType:AUAudioUnitBusTypeOutput busses:outBusses];
     _inputBusArray = [[AUAudioUnitBusArray alloc]
-        initWithAudioUnit:self busType:AUAudioUnitBusTypeInput busses:inputBusses];
+        initWithAudioUnit:self busType:AUAudioUnitBusTypeInput busses:inBusses];
 
     self.maximumFramesToRender = 512;
 
@@ -107,13 +115,26 @@ struct AUBridge {
     return self;
 }
 
-- (AUAudioUnitBusArray *)outputBusses {
-    return _outputBusArray;
+// ── Bus access ─────────────────────────────────────────────────────────────
+
+- (AUAudioUnitBusArray *)outputBusses { return _outputBusArray; }
+- (AUAudioUnitBusArray *)inputBusses { return _inputBusArray; }
+
+// ── Required property overrides ────────────────────────────────────────────
+
+- (NSTimeInterval)latency { return 0.0; }
+- (NSTimeInterval)tailTime { return 0.0; }
+- (BOOL)supportsUserPresets { return NO; }
+- (BOOL)canProcessInPlace { return YES; }
+
+- (AUParameterTree *)parameterTree {
+    return [AUParameterTree createTreeWithChildren:@[]];
 }
 
-- (AUAudioUnitBusArray *)inputBusses {
-    return _inputBusArray;
-}
+- (BOOL)shouldBypassEffect { return NO; }
+- (void)setShouldBypassEffect:(BOOL)bypass { (void)bypass; }
+
+// ── Render resources ───────────────────────────────────────────────────────
 
 - (BOOL)allocateRenderResourcesAndReturnError:(NSError **)outError {
     if (![super allocateRenderResourcesAndReturnError:outError]) return NO;
@@ -125,26 +146,24 @@ struct AUBridge {
         pulp::format::PrepareContext ctx;
         ctx.sample_rate = _bridge.sample_rate;
         ctx.max_buffer_size = static_cast<int>(_bridge.max_frames);
-        auto desc = _bridge.processor->descriptor();
-        ctx.output_channels = desc.default_output_channels;
-        ctx.input_channels = desc.default_input_channels;
+        ctx.output_channels = _bridge.output_channels;
+        ctx.input_channels = _bridge.input_channels;
         _bridge.processor->prepare(ctx);
     }
 
-    pulp::runtime::log_info("AU: allocated render resources at {} Hz, max {} frames",
+    pulp::runtime::log_info("AU: render resources at {} Hz, {} frames",
         _bridge.sample_rate, _bridge.max_frames);
     return YES;
 }
 
 - (void)deallocateRenderResources {
-    if (_bridge.processor) {
-        _bridge.processor->release();
-    }
+    if (_bridge.processor) _bridge.processor->release();
     [super deallocateRenderResources];
 }
 
+// ── Render block ───────────────────────────────────────────────────────────
+
 - (AUInternalRenderBlock)internalRenderBlock {
-    // Capture bridge pointer for the render block
     auto* bridge = &_bridge;
 
     AUInternalRenderBlock renderBlock = ^AUAudioUnitStatus(
@@ -157,71 +176,62 @@ struct AUBridge {
         AURenderPullInputBlock __unsafe_unretained pullInputBlock)
     {
         if (!bridge->processor) {
-            // Silence
-            for (UInt32 i = 0; i < outputData->mNumberBuffers; ++i) {
+            for (UInt32 i = 0; i < outputData->mNumberBuffers; ++i)
                 memset(outputData->mBuffers[i].mData, 0, outputData->mBuffers[i].mDataByteSize);
-            }
             return noErr;
         }
 
-        // Build output buffer view
-        bridge->output_ptrs.resize(outputData->mNumberBuffers);
-        for (UInt32 i = 0; i < outputData->mNumberBuffers; ++i) {
+        UInt32 outChans = std::min(outputData->mNumberBuffers,
+            static_cast<UInt32>(pulp::format::au::kMaxChannels));
+
+        // Output buffer view (no allocation)
+        for (UInt32 i = 0; i < outChans; ++i)
             bridge->output_ptrs[i] = static_cast<float*>(outputData->mBuffers[i].mData);
-        }
+        pulp::audio::BufferView<float> output_view(bridge->output_ptrs, outChans, frameCount);
 
-        pulp::audio::BufferView<float> output_view(
-            bridge->output_ptrs.data(),
-            bridge->output_ptrs.size(),
-            frameCount);
-
-        // Pull input audio if this is an effect (has input channels)
+        // Input: pull from upstream if we have input channels
         pulp::audio::BufferView<const float> input_view;
-        AudioBufferList inputBufferList;
-        if (pullInputBlock) {
-            // Set up input buffer list matching output format
-            inputBufferList.mNumberBuffers = outputData->mNumberBuffers;
-            for (UInt32 i = 0; i < outputData->mNumberBuffers; ++i) {
-                inputBufferList.mBuffers[i].mNumberChannels = 1;
-                inputBufferList.mBuffers[i].mDataByteSize = frameCount * sizeof(float);
-                inputBufferList.mBuffers[i].mData = outputData->mBuffers[i].mData; // In-place
+        if (pullInputBlock && bridge->input_channels > 0) {
+            auto& abl = bridge->input_abl;
+            abl.mNumberBuffers = outChans;
+            for (UInt32 i = 0; i < outChans; ++i) {
+                abl.mBuffers[i].mNumberChannels = 1;
+                abl.mBuffers[i].mDataByteSize = frameCount * sizeof(float);
+                abl.mBuffers[i].mData = outputData->mBuffers[i].mData;
             }
 
             AudioUnitRenderActionFlags pullFlags = 0;
-            AUAudioUnitStatus pullStatus = pullInputBlock(&pullFlags, timestamp, frameCount, 0, &inputBufferList);
-            if (pullStatus == noErr) {
-                bridge->input_ptrs.resize(inputBufferList.mNumberBuffers);
-                for (UInt32 i = 0; i < inputBufferList.mNumberBuffers; ++i) {
-                    bridge->input_ptrs[i] = static_cast<const float*>(inputBufferList.mBuffers[i].mData);
-                }
+            auto status = pullInputBlock(&pullFlags, timestamp, frameCount, 0,
+                reinterpret_cast<AudioBufferList*>(&abl));
+            if (status == noErr) {
+                for (UInt32 i = 0; i < outChans; ++i)
+                    bridge->input_ptrs[i] = static_cast<const float*>(abl.mBuffers[i].mData);
                 input_view = pulp::audio::BufferView<const float>(
-                    bridge->input_ptrs.data(),
-                    bridge->input_ptrs.size(),
-                    frameCount);
+                    bridge->input_ptrs, outChans, frameCount);
             }
         }
 
-        // Process MIDI events from the render event list
+        // MIDI events
         pulp::midi::MidiBuffer midi_in, midi_out;
         const AURenderEvent* event = realtimeEventListHead;
         while (event) {
             if (event->head.eventType == AURenderEventMIDI) {
-                const AUMIDIEvent& midi = event->MIDI;
+                const AUMIDIEvent& m = event->MIDI;
                 pulp::midi::MidiEvent me;
-                me.data[0] = midi.data[0];
-                me.data[1] = midi.length > 1 ? midi.data[1] : 0;
-                me.data[2] = midi.length > 2 ? midi.data[2] : 0;
-                me.size = static_cast<uint8_t>(midi.length);
+                me.data[0] = m.data[0];
+                me.data[1] = m.length > 1 ? m.data[1] : 0;
+                me.data[2] = m.length > 2 ? m.data[2] : 0;
+                me.size = static_cast<uint8_t>(m.length);
                 me.sample_offset = static_cast<int32_t>(event->head.eventSampleTime);
                 midi_in.add(me);
             }
             event = event->head.next;
         }
 
+        // Process
         pulp::format::ProcessContext ctx;
         ctx.sample_rate = bridge->sample_rate;
         ctx.num_samples = static_cast<int>(frameCount);
-
         bridge->processor->process(output_view, input_view, midi_in, midi_out, ctx);
 
         return noErr;
@@ -249,15 +259,3 @@ struct AUBridge {
 }
 
 @end
-
-// ── Factory function ───────────────────────────────────────────────────────
-
-namespace pulp::format::au {
-
-void register_au_factory(ProcessorFactory factory) {
-    // Store the factory for use by the AUAudioUnit subclass
-    // In a real implementation, this would be called before the AU is instantiated
-    // and the factory would be passed through to the AUAudioUnit init
-}
-
-} // namespace pulp::format::au
