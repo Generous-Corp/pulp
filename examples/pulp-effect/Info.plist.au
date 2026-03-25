@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>en</string>
+    <key>CFBundleExecutable</key>
+    <string>PulpEffect</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.pulp.effect.au</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleName</key>
+    <string>PulpEffect</string>
+    <key>CFBundlePackageType</key>
+    <string>BNDL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0.0</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>AudioComponents</key>
+    <array>
+        <dict>
+            <key>name</key>
+            <string>Pulp: PulpEffect</string>
+            <key>description</key>
+            <string>PulpEffect Biquad Filter</string>
+            <key>manufacturer</key>
+            <string>Pulp</string>
+            <key>type</key>
+            <string>aufx</string>
+            <key>subtype</key>
+            <string>PEfx</string>
+            <key>version</key>
+            <integer>65536</integer>
+            <key>factoryFunction</key>
+            <string>PulpEffectAUFactory</string>
+            <key>sandboxSafe</key>
+            <true/>
+        </dict>
+    </array>
+</dict>
+</plist>

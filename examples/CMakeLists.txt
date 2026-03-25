@@ -8,7 +8,7 @@ add_subdirectory(pulp-gain)
 add_subdirectory(pulp-tone)
 
 # Phase 5: PulpEffect (filter with parameters and state)
-# add_subdirectory(pulp-effect)
+add_subdirectory(pulp-effect)
 
 # Phase 6: PulpDrums (generative drum sequencer with GPU UI)
 # add_subdirectory(pulp-drums)

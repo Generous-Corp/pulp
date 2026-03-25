@@ -1,0 +1,42 @@
+# PulpEffect — biquad filter with frequency, resonance, type, mix
+# Validates: diverse parameter types, DSP, state serialization
+
+# Tests
+add_executable(pulp-effect-test test_pulp_effect.cpp)
+target_link_libraries(pulp-effect-test PRIVATE pulp::format Catch2::Catch2WithMain)
+target_include_directories(pulp-effect-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+catch_discover_tests(pulp-effect-test)
+
+# Plugin (all formats)
+pulp_add_plugin(PulpEffect
+    FORMATS         VST3 AU CLAP
+    PLUGIN_NAME     "PulpEffect"
+    BUNDLE_ID       "com.pulp.effect"
+    MANUFACTURER    "Pulp"
+    VERSION         "1.0.0"
+    CATEGORY        Effect
+    PLUGIN_CODE     "PEfx"
+    MANUFACTURER_CODE "Pulp"
+)
+
+# Validation
+if(PULP_HAS_CLAP AND APPLE)
+    add_test(NAME clap-dlopen-PulpEffect
+        COMMAND bash -c "python3 -c \"import ctypes; ctypes.CDLL('${CMAKE_BINARY_DIR}/CLAP/PulpEffect.clap/Contents/MacOS/PulpEffect'); print('OK')\"")
+    set_tests_properties(clap-dlopen-PulpEffect PROPERTIES LABELS "validation;clap" TIMEOUT 10)
+endif()
+
+if(APPLE AND PULP_HAS_AUSDK)
+    add_test(NAME auval-PulpEffect
+        COMMAND bash -c "cp -R ${CMAKE_BINARY_DIR}/AU/PulpEffect.component ~/Library/Audio/Plug-Ins/Components/ && auval -v aufx PEfx Pulp 2>&1 | tee /dev/stderr | grep -q 'PASS'")
+    set_tests_properties(auval-PulpEffect PROPERTIES LABELS "validation;au" TIMEOUT 30)
+endif()
+
+if(PULP_HAS_VST3)
+    find_program(PLUGINVAL pluginval)
+    if(PLUGINVAL)
+        add_test(NAME pluginval-PulpEffect-VST3
+            COMMAND ${PLUGINVAL} --validate ${CMAKE_BINARY_DIR}/VST3/PulpEffect.vst3 --strictness-level 5 --timeout-ms 10000)
+        set_tests_properties(pluginval-PulpEffect-VST3 PROPERTIES LABELS "validation;vst3" TIMEOUT 30)
+    endif()
+endif()
