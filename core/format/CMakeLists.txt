@@ -8,11 +8,7 @@ target_include_directories(pulp-format
 )
 
 target_sources(pulp-format PRIVATE
-    src/format.cpp
-)
-
-file(WRITE ${CMAKE_CURRENT_SOURCE_DIR}/src/format.cpp
-    "// pulp-format: processor interface and format adapters\n#include <pulp/format/format.hpp>\nnamespace pulp::format {}\n"
+    src/registry.cpp
 )
 
 target_link_libraries(pulp-format PUBLIC pulp::audio pulp::midi pulp::state)

@@ -63,6 +63,7 @@ endif()
 # Audio Unit component bundle (macOS)
 if(APPLE)
     add_library(PulpGain_AU MODULE
+        au_register.cpp
         ${CMAKE_SOURCE_DIR}/core/format/src/au_adapter.mm
         ${CMAKE_SOURCE_DIR}/core/format/src/au_entry.mm
     )
