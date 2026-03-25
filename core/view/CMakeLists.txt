@@ -13,6 +13,7 @@ target_sources(pulp-view PRIVATE
     src/view.cpp
     src/widgets.cpp
     src/widget_bridge.cpp
+    src/hot_reload.cpp
 )
 
 # CHOC headers (JS engine, utilities)
@@ -21,3 +22,8 @@ target_include_directories(pulp-view PUBLIC
 )
 
 target_link_libraries(pulp-view PUBLIC pulp::canvas pulp::events pulp::state)
+
+# Platform frameworks for CHOC FileWatcher
+if(APPLE)
+    target_link_libraries(pulp-view PRIVATE "-framework CoreServices")
+endif()

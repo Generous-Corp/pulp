@@ -84,6 +84,11 @@ add_executable(pulp-test-widgets test_widgets.cpp)
 target_link_libraries(pulp-test-widgets PRIVATE pulp::view Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-widgets)
 
+# Hot-reload tests
+add_executable(pulp-test-hot-reload test_hot_reload.cpp)
+target_link_libraries(pulp-test-hot-reload PRIVATE pulp::view Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-hot-reload)
+
 # Widget bridge tests
 add_executable(pulp-test-widget-bridge test_widget_bridge.cpp)
 target_link_libraries(pulp-test-widget-bridge PRIVATE pulp::view Catch2::Catch2WithMain)
