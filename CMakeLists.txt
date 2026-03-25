@@ -180,6 +180,9 @@ endif()
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake")
 include(PulpUtils)
 
+# ── CLI Tool ───────────────────────────────────────────────────────────────
+add_subdirectory(tools/cli)
+
 # ── Examples ────────────────────────────────────────────────────────────────
 if(PULP_BUILD_EXAMPLES)
     add_subdirectory(examples)
