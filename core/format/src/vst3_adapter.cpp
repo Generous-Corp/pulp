@@ -31,6 +31,16 @@ tresult PLUGIN_API PulpVst3Processor::initialize(FUnknown* context) {
     processor_->set_state_store(&store_);
     processor_->define_parameters(store_);
 
+    // Wire gesture callbacks to VST3 host
+    store_.set_gesture_callbacks(
+        [this](state::ParamID id) {
+            beginEdit(static_cast<ParamID>(id));
+        },
+        [this](state::ParamID id) {
+            endEdit(static_cast<ParamID>(id));
+        }
+    );
+
     // Add audio buses based on processor descriptor
     if (desc.default_input_channels > 0) {
         addAudioInput(STR16("Audio In"),
