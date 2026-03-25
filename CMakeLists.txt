@@ -188,6 +188,7 @@ if(PULP_ENABLE_GPU)
 endif()
 
 add_subdirectory(inspect)
+add_subdirectory(ship)
 
 # ── Testing ─────────────────────────────────────────────────────────────────
 if(PULP_BUILD_TESTS)

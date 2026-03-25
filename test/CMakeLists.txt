@@ -5,6 +5,11 @@ add_executable(pulp-test-build-check test_build_check.cpp)
 target_link_libraries(pulp-test-build-check PRIVATE pulp::platform pulp::runtime)
 add_test(NAME build-check COMMAND pulp-test-build-check)
 
+# Codesign tests
+add_executable(pulp-test-codesign test_codesign.cpp)
+target_link_libraries(pulp-test-codesign PRIVATE pulp::ship Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-codesign)
+
 # Drag-and-drop tests
 add_executable(pulp-test-dnd test_drag_drop.cpp)
 target_link_libraries(pulp-test-dnd PRIVATE pulp::view Catch2::Catch2WithMain)
