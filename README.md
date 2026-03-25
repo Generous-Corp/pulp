@@ -44,6 +44,16 @@ PULP_VST3_PLUGIN(kUID, "MyGain", Vst::PlugType::kFx, "Vendor", "1.0.0", "url", c
 PULP_AU_PLUGIN(MyGainAU, create_my_gain)
 ```
 
+Add to CMakeLists.txt:
+
+```cmake
+pulp_add_plugin(MyGain
+    FORMATS VST3 AU CLAP Standalone
+    PLUGIN_NAME "MyGain"  BUNDLE_ID "com.example.mygain"
+    MANUFACTURER "Example"  PLUGIN_CODE "MyGn"  MANUFACTURER_CODE "Exmp"
+)
+```
+
 Build all formats:
 
 ```bash
