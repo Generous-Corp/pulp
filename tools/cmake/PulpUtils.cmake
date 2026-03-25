@@ -107,8 +107,15 @@ function(_pulp_add_vst3 target name bundle_id version manufacturer category)
             ${VST3_SDK_DIR}/public.sdk/source/main/linuxmain.cpp)
     endif()
 
+    # Find VST3 entry point (convention: vst3_entry.cpp in source dir)
+    set(vst3_entry "")
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/vst3_entry.cpp")
+        set(vst3_entry "${CMAKE_CURRENT_SOURCE_DIR}/vst3_entry.cpp")
+    endif()
+
     add_library(${target}_VST3 MODULE
         $<TARGET_OBJECTS:${target}_Core>
+        ${vst3_entry}
         ${vst3_platform_src}
         ${VST3_SDK_DIR}/public.sdk/source/main/pluginfactory.cpp
         ${VST3_SDK_DIR}/public.sdk/source/main/moduleinit.cpp
@@ -143,8 +150,16 @@ endfunction()
 
 # ── Internal: CLAP target ───────────────────────────────────────────────
 function(_pulp_add_clap target name bundle_id version manufacturer category)
+    # Find CLAP entry point (convention: clap_entry.cpp in source dir)
+    set(clap_entry "")
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/clap_entry.cpp")
+        set(clap_entry "${CMAKE_CURRENT_SOURCE_DIR}/clap_entry.cpp")
+    endif()
+
     add_library(${target}_CLAP MODULE
         $<TARGET_OBJECTS:${target}_Core>
+        ${clap_entry}
+        ${CMAKE_SOURCE_DIR}/core/format/src/clap_adapter.cpp
     )
     target_link_libraries(${target}_CLAP PRIVATE pulp::format clap)
     target_include_directories(${target}_CLAP PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -166,8 +181,15 @@ endfunction()
 
 # ── Internal: AU v2 target ──────────────────────────────────────────────
 function(_pulp_add_au target name bundle_id version manufacturer category plugin_code manufacturer_code)
+    # Find AU entry point (convention: au_v2_entry.cpp in source dir)
+    set(au_entry "")
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/au_v2_entry.cpp")
+        set(au_entry "${CMAKE_CURRENT_SOURCE_DIR}/au_v2_entry.cpp")
+    endif()
+
     add_library(${target}_AU MODULE
         $<TARGET_OBJECTS:${target}_Core>
+        ${au_entry}
     )
     target_link_libraries(${target}_AU PRIVATE
         pulp::format
@@ -194,8 +216,16 @@ endfunction()
 
 # ── Internal: Standalone target ─────────────────────────────────────────
 function(_pulp_add_standalone target name)
+    # Find standalone entry (convention: main.cpp in source dir)
+    set(standalone_entry "")
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/main.cpp")
+        set(standalone_entry "${CMAKE_CURRENT_SOURCE_DIR}/main.cpp")
+    endif()
+
     add_executable(${target}_Standalone
         $<TARGET_OBJECTS:${target}_Core>
+        ${standalone_entry}
+        ${CMAKE_SOURCE_DIR}/core/format/src/standalone.cpp
     )
     target_link_libraries(${target}_Standalone PRIVATE pulp::format pulp::audio pulp::midi)
     target_include_directories(${target}_Standalone PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
