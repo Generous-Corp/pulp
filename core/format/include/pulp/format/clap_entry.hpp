@@ -61,7 +61,13 @@ inline void init_descriptor() {
 }
 
 // ── Audio ports extension ──────────────────────────────────────────────
-inline uint32_t audio_ports_count(const clap_plugin_t*, bool) { return 1; }
+inline uint32_t audio_ports_count(const clap_plugin_t* plugin, bool is_input) {
+    auto* self = static_cast<clap_adapter::PulpClapPlugin*>(plugin->plugin_data);
+    auto desc = self->processor ? self->processor->descriptor() : g_desc;
+    if (is_input)
+        return desc.default_input_channels > 0 ? 1 : 0;
+    return desc.default_output_channels > 0 ? 1 : 0;
+}
 
 inline bool audio_ports_get(const clap_plugin_t* plugin, uint32_t index, bool is_input,
                             clap_audio_port_info_t* info) {
@@ -69,11 +75,14 @@ inline bool audio_ports_get(const clap_plugin_t* plugin, uint32_t index, bool is
     auto* self = static_cast<clap_adapter::PulpClapPlugin*>(plugin->plugin_data);
     auto desc = self->processor ? self->processor->descriptor() : g_desc;
 
+    int channels = is_input ? desc.default_input_channels : desc.default_output_channels;
+    if (channels == 0) return false;
+
     info->id = is_input ? 0 : 1;
     strncpy(info->name, is_input ? "Audio In" : "Audio Out", CLAP_NAME_SIZE);
-    info->channel_count = is_input ? desc.default_input_channels : desc.default_output_channels;
+    info->channel_count = channels;
     info->flags = CLAP_AUDIO_PORT_IS_MAIN;
-    info->port_type = info->channel_count == 1 ? CLAP_PORT_MONO : CLAP_PORT_STEREO;
+    info->port_type = channels == 1 ? CLAP_PORT_MONO : CLAP_PORT_STEREO;
     info->in_place_pair = is_input ? 1 : 0;
     return true;
 }
