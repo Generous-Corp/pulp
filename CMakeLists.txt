@@ -82,6 +82,7 @@ if(EXISTS "${VST3_SDK_DIR}/pluginterfaces")
         "${VST3_SDK_DIR}/public.sdk/source/vst/vstparameters.cpp"
         "${VST3_SDK_DIR}/public.sdk/source/vst/vstsinglecomponenteffect.cpp"
         "${VST3_SDK_DIR}/public.sdk/source/common/pluginfactory.cpp"
+        "${VST3_SDK_DIR}/public.sdk/source/common/pluginview.cpp"
         "${VST3_SDK_DIR}/public.sdk/source/common/commoniids.cpp"
     )
 

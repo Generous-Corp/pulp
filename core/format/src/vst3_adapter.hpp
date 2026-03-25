@@ -2,9 +2,8 @@
 
 // VST3 Adapter for Pulp
 // Implements Steinberg's VST3 interfaces by wrapping pulp::format::Processor
+// Uses SingleComponentEffect pattern (combined processor + controller)
 // Built from VST3 SDK headers (MIT license), not from any existing adapter
-
-#include <pulp/format/processor.hpp>
 
 // VST3 SDK requires one of these to be defined
 #ifndef NDEBUG
@@ -17,24 +16,20 @@
     #endif
 #endif
 
-#include <pluginterfaces/vst/ivstaudioprocessor.h>
-#include <pluginterfaces/vst/ivsteditcontroller.h>
-#include <pluginterfaces/vst/ivstcomponent.h>
+// Must come first per VST3 SDK requirements
+#include <public.sdk/source/vst/vstsinglecomponenteffect.h>
+
 #include <pluginterfaces/vst/ivstparameterchanges.h>
 #include <pluginterfaces/vst/ivstevents.h>
 #include <pluginterfaces/base/ibstream.h>
-#include <pluginterfaces/base/funknown.h>
-#include <public.sdk/source/vst/vstaudioeffect.h>
+
+#include <pulp/format/processor.hpp>
 
 namespace pulp::format::vst3 {
 
-// Forward declarations
-class PulpVst3Processor;
-class PulpVst3Controller;
-
-// The VST3 audio processor component
+// The VST3 combined processor + controller
 // Wraps a pulp::format::Processor for the VST3 host
-class PulpVst3Processor : public Steinberg::Vst::AudioEffect {
+class PulpVst3Processor : public Steinberg::Vst::SingleComponentEffect {
 public:
     PulpVst3Processor(ProcessorFactory factory);
 

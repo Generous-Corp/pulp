@@ -1,9 +1,12 @@
 // VST3 Adapter implementation
-// Implements the VST3 hosting contract by wrapping a Pulp Processor
+// Uses SingleComponentEffect pattern: combined processor + controller
+// Parameters are registered with the VST3 parameter system and synced
+// with the Pulp StateStore during processing
 
 #include "vst3_adapter.hpp"
 #include <pulp/runtime/log.hpp>
 #include <pluginterfaces/vst/ivstparameterchanges.h>
+#include <pluginterfaces/base/ustring.h>
 #include <cstring>
 
 namespace pulp::format::vst3 {
@@ -14,11 +17,10 @@ using namespace Steinberg::Vst;
 PulpVst3Processor::PulpVst3Processor(ProcessorFactory factory)
     : factory_(factory)
 {
-    setControllerClass(FUID()); // Will be set properly in the factory
 }
 
 tresult PLUGIN_API PulpVst3Processor::initialize(FUnknown* context) {
-    auto result = AudioEffect::initialize(context);
+    auto result = SingleComponentEffect::initialize(context);
     if (result != kResultOk) return result;
 
     // Create the Pulp processor
@@ -47,13 +49,46 @@ tresult PLUGIN_API PulpVst3Processor::initialize(FUnknown* context) {
         addEventOutput(STR16("MIDI Out"), 1);
     }
 
-    runtime::log_info("VST3: initialized '{}'", desc.name);
+    // Register Pulp parameters with the VST3 parameter system
+    for (const auto& param : store_.all_params()) {
+        int32 flags = ParameterInfo::kCanAutomate;
+
+        // Boolean parameters (step == 1, range 0-1) get step count 1
+        int32 step_count = 0;
+        if (param.range.step >= 1.0f && param.range.min == 0.0f && param.range.max == 1.0f) {
+            step_count = 1;
+            // If the parameter is named "Bypass", mark it as the bypass parameter
+            if (param.name == "Bypass") {
+                flags |= ParameterInfo::kIsBypass;
+            }
+        }
+
+        // Convert param name to UTF-16 for VST3
+        String128 title;
+        UString(title, 128).fromAscii(param.name.c_str());
+
+        String128 units;
+        UString(units, 128).fromAscii(param.unit.c_str());
+
+        float default_normalized = param.range.normalize(param.range.default_value);
+
+        parameters.addParameter(
+            title,
+            units,
+            step_count,
+            static_cast<ParamValue>(default_normalized),
+            flags,
+            static_cast<ParamID>(param.id));
+    }
+
+    runtime::log_info("VST3: initialized '{}' with {} parameters",
+                      desc.name, store_.param_count());
     return kResultOk;
 }
 
 tresult PLUGIN_API PulpVst3Processor::terminate() {
     processor_.reset();
-    return AudioEffect::terminate();
+    return SingleComponentEffect::terminate();
 }
 
 tresult PLUGIN_API PulpVst3Processor::setBusArrangements(
@@ -62,7 +97,7 @@ tresult PLUGIN_API PulpVst3Processor::setBusArrangements(
 {
     // Accept stereo or mono
     if (numIns >= 1 && numOuts >= 1) {
-        return AudioEffect::setBusArrangements(inputs, numIns, outputs, numOuts);
+        return SingleComponentEffect::setBusArrangements(inputs, numIns, outputs, numOuts);
     }
     return kResultFalse;
 }
@@ -73,25 +108,24 @@ tresult PLUGIN_API PulpVst3Processor::setupProcessing(ProcessSetup& setup) {
     PrepareContext ctx;
     ctx.sample_rate = setup.sampleRate;
     ctx.max_buffer_size = setup.maxSamplesPerBlock;
-    // Channel count determined by bus arrangement
     ctx.input_channels = 2;  // TODO: query from bus arrangement
     ctx.output_channels = 2;
 
     processor_->prepare(ctx);
-    return AudioEffect::setupProcessing(setup);
+    return SingleComponentEffect::setupProcessing(setup);
 }
 
 tresult PLUGIN_API PulpVst3Processor::setActive(TBool state) {
     if (!state && processor_) {
         processor_->release();
     }
-    return AudioEffect::setActive(state);
+    return SingleComponentEffect::setActive(state);
 }
 
 tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
     if (!processor_) return kInternalError;
 
-    // Read parameter changes from host
+    // Read parameter changes from host and sync to Pulp StateStore
     if (data.inputParameterChanges) {
         int32 count = data.inputParameterChanges->getParameterCount();
         for (int32 i = 0; i < count; ++i) {
@@ -103,7 +137,7 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
                     ParamValue value;
                     int32 offset;
                     queue->getPoint(point_count - 1, offset, value);
-                    // VST3 uses normalized 0-1 values
+                    // VST3 uses normalized 0-1 values — sync to Pulp store
                     store_.set_normalized(static_cast<state::ParamID>(id),
                                          static_cast<float>(value));
                 }
@@ -221,7 +255,15 @@ tresult PLUGIN_API PulpVst3Processor::setState(IBStream* stream) {
     while (stream->read(buf, sizeof(buf), &read_count) == kResultOk && read_count > 0) {
         data.insert(data.end(), buf, buf + read_count);
     }
-    return store_.deserialize(data) ? kResultOk : kResultFalse;
+    if (!store_.deserialize(data)) return kResultFalse;
+
+    // Sync restored values back to VST3 parameter system
+    for (const auto& param : store_.all_params()) {
+        float normalized = store_.get_normalized(param.id);
+        setParamNormalized(static_cast<ParamID>(param.id),
+                           static_cast<ParamValue>(normalized));
+    }
+    return kResultOk;
 }
 
 } // namespace pulp::format::vst3
