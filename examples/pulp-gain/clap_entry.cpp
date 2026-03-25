@@ -78,10 +78,97 @@ static const clap_plugin_state_t state_ext = {
     .load = state_load,
 };
 
+// ── Params extension ───────────────────────────────────────────────────────
+
+static uint32_t params_count(const clap_plugin_t* plugin) {
+    auto* self = static_cast<pulp::format::clap_adapter::PulpClapPlugin*>(plugin->plugin_data);
+    return static_cast<uint32_t>(self->store.param_count());
+}
+
+static bool params_get_info(const clap_plugin_t* plugin, uint32_t index,
+                            clap_param_info_t* info) {
+    auto* self = static_cast<pulp::format::clap_adapter::PulpClapPlugin*>(plugin->plugin_data);
+    auto params = self->store.all_params();
+    if (index >= params.size()) return false;
+
+    auto& p = params[index];
+    memset(info, 0, sizeof(*info));
+    info->id = p.id;
+    strncpy(info->name, p.name.c_str(), CLAP_NAME_SIZE - 1);
+    strncpy(info->module, "", CLAP_PATH_SIZE - 1);
+
+    info->min_value = p.range.min;
+    info->max_value = p.range.max;
+    info->default_value = p.range.default_value;
+
+    info->flags = CLAP_PARAM_IS_AUTOMATABLE;
+
+    if (p.range.step >= 1.0f && (p.range.max - p.range.min) < 10.0f) {
+        info->flags |= CLAP_PARAM_IS_STEPPED;
+    }
+
+    return true;
+}
+
+static bool params_get_value(const clap_plugin_t* plugin, clap_id param_id,
+                             double* value) {
+    auto* self = static_cast<pulp::format::clap_adapter::PulpClapPlugin*>(plugin->plugin_data);
+    *value = self->store.get_value(static_cast<pulp::state::ParamID>(param_id));
+    return true;
+}
+
+static bool params_value_to_text(const clap_plugin_t* plugin, clap_id param_id,
+                                 double value, char* display, uint32_t size) {
+    auto* self = static_cast<pulp::format::clap_adapter::PulpClapPlugin*>(plugin->plugin_data);
+    auto* info = self->store.info(static_cast<pulp::state::ParamID>(param_id));
+    if (!info) return false;
+
+    if (!info->unit.empty()) {
+        snprintf(display, size, "%.2f %s", value, info->unit.c_str());
+    } else {
+        snprintf(display, size, "%.2f", value);
+    }
+    return true;
+}
+
+static bool params_text_to_value(const clap_plugin_t*, clap_id,
+                                 const char* text, double* value) {
+    char* end;
+    *value = strtod(text, &end);
+    return end != text;
+}
+
+static void params_flush(const clap_plugin_t* plugin,
+                         const clap_input_events_t* in,
+                         const clap_output_events_t*) {
+    auto* self = static_cast<pulp::format::clap_adapter::PulpClapPlugin*>(plugin->plugin_data);
+    if (!in) return;
+    uint32_t count = in->size(in);
+    for (uint32_t i = 0; i < count; ++i) {
+        auto* hdr = in->get(in, i);
+        if (hdr->type == CLAP_EVENT_PARAM_VALUE) {
+            auto* ev = reinterpret_cast<const clap_event_param_value_t*>(hdr);
+            self->store.set_value(
+                static_cast<pulp::state::ParamID>(ev->param_id),
+                static_cast<float>(ev->value));
+        }
+    }
+}
+
+static const clap_plugin_params_t params_ext = {
+    .count = params_count,
+    .get_info = params_get_info,
+    .get_value = params_get_value,
+    .value_to_text = params_value_to_text,
+    .text_to_value = params_text_to_value,
+    .flush = params_flush,
+};
+
 // ── Extension dispatch ─────────────────────────────────────────────────────
 
 static const void* get_extension(const clap_plugin_t*, const char* id) {
     if (strcmp(id, CLAP_EXT_AUDIO_PORTS) == 0) return &audio_ports_ext;
+    if (strcmp(id, CLAP_EXT_PARAMS) == 0) return &params_ext;
     if (strcmp(id, CLAP_EXT_STATE) == 0) return &state_ext;
     return nullptr;
 }
