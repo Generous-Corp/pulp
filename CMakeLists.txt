@@ -68,6 +68,7 @@ if(EXISTS "${VST3_SDK_DIR}/pluginterfaces")
     # Build the minimal VST3 SDK base library
     file(GLOB_RECURSE VST3_BASE_SOURCES
         "${VST3_SDK_DIR}/base/source/*.cpp"
+        "${VST3_SDK_DIR}/base/thread/source/*.cpp"
     )
     file(GLOB_RECURSE VST3_PLUGIF_SOURCES
         "${VST3_SDK_DIR}/pluginterfaces/base/*.cpp"
