@@ -66,6 +66,22 @@ All CI workflows (build, test, validate, sanitizers, docs-check) trigger on both
 
 This means you can update docs on `develop` as you build features, and they land on `main` cleanly when the branch merges.
 
+## README Accuracy
+
+The CI check also validates that README.md's claimed test count matches the actual `ctest` count in the build directory. This catches drift like "53 tests" persisting while the repo has 270.
+
+## Docs Site
+
+The docs site at `generouscorp.com/pulp/` is generated from the same `docs/` files:
+
+- **Build locally**: `pulp docs build-site` or `python3 tools/build-docs.py`
+- **Deploy**: the `docs-deploy.yml` GitHub Actions workflow builds and deploys on push to `main`
+- **Source**: GitHub Pages configured with "GitHub Actions" as the source
+- **Base URL**: `/pulp/` (served under the user-level custom domain)
+- **Branch badge**: the site header shows which branch the docs were built from
+
+The site generator (`tools/build-docs.py`) is stdlib-only Python — no pip dependencies. It reads `docs-index.yaml` for navigation and converts Markdown to HTML.
+
 ## Adding a New Doc
 
 1. Create the `.md` file in the appropriate `docs/` subdirectory
