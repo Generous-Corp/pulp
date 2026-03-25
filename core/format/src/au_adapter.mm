@@ -218,10 +218,10 @@ struct AUBridge {
             if (event->head.eventType == AURenderEventMIDI) {
                 const AUMIDIEvent& m = event->MIDI;
                 pulp::midi::MidiEvent me;
-                me.data[0] = m.data[0];
-                me.data[1] = m.length > 1 ? m.data[1] : 0;
-                me.data[2] = m.length > 2 ? m.data[2] : 0;
-                me.size = static_cast<uint8_t>(m.length);
+                me.message = choc::midi::ShortMessage(
+                    m.data[0],
+                    m.length > 1 ? m.data[1] : uint8_t(0),
+                    m.length > 2 ? m.data[2] : uint8_t(0));
                 me.sample_offset = static_cast<int32_t>(event->head.eventSampleTime);
                 midi_in.add(me);
             }

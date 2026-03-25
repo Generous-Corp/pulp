@@ -11,7 +11,7 @@ TEST_CASE("MidiEvent factory methods", "[midi][message]") {
         REQUIRE(evt.channel() == 0);
         REQUIRE(evt.note() == 60);
         REQUIRE(evt.velocity() == 100);
-        REQUIRE(evt.size == 3);
+        REQUIRE(evt.size() == 3);
     }
 
     SECTION("Note off") {

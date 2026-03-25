@@ -12,3 +12,8 @@ target_sources(pulp-state PRIVATE
 )
 
 target_link_libraries(pulp-state PUBLIC pulp::runtime)
+
+# CHOC headers (used by store.cpp for endianness utilities)
+target_include_directories(pulp-state PRIVATE
+    $<BUILD_INTERFACE:${choc_SOURCE_DIR}>
+)

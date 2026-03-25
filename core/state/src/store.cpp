@@ -1,6 +1,6 @@
 #include <pulp/state/store.hpp>
 #include <pulp/runtime/assert.hpp>
-#include <cstring>
+#include <choc/memory/choc_Endianness.h>
 
 namespace pulp::state {
 
@@ -108,16 +108,15 @@ std::vector<uint8_t> StateStore::serialize() const {
     out.push_back('P'); out.push_back('U'); out.push_back('L'); out.push_back('P');
 
     auto write_u32 = [&](uint32_t v) {
-        out.push_back(static_cast<uint8_t>(v));
-        out.push_back(static_cast<uint8_t>(v >> 8));
-        out.push_back(static_cast<uint8_t>(v >> 16));
-        out.push_back(static_cast<uint8_t>(v >> 24));
+        uint8_t buf[4];
+        choc::memory::writeLittleEndian(buf, v);
+        out.insert(out.end(), buf, buf + 4);
     };
 
     auto write_float = [&](float v) {
-        uint32_t bits;
-        std::memcpy(&bits, &v, sizeof(bits));
-        write_u32(bits);
+        uint8_t buf[4];
+        choc::memory::writeLittleEndian(buf, v);
+        out.insert(out.end(), buf, buf + 4);
     };
 
     write_u32(state_version_);
@@ -143,35 +142,21 @@ bool StateStore::deserialize(std::span<const uint8_t> data) {
     if (data[0] != 'P' || data[1] != 'U' || data[2] != 'L' || data[3] != 'P')
         return false;
 
-    auto read_u32 = [&](std::size_t offset) -> uint32_t {
-        return static_cast<uint32_t>(data[offset])
-             | (static_cast<uint32_t>(data[offset + 1]) << 8)
-             | (static_cast<uint32_t>(data[offset + 2]) << 16)
-             | (static_cast<uint32_t>(data[offset + 3]) << 24);
-    };
-
-    auto read_float = [&](std::size_t offset) -> float {
-        uint32_t bits = read_u32(offset);
-        float v;
-        std::memcpy(&v, &bits, sizeof(v));
-        return v;
-    };
-
     // Verify CRC
     auto payload_size = data.size() - 4;
-    auto stored_crc = read_u32(payload_size);
+    auto stored_crc = choc::memory::readLittleEndian<uint32_t>(data.data() + payload_size);
     auto computed_crc = crc32_simple(data.data(), payload_size);
     if (stored_crc != computed_crc) return false;
 
     // Read header
-    // uint32_t version = read_u32(4); // Available for future migration logic
-    uint32_t count = read_u32(8);
+    // uint32_t version = choc::memory::readLittleEndian<uint32_t>(data.data() + 4);
+    uint32_t count = choc::memory::readLittleEndian<uint32_t>(data.data() + 8);
 
     // Read parameters
     std::size_t offset = 12;
     for (uint32_t i = 0; i < count && offset + 8 <= payload_size; ++i) {
-        ParamID id = read_u32(offset);
-        float value = read_float(offset + 4);
+        ParamID id = choc::memory::readLittleEndian<uint32_t>(data.data() + offset);
+        float value = choc::memory::readLittleEndian<float>(data.data() + offset + 4);
         offset += 8;
 
         // Only set if we know this parameter (forward compatibility)

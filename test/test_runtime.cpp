@@ -34,7 +34,7 @@ TEST_CASE("SpscQueue basic operations", "[runtime][spsc]") {
     }
 
     SECTION("Full queue rejects push") {
-        for (int i = 0; i < 15; ++i) {  // capacity 16, usable is 15
+        for (int i = 0; i < 16; ++i) {  // capacity 16, all 16 slots usable
             REQUIRE(q.try_push(i));
         }
         REQUIRE_FALSE(q.try_push(99));

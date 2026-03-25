@@ -1,75 +1,53 @@
 #pragma once
 
-#include <atomic>
-#include <array>
 #include <cstddef>
 #include <optional>
+#include <choc/containers/choc_SingleReaderSingleWriterFIFO.h>
 
 namespace pulp::runtime {
 
 // Single-Producer Single-Consumer lock-free queue
 // Designed for audio thread → UI thread communication
-// Capacity must be a power of two
+// Wraps choc::fifo::SingleReaderSingleWriterFIFO
 template<typename T, std::size_t Capacity>
 class SpscQueue {
-    static_assert((Capacity & (Capacity - 1)) == 0, "Capacity must be a power of two");
     static_assert(Capacity > 0, "Capacity must be > 0");
 
 public:
-    SpscQueue() = default;
+    SpscQueue() {
+        fifo_.reset(Capacity);
+    }
 
     // Producer: push an item. Returns false if full.
     bool try_push(const T& item) {
-        const auto head = head_.load(std::memory_order_relaxed);
-        const auto next = (head + 1) & mask_;
-        if (next == tail_.load(std::memory_order_acquire)) {
-            return false; // full
-        }
-        buffer_[head] = item;
-        head_.store(next, std::memory_order_release);
-        return true;
+        return fifo_.push(item);
     }
 
     bool try_push(T&& item) {
-        const auto head = head_.load(std::memory_order_relaxed);
-        const auto next = (head + 1) & mask_;
-        if (next == tail_.load(std::memory_order_acquire)) {
-            return false;
-        }
-        buffer_[head] = std::move(item);
-        head_.store(next, std::memory_order_release);
-        return true;
+        return fifo_.push(std::move(item));
     }
 
     // Consumer: pop an item. Returns nullopt if empty.
     std::optional<T> try_pop() {
-        const auto tail = tail_.load(std::memory_order_relaxed);
-        if (tail == head_.load(std::memory_order_acquire)) {
-            return std::nullopt; // empty
+        T item{};
+        if (fifo_.pop(item)) {
+            return item;
         }
-        auto item = std::move(buffer_[tail]);
-        tail_.store((tail + 1) & mask_, std::memory_order_release);
-        return item;
+        return std::nullopt;
     }
 
     bool empty() const {
-        return head_.load(std::memory_order_acquire) ==
-               tail_.load(std::memory_order_acquire);
+        return fifo_.getUsedSlots() == 0;
     }
 
     std::size_t size_approx() const {
-        const auto head = head_.load(std::memory_order_acquire);
-        const auto tail = tail_.load(std::memory_order_acquire);
-        return (head - tail) & mask_;
+        return fifo_.getUsedSlots();
     }
 
     static constexpr std::size_t capacity() { return Capacity; }
 
 private:
-    static constexpr std::size_t mask_ = Capacity - 1;
-    std::array<T, Capacity> buffer_{};
-    alignas(64) std::atomic<std::size_t> head_{0};
-    alignas(64) std::atomic<std::size_t> tail_{0};
+    choc::fifo::SingleReaderSingleWriterFIFO<T> fifo_;
 };
 
 } // namespace pulp::runtime

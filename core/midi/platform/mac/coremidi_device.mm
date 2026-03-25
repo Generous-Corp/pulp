@@ -29,10 +29,10 @@ public:
 
                         if (type == 0x02) { // MIDI 1.0 channel voice message
                             MidiEvent evt;
-                            evt.data[0] = (word >> 16) & 0xFF;
-                            evt.data[1] = (word >> 8) & 0xFF;
-                            evt.data[2] = word & 0xFF;
-                            evt.size = 3;
+                            evt.message = choc::midi::ShortMessage(
+                                static_cast<uint8_t>((word >> 16) & 0xFF),
+                                static_cast<uint8_t>((word >> 8) & 0xFF),
+                                static_cast<uint8_t>(word & 0xFF));
                             evt.timestamp = static_cast<double>(packet->timeStamp) / 1e9;
                             if (this->callback_) this->callback_(evt);
                         }
@@ -134,10 +134,11 @@ public:
         if (!is_open_ || !dest_) return;
 
         // Build a MIDI 1.0 UMP word
+        const auto* d = event.data();
         uint32_t word = 0x20000000; // Type 2: MIDI 1.0 channel voice
-        word |= (static_cast<uint32_t>(event.data[0]) << 16);
-        word |= (static_cast<uint32_t>(event.data[1]) << 8);
-        word |= static_cast<uint32_t>(event.data[2]);
+        word |= (static_cast<uint32_t>(d[0]) << 16);
+        word |= (static_cast<uint32_t>(d[1]) << 8);
+        word |= static_cast<uint32_t>(d[2]);
 
         MIDIEventList list;
         MIDIEventPacket* packet = MIDIEventListInit(&list, kMIDIProtocol_1_0);

@@ -9,6 +9,11 @@ target_include_directories(pulp-midi
 
 target_link_libraries(pulp-midi PUBLIC pulp::runtime)
 
+# CHOC headers (used by MidiEvent via choc::midi)
+target_include_directories(pulp-midi PUBLIC
+    $<BUILD_INTERFACE:${choc_SOURCE_DIR}>
+)
+
 if(APPLE AND NOT IOS)
     target_sources(pulp-midi PRIVATE
         platform/mac/coremidi_device.mm
