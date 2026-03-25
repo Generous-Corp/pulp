@@ -177,4 +177,34 @@ private:
     std::vector<float> samples_;
 };
 
+// ── SpectrumView ─────────────────────────────────────────────────────────────
+// Displays frequency spectrum (magnitude data from FFT)
+
+class SpectrumView : public View {
+public:
+    enum class Style { bars, line, filled };
+
+    SpectrumView() = default;
+
+    // Set spectrum magnitudes (dB, typically -100 to 0)
+    void set_spectrum(const float* magnitudes_db, size_t bin_count);
+    void set_spectrum(std::vector<float> magnitudes_db);
+
+    size_t bin_count() const { return bins_.size(); }
+
+    void set_style(Style s) { style_ = s; }
+    Style style() const { return style_; }
+
+    // dB range for display
+    void set_range(float min_db, float max_db) { min_db_ = min_db; max_db_ = max_db; }
+
+    void paint(canvas::Canvas& canvas) override;
+
+private:
+    std::vector<float> bins_;
+    Style style_ = Style::filled;
+    float min_db_ = -80.0f;
+    float max_db_ = 0.0f;
+};
+
 } // namespace pulp::view

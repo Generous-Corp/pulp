@@ -242,6 +242,54 @@ TEST_CASE("WaveformView empty renders background only", "[view][widget]") {
     REQUIRE(canvas.count(DrawCommand::Type::stroke_line) == 0); // No waveform
 }
 
+TEST_CASE("SpectrumView renders bars", "[view][widget]") {
+    SpectrumView spectrum;
+    spectrum.set_bounds({0, 0, 300, 100});
+    spectrum.set_style(SpectrumView::Style::bars);
+
+    std::vector<float> bins(32);
+    for (size_t i = 0; i < bins.size(); ++i) {
+        bins[i] = -80.0f + 80.0f * (1.0f - static_cast<float>(i) / bins.size());
+    }
+    spectrum.set_spectrum(std::move(bins));
+
+    REQUIRE(spectrum.bin_count() == 32);
+
+    RecordingCanvas canvas;
+    spectrum.paint(canvas);
+
+    // Background + 32 bars + 3 grid lines
+    REQUIRE(canvas.count(DrawCommand::Type::fill_rounded_rect) == 1);
+    REQUIRE(canvas.count(DrawCommand::Type::fill_rect) >= 30);
+}
+
+TEST_CASE("SpectrumView renders filled line", "[view][widget]") {
+    SpectrumView spectrum;
+    spectrum.set_bounds({0, 0, 300, 100});
+    spectrum.set_style(SpectrumView::Style::filled);
+
+    std::vector<float> bins(64, -40.0f);
+    spectrum.set_spectrum(std::move(bins));
+
+    RecordingCanvas canvas;
+    spectrum.paint(canvas);
+
+    // Line segments + fill rects + grid + background
+    REQUIRE(canvas.count(DrawCommand::Type::stroke_line) >= 60);
+    REQUIRE(canvas.count(DrawCommand::Type::fill_rect) >= 60);
+}
+
+TEST_CASE("SpectrumView empty renders background", "[view][widget]") {
+    SpectrumView spectrum;
+    spectrum.set_bounds({0, 0, 300, 100});
+
+    RecordingCanvas canvas;
+    spectrum.paint(canvas);
+
+    REQUIRE(canvas.count(DrawCommand::Type::fill_rounded_rect) == 1);
+    REQUIRE(canvas.count(DrawCommand::Type::fill_rect) == 0);
+}
+
 TEST_CASE("View paint_all paints children", "[view][widget]") {
     View root;
     root.set_bounds({0, 0, 300, 200});

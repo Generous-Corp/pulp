@@ -343,4 +343,86 @@ void WaveformView::paint(canvas::Canvas& canvas) {
     }
 }
 
+// ── SpectrumView ─────────────────────────────────────────────────────────────
+
+void SpectrumView::set_spectrum(const float* magnitudes_db, size_t bin_count) {
+    bins_.assign(magnitudes_db, magnitudes_db + bin_count);
+}
+
+void SpectrumView::set_spectrum(std::vector<float> magnitudes_db) {
+    bins_ = std::move(magnitudes_db);
+}
+
+void SpectrumView::paint(canvas::Canvas& canvas) {
+    auto b = local_bounds();
+
+    // Background
+    auto bg = resolve_color("bg.surface", canvas::Color::rgba(25, 25, 35));
+    canvas.set_fill_color(bg);
+    canvas.fill_rounded_rect(0, 0, b.width, b.height, 2.0f);
+
+    if (bins_.empty()) return;
+
+    float db_range = max_db_ - min_db_;
+    if (db_range <= 0) return;
+
+    auto spectrum_color = resolve_color("accent.primary", canvas::Color::rgba(100, 180, 250));
+
+    if (style_ == Style::bars) {
+        canvas.set_fill_color(spectrum_color);
+        float bar_width = b.width / static_cast<float>(bins_.size());
+
+        for (size_t i = 0; i < bins_.size(); ++i) {
+            float norm = std::clamp((bins_[i] - min_db_) / db_range, 0.0f, 1.0f);
+            float bar_h = norm * b.height;
+            float x = i * bar_width;
+            canvas.fill_rect(x, b.height - bar_h, std::max(bar_width - 1, 1.0f), bar_h);
+        }
+    } else {
+        // Line or filled style
+        canvas.set_stroke_color(spectrum_color);
+        canvas.set_line_width(1.5f);
+
+        float step = b.width / static_cast<float>(bins_.size() - 1);
+
+        // Draw as connected line segments
+        for (size_t i = 0; i + 1 < bins_.size(); ++i) {
+            float norm0 = std::clamp((bins_[i] - min_db_) / db_range, 0.0f, 1.0f);
+            float norm1 = std::clamp((bins_[i + 1] - min_db_) / db_range, 0.0f, 1.0f);
+            float x0 = i * step;
+            float x1 = (i + 1) * step;
+            float y0 = b.height - norm0 * b.height;
+            float y1 = b.height - norm1 * b.height;
+            canvas.stroke_line(x0, y0, x1, y1);
+        }
+
+        // For filled style, also fill below the line
+        if (style_ == Style::filled) {
+            auto fill = spectrum_color;
+            fill.a = 60;
+            canvas.set_fill_color(fill);
+
+            for (size_t i = 0; i < bins_.size(); ++i) {
+                float norm = std::clamp((bins_[i] - min_db_) / db_range, 0.0f, 1.0f);
+                float x = i * step;
+                float y = b.height - norm * b.height;
+                float bar_w = step > 1 ? step : 1;
+                canvas.fill_rect(x, y, bar_w, b.height - y);
+            }
+        }
+    }
+
+    // Frequency grid lines (approximate positions)
+    auto grid = resolve_color("control.border", canvas::Color::rgba(50, 50, 65));
+    canvas.set_stroke_color(grid);
+    canvas.set_line_width(0.5f);
+
+    // Horizontal dB grid lines at -20, -40, -60
+    for (float db : {-20.0f, -40.0f, -60.0f}) {
+        float norm = std::clamp((db - min_db_) / db_range, 0.0f, 1.0f);
+        float y = b.height - norm * b.height;
+        canvas.stroke_line(0, y, b.width, y);
+    }
+}
+
 } // namespace pulp::view
