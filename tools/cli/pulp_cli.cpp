@@ -189,6 +189,97 @@ static int cmd_clean([[maybe_unused]] const std::vector<std::string>& args) {
     return 0;
 }
 
+static int cmd_validate(const std::vector<std::string>& args) {
+    auto root = find_project_root();
+    if (root.empty()) {
+        std::cerr << "Error: not in a Pulp project directory\n";
+        return 1;
+    }
+
+    auto build_dir = root / "build";
+    if (!fs::exists(build_dir)) {
+        std::cerr << "Build directory not found. Run `pulp build` first.\n";
+        return 1;
+    }
+
+    int total = 0, passed = 0, failed = 0, skipped = 0;
+
+    // CLAP validation
+    auto clap_dir = build_dir / "CLAP";
+    if (fs::exists(clap_dir)) {
+        bool has_clap_validator = !exec_output("which clap-validator 2>/dev/null").empty();
+
+        for (auto& entry : fs::directory_iterator(clap_dir)) {
+            if (entry.path().extension() == ".clap") {
+                auto name = entry.path().stem().string();
+                ++total;
+
+                if (has_clap_validator) {
+                    std::cout << "CLAP: validating " << name << "... ";
+                    auto clap_path = entry.path().string();
+                    int rc = run("clap-validator validate \"" + clap_path + "\" 2>/dev/null");
+                    if (rc == 0) {
+                        std::cout << "PASSED\n";
+                        ++passed;
+                    } else {
+                        std::cout << "FAILED\n";
+                        ++failed;
+                    }
+                } else {
+                    // Fallback: dlopen test
+                    std::cout << "CLAP: " << name << " (dlopen check only, clap-validator not installed)... ";
+                    auto test_cmd = "ctest --test-dir " + build_dir.string() + " -R clap-dlopen-" + name + " --output-on-failure 2>/dev/null";
+                    int rc = run(test_cmd);
+                    if (rc == 0) {
+                        std::cout << "PASSED\n";
+                        ++passed;
+                    } else {
+                        std::cout << "FAILED\n";
+                        ++failed;
+                    }
+                }
+            }
+        }
+    }
+
+    // AU validation (macOS only)
+#ifdef __APPLE__
+    auto au_dir = build_dir / "AU";
+    if (fs::exists(au_dir)) {
+        for (auto& entry : fs::directory_iterator(au_dir)) {
+            if (entry.path().extension() == ".component") {
+                auto name = entry.path().stem().string();
+                ++total;
+                std::cout << "AU: " << name << " (auval check)... ";
+
+                // Check if auval exists
+                if (!exec_output("which auval 2>/dev/null").empty()) {
+                    // Run auval test from ctest
+                    auto test_cmd = "ctest --test-dir " + build_dir.string() + " -R auval-" + name + " --output-on-failure 2>/dev/null";
+                    int rc = run(test_cmd);
+                    if (rc == 0) {
+                        std::cout << "PASSED\n";
+                        ++passed;
+                    } else {
+                        std::cout << "FAILED\n";
+                        ++failed;
+                    }
+                } else {
+                    std::cout << "SKIPPED (auval not found)\n";
+                    ++skipped;
+                }
+            }
+        }
+    }
+#endif
+
+    std::cout << "\nValidation Summary: " << total << " total, "
+              << passed << " passed, " << failed << " failed, "
+              << skipped << " skipped\n";
+
+    return failed > 0 ? 1 : 0;
+}
+
 static void print_usage() {
     std::cout << "pulp — Pulp audio plugin framework CLI\n\n";
     std::cout << "Usage: pulp <command> [options]\n\n";
@@ -196,6 +287,7 @@ static void print_usage() {
     std::cout << "  build    Build the project (configure + compile)\n";
     std::cout << "  test     Run the test suite\n";
     std::cout << "  status   Show project status and info\n";
+    std::cout << "  validate Run plugin format validators (clap-validator, auval)\n";
     std::cout << "  clean    Remove build directory\n";
     std::cout << "  help     Show this help\n";
     std::cout << "\nExamples:\n";
@@ -219,10 +311,11 @@ int main(int argc, char* argv[]) {
     for (int i = 2; i < argc; ++i)
         args.push_back(argv[i]);
 
-    if (command == "build")  return cmd_build(args);
-    if (command == "test")   return cmd_test(args);
-    if (command == "status") return cmd_status(args);
-    if (command == "clean")  return cmd_clean(args);
+    if (command == "build")    return cmd_build(args);
+    if (command == "test")     return cmd_test(args);
+    if (command == "status")   return cmd_status(args);
+    if (command == "validate") return cmd_validate(args);
+    if (command == "clean")    return cmd_clean(args);
     if (command == "help" || command == "--help" || command == "-h") {
         print_usage();
         return 0;
