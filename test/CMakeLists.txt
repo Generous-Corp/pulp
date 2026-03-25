@@ -59,6 +59,11 @@ add_executable(pulp-test-script test_script_engine.cpp)
 target_link_libraries(pulp-test-script PRIVATE pulp::view Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-script)
 
+# Theme/design token tests
+add_executable(pulp-test-theme test_theme.cpp)
+target_link_libraries(pulp-test-theme PRIVATE pulp::view Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-theme)
+
 # Golden-file audio tests (uses HeadlessHost + PulpGain)
 add_executable(pulp-test-golden test_golden_audio.cpp)
 target_link_libraries(pulp-test-golden PRIVATE pulp::format Catch2::Catch2WithMain)

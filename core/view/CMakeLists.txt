@@ -9,6 +9,7 @@ target_include_directories(pulp-view
 
 target_sources(pulp-view PRIVATE
     src/script_engine.cpp
+    src/theme.cpp
 )
 
 # CHOC headers (JS engine, utilities)
