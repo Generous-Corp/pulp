@@ -3,7 +3,7 @@
 // Parameters are registered with the VST3 parameter system and synced
 // with the Pulp StateStore during processing
 
-#include "vst3_adapter.hpp"
+#include <pulp/format/vst3_adapter.hpp>
 #include <pulp/runtime/log.hpp>
 #include <pluginterfaces/vst/ivstparameterchanges.h>
 #include <pluginterfaces/base/ustring.h>
