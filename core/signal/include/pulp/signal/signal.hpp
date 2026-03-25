@@ -19,3 +19,4 @@
 #include <pulp/signal/ladder_filter.hpp>
 #include <pulp/signal/linkwitz_riley.hpp>
 #include <pulp/signal/windowing.hpp>
+#include <pulp/signal/fft.hpp>

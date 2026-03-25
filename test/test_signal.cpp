@@ -602,3 +602,136 @@ TEST_CASE("WindowFunction apply", "[signal][window]") {
     REQUIRE_THAT(buf[0], WithinAbs(1.0, 0.001));
     REQUIRE_THAT(buf[3], WithinAbs(4.0, 0.001));
 }
+
+// ── FFT ──────────────────────────────────────────────────────────────────────
+
+TEST_CASE("FFT forward/inverse round-trip", "[signal][fft]") {
+    Fft fft(256);
+
+    // Create a simple signal
+    std::vector<std::complex<float>> data(256);
+    for (int i = 0; i < 256; ++i)
+        data[i] = {std::sin(2.0f * 3.14159f * 10.0f * i / 256.0f), 0.0f};
+
+    auto original = data;
+
+    fft.forward(data.data());
+    fft.inverse(data.data());
+
+    // Should recover original signal
+    for (int i = 0; i < 256; ++i) {
+        REQUIRE(std::abs(data[i].real() - original[i].real()) < 0.001f);
+    }
+}
+
+TEST_CASE("FFT detects single frequency", "[signal][fft]") {
+    constexpr int N = 1024;
+    Fft fft(N);
+
+    // Generate 100Hz sine at 44100 sample rate
+    std::vector<std::complex<float>> data(N);
+    float freq = 100.0f;
+    float sr = 44100.0f;
+    for (int i = 0; i < N; ++i)
+        data[i] = {std::sin(2.0f * 3.14159f * freq * i / sr), 0.0f};
+
+    fft.forward(data.data());
+
+    // Find the peak bin
+    int peak_bin = 0;
+    float peak_mag = 0;
+    for (int i = 1; i < N / 2; ++i) {
+        float mag = std::abs(data[i]);
+        if (mag > peak_mag) { peak_mag = mag; peak_bin = i; }
+    }
+
+    // Expected bin: freq * N / sr = 100 * 1024 / 44100 ≈ 2.32
+    float expected_bin = freq * N / sr;
+    REQUIRE(std::abs(peak_bin - expected_bin) < 2.0f);
+}
+
+TEST_CASE("FFT magnitude_db", "[signal][fft]") {
+    constexpr int N = 256;
+    Fft fft(N);
+
+    std::vector<std::complex<float>> freq(N);
+    std::vector<float> mag_db(N / 2);
+
+    // DC component = 1.0 → 0 dB
+    freq[0] = {1.0f, 0.0f};
+    fft.magnitude_db(freq.data(), mag_db.data(), N / 2);
+    REQUIRE_THAT(mag_db[0], WithinAbs(0.0, 0.01));
+
+    // 0.01 → -40 dB
+    freq[0] = {0.01f, 0.0f};
+    fft.magnitude_db(freq.data(), mag_db.data(), 1);
+    REQUIRE_THAT(mag_db[0], WithinAbs(-40.0, 0.1));
+}
+
+TEST_CASE("FFT forward_real", "[signal][fft]") {
+    constexpr int N = 256;
+    Fft fft(N);
+
+    std::vector<float> input(N, 0.0f);
+    input[0] = 1.0f; // Impulse
+
+    std::vector<std::complex<float>> output(N);
+    fft.forward_real(input.data(), output.data());
+
+    // FFT of impulse: all bins should have magnitude 1
+    for (int i = 0; i < N; ++i) {
+        REQUIRE(std::abs(std::abs(output[i]) - 1.0f) < 0.01f);
+    }
+}
+
+// ── Convolver ────────────────────────────────────────────────────────────────
+
+TEST_CASE("Convolver with identity IR", "[signal][convolver]") {
+    Convolver conv;
+
+    // Identity IR: [1, 0, 0, ...]
+    float ir[] = {1.0f};
+    conv.load_ir(ir, 1, 64);
+
+    // Process a known signal
+    std::vector<float> input(256);
+    std::vector<float> output(256);
+    for (int i = 0; i < 256; ++i)
+        input[i] = std::sin(2.0f * 3.14159f * 440.0f * i / 44100.0f);
+
+    conv.process(input.data(), output.data(), 256);
+
+    // Output should match input (after initial latency of one block)
+    float max_error = 0;
+    for (int i = 64; i < 200; ++i) {
+        float error = std::abs(output[i] - input[i - 64]);
+        if (error > max_error) max_error = error;
+    }
+    REQUIRE(max_error < 0.01f);
+}
+
+TEST_CASE("Convolver with simple delay IR", "[signal][convolver]") {
+    Convolver conv;
+
+    // Delay IR: [0, 0, 0, 0, 1] — 4-sample delay
+    float ir[] = {0.0f, 0.0f, 0.0f, 0.0f, 1.0f};
+    conv.load_ir(ir, 5, 32);
+
+    // Send an impulse and collect output
+    std::vector<float> output(128, 0.0f);
+    output[0] = conv.process(1.0f);
+    for (int i = 1; i < 128; ++i)
+        output[i] = conv.process(0.0f);
+
+    // Should see the impulse delayed by 4 samples + block latency
+    float peak = 0;
+    int peak_pos = 0;
+    for (int i = 0; i < 128; ++i) {
+        if (std::abs(output[i]) > peak) {
+            peak = std::abs(output[i]);
+            peak_pos = i;
+        }
+    }
+    REQUIRE(peak > 0.9f); // Should find the delayed impulse
+    REQUIRE(peak_pos >= 4); // At least 4 samples delayed
+}
