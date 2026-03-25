@@ -2,23 +2,71 @@
 
 A cross-platform framework for building audio plugins and applications.
 
-**VST3 · Audio Unit · AUv3 · CLAP · LV2 · AAX · Standalone · Web**
-**macOS · Windows · Linux · iOS · Browsers**
+**VST3 · Audio Unit · CLAP · Standalone** — more formats coming.
+**macOS** first, Windows and Linux planned.
 
 MIT-licensed. No royalties. No revenue thresholds. No copyleft.
 
-## Status
+## What Works Today
 
-Under active development. See [VISION.md](VISION.md) for the full picture.
+- **Three plugin formats** — VST3, AU v2, CLAP — validated with pluginval and auval
+- **Effects and instruments** — both plugin types supported across all formats
+- **Zero-boilerplate entry points** — one-line macros for each format
+- **Parameter system** — thread-safe, automatable, with state serialization
+- **Headless processing** — test and batch-process without a DAW
+- **53 automated tests** — unit tests, golden-file audio tests, format validators
+
+### Example: Create a Plugin
+
+Write your processor:
+
+```cpp
+class MyGain : public pulp::format::Processor {
+    void process(BufferView<float>& out, const BufferView<const float>& in, ...) override {
+        float gain = std::pow(10.0f, state().get_value(kGain) / 20.0f);
+        for (std::size_t ch = 0; ch < out.num_channels(); ++ch)
+            for (std::size_t i = 0; i < out.num_samples(); ++i)
+                out.channel(ch)[i] = in.channel(ch)[i] * gain;
+    }
+};
+```
+
+Add format entry points (one line each):
+
+```cpp
+// CLAP
+PULP_CLAP_PLUGIN(create_my_gain)
+
+// VST3
+PULP_VST3_PLUGIN(kUID, "MyGain", Vst::PlugType::kFx, "Vendor", "1.0.0", "url", create_my_gain)
+
+// AU
+PULP_AU_PLUGIN(MyGainAU, create_my_gain)
+```
+
+Build all formats:
+
+```bash
+cmake -B build && cmake --build build
+```
+
+See [docs/getting-started.md](docs/getting-started.md) for the full walkthrough.
 
 ## Building
 
 ```bash
 cmake -B build
 cmake --build build
+ctest --test-dir build
 ```
 
-Requires CMake 3.24+ and a C++20 compiler (Clang 16+, GCC 13+, MSVC 2022+).
+Requires CMake 3.24+ and a C++20 compiler (Clang 15+, GCC 13+, MSVC 2022+).
+
+## Status
+
+Under active development. Core framework operational — plugin formats, audio I/O, MIDI, parameter system, state serialization all working. GPU rendering (Dawn/Skia) and UI system are next.
+
+See [VISION.md](VISION.md) for the full picture.
 
 ## License
 
