@@ -28,9 +28,14 @@ void StateStore::set_value(ParamID id, float value) {
     float clamped = std::clamp(value, param.range.min, param.range.max);
     values_[it->second].set(clamped);
 
-    // Notify listeners
-    std::lock_guard lock(listener_mutex_);
-    for (auto& cb : listeners_) {
+    // Copy listeners under lock, then invoke outside lock.
+    // This prevents blocking the audio thread if a listener does slow work.
+    std::vector<ParamChangeCallback> snapshot;
+    {
+        std::lock_guard lock(listener_mutex_);
+        snapshot = listeners_;
+    }
+    for (auto& cb : snapshot) {
         cb(id, clamped);
     }
 }

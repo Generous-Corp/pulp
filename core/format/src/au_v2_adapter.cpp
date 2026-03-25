@@ -12,6 +12,7 @@
 #include <memory>
 #include <vector>
 #include <cmath>
+#include <limits>
 
 namespace pulp::format::au {
 
@@ -246,7 +247,13 @@ public:
 
     bool SupportsTail() override { return true; }
 
-    Float64 GetTailTime() override { return 0.0; }
+    Float64 GetTailTime() override {
+        if (!processor_) return 0.0;
+        auto tail = processor_->descriptor().tail_samples;
+        if (tail < 0) return std::numeric_limits<Float64>::infinity();
+        return tail > 0 ? static_cast<Float64>(tail) / GetSampleRate() : 0.0;
+    }
+
     Float64 GetLatency() override { return 0.0; }
 
 private:

@@ -144,10 +144,14 @@ inline bool params_value_to_text(const clap_plugin_t* plugin, clap_id param_id,
     auto* self = static_cast<clap_adapter::PulpClapPlugin*>(plugin->plugin_data);
     auto* info = self->store.info(static_cast<state::ParamID>(param_id));
     if (!info) return false;
-    if (!info->unit.empty())
+    if (info->to_string) {
+        auto str = info->to_string(static_cast<float>(value));
+        snprintf(display, size, "%s", str.c_str());
+    } else if (!info->unit.empty()) {
         snprintf(display, size, "%.2f %s", value, info->unit.c_str());
-    else
+    } else {
         snprintf(display, size, "%.2f", value);
+    }
     return true;
 }
 
@@ -168,6 +172,12 @@ inline void params_flush(const clap_plugin_t* plugin, const clap_input_events_t*
             auto* ev = reinterpret_cast<const clap_event_param_value_t*>(hdr);
             self->store.set_value(static_cast<state::ParamID>(ev->param_id),
                                   static_cast<float>(ev->value));
+        } else if (hdr->type == CLAP_EVENT_PARAM_GESTURE_BEGIN) {
+            auto* ev = reinterpret_cast<const clap_event_param_gesture_t*>(hdr);
+            self->store.begin_gesture(static_cast<state::ParamID>(ev->param_id));
+        } else if (hdr->type == CLAP_EVENT_PARAM_GESTURE_END) {
+            auto* ev = reinterpret_cast<const clap_event_param_gesture_t*>(hdr);
+            self->store.end_gesture(static_cast<state::ParamID>(ev->param_id));
         }
     }
 }

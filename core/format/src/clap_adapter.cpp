@@ -56,7 +56,7 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
     auto num_samples = process->frames_count;
     if (num_samples == 0) return CLAP_PROCESS_CONTINUE;
 
-    // Handle parameter events from host
+    // Handle parameter and gesture events from host
     auto* in_events = process->in_events;
     if (in_events) {
         uint32_t event_count = in_events->size(in_events);
@@ -67,6 +67,12 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
                 self->store.set_value(
                     static_cast<state::ParamID>(ev->param_id),
                     static_cast<float>(ev->value));
+            } else if (hdr->type == CLAP_EVENT_PARAM_GESTURE_BEGIN) {
+                auto* ev = reinterpret_cast<const clap_event_param_gesture_t*>(hdr);
+                self->store.begin_gesture(static_cast<state::ParamID>(ev->param_id));
+            } else if (hdr->type == CLAP_EVENT_PARAM_GESTURE_END) {
+                auto* ev = reinterpret_cast<const clap_event_param_gesture_t*>(hdr);
+                self->store.end_gesture(static_cast<state::ParamID>(ev->param_id));
             }
         }
     }
