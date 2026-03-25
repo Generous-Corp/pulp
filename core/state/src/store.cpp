@@ -21,6 +21,26 @@ float StateStore::get_value(ParamID id) const {
     return values_[it->second].get();
 }
 
+float StateStore::get_modulated(ParamID id) const {
+    auto it = id_to_index_.find(id);
+    if (it == id_to_index_.end()) return 0.0f;
+    return values_[it->second].get_modulated();
+}
+
+void StateStore::set_mod_offset(ParamID id, float offset) {
+    auto it = id_to_index_.find(id);
+    if (it != id_to_index_.end()) values_[it->second].set_mod_offset(offset);
+}
+
+void StateStore::add_mod_offset(ParamID id, float delta) {
+    auto it = id_to_index_.find(id);
+    if (it != id_to_index_.end()) values_[it->second].add_mod_offset(delta);
+}
+
+void StateStore::reset_all_mod() {
+    for (auto& v : values_) v.reset_mod();
+}
+
 void StateStore::set_value(ParamID id, float value) {
     auto it = id_to_index_.find(id);
     if (it == id_to_index_.end()) return;

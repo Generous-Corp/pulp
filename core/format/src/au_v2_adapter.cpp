@@ -4,6 +4,7 @@
 
 #include <AudioUnitSDK/AUEffectBase.h>
 #include <AudioUnitSDK/AUPlugInDispatch.h>
+#include <AudioToolbox/AudioUnitUtilities.h>
 
 #include <pulp/format/processor.hpp>
 #include <pulp/format/registry.hpp>
@@ -30,6 +31,28 @@ public:
             if (processor_) {
                 processor_->set_state_store(&store_);
                 processor_->define_parameters(store_);
+
+                // Wire gesture callbacks for undo grouping support
+                store_.set_gesture_callbacks(
+                    [this](state::ParamID id) {
+                        AudioUnitEvent event;
+                        event.mEventType = kAudioUnitEvent_BeginParameterChangeGesture;
+                        event.mArgument.mParameter.mAudioUnit = GetComponentInstance();
+                        event.mArgument.mParameter.mParameterID = static_cast<AudioUnitParameterID>(id);
+                        event.mArgument.mParameter.mScope = kAudioUnitScope_Global;
+                        event.mArgument.mParameter.mElement = 0;
+                        AUEventListenerNotify(nullptr, nullptr, &event);
+                    },
+                    [this](state::ParamID id) {
+                        AudioUnitEvent event;
+                        event.mEventType = kAudioUnitEvent_EndParameterChangeGesture;
+                        event.mArgument.mParameter.mAudioUnit = GetComponentInstance();
+                        event.mArgument.mParameter.mParameterID = static_cast<AudioUnitParameterID>(id);
+                        event.mArgument.mParameter.mScope = kAudioUnitScope_Global;
+                        event.mArgument.mParameter.mElement = 0;
+                        AUEventListenerNotify(nullptr, nullptr, &event);
+                    }
+                );
             }
         }
     }
@@ -103,8 +126,29 @@ public:
                                       AudioUnitParameterID inParameterID,
                                       CFArrayRef* outStrings) override
     {
-        // No indexed value strings for now
-        return kAudioUnitErr_InvalidPropertyValue;
+        if (inScope != kAudioUnitScope_Global)
+            return kAudioUnitErr_InvalidParameter;
+
+        const auto* param = store_.info(static_cast<state::ParamID>(inParameterID));
+        if (!param) return kAudioUnitErr_InvalidParameter;
+
+        // Only provide value strings for stepped parameters with to_string
+        if (param->range.step < 1.0f || !param->to_string)
+            return kAudioUnitErr_InvalidPropertyValue;
+
+        // Build string array for each discrete value
+        int count = static_cast<int>((param->range.max - param->range.min) / param->range.step) + 1;
+        CFMutableArrayRef strings = CFArrayCreateMutable(kCFAllocatorDefault, count, &kCFTypeArrayCallBacks);
+        for (int i = 0; i < count; ++i) {
+            float value = param->range.min + i * param->range.step;
+            auto str = param->to_string(value);
+            CFStringRef cfStr = CFStringCreateWithCString(
+                kCFAllocatorDefault, str.c_str(), kCFStringEncodingUTF8);
+            CFArrayAppendValue(strings, cfStr);
+            CFRelease(cfStr);
+        }
+        *outStrings = strings;
+        return noErr;
     }
 
     // ── Lifecycle ───────────────────────────────────────────────────────

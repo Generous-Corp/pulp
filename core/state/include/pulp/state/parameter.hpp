@@ -69,6 +69,18 @@ public:
     float get() const { return value_.load(std::memory_order_relaxed); }
     void set(float v) { value_.store(v, std::memory_order_relaxed); }
 
+    // Modulated value = base + mod_offset (for CLAP per-voice modulation)
+    float get_modulated() const {
+        return value_.load(std::memory_order_relaxed)
+             + mod_offset_.load(std::memory_order_relaxed);
+    }
+    void set_mod_offset(float offset) { mod_offset_.store(offset, std::memory_order_relaxed); }
+    void add_mod_offset(float delta) {
+        auto current = mod_offset_.load(std::memory_order_relaxed);
+        mod_offset_.store(current + delta, std::memory_order_relaxed);
+    }
+    void reset_mod() { mod_offset_.store(0.0f, std::memory_order_relaxed); }
+
     float get_normalized(const ParamRange& range) const {
         return range.normalize(get());
     }
@@ -79,6 +91,7 @@ public:
 
 private:
     std::atomic<float> value_{0.0f};
+    std::atomic<float> mod_offset_{0.0f};
 };
 
 // Change listener — notified when a parameter value changes

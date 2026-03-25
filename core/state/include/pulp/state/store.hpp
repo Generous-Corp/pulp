@@ -25,7 +25,11 @@ public:
 
     // Value access (thread-safe, lock-free)
     float get_value(ParamID id) const;
+    float get_modulated(ParamID id) const;
     void set_value(ParamID id, float value);
+    void set_mod_offset(ParamID id, float offset);
+    void add_mod_offset(ParamID id, float delta);
+    void reset_all_mod();
     float get_normalized(ParamID id) const;
     void set_normalized(ParamID id, float normalized);
     float get_default(ParamID id) const;
