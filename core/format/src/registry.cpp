@@ -11,13 +11,8 @@ ProcessorFactory& registered_factory() {
 
 void register_plugin(ProcessorFactory factory) {
     g_factory = factory;
-    if (factory) {
-        // Verify the factory works by creating a temporary instance
-        auto test = factory();
-        if (test) {
-            runtime::log_info("Plugin registered: {}", test->descriptor().name);
-        }
-    }
+    // Don't test-create at static init time — std::string and other
+    // globals may not be initialized yet when AU bundles are loaded.
 }
 
 } // namespace pulp::format
