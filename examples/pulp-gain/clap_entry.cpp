@@ -3,7 +3,7 @@
 // Built from the CLAP specification: https://github.com/free-audio/clap
 
 #include "pulp_gain.hpp"
-#include "../../core/format/src/clap_adapter.hpp"
+#include <pulp/format/clap_adapter.hpp>
 #include <pulp/format/registry.hpp>
 #include <pulp/runtime/log.hpp>
 #include <cstring>
