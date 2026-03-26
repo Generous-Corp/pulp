@@ -516,6 +516,7 @@ MIT-licensed. No royalties. No copyleft.</p>
 <h2>Reference</h2>
 <ul>
 <li><a href="{base_url}modules.html">Modules</a> — 12 subsystems with status, dependencies, and key headers</li>
+<li><a href="{base_url}api/">API Reference</a> — Doxygen-generated class and function documentation</li>
 <li><a href="{base_url}cli.html">CLI Reference</a> — <code>pulp</code> command reference (build, test, validate, ship, docs)</li>
 <li><a href="{base_url}cmake.html">CMake Reference</a> — <code>pulp_add_plugin()</code> and build system functions</li>
 <li><a href="{base_url}architecture.html">Architecture</a> — subsystem dependencies, thread model, GPU stack</li>

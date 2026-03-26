@@ -1,16 +1,7 @@
 #pragma once
 
-// SeqLock<T> — Lock-free reader/writer for coherent multi-field snapshots
-//
-// Use case: reading transport state (tempo + beat position + time sig) as a
-// consistent snapshot without locks. The writer is assumed to be a single
-// thread (audio thread or main thread). Readers retry if the data was
-// modified during their read.
-//
-// Writer: seqlock.write(new_value);
-// Reader: auto val = seqlock.read();
-//
-// Safe on ARM and x86. Uses acquire/release ordering.
+/// @file seqlock.hpp
+/// Lock-free sequence-lock for coherent multi-field snapshots.
 
 #include <atomic>
 #include <cstring>
@@ -18,6 +9,27 @@
 
 namespace pulp::runtime {
 
+/// Lock-free reader/writer for reading multi-field structs as consistent snapshots.
+///
+/// Use when a single writer (e.g., the audio thread) publishes a struct that
+/// multiple readers need to consume atomically. Readers spin-retry if the data
+/// was modified during their read, guaranteeing coherence without mutexes.
+///
+/// @tparam T  Must be trivially copyable.
+///
+/// @code
+/// struct Transport { double tempo; double beat_pos; int time_sig_num; };
+/// SeqLock<Transport> transport;
+///
+/// // Writer (audio thread):
+/// transport.write({120.0, 4.5, 4});
+///
+/// // Reader (UI thread):
+/// auto snap = transport.read(); // always a consistent snapshot
+/// @endcode
+///
+/// @note Safe on ARM and x86. Uses acquire/release ordering internally.
+/// @note Only one writer thread is allowed. Multiple concurrent readers are safe.
 template <typename T>
 class SeqLock {
     static_assert(std::is_trivially_copyable_v<T>,
@@ -25,9 +37,12 @@ class SeqLock {
 
 public:
     SeqLock() = default;
+
+    /// @param initial  Starting value.
     explicit SeqLock(const T& initial) : data_(initial) {}
 
-    // Single-writer: store a new value. Not thread-safe with other writers.
+    /// Publish a new value. Must be called from a single writer thread only.
+    /// @param value  The new value to publish.
     void write(const T& value) {
         seq_.fetch_add(1, std::memory_order_release); // odd = writing
         copy_bytes(reinterpret_cast<volatile char*>(&data_),
@@ -35,7 +50,9 @@ public:
         seq_.fetch_add(1, std::memory_order_release); // even = complete
     }
 
-    // Multi-reader: read a consistent snapshot. Retries on torn reads.
+    /// Read a consistent snapshot. Retries automatically on torn reads.
+    /// Safe to call from any number of reader threads concurrently.
+    /// @return A coherent copy of the stored value.
     T read() const {
         T result;
         for (;;) {
