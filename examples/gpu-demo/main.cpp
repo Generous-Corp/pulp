@@ -81,14 +81,14 @@ public:
         auto now = std::chrono::steady_clock::now();
         float t = std::chrono::duration<float>(now - start_time_).count();
 
-        // Layout
-        float col_w = 120.0f;
-        float left_x = 20.0f;
-        float right_x = w - col_w - 20.0f;
-        float cable_left = left_x + col_w + 10.0f;
-        float cable_right = right_x - 10.0f;
-        float row_h = 32.0f;
-        float top_y = 50.0f;
+        // Layout — use proportional positioning to handle any window size
+        float col_w = w * 0.15f;                    // 15% for each column
+        float left_x = w * 0.02f;                   // 2% margin
+        float right_x = w - col_w - w * 0.02f;      // right column
+        float cable_left = left_x + col_w + w * 0.01f;
+        float cable_right = right_x - w * 0.01f;
+        float row_h = h * 0.045f;                   // ~4.5% per row
+        float top_y = h * 0.08f;                    // 8% top margin
 
         // Background
         c.set_fill_color(Color::rgba(22, 22, 35));
@@ -196,15 +196,18 @@ public:
             for (int s = 1; s <= segments; ++s) {
                 float frac = static_cast<float>(s) / segments;
 
-                // Cubic Bézier
+                // Cubic Bézier with horizontal control points (patcher cable style)
                 float one_minus = 1.0f - frac;
                 float px = one_minus * one_minus * one_minus * x1
                          + 3.0f * one_minus * one_minus * frac * cx1
                          + 3.0f * one_minus * frac * frac * cx2
                          + frac * frac * frac * x2;
+                // Y control points stay at source/dest Y — creates horizontal S-curve
+                float cy1 = y1;  // control point 1 at source Y
+                float cy2 = y2;  // control point 2 at dest Y
                 float py = one_minus * one_minus * one_minus * y1
-                         + 3.0f * one_minus * one_minus * frac * y1
-                         + 3.0f * one_minus * frac * frac * y2
+                         + 3.0f * one_minus * one_minus * frac * cy1
+                         + 3.0f * one_minus * frac * frac * cy2
                          + frac * frac * frac * y2;
 
                 // Animated pulse traveling along cable
