@@ -98,6 +98,12 @@ function(pulp_add_plugin target)
         endif()
     endif()
 
+    # ── LV2 ───────────────────────────────────────────────────────────────
+    if("LV2" IN_LIST PLUGIN_FORMATS AND PULP_HAS_LV2)
+        _pulp_add_lv2(${target} "${PLUGIN_PLUGIN_NAME}" "${PLUGIN_BUNDLE_ID}"
+                       "${PLUGIN_VERSION}" "${PLUGIN_MANUFACTURER}" "${PLUGIN_CATEGORY}")
+    endif()
+
     # ── AUv3 ──────────────────────────────────────────────────────────────
     if("AUv3" IN_LIST PLUGIN_FORMATS AND APPLE)
         if(NOT PLUGIN_PLUGIN_CODE OR NOT PLUGIN_MANUFACTURER_CODE)
@@ -263,6 +269,30 @@ function(_pulp_add_clap target name bundle_id version manufacturer category)
             BUNDLE_EXTENSION "clap"
         )
     endif()
+endfunction()
+
+# ── Internal: LV2 target ───────────────────────────────────────────────
+function(_pulp_add_lv2 target name bundle_id version manufacturer category)
+    # Find LV2 entry point (convention: lv2_entry.cpp in source dir)
+    set(lv2_entry "")
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/lv2_entry.cpp")
+        set(lv2_entry "${CMAKE_CURRENT_SOURCE_DIR}/lv2_entry.cpp")
+    endif()
+
+    add_library(${target}_LV2 MODULE
+        ${PULP_${target}_CORE_OBJECTS}
+        ${lv2_entry}
+        ${CMAKE_SOURCE_DIR}/core/format/src/lv2_adapter.cpp
+    )
+    target_link_libraries(${target}_LV2 PRIVATE ${target}_Core pulp::format lv2-headers)
+    target_include_directories(${target}_LV2 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+    # LV2 bundles: <name>.lv2/ directory containing the .so and .ttl files
+    set_target_properties(${target}_LV2 PROPERTIES
+        OUTPUT_NAME "${name}"
+        LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/LV2/${name}.lv2"
+        PREFIX ""
+    )
 endfunction()
 
 # ── Internal: AU v2 target ──────────────────────────────────────────────

@@ -37,7 +37,7 @@ formats:
     macos: experimental
     ios: planned
   lv2:
-    linux: planned
+    linux: experimental
   aax:
     macos: planned
     windows: planned

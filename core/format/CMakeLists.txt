@@ -32,6 +32,15 @@ if(PULP_HAS_CLAP)
     target_compile_definitions(pulp-format PRIVATE PULP_CLAP=1)
 endif()
 
+# LV2 adapter
+if(PULP_HAS_LV2)
+    target_sources(pulp-format PRIVATE
+        src/lv2_adapter.cpp
+    )
+    target_link_libraries(pulp-format PRIVATE lv2-headers)
+    target_compile_definitions(pulp-format PRIVATE PULP_LV2=1)
+endif()
+
 # AU v2 adapter uses Apple AudioUnitSDK — compiled per-plugin in the entry point,
 # not in the shared library. The au_v2_adapter.cpp is included by each plugin's
 # au_v2_entry.cpp. The old au_adapter.mm (AUv3 approach) is kept for future AUv3 work.
