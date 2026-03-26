@@ -3,7 +3,9 @@
 
 #include <pulp/format/clap_adapter.hpp>
 #include <pulp/runtime/log.hpp>
+#include <clap/ext/preset-load.h>
 #include <cstring>
+#include <filesystem>
 
 namespace pulp::format::clap_adapter {
 
@@ -17,7 +19,13 @@ bool clap_init(const clap_plugin_t* plugin) {
     if (!self->processor) return false;
     self->processor->set_state_store(&self->store);
     self->processor->define_parameters(self->store);
-    runtime::log_info("CLAP: initialized '{}'", self->processor->descriptor().name);
+
+    // Create PresetManager from plugin descriptor
+    auto& desc = self->processor->descriptor();
+    self->preset_manager = std::make_unique<state::PresetManager>(
+        self->store, desc.vendor, desc.name);
+
+    runtime::log_info("CLAP: initialized '{}'", desc.name);
     return true;
 }
 
@@ -187,8 +195,35 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
     return CLAP_PROCESS_CONTINUE;
 }
 
-const void* clap_get_extension(const clap_plugin_t*, const char*) {
-    return nullptr; // Extensions added as needed
+// ── Preset load extension ─────────────────────────────────────────────────
+
+static bool preset_from_location(const clap_plugin_t* plugin,
+                                  uint32_t location_kind,
+                                  const char* location,
+                                  const char* /*load_key*/) {
+    auto* self = get_self(plugin);
+    if (!self->preset_manager || !location) return false;
+
+    // CLAP_PRESET_DISCOVERY_LOCATION_FILE = 0
+    if (location_kind != 0) return false;
+
+    return self->preset_manager->load(std::filesystem::path(location));
+}
+
+static const clap_plugin_preset_load_t s_preset_load = {
+    .from_location = preset_from_location
+};
+
+const void* clap_get_extension(const clap_plugin_t* plugin, const char* id) {
+    auto* self = get_self(plugin);
+
+    // Only expose preset-load if the plugin has a PresetManager
+    if (self->preset_manager) {
+        if (std::strcmp(id, CLAP_EXT_PRESET_LOAD) == 0) return &s_preset_load;
+        if (std::strcmp(id, CLAP_EXT_PRESET_LOAD_COMPAT) == 0) return &s_preset_load;
+    }
+
+    return nullptr;
 }
 
 void clap_on_main_thread(const clap_plugin_t*) {}

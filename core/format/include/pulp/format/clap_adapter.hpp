@@ -5,6 +5,7 @@
 // Built from CLAP specification headers (MIT license)
 
 #include <pulp/format/processor.hpp>
+#include <pulp/state/preset_manager.hpp>
 #include <clap/clap.h>
 
 namespace pulp::format::clap_adapter {
@@ -28,6 +29,9 @@ struct PulpClapPlugin {
 
     // Parameter snapshot for detecting plugin-side changes during process
     std::vector<float> param_snapshot;
+
+    // Preset management (optional — set by plugins that provide presets)
+    std::unique_ptr<state::PresetManager> preset_manager;
 };
 
 // CLAP entry point and factory
