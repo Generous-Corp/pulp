@@ -9,6 +9,7 @@ target_include_directories(pulp-state
 
 target_sources(pulp-state PRIVATE
     src/store.cpp
+    src/preset_manager.cpp
 )
 
 target_link_libraries(pulp-state PUBLIC pulp::runtime)

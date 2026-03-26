@@ -176,6 +176,41 @@ add_executable(pulp-test-widget-bridge test_widget_bridge.cpp)
 target_link_libraries(pulp-test-widget-bridge PRIVATE pulp::view Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-widget-bridge)
 
+# Input events tests
+add_executable(pulp-test-input-events test_input_events.cpp)
+target_link_libraries(pulp-test-input-events PRIVATE pulp::view Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-input-events)
+
+# Text editor tests
+add_executable(pulp-test-text-editor test_text_editor.cpp)
+target_link_libraries(pulp-test-text-editor PRIVATE pulp::view Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-text-editor)
+
+# UI components tests (ComboBox, TabPanel, ListBox, ScrollView, Tooltip, ProgressBar, CallOutBox)
+add_executable(pulp-test-ui-components test_ui_components.cpp)
+target_link_libraries(pulp-test-ui-components PRIVATE pulp::view Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-ui-components)
+
+# Modal overlay tests
+add_executable(pulp-test-modal test_modal.cpp)
+target_link_libraries(pulp-test-modal PRIVATE pulp::view Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-modal)
+
+# Design export tests
+add_executable(pulp-test-design-export test_design_export.cpp)
+target_link_libraries(pulp-test-design-export PRIVATE pulp::view Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-design-export)
+
+# App framework tests (KeyMapping, MenuBar, Toolbar, AppSettings)
+add_executable(pulp-test-app-framework test_app_framework.cpp)
+target_link_libraries(pulp-test-app-framework PRIVATE pulp::view Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-app-framework)
+
+# Preset manager tests
+add_executable(pulp-test-preset-manager test_preset_manager.cpp)
+target_link_libraries(pulp-test-preset-manager PRIVATE pulp::state Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-preset-manager)
+
 # Golden-file audio tests (uses HeadlessHost + PulpGain)
 add_executable(pulp-test-golden test_golden_audio.cpp)
 target_link_libraries(pulp-test-golden PRIVATE pulp::format Catch2::Catch2WithMain)

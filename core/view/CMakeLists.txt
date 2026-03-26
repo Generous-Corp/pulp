@@ -17,6 +17,10 @@ target_sources(pulp-view PRIVATE
     src/inspector.cpp
     src/sdl_window_host.cpp
     src/auto_ui.cpp
+    src/text_editor.cpp
+    src/ui_components.cpp
+    src/design_export.cpp
+    src/app_framework.cpp
 )
 
 # CHOC headers (JS engine, utilities)

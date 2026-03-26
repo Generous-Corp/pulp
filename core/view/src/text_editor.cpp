@@ -49,12 +49,13 @@ bool TextEditor::cut_to_clipboard() {
 
 bool TextEditor::paste_from_clipboard() {
     if (!platform::Clipboard::has_text()) return false;
-    auto text = platform::Clipboard::get_text();
-    if (text.empty()) return false;
+    auto opt_text = platform::Clipboard::get_text();
+    if (!opt_text || opt_text->empty()) return false;
 
     push_undo();
     if (has_selection()) delete_selection();
 
+    std::string text = *opt_text;
     if (numeric_only) {
         // Filter to numeric characters
         std::string filtered;
