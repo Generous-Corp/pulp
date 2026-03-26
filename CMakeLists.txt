@@ -228,6 +228,12 @@ add_subdirectory(tools/mcp)
 # ── Screenshot Tool ────────────────────────────────────────────────────────
 add_subdirectory(tools/screenshot)
 
+# ── Python Bindings ────────────────────────────────────────────────────────
+option(PULP_BUILD_PYTHON "Build Python bindings via pybind11" OFF)
+if(PULP_BUILD_PYTHON)
+    add_subdirectory(bindings/python)
+endif()
+
 # ── Examples ────────────────────────────────────────────────────────────────
 if(PULP_BUILD_EXAMPLES)
     add_subdirectory(examples)
