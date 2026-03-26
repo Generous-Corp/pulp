@@ -256,6 +256,12 @@ add_executable(pulp-test-workgroup test_workgroup.cpp)
 target_link_libraries(pulp-test-workgroup PRIVATE pulp::audio Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-workgroup)
 
+# Plugin matrix tests (sample rate/buffer size/edge case sweep)
+add_executable(pulp-test-matrix test_plugin_matrix.cpp)
+target_link_libraries(pulp-test-matrix PRIVATE pulp::format Catch2::Catch2WithMain)
+target_include_directories(pulp-test-matrix PRIVATE ${CMAKE_SOURCE_DIR}/examples/pulp-gain)
+catch_discover_tests(pulp-test-matrix)
+
 # Golden-file audio tests (uses HeadlessHost + PulpGain)
 add_executable(pulp-test-golden test_golden_audio.cpp)
 target_link_libraries(pulp-test-golden PRIVATE pulp::format Catch2::Catch2WithMain)
