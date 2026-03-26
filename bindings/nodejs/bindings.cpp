@@ -219,10 +219,11 @@ private:
         auto& d = host_->descriptor();
         auto obj = Napi::Object::New(env);
         obj.Set("name", Napi::String::New(env, d.name));
-        obj.Set("vendor", Napi::String::New(env, d.vendor));
+        obj.Set("manufacturer", Napi::String::New(env, d.manufacturer));
         obj.Set("version", Napi::String::New(env, d.version));
-        obj.Set("uniqueId", Napi::String::New(env, d.unique_id));
-        obj.Set("isInstrument", Napi::Boolean::New(env, d.is_instrument));
+        obj.Set("bundleId", Napi::String::New(env, d.bundle_id));
+        obj.Set("isInstrument", Napi::Boolean::New(env,
+            d.category == format::PluginCategory::Instrument));
         return obj;
     }
 

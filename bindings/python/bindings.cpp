@@ -68,10 +68,12 @@ PYBIND11_MODULE(pulp, m) {
     // ── PluginDescriptor ─────────────────────────────────────────────────
     py::class_<format::PluginDescriptor>(m, "PluginDescriptor")
         .def_readonly("name", &format::PluginDescriptor::name)
-        .def_readonly("vendor", &format::PluginDescriptor::vendor)
+        .def_readonly("manufacturer", &format::PluginDescriptor::manufacturer)
         .def_readonly("version", &format::PluginDescriptor::version)
-        .def_readonly("unique_id", &format::PluginDescriptor::unique_id)
-        .def_readonly("is_instrument", &format::PluginDescriptor::is_instrument);
+        .def_readonly("bundle_id", &format::PluginDescriptor::bundle_id)
+        .def_property_readonly("is_instrument", [](const format::PluginDescriptor& d) {
+            return d.category == format::PluginCategory::Instrument;
+        });
 
     // ── MidiEvent ────────────────────────────────────────────────────────
     py::class_<midi::MidiEvent>(m, "MidiEvent")
