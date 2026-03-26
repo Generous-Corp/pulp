@@ -49,7 +49,7 @@ cmake -S . -B build -DPULP_SANITIZER=address
 ./build/tools/cli/pulp ship check  # show signing status
 ```
 
-**Known issue:** PulpSynth CLAP build fails with missing `pulp/signal/oscillator.hpp` include path — exclude with `ctest -E PulpSynth`.
+**Note:** All plugin formats build and pass tests, including PulpSynth CLAP.
 
 ---
 

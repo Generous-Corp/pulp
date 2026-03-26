@@ -20,6 +20,9 @@ pulp_add_plugin(PulpSynth
     MANUFACTURER_CODE "Pulp"
 )
 
+# PulpSynth uses DSP library headers — link signal to Core target
+target_link_libraries(PulpSynth_Core INTERFACE pulp::signal)
+
 # ── CLAP validation ─────────────────────────────────────────────────────
 if(PULP_HAS_CLAP AND APPLE)
     add_test(
