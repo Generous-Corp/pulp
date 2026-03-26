@@ -123,7 +123,11 @@ TEST_CASE("TextEditor key event: Cmd+A selects all", "[view][text_editor]") {
 
     KeyEvent e;
     e.key = KeyCode::a;
+#ifdef __APPLE__
     e.modifiers = kModCmd;
+#else
+    e.modifiers = kModCtrl;
+#endif
     e.is_down = true;
     REQUIRE(editor.on_key_event(e));
     REQUIRE(editor.has_selection());

@@ -22,4 +22,8 @@ if(APPLE)
         "-framework Cocoa"
         "-framework UniformTypeIdentifiers"
     )
+elseif(UNIX AND NOT APPLE)
+    target_sources(pulp-platform PRIVATE
+        platform/linux/clipboard_linux.cpp
+    )
 endif()

@@ -12,6 +12,9 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# Required on Linux: static libraries linked into shared objects (.clap, .so) need PIC
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
 # ── Platform Detection ──────────────────────────────────────────────────────
 if(APPLE)
     if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
@@ -156,6 +159,22 @@ FetchContent_MakeAvailable(clap)
 set(PULP_HAS_CLAP TRUE)
 message(STATUS "Pulp: CLAP SDK available")
 
+# LV2 (ISC license) — header-only plugin format (Linux-first)
+FetchContent_Declare(
+    lv2
+    GIT_REPOSITORY https://github.com/lv2/lv2.git
+    GIT_TAG v1.18.10
+    GIT_SHALLOW TRUE
+)
+FetchContent_MakeAvailable(lv2)
+# LV2 headers are in lv2/include/
+add_library(lv2-headers INTERFACE)
+target_include_directories(lv2-headers INTERFACE
+    $<BUILD_INTERFACE:${lv2_SOURCE_DIR}/include>
+)
+set(PULP_HAS_LV2 TRUE)
+message(STATUS "Pulp: LV2 SDK available")
+
 # Apple AudioUnitSDK (Apache 2.0) — for AU v2 plugin support
 set(AUSDK_DIR "${CMAKE_CURRENT_SOURCE_DIR}/external/AudioUnitSDK")
 if(APPLE AND EXISTS "${AUSDK_DIR}/include/AudioUnitSDK/AUBase.h")
@@ -197,7 +216,9 @@ if(PULP_ENABLE_GPU)
     add_subdirectory(core/render)
 endif()
 
-add_subdirectory(inspect)
+if(PULP_ENABLE_GPU)
+    add_subdirectory(inspect)
+endif()
 add_subdirectory(ship)
 
 # ── Testing ─────────────────────────────────────────────────────────────────

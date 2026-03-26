@@ -25,6 +25,12 @@ if(APPLE AND NOT IOS)
         "-framework CoreMIDI"
         "-framework CoreFoundation"
     )
+elseif(UNIX AND NOT APPLE)
+    target_sources(pulp-midi PRIVATE
+        platform/linux/alsa_midi_device.cpp
+    )
+    find_package(ALSA REQUIRED)
+    target_link_libraries(pulp-midi PRIVATE ALSA::ALSA)
 else()
     target_sources(pulp-midi PRIVATE src/placeholder.cpp)
     file(WRITE ${CMAKE_CURRENT_SOURCE_DIR}/src/placeholder.cpp

@@ -9,8 +9,8 @@ platforms:
     status: partial
     notes: Build stubs exist. Not yet validated end-to-end.
   linux:
-    status: partial
-    notes: Build stubs exist. Not yet validated end-to-end.
+    status: experimental
+    notes: ALSA audio, ALSA MIDI, .deb packaging. CI enabled.
   ios:
     status: planned
   web:
@@ -37,7 +37,7 @@ formats:
     macos: experimental
     ios: planned
   lv2:
-    linux: planned
+    linux: experimental
   aax:
     macos: planned
     windows: planned
@@ -50,7 +50,7 @@ audio_io:
     status: planned
     platform: windows
   alsa:
-    status: planned
+    status: experimental
     platform: linux
 
 midi_io:
@@ -61,7 +61,7 @@ midi_io:
     status: planned
     platform: windows
   alsa_midi:
-    status: planned
+    status: experimental
     platform: linux
 
 rendering:
@@ -75,7 +75,7 @@ rendering:
     status: planned
     platform: windows
   dawn_vulkan:
-    status: planned
+    status: experimental
     platform: linux
 
 subsystems:
