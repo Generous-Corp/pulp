@@ -22,9 +22,9 @@ Event loop (constructible, not singleton), timers, and async dispatch. Used by U
 
 **Status**: usable
 **Dependencies**: runtime
-**Headers**: `pulp/audio/audio.hpp`, `pulp/audio/buffer.hpp`, `pulp/audio/device.hpp`, `pulp/audio/audio_file.hpp`
+**Headers**: `pulp/audio/audio.hpp`, `pulp/audio/buffer.hpp`, `pulp/audio/device.hpp`, `pulp/audio/audio_file.hpp`, `pulp/audio/load_measurer.hpp`, `pulp/audio/buffering_reader.hpp`, `pulp/audio/workgroup.hpp`
 
-Audio buffer types, device I/O (CoreAudio on macOS), and audio file reading/writing. `BufferView<T>` is the primary buffer abstraction used throughout the framework.
+Audio buffer types, device I/O (CoreAudio on macOS), and audio file reading/writing. `BufferView<T>` is the primary buffer abstraction used throughout the framework. `AudioProcessLoadMeasurer` tracks real-time CPU usage. `BufferingReader` provides background-thread ring buffer for gapless streaming. `AudioWorkgroup` manages real-time thread priority (macOS os_workgroup API).
 
 ## midi
 
