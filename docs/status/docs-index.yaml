@@ -34,6 +34,31 @@ docs:
     kind: guide
     summary: State and parameter system — ParamValue, StateStore, Binding, serialization
 
+  - slug: module-runtime
+    path: guides/modules/runtime.md
+    kind: guide
+    summary: Lock-free primitives — SeqLock, TripleBuffer, SpscQueue, logging
+
+  - slug: module-canvas
+    path: guides/modules/canvas.md
+    kind: guide
+    summary: 2D drawing — Canvas interface, CoreGraphics/Skia backends, SVG, effects
+
+  - slug: module-view
+    path: guides/modules/view.md
+    kind: guide
+    summary: Widget system — View hierarchy, layout, theming, JS scripting, hot-reload
+
+  - slug: module-render
+    path: guides/modules/render.md
+    kind: guide
+    summary: GPU rendering — Dawn/WebGPU, Skia Graphite, surface management
+
+  - slug: module-osc
+    path: guides/modules/osc.md
+    kind: guide
+    summary: OSC 1.0 sender/receiver over UDP
+
   - slug: docs-maintenance
     path: guides/docs-maintenance.md
     kind: guide
