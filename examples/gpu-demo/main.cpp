@@ -94,19 +94,9 @@ public:
         c.set_fill_color(Color::rgba(22, 22, 35));
         c.fill_rect(0, 0, w, h);
 
-        // Debug: draw markers at key positions
-        // Red marker at w/2 (should be center of window)
-        c.set_fill_color(Color::rgba(255, 0, 0));
-        c.fill_rect(w / 2.0f - 2, 0, 4, h);
-        // Green marker at right_x (where dest column should start)
-        c.set_fill_color(Color::rgba(0, 255, 0));
-        c.fill_rect(right_x, 0, 4, h);
-
-        // Title + size debug
+        // Title
         c.set_fill_color(Color::rgba(200, 200, 220));
-        char title_buf[128];
-        snprintf(title_buf, sizeof(title_buf), "GPU Demo — bounds: %.0fx%.0f  right_x: %.0f", w, h, right_x);
-        c.fill_text(title_buf, 10.0f, 30.0f);
+        c.fill_text("GPU Modulation Matrix", w * 0.3f, h * 0.04f);
 
         // FPS counter
         frame_count_++;
