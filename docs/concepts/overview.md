@@ -39,7 +39,7 @@ On the current branch, Pulp provides:
 - **Accessibility** — NSAccessibility (macOS), UI Automation stubs (Windows), AT-SPI stubs (Linux)
 - **A browser test host** — HTML/JS app for loading and interacting with WASM-compiled plugins
 - **Eight plugin examples** — PulpGain, PulpTone, PulpEffect, PulpCompressor, PulpSynth, PulpDrums, PulpSampler, PulpPluck — plus GPU Demo, UI Preview, and Web Demos
-- **631 automated tests** — unit tests, golden-file audio tests, format validation, UI component tests, DSP tests
+- **646 automated tests** — unit tests, golden-file audio tests, format validation, UI component tests, DSP tests
 
 ## How It Is Organized
 
