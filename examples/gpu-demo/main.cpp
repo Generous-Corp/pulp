@@ -227,6 +227,29 @@ public:
             }
         }
 
+        // Cable amount labels on hover
+        if (hover_cable_ >= 0 && hover_cable_ < static_cast<int>(connections_.size())) {
+            auto& conn = connections_[hover_cable_];
+            float src_y = top_y + 8.0f + conn.source_idx * row_h + (row_h - 6.0f) / 2.0f;
+            float dst_y = top_y + 8.0f + conn.dest_idx * row_h + (row_h - 6.0f) / 2.0f;
+            float mid_x = (cable_left + cable_right) / 2.0f;
+            float mid_y = (src_y + dst_y) / 2.0f;
+
+            char label_buf[64];
+            snprintf(label_buf, sizeof(label_buf), "%s → %s: %.0f%%",
+                sources[conn.source_idx].c_str(),
+                destinations[conn.dest_idx].c_str(),
+                conn.amount * 100.0f);
+
+            // Label background
+            c.set_fill_color(Color::rgba(20, 20, 40, 220));
+            c.fill_rect(mid_x - 80.0f, mid_y - 20.0f, 160.0f, 22.0f);
+
+            // Label text
+            c.set_fill_color(Color::rgba(255, 255, 255));
+            c.fill_text(label_buf, mid_x - 75.0f, mid_y - 4.0f);
+        }
+
         // Connection matrix (bottom panel)
         float matrix_y = top_y + row_h * std::max(sources.size(), destinations.size()) + 30.0f;
         c.set_fill_color(Color::rgba(30, 30, 50));
@@ -264,11 +287,14 @@ public:
 
     void on_mouse_event(const MouseEvent& e) override {
         auto b = bounds();
-        float col_w = 120.0f;
-        float left_x = 20.0f;
-        float right_x = b.width - col_w - 20.0f;
-        float row_h = 32.0f;
-        float top_y = 50.0f;
+        float w = b.width, h = b.height;
+
+        // Use same proportional layout as paint()
+        float col_w = w * 0.15f;
+        float left_x = w * 0.02f;
+        float right_x = w - col_w - w * 0.02f;
+        float row_h = h * 0.045f;
+        float top_y = h * 0.08f;
 
         hover_source_ = -1;
         hover_dest_ = -1;
@@ -288,6 +314,28 @@ public:
                 hover_dest_ = idx;
         }
 
+        // Check cable proximity (hit test within 6px of midpoint)
+        float cable_left = left_x + col_w + w * 0.01f;
+        float cable_right = right_x - w * 0.01f;
+        float cable_mid_x = (cable_left + cable_right) / 2.0f;
+        for (size_t i = 0; i < connections_.size(); ++i) {
+            auto& conn = connections_[i];
+            if (!conn.active) continue;
+            float src_y = top_y + 8.0f + conn.source_idx * row_h + (row_h - 6.0f) / 2.0f;
+            float dst_y = top_y + 8.0f + conn.dest_idx * row_h + (row_h - 6.0f) / 2.0f;
+            float mid_y = (src_y + dst_y) / 2.0f;
+            float dx = e.position.x - cable_mid_x;
+            float dy = e.position.y - mid_y;
+            if (dx * dx + dy * dy < 36.0f * 36.0f) {
+                hover_cable_ = static_cast<int>(i);
+                break;
+            }
+        }
+
+        // Toggle cable on click
+        if (e.is_down && hover_cable_ >= 0) {
+            connections_[hover_cable_].active = !connections_[hover_cable_].active;
+        }
     }
 
 private:
