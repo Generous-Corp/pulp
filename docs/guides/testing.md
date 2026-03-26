@@ -17,7 +17,7 @@ ctest --test-dir build -R clap-dlopen   # CLAP load tests
 
 ## Test Count
 
-The current branch has 270 registered tests covering:
+The current branch has 646 registered tests covering:
 
 - Unit tests for subsystems (runtime, state, audio, midi, signal, format, events, canvas, render, view, osc)
 - Golden-file audio comparison tests

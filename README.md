@@ -2,8 +2,8 @@
 
 A cross-platform framework for building audio plugins and applications.
 
-**VST3 · Audio Unit · CLAP · Standalone** — more formats coming.
-**macOS** first, Windows and Linux planned.
+**VST3 · Audio Unit · CLAP · LV2 · Standalone** — plus WAM/WebCLAP for the browser.
+**macOS** primary, **Windows** and **Linux** supported.
 
 MIT-licensed. No royalties. No revenue thresholds. No copyleft.
 
@@ -11,12 +11,12 @@ MIT-licensed. No royalties. No revenue thresholds. No copyleft.
 
 ## What Works Today
 
-- **Three plugin formats** — VST3, AU v2, CLAP — validated with pluginval and auval
+- **Six plugin formats** — VST3, AU v2, AUv3, CLAP, LV2, WAM/WebCLAP — with format-specific validation tests
 - **Effects and instruments** — both plugin types supported across all formats
 - **Zero-boilerplate entry points** — one-line macros for each format
 - **Parameter system** — thread-safe, automatable, with state serialization
 - **Headless processing** — test and batch-process without a DAW
-- **642 automated tests** — unit tests, golden-file audio tests, format validators, UI component tests, DSP tests
+- **646 automated tests** — unit tests, golden-file audio tests, format validation, UI component tests, DSP tests
 
 ### Example: Create a Plugin
 
@@ -76,7 +76,7 @@ Requires CMake 3.24+ and a C++20 compiler (Clang 15+, GCC 13+, MSVC 2022+).
 
 ## Status
 
-Under active development. Core framework operational — plugin formats, audio I/O, MIDI, parameter system, state serialization all working. GPU rendering (Dawn/Skia) and UI system are next.
+Under active development. Core framework operational — plugin formats, audio I/O, MIDI, parameter system, state serialization, GPU rendering (Dawn/Skia/Graphite), UI widget library, and 30+ DSP processors all working. macOS is the primary platform; Windows and Linux have audio/MIDI I/O and CI coverage.
 
 See [VISION.md](VISION.md) for the full picture.
 

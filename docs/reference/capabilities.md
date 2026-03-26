@@ -237,7 +237,7 @@ The `pulp` CLI wraps common development workflows.
 |---|---|---|
 | `pulp build` (configure + build) | usable | [cli](cli.md) |
 | `pulp test` (run test suite) | usable | [cli](cli.md) |
-| `pulp validate` (auval, clap-validator) | usable | [cli](cli.md) |
+| `pulp validate` (auval, pluginval, clap-validator — when installed locally) | usable | [cli](cli.md) |
 | `pulp status` (show project info, test list) | usable | [cli](cli.md) |
 | `pulp clean` (remove build directory) | usable | [cli](cli.md) |
 | `pulp ship sign` | usable | [cli](cli.md) |

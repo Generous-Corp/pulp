@@ -1,6 +1,6 @@
 # Examples
 
-Pulp ships with seven example projects that validate different capabilities of the framework. Each example is self-contained under `examples/` and builds as part of the standard CMake build.
+Pulp ships with eight plugin examples plus standalone apps (GPU demo, UI preview, web demos) that validate different capabilities of the framework. Each example is self-contained under `examples/` and builds as part of the standard CMake build.
 
 ## Gallery
 
@@ -23,6 +23,8 @@ These examples exist to test and validate specific subsystems of the framework.
 | [PulpCompressor](example-pulp-compressor.html) | Sidechain compressor with multi-bus input | VST3, AU, CLAP |
 | [PulpDrums](example-pulp-drums.html) | Generative drum sequencer with MIDI output | CLAP |
 | [PulpSynth](example-pulp-synth.html) | Macro oscillator synth using the signal DSP library | CLAP |
+| [PulpSampler](example-pulp-sampler.html) | Audio file sampler with MIDI, ADSR, pitch control | CLAP |
+| [PulpPluck](example-pulp-pluck.html) | Karplus-Strong plucked string synth | VST3, AU, CLAP |
 
 ### Experimental
 

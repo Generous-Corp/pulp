@@ -14,7 +14,7 @@ See the [Vision](vision.html) page for the full architecture, design decisions, 
 
 On the current branch, Pulp provides:
 
-- **Six native plugin formats** — VST3, AU v2, AUv3, CLAP, LV2, and standalone — validated with auval, pluginval, and clap-validator
+- **Six native plugin formats** — VST3, AU v2, AUv3, CLAP, LV2, and standalone — with format-specific validation tests (pluginval and auval available for local use, not yet in CI)
 - **Two web plugin formats** — WAMv2 (Web Audio Modules) and WebCLAP (CLAP-to-WebAssembly) for browser-based DAWs
 - **Effects, instruments, and MIDI effects** — all plugin types supported across formats
 - **Three platforms** — macOS (primary), Windows (WASAPI, Win32 MIDI, NSIS installer), Linux (ALSA, JACK, LV2, .deb packaging)
@@ -38,8 +38,8 @@ On the current branch, Pulp provides:
 - **MCP server** — AI agent parameter control, screenshot capture, view introspection
 - **Accessibility** — NSAccessibility (macOS), UI Automation stubs (Windows), AT-SPI stubs (Linux)
 - **A browser test host** — HTML/JS app for loading and interacting with WASM-compiled plugins
-- **Eleven example plugins** — PulpGain, PulpTone, PulpEffect, PulpCompressor, PulpSynth, PulpDrums, PulpSampler, PulpPluck, plus UI Preview, GPU Demo, and Web Demos
-- **642 automated tests** — unit tests, golden-file audio tests, format validators, UI component tests, DSP tests
+- **Eight plugin examples** — PulpGain, PulpTone, PulpEffect, PulpCompressor, PulpSynth, PulpDrums, PulpSampler, PulpPluck — plus GPU Demo, UI Preview, and Web Demos
+- **646 automated tests** — unit tests, golden-file audio tests, format validation, UI component tests, DSP tests
 
 ## How It Is Organized
 

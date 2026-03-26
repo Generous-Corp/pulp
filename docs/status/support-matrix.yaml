@@ -15,7 +15,8 @@ platforms:
     status: experimental
     notes: Foundation in place. AVAudioSession, AUv3, UIKit views, Metal surface.
   web:
-    status: planned
+    status: experimental
+    notes: WAMv2, WebCLAP adapters, Emscripten build pipeline, browser test host. Not yet runtime-validated in browser.
 
 formats:
   vst3:
@@ -39,6 +40,10 @@ formats:
     ios: experimental
   lv2:
     linux: experimental
+  wam_v2:
+    web: experimental
+  webclap:
+    web: experimental
   aax:
     macos: planned
     windows: planned
@@ -72,23 +77,23 @@ rendering:
   dawn_metal:
     status: experimental
     platform: macos
-    notes: Device bootstrap and presentable surface infrastructure exist. On-screen path not yet default in view hosts.
+    notes: Presentable surface via CAMetalLayer-backed NSView. GPU path opt-in via use_gpu in WindowHost and PluginViewHost. CoreGraphics remains default.
   skia_graphite:
     status: experimental
     platform: macos
-    notes: Offscreen Graphite rendering works. Present-to-surface path defined but view hosts still use CoreGraphics by default.
+    notes: Skia Graphite wired through Dawn device. Offscreen and on-screen rendering work. CoreGraphics is still the default path.
   dawn_metal_ios:
     status: experimental
     platform: ios
-    notes: CAMetalLayer helper exists. Not yet wired as active render path.
+    notes: IOSGpuWindowHost and IOSGpuPluginViewHost implemented. Not yet runtime-validated on device.
   dawn_d3d12:
     status: experimental
     platform: windows
-    notes: Dawn supports D3D12. Not yet integrated with Pulp surface model.
+    notes: Surface creation via SurfaceSourceWindowsHWND implemented. SDL3 extraction for HWND. Not runtime-validated on hardware.
   dawn_vulkan:
     status: experimental
     platform: linux
-    notes: Dawn supports Vulkan. Not yet integrated with Pulp surface model.
+    notes: Surface creation via SDL3 X11/Wayland extraction implemented. Not runtime-validated on hardware.
   coregraphics_fallback:
     status: usable
     platform: macos

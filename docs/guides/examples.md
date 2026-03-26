@@ -1,6 +1,6 @@
 # Examples
 
-Pulp ships with six example plugins and a UI preview application. Each example validates a specific capability of the framework.
+Pulp ships with eight example plugins plus standalone apps (GPU demo, UI preview, web demos). Each example validates a specific capability of the framework.
 
 All examples live under `examples/`.
 

@@ -133,16 +133,28 @@ done < "$STATUS/modules.yaml"
 # ── 8. README test count accuracy ─────────────────────────────────────────────
 echo "Checking README accuracy..."
 
-if [ -f "$ROOT/README.md" ] && [ -d "$ROOT/build" ]; then
-    # Extract test count from README
+if [ -d "$ROOT/build" ]; then
+    actual_count=$(ctest --test-dir "$ROOT/build" -N 2>/dev/null | grep "Total Tests:" | grep -oE '[0-9]+')
+fi
+
+if [ -f "$ROOT/README.md" ]; then
     readme_count=$(grep -oE '[0-9]+ automated tests' "$ROOT/README.md" 2>/dev/null | grep -oE '[0-9]+')
-    if [ -n "$readme_count" ]; then
-        # Get actual test count from build
-        actual_count=$(ctest --test-dir "$ROOT/build" -N 2>/dev/null | grep "Total Tests:" | grep -oE '[0-9]+')
-        if [ -n "$actual_count" ] && [ "$readme_count" != "$actual_count" ]; then
-            warn "README.md says '$readme_count automated tests' but build has $actual_count tests"
-        fi
+    if [ -n "$readme_count" ] && [ -n "$actual_count" ] && [ "$readme_count" != "$actual_count" ]; then
+        warn "README.md says '$readme_count automated tests' but build has $actual_count tests"
     fi
+fi
+
+# Check test count consistency across docs
+if [ -n "$readme_count" ]; then
+    for doc in "$DOCS/concepts/overview.md" "$DOCS/guides/testing.md"; do
+        if [ -f "$doc" ]; then
+            doc_count=$(grep -oE '[0-9]+ (automated|registered) tests' "$doc" 2>/dev/null | grep -oE '[0-9]+' | head -1)
+            if [ -n "$doc_count" ] && [ "$doc_count" != "$readme_count" ]; then
+                rel="${doc#$ROOT/}"
+                warn "Test count mismatch: README says $readme_count, $rel says $doc_count"
+            fi
+        fi
+    done
 fi
 
 # ── VISION.md status accuracy ─────────────────────────────────────────────────

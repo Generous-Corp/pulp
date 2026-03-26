@@ -1,6 +1,8 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/format/headless.hpp>
+#include <pulp/midi/message.hpp>
+#include <pulp/midi/buffer.hpp>
 #include <cmath>
 #include <numeric>
 
@@ -9,6 +11,10 @@
 // for known inputs and parameter settings.
 
 #include "pulp_gain.hpp"
+#include "pulp_tone.hpp"
+
+// PulpEffect golden tests are in test_golden_effect.cpp to avoid
+// unscoped enum collision (pulp_gain.hpp and pulp_effect.hpp both define kBypass)
 
 using Catch::Matchers::WithinAbs;
 using Catch::Matchers::WithinRel;
@@ -162,3 +168,53 @@ TEST_CASE("Golden: PulpGain state round-trip preserves audio", "[golden][pulpgai
         REQUIRE(out1.channel(0)[i] == out2.channel(0)[i]);
     }
 }
+
+// ── PulpTone (instrument) golden tests ──────────────────────────────────
+
+TEST_CASE("Golden: PulpTone produces sound with MIDI note", "[golden][pulptone]") {
+    pulp::format::HeadlessHost host(pulp::examples::create_pulp_tone);
+    host.prepare(48000.0, 1024, 0, 2); // instrument: 0 inputs, 2 outputs
+
+    pulp::midi::MidiBuffer midi_in;
+    midi_in.add(pulp::midi::MidiEvent::note_on(0, 60, 100)); // Middle C
+    pulp::midi::MidiBuffer midi_out;
+
+    pulp::audio::Buffer<float> in(0, 1024);  // no audio input for instrument
+    pulp::audio::Buffer<float> out(2, 1024);
+
+    const float* in_ptrs[] = {nullptr};
+    pulp::audio::BufferView<const float> in_view(in_ptrs, 0, 1024);
+    auto out_view = out.view();
+
+    host.process(out_view, in_view, midi_in, midi_out);
+
+    // Should produce non-zero output when a note is playing
+    float max_sample = 0.0f;
+    for (std::size_t i = 0; i < 1024; ++i) {
+        max_sample = std::max(max_sample, std::abs(out.channel(0)[i]));
+    }
+    REQUIRE(max_sample > 0.01f); // audible output
+}
+
+TEST_CASE("Golden: PulpTone is silent without MIDI", "[golden][pulptone]") {
+    pulp::format::HeadlessHost host(pulp::examples::create_pulp_tone);
+    host.prepare(48000.0, 1024, 0, 2);
+
+    pulp::midi::MidiBuffer midi_in; // empty
+    pulp::midi::MidiBuffer midi_out;
+
+    const float* in_ptrs[] = {nullptr};
+    pulp::audio::BufferView<const float> in_view(in_ptrs, 0, 1024);
+    pulp::audio::Buffer<float> out(2, 1024);
+    auto out_view = out.view();
+
+    host.process(out_view, in_view, midi_in, midi_out);
+
+    // No notes playing: output should be silence
+    float max_sample = 0.0f;
+    for (std::size_t i = 0; i < 1024; ++i) {
+        max_sample = std::max(max_sample, std::abs(out.channel(0)[i]));
+    }
+    REQUIRE(max_sample < 0.001f);
+}
+

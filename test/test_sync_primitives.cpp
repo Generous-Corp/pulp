@@ -1,8 +1,10 @@
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/runtime/seqlock.hpp>
 #include <pulp/runtime/triple_buffer.hpp>
+#include <pulp/runtime/spsc_queue.hpp>
 #include <thread>
 #include <atomic>
+#include <cmath>
 
 using namespace pulp::runtime;
 
@@ -93,7 +95,13 @@ TEST_CASE("TripleBuffer reader gets latest value", "[runtime][triple_buffer]") {
 }
 
 TEST_CASE("TripleBuffer concurrent stress test", "[runtime][triple_buffer]") {
-    TripleBuffer<TransportState> buf;
+    // Initialize with coherent state so early reads before first write are valid
+    TransportState init;
+    init.tempo = 0.0;
+    init.beat_position = 0.0;
+    init.time_sig_num = 1;
+    init.time_sig_den = 4;
+    TripleBuffer<TransportState> buf(init);
     std::atomic<bool> running{true};
     std::atomic<int> bad_reads{0};
 
@@ -122,6 +130,129 @@ TEST_CASE("TripleBuffer concurrent stress test", "[runtime][triple_buffer]") {
 
     writer.join();
     reader.join();
+
+    REQUIRE(bad_reads.load() == 0);
+}
+
+// ── Composed integration test ────────────────────────────────────────────
+// Simulates the real audio→UI pipeline: audio thread writes to both
+// TripleBuffer (meter data) and SpscQueue (events) while UI thread reads both.
+
+struct MeterData {
+    float peak_l = 0.0f;
+    float peak_r = 0.0f;
+    int block_count = 0;
+};
+
+struct UIEvent {
+    int type = 0;     // 0=param_change, 1=note_on, 2=note_off
+    int param_id = 0;
+    float value = 0.0f;
+};
+
+TEST_CASE("Composed: TripleBuffer + SpscQueue concurrent pipeline", "[runtime][integration]") {
+    TripleBuffer<MeterData> meter_buf;
+    SpscQueue<UIEvent, 256> event_queue;
+    std::atomic<bool> running{true};
+    std::atomic<int> coherence_errors{0};
+    std::atomic<int> events_received{0};
+
+    // Audio thread: writes meter data and pushes events
+    std::thread audio_thread([&] {
+        for (int i = 0; i < 100000; ++i) {
+            // Write coherent meter data
+            MeterData m;
+            m.peak_l = static_cast<float>(i) * 0.001f;
+            m.peak_r = m.peak_l * 0.5f; // invariant: peak_r == peak_l * 0.5
+            m.block_count = i;
+            meter_buf.write(m);
+
+            // Push events periodically
+            if (i % 100 == 0) {
+                UIEvent ev;
+                ev.type = i % 3;
+                ev.param_id = i / 100;
+                ev.value = static_cast<float>(i);
+                event_queue.try_push(ev); // may fail if full, that's OK
+            }
+        }
+        running = false;
+    });
+
+    // UI thread: reads meter data and pops events
+    std::thread ui_thread([&] {
+        while (running.load(std::memory_order_relaxed)) {
+            // Read latest meter data
+            auto& m = meter_buf.read();
+            // Check coherence: peak_r should be peak_l * 0.5
+            if (m.block_count > 0) {
+                float expected_r = m.peak_l * 0.5f;
+                if (std::abs(m.peak_r - expected_r) > 0.001f) {
+                    coherence_errors.fetch_add(1);
+                }
+            }
+
+            // Drain event queue
+            while (auto ev = event_queue.try_pop()) {
+                events_received.fetch_add(1);
+            }
+        }
+
+        // Final drain
+        while (auto ev = event_queue.try_pop()) {
+            events_received.fetch_add(1);
+        }
+    });
+
+    audio_thread.join();
+    ui_thread.join();
+
+    REQUIRE(coherence_errors.load() == 0);
+    REQUIRE(events_received.load() > 0); // should have received some events
+}
+
+TEST_CASE("Composed: SeqLock + TripleBuffer simultaneous access", "[runtime][integration]") {
+    SeqLock<TransportState> transport;
+    TripleBuffer<MeterData> meters;
+    std::atomic<bool> running{true};
+    std::atomic<int> bad_reads{0};
+
+    // Audio thread: writes both transport and meter data
+    std::thread audio_thread([&] {
+        for (int i = 0; i < 100000; ++i) {
+            TransportState ts;
+            ts.tempo = 120.0 + static_cast<double>(i % 60);
+            ts.beat_position = ts.tempo * 0.5;
+            ts.time_sig_num = 4;
+            ts.time_sig_den = 4;
+            transport.write(ts);
+
+            MeterData m;
+            m.peak_l = static_cast<float>(i % 1000) * 0.001f;
+            m.peak_r = m.peak_l;
+            m.block_count = i;
+            meters.write(m);
+        }
+        running = false;
+    });
+
+    // UI thread: reads both
+    std::thread ui_thread([&] {
+        while (running.load(std::memory_order_relaxed)) {
+            auto ts = transport.read();
+            if (std::abs(ts.beat_position - ts.tempo * 0.5) > 0.001) {
+                bad_reads.fetch_add(1);
+            }
+
+            auto& m = meters.read();
+            if (m.block_count > 0 && std::abs(m.peak_l - m.peak_r) > 0.001f) {
+                bad_reads.fetch_add(1);
+            }
+        }
+    });
+
+    audio_thread.join();
+    ui_thread.join();
 
     REQUIRE(bad_reads.load() == 0);
 }

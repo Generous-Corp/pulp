@@ -334,7 +334,7 @@ If it's not tested, it doesn't work. Every subsystem has tests. Every feature ha
 |-------|------|------|------|
 | Unit tests | Individual functions, classes | Catch2 | Every commit |
 | Integration tests | Subsystem interactions | Catch2 + custom harnesses | Every PR |
-| Format validation | Plugin loads correctly | auval (AU), pluginval (VST3), clap-validator | Every PR touching format code |
+| Format validation | Plugin loads correctly | CLAP dlopen, VST3 load tests; auval/pluginval/clap-validator for local use | Every PR touching format code |
 | Audio golden-files | DSP output matches reference | Custom harness (bit-exact or tolerance) | Every PR touching signal code |
 | Visual regression | UI renders correctly | Screenshot comparison | Every PR touching view/render code |
 | Build matrix | Builds on all platforms | GitHub Actions CI | Every PR |
@@ -376,7 +376,7 @@ Build → Validate → Install
 ```
 
 - `pulp build` — builds the plugin bundle(s) in the build directory
-- `pulp build --test` — builds + runs validation (auval for AU, pluginval for VST3, clap-validator for CLAP)
+- `pulp build --test` — builds + runs validation (auval for AU if installed, pluginval for VST3 if installed, CLAP dlopen tests)
 - `pulp build --install` — builds + validates + installs to system folders (only if validation passes)
 - `pulp build --install --skip-validation` — builds + installs WITHOUT validation (for debugging adapter code only, never for normal use)
 

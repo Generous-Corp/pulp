@@ -219,7 +219,7 @@ This isn't a bolt-on. The framework, the build system, the project templates, an
 GitHub Actions workflows ship with every Pulp project:
 
 - Multi-platform build matrix (macOS ARM64, Windows x64, Linux x64)
-- Automated plugin format validation (auval, pluginval, clap-validator)
+- Plugin format validation tests (CLAP dlopen, VST3 load tests; auval and pluginval available for local use)
 - macOS code signing and notarization via `notarytool`
 - Windows Authenticode and Azure Trusted Signing
 - EdDSA-signed artifacts for Sparkle/WinSparkle auto-updates
@@ -372,7 +372,7 @@ Every phase ships a validation example that proves the framework works. These ex
 
 **Core framework (stable/usable):**
 - C++20 cross-platform core on macOS, Windows, Linux, iOS
-- Four plugin formats: VST3, AU v2, AUv3, CLAP — validated with auval and clap-validator
+- Four plugin formats: VST3, AU v2, AUv3, CLAP — with format-specific validation tests (auval and clap-validator available for local use)
 - LV2 format adapter with TTL manifest generation (Linux)
 - Standalone application host with CoreAudio/CoreMIDI (macOS), WASAPI/Win32 MIDI (Windows), ALSA/JACK (Linux)
 - iOS audio session management (AVAudioSession) and AUv3 support
@@ -425,16 +425,22 @@ Every phase ships a validation example that proves the framework works. These ex
 These items from the vision above are planned but do not exist in the codebase today:
 
 - AAX format adapter (requires Avid SDK)
-- Web/WASM target runtime validation (build pipeline exists, awaiting end-to-end test)
-- D3D12 and Vulkan GPU rendering runtime validation (surface creation implemented, awaiting hardware test)
+- ASIO audio I/O (Windows, requires Steinberg SDK)
 - Musical Typing component
 - Audio Device Selector component
 - `pulp design` CLI command (AI-driven design session)
-- WebView embedding (Monaco editor, docs panels)
 - Multi-window support (floating palettes, inspectors)
-- MIDI 2.0 UMP / MPE
-- ASIO audio I/O (Windows, requires Steinberg SDK)
-- Plugin hosting (pulp-host: scanner, plugin slot, signal graph)
 - WebGPU compute shaders for audio (additive synthesis, FFT, ML inference)
+
+These items are implemented but not yet runtime-validated on target hardware:
+
+- Web/WASM target runtime validation (build pipeline and tests exist, awaiting browser end-to-end test)
+- D3D12 and Vulkan GPU rendering runtime validation (surface creation implemented, awaiting hardware test)
+
+These items were listed as "not implemented" in earlier versions of this document but now exist in the codebase:
+
+- MIDI 2.0 UMP / MPE — `ump.hpp` with UmpPacket, MpeConfig, 9 tests
+- Plugin hosting architecture — `core/host/` with PluginScanner, PluginSlot, SignalGraph, 10 tests (architecture only; format-specific plugin loading not yet implemented)
+- WebView embedding — `web_view.hpp/cpp` with CHOC WebView wrapper, 2 tests
 
 See [docs/reference/capabilities.md](docs/reference/capabilities.md) for the detailed current capability matrix and [docs/status/support-matrix.yaml](docs/status/support-matrix.yaml) for machine-readable status.
