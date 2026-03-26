@@ -65,8 +65,15 @@ def md_to_html(md: str) -> str:
                 p = re.sub(r'__(.+?)__', r'<strong>\1</strong>', p)
                 p = re.sub(r'\*(.+?)\*', r'<em>\1</em>', p)
                 p = re.sub(r'_(.+?)_', r'<em>\1</em>', p)
-                # Links: [text](url)
-                p = re.sub(r'\[([^\]]+)\]\(([^)]+)\)', r'<a href="\2">\1</a>', p)
+                # Links: [text](url) — rewrite .md refs to .html
+                def rewrite_link(m):
+                    text, url = m.group(1), m.group(2)
+                    if url.endswith('.md') and not url.startswith('http'):
+                        url = url.replace('.md', '.html')
+                        # Strip path prefixes — all pages are at root level
+                        url = url.split('/')[-1]
+                    return f'<a href="{url}">{text}</a>'
+                p = re.sub(r'\[([^\]]+)\]\(([^)]+)\)', rewrite_link, p)
                 result.append(p)
         return ''.join(result)
 
@@ -258,9 +265,14 @@ NAV_SECTIONS = [
         ('cli', 'CLI Reference'),
         ('cmake', 'CMake Reference'),
     ]),
+    ('Guides', [
+        ('web-plugins', 'Web Plugins'),
+        ('gpu-validation', 'GPU Validation'),
+    ]),
     ('Policies', [
         ('code-style', 'Code Style'),
         ('agent-rules', 'Agent Rules'),
+        ('licensing', 'Licensing & Acknowledgements'),
     ]),
 ]
 
@@ -325,6 +337,14 @@ a:hover {{ text-decoration: underline; }}
   right: 0;
   z-index: 100;
   height: 48px;
+}}
+.alpha-badge {{
+  font-size: 11px;
+  color: #c9a227;
+  border: 1px solid #c9a22744;
+  border-radius: 4px;
+  padding: 2px 8px;
+  white-space: nowrap;
 }}
 .header-left {{
   display: flex;
@@ -465,13 +485,11 @@ a:hover {{ text-decoration: underline; }}
 </style>
 </head>
 <body>
-<div style="background:#f9e154;color:#1e1e2e;text-align:center;padding:8px 16px;font-size:13px;font-weight:600;">
-  ⚠️ Alpha — This project is under active development. APIs, docs, and features may change without notice.
-</div>
 <header class="header">
   <div class="header-left">
     <h1>PULP</h1>
     <span class="branch-badge">{html.escape(branch)}</span>
+    <span class="alpha-badge">Alpha — under active development</span>
   </div>
   <div class="header-right">
     <a href="https://github.com/danielraffel/pulp">GitHub</a>
@@ -496,32 +514,34 @@ MIT-licensed. No royalties. No copyleft.</p>
 
 <h2>What is supported today</h2>
 <ul>
-<li><strong>Formats</strong>: VST3, Audio Unit v2, CLAP, standalone, headless</li>
-<li><strong>Platform</strong>: macOS (ARM64 + x86_64). Windows and Linux build stubs exist.</li>
-<li><strong>Audio</strong>: CoreAudio device I/O, buffer processing, audio file read/write</li>
-<li><strong>MIDI</strong>: CoreMIDI, note/CC/pitchbend events, MIDI file I/O</li>
-<li><strong>DSP</strong>: 19 signal processors (oscillator, biquad, SVF, ladder filter, compressor, reverb, delay, chorus, phaser, and more)</li>
-<li><strong>Parameters</strong>: thread-safe, automatable, serializable, with CLAP modulation support</li>
-<li><strong>GPU rendering</strong>: Dawn/Metal + Skia Graphite (experimental)</li>
-<li><strong>View system</strong>: 7 widgets, flex layout, JS scripting, hot-reload (experimental)</li>
-<li><strong>Testing</strong>: 270 automated tests across 12 subsystems</li>
-<li><strong>Shipping</strong>: codesign, notarization, DMG/PKG, appcast with Ed25519 signing</li>
+<li><strong>Formats</strong>: VST3, AU v2, AUv3, CLAP, LV2, WAMv2, WebCLAP, standalone, headless</li>
+<li><strong>Platforms</strong>: macOS, Windows (WASAPI, NSIS), Linux (ALSA, JACK, LV2), Browser (WASM)</li>
+<li><strong>Audio</strong>: CoreAudio, WASAPI, ALSA, JACK, Web Audio API — device I/O, buffer processing, file read/write</li>
+<li><strong>MIDI</strong>: CoreMIDI, Win32 MIDI, ALSA MIDI, Web MIDI, MIDI 2.0 UMP, MPE</li>
+<li><strong>DSP</strong>: 30+ signal processors (oscillator, biquad, SVF, ladder, FIR, TPT, compressor, reverb, delay, chorus, phaser, FFT, convolver, and more)</li>
+<li><strong>Parameters</strong>: thread-safe, automatable, serializable, with CLAP modulation, presets, undo/redo</li>
+<li><strong>GPU rendering</strong>: Dawn (Metal/D3D12/Vulkan) + Skia Graphite on all platforms</li>
+<li><strong>View system</strong>: TextEditor, ComboBox, TabPanel, ListBox, TreeView, and more — flex layout, JS scripting, hot-reload</li>
+<li><strong>Plugin hosting</strong>: PluginScanner, PluginSlot, SignalGraph for DAW-like apps</li>
+<li><strong>Testing</strong>: 642 automated tests across 13 subsystems</li>
+<li><strong>Shipping</strong>: codesign, notarization, DMG/PKG (macOS), NSIS (Windows), .deb (Linux), appcast</li>
 </ul>
 
 <h2>Where to start</h2>
 <ul>
 <li><a href="{base_url}getting-started.html">Getting Started</a> — build your first plugin step by step</li>
-<li><a href="{base_url}examples-index.html">Examples</a> — browse 7 example projects by category</li>
+<li><a href="{base_url}examples-index.html">Examples</a> — browse 11 example projects by category</li>
 <li><a href="{base_url}capabilities.html">Capabilities</a> — full capability matrix with status</li>
 <li><a href="{base_url}overview.html">Overview</a> — what Pulp is and how it is organized</li>
 </ul>
 
 <h2>Reference</h2>
 <ul>
-<li><a href="{base_url}modules.html">Modules</a> — 12 subsystems with status, dependencies, and key headers</li>
+<li><a href="{base_url}modules.html">Modules</a> — 13 subsystems with status, dependencies, and key headers</li>
 <li><a href="{base_url}api/">API Reference</a> — Doxygen-generated class and function documentation</li>
-<li><a href="{base_url}cli.html">CLI Reference</a> — <code>pulp</code> command reference (build, test, validate, ship, docs)</li>
+<li><a href="{base_url}cli.html">CLI Reference</a> — <code>pulp</code> command reference</li>
 <li><a href="{base_url}cmake.html">CMake Reference</a> — <code>pulp_add_plugin()</code> and build system functions</li>
+<li><a href="{base_url}licensing.html">Licensing &amp; Acknowledgements</a> — dependencies, standards, attribution</li>
 <li><a href="{base_url}architecture.html">Architecture</a> — subsystem dependencies, thread model, GPU stack</li>
 </ul>
 
@@ -529,6 +549,7 @@ MIT-licensed. No royalties. No copyleft.</p>
 <ul>
 <li><a href="{base_url}build.html">Building</a> — requirements, options, platform notes</li>
 <li><a href="{base_url}testing.html">Testing</a> — running tests, validation, writing tests</li>
+<li><a href="{base_url}web-plugins.html">Web Plugins</a> — WAMv2, WebCLAP, browser demos</li>
 <li><a href="{base_url}docs-maintenance.html">Docs Maintenance</a> — how docs stay consistent with code</li>
 </ul>
 
