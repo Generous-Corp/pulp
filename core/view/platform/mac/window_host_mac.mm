@@ -321,7 +321,9 @@ private:
     }
 
     void render_frame() {
-        if (!gpu_surface_ || !skia_surface_ || !needs_repaint_) return;
+        if (!gpu_surface_ || !skia_surface_) return;
+        // GPU path is frame-driven: render every display-link tick.
+        // This supports continuous animation without explicit invalidation.
 
         // Frame lifecycle: acquire → wrap → render → submit → present
         if (!gpu_surface_->begin_frame()) return;

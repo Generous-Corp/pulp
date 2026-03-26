@@ -24,3 +24,6 @@ add_subdirectory(PulpSynth)
 
 # Phase 17: PulpSampler (audio file sampler with MIDI + ADSR)
 add_subdirectory(PulpSampler)
+
+# GPU Validation Demo: Modulation Matrix with animated cables
+add_subdirectory(gpu-demo)
