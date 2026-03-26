@@ -15,6 +15,21 @@
 #import <Metal/Metal.h>
 #endif
 
+// ── App menu helper ──────────────────────────────────────────────────────────
+
+static void install_app_menu(NSString* appName) {
+    NSMenu* menuBar = [[NSMenu alloc] init];
+    NSMenuItem* appItem = [[NSMenuItem alloc] init];
+    [menuBar addItem:appItem];
+    [NSApp setMainMenu:menuBar];
+
+    NSMenu* appMenu = [[NSMenu alloc] init];
+    [appMenu addItemWithTitle:[@"Quit " stringByAppendingString:appName]
+                       action:@selector(terminate:)
+                keyEquivalent:@"q"];
+    [appItem setSubmenu:appMenu];
+}
+
 // ── PulpView: CoreGraphics NSView (CPU rendering path) ───────────────────────
 
 @interface PulpView : NSView
@@ -178,6 +193,7 @@ public:
         @autoreleasepool {
             [NSApplication sharedApplication];
             [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
+            install_app_menu([window_ title]);
             show();
             [NSApp activateIgnoringOtherApps:YES];
             [NSApp run];
@@ -254,6 +270,7 @@ public:
         @autoreleasepool {
             [NSApplication sharedApplication];
             [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
+            install_app_menu([window_ title]);
 
             // Start display-linked render loop
             start_display_link();
