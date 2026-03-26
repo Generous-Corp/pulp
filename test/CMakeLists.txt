@@ -231,6 +231,21 @@ add_executable(pulp-test-load-measurer test_load_measurer.cpp)
 target_link_libraries(pulp-test-load-measurer PRIVATE pulp::audio Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-load-measurer)
 
+# FilterDesign tests
+add_executable(pulp-test-filter-design test_filter_design.cpp)
+target_link_libraries(pulp-test-filter-design PRIVATE pulp::signal Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-filter-design)
+
+# TreeView tests
+add_executable(pulp-test-tree-view test_tree_view.cpp)
+target_link_libraries(pulp-test-tree-view PRIVATE pulp::view Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-tree-view)
+
+# Undo manager tests
+add_executable(pulp-test-undo-manager test_undo_manager.cpp)
+target_link_libraries(pulp-test-undo-manager PRIVATE pulp::state Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-undo-manager)
+
 # Golden-file audio tests (uses HeadlessHost + PulpGain)
 add_executable(pulp-test-golden test_golden_audio.cpp)
 target_link_libraries(pulp-test-golden PRIVATE pulp::format Catch2::Catch2WithMain)
