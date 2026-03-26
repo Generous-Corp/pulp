@@ -1,0 +1,82 @@
+# WASM Build and Deploy Workflow
+# Builds Pulp examples as WebAssembly and deploys to GitHub Pages
+#
+# Trigger: push to main (when WASM code changes) or manual dispatch
+
+name: WASM Build
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'core/**'
+      - 'examples/**'
+      - 'tools/cmake/PulpWasm.cmake'
+      - 'ci/wasm-build.yml'
+
+jobs:
+  build-wasm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Emscripten
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: 3.1.56
+
+      - name: Configure WASM build
+        run: |
+          emcmake cmake -S . -B build-wasm \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DPULP_WASM=ON \
+            -DPULP_BUILD_TESTS=OFF \
+            -DPULP_BUILD_PLUGINS=OFF
+
+      - name: Build WASM targets
+        run: cmake --build build-wasm -j$(nproc)
+
+      - name: Prepare deploy directory
+        run: |
+          mkdir -p deploy
+          # Copy all .html/.js/.wasm files
+          find build-wasm -name "*.html" -o -name "*.js" -o -name "*.wasm" | while read f; do
+            cp "$f" deploy/
+          done
+          # Create index page
+          cat > deploy/index.html << 'INDEXEOF'
+          <!DOCTYPE html>
+          <html>
+          <head><title>Pulp WASM Demos</title></head>
+          <body>
+            <h1>Pulp WASM Demos</h1>
+            <ul>
+              <li><a href="pulp-gain.html">PulpGain</a> — Stereo gain effect</li>
+              <li><a href="pulp-tone.html">PulpTone</a> — Polyphonic synth</li>
+            </ul>
+          </body>
+          </html>
+          INDEXEOF
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: deploy/
+
+  deploy:
+    needs: build-wasm
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
