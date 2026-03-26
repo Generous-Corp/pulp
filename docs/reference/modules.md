@@ -30,9 +30,9 @@ Audio buffer types, device I/O (CoreAudio on macOS), and audio file reading/writ
 
 **Status**: usable
 **Dependencies**: runtime
-**Headers**: `pulp/midi/midi.hpp`, `pulp/midi/buffer.hpp`, `pulp/midi/message.hpp`, `pulp/midi/device.hpp`, `pulp/midi/midi_file.hpp`
+**Headers**: `pulp/midi/midi.hpp`, `pulp/midi/buffer.hpp`, `pulp/midi/message.hpp`, `pulp/midi/device.hpp`, `pulp/midi/midi_file.hpp`, `pulp/midi/rpn_parser.hpp`, `pulp/midi/keyboard_state.hpp`
 
-MIDI message types, buffer management, device I/O (CoreMIDI on macOS), and MIDI file reading/writing. `MidiBuffer` is the primary MIDI container.
+MIDI message types, buffer management, device I/O (CoreMIDI on macOS), and MIDI file reading/writing. `MidiBuffer` is the primary MIDI container. `RpnParser` extracts 14-bit RPN/NRPN parameter messages from CC sequences. `MidiKeyboardState` tracks polyphonic key state across 16 channels with velocity and listener callbacks.
 
 ## signal
 
@@ -45,7 +45,7 @@ DSP algorithm library. Includes:
 - Oscillators (sine, saw, square, triangle, noise)
 - Filters: biquad, SVF, ladder, Linkwitz-Riley, FIR (windowed-sinc), TPT first-order
 - Effects: delay line, chorus, phaser, reverb, waveshaper, compressor, noise gate
-- Utilities: gain, panner, ADSR, smoothed value, log-ramped value, oversampling, FFT, windowing, ballistics filter, processor chain, lookup table
+- Utilities: gain, panner, ADSR, smoothed value, log-ramped value, oversampling, FFT, windowing, ballistics filter, processor chain, lookup table, interpolators (linear, Hermite, Lagrange, windowed-sinc)
 
 Each algorithm is a standalone header-only class with no framework coupling.
 
