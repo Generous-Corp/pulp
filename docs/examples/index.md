@@ -10,7 +10,7 @@ These examples are polished and demonstrate best practices for building Pulp plu
 
 | Example | Summary | Formats |
 |---------|---------|---------|
-| [PulpGain](pulp-gain.md) | Stereo gain effect with input/output gain and bypass | VST3, AU, CLAP, Standalone |
+| [PulpGain](example-pulp-gain.html) | Stereo gain effect with input/output gain and bypass | VST3, AU, CLAP, Standalone |
 
 ### Validation
 
@@ -18,11 +18,11 @@ These examples exist to test and validate specific subsystems of the framework.
 
 | Example | Summary | Formats |
 |---------|---------|---------|
-| [PulpTone](pulp-tone.md) | Polyphonic oscillator synth with MIDI input | VST3, AU, CLAP, Standalone |
-| [PulpEffect](pulp-effect.md) | Biquad filter with frequency, resonance, type, and mix | VST3, AU, CLAP |
-| [PulpCompressor](pulp-compressor.md) | Sidechain compressor with multi-bus input | VST3, AU, CLAP |
-| [PulpDrums](pulp-drums.md) | Generative drum sequencer with MIDI output | CLAP |
-| [PulpSynth](pulp-synth.md) | Macro oscillator synth using the signal DSP library | CLAP |
+| [PulpTone](example-pulp-tone.html) | Polyphonic oscillator synth with MIDI input | VST3, AU, CLAP, Standalone |
+| [PulpEffect](example-pulp-effect.html) | Biquad filter with frequency, resonance, type, and mix | VST3, AU, CLAP |
+| [PulpCompressor](example-pulp-compressor.html) | Sidechain compressor with multi-bus input | VST3, AU, CLAP |
+| [PulpDrums](example-pulp-drums.html) | Generative drum sequencer with MIDI output | CLAP |
+| [PulpSynth](example-pulp-synth.html) | Macro oscillator synth using the signal DSP library | CLAP |
 
 ### Experimental
 
@@ -30,7 +30,7 @@ These examples explore features that are not yet stable across all platforms.
 
 | Example | Summary | Formats |
 |---------|---------|---------|
-| [UI Preview](ui-preview.md) | Standalone app for testing the view/widget and GPU rendering pipeline | Standalone (macOS only) |
+| [UI Preview](example-ui-preview.html) | Standalone app for testing the view/widget and GPU rendering pipeline | Standalone (macOS only) |
 
 ## Building Examples
 

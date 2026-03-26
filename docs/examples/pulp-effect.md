@@ -64,5 +64,5 @@ A biquad filter effect with frequency, resonance, filter type (lowpass/highpass/
 
 ## Related Examples
 
-- [PulpGain](pulp-gain.md) -- simpler effect with fewer parameters
-- [PulpCompressor](pulp-compressor.md) -- another effect example with sidechain and multi-bus support
+- [PulpGain](example-pulp-gain.html) -- simpler effect with fewer parameters
+- [PulpCompressor](example-pulp-compressor.html) -- another effect example with sidechain and multi-bus support

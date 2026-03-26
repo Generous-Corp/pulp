@@ -76,6 +76,6 @@ The same Processor code that runs as VST3/AU/CLAP is compiled to WebAssembly and
 
 ## Related Examples
 
-- [PulpEffect](pulp-effect.md) -- adds more parameter types and biquad DSP
-- [PulpTone](pulp-tone.md) -- adds MIDI input and polyphonic voice handling
-- [UI Preview](ui-preview.md) -- demonstrates the view/widget system using PulpGain-like parameters
+- [PulpEffect](example-pulp-effect.html) -- adds more parameter types and biquad DSP
+- [PulpTone](example-pulp-tone.html) -- adds MIDI input and polyphonic voice handling
+- [UI Preview](example-ui-preview.html) -- demonstrates the view/widget system using PulpGain-like parameters

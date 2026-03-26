@@ -190,3 +190,8 @@ docs:
     path: policies/agent-contribution-rules.md
     kind: policy
     summary: Contribution rules for AI agents and automated tools
+
+  - slug: licensing
+    path: reference/licensing.md
+    kind: reference
+    summary: Licensing, dependencies, acknowledgements, and clean-room policy

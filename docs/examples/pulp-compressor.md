@@ -66,5 +66,5 @@ A dynamics compressor with optional sidechain input. The first Pulp example with
 
 ## Related Examples
 
-- [PulpEffect](pulp-effect.md) -- simpler single-bus effect
-- [PulpGain](pulp-gain.md) -- the simplest effect example
+- [PulpEffect](example-pulp-effect.html) -- simpler single-bus effect
+- [PulpGain](example-pulp-gain.html) -- the simplest effect example

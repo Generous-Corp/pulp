@@ -67,5 +67,5 @@ A macro oscillator synthesizer with filter, full ADSR envelope, oscillator detun
 
 ## Related Examples
 
-- [PulpTone](pulp-tone.md) -- simpler synth without the signal library, implements oscillators inline
-- [PulpDrums](pulp-drums.md) -- another CLAP-only example, focused on MIDI output
+- [PulpTone](example-pulp-tone.html) -- simpler synth without the signal library, implements oscillators inline
+- [PulpDrums](example-pulp-drums.html) -- another CLAP-only example, focused on MIDI output

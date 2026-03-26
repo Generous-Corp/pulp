@@ -48,4 +48,4 @@ This is not a plugin. It builds as a standalone executable only.
 
 ## Related Examples
 
-- [PulpGain](pulp-gain.md) -- the parameters used in this preview (Gain, Mix, Bypass) mirror PulpGain's parameter set
+- [PulpGain](example-pulp-gain.html) -- the parameters used in this preview (Gain, Mix, Bypass) mirror PulpGain's parameter set

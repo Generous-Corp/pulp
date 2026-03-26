@@ -65,6 +65,6 @@ A simple 8-voice polyphonic oscillator synth with MIDI input. Validates the inst
 
 ## Related Examples
 
-- [PulpGain](pulp-gain.md) -- simpler starting point for effects
-- [PulpSynth](pulp-synth.md) -- more advanced synth using the signal DSP library with ADSR, filter, and detune
-- [PulpDrums](pulp-drums.md) -- MIDI output instead of MIDI input
+- [PulpGain](example-pulp-gain.html) -- simpler starting point for effects
+- [PulpSynth](example-pulp-synth.html) -- more advanced synth using the signal DSP library with ADSR, filter, and detune
+- [PulpDrums](example-pulp-drums.html) -- MIDI output instead of MIDI input

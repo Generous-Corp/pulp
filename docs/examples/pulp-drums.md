@@ -67,5 +67,5 @@ A generative drum sequencer that outputs MIDI note events. The first Pulp exampl
 
 ## Related Examples
 
-- [PulpTone](pulp-tone.md) -- MIDI input (note-on/off consumption) rather than MIDI output
-- [PulpSynth](pulp-synth.md) -- another CLAP-only example, focused on synthesis
+- [PulpTone](example-pulp-tone.html) -- MIDI input (note-on/off consumption) rather than MIDI output
+- [PulpSynth](example-pulp-synth.html) -- another CLAP-only example, focused on synthesis
