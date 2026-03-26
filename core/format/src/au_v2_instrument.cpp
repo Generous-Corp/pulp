@@ -144,12 +144,6 @@ public:
         auto me = midi::MidiEvent::note_on(inChannel, inNoteNumber, inVelocity);
         me.sample_offset = static_cast<int32_t>(inStartFrame);
         pending_midi_.add(me);
-        runtime::log_info("AU instrument: NoteOn ch={} note={} vel={}", inChannel, inNoteNumber, inVelocity);
-        // Debug: write to file since Console may not show XPC logs
-        if (auto* f = fopen("/tmp/pulp-pluck-debug.log", "a")) {
-            fprintf(f, "NoteOn ch=%d note=%d vel=%d\n", inChannel, inNoteNumber, inVelocity);
-            fclose(f);
-        }
         return noErr;
     }
 
@@ -169,23 +163,7 @@ public:
                     const AudioTimeStamp& inTimeStamp,
                     UInt32 inNumberFrames) override
     {
-        if (!processor_) {
-            if (auto* f = fopen("/tmp/pulp-pluck-debug.log", "a")) {
-                fprintf(f, "Render: NO PROCESSOR\n"); fclose(f);
-            }
-            return noErr;
-        }
-        // Log first render call
-        static bool logged_render = false;
-        if (!logged_render) {
-            if (auto* f = fopen("/tmp/pulp-pluck-debug.log", "a")) {
-                fprintf(f, "Render: first call, frames=%u, channels=%u\n",
-                    (unsigned)inNumberFrames,
-                    (unsigned)GetOutput(0)->GetStreamFormat().mChannelsPerFrame);
-                fclose(f);
-            }
-            logged_render = true;
-        }
+        if (!processor_) return noErr;
 
         // Sync parameter values
         for (const auto& param : store_.all_params()) {

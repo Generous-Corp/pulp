@@ -38,3 +38,4 @@ __pycache__/
 .env
 .env.*
 !.env.example
+examples/web-demos/wasm-build/build/

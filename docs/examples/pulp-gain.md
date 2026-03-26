@@ -20,6 +20,12 @@ The simplest possible Pulp plugin. A stereo gain effect with input gain, output 
 - Bundle metadata files (`Info.plist.au`, `Info.plist.vst3`, `moduleinfo.json`)
 - Format validation tests (auval, pluginval, CLAP dlopen)
 
+## Try in Browser
+
+**[Open PulpGain in Browser Host →](../browser-host/?plugin=PulpGain)**
+
+The same Processor code that runs as VST3/AU/CLAP is compiled to WebAssembly and runs in your browser via the Web Audio API. Drop an audio file to hear gain processing in real-time.
+
 ## Supported Formats
 
 | Format | Supported |
@@ -28,6 +34,8 @@ The simplest possible Pulp plugin. A stereo gain effect with input gain, output 
 | AU v2 | Yes |
 | CLAP | Yes |
 | Standalone | Yes |
+| WAMv2 (Browser) | Yes |
+| WebCLAP (WASM) | Yes |
 
 ## Supported Platforms
 
