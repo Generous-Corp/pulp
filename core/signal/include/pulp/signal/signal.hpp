@@ -26,3 +26,4 @@
 #include <pulp/signal/processor_chain.hpp>
 #include <pulp/signal/lookup_table.hpp>
 #include <pulp/signal/tpt_filter.hpp>
+#include <pulp/signal/interpolator.hpp>
