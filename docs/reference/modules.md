@@ -43,9 +43,9 @@ MIDI message types, buffer management, device I/O (CoreMIDI on macOS), and MIDI 
 DSP algorithm library. Includes:
 
 - Oscillators (sine, saw, square, triangle, noise)
-- Filters: biquad, SVF, ladder, Linkwitz-Riley
+- Filters: biquad, SVF, ladder, Linkwitz-Riley, FIR (windowed-sinc), TPT first-order
 - Effects: delay line, chorus, phaser, reverb, waveshaper, compressor, noise gate
-- Utilities: gain, panner, ADSR, smoothed value, oversampling, FFT, windowing
+- Utilities: gain, panner, ADSR, smoothed value, log-ramped value, oversampling, FFT, windowing, ballistics filter, processor chain, lookup table
 
 Each algorithm is a standalone header-only class with no framework coupling.
 
