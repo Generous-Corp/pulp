@@ -34,7 +34,7 @@ formats:
     windows: partial
     linux: partial
   auv3:
-    macos: planned
+    macos: experimental
     ios: planned
   lv2:
     linux: planned

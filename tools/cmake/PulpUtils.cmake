@@ -98,6 +98,17 @@ function(pulp_add_plugin target)
         endif()
     endif()
 
+    # ── AUv3 ──────────────────────────────────────────────────────────────
+    if("AUv3" IN_LIST PLUGIN_FORMATS AND APPLE)
+        if(NOT PLUGIN_PLUGIN_CODE OR NOT PLUGIN_MANUFACTURER_CODE)
+            message(WARNING "pulp_add_plugin(${target}): AUv3 format requires PLUGIN_CODE and MANUFACTURER_CODE")
+        else()
+            _pulp_add_auv3(${target} "${PLUGIN_PLUGIN_NAME}" "${PLUGIN_BUNDLE_ID}"
+                           "${PLUGIN_VERSION}" "${PLUGIN_MANUFACTURER}"
+                           "${PLUGIN_CATEGORY}" "${PLUGIN_PLUGIN_CODE}" "${PLUGIN_MANUFACTURER_CODE}")
+        endif()
+    endif()
+
     # ── Standalone ───────────────────────────────────────────────────────
     if("Standalone" IN_LIST PLUGIN_FORMATS)
         _pulp_add_standalone(${target} "${PLUGIN_PLUGIN_NAME}")
@@ -302,6 +313,63 @@ function(_pulp_add_au target name bundle_id version manufacturer category plugin
         set_target_properties(${target}_AU PROPERTIES
             MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_BINARY_DIR}/${target}_Info.plist.au")
     endif()
+endfunction()
+
+# ── Internal: AUv3 app extension target ────────────────────────────────
+function(_pulp_add_auv3 target name bundle_id version manufacturer category plugin_code manufacturer_code)
+    if(NOT APPLE)
+        return()
+    endif()
+
+    # Map category to AU type and tag
+    if(category STREQUAL "Instrument")
+        set(au_type "aumu")
+        set(au_tag "Synthesizer")
+    elseif(category STREQUAL "MidiEffect")
+        set(au_type "aumi")
+        set(au_tag "MIDI")
+    else()
+        set(au_type "aufx")
+        set(au_tag "Effects")
+    endif()
+
+    # AUv3 is built as a loadable module (.appex)
+    add_library(${target}_AUv3 MODULE
+        ${PULP_${target}_CORE_OBJECTS}
+        ${CMAKE_SOURCE_DIR}/core/format/src/au_adapter.mm
+        ${CMAKE_SOURCE_DIR}/core/format/src/au_entry.mm
+    )
+    target_link_libraries(${target}_AUv3 PRIVATE
+        ${target}_Core pulp::format
+        "-framework AudioToolbox"
+        "-framework AVFoundation"
+        "-framework CoreAudioKit"
+    )
+    target_include_directories(${target}_AUv3 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+    # Configure Info.plist
+    set(PLUGIN_NAME "${name}")
+    set(BUNDLE_ID "${bundle_id}")
+    set(VERSION "${version}")
+    set(MANUFACTURER_CODE "${manufacturer_code}")
+    set(PLUGIN_CODE "${plugin_code}")
+    set(AU_TYPE "${au_type}")
+    set(AU_TAG "${au_tag}")
+    configure_file(
+        ${CMAKE_SOURCE_DIR}/tools/templates/auv3/Info.plist.template
+        ${CMAKE_BINARY_DIR}/AUv3/${target}.appex/Contents/Info.plist
+        @ONLY
+    )
+
+    set_target_properties(${target}_AUv3 PROPERTIES
+        BUNDLE TRUE
+        BUNDLE_EXTENSION "appex"
+        MACOSX_BUNDLE_INFO_PLIST "${CMAKE_BINARY_DIR}/AUv3/${target}.appex/Contents/Info.plist"
+        LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/AUv3"
+        OUTPUT_NAME "${name}"
+        PREFIX ""
+        SUFFIX ".appex"
+    )
 endfunction()
 
 # ── Internal: Standalone target ─────────────────────────────────────────
