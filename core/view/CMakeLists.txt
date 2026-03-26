@@ -38,16 +38,28 @@ endif()
 
 # Platform-specific window host and frameworks
 if(APPLE)
-    target_sources(pulp-view PRIVATE
-        platform/mac/window_host_mac.mm
-        platform/mac/plugin_view_host_mac.mm
-        platform/mac/screenshot_mac.mm
-        platform/mac/drag_drop_mac.mm
-    )
-    target_link_libraries(pulp-view PRIVATE
-        "-framework CoreServices"
-        "-framework Cocoa"
-        "-framework ImageIO"
-        "-framework UniformTypeIdentifiers"
-    )
+    if(PULP_IOS)
+        target_sources(pulp-view PRIVATE
+            platform/ios/window_host_ios.mm
+            platform/ios/plugin_view_host_ios.mm
+        )
+        target_link_libraries(pulp-view PRIVATE
+            "-framework UIKit"
+            "-framework CoreGraphics"
+            "-framework QuartzCore"
+        )
+    else()
+        target_sources(pulp-view PRIVATE
+            platform/mac/window_host_mac.mm
+            platform/mac/plugin_view_host_mac.mm
+            platform/mac/screenshot_mac.mm
+            platform/mac/drag_drop_mac.mm
+        )
+        target_link_libraries(pulp-view PRIVATE
+            "-framework CoreServices"
+            "-framework Cocoa"
+            "-framework ImageIO"
+            "-framework UniformTypeIdentifiers"
+        )
+    endif()
 endif()

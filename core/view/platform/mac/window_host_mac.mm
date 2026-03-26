@@ -1,6 +1,7 @@
 #include <pulp/view/window_host.hpp>
 
-#ifdef __APPLE__
+#include <TargetConditionals.h>
+#if TARGET_OS_OSX
 
 #include <pulp/canvas/cg_canvas.hpp>
 #import <Cocoa/Cocoa.h>
@@ -137,4 +138,4 @@ std::unique_ptr<WindowHost> WindowHost::create(View& root, const WindowOptions& 
 
 } // namespace pulp::view
 
-#endif // __APPLE__
+#endif // TARGET_OS_OSX

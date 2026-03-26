@@ -171,7 +171,11 @@ public struct PulpEditorView<Content: View>: View {
             }
             .padding(.horizontal)
             .padding(.vertical, 8)
+            #if os(macOS)
             .background(Color(.windowBackgroundColor).opacity(0.5))
+            #else
+            .background(Color(.systemBackground).opacity(0.5))
+            #endif
 
             // Content
             content

@@ -156,9 +156,9 @@ FetchContent_MakeAvailable(clap)
 set(PULP_HAS_CLAP TRUE)
 message(STATUS "Pulp: CLAP SDK available")
 
-# Apple AudioUnitSDK (Apache 2.0) — for AU v2 plugin support
+# Apple AudioUnitSDK (Apache 2.0) — for AU v2 plugin support (macOS only, not iOS)
 set(AUSDK_DIR "${CMAKE_CURRENT_SOURCE_DIR}/external/AudioUnitSDK")
-if(APPLE AND EXISTS "${AUSDK_DIR}/include/AudioUnitSDK/AUBase.h")
+if(PULP_MACOS AND EXISTS "${AUSDK_DIR}/include/AudioUnitSDK/AUBase.h")
     set(PULP_HAS_AUSDK TRUE)
 
     file(GLOB AUSDK_SOURCES "${AUSDK_DIR}/src/AudioUnitSDK/*.cpp")

@@ -12,7 +12,8 @@ platforms:
     status: partial
     notes: Build stubs exist. Not yet validated end-to-end.
   ios:
-    status: planned
+    status: experimental
+    notes: Foundation in place. AVAudioSession, AUv3, UIKit views, Metal surface.
   web:
     status: planned
 
@@ -35,7 +36,7 @@ formats:
     linux: partial
   auv3:
     macos: experimental
-    ios: planned
+    ios: experimental
   lv2:
     linux: planned
   aax:
@@ -46,6 +47,9 @@ audio_io:
   coreaudio:
     status: usable
     platform: macos
+  avaudiosession:
+    status: experimental
+    platform: ios
   wasapi:
     status: planned
     platform: windows
@@ -71,6 +75,9 @@ rendering:
   skia_graphite:
     status: experimental
     platform: macos
+  dawn_metal_ios:
+    status: experimental
+    platform: ios
   dawn_d3d12:
     status: planned
     platform: windows

@@ -328,3 +328,8 @@ add_executable(pulp-test-golden test_golden_audio.cpp)
 target_link_libraries(pulp-test-golden PRIVATE pulp::format Catch2::Catch2WithMain)
 target_include_directories(pulp-test-golden PRIVATE ${CMAKE_SOURCE_DIR}/examples/pulp-gain)
 catch_discover_tests(pulp-test-golden)
+
+# iOS foundation tests (platform detection, safe area geometry, touch events)
+add_executable(pulp-test-ios-foundation test_ios_foundation.cpp)
+target_link_libraries(pulp-test-ios-foundation PRIVATE pulp::view pulp::platform Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-ios-foundation)

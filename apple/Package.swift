@@ -17,7 +17,7 @@ let package = Package(
         .target(
             name: "PulpSwift",
             path: "Sources/PulpSwift",
-            sources: ["PulpParameter.swift", "PulpViews.swift"],
+            sources: ["PulpParameter.swift", "PulpViews.swift", "PulpAudioSession.swift"],
             publicHeadersPath: ".",
             cxxSettings: [
                 .headerSearchPath("../../core/state/include"),

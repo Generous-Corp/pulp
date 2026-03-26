@@ -12,6 +12,18 @@ target_sources(pulp-render PRIVATE
     src/skia_surface.cpp
 )
 
+# iOS Metal surface for Dawn rendering
+if(PULP_IOS)
+    target_sources(pulp-render PRIVATE
+        src/metal_surface_ios.mm
+    )
+    target_link_libraries(pulp-render PRIVATE
+        "-framework UIKit"
+        "-framework Metal"
+        "-framework QuartzCore"
+    )
+endif()
+
 target_link_libraries(pulp-render PUBLIC pulp::runtime pulp::canvas)
 
 # Link WebGPU if available

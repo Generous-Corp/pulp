@@ -333,43 +333,93 @@ function(_pulp_add_auv3 target name bundle_id version manufacturer category plug
         set(au_tag "Effects")
     endif()
 
-    # AUv3 is built as a loadable module (.appex)
-    add_library(${target}_AUv3 MODULE
-        ${PULP_${target}_CORE_OBJECTS}
+    # AUv3 sources — shared adapter plus platform-specific view controller
+    set(auv3_sources
         ${CMAKE_SOURCE_DIR}/core/format/src/au_adapter.mm
         ${CMAKE_SOURCE_DIR}/core/format/src/au_entry.mm
     )
-    target_link_libraries(${target}_AUv3 PRIVATE
-        ${target}_Core pulp::format
+    if(PULP_IOS)
+        list(APPEND auv3_sources
+            ${CMAKE_SOURCE_DIR}/core/format/src/au_view_controller_ios.mm
+        )
+    endif()
+
+    # AUv3 is built as a loadable module (.appex)
+    add_library(${target}_AUv3 MODULE
+        ${PULP_${target}_CORE_OBJECTS}
+        ${auv3_sources}
+    )
+
+    # Platform-specific frameworks
+    set(auv3_frameworks
         "-framework AudioToolbox"
         "-framework AVFoundation"
         "-framework CoreAudioKit"
     )
+    if(PULP_IOS)
+        list(APPEND auv3_frameworks "-framework UIKit")
+    else()
+        list(APPEND auv3_frameworks "-framework Cocoa")
+    endif()
+
+    target_link_libraries(${target}_AUv3 PRIVATE
+        ${target}_Core pulp::format pulp::view
+        ${auv3_frameworks}
+    )
     target_include_directories(${target}_AUv3 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
-    # Configure Info.plist
+    # Configure Info.plist — use iOS template on iOS, fallback to generic otherwise
     set(PLUGIN_NAME "${name}")
-    set(BUNDLE_ID "${bundle_id}")
-    set(VERSION "${version}")
-    set(MANUFACTURER_CODE "${manufacturer_code}")
-    set(PLUGIN_CODE "${plugin_code}")
-    set(AU_TYPE "${au_type}")
-    set(AU_TAG "${au_tag}")
-    configure_file(
-        ${CMAKE_SOURCE_DIR}/tools/templates/auv3/Info.plist.template
-        ${CMAKE_BINARY_DIR}/AUv3/${target}.appex/Contents/Info.plist
-        @ONLY
-    )
+    set(PLUGIN_BUNDLE_ID "${bundle_id}")
+    set(PLUGIN_VERSION "${version}")
+    set(PLUGIN_MANUFACTURER "${manufacturer}")
+    set(PLUGIN_MANUFACTURER_CODE "${manufacturer_code}")
+    set(PLUGIN_SUBTYPE_CODE "${plugin_code}")
+    set(PLUGIN_AU_TYPE "${au_type}")
+    set(PLUGIN_AU_TAG "${au_tag}")
+    # Compute integer version (major * 65536 + minor * 256 + patch)
+    string(REPLACE "." ";" _ver_parts "${version}")
+    list(GET _ver_parts 0 _ver_major)
+    list(GET _ver_parts 1 _ver_minor)
+    list(GET _ver_parts 2 _ver_patch)
+    math(EXPR PLUGIN_AU_VERSION_INT "${_ver_major} * 65536 + ${_ver_minor} * 256 + ${_ver_patch}")
+
+    if(PULP_IOS AND EXISTS "${CMAKE_SOURCE_DIR}/templates/ios-auv3/Info.plist.in")
+        configure_file(
+            "${CMAKE_SOURCE_DIR}/templates/ios-auv3/Info.plist.in"
+            "${CMAKE_BINARY_DIR}/AUv3/${target}.appex/Info.plist"
+            @ONLY
+        )
+        set_target_properties(${target}_AUv3 PROPERTIES
+            MACOSX_BUNDLE_INFO_PLIST "${CMAKE_BINARY_DIR}/AUv3/${target}.appex/Info.plist"
+        )
+    elseif(EXISTS "${CMAKE_SOURCE_DIR}/tools/templates/auv3/Info.plist.template")
+        configure_file(
+            "${CMAKE_SOURCE_DIR}/tools/templates/auv3/Info.plist.template"
+            "${CMAKE_BINARY_DIR}/AUv3/${target}.appex/Contents/Info.plist"
+            @ONLY
+        )
+        set_target_properties(${target}_AUv3 PROPERTIES
+            MACOSX_BUNDLE_INFO_PLIST "${CMAKE_BINARY_DIR}/AUv3/${target}.appex/Contents/Info.plist"
+        )
+    endif()
 
     set_target_properties(${target}_AUv3 PROPERTIES
         BUNDLE TRUE
         BUNDLE_EXTENSION "appex"
-        MACOSX_BUNDLE_INFO_PLIST "${CMAKE_BINARY_DIR}/AUv3/${target}.appex/Contents/Info.plist"
         LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/AUv3"
         OUTPUT_NAME "${name}"
         PREFIX ""
         SUFFIX ".appex"
     )
+
+    # iOS-specific Xcode attributes
+    if(PULP_IOS)
+        set_target_properties(${target}_AUv3 PROPERTIES
+            XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "1,2"
+            XCODE_ATTRIBUTE_IPHONEOS_DEPLOYMENT_TARGET "16.0"
+        )
+    endif()
 endfunction()
 
 # ── Internal: Standalone target ─────────────────────────────────────────

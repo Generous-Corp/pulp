@@ -8,7 +8,7 @@ namespace pulp::view {
 
 // Platform-specific handle types
 #ifdef __APPLE__
-using NativeViewHandle = void*; // NSView*
+using NativeViewHandle = void*; // NSView* (macOS) or UIView* (iOS)
 #elif defined(_WIN32)
 using NativeViewHandle = void*; // HWND
 #else

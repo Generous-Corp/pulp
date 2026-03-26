@@ -33,8 +33,16 @@ if(PULP_HAS_CLAP)
 endif()
 
 # AU v2 adapter uses Apple AudioUnitSDK — compiled per-plugin in the entry point,
-# not in the shared library. The au_v2_adapter.cpp is included by each plugin's
-# au_v2_entry.cpp. The old au_adapter.mm (AUv3 approach) is kept for future AUv3 work.
+# not in the shared library. The au_adapter.mm (AUv3) works on both macOS and iOS.
 if(APPLE)
     target_compile_definitions(pulp-format PRIVATE PULP_AU=1)
+    if(PULP_IOS)
+        # iOS uses AUv3 only (no AU v2 component manager)
+        target_link_libraries(pulp-format PRIVATE
+            "-framework AudioToolbox"
+            "-framework AVFoundation"
+            "-framework UIKit"
+        )
+        target_compile_definitions(pulp-format PRIVATE PULP_IOS=1)
+    endif()
 endif()
