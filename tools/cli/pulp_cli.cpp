@@ -1127,6 +1127,7 @@ static void print_usage() {
     std::cout << "Commands:\n";
     std::cout << "  create   Scaffold a new plugin project from templates\n";
     std::cout << "  inspect  Launch the component inspector\n";
+    std::cout << "  audit    License and clean-room audit\n";
     std::cout << "  build    Build the project (configure + compile)\n";
     std::cout << "  test     Run the test suite\n";
     std::cout << "  status   Show project status and info\n";
@@ -1167,6 +1168,36 @@ int main(int argc, char* argv[]) {
     if (command == "ship")     return cmd_ship(args);
     if (command == "docs")     return cmd_docs(args);
     if (command == "clean")    return cmd_clean(args);
+    if (command == "add") {
+        auto root = find_project_root();
+        if (root.empty()) {
+            std::cerr << "Error: not in a Pulp project directory\n";
+            return 1;
+        }
+        auto script = root / "tools" / "add-component.py";
+        if (!fs::exists(script)) {
+            std::cerr << "Error: add-component script not found\n";
+            return 1;
+        }
+        std::string cmd = "python3 \"" + script.string() + "\"";
+        for (auto& arg : args) cmd += " \"" + arg + "\"";
+        return run(cmd);
+    }
+    if (command == "audit") {
+        auto root = find_project_root();
+        if (root.empty()) {
+            std::cerr << "Error: not in a Pulp project directory\n";
+            return 1;
+        }
+        auto script = root / "tools" / "audit.py";
+        if (!fs::exists(script)) {
+            std::cerr << "Error: audit script not found at " << script.string() << "\n";
+            return 1;
+        }
+        std::string cmd = "python3 \"" + script.string() + "\"";
+        for (auto& arg : args) cmd += " \"" + arg + "\"";
+        return run(cmd);
+    }
     if (command == "inspect") {
         auto root = find_project_root();
         if (root.empty()) {

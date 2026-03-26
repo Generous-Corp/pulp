@@ -1,0 +1,22 @@
+# Pulp component registry
+# Components are reusable UI/logic modules that can be added to plugin projects.
+# Phase 14 will populate this with actual components.
+
+components:
+  # - name: preset-browser
+  #   description: Load, save, organize, and search presets
+  #   status: planned
+  #   phase: 14
+  #   files:
+  #     - include/pulp/components/preset_browser.hpp
+  #     - src/preset_browser.cpp
+
+  # - name: musical-typing
+  #   description: Computer keyboard as MIDI input with on-screen piano
+  #   status: planned
+  #   phase: 14
+
+  # - name: audio-device-selector
+  #   description: Audio/MIDI device picker for standalone apps
+  #   status: planned
+  #   phase: 14
