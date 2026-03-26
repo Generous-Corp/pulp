@@ -216,6 +216,21 @@ add_executable(pulp-test-dsp-expansion test_dsp_expansion.cpp)
 target_link_libraries(pulp-test-dsp-expansion PRIVATE pulp::signal Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-dsp-expansion)
 
+# Interpolator tests (Hermite, Lagrange, windowed-sinc)
+add_executable(pulp-test-interpolator test_interpolator.cpp)
+target_link_libraries(pulp-test-interpolator PRIVATE pulp::signal Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-interpolator)
+
+# MIDI expansion tests (RPN/NRPN parser, MidiKeyboardState)
+add_executable(pulp-test-midi-expansion test_midi_expansion.cpp)
+target_link_libraries(pulp-test-midi-expansion PRIVATE pulp::midi Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-midi-expansion)
+
+# Audio process load measurer tests
+add_executable(pulp-test-load-measurer test_load_measurer.cpp)
+target_link_libraries(pulp-test-load-measurer PRIVATE pulp::audio Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-load-measurer)
+
 # Golden-file audio tests (uses HeadlessHost + PulpGain)
 add_executable(pulp-test-golden test_golden_audio.cpp)
 target_link_libraries(pulp-test-golden PRIVATE pulp::format Catch2::Catch2WithMain)
