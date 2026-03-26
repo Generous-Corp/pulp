@@ -361,3 +361,8 @@ catch_discover_tests(pulp-test-identity)
 add_executable(pulp-test-webview test_web_view.cpp)
 target_link_libraries(pulp-test-webview PRIVATE pulp::view Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-webview)
+
+# MIDI 2.0 UMP/MPE tests
+add_executable(pulp-test-ump-mpe test_ump_mpe.cpp)
+target_link_libraries(pulp-test-ump-mpe PRIVATE pulp::midi Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-ump-mpe)
