@@ -79,6 +79,16 @@ docs:
     kind: guide
     summary: How docs stay consistent with code across tools and branches
 
+  - slug: formats
+    path: guides/formats.md
+    kind: guide
+    summary: Plugin format adapters — CLAP, VST3, AU v2 entry points, param sync, MIDI, state
+
+  - slug: signal-processing
+    path: guides/signal-processing.md
+    kind: guide
+    summary: DSP algorithm reference — 20 processors with usage examples and parameter docs
+
   - slug: examples
     path: guides/examples.md
     kind: guide
