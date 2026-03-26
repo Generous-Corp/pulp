@@ -351,3 +351,8 @@ catch_discover_tests(pulp-test-golden)
 add_executable(pulp-test-ios-foundation test_ios_foundation.cpp)
 target_link_libraries(pulp-test-ios-foundation PRIVATE pulp::view pulp::platform Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-ios-foundation)
+
+# Identity/UUID tests
+add_executable(pulp-test-identity test_identity.cpp)
+target_link_libraries(pulp-test-identity PRIVATE pulp::runtime Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-identity)

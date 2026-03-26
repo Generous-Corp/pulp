@@ -4,8 +4,10 @@
 // with the Pulp StateStore during processing
 
 #include <pulp/format/vst3_adapter.hpp>
+#include <pulp/format/vst3_plug_view.hpp>
 #include <pulp/runtime/log.hpp>
 #include <pluginterfaces/vst/ivstparameterchanges.h>
+#include <pluginterfaces/vst/ivsteditcontroller.h>
 #include <pluginterfaces/base/ustring.h>
 #include <cstring>
 
@@ -102,6 +104,19 @@ tresult PLUGIN_API PulpVst3Processor::initialize(FUnknown* context) {
 tresult PLUGIN_API PulpVst3Processor::terminate() {
     processor_.reset();
     return SingleComponentEffect::terminate();
+}
+
+IPlugView* PLUGIN_API PulpVst3Processor::createView(FIDString name) {
+    // VST3 hosts call createView("editor") to get the plugin's GUI
+    if (name && strcmp(name, ViewType::kEditor) == 0) {
+#ifdef PULP_VST3_GUI
+        if (processor_ && processor_->has_editor()) {
+            auto* view = new PulpPlugView(*processor_, store_);
+            return view;
+        }
+#endif
+    }
+    return nullptr;
 }
 
 tresult PLUGIN_API PulpVst3Processor::setBusArrangements(

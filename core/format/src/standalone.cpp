@@ -1,4 +1,6 @@
 #include "standalone.hpp"
+#include <pulp/view/auto_ui.hpp>
+#include <pulp/view/window_host.hpp>
 #include <pulp/runtime/log.hpp>
 
 namespace pulp::format {
@@ -103,6 +105,53 @@ bool StandaloneApp::start() {
     auto device_info = audio_device_->info();
     runtime::log_info("Standalone: running on '{}' at {} Hz, buffer {}",
         device_info.name, config_.sample_rate, config_.buffer_size);
+    return true;
+}
+
+bool StandaloneApp::run_with_editor(bool use_gpu) {
+    if (!start()) return false;
+
+    if (!processor_ || !processor_->has_editor()) {
+        runtime::log_error("Standalone: processor has no editor");
+        stop();
+        return false;
+    }
+
+    // Build AutoUi view tree from parameters
+    auto root = view::AutoUi::build(store_);
+    if (!root) {
+        runtime::log_error("Standalone: AutoUi::build() failed");
+        stop();
+        return false;
+    }
+
+    auto [w, h] = processor_->editor_size();
+    auto desc = processor_->descriptor();
+
+    view::WindowOptions opts;
+    opts.title = desc.name + " — Standalone";
+    opts.width = static_cast<float>(w);
+    opts.height = static_cast<float>(h);
+    opts.resizable = true;
+    opts.use_gpu = use_gpu;
+
+    auto window = view::WindowHost::create(*root, opts);
+    if (!window) {
+        runtime::log_error("Standalone: WindowHost::create() failed");
+        stop();
+        return false;
+    }
+
+    window->set_close_callback([this]() { stop(); });
+    window->show();
+
+    runtime::log_info("Standalone: editor window open ({}x{}, gpu={})",
+                      w, h, use_gpu);
+
+    // Blocks until the window is closed
+    window->run_event_loop();
+
+    stop();
     return true;
 }
 

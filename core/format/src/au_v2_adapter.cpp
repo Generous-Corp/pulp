@@ -17,6 +17,11 @@
 
 namespace pulp::format::au {
 
+#ifdef PULP_AU_GUI
+// Defined in au_v2_cocoa_view.mm — fills AudioUnitCocoaViewInfo for the host
+bool fill_cocoa_view_info(void* outData);
+#endif
+
 // Parameter IDs for the AU system map 1:1 from Pulp ParamIDs
 // AU uses AudioUnitParameterID (UInt32) which matches our state::ParamID
 
@@ -289,6 +294,39 @@ public:
         }
         return noErr;
     }
+
+    // ── Cocoa UI property ──────────────────────────────────────────────
+
+#ifdef PULP_AU_GUI
+    OSStatus GetPropertyInfo(AudioUnitPropertyID inID,
+                             AudioUnitScope inScope,
+                             AudioUnitElement inElement,
+                             UInt32& outDataSize,
+                             bool& outWritable) override
+    {
+        if (inID == kAudioUnitProperty_CocoaUI
+            && inScope == kAudioUnitScope_Global) {
+            outDataSize = sizeof(AudioUnitCocoaViewInfo);
+            outWritable = false;
+            return noErr;
+        }
+        return AUEffectBase::GetPropertyInfo(inID, inScope, inElement,
+                                             outDataSize, outWritable);
+    }
+
+    OSStatus GetProperty(AudioUnitPropertyID inID,
+                         AudioUnitScope inScope,
+                         AudioUnitElement inElement,
+                         void* outData) override
+    {
+        if (inID == kAudioUnitProperty_CocoaUI
+            && inScope == kAudioUnitScope_Global) {
+            if (fill_cocoa_view_info(outData)) return noErr;
+            return kAudioUnitErr_InvalidProperty;
+        }
+        return AUEffectBase::GetProperty(inID, inScope, inElement, outData);
+    }
+#endif
 
     // ── Component info ──────────────────────────────────────────────────
 

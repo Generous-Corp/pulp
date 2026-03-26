@@ -25,6 +25,8 @@
 
 #include <pulp/format/processor.hpp>
 
+#include <pluginterfaces/gui/iplugview.h>
+
 namespace pulp::format::vst3 {
 
 // The VST3 combined processor + controller
@@ -36,6 +38,9 @@ public:
     // IPluginBase
     Steinberg::tresult PLUGIN_API initialize(Steinberg::FUnknown* context) override;
     Steinberg::tresult PLUGIN_API terminate() override;
+
+    // IEditController — editor view creation
+    Steinberg::IPlugView* PLUGIN_API createView(Steinberg::FIDString name) override;
 
     // IAudioProcessor
     Steinberg::tresult PLUGIN_API setBusArrangements(

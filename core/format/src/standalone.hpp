@@ -38,6 +38,10 @@ public:
     void stop();
     bool is_running() const { return running_.load(); }
 
+    // Start audio and show an AutoUi editor window (blocks until window closes)
+    // Uses GPU rendering when use_gpu is true and Skia/Dawn are available
+    bool run_with_editor(bool use_gpu = false);
+
     // Access the processor (for testing or headless use)
     Processor* processor() { return processor_.get(); }
     state::StateStore& state() { return store_; }

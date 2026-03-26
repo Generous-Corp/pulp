@@ -15,16 +15,26 @@
 // Platform font manager
 #ifdef __APPLE__
 #include "include/ports/SkFontMgr_mac_ct.h"
+#elif defined(_WIN32)
+#include "include/ports/SkTypeface_win.h"
+#elif defined(__linux__)
+#include "include/ports/SkFontMgr_fontconfig.h"
+#include "include/core/SkFontScanner.h"
 #endif
 
 namespace pulp::canvas {
 
 // Lazily create a platform-appropriate font manager
+// macOS: CoreText, Windows: DirectWrite, Linux: fontconfig
 static sk_sp<SkFontMgr> get_font_manager() {
     static sk_sp<SkFontMgr> mgr;
     if (!mgr) {
 #ifdef __APPLE__
         mgr = SkFontMgr_New_CoreText(nullptr);
+#elif defined(_WIN32)
+        mgr = SkFontMgr_New_DirectWrite();
+#elif defined(__linux__)
+        mgr = SkFontMgr_New_FontConfig(nullptr, nullptr);
 #else
         mgr = SkFontMgr::RefEmpty();
 #endif

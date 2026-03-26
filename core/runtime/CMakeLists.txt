@@ -9,6 +9,7 @@ target_include_directories(pulp-runtime
 
 target_sources(pulp-runtime PRIVATE
     src/runtime.cpp
+    src/identity.cpp
 )
 
 target_link_libraries(pulp-runtime PUBLIC pulp::platform)

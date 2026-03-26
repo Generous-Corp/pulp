@@ -190,10 +190,12 @@ function(_pulp_add_vst3 target name bundle_id version manufacturer category)
         ${PULP_${target}_CORE_OBJECTS}
         ${vst3_entry}
         ${vst3_platform_src}
+        ${CMAKE_SOURCE_DIR}/core/format/src/vst3_plug_view.cpp
         ${VST3_SDK_DIR}/public.sdk/source/main/pluginfactory.cpp
         ${VST3_SDK_DIR}/public.sdk/source/main/moduleinit.cpp
     )
-    target_link_libraries(${target}_VST3 PRIVATE ${target}_Core pulp::format vst3-sdk)
+    target_link_libraries(${target}_VST3 PRIVATE ${target}_Core pulp::format pulp::view vst3-sdk)
+    target_compile_definitions(${target}_VST3 PRIVATE PULP_VST3_GUI=1)
     target_include_directories(${target}_VST3 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
     # VST3 bundle structure
@@ -307,15 +309,19 @@ function(_pulp_add_au target name bundle_id version manufacturer category plugin
     add_library(${target}_AU MODULE
         ${PULP_${target}_CORE_OBJECTS}
         ${au_entry}
+        ${CMAKE_SOURCE_DIR}/core/format/src/au_v2_cocoa_view.mm
     )
     target_link_libraries(${target}_AU PRIVATE
         ${target}_Core
         pulp::format
+        pulp::view
         ausdk
         "-framework AudioToolbox"
         "-framework CoreFoundation"
         "-framework CoreAudio"
+        "-framework Cocoa"
     )
+    target_compile_definitions(${target}_AU PRIVATE PULP_AU_GUI=1)
     target_include_directories(${target}_AU PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
     set_target_properties(${target}_AU PROPERTIES
@@ -482,7 +488,7 @@ function(_pulp_add_standalone target name)
         ${standalone_entry}
         ${CMAKE_SOURCE_DIR}/core/format/src/standalone.cpp
     )
-    target_link_libraries(${target}_Standalone PRIVATE ${target}_Core pulp::format pulp::audio pulp::midi)
+    target_link_libraries(${target}_Standalone PRIVATE ${target}_Core pulp::format pulp::view pulp::audio pulp::midi)
     target_include_directories(${target}_Standalone PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     set_target_properties(${target}_Standalone PROPERTIES
         OUTPUT_NAME "${name}"
