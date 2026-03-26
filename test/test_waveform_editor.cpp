@@ -171,7 +171,11 @@ TEST_CASE("WaveformEditor key Cmd+A selects all", "[view][waveform_editor]") {
 
     KeyEvent e;
     e.key = KeyCode::a;
+#ifdef __APPLE__
     e.modifiers = kModCmd;
+#else
+    e.modifiers = kModCtrl;
+#endif
     e.is_down = true;
     REQUIRE(editor.on_key_event(e));
     REQUIRE(editor.selection_start() == 0);
