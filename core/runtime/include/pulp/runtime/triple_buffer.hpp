@@ -1,15 +1,7 @@
 #pragma once
 
-// TripleBuffer<T> — Lock-free latest-value publication
-//
-// Use case: swapping large config blobs (wavetable data, IR buffers, routing
-// graphs) from the main thread to the audio thread without blocking either.
-//
-// Writer: publishes to back buffer, atomically swaps with middle.
-// Reader: swaps middle with front if newer, reads from front.
-//
-// The reader always gets the latest complete value. The writer never blocks.
-// No allocation on the read path.
+/// @file triple_buffer.hpp
+/// Lock-free latest-value publication between two threads.
 
 #include <atomic>
 #include <array>
@@ -17,17 +9,43 @@
 
 namespace pulp::runtime {
 
+/// Lock-free triple buffer for publishing the latest value from a writer
+/// thread to a reader thread without blocking either side.
+///
+/// Use case: swapping large config blobs (wavetable data, IR buffers, meter
+/// snapshots) from the main thread to the audio thread. The writer never
+/// blocks, and the reader always gets the most recently completed write.
+/// No allocation on the read path.
+///
+/// @tparam T  Value type. Must be default-constructible and assignable.
+///
+/// @code
+/// TripleBuffer<MeterData> meters;
+///
+/// // Audio thread (writer):
+/// meters.write(current_levels);
+///
+/// // UI thread (reader):
+/// const auto& levels = meters.read();
+/// draw_meter(levels);
+/// @endcode
+///
+/// @note Exactly one writer and one reader thread. Multiple concurrent
+///       writers or readers require external synchronization.
 template <typename T>
 class TripleBuffer {
 public:
     TripleBuffer() = default;
+
+    /// Initialize all three internal buffers with the same value.
     explicit TripleBuffer(const T& initial) {
         buffers_[0] = initial;
         buffers_[1] = initial;
         buffers_[2] = initial;
     }
 
-    // Writer thread: write a new value and publish it.
+    /// Publish a new value from the writer thread.
+    /// Writes into the back buffer, then atomically swaps it to middle.
     void write(const T& value) {
         auto idx = flags_.load(std::memory_order_relaxed);
         int back = back_index(idx);
@@ -46,8 +64,9 @@ public:
                  std::memory_order_release, std::memory_order_relaxed));
     }
 
-    // Reader thread: get the latest published value.
-    // Returns a const reference to the front buffer. Valid until next read().
+    /// Read the latest published value from the reader thread.
+    /// If new data is available, atomically swaps middle to front first.
+    /// @return Const reference to the front buffer. Valid until the next read().
     const T& read() {
         // If dirty, swap front and middle
         uint8_t old_flags = flags_.load(std::memory_order_relaxed);

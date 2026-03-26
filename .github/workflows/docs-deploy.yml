@@ -5,7 +5,10 @@ on:
     branches: [main]
     paths:
       - 'docs/**'
+      - 'core/**/include/**'
       - 'tools/build-docs.py'
+      - 'tools/build-api-docs.sh'
+      - 'docs/doxygen/**'
       - '.github/workflows/docs-deploy.yml'
   workflow_dispatch:
 
@@ -29,12 +32,28 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Install Doxygen
+        run: sudo apt-get install -y doxygen
+
       - name: Build docs site
         run: |
           python3 tools/build-docs.py \
             --output build/site \
             --base-url /pulp/ \
             --branch main
+
+      - name: Build API reference
+        run: |
+          chmod +x tools/build-api-docs.sh
+          tools/build-api-docs.sh
+
+      - name: Merge site and API docs
+        run: |
+          # API docs go under /pulp/api/
+          if [ -d build/api-docs/html ]; then
+            cp -r build/api-docs/html build/site/api
+            echo "API docs merged into site at /api/"
+          fi
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3

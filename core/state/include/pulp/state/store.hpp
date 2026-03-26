@@ -9,52 +9,117 @@
 
 namespace pulp::state {
 
-// Parameter group for hierarchical organization
+/// Named parameter group for hierarchical UI organization.
+///
+/// Groups can be nested: set @c parent_id to another group's @c id.
+/// A @c parent_id of 0 means the group is at the root level.
 struct ParamGroup {
     int id = 0;
     std::string name;
-    int parent_id = 0; // 0 = root
+    int parent_id = 0; ///< 0 = root-level group.
 };
 
-// Centralized parameter storage with thread-safe access
+/// Centralized parameter storage with lock-free value access.
+///
+/// StateStore is the single source of truth for all plugin parameters.
+/// Register parameters at initialization via add_parameter(), then
+/// read/write values from any thread using the lock-free accessors.
+///
+/// @code
+/// pulp::state::StateStore store;
+/// store.add_parameter({.id = 1, .name = "Gain", .range = {-60, 12, 0}});
+/// store.set_value(1, -3.0f);
+/// float gain = store.get_value(1); // -3.0
+/// @endcode
+///
+/// @note Parameter registration (add_parameter, add_group) is NOT thread-safe.
+///       Call these only during plugin initialization, before processing starts.
+/// @note Value access (get_value, set_value, etc.) is lock-free and safe to
+///       call from the audio thread.
 class StateStore {
 public:
-    // Register parameters (called once at initialization)
+    /// Register a parameter. Call during initialization only.
+    /// @param info  Immutable metadata for this parameter.
     void add_parameter(const ParamInfo& info);
+
+    /// Register a parameter group. Call during initialization only.
     void add_group(const ParamGroup& group);
 
-    // Value access (thread-safe, lock-free)
+    /// Read a parameter's base value (lock-free).
+    /// @note Safe to call from the audio thread.
     float get_value(ParamID id) const;
+
+    /// Read a parameter's modulated value: base + mod_offset (lock-free).
+    /// @note Safe to call from the audio thread.
     float get_modulated(ParamID id) const;
+
+    /// Write a parameter's base value (lock-free).
+    /// @note Safe to call from any thread.
     void set_value(ParamID id, float value);
+
+    /// Set the absolute modulation offset for a parameter.
     void set_mod_offset(ParamID id, float offset);
+
+    /// Add a delta to a parameter's modulation offset.
     void add_mod_offset(ParamID id, float delta);
+
+    /// Clear all modulation offsets to zero.
     void reset_all_mod();
+
+    /// Read a parameter's value mapped to [0, 1] (lock-free).
     float get_normalized(ParamID id) const;
+
+    /// Write a parameter from a normalized [0, 1] value (lock-free).
     void set_normalized(ParamID id, float normalized);
+
+    /// Get the default value for a parameter (from its ParamRange).
     float get_default(ParamID id) const;
+
+    /// Reset a single parameter to its default value.
     void reset_to_default(ParamID id);
+
+    /// Reset all parameters to their default values.
     void reset_all_to_defaults();
 
-    // Parameter info
+    /// Look up immutable metadata for a parameter.
+    /// @return Pointer to ParamInfo, or nullptr if @p id is not registered.
     const ParamInfo* info(ParamID id) const;
+
+    /// View of all registered parameters (in registration order).
     std::span<const ParamInfo> all_params() const { return params_; }
+
+    /// View of all registered groups (in registration order).
     std::span<const ParamGroup> all_groups() const { return groups_; }
+
+    /// Number of registered parameters.
     std::size_t param_count() const { return params_.size(); }
 
-    // Host automation gestures
+    /// Signal the host that a gesture (drag, click) has begun on a parameter.
+    /// Call from the UI thread before a series of set_value() calls so the
+    /// host groups them into a single undo step.
     void begin_gesture(ParamID id);
+
+    /// Signal the host that a gesture has ended.
     void end_gesture(ParamID id);
 
-    // Change notification (call from UI thread to poll changes)
+    /// Register a callback that fires when any parameter value changes.
+    /// @note The listener_mutex_ is held during registration. Callbacks
+    ///       themselves are invoked without the mutex.
     void add_listener(ParamChangeCallback callback);
 
-    // State serialization
+    /// Serialize all parameter values to a binary blob for preset/state save.
+    /// @return Byte vector suitable for storage or transmission.
     std::vector<uint8_t> serialize() const;
+
+    /// Restore parameter values from a binary blob.
+    /// @return True if deserialization succeeded.
     bool deserialize(std::span<const uint8_t> data);
 
-    // Version for state compatibility
+    /// Set the schema version embedded in serialized state.
+    /// Increment this when the parameter layout changes between plugin versions.
     void set_state_version(uint32_t version) { state_version_ = version; }
+
+    /// Get the current state schema version.
     uint32_t state_version() const { return state_version_; }
 
 private:
@@ -66,12 +131,13 @@ private:
     mutable std::mutex listener_mutex_;
     uint32_t state_version_ = 1;
 
-    // Gesture tracking
     std::function<void(ParamID)> on_begin_gesture_;
     std::function<void(ParamID)> on_end_gesture_;
 
 public:
-    // Format adapters set these to forward gestures to the host
+    /// Install callbacks that forward gesture begin/end to the plugin host.
+    /// Format adapters (VST3, AU, CLAP) call this during initialization so
+    /// that UI-driven gestures are reported to the host for undo grouping.
     void set_gesture_callbacks(
         std::function<void(ParamID)> begin_fn,
         std::function<void(ParamID)> end_fn)

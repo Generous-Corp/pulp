@@ -70,6 +70,10 @@ commands:
         summary: Show code style rules
       - name: check
         summary: Validate docs consistency against codebase
+      - name: build-site
+        summary: Generate static docs site
+      - name: build-api
+        summary: Generate API reference from public headers (Doxygen)
     docs: reference/cli.md#docs
 
   - name: clean

@@ -1019,6 +1019,7 @@ static int cmd_docs(const std::vector<std::string>& args) {
         std::cout << "  show style               Show code style rules\n";
         std::cout << "  check                    Validate docs consistency\n";
         std::cout << "  build-site               Generate static docs site\n";
+        std::cout << "  build-api                Generate API reference (Doxygen)\n";
         return 0;
     }
 
@@ -1036,6 +1037,15 @@ static int cmd_docs(const std::vector<std::string>& args) {
             cmd += " " + args[i];
         }
         return run(cmd);
+    }
+
+    if (sub == "build-api") {
+        auto script = root / "tools" / "build-api-docs.sh";
+        if (!fs::exists(script)) {
+            std::cerr << "Error: build script not found at " << script.string() << "\n";
+            return 1;
+        }
+        return run("bash \"" + script.string() + "\"");
     }
 
     if (sub == "check") {

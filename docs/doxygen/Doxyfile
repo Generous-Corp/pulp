@@ -1,0 +1,68 @@
+# Pulp API Reference — Doxygen Configuration
+# Generates HTML documentation from public headers only.
+
+PROJECT_NAME           = "Pulp"
+PROJECT_BRIEF          = "Cross-platform audio plugin framework"
+PROJECT_NUMBER         = "0.1.0"
+OUTPUT_DIRECTORY       = ../../build/api-docs
+
+# Source paths — public headers only
+INPUT                  = ../../core/audio/include \
+                         ../../core/canvas/include \
+                         ../../core/events/include \
+                         ../../core/format/include \
+                         ../../core/midi/include \
+                         ../../core/osc/include \
+                         ../../core/platform/include \
+                         ../../core/render/include \
+                         ../../core/runtime/include \
+                         ../../core/signal/include \
+                         ../../core/state/include \
+                         ../../core/view/include
+RECURSIVE              = YES
+FILE_PATTERNS          = *.hpp *.h
+
+# Extraction settings
+EXTRACT_ALL            = YES
+EXTRACT_PRIVATE        = NO
+EXTRACT_STATIC         = YES
+EXTRACT_LOCAL_CLASSES  = NO
+
+# Documentation style
+JAVADOC_AUTOBRIEF      = YES
+AUTOLINK_SUPPORT       = YES
+BUILTIN_STL_SUPPORT    = YES
+INLINE_INHERITED_MEMB  = YES
+
+# Output format
+GENERATE_HTML          = YES
+GENERATE_LATEX         = NO
+GENERATE_XML           = NO
+HTML_OUTPUT            = html
+HTML_COLORSTYLE        = DARK
+
+# Navigation
+GENERATE_TREEVIEW      = YES
+DISABLE_INDEX          = NO
+FULL_SIDEBAR           = YES
+
+# Diagrams
+HAVE_DOT               = NO
+CLASS_GRAPH            = NO
+COLLABORATION_GRAPH    = NO
+INCLUDE_GRAPH          = NO
+INCLUDED_BY_GRAPH      = NO
+
+# Preprocessing
+ENABLE_PREPROCESSING   = YES
+MACRO_EXPANSION        = YES
+PREDEFINED             = PULP_HAS_SDL3 \
+                         __APPLE__
+
+# Warnings
+WARN_IF_UNDOCUMENTED   = NO
+WARN_IF_DOC_ERROR      = YES
+WARN_NO_PARAMDOC       = NO
+
+# Don't document internal namespaces
+EXCLUDE_PATTERNS       = */src/* */detail/*
