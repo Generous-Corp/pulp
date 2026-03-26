@@ -341,11 +341,20 @@ target_link_libraries(pulp-test-matrix-sampler PRIVATE pulp::format pulp::signal
 target_include_directories(pulp-test-matrix-sampler PRIVATE ${CMAKE_SOURCE_DIR}/examples/PulpSampler)
 catch_discover_tests(pulp-test-matrix-sampler)
 
-# Golden-file audio tests (uses HeadlessHost + PulpGain)
+# Golden-file audio tests (uses HeadlessHost + PulpGain + PulpTone)
 add_executable(pulp-test-golden test_golden_audio.cpp)
-target_link_libraries(pulp-test-golden PRIVATE pulp::format Catch2::Catch2WithMain)
-target_include_directories(pulp-test-golden PRIVATE ${CMAKE_SOURCE_DIR}/examples/pulp-gain)
+target_link_libraries(pulp-test-golden PRIVATE pulp::format pulp::signal Catch2::Catch2WithMain)
+target_include_directories(pulp-test-golden PRIVATE
+    ${CMAKE_SOURCE_DIR}/examples/pulp-gain
+    ${CMAKE_SOURCE_DIR}/examples/pulp-tone
+)
 catch_discover_tests(pulp-test-golden)
+
+# Golden-file tests for PulpEffect (separate to avoid enum collision with PulpGain)
+add_executable(pulp-test-golden-effect test_golden_effect.cpp)
+target_link_libraries(pulp-test-golden-effect PRIVATE pulp::format Catch2::Catch2WithMain)
+target_include_directories(pulp-test-golden-effect PRIVATE ${CMAKE_SOURCE_DIR}/examples/pulp-effect)
+catch_discover_tests(pulp-test-golden-effect)
 
 # iOS foundation tests (platform detection, safe area geometry, touch events)
 add_executable(pulp-test-ios-foundation test_ios_foundation.cpp)
