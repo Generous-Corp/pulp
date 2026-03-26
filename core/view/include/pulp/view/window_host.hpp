@@ -12,6 +12,7 @@ struct WindowOptions {
     float width = 400;
     float height = 300;
     bool resizable = true;
+    bool use_gpu = false;  ///< Use GPU rendering (Dawn/Skia Graphite) instead of CoreGraphics
 };
 
 // Native window that hosts a View tree and renders it

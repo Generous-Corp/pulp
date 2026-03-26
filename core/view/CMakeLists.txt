@@ -61,5 +61,12 @@ if(APPLE)
             "-framework ImageIO"
             "-framework UniformTypeIdentifiers"
         )
+        # GPU rendering: link render module and Metal for CAMetalLayer-backed window host
+        if(PULP_HAS_SKIA)
+            target_link_libraries(pulp-view PRIVATE pulp::render
+                "-framework Metal"
+                "-framework QuartzCore"
+            )
+        endif()
     endif()
 endif()
