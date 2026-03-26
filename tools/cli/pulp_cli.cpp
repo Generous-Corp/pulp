@@ -1126,6 +1126,7 @@ static void print_usage() {
     std::cout << "Usage: pulp <command> [options]\n\n";
     std::cout << "Commands:\n";
     std::cout << "  create   Scaffold a new plugin project from templates\n";
+    std::cout << "  inspect  Launch the component inspector\n";
     std::cout << "  build    Build the project (configure + compile)\n";
     std::cout << "  test     Run the test suite\n";
     std::cout << "  status   Show project status and info\n";
@@ -1166,6 +1167,21 @@ int main(int argc, char* argv[]) {
     if (command == "ship")     return cmd_ship(args);
     if (command == "docs")     return cmd_docs(args);
     if (command == "clean")    return cmd_clean(args);
+    if (command == "inspect") {
+        auto root = find_project_root();
+        if (root.empty()) {
+            std::cerr << "Error: not in a Pulp project directory\n";
+            return 1;
+        }
+        auto screenshot_bin = root / "build" / "tools" / "screenshot" / "pulp-screenshot";
+        if (!fs::exists(screenshot_bin)) {
+            std::cerr << "Error: pulp-screenshot not built. Run `pulp build` first.\n";
+            return 1;
+        }
+        std::string cmd = screenshot_bin.string() + " --demo";
+        for (auto& arg : args) cmd += " " + arg;
+        return run(cmd);
+    }
     if (command == "create") {
         auto root = find_project_root();
         if (root.empty()) {

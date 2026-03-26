@@ -200,7 +200,10 @@ static std::string tools_list_json() {
 {"name":"pulp_validate","description":"Run plugin format validators","inputSchema":{"type":"object","properties":{}}},
 {"name":"pulp_screenshot","description":"Render a plugin UI to PNG (base64). Use --demo for a built-in demo or --script for a JS file.","inputSchema":{"type":"object","properties":{"script":{"type":"string","description":"Path to JS UI script"},"width":{"type":"integer","description":"Width in points (default 400)"},"height":{"type":"integer","description":"Height in points (default 300)"},"theme":{"type":"string","description":"Theme: dark, light, pro_audio"},"demo":{"type":"boolean","description":"Render built-in demo UI"}}}},
 {"name":"pulp_simulate_click","description":"Simulate a mouse click at coordinates on a demo UI and return the view tree JSON","inputSchema":{"type":"object","properties":{"x":{"type":"number","description":"X coordinate"},"y":{"type":"number","description":"Y coordinate"}}}},
-{"name":"pulp_get_view_tree","description":"Get the view tree as JSON for a demo UI","inputSchema":{"type":"object","properties":{}}}
+{"name":"pulp_get_view_tree","description":"Get the view tree as JSON for a demo UI","inputSchema":{"type":"object","properties":{}}},
+{"name":"pulp_create","description":"Scaffold a new plugin project from templates","inputSchema":{"type":"object","properties":{"name":{"type":"string","description":"Plugin name"},"type":{"type":"string","enum":["effect","instrument"],"description":"Plugin type"},"manufacturer":{"type":"string","description":"Manufacturer name"}}}},
+{"name":"pulp_docs_check","description":"Validate docs consistency against the codebase","inputSchema":{"type":"object","properties":{}}},
+{"name":"pulp_docs_search","description":"Search local docs for a query string","inputSchema":{"type":"object","properties":{"query":{"type":"string","description":"Search query"}}}}
 ]})JSON";
 }
 
@@ -268,6 +271,47 @@ static std::string handle_request(const std::string& json) {
                     exec(cmd);
                     result = "{\"content\":[{\"type\":\"text\",\"text\":\"View tree and event simulation available via pulp-screenshot --demo\"}]}";
                 }
+            }
+        }
+        else if (name == "pulp_create") {
+            auto root = find_project_root();
+            if (root.empty()) {
+                result = "{\"content\":[{\"type\":\"text\",\"text\":\"Error: not in a Pulp project\"}]}";
+            } else {
+                auto plugin_name = extract_string(args_json, "name");
+                auto plugin_type = extract_string(args_json, "type");
+                auto manufacturer = extract_string(args_json, "manufacturer");
+                if (plugin_name.empty()) {
+                    result = "{\"content\":[{\"type\":\"text\",\"text\":\"Error: name is required\"}]}";
+                } else {
+                    std::string cmd = "python3 " + (root / "tools" / "create-project.py").string();
+                    cmd += " \"" + plugin_name + "\"";
+                    if (!plugin_type.empty()) cmd += " --type " + plugin_type;
+                    if (!manufacturer.empty()) cmd += " --manufacturer \"" + manufacturer + "\"";
+                    auto output = exec(cmd + " 2>&1");
+                    result = "{\"content\":[{\"type\":\"text\",\"text\":" + json_string(output) + "}]}";
+                }
+            }
+        }
+        else if (name == "pulp_docs_check") {
+            auto root = find_project_root();
+            if (root.empty()) {
+                result = "{\"content\":[{\"type\":\"text\",\"text\":\"Error: not in a Pulp project\"}]}";
+            } else {
+                auto output = exec("bash " + (root / "tools" / "check-docs.sh").string() + " 2>&1");
+                result = "{\"content\":[{\"type\":\"text\",\"text\":" + json_string(output) + "}]}";
+            }
+        }
+        else if (name == "pulp_docs_search") {
+            auto root = find_project_root();
+            auto query = extract_string(args_json, "query");
+            if (root.empty()) {
+                result = "{\"content\":[{\"type\":\"text\",\"text\":\"Error: not in a Pulp project\"}]}";
+            } else if (query.empty()) {
+                result = "{\"content\":[{\"type\":\"text\",\"text\":\"Error: query is required\"}]}";
+            } else {
+                auto output = exec((root / "build" / "tools" / "cli" / "pulp").string() + " docs search \"" + query + "\" 2>&1");
+                result = "{\"content\":[{\"type\":\"text\",\"text\":" + json_string(output) + "}]}";
             }
         }
         else return json_error(id, -32601, "Unknown tool: " + name);
