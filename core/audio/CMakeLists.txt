@@ -37,9 +37,8 @@ elseif(WIN32)
     )
 elseif(UNIX AND NOT APPLE)
     target_sources(pulp-audio PRIVATE
-        src/placeholder.cpp
+        platform/linux/alsa_device.cpp
     )
-    file(WRITE ${CMAKE_CURRENT_SOURCE_DIR}/src/placeholder.cpp
-        "// pulp-audio: ALSA backend — Phase 4+\nnamespace pulp::audio {}\n"
-    )
+    find_package(ALSA REQUIRED)
+    target_link_libraries(pulp-audio PRIVATE ALSA::ALSA)
 endif()
