@@ -1,0 +1,144 @@
+#pragma once
+
+/// @file text_editor.hpp
+/// Full-featured text editor widget with selection, clipboard, undo/redo.
+/// Inspired by Visage TextEditor patterns (see ~/Code/visage).
+
+#include <pulp/view/view.hpp>
+#include <pulp/view/input_events.hpp>
+#include <pulp/platform/clipboard.hpp>
+#include <functional>
+#include <string>
+#include <vector>
+#include <utility>
+
+namespace pulp::view {
+
+/// Text editing widget with comprehensive keyboard/mouse interaction.
+///
+/// Features:
+/// - Single-line and multi-line modes
+/// - Text selection (click, shift-click, double-click word, triple-click line)
+/// - Clipboard: Cmd+C copy, Cmd+V paste, Cmd+X cut, Cmd+A select all
+/// - Undo/redo with history stack (Cmd+Z, Cmd+Shift+Z)
+/// - Cursor movement (arrows, word jump with Option, line start/end with Cmd)
+/// - Up=start, Down=end in single-line mode
+/// - Numeric-only mode for parameter value entry
+/// - Password mode (masked display)
+/// - Return to confirm, Escape to cancel
+/// - Select-on-focus option
+///
+/// @code
+/// auto editor = std::make_unique<TextEditor>();
+/// editor->set_text("Hello");
+/// editor->on_return = [&](const std::string& text) { apply_value(text); };
+/// editor->on_escape = [&] { revert(); };
+/// @endcode
+class TextEditor : public View {
+public:
+    static constexpr int kMaxUndoHistory = 1000;
+
+    // ── Configuration ────────────────────────────────────────────────────
+
+    /// Multi-line mode (default: single-line).
+    bool multi_line = false;
+
+    /// Numeric-only mode — only digits, decimal point, minus sign allowed.
+    bool numeric_only = false;
+
+    /// Password mode — display mask character instead of actual text.
+    bool password_mode = false;
+    char password_char = '*';
+
+    /// Automatically select all text when this editor gains focus.
+    bool select_on_focus = false;
+
+    /// Placeholder text when empty.
+    std::string placeholder;
+
+    // ── Callbacks ─────────────────────────────────────────────────────────
+
+    /// Called when Return/Enter is pressed (single-line) or Cmd+Return (multi-line).
+    std::function<void(const std::string& text)> on_return;
+
+    /// Called when Escape is pressed.
+    std::function<void()> on_escape;
+
+    /// Called whenever the text content changes.
+    std::function<void(const std::string& text)> on_change;
+
+    // ── Text access ──────────────────────────────────────────────────────
+
+    const std::string& text() const { return text_; }
+    void set_text(const std::string& t);
+
+    /// Get the currently selected text (empty if no selection).
+    std::string selected_text() const;
+
+    bool has_selection() const { return selection_start_ != selection_end_; }
+    bool is_empty() const { return text_.empty(); }
+
+    // ── Selection ─────────────────────────────────────────────────────────
+
+    void select_all();
+    void clear_selection();
+
+    // ── Clipboard ─────────────────────────────────────────────────────────
+
+    bool copy_to_clipboard();
+    bool cut_to_clipboard();
+    bool paste_from_clipboard();
+
+    // ── Undo/Redo ────────────────────────────────────────────────────────
+
+    bool undo();
+    bool redo();
+
+    // ── Painting ──────────────────────────────────────────────────────────
+
+    void paint(canvas::Canvas& canvas) override;
+
+    // ── Event handling ────────────────────────────────────────────────────
+
+    void on_mouse_event(const MouseEvent& event) override;
+    bool on_key_event(const KeyEvent& event) override;
+    void on_text_input(const TextInputEvent& event) override;
+    void on_focus_changed(bool gained) override;
+
+    // ── Style ─────────────────────────────────────────────────────────────
+
+    void set_font_size(float size) { font_size_ = size; }
+    float font_size() const { return font_size_; }
+
+private:
+    std::string text_;
+    int caret_position_ = 0;     ///< Cursor position (character index)
+    int selection_start_ = 0;    ///< Selection anchor
+    int selection_end_ = 0;      ///< Selection active end (= caret)
+    float font_size_ = 13.0f;
+    float scroll_offset_ = 0.0f; ///< Horizontal scroll for single-line
+
+    // Undo history: (text, caret_position) pairs
+    std::vector<std::pair<std::string, int>> undo_history_;
+    std::vector<std::pair<std::string, int>> redo_history_;
+
+    void push_undo();
+    void insert_text(const std::string& t);
+    void delete_selection();
+    void delete_char_before_caret();
+    void delete_char_after_caret();
+
+    void move_caret(int delta, bool extend_selection);
+    void move_word(int direction, bool extend_selection);
+    void move_to_line_start(bool extend_selection);
+    void move_to_line_end(bool extend_selection);
+    void move_to_start(bool extend_selection);
+    void move_to_end(bool extend_selection);
+
+    int char_index_at_x(float x) const;
+    bool is_word_char(char c) const;
+
+    void notify_change();
+};
+
+} // namespace pulp::view
