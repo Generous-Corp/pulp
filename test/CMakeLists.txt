@@ -308,6 +308,11 @@ target_link_libraries(pulp-test-matrix-drums PRIVATE pulp::format pulp::signal C
 target_include_directories(pulp-test-matrix-drums PRIVATE ${CMAKE_SOURCE_DIR}/examples/PulpDrums)
 catch_discover_tests(pulp-test-matrix-drums)
 
+add_executable(pulp-test-matrix-synth test_matrix_synth.cpp)
+target_link_libraries(pulp-test-matrix-synth PRIVATE pulp::format pulp::signal Catch2::Catch2WithMain)
+target_include_directories(pulp-test-matrix-synth PRIVATE ${CMAKE_SOURCE_DIR}/examples/PulpSynth)
+catch_discover_tests(pulp-test-matrix-synth)
+
 # Golden-file audio tests (uses HeadlessHost + PulpGain)
 add_executable(pulp-test-golden test_golden_audio.cpp)
 target_link_libraries(pulp-test-golden PRIVATE pulp::format Catch2::Catch2WithMain)
