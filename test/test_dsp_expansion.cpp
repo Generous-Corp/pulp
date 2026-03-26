@@ -217,7 +217,6 @@ TEST_CASE("ProcessorChain buffer processing", "[signal][chain]") {
 // ── LookupTable ──────────────────────────────────────────────────────────
 
 TEST_CASE("LookupTable sine approximation", "[signal][lookup]") {
-    constexpr float pi = 3.14159265358979323846f;
     LookupTable sine(4096, 0.0f, 1.0f, [](float phase) {
         return std::sin(phase * 2.0f * 3.14159265f);
     });
