@@ -121,7 +121,7 @@ def md_to_html(md: str) -> str:
             level = len(m.group(1))
             text = m.group(2)
             slug = re.sub(r'[^a-z0-9]+', '-', text.lower()).strip('-')
-            out.append(f'<h{level} id="{slug}">{inline(text)}</h{level}>')
+            out.append(f'<h{level} id="{slug}">{inline(text)} <a class="permalink" href="#{slug}">#</a></h{level}>')
             i += 1
             continue
 
@@ -478,16 +478,53 @@ a:hover {{ text-decoration: underline; }}
   font-weight: 600;
 }}
 
+/* Permalink anchors */
+.permalink {{
+  color: var(--text-muted);
+  font-size: 0.7em;
+  opacity: 0;
+  transition: opacity 0.15s;
+  text-decoration: none;
+  margin-left: 6px;
+}}
+h1:hover .permalink, h2:hover .permalink, h3:hover .permalink,
+h4:hover .permalink {{ opacity: 0.6; }}
+.permalink:hover {{ opacity: 1 !important; color: var(--accent); }}
+
+/* Mobile hamburger */
+.menu-toggle {{
+  display: none;
+  background: none;
+  border: none;
+  color: var(--text);
+  font-size: 22px;
+  cursor: pointer;
+  padding: 4px 8px;
+}}
+
 /* Responsive */
 @media (max-width: 768px) {{
-  .sidebar {{ display: none; }}
-  .content {{ margin-left: 0; padding: 24px 16px; }}
+  .menu-toggle {{ display: block; }}
+  .header-left .alpha-badge {{ display: none; }}
+  .sidebar {{
+    transform: translateX(-100%);
+    transition: transform 0.2s ease;
+    z-index: 99;
+    width: 260px;
+  }}
+  .sidebar.open {{ transform: translateX(0); }}
+  .content {{ margin-left: 0; padding: 20px 16px; }}
+  .content h1 {{ font-size: 22px; }}
+  .content h2 {{ font-size: 18px; }}
+  .content table {{ font-size: 12px; display: block; overflow-x: auto; }}
+  .content pre {{ font-size: 12px; }}
 }}
 </style>
 </head>
 <body>
 <header class="header">
   <div class="header-left">
+    <button class="menu-toggle" onclick="document.querySelector('.sidebar').classList.toggle('open')">☰</button>
     <h1>PULP</h1>
     <span class="branch-badge">{html.escape(branch)}</span>
     <span class="alpha-badge">Alpha — under active development</span>
@@ -502,6 +539,27 @@ a:hover {{ text-decoration: underline; }}
 <main class="content">
 {content}
 </main>
+<script>
+// Persist sidebar scroll position across page loads
+(function() {{
+  var sidebar = document.querySelector('.sidebar');
+  var key = 'pulp-nav-scroll';
+  if (sidebar) {{
+    var saved = sessionStorage.getItem(key);
+    if (saved) sidebar.scrollTop = parseInt(saved, 10);
+    sidebar.addEventListener('scroll', function() {{
+      sessionStorage.setItem(key, sidebar.scrollTop);
+    }});
+  }}
+  // Close mobile nav on link click
+  var links = document.querySelectorAll('.sidebar a');
+  links.forEach(function(a) {{
+    a.addEventListener('click', function() {{
+      sidebar.classList.remove('open');
+    }});
+  }});
+}})();
+</script>
 </body>
 </html>'''
 
