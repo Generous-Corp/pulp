@@ -45,7 +45,7 @@ DSP algorithm library. Includes:
 - Oscillators (sine, saw, square, triangle, noise)
 - Filters: biquad, SVF, ladder, Linkwitz-Riley, FIR (windowed-sinc), TPT first-order
 - Effects: delay line, chorus, phaser, reverb, waveshaper, compressor, noise gate
-- Utilities: gain, panner, ADSR, smoothed value, log-ramped value, oversampling, FFT, windowing, ballistics filter, processor chain, lookup table, interpolators (linear, Hermite, Lagrange, windowed-sinc)
+- Utilities: gain, panner, ADSR, smoothed value, log-ramped value, oversampling, FFT, windowing, ballistics filter, processor chain, lookup table, interpolators (linear, Hermite, Lagrange, windowed-sinc), filter design (Audio EQ Cookbook + Butterworth cascades)
 
 Each algorithm is a standalone header-only class with no framework coupling.
 
@@ -53,9 +53,9 @@ Each algorithm is a standalone header-only class with no framework coupling.
 
 **Status**: stable
 **Dependencies**: runtime
-**Headers**: `pulp/state/parameter.hpp`, `pulp/state/store.hpp`, `pulp/state/preset_manager.hpp`
+**Headers**: `pulp/state/parameter.hpp`, `pulp/state/store.hpp`, `pulp/state/preset_manager.hpp`, `pulp/state/undo_manager.hpp`
 
-Thread-safe parameter system. `ParamValue` uses relaxed atomics for lock-free audio-thread reads. `StateStore` manages parameter registration, value access, gesture tracking, change notification, and binary state serialization. Supports modulation offsets (for CLAP per-voice modulation). `PresetManager` provides built-in preset save/load/delete/rename/import with factory vs user separation, JSON file format, and platform-standard storage locations.
+Thread-safe parameter system. `ParamValue` uses relaxed atomics for lock-free audio-thread reads. `StateStore` manages parameter registration, value access, gesture tracking, change notification, and binary state serialization. Supports modulation offsets (for CLAP per-voice modulation). `PresetManager` provides built-in preset save/load/delete/rename/import with factory vs user separation, JSON file format, and platform-standard storage locations. `UndoManager` provides generic undo/redo with named actions, transaction grouping, and configurable history depth.
 
 ## format
 
@@ -99,7 +99,7 @@ GPU surface management. Creates Dawn (WebGPU) GPU contexts and Skia Graphite ren
 
 Widget system with JS scripting (QuickJS), theme/design tokens, hot-reload, drag-and-drop, animation, screenshot capture, audio visualization bridge, automatic UI generation, and a component inspector. SDL window host available.
 
-Phase 14 additions: rich input events (MouseEvent/KeyEvent with modifiers and pointer IDs), full TextEditor widget (selection, clipboard, undo/redo, numeric/password modes), UI components (ComboBox, TabPanel, ListBox, ScrollView, Tooltip, ProgressBar, CallOutBox), modal overlay, parameter attachment helpers, application framework (KeyMapping, MenuBar, Toolbar, AppSettings), and design token export (JSON, CSS, C++, OKLCH, WGSL).
+Phase 14 additions: rich input events (MouseEvent/KeyEvent with modifiers and pointer IDs), full TextEditor widget (selection, clipboard, undo/redo, numeric/password modes), UI components (ComboBox, TabPanel, ListBox, ScrollView, Tooltip, ProgressBar, CallOutBox), modal overlay, parameter attachment helpers, application framework (KeyMapping, MenuBar, Toolbar, AppSettings), and design token export (JSON, CSS, C++, OKLCH, WGSL). Phase 19: TreeView widget for hierarchical displays (file browsers, preset trees).
 
 ## osc
 
