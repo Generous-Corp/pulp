@@ -21,8 +21,19 @@ target_sources(pulp-view PRIVATE
     src/ui_components.cpp
     src/design_export.cpp
     src/app_framework.cpp
-    src/web_view.cpp
 )
+
+# WebView support — compiled separately to avoid WebKit framework auto-loading
+# in plugin hosts. Only link into standalone apps, not AU/VST3/CLAP plugins.
+# The ObjC runtime loads WebKit on dylib load if any WKWebView references exist,
+# which crashes Logic Pro's sandboxed AUHostingServiceXPC process.
+option(PULP_BUILD_WEBVIEW "Include WebView support (requires WebKit)" OFF)
+if(PULP_BUILD_WEBVIEW)
+    target_sources(pulp-view PRIVATE src/web_view.cpp)
+    if(APPLE AND NOT PULP_IOS)
+        target_link_libraries(pulp-view PRIVATE "-framework WebKit")
+    endif()
+endif()
 
 # CHOC headers (JS engine, utilities)
 target_include_directories(pulp-view PUBLIC
