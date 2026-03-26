@@ -86,24 +86,34 @@ public:
             // GpuSurface::begin_frame() must have been called first.
             auto* texture_ptr = static_cast<wgpu::Texture*>(gpu_.current_texture_handle());
             if (texture_ptr && *texture_ptr) {
+                WGPUTexture raw_texture = texture_ptr->Get();
+
                 // Create a Graphite BackendTexture from the current surface texture
                 skgpu::graphite::BackendTexture backend_tex =
-                    skgpu::graphite::BackendTextures::MakeDawn(texture_ptr->Get());
+                    skgpu::graphite::BackendTextures::MakeDawn(raw_texture);
 
-                // Wrap it as an SkSurface for Skia drawing
-                frame_surface_ = SkSurfaces::WrapBackendTexture(
-                    recorder_.get(),
-                    backend_tex,
-                    kBGRA_8888_SkColorType,
-                    SkColorSpace::MakeSRGB(),
-                    nullptr);  // props
+                if (!backend_tex.isValid()) {
+                    runtime::log_warn("SkiaSurface: BackendTexture::MakeDawn returned invalid texture");
+                } else {
+                    // Wrap it as an SkSurface for Skia drawing
+                    frame_surface_ = SkSurfaces::WrapBackendTexture(
+                        recorder_.get(),
+                        backend_tex,
+                        kBGRA_8888_SkColorType,
+                        SkColorSpace::MakeSRGB(),
+                        nullptr);  // props
 
-                if (frame_surface_) {
-                    sk_canvas = frame_surface_->getCanvas();
-                    if (sk_canvas && scale_ != 1.0f) {
-                        sk_canvas->scale(scale_, scale_);
+                    if (frame_surface_) {
+                        sk_canvas = frame_surface_->getCanvas();
+                        if (sk_canvas && scale_ != 1.0f) {
+                            sk_canvas->scale(scale_, scale_);
+                        }
+                    } else {
+                        runtime::log_warn("SkiaSurface: WrapBackendTexture failed — falling back to offscreen");
                     }
                 }
+            } else {
+                runtime::log_warn("SkiaSurface: no current texture from GpuSurface");
             }
         }
 

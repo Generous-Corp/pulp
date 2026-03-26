@@ -275,6 +275,8 @@ private:
     std::unique_ptr<render::SkiaSurface> skia_surface_;
     CVDisplayLinkRef display_link_ = nullptr;
     std::atomic<bool> needs_repaint_{true};
+    int frame_fail_count_ = 0;
+    int frame_ok_count_ = 0;
     float width_ = 0, height_ = 0;
 
     void init_gpu(float width, float height) {
@@ -322,13 +324,26 @@ private:
 
     void render_frame() {
         if (!gpu_surface_ || !skia_surface_) return;
-        // GPU path is frame-driven: render every display-link tick.
-        // This supports continuous animation without explicit invalidation.
 
-        // Frame lifecycle: acquire → wrap → render → submit → present
-        if (!gpu_surface_->begin_frame()) return;
+        if (!gpu_surface_->begin_frame()) {
+            frame_fail_count_++;
+            if (frame_fail_count_ <= 3)
+                fprintf(stderr, "[gpu-host] begin_frame failed (%d)\n", frame_fail_count_);
+            return;
+        }
 
-        if (auto* canvas = skia_surface_->begin_frame()) {
+        auto* canvas = skia_surface_->begin_frame();
+        if (!canvas) {
+            fprintf(stderr, "[gpu-host] skia begin_frame returned null\n");
+            gpu_surface_->end_frame();
+            return;
+        }
+
+        if (frame_ok_count_++ == 0) {
+            fprintf(stderr, "[gpu-host] first successful frame\n");
+        }
+
+        {
             // Layout and paint the view tree
             root_.set_bounds({0, 0, width_, height_});
             root_.layout_children();
