@@ -224,6 +224,11 @@ add_executable(pulp-test-text-input test_text_input.cpp)
 target_link_libraries(pulp-test-text-input PRIVATE pulp::view Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-text-input)
 
+# Panel widget tests (styled containers)
+add_executable(pulp-test-panel test_panel.cpp)
+target_link_libraries(pulp-test-panel PRIVATE pulp::view Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-panel)
+
 # UI components tests (ComboBox, TabPanel, ListBox, ScrollView, Tooltip, ProgressBar, CallOutBox)
 add_executable(pulp-test-ui-components test_ui_components.cpp)
 target_link_libraries(pulp-test-ui-components PRIVATE pulp::view Catch2::Catch2WithMain)

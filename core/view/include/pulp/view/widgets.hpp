@@ -246,4 +246,30 @@ private:
     float max_db_ = 0.0f;
 };
 
+// ── Panel ────────────────────────────────────────────────────────────────────
+// Styled container with background, border, and rounding. For visual chrome.
+
+class Panel : public View {
+public:
+    Panel() = default;
+
+    void set_background_token(std::string token) { bg_token_ = std::move(token); }
+    void set_border_token(std::string token) { border_token_ = std::move(token); }
+    void set_corner_radius(float r) { corner_radius_ = r; }
+    void set_border_width(float w) { border_width_ = w; }
+
+    const std::string& background_token() const { return bg_token_; }
+    const std::string& border_token() const { return border_token_; }
+    float corner_radius() const { return corner_radius_; }
+    float border_width() const { return border_width_; }
+
+    void paint(canvas::Canvas& canvas) override;
+
+private:
+    std::string bg_token_ = "bg.surface";
+    std::string border_token_ = "control.border";
+    float corner_radius_ = 8.0f;
+    float border_width_ = 1.0f;
+};
+
 } // namespace pulp::view

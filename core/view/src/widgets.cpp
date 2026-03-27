@@ -512,4 +512,20 @@ void SpectrumView::paint(canvas::Canvas& canvas) {
     }
 }
 
+// ── Panel ────────────────────────────────────────────────────────────────────
+
+void Panel::paint(canvas::Canvas& canvas) {
+    auto b = local_bounds();
+    auto bg = resolve_color(bg_token_, canvas::Color::rgba(45, 45, 60));
+    canvas.set_fill_color(bg);
+    canvas.fill_rounded_rect(0, 0, b.width, b.height, corner_radius_);
+
+    if (border_width_ > 0) {
+        auto border = resolve_color(border_token_, canvas::Color::rgba(80, 80, 100));
+        canvas.set_stroke_color(border);
+        canvas.set_line_width(border_width_);
+        canvas.stroke_rounded_rect(0, 0, b.width, b.height, corner_radius_);
+    }
+}
+
 } // namespace pulp::view
