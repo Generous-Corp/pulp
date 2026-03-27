@@ -1,4 +1,5 @@
 #include <pulp/view/ui_components.hpp>
+#include <pulp/view/animation.hpp>
 #include <algorithm>
 
 namespace pulp::view {
@@ -107,16 +108,30 @@ bool ComboBox::on_key_event(const KeyEvent& event) {
 void Tooltip::show_at(Point position) {
     set_bounds({position.x, position.y - 24, 200, 22});
     set_visible(true);
+    float dur = resolve_dimension("motion.duration.normal", 0.15f);
+    opacity_.animate_to(1.0f, dur, easing::ease_out_quad);
 }
 
-void Tooltip::hide() { set_visible(false); }
+void Tooltip::hide() {
+    float dur = resolve_dimension("motion.duration.normal", 0.15f);
+    opacity_.animate_to(0.0f, dur, easing::ease_in_quad);
+    // Note: caller should check opacity_.value() <= 0 to actually set_visible(false)
+}
+
+void Tooltip::advance_animations(float dt) {
+    opacity_.advance(dt);
+    if (!opacity_.animating() && opacity_.value() <= 0.01f && visible()) {
+        set_visible(false);
+    }
+}
 
 void Tooltip::paint(canvas::Canvas& canvas) {
     auto b = local_bounds();
-    canvas.set_fill_color(canvas::Color::hex(0x333344));
+    auto alpha = static_cast<uint8_t>(255 * opacity_.value());
+    canvas.set_fill_color(canvas::Color::rgba(0x33, 0x33, 0x44, alpha));
     canvas.fill_rounded_rect(b.x, b.y, b.width, b.height, 4);
     canvas.set_font("system", 11);
-    canvas.set_fill_color(canvas::Color::hex(0xe0e0e0));
+    canvas.set_fill_color(canvas::Color::rgba(0xe0, 0xe0, 0xe0, alpha));
     canvas.fill_text(text_, b.x + 6, b.y + 15);
 }
 
@@ -253,34 +268,91 @@ void TabPanel::on_mouse_event(const MouseEvent& event) {
 
 // ── ScrollView ───────────────────────────────────────────────────────────
 
-void ScrollView::set_scroll(float x, float y) {
+void ScrollView::clamp_scroll_targets() {
     auto b = local_bounds();
-    scroll_x_ = std::clamp(x, 0.0f, std::max(0.0f, content_size_.width - b.width));
-    scroll_y_ = std::clamp(y, 0.0f, std::max(0.0f, content_size_.height - b.height));
+    target_scroll_x_ = std::clamp(target_scroll_x_, 0.0f, std::max(0.0f, content_size_.width - b.width));
+    target_scroll_y_ = std::clamp(target_scroll_y_, 0.0f, std::max(0.0f, content_size_.height - b.height));
+}
+
+void ScrollView::set_scroll(float x, float y) {
+    target_scroll_x_ = x;
+    target_scroll_y_ = y;
+    clamp_scroll_targets();
+    smooth_scroll_x_.set(target_scroll_x_);
+    smooth_scroll_y_.set(target_scroll_y_);
+}
+
+void ScrollView::scroll_by(float dx, float dy) {
+    target_scroll_x_ += dx;
+    target_scroll_y_ += dy;
+    clamp_scroll_targets();
+    float dur = resolve_dimension("motion.duration.normal", 0.15f);
+    smooth_scroll_x_.animate_to(target_scroll_x_, dur, easing::ease_out_cubic);
+    smooth_scroll_y_.animate_to(target_scroll_y_, dur, easing::ease_out_cubic);
+}
+
+void ScrollView::on_mouse_enter() {
+    float dur = resolve_dimension("motion.duration.normal", 0.15f);
+    bar_opacity_.animate_to(1.0f, dur, easing::ease_out_quad);
+    bar_width_.animate_to(8.0f, dur, easing::ease_out_quad);
+}
+
+void ScrollView::on_mouse_leave() {
+    float dur = resolve_dimension("motion.duration.normal", 0.15f);
+    bar_opacity_.animate_to(0.3f, dur, easing::ease_in_quad);
+    bar_width_.animate_to(4.0f, dur, easing::ease_in_quad);
+}
+
+void ScrollView::advance_animations(float dt) {
+    smooth_scroll_x_.advance(dt);
+    smooth_scroll_y_.advance(dt);
+    bar_opacity_.advance(dt);
+    bar_width_.advance(dt);
 }
 
 void ScrollView::paint(canvas::Canvas& canvas) {
     auto b = local_bounds();
+    float sx = smooth_scroll_x_.value();
+    float sy = smooth_scroll_y_.value();
+
     canvas.save();
     canvas.clip_rect(b.x, b.y, b.width, b.height);
-    canvas.translate(-scroll_x_, -scroll_y_);
+    canvas.translate(-sx, -sy);
     // Children paint themselves via paint_all
     canvas.restore();
 
-    // Scroll bar (vertical)
+    float opacity = bar_opacity_.value();
+    float width = bar_width_.value();
+
+    // Vertical scroll bar
     if (direction_ != Direction::horizontal && content_size_.height > b.height) {
         float ratio = b.height / content_size_.height;
-        float bar_h = b.height * ratio;
-        float bar_y = b.y + (scroll_y_ / content_size_.height) * b.height;
-        canvas.set_fill_color(canvas::Color::rgba(255, 255, 255, 40));
-        canvas.fill_rounded_rect(b.x + b.width - 6, bar_y, 4, bar_h, 2);
+        float bar_h = std::max(20.0f, b.height * ratio);
+        float max_scroll = content_size_.height - b.height;
+        float bar_y = b.y + (max_scroll > 0 ? (sy / max_scroll) * (b.height - bar_h) : 0);
+        auto alpha = static_cast<uint8_t>(255 * opacity * 0.4f);
+        canvas.set_fill_color(canvas::Color::rgba(255, 255, 255, alpha));
+        canvas.fill_rounded_rect(b.x + b.width - width - 2, bar_y, width, bar_h, width * 0.5f);
+    }
+
+    // Horizontal scroll bar
+    if (direction_ != Direction::vertical && content_size_.width > b.width) {
+        float ratio = b.width / content_size_.width;
+        float bar_w = std::max(20.0f, b.width * ratio);
+        float max_scroll = content_size_.width - b.width;
+        float bar_x = b.x + (max_scroll > 0 ? (sx / max_scroll) * (b.width - bar_w) : 0);
+        auto alpha = static_cast<uint8_t>(255 * opacity * 0.4f);
+        canvas.set_fill_color(canvas::Color::rgba(255, 255, 255, alpha));
+        canvas.fill_rounded_rect(bar_x, b.y + b.height - width - 2, bar_w, width, width * 0.5f);
     }
 }
 
 void ScrollView::on_mouse_event(const MouseEvent& event) {
-    // Drag to scroll
-    if (event.is_down) return;
-    // TODO: track drag delta for scroll
+    if (event.is_wheel) {
+        float sensitivity = 30.0f;
+        scroll_by(event.scroll_delta_x * sensitivity, event.scroll_delta_y * sensitivity);
+        return;
+    }
 }
 
 // ── ListBox ──────────────────────────────────────────────────────────────

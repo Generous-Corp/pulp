@@ -155,6 +155,40 @@ Color View::resolve_color(const std::string& name, Color fallback) const {
     return fallback;
 }
 
+float View::resolve_dimension(const std::string& name, float fallback) const {
+    auto d = theme_.dimension(name);
+    if (d.has_value()) return d.value();
+    if (parent_) return parent_->resolve_dimension(name, fallback);
+    return fallback;
+}
+
+void View::set_hovered(bool h) {
+    if (hovered_ == h) return;
+    hovered_ = h;
+    if (h) on_mouse_enter();
+    else on_mouse_leave();
+}
+
+FrameClock* View::frame_clock() const {
+    if (frame_clock_) return frame_clock_;
+    if (parent_) return parent_->frame_clock();
+    return nullptr;
+}
+
+void View::simulate_hover(Point root_pos) {
+    // Clear hover on all children first via a simple recursive walk
+    std::function<void(View*)> clear_hover = [&](View* v) {
+        if (v->hovered_) v->set_hovered(false);
+        for (size_t i = 0; i < v->child_count(); ++i)
+            clear_hover(v->child_at(i));
+    };
+    clear_hover(this);
+
+    // Set hover on the hit target
+    auto* target = hit_test(root_pos);
+    if (target) target->set_hovered(true);
+}
+
 void View::layout_children() {
     if (children_.empty()) return;
 
@@ -244,6 +278,7 @@ void View::layout_children() {
         }
 
         child->set_bounds(child_bounds);
+        child->layout_children();  // Recurse into nested containers
         pos += child_main + gap;
     }
 }

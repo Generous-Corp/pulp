@@ -146,9 +146,21 @@ Theme Theme::dark() {
     t.dimensions["control.fader_width"] = 24.0f;
     t.dimensions["control.meter_width"] = 12.0f;
 
+    // Motion durations (seconds)
+    t.dimensions["motion.duration.fast"]       = 0.08f;
+    t.dimensions["motion.duration.normal"]     = 0.15f;
+    t.dimensions["motion.duration.slow"]       = 0.30f;
+    t.dimensions["motion.duration.meter_decay"] = 0.30f;
+    t.dimensions["motion.duration.peak_hold"]  = 1.50f;
+
     // Strings
     t.strings["font.family"] = "Inter";
     t.strings["font.mono"]   = "JetBrains Mono";
+
+    // Motion easing names
+    t.strings["motion.easing.interaction"] = "ease_out_cubic";
+    t.strings["motion.easing.enter"]       = "ease_out_quad";
+    t.strings["motion.easing.exit"]        = "ease_in_quad";
 
     return t;
 }
@@ -214,6 +226,11 @@ Theme Theme::pro_audio() {
     t.dimensions["spacing.lg"] = 12.0f;
     t.dimensions["font.md"]    = 12.0f;
     t.dimensions["control.knob_size"] = 40.0f;
+
+    // Snappier motion for pro audio
+    t.dimensions["motion.duration.fast"]   = 0.06f;
+    t.dimensions["motion.duration.normal"] = 0.12f;
+    t.dimensions["motion.duration.slow"]   = 0.25f;
 
     t.strings = dark_theme.strings;
 

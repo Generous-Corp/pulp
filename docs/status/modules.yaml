@@ -63,7 +63,7 @@ modules:
     docs: reference/modules.md#render
 
   - name: view
-    summary: Widgets, themes, JS scripting, hot-reload, inspector, text editor, UI components, app framework, design export
+    summary: Widgets, themes, JS scripting, hot-reload, inspector, text editor, UI components, app framework, design export, FrameClock animation system, motion tokens
     status: usable
     dependencies: [canvas, events, state]
     docs: reference/modules.md#view

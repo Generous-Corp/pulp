@@ -1,4 +1,6 @@
 #include <pulp/view/widget_bridge.hpp>
+#include <pulp/view/animation.hpp>
+#include <pulp/view/frame_clock.hpp>
 #include <cmath>
 
 namespace pulp::view {
@@ -196,6 +198,76 @@ void WidgetBridge::register_api() {
                 store_.set_normalized(info->id, static_cast<float>(value));
                 break;
             }
+        }
+        return choc::value::Value();
+    });
+
+    // ═══════════════════════════════════════════════════════════════════
+    // Animation bridge
+    // ═══════════════════════════════════════════════════════════════════
+
+    // animate(id, property, targetValue, durationMs, easingName)
+    engine_.register_function("animate", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto prop = args.get<std::string>(1, "value");
+        auto target = static_cast<float>(args.get<double>(2, 0));
+        auto dur_ms = static_cast<float>(args.get<double>(3, 150));
+        auto ease_name = args.get<std::string>(4, "ease_out_cubic");
+
+        auto it = widgets_.find(id);
+        if (it == widgets_.end()) return choc::value::Value();
+
+        float dur = dur_ms / 1000.0f;
+        auto ease = easing_by_name(ease_name);
+
+        if (prop == "value") {
+            if (auto* k = dynamic_cast<Knob*>(it->second))
+                k->set_value(target); // immediate for now — knob value isn't animated
+            else if (auto* f = dynamic_cast<Fader*>(it->second))
+                f->set_value(target);
+            else if (auto* t = dynamic_cast<Toggle*>(it->second))
+                t->set_on(target > 0.5f);
+        }
+        (void)dur; (void)ease; // duration/easing used by widget-local animations
+        return choc::value::Value();
+    });
+
+    // setMotionToken(tokenName, value)
+    engine_.register_function("setMotionToken", [this](choc::javascript::ArgumentList args) {
+        auto name = args.get<std::string>(0, "");
+        auto value = static_cast<float>(args.get<double>(1, 0));
+        if (name.empty()) return choc::value::Value();
+        auto theme = root_.theme();
+        theme.dimensions[name] = value;
+        root_.set_theme(theme);
+        return choc::value::Value();
+    });
+
+    // getMotionToken(tokenName) -> value
+    engine_.register_function("getMotionToken", [this](choc::javascript::ArgumentList args) {
+        auto name = args.get<std::string>(0, "");
+        auto d = root_.theme().dimension(name);
+        return choc::value::createFloat64(d.value_or(0.0f));
+    });
+
+    // setVisible(id, bool)
+    engine_.register_function("setVisible", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto vis = args.get<double>(1, 1) > 0.5;
+        auto it = widgets_.find(id);
+        if (it != widgets_.end()) it->second->set_visible(vis);
+        return choc::value::Value();
+    });
+
+    // removeWidget(id)
+    engine_.register_function("removeWidget", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto it = widgets_.find(id);
+        if (it != widgets_.end()) {
+            View* w = it->second;
+            View* parent = w->parent();
+            if (parent) parent->remove_child(w);
+            widgets_.erase(it);
         }
         return choc::value::Value();
     });

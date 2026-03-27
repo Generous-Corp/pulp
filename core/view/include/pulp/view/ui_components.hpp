@@ -6,6 +6,7 @@
 
 #include <pulp/view/view.hpp>
 #include <pulp/view/input_events.hpp>
+#include <pulp/view/animation.hpp>
 #include <pulp/canvas/canvas.hpp>
 #include <functional>
 #include <string>
@@ -59,23 +60,28 @@ private:
 /// Attach to any view via set_tooltip().
 class Tooltip : public View {
 public:
-    explicit Tooltip(std::string text = {}) : text_(std::move(text)) {
+    explicit Tooltip(std::string text = {}) : text_(std::move(text)), opacity_(0.0f) {
         set_visible(false);
     }
 
     void set_text(std::string text) { text_ = std::move(text); }
     const std::string& text() const { return text_; }
 
-    /// Show the tooltip near a given position.
+    /// Show the tooltip near a given position (with fade-in).
     void show_at(Point position);
 
-    /// Hide the tooltip.
+    /// Hide the tooltip (with fade-out).
     void hide();
 
     void paint(canvas::Canvas& canvas) override;
 
+    // Animation accessors for testing
+    float opacity() const { return opacity_.value(); }
+    void advance_animations(float dt);
+
 private:
     std::string text_;
+    ValueAnimation opacity_;
 };
 
 // ── ProgressBar ──────────────────────────────────────────────────────────
@@ -177,6 +183,7 @@ private:
 // ── ScrollView ───────────────────────────────────────────────────────────
 
 /// Scrollable container that clips and scrolls its content.
+/// Scroll bars animate: fade in and widen on hover, fade out when idle.
 class ScrollView : public View {
 public:
     enum class Direction { vertical, horizontal, both };
@@ -184,19 +191,36 @@ public:
     void set_direction(Direction d) { direction_ = d; }
     void set_content_size(Size size) { content_size_ = size; }
 
-    float scroll_x() const { return scroll_x_; }
-    float scroll_y() const { return scroll_y_; }
+    float scroll_x() const { return smooth_scroll_x_.value(); }
+    float scroll_y() const { return smooth_scroll_y_.value(); }
     void set_scroll(float x, float y);
 
+    /// Scroll by a delta (e.g., from mouse wheel). Animates smoothly.
+    void scroll_by(float dx, float dy);
+
     void paint(canvas::Canvas& canvas) override;
+    void on_mouse_enter() override;
+    void on_mouse_leave() override;
 
     // Scroll via mouse wheel or touch drag
     void on_mouse_event(const MouseEvent& event) override;
 
+    // Animation accessors for testing
+    float bar_opacity() const { return bar_opacity_.value(); }
+    float bar_width() const { return bar_width_.value(); }
+    float target_scroll_y() const { return target_scroll_y_; }
+    void advance_animations(float dt);
+
 private:
+    void clamp_scroll_targets();
+
     Direction direction_ = Direction::vertical;
     Size content_size_{0, 0};
-    float scroll_x_ = 0, scroll_y_ = 0;
+    float target_scroll_x_ = 0, target_scroll_y_ = 0;
+    ValueAnimation smooth_scroll_x_{0.0f};  // smoothly interpolated scroll position
+    ValueAnimation smooth_scroll_y_{0.0f};
+    ValueAnimation bar_opacity_{0.0f};      // fade in/out on hover
+    ValueAnimation bar_width_{4.0f};        // narrow when idle, wide on hover
 };
 
 // ── ListBox ──────────────────────────────────────────────────────────────

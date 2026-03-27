@@ -34,6 +34,16 @@ docs:
     kind: guide
     summary: Running tests, validation, writing new tests
 
+  - slug: animation
+    path: guides/animation.md
+    kind: guide
+    summary: FrameClock, ValueAnimation, motion tokens, widget animations, JS bridge animation API
+
+  - slug: animation-demo
+    path: examples/animation-demo.md
+    kind: example
+    summary: Animated plugin UI with JS bridge and C++ examples
+
   - slug: parameters
     path: guides/parameters.md
     kind: guide

@@ -105,6 +105,64 @@ TEST_CASE("Theme missing token returns nullopt", "[view][theme]") {
     REQUIRE_FALSE(empty.string_token("nonexistent").has_value());
 }
 
+// ── Motion token tests ──────────────────────────────────────────────────────
+
+TEST_CASE("Dark theme has motion duration tokens", "[view][theme][motion]") {
+    auto theme = Theme::dark();
+    REQUIRE(theme.dimension("motion.duration.fast").has_value());
+    REQUIRE(theme.dimension("motion.duration.normal").has_value());
+    REQUIRE(theme.dimension("motion.duration.slow").has_value());
+    REQUIRE(theme.dimension("motion.duration.meter_decay").has_value());
+    REQUIRE(theme.dimension("motion.duration.peak_hold").has_value());
+
+    // Verify ordering: fast < normal < slow
+    float fast = theme.dimension("motion.duration.fast").value();
+    float normal = theme.dimension("motion.duration.normal").value();
+    float slow = theme.dimension("motion.duration.slow").value();
+    REQUIRE(fast < normal);
+    REQUIRE(normal < slow);
+}
+
+TEST_CASE("Dark theme has motion easing tokens", "[view][theme][motion]") {
+    auto theme = Theme::dark();
+    REQUIRE(theme.string_token("motion.easing.interaction").has_value());
+    REQUIRE(theme.string_token("motion.easing.enter").has_value());
+    REQUIRE(theme.string_token("motion.easing.exit").has_value());
+}
+
+TEST_CASE("Light theme inherits motion tokens from dark", "[view][theme][motion]") {
+    auto theme = Theme::light();
+    REQUIRE(theme.dimension("motion.duration.fast").has_value());
+    REQUIRE(theme.string_token("motion.easing.interaction").has_value());
+}
+
+TEST_CASE("Pro audio theme has snappier motion", "[view][theme][motion]") {
+    auto dark = Theme::dark();
+    auto pro = Theme::pro_audio();
+
+    float dark_fast = dark.dimension("motion.duration.fast").value();
+    float pro_fast = pro.dimension("motion.duration.fast").value();
+    REQUIRE(pro_fast <= dark_fast);
+
+    float dark_normal = dark.dimension("motion.duration.normal").value();
+    float pro_normal = pro.dimension("motion.duration.normal").value();
+    REQUIRE(pro_normal <= dark_normal);
+}
+
+TEST_CASE("Motion tokens survive JSON round-trip", "[view][theme][motion]") {
+    auto original = Theme::dark();
+    auto json = original.to_json();
+    auto restored = Theme::from_json(json);
+
+    auto orig_fast = original.dimension("motion.duration.fast").value();
+    auto rest_fast = restored.dimension("motion.duration.fast").value();
+    REQUIRE_THAT(rest_fast, WithinAbs(orig_fast, 0.001));
+
+    auto orig_ease = original.string_token("motion.easing.interaction").value();
+    auto rest_ease = restored.string_token("motion.easing.interaction").value();
+    REQUIRE(orig_ease == rest_ease);
+}
+
 TEST_CASE("Theme from_json with custom tokens", "[view][theme]") {
     auto json = R"({
         "colors": {

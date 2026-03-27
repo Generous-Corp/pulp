@@ -391,7 +391,11 @@ private:
     }
 };
 
+} // namespace pulp::view (close GPU class block)
+
 #endif // PULP_HAS_SKIA
+
+namespace pulp::view { // reopen for factory functions
 
 // ── Factory ──────────────────────────────────────────────────────────────────
 

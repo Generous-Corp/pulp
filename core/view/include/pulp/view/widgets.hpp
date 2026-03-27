@@ -2,6 +2,7 @@
 
 #include <pulp/view/view.hpp>
 #include <pulp/view/audio_bridge.hpp>
+#include <pulp/view/animation.hpp>
 #include <string>
 #include <cmath>
 #include <functional>
@@ -53,6 +54,12 @@ public:
     std::function<void(float)> on_change;
 
     void paint(canvas::Canvas& canvas) override;
+    void on_mouse_enter() override;
+    void on_mouse_leave() override;
+
+    // Animation accessors for testing
+    float hover_glow() const { return hover_glow_.value(); }
+    void advance_animations(float dt);
 
     // Arc range in radians (default: 270-degree sweep)
     static constexpr float start_angle = 2.356f;  // 135 degrees (bottom-left)
@@ -62,6 +69,7 @@ private:
     float value_ = 0.0f;
     std::string label_;
     std::function<std::string(float)> format_;
+    ValueAnimation hover_glow_{0.0f};
 };
 
 // ── Fader ────────────────────────────────────────────────────────────────────
@@ -86,11 +94,18 @@ public:
     std::function<void(float)> on_change;
 
     void paint(canvas::Canvas& canvas) override;
+    void on_mouse_enter() override;
+    void on_mouse_leave() override;
+
+    // Animation accessors for testing
+    float hover_scale() const { return hover_thumb_scale_.value(); }
+    void advance_animations(float dt);
 
 private:
     float value_ = 0.0f;
     Orientation orientation_ = Orientation::vertical;
     std::string label_;
+    ValueAnimation hover_thumb_scale_{1.0f};
 };
 
 // ── Toggle ───────────────────────────────────────────────────────────────────
@@ -98,9 +113,11 @@ private:
 
 class Toggle : public View {
 public:
-    Toggle() { set_access_role(AccessRole::toggle); set_focusable(true); }
+    Toggle() : thumb_position_(0.0f), hover_opacity_(0.0f) {
+        set_access_role(AccessRole::toggle); set_focusable(true);
+    }
 
-    void set_on(bool v) { on_ = v; }
+    void set_on(bool v);
     bool is_on() const { return on_; }
 
     void set_label(std::string text) { label_ = std::move(text); }
@@ -110,10 +127,20 @@ public:
     std::function<void(bool)> on_toggle;
 
     void paint(canvas::Canvas& canvas) override;
+    void on_mouse_down(Point pos) override;
+    void on_mouse_enter() override;
+    void on_mouse_leave() override;
+
+    // Animation accessors for testing
+    float thumb_position() const { return thumb_position_.value(); }
+    float hover_opacity() const { return hover_opacity_.value(); }
+    void advance_animations(float dt);
 
 private:
     bool on_ = false;
     std::string label_;
+    ValueAnimation thumb_position_;
+    ValueAnimation hover_opacity_;
 };
 
 // ── Meter ────────────────────────────────────────────────────────────────────
