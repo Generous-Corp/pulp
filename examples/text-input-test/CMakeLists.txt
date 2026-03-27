@@ -1,0 +1,5 @@
+if(APPLE AND NOT PULP_IOS)
+    add_executable(pulp-text-input-test main.cpp)
+    target_link_libraries(pulp-text-input-test PRIVATE pulp::view pulp::canvas pulp::state)
+    target_compile_features(pulp-text-input-test PRIVATE cxx_std_20)
+endif()

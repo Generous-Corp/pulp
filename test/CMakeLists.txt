@@ -219,6 +219,11 @@ add_executable(pulp-test-text-editor test_text_editor.cpp)
 target_link_libraries(pulp-test-text-editor PRIVATE pulp::view Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-text-editor)
 
+# TextEditor input pipeline tests (headless — validates focus, typing, Enter, backspace)
+add_executable(pulp-test-text-input test_text_input.cpp)
+target_link_libraries(pulp-test-text-input PRIVATE pulp::view Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-text-input)
+
 # UI components tests (ComboBox, TabPanel, ListBox, ScrollView, Tooltip, ProgressBar, CallOutBox)
 add_executable(pulp-test-ui-components test_ui_components.cpp)
 target_link_libraries(pulp-test-ui-components PRIVATE pulp::view Catch2::Catch2WithMain)

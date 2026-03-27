@@ -33,3 +33,8 @@ add_subdirectory(gpu-demo)
 
 # AI Style Designer: JS-defined design tool with hot reload
 add_subdirectory(design-tool)
+
+# TextEditor keyboard input test (Phase 21.1)
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/text-input-test/CMakeLists.txt)
+    add_subdirectory(text-input-test)
+endif()

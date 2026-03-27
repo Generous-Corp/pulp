@@ -36,6 +36,8 @@ namespace pulp::view {
 /// @endcode
 class TextEditor : public View {
 public:
+    TextEditor() { set_focusable(true); }
+
     static constexpr int kMaxUndoHistory = 1000;
 
     // ── Configuration ────────────────────────────────────────────────────

@@ -35,17 +35,21 @@ static void install_app_menu(NSString* appName) {
 
 // ── PulpView: CoreGraphics NSView (CPU rendering path) ───────────────────────
 
-@interface PulpView : NSView
+@interface PulpView : NSView <NSTextInputClient>
 @property (nonatomic, assign) pulp::view::View* rootView;
 @property (nonatomic, assign) pulp::view::FrameClock* frameClock;
 @property (nonatomic, strong) NSTimer* animationTimer;
 @property (nonatomic, strong) NSTrackingArea* trackingArea;
 @end
 
-@implementation PulpView
+@implementation PulpView {
+    pulp::view::View* _dragTarget;
+    pulp::view::View* _focusedView;
+}
 
-- (BOOL)isFlipped { return NO; }  // CG canvas already flips coordinates
+- (BOOL)isFlipped { return NO; }
 - (BOOL)acceptsFirstResponder { return YES; }
+- (BOOL)acceptsFirstMouse:(NSEvent*)e { (void)e; return YES; }
 
 - (void)updateTrackingAreas {
     [super updateTrackingAreas];
@@ -82,12 +86,136 @@ static void install_app_menu(NSString* appName) {
     [self setNeedsDisplay:YES];
 }
 
+static uint16_t modifiersFromNSFlags(NSEventModifierFlags flags) {
+    uint16_t m = 0;
+    if (flags & NSEventModifierFlagShift)   m |= pulp::view::kModShift;
+    if (flags & NSEventModifierFlagControl) m |= pulp::view::kModCtrl;
+    if (flags & NSEventModifierFlagOption)  m |= pulp::view::kModAlt;
+    if (flags & NSEventModifierFlagCommand) m |= pulp::view::kModCmd;
+    return m;
+}
+
+static pulp::view::Point toLocal(pulp::view::Point pos, pulp::view::View* target, pulp::view::View* root) {
+    auto local = pos;
+    for (auto* v = target; v && v != root; v = v->parent()) {
+        local.x -= v->bounds().x;
+        local.y -= v->bounds().y;
+    }
+    return local;
+}
+
+static pulp::view::KeyCode keyCodeFromNS(unsigned short code) {
+    using KC = pulp::view::KeyCode;
+    switch (code) {
+        case 0: return KC::a; case 1: return KC::s; case 2: return KC::d;
+        case 3: return KC::f; case 4: return KC::h; case 5: return KC::g;
+        case 6: return KC::z; case 7: return KC::x; case 8: return KC::c;
+        case 9: return KC::v; case 11: return KC::b; case 12: return KC::q;
+        case 13: return KC::w; case 14: return KC::e; case 15: return KC::r;
+        case 16: return KC::y; case 17: return KC::t; case 31: return KC::o;
+        case 32: return KC::u; case 34: return KC::i; case 35: return KC::p;
+        case 37: return KC::l; case 38: return KC::j; case 40: return KC::k;
+        case 45: return KC::n; case 46: return KC::m;
+        case 36: return KC::enter; case 53: return KC::escape;
+        case 48: return KC::tab; case 51: return KC::backspace;
+        case 117: return KC::delete_;
+        case 123: return KC::left; case 124: return KC::right;
+        case 125: return KC::down; case 126: return KC::up;
+        case 115: return KC::home; case 119: return KC::end_;
+        case 49: return KC::space;
+        default: return KC::unknown;
+    }
+}
+
 - (void)mouseDown:(NSEvent*)event {
     if (!self.rootView) return;
     auto pt = [self localPoint:event];
-    self.rootView->simulate_click(pt);
+    _dragTarget = self.rootView->hit_test(pt);
+    if (_dragTarget) {
+        auto local = toLocal(pt, _dragTarget, self.rootView);
+
+        // Focus: click on focusable view gives it keyboard focus
+        if (_dragTarget->focusable()) {
+            if (_focusedView && _focusedView != _dragTarget)
+                _focusedView->on_focus_changed(false);
+            _focusedView = _dragTarget;
+            _focusedView->on_focus_changed(true);
+        }
+
+        // Rich event path (ComboBox, etc.)
+        pulp::view::MouseEvent me;
+        me.position = local;
+        me.window_position = pt;
+        me.button = pulp::view::MouseButton::left;
+        me.modifiers = modifiersFromNSFlags(event.modifierFlags);
+        me.is_down = true;
+        me.click_count = static_cast<int>(event.clickCount);
+        _dragTarget->on_mouse_event(me);
+
+        // Legacy path (Knob, Fader, Toggle)
+        _dragTarget->on_mouse_down(local);
+    }
     [self setNeedsDisplay:YES];
 }
+
+- (void)mouseDragged:(NSEvent*)event {
+    if (!_dragTarget || !self.rootView) return;
+    auto pt = [self localPoint:event];
+    auto local = toLocal(pt, _dragTarget, self.rootView);
+    _dragTarget->on_mouse_drag(local);
+    [self setNeedsDisplay:YES];
+}
+
+- (void)mouseUp:(NSEvent*)event {
+    if (_dragTarget) {
+        auto pt = [self localPoint:event];
+        _dragTarget->on_mouse_up(pt);
+        _dragTarget = nullptr;
+    }
+    [self setNeedsDisplay:YES];
+}
+
+// ── Keyboard input ───────────────────────────────────────────────
+
+- (void)keyDown:(NSEvent*)event {
+    // Let NSTextInputClient handle text insertion
+    [self interpretKeyEvents:@[event]];
+
+    // Forward as KeyEvent to focused view (for navigation, Enter, Backspace, etc.)
+    if (_focusedView) {
+        pulp::view::KeyEvent ke;
+        ke.key = keyCodeFromNS(event.keyCode);
+        ke.modifiers = modifiersFromNSFlags(event.modifierFlags);
+        ke.is_down = true;
+        ke.is_repeat = event.isARepeat;
+        _focusedView->on_key_event(ke);
+        [self startAnimationTimerIfNeeded];
+        [self setNeedsDisplay:YES];
+    }
+}
+
+- (void)insertText:(id)string replacementRange:(NSRange)range {
+    (void)range;
+    if (_focusedView) {
+        NSString* str = [string isKindOfClass:[NSAttributedString class]]
+            ? [(NSAttributedString*)string string] : (NSString*)string;
+        pulp::view::TextInputEvent te;
+        te.text = [str UTF8String];
+        _focusedView->on_text_input(te);
+        [self setNeedsDisplay:YES];
+    }
+}
+
+- (BOOL)hasMarkedText { return NO; }
+- (NSRange)markedRange { return NSMakeRange(NSNotFound, 0); }
+- (NSRange)selectedRange { return NSMakeRange(0, 0); }
+- (void)setMarkedText:(id)s selectedRange:(NSRange)sel replacementRange:(NSRange)rep { (void)s; (void)sel; (void)rep; }
+- (void)unmarkText {}
+- (NSArray<NSAttributedStringKey>*)validAttributesForMarkedText { return @[]; }
+- (NSAttributedString*)attributedSubstringForProposedRange:(NSRange)r actualRange:(NSRangePointer)a { (void)r; (void)a; return nil; }
+- (NSUInteger)characterIndexForPoint:(NSPoint)p { (void)p; return 0; }
+- (NSRect)firstRectForCharacterRange:(NSRange)r actualRange:(NSRangePointer)a { (void)r; (void)a; return NSZeroRect; }
+- (void)doCommandBySelector:(SEL)sel { (void)sel; }
 
 - (void)mouseMoved:(NSEvent*)event {
     if (!self.rootView) return;
