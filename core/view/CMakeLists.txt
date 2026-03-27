@@ -21,6 +21,7 @@ target_sources(pulp-view PRIVATE
     src/ui_components.cpp
     src/design_export.cpp
     src/app_framework.cpp
+    src/frame_clock.cpp
 )
 
 # WebView support — compiled separately to avoid WebKit framework auto-loading

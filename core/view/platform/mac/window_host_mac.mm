@@ -1,4 +1,7 @@
 #include <pulp/view/window_host.hpp>
+#include <pulp/view/frame_clock.hpp>
+#include <pulp/view/widgets.hpp>
+#include <pulp/view/ui_components.hpp>
 
 #include <TargetConditionals.h>
 #if TARGET_OS_OSX
@@ -34,11 +37,123 @@ static void install_app_menu(NSString* appName) {
 
 @interface PulpView : NSView
 @property (nonatomic, assign) pulp::view::View* rootView;
+@property (nonatomic, assign) pulp::view::FrameClock* frameClock;
+@property (nonatomic, strong) NSTimer* animationTimer;
+@property (nonatomic, strong) NSTrackingArea* trackingArea;
 @end
 
 @implementation PulpView
 
-- (BOOL)isFlipped { return YES; }
+- (BOOL)isFlipped { return NO; }  // CG canvas already flips coordinates
+- (BOOL)acceptsFirstResponder { return YES; }
+
+- (void)updateTrackingAreas {
+    [super updateTrackingAreas];
+    if (self.trackingArea) [self removeTrackingArea:self.trackingArea];
+    self.trackingArea = [[NSTrackingArea alloc]
+        initWithRect:self.bounds
+             options:(NSTrackingMouseEnteredAndExited | NSTrackingMouseMoved |
+                      NSTrackingActiveInKeyWindow | NSTrackingInVisibleRect)
+               owner:self
+            userInfo:nil];
+    [self addTrackingArea:self.trackingArea];
+}
+
+- (pulp::view::Point)localPoint:(NSEvent*)event {
+    NSPoint p = [self convertPoint:event.locationInWindow fromView:nil];
+    // NSView is not flipped, so Y=0 is bottom. Convert to top-down for the view tree.
+    float viewHeight = static_cast<float>(self.bounds.size.height);
+    return {static_cast<float>(p.x), viewHeight - static_cast<float>(p.y)};
+}
+
+- (void)scrollWheel:(NSEvent*)event {
+    if (!self.rootView) return;
+    auto pt = [self localPoint:event];
+    auto* target = self.rootView->hit_test(pt);
+    if (!target) return;
+
+    pulp::view::MouseEvent me;
+    me.position = pt;
+    me.is_wheel = true;
+    me.scroll_delta_x = static_cast<float>(event.scrollingDeltaX);
+    me.scroll_delta_y = static_cast<float>(event.scrollingDeltaY);
+    target->on_mouse_event(me);
+    [self startAnimationTimerIfNeeded];
+    [self setNeedsDisplay:YES];
+}
+
+- (void)mouseDown:(NSEvent*)event {
+    if (!self.rootView) return;
+    auto pt = [self localPoint:event];
+    self.rootView->simulate_click(pt);
+    [self setNeedsDisplay:YES];
+}
+
+- (void)mouseMoved:(NSEvent*)event {
+    if (!self.rootView) return;
+    auto pt = [self localPoint:event];
+    self.rootView->simulate_hover(pt);
+    [self startAnimationTimerIfNeeded];
+    [self setNeedsDisplay:YES];
+}
+
+- (void)mouseExited:(NSEvent*)event {
+    (void)event;
+    if (!self.rootView) return;
+    // Clear all hover states
+    self.rootView->simulate_hover({-1, -1});
+    [self startAnimationTimerIfNeeded];
+    [self setNeedsDisplay:YES];
+}
+
+- (void)startAnimationTimerIfNeeded {
+    if (self.animationTimer) return;
+    // 60fps timer to drive animations
+    self.animationTimer = [NSTimer scheduledTimerWithTimeInterval:1.0/60.0
+        repeats:YES block:^(NSTimer* timer) {
+            if (self.frameClock) {
+                self.frameClock->tick(1.0f / 60.0f);
+            }
+            // Advance widget animations
+            [self advanceWidgetAnimations:self.rootView dt:1.0f/60.0f];
+            [self setNeedsDisplay:YES];
+
+            // Stop timer when no animations are active
+            if (self.frameClock && !self.frameClock->has_active_subscribers()) {
+                if (![self hasActiveAnimations:self.rootView]) {
+                    [self.animationTimer invalidate];
+                    self.animationTimer = nil;
+                }
+            }
+        }];
+}
+
+- (void)advanceWidgetAnimations:(pulp::view::View*)view dt:(float)dt {
+    if (!view) return;
+    // Try each animated widget type
+    if (auto* k = dynamic_cast<pulp::view::Knob*>(view)) k->advance_animations(dt);
+    else if (auto* t = dynamic_cast<pulp::view::Toggle*>(view)) t->advance_animations(dt);
+    else if (auto* f = dynamic_cast<pulp::view::Fader*>(view)) f->advance_animations(dt);
+    else if (auto* sv = dynamic_cast<pulp::view::ScrollView*>(view)) sv->advance_animations(dt);
+    else if (auto* tip = dynamic_cast<pulp::view::Tooltip*>(view)) tip->advance_animations(dt);
+
+    for (size_t i = 0; i < view->child_count(); ++i)
+        [self advanceWidgetAnimations:view->child_at(i) dt:dt];
+}
+
+- (BOOL)hasActiveAnimations:(pulp::view::View*)view {
+    if (!view) return NO;
+    if (auto* k = dynamic_cast<pulp::view::Knob*>(view))
+        if (k->hover_glow() > 0.01f || k->hover_glow() < 0.99f) return YES;
+    if (auto* t = dynamic_cast<pulp::view::Toggle*>(view))
+        if (t->thumb_position() > 0.01f && t->thumb_position() < 0.99f) return YES;
+    if (auto* f = dynamic_cast<pulp::view::Fader*>(view))
+        if (f->hover_scale() > 1.01f) return YES;
+
+    for (size_t i = 0; i < view->child_count(); ++i)
+        if ([self hasActiveAnimations:view->child_at(i)]) return YES;
+    return NO;
+}
 
 - (void)drawRect:(NSRect)dirtyRect {
     CGContextRef ctx = [[NSGraphicsContext currentContext] CGContext];
@@ -60,6 +175,10 @@ static void install_app_menu(NSString* appName) {
         self.rootView->layout_children();
         self.rootView->paint_all(canvas);
     }
+}
+
+- (void)dealloc {
+    [self.animationTimer invalidate];
 }
 
 @end
@@ -170,6 +289,7 @@ public:
 
             view_ = [[PulpView alloc] initWithFrame:frame];
             view_.rootView = &root_;
+            view_.frameClock = root_.frame_clock();
             [window_ setContentView:view_];
 
             delegate_ = [[PulpWindowDelegate alloc] init];

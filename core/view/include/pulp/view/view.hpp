@@ -10,6 +10,8 @@
 
 namespace pulp::view {
 
+class FrameClock;
+
 // Base class for all UI elements
 // Views form a tree: each view has zero or more children and one optional parent
 class View {
@@ -96,11 +98,34 @@ public:
     virtual void on_mouse_drag(Point pos) { (void)pos; }
     virtual void on_key_press(int key_code) { (void)key_code; }
 
+    // ── Hover events ──────────────────────────────────────────────────────
+
+    virtual void on_mouse_enter() {}
+    virtual void on_mouse_leave() {}
+    bool is_hovered() const { return hovered_; }
+    void set_hovered(bool h);
+
+    // ── Frame clock ─────────────────────────────────────────────────────
+
+    /// Set the frame clock on the root view. Children access via frame_clock().
+    void set_frame_clock(FrameClock* clock) { frame_clock_ = clock; }
+
+    /// Get the frame clock (walks up parent chain to find it).
+    FrameClock* frame_clock() const;
+
+    // ── Theme dimension resolution ──────────────────────────────────────
+
+    /// Resolve a dimension token: check own theme, walk up to parent.
+    float resolve_dimension(const std::string& name, float fallback) const;
+
     // Dispatch a synthetic click to the deepest view at the given point
     void simulate_click(Point root_pos);
 
     // Dispatch a synthetic drag from start to end
     void simulate_drag(Point start, Point end, int steps = 10);
+
+    // Dispatch a synthetic hover to the view at the given point
+    void simulate_hover(Point root_pos);
 
     // ── Keyboard focus ───────────────────────────────────────────────────
 
@@ -144,6 +169,8 @@ private:
     bool visible_ = true;
     bool focusable_ = false;
     bool has_focus_ = false;
+    bool hovered_ = false;
+    FrameClock* frame_clock_ = nullptr;
 };
 
 } // namespace pulp::view

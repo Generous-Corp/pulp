@@ -81,3 +81,107 @@ TEST_CASE("Easing functions produce valid output", "[view][animation]") {
     REQUIRE_THAT(easing::ease_out_bounce(0.0f), WithinAbs(0.0, 0.001));
     REQUIRE_THAT(easing::ease_out_bounce(1.0f), WithinAbs(1.0, 0.001));
 }
+
+// ── ValueAnimation tests ────────────────────────────────────────────────────
+
+TEST_CASE("ValueAnimation initial value", "[view][animation]") {
+    ValueAnimation a(0.5f);
+    REQUIRE_THAT(a.value(), WithinAbs(0.5, 0.001));
+    REQUIRE_FALSE(a.animating());
+}
+
+TEST_CASE("ValueAnimation animate_to reaches target", "[view][animation]") {
+    ValueAnimation a(0.0f);
+    a.animate_to(1.0f, 0.1f, easing::linear);
+    REQUIRE(a.animating());
+
+    // Advance halfway
+    a.advance(0.05f);
+    REQUIRE_THAT(a.value(), WithinAbs(0.5, 0.05));
+    REQUIRE(a.animating());
+
+    // Finish
+    a.advance(0.05f);
+    REQUIRE_THAT(a.value(), WithinAbs(1.0, 0.001));
+    REQUIRE_FALSE(a.animating());
+}
+
+TEST_CASE("ValueAnimation set snaps immediately", "[view][animation]") {
+    ValueAnimation a(0.0f);
+    a.animate_to(1.0f, 1.0f); // long animation
+    a.advance(0.01f);
+    REQUIRE(a.animating());
+
+    a.set(0.75f);
+    REQUIRE_THAT(a.value(), WithinAbs(0.75, 0.001));
+    REQUIRE_FALSE(a.animating());
+}
+
+TEST_CASE("ValueAnimation cancel stops mid-animation", "[view][animation]") {
+    ValueAnimation a(0.0f);
+    a.animate_to(1.0f, 1.0f, easing::linear);
+    a.advance(0.5f);
+    float mid = a.value();
+    REQUIRE(mid > 0.0f);
+    REQUIRE(mid < 1.0f);
+
+    a.cancel();
+    REQUIRE_FALSE(a.animating());
+    REQUIRE_THAT(a.value(), WithinAbs(mid, 0.001));
+
+    // Further advance does nothing
+    a.advance(1.0f);
+    REQUIRE_THAT(a.value(), WithinAbs(mid, 0.001));
+}
+
+TEST_CASE("ValueAnimation chained: animate_to while already animating", "[view][animation]") {
+    ValueAnimation a(0.0f);
+    a.animate_to(1.0f, 1.0f, easing::linear);
+    a.advance(0.3f); // partway through
+    float mid = a.value();
+
+    // Start new animation from current position
+    a.animate_to(0.0f, 0.1f, easing::linear);
+    REQUIRE(a.animating());
+    REQUIRE_THAT(a.value(), WithinAbs(mid, 0.01)); // starts from where we were
+
+    a.advance(0.1f);
+    REQUIRE_THAT(a.value(), WithinAbs(0.0, 0.01)); // reaches new target
+}
+
+TEST_CASE("ValueAnimation zero duration snaps", "[view][animation]") {
+    ValueAnimation a(0.0f);
+    a.animate_to(1.0f, 0.0f);
+    REQUIRE_THAT(a.value(), WithinAbs(1.0, 0.001));
+    REQUIRE_FALSE(a.animating());
+}
+
+TEST_CASE("ValueAnimation advance returns false when not animating", "[view][animation]") {
+    ValueAnimation a(0.0f);
+    REQUIRE_FALSE(a.advance(0.016f));
+
+    a.animate_to(1.0f, 0.01f);
+    a.advance(0.1f); // finish
+    REQUIRE_FALSE(a.advance(0.016f)); // no longer animating
+}
+
+// ── easing_by_name tests ────────────────────────────────────────────────────
+
+TEST_CASE("easing_by_name resolves known easings", "[view][animation]") {
+    REQUIRE(easing_by_name("linear") == easing::linear);
+    REQUIRE(easing_by_name("ease_in_quad") == easing::ease_in_quad);
+    REQUIRE(easing_by_name("ease_out_quad") == easing::ease_out_quad);
+    REQUIRE(easing_by_name("ease_in_out_quad") == easing::ease_in_out_quad);
+    REQUIRE(easing_by_name("ease_in_cubic") == easing::ease_in_cubic);
+    REQUIRE(easing_by_name("ease_out_cubic") == easing::ease_out_cubic);
+    REQUIRE(easing_by_name("ease_in_out_cubic") == easing::ease_in_out_cubic);
+    REQUIRE(easing_by_name("ease_in_expo") == easing::ease_in_expo);
+    REQUIRE(easing_by_name("ease_out_expo") == easing::ease_out_expo);
+    REQUIRE(easing_by_name("ease_out_elastic") == easing::ease_out_elastic);
+    REQUIRE(easing_by_name("ease_out_bounce") == easing::ease_out_bounce);
+}
+
+TEST_CASE("easing_by_name returns linear for unknown", "[view][animation]") {
+    REQUIRE(easing_by_name("nonexistent") == easing::linear);
+    REQUIRE(easing_by_name("") == easing::linear);
+}

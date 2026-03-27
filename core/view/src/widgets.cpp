@@ -1,7 +1,70 @@
 #include <pulp/view/widgets.hpp>
+#include <pulp/view/animation.hpp>
 #include <cmath>
 
 namespace pulp::view {
+
+// ── Knob animation ──────────────────────────────────────────────────────────
+
+void Knob::on_mouse_enter() {
+    float dur = resolve_dimension("motion.duration.fast", 0.08f);
+    hover_glow_.animate_to(1.0f, dur, easing::ease_out_quad);
+}
+
+void Knob::on_mouse_leave() {
+    float dur = resolve_dimension("motion.duration.fast", 0.08f);
+    hover_glow_.animate_to(0.0f, dur, easing::ease_out_quad);
+}
+
+void Knob::advance_animations(float dt) {
+    hover_glow_.advance(dt);
+}
+
+// ── Fader animation ─────────────────────────────────────────────────────────
+
+void Fader::on_mouse_enter() {
+    float dur = resolve_dimension("motion.duration.fast", 0.08f);
+    hover_thumb_scale_.animate_to(1.3f, dur, easing::ease_out_quad);
+}
+
+void Fader::on_mouse_leave() {
+    float dur = resolve_dimension("motion.duration.fast", 0.08f);
+    hover_thumb_scale_.animate_to(1.0f, dur, easing::ease_out_quad);
+}
+
+void Fader::advance_animations(float dt) {
+    hover_thumb_scale_.advance(dt);
+}
+
+// ── Toggle animation ────────────────────────────────────────────────────────
+
+void Toggle::set_on(bool v) {
+    if (on_ == v) return;
+    on_ = v;
+    float dur = resolve_dimension("motion.duration.normal", 0.15f);
+    thumb_position_.animate_to(v ? 1.0f : 0.0f, dur, easing::ease_out_cubic);
+}
+
+void Toggle::on_mouse_down(Point) {
+    bool new_state = !on_;
+    set_on(new_state);
+    if (on_toggle) on_toggle(new_state);
+}
+
+void Toggle::on_mouse_enter() {
+    float dur = resolve_dimension("motion.duration.fast", 0.08f);
+    hover_opacity_.animate_to(1.0f, dur, easing::ease_out_quad);
+}
+
+void Toggle::on_mouse_leave() {
+    float dur = resolve_dimension("motion.duration.fast", 0.08f);
+    hover_opacity_.animate_to(0.0f, dur, easing::ease_out_quad);
+}
+
+void Toggle::advance_animations(float dt) {
+    thumb_position_.advance(dt);
+    hover_opacity_.advance(dt);
+}
 
 // ── Label ────────────────────────────────────────────────────────────────────
 
@@ -23,6 +86,16 @@ void Knob::paint(canvas::Canvas& canvas) {
     float cx = b.width * 0.5f;
     float cy = b.height * 0.5f;
     float radius = std::min(cx, cy) * 0.8f;
+
+    // Hover glow ring (drawn behind everything)
+    float glow = hover_glow_.value();
+    if (glow > 0.01f) {
+        auto accent = resolve_color("accent.primary", canvas::Color::rgba(100, 150, 255));
+        canvas.set_stroke_color(canvas::Color::rgba(accent.r, accent.g, accent.b,
+                                static_cast<uint8_t>(40 * glow)));
+        canvas.set_line_width(6.0f);
+        canvas.stroke_arc(cx, cy, radius + 2.0f, start_angle, end_angle);
+    }
 
     // Track (background arc)
     auto track_color = resolve_color("control.track", canvas::Color::rgba(60, 60, 60));
@@ -102,11 +175,11 @@ void Fader::paint(canvas::Canvas& canvas) {
         canvas.fill_rounded_rect(0, ty, fill_width, track_thick, 2.0f);
     }
 
-    // Thumb
+    // Thumb (with hover scale animation)
     auto thumb_color = resolve_color("control.thumb", canvas::Color::rgba(220, 220, 220));
     canvas.set_fill_color({thumb_color.r, thumb_color.g, thumb_color.b, thumb_color.a});
 
-    float thumb_radius = std::min(track_width * 0.35f, 8.0f);
+    float thumb_radius = std::min(track_width * 0.35f, 8.0f) * hover_thumb_scale_.value();
     if (vert) {
         float thumb_y = track_length - value_ * track_length;
         canvas.fill_circle(b.width * 0.5f, thumb_y, thumb_radius);
@@ -139,18 +212,32 @@ void Toggle::paint(canvas::Canvas& canvas) {
     float sx = (b.width - switch_w) * 0.5f;
     float sy = (b.height - switch_h) * 0.5f;
 
-    // Track
-    auto bg_color = on_
-        ? resolve_color("accent.primary", canvas::Color::rgba(100, 150, 255))
-        : resolve_color("control.track", canvas::Color::rgba(60, 60, 60));
-    canvas.set_fill_color({bg_color.r, bg_color.g, bg_color.b, bg_color.a});
+    // Track — blend color based on animated thumb position
+    float t = thumb_position_.value();
+    auto on_color = resolve_color("accent.primary", canvas::Color::rgba(100, 150, 255));
+    auto off_color = resolve_color("control.track", canvas::Color::rgba(60, 60, 60));
+    auto bg_color = canvas::Color::rgba(
+        static_cast<uint8_t>(off_color.r + (on_color.r - off_color.r) * t),
+        static_cast<uint8_t>(off_color.g + (on_color.g - off_color.g) * t),
+        static_cast<uint8_t>(off_color.b + (on_color.b - off_color.b) * t),
+        255);
+    canvas.set_fill_color(bg_color);
     canvas.fill_rounded_rect(sx, sy, switch_w, switch_h, switch_h * 0.5f);
 
-    // Thumb circle
+    // Hover highlight on track
+    float hov = hover_opacity_.value();
+    if (hov > 0.01f) {
+        canvas.set_fill_color(canvas::Color::rgba(255, 255, 255, static_cast<uint8_t>(15 * hov)));
+        canvas.fill_rounded_rect(sx, sy, switch_w, switch_h, switch_h * 0.5f);
+    }
+
+    // Thumb circle — position animated between off and on
     auto thumb_color = resolve_color("control.thumb", canvas::Color::rgba(220, 220, 220));
     canvas.set_fill_color({thumb_color.r, thumb_color.g, thumb_color.b, thumb_color.a});
     float thumb_r = switch_h * 0.4f;
-    float thumb_x = on_ ? sx + switch_w - switch_h * 0.5f : sx + switch_h * 0.5f;
+    float off_x = sx + switch_h * 0.5f;
+    float on_x = sx + switch_w - switch_h * 0.5f;
+    float thumb_x = off_x + (on_x - off_x) * t;
     canvas.fill_circle(thumb_x, sy + switch_h * 0.5f, thumb_r);
 
     // Label

@@ -357,6 +357,7 @@ If it's not tested, it doesn't work. Every subsystem has tests. Every feature ha
 - Screenshot capture and comparison (automated in CI)
 - The component inspector (pulp-inspect) doubles as a validation tool
 - WebDriver-based automation via tauri-plugin-webdriver patterns
+- **Headless screenshot verification**: Before launching a UI window for visual inspection, use `render_to_file()` or the `--screenshot` flag on preview apps to capture a headless PNG and verify the rendering is correct. Never show the user an empty or broken window. Example: `./build/examples/ui-preview/pulp-ui-preview --screenshot` renders to `/tmp/pulp-animation-preview.png` without opening a window.
 
 **Audio:**
 - Golden-file comparison: render known input → compare output against reference

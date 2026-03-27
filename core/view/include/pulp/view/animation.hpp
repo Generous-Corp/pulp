@@ -4,8 +4,11 @@
 #include <functional>
 #include <vector>
 #include <algorithm>
+#include <string>
 
 namespace pulp::view {
+
+class FrameClock; // forward declaration
 
 // ── Easing functions ─────────────────────────────────────────────────────────
 
@@ -122,6 +125,91 @@ private:
 
     std::vector<Animation> animations_;
     int next_id_ = 0;
+};
+
+// ── easing_by_name ──────────────────────────────────────────────────────────
+
+/// Resolve an easing function by name string. Returns linear for unknown names.
+inline EasingFunction easing_by_name(const std::string& name) {
+    if (name == "linear")             return easing::linear;
+    if (name == "ease_in_quad")       return easing::ease_in_quad;
+    if (name == "ease_out_quad")      return easing::ease_out_quad;
+    if (name == "ease_in_out_quad")   return easing::ease_in_out_quad;
+    if (name == "ease_in_cubic")      return easing::ease_in_cubic;
+    if (name == "ease_out_cubic")     return easing::ease_out_cubic;
+    if (name == "ease_in_out_cubic")  return easing::ease_in_out_cubic;
+    if (name == "ease_in_expo")       return easing::ease_in_expo;
+    if (name == "ease_out_expo")      return easing::ease_out_expo;
+    if (name == "ease_out_elastic")   return easing::ease_out_elastic;
+    if (name == "ease_out_bounce")    return easing::ease_out_bounce;
+    return easing::linear;
+}
+
+// ── ValueAnimation ──────────────────────────────────────────────────────────
+
+/// Lightweight, embeddable value animator for widget members.
+/// No heap allocation. Designed to be a member variable.
+class ValueAnimation {
+public:
+    ValueAnimation() = default;
+    explicit ValueAnimation(float initial) : current_(initial), target_(initial), from_(initial) {}
+
+    /// Set a new target. Starts animating from current value.
+    void animate_to(float target, float duration, EasingFunction ease = easing::ease_out_quad) {
+        from_ = current_;
+        target_ = target;
+        duration_ = duration;
+        elapsed_ = 0;
+        ease_ = ease;
+        if (duration <= 0) {
+            current_ = target;
+            animating_ = false;
+        } else {
+            animating_ = true;
+        }
+    }
+
+    /// Snap to value immediately (no animation).
+    void set(float value) {
+        current_ = value;
+        target_ = value;
+        from_ = value;
+        elapsed_ = 0;
+        animating_ = false;
+    }
+
+    /// Advance by dt. Returns true if still animating.
+    bool advance(float dt) {
+        if (!animating_) return false;
+        elapsed_ += dt;
+        float t = std::clamp(elapsed_ / duration_, 0.0f, 1.0f);
+        current_ = from_ + (target_ - from_) * ease_(t);
+        if (t >= 1.0f) {
+            current_ = target_;
+            animating_ = false;
+        }
+        return animating_;
+    }
+
+    float value() const { return current_; }
+    float target() const { return target_; }
+    bool animating() const { return animating_; }
+
+    /// Cancel in-flight animation, keep current value.
+    void cancel() {
+        target_ = current_;
+        from_ = current_;
+        animating_ = false;
+    }
+
+private:
+    float current_ = 0;
+    float target_ = 0;
+    float from_ = 0;
+    float duration_ = 0;
+    float elapsed_ = 0;
+    bool animating_ = false;
+    EasingFunction ease_ = easing::ease_out_quad;
 };
 
 } // namespace pulp::view

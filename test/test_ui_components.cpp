@@ -93,6 +93,8 @@ TEST_CASE("Tooltip show and hide", "[view][tooltip]") {
     REQUIRE(tip.visible());
 
     tip.hide();
+    // Tooltip now fades out via animation — advance until opacity settles
+    for (int i = 0; i < 30; i++) tip.advance_animations(0.016f);
     REQUIRE_FALSE(tip.visible());
 }
 

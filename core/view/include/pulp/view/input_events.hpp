@@ -76,6 +76,9 @@ struct MouseEvent {
     int pointer_id = 0;          ///< 0 = primary, >0 = additional touches (iOS multi-touch)
     int click_count = 1;         ///< 1=single, 2=double, 3=triple click
     bool is_down = false;        ///< True for mouse-down events
+    bool is_wheel = false;       ///< True for scroll wheel events
+    float scroll_delta_x = 0;   ///< Horizontal scroll delta (positive = right)
+    float scroll_delta_y = 0;   ///< Vertical scroll delta (positive = down)
 
     bool isShiftDown() const  { return (modifiers & kModShift) != 0; }
     bool isCtrlDown() const   { return (modifiers & kModCtrl) != 0; }
@@ -84,6 +87,7 @@ struct MouseEvent {
     bool isMetaDown() const   { return (modifiers & kModMeta) != 0; }
     bool isMainModifier() const { return is_main_modifier(modifiers); }
     bool isTouch() const      { return pointer_id > 0 || (modifiers & 0x8000) != 0; }
+    bool isWheel() const      { return is_wheel; }
 };
 
 // ── Key event ────────────────────────────────────────────────────────────

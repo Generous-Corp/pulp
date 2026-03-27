@@ -142,6 +142,16 @@ add_executable(pulp-test-animation test_animation.cpp)
 target_link_libraries(pulp-test-animation PRIVATE pulp::view Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-animation)
 
+# FrameClock tests
+add_executable(pulp-test-frame-clock test_frame_clock.cpp)
+target_link_libraries(pulp-test-frame-clock PRIVATE pulp::view Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-frame-clock)
+
+# Widget animation behavior tests
+add_executable(pulp-test-widget-animation test_widget_animation.cpp)
+target_link_libraries(pulp-test-widget-animation PRIVATE pulp::view Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-widget-animation)
+
 # Auto UI tests
 add_executable(pulp-test-auto-ui test_auto_ui.cpp)
 target_link_libraries(pulp-test-auto-ui PRIVATE pulp::view Catch2::Catch2WithMain)
