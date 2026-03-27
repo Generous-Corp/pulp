@@ -76,7 +76,7 @@ commands:
         summary: Generate API reference from public headers (Doxygen)
     docs: reference/cli.md#docs
 
-  - name: new
+  - name: create
     status: usable
     summary: Create a new plugin project from templates. Checks environment, scaffolds, builds, and tests.
     args:
@@ -96,7 +96,7 @@ commands:
       - name: --no-build
         kind: flag
         description: Skip build after scaffolding
-    docs: reference/cli.md#new
+    docs: reference/cli.md#create
 
   - name: doctor
     status: usable

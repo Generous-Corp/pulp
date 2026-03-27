@@ -59,18 +59,18 @@ Checks:
 
 Prints a summary with pass/fail/skip counts.
 
-### new
+### create
 
 **Status**: usable
 
 Create a new plugin project from templates. Checks environment, scaffolds source files, builds, and runs tests.
 
 ```bash
-pulp new "My Gain"                              # effect plugin (default)
-pulp new "My Synth" --type instrument           # instrument plugin
-pulp new "My FX" --manufacturer "Acme Audio"    # custom manufacturer
-pulp new "My FX" --output ~/projects/my-fx      # custom output directory
-pulp new "My FX" --no-build                     # scaffold only, skip build
+pulp create "My Gain"                              # effect plugin (default)
+pulp create "My Synth" --type instrument           # instrument plugin
+pulp create "My FX" --manufacturer "Acme Audio"    # custom manufacturer
+pulp create "My FX" --output ~/projects/my-fx      # custom output directory
+pulp create "My FX" --no-build                     # scaffold only, skip build
 ```
 
 What it does:

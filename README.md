@@ -96,11 +96,11 @@ ctest --test-dir build
 
 ### Create a New Plugin
 
-After building, use `pulp new` to scaffold a plugin project:
+After building, use `pulp create` to scaffold a plugin project:
 
 ```bash
-./build/tools/cli/pulp new "My Gain"                    # effect (default)
-./build/tools/cli/pulp new "My Synth" --type instrument  # instrument
+./build/tools/cli/pulp create "My Gain"                    # effect (default)
+./build/tools/cli/pulp create "My Synth" --type instrument  # instrument
 ```
 
 This checks your environment, scaffolds from templates, builds, runs tests, and reports artifact locations. Formats are platform-gated (macOS gets VST3+AU+CLAP+Standalone by default).

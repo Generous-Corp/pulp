@@ -95,7 +95,7 @@ Write-Host ""
 Write-Host "Pulp CLI installed successfully!" -ForegroundColor Green
 Write-Host ""
 Write-Host "Get started:"
-Write-Host "  pulp new MyPlugin        # create your first plugin"
+Write-Host "  pulp create MyPlugin        # create your first plugin"
 Write-Host "  pulp doctor              # check your environment"
 Write-Host ""
 Write-Host "Or clone the framework:"

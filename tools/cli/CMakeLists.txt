@@ -35,9 +35,9 @@ if(PULP_BUILD_TESTS)
     set_tests_properties(cli-status PROPERTIES
         PASS_REGULAR_EXPRESSION "Pulp Project Status")
 
-    add_test(NAME cli-new-help
-        COMMAND pulp-cli new --help
+    add_test(NAME cli-create-help
+        COMMAND pulp-cli create --help
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
-    set_tests_properties(cli-new-help PROPERTIES
+    set_tests_properties(cli-create-help PROPERTIES
         PASS_REGULAR_EXPRESSION "create a new plugin project")
 endif()
