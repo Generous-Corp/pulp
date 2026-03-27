@@ -94,6 +94,23 @@ public:
     // ── Lines ────────────────────────────────────────────────────────────
     virtual void stroke_line(float x0, float y0, float x1, float y1) = 0;
 
+    /// Stroke a continuous polyline through an array of points.
+    /// Much smoother than individual stroke_line calls — produces proper
+    /// anti-aliased curves with line joins between segments.
+    struct Point2D { float x, y; };
+
+    /// Stroke a continuous polyline — much smoother than individual stroke_line calls.
+    virtual void stroke_path(const Point2D* points, size_t count) {
+        // Default fallback: individual line segments (subclass should override)
+        for (size_t i = 1; i < count; ++i)
+            stroke_line(points[i-1].x, points[i-1].y, points[i].x, points[i].y);
+    }
+
+    /// Fill a closed polygon defined by points.
+    virtual void fill_path(const Point2D* points, size_t count) {
+        (void)points; (void)count; // Default: no-op, subclass should override
+    }
+
     // ── Text ─────────────────────────────────────────────────────────────
     virtual void set_font(const std::string& family, float size) = 0;
     virtual void set_text_align(TextAlign align) = 0;

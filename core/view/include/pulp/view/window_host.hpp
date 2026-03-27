@@ -11,6 +11,8 @@ struct WindowOptions {
     std::string title = "Pulp";
     float width = 400;
     float height = 300;
+    float min_width = 0;   ///< Minimum window width (0 = no minimum)
+    float min_height = 0;  ///< Minimum window height (0 = no minimum)
     bool resizable = true;
     bool use_gpu = false;  ///< Use GPU rendering (Dawn/Skia Graphite) instead of CoreGraphics
 };

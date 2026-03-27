@@ -1127,6 +1127,7 @@ static void print_usage() {
     std::cout << "Commands:\n";
     std::cout << "  create   Scaffold a new plugin project from templates\n";
     std::cout << "  inspect  Launch the component inspector\n";
+    std::cout << "  design   AI-powered style design (natural language -> token diffs)\n";
     std::cout << "  audit    License and clean-room audit\n";
     std::cout << "  build    Build the project (configure + compile)\n";
     std::cout << "  test     Run the test suite\n";
@@ -1195,6 +1196,21 @@ int main(int argc, char* argv[]) {
             return 1;
         }
         std::string cmd = "python3 \"" + script.string() + "\"";
+        for (auto& arg : args) cmd += " \"" + arg + "\"";
+        return run(cmd);
+    }
+    if (command == "design") {
+        auto root = find_project_root();
+        if (root.empty()) {
+            std::cerr << "Error: not in a Pulp project directory\n";
+            return 1;
+        }
+        auto design_bin = root / "build" / "tools" / "design" / "pulp-design";
+        if (!fs::exists(design_bin)) {
+            std::cerr << "Error: pulp-design not built. Run `pulp build` first.\n";
+            return 1;
+        }
+        std::string cmd = design_bin.string();
         for (auto& arg : args) cmd += " \"" + arg + "\"";
         return run(cmd);
     }

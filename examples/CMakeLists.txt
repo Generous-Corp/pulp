@@ -30,3 +30,6 @@ add_subdirectory(pulp-pluck)
 
 # GPU Validation Demo: Modulation Matrix with animated cables
 add_subdirectory(gpu-demo)
+
+# AI Style Designer: JS-defined design tool with hot reload
+add_subdirectory(design-tool)

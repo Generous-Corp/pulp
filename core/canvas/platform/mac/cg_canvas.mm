@@ -139,6 +139,30 @@ void CoreGraphicsCanvas::stroke_line(float x0, float y0, float x1, float y1) {
     CGContextStrokePath(ctx_);
 }
 
+void CoreGraphicsCanvas::stroke_path(const Point2D* points, size_t count) {
+    if (count < 2) return;
+    apply_stroke_color();
+    CGContextSetShouldAntialias(ctx_, true);
+    CGContextSetAllowsAntialiasing(ctx_, true);
+    CGContextBeginPath(ctx_);
+    CGContextMoveToPoint(ctx_, points[0].x, points[0].y);
+    for (size_t i = 1; i < count; ++i)
+        CGContextAddLineToPoint(ctx_, points[i].x, points[i].y);
+    CGContextStrokePath(ctx_);
+}
+
+void CoreGraphicsCanvas::fill_path(const Point2D* points, size_t count) {
+    if (count < 3) return;
+    apply_fill_color();
+    CGContextSetShouldAntialias(ctx_, true);
+    CGContextBeginPath(ctx_);
+    CGContextMoveToPoint(ctx_, points[0].x, points[0].y);
+    for (size_t i = 1; i < count; ++i)
+        CGContextAddLineToPoint(ctx_, points[i].x, points[i].y);
+    CGContextClosePath(ctx_);
+    CGContextFillPath(ctx_);
+}
+
 void CoreGraphicsCanvas::set_font(const std::string& family, float size) {
     font_family_ = family;
     font_size_ = size;

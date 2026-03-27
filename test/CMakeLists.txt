@@ -429,3 +429,21 @@ target_include_directories(pulp-test-web-demos PRIVATE
     ${CMAKE_SOURCE_DIR}/examples/web-demos
 )
 catch_discover_tests(pulp-test-web-demos)
+
+# AI Designer: token diff tests
+add_executable(pulp-test-token-diff test_token_diff.cpp)
+target_link_libraries(pulp-test-token-diff PRIVATE pulp::view Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-token-diff)
+
+# AI Designer: style pack tests
+add_executable(pulp-test-style-pack test_style_pack.cpp)
+target_link_libraries(pulp-test-style-pack PRIVATE pulp::view Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-style-pack)
+
+# AI Designer: showcase tests
+add_executable(pulp-test-showcase test_showcase.cpp)
+target_link_libraries(pulp-test-showcase PRIVATE pulp::view Catch2::Catch2WithMain)
+target_include_directories(pulp-test-showcase PRIVATE
+    ${CMAKE_SOURCE_DIR}/tools/design
+)
+catch_discover_tests(pulp-test-showcase)

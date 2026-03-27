@@ -1,6 +1,6 @@
-# Planning and internal docs (not for public repo)
-/planning/
-/research/
+# Planning and internal docs — uncomment before going public
+#/planning/
+#/research/
 
 # Build artifacts
 /build/
