@@ -409,6 +409,278 @@ static int cmd_ship(const std::vector<std::string>& args) {
     return 0;
 }
 
+// ── Doctor ───────────────────────────────────────────────────────────────────
+
+struct DoctorCheck {
+    std::string name;
+    bool passed;
+    std::string detail;
+    std::string fix;
+};
+
+static std::vector<DoctorCheck> run_doctor_checks(const fs::path& root) {
+    std::vector<DoctorCheck> checks;
+
+    // 1. C++20 compiler
+    {
+        DoctorCheck c{"C++20 compiler", false, {}, {}};
+#ifdef __APPLE__
+        auto ver = exec_output("clang++ --version 2>&1 | head -1");
+        if (!ver.empty()) {
+            c.passed = true;
+            c.detail = ver;
+        } else {
+            c.fix = "xcode-select --install";
+        }
+#elif defined(_WIN32)
+        auto ver = exec_output("cl 2>&1 | head -1");
+        if (!ver.empty()) { c.passed = true; c.detail = ver; }
+        else { c.fix = "Install Visual Studio Build Tools 2022+ with 'Desktop development with C++'"; }
+#else
+        auto ver = exec_output("g++ --version 2>&1 | head -1");
+        if (ver.empty()) ver = exec_output("clang++ --version 2>&1 | head -1");
+        if (!ver.empty()) { c.passed = true; c.detail = ver; }
+        else { c.fix = "sudo apt install g++-13  (or equivalent for your distro)"; }
+#endif
+        checks.push_back(c);
+    }
+
+    // 2. CMake version
+    {
+        DoctorCheck c{"CMake >= 3.24", false, {}, {}};
+        auto ver_str = exec_output("cmake --version 2>&1 | head -1");
+        if (!ver_str.empty()) {
+            // Extract version number
+            auto pos = ver_str.find_first_of("0123456789");
+            if (pos != std::string::npos) {
+                auto ver_num = ver_str.substr(pos);
+                auto dot1 = ver_num.find('.');
+                auto dot2 = (dot1 != std::string::npos) ? ver_num.find('.', dot1 + 1) : std::string::npos;
+                int major = 0, minor = 0;
+                try {
+                    major = std::stoi(ver_num.substr(0, dot1));
+                    if (dot1 != std::string::npos)
+                        minor = std::stoi(ver_num.substr(dot1 + 1, dot2 - dot1 - 1));
+                } catch (...) {}
+
+                if (major > 3 || (major == 3 && minor >= 24)) {
+                    c.passed = true;
+                    c.detail = "cmake " + ver_num.substr(0, dot2 != std::string::npos ? dot2 + 2 : std::string::npos);
+                } else {
+                    c.detail = "cmake " + ver_num.substr(0, dot2 != std::string::npos ? dot2 + 2 : std::string::npos) + " (too old)";
+#ifdef __APPLE__
+                    c.fix = "brew upgrade cmake";
+#else
+                    c.fix = "Install CMake 3.24+ from https://cmake.org/download/";
+#endif
+                }
+            }
+        } else {
+#ifdef __APPLE__
+            c.fix = "brew install cmake";
+#else
+            c.fix = "Install CMake from https://cmake.org/download/";
+#endif
+        }
+        checks.push_back(c);
+    }
+
+    // 3. git-lfs
+    {
+        DoctorCheck c{"git-lfs", false, {}, {}};
+        auto ver = exec_output("git lfs version 2>&1 | head -1");
+        if (!ver.empty() && ver.find("git-lfs") != std::string::npos) {
+            c.passed = true;
+            c.detail = ver;
+        } else {
+#ifdef __APPLE__
+            c.fix = "brew install git-lfs && git lfs install";
+#elif defined(_WIN32)
+            c.fix = "winget install git-lfs";
+#else
+            c.fix = "sudo apt install git-lfs && git lfs install";
+#endif
+        }
+        checks.push_back(c);
+    }
+
+    // 4. git-lfs files pulled (check if Skia files are pointers)
+    if (!root.empty()) {
+        DoctorCheck c{"LFS files pulled", false, {}, {}};
+        bool found_pointer = false;
+        bool found_any = false;
+        auto skia_dir = root / "external" / "skia-build";
+        if (fs::exists(skia_dir)) {
+            for (auto& entry : fs::recursive_directory_iterator(skia_dir)) {
+                auto ext = entry.path().extension().string();
+                if (ext == ".a" || ext == ".lib") {
+                    found_any = true;
+                    // Read first bytes to check if it's an LFS pointer
+                    std::ifstream f(entry.path(), std::ios::binary);
+                    char buf[40] = {};
+                    f.read(buf, 39);
+                    if (std::string(buf).find("version https://git-lfs") != std::string::npos) {
+                        found_pointer = true;
+                        break;
+                    }
+                }
+            }
+        }
+        if (found_pointer) {
+            c.detail = "Skia files are LFS pointers, not binaries";
+            c.fix = "git lfs pull";
+        } else if (found_any) {
+            c.passed = true;
+            c.detail = "Skia binaries present";
+        } else {
+            c.passed = true;
+            c.detail = "No LFS-tracked binaries found (OK if Skia not needed)";
+        }
+        checks.push_back(c);
+    }
+
+    // 5. VST3 SDK
+    if (!root.empty()) {
+        DoctorCheck c{"VST3 SDK", false, {}, {}};
+        auto vst3_dir = root / "external" / "vst3sdk";
+        if (fs::exists(vst3_dir / "pluginterfaces")) {
+            c.passed = true;
+            c.detail = "external/vst3sdk/";
+        } else if (fs::is_symlink(vst3_dir)) {
+            c.detail = "Broken symlink at external/vst3sdk";
+            c.fix = "rm external/vst3sdk && ./setup.sh";
+        } else {
+            c.detail = "Not found";
+            c.fix = "git clone --depth 1 --recursive https://github.com/steinbergmedia/vst3sdk.git external/vst3sdk";
+        }
+        checks.push_back(c);
+    }
+
+    // 6. AudioUnitSDK (macOS only)
+#ifdef __APPLE__
+    if (!root.empty()) {
+        DoctorCheck c{"AudioUnitSDK", false, {}, {}};
+        auto au_dir = root / "external" / "AudioUnitSDK";
+        if (fs::exists(au_dir / "include")) {
+            c.passed = true;
+            c.detail = "external/AudioUnitSDK/";
+        } else if (fs::is_symlink(au_dir)) {
+            c.detail = "Broken symlink at external/AudioUnitSDK";
+            c.fix = "rm external/AudioUnitSDK && ./setup.sh";
+        } else {
+            c.detail = "Not found";
+            c.fix = "git clone --depth 1 https://github.com/apple/AudioUnitSDK.git external/AudioUnitSDK";
+        }
+        checks.push_back(c);
+    }
+#endif
+
+    // 7. Linux: ALSA dev headers
+#ifdef __linux__
+    {
+        DoctorCheck c{"ALSA dev headers", false, {}, {}};
+        int rc = std::system("pkg-config --exists alsa 2>/dev/null");
+        if (rc == 0) {
+            c.passed = true;
+            c.detail = "libasound2-dev";
+        } else {
+            c.fix = "sudo apt install libasound2-dev";
+        }
+        checks.push_back(c);
+    }
+#endif
+
+    // 8. Build state
+    if (!root.empty()) {
+        DoctorCheck c{"Build configured", false, {}, {}};
+        if (fs::exists(root / "build" / "CMakeCache.txt")) {
+            c.passed = true;
+            c.detail = "build/CMakeCache.txt present";
+        } else {
+            c.detail = "Not yet configured";
+            c.fix = "pulp build  (or cmake -B build)";
+        }
+        checks.push_back(c);
+    }
+
+    return checks;
+}
+
+static int cmd_doctor(const std::vector<std::string>& args) {
+    auto root = find_project_root();
+
+    bool fix_mode = false;
+    bool ci_mode = false;
+    bool dry_run = false;
+    for (auto& arg : args) {
+        if (arg == "--fix") fix_mode = true;
+        if (arg == "--ci") ci_mode = true;
+        if (arg == "--dry-run") dry_run = true;
+    }
+
+    if (!ci_mode) {
+        std::cout << "Pulp Doctor\n";
+        std::cout << "===========\n\n";
+        if (root.empty()) {
+            std::cout << "(Not in a Pulp project — checking system tools only)\n\n";
+        }
+    }
+
+    auto checks = run_doctor_checks(root);
+
+    int pass_count = 0, fail_count = 0;
+    for (auto& c : checks) {
+        if (c.passed) {
+            ++pass_count;
+            if (!ci_mode) {
+                std::cout << "  \xe2\x9c\x93 " << c.name;
+                if (!c.detail.empty()) std::cout << " — " << c.detail;
+                std::cout << "\n";
+            }
+        } else {
+            ++fail_count;
+            if (ci_mode) {
+                std::cerr << "FAIL: " << c.name;
+                if (!c.detail.empty()) std::cerr << " — " << c.detail;
+                if (!c.fix.empty()) std::cerr << " [fix: " << c.fix << "]";
+                std::cerr << "\n";
+            } else {
+                std::cout << "  \xe2\x9c\x97 " << c.name;
+                if (!c.detail.empty()) std::cout << " — " << c.detail;
+                std::cout << "\n";
+                if (!c.fix.empty()) {
+                    if (fix_mode && !dry_run) {
+                        std::cout << "    Fixing: " << c.fix << "\n";
+                        int rc = std::system(c.fix.c_str());
+                        if (rc == 0) {
+                            std::cout << "    Fixed.\n";
+                            --fail_count;
+                            ++pass_count;
+                        } else {
+                            std::cout << "    Fix failed (exit " << rc << "). Run manually:\n";
+                            std::cout << "      " << c.fix << "\n";
+                        }
+                    } else if (dry_run) {
+                        std::cout << "    [dry-run] Would run: " << c.fix << "\n";
+                    } else {
+                        std::cout << "    Fix: " << c.fix << "\n";
+                    }
+                }
+            }
+        }
+    }
+
+    if (!ci_mode) {
+        std::cout << "\n  " << pass_count << "/" << (pass_count + fail_count) << " checks passed";
+        if (fail_count > 0) {
+            std::cout << " — run `pulp doctor --fix` to resolve";
+        }
+        std::cout << "\n";
+    }
+
+    return fail_count > 0 ? 1 : 0;
+}
+
 // ── Docs helpers ────────────────────────────────────────────────────────────
 
 static std::string read_file_contents(const fs::path& path) {
@@ -1135,13 +1407,17 @@ static void print_usage() {
     std::cout << "  validate Run plugin format validators (clap-validator, auval)\n";
     std::cout << "  ship     Sign, package, and check plugins\n";
     std::cout << "  docs     Browse local documentation\n";
+    std::cout << "  doctor   Diagnose environment issues (--fix, --ci, --dry-run)\n";
     std::cout << "  clean    Remove build directory\n";
     std::cout << "  help     Show this help\n";
     std::cout << "\nExamples:\n";
+    std::cout << "  pulp doctor             # Check environment for issues\n";
+    std::cout << "  pulp doctor --fix       # Auto-fix issues where possible\n";
     std::cout << "  pulp build              # Build all targets\n";
     std::cout << "  pulp build --target X   # Build specific target\n";
     std::cout << "  pulp test               # Run all tests\n";
     std::cout << "  pulp test -R Knob       # Run tests matching 'Knob'\n";
+    std::cout << "  pulp validate           # Validate built plugins\n";
     std::cout << "  pulp ship sign --identity \"Developer ID Application: Foo\"\n";
     std::cout << "  pulp ship package --version 1.0.0\n";
     std::cout << "  pulp docs index         # List available docs\n";
@@ -1166,6 +1442,7 @@ int main(int argc, char* argv[]) {
     if (command == "test")     return cmd_test(args);
     if (command == "status")   return cmd_status(args);
     if (command == "validate") return cmd_validate(args);
+    if (command == "doctor")   return cmd_doctor(args);
     if (command == "ship")     return cmd_ship(args);
     if (command == "docs")     return cmd_docs(args);
     if (command == "clean")    return cmd_clean(args);

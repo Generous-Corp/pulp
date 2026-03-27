@@ -32,7 +32,9 @@ add_subdirectory(pulp-pluck)
 add_subdirectory(gpu-demo)
 
 # AI Style Designer: JS-defined design tool with hot reload
-add_subdirectory(design-tool)
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/design-tool/CMakeLists.txt)
+    add_subdirectory(design-tool)
+endif()
 
 # TextEditor keyboard input test (Phase 21.1)
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/text-input-test/CMakeLists.txt)

@@ -76,6 +76,21 @@ commands:
         summary: Generate API reference from public headers (Doxygen)
     docs: reference/cli.md#docs
 
+  - name: doctor
+    status: usable
+    summary: Diagnose environment issues. Checks compiler, CMake, git-lfs, external SDKs, platform deps.
+    args:
+      - name: --fix
+        kind: flag
+        description: Auto-fix issues where possible (with confirmation)
+      - name: --ci
+        kind: flag
+        description: Non-interactive mode, exit codes only
+      - name: --dry-run
+        kind: flag
+        description: Show what --fix would do without doing it
+    docs: reference/cli.md#doctor
+
   - name: clean
     status: usable
     summary: Remove the build directory.

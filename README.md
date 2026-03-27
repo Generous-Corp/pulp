@@ -64,15 +64,44 @@ cmake -B build && cmake --build build
 
 See the [Getting Started guide](https://www.generouscorp.com/pulp/getting-started.html) for the full walkthrough.
 
-## Building
+## Quick Start
 
 ```bash
-cmake -B build
-cmake --build build
+git clone https://github.com/danielraffel/pulp.git
+cd pulp
+./setup.sh
+```
+
+`setup.sh` handles everything: checks prerequisites, installs git-lfs, clones external SDKs (VST3, AudioUnit), configures, builds, and runs tests. Works on macOS, Linux, and Windows (Git Bash/MSYS2).
+
+### Prerequisites
+
+- **CMake 3.24+**
+- **C++20 compiler** — Clang 15+, GCC 13+, or MSVC 2022+
+- **git-lfs** — required for pre-built Skia binaries (`brew install git-lfs` / `apt install git-lfs`)
+- **macOS:** Xcode Command Line Tools (`xcode-select --install`)
+- **Linux:** ALSA dev headers (`sudo apt install libasound2-dev`)
+
+### Building Manually
+
+If you prefer manual setup over `setup.sh`:
+
+```bash
+git lfs install && git lfs pull              # pull Skia binaries
+git clone --depth 1 --recursive \
+    https://github.com/steinbergmedia/vst3sdk.git external/vst3sdk
+cmake -B build && cmake --build build
 ctest --test-dir build
 ```
 
-Requires CMake 3.24+ and a C++20 compiler (Clang 15+, GCC 13+, MSVC 2022+).
+### Environment Diagnosis
+
+After building, use `pulp doctor` to check your environment:
+
+```bash
+./build/tools/cli/pulp doctor        # show status of all checks
+./build/tools/cli/pulp doctor --fix  # auto-fix what it can
+```
 
 ## Status
 

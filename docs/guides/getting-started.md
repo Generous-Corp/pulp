@@ -2,13 +2,45 @@
 
 Build your first audio plugin with Pulp.
 
+## Setup
+
+The fastest way to get started:
+
+```bash
+git clone https://github.com/danielraffel/pulp.git
+cd pulp
+./setup.sh
+```
+
+`setup.sh` checks prerequisites, installs git-lfs, clones external SDKs, configures, builds, and runs tests. It works on macOS, Linux, and Windows (Git Bash/MSYS2).
+
+Options:
+- `./setup.sh --ci` — non-interactive mode for CI/automation
+- `./setup.sh --dry-run` — show what would be done without doing it
+
 ## Prerequisites
 
-- CMake 3.24+
-- C++20 compiler (Clang 15+, GCC 13+, MSVC 2022+)
-- macOS: Xcode Command Line Tools
+- **CMake 3.24+**
+- **C++20 compiler** (Clang 15+, GCC 13+, MSVC 2022+)
+- **git-lfs** — required for pre-built Skia GPU rendering binaries
+  - macOS: `brew install git-lfs && git lfs install`
+  - Linux: `sudo apt install git-lfs && git lfs install`
+  - Windows: `winget install git-lfs`
+- **macOS:** Xcode Command Line Tools (`xcode-select --install`)
+- **Linux:** ALSA dev headers (`sudo apt install libasound2-dev`)
 - Optional: [pluginval](https://github.com/Tracktion/pluginval) for VST3 validation
 - Optional: [clap-validator](https://github.com/free-audio/clap-validator) for CLAP validation
+
+### Environment Diagnosis
+
+After building, use `pulp doctor` to check your environment:
+
+```bash
+pulp doctor             # show status of all checks
+pulp doctor --fix       # auto-fix issues where possible
+pulp doctor --ci        # CI mode — exit codes only, no prompts
+pulp doctor --dry-run   # show what --fix would do
+```
 
 ## Project Structure
 

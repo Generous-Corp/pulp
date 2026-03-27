@@ -59,6 +59,26 @@ Checks:
 
 Prints a summary with pass/fail/skip counts.
 
+### doctor
+
+**Status**: usable
+
+Diagnose environment issues. Checks C++20 compiler, CMake version, git-lfs, LFS file state, external SDKs (VST3, AudioUnit), and platform-specific dependencies.
+
+```bash
+pulp doctor             # show all checks
+pulp doctor --fix       # auto-fix issues where possible
+pulp doctor --ci        # non-interactive, exit codes only
+pulp doctor --dry-run   # show what --fix would do
+```
+
+Checks are platform-gated — only relevant checks run on each OS:
+- **macOS**: compiler, CMake, git-lfs, LFS files, VST3 SDK, AudioUnitSDK, build state
+- **Linux**: compiler, CMake, git-lfs, LFS files, VST3 SDK, ALSA dev headers, build state
+- **Windows**: compiler, CMake, git-lfs, LFS files, VST3 SDK, build state
+
+Exit code is 0 if all checks pass, 1 if any fail.
+
 ### ship
 
 **Status**: experimental
