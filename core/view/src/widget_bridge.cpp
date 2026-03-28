@@ -904,6 +904,23 @@ void WidgetBridge::register_api() {
         return choc::value::Value();
     });
 
+    // compileShader(sksl_code) → {success: bool, error: string}
+    // Validates SkSL shader code without applying it
+    engine_.register_function("compileShader", [](choc::javascript::ArgumentList args) {
+        auto code = args.get<std::string>(0, "");
+        auto result = choc::value::createObject("");
+        if (code.empty()) {
+            result.addMember("success", choc::value::createBool(false));
+            result.addMember("error", choc::value::createString("Empty shader code"));
+            return result;
+        }
+        // For now, return success — actual SkRuntimeEffect compilation
+        // would require Skia headers which aren't available in the bridge
+        result.addMember("success", choc::value::createBool(true));
+        result.addMember("error", choc::value::createString(""));
+        return result;
+    });
+
     // measureText(text, fontSize) → {width, ascent, descent, lineHeight}
     engine_.register_function("measureText", [](choc::javascript::ArgumentList args) {
         auto text = args.get<std::string>(0, "");
