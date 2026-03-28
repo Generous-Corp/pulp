@@ -771,10 +771,11 @@ static int cmd_create(const std::vector<std::string>& args) {
     }
 
     // Parse args
-    std::string name, type = "effect", manufacturer = "Pulp", output_path;
+    std::string name, type = "effect", manufacturer = "Pulp", output_path, tmpl;
     bool no_build = false;
     for (size_t i = 0; i < args.size(); ++i) {
         if (args[i] == "--type" && i + 1 < args.size()) { type = args[++i]; continue; }
+        if (args[i] == "--template" && i + 1 < args.size()) { tmpl = args[++i]; continue; }
         if (args[i] == "--manufacturer" && i + 1 < args.size()) { manufacturer = args[++i]; continue; }
         if (args[i] == "--output" && i + 1 < args.size()) { output_path = args[++i]; continue; }
         if (args[i] == "--no-build") { no_build = true; continue; }
@@ -783,6 +784,7 @@ static int cmd_create(const std::vector<std::string>& args) {
             std::cout << "Usage: pulp create <name> [options]\n\n";
             std::cout << "Options:\n";
             std::cout << "  --type <effect|instrument>  Plugin type (default: effect)\n";
+            std::cout << "  --template <name>           Use named template (e.g. gain)\n";
             std::cout << "  --manufacturer <name>       Manufacturer (default: Pulp)\n";
             std::cout << "  --output <dir>              Output directory\n";
             std::cout << "  --no-build                  Skip build after scaffolding\n";
@@ -792,11 +794,14 @@ static int cmd_create(const std::vector<std::string>& args) {
     }
 
     if (name.empty()) {
-        std::cerr << "Usage: pulp create <name> [--type effect|instrument] [--manufacturer Name]\n";
+        std::cerr << "Usage: pulp create <name> [--type effect|instrument] [--template gain] [--manufacturer Name]\n";
         return 1;
     }
 
-    if (type != "effect" && type != "instrument") {
+    // --template overrides --type for template directory lookup
+    std::string template_key = tmpl.empty() ? type : tmpl;
+
+    if (tmpl.empty() && type != "effect" && type != "instrument") {
         std::cerr << "Error: --type must be 'effect' or 'instrument'\n";
         return 1;
     }
@@ -876,9 +881,11 @@ static int cmd_create(const std::vector<std::string>& args) {
     };
 
     // Read and expand templates
-    auto template_dir = root / "tools" / "templates" / type;
+    auto template_dir = root / "tools" / "templates" / template_key;
     if (!fs::exists(template_dir)) {
         std::cerr << "Error: template directory not found at " << template_dir.string() << "\n";
+        if (!tmpl.empty())
+            std::cerr << "Available templates: effect, instrument, gain\n";
         return 1;
     }
 
@@ -915,6 +922,21 @@ static int cmd_create(const std::vector<std::string>& args) {
         f << "    return pulp::format::run_standalone(" << ns << "::create_" << factory << ", argc, argv);\n";
         f << "}\n";
         std::cout << "  Created main.cpp\n";
+    }
+
+    // Copy UI script directory if template includes one
+    auto ui_template_dir = template_dir / "ui";
+    if (fs::exists(ui_template_dir)) {
+        auto ui_out_dir = out_dir / "ui";
+        fs::create_directories(ui_out_dir);
+        for (auto& entry : fs::directory_iterator(ui_template_dir)) {
+            auto content = read_file_contents(entry.path());
+            auto expanded = expand_template_str(content, vars);
+            auto out_path = ui_out_dir / entry.path().filename();
+            std::ofstream f(out_path);
+            f << expanded;
+            std::cout << "  Created ui/" << entry.path().filename().string() << "\n";
+        }
     }
 
     // Add to examples/CMakeLists.txt

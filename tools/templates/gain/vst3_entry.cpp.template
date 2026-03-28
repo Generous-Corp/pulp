@@ -1,0 +1,12 @@
+#include "{{HEADER_NAME}}"
+#include <pulp/format/vst3_entry.hpp>
+
+PULP_VST3_PLUGIN(
+    {{VST3_UID}},
+    "{{PLUGIN_NAME}}",
+    Steinberg::Vst::PlugType::kFx,
+    "{{MANUFACTURER}}",
+    "{{VERSION}}",
+    "",
+    {{NAMESPACE}}::create_{{FACTORY_NAME}}
+)

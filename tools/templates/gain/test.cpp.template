@@ -1,0 +1,84 @@
+#include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_approx.hpp>
+#include <pulp/format/headless.hpp>
+#include "{{HEADER_NAME}}"
+
+using Catch::Approx;
+
+TEST_CASE("{{PLUGIN_NAME}} applies gain") {
+    pulp::format::HeadlessHost host({{NAMESPACE}}::create_{{FACTORY_NAME}});
+    host.prepare(48000, 512);
+
+    pulp::audio::Buffer<float> in(2, 512), out(2, 512);
+
+    for (std::size_t i = 0; i < 512; ++i) {
+        in.channel(0)[i] = 0.5f;
+        in.channel(1)[i] = 0.5f;
+    }
+
+    const float* in_ptrs[] = {in.channel(0).data(), in.channel(1).data()};
+    pulp::audio::BufferView<const float> iv(in_ptrs, 2, 512);
+    auto ov = out.view();
+
+    // Default gain is 0 dB — output should equal input
+    host.process(ov, iv);
+    REQUIRE(out.channel(0)[0] == Approx(0.5f));
+}
+
+TEST_CASE("{{PLUGIN_NAME}} gain at -6 dB halves amplitude") {
+    pulp::format::HeadlessHost host({{NAMESPACE}}::create_{{FACTORY_NAME}});
+    host.prepare(48000, 512);
+
+    host.state().set_value({{NAMESPACE}}::kGain, -6.0206f); // -6 dB ≈ 0.5x
+
+    pulp::audio::Buffer<float> in(2, 512), out(2, 512);
+    for (std::size_t i = 0; i < 512; ++i)
+        in.channel(0)[i] = 1.0f;
+
+    const float* in_ptrs[] = {in.channel(0).data(), in.channel(1).data()};
+    pulp::audio::BufferView<const float> iv(in_ptrs, 2, 512);
+    auto ov = out.view();
+    host.process(ov, iv);
+
+    REQUIRE(out.channel(0)[0] == Approx(0.5f).margin(0.01f));
+}
+
+TEST_CASE("{{PLUGIN_NAME}} bypass passes input through") {
+    pulp::format::HeadlessHost host({{NAMESPACE}}::create_{{FACTORY_NAME}});
+    host.prepare(48000, 512);
+
+    host.state().set_value({{NAMESPACE}}::kBypass, 1.0f);
+    host.state().set_value({{NAMESPACE}}::kGain, -60.0f); // Should be ignored
+
+    pulp::audio::Buffer<float> in(2, 512), out(2, 512);
+    for (std::size_t i = 0; i < 512; ++i)
+        in.channel(0)[i] = 0.7f;
+
+    const float* in_ptrs[] = {in.channel(0).data(), in.channel(1).data()};
+    pulp::audio::BufferView<const float> iv(in_ptrs, 2, 512);
+    auto ov = out.view();
+    host.process(ov, iv);
+
+    REQUIRE(out.channel(0)[0] == Approx(0.7f));
+}
+
+TEST_CASE("{{PLUGIN_NAME}} has correct descriptor") {
+    pulp::format::HeadlessHost host({{NAMESPACE}}::create_{{FACTORY_NAME}});
+    auto desc = host.descriptor();
+
+    REQUIRE(desc.name == "{{PLUGIN_NAME}}");
+    REQUIRE(desc.manufacturer == "{{MANUFACTURER}}");
+    REQUIRE(desc.category == pulp::format::PluginCategory::Effect);
+}
+
+TEST_CASE("{{PLUGIN_NAME}} state round-trip") {
+    pulp::format::HeadlessHost host({{NAMESPACE}}::create_{{FACTORY_NAME}});
+    host.prepare(48000, 512);
+
+    host.state().set_value({{NAMESPACE}}::kGain, -12.0f);
+
+    auto data = host.save_state();
+    host.state().set_value({{NAMESPACE}}::kGain, 0.0f);
+    REQUIRE(host.load_state(data));
+    REQUIRE(host.state().get_value({{NAMESPACE}}::kGain) == Approx(-12.0f));
+}

@@ -68,14 +68,17 @@ Create a new plugin project from templates. Checks environment, scaffolds source
 ```bash
 pulp create "My Gain"                              # effect plugin (default)
 pulp create "My Synth" --type instrument           # instrument plugin
+pulp create "My Gain" --template gain              # gain template with UI script
 pulp create "My FX" --manufacturer "Acme Audio"    # custom manufacturer
 pulp create "My FX" --output ~/projects/my-fx      # custom output directory
 pulp create "My FX" --no-build                     # scaffold only, skip build
 ```
 
+The `--template` flag selects a named template directory (`tools/templates/<name>/`). Templates can include a `ui/` directory with JS scripts that are scaffolded alongside the C++ source. Available templates: `effect` (default), `instrument`, `gain`.
+
 What it does:
 1. Runs `pulp doctor` checks (fails fast if environment is broken)
-2. Scaffolds source files from templates (processor, format entries, test, CMakeLists.txt)
+2. Scaffolds source files from templates (processor, format entries, test, CMakeLists.txt, optional UI scripts)
 3. Adds the project to `examples/CMakeLists.txt`
 4. Configures, builds the test target, and runs tests
 5. Reports plugin artifact locations
