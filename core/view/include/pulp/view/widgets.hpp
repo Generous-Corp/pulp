@@ -29,6 +29,9 @@ public:
 
     void paint(canvas::Canvas& canvas) override;
 
+    /// Intrinsic height based on font size (ascent + descent + padding).
+    float intrinsic_height() const override { return font_size_ * 1.4f; }
+
 private:
     std::string text_;
     float font_size_ = 14.0f;

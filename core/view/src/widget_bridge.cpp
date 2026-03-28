@@ -758,6 +758,23 @@ void WidgetBridge::register_api() {
         return choc::value::Value();
     });
 
+    // measureText(text, fontSize) → {width, ascent, descent, lineHeight}
+    engine_.register_function("measureText", [](choc::javascript::ArgumentList args) {
+        auto text = args.get<std::string>(0, "");
+        auto size = static_cast<float>(args.get<double>(1, 14.0));
+        // Return approximate metrics (exact when Skia canvas is available)
+        float width = static_cast<float>(text.size()) * size * 0.6f;
+        float ascent = size * 0.75f;
+        float descent = size * 0.25f;
+        float lineHeight = size * 1.4f;
+        auto result = choc::value::createObject("");
+        result.addMember("width", choc::value::createFloat64(width));
+        result.addMember("ascent", choc::value::createFloat64(ascent));
+        result.addMember("descent", choc::value::createFloat64(descent));
+        result.addMember("lineHeight", choc::value::createFloat64(lineHeight));
+        return result;
+    });
+
     // Theme control
     engine_.register_function("setTheme", [this](choc::javascript::ArgumentList args) {
         auto n = args.get<std::string>(0, "dark");

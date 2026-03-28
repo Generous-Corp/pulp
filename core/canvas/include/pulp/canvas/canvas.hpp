@@ -120,6 +120,27 @@ public:
     virtual void set_text_align(TextAlign align) = 0;
     virtual void fill_text(const std::string& text, float x, float y) = 0;
     virtual float measure_text(const std::string& text) = 0;
+
+    /// Full text metrics for layout and intrinsic sizing.
+    struct TextMetrics {
+        float width = 0;        ///< Advance width of the text
+        float ascent = 0;       ///< Distance above baseline (positive value)
+        float descent = 0;      ///< Distance below baseline (positive value)
+        float line_height = 0;  ///< Recommended line spacing (ascent + descent + leading)
+    };
+
+    /// Measure text with full font metrics using current font settings.
+    virtual TextMetrics measure_text_full(const std::string& text) {
+        TextMetrics m;
+        m.width = measure_text(text);
+        m.ascent = font_size_ * 0.75f;   // approximate
+        m.descent = font_size_ * 0.25f;
+        m.line_height = font_size_ * 1.2f;
+        return m;
+    }
+
+protected:
+    float font_size_ = 14.0f;  ///< Current font size (set by set_font)
 };
 
 // ── Recording canvas ─────────────────────────────────────────────────────────

@@ -7,6 +7,7 @@
 #include "include/core/SkPath.h"
 #include "include/core/SkPathBuilder.h"
 #include "include/core/SkFont.h"
+#include "include/core/SkFontMetrics.h"
 #include "include/core/SkFontMgr.h"
 #include "include/core/SkTypeface.h"
 #include "include/core/SkTextBlob.h"
@@ -175,6 +176,24 @@ float SkiaCanvas::measure_text(const std::string& text) {
     SkRect bounds;
     font.measureText(text.c_str(), text.size(), SkTextEncoding::kUTF8, &bounds);
     return bounds.width();
+}
+
+Canvas::TextMetrics SkiaCanvas::measure_text_full(const std::string& text) {
+    SkFont font;
+    font.setSize(font_size_);
+
+    SkFontMetrics sk_metrics;
+    font.getMetrics(&sk_metrics);
+
+    SkRect bounds;
+    font.measureText(text.c_str(), text.size(), SkTextEncoding::kUTF8, &bounds);
+
+    TextMetrics m;
+    m.width = bounds.width();
+    m.ascent = -sk_metrics.fAscent;   // Skia ascent is negative, we return positive
+    m.descent = sk_metrics.fDescent;  // Skia descent is positive
+    m.line_height = -sk_metrics.fAscent + sk_metrics.fDescent + sk_metrics.fLeading;
+    return m;
 }
 
 } // namespace pulp::canvas

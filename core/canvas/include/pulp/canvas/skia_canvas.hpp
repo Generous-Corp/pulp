@@ -59,6 +59,7 @@ public:
     void set_text_align(TextAlign align) override;
     void fill_text(const std::string& text, float x, float y) override;
     float measure_text(const std::string& text) override;
+    TextMetrics measure_text_full(const std::string& text) override;
 
 private:
     SkCanvas* canvas_;        // Non-owning — owned by surface or caller
@@ -68,7 +69,6 @@ private:
     LineCap line_cap_ = LineCap::butt;
     LineJoin line_join_ = LineJoin::miter;
     std::string font_family_ = "sans-serif";
-    float font_size_ = 14.0f;
     TextAlign text_align_ = TextAlign::left;
 };
 

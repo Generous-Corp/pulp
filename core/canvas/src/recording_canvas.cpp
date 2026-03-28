@@ -122,6 +122,7 @@ void RecordingCanvas::stroke_line(float x0, float y0, float x1, float y1) {
 }
 
 void RecordingCanvas::set_font(const std::string& family, float size) {
+    font_size_ = size;
     DrawCommand cmd{DrawCommand::Type::set_font};
     cmd.text = family;
     cmd.f[0] = size;

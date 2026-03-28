@@ -67,6 +67,11 @@ public:
     // Perform flex layout on children
     void layout_children();
 
+    /// Intrinsic content size (override in widgets that know their natural size).
+    /// Returns 0 if no intrinsic size (use preferred_width/height instead).
+    virtual float intrinsic_width() const { return 0; }
+    virtual float intrinsic_height() const { return 0; }
+
     // ── Painting ──────────────────────────────────────────────────────────
 
     // Paint this view and all children into a canvas

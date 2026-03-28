@@ -263,6 +263,10 @@ void View::layout_children() {
             total_flex_grow += cf.flex_grow;
         } else {
             float preferred = is_row ? cf.preferred_width : cf.preferred_height;
+            // Use intrinsic size if no preferred size set
+            if (preferred <= 0) {
+                preferred = is_row ? child->intrinsic_width() : child->intrinsic_height();
+            }
             float min_val = is_row ? cf.min_width : cf.min_height;
             float max_val = is_row ? cf.max_width : cf.max_height;
             float size = std::max(preferred, min_val);
@@ -288,14 +292,15 @@ void View::layout_children() {
         if (cf.flex_grow > 0 && remaining > 0) {
             child_main = total_flex_grow > 0 ? remaining * (cf.flex_grow / total_flex_grow) : 0;
         } else if (cf.flex_grow == 0 && remaining < 0 && cf.flex_shrink > 0 && total_flex_shrink > 0) {
-            // Flex shrink: proportionally reduce fixed items
             float preferred = is_row ? cf.preferred_width : cf.preferred_height;
+            if (preferred <= 0) preferred = is_row ? child->intrinsic_width() : child->intrinsic_height();
             float min_val = is_row ? cf.min_width : cf.min_height;
             float base = std::max(preferred, min_val);
             float shrink_amount = (-remaining) * (cf.flex_shrink / total_flex_shrink);
             child_main = std::max(min_val, base - shrink_amount);
         } else {
             float preferred = is_row ? cf.preferred_width : cf.preferred_height;
+            if (preferred <= 0) preferred = is_row ? child->intrinsic_width() : child->intrinsic_height();
             float min_val = is_row ? cf.min_width : cf.min_height;
             child_main = std::max(preferred, min_val);
         }
