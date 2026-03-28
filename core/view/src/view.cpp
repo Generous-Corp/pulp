@@ -262,7 +262,7 @@ void View::layout_children() {
 
     auto area = local_bounds();
 
-    // Per-side padding (use per-side if set, otherwise uniform)
+    // Per-side padding
     float pt = flex_.padding_top >= 0 ? flex_.padding_top : flex_.padding;
     float pr = flex_.padding_right >= 0 ? flex_.padding_right : flex_.padding;
     float pb = flex_.padding_bottom >= 0 ? flex_.padding_bottom : flex_.padding;
@@ -272,30 +272,43 @@ void View::layout_children() {
     bool is_row = flex_.direction == FlexDirection::row;
     float main_size = is_row ? area.width : area.height;
     float cross_size = is_row ? area.height : area.width;
-    float gap = flex_.gap;
+    float gap = flex_.effective_gap(flex_.direction);
 
-    // ── Pass 1: Measure children ──────────────────────────────────────
+    // ── Collect visible children, sorted by order ────────────────────
+    struct ChildEntry { View* view; int order; };
+    std::vector<ChildEntry> ordered;
+    for (auto& child : children_) {
+        if (!child->visible_) continue;
+        ordered.push_back({child.get(), child->flex().order});
+    }
+    // Stable sort by order (preserves source order for equal values)
+    std::stable_sort(ordered.begin(), ordered.end(),
+        [](const ChildEntry& a, const ChildEntry& b) { return a.order < b.order; });
+
+    int visible_count = static_cast<int>(ordered.size());
+    if (visible_count == 0) return;
+
+    // ── Pass 1: Measure children (flex_basis → preferred → intrinsic) ──
     float total_fixed = 0;
     float total_flex_grow = 0;
     float total_flex_shrink = 0;
-    int visible_count = 0;
+    float total_margins = 0;
 
-    for (auto& child : children_) {
-        if (!child->visible_) continue;
-        ++visible_count;
+    for (auto& entry : ordered) {
+        auto& cf = entry.view->flex();
+        // Main-axis margins
+        float margin_before = is_row ? cf.margin_l() : cf.margin_t();
+        float margin_after = is_row ? cf.margin_r() : cf.margin_b();
+        total_margins += margin_before + margin_after;
 
-        auto& cf = child->flex();
         if (cf.flex_grow > 0) {
             total_flex_grow += cf.flex_grow;
         } else {
-            float preferred = is_row ? cf.preferred_width : cf.preferred_height;
-            // Use intrinsic size if no preferred size set
-            if (preferred <= 0) {
-                preferred = is_row ? child->intrinsic_width() : child->intrinsic_height();
-            }
+            float basis = cf.basis_or_preferred(is_row);
+            if (basis <= 0) basis = is_row ? entry.view->intrinsic_width() : entry.view->intrinsic_height();
             float min_val = is_row ? cf.min_width : cf.min_height;
             float max_val = is_row ? cf.max_width : cf.max_height;
-            float size = std::max(preferred, min_val);
+            float size = std::max(basis, min_val);
             if (max_val > 0) size = std::min(size, max_val);
             total_fixed += size;
             total_flex_shrink += cf.flex_shrink;
@@ -303,112 +316,115 @@ void View::layout_children() {
     }
 
     float total_gaps = visible_count > 1 ? gap * (visible_count - 1) : 0;
-    float remaining = main_size - total_fixed - total_gaps;
+    float remaining = main_size - total_fixed - total_gaps - total_margins;
 
     // ── Pass 2: Compute child sizes ───────────────────────────────────
-    struct ChildLayout { View* view; float main_size; float cross_size; };
+    struct ChildLayout { View* view; float main_size; float cross_size;
+                         float margin_before; float margin_after;
+                         float cross_margin_before; float cross_margin_after; };
     std::vector<ChildLayout> layouts;
     layouts.reserve(static_cast<size_t>(visible_count));
 
-    for (auto& child : children_) {
-        if (!child->visible_) continue;
-        auto& cf = child->flex();
+    for (auto& entry : ordered) {
+        auto& cf = entry.view->flex();
         float child_main;
+        float mb = is_row ? cf.margin_l() : cf.margin_t();
+        float ma = is_row ? cf.margin_r() : cf.margin_b();
+        float cmb = is_row ? cf.margin_t() : cf.margin_l();
+        float cma = is_row ? cf.margin_b() : cf.margin_r();
 
         if (cf.flex_grow > 0 && remaining > 0) {
             child_main = total_flex_grow > 0 ? remaining * (cf.flex_grow / total_flex_grow) : 0;
         } else if (cf.flex_grow == 0 && remaining < 0 && cf.flex_shrink > 0 && total_flex_shrink > 0) {
-            float preferred = is_row ? cf.preferred_width : cf.preferred_height;
-            if (preferred <= 0) preferred = is_row ? child->intrinsic_width() : child->intrinsic_height();
+            float basis = cf.basis_or_preferred(is_row);
+            if (basis <= 0) basis = is_row ? entry.view->intrinsic_width() : entry.view->intrinsic_height();
             float min_val = is_row ? cf.min_width : cf.min_height;
-            float base = std::max(preferred, min_val);
+            float base = std::max(basis, min_val);
             float shrink_amount = (-remaining) * (cf.flex_shrink / total_flex_shrink);
             child_main = std::max(min_val, base - shrink_amount);
         } else {
-            float preferred = is_row ? cf.preferred_width : cf.preferred_height;
-            if (preferred <= 0) preferred = is_row ? child->intrinsic_width() : child->intrinsic_height();
+            float basis = cf.basis_or_preferred(is_row);
+            if (basis <= 0) basis = is_row ? entry.view->intrinsic_width() : entry.view->intrinsic_height();
             float min_val = is_row ? cf.min_width : cf.min_height;
-            child_main = std::max(preferred, min_val);
+            child_main = std::max(basis, min_val);
         }
 
-        // Apply max constraint
         float max_main = is_row ? cf.max_width : cf.max_height;
         if (max_main > 0) child_main = std::min(child_main, max_main);
 
-        // Cross-axis sizing
+        // Cross-axis sizing — respect align_self override
+        FlexAlign align = (cf.align_self != FlexAlign::auto_) ? cf.align_self : flex_.align_items;
         float cross_min = is_row ? cf.min_height : cf.min_width;
         float cross_preferred = is_row ? cf.preferred_height : cf.preferred_width;
+        float cross_intrinsic = is_row ? entry.view->intrinsic_height() : entry.view->intrinsic_width();
         float cross_max = is_row ? cf.max_height : cf.max_width;
+        float avail_cross = cross_size - cmb - cma;
         float child_cross;
 
-        switch (flex_.align_items) {
-            case FlexAlign::stretch:
-                child_cross = cross_size;
-                break;
-            default:
-                child_cross = std::max(cross_preferred, cross_min);
-                if (child_cross <= 0) child_cross = cross_size;
-                break;
+        if (align == FlexAlign::stretch) {
+            child_cross = avail_cross;
+        } else {
+            child_cross = cross_preferred > 0 ? cross_preferred : cross_intrinsic;
+            child_cross = std::max(child_cross, cross_min);
+            if (child_cross <= 0) child_cross = avail_cross;
         }
         if (cross_max > 0) child_cross = std::min(child_cross, cross_max);
 
-        layouts.push_back({child.get(), child_main, child_cross});
+        layouts.push_back({entry.view, child_main, child_cross, mb, ma, cmb, cma});
     }
 
-    // ── Pass 3: Compute total content size for justify ────────────────
+    // ── Pass 3: Justify content ──────────────────────────────────────
     float total_content = 0;
-    for (auto& l : layouts) total_content += l.main_size;
+    for (auto& l : layouts)
+        total_content += l.main_size + l.margin_before + l.margin_after;
 
-    float free_space = main_size - total_content - total_gaps;
-    if (free_space < 0) free_space = 0;
-
-    // ── Pass 4: Position children with justify_content ────────────────
+    float free_space = std::max(0.0f, main_size - total_content - total_gaps);
     float pos = is_row ? area.x : area.y;
     float extra_gap = 0;
 
     switch (flex_.justify_content) {
-        case FlexJustify::start:
-            break;
-        case FlexJustify::center:
-            pos += free_space * 0.5f;
-            break;
-        case FlexJustify::end_:
-            pos += free_space;
-            break;
+        case FlexJustify::start: break;
+        case FlexJustify::center: pos += free_space * 0.5f; break;
+        case FlexJustify::end_: pos += free_space; break;
         case FlexJustify::space_between:
             if (visible_count > 1) extra_gap = free_space / (visible_count - 1);
             break;
         case FlexJustify::space_around:
             if (visible_count > 0) {
                 float around = free_space / visible_count;
-                pos += around * 0.5f;
-                extra_gap = around;
+                pos += around * 0.5f; extra_gap = around;
             }
             break;
         case FlexJustify::space_evenly:
             if (visible_count > 0) {
                 float even = free_space / (visible_count + 1);
-                pos += even;
-                extra_gap = even;
+                pos += even; extra_gap = even;
             }
             break;
     }
 
+    // ── Pass 4: Position children ────────────────────────────────────
     for (size_t i = 0; i < layouts.size(); ++i) {
         auto& l = layouts[i];
         auto& cf = l.view->flex();
 
-        // Cross-axis position
-        float cross_pos = is_row ? area.y : area.x;
-        switch (flex_.align_items) {
+        pos += l.margin_before;
+
+        // Cross-axis position — respect align_self
+        FlexAlign align = (cf.align_self != FlexAlign::auto_) ? cf.align_self : flex_.align_items;
+        float cross_pos = (is_row ? area.y : area.x) + l.cross_margin_before;
+        float avail_cross = cross_size - l.cross_margin_before - l.cross_margin_after;
+
+        switch (align) {
             case FlexAlign::start:
             case FlexAlign::stretch:
+            case FlexAlign::auto_:
                 break;
             case FlexAlign::center:
-                cross_pos += (cross_size - l.cross_size) * 0.5f;
+                cross_pos += (avail_cross - l.cross_size) * 0.5f;
                 break;
             case FlexAlign::end:
-                cross_pos += cross_size - l.cross_size;
+                cross_pos += avail_cross - l.cross_size;
                 break;
         }
 
@@ -420,8 +436,8 @@ void View::layout_children() {
         }
 
         l.view->set_bounds(child_bounds);
-        l.view->layout_children();  // Recurse
-        pos += l.main_size + gap + extra_gap;
+        l.view->layout_children();
+        pos += l.main_size + l.margin_after + gap + extra_gap;
     }
 }
 

@@ -497,19 +497,39 @@ void WidgetBridge::register_api() {
         else if (key == "padding_left") f.padding_left = (float)val;
         else if (key == "flex_grow") f.flex_grow = (float)val;
         else if (key == "flex_shrink") f.flex_shrink = (float)val;
+        else if (key == "flex_basis") f.flex_basis = (float)val;
         else if (key == "flex_wrap") f.flex_wrap = val > 0;
+        else if (key == "order") f.order = (int)val;
         else if (key == "width") f.preferred_width = (float)val;
         else if (key == "height") f.preferred_height = (float)val;
         else if (key == "min_width") f.min_width = (float)val;
         else if (key == "min_height") f.min_height = (float)val;
         else if (key == "max_width") f.max_width = (float)val;
         else if (key == "max_height") f.max_height = (float)val;
+        // Margin
+        else if (key == "margin") f.margin = (float)val;
+        else if (key == "margin_top") f.margin_top = (float)val;
+        else if (key == "margin_right") f.margin_right = (float)val;
+        else if (key == "margin_bottom") f.margin_bottom = (float)val;
+        else if (key == "margin_left") f.margin_left = (float)val;
+        // Directional gap
+        else if (key == "row_gap") f.row_gap = (float)val;
+        else if (key == "column_gap") f.column_gap = (float)val;
+        // Alignment
         else if (key == "align_items") {
             auto a = args.get<std::string>(2,"stretch");
             if (a=="start") f.align_items=FlexAlign::start;
             else if (a=="center") f.align_items=FlexAlign::center;
             else if (a=="end") f.align_items=FlexAlign::end;
             else f.align_items=FlexAlign::stretch;
+        }
+        else if (key == "align_self") {
+            auto a = args.get<std::string>(2,"auto");
+            if (a=="start") f.align_self=FlexAlign::start;
+            else if (a=="center") f.align_self=FlexAlign::center;
+            else if (a=="end") f.align_self=FlexAlign::end;
+            else if (a=="stretch") f.align_self=FlexAlign::stretch;
+            else f.align_self=FlexAlign::auto_;
         }
         else if (key == "justify_content") {
             auto j = args.get<std::string>(2,"start");

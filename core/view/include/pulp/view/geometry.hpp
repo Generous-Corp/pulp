@@ -55,8 +55,8 @@ struct Rect {
 // Flex layout direction
 enum class FlexDirection { row, column };
 
-// Flex alignment
-enum class FlexAlign { start, center, end, stretch };
+// Flex alignment (auto_ = inherit from parent's align_items)
+enum class FlexAlign { start, center, end, stretch, auto_ };
 
 /// Justify content modes (main axis space distribution)
 enum class FlexJustify {
@@ -68,26 +68,68 @@ enum class FlexJustify {
     space_evenly,   ///< Equal space between items AND at edges
 };
 
+/// Overflow behavior
+enum class FlexOverflow {
+    visible,    ///< Content renders beyond bounds (default for views)
+    hidden,     ///< Content clipped to bounds
+    scroll,     ///< Content clipped, scrollbar shown when needed
+    auto_,      ///< Like scroll but scrollbar only when content overflows
+};
+
 // Flex layout properties for a view
 struct FlexStyle {
     FlexDirection direction = FlexDirection::column;
     FlexAlign align_items = FlexAlign::stretch;
+    FlexAlign align_self = FlexAlign::auto_;  ///< Override parent's align_items for this child
     FlexJustify justify_content = FlexJustify::start;
-    float gap = 0;
+
+    float gap = 0;              ///< Shorthand for both row_gap and column_gap
+    float row_gap = -1;         ///< Gap between rows (-1 = use `gap`)
+    float column_gap = -1;      ///< Gap between columns (-1 = use `gap`)
+
     float padding = 0;
     float padding_top = -1;     ///< Per-side padding (-1 = use uniform `padding`)
     float padding_right = -1;
     float padding_bottom = -1;
     float padding_left = -1;
+
+    float margin = 0;           ///< Uniform margin around this view
+    float margin_top = -1;      ///< Per-side margin (-1 = use uniform `margin`)
+    float margin_right = -1;
+    float margin_bottom = -1;
+    float margin_left = -1;
+
     float flex_grow = 0;        ///< 0 = fixed size, >0 = share remaining space
     float flex_shrink = 1;      ///< 1 = shrink proportionally if overflow
+    float flex_basis = -1;      ///< Initial main size before grow/shrink (-1 = use preferred)
+
     float min_width = 0;
     float min_height = 0;
     float preferred_width = 0;
     float preferred_height = 0;
     float max_width = 0;        ///< 0 = no maximum
     float max_height = 0;       ///< 0 = no maximum
+
     bool flex_wrap = false;     ///< Wrap to next line when main axis overflows
+    int order = 0;              ///< Layout order (lower values first, default 0)
+
+    // Helper: resolve per-side margin
+    float margin_t() const { return margin_top >= 0 ? margin_top : margin; }
+    float margin_r() const { return margin_right >= 0 ? margin_right : margin; }
+    float margin_b() const { return margin_bottom >= 0 ? margin_bottom : margin; }
+    float margin_l() const { return margin_left >= 0 ? margin_left : margin; }
+
+    // Helper: resolve directional gap
+    float effective_gap(FlexDirection dir) const {
+        if (dir == FlexDirection::row) return column_gap >= 0 ? column_gap : gap;
+        return row_gap >= 0 ? row_gap : gap;
+    }
+
+    // Helper: resolve flex_basis or preferred size
+    float basis_or_preferred(bool is_row) const {
+        if (flex_basis >= 0) return flex_basis;
+        return is_row ? preferred_width : preferred_height;
+    }
 };
 
 } // namespace pulp::view
