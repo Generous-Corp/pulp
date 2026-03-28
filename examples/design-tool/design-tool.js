@@ -34,6 +34,7 @@ setBackground("", APP_BG);
 // ═══════════════════════════════════════════════════════════════════
 createRow("toolbar");
 setFlex("toolbar", "height", 44);
+setFlex("toolbar", "flex_shrink", 0);
 setFlex("toolbar", "padding_left", 12);
 setFlex("toolbar", "padding_right", 12);
 setFlex("toolbar", "align_items", "center");
@@ -41,35 +42,35 @@ setFlex("toolbar", "justify_content", "space-between");
 setBackground("toolbar", APP_SURFACE);
 setBorder("toolbar", APP_BORDER, 1, 0);
 
-// Left toolbar group: theme name + preset buttons
-createRow("toolbar-left", "toolbar");
-setFlex("toolbar-left", "gap", 8);
-setFlex("toolbar-left", "align_items", "center");
-
-createLabel("theme-name-label", "Default Dark", "toolbar-left");
+// Toolbar items (flat layout)
+createLabel("theme-name-label", "Default Dark", "toolbar");
 setFontSize("theme-name-label", 13);
+setFlex("theme-name-label", "width", 90);
 
-createCombo("preset-selector", "toolbar-left");
+createCombo("preset-selector", "toolbar");
 setItems("preset-selector", ["Default Dark", "Light", "Pro Audio", "Violet", "Amber", "Ocean", "Neon"]);
 setFlex("preset-selector", "width", 120);
 setFlex("preset-selector", "height", 26);
 
-// Right toolbar group: undo/redo + import/export
-createRow("toolbar-right", "toolbar");
-setFlex("toolbar-right", "gap", 6);
-setFlex("toolbar-right", "align_items", "center");
+// Spacer
+createCol("toolbar-spacer", "toolbar");
+setFlex("toolbar-spacer", "flex_grow", 1);
 
-createLabel("undo-btn", "Undo", "toolbar-right");
+createLabel("undo-btn", "Undo", "toolbar");
 setFontSize("undo-btn", 11);
+setFlex("undo-btn", "width", 36);
 
-createLabel("redo-btn", "Redo", "toolbar-right");
+createLabel("redo-btn", "Redo", "toolbar");
 setFontSize("redo-btn", 11);
+setFlex("redo-btn", "width", 36);
 
-createLabel("import-btn", "Import", "toolbar-right");
+createLabel("import-btn", "Import", "toolbar");
 setFontSize("import-btn", 11);
+setFlex("import-btn", "width", 48);
 
-createLabel("export-btn", "Export", "toolbar-right");
+createLabel("export-btn", "Export", "toolbar");
 setFontSize("export-btn", 11);
+setFlex("export-btn", "width", 48);
 setTextColor("export-btn", APP_ACCENT);
 
 // ═══════════════════════════════════════════════════════════════════
@@ -81,18 +82,22 @@ setFlex("main-area", "flex_grow", 1);
 // ── LEFT PANEL (Token Browser) ───────────────────────────────────
 createCol("left-panel", "main-area");
 setFlex("left-panel", "width", 310);
+setFlex("left-panel", "flex_shrink", 0);
 setFlex("left-panel", "padding", 0);
 setBackground("left-panel", APP_SURFACE);
 setBorder("left-panel", APP_BORDER, 1, 0);
 
-// Color System section
+// Color System section (height: title 14 + combo 26 + hue 24 + 5 ramps*38 + gaps + padding)
 createCol("color-section", "left-panel");
+setFlex("color-section", "height", 310);
+setFlex("color-section", "flex_shrink", 0);
 setFlex("color-section", "padding", 10);
 setFlex("color-section", "gap", 6);
 
 createLabel("cs-title", "COLOR SYSTEM", "color-section");
 setFontSize("cs-title", 10);
 setTextColor("cs-title", APP_TEXT_DIM);
+setFlex("cs-title", "height", 14);
 
 createCombo("harmony-selector", "color-section");
 setItems("harmony-selector", ["Monochromatic", "Analogous", "Complementary", "Split Comp.", "None"]);
@@ -114,8 +119,10 @@ setValue("accent-hue", 0.65);
 
 // Token browser header
 createRow("token-header", "left-panel");
+setFlex("token-header", "height", 30);
 setFlex("token-header", "padding", 10);
 setFlex("token-header", "padding_bottom", 6);
+setFlex("token-header", "align_items", "center");
 
 createLabel("tokens-title", "TOKENS", "token-header");
 setFontSize("tokens-title", 10);
@@ -137,7 +144,9 @@ var tokenGroups = [
 for (var g = 0; g < tokenGroups.length; g++) {
     var group = tokenGroups[g];
     var gid = "tg-" + g;
+    var groupHeight = 4 + 14 + 2 + group.tokens.length * 26; // padding_top + title + gap + tokens*(height+gap)
     createCol(gid, "token-list");
+    setFlex(gid, "height", groupHeight);
     setFlex(gid, "padding_left", 10);
     setFlex(gid, "padding_right", 10);
     setFlex(gid, "padding_top", 4);
@@ -146,6 +155,7 @@ for (var g = 0; g < tokenGroups.length; g++) {
     createLabel(gid + "-title", group.name, gid);
     setFontSize(gid + "-title", 10);
     setTextColor(gid + "-title", APP_TEXT_DIM);
+    setFlex(gid + "-title", "height", 14);
 
     for (var t = 0; t < group.tokens.length; t++) {
         var tid = "tok-" + g + "-" + t;
@@ -160,7 +170,6 @@ for (var g = 0; g < tokenGroups.length; g++) {
         setFlex(swatchId, "width", 16);
         setFlex(swatchId, "height", 16);
         setBorder(swatchId, APP_BORDER, 1, 3);
-        // TODO: set swatch background to actual token color
 
         // Token name
         createLabel(tid + "-name", group.tokens[t], tid);
@@ -168,6 +177,93 @@ for (var g = 0; g < tokenGroups.length; g++) {
         setFlex(tid + "-name", "flex_grow", 1);
     }
 }
+
+// ── Apply token colors to swatches ───────────────────────────────
+function updateTokenSwatches() {
+    var themeStr = getThemeJson();
+    var theme = JSON.parse(themeStr);
+    var colors = theme.colors || {};
+    for (var g = 0; g < tokenGroups.length; g++) {
+        var group = tokenGroups[g];
+        for (var t = 0; t < group.tokens.length; t++) {
+            var swatchId = "tok-" + g + "-" + t + "-sw";
+            var tokenName = group.tokens[t];
+            if (colors[tokenName]) {
+                setBackground(swatchId, colors[tokenName]);
+            }
+        }
+    }
+}
+updateTokenSwatches();
+
+// ── Color System: OKLCH Shade Ramps ──────────────────────────────
+var paletteNames = ["Accent", "Neutral", "Success", "Warning", "Error"];
+var paletteKeys  = ["accent", "neutral", "success", "warning", "error"];
+
+function buildShadeRamps() {
+    var palette = PaletteSystem.create(currentAccent, currentHarmony);
+    var steps = ShadeGenerator.STEPS;
+
+    for (var p = 0; p < paletteNames.length; p++) {
+        var rampId = "ramp-" + p;
+        // Remove old ramp if it exists (on rebuild)
+        removeWidget(rampId);
+
+        createCol(rampId, "color-section");
+        setFlex(rampId, "height", 36);
+        setFlex(rampId, "gap", 2);
+
+        createLabel(rampId + "-title", paletteNames[p], rampId);
+        setFontSize(rampId + "-title", 9);
+        setTextColor(rampId + "-title", APP_TEXT_DIM);
+        setFlex(rampId + "-title", "height", 12);
+
+        createRow(rampId + "-row", rampId);
+        setFlex(rampId + "-row", "gap", 2);
+        setFlex(rampId + "-row", "height", 20);
+
+        var ramp = palette[paletteKeys[p]];
+        for (var s = 0; s < steps.length; s++) {
+            var shadeId = rampId + "-s" + s;
+            createCol(shadeId, rampId + "-row");
+            setFlex(shadeId, "flex_grow", 1);
+            setFlex(shadeId, "height", 18);
+            setBackground(shadeId, ramp[steps[s]].hex);
+            setBorder(shadeId, APP_BORDER, 0, 2);
+        }
+    }
+}
+buildShadeRamps();
+
+// ── Accent hue slider handler ────────────────────────────────────
+on("accent-hue", "change", function(val) {
+    var hue = val * 360;
+    var oklch = OklchEngine.hexToOklch(currentAccent);
+    currentAccent = OklchEngine.oklchToHex(oklch.L, oklch.C, hue);
+
+    // Rebuild shade ramps with new hue
+    buildShadeRamps();
+
+    // Apply new palette as theme
+    var palette = PaletteSystem.create(currentAccent, currentHarmony);
+    var diff = PaletteSystem.toThemeDiff(palette);
+    applyTokenDiff(diff);
+    updateTokenSwatches();
+    layout();
+});
+
+// Harmony selector handler
+on("harmony-selector", "select", function(idx) {
+    var modes = ["monochromatic", "analogous", "complementary", "splitComplementary", "none"];
+    currentHarmony = modes[idx];
+    buildShadeRamps();
+
+    var palette = PaletteSystem.create(currentAccent, currentHarmony);
+    var diff = PaletteSystem.toThemeDiff(palette);
+    applyTokenDiff(diff);
+    updateTokenSwatches();
+    layout();
+});
 
 // ── CENTER PANEL (Preview) ───────────────────────────────────────
 createCol("center-panel", "main-area");
@@ -226,6 +322,7 @@ setFlex("preview-area", "gap", 16);
 createLabel("controls-header", "Controls", "preview-area");
 setFontSize("controls-header", 11);
 setTextColor("controls-header", APP_TEXT_DIM);
+setFlex("controls-header", "height", 16);
 
 createRow("knob-row", "preview-area");
 setFlex("knob-row", "gap", 20);
@@ -261,33 +358,51 @@ createFader("slider1", "horizontal", "preview-area");
 setFlex("slider1", "height", 24);
 setValue("slider1", 0.65);
 
-// Buttons row
+// Buttons row (Normal, Hover, Action, Disabled)
 createRow("btn-row", "preview-area");
 setFlex("btn-row", "gap", 8);
 setFlex("btn-row", "height", 32);
 setFlex("btn-row", "align_items", "center");
 
 createCol("btn-normal", "btn-row");
-setFlex("btn-normal", "width", 80);
+setFlex("btn-normal", "width", 72);
 setFlex("btn-normal", "height", 28);
 setBackground("btn-normal", "#3a3a4c");
 setBorder("btn-normal", APP_BORDER, 1, 6);
-
 createLabel("btn-normal-label", "Normal", "btn-normal");
 setFontSize("btn-normal-label", 11);
 setFlex("btn-normal-label", "padding", 6);
 
+createCol("btn-hover", "btn-row");
+setFlex("btn-hover", "width", 72);
+setFlex("btn-hover", "height", 28);
+setBackground("btn-hover", "#4a4a5c");
+setBorder("btn-hover", APP_BORDER, 1, 6);
+createLabel("btn-hover-label", "Hover", "btn-hover");
+setFontSize("btn-hover-label", 11);
+setFlex("btn-hover-label", "padding", 6);
+
 createCol("btn-action", "btn-row");
-setFlex("btn-action", "width", 80);
+setFlex("btn-action", "width", 72);
 setFlex("btn-action", "height", 28);
 setBackground("btn-action", APP_ACCENT);
 setBorder("btn-action", APP_ACCENT, 0, 6);
-
 createLabel("btn-action-label", "Action", "btn-action");
 setFontSize("btn-action-label", 11);
 setFlex("btn-action-label", "padding", 6);
 
-// Toggles row
+createCol("btn-disabled", "btn-row");
+setFlex("btn-disabled", "width", 72);
+setFlex("btn-disabled", "height", 28);
+setBackground("btn-disabled", "#2a2a36");
+setBorder("btn-disabled", APP_BORDER, 1, 6);
+setOpacity("btn-disabled", 0.5);
+createLabel("btn-disabled-label", "Disabled", "btn-disabled");
+setFontSize("btn-disabled-label", 11);
+setFlex("btn-disabled-label", "padding", 6);
+setTextColor("btn-disabled-label", APP_TEXT_DIM);
+
+// Toggles + checkbox row
 createRow("toggle-row", "preview-area");
 setFlex("toggle-row", "gap", 12);
 setFlex("toggle-row", "height", 28);
@@ -304,11 +419,35 @@ setFlex("t2", "height", 24);
 
 createLabel("toggle-label", "Toggle", "toggle-row");
 setFontSize("toggle-label", 11);
+setFlex("toggle-label", "width", 50);
+
+// Text input + Placeholder + Combo preview
+createRow("input-row", "preview-area");
+setFlex("input-row", "gap", 8);
+setFlex("input-row", "height", 30);
+setFlex("input-row", "align_items", "center");
+
+createTextEditor("sample-input", "input-row");
+setPlaceholder("sample-input", "Some text");
+setText("sample-input", "Some text");
+setFlex("sample-input", "width", 120);
+setFlex("sample-input", "height", 26);
+
+createTextEditor("sample-placeholder", "input-row");
+setPlaceholder("sample-placeholder", "Placeholder...");
+setFlex("sample-placeholder", "width", 120);
+setFlex("sample-placeholder", "height", 26);
+
+createCombo("sample-combo", "input-row");
+setItems("sample-combo", ["Select preset...", "Option A", "Option B"]);
+setFlex("sample-combo", "width", 130);
+setFlex("sample-combo", "height", 26);
 
 // Data display: Waveform
 createLabel("data-header", "Data Display", "preview-area");
 setFontSize("data-header", 11);
 setTextColor("data-header", APP_TEXT_DIM);
+setFlex("data-header", "height", 16);
 
 createWaveform("waveform", "preview-area");
 setFlex("waveform", "height", 80);
@@ -341,15 +480,67 @@ createMeter("m4", "vertical", "meter-row");
 setFlex("m4", "width", 12);
 setMeterLevel("m4", 0.85, 0.95);
 
+// Layout section: 2x2 card grid
+createLabel("layout-header", "Layout", "preview-area");
+setFontSize("layout-header", 11);
+setTextColor("layout-header", APP_TEXT_DIM);
+setFlex("layout-header", "height", 16);
+
+createRow("card-grid-top", "preview-area");
+setFlex("card-grid-top", "gap", 8);
+setFlex("card-grid-top", "height", 56);
+
+createCol("card-1", "card-grid-top");
+setFlex("card-1", "flex_grow", 1);
+setBackground("card-1", APP_PANEL);
+setBorder("card-1", APP_BORDER, 1, 8);
+setFlex("card-1", "padding", 8);
+createLabel("card-1-label", "Panel A", "card-1");
+setFontSize("card-1-label", 10);
+setFlex("card-1-label", "height", 14);
+
+createCol("card-2", "card-grid-top");
+setFlex("card-2", "flex_grow", 1);
+setBackground("card-2", APP_PANEL);
+setBorder("card-2", APP_BORDER, 1, 8);
+setFlex("card-2", "padding", 8);
+createLabel("card-2-label", "Panel B", "card-2");
+setFontSize("card-2-label", 10);
+setFlex("card-2-label", "height", 14);
+
+createRow("card-grid-bot", "preview-area");
+setFlex("card-grid-bot", "gap", 8);
+setFlex("card-grid-bot", "height", 56);
+
+createCol("card-3", "card-grid-bot");
+setFlex("card-3", "flex_grow", 1);
+setBackground("card-3", APP_ACCENT);
+setBorder("card-3", APP_ACCENT, 0, 8);
+setFlex("card-3", "padding", 8);
+createLabel("card-3-label", "Accent", "card-3");
+setFontSize("card-3-label", 10);
+setFlex("card-3-label", "height", 14);
+
+createCol("card-4", "card-grid-bot");
+setFlex("card-4", "flex_grow", 1);
+setBackground("card-4", "#8b3a3a");
+setBorder("card-4", "#8b3a3a", 0, 8);
+setFlex("card-4", "padding", 8);
+createLabel("card-4-label", "Error", "card-4");
+setFontSize("card-4-label", 10);
+setFlex("card-4-label", "height", 14);
+
 // ── RIGHT PANEL (Inspector + Chat) ──────────────────────────────
 createCol("right-panel", "main-area");
 setFlex("right-panel", "width", 272);
+setFlex("right-panel", "flex_shrink", 0);
 setBackground("right-panel", APP_SURFACE);
 setBorder("right-panel", APP_BORDER, 1, 0);
 
 // Tab bar
 createRow("right-tabs", "right-panel");
 setFlex("right-tabs", "height", 36);
+setFlex("right-tabs", "flex_shrink", 0);
 setFlex("right-tabs", "align_items", "center");
 setFlex("right-tabs", "justify_content", "center");
 setFlex("right-tabs", "gap", 0);
@@ -367,6 +558,81 @@ setFlex("tab-chat", "flex_grow", 1);
 setFlex("tab-chat", "padding", 10);
 setTextColor("tab-chat", APP_ACCENT);
 
+// Inspector content area (hidden by default)
+createCol("inspector-area", "right-panel");
+setFlex("inspector-area", "flex_grow", 1);
+setFlex("inspector-area", "padding", 10);
+setFlex("inspector-area", "gap", 6);
+setVisible("inspector-area", false);
+
+createLabel("insp-title", "ELEMENT INSPECTOR", "inspector-area");
+setFontSize("insp-title", 10);
+setTextColor("insp-title", APP_TEXT_DIM);
+setFlex("insp-title", "height", 14);
+
+createLabel("insp-hint", "Cmd+click any element in the preview to inspect its properties.", "inspector-area");
+setFontSize("insp-hint", 10);
+setTextColor("insp-hint", APP_TEXT_DIM);
+setFlex("insp-hint", "height", 28);
+
+// Inspector property rows (placeholder)
+createRow("insp-row-type", "inspector-area");
+setFlex("insp-row-type", "height", 20);
+setFlex("insp-row-type", "align_items", "center");
+createLabel("insp-type-k", "Type:", "insp-row-type");
+setFontSize("insp-type-k", 10);
+setTextColor("insp-type-k", APP_TEXT_DIM);
+setFlex("insp-type-k", "width", 60);
+createLabel("insp-type-v", "—", "insp-row-type");
+setFontSize("insp-type-v", 10);
+setFlex("insp-type-v", "flex_grow", 1);
+
+createRow("insp-row-id", "inspector-area");
+setFlex("insp-row-id", "height", 20);
+setFlex("insp-row-id", "align_items", "center");
+createLabel("insp-id-k", "ID:", "insp-row-id");
+setFontSize("insp-id-k", 10);
+setTextColor("insp-id-k", APP_TEXT_DIM);
+setFlex("insp-id-k", "width", 60);
+createLabel("insp-id-v", "—", "insp-row-id");
+setFontSize("insp-id-v", 10);
+setFlex("insp-id-v", "flex_grow", 1);
+
+createRow("insp-row-bounds", "inspector-area");
+setFlex("insp-row-bounds", "height", 20);
+setFlex("insp-row-bounds", "align_items", "center");
+createLabel("insp-bounds-k", "Bounds:", "insp-row-bounds");
+setFontSize("insp-bounds-k", 10);
+setTextColor("insp-bounds-k", APP_TEXT_DIM);
+setFlex("insp-bounds-k", "width", 60);
+createLabel("insp-bounds-v", "—", "insp-row-bounds");
+setFontSize("insp-bounds-v", 10);
+setFlex("insp-bounds-v", "flex_grow", 1);
+
+// Tab switching logic
+var activeTab = "chat";
+function switchTab(tab) {
+    activeTab = tab;
+    if (tab === "chat") {
+        setVisible("chat-area", true);
+        setVisible("inspector-area", false);
+        setTextColor("tab-chat", APP_ACCENT);
+        setTextColor("tab-inspector", APP_TEXT);
+    } else {
+        setVisible("chat-area", false);
+        setVisible("inspector-area", true);
+        setTextColor("tab-inspector", APP_ACCENT);
+        setTextColor("tab-chat", APP_TEXT);
+    }
+    layout();
+}
+
+// Tab switching via registerClick + on() click events
+registerClick("tab-inspector");
+registerClick("tab-chat");
+on("tab-inspector", "click", function() { switchTab("inspector"); });
+on("tab-chat", "click", function() { switchTab("chat"); });
+
 // Chat content area
 createCol("chat-area", "right-panel");
 setFlex("chat-area", "flex_grow", 1);
@@ -376,6 +642,7 @@ setFlex("chat-area", "gap", 8);
 // Model selector
 createRow("model-row", "chat-area");
 setFlex("model-row", "height", 24);
+setFlex("model-row", "flex_shrink", 0);
 setFlex("model-row", "align_items", "center");
 setFlex("model-row", "justify_content", "space-between");
 
@@ -395,14 +662,17 @@ setScrollContentSize("chat-messages", 252, 400);
 
 createLabel("welcome-msg", "Describe a visual style and the preview will update live.", "chat-messages");
 setFontSize("welcome-msg", 11);
+setFlex("welcome-msg", "height", 30);
 
 createLabel("hint-msg", 'Try: "warm vintage" or "neon cyberpunk"', "chat-messages");
 setFontSize("hint-msg", 10);
 setTextColor("hint-msg", APP_TEXT_DIM);
+setFlex("hint-msg", "height", 16);
 
 // Chat input area
 createRow("chat-input-row", "chat-area");
 setFlex("chat-input-row", "height", 32);
+setFlex("chat-input-row", "flex_shrink", 0);
 setFlex("chat-input-row", "gap", 6);
 
 createTextEditor("chat-input", "chat-input-row");
@@ -415,6 +685,7 @@ setFlex("chat-input", "height", 28);
 // ═══════════════════════════════════════════════════════════════════
 createRow("status-bar");
 setFlex("status-bar", "height", 28);
+setFlex("status-bar", "flex_shrink", 0);
 setFlex("status-bar", "padding_left", 12);
 setFlex("status-bar", "padding_right", 12);
 setFlex("status-bar", "align_items", "center");
@@ -436,7 +707,12 @@ setTextColor("status-schema", APP_TEXT_DIM);
 
 function addChatMessage(role, text) {
     var id = "msg-" + (msgCount++);
+    // Estimate height: role(12) + gap(4) + text lines(~14 per line) + padding(16)
+    var lineCount = Math.ceil(text.length / 30);
+    var msgHeight = 12 + 4 + lineCount * 14 + 16;
+
     createCol(id, "chat-messages");
+    setFlex(id, "height", msgHeight);
     setFlex(id, "padding", 8);
     setFlex(id, "gap", 4);
     setBorder(id, APP_BORDER, 1, 6);
@@ -449,10 +725,15 @@ function addChatMessage(role, text) {
     createLabel(id + "-role", role === "user" ? "You" : "Designer", id);
     setFontSize(id + "-role", 9);
     setTextColor(id + "-role", APP_TEXT_DIM);
+    setFlex(id + "-role", "height", 12);
 
     createLabel(id + "-text", text, id);
     setFontSize(id + "-text", 11);
+    setFlex(id + "-text", "height", lineCount * 14);
 
+    // Update scroll content size to fit all messages
+    var totalHeight = (msgCount + 1) * (msgHeight + 8) + 60;
+    setScrollContentSize("chat-messages", 252, totalHeight);
     layout();
 }
 
@@ -495,6 +776,7 @@ on("chat-input", "return", function(text) {
 
     var jsonDiff = response.substring(jsonStart, jsonEnd + 1);
     applyTokenDiff(jsonDiff);
+    pushThemeSnapshot();
 
     var count = (jsonDiff.match(/#[0-9a-fA-F]{6}/g) || []).length;
     addChatMessage("assistant", "Applied " + count + " token changes");
@@ -517,6 +799,68 @@ on("preset-selector", "select", function(idx) {
     setTheme(p.theme);
     setText("theme-name-label", ["Default Dark","Light","Pro Audio","Violet","Amber","Ocean","Neon"][idx]);
     layout();
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// Export/Import buttons
+// ═══════════════════════════════════════════════════════════════════
+registerClick("export-btn");
+on("export-btn", "click", function() {
+    var json = getThemeJson();
+    var path = "/tmp/pulp-theme-export.json";
+    exec("cat > " + path + " << 'PULPEOF'\n" + json + "\nPULPEOF");
+    setText("status-text", "Exported to " + path);
+    layout();
+});
+
+registerClick("import-btn");
+on("import-btn", "click", function() {
+    var path = "/tmp/pulp-theme-export.json";
+    var json = exec("cat " + path + " 2>/dev/null");
+    if (json && json.length > 10) {
+        applyTokenDiff(json);
+        updateTokenSwatches();
+        setText("status-text", "Imported from " + path);
+    } else {
+        setText("status-text", "No theme file found");
+    }
+    layout();
+});
+
+// Undo/Redo (snapshot-based)
+var themeHistory = [];
+var historyIndex = -1;
+
+function pushThemeSnapshot() {
+    var snap = getThemeJson();
+    if (historyIndex < themeHistory.length - 1) {
+        themeHistory = themeHistory.slice(0, historyIndex + 1);
+    }
+    themeHistory.push(snap);
+    historyIndex = themeHistory.length - 1;
+}
+pushThemeSnapshot();
+
+registerClick("undo-btn");
+on("undo-btn", "click", function() {
+    if (historyIndex > 0) {
+        historyIndex--;
+        applyTokenDiff(themeHistory[historyIndex]);
+        updateTokenSwatches();
+        setText("status-text", "Undo (" + historyIndex + "/" + (themeHistory.length - 1) + ")");
+        layout();
+    }
+});
+
+registerClick("redo-btn");
+on("redo-btn", "click", function() {
+    if (historyIndex < themeHistory.length - 1) {
+        historyIndex++;
+        applyTokenDiff(themeHistory[historyIndex]);
+        updateTokenSwatches();
+        setText("status-text", "Redo (" + historyIndex + "/" + (themeHistory.length - 1) + ")");
+        layout();
+    }
 });
 
 layout();

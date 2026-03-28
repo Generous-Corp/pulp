@@ -76,6 +76,7 @@ void View::simulate_click(Point root_pos) {
 
     target->on_mouse_down(local);
     target->on_mouse_up(local);
+    if (target->on_click) target->on_click();
 }
 
 void View::simulate_drag(Point start, Point end, int steps) {

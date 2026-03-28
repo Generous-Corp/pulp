@@ -365,6 +365,18 @@ void WidgetBridge::register_api() {
         return choc::value::Value();
     });
 
+    // registerClick(id) — enables "click" event dispatch for any widget
+    engine_.register_function("registerClick", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto it = widgets_.find(id);
+        if (it != widgets_.end()) {
+            it->second->on_click = [this, id]() {
+                engine_.evaluate("__dispatch__('" + id + "', 'click', 0)");
+            };
+        }
+        return choc::value::Value();
+    });
+
     // removeWidget(id)
     engine_.register_function("removeWidget", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");

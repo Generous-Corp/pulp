@@ -174,6 +174,9 @@ public:
     void clear_border() { has_border_ = false; }
     float corner_radius() const { return corner_radius_; }
 
+    /// Generic click callback (fires on mouse-down, if set).
+    std::function<void()> on_click;
+
     /// Overflow mode
     enum class Overflow { hidden, visible };
     void set_overflow(Overflow o) { overflow_ = o; }
