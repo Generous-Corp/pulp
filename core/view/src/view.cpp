@@ -201,6 +201,21 @@ View* View::hit_test(Point local_point) {
     return nullptr;
 }
 
+// ── Overlay paint queue ──────────────────────────────────────────────────────
+
+std::vector<View::OverlayRequest>& View::overlay_queue() {
+    static std::vector<OverlayRequest> queue;
+    return queue;
+}
+
+void View::paint_overlays(canvas::Canvas& canvas) {
+    auto& queue = overlay_queue();
+    for (auto& req : queue) {
+        if (req.paint_fn) req.paint_fn(canvas);
+    }
+    queue.clear();
+}
+
 Color View::resolve_color(const std::string& name, Color fallback) const {
     auto c = theme_.color(name);
     if (c.has_value()) return c.value();

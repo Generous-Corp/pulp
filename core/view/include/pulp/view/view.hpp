@@ -182,6 +182,16 @@ public:
     /// Generic click callback (fires on mouse-down, if set).
     std::function<void()> on_click;
 
+    // ── Overlay painting ────────────────────────────────────────────────
+    /// Deferred overlay paint callback. If set, called after the entire view
+    /// tree is painted. The canvas is in root coordinates. Used by popups/dropdowns.
+    struct OverlayRequest {
+        std::function<void(canvas::Canvas&)> paint_fn;
+        View* owner = nullptr;
+    };
+    static std::vector<OverlayRequest>& overlay_queue();
+    static void paint_overlays(canvas::Canvas& canvas);
+
     /// Global click callback (fires on any view click with widget id). Set on root.
     std::function<void(const std::string& id, uint16_t modifiers)> on_global_click;
 

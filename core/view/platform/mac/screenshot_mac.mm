@@ -33,6 +33,7 @@ std::vector<uint8_t> render_to_png(View& root, uint32_t width, uint32_t height, 
     root.set_bounds({0, 0, static_cast<float>(width), static_cast<float>(height)});
     root.layout_children();
     root.paint_all(canvas);
+    pulp::view::View::paint_overlays(canvas);
 
     CGImageRef image = CGBitmapContextCreateImage(ctx);
     CGContextRelease(ctx);

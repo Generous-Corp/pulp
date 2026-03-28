@@ -131,6 +131,10 @@ static pulp::view::KeyCode keyCodeFromNS(unsigned short code) {
     if (!self.rootView) return;
     auto pt = [self localPoint:event];
     _dragTarget = self.rootView->hit_test(pt);
+
+    // Close any open popup if click is outside it
+    pulp::view::ComboBox::notify_global_click(_dragTarget);
+
     if (_dragTarget) {
         auto local = toLocal(pt, _dragTarget, self.rootView);
 
@@ -302,6 +306,7 @@ static pulp::view::KeyCode keyCodeFromNS(unsigned short code) {
             static_cast<float>(bounds.size.height)});
         self.rootView->layout_children();
         self.rootView->paint_all(canvas);
+        pulp::view::View::paint_overlays(canvas);
     }
 }
 
@@ -630,6 +635,7 @@ private:
             canvas->fill_rect(0, 0, width_, height_);
 
             root_.paint_all(*canvas);
+            pulp::view::View::paint_overlays(*canvas);
         }
 
         skia_surface_->end_frame();   // submit Graphite recording

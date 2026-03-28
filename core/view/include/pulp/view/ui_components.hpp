@@ -49,10 +49,21 @@ public:
 
     bool is_open() const { return open_; }
 
+    /// Close any currently open ComboBox (call before opening a new one).
+    static void close_active_popup();
+
+    /// Called by the root view on any mouse click — closes popup if click is outside.
+    static void notify_global_click(View* target);
+
 private:
+    void open_dropdown();
+    void close_dropdown();
+
     std::vector<std::string> items_;
     int selected_ = 0;
     bool open_ = false;
+
+    static ComboBox* active_popup_;
     static const std::string empty_string_;
 };
 

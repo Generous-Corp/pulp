@@ -52,48 +52,97 @@ void ComboBox::paint(canvas::Canvas& canvas) {
     canvas.stroke_line(ax - 3, ay - 2, ax, ay + 2);
     canvas.stroke_line(ax, ay + 2, ax + 3, ay - 2);
 
-    // Dropdown menu when open
+    // Dropdown menu: deferred to overlay queue so it paints on top of everything
     if (open_ && !items_.empty()) {
-        float item_h = 24.0f;
-        float dropdown_y = base_h + 2;
-        float dropdown_h = static_cast<float>(items_.size()) * item_h;
-        auto dropdown_bg = resolve_color("bg.elevated", canvas::Color::rgba(45, 45, 60));
-        auto accent = resolve_color("accent.primary", canvas::Color::rgba(100, 150, 255));
-
-        canvas.set_fill_color(dropdown_bg);
-        canvas.fill_rounded_rect(0, dropdown_y, b.width, dropdown_h, 4);
-        canvas.set_stroke_color(border_c);
-        canvas.stroke_rounded_rect(0, dropdown_y, b.width, dropdown_h, 4);
-
-        for (int i = 0; i < static_cast<int>(items_.size()); ++i) {
-            float iy = dropdown_y + static_cast<float>(i) * item_h;
-            const auto& item = items_[static_cast<size_t>(i)];
-
-            // Separator support: items starting with "---"
-            if (item.size() >= 3 && item.substr(0, 3) == "---") {
-                canvas.set_stroke_color(border_c);
-                canvas.set_line_width(0.5f);
-                canvas.stroke_line(4, iy + item_h * 0.5f, b.width - 4, iy + item_h * 0.5f);
-                continue;
-            }
-
-            // Highlight selected item row
-            if (i == selected_) {
-                canvas.set_fill_color(accent);
-                canvas.fill_rect(1, iy, b.width - 2, item_h);
-            }
-
-            // Check glyph for selected item (left-aligned)
-            if (i == selected_) {
-                canvas.set_fill_color(canvas::Color::rgba(255, 255, 255));
-                canvas.fill_text("\xe2\x9c\x93", 6, iy + 16);  // UTF-8 checkmark ✓
-            }
-
-            // Item text (indented to make room for check glyph)
-            canvas.set_fill_color(text_c);
-            canvas.fill_text(item, 22, iy + 16);
+        // Compute absolute position by walking up the parent chain
+        float abs_x = 0, abs_y = 0;
+        View* v = this;
+        while (v) {
+            abs_x += v->bounds().x;
+            abs_y += v->bounds().y;
+            v = v->parent();
         }
+
+        float item_h = 24.0f;
+        float dd_top = abs_y + base_h + 2;
+        float dd_w = b.width;
+        float dd_h = static_cast<float>(items_.size()) * item_h;
+        int sel = selected_;
+        auto items_copy = items_;
+        auto dropdown_bg = resolve_color("bg.elevated", canvas::Color::rgba(45, 45, 60));
+        auto accent_c = resolve_color("accent.primary", canvas::Color::rgba(100, 150, 255));
+        auto border = border_c;
+        auto text = text_c;
+
+        overlay_queue().push_back({[=](canvas::Canvas& c) {
+            c.save();
+            c.set_fill_color(dropdown_bg);
+            c.fill_rounded_rect(abs_x, dd_top, dd_w, dd_h, 4);
+            c.set_stroke_color(border);
+            c.set_line_width(1);
+            c.stroke_rounded_rect(abs_x, dd_top, dd_w, dd_h, 4);
+
+            c.set_font("Inter", 12);
+            for (int i = 0; i < static_cast<int>(items_copy.size()); ++i) {
+                float iy = dd_top + static_cast<float>(i) * item_h;
+                const auto& item = items_copy[static_cast<size_t>(i)];
+
+                if (item.size() >= 3 && item.substr(0, 3) == "---") {
+                    c.set_stroke_color(border);
+                    c.set_line_width(0.5f);
+                    c.stroke_line(abs_x + 4, iy + item_h * 0.5f,
+                                  abs_x + dd_w - 4, iy + item_h * 0.5f);
+                    continue;
+                }
+
+                if (i == sel) {
+                    c.set_fill_color(accent_c);
+                    c.fill_rect(abs_x + 1, iy, dd_w - 2, item_h);
+                    c.set_fill_color(canvas::Color::rgba(255, 255, 255));
+                    c.fill_text("\xe2\x9c\x93", abs_x + 6, iy + 16);
+                }
+
+                c.set_fill_color(text);
+                c.set_text_align(canvas::TextAlign::left);
+                c.fill_text(item, abs_x + 22, iy + 16);
+            }
+            c.restore();
+        }, this});
     }
+}
+
+ComboBox* ComboBox::active_popup_ = nullptr;
+
+void ComboBox::close_active_popup() {
+    if (active_popup_) {
+        active_popup_->close_dropdown();
+    }
+}
+
+void ComboBox::notify_global_click(View* target) {
+    if (!active_popup_) return;
+    // Check if click target is the active popup or a child of it
+    View* v = target;
+    while (v) {
+        if (v == active_popup_) return;  // click is inside popup
+        v = v->parent();
+    }
+    close_active_popup();
+}
+
+void ComboBox::open_dropdown() {
+    if (open_) return;
+    close_active_popup();  // close any other open dropdown first
+    set_overflow(Overflow::visible);
+    open_ = true;
+    active_popup_ = this;
+}
+
+void ComboBox::close_dropdown() {
+    if (!open_) return;
+    open_ = false;
+    set_overflow(Overflow::hidden);
+    if (active_popup_ == this) active_popup_ = nullptr;
 }
 
 void ComboBox::on_mouse_event(const MouseEvent& event) {
@@ -105,18 +154,15 @@ void ComboBox::on_mouse_event(const MouseEvent& event) {
         if (event.position.y >= dropdown_top) {
             int index = static_cast<int>((event.position.y - dropdown_top) / 24.0f);
             if (index >= 0 && index < static_cast<int>(items_.size())) {
-                // Skip separators
                 const auto& item = items_[static_cast<size_t>(index)];
                 if (item.size() < 3 || item.substr(0, 3) != "---") {
                     set_selected(index);
                 }
             }
         }
-        open_ = false;
-        set_overflow(Overflow::hidden);
+        close_dropdown();
     } else {
-        set_overflow(Overflow::visible);
-        open_ = true;
+        open_dropdown();
     }
 }
 
@@ -132,18 +178,15 @@ bool ComboBox::on_key_event(const KeyEvent& event) {
         return true;
     }
     if (event.key == KeyCode::escape && open_) {
-        open_ = false;
-        set_overflow(Overflow::hidden);
+        close_dropdown();
         return true;
     }
     if ((event.key == KeyCode::enter || event.key == KeyCode::space) && !open_) {
-        set_overflow(Overflow::visible);
-        open_ = true;
+        open_dropdown();
         return true;
     }
     if ((event.key == KeyCode::enter || event.key == KeyCode::space) && open_) {
-        open_ = false;
-        set_overflow(Overflow::hidden);
+        close_dropdown();
         return true;
     }
     return false;
