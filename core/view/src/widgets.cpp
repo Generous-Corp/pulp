@@ -183,7 +183,7 @@ void Knob::paint(canvas::Canvas& canvas) {
         canvas.set_fill_color({text_color.r, text_color.g, text_color.b, text_color.a});
         canvas.set_font("Inter", 10.0f);
         canvas.set_text_align(canvas::TextAlign::center);
-        canvas.fill_text(label_, cx, b.height - 2);
+        canvas.fill_text(label_, cx, b.height - 6);
     }
 
     // Value text in center
@@ -252,9 +252,9 @@ void Fader::paint(canvas::Canvas& canvas) {
         canvas.set_font("Inter", 10.0f);
         canvas.set_text_align(canvas::TextAlign::center);
         if (vert) {
-            canvas.fill_text(label_, b.width * 0.5f, b.height - 2);
+            canvas.fill_text(label_, b.width * 0.5f, b.height - 6);
         } else {
-            canvas.fill_text(label_, b.width * 0.5f, b.height - 2);
+            canvas.fill_text(label_, b.width * 0.5f, b.height - 6);
         }
     }
 }
@@ -303,7 +303,7 @@ void Toggle::paint(canvas::Canvas& canvas) {
         canvas.set_fill_color({text_color.r, text_color.g, text_color.b, text_color.a});
         canvas.set_font("Inter", 10.0f);
         canvas.set_text_align(canvas::TextAlign::center);
-        canvas.fill_text(label_, b.width * 0.5f, b.height - 2);
+        canvas.fill_text(label_, b.width * 0.5f, b.height - 6);
     }
 }
 
@@ -491,7 +491,7 @@ void XYPad::paint(canvas::Canvas& canvas) {
 
     if (!x_label_.empty()) {
         canvas.set_text_align(canvas::TextAlign::center);
-        canvas.fill_text(x_label_, b.width * 0.5f, b.height - 2);
+        canvas.fill_text(x_label_, b.width * 0.5f, b.height - 6);
     }
     if (!y_label_.empty()) {
         canvas.set_text_align(canvas::TextAlign::left);
