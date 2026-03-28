@@ -12,6 +12,11 @@
 #include "include/core/SkTypeface.h"
 #include "include/core/SkTextBlob.h"
 #include "include/core/SkRRect.h"
+#include "include/core/SkColorSpace.h"
+#include "include/core/SkImage.h"
+#include "include/core/SkPixmap.h"
+#include "include/core/SkData.h"
+#include "include/effects/SkRuntimeEffect.h"
 
 // Platform font manager
 #ifdef __APPLE__
@@ -194,6 +199,143 @@ Canvas::TextMetrics SkiaCanvas::measure_text_full(const std::string& text) {
     m.descent = sk_metrics.fDescent;  // Skia descent is positive
     m.line_height = -sk_metrics.fAscent + sk_metrics.fDescent + sk_metrics.fLeading;
     return m;
+}
+
+// ── GPU Waveform (SkRuntimeEffect shader-driven) ────────────────────────────
+
+// SkSL shader: samples waveform from a 1D texture, computes SDF distance
+// to the curve for anti-aliased line + fill rendering.
+static const char* kWaveformSkSL = R"(
+    uniform shader waveformData;
+    uniform float2 resolution;
+    uniform float thickness;
+    uniform float fillCenter;
+    uniform half4 lineColor;
+    uniform half4 fillColor;
+
+    // Sample the waveform value at normalized x (0..1), returns -1..1
+    float sampleWave(float x) {
+        float texX = clamp(x, 0.0, 1.0) * resolution.x;
+        // Sample red channel from the data texture
+        return waveformData.eval(float2(texX + 0.5, 0.5)).r * 2.0 - 1.0;
+    }
+
+    // Minimum distance from point p to line segment a->b
+    float segmentDist(float2 p, float2 a, float2 b) {
+        float2 ab = b - a;
+        float t = clamp(dot(p - a, ab) / dot(ab, ab), 0.0, 1.0);
+        float2 closest = a + t * ab;
+        return length(p - closest);
+    }
+
+    half4 main(float2 coord) {
+        float2 uv = coord / resolution;
+        float cy = fillCenter;
+        float halfH = resolution.y * 0.5;
+
+        // Sample nearby waveform points for local line segments
+        float pixelWidth = 1.0 / resolution.x;
+        float minDist = 1e6;
+
+        // Check 4 segments around current x for smooth coverage
+        for (int i = -2; i <= 2; i++) {
+            float x0 = uv.x + float(i) * pixelWidth;
+            float x1 = x0 + pixelWidth;
+            float y0 = cy - sampleWave(x0) * 0.5;
+            float y1 = cy - sampleWave(x1) * 0.5;
+            float2 a = float2(x0 * resolution.x, y0 * resolution.y);
+            float2 b = float2(x1 * resolution.x, y1 * resolution.y);
+            float d = segmentDist(coord, a, b);
+            minDist = min(minDist, d);
+        }
+
+        // Line: SDF anti-aliased edge
+        float lineAlpha = 1.0 - smoothstep(thickness * 0.5 - 0.5, thickness * 0.5 + 0.5, minDist);
+
+        // Fill: area between waveform and center line
+        float waveY = cy - sampleWave(uv.x) * 0.5;
+        float centerY = cy;
+        float fillAlpha = 0.0;
+        if ((uv.y >= min(waveY, centerY) - pixelWidth) &&
+            (uv.y <= max(waveY, centerY) + pixelWidth)) {
+            // Slope-aware edge softening
+            float edge = min(abs(uv.y - waveY), abs(uv.y - centerY));
+            fillAlpha = 1.0 - smoothstep(0.0, pixelWidth * 2.0, edge);
+            // Full fill in interior
+            if (uv.y > min(waveY, centerY) + pixelWidth &&
+                uv.y < max(waveY, centerY) - pixelWidth) {
+                fillAlpha = 1.0;
+            }
+        }
+
+        half4 result = fillColor * half(fillAlpha);
+        result = result + lineColor * half(lineAlpha) * (1.0 - result.a);
+        return result;
+    }
+)";
+
+void SkiaCanvas::draw_waveform(const float* samples, size_t count,
+                                float x, float y, float width, float height,
+                                const WaveformStyle& style) {
+    if (!canvas_ || count < 2) return;
+
+    // Try SkRuntimeEffect shader path
+    static auto effectResult = SkRuntimeEffect::MakeForShader(SkString(kWaveformSkSL));
+    if (!effectResult.effect) {
+        // Fallback to base class CPU implementation
+        Canvas::draw_waveform(samples, count, x, y, width, height, style);
+        return;
+    }
+
+    auto effect = effectResult.effect;
+
+    // Pack sample data into an RGBA8 texture (store normalized 0..1 in R channel)
+    // Each sample maps from [-1,1] to [0,1] for storage
+    std::vector<uint8_t> texData(count * 4);
+    for (size_t i = 0; i < count; ++i) {
+        uint8_t val = static_cast<uint8_t>(std::clamp((samples[i] + 1.0f) * 0.5f, 0.0f, 1.0f) * 255.0f);
+        texData[i * 4 + 0] = val;  // R
+        texData[i * 4 + 1] = 0;
+        texData[i * 4 + 2] = 0;
+        texData[i * 4 + 3] = 255;
+    }
+
+    SkImageInfo texInfo = SkImageInfo::Make(static_cast<int>(count), 1,
+                                            kRGBA_8888_SkColorType, kPremul_SkAlphaType);
+    auto texImage = SkImages::RasterFromPixmapCopy(
+        SkPixmap(texInfo, texData.data(), count * 4));
+
+    if (!texImage) {
+        Canvas::draw_waveform(samples, count, x, y, width, height, style);
+        return;
+    }
+
+    // Create child shader from the texture
+    auto texShader = texImage->makeShader(SkTileMode::kClamp, SkTileMode::kClamp,
+                                          SkSamplingOptions(SkFilterMode::kLinear));
+
+    // Set uniforms
+    SkRuntimeShaderBuilder builder(effect);
+    builder.child("waveformData") = texShader;
+    builder.uniform("resolution") = SkV2{width, height};
+    builder.uniform("thickness") = style.line_thickness;
+    builder.uniform("fillCenter") = style.fill_center;
+    builder.uniform("lineColor") = SkV4{
+        style.line_color.r / 255.0f, style.line_color.g / 255.0f,
+        style.line_color.b / 255.0f, style.line_color.a / 255.0f};
+    builder.uniform("fillColor") = SkV4{
+        style.fill_color.r / 255.0f, style.fill_color.g / 255.0f,
+        style.fill_color.b / 255.0f, style.fill_color.a / 255.0f};
+
+    auto shader = builder.makeShader();
+    if (!shader) {
+        Canvas::draw_waveform(samples, count, x, y, width, height, style);
+        return;
+    }
+
+    SkPaint paint;
+    paint.setShader(std::move(shader));
+    canvas_->drawRect(SkRect::MakeXYWH(x, y, width, height), paint);
 }
 
 } // namespace pulp::canvas

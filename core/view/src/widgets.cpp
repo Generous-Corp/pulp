@@ -452,30 +452,17 @@ void WaveformView::paint(canvas::Canvas& canvas) {
     float cy = b.height * 0.5f;
     canvas.stroke_line(0, cy, b.width, cy);
 
-    // Waveform
+    // GPU-accelerated waveform via draw_waveform (SDF anti-aliased)
     auto wave_color = resolve_color("accent.primary", canvas::Color::rgba(100, 180, 250));
-    canvas.set_stroke_color(wave_color);
-    canvas.set_line_width(1.0f);
+    canvas::Canvas::WaveformStyle style;
+    style.line_color = wave_color;
+    style.fill_color = {wave_color.r, wave_color.g, wave_color.b, 40};
+    style.line_thickness = 2.0f;
+    style.show_fill = true;
+    style.fill_center = 0.5f;
 
-    float samples_per_pixel = static_cast<float>(samples_.size()) / b.width;
-
-    for (float px = 0; px < b.width - 1; px += 1.0f) {
-        size_t idx0 = static_cast<size_t>(px * samples_per_pixel);
-        size_t idx1 = static_cast<size_t>((px + 1) * samples_per_pixel);
-        if (idx0 >= samples_.size()) break;
-        if (idx1 >= samples_.size()) idx1 = samples_.size() - 1;
-
-        // Find min/max in this pixel's range for accurate display
-        float min_val = samples_[idx0], max_val = samples_[idx0];
-        for (size_t i = idx0; i <= idx1; ++i) {
-            min_val = std::min(min_val, samples_[i]);
-            max_val = std::max(max_val, samples_[i]);
-        }
-
-        float y0 = cy - min_val * cy;
-        float y1 = cy - max_val * cy;
-        canvas.stroke_line(px, y0, px, y1);
-    }
+    canvas.draw_waveform(samples_.data(), samples_.size(),
+                         0, 0, b.width, b.height, style);
 }
 
 // ── SpectrumView ─────────────────────────────────────────────────────────────

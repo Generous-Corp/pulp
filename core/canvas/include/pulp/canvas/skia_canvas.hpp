@@ -60,6 +60,9 @@ public:
     void fill_text(const std::string& text, float x, float y) override;
     float measure_text(const std::string& text) override;
     TextMetrics measure_text_full(const std::string& text) override;
+    void draw_waveform(const float* samples, size_t count,
+                       float x, float y, float width, float height,
+                       const WaveformStyle& style) override;
 
 private:
     SkCanvas* canvas_;        // Non-owning — owned by surface or caller

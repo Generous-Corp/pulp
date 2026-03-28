@@ -139,6 +139,37 @@ public:
         return m;
     }
 
+    // ── Waveform (GPU-accelerated) ─────────────────────────────────────
+    /// Draw a waveform using GPU shader (SDF anti-aliased line + fill).
+    /// Samples are normalized -1 to 1. Default implementation falls back to polyline.
+    struct WaveformStyle {
+        Color line_color{100, 180, 250, 255};
+        Color fill_color{100, 180, 250, 40};
+        float line_thickness = 1.5f;
+        bool show_fill = true;
+        float fill_center = 0.5f;  ///< 0=top, 0.5=center, 1=bottom
+    };
+
+    virtual void draw_waveform(const float* samples, size_t count,
+                               float x, float y, float width, float height,
+                               const WaveformStyle& style) {
+        // CPU fallback: connected line strip
+        if (count < 2) return;
+        set_stroke_color(style.line_color);
+        set_line_width(style.line_thickness);
+        float cy = y + height * style.fill_center;
+        float half_h = height * 0.5f;
+        float prev_x = x;
+        float prev_y = cy - samples[0] * half_h;
+        for (size_t i = 1; i < count; ++i) {
+            float sx = x + (static_cast<float>(i) / static_cast<float>(count - 1)) * width;
+            float sy = cy - samples[i] * half_h;
+            stroke_line(prev_x, prev_y, sx, sy);
+            prev_x = sx;
+            prev_y = sy;
+        }
+    }
+
 protected:
     float font_size_ = 14.0f;  ///< Current font size (set by set_font)
 };
