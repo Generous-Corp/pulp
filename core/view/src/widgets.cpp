@@ -150,6 +150,23 @@ void Label::paint(canvas::Canvas& canvas) {
     }
 
     if (!multi_line_) {
+        // Text overflow ellipsis: truncate with "..." if text exceeds bounds
+        if (text_overflow_ellipsis() && text_align_ == LabelAlign::left) {
+            float avail = bounds().width;
+            float text_w = canvas.measure_text(text_);
+            if (text_w > avail && text_.size() > 3) {
+                // Binary search for max chars that fit with "..."
+                std::string truncated = text_;
+                while (truncated.size() > 1) {
+                    truncated.pop_back();
+                    float w = canvas.measure_text(truncated + "...");
+                    if (w <= avail) {
+                        canvas.fill_text(truncated + "...", x, baseline_y);
+                        return;  // done, painted truncated
+                    }
+                }
+            }
+        }
         canvas.fill_text(text_, x, baseline_y);
     } else {
         // Simple multi-line: split on \n, render each line

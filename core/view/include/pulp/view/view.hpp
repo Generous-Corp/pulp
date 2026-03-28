@@ -218,6 +218,19 @@ public:
     void set_overflow(Overflow o) { overflow_ = o; }
     Overflow overflow() const { return overflow_; }
 
+    /// Transform: scale (CSS transform: scale())
+    void set_scale(float s) { scale_ = s; }
+    float scale() const { return scale_; }
+
+    /// Text overflow: ellipsis (CSS text-overflow: ellipsis)
+    void set_text_overflow_ellipsis(bool e) { text_ellipsis_ = e; }
+    bool text_overflow_ellipsis() const { return text_ellipsis_; }
+
+    /// Cursor style hint (CSS cursor property)
+    enum class CursorStyle { default_, pointer, crosshair, text, grab, grabbing, not_allowed };
+    void set_cursor(CursorStyle c) { cursor_ = c; }
+    CursorStyle cursor() const { return cursor_; }
+
 private:
     Rect bounds_{};
     FlexStyle flex_{};
@@ -245,6 +258,9 @@ private:
     Overflow overflow_ = Overflow::hidden;
     BoxShadow shadow_{};
     bool has_shadow_ = false;
+    float scale_ = 1.0f;
+    bool text_ellipsis_ = false;
+    CursorStyle cursor_ = CursorStyle::default_;
 };
 
 } // namespace pulp::view

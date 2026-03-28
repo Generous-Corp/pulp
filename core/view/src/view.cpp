@@ -10,6 +10,15 @@ void View::paint_all(canvas::Canvas& canvas) {
     canvas.save();
     canvas.translate(bounds_.x, bounds_.y);
 
+    // CSS transform: scale() — scale around center
+    if (scale_ != 1.0f) {
+        float cx = bounds_.width * 0.5f;
+        float cy = bounds_.height * 0.5f;
+        canvas.translate(cx, cy);
+        canvas.scale(scale_, scale_);
+        canvas.translate(-cx, -cy);
+    }
+
     // Clip only if overflow is hidden (default)
     if (overflow_ == Overflow::hidden)
         canvas.clip_rect(0, 0, bounds_.width, bounds_.height);

@@ -887,6 +887,52 @@ void WidgetBridge::register_api() {
         return choc::value::Value();
     });
 
+    // setTransitionDuration(id, seconds) — CSS transition duration for animated property changes
+    engine_.register_function("setTransitionDuration", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto dur = static_cast<float>(args.get<double>(1, 0.15));
+        // Store transition duration on the view's theme as a dimension token
+        auto* v = id.empty() ? &root_ : widget(id);
+        if (v) {
+            auto theme = v->theme();
+            theme.dimensions["transition.duration"] = dur;
+            v->set_theme(theme);
+        }
+        return choc::value::Value();
+    });
+
+    // setScale(id, scale) — CSS transform: scale()
+    engine_.register_function("setScale", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto s = static_cast<float>(args.get<double>(1, 1.0));
+        auto* v = id.empty() ? &root_ : widget(id);
+        if (v) v->set_scale(s);
+        return choc::value::Value();
+    });
+
+    // setTextOverflow(id, "ellipsis"|"clip") — CSS text-overflow
+    engine_.register_function("setTextOverflow", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto mode = args.get<std::string>(1, "clip");
+        auto* v = id.empty() ? &root_ : widget(id);
+        if (v) v->set_text_overflow_ellipsis(mode == "ellipsis");
+        return choc::value::Value();
+    });
+
+    // setCursor(id, "pointer"|"crosshair"|"text"|"default") — CSS cursor
+    engine_.register_function("setCursor", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto c = args.get<std::string>(1, "default");
+        auto* v = id.empty() ? &root_ : widget(id);
+        if (!v) return choc::value::Value();
+        if (c == "pointer") v->set_cursor(View::CursorStyle::pointer);
+        else if (c == "crosshair") v->set_cursor(View::CursorStyle::crosshair);
+        else if (c == "text") v->set_cursor(View::CursorStyle::text);
+        else if (c == "grab") v->set_cursor(View::CursorStyle::grab);
+        else v->set_cursor(View::CursorStyle::default_);
+        return choc::value::Value();
+    });
+
     // setBoxShadow(id, offsetX, offsetY, blur, spread, color)
     engine_.register_function("setBoxShadow", [this, parseHexColor](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
