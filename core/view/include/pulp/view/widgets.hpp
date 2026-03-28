@@ -47,6 +47,8 @@ public:
     void set_value(float v) { value_ = std::clamp(v, 0.0f, 1.0f); }
     float value() const { return value_; }
 
+    void set_default_value(float v) { default_value_ = std::clamp(v, 0.0f, 1.0f); }
+
     void set_label(std::string text) { label_ = std::move(text); }
     const std::string& label() const { return label_; }
 
@@ -57,6 +59,7 @@ public:
     std::function<void(float)> on_change;
 
     void paint(canvas::Canvas& canvas) override;
+    void on_mouse_event(const MouseEvent& event) override;
     void on_mouse_enter() override;
     void on_mouse_leave() override;
     void on_mouse_down(Point pos) override;
@@ -72,6 +75,7 @@ public:
 
 private:
     float value_ = 0.0f;
+    float default_value_ = 0.5f;
     std::string label_;
     std::function<std::string(float)> format_;
     ValueAnimation hover_glow_{0.0f};

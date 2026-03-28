@@ -47,11 +47,12 @@ public:
     void on_mouse_event(const MouseEvent& event) override;
     bool on_key_event(const KeyEvent& event) override;
 
+    bool is_open() const { return open_; }
+
 private:
     std::vector<std::string> items_;
     int selected_ = 0;
     bool open_ = false;
-    float closed_height_ = 0;  ///< Original height before dropdown expansion
     static const std::string empty_string_;
 };
 

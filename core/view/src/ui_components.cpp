@@ -28,7 +28,7 @@ void ComboBox::paint(canvas::Canvas& canvas) {
     auto border_c = resolve_color("control.border", canvas::Color::rgba(80, 80, 100));
     auto text_c = resolve_color("text.primary", canvas::Color::rgba(220, 220, 230));
 
-    float base_h = closed_height_ > 0 ? closed_height_ : b.height;
+    float base_h = b.height;
 
     // Background
     canvas.set_fill_color(bg);
@@ -99,31 +99,27 @@ void ComboBox::paint(canvas::Canvas& canvas) {
 void ComboBox::on_mouse_event(const MouseEvent& event) {
     if (!event.is_down) return;
     auto b = local_bounds();
-    float base_h = closed_height_ > 0 ? closed_height_ : 26.0f;
 
     if (open_) {
-        float dropdown_top = base_h + 2;
+        float dropdown_top = b.height + 2;
         if (event.position.y >= dropdown_top) {
             int index = static_cast<int>((event.position.y - dropdown_top) / 24.0f);
             if (index >= 0 && index < static_cast<int>(items_.size())) {
-                set_selected(index);
+                // Skip separators
+                const auto& item = items_[static_cast<size_t>(index)];
+                if (item.size() < 3 || item.substr(0, 3) != "---") {
+                    set_selected(index);
+                }
             }
         }
         open_ = false;
-        // Restore original height
-        flex().preferred_height = closed_height_;
         set_overflow(Overflow::hidden);
-        if (parent()) parent()->layout_children();
     } else {
-        // Save closed height and expand
-        closed_height_ = b.height > 0 ? b.height : 26.0f;
-        float dropdown_h = static_cast<float>(items_.size()) * 24.0f;
-        flex().preferred_height = closed_height_ + 2 + dropdown_h;
         set_overflow(Overflow::visible);
         open_ = true;
-        if (parent()) parent()->layout_children();
     }
 }
+
 
 bool ComboBox::on_key_event(const KeyEvent& event) {
     if (!event.is_down) return false;
@@ -137,28 +133,17 @@ bool ComboBox::on_key_event(const KeyEvent& event) {
     }
     if (event.key == KeyCode::escape && open_) {
         open_ = false;
-        flex().preferred_height = closed_height_;
         set_overflow(Overflow::hidden);
-        if (parent()) parent()->layout_children();
         return true;
     }
     if ((event.key == KeyCode::enter || event.key == KeyCode::space) && !open_) {
-        // Open dropdown
-        auto b = local_bounds();
-        closed_height_ = b.height > 0 ? b.height : 26.0f;
-        float dropdown_h = static_cast<float>(items_.size()) * 24.0f;
-        flex().preferred_height = closed_height_ + 2 + dropdown_h;
         set_overflow(Overflow::visible);
         open_ = true;
-        if (parent()) parent()->layout_children();
         return true;
     }
     if ((event.key == KeyCode::enter || event.key == KeyCode::space) && open_) {
-        // Select current and close
         open_ = false;
-        flex().preferred_height = closed_height_;
         set_overflow(Overflow::hidden);
-        if (parent()) parent()->layout_children();
         return true;
     }
     return false;

@@ -16,6 +16,15 @@ void Knob::on_mouse_leave() {
     hover_glow_.animate_to(0.0f, dur, easing::ease_out_quad);
 }
 
+void Knob::on_mouse_event(const MouseEvent& event) {
+    if (!event.is_down) return;
+    // Double-click: reset to default (0.5)
+    if (event.click_count >= 2) {
+        value_ = default_value_;
+        if (on_change) on_change(value_);
+    }
+}
+
 void Knob::on_mouse_down(Point pos) {
     drag_start_y_ = pos.y;
     drag_start_value_ = value_;

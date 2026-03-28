@@ -177,7 +177,18 @@ View* View::hit_test(Point local_point) {
 
         Point child_point = {local_point.x - child->bounds_.x,
                             local_point.y - child->bounds_.y};
-        if (child->local_bounds().contains(child_point)) {
+
+        // For overflow:visible, expand the hit area to include content
+        // that extends beyond the child's bounds (e.g., dropdown menus)
+        bool in_bounds = child->local_bounds().contains(child_point);
+        if (!in_bounds && child->overflow() == Overflow::visible) {
+            // Allow hit testing up to 500px below the child (for dropdowns)
+            auto lb = child->local_bounds();
+            in_bounds = child_point.x >= lb.x && child_point.x <= lb.x + lb.width &&
+                       child_point.y >= lb.y && child_point.y <= lb.y + lb.height + 500;
+        }
+
+        if (in_bounds) {
             auto* hit = child->hit_test(child_point);
             if (hit) return hit;
         }
