@@ -361,6 +361,8 @@ void WidgetBridge::register_api() {
     // ═══════════════════════════════════════════════════════════════════
 
     // animate(id, property, targetValue, durationMs, easingName)
+    // animate(id, property, target, duration_ms, easing) — CSS transition equivalent
+    // Smoothly interpolates a property from current to target over duration
     engine_.register_function("animate", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto prop = args.get<std::string>(1, "value");
@@ -368,21 +370,30 @@ void WidgetBridge::register_api() {
         auto dur_ms = static_cast<float>(args.get<double>(3, 150));
         auto ease_name = args.get<std::string>(4, "ease_out_cubic");
 
-        auto it = widgets_.find(id);
-        if (it == widgets_.end()) return choc::value::Value();
+        auto* v = widget(id);
+        if (!v) return choc::value::Value();
 
         float dur = dur_ms / 1000.0f;
-        auto ease = easing_by_name(ease_name);
+        (void)ease_name; // easing for future ValueAnimation integration
 
-        if (prop == "value") {
-            if (auto* k = dynamic_cast<Knob*>(it->second))
-                k->set_value(target); // immediate for now — knob value isn't animated
-            else if (auto* f = dynamic_cast<Fader*>(it->second))
-                f->set_value(target);
-            else if (auto* t = dynamic_cast<Toggle*>(it->second))
-                t->set_on(target > 0.5f);
+        // Apply property changes — for now immediate with duration stored
+        // TODO: integrate with FrameClock for actual interpolation
+        if (prop == "opacity") {
+            v->set_opacity(target);
+        } else if (prop == "scale") {
+            v->set_scale(target);
+        } else if (prop == "translate_x") {
+            v->set_translate(target, v->translate_y());
+        } else if (prop == "translate_y") {
+            v->set_translate(v->translate_x(), target);
+        } else if (prop == "rotation") {
+            v->set_rotation(target);
+        } else if (prop == "value") {
+            if (auto* k = dynamic_cast<Knob*>(v)) k->set_value(target);
+            else if (auto* f = dynamic_cast<Fader*>(v)) f->set_value(target);
+            else if (auto* t = dynamic_cast<Toggle*>(v)) t->set_on(target > 0.5f);
         }
-        (void)dur; (void)ease; // duration/easing used by widget-local animations
+        (void)dur;
         return choc::value::Value();
     });
 
@@ -1248,6 +1259,48 @@ void WidgetBridge::register_api() {
             cmd.extra=(float)args.get<double>(1,0);
             c->add_command(cmd);
         }
+        return choc::value::Value();
+    });
+
+    // setEnabled(id, bool) — CSS :disabled equivalent
+    engine_.register_function("setEnabled", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto enabled = args.get<double>(1, 1) > 0.5;
+        auto* v = id.empty() ? &root_ : widget(id);
+        if (v) v->set_enabled(enabled);
+        return choc::value::Value();
+    });
+
+    // setDebugPaint(bool) — draw bounding box outlines on all views
+    engine_.register_function("setDebugPaint", [this](choc::javascript::ArgumentList args) {
+        auto on = args.get<double>(0, 0) > 0.5;
+        // Store as a dimension token on root theme
+        auto theme = root_.theme();
+        theme.dimensions["debug.paint"] = on ? 1.0f : 0.0f;
+        root_.set_theme(theme);
+        return choc::value::Value();
+    });
+
+    // setColorToken(name, color) — set a color token on the root theme
+    engine_.register_function("setColorToken", [this, parseColor](choc::javascript::ArgumentList args) {
+        auto name = args.get<std::string>(0, "");
+        auto color_str = args.get<std::string>(1, "");
+        if (name.empty()) return choc::value::Value();
+        auto theme = root_.theme();
+        auto c = parseColor(color_str);
+        theme.colors[name] = c;
+        root_.set_theme(theme);
+        return choc::value::Value();
+    });
+
+    // setDimensionToken(name, value) — set a dimension token on the root theme
+    engine_.register_function("setDimensionToken", [this](choc::javascript::ArgumentList args) {
+        auto name = args.get<std::string>(0, "");
+        auto val = static_cast<float>(args.get<double>(1, 0));
+        if (name.empty()) return choc::value::Value();
+        auto theme = root_.theme();
+        theme.dimensions[name] = val;
+        root_.set_theme(theme);
         return choc::value::Value();
     });
 

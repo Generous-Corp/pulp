@@ -143,6 +143,10 @@ public:
 
     bool focusable() const { return focusable_; }
     void set_focusable(bool f) { focusable_ = f; }
+
+    /// CSS :disabled equivalent — blocks input, reduces opacity
+    bool enabled() const { return enabled_; }
+    void set_enabled(bool e) { enabled_ = e; }
     bool has_focus() const { return has_focus_; }
     void set_focus(bool f) { has_focus_ = f; }
 
@@ -294,6 +298,7 @@ private:
     std::string access_value_;
     bool visible_ = true;
     bool focusable_ = false;
+    bool enabled_ = true;
     bool has_focus_ = false;
     bool hovered_ = false;
     FrameClock* frame_clock_ = nullptr;

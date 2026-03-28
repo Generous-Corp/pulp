@@ -11,6 +11,9 @@ void View::paint_all(canvas::Canvas& canvas) {
     canvas.save();
     canvas.translate(bounds_.x, bounds_.y);
 
+    // Disabled state: reduce opacity (CSS :disabled equivalent)
+    if (!enabled_) canvas.set_opacity(0.4f);
+
     // CSS transforms: translate, rotate, scale, skew — around transform-origin
     bool has_transform = (scale_ != 1.0f || rotation_deg_ != 0 ||
                           translate_x_ != 0 || translate_y_ != 0 ||
@@ -232,7 +235,7 @@ std::unique_ptr<View> View::remove_child(View* child) {
 }
 
 View* View::hit_test(Point local_point) {
-    if (!visible_) return nullptr;
+    if (!visible_ || !enabled_) return nullptr;
 
     // Check children in reverse order (topmost first)
     for (auto it = children_.rbegin(); it != children_.rend(); ++it) {
