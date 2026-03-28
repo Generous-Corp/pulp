@@ -48,6 +48,16 @@ public:
     void set_multi_line(bool ml) { multi_line_ = ml; }
     bool multi_line() const { return multi_line_; }
 
+    /// CSS text-transform: uppercase, lowercase, capitalize, none
+    enum class TextTransform { none, uppercase, lowercase, capitalize };
+    void set_text_transform(TextTransform t) { text_transform_ = t; }
+    TextTransform text_transform() const { return text_transform_; }
+
+    /// CSS text-decoration: none, underline, line-through, overline
+    enum class TextDecoration { none, underline, line_through, overline };
+    void set_text_decoration(TextDecoration d) { text_decoration_ = d; }
+    void set_text_decoration_color(canvas::Color c) { decoration_color_ = c; has_decoration_color_ = true; }
+
     void paint(canvas::Canvas& canvas) override;
 
     /// Intrinsic height based on font size and line height.
@@ -64,6 +74,10 @@ private:
     float line_height_ = 0;       ///< 0=auto (font_size * 1.4)
     LabelAlign text_align_ = LabelAlign::left;
     bool multi_line_ = false;
+    TextTransform text_transform_ = TextTransform::none;
+    TextDecoration text_decoration_ = TextDecoration::none;
+    canvas::Color decoration_color_{};
+    bool has_decoration_color_ = false;
 };
 
 // ── Knob ─────────────────────────────────────────────────────────────────────

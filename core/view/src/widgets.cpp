@@ -130,6 +130,23 @@ void Label::paint(canvas::Canvas& canvas) {
     canvas.set_fill_color({text_color.r, text_color.g, text_color.b, text_color.a});
     canvas.set_font("Inter", font_size_);
 
+    // Apply text-transform
+    std::string display_text = text_;
+    if (text_transform_ == TextTransform::uppercase) {
+        for (auto& ch : display_text) ch = static_cast<char>(std::toupper(static_cast<unsigned char>(ch)));
+    } else if (text_transform_ == TextTransform::lowercase) {
+        for (auto& ch : display_text) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+    } else if (text_transform_ == TextTransform::capitalize) {
+        bool cap_next = true;
+        for (auto& ch : display_text) {
+            if (cap_next && std::isalpha(static_cast<unsigned char>(ch))) {
+                ch = static_cast<char>(std::toupper(static_cast<unsigned char>(ch)));
+                cap_next = false;
+            }
+            if (ch == ' ') cap_next = true;
+        }
+    }
+
     // Text alignment
     float lh = line_height_ > 0 ? line_height_ : font_size_ * 1.4f;
     float baseline_y = bounds().height * 0.5f + font_size_ * 0.35f;
@@ -150,35 +167,52 @@ void Label::paint(canvas::Canvas& canvas) {
     }
 
     if (!multi_line_) {
-        // Text overflow ellipsis: truncate with "..." if text exceeds bounds
+        // Text overflow ellipsis
         if (text_overflow_ellipsis() && text_align_ == LabelAlign::left) {
             float avail = bounds().width;
-            float text_w = canvas.measure_text(text_);
-            if (text_w > avail && text_.size() > 3) {
-                // Binary search for max chars that fit with "..."
-                std::string truncated = text_;
+            float text_w = canvas.measure_text(display_text);
+            if (text_w > avail && display_text.size() > 3) {
+                std::string truncated = display_text;
                 while (truncated.size() > 1) {
                     truncated.pop_back();
                     float w = canvas.measure_text(truncated + "...");
                     if (w <= avail) {
                         canvas.fill_text(truncated + "...", x, baseline_y);
-                        return;  // done, painted truncated
+                        goto decoration;
                     }
                 }
             }
         }
-        canvas.fill_text(text_, x, baseline_y);
+        canvas.fill_text(display_text, x, baseline_y);
     } else {
-        // Simple multi-line: split on \n, render each line
-        float y = font_size_ * 0.85f;  // first line baseline
+        float y = font_size_ * 0.85f;
         size_t pos = 0;
-        while (pos < text_.size()) {
-            size_t nl = text_.find('\n', pos);
-            if (nl == std::string::npos) nl = text_.size();
-            canvas.fill_text(text_.substr(pos, nl - pos), x, y);
+        while (pos < display_text.size()) {
+            size_t nl = display_text.find('\n', pos);
+            if (nl == std::string::npos) nl = display_text.size();
+            canvas.fill_text(display_text.substr(pos, nl - pos), x, y);
             y += lh;
             pos = nl + 1;
         }
+    }
+
+    // Text decoration (underline, line-through, overline)
+    decoration:
+    if (text_decoration_ != TextDecoration::none) {
+        auto dec_color = has_decoration_color_ ? decoration_color_ : text_color;
+        canvas.set_stroke_color(dec_color);
+        canvas.set_line_width(1.0f);
+        float text_w = canvas.measure_text(display_text);
+        float draw_x = x;
+        if (text_align_ == LabelAlign::center) draw_x = x - text_w * 0.5f;
+        else if (text_align_ == LabelAlign::right) draw_x = x - text_w;
+
+        if (text_decoration_ == TextDecoration::underline)
+            canvas.stroke_line(draw_x, baseline_y + 2, draw_x + text_w, baseline_y + 2);
+        else if (text_decoration_ == TextDecoration::line_through)
+            canvas.stroke_line(draw_x, baseline_y - font_size_ * 0.2f, draw_x + text_w, baseline_y - font_size_ * 0.2f);
+        else if (text_decoration_ == TextDecoration::overline)
+            canvas.stroke_line(draw_x, baseline_y - font_size_ * 0.7f, draw_x + text_w, baseline_y - font_size_ * 0.7f);
     }
 }
 

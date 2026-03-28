@@ -1052,6 +1052,71 @@ void WidgetBridge::register_api() {
         return choc::value::Value();
     });
 
+    // setTextTransform(id, "uppercase"/"lowercase"/"capitalize"/"none") — CSS text-transform
+    engine_.register_function("setTextTransform", [this](choc::javascript::ArgumentList args) {
+        auto* v = widget(args.get<std::string>(0, ""));
+        auto t = args.get<std::string>(1, "none");
+        if (auto* l = dynamic_cast<Label*>(v)) {
+            if (t == "uppercase") l->set_text_transform(Label::TextTransform::uppercase);
+            else if (t == "lowercase") l->set_text_transform(Label::TextTransform::lowercase);
+            else if (t == "capitalize") l->set_text_transform(Label::TextTransform::capitalize);
+            else l->set_text_transform(Label::TextTransform::none);
+        }
+        return choc::value::Value();
+    });
+
+    // setTextDecoration(id, "underline"/"line-through"/"overline"/"none") — CSS text-decoration
+    engine_.register_function("setTextDecoration", [this](choc::javascript::ArgumentList args) {
+        auto* v = widget(args.get<std::string>(0, ""));
+        auto d = args.get<std::string>(1, "none");
+        if (auto* l = dynamic_cast<Label*>(v)) {
+            if (d == "underline") l->set_text_decoration(Label::TextDecoration::underline);
+            else if (d == "line-through") l->set_text_decoration(Label::TextDecoration::line_through);
+            else if (d == "overline") l->set_text_decoration(Label::TextDecoration::overline);
+            else l->set_text_decoration(Label::TextDecoration::none);
+        }
+        return choc::value::Value();
+    });
+
+    // setPosition(id, "static"/"relative"/"absolute"/"fixed") — CSS position
+    engine_.register_function("setPosition", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto pos = args.get<std::string>(1, "static");
+        auto* v = id.empty() ? &root_ : widget(id);
+        if (!v) return choc::value::Value();
+        if (pos == "relative") v->set_position(View::Position::relative);
+        else if (pos == "absolute") v->set_position(View::Position::absolute);
+        else if (pos == "fixed") v->set_position(View::Position::fixed);
+        else if (pos == "sticky") v->set_position(View::Position::sticky);
+        else v->set_position(View::Position::static_);
+        return choc::value::Value();
+    });
+
+    // setTop/setRight/setBottom/setLeft(id, px) — CSS positioning offsets
+    engine_.register_function("setTop", [this](choc::javascript::ArgumentList args) {
+        auto* v = widget(args.get<std::string>(0, "")); if (v) v->set_top(static_cast<float>(args.get<double>(1, 0)));
+        return choc::value::Value();
+    });
+    engine_.register_function("setRight", [this](choc::javascript::ArgumentList args) {
+        auto* v = widget(args.get<std::string>(0, "")); if (v) v->set_right(static_cast<float>(args.get<double>(1, 0)));
+        return choc::value::Value();
+    });
+    engine_.register_function("setBottom", [this](choc::javascript::ArgumentList args) {
+        auto* v = widget(args.get<std::string>(0, "")); if (v) v->set_bottom(static_cast<float>(args.get<double>(1, 0)));
+        return choc::value::Value();
+    });
+    engine_.register_function("setLeft", [this](choc::javascript::ArgumentList args) {
+        auto* v = widget(args.get<std::string>(0, "")); if (v) v->set_left(static_cast<float>(args.get<double>(1, 0)));
+        return choc::value::Value();
+    });
+
+    // setZIndex(id, n) — CSS z-index
+    engine_.register_function("setZIndex", [this](choc::javascript::ArgumentList args) {
+        auto* v = widget(args.get<std::string>(0, ""));
+        if (v) v->set_z_index(static_cast<int>(args.get<double>(1, 0)));
+        return choc::value::Value();
+    });
+
     // setTransitionDuration(id, seconds) — CSS transition duration for animated property changes
     engine_.register_function("setTransitionDuration", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");

@@ -219,6 +219,18 @@ public:
     /// Global click callback (fires on any view click with widget id). Set on root.
     std::function<void(const std::string& id, uint16_t modifiers)> on_global_click;
 
+    /// CSS position property
+    enum class Position { static_, relative, absolute, fixed, sticky };
+    void set_position(Position p) { position_ = p; }
+    Position position() const { return position_; }
+
+    void set_top(float v) { top_ = v; has_top_ = true; }
+    void set_right(float v) { right_ = v; has_right_ = true; }
+    void set_bottom(float v) { bottom_ = v; has_bottom_ = true; }
+    void set_left(float v) { left_ = v; has_left_ = true; }
+    void set_z_index(int z) { z_index_ = z; }
+    int z_index() const { return z_index_; }
+
     /// Overflow mode
     enum class Overflow { hidden, visible };
     void set_overflow(Overflow o) { overflow_ = o; }
@@ -294,6 +306,10 @@ private:
     float border_width_ = 0;
     float corner_radius_ = 0;
     bool has_border_ = false;
+    Position position_ = Position::static_;
+    float top_ = 0, right_ = 0, bottom_ = 0, left_ = 0;
+    bool has_top_ = false, has_right_ = false, has_bottom_ = false, has_left_ = false;
+    int z_index_ = 0;
     Overflow overflow_ = Overflow::hidden;
     BoxShadow shadow_{};
     bool has_shadow_ = false;
