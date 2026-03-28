@@ -35,13 +35,14 @@ Last updated: 2026-03-26 (647 tests, 8 plugin examples + 3 apps, PHASES 0-20 + A
 | 14 | Core UI Components | **Complete** | Input events, TextEditor, ComboBox, TabPanel, ListBox, ScrollView, Tooltip, ProgressBar, CallOutBox, Modal, PresetManager, AppFramework, DesignExport, ParamAttachment |
 | 15 | Windows Platform | **Mostly Complete** | WASAPI, Win32 MIDI, NSIS installer, CI, platform guide. Signing stubs only. No platform UI (clipboard/file dialog). VM validation pending. |
 | 16 | Linux Platform | **Mostly Complete** | ALSA, JACK, ALSA MIDI, LV2, CI, platform guide, 540/540 on VM. Platform UI stubs (clipboard). Accessibility stubs. |
-| 21 | View System Foundation | **In Progress** | Fix keyboard input, Panel widget, ComboBox popup, ScrollView, JS canvas drawing. Branch: phase/ai-designer |
-| 22 | Design Tool | **Planned** | Three-panel design app built on Phase 21. Color picker, AI chat, export/import. All JS-defined, hot-reloadable. |
+| 21 | View System Foundation | **Complete** | Keyboard input, Panel widget, ComboBox fix, ScrollView, CanvasWidget. 24 new tests on main. |
+| 21.5 | W3C Standards Parity | **In Progress** | Full W3C Flexbox L1 + Box Model L3 + Color L4 + Overflow L3 + Graphics extensions. 3 phases: Critical (~9d), DX (~17d), Advanced (~22d). Specs: planning/w3c-standards-coverage-map.md, planning/css-flexbox-parity-spec.md |
+| 22 | Design Tool Parity | **In Progress** | Achieving 1:1 feature parity with ai-style-designer HTML. 5 sub-phases: Layout/Structure, Center Preview, Left Token Browser, Right Inspector+Chat, Interactions+Polish. Branch: phase/design-tool-v2. Ref: planning/ralph-loop-prompt-11.md |
 | 23 | Plugin Preview | **Planned** | Load real plugin UIs in design tool. Parameter connection, side-by-side theme comparison. |
 | 24 | Visual Editor | **Planned** | Unlock canvas, drag/resize widgets, snapping, grouping, code generation from layout changes. |
 | 25 | Design HUD | **Planned** | Floating color/chat panels that attach to any running plugin. Live token editing on your actual plugin UI without the full design tool. |
 
-## Tests: 647 pass (macOS; 540/540 validated on Linux VM; webview test excluded when PULP_BUILD_WEBVIEW=OFF)
+## Tests: 725 pass (macOS; AudioWorkgroup timeout is known flaky — exclude with --exclude-regex AudioWorkgroup)
 
 ### Loop 8 Gap Closures (2026-03-26)
 - [x] CI: pluginval installed in validate.yml, runs against VST3 bundles at strictness 5
