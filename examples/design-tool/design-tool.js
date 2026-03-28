@@ -285,13 +285,17 @@ setFlex("center-panel", "padding", 20);
 setFlex("center-panel", "gap", 12);
 setBackground("center-panel", APP_BG);
 
-// Preview content area (flush to top, no fake title bar)
-createCol("preview-area", "center-panel");
-setFlex("preview-area", "flex_grow", 1);
+// Preview content area (scrollable, flush to top)
+createScrollView("preview-scroll", "center-panel");
+setFlex("preview-scroll", "flex_grow", 1);
+setBackground("preview-scroll", APP_PANEL);
+setBorder("preview-scroll", APP_BORDER, 1, 4);
+setScrollContentSize("preview-scroll", 500, 1400);
+
+createCol("preview-area", "preview-scroll");
+setFlex("preview-area", "height", 1400);
 setFlex("preview-area", "padding", 12);
 setFlex("preview-area", "gap", 10);
-setBackground("preview-area", APP_PANEL);
-setBorder("preview-area", APP_BORDER, 1, 4);
 
 // Foundations section: bg swatches + text hierarchy
 createLabel("foundations-header", "Foundations", "preview-area");
@@ -581,6 +585,199 @@ setFlex("card-4", "padding", 8);
 createLabel("card-4-label", "Error", "card-4");
 setFontSize("card-4-label", 10);
 setFlex("card-4-label", "height", 14);
+
+// ── Progress + Spinner ───────────────────────────────────────────
+createRow("progress-row", "preview-area");
+setFlex("progress-row", "gap", 12);
+setFlex("progress-row", "height", 24);
+setFlex("progress-row", "align_items", "center");
+
+createProgress("prog1", "progress-row");
+setFlex("prog1", "flex_grow", 1);
+setFlex("prog1", "height", 6);
+setProgress("prog1", 0.65);
+
+createLabel("spinner-label", "\u25CB Loading...", "progress-row");
+setFontSize("spinner-label", 10);
+setTextColor("spinner-label", APP_TEXT_DIM);
+setFlex("spinner-label", "width", 80);
+
+// ── Tab Bar (General / Audio / MIDI / About) ─────────────────────
+createLabel("tabs-header", "Tabs", "preview-area");
+setFontSize("tabs-header", 11);
+setTextColor("tabs-header", APP_TEXT_DIM);
+
+createRow("tab-bar-preview", "preview-area");
+setFlex("tab-bar-preview", "height", 30);
+setFlex("tab-bar-preview", "gap", 0);
+setFlex("tab-bar-preview", "align_items", "center");
+setBorder("tab-bar-preview", APP_BORDER, 1, 0);
+
+var tabNames = ["General", "Audio", "MIDI", "About"];
+for (var ti = 0; ti < tabNames.length; ti++) {
+    var tabId = "ptab-" + ti;
+    createCol(tabId, "tab-bar-preview");
+    setFlex(tabId, "flex_grow", 1);
+    setFlex(tabId, "height", 30);
+    setFlex(tabId, "justify_content", "center");
+    setFlex(tabId, "align_items", "center");
+
+    createLabel(tabId + "-l", tabNames[ti], tabId);
+    setFontSize(tabId + "-l", 11);
+    if (ti === 0) setTextColor(tabId + "-l", APP_ACCENT);
+    else setTextColor(tabId + "-l", APP_TEXT_DIM);
+
+    if (ti === 0) {
+        createCol(tabId + "-line", tabId);
+        setFlex(tabId + "-line", "height", 2);
+        setFlex(tabId + "-line", "flex_grow", 1);
+        setBackground(tabId + "-line", APP_ACCENT);
+    }
+}
+
+// Panel content area with divider
+createCol("panel-content", "preview-area");
+setFlex("panel-content", "height", 56);
+setFlex("panel-content", "padding", 8);
+setFlex("panel-content", "gap", 4);
+setBackground("panel-content", APP_PANEL);
+setBorder("panel-content", APP_BORDER, 1, 6);
+
+createLabel("panel-title", "Panel content area", "panel-content");
+setFontSize("panel-title", 11);
+
+createCol("panel-divider", "panel-content");
+setFlex("panel-divider", "height", 1);
+setBackground("panel-divider", APP_BORDER);
+
+createLabel("panel-sub", "With divider and secondary text", "panel-content");
+setFontSize("panel-sub", 10);
+setTextColor("panel-sub", APP_TEXT_DIM);
+
+// ── Overlays (Static Preview) ────────────────────────────────────
+createLabel("overlays-header", "Overlays", "preview-area");
+setFontSize("overlays-header", 11);
+setTextColor("overlays-header", APP_TEXT_DIM);
+
+createRow("overlay-row", "preview-area");
+setFlex("overlay-row", "gap", 8);
+setFlex("overlay-row", "height", 96);
+
+// Confirm Action dialog card
+createCol("dialog-card", "overlay-row");
+setFlex("dialog-card", "flex_grow", 1);
+setFlex("dialog-card", "padding", 8);
+setFlex("dialog-card", "gap", 4);
+setBackground("dialog-card", APP_PANEL);
+setBorder("dialog-card", APP_BORDER, 1, 8);
+
+createLabel("dialog-title", "Confirm Action", "dialog-card");
+setFontSize("dialog-title", 11);
+
+createLabel("dialog-msg", "Are you sure you want to delete this preset? This cannot be undone.", "dialog-card");
+setFontSize("dialog-msg", 9);
+setTextColor("dialog-msg", APP_TEXT_DIM);
+
+createRow("dialog-btns", "dialog-card");
+setFlex("dialog-btns", "gap", 6);
+setFlex("dialog-btns", "height", 22);
+setFlex("dialog-btns", "align_items", "center");
+setFlex("dialog-btns", "justify_content", "flex-end");
+
+createCol("dialog-cancel", "dialog-btns");
+setFlex("dialog-cancel", "width", 50);
+setFlex("dialog-cancel", "height", 20);
+setBorder("dialog-cancel", APP_BORDER, 1, 4);
+setFlex("dialog-cancel", "justify_content", "center");
+setFlex("dialog-cancel", "align_items", "center");
+createLabel("dialog-cancel-l", "Cancel", "dialog-cancel");
+setFontSize("dialog-cancel-l", 9);
+
+createCol("dialog-accept", "dialog-btns");
+setFlex("dialog-accept", "width", 50);
+setFlex("dialog-accept", "height", 20);
+setBackground("dialog-accept", APP_ACCENT);
+setBorder("dialog-accept", APP_ACCENT, 0, 4);
+setFlex("dialog-accept", "justify_content", "center");
+setFlex("dialog-accept", "align_items", "center");
+createLabel("dialog-accept-l", "Accept", "dialog-accept");
+setFontSize("dialog-accept-l", 9);
+
+// Context menu card
+createCol("ctx-menu", "overlay-row");
+setFlex("ctx-menu", "width", 120);
+setFlex("ctx-menu", "padding", 4);
+setFlex("ctx-menu", "gap", 0);
+setBackground("ctx-menu", APP_PANEL);
+setBorder("ctx-menu", APP_BORDER, 1, 6);
+
+var ctxItems = ["Copy", "Paste", "---", "Rename", "Delete"];
+for (var ci = 0; ci < ctxItems.length; ci++) {
+    if (ctxItems[ci] === "---") {
+        createCol("ctx-sep-" + ci, "ctx-menu");
+        setFlex("ctx-sep-" + ci, "height", 1);
+        setBackground("ctx-sep-" + ci, APP_BORDER);
+    } else {
+        var cid = "ctx-" + ci;
+        createRow(cid, "ctx-menu");
+        setFlex(cid, "height", 22);
+        setFlex(cid, "padding_left", 8);
+        setFlex(cid, "align_items", "center");
+        createLabel(cid + "-l", ctxItems[ci], cid);
+        setFontSize(cid + "-l", 11);
+        if (ctxItems[ci] === "Delete") setTextColor(cid + "-l", "#f38ba8");
+    }
+}
+
+// ── States ───────────────────────────────────────────────────────
+createLabel("states-header", "States", "preview-area");
+setFontSize("states-header", 11);
+setTextColor("states-header", APP_TEXT_DIM);
+
+createRow("states-row", "preview-area");
+setFlex("states-row", "gap", 6);
+setFlex("states-row", "height", 26);
+setFlex("states-row", "align_items", "center");
+
+var stateNames = ["Normal", "Hover", "Active", "Focus", "Disabled"];
+var stateBgs   = ["#3a3a4c", "#4a4a5c", APP_ACCENT, "#3a3a4c", "#2a2a36"];
+for (var si = 0; si < stateNames.length; si++) {
+    var sid = "state-" + si;
+    createCol(sid, "states-row");
+    setFlex(sid, "flex_grow", 1);
+    setFlex(sid, "height", 24);
+    setBackground(sid, stateBgs[si]);
+    setBorder(sid, si === 3 ? APP_ACCENT : APP_BORDER, 1, 4);
+    if (si === 4) setOpacity(sid, 0.5);
+    setFlex(sid, "justify_content", "center");
+    setFlex(sid, "align_items", "center");
+    createLabel(sid + "-l", stateNames[si], sid);
+    setFontSize(sid + "-l", 9);
+}
+
+// ── Effects ──────────────────────────────────────────────────────
+createLabel("effects-header", "Effects", "preview-area");
+setFontSize("effects-header", 11);
+setTextColor("effects-header", APP_TEXT_DIM);
+
+createRow("effects-row", "preview-area");
+setFlex("effects-row", "gap", 8);
+setFlex("effects-row", "height", 40);
+setFlex("effects-row", "align_items", "center");
+
+var effectNames = ["Shadow", "Glow", "Blur", "Gradient"];
+for (var ei = 0; ei < effectNames.length; ei++) {
+    var eid = "effect-" + ei;
+    createCol(eid, "effects-row");
+    setFlex(eid, "flex_grow", 1);
+    setFlex(eid, "height", 36);
+    setBackground(eid, APP_PANEL);
+    setBorder(eid, APP_BORDER, 1, 6);
+    setFlex(eid, "justify_content", "center");
+    setFlex(eid, "align_items", "center");
+    createLabel(eid + "-l", effectNames[ei], eid);
+    setFontSize(eid + "-l", 10);
+}
 
 // ── RIGHT PANEL (Inspector + Chat) ──────────────────────────────
 createCol("right-panel", "main-area");
