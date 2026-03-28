@@ -1,0 +1,23 @@
+#include <catch2/catch_test_macros.hpp>
+#include <pulp/format/headless.hpp>
+#include "{{HEADER_NAME}}"
+
+TEST_CASE("{{PLUGIN_NAME}} processes audio") {
+    pulp::format::HeadlessHost host({{NAMESPACE}}::create_{{FACTORY_NAME}});
+    host.prepare(48000, 512);
+
+    pulp::audio::Buffer<float> in(2, 512), out(2, 512);
+
+    for (std::size_t i = 0; i < 512; ++i) {
+        in.channel(0)[i] = 0.5f;
+        in.channel(1)[i] = 0.5f;
+    }
+
+    const float* in_ptrs[] = {in.channel(0).data(), in.channel(1).data()};
+    pulp::audio::BufferView<const float> iv(in_ptrs, 2, 512);
+    auto ov = out.view();
+    host.process(ov, iv);
+
+    // Pass-through: output should equal input
+    REQUIRE(out.channel(0)[0] == 0.5f);
+}

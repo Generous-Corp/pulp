@@ -3,10 +3,12 @@
 # Uses: Oscillator, Svf, Adsr, SmoothedValue, Gain
 
 # ── Tests ──────────────────────────────────────────────────────────────────
-add_executable(pulp-synth-test test_pulp_synth.cpp)
-target_link_libraries(pulp-synth-test PRIVATE pulp::format pulp::signal Catch2::Catch2WithMain)
-target_include_directories(pulp-synth-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-catch_discover_tests(pulp-synth-test)
+if(PULP_BUILD_TESTS)
+    add_executable(pulp-synth-test test_pulp_synth.cpp)
+    target_link_libraries(pulp-synth-test PRIVATE pulp::format pulp::signal Catch2::Catch2WithMain)
+    target_include_directories(pulp-synth-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    catch_discover_tests(pulp-synth-test)
+endif()
 
 # ── Plugin (CLAP only for now — add VST3/AU when validated) ──────────────
 pulp_add_plugin(PulpSynth

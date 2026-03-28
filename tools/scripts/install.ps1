@@ -1,0 +1,98 @@
+# Pulp CLI installer for Windows
+# Usage: irm https://generouscorp.com/pulp/install.ps1 | iex
+#
+# Environment variables:
+#   PULP_VERSION      — install a specific version (default: latest)
+#   PULP_INSTALL_DIR  — install directory (default: ~/.pulp/bin)
+
+$ErrorActionPreference = "Stop"
+
+# ── Configuration ────────────────────────────────────────────────────────────
+
+$GithubRepo = "danielraffel/pulp"
+$InstallDir = if ($env:PULP_INSTALL_DIR) { $env:PULP_INSTALL_DIR } else { "$env:USERPROFILE\.pulp\bin" }
+$Version = if ($env:PULP_VERSION) { $env:PULP_VERSION } else { "latest" }
+
+# ── Resolve version ─────────────────────────────────────────────────────────
+
+if ($Version -eq "latest") {
+    Write-Host "  Fetching latest release..."
+    try {
+        $Release = Invoke-RestMethod -Uri "https://api.github.com/repos/$GithubRepo/releases/latest"
+        $Version = $Release.tag_name -replace '^v', ''
+    } catch {
+        Write-Error "Could not determine latest version. Set PULP_VERSION explicitly."
+        exit 1
+    }
+}
+
+$Arch = if ([Environment]::Is64BitOperatingSystem) { "x86_64" } else { "x86" }
+$Zipfile = "pulp-$Version-windows-$Arch.zip"
+$Url = "https://github.com/$GithubRepo/releases/download/v$Version/$Zipfile"
+
+# ── Download and install ────────────────────────────────────────────────────
+
+Write-Host ""
+Write-Host "Installing Pulp CLI v$Version for Windows ($Arch)..."
+Write-Host ""
+
+# Create install directory
+New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
+
+# Download to temp
+$TmpDir = New-Item -ItemType Directory -Force -Path "$env:TEMP\pulp-install-$(Get-Random)"
+$TmpFile = Join-Path $TmpDir $Zipfile
+
+try {
+    Write-Host "  Downloading $Zipfile..."
+    Invoke-WebRequest -Uri $Url -OutFile $TmpFile -UseBasicParsing
+} catch {
+    Write-Error @"
+Download failed.
+
+  The release v$Version may not exist yet for windows-$Arch.
+  Check available releases: https://github.com/$GithubRepo/releases
+
+  If you're building from source instead:
+    git clone https://github.com/$GithubRepo.git
+    cd pulp && .\setup.sh
+"@
+    exit 1
+}
+
+# Extract
+Write-Host "  Extracting..."
+Expand-Archive -Path $TmpFile -DestinationPath $InstallDir -Force
+
+# Cleanup temp
+Remove-Item -Recurse -Force $TmpDir
+
+# Verify
+$PulpExe = Join-Path $InstallDir "pulp.exe"
+if (-not (Test-Path $PulpExe)) {
+    Write-Error "Installation failed - pulp.exe not found at $PulpExe"
+    exit 1
+}
+
+Write-Host "  Installed: pulp v$Version"
+
+# ── Add to PATH ─────────────────────────────────────────────────────────────
+
+$UserPath = [Environment]::GetEnvironmentVariable("PATH", "User")
+if ($UserPath -notlike "*$InstallDir*") {
+    [Environment]::SetEnvironmentVariable("PATH", "$InstallDir;$UserPath", "User")
+    Write-Host "  Added $InstallDir to user PATH"
+}
+
+# Update current session
+if ($env:PATH -notlike "*$InstallDir*") {
+    $env:PATH = "$InstallDir;$env:PATH"
+}
+
+# ── Done ────────────────────────────────────────────────────────────────────
+
+Write-Host ""
+Write-Host "  Done! Run ``pulp new my-plugin`` to create your first plugin."
+Write-Host ""
+Write-Host "  If 'pulp' is not found, restart your terminal."
+Write-Host ""

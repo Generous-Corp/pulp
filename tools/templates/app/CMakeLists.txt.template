@@ -1,0 +1,10 @@
+# {{PLUGIN_NAME}} — Standalone Audio Application
+
+add_executable({{TARGET_NAME}} main.cpp)
+target_link_libraries({{TARGET_NAME}} PRIVATE pulp::format)
+target_include_directories({{TARGET_NAME}} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+add_executable({{TARGET_NAME}}-test test_{{LOWER_NAME}}.cpp)
+target_link_libraries({{TARGET_NAME}}-test PRIVATE pulp::format Catch2::Catch2WithMain)
+target_include_directories({{TARGET_NAME}}-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+catch_discover_tests({{TARGET_NAME}}-test)

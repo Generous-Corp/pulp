@@ -106,12 +106,12 @@ jobs:
 
             **macOS / Linux:**
             ```bash
-            curl -fsSL https://generouscorp.com/pulp/install.sh | sh
+            curl -fsSL https://www.generouscorp.com/pulp/install.sh | sh
             ```
 
             **Windows (PowerShell):**
             ```powershell
-            irm https://generouscorp.com/pulp/install.ps1 | iex
+            irm https://www.generouscorp.com/pulp/install.ps1 | iex
             ```
 
             Or download the binary for your platform below.

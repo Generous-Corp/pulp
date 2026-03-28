@@ -1,0 +1,152 @@
+#!/bin/bash
+# Local CLI release builder — builds on macOS + SSH VMs, creates GitHub release
+#
+# Usage:
+#   ./tools/scripts/release-cli-local.sh v0.1.0
+#
+# Prerequisites:
+#   - macOS with Xcode CLT and CMake
+#   - SSH access to 'ubuntu' VM (Linux arm64 build)
+#   - SSH access to 'win2' VM (Windows x64 build) — optional
+#   - gh CLI authenticated (for creating GitHub releases)
+#
+# For cloud CI builds, push a tag or use workflow_dispatch on release-cli.yml.
+
+set -e
+
+VERSION="${1:?Usage: $0 <version> (e.g., v0.1.0)}"
+VERSION_NUM="${VERSION#v}"  # strip leading v
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+DIST_DIR="$REPO_ROOT/dist"
+rm -rf "$DIST_DIR"
+mkdir -p "$DIST_DIR"
+
+info() { echo "  ✓ $*"; }
+fail() { echo "  ✗ $*" >&2; }
+step() { echo ""; echo "── $* ──"; }
+
+# ── macOS arm64 ──────────────────────────────────────────────────────────────
+
+step "Building macOS arm64"
+
+cmake --build "$REPO_ROOT/build" --target pulp-cli --config Release 2>&1 | tail -3
+if [ ! -f "$REPO_ROOT/build/tools/cli/pulp" ]; then
+    fail "macOS build failed"
+    exit 1
+fi
+
+cp "$REPO_ROOT/build/tools/cli/pulp" "$DIST_DIR/pulp"
+strip "$DIST_DIR/pulp"
+(cd "$DIST_DIR" && tar czf "pulp-darwin-arm64.tar.gz" pulp && rm pulp)
+info "pulp-darwin-arm64.tar.gz ($(du -h "$DIST_DIR/pulp-darwin-arm64.tar.gz" | cut -f1))"
+
+# ── Linux arm64 (via SSH) ───────────────────────────────────────────────────
+
+step "Building Linux arm64 (ssh ubuntu)"
+
+if ssh -o ConnectTimeout=5 -o BatchMode=yes ubuntu "echo ok" &>/dev/null; then
+    # Sync source
+    rsync -az --delete \
+        --exclude='build*' --exclude='.git' --exclude='external/skia-build' \
+        --exclude='dist' --exclude='planning' --exclude='node_modules' \
+        "$REPO_ROOT/" ubuntu:~/pulp/
+
+    # Configure if needed
+    ssh ubuntu "cd ~/pulp && \
+        if [ ! -f build-cli/CMakeCache.txt ]; then \
+            cmake -S . -B build-cli -DCMAKE_BUILD_TYPE=Release \
+                -DPULP_BUILD_TESTS=OFF -DPULP_ENABLE_GPU=OFF; \
+        fi" 2>&1 | tail -5
+
+    # Build
+    ssh ubuntu "cd ~/pulp && cmake --build build-cli --target pulp-cli 2>&1 | tail -5"
+
+    if ssh ubuntu "test -f ~/pulp/build-cli/tools/cli/pulp && echo ok" | grep -q ok; then
+        ssh ubuntu "strip ~/pulp/build-cli/tools/cli/pulp"
+        scp ubuntu:~/pulp/build-cli/tools/cli/pulp "$DIST_DIR/pulp"
+        (cd "$DIST_DIR" && tar czf "pulp-linux-arm64.tar.gz" pulp && rm pulp)
+        info "pulp-linux-arm64.tar.gz ($(du -h "$DIST_DIR/pulp-linux-arm64.tar.gz" | cut -f1))"
+    else
+        fail "Linux build failed — binary not found"
+    fi
+else
+    fail "Cannot reach ubuntu VM — skipping Linux build"
+fi
+
+# ── Windows x64 (via SSH) ───────────────────────────────────────────────────
+
+step "Building Windows x64 (ssh win2)"
+
+if ssh -o ConnectTimeout=5 -o BatchMode=yes win2 "echo ok" &>/dev/null; then
+    # Check for compiler
+    if ssh win2 "where cl 2>nul" &>/dev/null; then
+        # Sync source via rsync (requires rsync on Windows, e.g., via Git Bash)
+        rsync -az --delete \
+            --exclude='build*' --exclude='.git' --exclude='external/skia-build' \
+            --exclude='dist' --exclude='planning' \
+            "$REPO_ROOT/" win2:~/pulp/
+
+        ssh win2 "cd ~/pulp && cmake -S . -B build-cli -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_TESTS=OFF -DPULP_ENABLE_GPU=OFF 2>&1 | tail -5"
+        ssh win2 "cd ~/pulp && cmake --build build-cli --target pulp-cli --config Release 2>&1 | tail -5"
+
+        if ssh win2 "if exist ~/pulp/build-cli/tools/cli/Release/pulp.exe (echo ok)" | grep -q ok; then
+            scp win2:~/pulp/build-cli/tools/cli/Release/pulp.exe "$DIST_DIR/pulp.exe"
+            (cd "$DIST_DIR" && zip -q "pulp-windows-x64.zip" pulp.exe && rm pulp.exe)
+            info "pulp-windows-x64.zip ($(du -h "$DIST_DIR/pulp-windows-x64.zip" | cut -f1))"
+        else
+            fail "Windows build failed — binary not found"
+        fi
+    else
+        fail "No C++ compiler on win2 — install VS Build Tools 2022+"
+        echo "    Download: https://visualstudio.microsoft.com/downloads/#build-tools-for-visual-studio-2022"
+        echo "    Select workload: 'Desktop development with C++'"
+    fi
+else
+    fail "Cannot reach win2 VM — skipping Windows build"
+fi
+
+# ── Summary ─────────────────────────────────────────────────────────────────
+
+step "Release artifacts"
+
+ls -lh "$DIST_DIR/"
+
+ARTIFACT_COUNT=$(ls "$DIST_DIR/" | wc -l | tr -d ' ')
+echo ""
+echo "  $ARTIFACT_COUNT artifact(s) in dist/"
+
+# ── Create GitHub release (if gh is available) ──────────────────────────────
+
+if command -v gh &>/dev/null; then
+    echo ""
+    read -r -p "Create GitHub release $VERSION with these artifacts? [y/N] " response
+    if [[ "$response" =~ ^[yY] ]]; then
+        gh release create "$VERSION" \
+            --title "Pulp CLI $VERSION" \
+            --notes "## Install
+
+**macOS / Linux:**
+\`\`\`bash
+curl -fsSL https://www.generouscorp.com/pulp/install.sh | sh
+\`\`\`
+
+**Windows (PowerShell):**
+\`\`\`powershell
+irm https://www.generouscorp.com/pulp/install.ps1 | iex
+\`\`\`
+
+Or download the binary for your platform below." \
+            "$DIST_DIR"/*
+
+        info "Release $VERSION created"
+        echo "  https://github.com/danielraffel/pulp/releases/tag/$VERSION"
+    else
+        echo "Skipped. Create manually with:"
+        echo "  gh release create $VERSION dist/*"
+    fi
+else
+    echo ""
+    echo "  gh CLI not found — create release manually:"
+    echo "  gh release create $VERSION dist/*"
+fi

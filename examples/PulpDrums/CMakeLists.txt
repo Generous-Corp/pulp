@@ -1,10 +1,12 @@
 # PulpDrums — generative drum sequencer MIDI effect
 # Validates: MIDI output, pattern sequencing, Phase 6 GPU UI
 
-add_executable(pulp-drums-test test_pulp_drums.cpp)
-target_link_libraries(pulp-drums-test PRIVATE pulp::format Catch2::Catch2WithMain)
-target_include_directories(pulp-drums-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-catch_discover_tests(pulp-drums-test)
+if(PULP_BUILD_TESTS)
+    add_executable(pulp-drums-test test_pulp_drums.cpp)
+    target_link_libraries(pulp-drums-test PRIVATE pulp::format Catch2::Catch2WithMain)
+    target_include_directories(pulp-drums-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    catch_discover_tests(pulp-drums-test)
+endif()
 
 pulp_add_plugin(PulpDrums
     FORMATS         CLAP

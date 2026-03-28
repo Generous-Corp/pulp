@@ -3,10 +3,12 @@
 # Uses pulp_add_plugin() for all format targets
 
 # ── Tests ──────────────────────────────────────────────────────────────────
-add_executable(pulp-tone-test test_pulp_tone.cpp)
-target_link_libraries(pulp-tone-test PRIVATE pulp::format Catch2::Catch2WithMain)
-target_include_directories(pulp-tone-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-catch_discover_tests(pulp-tone-test)
+if(PULP_BUILD_TESTS)
+    add_executable(pulp-tone-test test_pulp_tone.cpp)
+    target_link_libraries(pulp-tone-test PRIVATE pulp::format Catch2::Catch2WithMain)
+    target_include_directories(pulp-tone-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    catch_discover_tests(pulp-tone-test)
+endif()
 
 # ── Plugin (all formats) ──────────────────────────────────────────────────
 pulp_add_plugin(PulpTone

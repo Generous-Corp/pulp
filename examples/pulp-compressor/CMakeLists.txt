@@ -2,10 +2,12 @@
 # First plugin with 2 input buses (main + optional sidechain)
 
 # Tests
-add_executable(pulp-compressor-test test_pulp_compressor.cpp)
-target_link_libraries(pulp-compressor-test PRIVATE pulp::format Catch2::Catch2WithMain)
-target_include_directories(pulp-compressor-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-catch_discover_tests(pulp-compressor-test)
+if(PULP_BUILD_TESTS)
+    add_executable(pulp-compressor-test test_pulp_compressor.cpp)
+    target_link_libraries(pulp-compressor-test PRIVATE pulp::format Catch2::Catch2WithMain)
+    target_include_directories(pulp-compressor-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    catch_discover_tests(pulp-compressor-test)
+endif()
 
 # Plugin (all formats except standalone — no standalone sidechain routing)
 pulp_add_plugin(PulpCompressor

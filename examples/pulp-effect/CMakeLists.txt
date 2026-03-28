@@ -2,10 +2,12 @@
 # Validates: diverse parameter types, DSP, state serialization
 
 # Tests
-add_executable(pulp-effect-test test_pulp_effect.cpp)
-target_link_libraries(pulp-effect-test PRIVATE pulp::format Catch2::Catch2WithMain)
-target_include_directories(pulp-effect-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-catch_discover_tests(pulp-effect-test)
+if(PULP_BUILD_TESTS)
+    add_executable(pulp-effect-test test_pulp_effect.cpp)
+    target_link_libraries(pulp-effect-test PRIVATE pulp::format Catch2::Catch2WithMain)
+    target_include_directories(pulp-effect-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    catch_discover_tests(pulp-effect-test)
+endif()
 
 # Plugin (all formats)
 pulp_add_plugin(PulpEffect

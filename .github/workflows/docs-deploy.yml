@@ -55,6 +55,13 @@ jobs:
             echo "API docs merged into site at /api/"
           fi
 
+      - name: Copy install scripts
+        run: |
+          # Install scripts accessible at www.generouscorp.com/pulp/install.sh
+          cp tools/install/install.sh build/site/install.sh
+          cp tools/install/install.ps1 build/site/install.ps1
+          echo "Install scripts copied to site root"
+
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:

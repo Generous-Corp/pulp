@@ -54,6 +54,11 @@ docs:
     kind: guide
     summary: End-to-end signing, notarization, packaging, and distribution
 
+  - slug: troubleshooting
+    path: guides/troubleshooting.md
+    kind: guide
+    summary: Common issues and solutions — setup, build, environment, plugins
+
   - slug: testing-advanced
     path: guides/testing-advanced.md
     kind: guide

@@ -96,14 +96,16 @@ ctest --test-dir build
 
 ### Create a New Plugin
 
-After building, use `pulp create` to scaffold a plugin project:
+After building, use `pulp new` to scaffold a plugin project:
 
 ```bash
-./build/tools/cli/pulp create "My Gain"                    # effect (default)
-./build/tools/cli/pulp create "My Synth" --type instrument  # instrument
+./build/tools/cli/pulp new "My Gain"                    # effect (default)
+./build/tools/cli/pulp new "My Synth" --type instrument  # instrument
+./build/tools/cli/pulp new "My App" --type app           # standalone application
+./build/tools/cli/pulp new "My Project" --type bare      # minimal skeleton
 ```
 
-This checks your environment, scaffolds from templates, builds, runs tests, and reports artifact locations. Formats are platform-gated (macOS gets VST3+AU+CLAP+Standalone by default).
+This checks your environment, scaffolds from templates, builds, runs tests, and reports artifact locations. Formats are platform-gated (macOS gets VST3+AU+CLAP+Standalone by default). Use `--no-interactive` for CI/scripting.
 
 ### Environment Diagnosis
 
@@ -112,6 +114,8 @@ After building, use `pulp doctor` to check your environment:
 ```bash
 ./build/tools/cli/pulp doctor        # show status of all checks
 ./build/tools/cli/pulp doctor --fix  # auto-fix what it can
+./build/tools/cli/pulp run           # launch a standalone plugin
+./build/tools/cli/pulp upgrade       # update CLI to latest version
 ```
 
 ## Status

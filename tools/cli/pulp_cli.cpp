@@ -2,7 +2,9 @@
 // Wraps common build/test/status operations
 
 #include <algorithm>
+#include <atomic>
 #include <cctype>
+#include <chrono>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
@@ -10,14 +12,130 @@
 #include <iostream>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <vector>
 
+#ifdef __APPLE__
+#include <mach-o/dyld.h>  // _NSGetExecutablePath
+#endif
+
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>  // GetModuleFileNameA, MAX_PATH
+#include <io.h>       // _isatty, _fileno
+#include <process.h>  // _getpid
+#define popen _popen
+#define pclose _pclose
+#define getpid _getpid
+#else
+#include <unistd.h>  // isatty, getpid
+#endif
+
 namespace fs = std::filesystem;
+
+// ── Color / Terminal ────────────────────────────────────────────────────────
+
+static bool g_color_enabled = true;
+static bool g_no_color = false;  // --no-color flag
+
+static bool is_tty() {
+#ifdef _WIN32
+    return _isatty(_fileno(stdout)) != 0;
+#else
+    return isatty(fileno(stdout)) != 0;
+#endif
+}
+
+static void init_color() {
+    if (g_no_color) { g_color_enabled = false; return; }
+    // Respect NO_COLOR convention (https://no-color.org/)
+    if (std::getenv("NO_COLOR")) { g_color_enabled = false; return; }
+    g_color_enabled = is_tty();
+}
+
+namespace color {
+    static std::string reset()   { return g_color_enabled ? "\033[0m"  : ""; }
+    static std::string bold()    { return g_color_enabled ? "\033[1m"  : ""; }
+    static std::string dim()     { return g_color_enabled ? "\033[2m"  : ""; }
+    static std::string green()   { return g_color_enabled ? "\033[32m" : ""; }
+    static std::string yellow()  { return g_color_enabled ? "\033[33m" : ""; }
+    static std::string red()     { return g_color_enabled ? "\033[31m" : ""; }
+    static std::string cyan()    { return g_color_enabled ? "\033[36m" : ""; }
+}
+
+// Formatted status helpers
+static void print_ok(const std::string& msg) {
+    std::cout << "  " << color::green() << "\xe2\x9c\x93" << color::reset() << " " << msg << "\n";
+}
+static void print_fail(const std::string& msg) {
+    std::cout << "  " << color::red() << "\xe2\x9c\x97" << color::reset() << " " << msg << "\n";
+}
+static void print_warn(const std::string& msg) {
+    std::cout << "  " << color::yellow() << "\xe2\x9a\xa0" << color::reset() << " " << msg << "\n";
+}
+static void print_step(const std::string& msg) {
+    std::cout << "\n" << color::bold() << color::cyan() << "\xe2\x94\x80\xe2\x94\x80 " << msg << color::reset() << "\n";
+}
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 static int run(const std::string& cmd) {
     return std::system(cmd.c_str());
+}
+
+// Run a shell command with an animated spinner and elapsed time.
+// Output is captured to a temp file and shown only on failure.
+static int run_with_spinner(const std::string& cmd, const std::string& label) {
+    if (!is_tty() || g_no_color) {
+        std::cout << label << "...\n";
+        return run(cmd);
+    }
+
+    // Redirect output to temp file so it doesn't interleave with spinner
+    std::string tmp = "/tmp/pulp-spinner-" + std::to_string(getpid()) + ".log";
+    std::string redirected = cmd + " >" + tmp + " 2>&1";
+
+    std::atomic<bool> done{false};
+    std::atomic<int> result{0};
+
+    std::thread worker([&]() {
+        result = std::system(redirected.c_str());
+        done = true;
+    });
+
+    const char* frames[] = {"\xe2\xa0\x8b", "\xe2\xa0\x99", "\xe2\xa0\xb9", "\xe2\xa0\xb8",
+                            "\xe2\xa0\xbc", "\xe2\xa0\xb4", "\xe2\xa0\xa6", "\xe2\xa0\xa7",
+                            "\xe2\xa0\x87", "\xe2\xa0\x8f"};
+    int frame = 0;
+    auto start = std::chrono::steady_clock::now();
+
+    while (!done) {
+        auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
+            std::chrono::steady_clock::now() - start).count();
+        std::cout << "\r  " << color::cyan() << frames[frame % 10] << color::reset()
+                  << " " << label << color::dim() << " (" << elapsed << "s)" << color::reset() << "  " << std::flush;
+        frame++;
+        std::this_thread::sleep_for(std::chrono::milliseconds(80));
+    }
+
+    worker.join();
+
+    // Clear spinner line
+    std::cout << "\r\033[K";
+    auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::steady_clock::now() - start).count();
+
+    if (result == 0) {
+        print_ok(label + color::dim() + " (" + std::to_string(elapsed) + "s)" + color::reset());
+    } else {
+        print_fail(label + color::dim() + " (" + std::to_string(elapsed) + "s)" + color::reset());
+        // Show last 20 lines of captured output on failure
+        std::string tail_cmd = "tail -20 " + tmp;
+        run(tail_cmd);
+    }
+
+    std::remove(tmp.c_str());
+    return result;
 }
 
 static std::string exec_output(const std::string& cmd) {
@@ -68,12 +186,9 @@ static int cmd_build(const std::vector<std::string>& args) {
     }
 
     if (needs_configure) {
-        std::cout << "Configuring...\n";
-        int rc = run("cmake -B " + build_dir.string() + " -S " + root.string());
+        int rc = run_with_spinner("cmake -B " + build_dir.string() + " -S " + root.string(), "Configuring");
         if (rc != 0) return rc;
     }
-
-    std::cout << "Building...\n";
 
     std::string build_cmd = "cmake --build " + build_dir.string();
 
@@ -82,7 +197,7 @@ static int cmd_build(const std::vector<std::string>& args) {
         build_cmd += " " + arg;
     }
 
-    return run(build_cmd);
+    return run_with_spinner(build_cmd, "Building");
 }
 
 static int cmd_test(const std::vector<std::string>& args) {
@@ -433,14 +548,46 @@ static std::vector<DoctorCheck> run_doctor_checks(const fs::path& root) {
             c.fix = "xcode-select --install";
         }
 #elif defined(_WIN32)
+        // Try cl.exe first, then check for VS Build Tools via vswhere
         auto ver = exec_output("cl 2>&1 | head -1");
-        if (!ver.empty()) { c.passed = true; c.detail = ver; }
-        else { c.fix = "Install Visual Studio Build Tools 2022+ with 'Desktop development with C++'"; }
+        if (!ver.empty()) {
+            c.passed = true; c.detail = ver;
+        } else {
+            // Check if vswhere can find any VS installation
+            auto vswhere = exec_output(
+                "\"%ProgramFiles(x86)%\\Microsoft Visual Studio\\Installer\\vswhere.exe\""
+                " -latest -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64"
+                " -property displayName 2>nul");
+            if (!vswhere.empty()) {
+                c.passed = true;
+                c.detail = vswhere + " (run from Developer Command Prompt for cl.exe)";
+            } else {
+                c.fix = "Install Visual Studio Build Tools 2022+:\n"
+                        "    https://visualstudio.microsoft.com/downloads/#build-tools-for-visual-studio-2022\n"
+                        "    Select workload: 'Desktop development with C++'\n"
+                        "    Or: winget install Microsoft.VisualStudio.2022.BuildTools";
+            }
+        }
 #else
+        // Linux: detect distro for better fix suggestions
         auto ver = exec_output("g++ --version 2>&1 | head -1");
         if (ver.empty()) ver = exec_output("clang++ --version 2>&1 | head -1");
-        if (!ver.empty()) { c.passed = true; c.detail = ver; }
-        else { c.fix = "sudo apt install g++-13  (or equivalent for your distro)"; }
+        if (!ver.empty()) {
+            c.passed = true; c.detail = ver;
+        } else {
+            // Detect distro for package manager command
+            auto distro_id = exec_output("grep '^ID=' /etc/os-release 2>/dev/null | cut -d= -f2 | tr -d '\"'");
+            if (distro_id == "ubuntu" || distro_id == "debian" || distro_id == "pop" || distro_id == "mint")
+                c.fix = "sudo apt install g++-13";
+            else if (distro_id == "fedora" || distro_id == "rhel" || distro_id == "centos")
+                c.fix = "sudo dnf install gcc-c++";
+            else if (distro_id == "arch" || distro_id == "manjaro")
+                c.fix = "sudo pacman -S gcc";
+            else if (distro_id == "opensuse" || distro_id == "sles")
+                c.fix = "sudo zypper install gcc-c++";
+            else
+                c.fix = "Install g++-13 or clang++-15 (check your distro's package manager)";
+        }
 #endif
         checks.push_back(c);
     }
@@ -470,16 +617,20 @@ static std::vector<DoctorCheck> run_doctor_checks(const fs::path& root) {
                     c.detail = "cmake " + ver_num.substr(0, dot2 != std::string::npos ? dot2 + 2 : std::string::npos) + " (too old)";
 #ifdef __APPLE__
                     c.fix = "brew upgrade cmake";
+#elif defined(_WIN32)
+                    c.fix = "winget install Kitware.CMake";
 #else
-                    c.fix = "Install CMake 3.24+ from https://cmake.org/download/";
+                    c.fix = "Install CMake 3.24+ from https://cmake.org/download/ or your package manager";
 #endif
                 }
             }
         } else {
 #ifdef __APPLE__
             c.fix = "brew install cmake";
+#elif defined(_WIN32)
+            c.fix = "winget install Kitware.CMake";
 #else
-            c.fix = "Install CMake from https://cmake.org/download/";
+            c.fix = "Install CMake 3.24+ from https://cmake.org/download/ or your package manager";
 #endif
         }
         checks.push_back(c);
@@ -584,7 +735,17 @@ static std::vector<DoctorCheck> run_doctor_checks(const fs::path& root) {
             c.passed = true;
             c.detail = "libasound2-dev";
         } else {
-            c.fix = "sudo apt install libasound2-dev";
+            auto distro_id = exec_output("grep '^ID=' /etc/os-release 2>/dev/null | cut -d= -f2 | tr -d '\"'");
+            if (distro_id == "ubuntu" || distro_id == "debian" || distro_id == "pop" || distro_id == "mint")
+                c.fix = "sudo apt install libasound2-dev";
+            else if (distro_id == "fedora" || distro_id == "rhel" || distro_id == "centos")
+                c.fix = "sudo dnf install alsa-lib-devel";
+            else if (distro_id == "arch" || distro_id == "manjaro")
+                c.fix = "sudo pacman -S alsa-lib";
+            else if (distro_id == "opensuse" || distro_id == "sles")
+                c.fix = "sudo zypper install alsa-devel";
+            else
+                c.fix = "Install ALSA development headers (check your distro's package manager)";
         }
         checks.push_back(c);
     }
@@ -619,10 +780,10 @@ static int cmd_doctor(const std::vector<std::string>& args) {
     }
 
     if (!ci_mode) {
-        std::cout << "Pulp Doctor\n";
+        std::cout << color::bold() << "Pulp Doctor" << color::reset() << "\n";
         std::cout << "===========\n\n";
         if (root.empty()) {
-            std::cout << "(Not in a Pulp project — checking system tools only)\n\n";
+            std::cout << color::dim() << "(Not in a Pulp project — checking system tools only)" << color::reset() << "\n\n";
         }
     }
 
@@ -633,9 +794,9 @@ static int cmd_doctor(const std::vector<std::string>& args) {
         if (c.passed) {
             ++pass_count;
             if (!ci_mode) {
-                std::cout << "  \xe2\x9c\x93 " << c.name;
-                if (!c.detail.empty()) std::cout << " — " << c.detail;
-                std::cout << "\n";
+                std::string msg = c.name;
+                if (!c.detail.empty()) msg += " — " + c.detail;
+                print_ok(msg);
             }
         } else {
             ++fail_count;
@@ -645,25 +806,25 @@ static int cmd_doctor(const std::vector<std::string>& args) {
                 if (!c.fix.empty()) std::cerr << " [fix: " << c.fix << "]";
                 std::cerr << "\n";
             } else {
-                std::cout << "  \xe2\x9c\x97 " << c.name;
-                if (!c.detail.empty()) std::cout << " — " << c.detail;
-                std::cout << "\n";
+                std::string msg = c.name;
+                if (!c.detail.empty()) msg += " — " + c.detail;
+                print_fail(msg);
                 if (!c.fix.empty()) {
                     if (fix_mode && !dry_run) {
-                        std::cout << "    Fixing: " << c.fix << "\n";
+                        std::cout << "    " << color::cyan() << "Fixing:" << color::reset() << " " << c.fix << "\n";
                         int rc = std::system(c.fix.c_str());
                         if (rc == 0) {
-                            std::cout << "    Fixed.\n";
+                            print_ok("Fixed");
                             --fail_count;
                             ++pass_count;
                         } else {
                             std::cout << "    Fix failed (exit " << rc << "). Run manually:\n";
-                            std::cout << "      " << c.fix << "\n";
+                            std::cout << "      " << color::yellow() << c.fix << color::reset() << "\n";
                         }
                     } else if (dry_run) {
-                        std::cout << "    [dry-run] Would run: " << c.fix << "\n";
+                        std::cout << "    " << color::dim() << "[dry-run] Would run: " << c.fix << color::reset() << "\n";
                     } else {
-                        std::cout << "    Fix: " << c.fix << "\n";
+                        std::cout << "    Fix: " << color::yellow() << c.fix << color::reset() << "\n";
                     }
                 }
             }
@@ -671,9 +832,10 @@ static int cmd_doctor(const std::vector<std::string>& args) {
     }
 
     if (!ci_mode) {
-        std::cout << "\n  " << pass_count << "/" << (pass_count + fail_count) << " checks passed";
+        std::cout << "\n  " << color::bold() << pass_count << "/" << (pass_count + fail_count)
+                  << " checks passed" << color::reset();
         if (fail_count > 0) {
-            std::cout << " — run `pulp doctor --fix` to resolve";
+            std::cout << " — run " << color::cyan() << "`pulp doctor --fix`" << color::reset() << " to resolve";
         }
         std::cout << "\n";
     }
@@ -773,36 +935,44 @@ static int cmd_create(const std::vector<std::string>& args) {
     // Parse args
     std::string name, type = "effect", manufacturer = "Pulp", output_path;
     bool no_build = false;
+    bool ci_mode = false;
     for (size_t i = 0; i < args.size(); ++i) {
         if (args[i] == "--type" && i + 1 < args.size()) { type = args[++i]; continue; }
         if (args[i] == "--manufacturer" && i + 1 < args.size()) { manufacturer = args[++i]; continue; }
         if (args[i] == "--output" && i + 1 < args.size()) { output_path = args[++i]; continue; }
         if (args[i] == "--no-build") { no_build = true; continue; }
+        if (args[i] == "--no-interactive" || args[i] == "--ci") { ci_mode = true; continue; }
         if (args[i] == "--help" || args[i] == "-h") {
-            std::cout << "pulp create — create a new plugin project\n\n";
-            std::cout << "Usage: pulp create <name> [options]\n\n";
+            std::cout << "pulp new — create a new plugin project\n\n";
+            std::cout << "Usage: pulp new <name> [options]\n\n";
             std::cout << "Options:\n";
-            std::cout << "  --type <effect|instrument>  Plugin type (default: effect)\n";
+            std::cout << "  --type <effect|instrument|app|bare>  Plugin type (default: effect)\n";
             std::cout << "  --manufacturer <name>       Manufacturer (default: Pulp)\n";
             std::cout << "  --output <dir>              Output directory\n";
             std::cout << "  --no-build                  Skip build after scaffolding\n";
+            std::cout << "  --no-interactive, --ci      Non-interactive mode (use defaults)\n";
             return 0;
         }
         if (name.empty() && args[i][0] != '-') { name = args[i]; continue; }
     }
 
     if (name.empty()) {
-        std::cerr << "Usage: pulp create <name> [--type effect|instrument] [--manufacturer Name]\n";
+        std::cerr << "Usage: pulp new <name> [--type effect|instrument] [--manufacturer Name]\n";
         return 1;
     }
 
-    if (type != "effect" && type != "instrument") {
-        std::cerr << "Error: --type must be 'effect' or 'instrument'\n";
+    if (type != "effect" && type != "instrument" && type != "app" && type != "bare") {
+        std::cerr << "Error: --type must be 'effect', 'instrument', 'app', or 'bare'\n";
         return 1;
     }
+
+    // In CI mode, suppress progress output (errors still go to stderr)
+    auto log = [&](const std::string& msg) {
+        if (!ci_mode) std::cout << msg;
+    };
 
     // Quick doctor check
-    std::cout << "Checking environment...\n";
+    log("Checking environment...\n");
     auto checks = run_doctor_checks(root);
     bool env_ok = true;
     for (auto& c : checks) {
@@ -817,7 +987,7 @@ static int cmd_create(const std::vector<std::string>& args) {
         std::cerr << "\nEnvironment issues found. Run `pulp doctor --fix` first.\n";
         return 1;
     }
-    std::cout << "  \xe2\x9c\x93 Environment OK\n\n";
+    log("  \xe2\x9c\x93 Environment OK\n\n");
 
     // Compute names
     std::string class_name = to_class_name(name);
@@ -829,15 +999,19 @@ static int cmd_create(const std::vector<std::string>& args) {
     std::string bundle_id = "com." + to_namespace_name(manufacturer) + "." + ns;
     std::string header_name = replace_all_str(lower_name, "-", "_") + ".hpp";
 
-    // Determine formats based on platform
+    // Determine formats based on platform and type
     std::string formats;
+    if (type == "app" || type == "bare") {
+        formats = "Standalone";
+    } else {
 #ifdef __APPLE__
-    formats = "VST3 AU CLAP Standalone";
+        formats = "VST3 AU CLAP Standalone";
 #elif defined(_WIN32)
-    formats = "VST3 CLAP Standalone";
+        formats = "VST3 CLAP Standalone";
 #else
-    formats = "VST3 CLAP LV2 Standalone";
+        formats = "VST3 CLAP LV2 Standalone";
 #endif
+    }
 
     // Output directory
     fs::path out_dir;
@@ -871,7 +1045,9 @@ static int cmd_create(const std::vector<std::string>& args) {
         {"VERSION", "1.0.0"},
         {"PLUGIN_CODE", plugin_code},
         {"FORMATS", formats},
-        {"DESCRIPTION", "A Pulp audio " + type},
+        {"DESCRIPTION", type == "app" ? "A standalone Pulp audio application" :
+                        type == "bare" ? "A minimal Pulp project" :
+                        "A Pulp audio " + type},
         {"VST3_UID", make_vst3_uid()},
     };
 
@@ -883,7 +1059,7 @@ static int cmd_create(const std::vector<std::string>& args) {
     }
 
     fs::create_directories(out_dir);
-    std::cout << "Creating " << name << " (" << type << ") at " << out_dir.string() << "\n\n";
+    log("Creating " + name + " (" + type + ") at " + out_dir.string() + "\n\n");
 
     struct FileMapping { std::string tmpl; std::string output; };
     std::string test_name = "test_" + replace_all_str(lower_name, "-", "_") + ".cpp";
@@ -903,7 +1079,7 @@ static int cmd_create(const std::vector<std::string>& args) {
         auto expanded = expand_template_str(content, vars);
         std::ofstream f(out_dir / outfile);
         f << expanded;
-        std::cout << "  Created " << outfile << "\n";
+        log("  Created " + outfile + "\n");
     }
 
     // Standalone main.cpp
@@ -914,7 +1090,7 @@ static int cmd_create(const std::vector<std::string>& args) {
         f << "int main(int argc, char* argv[]) {\n";
         f << "    return pulp::format::run_standalone(" << ns << "::create_" << factory << ", argc, argv);\n";
         f << "}\n";
-        std::cout << "  Created main.cpp\n";
+        log("  Created main.cpp\n");
     }
 
     // Add to examples/CMakeLists.txt
@@ -924,22 +1100,22 @@ static int cmd_create(const std::vector<std::string>& args) {
 
     if (in_examples && fs::exists(examples_cmake)) {
         std::string cmake_content = read_file_contents(examples_cmake);
-        std::string add_line = "\n# " + name + " (generated by pulp create)\n"
+        std::string add_line = "\n# " + name + " (generated by pulp new)\n"
                                "add_subdirectory(" + rel_dir + ")\n";
         std::ofstream f(examples_cmake, std::ios::app);
         f << add_line;
-        std::cout << "  Added to examples/CMakeLists.txt\n";
+        log("  Added to examples/CMakeLists.txt\n");
     }
 
-    std::cout << "\n";
+    log("\n");
 
     if (no_build) {
-        std::cout << "Scaffolding complete. Run `pulp build` to build.\n";
+        log("Scaffolding complete. Run `pulp build` to build.\n");
         return 0;
     }
 
     // Build
-    std::cout << "Building...\n";
+    log("Building...\n");
     int rc = run("cmake -S " + root.string() + " -B " + (root / "build").string()
                  + " -DCMAKE_BUILD_TYPE=Debug 2>&1 | tail -5");
     if (rc != 0) {
@@ -954,7 +1130,7 @@ static int cmd_create(const std::vector<std::string>& args) {
     }
 
     // Test — run the test binary directly since ctest may not have discovered new tests yet
-    std::cout << "\nRunning tests...\n";
+    log("\nRunning tests...\n");
     auto test_binary = root / "build" / "examples" / lower_name / (class_name + "-test");
     if (fs::exists(test_binary)) {
         rc = run(test_binary.string());
@@ -988,6 +1164,244 @@ static int cmd_create(const std::vector<std::string>& args) {
     std::cout << "    pulp test -R " << test_filter << "  # run tests\n";
     std::cout << "    pulp validate           # validate plugin formats\n";
     return 0;
+}
+
+// ── Upgrade ─────────────────────────────────────────────────────────────────
+
+static int cmd_upgrade(const std::vector<std::string>& args) {
+    std::string target_version;
+    for (size_t i = 0; i < args.size(); ++i) {
+        if (args[i] == "--help" || args[i] == "-h") {
+            std::cout << "pulp upgrade — update the Pulp CLI to the latest version\n\n";
+            std::cout << "Usage: pulp upgrade [version]\n\n";
+            std::cout << "If no version is specified, upgrades to the latest release.\n";
+            std::cout << "Requires curl (macOS/Linux) or Invoke-WebRequest (Windows).\n";
+            return 0;
+        }
+        if (args[i][0] != '-') target_version = args[i];
+    }
+
+    // Check current version
+    std::cout << "Checking for updates...\n";
+
+    // Fetch latest version from GitHub
+    std::string version_cmd = "curl -fsSL https://api.github.com/repos/danielraffel/pulp/releases/latest 2>/dev/null"
+                              " | grep '\"tag_name\"' | sed 's/.*\"v\\(.*\\)\".*/\\1/'";
+    std::string latest = exec_output(version_cmd);
+
+    if (latest.empty() && target_version.empty()) {
+        std::cerr << "Error: could not fetch latest version from GitHub.\n";
+        std::cerr << "  Check your internet connection, or specify a version:\n";
+        std::cerr << "    pulp upgrade 0.2.0\n";
+        return 1;
+    }
+
+    std::string version = target_version.empty() ? latest : target_version;
+    std::cout << "  Target version: " << version << "\n";
+
+    // Detect platform
+    std::string platform, arch;
+#ifdef __APPLE__
+    platform = "darwin";
+#elif defined(_WIN32)
+    platform = "windows";
+#else
+    platform = "linux";
+#endif
+
+#if defined(__aarch64__) || defined(__arm64__)
+    arch = "arm64";
+#else
+    arch = "x86_64";
+#endif
+
+    // Determine install location (where is the current binary?)
+    std::string self_path;
+#ifdef __APPLE__
+    {
+        char buf[1024];
+        uint32_t size = sizeof(buf);
+        if (_NSGetExecutablePath(buf, &size) == 0) {
+            self_path = fs::canonical(buf).string();
+        }
+    }
+#elif defined(__linux__)
+    self_path = fs::canonical("/proc/self/exe").string();
+#elif defined(_WIN32)
+    {
+        char buf[MAX_PATH];
+        GetModuleFileNameA(nullptr, buf, MAX_PATH);
+        self_path = fs::canonical(buf).string();
+    }
+#endif
+
+    if (self_path.empty()) {
+        std::cerr << "Error: could not determine current binary path.\n";
+        std::cerr << "  Download manually from: https://github.com/danielraffel/pulp/releases\n";
+        return 1;
+    }
+
+    auto install_dir = fs::path(self_path).parent_path();
+
+    std::string ext = (platform == "windows") ? "zip" : "tar.gz";
+    std::string tarball = "pulp-" + version + "-" + platform + "-" + arch + "." + ext;
+    std::string url = "https://github.com/danielraffel/pulp/releases/download/v" + version + "/" + tarball;
+
+    std::cout << "  Downloading " << tarball << "...\n";
+
+    // Download and extract
+    std::string tmp_dir = "/tmp/pulp-upgrade-" + version;
+    int rc = run("mkdir -p " + tmp_dir + " && curl -fSL -o " + tmp_dir + "/" + tarball + " " + url);
+    if (rc != 0) {
+        std::cerr << "Download failed. Check: https://github.com/danielraffel/pulp/releases/tag/v" << version << "\n";
+        run("rm -rf " + tmp_dir);
+        return 1;
+    }
+
+    rc = run("tar -xzf " + tmp_dir + "/" + tarball + " -C " + tmp_dir);
+    if (rc != 0) {
+        std::cerr << "Extraction failed.\n";
+        run("rm -rf " + tmp_dir);
+        return 1;
+    }
+
+    // Replace binary
+    std::string new_binary = tmp_dir + "/pulp";
+    if (!fs::exists(new_binary)) {
+        std::cerr << "Error: extracted archive does not contain 'pulp' binary.\n";
+        run("rm -rf " + tmp_dir);
+        return 1;
+    }
+
+    // Backup current binary, then replace
+    std::string backup = self_path + ".bak";
+    try {
+        if (fs::exists(backup)) fs::remove(backup);
+        fs::rename(self_path, backup);
+        fs::copy_file(new_binary, self_path);
+        fs::permissions(self_path, fs::perms::owner_exec | fs::perms::owner_read | fs::perms::owner_write
+                                 | fs::perms::group_exec | fs::perms::group_read
+                                 | fs::perms::others_exec | fs::perms::others_read);
+        fs::remove(backup);
+    } catch (const std::exception& e) {
+        std::cerr << "Error replacing binary: " << e.what() << "\n";
+        // Try to restore backup
+        if (fs::exists(backup) && !fs::exists(self_path)) {
+            fs::rename(backup, self_path);
+        }
+        run("rm -rf " + tmp_dir);
+        return 1;
+    }
+
+    run("rm -rf " + tmp_dir);
+
+    std::cout << "\n  \xe2\x9c\x93 Pulp CLI upgraded to v" << version << "\n";
+    return 0;
+}
+
+// ── Run ─────────────────────────────────────────────────────────────────────
+
+static int cmd_run(const std::vector<std::string>& args) {
+    auto root = find_project_root();
+    if (root.empty()) {
+        std::cerr << "Error: not in a Pulp project directory\n";
+        return 1;
+    }
+
+    std::string target_name;
+    std::vector<std::string> pass_through;
+    for (size_t i = 0; i < args.size(); ++i) {
+        if (args[i] == "--help" || args[i] == "-h") {
+            std::cout << "pulp run — launch a standalone Pulp application\n\n";
+            std::cout << "Usage: pulp run [target] [-- args...]\n\n";
+            std::cout << "If no target is specified, finds the first standalone binary in build/examples/.\n";
+            std::cout << "Arguments after -- are passed to the launched application.\n";
+            return 0;
+        }
+        if (args[i] == "--") {
+            for (size_t j = i + 1; j < args.size(); ++j)
+                pass_through.push_back(args[j]);
+            break;
+        }
+        if (target_name.empty() && args[i][0] != '-') {
+            target_name = args[i];
+        }
+    }
+
+    auto build_dir = root / "build";
+    if (!fs::exists(build_dir / "CMakeCache.txt")) {
+        std::cerr << "Error: project not built yet. Run `pulp build` first.\n";
+        return 1;
+    }
+
+    // Find standalone binary
+    fs::path binary;
+
+    if (!target_name.empty()) {
+        // Search for the named target
+        auto examples_dir = build_dir / "examples";
+        if (fs::exists(examples_dir)) {
+            for (auto& dir_entry : fs::directory_iterator(examples_dir)) {
+                if (!dir_entry.is_directory()) continue;
+                for (auto& file : fs::directory_iterator(dir_entry.path())) {
+                    if (!file.is_regular_file()) continue;
+                    auto fname = file.path().filename().string();
+                    // Skip test binaries
+                    if (fname.find("-test") != std::string::npos) continue;
+                    if (fname == target_name || file.path().stem().string() == target_name) {
+                        auto st = fs::status(file.path());
+                        if ((st.permissions() & fs::perms::owner_exec) != fs::perms::none) {
+                            binary = file.path();
+                            break;
+                        }
+                    }
+                }
+                if (!binary.empty()) break;
+            }
+        }
+        if (binary.empty()) {
+            std::cerr << "Error: could not find standalone binary '" << target_name << "' in build/examples/\n";
+            std::cerr << "  Run `pulp build` to build, then try again.\n";
+            return 1;
+        }
+    } else {
+        // Find first standalone executable in build/examples/
+        auto examples_dir = build_dir / "examples";
+        if (fs::exists(examples_dir)) {
+            for (auto& dir_entry : fs::directory_iterator(examples_dir)) {
+                if (!dir_entry.is_directory()) continue;
+                for (auto& file : fs::directory_iterator(dir_entry.path())) {
+                    if (!file.is_regular_file()) continue;
+                    auto fname = file.path().filename().string();
+                    // Skip test binaries and cmake artifacts
+                    if (fname.find("-test") != std::string::npos) continue;
+                    if (fname.find("cmake") != std::string::npos) continue;
+                    if (fname.find(".") != std::string::npos) continue;  // skip files with extensions
+                    auto st = fs::status(file.path());
+                    if ((st.permissions() & fs::perms::owner_exec) != fs::perms::none) {
+                        binary = file.path();
+                        break;
+                    }
+                }
+                if (!binary.empty()) break;
+            }
+        }
+        if (binary.empty()) {
+            std::cerr << "Error: no standalone binary found in build/examples/\n";
+            std::cerr << "  Create one with: pulp new MyApp --type app\n";
+            std::cerr << "  Or build an existing project: pulp build\n";
+            return 1;
+        }
+    }
+
+    std::cout << "Launching " << binary.filename().string() << "...\n";
+
+    std::string cmd = binary.string();
+    for (auto& arg : pass_through) {
+        cmd += " \"" + arg + "\"";
+    }
+
+    return run(cmd);
 }
 
 // ── Docs helpers ────────────────────────────────────────────────────────────
@@ -1706,22 +2120,24 @@ static void print_usage() {
     std::cout << "pulp — Pulp audio plugin framework CLI\n\n";
     std::cout << "Usage: pulp <command> [options]\n\n";
     std::cout << "Commands:\n";
-    std::cout << "  create   Create a new plugin project (scaffold + build + test)\n";
+    std::cout << "  new      Create a new plugin project (scaffold + build + test)\n";
     std::cout << "  inspect  Launch the component inspector\n";
     std::cout << "  design   AI-powered style design (natural language -> token diffs)\n";
     std::cout << "  audit    License and clean-room audit\n";
     std::cout << "  build    Build the project (configure + compile)\n";
+    std::cout << "  run      Launch a standalone Pulp application\n";
     std::cout << "  test     Run the test suite\n";
     std::cout << "  status   Show project status and info\n";
     std::cout << "  validate Run plugin format validators (clap-validator, auval)\n";
     std::cout << "  ship     Sign, package, and check plugins\n";
     std::cout << "  docs     Browse local documentation\n";
     std::cout << "  doctor   Diagnose environment issues (--fix, --ci, --dry-run)\n";
+    std::cout << "  upgrade  Update the Pulp CLI to the latest version\n";
     std::cout << "  clean    Remove build directory\n";
     std::cout << "  help     Show this help\n";
     std::cout << "\nExamples:\n";
-    std::cout << "  pulp create MyPlugin       # Create a new effect plugin\n";
-    std::cout << "  pulp create MySynth --type instrument  # Create an instrument\n";
+    std::cout << "  pulp new MyPlugin          # Create a new effect plugin\n";
+    std::cout << "  pulp new MySynth --type instrument  # Create an instrument\n";
     std::cout << "  pulp doctor             # Check environment for issues\n";
     std::cout << "  pulp doctor --fix       # Auto-fix issues where possible\n";
     std::cout << "  pulp build              # Build all targets\n";
@@ -1739,6 +2155,14 @@ static void print_usage() {
 // ── Main ─────────────────────────────────────────────────────────────────────
 
 int main(int argc, char* argv[]) {
+    // Check for --no-color before anything else
+    for (int i = 1; i < argc; ++i) {
+        if (std::strcmp(argv[i], "--no-color") == 0) {
+            g_no_color = true;
+        }
+    }
+    init_color();
+
     if (argc < 2) {
         print_usage();
         return 0;
@@ -1746,14 +2170,18 @@ int main(int argc, char* argv[]) {
 
     std::string command = argv[1];
     std::vector<std::string> args;
-    for (int i = 2; i < argc; ++i)
+    for (int i = 2; i < argc; ++i) {
+        if (std::strcmp(argv[i], "--no-color") == 0) continue;  // already handled
         args.push_back(argv[i]);
+    }
 
     if (command == "build")    return cmd_build(args);
+    if (command == "run")      return cmd_run(args);
     if (command == "test")     return cmd_test(args);
     if (command == "status")   return cmd_status(args);
     if (command == "validate") return cmd_validate(args);
     if (command == "doctor")   return cmd_doctor(args);
+    if (command == "upgrade")  return cmd_upgrade(args);
     if (command == "ship")     return cmd_ship(args);
     if (command == "docs")     return cmd_docs(args);
     if (command == "clean")    return cmd_clean(args);
@@ -1817,7 +2245,7 @@ int main(int argc, char* argv[]) {
         for (auto& arg : args) cmd += " " + arg;
         return run(cmd);
     }
-    if (command == "create") return cmd_create(args);
+    if (command == "create" || command == "new") return cmd_create(args);
     if (command == "help" || command == "--help" || command == "-h") {
         print_usage();
         return 0;

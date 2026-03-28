@@ -1,0 +1,47 @@
+#include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_approx.hpp>
+#include <pulp/format/headless.hpp>
+#include "{{HEADER_NAME}}"
+
+using Catch::Approx;
+
+TEST_CASE("{{PLUGIN_NAME}} processes audio") {
+    pulp::format::HeadlessHost host({{NAMESPACE}}::create_{{FACTORY_NAME}});
+    host.prepare(48000, 512);
+
+    pulp::audio::Buffer<float> in(2, 512), out(2, 512);
+
+    // Fill input with a test signal
+    for (std::size_t i = 0; i < 512; ++i) {
+        in.channel(0)[i] = 0.5f;
+        in.channel(1)[i] = 0.5f;
+    }
+
+    const float* in_ptrs[] = {in.channel(0).data(), in.channel(1).data()};
+    pulp::audio::BufferView<const float> iv(in_ptrs, 2, 512);
+    auto ov = out.view();
+    host.process(ov, iv);
+
+    // With Gain at 0dB, output should equal input
+    REQUIRE(out.channel(0)[0] == Approx(0.5f));
+}
+
+TEST_CASE("{{PLUGIN_NAME}} has correct descriptor") {
+    pulp::format::HeadlessHost host({{NAMESPACE}}::create_{{FACTORY_NAME}});
+    auto desc = host.descriptor();
+
+    REQUIRE(desc.name == "{{PLUGIN_NAME}}");
+    REQUIRE(desc.manufacturer == "{{MANUFACTURER}}");
+}
+
+TEST_CASE("{{PLUGIN_NAME}} state round-trip") {
+    pulp::format::HeadlessHost host({{NAMESPACE}}::create_{{FACTORY_NAME}});
+    host.prepare(48000, 512);
+
+    host.state().set_value({{NAMESPACE}}::kGain, -12.0f);
+
+    auto data = host.save_state();
+    host.state().set_value({{NAMESPACE}}::kGain, 0.0f);
+    REQUIRE(host.load_state(data));
+    REQUIRE(host.state().get_value({{NAMESPACE}}::kGain) == Approx(-12.0f));
+}
