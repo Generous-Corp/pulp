@@ -174,11 +174,41 @@ docs:
     kind: guide
     summary: WAMv2 and WebCLAP web plugin formats — build, deploy, and browser demo
 
+  - slug: from-react-css
+    path: guides/from-react-css.md
+    kind: guide
+    summary: Migration guide — React/CSS concepts mapped to Pulp widgets and bridge API
+
+  - slug: cookbook
+    path: guides/cookbook.md
+    kind: guide
+    summary: 10 practical recipes — form layout, modal, scroll list, tabs, meter, themes, hover, keys, drag, presets
+
+  - slug: design-tokens
+    path: guides/design-tokens.md
+    kind: guide
+    summary: Theme system — token categories, inheritance, JSON creation, CSS/WGSL/Figma export
+
+  - slug: custom-rendering
+    path: guides/custom-rendering.md
+    kind: guide
+    summary: Three rendering layers — JS canvas, C++ Canvas API, Dawn/WebGPU shaders
+
+  - slug: example-showcase
+    path: examples/showcase.md
+    kind: example
+    summary: Component showcase — every widget type in one screenshot-testable JS file
+
   # Reference
   - slug: cli
     path: reference/cli.md
     kind: reference
     summary: CLI commands and usage
+
+  - slug: js-bridge
+    path: reference/js-bridge.md
+    kind: reference
+    summary: All 111 JS bridge functions — widget creation, layout, styling, events, canvas, animation
 
   - slug: cmake
     path: reference/cmake.md
