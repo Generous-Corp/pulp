@@ -17,6 +17,7 @@
 #include "include/core/SkPixmap.h"
 #include "include/core/SkData.h"
 #include "include/effects/SkRuntimeEffect.h"
+#include "include/effects/SkImageFilters.h"
 
 // Platform font manager
 #ifdef __APPLE__
@@ -199,6 +200,43 @@ Canvas::TextMetrics SkiaCanvas::measure_text_full(const std::string& text) {
     m.descent = sk_metrics.fDescent;  // Skia descent is positive
     m.line_height = -sk_metrics.fAscent + sk_metrics.fDescent + sk_metrics.fLeading;
     return m;
+}
+
+// ── Blur backdrop ────────────────────────────────────────────────────────────
+
+void SkiaCanvas::draw_blurred_backdrop(float x, float y, float w, float h,
+                                        float blur_radius, float corner_radius,
+                                        Color tint) {
+    if (!canvas_) return;
+
+    SkRect rect = SkRect::MakeXYWH(x, y, w, h);
+
+    // Backdrop blur using saveLayer with SkImageFilter
+    auto blur = SkImageFilters::Blur(blur_radius, blur_radius, SkTileMode::kClamp, nullptr);
+
+    canvas_->save();
+    if (corner_radius > 0) {
+        canvas_->clipRRect(SkRRect::MakeRectXY(rect, corner_radius, corner_radius), true);
+    } else {
+        canvas_->clipRect(rect, true);
+    }
+
+    // saveLayer with backdrop blur filter
+    SkPaint layerPaint;
+    layerPaint.setImageFilter(std::move(blur));
+    canvas_->saveLayer(&rect, &layerPaint);
+    canvas_->restore();
+
+    // Tint overlay
+    SkPaint tintPaint;
+    tintPaint.setColor(SkColorSetARGB(tint.a, tint.r, tint.g, tint.b));
+    if (corner_radius > 0) {
+        canvas_->drawRRect(SkRRect::MakeRectXY(rect, corner_radius, corner_radius), tintPaint);
+    } else {
+        canvas_->drawRect(rect, tintPaint);
+    }
+
+    canvas_->restore();
 }
 
 // ── GPU Waveform (SkRuntimeEffect shader-driven) ────────────────────────────

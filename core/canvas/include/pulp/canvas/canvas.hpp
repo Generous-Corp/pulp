@@ -139,6 +139,17 @@ public:
         return m;
     }
 
+    // ── Blur / Backdrop filter ─────────────────────────────────────────
+    /// Save a blurred snapshot of the current canvas content as a backdrop.
+    /// Call before painting the overlay content.
+    virtual void draw_blurred_backdrop(float x, float y, float w, float h,
+                                       float blur_radius, float corner_radius = 0,
+                                       Color tint = {0, 0, 0, 80}) {
+        // CPU fallback: just draw a semi-transparent rect (no blur)
+        set_fill_color(tint);
+        fill_rounded_rect(x, y, w, h, corner_radius);
+    }
+
     // ── Waveform (GPU-accelerated) ─────────────────────────────────────
     /// Draw a waveform using GPU shader (SDF anti-aliased line + fill).
     /// Samples are normalized -1 to 1. Default implementation falls back to polyline.
