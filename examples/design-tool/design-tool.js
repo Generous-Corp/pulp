@@ -82,6 +82,7 @@ setFlex("main-area", "flex_grow", 1);
 // ── LEFT PANEL (Token Browser) ───────────────────────────────────
 createCol("left-panel", "main-area");
 setFlex("left-panel", "width", 310);
+setFlex("left-panel", "min_width", 260);
 setFlex("left-panel", "flex_shrink", 0);
 setFlex("left-panel", "padding", 0);
 setBackground("left-panel", APP_SURFACE);
@@ -272,51 +273,13 @@ setFlex("center-panel", "padding", 20);
 setFlex("center-panel", "gap", 12);
 setBackground("center-panel", APP_BG);
 
-// Plugin chrome (rounded card with traffic lights)
-createCol("plugin-chrome", "center-panel");
-setFlex("plugin-chrome", "flex_grow", 1);
-setBorder("plugin-chrome", APP_BORDER, 1, 12);
-setBackground("plugin-chrome", APP_PANEL);
-setFlex("plugin-chrome", "padding", 0);
-
-// Chrome title bar
-createRow("chrome-titlebar", "plugin-chrome");
-setFlex("chrome-titlebar", "height", 32);
-setFlex("chrome-titlebar", "padding_left", 12);
-setFlex("chrome-titlebar", "padding_right", 12);
-setFlex("chrome-titlebar", "align_items", "center");
-setFlex("chrome-titlebar", "gap", 8);
-setBackground("chrome-titlebar", "#1a1a22");
-setBorder("chrome-titlebar", APP_BORDER, 0, 12);
-
-// Traffic lights
-createCol("tl-close", "chrome-titlebar");
-setFlex("tl-close", "width", 12);
-setFlex("tl-close", "height", 12);
-setBackground("tl-close", "#ff5f57");
-setBorder("tl-close", "#e04040", 0, 6);
-
-createCol("tl-min", "chrome-titlebar");
-setFlex("tl-min", "width", 12);
-setFlex("tl-min", "height", 12);
-setBackground("tl-min", "#ffbd2e");
-setBorder("tl-min", "#d4a020", 0, 6);
-
-createCol("tl-max", "chrome-titlebar");
-setFlex("tl-max", "width", 12);
-setFlex("tl-max", "height", 12);
-setBackground("tl-max", "#28c840");
-setBorder("tl-max", "#20a835", 0, 6);
-
-createLabel("chrome-title", "Plugin Preview", "chrome-titlebar");
-setFontSize("chrome-title", 11);
-setTextColor("chrome-title", APP_TEXT_DIM);
-
-// Preview content area
-createCol("preview-area", "plugin-chrome");
+// Preview content area (flush to top, no fake title bar)
+createCol("preview-area", "center-panel");
 setFlex("preview-area", "flex_grow", 1);
 setFlex("preview-area", "padding", 12);
 setFlex("preview-area", "gap", 10);
+setBackground("preview-area", APP_PANEL);
+setBorder("preview-area", APP_BORDER, 1, 4);
 
 // Foundations section: bg swatches + text hierarchy
 createLabel("foundations-header", "Foundations", "preview-area");
@@ -414,41 +377,49 @@ setFlex("btn-row", "height", 32);
 setFlex("btn-row", "align_items", "center");
 
 createCol("btn-normal", "btn-row");
-setFlex("btn-normal", "width", 72);
+setFlex("btn-normal", "flex_grow", 1);
 setFlex("btn-normal", "height", 28);
 setBackground("btn-normal", "#3a3a4c");
 setBorder("btn-normal", APP_BORDER, 1, 6);
+setFlex("btn-normal", "justify_content", "center");
+setFlex("btn-normal", "align_items", "center");
 createLabel("btn-normal-label", "Normal", "btn-normal");
 setFontSize("btn-normal-label", 11);
-setFlex("btn-normal-label", "padding", 6);
+setFlex("btn-normal-label", "height", 16);
 
 createCol("btn-hover", "btn-row");
-setFlex("btn-hover", "width", 72);
+setFlex("btn-hover", "flex_grow", 1);
 setFlex("btn-hover", "height", 28);
 setBackground("btn-hover", "#4a4a5c");
 setBorder("btn-hover", APP_BORDER, 1, 6);
+setFlex("btn-hover", "justify_content", "center");
+setFlex("btn-hover", "align_items", "center");
 createLabel("btn-hover-label", "Hover", "btn-hover");
 setFontSize("btn-hover-label", 11);
-setFlex("btn-hover-label", "padding", 6);
+setFlex("btn-hover-label", "height", 16);
 
 createCol("btn-action", "btn-row");
-setFlex("btn-action", "width", 72);
+setFlex("btn-action", "flex_grow", 1);
 setFlex("btn-action", "height", 28);
 setBackground("btn-action", APP_ACCENT);
 setBorder("btn-action", APP_ACCENT, 0, 6);
+setFlex("btn-action", "justify_content", "center");
+setFlex("btn-action", "align_items", "center");
 createLabel("btn-action-label", "Action", "btn-action");
 setFontSize("btn-action-label", 11);
-setFlex("btn-action-label", "padding", 6);
+setFlex("btn-action-label", "height", 16);
 
 createCol("btn-disabled", "btn-row");
-setFlex("btn-disabled", "width", 72);
+setFlex("btn-disabled", "flex_grow", 1);
 setFlex("btn-disabled", "height", 28);
 setBackground("btn-disabled", "#2a2a36");
 setBorder("btn-disabled", APP_BORDER, 1, 6);
 setOpacity("btn-disabled", 0.5);
+setFlex("btn-disabled", "justify_content", "center");
+setFlex("btn-disabled", "align_items", "center");
 createLabel("btn-disabled-label", "Disabled", "btn-disabled");
 setFontSize("btn-disabled-label", 11);
-setFlex("btn-disabled-label", "padding", 6);
+setFlex("btn-disabled-label", "height", 16);
 setTextColor("btn-disabled-label", APP_TEXT_DIM);
 
 // Toggles + checkbox row
@@ -458,17 +429,21 @@ setFlex("toggle-row", "height", 28);
 setFlex("toggle-row", "align_items", "center");
 
 createToggle("t1", "toggle-row");
-setFlex("t1", "width", 44);
-setFlex("t1", "height", 24);
+setFlex("t1", "width", 36);
+setFlex("t1", "height", 20);
 setValue("t1", 1);
 
-createToggle("t2", "toggle-row");
-setFlex("t2", "width", 44);
-setFlex("t2", "height", 24);
+createLabel("toggle-on-label", "Enabled", "toggle-row");
+setFontSize("toggle-on-label", 11);
+setFlex("toggle-on-label", "width", 54);
 
-createLabel("toggle-label", "Toggle", "toggle-row");
-setFontSize("toggle-label", 11);
-setFlex("toggle-label", "width", 50);
+createToggle("t2", "toggle-row");
+setFlex("t2", "width", 36);
+setFlex("t2", "height", 20);
+
+createLabel("toggle-off-label", "Disabled", "toggle-row");
+setFontSize("toggle-off-label", 11);
+setFlex("toggle-off-label", "width", 56);
 
 // Text input + Placeholder + Combo preview
 createRow("input-row", "preview-area");
@@ -596,16 +571,41 @@ setFlex("right-tabs", "gap", 0);
 setBackground("right-tabs", APP_PANEL);
 setBorder("right-tabs", APP_BORDER, 1, 0);
 
-createLabel("tab-inspector", "Inspector", "right-tabs");
-setFontSize("tab-inspector", 12);
-setFlex("tab-inspector", "flex_grow", 1);
-setFlex("tab-inspector", "padding", 10);
+// Tab columns (label + underline indicator)
+createCol("tab-inspector-col", "right-tabs");
+setFlex("tab-inspector-col", "flex_grow", 1);
+setFlex("tab-inspector-col", "height", 36);
+setFlex("tab-inspector-col", "align_items", "center");
+setFlex("tab-inspector-col", "justify_content", "center");
+setFlex("tab-inspector-col", "gap", 0);
 
-createLabel("tab-chat", "Chat", "right-tabs");
-setFontSize("tab-chat", 12);
-setFlex("tab-chat", "flex_grow", 1);
-setFlex("tab-chat", "padding", 10);
+createLabel("tab-inspector", "INSPECTOR", "tab-inspector-col");
+setFontSize("tab-inspector", 11);
+setFlex("tab-inspector", "height", 28);
+setFlex("tab-inspector", "padding", 8);
+setTextColor("tab-inspector", APP_TEXT_DIM);
+
+createCol("tab-inspector-line", "tab-inspector-col");
+setFlex("tab-inspector-line", "height", 2);
+setFlex("tab-inspector-line", "width", 80);
+
+createCol("tab-chat-col", "right-tabs");
+setFlex("tab-chat-col", "flex_grow", 1);
+setFlex("tab-chat-col", "height", 36);
+setFlex("tab-chat-col", "align_items", "center");
+setFlex("tab-chat-col", "justify_content", "center");
+setFlex("tab-chat-col", "gap", 0);
+
+createLabel("tab-chat", "CHAT", "tab-chat-col");
+setFontSize("tab-chat", 11);
+setFlex("tab-chat", "height", 28);
+setFlex("tab-chat", "padding", 8);
 setTextColor("tab-chat", APP_ACCENT);
+
+createCol("tab-chat-line", "tab-chat-col");
+setFlex("tab-chat-line", "height", 2);
+setFlex("tab-chat-line", "width", 80);
+setBackground("tab-chat-line", APP_ACCENT);
 
 // Inspector content area (hidden by default)
 createCol("inspector-area", "right-panel");
@@ -666,21 +666,25 @@ function switchTab(tab) {
         setVisible("chat-area", true);
         setVisible("inspector-area", false);
         setTextColor("tab-chat", APP_ACCENT);
-        setTextColor("tab-inspector", APP_TEXT);
+        setBackground("tab-chat-line", APP_ACCENT);
+        setTextColor("tab-inspector", APP_TEXT_DIM);
+        setBackground("tab-inspector-line", "transparent");
     } else {
         setVisible("chat-area", false);
         setVisible("inspector-area", true);
         setTextColor("tab-inspector", APP_ACCENT);
-        setTextColor("tab-chat", APP_TEXT);
+        setBackground("tab-inspector-line", APP_ACCENT);
+        setTextColor("tab-chat", APP_TEXT_DIM);
+        setBackground("tab-chat-line", "transparent");
     }
     layout();
 }
 
 // Tab switching via registerClick + on() click events
-registerClick("tab-inspector");
-registerClick("tab-chat");
-on("tab-inspector", "click", function() { switchTab("inspector"); });
-on("tab-chat", "click", function() { switchTab("chat"); });
+registerClick("tab-inspector-col");
+registerClick("tab-chat-col");
+on("tab-inspector-col", "click", function() { switchTab("inspector"); });
+on("tab-chat-col", "click", function() { switchTab("chat"); });
 
 // Chat content area
 createCol("chat-area", "right-panel");

@@ -76,7 +76,9 @@ void Label::paint(canvas::Canvas& canvas) {
     canvas.set_fill_color({text_color.r, text_color.g, text_color.b, text_color.a});
     canvas.set_font("Inter", font_size_);
     canvas.set_text_align(canvas::TextAlign::left);
-    canvas.fill_text(text_, 0, bounds().height * 0.5f);
+    // Baseline positioned for visual centering: center + ~35% of font size for descender offset
+    float baseline_y = bounds().height * 0.5f + font_size_ * 0.35f;
+    canvas.fill_text(text_, 0, baseline_y);
 }
 
 // ── Knob ─────────────────────────────────────────────────────────────────────
