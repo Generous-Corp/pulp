@@ -17,6 +17,9 @@
 #include "include/core/SkPixmap.h"
 #include "include/core/SkData.h"
 #include "include/effects/SkRuntimeEffect.h"
+#include "include/effects/SkGradientShader.h"
+#include "include/core/SkPathBuilder.h"
+#include "include/core/SkBlendMode.h"
 #include "include/effects/SkImageFilters.h"
 
 // Platform font manager
@@ -200,6 +203,110 @@ Canvas::TextMetrics SkiaCanvas::measure_text_full(const std::string& text) {
     m.descent = sk_metrics.fDescent;  // Skia descent is positive
     m.line_height = -sk_metrics.fAscent + sk_metrics.fDescent + sk_metrics.fLeading;
     return m;
+}
+
+// ── Gradients ────────────────────────────────────────────────────────────────
+
+static void colors_to_skia(const Color* colors, const float* positions, int count,
+                            std::vector<SkColor>& sk_colors, std::vector<SkScalar>& sk_pos) {
+    sk_colors.resize(static_cast<size_t>(count));
+    sk_pos.resize(static_cast<size_t>(count));
+    for (int i = 0; i < count; ++i) {
+        sk_colors[static_cast<size_t>(i)] = SkColorSetARGB(colors[i].a, colors[i].r, colors[i].g, colors[i].b);
+        sk_pos[static_cast<size_t>(i)] = positions[i];
+    }
+}
+
+void SkiaCanvas::set_fill_gradient_linear(float x0, float y0, float x1, float y1,
+                                           const Color* colors, const float* positions, int count) {
+    std::vector<SkColor> sk_colors;
+    std::vector<SkScalar> sk_pos;
+    colors_to_skia(colors, positions, count, sk_colors, sk_pos);
+    SkPoint pts[2] = {{x0, y0}, {x1, y1}};
+    gradient_shader_ = SkGradientShader::MakeLinear(pts, sk_colors.data(), sk_pos.data(), count,
+                                                     SkTileMode::kClamp);
+    has_gradient_ = gradient_shader_ != nullptr;
+}
+
+void SkiaCanvas::set_fill_gradient_radial(float cx, float cy, float radius,
+                                           const Color* colors, const float* positions, int count) {
+    std::vector<SkColor> sk_colors;
+    std::vector<SkScalar> sk_pos;
+    colors_to_skia(colors, positions, count, sk_colors, sk_pos);
+    gradient_shader_ = SkGradientShader::MakeRadial({cx, cy}, radius, sk_colors.data(),
+                                                     sk_pos.data(), count, SkTileMode::kClamp);
+    has_gradient_ = gradient_shader_ != nullptr;
+}
+
+void SkiaCanvas::clear_fill_gradient() {
+    gradient_shader_ = nullptr;
+    has_gradient_ = false;
+}
+
+// ── Blend modes ─────────────────────────────────────────────────────────────
+
+void SkiaCanvas::set_blend_mode(BlendMode mode) {
+    static const SkBlendMode map[] = {
+        SkBlendMode::kSrcOver, SkBlendMode::kMultiply, SkBlendMode::kScreen,
+        SkBlendMode::kOverlay, SkBlendMode::kDarken, SkBlendMode::kLighten,
+        SkBlendMode::kColorDodge, SkBlendMode::kColorBurn, SkBlendMode::kHardLight,
+        SkBlendMode::kSoftLight, SkBlendMode::kDifference, SkBlendMode::kExclusion,
+        SkBlendMode::kHue, SkBlendMode::kSaturation, SkBlendMode::kColor,
+        SkBlendMode::kLuminosity
+    };
+    blend_mode_ = map[static_cast<int>(mode)];
+}
+
+// ── Path building ───────────────────────────────────────────────────────────
+
+void SkiaCanvas::begin_path() {
+    path_builder_ = std::make_unique<SkPathBuilder>();
+}
+
+void SkiaCanvas::move_to(float x, float y) {
+    if (path_builder_) path_builder_->moveTo(x, y);
+}
+
+void SkiaCanvas::line_to(float x, float y) {
+    if (path_builder_) path_builder_->lineTo(x, y);
+}
+
+void SkiaCanvas::quad_to(float cpx, float cpy, float x, float y) {
+    if (path_builder_) path_builder_->quadTo(cpx, cpy, x, y);
+}
+
+void SkiaCanvas::cubic_to(float cp1x, float cp1y, float cp2x, float cp2y, float x, float y) {
+    if (path_builder_) path_builder_->cubicTo(cp1x, cp1y, cp2x, cp2y, x, y);
+}
+
+void SkiaCanvas::close_path() {
+    if (path_builder_) path_builder_->close();
+}
+
+void SkiaCanvas::fill_current_path() {
+    if (!canvas_ || !path_builder_) return;
+    SkPaint paint;
+    paint.setAntiAlias(true);
+    if (has_gradient_ && gradient_shader_) {
+        paint.setShader(gradient_shader_);
+    } else {
+        paint.setColor(SkColorSetARGB(fill_color_.a, fill_color_.r, fill_color_.g, fill_color_.b));
+    }
+    paint.setBlendMode(blend_mode_);
+    canvas_->drawPath(path_builder_->detach(), paint);
+}
+
+void SkiaCanvas::stroke_current_path() {
+    if (!canvas_ || !path_builder_) return;
+    SkPaint paint;
+    paint.setAntiAlias(true);
+    paint.setStyle(SkPaint::kStroke_Style);
+    paint.setColor(SkColorSetARGB(stroke_color_.r, stroke_color_.g, stroke_color_.b, stroke_color_.a));
+    // Fix: ARGB order
+    paint.setColor(SkColorSetARGB(stroke_color_.a, stroke_color_.r, stroke_color_.g, stroke_color_.b));
+    paint.setStrokeWidth(line_width_);
+    paint.setBlendMode(blend_mode_);
+    canvas_->drawPath(path_builder_->detach(), paint);
 }
 
 // ── GPU SDF Shape Primitives ─────────────────────────────────────────────────

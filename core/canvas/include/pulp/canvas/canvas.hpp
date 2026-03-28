@@ -79,6 +79,64 @@ public:
     virtual void set_line_cap(LineCap cap) = 0;
     virtual void set_line_join(LineJoin join) = 0;
 
+    // ── Gradients ────────────────────────────────────────────────────────
+    /// Set a linear gradient as the fill paint.
+    virtual void set_fill_gradient_linear(float x0, float y0, float x1, float y1,
+                                          const Color* colors, const float* positions,
+                                          int count) {
+        if (count > 0) set_fill_color(colors[0]); // fallback: first color
+    }
+
+    /// Set a radial gradient as the fill paint.
+    virtual void set_fill_gradient_radial(float cx, float cy, float radius,
+                                          const Color* colors, const float* positions,
+                                          int count) {
+        if (count > 0) set_fill_color(colors[0]);
+    }
+
+    /// Clear gradient, return to solid fill color.
+    virtual void clear_fill_gradient() {}
+
+    // ── Blend modes ─────────────────────────────────────────────────────
+    enum class BlendMode {
+        normal, multiply, screen, overlay, darken, lighten,
+        color_dodge, color_burn, hard_light, soft_light,
+        difference, exclusion, hue, saturation, color, luminosity
+    };
+
+    /// Set the compositing blend mode for subsequent draw operations.
+    virtual void set_blend_mode(BlendMode mode) { (void)mode; }
+
+    // ── Path building ───────────────────────────────────────────────────
+    /// Begin a new path.
+    virtual void begin_path() {}
+    /// Move the pen to (x, y) without drawing.
+    virtual void move_to(float x, float y) { (void)x; (void)y; }
+    /// Add a line segment to (x, y).
+    virtual void line_to(float x, float y) { (void)x; (void)y; }
+    /// Add a quadratic bezier curve to (x, y) with control point (cpx, cpy).
+    virtual void quad_to(float cpx, float cpy, float x, float y) {
+        (void)cpx; (void)cpy; line_to(x, y); // fallback: straight line
+    }
+    /// Add a cubic bezier curve.
+    virtual void cubic_to(float cp1x, float cp1y, float cp2x, float cp2y,
+                          float x, float y) {
+        (void)cp1x; (void)cp1y; (void)cp2x; (void)cp2y; line_to(x, y);
+    }
+    /// Close the current path subpath.
+    virtual void close_path() {}
+    /// Fill the current path.
+    virtual void fill_current_path() {}
+    /// Stroke the current path.
+    virtual void stroke_current_path() {}
+
+    // ── Bloom / Glow post-effect ────────────────────────────────────────
+    /// Apply bloom/glow effect to the current layer.
+    /// intensity: glow strength (0=none, 1=full), threshold: brightness cutoff (0-1).
+    virtual void set_bloom(float intensity, float threshold = 0.7f) {
+        (void)intensity; (void)threshold;
+    }
+
     // ── Shapes ───────────────────────────────────────────────────────────
     virtual void fill_rect(float x, float y, float w, float h) = 0;
     virtual void stroke_rect(float x, float y, float w, float h) = 0;

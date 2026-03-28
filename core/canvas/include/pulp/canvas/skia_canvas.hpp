@@ -9,6 +9,12 @@ class SkCanvas;
 class SkSurface;
 class SkFont;
 class SkPaint;
+class SkPathBuilder;
+
+// These need full definitions for member variables
+#include "include/core/SkRefCnt.h"
+#include "include/core/SkBlendMode.h"
+class SkShader;
 
 namespace pulp::canvas {
 
@@ -63,6 +69,27 @@ public:
     void draw_waveform(const float* samples, size_t count,
                        float x, float y, float width, float height,
                        const WaveformStyle& style) override;
+    // Gradients
+    void set_fill_gradient_linear(float x0, float y0, float x1, float y1,
+                                   const Color* colors, const float* positions, int count) override;
+    void set_fill_gradient_radial(float cx, float cy, float radius,
+                                   const Color* colors, const float* positions, int count) override;
+    void clear_fill_gradient() override;
+
+    // Blend modes
+    void set_blend_mode(BlendMode mode) override;
+
+    // Path building
+    void begin_path() override;
+    void move_to(float x, float y) override;
+    void line_to(float x, float y) override;
+    void quad_to(float cpx, float cpy, float x, float y) override;
+    void cubic_to(float cp1x, float cp1y, float cp2x, float cp2y, float x, float y) override;
+    void close_path() override;
+    void fill_current_path() override;
+    void stroke_current_path() override;
+
+    // SDF shapes
     void draw_sdf_shape(SDFShape shape, float x, float y, float w, float h,
                         const SDFStyle& style) override;
     void draw_blurred_backdrop(float x, float y, float w, float h,
@@ -78,6 +105,16 @@ private:
     LineJoin line_join_ = LineJoin::miter;
     std::string font_family_ = "sans-serif";
     TextAlign text_align_ = TextAlign::left;
+
+    // Gradient state
+    bool has_gradient_ = false;
+    sk_sp<SkShader> gradient_shader_;
+
+    // Path building state
+    std::unique_ptr<SkPathBuilder> path_builder_;
+
+    // Blend mode
+    SkBlendMode blend_mode_ = SkBlendMode::kSrcOver;
 };
 
 } // namespace pulp::canvas
