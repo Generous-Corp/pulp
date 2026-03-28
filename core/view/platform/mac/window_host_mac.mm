@@ -80,22 +80,20 @@ static void install_app_menu(NSString* appName) {
     me.position = pt;
     me.is_wheel = true;
     me.scroll_delta_x = static_cast<float>(event.scrollingDeltaX);
-    me.scroll_delta_y = static_cast<float>(-event.scrollingDeltaY); // flip for natural scroll
+    me.scroll_delta_y = static_cast<float>(-event.scrollingDeltaY);
 
     // Walk up from target to find nearest ScrollView ancestor
     auto* v = target;
     while (v) {
         if (auto* sv = dynamic_cast<pulp::view::ScrollView*>(v)) {
             sv->on_mouse_event(me);
-            [self startAnimationTimerIfNeeded];
+            sv->layout_children();  // re-layout after scroll position change
             [self setNeedsDisplay:YES];
             return;
         }
         v = v->parent();
     }
-    // No ScrollView found, send to target anyway
     target->on_mouse_event(me);
-    [self startAnimationTimerIfNeeded];
     [self setNeedsDisplay:YES];
 }
 
