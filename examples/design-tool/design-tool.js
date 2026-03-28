@@ -166,7 +166,7 @@ var tokenGroups = [
 for (var g = 0; g < tokenGroups.length; g++) {
     var group = tokenGroups[g];
     var gid = "tg-" + g;
-    var groupHeight = 4 + 14 + 2 + group.tokens.length * 26; // padding_top + title + gap + tokens*(height+gap)
+    var groupHeight = 4 + 18 + 2 + group.tokens.length * 26; // padding_top + title + gap + tokens*(height+gap)
     createCol(gid, "token-list");
     setFlex(gid, "height", groupHeight);
     setFlex(gid, "padding_left", 10);
@@ -177,7 +177,7 @@ for (var g = 0; g < tokenGroups.length; g++) {
     createLabel(gid + "-title", group.name, gid);
     setFontSize(gid + "-title", 10);
     setTextColor(gid + "-title", APP_TEXT_DIM);
-    setFlex(gid + "-title", "height", 14);
+    setFlex(gid + "-title", "height", 18);
 
     for (var t = 0; t < group.tokens.length; t++) {
         var tid = "tok-" + g + "-" + t;

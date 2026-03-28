@@ -47,6 +47,8 @@ public:
     void on_mouse_event(const MouseEvent& event) override;
     bool on_key_event(const KeyEvent& event) override;
 
+    void on_text_input(const TextInputEvent& event) override;
+
     bool is_open() const { return open_; }
 
     /// Close any currently open ComboBox (call before opening a new one).
