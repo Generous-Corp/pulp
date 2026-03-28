@@ -613,9 +613,10 @@ setFlex("tab-inspector", "height", 28);
 setFlex("tab-inspector", "padding", 8);
 setTextColor("tab-inspector", APP_TEXT_DIM);
 
+// Full-width underline indicator (matches original HTML styling)
 createCol("tab-inspector-line", "tab-inspector-col");
 setFlex("tab-inspector-line", "height", 2);
-setFlex("tab-inspector-line", "width", 80);
+setFlex("tab-inspector-line", "flex_grow", 1);
 
 createCol("tab-chat-col", "right-tabs");
 setFlex("tab-chat-col", "flex_grow", 1);
@@ -632,7 +633,7 @@ setTextColor("tab-chat", APP_ACCENT);
 
 createCol("tab-chat-line", "tab-chat-col");
 setFlex("tab-chat-line", "height", 2);
-setFlex("tab-chat-line", "width", 80);
+setFlex("tab-chat-line", "flex_grow", 1);
 setBackground("tab-chat-line", APP_ACCENT);
 
 // Inspector content area (hidden by default)
