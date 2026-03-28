@@ -1038,15 +1038,214 @@ void WidgetBridge::register_api() {
         return choc::value::Value();
     });
 
-    engine_.register_function("canvasRect", [this](choc::javascript::ArgumentList args) {
+    // Canvas 2D API — full CanvasRenderingContext2D equivalent
+    // Helper to get CanvasWidget and add a command
+    auto canvasCmd = [this](choc::javascript::ArgumentList& args, CanvasDrawCmd::Type type) -> CanvasWidget* {
+        auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")));
+        return c;
+    };
+
+    engine_.register_function("canvasRect", [this, parseColor](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::fill_rect;
             cmd.x=(float)args.get<double>(1,0); cmd.y=(float)args.get<double>(2,0);
             cmd.w=(float)args.get<double>(3,0); cmd.h=(float)args.get<double>(4,0);
-            auto h = args.get<std::string>(5,"#fff");
-            if (h.size()>=7) { cmd.color.r=(uint8_t)std::stoul(h.substr(1,2),0,16);
-                cmd.color.g=(uint8_t)std::stoul(h.substr(3,2),0,16);
-                cmd.color.b=(uint8_t)std::stoul(h.substr(5,2),0,16); cmd.color.a=255; }
+            cmd.color = parseColor(args.get<std::string>(5, "#fff"));
+            c->add_command(cmd);
+        }
+        return choc::value::Value();
+    });
+
+    engine_.register_function("canvasStrokeRect", [this, parseColor](choc::javascript::ArgumentList args) {
+        if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
+            CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::stroke_rect;
+            cmd.x=(float)args.get<double>(1,0); cmd.y=(float)args.get<double>(2,0);
+            cmd.w=(float)args.get<double>(3,0); cmd.h=(float)args.get<double>(4,0);
+            cmd.color = parseColor(args.get<std::string>(5, "#fff"));
+            cmd.extra = (float)args.get<double>(6, 1);
+            c->add_command(cmd);
+        }
+        return choc::value::Value();
+    });
+
+    engine_.register_function("canvasFillCircle", [this, parseColor](choc::javascript::ArgumentList args) {
+        if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
+            CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::fill_circle;
+            cmd.x=(float)args.get<double>(1,0); cmd.y=(float)args.get<double>(2,0);
+            cmd.extra=(float)args.get<double>(3,10);
+            cmd.color = parseColor(args.get<std::string>(4, "#fff"));
+            c->add_command(cmd);
+        }
+        return choc::value::Value();
+    });
+
+    engine_.register_function("canvasStrokeLine", [this, parseColor](choc::javascript::ArgumentList args) {
+        if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
+            CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::stroke_line;
+            cmd.x=(float)args.get<double>(1,0); cmd.y=(float)args.get<double>(2,0);
+            cmd.w=(float)args.get<double>(3,0); cmd.h=(float)args.get<double>(4,0);
+            cmd.color = parseColor(args.get<std::string>(5, "#fff"));
+            cmd.extra=(float)args.get<double>(6, 1);
+            c->add_command(cmd);
+        }
+        return choc::value::Value();
+    });
+
+    engine_.register_function("canvasFillText", [this, parseColor](choc::javascript::ArgumentList args) {
+        if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
+            CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::fill_text;
+            cmd.text = args.get<std::string>(1, "");
+            cmd.x=(float)args.get<double>(2,0); cmd.y=(float)args.get<double>(3,0);
+            cmd.extra=(float)args.get<double>(4, 14);
+            cmd.color = parseColor(args.get<std::string>(5, "#fff"));
+            c->add_command(cmd);
+        }
+        return choc::value::Value();
+    });
+
+    engine_.register_function("canvasSetFillColor", [this, parseColor](choc::javascript::ArgumentList args) {
+        if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
+            CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::set_fill_color;
+            cmd.color = parseColor(args.get<std::string>(1, "#fff"));
+            c->add_command(cmd);
+        }
+        return choc::value::Value();
+    });
+
+    engine_.register_function("canvasSetStrokeColor", [this, parseColor](choc::javascript::ArgumentList args) {
+        if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
+            CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::set_stroke_color;
+            cmd.color = parseColor(args.get<std::string>(1, "#fff"));
+            c->add_command(cmd);
+        }
+        return choc::value::Value();
+    });
+
+    engine_.register_function("canvasSetLineWidth", [this](choc::javascript::ArgumentList args) {
+        if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
+            CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::set_line_width;
+            cmd.extra = (float)args.get<double>(1, 1);
+            c->add_command(cmd);
+        }
+        return choc::value::Value();
+    });
+
+    engine_.register_function("canvasSetFont", [this](choc::javascript::ArgumentList args) {
+        if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
+            CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::set_font;
+            cmd.text = args.get<std::string>(1, "Inter");
+            cmd.extra = (float)args.get<double>(2, 14);
+            c->add_command(cmd);
+        }
+        return choc::value::Value();
+    });
+
+    // Path operations
+    engine_.register_function("canvasBeginPath", [this](choc::javascript::ArgumentList args) {
+        if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
+            CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::begin_path; c->add_command(cmd);
+        }
+        return choc::value::Value();
+    });
+
+    engine_.register_function("canvasMoveTo", [this](choc::javascript::ArgumentList args) {
+        if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
+            CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::move_to;
+            cmd.x=(float)args.get<double>(1,0); cmd.y=(float)args.get<double>(2,0);
+            c->add_command(cmd);
+        }
+        return choc::value::Value();
+    });
+
+    engine_.register_function("canvasLineTo", [this](choc::javascript::ArgumentList args) {
+        if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
+            CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::line_to;
+            cmd.x=(float)args.get<double>(1,0); cmd.y=(float)args.get<double>(2,0);
+            c->add_command(cmd);
+        }
+        return choc::value::Value();
+    });
+
+    engine_.register_function("canvasQuadTo", [this](choc::javascript::ArgumentList args) {
+        if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
+            CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::quad_to;
+            cmd.x=(float)args.get<double>(1,0); cmd.y=(float)args.get<double>(2,0);
+            cmd.x2=(float)args.get<double>(3,0); cmd.y2=(float)args.get<double>(4,0);
+            c->add_command(cmd);
+        }
+        return choc::value::Value();
+    });
+
+    engine_.register_function("canvasCubicTo", [this](choc::javascript::ArgumentList args) {
+        if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
+            CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::cubic_to;
+            cmd.x=(float)args.get<double>(1,0); cmd.y=(float)args.get<double>(2,0);
+            cmd.x2=(float)args.get<double>(3,0); cmd.y2=(float)args.get<double>(4,0);
+            cmd.x3=(float)args.get<double>(5,0); cmd.y3=(float)args.get<double>(6,0);
+            c->add_command(cmd);
+        }
+        return choc::value::Value();
+    });
+
+    engine_.register_function("canvasClosePath", [this](choc::javascript::ArgumentList args) {
+        if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
+            CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::close_path; c->add_command(cmd);
+        }
+        return choc::value::Value();
+    });
+
+    engine_.register_function("canvasFillPath", [this](choc::javascript::ArgumentList args) {
+        if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
+            CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::fill_path; c->add_command(cmd);
+        }
+        return choc::value::Value();
+    });
+
+    engine_.register_function("canvasStrokePath", [this](choc::javascript::ArgumentList args) {
+        if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
+            CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::stroke_path; c->add_command(cmd);
+        }
+        return choc::value::Value();
+    });
+
+    // State
+    engine_.register_function("canvasSave", [this](choc::javascript::ArgumentList args) {
+        if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
+            CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::save; c->add_command(cmd);
+        }
+        return choc::value::Value();
+    });
+
+    engine_.register_function("canvasRestore", [this](choc::javascript::ArgumentList args) {
+        if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
+            CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::restore; c->add_command(cmd);
+        }
+        return choc::value::Value();
+    });
+
+    // Transform
+    engine_.register_function("canvasTranslate", [this](choc::javascript::ArgumentList args) {
+        if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
+            CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::translate;
+            cmd.x=(float)args.get<double>(1,0); cmd.y=(float)args.get<double>(2,0);
+            c->add_command(cmd);
+        }
+        return choc::value::Value();
+    });
+
+    engine_.register_function("canvasScale", [this](choc::javascript::ArgumentList args) {
+        if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
+            CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::scale;
+            cmd.x=(float)args.get<double>(1,1); cmd.y=(float)args.get<double>(2,1);
+            c->add_command(cmd);
+        }
+        return choc::value::Value();
+    });
+
+    engine_.register_function("canvasRotate", [this](choc::javascript::ArgumentList args) {
+        if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
+            CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::rotate;
+            cmd.extra=(float)args.get<double>(1,0);
             c->add_command(cmd);
         }
         return choc::value::Value();
