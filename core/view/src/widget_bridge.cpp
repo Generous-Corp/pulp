@@ -657,6 +657,53 @@ void WidgetBridge::register_api() {
         return choc::value::Value();
     });
 
+    // Typography properties
+    engine_.register_function("setFontWeight", [this](choc::javascript::ArgumentList args) {
+        auto* v = widget(args.get<std::string>(0, ""));
+        int w = static_cast<int>(args.get<double>(1, 400));
+        if (auto* l = dynamic_cast<Label*>(v)) l->set_font_weight(w);
+        return choc::value::Value();
+    });
+
+    engine_.register_function("setFontStyle", [this](choc::javascript::ArgumentList args) {
+        auto* v = widget(args.get<std::string>(0, ""));
+        auto s = args.get<std::string>(1, "normal");
+        if (auto* l = dynamic_cast<Label*>(v)) l->set_font_style(s == "italic" ? 1 : 0);
+        return choc::value::Value();
+    });
+
+    engine_.register_function("setLetterSpacing", [this](choc::javascript::ArgumentList args) {
+        auto* v = widget(args.get<std::string>(0, ""));
+        auto sp = static_cast<float>(args.get<double>(1, 0));
+        if (auto* l = dynamic_cast<Label*>(v)) l->set_letter_spacing(sp);
+        return choc::value::Value();
+    });
+
+    engine_.register_function("setLineHeight", [this](choc::javascript::ArgumentList args) {
+        auto* v = widget(args.get<std::string>(0, ""));
+        auto lh = static_cast<float>(args.get<double>(1, 0));
+        if (auto* l = dynamic_cast<Label*>(v)) l->set_line_height(lh);
+        return choc::value::Value();
+    });
+
+    engine_.register_function("setTextAlign", [this](choc::javascript::ArgumentList args) {
+        auto* v = widget(args.get<std::string>(0, ""));
+        auto a = args.get<std::string>(1, "left");
+        if (auto* l = dynamic_cast<Label*>(v)) {
+            if (a == "center") l->set_text_align(LabelAlign::center);
+            else if (a == "right") l->set_text_align(LabelAlign::right);
+            else l->set_text_align(LabelAlign::left);
+        }
+        return choc::value::Value();
+    });
+
+    engine_.register_function("setMultiLine", [this](choc::javascript::ArgumentList args) {
+        auto* v = widget(args.get<std::string>(0, ""));
+        auto ml = args.get<double>(1, 0) > 0.5;
+        if (auto* l = dynamic_cast<Label*>(v)) l->set_multi_line(ml);
+        return choc::value::Value();
+    });
+
     engine_.register_function("setFontSize", [this](choc::javascript::ArgumentList args) {
         if (auto* l = dynamic_cast<Label*>(widget(args.get<std::string>(0, ""))))
             l->set_font_size(static_cast<float>(args.get<double>(1, 14)));

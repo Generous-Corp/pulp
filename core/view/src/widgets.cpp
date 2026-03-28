@@ -124,16 +124,45 @@ void Toggle::advance_animations(float dt) {
 // ── Label ────────────────────────────────────────────────────────────────────
 
 void Label::paint(canvas::Canvas& canvas) {
-    auto text_color = resolve_color("text.primary", canvas::Color::rgba(200, 200, 200));
-    auto font = resolve_color("font.family"); // won't resolve but that's ok
-    (void)font;
+    if (text_.empty()) return;
 
+    auto text_color = resolve_color("text.primary", canvas::Color::rgba(200, 200, 200));
     canvas.set_fill_color({text_color.r, text_color.g, text_color.b, text_color.a});
     canvas.set_font("Inter", font_size_);
-    canvas.set_text_align(canvas::TextAlign::left);
-    // Baseline positioned for visual centering: center + ~35% of font size for descender offset
+
+    // Text alignment
+    float lh = line_height_ > 0 ? line_height_ : font_size_ * 1.4f;
     float baseline_y = bounds().height * 0.5f + font_size_ * 0.35f;
-    canvas.fill_text(text_, 0, baseline_y);
+
+    float x = 0;
+    switch (text_align_) {
+        case LabelAlign::left:
+            canvas.set_text_align(canvas::TextAlign::left);
+            break;
+        case LabelAlign::center:
+            canvas.set_text_align(canvas::TextAlign::center);
+            x = bounds().width * 0.5f;
+            break;
+        case LabelAlign::right:
+            canvas.set_text_align(canvas::TextAlign::right);
+            x = bounds().width;
+            break;
+    }
+
+    if (!multi_line_) {
+        canvas.fill_text(text_, x, baseline_y);
+    } else {
+        // Simple multi-line: split on \n, render each line
+        float y = font_size_ * 0.85f;  // first line baseline
+        size_t pos = 0;
+        while (pos < text_.size()) {
+            size_t nl = text_.find('\n', pos);
+            if (nl == std::string::npos) nl = text_.size();
+            canvas.fill_text(text_.substr(pos, nl - pos), x, y);
+            y += lh;
+            pos = nl + 1;
+        }
+    }
 }
 
 // ── Knob ─────────────────────────────────────────────────────────────────────

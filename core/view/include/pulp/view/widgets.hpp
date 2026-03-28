@@ -13,6 +13,9 @@ namespace pulp::view {
 // ── Label ────────────────────────────────────────────────────────────────────
 // Static or dynamic text display
 
+/// Text alignment for Label
+enum class LabelAlign { left, center, right };
+
 class Label : public View {
 public:
     Label() { set_access_role(AccessRole::label); }
@@ -27,14 +30,40 @@ public:
     void set_font_size(float size) { font_size_ = size; }
     float font_size() const { return font_size_; }
 
+    void set_font_weight(int weight) { font_weight_ = weight; }  // 100-900, 400=normal, 700=bold
+    int font_weight() const { return font_weight_; }
+
+    void set_font_style(int style) { font_style_ = style; }  // 0=normal, 1=italic
+    int font_style() const { return font_style_; }
+
+    void set_letter_spacing(float sp) { letter_spacing_ = sp; }
+    float letter_spacing() const { return letter_spacing_; }
+
+    void set_line_height(float lh) { line_height_ = lh; }
+    float line_height() const { return line_height_; }
+
+    void set_text_align(LabelAlign align) { text_align_ = align; }
+    LabelAlign text_align() const { return text_align_; }
+
+    void set_multi_line(bool ml) { multi_line_ = ml; }
+    bool multi_line() const { return multi_line_; }
+
     void paint(canvas::Canvas& canvas) override;
 
-    /// Intrinsic height based on font size (ascent + descent + padding).
-    float intrinsic_height() const override { return font_size_ * 1.4f; }
+    /// Intrinsic height based on font size and line height.
+    float intrinsic_height() const override {
+        return line_height_ > 0 ? line_height_ : font_size_ * 1.4f;
+    }
 
 private:
     std::string text_;
     float font_size_ = 14.0f;
+    int font_weight_ = 400;       ///< 400=normal, 700=bold
+    int font_style_ = 0;          ///< 0=normal, 1=italic
+    float letter_spacing_ = 0;    ///< Extra spacing between characters (px)
+    float line_height_ = 0;       ///< 0=auto (font_size * 1.4)
+    LabelAlign text_align_ = LabelAlign::left;
+    bool multi_line_ = false;
 };
 
 // ── Knob ─────────────────────────────────────────────────────────────────────
