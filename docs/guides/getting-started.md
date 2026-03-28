@@ -2,9 +2,32 @@
 
 Build your first audio plugin with Pulp.
 
-## Setup
+## Quick Install
 
-The fastest way to get started:
+Install the Pulp CLI with one command:
+
+**macOS / Linux:**
+```bash
+curl -fsSL https://www.generouscorp.com/pulp/install.sh | sh
+```
+
+**Windows (PowerShell):**
+```powershell
+irm https://www.generouscorp.com/pulp/install.ps1 | iex
+```
+
+Then create your first plugin:
+
+```bash
+pulp new my-plugin           # scaffolds, builds, and tests
+pulp run                     # launch the standalone host
+```
+
+That's it — three commands from zero to a working plugin.
+
+## Building from Source
+
+If you want to build the framework itself (to contribute, modify core code, or work without pre-built binaries):
 
 ```bash
 git clone https://github.com/danielraffel/pulp.git
