@@ -1811,7 +1811,10 @@ on("chat-input", "return", function(text) {
     layout();
 
     var themeJson = getThemeJson();
-    var model = "claude-sonnet-4-6";
+    // D6: Use model selector value
+    var modelIdx = 0;
+    try { modelIdx = getValue("model-selector"); } catch(e) {}
+    var model = modelIdx > 0.5 ? "claude-opus-4-6" : "claude-sonnet-4-6";
     var prompt = "You are a design token expert for audio plugin UIs.\n";
     prompt += "Modify design tokens to achieve the requested style.\n\n";
     prompt += "## Current Theme\n" + themeJson + "\n\n";
@@ -1844,9 +1847,20 @@ on("chat-input", "return", function(text) {
     applyTokenDiff(jsonDiff);
     pushThemeSnapshot();
 
-    var count = (jsonDiff.match(/#[0-9a-fA-F]{6}/g) || []).length;
-    addChatMessage("assistant", "Applied " + count + " token changes");
-    setText("status-text", count + " tokens modified");
+    // D6: Change summary showing which tokens were modified
+    var diffObj = {};
+    try { diffObj = JSON.parse(jsonDiff); } catch(e) {}
+    var diffColors = diffObj.colors || {};
+    var changedNames = [];
+    for (var dk in diffColors) changedNames.push(dk);
+    var summary = "Applied " + changedNames.length + " changes";
+    if (changedNames.length > 0 && changedNames.length <= 8) {
+        summary += ": " + changedNames.join(", ");
+    }
+    addChatMessage("assistant", summary);
+    updateTokenSwatches();
+    updateModifiedCount();
+    setText("status-text", changedNames.length + " tokens modified by AI");
     layout();
 });
 
