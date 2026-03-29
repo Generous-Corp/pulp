@@ -97,6 +97,13 @@ Browser-shaped JS API over Pulp's native GPU UI (document.createElement, element
 - [x] P3: fetch() via curl, crypto.getRandomValues, TextEncoder/TextDecoder, atob/btoa, structuredClone
 - [x] docs/reference/w3c-coverage.md expanded from 16 to 26 specs (Canvas 2D, Clipboard, Storage, Fetch, Encoding, Crypto, Console, HR Time, DnD, Structured Clone)
 
+### Phase 9b: Final Gap Closure
+- [x] Canvas drawImage (placeholder rendering, Skia image decode pipeline planned)
+- [x] Drag-and-drop JS bridge: registerDrop(id, callback) + View::on_drop
+- [x] Font loading: loadFont(path) bridge
+- [x] WebGPU shader access: applyShader(canvasId, skslCode), getGPUInfo()
+- [x] w3c-coverage.md expanded to 29 specs: added WebGPU (#27), Font Loading (#28), DnD (#29)
+
 ## First-Time Setup & Onboarding — COMPLETE (2026-03-28)
 
 Implements the full install/onboarding spec (planning/pulp-install-onboarding.md, Phases F1-F6).

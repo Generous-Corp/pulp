@@ -448,6 +448,21 @@ runtime_apis:
   timers:
     status: usable
     notes: setTimeout/setInterval/requestAnimationFrame via __requestFrame__ bridge.
+  canvas_draw_image:
+    status: partial
+    notes: canvasDrawImage renders placeholder; full Skia image decode pipeline planned.
+  drag_and_drop:
+    status: usable
+    notes: registerDrop(id, callback) + View::on_drop. Receives type/data/x/y on file or text drop.
+  font_loading:
+    status: partial
+    notes: loadFont(path) bridge validates existence. Full Skia font registration planned.
+  webgpu_shaders:
+    status: usable
+    notes: >
+      Dawn/WebGPU backend available. applyShader(canvasId, skslCode) for custom
+      SkSL fragment shaders. getGPUInfo() queries backend. compileShader() validates.
+      Full navigator.gpu pipeline API not exposed — Canvas 2D + shaders is the design.
 
 subsystems:
   runtime: stable
