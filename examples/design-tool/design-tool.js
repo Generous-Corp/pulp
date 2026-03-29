@@ -620,18 +620,7 @@ function buildShadeRamps() {
             on(gamutId, "pointermove", onGamutPointer);
         })(p, paletteKeys[p]);
 
-        // H slider — rainbow hue gradient bar + fader below
-        var hGradId = rampId + "-h-grad";
-        createCanvas(hGradId, editorId);
-        setFlex(hGradId, "height", 12);
-        setBorder(hGradId, APP_BORDER, 0, 6);
-        // Draw rainbow hue gradient (red → orange → yellow → green → cyan → blue → violet → pink)
-        var hGradW = 260;
-        for (var hg = 0; hg < 48; hg++) {
-            var hueVal = (hg / 48) * 360;
-            canvasRect(hGradId, (hg / 48) * hGradW, 0, (hGradW / 48) + 1, 12, OklchEngine.oklchToHex(0.65, 0.25, hueVal));
-        }
-        // H fader (interactive)
+        // H slider — interactive gradient canvas (the gradient IS the slider)
         var hRowId = rampId + "-h-row";
         createRow(hRowId, editorId);
         setFlex(hRowId, "height", 16);
@@ -640,16 +629,24 @@ function buildShadeRamps() {
         createLabel(rampId + "-h-lbl", "H", hRowId);
         setFontSize(rampId + "-h-lbl", 9);
         setFlex(rampId + "-h-lbl", "width", 12);
+        var hGradId = rampId + "-h-grad";
+        createCanvas(hGradId, hRowId);
+        setFlex(hGradId, "flex_grow", 1);
+        setFlex(hGradId, "height", 14);
+        setBorder(hGradId, APP_BORDER, 0, 7);
+        // Draw rainbow hue gradient
+        var hGradW = 240;
+        for (var hg = 0; hg < 60; hg++) {
+            canvasRect(hGradId, (hg / 60) * hGradW, 0, (hGradW / 60) + 1, 14, OklchEngine.oklchToHex(0.65, 0.25, (hg / 60) * 360));
+        }
+        // Make H gradient clickable/draggable
+        registerPointer(hGradId);
+        // Hidden fader for value storage (0-width, not visible)
         createFader(rampId + "-h-fdr", "horizontal", hRowId);
-        setFlex(rampId + "-h-fdr", "flex_grow", 1);
-        setFlex(rampId + "-h-fdr", "height", 14);
+        setFlex(rampId + "-h-fdr", "width", 0);
+        setFlex(rampId + "-h-fdr", "height", 0);
 
-        // C slider — chroma gradient bar (gray to saturated) + fader below
-        var cGradId = rampId + "-c-grad";
-        createCanvas(cGradId, editorId);
-        setFlex(cGradId, "height", 12);
-        setBorder(cGradId, APP_BORDER, 0, 6);
-        // C fader (interactive)
+        // C slider — interactive gradient canvas
         var cRowId = rampId + "-c-row";
         createRow(cRowId, editorId);
         setFlex(cRowId, "height", 16);
@@ -658,9 +655,16 @@ function buildShadeRamps() {
         createLabel(rampId + "-c-lbl", "C", cRowId);
         setFontSize(rampId + "-c-lbl", 9);
         setFlex(rampId + "-c-lbl", "width", 12);
+        var cGradId = rampId + "-c-grad";
+        createCanvas(cGradId, cRowId);
+        setFlex(cGradId, "flex_grow", 1);
+        setFlex(cGradId, "height", 14);
+        setBorder(cGradId, APP_BORDER, 0, 7);
+        registerPointer(cGradId);
+        // Hidden fader for value storage
         createFader(rampId + "-c-fdr", "horizontal", cRowId);
-        setFlex(rampId + "-c-fdr", "flex_grow", 1);
-        setFlex(rampId + "-c-fdr", "height", 14);
+        setFlex(rampId + "-c-fdr", "width", 0);
+        setFlex(rampId + "-c-fdr", "height", 0);
 
         // OKLCH display
         createLabel(rampId + "-oklch", "L: 0.50  C: 0.100  H: 180", editorId);
@@ -699,6 +703,7 @@ function buildShadeRamps() {
             var oklch = OklchEngine.hexToOklch(base.hex);
             renderPaletteGamut(p, oklch.H, oklch.L, oklch.C);
             renderChromaGradient(p, oklch.H);
+            renderHueThumb(p, oklch.H);
             setValue(rampId + "-h-fdr", oklch.H / 360);
             setValue(rampId + "-c-fdr", Math.min(oklch.C / 0.4, 1));
             setText(rampId + "-oklch", "L: " + oklch.L.toFixed(2) + "  C: " + oklch.C.toFixed(3) + "  H: " + oklch.H.toFixed(1));
@@ -726,6 +731,7 @@ function buildShadeRamps() {
                     var oklch = OklchEngine.hexToOklch(base.hex);
                     renderPaletteGamut(idx, oklch.H, oklch.L, oklch.C);
                     renderChromaGradient(idx, oklch.H);
+                    renderHueThumb(idx, oklch.H);
                     setValue("ramp-" + idx + "-h-fdr", oklch.H / 360);
                     setValue("ramp-" + idx + "-c-fdr", Math.min(oklch.C / 0.4, 1));
                     setText("ramp-" + idx + "-oklch", "L: " + oklch.L.toFixed(2) + "  C: " + oklch.C.toFixed(3) + "  H: " + oklch.H.toFixed(1));
@@ -749,6 +755,7 @@ function buildShadeRamps() {
                         setVisible("ramp-" + paletteIdx + "-editor", true);
                         renderPaletteGamut(paletteIdx, oklch.H, oklch.L, oklch.C);
                         renderChromaGradient(paletteIdx, oklch.H);
+                        renderHueThumb(paletteIdx, oklch.H);
                         setValue("ramp-" + paletteIdx + "-h-fdr", oklch.H / 360);
                         setValue("ramp-" + paletteIdx + "-c-fdr", Math.min(oklch.C / 0.4, 1));
                         setText("ramp-" + paletteIdx + "-oklch", "L: " + oklch.L.toFixed(2) + "  C: " + oklch.C.toFixed(3) + "  H: " + oklch.H.toFixed(1));
@@ -758,61 +765,102 @@ function buildShadeRamps() {
             }
         })(p);
 
-        // H/C slider change handlers — update gamut, dot, accent, and preview
+        // H/C interactive gradient handlers — click/drag on gradient canvas sets value
         (function(idx, pKey) {
-            function onPaletteSliderChange() {
-                var h = getValue("ramp-" + idx + "-h-fdr") * 360;
-                var c = getValue("ramp-" + idx + "-c-fdr") * 0.4;
+            var sliderDragCount = 0;
+            function applyHCValues(h, c) {
+                setValue("ramp-" + idx + "-h-fdr", h / 360);
+                setValue("ramp-" + idx + "-c-fdr", Math.min(c / 0.4, 1));
                 var mapped = OklchEngine.gamutMap(0.55, c, h);
-                // Redraw gamut with dot + update C gradient for new hue
                 renderPaletteGamut(idx, h, mapped.L, mapped.C);
                 renderChromaGradient(idx, h);
+                renderHueThumb(idx, h);
+                renderHueThumb(idx, h);
+                renderChromaThumb(idx, c);
                 setText("ramp-" + idx + "-oklch", "L: " + mapped.L.toFixed(2) + "  C: " + mapped.C.toFixed(3) + "  H: " + h.toFixed(1));
-                // Update the palette base color
-                if (pKey === "accent") {
-                    currentAccent = OklchEngine.oklchToHex(mapped.L, mapped.C, h);
-                }
-                // Rebuild full palette and apply all tokens to preview
-                var palette = PaletteSystem.create(currentAccent, currentHarmony);
-                // For non-accent palettes, regenerate that specific ramp with the slider values
-                if (pKey !== "accent") {
-                    palette[pKey] = ShadeGenerator.generateRamp(mapped.L, mapped.C, h);
-                }
-                var diff = PaletteSystem.toThemeDiff(palette);
-                applyTokenDiff(diff);
-                updateTokenSwatches();
-                // Update the mini ramp swatches and dot color
-                var ramp = palette[pKey];
-                var steps = ShadeGenerator.STEPS;
-                for (var s = 0; s < steps.length; s++) {
-                    setBackground("ramp-" + idx + "-s" + s, ramp[steps[s]].hex);
-                }
-                setBackground("ramp-" + idx + "-dot", ramp[500].hex);
-                // Update large shade swatches
-                var stepIdxs = [0, 2, 4, 5, 7, 9];
-                for (var ls = 0; ls < 6; ls++) {
-                    setBackground("ramp-" + idx + "-lg-" + ls, ramp[steps[stepIdxs[ls]]].hex);
+                sliderDragCount++;
+                if (sliderDragCount % 3 === 0) {
+                    if (pKey === "accent") currentAccent = OklchEngine.oklchToHex(mapped.L, mapped.C, h);
+                    var palette = PaletteSystem.create(currentAccent, currentHarmony);
+                    if (pKey !== "accent") palette[pKey] = ShadeGenerator.generateRamp(mapped.L, mapped.C, h);
+                    applyTokenDiff(PaletteSystem.toThemeDiff(palette));
+                    updateTokenSwatches();
+                    var ramp = palette[pKey]; var steps = ShadeGenerator.STEPS;
+                    for (var s = 0; s < steps.length; s++) setBackground("ramp-" + idx + "-s" + s, ramp[steps[s]].hex);
+                    setBackground("ramp-" + idx + "-dot", ramp[500].hex);
+                    var si2 = [0,2,4,5,7,9];
+                    for (var ls = 0; ls < 6; ls++) setBackground("ramp-" + idx + "-lg-" + ls, ramp[steps[si2[ls]]].hex);
                 }
             }
-            on("ramp-" + idx + "-h-fdr", "change", onPaletteSliderChange);
-            on("ramp-" + idx + "-c-fdr", "change", onPaletteSliderChange);
+            // H gradient pointer events
+            function onHGradPointer(evt) {
+                var hVal = Math.max(0, Math.min(360, (evt.offsetX / 240) * 360));
+                var cVal = getValue("ramp-" + idx + "-c-fdr") * 0.4;
+                applyHCValues(hVal, cVal);
+            }
+            on("ramp-" + idx + "-h-grad", "pointerdown", function(e) { sliderDragCount = 0; onHGradPointer(e); });
+            on("ramp-" + idx + "-h-grad", "pointermove", onHGradPointer);
+            // C gradient pointer events
+            function onCGradPointer(evt) {
+                var cVal = Math.max(0, Math.min(0.4, (evt.offsetX / 240) * 0.4));
+                var hVal = getValue("ramp-" + idx + "-h-fdr") * 360;
+                applyHCValues(hVal, cVal);
+            }
+            on("ramp-" + idx + "-c-grad", "pointerdown", function(e) { sliderDragCount = 0; onCGradPointer(e); });
+            on("ramp-" + idx + "-c-grad", "pointermove", onCGradPointer);
+            // Also keep fader change handlers as backup
+            on("ramp-" + idx + "-h-fdr", "change", function() {
+                var h = getValue("ramp-" + idx + "-h-fdr") * 360;
+                var c = getValue("ramp-" + idx + "-c-fdr") * 0.4;
+                applyHCValues(h, c);
+            });
+            on("ramp-" + idx + "-c-fdr", "change", function() {
+                var h = getValue("ramp-" + idx + "-h-fdr") * 360;
+                var c = getValue("ramp-" + idx + "-c-fdr") * 0.4;
+                applyHCValues(h, c);
+            });
         })(p, paletteKeys[p]);
     }
     if (tokenEditState.activeToken) rebuildPopupPalette();
 }
 
-// Render gamut triangle for a specific palette editor
-// Render chroma gradient for a palette editor (gray → saturated at current hue)
+// Render thumb dot on H gradient showing current hue position
+function renderHueThumb(paletteIdx, hue) {
+    var id = "ramp-" + paletteIdx + "-h-grad";
+    // Redraw gradient (clears old thumb)
+    canvasClear(id);
+    var w = 240;
+    for (var hg = 0; hg < 60; hg++) {
+        canvasRect(id, (hg / 60) * w, 0, (w / 60) + 1, 14, OklchEngine.oklchToHex(0.65, 0.25, (hg / 60) * 360));
+    }
+    // Draw thumb
+    var tx = (hue / 360) * w;
+    canvasFillCircle(id, tx, 7, 7, '#00000040');
+    canvasFillCircle(id, tx, 7, 5, '#ffffff');
+}
+
+// Render thumb dot on C gradient showing current chroma position
+function renderChromaThumb(paletteIdx, chroma) {
+    // Thumb is drawn by renderChromaGradient which we extend
+}
+
+// Render chroma gradient with thumb
 function renderChromaGradient(paletteIdx, hue) {
     var cGradId = "ramp-" + paletteIdx + "-c-grad";
     canvasClear(cGradId);
-    var w = 260;
-    var steps = 32;
+    var w = 240;
+    var steps = 48;
     for (var cs = 0; cs < steps; cs++) {
         var c = (cs / steps) * 0.4;
         var hex = OklchEngine.oklchToHex(0.6, c, hue);
-        canvasRect(cGradId, (cs / steps) * w, 0, (w / steps) + 1, 12, hex);
+        canvasRect(cGradId, (cs / steps) * w, 0, (w / steps) + 1, 14, hex);
     }
+    // Draw thumb at current chroma position
+    var cFdrVal = 0;
+    try { cFdrVal = getValue("ramp-" + paletteIdx + "-c-fdr"); } catch(e) {}
+    var cx = cFdrVal * w;
+    canvasFillCircle(cGradId, cx, 7, 7, '#00000040');
+    canvasFillCircle(cGradId, cx, 7, 5, '#ffffff');
 }
 
 // fullRedraw=true renders the color grid; false only redraws dot overlay
@@ -843,7 +891,7 @@ function renderPaletteGamut(paletteIdx, hue, dotL, dotC, fullRedraw) {
         }
 
         // Draw color grid — high resolution for smooth edges
-        var cols = 135, rows = 65;
+        var cols = 180, rows = 90;
         var cellW = w / cols, cellH = h / rows;
         for (var gx = 0; gx < cols; gx++) {
             var L = gx / (cols - 1);
