@@ -268,6 +268,9 @@ if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tools/design/CMakeLists.txt)
     add_subdirectory(tools/design)
 endif()
 
+# ── Import Design Tool ────────────────────────────────────────────────────
+add_subdirectory(tools/import-design)
+
 # ── Python Bindings ────────────────────────────────────────────────────────
 option(PULP_BUILD_PYTHON "Build Python bindings via pybind11" OFF)
 if(PULP_BUILD_PYTHON)

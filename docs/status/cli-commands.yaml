@@ -153,6 +153,50 @@ commands:
     summary: Remove the build directory.
     docs: reference/cli.md#clean
 
+  - name: import-design
+    status: experimental
+    summary: Import designs from Figma, Stitch, v0, or Pencil into Pulp web-compat JS.
+    args:
+      - name: --from
+        kind: option
+        required: true
+        description: "Design source: figma, stitch, v0, pencil"
+      - name: --file
+        kind: option
+        required: true
+        description: Input file path
+      - name: --output
+        kind: option
+        description: Output JS file (default: ui.js)
+      - name: --tokens
+        kind: option
+        description: Output W3C token file (default: tokens.json)
+      - name: --dry-run
+        kind: flag
+        description: Show generated code without writing files
+      - name: --no-tokens
+        kind: flag
+        description: Skip token extraction
+      - name: --no-comments
+        kind: flag
+        description: Omit comments from generated code
+    docs: guides/importing-designs.md
+
+  - name: export-tokens
+    status: experimental
+    summary: Export current theme as W3C Design Tokens JSON.
+    args:
+      - name: --file
+        kind: option
+        description: Input theme JSON (default: built-in dark theme)
+      - name: --tokens
+        kind: option
+        description: Output file (default: tokens.json)
+      - name: --dry-run
+        kind: flag
+        description: Print to stdout
+    docs: guides/importing-designs.md#design-tokens
+
   - name: help
     status: usable
     summary: Print usage information.

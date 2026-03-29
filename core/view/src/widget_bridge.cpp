@@ -4,6 +4,7 @@
 #include <pulp/view/ui_components.hpp>
 #include <pulp/view/text_editor.hpp>
 #include <pulp/view/canvas_widget.hpp>
+#include <pulp/view/design_import.hpp>
 #include <pulp/platform/popup_menu.hpp>
 #include <pulp/platform/file_dialog.hpp>
 #include <pulp/platform/clipboard.hpp>
@@ -2145,57 +2146,21 @@ void WidgetBridge::register_api() {
         return choc::value::createString(root_.theme().to_json());
     });
 
-    // W3C Design Tokens import: parse { "$value": "#hex", "$type": "color" } format
+    // importDesignTokens(w3cJson) — parse W3C Design Tokens JSON and apply to theme
     engine_.register_function("importDesignTokens", [this](choc::javascript::ArgumentList args) {
         auto json = args.get<std::string>(0, "");
-        if (json.empty()) return choc::value::Value();
-        try {
-            auto tokens = choc::json::parse(json);
-            auto theme = root_.theme();
-            // Walk top-level keys — each is a token group or a direct token
-            if (tokens.isObject()) {
-                for (uint32_t i = 0; i < tokens.size(); ++i) {
-                    auto name = std::string(tokens.getObjectMemberAt(i).name);
-                    auto val = tokens.getObjectMemberAt(i).value;
-                    if (val.isObject() && val.hasObjectMember("$value")) {
-                        auto type = val.hasObjectMember("$type") ? val["$type"].getWithDefault(std::string("")) : "";
-                        auto value = val["$value"].getWithDefault(std::string(""));
-                        if (type == "color") {
-                            // Parse hex color into theme
-                            theme.colors[name] = canvas::Color{}; // will be overridden by apply_overrides
-                        } else if (type == "dimension") {
-                            auto num = std::stof(value);
-                            theme.dimensions[name] = num;
-                        }
-                    }
-                }
-            }
-            root_.set_theme(theme);
-        } catch (...) {}
+        if (!json.empty()) {
+            auto imported = parse_w3c_tokens(json);
+            auto current = root_.theme();
+            current.apply_overrides(imported);
+            root_.set_theme(current);
+        }
         return choc::value::Value();
     });
 
-    // W3C Design Tokens export: serialize theme to W3C format
+    // exportDesignTokens() — export current theme as W3C Design Tokens JSON
     engine_.register_function("exportDesignTokens", [this](choc::javascript::ArgumentList) {
-        auto& theme = root_.theme();
-        auto root = choc::value::createObject("");
-        // Export colors
-        for (auto& [name, color] : theme.colors) {
-            auto token = choc::value::createObject("");
-            char hex[10];
-            snprintf(hex, sizeof(hex), "#%02x%02x%02x", color.r, color.g, color.b);
-            token.addMember("$value", choc::value::createString(hex));
-            token.addMember("$type", choc::value::createString("color"));
-            root.addMember(name, token);
-        }
-        // Export dimensions
-        for (auto& [name, val] : theme.dimensions) {
-            auto token = choc::value::createObject("");
-            token.addMember("$value", choc::value::createString(std::to_string(val)));
-            token.addMember("$type", choc::value::createString("dimension"));
-            root.addMember(name, token);
-        }
-        return choc::value::createString(choc::json::toString(root, true));
+        return choc::value::createString(export_w3c_tokens(root_.theme()));
     });
 
     // Model-agnostic AI CLI: configurable command for chat integration

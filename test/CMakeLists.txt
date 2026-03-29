@@ -269,6 +269,11 @@ add_executable(pulp-test-design-export test_design_export.cpp)
 target_link_libraries(pulp-test-design-export PRIVATE pulp::view Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-design-export)
 
+# Design import tests (Figma/Stitch/v0/Pencil → Pulp, W3C tokens)
+add_executable(pulp-test-design-import test_design_import.cpp)
+target_link_libraries(pulp-test-design-import PRIVATE pulp::view Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-design-import)
+
 # Parameter attachment tests
 add_executable(pulp-test-param-attachment test_param_attachment.cpp)
 target_link_libraries(pulp-test-param-attachment PRIVATE pulp::view Catch2::Catch2WithMain)

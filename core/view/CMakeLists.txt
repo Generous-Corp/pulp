@@ -50,6 +50,7 @@ target_sources(pulp-view PRIVATE
     src/text_editor.cpp
     src/ui_components.cpp
     src/design_export.cpp
+    src/design_import.cpp
     src/app_framework.cpp
     src/canvas_widget.cpp
     src/frame_clock.cpp
