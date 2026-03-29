@@ -192,6 +192,7 @@ static pulp::view::KeyCode keyCodeFromNS(unsigned short code) {
     auto pt = [self localPoint:event];
     auto local = toLocal(pt, _dragTarget, self.rootView);
     _dragTarget->on_mouse_drag(local);
+    if (_dragTarget->on_drag) _dragTarget->on_drag(local);
     [self setNeedsDisplay:YES];
 }
 

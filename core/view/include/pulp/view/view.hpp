@@ -242,6 +242,7 @@ public:
     /// Generic click callback (fires on mouse-down, if set).
     std::function<void()> on_click;
     std::function<void(const MouseEvent&)> on_pointer_event;   ///< JS pointer event callback
+    std::function<void(Point)> on_drag;   ///< JS pointermove during drag callback
     std::function<void(const GestureEvent&)> on_gesture_cb;    ///< JS gesture event callback
 
     /// Right-click context menu callback. If set, called on right-click with view-local coords.

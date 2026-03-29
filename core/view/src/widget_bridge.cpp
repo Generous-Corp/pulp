@@ -626,6 +626,14 @@ void WidgetBridge::register_api() {
 
                 engine_.evaluate("__dispatch__('" + id + "', '" + type + "', " + data + ")");
             };
+            // W3C PointerEvents: forward drag as pointermove
+            w->on_drag = [this, id](Point pos) {
+                std::string data = "{"
+                    "offsetX:" + std::to_string(pos.x) + ","
+                    "offsetY:" + std::to_string(pos.y) + ","
+                    "pointerId:0,pointerType:'mouse',isPrimary:true}";
+                engine_.evaluate("__dispatch__('" + id + "', 'pointermove', " + data + ")");
+            };
         }
         return choc::value::Value();
     });
