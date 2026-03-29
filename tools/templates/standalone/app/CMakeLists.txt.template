@@ -1,0 +1,27 @@
+cmake_minimum_required(VERSION 3.24)
+project({{TARGET_NAME}} VERSION {{VERSION}} LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+find_package(Pulp {{SDK_VERSION}} REQUIRED)
+
+# Tests
+include(FetchContent)
+FetchContent_Declare(Catch2
+    GIT_REPOSITORY https://github.com/catchorg/Catch2.git
+    GIT_TAG v3.7.1
+)
+FetchContent_MakeAvailable(Catch2)
+include(CTest)
+list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/extras)
+include(Catch)
+
+add_executable({{TARGET_NAME}} main.cpp)
+target_link_libraries({{TARGET_NAME}} PRIVATE Pulp::format)
+target_include_directories({{TARGET_NAME}} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
+add_executable({{TARGET_NAME}}-test test_{{LOWER_NAME}}.cpp)
+target_link_libraries({{TARGET_NAME}}-test PRIVATE Pulp::format Catch2::Catch2WithMain)
+target_include_directories({{TARGET_NAME}}-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+catch_discover_tests({{TARGET_NAME}}-test)

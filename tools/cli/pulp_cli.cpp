@@ -1125,11 +1125,7 @@ static std::string expand_template_str(const std::string& tmpl,
 
 static int cmd_create(const std::vector<std::string>& args) {
     auto root = find_project_root();
-    if (root.empty()) {
-        std::cerr << "Error: not in a Pulp project directory.\n";
-        std::cerr << "Run this from within a Pulp checkout.\n";
-        return 1;
-    }
+    bool standalone_mode = root.empty();
 
     // Parse args
     std::string name, type = "effect", manufacturer = "Pulp", output_path, tmpl;
@@ -1143,8 +1139,8 @@ static int cmd_create(const std::vector<std::string>& args) {
         if (args[i] == "--no-build") { no_build = true; continue; }
         if (args[i] == "--no-interactive" || args[i] == "--ci") { ci_mode = true; continue; }
         if (args[i] == "--help" || args[i] == "-h") {
-            std::cout << "pulp new — create a new plugin project\n\n";
-            std::cout << "Usage: pulp new <name> [options]\n\n";
+            std::cout << "pulp create — create a new plugin project\n\n";
+            std::cout << "Usage: pulp create <name> [options]\n\n";
             std::cout << "Options:\n";
             std::cout << "  --type <effect|instrument|app|bare>  Plugin type (default: effect)\n";
             std::cout << "  --template <name>           Use named template (e.g. gain)\n";
@@ -1152,13 +1148,15 @@ static int cmd_create(const std::vector<std::string>& args) {
             std::cout << "  --output <dir>              Output directory\n";
             std::cout << "  --no-build                  Skip build after scaffolding\n";
             std::cout << "  --no-interactive, --ci      Non-interactive mode (use defaults)\n";
+            std::cout << "\nWorks both inside a Pulp repo (contributor mode) and outside\n";
+            std::cout << "(standalone mode — downloads SDK automatically).\n";
             return 0;
         }
-        if (name.empty() && args[i][0] != '-') { name = args[i]; continue; }
+        if (name.empty() && !args[i].empty() && args[i][0] != '-') { name = args[i]; continue; }
     }
 
     if (name.empty()) {
-        std::cerr << "Usage: pulp new <name> [--type effect|instrument] [--template gain] [--manufacturer Name]\n";
+        std::cerr << "Usage: pulp create <name> [--type effect|instrument] [--template gain] [--manufacturer Name]\n";
         return 1;
     }
 
@@ -1175,9 +1173,28 @@ static int cmd_create(const std::vector<std::string>& args) {
         if (!ci_mode) std::cout << msg;
     };
 
-    // Quick doctor check
+    // For standalone mode, ensure we have the SDK before doctor checks
+    fs::path sdk_dir;
+    std::string sdk_version = PULP_SDK_VERSION;
+    fs::path templates_base;
+
+    if (standalone_mode) {
+        log("Standalone mode — fetching SDK...\n");
+        sdk_dir = ensure_sdk(sdk_version);
+        if (sdk_dir.empty()) {
+            std::cerr << "Error: could not obtain Pulp SDK. Check your internet connection.\n";
+            return 1;
+        }
+        templates_base = sdk_dir / "templates";
+        // Fall back to local templates if SDK doesn't have them
+        // (e.g., SDK not yet released, running from source build)
+    } else {
+        templates_base = root / "tools" / "templates";
+    }
+
+    // Quick doctor check (system-level only for standalone)
     log("Checking environment...\n");
-    auto checks = run_doctor_checks(root);
+    auto checks = run_doctor_checks(standalone_mode ? fs::path{} : root);
     bool env_ok = true;
     for (auto& c : checks) {
         if (!c.passed) {
@@ -1222,6 +1239,8 @@ static int cmd_create(const std::vector<std::string>& args) {
     if (!output_path.empty()) {
         out_dir = fs::path(output_path);
         if (!out_dir.is_absolute()) out_dir = fs::current_path() / out_dir;
+    } else if (standalone_mode) {
+        out_dir = fs::current_path() / lower_name;
     } else {
         out_dir = root / "examples" / lower_name;
     }
@@ -1253,19 +1272,33 @@ static int cmd_create(const std::vector<std::string>& args) {
                         type == "bare" ? "A minimal Pulp project" :
                         "A Pulp audio " + type},
         {"VST3_UID", make_vst3_uid()},
+        {"SDK_VERSION", sdk_version},
     };
 
-    // Read and expand templates
-    auto template_dir = root / "tools" / "templates" / template_key;
-    if (!fs::exists(template_dir)) {
-        std::cerr << "Error: template directory not found at " << template_dir.string() << "\n";
+    // Determine template directories
+    // For standalone: CMakeLists.txt comes from standalone/<type>, other files from <type>
+    // For in-repo: all files come from <type> as before
+    auto source_template_dir = templates_base / template_key;
+    auto cmake_template_dir = standalone_mode
+        ? templates_base / "standalone" / template_key
+        : source_template_dir;
+
+    // Fall back: if standalone templates aren't available, use source templates
+    // with a note that the CMakeLists.txt needs adjustment
+    if (standalone_mode && !fs::exists(cmake_template_dir)) {
+        cmake_template_dir = source_template_dir;
+    }
+
+    if (!fs::exists(source_template_dir)) {
+        std::cerr << "Error: template directory not found at " << source_template_dir.string() << "\n";
         if (!tmpl.empty())
             std::cerr << "Available templates: effect, instrument, gain\n";
         return 1;
     }
 
     fs::create_directories(out_dir);
-    log("Creating " + name + " (" + type + ") at " + out_dir.string() + "\n\n");
+    log("Creating " + name + " (" + type + ")"
+        + (standalone_mode ? " [standalone]" : "") + " at " + out_dir.string() + "\n\n");
 
     struct FileMapping { std::string tmpl; std::string output; };
     std::string test_name = "test_" + replace_all_str(lower_name, "-", "_") + ".cpp";
@@ -1278,8 +1311,11 @@ static int cmd_create(const std::vector<std::string>& args) {
         {"test.cpp.template", test_name},
     };
 
-    for (auto& [tmpl, outfile] : file_map) {
-        auto tmpl_path = template_dir / tmpl;
+    for (auto& [tmpl_file, outfile] : file_map) {
+        // CMakeLists.txt comes from cmake_template_dir, others from source_template_dir
+        auto tmpl_path = (tmpl_file == "CMakeLists.txt.template")
+            ? cmake_template_dir / tmpl_file
+            : source_template_dir / tmpl_file;
         if (!fs::exists(tmpl_path)) continue;
         auto content = read_file_contents(tmpl_path);
         auto expanded = expand_template_str(content, vars);
@@ -1300,7 +1336,7 @@ static int cmd_create(const std::vector<std::string>& args) {
     }
 
     // Copy UI script directory if template includes one
-    auto ui_template_dir = template_dir / "ui";
+    auto ui_template_dir = source_template_dir / "ui";
     if (fs::exists(ui_template_dir)) {
         auto ui_out_dir = out_dir / "ui";
         fs::create_directories(ui_out_dir);
@@ -1314,18 +1350,28 @@ static int cmd_create(const std::vector<std::string>& args) {
         }
     }
 
-    // Add to examples/CMakeLists.txt
-    auto examples_cmake = root / "examples" / "CMakeLists.txt";
-    auto rel_dir = lower_name;
-    bool in_examples = (out_dir.parent_path() == root / "examples");
+    // Generate pulp.toml for standalone projects
+    if (standalone_mode) {
+        std::ofstream f(out_dir / "pulp.toml");
+        f << "[pulp]\n";
+        f << "sdk_version = \"" << sdk_version << "\"\n";
+        log("  Created pulp.toml\n");
+    }
 
-    if (in_examples && fs::exists(examples_cmake)) {
-        std::string cmake_content = read_file_contents(examples_cmake);
-        std::string add_line = "\n# " + name + " (generated by pulp new)\n"
-                               "add_subdirectory(" + rel_dir + ")\n";
-        std::ofstream f(examples_cmake, std::ios::app);
-        f << add_line;
-        log("  Added to examples/CMakeLists.txt\n");
+    // Add to examples/CMakeLists.txt (in-repo mode only)
+    if (!standalone_mode) {
+        auto examples_cmake = root / "examples" / "CMakeLists.txt";
+        auto rel_dir = lower_name;
+        bool in_examples = (out_dir.parent_path() == root / "examples");
+
+        if (in_examples && fs::exists(examples_cmake)) {
+            std::string cmake_content = read_file_contents(examples_cmake);
+            std::string add_line = "\n# " + name + " (generated by pulp create)\n"
+                                   "add_subdirectory(" + rel_dir + ")\n";
+            std::ofstream f(examples_cmake, std::ios::app);
+            f << add_line;
+            log("  Added to examples/CMakeLists.txt\n");
+        }
     }
 
     log("\n");
@@ -1337,30 +1383,58 @@ static int cmd_create(const std::vector<std::string>& args) {
 
     // Build
     log("Building...\n");
-    int rc = run("cmake -S " + root.string() + " -B " + (root / "build").string()
-                 + " -DCMAKE_BUILD_TYPE=Debug 2>&1 | tail -5");
-    if (rc != 0) {
-        std::cerr << "Configure failed.\n";
-        return rc;
-    }
+    if (standalone_mode) {
+        // Standalone: configure with CMAKE_PREFIX_PATH pointing to SDK
+        std::string configure_cmd = "cmake -S " + out_dir.string()
+            + " -B " + (out_dir / "build").string()
+            + " -DCMAKE_BUILD_TYPE=Debug"
+            + " -DCMAKE_PREFIX_PATH=" + sdk_dir.string();
+        int rc = run_with_spinner(configure_cmd, "Configuring");
+        if (rc != 0) {
+            std::cerr << "Configure failed.\n";
+            return rc;
+        }
 
-    rc = run("cmake --build " + (root / "build").string() + " --target " + class_name + "-test 2>&1 | tail -10");
-    if (rc != 0) {
-        std::cerr << "Build failed.\n";
-        return rc;
-    }
+        rc = run_with_spinner("cmake --build " + (out_dir / "build").string()
+                              + " --target " + class_name + "-test", "Building");
+        if (rc != 0) {
+            std::cerr << "Build failed.\n";
+            return rc;
+        }
 
-    // Test — run the test binary directly since ctest may not have discovered new tests yet
-    log("\nRunning tests...\n");
-    auto test_binary = root / "build" / "examples" / lower_name / (class_name + "-test");
-    if (fs::exists(test_binary)) {
-        rc = run(test_binary.string());
+        // Test
+        log("\nRunning tests...\n");
+        rc = run("ctest --test-dir " + (out_dir / "build").string() + " --output-on-failure");
+        if (rc != 0) {
+            std::cerr << "Tests failed.\n";
+            return rc;
+        }
     } else {
-        rc = run("ctest --test-dir " + (root / "build").string() + " -R \"" + name + "\" --output-on-failure");
-    }
-    if (rc != 0) {
-        std::cerr << "Tests failed.\n";
-        return rc;
+        int rc = run("cmake -S " + root.string() + " -B " + (root / "build").string()
+                     + " -DCMAKE_BUILD_TYPE=Debug 2>&1 | tail -5");
+        if (rc != 0) {
+            std::cerr << "Configure failed.\n";
+            return rc;
+        }
+
+        rc = run("cmake --build " + (root / "build").string() + " --target " + class_name + "-test 2>&1 | tail -10");
+        if (rc != 0) {
+            std::cerr << "Build failed.\n";
+            return rc;
+        }
+
+        // Test — run the test binary directly since ctest may not have discovered new tests yet
+        log("\nRunning tests...\n");
+        auto test_binary = root / "build" / "examples" / lower_name / (class_name + "-test");
+        if (fs::exists(test_binary)) {
+            rc = run(test_binary.string());
+        } else {
+            rc = run("ctest --test-dir " + (root / "build").string() + " -R \"" + name + "\" --output-on-failure");
+        }
+        if (rc != 0) {
+            std::cerr << "Tests failed.\n";
+            return rc;
+        }
     }
 
     std::string test_filter = replace_all_str(lower_name, "-", "_");
@@ -1369,7 +1443,11 @@ static int cmd_create(const std::vector<std::string>& args) {
     std::cout << "\n  \xe2\x9c\x93 " << name << " is ready!\n\n";
     std::cout << "  Source:     " << out_dir.string() << "\n";
 
-    auto build_dir = root / "build";
+    if (standalone_mode) {
+        std::cout << "  SDK:        " << sdk_dir.string() << "\n";
+    }
+
+    auto build_dir = standalone_mode ? (out_dir / "build") : (root / "build");
     for (auto fmt : {"VST3", "CLAP", "AU"}) {
         auto fmt_dir = build_dir / fmt;
         if (!fs::exists(fmt_dir)) continue;
@@ -1381,6 +1459,9 @@ static int cmd_create(const std::vector<std::string>& args) {
     }
 
     std::cout << "\n  Next steps:\n";
+    if (standalone_mode) {
+        std::cout << "    cd " << lower_name << "\n";
+    }
     std::cout << "    pulp build              # rebuild after changes\n";
     std::cout << "    pulp test -R " << test_filter << "  # run tests\n";
     std::cout << "    pulp validate           # validate plugin formats\n";
