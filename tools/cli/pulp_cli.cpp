@@ -33,6 +33,11 @@
 
 namespace fs = std::filesystem;
 
+// ── SDK Constants ───────────────────────────────────────────────────────────
+
+static const char* PULP_SDK_VERSION = "0.1.0";
+static const char* PULP_GITHUB_REPO = "danielraffel/pulp";
+
 // ── Color / Terminal ────────────────────────────────────────────────────────
 
 static bool g_color_enabled = true;
@@ -166,27 +171,218 @@ static fs::path find_project_root() {
     return {};
 }
 
+// ── Standalone Project Detection ────────────────────────────────────────────
+
+// Check if we're in a standalone project (has pulp.toml but no core/)
+static fs::path find_standalone_root() {
+    auto dir = fs::current_path();
+    while (!dir.empty()) {
+        if (fs::exists(dir / "pulp.toml") && !fs::exists(dir / "core")) {
+            return dir;
+        }
+        auto parent = dir.parent_path();
+        if (parent == dir) break;
+        dir = parent;
+    }
+    return {};
+}
+
+// ── SDK Cache ──────────────────────────────────────────────────────────────
+
+static fs::path pulp_home() {
+    const char* home = std::getenv("HOME");
+#ifdef _WIN32
+    if (!home) home = std::getenv("USERPROFILE");
+#endif
+    if (!home) return {};
+    return fs::path(home) / ".pulp";
+}
+
+static fs::path sdk_cache_path(const std::string& version) {
+    return pulp_home() / "sdk" / version;
+}
+
+static std::string detect_platform() {
+#ifdef __APPLE__
+    #if defined(__aarch64__) || defined(__arm64__)
+        return "darwin-arm64";
+    #else
+        return "darwin-x64";
+    #endif
+#elif defined(_WIN32)
+    return "windows-x64";
+#elif defined(__linux__)
+    #if defined(__aarch64__)
+        return "linux-arm64";
+    #else
+        return "linux-x64";
+    #endif
+#else
+    return "unknown";
+#endif
+}
+
+// Download and cache the Pulp SDK for the given version.
+// Returns the SDK root path on success, empty path on failure.
+static fs::path ensure_sdk(const std::string& version) {
+    auto sdk_dir = sdk_cache_path(version);
+
+    // Already cached?
+    if (fs::exists(sdk_dir / "version.txt")) {
+        return sdk_dir;
+    }
+
+    auto platform = detect_platform();
+    if (platform == "unknown") {
+        std::cerr << "Error: unsupported platform for SDK download.\n";
+        return {};
+    }
+
+    std::string ext = (platform.find("windows") != std::string::npos) ? "tar.gz" : "tar.gz";
+    std::string tarball = "pulp-sdk-" + platform + ".tar.gz";
+    std::string url = "https://github.com/" + std::string(PULP_GITHUB_REPO)
+                    + "/releases/download/v" + version + "/" + tarball;
+
+    std::cout << "Downloading Pulp SDK v" << version << " (" << platform << ")...\n";
+
+    // Create cache directory
+    fs::create_directories(sdk_dir);
+
+    std::string tmp_dir = "/tmp/pulp-sdk-download-" + version;
+#ifdef _WIN32
+    tmp_dir = std::string(std::getenv("TEMP") ? std::getenv("TEMP") : ".") + "\\pulp-sdk-download-" + version;
+#endif
+
+    // Download
+    std::string download_cmd;
+#ifdef _WIN32
+    download_cmd = "powershell -Command \"Invoke-WebRequest -Uri '" + url
+                 + "' -OutFile '" + tmp_dir + "\\" + tarball + "'\"";
+#else
+    download_cmd = "mkdir -p " + tmp_dir + " && curl -fSL -o " + tmp_dir + "/" + tarball + " " + url;
+#endif
+
+    int rc = run_with_spinner(download_cmd, "Downloading SDK");
+    if (rc != 0) {
+        std::cerr << "Error: failed to download SDK from:\n  " << url << "\n";
+        std::cerr << "Check your internet connection or download manually.\n";
+        fs::remove_all(sdk_dir);
+        run("rm -rf " + tmp_dir);
+        return {};
+    }
+
+    // Extract
+    std::string extract_cmd;
+#ifdef _WIN32
+    extract_cmd = "tar -xzf \"" + tmp_dir + "\\" + tarball + "\" -C \"" + tmp_dir + "\"";
+#else
+    extract_cmd = "tar -xzf " + tmp_dir + "/" + tarball + " -C " + tmp_dir;
+#endif
+
+    rc = run_with_spinner(extract_cmd, "Extracting SDK");
+    if (rc != 0) {
+        std::cerr << "Error: failed to extract SDK archive.\n";
+        fs::remove_all(sdk_dir);
+        run("rm -rf " + tmp_dir);
+        return {};
+    }
+
+    // Move extracted SDK into cache location
+    // The archive extracts to pulp-sdk/ directory
+    auto extracted = fs::path(tmp_dir) / "pulp-sdk";
+    if (!fs::exists(extracted)) {
+        // Try without subdirectory (flat extraction)
+        extracted = fs::path(tmp_dir);
+    }
+
+    try {
+        // Copy all files from extracted dir to sdk_dir
+        for (auto& entry : fs::directory_iterator(extracted)) {
+            auto dest = sdk_dir / entry.path().filename();
+            if (entry.is_directory()) {
+                fs::copy(entry.path(), dest, fs::copy_options::recursive | fs::copy_options::overwrite_existing);
+            } else {
+                fs::copy_file(entry.path(), dest, fs::copy_options::overwrite_existing);
+            }
+        }
+    } catch (const std::exception& e) {
+        std::cerr << "Error installing SDK to cache: " << e.what() << "\n";
+        fs::remove_all(sdk_dir);
+        run("rm -rf " + tmp_dir);
+        return {};
+    }
+
+    run("rm -rf " + tmp_dir);
+
+    if (!fs::exists(sdk_dir / "version.txt")) {
+        std::cerr << "Error: SDK installation incomplete — version.txt not found.\n";
+        fs::remove_all(sdk_dir);
+        return {};
+    }
+
+    print_ok("SDK v" + version + " cached at " + sdk_dir.string());
+    return sdk_dir;
+}
+
+// Read SDK version from pulp.toml
+static std::string read_sdk_version(const fs::path& project_root) {
+    auto toml_path = project_root / "pulp.toml";
+    if (!fs::exists(toml_path)) return PULP_SDK_VERSION;
+
+    std::ifstream f(toml_path);
+    std::string line;
+    while (std::getline(f, line)) {
+        // Look for: sdk_version = "0.1.0"
+        auto pos = line.find("sdk_version");
+        if (pos != std::string::npos) {
+            auto q1 = line.find('"', pos);
+            auto q2 = line.find('"', q1 + 1);
+            if (q1 != std::string::npos && q2 != std::string::npos) {
+                return line.substr(q1 + 1, q2 - q1 - 1);
+            }
+        }
+    }
+    return PULP_SDK_VERSION;
+}
+
 // ── Commands ─────────────────────────────────────────────────────────────────
 
 static int cmd_build(const std::vector<std::string>& args) {
     auto root = find_project_root();
-    if (root.empty()) {
+    auto standalone_root = find_standalone_root();
+
+    if (root.empty() && standalone_root.empty()) {
         std::cerr << "Error: not in a Pulp project directory\n";
         return 1;
     }
 
-    auto build_dir = root / "build";
+    // Standalone project mode: set CMAKE_PREFIX_PATH to SDK
+    auto project_root = root.empty() ? standalone_root : root;
+    auto build_dir = project_root / "build";
     bool needs_configure = !fs::exists(build_dir / "CMakeCache.txt");
 
     // Check if CMakeLists.txt is newer than CMakeCache
     if (!needs_configure && fs::exists(build_dir / "CMakeCache.txt")) {
-        auto cmake_time = fs::last_write_time(root / "CMakeLists.txt");
+        auto cmake_time = fs::last_write_time(project_root / "CMakeLists.txt");
         auto cache_time = fs::last_write_time(build_dir / "CMakeCache.txt");
         if (cmake_time > cache_time) needs_configure = true;
     }
 
     if (needs_configure) {
-        int rc = run_with_spinner("cmake -B " + build_dir.string() + " -S " + root.string(), "Configuring");
+        std::string configure_cmd = "cmake -B " + build_dir.string() + " -S " + project_root.string();
+
+        // Standalone projects need CMAKE_PREFIX_PATH to find the SDK
+        if (root.empty() && !standalone_root.empty()) {
+            auto version = read_sdk_version(standalone_root);
+            auto sdk_dir = ensure_sdk(version);
+            if (sdk_dir.empty()) {
+                std::cerr << "Error: could not obtain Pulp SDK v" << version << "\n";
+                return 1;
+            }
+            configure_cmd += " -DCMAKE_PREFIX_PATH=" + sdk_dir.string();
+        }
+
+        int rc = run_with_spinner(configure_cmd, "Configuring");
         if (rc != 0) return rc;
     }
 
@@ -202,12 +398,15 @@ static int cmd_build(const std::vector<std::string>& args) {
 
 static int cmd_test(const std::vector<std::string>& args) {
     auto root = find_project_root();
-    if (root.empty()) {
+    auto standalone_root = find_standalone_root();
+    auto project_root = root.empty() ? standalone_root : root;
+
+    if (project_root.empty()) {
         std::cerr << "Error: not in a Pulp project directory\n";
         return 1;
     }
 
-    auto build_dir = root / "build";
+    auto build_dir = project_root / "build";
     if (!fs::exists(build_dir / "CMakeCache.txt")) {
         std::cout << "Build directory not found, building first...\n";
         int rc = cmd_build({});
