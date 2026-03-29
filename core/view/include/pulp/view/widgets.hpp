@@ -137,6 +137,14 @@ private:
     float drag_start_value_ = 0;
     std::string custom_sksl_;     // SkSL source for GPU shader body
     std::string widget_schema_;   // JSON declarative schema
+    std::string lottie_json_;     // Lottie animation JSON
+    float lottie_time_ = 0;       // Current playback position (0-1)
+
+public:
+    void set_lottie_json(std::string json) { lottie_json_ = std::move(json); }
+    const std::string& lottie_json() const { return lottie_json_; }
+    void set_lottie_time(float t) { lottie_time_ = std::clamp(t, 0.0f, 1.0f); }
+    float lottie_time() const { return lottie_time_; }
 };
 
 // ── Fader ────────────────────────────────────────────────────────────────────

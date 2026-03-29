@@ -2081,6 +2081,27 @@ void WidgetBridge::register_api() {
         return choc::value::Value();
     });
 
+    // setWidgetLottie(id, lottieJSON) → store Lottie animation JSON on widget
+    engine_.register_function("setWidgetLottie", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto json = args.get<std::string>(1, "");
+        auto* v = widget(id);
+        if (!v) return choc::value::Value();
+        // Store Lottie JSON for JS-side rendering or future Skottie integration
+        if (auto* k = dynamic_cast<Knob*>(v)) k->set_lottie_json(json);
+        return choc::value::Value();
+    });
+
+    // seekWidgetLottie(id, normalizedTime) → scrub Lottie to position (0-1)
+    engine_.register_function("seekWidgetLottie", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto t = static_cast<float>(args.get<double>(1, 0));
+        auto* v = widget(id);
+        if (!v) return choc::value::Value();
+        if (auto* k = dynamic_cast<Knob*>(v)) k->set_lottie_time(t);
+        return choc::value::Value();
+    });
+
     // clearWidgetSchema(id) → remove schema, restore default paint
     engine_.register_function("clearWidgetSchema", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
