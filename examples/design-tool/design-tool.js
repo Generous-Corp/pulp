@@ -632,19 +632,29 @@ function buildShadeRamps() {
         setTextColor(rampId + "-oklch", APP_TEXT_DIM);
         setFlex(rampId + "-oklch", "height", 14);
 
-        // Large shade swatches row
+        // #54: Large shade swatches with WCAG contrast badges
         createRow(rampId + "-shades", editorId);
         setFlex(rampId + "-shades", "gap", 3);
-        setFlex(rampId + "-shades", "height", 28);
+        setFlex(rampId + "-shades", "height", 32);
         for (var ls = 0; ls < 6; ls++) {
             var lsId = rampId + "-lg-" + ls;
-            // Show steps 50, 200, 400, 500, 700, 900
             var stepIdx = [0, 2, 4, 5, 7, 9][ls];
+            var shadeHex = ramp[steps[stepIdx]].hex;
             createCol(lsId, rampId + "-shades");
             setFlex(lsId, "flex_grow", 1);
-            setFlex(lsId, "height", 28);
-            setBackground(lsId, ramp[steps[stepIdx]].hex);
+            setFlex(lsId, "height", 32);
+            setBackground(lsId, shadeHex);
             setBorder(lsId, APP_BORDER, 0, 6);
+            setFlex(lsId, "justify_content", "center");
+            setFlex(lsId, "align_items", "center");
+            // WCAG contrast badge
+            var ratio = OklchEngine.contrastRatio(shadeHex, "#ffffff");
+            var level = OklchEngine.contrastLevel(ratio);
+            if (level !== "fail") {
+                createLabel(lsId + "-badge", level, lsId);
+                setFontSize(lsId + "-badge", 7);
+                setTextColor(lsId + "-badge", ratio > 4.5 ? "#ffffff" : "#000000");
+            }
         }
 
         // Draw gamut + set faders if this palette is expanded
@@ -2216,7 +2226,7 @@ setFlex("model-selector", "height", 22);
 // Chat messages (scrollable)
 createScrollView("chat-messages", "chat-area");
 setFlex("chat-messages", "flex_grow", 1);
-setScrollContentSize("chat-messages", 252, 400);
+setScrollContentSize("chat-messages", 236, 400);  // #61: narrower to clear scrollbar
 
 createLabel("welcome-msg", "Describe a visual style and the preview will update live.", "chat-messages");
 setFontSize("welcome-msg", 11);
@@ -2490,27 +2500,36 @@ on("chat-input", "return", function(text) {
     var modelIdx = 0;
     try { modelIdx = getValue("model-selector"); } catch(e) {}
     var model = modelIdx > 0.5 ? "claude-opus-4-6" : "claude-sonnet-4-6";
-    // Issue 7: prompt supports styles AND colors, scoped by inspector context
+    // #59: Prompt supports BOTH colors AND styles
     var scope = inspectedComponent ? "\nScope: ONLY modify tokens related to '" + inspectedComponent + "'" : "";
     var prompt = "You are a design system expert for audio plugin UIs.\n";
     prompt += "Modify the theme to achieve the requested look. Be creative and bold.\n";
-    prompt += "You can change ANY colors in the theme — backgrounds, text, accents, controls, effects.\n";
-    prompt += "Make dramatic, visible changes that transform the overall feel.\n\n";
+    prompt += "You can change colors AND style properties to create dramatic transformations.\n\n";
     prompt += "## Current Theme\n" + themeJson + "\n\n";
-    prompt += "## Available Token Names\n";
+    prompt += "## Available Color Tokens (hex values)\n";
     for (var gi = 0; gi < tokenGroups.length; gi++) {
         prompt += tokenGroups[gi].name + ": " + tokenGroups[gi].tokens.join(", ") + "\n";
     }
+    prompt += "\n## Available Style Properties (numeric values)\n";
+    prompt += "dimensions.cornerRadius (0-24): border radius for panels/buttons\n";
+    prompt += "dimensions.borderWidth (0-4): border thickness\n";
+    prompt += "dimensions.shadowBlur (0-20): shadow blur radius\n";
+    prompt += "dimensions.shadowAlpha (0-1): shadow opacity\n";
+    prompt += "dimensions.knobArcWidth (2-8): knob arc stroke width\n";
+    prompt += "dimensions.knobSize (32-80): knob diameter\n";
+    prompt += "dimensions.headingSize (12-36): heading font size\n";
+    prompt += "dimensions.bodySize (10-16): body font size\n";
+    prompt += "dimensions.labelSize (8-12): label font size\n";
     prompt += "\n## RULES\n";
     prompt += "1. Output ONLY valid JSON. No markdown, no explanation.\n";
-    prompt += '2. Format: {"colors": {"token.name": "#hexcolor", ...}}\n';
-    prompt += "3. Change 5-30 tokens to create a cohesive, dramatic transformation.\n";
-    prompt += "4. Use the exact token names listed above.\n";
+    prompt += '2. Format: {"colors": {"token.name": "#hex", ...}, "dimensions": {"prop": number, ...}}\n';
+    prompt += "3. Change 5-30 tokens. Include BOTH colors and dimensions for dramatic effect.\n";
+    prompt += "4. Use the exact token/property names listed above.\n";
+    prompt += "5. Be bold — if asked for 'cyberpunk', make it look like cyberpunk. If 'warm analog', make it warm.\n";
     prompt += scope + "\n\n";
-    // Issue 2: include reference image if uploaded
     if (uploadedImagePath && uploadedImagePath.length > 0) {
         prompt += "## Reference Image\nThe user uploaded a reference image at: " + uploadedImagePath + "\n";
-        prompt += "Use this as visual inspiration for the color scheme.\n\n";
+        prompt += "Extract the visual mood, colors, and style from this image and apply them.\n\n";
     }
     prompt += '## Request\n"' + text + '"\n\n## JSON Output\n';
 
@@ -2535,23 +2554,47 @@ on("chat-input", "return", function(text) {
     }
 
     var jsonDiff = response.substring(jsonStart, jsonEnd + 1);
-    applyTokenDiff(jsonDiff);
-    pushThemeSnapshot();
-
-    // D6: Change summary showing which tokens were modified
     var diffObj = {};
     try { diffObj = JSON.parse(jsonDiff); } catch(e) {}
+
+    // Apply color changes via theme diff
+    if (diffObj.colors) {
+        applyTokenDiff(JSON.stringify({ colors: diffObj.colors }));
+    }
+    pushThemeSnapshot();
+
+    // #59: Apply dimension/style changes directly to preview widgets
+    var dimChanges = diffObj.dimensions || {};
+    var dimCount = 0;
+    for (var dk in dimChanges) {
+        dimCount++;
+        var dv = dimChanges[dk];
+        if (dk === "cornerRadius") {
+            setBorderRadius("btn-normal", dv); setBorderRadius("btn-hover", dv);
+            setBorderRadius("btn-action", dv); setBorderRadius("btn-disabled", dv);
+        } else if (dk === "headingSize") {
+            setFontSize("heading-text", dv);
+        } else if (dk === "bodySize") {
+            setFontSize("body-text", dv);
+        } else if (dk === "labelSize") {
+            setFontSize("caption-text", dv);
+        }
+        // Store dimension in status for user visibility
+    }
+
+    // Change summary
     var diffColors = diffObj.colors || {};
     var changedNames = [];
-    for (var dk in diffColors) changedNames.push(dk);
-    var summary = "Applied " + changedNames.length + " changes";
-    if (changedNames.length > 0 && changedNames.length <= 8) {
+    for (var ck in diffColors) changedNames.push(ck);
+    var summary = "Applied " + changedNames.length + " colors";
+    if (dimCount > 0) summary += " + " + dimCount + " styles";
+    if (changedNames.length > 0 && changedNames.length <= 6) {
         summary += ": " + changedNames.join(", ");
     }
     addChatMessage("assistant", summary);
     updateTokenSwatches();
     updateModifiedCount();
-    setText("status-text", changedNames.length + " tokens modified by AI");
+    setText("status-text", (changedNames.length + dimCount) + " changes by AI");
     layout();
 });
 
