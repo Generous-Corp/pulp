@@ -59,6 +59,9 @@ int main(int argc, char* argv[]) {
 
     StateStore store;
     ScriptEngine engine;
+    engine.set_log_callback([](std::string_view level, std::string_view msg) {
+        std::cerr << "[" << level << "] " << msg << "\n";
+    });
     WidgetBridge bridge(engine, root, store);
 
     // Load library scripts first (oklch.js)

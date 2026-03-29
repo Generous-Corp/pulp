@@ -1309,33 +1309,55 @@ on("accent-hue", "change", function(val) {
 });
 
 // Harmony selector handler
-// Defer heavy work from combo select handlers to next frame
-// (avoids widget tree mutation during on_mouse_event processing)
+// Harmony change: update palette colors in-place (no widget tree mutation)
 on("harmony-selector", "select", function(idx) {
     var modes = ["monochromatic", "analogous", "complementary", "splitComplementary", "none"];
     if (idx >= 0 && idx < modes.length) {
         currentHarmony = modes[idx];
-        __requestFrame__(function() {
+        // Just update colors — don't rebuild widget tree during mouse event
+        var palette = PaletteSystem.create(currentAccent, currentHarmony);
+        applyTokenDiff(PaletteSystem.toThemeDiff(palette));
+        updateTokenSwatches();
+        // Update shade ramp colors in-place
+        var steps = ShadeGenerator.STEPS;
+        for (var p = 0; p < paletteKeys.length; p++) {
+            var ramp = palette[paletteKeys[p]];
+            for (var s = 0; s < steps.length; s++) {
+                setBackground("ramp-" + p + "-s" + s, ramp[steps[s]].hex);
+            }
+            setBackground("ramp-" + p + "-dot", ramp[500].hex);
+        }
+        // Close any expanded editor since palette changed
+        if (expandedPalette >= 0) {
+            setVisible("ramp-" + expandedPalette + "-editor", false);
             expandedPalette = -1;
-            buildShadeRamps();
-            var palette = PaletteSystem.create(currentAccent, currentHarmony);
-            applyTokenDiff(PaletteSystem.toThemeDiff(palette));
-            updateTokenSwatches();
-            layout();
-        });
+        }
+        layout();
     }
 });
 
 // Dark/Light mode handler
 on("mode-selector", "select", function(idx) {
     var mode = idx === 0 ? "dark" : "light";
-    __requestFrame__(function() {
-        setTheme(mode);
-        buildShadeRamps();
-        updateTokenSwatches();
-        pushThemeSnapshot();
-        layout();
-    });
+    setTheme(mode);
+    // Update shade ramp colors in-place
+    var palette = PaletteSystem.create(currentAccent, currentHarmony);
+    applyTokenDiff(PaletteSystem.toThemeDiff(palette));
+    updateTokenSwatches();
+    var steps = ShadeGenerator.STEPS;
+    for (var p = 0; p < paletteKeys.length; p++) {
+        var ramp = palette[paletteKeys[p]];
+        for (var s = 0; s < steps.length; s++) {
+            setBackground("ramp-" + p + "-s" + s, ramp[steps[s]].hex);
+        }
+        setBackground("ramp-" + p + "-dot", ramp[500].hex);
+    }
+    if (expandedPalette >= 0) {
+        setVisible("ramp-" + expandedPalette + "-editor", false);
+        expandedPalette = -1;
+    }
+    pushThemeSnapshot();
+    layout();
 });
 
 // ── CENTER PANEL (Preview) ───────────────────────────────────────
@@ -2409,14 +2431,25 @@ on("preset-selector", "select", function(idx) {
     ];
     var p = presets[idx];
     currentAccent = p.accent;
-    __requestFrame__(function() {
-        setTheme(p.theme);
-        setText("theme-name-label", ["Default Dark","Light","Pro Audio","Violet","Amber","Ocean","Neon"][idx]);
-        buildShadeRamps();
-        updateTokenSwatches();
-        pushThemeSnapshot();
-        layout();
-    });
+    setTheme(p.theme);
+    setText("theme-name-label", ["Default Dark","Light","Pro Audio","Violet","Amber","Ocean","Neon"][idx]);
+    var palette = PaletteSystem.create(currentAccent, currentHarmony);
+    applyTokenDiff(PaletteSystem.toThemeDiff(palette));
+    updateTokenSwatches();
+    var steps = ShadeGenerator.STEPS;
+    for (var pp = 0; pp < paletteKeys.length; pp++) {
+        var ramp = palette[paletteKeys[pp]];
+        for (var s = 0; s < steps.length; s++) {
+            setBackground("ramp-" + pp + "-s" + s, ramp[steps[s]].hex);
+        }
+        setBackground("ramp-" + pp + "-dot", ramp[500].hex);
+    }
+    if (expandedPalette >= 0) {
+        setVisible("ramp-" + expandedPalette + "-editor", false);
+        expandedPalette = -1;
+    }
+    pushThemeSnapshot();
+    layout();
 });
 
 // ═══════════════════════════════════════════════════════════════════
