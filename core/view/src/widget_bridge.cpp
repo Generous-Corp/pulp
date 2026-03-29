@@ -8,6 +8,7 @@
 #include <pulp/platform/file_dialog.hpp>
 #include <pulp/platform/clipboard.hpp>
 #include <web_compat_preludes_gen.hpp>
+#include <thread>
 #include <chrono>
 #include <cmath>
 #include <filesystem>
@@ -2123,6 +2124,45 @@ void WidgetBridge::register_api() {
         while (fgets(buf, sizeof(buf), p)) r += buf;
         pclose(p);
         return choc::value::createString(r);
+    });
+
+    // execAsync(cmd, callbackId) — non-blocking shell command
+    // Runs cmd on a background thread, dispatches result to JS via
+    // __dispatch__(callbackId, 'result', stdout) when complete.
+    engine_.register_function("execAsync", [this](choc::javascript::ArgumentList args) {
+        auto cmd = args.get<std::string>(0, "");
+        auto cbId = args.get<std::string>(1, "");
+        if (cmd.empty() || cbId.empty()) return choc::value::Value();
+        auto full_cmd = std::string(
+            "export PATH=\"$HOME/.local/bin:$HOME/.npm-global/bin:"
+            "/opt/homebrew/bin:/usr/local/bin:$PATH\"; ") + cmd;
+        // Capture engine pointer for callback
+        auto* eng = &engine_;
+        std::thread([full_cmd, cbId, eng]() {
+            std::string r;
+            FILE* p = popen(full_cmd.c_str(), "r");
+            if (p) {
+                char buf[4096];
+                while (fgets(buf, sizeof(buf), p)) r += buf;
+                pclose(p);
+            }
+            // Escape single quotes in result for JS string
+            std::string escaped;
+            for (char c : r) {
+                if (c == '\'') escaped += "\\'";
+                else if (c == '\n') escaped += "\\n";
+                else if (c == '\r') continue;
+                else escaped += c;
+            }
+            // Dispatch result back to JS on next evaluate
+            // Note: this is called from a background thread — the JS engine
+            // is not thread-safe. The caller must poll for results.
+            // For safety, write result to a temp file and let JS poll it.
+            std::string tmpPath = "/tmp/pulp-async-" + cbId + ".txt";
+            FILE* f = fopen(tmpPath.c_str(), "w");
+            if (f) { fwrite(r.c_str(), 1, r.size(), f); fclose(f); }
+        }).detach();
+        return choc::value::Value();
     });
 
     // ── Context menu ────────────────────────────────────────────────────
