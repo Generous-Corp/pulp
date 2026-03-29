@@ -395,4 +395,35 @@ void TextEditor::notify_change() {
     if (on_change) on_change(text_);
 }
 
+// ── IME composition ─────────────────────────────────────────────────────────
+
+void TextEditor::set_marked_text(const std::string& marked, int selected_pos, int selected_len) {
+    // Remove any previous marked text
+    if (!marked_text_.empty()) {
+        text_.erase(static_cast<size_t>(marked_start_), marked_text_.size());
+        caret_position_ = marked_start_;
+    }
+
+    marked_text_ = marked;
+    marked_start_ = caret_position_;
+    marked_selected_pos_ = selected_pos;
+    marked_selected_len_ = selected_len;
+
+    // Insert marked text at caret
+    if (!marked.empty()) {
+        text_.insert(static_cast<size_t>(marked_start_), marked);
+        caret_position_ = marked_start_ + static_cast<int>(marked.size());
+    }
+
+    selection_start_ = selection_end_ = caret_position_;
+}
+
+void TextEditor::unmark_text() {
+    // Marked text has already been inserted into text_; just clear the state
+    marked_text_.clear();
+    marked_start_ = 0;
+    marked_selected_pos_ = 0;
+    marked_selected_len_ = 0;
+}
+
 } // namespace pulp::view

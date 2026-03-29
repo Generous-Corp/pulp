@@ -97,6 +97,7 @@ if(APPLE)
             platform/mac/plugin_view_host_mac.mm
             platform/mac/screenshot_mac.mm
             platform/mac/drag_drop_mac.mm
+            platform/mac/accessibility_mac.mm
         )
         target_link_libraries(pulp-view PRIVATE
             "-framework CoreServices"

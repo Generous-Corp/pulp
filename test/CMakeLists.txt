@@ -184,6 +184,11 @@ add_executable(pulp-test-view test_view.cpp)
 target_link_libraries(pulp-test-view PRIVATE pulp::view Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-view)
 
+# Platform maturity tests (cursor, focus, IME, context menu, accessibility)
+add_executable(pulp-test-platform-maturity test_platform_maturity.cpp)
+target_link_libraries(pulp-test-platform-maturity PRIVATE pulp::view Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-platform-maturity)
+
 # Audio bridge tests
 add_executable(pulp-test-audio-bridge test_audio_bridge.cpp)
 target_link_libraries(pulp-test-audio-bridge PRIVATE pulp::view Catch2::Catch2WithMain)

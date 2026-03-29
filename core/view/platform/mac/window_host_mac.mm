@@ -2,6 +2,7 @@
 #include <pulp/view/frame_clock.hpp>
 #include <pulp/view/widgets.hpp>
 #include <pulp/view/ui_components.hpp>
+#include <pulp/view/text_editor.hpp>
 
 #include <TargetConditionals.h>
 #if TARGET_OS_OSX
@@ -203,17 +204,48 @@ static pulp::view::KeyCode keyCodeFromNS(unsigned short code) {
     [self setNeedsDisplay:YES];
 }
 
+- (void)rightMouseDown:(NSEvent*)event {
+    if (!self.rootView) return;
+    auto pt = [self localPoint:event];
+    auto* target = self.rootView->hit_test(pt);
+    if (target && target->on_context_menu) {
+        auto local = toLocal(pt, target, self.rootView);
+        target->on_context_menu(local);
+    }
+    [self setNeedsDisplay:YES];
+}
+
 // ── Keyboard input ───────────────────────────────────────────────
 
 - (void)keyDown:(NSEvent*)event {
+    auto key = keyCodeFromNS(event.keyCode);
+    auto mods = modifiersFromNSFlags(event.modifierFlags);
+
+    // Tab / Shift+Tab: cycle keyboard focus through focusable views
+    if (key == pulp::view::KeyCode::tab && self.rootView) {
+        auto* old = _focusedView;
+        pulp::view::View* next = nullptr;
+        if (mods & pulp::view::kModShift)
+            next = pulp::view::View::focus_prev(*self.rootView, _focusedView);
+        else
+            next = pulp::view::View::focus_next(*self.rootView, _focusedView);
+        if (next && next != old) {
+            if (old) old->on_focus_changed(false);
+            _focusedView = next;
+            _focusedView->on_focus_changed(true);
+        }
+        [self setNeedsDisplay:YES];
+        return;
+    }
+
     // Let NSTextInputClient handle text insertion
     [self interpretKeyEvents:@[event]];
 
     // Forward as KeyEvent to focused view (for navigation, Enter, Backspace, etc.)
     if (_focusedView) {
         pulp::view::KeyEvent ke;
-        ke.key = keyCodeFromNS(event.keyCode);
-        ke.modifiers = modifiersFromNSFlags(event.modifierFlags);
+        ke.key = key;
+        ke.modifiers = mods;
         ke.is_down = true;
         ke.is_repeat = event.isARepeat;
         _focusedView->on_key_event(ke);
@@ -234,15 +266,86 @@ static pulp::view::KeyCode keyCodeFromNS(unsigned short code) {
     }
 }
 
-- (BOOL)hasMarkedText { return NO; }
-- (NSRange)markedRange { return NSMakeRange(NSNotFound, 0); }
-- (NSRange)selectedRange { return NSMakeRange(0, 0); }
-- (void)setMarkedText:(id)s selectedRange:(NSRange)sel replacementRange:(NSRange)rep { (void)s; (void)sel; (void)rep; }
-- (void)unmarkText {}
+- (pulp::view::TextEditor*)focusedTextEditor {
+    auto* te = dynamic_cast<pulp::view::TextEditor*>(_focusedView);
+    return te;
+}
+
+- (BOOL)hasMarkedText {
+    auto* te = [self focusedTextEditor];
+    return te ? te->has_marked_text() : NO;
+}
+
+- (NSRange)markedRange {
+    auto* te = [self focusedTextEditor];
+    if (!te || !te->has_marked_text()) return NSMakeRange(NSNotFound, 0);
+    auto [start, len] = te->marked_range();
+    return NSMakeRange(static_cast<NSUInteger>(start), static_cast<NSUInteger>(len));
+}
+
+- (NSRange)selectedRange {
+    auto* te = [self focusedTextEditor];
+    if (!te) return NSMakeRange(0, 0);
+    return NSMakeRange(static_cast<NSUInteger>(te->caret_pos()), 0);
+}
+
+- (void)setMarkedText:(id)string selectedRange:(NSRange)sel replacementRange:(NSRange)rep {
+    (void)rep;
+    auto* te = [self focusedTextEditor];
+    if (!te) return;
+    NSString* str = [string isKindOfClass:[NSAttributedString class]]
+        ? [(NSAttributedString*)string string] : (NSString*)string;
+    te->set_marked_text([str UTF8String],
+                        static_cast<int>(sel.location),
+                        static_cast<int>(sel.length));
+    [self setNeedsDisplay:YES];
+}
+
+- (void)unmarkText {
+    auto* te = [self focusedTextEditor];
+    if (te) te->unmark_text();
+}
+
 - (NSArray<NSAttributedStringKey>*)validAttributesForMarkedText { return @[]; }
-- (NSAttributedString*)attributedSubstringForProposedRange:(NSRange)r actualRange:(NSRangePointer)a { (void)r; (void)a; return nil; }
+
+- (NSAttributedString*)attributedSubstringForProposedRange:(NSRange)r actualRange:(NSRangePointer)a {
+    (void)a;
+    auto* te = [self focusedTextEditor];
+    if (!te) return nil;
+    auto& text = te->text();
+    if (r.location >= text.size()) return nil;
+    auto len = std::min(r.length, text.size() - r.location);
+    auto sub = text.substr(r.location, len);
+    return [[NSAttributedString alloc] initWithString:[NSString stringWithUTF8String:sub.c_str()]];
+}
+
 - (NSUInteger)characterIndexForPoint:(NSPoint)p { (void)p; return 0; }
-- (NSRect)firstRectForCharacterRange:(NSRange)r actualRange:(NSRangePointer)a { (void)r; (void)a; return NSZeroRect; }
+
+- (NSRect)firstRectForCharacterRange:(NSRange)r actualRange:(NSRangePointer)a {
+    (void)r; (void)a;
+    // Return the caret rect in screen coordinates for IME candidate window positioning
+    auto* te = [self focusedTextEditor];
+    if (!te) return NSZeroRect;
+
+    // Approximate caret position using monospace character width
+    float char_w = te->font_size() * 0.6f;
+    float caret_x = 6.0f + te->caret_pos() * char_w;
+    float caret_y = 0;
+
+    // Walk up parents to get root-relative position
+    float rx = caret_x, ry = caret_y;
+    for (auto* v = static_cast<pulp::view::View*>(te); v; v = v->parent()) {
+        rx += v->bounds().x;
+        ry += v->bounds().y;
+    }
+
+    // Convert to NSView coordinates (bottom-up)
+    float viewHeight = static_cast<float>(self.bounds.size.height);
+    NSRect viewRect = NSMakeRect(rx, viewHeight - ry - te->font_size(), char_w, te->font_size());
+    NSRect windowRect = [self convertRect:viewRect toView:nil];
+    return [self.window convertRectToScreen:windowRect];
+}
+
 - (void)doCommandBySelector:(SEL)sel { (void)sel; }
 
 - (void)mouseMoved:(NSEvent*)event {
@@ -262,6 +365,28 @@ static pulp::view::KeyCode keyCodeFromNS(unsigned short code) {
     }
 
     self.rootView->simulate_hover(pt);
+
+    // Update cursor based on hovered view's cursor style
+    auto* target = self.rootView->hit_test(pt);
+    if (target) {
+        switch (target->cursor()) {
+            case pulp::view::View::CursorStyle::pointer:
+                [[NSCursor pointingHandCursor] set]; break;
+            case pulp::view::View::CursorStyle::crosshair:
+                [[NSCursor crosshairCursor] set]; break;
+            case pulp::view::View::CursorStyle::text:
+                [[NSCursor IBeamCursor] set]; break;
+            case pulp::view::View::CursorStyle::grab:
+                [[NSCursor openHandCursor] set]; break;
+            case pulp::view::View::CursorStyle::grabbing:
+                [[NSCursor closedHandCursor] set]; break;
+            case pulp::view::View::CursorStyle::not_allowed:
+                [[NSCursor operationNotAllowedCursor] set]; break;
+            default:
+                [[NSCursor arrowCursor] set]; break;
+        }
+    }
+
     [self setNeedsDisplay:YES];
 }
 

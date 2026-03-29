@@ -211,6 +211,10 @@ public:
     /// Generic click callback (fires on mouse-down, if set).
     std::function<void()> on_click;
 
+    /// Right-click context menu callback. If set, called on right-click with view-local coords.
+    /// Return a list of menu items; an empty return suppresses the menu.
+    std::function<void(Point position)> on_context_menu;
+
     /// Hover callbacks (CSS :hover equivalent). Fired by set_hovered().
     std::function<void()> on_hover_enter;
     std::function<void()> on_hover_leave;

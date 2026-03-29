@@ -3,9 +3,11 @@
 #include <pulp/view/script_engine.hpp>
 #include <pulp/view/view.hpp>
 #include <pulp/view/widgets.hpp>
+#include <pulp/view/input_events.hpp>
 #include <pulp/view/theme.hpp>
 #include <pulp/state/store.hpp>
 #include <string>
+#include <vector>
 #include <unordered_map>
 #include <memory>
 
@@ -46,6 +48,14 @@ private:
 
     // Track widgets by ID for JS access
     std::unordered_map<std::string, View*> widgets_;
+
+    // Registered keyboard shortcuts from JS
+    struct ShortcutBinding {
+        KeyCode key;
+        uint16_t modifiers;
+        std::string callback;
+    };
+    std::vector<ShortcutBinding> shortcuts_;
 
     // Resolve parent: returns view for parentId, or &root_ if empty
     View* resolve_parent(const std::string& parent_id);

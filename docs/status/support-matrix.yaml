@@ -108,6 +108,38 @@ js_authoring:
       148 named CSS colors, shorthand expansion, transform/transition parsing.
       No DOM/CSSOM — pure JS shim over native widget bridge.
 
+platform_maturity:
+  cursor_management:
+    status: usable
+    platform: macos
+    notes: CursorStyle enum mapped to NSCursor in mouseMoved. All 7 styles supported.
+  tab_focus:
+    status: usable
+    notes: Tab/Shift+Tab cycles focus through focusable views. Wraps at ends.
+  accessibility:
+    macos:
+      status: usable
+      notes: VoiceOver via NSAccessibilityElement. AccessRole maps to NSAccessibilityRole.
+    windows:
+      status: partial
+      notes: UIA stub — role mapping defined, provider not yet implemented.
+    linux:
+      status: partial
+      notes: AT-SPI stub — role mapping defined, D-Bus registration not yet implemented.
+  ime_composition:
+    status: usable
+    platform: macos
+    notes: Full NSTextInputClient — setMarkedText, unmarkText, firstRectForCharacterRange for candidate window positioning.
+  context_menu:
+    status: usable
+    notes: on_context_menu callback on View, rightMouseDown dispatch, showContextMenu/registerContextMenu bridge.
+  keyboard_shortcuts:
+    status: usable
+    notes: registerShortcut bridge function, shortcuts checked before global key dispatch.
+  file_dialogs:
+    status: usable
+    notes: showOpenDialog, showSaveDialog, chooseFolder bridge functions via native NSOpenPanel/NSSavePanel.
+
 subsystems:
   runtime: stable
   events: usable

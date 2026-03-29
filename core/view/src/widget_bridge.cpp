@@ -4,6 +4,8 @@
 #include <pulp/view/ui_components.hpp>
 #include <pulp/view/text_editor.hpp>
 #include <pulp/view/canvas_widget.hpp>
+#include <pulp/platform/popup_menu.hpp>
+#include <pulp/platform/file_dialog.hpp>
 #include <web_compat_preludes_gen.hpp>
 #include <cmath>
 #include <sstream>
@@ -1828,10 +1830,116 @@ void WidgetBridge::register_api() {
         pclose(p);
         return choc::value::createString(r);
     });
+
+    // ── Context menu ────────────────────────────────────────────────────
+    // registerContextMenu(id, callbackName)
+    // When right-click fires on the widget, calls JS: callbackName(x, y)
+    engine_.register_function("registerContextMenu", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto cb = args.get<std::string>(1, "");
+        auto* v = widget(id);
+        if (v && !cb.empty()) {
+            v->on_context_menu = [this, cb](Point pos) {
+                engine_.evaluate(cb + "(" + std::to_string(pos.x) + "," + std::to_string(pos.y) + ")");
+            };
+        }
+        return choc::value::Value();
+    });
+
+    // showContextMenu(itemsJSON, x, y) -> selected id or -1
+    engine_.register_function("showContextMenu", [this](choc::javascript::ArgumentList args) {
+        auto json = args.get<std::string>(0, "");
+        auto x = args.get<double>(1, 0);
+        auto y = args.get<double>(2, 0);
+
+        platform::PopupMenu menu;
+        // Parse JSON array: [{"id":1,"label":"Cut"}, {"separator":true}]
+        try {
+            auto items = choc::json::parse(json);
+            if (items.isArray()) {
+                for (uint32_t i = 0; i < items.size(); ++i) {
+                    auto item = items[i];
+                    bool sep = false;
+                    if (item.hasObjectMember("separator")) {
+                        sep = item["separator"].getWithDefault(false);
+                    }
+                    if (sep) {
+                        menu.add_separator();
+                    } else {
+                        int id = item["id"].getWithDefault(0);
+                        std::string label;
+                        if (item.hasObjectMember("label"))
+                            label = item["label"].getWithDefault(std::string(""));
+                        bool enabled = item.hasObjectMember("enabled") ? item["enabled"].getWithDefault(true) : true;
+                        bool checked = item.hasObjectMember("checked") ? item["checked"].getWithDefault(false) : false;
+                        menu.add_item(id, label, enabled, checked);
+                    }
+                }
+            }
+        } catch (...) {}
+        auto result = menu.show(static_cast<float>(x), static_cast<float>(y));
+        return choc::value::createInt32(result.value_or(-1));
+    });
+
+    // ── Keyboard shortcuts ──────────────────────────────────────────────
+    // registerShortcut(key, modifiers, callbackName)
+    engine_.register_function("registerShortcut", [this](choc::javascript::ArgumentList args) {
+        auto key = args.get<int>(0, 0);
+        auto mods = args.get<int>(1, 0);
+        auto cb = args.get<std::string>(2, "");
+        if (!cb.empty()) {
+            shortcuts_.push_back({static_cast<KeyCode>(key),
+                                  static_cast<uint16_t>(mods), cb});
+        }
+        return choc::value::Value();
+    });
+
+    // ── File dialogs ────────────────────────────────────────────────────
+    // showOpenDialog(title, filterDesc, extensions) -> path or ""
+    // extensions: semicolon-separated, e.g. "js;json;txt"
+    engine_.register_function("showOpenDialog", [this](choc::javascript::ArgumentList args) {
+        auto title = args.get<std::string>(0, "Open");
+        auto desc = args.get<std::string>(1, "");
+        auto exts = args.get<std::string>(2, "");
+        std::vector<platform::FileFilter> filters;
+        if (!desc.empty())
+            filters.push_back({desc, exts});
+        auto result = platform::FileDialog::open_file(title, filters);
+        return choc::value::createString(result.value_or(""));
+    });
+
+    // showSaveDialog(title, filterDesc, extensions) -> path or ""
+    engine_.register_function("showSaveDialog", [this](choc::javascript::ArgumentList args) {
+        auto title = args.get<std::string>(0, "Save");
+        auto desc = args.get<std::string>(1, "");
+        auto exts = args.get<std::string>(2, "");
+        std::vector<platform::FileFilter> filters;
+        if (!desc.empty())
+            filters.push_back({desc, exts});
+        auto result = platform::FileDialog::save_file(title, filters);
+        return choc::value::createString(result.value_or(""));
+    });
+
+    // chooseFolder(title) -> path or ""
+    engine_.register_function("chooseFolder", [this](choc::javascript::ArgumentList args) {
+        auto title = args.get<std::string>(0, "Choose Folder");
+        auto result = platform::FileDialog::choose_folder(title);
+        return choc::value::createString(result.value_or(""));
+    });
 }
 
 void WidgetBridge::forward_key_event(int key_code, uint16_t modifiers, bool is_down) {
     if (!is_down) return;
+
+    // Check registered shortcuts first
+    auto kc = static_cast<KeyCode>(key_code);
+    for (auto& s : shortcuts_) {
+        if (s.key == kc && s.modifiers == modifiers) {
+            engine_.evaluate(s.callback + "()");
+            return;
+        }
+    }
+
     engine_.evaluate("__dispatch__('__global__', 'keydown', {"
         "key:" + std::to_string(key_code) +
         ",mods:" + std::to_string(modifiers) + "})");

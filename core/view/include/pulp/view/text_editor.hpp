@@ -36,7 +36,7 @@ namespace pulp::view {
 /// @endcode
 class TextEditor : public View {
 public:
-    TextEditor() { set_focusable(true); }
+    TextEditor() { set_focusable(true); set_cursor(CursorStyle::text); }
 
     static constexpr int kMaxUndoHistory = 1000;
 
@@ -112,6 +112,23 @@ public:
     void set_font_size(float size) { font_size_ = size; }
     float font_size() const { return font_size_; }
 
+    // ── IME composition (marked text) ────────────────────────────────────
+
+    /// Set composition text from input method. Replaces any existing marked text.
+    void set_marked_text(const std::string& marked, int selected_pos, int selected_len);
+
+    /// Commit composition (clear marked text, the final text was already inserted via on_text_input).
+    void unmark_text();
+
+    /// Whether there is active IME composition text.
+    bool has_marked_text() const { return !marked_text_.empty(); }
+
+    /// The marked text range relative to the full text (start, length).
+    std::pair<int, int> marked_range() const { return {marked_start_, static_cast<int>(marked_text_.size())}; }
+
+    /// Caret position in the text, for IME cursor rect queries.
+    int caret_pos() const { return caret_position_; }
+
 private:
     std::string text_;
     int caret_position_ = 0;     ///< Cursor position (character index)
@@ -120,6 +137,12 @@ private:
     float font_size_ = 13.0f;
     float scroll_offset_ = 0.0f; ///< Horizontal scroll for single-line
     float caret_blink_time_ = 0.0f; ///< Accumulated time for caret blinking
+
+    // IME composition state
+    std::string marked_text_;        ///< Active composition string
+    int marked_start_ = 0;          ///< Position in text_ where marked text starts
+    int marked_selected_pos_ = 0;   ///< Selected range within marked text
+    int marked_selected_len_ = 0;
 
     // Undo history: (text, caret_position) pairs
     std::vector<std::pair<std::string, int>> undo_history_;

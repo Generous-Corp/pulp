@@ -63,7 +63,7 @@ modules:
     docs: reference/modules.md#render
 
   - name: view
-    summary: Widgets, themes, JS scripting, web-compat layer (document/Element/style/events/StyleSheet/querySelector), hot-reload, inspector, text editor, UI components, app framework, design export, FrameClock animation system, motion tokens
+    summary: Widgets, themes, JS scripting, web-compat layer, hot-reload, inspector, text editor with IME, UI components, app framework, design export, FrameClock animation, motion tokens, cursor management, Tab focus traversal, VoiceOver accessibility, context menus, keyboard shortcuts, file dialogs
     status: usable
     dependencies: [canvas, events, state]
     docs: reference/modules.md#view
