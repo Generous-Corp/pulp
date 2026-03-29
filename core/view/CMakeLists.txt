@@ -1,10 +1,33 @@
 add_library(pulp-view)
 add_library(pulp::view ALIAS pulp-view)
 
+# ── Embed JS preludes as C++ string constants ────────────────────────────────
+set(PULP_JS_PRELUDES
+    ${CMAKE_CURRENT_SOURCE_DIR}/js/css-colors.js
+    ${CMAKE_CURRENT_SOURCE_DIR}/js/css-parser.js
+    ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat.js
+)
+set(PULP_JS_EMBEDDED_HEADER ${CMAKE_CURRENT_BINARY_DIR}/web_compat_preludes_gen.hpp)
+
+add_custom_command(
+    OUTPUT ${PULP_JS_EMBEDDED_HEADER}
+    COMMAND ${CMAKE_COMMAND}
+        -DFILE1=${CMAKE_CURRENT_SOURCE_DIR}/js/css-colors.js
+        -DFILE2=${CMAKE_CURRENT_SOURCE_DIR}/js/css-parser.js
+        -DFILE3=${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat.js
+        -DOUTPUT_FILE=${PULP_JS_EMBEDDED_HEADER}
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/js/embed_js.cmake
+    DEPENDS ${PULP_JS_PRELUDES} ${CMAKE_CURRENT_SOURCE_DIR}/js/embed_js.cmake
+    COMMENT "Embedding JS preludes into C++ header"
+)
+add_custom_target(pulp-view-js-preludes DEPENDS ${PULP_JS_EMBEDDED_HEADER})
+
 target_include_directories(pulp-view
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
         $<INSTALL_INTERFACE:include>
+    PRIVATE
+        ${CMAKE_CURRENT_BINARY_DIR}  # For generated web_compat_preludes_gen.hpp
 )
 
 target_sources(pulp-view PRIVATE
@@ -41,6 +64,8 @@ endif()
 target_include_directories(pulp-view PUBLIC
     $<BUILD_INTERFACE:${choc_SOURCE_DIR}>
 )
+
+add_dependencies(pulp-view pulp-view-js-preludes)
 
 target_link_libraries(pulp-view PUBLIC pulp::canvas pulp::events pulp::state)
 

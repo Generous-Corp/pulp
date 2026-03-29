@@ -99,6 +99,15 @@ rendering:
     platform: macos
     notes: Current default render path for all macOS view hosts. Production-ready.
 
+js_authoring:
+  web_compat_layer:
+    status: usable
+    notes: >
+      JS prelude providing document.createElement, element.style, addEventListener,
+      StyleSheet, querySelector/querySelectorAll, getBoundingClientRect, getComputedStyle.
+      148 named CSS colors, shorthand expansion, transform/transition parsing.
+      No DOM/CSSOM — pure JS shim over native widget bridge.
+
 subsystems:
   runtime: stable
   events: usable
@@ -110,5 +119,5 @@ subsystems:
   platform: usable
   canvas: experimental
   render: experimental
-  view: experimental
+  view: usable
   osc: experimental
