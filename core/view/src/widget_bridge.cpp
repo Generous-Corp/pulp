@@ -1371,6 +1371,47 @@ void WidgetBridge::register_api() {
         return choc::value::Value();
     });
 
+    // setBorderSide(id, side, width, color) — per-side border
+    engine_.register_function("setBorderSide", [this, parseHexColor](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto side = args.get<std::string>(1, "");
+        auto width = static_cast<float>(args.get<double>(2, 1.0));
+        auto hex = args.get<std::string>(3, "");
+        auto* v = id.empty() ? &root_ : widget(id);
+        if (v) {
+            auto c = hex.empty() ? canvas::Color{128,128,128,255} : parseHexColor(hex);
+            if (side == "top") v->set_border_top(c, width);
+            else if (side == "right") v->set_border_right(c, width);
+            else if (side == "bottom") v->set_border_bottom(c, width);
+            else if (side == "left") v->set_border_left(c, width);
+        }
+        return choc::value::Value();
+    });
+
+    // setCornerRadius(id, corner, radius) — per-corner border-radius
+    engine_.register_function("setCornerRadius", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto corner = args.get<std::string>(1, "");
+        auto r = static_cast<float>(args.get<double>(2, 0));
+        auto* v = id.empty() ? &root_ : widget(id);
+        if (v) {
+            if (corner == "TopLeft") v->set_corner_radius_tl(r);
+            else if (corner == "TopRight") v->set_corner_radius_tr(r);
+            else if (corner == "BottomLeft") v->set_corner_radius_bl(r);
+            else if (corner == "BottomRight") v->set_corner_radius_br(r);
+        }
+        return choc::value::Value();
+    });
+
+    // registerWheel(id) — enable wheel event dispatch for scroll/zoom
+    engine_.register_function("registerWheel", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        // Wheel events are dispatched from the native scroll handler
+        // For now, register interest — the window host already dispatches scroll
+        (void)id;
+        return choc::value::Value();
+    });
+
     engine_.register_function("setOpacity", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto alpha = args.get<double>(1, 1.0);

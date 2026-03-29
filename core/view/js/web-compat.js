@@ -759,6 +759,27 @@ Element.prototype._registerNativeEvent = function(type) {
             var evt2 = _makeEvent("change", self);
             self.dispatchEvent(evt2);
         });
+    } else if (type === "dblclick") {
+        registerClick(id);
+        on(id, "dblclick", function() {
+            self.dispatchEvent(_makeEvent("dblclick", self));
+        });
+    } else if (type === "wheel") {
+        if (typeof registerWheel === "function") registerWheel(id);
+        on(id, "wheel", function(dx, dy) {
+            self.dispatchEvent(_makeEvent("wheel", self, { deltaX: dx || 0, deltaY: dy || 0 }));
+        });
+    } else if (type === "scroll") {
+        on(id, "scroll", function() {
+            self.dispatchEvent(_makeEvent("scroll", self));
+        });
+    } else if (type === "contextmenu") {
+        if (typeof registerContextMenu === "function") {
+            registerContextMenu(id, "__dispatch__('" + id + "', 'contextmenu', 0)");
+        }
+        on(id, "contextmenu", function() {
+            self.dispatchEvent(_makeEvent("contextmenu", self));
+        });
     } else if (type === "keydown" || type === "keyup" || type === "keypress") {
         // Global key events are forwarded through __dispatch__
     } else if (type === "focus") {
@@ -798,12 +819,25 @@ function _makeEvent(type, target, data) {
         _predicted: d._predicted || null,
         getCoalescedEvents: function() { return this._coalesced || [this]; },
         getPredictedEvents: function() { return this._predicted || []; },
+        detail: d.detail || null,
+        deltaX: d.deltaX || 0, deltaY: d.deltaY || 0, deltaMode: d.deltaMode || 0,
         _stopped: false,
+        _stoppedImmediate: false,
         _defaultPrevented: false,
         _noBubble: false,
         stopPropagation: function() { this._stopped = true; },
+        stopImmediatePropagation: function() { this._stopped = true; this._stoppedImmediate = true; },
         preventDefault: function() { this._defaultPrevented = true; }
     };
+}
+
+// CustomEvent constructor
+function CustomEvent(type, opts) {
+    var o = opts || {};
+    var evt = _makeEvent(type, null, { detail: o.detail });
+    evt.bubbles = o.bubbles !== undefined ? o.bubbles : false;
+    evt.cancelable = o.cancelable !== undefined ? o.cancelable : false;
+    return evt;
 }
 
 function _fireListeners(el, event) {
@@ -813,7 +847,7 @@ function _fireListeners(el, event) {
     event.currentTarget = el;
     for (var i = 0; i < listeners.length; i++) {
         listeners[i].fn.call(el, event);
-        if (event._stopped) break;
+        if (event._stoppedImmediate || event._stopped) break;
     }
 }
 
@@ -1506,7 +1540,14 @@ function _setupPseudoActive(el, props) {
 
 function _parseSelector(str) {
     var result = { tag: null, id: null, classes: [], pseudo: null, pseudoArg: null,
-                   notSelector: null, parent: null, direct: false };
+                   notSelector: null, parent: null, direct: false, attrSelectors: [] };
+
+    // Extract attribute selectors [attr], [attr="val"], [attr~="val"], [attr^="val"]
+    str = str.replace(/\[([^\]]+)\]/g, function(_, inner) {
+        var m = inner.match(/^([\w-]+)(?:([~|^$*]?)=["']?([^"'\]]*)["']?)?$/);
+        if (m) result.attrSelectors.push({ name: m[1], op: m[2] || "", value: m[3] || "" });
+        return "";
+    });
 
     // Handle :not(selector) — extract inner selector
     var notMatch = str.match(/:not\(([^)]+)\)/);
@@ -1636,8 +1677,64 @@ function _matchesSelector(el, parsed) {
             if (!el._checked) return false;
         } else if (p === "disabled") {
             if (!el._disabled) return false;
+        } else if (p === "first-of-type") {
+            if (!el._parentElement) return false;
+            var tag = el.tagName;
+            var fot = el._parentElement._children;
+            var foundFirst = false;
+            for (var fi = 0; fi < fot.length; fi++) {
+                if (fot[fi].tagName === tag) { foundFirst = (fot[fi] === el); break; }
+            }
+            if (!foundFirst) return false;
+        } else if (p === "last-of-type") {
+            if (!el._parentElement) return false;
+            var tag2 = el.tagName;
+            var lot = el._parentElement._children;
+            var foundLast = false;
+            for (var li = lot.length - 1; li >= 0; li--) {
+                if (lot[li].tagName === tag2) { foundLast = (lot[li] === el); break; }
+            }
+            if (!foundLast) return false;
+        } else if (p === "nth-of-type") {
+            if (!el._parentElement) return false;
+            var tag3 = el.tagName;
+            var notSiblings = el._parentElement._children;
+            var typeIdx = 0;
+            for (var ni = 0; ni < notSiblings.length; ni++) {
+                if (notSiblings[ni].tagName === tag3) typeIdx++;
+                if (notSiblings[ni] === el) break;
+            }
+            var anb3 = _parseAnB(parsed.pseudoArg || "0");
+            if (!_matchesNthChild(typeIdx, anb3)) return false;
         } else if (p === "hover" || p === "focus" || p === "active") {
             // These are handled by StyleSheet pseudo-class registration, not static matching
+        }
+    }
+
+    // Match attribute selectors
+    if (parsed.attrSelectors) {
+        for (var ai = 0; ai < parsed.attrSelectors.length; ai++) {
+            var as = parsed.attrSelectors[ai];
+            var attrVal = el.getAttribute(as.name);
+            if (as.op === "" && as.value === "") {
+                // [attr] — attribute exists
+                if (attrVal === null) return false;
+            } else if (as.op === "" || as.op === undefined) {
+                // [attr="val"] — exact match
+                if (attrVal !== as.value) return false;
+            } else if (as.op === "~") {
+                // [attr~="val"] — whitespace-separated word
+                if (!attrVal || (" " + attrVal + " ").indexOf(" " + as.value + " ") < 0) return false;
+            } else if (as.op === "^") {
+                // [attr^="val"] — starts with
+                if (!attrVal || attrVal.indexOf(as.value) !== 0) return false;
+            } else if (as.op === "$") {
+                // [attr$="val"] — ends with
+                if (!attrVal || attrVal.indexOf(as.value, attrVal.length - as.value.length) < 0) return false;
+            } else if (as.op === "*") {
+                // [attr*="val"] — contains
+                if (!attrVal || attrVal.indexOf(as.value) < 0) return false;
+            }
         }
     }
 
@@ -1754,8 +1851,60 @@ var document = {
         el._textContent = text;
         __elements__[el._id] = el;
         return el;
+    },
+
+    createDocumentFragment: function() {
+        // Lightweight container — children transfer on appendChild
+        var frag = new Element("div");
+        frag._isFragment = true;
+        __elements__[frag._id] = frag;
+        return frag;
     }
 };
+
+// Override appendChild on fragments: transfer children instead of appending the fragment
+var _origAppendChild = Element.prototype.appendChild;
+Element.prototype.appendChild = function(child) {
+    if (child && child._isFragment) {
+        // Transfer all children from fragment to this element
+        var kids = child._children.slice();
+        for (var i = 0; i < kids.length; i++) {
+            _origAppendChild.call(this, kids[i]);
+        }
+        return child;
+    }
+    return _origAppendChild.call(this, child);
+};
+
+// Option element support for <select>
+// When a <select> element has children appended, sync items to native ComboBox
+var _origSelectAppendChild = _origAppendChild;
+(function() {
+    var origAC = Element.prototype.appendChild;
+    Element.prototype.appendChild = function(child) {
+        var result = origAC.call(this, child);
+        if (this.tagName === "SELECT" && this._nativeCreated) {
+            _syncSelectOptions(this);
+        }
+        return result;
+    };
+})();
+
+function _syncSelectOptions(selectEl) {
+    var items = [];
+    for (var i = 0; i < selectEl._children.length; i++) {
+        var opt = selectEl._children[i];
+        if (opt.tagName === "OPTION") {
+            items.push(opt._textContent || opt.getAttribute("value") || "");
+        }
+    }
+    if (items.length > 0 && typeof setItems === "function") {
+        // Build choc value array
+        var arr = [];
+        for (var j = 0; j < items.length; j++) arr.push(items[j]);
+        setItems(selectEl._id, arr);
+    }
+}
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // window object (minimal shim)
@@ -1826,5 +1975,27 @@ var window = {
         if (typeof __requestFrame__ === "function") __requestFrame__(tick);
         return 0;
     },
-    clearInterval: function() {}
+    clearInterval: function() {},
+
+    // window.addEventListener — global event listeners (keydown, resize, etc.)
+    _listeners: {},
+    addEventListener: function(type, fn, opts) {
+        if (!this._listeners[type]) this._listeners[type] = [];
+        this._listeners[type].push(fn);
+    },
+    removeEventListener: function(type, fn) {
+        var list = this._listeners[type];
+        if (!list) return;
+        for (var i = list.length - 1; i >= 0; i--) {
+            if (list[i] === fn) list.splice(i, 1);
+        }
+    },
+    dispatchEvent: function(event) {
+        var list = this._listeners[event.type];
+        if (!list) return;
+        for (var i = 0; i < list.length; i++) list[i](event);
+    },
+
+    // CustomEvent constructor
+    CustomEvent: CustomEvent
 };
