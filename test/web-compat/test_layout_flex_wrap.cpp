@@ -51,7 +51,7 @@ TEST_CASE("Flex Wrap: all items fit = single row", "[layout][flex][wrap]") {
     REQUIRE(root.child_at(2)->bounds().y == 0.0f);
 }
 
-TEST_CASE("Flex Wrap: overflow items shrink when wrap enabled", "[layout][flex][wrap]") {
+TEST_CASE("Flex Wrap: overflow items wrap to next line", "[layout][flex][wrap]") {
     View root;
     root.set_bounds({0, 0, 200, 200});
     root.flex().direction = FlexDirection::row;
@@ -61,11 +61,13 @@ TEST_CASE("Flex Wrap: overflow items shrink when wrap enabled", "[layout][flex][
     root.add_child(make_box(80, 40));
     root.layout_children();
 
-    // Current behavior: items shrink to fit, all on same y
-    float total_w = 0;
-    for (int i = 0; i < 3; ++i)
-        total_w += root.child_at(i)->bounds().width;
-    REQUIRE_THAT(total_w, WithinAbs(200.0f, 1.0f));
+    // CSS wrap: first 2 items fit on line 1 (80+80=160 ≤ 200), 3rd wraps to line 2
+    // Items keep their preferred width (80px each), not shrunk
+    REQUIRE(root.child_at(0)->bounds().width == 80.0f);
+    REQUIRE(root.child_at(1)->bounds().width == 80.0f);
+    REQUIRE(root.child_at(2)->bounds().width == 80.0f);
+    // Third item should be on a new line (y > 0)
+    REQUIRE(root.child_at(2)->bounds().y > 0.0f);
 }
 
 TEST_CASE("Flex Wrap: gap with wrap reduces available space", "[layout][flex][wrap]") {

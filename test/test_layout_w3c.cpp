@@ -259,13 +259,15 @@ TEST_CASE("Layout: align-self auto inherits parent", "[layout][w3c][align-self]"
     root.flex().direction = FlexDirection::row;
     root.flex().align_items = FlexAlign::stretch;
 
-    auto child = make_box(50, 30);
+    auto child = std::make_unique<View>();
+    child->flex().preferred_width = 50;
+    // No preferred_height — cross-size is auto, so stretch should apply
     child->flex().align_self = FlexAlign::auto_;
     auto* cp = child.get();
     root.add_child(std::move(child));
     root.layout_children();
 
-    // auto = inherit stretch from parent
+    // auto = inherit stretch from parent (only when cross-size is auto)
     REQUIRE(cp->bounds().height == 100);
 }
 
@@ -344,8 +346,8 @@ TEST_CASE("Layout: Label intrinsic height in column", "[layout][w3c][intrinsic]"
     root.add_child(std::move(label));
     root.layout_children();
 
-    // Label should get intrinsic height (14 * 1.4 = 19.6)
-    REQUIRE(lp->bounds().height == 19.6f);
+    // Label should get intrinsic height (14 * 1.4 ≈ 19.6, Yoga may round)
+    REQUIRE_THAT(lp->bounds().height, Catch::Matchers::WithinAbs(19.6f, 1.0f));
 }
 
 TEST_CASE("View: paint_all with background renders without crash", "[view][w3c]") {

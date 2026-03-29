@@ -175,6 +175,19 @@ target_include_directories(lv2-headers INTERFACE
 set(PULP_HAS_LV2 TRUE)
 message(STATUS "Pulp: LV2 SDK available")
 
+# Facebook Yoga (MIT license) — cross-platform CSS Flexbox/Grid layout engine
+FetchContent_Declare(
+    yoga
+    GIT_REPOSITORY https://github.com/facebook/yoga.git
+    GIT_TAG v3.2.1
+    GIT_SHALLOW TRUE
+)
+# Disable Yoga's tests to avoid building them
+set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(yoga)
+set(PULP_HAS_YOGA TRUE)
+message(STATUS "Pulp: Yoga layout engine enabled")
+
 # Apple AudioUnitSDK (Apache 2.0) — for AU v2 plugin support (macOS only, not iOS)
 set(AUSDK_DIR "${CMAKE_CURRENT_SOURCE_DIR}/external/AudioUnitSDK")
 if(PULP_MACOS AND EXISTS "${AUSDK_DIR}/include/AudioUnitSDK/AUBase.h")

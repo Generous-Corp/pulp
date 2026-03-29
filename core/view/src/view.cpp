@@ -539,6 +539,10 @@ float View::intrinsic_height() const {
     return total + pt + pb;
 }
 
+#ifdef PULP_HAS_YOGA
+void yoga_layout(View& root); // implemented in yoga_layout.cpp
+#endif
+
 void View::layout_children() {
     if (children_.empty()) return;
 
@@ -547,6 +551,12 @@ void View::layout_children() {
         layout_grid(*this);
         return;
     }
+
+#ifdef PULP_HAS_YOGA
+    // Use Yoga for flexbox layout (correct margin:auto, flex-wrap, absolute positioning)
+    yoga_layout(*this);
+    return;
+#endif
 
     auto area = local_bounds();
 

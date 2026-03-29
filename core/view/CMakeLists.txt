@@ -40,6 +40,7 @@ target_sources(pulp-view PRIVATE
     src/script_engine.cpp
     src/theme.cpp
     src/view.cpp
+    src/yoga_layout.cpp
     src/widgets.cpp
     src/widget_bridge.cpp
     src/hot_reload.cpp
@@ -74,6 +75,12 @@ target_include_directories(pulp-view PUBLIC
 add_dependencies(pulp-view pulp-view-js-preludes)
 
 target_link_libraries(pulp-view PUBLIC pulp::canvas pulp::events pulp::state)
+
+# Yoga layout engine (MIT)
+if(PULP_HAS_YOGA)
+    target_link_libraries(pulp-view PRIVATE yogacore)
+    target_compile_definitions(pulp-view PRIVATE PULP_HAS_YOGA=1)
+endif()
 
 # SDL3 for cross-platform windowing
 if(PULP_HAS_SDL3)
