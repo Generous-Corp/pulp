@@ -19,7 +19,7 @@ irm https://www.generouscorp.com/pulp/install.ps1 | iex
 Then create your first plugin:
 
 ```bash
-pulp new my-plugin           # scaffolds, builds, and tests
+pulp create my-plugin           # scaffolds, builds, and tests
 pulp run                     # launch the standalone host
 ```
 

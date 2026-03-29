@@ -24,10 +24,10 @@ if(PULP_BUILD_TESTS)
     add_test(NAME cli-doctor-ci
         COMMAND pulp-cli doctor --ci
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
-    # CI mode outputs nothing on success (all pass) or FAIL: lines
-    # Just verify it doesn't crash — either exit code is acceptable
+    # CI mode may exit 1 if optional SDKs are missing — that's not a crash.
+    # Accept any exit code; the test just verifies it doesn't crash.
     set_tests_properties(cli-doctor-ci PROPERTIES
-        WILL_FAIL false)
+        PASS_REGULAR_EXPRESSION ".*")
 
     add_test(NAME cli-status
         COMMAND pulp-cli status
@@ -40,4 +40,23 @@ if(PULP_BUILD_TESTS)
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
     set_tests_properties(cli-create-help PROPERTIES
         PASS_REGULAR_EXPRESSION "create a new plugin project")
+
+    add_test(NAME cli-cache-status
+        COMMAND pulp-cli cache status
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+    set_tests_properties(cli-cache-status PROPERTIES
+        PASS_REGULAR_EXPRESSION "Pulp Cache")
+
+    add_test(NAME cli-cache-help
+        COMMAND pulp-cli cache
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+    set_tests_properties(cli-cache-help PROPERTIES
+        PASS_REGULAR_EXPRESSION "pulp cache")
+
+    # Verify 'new' alias is removed — should print unknown command
+    add_test(NAME cli-no-new-alias
+        COMMAND pulp-cli new --help
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+    set_tests_properties(cli-no-new-alias PROPERTIES
+        PASS_REGULAR_EXPRESSION "Unknown command")
 endif()

@@ -1828,7 +1828,7 @@ static int cmd_run(const std::vector<std::string>& args) {
         }
         if (binary.empty()) {
             std::cerr << "Error: no standalone binary found in build/examples/\n";
-            std::cerr << "  Create one with: pulp new MyApp --type app\n";
+            std::cerr << "  Create one with: pulp create MyApp --type app\n";
             std::cerr << "  Or build an existing project: pulp build\n";
             return 1;
         }

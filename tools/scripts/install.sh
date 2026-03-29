@@ -143,7 +143,7 @@ fi
 # ── Done ────────────────────────────────────────────────────────────────────
 
 echo ""
-echo "  Done! Run \`pulp new my-plugin\` to create your first plugin."
+echo "  Done! Run \`pulp create my-plugin\` to create your first plugin."
 echo ""
 echo "  If 'pulp' is not found, restart your shell or run:"
 echo "    export PATH=\"${INSTALL_DIR}:\$PATH\""

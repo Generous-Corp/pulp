@@ -6,11 +6,49 @@ Source: `tools/cli/pulp_cli.cpp`
 
 ## Commands
 
+### create
+
+**Status**: usable
+
+Create a new plugin project from templates. Checks environment, scaffolds source files, builds, and runs tests.
+
+Works in two modes:
+- **Inside a Pulp repo** (contributor mode): uses local source, adds to `examples/`
+- **Outside a repo** (standalone mode): downloads the SDK, uses `find_package(Pulp)`, generates `pulp.toml`
+
+```bash
+pulp create "My Gain"                              # effect plugin (default)
+pulp create "My Synth" --type instrument           # instrument plugin
+pulp create "My App" --type app                    # standalone audio application
+pulp create "My Project" --type bare               # minimal skeleton
+pulp create "My FX" --manufacturer "Acme Audio"    # custom manufacturer
+pulp create "My FX" --output ~/projects/my-fx      # custom output directory
+pulp create "My FX" --no-build                     # scaffold only, skip build
+pulp create "My FX" --no-interactive               # CI/scripting mode (no prompts)
+```
+
+Available types: `effect` (default), `instrument`, `app`, `bare`. Templates are in `tools/templates/<type>/`.
+
+What it does:
+1. Runs `pulp doctor` checks (fails fast if environment is broken)
+2. In standalone mode: downloads and caches the Pulp SDK
+3. Scaffolds source files from templates (processor, format entries, test, CMakeLists.txt)
+4. In repo mode: adds the project to `examples/CMakeLists.txt`
+5. In standalone mode: generates `pulp.toml` with pinned SDK version
+6. Configures, builds the test target, and runs tests
+7. Reports plugin artifact locations
+
+Default formats are platform-gated:
+- **macOS**: VST3, AU, CLAP, Standalone
+- **Linux**: VST3, CLAP, LV2, Standalone
+- **Windows**: VST3, CLAP, Standalone
+- **app/bare**: Standalone only
+
 ### build
 
 **Status**: usable
 
-Configure and build the project. Auto-detects when CMake reconfiguration is needed.
+Configure and build the project. Auto-detects when CMake reconfiguration is needed. Works with both repo-based and standalone projects.
 
 ```bash
 pulp build                    # Build all targets
@@ -20,11 +58,13 @@ pulp build -j8                # Parallel jobs
 
 Extra arguments are passed through to `cmake --build`.
 
+For standalone projects (detected via `pulp.toml`), automatically sets `CMAKE_PREFIX_PATH` to the cached SDK.
+
 ### test
 
 **Status**: usable
 
-Run the test suite via CTest. Builds first if no build directory exists.
+Run the test suite via CTest. Builds first if no build directory exists. Works with both repo-based and standalone projects.
 
 ```bash
 pulp test                     # Run all tests
@@ -59,38 +99,6 @@ Checks:
 
 Prints a summary with pass/fail/skip counts.
 
-### new
-
-**Status**: usable
-
-Create a new plugin project from templates. Checks environment, scaffolds source files, builds, and runs tests. (`create` is an alias.)
-
-```bash
-pulp new "My Gain"                              # effect plugin (default)
-pulp new "My Synth" --type instrument           # instrument plugin
-pulp new "My App" --type app                    # standalone audio application
-pulp new "My Project" --type bare               # minimal skeleton
-pulp new "My FX" --manufacturer "Acme Audio"    # custom manufacturer
-pulp new "My FX" --output ~/projects/my-fx      # custom output directory
-pulp new "My FX" --no-build                     # scaffold only, skip build
-pulp new "My FX" --no-interactive               # CI/scripting mode (no prompts)
-```
-
-Available types: `effect` (default), `instrument`, `app`, `bare`. Templates are in `tools/templates/<type>/`.
-
-What it does:
-1. Runs `pulp doctor` checks (fails fast if environment is broken)
-2. Scaffolds source files from templates (processor, format entries, test, CMakeLists.txt)
-3. Adds the project to `examples/CMakeLists.txt`
-4. Configures, builds the test target, and runs tests
-5. Reports plugin artifact locations
-
-Default formats are platform-gated:
-- **macOS**: VST3, AU, CLAP, Standalone
-- **Linux**: VST3, CLAP, LV2, Standalone
-- **Windows**: VST3, CLAP, Standalone
-- **app/bare**: Standalone only
-
 ### run
 
 **Status**: usable
@@ -104,6 +112,29 @@ pulp run MyApp -- --arg1    # pass arguments to the launched binary
 ```
 
 Searches `build/examples/` for executable binaries, skipping test binaries.
+
+### cache
+
+**Status**: usable
+
+Manage the Pulp SDK and asset cache at `~/.pulp/`.
+
+```bash
+pulp cache                  # Show help
+pulp cache status           # Show cached SDKs and assets with sizes
+pulp cache fetch skia       # Download Skia GPU rendering binaries
+pulp cache clean            # Remove all cached assets
+```
+
+**Subcommands**:
+
+| Subcommand | What it does |
+|------------|-------------|
+| `status` | List cached SDK versions and downloaded assets |
+| `fetch skia` | Download platform-specific Skia GPU binaries to `~/.pulp/cache/` |
+| `clean` | Remove all files from the asset cache |
+
+GPU rendering requires Skia binaries. If a standalone project enables GPU features, run `pulp cache fetch skia` to download them.
 
 ### doctor
 
@@ -222,6 +253,7 @@ Color output is auto-detected based on TTY. Non-TTY environments (pipes, CI) get
 
 ## Caveats
 
-- The CLI finds the project root by walking up from the current directory looking for a directory with both `CMakeLists.txt` and `core/`.
+- In repo mode, the CLI finds the project root by walking up from the current directory looking for a directory with both `CMakeLists.txt` and `core/`.
+- In standalone mode, the CLI finds the project root by looking for `pulp.toml` without `core/`.
 - The `ship` subcommands are macOS-specific (they use `codesign` and `pkgbuild`).
 - `pulp upgrade` requires internet access and `curl` (macOS/Linux) or PowerShell (Windows).

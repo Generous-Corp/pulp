@@ -4,7 +4,7 @@
 commands:
   - name: build
     status: usable
-    summary: Configure and build the project. Auto-detects CMake reconfiguration needs.
+    summary: Configure and build the project. Auto-detects CMake reconfiguration needs. Works with repo and standalone projects.
     args:
       - name: extra_args
         kind: passthrough
@@ -13,7 +13,7 @@ commands:
 
   - name: test
     status: usable
-    summary: Run the test suite via CTest. Builds first if needed.
+    summary: Run the test suite via CTest. Builds first if needed. Works with repo and standalone projects.
     args:
       - name: extra_args
         kind: passthrough
@@ -76,9 +76,9 @@ commands:
         summary: Generate API reference from public headers (Doxygen)
     docs: reference/cli.md#docs
 
-  - name: new
+  - name: create
     status: usable
-    summary: Create a new plugin project from templates. Checks environment, scaffolds, builds, and tests. (Alias: create)
+    summary: Create a new plugin project from templates. Checks environment, scaffolds, builds, and tests. Works inside repo (contributor mode) and outside (standalone mode with SDK).
     args:
       - name: name
         kind: positional
@@ -92,14 +92,26 @@ commands:
         description: Manufacturer name (default: Pulp)
       - name: --output
         kind: option
-        description: Output directory (default: examples/<name>/)
+        description: Output directory (default: examples/<name>/ or ./<name>/ in standalone mode)
       - name: --no-build
         kind: flag
         description: Skip build after scaffolding
       - name: --no-interactive
         kind: flag
         description: Non-interactive mode for CI/scripting (alias: --ci)
-    docs: reference/cli.md#new
+    docs: reference/cli.md#create
+
+  - name: cache
+    status: usable
+    summary: Manage SDK and asset cache at ~/.pulp/.
+    subcommands:
+      - name: status
+        summary: Show cached SDKs and assets with sizes
+      - name: fetch
+        summary: Download platform-specific assets (e.g., skia)
+      - name: clean
+        summary: Remove all cached assets
+    docs: reference/cli.md#cache
 
   - name: run
     status: usable
