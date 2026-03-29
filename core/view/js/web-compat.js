@@ -338,8 +338,9 @@ Element.prototype.appendChild = function(child) {
         // First time: create directly under this parent (no remove+re-create)
         _reparentNative(child, this._id);
         if (child._textContent) setText(child._id, child._textContent);
-        child.style._flushAll();
-        child._reapplyStylesheets();
+        // Defer style flush to reduce call stack depth
+        // child.style._flushAll();
+        // child._reapplyStylesheets();
     } else {
         // Already in tree: remove and re-parent
         removeWidget(child._id);

@@ -283,3 +283,58 @@ TEST_CASE("WebCompat: dataset from data attribute", "[webcompat][element]") {
     auto result = env.engine.evaluate("el.dataset.userId");
     REQUIRE(std::string(result.getWithDefault<std::string_view>("")) == "42");
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Debug: direct createCol works after prelude
+// ═══════════════════════════════════════════════════════════════════════════════
+
+TEST_CASE("WebCompat: direct createCol still works", "[webcompat][native]") {
+    TestEnvironment env;
+    env.eval("createCol('directtest');");
+    REQUIRE(env.widget("directtest") != nullptr);
+}
+
+TEST_CASE("WebCompat: manual _reparentNative works", "[webcompat][native]") {
+    TestEnvironment env;
+    env.eval(R"JS(
+        var d = document.createElement('div');
+        d.id = 'manual1';
+        _reparentNative(d, '__body__');
+    )JS");
+    // Widget is registered under internal _id, not user .id
+    auto result = env.engine.evaluate("d._nativeCreated");
+    REQUIRE(result.getWithDefault<bool>(false) == true);
+    // Also verify the widget exists in the bridge by internal id
+    auto idResult = env.engine.evaluate("d._id");
+    auto internalId = std::string(idResult.getWithDefault<std::string_view>(""));
+    REQUIRE(env.widget(internalId) != nullptr);
+}
+
+TEST_CASE("WebCompat: createCol under root", "[webcompat][native]") {
+    TestEnvironment env;
+    env.eval("createCol('rootchild', '__root__');");
+    REQUIRE(env.widget("rootchild") != nullptr);
+}
+
+TEST_CASE("WebCompat: manual appendChild works", "[webcompat][dom]") {
+    TestEnvironment env;
+    env.eval(R"JS(
+        var __testD = document.createElement('div');
+        __testD._parentElement = document.body;
+        document.body._children.push(__testD);
+        _reparentNative(__testD, document.body._id);
+        var __testResult = __testD._nativeCreated;
+        var __testInternalId = __testD._id;
+    )JS");
+    auto r = env.engine.evaluate("__testResult");
+    REQUIRE(r.getWithDefault<bool>(false) == true);
+    auto id = std::string(env.engine.evaluate("__testInternalId").getWithDefault<std::string_view>(""));
+    REQUIRE(env.widget(id) != nullptr);
+}
+
+// Note: document.body.appendChild() crashes due to QuickJS stack overflow
+// when the method is dispatched through Element.prototype chain after the
+// large prelude has consumed most of the 256KB JS stack. The manual
+// _reparentNative approach works (see test above). Fix requires either:
+// (a) Increasing JS_DEFAULT_STACK_SIZE in CHOC's QuickJS, or
+// (b) Further splitting the web-compat prelude to reduce stack usage.
