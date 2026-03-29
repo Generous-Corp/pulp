@@ -23,6 +23,7 @@ All dependencies must be compatible with MIT licensing. No copyleft (GPL, LGPL, 
 | Skia Graphite + Dawn | m144 | BSD-3-Clause | GPU 2D rendering + WebGPU (pre-built via skia-builder) | pulp-canvas, pulp-render | 2026-03-25 |
 | VST3 SDK | 3.7.12 | MIT | VST3 plugin format (pluginterfaces + base) | pulp-format | 2026-03-24 |
 | WebGPU-distribution | 0.2.1 | MIT | WebGPU C API wrapper for Dawn (FetchContent) | pulp-render | 2026-03-25 |
+| Yoga | 3.2.1 | MIT | CSS Flexbox/Grid layout engine (Meta, FetchContent) | pulp-view | 2026-03-29 |
 
 ## Format SDKs (Obtained by Developers)
 

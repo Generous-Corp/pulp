@@ -104,6 +104,14 @@ Browser-shaped JS API over Pulp's native GPU UI (document.createElement, element
 - [x] WebGPU shader access: applyShader(canvasId, skslCode), getGPUInfo()
 - [x] w3c-coverage.md expanded to 29 specs: added WebGPU (#27), Font Loading (#28), DnD (#29)
 
+### Phase 10: AI-Driven GPU Shader Design System — COMPLETE (2026-03-29)
+- [x] 10.0: Yoga layout engine (MIT, Meta v3.2.1) — correct CSS Flexbox L1: margin:auto, flex-wrap, absolute positioning
+- [x] 10.1: Shader engine — RuntimeEffectCache (process-lifetime), draw_with_sksl on Canvas, Knob/Fader/Toggle body-layer shaders
+- [x] 10.2: Declarative widget schema — Rive-inspired JSON (elements, value binding, color tokens, percentage dims)
+- [x] 10.3: Lottie animation bridge — setWidgetLottie/seekWidgetLottie, Skottie libs available
+- [x] 10.4: Web Animations API — element.animate(keyframes, options) with play/pause/cancel
+- [x] 10.5: W3C Design Tokens import/export + model-agnostic AI CLI (Claude/Gemini/Codex)
+
 ## First-Time Setup & Onboarding — COMPLETE (2026-03-28)
 
 Implements the full install/onboarding spec (planning/pulp-install-onboarding.md, Phases F1-F6).

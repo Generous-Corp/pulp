@@ -280,6 +280,8 @@ Phase specs define: goals, deliverables, acceptance criteria, test plan, clean-r
 | iPlug2 | zlib-like | Architecture inspiration (NOT code copying) |
 | AudioKit | MIT | Swift audio patterns |
 | SignalKit | MIT | Swift real-time DSP patterns |
+| Yoga | MIT | CSS Flexbox/Grid layout engine (Meta) |
+| Mystral Native | MIT | Reference: QuickJS+Dawn+Skia integration patterns |
 
 ### Projects NOT to Reference During Implementation
 

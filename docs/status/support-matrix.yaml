@@ -462,6 +462,45 @@ runtime_apis:
     notes: >
       Dawn/WebGPU backend available. applyShader(canvasId, skslCode) for custom
       SkSL fragment shaders. getGPUInfo() queries backend. compileShader() validates.
+
+ai_shader_design:
+  yoga_layout:
+    status: usable
+    notes: >
+      Meta Yoga v3.2.1 (MIT) replaces hand-rolled flexbox. Correct CSS Flexbox L1:
+      margin:auto centering, flex-wrap, absolute positioning, min-content/max-content.
+  shader_engine:
+    status: usable
+    notes: >
+      RuntimeEffectCache (process-lifetime SkRuntimeEffect compiler). draw_with_sksl()
+      on Canvas with GPU rendering via SkiaCanvas. compileShader() validates SkSL.
+      setWidgetShader/clearWidgetShader for Knob/Fader/Toggle body-layer shaders.
+  declarative_schema:
+    status: usable
+    notes: >
+      Rive-inspired JSON widget schema: elements (arc/circle/line/rect/text),
+      value binding, color token resolution, percentage dimensions. Interpreted
+      by render_schema() at paint time. setWidgetSchema bridge.
+  lottie_animations:
+    status: partial
+    notes: >
+      setWidgetLottie/seekWidgetLottie bridge. Lottie JSON storage on widgets.
+      Skottie headers+libs available for future native GPU rendering.
+  web_animations_api:
+    status: usable
+    notes: >
+      element.animate(keyframes, options) with Animation object (play/pause/cancel).
+      Easing: linear, ease-in, ease-out, ease-in-out. fill mode, animationend event.
+  design_tokens_interop:
+    status: usable
+    notes: >
+      importDesignTokens/exportDesignTokens in W3C Design Tokens format.
+      Enables round-trip with Figma token plugins, Stitch, v0.
+  model_agnostic_ai:
+    status: usable
+    notes: >
+      setAICli/getAICli configures AI CLI command at runtime.
+      Default: Claude. Swappable to Gemini/Codex CLI.
       Full navigator.gpu pipeline API not exposed — Canvas 2D + shaders is the design.
 
 subsystems:
