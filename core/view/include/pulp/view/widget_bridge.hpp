@@ -57,6 +57,9 @@ private:
     };
     std::vector<ShortcutBinding> shortcuts_;
 
+    // Model-agnostic AI CLI command (default: Claude)
+    std::string ai_cli_command_ = "claude --print --model claude-sonnet-4-6";
+
     // Resolve parent: returns view for parentId, or &root_ if empty
     View* resolve_parent(const std::string& parent_id);
 

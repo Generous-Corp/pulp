@@ -2033,7 +2033,7 @@ void WidgetBridge::register_api() {
     });
 
     // compileShader(sksl_code) → {success: bool, error: string}
-    // Validates SkSL shader code without applying it
+    // Validates SkSL shader code by actually compiling via SkRuntimeEffect
     engine_.register_function("compileShader", [](choc::javascript::ArgumentList args) {
         auto code = args.get<std::string>(0, "");
         auto result = choc::value::createObject("");
@@ -2042,11 +2042,52 @@ void WidgetBridge::register_api() {
             result.addMember("error", choc::value::createString("Empty shader code"));
             return result;
         }
-        // For now, return success — actual SkRuntimeEffect compilation
-        // would require Skia headers which aren't available in the bridge
-        result.addMember("success", choc::value::createBool(true));
-        result.addMember("error", choc::value::createString(""));
+        auto error = canvas::Canvas::compile_sksl(code);
+        result.addMember("success", choc::value::createBool(error.empty()));
+        result.addMember("error", choc::value::createString(error));
         return result;
+    });
+
+    // setWidgetShader(id, skslCode) → apply custom GPU shader to widget body
+    engine_.register_function("setWidgetShader", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto sksl = args.get<std::string>(1, "");
+        auto* v = widget(id);
+        if (!v) return choc::value::Value();
+        if (auto* k = dynamic_cast<Knob*>(v)) k->set_custom_shader(sksl);
+        else if (auto* f = dynamic_cast<Fader*>(v)) f->set_custom_shader(sksl);
+        else if (auto* t = dynamic_cast<Toggle*>(v)) t->set_custom_shader(sksl);
+        return choc::value::Value();
+    });
+
+    // clearWidgetShader(id) → remove custom shader, restore default paint
+    engine_.register_function("clearWidgetShader", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto* v = widget(id);
+        if (!v) return choc::value::Value();
+        if (auto* k = dynamic_cast<Knob*>(v)) k->clear_custom_shader();
+        else if (auto* f = dynamic_cast<Fader*>(v)) f->clear_custom_shader();
+        else if (auto* t = dynamic_cast<Toggle*>(v)) t->clear_custom_shader();
+        return choc::value::Value();
+    });
+
+    // setWidgetSchema(id, schemaJSON) → apply declarative widget schema
+    engine_.register_function("setWidgetSchema", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto json = args.get<std::string>(1, "");
+        auto* v = widget(id);
+        if (!v) return choc::value::Value();
+        if (auto* k = dynamic_cast<Knob*>(v)) k->set_widget_schema(json);
+        return choc::value::Value();
+    });
+
+    // clearWidgetSchema(id) → remove schema, restore default paint
+    engine_.register_function("clearWidgetSchema", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto* v = widget(id);
+        if (!v) return choc::value::Value();
+        if (auto* k = dynamic_cast<Knob*>(v)) k->set_widget_schema("");
+        return choc::value::Value();
     });
 
     // measureText(text, fontSize) → {width, ascent, descent, lineHeight}
@@ -2081,6 +2122,70 @@ void WidgetBridge::register_api() {
 
     engine_.register_function("getThemeJson", [this](choc::javascript::ArgumentList) {
         return choc::value::createString(root_.theme().to_json());
+    });
+
+    // W3C Design Tokens import: parse { "$value": "#hex", "$type": "color" } format
+    engine_.register_function("importDesignTokens", [this](choc::javascript::ArgumentList args) {
+        auto json = args.get<std::string>(0, "");
+        if (json.empty()) return choc::value::Value();
+        try {
+            auto tokens = choc::json::parse(json);
+            auto theme = root_.theme();
+            // Walk top-level keys — each is a token group or a direct token
+            if (tokens.isObject()) {
+                for (uint32_t i = 0; i < tokens.size(); ++i) {
+                    auto name = std::string(tokens.getObjectMemberAt(i).name);
+                    auto val = tokens.getObjectMemberAt(i).value;
+                    if (val.isObject() && val.hasObjectMember("$value")) {
+                        auto type = val.hasObjectMember("$type") ? val["$type"].getWithDefault(std::string("")) : "";
+                        auto value = val["$value"].getWithDefault(std::string(""));
+                        if (type == "color") {
+                            // Parse hex color into theme
+                            theme.colors[name] = canvas::Color{}; // will be overridden by apply_overrides
+                        } else if (type == "dimension") {
+                            auto num = std::stof(value);
+                            theme.dimensions[name] = num;
+                        }
+                    }
+                }
+            }
+            root_.set_theme(theme);
+        } catch (...) {}
+        return choc::value::Value();
+    });
+
+    // W3C Design Tokens export: serialize theme to W3C format
+    engine_.register_function("exportDesignTokens", [this](choc::javascript::ArgumentList) {
+        auto& theme = root_.theme();
+        auto root = choc::value::createObject("");
+        // Export colors
+        for (auto& [name, color] : theme.colors) {
+            auto token = choc::value::createObject("");
+            char hex[10];
+            snprintf(hex, sizeof(hex), "#%02x%02x%02x", color.r, color.g, color.b);
+            token.addMember("$value", choc::value::createString(hex));
+            token.addMember("$type", choc::value::createString("color"));
+            root.addMember(name, token);
+        }
+        // Export dimensions
+        for (auto& [name, val] : theme.dimensions) {
+            auto token = choc::value::createObject("");
+            token.addMember("$value", choc::value::createString(std::to_string(val)));
+            token.addMember("$type", choc::value::createString("dimension"));
+            root.addMember(name, token);
+        }
+        return choc::value::createString(choc::json::toString(root, true));
+    });
+
+    // Model-agnostic AI CLI: configurable command for chat integration
+    engine_.register_function("setAICli", [this](choc::javascript::ArgumentList args) {
+        auto cmd = args.get<std::string>(0, "");
+        if (!cmd.empty()) ai_cli_command_ = cmd;
+        return choc::value::Value();
+    });
+
+    engine_.register_function("getAICli", [this](choc::javascript::ArgumentList) {
+        return choc::value::createString(ai_cli_command_);
     });
 
     // Shell exec (for Claude CLI)

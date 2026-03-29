@@ -275,6 +275,35 @@ public:
         }
     }
 
+    // ── Custom SkSL Shader Rendering (GPU) ──────────────────────────────
+    /// Uniforms passed to custom widget shaders.
+    struct ShaderUniforms {
+        float value = 0;           ///< Widget value (0-1)
+        float time = 0;            ///< Animation time (seconds)
+        Color accent_color{};
+        Color bg_color{};
+        Color track_color{};
+        Color fill_color{};
+        Color thumb_color{};
+    };
+
+    /// Validate and compile an SkSL shader without drawing. Returns error string (empty = success).
+    /// Static so it can be called without a Canvas instance.
+    static std::string compile_sksl(const std::string& sksl);
+
+    /// Draw a rectangle filled by a custom SkSL shader.
+    /// Only works on GPU backends (SkiaCanvas). CPU backends draw a fallback rect.
+    /// The shader receives: uniform float2 resolution, float value, float time,
+    /// layout(color) float4 accentColor/bgColor/trackColor/fillColor/thumbColor.
+    virtual bool draw_with_sksl(const std::string& sksl,
+                                float x, float y, float w, float h,
+                                const ShaderUniforms& uniforms) {
+        // CPU fallback: draw a colored placeholder rect
+        set_fill_color(uniforms.fill_color.a > 0 ? uniforms.fill_color : Color{80, 80, 100, 200});
+        fill_rect(x, y, w, h);
+        return false; // shader not rendered
+    }
+
 protected:
     float font_size_ = 14.0f;  ///< Current font size (set by set_font)
 };

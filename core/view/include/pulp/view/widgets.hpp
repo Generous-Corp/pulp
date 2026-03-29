@@ -116,6 +116,17 @@ public:
     static constexpr float start_angle = 2.356f;  // 135 degrees (bottom-left)
     static constexpr float end_angle = 7.069f;    // 405 degrees (bottom-right via top)
 
+    // Custom shader: if set, replaces the body/track/fill arc drawing with SkSL GPU shader.
+    // Labels, value text, and hover glow still draw in C++.
+    void set_custom_shader(std::string sksl) { custom_sksl_ = std::move(sksl); }
+    void clear_custom_shader() { custom_sksl_.clear(); }
+    bool has_custom_shader() const { return !custom_sksl_.empty(); }
+    const std::string& custom_shader() const { return custom_sksl_; }
+
+    // Declarative widget schema: JSON defining appearance as data (Rive-inspired)
+    void set_widget_schema(std::string json) { widget_schema_ = std::move(json); }
+    const std::string& widget_schema() const { return widget_schema_; }
+
 private:
     float value_ = 0.0f;
     float default_value_ = 0.5f;
@@ -124,6 +135,8 @@ private:
     ValueAnimation hover_glow_{0.0f};
     float drag_start_y_ = 0;
     float drag_start_value_ = 0;
+    std::string custom_sksl_;     // SkSL source for GPU shader body
+    std::string widget_schema_;   // JSON declarative schema
 };
 
 // ── Fader ────────────────────────────────────────────────────────────────────
@@ -157,12 +170,18 @@ public:
     float hover_scale() const { return hover_thumb_scale_.value(); }
     void advance_animations(float dt);
 
+    void set_custom_shader(std::string sksl) { custom_sksl_ = std::move(sksl); }
+    void clear_custom_shader() { custom_sksl_.clear(); }
+    bool has_custom_shader() const { return !custom_sksl_.empty(); }
+    const std::string& custom_shader() const { return custom_sksl_; }
+
 private:
     float value_ = 0.0f;
     Orientation orientation_ = Orientation::vertical;
     std::string label_;
     ValueAnimation hover_thumb_scale_{1.0f};
     bool dragging_ = false;
+    std::string custom_sksl_;
 };
 
 // ── Toggle ───────────────────────────────────────────────────────────────────
@@ -193,11 +212,17 @@ public:
     float hover_opacity() const { return hover_opacity_.value(); }
     void advance_animations(float dt);
 
+    void set_custom_shader(std::string sksl) { custom_sksl_ = std::move(sksl); }
+    void clear_custom_shader() { custom_sksl_.clear(); }
+    bool has_custom_shader() const { return !custom_sksl_.empty(); }
+    const std::string& custom_shader() const { return custom_sksl_; }
+
 private:
     bool on_ = false;
     std::string label_;
     ValueAnimation thumb_position_;
     ValueAnimation hover_opacity_;
+    std::string custom_sksl_;
 };
 
 // ── Checkbox ────────────────────────────────────────────────────────────────

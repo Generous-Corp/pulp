@@ -96,6 +96,11 @@ public:
                                float blur_radius, float corner_radius,
                                Color tint) override;
 
+    // Custom SkSL shader rendering (GPU-accelerated)
+    bool draw_with_sksl(const std::string& sksl,
+                        float x, float y, float w, float h,
+                        const ShaderUniforms& uniforms) override;
+
 private:
     SkCanvas* canvas_;        // Non-owning — owned by surface or caller
     Color fill_color_{255, 255, 255, 255};

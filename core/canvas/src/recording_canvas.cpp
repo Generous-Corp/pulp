@@ -147,4 +147,12 @@ float RecordingCanvas::measure_text(const std::string& text) {
     return static_cast<float>(text.size()) * 7.0f;
 }
 
+// ── compile_sksl fallback for non-Skia builds ────────────────────────────────
+#ifndef PULP_HAS_SKIA
+std::string Canvas::compile_sksl(const std::string& sksl) {
+    (void)sksl;
+    return "Skia not available — shader compilation requires GPU build";
+}
+#endif
+
 } // namespace pulp::canvas

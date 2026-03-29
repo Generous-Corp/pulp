@@ -18,6 +18,7 @@
 #include "include/core/SkData.h"
 #include "include/effects/SkRuntimeEffect.h"
 #include "include/effects/SkGradientShader.h"
+#include "runtime_effect_cache.hpp"
 #include "include/core/SkPathBuilder.h"
 #include "include/core/SkBlendMode.h"
 #include "include/effects/SkImageFilters.h"
@@ -309,6 +310,15 @@ void SkiaCanvas::stroke_current_path() {
     canvas_->drawPath(path_builder_->detach(), paint);
 }
 
+// ── Static SkSL compilation (accessible from bridge without Canvas instance) ──
+
+std::string Canvas::compile_sksl(const std::string& sksl) {
+    if (sksl.empty()) return "Empty shader code";
+    auto& cache = RuntimeEffectCache::instance();
+    auto effect = cache.get_or_compile(sksl);
+    return effect ? "" : cache.last_error();
+}
+
 // ── GPU SDF Shape Primitives ─────────────────────────────────────────────────
 
 static const char* kSDFShapeSkSL = R"(
@@ -418,6 +428,53 @@ void SkiaCanvas::draw_sdf_shape(SDFShape shape, float x, float y, float w, float
     SkPaint paint;
     paint.setShader(std::move(shader));
     canvas_->drawRect(SkRect::MakeXYWH(x, y, w, h), paint);
+}
+
+// ── Custom SkSL shader rendering ─────────────────────────────────────────────
+
+bool SkiaCanvas::draw_with_sksl(const std::string& sksl,
+                                 float x, float y, float w, float h,
+                                 const ShaderUniforms& uniforms) {
+    if (!canvas_ || sksl.empty()) return false;
+
+    // Compile and cache the shader effect (process-lifetime cache)
+    auto& cache = RuntimeEffectCache::instance();
+    auto effect = cache.get_or_compile(sksl);
+    if (!effect) return false;
+
+    // Build shader with standard uniforms
+    SkRuntimeShaderBuilder builder(effect);
+
+    // Set all uniforms that exist in the shader (skip gracefully if not present)
+    if (effect->findUniform("resolution"))
+        builder.uniform("resolution") = SkV2{w, h};
+    if (effect->findUniform("value"))
+        builder.uniform("value") = uniforms.value;
+    if (effect->findUniform("time"))
+        builder.uniform("time") = uniforms.time;
+
+    auto toSkV4 = [](Color c) -> SkV4 {
+        return {c.r / 255.0f, c.g / 255.0f, c.b / 255.0f, c.a / 255.0f};
+    };
+
+    if (effect->findUniform("accentColor"))
+        builder.uniform("accentColor") = toSkV4(uniforms.accent_color);
+    if (effect->findUniform("bgColor"))
+        builder.uniform("bgColor") = toSkV4(uniforms.bg_color);
+    if (effect->findUniform("trackColor"))
+        builder.uniform("trackColor") = toSkV4(uniforms.track_color);
+    if (effect->findUniform("fillColor"))
+        builder.uniform("fillColor") = toSkV4(uniforms.fill_color);
+    if (effect->findUniform("thumbColor"))
+        builder.uniform("thumbColor") = toSkV4(uniforms.thumb_color);
+
+    auto shader = builder.makeShader();
+    if (!shader) return false;
+
+    SkPaint paint;
+    paint.setShader(std::move(shader));
+    canvas_->drawRect(SkRect::MakeXYWH(x, y, w, h), paint);
+    return true;
 }
 
 // ── Blur backdrop ────────────────────────────────────────────────────────────
