@@ -1,6 +1,40 @@
 # Web Standards Coverage
 
-Pulp's web-compat layer was audited against **29 web specifications** — 16 W3C CSS/DOM specs plus 13 Web API specs that frontend developers rely on. This document tracks what's implemented, what's not, and how to run validation tests.
+Pulp's web-compat layer was audited against **28 web specifications** — 16 W3C CSS/DOM specs plus 12 Web API specs that frontend developers rely on. This document tracks what's implemented, what's not, and how to run validation tests.
+
+## At a Glance
+
+| # | Spec | Version | Status | What's Covered | What's Not |
+|---|------|---------|--------|----------------|------------|
+| 1 | [CSS Flexbox L1](https://www.w3.org/TR/css-flexbox-1/) | L1 | ✅ Complete | All properties: direction, wrap, grow/shrink/basis, justify, align, gap, order | — |
+| 2 | [CSS Grid L1](https://www.w3.org/TR/css-grid-1/) | L1 | ⚠️ Partial | Templates (fr/px/auto), column/row spans, gaps | auto-flow, named areas, grid shorthand |
+| 3 | [CSS Box Model L3](https://www.w3.org/TR/css-box-3/) | L3 | ✅ Complete | margin/padding (shorthand + individual), width/height/min/max | margin:auto centering |
+| 4 | [CSS Backgrounds & Borders L3](https://www.w3.org/TR/css-backgrounds-3/) | L3 | ✅ Mostly | bg-color, gradients, border (per-side + per-corner radius), box-shadow | bg-image URL, bg-repeat rendering |
+| 5 | [CSS Color L4](https://www.w3.org/TR/css-color-4/) | L4 | ✅ Complete | hex, rgb/rgba, hsl/hsla, 148 named colors, transparent | oklch, color-mix |
+| 6 | [CSS Values & Units L4](https://www.w3.org/TR/css-values-4/) | L4 | ✅ Complete | px, em, rem, %, vw/vh/vmin/vmax, ch, calc/min/max/clamp | min-content/max-content/fit-content |
+| 7 | [CSS Transforms L1](https://www.w3.org/TR/css-transforms-1/) | L1 | ✅ Mostly | translate, scale, rotate, skew, transform-origin | matrix(), 3D transforms |
+| 8 | [CSS Transitions L1](https://www.w3.org/TR/css-transitions-1/) | L1 | ⚠️ Partial | Shorthand parsed, duration applied | Per-property timing, transitionend event |
+| 9 | [CSS Animations L1](https://www.w3.org/TR/css-animations-1/) | L1 | ⚠️ Partial | All animation-* properties parsed | @keyframes execution (use animate() bridge) |
+| 10 | [CSS Text L3](https://www.w3.org/TR/css-text-3/) | L3 | ✅ Complete | transform, decoration, align, overflow, shadow, spacing, white-space | — |
+| 11 | [CSS Position L3](https://www.w3.org/TR/css-position-3/) | L3 | ✅ Complete | static/relative/absolute/fixed/sticky, offsets, z-index, inset | — |
+| 12 | [CSS Overflow L3](https://www.w3.org/TR/css-overflow-3/) | L3 | ✅ Complete | visible/hidden/scroll/auto | — |
+| 13 | [CSS Sizing L3](https://www.w3.org/TR/css-sizing-3/) | L3 | ✅ Mostly | width/height/min/max, aspect-ratio | min-content/max-content |
+| 14 | [CSS Filter Effects L1](https://www.w3.org/TR/filter-effects-1/) | L1 | ⚠️ Partial | blur() | brightness, contrast, grayscale, etc. |
+| 15 | [Selectors L4](https://www.w3.org/TR/selectors-4/) | L4 | ✅ Complete | Type, class, ID, combinators, :nth-child, :not, :*-of-type, [attr] selectors | :valid/:invalid, ::before/::after |
+| 16 | [DOM / UI Events](https://dom.spec.whatwg.org/) | Living | ✅ Complete | Full element API, events, bubbling, innerHTML, closest, matches | MutationObserver, IntersectionObserver |
+| 17 | [Canvas 2D Context](https://html.spec.whatwg.org/multipage/canvas.html) | Living | ✅ Mostly | 30+ commands, gradients, arc, clip, blend, text align | drawImage (placeholder), getImageData |
+| 18 | [Clipboard API](https://www.w3.org/TR/clipboard-apis/) | — | ✅ Complete | readText, writeText | — |
+| 19 | [Drag and Drop](https://html.spec.whatwg.org/multipage/dnd.html) | Living | ⚠️ Receive only | registerDrop + on_drop callback | Initiating drags from JS, dataTransfer |
+| 20 | [Web Storage](https://html.spec.whatwg.org/multipage/webstorage.html) | Living | ✅ Complete | getItem/setItem/removeItem (file-backed) | — |
+| 21 | [HR Time](https://www.w3.org/TR/hr-time-3/) | L3 | ✅ Complete | performance.now() (sub-ms) | — |
+| 22 | [Console](https://console.spec.whatwg.org/) | Living | ✅ Mostly | log/warn/error/info/debug, time/timeEnd | table |
+| 23 | [Fetch](https://fetch.spec.whatwg.org/) | Living | ⚠️ Basic | GET/POST via curl, {text(), json()} | Streaming, AbortController |
+| 24 | [Encoding](https://encoding.spec.whatwg.org/) | Living | ✅ Complete | TextEncoder, TextDecoder, atob/btoa | — |
+| 25 | [Web Crypto](https://www.w3.org/TR/WebCryptoAPI/) | — | ⚠️ Minimal | getRandomValues (not cryptographic) | SubtleCrypto |
+| 26 | [Structured Clone](https://html.spec.whatwg.org/multipage/structured-data.html) | Living | ✅ Complete | structuredClone (via JSON) | — |
+| 27 | [WebGPU](https://www.w3.org/TR/webgpu/) | — | ⚠️ Shader API | Dawn backend, applyShader (SkSL), getGPUInfo | Full navigator.gpu pipeline |
+| 28 | [Font Loading](https://www.w3.org/TR/css-font-loading-3/) | L3 | ⚠️ Partial | loadFont(path) | FontFace constructor, document.fonts |
+**Legend:** ✅ Complete or nearly so — ⚠️ Partial, see details below — ❌ Not implemented
 
 ## How to Run Tests
 
