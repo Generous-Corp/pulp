@@ -1309,32 +1309,33 @@ on("accent-hue", "change", function(val) {
 });
 
 // Harmony selector handler
-var harmonyHandlerActive = false;
+// Defer heavy work from combo select handlers to next frame
+// (avoids widget tree mutation during on_mouse_event processing)
 on("harmony-selector", "select", function(idx) {
-    if (harmonyHandlerActive) return;  // prevent re-entry
-    harmonyHandlerActive = true;
     var modes = ["monochromatic", "analogous", "complementary", "splitComplementary", "none"];
     if (idx >= 0 && idx < modes.length) {
         currentHarmony = modes[idx];
-        expandedPalette = -1;
-        buildShadeRamps();
-        var palette = PaletteSystem.create(currentAccent, currentHarmony);
-        var diff = PaletteSystem.toThemeDiff(palette);
-        applyTokenDiff(diff);
-        updateTokenSwatches();
-        layout();
+        __requestFrame__(function() {
+            expandedPalette = -1;
+            buildShadeRamps();
+            var palette = PaletteSystem.create(currentAccent, currentHarmony);
+            applyTokenDiff(PaletteSystem.toThemeDiff(palette));
+            updateTokenSwatches();
+            layout();
+        });
     }
-    harmonyHandlerActive = false;
 });
 
 // Dark/Light mode handler
 on("mode-selector", "select", function(idx) {
     var mode = idx === 0 ? "dark" : "light";
-    setTheme(mode);
-    buildShadeRamps();
-    updateTokenSwatches();
-    pushThemeSnapshot();
-    layout();
+    __requestFrame__(function() {
+        setTheme(mode);
+        buildShadeRamps();
+        updateTokenSwatches();
+        pushThemeSnapshot();
+        layout();
+    });
 });
 
 // ── CENTER PANEL (Preview) ───────────────────────────────────────
@@ -2408,12 +2409,14 @@ on("preset-selector", "select", function(idx) {
     ];
     var p = presets[idx];
     currentAccent = p.accent;
-    setTheme(p.theme);
-    setText("theme-name-label", ["Default Dark","Light","Pro Audio","Violet","Amber","Ocean","Neon"][idx]);
-    buildShadeRamps();
-    updateTokenSwatches();
-    pushThemeSnapshot();
-    layout();
+    __requestFrame__(function() {
+        setTheme(p.theme);
+        setText("theme-name-label", ["Default Dark","Light","Pro Audio","Violet","Amber","Ocean","Neon"][idx]);
+        buildShadeRamps();
+        updateTokenSwatches();
+        pushThemeSnapshot();
+        layout();
+    });
 });
 
 // ═══════════════════════════════════════════════════════════════════
