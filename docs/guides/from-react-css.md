@@ -1,19 +1,55 @@
 # From React/CSS to Pulp
 
-A mapping guide for developers who know React and CSS. Pulp's JS bridge uses familiar concepts with audio-specific extensions.
+A mapping guide for developers who know React and CSS. Pulp provides two JS authoring approaches: a **web-compat layer** that feels like the browser DOM, and a **native bridge** for direct widget control.
+
+## Two Approaches
+
+### Web-Compat Layer (recommended for frontend devs)
+
+Write familiar `document.createElement` / `element.style` / `addEventListener` code:
+
+```js
+const panel = document.createElement('div');
+panel.style.display = 'flex';
+panel.style.gap = '8px';
+panel.style.padding = '16px';
+panel.style.backgroundColor = '#1a1a2e';
+
+const title = document.createElement('h2');
+title.textContent = 'My Plugin';
+panel.appendChild(title);
+document.body.appendChild(panel);
+```
+
+See the [web-compat guide](web-compat.md) for full API details including `calc()`, `matchMedia()`, `closest()`, `innerHTML`, CSS selectors, and 81 CSS properties.
+
+### Native Bridge (for audio-specific widgets)
+
+Use Pulp's native API for audio widgets (knobs, meters, waveforms) that have no HTML equivalent:
+
+```js
+createKnob('gain', 'panel');
+setValue('gain', 0.75);
+on('gain', 'change', function(val) { setParam('gain', val); });
+```
+
+**Mix both freely** — use web-compat for layout/styling and native bridge for audio controls.
 
 ## Mental Model
 
 | React/CSS | Pulp |
 |-----------|------|
-| JSX component tree | `createKnob()`, `createCol()`, etc. — imperative widget creation |
+| JSX component tree | `document.createElement()` + `appendChild()`, or `createKnob()` / `createCol()` |
 | `useState` / `useReducer` | `getParam()` / `setParam()` — plugin parameters are the state |
-| CSS flexbox | `setFlex(id, property, value)` — same model, subset of properties |
-| CSS Grid | `setGrid(id, property, value)` — template columns/rows, gaps |
-| `className` / CSS file | `setStyle(id, property, value)` or individual setters |
-| Theme / CSS variables | Design tokens via `Theme` — colors, dimensions, strings |
+| CSS flexbox | `element.style.flexDirection = 'row'` or `setFlex(id, 'direction', 'row')` |
+| CSS Grid | `element.style.gridTemplateColumns = '1fr 2fr'` or `setGrid(id, 'template_columns', '1fr 2fr')` |
+| `className` / CSS file | `element.className = 'panel'` + `new StyleSheet({...})` |
+| CSS variables | `document.documentElement.style.setProperty('--accent', '#3b82f6')` |
+| `calc()` / `clamp()` | `element.style.width = 'calc(100% - 40px)'` — full expression evaluator |
+| `@media` queries | `window.matchMedia('(min-width: 600px)')` |
 | `useEffect` for animation | `animate(id, property, target, duration, easing)` |
-| Event handlers (`onClick`) | `on(id, 'click', fn)` — register after creation |
+| Event handlers (`onClick`) | `element.addEventListener('click', fn)` or `on(id, 'click', fn)` |
+| Event delegation | `container.addEventListener('click', e => { if (e.target.closest('.item')) ... })` |
 | React DevTools | `enableInspectClick()` + component inspector |
 | Hot Module Replacement | Built-in hot-reload — save JS, see changes instantly |
 

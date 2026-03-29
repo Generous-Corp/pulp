@@ -20,8 +20,10 @@ Pulp wraps a single `Processor` subclass and exposes it through multiple plugin 
 | CLAP instrument | usable | [format](modules.md#format) | | PulpSynth |
 | Standalone app | usable | [format](modules.md#format) | | pulp-gain |
 | Headless host | usable | [format](modules.md#format) | [testing](../guides/testing.md) | |
-| AU v3 | planned | | | |
-| LV2 | planned | | | |
+| AU v3 (macOS + iOS) | usable | [format](modules.md#format) | | |
+| LV2 (Linux) | experimental | [format](modules.md#format) | | |
+| WAM v2 (Web) | experimental | [format](modules.md#format) | [web-plugins](../guides/web-plugins.md) | |
+| WebCLAP (Web) | experimental | [format](modules.md#format) | | |
 | AAX | planned | | | |
 
 Key headers: `pulp/format/processor.hpp`, `pulp/format/vst3_adapter.hpp`, `pulp/format/clap_adapter.hpp`, `pulp/format/headless.hpp`
@@ -33,10 +35,10 @@ Key headers: `pulp/format/processor.hpp`, `pulp/format/vst3_adapter.hpp`, `pulp/
 | Capability | Status | Module | Notes |
 |---|---|---|---|
 | macOS (ARM64 + x86_64) | usable | [platform](modules.md#platform) | Primary development platform |
-| Windows | partial | [platform](modules.md#platform) | Build stubs exist; not validated end-to-end |
-| Linux | partial | [platform](modules.md#platform) | Build stubs exist; not validated end-to-end |
-| iOS | planned | | |
-| Web / WASM | planned | | |
+| Windows | experimental | [platform](modules.md#platform) | WASAPI, Win32 MIDI, NSIS installer, CI |
+| Linux | experimental | [platform](modules.md#platform) | ALSA, JACK, LV2, .deb packaging, CI |
+| iOS | experimental | [platform](modules.md#platform) | AVAudioSession, AUv3, UIKit, Metal |
+| Web / WASM | experimental | [platform](modules.md#platform) | WAMv2, WebCLAP, Emscripten pipeline |
 
 Key headers: `pulp/platform/detect.hpp`, `pulp/platform/native_handle.hpp`
 
@@ -49,8 +51,9 @@ Key headers: `pulp/platform/detect.hpp`, `pulp/platform/native_handle.hpp`
 | BufferView (non-owning channel pointer wrapper) | usable | [audio](modules.md#audio) | [modules](modules.md#audio) |
 | Audio device enumeration and streaming (CoreAudio) | usable | [audio](modules.md#audio) | |
 | Audio file read/write | usable | [audio](modules.md#audio) | |
-| WASAPI device I/O | planned | | |
-| ALSA device I/O | planned | | |
+| WASAPI device I/O | experimental | [audio](modules.md#audio) | |
+| ALSA device I/O | experimental | [audio](modules.md#audio) | |
+| AVAudioSession (iOS) | experimental | [audio](modules.md#audio) | |
 
 Key headers: `pulp/audio/buffer.hpp`, `pulp/audio/device.hpp`, `pulp/audio/audio_file.hpp`
 
@@ -63,8 +66,8 @@ Key headers: `pulp/audio/buffer.hpp`, `pulp/audio/device.hpp`, `pulp/audio/audio
 | MidiEvent / MidiBuffer | usable | [midi](modules.md#midi) | [modules](modules.md#midi) |
 | MIDI device I/O (CoreMIDI) | usable | [midi](modules.md#midi) | |
 | MIDI file read/write | usable | [midi](modules.md#midi) | |
-| Win32 MIDI | planned | | |
-| ALSA MIDI | planned | | |
+| Win32 MIDI | experimental | [midi](modules.md#midi) | |
+| ALSA Raw MIDI | experimental | [midi](modules.md#midi) | |
 
 Key headers: `pulp/midi/message.hpp`, `pulp/midi/buffer.hpp`, `pulp/midi/device.hpp`, `pulp/midi/midi_file.hpp`
 
@@ -121,32 +124,70 @@ Key headers: `pulp/state/parameter.hpp`, `pulp/state/store.hpp`, `pulp/state/bin
 
 ## View / UI
 
-| Capability | Status | Module | Docs | Examples |
-|---|---|---|---|---|
-| View hierarchy (tree, bounds, hit-testing) | experimental | [view](modules.md#view) | [modules](modules.md#view) | ui-preview |
-| Flex layout | experimental | [view](modules.md#view) | | ui-preview |
-| Theme system (color resolution up the tree) | experimental | [view](modules.md#view) | | ui-preview |
-| Knob widget | experimental | [view](modules.md#view) | | ui-preview |
-| Fader widget | experimental | [view](modules.md#view) | | ui-preview |
-| Toggle widget | experimental | [view](modules.md#view) | | ui-preview |
-| Label widget | experimental | [view](modules.md#view) | | ui-preview |
-| Meter widget (RMS + peak hold) | experimental | [view](modules.md#view) | | ui-preview |
-| XYPad widget | experimental | [view](modules.md#view) | | ui-preview |
-| WaveformView | experimental | [view](modules.md#view) | | |
-| SpectrumView | experimental | [view](modules.md#view) | | |
-| AudioBridge (param + meter sync) | experimental | [view](modules.md#view) | | |
-| Auto-UI generation | experimental | [view](modules.md#view) | | |
-| JS scripting (QuickJS bridge) | experimental | [view](modules.md#view) | | |
-| Hot reload | experimental | [view](modules.md#view) | | |
-| Component inspector | experimental | [view](modules.md#view) | | |
-| Drag and drop | experimental | [view](modules.md#view) | | |
-| Screenshot capture | experimental | [view](modules.md#view) | | |
-| Plugin view hosting | experimental | [view](modules.md#view) | | |
-| SDL window host | experimental | [view](modules.md#view) | | |
-| Animation | experimental | [view](modules.md#view) | | |
-| Accessibility roles | experimental | [view](modules.md#view) | | |
+### Core
 
-Key headers: `pulp/view/view.hpp`, `pulp/view/widgets.hpp`, `pulp/view/theme.hpp`, `pulp/view/script_engine.hpp`, `pulp/view/hot_reload.hpp`
+| Capability | Status | Module | Docs |
+|---|---|---|---|
+| View hierarchy (tree, bounds, hit-testing) | usable | [view](modules.md#view) | [modules](modules.md#view) |
+| Flex layout (full CSS Flexbox L1) | usable | [view](modules.md#view) | [web-compat](../guides/web-compat.md) |
+| Grid layout (CSS Grid L1 — templates, fr, gaps) | usable | [view](modules.md#view) | |
+| Theme system (color/dimension tokens, inheritance) | usable | [view](modules.md#view) | [design-tokens](../guides/design-tokens.md) |
+| JS scripting (QuickJS, 84 bridge functions) | usable | [view](modules.md#view) | [js-bridge](js-bridge.md) |
+| Hot reload | usable | [view](modules.md#view) | |
+| Screenshot capture (headless PNG) | usable | [view](modules.md#view) | |
+| Component inspector | usable | [view](modules.md#view) | |
+| Animation (FrameClock, ValueAnimation, motion tokens) | usable | [view](modules.md#view) | [animation](../guides/animation.md) |
+| Design export (JSON, SVG) | usable | [view](modules.md#view) | |
+| App framework (commands, menus, key bindings) | usable | [view](modules.md#view) | |
+
+### Widgets
+
+| Capability | Status | Module | Notes |
+|---|---|---|---|
+| Knob, Fader, Toggle, Checkbox, ToggleButton | usable | [view](modules.md#view) | Full interaction + accessibility roles |
+| Label (multi-line, text-transform, decoration) | usable | [view](modules.md#view) | |
+| TextEditor (selection, clipboard, undo, IME) | usable | [view](modules.md#view) | |
+| ComboBox (dropdown, keyboard nav) | usable | [view](modules.md#view) | |
+| ListBox (virtualized, scroll, keyboard) | usable | [view](modules.md#view) | |
+| ScrollView (smooth scroll, fade bars) | usable | [view](modules.md#view) | |
+| Meter (RMS + peak hold), ProgressBar | usable | [view](modules.md#view) | |
+| XYPad, WaveformView, SpectrumView | usable | [view](modules.md#view) | |
+| ImageView | usable | [view](modules.md#view) | Placeholder rendering |
+| TreeView, Tooltip, Panel, Icon | usable | [view](modules.md#view) | |
+| CanvasWidget (25 draw commands) | usable | [view](modules.md#view) | [custom-rendering](../guides/custom-rendering.md) |
+
+### Web-Compat Layer
+
+| Capability | Status | Module | Docs |
+|---|---|---|---|
+| document.createElement / appendChild / remove | usable | [view](modules.md#view) | [web-compat](../guides/web-compat.md) |
+| element.style (81 CSS properties) | usable | [view](modules.md#view) | [web-compat](../guides/web-compat.md) |
+| CSS calc() / min() / max() / clamp() | usable | [view](modules.md#view) | |
+| CSS unit resolution (em, rem, %, vw, vh) | usable | [view](modules.md#view) | |
+| CSS colors (L4: hex, rgb, hsl, 148 named) | usable | [view](modules.md#view) | |
+| StyleSheet (class rules, pseudo-classes) | usable | [view](modules.md#view) | |
+| Selectors (:nth-child, :not, descendant, child) | usable | [view](modules.md#view) | |
+| closest / matches / innerHTML | usable | [view](modules.md#view) | |
+| matchMedia (responsive breakpoints) | usable | [view](modules.md#view) | |
+| Pointer events (W3C Level 2) | usable | [view](modules.md#view) | [js-bridge](js-bridge.md) |
+| Gesture events (scale, rotation) | usable | [view](modules.md#view) | |
+
+### Platform Maturity
+
+| Capability | Status | Platform | Notes |
+|---|---|---|---|
+| Cursor management (7 styles) | usable | macOS | NSCursor in mouseMoved |
+| Tab focus traversal | usable | all | Tab/Shift+Tab cycles focusable views |
+| VoiceOver accessibility | usable | macOS | NSAccessibilityElement + AccessRole |
+| IME composition (marked text) | usable | macOS | Full NSTextInputClient |
+| Right-click context menu | usable | macOS | on_context_menu + PopupMenu |
+| Keyboard shortcuts | usable | all | registerShortcut bridge |
+| File dialogs (open, save, folder) | usable | macOS | NSOpenPanel/NSSavePanel |
+| Drag and drop | usable | macOS | File + text drop targets |
+| Plugin view hosting | usable | macOS | NSView + Metal |
+| SDL window host | usable | all | Cross-platform windowing |
+
+Key headers: `pulp/view/view.hpp`, `pulp/view/widgets.hpp`, `pulp/view/theme.hpp`, `pulp/view/script_engine.hpp`, `pulp/view/widget_bridge.hpp`
 
 ---
 
@@ -156,8 +197,10 @@ Key headers: `pulp/view/view.hpp`, `pulp/view/widgets.hpp`, `pulp/view/theme.hpp
 |---|---|---|---|
 | Dawn/Metal GPU surface | experimental | [render](modules.md#render) | [modules](modules.md#render) |
 | Skia Graphite rendering | experimental | [render](modules.md#render) | |
-| Dawn/D3D12 surface | planned | | |
-| Dawn/Vulkan surface | planned | | |
+| Dawn/Metal iOS surface | experimental | [render](modules.md#render) | |
+| Dawn/D3D12 surface (Windows) | experimental | [render](modules.md#render) | Surface creation implemented, not runtime-validated |
+| Dawn/Vulkan surface (Linux) | experimental | [render](modules.md#render) | Surface creation implemented, not runtime-validated |
+| CoreGraphics fallback | usable | [render](modules.md#render) | Default render path on macOS |
 
 Key headers: `pulp/render/gpu_surface.hpp`, `pulp/render/skia_surface.hpp`
 
@@ -167,11 +210,12 @@ Key headers: `pulp/render/gpu_surface.hpp`, `pulp/render/skia_surface.hpp`
 
 | Capability | Status | Module | Docs |
 |---|---|---|---|
-| Canvas abstraction (paths, fills, strokes, text) | experimental | [canvas](modules.md#canvas) | [modules](modules.md#canvas) |
-| CoreGraphics backend | experimental | [canvas](modules.md#canvas) | |
+| Canvas abstraction (paths, fills, strokes, text) | usable | [canvas](modules.md#canvas) | [modules](modules.md#canvas) |
+| RecordingCanvas (command capture for testing) | usable | [canvas](modules.md#canvas) | |
+| CoreGraphics backend | usable | [canvas](modules.md#canvas) | |
 | Skia backend | experimental | [canvas](modules.md#canvas) | |
 | SVG rendering | experimental | [canvas](modules.md#canvas) | |
-| Effects (shadow, blur) | experimental | [canvas](modules.md#canvas) | |
+| Effects (shadow, blur, gradients) | usable | [canvas](modules.md#canvas) | |
 
 Key headers: `pulp/canvas/canvas.hpp`, `pulp/canvas/cg_canvas.hpp`, `pulp/canvas/skia_canvas.hpp`, `pulp/canvas/svg.hpp`, `pulp/canvas/effects.hpp`
 
@@ -244,6 +288,13 @@ The `pulp` CLI wraps common development workflows.
 | `pulp ship package` | usable | [cli](cli.md) |
 | `pulp ship check` | usable | [cli](cli.md) |
 | `pulp docs` (local docs lookup) | usable | [cli](cli.md) |
+| `pulp create` (new project from template) | usable | [cli](cli.md) |
+| `pulp run` (launch standalone binary) | usable | [cli](cli.md) |
+| `pulp upgrade` (self-update) | usable | [cli](cli.md) |
+| `pulp doctor` (check system dependencies) | usable | [cli](cli.md) |
+| `pulp inspect` (component inspector) | usable | [cli](cli.md) |
+| `pulp audit` (dependency license check) | usable | [cli](cli.md) |
+| `pulp add` (add dependency) | usable | [cli](cli.md) |
 
 ---
 

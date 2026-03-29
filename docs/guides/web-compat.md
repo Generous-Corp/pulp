@@ -245,10 +245,175 @@ Events propagate (bubble) from target up through parentElement chain. Use `event
 | Event | Fires When |
 |-------|-----------|
 | `click` | Element clicked |
-| `mouseenter` | Mouse enters element |
-| `mouseleave` | Mouse leaves element |
+| `mousedown` / `mouseup` | Mouse button pressed / released |
+| `mouseenter` | Mouse enters element (no bubble) |
+| `mouseleave` | Mouse leaves element (no bubble) |
 | `input` | Value changes (text editors, sliders) |
 | `change` | Value committed |
+| `keydown` / `keyup` | Key pressed / released |
+| `focus` / `blur` | Element gains / loses focus |
+| `pointerdown` / `pointermove` / `pointerup` | Pointer events (mouse, touch, pen) |
+| `gesturestart` / `gesturechange` / `gestureend` | Multi-touch gestures (scale, rotation) |
+
+Events propagate in the standard capture → target → bubble order. Capture phase listeners receive events first when registered with `{ capture: true }`.
+
+## DOM Traversal & Querying
+
+### closest / matches / contains
+
+```js
+// Find nearest ancestor matching a selector
+const panel = el.closest('.panel');
+
+// Test if element matches a selector
+if (el.matches('.active')) { /* ... */ }
+
+// Check if element contains another
+if (container.contains(child)) { /* ... */ }
+```
+
+### querySelector on elements
+
+```js
+// Scoped queries — search within a specific element's subtree
+const item = panel.querySelector('.item');
+const buttons = panel.querySelectorAll('button');
+```
+
+### innerHTML
+
+```js
+// Set HTML content (simple parser supports nested tags)
+panel.innerHTML = '<div class="header"><span>Title</span></div>';
+
+// Read serialized HTML
+console.log(panel.outerHTML);
+```
+
+### Modern DOM insertion
+
+```js
+parent.append(child1, child2, "text");    // Append multiple
+parent.prepend(child);                     // Insert at start
+el.before(sibling);                        // Insert before
+el.after(sibling);                         // Insert after
+el.replaceWith(replacement);               // Replace self
+```
+
+## Selectors
+
+### Supported Selector Syntax
+
+| Syntax | Example | Notes |
+|--------|---------|-------|
+| Tag | `div`, `button` | Element type |
+| Class | `.panel` | Class name |
+| ID | `#header` | Element ID |
+| Multiple classes | `.btn.primary` | All classes must match |
+| Descendant | `.panel .item` | Any depth |
+| Child | `.panel > .item` | Direct child only |
+| `:first-child` | `li:first-child` | First child of parent |
+| `:last-child` | `li:last-child` | Last child of parent |
+| `:nth-child(An+B)` | `li:nth-child(odd)`, `li:nth-child(2n+1)`, `li:nth-child(3)` | Pattern matching |
+| `:nth-last-child(An+B)` | `li:nth-last-child(2)` | From end |
+| `:only-child` | `div:only-child` | Sole child |
+| `:empty` | `div:empty` | No children or text |
+| `:checked` | `input:checked` | Checked inputs |
+| `:disabled` | `input:disabled` | Disabled elements |
+| `:not(selector)` | `.item:not(.disabled)` | Negation |
+| `:hover` / `:focus` / `:active` | `.btn:hover` | Via StyleSheet rules |
+
+## CSS Values & Units
+
+### calc / min / max / clamp
+
+```js
+el.style.width = 'calc(100% - 40px)';
+el.style.fontSize = 'clamp(12px, 2vw, 18px)';
+el.style.padding = 'max(8px, 1%)';
+el.style.height = 'min(200px, 50vh)';
+```
+
+Full expression evaluator with `+`, `-`, `*`, `/`, nested functions, and mixed units.
+
+### Relative Units
+
+| Unit | Resolves Against |
+|------|-----------------|
+| `px` | Pixels (default) |
+| `em` | Parent element font-size |
+| `rem` | Root element font-size (default 14px) |
+| `%` | Parent element dimension |
+| `vw` / `vh` | Root view width / height |
+| `vmin` / `vmax` | Smaller / larger of vw and vh |
+| `ch` | Approximate character width (0.5 × font-size) |
+
+```js
+el.style.fontSize = '1.5em';      // 1.5x parent font-size
+el.style.width = '50%';           // Half of parent width
+el.style.padding = '2vw';         // 2% of viewport width
+```
+
+### CSS Custom Properties
+
+```js
+// Set via element.style.setProperty
+document.documentElement.style.setProperty('--accent', '#3b82f6');
+document.documentElement.style.setProperty('--radius', '8px');
+
+// Use in values
+el.style.backgroundColor = 'var(--accent)';
+el.style.borderRadius = 'var(--radius)';
+
+// Use in StyleSheet rules
+new StyleSheet({
+    '.panel': { backgroundColor: 'var(--accent)' }
+});
+```
+
+## Responsive Design
+
+### matchMedia
+
+```js
+const mq = window.matchMedia('(min-width: 600px)');
+if (mq.matches) {
+    // Wide layout
+}
+
+// Supported queries: min-width, max-width, min-height, max-height, orientation
+const portrait = window.matchMedia('(orientation: portrait)');
+```
+
+### Dynamic viewport dimensions
+
+```js
+window.innerWidth;   // Actual root view width (updates dynamically)
+window.innerHeight;  // Actual root view height
+```
+
+## Additional CSS Properties
+
+### Layout
+
+```js
+el.style.aspectRatio = '16/9';         // Maintain proportions
+el.style.visibility = 'hidden';        // Hidden but preserves layout space
+el.style.pointerEvents = 'none';       // Click-through overlay
+el.style.alignContent = 'center';      // Multi-line flex cross-axis
+```
+
+### Visual
+
+```js
+el.style.outline = '2px solid blue';   // Focus indicator (outside border)
+el.style.whiteSpace = 'nowrap';        // Prevent text wrapping
+el.style.userSelect = 'none';          // Prevent text selection
+el.style.fontFamily = 'Inter';         // Font selection
+el.style.textShadow = '2px 2px 4px rgba(0,0,0,0.5)';
+el.style.backgroundSize = 'cover';
+el.style.backgroundPosition = 'center';
+```
 
 ## Layout Inspection
 
@@ -263,25 +428,24 @@ const rect = el.getBoundingClientRect();
 
 ```js
 const style = getComputedStyle(el);
-style.getPropertyValue('width');   // e.g., "200px"
-style.getPropertyValue('opacity'); // e.g., "1"
+style.width;    // e.g., "200px" (layout-resolved)
+style.opacity;  // e.g., "1"
 ```
 
-## CSS Parsing Utilities
-
-These global functions are available for parsing CSS values in custom code:
+## Focus Management
 
 ```js
-parseCSSColor('cornflowerblue');    // '#6495ed'
-parseCSSColor('rgb(255, 128, 0)'); // '#ff8000'
+el.focus();   // Gives keyboard focus
+el.blur();    // Removes keyboard focus
+```
 
-parseCSSLength('20px');             // { value: 20, unit: 'px' }
-parseCSSLength('50%');              // { value: 50, unit: '%' }
+Tab / Shift+Tab cycles through focusable elements automatically.
 
-expandShorthand('10px 20px');       // [10, 20, 10, 20]
+## Timers
 
-parseTransform('scale(1.5) rotate(45)');
-// [{ fn: 'scale', args: [1.5] }, { fn: 'rotate', args: [45] }]
+```js
+window.setTimeout(fn, 500);       // Approximate via animation frames
+window.setInterval(fn, 1000);     // Repeating timer
 ```
 
 ## Mixing with Native Bridge
@@ -304,11 +468,16 @@ on('my-knob', 'change', function(val) {
 
 Use `element._id` to get the internal widget ID for native bridge calls.
 
-## Limitations
+## Current Limitations
 
-- No `<form>` elements or form submission
-- No `<table>` layout (use CSS Grid instead)
-- No CSS animations via `@keyframes` (use Pulp's `animate()` bridge)
-- No `window.setTimeout` / `setInterval` (use Pulp's timer system)
-- `calc()`, `clamp()`, `em`, `rem` units not yet supported
-- No `<video>` or `<audio>` elements
+- No per-side borders (border-top, border-right, etc.) — only uniform border
+- No per-corner border-radius — only single radius value
+- No CSS `@keyframes` animations (use Pulp's `animate()` bridge)
+- No `transitionend` / `animationend` events yet
+- No `wheel`, `scroll`, `resize`, `dblclick` events yet
+- No `<form>`, `<table>`, `<video>`, `<audio>` elements
+- No attribute selectors (`[data-x]`) or `:nth-of-type`
+- No `::before` / `::after` pseudo-elements
+- `getComputedStyle` returns inline style, not fully computed layout values
+- `margin: auto` centering not yet implemented
+- `min-content` / `max-content` / `fit-content` size keywords not supported

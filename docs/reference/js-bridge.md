@@ -359,12 +359,46 @@ getThemeJson()                    // Returns full theme as JSON string
 applyTokenDiff(jsonString)        // Apply partial theme overrides from JSON
 ```
 
-## Utility
+## Layout & Geometry
 
 ```js
 layout()                          // Trigger layout recalculation on all widgets
 removeWidget(id)                  // Remove widget from tree
+getLayoutRect(id)                 // Returns { x, y, width, height, top, right, bottom, left } in root coords
+getRootSize()                     // Returns { width, height } of root view (for vw/vh units)
+getComputedValue(id, property)    // Returns resolved CSS property value as string
 measureText(text, fontSize)       // Returns { width, ascent, descent, lineHeight }
+```
+
+## Platform Integration
+
+```js
+// Context menus
+registerContextMenu(id, callbackName) // Register right-click handler: callbackName(x, y)
+showContextMenu(itemsJSON, x, y)      // Show native popup menu, returns selected id or -1
+                                      // itemsJSON: '[{"id":1,"label":"Cut"},{"separator":true}]'
+
+// Keyboard shortcuts
+registerShortcut(keyCode, modifiers, callbackName)  // Global shortcut: callbackName()
+
+// File dialogs
+showOpenDialog(title, filterDesc, extensions)   // Returns path or "" (extensions: "js;json;txt")
+showSaveDialog(title, filterDesc, extensions)   // Returns path or ""
+chooseFolder(title)                              // Returns path or ""
+```
+
+## Visual Properties
+
+```js
+setPointerEvents(id, "none"|"auto")   // CSS pointer-events (skip in hit testing)
+setVisibility(id, "visible"|"hidden") // CSS visibility (hidden preserves layout)
+setWhiteSpace(id, "normal"|"nowrap")  // CSS white-space
+setUserSelect(id, "none"|"text")      // CSS user-select
+```
+
+## Utility
+
+```js
 compileShader(skslCode)           // Validate SkSL shader — returns { success, error }
 exec(command)                     // Run shell command — returns output string
 ```
