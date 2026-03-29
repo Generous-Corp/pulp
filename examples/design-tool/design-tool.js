@@ -4,6 +4,15 @@
 
 setTheme("dark");
 
+// Wrap __requestFrame__ to use the callback registry pattern
+// (C++ can't receive JS functions directly — use ID-based dispatch)
+var __origRequestFrame__ = __requestFrame__;
+__requestFrame__ = function(fn) {
+    var id = __frameNextId__++;
+    __frameCallbacks__[id] = fn;
+    return __origRequestFrame__(id);
+};
+
 // ═══════════════════════════════════════════════════════════════════
 // Color/palette/app state
 // ═══════════════════════════════════════════════════════════════════

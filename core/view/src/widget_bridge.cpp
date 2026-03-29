@@ -100,6 +100,8 @@ void WidgetBridge::load_script(const std::string& code) {
     // expression value. Elements have circular references (_parentElement
     // ↔ _children) which cause infinite recursion in CHOC's toChocValue().
     engine_.evaluate(code + "\n;void 0");
+    // Flush any pending requestAnimationFrame callbacks
+    engine_.evaluate("if (typeof __flushFrames__ === 'function') __flushFrames__();void 0");
 }
 
 View* WidgetBridge::widget(const std::string& id) {
@@ -2275,21 +2277,43 @@ void WidgetBridge::register_api() {
     // Phase 9: Runtime API gap closure
     // ═══════════════════════════════════════════════════════════════════
 
-    // P0: __requestFrame__ — wire requestAnimationFrame to FrameClock
-    // The frame clock calls registered callbacks each frame (~60fps).
-    // We store pending JS callbacks and invoke them on next frame tick.
-    engine_.register_function("__requestFrame__", [this](choc::javascript::ArgumentList args) {
-        // Store the callback expression for invocation on next frame
-        // QuickJS doesn't easily pass function references through choc,
-        // so we use a global callback registry pattern
-        static int nextFrameId = 1;
-        int id = nextFrameId++;
-        // Store the callback ID — the JS side wraps the function
+    // __requestFrame__ — requestAnimationFrame implementation
+    // JS side stores callbacks in __frameCallbacks__ map, passes ID to C++.
+    // C++ stores pending IDs and invokes them on next frame via __invokeFrame__.
+    // Shared pending frame callback IDs (static so lambdas can capture pointer)
+    static std::vector<int>* s_pending_frames = new std::vector<int>();
+    static bool frame_preamble_loaded = false;
+    if (!frame_preamble_loaded) {
+        frame_preamble_loaded = true;
+        engine_.evaluate(
+            "var __frameCallbacks__ = {};"
+            "var __frameNextId__ = 1;"
+            "function __invokeFrame__(id) {"
+            "  var fn = __frameCallbacks__[id];"
+            "  if (fn) { delete __frameCallbacks__[id]; fn(); }"
+            "}"
+        );
+    }
+
+    engine_.register_function("__requestFrame__", [](choc::javascript::ArgumentList args) {
+        auto id = args.get<int>(0, 0);
+        if (id > 0) s_pending_frames->push_back(id);
         return choc::value::createInt32(id);
     });
 
     engine_.register_function("__cancelFrame__", [](choc::javascript::ArgumentList args) {
-        (void)args;
+        auto id = args.get<int>(0, 0);
+        auto it = std::find(s_pending_frames->begin(), s_pending_frames->end(), id);
+        if (it != s_pending_frames->end()) s_pending_frames->erase(it);
+        return choc::value::Value();
+    });
+
+    engine_.register_function("__flushFrames__", [this](choc::javascript::ArgumentList) {
+        auto ids = *s_pending_frames;
+        s_pending_frames->clear();
+        for (auto id : ids) {
+            engine_.evaluate("__invokeFrame__(" + std::to_string(id) + ")");
+        }
         return choc::value::Value();
     });
 
