@@ -408,6 +408,47 @@ input:
       getCoalescedEvents()/getPredictedEvents() API on PointerEvent objects.
       JS API structure in place. iOS coalescedTouches/predictedTouches data piping planned.
 
+runtime_apis:
+  canvas_2d:
+    status: usable
+    notes: >
+      25+ draw commands including gradient fills (linear/radial), arc/ellipse,
+      textAlign/textBaseline, clearRect, clipRect, globalAlpha, lineCap/lineJoin,
+      globalCompositeOperation (blend modes), fillRoundedRect, strokeCircle.
+  clipboard:
+    status: usable
+    notes: navigator.clipboard.readText/writeText via platform::Clipboard C++ API.
+  local_storage:
+    status: usable
+    notes: localStorage.getItem/setItem/removeItem — file-backed in temp directory.
+  performance:
+    status: usable
+    notes: performance.now() via std::chrono::steady_clock (sub-millisecond precision).
+  fetch:
+    status: usable
+    notes: Minimal fetch(url, opts) via curl exec. GET/POST, returns {text(), json()}.
+  encoding:
+    status: usable
+    notes: TextEncoder/TextDecoder (UTF-8), atob/btoa (base64).
+  crypto:
+    status: partial
+    notes: crypto.getRandomValues() (Math.random-based, not cryptographic).
+  image_constructor:
+    status: usable
+    notes: new Image() with src setter and onload callback for preloading.
+  console_extended:
+    status: usable
+    notes: console.log/warn/error/info/debug + console.time/timeEnd.
+  structured_clone:
+    status: usable
+    notes: structuredClone() via JSON round-trip.
+  custom_event:
+    status: usable
+    notes: CustomEvent constructor with detail property, dispatchEvent support.
+  timers:
+    status: usable
+    notes: setTimeout/setInterval/requestAnimationFrame via __requestFrame__ bridge.
+
 subsystems:
   runtime: stable
   events: usable

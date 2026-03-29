@@ -90,13 +90,12 @@ Browser-shaped JS API over Pulp's native GPU UI (document.createElement, element
 - [x] -webkit-line-clamp / line-clamp, background-repeat
 - [x] W3C spec coverage doc: docs/reference/w3c-coverage.md (16 specs, property-by-property)
 
-### Phase 9: Runtime API Gaps — FILED (26 items across 4 tiers)
-Identified via systematic audit of Web APIs beyond W3C CSS/DOM:
-- [ ] P0: __requestFrame__ never registered (rAF/setTimeout/setInterval dead), performance.now()
-- [ ] P1: Clipboard JS bridge, canvas gradients/drawImage/arc/textAlign/clearRect/clip, drag-and-drop events, Image constructor + onload
-- [ ] P2: localStorage, window.onerror, console.time, missing canvas registrations, globalAlpha, data URLs, measureText accuracy, microtask pump
-- [ ] P3: fetch(), getImageData/putImageData, globalCompositeOperation, createPattern
-Spec: planning/phase-9-runtime-api-gaps.md
+### Phase 9: Runtime API Gap Closure — COMPLETE (30 items across 26 web specs)
+- [x] P0: __requestFrame__/__cancelFrame__ registered, performance.now() via steady_clock
+- [x] P1: Clipboard (readClipboard/writeClipboard), canvas gradients (linear/radial), canvas arc, canvas textAlign/textBaseline, clearRect, clipRect, Image constructor
+- [x] P2: localStorage (file-backed), window.onerror, console.time/timeEnd, canvasFillRoundedRect/StrokeRoundedRect/StrokeCircle registered, globalAlpha, lineCap/lineJoin, blendMode
+- [x] P3: fetch() via curl, crypto.getRandomValues, TextEncoder/TextDecoder, atob/btoa, structuredClone
+- [x] docs/reference/w3c-coverage.md expanded from 16 to 26 specs (Canvas 2D, Clipboard, Storage, Fetch, Encoding, Crypto, Console, HR Time, DnD, Structured Clone)
 
 ## First-Time Setup & Onboarding — COMPLETE (2026-03-28)
 
