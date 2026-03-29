@@ -842,8 +842,8 @@ function renderPaletteGamut(paletteIdx, hue, dotL, dotC, fullRedraw) {
             boundary.push(blo);
         }
 
-        // Draw color grid
-        var cols = 100, rows = 40;
+        // Draw color grid — high resolution for smooth edges
+        var cols = 135, rows = 65;
         var cellW = w / cols, cellH = h / rows;
         for (var gx = 0; gx < cols; gx++) {
             var L = gx / (cols - 1);

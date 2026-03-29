@@ -325,19 +325,21 @@ void TextEditor::paint(canvas::Canvas& canvas) {
     // Background
     auto bg_color = has_focus() ? resolve_color("text_editor_focus_bg", canvas::Color::hex(0x2a2a4a))
                                 : resolve_color("text_editor_bg", canvas::Color::hex(0x1a1a2e));
+    float radius = 6.0f;
     canvas.set_fill_color(bg_color);
-    canvas.fill_rounded_rect(b.x, b.y, b.width, b.height, 4);
+    canvas.fill_rounded_rect(b.x, b.y, b.width, b.height, radius);
 
-    // Border — prominent accent border when focused (like original HTML)
+    // Border — accent when focused, subtle when not
     if (has_focus()) {
-        // Always use a visible accent color for focus border
         canvas.set_stroke_color(canvas::Color::rgba(140, 120, 255, 255));
         canvas.set_line_width(2.0f);
+        // Inset stroke by half line width so it aligns cleanly with fill edge
+        canvas.stroke_rounded_rect(b.x + 1, b.y + 1, b.width - 2, b.height - 2, radius - 1);
     } else {
         canvas.set_stroke_color(resolve_color("border", canvas::Color::hex(0x3a3a5a)));
         canvas.set_line_width(1.0f);
+        canvas.stroke_rounded_rect(b.x + 0.5f, b.y + 0.5f, b.width - 1, b.height - 1, radius - 0.5f);
     }
-    canvas.stroke_rounded_rect(b.x, b.y, b.width, b.height, 6);
 
     canvas.set_font("system", font_size_);
 
