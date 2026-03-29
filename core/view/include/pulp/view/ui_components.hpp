@@ -37,6 +37,7 @@ public:
 
     int selected() const { return selected_; }
     void set_selected(int index);
+    void set_selected_silent(int index);
 
     const std::string& selected_text() const;
 
@@ -58,6 +59,7 @@ public:
     static void notify_global_click(View* target);
 
 private:
+    void set_selected_impl(int index, bool notify);
     void open_dropdown();
     void close_dropdown();
 

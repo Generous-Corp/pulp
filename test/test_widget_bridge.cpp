@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/view/widget_bridge.hpp>
+#include <pulp/view/ui_components.hpp>
 
 using namespace pulp::view;
 using namespace pulp::state;
@@ -182,4 +183,70 @@ TEST_CASE("WidgetBridge removeWidget from JS", "[view][bridge][animation]") {
     bridge.load_script("removeWidget('gain')");
     REQUIRE(root.child_count() == 0);
     REQUIRE(bridge.widget("gain") == nullptr);
+}
+
+TEST_CASE("WidgetBridge ComboBox selection survives applyTokenDiff in select handler", "[view][bridge][combo]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createCombo('harmony', '');
+        setItems('harmony', ['Monochromatic', 'Analogous', 'Complementary']);
+        on('harmony', 'select', function(idx) {
+            setSelected('harmony', idx);
+            applyTokenDiff('{"colors":{"accent.primary":"#ff0000"}}');
+        });
+    )");
+
+    auto* combo = dynamic_cast<ComboBox*>(bridge.widget("harmony"));
+    REQUIRE(combo != nullptr);
+    REQUIRE(combo->selected() == 0);
+    auto* original_ptr = combo;
+
+    combo->set_bounds({0, 0, 140, 120});
+
+    MouseEvent open_click;
+    open_click.position = {70, 14};
+    open_click.is_down = true;
+    combo->on_mouse_event(open_click);
+
+    MouseEvent select_click;
+    select_click.position = {70, 54};
+    select_click.is_down = true;
+    combo->on_mouse_event(select_click);
+
+    auto* combo_after = dynamic_cast<ComboBox*>(bridge.widget("harmony"));
+    REQUIRE(combo_after == original_ptr);
+    REQUIRE(combo_after->selected() == 1);
+    REQUIRE(combo_after->selected_text() == "Analogous");
+}
+
+TEST_CASE("WidgetBridge setSelected updates ComboBox without firing select handler", "[view][bridge][combo]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        var select_count = 0;
+        createCombo('harmony', '');
+        setItems('harmony', ['Monochromatic', 'Analogous', 'Complementary']);
+        on('harmony', 'select', function(idx) { select_count++; });
+    )");
+
+    auto* combo = dynamic_cast<ComboBox*>(bridge.widget("harmony"));
+    REQUIRE(combo != nullptr);
+    REQUIRE(combo->selected_text() == "Monochromatic");
+
+    bridge.load_script("setSelected('harmony', 1)");
+
+    REQUIRE(combo->selected() == 1);
+    REQUIRE(combo->selected_text() == "Analogous");
+    REQUIRE(engine.evaluate("select_count").getWithDefault<int>(-1) == 0);
 }

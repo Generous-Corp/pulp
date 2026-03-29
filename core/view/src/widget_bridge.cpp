@@ -1107,7 +1107,7 @@ void WidgetBridge::register_api() {
         auto id = args.get<std::string>(0, "");
         auto idx = args.get<int>(1, 0);
         if (auto* c = dynamic_cast<ComboBox*>(widget(id))) {
-            c->set_selected(idx);
+            c->set_selected_silent(idx);
         }
         return choc::value::Value();
     });

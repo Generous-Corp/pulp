@@ -8,12 +8,20 @@ const std::string ComboBox::empty_string_;
 
 // ── ComboBox ─────────────────────────────────────────────────────────────
 
-void ComboBox::set_selected(int index) {
+void ComboBox::set_selected_impl(int index, bool notify) {
     if (index >= 0 && index < static_cast<int>(items_.size()) && index != selected_) {
         selected_ = index;
         set_access_value(items_[static_cast<size_t>(index)]);
-        if (on_change) on_change(index);
+        if (notify && on_change) on_change(index);
     }
+}
+
+void ComboBox::set_selected(int index) {
+    set_selected_impl(index, true);
+}
+
+void ComboBox::set_selected_silent(int index) {
+    set_selected_impl(index, false);
 }
 
 const std::string& ComboBox::selected_text() const {

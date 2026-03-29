@@ -143,6 +143,38 @@ static pulp::view::KeyCode keyCodeFromNS(unsigned short code) {
 - (void)mouseDown:(NSEvent*)event {
     if (!self.rootView) return;
     auto pt = [self localPoint:event];
+
+    // Check if click is inside an active ComboBox dropdown overlay.
+    // The dropdown renders as a paint overlay with no view backing, so
+    // normal hit_test finds the view BEHIND the dropdown. Route the click
+    // to the ComboBox instead so it can process the dropdown item selection.
+    if (pulp::view::ComboBox::active_popup_) {
+        auto* combo = pulp::view::ComboBox::active_popup_;
+        // Compute dropdown bounds in root coordinates
+        float abs_x = 0, abs_y = 0;
+        pulp::view::View* v = combo;
+        while (v) { abs_x += v->bounds().x; abs_y += v->bounds().y; v = v->parent(); }
+        float base_h = std::min(combo->local_bounds().height, 28.0f);
+        float dd_top = abs_y + base_h + 2;
+        float dd_w = combo->local_bounds().width;
+        float dd_h = static_cast<float>(combo->items().size()) * 24.0f;
+        if (pt.x >= abs_x && pt.x <= abs_x + dd_w &&
+            pt.y >= dd_top && pt.y <= dd_top + dd_h) {
+            // Click is inside dropdown — route to ComboBox
+            _dragTarget = combo;
+            auto local = toLocal(pt, combo, self.rootView);
+            pulp::view::MouseEvent me;
+            me.position = local;
+            me.window_position = pt;
+            me.button = pulp::view::MouseButton::left;
+            me.is_down = true;
+            me.click_count = 1;
+            combo->on_mouse_event(me);
+            [self setNeedsDisplay:YES];
+            return;
+        }
+    }
+
     _dragTarget = self.rootView->hit_test(pt);
 
     // Close any open popup if click is outside it

@@ -67,6 +67,7 @@ getText(id)            // Get text from TextEditor or Label — returns string
 
 ```js
 setItems(id, ["Option A", "Option B"])   // Set Combo dropdown items
+setSelected(id, index)                    // Set Combo selection without firing "select"
 setProgress(id, 0.75)                     // Set Progress bar value (0-1)
 setMeterLevel(id, peak, rms)              // Set Meter peak and RMS levels
 setXY(id, x, y)                           // Set XYPad position (0-1 each axis)
