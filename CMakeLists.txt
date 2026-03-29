@@ -271,3 +271,97 @@ endif()
 if(PULP_BUILD_EXAMPLES)
     add_subdirectory(examples)
 endif()
+
+# ── SDK Install Rules ──────────────────────────────────────────────────────
+# cmake --install build --prefix <staging> produces a complete Pulp SDK
+include(GNUInstallDirs)
+
+# Core libraries for SDK packaging — only targets with clean dependency chains.
+# View, render, host require third-party libs (SDL3, Dawn, Skia) that can't
+# be redistributed in the SDK. Standalone plugins link format + state + audio.
+set(PULP_SDK_TARGETS
+    pulp-platform pulp-runtime pulp-events pulp-state
+    pulp-audio pulp-midi pulp-signal pulp-format
+    pulp-canvas
+)
+
+install(TARGETS ${PULP_SDK_TARGETS}
+    EXPORT PulpTargets
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+)
+
+# Also install third-party targets that our exported targets depend on
+if(PULP_HAS_CLAP)
+    install(TARGETS clap EXPORT PulpTargets)
+endif()
+if(PULP_HAS_LV2)
+    install(TARGETS lv2-headers EXPORT PulpTargets)
+endif()
+
+# Public headers for each SDK subsystem
+foreach(subsystem platform runtime events state audio midi signal format canvas)
+    set(_inc_dir "${CMAKE_CURRENT_SOURCE_DIR}/core/${subsystem}/include")
+    if(EXISTS "${_inc_dir}")
+        install(DIRECTORY "${_inc_dir}/pulp/"
+            DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/pulp"
+            FILES_MATCHING PATTERN "*.hpp" PATTERN "*.h"
+        )
+    endif()
+endforeach()
+
+# SDK version file
+file(WRITE "${CMAKE_BINARY_DIR}/version.txt" "${PROJECT_VERSION}\n")
+install(FILES "${CMAKE_BINARY_DIR}/version.txt" DESTINATION ".")
+
+# CMake config files for find_package(Pulp)
+install(EXPORT PulpTargets
+    FILE PulpTargets.cmake
+    NAMESPACE Pulp::
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/Pulp
+)
+
+include(CMakePackageConfigHelpers)
+write_basic_package_version_file(
+    "${CMAKE_BINARY_DIR}/PulpConfigVersion.cmake"
+    VERSION ${PROJECT_VERSION}
+    COMPATIBILITY SameMajorVersion
+)
+
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpConfig.cmake.in"
+    "${CMAKE_BINARY_DIR}/PulpConfig.cmake"
+    @ONLY
+)
+
+install(FILES
+    "${CMAKE_BINARY_DIR}/PulpConfig.cmake"
+    "${CMAKE_BINARY_DIR}/PulpConfigVersion.cmake"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpPlugin.cmake"
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/Pulp
+)
+
+# Templates for standalone project scaffolding
+install(DIRECTORY tools/templates/
+    DESTINATION templates
+    PATTERN "*.template"
+)
+
+# Format SDK headers (CLAP, LV2 — MIT/ISC compatible)
+if(PULP_HAS_CLAP)
+    install(DIRECTORY "${clap_SOURCE_DIR}/include/clap"
+        DESTINATION external/clap/include
+    )
+endif()
+if(PULP_HAS_LV2)
+    install(DIRECTORY "${lv2_SOURCE_DIR}/include/lv2"
+        DESTINATION external/lv2/include
+    )
+endif()
+if(PULP_HAS_VST3)
+    install(DIRECTORY "${VST3_SDK_DIR}/pluginterfaces/"
+        DESTINATION external/vst3sdk/pluginterfaces
+        FILES_MATCHING PATTERN "*.h"
+    )
+endif()

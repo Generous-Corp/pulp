@@ -54,25 +54,49 @@ jobs:
         if: runner.os != 'Windows'
         run: strip build/tools/cli/pulp
 
-      - name: Package (Unix)
+      - name: Package CLI (Unix)
         if: runner.os != 'Windows'
         run: |
           cd build/tools/cli
           tar czf ../../../pulp-${{ matrix.platform }}.tar.gz pulp
         shell: bash
 
-      - name: Package (Windows)
+      - name: Package CLI (Windows)
         if: runner.os == 'Windows'
         run: |
           cd build/tools/cli/Release
           Compress-Archive -Path pulp.exe -DestinationPath ../../../../pulp-${{ matrix.platform }}.zip
         shell: pwsh
 
-      - name: Upload artifact
+      - name: Build SDK tarball (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          cmake --install build --prefix sdk-staging --config Release
+          mv sdk-staging pulp-sdk
+          tar czf pulp-sdk-${{ matrix.platform }}.tar.gz pulp-sdk
+          rm -rf pulp-sdk
+        shell: bash
+
+      - name: Build SDK tarball (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          cmake --install build --prefix sdk-staging --config Release
+          Rename-Item sdk-staging pulp-sdk
+          Compress-Archive -Path pulp-sdk -DestinationPath pulp-sdk-${{ matrix.platform }}.tar.gz
+          Remove-Item -Recurse pulp-sdk
+        shell: pwsh
+
+      - name: Upload CLI artifact
         uses: actions/upload-artifact@v4
         with:
           name: pulp-${{ matrix.platform }}
           path: pulp-${{ matrix.platform }}.*
+
+      - name: Upload SDK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pulp-sdk-${{ matrix.platform }}
+          path: pulp-sdk-${{ matrix.platform }}.*
 
   release:
     needs: build-cli

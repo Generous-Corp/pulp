@@ -41,6 +41,20 @@ strip "$DIST_DIR/pulp"
 (cd "$DIST_DIR" && tar czf "pulp-darwin-arm64.tar.gz" pulp && rm pulp)
 info "pulp-darwin-arm64.tar.gz ($(du -h "$DIST_DIR/pulp-darwin-arm64.tar.gz" | cut -f1))"
 
+# ── macOS arm64 SDK ────────────────────────────────────────────────────────
+
+step "Building macOS arm64 SDK"
+
+SDK_STAGING="$DIST_DIR/pulp-sdk-staging"
+rm -rf "$SDK_STAGING"
+cmake --install "$REPO_ROOT/build" --prefix "$SDK_STAGING" --config Release 2>&1 | tail -5
+if [ -f "$SDK_STAGING/version.txt" ]; then
+    (cd "$DIST_DIR" && mv pulp-sdk-staging pulp-sdk && tar czf "pulp-sdk-darwin-arm64.tar.gz" pulp-sdk && rm -rf pulp-sdk)
+    info "pulp-sdk-darwin-arm64.tar.gz ($(du -h "$DIST_DIR/pulp-sdk-darwin-arm64.tar.gz" | cut -f1))"
+else
+    fail "SDK install failed — version.txt not found"
+fi
+
 # ── Linux arm64 (via SSH) ───────────────────────────────────────────────────
 
 step "Building Linux arm64 (ssh ubuntu)"

@@ -1,0 +1,27 @@
+# PulpConfig.cmake — find_package(Pulp) support for standalone projects
+#
+# Defines imported targets:
+#   Pulp::format   Pulp::state   Pulp::audio   Pulp::signal
+#   Pulp::midi     Pulp::canvas  Pulp::view    Pulp::platform
+#   Pulp::runtime  Pulp::events  Pulp::osc     Pulp::host
+#
+# Also provides:
+#   pulp_add_plugin()  — macro from PulpPlugin.cmake
+#   PULP_SDK_DIR       — root of the installed SDK
+
+@PACKAGE_INIT@
+
+set(PULP_VERSION "@PROJECT_VERSION@")
+get_filename_component(PULP_SDK_DIR "${CMAKE_CURRENT_LIST_DIR}/../../.." ABSOLUTE)
+
+include("${CMAKE_CURRENT_LIST_DIR}/PulpTargets.cmake")
+
+# Provide the pulp_add_plugin() macro for standalone projects
+include("${CMAKE_CURRENT_LIST_DIR}/PulpPlugin.cmake")
+
+# Locate bundled format SDK headers
+set(PULP_CLAP_INCLUDE_DIR "${PULP_SDK_DIR}/external/clap/include")
+set(PULP_LV2_INCLUDE_DIR "${PULP_SDK_DIR}/external/lv2/include")
+set(PULP_VST3_INCLUDE_DIR "${PULP_SDK_DIR}/external/vst3sdk")
+
+check_required_components(Pulp)
