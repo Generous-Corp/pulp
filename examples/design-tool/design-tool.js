@@ -498,7 +498,7 @@ function buildShadeRamps() {
         var gamutId = rampId + "-gamut";
         createCanvas(gamutId, editorId);
         setFlex(gamutId, "width", 270);
-        setFlex(gamutId, "height", 110);
+        setFlex(gamutId, "height", 130);
 
         // H slider
         var hRowId = rampId + "-h-row";
@@ -551,7 +551,7 @@ function buildShadeRamps() {
         if (p === expandedPalette) {
             var base = ramp[500];
             var oklch = OklchEngine.hexToOklch(base.hex);
-            renderPaletteGamut(p, oklch.H);
+            renderPaletteGamut(p, oklch.H, oklch.L, oklch.C);
             setValue(rampId + "-h-fdr", oklch.H / 360);
             setValue(rampId + "-c-fdr", Math.min(oklch.C / 0.4, 1));
             setText(rampId + "-oklch", "L: " + oklch.L.toFixed(2) + "  C: " + oklch.C.toFixed(3) + "  H: " + oklch.H.toFixed(1));
@@ -577,7 +577,7 @@ function buildShadeRamps() {
                     var pKey = paletteKeys[idx];
                     var base = pal[pKey][500];
                     var oklch = OklchEngine.hexToOklch(base.hex);
-                    renderPaletteGamut(idx, oklch.H);
+                    renderPaletteGamut(idx, oklch.H, oklch.L, oklch.C);
                     setValue("ramp-" + idx + "-h-fdr", oklch.H / 360);
                     setValue("ramp-" + idx + "-c-fdr", Math.min(oklch.C / 0.4, 1));
                     setText("ramp-" + idx + "-oklch", "L: " + oklch.L.toFixed(2) + "  C: " + oklch.C.toFixed(3) + "  H: " + oklch.H.toFixed(1));
@@ -588,64 +588,74 @@ function buildShadeRamps() {
             on("ramp-" + idx + "-name", "click", toggleExpand);
         })(p);
 
-        // H/C slider change handlers (rebuild ramp on change)
+        // H/C slider change handlers — update gamut, dot, accent, and preview
         (function(idx, pKey) {
-            on("ramp-" + idx + "-h-fdr", "change", function() {
+            function onPaletteSliderChange() {
                 var h = getValue("ramp-" + idx + "-h-fdr") * 360;
                 var c = getValue("ramp-" + idx + "-c-fdr") * 0.4;
-                // For accent palette, update the global accent color
+                var mapped = OklchEngine.gamutMap(0.55, c, h);
+                // Redraw gamut with dot at current position
+                renderPaletteGamut(idx, h, mapped.L, mapped.C);
+                setText("ramp-" + idx + "-oklch", "L: " + mapped.L.toFixed(2) + "  C: " + mapped.C.toFixed(3) + "  H: " + h.toFixed(1));
+                // Update the global accent/palette and apply to preview
                 if (pKey === "accent") {
-                    var oklch = OklchEngine.hexToOklch(currentAccent);
-                    currentAccent = OklchEngine.oklchToHex(oklch.L, oklch.C, h);
+                    currentAccent = OklchEngine.oklchToHex(mapped.L, mapped.C, h);
                 }
-                renderPaletteGamut(idx, h);
-                var mapped = OklchEngine.gamutMap(0.5, c, h);
-                setText("ramp-" + idx + "-oklch", "L: " + mapped.L.toFixed(2) + "  C: " + mapped.C.toFixed(3) + "  H: " + h.toFixed(1));
-            });
-            on("ramp-" + idx + "-c-fdr", "change", function() {
-                var h = getValue("ramp-" + idx + "-h-fdr") * 360;
-                var c = getValue("ramp-" + idx + "-c-fdr") * 0.4;
-                var mapped = OklchEngine.gamutMap(0.5, c, h);
-                setText("ramp-" + idx + "-oklch", "L: " + mapped.L.toFixed(2) + "  C: " + mapped.C.toFixed(3) + "  H: " + h.toFixed(1));
-            });
+                // Rebuild palette and apply to theme
+                var palette = PaletteSystem.create(currentAccent, currentHarmony);
+                var diff = PaletteSystem.toThemeDiff(palette);
+                applyTokenDiff(diff);
+                updateTokenSwatches();
+                // Update the mini ramp swatches and dot color
+                var ramp = palette[pKey];
+                var steps = ShadeGenerator.STEPS;
+                for (var s = 0; s < steps.length; s++) {
+                    setBackground("ramp-" + idx + "-s" + s, ramp[steps[s]].hex);
+                }
+                setBackground("ramp-" + idx + "-dot", ramp[500].hex);
+                // Update large shade swatches
+                var stepIdxs = [0, 2, 4, 5, 7, 9];
+                for (var ls = 0; ls < 6; ls++) {
+                    setBackground("ramp-" + idx + "-lg-" + ls, ramp[steps[stepIdxs[ls]]].hex);
+                }
+            }
+            on("ramp-" + idx + "-h-fdr", "change", onPaletteSliderChange);
+            on("ramp-" + idx + "-c-fdr", "change", onPaletteSliderChange);
         })(p, paletteKeys[p]);
     }
     if (tokenEditState.activeToken) rebuildPopupPalette();
 }
 
 // Render gamut triangle for a specific palette editor
-function renderPaletteGamut(paletteIdx, hue) {
+// Draws the OKLCH gamut filled with color, plus a position dot
+function renderPaletteGamut(paletteIdx, hue, dotL, dotC) {
     var gamutId = "ramp-" + paletteIdx + "-gamut";
     canvasClear(gamutId);
-    var w = 270, h = 110;
-    var cols = 50;
-    var colW = w / cols;
+    var w = 270, h = 130;
+    // Background
+    canvasRect(gamutId, 0, 0, w, h, '#1e1e22');
+    // Draw OKLCH gamut: X = Lightness (0-1), Y = Chroma (0.4 top to 0 bottom)
+    var cols = 60;
+    var rows = 30;
+    var cellW = w / cols;
+    var cellH = h / rows;
     for (var gx = 0; gx < cols; gx++) {
         var L = gx / (cols - 1);
-        var lo = 0, hi = 0.4;
-        for (var bi = 0; bi < 14; bi++) {
-            var mid = (lo + hi) / 2;
-            if (OklchEngine.isInGamut(L, mid, hue)) lo = mid;
-            else hi = mid;
+        for (var gy = 0; gy < rows; gy++) {
+            var C = (1 - gy / (rows - 1)) * 0.4;
+            if (OklchEngine.isInGamut(L, C, hue)) {
+                canvasRect(gamutId, gx * cellW, gy * cellH, cellW + 1, cellH + 1, OklchEngine.oklchToHex(L, C, hue));
+            }
         }
-        var maxC = lo;
-        var topHex = OklchEngine.oklchToHex(L, maxC, hue);
-        var botHex = OklchEngine.oklchToHex(L, 0, hue);
-        var gamutH = (maxC / 0.4) * h;
-        if (gamutH > 1) {
-            canvasSetLinearGradient(gamutId, gx * colW, h - gamutH, gx * colW, h, topHex, botHex);
-            canvasBeginPath(gamutId);
-            canvasMoveTo(gamutId, gx * colW, h - gamutH);
-            canvasLineTo(gamutId, gx * colW + colW + 0.5, h - gamutH);
-            canvasLineTo(gamutId, gx * colW + colW + 0.5, h);
-            canvasLineTo(gamutId, gx * colW, h);
-            canvasClosePath(gamutId);
-            canvasFillPath(gamutId);
-            canvasClearGradient(gamutId);
-        }
-        if (h - gamutH > 0) {
-            canvasRect(gamutId, gx * colW, 0, colW + 0.5, h - gamutH, '#1e1e22');
-        }
+    }
+    // Draw position dot if L/C provided
+    if (dotL !== undefined && dotC !== undefined) {
+        var dx = dotL * w;
+        var dy = (1 - dotC / 0.4) * h;
+        // White circle outline
+        canvasFillCircle(gamutId, dx, dy, 7, '#00000040');
+        canvasFillCircle(gamutId, dx, dy, 5, '#ffffff');
+        canvasFillCircle(gamutId, dx, dy, 3, OklchEngine.oklchToHex(dotL, dotC, hue));
     }
 }
 
