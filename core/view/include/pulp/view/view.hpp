@@ -163,6 +163,10 @@ public:
     bool enabled() const { return enabled_; }
     void set_enabled(bool e) { enabled_ = e; }
 
+    /// CSS pointer-events: none — view is invisible to hit testing
+    bool hit_testable() const { return hit_testable_; }
+    void set_hit_testable(bool h) { hit_testable_ = h; }
+
     /// Mark layout as needing recalculation (auto-invalidation)
     void invalidate_layout() { layout_dirty_ = true; }
     bool layout_dirty() const { return layout_dirty_; }
@@ -328,6 +332,7 @@ private:
     bool layout_dirty_ = false;
     bool has_focus_ = false;
     bool hovered_ = false;
+    bool hit_testable_ = true;
     FrameClock* frame_clock_ = nullptr;
 
     // Visual properties

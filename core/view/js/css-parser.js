@@ -173,3 +173,179 @@ function _resolveVar(str) {
         return "0";
     });
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Unit resolution — convert parsed {value, unit} to pixels given context
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Context: { parentWidth, parentHeight, fontSize, rootFontSize, viewportW, viewportH }
+function resolveLength(parsed, ctx) {
+    if (!parsed) return 0;
+    if (parsed.unit === "auto") return 0; // caller handles auto specially
+    if (parsed.unit === "px" || !parsed.unit) return parsed.value;
+    if (!ctx) return parsed.value; // fallback: treat as px
+
+    switch (parsed.unit) {
+        case "em":   return parsed.value * (ctx.fontSize || 14);
+        case "rem":  return parsed.value * (ctx.rootFontSize || 14);
+        case "%":    return parsed.value / 100 * (ctx.parentSize || ctx.parentWidth || 0);
+        case "vw":   return parsed.value / 100 * (ctx.viewportW || 800);
+        case "vh":   return parsed.value / 100 * (ctx.viewportH || 600);
+        case "vmin": return parsed.value / 100 * Math.min(ctx.viewportW || 800, ctx.viewportH || 600);
+        case "vmax": return parsed.value / 100 * Math.max(ctx.viewportW || 800, ctx.viewportH || 600);
+        case "ch":   return parsed.value * (ctx.fontSize || 14) * 0.5; // approximate
+        default:     return parsed.value;
+    }
+}
+
+// Resolve a CSS length string to px in one call
+function resolveCSSLength(str, ctx) {
+    if (!str) return 0;
+    str = String(str).trim();
+    // Check for calc/min/max/clamp first
+    if (str.indexOf("calc(") === 0 || str.indexOf("min(") === 0 ||
+        str.indexOf("max(") === 0 || str.indexOf("clamp(") === 0) {
+        return evaluateCalc(str, ctx);
+    }
+    var parsed = parseCSSLength(str);
+    if (!parsed) return 0;
+    return resolveLength(parsed, ctx);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// calc() / min() / max() / clamp() expression evaluator
+// ═══════════════════════════════════════════════════════════════════════════════
+
+function evaluateCalc(expr, ctx) {
+    if (!expr) return 0;
+    expr = String(expr).trim();
+
+    // Strip outer function wrapper
+    if (expr.indexOf("calc(") === 0) expr = expr.slice(5, -1);
+
+    // Handle min(a, b, ...)
+    var minMatch = expr.match(/^min\((.+)\)$/);
+    if (minMatch) {
+        var parts = _splitCalcArgs(minMatch[1]);
+        var vals = parts.map(function(p) { return evaluateCalc(p.trim(), ctx); });
+        return Math.min.apply(null, vals);
+    }
+
+    // Handle max(a, b, ...)
+    var maxMatch = expr.match(/^max\((.+)\)$/);
+    if (maxMatch) {
+        var parts2 = _splitCalcArgs(maxMatch[1]);
+        var vals2 = parts2.map(function(p) { return evaluateCalc(p.trim(), ctx); });
+        return Math.max.apply(null, vals2);
+    }
+
+    // Handle clamp(min, preferred, max)
+    var clampMatch = expr.match(/^clamp\((.+)\)$/);
+    if (clampMatch) {
+        var parts3 = _splitCalcArgs(clampMatch[1]);
+        if (parts3.length >= 3) {
+            var lo = evaluateCalc(parts3[0].trim(), ctx);
+            var pref = evaluateCalc(parts3[1].trim(), ctx);
+            var hi = evaluateCalc(parts3[2].trim(), ctx);
+            return Math.min(Math.max(pref, lo), hi);
+        }
+        return 0;
+    }
+
+    // Evaluate arithmetic expression: supports +, -, *, /
+    // First resolve nested function calls
+    expr = expr.replace(/(calc|min|max|clamp)\([^)]*\)/g, function(match) {
+        return String(evaluateCalc(match, ctx));
+    });
+
+    // Tokenize: numbers with units, operators
+    var tokens = [];
+    var re = /(-?[\d.]+(?:px|em|rem|%|vw|vh|vmin|vmax|ch)?)|([+\-*/])/g;
+    var m;
+    while ((m = re.exec(expr)) !== null) {
+        if (m[1]) {
+            var parsed = parseCSSLength(m[1]);
+            tokens.push({ type: "num", value: parsed ? resolveLength(parsed, ctx) : parseFloat(m[1]) || 0 });
+        } else if (m[2]) {
+            tokens.push({ type: "op", value: m[2] });
+        }
+    }
+
+    if (tokens.length === 0) return 0;
+
+    // Evaluate: * and / first, then + and -
+    // Pass 1: multiply and divide
+    var simplified = [tokens[0]];
+    for (var i = 1; i < tokens.length - 1; i += 2) {
+        var op = tokens[i];
+        var next = tokens[i + 1];
+        if (!op || !next) break;
+        if (op.value === "*") {
+            simplified[simplified.length - 1] = { type: "num", value: simplified[simplified.length - 1].value * next.value };
+        } else if (op.value === "/") {
+            simplified[simplified.length - 1] = { type: "num", value: next.value !== 0 ? simplified[simplified.length - 1].value / next.value : 0 };
+        } else {
+            simplified.push(op, next);
+        }
+    }
+
+    // Pass 2: add and subtract
+    var result = simplified[0] ? simplified[0].value : 0;
+    for (var j = 1; j < simplified.length - 1; j += 2) {
+        var op2 = simplified[j];
+        var next2 = simplified[j + 1];
+        if (!op2 || !next2) break;
+        if (op2.value === "+") result += next2.value;
+        else if (op2.value === "-") result -= next2.value;
+    }
+
+    return result;
+}
+
+// Split comma-separated args respecting nested parentheses
+function _splitCalcArgs(str) {
+    var args = [], depth = 0, current = "";
+    for (var i = 0; i < str.length; i++) {
+        var c = str[i];
+        if (c === "(") depth++;
+        else if (c === ")") depth--;
+        if (c === "," && depth === 0) {
+            args.push(current);
+            current = "";
+        } else {
+            current += c;
+        }
+    }
+    if (current) args.push(current);
+    return args;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// matchMedia — responsive breakpoint queries
+// ═══════════════════════════════════════════════════════════════════════════════
+
+function _matchMediaQuery(query) {
+    // Parse: "(min-width: 600px)", "(max-width: 400px)", "(orientation: landscape)"
+    var rootW = (typeof getRootSize === "function") ? getRootSize().width : 800;
+    var rootH = (typeof getRootSize === "function") ? getRootSize().height : 600;
+
+    var minW = query.match(/min-width:\s*([\d.]+)px/);
+    if (minW && rootW < parseFloat(minW[1])) return false;
+
+    var maxW = query.match(/max-width:\s*([\d.]+)px/);
+    if (maxW && rootW > parseFloat(maxW[1])) return false;
+
+    var minH = query.match(/min-height:\s*([\d.]+)px/);
+    if (minH && rootH < parseFloat(minH[1])) return false;
+
+    var maxH = query.match(/max-height:\s*([\d.]+)px/);
+    if (maxH && rootH > parseFloat(maxH[1])) return false;
+
+    var orient = query.match(/orientation:\s*(landscape|portrait)/);
+    if (orient) {
+        if (orient[1] === "landscape" && rootW <= rootH) return false;
+        if (orient[1] === "portrait" && rootW > rootH) return false;
+    }
+
+    return true; // If no conditions matched, it passes
+}

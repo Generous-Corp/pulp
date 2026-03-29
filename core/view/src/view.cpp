@@ -235,7 +235,7 @@ std::unique_ptr<View> View::remove_child(View* child) {
 }
 
 View* View::hit_test(Point local_point) {
-    if (!visible_ || !enabled_) return nullptr;
+    if (!visible_ || !enabled_ || !hit_testable_) return nullptr;
 
     // Check children in reverse order (topmost first)
     for (auto it = children_.rbegin(); it != children_.rend(); ++it) {

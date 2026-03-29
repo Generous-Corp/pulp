@@ -884,6 +884,53 @@ void WidgetBridge::register_api() {
         return r;
     });
 
+    // getRootSize() -> {width, height} — actual root view dimensions for vw/vh/matchMedia
+    engine_.register_function("getRootSize", [this](choc::javascript::ArgumentList) {
+        auto b = root_.bounds();
+        auto r = choc::value::createObject("");
+        r.addMember("width", choc::value::createFloat64(b.width));
+        r.addMember("height", choc::value::createFloat64(b.height));
+        return r;
+    });
+
+    // setPointerEvents(id, "none"|"auto") — CSS pointer-events: skip in hit_test
+    engine_.register_function("setPointerEvents", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto mode = args.get<std::string>(1, "auto");
+        auto* v = id.empty() ? &root_ : widget(id);
+        if (v) v->set_hit_testable(mode != "none");
+        return choc::value::Value();
+    });
+
+    // setVisibility(id, "visible"|"hidden") — hidden preserves layout space
+    engine_.register_function("setVisibility", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto vis = args.get<std::string>(1, "visible");
+        auto* v = id.empty() ? &root_ : widget(id);
+        if (v) {
+            // visibility:hidden = still takes space but not painted
+            // We use opacity 0 + still visible for layout
+            if (vis == "hidden") { v->set_opacity(0); }
+            else { v->set_opacity(1); }
+        }
+        return choc::value::Value();
+    });
+
+    // setWhiteSpace(id, "normal"|"nowrap"|"pre"|"pre-wrap")
+    engine_.register_function("setWhiteSpace", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto ws = args.get<std::string>(1, "normal");
+        if (auto* l = dynamic_cast<Label*>(widget(id)))
+            l->set_multi_line(ws != "nowrap");
+        return choc::value::Value();
+    });
+
+    // setUserSelect(id, "none"|"text"|"all")
+    engine_.register_function("setUserSelect", [this](choc::javascript::ArgumentList args) {
+        (void)args; // Store for future use — currently no-op
+        return choc::value::Value();
+    });
+
     engine_.register_function("createMeter", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, ""); auto o = args.get<std::string>(1, "vertical");
         auto pid = args.get<std::string>(2, "");

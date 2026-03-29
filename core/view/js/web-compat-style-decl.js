@@ -376,6 +376,96 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
             if (gr[1]) setGrid(id, "row_end", gr[1]);
             break;
         }
+
+        // ── P1: New CSS properties ──────────────────────────────────────
+
+        // aspect-ratio: "16/9" or "1"
+        case "aspectRatio": {
+            var arParts = resolved.split("/");
+            var ratio = parseFloat(arParts[0]) || 1;
+            if (arParts[1]) ratio /= parseFloat(arParts[1]) || 1;
+            setFlex(id, "aspect_ratio", ratio);
+            break;
+        }
+
+        // visibility: "hidden" vs display:none — hidden preserves layout space
+        case "visibility":
+            if (typeof setVisibility === "function") setVisibility(id, resolved);
+            else if (resolved === "hidden") setOpacity(id, 0);
+            else setOpacity(id, 1);
+            break;
+
+        // outline: "2px solid blue"
+        case "outline": {
+            var op = resolved.match(/([\d.]+)px\s+\w+\s+(.+)/);
+            if (op) {
+                var oc = parseCSSColor(op[2].trim());
+                if (typeof setOutline === "function") setOutline(id, parseFloat(op[1]), oc || op[2].trim());
+            }
+            break;
+        }
+        case "outlineWidth": {
+            var ow = parseCSSLength(resolved);
+            if (ow && typeof setOutline === "function") setOutline(id, ow.value, "");
+            break;
+        }
+        case "outlineColor": {
+            var occ = parseCSSColor(resolved);
+            if (occ && typeof setOutline === "function") setOutline(id, 0, occ);
+            break;
+        }
+
+        // white-space: "nowrap", "pre", "normal"
+        case "whiteSpace":
+            if (typeof setWhiteSpace === "function") setWhiteSpace(id, resolved);
+            break;
+
+        // word-break / overflow-wrap
+        case "wordBreak":
+        case "overflowWrap":
+        case "wordWrap":
+            if (typeof setWordBreak === "function") setWordBreak(id, resolved);
+            break;
+
+        // text-shadow: "2px 2px 4px rgba(0,0,0,0.5)"
+        case "textShadow": {
+            var tsm = resolved.match(/(-?[\d.]+)px\s+(-?[\d.]+)px\s+([\d.]+)px\s+(.*)/);
+            if (tsm && typeof setTextShadow === "function") {
+                var tsc = parseCSSColor(tsm[4].trim());
+                setTextShadow(id, parseFloat(tsm[1]), parseFloat(tsm[2]), parseFloat(tsm[3]), tsc || tsm[4].trim());
+            }
+            break;
+        }
+
+        // user-select: "none", "text", "all"
+        case "userSelect":
+            if (typeof setUserSelect === "function") setUserSelect(id, resolved);
+            break;
+
+        // pointer-events: "none", "auto"
+        case "pointerEvents":
+            if (typeof setPointerEvents === "function") setPointerEvents(id, resolved);
+            break;
+
+        // font-family
+        case "fontFamily":
+            if (typeof setFontFamily === "function") setFontFamily(id, resolved.replace(/['"]/g, ""));
+            break;
+
+        // background-size: "cover", "contain", "100px 200px"
+        case "backgroundSize":
+            if (typeof setBackgroundSize === "function") setBackgroundSize(id, resolved);
+            break;
+
+        // background-position: "center", "top left", "50% 50%"
+        case "backgroundPosition":
+            if (typeof setBackgroundPosition === "function") setBackgroundPosition(id, resolved);
+            break;
+
+        // align-content (multi-line flex cross-axis)
+        case "alignContent":
+            setFlex(id, "align_content", _cssToFlex(resolved));
+            break;
     }
 };
 
@@ -394,20 +484,25 @@ function _cssToFlex(v) {
 // But for safety and compatibility, we use defineProperty on the prototype
 var __cssProperties__ = [
     "display", "flexDirection", "flexWrap", "flexGrow", "flexShrink", "flexBasis", "flex",
-    "justifyContent", "alignItems", "alignSelf", "order",
+    "justifyContent", "alignItems", "alignSelf", "alignContent", "order",
     "gap", "rowGap", "columnGap",
     "width", "height", "minWidth", "minHeight", "maxWidth", "maxHeight",
+    "aspectRatio",
     "margin", "marginTop", "marginRight", "marginBottom", "marginLeft",
     "padding", "paddingTop", "paddingRight", "paddingBottom", "paddingLeft",
     "backgroundColor", "color",
-    "fontSize", "fontWeight", "fontStyle", "letterSpacing", "lineHeight",
-    "textAlign", "textTransform", "textDecoration", "textOverflow",
+    "fontSize", "fontWeight", "fontStyle", "fontFamily", "letterSpacing", "lineHeight",
+    "textAlign", "textTransform", "textDecoration", "textOverflow", "textShadow",
+    "whiteSpace", "wordBreak", "overflowWrap", "wordWrap",
     "border", "borderColor", "borderWidth", "borderRadius",
-    "opacity", "overflow", "cursor",
+    "outline", "outlineWidth", "outlineColor",
+    "opacity", "overflow", "cursor", "visibility",
+    "userSelect", "pointerEvents",
     "transform", "transformOrigin",
     "transition", "transitionDuration",
     "position", "top", "right", "bottom", "left", "zIndex",
     "boxShadow", "filter", "background", "backgroundImage",
+    "backgroundSize", "backgroundPosition",
     "gridTemplateColumns", "gridTemplateRows", "gridColumn", "gridRow"
 ];
 

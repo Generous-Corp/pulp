@@ -189,6 +189,13 @@ ClassList.prototype.contains = function(c) {
     return (" " + this._el._className + " ").indexOf(" " + c + " ") >= 0;
 };
 
+ClassList.prototype.replace = function(oldToken, newToken) {
+    if (!this.contains(oldToken)) return false;
+    this.remove(oldToken);
+    this.add(newToken);
+    return true;
+};
+
 ClassList.prototype.toString = function() { return this._el._className; };
 
 Object.defineProperty(ClassList.prototype, "length", {
@@ -509,6 +516,218 @@ Element.prototype.removeEventListener = function(type, fn, opts) {
 Element.prototype.dispatchEvent = function(event) {
     event.target = this;
     _dispatchEvent(this, event);
+};
+
+// ── P1: closest(), matches(), contains(), querySelector on elements ──────
+
+Element.prototype.closest = function(selector) {
+    var parsed = _parseSelector(selector);
+    var el = this;
+    while (el) {
+        if (_matchesSelector(el, parsed)) return el;
+        el = el._parentElement;
+    }
+    return null;
+};
+
+Element.prototype.matches = function(selector) {
+    var parsed = _parseSelector(selector);
+    return _matchesSelector(this, parsed);
+};
+
+Element.prototype.contains = function(other) {
+    var el = other;
+    while (el) {
+        if (el === this) return true;
+        el = el._parentElement;
+    }
+    return false;
+};
+
+Element.prototype.querySelector = function(selector) {
+    return _querySelector(this, selector);
+};
+
+Element.prototype.querySelectorAll = function(selector) {
+    return _querySelectorAll(this, selector);
+};
+
+// ── P1: innerHTML (simple HTML parser for common patterns) ───────────────
+
+Object.defineProperty(Element.prototype, "innerHTML", {
+    get: function() {
+        var out = "";
+        for (var i = 0; i < this._children.length; i++) {
+            out += _serializeElement(this._children[i]);
+        }
+        return out;
+    },
+    set: function(html) {
+        // Remove existing children
+        while (this._children.length > 0) {
+            this.removeChild(this._children[0]);
+        }
+        if (!html) return;
+        // Parse and append
+        var nodes = _parseHTML(html);
+        for (var i = 0; i < nodes.length; i++) {
+            this.appendChild(nodes[i]);
+        }
+    }
+});
+
+Object.defineProperty(Element.prototype, "outerHTML", {
+    get: function() { return _serializeElement(this); }
+});
+
+function _serializeElement(el) {
+    var tag = el.tagName.toLowerCase();
+    var attrs = "";
+    if (el._attributes["id"]) attrs += ' id="' + el._attributes["id"] + '"';
+    if (el._className) attrs += ' class="' + el._className + '"';
+    var inner = el._textContent || "";
+    for (var i = 0; i < el._children.length; i++) {
+        inner += _serializeElement(el._children[i]);
+    }
+    return "<" + tag + attrs + ">" + inner + "</" + tag + ">";
+}
+
+function _parseHTML(html) {
+    var nodes = [];
+    var re = /<(\w+)([^>]*)>([\s\S]*?)<\/\1>|<(\w+)([^>]*)\s*\/?>|([^<]+)/g;
+    var m;
+    while ((m = re.exec(html)) !== null) {
+        if (m[1]) {
+            // Opening + closing tag: <tag attrs>content</tag>
+            var el = document.createElement(m[1]);
+            _parseAttrs(el, m[2]);
+            if (m[3]) {
+                // Check for nested tags
+                if (m[3].indexOf("<") >= 0) {
+                    var children = _parseHTML(m[3]);
+                    for (var i = 0; i < children.length; i++) el.appendChild(children[i]);
+                } else {
+                    el.textContent = m[3];
+                }
+            }
+            nodes.push(el);
+        } else if (m[4]) {
+            // Self-closing tag: <tag attrs/>
+            var el2 = document.createElement(m[4]);
+            _parseAttrs(el2, m[5]);
+            nodes.push(el2);
+        } else if (m[6] && m[6].trim()) {
+            // Text node
+            var tn = document.createElement("span");
+            tn.textContent = m[6];
+            nodes.push(tn);
+        }
+    }
+    return nodes;
+}
+
+function _parseAttrs(el, attrStr) {
+    if (!attrStr) return;
+    var re = /(\w[\w-]*)(?:="([^"]*)")?/g;
+    var m;
+    while ((m = re.exec(attrStr)) !== null) {
+        var name = m[1], value = m[2] || "";
+        if (name === "class") el.className = value;
+        else if (name === "id") el.id = value;
+        else el.setAttribute(name, value);
+    }
+}
+
+// ── P2: Modern DOM insertion methods ─────────────────────────────────────
+
+Element.prototype.append = function() {
+    for (var i = 0; i < arguments.length; i++) {
+        var arg = arguments[i];
+        if (typeof arg === "string") {
+            var tn = document.createElement("span");
+            tn.textContent = arg;
+            this.appendChild(tn);
+        } else {
+            this.appendChild(arg);
+        }
+    }
+};
+
+Element.prototype.prepend = function() {
+    var first = this._children[0] || null;
+    for (var i = 0; i < arguments.length; i++) {
+        var arg = arguments[i];
+        if (typeof arg === "string") {
+            var tn = document.createElement("span");
+            tn.textContent = arg;
+            this.insertBefore(tn, first);
+        } else {
+            this.insertBefore(arg, first);
+        }
+    }
+};
+
+Element.prototype.before = function() {
+    if (!this._parentElement) return;
+    for (var i = 0; i < arguments.length; i++) {
+        var arg = arguments[i];
+        if (typeof arg === "string") {
+            var tn = document.createElement("span");
+            tn.textContent = arg;
+            this._parentElement.insertBefore(tn, this);
+        } else {
+            this._parentElement.insertBefore(arg, this);
+        }
+    }
+};
+
+Element.prototype.after = function() {
+    if (!this._parentElement) return;
+    var next = this.nextSibling;
+    for (var i = 0; i < arguments.length; i++) {
+        var arg = arguments[i];
+        if (typeof arg === "string") {
+            var tn = document.createElement("span");
+            tn.textContent = arg;
+            this._parentElement.insertBefore(tn, next);
+        } else {
+            this._parentElement.insertBefore(arg, next);
+        }
+    }
+};
+
+Element.prototype.replaceWith = function() {
+    if (!this._parentElement) return;
+    var parent = this._parentElement;
+    var next = this.nextSibling;
+    parent.removeChild(this);
+    for (var i = 0; i < arguments.length; i++) {
+        var arg = arguments[i];
+        if (typeof arg === "string") {
+            var tn = document.createElement("span");
+            tn.textContent = arg;
+            parent.insertBefore(tn, next);
+        } else {
+            parent.insertBefore(arg, next);
+        }
+    }
+};
+
+// ── P2: focus() / blur() ─────────────────────────────────────────────────
+
+Element.prototype.focus = function() {
+    if (this._nativeCreated) {
+        // Dispatch focus event
+        var evt = _makeEvent("focus", this);
+        this.dispatchEvent(evt);
+    }
+};
+
+Element.prototype.blur = function() {
+    if (this._nativeCreated) {
+        var evt = _makeEvent("blur", this);
+        this.dispatchEvent(evt);
+    }
 };
 
 Element.prototype._registerNativeEvent = function(type) {
@@ -1286,14 +1505,30 @@ function _setupPseudoActive(el, props) {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 function _parseSelector(str) {
-    var result = { tag: null, id: null, classes: [], pseudo: null, parent: null, direct: false };
+    var result = { tag: null, id: null, classes: [], pseudo: null, pseudoArg: null,
+                   notSelector: null, parent: null, direct: false };
 
-    // Split pseudo-class
+    // Handle :not(selector) — extract inner selector
+    var notMatch = str.match(/:not\(([^)]+)\)/);
+    if (notMatch) {
+        result.notSelector = _parseSelector(notMatch[1]);
+        str = str.replace(/:not\([^)]+\)/, "");
+    }
+
+    // Split pseudo-class (but not :not which was already handled)
     var pseudoIdx = str.indexOf(":");
     var mainPart = str;
     if (pseudoIdx >= 0) {
-        result.pseudo = str.slice(pseudoIdx + 1);
+        var pseudoStr = str.slice(pseudoIdx + 1);
         mainPart = str.slice(0, pseudoIdx);
+        // Parse pseudo with optional argument: nth-child(2n+1)
+        var pseudoArgMatch = pseudoStr.match(/^([\w-]+)\(([^)]*)\)/);
+        if (pseudoArgMatch) {
+            result.pseudo = pseudoArgMatch[1];
+            result.pseudoArg = pseudoArgMatch[2];
+        } else {
+            result.pseudo = pseudoStr;
+        }
     }
 
     // Check for descendant/child combinators
@@ -1326,6 +1561,39 @@ function _parseSelector(str) {
     return result;
 }
 
+// Get the index of an element among its parent's children (0-based)
+function _childIndex(el) {
+    if (!el._parentElement) return 0;
+    var siblings = el._parentElement._children;
+    for (var i = 0; i < siblings.length; i++) {
+        if (siblings[i] === el) return i;
+    }
+    return 0;
+}
+
+// Parse An+B syntax: "odd" -> {a:2,b:1}, "even" -> {a:2,b:0}, "3" -> {a:0,b:3}, "2n+1" -> {a:2,b:1}
+function _parseAnB(str) {
+    str = str.trim().toLowerCase();
+    if (str === "odd") return { a: 2, b: 1 };
+    if (str === "even") return { a: 2, b: 0 };
+    var m = str.match(/^(-?\d*)n\s*([+-]\s*\d+)?$/);
+    if (m) {
+        var a = m[1] === "" || m[1] === "+" ? 1 : m[1] === "-" ? -1 : parseInt(m[1]);
+        var b = m[2] ? parseInt(m[2].replace(/\s/g, "")) : 0;
+        return { a: a, b: b };
+    }
+    var n = parseInt(str);
+    if (!isNaN(n)) return { a: 0, b: n };
+    return { a: 0, b: 0 };
+}
+
+function _matchesNthChild(index1Based, anb) {
+    if (anb.a === 0) return index1Based === anb.b;
+    if (anb.a > 0) return (index1Based - anb.b) >= 0 && (index1Based - anb.b) % anb.a === 0;
+    // Negative a: matches indices <= b
+    return (index1Based - anb.b) <= 0 && (index1Based - anb.b) % anb.a === 0;
+}
+
 function _matchesSelector(el, parsed) {
     // Match tag
     if (parsed.tag && el.tagName.toLowerCase() !== parsed.tag) return false;
@@ -1338,13 +1606,46 @@ function _matchesSelector(el, parsed) {
         if (!el.classList.contains(parsed.classes[i])) return false;
     }
 
+    // Match :not(selector)
+    if (parsed.notSelector && _matchesSelector(el, parsed.notSelector)) return false;
+
+    // Match pseudo-classes
+    if (parsed.pseudo) {
+        var p = parsed.pseudo;
+        if (p === "first-child") {
+            if (!el._parentElement || el._parentElement._children[0] !== el) return false;
+        } else if (p === "last-child") {
+            if (!el._parentElement) return false;
+            var ch = el._parentElement._children;
+            if (ch[ch.length - 1] !== el) return false;
+        } else if (p === "nth-child") {
+            var idx = _childIndex(el) + 1; // 1-based
+            var anb = _parseAnB(parsed.pseudoArg || "0");
+            if (!_matchesNthChild(idx, anb)) return false;
+        } else if (p === "nth-last-child") {
+            if (!el._parentElement) return false;
+            var siblings = el._parentElement._children;
+            var ridx = siblings.length - _childIndex(el); // 1-based from end
+            var anb2 = _parseAnB(parsed.pseudoArg || "0");
+            if (!_matchesNthChild(ridx, anb2)) return false;
+        } else if (p === "only-child") {
+            if (!el._parentElement || el._parentElement._children.length !== 1) return false;
+        } else if (p === "empty") {
+            if (el._children.length > 0 || (el._textContent && el._textContent.length > 0)) return false;
+        } else if (p === "checked") {
+            if (!el._checked) return false;
+        } else if (p === "disabled") {
+            if (!el._disabled) return false;
+        } else if (p === "hover" || p === "focus" || p === "active") {
+            // These are handled by StyleSheet pseudo-class registration, not static matching
+        }
+    }
+
     // Match parent constraint
     if (parsed.parent) {
         if (parsed.direct) {
-            // Direct child: parent must be immediate parent
             if (!el._parentElement || !_matchesSelector(el._parentElement, parsed.parent)) return false;
         } else {
-            // Descendant: any ancestor must match
             var ancestor = el._parentElement;
             var found = false;
             while (ancestor) {
@@ -1460,18 +1761,70 @@ var document = {
 // window object (minimal shim)
 // ═══════════════════════════════════════════════════════════════════════════════
 
+// Helper: get actual root view dimensions from native bridge
+function _getRootDims() {
+    if (typeof getRootSize === "function") {
+        var s = getRootSize();
+        return { w: s.width || 800, h: s.height || 600 };
+    }
+    return { w: 800, h: 600 };
+}
+
 var window = {
     document: document,
     getComputedStyle: getComputedStyle,
-    innerWidth: 800,
-    innerHeight: 600,
+
+    // Dynamic dimensions — query native root view size
+    get innerWidth() { return _getRootDims().w; },
+    get innerHeight() { return _getRootDims().h; },
     devicePixelRatio: 2,
+
     requestAnimationFrame: function(fn) {
-        // Map to Pulp's frame clock
         if (typeof __requestFrame__ === "function") return __requestFrame__(fn);
         return 0;
     },
     cancelAnimationFrame: function(id) {
         if (typeof __cancelFrame__ === "function") __cancelFrame__(id);
-    }
+    },
+
+    // matchMedia — responsive breakpoint queries
+    matchMedia: function(query) {
+        var matches = _matchMediaQuery(query);
+        return {
+            matches: matches,
+            media: query,
+            onchange: null,
+            addEventListener: function(type, fn) { this.onchange = fn; },
+            removeEventListener: function() { this.onchange = null; },
+            addListener: function(fn) { this.onchange = fn; },    // deprecated but expected
+            removeListener: function() { this.onchange = null; }   // deprecated but expected
+        };
+    },
+
+    // Stubs for common window properties developers check for
+    navigator: { userAgent: "Pulp/1.0", platform: "native" },
+    location: { href: "", pathname: "", search: "", hash: "" },
+    setTimeout: function(fn, ms) {
+        // Approximate via requestAnimationFrame chain
+        var frames = Math.max(1, Math.round((ms || 0) / 16));
+        var count = 0;
+        function tick() {
+            if (++count >= frames) fn();
+            else if (typeof __requestFrame__ === "function") __requestFrame__(tick);
+        }
+        if (typeof __requestFrame__ === "function") __requestFrame__(tick);
+        return 0;
+    },
+    clearTimeout: function() {},
+    setInterval: function(fn, ms) {
+        var frames = Math.max(1, Math.round((ms || 16) / 16));
+        var count = 0;
+        function tick() {
+            if (++count >= frames) { fn(); count = 0; }
+            if (typeof __requestFrame__ === "function") __requestFrame__(tick);
+        }
+        if (typeof __requestFrame__ === "function") __requestFrame__(tick);
+        return 0;
+    },
+    clearInterval: function() {}
 };
