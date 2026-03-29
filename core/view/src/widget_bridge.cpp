@@ -4,6 +4,7 @@
 #include <pulp/view/ui_components.hpp>
 #include <pulp/view/text_editor.hpp>
 #include <pulp/view/canvas_widget.hpp>
+#include <web_compat_preludes_gen.hpp>
 #include <cmath>
 #include <sstream>
 #include <unordered_map>
@@ -25,6 +26,10 @@ WidgetBridge::WidgetBridge(ScriptEngine& engine, View& root, state::StateStore& 
     : engine_(engine), root_(root), store_(store) {
     register_api();
     engine_.evaluate(kJSPreamble);
+    // Load web-compat preludes (css-colors -> css-parser -> web-compat)
+    engine_.evaluate(preludes::css_colors);
+    engine_.evaluate(preludes::css_parser);
+    engine_.evaluate(preludes::web_compat);
 }
 
 void WidgetBridge::load_script(const std::string& code) {
@@ -608,6 +613,44 @@ void WidgetBridge::register_api() {
     engine_.register_function("layout", [this](choc::javascript::ArgumentList) {
         root_.layout_children();
         return choc::value::Value();
+    });
+
+    // getLayoutRect(id) -> {x, y, width, height, top, right, bottom, left}
+    // Returns layout-resolved bounds in root-relative coordinates
+    engine_.register_function("getLayoutRect", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        View* v = id.empty() ? &root_ : widget(id);
+        if (!v) {
+            auto r = choc::value::createObject("");
+            r.addMember("x", choc::value::createFloat64(0));
+            r.addMember("y", choc::value::createFloat64(0));
+            r.addMember("width", choc::value::createFloat64(0));
+            r.addMember("height", choc::value::createFloat64(0));
+            r.addMember("top", choc::value::createFloat64(0));
+            r.addMember("right", choc::value::createFloat64(0));
+            r.addMember("bottom", choc::value::createFloat64(0));
+            r.addMember("left", choc::value::createFloat64(0));
+            return r;
+        }
+        // Walk up parent chain to compute root-relative position
+        float rx = 0, ry = 0;
+        View* cur = v;
+        while (cur) {
+            rx += cur->bounds().x;
+            ry += cur->bounds().y;
+            cur = cur->parent();
+        }
+        auto b = v->bounds();
+        auto r = choc::value::createObject("");
+        r.addMember("x", choc::value::createFloat64(rx));
+        r.addMember("y", choc::value::createFloat64(ry));
+        r.addMember("width", choc::value::createFloat64(b.width));
+        r.addMember("height", choc::value::createFloat64(b.height));
+        r.addMember("top", choc::value::createFloat64(ry));
+        r.addMember("right", choc::value::createFloat64(rx + b.width));
+        r.addMember("bottom", choc::value::createFloat64(ry + b.height));
+        r.addMember("left", choc::value::createFloat64(rx));
+        return r;
     });
 
     engine_.register_function("createMeter", [this](choc::javascript::ArgumentList args) {
