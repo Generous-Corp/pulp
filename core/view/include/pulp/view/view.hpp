@@ -249,6 +249,10 @@ public:
     /// Return a list of menu items; an empty return suppresses the menu.
     std::function<void(Point position)> on_context_menu;
 
+    /// Drop callback — fired when files or text are dropped on this view.
+    /// Parameters: type ("file"/"text"), data (path or text), x, y
+    std::function<void(const std::string& type, const std::string& data, float x, float y)> on_drop;
+
     /// Hover callbacks (CSS :hover equivalent). Fired by set_hovered().
     std::function<void()> on_hover_enter;
     std::function<void()> on_hover_leave;

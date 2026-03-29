@@ -179,6 +179,19 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
             canvas.fill_rect(cmd.x, cmd.y, cmd.w, cmd.h);
             canvas.restore();
             break;
+
+        // Draw image — renders a placeholder rect with the image path stored in text
+        // Full image rendering requires the Skia image decode pipeline;
+        // for now we render a labeled placeholder that marks where the image goes
+        case CanvasDrawCmd::Type::draw_image:
+            canvas.save();
+            canvas.set_fill_color({40, 40, 60, 200});
+            canvas.fill_rect(cmd.x, cmd.y, cmd.w, cmd.h);
+            canvas.set_fill_color({180, 180, 200, 255});
+            canvas.set_font("", 10);
+            canvas.fill_text(cmd.text.empty() ? "[image]" : cmd.text, cmd.x + 4, cmd.y + cmd.h / 2);
+            canvas.restore();
+            break;
         }
     }
 }

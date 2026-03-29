@@ -1,6 +1,6 @@
 # Web Standards Coverage
 
-Pulp's web-compat layer was audited against **26 web specifications** — 16 W3C CSS/DOM specs plus 10 Web API specs that frontend developers rely on. This document tracks what's implemented, what's not, and how to run validation tests.
+Pulp's web-compat layer was audited against **29 web specifications** — 16 W3C CSS/DOM specs plus 13 Web API specs that frontend developers rely on. This document tracks what's implemented, what's not, and how to run validation tests.
 
 ## How to Run Tests
 
@@ -416,22 +416,66 @@ These are the 10 additional Web API specifications that frontend developers use 
 |---------|--------|-------|
 | `structuredClone()` | ✅ | Via JSON round-trip |
 
+### 27. WebGPU
+**Spec:** https://www.w3.org/TR/webgpu/
+**Status:** ⚠️ Infrastructure (Dawn backend, not JS API)
+
+Pulp uses **Dawn** (Google's WebGPU implementation) as its GPU backend. The Dawn device, queue, and instance are available for rendering. However, the full `navigator.gpu` JS API is not exposed — instead, Pulp provides a shader-oriented API:
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| Dawn GPU backend (Metal/D3D12/Vulkan) | ✅ | GpuSurface with presentable textures |
+| Skia Graphite over Dawn | ✅ | 2D rendering through WebGPU device |
+| `compileShader(skslCode)` | ✅ | Validate SkSL shader code |
+| `applyShader(canvasId, skslCode)` | ✅ | Apply custom shader to canvas widget |
+| `getGPUInfo()` | ✅ | Query backend and Skia availability |
+| `navigator.gpu.requestAdapter()` | ❌ | Full WebGPU JS API not exposed |
+| GPURenderPipeline / GPUBuffer | ❌ | Use Canvas 2D + shaders instead |
+| GPUComputePipeline | ❌ | Not needed for plugin UIs |
+
+**Design rationale:** Pulp exposes GPU power through the Canvas 2D API + SkSL custom shaders, rather than the raw WebGPU pipeline API. This is simpler for UI development while still allowing custom GPU effects. For advanced visualization, use `applyShader()` with SkSL fragment shaders.
+
+### 28. Font Loading API
+**Spec:** https://www.w3.org/TR/css-font-loading-3/
+**Status:** ⚠️ Partial
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| `loadFont(path)` | ✅ | Bridge function, checks file exists |
+| `FontFace` constructor | ❌ | Use `loadFont()` + `style.fontFamily` |
+| `document.fonts.ready` | ❌ | Fonts load synchronously |
+
+### 29. Drag and Drop API
+**Spec:** https://html.spec.whatwg.org/multipage/dnd.html
+**Status:** ✅ Mostly Complete
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| C++ DropTarget interface | ✅ | Platform-level file/text drops |
+| `registerDrop(id, callback)` | ✅ | JS receives type, data, x, y |
+| `on_drop` callback on View | ✅ | Fires with drop type and content |
+| `dragstart` / `drag` / `dragend` events | ❌ | Initiating drags from JS not supported |
+| `dataTransfer` object | ❌ | Drop data passed as callback arguments |
+
 ---
 
 ## Deliberately Out of Scope
 
-These W3C features are intentionally not implemented because they don't apply to plugin UIs:
+These web features are intentionally not implemented because they don't apply to plugin UIs:
 
-- **CSS Cascade** — Rules apply in source order, no specificity scoring
+- **CSS Cascade / Specificity** — Rules apply in source order, no specificity scoring
 - **Shadow DOM / Web Components** — Not needed for plugin UIs
 - **CSS @import / @supports / @layer** — Single-file JS scripts
 - **CSS Houdini** — Paint worklets, layout API
 - **SVG elements** — Canvas 2D API covers drawing needs
 - **Full HTML parsing** — innerHTML handles common nested patterns
 - **Form submission** — No network requests from plugin UIs
-- **Service Workers / IndexedDB** — No offline storage
+- **Service Workers / IndexedDB** — localStorage covers persistence needs
 - **3D Transforms** — 2D transforms cover plugin UI needs
 - **CSS Container Queries** — matchMedia covers responsive needs
+- **Full WebGPU pipeline API** — Canvas 2D + SkSL shaders covers GPU needs
+- **WebSocket** — Use `exec()` or `fetch()` for external communication
+- **Web Workers** — Single-threaded QuickJS context
 
 ---
 

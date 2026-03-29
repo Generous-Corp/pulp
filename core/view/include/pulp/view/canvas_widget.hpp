@@ -34,6 +34,8 @@ struct CanvasDrawCmd {
         save, restore,
         // Transform
         translate, scale, rotate, clip_rect,
+        // Image
+        draw_image,
         // Clear
         clear, clear_rect
     };
