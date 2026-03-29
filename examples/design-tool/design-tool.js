@@ -557,17 +557,33 @@ function buildShadeRamps() {
             setText(rampId + "-oklch", "L: " + oklch.L.toFixed(2) + "  C: " + oklch.C.toFixed(3) + "  H: " + oklch.H.toFixed(1));
         }
 
-        // Click row/dot/name → toggle expand (deferred to avoid use-after-free
-        // since buildShadeRamps calls removeWidget on the clicked view)
+        // Click dot or name → toggle expand (just visibility, no rebuild)
         (function(idx) {
             var toggleExpand = function() {
-                expandedPalette = (expandedPalette === idx) ? -1 : idx;
-                __requestFrame__(function() {
-                    buildShadeRamps();
-                    layout();
-                });
+                if (expandedPalette === idx) {
+                    // Collapse this palette
+                    setVisible("ramp-" + idx + "-editor", false);
+                    expandedPalette = -1;
+                } else {
+                    // Collapse previous
+                    if (expandedPalette >= 0) {
+                        setVisible("ramp-" + expandedPalette + "-editor", false);
+                    }
+                    // Expand this one
+                    expandedPalette = idx;
+                    setVisible("ramp-" + idx + "-editor", true);
+                    // Render gamut triangle for this palette
+                    var pal = PaletteSystem.create(currentAccent, currentHarmony);
+                    var pKey = paletteKeys[idx];
+                    var base = pal[pKey][500];
+                    var oklch = OklchEngine.hexToOklch(base.hex);
+                    renderPaletteGamut(idx, oklch.H);
+                    setValue("ramp-" + idx + "-h-fdr", oklch.H / 360);
+                    setValue("ramp-" + idx + "-c-fdr", Math.min(oklch.C / 0.4, 1));
+                    setText("ramp-" + idx + "-oklch", "L: " + oklch.L.toFixed(2) + "  C: " + oklch.C.toFixed(3) + "  H: " + oklch.H.toFixed(1));
+                }
+                layout();
             };
-            on("ramp-" + idx + "-header", "click", toggleExpand);
             on("ramp-" + idx + "-dot", "click", toggleExpand);
             on("ramp-" + idx + "-name", "click", toggleExpand);
         })(p);
