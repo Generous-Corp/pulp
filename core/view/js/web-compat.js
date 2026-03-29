@@ -332,19 +332,24 @@ Element.prototype.appendChild = function(child) {
     if (child._parentElement) child._parentElement.removeChild(child);
     child._parentElement = this;
     this._children.push(child);
-    // Ensure both native widgets exist
+    // Ensure parent native widget exists
     this._ensureNative();
-    child._ensureNative();
-    // Reparent native: remove from old location, add to new
-    removeWidget(child._id);
-    // Re-create under this parent by calling the appropriate create fn
-    _reparentNative(child, this._id);
-    // Apply pending text
-    if (child._textContent) setText(child._id, child._textContent);
-    // Re-apply styles
-    child.style._flushAll();
-    child._reapplyStylesheets();
-    layout();
+    if (!child._nativeCreated) {
+        // First time: create directly under this parent (no remove+re-create)
+        _reparentNative(child, this._id);
+        if (child._textContent) setText(child._id, child._textContent);
+        child.style._flushAll();
+        child._reapplyStylesheets();
+    } else {
+        // Already in tree: remove and re-parent
+        removeWidget(child._id);
+        _reparentNative(child, this._id);
+        if (child._textContent) setText(child._id, child._textContent);
+        child.style._flushAll();
+        child._reapplyStylesheets();
+    }
+    // Defer layout to avoid stack overflow from deep JS↔C++ interleaving
+    // layout() will be called by the host before the next paint
     return child;
 };
 

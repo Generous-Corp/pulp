@@ -26,10 +26,13 @@ WidgetBridge::WidgetBridge(ScriptEngine& engine, View& root, state::StateStore& 
     : engine_(engine), root_(root), store_(store) {
     register_api();
     engine_.evaluate(kJSPreamble);
-    // Load web-compat preludes (css-colors -> css-parser -> web-compat)
+    // Load web-compat preludes in dependency order, split to avoid
+    // QuickJS stack overflow from compiling large single files
     engine_.evaluate(preludes::css_colors);
     engine_.evaluate(preludes::css_parser);
-    engine_.evaluate(preludes::web_compat);
+    engine_.evaluate(preludes::web_compat_element);
+    engine_.evaluate(preludes::web_compat_style_decl);
+    engine_.evaluate(preludes::web_compat_document);
 }
 
 void WidgetBridge::load_script(const std::string& code) {
@@ -1773,6 +1776,43 @@ void WidgetBridge::register_api() {
 
     // Shell exec (for Claude CLI)
     // Ensures PATH includes common tool locations (homebrew, npm global, etc.)
+    // getLayoutRect(id) → {x, y, width, height, top, left, right, bottom}
+    engine_.register_function("getLayoutRect", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto* v = widget(id);
+        auto result = choc::value::createObject("");
+        if (v) {
+            auto b = v->bounds();
+            // Walk up parent chain to get absolute position
+            float ax = 0, ay = 0;
+            View* p = v;
+            while (p) { ax += p->bounds().x; ay += p->bounds().y; p = p->parent(); }
+            result.addMember("x", choc::value::createFloat64(ax));
+            result.addMember("y", choc::value::createFloat64(ay));
+            result.addMember("width", choc::value::createFloat64(b.width));
+            result.addMember("height", choc::value::createFloat64(b.height));
+            result.addMember("top", choc::value::createFloat64(ay));
+            result.addMember("left", choc::value::createFloat64(ax));
+            result.addMember("right", choc::value::createFloat64(ax + b.width));
+            result.addMember("bottom", choc::value::createFloat64(ay + b.height));
+        }
+        return result;
+    });
+
+    // getComputedValue(id, prop) → string
+    engine_.register_function("getComputedValue", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto prop = args.get<std::string>(1, "");
+        auto* v = widget(id);
+        if (!v) return choc::value::createString("");
+        if (prop == "width") return choc::value::createString(std::to_string(v->bounds().width) + "px");
+        if (prop == "height") return choc::value::createString(std::to_string(v->bounds().height) + "px");
+        if (prop == "opacity") return choc::value::createString(std::to_string(v->opacity()));
+        if (prop == "display") return choc::value::createString(v->visible() ? "flex" : "none");
+        if (prop == "visibility") return choc::value::createString(v->visible() ? "visible" : "hidden");
+        return choc::value::createString("");
+    });
+
     engine_.register_function("exec", [](choc::javascript::ArgumentList args) {
         auto cmd = args.get<std::string>(0, "");
         if (cmd.empty()) return choc::value::createString("");

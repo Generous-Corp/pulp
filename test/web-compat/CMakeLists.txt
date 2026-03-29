@@ -50,6 +50,17 @@ target_compile_definitions(pulp-test-web-compat-events PRIVATE
 )
 catch_discover_tests(pulp-test-web-compat-events)
 
+# Web-compat prelude tests (document, Element, style, parser, StyleSheet)
+add_executable(pulp-test-web-compat-prelude
+    test_web_compat_prelude.cpp
+)
+target_link_libraries(pulp-test-web-compat-prelude PRIVATE pulp::view Catch2::Catch2WithMain)
+target_include_directories(pulp-test-web-compat-prelude PRIVATE ${WEBCOMPAT_INCLUDE_DIR})
+target_compile_definitions(pulp-test-web-compat-prelude PRIVATE
+    PULP_TEST_SOURCE_DIR="${CMAKE_SOURCE_DIR}/test"
+)
+catch_discover_tests(pulp-test-web-compat-prelude)
+
 # Visual reftest runner (screenshot comparison against baselines)
 if(APPLE)
     add_executable(pulp-test-web-compat-reftest

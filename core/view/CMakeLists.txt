@@ -5,7 +5,9 @@ add_library(pulp::view ALIAS pulp-view)
 set(PULP_JS_PRELUDES
     ${CMAKE_CURRENT_SOURCE_DIR}/js/css-colors.js
     ${CMAKE_CURRENT_SOURCE_DIR}/js/css-parser.js
-    ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat.js
+    ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-element.js
+    ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-style-decl.js
+    ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-document.js
 )
 set(PULP_JS_EMBEDDED_HEADER ${CMAKE_CURRENT_BINARY_DIR}/web_compat_preludes_gen.hpp)
 
@@ -14,7 +16,9 @@ add_custom_command(
     COMMAND ${CMAKE_COMMAND}
         -DFILE1=${CMAKE_CURRENT_SOURCE_DIR}/js/css-colors.js
         -DFILE2=${CMAKE_CURRENT_SOURCE_DIR}/js/css-parser.js
-        -DFILE3=${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat.js
+        -DFILE3=${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-element.js
+        -DFILE4=${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-style-decl.js
+        -DFILE5=${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-document.js
         -DOUTPUT_FILE=${PULP_JS_EMBEDDED_HEADER}
         -P ${CMAKE_CURRENT_SOURCE_DIR}/js/embed_js.cmake
     DEPENDS ${PULP_JS_PRELUDES} ${CMAKE_CURRENT_SOURCE_DIR}/js/embed_js.cmake
