@@ -496,11 +496,56 @@ function buildShadeRamps() {
         setFlex(editorId, "padding_left", 4);
         setVisible(editorId, p === expandedPalette);
 
-        // Gamut triangle canvas
+        // Gamut triangle canvas (draggable for dot positioning)
         var gamutId = rampId + "-gamut";
         createCanvas(gamutId, editorId);
         setFlex(gamutId, "width", 270);
         setFlex(gamutId, "height", 130);
+        // Enable pointer events for drag interaction on the gamut
+        registerPointer(gamutId);
+        (function(idx, pKey) {
+            // Handle both pointerdown and pointermove (drag) on gamut
+            function onGamutPointer(evt) {
+                var gw = 270, gh = 130;
+                var x = evt.offsetX;
+                var y = evt.offsetY;
+                // Map to OKLCH: X=Lightness, Y=Chroma (inverted)
+                var L = Math.max(0, Math.min(1, x / gw));
+                var C = Math.max(0, Math.min(0.4, (1 - y / gh) * 0.4));
+                var h = getValue("ramp-" + idx + "-h-fdr") * 360;
+                // Clamp to gamut boundary
+                var mapped = OklchEngine.gamutMap(L, C, h);
+                // Update faders
+                setValue("ramp-" + idx + "-c-fdr", Math.min(mapped.C / 0.4, 1));
+                // Redraw gamut with new dot position
+                renderPaletteGamut(idx, h, mapped.L, mapped.C);
+                setText("ramp-" + idx + "-oklch", "L: " + mapped.L.toFixed(2) + "  C: " + mapped.C.toFixed(3) + "  H: " + h.toFixed(1));
+                // Update palette and preview
+                if (pKey === "accent") {
+                    currentAccent = OklchEngine.oklchToHex(mapped.L, mapped.C, h);
+                }
+                var palette = PaletteSystem.create(currentAccent, currentHarmony);
+                if (pKey !== "accent") {
+                    palette[pKey] = ShadeGenerator.generateRamp(mapped.L, mapped.C, h);
+                }
+                var diff = PaletteSystem.toThemeDiff(palette);
+                applyTokenDiff(diff);
+                updateTokenSwatches();
+                // Update mini ramp + large shades
+                var rampData = palette[pKey];
+                var stepsArr = ShadeGenerator.STEPS;
+                for (var ss = 0; ss < stepsArr.length; ss++) {
+                    setBackground("ramp-" + idx + "-s" + ss, rampData[stepsArr[ss]].hex);
+                }
+                setBackground("ramp-" + idx + "-dot", rampData[500].hex);
+                var stepIdxs = [0, 2, 4, 5, 7, 9];
+                for (var ls = 0; ls < 6; ls++) {
+                    setBackground("ramp-" + idx + "-lg-" + ls, rampData[stepsArr[stepIdxs[ls]]].hex);
+                }
+            }
+            on(gamutId, "pointerdown", onGamutPointer);
+            on(gamutId, "pointermove", onGamutPointer);
+        })(p, paletteKeys[p]);
 
         // H slider
         var hRowId = rampId + "-h-row";
