@@ -211,7 +211,7 @@ setFlex("left-panel", "min_width", 260);
 setFlex("left-panel", "flex_shrink", 0);
 setBackground("left-panel", APP_SURFACE);
 setBorder("left-panel", APP_BORDER, 1, 0);
-setScrollContentSize("left-panel", 310, 1200);
+setScrollContentSize("left-panel", 310, 1600);
 
 // Issue 9: Color System section matching HTML reference
 createCol("color-section", "left-panel");
@@ -431,7 +431,10 @@ updateTokenSwatches();
 var paletteNames = ["Accent", "Neutral", "Success", "Warning", "Error"];
 var paletteKeys  = ["accent", "neutral", "success", "warning", "error"];
 
-// Issue 9: Build shade ramps with base color dot + name + mini ramp (HTML reference style)
+// Color system: palette rows with expandable gamut editor
+// Clicking a palette row toggles the expanded editor (gamut triangle + sliders + shades)
+var expandedPalette = -1;  // -1 = all collapsed, click a row to expand
+
 function buildShadeRamps() {
     var palette = PaletteSystem.create(currentAccent, currentHarmony);
     var steps = ShadeGenerator.STEPS;
@@ -440,29 +443,35 @@ function buildShadeRamps() {
         var rampId = "ramp-" + p;
         removeWidget(rampId);
 
-        // Palette row: dot + name + shade ramp
-        createRow(rampId, "color-section");
-        setFlex(rampId, "height", 24);
-        setFlex(rampId, "gap", 6);
-        setFlex(rampId, "align_items", "center");
+        // Container for palette row + editor
+        createCol(rampId, "color-section");
+        setFlex(rampId, "gap", 4);
 
-        // Base color dot (shade 500)
+        // Palette row: dot + name + shade ramp (clickable to expand)
+        var rowId = rampId + "-header";
+        createRow(rowId, rampId);
+        setFlex(rowId, "height", 24);
+        setFlex(rowId, "gap", 6);
+        setFlex(rowId, "align_items", "center");
+        registerClick(rowId);
+
         var ramp = palette[paletteKeys[p]];
+
+        // Base color dot
         var dotId = rampId + "-dot";
-        createCol(dotId, rampId);
+        createCol(dotId, rowId);
         setFlex(dotId, "width", 14);
         setFlex(dotId, "height", 14);
         setBackground(dotId, ramp[500].hex);
         setBorder(dotId, ramp[500].hex, 0, 7);
 
-        // Palette name
-        var nameId = rampId + "-name";
-        createLabel(nameId, paletteNames[p], rampId);
-        setFontSize(nameId, 10);
-        setFlex(nameId, "width", 52);
+        // Name
+        createLabel(rampId + "-name", paletteNames[p], rowId);
+        setFontSize(rampId + "-name", 10);
+        setFlex(rampId + "-name", "width", 52);
 
-        // Mini shade ramp (11 tiny swatches)
-        createRow(rampId + "-row", rampId);
+        // Mini ramp
+        createRow(rampId + "-row", rowId);
         setFlex(rampId + "-row", "flex_grow", 1);
         setFlex(rampId + "-row", "gap", 1);
         setFlex(rampId + "-row", "height", 16);
@@ -474,23 +483,151 @@ function buildShadeRamps() {
             setFlex(shadeId, "height", 14);
             setBackground(shadeId, ramp[steps[s]].hex);
             setBorder(shadeId, APP_BORDER, 0, 2);
-            registerClick(shadeId);
-            (function(hex, name, step) {
-                on(shadeId, "click", function() {
-                    setText("status-text", name + " " + step + ": " + hex);
-                    showColorPicker(hex);
-                });
-            })(ramp[steps[s]].hex, paletteNames[p], steps[s]);
         }
+
+        // Expanded editor section (hidden unless this palette is expanded)
+        var editorId = rampId + "-editor";
+        createCol(editorId, rampId);
+        setFlex(editorId, "gap", 6);
+        setFlex(editorId, "padding_left", 4);
+        setVisible(editorId, p === expandedPalette);
+
+        // Gamut triangle canvas
+        var gamutId = rampId + "-gamut";
+        createCanvas(gamutId, editorId);
+        setFlex(gamutId, "width", 270);
+        setFlex(gamutId, "height", 110);
+
+        // H slider
+        var hRowId = rampId + "-h-row";
+        createRow(hRowId, editorId);
+        setFlex(hRowId, "height", 20);
+        setFlex(hRowId, "gap", 6);
+        setFlex(hRowId, "align_items", "center");
+        createLabel(rampId + "-h-lbl", "H", hRowId);
+        setFontSize(rampId + "-h-lbl", 9);
+        setFlex(rampId + "-h-lbl", "width", 12);
+        createFader(rampId + "-h-fdr", "horizontal", hRowId);
+        setFlex(rampId + "-h-fdr", "flex_grow", 1);
+        setFlex(rampId + "-h-fdr", "height", 14);
+
+        // C slider
+        var cRowId = rampId + "-c-row";
+        createRow(cRowId, editorId);
+        setFlex(cRowId, "height", 20);
+        setFlex(cRowId, "gap", 6);
+        setFlex(cRowId, "align_items", "center");
+        createLabel(rampId + "-c-lbl", "C", cRowId);
+        setFontSize(rampId + "-c-lbl", 9);
+        setFlex(rampId + "-c-lbl", "width", 12);
+        createFader(rampId + "-c-fdr", "horizontal", cRowId);
+        setFlex(rampId + "-c-fdr", "flex_grow", 1);
+        setFlex(rampId + "-c-fdr", "height", 14);
+
+        // OKLCH display
+        createLabel(rampId + "-oklch", "L: 0.50  C: 0.100  H: 180", editorId);
+        setFontSize(rampId + "-oklch", 9);
+        setTextColor(rampId + "-oklch", APP_TEXT_DIM);
+        setFlex(rampId + "-oklch", "height", 14);
+
+        // Large shade swatches row
+        createRow(rampId + "-shades", editorId);
+        setFlex(rampId + "-shades", "gap", 3);
+        setFlex(rampId + "-shades", "height", 28);
+        for (var ls = 0; ls < 6; ls++) {
+            var lsId = rampId + "-lg-" + ls;
+            // Show steps 50, 200, 400, 500, 700, 900
+            var stepIdx = [0, 2, 4, 5, 7, 9][ls];
+            createCol(lsId, rampId + "-shades");
+            setFlex(lsId, "flex_grow", 1);
+            setFlex(lsId, "height", 28);
+            setBackground(lsId, ramp[steps[stepIdx]].hex);
+            setBorder(lsId, APP_BORDER, 0, 6);
+        }
+
+        // Draw gamut + set faders if this palette is expanded
+        if (p === expandedPalette) {
+            var base = ramp[500];
+            var oklch = OklchEngine.hexToOklch(base.hex);
+            renderPaletteGamut(p, oklch.H);
+            setValue(rampId + "-h-fdr", oklch.H / 360);
+            setValue(rampId + "-c-fdr", Math.min(oklch.C / 0.4, 1));
+            setText(rampId + "-oklch", "L: " + oklch.L.toFixed(2) + "  C: " + oklch.C.toFixed(3) + "  H: " + oklch.H.toFixed(1));
+        }
+
+        // Click row → toggle expand
+        (function(idx) {
+            on("ramp-" + idx + "-header", "click", function() {
+                expandedPalette = (expandedPalette === idx) ? -1 : idx;
+                buildShadeRamps();
+                layout();
+            });
+        })(p);
+
+        // H/C slider change handlers (rebuild ramp on change)
+        (function(idx, pKey) {
+            on("ramp-" + idx + "-h-fdr", "change", function() {
+                var h = getValue("ramp-" + idx + "-h-fdr") * 360;
+                var c = getValue("ramp-" + idx + "-c-fdr") * 0.4;
+                // For accent palette, update the global accent color
+                if (pKey === "accent") {
+                    var oklch = OklchEngine.hexToOklch(currentAccent);
+                    currentAccent = OklchEngine.oklchToHex(oklch.L, oklch.C, h);
+                }
+                renderPaletteGamut(idx, h);
+                var mapped = OklchEngine.gamutMap(0.5, c, h);
+                setText("ramp-" + idx + "-oklch", "L: " + mapped.L.toFixed(2) + "  C: " + mapped.C.toFixed(3) + "  H: " + h.toFixed(1));
+            });
+            on("ramp-" + idx + "-c-fdr", "change", function() {
+                var h = getValue("ramp-" + idx + "-h-fdr") * 360;
+                var c = getValue("ramp-" + idx + "-c-fdr") * 0.4;
+                var mapped = OklchEngine.gamutMap(0.5, c, h);
+                setText("ramp-" + idx + "-oklch", "L: " + mapped.L.toFixed(2) + "  C: " + mapped.C.toFixed(3) + "  H: " + h.toFixed(1));
+            });
+        })(p, paletteKeys[p]);
     }
     if (tokenEditState.activeToken) rebuildPopupPalette();
 }
+
+// Render gamut triangle for a specific palette editor
+function renderPaletteGamut(paletteIdx, hue) {
+    var gamutId = "ramp-" + paletteIdx + "-gamut";
+    canvasClear(gamutId);
+    var w = 270, h = 110;
+    var cols = 50;
+    var colW = w / cols;
+    for (var gx = 0; gx < cols; gx++) {
+        var L = gx / (cols - 1);
+        var lo = 0, hi = 0.4;
+        for (var bi = 0; bi < 14; bi++) {
+            var mid = (lo + hi) / 2;
+            if (OklchEngine.isInGamut(L, mid, hue)) lo = mid;
+            else hi = mid;
+        }
+        var maxC = lo;
+        var topHex = OklchEngine.oklchToHex(L, maxC, hue);
+        var botHex = OklchEngine.oklchToHex(L, 0, hue);
+        var gamutH = (maxC / 0.4) * h;
+        if (gamutH > 1) {
+            canvasSetLinearGradient(gamutId, gx * colW, h - gamutH, gx * colW, h, topHex, botHex);
+            canvasBeginPath(gamutId);
+            canvasMoveTo(gamutId, gx * colW, h - gamutH);
+            canvasLineTo(gamutId, gx * colW + colW + 0.5, h - gamutH);
+            canvasLineTo(gamutId, gx * colW + colW + 0.5, h);
+            canvasLineTo(gamutId, gx * colW, h);
+            canvasClosePath(gamutId);
+            canvasFillPath(gamutId);
+            canvasClearGradient(gamutId);
+        }
+        if (h - gamutH > 0) {
+            canvasRect(gamutId, gx * colW, 0, colW + 0.5, h - gamutH, '#1e1e22');
+        }
+    }
+}
+
 buildShadeRamps();
 
-// ── Color Picker Popup ───────────────────────────────────────────
-// Hidden panel that shows OKLCH values when a swatch is clicked.
-// Appears over the left panel content.
-
+// ── Color Picker (legacy — hidden, replaced by inline palette editor)
 var pickerVisible = false;
 var pickerColor = { L: 0, C: 0, H: 0, hex: '#000000' };
 
