@@ -18,20 +18,24 @@ struct CanvasDrawCmd {
         // Shapes
         fill_rect, stroke_rect, fill_rounded_rect, stroke_rounded_rect,
         fill_circle, stroke_circle,
-        stroke_line,
+        stroke_line, stroke_arc,
         // Text
-        fill_text, set_font,
+        fill_text, set_font, set_text_align, set_text_baseline,
         // Style
         set_fill_color, set_stroke_color, set_line_width,
+        set_line_cap, set_line_join,
+        set_global_alpha, set_blend_mode,
+        // Gradient
+        set_fill_gradient_linear, set_fill_gradient_radial, clear_fill_gradient,
         // Path
         begin_path, move_to, line_to, quad_to, cubic_to, close_path,
-        fill_path, stroke_path,
+        fill_path, stroke_path, clip_path,
         // State
         save, restore,
         // Transform
         translate, scale, rotate, clip_rect,
         // Clear
-        clear
+        clear, clear_rect
     };
     Type type = Type::clear;
     float x = 0, y = 0, w = 0, h = 0;
@@ -40,6 +44,9 @@ struct CanvasDrawCmd {
     canvas::Color color{255, 255, 255, 255};
     float extra = 0;            // radius, line width, font size, angle
     std::string text;           // for fill_text, set_font family
+    int int_val = 0;            // for enum values (text align, baseline, blend mode, cap, join)
+    std::vector<canvas::Color> gradient_colors;    // for gradient stops
+    std::vector<float> gradient_positions;          // gradient stop positions
 };
 
 /// A View whose paint() replays a list of recorded draw commands.

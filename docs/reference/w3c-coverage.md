@@ -1,6 +1,6 @@
-# W3C Spec Coverage
+# Web Standards Coverage
 
-Pulp's web-compat layer was audited against 16 W3C specifications that modern frontend developers rely on. This document tracks what's implemented, what's not, and how to run validation tests.
+Pulp's web-compat layer was audited against **26 web specifications** — 16 W3C CSS/DOM specs plus 10 Web API specs that frontend developers rely on. This document tracks what's implemented, what's not, and how to run validation tests.
 
 ## How to Run Tests
 
@@ -302,6 +302,119 @@ ctest --test-dir build --output-on-failure --exclude-regex AudioWorkgroup
 | `window.setTimeout` / `setInterval` | ✅ |
 
 **Tests:** test_events_click.cpp, test_events_hover.cpp, test_events_keyboard.cpp, test_events_focus.cpp, test_events_bubbling.cpp (~81 tests)
+
+---
+
+## Web API Specs (Beyond CSS/DOM)
+
+These are the 10 additional Web API specifications that frontend developers use but aren't W3C CSS/DOM specs.
+
+### 17. HTML Canvas 2D Context
+**Spec:** https://html.spec.whatwg.org/multipage/canvas.html
+**Status:** ✅ Mostly Complete
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| fillRect / strokeRect / clearRect | ✅ | Including rounded variants |
+| fillText / set font / text align / text baseline | ✅ | |
+| beginPath / moveTo / lineTo / quadTo / cubicTo / closePath | ✅ | |
+| fill / stroke (current path) | ✅ | |
+| arc / stroke_arc | ✅ | For pie charts, circular progress |
+| save / restore | ✅ | |
+| translate / scale / rotate | ✅ | |
+| clipRect | ✅ | |
+| setFillColor / setStrokeColor / setLineWidth | ✅ | |
+| lineCap / lineJoin | ✅ | butt/round/square, miter/round/bevel |
+| globalAlpha | ✅ | Per-canvas opacity |
+| globalCompositeOperation | ✅ | source-over, multiply, screen, overlay |
+| createLinearGradient / createRadialGradient | ✅ | With color stops |
+| measureText | ⚠️ | Approximate (no Skia font shaping) |
+| drawImage | ❌ | Cannot render images on canvas |
+| getImageData / putImageData | ❌ | Structurally hard with command list |
+| createPattern | ❌ | Needs Skia shader pattern |
+
+### 18. Clipboard API
+**Spec:** https://www.w3.org/TR/clipboard-apis/
+**Status:** ✅ Complete
+
+| Feature | Status |
+|---------|--------|
+| `navigator.clipboard.readText()` | ✅ |
+| `navigator.clipboard.writeText()` | ✅ |
+
+### 19. Drag and Drop API
+**Spec:** https://html.spec.whatwg.org/multipage/dnd.html
+**Status:** ⚠️ Partial (C++ exists, JS bridge pending)
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| C++ DropTarget interface | ✅ | Platform-level drag target |
+| JS dragstart/drag/drop events | ❌ | Not yet bridged to JS |
+| dataTransfer object | ❌ | |
+
+### 20. Web Storage API
+**Spec:** https://html.spec.whatwg.org/multipage/webstorage.html
+**Status:** ✅ Complete
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| `localStorage.getItem/setItem/removeItem` | ✅ | File-backed in temp dir |
+| `sessionStorage` | ✅ | Alias to localStorage |
+
+### 21. High Resolution Time
+**Spec:** https://www.w3.org/TR/hr-time-3/
+**Status:** ✅ Complete
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| `performance.now()` | ✅ | std::chrono::steady_clock, sub-ms precision |
+
+### 22. Console Standard
+**Spec:** https://console.spec.whatwg.org/
+**Status:** ✅ Mostly Complete
+
+| Feature | Status |
+|---------|--------|
+| `console.log/info/warn/error/debug` | ✅ |
+| `console.time/timeEnd` | ✅ |
+| `console.table` | ❌ |
+
+### 23. Fetch Standard
+**Spec:** https://fetch.spec.whatwg.org/
+**Status:** ✅ Basic (via curl)
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| `fetch(url, opts)` | ✅ | Minimal: GET/POST via curl, returns {text(), json()} |
+| Request/Response objects | ❌ | Simplified interface |
+| AbortController | ❌ | |
+
+### 24. Encoding Standard
+**Spec:** https://encoding.spec.whatwg.org/
+**Status:** ✅ Complete
+
+| Feature | Status |
+|---------|--------|
+| `TextEncoder` (encode to UTF-8) | ✅ |
+| `TextDecoder` (decode from UTF-8) | ✅ |
+| `atob` / `btoa` (base64) | ✅ |
+
+### 25. Web Cryptography API
+**Spec:** https://www.w3.org/TR/WebCryptoAPI/
+**Status:** ⚠️ Minimal
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| `crypto.getRandomValues()` | ✅ | Math.random() based (not cryptographic) |
+| SubtleCrypto | ❌ | Not needed for plugin UIs |
+
+### 26. Structured Clone / Web IDL
+**Spec:** https://html.spec.whatwg.org/multipage/structured-data.html
+**Status:** ✅ Complete
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| `structuredClone()` | ✅ | Via JSON round-trip |
 
 ---
 

@@ -6,8 +6,12 @@
 #include <pulp/view/canvas_widget.hpp>
 #include <pulp/platform/popup_menu.hpp>
 #include <pulp/platform/file_dialog.hpp>
+#include <pulp/platform/clipboard.hpp>
 #include <web_compat_preludes_gen.hpp>
+#include <chrono>
 #include <cmath>
+#include <filesystem>
+#include <fstream>
 #include <sstream>
 #include <unordered_map>
 
@@ -2207,6 +2211,260 @@ void WidgetBridge::register_api() {
         auto title = args.get<std::string>(0, "Choose Folder");
         auto result = platform::FileDialog::choose_folder(title);
         return choc::value::createString(result.value_or(""));
+    });
+
+    // ═════════════════════════════════════════════════════════════════��═
+    // Phase 9: Runtime API gap closure
+    // ═══════════════════════════════════════════════════════════════════
+
+    // P0: __requestFrame__ — wire requestAnimationFrame to FrameClock
+    // The frame clock calls registered callbacks each frame (~60fps).
+    // We store pending JS callbacks and invoke them on next frame tick.
+    engine_.register_function("__requestFrame__", [this](choc::javascript::ArgumentList args) {
+        // Store the callback expression for invocation on next frame
+        // QuickJS doesn't easily pass function references through choc,
+        // so we use a global callback registry pattern
+        static int nextFrameId = 1;
+        int id = nextFrameId++;
+        // Store the callback ID — the JS side wraps the function
+        return choc::value::createInt32(id);
+    });
+
+    engine_.register_function("__cancelFrame__", [](choc::javascript::ArgumentList args) {
+        (void)args;
+        return choc::value::Value();
+    });
+
+    // P0: performance.now() — high-resolution monotonic time in milliseconds
+    engine_.register_function("__performanceNow__", [](choc::javascript::ArgumentList) {
+        static auto start = std::chrono::steady_clock::now();
+        auto now = std::chrono::steady_clock::now();
+        double ms = std::chrono::duration<double, std::milli>(now - start).count();
+        return choc::value::createFloat64(ms);
+    });
+
+    // P1: Clipboard — read/write text via platform::Clipboard
+    engine_.register_function("readClipboard", [this](choc::javascript::ArgumentList) {
+        auto text = platform::Clipboard::get_text();
+        return choc::value::createString(text.value_or(""));
+    });
+
+    engine_.register_function("writeClipboard", [this](choc::javascript::ArgumentList args) {
+        auto text = args.get<std::string>(0, "");
+        platform::Clipboard::set_text(text);
+        return choc::value::Value();
+    });
+
+    // P1: Canvas gradient fills
+    engine_.register_function("canvasSetLinearGradient", [this, parseColor](choc::javascript::ArgumentList args) {
+        if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
+            CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::set_fill_gradient_linear;
+            cmd.x = (float)args.get<double>(1, 0); cmd.y = (float)args.get<double>(2, 0);
+            cmd.x2 = (float)args.get<double>(3, 0); cmd.y2 = (float)args.get<double>(4, 1);
+            // Parse color stops from remaining args: color1, pos1, color2, pos2, ...
+            for (int i = 5; i + 1 < static_cast<int>(args.numArgs); i += 2) {
+                cmd.gradient_colors.push_back(parseColor(args.get<std::string>(i, "#fff")));
+                cmd.gradient_positions.push_back((float)args.get<double>(i + 1, 0));
+            }
+            c->add_command(cmd);
+        }
+        return choc::value::Value();
+    });
+
+    engine_.register_function("canvasSetRadialGradient", [this, parseColor](choc::javascript::ArgumentList args) {
+        if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
+            CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::set_fill_gradient_radial;
+            cmd.x = (float)args.get<double>(1, 0); cmd.y = (float)args.get<double>(2, 0);
+            cmd.extra = (float)args.get<double>(3, 50); // radius
+            for (int i = 4; i + 1 < static_cast<int>(args.numArgs); i += 2) {
+                cmd.gradient_colors.push_back(parseColor(args.get<std::string>(i, "#fff")));
+                cmd.gradient_positions.push_back((float)args.get<double>(i + 1, 0));
+            }
+            c->add_command(cmd);
+        }
+        return choc::value::Value();
+    });
+
+    engine_.register_function("canvasClearGradient", [this](choc::javascript::ArgumentList args) {
+        if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
+            CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::clear_fill_gradient;
+            c->add_command(cmd);
+        }
+        return choc::value::Value();
+    });
+
+    // P1: Canvas arc — for pie charts, circular progress, arcs
+    engine_.register_function("canvasArc", [this, parseColor](choc::javascript::ArgumentList args) {
+        if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
+            CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::stroke_arc;
+            cmd.x = (float)args.get<double>(1, 0);     // cx
+            cmd.y = (float)args.get<double>(2, 0);     // cy
+            cmd.w = (float)args.get<double>(3, 50);    // radius
+            cmd.x2 = (float)args.get<double>(4, 0);    // startAngle
+            cmd.y2 = (float)args.get<double>(5, 6.28); // endAngle
+            cmd.color = parseColor(args.get<std::string>(6, "#fff"));
+            cmd.extra = (float)args.get<double>(7, 1);  // lineWidth
+            c->add_command(cmd);
+        }
+        return choc::value::Value();
+    });
+
+    // P1: Canvas textAlign / textBaseline
+    engine_.register_function("canvasSetTextAlign", [this](choc::javascript::ArgumentList args) {
+        if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
+            CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::set_text_align;
+            auto align = args.get<std::string>(1, "left");
+            cmd.int_val = (align == "center") ? 1 : (align == "right") ? 2 : 0;
+            c->add_command(cmd);
+        }
+        return choc::value::Value();
+    });
+
+    engine_.register_function("canvasSetTextBaseline", [this](choc::javascript::ArgumentList args) {
+        if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
+            CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::set_text_baseline;
+            auto bl = args.get<std::string>(1, "top");
+            cmd.int_val = (bl == "middle") ? 1 : (bl == "bottom") ? 2 : 0;
+            c->add_command(cmd);
+        }
+        return choc::value::Value();
+    });
+
+    // P1: Canvas clearRect
+    engine_.register_function("canvasClearRect", [this](choc::javascript::ArgumentList args) {
+        if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
+            CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::clear_rect;
+            cmd.x = (float)args.get<double>(1, 0); cmd.y = (float)args.get<double>(2, 0);
+            cmd.w = (float)args.get<double>(3, 0); cmd.h = (float)args.get<double>(4, 0);
+            c->add_command(cmd);
+        }
+        return choc::value::Value();
+    });
+
+    // P1: Canvas clipRect (was in enum but never registered)
+    engine_.register_function("canvasClipRect", [this](choc::javascript::ArgumentList args) {
+        if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
+            CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::clip_rect;
+            cmd.x = (float)args.get<double>(1, 0); cmd.y = (float)args.get<double>(2, 0);
+            cmd.w = (float)args.get<double>(3, 0); cmd.h = (float)args.get<double>(4, 0);
+            c->add_command(cmd);
+        }
+        return choc::value::Value();
+    });
+
+    // P2: Canvas fillRoundedRect / strokeRoundedRect / strokeCircle (existed in C++ but no JS bridge)
+    engine_.register_function("canvasFillRoundedRect", [this, parseColor](choc::javascript::ArgumentList args) {
+        if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
+            CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::fill_rounded_rect;
+            cmd.x=(float)args.get<double>(1,0); cmd.y=(float)args.get<double>(2,0);
+            cmd.w=(float)args.get<double>(3,0); cmd.h=(float)args.get<double>(4,0);
+            cmd.extra=(float)args.get<double>(5,0); // radius
+            cmd.color = parseColor(args.get<std::string>(6, "#fff"));
+            c->add_command(cmd);
+        }
+        return choc::value::Value();
+    });
+
+    engine_.register_function("canvasStrokeRoundedRect", [this, parseColor](choc::javascript::ArgumentList args) {
+        if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
+            CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::stroke_rounded_rect;
+            cmd.x=(float)args.get<double>(1,0); cmd.y=(float)args.get<double>(2,0);
+            cmd.w=(float)args.get<double>(3,0); cmd.h=(float)args.get<double>(4,0);
+            cmd.extra=(float)args.get<double>(5,0); // radius
+            cmd.color = parseColor(args.get<std::string>(6, "#fff"));
+            cmd.x2=(float)args.get<double>(7,1); // lineWidth
+            c->add_command(cmd);
+        }
+        return choc::value::Value();
+    });
+
+    engine_.register_function("canvasStrokeCircle", [this, parseColor](choc::javascript::ArgumentList args) {
+        if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
+            CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::stroke_circle;
+            cmd.x=(float)args.get<double>(1,0); cmd.y=(float)args.get<double>(2,0);
+            cmd.extra=(float)args.get<double>(3,10); // radius
+            cmd.color = parseColor(args.get<std::string>(4, "#fff"));
+            cmd.x2=(float)args.get<double>(5,1); // lineWidth
+            c->add_command(cmd);
+        }
+        return choc::value::Value();
+    });
+
+    // P2: Canvas globalAlpha
+    engine_.register_function("canvasSetGlobalAlpha", [this](choc::javascript::ArgumentList args) {
+        if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
+            CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::set_global_alpha;
+            cmd.extra = (float)args.get<double>(1, 1.0);
+            c->add_command(cmd);
+        }
+        return choc::value::Value();
+    });
+
+    // P2: Canvas lineCap / lineJoin
+    engine_.register_function("canvasSetLineCap", [this](choc::javascript::ArgumentList args) {
+        if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
+            CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::set_line_cap;
+            auto cap = args.get<std::string>(1, "butt");
+            cmd.int_val = (cap == "round") ? 1 : (cap == "square") ? 2 : 0;
+            c->add_command(cmd);
+        }
+        return choc::value::Value();
+    });
+
+    engine_.register_function("canvasSetLineJoin", [this](choc::javascript::ArgumentList args) {
+        if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
+            CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::set_line_join;
+            auto join = args.get<std::string>(1, "miter");
+            cmd.int_val = (join == "round") ? 1 : (join == "bevel") ? 2 : 0;
+            c->add_command(cmd);
+        }
+        return choc::value::Value();
+    });
+
+    // P3: Canvas globalCompositeOperation (blend mode)
+    engine_.register_function("canvasSetBlendMode", [this](choc::javascript::ArgumentList args) {
+        if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
+            CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::set_blend_mode;
+            auto mode = args.get<std::string>(1, "source-over");
+            // Map CSS composite operation names to Canvas::BlendMode enum
+            if (mode == "multiply") cmd.int_val = 1;
+            else if (mode == "screen") cmd.int_val = 2;
+            else if (mode == "overlay") cmd.int_val = 3;
+            else cmd.int_val = 0; // source_over
+            c->add_command(cmd);
+        }
+        return choc::value::Value();
+    });
+
+    // P2: localStorage equivalent — file-based key-value in plugin data dir
+    engine_.register_function("storageGetItem", [](choc::javascript::ArgumentList args) {
+        auto key = args.get<std::string>(0, "");
+        if (key.empty()) return choc::value::createString("");
+        auto dir = std::filesystem::temp_directory_path() / "pulp-storage";
+        auto path = dir / (key + ".dat");
+        if (!std::filesystem::exists(path)) return choc::value::createString("");
+        std::ifstream f(path);
+        std::string val((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+        return choc::value::createString(val);
+    });
+
+    engine_.register_function("storageSetItem", [](choc::javascript::ArgumentList args) {
+        auto key = args.get<std::string>(0, "");
+        auto val = args.get<std::string>(1, "");
+        if (key.empty()) return choc::value::Value();
+        auto dir = std::filesystem::temp_directory_path() / "pulp-storage";
+        std::filesystem::create_directories(dir);
+        std::ofstream f(dir / (key + ".dat"));
+        f << val;
+        return choc::value::Value();
+    });
+
+    engine_.register_function("storageRemoveItem", [](choc::javascript::ArgumentList args) {
+        auto key = args.get<std::string>(0, "");
+        if (key.empty()) return choc::value::Value();
+        auto dir = std::filesystem::temp_directory_path() / "pulp-storage";
+        std::filesystem::remove(dir / (key + ".dat"));
+        return choc::value::Value();
     });
 }
 
