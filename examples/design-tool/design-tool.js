@@ -1314,6 +1314,7 @@ on("harmony-selector", "select", function(idx) {
     var modes = ["monochromatic", "analogous", "complementary", "splitComplementary", "none"];
     if (idx >= 0 && idx < modes.length) {
         currentHarmony = modes[idx];
+        setSelected("harmony-selector", idx);
         // Just update colors — don't rebuild widget tree during mouse event
         var palette = PaletteSystem.create(currentAccent, currentHarmony);
         applyTokenDiff(PaletteSystem.toThemeDiff(palette));
@@ -1339,6 +1340,7 @@ on("harmony-selector", "select", function(idx) {
 // Dark/Light mode handler
 on("mode-selector", "select", function(idx) {
     var mode = idx === 0 ? "dark" : "light";
+    setSelected("mode-selector", idx);
     setTheme(mode);
     // Update shade ramp colors in-place
     var palette = PaletteSystem.create(currentAccent, currentHarmony);
@@ -2431,6 +2433,7 @@ on("preset-selector", "select", function(idx) {
     ];
     var p = presets[idx];
     currentAccent = p.accent;
+    setSelected("preset-selector", idx);
     setTheme(p.theme);
     setText("theme-name-label", ["Default Dark","Light","Pro Audio","Violet","Amber","Ocean","Neon"][idx]);
     var palette = PaletteSystem.create(currentAccent, currentHarmony);
