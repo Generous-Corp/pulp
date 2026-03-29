@@ -270,6 +270,28 @@ setFontSize("cs-title", 10);
 setTextColor("cs-title", APP_ACCENT);
 setFlex("cs-title", "height", 14);
 
+// #55: Template selector row
+createRow("template-row", "color-section");
+setFlex("template-row", "height", 22);
+setFlex("template-row", "gap", 6);
+setFlex("template-row", "align_items", "center");
+createLabel("template-lbl", "Template", "template-row");
+setFontSize("template-lbl", 9);
+setTextColor("template-lbl", APP_TEXT_DIM);
+setFlex("template-lbl", "width", 52);
+createCombo("template-selector", "template-row");
+setItems("template-selector", ["Audio Studio", "Tailwind 4"]);
+setFlex("template-selector", "flex_grow", 1);
+setFlex("template-selector", "height", 22);
+// #56: ? info button
+createLabel("template-help", "?", "template-row");
+setFontSize("template-help", 9);
+setTextColor("template-help", APP_TEXT_DIM);
+registerClick("template-help");
+on("template-help", "click", function() {
+    showToast("Template: base color palette preset (Audio Studio or Tailwind)");
+});
+
 // Harmony selector row
 createRow("harmony-row", "color-section");
 setFlex("harmony-row", "height", 22);
@@ -283,6 +305,13 @@ createCombo("harmony-selector", "harmony-row");
 setItems("harmony-selector", ["Monochromatic", "Analogous", "Complementary", "Split Comp.", "None"]);
 setFlex("harmony-selector", "flex_grow", 1);
 setFlex("harmony-selector", "height", 22);
+createLabel("harmony-help", "?", "harmony-row");
+setFontSize("harmony-help", 9);
+setTextColor("harmony-help", APP_TEXT_DIM);
+registerClick("harmony-help");
+on("harmony-help", "click", function() {
+    showToast("Harmony: how semantic colors relate to the accent hue");
+});
 
 // Mode selector row
 createRow("mode-row", "color-section");
@@ -297,6 +326,13 @@ createCombo("mode-selector", "mode-row");
 setItems("mode-selector", ["Dark", "Light"]);
 setFlex("mode-selector", "flex_grow", 1);
 setFlex("mode-selector", "height", 22);
+createLabel("mode-help", "?", "mode-row");
+setFontSize("mode-help", 9);
+setTextColor("mode-help", APP_TEXT_DIM);
+registerClick("mode-help");
+on("mode-help", "click", function() {
+    showToast("Mode: dark assigns light shades to text, light inverts");
+});
 
 // Issue 9: 5 palette rows — each with base color dot + name + 11-shade mini ramp
 // (shade ramps are built dynamically by buildShadeRamps below)
@@ -1208,6 +1244,32 @@ on("tp-hex-input", "return", function(text) {
     if (!tokenEditState.activeToken) return;
     if (!/^#[0-9a-fA-F]{6}$/.test(hex)) return;
     applyTokenColor(tokenEditState.activeToken, hex);
+});
+
+// #62: Token alpha (opacity) fader
+createRow("tp-alpha-row", "token-popup");
+setFlex("tp-alpha-row", "height", 20);
+setFlex("tp-alpha-row", "gap", 6);
+setFlex("tp-alpha-row", "align_items", "center");
+createLabel("tp-alpha-lbl", "Alpha", "tp-alpha-row");
+setFontSize("tp-alpha-lbl", 9);
+setTextColor("tp-alpha-lbl", APP_TEXT_DIM);
+setFlex("tp-alpha-lbl", "width", 30);
+createFader("tp-alpha-fdr", "horizontal", "tp-alpha-row");
+setFlex("tp-alpha-fdr", "flex_grow", 1);
+setFlex("tp-alpha-fdr", "height", 14);
+setValue("tp-alpha-fdr", 1.0);
+createLabel("tp-alpha-val", "1.0", "tp-alpha-row");
+setFontSize("tp-alpha-val", 9);
+setFlex("tp-alpha-val", "width", 24);
+on("tp-alpha-fdr", "change", function() {
+    var alpha = getValue("tp-alpha-fdr");
+    setText("tp-alpha-val", alpha.toFixed(1));
+    if (tokenEditState.activeToken) {
+        // Apply opacity to the token swatch
+        var swId = tokenEditState.activeSwatchId;
+        if (swId) setOpacity(swId, alpha);
+    }
 });
 
 // 5 palette shade grids
