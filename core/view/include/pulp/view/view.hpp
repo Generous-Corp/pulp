@@ -214,6 +214,18 @@ public:
     void clear_border() { has_border_ = false; }
     float corner_radius() const { return corner_radius_; }
 
+    /// Per-side borders (CSS border-top, border-right, etc.)
+    void set_border_top(Color c, float w) { border_top_ = {c, w}; has_border_sides_ = true; }
+    void set_border_right(Color c, float w) { border_right_ = {c, w}; has_border_sides_ = true; }
+    void set_border_bottom(Color c, float w) { border_bottom_ = {c, w}; has_border_sides_ = true; }
+    void set_border_left(Color c, float w) { border_left_ = {c, w}; has_border_sides_ = true; }
+
+    /// Per-corner border-radius (CSS border-top-left-radius, etc.)
+    void set_corner_radius_tl(float r) { corner_radii_[0] = r; has_corner_radii_ = true; }
+    void set_corner_radius_tr(float r) { corner_radii_[1] = r; has_corner_radii_ = true; }
+    void set_corner_radius_bl(float r) { corner_radii_[2] = r; has_corner_radii_ = true; }
+    void set_corner_radius_br(float r) { corner_radii_[3] = r; has_corner_radii_ = true; }
+
     /// Box shadow (CSS-like: offset, blur, spread, color)
     struct BoxShadow {
         float offset_x = 0, offset_y = 2;
@@ -343,6 +355,13 @@ private:
     float border_width_ = 0;
     float corner_radius_ = 0;
     bool has_border_ = false;
+    // Per-side borders
+    struct BorderSide { Color color{}; float width = 0; };
+    BorderSide border_top_{}, border_right_{}, border_bottom_{}, border_left_{};
+    bool has_border_sides_ = false;
+    // Per-corner radii
+    float corner_radii_[4] = {0, 0, 0, 0}; // TL, TR, BL, BR
+    bool has_corner_radii_ = false;
     Position position_ = Position::static_;
     float top_ = 0, right_ = 0, bottom_ = 0, left_ = 0;
     bool has_top_ = false, has_right_ = false, has_bottom_ = false, has_left_ = false;

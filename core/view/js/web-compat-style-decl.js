@@ -466,6 +466,170 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
         case "alignContent":
             setFlex(id, "align_content", _cssToFlex(resolved));
             break;
+
+        // ── Tier 2: Per-side borders ────────────────────────────────────
+
+        case "borderTop": case "borderRight": case "borderBottom": case "borderLeft": {
+            var side = key.replace("border", "").toLowerCase();
+            var bsp = resolved.match(/([\d.]+)px\s+\w+\s+(.+)/);
+            if (bsp) {
+                var bsc = parseCSSColor(bsp[2].trim());
+                if (typeof setBorderSide === "function")
+                    setBorderSide(id, side, parseFloat(bsp[1]), bsc || bsp[2].trim());
+            }
+            break;
+        }
+        case "borderTopWidth": case "borderRightWidth": case "borderBottomWidth": case "borderLeftWidth": {
+            var side2 = key.replace("border", "").replace("Width", "").toLowerCase();
+            var bw2 = parseCSSLength(resolved);
+            if (bw2 && typeof setBorderSide === "function")
+                setBorderSide(id, side2, bw2.value, "");
+            break;
+        }
+        case "borderTopColor": case "borderRightColor": case "borderBottomColor": case "borderLeftColor": {
+            var side3 = key.replace("border", "").replace("Color", "").toLowerCase();
+            var bc3 = parseCSSColor(resolved);
+            if (bc3 && typeof setBorderSide === "function")
+                setBorderSide(id, side3, 0, bc3);
+            break;
+        }
+
+        // Per-corner border-radius
+        case "borderTopLeftRadius": case "borderTopRightRadius":
+        case "borderBottomLeftRadius": case "borderBottomRightRadius": {
+            var corner = key.replace("border", "").replace("Radius", "");
+            var cr = parseCSSLength(resolved);
+            if (cr && typeof setCornerRadius === "function")
+                setCornerRadius(id, corner, cr.value);
+            break;
+        }
+
+        // ── Tier 3: Layout keywords ─────────────────────────────────────
+
+        // box-sizing
+        case "boxSizing":
+            if (typeof setBoxSizing === "function") setBoxSizing(id, resolved);
+            break;
+
+        // flex-flow shorthand
+        case "flexFlow": {
+            var ffp = resolved.split(/\s+/);
+            for (var ffi = 0; ffi < ffp.length; ffi++) {
+                if (ffp[ffi] === "row" || ffp[ffi] === "column")
+                    setFlex(id, "direction", ffp[ffi] === "row" ? "row" : "col");
+                else if (ffp[ffi] === "wrap" || ffp[ffi] === "nowrap")
+                    setFlex(id, "flex_wrap", ffp[ffi] === "wrap" ? 1 : 0);
+            }
+            break;
+        }
+
+        // place-items shorthand (align-items + justify-items)
+        case "placeItems": {
+            var pip = resolved.split(/\s+/);
+            setFlex(id, "align_items", _cssToFlex(pip[0]));
+            if (pip[1]) setFlex(id, "justify_content", _cssToFlex(pip[1]));
+            break;
+        }
+
+        // place-content shorthand
+        case "placeContent": {
+            var pcp = resolved.split(/\s+/);
+            setFlex(id, "align_content", _cssToFlex(pcp[0]));
+            if (pcp[1]) setFlex(id, "justify_content", _cssToFlex(pcp[1]));
+            break;
+        }
+
+        // ── Tier 4: Animation properties ────────────────────────────────
+
+        case "animationName":
+            if (typeof setAnimation === "function") setAnimation(id, "name", resolved);
+            break;
+        case "animationDuration": {
+            var ad = parseFloat(resolved);
+            if (resolved.indexOf("ms") >= 0) ad /= 1000;
+            if (typeof setAnimation === "function") setAnimation(id, "duration", ad);
+            break;
+        }
+        case "animationTimingFunction":
+            if (typeof setAnimation === "function") setAnimation(id, "easing", resolved);
+            break;
+        case "animationDelay": {
+            var adl = parseFloat(resolved);
+            if (resolved.indexOf("ms") >= 0) adl /= 1000;
+            if (typeof setAnimation === "function") setAnimation(id, "delay", adl);
+            break;
+        }
+        case "animationIterationCount":
+            if (typeof setAnimation === "function")
+                setAnimation(id, "iterations", resolved === "infinite" ? -1 : parseFloat(resolved) || 1);
+            break;
+        case "animationDirection":
+            if (typeof setAnimation === "function") setAnimation(id, "direction", resolved);
+            break;
+        case "animationFillMode":
+            if (typeof setAnimation === "function") setAnimation(id, "fill", resolved);
+            break;
+        case "animation": {
+            // Shorthand: "name duration easing delay iterations direction fill"
+            var atr = parseTransition(resolved); // reuse transition parser for timing
+            if (typeof setAnimation === "function") {
+                setAnimation(id, "name", atr.property);
+                setAnimation(id, "duration", atr.duration);
+                setAnimation(id, "easing", atr.easing);
+                setAnimation(id, "delay", atr.delay);
+            }
+            break;
+        }
+
+        // ── Tier 6: Additional filter functions ─────────────────────────
+
+        // filter already handled above — extend for multi-function
+        // (the existing setFilter bridge parses "blur(4px)" — additional functions pass through)
+
+        // ── Tier 7: CSS logical properties ──────────────────────────────
+
+        case "marginInline": {
+            var mi = expandShorthand(resolved);
+            setFlex(id, "margin_left", mi[0]); setFlex(id, "margin_right", mi[1]);
+            break;
+        }
+        case "marginInlineStart":
+        case "marginLeft": // already handled above, fall through for logical
+            break;
+        case "marginBlock": {
+            var mb2 = expandShorthand(resolved);
+            setFlex(id, "margin_top", mb2[0]); setFlex(id, "margin_bottom", mb2[1]);
+            break;
+        }
+        case "paddingInline": {
+            var pi2 = expandShorthand(resolved);
+            setFlex(id, "padding_left", pi2[0]); setFlex(id, "padding_right", pi2[1]);
+            break;
+        }
+        case "paddingBlock": {
+            var pb2 = expandShorthand(resolved);
+            setFlex(id, "padding_top", pb2[0]); setFlex(id, "padding_bottom", pb2[1]);
+            break;
+        }
+        case "inset": {
+            var ins = expandShorthand(resolved);
+            var tv2 = parseCSSLength(String(ins[0])); if (tv2) setTop(id, tv2.value);
+            var rv2 = parseCSSLength(String(ins[1])); if (rv2) setRight(id, rv2.value);
+            var bv2 = parseCSSLength(String(ins[2])); if (bv2) setBottom(id, bv2.value);
+            var lv2 = parseCSSLength(String(ins[3])); if (lv2) setLeft(id, lv2.value);
+            break;
+        }
+
+        // line-clamp (-webkit-line-clamp)
+        case "webkitLineClamp":
+        case "lineClamp":
+            if (typeof setLineClamp === "function") setLineClamp(id, parseInt(resolved) || 0);
+            break;
+
+        // background-repeat
+        case "backgroundRepeat":
+            if (typeof setBackgroundRepeat === "function") setBackgroundRepeat(id, resolved);
+            break;
     }
 };
 
@@ -484,26 +648,36 @@ function _cssToFlex(v) {
 // But for safety and compatibility, we use defineProperty on the prototype
 var __cssProperties__ = [
     "display", "flexDirection", "flexWrap", "flexGrow", "flexShrink", "flexBasis", "flex",
-    "justifyContent", "alignItems", "alignSelf", "alignContent", "order",
+    "flexFlow", "justifyContent", "alignItems", "alignSelf", "alignContent", "order",
+    "placeItems", "placeContent",
     "gap", "rowGap", "columnGap",
     "width", "height", "minWidth", "minHeight", "maxWidth", "maxHeight",
-    "aspectRatio",
+    "aspectRatio", "boxSizing",
     "margin", "marginTop", "marginRight", "marginBottom", "marginLeft",
+    "marginInline", "marginBlock",
     "padding", "paddingTop", "paddingRight", "paddingBottom", "paddingLeft",
+    "paddingInline", "paddingBlock",
     "backgroundColor", "color",
     "fontSize", "fontWeight", "fontStyle", "fontFamily", "letterSpacing", "lineHeight",
     "textAlign", "textTransform", "textDecoration", "textOverflow", "textShadow",
     "whiteSpace", "wordBreak", "overflowWrap", "wordWrap",
     "border", "borderColor", "borderWidth", "borderRadius",
+    "borderTop", "borderRight", "borderBottom", "borderLeft",
+    "borderTopWidth", "borderRightWidth", "borderBottomWidth", "borderLeftWidth",
+    "borderTopColor", "borderRightColor", "borderBottomColor", "borderLeftColor",
+    "borderTopLeftRadius", "borderTopRightRadius", "borderBottomLeftRadius", "borderBottomRightRadius",
     "outline", "outlineWidth", "outlineColor",
     "opacity", "overflow", "cursor", "visibility",
     "userSelect", "pointerEvents",
     "transform", "transformOrigin",
     "transition", "transitionDuration",
-    "position", "top", "right", "bottom", "left", "zIndex",
+    "animation", "animationName", "animationDuration", "animationTimingFunction",
+    "animationDelay", "animationIterationCount", "animationDirection", "animationFillMode",
+    "position", "top", "right", "bottom", "left", "zIndex", "inset",
     "boxShadow", "filter", "background", "backgroundImage",
-    "backgroundSize", "backgroundPosition",
-    "gridTemplateColumns", "gridTemplateRows", "gridColumn", "gridRow"
+    "backgroundSize", "backgroundPosition", "backgroundRepeat",
+    "gridTemplateColumns", "gridTemplateRows", "gridColumn", "gridRow",
+    "lineClamp", "webkitLineClamp"
 ];
 
 (function() {
