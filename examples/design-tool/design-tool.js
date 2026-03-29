@@ -597,12 +597,16 @@ function buildShadeRamps() {
                 // Redraw gamut with dot at current position
                 renderPaletteGamut(idx, h, mapped.L, mapped.C);
                 setText("ramp-" + idx + "-oklch", "L: " + mapped.L.toFixed(2) + "  C: " + mapped.C.toFixed(3) + "  H: " + h.toFixed(1));
-                // Update the global accent/palette and apply to preview
+                // Update the palette base color
                 if (pKey === "accent") {
                     currentAccent = OklchEngine.oklchToHex(mapped.L, mapped.C, h);
                 }
-                // Rebuild palette and apply to theme
+                // Rebuild full palette and apply all tokens to preview
                 var palette = PaletteSystem.create(currentAccent, currentHarmony);
+                // For non-accent palettes, regenerate that specific ramp with the slider values
+                if (pKey !== "accent") {
+                    palette[pKey] = ShadeGenerator.generateRamp(mapped.L, mapped.C, h);
+                }
                 var diff = PaletteSystem.toThemeDiff(palette);
                 applyTokenDiff(diff);
                 updateTokenSwatches();
@@ -635,8 +639,8 @@ function renderPaletteGamut(paletteIdx, hue, dotL, dotC) {
     // Background
     canvasRect(gamutId, 0, 0, w, h, '#1e1e22');
     // Draw OKLCH gamut: X = Lightness (0-1), Y = Chroma (0.4 top to 0 bottom)
-    var cols = 60;
-    var rows = 30;
+    var cols = 120;
+    var rows = 50;
     var cellW = w / cols;
     var cellH = h / rows;
     for (var gx = 0; gx < cols; gx++) {
@@ -653,9 +657,9 @@ function renderPaletteGamut(paletteIdx, hue, dotL, dotC) {
         var dx = dotL * w;
         var dy = (1 - dotC / 0.4) * h;
         // White circle outline
-        canvasFillCircle(gamutId, dx, dy, 7, '#00000040');
-        canvasFillCircle(gamutId, dx, dy, 5, '#ffffff');
-        canvasFillCircle(gamutId, dx, dy, 3, OklchEngine.oklchToHex(dotL, dotC, hue));
+        canvasFillCircle(gamutId, dx, dy, 10, '#00000050');
+        canvasFillCircle(gamutId, dx, dy, 8, '#ffffff');
+        canvasFillCircle(gamutId, dx, dy, 5, OklchEngine.oklchToHex(dotL, dotC, hue));
     }
 }
 
