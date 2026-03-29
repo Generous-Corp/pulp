@@ -42,7 +42,20 @@ Last updated: 2026-03-26 (647 tests, 8 plugin examples + 3 apps, PHASES 0-20 + A
 | 24 | Visual Editor | **Planned** | Unlock canvas, drag/resize widgets, snapping, grouping, code generation from layout changes. |
 | 25 | Design HUD | **Planned** | Floating color/chat panels that attach to any running plugin. Live token editing on your actual plugin UI without the full design tool. |
 
-## Tests: 725 pass (macOS; AudioWorkgroup timeout is known flaky — exclude with --exclude-regex AudioWorkgroup)
+## Touch → JS Bridge (2026-03-28)
+- [x] P0: Fix iOS pointer identity — stable UITouch→ID map in window_host_ios.mm + plugin_view_host_ios.mm
+- [x] P1: Pipe clientX/clientY through JS bridge — _makeEvent() receives full coordinate data
+- [x] P2: W3C PointerEvent API — pointerdown/pointermove/pointerup/pointercancel with pointerId, pointerType, isPrimary
+- [x] P2b: Pointer capture — setPointerCapture/releasePointerCapture, gotpointercapture/lostpointercapture
+- [x] P3: Apple Pencil — pressure, altitudeAngle, azimuthAngle, pointerType="pen"
+- [x] P4: Gesture events — gesturestart/gesturechange/gestureend, macOS magnifyWithEvent/rotateWithEvent
+- [x] P5: Coalesced/predicted touches — JS API structure (getCoalescedEvents/getPredictedEvents)
+- [x] P6: iPadOS hover — UIHoverGestureRecognizer for trackpad/mouse on iPadOS 13+
+- [x] touch-action CSS property
+- [x] 10 new headless tests (pointer types, stylus data, gesture events, pointer capture)
+- [x] Docs: js-bridge.md, support-matrix.yaml updated
+
+## Tests: 1218 pass (macOS; AudioWorkgroup timeout is known flaky — exclude with --exclude-regex AudioWorkgroup)
 
 ### Loop 8 Gap Closures (2026-03-26)
 - [x] CI: pluginval installed in validate.yml, runs against VST3 bundles at strictness 5

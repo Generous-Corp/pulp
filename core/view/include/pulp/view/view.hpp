@@ -93,7 +93,9 @@ public:
     // ── Input events (rich, with modifiers and pointer ID) ──────────────
 
     /// Mouse down with full event context.
-    virtual void on_mouse_event(const MouseEvent& event) { (void)event; }
+    virtual void on_mouse_event(const MouseEvent& event) {
+        if (on_pointer_event) on_pointer_event(event);
+    }
     /// Key event with modifiers and up/down state.
     /// Return true if handled (prevents propagation to parent).
     virtual bool on_key_event(const KeyEvent& event) { (void)event; return false; }
@@ -102,6 +104,19 @@ public:
     /// Called when this view gains or loses focus.
     /// Default implementation updates has_focus_ state. Subclasses should call base.
     virtual void on_focus_changed(bool gained) { has_focus_ = gained; }
+
+    /// Gesture event (pinch/rotate from multi-touch or trackpad).
+    virtual void on_gesture_event(const GestureEvent& event) {
+        if (on_gesture_cb) on_gesture_cb(event);
+    }
+
+    // ── Pointer capture (W3C setPointerCapture) ─────────────────────────
+
+    /// Capture pointer events for this view — all events for pointer_id
+    /// route here regardless of hit-test until released.
+    void set_pointer_capture(int pointer_id);
+    void release_pointer_capture(int pointer_id);
+    bool has_pointer_capture(int pointer_id) const;
 
     // ── Legacy event handlers (kept for backward compatibility) ──────────
 
@@ -210,6 +225,8 @@ public:
 
     /// Generic click callback (fires on mouse-down, if set).
     std::function<void()> on_click;
+    std::function<void(const MouseEvent&)> on_pointer_event;   ///< JS pointer event callback
+    std::function<void(const GestureEvent&)> on_gesture_cb;    ///< JS gesture event callback
 
     /// Hover callbacks (CSS :hover equivalent). Fired by set_hovered().
     std::function<void()> on_hover_enter;
@@ -336,6 +353,9 @@ private:
     std::vector<float> bg_gradient_positions_;
     bool text_ellipsis_ = false;
     CursorStyle cursor_ = CursorStyle::default_;
+
+    // Pointer capture: pointer_id → this view receives all events for that pointer
+    std::vector<int> captured_pointers_;
 };
 
 } // namespace pulp::view

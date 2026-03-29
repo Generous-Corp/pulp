@@ -108,6 +108,43 @@ js_authoring:
       148 named CSS colors, shorthand expansion, transform/transition parsing.
       No DOM/CSSOM — pure JS shim over native widget bridge.
 
+input:
+  pointer_events:
+    status: usable
+    notes: >
+      W3C PointerEvent API: pointerdown/pointermove/pointerup/pointercancel with
+      pointerId, pointerType (mouse/touch/pen), isPrimary, pressure, clientX/clientY.
+      Unified model — same JS code works for mouse (macOS), touch (iOS), and stylus (Apple Pencil).
+  pointer_capture:
+    status: usable
+    notes: >
+      setPointerCapture/releasePointerCapture for drag interactions.
+      gotpointercapture/lostpointercapture events. Implicit release on pointerup.
+  stylus:
+    status: usable
+    platform: ios
+    notes: >
+      Apple Pencil properties: pressure (0.0–1.0), altitudeAngle, azimuthAngle.
+      pointerType="pen" discrimination. Exposed via PointerEvent JS API.
+  gesture_events:
+    status: usable
+    notes: >
+      gesturestart/gesturechange/gestureend with scale and rotation.
+      macOS: magnifyWithEvent/rotateWithEvent trackpad gestures.
+      iOS: multi-touch gesture analysis (planned).
+  ipados_hover:
+    status: usable
+    platform: ios
+    notes: UIHoverGestureRecognizer for trackpad/mouse hover on iPadOS 13+.
+  touch_action_css:
+    status: usable
+    notes: CSS touch-action property to control default gesture handling (auto, none, pan-x, pan-y, manipulation).
+  coalesced_predicted:
+    status: partial
+    notes: >
+      getCoalescedEvents()/getPredictedEvents() API on PointerEvent objects.
+      JS API structure in place. iOS coalescedTouches/predictedTouches data piping planned.
+
 subsystems:
   runtime: stable
   events: usable

@@ -451,21 +451,55 @@ Element.prototype._registerNativeEvent = function(type) {
     var self = this;
     if (type === "click" || type === "mousedown" || type === "mouseup") {
         registerClick(id);
-        on(id, "click", function() {
-            var evt = _makeEvent("click", self);
+        on(id, "click", function(data) {
+            var evt = _makeEvent("click", self, data);
             self.dispatchEvent(evt);
         });
-    } else if (type === "mouseenter" || type === "mouseleave") {
+    } else if (type === "mouseenter" || type === "mouseleave" ||
+               type === "pointerenter" || type === "pointerleave") {
         registerHover(id);
-        on(id, "mouseenter", function() {
-            var evt = _makeEvent("mouseenter", self);
+        on(id, "mouseenter", function(data) {
+            var evt = _makeEvent("mouseenter", self, data);
             evt._noBubble = true;
             _fireListeners(self, evt);
+            var pe = _makeEvent("pointerenter", self, data);
+            pe._noBubble = true;
+            _fireListeners(self, pe);
         });
-        on(id, "mouseleave", function() {
-            var evt = _makeEvent("mouseleave", self);
+        on(id, "mouseleave", function(data) {
+            var evt = _makeEvent("mouseleave", self, data);
             evt._noBubble = true;
             _fireListeners(self, evt);
+            var pe = _makeEvent("pointerleave", self, data);
+            pe._noBubble = true;
+            _fireListeners(self, pe);
+        });
+    } else if (type === "pointerdown" || type === "pointermove" || type === "pointerup" || type === "pointercancel") {
+        // Register for pointer events — these are dispatched from C++ bridge
+        if (typeof registerPointer === "function") registerPointer(id);
+        on(id, "pointerdown", function(data) {
+            self.dispatchEvent(_makeEvent("pointerdown", self, data));
+        });
+        on(id, "pointermove", function(data) {
+            self.dispatchEvent(_makeEvent("pointermove", self, data));
+        });
+        on(id, "pointerup", function(data) {
+            self.dispatchEvent(_makeEvent("pointerup", self, data));
+        });
+        on(id, "pointercancel", function(data) {
+            self.dispatchEvent(_makeEvent("pointercancel", self, data));
+        });
+    } else if (type === "gesturestart" || type === "gesturechange" || type === "gestureend") {
+        // Gesture events dispatched from C++ bridge
+        if (typeof registerGesture === "function") registerGesture(id);
+        on(id, "gesturestart", function(data) {
+            self.dispatchEvent(_makeEvent("gesturestart", self, data));
+        });
+        on(id, "gesturechange", function(data) {
+            self.dispatchEvent(_makeEvent("gesturechange", self, data));
+        });
+        on(id, "gestureend", function(data) {
+            self.dispatchEvent(_makeEvent("gestureend", self, data));
         });
     } else if (type === "input" || type === "change") {
         on(id, "change", function(val) {
@@ -488,16 +522,51 @@ Element.prototype._registerNativeEvent = function(type) {
     }
 };
 
-function _makeEvent(type, target) {
+// ── Pointer capture (P2b) ───────────────────────────────────────────────
+
+Element.prototype.setPointerCapture = function(pointerId) {
+    if (typeof nativeSetPointerCapture === "function")
+        nativeSetPointerCapture(this._id, pointerId);
+};
+
+Element.prototype.releasePointerCapture = function(pointerId) {
+    if (typeof nativeReleasePointerCapture === "function")
+        nativeReleasePointerCapture(this._id, pointerId);
+};
+
+function _makeEvent(type, target, data) {
+    var d = data || {};
     return {
         type: type,
         target: target,
         currentTarget: null,
-        clientX: 0, clientY: 0,
-        offsetX: 0, offsetY: 0,
-        button: 0,
-        key: "", code: "",
-        ctrlKey: false, shiftKey: false, altKey: false, metaKey: false,
+        // Position (P1)
+        clientX: d.clientX || 0,
+        clientY: d.clientY || 0,
+        offsetX: d.offsetX || 0,
+        offsetY: d.offsetY || 0,
+        button: d.button || 0,
+        // Keyboard
+        key: d.key || "", code: d.code || "",
+        ctrlKey: !!d.ctrlKey, shiftKey: !!d.shiftKey,
+        altKey: !!d.altKey, metaKey: !!d.metaKey,
+        // Pointer (P2)
+        pointerId: d.pointerId || 0,
+        pointerType: d.pointerType || "mouse",
+        isPrimary: d.isPrimary !== undefined ? d.isPrimary : true,
+        // Stylus (P3)
+        pressure: d.pressure !== undefined ? d.pressure : 0.5,
+        altitudeAngle: d.altitudeAngle || 0,
+        azimuthAngle: d.azimuthAngle || 0,
+        // Gesture (P4)
+        scale: d.scale !== undefined ? d.scale : 1,
+        rotation: d.rotation || 0,
+        // Coalesced/predicted (P5)
+        _coalesced: d._coalesced || null,
+        _predicted: d._predicted || null,
+        getCoalescedEvents: function() { return this._coalesced || [this]; },
+        getPredictedEvents: function() { return this._predicted || []; },
+        // Propagation control
         _stopped: false,
         _defaultPrevented: false,
         _noBubble: false,

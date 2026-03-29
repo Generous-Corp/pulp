@@ -524,6 +524,100 @@ void WidgetBridge::register_api() {
         return choc::value::Value();
     });
 
+    // ── Pointer events (P2) ─────────────────────────────────────────────
+
+    // Helper: build JS object literal for pointer event data from MouseEvent
+    auto pointer_data_js = [](const std::string& id, const MouseEvent& me) -> std::string {
+        std::string js = "__dispatch__('" + id + "', '";
+        // Event type placeholder — caller appends type
+        return js;
+    };
+
+    // registerPointer(id) — enables pointer event dispatch for a widget
+    engine_.register_function("registerPointer", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto it = widgets_.find(id);
+        if (it != widgets_.end()) {
+            auto* w = it->second;
+            w->on_pointer_event = [this, id](const MouseEvent& me) {
+                std::string type;
+                if (me.is_down) type = "pointerdown";
+                else type = "pointerup";
+                if (me.is_cancelled) type = "pointercancel";
+
+                std::string data = "{"
+                    "clientX:" + std::to_string(me.window_position.x) + ","
+                    "clientY:" + std::to_string(me.window_position.y) + ","
+                    "offsetX:" + std::to_string(me.position.x) + ","
+                    "offsetY:" + std::to_string(me.position.y) + ","
+                    "pointerId:" + std::to_string(me.pointer_id) + ","
+                    "pointerType:'" + std::string(me.pointerTypeString()) + "',"
+                    "isPrimary:" + (me.isPrimary() ? "true" : "false") + ","
+                    "pressure:" + std::to_string(me.pressure) + ","
+                    "altitudeAngle:" + std::to_string(me.altitude_angle) + ","
+                    "azimuthAngle:" + std::to_string(me.azimuth_angle) + ","
+                    "button:" + std::to_string(static_cast<int>(me.button)) + ","
+                    "ctrlKey:" + (me.isCtrlDown() ? "true" : "false") + ","
+                    "shiftKey:" + (me.isShiftDown() ? "true" : "false") + ","
+                    "altKey:" + (me.isAltDown() ? "true" : "false") + ","
+                    "metaKey:" + (me.isCmdDown() ? "true" : "false") +
+                    "}";
+
+                engine_.evaluate("__dispatch__('" + id + "', '" + type + "', " + data + ")");
+            };
+        }
+        return choc::value::Value();
+    });
+
+    // registerGesture(id) — enables gesture event dispatch for a widget
+    engine_.register_function("registerGesture", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto it = widgets_.find(id);
+        if (it != widgets_.end()) {
+            it->second->on_gesture_cb = [this, id](const GestureEvent& ge) {
+                std::string type;
+                switch (ge.phase) {
+                    case GesturePhase::began:     type = "gesturestart"; break;
+                    case GesturePhase::ended:     type = "gestureend"; break;
+                    case GesturePhase::cancelled: type = "gestureend"; break;
+                    default:                      type = "gesturechange"; break;
+                }
+                std::string data = "{"
+                    "scale:" + std::to_string(ge.scale) + ","
+                    "rotation:" + std::to_string(ge.rotation) + ","
+                    "clientX:" + std::to_string(ge.position.x) + ","
+                    "clientY:" + std::to_string(ge.position.y) +
+                    "}";
+                engine_.evaluate("__dispatch__('" + id + "', '" + type + "', " + data + ")");
+            };
+        }
+        return choc::value::Value();
+    });
+
+    // nativeSetPointerCapture(id, pointerId) — P2b
+    engine_.register_function("nativeSetPointerCapture", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto pointerId = static_cast<int>(args.get<double>(1, 0));
+        auto it = widgets_.find(id);
+        if (it != widgets_.end()) {
+            it->second->set_pointer_capture(pointerId);
+            engine_.evaluate("__dispatch__('" + id + "', 'gotpointercapture', {pointerId:" + std::to_string(pointerId) + "})");
+        }
+        return choc::value::Value();
+    });
+
+    // nativeReleasePointerCapture(id, pointerId) — P2b
+    engine_.register_function("nativeReleasePointerCapture", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto pointerId = static_cast<int>(args.get<double>(1, 0));
+        auto it = widgets_.find(id);
+        if (it != widgets_.end()) {
+            it->second->release_pointer_capture(pointerId);
+            engine_.evaluate("__dispatch__('" + id + "', 'lostpointercapture', {pointerId:" + std::to_string(pointerId) + "})");
+        }
+        return choc::value::Value();
+    });
+
     // enableInspectClick() — sets up Cmd+click detection on all registered widgets
     engine_.register_function("enableInspectClick", [this](choc::javascript::ArgumentList) {
         root_.on_global_click = [this](const std::string& id, uint16_t mods) {

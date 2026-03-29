@@ -297,6 +297,26 @@ float View::resolve_dimension(const std::string& name, float fallback) const {
     return fallback;
 }
 
+// ── Pointer capture ─────────────────────────────────────────────────────
+
+void View::set_pointer_capture(int pointer_id) {
+    if (!has_pointer_capture(pointer_id))
+        captured_pointers_.push_back(pointer_id);
+}
+
+void View::release_pointer_capture(int pointer_id) {
+    auto it = std::find(captured_pointers_.begin(), captured_pointers_.end(), pointer_id);
+    if (it != captured_pointers_.end())
+        captured_pointers_.erase(it);
+}
+
+bool View::has_pointer_capture(int pointer_id) const {
+    return std::find(captured_pointers_.begin(), captured_pointers_.end(), pointer_id)
+           != captured_pointers_.end();
+}
+
+// ── Hover ───────────────────────────────────────────────────────────────
+
 void View::set_hovered(bool h) {
     if (hovered_ == h) return;
     hovered_ = h;

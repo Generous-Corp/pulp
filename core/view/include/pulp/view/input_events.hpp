@@ -57,7 +57,7 @@ enum class KeyCode : int {
     f1 = 290, f2, f3, f4, f5, f6, f7, f8, f9, f10, f11, f12,
 };
 
-// ── Mouse event ──────────────────────────────────────────────────────────
+// ── Mouse / pointer event ────────────────────────────────────────────────
 
 /// Mouse button identifiers.
 enum class MouseButton : uint8_t {
@@ -67,18 +67,33 @@ enum class MouseButton : uint8_t {
     middle = 3,
 };
 
-/// Rich mouse event with position, modifiers, button state, and pointer ID.
+/// Pointer device type (W3C PointerEvent.pointerType).
+enum class PointerType : uint8_t {
+    mouse = 0,   ///< Mouse cursor (default)
+    touch = 1,   ///< Direct touch (finger)
+    pen   = 2,   ///< Stylus / Apple Pencil
+};
+
+/// Rich mouse/pointer event with position, modifiers, button state, pointer ID,
+/// and stylus properties. Unified for mouse, touch, and pen input.
 struct MouseEvent {
     Point position;              ///< Position in local view coordinates
     Point window_position;       ///< Position in window coordinates
     MouseButton button = MouseButton::left;
     uint16_t modifiers = 0;      ///< Bitfield of Modifier flags
-    int pointer_id = 0;          ///< 0 = primary, >0 = additional touches (iOS multi-touch)
+    int pointer_id = 0;          ///< 0 = primary, >0 = additional touches (multi-touch)
     int click_count = 1;         ///< 1=single, 2=double, 3=triple click
-    bool is_down = false;        ///< True for mouse-down events
+    bool is_down = false;        ///< True for mouse-down / touch-began events
+    bool is_cancelled = false;   ///< True for touchesCancelled (→ pointercancel)
     bool is_wheel = false;       ///< True for scroll wheel events
     float scroll_delta_x = 0;   ///< Horizontal scroll delta (positive = right)
     float scroll_delta_y = 0;   ///< Vertical scroll delta (positive = down)
+
+    // ── Pointer / stylus properties (W3C PointerEvent) ──────────────
+    PointerType pointer_type = PointerType::mouse;
+    float pressure = 0.5f;       ///< 0.0–1.0 (0.5 = default for mouse)
+    float altitude_angle = 0;    ///< Stylus tilt in radians (0 = perpendicular)
+    float azimuth_angle = 0;     ///< Stylus rotation in radians (0–2π)
 
     bool isShiftDown() const  { return (modifiers & kModShift) != 0; }
     bool isCtrlDown() const   { return (modifiers & kModCtrl) != 0; }
@@ -86,8 +101,39 @@ struct MouseEvent {
     bool isCmdDown() const    { return (modifiers & kModCmd) != 0; }
     bool isMetaDown() const   { return (modifiers & kModMeta) != 0; }
     bool isMainModifier() const { return is_main_modifier(modifiers); }
-    bool isTouch() const      { return pointer_id > 0 || (modifiers & 0x8000) != 0; }
+    bool isTouch() const      { return pointer_type == PointerType::touch || (modifiers & 0x8000) != 0; }
+    bool isPen() const        { return pointer_type == PointerType::pen; }
     bool isWheel() const      { return is_wheel; }
+    bool isPrimary() const    { return pointer_id == 0; }
+
+    /// W3C pointerType string
+    const char* pointerTypeString() const {
+        switch (pointer_type) {
+            case PointerType::touch: return "touch";
+            case PointerType::pen:   return "pen";
+            default:                 return "mouse";
+        }
+    }
+};
+
+// ── Gesture event (pinch / rotate) ──────────────────────────────────────
+
+enum class GesturePhase : uint8_t {
+    began = 0,
+    changed = 1,
+    ended = 2,
+    cancelled = 3,
+};
+
+/// High-level gesture event for pinch (scale) and rotate.
+/// Fired by iOS multi-touch analysis or macOS trackpad magnify/rotate.
+struct GestureEvent {
+    GesturePhase phase = GesturePhase::began;
+    float scale = 1.0f;          ///< Cumulative scale factor (1.0 = no change)
+    float rotation = 0.0f;       ///< Cumulative rotation in radians
+    float delta_scale = 0.0f;    ///< Scale delta since last event
+    float delta_rotation = 0.0f; ///< Rotation delta since last event
+    Point position;              ///< Center point of the gesture
 };
 
 // ── Key event ────────────────────────────────────────────────────────────

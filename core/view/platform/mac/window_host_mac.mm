@@ -274,6 +274,46 @@ static pulp::view::KeyCode keyCodeFromNS(unsigned short code) {
     [self setNeedsDisplay:YES];
 }
 
+// ── Trackpad gestures (P4: pinch/rotate) ───────────────────────────
+
+- (void)magnifyWithEvent:(NSEvent*)event {
+    if (!self.rootView) return;
+    auto pt = [self localPoint:event];
+    auto* target = self.rootView->hit_test(pt);
+    if (!target) return;
+
+    pulp::view::GestureEvent ge;
+    if (event.phase == NSEventPhaseBegan)        ge.phase = pulp::view::GesturePhase::began;
+    else if (event.phase == NSEventPhaseEnded)   ge.phase = pulp::view::GesturePhase::ended;
+    else if (event.phase == NSEventPhaseCancelled) ge.phase = pulp::view::GesturePhase::cancelled;
+    else                                          ge.phase = pulp::view::GesturePhase::changed;
+
+    ge.delta_scale = static_cast<float>(event.magnification);
+    ge.scale = 1.0f + ge.delta_scale;
+    ge.position = pt;
+    target->on_gesture_event(ge);
+    [self setNeedsDisplay:YES];
+}
+
+- (void)rotateWithEvent:(NSEvent*)event {
+    if (!self.rootView) return;
+    auto pt = [self localPoint:event];
+    auto* target = self.rootView->hit_test(pt);
+    if (!target) return;
+
+    pulp::view::GestureEvent ge;
+    if (event.phase == NSEventPhaseBegan)        ge.phase = pulp::view::GesturePhase::began;
+    else if (event.phase == NSEventPhaseEnded)   ge.phase = pulp::view::GesturePhase::ended;
+    else if (event.phase == NSEventPhaseCancelled) ge.phase = pulp::view::GesturePhase::cancelled;
+    else                                          ge.phase = pulp::view::GesturePhase::changed;
+
+    ge.delta_rotation = static_cast<float>(event.rotation) * (3.14159265f / 180.0f); // degrees → radians
+    ge.rotation = ge.delta_rotation;
+    ge.position = pt;
+    target->on_gesture_event(ge);
+    [self setNeedsDisplay:YES];
+}
+
 - (void)startAnimationTimerIfNeeded {
     if (self.animationTimer) return;
     // 60fps timer to drive animations

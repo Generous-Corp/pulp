@@ -7,10 +7,14 @@
 
 #include <pulp/canvas/cg_canvas.hpp>
 #import <UIKit/UIKit.h>
+#include <unordered_map>
 
 // ── PulpRootView: UIView subclass that paints the View tree ─────────────────
 
-@interface PulpRootView : UIView
+@interface PulpRootView : UIView {
+    std::unordered_map<void*, int> _touchIdMap;
+    int _nextTouchId;
+}
 @property (nonatomic, assign) pulp::view::View* rootView;
 @end
 
@@ -22,8 +26,24 @@
         self.backgroundColor = [UIColor blackColor];
         self.multipleTouchEnabled = YES;
         self.contentMode = UIViewContentModeRedraw;
+        _nextTouchId = 0;
+        [self setupHoverIfAvailable];
     }
     return self;
+}
+
+- (int)stableIdForTouch:(UITouch*)touch {
+    void* key = (__bridge void*)touch;
+    auto it = _touchIdMap.find(key);
+    if (it != _touchIdMap.end()) return it->second;
+    int newId = _nextTouchId++;
+    _touchIdMap[key] = newId;
+    return newId;
+}
+
+- (void)removeTouchId:(UITouch*)touch {
+    _touchIdMap.erase((__bridge void*)touch);
+    if (_touchIdMap.empty()) _nextTouchId = 0;
 }
 
 - (void)drawRect:(CGRect)rect {
@@ -69,56 +89,88 @@
 
 // ── Touch events ────────────────────────────────────────────────────────────
 
+- (pulp::view::MouseEvent)mouseEventFromTouch:(UITouch*)touch isDown:(BOOL)isDown {
+    CGPoint loc = [touch locationInView:self];
+    pulp::view::MouseEvent me;
+    me.position = {static_cast<float>(loc.x), static_cast<float>(loc.y)};
+    me.window_position = me.position;
+    me.button = pulp::view::MouseButton::left;
+    me.pointer_id = [self stableIdForTouch:touch];
+    me.is_down = isDown;
+    me.modifiers = 0x8000; // Touch flag
+
+    // Stylus / pressure data (P3: Apple Pencil support)
+    if (touch.maximumPossibleForce > 0)
+        me.pressure = static_cast<float>(touch.force / touch.maximumPossibleForce);
+    if (touch.type == UITouchTypePencil) {
+        me.pointer_type = pulp::view::PointerType::pen;
+        me.altitude_angle = static_cast<float>(touch.altitudeAngle);
+        me.azimuth_angle = static_cast<float>([touch azimuthAngleInView:self]);
+    } else {
+        me.pointer_type = pulp::view::PointerType::touch;
+    }
+
+    return me;
+}
+
 - (void)touchesBegan:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
     if (!self.rootView) return;
-    int pid = 0;
     for (UITouch *touch in touches) {
-        CGPoint loc = [touch locationInView:self];
-        pulp::view::MouseEvent me;
-        me.position = {static_cast<float>(loc.x), static_cast<float>(loc.y)};
-        me.window_position = me.position;
-        me.button = pulp::view::MouseButton::left;
-        me.pointer_id = pid++;
-        me.is_down = true;
-        me.modifiers = 0x8000;
+        auto me = [self mouseEventFromTouch:touch isDown:YES];
         self.rootView->on_mouse_down(me);
     }
 }
 
 - (void)touchesMoved:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
     if (!self.rootView) return;
-    int pid = 0;
     for (UITouch *touch in touches) {
-        CGPoint loc = [touch locationInView:self];
-        pulp::view::MouseEvent me;
-        me.position = {static_cast<float>(loc.x), static_cast<float>(loc.y)};
-        me.window_position = me.position;
-        me.button = pulp::view::MouseButton::left;
-        me.pointer_id = pid++;
-        me.is_down = true;
-        me.modifiers = 0x8000;
+        auto me = [self mouseEventFromTouch:touch isDown:YES];
         self.rootView->on_mouse_drag(me);
     }
 }
 
 - (void)touchesEnded:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
     if (!self.rootView) return;
-    int pid = 0;
     for (UITouch *touch in touches) {
-        CGPoint loc = [touch locationInView:self];
-        pulp::view::MouseEvent me;
-        me.position = {static_cast<float>(loc.x), static_cast<float>(loc.y)};
-        me.window_position = me.position;
-        me.button = pulp::view::MouseButton::left;
-        me.pointer_id = pid++;
-        me.is_down = false;
-        me.modifiers = 0x8000;
+        auto me = [self mouseEventFromTouch:touch isDown:NO];
         self.rootView->on_mouse_up(me);
+        [self removeTouchId:touch];
     }
 }
 
 - (void)touchesCancelled:(NSSet<UITouch *> *)touches withEvent:(UIEvent *)event {
-    [self touchesEnded:touches withEvent:event];
+    if (!self.rootView) return;
+    for (UITouch *touch in touches) {
+        auto me = [self mouseEventFromTouch:touch isDown:NO];
+        me.is_cancelled = true;
+        self.rootView->on_mouse_up(me);
+        [self removeTouchId:touch];
+    }
+}
+
+// ── iPadOS hover support (P6: trackpad/mouse connected) ─────────────────
+
+- (void)setupHoverIfAvailable {
+    if (@available(iOS 13.0, *)) {
+        UIHoverGestureRecognizer *hover =
+            [[UIHoverGestureRecognizer alloc] initWithTarget:self action:@selector(handleHover:)];
+        [self addGestureRecognizer:hover];
+    }
+}
+
+- (void)handleHover:(UIHoverGestureRecognizer *)recognizer API_AVAILABLE(ios(13.0)) {
+    if (!self.rootView) return;
+    CGPoint loc = [recognizer locationInView:self];
+    pulp::view::Point pt = {static_cast<float>(loc.x), static_cast<float>(loc.y)};
+
+    if (recognizer.state == UIGestureRecognizerStateChanged ||
+        recognizer.state == UIGestureRecognizerStateBegan) {
+        self.rootView->simulate_hover(pt);
+    } else if (recognizer.state == UIGestureRecognizerStateEnded ||
+               recognizer.state == UIGestureRecognizerStateCancelled) {
+        self.rootView->simulate_hover({-1, -1});
+    }
+    [self setNeedsDisplay];
 }
 
 @end

@@ -220,6 +220,8 @@ getMotionToken("motion.duration.fast")  // returns 80
 // Register event types (required before on() will fire)
 registerClick(id)     // Enable click events
 registerHover(id)     // Enable mouseenter/mouseleave events
+registerPointer(id)   // Enable pointer events (pointerdown/pointermove/pointerup)
+registerGesture(id)   // Enable gesture events (gesturestart/gesturechange/gestureend)
 
 // Listen for events
 on(id, "change", (value) => { })        // Knob, Fader, Checkbox value changed
@@ -231,6 +233,70 @@ on(id, "mouseleave", () => { })         // Mouse leave (requires registerHover)
 // Inspector (developer tool)
 enableInspectClick()
 on("__inspect__", "click", (id) => { }) // Cmd+click reports widget ID
+```
+
+### Pointer Events (W3C PointerEvent)
+
+Unified input model — same code works for mouse (macOS), touch (iOS), and stylus (Apple Pencil):
+
+```js
+el.addEventListener("pointerdown", (e) => {
+    console.log(e.pointerId);       // Stable per-finger ID (0 = primary)
+    console.log(e.pointerType);     // "mouse", "touch", or "pen"
+    console.log(e.isPrimary);       // true for first finger / mouse
+    console.log(e.clientX, e.clientY);
+    console.log(e.pressure);        // 0.0–1.0 (Apple Pencil force)
+    console.log(e.altitudeAngle);   // Pencil tilt (radians)
+    console.log(e.azimuthAngle);    // Pencil rotation (radians)
+});
+
+el.addEventListener("pointermove", (e) => {
+    // Coalesced events: all touch samples between frames (120Hz+ on ProMotion)
+    for (const pt of e.getCoalescedEvents()) {
+        drawLine(pt.clientX, pt.clientY);
+    }
+});
+
+el.addEventListener("pointerup", (e) => { /* finger/mouse released */ });
+el.addEventListener("pointercancel", (e) => { /* touch cancelled by system */ });
+```
+
+### Pointer Capture
+
+Lock pointer events to an element during drag, even if the pointer leaves its bounds:
+
+```js
+el.addEventListener("pointerdown", (e) => {
+    el.setPointerCapture(e.pointerId);
+});
+el.addEventListener("gotpointercapture", (e) => { /* capture acquired */ });
+el.addEventListener("lostpointercapture", (e) => { /* capture released */ });
+// Capture is automatically released on pointerup
+```
+
+### Gesture Events
+
+High-level multi-touch and trackpad gestures:
+
+```js
+el.addEventListener("gesturestart", (e) => { /* two-finger gesture began */ });
+el.addEventListener("gesturechange", (e) => {
+    console.log(e.scale);     // Pinch zoom factor (1.0 = no change)
+    console.log(e.rotation);  // Rotation in radians
+});
+el.addEventListener("gestureend", (e) => { /* gesture ended */ });
+```
+
+Works on macOS trackpad (magnifyWithEvent/rotateWithEvent) and iOS multi-touch.
+
+### touch-action CSS
+
+Control default gesture handling on touch platforms:
+
+```js
+el.style.touchAction = "none";          // Disable all default gestures
+el.style.touchAction = "pan-x";         // Allow horizontal panning only
+el.style.touchAction = "manipulation";  // Allow pan + pinch, disable double-tap zoom
 ```
 
 ## Canvas 2D Drawing

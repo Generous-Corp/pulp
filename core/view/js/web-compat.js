@@ -553,16 +553,32 @@ Element.prototype._registerNativeEvent = function(type) {
     }
 };
 
-function _makeEvent(type, target) {
+function _makeEvent(type, target, data) {
+    var d = data || {};
     return {
         type: type,
         target: target,
         currentTarget: null,
-        clientX: 0, clientY: 0,
-        offsetX: 0, offsetY: 0,
-        button: 0,
-        key: "", code: "",
-        ctrlKey: false, shiftKey: false, altKey: false, metaKey: false,
+        clientX: d.clientX || 0,
+        clientY: d.clientY || 0,
+        offsetX: d.offsetX || 0,
+        offsetY: d.offsetY || 0,
+        button: d.button || 0,
+        key: d.key || "", code: d.code || "",
+        ctrlKey: !!d.ctrlKey, shiftKey: !!d.shiftKey,
+        altKey: !!d.altKey, metaKey: !!d.metaKey,
+        pointerId: d.pointerId || 0,
+        pointerType: d.pointerType || "mouse",
+        isPrimary: d.isPrimary !== undefined ? d.isPrimary : true,
+        pressure: d.pressure !== undefined ? d.pressure : 0.5,
+        altitudeAngle: d.altitudeAngle || 0,
+        azimuthAngle: d.azimuthAngle || 0,
+        scale: d.scale !== undefined ? d.scale : 1,
+        rotation: d.rotation || 0,
+        _coalesced: d._coalesced || null,
+        _predicted: d._predicted || null,
+        getCoalescedEvents: function() { return this._coalesced || [this]; },
+        getPredictedEvents: function() { return this._predicted || []; },
         _stopped: false,
         _defaultPrevented: false,
         _noBubble: false,

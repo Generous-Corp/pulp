@@ -262,6 +262,14 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
             setCursor(id, resolved);
             break;
 
+        // Touch behavior (W3C touch-action)
+        case "touch-action":
+        case "touchAction":
+            // Store on element for pointer event handling
+            // Values: auto, none, pan-x, pan-y, pinch-zoom, manipulation
+            this._touchAction = resolved;
+            break;
+
         // Transform
         case "transform": {
             var transforms = parseTransform(resolved);

@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/view/input_events.hpp>
+#include <pulp/view/view.hpp>
 
 using namespace pulp::view;
 
@@ -39,8 +40,14 @@ TEST_CASE("MouseEvent pointer_id defaults to primary", "[view][input]") {
     REQUIRE(e.pointer_id == 0);
     REQUIRE_FALSE(e.isTouch());
 
-    e.pointer_id = 1;
+    // pointer_id alone doesn't make it a touch — need pointer_type or touch flag
+    e.pointer_type = PointerType::touch;
     REQUIRE(e.isTouch());
+
+    // Legacy touch flag (0x8000) also works
+    MouseEvent e2;
+    e2.modifiers = 0x8000;
+    REQUIRE(e2.isTouch());
 }
 
 TEST_CASE("MouseEvent click_count defaults to 1", "[view][input]") {
@@ -79,4 +86,92 @@ TEST_CASE("KeyCode navigation keys are sequential", "[view][input]") {
     REQUIRE(static_cast<int>(KeyCode::right) == static_cast<int>(KeyCode::left) + 1);
     REQUIRE(static_cast<int>(KeyCode::up) == static_cast<int>(KeyCode::right) + 1);
     REQUIRE(static_cast<int>(KeyCode::down) == static_cast<int>(KeyCode::up) + 1);
+}
+
+// ── Pointer type tests (P2/P3) ─────────────────────────────────────────
+
+TEST_CASE("MouseEvent default pointer type is mouse", "[view][input][pointer]") {
+    MouseEvent e;
+    REQUIRE(e.pointer_type == PointerType::mouse);
+    REQUIRE(std::string(e.pointerTypeString()) == "mouse");
+    REQUIRE(e.isPrimary());
+    REQUIRE(e.pressure == 0.5f); // mouse default
+}
+
+TEST_CASE("MouseEvent touch pointer type", "[view][input][pointer]") {
+    MouseEvent e;
+    e.pointer_type = PointerType::touch;
+    e.pointer_id = 1;
+    REQUIRE(e.isTouch());
+    REQUIRE_FALSE(e.isPrimary());
+    REQUIRE(std::string(e.pointerTypeString()) == "touch");
+}
+
+TEST_CASE("MouseEvent pen pointer type with stylus data", "[view][input][pointer]") {
+    MouseEvent e;
+    e.pointer_type = PointerType::pen;
+    e.pressure = 0.8f;
+    e.altitude_angle = 1.2f;
+    e.azimuth_angle = 3.14f;
+
+    REQUIRE(e.isPen());
+    REQUIRE(std::string(e.pointerTypeString()) == "pen");
+    REQUIRE(e.pressure == 0.8f);
+    REQUIRE(e.altitude_angle == 1.2f);
+    REQUIRE(e.azimuth_angle == 3.14f);
+}
+
+TEST_CASE("MouseEvent is_cancelled flag", "[view][input][pointer]") {
+    MouseEvent e;
+    REQUIRE_FALSE(e.is_cancelled);
+    e.is_cancelled = true;
+    REQUIRE(e.is_cancelled);
+}
+
+// ── Gesture event tests (P4) ───────────────────────────────────────────
+
+TEST_CASE("GestureEvent defaults", "[view][input][gesture]") {
+    GestureEvent ge;
+    REQUIRE(ge.phase == GesturePhase::began);
+    REQUIRE(ge.scale == 1.0f);
+    REQUIRE(ge.rotation == 0.0f);
+    REQUIRE(ge.delta_scale == 0.0f);
+}
+
+TEST_CASE("GestureEvent pinch", "[view][input][gesture]") {
+    GestureEvent ge;
+    ge.phase = GesturePhase::changed;
+    ge.scale = 1.5f;
+    ge.delta_scale = 0.05f;
+    ge.position = {100, 200};
+
+    REQUIRE(ge.scale == 1.5f);
+    REQUIRE(ge.position.x == 100.0f);
+}
+
+// ── Pointer capture tests (P2b) ────────────────────────────────────────
+
+TEST_CASE("View pointer capture", "[view][input][capture]") {
+    View v;
+    REQUIRE_FALSE(v.has_pointer_capture(0));
+
+    v.set_pointer_capture(0);
+    REQUIRE(v.has_pointer_capture(0));
+    REQUIRE_FALSE(v.has_pointer_capture(1));
+
+    v.set_pointer_capture(1);
+    REQUIRE(v.has_pointer_capture(1));
+
+    v.release_pointer_capture(0);
+    REQUIRE_FALSE(v.has_pointer_capture(0));
+    REQUIRE(v.has_pointer_capture(1));
+}
+
+TEST_CASE("View pointer capture duplicate is no-op", "[view][input][capture]") {
+    View v;
+    v.set_pointer_capture(0);
+    v.set_pointer_capture(0); // duplicate
+    REQUIRE(v.has_pointer_capture(0));
+    v.release_pointer_capture(0);
+    REQUIRE_FALSE(v.has_pointer_capture(0)); // single release clears it
 }
