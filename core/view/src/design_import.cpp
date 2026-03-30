@@ -207,11 +207,124 @@ static IRNode parse_ir_node(const choc::value::ValueView& obj) {
     if (obj.hasObjectMember("default"))
         node.audio_default = get_float(obj, "default", 0.5f);
 
+    // Top-level properties (Pencil/Figma format puts these at node level, not in "style")
+    // Override style values if they weren't set from the "style" sub-object
+    if (!node.style.width && obj.hasObjectMember("width")) {
+        auto w_str = get_string(obj, "width", "");
+        if (w_str != "fill_container" && w_str != "fit_content") {
+            float w = get_float(obj, "width", 0);
+            if (w > 0) node.style.width = w;
+        }
+    }
+    if (!node.style.height && obj.hasObjectMember("height")) {
+        float h = get_float(obj, "height", 0);
+        if (h > 0) node.style.height = h;
+    }
+    // Top-level fill → backgroundColor
+    if (!node.style.background_color && obj.hasObjectMember("fill")) {
+        auto fill_val = obj["fill"];
+        if (fill_val.isString()) {
+            auto fill_str = std::string(fill_val.toString());
+            if (!fill_str.empty() && fill_str[0] == '#')
+                node.style.background_color = fill_str;
+        }
+    }
+    // Top-level cornerRadius
+    if (!node.style.border_radius && obj.hasObjectMember("cornerRadius")) {
+        node.style.border_radius = get_float(obj, "cornerRadius", 0);
+    }
+    // Top-level fontSize, fontWeight, fontFamily for text nodes
+    if (node.type == "text" || node.type == "label") {
+        if (!node.style.font_size && obj.hasObjectMember("fontSize"))
+            node.style.font_size = get_float(obj, "fontSize", 14);
+        if (!node.style.font_weight && obj.hasObjectMember("fontWeight")) {
+            auto fw = get_string(obj, "fontWeight", "");
+            if (!fw.empty()) {
+                try { node.style.font_weight = std::stoi(fw); }
+                catch (...) { if (fw == "bold") node.style.font_weight = 700; }
+            }
+        }
+        if (!node.style.color && obj.hasObjectMember("fill")) {
+            auto fill_val = obj["fill"];
+            if (fill_val.isString()) node.style.color = std::string(fill_val.toString());
+        }
+        if (!node.style.font_family && obj.hasObjectMember("fontFamily"))
+            node.style.font_family = get_string(obj, "fontFamily", "");
+        // Top-level content → text_content
+        if (node.text_content.empty() && obj.hasObjectMember("content"))
+            node.text_content = get_string(obj, "content", "");
+    }
+    // Top-level layout properties (Pencil uses "layout": "vertical"/"horizontal")
+    // Pencil frames default to horizontal when no layout is specified
+    if (obj.hasObjectMember("layout")) {
+        auto layout_val = obj["layout"];
+        if (layout_val.isString()) {
+            auto dir = std::string(layout_val.toString());
+            if (dir == "horizontal") node.layout.direction = LayoutDirection::row;
+            else if (dir == "vertical") node.layout.direction = LayoutDirection::column;
+            else if (dir == "none") {} // absolute positioning, keep default
+        } else if (layout_val.isObject()) {
+            // IR format: layout is an object with "direction" key
+            // Already parsed above via parse_ir_layout
+        }
+    } else if (node.type == "frame" &&
+               obj.hasObjectMember("children") && obj["children"].isArray() && obj["children"].size() > 0) {
+        // Pencil frames default to horizontal (row) when layout is not specified
+        node.layout.direction = LayoutDirection::row;
+    }
+    if (obj.hasObjectMember("gap"))
+        node.layout.gap = get_float(obj, "gap", 0);
+    if (obj.hasObjectMember("justifyContent")) {
+        auto j = get_string(obj, "justifyContent", "");
+        if (j == "center") node.layout.justify = LayoutAlign::center;
+        else if (j == "space_between" || j == "space-between") node.layout.justify = LayoutAlign::space_between;
+    }
+    if (obj.hasObjectMember("alignItems")) {
+        auto a = get_string(obj, "alignItems", "");
+        if (a == "center") node.layout.align = LayoutAlign::center;
+        else if (a == "end") node.layout.align = LayoutAlign::flex_end;
+    }
+    // Top-level padding (Pencil uses array: [top, right] or [top, right, bottom, left])
+    if (obj.hasObjectMember("padding")) {
+        auto pad = obj["padding"];
+        if (pad.isArray()) {
+            if (pad.size() == 2) {
+                float tb = static_cast<float>(pad[0].getWithDefault<double>(0));
+                float lr = static_cast<float>(pad[1].getWithDefault<double>(0));
+                node.layout.padding_top = node.layout.padding_bottom = tb;
+                node.layout.padding_left = node.layout.padding_right = lr;
+            } else if (pad.size() == 4) {
+                node.layout.padding_top = static_cast<float>(pad[0].getWithDefault<double>(0));
+                node.layout.padding_right = static_cast<float>(pad[1].getWithDefault<double>(0));
+                node.layout.padding_bottom = static_cast<float>(pad[2].getWithDefault<double>(0));
+                node.layout.padding_left = static_cast<float>(pad[3].getWithDefault<double>(0));
+            }
+        } else {
+            float p = get_float(obj, "padding", 0);
+            node.layout.padding_top = node.layout.padding_right =
+                node.layout.padding_bottom = node.layout.padding_left = p;
+        }
+    }
+
     // Children
     if (obj.hasObjectMember("children") && obj["children"].isArray()) {
         auto children = obj["children"];
         for (uint32_t i = 0; i < children.size(); ++i)
             node.children.push_back(parse_ir_node(children[static_cast<int>(i)]));
+    }
+
+    // For audio widgets: extract dimensions from child shapes
+    if (node.audio_widget != AudioWidgetType::none && !node.children.empty()) {
+        for (auto& child : node.children) {
+            // Child ellipse/rectangle = the visual shape of the widget
+            if (child.type == "ellipse" || child.type == "rectangle") {
+                if (child.style.width && !node.style.width)
+                    node.style.width = child.style.width;
+                if (child.style.height && !node.style.height)
+                    node.style.height = child.style.height;
+                break;  // Use first shape child
+            }
+        }
     }
 
     return node;
@@ -579,44 +692,67 @@ static constexpr float kMinFaderHeight = 80.0f;
 static constexpr float kMinMeterWidth = 20.0f;
 static constexpr float kMinMeterHeight = 80.0f;
 
-static float estimate_child_height(const IRNode& child);
+// Compute the actual rendered height of a node from its Pencil/IR data.
+// Uses exact child dimensions — no guessing.
+static float compute_node_height(const IRNode& node);
 
-static float estimate_container_height(const IRNode& node) {
-    // Estimate height needed for a container based on its children and direction
+static float compute_container_height(const IRNode& node) {
     bool is_row = (node.layout.direction == LayoutDirection::row);
     float gap = node.layout.gap;
+    float pad = node.layout.padding_top + node.layout.padding_bottom;
 
     if (is_row) {
-        // Row: height = max child height
         float max_h = 0;
         for (auto& child : node.children)
-            max_h = std::max(max_h, estimate_child_height(child));
-        max_h += node.layout.padding_top + node.layout.padding_bottom;
-        return std::max(max_h, kMinRowHeight);
+            max_h = std::max(max_h, compute_node_height(child));
+        return std::max(max_h + pad, kMinRowHeight);
     } else {
-        // Column: height = sum of child heights + gaps
         float h = 0;
         for (size_t i = 0; i < node.children.size(); ++i) {
             if (i > 0) h += gap;
-            h += estimate_child_height(node.children[i]);
+            h += compute_node_height(node.children[i]);
         }
-        h += node.layout.padding_top + node.layout.padding_bottom;
-        return std::max(h, kMinRowHeight);
+        return std::max(h + pad, kMinRowHeight);
     }
 }
 
-static float estimate_child_height(const IRNode& child) {
-    if (child.style.height) return *child.style.height;
-    if (child.audio_widget == AudioWidgetType::knob)
-        return child.style.height.value_or(kMinKnobSize) + 20;
-    if (child.audio_widget == AudioWidgetType::fader)
-        return child.style.height.value_or(kMinFaderHeight) + 20;
-    if (child.audio_widget == AudioWidgetType::meter)
-        return child.style.height.value_or(kMinMeterHeight) + 20;
-    if (child.type == "text" || child.type == "label")
-        return kMinLabelHeight;
-    if (!child.children.empty())
-        return estimate_container_height(child);
+static float compute_node_height(const IRNode& node) {
+    // Audio widget frames: the generated wrapper column contains the widget +
+    // separate labels. Compute from children's actual dimensions.
+    if (node.audio_widget != AudioWidgetType::none) {
+        float widget_h = 0;
+        float labels_h = 0;
+        float gap = node.layout.gap > 0 ? node.layout.gap : 8;
+        int n_items = 0;
+
+        for (auto& c : node.children) {
+            if (c.type == "ellipse" || c.type == "rectangle") {
+                widget_h = std::max(widget_h, c.style.height.value_or(kMinFaderHeight));
+                n_items++;
+            } else if (c.type == "text" || c.type == "label") {
+                labels_h += kMinLabelHeight;
+                n_items++;
+            }
+        }
+        // Minimums if no children found
+        if (widget_h == 0) widget_h = (node.audio_widget == AudioWidgetType::knob) ? kMinKnobSize : kMinFaderHeight;
+        if (n_items == 0) n_items = 1;
+
+        return widget_h + labels_h + gap * static_cast<float>(n_items);
+    }
+
+    // Non-audio node with explicit height
+    if (node.style.height) return *node.style.height;
+
+    // Text/label: font-dependent height
+    if (node.type == "text" || node.type == "label")
+        return node.style.font_size.value_or(14.0f) + 4.0f;
+
+    // Container with children: compute recursively
+    if (!node.children.empty())
+        return compute_container_height(node);
+
+    // Leaf node without dimensions
     return kMinRowHeight;
 }
 
@@ -774,8 +910,8 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
         } else if (node.layout.height_mode == SizingMode::fill) {
             ss << ind << "setFlex('" << id << "', 'flex_grow', 1);\n";
         } else {
-            // Estimate height from children
-            float est = estimate_container_height(node);
+            // Compute height from children's actual dimensions
+            float est = compute_container_height(node);
             ss << ind << "setFlex('" << id << "', 'height', " << est << ");\n";
         }
 
