@@ -113,6 +113,37 @@ After generating, offer to:
 | Variables (COLOR) | `theme.colors` |
 | Variables (FLOAT) | `theme.dimensions` |
 
+## Automated Validation Loop
+
+After generating Pulp code, ALWAYS validate by comparing with the source design:
+
+1. **Screenshot the source design** via MCP:
+   - Pencil: `get_screenshot(nodeId)`
+   - Save to a temp file as the reference
+
+2. **Render the generated JS** headlessly:
+   ```bash
+   pulp-screenshot --script generated.js --output render.png --width W --height H
+   ```
+
+3. **Compare** reference vs render:
+   ```bash
+   pulp import-design --from X --file input --validate --reference source.png --diff diff.png
+   ```
+
+4. **Review the diff image** — red highlights show differences
+
+5. **Iterate if needed** — adjust the generated code and re-render until similarity is acceptable (>85%)
+
+### Yoga Layout Rules (MUST follow)
+- Every container needs explicit `height`, `min_height`, or `flex_grow`
+- Labels need `min_height` (14px for normal text, 12px for small)
+- Faders need `min_width >= 40px` for thumb rendering
+- Meters need `min_width >= 20px` for bar visibility
+- Knobs need `min_size >= 56px` for arc rendering
+- Use `createCol`/`createRow` for containers (NOT `createPanel` which adds glass overlay)
+- Row height = max child height; Column height = sum of child heights + gaps
+
 ## CLI Alternative
 
 The deterministic import tool is also available:
@@ -121,6 +152,9 @@ pulp import-design --from figma --file design.json
 pulp import-design --from stitch --file screen.html
 pulp import-design --from v0 --file component.tsx
 pulp import-design --from pencil --file design.json
+
+# With validation
+pulp import-design --from pencil --file design.json --validate --reference source.png --diff diff.png
 ```
 
 Use `--dry-run` to preview without writing files.
