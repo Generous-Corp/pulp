@@ -258,12 +258,13 @@ setFlex("left-panel", "min_width", 260);
 setFlex("left-panel", "flex_shrink", 0);
 setBackground("left-panel", APP_SURFACE);
 setBorder("left-panel", APP_BORDER, 1, 0);
-setScrollContentSize("left-panel", 310, 1600);
+setScrollContentSize("left-panel", 310, 2200);  // color-section(380) + search(60) + tokens(1700)
 
 // Issue 9: Color System section matching HTML reference
 createCol("color-section", "left-panel");
 setFlex("color-section", "padding", 10);
 setFlex("color-section", "gap", 6);
+setFlex("color-section", "height", 380);  // explicit height for Yoga layout engine
 
 createLabel("cs-title", "COLOR SYSTEM", "color-section");
 setFontSize("cs-title", 10);
@@ -384,7 +385,7 @@ setTextColor("tokens-title", APP_TEXT_DIM);
 
 // Token list (inside left-panel scroll, no nested scroll needed)
 createCol("token-list", "left-panel");
-setFlex("token-list", "height", 800);
+setFlex("token-list", "height", 1700);  // Yoga: fits all 13 token groups
 
 // Token groups
 // D5: Expanded token registry (50+ semantic tokens matching HTML reference)
@@ -407,8 +408,10 @@ var tokenGroups = [
 for (var g = 0; g < tokenGroups.length; g++) {
     var group = tokenGroups[g];
     var gid = "tg-" + g;
-    // No fixed height — let flex layout compute from visible children (CSS auto height)
+    // Yoga needs explicit height for each token group
+    var groupHeight = 18 + (group.tokens.length * 28) + 8;  // title + rows + padding
     createCol(gid, "token-list");
+    setFlex(gid, "height", groupHeight);
     setFlex(gid, "padding_left", 10);
     setFlex(gid, "padding_right", 10);
     setFlex(gid, "padding_top", 4);
@@ -529,6 +532,7 @@ function buildShadeRamps() {
         // Container for palette row + editor
         createCol(rampId, "color-section");
         setFlex(rampId, "gap", 4);
+        setFlex(rampId, "height", 28);  // Yoga needs explicit height (collapsed state)
 
         // Palette row: dot + name + shade ramp (clickable to expand)
         var rowId = rampId + "-header";
