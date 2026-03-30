@@ -274,6 +274,13 @@ add_executable(pulp-test-design-import test_design_import.cpp)
 target_link_libraries(pulp-test-design-import PRIVATE pulp::view Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-design-import)
 
+# Screenshot comparison tests (visual diff for design import validation)
+if(APPLE)
+    add_executable(pulp-test-screenshot-compare test_screenshot_compare.cpp)
+    target_link_libraries(pulp-test-screenshot-compare PRIVATE pulp::view Catch2::Catch2WithMain)
+    catch_discover_tests(pulp-test-screenshot-compare)
+endif()
+
 # Parameter attachment tests
 add_executable(pulp-test-param-attachment test_param_attachment.cpp)
 target_link_libraries(pulp-test-param-attachment PRIVATE pulp::view Catch2::Catch2WithMain)
@@ -474,6 +481,11 @@ catch_discover_tests(pulp-test-web-demos)
 add_executable(pulp-test-token-diff test_token_diff.cpp)
 target_link_libraries(pulp-test-token-diff PRIVATE pulp::view Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-token-diff)
+
+# AI Designer: design tool layout/parity tests
+add_executable(pulp-test-design-tool-layout test_design_tool_layout.cpp)
+target_link_libraries(pulp-test-design-tool-layout PRIVATE pulp::view pulp::state Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-design-tool-layout)
 
 # AI Designer: style pack tests
 add_executable(pulp-test-style-pack test_style_pack.cpp)

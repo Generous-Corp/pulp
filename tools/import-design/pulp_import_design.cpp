@@ -1,5 +1,10 @@
 #include <pulp/view/design_import.hpp>
 #include <pulp/view/design_export.hpp>
+#include <pulp/view/screenshot_compare.hpp>
+#include <pulp/view/screenshot.hpp>
+#include <pulp/view/script_engine.hpp>
+#include <pulp/view/widget_bridge.hpp>
+#include <pulp/state/store.hpp>
 #include <fstream>
 #include <iostream>
 #include <sstream>
@@ -9,6 +14,7 @@
 
 namespace fs = std::filesystem;
 using namespace pulp::view;
+using namespace pulp::state;
 
 static void print_usage() {
     std::cout << "pulp import-design — Import designs from external tools into Pulp\n\n";
@@ -66,10 +72,15 @@ int main(int argc, char* argv[]) {
     std::string output_file = "ui.js";
     std::string tokens_file = "tokens.json";
     std::string export_format = "w3c";
+    std::string reference_image;     // --reference: PNG of source design for validation
+    std::string diff_output;         // --diff: output path for visual diff image
     bool dry_run = false;
     bool include_tokens = true;
     bool include_comments = true;
     bool export_tokens_mode = false;
+    bool validate = false;           // --validate: render + compare after import
+    int render_width = 340;
+    int render_height = 280;
 
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--from") == 0 && i + 1 < argc) {
@@ -90,6 +101,21 @@ int main(int argc, char* argv[]) {
             export_tokens_mode = true;
         } else if (std::strcmp(argv[i], "--format") == 0 && i + 1 < argc) {
             export_format = argv[++i];
+        } else if (std::strcmp(argv[i], "--validate") == 0) {
+            validate = true;
+        } else if (std::strcmp(argv[i], "--reference") == 0 && i + 1 < argc) {
+            reference_image = argv[++i];
+            validate = true;
+        } else if (std::strcmp(argv[i], "--diff") == 0 && i + 1 < argc) {
+            diff_output = argv[++i];
+        } else if (std::strcmp(argv[i], "--render-size") == 0 && i + 1 < argc) {
+            // Parse WxH
+            std::string sz = argv[++i];
+            auto x = sz.find('x');
+            if (x != std::string::npos) {
+                render_width = std::stoi(sz.substr(0, x));
+                render_height = std::stoi(sz.substr(x + 1));
+            }
         } else if (std::strcmp(argv[i], "--help") == 0 || std::strcmp(argv[i], "-h") == 0) {
             print_usage();
             return 0;
@@ -207,5 +233,77 @@ int main(int argc, char* argv[]) {
     }
 
     std::cout << ")\n";
+
+    // ── Validation: render generated JS and compare with reference ──────
+    if (validate) {
+        std::cout << "Validating render...\n";
+
+        // Render the generated JS headlessly
+        View render_root;
+        render_root.set_theme(Theme::dark());
+        render_root.flex().direction = FlexDirection::column;
+        StateStore render_store;
+        ScriptEngine render_engine;
+        WidgetBridge render_bridge(render_engine, render_root, render_store);
+        try {
+            render_bridge.load_script(js);
+        } catch (const std::exception& e) {
+            std::cerr << "Validation error: generated JS failed to load: " << e.what() << "\n";
+            return 1;
+        }
+
+        auto rendered_png = render_to_png(render_root,
+            static_cast<uint32_t>(render_width),
+            static_cast<uint32_t>(render_height), 2.0f);
+
+        if (rendered_png.empty()) {
+            std::cerr << "Validation error: headless render failed\n";
+            return 1;
+        }
+
+        // Save rendered screenshot
+        auto rendered_path = output_file + ".png";
+        {
+            std::ofstream f(rendered_path, std::ios::binary);
+            f.write(reinterpret_cast<const char*>(rendered_png.data()),
+                    static_cast<std::streamsize>(rendered_png.size()));
+        }
+        std::cout << "Rendered → " << rendered_path << " (" << render_width << "x" << render_height << ")\n";
+
+        // Compare with reference if provided
+        if (!reference_image.empty()) {
+            auto result = compare_screenshot_files(reference_image, rendered_path);
+            if (!result.valid) {
+                std::cerr << "Comparison error: " << result.error << "\n";
+                return 1;
+            }
+
+            std::cout << "Similarity: " << static_cast<int>(result.similarity * 100) << "% ("
+                      << result.diff_pixels << "/" << result.total_pixels << " pixels differ, "
+                      << "mean error: " << result.mean_error << ")\n";
+
+            if (result.passes(0.70f)) {
+                std::cout << "Validation: PASS\n";
+            } else {
+                std::cout << "Validation: NEEDS REVIEW (similarity below 70%)\n";
+            }
+
+            // Generate diff image if requested
+            if (!diff_output.empty()) {
+                auto ref_bytes = [&]() -> std::vector<uint8_t> {
+                    std::ifstream f(reference_image, std::ios::binary);
+                    return {std::istreambuf_iterator<char>(f), {}};
+                }();
+                auto diff_png = generate_diff_image(ref_bytes, rendered_png);
+                if (!diff_png.empty()) {
+                    std::ofstream f(diff_output, std::ios::binary);
+                    f.write(reinterpret_cast<const char*>(diff_png.data()),
+                            static_cast<std::streamsize>(diff_png.size()));
+                    std::cout << "Diff image → " << diff_output << "\n";
+                }
+            }
+        }
+    }
+
     return 0;
 }
