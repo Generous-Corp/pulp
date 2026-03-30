@@ -353,6 +353,19 @@ static IRNode parse_ir_node(const choc::value::ValueView& obj) {
         }
     }
 
+    // Parse stroke color from shapes (Pencil puts stroke on ellipse/rectangle nodes)
+    if (obj.hasObjectMember("stroke")) {
+        auto stroke = obj["stroke"];
+        if (stroke.isObject() && stroke.hasObjectMember("fill")) {
+            auto fill = stroke["fill"];
+            if (fill.isString()) {
+                auto fill_str = std::string(fill.toString());
+                if (!fill_str.empty() && fill_str[0] == '#')
+                    node.attributes["stroke_color"] = fill_str;
+            }
+        }
+    }
+
     // For audio widgets: extract dimensions from child shapes
     if (node.audio_widget != AudioWidgetType::none && !node.children.empty()) {
         for (auto& child : node.children) {
@@ -810,16 +823,21 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
     if (node.audio_widget != AudioWidgetType::none) {
         auto wtype = node.audio_widget;
 
-        // Extract label and value text from child text nodes (if present)
-        // This avoids duplicating labels that the widget already renders
+        // Extract label text, value text, and stroke color from child nodes
         std::string label_text = node.audio_label;
         std::string value_text;
+        std::string stroke_color;  // Per-widget stroke color from child ellipse
         for (auto& child : node.children) {
             if (child.type == "text" || child.type == "label") {
                 if (label_text.empty() && !child.text_content.empty())
                     label_text = child.text_content;
                 else if (!child.text_content.empty() && child.text_content != label_text)
                     value_text = child.text_content;
+            }
+            // Extract stroke color from child ellipse/rectangle for per-knob coloring
+            if ((child.type == "ellipse" || child.type == "rectangle") && stroke_color.empty()) {
+                if (child.attributes.count("stroke_color"))
+                    stroke_color = child.attributes.at("stroke_color");
             }
         }
 

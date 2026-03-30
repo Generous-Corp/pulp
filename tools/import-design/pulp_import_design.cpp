@@ -358,18 +358,21 @@ int main(int argc, char* argv[]) {
                 std::cout << "Validation: NEEDS REVIEW (similarity below 70%)\n";
             }
 
-            // Generate diff image if requested
-            if (!diff_output.empty()) {
+            // Always generate diff image when reference is provided
+            // Use --diff path if given, otherwise auto-generate alongside render
+            auto actual_diff_path = diff_output.empty()
+                ? (output_file + ".diff.png") : diff_output;
+            {
                 auto ref_bytes = [&]() -> std::vector<uint8_t> {
                     std::ifstream f(reference_image, std::ios::binary);
                     return {std::istreambuf_iterator<char>(f), {}};
                 }();
                 auto diff_png = generate_diff_image(ref_bytes, rendered_png);
                 if (!diff_png.empty()) {
-                    std::ofstream f(diff_output, std::ios::binary);
+                    std::ofstream f(actual_diff_path, std::ios::binary);
                     f.write(reinterpret_cast<const char*>(diff_png.data()),
                             static_cast<std::streamsize>(diff_png.size()));
-                    std::cout << "Diff image → " << diff_output << "\n";
+                    std::cout << "Diff image → " << actual_diff_path << "\n";
                 }
             }
         }

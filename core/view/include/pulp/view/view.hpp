@@ -206,12 +206,15 @@ public:
     void set_background_color(Color c) { bg_color_ = c; has_bg_ = true; }
     void clear_background_color() { has_bg_ = false; }
     bool has_background_color() const { return has_bg_; }
+    Color background_color() const { return bg_color_; }
 
     /// Border (optional — painted on top of background)
     void set_border(Color c, float width, float radius = 0) {
         border_color_ = c; border_width_ = width; corner_radius_ = radius; has_border_ = true;
     }
     void clear_border() { has_border_ = false; }
+    bool has_border() const { return has_border_; }
+    Color border_color() const { return border_color_; }
     float corner_radius() const { return corner_radius_; }
 
     /// Per-side borders (CSS border-top, border-right, etc.)
@@ -279,6 +282,14 @@ public:
     void set_right(float v) { right_ = v; has_right_ = true; }
     void set_bottom(float v) { bottom_ = v; has_bottom_ = true; }
     void set_left(float v) { left_ = v; has_left_ = true; }
+    float top() const { return top_; }
+    float right() const { return right_; }
+    float bottom() const { return bottom_; }
+    float left() const { return left_; }
+    bool has_top() const { return has_top_; }
+    bool has_right() const { return has_right_; }
+    bool has_bottom() const { return has_bottom_; }
+    bool has_left() const { return has_left_; }
     void set_z_index(int z) { z_index_ = z; }
     int z_index() const { return z_index_; }
 

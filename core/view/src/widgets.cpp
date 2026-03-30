@@ -348,14 +348,15 @@ void Knob::paint(canvas::Canvas& canvas) {
         // Fall through to draw labels and value text on top of the shader
     } else if (render_style_ == WidgetRenderStyle::minimal) {
         // ── Minimal/design-preview: simple circle outline (matches design tools) ──
-        // Use full available radius (not 0.8) to match Pencil/Figma ellipse sizes
         float full_r = std::min(cx, cy) - 2.0f;
         auto fill_bg = resolve_color("bg.surface", canvas::Color::rgba(49, 50, 68));
         canvas.set_fill_color(fill_bg);
         canvas.fill_circle(cx, cy, full_r);
 
-        auto stroke_color = resolve_color("control.fill", canvas::Color::rgba(100, 150, 255));
-        canvas.set_stroke_color(stroke_color);
+        // Use per-widget border color if set via setBorder, otherwise theme color
+        auto stroke = has_border()
+            ? border_color() : resolve_color("control.fill", canvas::Color::rgba(100, 150, 255));
+        canvas.set_stroke_color(stroke);
         canvas.set_line_width(2.5f);
         canvas.stroke_circle(cx, cy, full_r);
     } else {
