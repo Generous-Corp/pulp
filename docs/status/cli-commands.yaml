@@ -163,8 +163,16 @@ commands:
         description: "Design source: figma, stitch, v0, pencil"
       - name: --file
         kind: option
-        required: true
-        description: Input file path
+        description: Input file path (required if --url not given)
+      - name: --url
+        kind: option
+        description: Design URL (Figma file URL or v0 share link)
+      - name: --frame
+        kind: option
+        description: Frame/artboard name to import (Figma)
+      - name: --screen
+        kind: option
+        description: Screen name to import (Stitch)
       - name: --output
         kind: option
         description: Output JS file (default: ui.js)
@@ -180,7 +188,28 @@ commands:
       - name: --no-comments
         kind: flag
         description: Omit comments from generated code
-    docs: guides/importing-designs.md
+      - name: --web-compat
+        kind: flag
+        description: Use DOM API instead of native Pulp API
+      - name: --validate
+        kind: flag
+        description: Render generated JS and validate layout
+      - name: --reference
+        kind: option
+        description: Compare render against reference screenshot PNG
+      - name: --diff
+        kind: option
+        description: Save visual diff image PNG
+      - name: --render-size
+        kind: option
+        description: "Render dimensions (default: 340x280)"
+      - name: --preview
+        kind: flag
+        description: Minimal widget styling for design comparison
+      - name: --debug
+        kind: flag
+        description: Output JSON report with metrics
+    docs: reference/design-import.md
 
   - name: export-tokens
     status: experimental

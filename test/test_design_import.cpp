@@ -571,6 +571,229 @@ TEST_CASE("parse_v0_tsx accepts JSON IR directly", "[view][import]") {
 
 // ── Pencil JSON parsing ─────────────────────────────────────────────────
 
+// ── Token alias cycle detection ─────────────────────────────────────────
+
+TEST_CASE("parse_w3c_tokens handles circular aliases without infinite loop", "[view][import]") {
+    auto json = R"({
+        "color": {
+            "$type": "color",
+            "a": { "$value": "{color.b}" },
+            "b": { "$value": "{color.a}" },
+            "safe": { "$value": "#FF0000" }
+        }
+    })";
+
+    // Should not hang — circular refs terminate gracefully
+    auto theme = parse_w3c_tokens(json);
+
+    // The safe token should still resolve
+    REQUIRE(theme.colors.count("color.safe") == 1);
+    REQUIRE(theme.colors["color.safe"].r == 0xFF);
+
+    // Circular tokens won't resolve to valid colors — they should not crash
+    // (they may or may not be in the theme depending on what the unresolved
+    // string looks like, but the important thing is no infinite loop)
+}
+
+TEST_CASE("parse_w3c_tokens handles self-referencing alias", "[view][import]") {
+    auto json = R"({
+        "spacing": {
+            "$type": "dimension",
+            "self": { "$value": "{spacing.self}" }
+        }
+    })";
+
+    // Should not hang
+    auto theme = parse_w3c_tokens(json);
+    // Self-reference won't resolve to a valid number
+}
+
+// ── Figma Variables sync ───────────────────────────────────────────────
+
+TEST_CASE("parse_figma_variables reads Figma variable format", "[view][import]") {
+    auto json = R"({
+        "variables": [
+            { "name": "color/primary", "type": "COLOR", "resolvedValue": "#89B4FA" },
+            { "name": "color/bg", "type": "COLOR", "resolvedValue": "#1E1E2E" },
+            { "name": "spacing/md", "type": "FLOAT", "resolvedValue": "8" },
+            { "name": "font/heading", "type": "STRING", "resolvedValue": "Inter" }
+        ]
+    })";
+
+    auto theme = parse_figma_variables(json);
+
+    REQUIRE(theme.colors.count("color.primary") == 1);
+    REQUIRE(theme.colors["color.primary"].r == 0x89);
+    REQUIRE(theme.colors["color.primary"].g == 0xB4);
+
+    REQUIRE(theme.colors.count("color.bg") == 1);
+    REQUIRE(theme.colors["color.bg"].r == 0x1E);
+
+    REQUIRE(theme.dimensions["spacing.md"] == 8.0f);
+    REQUIRE(theme.strings["font.heading"] == "Inter");
+}
+
+TEST_CASE("export_figma_variables produces Figma-compatible JSON", "[view][import]") {
+    Theme theme;
+    theme.colors["color.primary"] = color_from_hex(0x89B4FA);
+    theme.dimensions["spacing.md"] = 8.0f;
+    theme.strings["font.heading"] = "Inter";
+
+    auto json = export_figma_variables(theme);
+
+    REQUIRE(json.find("\"variables\"") != std::string::npos);
+    REQUIRE(json.find("\"name\": \"color/primary\"") != std::string::npos);
+    REQUIRE(json.find("\"type\": \"COLOR\"") != std::string::npos);
+    REQUIRE(json.find("#89b4fa") != std::string::npos);
+    REQUIRE(json.find("\"name\": \"spacing/md\"") != std::string::npos);
+    REQUIRE(json.find("\"type\": \"FLOAT\"") != std::string::npos);
+    REQUIRE(json.find("\"name\": \"font/heading\"") != std::string::npos);
+    REQUIRE(json.find("\"type\": \"STRING\"") != std::string::npos);
+}
+
+TEST_CASE("Figma Variables round-trip preserves colors", "[view][import]") {
+    Theme original;
+    original.colors["color.primary"] = color_from_hex(0x89B4FA);
+    original.dimensions["spacing.md"] = 8.0f;
+
+    auto json = export_figma_variables(original);
+    auto restored = parse_figma_variables(json);
+
+    REQUIRE(restored.colors.count("color.primary") == 1);
+    REQUIRE(restored.colors["color.primary"].r == original.colors["color.primary"].r);
+    REQUIRE(restored.colors["color.primary"].g == original.colors["color.primary"].g);
+    REQUIRE(restored.colors["color.primary"].b == original.colors["color.primary"].b);
+    REQUIRE(restored.dimensions["spacing.md"] == 8.0f);
+}
+
+// ── Stitch Design System sync ──────────────────────────────────────────
+
+TEST_CASE("parse_stitch_design_system reads Stitch format", "[view][import]") {
+    auto json = R"({
+        "name": "Dark Theme",
+        "colors": { "primary": "#89B4FA", "background": "#1E1E2E" },
+        "fonts": { "heading": "Inter", "body": "Roboto" },
+        "roundness": "large",
+        "spacing": 12
+    })";
+
+    auto theme = parse_stitch_design_system(json);
+
+    REQUIRE(theme.colors.count("color.primary") == 1);
+    REQUIRE(theme.colors["color.primary"].r == 0x89);
+    REQUIRE(theme.colors.count("color.background") == 1);
+    REQUIRE(theme.strings["font.heading"] == "Inter");
+    REQUIRE(theme.strings["font.body"] == "Roboto");
+    REQUIRE(theme.dimensions["roundness"] == 16.0f);  // "large" = 16
+    REQUIRE(theme.dimensions["spacing.base"] == 12.0f);
+}
+
+TEST_CASE("export_stitch_design_system produces Stitch-compatible JSON", "[view][import]") {
+    Theme theme;
+    theme.colors["color.primary"] = color_from_hex(0x89B4FA);
+    theme.strings["font.heading"] = "Inter";
+    theme.dimensions["roundness"] = 8.0f;
+    theme.dimensions["spacing.base"] = 12.0f;
+
+    auto json = export_stitch_design_system(theme);
+
+    REQUIRE(json.find("\"colors\"") != std::string::npos);
+    REQUIRE(json.find("\"primary\"") != std::string::npos);
+    REQUIRE(json.find("#89b4fa") != std::string::npos);
+    REQUIRE(json.find("\"fonts\"") != std::string::npos);
+    REQUIRE(json.find("\"heading\": \"Inter\"") != std::string::npos);
+    REQUIRE(json.find("\"roundness\": \"medium\"") != std::string::npos);  // 8 = medium
+    REQUIRE(json.find("\"spacing\": 12") != std::string::npos);
+}
+
+TEST_CASE("Stitch Design System round-trip preserves tokens", "[view][import]") {
+    Theme original;
+    original.colors["color.accent"] = color_from_hex(0xE94560);
+    original.strings["font.body"] = "Roboto";
+    original.dimensions["roundness"] = 4.0f;
+    original.dimensions["spacing.base"] = 8.0f;
+
+    auto json = export_stitch_design_system(original);
+    auto restored = parse_stitch_design_system(json);
+
+    REQUIRE(restored.colors["color.accent"].r == 0xE9);
+    REQUIRE(restored.strings["font.body"] == "Roboto");
+    REQUIRE(restored.dimensions["roundness"] == 4.0f);  // "small" maps back to 4
+    REQUIRE(restored.dimensions["spacing.base"] == 8.0f);
+}
+
+// ── E2E pipeline test ──────────────────────────────────────────────────
+
+TEST_CASE("E2E: Figma IR → code gen → tokens → round-trip", "[view][import][e2e]") {
+    // Step 1: Parse a Figma IR with audio widgets and tokens
+    auto json = R"({
+        "type": "frame",
+        "name": "PluginUI",
+        "layout": { "direction": "column", "gap": 16, "padding": 12 },
+        "style": { "backgroundColor": "#1a1a2e", "width": 340, "height": 280 },
+        "children": [
+            {
+                "type": "text", "name": "title", "content": "My Plugin",
+                "style": { "fontSize": 20, "fontWeight": 700, "color": "#e0e0e0" }
+            },
+            {
+                "type": "frame", "name": "controls",
+                "layout": { "direction": "row", "gap": 12 },
+                "children": [
+                    { "type": "slider", "name": "GainKnob", "label": "Gain", "min": 0, "max": 1, "default": 0.75 },
+                    { "type": "slider", "name": "MixFader", "label": "Mix", "min": 0, "max": 1 },
+                    { "type": "frame", "name": "OutputMeter", "label": "Out" }
+                ]
+            }
+        ],
+        "tokens": {
+            "colors": { "bg.primary": "#1a1a2e", "accent": "#e94560" },
+            "dimensions": { "spacing.md": 16 }
+        }
+    })";
+
+    auto ir = parse_figma_json(json);
+    REQUIRE(ir.root.name == "PluginUI");
+    REQUIRE(ir.root.children.size() == 2);
+
+    // Step 2: Audio widget detection
+    auto& controls = ir.root.children[1];
+    REQUIRE(controls.children[0].audio_widget == AudioWidgetType::knob);
+    REQUIRE(controls.children[1].audio_widget == AudioWidgetType::fader);
+    REQUIRE(controls.children[2].audio_widget == AudioWidgetType::meter);
+
+    // Step 3: Generate native code
+    CodeGenOptions opts;
+    opts.mode = CodeGenMode::native;
+    opts.include_comments = false;
+    auto js = generate_pulp_js(ir, opts);
+    REQUIRE(!js.empty());
+    REQUIRE(js.find("createCol('root',") != std::string::npos);
+    REQUIRE(js.find("createKnob('GainKnob") != std::string::npos);
+    REQUIRE(js.find("createFader('MixFader") != std::string::npos);
+    REQUIRE(js.find("createMeter('OutputMeter") != std::string::npos);
+    REQUIRE(js.find("setColorToken('bg.primary'") != std::string::npos);
+
+    // Step 4: Token round-trip
+    auto theme = ir_tokens_to_theme(ir.tokens);
+    auto w3c = export_w3c_tokens(theme);
+    auto restored = parse_w3c_tokens(w3c);
+    REQUIRE(restored.colors.count("bg.primary") == 1);
+    REQUIRE(restored.colors["bg.primary"].r == 0x1a);
+
+    // Step 5: Figma Variables export/import cycle
+    auto figma_vars = export_figma_variables(theme);
+    auto from_figma = parse_figma_variables(figma_vars);
+    REQUIRE(from_figma.colors.count("bg.primary") == 1);
+
+    // Step 6: Stitch export/import cycle
+    auto stitch_json = export_stitch_design_system(theme);
+    auto from_stitch = parse_stitch_design_system(stitch_json);
+    REQUIRE(!from_stitch.colors.empty());
+}
+
+// ── Pencil JSON parsing ─────────────────────────────────────────────────
+
 TEST_CASE("parse_pencil_json parses node tree", "[view][import]") {
     auto json = R"({
         "type": "frame",

@@ -29,6 +29,9 @@ static void print_usage() {
     std::cout << "Options:\n";
     std::cout << "  --from <source>   Design source (required)\n";
     std::cout << "  --file <path>     Input file path\n";
+    std::cout << "  --url <url>       Design URL (Figma file URL or v0 share link)\n";
+    std::cout << "  --frame <name>    Frame/artboard to import (Figma)\n";
+    std::cout << "  --screen <name>   Screen to import (Stitch)\n";
     std::cout << "  --output <path>   Output JS file (default: ui.js)\n";
     std::cout << "  --tokens <path>   Output W3C token file (default: tokens.json)\n";
     std::cout << "  --dry-run         Show generated code without writing files\n";
@@ -42,7 +45,9 @@ static void print_usage() {
     std::cout << "  --help            Show this help\n\n";
     std::cout << "Examples:\n";
     std::cout << "  pulp import-design --from figma --file design.json\n";
-    std::cout << "  pulp import-design --from v0 --file component.tsx --output my-ui.js\n";
+    std::cout << "  pulp import-design --from figma --url 'https://figma.com/design/...' --frame 'Plugin UI'\n";
+    std::cout << "  pulp import-design --from stitch --file screen.html --screen 'Main'\n";
+    std::cout << "  pulp import-design --from v0 --url 'https://v0.dev/t/abc123' --output my-ui.js\n";
     std::cout << "  pulp import-design --from pencil --file design.json --dry-run\n";
     std::cout << "  pulp import-design --from pencil --file design.json --validate --reference source.png\n";
 }
@@ -75,6 +80,9 @@ static bool write_file(const std::string& path, const std::string& content) {
 int main(int argc, char* argv[]) {
     std::string source_str;
     std::string input_file;
+    std::string input_url;           // --url: Figma file URL or v0 share link
+    std::string frame_name;          // --frame: Figma frame/artboard name
+    std::string screen_name;         // --screen: Stitch screen name
     std::string output_file = "ui.js";
     std::string tokens_file = "tokens.json";
     std::string export_format = "w3c";
@@ -97,6 +105,12 @@ int main(int argc, char* argv[]) {
             source_str = argv[++i];
         } else if (std::strcmp(argv[i], "--file") == 0 && i + 1 < argc) {
             input_file = argv[++i];
+        } else if (std::strcmp(argv[i], "--url") == 0 && i + 1 < argc) {
+            input_url = argv[++i];
+        } else if (std::strcmp(argv[i], "--frame") == 0 && i + 1 < argc) {
+            frame_name = argv[++i];
+        } else if (std::strcmp(argv[i], "--screen") == 0 && i + 1 < argc) {
+            screen_name = argv[++i];
         } else if (std::strcmp(argv[i], "--output") == 0 && i + 1 < argc) {
             output_file = argv[++i];
         } else if (std::strcmp(argv[i], "--tokens") == 0 && i + 1 < argc) {
@@ -184,9 +198,23 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    if (input_file.empty()) {
-        std::cerr << "Error: --file <path> is required\n";
+    if (input_file.empty() && input_url.empty()) {
+        std::cerr << "Error: --file <path> or --url <url> is required\n";
         return 1;
+    }
+
+    // --url without --file: fetch the URL content via curl
+    std::string fetched_tmp;
+    if (input_file.empty() && !input_url.empty()) {
+        fetched_tmp = fs::temp_directory_path() / "pulp-import-fetched.tmp";
+        std::string cmd = "curl -sL -o '" + fetched_tmp + "' '" + input_url + "' 2>&1";
+        int rc = std::system(cmd.c_str());
+        if (rc != 0) {
+            std::cerr << "Error: failed to fetch URL: " << input_url << "\n";
+            return 1;
+        }
+        input_file = fetched_tmp;
+        std::cout << "Fetched " << input_url << " → " << fetched_tmp << "\n";
     }
 
     auto t_start = std::chrono::steady_clock::now();
@@ -210,7 +238,14 @@ int main(int argc, char* argv[]) {
     }
 
     ir.source = *source;
-    ir.source_file = input_file;
+    ir.source_file = input_url.empty() ? input_file : input_url;
+
+    // Clean up temp file from URL fetch
+    if (!fetched_tmp.empty()) fs::remove(fetched_tmp);
+
+    // Store frame/screen selection metadata
+    if (!frame_name.empty()) ir.root.attributes["frame"] = frame_name;
+    if (!screen_name.empty()) ir.root.attributes["screen"] = screen_name;
 
     // Generate Pulp JS
     CodeGenOptions opts;

@@ -8,8 +8,14 @@ Pulp can import designs from external tools and translate them into web-compat J
 # Import a Figma export
 pulp import-design --from figma --file design.json
 
-# Import a v0.dev component
-pulp import-design --from v0 --file component.tsx
+# Import from a Figma URL (fetches via curl)
+pulp import-design --from figma --url 'https://figma.com/design/...' --frame 'Plugin UI'
+
+# Import a v0.dev component by URL
+pulp import-design --from v0 --url 'https://v0.dev/t/abc123'
+
+# Import a Stitch screen
+pulp import-design --from stitch --file screen.html --screen 'Main'
 
 # Preview without writing files
 pulp import-design --from pencil --file design.json --dry-run
@@ -186,7 +192,29 @@ importDesignTokens(w3cJsonString);
 const w3c = exportDesignTokens();
 ```
 
+### Figma Variables Sync
+
+Figma Variables can be imported and exported bidirectionally:
+
+```
+Figma Variables (MCP get_variable_defs) → Pulp Theme → Figma Variables JSON
+```
+
+Figma uses slash-separated paths (`color/primary`) which are automatically converted to dot-separated (`color.primary`) for Pulp themes.
+
+### Stitch Design System Sync
+
+Stitch Design Systems map to Pulp tokens:
+
+```
+Stitch Design System (MCP list_design_systems) → Pulp Theme → Stitch JSON
+```
+
+Maps: `colors`, `fonts`, `roundness` (none/small/medium/large/full), `spacing`.
+
 ## CLI Reference
+
+See [Design Import API Reference](../reference/design-import.md) for the full CLI and IR specification.
 
 ```
 pulp import-design --from <source> [options]
@@ -200,11 +228,17 @@ Sources:
 Options:
   --from <source>   Design source (required)
   --file <path>     Input file path
+  --url <url>       Design URL (Figma file URL, v0 share link)
+  --frame <name>    Frame/artboard to import (Figma)
+  --screen <name>   Screen to import (Stitch)
   --output <path>   Output JS file (default: ui.js)
   --tokens <path>   Output W3C token file (default: tokens.json)
   --dry-run         Show generated code without writing files
   --no-tokens       Skip token extraction
   --no-comments     Omit comments from generated code
+  --web-compat      Use DOM API instead of native Pulp API
+  --validate        Render and validate layout
+  --reference <png> Compare against reference screenshot
 
 pulp export-tokens [options]
 

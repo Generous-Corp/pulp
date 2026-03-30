@@ -503,6 +503,52 @@ ai_shader_design:
       Default: Claude. Swappable to Gemini/Codex CLI.
       Full navigator.gpu pipeline API not exposed — Canvas 2D + shaders is the design.
 
+design_import:
+  figma_adapter:
+    status: usable
+    notes: JSON IR parsing, audio widget detection, token extraction. MCP live fetch via Claude skill.
+  stitch_adapter:
+    status: usable
+    notes: JSON IR + HTML fallback parsing. Stitch MCP integration via Claude skill.
+  v0_adapter:
+    status: usable
+    notes: JSON IR + Tailwind className extraction. URL fetch via --url flag.
+  pencil_adapter:
+    status: usable
+    notes: JSON IR parsing with Yoga layout near-1:1 translation. Pencil MCP integration via Claude skill.
+  code_generator:
+    status: usable
+    notes: >
+      Native mode (createCol/createKnob/setFlex) and web-compat mode
+      (document.createElement/style). Audio widget sizing constraints,
+      Yoga layout requirements encoded.
+  w3c_tokens:
+    status: usable
+    notes: >
+      Full W3C/DTCG Design Tokens: group $type inheritance, alias resolution
+      with cycle detection, math expressions, composite types (typography,
+      shadow, border). Round-trip safe.
+  figma_variables_sync:
+    status: experimental
+    notes: Parse Figma Variables JSON, export Theme as Figma Variables format. Slash-to-dot path conversion.
+  stitch_design_system_sync:
+    status: experimental
+    notes: Parse Stitch Design System JSON (colors, fonts, roundness, spacing), export Theme as Stitch format.
+  validation:
+    status: usable
+    notes: Headless render + screenshot comparison. Similarity threshold, diff image generation.
+  cli_import_design:
+    status: experimental
+    notes: >
+      pulp import-design with --from, --file, --url, --frame, --screen,
+      --output, --tokens, --validate, --reference, --diff, --debug flags.
+  cli_export_tokens:
+    status: experimental
+    notes: pulp export-tokens with theme JSON input or built-in dark theme default.
+  claude_skill:
+    status: usable
+    notes: /import-design skill with MCP-aware flow for Figma, Stitch, Pencil, v0.
+
 subsystems:
   runtime: stable
   events: usable

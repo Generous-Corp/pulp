@@ -6,6 +6,7 @@
 #include <regex>
 #include <cmath>
 #include <map>
+#include <unordered_set>
 
 namespace pulp::view {
 
@@ -1217,6 +1218,7 @@ Theme parse_w3c_tokens(const std::string& json) {
     // Supports up to 10 levels of chained aliases to prevent infinite loops
     auto resolve_value = [&](const std::string& value) -> std::string {
         std::string resolved = value;
+        std::unordered_set<std::string> visited;  // Cycle detection
         for (int depth = 0; depth < 10; ++depth) {
             // Find any {reference.path} pattern in the string
             auto open = resolved.find('{');
@@ -1225,6 +1227,10 @@ Theme parse_w3c_tokens(const std::string& json) {
                 break;
 
             auto ref = resolved.substr(open + 1, close - open - 1);
+            if (visited.count(ref))
+                break;  // Circular alias — stop resolving
+            visited.insert(ref);
+
             auto it = raw_tokens.find(ref);
             if (it != raw_tokens.end()) {
                 // Replace {ref} with resolved value
@@ -1372,6 +1378,202 @@ IRTokens theme_to_ir_tokens(const Theme& theme) {
     tokens.dimensions = theme.dimensions;
     tokens.strings = theme.strings;
     return tokens;
+}
+
+// ── Figma Variables sync ────────────────────────────────────────────────
+
+Theme parse_figma_variables(const std::string& json) {
+    Theme theme;
+    auto root = choc::json::parse(json);
+
+    // Figma Variables JSON structure (from MCP get_variable_defs):
+    // { "variables": [ { "name": "color/primary", "resolvedValue": "#89B4FA",
+    //                     "type": "COLOR" }, ... ],
+    //   "collections": [ { "name": "Tokens", "modes": [...] } ] }
+    // OR flat array of variables
+
+    auto parse_vars = [&](const choc::value::ValueView& vars) {
+        for (uint32_t i = 0; i < vars.size(); ++i) {
+            auto v = vars[static_cast<int>(i)];
+            auto name = get_string(v, "name", "");
+            auto type = get_string(v, "type", "");
+            if (name.empty()) continue;
+
+            // Figma uses slash-separated paths: "color/primary" → "color.primary"
+            std::string dotted = name;
+            for (auto& c : dotted) if (c == '/') c = '.';
+
+            auto resolved = get_string(v, "resolvedValue", "");
+            if (resolved.empty() && v.hasObjectMember("value"))
+                resolved = get_string(v, "value", "");
+
+            if (type == "COLOR" || type == "color") {
+                if (!resolved.empty() && resolved[0] == '#')
+                    theme.colors[dotted] = parse_hex_color_str(resolved);
+            } else if (type == "FLOAT" || type == "float" || type == "number") {
+                try { theme.dimensions[dotted] = std::stof(resolved); } catch (...) {}
+            } else if (type == "STRING" || type == "string") {
+                theme.strings[dotted] = resolved;
+            } else {
+                // Infer from value
+                if (!resolved.empty() && resolved[0] == '#')
+                    theme.colors[dotted] = parse_hex_color_str(resolved);
+                else {
+                    try { theme.dimensions[dotted] = std::stof(resolved); }
+                    catch (...) { theme.strings[dotted] = resolved; }
+                }
+            }
+        }
+    };
+
+    if (root.hasObjectMember("variables") && root["variables"].isArray())
+        parse_vars(root["variables"]);
+    else if (root.isArray())
+        parse_vars(root);
+
+    return theme;
+}
+
+std::string export_figma_variables(const Theme& theme) {
+    std::ostringstream ss;
+    ss << "{\n  \"variables\": [\n";
+
+    bool first = true;
+    auto emit = [&](const std::string& name, const std::string& type, const std::string& value) {
+        if (!first) ss << ",\n";
+        first = false;
+        // Convert dot-separated to slash-separated for Figma
+        std::string figma_name = name;
+        for (auto& c : figma_name) if (c == '.') c = '/';
+        ss << "    { \"name\": \"" << figma_name << "\", \"type\": \"" << type
+           << "\", \"value\": \"" << value << "\" }";
+    };
+
+    for (auto& [name, color] : theme.colors) {
+        char buf[10];
+        if (color.a == 255)
+            snprintf(buf, sizeof(buf), "#%02x%02x%02x", color.r, color.g, color.b);
+        else
+            snprintf(buf, sizeof(buf), "#%02x%02x%02x%02x", color.r, color.g, color.b, color.a);
+        emit(name, "COLOR", buf);
+    }
+    for (auto& [name, value] : theme.dimensions) {
+        std::ostringstream vs;
+        if (value == std::floor(value)) vs << static_cast<int>(value);
+        else vs << value;
+        emit(name, "FLOAT", vs.str());
+    }
+    for (auto& [name, value] : theme.strings)
+        emit(name, "STRING", value);
+
+    ss << "\n  ]\n}\n";
+    return ss.str();
+}
+
+// ── Stitch Design System sync ──────────────────────────────────────────
+
+Theme parse_stitch_design_system(const std::string& json) {
+    Theme theme;
+    auto root = choc::json::parse(json);
+
+    // Stitch Design System JSON (from MCP list_design_systems):
+    // { "name": "My Theme",
+    //   "colors": { "primary": "#89B4FA", "background": "#1E1E2E", ... },
+    //   "fonts": { "heading": "Inter", "body": "Roboto" },
+    //   "roundness": "medium",
+    //   "spacing": 8 }
+
+    if (root.hasObjectMember("colors")) {
+        auto colors = root["colors"];
+        for (uint32_t i = 0; i < colors.size(); ++i) {
+            auto m = colors.getObjectMemberAt(i);
+            auto hex = std::string(m.value.toString());
+            if (!hex.empty() && hex[0] == '#')
+                theme.colors[std::string("color.") + std::string(m.name)] = parse_hex_color_str(hex);
+        }
+    }
+
+    if (root.hasObjectMember("fonts")) {
+        auto fonts = root["fonts"];
+        for (uint32_t i = 0; i < fonts.size(); ++i) {
+            auto m = fonts.getObjectMemberAt(i);
+            theme.strings[std::string("font.") + std::string(m.name)] = std::string(m.value.toString());
+        }
+    }
+
+    if (root.hasObjectMember("roundness")) {
+        auto r = get_string(root, "roundness", "medium");
+        float radius = 8.0f;
+        if (r == "none") radius = 0;
+        else if (r == "small") radius = 4;
+        else if (r == "medium") radius = 8;
+        else if (r == "large") radius = 16;
+        else if (r == "full") radius = 999;
+        else { try { radius = std::stof(r); } catch (...) {} }
+        theme.dimensions["roundness"] = radius;
+    }
+
+    if (root.hasObjectMember("spacing")) {
+        theme.dimensions["spacing.base"] = get_float(root, "spacing", 8);
+    }
+
+    return theme;
+}
+
+std::string export_stitch_design_system(const Theme& theme) {
+    std::ostringstream ss;
+    ss << "{\n";
+
+    // Colors
+    ss << "  \"colors\": {\n";
+    bool first = true;
+    for (auto& [name, color] : theme.colors) {
+        if (!first) ss << ",\n";
+        first = false;
+        // Strip "color." prefix for Stitch
+        auto key = name;
+        if (key.substr(0, 6) == "color.") key = key.substr(6);
+        char buf[10];
+        if (color.a == 255)
+            snprintf(buf, sizeof(buf), "#%02x%02x%02x", color.r, color.g, color.b);
+        else
+            snprintf(buf, sizeof(buf), "#%02x%02x%02x%02x", color.r, color.g, color.b, color.a);
+        ss << "    \"" << key << "\": \"" << buf << "\"";
+    }
+    ss << "\n  },\n";
+
+    // Fonts
+    ss << "  \"fonts\": {\n";
+    first = true;
+    for (auto& [name, value] : theme.strings) {
+        if (name.find("font.") != 0) continue;
+        if (!first) ss << ",\n";
+        first = false;
+        auto key = name.substr(5);
+        ss << "    \"" << key << "\": \"" << value << "\"";
+    }
+    ss << "\n  },\n";
+
+    // Roundness
+    float roundness = 8;
+    if (theme.dimensions.count("roundness"))
+        roundness = theme.dimensions.at("roundness");
+    std::string r_name = "medium";
+    if (roundness <= 0) r_name = "none";
+    else if (roundness <= 4) r_name = "small";
+    else if (roundness <= 8) r_name = "medium";
+    else if (roundness <= 16) r_name = "large";
+    else r_name = "full";
+    ss << "  \"roundness\": \"" << r_name << "\",\n";
+
+    // Spacing
+    float spacing = 8;
+    if (theme.dimensions.count("spacing.base"))
+        spacing = theme.dimensions.at("spacing.base");
+    ss << "  \"spacing\": " << static_cast<int>(spacing) << "\n";
+
+    ss << "}\n";
+    return ss.str();
 }
 
 } // namespace pulp::view
