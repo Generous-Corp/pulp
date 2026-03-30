@@ -239,25 +239,111 @@ function applyStateToPreview(stateIdx) {
     setBorder("btn-hover", APP_BORDER, 1, 6);
     setBorder("btn-action", APP_ACCENT, 0, 6);
     setEnabled("btn-disabled", false);
+    setBackground("btn-action", APP_ACCENT);
+
+    setOpacity("sample-input", 1);
+    setOpacity("sample-placeholder", 1);
+    setOpacity("sample-combo", 1);
+    setOpacity("tb1", 1);
+    setOpacity("t1", 1);
+    setOpacity("t2", 1);
+    setOpacity("cb1", 1);
+    setEnabled("sample-input", true);
+    setEnabled("sample-placeholder", true);
+    setEnabled("sample-combo", true);
+    setEnabled("tb1", true);
+    setEnabled("t1", true);
+    setEnabled("t2", true);
+    setEnabled("cb1", true);
+    setBackground("sample-input", APP_PANEL);
+    setBackground("sample-placeholder", APP_PANEL);
+    setBackground("sample-combo", APP_PANEL);
+    setBorder("sample-input", APP_BORDER, 1, 6);
+    setBorder("sample-placeholder", APP_BORDER, 1, 6);
+    setBorder("sample-combo", APP_BORDER, 1, 6);
+    setBackground("tb1", APP_PANEL);
+    setBorder("tb1", APP_BORDER, 1, 6);
+    setTextColor("toggle-on-label", APP_TEXT);
+    setTextColor("toggle-off-label", APP_TEXT);
+
+    setBorder("panel-content", APP_BORDER, 1, 6);
+    setBackground("panel-content", APP_PANEL);
+    setBorder("card-1", APP_BORDER, 1, 8);
+    setBorder("card-2", APP_BORDER, 1, 8);
+    setBorder("card-3", "#4CAF50", 1, 8);
+    setBorder("card-4", "#e94560", 1, 8);
+    setBackground("card-1", APP_PANEL);
+    setBackground("card-2", APP_PANEL);
+    setBackground("card-3", APP_PANEL);
+    setBackground("card-4", "#3a2020");
+
+    setTextColor("ptab-0-l", APP_ACCENT);
+    setTextColor("ptab-1-l", APP_TEXT_DIM);
+    setTextColor("ptab-2-l", APP_TEXT_DIM);
+    setTextColor("ptab-3-l", APP_TEXT_DIM);
+    setBackground("ptab-0", "transparent");
+    setBackground("ptab-1", "transparent");
+    setBackground("ptab-2", "transparent");
+    setBackground("ptab-3", "transparent");
+    setBackground("ptab-0-line", APP_ACCENT);
 
     if (stateIdx === 1) { // Hover
         setBackground("btn-normal", "#4a4a5c");
         setBackground("btn-hover", "#5a5a6c");
         setBorder("btn-normal", APP_ACCENT, 1, 6);
         setBorder("btn-action", APP_ACCENT, 1, 6);
+        setBorder("sample-input", APP_ACCENT, 1, 6);
+        setBorder("sample-combo", APP_ACCENT, 1, 6);
+        setBackground("tb1", "#4a4a5c");
+        setBorder("tb1", APP_ACCENT, 1, 6);
+        setBackground("ptab-1", APP_PANEL);
+        setTextColor("ptab-0-l", APP_TEXT_DIM);
+        setTextColor("ptab-1-l", APP_ACCENT);
+        setBackground("ptab-0-line", APP_PANEL);
+        setBackground("card-2", "#313544");
     } else if (stateIdx === 2) { // Focus
         setBorder("btn-normal", APP_ACCENT, 2, 6);
         setBorder("btn-hover", APP_ACCENT, 2, 6);
         setBorder("btn-action", APP_ACCENT, 2, 6);
+        setBorder("sample-input", APP_ACCENT, 2, 6);
+        setBorder("sample-placeholder", APP_ACCENT, 2, 6);
+        setBorder("sample-combo", APP_ACCENT, 2, 6);
+        setBorder("tb1", APP_ACCENT, 2, 6);
+        setBorder("panel-content", APP_ACCENT, 1, 6);
     } else if (stateIdx === 3) { // Disabled
         setOpacity("btn-normal", 0.4);
         setOpacity("btn-hover", 0.4);
         setOpacity("btn-action", 0.4);
         setOpacity("btn-disabled", 0.4);
+        setOpacity("sample-input", 0.4);
+        setOpacity("sample-placeholder", 0.4);
+        setOpacity("sample-combo", 0.4);
+        setOpacity("tb1", 0.4);
+        setOpacity("t1", 0.4);
+        setOpacity("t2", 0.4);
+        setOpacity("cb1", 0.4);
+        setEnabled("sample-input", false);
+        setEnabled("sample-placeholder", false);
+        setEnabled("sample-combo", false);
+        setEnabled("tb1", false);
+        setEnabled("t1", false);
+        setEnabled("t2", false);
+        setEnabled("cb1", false);
+        setTextColor("toggle-on-label", APP_TEXT_DIM);
+        setTextColor("toggle-off-label", APP_TEXT_DIM);
+        setBackground("ptab-0-line", APP_PANEL);
     } else if (stateIdx === 4) { // Error
         setBorder("btn-normal", "#e94560", 1, 6);
         setBorder("btn-hover", "#e94560", 1, 6);
         setBackground("btn-action", "#e94560");
+        setBorder("sample-input", "#e94560", 1, 6);
+        setBorder("sample-placeholder", "#e94560", 1, 6);
+        setBorder("sample-combo", "#e94560", 1, 6);
+        setBorder("tb1", "#e94560", 1, 6);
+        setBorder("panel-content", "#e94560", 1, 6);
+        setBackground("card-2", "#3a2020");
+        setBackground("card-4", "#4a1f28");
+        setTextColor("toggle-off-label", "#f38ba8");
     }
     layout();
 }

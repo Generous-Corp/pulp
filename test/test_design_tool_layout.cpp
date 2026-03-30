@@ -10,6 +10,7 @@
 #include <pulp/view/script_engine.hpp>
 #include <pulp/view/widget_bridge.hpp>
 #include <pulp/state/store.hpp>
+#include <pulp/canvas/canvas.hpp>
 #include <fstream>
 #include <sstream>
 #include <filesystem>
@@ -336,4 +337,47 @@ TEST_CASE("Design tool: family-only widget look specs resolve to concrete preset
 
     REQUIRE(engine.evaluate("applyWidgetLook('slider1', { family: 'console_strip' })").getWithDefault<bool>(false));
     REQUIRE(engine.evaluate("widgetLookState.slider1.preset").toString() == "console_slider");
+}
+
+TEST_CASE("Design tool: state pills drive disabled and error preview states", "[design-tool]") {
+    auto js_path = find_js_file("design-tool.js");
+    if (js_path.empty()) {
+        SKIP("design-tool.js not found");
+        return;
+    }
+
+    View root;
+    root.set_theme(Theme::dark());
+    root.flex().direction = FlexDirection::column;
+    root.set_bounds({0, 0, 1100, 700});
+
+    pulp::state::StateStore store;
+    ScriptEngine engine;
+    WidgetBridge bridge(engine, root, store);
+    load_design_tool(root, engine, bridge);
+
+    auto* sample_input = bridge.widget("sample-input");
+    auto* sample_combo = bridge.widget("sample-combo");
+    auto* panel_content = bridge.widget("panel-content");
+    REQUIRE(sample_input != nullptr);
+    REQUIRE(sample_combo != nullptr);
+    REQUIRE(panel_content != nullptr);
+
+    REQUIRE(sample_input->enabled());
+    REQUIRE(sample_combo->enabled());
+
+    engine.evaluate("applyStateToPreview(3)");
+    root.layout_children();
+
+    REQUIRE_FALSE(sample_input->enabled());
+    REQUIRE_FALSE(sample_combo->enabled());
+    REQUIRE_THAT(sample_input->opacity(), Catch::Matchers::WithinAbs(0.4f, 0.01f));
+    REQUIRE_THAT(sample_combo->opacity(), Catch::Matchers::WithinAbs(0.4f, 0.01f));
+
+    engine.evaluate("applyStateToPreview(4)");
+    root.layout_children();
+
+    REQUIRE(sample_input->enabled());
+    REQUIRE(sample_combo->enabled());
+    REQUIRE(panel_content->border_color() == pulp::canvas::Color::hex(0xe94560));
 }
