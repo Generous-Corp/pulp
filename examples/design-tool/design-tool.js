@@ -263,13 +263,13 @@ setFlex("left-panel", "min_width", 260);
 setFlex("left-panel", "flex_shrink", 0);
 setBackground("left-panel", APP_SURFACE);
 setBorder("left-panel", APP_BORDER, 1, 0);
-setScrollContentSize("left-panel", 310, 2200);  // color-section(380) + search(60) + tokens(1700)
+setScrollContentSize("left-panel", 310, 2500);  // color-section(700) + search(60) + tokens(1700)
 
 // Issue 9: Color System section matching HTML reference
 createCol("color-section", "left-panel");
 setFlex("color-section", "padding", 10);
 setFlex("color-section", "gap", 6);
-setFlex("color-section", "height", 380);  // explicit height for Yoga layout engine
+setFlex("color-section", "height", 700);  // Yoga: room for palettes + expanded editor
 
 createLabel("cs-title", "COLOR SYSTEM", "color-section");
 setFontSize("cs-title", 10);
@@ -713,16 +713,19 @@ function buildShadeRamps() {
         (function(idx) {
             var toggleExpand = function() {
                 if (expandedPalette === idx) {
-                    // Collapse this palette
+                    // Collapse — shrink container back
                     setVisible("ramp-" + idx + "-editor", false);
+                    setFlex("ramp-" + idx, "height", 28);
                     expandedPalette = -1;
                 } else {
                     // Collapse previous
                     if (expandedPalette >= 0) {
                         setVisible("ramp-" + expandedPalette + "-editor", false);
+                        setFlex("ramp-" + expandedPalette, "height", 28);
                     }
-                    // Expand this one
+                    // Expand — grow container for editor content
                     expandedPalette = idx;
+                    setFlex("ramp-" + idx, "height", 320);  // Yoga: room for gamut+sliders+shades
                     setVisible("ramp-" + idx + "-editor", true);
                     // Render gamut triangle for this palette
                     var pal = PaletteSystem.create(currentAccent, currentHarmony);
@@ -749,8 +752,10 @@ function buildShadeRamps() {
                         // Expand if not already
                         if (expandedPalette >= 0 && expandedPalette !== paletteIdx) {
                             setVisible("ramp-" + expandedPalette + "-editor", false);
+                            setFlex("ramp-" + expandedPalette, "height", 28);
                         }
                         expandedPalette = paletteIdx;
+                        setFlex("ramp-" + paletteIdx, "height", 320);
                         setVisible("ramp-" + paletteIdx + "-editor", true);
                         renderPaletteGamut(paletteIdx, oklch.H, oklch.L, oklch.C);
                         renderChromaGradient(paletteIdx, oklch.H);
