@@ -160,8 +160,8 @@ for (var sp = 0; sp < stateNames.length; sp++) {
     var spId = "state-pill-" + sp;
     createCol(spId, "state-pills");
     setFlex(spId, "height", 22);
-    setFlex(spId, "padding_left", 6);
-    setFlex(spId, "padding_right", 6);
+    setFlex(spId, "width", 56);
+    setFlex(spId, "flex_shrink", 0);
     setFlex(spId, "justify_content", "center");
     setFlex(spId, "align_items", "center");
     if (sp === 0) {
