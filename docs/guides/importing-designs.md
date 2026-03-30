@@ -212,6 +212,18 @@ Stitch Design System (MCP list_design_systems) → Pulp Theme → Stitch JSON
 
 Maps: `colors`, `fonts`, `roundness` (none/small/medium/large/full), `spacing`.
 
+## WIP MCP Integration Status
+
+| Source | MCP Connected | Design Created | Imported | Rendered | Validated | Parity |
+|--------|:---:|:---:|:---:|:---:|:---:|:---:|
+| **Pencil** (PulpGain) | ✓ | ✓ | ✓ | ✓ | ✓ | **94%** |
+| **Pencil** (PulpEQ) | ✓ | ✓ | ✓ | ✓ | ✓ | **95%** |
+| **Stitch** (PulpDelay) | ✓ | ✓ | ✓ | ✓ | N/A* | Layout match |
+| **Figma Make** | ✓ | Source read ✓ | [#49](https://github.com/danielraffel/pulp/issues/49) | — | — | — |
+| **Figma Design** | ✓ (auth) | Screenshot ✓ | [#49](https://github.com/danielraffel/pulp/issues/49) | — | — | — |
+
+*\*Stitch validation compares plugin render vs app thumbnail (different resolution/chrome) — not comparable. Needs screen HTML via Chrome DevTools for proper validation.*
+
 ## CLI Reference
 
 See [Design Import API Reference](../reference/design-import.md) for the full CLI and IR specification.
