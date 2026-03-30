@@ -560,6 +560,253 @@ static void generate_node(std::ostringstream& ss, const IRNode& node,
         generate_node(ss, child, opts, depth + 1, var_counter, var);
 }
 
+// ── Native Pulp API code generator ──────────────────────────────────────
+// Uses createCol/createRow/createKnob/setFlex — the native widget bridge API.
+// Encodes Yoga layout constraints learned from testing:
+//   - Every container MUST have explicit height, min_height, or flex_grow
+//   - Labels inside containers need min_height (14px text, 12px small)
+//   - Faders need min_width >= 40 for thumb rendering
+//   - Meters need min_width >= 20 for bar visibility
+//   - Knobs need width and height >= 56 for arc rendering
+
+// Minimum sizes for Yoga layout (prevents zero-height collapse)
+static constexpr float kMinLabelHeight = 14.0f;
+static constexpr float kMinSmallLabelHeight = 12.0f;
+static constexpr float kMinRowHeight = 16.0f;
+static constexpr float kMinKnobSize = 56.0f;
+static constexpr float kMinFaderWidth = 40.0f;
+static constexpr float kMinFaderHeight = 80.0f;
+static constexpr float kMinMeterWidth = 20.0f;
+static constexpr float kMinMeterHeight = 80.0f;
+
+static float estimate_child_height(const IRNode& child);
+
+static float estimate_container_height(const IRNode& node) {
+    // Estimate height needed for a container based on its children and direction
+    bool is_row = (node.layout.direction == LayoutDirection::row);
+    float gap = node.layout.gap;
+
+    if (is_row) {
+        // Row: height = max child height
+        float max_h = 0;
+        for (auto& child : node.children)
+            max_h = std::max(max_h, estimate_child_height(child));
+        max_h += node.layout.padding_top + node.layout.padding_bottom;
+        return std::max(max_h, kMinRowHeight);
+    } else {
+        // Column: height = sum of child heights + gaps
+        float h = 0;
+        for (size_t i = 0; i < node.children.size(); ++i) {
+            if (i > 0) h += gap;
+            h += estimate_child_height(node.children[i]);
+        }
+        h += node.layout.padding_top + node.layout.padding_bottom;
+        return std::max(h, kMinRowHeight);
+    }
+}
+
+static float estimate_child_height(const IRNode& child) {
+    if (child.style.height) return *child.style.height;
+    if (child.audio_widget == AudioWidgetType::knob)
+        return child.style.height.value_or(kMinKnobSize) + 20;
+    if (child.audio_widget == AudioWidgetType::fader)
+        return child.style.height.value_or(kMinFaderHeight) + 20;
+    if (child.audio_widget == AudioWidgetType::meter)
+        return child.style.height.value_or(kMinMeterHeight) + 20;
+    if (child.type == "text" || child.type == "label")
+        return kMinLabelHeight;
+    if (!child.children.empty())
+        return estimate_container_height(child);
+    return kMinRowHeight;
+}
+
+static void generate_native_node(std::ostringstream& ss, const IRNode& node,
+                                  const CodeGenOptions& opts, int depth,
+                                  int& var_counter, const std::string& parent_id) {
+    std::string id = sanitize_var(node.name.empty() ? node.type : node.name);
+    if (depth > 0) id += std::to_string(var_counter++);
+    else id = opts.root_variable;
+
+    std::string ind = indent(depth, opts.indent_spaces);
+    std::string pid = parent_id.empty() ? "''" : ("'" + parent_id + "'");
+
+    // Audio widgets use native widget API
+    if (node.audio_widget != AudioWidgetType::none) {
+        auto wtype = node.audio_widget;
+        if (opts.include_comments && !node.audio_label.empty())
+            ss << ind << "// " << node.audio_label << "\n";
+
+        // Create a wrapper column for the widget + label
+        std::string col_id = id + "_col";
+        ss << ind << "createCol('" << col_id << "', " << pid << ");\n";
+        ss << ind << "setFlex('" << col_id << "', 'align_items', 'center');\n";
+        ss << ind << "setFlex('" << col_id << "', 'gap', 4);\n";
+
+        if (wtype == AudioWidgetType::knob) {
+            float w = node.style.width.value_or(kMinKnobSize);
+            float h = node.style.height.value_or(kMinKnobSize);
+            float col_h = h + 20; // space for label
+            ss << ind << "setFlex('" << col_id << "', 'height', " << col_h << ");\n";
+            ss << ind << "setFlex('" << col_id << "', 'min_width', " << (w + 8) << ");\n";
+            ss << ind << "createKnob('" << id << "', '" << col_id << "');\n";
+            ss << ind << "setFlex('" << id << "', 'width', " << w << ");\n";
+            ss << ind << "setFlex('" << id << "', 'height', " << h << ");\n";
+            if (!node.audio_label.empty())
+                ss << ind << "setLabel('" << id << "', '" << node.audio_label << "');\n";
+            ss << ind << "setValue('" << id << "', " << node.audio_default << ");\n";
+        }
+        else if (wtype == AudioWidgetType::fader) {
+            float w = std::max(node.style.width.value_or(kMinFaderWidth), kMinFaderWidth);
+            float h = std::max(node.style.height.value_or(kMinFaderHeight), kMinFaderHeight);
+            float col_h = h + 20;
+            ss << ind << "setFlex('" << col_id << "', 'height', " << col_h << ");\n";
+            ss << ind << "setFlex('" << col_id << "', 'min_width', " << w << ");\n";
+            ss << ind << "createFader('" << id << "', 'vertical', '" << col_id << "');\n";
+            ss << ind << "setFlex('" << id << "', 'width', " << w << ");\n";
+            ss << ind << "setFlex('" << id << "', 'height', " << h << ");\n";
+            if (!node.audio_label.empty())
+                ss << ind << "setLabel('" << id << "', '" << node.audio_label << "');\n";
+            ss << ind << "setValue('" << id << "', " << node.audio_default << ");\n";
+        }
+        else if (wtype == AudioWidgetType::meter) {
+            float w = std::max(node.style.width.value_or(kMinMeterWidth), kMinMeterWidth);
+            float h = std::max(node.style.height.value_or(kMinMeterHeight), kMinMeterHeight);
+            float col_h = h + 20;
+            ss << ind << "setFlex('" << col_id << "', 'height', " << col_h << ");\n";
+            ss << ind << "setFlex('" << col_id << "', 'min_width', " << w << ");\n";
+            ss << ind << "createMeter('" << id << "', 'vertical', '" << col_id << "');\n";
+            ss << ind << "setFlex('" << id << "', 'width', " << w << ");\n";
+            ss << ind << "setFlex('" << id << "', 'height', " << h << ");\n";
+            ss << ind << "setMeterLevel('" << id << "', -6);\n";
+            // Meter has no setLabel — add a separate label
+            if (!node.audio_label.empty()) {
+                std::string lbl_id = id + "_lbl";
+                ss << ind << "createLabel('" << lbl_id << "', '" << node.audio_label << "', '" << col_id << "');\n";
+                ss << ind << "setFlex('" << lbl_id << "', 'height', " << kMinLabelHeight << ");\n";
+                ss << ind << "setFontSize('" << lbl_id << "', 11);\n";
+                ss << ind << "setTextColor('" << lbl_id << "', '#a6adc8');\n";
+            }
+        }
+        else if (wtype == AudioWidgetType::xy_pad) {
+            float sz = std::max(node.style.width.value_or(100.0f), 80.0f);
+            ss << ind << "setFlex('" << col_id << "', 'height', " << (sz + 20) << ");\n";
+            ss << ind << "createXYPad('" << id << "', '" << col_id << "');\n";
+            ss << ind << "setFlex('" << id << "', 'width', " << sz << ");\n";
+            ss << ind << "setFlex('" << id << "', 'height', " << sz << ");\n";
+        }
+        else if (wtype == AudioWidgetType::waveform || wtype == AudioWidgetType::spectrum) {
+            float w = node.style.width.value_or(200.0f);
+            float h = node.style.height.value_or(80.0f);
+            ss << ind << "setFlex('" << col_id << "', 'height', " << (h + 20) << ");\n";
+            auto fn = (wtype == AudioWidgetType::waveform) ? "createWaveform" : "createSpectrum";
+            ss << ind << fn << "('" << id << "', '" << col_id << "');\n";
+            ss << ind << "setFlex('" << id << "', 'width', " << w << ");\n";
+            ss << ind << "setFlex('" << id << "', 'height', " << h << ");\n";
+        }
+
+        ss << "\n";
+        return;
+    }
+
+    // Container or text node
+    bool is_container = !node.children.empty() || node.type == "frame";
+    bool is_text = (node.type == "text" || node.type == "label");
+    bool is_row = (node.layout.direction == LayoutDirection::row);
+
+    if (is_text) {
+        // Text node → createLabel with explicit height (Yoga requirement)
+        ss << ind << "createLabel('" << id << "', '" << node.text_content << "', " << pid << ");\n";
+
+        float font_h = node.style.font_size.value_or(14.0f);
+        float label_h = std::max(font_h + 4.0f, kMinLabelHeight);
+        ss << ind << "setFlex('" << id << "', 'height', " << label_h << ");\n";
+
+        if (node.style.font_size)
+            ss << ind << "setFontSize('" << id << "', " << *node.style.font_size << ");\n";
+        if (node.style.font_weight)
+            ss << ind << "setFontWeight('" << id << "', '" << *node.style.font_weight << "');\n";
+        if (node.style.color)
+            ss << ind << "setTextColor('" << id << "', '" << *node.style.color << "');\n";
+
+        ss << "\n";
+        return;
+    }
+
+    if (is_container) {
+        // Container → createRow or createCol
+        if (opts.include_comments && !node.name.empty() && depth > 0)
+            ss << ind << "// " << node.name << "\n";
+
+        ss << ind << (is_row ? "createRow" : "createCol")
+           << "('" << id << "', " << pid << ");\n";
+
+        // Yoga: every container MUST have explicit height
+        if (node.style.height) {
+            ss << ind << "setFlex('" << id << "', 'height', " << *node.style.height << ");\n";
+        } else if (node.layout.height_mode == SizingMode::fill) {
+            ss << ind << "setFlex('" << id << "', 'flex_grow', 1);\n";
+        } else {
+            // Estimate height from children
+            float est = estimate_container_height(node);
+            ss << ind << "setFlex('" << id << "', 'height', " << est << ");\n";
+        }
+
+        if (node.style.width)
+            ss << ind << "setFlex('" << id << "', 'width', " << *node.style.width << ");\n";
+
+        if (node.layout.gap > 0)
+            ss << ind << "setFlex('" << id << "', 'gap', " << node.layout.gap << ");\n";
+
+        // Padding
+        bool uniform = (node.layout.padding_top == node.layout.padding_right &&
+                         node.layout.padding_right == node.layout.padding_bottom &&
+                         node.layout.padding_bottom == node.layout.padding_left);
+        if (uniform && node.layout.padding_top > 0)
+            ss << ind << "setFlex('" << id << "', 'padding', " << node.layout.padding_top << ");\n";
+        else {
+            if (node.layout.padding_top > 0)
+                ss << ind << "setFlex('" << id << "', 'padding_top', " << node.layout.padding_top << ");\n";
+            if (node.layout.padding_right > 0)
+                ss << ind << "setFlex('" << id << "', 'padding_right', " << node.layout.padding_right << ");\n";
+            if (node.layout.padding_bottom > 0)
+                ss << ind << "setFlex('" << id << "', 'padding_bottom', " << node.layout.padding_bottom << ");\n";
+            if (node.layout.padding_left > 0)
+                ss << ind << "setFlex('" << id << "', 'padding_left', " << node.layout.padding_left << ");\n";
+        }
+
+        if (node.layout.justify != LayoutAlign::flex_start)
+            ss << ind << "setFlex('" << id << "', 'justify_content', '" << align_to_css(node.layout.justify) << "');\n";
+        if (node.layout.align != LayoutAlign::stretch)
+            ss << ind << "setFlex('" << id << "', 'align_items', '" << align_to_css(node.layout.align) << "');\n";
+
+        // Visual styles
+        if (node.style.background_color)
+            ss << ind << "setBackground('" << id << "', '" << *node.style.background_color << "');\n";
+        if (node.style.border_radius)
+            ss << ind << "setCornerRadius('" << id << "', 'All', " << *node.style.border_radius << ");\n";
+
+        ss << "\n";
+
+        // Recurse children
+        for (auto& child : node.children)
+            generate_native_node(ss, child, opts, depth + 1, var_counter, id);
+
+        return;
+    }
+
+    // Generic frame without children (divider, spacer, etc.)
+    ss << ind << "createRow('" << id << "', " << pid << ");\n";
+    if (node.style.height)
+        ss << ind << "setFlex('" << id << "', 'height', " << *node.style.height << ");\n";
+    else
+        ss << ind << "setFlex('" << id << "', 'height', 1);\n";
+    if (node.style.background_color)
+        ss << ind << "setBackground('" << id << "', '" << *node.style.background_color << "');\n";
+    ss << "\n";
+}
+
+// ── Public code generation ──────────────────────────────────────────────
+
 std::string generate_pulp_js(const DesignIR& ir, const CodeGenOptions& opts) {
     std::ostringstream ss;
 
@@ -570,6 +817,8 @@ std::string generate_pulp_js(const DesignIR& ir, const CodeGenOptions& opts) {
         ss << "\n";
     }
 
+    ss << "setTheme('dark');\n\n";
+
     // Token assignments
     if (opts.include_tokens && (!ir.tokens.colors.empty() ||
                                  !ir.tokens.dimensions.empty() ||
@@ -577,22 +826,34 @@ std::string generate_pulp_js(const DesignIR& ir, const CodeGenOptions& opts) {
         if (opts.include_comments)
             ss << "// Design tokens\n";
 
-        for (auto& [name, value] : ir.tokens.colors)
-            ss << "theme.colors[\"" << name << "\"] = '" << value << "';\n";
-        for (auto& [name, value] : ir.tokens.dimensions)
-            ss << "theme.dimensions[\"" << name << "\"] = " << value << ";\n";
-        for (auto& [name, value] : ir.tokens.strings)
-            ss << "theme.strings[\"" << name << "\"] = '" << value << "';\n";
+        if (opts.mode == CodeGenMode::native) {
+            for (auto& [name, value] : ir.tokens.colors)
+                ss << "setColorToken('" << name << "', '" << value << "');\n";
+            for (auto& [name, value] : ir.tokens.dimensions)
+                ss << "setDimensionToken('" << name << "', " << value << ");\n";
+        } else {
+            for (auto& [name, value] : ir.tokens.colors)
+                ss << "theme.colors[\"" << name << "\"] = '" << value << "';\n";
+            for (auto& [name, value] : ir.tokens.dimensions)
+                ss << "theme.dimensions[\"" << name << "\"] = " << value << ";\n";
+            for (auto& [name, value] : ir.tokens.strings)
+                ss << "theme.strings[\"" << name << "\"] = '" << value << "';\n";
+        }
 
         ss << "\n";
     }
 
-    // Element tree
-    int var_counter = 0;
-    generate_node(ss, ir.root, opts, 0, var_counter, "");
-
-    // Append root to document
-    ss << "document.body.appendChild(" << opts.root_variable << ");\n";
+    if (opts.mode == CodeGenMode::native) {
+        // Native Pulp API
+        int var_counter = 0;
+        generate_native_node(ss, ir.root, opts, 0, var_counter, "");
+        ss << "void 0;\n";
+    } else {
+        // Web-compat DOM API
+        int var_counter = 0;
+        generate_node(ss, ir.root, opts, 0, var_counter, "");
+        ss << "document.body.appendChild(" << opts.root_variable << ");\n";
+    }
 
     return ss.str();
 }

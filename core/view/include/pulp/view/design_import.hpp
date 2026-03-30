@@ -147,15 +147,24 @@ AudioWidgetType detect_audio_widget(const std::string& name);
 
 // ── Code generator ──────────────────────────────────────────────────────
 
+/// Code generation output mode.
+enum class CodeGenMode {
+    web_compat,   // document.createElement + el.style (web-compat layer)
+    native        // createCol/createRow/createKnob + setFlex (native Pulp API)
+};
+
 /// Options for code generation.
 struct CodeGenOptions {
+    CodeGenMode mode = CodeGenMode::native;  // Native by default (better Yoga compat)
     bool include_tokens = true;       // Generate token assignments
     bool include_comments = true;     // Generate inline comments
     std::string root_variable = "root";
     int indent_spaces = 2;
 };
 
-/// Generate Pulp web-compat JS code from a DesignIR.
+/// Generate Pulp JS code from a DesignIR.
+/// Native mode (default) uses createCol/createRow/createKnob + setFlex.
+/// Web-compat mode uses document.createElement + el.style.
 std::string generate_pulp_js(const DesignIR& ir, const CodeGenOptions& opts = {});
 
 // ── W3C Design Tokens ───────────────────────────────────────────────────

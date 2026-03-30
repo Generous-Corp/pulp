@@ -128,6 +128,7 @@ TEST_CASE("generate_pulp_js produces valid web-compat JS", "[view][import]") {
     ir.tokens.colors["bg.primary"] = "#1a1a2e";
 
     CodeGenOptions opts;
+    opts.mode = CodeGenMode::web_compat;
     opts.include_comments = false;
     auto js = generate_pulp_js(ir, opts);
 
@@ -149,7 +150,101 @@ TEST_CASE("generate_pulp_js produces valid web-compat JS", "[view][import]") {
     REQUIRE(js.find("theme.colors[\"bg.primary\"]") != std::string::npos);
 }
 
-TEST_CASE("generate_pulp_js handles audio widgets", "[view][import]") {
+TEST_CASE("generate_pulp_js native mode produces Pulp API", "[view][import]") {
+    DesignIR ir;
+    ir.source = DesignSource::figma;
+    ir.root.type = "frame";
+    ir.root.name = "TestUI";
+    ir.root.layout.direction = LayoutDirection::column;
+    ir.root.layout.gap = 8.0f;
+    ir.root.style.background_color = "#1a1a2e";
+    ir.root.style.width = 320.0f;
+    ir.root.style.height = 200.0f;
+
+    IRNode text;
+    text.type = "text";
+    text.name = "title";
+    text.text_content = "Hello";
+    text.style.font_size = 18.0f;
+    text.style.color = "#ffffff";
+    ir.root.children.push_back(text);
+
+    ir.tokens.colors["bg.primary"] = "#1a1a2e";
+
+    CodeGenOptions opts;
+    opts.mode = CodeGenMode::native;
+    opts.include_comments = false;
+    auto js = generate_pulp_js(ir, opts);
+
+    // Should use native API
+    REQUIRE(js.find("createCol('root',") != std::string::npos);
+    REQUIRE(js.find("setFlex('root', 'gap', 8)") != std::string::npos);
+    REQUIRE(js.find("setBackground('root', '#1a1a2e')") != std::string::npos);
+    REQUIRE(js.find("setFlex('root', 'width', 320)") != std::string::npos);
+    // Labels use createLabel with height (Yoga requirement)
+    REQUIRE(js.find("createLabel('title") != std::string::npos);
+    REQUIRE(js.find("setFlex('title") != std::string::npos);
+    REQUIRE(js.find("'height'") != std::string::npos);
+    // Token assignments use setColorToken
+    REQUIRE(js.find("setColorToken('bg.primary', '#1a1a2e')") != std::string::npos);
+    // Should end with void 0
+    REQUIRE(js.find("void 0;") != std::string::npos);
+}
+
+TEST_CASE("generate_pulp_js native mode handles audio widgets with Yoga constraints", "[view][import]") {
+    DesignIR ir;
+    ir.source = DesignSource::figma;
+    ir.root.type = "frame";
+    ir.root.name = "Controls";
+    ir.root.style.width = 300.0f;
+
+    IRNode knob;
+    knob.type = "knob";
+    knob.name = "GainKnob";
+    knob.audio_widget = AudioWidgetType::knob;
+    knob.audio_label = "Gain";
+    knob.audio_default = 0.75f;
+    ir.root.children.push_back(knob);
+
+    IRNode fader;
+    fader.type = "fader";
+    fader.name = "MixFader";
+    fader.audio_widget = AudioWidgetType::fader;
+    fader.audio_label = "Mix";
+    fader.audio_default = 0.5f;
+    ir.root.children.push_back(fader);
+
+    IRNode meter;
+    meter.type = "meter";
+    meter.name = "OutputMeter";
+    meter.audio_widget = AudioWidgetType::meter;
+    meter.audio_label = "Out";
+    ir.root.children.push_back(meter);
+
+    CodeGenOptions opts;
+    opts.mode = CodeGenMode::native;
+    auto js = generate_pulp_js(ir, opts);
+
+    // Knob with wrapper column and proper sizing (IDs get numeric suffixes)
+    REQUIRE(js.find("createKnob('GainKnob") != std::string::npos);
+    REQUIRE(js.find("setLabel('GainKnob") != std::string::npos);
+    REQUIRE(js.find("'Gain')") != std::string::npos);
+    REQUIRE(js.find("setValue('GainKnob") != std::string::npos);
+    // Knob size >= 56 (minimum)
+    REQUIRE(js.find("'width', 56)") != std::string::npos);
+
+    // Fader with min width >= 40
+    REQUIRE(js.find("createFader('MixFader") != std::string::npos);
+    REQUIRE(js.find("'Mix')") != std::string::npos);
+    REQUIRE(js.find("'width', 40)") != std::string::npos);
+
+    // Meter with separate label (no built-in setLabel for Meter)
+    REQUIRE(js.find("createMeter('OutputMeter") != std::string::npos);
+    REQUIRE(js.find("'Out'") != std::string::npos);
+    REQUIRE(js.find("setMeterLevel") != std::string::npos);
+}
+
+TEST_CASE("generate_pulp_js web-compat mode handles audio widgets", "[view][import]") {
     DesignIR ir;
     ir.source = DesignSource::figma;
     ir.root.type = "frame";
@@ -165,7 +260,9 @@ TEST_CASE("generate_pulp_js handles audio widgets", "[view][import]") {
     knob.audio_default = 0.75f;
     ir.root.children.push_back(knob);
 
-    auto js = generate_pulp_js(ir);
+    CodeGenOptions opts;
+    opts.mode = CodeGenMode::web_compat;
+    auto js = generate_pulp_js(ir, opts);
 
     REQUIRE(js.find("createKnob") != std::string::npos);
     REQUIRE(js.find("label: 'Gain'") != std::string::npos);
