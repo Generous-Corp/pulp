@@ -130,33 +130,37 @@ setFlex("toolbar", "justify_content", "space-between");
 setBackground("toolbar", APP_SURFACE);
 setBorder("toolbar", APP_BORDER, 1, 0);
 
-// Toolbar items (flat layout)
+// Toolbar items — all flex_shrink:0 to prevent Yoga compression
 createLabel("theme-name-label", "Default Dark", "toolbar");
-setFontSize("theme-name-label", 13);
-setFlex("theme-name-label", "width", 90);
+setFontSize("theme-name-label", 12);
+setFlex("theme-name-label", "width", 80);
+setFlex("theme-name-label", "flex_shrink", 0);
+setFlex("theme-name-label", "height", 26);
 
 createCombo("preset-selector", "toolbar");
 setItems("preset-selector", ["Default Dark", "Light", "Pro Audio", "Violet", "Amber", "Ocean", "Neon"]);
-setFlex("preset-selector", "width", 120);
+setFlex("preset-selector", "width", 110);
 setFlex("preset-selector", "height", 26);
+setFlex("preset-selector", "flex_shrink", 0);
 
-// D3: State scrubber pills
+// State scrubber pills
 var stateNames = ["Default", "Hover", "Focus", "Disabled", "Error"];
 var activeState = 0;
 createRow("state-pills", "toolbar");
 setFlex("state-pills", "height", 26);
-setFlex("state-pills", "gap", 2);
+setFlex("state-pills", "flex_shrink", 0);
+setFlex("state-pills", "gap", 1);
 setFlex("state-pills", "align_items", "center");
-setFlex("state-pills", "padding_left", 8);
-setFlex("state-pills", "padding_right", 8);
+setFlex("state-pills", "padding_left", 4);
+setFlex("state-pills", "padding_right", 4);
 setBorder("state-pills", APP_BORDER, 1, 4);
 
 for (var sp = 0; sp < stateNames.length; sp++) {
     var spId = "state-pill-" + sp;
     createCol(spId, "state-pills");
-    setFlex(spId, "height", 24);
-    setFlex(spId, "padding_left", 12);
-    setFlex(spId, "padding_right", 12);
+    setFlex(spId, "height", 22);
+    setFlex(spId, "padding_left", 6);
+    setFlex(spId, "padding_right", 6);
     setFlex(spId, "justify_content", "center");
     setFlex(spId, "align_items", "center");
     if (sp === 0) {
@@ -236,6 +240,7 @@ for (var tb = 0; tb < toolbarBtns.length; tb++) {
     createCol(btn.id + "-pill", "toolbar");
     setFlex(btn.id + "-pill", "width", btn.width);
     setFlex(btn.id + "-pill", "height", 26);
+    setFlex(btn.id + "-pill", "flex_shrink", 0);
     setFlex(btn.id + "-pill", "justify_content", "center");
     setFlex(btn.id + "-pill", "align_items", "center");
     setBorder(btn.id + "-pill", APP_BORDER, 1, 4);
@@ -2306,23 +2311,27 @@ setFlex("model-row", "align_items", "center");
 setFlex("model-row", "justify_content", "space-between");
 
 // #51: Context badge with accent styling
-createCol("context-badge", "model-row");
-setFlex("context-badge", "height", 20);
+// Chat context badge
+createRow("context-badge", "model-row");
+setFlex("context-badge", "height", 22);
+setFlex("context-badge", "width", 150);
+setFlex("context-badge", "flex_shrink", 0);
 setFlex("context-badge", "padding_left", 8);
 setFlex("context-badge", "padding_right", 8);
-setFlex("context-badge", "justify_content", "center");
 setFlex("context-badge", "align_items", "center");
-setFlex("context-badge", "direction", "row");
 setFlex("context-badge", "gap", 4);
 setBackground("context-badge", '#2a2040');
 setBorder("context-badge", APP_ACCENT, 1, 10);
-createLabel("context-label", "Editing: All Components", "context-badge");
-setFontSize("context-label", 8);
+createLabel("context-label", "Editing: All", "context-badge");
+setFontSize("context-label", 9);
 setTextColor("context-label", APP_ACCENT);
-// Clear button (x) — visible when component selected
+setFlex("context-label", "flex_grow", 1);
+setFlex("context-label", "height", 14);
 createLabel("context-clear", "x", "context-badge");
-setFontSize("context-clear", 9);
+setFontSize("context-clear", 10);
 setTextColor("context-clear", APP_TEXT_DIM);
+setFlex("context-clear", "width", 12);
+setFlex("context-clear", "height", 14);
 setVisible("context-clear", false);
 registerClick("context-clear");
 registerClick("context-badge");
