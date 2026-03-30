@@ -222,17 +222,29 @@ int main(int argc, char* argv[]) {
         return 0;
     }
 
+    auto t_codegen = std::chrono::steady_clock::now();
+
     // Write output files
     if (!write_file(output_file, js)) return 1;
 
-    size_t node_count = 0;
+    // Count elements by type
+    size_t node_count = 0, text_count = 0, container_count = 0, widget_count = 0;
     std::function<void(const IRNode&)> count_nodes = [&](const IRNode& n) {
         node_count++;
+        if (n.audio_widget != AudioWidgetType::none) widget_count++;
+        else if (n.type == "text" || n.type == "label") text_count++;
+        else if (!n.children.empty() || n.type == "frame") container_count++;
         for (auto& c : n.children) count_nodes(c);
     };
     count_nodes(ir.root);
 
-    std::cout << "Wrote " << output_file << " (" << node_count << " elements";
+    auto t_write = std::chrono::steady_clock::now();
+    auto ms_total = std::chrono::duration_cast<std::chrono::milliseconds>(t_write - t_start).count();
+    auto ms_codegen = std::chrono::duration_cast<std::chrono::milliseconds>(t_codegen - t_start).count();
+
+    std::cout << "Wrote " << output_file << " (" << node_count << " elements: "
+              << container_count << " containers, " << widget_count << " widgets, "
+              << text_count << " labels";
 
     // Write tokens
     if (include_tokens && (!ir.tokens.colors.empty() || !ir.tokens.dimensions.empty() || !ir.tokens.strings.empty())) {

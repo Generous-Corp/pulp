@@ -209,16 +209,28 @@ static IRNode parse_ir_node(const choc::value::ValueView& obj) {
 
     // Top-level properties (Pencil/Figma format puts these at node level, not in "style")
     // Override style values if they weren't set from the "style" sub-object
-    if (!node.style.width && obj.hasObjectMember("width")) {
+    // Handle Pencil sizing modes: fill_container → flex_grow, fit_content → auto
+    if (obj.hasObjectMember("width")) {
         auto w_str = get_string(obj, "width", "");
-        if (w_str != "fill_container" && w_str != "fit_content") {
+        if (w_str == "fill_container") {
+            node.layout.width_mode = SizingMode::fill;
+        } else if (w_str == "fit_content" || w_str.find("fit_content") == 0) {
+            node.layout.width_mode = SizingMode::hug;
+        } else if (!node.style.width) {
             float w = get_float(obj, "width", 0);
             if (w > 0) node.style.width = w;
         }
     }
-    if (!node.style.height && obj.hasObjectMember("height")) {
-        float h = get_float(obj, "height", 0);
-        if (h > 0) node.style.height = h;
+    if (obj.hasObjectMember("height")) {
+        auto h_str = get_string(obj, "height", "");
+        if (h_str == "fill_container") {
+            node.layout.height_mode = SizingMode::fill;
+        } else if (h_str == "fit_content" || h_str.find("fit_content") == 0) {
+            node.layout.height_mode = SizingMode::hug;
+        } else if (!node.style.height) {
+            float h = get_float(obj, "height", 0);
+            if (h > 0) node.style.height = h;
+        }
     }
     // Top-level fill → backgroundColor
     if (!node.style.background_color && obj.hasObjectMember("fill")) {
@@ -939,6 +951,8 @@ static void generate_native_node(std::ostringstream& ss, const IRNode& node,
 
         if (node.style.width)
             ss << ind << "setFlex('" << id << "', 'width', " << *node.style.width << ");\n";
+        else if (node.layout.width_mode == SizingMode::fill)
+            ss << ind << "setFlex('" << id << "', 'flex_grow', 1);\n";
 
         if (node.layout.gap > 0)
             ss << ind << "setFlex('" << id << "', 'gap', " << node.layout.gap << ");\n";
