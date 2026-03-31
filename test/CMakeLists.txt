@@ -127,14 +127,22 @@ catch_discover_tests(pulp-test-nsis-installer)
 
 # GPU surface tests
 if(PULP_ENABLE_GPU)
+    set(PULP_GPU_TEST_DISCOVERY_ARGS)
+    if(WIN32 AND TARGET webgpu)
+        list(APPEND PULP_GPU_TEST_DISCOVERY_ARGS
+            DISCOVERY_MODE PRE_TEST
+            DL_PATHS "$<TARGET_FILE_DIR:webgpu>"
+        )
+    endif()
+
     add_executable(pulp-test-gpu-surface test_gpu_surface.cpp)
     target_link_libraries(pulp-test-gpu-surface PRIVATE pulp::render Catch2::Catch2WithMain)
-    catch_discover_tests(pulp-test-gpu-surface)
+    catch_discover_tests(pulp-test-gpu-surface ${PULP_GPU_TEST_DISCOVERY_ARGS})
 
     # Skia surface test
     add_executable(pulp-test-skia-surface test_skia_surface.cpp)
     target_link_libraries(pulp-test-skia-surface PRIVATE pulp::render Catch2::Catch2WithMain)
-    catch_discover_tests(pulp-test-skia-surface)
+    catch_discover_tests(pulp-test-skia-surface ${PULP_GPU_TEST_DISCOVERY_ARGS})
 endif()
 
 # Animation tests

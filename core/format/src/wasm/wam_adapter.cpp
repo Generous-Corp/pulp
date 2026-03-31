@@ -69,8 +69,8 @@ bool WamProcessorBridge::initialize(double sample_rate, int max_block_size) {
     processor_->define_parameters(store_);
 
     auto desc = processor_->descriptor();
-    num_channels_ = std::max(desc.default_input_channels(),
-                             desc.default_output_channels());
+    num_channels_ = (std::max)(desc.default_input_channels(),
+                               desc.default_output_channels());
     if (num_channels_ < 1) num_channels_ = 2;
     block_size_ = max_block_size;
 
@@ -101,7 +101,7 @@ void WamProcessorBridge::process(const float* input, float* output,
                                   int num_channels, int num_frames) {
     if (!processor_) return;
 
-    int ch = std::min(num_channels, num_channels_);
+    int ch = (std::min)(num_channels, num_channels_);
 
     // De-interleave: Web Audio [L0,R0,L1,R1,...] → planar [L0,L1,...][R0,R1,...]
     for (int f = 0; f < num_frames; ++f) {
