@@ -26,6 +26,7 @@ $InstallLog = Join-Path $TempRoot "install.log"
 $SmokeLog = Join-Path $TempRoot "smoke.log"
 $TestLog = Join-Path $TempRoot "test.log"
 $BashExe = $null
+$VcVarsBat = $null
 
 New-Item -ItemType Directory -Force -Path $TempRoot | Out-Null
 
@@ -71,8 +72,59 @@ function Resolve-Bash {
     throw "bash not found on PATH and no Git Bash fallback was found"
 }
 
+function Resolve-VcVars {
+    if (Get-Command cl.exe -ErrorAction SilentlyContinue) {
+        return $null
+    }
+
+    $vswhere = Get-Command vswhere.exe -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source -ErrorAction SilentlyContinue
+    if (-not $vswhere) {
+        $bundledVsWhere = "C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe"
+        if (Test-Path $bundledVsWhere) { $vswhere = $bundledVsWhere }
+    }
+
+    if ($vswhere) {
+        $installPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath 2>$null
+        if ($LASTEXITCODE -eq 0 -and $installPath) {
+            $candidate = Join-Path $installPath "VC\Auxiliary\Build\vcvars64.bat"
+            if (Test-Path $candidate) { return $candidate }
+        }
+    }
+
+    $fallbacks = @(
+        "C:\Program Files\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat",
+        "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat",
+        "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat",
+        "C:\Program Files (x86)\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat"
+    )
+    foreach ($candidate in $fallbacks) {
+        if (Test-Path $candidate) { return $candidate }
+    }
+
+    return $null
+}
+
+function Import-VcVarsEnvironment {
+    param([string]$BatchFile)
+
+    if (-not $BatchFile) { return }
+
+    $lines = & cmd.exe /d /s /c """$BatchFile"" >nul && set"
+    if ($LASTEXITCODE -ne 0) {
+        throw "failed to import MSVC environment from $BatchFile"
+    }
+
+    foreach ($line in $lines) {
+        if ($line -match '^(.*?)=(.*)$') {
+            [Environment]::SetEnvironmentVariable($matches[1], $matches[2], 'Process')
+        }
+    }
+}
+
 try {
     $BashExe = Resolve-Bash
+    $VcVarsBat = Resolve-VcVars
+    Import-VcVarsEnvironment -BatchFile $VcVarsBat
     if (-not $Quiet) { Write-Host "Creating clean validation worktree..." }
     & cmd.exe /c "git -C `"$Root`" worktree add --detach `"$SrcDir`" `"$Ref`" >nul 2>nul"
     if ($LASTEXITCODE -ne 0) { throw "git worktree add failed" }
