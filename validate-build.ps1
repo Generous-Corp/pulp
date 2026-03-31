@@ -11,6 +11,7 @@ param(
 
 if ($Verbose) { $Quiet = $false }
 $ErrorActionPreference = "Stop"
+$PSNativeCommandUseErrorActionPreference = $false
 
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $TempRoot = Join-Path $env:TEMP ("pulp-validate." + [Guid]::NewGuid().ToString("N"))
@@ -74,6 +75,7 @@ try {
     $BashExe = Resolve-Bash
     if (-not $Quiet) { Write-Host "Creating clean validation worktree..." }
     git -C $Root worktree add --detach $SrcDir $Ref *> $null
+    if ($LASTEXITCODE -ne 0) { throw "git worktree add failed" }
 
     Run-OrDump "dependency bootstrap" $SetupLog {
         & $BashExe -lc "cd '$SrcDir' && ./setup.sh --ci --deps-only"
