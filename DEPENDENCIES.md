@@ -14,7 +14,7 @@ All dependencies must be compatible with MIT licensing. No copyleft (GPL, LGPL, 
 |------|---------|---------|----------|-----------|-------|
 | AudioUnitSDK | HEAD | Apache-2.0 | AU v2 plugin format adapter (AUEffectBase, factory) | pulp-format | 2026-03-24 |
 | Catch2 | 3.7.1 | BSL-1.0 | Unit testing framework | test | 2026-03-24 |
-| CHOC | main | ISC | JS engine abstraction, MIDI utilities, audio helpers | multiple | 2026-03-24 |
+| CHOC | f0f5cdf5a938 | ISC | JS engine abstraction, MIDI utilities, audio helpers | multiple | 2026-03-24 |
 | CLAP | 1.2.2 | MIT | CLAP plugin format headers | pulp-format | 2026-03-24 |
 | Dawn | chrome/m144 | BSD-3-Clause | WebGPU implementation used by the GPU render path (via pre-built Skia toolchain) | pulp-render | 2026-03-30 |
 | LV2 | 1.18.10 | ISC | LV2 plugin format headers | pulp-format | 2026-03-30 |
@@ -24,7 +24,7 @@ All dependencies must be compatible with MIT licensing. No copyleft (GPL, LGPL, 
 | SDL3 | 3.2.12 | zlib | Cross-platform windowing, input, GPU context | pulp-view | 2026-03-25 |
 | Skia | chrome/m144 | BSD-3-Clause | GPU 2D rendering engine (pre-built via skia-builder) | pulp-canvas, pulp-render | 2026-03-25 |
 | VST3 SDK | v3.7.12_build_20 | MIT | VST3 plugin format (pluginterfaces + base) | pulp-format | 2026-03-24 |
-| WebGPU-distribution | main | MIT | WebGPU C API wrapper for Dawn (FetchContent) | pulp-render | 2026-03-25 |
+| WebGPU-distribution | 17dcd42a7683 | MIT | WebGPU C API wrapper for Dawn (FetchContent) | pulp-render | 2026-03-25 |
 | Yoga | 3.2.1 | MIT | CSS Flexbox/Grid layout engine (Meta, FetchContent) | pulp-view | 2026-03-29 |
 
 ## Format SDKs (Obtained by Developers)

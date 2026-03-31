@@ -43,6 +43,7 @@ option(PULP_BUILD_TESTS "Build unit tests" ON)
 option(PULP_BUILD_EXAMPLES "Build example projects" ON)
 option(PULP_ENABLE_GPU "Enable GPU rendering (Dawn/Skia)" ON)
 option(PULP_ENABLE_SWIFT "Enable Swift layer (Apple only)" OFF)
+option(PULP_FETCHCONTENT_UPDATES_DISCONNECTED "Avoid implicit FetchContent updates during configure" ON)
 
 # ── Compiler Warnings ──────────────────────────────────────────────────────
 if(MSVC)
@@ -56,13 +57,14 @@ include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/Sanitizers.cmake)
 
 # ── Third-Party Dependencies ────────────────────────────────────────────────
 include(FetchContent)
+set(FETCHCONTENT_UPDATES_DISCONNECTED ${PULP_FETCHCONTENT_UPDATES_DISCONNECTED})
 
 # CHOC: header-only C++ utilities (ISC license)
 # Used for: JS engine abstraction, MIDI utilities
 FetchContent_Declare(
     choc
     GIT_REPOSITORY https://github.com/Tracktion/choc.git
-    GIT_TAG main
+    GIT_TAG f0f5cdf5a938b8b779fea6c083571cce5ccab925
 )
 FetchContent_MakeAvailable(choc)
 
@@ -72,7 +74,7 @@ if(PULP_ENABLE_GPU)
     FetchContent_Declare(
         webgpu
         GIT_REPOSITORY https://github.com/eliemichel/WebGPU-distribution.git
-        GIT_TAG main
+        GIT_TAG 17dcd42a7683355e7a40ac4e97e77f36dff5b5ab
     )
     FetchContent_MakeAvailable(webgpu)
     set(PULP_HAS_WEBGPU TRUE)
