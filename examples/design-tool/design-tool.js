@@ -111,6 +111,67 @@ var APP_TEXT    = '#d4d4dc';
 var APP_TEXT_DIM = '#808090';
 var APP_ACCENT  = '#aa88ff';
 var APP_ACCENT_HOVER = '#bf9fff';
+var previewReady = false;
+var activePreviewTab = 0;
+
+function previewThemeColor(token, fallback) {
+    var colors = JSON.parse(getThemeJson()).colors || {};
+    return colors[token] || fallback;
+}
+
+var previewTabContent = [
+    { title: "Panel content area", subtitle: "With divider and secondary text" },
+    { title: "Audio routing", subtitle: "Meters, waveforms, and controls align here" },
+    { title: "MIDI mapping", subtitle: "Assignments and ranges preview here" },
+    { title: "About this preset", subtitle: "Metadata, export details, and notes" }
+];
+
+function setPreviewActiveTab(idx, skipLayout) {
+    if (!previewReady) return;
+    activePreviewTab = idx;
+    var activeUnderline = previewThemeColor("tab.active", APP_ACCENT);
+    var inactiveText = previewThemeColor("tab.inactive", APP_TEXT_DIM);
+    for (var ti = 0; ti < 4; ti++) {
+        setTextColor("ptab-" + ti + "-l", ti === idx ? APP_TEXT : inactiveText);
+        setBackground("ptab-" + ti + "-line", ti === idx ? activeUnderline : "transparent");
+    }
+    setText("panel-title", previewTabContent[idx].title);
+    setText("panel-sub", previewTabContent[idx].subtitle);
+    if (!skipLayout) layout();
+}
+
+function refreshPreviewLayoutSection() {
+    if (!previewReady) return;
+    var cardEmpty = previewThemeColor("card.empty", APP_PANEL);
+    var cardLoading = previewThemeColor("card.loading", "#3e4245");
+    var cardReady = previewThemeColor("card.ready", APP_PANEL);
+    var cardError = previewThemeColor("card.error", "#4a1f28");
+    var success = previewThemeColor("success", "#4CAF50");
+    var error = previewThemeColor("error", "#F44336");
+    var spinner = previewThemeColor("spinner", APP_ACCENT);
+    var divider = previewThemeColor("divider", APP_BORDER);
+
+    setBackground("card-1", cardEmpty);
+    setBackground("card-2", cardLoading);
+    setBackground("card-3", cardReady);
+    setBackground("card-4", cardError);
+    setBorder("card-1", divider, 1, 8);
+    setBorder("card-2", divider, 1, 8);
+    setBorder("card-3", divider, 1, 8);
+    setBorder("card-4", divider, 1, 8);
+    setTextColor("card-1-label", APP_TEXT_DIM);
+    setTextColor("card-3-label", APP_TEXT_DIM);
+    setTextColor("card-4-label", error);
+    setBackground("card-3-badge", success);
+    setBackground("card-4-badge", error);
+    setTextColor("card-3-badge-lbl", "#ffffff");
+    setTextColor("card-4-badge-lbl", "#ffffff");
+    setTextColor("card-2-spinner", spinner);
+    setBackground("panel-divider", divider);
+    setTextColor("spinner-icon", spinner);
+    setTextColor("spinner-text", previewThemeColor("text.secondary", APP_TEXT_DIM));
+    setPreviewActiveTab(activePreviewTab, true);
+}
 
 // ═══════════════════════════════════════════════════════════════════
 // Root: vertical column (toolbar → main → status bar)
@@ -267,26 +328,10 @@ function applyStateToPreview(stateIdx) {
     setTextColor("toggle-on-label", APP_TEXT);
     setTextColor("toggle-off-label", APP_TEXT);
 
-    setBorder("panel-content", APP_BORDER, 1, 6);
+    setBorder("panel-content", previewThemeColor("divider", APP_BORDER), 1, 6);
     setBackground("panel-content", APP_PANEL);
-    setBorder("card-1", APP_BORDER, 1, 8);
-    setBorder("card-2", APP_BORDER, 1, 8);
-    setBorder("card-3", "#4CAF50", 1, 8);
-    setBorder("card-4", "#e94560", 1, 8);
-    setBackground("card-1", APP_PANEL);
-    setBackground("card-2", APP_PANEL);
-    setBackground("card-3", APP_PANEL);
-    setBackground("card-4", "#3a2020");
-
-    setTextColor("ptab-0-l", APP_ACCENT);
-    setTextColor("ptab-1-l", APP_TEXT_DIM);
-    setTextColor("ptab-2-l", APP_TEXT_DIM);
-    setTextColor("ptab-3-l", APP_TEXT_DIM);
-    setBackground("ptab-0", "transparent");
-    setBackground("ptab-1", "transparent");
-    setBackground("ptab-2", "transparent");
-    setBackground("ptab-3", "transparent");
-    setBackground("ptab-0-line", APP_ACCENT);
+    refreshPreviewLayoutSection();
+    setPreviewActiveTab(0, true);
 
     if (stateIdx === 1) { // Hover
         setBackground("btn-normal", "#4a4a5c");
@@ -297,11 +342,8 @@ function applyStateToPreview(stateIdx) {
         setBorder("sample-combo", APP_ACCENT, 1, 6);
         setBackground("tb1", "#4a4a5c");
         setBorder("tb1", APP_ACCENT, 1, 6);
-        setBackground("ptab-1", APP_PANEL);
-        setTextColor("ptab-0-l", APP_TEXT_DIM);
-        setTextColor("ptab-1-l", APP_ACCENT);
-        setBackground("ptab-0-line", APP_PANEL);
-        setBackground("card-2", "#313544");
+        setTextColor("ptab-1-l", APP_TEXT);
+        setBackground("card-2", previewThemeColor("card.loading", "#3e4245"));
     } else if (stateIdx === 2) { // Focus
         setBorder("btn-normal", APP_ACCENT, 2, 6);
         setBorder("btn-hover", APP_ACCENT, 2, 6);
@@ -332,7 +374,6 @@ function applyStateToPreview(stateIdx) {
         setEnabled("cb1", false);
         setTextColor("toggle-on-label", APP_TEXT_DIM);
         setTextColor("toggle-off-label", APP_TEXT_DIM);
-        setBackground("ptab-0-line", APP_PANEL);
     } else if (stateIdx === 4) { // Error
         setBorder("btn-normal", "#e94560", 1, 6);
         setBorder("btn-hover", "#e94560", 1, 6);
@@ -342,8 +383,9 @@ function applyStateToPreview(stateIdx) {
         setBorder("sample-combo", "#e94560", 1, 6);
         setBorder("tb1", "#e94560", 1, 6);
         setBorder("panel-content", "#e94560", 1, 6);
-        setBackground("card-2", "#3a2020");
-        setBackground("card-4", "#4a1f28");
+        setBackground("card-2", previewThemeColor("card.error", "#4a1f28"));
+        setBackground("card-4", previewThemeColor("card.error", "#4a1f28"));
+        setTextColor("card-4-label", previewThemeColor("error", "#F44336"));
         setTextColor("toggle-off-label", "#f38ba8");
     }
     layout();
@@ -790,6 +832,9 @@ function updateTokenSwatches() {
                 setText(hexId, colors[tokenName]);
             }
         }
+    }
+    if (previewReady) {
+        refreshPreviewLayoutSection();
     }
 }
 updateTokenSwatches();
@@ -2348,14 +2393,10 @@ setWidgetStyle("m4", "minimal");
 setMeterLevel("m4", 0.85, 0.95);
 
 // Layout section: 2x2 card grid
-createLabel("layout-header", "Layout", "preview-area");
-setFontSize("layout-header", 11);
+createLabel("layout-header", "LAYOUT", "preview-area");
+setFontSize("layout-header", 10);
 setTextColor("layout-header", APP_TEXT_DIM);
 setFlex("layout-header", "height", 16);
-
-createRow("card-grid-top", "preview-area");
-setFlex("card-grid-top", "gap", 8);
-setFlex("card-grid-top", "height", 56);
 
 // D3: Card grid matching HTML reference — Empty, Loading, Ready (OK badge), Error (! badge)
 var cardDefs = [
@@ -2368,32 +2409,43 @@ var cardRows = [["card-grid-top", [0, 1]], ["card-grid-bot", [2, 3]]];
 for (var cr = 0; cr < cardRows.length; cr++) {
     var crId = cardRows[cr][0];
     createRow(crId, "preview-area");
-    setFlex(crId, "gap", 8);
+    setFlex(crId, "gap", 6);
     setFlex(crId, "height", 56);
     var indices = cardRows[cr][1];
     for (var ci = 0; ci < indices.length; ci++) {
         var cd = cardDefs[indices[ci]];
         createCol(cd.id, crId);
+        setPosition(cd.id, "relative");
         setFlex(cd.id, "flex_grow", 1);
         setBackground(cd.id, cd.bg);
         setBorder(cd.id, cd.border, 1, 8);
-        setFlex(cd.id, "padding", 8);
+        setFlex(cd.id, "padding", 6);
         setFlex(cd.id, "justify_content", "center");
         setFlex(cd.id, "align_items", "center");
-        createLabel(cd.id + "-label", cd.label, cd.id);
-        setFontSize(cd.id + "-label", 10);
-        setTextColor(cd.id + "-label", cd.loading ? APP_TEXT_DIM : APP_TEXT);
+        if (cd.loading) {
+            createLabel(cd.id + "-spinner", "\u25DC", cd.id);
+            setFontSize(cd.id + "-spinner", 12);
+            setTextColor(cd.id + "-spinner", APP_ACCENT);
+        } else {
+            createLabel(cd.id + "-label", cd.label, cd.id);
+            setFontSize(cd.id + "-label", 9);
+            setTextColor(cd.id + "-label", cd.id === "card-4" ? "#F44336" : APP_TEXT_DIM);
+        }
         if (cd.badge) {
-            // Badge in top-right corner
             createCol(cd.id + "-badge", cd.id);
-            setFlex(cd.id + "-badge", "width", 22);
+            setPosition(cd.id + "-badge", "absolute");
+            setTop(cd.id + "-badge", 4);
+            setRight(cd.id + "-badge", 4);
             setFlex(cd.id + "-badge", "height", 16);
+            setFlex(cd.id + "-badge", "padding_left", 4);
+            setFlex(cd.id + "-badge", "padding_right", 4);
             setFlex(cd.id + "-badge", "justify_content", "center");
             setFlex(cd.id + "-badge", "align_items", "center");
             setBackground(cd.id + "-badge", cd.badgeColor);
-            setBorder(cd.id + "-badge", cd.badgeColor, 0, 4);
+            setBorder(cd.id + "-badge", cd.badgeColor, 0, 3);
             createLabel(cd.id + "-badge-lbl", cd.badge, cd.id + "-badge");
-            setFontSize(cd.id + "-badge-lbl", 8);
+            setFontSize(cd.id + "-badge-lbl", 7);
+            setTextColor(cd.id + "-badge-lbl", "#ffffff");
         }
     }
 }
@@ -2409,52 +2461,72 @@ setFlex("prog1", "flex_grow", 1);
 setFlex("prog1", "height", 6);
 setProgress("prog1", 0.65);
 
-createLabel("spinner-label", "\u25E0 Loading...", "progress-row");
-setFontSize("spinner-label", 11);
-setTextColor("spinner-label", APP_ACCENT);
-setFlex("spinner-label", "width", 90);
+createRow("spinner-row", "progress-row");
+setFlex("spinner-row", "gap", 8);
+setFlex("spinner-row", "align_items", "center");
+setFlex("spinner-row", "height", 16);
+
+createLabel("spinner-icon", "\u25E0", "spinner-row");
+setFontSize("spinner-icon", 11);
+setTextColor("spinner-icon", APP_ACCENT);
+setFlex("spinner-icon", "width", 12);
+
+createLabel("spinner-text", "Loading...", "spinner-row");
+setFontSize("spinner-text", 10);
+setTextColor("spinner-text", APP_TEXT_DIM);
+setFlex("spinner-text", "width", 54);
 
 // Animate spinner character rotation
 var spinnerFrames = ["\u25DC", "\u25DD", "\u25DE", "\u25DF"];
 var spinnerIdx = 0;
 function tickSpinner() {
     spinnerIdx = (spinnerIdx + 1) % spinnerFrames.length;
-    setText("spinner-label", spinnerFrames[spinnerIdx] + " Loading...");
+    setText("spinner-icon", spinnerFrames[spinnerIdx]);
+    setText("card-2-spinner", spinnerFrames[spinnerIdx]);
     __requestFrame__(tickSpinner);
 }
 __requestFrame__(tickSpinner);
 
 // ── Tab Bar (General / Audio / MIDI / About) ─────────────────────
-createLabel("tabs-header", "Tabs", "preview-area");
-setFontSize("tabs-header", 11);
-setTextColor("tabs-header", APP_TEXT_DIM);
-
 createRow("tab-bar-preview", "preview-area");
-setFlex("tab-bar-preview", "height", 30);
+setFlex("tab-bar-preview", "height", 28);
 setFlex("tab-bar-preview", "gap", 0);
-setFlex("tab-bar-preview", "align_items", "center");
-setBorder("tab-bar-preview", APP_BORDER, 1, 0);
+setFlex("tab-bar-preview", "align_items", "flex_end");
+setBorder("tab-bar-preview", APP_BORDER, 0, 0);
+createCol("tab-bar-preview-line", "tab-bar-preview");
+setPosition("tab-bar-preview-line", "absolute");
+setLeft("tab-bar-preview-line", 0);
+setRight("tab-bar-preview-line", 0);
+setBottom("tab-bar-preview-line", 0);
+setFlex("tab-bar-preview-line", "height", 2);
+setBackground("tab-bar-preview-line", previewThemeColor("divider", APP_BORDER));
 
 var tabNames = ["General", "Audio", "MIDI", "About"];
 for (var ti = 0; ti < tabNames.length; ti++) {
     var tabId = "ptab-" + ti;
     createCol(tabId, "tab-bar-preview");
-    setFlex(tabId, "flex_grow", 1);
-    setFlex(tabId, "height", 30);
-    setFlex(tabId, "justify_content", "center");
+    setPosition(tabId, "relative");
+    setFlex(tabId, "height", 28);
+    setFlex(tabId, "padding_left", 14);
+    setFlex(tabId, "padding_right", 14);
+    setFlex(tabId, "justify_content", "flex_end");
     setFlex(tabId, "align_items", "center");
+    setFlex(tabId, "gap", 6);
+    registerClick(tabId);
 
     createLabel(tabId + "-l", tabNames[ti], tabId);
     setFontSize(tabId + "-l", 11);
-    if (ti === 0) setTextColor(tabId + "-l", APP_ACCENT);
-    else setTextColor(tabId + "-l", APP_TEXT_DIM);
+    setTextColor(tabId + "-l", ti === 0 ? APP_TEXT : APP_TEXT_DIM);
+    setPointerEvents(tabId + "-l", "none");
 
-    if (ti === 0) {
-        createCol(tabId + "-line", tabId);
-        setFlex(tabId + "-line", "height", 2);
-        setFlex(tabId + "-line", "flex_grow", 1);
-        setBackground(tabId + "-line", APP_ACCENT);
-    }
+    createCol(tabId + "-line", tabId);
+    setFlex(tabId + "-line", "height", 2);
+    setFlex(tabId + "-line", "width", 999);
+    setBackground(tabId + "-line", ti === 0 ? APP_ACCENT : "transparent");
+
+    (function(idx) {
+        on("ptab-" + idx, "click", function() { setPreviewActiveTab(idx); });
+    })(ti);
 }
 
 // Panel content area with divider
@@ -2475,6 +2547,10 @@ setBackground("panel-divider", APP_BORDER);
 createLabel("panel-sub", "With divider and secondary text", "panel-content");
 setFontSize("panel-sub", 10);
 setTextColor("panel-sub", APP_TEXT_DIM);
+
+previewReady = true;
+refreshPreviewLayoutSection();
+setPreviewActiveTab(0, true);
 
 // ── Overlays (Static Preview) ────────────────────────────────────
 createLabel("overlays-header", "Overlays", "preview-area");

@@ -306,6 +306,39 @@ TEST_CASE("Design tool: waveform and spectrum previews render populated data", "
     REQUIRE(spectrum_canvas.count(pulp::canvas::DrawCommand::Type::stroke_line) > 3);
 }
 
+TEST_CASE("Design tool: layout preview uses loading spinner and interactive tabs", "[design-tool]") {
+    auto js_path = find_js_file("design-tool.js");
+    if (js_path.empty()) {
+        SKIP("design-tool.js not found");
+        return;
+    }
+
+    View root;
+    root.set_theme(Theme::dark());
+    root.flex().direction = FlexDirection::column;
+    root.set_bounds({0, 0, 1100, 700});
+
+    pulp::state::StateStore store;
+    ScriptEngine engine;
+    WidgetBridge bridge(engine, root, store);
+    load_design_tool(root, engine, bridge);
+
+    auto* spinner = dynamic_cast<Label*>(bridge.widget("card-2-spinner"));
+    auto* tabs_header = bridge.widget("tabs-header");
+    auto* panel_title = dynamic_cast<Label*>(bridge.widget("panel-title"));
+    REQUIRE(spinner != nullptr);
+    REQUIRE(tabs_header == nullptr);
+    REQUIRE(panel_title != nullptr);
+    REQUIRE_FALSE(spinner->text().empty());
+    REQUIRE(panel_title->text() == "Panel content area");
+
+    REQUIRE_NOTHROW(engine.evaluate("__dispatch__('ptab-2', 'click', 0);"));
+    root.layout_children();
+
+    REQUIRE(engine.evaluate("activePreviewTab").getWithDefault<int>(-1) == 2);
+    REQUIRE(panel_title->text() == "MIDI mapping");
+}
+
 TEST_CASE("Design tool: inspect click updates and clears chat context badge", "[design-tool]") {
     auto js_path = find_js_file("design-tool.js");
     if (js_path.empty()) {
