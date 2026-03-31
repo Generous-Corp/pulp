@@ -68,3 +68,19 @@ TEST_CASE("ScrollView: bar opacity starts at zero", "[scrollview]") {
     ScrollView sv;
     REQUIRE(sv.bar_opacity() == 0.0f);
 }
+
+TEST_CASE("ScrollView: hit testing follows scrolled content", "[scrollview]") {
+    ScrollView sv;
+    sv.set_bounds({0, 0, 200, 100});
+    sv.set_content_size({200, 300});
+
+    auto label = std::make_unique<Label>("Scrolled");
+    auto* label_ptr = label.get();
+    label->set_bounds({0, 120, 120, 20});
+    sv.add_child(std::move(label));
+
+    sv.set_scroll(0, 100);
+
+    auto* hit = sv.hit_test({10, 30});
+    REQUIRE(hit == label_ptr);
+}

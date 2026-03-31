@@ -185,7 +185,7 @@ setFlex("toolbar-state-group", "flex_shrink", 0);
 
 createRow("state-pills", "toolbar-state-group");
 setFlex("state-pills", "height", 26);
-setFlex("state-pills", "width", 294);
+setFlex("state-pills", "width", 316);
 setFlex("state-pills", "flex_shrink", 0);
 setFlex("state-pills", "gap", 2);
 setFlex("state-pills", "align_items", "center");
@@ -194,7 +194,7 @@ setFlex("state-pills", "padding_right", 2);
 setBackground("state-pills", APP_PANEL);
 setBorder("state-pills", APP_BORDER, 1, 6);
 
-var stateWidths = [60, 52, 52, 68, 50];
+var stateWidths = [64, 56, 56, 76, 54];
 for (var sp = 0; sp < stateNames.length; sp++) {
     var spId = "state-pill-" + sp;
     createCol(spId, "state-pills");
@@ -369,10 +369,10 @@ setFlex("toolbar-file-group", "flex_shrink", 0);
 
 // Toolbar action buttons with pill styling
 var toolbarBtns = [
-    { id: "undo-btn", label: "Undo", width: 68, group: "toolbar-history-group" },
-    { id: "redo-btn", label: "Redo", width: 68, group: "toolbar-history-group" },
-    { id: "import-btn", label: "Import", width: 78, group: "toolbar-file-group" },
-    { id: "export-btn", label: "Export", width: 82, group: "toolbar-file-group", accent: true }
+    { id: "undo-btn", label: "Undo", width: 74, group: "toolbar-history-group" },
+    { id: "redo-btn", label: "Redo", width: 74, group: "toolbar-history-group" },
+    { id: "import-btn", label: "Import", width: 88, group: "toolbar-file-group" },
+    { id: "export-btn", label: "Export", width: 94, group: "toolbar-file-group", accent: true }
 ];
 for (var tb = 0; tb < toolbarBtns.length; tb++) {
     var btn = toolbarBtns[tb];
@@ -380,6 +380,8 @@ for (var tb = 0; tb < toolbarBtns.length; tb++) {
     setFlex(btn.id + "-pill", "width", btn.width);
     setFlex(btn.id + "-pill", "height", 26);
     setFlex(btn.id + "-pill", "flex_shrink", 0);
+    setFlex(btn.id + "-pill", "padding_left", 8);
+    setFlex(btn.id + "-pill", "padding_right", 8);
     setFlex(btn.id + "-pill", "justify_content", "center");
     setFlex(btn.id + "-pill", "align_items", "center");
     setBackground(btn.id + "-pill", btn.accent ? APP_ACCENT : APP_PANEL);
@@ -795,6 +797,52 @@ updateTokenSwatches();
 // ── Color System: OKLCH Shade Ramps ──────────────────────────────
 var paletteNames = ["Accent", "Neutral", "Success", "Warning", "Error"];
 var paletteKeys  = ["accent", "neutral", "success", "warning", "error"];
+var paletteValueFormats = ["OKLCH", "OKLCH", "OKLCH", "OKLCH", "OKLCH"];
+
+function hexToRgbParts(hex) {
+    if (!hex || hex.length !== 7 || hex.charAt(0) !== "#") return { r: 0, g: 0, b: 0 };
+    return {
+        r: parseInt(hex.slice(1, 3), 16) || 0,
+        g: parseInt(hex.slice(3, 5), 16) || 0,
+        b: parseInt(hex.slice(5, 7), 16) || 0
+    };
+}
+
+function getPaletteValueFields(format, oklch, hex) {
+    var rgb = hexToRgbParts(hex);
+    if (format === "RGB") {
+        return {
+            labels: ["R", "G", "B"],
+            values: [String(rgb.r), String(rgb.g), String(rgb.b)]
+        };
+    }
+    if (format === "HEX") {
+        return {
+            labels: ["R", "G", "B"],
+            values: [
+                hex.slice(1, 3).toUpperCase(),
+                hex.slice(3, 5).toUpperCase(),
+                hex.slice(5, 7).toUpperCase()
+            ]
+        };
+    }
+    return {
+        labels: ["L", "C", "H"],
+        values: [
+            (oklch.L * 100).toFixed(1),
+            oklch.C.toFixed(3),
+            oklch.H.toFixed(1)
+        ]
+    };
+}
+
+function updatePaletteValueDisplay(paletteIdx, oklch, hex) {
+    var display = getPaletteValueFields(paletteValueFormats[paletteIdx] || "OKLCH", oklch, hex);
+    for (var i = 0; i < 3; i++) {
+        setText("ramp-" + paletteIdx + "-value-" + i + "-key", display.labels[i]);
+        setText("ramp-" + paletteIdx + "-value-" + i + "-text", display.values[i]);
+    }
+}
 
 // Color system: palette rows with expandable gamut editor
 // Clicking a palette row toggles the expanded editor (gamut triangle + sliders + shades)
@@ -914,7 +962,7 @@ function buildShadeRamps() {
                 var mapped = OklchEngine.gamutMap(L, C, h);
                 setValue("ramp-" + idx + "-c-fdr", Math.min(mapped.C / 0.4, 1));
                 renderPaletteGamut(idx, h, mapped.L, mapped.C, evt.type === 'pointerdown');
-                setText("ramp-" + idx + "-oklch", "L: " + mapped.L.toFixed(2) + "  C: " + mapped.C.toFixed(3) + "  H: " + h.toFixed(1));
+                updatePaletteValueDisplay(idx, mapped, OklchEngine.oklchToHex(mapped.L, mapped.C, h));
                 // Throttle palette rebuild during drag (every 3rd event)
                 dragCount++;
                 if (dragCount % 3 === 0 || evt.type === 'pointerdown') {
@@ -985,35 +1033,92 @@ function buildShadeRamps() {
         setFlex(rampId + "-c-fdr", "flex_grow", 1);
         setFlex(rampId + "-c-fdr", "height", 14);
 
-        // OKLCH display
-        createLabel(rampId + "-oklch", "L: 0.50  C: 0.100  H: 180", editorId);
-        setFontSize(rampId + "-oklch", 9);
-        setTextColor(rampId + "-oklch", APP_TEXT_DIM);
-        setFlex(rampId + "-oklch", "height", 14);
+        // Color value format selector + value fields
+        var valuesRowId = rampId + "-values";
+        createRow(valuesRowId, editorId);
+        setFlex(valuesRowId, "height", 34);
+        setFlex(valuesRowId, "gap", 8);
+        setFlex(valuesRowId, "align_items", "flex_end");
 
-        // #54: Large shade swatches with WCAG contrast badges
+        var formatId = rampId + "-format";
+        createCombo(formatId, valuesRowId);
+        setItems(formatId, ["OKLCH", "HEX", "RGB"]);
+        setSelected(formatId, 0);
+        setFlex(formatId, "width", 72);
+        setFlex(formatId, "height", 26);
+        setFlex(formatId, "flex_shrink", 0);
+
+        for (var vf = 0; vf < 3; vf++) {
+            var fieldId = rampId + "-value-" + vf;
+            createCol(fieldId, valuesRowId);
+            setFlex(fieldId, "width", 56);
+            setFlex(fieldId, "height", 32);
+            setFlex(fieldId, "gap", 2);
+            setFlex(fieldId, "flex_shrink", 0);
+
+            createLabel(fieldId + "-key", vf === 0 ? "L" : (vf === 1 ? "C" : "H"), fieldId);
+            setFontSize(fieldId + "-key", 8);
+            setTextColor(fieldId + "-key", APP_TEXT_DIM);
+            setFlex(fieldId + "-key", "height", 10);
+
+            createCol(fieldId + "-box", fieldId);
+            setFlex(fieldId + "-box", "height", 20);
+            setFlex(fieldId + "-box", "justify_content", "center");
+            setFlex(fieldId + "-box", "align_items", "center");
+            setBackground(fieldId + "-box", APP_PANEL_RAISED);
+            setBorder(fieldId + "-box", APP_BORDER, 1, 6);
+            createLabel(fieldId + "-text", vf === 0 ? "50.0" : (vf === 1 ? "0.100" : "180.0"), fieldId + "-box");
+            setFontSize(fieldId + "-text", 10);
+        }
+
+        (function(idx) {
+            on("ramp-" + idx + "-format", "select", function(selIdx) {
+                paletteValueFormats[idx] = selIdx === 1 ? "HEX" : (selIdx === 2 ? "RGB" : "OKLCH");
+                var palette = PaletteSystem.create(currentAccent, currentHarmony);
+                var base = palette[paletteKeys[idx]][500];
+                updatePaletteValueDisplay(idx, OklchEngine.hexToOklch(base.hex), base.hex);
+            });
+        })(p);
+
+        // Compact shade swatches with WCAG badges
         createRow(rampId + "-shades", editorId);
-        setFlex(rampId + "-shades", "gap", 3);
-        setFlex(rampId + "-shades", "height", 32);
+        setFlex(rampId + "-shades", "gap", 4);
+        setFlex(rampId + "-shades", "height", 34);
         setFlex(rampId + "-shades", "flex_shrink", 0);
         for (var ls = 0; ls < 6; ls++) {
             var lsId = rampId + "-lg-" + ls;
             var stepIdx = [0, 2, 4, 5, 7, 9][ls];
             var shadeHex = ramp[steps[stepIdx]].hex;
             createCol(lsId, rampId + "-shades");
-            setFlex(lsId, "flex_grow", 1);
-            setFlex(lsId, "height", 32);
+            setFlex(lsId, "width", 40);
+            setFlex(lsId, "min_width", 40);
+            setFlex(lsId, "max_width", 40);
+            setFlex(lsId, "height", 30);
+            setFlex(lsId, "flex_grow", 0);
+            setFlex(lsId, "flex_shrink", 0);
             setBackground(lsId, shadeHex);
-            setBorder(lsId, APP_BORDER, 0, 6);
-            setFlex(lsId, "justify_content", "center");
+            setBorder(lsId, APP_BORDER, 0, 10);
+            setFlex(lsId, "justify_content", "flex_end");
             setFlex(lsId, "align_items", "center");
-            // WCAG contrast badge
+            setFlex(lsId, "padding_bottom", 4);
             var ratio = OklchEngine.contrastRatio(shadeHex, "#ffffff");
             var level = OklchEngine.contrastLevel(ratio);
-            if (level !== "fail") {
-                createLabel(lsId + "-badge", level, lsId);
-                setFontSize(lsId + "-badge", 7);
-                setTextColor(lsId + "-badge", ratio > 4.5 ? "#ffffff" : "#000000");
+            var badgeText = "";
+            if (ratio >= 7.0) badgeText = "AAA";
+            else if (ratio >= 4.5) badgeText = "AA";
+            else if (ratio >= 3.0) badgeText = ratio.toFixed(1) + ":1";
+            if (badgeText.length > 0) {
+                createCol(lsId + "-pill", lsId);
+                setFlex(lsId + "-pill", "height", 14);
+                setFlex(lsId + "-pill", "padding_left", 6);
+                setFlex(lsId + "-pill", "padding_right", 6);
+                setFlex(lsId + "-pill", "justify_content", "center");
+                setFlex(lsId + "-pill", "align_items", "center");
+                setBackground(lsId + "-pill", ratio > 4.5 ? "#00000038" : "#ffffff88");
+                setBorder(lsId + "-pill", ratio > 4.5 ? "#ffffff18" : "#00000014", 1, 7);
+                createLabel(lsId + "-badge", badgeText, lsId + "-pill");
+                setFontSize(lsId + "-badge", badgeText.length > 3 ? 7 : 8);
+                setTextColor(lsId + "-badge", ratio > 4.5 ? "#ffffff" : "#111111");
             }
         }
 
@@ -1025,7 +1130,7 @@ function buildShadeRamps() {
             renderChromaGradient(p, oklch.H);
             setValue(rampId + "-h-fdr", oklch.H / 360);
             setValue(rampId + "-c-fdr", Math.min(oklch.C / 0.4, 1));
-            setText(rampId + "-oklch", "L: " + oklch.L.toFixed(2) + "  C: " + oklch.C.toFixed(3) + "  H: " + oklch.H.toFixed(1));
+            updatePaletteValueDisplay(p, oklch, base.hex);
         }
 
         // Click dot or name → toggle expand (just visibility, no rebuild)
@@ -1052,7 +1157,7 @@ function buildShadeRamps() {
                     renderChromaGradient(idx, oklch.H);
                     setValue("ramp-" + idx + "-h-fdr", oklch.H / 360);
                     setValue("ramp-" + idx + "-c-fdr", Math.min(oklch.C / 0.4, 1));
-                    setText("ramp-" + idx + "-oklch", "L: " + oklch.L.toFixed(2) + "  C: " + oklch.C.toFixed(3) + "  H: " + oklch.H.toFixed(1));
+                    updatePaletteValueDisplay(idx, oklch, base.hex);
                 }
                 updateLeftPanelScrollMetrics();
                 layout();
@@ -1077,7 +1182,7 @@ function buildShadeRamps() {
                         renderChromaGradient(paletteIdx, oklch.H);
                         setValue("ramp-" + paletteIdx + "-h-fdr", oklch.H / 360);
                         setValue("ramp-" + paletteIdx + "-c-fdr", Math.min(oklch.C / 0.4, 1));
-                        setText("ramp-" + paletteIdx + "-oklch", "L: " + oklch.L.toFixed(2) + "  C: " + oklch.C.toFixed(3) + "  H: " + oklch.H.toFixed(1));
+                        updatePaletteValueDisplay(paletteIdx, oklch, shade.hex);
                         updateLeftPanelScrollMetrics();
                         layout();
                     });
@@ -1094,7 +1199,7 @@ function buildShadeRamps() {
                 // Redraw gamut with dot + update C gradient for new hue
                 renderPaletteGamut(idx, h, mapped.L, mapped.C);
                 renderChromaGradient(idx, h);
-                setText("ramp-" + idx + "-oklch", "L: " + mapped.L.toFixed(2) + "  C: " + mapped.C.toFixed(3) + "  H: " + h.toFixed(1));
+                updatePaletteValueDisplay(idx, mapped, OklchEngine.oklchToHex(mapped.L, mapped.C, h));
                 // Update the palette base color
                 if (pKey === "accent") {
                     currentAccent = OklchEngine.oklchToHex(mapped.L, mapped.C, h);
@@ -2209,30 +2314,37 @@ setFlex("waveform", "height", 60);
 
 var waveData = [];
 for (var i = 0; i < 512; i++) {
-    waveData.push(Math.sin(2 * Math.PI * 3 * i / 512) * 0.7 +
-                  Math.sin(2 * Math.PI * 7 * i / 512) * 0.3);
+    var phase = i / 512;
+    var envelope = 0.74 + Math.sin(phase * Math.PI * 6) * 0.08;
+    waveData.push((Math.sin(2 * Math.PI * 3 * phase) * 0.48 +
+                   Math.sin(2 * Math.PI * 9 * phase) * 0.20 +
+                   Math.sin(2 * Math.PI * 17 * phase) * 0.08) * envelope);
 }
 setWaveformData("waveform", waveData);
 
 // Meters
 createRow("meter-row", "preview-area");
 setFlex("meter-row", "gap", 4);
-setFlex("meter-row", "height", 48);
+setFlex("meter-row", "height", 52);
 
 createMeter("m1", "vertical", "meter-row");
-setFlex("m1", "width", 12);
+setFlex("m1", "width", 14);
+setWidgetStyle("m1", "minimal");
 setMeterLevel("m1", 0.75, 0.88);
 
 createMeter("m2", "vertical", "meter-row");
-setFlex("m2", "width", 12);
+setFlex("m2", "width", 14);
+setWidgetStyle("m2", "minimal");
 setMeterLevel("m2", 0.55, 0.72);
 
 createMeter("m3", "vertical", "meter-row");
-setFlex("m3", "width", 12);
+setFlex("m3", "width", 14);
+setWidgetStyle("m3", "minimal");
 setMeterLevel("m3", 0.3, 0.45);
 
 createMeter("m4", "vertical", "meter-row");
-setFlex("m4", "width", 12);
+setFlex("m4", "width", 14);
+setWidgetStyle("m4", "minimal");
 setMeterLevel("m4", 0.85, 0.95);
 
 // Layout section: 2x2 card grid
@@ -2501,23 +2613,28 @@ setTextColor("showcase-header", APP_TEXT_DIM);
 // XY Pad for touch/mouse interaction demo
 createRow("showcase-row", "preview-area");
 setFlex("showcase-row", "gap", 8);
-setFlex("showcase-row", "height", 80);
+setFlex("showcase-row", "height", 84);
 
 createXYPad("xy-demo", "showcase-row");
 setFlex("xy-demo", "width", 80);
-setFlex("xy-demo", "height", 80);
-setLabel("xy-demo", "XY Pad");
+setFlex("xy-demo", "height", 84);
+setXY("xy-demo", 0.38, 0.67);
 
 // Spectrum analyzer
 createSpectrum("spectrum-demo", "showcase-row");
 setFlex("spectrum-demo", "flex_grow", 1);
-setFlex("spectrum-demo", "height", 80);
+setFlex("spectrum-demo", "height", 84);
 
 // Generate some spectrum data
 var specData = [];
-for (var si = 0; si < 64; si++) {
-    var freq = si / 64;
-    specData.push(-72 + Math.exp(-freq * 3) * 54 + Math.random() * 3);
+for (var si = 0; si < 72; si++) {
+    var freq = si / 71;
+    var lowPeak = 26 * Math.exp(-Math.pow((freq - 0.14) / 0.08, 2));
+    var midPeak = 18 * Math.exp(-Math.pow((freq - 0.46) / 0.10, 2));
+    var airPeak = 22 * Math.exp(-Math.pow((freq - 0.78) / 0.06, 2));
+    var ripple = Math.sin(freq * 26.0) * 2.2 + Math.cos(freq * 13.0) * 1.1;
+    var floor = -74 + Math.sin(freq * 5.0) * 1.5;
+    specData.push(Math.max(-78, Math.min(-8, floor + lowPeak + midPeak + airPeak + ripple)));
 }
 setSpectrumData("spectrum-demo", specData);
 
@@ -2531,9 +2648,11 @@ setFlex("waveform2", "height", 60);
 
 var wave2 = [];
 for (var w2 = 0; w2 < 512; w2++) {
-    wave2.push(Math.sin(2 * Math.PI * 5 * w2 / 512) * 0.5 *
-               Math.exp(-w2 / 256) +
-               Math.sin(2 * Math.PI * 13 * w2 / 512) * 0.2);
+    var phase2 = w2 / 512;
+    var envelope2 = 0.58 + 0.18 * Math.sin(phase2 * Math.PI * 4.0);
+    wave2.push((Math.sin(2 * Math.PI * 5 * phase2) * 0.42 +
+                Math.sin(2 * Math.PI * 13 * phase2) * 0.18 +
+                Math.sin(2 * Math.PI * 27 * phase2) * 0.09) * envelope2);
 }
 setWaveformData("waveform2", wave2);
 
@@ -2979,7 +3098,7 @@ setVisible("toast-overlay", false);
 createLabel("toast-text", "", "toast-overlay");
 setFontSize("toast-text", 10);
 
-createCol("help-modal", "");
+createModal("help-modal", "");
 setPosition("help-modal", "absolute");
 setFlex("help-modal", "width", 1100);
 setFlex("help-modal", "height", 700);
@@ -3002,7 +3121,7 @@ setBorder("help-card", APP_BORDER, 1, 12);
 setBoxShadow("help-card", 0, 12, 32, 0, "#00000088");
 
 createRow("help-card-header", "help-card");
-setFlex("help-card-header", "height", 24);
+setFlex("help-card-header", "height", 26);
 setFlex("help-card-header", "align_items", "center");
 setFlex("help-card-header", "justify_content", "space-between");
 setFlex("help-card-header", "gap", 8);
@@ -3014,8 +3133,10 @@ setFlex("help-modal-title", "flex_grow", 1);
 setTextOverflow("help-modal-title", "ellipsis");
 
 createCol("help-modal-close-btn", "help-card-header");
-setFlex("help-modal-close-btn", "width", 52);
-setFlex("help-modal-close-btn", "height", 24);
+setFlex("help-modal-close-btn", "width", 60);
+setFlex("help-modal-close-btn", "height", 26);
+setFlex("help-modal-close-btn", "padding_left", 6);
+setFlex("help-modal-close-btn", "padding_right", 6);
 setFlex("help-modal-close-btn", "justify_content", "center");
 setFlex("help-modal-close-btn", "align_items", "center");
 setBackground("help-modal-close-btn", APP_SURFACE);

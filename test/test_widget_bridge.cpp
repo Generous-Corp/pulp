@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
+#include <pulp/view/modal.hpp>
 #include <pulp/view/widget_bridge.hpp>
 #include <pulp/view/theme.hpp>
 #include <pulp/view/ui_components.hpp>
@@ -72,6 +73,20 @@ TEST_CASE("WidgetBridge creates toggle from JS", "[view][bridge]") {
     auto* w = bridge.widget("bypass");
     REQUIRE(w != nullptr);
     REQUIRE(dynamic_cast<Toggle*>(w) != nullptr);
+}
+
+TEST_CASE("WidgetBridge creates modal overlay from JS", "[view][bridge]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script("createModal('help-modal', '')");
+
+    auto* w = bridge.widget("help-modal");
+    REQUIRE(w != nullptr);
+    REQUIRE(dynamic_cast<ModalOverlay*>(w) != nullptr);
 }
 
 TEST_CASE("WidgetBridge set/get value from JS", "[view][bridge]") {

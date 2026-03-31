@@ -910,17 +910,33 @@ void WaveformView::paint(canvas::Canvas& canvas) {
     float cy = b.height * 0.5f;
     canvas.stroke_line(0, cy, b.width, cy);
 
-    // GPU-accelerated waveform via draw_waveform (SDF anti-aliased)
     auto wave_color = resolve_color("accent.primary", canvas::Color::rgba(100, 180, 250));
-    canvas::Canvas::WaveformStyle style;
-    style.line_color = wave_color;
-    style.fill_color = {wave_color.r, wave_color.g, wave_color.b, 40};
-    style.line_thickness = 2.0f;
-    style.show_fill = true;
-    style.fill_center = 0.5f;
+    auto fill_color = wave_color;
+    fill_color.a = 56;
 
-    canvas.draw_waveform(samples_.data(), samples_.size(),
-                         0, 0, b.width, b.height, style);
+    const float half_h = b.height * 0.42f;
+    const float step = samples_.size() > 1 ? (b.width / static_cast<float>(samples_.size() - 1)) : b.width;
+
+    canvas.set_fill_color(fill_color);
+    for (size_t i = 0; i < samples_.size(); ++i) {
+        float x = std::min(b.width, static_cast<float>(i) * step);
+        float y = cy - samples_[i] * half_h;
+        float top = std::min(cy, y);
+        float fill_h = std::max(1.0f, std::abs(cy - y));
+        canvas.fill_rect(x, top, std::max(1.0f, step), fill_h);
+    }
+
+    canvas.set_stroke_color(wave_color);
+    canvas.set_line_width(2.0f);
+    float prev_x = 0.0f;
+    float prev_y = cy - samples_[0] * half_h;
+    for (size_t i = 1; i < samples_.size(); ++i) {
+        float x = static_cast<float>(i) * step;
+        float y = cy - samples_[i] * half_h;
+        canvas.stroke_line(prev_x, prev_y, x, y);
+        prev_x = x;
+        prev_y = y;
+    }
 }
 
 // ── SpectrumView ─────────────────────────────────────────────────────────────

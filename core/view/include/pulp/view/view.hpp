@@ -53,7 +53,7 @@ public:
     // ── Hit testing ──────────────────────────────────────────────────────
 
     // Find the deepest child that contains the given point (in local coords)
-    View* hit_test(Point local_point);
+    virtual View* hit_test(Point local_point);
 
     // ── Theme ────────────────────────────────────────────────────────────
 

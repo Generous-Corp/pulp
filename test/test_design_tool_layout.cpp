@@ -502,6 +502,58 @@ TEST_CASE("Design tool: palette rows keep mini ramps when collapsed and gamut ed
     REQUIRE_THAT(gamut->bounds().height, Catch::Matchers::WithinAbs(130.0f, 2.0f));
 }
 
+TEST_CASE("Design tool: expanded palette exposes color format values and compact shade chips", "[design-tool]") {
+    auto js_path = find_js_file("design-tool.js");
+    if (js_path.empty()) {
+        SKIP("design-tool.js not found");
+        return;
+    }
+
+    View root;
+    root.set_theme(Theme::dark());
+    root.flex().direction = FlexDirection::column;
+    root.set_bounds({0, 0, 1100, 700});
+
+    pulp::state::StateStore store;
+    ScriptEngine engine;
+    WidgetBridge bridge(engine, root, store);
+    load_design_tool(root, engine, bridge);
+
+    engine.evaluate("expandedPalette = 0; buildShadeRamps(); layout();");
+    root.layout_children();
+
+    auto* format_combo = bridge.widget("ramp-0-format");
+    auto* value_key_0 = dynamic_cast<Label*>(bridge.widget("ramp-0-value-0-key"));
+    auto* value_key_1 = dynamic_cast<Label*>(bridge.widget("ramp-0-value-1-key"));
+    auto* value_text_0 = dynamic_cast<Label*>(bridge.widget("ramp-0-value-0-text"));
+    auto* shade_chip = bridge.widget("ramp-0-lg-0");
+    REQUIRE(format_combo != nullptr);
+    REQUIRE(value_key_0 != nullptr);
+    REQUIRE(value_key_1 != nullptr);
+    REQUIRE(value_text_0 != nullptr);
+    REQUIRE(shade_chip != nullptr);
+
+    REQUIRE(value_key_0->text() == "L");
+    REQUIRE(value_key_1->text() == "C");
+    REQUIRE(value_text_0->text().size() >= 4);
+    REQUIRE_THAT(shade_chip->bounds().width, Catch::Matchers::WithinAbs(40.0f, 1.0f));
+    REQUIRE_THAT(shade_chip->bounds().height, Catch::Matchers::WithinAbs(30.0f, 1.0f));
+
+    REQUIRE_NOTHROW(engine.evaluate("__dispatch__('ramp-0-format', 'select', 1);"));
+    root.layout_children();
+
+    REQUIRE(value_key_0->text() == "R");
+    REQUIRE(value_key_1->text() == "G");
+    REQUIRE(value_text_0->text().size() == 2);
+
+    REQUIRE_NOTHROW(engine.evaluate("__dispatch__('ramp-0-format', 'select', 2);"));
+    root.layout_children();
+
+    REQUIRE(value_key_0->text() == "R");
+    REQUIRE(value_key_1->text() == "G");
+    REQUIRE(value_text_0->text().size() >= 1);
+}
+
 TEST_CASE("Design tool: brand/style cues resolve to deterministic audio-plugin presets", "[design-tool]") {
     auto js_path = find_js_file("design-tool.js");
     if (js_path.empty()) {

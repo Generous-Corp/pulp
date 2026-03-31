@@ -3,6 +3,7 @@
 #include <pulp/view/widgets.hpp>
 #include <pulp/view/ui_components.hpp>
 #include <pulp/view/text_editor.hpp>
+#include <pulp/view/modal.hpp>
 
 #include <TargetConditionals.h>
 #if TARGET_OS_OSX
@@ -105,6 +106,17 @@ static std::vector<uint8_t> capture_window_content_png(NSWindow* window, NSView*
     [window displayIfNeeded];
     [contentView displayIfNeeded];
     return capture_view_cache_png(contentView);
+}
+
+static pulp::view::ModalOverlay* find_topmost_modal(pulp::view::View* root) {
+    if (!root || !root->visible()) return nullptr;
+
+    for (size_t i = root->child_count(); i > 0; --i) {
+        if (auto* modal = find_topmost_modal(root->child_at(i - 1)))
+            return modal;
+    }
+
+    return dynamic_cast<pulp::view::ModalOverlay*>(root);
 }
 
 static std::vector<uint8_t> capture_window_screencapture_png(NSWindow* window) {
@@ -435,6 +447,21 @@ static pulp::view::KeyCode keyCodeFromNS(unsigned short code) {
             }
             [self setNeedsDisplay:YES];
             return;
+        }
+
+        if (key == pulp::view::KeyCode::escape && self.rootView) {
+            if (auto* modal = find_topmost_modal(self.rootView)) {
+                pulp::view::KeyEvent ke;
+                ke.key = key;
+                ke.modifiers = mods;
+                ke.is_down = true;
+                ke.is_repeat = event.isARepeat;
+                if (modal->on_key_event(ke)) {
+                    [self startAnimationTimerIfNeeded];
+                    [self setNeedsDisplay:YES];
+                    return;
+                }
+            }
         }
 
         [self interpretKeyEvents:@[event]];

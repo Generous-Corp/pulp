@@ -46,6 +46,7 @@ createCanvas(id, parentId)         // Canvas for 2D draw commands
 ```js
 createRow(id, parentId)            // Flex row (horizontal)
 createCol(id, parentId)            // Flex column (vertical)
+createModal(id, parentId)          // Full-screen modal overlay (Escape + backdrop dismiss)
 createGrid(id, parentId)           // CSS Grid container
 createPanel(id, parentId)          // Generic container with styling
 createScrollView(id, parentId)     // Scrollable container

@@ -4,6 +4,7 @@
 #include <pulp/view/ui_components.hpp>
 #include <pulp/view/text_editor.hpp>
 #include <pulp/view/canvas_widget.hpp>
+#include <pulp/view/modal.hpp>
 #include <pulp/view/design_import.hpp>
 #include <pulp/platform/popup_menu.hpp>
 #include <pulp/platform/file_dialog.hpp>
@@ -815,6 +816,16 @@ void WidgetBridge::register_api() {
         auto id = args.get<std::string>(0, "");
         auto pid = args.get<std::string>(1, "");
         auto v = std::make_unique<View>(); v->set_id(id);
+        v->flex().direction = FlexDirection::column;
+        widgets_[id] = v.get();
+        resolve_parent(pid)->add_child(std::move(v));
+        return choc::value::createString(id);
+    });
+
+    engine_.register_function("createModal", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto pid = args.get<std::string>(1, "");
+        auto v = std::make_unique<ModalOverlay>(); v->set_id(id);
         v->flex().direction = FlexDirection::column;
         widgets_[id] = v.get();
         resolve_parent(pid)->add_child(std::move(v));

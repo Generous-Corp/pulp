@@ -572,6 +572,47 @@ void ScrollView::paint(canvas::Canvas& canvas) {
     }
 }
 
+View* ScrollView::hit_test(Point local_point) {
+    if (!visible() || !enabled() || !hit_testable()) return nullptr;
+    if (!local_bounds().contains(local_point)) return nullptr;
+
+    auto b = local_bounds();
+    float bar_w = bar_width_.value();
+    bool in_v_bar = direction_ != Direction::horizontal &&
+                    content_size_.height > b.height &&
+                    local_point.x >= b.x + b.width - bar_w - 6;
+    bool in_h_bar = direction_ != Direction::vertical &&
+                    content_size_.width > b.width &&
+                    local_point.y >= b.y + b.height - bar_w - 6;
+    if (in_v_bar || in_h_bar)
+        return this;
+
+    float sx = smooth_scroll_x_.value();
+    float sy = smooth_scroll_y_.value();
+
+    for (size_t i = child_count(); i > 0; --i) {
+        auto* child = child_at(i - 1);
+        if (!child->visible()) continue;
+
+        Point child_point = {local_point.x + sx - child->bounds().x,
+                             local_point.y + sy - child->bounds().y};
+
+        bool in_bounds = child->local_bounds().contains(child_point);
+        if (!in_bounds && child->overflow() == Overflow::visible) {
+            auto lb = child->local_bounds();
+            in_bounds = child_point.x >= lb.x && child_point.x <= lb.x + lb.width &&
+                        child_point.y >= lb.y && child_point.y <= lb.y + lb.height + 500;
+        }
+
+        if (in_bounds) {
+            if (auto* hit = child->hit_test(child_point))
+                return hit;
+        }
+    }
+
+    return this;
+}
+
 void ScrollView::on_mouse_event(const MouseEvent& event) {
     if (event.is_wheel) {
         // macOS trackpad provides pixel-level deltas
