@@ -27,6 +27,7 @@ $SmokeLog = Join-Path $TempRoot "smoke.log"
 $TestLog = Join-Path $TempRoot "test.log"
 $BashExe = $null
 $VcVarsBat = $null
+$UsingExistingCheckout = $false
 
 New-Item -ItemType Directory -Force -Path $TempRoot | Out-Null
 
@@ -35,7 +36,9 @@ function Cleanup {
         Write-Host "Keeping validation worktree at $SrcDir"
         return
     }
-    try { git -C $Root worktree remove --force $SrcDir *> $null } catch {}
+    if (-not $UsingExistingCheckout) {
+        try { git -C $Root worktree remove --force $SrcDir *> $null } catch {}
+    }
     Remove-Item -Recurse -Force $TempRoot -ErrorAction SilentlyContinue
 }
 
@@ -139,7 +142,15 @@ try {
     if (-not $Quiet) { Write-Host "Creating clean validation worktree..." }
     $worktreeCmd = 'git -C "{0}" worktree add --detach "{1}" "{2}" >nul 2>nul' -f $Root, $SrcDir, $Ref
     & cmd.exe /d /c $worktreeCmd
-    if ($LASTEXITCODE -ne 0) { throw "git worktree add failed" }
+    if ($LASTEXITCODE -ne 0) {
+        $status = git -C $Root status --porcelain
+        if ($LASTEXITCODE -ne 0) { throw "git worktree add failed" }
+        if ($status) { throw "git worktree add failed and current checkout is dirty" }
+        $UsingExistingCheckout = $true
+        $SrcDir = $Root
+        $SrcDirBash = Convert-ToBashPath -PathValue $SrcDir
+        if (-not $Quiet) { Write-Host "Falling back to validating the current checkout because a clean worktree could not be created." }
+    }
 
     Run-OrDump "dependency bootstrap" $SetupLog {
         & $BashExe -lc "cd '$SrcDirBash' && ./setup.sh --ci --deps-only"
