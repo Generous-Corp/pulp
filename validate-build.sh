@@ -34,6 +34,8 @@ configure_log="$tmp_root/configure.log"
 build_log="$tmp_root/build.log"
 install_dir="$tmp_root/install"
 install_log="$tmp_root/install.log"
+smoke_dir="$tmp_root/sdk-smoke"
+smoke_log="$tmp_root/smoke.log"
 test_log="$tmp_root/test.log"
 
 cleanup() {
@@ -69,6 +71,20 @@ run_or_dump "dependency bootstrap" "$setup_log" bash -lc "cd \"$src_dir\" && ./s
 run_or_dump "configure" "$configure_log" cmake -S "$src_dir" -B "$build_dir" -DCMAKE_BUILD_TYPE=Debug
 run_or_dump "build" "$build_log" cmake --build "$build_dir" -j"$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4)"
 run_or_dump "install" "$install_log" cmake --install "$build_dir" --prefix "$install_dir"
+
+mkdir -p "$smoke_dir"
+cat >"$smoke_dir/CMakeLists.txt" <<'EOF'
+cmake_minimum_required(VERSION 3.24)
+project(PulpSDKSmoke LANGUAGES CXX)
+
+find_package(Pulp REQUIRED CONFIG)
+
+add_library(smoke INTERFACE)
+target_link_libraries(smoke INTERFACE Pulp::format)
+EOF
+
+run_or_dump "install smoke test" "$smoke_log" \
+    cmake -S "$smoke_dir" -B "$smoke_dir/build" -DCMAKE_PREFIX_PATH="$install_dir"
 
 if [ "$SKIP_TESTS" = false ]; then
     run_or_dump "test" "$test_log" ctest --test-dir "$build_dir" --output-on-failure

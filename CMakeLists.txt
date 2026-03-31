@@ -132,7 +132,8 @@ if(EXISTS "${VST3_SDK_DIR}/pluginterfaces")
         ${VST3_SDK_SOURCES}
     )
     target_include_directories(vst3-sdk PUBLIC
-        ${VST3_SDK_DIR}
+        $<BUILD_INTERFACE:${VST3_SDK_DIR}>
+        $<INSTALL_INTERFACE:external/vst3sdk>
     )
     if(CMAKE_BUILD_TYPE STREQUAL "Release")
         target_compile_definitions(vst3-sdk PUBLIC RELEASE=1)
@@ -156,6 +157,10 @@ FetchContent_Declare(
     GIT_SHALLOW TRUE
 )
 FetchContent_MakeAvailable(clap)
+target_include_directories(clap INTERFACE
+    $<BUILD_INTERFACE:${clap_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:external/clap/include>
+)
 set(PULP_HAS_CLAP TRUE)
 message(STATUS "Pulp: CLAP SDK available")
 
@@ -171,6 +176,7 @@ FetchContent_MakeAvailable(lv2)
 add_library(lv2-headers INTERFACE)
 target_include_directories(lv2-headers INTERFACE
     $<BUILD_INTERFACE:${lv2_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:external/lv2/include>
 )
 set(PULP_HAS_LV2 TRUE)
 message(STATUS "Pulp: LV2 SDK available")
@@ -301,6 +307,11 @@ set(PULP_SDK_TARGETS
     pulp-canvas
 )
 
+foreach(_sdk_target IN LISTS PULP_SDK_TARGETS)
+    string(REPLACE "pulp-" "" _sdk_export_name "${_sdk_target}")
+    set_target_properties(${_sdk_target} PROPERTIES EXPORT_NAME "${_sdk_export_name}")
+endforeach()
+
 install(TARGETS ${PULP_SDK_TARGETS}
     EXPORT PulpTargets
     ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
@@ -309,6 +320,14 @@ install(TARGETS ${PULP_SDK_TARGETS}
 )
 
 # Also install third-party targets that our exported targets depend on
+if(PULP_HAS_VST3)
+    install(TARGETS vst3-sdk
+        EXPORT PulpTargets
+        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        INCLUDES DESTINATION external/vst3sdk
+    )
+endif()
 if(PULP_HAS_CLAP)
     install(TARGETS clap EXPORT PulpTargets)
 endif()
@@ -345,10 +364,10 @@ write_basic_package_version_file(
     COMPATIBILITY SameMajorVersion
 )
 
-configure_file(
+configure_package_config_file(
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpConfig.cmake.in"
     "${CMAKE_BINARY_DIR}/PulpConfig.cmake"
-    @ONLY
+    INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/Pulp
 )
 
 install(FILES

@@ -1,9 +1,9 @@
 # PulpConfig.cmake — find_package(Pulp) support for standalone projects
 #
 # Defines imported targets:
-#   Pulp::format   Pulp::state   Pulp::audio   Pulp::signal
-#   Pulp::midi     Pulp::canvas  Pulp::view    Pulp::platform
-#   Pulp::runtime  Pulp::events  Pulp::osc     Pulp::host
+#   Pulp::platform  Pulp::runtime  Pulp::events  Pulp::state
+#   Pulp::audio     Pulp::midi     Pulp::signal  Pulp::format
+#   Pulp::canvas
 #
 # Also provides:
 #   pulp_add_plugin()  — macro from PulpPlugin.cmake
