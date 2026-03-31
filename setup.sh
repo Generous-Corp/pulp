@@ -79,12 +79,17 @@ if command -v clang++ &>/dev/null; then
 elif command -v g++ &>/dev/null; then
     GCC_VERSION=$(g++ --version 2>&1 | head -1)
     info "g++: $GCC_VERSION"
+elif [ "$PLATFORM" = "Windows" ] && command -v cl &>/dev/null; then
+    CL_VERSION=$(cl 2>&1 | head -1)
+    info "cl: $CL_VERSION"
 else
     fail "No C++20 compiler found"
     if [ "$PLATFORM" = "macOS" ]; then
         echo "    Fix: xcode-select --install"
     elif [ "$PLATFORM" = "Linux" ]; then
         echo "    Fix: sudo apt install g++-13  (or equivalent for your distro)"
+    elif [ "$PLATFORM" = "Windows" ]; then
+        echo "    Fix: install Visual Studio Build Tools with C++ workload or run from a Developer Command Prompt"
     fi
 fi
 
