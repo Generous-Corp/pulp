@@ -4,6 +4,7 @@
 #include <string>
 #include <memory>
 #include <functional>
+#include <vector>
 
 namespace pulp::view {
 
@@ -34,8 +35,14 @@ public:
     // Request a repaint
     virtual void repaint() = 0;
 
+    // Capture the current visible content as a PNG image.
+    virtual std::vector<uint8_t> capture_png() { return {}; }
+
     // Clear any cached host-side input targets before the view tree is rebuilt.
     virtual void invalidate_input_state() {}
+
+    // Request the host to close and exit its event loop.
+    virtual void request_close() {}
 
     // Set a callback for when the window is closed
     virtual void set_close_callback(std::function<void()> cb) = 0;

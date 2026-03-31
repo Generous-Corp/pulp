@@ -154,6 +154,25 @@ public:
         create_offscreen_target();
     }
 
+    bool read_current_rgba(std::vector<uint8_t>& pixels,
+                           uint32_t& pixel_width,
+                           uint32_t& pixel_height) override {
+        auto* source = frame_surface_ ? frame_surface_.get() : offscreen_surface_.get();
+        if (!source) return false;
+
+        pixel_width = static_cast<uint32_t>(std::max(1, static_cast<int>(width_ * scale_)));
+        pixel_height = static_cast<uint32_t>(std::max(1, static_cast<int>(height_ * scale_)));
+
+        auto info = SkImageInfo::Make(static_cast<int>(pixel_width),
+                                      static_cast<int>(pixel_height),
+                                      kRGBA_8888_SkColorType,
+                                      kPremul_SkAlphaType,
+                                      SkColorSpace::MakeSRGB());
+        pixels.resize(static_cast<size_t>(pixel_width) * static_cast<size_t>(pixel_height) * 4u);
+        SkPixmap pixmap(info, pixels.data(), static_cast<size_t>(pixel_width) * 4u);
+        return source->readPixels(pixmap, 0, 0);
+    }
+
     bool is_available() const override {
         return context_ != nullptr && recorder_ != nullptr;
     }

@@ -118,7 +118,7 @@ Browser-shaped JS API over Pulp's native GPU UI (document.createElement, element
 - [x] 10.x style routing: audio-plugin family cues (precision analyzer, heritage hardware, retro character, modular neon, mastering lab, console strip) normalize to deterministic per-widget presets
 - [x] 10.x debug harness: `pulp design-debug` emits before/after/diff screenshots plus JSON reports with provider/model/reasoning-effort metadata, target bounds, prompt/response capture, and diff stats
 - [x] 10.x debug capture: offscreen Skia-backed `design-debug` screenshots now render widget SkSL for shader-aware before/after artifact bundles
-- [x] 10.x caveat documented: offscreen Skia capture is useful for prompt/response/apply validation and shader-shape QA, but not final live GPU presentation parity
+- [x] 10.x live debug capture: `pulp design-debug --capture-backend live-gpu` now drives the real GPU-backed design tool, captures live before/after frames, and records target ROI artifacts from the actual Skia/Graphite renderer
 
 ### Phase 11: Design Import Pipeline — COMPLETE (2026-03-30)
 - [x] 11.1: CLI `pulp import-design` — --from (figma/stitch/v0/pencil), --file, --url, --frame, --screen, --output, --tokens, --dry-run, --validate, --reference, --diff, --debug

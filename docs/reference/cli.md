@@ -243,6 +243,7 @@ pulp design-debug --prompt "make the gain knob look like macOS 7" --target k1
 pulp design-debug --prompt "design a cyberpunk interface for a modern synth plugin" --target all --provider claude --model claude-sonnet-4-6
 pulp design-debug --prompt "make the gain knob look like a precision analyzer control" --target k1 --provider codex --model gpt-5.4 --reasoning-effort xhigh
 pulp design-debug --prompt "warm analog EQ" --target all --response-file saved-response.json
+pulp design-debug --prompt "make the gain knob look like premium brushed aluminum" --target k1 --capture-backend live-gpu
 ```
 
 Artifacts are written by default under `planning/screenshots/design-debug/`:
@@ -252,6 +253,8 @@ Artifacts are written by default under `planning/screenshots/design-debug/`:
 - `*-target-before.png`, `*-target-after.png`, `*-target-diff.png` for targeted runs
 - `*-prompt.txt`
 - `*-response.txt`
+- `*-debug-state.json`
+- `*-apply-summary.txt`
 - `*-report.json`
 - `latest-report.json`
 - `latest-run.json`
@@ -262,32 +265,35 @@ The JSON report records:
 - `target` and `target_bounds`
 - `target_region`, `target_region_source`, and target-only diff stats (`target_diff_pixels`, `target_diff_pct`) when a widget target is selected
 - `debug_state` from the design tool (`changedColors`, `changedDimensions`, `widgetLookIds`, summary, request text)
-- the exact `ai_command` used for local execution
+- the exact `ai_command` or live `driver_command` used for local execution
 - screenshot-diff stats (`similarity_pct`, `diff_pixels`, `mean_error`)
 
 Useful flags:
 - `--provider claude|codex`
 - `--model <name>`
 - `--reasoning-effort low|medium|high|xhigh`
-- `--capture-backend skia|coregraphics`
+- `--capture-backend skia|coregraphics|live-gpu`
 - `--response-file <json-or-text>` to replay a saved model response without calling AI
 - `--script <path>` to load a custom design-tool JS file
+- `--design-tool-bin <path>` to point `live-gpu` runs at a built `pulp-design-tool`
 - `--output-dir <dir>` to redirect artifact output
 - `--width`, `--height`, `--scale` to control the render size
+- `--delay-ms`, `--after-delay-ms` to control baseline/post-apply capture timing in `live-gpu` mode
 - `--ai-cli <template>` to override the local AI command template
 
 Backend behavior:
 - The default `--capture-backend skia` path renders through an offscreen Skia surface,
   so widget SkSL is present in the `before`/`after` images and the report records
   `render_backend: "skia-headless"` with `widget_sksl_render_supported: true`.
+- `--capture-backend live-gpu` drives the real `pulp-design-tool` app in automation
+  mode, captures before/after images from the actual Skia/Graphite presentation path,
+  and records `render_backend: "skia-live-gpu"` with `sksl_gpu_supported: true`.
 - `--capture-backend coregraphics` is still available for comparison, but it does not
   faithfully render custom widget SkSL.
 
 Remaining limitation:
-- Even with `skia` capture, `pulp design-debug` still validates an offscreen Skia path,
-  not the final live GPU presentation path used by the interactive app. Use it as the
-  source of truth for prompt/response/apply flow and shader-shape validation, then do
-  final visual QA in `pulp design`.
+- `skia` and `coregraphics` still validate headless render paths, not the live app.
+  Use `live-gpu` when you need proof from the actual design-tool renderer.
 
 ### import-design
 

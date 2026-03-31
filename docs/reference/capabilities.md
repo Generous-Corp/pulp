@@ -140,7 +140,7 @@ Key headers: `pulp/state/parameter.hpp`, `pulp/state/store.hpp`, `pulp/state/bin
 | Design export (JSON, SVG) | usable | [view](modules.md#view) | |
 | App framework (commands, menus, key bindings) | usable | [view](modules.md#view) | |
 | Interactive AI design tool (`pulp design`) | experimental | [view](modules.md#view) | [cli](cli.md#design) |
-| Headless design debug harness (`pulp design-debug`) | experimental | [view](modules.md#view) | [cli](cli.md#design-debug) |
+| Design debug harness (`pulp design-debug`) | experimental | [view](modules.md#view) | [cli](cli.md#design-debug) |
 
 ### Widgets
 

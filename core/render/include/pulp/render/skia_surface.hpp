@@ -4,6 +4,7 @@
 #include <pulp/canvas/canvas.hpp>
 #include <memory>
 #include <functional>
+#include <vector>
 
 namespace pulp::render {
 
@@ -47,6 +48,11 @@ public:
 
     /// Resize the surface
     virtual void resize(uint32_t width, uint32_t height, float scale = 1.0f) = 0;
+
+    /// Read the current rendered frame into an RGBA buffer.
+    virtual bool read_current_rgba(std::vector<uint8_t>& pixels,
+                                   uint32_t& pixel_width,
+                                   uint32_t& pixel_height) = 0;
 
     /// Check if Skia rendering is available
     virtual bool is_available() const = 0;

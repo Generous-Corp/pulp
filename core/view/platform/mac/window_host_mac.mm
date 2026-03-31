@@ -36,6 +36,106 @@ static void install_app_menu(NSString* appName) {
     [appItem setSubmenu:appMenu];
 }
 
+static std::vector<uint8_t> nsdata_to_bytes(NSData* data) {
+    if (!data || data.length == 0) return {};
+    std::vector<uint8_t> bytes(static_cast<size_t>(data.length));
+    memcpy(bytes.data(), data.bytes, static_cast<size_t>(data.length));
+    return bytes;
+}
+
+static std::vector<uint8_t> bitmap_rep_to_png(NSBitmapImageRep* rep) {
+    if (!rep) return {};
+    NSData* data = [rep representationUsingType:NSBitmapImageFileTypePNG properties:@{}];
+    return nsdata_to_bytes(data);
+}
+
+static std::vector<uint8_t> encode_rgba_to_png(const uint8_t* pixels,
+                                               uint32_t pixel_w,
+                                               uint32_t pixel_h,
+                                               size_t row_bytes) {
+    if (!pixels || pixel_w == 0 || pixel_h == 0) return {};
+
+    CGColorSpaceRef color_space = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
+    if (!color_space) return {};
+
+    CGBitmapInfo bitmap_info =
+        static_cast<CGBitmapInfo>(kCGImageAlphaPremultipliedLast) |
+        static_cast<CGBitmapInfo>(kCGBitmapByteOrderDefault);
+
+    CGDataProviderRef provider = CGDataProviderCreateWithData(
+        nullptr, pixels, row_bytes * pixel_h, nullptr);
+    if (!provider) {
+        CGColorSpaceRelease(color_space);
+        return {};
+    }
+
+    CGImageRef image = CGImageCreate(
+        pixel_w, pixel_h,
+        8, 32,
+        row_bytes,
+        color_space,
+        bitmap_info,
+        provider,
+        nullptr,
+        false,
+        kCGRenderingIntentDefault);
+
+    CGDataProviderRelease(provider);
+    CGColorSpaceRelease(color_space);
+    if (!image) return {};
+
+    NSBitmapImageRep* rep = [[NSBitmapImageRep alloc] initWithCGImage:image];
+    CGImageRelease(image);
+    return bitmap_rep_to_png(rep);
+}
+
+static std::vector<uint8_t> capture_view_cache_png(NSView* view) {
+    if (!view) return {};
+    NSRect bounds = [view bounds];
+    if (bounds.size.width <= 0 || bounds.size.height <= 0) return {};
+    NSBitmapImageRep* rep = [view bitmapImageRepForCachingDisplayInRect:bounds];
+    if (!rep) return {};
+    [view cacheDisplayInRect:bounds toBitmapImageRep:rep];
+    return bitmap_rep_to_png(rep);
+}
+
+static std::vector<uint8_t> capture_window_content_png(NSWindow* window, NSView* contentView) {
+    if (!window || !contentView) return {};
+
+    [window displayIfNeeded];
+    [contentView displayIfNeeded];
+    return capture_view_cache_png(contentView);
+}
+
+static std::vector<uint8_t> capture_window_screencapture_png(NSWindow* window) {
+    if (!window) return {};
+
+    NSString* temp_name = [NSString stringWithFormat:@"pulp-window-capture-%@.png", NSUUID.UUID.UUIDString];
+    NSString* temp_path = [NSTemporaryDirectory() stringByAppendingPathComponent:temp_name];
+    NSString* window_arg = [NSString stringWithFormat:@"-l%u", static_cast<unsigned int>(window.windowNumber)];
+
+    NSTask* task = [[NSTask alloc] init];
+    task.launchPath = @"/usr/sbin/screencapture";
+    task.arguments = @[ @"-x", @"-o", window_arg, temp_path ];
+
+    @try {
+        [task launch];
+        [task waitUntilExit];
+    } @catch (NSException*) {
+        [[NSFileManager defaultManager] removeItemAtPath:temp_path error:nil];
+        return {};
+    }
+
+    if (task.terminationStatus != 0) {
+        [[NSFileManager defaultManager] removeItemAtPath:temp_path error:nil];
+        return {};
+    }
+
+    NSData* data = [NSData dataWithContentsOfFile:temp_path];
+    [[NSFileManager defaultManager] removeItemAtPath:temp_path error:nil];
+    return nsdata_to_bytes(data);
+}
+
 // ── PulpView: CoreGraphics NSView (CPU rendering path) ───────────────────────
 
 @interface PulpView : NSView <NSTextInputClient>
@@ -777,7 +877,12 @@ public:
     void hide() override { [window_ orderOut:nil]; }
     bool is_visible() const override { return [window_ isVisible]; }
     void repaint() override { [view_ setNeedsDisplay:YES]; }
+    std::vector<uint8_t> capture_png() override {
+        auto live = capture_window_screencapture_png(window_);
+        return !live.empty() ? live : capture_window_content_png(window_, view_);
+    }
     void invalidate_input_state() override { [view_ clearInteractionState]; }
+    void request_close() override { [NSApp terminate:nil]; }
 
     void set_close_callback(std::function<void()> cb) override {
         close_callback_ = std::move(cb);
@@ -863,8 +968,33 @@ public:
         needs_repaint_ = true;
     }
 
+    std::vector<uint8_t> capture_png() override {
+        std::vector<uint8_t> pixels;
+        uint32_t pixel_w = 0;
+        uint32_t pixel_h = 0;
+        if (gpu_surface_ && skia_surface_) {
+            needs_repaint_.store(true, std::memory_order_relaxed);
+            if (render_frame(&pixels, &pixel_w, &pixel_h)) {
+                auto encoded = encode_rgba_to_png(pixels.data(),
+                                                  pixel_w,
+                                                  pixel_h,
+                                                  static_cast<size_t>(pixel_w) * 4u);
+                if (!encoded.empty()) return encoded;
+            }
+        }
+
+        auto live = capture_window_screencapture_png(window_);
+        if (!live.empty()) return live;
+
+        return capture_window_content_png(window_, metal_view_);
+    }
+
     void invalidate_input_state() override {
         [metal_view_ clearInteractionState];
+    }
+
+    void request_close() override {
+        [NSApp terminate:nil];
     }
 
     void set_close_callback(std::function<void()> cb) override {
@@ -995,21 +1125,34 @@ private:
         needs_repaint_ = true;
     }
 
-    void render_frame() {
-        if (!gpu_surface_ || !skia_surface_) return;
+    void paint_scene(canvas::Canvas& canvas) {
+        root_.set_bounds({0, 0, width_, height_});
+        root_.layout_children();
+
+        canvas.set_fill_color(canvas::Color::rgba(30, 30, 46));
+        canvas.fill_rect(0, 0, width_, height_);
+
+        root_.paint_all(canvas);
+        pulp::view::View::paint_overlays(canvas);
+    }
+
+    bool render_frame(std::vector<uint8_t>* capture_pixels = nullptr,
+                      uint32_t* capture_width = nullptr,
+                      uint32_t* capture_height = nullptr) {
+        if (!gpu_surface_ || !skia_surface_) return false;
 
         if (!gpu_surface_->begin_frame()) {
             frame_fail_count_++;
             if (frame_fail_count_ <= 3)
                 fprintf(stderr, "[gpu-host] begin_frame failed (%d)\n", frame_fail_count_);
-            return;
+            return false;
         }
 
         auto* canvas = skia_surface_->begin_frame();
         if (!canvas) {
             fprintf(stderr, "[gpu-host] skia begin_frame returned null\n");
             gpu_surface_->end_frame();
-            return;
+            return false;
         }
 
         if (frame_ok_count_++ == 0) {
@@ -1018,28 +1161,23 @@ private:
                 width_, height_, gpu_surface_->width(), gpu_surface_->height(), scale);
         }
 
-        {
-            // Layout and paint the view tree
-            root_.set_bounds({0, 0, width_, height_});
-            root_.layout_children();
-
-            // Clear background
-            canvas->set_fill_color(canvas::Color::rgba(30, 30, 46));
-            canvas->fill_rect(0, 0, width_, height_);
-
-            root_.paint_all(*canvas);
-            pulp::view::View::paint_overlays(*canvas);
-        }
+        paint_scene(*canvas);
 
         continuous_frames_.store(
             view_needs_continuous_frames(&root_) || frame_clock_.has_active_subscribers(),
             std::memory_order_relaxed);
+
+        bool captured = true;
+        if (capture_pixels && capture_width && capture_height) {
+            captured = skia_surface_->read_current_rgba(*capture_pixels, *capture_width, *capture_height);
+        }
 
         skia_surface_->end_frame();   // submit Graphite recording
         gpu_surface_->end_frame();    // present to Metal surface
 
         needs_repaint_.store(continuous_frames_.load(std::memory_order_relaxed),
                              std::memory_order_relaxed);
+        return captured;
     }
 
     // CVDisplayLink callback — fires on the display's vsync

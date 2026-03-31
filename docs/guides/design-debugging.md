@@ -16,6 +16,8 @@ Each run writes an artifact bundle under `planning/screenshots/design-debug/` by
 
 - `*-prompt.txt`
 - `*-response.txt`
+- `*-debug-state.json`
+- `*-apply-summary.txt`
 - `*-before.png`
 - `*-after.png`
 - `*-diff.png`
@@ -31,7 +33,7 @@ The JSON report includes:
 - whether widget SkSL was rendered in the artifact images
 - target widget id and bounds
 - target-region crop bounds and ROI diff stats for targeted runs (`target_diff_pixels`, `target_diff_pct`)
-- the exact AI command used
+- the exact AI command or live driver command used
 - screenshot diff stats
 - `debug_state` from the real design tool script:
   - request text
@@ -107,10 +109,11 @@ from the requested widget bounds or a changed-pixels fallback.
 
 ## Capture Backends
 
-The debug tool supports two render paths:
+The debug tool supports three render paths:
 
 - `--capture-backend skia` (default)
 - `--capture-backend coregraphics`
+- `--capture-backend live-gpu`
 
 The default Skia path makes the harness much more useful for widget restyling,
 because widget SkSL actually renders in the screenshots. The report makes this explicit:
@@ -127,12 +130,34 @@ because widget SkSL actually renders in the screenshots. The report makes this e
 The CoreGraphics path is still available, but it does not faithfully render
 custom widget SkSL and is mainly useful as a baseline/comparison path.
 
+The live GPU path launches the real `pulp-design-tool` app in automation mode,
+captures before/after frames from the actual Skia/Graphite renderer, and writes
+those images back into the same artifact bundle:
+
+```json
+{
+  "render_backend": "skia-live-gpu",
+  "requested_capture_backend": "live-gpu",
+  "sksl_gpu_supported": true,
+  "widget_sksl_render_supported": true
+}
+```
+
+Useful when you need proof from the same renderer the interactive app uses:
+
+```bash
+pulp design-debug \
+  --prompt "make the gain knob look like premium brushed aluminum" \
+  --target k1 \
+  --capture-backend live-gpu
+```
+
 ## Current Limitation
 
-Even with Skia capture, the harness still renders offscreen rather than through
-the final live GPU presentation path used by the interactive app.
+The headless `skia` backend still renders offscreen rather than through the
+final live GPU presentation path used by the interactive app.
 
-This means the harness is very good for:
+That means the headless harness is very good for:
 - validating prompt construction
 - validating provider/model/reasoning metadata
 - validating JSON parsing and apply flow
@@ -140,9 +165,8 @@ This means the harness is very good for:
 - comparing token/dimension/widget-look diffs
 - publishing deterministic before/after/report bundles
 
-It is still not the final source of truth for live GPU presentation parity.
-For final shader fidelity, judge the result in the interactive GPU-backed
-`pulp design` app.
+When you need final renderer fidelity inside the harness itself, use
+`--capture-backend live-gpu`.
 
 ## Testing
 
@@ -151,8 +175,9 @@ Relevant local checks:
 ```bash
 node --check examples/design-tool/design-tool.js
 ctest --test-dir build -R "Design tool:|WidgetBridge"
+./build/tools/design/pulp-design-debug --prompt "make the gain knob look like premium brushed aluminum" --target k1 --capture-backend live-gpu --response-file saved-response.json
 ```
 
 Those tests cover the prompt builder, provider/model selector behavior, debug-state
-capture, and the widget-restyling bridge APIs. They do not replace visual QA in the
-interactive GPU path for final SkSL polish.
+capture, and the widget-restyling bridge APIs. The live-gpu command above is the
+best local smoke test when you want a report bundle from the actual GPU-backed app.

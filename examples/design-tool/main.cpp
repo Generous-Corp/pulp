@@ -15,9 +15,15 @@
 #include <memory>
 #include <iostream>
 #include <sstream>
+#include <array>
 #include <unordered_map>
 #include <cstdlib>
+#include <cstdio>
 #include <dispatch/dispatch.h>
+
+#if !defined(_WIN32)
+#include <sys/wait.h>
+#endif
 
 using namespace pulp::view;
 using namespace pulp::state;
@@ -31,25 +37,177 @@ static std::string read_file(const fs::path& path) {
     return ss.str();
 }
 
+static bool write_text_file(const fs::path& path, const std::string& content) {
+    std::ofstream out(path, std::ios::binary);
+    if (!out.is_open()) return false;
+    out << content;
+    return out.good();
+}
+
+static bool write_binary_file(const fs::path& path, const std::vector<uint8_t>& bytes) {
+    std::ofstream out(path, std::ios::binary);
+    if (!out.is_open()) return false;
+    out.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+    return out.good();
+}
+
+static std::string run_command_capture(const std::string& command, int& exit_code) {
+    std::array<char, 4096> buffer{};
+    std::string output;
+#if defined(_WIN32)
+    FILE* pipe = _popen(command.c_str(), "r");
+#else
+    FILE* pipe = popen(command.c_str(), "r");
+#endif
+    if (!pipe) {
+        exit_code = -1;
+        return {};
+    }
+    while (fgets(buffer.data(), static_cast<int>(buffer.size()), pipe) != nullptr) {
+        output += buffer.data();
+    }
+#if defined(_WIN32)
+    auto status = _pclose(pipe);
+    exit_code = status;
+#else
+    auto status = pclose(pipe);
+    if (WIFEXITED(status)) exit_code = WEXITSTATUS(status);
+    else exit_code = status;
+#endif
+    return output;
+}
+
+static fs::path find_default_js_path() {
+    auto dir = fs::current_path();
+    while (!dir.empty()) {
+        auto candidate = dir / "examples" / "design-tool" / "design-tool.js";
+        if (fs::exists(candidate)) return candidate;
+        auto parent = dir.parent_path();
+        if (parent == dir) break;
+        dir = parent;
+    }
+    return {};
+}
+
+struct AutomationOptions {
+    bool enabled = false;
+    std::string prompt;
+    std::string target = "all";
+    std::string provider = "claude";
+    std::string model = "claude-sonnet-4-6";
+    std::string reasoning_effort;
+    std::string ai_cli;
+    fs::path response_file;
+    fs::path before_path;
+    fs::path after_path;
+    fs::path prompt_out;
+    fs::path response_out;
+    fs::path debug_state_out;
+    fs::path apply_summary_out;
+    uint64_t delay_ms = 350;
+    uint64_t after_delay_ms = 350;
+};
+
+static void print_usage() {
+    std::cerr << "Usage: pulp-design-tool [path/to/design-tool.js] [options]\n";
+    std::cerr << "  --script <file.js>                 Explicit design-tool.js path\n";
+    std::cerr << "  --automation-prompt <text>         Run a one-shot automated chat restyle\n";
+    std::cerr << "  --automation-target <id|all>       Target widget for automation (default: all)\n";
+    std::cerr << "  --automation-provider <name>       Metadata provider name (default: claude)\n";
+    std::cerr << "  --automation-model <id>            Metadata model id (default: claude-sonnet-4-6)\n";
+    std::cerr << "  --automation-reasoning-effort <l>  Metadata effort (low|medium|high|xhigh)\n";
+    std::cerr << "  --automation-ai-cli <template>     Override AI CLI command template\n";
+    std::cerr << "  --automation-response-file <file>  Use a saved model response instead of calling AI\n";
+    std::cerr << "  --automation-before <file.png>     Save live before screenshot\n";
+    std::cerr << "  --automation-after <file.png>      Save live after screenshot\n";
+    std::cerr << "  --automation-prompt-out <file>     Save generated prompt text\n";
+    std::cerr << "  --automation-response-out <file>   Save model response text\n";
+    std::cerr << "  --automation-debug-state-out <f>   Save getDesignDebugStateJson() output\n";
+    std::cerr << "  --automation-apply-summary-out <f> Save applyDesignChatResponse() summary\n";
+    std::cerr << "  --automation-delay-ms <ms>         Delay before baseline capture (default: 350)\n";
+    std::cerr << "  --automation-after-delay-ms <ms>   Delay before post-apply capture (default: 350)\n";
+}
+
 int main(int argc, char* argv[]) {
-    // Find the JS file
     fs::path js_path;
-    if (argc > 1) {
-        js_path = argv[1];
-    } else {
-        auto dir = fs::current_path();
-        while (!dir.empty()) {
-            auto candidate = dir / "examples" / "design-tool" / "design-tool.js";
-            if (fs::exists(candidate)) { js_path = candidate; break; }
-            auto parent = dir.parent_path();
-            if (parent == dir) break;
-            dir = parent;
+    AutomationOptions automation;
+
+    for (int i = 1; i < argc; ++i) {
+        std::string arg = argv[i];
+        if (arg == "--script" && i + 1 < argc) {
+            js_path = argv[++i];
+        } else if (arg == "--automation-prompt" && i + 1 < argc) {
+            automation.enabled = true;
+            automation.prompt = argv[++i];
+        } else if (arg == "--automation-target" && i + 1 < argc) {
+            automation.enabled = true;
+            automation.target = argv[++i];
+        } else if (arg == "--automation-provider" && i + 1 < argc) {
+            automation.enabled = true;
+            automation.provider = argv[++i];
+        } else if (arg == "--automation-model" && i + 1 < argc) {
+            automation.enabled = true;
+            automation.model = argv[++i];
+        } else if (arg == "--automation-reasoning-effort" && i + 1 < argc) {
+            automation.enabled = true;
+            automation.reasoning_effort = argv[++i];
+        } else if (arg == "--automation-ai-cli" && i + 1 < argc) {
+            automation.enabled = true;
+            automation.ai_cli = argv[++i];
+        } else if (arg == "--automation-response-file" && i + 1 < argc) {
+            automation.enabled = true;
+            automation.response_file = argv[++i];
+        } else if (arg == "--automation-before" && i + 1 < argc) {
+            automation.enabled = true;
+            automation.before_path = argv[++i];
+        } else if (arg == "--automation-after" && i + 1 < argc) {
+            automation.enabled = true;
+            automation.after_path = argv[++i];
+        } else if (arg == "--automation-prompt-out" && i + 1 < argc) {
+            automation.enabled = true;
+            automation.prompt_out = argv[++i];
+        } else if (arg == "--automation-response-out" && i + 1 < argc) {
+            automation.enabled = true;
+            automation.response_out = argv[++i];
+        } else if (arg == "--automation-debug-state-out" && i + 1 < argc) {
+            automation.enabled = true;
+            automation.debug_state_out = argv[++i];
+        } else if (arg == "--automation-apply-summary-out" && i + 1 < argc) {
+            automation.enabled = true;
+            automation.apply_summary_out = argv[++i];
+        } else if (arg == "--automation-delay-ms" && i + 1 < argc) {
+            automation.enabled = true;
+            automation.delay_ms = static_cast<uint64_t>(std::stoull(argv[++i]));
+        } else if (arg == "--automation-after-delay-ms" && i + 1 < argc) {
+            automation.enabled = true;
+            automation.after_delay_ms = static_cast<uint64_t>(std::stoull(argv[++i]));
+        } else if ((arg == "--help" || arg == "-h")) {
+            print_usage();
+            return 0;
+        } else if (!arg.empty() && arg[0] != '-' && js_path.empty()) {
+            js_path = arg;
+        } else {
+            std::cerr << "Unknown option: " << arg << "\n";
+            print_usage();
+            return 1;
         }
+    }
+
+    if (js_path.empty()) {
+        js_path = find_default_js_path();
     }
 
     if (js_path.empty() || !fs::exists(js_path)) {
         std::cerr << "Error: design-tool.js not found.\n";
-        std::cerr << "Usage: pulp-design-tool [path/to/design-tool.js]\n";
+        print_usage();
+        return 1;
+    }
+    if (automation.enabled && automation.prompt.empty()) {
+        std::cerr << "Error: --automation-prompt is required when automation is enabled.\n";
+        return 1;
+    }
+    if (!automation.response_file.empty() && !fs::exists(automation.response_file)) {
+        std::cerr << "Error: automation response file not found: " << automation.response_file << "\n";
         return 1;
     }
 
@@ -75,7 +233,9 @@ int main(int argc, char* argv[]) {
 
     auto engine = make_engine();
     auto bridge = std::make_unique<WidgetBridge>(*engine, root, store);
-    if (const char* ai_cli = std::getenv("PULP_AI_CLI")) {
+    if (!automation.ai_cli.empty()) {
+        bridge->set_ai_cli_command(automation.ai_cli);
+    } else if (const char* ai_cli = std::getenv("PULP_AI_CLI")) {
         bridge->set_ai_cli_command(ai_cli);
     }
 
@@ -158,7 +318,9 @@ int main(int argc, char* argv[]) {
 
             auto next_engine = make_engine();
             auto next_bridge = std::make_unique<WidgetBridge>(*next_engine, root, store);
-            if (const char* ai_cli = std::getenv("PULP_AI_CLI")) {
+            if (!automation.ai_cli.empty()) {
+                next_bridge->set_ai_cli_command(automation.ai_cli);
+            } else if (const char* ai_cli = std::getenv("PULP_AI_CLI")) {
                 next_bridge->set_ai_cli_command(ai_cli);
             }
             load_library_scripts(*next_bridge);
@@ -199,10 +361,150 @@ int main(int argc, char* argv[]) {
     });
     dispatch_resume(reload_timer);
 
+    int automation_exit_code = 0;
+    if (automation.enabled) {
+        auto automation_copy = automation;
+        auto* bridge_slot = &bridge;
+        auto* engine_slot = &engine;
+        auto* automation_exit_code_ptr = &automation_exit_code;
+        auto* window_ptr = window.get();
+        auto* root_ptr = &root;
+
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, static_cast<int64_t>(automation_copy.delay_ms) * NSEC_PER_MSEC),
+                       dispatch_get_main_queue(), ^{
+            auto fail = [&](const std::string& message) {
+                std::cerr << "Automation failed: " << message << "\n";
+                *automation_exit_code_ptr = 1;
+                if (window_ptr) window_ptr->request_close();
+            };
+
+            try {
+                if (!*engine_slot || !*bridge_slot || !window_ptr) {
+                    fail("automation host not ready");
+                    return;
+                }
+
+                if (automation_copy.target != "all") {
+                    (*engine_slot)->invoke("setDesignDebugTarget", automation_copy.target);
+                } else {
+                    (*engine_slot)->invoke("clearInspectedComponent");
+                }
+                (*engine_slot)->invoke("setDesignDebugAIConfig",
+                                       automation_copy.provider,
+                                       automation_copy.model,
+                                       automation_copy.reasoning_effort);
+                root_ptr->layout_children();
+                window_ptr->repaint();
+
+                if (!automation_copy.before_path.empty()) {
+                    fs::create_directories(automation_copy.before_path.parent_path());
+                    auto before_png = window_ptr->capture_png();
+                    if (before_png.empty() || !write_binary_file(automation_copy.before_path, before_png)) {
+                        fail("failed to capture before image");
+                        return;
+                    }
+                }
+
+                auto prompt_text = (*engine_slot)->invoke("buildDesignChatPrompt", automation_copy.prompt).toString();
+                if (!automation_copy.prompt_out.empty()) {
+                    fs::create_directories(automation_copy.prompt_out.parent_path());
+                    if (!write_text_file(automation_copy.prompt_out, prompt_text)) {
+                        fail("failed to write prompt output");
+                        return;
+                    }
+                }
+
+                std::string response_text;
+                if (!automation_copy.response_file.empty()) {
+                    response_text = read_file(automation_copy.response_file);
+                } else {
+                    auto temp_prompt = fs::temp_directory_path() / "pulp-design-tool-automation-prompt.txt";
+                    if (!write_text_file(temp_prompt, prompt_text)) {
+                        fail("failed to write temp prompt");
+                        return;
+                    }
+                    std::string command_string;
+                    try {
+                        command_string = (*engine_slot)->invoke("buildAiCliCommand",
+                                                                temp_prompt.string(),
+                                                                automation_copy.model,
+                                                                automation_copy.provider,
+                                                                automation_copy.reasoning_effort).toString();
+                    } catch (const std::exception& e) {
+                        fs::remove(temp_prompt);
+                        fail(std::string("failed to build AI command: ") + e.what());
+                        return;
+                    }
+                    int exit_code = 0;
+                    response_text = run_command_capture(command_string, exit_code);
+                    fs::remove(temp_prompt);
+                    if (exit_code != 0) {
+                        fail("AI command failed with exit code " + std::to_string(exit_code));
+                        return;
+                    }
+                }
+
+                if (!automation_copy.response_out.empty()) {
+                    fs::create_directories(automation_copy.response_out.parent_path());
+                    if (!write_text_file(automation_copy.response_out, response_text)) {
+                        fail("failed to write response output");
+                        return;
+                    }
+                }
+
+                auto apply_summary = (*engine_slot)->invoke("applyDesignChatResponse", response_text).toString();
+                if (!automation_copy.apply_summary_out.empty()) {
+                    fs::create_directories(automation_copy.apply_summary_out.parent_path());
+                    if (!write_text_file(automation_copy.apply_summary_out, apply_summary)) {
+                        fail("failed to write apply summary output");
+                        return;
+                    }
+                }
+
+                root_ptr->layout_children();
+                window_ptr->repaint();
+
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, static_cast<int64_t>(automation_copy.after_delay_ms) * NSEC_PER_MSEC),
+                               dispatch_get_main_queue(), ^{
+                    try {
+                        if (!automation_copy.after_path.empty()) {
+                            fs::create_directories(automation_copy.after_path.parent_path());
+                            auto after_png = window_ptr->capture_png();
+                            if (after_png.empty() || !write_binary_file(automation_copy.after_path, after_png)) {
+                                fail("failed to capture after image");
+                                return;
+                            }
+                        }
+
+                        if (!automation_copy.debug_state_out.empty()) {
+                            fs::create_directories(automation_copy.debug_state_out.parent_path());
+                            auto debug_state = (*engine_slot)->invoke("getDesignDebugStateJson").toString();
+                            if (!write_text_file(automation_copy.debug_state_out, debug_state)) {
+                                fail("failed to write debug state output");
+                                return;
+                            }
+                        }
+                    } catch (const std::exception& e) {
+                        fail(std::string("automation finalize error: ") + e.what());
+                        return;
+                    } catch (...) {
+                        fail("automation finalize error");
+                        return;
+                    }
+                    window_ptr->request_close();
+                });
+            } catch (const std::exception& e) {
+                fail(std::string("automation error: ") + e.what());
+            } catch (...) {
+                fail("automation error");
+            }
+        });
+    }
+
     std::cout << "Hot reload watching: " << js_path.parent_path().string() << "\n";
     std::cout << "Opening window...\n";
 
     window->run_event_loop();
     dispatch_source_cancel(reload_timer);
-    return 0;
+    return automation_exit_code;
 }

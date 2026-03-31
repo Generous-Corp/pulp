@@ -20,6 +20,7 @@
 #include <fstream>
 #include <iostream>
 #include <optional>
+#include <regex>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -35,8 +36,15 @@ namespace fs = std::filesystem;
 
 namespace {
 
+enum class CaptureMode {
+    headless_skia,
+    headless_coregraphics,
+    live_gpu
+};
+
 struct Options {
     fs::path script_path;
+    fs::path design_tool_bin;
     fs::path output_dir = fs::path("planning") / "screenshots" / "design-debug";
     std::string prompt;
     std::string target = "all";
@@ -48,7 +56,10 @@ struct Options {
     uint32_t width = 1100;
     uint32_t height = 700;
     float scale = 2.0f;
+    CaptureMode capture_mode = CaptureMode::headless_skia;
     ScreenshotBackend capture_backend = ScreenshotBackend::skia;
+    uint64_t delay_ms = 350;
+    uint64_t after_delay_ms = 350;
     bool debug_json = true;
 };
 
@@ -72,6 +83,12 @@ bool write_binary_file(const fs::path& path, const std::vector<uint8_t>& bytes) 
     if (!out.is_open()) return false;
     out.write(reinterpret_cast<const char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
     return out.good();
+}
+
+std::vector<uint8_t> read_binary_file(const fs::path& path) {
+    std::ifstream in(path, std::ios::binary);
+    if (!in.is_open()) return {};
+    return std::vector<uint8_t>(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
 }
 
 bool append_text_file(const fs::path& path, const std::string& content) {
@@ -144,6 +161,12 @@ fs::path find_default_script(const fs::path& repo_root) {
     return {};
 }
 
+fs::path find_default_design_tool_bin(const fs::path& repo_root) {
+    auto path = repo_root / "build" / "examples" / "design-tool" / "pulp-design-tool";
+    if (fs::exists(path)) return path;
+    return {};
+}
+
 void load_design_tool(const fs::path& script_path, WidgetBridge& bridge) {
     auto js_dir = script_path.parent_path();
     auto oklch_path = js_dir / "oklch.js";
@@ -166,7 +189,20 @@ void print_usage() {
     std::cerr << "  --width <px>                 Render width (default: 1100)\n";
     std::cerr << "  --height <px>                Render height (default: 700)\n";
     std::cerr << "  --scale <factor>             Render scale (default: 2.0)\n";
-    std::cerr << "  --capture-backend <name>     Screenshot backend: skia or coregraphics (default: skia)\n";
+    std::cerr << "  --capture-backend <name>     Screenshot backend: skia, coregraphics, or live-gpu (default: skia)\n";
+    std::cerr << "  --design-tool-bin <path>     Live design-tool binary for --capture-backend live-gpu\n";
+    std::cerr << "  --delay-ms <ms>              Delay before baseline capture in live-gpu mode (default: 350)\n";
+    std::cerr << "  --after-delay-ms <ms>        Delay before post-apply capture in live-gpu mode (default: 350)\n";
+}
+
+std::string shell_quote(std::string_view text) {
+    std::string out = "'";
+    for (char c : text) {
+        if (c == '\'') out += "'\"'\"'";
+        else out.push_back(c);
+    }
+    out.push_back('\'');
+    return out;
 }
 
 std::string run_command_capture(const std::string& command, int& exit_code) {
@@ -204,7 +240,8 @@ std::string now_stamp() {
     return buf;
 }
 
-const char* backend_flag_name(ScreenshotBackend backend) {
+const char* capture_mode_flag_name(CaptureMode mode, ScreenshotBackend backend) {
+    if (mode == CaptureMode::live_gpu) return "live-gpu";
     switch (backend) {
         case ScreenshotBackend::coregraphics: return "coregraphics";
         case ScreenshotBackend::skia: return "skia";
@@ -212,7 +249,8 @@ const char* backend_flag_name(ScreenshotBackend backend) {
     }
 }
 
-const char* backend_report_name(ScreenshotBackend backend) {
+const char* capture_mode_report_name(CaptureMode mode, ScreenshotBackend backend) {
+    if (mode == CaptureMode::live_gpu) return "skia-live-gpu";
     switch (backend) {
         case ScreenshotBackend::coregraphics: return "coregraphics-headless";
         case ScreenshotBackend::skia: return "skia-headless";
@@ -220,8 +258,33 @@ const char* backend_report_name(ScreenshotBackend backend) {
     }
 }
 
-bool backend_supports_widget_sksl(ScreenshotBackend backend) {
-    return backend == ScreenshotBackend::skia;
+bool capture_mode_supports_widget_sksl(CaptureMode mode, ScreenshotBackend backend) {
+    return mode == CaptureMode::live_gpu || backend == ScreenshotBackend::skia;
+}
+
+struct ParsedTargetBounds {
+    bool valid = false;
+    float x = 0.0f;
+    float y = 0.0f;
+    float width = 0.0f;
+    float height = 0.0f;
+};
+
+ParsedTargetBounds parse_target_bounds(std::string_view json) {
+    static const std::regex re(
+        R"("targetBounds"\s*:\s*\{\s*"x"\s*:\s*([-0-9.]+)\s*,\s*"y"\s*:\s*([-0-9.]+)\s*,\s*"width"\s*:\s*([-0-9.]+)\s*,\s*"height"\s*:\s*([-0-9.]+)\s*\})",
+        std::regex::ECMAScript);
+    std::match_results<std::string_view::const_iterator> match;
+    ParsedTargetBounds bounds;
+    if (!std::regex_search(json.begin(), json.end(), match, re) || match.size() != 5) {
+        return bounds;
+    }
+    bounds.valid = true;
+    bounds.x = std::stof(std::string(match[1].first, match[1].second));
+    bounds.y = std::stof(std::string(match[2].first, match[2].second));
+    bounds.width = std::stof(std::string(match[3].first, match[3].second));
+    bounds.height = std::stof(std::string(match[4].first, match[4].second));
+    return bounds;
 }
 
 struct TargetArtifacts {
@@ -246,6 +309,7 @@ int main(int argc, char* argv[]) {
     auto repo_root = find_repo_root();
     if (!repo_root.empty()) {
         opts.script_path = find_default_script(repo_root);
+        opts.design_tool_bin = find_default_design_tool_bin(repo_root);
     }
 
     for (int i = 1; i < argc; ++i) {
@@ -262,10 +326,21 @@ int main(int argc, char* argv[]) {
         else if (arg == "--width" && i + 1 < argc) opts.width = static_cast<uint32_t>(std::stoul(argv[++i]));
         else if (arg == "--height" && i + 1 < argc) opts.height = static_cast<uint32_t>(std::stoul(argv[++i]));
         else if (arg == "--scale" && i + 1 < argc) opts.scale = std::stof(argv[++i]);
+        else if (arg == "--design-tool-bin" && i + 1 < argc) opts.design_tool_bin = argv[++i];
+        else if (arg == "--delay-ms" && i + 1 < argc) opts.delay_ms = static_cast<uint64_t>(std::stoull(argv[++i]));
+        else if (arg == "--after-delay-ms" && i + 1 < argc) opts.after_delay_ms = static_cast<uint64_t>(std::stoull(argv[++i]));
         else if (arg == "--capture-backend" && i + 1 < argc) {
             auto value = std::string(argv[++i]);
-            if (value == "coregraphics") opts.capture_backend = ScreenshotBackend::coregraphics;
-            else if (value == "skia") opts.capture_backend = ScreenshotBackend::skia;
+            if (value == "coregraphics") {
+                opts.capture_mode = CaptureMode::headless_coregraphics;
+                opts.capture_backend = ScreenshotBackend::coregraphics;
+            } else if (value == "skia") {
+                opts.capture_mode = CaptureMode::headless_skia;
+                opts.capture_backend = ScreenshotBackend::skia;
+            } else if (value == "live-gpu") {
+                opts.capture_mode = CaptureMode::live_gpu;
+                opts.capture_backend = ScreenshotBackend::skia;
+            }
             else {
                 std::cerr << "Unknown capture backend: " << value << "\n";
                 return 1;
@@ -290,6 +365,12 @@ int main(int argc, char* argv[]) {
         std::cerr << "Error: design-tool.js not found\n";
         return 1;
     }
+    if (opts.capture_mode == CaptureMode::live_gpu &&
+        (opts.design_tool_bin.empty() || !fs::exists(opts.design_tool_bin))) {
+        std::cerr << "Error: live GPU capture requires a built design tool binary. "
+                     "Expected " << opts.design_tool_bin << "\n";
+        return 1;
+    }
     if (!opts.response_file.empty() && !fs::exists(opts.response_file)) {
         std::cerr << "Error: response file not found: " << opts.response_file << "\n";
         return 1;
@@ -304,112 +385,206 @@ int main(int argc, char* argv[]) {
     auto diff_path = opts.output_dir / (stem + "-diff.png");
     auto prompt_path = opts.output_dir / (stem + "-prompt.txt");
     auto response_path = opts.output_dir / (stem + "-response.txt");
+    auto debug_state_path = opts.output_dir / (stem + "-debug-state.json");
+    auto apply_summary_path = opts.output_dir / (stem + "-apply-summary.txt");
     auto report_path = opts.output_dir / (stem + "-report.json");
     auto latest_report_path = opts.output_dir / "latest-report.json";
     auto latest_run_path = opts.output_dir / "latest-run.json";
     auto runs_path = opts.output_dir / "runs.jsonl";
 
-    View root;
-    root.set_theme(Theme::dark());
-    root.flex().direction = FlexDirection::column;
-    root.set_bounds({0.0f, 0.0f, static_cast<float>(opts.width), static_cast<float>(opts.height)});
-
-    StateStore store;
-    ScriptEngine engine;
-    WidgetBridge bridge(engine, root, store);
-    if (!opts.ai_cli.empty()) {
-        engine.invoke("setAICli", opts.ai_cli);
-    } else if (const char* ai_cli = std::getenv("PULP_AI_CLI")) {
-        engine.invoke("setAICli", ai_cli);
-    }
-
-    try {
-        load_design_tool(opts.script_path, bridge);
-    } catch (const std::exception& e) {
-        std::cerr << "Error loading design tool: " << e.what() << "\n";
-        return 1;
-    }
-    root.layout_children();
-
-    try {
-        if (opts.target != "all") {
-            engine.invoke("setDesignDebugTarget", opts.target);
-            root.layout_children();
-        } else {
-            engine.invoke("clearInspectedComponent");
-            root.layout_children();
-        }
-        engine.invoke("setDesignDebugAIConfig", opts.provider, opts.model, opts.reasoning_effort);
-        root.layout_children();
-    } catch (const std::exception& e) {
-        std::cerr << "Error setting debug state: " << e.what() << "\n";
-        return 1;
-    }
-
-    auto before_png = render_to_png(root, opts.width, opts.height, opts.scale, opts.capture_backend);
-    if (before_png.empty() || !write_binary_file(before_path, before_png)) {
-        std::cerr << "Error: failed to render before screenshot\n";
-        return 1;
-    }
-
     std::string prompt_text;
-    try {
-        prompt_text = engine.invoke("buildDesignChatPrompt", opts.prompt).toString();
-    } catch (const std::exception& e) {
-        std::cerr << "Error building design prompt: " << e.what() << "\n";
-        return 1;
-    }
-    if (!write_text_file(prompt_path, prompt_text)) {
-        std::cerr << "Error: failed to write prompt file\n";
-        return 1;
-    }
-
     std::string response_text;
     std::string command_string;
-    int command_exit = 0;
-    if (!opts.response_file.empty()) {
-        response_text = read_file(opts.response_file);
-    } else {
-        auto temp_prompt = fs::temp_directory_path() / (stem + "-prompt.txt");
-        if (!write_text_file(temp_prompt, prompt_text)) {
-            std::cerr << "Error: failed to write temp prompt file\n";
-            return 1;
-        }
-        try {
-            command_string = engine.invoke("buildAiCliCommand",
-                                           temp_prompt.string(),
-                                           opts.model,
-                                           opts.provider,
-                                           opts.reasoning_effort).toString();
-        } catch (const std::exception& e) {
-            std::cerr << "Error building AI CLI command: " << e.what() << "\n";
-            return 1;
-        }
-        response_text = run_command_capture(command_string, command_exit);
-        if (command_exit != 0) {
-            std::cerr << "AI command failed with exit code " << command_exit << "\n";
-            if (!response_text.empty()) std::cerr << response_text << "\n";
-            return 1;
-        }
-    }
-    if (!write_text_file(response_path, response_text)) {
-        std::cerr << "Error: failed to write response file\n";
-        return 1;
-    }
-
+    std::string command_output;
     std::string apply_summary;
-    try {
-        apply_summary = engine.invoke("applyDesignChatResponse", response_text).toString();
-        root.layout_children();
-    } catch (const std::exception& e) {
-        std::cerr << "Error applying design response: " << e.what() << "\n";
-        return 1;
-    }
+    std::string debug_state_json = "{}";
+    int command_exit = 0;
+    std::vector<uint8_t> before_png;
+    std::vector<uint8_t> after_png;
+    float target_x = 0.0f, target_y = 0.0f, target_w = 0.0f, target_h = 0.0f;
+    bool target_found = false;
 
-    auto after_png = render_to_png(root, opts.width, opts.height, opts.scale, opts.capture_backend);
-    if (after_png.empty() || !write_binary_file(after_path, after_png)) {
-        std::cerr << "Error: failed to render after screenshot\n";
-        return 1;
+    if (opts.capture_mode == CaptureMode::live_gpu) {
+        std::ostringstream cmd;
+        cmd << shell_quote(opts.design_tool_bin.string())
+            << " --script " << shell_quote(opts.script_path.string())
+            << " --automation-prompt " << shell_quote(opts.prompt)
+            << " --automation-target " << shell_quote(opts.target)
+            << " --automation-provider " << shell_quote(opts.provider)
+            << " --automation-model " << shell_quote(opts.model)
+            << " --automation-delay-ms " << opts.delay_ms
+            << " --automation-after-delay-ms " << opts.after_delay_ms
+            << " --automation-before " << shell_quote(before_path.string())
+            << " --automation-after " << shell_quote(after_path.string())
+            << " --automation-prompt-out " << shell_quote(prompt_path.string())
+            << " --automation-response-out " << shell_quote(response_path.string())
+            << " --automation-debug-state-out " << shell_quote(debug_state_path.string())
+            << " --automation-apply-summary-out " << shell_quote(apply_summary_path.string());
+        if (!opts.reasoning_effort.empty()) {
+            cmd << " --automation-reasoning-effort " << shell_quote(opts.reasoning_effort);
+        }
+        if (!opts.ai_cli.empty()) {
+            cmd << " --automation-ai-cli " << shell_quote(opts.ai_cli);
+        }
+        if (!opts.response_file.empty()) {
+            cmd << " --automation-response-file " << shell_quote(opts.response_file.string());
+        }
+        command_string = cmd.str();
+        command_output = run_command_capture(command_string, command_exit);
+        if (command_exit != 0) {
+            std::cerr << "Live GPU automation failed with exit code " << command_exit << "\n";
+            if (!command_output.empty()) std::cerr << command_output << "\n";
+            return 1;
+        }
+
+        prompt_text = read_file(prompt_path);
+        response_text = read_file(response_path);
+        apply_summary = read_file(apply_summary_path);
+        debug_state_json = read_file(debug_state_path);
+        before_png = read_binary_file(before_path);
+        after_png = read_binary_file(after_path);
+        if (prompt_text.empty() || response_text.empty() || before_png.empty() || after_png.empty()) {
+            std::cerr << "Error: live GPU run did not produce the expected artifacts\n";
+            return 1;
+        }
+
+        auto parsed_bounds = parse_target_bounds(debug_state_json);
+        if (opts.target != "all" && parsed_bounds.valid) {
+            target_x = parsed_bounds.x;
+            target_y = parsed_bounds.y;
+            target_w = parsed_bounds.width;
+            target_h = parsed_bounds.height;
+            target_found = target_w > 0.0f && target_h > 0.0f;
+        }
+    } else {
+        View root;
+        root.set_theme(Theme::dark());
+        root.flex().direction = FlexDirection::column;
+        root.set_bounds({0.0f, 0.0f, static_cast<float>(opts.width), static_cast<float>(opts.height)});
+
+        StateStore store;
+        ScriptEngine engine;
+        WidgetBridge bridge(engine, root, store);
+        if (!opts.ai_cli.empty()) {
+            engine.invoke("setAICli", opts.ai_cli);
+        } else if (const char* ai_cli = std::getenv("PULP_AI_CLI")) {
+            engine.invoke("setAICli", ai_cli);
+        }
+
+        try {
+            load_design_tool(opts.script_path, bridge);
+        } catch (const std::exception& e) {
+            std::cerr << "Error loading design tool: " << e.what() << "\n";
+            return 1;
+        }
+        root.layout_children();
+
+        try {
+            if (opts.target != "all") {
+                engine.invoke("setDesignDebugTarget", opts.target);
+                root.layout_children();
+            } else {
+                engine.invoke("clearInspectedComponent");
+                root.layout_children();
+            }
+            engine.invoke("setDesignDebugAIConfig", opts.provider, opts.model, opts.reasoning_effort);
+            root.layout_children();
+        } catch (const std::exception& e) {
+            std::cerr << "Error setting debug state: " << e.what() << "\n";
+            return 1;
+        }
+
+        before_png = render_to_png(root, opts.width, opts.height, opts.scale, opts.capture_backend);
+        if (before_png.empty() || !write_binary_file(before_path, before_png)) {
+            std::cerr << "Error: failed to render before screenshot\n";
+            return 1;
+        }
+
+        try {
+            prompt_text = engine.invoke("buildDesignChatPrompt", opts.prompt).toString();
+        } catch (const std::exception& e) {
+            std::cerr << "Error building design prompt: " << e.what() << "\n";
+            return 1;
+        }
+        if (!write_text_file(prompt_path, prompt_text)) {
+            std::cerr << "Error: failed to write prompt file\n";
+            return 1;
+        }
+
+        if (!opts.response_file.empty()) {
+            response_text = read_file(opts.response_file);
+        } else {
+            auto temp_prompt = fs::temp_directory_path() / (stem + "-prompt.txt");
+            if (!write_text_file(temp_prompt, prompt_text)) {
+                std::cerr << "Error: failed to write temp prompt file\n";
+                return 1;
+            }
+            try {
+                command_string = engine.invoke("buildAiCliCommand",
+                                               temp_prompt.string(),
+                                               opts.model,
+                                               opts.provider,
+                                               opts.reasoning_effort).toString();
+            } catch (const std::exception& e) {
+                std::cerr << "Error building AI CLI command: " << e.what() << "\n";
+                return 1;
+            }
+            response_text = run_command_capture(command_string, command_exit);
+            if (command_exit != 0) {
+                std::cerr << "AI command failed with exit code " << command_exit << "\n";
+                if (!response_text.empty()) std::cerr << response_text << "\n";
+                return 1;
+            }
+        }
+        if (!write_text_file(response_path, response_text)) {
+            std::cerr << "Error: failed to write response file\n";
+            return 1;
+        }
+
+        try {
+            apply_summary = engine.invoke("applyDesignChatResponse", response_text).toString();
+            root.layout_children();
+        } catch (const std::exception& e) {
+            std::cerr << "Error applying design response: " << e.what() << "\n";
+            return 1;
+        }
+
+        after_png = render_to_png(root, opts.width, opts.height, opts.scale, opts.capture_backend);
+        if (after_png.empty() || !write_binary_file(after_path, after_png)) {
+            std::cerr << "Error: failed to render after screenshot\n";
+            return 1;
+        }
+
+        try {
+            debug_state_json = engine.invoke("getDesignDebugStateJson").toString();
+        } catch (...) {
+        }
+
+        if (!write_text_file(debug_state_path, debug_state_json)) {
+            std::cerr << "Error: failed to write debug state file\n";
+            return 1;
+        }
+        if (!write_text_file(apply_summary_path, apply_summary)) {
+            std::cerr << "Error: failed to write apply summary file\n";
+            return 1;
+        }
+
+        if (opts.target != "all") {
+            if (auto* target = bridge.widget(opts.target)) {
+                auto b = target->bounds();
+                float abs_x = 0.0f;
+                float abs_y = 0.0f;
+                for (View* v = target; v != nullptr; v = v->parent()) {
+                    abs_x += v->bounds().x;
+                    abs_y += v->bounds().y;
+                }
+                target_x = abs_x;
+                target_y = abs_y;
+                target_w = b.width;
+                target_h = b.height;
+                target_found = true;
+            }
+        }
     }
 
     auto diff_png = generate_diff_image(before_png, after_png);
@@ -418,31 +593,6 @@ int main(int argc, char* argv[]) {
     }
     auto compare = compare_screenshots(before_png, after_png);
     auto changed_bounds = diff_bounds(before_png, after_png);
-
-    std::string debug_state_json = "{}";
-    try {
-        debug_state_json = engine.invoke("getDesignDebugStateJson").toString();
-    } catch (...) {
-    }
-
-    float target_x = 0.0f, target_y = 0.0f, target_w = 0.0f, target_h = 0.0f;
-    bool target_found = false;
-    if (opts.target != "all") {
-        if (auto* target = bridge.widget(opts.target)) {
-            auto b = target->bounds();
-            float abs_x = 0.0f;
-            float abs_y = 0.0f;
-            for (View* v = target; v != nullptr; v = v->parent()) {
-                abs_x += v->bounds().x;
-                abs_y += v->bounds().y;
-            }
-            target_x = abs_x;
-            target_y = abs_y;
-            target_w = b.width;
-            target_h = b.height;
-            target_found = true;
-        }
-    }
 
     TargetArtifacts target_artifacts;
     if (opts.target != "all") {
@@ -500,12 +650,14 @@ int main(int argc, char* argv[]) {
     report << "  \"tool\": \"pulp-design-debug\",\n";
     report << "  \"timestamp\": \"" << json_escape(stamp) << "\",\n";
     report << "  \"script\": \"" << json_escape(opts.script_path.string()) << "\",\n";
-    report << "  \"render_backend\": \"" << backend_report_name(opts.capture_backend) << "\",\n";
-    report << "  \"requested_capture_backend\": \"" << backend_flag_name(opts.capture_backend) << "\",\n";
-    report << "  \"sksl_gpu_supported\": false,\n";
-    report << "  \"widget_sksl_render_supported\": " << (backend_supports_widget_sksl(opts.capture_backend) ? "true" : "false") << ",\n";
+    report << "  \"render_backend\": \"" << capture_mode_report_name(opts.capture_mode, opts.capture_backend) << "\",\n";
+    report << "  \"requested_capture_backend\": \"" << capture_mode_flag_name(opts.capture_mode, opts.capture_backend) << "\",\n";
+    report << "  \"sksl_gpu_supported\": " << (opts.capture_mode == CaptureMode::live_gpu ? "true" : "false") << ",\n";
+    report << "  \"widget_sksl_render_supported\": " << (capture_mode_supports_widget_sksl(opts.capture_mode, opts.capture_backend) ? "true" : "false") << ",\n";
     report << "  \"warnings\": [\n";
-    if (opts.capture_backend == ScreenshotBackend::skia) {
+    if (opts.capture_mode == CaptureMode::live_gpu) {
+        report << "    \"This run used the live GPU design tool automation path, so the before/after artifacts reflect the real Skia/Graphite widget render path instead of the offscreen headless fallback.\"\n";
+    } else if (opts.capture_backend == ScreenshotBackend::skia) {
         report << "    \"This run used the offscreen Skia backend, so widget SkSL is rendered in the artifact images. It still does not prove final live GPU presentation parity. Use the interactive design tool for final visual QA.\"\n";
     } else {
         report << "    \"This run used the CoreGraphics headless backend. Widget SkSL is not faithfully rendered here; use this report to validate prompt/response/apply flow and visual diffs, but judge final widget shader quality with Skia-backed capture or the interactive design tool.\"\n";
@@ -521,6 +673,8 @@ int main(int argc, char* argv[]) {
     report << "  \"prompt\": \"" << json_escape(opts.prompt) << "\",\n";
     report << "  \"prompt_file\": \"" << json_escape(prompt_path.string()) << "\",\n";
     report << "  \"response_file\": \"" << json_escape(response_path.string()) << "\",\n";
+    report << "  \"debug_state_file\": \"" << json_escape(debug_state_path.string()) << "\",\n";
+    report << "  \"apply_summary_file\": \"" << json_escape(apply_summary_path.string()) << "\",\n";
     report << "  \"before_image\": \"" << json_escape(before_path.string()) << "\",\n";
     report << "  \"after_image\": \"" << json_escape(after_path.string()) << "\",\n";
     report << "  \"diff_image\": \"" << json_escape(diff_path.string()) << "\",\n";
@@ -561,7 +715,14 @@ int main(int argc, char* argv[]) {
     report << "  \"apply_summary\": \"" << json_escape(apply_summary) << "\",\n";
     report << "  \"debug_state\": " << debug_state_json;
     if (!command_string.empty()) {
-        report << ",\n  \"ai_command\": \"" << json_escape(command_string) << "\"";
+        if (opts.capture_mode == CaptureMode::live_gpu) {
+            report << ",\n  \"driver_command\": \"" << json_escape(command_string) << "\"";
+            if (!command_output.empty()) {
+                report << ",\n  \"driver_output\": \"" << json_escape(command_output) << "\"";
+            }
+        } else {
+            report << ",\n  \"ai_command\": \"" << json_escape(command_string) << "\"";
+        }
     }
     report << "\n}\n";
 
@@ -579,8 +740,8 @@ int main(int argc, char* argv[]) {
     run_summary << "\"provider\":\"" << json_escape(opts.provider) << "\",";
     run_summary << "\"model\":\"" << json_escape(opts.model) << "\",";
     run_summary << "\"reasoning_effort\":\"" << json_escape(opts.reasoning_effort) << "\",";
-    run_summary << "\"render_backend\":\"" << backend_report_name(opts.capture_backend) << "\",";
-    run_summary << "\"widget_sksl_render_supported\":" << (backend_supports_widget_sksl(opts.capture_backend) ? "true" : "false") << ",";
+    run_summary << "\"render_backend\":\"" << capture_mode_report_name(opts.capture_mode, opts.capture_backend) << "\",";
+    run_summary << "\"widget_sksl_render_supported\":" << (capture_mode_supports_widget_sksl(opts.capture_mode, opts.capture_backend) ? "true" : "false") << ",";
     run_summary << "\"similarity_pct\":" << static_cast<int>(compare.similarity * 100.0f) << ",";
     run_summary << "\"diff_pct\":" << (compare.total_pixels > 0 ? (100.0 * static_cast<double>(compare.diff_pixels) / static_cast<double>(compare.total_pixels)) : 0.0) << ",";
     if (target_artifacts.valid) {
@@ -594,6 +755,8 @@ int main(int argc, char* argv[]) {
     }
     run_summary << "\"apply_summary\":\"" << json_escape(apply_summary) << "\",";
     run_summary << "\"report\":\"" << json_escape(report_path.string()) << "\",";
+    run_summary << "\"debug_state_file\":\"" << json_escape(debug_state_path.string()) << "\",";
+    run_summary << "\"apply_summary_file\":\"" << json_escape(apply_summary_path.string()) << "\",";
     run_summary << "\"before_image\":\"" << json_escape(before_path.string()) << "\",";
     run_summary << "\"after_image\":\"" << json_escape(after_path.string()) << "\",";
     run_summary << "\"diff_image\":\"" << json_escape(diff_path.string()) << "\"";

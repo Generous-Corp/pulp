@@ -519,8 +519,9 @@ ai_shader_design:
       reasoning-effort metadata, target bounds, prompt/response files, and
       screenshot diff statistics. Supports replaying saved responses. The default
       Skia backend renders widget SkSL offscreen (`render_backend: skia-headless`,
-      `widget_sksl_render_supported: true`). Remaining limitation: this still does
-      not prove final live GPU presentation parity in the interactive app.
+      `widget_sksl_render_supported: true`). `--capture-backend live-gpu` now
+      drives the real `pulp-design-tool` app in automation mode and records
+      `render_backend: skia-live-gpu` with true live GPU widget screenshots.
 
 design_import:
   figma_adapter:

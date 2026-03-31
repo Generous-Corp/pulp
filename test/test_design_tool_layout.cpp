@@ -331,6 +331,8 @@ TEST_CASE("Design tool: debug state captures applied widget look metadata", "[de
 
     auto debug_json = engine.invoke("getDesignDebugStateJson").toString();
     REQUIRE(debug_json.find("\"target\":\"k1\"") != std::string::npos);
+    REQUIRE(debug_json.find("\"targetBounds\":{") != std::string::npos);
+    REQUIRE(debug_json.find("\"width\":56") != std::string::npos);
     REQUIRE(debug_json.find("\"widgetLookIds\":[\"k1\"]") != std::string::npos);
     REQUIRE(debug_json.find("\"widgetLookCount\":1") != std::string::npos);
     REQUIRE(debug_json.find("\"status\":\"ok\"") != std::string::npos);

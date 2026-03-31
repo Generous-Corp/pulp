@@ -3065,7 +3065,32 @@ function clearInspectedComponent() {
     inspectedComponent = null;
     setText("context-label", "Editing: All");
     setVisible("context-clear", false);
+    setText("insp-bounds-v", "—");
     lastDesignDebugState.target = "all";
+    lastDesignDebugState.targetBounds = null;
+}
+
+function syncDesignDebugTargetBounds() {
+    if (!inspectedComponent) {
+        setText("insp-bounds-v", "—");
+        lastDesignDebugState.targetBounds = null;
+        return;
+    }
+    var rect = getLayoutRect(inspectedComponent);
+    if (!rect || rect.width === undefined) {
+        setText("insp-bounds-v", "—");
+        lastDesignDebugState.targetBounds = null;
+        return;
+    }
+    var boundsText = Math.round(rect.x) + ", " + Math.round(rect.y) + " · " +
+        Math.round(rect.width) + "×" + Math.round(rect.height);
+    setText("insp-bounds-v", boundsText);
+    lastDesignDebugState.targetBounds = {
+        x: rect.x,
+        y: rect.y,
+        width: rect.width,
+        height: rect.height
+    };
 }
 
 function setDesignDebugTarget(widgetId) {
@@ -3077,12 +3102,14 @@ function setDesignDebugTarget(widgetId) {
         setText("context-label", "Editing: " + inspectedComponent);
         setVisible("context-clear", true);
         lastDesignDebugState.target = inspectedComponent;
+        syncDesignDebugTargetBounds();
     } else {
         clearInspectedComponent();
     }
 }
 
 function getDesignDebugStateJson() {
+    syncDesignDebugTargetBounds();
     return JSON.stringify(lastDesignDebugState);
 }
 
@@ -3211,6 +3238,7 @@ var widgetLookState = {};
 var lastChatRequestText = "";
 var lastDesignDebugState = {
     target: "all",
+    targetBounds: null,
     provider: "claude",
     model: "claude-sonnet-4-6",
     reasoningEffort: "",

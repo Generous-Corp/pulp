@@ -165,7 +165,7 @@ commands:
 
   - name: design-debug
     status: experimental
-    summary: Headless before/after/diff runner for design-chat prompts with provider/model metadata capture.
+    summary: Before/after/diff runner for design-chat prompts with provider/model metadata capture and optional live GPU capture.
     args:
       - name: --prompt
         kind: option
@@ -190,7 +190,11 @@ commands:
       - name: --capture-backend
         kind: option
         required: false
-        description: "Screenshot backend (skia or coregraphics); skia renders widget SkSL offscreen"
+        description: "Screenshot backend (skia, coregraphics, or live-gpu); live-gpu drives the real design tool renderer"
+      - name: --design-tool-bin
+        kind: option
+        required: false
+        description: Path to a built pulp-design-tool binary for live-gpu runs
       - name: --provider
         kind: option
         required: false
@@ -219,6 +223,14 @@ commands:
         kind: option
         required: false
         description: Render scale factor
+      - name: --delay-ms
+        kind: option
+        required: false
+        description: Delay before baseline capture in live-gpu mode
+      - name: --after-delay-ms
+        kind: option
+        required: false
+        description: Delay before post-apply capture in live-gpu mode
     docs: reference/cli.md#design-debug
 
   - name: import-design
