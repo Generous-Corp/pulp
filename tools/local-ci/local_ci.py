@@ -193,7 +193,7 @@ def run_local_validation(branch: str, exclude_tests: str = "") -> dict:
 
     try:
         result = subprocess.run(
-            cmd, cwd=ROOT, capture_output=True, text=True, timeout=1800,
+            cmd, cwd=ROOT, capture_output=True, text=True, timeout=3600,  # 1 hour — clean builds are slow when parallel
         )
         elapsed = round(time.time() - start, 1)
         return {
@@ -211,7 +211,7 @@ def run_local_validation(branch: str, exclude_tests: str = "") -> dict:
             "exit_code": -1,
             "duration_secs": round(time.time() - start, 1),
             "stdout_tail": "",
-            "stderr_tail": "Validation timed out after 1800s",
+            "stderr_tail": "Validation timed out after 3600s",
         }
 
 
@@ -255,7 +255,7 @@ def run_ssh_validation(target_name: str, host: str, repo_path: str,
 
     try:
         result = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=1800,
+            cmd, capture_output=True, text=True, timeout=3600,  # 1 hour — clean builds are slow when parallel
         )
         elapsed = round(time.time() - start, 1)
         return {
@@ -273,7 +273,7 @@ def run_ssh_validation(target_name: str, host: str, repo_path: str,
             "exit_code": -1,
             "duration_secs": round(time.time() - start, 1),
             "stdout_tail": "",
-            "stderr_tail": "Validation timed out after 1800s",
+            "stderr_tail": "Validation timed out after 3600s",
         }
 
 
