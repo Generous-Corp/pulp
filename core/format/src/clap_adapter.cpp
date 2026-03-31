@@ -4,6 +4,7 @@
 #include <pulp/format/clap_adapter.hpp>
 #include <pulp/runtime/log.hpp>
 #include <clap/ext/preset-load.h>
+#include <algorithm>
 #include <cstring>
 #include <filesystem>
 
@@ -98,14 +99,14 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
 
     if (process->audio_inputs_count > 0) {
         auto& bus = process->audio_inputs[0];
-        in_channels = std::min(static_cast<int>(bus.channel_count), kMaxChannels);
+        in_channels = (std::min)(static_cast<int>(bus.channel_count), kMaxChannels);
         for (int ch = 0; ch < in_channels; ++ch)
             self->input_ptrs[ch] = bus.data32[ch];
     }
 
     if (process->audio_outputs_count > 0) {
         auto& bus = process->audio_outputs[0];
-        out_channels = std::min(static_cast<int>(bus.channel_count), kMaxChannels);
+        out_channels = (std::min)(static_cast<int>(bus.channel_count), kMaxChannels);
         for (int ch = 0; ch < out_channels; ++ch)
             self->output_ptrs[ch] = bus.data32[ch];
     }
