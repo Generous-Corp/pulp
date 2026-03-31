@@ -242,6 +242,32 @@ TEST_CASE("Design tool: palette dots stay circular", "[design-tool]") {
     REQUIRE_THAT(accent_dot->bounds().height, Catch::Matchers::WithinAbs(14.0f, 1.0f));
 }
 
+TEST_CASE("Design tool: token rows use square swatches and wider hex fields", "[design-tool]") {
+    auto js_path = find_js_file("design-tool.js");
+    if (js_path.empty()) {
+        SKIP("design-tool.js not found");
+        return;
+    }
+
+    View root;
+    root.set_theme(Theme::dark());
+    root.flex().direction = FlexDirection::column;
+    root.set_bounds({0, 0, 1100, 700});
+
+    pulp::state::StateStore store;
+    ScriptEngine engine;
+    WidgetBridge bridge(engine, root, store);
+    load_design_tool(root, engine, bridge);
+
+    auto* swatch = bridge.widget("tok-2-0-sw");
+    auto* hex = bridge.widget("tok-2-0-hex");
+    REQUIRE(swatch != nullptr);
+    REQUIRE(hex != nullptr);
+    REQUIRE_THAT(swatch->bounds().width, Catch::Matchers::WithinAbs(18.0f, 1.0f));
+    REQUIRE_THAT(swatch->bounds().height, Catch::Matchers::WithinAbs(18.0f, 1.0f));
+    REQUIRE_THAT(hex->bounds().width, Catch::Matchers::WithinAbs(72.0f, 2.0f));
+}
+
 TEST_CASE("Design tool: text editor font sizes flow through the bridge", "[design-tool]") {
     auto js_path = find_js_file("design-tool.js");
     if (js_path.empty()) {
@@ -264,8 +290,53 @@ TEST_CASE("Design tool: text editor font sizes flow through the bridge", "[desig
     auto* popup_hex = dynamic_cast<TextEditor*>(bridge.widget("tp-hex-input"));
     REQUIRE(token_hex != nullptr);
     REQUIRE(popup_hex != nullptr);
-    REQUIRE_THAT(token_hex->font_size(), Catch::Matchers::WithinAbs(9.0f, 0.1f));
+    REQUIRE_THAT(token_hex->font_size(), Catch::Matchers::WithinAbs(10.0f, 0.1f));
     REQUIRE_THAT(popup_hex->font_size(), Catch::Matchers::WithinAbs(11.0f, 0.1f));
+}
+
+TEST_CASE("Design tool: token popup surfaces modified state and compact controls", "[design-tool]") {
+    auto js_path = find_js_file("design-tool.js");
+    if (js_path.empty()) {
+        SKIP("design-tool.js not found");
+        return;
+    }
+
+    View root;
+    root.set_theme(Theme::dark());
+    root.flex().direction = FlexDirection::column;
+    root.set_bounds({0, 0, 1100, 700});
+
+    pulp::state::StateStore store;
+    ScriptEngine engine;
+    WidgetBridge bridge(engine, root, store);
+
+    load_design_tool(root, engine, bridge);
+
+    REQUIRE_NOTHROW(engine.evaluate("__dispatch__('tok-2-0-sw', 'click', 0);"));
+    root.layout_children();
+
+    auto* popup = bridge.widget("token-popup");
+    auto* token_name = dynamic_cast<Label*>(bridge.widget("tp-token-name"));
+    auto* modified_marker = bridge.widget("tp-token-modified");
+    auto* reset_button = bridge.widget("tp-btn-2");
+    auto* custom_label = dynamic_cast<Label*>(bridge.widget("tp-custom-lbl"));
+    REQUIRE(popup != nullptr);
+    REQUIRE(token_name != nullptr);
+    REQUIRE(modified_marker != nullptr);
+    REQUIRE(reset_button != nullptr);
+    REQUIRE(custom_label != nullptr);
+
+    REQUIRE(popup->visible());
+    REQUIRE(token_name->text() == "accent.primary");
+    REQUIRE_THAT(reset_button->bounds().width, Catch::Matchers::WithinAbs(44.0f, 1.0f));
+    REQUIRE(custom_label->text().find("Custom color picker") != std::string::npos);
+    REQUIRE_THAT(modified_marker->opacity(), Catch::Matchers::WithinAbs(0.0f, 0.01f));
+
+    REQUIRE_NOTHROW(engine.evaluate("applyTokenColor('accent.primary', '#112233');"));
+    root.layout_children();
+
+    REQUIRE_THAT(modified_marker->opacity(), Catch::Matchers::WithinAbs(1.0f, 0.01f));
+    REQUIRE_THAT(reset_button->opacity(), Catch::Matchers::WithinAbs(1.0f, 0.01f));
 }
 
 TEST_CASE("Design tool: waveform and spectrum previews render populated data", "[design-tool]") {

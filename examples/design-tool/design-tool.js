@@ -99,6 +99,10 @@ function updateAllTokenNameDisplays() {
     }
 }
 
+function isTokenModified(name) {
+    return !!tokenEditState.modified[name];
+}
+
 // ═══════════════════════════════════════════════════════════════════
 // App colors (matching original --app-* CSS variables)
 // ═══════════════════════════════════════════════════════════════════
@@ -767,9 +771,13 @@ for (var g = 0; g < tokenGroups.length; g++) {
         // Color swatch (small colored box)
         var swatchId = tid + "-sw";
         createCol(swatchId, tid);
-        setFlex(swatchId, "width", 16);
-        setFlex(swatchId, "height", 16);
-        setBorder(swatchId, APP_BORDER, 1, 3);
+        setFlex(swatchId, "width", 18);
+        setFlex(swatchId, "height", 18);
+        setFlex(swatchId, "min_width", 18);
+        setFlex(swatchId, "min_height", 18);
+        setFlex(swatchId, "max_width", 18);
+        setFlex(swatchId, "max_height", 18);
+        setBorder(swatchId, APP_BORDER, 1, 4);
 
         // Token name
         createLabel(tid + "-name", group.tokens[t], tid);
@@ -780,9 +788,12 @@ for (var g = 0; g < tokenGroups.length; g++) {
         var hexId = tid + "-hex";
         createTextEditor(hexId, tid);
         setPlaceholder(hexId, "#000000");
-        setFlex(hexId, "width", 58);
-        setFlex(hexId, "height", 18);
-        setFontSize(hexId, 9);
+        setFlex(hexId, "width", 72);
+        setFlex(hexId, "min_width", 72);
+        setFlex(hexId, "max_width", 72);
+        setFlex(hexId, "flex_shrink", 0);
+        setFlex(hexId, "height", 20);
+        setFontSize(hexId, 10);
 
         // D7: hover highlight on token row
         registerHover(tid);
@@ -1635,8 +1646,8 @@ on("tp-backdrop", "click", function() { closeTokenPopup(); });
 createCol("token-popup", "");
 setPosition("token-popup", "absolute");
 setFlex("token-popup", "width", TOKEN_POPUP_W);
-setFlex("token-popup", "padding", 10);
-setFlex("token-popup", "gap", 6);
+setFlex("token-popup", "padding", 12);
+setFlex("token-popup", "gap", 8);
 setBackground("token-popup", APP_PANEL);
 setBorder("token-popup", APP_BORDER, 1, 8);
 setBoxShadow("token-popup", 0, 8, 24, 0, "#000000a0");
@@ -1651,12 +1662,20 @@ createLabel("tp-token-name", "—", "tp-header");
 setFontSize("tp-token-name", 11);
 setTextColor("tp-token-name", APP_ACCENT);
 setFlex("tp-token-name", "flex_grow", 1);
+createLabel("tp-token-modified", "*", "tp-header");
+setFontSize("tp-token-modified", 12);
+setTextColor("tp-token-modified", APP_ACCENT_HOVER);
+setFlex("tp-token-modified", "width", 10);
+setFlex("tp-token-modified", "height", 14);
+setOpacity("tp-token-modified", 0.0);
 
 createCol("tp-close", "tp-header");
-setFlex("tp-close", "width", 20);
-setFlex("tp-close", "height", 20);
+setFlex("tp-close", "width", 22);
+setFlex("tp-close", "height", 22);
 setFlex("tp-close", "justify_content", "center");
 setFlex("tp-close", "align_items", "center");
+setBackground("tp-close", APP_SURFACE);
+setBorder("tp-close", APP_BORDER, 1, 10);
 createLabel("tp-close-lbl", "x", "tp-close");
 setFontSize("tp-close-lbl", 11);
 registerClick("tp-close");
@@ -1666,15 +1685,20 @@ on("tp-close", "click", function() { closeTokenPopup(); });
 createRow("tp-undo-row", "token-popup");
 setFlex("tp-undo-row", "height", 22);
 setFlex("tp-undo-row", "gap", 4);
+setFlex("tp-undo-row", "align_items", "center");
 
 var tpUndoBtns = ["Undo", "Redo", "Reset"];
 for (var ub = 0; ub < tpUndoBtns.length; ub++) {
     var ubId = "tp-btn-" + ub;
     createCol(ubId, "tp-undo-row");
-    setFlex(ubId, "flex_grow", 1);
+    setFlex(ubId, "width", ub === 2 ? 44 : 48);
+    setFlex(ubId, "min_width", ub === 2 ? 44 : 48);
+    setFlex(ubId, "max_width", ub === 2 ? 44 : 48);
+    setFlex(ubId, "flex_shrink", 0);
     setFlex(ubId, "height", 22);
     setFlex(ubId, "justify_content", "center");
     setFlex(ubId, "align_items", "center");
+    setBackground(ubId, APP_SURFACE);
     setBorder(ubId, APP_BORDER, 1, 4);
     createLabel(ubId + "-lbl", tpUndoBtns[ub], ubId);
     setFontSize(ubId + "-lbl", 9);
@@ -1788,27 +1812,27 @@ on("tp-alpha-fdr", "change", function() {
 
 // 5 palette shade grids
 createCol("tp-palettes", "token-popup");
-setFlex("tp-palettes", "gap", 4);
+setFlex("tp-palettes", "gap", 6);
 
 for (var pp = 0; pp < paletteNames.length; pp++) {
     var ppId = "tp-pal-" + pp;
     createCol(ppId, "tp-palettes");
-    setFlex(ppId, "gap", 1);
+    setFlex(ppId, "gap", 2);
 
     createLabel(ppId + "-title", paletteNames[pp].toUpperCase(), ppId);
-    setFontSize(ppId + "-title", 8);
+    setFontSize(ppId + "-title", 9);
     setTextColor(ppId + "-title", APP_TEXT_DIM);
-    setFlex(ppId + "-title", "height", 12);
+    setFlex(ppId + "-title", "height", 14);
 
     createRow(ppId + "-row", ppId);
     setFlex(ppId + "-row", "gap", 2);
-    setFlex(ppId + "-row", "height", 18);
+    setFlex(ppId + "-row", "height", 20);
 
     for (var ps = 0; ps < ShadeGenerator.STEPS.length; ps++) {
         var psId = ppId + "-s" + ps;
         createCol(psId, ppId + "-row");
         setFlex(psId, "flex_grow", 1);
-        setFlex(psId, "height", 18);
+        setFlex(psId, "height", 20);
         setBorder(psId, APP_BORDER, 0, 2);
         registerClick(psId);
         (function(palIdx, shadeIdx) {
@@ -1829,7 +1853,7 @@ createRow("tp-custom-toggle", "token-popup");
 setFlex("tp-custom-toggle", "height", 22);
 setFlex("tp-custom-toggle", "align_items", "center");
 registerClick("tp-custom-toggle");
-createLabel("tp-custom-lbl", "Custom color  >", "tp-custom-toggle");
+createLabel("tp-custom-lbl", "\u25b6 Custom color picker", "tp-custom-toggle");
 setFontSize("tp-custom-lbl", 10);
 setTextColor("tp-custom-lbl", APP_TEXT_DIM);
 
@@ -1979,7 +2003,7 @@ on("tp-l-fader", "change", function() { onTpHclChange(); });
 on("tp-custom-toggle", "click", function() {
     tpCustomOpen = !tpCustomOpen;
     setVisible("tp-custom", tpCustomOpen);
-    setText("tp-custom-lbl", tpCustomOpen ? "Custom color  v" : "Custom color  >");
+    setText("tp-custom-lbl", tpCustomOpen ? "\u25bc Custom color picker" : "\u25b6 Custom color picker");
     if (tpCustomOpen && tokenEditState.activeToken) {
         var hex = (JSON.parse(getThemeJson()).colors || {})[tokenEditState.activeToken] || '#808080';
         var oklch = OklchEngine.hexToOklch(hex);
@@ -2002,7 +2026,9 @@ function rebuildPopupPalette() {
 function updatePopupState(tokenName) {
     var themeColors = JSON.parse(getThemeJson()).colors || {};
     var hex = themeColors[tokenName] || '#000000';
+    setText("tp-token-name", tokenName);
     setText("tp-hex-input", hex);
+    setOpacity("tp-token-modified", isTokenModified(tokenName) ? 1.0 : 0.0);
     // D2: Sync HCL faders and gamut triangle
     if (tpCustomOpen) {
         var oklch = OklchEngine.hexToOklch(hex);
@@ -2023,7 +2049,6 @@ function openTokenPopup(tokenName, swatchId, gIdx, tIdx) {
     tokenHistory(tokenName);
     tokenEditState.activeToken = tokenName;
     tokenEditState.activeSwatchId = swatchId;
-    setText("tp-token-name", tokenName);
     rebuildPopupPalette();
     updatePopupState(tokenName);
     layout();
