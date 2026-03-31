@@ -41,6 +41,7 @@ target/
 # Python
 __pycache__/
 *.pyc
+tools/deps/hosts.local.json
 
 # Secrets
 .env

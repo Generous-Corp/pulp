@@ -23,6 +23,15 @@ ctest --test-dir build --output-on-failure
 # Run an outer-loop clean validation in a detached worktree
 ./validate-build.sh
 
+# Audit dependency pins / notice coverage
+python3 tools/deps/audit.py --strict
+
+# Audit current pins against upstream refs/tags
+python3 tools/deps/audit.py --check-upstream --format markdown
+
+# Run outer-loop validation locally and on any configured SSH hosts
+python3 tools/deps/validate_hosts.py
+
 # Run tests matching a pattern
 ctest --test-dir build -R "Knob"
 
@@ -62,6 +71,15 @@ Use the normal incremental `build/` loop for most work, but periodically run a c
 - Run it before landing broad or risky slices, even if incremental builds are green.
 - Prefer the default quiet mode in agent loops so success stays silent and only failure logs appear.
 - Use `./validate-build.sh --verbose` when a human is actively watching or when debugging the validator itself.
+
+### Dependency Update Workflow
+
+- Treat dependency changes as non-trivial work. Do them on a branch, never directly on `main`.
+- `tools/deps/manifest.json` is the machine-readable dependency inventory and should be updated alongside any pin/version change.
+- `python3 tools/deps/audit.py --strict --check-upstream` is the first check before and after a dependency bump.
+- `python3 tools/deps/validate_hosts.py` is the local multi-host validation lane. It always validates locally and can also validate over SSH via `tools/deps/hosts.local.json`.
+- Keep `DEPENDENCIES.md` and `NOTICE.md` in sync with the manifest whenever dependency inventory changes.
+- For FetchContent dependencies, prefer exact tags or commits over floating branches on stable lanes. If a dependency is intentionally floating, call that out explicitly in the manifest and docs.
 
 ---
 

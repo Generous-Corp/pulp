@@ -1,0 +1,27 @@
+name: Dependency Audit
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 15 * * 1'
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    name: Audit dependency pins and notices
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run dependency audit
+        run: |
+          python3 tools/deps/audit.py --strict --check-upstream --format markdown > dependency-audit.md
+
+      - name: Publish summary
+        run: cat dependency-audit.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload audit artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dependency-audit
+          path: dependency-audit.md

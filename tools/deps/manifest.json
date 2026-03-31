@@ -1,0 +1,210 @@
+{
+  "dependencies": [
+    {
+      "name": "AudioUnitSDK",
+      "category": "format-sdk",
+      "license": "Apache-2.0",
+      "version": "HEAD",
+      "source_kind": "external-clone",
+      "repository": "https://github.com/apple/AudioUnitSDK.git",
+      "upstream": { "kind": "git-head" },
+      "documented_in_dependencies_md": true,
+      "documented_in_notice_md": true,
+      "source_files": [
+        "CMakeLists.txt",
+        "setup.sh",
+        ".github/workflows/sign-and-release.yml"
+      ]
+    },
+    {
+      "name": "Catch2",
+      "category": "test",
+      "license": "BSL-1.0",
+      "version": "v3.7.1",
+      "source_kind": "fetchcontent",
+      "repository": "https://github.com/catchorg/Catch2.git",
+      "upstream": { "kind": "git-tag", "ref": "v3.7.1" },
+      "documented_in_dependencies_md": true,
+      "documented_in_notice_md": true,
+      "source_files": [
+        "CMakeLists.txt"
+      ]
+    },
+    {
+      "name": "CHOC",
+      "category": "core",
+      "license": "ISC",
+      "version": "main",
+      "source_kind": "fetchcontent",
+      "repository": "https://github.com/Tracktion/choc.git",
+      "upstream": { "kind": "git-branch", "ref": "main" },
+      "documented_in_dependencies_md": true,
+      "documented_in_notice_md": true,
+      "source_files": [
+        "CMakeLists.txt"
+      ]
+    },
+    {
+      "name": "CLAP",
+      "category": "format-sdk",
+      "license": "MIT",
+      "version": "1.2.2",
+      "source_kind": "fetchcontent",
+      "repository": "https://github.com/free-audio/clap.git",
+      "upstream": { "kind": "git-tag", "ref": "1.2.2" },
+      "documented_in_dependencies_md": true,
+      "documented_in_notice_md": true,
+      "source_files": [
+        "CMakeLists.txt"
+      ]
+    },
+    {
+      "name": "Dawn",
+      "category": "render",
+      "license": "BSD-3-Clause",
+      "version": "chrome/m144",
+      "source_kind": "prebuilt-toolchain",
+      "repository": "https://dawn.googlesource.com/dawn",
+      "upstream": { "kind": "none" },
+      "documented_in_dependencies_md": true,
+      "documented_in_notice_md": true,
+      "source_files": [
+        "CMakeLists.txt",
+        "tools/build-skia.sh",
+        "tools/cmake/FindSkia.cmake"
+      ]
+    },
+    {
+      "name": "LV2",
+      "category": "format-sdk",
+      "license": "ISC",
+      "version": "v1.18.10",
+      "source_kind": "fetchcontent",
+      "repository": "https://github.com/lv2/lv2.git",
+      "upstream": { "kind": "git-tag", "ref": "v1.18.10" },
+      "documented_in_dependencies_md": true,
+      "documented_in_notice_md": true,
+      "source_files": [
+        "CMakeLists.txt"
+      ]
+    },
+    {
+      "name": "nanosvg",
+      "category": "canvas",
+      "license": "zlib",
+      "version": "vendored-snapshot",
+      "source_kind": "vendored",
+      "repository": "https://github.com/memononen/nanosvg",
+      "upstream": { "kind": "none" },
+      "documented_in_dependencies_md": true,
+      "documented_in_notice_md": true,
+      "source_files": [
+        "external/nanosvg/nanosvg.h",
+        "external/nanosvg/nanosvgrast.h",
+        "core/canvas/CMakeLists.txt"
+      ]
+    },
+    {
+      "name": "node-addon-api",
+      "category": "bindings",
+      "license": "MIT",
+      "version": "user-installed",
+      "source_kind": "npm",
+      "repository": "https://github.com/nodejs/node-addon-api",
+      "upstream": { "kind": "none" },
+      "documented_in_dependencies_md": true,
+      "documented_in_notice_md": true,
+      "source_files": [
+        "bindings/nodejs/CMakeLists.txt"
+      ]
+    },
+    {
+      "name": "pybind11",
+      "category": "bindings",
+      "license": "BSD-3-Clause",
+      "version": "v2.13.6",
+      "source_kind": "fetchcontent",
+      "repository": "https://github.com/pybind/pybind11.git",
+      "upstream": { "kind": "git-tag", "ref": "v2.13.6" },
+      "documented_in_dependencies_md": true,
+      "documented_in_notice_md": true,
+      "source_files": [
+        "bindings/python/CMakeLists.txt"
+      ]
+    },
+    {
+      "name": "SDL3",
+      "category": "view",
+      "license": "zlib",
+      "version": "release-3.2.12",
+      "source_kind": "fetchcontent",
+      "repository": "https://github.com/libsdl-org/SDL.git",
+      "upstream": { "kind": "git-tag", "ref": "release-3.2.12" },
+      "documented_in_dependencies_md": true,
+      "documented_in_notice_md": true,
+      "source_files": [
+        "CMakeLists.txt"
+      ]
+    },
+    {
+      "name": "Skia",
+      "category": "canvas",
+      "license": "BSD-3-Clause",
+      "version": "chrome/m144",
+      "source_kind": "prebuilt-toolchain",
+      "repository": "https://skia.googlesource.com/skia.git",
+      "upstream": { "kind": "none" },
+      "documented_in_dependencies_md": true,
+      "documented_in_notice_md": true,
+      "source_files": [
+        "CMakeLists.txt",
+        "tools/build-skia.sh",
+        "tools/cmake/FindSkia.cmake"
+      ]
+    },
+    {
+      "name": "VST3 SDK",
+      "category": "format-sdk",
+      "license": "MIT",
+      "version": "v3.7.12_build_20",
+      "source_kind": "external-clone",
+      "repository": "https://github.com/steinbergmedia/vst3sdk.git",
+      "upstream": { "kind": "git-tag", "ref": "v3.7.12_build_20" },
+      "documented_in_dependencies_md": true,
+      "documented_in_notice_md": true,
+      "source_files": [
+        "CMakeLists.txt",
+        "setup.sh",
+        ".github/workflows/sign-and-release.yml"
+      ]
+    },
+    {
+      "name": "WebGPU-distribution",
+      "category": "render",
+      "license": "MIT",
+      "version": "main",
+      "source_kind": "fetchcontent",
+      "repository": "https://github.com/eliemichel/WebGPU-distribution.git",
+      "upstream": { "kind": "git-branch", "ref": "main" },
+      "documented_in_dependencies_md": true,
+      "documented_in_notice_md": true,
+      "source_files": [
+        "CMakeLists.txt"
+      ]
+    },
+    {
+      "name": "Yoga",
+      "category": "view",
+      "license": "MIT",
+      "version": "v3.2.1",
+      "source_kind": "fetchcontent",
+      "repository": "https://github.com/facebook/yoga.git",
+      "upstream": { "kind": "git-tag", "ref": "v3.2.1" },
+      "documented_in_dependencies_md": true,
+      "documented_in_notice_md": true,
+      "source_files": [
+        "CMakeLists.txt"
+      ]
+    }
+  ]
+}

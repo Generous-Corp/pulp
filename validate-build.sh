@@ -7,24 +7,33 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 QUIET=true
 SKIP_TESTS=false
 KEEP_WORKTREE=false
+REF="HEAD"
 
-for arg in "$@"; do
-    case "$arg" in
+while [ $# -gt 0 ]; do
+    case "$1" in
         --quiet) QUIET=true ;;
         --verbose) QUIET=false ;;
         --no-tests) SKIP_TESTS=true ;;
         --keep-worktree) KEEP_WORKTREE=true ;;
+        --ref)
+            shift
+            REF="${1:-HEAD}"
+            ;;
+        --ref=*)
+            REF="${1#--ref=}"
+            ;;
         --help|-h)
             cat <<'EOF'
-Usage: ./validate-build.sh [--quiet] [--verbose] [--no-tests] [--keep-worktree]
+Usage: ./validate-build.sh [--quiet] [--verbose] [--no-tests] [--keep-worktree] [--ref <git-ref>]
 
-Creates a detached clean worktree at the current HEAD, bootstraps dependencies,
-configures, builds, installs, and optionally runs tests. Output is quiet on success
+Creates a detached clean worktree at the requested git ref (default: current HEAD),
+bootstraps dependencies, configures, builds, installs, and optionally runs tests. Output is quiet on success
 by default and prints logs only on failure. Use --verbose to print progress messages.
 EOF
             exit 0
             ;;
     esac
+    shift
 done
 
 tmp_root="$(mktemp -d "${TMPDIR:-/tmp}/pulp-validate.XXXXXX")"
@@ -52,7 +61,7 @@ trap cleanup EXIT
 if ! $QUIET; then
     echo "Creating clean validation worktree..."
 fi
-git -C "$ROOT" worktree add --detach "$src_dir" HEAD >/dev/null
+git -C "$ROOT" worktree add --detach "$src_dir" "$REF" >/dev/null
 
 run_or_dump() {
     local label="$1"

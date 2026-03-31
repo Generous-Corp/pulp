@@ -1,0 +1,8 @@
+{
+  "unix_targets": [
+    { "host": "ubuntu", "path": "/home/daniel/Code/pulp" }
+  ],
+  "windows_targets": [
+    { "host": "win2", "path": "C:\\Users\\danielraffel\\pulp" }
+  ]
+}

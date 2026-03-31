@@ -15,6 +15,7 @@ Pulp builds on excellent open-source software. Every dependency is compatible wi
 | **CHOC** | ISC | JS engine, MIDI utilities, audio file I/O, WebView, networking | [github.com/Tracktion/choc](https://github.com/Tracktion/choc) |
 | **Catch2** | BSL-1.0 | Unit testing framework | [github.com/catchorg/Catch2](https://github.com/catchorg/Catch2) |
 | **nanosvg** | zlib | SVG parsing and rasterization | [github.com/memononen/nanosvg](https://github.com/memononen/nanosvg) |
+| **Yoga** | MIT | Layout engine for Flexbox/Grid-style native UI | [github.com/facebook/yoga](https://github.com/facebook/yoga) |
 
 ### Plugin Format SDKs
 
@@ -23,7 +24,7 @@ Pulp builds on excellent open-source software. Every dependency is compatible wi
 | **CLAP** | MIT | CLAP plugin format headers | [github.com/free-audio/clap](https://github.com/free-audio/clap) |
 | **VST3 SDK** | MIT | VST3 plugin format (pluginterfaces + base) | [github.com/steinbergmedia/vst3sdk](https://github.com/steinbergmedia/vst3sdk) |
 | **AudioUnitSDK** | Apache-2.0 | AU v2 plugin format adapter | [github.com/apple/AudioUnitSDK](https://github.com/apple/AudioUnitSDK) |
-| **LV2** | ISC | LV2 plugin format headers | [lv2plug.in](https://lv2plug.in) |
+| **LV2** | ISC | LV2 plugin format headers | [github.com/lv2/lv2](https://github.com/lv2/lv2) |
 
 ### GPU and Windowing
 
@@ -32,7 +33,7 @@ Pulp builds on excellent open-source software. Every dependency is compatible wi
 | **Dawn** | BSD-3-Clause | WebGPU implementation (Metal, D3D12, Vulkan) | [dawn.googlesource.com](https://dawn.googlesource.com/dawn) |
 | **Skia Graphite** | BSD-3-Clause | 2D GPU rendering engine | [skia.org](https://skia.org) |
 | **SDL3** | zlib | Cross-platform windowing and input | [github.com/libsdl-org/SDL](https://github.com/libsdl-org/SDL) |
-| **WebGPU-distribution** | MIT | WebGPU C API wrapper for Dawn | [github.com/niclamusic/webgpu-distribution](https://github.com/niclamusic/webgpu-distribution) |
+| **WebGPU-distribution** | MIT | WebGPU C API wrapper for Dawn | [github.com/eliemichel/WebGPU-distribution](https://github.com/eliemichel/WebGPU-distribution) |
 
 ### Optional Dependencies
 
@@ -85,3 +86,5 @@ Before adding any dependency to Pulp:
 3. **Add to NOTICE.md** — full license text, alphabetical order
 4. **No copyleft** — GPL, LGPL, AGPL, SSPL are not allowed
 5. **MPL-2.0** — requires case-by-case review (weak copyleft)
+
+Dependency update workflow is tracked in `tools/deps/manifest.json` and audited by `tools/deps/audit.py`.
