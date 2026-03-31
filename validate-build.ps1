@@ -198,7 +198,7 @@ target_link_libraries(smoke INTERFACE Pulp::format)
 "@ | Set-Content -Path (Join-Path $SmokeDir "CMakeLists.txt")
 
     Run-OrDump "install smoke test" $SmokeLog {
-        cmake -S $SmokeDir -B (Join-Path $SmokeDir "build") -DCMAKE_PREFIX_PATH=$InstallDir
+        cmake -S $SmokeDir -B (Join-Path $SmokeDir "build") "-DCMAKE_PREFIX_PATH=$InstallDir"
     }
 
     if (-not $NoTests) {
