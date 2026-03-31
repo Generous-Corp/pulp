@@ -9,6 +9,8 @@ target_include_directories(pulp-platform
 
 target_sources(pulp-platform PRIVATE
     src/platform.cpp
+    src/file_dialog_stub.cpp
+    src/popup_menu_stub.cpp
 )
 
 # Platform-specific UI services
