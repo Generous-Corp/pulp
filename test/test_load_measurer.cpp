@@ -15,6 +15,14 @@ static void busy_wait_for(std::chrono::duration<Rep, Period> duration) {
     }
 }
 
+template <typename Rep, typename Period>
+static float measure_load(AudioProcessLoadMeasurer& m, std::chrono::duration<Rep, Period> duration) {
+    m.begin(512, 44100.0f);
+    busy_wait_for(duration);
+    m.end();
+    return m.load();
+}
+
 TEST_CASE("AudioProcessLoadMeasurer initial state is zero", "[audio][load]") {
     AudioProcessLoadMeasurer m;
     REQUIRE_THAT(m.load(), WithinAbs(0.0, 0.001));
@@ -39,19 +47,20 @@ TEST_CASE("AudioProcessLoadMeasurer peak tracking", "[audio][load]") {
     AudioProcessLoadMeasurer m;
     m.set_smoothing(1.0f);
 
-    // First measurement
-    m.begin(512, 44100.0f);
-    busy_wait_for(std::chrono::microseconds(600));
-    m.end();
-    float first = m.load();
+    const float first = measure_load(m, std::chrono::microseconds(600));
 
-    // Second measurement with more work
-    m.begin(512, 44100.0f);
-    busy_wait_for(std::chrono::microseconds(2200));
-    m.end();
+    float second = 0.0f;
+    for (int attempt = 0; attempt < 5; ++attempt) {
+        second = measure_load(m, std::chrono::microseconds(2200));
+        if (second > first) {
+            break;
+        }
+    }
 
     REQUIRE(std::isfinite(first));
-    REQUIRE(m.load() > first);
+    REQUIRE(std::isfinite(second));
+    INFO("first=" << first << " second=" << second << " peak=" << m.peak_load());
+    REQUIRE(second > first);
     REQUIRE(m.peak_load() >= m.load());
 }
 

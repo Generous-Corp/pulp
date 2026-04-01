@@ -5,11 +5,13 @@ param(
     [switch]$Quiet = $true,
     [switch]$Verbose,
     [switch]$NoTests,
+    [switch]$Smoke,
     [switch]$KeepWorktree,
     [string]$Ref = "HEAD"
 )
 
 if ($Verbose) { $Quiet = $false }
+if ($Smoke) { $NoTests = $true }
 $ErrorActionPreference = "Stop"
 $PSNativeCommandUseErrorActionPreference = $false
 
@@ -72,9 +74,6 @@ function Run-OrDump {
 }
 
 function Resolve-Bash {
-    $cmd = Get-Command bash -ErrorAction SilentlyContinue
-    if ($cmd) { return $cmd.Source }
-
     $fallbacks = @(
         "C:\Program Files\Git\bin\bash.exe",
         "C:\Program Files\Git\usr\bin\bash.exe"
@@ -82,6 +81,10 @@ function Resolve-Bash {
     foreach ($candidate in $fallbacks) {
         if (Test-Path $candidate) { return $candidate }
     }
+
+    $cmd = Get-Command bash -ErrorAction SilentlyContinue
+    if ($cmd) { return $cmd.Source }
+
     throw "bash not found on PATH and no Git Bash fallback was found"
 }
 
@@ -189,8 +192,20 @@ try {
         & $BashExe -lc "cd '$SrcDirBash' && ./setup.sh --ci --deps-only"
     }
 
+    $configureArgs = @(
+        "-S", $SrcDir,
+        "-B", $BuildDir,
+        "-DCMAKE_BUILD_TYPE=Debug"
+    )
+    if ($Smoke) {
+        $configureArgs += @(
+            "-DPULP_BUILD_TESTS=OFF",
+            "-DPULP_BUILD_EXAMPLES=OFF",
+            "-DPULP_ENABLE_GPU=OFF"
+        )
+    }
     Run-OrDump "configure" $ConfigureLog {
-        cmake -S $SrcDir -B $BuildDir -DCMAKE_BUILD_TYPE=Debug
+        cmake @configureArgs
     }
 
     $Jobs = [Environment]::ProcessorCount
@@ -210,7 +225,7 @@ project(PulpSDKSmoke LANGUAGES CXX)
 find_package(Pulp REQUIRED CONFIG)
 
 add_library(smoke INTERFACE)
-target_link_libraries(smoke INTERFACE Pulp::format)
+target_link_libraries(smoke INTERFACE Pulp::format Pulp::standalone)
 "@ | Set-Content -Path (Join-Path $SmokeDir "CMakeLists.txt")
 
     Run-OrDump "install smoke test" $SmokeLog {

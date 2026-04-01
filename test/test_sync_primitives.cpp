@@ -35,7 +35,9 @@ TEST_CASE("SeqLock basic read/write", "[runtime][seqlock]") {
 }
 
 TEST_CASE("SeqLock concurrent stress test", "[runtime][seqlock]") {
-    SeqLock<TransportState> lock;
+    TransportState init;
+    init.beat_position = init.tempo * 0.5;
+    SeqLock<TransportState> lock(init);
     std::atomic<bool> running{true};
     std::atomic<int> torn_reads{0};
 
@@ -212,7 +214,9 @@ TEST_CASE("Composed: TripleBuffer + SpscQueue concurrent pipeline", "[runtime][i
 }
 
 TEST_CASE("Composed: SeqLock + TripleBuffer simultaneous access", "[runtime][integration]") {
-    SeqLock<TransportState> transport;
+    TransportState init;
+    init.beat_position = init.tempo * 0.5;
+    SeqLock<TransportState> transport(init);
     TripleBuffer<MeterData> meters;
     std::atomic<bool> running{true};
     std::atomic<int> bad_reads{0};

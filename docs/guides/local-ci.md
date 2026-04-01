@@ -5,11 +5,13 @@ Local CI lets you validate branches on your Mac and cross-platform VMs before me
 ## TL;DR
 
 - `pulp ci-local run` queues the current `HEAD` in a machine-global queue shared by every worktree on that Mac.
+- `pulp ci-local run --smoke` queues a fast clean install/export preflight instead of a full test run.
 - The queue serializes jobs, not targets. One CI job runs at a time, but its requested targets (`mac`, `ubuntu`, `windows`) run in parallel inside that job.
 - Mac runs locally. Ubuntu and Windows run over SSH against repos you already cloned on those machines.
 - Remote targets validate the exact queued git SHA, not "whatever the branch points to later". The runner uploads that SHA as a git bundle before validation, so full-matrix checks do not depend on the host already seeing your latest branch tip.
 - `pulp ci-local status` shows the active runner, pending jobs, SSH/VM reachability, and live per-target state for the running job. `pulp ci-local bump <job-id> high` moves a pending job forward.
 - While a job is running, `pulp ci-local status` also shows live per-target state such as `mac=pass, ubuntu=pass, windows=running`.
+- If you queue a newer SHA for the same branch, targets, and validation mode, older pending work is superseded automatically instead of sitting behind it forever.
 - `pulp ci-local logs <job-id> --target windows` tails the saved per-target log from the machine-global CI state dir, so you do not need ad hoc SSH just to see whether a target is building or testing.
 - If a runner is interrupted, the queued job keeps its last-known per-target state so you can see what already passed before deciding whether to rerun everything or just the remaining target.
 - Jobs submitted through `pulp ci-local` are globally queued, and validation itself now takes a per-host lock on macOS/Linux plus a Windows host mutex, so old `validate-build.sh` runs wait instead of colliding.
@@ -138,6 +140,12 @@ rm ~/Library/LaunchAgents/dev.pulp.local-ci.plist
 # Enqueue the current HEAD and wait for completion
 pulp ci-local run
 
+# Fast preflight: clean configure/build/install + installed-SDK smoke, no tests
+pulp ci-local run --smoke
+
+# Fast PR preflight with a comment that is clearly labeled as smoke-only
+pulp ci-local check 56 --smoke
+
 # Run Mac-only while iterating locally
 pulp ci-local run --targets mac
 
@@ -158,6 +166,8 @@ pulp ci-local logs <job-id> --target windows
 ```
 
 `pulp ci-local run` is the most common command. It enqueues the current `HEAD`, joins the machine-global queue, and waits until that exact job finishes.
+
+Use `--smoke` when you want a quicker preflight before a full matrix run. Smoke mode still validates a clean detached worktree and installed SDK export path, but it disables tests, examples, and GPU in that clean build and skips `ctest`. Queue summaries and PR comments label these jobs as `validation=smoke` so they are not mistaken for full validation.
 
 While a job is still running, `pulp ci-local status` reports live per-target state for the active job when available, for example:
 
@@ -185,6 +195,12 @@ Results are written to the machine-global state directory:
 - Linux: `${XDG_STATE_HOME:-~/.local/state}/pulp/local-ci/results/`
 
 A non-zero exit means at least one target failed.
+
+If a newer SHA is queued for the same branch, targets, and validation mode, older
+pending work is marked `superseded` and written to the results directory with a
+reference to the replacement job. If a runner dies and reconciliation finds a newer
+replacement already queued for that same scope, the stale running job is also
+superseded instead of being requeued.
 
 ## Priorities
 

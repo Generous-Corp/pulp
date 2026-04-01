@@ -59,14 +59,18 @@ Run local CI on the current branch without creating a PR or merging.
 
 ```bash
 python3 tools/local-ci/local_ci.py run [branch]
+python3 tools/local-ci/local_ci.py run [branch] --smoke
 ```
 
 For SSH targets, `run` uploads the exact queued SHA as a git bundle before validation, so Ubuntu and Windows do not need that branch tip to be visible on the host ahead of time.
+Use `--smoke` for a fast clean install/export preflight when you want early signal before paying for the full test matrix. Smoke runs are explicitly labeled as `validation=smoke`.
+If you queue a newer SHA for the same branch, targets, and validation mode, older pending work is superseded automatically.
 
 Useful queue controls:
 
 ```bash
 python3 tools/local-ci/local_ci.py run [branch] --targets mac
+python3 tools/local-ci/local_ci.py run [branch] --smoke --targets windows
 python3 tools/local-ci/local_ci.py enqueue [branch] --priority low
 python3 tools/local-ci/local_ci.py bump <job-id> high
 python3 tools/local-ci/local_ci.py logs <job-id> --target windows
@@ -80,7 +84,7 @@ Run CI on an existing PR by number, GitHub URL, or "latest".
 2. If URL → extract PR number from the URL
 3. Fetch the PR's head branch: `gh pr view <number> --json headRefName`
 4. Checkout that branch locally
-5. Run local CI: `python3 tools/local-ci/local_ci.py run <branch>`
+5. Run local CI: `python3 tools/local-ci/local_ci.py run <branch>` or `python3 tools/local-ci/local_ci.py check <PR#> --smoke` for a fast preflight
 6. Post results as a PR comment via `gh pr comment`
 
 ### `list` — Show open PRs
@@ -106,6 +110,12 @@ python3 tools/local-ci/local_ci.py logs <job-id> --target windows
 ```
 
 Use this when a target looks slow or stuck. The logs come from the machine-global CI state directory, so you can inspect a running job without manual SSH.
+
+When you need to reproduce an intermittent failure locally before spending another full CI run, use:
+
+```bash
+tools/scripts/repeat-until-fail.sh 100 -- ctest --test-dir build -R "<test name>" --output-on-failure
+```
 
 ### `cloud run [branch]` — Trigger GitHub Actions
 

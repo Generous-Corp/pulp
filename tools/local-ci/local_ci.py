@@ -3,8 +3,10 @@
 
 Usage:
     pulp ci-local run [branch]                # Queue and wait for completion
+    pulp ci-local run [branch] --smoke        # Fast install/export preflight, no tests
     pulp ci-local ship [branch]               # PR -> queued CI -> merge on green
     pulp ci-local check <PR#|latest>          # Validate an existing PR
+    pulp ci-local check <PR#|latest> --smoke  # Fast PR smoke preflight
     pulp ci-local list                        # Show open PRs
     pulp ci-local status                      # Show queue, runner, and VM status
     pulp ci-local enqueue [branch]            # Queue for later drain
@@ -266,6 +268,13 @@ def priority_value(priority: str | None) -> int:
     return PRIORITY_VALUES[normalize_priority(priority)]
 
 
+def normalize_validation_mode(mode: str | None) -> str:
+    value = (mode or "full").strip().lower()
+    if value not in {"full", "smoke"}:
+        raise ValueError(f"Invalid validation mode '{mode}'. Use one of: full, smoke.")
+    return value
+
+
 def load_config() -> dict:
     path = config_path()
     if not path.exists():
@@ -285,6 +294,7 @@ def normalize_job(job: dict) -> dict:
     normalized["priority"] = normalize_priority(normalized.get("priority", "normal"))
     normalized["targets"] = sorted(dict.fromkeys(normalized.get("targets") or []))
     normalized["status"] = normalized.get("status", "pending")
+    normalized["validation"] = normalize_validation_mode(normalized.get("validation", "full"))
     return normalized
 
 
@@ -365,15 +375,16 @@ def default_priority_for(command: str, config: dict) -> str:
     return normalize_priority(defaults.get("priority", "normal"))
 
 
-def make_fingerprint(branch: str, sha: str, targets: list[str]) -> str:
+def make_fingerprint(branch: str, sha: str, targets: list[str], validation: str) -> str:
     raw = json.dumps(
-        {"branch": branch, "sha": sha, "targets": sorted(targets)},
+        {"branch": branch, "sha": sha, "targets": sorted(targets), "validation": validation},
         sort_keys=True,
     )
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
-def make_job(branch: str, sha: str, priority: str, targets: list[str], mode: str) -> dict:
+def make_job(branch: str, sha: str, priority: str, targets: list[str], mode: str, validation: str) -> dict:
+    normalized_validation = normalize_validation_mode(validation)
     return {
         "id": uuid.uuid4().hex[:12],
         "branch": branch,
@@ -382,17 +393,67 @@ def make_job(branch: str, sha: str, priority: str, targets: list[str], mode: str
         "targets": sorted(targets),
         "queued_at": now_iso(),
         "status": "pending",
-        "fingerprint": make_fingerprint(branch, sha, targets),
+        "fingerprint": make_fingerprint(branch, sha, targets, normalized_validation),
         "mode": mode,
+        "validation": normalized_validation,
         "submitted_root": str(ROOT),
     }
 
 
+def supersedence_key(job: dict) -> tuple[str, tuple[str, ...], str]:
+    return (
+        job.get("branch", ""),
+        tuple(sorted(job.get("targets") or [])),
+        normalize_validation_mode(job.get("validation", "full")),
+    )
+
+
+def jobs_share_supersedence_scope(newer_job: dict, older_job: dict) -> bool:
+    return (
+        newer_job.get("id") != older_job.get("id")
+        and newer_job.get("fingerprint") != older_job.get("fingerprint")
+        and supersedence_key(newer_job) == supersedence_key(older_job)
+    )
+
+
+def supersedence_result(job: dict, superseded_by: str, reason: str) -> dict:
+    return {
+        "job_id": job["id"],
+        "branch": job["branch"],
+        "sha": job["sha"],
+        "priority": job["priority"],
+        "validation": job.get("validation", "full"),
+        "targets": job.get("targets", []),
+        "queued_at": job.get("queued_at", ""),
+        "completed_at": now_iso(),
+        "results": [],
+        "overall": "superseded",
+        "superseded_by": superseded_by,
+        "superseded_reason": reason,
+    }
+
+
+def supersede_job_unlocked(job: dict, superseded_by: str, reason: str) -> None:
+    result = supersedence_result(job, superseded_by, reason)
+    result_path = save_result(result)
+    job["status"] = "completed"
+    job["completed_at"] = result["completed_at"]
+    job["result_file"] = str(result_path)
+    job["overall"] = "superseded"
+    job["superseded_by"] = superseded_by
+    job["superseded_reason"] = reason
+    job.pop("runner", None)
+    job.pop("active_targets", None)
+    job.pop("last_progress_at", None)
+
+
 def summarize_job(job: dict) -> str:
     targets = ",".join(job.get("targets") or []) or "none"
+    validation = job.get("validation", "full")
+    validation_suffix = f" validation={validation}" if validation != "full" else ""
     return (
         f"[{job['id']}] {job['branch']} @ {short_sha(job.get('sha', ''))} "
-        f"priority={job.get('priority', 'normal')} targets={targets}"
+        f"priority={job.get('priority', 'normal')} targets={targets}{validation_suffix}"
     )
 
 
@@ -439,15 +500,23 @@ def update_job_active_targets(job_id: str, active_targets: dict | None) -> None:
             save_queue_unlocked(queue)
 
 
-def enqueue_job(branch: str, sha: str, priority: str, targets: list[str], mode: str) -> tuple[dict, bool]:
+def enqueue_job(
+    branch: str,
+    sha: str,
+    priority: str,
+    targets: list[str],
+    mode: str,
+    validation: str,
+) -> tuple[dict, bool]:
     requested_priority = normalize_priority(priority)
+    normalized_validation = normalize_validation_mode(validation)
 
     with file_lock(queue_lock_path(), blocking=True):
         queue = load_queue_unlocked()
         queue, changed = reconcile_running_jobs_unlocked(queue)
         if changed:
             save_queue_unlocked(queue)
-        fingerprint = make_fingerprint(branch, sha, targets)
+        fingerprint = make_fingerprint(branch, sha, targets, normalized_validation)
 
         for job in queue:
             if job.get("fingerprint") != fingerprint or job.get("status") not in {"pending", "running"}:
@@ -466,9 +535,14 @@ def enqueue_job(branch: str, sha: str, priority: str, targets: list[str], mode: 
                 save_queue_unlocked(queue)
             return normalize_job(job), False
 
-        job = make_job(branch, sha, requested_priority, targets, mode)
+        job = make_job(branch, sha, requested_priority, targets, mode, normalized_validation)
         queue.append(job)
-        save_queue_unlocked(queue)
+        for existing in queue:
+            if existing.get("status") != "pending":
+                continue
+            if jobs_share_supersedence_scope(job, existing):
+                supersede_job_unlocked(existing, job["id"], "newer_sha_queued")
+        save_queue_unlocked(trim_completed_jobs(queue))
         return job, True
 
 
@@ -503,6 +577,20 @@ def reconcile_running_jobs_unlocked(queue: list[dict]) -> tuple[list[dict], bool
 
         job_runner = job.get("runner") or {}
         if runner and runner_pid and job_runner.get("pid") == runner_pid:
+            continue
+
+        replacement = None
+        for candidate in queue:
+            if candidate.get("status") not in {"pending", "running"}:
+                continue
+            if not jobs_share_supersedence_scope(candidate, job):
+                continue
+            if replacement is None or candidate.get("queued_at", "") > replacement.get("queued_at", ""):
+                replacement = candidate
+
+        if replacement is not None:
+            supersede_job_unlocked(job, replacement["id"], "newer_sha_queued")
+            changed = True
             continue
 
         job["status"] = "pending"
@@ -907,6 +995,8 @@ def run_local_validation(job: dict, exclude_tests: str = "", report_progress=Non
         report_progress(phase="validate", log_path=str(log_path), last_output_at=now_iso())
 
     cmd = ["./validate-build.sh", "--quiet", "--ref", job["sha"]]
+    if job.get("validation") == "smoke":
+        cmd.append("--smoke")
     if exclude_tests:
         cmd += ["--exclude-regex", exclude_tests]
 
@@ -931,6 +1021,7 @@ def run_local_validation(job: dict, exclude_tests: str = "", report_progress=Non
         "stdout_tail": "" if failed else tail,
         "stderr_tail": tail if failed else "",
         "log_file": str(log_path),
+        "validation": job.get("validation", "full"),
     }
 
 
@@ -991,6 +1082,8 @@ def run_posix_ssh_validation(
         "printf '__PULP_PHASE__:validate\n'; "
         "./validate-build.sh --quiet --ref \"$sha\""
     )
+    if job.get("validation") == "smoke":
+        remote_cmd += " --smoke"
     if exclude_tests:
         remote_cmd += f" --exclude-regex {shlex.quote(exclude_tests)}"
 
@@ -1017,6 +1110,7 @@ def run_posix_ssh_validation(
         "stdout_tail": "" if failed else tail,
         "stderr_tail": tail if failed else "",
         "log_file": str(log_path),
+        "validation": job.get("validation", "full"),
     }
 
 
@@ -1232,8 +1326,12 @@ $env:GIT_LFS_SKIP_SMUDGE = '1'
 $CiRoot = Join-Path $RepoDrive 'pulp-ci'
 $SrcRoot = Join-Path $CiRoot 'w'
 $BuildRoot = Join-Path $CiRoot 'b'
+$InstallRoot = Join-Path $CiRoot 'i'
+$SmokeRoot = Join-Path $CiRoot 's'
 $Src = Join-Path $SrcRoot '{job['id']}'
 $Build = Join-Path $BuildRoot '{job['id']}'
+$Install = Join-Path $InstallRoot '{job['id']}'
+$Smoke = Join-Path $SmokeRoot '{job['id']}'
 $Branch = '{ps_literal(job['branch'])}'
 $Sha = '{ps_literal(job['sha'])}'
 $BundleName = '{ps_literal(bundle_name)}'
@@ -1243,6 +1341,7 @@ $ExcludeRegex = '{ps_literal(exclude_tests)}'
 $Generator = '{ps_literal(cmake_generator)}'
 $Platform = '{ps_literal(resolved_platform)}'
 $GeneratorInstance = '{ps_literal(resolved_generator_instance)}'
+$ValidationMode = '{ps_literal(job.get("validation", "full"))}'
 $MutexName = 'Global\\PulpLocalCIValidate'
 $Mutex = New-Object System.Threading.Mutex($false, $MutexName)
 $LockAcquired = $false
@@ -1258,7 +1357,7 @@ try {{
     }}
 
     Write-Host "__PULP_PHASE__:fetch"
-    New-Item -ItemType Directory -Force -Path $SrcRoot, $BuildRoot | Out-Null
+    New-Item -ItemType Directory -Force -Path $SrcRoot, $BuildRoot, $InstallRoot, $SmokeRoot | Out-Null
     Set-Location $Repo
     if (Test-Path $Bundle) {{
         Write-Host "__PULP_PHASE__:bundle-sync"
@@ -1299,6 +1398,12 @@ try {{
     if (Test-Path $Build) {{
         Remove-Item -Recurse -Force $Build
     }}
+    if (Test-Path $Install) {{
+        Remove-Item -Recurse -Force $Install
+    }}
+    if (Test-Path $Smoke) {{
+        Remove-Item -Recurse -Force $Smoke
+    }}
 
     Write-Host "__PULP_PHASE__:worktree"
     Invoke-Native git @('worktree', 'add', '--force', '--detach', $Src, $Sha)
@@ -1320,21 +1425,68 @@ try {{
             $configureArgs += @("-DCMAKE_GENERATOR_INSTANCE=$GeneratorInstance")
         }}
         $configureArgs += @('-DCMAKE_BUILD_TYPE=Release')
+        if ($ValidationMode -eq 'smoke') {{
+            $configureArgs += @(
+                '-DPULP_BUILD_TESTS=OFF',
+                '-DPULP_BUILD_EXAMPLES=OFF',
+                '-DPULP_ENABLE_GPU=OFF'
+            )
+        }}
         Invoke-Native cmake $configureArgs
         Write-Host "__PULP_PHASE__:build"
         Invoke-Native cmake @('--build', $Build, '--config', 'Release')
-        Write-Host "__PULP_PHASE__:test"
-        $ctestArgs = @('--test-dir', $Build, '--output-on-failure', '-C', 'Release')
-        if ($ExcludeRegex) {{
-            $ctestArgs += @('--exclude-regex', $ExcludeRegex)
+        if ($ValidationMode -eq 'smoke') {{
+            Write-Host "__PULP_PHASE__:install"
+            Invoke-Native cmake @('--install', $Build, '--prefix', $Install, '--config', 'Release')
+            New-Item -ItemType Directory -Force -Path $Smoke | Out-Null
+            @"
+cmake_minimum_required(VERSION 3.24)
+project(PulpSDKSmoke LANGUAGES CXX)
+
+find_package(Pulp REQUIRED CONFIG)
+
+add_library(smoke INTERFACE)
+target_link_libraries(smoke INTERFACE Pulp::format Pulp::standalone)
+"@ | Set-Content -Path (Join-Path $Smoke 'CMakeLists.txt')
+            Write-Host "__PULP_PHASE__:smoke"
+            $smokeConfigureArgs = @('-S', $Smoke, '-B', (Join-Path $Smoke 'build'))
+            if ($Generator) {{
+                $smokeConfigureArgs += @('-G', $Generator)
+            }}
+            if ($Platform) {{
+                $smokeConfigureArgs += @('-A', $Platform)
+            }}
+            if ($GeneratorInstance) {{
+                $smokeConfigureArgs += @("-DCMAKE_GENERATOR_INSTANCE=$GeneratorInstance")
+            }}
+            $smokeConfigureArgs += @("-DCMAKE_PREFIX_PATH=$Install")
+            Invoke-Native cmake $smokeConfigureArgs
+        }} else {{
+            Write-Host "__PULP_PHASE__:test"
+            $ctestArgs = @('--test-dir', $Build, '--output-on-failure', '-C', 'Release')
+            if ($ExcludeRegex) {{
+                $ctestArgs += @('--exclude-regex', $ExcludeRegex)
+            }}
+            Invoke-Native ctest $ctestArgs
         }}
-        Invoke-Native ctest $ctestArgs
     }} finally {{
         Write-Host "__PULP_PHASE__:cleanup"
         Remove-WorktreeSafe $Repo $Src
         if (Test-Path $Build) {{
             try {{
                 Remove-Item -Recurse -Force -ErrorAction Stop $Build
+            }} catch {{
+            }}
+        }}
+        if (Test-Path $Install) {{
+            try {{
+                Remove-Item -Recurse -Force -ErrorAction Stop $Install
+            }} catch {{
+            }}
+        }}
+        if (Test-Path $Smoke) {{
+            try {{
+                Remove-Item -Recurse -Force -ErrorAction Stop $Smoke
             }} catch {{
             }}
         }}
@@ -1379,6 +1531,7 @@ try {{
         "stdout_tail": "" if failed else tail,
         "stderr_tail": tail if failed else "",
         "log_file": str(log_path),
+        "validation": job.get("validation", "full"),
     }
 
 
@@ -1558,6 +1711,7 @@ def process_job(job: dict, config: dict) -> dict:
         "branch": job["branch"],
         "sha": job["sha"],
         "priority": job["priority"],
+        "validation": job.get("validation", "full"),
         "targets": job.get("targets", []),
         "queued_at": job.get("queued_at", ""),
         "completed_at": now_iso(),
@@ -1577,6 +1731,8 @@ def save_result(result: dict) -> Path:
 
 def print_result(result: dict, result_path: Path | None = None) -> None:
     print(f"\n--- Result: [{result['job_id']}] {result['branch']} ---")
+    if result.get("validation", "full") != "full":
+        print(f"  {'validation':10s}  {result['validation']}")
     for item in result["results"]:
         icon = "PASS" if item["status"] == "pass" else item["status"].upper()
         print(f"  {item['target']:10s}  {icon:12s}  {item.get('duration_secs', 0)}s")
@@ -1623,6 +1779,7 @@ def drain_pending_jobs(config: dict, *, blocking: bool) -> tuple[bool, bool]:
                         "branch": job["branch"],
                         "sha": job["sha"],
                         "priority": job["priority"],
+                        "validation": job.get("validation", "full"),
                         "targets": job.get("targets", []),
                         "queued_at": job.get("queued_at", ""),
                         "completed_at": now_iso(),
@@ -1742,11 +1899,16 @@ def gh_pr_head(pr_ref: str) -> tuple[int, str, str] | None:
 
 
 def format_ci_comment(result: dict) -> str:
-    lines = ["## Local CI Results\n"]
+    validation = result.get("validation", "full")
+    title = "Local CI Smoke Results" if validation == "smoke" else "Local CI Results"
+    lines = [f"## {title}\n"]
     overall = result["overall"].upper()
     icon = "white_check_mark" if overall == "PASS" else "x"
     lines.append(f":{icon}: **Overall: {overall}**\n")
     lines.append(f"Job: `{result.get('job_id', '?')}`  Commit: `{short_sha(result.get('sha', ''))}`\n")
+    if validation != "full":
+        lines.append(f"Validation: `{validation}`\n")
+        lines.append("_Smoke mode is a fast clean install/export preflight and does not run the full test suite._\n")
     lines.append("| Target | Status | Duration |")
     lines.append("|--------|--------|----------|")
     for item in result["results"]:
@@ -1772,23 +1934,24 @@ def format_ci_comment(result: dict) -> str:
 # ── CLI Commands ─────────────────────────────────────────────────────────────
 
 
-def resolve_submission_options(args: argparse.Namespace, command: str) -> tuple[dict, str, str, list[str], str]:
+def resolve_submission_options(args: argparse.Namespace, command: str) -> tuple[dict, str, str, list[str], str, str]:
     config = load_config()
     branch = args.branch or current_branch()
     sha = args.sha or current_sha()
     targets = resolve_targets(config, parse_targets_arg(getattr(args, "targets", None)))
     priority = normalize_priority(getattr(args, "priority", None) or default_priority_for(command, config))
-    return config, branch, sha, targets, priority
+    validation = normalize_validation_mode("smoke" if getattr(args, "smoke", False) else "full")
+    return config, branch, sha, targets, priority, validation
 
 
 def cmd_enqueue(args: argparse.Namespace) -> int:
     try:
-        _config, branch, sha, targets, priority = resolve_submission_options(args, "enqueue")
+        _config, branch, sha, targets, priority, validation = resolve_submission_options(args, "enqueue")
     except (FileNotFoundError, ValueError) as exc:
         print(f"Error: {exc}")
         return 1
 
-    job, created = enqueue_job(branch, sha, priority, targets, "enqueue")
+    job, created = enqueue_job(branch, sha, priority, targets, "enqueue", validation)
     if created:
         print(f"Enqueued: {summarize_job(job)}")
     else:
@@ -1820,12 +1983,12 @@ def cmd_drain(_args: argparse.Namespace) -> int:
 
 def cmd_run(args: argparse.Namespace) -> int:
     try:
-        config, branch, sha, targets, priority = resolve_submission_options(args, "run")
+        config, branch, sha, targets, priority, validation = resolve_submission_options(args, "run")
     except (FileNotFoundError, ValueError) as exc:
         print(f"Error: {exc}")
         return 1
 
-    job, created = enqueue_job(branch, sha, priority, targets, "run")
+    job, created = enqueue_job(branch, sha, priority, targets, "run", validation)
     print(("Enqueued" if created else "Already queued/running") + f": {summarize_job(job)}")
 
     result, exit_code = wait_for_job(job["id"], config)
@@ -1837,9 +2000,12 @@ def cmd_run(args: argparse.Namespace) -> int:
 
 def cmd_ship(args: argparse.Namespace) -> int:
     try:
-        config, branch, sha, targets, priority = resolve_submission_options(args, "ship")
+        config, branch, sha, targets, priority, validation = resolve_submission_options(args, "ship")
     except (FileNotFoundError, ValueError) as exc:
         print(f"Error: {exc}")
+        return 1
+    if validation != "full":
+        print("Error: ship only supports full validation. Use `run --smoke` or `check --smoke` for preflight.")
         return 1
 
     base = args.base or "main"
@@ -1870,7 +2036,7 @@ def cmd_ship(args: argparse.Namespace) -> int:
         return 1
     print(f"  PR #{pr_number} ready")
 
-    job, _created = enqueue_job(branch, sha, priority, targets, "ship")
+    job, _created = enqueue_job(branch, sha, priority, targets, "ship", validation)
     print(f"  Queueing CI: {summarize_job(job)}")
     result, exit_code = wait_for_job(job["id"], config)
     if result is None:
@@ -1908,11 +2074,12 @@ def cmd_check(args: argparse.Namespace) -> int:
         config = load_config()
         targets = resolve_targets(config, parse_targets_arg(args.targets))
         priority = normalize_priority(args.priority or default_priority_for("check", config))
+        validation = normalize_validation_mode("smoke" if getattr(args, "smoke", False) else "full")
     except (FileNotFoundError, ValueError) as exc:
         print(f"Error: {exc}")
         return 1
 
-    job, _created = enqueue_job(branch, sha, priority, targets, "check")
+    job, _created = enqueue_job(branch, sha, priority, targets, "check", validation)
     print(f"  Queueing CI: {summarize_job(job)}")
     result, exit_code = wait_for_job(job["id"], config)
     if result is None:
@@ -2138,7 +2305,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sub = parser.add_subparsers(dest="command")
 
-    def add_submission_args(command_parser: argparse.ArgumentParser, *, include_sha: bool = False) -> None:
+    def add_submission_args(
+        command_parser: argparse.ArgumentParser,
+        *,
+        include_sha: bool = False,
+        allow_smoke: bool = False,
+    ) -> None:
         command_parser.add_argument("branch", nargs="?", help="Branch name (default: current)")
         command_parser.add_argument(
             "--priority",
@@ -2151,14 +2323,20 @@ def build_parser() -> argparse.ArgumentParser:
         )
         if include_sha:
             command_parser.add_argument("--sha", help="Exact commit SHA to validate (default: current HEAD)")
+        if allow_smoke:
+            command_parser.add_argument(
+                "--smoke",
+                action="store_true",
+                help="Run the fast clean install/export preflight instead of full validation",
+            )
 
     p_enqueue = sub.add_parser("enqueue", help="Queue a branch for validation")
-    add_submission_args(p_enqueue, include_sha=True)
+    add_submission_args(p_enqueue, include_sha=True, allow_smoke=True)
 
     sub.add_parser("drain", help="Process pending jobs if no other runner is active")
 
     p_run = sub.add_parser("run", help="Queue validation and wait for completion")
-    add_submission_args(p_run, include_sha=True)
+    add_submission_args(p_run, include_sha=True, allow_smoke=True)
 
     p_ship = sub.add_parser("ship", help="PR -> queued CI -> merge on green")
     add_submission_args(p_ship, include_sha=True)
@@ -2174,6 +2352,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_check.add_argument(
         "--targets",
         help="Comma-separated target list (for example: mac or mac,ubuntu)",
+    )
+    p_check.add_argument(
+        "--smoke",
+        action="store_true",
+        help="Run the fast clean install/export preflight instead of full validation",
     )
 
     sub.add_parser("list", help="Show open PRs")

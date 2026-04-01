@@ -6,6 +6,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 QUIET=true
 SKIP_TESTS=false
+SMOKE_ONLY=false
 KEEP_WORKTREE=false
 NO_LOCK=false
 REF="HEAD"
@@ -16,6 +17,10 @@ while [ $# -gt 0 ]; do
         --quiet) QUIET=true ;;
         --verbose) QUIET=false ;;
         --no-tests) SKIP_TESTS=true ;;
+        --smoke)
+            SMOKE_ONLY=true
+            SKIP_TESTS=true
+            ;;
         --keep-worktree) KEEP_WORKTREE=true ;;
         --exclude-regex)
             shift
@@ -34,12 +39,14 @@ while [ $# -gt 0 ]; do
         --no-lock) NO_LOCK=true ;;
         --help|-h)
             cat <<'EOF'
-Usage: ./validate-build.sh [--quiet] [--verbose] [--no-tests] [--keep-worktree] [--no-lock] [--ref <git-ref>] [--exclude-regex <pattern>]
+Usage: ./validate-build.sh [--quiet] [--verbose] [--no-tests] [--smoke] [--keep-worktree] [--no-lock] [--ref <git-ref>] [--exclude-regex <pattern>]
 
 Creates a detached clean worktree at the requested git ref (default: current HEAD),
 bootstraps dependencies, configures, builds, installs, and optionally runs tests. Output is quiet on success
 by default and prints logs only on failure. Use --verbose to print progress messages.
 By default the script also takes a per-host validation lock so concurrent agents wait instead of colliding.
+Use --smoke for a fast install/export preflight: it disables tests/examples/GPU in the clean build,
+still installs the SDK, and runs the installed-SDK find_package(Pulp) smoke configure.
 EOF
             exit 0
             ;;
@@ -162,7 +169,11 @@ run_or_dump() {
 }
 
 run_or_dump "dependency bootstrap" "$setup_log" bash -lc "cd \"$src_dir\" && ./setup.sh --ci --deps-only"
-run_or_dump "configure" "$configure_log" cmake -S "$src_dir" -B "$build_dir" -DCMAKE_BUILD_TYPE=Debug
+configure_args=(-S "$src_dir" -B "$build_dir" -DCMAKE_BUILD_TYPE=Debug)
+if [ "$SMOKE_ONLY" = true ]; then
+    configure_args+=(-DPULP_BUILD_TESTS=OFF -DPULP_BUILD_EXAMPLES=OFF -DPULP_ENABLE_GPU=OFF)
+fi
+run_or_dump "configure" "$configure_log" cmake "${configure_args[@]}"
 run_or_dump "build" "$build_log" cmake --build "$build_dir" -j"$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4)"
 run_or_dump "install" "$install_log" cmake --install "$build_dir" --prefix "$install_dir"
 
@@ -174,7 +185,7 @@ project(PulpSDKSmoke LANGUAGES CXX)
 find_package(Pulp REQUIRED CONFIG)
 
 add_library(smoke INTERFACE)
-target_link_libraries(smoke INTERFACE Pulp::format)
+target_link_libraries(smoke INTERFACE Pulp::format Pulp::standalone)
 EOF
 
 run_or_dump "install smoke test" "$smoke_log" \

@@ -70,6 +70,7 @@ class LocalCiTests(unittest.TestCase):
             "low",
             ["mac"],
             "run",
+            "full",
         )
         second, created_second = self.mod.enqueue_job(
             "feature/test",
@@ -77,6 +78,7 @@ class LocalCiTests(unittest.TestCase):
             "high",
             ["mac"],
             "run",
+            "full",
         )
 
         self.assertTrue(created_first)
@@ -87,9 +89,67 @@ class LocalCiTests(unittest.TestCase):
         self.assertIsNotNone(stored)
         self.assertEqual(stored["priority"], "high")
 
+    def test_enqueue_treats_smoke_and_full_as_distinct_jobs(self):
+        smoke_job, smoke_created = self.mod.enqueue_job(
+            "feature/test",
+            "a" * 40,
+            "normal",
+            ["mac"],
+            "run",
+            "smoke",
+        )
+        full_job, full_created = self.mod.enqueue_job(
+            "feature/test",
+            "a" * 40,
+            "normal",
+            ["mac"],
+            "run",
+            "full",
+        )
+
+        self.assertTrue(smoke_created)
+        self.assertTrue(full_created)
+        self.assertNotEqual(smoke_job["id"], full_job["id"])
+        self.assertEqual(smoke_job["validation"], "smoke")
+        self.assertEqual(full_job["validation"], "full")
+
+    def test_enqueue_supersedes_older_pending_same_scope(self):
+        older_job, older_created = self.mod.enqueue_job(
+            "feature/test",
+            "a" * 40,
+            "normal",
+            ["mac"],
+            "run",
+            "full",
+        )
+        newer_job, newer_created = self.mod.enqueue_job(
+            "feature/test",
+            "b" * 40,
+            "normal",
+            ["mac"],
+            "run",
+            "full",
+        )
+
+        self.assertTrue(older_created)
+        self.assertTrue(newer_created)
+
+        queue = self.mod.load_queue()
+        older_stored = next(job for job in queue if job["id"] == older_job["id"])
+        newer_stored = next(job for job in queue if job["id"] == newer_job["id"])
+
+        self.assertEqual(older_stored["status"], "completed")
+        self.assertEqual(older_stored["overall"], "superseded")
+        self.assertEqual(older_stored["superseded_by"], newer_job["id"])
+        self.assertEqual(newer_stored["status"], "pending")
+
+        result = self.mod.load_result(Path(older_stored["result_file"]))
+        self.assertEqual(result["overall"], "superseded")
+        self.assertEqual(result["superseded_by"], newer_job["id"])
+
     def test_claim_next_job_prefers_higher_priority(self):
-        low_job, _ = self.mod.enqueue_job("feature/low", "1" * 40, "low", ["mac"], "run")
-        high_job, _ = self.mod.enqueue_job("feature/high", "2" * 40, "high", ["mac"], "run")
+        low_job, _ = self.mod.enqueue_job("feature/low", "1" * 40, "low", ["mac"], "run", "full")
+        high_job, _ = self.mod.enqueue_job("feature/high", "2" * 40, "high", ["mac"], "run", "full")
 
         claimed = self.mod.claim_next_job()
         self.assertIsNotNone(claimed)
@@ -104,7 +164,7 @@ class LocalCiTests(unittest.TestCase):
             self.mod.resolve_targets(config, ["windows"])
 
     def test_stale_running_job_requeues_when_runner_dies(self):
-        job = self.mod.make_job("feature/stale", "3" * 40, "normal", ["mac"], "run")
+        job = self.mod.make_job("feature/stale", "3" * 40, "normal", ["mac"], "run", "full")
         job["status"] = "running"
         job["started_at"] = "2026-03-31T00:00:00+00:00"
         job["runner"] = {"pid": 999999, "root": "/tmp/pulp"}
@@ -125,6 +185,31 @@ class LocalCiTests(unittest.TestCase):
         self.assertEqual(queue[0]["active_targets"]["mac"]["status"], "pass")
         self.assertEqual(queue[0]["active_targets"]["windows"]["status"], "running")
         self.assertFalse(self.mod.runner_info_path().exists())
+
+    def test_stale_running_job_is_superseded_when_newer_pending_exists(self):
+        older_job = self.mod.make_job("feature/stale", "3" * 40, "normal", ["mac"], "run", "full")
+        older_job["queued_at"] = "2026-03-31T00:00:00+00:00"
+        older_job["status"] = "running"
+        older_job["started_at"] = "2026-03-31T00:10:00+00:00"
+        older_job["runner"] = {"pid": 999999, "root": "/tmp/pulp"}
+
+        newer_job = self.mod.make_job("feature/stale", "4" * 40, "high", ["mac"], "run", "full")
+        newer_job["queued_at"] = "2026-03-31T00:20:00+00:00"
+
+        self.mod.ensure_state_dirs()
+        self.mod.queue_path().write_text(json.dumps([older_job, newer_job], indent=2) + "\n")
+        self.mod.runner_info_path().write_text(
+            json.dumps({"pid": 999999, "active_job_id": older_job["id"], "active_branch": older_job["branch"]}) + "\n"
+        )
+
+        queue = self.mod.load_queue()
+        older_stored = next(job for job in queue if job["id"] == older_job["id"])
+        newer_stored = next(job for job in queue if job["id"] == newer_job["id"])
+
+        self.assertEqual(older_stored["status"], "completed")
+        self.assertEqual(older_stored["overall"], "superseded")
+        self.assertEqual(older_stored["superseded_by"], newer_job["id"])
+        self.assertEqual(newer_stored["status"], "pending")
 
     def test_summarize_active_targets_uses_requested_order(self):
         summary = self.mod.summarize_active_targets(
@@ -199,7 +284,7 @@ class LocalCiTests(unittest.TestCase):
         self.assertIn(info["active_branch"], {"feature/1", "feature/2"})
 
     def test_update_job_active_targets_tracks_live_state(self):
-        job = self.mod.make_job("feature/progress", "4" * 40, "normal", ["mac", "ubuntu"], "run")
+        job = self.mod.make_job("feature/progress", "4" * 40, "normal", ["mac", "ubuntu"], "run", "full")
         self.mod.ensure_state_dirs()
         self.mod.queue_path().write_text(json.dumps([job], indent=2) + "\n")
 
@@ -282,6 +367,50 @@ class LocalCiTests(unittest.TestCase):
         self.assertIn("$Platform = 'ARM64'", captured["input_text"])
         self.assertIn("$BundleName = 'pulp-ci-job123.bundle'", captured["input_text"])
         self.assertIn("$BundleRef = 'refs/pulp-ci-bundles/job123'", captured["input_text"])
+
+    def test_windows_smoke_validation_installs_sdk_and_skips_ctest(self):
+        captured = {}
+
+        def fake_run_logged_command(cmd, **kwargs):
+            captured["input_text"] = kwargs.get("input_text", "")
+            return {
+                "timed_out": False,
+                "returncode": 0,
+                "output": "ok\n",
+                "duration_secs": 1.2,
+            }
+
+        original_run_logged = self.mod.run_logged_command
+        original_probe = self.mod.probe_windows_ssh_cmake_settings
+        original_sync = self.mod.sync_job_bundle_to_ssh_host
+        self.mod.run_logged_command = fake_run_logged_command
+        self.mod.probe_windows_ssh_cmake_settings = (
+            lambda host, generator, platform, instance: (platform, instance)
+        )
+        self.mod.sync_job_bundle_to_ssh_host = (
+            lambda host, job, report_progress=None: (f"pulp-ci-{job['id']}.bundle", f"refs/pulp-ci-bundles/{job['id']}")
+        )
+        try:
+            result = self.mod.run_windows_ssh_validation(
+                "windows",
+                "win",
+                "C:\\Pulp",
+                {"id": "job126", "branch": "feature/smoke", "sha": "e" * 40, "validation": "smoke"},
+            )
+        finally:
+            self.mod.run_logged_command = original_run_logged
+            self.mod.probe_windows_ssh_cmake_settings = original_probe
+            self.mod.sync_job_bundle_to_ssh_host = original_sync
+
+        self.assertEqual(result["status"], "pass")
+        self.assertIn("$ValidationMode = 'smoke'", captured["input_text"])
+        self.assertIn("-DPULP_BUILD_TESTS=OFF", captured["input_text"])
+        self.assertIn("'--install'", captured["input_text"])
+        self.assertIn("__PULP_PHASE__:smoke", captured["input_text"])
+        self.assertIn("$smokeConfigureArgs = @('-S', $Smoke, '-B', (Join-Path $Smoke 'build'))", captured["input_text"])
+        self.assertIn("$smokeConfigureArgs += @('-G', $Generator)", captured["input_text"])
+        self.assertIn("$smokeConfigureArgs += @('-A', $Platform)", captured["input_text"])
+        self.assertIn('$smokeConfigureArgs += @("-DCMAKE_GENERATOR_INSTANCE=$GeneratorInstance")', captured["input_text"])
 
     def test_windows_validation_auto_detects_platform_and_vs_instance(self):
         captured = {}

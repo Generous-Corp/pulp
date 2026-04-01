@@ -6,6 +6,7 @@
 pulp test                    # Run all tests
 ctest --test-dir build       # Equivalent, direct CTest
 ./validate-build.sh          # Detached clean worktree configure/build/test
+./validate-build.sh --smoke  # Fast clean install/export preflight, no tests
 ```
 
 Filter tests by name:
@@ -23,6 +24,27 @@ an installed SDK `find_package(Pulp)` smoke configure, and an optional test pass
 This is the quickest way to catch clean-build drift, basic install/export breakage,
 and missing setup dependencies before opening a PR. Run `./tools/check-docs.sh`
 separately for manifest and README/docs consistency checks.
+
+Use `./validate-build.sh --smoke` when you want the fastest truthful preflight for
+build-system and SDK export work. Smoke mode still bootstraps dependencies, does a
+clean detached configure/build/install, and runs the installed-SDK `find_package(Pulp)`
+smoke configure, but disables tests, examples, and GPU in that clean build so you can
+catch install/export regressions before paying for a full validation run.
+
+## Repeat Until Fail
+
+When a test or command only fails intermittently, use the repeat helper instead of
+copy-pasting shell loops:
+
+```bash
+tools/scripts/repeat-until-fail.sh 100 -- ctest --test-dir build -R "SeqLock concurrent stress test" --output-on-failure
+tools/scripts/repeat-until-fail.sh -- ctest --test-dir build -R "OSC sender/receiver loopback" --output-on-failure
+```
+
+The helper prints the current iteration, exports it as
+`REPEAT_UNTIL_FAIL_ITERATION`, and stops on the first failure. This is useful for
+debugging flaky concurrency, timing, path, and validator issues without inventing a
+new one-off loop every time.
 
 ## Test Count
 
