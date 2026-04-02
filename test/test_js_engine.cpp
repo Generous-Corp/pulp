@@ -215,9 +215,14 @@ TEST_CASE("JsEngine availability", "[js_engine]") {
     REQUIRE_FALSE(is_engine_available(JsEngineType::jsc));
 #endif
 
-#ifndef PULP_HAS_V8
-    REQUIRE_FALSE(is_engine_available(JsEngineType::v8));
-#endif
+    if (is_engine_available(JsEngineType::v8)) {
+        auto v8_engine = create_js_engine(JsEngineType::v8);
+        REQUIRE(v8_engine != nullptr);
+        REQUIRE(v8_engine->is_valid());
+        REQUIRE(v8_engine->type() == JsEngineType::v8);
+    } else {
+        SUCCEED("V8 intentionally unavailable in this build");
+    }
 }
 
 TEST_CASE("JsEngine default engine creation", "[js_engine]") {

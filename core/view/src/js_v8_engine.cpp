@@ -3,7 +3,10 @@
 // V8 is BSD-3-Clause licensed.
 //
 // Build integration:
-//   cmake -S . -B build -DPULP_JS_ENGINE=v8 -DV8_INCLUDE_DIR=/path/to/v8/include -DV8_LIB_DIR=/path/to/v8/out/release
+//   cmake -S . -B build -DPULP_JS_ENGINE=v8 \
+//         -DV8_INCLUDE_DIR=/path/to/v8/include \
+//         -DV8_LIB_DIR=/path/to/v8/lib \
+//         [-DV8_LIBRARY_PATH=/full/path/to/libv8_monolith_or_libnode]
 //
 // V8 provides JIT compilation, making it suitable for heavy workloads like
 // Three.js scene graphs (Phase 13). QuickJS is the portable fallback.
