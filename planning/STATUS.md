@@ -467,7 +467,7 @@ Work items from VISION.md not yet implemented, ordered by dependency and impact.
 - [x] PulpSampler — audio file sampler with MIDI, ADSR, pitch, loop (6 tests, CLAP)
 - [x] Waveform Editor component (selection, zoom, scroll, regions, playhead) — 13 tests
 - [x] Diagnostic Reporter component (text + JSON reports, system/audio/params) — 7 tests
-- [x] WebView embedding (CHOC WebView wrapper: navigate, set_html, evaluate_js, bind) — 2 tests
+- [x] WebView embedding (CHOC WebView wrapper: async JS bridge, structured native/web messages, offline asset helpers, custom resource serving) — 6 cases / 70 assertions
 - [x] Example screenshots and visual documentation — docs/examples/screenshots.md + capture script
 
 ### Phase 18: Web/WASM Target

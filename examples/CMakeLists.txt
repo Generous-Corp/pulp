@@ -45,3 +45,13 @@ endif()
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/text-input-test/CMakeLists.txt)
     add_subdirectory(text-input-test)
 endif()
+
+# Phase 7: simple floating WebView palette proof
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/webview-palette/CMakeLists.txt)
+    add_subdirectory(webview-palette)
+endif()
+
+# Phase 7: optional Monaco WebView proof (requires prebundled Monaco assets)
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/webview-monaco/CMakeLists.txt)
+    add_subdirectory(webview-monaco)
+endif()

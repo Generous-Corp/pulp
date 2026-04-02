@@ -1,0 +1,41 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pulp WebView Palette Preview</title>
+  <link rel="stylesheet" href="palette.css">
+</head>
+<body data-theme="dark">
+  <main class="shell">
+    <p class="eyebrow">Pulp Phase 7</p>
+    <h1>WebView Palette</h1>
+    <p class="copy">Static browser preview for screenshots and layout checks.</p>
+    <button id="ping" type="button">Ping Native</button>
+    <pre id="status">booting…</pre>
+  </main>
+  <script>
+    window.pulp = {
+      on(type, callback) {
+        if (type === 'native.theme') {
+          queueMicrotask(() => callback({ type, payload: { mode: 'dark' }, id: 'preview-theme' }));
+        }
+        return () => {};
+      },
+      postMessage(type, payload, id) {
+        return {
+          id,
+          ok: true,
+          payload: {
+            message: type === 'palette.ping'
+              ? 'preview pong from browser stub'
+              : 'preview acknowledged palette load',
+            echo: payload || null
+          }
+        };
+      }
+    };
+  </script>
+  <script src="palette.js"></script>
+</body>
+</html>

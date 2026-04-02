@@ -30,7 +30,7 @@ On the current branch, Pulp provides:
 - **Plugin hosting** — PluginScanner, PluginSlot, and SignalGraph for building DAW-like applications
 - **OSC support** — Open Sound Control 1.0 sender/receiver over UDP
 - **Identity system** — UUIDv4 with typed wrappers (SessionId, RunId, ObjectId, CorrelationId) for AI workflows
-- **WebView embedding** (optional, off by default) — CHOC-based WebView panel for Monaco editors, docs panels, custom web UIs
+- **WebView embedding** (optional, off by default) — CHOC-based native WebView panel with async JS bridge, structured native/web messages, and bundled-resource serving for Monaco editors, docs panels, and custom web UIs
 - **Headless processing** — test and batch-process plugins without a DAW
 - **A CLI tool** — `pulp build`, `pulp test`, `pulp validate`, `pulp create`, `pulp inspect`, `pulp audit`, `pulp ship`, `pulp status`, `pulp clean`, `pulp docs`
 - **Code signing and packaging** — codesign, notarization, DMG/PKG (macOS), NSIS (Windows), .deb/.tar.gz (Linux), appcast

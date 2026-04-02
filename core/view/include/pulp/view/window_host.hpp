@@ -45,6 +45,40 @@ public:
     // Request a repaint
     virtual void repaint() = 0;
 
+    // Native host/window handles for embedding child platform views such as
+    // WebViews. Default implementations return nullptr on platforms that do
+    // not expose these seams yet.
+    virtual void* native_window_handle() const { return nullptr; }
+    virtual void* native_content_view_handle() const { return nullptr; }
+
+    // Attach/detach a platform-native child view inside this host. Coordinates
+    // use Pulp's top-left origin convention.
+    virtual bool attach_native_child_view(void* child_view,
+                                          float x,
+                                          float y,
+                                          float width,
+                                          float height) {
+        (void) child_view;
+        (void) x;
+        (void) y;
+        (void) width;
+        (void) height;
+        return false;
+    }
+    virtual bool set_native_child_view_bounds(void* child_view,
+                                              float x,
+                                              float y,
+                                              float width,
+                                              float height) {
+        (void) child_view;
+        (void) x;
+        (void) y;
+        (void) width;
+        (void) height;
+        return false;
+    }
+    virtual void detach_native_child_view(void* child_view) { (void) child_view; }
+
     // Capture the current visible content as a PNG image.
     virtual std::vector<uint8_t> capture_png() { return {}; }
 

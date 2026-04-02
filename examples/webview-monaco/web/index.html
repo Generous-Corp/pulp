@@ -1,0 +1,45 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pulp WebView Monaco</title>
+  <link rel="stylesheet" href="./shell.css">
+  <link rel="stylesheet" href="./app.css">
+</head>
+<body data-theme="dark">
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand">Pulp Phase 7</div>
+      <h1>Monaco WebView</h1>
+      <p class="copy">Bundled ESM Monaco served through Pulp's native WebView bridge.</p>
+      <div class="tabs" id="tabs"></div>
+      <div class="meta">
+        <div>Press <kbd>Escape</kbd> to toggle the editor focus.</div>
+        <div id="bridge-status">booting…</div>
+      </div>
+    </aside>
+    <main class="workspace">
+      <section class="editor-pane">
+        <div id="editor"></div>
+      </section>
+      <section class="preview-pane">
+        <div class="preview-header">Preview</div>
+        <svg viewBox="0 0 640 420" class="art" aria-hidden="true">
+          <rect x="34" y="34" width="110" height="88" fill="#d98aa7"/>
+          <rect x="174" y="34" width="110" height="88" fill="none" stroke="#bddbff" stroke-width="4"/>
+          <path d="M398 36 L462 122 L330 122 Z" fill="#b6e7a0"/>
+          <rect x="34" y="298" width="140" height="80" fill="#8b5fbf" opacity="0.72"/>
+          <rect x="118" y="332" width="140" height="80" fill="#6b7dff" opacity="0.72"/>
+          <circle cx="350" cy="246" r="52" fill="#f2b787"/>
+          <ellipse cx="378" cy="132" rx="44" ry="28" fill="#fff4b2"/>
+          <rect x="66" y="134" width="58" height="58" fill="#c5a2ff" transform="rotate(-16 95 163)"/>
+          <path d="M56 212 C140 148 250 252 350 212 C440 168 480 202 524 168" fill="none" stroke="#9fe2ee" stroke-width="4"/>
+        </svg>
+        <div class="preview-caption">Edit <strong>demo.js</strong> or <strong>background.sksl</strong> to test the bridge workflow.</div>
+      </section>
+    </main>
+  </div>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

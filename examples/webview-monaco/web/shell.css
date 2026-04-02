@@ -1,0 +1,150 @@
+:root {
+  color-scheme: dark;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+  background:
+    radial-gradient(circle at top, rgba(86, 130, 255, 0.18), transparent 34%),
+    linear-gradient(180deg, #2616a8 0%, #341eb8 38%, #2a178f 100%);
+  color: #eef2ff;
+}
+
+body {
+  min-height: 100vh;
+}
+
+.shell {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: 320px 1fr;
+}
+
+.sidebar {
+  padding: 28px 24px;
+  border-right: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(12, 18, 40, 0.34);
+  backdrop-filter: blur(16px);
+}
+
+.brand {
+  margin-bottom: 18px;
+  font-size: 12px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: #c4d5ff;
+}
+
+h1 {
+  margin: 0 0 8px;
+  font-size: 44px;
+  line-height: 1;
+}
+
+.copy {
+  margin: 0 0 24px;
+  color: #d5dbff;
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+.tabs {
+  display: grid;
+  gap: 10px;
+}
+
+.tab {
+  appearance: none;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 14px;
+  background: rgba(17, 26, 62, 0.66);
+  color: inherit;
+  text-align: left;
+  padding: 14px 16px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.tab.active {
+  background: rgba(82, 124, 255, 0.28);
+  border-color: rgba(194, 220, 255, 0.32);
+}
+
+.tab-label {
+  display: block;
+  font-weight: 700;
+}
+
+.tab-meta {
+  display: block;
+  margin-top: 4px;
+  font-size: 12px;
+  color: #bfccff;
+}
+
+.meta {
+  margin-top: 24px;
+  display: grid;
+  gap: 8px;
+  font-size: 13px;
+  color: #d8deff;
+}
+
+kbd {
+  display: inline-block;
+  min-width: 1.6em;
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  text-align: center;
+}
+
+.workspace {
+  display: grid;
+  grid-template-columns: minmax(420px, 1.1fr) minmax(360px, 0.9fr);
+  min-height: 100vh;
+}
+
+.editor-pane {
+  min-width: 0;
+}
+
+#editor {
+  height: 100vh;
+  width: 100%;
+}
+
+.preview-pane {
+  padding: 28px;
+  display: grid;
+  align-content: start;
+  gap: 16px;
+}
+
+.preview-header {
+  font-size: 16px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #dce6ff;
+}
+
+.art {
+  width: 100%;
+  border-radius: 28px;
+  background: rgba(33, 14, 132, 0.78);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+}
+
+.preview-caption {
+  color: #e6ebff;
+  font-size: 14px;
+  line-height: 1.5;
+}

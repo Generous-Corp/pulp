@@ -1,0 +1,129 @@
+---
+name: webview-ui
+description: Build or iterate on a Pulp WebView UI using the native WebView bridge, embedded assets, directory-backed dev resources, and focused WebView validation.
+---
+
+# WebView UI
+
+Use this skill when working on Pulp's optional WebView layer: HTML/JS panels,
+Monaco-style tools, documentation views, or mixed native/WebView windows.
+
+## Core Positioning
+
+Pulp WebView is an opt-in compatibility layer, not the primary UI path.
+Default to native Pulp UI unless the task truly benefits from existing web
+content.
+
+## Core Runtime Pieces
+
+Main APIs:
+- `pulp::view::WebViewPanel`
+- `pulp::view::WebViewOptions`
+- `pulp::view::WindowHost`
+- `pulp::view::AssetManager`
+
+Bridge contract:
+- `window.pulp.postMessage(type, payload, id)`
+- `window.pulp.on(type, callback)`
+- native `set_message_handler(...)`
+- native `post_message(...)`
+- async `evaluate_js(..., callback)`
+
+## Choose A Loading Mode
+
+1. Simple inline proof
+- use `set_html(...)`
+- append `make_webview_bridge_bootstrap_script()`
+- good for the smallest lifecycle/message tests
+
+2. Embedded bundled assets
+- use `pulp_add_binary_data(...)`
+- register generated arrays with `AssetManager`
+- serve through `make_webview_embedded_resource_fetcher(...)`
+- this is the truthful offline/distributable path
+
+3. Directory-backed dev assets
+- use `make_webview_directory_resource_fetcher(...)`
+- use this for local framework payloads that already exist on disk
+- good for Monaco / richer web tooling during development
+
+## Monaco Guidance
+
+Do not chase Monaco's deprecated AMD path.
+
+Use a prebundled ESM workflow:
+- bundle one app entry
+- bundle the worker files
+- point `MonacoEnvironment.getWorkerUrl(...)` or `getWorker(...)` at those generated worker files
+- expose `window.monaco` only if the page wants that global convenience
+
+Treat raw Monaco source or raw ESM output as build inputs, not as the final
+browser payload. Worker and CSS handling belongs to the bundler.
+
+Current proven local recipe:
+
+```bash
+cd /Users/danielraffel/Code/monaco-editor
+npm install
+npm run build-monaco-editor
+
+cd /private/tmp/pulp-phase7-webview-main
+node examples/webview-monaco/build_monaco_bundle.mjs \
+  --monaco-root /Users/danielraffel/Code/monaco-editor \
+  --out-dir /private/tmp/pulp-phase7-webview-main/build-phase7/examples/webview-monaco/dist
+
+cmake -S . -B build-phase7 -DCMAKE_BUILD_TYPE=Debug -DPULP_BUILD_WEBVIEW=ON \
+  -DPULP_MONACO_BUNDLE_DIR=/private/tmp/pulp-phase7-webview-main/build-phase7/examples/webview-monaco/dist
+cmake --build build-phase7 --target pulp-webview-monaco -j8
+./build-phase7/examples/webview-monaco/pulp-webview-monaco
+```
+
+Important notes from the working proof:
+- use the local build script in `examples/webview-monaco/build_monaco_bundle.mjs`
+- prefer `editor.main.js` so Monaco's real CSS/features come through
+- worker URLs must point at the built `vs/languages/features/...` layout
+- the current Monaco build imports `@vscode/monaco-lsp-client`; for the Phase 7 example we stub that at bundle time because the example is not doing LSP
+- browser preview is useful for cheap layout proof, but `bridge unavailable` is expected there because only the native host injects `window.pulp`
+- the native proof should reach `editor ready`
+
+## Window Embedding
+
+For palette / inspector style UI:
+- create the parent `WindowHost`
+- create the child/palette `WindowHost`
+- use `attach_native_child_view(...)`
+- resize with `set_native_child_view_bounds(...)`
+- detach on close
+
+## Validation Loop
+
+For focused local proof:
+
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DPULP_BUILD_WEBVIEW=ON
+cmake --build build --target pulp-test-webview -j8
+./build/test/pulp-test-webview --reporter compact
+```
+
+If example code changed, also build the relevant example target:
+
+```bash
+cmake --build build --target pulp-webview-palette -j8
+```
+
+Current proof expectations:
+- encode/decode helpers pass
+- bridge helpers pass
+- resource fetchers pass
+- example builds
+- live callback-ready cases may skip in headless or limited environments
+
+## Screenshot / Preview Workflow
+
+For quick visual inspection, keep a static browser preview page beside the
+runtime assets when useful. That gives you a cheap screenshot path without
+pretending the browser preview replaces native validation.
+
+For Monaco specifically:
+- browser-served proof page is useful to confirm bundling, workers, and CSS
+- native-host proof is still required before claiming the bridge is working
