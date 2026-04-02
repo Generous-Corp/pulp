@@ -46,9 +46,12 @@ target_include_directories(pulp-view
 #   auto    → JSC on Apple, QuickJS elsewhere (V8 if PULP_HAS_V8)
 #   quickjs → QuickJS only (always available, portable)
 #   jsc     → JavaScriptCore (Apple platforms only)
-#   v8      → V8 (requires external V8 build, set V8_INCLUDE_DIR / V8_LIB_DIR)
+#   v8      → V8 (requires external V8 build, set V8_INCLUDE_DIR / V8_LIB_DIR,
+#                 and optionally V8_LIBRARY_PATH or V8_LIBRARY_NAME)
 set(PULP_JS_ENGINE "auto" CACHE STRING "JS engine backend (auto|quickjs|jsc|v8)")
 set_property(CACHE PULP_JS_ENGINE PROPERTY STRINGS auto quickjs jsc v8)
+set(V8_LIBRARY_PATH "" CACHE FILEPATH "Full path to the V8 provider library (e.g. libv8_monolith or libnode)")
+set(V8_LIBRARY_NAME "" CACHE STRING "Library name to link for V8 when V8_LIBRARY_PATH is not set")
 
 # QuickJS backend is always compiled (portable fallback)
 set(PULP_JS_ENGINE_SOURCES
@@ -62,7 +65,30 @@ if(PULP_JS_ENGINE STREQUAL "v8" OR (PULP_JS_ENGINE STREQUAL "auto" AND DEFINED V
         list(APPEND PULP_JS_ENGINE_SOURCES src/js_v8_engine.cpp)
         target_include_directories(pulp-view PRIVATE ${V8_INCLUDE_DIR})
         target_link_directories(pulp-view PRIVATE ${V8_LIB_DIR})
-        target_link_libraries(pulp-view PRIVATE v8_monolith)
+        if(V8_LIBRARY_PATH)
+            target_link_libraries(pulp-view PRIVATE ${V8_LIBRARY_PATH})
+        else()
+            set(PULP_V8_PROVIDER_NAMES)
+            if(V8_LIBRARY_NAME)
+                list(APPEND PULP_V8_PROVIDER_NAMES ${V8_LIBRARY_NAME})
+            endif()
+            list(APPEND PULP_V8_PROVIDER_NAMES v8_monolith node.141 node)
+
+            find_library(PULP_V8_PROVIDER_LIBRARY
+                NAMES ${PULP_V8_PROVIDER_NAMES}
+                PATHS ${V8_LIB_DIR}
+                NO_DEFAULT_PATH
+            )
+
+            if(PULP_V8_PROVIDER_LIBRARY)
+                target_link_libraries(pulp-view PRIVATE ${PULP_V8_PROVIDER_LIBRARY})
+            else()
+                message(FATAL_ERROR
+                    "Could not find a V8 provider library in ${V8_LIB_DIR}. "
+                    "Set V8_LIBRARY_PATH to a full library path or V8_LIBRARY_NAME to the library basename."
+                )
+            endif()
+        endif()
         set(PULP_HAS_V8_ACTUAL ON)
     else()
         if(PULP_JS_ENGINE STREQUAL "v8")

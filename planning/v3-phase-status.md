@@ -18,7 +18,7 @@
 | 7 | WebView integration (iPlug2-style) | feature/v3-phase7-webview | **complete** (macOS-native scope; Windows/Linux follow-up tracked) | [#91](https://github.com/danielraffel/pulp/pull/91) | focused native proof on macOS; cross-platform gap tracked in [#92](https://github.com/danielraffel/pulp/issues/92) |
 | 8 | Audio visualization (STFT/spectrogram) | phase/dsl-agentic-webgpu-v3-phase8 | **complete** | [#62](https://github.com/danielraffel/pulp/pull/62) | pending Phase 14 |
 | 9 | Widgets + assets + themes | phase/dsl-agentic-webgpu-v3-phase9 | **complete** | [#72](https://github.com/danielraffel/pulp/pull/72) | pending Phase 14 |
-| 10 | JS engine abstraction (V8/JSC) | phase/dsl-agentic-webgpu-v3-phase10 | **complete** (core abstraction merged; Phase 13 readiness floor still needs proof) | [#63](https://github.com/danielraffel/pulp/pull/63) | pending Phase 14 |
+| 10 | JS engine abstraction (V8/JSC) | phase/dsl-agentic-webgpu-v3-phase10 | **complete** (core abstraction merged; readiness floor now partially proven) | [#63](https://github.com/danielraffel/pulp/pull/63) | pending Phase 14 |
 | 11 | WebGPU compute exploration | phase/dsl-agentic-webgpu-v3-phase11 | **complete** | [#64](https://github.com/danielraffel/pulp/pull/64) | pending Phase 14 |
 | 12 | Offline video exploration | phase/dsl-agentic-webgpu-v3-phase12 | not started | — | — |
 | 13 | Three.js / WebGPU JS bridge | phase/dsl-agentic-webgpu-v3-phase13 | not started (10/11 merged; readiness pass required first) | — | — |
@@ -45,7 +45,7 @@ These phases are already on `main`:
 
 Current recommended landing order:
 - [x] Status / planning truth refresh
-- [ ] Phase 13 readiness pass (see `planning/v3-phase13-readiness.md`)
+- [ ] Phase 13 readiness pass (see `planning/v3-phase13-readiness.md`; typed arrays + V8 proof landed, HostObjects/Promises still open)
 - [ ] Phase 12 — Offline video exploration
 - [ ] Phase 13 — Three.js / WebGPU JS bridge
 - [ ] Phase 14 — Final verification pass
@@ -61,14 +61,14 @@ Before starting Phase 13 implementation work in earnest, prove the current merge
 - [x] verify `PULP_JS_ENGINE=quickjs|jsc|v8|auto` configure/build behavior on current `main`
 - [x] prove `quickjs` and `jsc` build/test cleanly on current `main`
 - [x] capture the real `v8` configure contract on current `main` (`V8_INCLUDE_DIR` + `V8_LIB_DIR` required)
-- [ ] prove `V8` really builds when enabled with external libs
-- [ ] assess whether the merged `JsEngine` layer already provides enough native-object / TypedArray / Promise support for Phase 13
+- [x] prove `V8` really builds when enabled with external libs
+- [x] assess whether the merged `JsEngine` layer already provides enough TypedArray support for the first readiness slice
 - [ ] write down the exact missing capability floor if the current abstraction is still short
 - [ ] define the first truthful Phase 13 test slice (engine selection, Three.js init, WebGPU binding smoke)
 
 Readiness note:
 - Current evidence is recorded in `planning/v3-phase13-readiness.md`.
-- Stock-checkout truth today is: `quickjs` and `jsc` are proven; `v8` is optional and dependency-conditional, not turnkey.
+- Stock-checkout truth today is: `quickjs` and `jsc` are proven; `v8` is optional and dependency-conditional, but now has a real explicit provider path on this machine via Homebrew Node + `V8_LIBRARY_PATH`.
 
 ## Open MVP Blockers
 
@@ -171,7 +171,7 @@ Record when each phase lands with notes on what was delivered vs what was deferr
 ### Phase 10 — JS engine abstraction
 - **Merged:** 2026-04-02 (`e2f7dda`)
 - **Delivered:** JS engine abstraction with QuickJS/JSC/V8 backends and tests
-- **Deferred:** higher-level Phase 13 readiness proof still needs explicit truthing for V8-enabled builds and native-object / TypedArray / Promise capability floor
+- **Deferred:** higher-level Phase 13 readiness work still needs HostObject / Promise capability floor and the first bridge smoke slice
 - **Notes:** this is one of the dependency unlocks for Phase 13, but not the end of Phase 13 readiness work
 
 ### Phase 11 — WebGPU compute exploration

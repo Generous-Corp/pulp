@@ -50,22 +50,28 @@ Result:
 Command:
 
 ```bash
-cmake -S . -B build-phase13-v8 -DCMAKE_BUILD_TYPE=Debug -DPULP_JS_ENGINE=v8
+cmake -S . -B build-phase13-v8 -DCMAKE_BUILD_TYPE=Debug -DPULP_JS_ENGINE=v8 \
+  -DV8_INCLUDE_DIR=/opt/homebrew/Cellar/node/25.8.2/include/node \
+  -DV8_LIB_DIR=/opt/homebrew/Cellar/node/25.8.2/lib \
+  -DV8_LIBRARY_PATH=/opt/homebrew/Cellar/node/25.8.2/lib/libnode.141.dylib
+cmake --build build-phase13-v8 --target pulp-test-js-engine -j8
+ctest --test-dir build-phase13-v8 -R "JsEngine" --output-on-failure
 ```
 
 Result:
-- configure: fails on a stock checkout unless external V8 paths are supplied
-- exact current error:
-
-```text
-PULP_JS_ENGINE=v8 requires V8_INCLUDE_DIR and V8_LIB_DIR
-```
+- configure: pass with explicit external V8 inputs
+- build: pass with the Node-provided embedder library
+- shared `JsEngine` tests: `24/24` passed
 
 Truth:
 - the V8 backend exists in code
 - V8 is not a turnkey stock-checkout backend today
-- V8 is dependency-conditional until explicit external V8 inputs are provided and proven
-- local machine note: there is a Homebrew `libnode` dylib, but no obvious `v8.h` embedder header set was found under `~/Code` or the Homebrew include path during this readiness pass
+- V8 is dependency-conditional until explicit external V8 inputs are supplied
+- a real V8-enabled proof path now exists on this machine via Homebrew Node's embedder layout
+- the current provider contract is:
+  - `V8_INCLUDE_DIR` -> header root containing `v8.h`
+  - `V8_LIB_DIR` -> library directory
+  - `V8_LIBRARY_PATH` -> actual provider library when it is not named `v8_monolith`
 
 ## Capability Floor Status For Phase 13
 
@@ -77,7 +83,7 @@ Current code truth:
 - `JsEngine::supports_promises()` defaults to `false`
 - `QuickJS` still reports typed arrays unsupported through the current Pulp seam
 - `JavaScriptCore` now surfaces TypedArray / ArrayBuffer values through the current Pulp seam and is covered by shared `JsEngine` tests
-- the `V8` backend now truthfully reports typed-array support in code, but a real V8-enabled configure/build/test path is still not proven on a stock machine
+- the `V8` backend now truthfully reports typed-array support in code and is proven in a real V8-enabled configure/build/test path when explicit external inputs are supplied
 - HostObjects and Promise-returning native APIs are still not implemented on any backend
 
 That means the current engine layer is sufficient for:
@@ -100,7 +106,7 @@ Before calling Phase 13 implementation "in progress", the following should be tr
 - [x] prove `jsc` configure/build/test on current `main`
 - [x] record the real `v8` configure contract on current `main`
 - [x] raise the first truthful capability slice: typed arrays where the backend already supports them
-- [ ] prove one real V8-enabled configure/build with external V8 inputs
+- [x] prove one real V8-enabled configure/build with external V8 inputs
 - [ ] decide whether Phase 13 starts as `v8-first` or `quickjs/jsc-first with V8 follow-up`
 - [ ] extend the `JsEngine` contract with the remaining minimum host-object / promise surface
 - [ ] add tests for that remaining surface before binding Dawn objects
@@ -108,12 +114,11 @@ Before calling Phase 13 implementation "in progress", the following should be tr
 
 ## Recommended Next Steps
 
-1. Prove one real V8-enabled configure/build/test path with explicit `V8_INCLUDE_DIR` and `V8_LIB_DIR`.
-2. Add the next capability slice for HostObjects and Promise-returning native async paths instead of leaving them as undocumented stubs.
-3. Decide whether the first bridge slice targets:
+1. Add the next capability slice for HostObjects and Promise-returning native async paths instead of leaving them as undocumented stubs.
+2. Decide whether the first bridge slice targets:
    - a `v8-first` path for Three.js realism, or
    - a thinner engine-agnostic proof slice first, with V8 performance proof immediately after.
-4. Only then start the actual Three.js / WebGPU bridge branch.
+3. Only then start the actual Three.js / WebGPU bridge branch.
 
 ## Related Tracking
 
