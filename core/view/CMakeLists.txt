@@ -60,6 +60,7 @@ target_sources(pulp-view PRIVATE
     src/app_framework.cpp
     src/canvas_widget.cpp
     src/frame_clock.cpp
+    src/window_manager.cpp
 )
 
 # WebView support — compiled separately to avoid WebKit framework auto-loading
@@ -124,6 +125,7 @@ if(APPLE)
     else()
         target_sources(pulp-view PRIVATE
             platform/mac/window_host_mac.mm
+            platform/mac/window_manager_mac.mm
             platform/mac/plugin_view_host_mac.mm
             platform/mac/screenshot_mac.mm
             platform/mac/drag_drop_mac.mm

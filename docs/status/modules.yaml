@@ -72,8 +72,12 @@ modules:
       Canvas 2D (25 commands), ImageView, ListBox (virtualized), ComboBox, ScrollView, TextEditor
       with IME, TreeView, ProgressBar, Tooltip. Web-compat JS prelude (document/Element/style/events/
       StyleSheet/querySelector). FrameClock animation with motion tokens. Hot-reload, inspector,
-      app framework, design export. Platform: cursor management, Tab focus, VoiceOver accessibility,
-      context menus, keyboard shortcuts, file dialogs. Pointer events, gestures, Apple Pencil.
+      app framework, design export. Multi-window framework (WindowManager): window registry,
+      parent-child cascading close, floating palettes, inspectors, popups, dialogs, shared theme
+      propagation, inter-window messaging, screen enumeration, window state save/restore, shared
+      GPU device for Dawn-backed rendering across windows. Platform: cursor management, Tab focus,
+      VoiceOver accessibility, context menus, keyboard shortcuts, file dialogs. Pointer events,
+      gestures, Apple Pencil.
     status: usable
     dependencies: [canvas, events, state]
     docs: reference/modules.md#view

@@ -531,5 +531,10 @@ target_include_directories(pulp-test-showcase PRIVATE
 )
 catch_discover_tests(pulp-test-showcase)
 
+# WindowManager multi-window framework tests (Phase 6)
+add_executable(pulp-test-window-manager test_window_manager.cpp)
+target_link_libraries(pulp-test-window-manager PRIVATE pulp::view Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-window-manager)
+
 # Web-compat test suite (Phase 6: CSS parsing, layout, events, visual regression)
 add_subdirectory(web-compat)

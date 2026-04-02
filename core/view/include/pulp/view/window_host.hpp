@@ -8,6 +8,8 @@
 
 namespace pulp::view {
 
+enum class WindowType;  // Forward-declared from window_manager.hpp
+
 struct WindowOptions {
     std::string title = "Pulp";
     float width = 400;
@@ -16,6 +18,14 @@ struct WindowOptions {
     float min_height = 0;  ///< Minimum window height (0 = no minimum)
     bool resizable = true;
     bool use_gpu = false;  ///< Use GPU rendering (Dawn/Skia Graphite) instead of CoreGraphics
+
+    // ── Multi-window hints (Phase 6) ────────────────────────────────────
+    // These are used by WindowManager to configure platform-specific
+    // window behavior. Callers creating standalone windows can ignore them.
+
+    WindowType* window_type = nullptr;  ///< Optional type hint for platform styling
+    void* parent_native_handle = nullptr; ///< Parent window handle (HWND, NSWindow*)
+    void* shared_gpu_device = nullptr;  ///< Shared Dawn device for multi-window GPU
 };
 
 // Native window that hosts a View tree and renders it

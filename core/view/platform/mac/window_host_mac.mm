@@ -1,4 +1,5 @@
 #include <pulp/view/window_host.hpp>
+#include <pulp/view/window_manager.hpp>
 #include <pulp/view/frame_clock.hpp>
 #include <pulp/view/widgets.hpp>
 #include <pulp/view/ui_components.hpp>
@@ -862,6 +863,57 @@ static pulp::view::KeyCode keyCodeFromNS(unsigned short code) {
 
 @end
 
+// ── Multi-window type configuration (Phase 6) ──────────────────────────────
+
+static void configure_window_type(NSWindow* window, const pulp::view::WindowOptions& options) {
+    if (!options.window_type) return;
+
+    using pulp::view::WindowType;
+    WindowType type = *options.window_type;
+
+    switch (type) {
+        case WindowType::palette:
+            // Floating palette: stays above main windows, no taskbar entry
+            [window setLevel:NSFloatingWindowLevel];
+            [window setHidesOnDeactivate:YES];
+            [window setCollectionBehavior:
+                NSWindowCollectionBehaviorTransient |
+                NSWindowCollectionBehaviorFullScreenAuxiliary];
+            break;
+
+        case WindowType::inspector:
+            // Inspector: floating, resizable, auxiliary panel
+            [window setLevel:NSFloatingWindowLevel];
+            [window setHidesOnDeactivate:YES];
+            [window setCollectionBehavior:
+                NSWindowCollectionBehaviorFullScreenAuxiliary];
+            break;
+
+        case WindowType::popup:
+            // Popup: above everything, auto-dismiss expected by caller
+            [window setLevel:NSPopUpMenuWindowLevel];
+            [window setHidesOnDeactivate:YES];
+            [window setCollectionBehavior:NSWindowCollectionBehaviorTransient];
+            break;
+
+        case WindowType::dialog:
+            // Dialog: modal window level, centered
+            [window setLevel:NSModalPanelWindowLevel];
+            [window center];
+            break;
+
+        case WindowType::main:
+            // Main: default behavior, no special configuration
+            break;
+    }
+
+    // Set parent-child relationship if a parent handle was provided
+    if (options.parent_native_handle) {
+        NSWindow* parent = (__bridge NSWindow*)options.parent_native_handle;
+        [parent addChildWindow:window ordered:NSWindowAbove];
+    }
+}
+
 // ── MacWindowHost (CoreGraphics) ─────────────────────────────────────────────
 
 namespace pulp::view {
@@ -885,6 +937,12 @@ public:
                                         defer:NO];
 
             [window_ setTitle:[NSString stringWithUTF8String:options.title.c_str()]];
+
+            // Apply multi-window type configuration (Phase 6)
+            configure_window_type(window_, options);
+
+            if (options.min_width > 0 || options.min_height > 0)
+                [window_ setContentMinSize:NSMakeSize(options.min_width, options.min_height)];
 
             view_ = [[PulpView alloc] initWithFrame:frame];
             view_.rootView = &root_;
@@ -958,6 +1016,12 @@ public:
                                         backing:NSBackingStoreBuffered
                                         defer:NO];
             [window_ setTitle:[NSString stringWithUTF8String:options.title.c_str()]];
+
+            // Apply multi-window type configuration (Phase 6)
+            configure_window_type(window_, options);
+
+            if (options.min_width > 0 || options.min_height > 0)
+                [window_ setContentMinSize:NSMakeSize(options.min_width, options.min_height)];
 
             // Create CAMetalLayer-backed view
             metal_view_ = [[PulpMetalView alloc] initWithFrame:frame];
