@@ -145,6 +145,7 @@ Required behavior while a job is active:
 - Use `validation=smoke` before full CI when the risk is install/export/build structure rather than runtime test behavior.
 - Treat `all targets on one SHA` as a goal, not a reason to blindly rerun already-green same-SHA targets.
 - On persistent local/self-hosted targets, prefer prepared same-SHA reruns for narrow follow-up validation and make `prepared=clean` vs `prepared=reused` visible in status/logs.
+- If a dead runner left behind a stale Windows validator, let the queue reclaim that specific remote validator before starting fresh work; treat that cleanup as part of the truthful narrow-rerun path, not as ad hoc manual SSH.
 
 Minimum incident response once a failure is visible:
 1. Capture the failing job id, target, SHA, validation mode, and first failing test/build step.

@@ -629,24 +629,8 @@ def job_sort_key(job: dict) -> tuple[int, str, str]:
 
 
 def reconcile_running_jobs_unlocked(queue: list[dict]) -> tuple[list[dict], bool]:
-    runner = read_runner_info()
-    runner_pid = runner.get("pid") if runner else None
-    runner_alive = pid_alive(runner_pid)
-
-    if runner and not runner_alive:
-        runner_info_path().unlink(missing_ok=True)
-        runner = None
-        runner_pid = None
-
     changed = False
-    for job in queue:
-        if job.get("status") != "running":
-            continue
-
-        job_runner = job.get("runner") or {}
-        if runner and runner_pid and job_runner.get("pid") == runner_pid:
-            continue
-
+    for job in stale_running_jobs_unlocked(queue):
         replacement = None
         for candidate in queue:
             if candidate.get("status") not in {"pending", "running"}:
@@ -702,6 +686,199 @@ def current_runner_info() -> dict | None:
             return None
     except LockBusyError:
         return info
+
+
+def stale_running_jobs_unlocked(queue: list[dict]) -> list[dict]:
+    runner = read_runner_info()
+    runner_pid = runner.get("pid") if runner else None
+    runner_alive = pid_alive(runner_pid)
+
+    if runner and not runner_alive:
+        runner_info_path().unlink(missing_ok=True)
+        runner = None
+        runner_pid = None
+
+    stale: list[dict] = []
+    for job in queue:
+        if job.get("status") != "running":
+            continue
+        job_runner = job.get("runner") or {}
+        if runner and runner_pid and job_runner.get("pid") == runner_pid:
+            continue
+        stale.append(job)
+    return stale
+
+
+def update_job_target_state(job_id: str, target_name: str, **fields) -> None:
+    with file_lock(queue_lock_path(), blocking=True):
+        queue = load_queue_unlocked()
+        job = find_job_unlocked(queue, job_id)
+        if job is None:
+            return
+
+        active_targets = dict(job.get("active_targets") or {})
+        state = dict(active_targets.get(target_name) or {})
+        for key, value in fields.items():
+            if value is None:
+                state.pop(key, None)
+            else:
+                state[key] = value
+
+        if state:
+            active_targets[target_name] = state
+        else:
+            active_targets.pop(target_name, None)
+
+        if active_targets:
+            job["active_targets"] = active_targets
+            job["last_progress_at"] = now_iso()
+        else:
+            job.pop("active_targets", None)
+            job.pop("last_progress_at", None)
+
+        save_queue_unlocked(queue)
+
+
+def collect_stale_windows_cleanup_candidates_unlocked(queue: list[dict]) -> list[dict]:
+    candidates: list[dict] = []
+    for job in stale_running_jobs_unlocked(queue):
+        active_targets = job.get("active_targets") or {}
+        state = dict(active_targets.get("windows") or {})
+        host = state.get("host")
+        validator_pid = state.get("validator_pid")
+        validator_started_at = state.get("validator_started_at")
+        if not host or validator_pid is None or not validator_started_at:
+            continue
+        if state.get("cleanup_requested_at"):
+            continue
+
+        state["cleanup_requested_at"] = now_iso()
+        state["cleanup_status"] = "requested"
+        state["cleanup_reason"] = "stale_runner_recovery"
+        active_targets["windows"] = state
+        job["active_targets"] = active_targets
+        job["last_progress_at"] = now_iso()
+        candidates.append(
+            {
+                "job_id": job["id"],
+                "target": "windows",
+                "host": host,
+                "validator_pid": int(validator_pid),
+                "validator_started_at": validator_started_at,
+            }
+        )
+    return candidates
+
+
+def cleanup_stale_windows_validator(host: str, pid: int, started_at: str) -> dict:
+    ps_script = f"""
+$PidToKill = {pid}
+$ExpectedStart = '{ps_literal(started_at)}'
+
+function Get-DescendantProcessIds {{
+    param([int]$RootPid)
+    $result = New-Object System.Collections.Generic.List[int]
+    $queue = New-Object System.Collections.Generic.Queue[int]
+    $queue.Enqueue($RootPid)
+    while ($queue.Count -gt 0) {{
+        $current = $queue.Dequeue()
+        $children = @(Get-CimInstance Win32_Process -Filter "ParentProcessId = $current" -ErrorAction SilentlyContinue)
+        foreach ($child in $children) {{
+            $childPid = [int]$child.ProcessId
+            $result.Add($childPid)
+            $queue.Enqueue($childPid)
+        }}
+    }}
+    return $result
+}}
+
+$result = [ordered]@{{
+    found = $false
+    matched = $false
+    killed = $false
+    pid = $PidToKill
+}}
+
+try {{
+    $proc = Get-Process -Id $PidToKill -ErrorAction SilentlyContinue
+    if ($null -ne $proc) {{
+        $result.found = $true
+        $start = $proc.StartTime.ToUniversalTime().ToString('o')
+        $result.start = $start
+        if ($ExpectedStart -and $start -ne $ExpectedStart) {{
+            $result.matched = $false
+        }} else {{
+            $result.matched = $true
+            $children = @(Get-DescendantProcessIds -RootPid $PidToKill | Sort-Object -Descending -Unique)
+            foreach ($childPid in $children) {{
+                try {{
+                    Stop-Process -Id $childPid -Force -ErrorAction Stop
+                }} catch {{
+                }}
+            }}
+            Stop-Process -Id $PidToKill -Force -ErrorAction Stop
+            $result.killed = $true
+            $result.children = @($children)
+        }}
+    }}
+}} catch {{
+    $result.error = $_.Exception.Message
+}}
+
+$result | ConvertTo-Json -Compress
+""".strip()
+    run = run_logged_command(
+        windows_ssh_powershell_command(host),
+        input_text=ps_script,
+        timeout=120,
+    )
+    lines = [line.strip() for line in run["output"].splitlines() if line.strip()]
+    payload = {}
+    if lines:
+        try:
+            payload = json.loads(lines[-1])
+        except json.JSONDecodeError:
+            payload = {"error": trim_line(lines[-1])}
+    if run["returncode"] != 0:
+        payload.setdefault("error", f"cleanup command exited {run['returncode']}")
+    return payload
+
+
+def reclaim_stale_remote_validators(_config: dict) -> int:
+    with file_lock(queue_lock_path(), blocking=True):
+        queue = load_queue_unlocked()
+        candidates = collect_stale_windows_cleanup_candidates_unlocked(queue)
+        if candidates:
+            save_queue_unlocked(queue)
+
+    for candidate in candidates:
+        result = cleanup_stale_windows_validator(
+            candidate["host"],
+            candidate["validator_pid"],
+            candidate["validator_started_at"],
+        )
+        update_job_target_state(
+            candidate["job_id"],
+            candidate["target"],
+            cleanup_completed_at=now_iso(),
+            cleanup_status=(
+                "killed"
+                if result.get("killed")
+                else "not-found"
+                if not result.get("found", True)
+                else "mismatch"
+                if result.get("found") and not result.get("matched", True)
+                else "error"
+                if result.get("error")
+                else "checked"
+            ),
+            cleanup_result=trim_line(json.dumps(result, sort_keys=True)),
+            validator_pid=None if result.get("killed") or not result.get("found", True) else candidate["validator_pid"],
+            validator_started_at=None
+            if result.get("killed") or not result.get("found", True)
+            else candidate["validator_started_at"],
+        )
+    return len(candidates)
 
 
 def write_runner_info(info: dict) -> None:
@@ -1118,6 +1295,14 @@ def parse_progress_marker(line: str) -> dict:
         return {"test_policy": stripped.split(":", 1)[1]}
     if stripped.startswith("__PULP_PREPARED__:"):
         return {"prepared_state": stripped.split(":", 1)[1]}
+    if stripped.startswith("__PULP_VALIDATOR_PID__:"):
+        value = stripped.split(":", 1)[1]
+        try:
+            return {"validator_pid": int(value)}
+        except ValueError:
+            return {"validator_pid": value}
+    if stripped.startswith("__PULP_VALIDATOR_STARTED__:"):
+        return {"validator_started_at": stripped.split(":", 1)[1]}
     return {}
 
 
@@ -1724,8 +1909,11 @@ $UsePrepared = $false
 $MutexName = 'Global\\PulpLocalCIValidate'
 $Mutex = New-Object System.Threading.Mutex($false, $MutexName)
 $LockAcquired = $false
+$ValidatorStartedAt = (Get-Process -Id $PID).StartTime.ToUniversalTime().ToString('o')
 
 try {{
+    Write-Host "__PULP_VALIDATOR_PID__:$PID"
+    Write-Host "__PULP_VALIDATOR_STARTED__:$ValidatorStartedAt"
     if (-not (Wait-HostMutex -Mutex $Mutex -Immediate $true)) {{
         Write-Host "__PULP_WAIT__:host-lock"
         Write-Host "__PULP_PHASE__:waiting-lock"
@@ -2136,6 +2324,7 @@ def drain_pending_jobs(config: dict, *, blocking: bool) -> tuple[bool, bool]:
             any_failure = False
 
             while True:
+                reclaim_stale_remote_validators(config)
                 job = claim_next_job()
                 if job is None:
                     break
@@ -2655,6 +2844,8 @@ def cmd_status(_args: argparse.Namespace) -> int:
                     details.append(f"prepared={state['prepared_state']}")
                 if state.get("wait_reason"):
                     details.append(f"wait={state['wait_reason']}")
+                if state.get("cleanup_status"):
+                    details.append(f"cleanup={state['cleanup_status']}")
                 if state.get("last_output_at"):
                     details.append(f"output={state['last_output_at']}")
                 if state.get("log_path"):
@@ -2663,6 +2854,8 @@ def cmd_status(_args: argparse.Namespace) -> int:
                     print(f"    {name}: " + ", ".join(details))
                 if state.get("last_line"):
                     print(f"      {state['last_line']}")
+                if state.get("cleanup_result"):
+                    print(f"      cleanup: {state['cleanup_result']}")
     else:
         print("\nNo running jobs.")
 
@@ -2690,6 +2883,8 @@ def cmd_status(_args: argparse.Namespace) -> int:
                     details.append(f"prepared={state['prepared_state']}")
                 if state.get("wait_reason"):
                     details.append(f"wait={state['wait_reason']}")
+                if state.get("cleanup_status"):
+                    details.append(f"cleanup={state['cleanup_status']}")
                 if state.get("last_output_at"):
                     details.append(f"output={state['last_output_at']}")
                 if state.get("log_path"):
@@ -2698,6 +2893,8 @@ def cmd_status(_args: argparse.Namespace) -> int:
                     print(f"    {name}: " + ", ".join(details))
                 if state.get("last_line"):
                     print(f"      {state['last_line']}")
+                if state.get("cleanup_result"):
+                    print(f"      cleanup: {state['cleanup_result']}")
     else:
         print("\nNo pending jobs.")
 

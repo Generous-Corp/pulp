@@ -7,6 +7,7 @@ import os
 import tempfile
 import threading
 import unittest
+from unittest import mock
 from contextlib import redirect_stdout
 from pathlib import Path
 from types import SimpleNamespace
@@ -611,6 +612,53 @@ class LocalCiTests(unittest.TestCase):
         self.assertIn("function Wait-HostMutex", captured["input_text"])
         self.assertIn("AbandonedMutexException", captured["input_text"])
         self.assertIn("Recovered abandoned host validation lock: $MutexName", captured["input_text"])
+        self.assertIn('Write-Host "__PULP_VALIDATOR_PID__:$PID"', captured["input_text"])
+        self.assertIn('Write-Host "__PULP_VALIDATOR_STARTED__:$ValidatorStartedAt"', captured["input_text"])
+
+    def test_reclaim_stale_remote_validators_cleans_targeted_windows_pid(self):
+        job, _created = self.mod.enqueue_job(
+            "feature/stale",
+            "d" * 40,
+            "normal",
+            ["windows"],
+            "run",
+            "full",
+        )
+
+        with self.mod.file_lock(self.mod.queue_lock_path(), blocking=True):
+            queue = self.mod.load_queue_unlocked()
+            stored = self.mod.find_job_unlocked(queue, job["id"])
+            self.assertIsNotNone(stored)
+            stored["status"] = "running"
+            stored["runner"] = {"pid": 999999, "root": "/dead-runner"}
+            stored["active_targets"] = {
+                "windows": {
+                    "status": "running",
+                    "host": "win",
+                    "validator_pid": 4321,
+                    "validator_started_at": "2026-04-02T04:00:00+00:00",
+                    "phase": "waiting-lock",
+                }
+            }
+            self.mod.save_queue_unlocked(queue)
+
+        with mock.patch.object(
+            self.mod,
+            "cleanup_stale_windows_validator",
+            return_value={"found": True, "matched": True, "killed": True, "pid": 4321},
+        ) as cleanup:
+            reclaimed = self.mod.reclaim_stale_remote_validators({})
+
+        self.assertEqual(reclaimed, 1)
+        cleanup.assert_called_once_with("win", 4321, "2026-04-02T04:00:00+00:00")
+
+        refreshed = self.mod.load_job(job["id"])
+        self.assertIsNotNone(refreshed)
+        state = refreshed["active_targets"]["windows"]
+        self.assertEqual(state["cleanup_status"], "killed")
+        self.assertIn("cleanup_completed_at", state)
+        self.assertNotIn("validator_pid", state)
+        self.assertNotIn("validator_started_at", state)
 
     def test_windows_validation_checks_commit_refs_quietly(self):
         captured = {}
@@ -904,6 +952,14 @@ class LocalCiTests(unittest.TestCase):
         self.assertEqual(
             self.mod.parse_progress_marker("__PULP_PREPARED__:reused\n"),
             {"prepared_state": "reused"},
+        )
+        self.assertEqual(
+            self.mod.parse_progress_marker("__PULP_VALIDATOR_PID__:4321\n"),
+            {"validator_pid": 4321},
+        )
+        self.assertEqual(
+            self.mod.parse_progress_marker("__PULP_VALIDATOR_STARTED__:2026-04-02T04:00:00+00:00\n"),
+            {"validator_started_at": "2026-04-02T04:00:00+00:00"},
         )
         self.assertEqual(self.mod.parse_progress_marker("normal output\n"), {})
 
