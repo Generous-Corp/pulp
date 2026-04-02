@@ -4,6 +4,7 @@ References:
 - planning/dsl-agentic-validation-webgpu-audit-v3.md
 - planning/ralph-loop-prompt-dsl-agentic-webgpu-v3-phase10-jsengine.md
 - planning/ralph-loop-prompt-dsl-agentic-webgpu-v3-phase11-webgpu.md
+- planning/v3-phase13-readiness.md
 - core/view/include/pulp/view/script_engine.hpp
 - core/view/src/script_engine.cpp
 - core/render/src/gpu_surface_dawn.cpp
@@ -31,6 +32,13 @@ GOAL:
 Build a native WebGPU JavaScript API bridge so that Three.js (and other WebGPU-based JS libraries)
 can run natively inside Pulp's JS engine against Dawn — no browser, no WebView. JavaScript 3D scene
 code renders at full GPU speed, composited into the same surface as the 2D Skia UI.
+
+READINESS SNAPSHOT (2026-04-02):
+- The Phase 10 engine abstraction is merged on `main`.
+- `quickjs` and `jsc` are configure/build/test-proven on current `main`.
+- `v8` exists in code but is not a turnkey stock-checkout backend; it currently requires explicit `V8_INCLUDE_DIR` and `V8_LIB_DIR`.
+- The current `JsEngine` capability floor for HostObjects, TypedArrays, and Promises is still not implemented or proven.
+- Read `planning/v3-phase13-readiness.md` before treating this phase as ready to implement.
 
 CONCEPT:
 Three.js's WebGPU renderer calls the standard WebGPU JavaScript API. This phase implements those
@@ -101,6 +109,7 @@ NON-NEGOTIABLES:
 - 3D rendering must composite into the same GPU surface as 2D Skia UI.
 - V8 is the recommended engine. QuickJS will work for simple scenes but will struggle with
   complex Three.js workloads (Three.js library is ~1MB of JS to parse and JIT).
+  This is a target state, not current stock-checkout proof.
 - The bridge is optional: build flag PULP_BUILD_WEBGPU_JS_BRIDGE.
 - Do not fork or modify Three.js. The goal is API compatibility.
 - Dawn device MUST be shared between Skia Graphite and the WebGPU JS bridge.

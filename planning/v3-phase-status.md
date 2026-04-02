@@ -15,7 +15,7 @@
 | 4 | Cmajor adapter | phase/dsl-agentic-webgpu-v3-phase4 | parked (license policy blocker) | — | — |
 | 5 | JSFX adapter | phase/dsl-agentic-webgpu-v3-phase5 | blocked (needs 4 / licensing decision) | — | — |
 | 6 | Multi-window framework | phase/dsl-agentic-webgpu-v3-phase6 | **complete** | [#60](https://github.com/danielraffel/pulp/pull/60) | pending Phase 14 |
-| 7 | WebView integration (iPlug2-style) | feature/v3-phase7-webview | in progress | — | local focused proof; pending PR/CI |
+| 7 | WebView integration (iPlug2-style) | feature/v3-phase7-webview | **complete** (macOS-native scope; Windows/Linux follow-up tracked) | [#91](https://github.com/danielraffel/pulp/pull/91) | focused native proof on macOS; cross-platform gap tracked in [#92](https://github.com/danielraffel/pulp/issues/92) |
 | 8 | Audio visualization (STFT/spectrogram) | phase/dsl-agentic-webgpu-v3-phase8 | **complete** | [#62](https://github.com/danielraffel/pulp/pull/62) | pending Phase 14 |
 | 9 | Widgets + assets + themes | phase/dsl-agentic-webgpu-v3-phase9 | **complete** | [#72](https://github.com/danielraffel/pulp/pull/72) | pending Phase 14 |
 | 10 | JS engine abstraction (V8/JSC) | phase/dsl-agentic-webgpu-v3-phase10 | **complete** (core abstraction merged; Phase 13 readiness floor still needs proof) | [#63](https://github.com/danielraffel/pulp/pull/63) | pending Phase 14 |
@@ -45,8 +45,7 @@ These phases are already on `main`:
 
 Current recommended landing order:
 - [x] Status / planning truth refresh
-- [ ] Phase 7 — WebView integration
-- [ ] Phase 13 readiness pass (prove V8-enabled build path and exact capability floor)
+- [ ] Phase 13 readiness pass (see `planning/v3-phase13-readiness.md`)
 - [ ] Phase 12 — Offline video exploration
 - [ ] Phase 13 — Three.js / WebGPU JS bridge
 - [ ] Phase 14 — Final verification pass
@@ -59,11 +58,21 @@ Parked pending license-policy resolution:
 ## Phase 13 Readiness Gate
 
 Before starting Phase 13 implementation work in earnest, prove the current merged prerequisites are actually sufficient:
-- [ ] verify `PULP_JS_ENGINE=quickjs|jsc|v8|auto` configure/build behavior on current `main`
-- [ ] prove `V8` really builds when enabled with external libs, or narrow the claim
+- [x] verify `PULP_JS_ENGINE=quickjs|jsc|v8|auto` configure/build behavior on current `main`
+- [x] prove `quickjs` and `jsc` build/test cleanly on current `main`
+- [x] capture the real `v8` configure contract on current `main` (`V8_INCLUDE_DIR` + `V8_LIB_DIR` required)
+- [ ] prove `V8` really builds when enabled with external libs
 - [ ] assess whether the merged `JsEngine` layer already provides enough native-object / TypedArray / Promise support for Phase 13
 - [ ] write down the exact missing capability floor if the current abstraction is still short
 - [ ] define the first truthful Phase 13 test slice (engine selection, Three.js init, WebGPU binding smoke)
+
+Readiness note:
+- Current evidence is recorded in `planning/v3-phase13-readiness.md`.
+- Stock-checkout truth today is: `quickjs` and `jsc` are proven; `v8` is optional and dependency-conditional, not turnkey.
+
+## Open MVP Blockers
+
+- [ ] [#92](https://github.com/danielraffel/pulp/issues/92) — add native WebView support on Windows and Linux so the Phase 7 API is not macOS-only in shipped form
 
 ## Sequential Chain: DSLs
 
@@ -74,7 +83,7 @@ Before starting Phase 13 implementation work in earnest, prove the current merge
 ## Sequential Chain: Multi-window → WebView
 
 - [x] Phase 6 (multi-window) → merged to main
-- [ ] Phase 7 (WebView) → merge to main
+- [x] Phase 7 (WebView) → merged to main with macOS-native proof; Windows/Linux parity deferred to [#92](https://github.com/danielraffel/pulp/issues/92)
 
 ## Sequential Chain: Late phases
 
@@ -142,10 +151,10 @@ Record when each phase lands with notes on what was delivered vs what was deferr
 - **Notes:** this is the dependency unlock for Phase 7
 
 ### Phase 7 — WebView integration
-- **Merged:** —
-- **Delivered:** bridge/resource-serving/docs slices currently in active branch work, not yet merged
-- **Deferred:** native backend hardening, examples, PR/CI, final acceptance proof
-- **Notes:** active branch is `feature/v3-phase7-webview`; Phase 6 dependency is already on `main`
+- **Merged:** 2026-04-02 (`ac9a8e2`)
+- **Delivered:** native WebView bridge on macOS, bundled resource serving, host embedding seam, palette example, Monaco example, focused WebView tests, WebView guide, and `webview-ui` skill
+- **Deferred:** Windows/WebView2 and Linux/WebKitGTK native backends remain follow-up platform work
+- **Notes:** shipped scope is macOS-native only today; the cross-platform backend gap is tracked explicitly in [#92](https://github.com/danielraffel/pulp/issues/92)
 
 ### Phase 8 — Audio visualization
 - **Merged:** 2026-04-02 (`de946d1`)
@@ -181,10 +190,10 @@ Record when each phase lands with notes on what was delivered vs what was deferr
 - **Merged:** —
 - **Delivered:** —
 - **Deferred:** —
-- **Notes:** prerequisites are merged, but the implementation queue intentionally includes a readiness pass first so the bridge starts from proven engine/build facts
+- **Notes:** prerequisites are merged, but the implementation queue intentionally includes a readiness pass first so the bridge starts from proven engine/build facts; see `planning/v3-phase13-readiness.md`
 
 ### Phase 14 — Verification pass
 - **Merged:** —
 - **Delivered:** —
 - **Deferred:** —
-- **Notes:** final end-to-end verification remains after Phases 7, 12, and 13, plus an explicit disposition for the parked Cmajor/JSFX phases (tracked in [#89](https://github.com/danielraffel/pulp/issues/89), not silent omission)
+- **Notes:** final end-to-end verification remains after Phases 12 and 13, plus explicit disposition tracking for the parked Cmajor/JSFX phases ([#89](https://github.com/danielraffel/pulp/issues/89)) and the deferred Windows/Linux WebView parity gap ([#92](https://github.com/danielraffel/pulp/issues/92))

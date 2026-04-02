@@ -87,11 +87,12 @@ VERIFICATION CHECKLIST PER PHASE:
 - [ ] shared Dawn device across all windows (verify: not multiple devices)
 
 ### Phase 7 — WebView integration
-- [ ] WKWebView on macOS, WebView2 on Windows (no Chromium bundled)
+- [ ] shipped scope is documented truthfully: WKWebView-backed native host is proven on macOS, while Windows/WebView2 and Linux/WebKitGTK parity is either implemented or explicitly deferred to a tracked issue
 - [ ] bidirectional JS↔native message bridge works
 - [ ] custom URL scheme serves bundled resources
 - [ ] Monaco editor or equivalent example works
 - [ ] docs position WebView as optional compatibility layer
+- [ ] if Windows/Linux native backends are still deferred, the gap is linked to a tracked issue and no docs imply those hosts already ship
 
 ### Phase 8 — Audio visualization
 - [ ] STFT abstraction exists with configurable window/FFT size/hop size
@@ -114,11 +115,12 @@ VERIFICATION CHECKLIST PER PHASE:
 ### Phase 10 — JS engine abstraction
 - [ ] QuickJS backend passes shared test suite
 - [ ] JSC backend works on macOS (if Apple hardware available)
-- [ ] V8 backend works on desktop
+- [ ] V8 backend works on desktop when explicit external V8 inputs are provided
 - [ ] PULP_JS_ENGINE=auto|quickjs|jsc|v8 CMake option works
 - [ ] HostObject-style native binding API exists (Phase 13 forward compat)
 - [ ] TypedArray zero-copy between JS and C++ verified
 - [ ] Promise support from C++ to JS verified
+- [ ] docs do not overclaim turnkey V8 support if the build still requires explicit external inputs
 - [ ] performance benchmarks documented
 
 ### Phase 11 — WebGPU compute exploration
