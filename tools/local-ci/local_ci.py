@@ -47,6 +47,8 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 PRIORITY_VALUES = {"low": 10, "normal": 50, "high": 100}
 WAIT_POLL_SECS = 3
 KEEP_COMPLETED_JOBS = 25
+HEARTBEAT_INTERVAL_SECS = 15.0
+STUCK_IDLE_SECS = 90.0
 _BUNDLE_BUILD_LOCK = threading.Lock()
 
 
@@ -1322,6 +1324,8 @@ def run_logged_command(
     timeout: int = 3600,
     log_path: Path | None = None,
     report_progress=None,
+    heartbeat_interval_secs: float = HEARTBEAT_INTERVAL_SECS,
+    stuck_idle_secs: float = STUCK_IDLE_SECS,
 ) -> dict:
     start = time.time()
     proc = subprocess.Popen(
@@ -1352,6 +1356,8 @@ def run_logged_command(
 
     combined: list[str] = []
     saw_eof = False
+    last_output_ts = start
+    last_heartbeat_ts = start
     log_handle = log_path.open("a", errors="replace") if log_path else None
     try:
         while True:
@@ -1370,10 +1376,27 @@ def run_logged_command(
                 }
 
             try:
-                item = output_queue.get(timeout=min(0.25, max(remaining, 0.01)))
+                poll_timeout = 0.25
+                if heartbeat_interval_secs > 0:
+                    poll_timeout = min(poll_timeout, max(heartbeat_interval_secs / 2.0, 0.01))
+                item = output_queue.get(timeout=min(poll_timeout, max(remaining, 0.01)))
             except queue_module.Empty:
                 if proc.poll() is not None and saw_eof:
                     break
+                now = time.time()
+                quiet_for_secs_raw = now - last_output_ts
+                quiet_for_secs = int(round(quiet_for_secs_raw))
+                if (
+                    report_progress
+                    and proc.poll() is None
+                    and (now - last_heartbeat_ts) >= heartbeat_interval_secs
+                ):
+                    report_progress(
+                        last_heartbeat_at=now_iso(),
+                        quiet_for_secs=quiet_for_secs,
+                        liveness="stuck" if quiet_for_secs_raw >= stuck_idle_secs else "quiet",
+                    )
+                    last_heartbeat_ts = now
                 continue
 
             if item is None:
@@ -1388,7 +1411,12 @@ def run_logged_command(
                 if log_handle is not None:
                     log_handle.write(item)
                     log_handle.flush()
+                last_output_ts = time.time()
+                last_heartbeat_ts = last_output_ts
                 progress["last_output_at"] = now_iso()
+                progress["last_heartbeat_at"] = None
+                progress["quiet_for_secs"] = None
+                progress["liveness"] = None
                 if report_progress:
                     report_progress(**progress)
                 continue
@@ -1400,7 +1428,14 @@ def run_logged_command(
 
             stripped = item.strip()
             if report_progress:
-                fields = {"last_output_at": now_iso()}
+                last_output_ts = time.time()
+                last_heartbeat_ts = last_output_ts
+                fields = {
+                    "last_output_at": now_iso(),
+                    "last_heartbeat_at": None,
+                    "quiet_for_secs": None,
+                    "liveness": None,
+                }
                 if stripped:
                     fields["last_line"] = trim_line(stripped)
                 report_progress(**fields)
@@ -2848,6 +2883,12 @@ def cmd_status(_args: argparse.Namespace) -> int:
                     details.append(f"cleanup={state['cleanup_status']}")
                 if state.get("last_output_at"):
                     details.append(f"output={state['last_output_at']}")
+                if state.get("last_heartbeat_at"):
+                    details.append(f"heartbeat={state['last_heartbeat_at']}")
+                if state.get("quiet_for_secs") is not None:
+                    details.append(f"idle={state['quiet_for_secs']}s")
+                if state.get("liveness"):
+                    details.append(f"liveness={state['liveness']}")
                 if state.get("log_path"):
                     details.append(f"log={Path(state['log_path']).name}")
                 if details:
@@ -2887,6 +2928,12 @@ def cmd_status(_args: argparse.Namespace) -> int:
                     details.append(f"cleanup={state['cleanup_status']}")
                 if state.get("last_output_at"):
                     details.append(f"output={state['last_output_at']}")
+                if state.get("last_heartbeat_at"):
+                    details.append(f"heartbeat={state['last_heartbeat_at']}")
+                if state.get("quiet_for_secs") is not None:
+                    details.append(f"idle={state['quiet_for_secs']}s")
+                if state.get("liveness"):
+                    details.append(f"liveness={state['liveness']}")
                 if state.get("log_path"):
                     details.append(f"log={Path(state['log_path']).name}")
                 if details:

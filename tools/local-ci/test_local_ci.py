@@ -1034,6 +1034,36 @@ class LocalCiTests(unittest.TestCase):
         self.assertEqual(seen["test_policy"], "skip")
         self.assertEqual(seen["phase"], "build")
 
+    def test_run_logged_command_emits_quiet_heartbeat_and_stuck_state(self):
+        seen: list[dict] = []
+
+        def report_progress(**fields):
+            seen.append(dict(fields))
+
+        result = self.mod.run_logged_command(
+            [
+                "python3",
+                "-c",
+                "import time; time.sleep(0.18); print('done')",
+            ],
+            report_progress=report_progress,
+            heartbeat_interval_secs=0.05,
+            stuck_idle_secs=0.1,
+        )
+
+        self.assertEqual(result["returncode"], 0)
+        heartbeat_events = [item for item in seen if item.get("last_heartbeat_at")]
+        self.assertTrue(heartbeat_events, msg=f"missing heartbeat events in {seen}")
+        self.assertTrue(
+            any(item.get("liveness") == "quiet" for item in heartbeat_events),
+            msg=f"missing quiet heartbeat in {heartbeat_events}",
+        )
+        self.assertTrue(
+            any(item.get("liveness") == "stuck" for item in heartbeat_events),
+            msg=f"missing stuck heartbeat in {heartbeat_events}",
+        )
+        self.assertTrue(any(item.get("last_output_at") for item in seen))
+
     def test_run_logged_command_replaces_invalid_utf8_bytes(self):
         log_path = self.state_dir / "nonutf8.log"
         log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1229,6 +1259,65 @@ class LocalCiTests(unittest.TestCase):
         self.assertIn("Evidence (feature/status-evidence):", output)
         self.assertIn("333333333333", output)
         self.assertIn("mac=pass, ubuntu=pass, windows=pass", output)
+
+    def test_cmd_status_shows_heartbeat_idle_and_liveness(self):
+        job, _created = self.mod.enqueue_job(
+            "feature/observability",
+            "4" * 40,
+            "normal",
+            ["windows"],
+            "run",
+            "full",
+        )
+        with self.mod.file_lock(self.mod.queue_lock_path(), blocking=True):
+            queue = self.mod.load_queue_unlocked()
+            stored = self.mod.find_job_unlocked(queue, job["id"])
+            self.assertIsNotNone(stored)
+            stored["status"] = "running"
+            stored["started_at"] = "2026-04-02T05:00:00+00:00"
+            stored["runner"] = {"pid": os.getpid(), "root": str(self.state_dir)}
+            stored["active_targets"] = {
+                "windows": {
+                    "status": "running",
+                    "phase": "build",
+                    "last_output_at": "2026-04-02T05:00:10+00:00",
+                    "last_heartbeat_at": "2026-04-02T05:01:10+00:00",
+                    "quiet_for_secs": 60,
+                    "liveness": "stuck",
+                    "log_path": str(self.state_dir / "logs" / "job.log"),
+                }
+            }
+            self.mod.save_queue_unlocked(queue)
+            self.mod.write_runner_info(
+                {
+                    "pid": os.getpid(),
+                    "root": str(self.state_dir),
+                    "active_job_id": job["id"],
+                    "active_branch": job["branch"],
+                    "active_targets": stored["active_targets"],
+                }
+            )
+
+        original_current_branch = self.mod.current_branch
+        original_utm_status = self.mod.utmctl_vm_status
+        original_ssh_reachable = self.mod.ssh_reachable
+        self.mod.current_branch = lambda: "feature/observability"
+        self.mod.utmctl_vm_status = lambda vm_name: "stopped"
+        self.mod.ssh_reachable = lambda host, timeout=5: True
+        try:
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                exit_code = self.mod.cmd_status(SimpleNamespace())
+        finally:
+            self.mod.current_branch = original_current_branch
+            self.mod.utmctl_vm_status = original_utm_status
+            self.mod.ssh_reachable = original_ssh_reachable
+
+        output = buf.getvalue()
+        self.assertEqual(exit_code, 0)
+        self.assertIn("heartbeat=2026-04-02T05:01:10+00:00", output)
+        self.assertIn("idle=60s", output)
+        self.assertIn("liveness=stuck", output)
 
 
 if __name__ == "__main__":

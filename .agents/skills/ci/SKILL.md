@@ -102,7 +102,7 @@ gh pr list --json number,title,author,headRefName,createdAt,labels --template '{
 python3 tools/local-ci/local_ci.py status
 ```
 
-While a job is still running, `status` can show live target state for the active job, for example `mac=pass, ubuntu=pass, windows=running`.
+While a job is still running, `status` can show live target state for the active job, for example `mac=pass, ubuntu=pass, windows=running`. Quiet phases should now surface heartbeat and idle/liveness hints instead of looking dead by default.
 
 ### `logs [job]` — Tail a saved target log
 
