@@ -226,6 +226,62 @@ TEST_CASE("JsEngine default engine creation", "[js_engine]") {
     REQUIRE(engine->is_valid());
 }
 
+TEST_CASE("JsEngine capability flags are truthful", "[js_engine]") {
+    FOR_EACH_ENGINE(engine)
+        REQUIRE_FALSE(engine->supports_host_objects());
+        REQUIRE_FALSE(engine->supports_promises());
+
+        switch (engine->type()) {
+            case JsEngineType::quickjs:
+                REQUIRE_FALSE(engine->supports_typed_arrays());
+                break;
+            case JsEngineType::jsc:
+            case JsEngineType::v8:
+                REQUIRE(engine->supports_typed_arrays());
+                break;
+        }
+    END_FOR_EACH_ENGINE
+}
+
+TEST_CASE("JsEngine typed array evaluation", "[js_engine]") {
+    FOR_EACH_ENGINE(engine)
+        if (!engine->supports_typed_arrays()) {
+            SUCCEED("typed arrays intentionally unsupported on this backend");
+            continue;
+        }
+
+        auto result = engine->evaluate("new Uint8Array([1, 2, 255])");
+        REQUIRE(result.isArray());
+        REQUIRE(result.size() == 3);
+        REQUIRE(result[0].getWithDefault<int32_t>(0) == 1);
+        REQUIRE(result[1].getWithDefault<int32_t>(0) == 2);
+        REQUIRE(result[2].getWithDefault<int32_t>(0) == 255);
+    END_FOR_EACH_ENGINE
+}
+
+TEST_CASE("JsEngine typed array reaches native callbacks when supported", "[js_engine]") {
+    FOR_EACH_ENGINE(engine)
+        if (!engine->supports_typed_arrays()) {
+            SUCCEED("typed arrays intentionally unsupported on this backend");
+            continue;
+        }
+
+        engine->register_function("sumTyped", [](const choc::value::Value* args, size_t count) {
+            REQUIRE(count == 1);
+            REQUIRE(args[0].isArray());
+
+            int total = 0;
+            for (uint32_t i = 0; i < args[0].size(); ++i)
+                total += args[0][static_cast<int>(i)].getWithDefault<int32_t>(0);
+
+            return choc::value::createInt32(total);
+        });
+
+        auto result = engine->evaluate("sumTyped(new Uint8Array([3, 4, 5]))");
+        REQUIRE(result.getWithDefault<int32_t>(0) == 12);
+    END_FOR_EACH_ENGINE
+}
+
 TEST_CASE("JsEngine gc_hint does not crash", "[js_engine]") {
     FOR_EACH_ENGINE(engine)
         engine->evaluate("var arr = []; for (var i = 0; i < 1000; i++) arr.push({x: i}); void 0");

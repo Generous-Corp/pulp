@@ -96,7 +96,7 @@ public:
 
     // V8 has the richest native object support — Phase 13 will enable these
     bool supports_host_objects() const override { return false; }
-    bool supports_typed_arrays() const override { return false; }
+    bool supports_typed_arrays() const override { return true; }
     bool supports_promises() const override { return false; }
 
 private:

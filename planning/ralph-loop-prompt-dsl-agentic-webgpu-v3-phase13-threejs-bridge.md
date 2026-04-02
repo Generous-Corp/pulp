@@ -37,7 +37,10 @@ READINESS SNAPSHOT (2026-04-02):
 - The Phase 10 engine abstraction is merged on `main`.
 - `quickjs` and `jsc` are configure/build/test-proven on current `main`.
 - `v8` exists in code but is not a turnkey stock-checkout backend; it currently requires explicit `V8_INCLUDE_DIR` and `V8_LIB_DIR`.
-- The current `JsEngine` capability floor for HostObjects, TypedArrays, and Promises is still not implemented or proven.
+- The current `JsEngine` capability floor is only partially raised:
+  - typed arrays are now a real tested capability on `jsc`
+  - `v8` advertises typed-array support in code, but still lacks stock-machine build proof
+  - HostObjects and Promises are still not implemented or proven
 - Read `planning/v3-phase13-readiness.md` before treating this phase as ready to implement.
 
 CONCEPT:

@@ -8,6 +8,7 @@
 
 #import <JavaScriptCore/JavaScriptCore.h>
 #include <choc/text/choc_JSON.h>
+#include <cstdint>
 #include <string>
 #include <unordered_map>
 #include <stdexcept>
@@ -16,6 +17,94 @@ namespace pulp::view {
 
 // Forward declaration
 static JSValue* choc_to_jsc(JSContext* ctx, const choc::value::Value& value);
+
+template <typename ElementType, typename ConvertFn>
+static choc::value::Value typed_array_to_choc_array(const ElementType* data,
+                                                    size_t length,
+                                                    ConvertFn convert) {
+    return choc::value::createArray(static_cast<uint32_t>(length),
+        [data, convert](uint32_t index) -> choc::value::Value {
+            return convert(data[index]);
+        });
+}
+
+static choc::value::Value jsc_typed_array_to_choc(JSContext* ctx, JSValue* value) {
+    JSContextRef raw_ctx = [ctx JSGlobalContextRef];
+    JSValueRef exception = nullptr;
+    auto typed_array_type = JSValueGetTypedArrayType(raw_ctx, [value JSValueRef], &exception);
+
+    if (exception != nullptr || typed_array_type == kJSTypedArrayTypeNone)
+        return {};
+
+    JSObjectRef object = JSValueToObject(raw_ctx, [value JSValueRef], &exception);
+    if (exception != nullptr || object == nullptr)
+        return {};
+
+    if (typed_array_type == kJSTypedArrayTypeArrayBuffer) {
+        auto* bytes = static_cast<const uint8_t*>(JSObjectGetArrayBufferBytesPtr(raw_ctx, object, &exception));
+        auto length = JSObjectGetArrayBufferByteLength(raw_ctx, object, &exception);
+        if (exception != nullptr || bytes == nullptr)
+            return {};
+
+        return typed_array_to_choc_array(bytes, length, [](uint8_t sample) {
+            return choc::value::createInt32(static_cast<int32_t>(sample));
+        });
+    }
+
+    auto* bytes = static_cast<const uint8_t*>(JSObjectGetTypedArrayBytesPtr(raw_ctx, object, &exception));
+    auto length = JSObjectGetTypedArrayLength(raw_ctx, object, &exception);
+    if (exception != nullptr || bytes == nullptr)
+        return {};
+
+    switch (typed_array_type) {
+        case kJSTypedArrayTypeInt8Array:
+            return typed_array_to_choc_array(reinterpret_cast<const int8_t*>(bytes), length, [](int8_t sample) {
+                return choc::value::createInt32(static_cast<int32_t>(sample));
+            });
+        case kJSTypedArrayTypeInt16Array:
+            return typed_array_to_choc_array(reinterpret_cast<const int16_t*>(bytes), length, [](int16_t sample) {
+                return choc::value::createInt32(static_cast<int32_t>(sample));
+            });
+        case kJSTypedArrayTypeInt32Array:
+            return typed_array_to_choc_array(reinterpret_cast<const int32_t*>(bytes), length, [](int32_t sample) {
+                return choc::value::createInt32(sample);
+            });
+        case kJSTypedArrayTypeUint8Array:
+        case kJSTypedArrayTypeUint8ClampedArray:
+            return typed_array_to_choc_array(reinterpret_cast<const uint8_t*>(bytes), length, [](uint8_t sample) {
+                return choc::value::createInt32(static_cast<int32_t>(sample));
+            });
+        case kJSTypedArrayTypeUint16Array:
+            return typed_array_to_choc_array(reinterpret_cast<const uint16_t*>(bytes), length, [](uint16_t sample) {
+                return choc::value::createInt32(static_cast<int32_t>(sample));
+            });
+        case kJSTypedArrayTypeUint32Array:
+            return typed_array_to_choc_array(reinterpret_cast<const uint32_t*>(bytes), length, [](uint32_t sample) {
+                return choc::value::createInt64(static_cast<int64_t>(sample));
+            });
+        case kJSTypedArrayTypeFloat32Array:
+            return typed_array_to_choc_array(reinterpret_cast<const float*>(bytes), length, [](float sample) {
+                return choc::value::createFloat64(static_cast<double>(sample));
+            });
+        case kJSTypedArrayTypeFloat64Array:
+            return typed_array_to_choc_array(reinterpret_cast<const double*>(bytes), length, [](double sample) {
+                return choc::value::createFloat64(sample);
+            });
+        case kJSTypedArrayTypeBigInt64Array:
+            return typed_array_to_choc_array(reinterpret_cast<const int64_t*>(bytes), length, [](int64_t sample) {
+                return choc::value::createInt64(sample);
+            });
+        case kJSTypedArrayTypeBigUint64Array:
+            return typed_array_to_choc_array(reinterpret_cast<const uint64_t*>(bytes), length, [](uint64_t sample) {
+                return choc::value::createFloat64(static_cast<double>(sample));
+            });
+        case kJSTypedArrayTypeNone:
+        case kJSTypedArrayTypeArrayBuffer:
+            break;
+    }
+
+    return {};
+}
 
 // ── Value conversion: JSC → choc ────────────────────────────────────────────
 
@@ -35,6 +124,10 @@ static choc::value::Value jsc_to_choc(JSContext* ctx, JSValue* value) {
 
     if ([value isString])
         return choc::value::createString(std::string([[value toString] UTF8String]));
+
+    auto typed_array = jsc_typed_array_to_choc(ctx, value);
+    if (!typed_array.isVoid())
+        return typed_array;
 
     if ([value isArray]) {
         auto arr = choc::value::createEmptyArray();
@@ -277,6 +370,8 @@ public:
                 JSGarbageCollect(global_ctx_);
         }
     }
+
+    bool supports_typed_arrays() const override { return true; }
 
 private:
     JSContext* context_ = nil;

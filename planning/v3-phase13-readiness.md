@@ -67,21 +67,25 @@ Truth:
 - V8 is dependency-conditional until explicit external V8 inputs are provided and proven
 - local machine note: there is a Homebrew `libnode` dylib, but no obvious `v8.h` embedder header set was found under `~/Code` or the Homebrew include path during this readiness pass
 
-## Capability Floor Still Missing For Phase 13
+## Capability Floor Status For Phase 13
 
-The merged Phase 10 abstraction is real, but the stronger Phase 13-forward capability floor is not yet proven.
+The merged Phase 10 abstraction is real, but the stronger Phase 13-forward capability floor is only partially implemented today.
 
 Current code truth:
 - `JsEngine::supports_host_objects()` defaults to `false`
-- `JsEngine::supports_typed_arrays()` defaults to `false`
+- `JsEngine::supports_typed_arrays()` defaults to `false`, but backend overrides now matter
 - `JsEngine::supports_promises()` defaults to `false`
-- the `V8` backend still overrides all three as `false`
+- `QuickJS` still reports typed arrays unsupported through the current Pulp seam
+- `JavaScriptCore` now surfaces TypedArray / ArrayBuffer values through the current Pulp seam and is covered by shared `JsEngine` tests
+- the `V8` backend now truthfully reports typed-array support in code, but a real V8-enabled configure/build/test path is still not proven on a stock machine
+- HostObjects and Promise-returning native APIs are still not implemented on any backend
 
 That means the current engine layer is sufficient for:
 - expression evaluation
 - module execution
 - function registration
 - basic bridge-style JS integration
+- typed-array argument / return-value flows on `jsc`
 
 It is not yet proven sufficient for:
 - HostObject-style native GPU wrapper objects
@@ -95,16 +99,17 @@ Before calling Phase 13 implementation "in progress", the following should be tr
 - [x] prove `quickjs` configure/build/test on current `main`
 - [x] prove `jsc` configure/build/test on current `main`
 - [x] record the real `v8` configure contract on current `main`
+- [x] raise the first truthful capability slice: typed arrays where the backend already supports them
 - [ ] prove one real V8-enabled configure/build with external V8 inputs
 - [ ] decide whether Phase 13 starts as `v8-first` or `quickjs/jsc-first with V8 follow-up`
-- [ ] extend the `JsEngine` contract with the minimum host-object / typed-array / promise surface
-- [ ] add tests for that surface before binding Dawn objects
+- [ ] extend the `JsEngine` contract with the remaining minimum host-object / promise surface
+- [ ] add tests for that remaining surface before binding Dawn objects
 - [ ] define the first truthful Phase 13 smoke slice
 
 ## Recommended Next Steps
 
 1. Prove one real V8-enabled configure/build/test path with explicit `V8_INCLUDE_DIR` and `V8_LIB_DIR`.
-2. Add contract tests for the Phase 13-forward engine capabilities instead of leaving them as undocumented stubs.
+2. Add the next capability slice for HostObjects and Promise-returning native async paths instead of leaving them as undocumented stubs.
 3. Decide whether the first bridge slice targets:
    - a `v8-first` path for Three.js realism, or
    - a thinner engine-agnostic proof slice first, with V8 performance proof immediately after.

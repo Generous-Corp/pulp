@@ -79,6 +79,9 @@ public:
     // Default implementations return false / no-op. Backends enable as ready.
 
     virtual bool supports_host_objects() const { return false; }
+    // This means the engine can surface JS TypedArray / ArrayBuffer values
+    // through the current Pulp API seam without collapsing them into an
+    // opaque generic object. It does not imply zero-copy bridging yet.
     virtual bool supports_typed_arrays() const { return false; }
     virtual bool supports_promises() const { return false; }
 
