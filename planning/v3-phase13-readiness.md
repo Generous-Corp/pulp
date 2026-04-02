@@ -87,6 +87,7 @@ Current code truth:
   - native callback result is surfaced as a real JS `Promise`
   - resolution happens on the JS microtask queue through a shared wrapper
   - this is not yet a held native resolver for later completion
+  - cross-backend synchronous observation of settled `.then(...)` callbacks is not yet a proven contract through the current `evaluate()` loop
 - the first truthful bridge smoke slice now exists on every proven backend:
   - `ScriptEngine` can register a browser-style `navigator.gpu` host object
   - `navigator.gpu.requestAdapter()` can be surfaced as a real JS `Promise`
@@ -112,6 +113,7 @@ It is not yet proven sufficient for:
 - zero-copy TypedArray / ArrayBuffer exchange
 - held-resolver native async APIs such as `mapAsync()`
 - opaque native GPU wrapper objects with live property interception / lifecycle hooks
+- deterministic cross-backend promise settlement observation from synchronous evaluation loops (`V8` pumps microtasks when its message loop is pumped; the current QuickJS wrapper does not explicitly execute pending jobs after `evaluateExpression()`)
 
 ## First Honest Phase 13 Gate
 

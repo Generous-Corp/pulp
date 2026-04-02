@@ -58,6 +58,7 @@ CURRENT IMPLEMENTATION TRUTH (current local slices):
   - core WebGPU globals are now present for bitmask-driven browser code: `GPUBufferUsage`, `GPUTextureUsage`, `GPUMapMode`, `GPUShaderStage`, and `GPUColorWrite`
 - These slices are useful because they prove the browser-style surface can attach to native rendering and GPU facts, and now expose the first synchronous global constants that real WebGPU libraries expect, without claiming a real `GPUDevice`, WGSL execution, or Three.js compatibility yet.
 - DOM `id` and native widget `_id` are not yet the same contract; do not overclaim DOM/native parity until that seam is intentionally raised.
+- Promise-returning seams are currently proven only at the "real JS Promise object exists" level. The stock backend wrappers do not yet provide a portable cross-backend guarantee that settled `.then(...)` callbacks are observable from synchronous evaluation loops, so do not overclaim resolved adapter/device semantics yet.
 
 CONCEPT:
 Three.js's WebGPU renderer calls the standard WebGPU JavaScript API. This phase implements those
