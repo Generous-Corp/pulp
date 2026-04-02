@@ -375,6 +375,168 @@ if (typeof navigatorGPU !== "undefined" && navigatorGPU) {
 window.navigator = navigator;
 globalThis.navigator = navigator;
 
+var performance = {
+    now: function() {
+        if (typeof __performanceNow__ === "function") return __performanceNow__();
+        return Date.now();
+    }
+};
+window.performance = performance;
+globalThis.performance = performance;
+
+if (!window.navigator.clipboard) {
+    window.navigator.clipboard = {
+        readText: function() {
+            if (typeof readClipboard === "function") return readClipboard();
+            return "";
+        },
+        writeText: function(text) {
+            if (typeof writeClipboard === "function") writeClipboard(text);
+        }
+    };
+}
+
+var localStorage = {
+    getItem: function(key) {
+        if (typeof storageGetItem === "function") {
+            var v = storageGetItem(key);
+            return v || null;
+        }
+        return null;
+    },
+    setItem: function(key, value) {
+        if (typeof storageSetItem === "function") storageSetItem(key, String(value));
+    },
+    removeItem: function(key) {
+        if (typeof storageRemoveItem === "function") storageRemoveItem(key);
+    },
+    clear: function() {},
+    get length() { return 0; },
+    key: function() { return null; }
+};
+window.localStorage = localStorage;
+globalThis.localStorage = localStorage;
+window.sessionStorage = localStorage;
+globalThis.sessionStorage = localStorage;
+
+function Image() {
+    var self = this;
+    self.width = 0;
+    self.height = 0;
+    self.onload = null;
+    self.onerror = null;
+    self.complete = false;
+
+    Object.defineProperty(self, "src", {
+        get: function() { return self._src || ""; },
+        set: function(v) {
+            self._src = v;
+            if (v && typeof createImage === "function") {
+                var id = __genId__();
+                createImage(id, "");
+                if (typeof setImageSource === "function") setImageSource(id, v);
+                self.complete = true;
+                if (self.onload) self.onload();
+            }
+        }
+    });
+}
+window.Image = Image;
+globalThis.Image = Image;
+
+function btoa(str) {
+    var chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=";
+    var out = "";
+    for (var i = 0; i < str.length; i += 3) {
+        var a = str.charCodeAt(i);
+        var b = i + 1 < str.length ? str.charCodeAt(i + 1) : 0;
+        var c = i + 2 < str.length ? str.charCodeAt(i + 2) : 0;
+        out += chars[(a >> 2) & 63];
+        out += chars[((a << 4) | (b >> 4)) & 63];
+        out += i + 1 < str.length ? chars[((b << 2) | (c >> 6)) & 63] : "=";
+        out += i + 2 < str.length ? chars[c & 63] : "=";
+    }
+    return out;
+}
+window.btoa = btoa;
+globalThis.btoa = btoa;
+
+function atob(encoded) {
+    var chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=";
+    var out = "";
+    for (var i = 0; i < encoded.length; i += 4) {
+        var a = chars.indexOf(encoded[i]);
+        var b = chars.indexOf(encoded[i + 1]);
+        var c = chars.indexOf(encoded[i + 2]);
+        var d = chars.indexOf(encoded[i + 3]);
+        out += String.fromCharCode((a << 2) | (b >> 4));
+        if (c !== 64) out += String.fromCharCode(((b << 4) | (c >> 2)) & 255);
+        if (d !== 64) out += String.fromCharCode(((c << 6) | d) & 255);
+    }
+    return out;
+}
+window.atob = atob;
+globalThis.atob = atob;
+
+var crypto = {
+    getRandomValues: function(arr) {
+        for (var i = 0; i < arr.length; i++) {
+            arr[i] = Math.floor(Math.random() * 256);
+        }
+        return arr;
+    }
+};
+window.crypto = crypto;
+globalThis.crypto = crypto;
+
+function TextEncoder() {}
+TextEncoder.prototype.encode = function(str) {
+    var arr = [];
+    for (var i = 0; i < str.length; i++) {
+        var c = str.charCodeAt(i);
+        if (c < 128) arr.push(c);
+        else if (c < 2048) {
+            arr.push(192 | (c >> 6));
+            arr.push(128 | (c & 63));
+        } else {
+            arr.push(224 | (c >> 12));
+            arr.push(128 | ((c >> 6) & 63));
+            arr.push(128 | (c & 63));
+        }
+    }
+    return new Uint8Array(arr);
+};
+window.TextEncoder = TextEncoder;
+globalThis.TextEncoder = TextEncoder;
+
+function TextDecoder() {}
+TextDecoder.prototype.decode = function(buf) {
+    var out = "";
+    var arr = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
+    for (var i = 0; i < arr.length; ) {
+        var b = arr[i];
+        if (b < 128) {
+            out += String.fromCharCode(b);
+            i++;
+        } else if (b < 224) {
+            out += String.fromCharCode(((b & 31) << 6) | (arr[i + 1] & 63));
+            i += 2;
+        } else {
+            out += String.fromCharCode(((b & 15) << 12) | ((arr[i + 1] & 63) << 6) | (arr[i + 2] & 63));
+            i += 3;
+        }
+    }
+    return out;
+};
+window.TextDecoder = TextDecoder;
+globalThis.TextDecoder = TextDecoder;
+
+function structuredClone(obj) {
+    return JSON.parse(JSON.stringify(obj));
+}
+window.structuredClone = structuredClone;
+globalThis.structuredClone = structuredClone;
+
 window.pulp = window.pulp || {};
 window.pulp.gpu = {
     getInfo: function() {

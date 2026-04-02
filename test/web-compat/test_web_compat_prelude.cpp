@@ -249,6 +249,38 @@ TEST_CASE("WebCompat: WebGPU globals expose core usage and stage constants", "[w
     REQUIRE(colorAll.getWithDefault<int32_t>(0) == 0xF);
 }
 
+TEST_CASE("WebCompat: performance and storage shims are available", "[webcompat][browser]") {
+    TestEnvironment env;
+    auto perfNow = env.engine.evaluate("typeof performance.now === 'function' && performance.now() >= 0");
+    env.eval("localStorage.setItem('phase13-key', 'phase13-value');");
+    auto stored = env.engine.evaluate("localStorage.getItem('phase13-key')");
+
+    REQUIRE(perfNow.getWithDefault<bool>(false) == true);
+    REQUIRE(std::string(stored.getWithDefault<std::string_view>("")) == "phase13-value");
+}
+
+TEST_CASE("WebCompat: UTF-8 helpers round-trip non-ASCII text", "[webcompat][browser]") {
+    TestEnvironment env;
+    auto byteLength = env.engine.evaluate("new TextEncoder().encode('Pulp ✓').length");
+    auto decoded = env.engine.evaluate("new TextDecoder().decode(new TextEncoder().encode('Pulp ✓'))");
+    auto cloned = env.engine.evaluate("structuredClone({ label: 'Pulp ✓' }).label");
+
+    REQUIRE(byteLength.getWithDefault<int32_t>(0) == 8);
+    REQUIRE(std::string(decoded.getWithDefault<std::string_view>("")) == "Pulp ✓");
+    REQUIRE(std::string(cloned.getWithDefault<std::string_view>("")) == "Pulp ✓");
+}
+
+TEST_CASE("WebCompat: browser utility shims cover base64, crypto, and Image", "[webcompat][browser]") {
+    TestEnvironment env;
+    auto roundTrip = env.engine.evaluate("atob(btoa('pulp'))");
+    auto randomCount = env.engine.evaluate("crypto.getRandomValues(new Uint8Array(4)).length");
+    auto imageComplete = env.engine.evaluate("var img = new Image(); img.src = 'mock.png'; img.complete");
+
+    REQUIRE(std::string(roundTrip.getWithDefault<std::string_view>("")) == "pulp");
+    REQUIRE(randomCount.getWithDefault<int32_t>(0) == 4);
+    REQUIRE(imageComplete.getWithDefault<bool>(false) == true);
+}
+
 TEST_CASE("WebCompat: element.id assignment", "[webcompat][element]") {
     TestEnvironment env;
     env.eval("var el = document.createElement('div'); el.id = 'test123';");

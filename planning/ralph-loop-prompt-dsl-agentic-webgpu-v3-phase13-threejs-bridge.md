@@ -56,7 +56,8 @@ CURRENT IMPLEMENTATION TRUTH (current local slices):
   - `navigator.gpu.getPreferredCanvasFormat()` returns `"bgra8unorm"`
   - `navigator.gpu.requestAdapter()` returns a real JS `Promise` that resolves to a mock adapter object
   - core WebGPU globals are now present for bitmask-driven browser code: `GPUBufferUsage`, `GPUTextureUsage`, `GPUMapMode`, `GPUShaderStage`, and `GPUColorWrite`
-- These slices are useful because they prove the browser-style surface can attach to native rendering and GPU facts, and now expose the first synchronous global constants that real WebGPU libraries expect, without claiming a real `GPUDevice`, WGSL execution, or Three.js compatibility yet.
+  - browser helper shims from the older monolith are now present in the split prelude too: `performance.now`, storage, `Image`, `atob`/`btoa`, `crypto.getRandomValues`, `TextEncoder`, `TextDecoder`, and `structuredClone`
+- These slices are useful because they prove the browser-style surface can attach to native rendering and GPU facts, expose the first synchronous global constants that real WebGPU libraries expect, and now cover common browser helper APIs that loader code tends to assume, without claiming a real `GPUDevice`, WGSL execution, or Three.js compatibility yet.
 - DOM `id` and native widget `_id` are not yet the same contract; do not overclaim DOM/native parity until that seam is intentionally raised.
 - Promise-returning seams are currently proven only at the "real JS Promise object exists" level. The stock backend wrappers do not yet provide a portable cross-backend guarantee that settled `.then(...)` callbacks are observable from synchronous evaluation loops, so do not overclaim resolved adapter/device semantics yet.
 
