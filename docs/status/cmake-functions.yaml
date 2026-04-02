@@ -35,6 +35,25 @@ functions:
       - VERSION
     docs: reference/cmake.md#pulp_add_app
 
+  - name: pulp_faust_generate
+    status: experimental
+    summary: Generate C++ from a FAUST .dsp file (requires faust compiler). Pre-generated files are used when faust is not installed.
+    required:
+      - output_hpp
+      - input_dsp
+      - class_name
+    docs: reference/cmake.md#pulp_faust_generate
+
+  - name: pulp_add_faust_test
+    status: experimental
+    summary: Add a test target for a FAUST-generated processor.
+    required:
+      - target
+      - test_source
+    optional:
+      - SOURCES
+    docs: reference/cmake.md#pulp_add_faust_test
+
   - name: pulp_add_binary_data
     status: usable
     summary: Embed binary assets as C++ arrays in a static library.

@@ -78,6 +78,12 @@ modules:
     dependencies: [canvas, events, state]
     docs: reference/modules.md#view
 
+  - name: dsl
+    summary: DSL integration contract and FAUST offline codegen wrapper
+    status: experimental
+    dependencies: [format]
+    docs: reference/modules.md#dsl
+
   - name: osc
     summary: Open Sound Control messaging
     status: experimental

@@ -266,6 +266,7 @@ add_subdirectory(core/canvas)
 add_subdirectory(core/view)
 add_subdirectory(core/osc)
 add_subdirectory(core/host)
+add_subdirectory(core/dsl)
 
 # ── Optional Subsystems ────────────────────────────────────────────────────
 if(PULP_ENABLE_GPU)
@@ -362,7 +363,7 @@ include(GNUInstallDirs)
 set(PULP_SDK_TARGETS
     pulp-platform pulp-runtime pulp-events pulp-state
     pulp-audio pulp-midi pulp-signal pulp-format
-    pulp-canvas pulp-view pulp-standalone
+    pulp-canvas pulp-view pulp-standalone pulp-dsl
 )
 
 if(TARGET pulp-render)

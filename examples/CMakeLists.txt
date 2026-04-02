@@ -28,6 +28,11 @@ add_subdirectory(PulpSampler)
 # Phase 18: PulpPluck (Karplus-Strong synth — same code runs native + WASM)
 add_subdirectory(pulp-pluck)
 
+# FAUST DSL examples (Phase 3: offline codegen → Processor)
+add_subdirectory(faust-gain)
+add_subdirectory(faust-filter)
+add_subdirectory(faust-tremolo)
+
 # GPU Validation Demo: Modulation Matrix with animated cables
 add_subdirectory(gpu-demo)
 
