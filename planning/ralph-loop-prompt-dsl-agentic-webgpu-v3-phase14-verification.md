@@ -20,7 +20,8 @@ the docs match reality. Any phase that fails verification gets a deficiency repo
 remediation steps.
 
 DEPENDENCIES:
-- Requires ALL phases (1-13) to be merged to main
+- Requires all shippable phases to be merged to `main`
+- Any phase intentionally parked for policy/licensing reasons must have an explicit tracked disposition (issue + status/doc note), not silent omission
 
 CAN RUN IN PARALLEL:
 - no; this is the final gate
@@ -33,6 +34,9 @@ NON-NEGOTIABLES:
 - Every test must pass (ctest --test-dir build --output-on-failure).
 - The verification pass itself must be documented — produce a verification report, not just
   'it looks fine'.
+- Parked phases are not free passes. If a phase was skipped for licensing/policy reasons, verify
+  that the repo says so explicitly, that no docs overclaim shipped support, and that a tracked
+  follow-up/disposition issue exists.
 
 VERIFICATION CHECKLIST PER PHASE:
 
@@ -57,18 +61,22 @@ VERIFICATION CHECKLIST PER PHASE:
 - [ ] pulp-dsl contract document exists and is referenced by Phase 4
 
 ### Phase 4 — Cmajor adapter
-- [ ] Cmajor .cmajor files load into Processor interface
-- [ ] 3 examples exist and build
-- [ ] FAUST examples still pass (regression)
-- [ ] pulp-dsl contract is stable or changes documented
+- [ ] Either Cmajor support is implemented and validated, OR the phase remains explicitly parked with a tracked licensing/disposition issue and no shipped-support overclaim
+- [ ] If implemented: Cmajor `.cmajor` files load into Processor interface
+- [ ] If implemented: 3 examples exist and build
+- [ ] If implemented: FAUST examples still pass (regression)
+- [ ] If implemented: pulp-dsl contract is stable or changes documented
+- [ ] If parked: the status docs and roadmap explain why, what policy blocked it, and what would need to change to revisit it
 
 ### Phase 5 — JSFX adapter
-- [ ] EEL2 @init/@slider/@block/@sample sections execute correctly
-- [ ] slider1..slider64 mapped to StateStore
-- [ ] scope boundary document exists (what's supported vs not)
-- [ ] no @gfx support (documented as planned)
-- [ ] 3 examples exist and build
-- [ ] FAUST and Cmajor examples still pass (regression)
+- [ ] Either JSFX support is implemented and validated, OR the phase remains explicitly parked/blocked behind the Cmajor/licensing disposition with no shipped-support overclaim
+- [ ] If implemented: EEL2 @init/@slider/@block/@sample sections execute correctly
+- [ ] If implemented: slider1..slider64 mapped to StateStore
+- [ ] If implemented: scope boundary document exists (what's supported vs not)
+- [ ] If implemented: no @gfx support (documented as planned)
+- [ ] If implemented: 3 examples exist and build
+- [ ] If implemented: FAUST and Cmajor examples still pass (regression)
+- [ ] If parked: the dependency/parking reason is explicitly documented and linked to the tracked issue
 
 ### Phase 6 — Multi-window framework
 - [ ] WindowManager coordinates multiple windows
@@ -146,6 +154,7 @@ VERIFICATION CHECKLIST PER PHASE:
 - [ ] docs/reference/capabilities.md matches actual capabilities
 - [ ] docs/status/ manifests are current
 - [ ] no overclaims anywhere in docs — every claim backed by code
+- [ ] parked/deferred phases have explicit truth in docs and a tracked issue/disposition path
 - [ ] all tests pass: ctest --test-dir build --output-on-failure
 - [ ] clean build from scratch: cmake -S . -B build && cmake --build build
 - [ ] validate-build.sh passes
@@ -158,12 +167,13 @@ DELIVERABLES:
    - overall go/no-go for v3 completeness
 2. Updated v3-phase-status.md:
    - Verified column filled for each phase (pass/fail + date)
+   - parked phases explicitly marked as parked-with-disposition rather than silently left ambiguous
 3. Deficiency branches (if needed):
    - for each failed verification item, a specific branch with the fix
    - re-verify after fix merges
 
 ACCEPTANCE:
-- every phase has been independently verified against its acceptance criteria
+- every phase has been independently verified against its acceptance criteria, or explicitly dispositioned as parked with evidence and a tracked follow-up
 - the verification report exists and is honest
 - all deficiencies have remediation steps (even if not yet fixed)
 - v3-phase-status.md is fully populated
