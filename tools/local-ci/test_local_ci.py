@@ -235,7 +235,15 @@ class LocalCiTests(unittest.TestCase):
                 os.environ["PULP_LOCAL_CI_CONFIG"] = original_override
 
     def test_resolve_submission_options_uses_branch_tip_when_branch_is_explicit(self):
-        args = SimpleNamespace(branch="feature/topic", sha=None, targets=None, priority=None, smoke=False)
+        args = SimpleNamespace(
+            branch="feature/topic",
+            sha=None,
+            targets=None,
+            priority=None,
+            smoke=False,
+            allow_root_mismatch=False,
+            allow_unreachable_targets=False,
+        )
 
         original_load_config = self.mod.load_config
         original_resolve_targets = self.mod.resolve_targets
@@ -249,7 +257,9 @@ class LocalCiTests(unittest.TestCase):
         self.mod.resolve_git_ref_sha = lambda ref: "b" * 40
         self.mod.current_sha = lambda: "a" * 40
         try:
-            _config, branch, sha, targets, priority, validation = self.mod.resolve_submission_options(args, "run")
+            _config, branch, sha, targets, priority, validation, submission = self.mod.resolve_submission_options(
+                args, "run"
+            )
         finally:
             self.mod.load_config = original_load_config
             self.mod.resolve_targets = original_resolve_targets
@@ -262,6 +272,93 @@ class LocalCiTests(unittest.TestCase):
         self.assertEqual(targets, ["mac"])
         self.assertEqual(priority, "normal")
         self.assertEqual(validation, "full")
+        self.assertEqual(submission["branch"], "feature/topic")
+        self.assertEqual(Path(submission["config_path"]).resolve(), self.config_path.resolve())
+
+    def test_build_submission_metadata_rejects_root_mismatch_by_default(self):
+        config = self.mod.load_config()
+        original_root = self.mod.ROOT
+        original_git_root = self.mod.git_root_for
+        self.mod.ROOT = Path("/tmp/pulp-root")
+        self.mod.git_root_for = lambda path: Path("/tmp/other-root")
+        try:
+            with self.assertRaises(ValueError):
+                self.mod.build_submission_metadata(
+                    config,
+                    "feature/topic",
+                    "a" * 40,
+                    ["mac"],
+                    "normal",
+                    "full",
+                    allow_root_mismatch=False,
+                    allow_unreachable_targets=False,
+                )
+        finally:
+            self.mod.ROOT = original_root
+            self.mod.git_root_for = original_git_root
+
+    def test_build_submission_metadata_records_fallback_host_preflight(self):
+        config = {
+            "targets": {
+                "windows": {
+                    "type": "ssh",
+                    "enabled": True,
+                    "host": "win2",
+                    "fallback_host": "win",
+                    "repo_path": "C:\\Pulp",
+                }
+            },
+            "defaults": {},
+        }
+        original_ssh = self.mod.ssh_reachable
+        self.mod.ssh_reachable = lambda host, timeout=5: host == "win"
+        try:
+            submission = self.mod.build_submission_metadata(
+                config,
+                "feature/topic",
+                "a" * 40,
+                ["windows"],
+                "normal",
+                "full",
+                allow_root_mismatch=True,
+                allow_unreachable_targets=False,
+            )
+        finally:
+            self.mod.ssh_reachable = original_ssh
+
+        state = submission["target_hosts"]["windows"]
+        self.assertEqual(state["status"], "fallback-up")
+        self.assertEqual(state["resolved_host"], "win")
+        self.assertIn("fallback", submission["warnings"][0])
+
+    def test_build_submission_metadata_fails_fast_for_unreachable_target_without_override(self):
+        config = {
+            "targets": {
+                "windows": {
+                    "type": "ssh",
+                    "enabled": True,
+                    "host": "win2",
+                    "repo_path": "C:\\Pulp",
+                }
+            },
+            "defaults": {},
+        }
+        original_ssh = self.mod.ssh_reachable
+        self.mod.ssh_reachable = lambda host, timeout=5: False
+        try:
+            with self.assertRaises(ValueError):
+                self.mod.build_submission_metadata(
+                    config,
+                    "feature/topic",
+                    "a" * 40,
+                    ["windows"],
+                    "normal",
+                    "full",
+                    allow_root_mismatch=True,
+                    allow_unreachable_targets=False,
+                )
+        finally:
+            self.mod.ssh_reachable = original_ssh
 
     def test_stale_running_job_requeues_when_runner_dies(self):
         job = self.mod.make_job("feature/stale", "3" * 40, "normal", ["mac"], "run", "full")

@@ -67,6 +67,18 @@ python3 tools/local-ci/local_ci.py run [branch] --smoke
 
 If you pass a branch name explicitly, `run [branch]` resolves that branch tip to an exact SHA before queueing. It must not silently reuse the launching checkout's `HEAD`.
 
+Queueing now performs a submission preflight before the job is recorded:
+- prints the queued worktree root, current cwd, config path/source, and per-target host intent
+- rejects accidental wrong-root launches by default
+- rejects obviously unreachable SSH targets by default when they have no fallback path
+
+Override flags exist for deliberate exceptions:
+
+```bash
+python3 tools/local-ci/local_ci.py run [branch] --allow-root-mismatch
+python3 tools/local-ci/local_ci.py run [branch] --allow-unreachable-targets
+```
+
 For SSH targets, `run` uploads the exact queued SHA as a git bundle before validation, so Ubuntu and Windows do not need that branch tip to be visible on the host ahead of time.
 Use `--smoke` for a fast clean install/export preflight when you want early signal before paying for the full test matrix. Smoke runs are explicitly labeled as `validation=smoke`.
 If you queue a newer SHA for the same branch, targets, and validation mode, older pending work is superseded automatically.
@@ -152,6 +164,8 @@ Required behavior while a job is active:
 - On persistent local/self-hosted targets, prefer prepared same-SHA reruns for narrow follow-up validation and make `prepared=clean` vs `prepared=reused` visible in status/logs.
 - Prefer the shared machine-global CI config (`state_dir()/config.json`; on macOS `~/Library/Application Support/Pulp/local-ci/config.json`) so every worktree sees the same host map by default.
 - Treat worktree-local `tools/local-ci/config.json` as a fallback or temporary override only. Hostnames and `repo_path` values can drift between worktrees.
+- Pay attention to the submission preflight. If it says the cwd git root and queued worktree root differ, stop and fix that unless the mismatch is intentional.
+- If preflight reports shared-state vs worktree-local config drift for the selected targets, treat that as a real warning, not cosmetic noise.
 - If a dead runner left behind a stale Windows validator, let the queue reclaim that specific remote validator before starting fresh work; treat that cleanup as part of the truthful narrow-rerun path, not as ad hoc manual SSH.
 
 Minimum incident response once a failure is visible:

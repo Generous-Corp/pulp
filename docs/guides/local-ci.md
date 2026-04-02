@@ -11,6 +11,8 @@ Local CI lets you validate branches on your Mac and cross-platform VMs before me
 - Mac runs locally. Ubuntu and Windows run over SSH against repos you already cloned on those machines.
 - Remote targets validate the exact queued git SHA, not "whatever the branch points to later". The runner uploads that SHA as a git bundle before validation, so full-matrix checks do not depend on the host already seeing your latest branch tip.
 - `pulp ci-local status` shows the active runner, pending jobs, SSH/VM reachability, and live per-target state for the running job. `pulp ci-local bump <job-id> high` moves a pending job forward.
+- queueing now prints the submission root, current cwd, config path/source, and per-target host preflight before a job is recorded
+- queueing fails fast if you launched from the wrong git root or selected an SSH target that is currently unreachable with no fallback, unless you explicitly override that safety check
 - While a job is running, `pulp ci-local status` also shows live per-target state such as `mac=pass, ubuntu=pass, windows=running`.
 - Quiet long-running targets now emit runner heartbeats, so `status` can show `heartbeat=...`, `idle=...`, and `liveness=quiet|stuck` even when the underlying toolchain has not printed a new line recently.
 - If you queue a newer SHA for the same branch, targets, and validation mode, older pending work is superseded automatically instead of sitting behind it forever.
@@ -34,11 +36,12 @@ Pulp has GitHub Actions workflows for CI, but running them on every branch costs
 When you run `pulp ci-local`, it:
 
 1. Queues a job in a machine-global queue shared by every worktree on that Mac
-2. Runs only one queue drain owner at a time, so separate agents do not stampede the same Mac and VMs
-3. Validates locally on Mac via `./validate-build.sh --ref <sha>`
-4. For each SSH target in `config.json`: uploads a per-job git bundle, injects that exact SHA into the configured repo on the host, then validates it there
-5. If an SSH target is unreachable, it tries to start the corresponding UTM VM, waits for it to boot, then retries the SSH connection
-6. Drains queued work on login or wake if you install the launchd agent
+2. Prints the exact queue intent first: submission root, cwd, config path/source, and remote-host preflight
+3. Runs only one queue drain owner at a time, so separate agents do not stampede the same Mac and VMs
+4. Validates locally on Mac via `./validate-build.sh --ref <sha>`
+5. For each SSH target in `config.json`: uploads a per-job git bundle, injects that exact SHA into the configured repo on the host, then validates it there
+6. If an SSH target is unreachable, it tries to start the corresponding UTM VM, waits for it to boot, then retries the SSH connection
+7. Drains queued work on login or wake if you install the launchd agent
 
 Mac validation always runs. SSH targets are skipped if disabled in config.
 
@@ -155,6 +158,9 @@ rm ~/Library/LaunchAgents/dev.pulp.local-ci.plist
 # Enqueue the current HEAD and wait for completion
 pulp ci-local run
 
+# Queue even if your current cwd belongs to a different git root than the script checkout
+pulp ci-local run --allow-root-mismatch
+
 # Fast preflight: clean configure/build/install + installed-SDK smoke, no tests
 pulp ci-local run --smoke
 
@@ -187,6 +193,16 @@ pulp ci-local evidence feature/my-branch --limit 3
 
 If you pass a branch name explicitly, for example `pulp ci-local run feature/my-branch`, local CI resolves and records that branch tip's exact SHA immediately. This prevents a stale launching checkout from accidentally queuing its own `HEAD` while you intended to validate a different branch.
 
+Before queueing, local CI now also records:
+- the worktree root that is actually being queued
+- the current cwd and its git root, if any
+- the config path and whether it came from `PULP_LOCAL_CI_CONFIG`, shared state, or the worktree fallback
+- the selected SSH host/transport intent for each remote target
+
+If the current cwd belongs to a different git root than the `local_ci.py` checkout you are invoking, queueing fails fast by default. Pass `--allow-root-mismatch` only when that mismatch is intentional.
+
+If a selected SSH target is down and no fallback host or UTM fallback is configured, queueing now fails fast instead of burning time on a doomed job. Pass `--allow-unreachable-targets` only when you deliberately want to queue past that preflight.
+
 Use `--smoke` when you want a quicker preflight before a full matrix run. Smoke mode still validates a clean detached worktree and installed SDK export path, but it disables tests, examples, and GPU in that clean build and skips `ctest`. Queue summaries and PR comments label these jobs as `validation=smoke` so they are not mistaken for full validation.
 
 When a rerun is narrow and stays on the exact same SHA, local CI can now reuse the prepared root for that `target + validation` on persistent hosts. Status output calls this out as `prepared=reused` or `prepared=clean` so reused proof is never mistaken for a fresh cold path.
@@ -198,6 +214,7 @@ Runner: pid=12345 active=[abcd1234ef56] feature/my-branch
 
 Running (1):
   [abcd1234ef56] feature/my-branch @ 0123456789ab priority=normal targets=mac,ubuntu,windows
+    submission: root=/Users/me/Code/pulp-worktree config=/Users/me/Library/Application Support/Pulp/local-ci/config.json (shared-state)
     live targets: mac=pass, ubuntu=pass, windows=running
     windows: phase=test, output=2026-04-01T01:34:18+00:00, heartbeat=2026-04-01T01:34:33+00:00, idle=15s, liveness=quiet, log=windows.log
       37/1263 Test: OSC 4-byte alignment

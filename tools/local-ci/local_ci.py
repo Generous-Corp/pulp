@@ -83,6 +83,14 @@ def config_path() -> Path:
     return SCRIPT_DIR / "config.json"
 
 
+def worktree_config_path() -> Path:
+    return SCRIPT_DIR / "config.json"
+
+
+def shared_config_path() -> Path:
+    return state_dir() / "config.json"
+
+
 def queue_path() -> Path:
     return state_dir() / "queue.json"
 
@@ -180,6 +188,7 @@ def sync_job_bundle_to_ssh_host(host: str, job: dict, report_progress=None) -> t
                 host=host,
                 bundle=remote_name,
                 last_output_at=now_iso(),
+                transport_mode="bundle",
             )
         subprocess.run(
             ["scp", str(bundle_path), f"{host}:{remote_name}"],
@@ -267,6 +276,18 @@ def current_sha() -> str:
         check=True,
     )
     return result.stdout.strip()
+
+
+def git_root_for(path: Path) -> Path | None:
+    result = subprocess.run(
+        ["git", "rev-parse", "--show-toplevel"],
+        cwd=path,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return None
+    return Path(result.stdout.strip()).resolve()
 
 
 def resolve_git_ref_sha(ref: str) -> str:
@@ -412,9 +433,17 @@ def make_fingerprint(branch: str, sha: str, targets: list[str], validation: str)
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
-def make_job(branch: str, sha: str, priority: str, targets: list[str], mode: str, validation: str) -> dict:
+def make_job(
+    branch: str,
+    sha: str,
+    priority: str,
+    targets: list[str],
+    mode: str,
+    validation: str,
+    submission: dict | None = None,
+) -> dict:
     normalized_validation = normalize_validation_mode(validation)
-    return {
+    job = {
         "id": uuid.uuid4().hex[:12],
         "branch": branch,
         "sha": sha,
@@ -427,6 +456,11 @@ def make_job(branch: str, sha: str, priority: str, targets: list[str], mode: str
         "validation": normalized_validation,
         "submitted_root": str(ROOT),
     }
+    if submission:
+        job["submission"] = submission
+        if submission.get("submitted_root"):
+            job["submitted_root"] = submission["submitted_root"]
+    return job
 
 
 def supersedence_key(job: dict) -> tuple[str, tuple[str, ...], str]:
@@ -594,6 +628,7 @@ def enqueue_job(
     targets: list[str],
     mode: str,
     validation: str,
+    submission: dict | None = None,
 ) -> tuple[dict, bool]:
     requested_priority = normalize_priority(priority)
     normalized_validation = normalize_validation_mode(validation)
@@ -622,7 +657,7 @@ def enqueue_job(
                 save_queue_unlocked(queue)
             return normalize_job(job), False
 
-        job = make_job(branch, sha, requested_priority, targets, mode, normalized_validation)
+        job = make_job(branch, sha, requested_priority, targets, mode, normalized_validation, submission=submission)
         queue.append(job)
         for existing in queue:
             if existing.get("status") != "pending":
@@ -1293,6 +1328,193 @@ def ensure_host_reachable(target_name: str, target_cfg: dict, defaults: dict) ->
     return None
 
 
+def config_source_name(path: Path) -> str:
+    override = os.environ.get("PULP_LOCAL_CI_CONFIG")
+    if override:
+        return "env-override"
+    if path == shared_config_path():
+        return "shared-state"
+    return "worktree-local"
+
+
+def config_material_for_targets(config: dict, targets: list[str]) -> dict:
+    material: dict[str, dict] = {}
+    for name in targets:
+        target_cfg = config.get("targets", {}).get(name)
+        if not target_cfg:
+            continue
+        entry = {
+            "type": target_cfg.get("type", "local"),
+            "enabled": bool(target_cfg.get("enabled", True)),
+        }
+        for key in (
+            "host",
+            "fallback_host",
+            "repo_path",
+            "utm_fallback",
+            "cmake_generator",
+            "cmake_platform",
+            "cmake_generator_instance",
+        ):
+            value = target_cfg.get(key)
+            if value not in (None, "", {}):
+                entry[key] = value
+        material[name] = entry
+    return material
+
+
+def find_material_config_drift(targets: list[str]) -> list[str]:
+    shared_path = shared_config_path()
+    worktree_path = worktree_config_path()
+    if not shared_path.exists() or not worktree_path.exists():
+        return []
+    try:
+        shared_cfg = json.loads(shared_path.read_text())
+        worktree_cfg = json.loads(worktree_path.read_text())
+    except json.JSONDecodeError:
+        return []
+
+    drift: list[str] = []
+    shared_material = config_material_for_targets(shared_cfg, targets)
+    worktree_material = config_material_for_targets(worktree_cfg, targets)
+    for name in targets:
+        shared_entry = shared_material.get(name)
+        worktree_entry = worktree_material.get(name)
+        if shared_entry == worktree_entry:
+            continue
+        drift.append(
+            f"{name}: shared-state {shared_entry or '(missing)'} vs worktree-local {worktree_entry or '(missing)'}"
+        )
+    return drift
+
+
+def preflight_target_host_state(target_name: str, target_cfg: dict, defaults: dict) -> dict:
+    target_type = target_cfg.get("type", "local")
+    if target_type != "ssh":
+        return {"target": target_name, "transport_mode": "local", "status": "local"}
+
+    host = target_cfg.get("host", "")
+    fallback_host = target_cfg.get("fallback_host")
+    timeout = defaults.get("ssh_timeout_secs", 5)
+    state = {
+        "target": target_name,
+        "transport_mode": "bundle",
+        "configured_host": host,
+        "repo_path": target_cfg.get("repo_path"),
+        "status": "unknown",
+    }
+
+    if host and ssh_reachable(host, timeout):
+        state["status"] = "primary-up"
+        state["resolved_host"] = host
+        return state
+
+    if fallback_host and ssh_reachable(fallback_host, timeout):
+        state["status"] = "fallback-up"
+        state["resolved_host"] = fallback_host
+        state["warning"] = f"{target_name}: primary host {host} is down; fallback {fallback_host} is up"
+        return state
+
+    utm_fallback = target_cfg.get("utm_fallback")
+    if utm_fallback:
+        vm_name = utm_fallback.get("vm_name", "(unknown)")
+        state["status"] = "utm-fallback-pending"
+        state["resolved_host"] = host
+        state["warning"] = f"{target_name}: ssh host {host} is down; queued run would need UTM fallback '{vm_name}'"
+        return state
+
+    state["status"] = "unreachable"
+    state["resolved_host"] = host
+    state["error"] = f"{target_name}: ssh host {host} is down and no fallback host or UTM VM is configured"
+    return state
+
+
+def build_submission_metadata(
+    config: dict,
+    branch: str,
+    sha: str,
+    targets: list[str],
+    priority: str,
+    validation: str,
+    *,
+    allow_root_mismatch: bool,
+    allow_unreachable_targets: bool,
+) -> dict:
+    cwd = Path.cwd().resolve()
+    cwd_git_root = git_root_for(cwd)
+    submission_root = ROOT.resolve()
+
+    if cwd_git_root and cwd_git_root != submission_root and not allow_root_mismatch:
+        raise ValueError(
+            "Invoked from a different git root than the queued worktree. "
+            f"cwd git root={cwd_git_root}, submission root={submission_root}. "
+            "Run the worktree-local tools/local-ci/local_ci.py or pass --allow-root-mismatch."
+        )
+
+    config_file = config_path().resolve()
+    host_preflight: dict[str, dict] = {}
+    warnings: list[str] = []
+    errors: list[str] = []
+    defaults = config.get("defaults", {})
+    for name in targets:
+        state = preflight_target_host_state(name, config.get("targets", {}).get(name, {}), defaults)
+        host_preflight[name] = state
+        if state.get("warning"):
+            warnings.append(state["warning"])
+        if state.get("error"):
+            errors.append(state["error"])
+
+    if errors and not allow_unreachable_targets:
+        raise ValueError("; ".join(errors) + ". Pass --allow-unreachable-targets to queue anyway.")
+
+    config_drift = [] if os.environ.get("PULP_LOCAL_CI_CONFIG") else find_material_config_drift(targets)
+    if config_drift:
+        warnings.append("config drift detected between shared-state and worktree-local config")
+
+    return {
+        "submitted_root": str(submission_root),
+        "cwd": str(cwd),
+        "cwd_git_root": str(cwd_git_root) if cwd_git_root else "",
+        "config_path": str(config_file),
+        "config_source": config_source_name(config_file),
+        "branch": branch,
+        "sha": sha,
+        "priority": priority,
+        "validation": validation,
+        "targets": targets,
+        "target_hosts": host_preflight,
+        "config_drift": config_drift,
+        "warnings": warnings,
+    }
+
+
+def print_submission_metadata(metadata: dict) -> None:
+    print(
+        "Submitting: "
+        f"{metadata['branch']} @ {short_sha(metadata['sha'])} "
+        f"priority={metadata['priority']} targets={','.join(metadata['targets']) or 'none'}"
+    )
+    print(f"  root: {metadata['submitted_root']}")
+    print(f"  cwd: {metadata['cwd']}")
+    if metadata.get("cwd_git_root"):
+        print(f"  cwd git root: {metadata['cwd_git_root']}")
+    print(f"  config: {metadata['config_path']} ({metadata['config_source']})")
+    for drift in metadata.get("config_drift", []):
+        print(f"  config drift: {drift}")
+    for target_name in metadata.get("targets", []):
+        state = metadata.get("target_hosts", {}).get(target_name, {})
+        transport = state.get("transport_mode", "local")
+        if transport == "local":
+            print(f"  {target_name}: local transport")
+            continue
+        resolved = state.get("resolved_host") or state.get("configured_host") or "?"
+        status = state.get("status", "unknown")
+        repo_path = state.get("repo_path") or "?"
+        print(f"  {target_name}: host={resolved} status={status} transport={transport} repo={repo_path}")
+    for warning in metadata.get("warnings", []):
+        print(f"  warning: {warning}")
+
+
 # ── Validation Runners ───────────────────────────────────────────────────────
 
 
@@ -1475,7 +1697,12 @@ def run_local_validation(job: dict, exclude_tests: str = "", report_progress=Non
     print(f"  [mac] Running local validation on {job['branch']} @ {short_sha(job['sha'])}...")
     log_path = prepare_target_log(job["id"], "mac")
     if report_progress:
-        report_progress(phase="validate", log_path=str(log_path), last_output_at=now_iso())
+        report_progress(
+            phase="validate",
+            log_path=str(log_path),
+            last_output_at=now_iso(),
+            transport_mode="local",
+        )
 
     validation = job.get("validation", "full")
     prepared_root = prepared_state_root("mac", validation)
@@ -1511,6 +1738,7 @@ def run_local_validation(job: dict, exclude_tests: str = "", report_progress=Non
             "stdout_tail": "",
             "stderr_tail": "Validation timed out after 3600s",
             "log_file": str(log_path),
+            "transport_mode": "local",
         }
     tail = run["output"][-2000:] if run["output"] else ""
     if validation == "smoke":
@@ -1533,6 +1761,7 @@ def run_local_validation(job: dict, exclude_tests: str = "", report_progress=Non
         "stderr_tail": tail if failed else "",
         "log_file": str(log_path),
         "validation": validation,
+        "transport_mode": "local",
     }
 
 
@@ -1547,7 +1776,13 @@ def run_posix_ssh_validation(
     print(f"  [{target_name}] Running validation on {host}:{repo_path} @ {short_sha(job['sha'])}...")
     log_path = prepare_target_log(job["id"], target_name)
     if report_progress:
-        report_progress(phase="connect", host=host, log_path=str(log_path), last_output_at=now_iso())
+        report_progress(
+            phase="connect",
+            host=host,
+            log_path=str(log_path),
+            last_output_at=now_iso(),
+            transport_mode="bundle",
+        )
 
     try:
         bundle_name, bundle_ref = sync_job_bundle_to_ssh_host(host, job, report_progress=report_progress)
@@ -1560,6 +1795,7 @@ def run_posix_ssh_validation(
             "stdout_tail": "",
             "stderr_tail": str(exc),
             "log_file": str(log_path),
+            "transport_mode": "bundle",
         }
 
     branch_q = shlex.quote(job["branch"])
@@ -1624,6 +1860,7 @@ def run_posix_ssh_validation(
             "stdout_tail": "",
             "stderr_tail": "Validation timed out after 3600s",
             "log_file": str(log_path),
+            "transport_mode": "bundle",
         }
     tail = run["output"][-2000:] if run["output"] else ""
     if validation == "smoke":
@@ -1646,6 +1883,7 @@ def run_posix_ssh_validation(
         "stderr_tail": tail if failed else "",
         "log_file": str(log_path),
         "validation": validation,
+        "transport_mode": "bundle",
     }
 
 
@@ -1777,7 +2015,13 @@ def run_windows_ssh_validation(
     print(f"  [{target_name}] Running validation on {host}:{repo_path} @ {short_sha(job['sha'])}...")
     log_path = prepare_target_log(job["id"], target_name)
     if report_progress:
-        report_progress(phase="connect", host=host, log_path=str(log_path), last_output_at=now_iso())
+        report_progress(
+            phase="connect",
+            host=host,
+            log_path=str(log_path),
+            last_output_at=now_iso(),
+            transport_mode="bundle",
+        )
 
     try:
         bundle_name, bundle_ref = sync_job_bundle_to_ssh_host(host, job, report_progress=report_progress)
@@ -1790,6 +2034,7 @@ def run_windows_ssh_validation(
             "stdout_tail": "",
             "stderr_tail": str(exc),
             "log_file": str(log_path),
+            "transport_mode": "bundle",
         }
 
     resolved_platform, resolved_generator_instance = probe_windows_ssh_cmake_settings(
@@ -2138,6 +2383,7 @@ target_link_libraries(smoke INTERFACE Pulp::format Pulp::standalone)
             "stdout_tail": "",
             "stderr_tail": "Validation timed out after 3600s",
             "log_file": str(log_path),
+            "transport_mode": "bundle",
         }
     tail = run["output"][-2000:] if run["output"] else ""
     failed = run["returncode"] != 0
@@ -2150,6 +2396,7 @@ target_link_libraries(smoke INTERFACE Pulp::format Pulp::standalone)
         "stderr_tail": tail if failed else "",
         "log_file": str(log_path),
         "validation": job.get("validation", "full"),
+        "transport_mode": "bundle",
     }
 
 
@@ -2275,6 +2522,7 @@ def process_job(job: dict, config: dict) -> dict:
             "branch": job["branch"],
             "sha": job["sha"],
             "priority": job["priority"],
+            "submission": job.get("submission"),
             "targets": job.get("targets", []),
             "queued_at": job.get("queued_at", ""),
             "completed_at": now_iso(),
@@ -2319,6 +2567,7 @@ def process_job(job: dict, config: dict) -> dict:
                 "last_output_at": target_states.get(name, {}).get("last_output_at"),
                 "last_line": target_states.get(name, {}).get("last_line"),
                 "host": target_states.get(name, {}).get("host"),
+                "transport_mode": result.get("transport_mode", target_states.get(name, {}).get("transport_mode")),
                 "wait_reason": target_states.get(name, {}).get("wait_reason"),
             }
             flush_target_states()
@@ -2330,6 +2579,7 @@ def process_job(job: dict, config: dict) -> dict:
         "sha": job["sha"],
         "priority": job["priority"],
         "validation": job.get("validation", "full"),
+        "submission": job.get("submission"),
         "targets": job.get("targets", []),
         "queued_at": job.get("queued_at", ""),
         "completed_at": now_iso(),
@@ -2554,7 +2804,9 @@ def format_ci_comment(result: dict) -> str:
 # ── CLI Commands ─────────────────────────────────────────────────────────────
 
 
-def resolve_submission_options(args: argparse.Namespace, command: str) -> tuple[dict, str, str, list[str], str, str]:
+def resolve_submission_options(
+    args: argparse.Namespace, command: str
+) -> tuple[dict, str, str, list[str], str, str, dict]:
     config = load_config()
     branch = args.branch or current_branch()
     if args.sha:
@@ -2566,17 +2818,28 @@ def resolve_submission_options(args: argparse.Namespace, command: str) -> tuple[
     targets = resolve_targets(config, parse_targets_arg(getattr(args, "targets", None)))
     priority = normalize_priority(getattr(args, "priority", None) or default_priority_for(command, config))
     validation = normalize_validation_mode("smoke" if getattr(args, "smoke", False) else "full")
-    return config, branch, sha, targets, priority, validation
+    submission = build_submission_metadata(
+        config,
+        branch,
+        sha,
+        targets,
+        priority,
+        validation,
+        allow_root_mismatch=bool(getattr(args, "allow_root_mismatch", False)),
+        allow_unreachable_targets=bool(getattr(args, "allow_unreachable_targets", False)),
+    )
+    return config, branch, sha, targets, priority, validation, submission
 
 
 def cmd_enqueue(args: argparse.Namespace) -> int:
     try:
-        _config, branch, sha, targets, priority, validation = resolve_submission_options(args, "enqueue")
+        _config, branch, sha, targets, priority, validation, submission = resolve_submission_options(args, "enqueue")
     except (FileNotFoundError, ValueError) as exc:
         print(f"Error: {exc}")
         return 1
 
-    job, created = enqueue_job(branch, sha, priority, targets, "enqueue", validation)
+    print_submission_metadata(submission)
+    job, created = enqueue_job(branch, sha, priority, targets, "enqueue", validation, submission=submission)
     if created:
         print(f"Enqueued: {summarize_job(job)}")
     else:
@@ -2608,12 +2871,13 @@ def cmd_drain(_args: argparse.Namespace) -> int:
 
 def cmd_run(args: argparse.Namespace) -> int:
     try:
-        config, branch, sha, targets, priority, validation = resolve_submission_options(args, "run")
+        config, branch, sha, targets, priority, validation, submission = resolve_submission_options(args, "run")
     except (FileNotFoundError, ValueError) as exc:
         print(f"Error: {exc}")
         return 1
 
-    job, created = enqueue_job(branch, sha, priority, targets, "run", validation)
+    print_submission_metadata(submission)
+    job, created = enqueue_job(branch, sha, priority, targets, "run", validation, submission=submission)
     print(("Enqueued" if created else "Already queued/running") + f": {summarize_job(job)}")
 
     result, exit_code = wait_for_job(job["id"], config)
@@ -2625,7 +2889,7 @@ def cmd_run(args: argparse.Namespace) -> int:
 
 def cmd_ship(args: argparse.Namespace) -> int:
     try:
-        config, branch, sha, targets, priority, validation = resolve_submission_options(args, "ship")
+        config, branch, sha, targets, priority, validation, submission = resolve_submission_options(args, "ship")
     except (FileNotFoundError, ValueError) as exc:
         print(f"Error: {exc}")
         return 1
@@ -2643,6 +2907,7 @@ def cmd_ship(args: argparse.Namespace) -> int:
         return 1
 
     print(f"\n=== Shipping {branch} -> {base} ===\n")
+    print_submission_metadata(submission)
     print(f"  Pushing {branch}...")
     push = subprocess.run(
         ["git", "push", "-u", "origin", branch],
@@ -2661,7 +2926,7 @@ def cmd_ship(args: argparse.Namespace) -> int:
         return 1
     print(f"  PR #{pr_number} ready")
 
-    job, _created = enqueue_job(branch, sha, priority, targets, "ship", validation)
+    job, _created = enqueue_job(branch, sha, priority, targets, "ship", validation, submission=submission)
     print(f"  Queueing CI: {summarize_job(job)}")
     result, exit_code = wait_for_job(job["id"], config)
     if result is None:
@@ -2700,11 +2965,22 @@ def cmd_check(args: argparse.Namespace) -> int:
         targets = resolve_targets(config, parse_targets_arg(args.targets))
         priority = normalize_priority(args.priority or default_priority_for("check", config))
         validation = normalize_validation_mode("smoke" if getattr(args, "smoke", False) else "full")
+        submission = build_submission_metadata(
+            config,
+            branch,
+            sha,
+            targets,
+            priority,
+            validation,
+            allow_root_mismatch=bool(getattr(args, "allow_root_mismatch", False)),
+            allow_unreachable_targets=bool(getattr(args, "allow_unreachable_targets", False)),
+        )
     except (FileNotFoundError, ValueError) as exc:
         print(f"Error: {exc}")
         return 1
 
-    job, _created = enqueue_job(branch, sha, priority, targets, "check", validation)
+    print_submission_metadata(submission)
+    job, _created = enqueue_job(branch, sha, priority, targets, "check", validation, submission=submission)
     print(f"  Queueing CI: {summarize_job(job)}")
     result, exit_code = wait_for_job(job["id"], config)
     if result is None:
@@ -2881,6 +3157,14 @@ def cmd_status(_args: argparse.Namespace) -> int:
         print(f"\nRunning ({len(running)}):")
         for job in running:
             print(f"  {summarize_job(job)} started {job.get('started_at', '?')}")
+            submission = job.get("submission") or {}
+            if submission.get("config_path"):
+                print(
+                    "    submission: "
+                    f"root={submission.get('submitted_root', '?')} "
+                    f"config={submission.get('config_path')} "
+                    f"({submission.get('config_source', '?')})"
+                )
             active_targets = job.get("active_targets") or (
                 runner.get("active_targets") if runner and runner.get("active_job_id") == job["id"] else None
             )
@@ -2896,6 +3180,8 @@ def cmd_status(_args: argparse.Namespace) -> int:
                     details.append(f"phase={state['phase']}")
                 if state.get("validation_mode"):
                     details.append(f"mode={state['validation_mode']}")
+                if state.get("transport_mode"):
+                    details.append(f"transport={state['transport_mode']}")
                 if state.get("test_policy"):
                     details.append(f"tests={state['test_policy']}")
                 if state.get("prepared_state"):
@@ -2927,6 +3213,14 @@ def cmd_status(_args: argparse.Namespace) -> int:
         print(f"\nPending ({len(pending)}):")
         for job in pending:
             print(f"  {summarize_job(job)} queued {job.get('queued_at', '?')}")
+            submission = job.get("submission") or {}
+            if submission.get("config_path"):
+                print(
+                    "    submission: "
+                    f"root={submission.get('submitted_root', '?')} "
+                    f"config={submission.get('config_path')} "
+                    f"({submission.get('config_source', '?')})"
+                )
             active_targets = job.get("active_targets")
             target_summary = summarize_active_targets(active_targets, job.get("targets"))
             if target_summary:
@@ -2941,6 +3235,8 @@ def cmd_status(_args: argparse.Namespace) -> int:
                     details.append(f"phase={state['phase']}")
                 if state.get("validation_mode"):
                     details.append(f"mode={state['validation_mode']}")
+                if state.get("transport_mode"):
+                    details.append(f"transport={state['transport_mode']}")
                 if state.get("test_policy"):
                     details.append(f"tests={state['test_policy']}")
                 if state.get("prepared_state"):
@@ -3025,6 +3321,16 @@ def build_parser() -> argparse.ArgumentParser:
             "--targets",
             help="Comma-separated target list (for example: mac or mac,ubuntu)",
         )
+        command_parser.add_argument(
+            "--allow-root-mismatch",
+            action="store_true",
+            help="Queue even if the current cwd belongs to a different git root than this local_ci.py checkout",
+        )
+        command_parser.add_argument(
+            "--allow-unreachable-targets",
+            action="store_true",
+            help="Queue even if preflight finds a selected SSH target currently unreachable with no fallback",
+        )
         if include_sha:
             command_parser.add_argument("--sha", help="Exact commit SHA to validate (default: current HEAD)")
         if allow_smoke:
@@ -3056,6 +3362,16 @@ def build_parser() -> argparse.ArgumentParser:
     p_check.add_argument(
         "--targets",
         help="Comma-separated target list (for example: mac or mac,ubuntu)",
+    )
+    p_check.add_argument(
+        "--allow-root-mismatch",
+        action="store_true",
+        help="Queue even if the current cwd belongs to a different git root than this local_ci.py checkout",
+    )
+    p_check.add_argument(
+        "--allow-unreachable-targets",
+        action="store_true",
+        help="Queue even if preflight finds a selected SSH target currently unreachable with no fallback",
     )
     p_check.add_argument(
         "--smoke",
