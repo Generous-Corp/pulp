@@ -44,6 +44,7 @@ public:
     // Accepts both the new NativeFunction signature and CHOC's ArgumentList signature.
     void register_function(const std::string& name, NativeFunction fn);
     void register_function(const std::string& name, choc::javascript::Context::NativeFunction fn);
+    void register_promise_function(const std::string& name, NativePromiseFunction fn);
 
     // Register a native-backed global object with snapshot properties and
     // native methods.

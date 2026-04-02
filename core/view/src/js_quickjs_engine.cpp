@@ -112,6 +112,7 @@ public:
     }
 
     bool supports_host_objects() const override { return true; }
+    bool supports_promises() const override { return true; }
 
     // Expose the underlying CHOC context for WidgetBridge backward compatibility
     choc::javascript::Context& choc_context() { return context_; }

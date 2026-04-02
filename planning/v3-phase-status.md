@@ -45,7 +45,7 @@ These phases are already on `main`:
 
 Current recommended landing order:
 - [x] Status / planning truth refresh
-- [ ] Phase 13 readiness pass (see `planning/v3-phase13-readiness.md`; typed arrays + V8 proof + first host-object slice landed, Promises + bridge smoke still open)
+- [ ] Phase 13 readiness pass (see `planning/v3-phase13-readiness.md`; typed arrays + V8 proof + first host-object slice + first promise slice landed, deferred async + bridge smoke still open)
 - [ ] Phase 12 — Offline video exploration
 - [ ] Phase 13 — Three.js / WebGPU JS bridge
 - [ ] Phase 14 — Final verification pass
@@ -64,7 +64,8 @@ Before starting Phase 13 implementation work in earnest, prove the current merge
 - [x] prove `V8` really builds when enabled with external libs
 - [x] assess whether the merged `JsEngine` layer already provides enough TypedArray support for the first readiness slice
 - [x] raise and document the first host-object slice (native-backed object descriptors with properties + native methods)
-- [ ] write down the exact remaining promise / bridge capability floor
+- [x] raise and document the first promise slice (native callbacks surfaced as JS `Promise` objects)
+- [ ] write down the exact remaining deferred-async / bridge capability floor
 - [ ] define the first truthful Phase 13 test slice (engine selection, bridge smoke, then Three.js init)
 
 Readiness note:
@@ -172,7 +173,7 @@ Record when each phase lands with notes on what was delivered vs what was deferr
 ### Phase 10 — JS engine abstraction
 - **Merged:** 2026-04-02 (`e2f7dda`)
 - **Delivered:** JS engine abstraction with QuickJS/JSC/V8 backends and tests
-- **Deferred:** higher-level Phase 13 readiness work still needs native promise / async capability floor and the first bridge smoke slice
+- **Deferred:** higher-level Phase 13 readiness work still needs deferred native async capability floor and the first bridge smoke slice
 - **Notes:** this is one of the dependency unlocks for Phase 13, but not the end of Phase 13 readiness work
 
 ### Phase 11 — WebGPU compute exploration

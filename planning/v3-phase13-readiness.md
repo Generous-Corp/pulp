@@ -83,13 +83,16 @@ Current code truth:
   - native method callbacks
   - explicit `_objectName` tagging for later bridge code
 - `JsEngine::supports_typed_arrays()` defaults to `false`, but backend overrides now matter
-- `JsEngine::supports_promises()` defaults to `false`
+- `JsEngine::register_promise_function()` now exposes a first truthful promise slice on every proven backend:
+  - native callback result is surfaced as a real JS `Promise`
+  - resolution happens on the JS microtask queue through a shared wrapper
+  - this is not yet a held native resolver for later completion
 - `QuickJS` now reports host-object support through the shared descriptor seam, but still reports typed arrays unsupported through the current Pulp seam
 - `JavaScriptCore` now reports host-object support through that same shared descriptor seam
 - `V8` now reports host-object support through that same shared descriptor seam when built with the explicit provider contract
 - `JavaScriptCore` now surfaces TypedArray / ArrayBuffer values through the current Pulp seam and is covered by shared `JsEngine` tests
 - the `V8` backend now truthfully reports typed-array support in code and is proven in a real V8-enabled configure/build/test path when explicit external inputs are supplied
-- Promise-returning native APIs are still not implemented on any backend
+- full held-resolver native async APIs are still not implemented on any backend
 - full opaque native wrapper / proxy-style HostObjects are still not implemented on any backend
 
 That means the current engine layer is sufficient for:
@@ -98,11 +101,12 @@ That means the current engine layer is sufficient for:
 - function registration
 - basic bridge-style JS integration
 - native-backed object descriptors with properties + method callbacks
+- Promise-returning native functions that resolve via the JS microtask queue
 - typed-array argument / return-value flows on `jsc`
 
 It is not yet proven sufficient for:
-- Promise-returning native async APIs such as `mapAsync()`
 - zero-copy TypedArray / ArrayBuffer exchange
+- held-resolver native async APIs such as `mapAsync()`
 - opaque native GPU wrapper objects with live property interception / lifecycle hooks
 
 ## First Honest Phase 13 Gate
@@ -115,14 +119,15 @@ Before calling Phase 13 implementation "in progress", the following should be tr
 - [x] raise the first truthful capability slice: typed arrays where the backend already supports them
 - [x] prove one real V8-enabled configure/build with external V8 inputs
 - [x] raise the first truthful host-object slice: native-backed object descriptors with properties + methods
+- [x] raise the first truthful promise slice: native callbacks surfaced as JS `Promise` objects
 - [ ] decide whether Phase 13 starts as `v8-first` or `quickjs/jsc-first with V8 follow-up`
-- [ ] extend the `JsEngine` contract with the remaining minimum promise / async surface
+- [ ] extend the `JsEngine` contract with the remaining minimum deferred async surface
 - [ ] add tests for that remaining surface before binding Dawn objects
 - [ ] define the first truthful Phase 13 smoke slice
 
 ## Recommended Next Steps
 
-1. Add the next capability slice for Promise-returning native async paths instead of leaving that gap as an undocumented stub.
+1. Add the next capability slice for deferred native async paths instead of leaving that gap as an undocumented stub.
 2. Decide whether the first bridge slice targets:
    - a `v8-first` path for Three.js realism, or
    - a thinner engine-agnostic proof slice first, with V8 performance proof immediately after.

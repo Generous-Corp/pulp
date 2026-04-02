@@ -234,7 +234,7 @@ TEST_CASE("JsEngine default engine creation", "[js_engine]") {
 TEST_CASE("JsEngine capability flags are truthful", "[js_engine]") {
     FOR_EACH_ENGINE(engine)
         REQUIRE(engine->supports_host_objects());
-        REQUIRE_FALSE(engine->supports_promises());
+        REQUIRE(engine->supports_promises());
 
         switch (engine->type()) {
             case JsEngineType::quickjs:
@@ -293,6 +293,25 @@ TEST_CASE("JsEngine typed array evaluation", "[js_engine]") {
         REQUIRE(result[0].getWithDefault<int32_t>(0) == 1);
         REQUIRE(result[1].getWithDefault<int32_t>(0) == 2);
         REQUIRE(result[2].getWithDefault<int32_t>(0) == 255);
+    END_FOR_EACH_ENGINE
+}
+
+TEST_CASE("JsEngine native promise functions return real Promise objects", "[js_engine]") {
+    FOR_EACH_ENGINE(engine)
+        if (!engine->supports_promises()) {
+            SUCCEED("promises intentionally unsupported on this backend");
+            continue;
+        }
+
+        engine->register_promise_function("asyncAdd", [](const choc::value::Value* args, size_t count) {
+            int total = 0;
+            for (size_t i = 0; i < count; ++i)
+                total += args[i].getWithDefault<int32_t>(0);
+            return choc::value::createInt32(total);
+        });
+
+        REQUIRE(engine->evaluate("Object.prototype.toString.call(asyncAdd(20, 22))").toString() == "[object Promise]");
+        REQUIRE(engine->evaluate("typeof asyncAdd(20, 22).then").toString() == "function");
     END_FOR_EACH_ENGINE
 }
 

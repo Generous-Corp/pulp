@@ -40,8 +40,9 @@ READINESS SNAPSHOT (2026-04-02):
 - The current `JsEngine` capability floor is only partially raised:
   - typed arrays are now a real tested capability on `jsc`
   - a first native-backed host-object descriptor seam is now tested across the proven backends
+  - a first native promise-returning seam is now tested across the proven backends
   - `v8` now also has a real configure/build/test proof path with typed-array coverage when built through that explicit provider contract
-  - Promise-returning native APIs are still not implemented or proven
+  - deferred native async settlement is still not implemented or proven
   - full opaque wrapper / proxy-style HostObjects are still not implemented or proven
 - Read `planning/v3-phase13-readiness.md` before treating this phase as ready to implement.
 
@@ -120,7 +121,7 @@ NON-NEGOTIABLES:
 - Dawn device MUST be shared between Skia Graphite and the WebGPU JS bridge.
   Do not create a second GPU device.
 - Treat the currently landed host-object descriptor seam as the first floor, not the final API.
-  The real bridge still needs opaque wrapper objects and native async promise plumbing before
+  The real bridge still needs opaque wrapper objects and deferred native async promise plumbing before
   it can honestly claim Three.js/WebGPU compatibility.
 
 DELIVERABLES:

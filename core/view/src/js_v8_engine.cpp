@@ -101,7 +101,7 @@ public:
     // native-backed object descriptor seam.
     bool supports_host_objects() const override { return true; }
     bool supports_typed_arrays() const override { return true; }
-    bool supports_promises() const override { return false; }
+    bool supports_promises() const override { return true; }
 
 private:
     choc::javascript::Context context_;

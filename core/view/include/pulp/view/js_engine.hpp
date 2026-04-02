@@ -20,6 +20,7 @@ using LogCallback = std::function<void(std::string_view level, std::string_view 
 
 // Native function callable from JS
 using NativeFunction = std::function<choc::value::Value(const choc::value::Value* args, size_t num_args)>;
+using NativePromiseFunction = NativeFunction;
 
 // First host-object slice: native-backed global objects with snapshot properties
 // and native method callbacks. This is intentionally smaller than a full opaque
@@ -126,6 +127,27 @@ public:
         }
 
         evaluate(script + target + ";");
+    }
+
+    // First promise slice: expose a native callback as a JS function that
+    // returns a real Promise and resolves on the JS microtask queue.
+    // This does not yet provide a held native resolver for later completion.
+    virtual void register_promise_function(const std::string& name, NativePromiseFunction fn) {
+        const auto quote_string = [] (std::string_view text) {
+            return choc::json::toString(choc::value::createString(std::string(text)));
+        };
+
+        static uint64_t global_promise_symbol = 0;
+        auto hidden_name = "__pulp_promise_function_" + std::to_string(global_promise_symbol++);
+        register_function(hidden_name, std::move(fn));
+
+        std::string quoted_hidden = quote_string(hidden_name);
+        std::string quoted_name = quote_string(name);
+        std::string script =
+            "globalThis[" + quoted_name + "] = (...args) => Promise.resolve().then(() => globalThis[" + quoted_hidden + "](...args));\n"
+            "delete globalThis[" + quoted_hidden + "];\n"
+            "globalThis[" + quoted_name + "];";
+        evaluate(script);
     }
 
     // Hint that now is a good time to collect garbage (advisory)
