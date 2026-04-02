@@ -39,7 +39,10 @@ target_link_libraries(pulp-render PUBLIC pulp::runtime pulp::canvas)
 
 # SDL3 for cross-platform surface extraction
 if(PULP_HAS_SDL3)
-    target_link_libraries(pulp-render PRIVATE SDL3::SDL3-static)
+    target_link_libraries(pulp-render PRIVATE
+        $<BUILD_INTERFACE:SDL3::SDL3-static>
+        $<INSTALL_INTERFACE:Pulp::sdl3-static>
+    )
     target_compile_definitions(pulp-render PRIVATE PULP_HAS_SDL3=1)
 endif()
 

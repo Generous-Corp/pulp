@@ -12,9 +12,9 @@ Source: `tools/cli/pulp_cli.cpp`
 
 Create a new plugin project from templates. Checks environment, scaffolds source files, builds, and runs tests.
 
-Works in two modes:
-- **Inside a Pulp repo** (contributor mode): uses local source, adds to `examples/`
-- **Outside a repo** (standalone mode): downloads the SDK, uses `find_package(Pulp)`, generates `pulp.toml`
+Default behavior is product-first:
+- **SDK mode** (default for external projects): uses `find_package(Pulp)`, generates `pulp.toml`, and either reuses a checkout-built local SDK or downloads a cached SDK release when no local checkout hint is available
+- **Source-tree mode** (`--in-tree` / `--example`): uses local source and adds the project to `examples/`
 
 ```bash
 pulp create "My Gain"                              # effect plugin (default)
@@ -23,18 +23,41 @@ pulp create "My App" --type app                    # standalone audio applicatio
 pulp create "My Project" --type bare               # minimal skeleton
 pulp create "My FX" --manufacturer "Acme Audio"    # custom manufacturer
 pulp create "My FX" --output ~/projects/my-fx      # custom output directory
+pulp create "Debug Knob" --in-tree                 # add an example under examples/
 pulp create "My FX" --no-build                     # scaffold only, skip build
 pulp create "My FX" --no-interactive               # CI/scripting mode (no prompts)
 ```
 
 Available types: `effect` (default), `instrument`, `app`, `bare`. Templates are in `tools/templates/<type>/`.
 
+Default output location resolution:
+1. `--output <dir>`
+2. `PULP_PROJECTS_DIR`
+3. `~/.pulp/config.toml` with:
+
+```toml
+[create]
+projects_dir = "~/Code/PulpProjects"
+```
+
+4. If run inside the Pulp repo: create the project next to the repo root
+5. Otherwise: create the project in `./<name>`
+
+Set `PULP_HOME` to move the default `~/.pulp/` home used for SDK/cache/config storage.
+
+This flow is meant to behave the same from a normal terminal, CI, or agent-driven workflows. The CLI prints which mode it selected and why, while `--no-interactive`, `PULP_PROJECTS_DIR`, and `PULP_HOME` make project creation predictable for automation.
+
+Mode truth:
+- **SDK mode** means you are in an external project building against a pinned installed Pulp SDK artifact.
+- **Source-tree mode** means you are inside the Pulp checkout building the repo or its examples against live source.
+- `pulp create` defaults to SDK mode unless you explicitly ask for an in-tree example with `--in-tree`.
+
 What it does:
 1. Runs `pulp doctor` checks (fails fast if environment is broken)
-2. In standalone mode: downloads and caches the Pulp SDK
+2. In standalone product mode: if run from inside a Pulp checkout, prepares pinned dependencies from that checkout and caches a local SDK install; otherwise downloads and caches the SDK release
 3. Scaffolds source files from templates (processor, format entries, test, CMakeLists.txt)
-4. In repo mode: adds the project to `examples/CMakeLists.txt`
-5. In standalone mode: generates `pulp.toml` with pinned SDK version
+4. In in-tree mode: adds the project to `examples/CMakeLists.txt`
+5. In standalone product mode: generates `pulp.toml` with pinned SDK version and local SDK hints when created from a checkout
 6. Configures, builds the test target, and runs tests
 7. Reports plugin artifact locations
 
@@ -58,7 +81,7 @@ pulp build -j8                # Parallel jobs
 
 Extra arguments are passed through to `cmake --build`.
 
-For standalone projects (detected via `pulp.toml`), automatically sets `CMAKE_PREFIX_PATH` to the cached SDK.
+For standalone projects (detected via `pulp.toml`), automatically sets `CMAKE_PREFIX_PATH` to the hinted local SDK when available, otherwise to the cached SDK release.
 
 ### test
 
@@ -77,11 +100,14 @@ Extra arguments are passed through to `ctest`.
 
 **Status**: usable
 
-Show project information: root directory, git branch, build state, source file counts, example count, and available plugin format SDKs.
+Show project information for either SDK mode or source-tree mode.
 
 ```bash
 pulp status
 ```
+
+`pulp status` reports which mode you are in so external projects never silently depend on a random checkout and repo/examples never silently pick up a cached SDK.
+In SDK mode it also reports the pinned SDK version plus the resolved SDK path and checkout hints when present.
 
 ### validate
 
@@ -111,13 +137,15 @@ pulp run PulpGain           # launch a specific target
 pulp run MyApp -- --arg1    # pass arguments to the launched binary
 ```
 
-Searches `build/examples/` for executable binaries, skipping test binaries.
+Searches the active project's build output:
+- standalone projects: `build/bin/`
+- in-repo examples: `build/examples/`
 
 ### cache
 
 **Status**: usable
 
-Manage the Pulp SDK and asset cache at `~/.pulp/`.
+Manage the Pulp SDK and asset cache at `~/.pulp/` by default.
 
 ```bash
 pulp cache                  # Show help
@@ -131,16 +159,17 @@ pulp cache clean            # Remove all cached assets
 | Subcommand | What it does |
 |------------|-------------|
 | `status` | List cached SDK versions and downloaded assets |
-| `fetch skia` | Download platform-specific Skia GPU binaries to `~/.pulp/cache/` |
+| `fetch skia` | Download platform-specific Skia GPU binaries to `~/.pulp/cache/` by default |
 | `clean` | Remove all files from the asset cache |
 
 GPU rendering requires Skia binaries. If a standalone project enables GPU features, run `pulp cache fetch skia` to download them.
+Set `PULP_HOME` to relocate the cache, SDK, and config root.
 
 ### doctor
 
 **Status**: usable
 
-Diagnose environment issues. Checks C++20 compiler, CMake version, git-lfs, LFS file state, external SDKs (VST3, AudioUnit), and platform-specific dependencies.
+Diagnose environment issues. Checks C++20 compiler, CMake version, git-lfs, LFS file state, external SDKs (VST3, AudioUnit), platform-specific dependencies, and the expected project mode.
 
 ```bash
 pulp doctor             # show all checks
@@ -153,6 +182,10 @@ Checks are platform-gated — only relevant checks run on each OS:
 - **macOS**: compiler, CMake, git-lfs, LFS files, VST3 SDK, AudioUnitSDK, build state
 - **Linux**: compiler, CMake, git-lfs, LFS files, VST3 SDK, ALSA dev headers, build state
 - **Windows**: compiler, CMake, git-lfs, LFS files, VST3 SDK, build state
+
+Mode-specific checks:
+- **SDK mode**: verifies `pulp.toml`, the installed SDK path or cache, optional checkout hints, and build configuration for the external project
+- **Source-tree mode**: verifies the active checkout, pinned external SDKs, LFS state, and build configuration for the repo/examples workflow
 
 Exit code is 0 if all checks pass, 1 if any fail.
 
@@ -364,7 +397,8 @@ Color output is auto-detected based on TTY. Non-TTY environments (pipes, CI) get
 
 ## Caveats
 
-- In repo mode, the CLI finds the project root by walking up from the current directory looking for a directory with both `CMakeLists.txt` and `core/`.
-- In standalone mode, the CLI finds the project root by looking for `pulp.toml` without `core/`.
+- Standalone projects are detected by walking up from the current directory looking for `pulp.toml` without `core/`.
+- If both a standalone project and a parent Pulp repo are present, the standalone project wins.
+- Pulp repo mode is detected by walking up from the current directory looking for a directory with both `CMakeLists.txt` and `core/`.
 - The `ship` subcommands are macOS-specific (they use `codesign` and `pkgbuild`).
 - `pulp upgrade` requires internet access and `curl` (macOS/Linux) or PowerShell (Windows).

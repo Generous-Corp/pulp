@@ -117,6 +117,31 @@ When you need to reproduce an intermittent failure locally before spending anoth
 tools/scripts/repeat-until-fail.sh 100 -- ctest --test-dir build -R "<test name>" --output-on-failure
 ```
 
+## Active CI Incident Loop
+
+Do not treat a running CI job as something to check later. When a local CI job is active, one agent should own the monitoring loop and one agent or process should work the likely fix path locally as soon as a failure becomes actionable.
+
+Required behavior while a job is active:
+- Poll `python3 tools/local-ci/local_ci.py status` proactively.
+- Tail `python3 tools/local-ci/local_ci.py logs <job-id> --target <name>` as soon as a target fails or looks stuck.
+- Send user updates without waiting to be asked when a target changes state, a failure appears, or a rerun is queued.
+- If one target has already failed, stop treating the rest of that job as the only source of truth. Start local repro or code inspection immediately when the failure is actionable.
+- Once a failure is actionable, parallel work is required unless it would contend with the same host or invalidate the active run. Keep one CI owner watching the hosts and one local loop reproducing or patching the likely issue.
+- Do not sit idle waiting for unrelated targets to finish if the first failing target already tells you what to investigate.
+- Never rerun a target that already passed on the exact same SHA unless the prior result is untrustworthy or the environment changed.
+- If only part of the matrix is stale, rerun only that subset of targets.
+- Once the failure surface is isolated, prefer the minimum sufficient proof instead of a symmetric rerun. If macOS and Ubuntu already passed on the current head and only Windows changed or failed, rerun Windows only.
+- A direct exact-SHA validation on one target is acceptable merge evidence for that target. Do not invalidate earlier same-SHA passes on other targets just because they came from a different run.
+- Use `validation=smoke` before full CI when the risk is install/export/build structure rather than runtime test behavior.
+- Treat `all targets on one SHA` as a goal, not a reason to blindly rerun already-green same-SHA targets.
+
+Minimum incident response once a failure is visible:
+1. Capture the failing job id, target, SHA, validation mode, and first failing test/build step.
+2. Decide whether the failure is infrastructure, environment drift, or a likely code/test issue.
+3. If actionable, begin the fix or repro loop immediately instead of waiting for the whole matrix to finish.
+4. Queue the narrowest truthful rerun needed after the fix.
+5. Close the loop with a short status update that says what failed, what is being tried now, and what still remains.
+
 ### `cloud run [branch]` — Trigger GitHub Actions
 
 Trigger cloud CI manually via workflow_dispatch (when cloud CI is needed):

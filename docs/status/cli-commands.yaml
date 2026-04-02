@@ -22,7 +22,7 @@ commands:
 
   - name: status
     status: usable
-    summary: Show project root, git info, build state, source counts, SDK availability.
+    summary: Show project root, git info, build state, and whether the active project is in source-tree mode or sdk mode.
     docs: reference/cli.md#status
 
   - name: validate
@@ -78,7 +78,7 @@ commands:
 
   - name: create
     status: usable
-    summary: Create a new plugin project from templates. Checks environment, scaffolds, builds, and tests. Works inside repo (contributor mode) and outside (standalone mode with SDK).
+    summary: Create a new plugin project from templates. Defaults to sdk mode for external projects, with explicit source-tree example mode for Pulp development and checkout-aware SDK reuse when run from a Pulp source tree.
     args:
       - name: name
         kind: positional
@@ -92,7 +92,10 @@ commands:
         description: Manufacturer name (default: Pulp)
       - name: --output
         kind: option
-        description: Output directory (default: examples/<name>/ or ./<name>/ in standalone mode)
+        description: Output directory override (otherwise uses PULP_PROJECTS_DIR, ~/.pulp/config.toml, repo sibling, or ./<name>)
+      - name: --in-tree
+        kind: flag
+        description: Add the project under examples/ using the local Pulp checkout (alias: --example)
       - name: --no-build
         kind: flag
         description: Skip build after scaffolding
@@ -103,7 +106,7 @@ commands:
 
   - name: cache
     status: usable
-    summary: Manage SDK and asset cache at ~/.pulp/.
+    summary: Manage SDK and asset cache at ~/.pulp/ by default.
     subcommands:
       - name: status
         summary: Show cached SDKs and assets with sizes
@@ -135,7 +138,7 @@ commands:
 
   - name: doctor
     status: usable
-    summary: Diagnose environment issues. Checks compiler, CMake, git-lfs, external SDKs, platform deps.
+    summary: Diagnose environment issues. Checks compiler, CMake, git-lfs, platform deps, and either the active checkout or the installed SDK workflow depending on source-tree vs sdk mode.
     args:
       - name: --fix
         kind: flag

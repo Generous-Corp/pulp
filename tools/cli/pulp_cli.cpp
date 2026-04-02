@@ -2,6 +2,7 @@
 // Wraps common build/test/status operations
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cctype>
 #include <chrono>
@@ -9,7 +10,9 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
+#include <random>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -190,6 +193,11 @@ static fs::path find_standalone_root() {
 // ── SDK Cache ──────────────────────────────────────────────────────────────
 
 static fs::path pulp_home() {
+    const char* pulp_home_env = std::getenv("PULP_HOME");
+    if (pulp_home_env && *pulp_home_env) {
+        return fs::path(pulp_home_env);
+    }
+
     const char* home = std::getenv("HOME");
 #ifdef _WIN32
     if (!home) home = std::getenv("USERPROFILE");
@@ -201,6 +209,15 @@ static fs::path pulp_home() {
 static fs::path sdk_cache_path(const std::string& version) {
     return pulp_home() / "sdk" / version;
 }
+
+static std::string detect_platform();
+
+static fs::path local_sdk_cache_path(const std::string& version) {
+    return pulp_home() / "sdk-local" / detect_platform() / version;
+}
+
+static std::string trim(const std::string& s);
+static std::string strip_quotes(const std::string& s);
 
 static std::string detect_platform() {
 #ifdef __APPLE__
@@ -328,16 +345,66 @@ static fs::path ensure_sdk(const std::string& version) {
     return sdk_dir;
 }
 
+static int ensure_checkout_dependencies(const fs::path& repo_root) {
+    auto script = repo_root / "setup.sh";
+    if (!fs::exists(script)) {
+        std::cerr << "Error: setup.sh not found in checkout at " << repo_root.string() << "\n";
+        return 1;
+    }
+
+    std::string cmd = "cd " + repo_root.string() + " && ./setup.sh --deps-only";
+    return run_with_spinner(cmd, "Preparing checkout dependencies");
+}
+
+static fs::path ensure_checkout_sdk(const fs::path& repo_root, const std::string& version) {
+    auto sdk_dir = local_sdk_cache_path(version);
+    auto config = sdk_dir / "lib" / "cmake" / "Pulp" / "PulpConfig.cmake";
+    if (fs::exists(config) && fs::exists(sdk_dir / "version.txt")) {
+        return sdk_dir;
+    }
+
+    if (ensure_checkout_dependencies(repo_root) != 0) {
+        return {};
+    }
+
+    auto build_dir = pulp_home() / "sdk-build" / (detect_platform() + "-" + version);
+    fs::create_directories(build_dir.parent_path());
+    fs::create_directories(sdk_dir);
+
+    std::string configure_cmd = "cmake -S " + repo_root.string()
+        + " -B " + build_dir.string()
+        + " -DCMAKE_BUILD_TYPE=Release"
+        + " -DCMAKE_INSTALL_PREFIX=" + sdk_dir.string()
+        + " -DPULP_BUILD_TESTS=OFF"
+        + " -DPULP_BUILD_EXAMPLES=OFF"
+        + " -DPULP_ENABLE_GPU=OFF";
+    if (run_with_spinner(configure_cmd, "Configuring local SDK") != 0) {
+        return {};
+    }
+
+    std::string install_cmd = "cmake --build " + build_dir.string() + " --target install --parallel";
+    if (run_with_spinner(install_cmd, "Installing local SDK") != 0) {
+        return {};
+    }
+
+    if (!fs::exists(config)) {
+        std::cerr << "Error: local SDK installation incomplete — " << config.string() << " not found.\n";
+        return {};
+    }
+
+    print_ok("Local SDK cached at " + sdk_dir.string());
+    return sdk_dir;
+}
+
 // Read SDK version from pulp.toml
-static std::string read_sdk_version(const fs::path& project_root) {
+static std::string read_pulp_toml_value(const fs::path& project_root, const std::string& key) {
     auto toml_path = project_root / "pulp.toml";
-    if (!fs::exists(toml_path)) return PULP_SDK_VERSION;
+    if (!fs::exists(toml_path)) return {};
 
     std::ifstream f(toml_path);
     std::string line;
     while (std::getline(f, line)) {
-        // Look for: sdk_version = "0.1.0"
-        auto pos = line.find("sdk_version");
+        auto pos = line.find(key);
         if (pos != std::string::npos) {
             auto q1 = line.find('"', pos);
             auto q2 = line.find('"', q1 + 1);
@@ -346,22 +413,180 @@ static std::string read_sdk_version(const fs::path& project_root) {
             }
         }
     }
+    return {};
+}
+
+static std::string read_sdk_version(const fs::path& project_root) {
+    auto version = read_pulp_toml_value(project_root, "sdk_version");
+    if (!version.empty()) return version;
     return PULP_SDK_VERSION;
+}
+
+static fs::path read_sdk_path_hint(const fs::path& project_root) {
+    auto value = read_pulp_toml_value(project_root, "sdk_path");
+    return value.empty() ? fs::path{} : fs::path(value);
+}
+
+static fs::path read_sdk_checkout_hint(const fs::path& project_root) {
+    auto value = read_pulp_toml_value(project_root, "sdk_checkout");
+    return value.empty() ? fs::path{} : fs::path(value);
+}
+
+static std::string default_create_formats(const fs::path& repo_root, const std::string& type) {
+    if (type == "app" || type == "bare") {
+        return "Standalone";
+    }
+
+    if (!repo_root.empty()) {
+        std::vector<std::string> formats;
+        if (fs::exists(repo_root / "external" / "vst3sdk" / "pluginterfaces")) {
+            formats.push_back("VST3");
+        }
+#ifdef __APPLE__
+        if (fs::exists(repo_root / "external" / "AudioUnitSDK")) {
+            formats.push_back("AU");
+        }
+#endif
+        formats.push_back("CLAP");
+#ifdef __linux__
+        formats.push_back("LV2");
+#endif
+        formats.push_back("Standalone");
+        std::ostringstream out;
+        for (size_t i = 0; i < formats.size(); ++i) {
+            if (i > 0) out << ' ';
+            out << formats[i];
+        }
+        return out.str();
+    }
+
+#ifdef __APPLE__
+    return "VST3 AU CLAP Standalone";
+#elif defined(_WIN32)
+    return "VST3 CLAP Standalone";
+#else
+    return "VST3 CLAP LV2 Standalone";
+#endif
+}
+
+static bool checkout_supports_vst3(const fs::path& repo_root) {
+    return fs::exists(repo_root / "external" / "vst3sdk" / "pluginterfaces");
+}
+
+static bool checkout_supports_au(const fs::path& repo_root) {
+#ifdef __APPLE__
+    return fs::exists(repo_root / "external" / "AudioUnitSDK");
+#else
+    (void) repo_root;
+    return false;
+#endif
+}
+
+static fs::path resolve_active_project_root(bool* is_standalone) {
+    auto standalone_root = find_standalone_root();
+    if (!standalone_root.empty()) {
+        if (is_standalone) *is_standalone = true;
+        return standalone_root;
+    }
+
+    auto root = find_project_root();
+    if (is_standalone) *is_standalone = false;
+    return root;
+}
+
+static std::string read_user_config_value(const std::string& section, const std::string& key) {
+    auto config_path = pulp_home() / "config.toml";
+    if (!fs::exists(config_path)) return {};
+
+    std::ifstream f(config_path);
+    if (!f.is_open()) return {};
+
+    std::string line;
+    std::string current_section;
+    while (std::getline(f, line)) {
+        auto comment = line.find('#');
+        if (comment != std::string::npos) line = line.substr(0, comment);
+
+        auto trimmed = trim(line);
+        if (trimmed.empty()) continue;
+
+        if (trimmed.front() == '[' && trimmed.back() == ']') {
+            current_section = trim(trimmed.substr(1, trimmed.size() - 2));
+            continue;
+        }
+
+        if (current_section != section) continue;
+
+        auto eq = trimmed.find('=');
+        if (eq == std::string::npos) continue;
+
+        auto parsed_key = trim(trimmed.substr(0, eq));
+        if (parsed_key != key) continue;
+
+        return strip_quotes(trim(trimmed.substr(eq + 1)));
+    }
+
+    return {};
+}
+
+static bool path_is_within(const fs::path& path, const fs::path& root) {
+    auto normalized_path = fs::absolute(path).lexically_normal();
+    auto normalized_root = fs::absolute(root).lexically_normal();
+
+    auto path_it = normalized_path.begin();
+    auto root_it = normalized_root.begin();
+    for (; root_it != normalized_root.end(); ++root_it, ++path_it) {
+        if (path_it == normalized_path.end() || *path_it != *root_it) return false;
+    }
+
+    return true;
+}
+
+static fs::path resolve_create_projects_base_dir(const fs::path& repo_root) {
+    const char* home_env = std::getenv("HOME");
+#ifdef _WIN32
+    if (!home_env) home_env = std::getenv("USERPROFILE");
+#endif
+    fs::path user_home = home_env ? fs::path(home_env) : fs::path{};
+
+    if (const char* env_projects_dir = std::getenv("PULP_PROJECTS_DIR")) {
+        auto configured = strip_quotes(trim(env_projects_dir));
+        if (!configured.empty()) {
+            auto path = fs::path(configured);
+            if (!path.empty() && path.string()[0] == '~' && !user_home.empty()) {
+                path = configured == "~"
+                    ? user_home
+                    : user_home / configured.substr(2);
+            }
+            return path.is_absolute() ? path : fs::absolute(path);
+        }
+    }
+
+    auto config_projects_dir = read_user_config_value("create", "projects_dir");
+    if (!config_projects_dir.empty()) {
+        auto path = fs::path(config_projects_dir);
+        if (!path.empty() && path.string()[0] == '~' && !user_home.empty()) {
+            path = config_projects_dir == "~"
+                ? user_home
+                : user_home / config_projects_dir.substr(2);
+        }
+        return path.is_absolute() ? path : fs::absolute(path);
+    }
+
+    if (!repo_root.empty()) return repo_root.parent_path();
+    return fs::current_path();
 }
 
 // ── Commands ─────────────────────────────────────────────────────────────────
 
 static int cmd_build(const std::vector<std::string>& args) {
-    auto root = find_project_root();
-    auto standalone_root = find_standalone_root();
-
-    if (root.empty() && standalone_root.empty()) {
+    bool standalone_mode = false;
+    auto project_root = resolve_active_project_root(&standalone_mode);
+    if (project_root.empty()) {
         std::cerr << "Error: not in a Pulp project directory\n";
         return 1;
     }
 
-    // Standalone project mode: set CMAKE_PREFIX_PATH to SDK
-    auto project_root = root.empty() ? standalone_root : root;
     auto build_dir = project_root / "build";
     bool needs_configure = !fs::exists(build_dir / "CMakeCache.txt");
 
@@ -376,9 +601,18 @@ static int cmd_build(const std::vector<std::string>& args) {
         std::string configure_cmd = "cmake -B " + build_dir.string() + " -S " + project_root.string();
 
         // Standalone projects need CMAKE_PREFIX_PATH to find the SDK
-        if (root.empty() && !standalone_root.empty()) {
-            auto version = read_sdk_version(standalone_root);
-            auto sdk_dir = ensure_sdk(version);
+        if (standalone_mode) {
+            auto version = read_sdk_version(project_root);
+            auto sdk_dir = read_sdk_path_hint(project_root);
+            auto checkout_hint = read_sdk_checkout_hint(project_root);
+            auto config = sdk_dir / "lib" / "cmake" / "Pulp" / "PulpConfig.cmake";
+            if (sdk_dir.empty() || !fs::exists(config)) {
+                if (!checkout_hint.empty() && fs::exists(checkout_hint)) {
+                    sdk_dir = ensure_checkout_sdk(checkout_hint, version);
+                } else {
+                    sdk_dir = ensure_sdk(version);
+                }
+            }
             if (sdk_dir.empty()) {
                 std::cerr << "Error: could not obtain Pulp SDK v" << version << "\n";
                 return 1;
@@ -401,10 +635,8 @@ static int cmd_build(const std::vector<std::string>& args) {
 }
 
 static int cmd_test(const std::vector<std::string>& args) {
-    auto root = find_project_root();
-    auto standalone_root = find_standalone_root();
-    auto project_root = root.empty() ? standalone_root : root;
-
+    bool standalone_mode = false;
+    auto project_root = resolve_active_project_root(&standalone_mode);
     if (project_root.empty()) {
         std::cerr << "Error: not in a Pulp project directory\n";
         return 1;
@@ -427,7 +659,8 @@ static int cmd_test(const std::vector<std::string>& args) {
 }
 
 static int cmd_status([[maybe_unused]] const std::vector<std::string>& args) {
-    auto root = find_project_root();
+    bool standalone_mode = false;
+    auto root = resolve_active_project_root(&standalone_mode);
     if (root.empty()) {
         std::cerr << "Error: not in a Pulp project directory\n";
         return 1;
@@ -437,10 +670,17 @@ static int cmd_status([[maybe_unused]] const std::vector<std::string>& args) {
     std::cout << "Pulp Project Status\n";
     std::cout << "====================\n";
     std::cout << "Root: " << root.string() << "\n";
+    if (standalone_mode) {
+        std::cout << "Mode: sdk mode\n";
+        std::cout << "Mode detail: external project using an installed Pulp SDK artifact\n";
+    } else {
+        std::cout << "Mode: source-tree mode\n";
+        std::cout << "Mode detail: repo/examples build against the current checkout\n";
+    }
 
     // Git info
-    auto branch = exec_output("git -C " + root.string() + " branch --show-current");
-    auto commit = exec_output("git -C " + root.string() + " log --oneline -1");
+    auto branch = exec_output("git -C " + root.string() + " branch --show-current 2>/dev/null");
+    auto commit = exec_output("git -C " + root.string() + " log --oneline -1 2>/dev/null");
     if (!branch.empty()) std::cout << "Branch: " << branch << "\n";
     if (!commit.empty()) std::cout << "Commit: " << commit << "\n";
 
@@ -450,6 +690,26 @@ static int cmd_status([[maybe_unused]] const std::vector<std::string>& args) {
         std::cout << "Build: configured\n";
     } else {
         std::cout << "Build: not configured (run `pulp build`)\n";
+    }
+
+    if (standalone_mode) {
+        const auto version = read_sdk_version(root);
+        const auto sdk_hint = read_sdk_path_hint(root);
+        const auto checkout_hint = read_sdk_checkout_hint(root);
+        std::cout << "SDK version: " << version << "\n";
+        if (!sdk_hint.empty()) {
+            std::cout << "SDK path: " << sdk_hint.string();
+            std::cout << (fs::exists(sdk_hint / "lib" / "cmake" / "Pulp" / "PulpConfig.cmake") ? " (ready)\n" : " (missing)\n");
+        } else if (auto sdk_dir = local_sdk_cache_path(version); fs::exists(sdk_dir)) {
+            std::cout << "SDK local cache: " << sdk_dir.string() << "\n";
+        } else if (auto sdk_dir = sdk_cache_path(version); fs::exists(sdk_dir)) {
+            std::cout << "SDK download cache: " << sdk_dir.string() << "\n";
+        }
+        if (!checkout_hint.empty()) {
+            std::cout << "SDK checkout: " << checkout_hint.string();
+            std::cout << (fs::exists(checkout_hint / "setup.sh") ? " (ready)\n" : " (missing)\n");
+        }
+        return 0;
     }
 
     // Count source files
@@ -492,7 +752,7 @@ static int cmd_status([[maybe_unused]] const std::vector<std::string>& args) {
 }
 
 static int cmd_clean([[maybe_unused]] const std::vector<std::string>& args) {
-    auto root = find_project_root();
+    auto root = resolve_active_project_root(nullptr);
     if (root.empty()) {
         std::cerr << "Error: not in a Pulp project directory\n";
         return 1;
@@ -510,7 +770,7 @@ static int cmd_clean([[maybe_unused]] const std::vector<std::string>& args) {
 }
 
 static int cmd_validate(const std::vector<std::string>& args) {
-    auto root = find_project_root();
+    auto root = resolve_active_project_root(nullptr);
     if (root.empty()) {
         std::cerr << "Error: not in a Pulp project directory\n";
         return 1;
@@ -736,8 +996,14 @@ struct DoctorCheck {
     std::string fix;
 };
 
-static std::vector<DoctorCheck> run_doctor_checks(const fs::path& root) {
+static bool sdk_config_ready(const fs::path& sdk_dir) {
+    if (sdk_dir.empty()) return false;
+    return fs::exists(sdk_dir / "lib" / "cmake" / "Pulp" / "PulpConfig.cmake");
+}
+
+static std::vector<DoctorCheck> run_doctor_checks(const fs::path& active_root, bool standalone_mode) {
     std::vector<DoctorCheck> checks;
+    auto repo_root = standalone_mode ? fs::path{} : active_root;
 
     // 1. C++20 compiler
     {
@@ -751,12 +1017,11 @@ static std::vector<DoctorCheck> run_doctor_checks(const fs::path& root) {
             c.fix = "xcode-select --install";
         }
 #elif defined(_WIN32)
-        // Try cl.exe first, then check for VS Build Tools via vswhere
         auto ver = exec_output("cl 2>&1 | head -1");
         if (!ver.empty()) {
-            c.passed = true; c.detail = ver;
+            c.passed = true;
+            c.detail = ver;
         } else {
-            // Check if vswhere can find any VS installation
             auto vswhere = exec_output(
                 "\"%ProgramFiles(x86)%\\Microsoft Visual Studio\\Installer\\vswhere.exe\""
                 " -latest -requiresAny"
@@ -774,13 +1039,12 @@ static std::vector<DoctorCheck> run_doctor_checks(const fs::path& root) {
             }
         }
 #else
-        // Linux: detect distro for better fix suggestions
         auto ver = exec_output("g++ --version 2>&1 | head -1");
         if (ver.empty()) ver = exec_output("clang++ --version 2>&1 | head -1");
         if (!ver.empty()) {
-            c.passed = true; c.detail = ver;
+            c.passed = true;
+            c.detail = ver;
         } else {
-            // Detect distro for package manager command
             auto distro_id = exec_output("grep '^ID=' /etc/os-release 2>/dev/null | cut -d= -f2 | tr -d '\"'");
             if (distro_id == "ubuntu" || distro_id == "debian" || distro_id == "pop" || distro_id == "mint")
                 c.fix = "sudo apt install g++-13";
@@ -802,7 +1066,6 @@ static std::vector<DoctorCheck> run_doctor_checks(const fs::path& root) {
         DoctorCheck c{"CMake >= 3.24", false, {}, {}};
         auto ver_str = exec_output("cmake --version 2>&1 | head -1");
         if (!ver_str.empty()) {
-            // Extract version number
             auto pos = ver_str.find_first_of("0123456789");
             if (pos != std::string::npos) {
                 auto ver_num = ver_str.substr(pos);
@@ -860,18 +1123,65 @@ static std::vector<DoctorCheck> run_doctor_checks(const fs::path& root) {
         checks.push_back(c);
     }
 
-    // 4. git-lfs files pulled (check if Skia files are pointers)
-    if (!root.empty()) {
+    if (standalone_mode && !active_root.empty()) {
+        DoctorCheck c{"pulp.toml", false, {}, {}};
+        auto pulp_toml = active_root / "pulp.toml";
+        if (fs::exists(pulp_toml)) {
+            c.passed = true;
+            c.detail = pulp_toml.string();
+        } else {
+            c.detail = "Not found";
+        }
+        checks.push_back(c);
+
+        auto version = read_sdk_version(active_root);
+        auto sdk_hint = read_sdk_path_hint(active_root);
+        auto checkout_hint = read_sdk_checkout_hint(active_root);
+
+        DoctorCheck sdk{"Installed SDK", false, {}, {}};
+        if (!sdk_hint.empty() && sdk_config_ready(sdk_hint)) {
+            sdk.passed = true;
+            sdk.detail = sdk_hint.string();
+        } else if (auto local_sdk = local_sdk_cache_path(version); sdk_config_ready(local_sdk)) {
+            sdk.passed = true;
+            sdk.detail = local_sdk.string() + " (local cache)";
+        } else if (auto downloaded_sdk = sdk_cache_path(version); sdk_config_ready(downloaded_sdk)) {
+            sdk.passed = true;
+            sdk.detail = downloaded_sdk.string() + " (download cache)";
+        } else if (!sdk_hint.empty()) {
+            sdk.detail = sdk_hint.string() + " missing PulpConfig.cmake";
+            sdk.fix = "pulp build";
+        } else if (!checkout_hint.empty()) {
+            sdk.detail = "SDK v" + version + " not materialized from checkout";
+            sdk.fix = "pulp build";
+        } else {
+            sdk.detail = "SDK v" + version + " not installed";
+            sdk.fix = "pulp build";
+        }
+        checks.push_back(sdk);
+
+        if (!checkout_hint.empty()) {
+            DoctorCheck checkout{"SDK checkout", false, {}, {}};
+            if (fs::exists(checkout_hint / "setup.sh")) {
+                checkout.passed = true;
+                checkout.detail = checkout_hint.string();
+            } else {
+                checkout.detail = checkout_hint.string() + " missing setup.sh";
+            }
+            checks.push_back(checkout);
+        }
+    }
+
+    if (!repo_root.empty()) {
         DoctorCheck c{"LFS files pulled", false, {}, {}};
         bool found_pointer = false;
         bool found_any = false;
-        auto skia_dir = root / "external" / "skia-build";
+        auto skia_dir = repo_root / "external" / "skia-build";
         if (fs::exists(skia_dir)) {
             for (auto& entry : fs::recursive_directory_iterator(skia_dir)) {
                 auto ext = entry.path().extension().string();
                 if (ext == ".a" || ext == ".lib") {
                     found_any = true;
-                    // Read first bytes to check if it's an LFS pointer
                     std::ifstream f(entry.path(), std::ios::binary);
                     char buf[40] = {};
                     f.read(buf, 39);
@@ -895,10 +1205,9 @@ static std::vector<DoctorCheck> run_doctor_checks(const fs::path& root) {
         checks.push_back(c);
     }
 
-    // 5. VST3 SDK
-    if (!root.empty()) {
+    if (!repo_root.empty()) {
         DoctorCheck c{"VST3 SDK", false, {}, {}};
-        auto vst3_dir = root / "external" / "vst3sdk";
+        auto vst3_dir = repo_root / "external" / "vst3sdk";
         if (fs::exists(vst3_dir / "pluginterfaces")) {
             c.passed = true;
             c.detail = "external/vst3sdk/";
@@ -912,11 +1221,10 @@ static std::vector<DoctorCheck> run_doctor_checks(const fs::path& root) {
         checks.push_back(c);
     }
 
-    // 6. AudioUnitSDK (macOS only)
 #ifdef __APPLE__
-    if (!root.empty()) {
+    if (!repo_root.empty()) {
         DoctorCheck c{"AudioUnitSDK", false, {}, {}};
-        auto au_dir = root / "external" / "AudioUnitSDK";
+        auto au_dir = repo_root / "external" / "AudioUnitSDK";
         if (fs::exists(au_dir / "include")) {
             c.passed = true;
             c.detail = "external/AudioUnitSDK/";
@@ -931,7 +1239,6 @@ static std::vector<DoctorCheck> run_doctor_checks(const fs::path& root) {
     }
 #endif
 
-    // 7. Linux: ALSA dev headers
 #ifdef __linux__
     {
         DoctorCheck c{"ALSA dev headers", false, {}, {}};
@@ -956,10 +1263,9 @@ static std::vector<DoctorCheck> run_doctor_checks(const fs::path& root) {
     }
 #endif
 
-    // 8. Build state
-    if (!root.empty()) {
+    if (!active_root.empty()) {
         DoctorCheck c{"Build configured", false, {}, {}};
-        if (fs::exists(root / "build" / "CMakeCache.txt")) {
+        if (fs::exists(active_root / "build" / "CMakeCache.txt")) {
             c.passed = true;
             c.detail = "build/CMakeCache.txt present";
         } else {
@@ -973,7 +1279,9 @@ static std::vector<DoctorCheck> run_doctor_checks(const fs::path& root) {
 }
 
 static int cmd_doctor(const std::vector<std::string>& args) {
-    auto root = find_project_root();
+    bool standalone_mode = false;
+    auto active_root = resolve_active_project_root(&standalone_mode);
+    auto root = standalone_mode ? fs::path{} : active_root;
 
     bool fix_mode = false;
     bool ci_mode = false;
@@ -987,12 +1295,16 @@ static int cmd_doctor(const std::vector<std::string>& args) {
     if (!ci_mode) {
         std::cout << color::bold() << "Pulp Doctor" << color::reset() << "\n";
         std::cout << "===========\n\n";
-        if (root.empty()) {
+        if (standalone_mode && !active_root.empty()) {
+            std::cout << color::dim() << "(SDK mode project — checking system tools for an installed SDK workflow)" << color::reset() << "\n\n";
+        } else if (root.empty()) {
             std::cout << color::dim() << "(Not in a Pulp project — checking system tools only)" << color::reset() << "\n\n";
+        } else {
+            std::cout << color::dim() << "(Source-tree mode — checking the active Pulp checkout)" << color::reset() << "\n\n";
         }
     }
 
-    auto checks = run_doctor_checks(root);
+    auto checks = run_doctor_checks(active_root, standalone_mode);
 
     int pass_count = 0, fail_count = 0;
     for (auto& c : checks) {
@@ -1050,6 +1362,12 @@ static int cmd_doctor(const std::vector<std::string>& args) {
 
 // Forward declarations for helpers defined later
 static std::string read_file_contents(const fs::path& path);
+static std::string trim(const std::string& s);
+static std::string strip_quotes(const std::string& s);
+static std::string read_user_config_value(const std::string& section, const std::string& key);
+static bool path_is_within(const fs::path& path, const fs::path& root);
+static fs::path resolve_active_project_root(bool* is_standalone = nullptr);
+static fs::path resolve_create_projects_base_dir(const fs::path& repo_root);
 
 // ── New / Create ────────────────────────────────────────────────────────────
 
@@ -1109,15 +1427,27 @@ static std::string make_mfr_code(const std::string& mfr) {
 }
 
 static std::string make_vst3_uid() {
-    std::string result;
-    std::srand(static_cast<unsigned>(std::time(nullptr)));
-    for (int i = 0; i < 16; ++i) {
-        char buf[8];
-        std::snprintf(buf, sizeof(buf), "0x%02X", std::rand() % 256);
-        if (i > 0) result += ", ";
-        result += buf;
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_int_distribution<uint32_t> dist;
+
+    std::array<uint32_t, 4> words = {
+        dist(gen), dist(gen), dist(gen), dist(gen)
+    };
+
+    std::ostringstream out;
+    out << "Steinberg::FUID(";
+    for (std::size_t i = 0; i < words.size(); ++i) {
+        if (i > 0) out << ", ";
+        out << "0x"
+            << std::uppercase
+            << std::hex
+            << std::setw(8)
+            << std::setfill('0')
+            << words[i];
     }
-    return result;
+    out << ")";
+    return out.str();
 }
 
 static std::string expand_template_str(const std::string& tmpl,
@@ -1131,17 +1461,18 @@ static std::string expand_template_str(const std::string& tmpl,
 
 static int cmd_create(const std::vector<std::string>& args) {
     auto root = find_project_root();
-    bool standalone_mode = root.empty();
 
     // Parse args
     std::string name, type = "effect", manufacturer = "Pulp", output_path, tmpl;
     bool no_build = false;
     bool ci_mode = false;
+    bool in_tree_mode = false;
     for (size_t i = 0; i < args.size(); ++i) {
         if (args[i] == "--type" && i + 1 < args.size()) { type = args[++i]; continue; }
         if (args[i] == "--template" && i + 1 < args.size()) { tmpl = args[++i]; continue; }
         if (args[i] == "--manufacturer" && i + 1 < args.size()) { manufacturer = args[++i]; continue; }
         if (args[i] == "--output" && i + 1 < args.size()) { output_path = args[++i]; continue; }
+        if (args[i] == "--in-tree" || args[i] == "--example") { in_tree_mode = true; continue; }
         if (args[i] == "--no-build") { no_build = true; continue; }
         if (args[i] == "--no-interactive" || args[i] == "--ci") { ci_mode = true; continue; }
         if (args[i] == "--help" || args[i] == "-h") {
@@ -1149,20 +1480,22 @@ static int cmd_create(const std::vector<std::string>& args) {
             std::cout << "Usage: pulp create <name> [options]\n\n";
             std::cout << "Options:\n";
             std::cout << "  --type <effect|instrument|app|bare>  Plugin type (default: effect)\n";
-            std::cout << "  --template <name>           Use named template (e.g. gain)\n";
-            std::cout << "  --manufacturer <name>       Manufacturer (default: Pulp)\n";
-            std::cout << "  --output <dir>              Output directory\n";
-            std::cout << "  --no-build                  Skip build after scaffolding\n";
-            std::cout << "  --no-interactive, --ci      Non-interactive mode (use defaults)\n";
-            std::cout << "\nWorks both inside a Pulp repo (contributor mode) and outside\n";
-            std::cout << "(standalone mode — downloads SDK automatically).\n";
+            std::cout << "  --template <name>                    Use named template (e.g. gain)\n";
+            std::cout << "  --manufacturer <name>                Manufacturer (default: Pulp)\n";
+            std::cout << "  --output <dir>                       Override output directory\n";
+            std::cout << "  --in-tree, --example                 Add the project to examples/ using the local Pulp checkout\n";
+            std::cout << "  --no-build                           Skip build after scaffolding\n";
+            std::cout << "  --no-interactive, --ci               Non-interactive mode (use defaults)\n";
+            std::cout << "\nDefault behavior: create a standalone product project, even inside the Pulp repo.\n";
+            std::cout << "Inside the repo, the default location is next to the repo root unless\n";
+            std::cout << "PULP_PROJECTS_DIR or ~/.pulp/config.toml overrides it.\n";
             return 0;
         }
         if (name.empty() && !args[i].empty() && args[i][0] != '-') { name = args[i]; continue; }
     }
 
     if (name.empty()) {
-        std::cerr << "Usage: pulp create <name> [--type effect|instrument] [--template gain] [--manufacturer Name]\n";
+        std::cerr << "Usage: pulp create <name> [--type effect|instrument|app|bare] [options]\n";
         return 1;
     }
 
@@ -1174,33 +1507,60 @@ static int cmd_create(const std::vector<std::string>& args) {
         return 1;
     }
 
+    if (in_tree_mode && root.empty()) {
+        std::cerr << "Error: --in-tree/--example can only be used from inside the Pulp repo\n";
+        return 1;
+    }
+
+    bool standalone_mode = !in_tree_mode;
+
     // In CI mode, suppress progress output (errors still go to stderr)
     auto log = [&](const std::string& msg) {
         if (!ci_mode) std::cout << msg;
     };
 
-    // For standalone mode, ensure we have the SDK before doctor checks
-    fs::path sdk_dir;
-    std::string sdk_version = PULP_SDK_VERSION;
-    fs::path templates_base;
+    // Compute names
+    std::string class_name = to_class_name(name);
+    std::string lower_name = to_lower_name(name);
+    std::string ns = to_namespace_name(name);
+    std::string factory = ns;
+    std::string plugin_code = make_plugin_code(class_name);
+    std::string mfr_code = make_mfr_code(manufacturer);
+    std::string bundle_id = "com." + to_namespace_name(manufacturer) + "." + ns;
+    std::string header_name = replace_all_str(lower_name, "-", "_") + ".hpp";
 
-    if (standalone_mode) {
-        log("Standalone mode — fetching SDK...\n");
-        sdk_dir = ensure_sdk(sdk_version);
-        if (sdk_dir.empty()) {
-            std::cerr << "Error: could not obtain Pulp SDK. Check your internet connection.\n";
+    // Output directory
+    fs::path out_dir;
+    if (!output_path.empty()) {
+        out_dir = fs::path(output_path);
+        if (!out_dir.is_absolute()) out_dir = fs::current_path() / out_dir;
+    } else if (in_tree_mode) {
+        out_dir = root / "examples" / lower_name;
+    } else {
+        out_dir = resolve_create_projects_base_dir(root) / lower_name;
+    }
+
+    if (in_tree_mode) {
+        auto examples_root = root / "examples";
+        if (!path_is_within(out_dir, examples_root)) {
+            std::cerr << "Error: --in-tree projects must live under " << examples_root.string() << "\n";
             return 1;
         }
-        templates_base = sdk_dir / "templates";
-        // Fall back to local templates if SDK doesn't have them
-        // (e.g., SDK not yet released, running from source build)
-    } else {
-        templates_base = root / "tools" / "templates";
+    } else if (!root.empty() && path_is_within(out_dir, root)) {
+        std::cerr << "Error: standalone product projects must live outside the Pulp repo\n";
+        std::cerr << "  Use --in-tree to scaffold under examples/, or choose --output outside\n";
+        std::cerr << "  " << root.string() << "\n";
+        return 1;
+    }
+
+    if (fs::exists(out_dir)) {
+        std::cerr << "Error: " << out_dir.string() << " already exists\n";
+        return 1;
     }
 
     // Quick doctor check (system-level only for standalone)
     log("Checking environment...\n");
-    auto checks = run_doctor_checks(standalone_mode ? fs::path{} : root);
+    auto checks = run_doctor_checks(standalone_mode ? fs::path{} : root, standalone_mode);
     bool env_ok = true;
     for (auto& c : checks) {
         if (!c.passed) {
@@ -1216,44 +1576,48 @@ static int cmd_create(const std::vector<std::string>& args) {
     }
     log("  \xe2\x9c\x93 Environment OK\n\n");
 
-    // Compute names
-    std::string class_name = to_class_name(name);
-    std::string lower_name = to_lower_name(name);
-    std::string ns = to_namespace_name(name);
-    std::string factory = ns;
-    std::string plugin_code = make_plugin_code(class_name);
-    std::string mfr_code = make_mfr_code(manufacturer);
-    std::string bundle_id = "com." + to_namespace_name(manufacturer) + "." + ns;
-    std::string header_name = replace_all_str(lower_name, "-", "_") + ".hpp";
-
-    // Determine formats based on platform and type
-    std::string formats;
-    if (type == "app" || type == "bare") {
-        formats = "Standalone";
-    } else {
+    if (standalone_mode && !root.empty()) {
+        const bool needs_vst3 = type != "app" && type != "bare" && !checkout_supports_vst3(root);
 #ifdef __APPLE__
-        formats = "VST3 AU CLAP Standalone";
-#elif defined(_WIN32)
-        formats = "VST3 CLAP Standalone";
+        const bool needs_au = type != "app" && type != "bare" && !checkout_supports_au(root);
 #else
-        formats = "VST3 CLAP LV2 Standalone";
+        const bool needs_au = false;
+#endif
+        if (needs_vst3 || needs_au) {
+            log("Preparing current checkout dependencies for standalone plugin formats...\n");
+            if (ensure_checkout_dependencies(root) != 0) {
+                std::cerr << "Error: could not prepare checkout dependencies.\n";
+                return 1;
+            }
+            log("\n");
+        }
+    }
+
+    auto formats = default_create_formats(root, type);
+    if (standalone_mode && !root.empty() && type != "app" && type != "bare") {
+        if (formats.find("VST3") == std::string::npos) {
+            print_warn("VST3 SDK unavailable in current checkout — generating without VST3 support");
+        }
+#ifdef __APPLE__
+        if (formats.find("AU") == std::string::npos) {
+            print_warn("AudioUnitSDK unavailable in current checkout — generating without AU support");
+        }
 #endif
     }
+    fs::path sdk_dir;
+    std::string sdk_version = PULP_SDK_VERSION;
+    fs::path templates_base = root.empty() ? fs::path{} : root / "tools" / "templates";
 
-    // Output directory
-    fs::path out_dir;
-    if (!output_path.empty()) {
-        out_dir = fs::path(output_path);
-        if (!out_dir.is_absolute()) out_dir = fs::current_path() / out_dir;
+    if (standalone_mode && root.empty()) {
+        log("Standalone mode — fetching SDK...\n");
+        sdk_dir = ensure_sdk(sdk_version);
+        if (sdk_dir.empty()) {
+            std::cerr << "Error: could not obtain Pulp SDK. Check your internet connection.\n";
+            return 1;
+        }
+        templates_base = sdk_dir / "templates";
     } else if (standalone_mode) {
-        out_dir = fs::current_path() / lower_name;
-    } else {
-        out_dir = root / "examples" / lower_name;
-    }
-
-    if (fs::exists(out_dir)) {
-        std::cerr << "Error: " << out_dir.string() << " already exists\n";
-        return 1;
+        log("Standalone mode — using templates from the current checkout.\n");
     }
 
     // Use underscored lower name for C++ filenames (hyphens illegal in identifiers)
@@ -1289,8 +1653,19 @@ static int cmd_create(const std::vector<std::string>& args) {
         ? templates_base / "standalone" / template_key
         : source_template_dir;
 
-    // Fall back: if standalone templates aren't available, use source templates
-    // with a note that the CMakeLists.txt needs adjustment
+    if (standalone_mode && !root.empty()) {
+        auto local_templates_base = root / "tools" / "templates";
+        if (!fs::exists(source_template_dir) && fs::exists(local_templates_base / template_key)) {
+            source_template_dir = local_templates_base / template_key;
+        }
+        if (!fs::exists(cmake_template_dir) &&
+            fs::exists(local_templates_base / "standalone" / template_key)) {
+            cmake_template_dir = local_templates_base / "standalone" / template_key;
+        }
+    }
+
+    // Fall back: if standalone templates don't ship a standalone-specific CMakeLists yet,
+    // use the source template variant.
     if (standalone_mode && !fs::exists(cmake_template_dir)) {
         cmake_template_dir = source_template_dir;
     }
@@ -1303,8 +1678,17 @@ static int cmd_create(const std::vector<std::string>& args) {
     }
 
     fs::create_directories(out_dir);
-    log("Creating " + name + " (" + type + ")"
-        + (standalone_mode ? " [standalone]" : "") + " at " + out_dir.string() + "\n\n");
+    if (standalone_mode) {
+        log("Mode: standalone product project (default)\n");
+        if (!root.empty()) {
+            log("  Creating outside the repo so the generated project behaves like an end-user install.\n");
+            log("  Use --in-tree to add an example under examples/ instead.\n");
+        }
+    } else {
+        log("Mode: in-tree example project\n");
+        log("  Using the local checkout and adding the project to examples/.\n");
+    }
+    log("Creating " + name + " (" + type + ") at " + out_dir.string() + "\n\n");
 
     struct FileMapping { std::string tmpl; std::string output; };
     std::string test_name = "test_" + replace_all_str(lower_name, "-", "_") + ".cpp";
@@ -1318,6 +1702,9 @@ static int cmd_create(const std::vector<std::string>& args) {
     };
 
     for (auto& [tmpl_file, outfile] : file_map) {
+        if (tmpl_file == "clap_entry.cpp.template" && formats.find("CLAP") == std::string::npos) continue;
+        if (tmpl_file == "vst3_entry.cpp.template" && formats.find("VST3") == std::string::npos) continue;
+        if (tmpl_file == "au_v2_entry.cpp.template" && formats.find("AU") == std::string::npos) continue;
         // CMakeLists.txt comes from cmake_template_dir, others from source_template_dir
         auto tmpl_path = (tmpl_file == "CMakeLists.txt.template")
             ? cmake_template_dir / tmpl_file
@@ -1334,9 +1721,18 @@ static int cmd_create(const std::vector<std::string>& args) {
     if (formats.find("Standalone") != std::string::npos) {
         std::ofstream f(out_dir / "main.cpp");
         f << "#include \"" << header_name << "\"\n";
-        f << "#include <pulp/format/format.hpp>\n\n";
-        f << "int main(int argc, char* argv[]) {\n";
-        f << "    return pulp::format::run_standalone(" << ns << "::create_" << factory << ", argc, argv);\n";
+        f << "#include <pulp/format/standalone.hpp>\n\n";
+        f << "int main() {\n";
+        f << "    pulp::format::StandaloneApp app(" << ns << "::create_" << factory << ");\n";
+        f << "    pulp::format::StandaloneConfig config;\n";
+        if (type == "instrument") {
+            f << "    config.input_channels = 0;\n";
+        } else {
+            f << "    config.input_channels = 2;\n";
+        }
+        f << "    config.output_channels = 2;\n";
+        f << "    app.set_config(config);\n";
+        f << "    return app.run_with_editor(false) ? 0 : 1;\n";
         f << "}\n";
         log("  Created main.cpp\n");
     }
@@ -1361,22 +1757,28 @@ static int cmd_create(const std::vector<std::string>& args) {
         std::ofstream f(out_dir / "pulp.toml");
         f << "[pulp]\n";
         f << "sdk_version = \"" << sdk_version << "\"\n";
+        if (!root.empty()) {
+            auto local_sdk_dir = local_sdk_cache_path(sdk_version);
+            f << "sdk_path = \"" << local_sdk_dir.generic_string() << "\"\n";
+            f << "sdk_checkout = \"" << root.generic_string() << "\"\n";
+        }
         log("  Created pulp.toml\n");
     }
 
-    // Add to examples/CMakeLists.txt (in-repo mode only)
-    if (!standalone_mode) {
+    // Add to examples/CMakeLists.txt (in-tree mode only)
+    if (in_tree_mode) {
         auto examples_cmake = root / "examples" / "CMakeLists.txt";
-        auto rel_dir = lower_name;
-        bool in_examples = (out_dir.parent_path() == root / "examples");
+        auto rel_dir = fs::relative(out_dir, root / "examples").generic_string();
 
-        if (in_examples && fs::exists(examples_cmake)) {
+        if (fs::exists(examples_cmake)) {
             std::string cmake_content = read_file_contents(examples_cmake);
-            std::string add_line = "\n# " + name + " (generated by pulp create)\n"
-                                   "add_subdirectory(" + rel_dir + ")\n";
-            std::ofstream f(examples_cmake, std::ios::app);
-            f << add_line;
-            log("  Added to examples/CMakeLists.txt\n");
+            std::string add_line = "add_subdirectory(" + rel_dir + ")";
+            if (cmake_content.find(add_line) == std::string::npos) {
+                std::ofstream f(examples_cmake, std::ios::app);
+                f << "\n# " << name << " (generated by pulp create)\n"
+                  << add_line << "\n";
+                log("  Added to examples/CMakeLists.txt\n");
+            }
         }
     }
 
@@ -1390,6 +1792,25 @@ static int cmd_create(const std::vector<std::string>& args) {
     // Build
     log("Building...\n");
     if (standalone_mode) {
+        if (sdk_dir.empty()) {
+            if (!root.empty()) {
+                log("Preparing local SDK from the current checkout...\n");
+                sdk_dir = ensure_checkout_sdk(root, sdk_version);
+            } else {
+                log("Fetching SDK for standalone build...\n");
+                sdk_dir = ensure_sdk(sdk_version);
+            }
+            if (sdk_dir.empty()) {
+                std::cerr << "Error: could not obtain Pulp SDK. ";
+                if (!root.empty()) {
+                    std::cerr << "Run with --no-build to scaffold only, or use --in-tree while developing Pulp.\n";
+                } else {
+                    std::cerr << "Check your internet connection.\n";
+                }
+                return 1;
+            }
+        }
+
         // Standalone: configure with CMAKE_PREFIX_PATH pointing to SDK
         std::string configure_cmd = "cmake -S " + out_dir.string()
             + " -B " + (out_dir / "build").string()
@@ -1416,6 +1837,7 @@ static int cmd_create(const std::vector<std::string>& args) {
             return rc;
         }
     } else {
+        auto example_rel_dir = fs::relative(out_dir, root / "examples");
         int rc = run("cmake -S " + root.string() + " -B " + (root / "build").string()
                      + " -DCMAKE_BUILD_TYPE=Debug 2>&1 | tail -5");
         if (rc != 0) {
@@ -1431,7 +1853,7 @@ static int cmd_create(const std::vector<std::string>& args) {
 
         // Test — run the test binary directly since ctest may not have discovered new tests yet
         log("\nRunning tests...\n");
-        auto test_binary = root / "build" / "examples" / lower_name / (class_name + "-test");
+        auto test_binary = root / "build" / "examples" / example_rel_dir / (class_name + "-test");
         if (fs::exists(test_binary)) {
             rc = run(test_binary.string());
         } else {
@@ -1466,7 +1888,7 @@ static int cmd_create(const std::vector<std::string>& args) {
 
     std::cout << "\n  Next steps:\n";
     if (standalone_mode) {
-        std::cout << "    cd " << lower_name << "\n";
+        std::cout << "    cd " << out_dir.string() << "\n";
     }
     std::cout << "    pulp build              # rebuild after changes\n";
     std::cout << "    pulp test -R " << test_filter << "  # run tests\n";
@@ -1486,7 +1908,7 @@ static int cmd_cache(const std::vector<std::string>& args) {
     auto cache_dir = home / "cache";
 
     if (args.empty()) {
-        std::cout << "pulp cache — manage the Pulp asset cache (~/.pulp/cache/)\n\n";
+        std::cout << "pulp cache — manage the Pulp SDK and asset cache (~/.pulp/ by default)\n\n";
         std::cout << "Subcommands:\n";
         std::cout << "  status           Show cache contents and sizes\n";
         std::cout << "  fetch skia       Download Skia GPU rendering binaries\n";
@@ -1750,7 +2172,8 @@ static int cmd_upgrade(const std::vector<std::string>& args) {
 // ── Run ─────────────────────────────────────────────────────────────────────
 
 static int cmd_run(const std::vector<std::string>& args) {
-    auto root = find_project_root();
+    bool standalone_mode = false;
+    auto root = resolve_active_project_root(&standalone_mode);
     if (root.empty()) {
         std::cerr << "Error: not in a Pulp project directory\n";
         return 1;
@@ -1762,7 +2185,7 @@ static int cmd_run(const std::vector<std::string>& args) {
         if (args[i] == "--help" || args[i] == "-h") {
             std::cout << "pulp run — launch a standalone Pulp application\n\n";
             std::cout << "Usage: pulp run [target] [-- args...]\n\n";
-            std::cout << "If no target is specified, finds the first standalone binary in build/examples/.\n";
+            std::cout << "If no target is specified, finds the first standalone binary in the active project build.\n";
             std::cout << "Arguments after -- are passed to the launched application.\n";
             return 0;
         }
@@ -1784,12 +2207,27 @@ static int cmd_run(const std::vector<std::string>& args) {
 
     // Find standalone binary
     fs::path binary;
+    auto app_search_root = standalone_mode ? (build_dir / "bin") : (build_dir / "examples");
 
     if (!target_name.empty()) {
         // Search for the named target
-        auto examples_dir = build_dir / "examples";
-        if (fs::exists(examples_dir)) {
-            for (auto& dir_entry : fs::directory_iterator(examples_dir)) {
+        if (standalone_mode) {
+            if (fs::exists(app_search_root)) {
+                for (auto& file : fs::directory_iterator(app_search_root)) {
+                    if (!file.is_regular_file()) continue;
+                    auto fname = file.path().filename().string();
+                    if (fname.find("-test") != std::string::npos) continue;
+                    if (fname == target_name || file.path().stem().string() == target_name) {
+                        auto st = fs::status(file.path());
+                        if ((st.permissions() & fs::perms::owner_exec) != fs::perms::none) {
+                            binary = file.path();
+                            break;
+                        }
+                    }
+                }
+            }
+        } else if (fs::exists(app_search_root)) {
+            for (auto& dir_entry : fs::directory_iterator(app_search_root)) {
                 if (!dir_entry.is_directory()) continue;
                 for (auto& file : fs::directory_iterator(dir_entry.path())) {
                     if (!file.is_regular_file()) continue;
@@ -1808,15 +2246,29 @@ static int cmd_run(const std::vector<std::string>& args) {
             }
         }
         if (binary.empty()) {
-            std::cerr << "Error: could not find standalone binary '" << target_name << "' in build/examples/\n";
+            std::cerr << "Error: could not find standalone binary '" << target_name
+                      << "' in " << app_search_root.string() << "\n";
             std::cerr << "  Run `pulp build` to build, then try again.\n";
             return 1;
         }
     } else {
-        // Find first standalone executable in build/examples/
-        auto examples_dir = build_dir / "examples";
-        if (fs::exists(examples_dir)) {
-            for (auto& dir_entry : fs::directory_iterator(examples_dir)) {
+        if (standalone_mode) {
+            if (fs::exists(app_search_root)) {
+                for (auto& file : fs::directory_iterator(app_search_root)) {
+                    if (!file.is_regular_file()) continue;
+                    auto fname = file.path().filename().string();
+                    if (fname.find("-test") != std::string::npos) continue;
+                    if (fname.find("cmake") != std::string::npos) continue;
+                    if (fname.find(".") != std::string::npos) continue;
+                    auto st = fs::status(file.path());
+                    if ((st.permissions() & fs::perms::owner_exec) != fs::perms::none) {
+                        binary = file.path();
+                        break;
+                    }
+                }
+            }
+        } else if (fs::exists(app_search_root)) {
+            for (auto& dir_entry : fs::directory_iterator(app_search_root)) {
                 if (!dir_entry.is_directory()) continue;
                 for (auto& file : fs::directory_iterator(dir_entry.path())) {
                     if (!file.is_regular_file()) continue;
@@ -1835,7 +2287,7 @@ static int cmd_run(const std::vector<std::string>& args) {
             }
         }
         if (binary.empty()) {
-            std::cerr << "Error: no standalone binary found in build/examples/\n";
+            std::cerr << "Error: no standalone binary found in " << app_search_root.string() << "\n";
             std::cerr << "  Create one with: pulp create MyApp --type app\n";
             std::cerr << "  Or build an existing project: pulp build\n";
             return 1;
@@ -1868,6 +2320,16 @@ static std::string trim(const std::string& s) {
     if (start == std::string::npos) return {};
     auto end = s.find_last_not_of(" \t\r\n");
     return s.substr(start, end - start + 1);
+}
+
+static std::string strip_quotes(const std::string& s) {
+    if (s.size() >= 2) {
+        if ((s.front() == '"' && s.back() == '"') ||
+            (s.front() == '\'' && s.back() == '\'')) {
+            return s.substr(1, s.size() - 2);
+        }
+    }
+    return s;
 }
 
 // Case-insensitive substring search
@@ -2590,6 +3052,7 @@ static void print_usage() {
     std::cout << "\nExamples:\n";
     std::cout << "  pulp create MyPlugin              # Create a new effect plugin\n";
     std::cout << "  pulp create MySynth --type instrument  # Create an instrument\n";
+    std::cout << "  pulp create DebugKnob --in-tree   # Add an example under examples/\n";
     std::cout << "  pulp doctor             # Check environment for issues\n";
     std::cout << "  pulp doctor --fix       # Auto-fix issues where possible\n";
     std::cout << "  pulp build              # Build all targets\n";

@@ -408,12 +408,41 @@ def supersedence_key(job: dict) -> tuple[str, tuple[str, ...], str]:
     )
 
 
+def supersedence_identity_key(job: dict) -> tuple[str, str, str]:
+    return (
+        job.get("branch", ""),
+        job.get("sha", ""),
+        normalize_validation_mode(job.get("validation", "full")),
+    )
+
+
 def jobs_share_supersedence_scope(newer_job: dict, older_job: dict) -> bool:
     return (
         newer_job.get("id") != older_job.get("id")
         and newer_job.get("fingerprint") != older_job.get("fingerprint")
         and supersedence_key(newer_job) == supersedence_key(older_job)
     )
+
+
+def job_has_narrower_same_identity_scope(newer_job: dict, older_job: dict) -> bool:
+    if (
+        newer_job.get("id") == older_job.get("id")
+        or newer_job.get("fingerprint") == older_job.get("fingerprint")
+        or supersedence_identity_key(newer_job) != supersedence_identity_key(older_job)
+    ):
+        return False
+
+    newer_targets = set(newer_job.get("targets") or [])
+    older_targets = set(older_job.get("targets") or [])
+    return bool(newer_targets) and newer_targets < older_targets
+
+
+def supersedence_reason(newer_job: dict, older_job: dict) -> str | None:
+    if jobs_share_supersedence_scope(newer_job, older_job):
+        return "newer_sha_queued"
+    if job_has_narrower_same_identity_scope(newer_job, older_job):
+        return "narrower_scope_queued"
+    return None
 
 
 def supersedence_result(job: dict, superseded_by: str, reason: str) -> dict:
@@ -442,6 +471,35 @@ def supersede_job_unlocked(job: dict, superseded_by: str, reason: str) -> None:
     job["overall"] = "superseded"
     job["superseded_by"] = superseded_by
     job["superseded_reason"] = reason
+    job.pop("runner", None)
+    job.pop("active_targets", None)
+    job.pop("last_progress_at", None)
+
+
+def cancellation_result(job: dict, reason: str) -> dict:
+    return {
+        "job_id": job["id"],
+        "branch": job["branch"],
+        "sha": job["sha"],
+        "priority": job["priority"],
+        "validation": job.get("validation", "full"),
+        "targets": job.get("targets", []),
+        "queued_at": job.get("queued_at", ""),
+        "completed_at": now_iso(),
+        "results": [],
+        "overall": "canceled",
+        "canceled_reason": reason,
+    }
+
+
+def cancel_job_unlocked(job: dict, reason: str = "operator_canceled") -> None:
+    result = cancellation_result(job, reason)
+    result_path = save_result(result)
+    job["status"] = "completed"
+    job["completed_at"] = result["completed_at"]
+    job["result_file"] = str(result_path)
+    job["overall"] = "canceled"
+    job["canceled_reason"] = reason
     job.pop("runner", None)
     job.pop("active_targets", None)
     job.pop("last_progress_at", None)
@@ -540,8 +598,9 @@ def enqueue_job(
         for existing in queue:
             if existing.get("status") != "pending":
                 continue
-            if jobs_share_supersedence_scope(job, existing):
-                supersede_job_unlocked(existing, job["id"], "newer_sha_queued")
+            reason = supersedence_reason(job, existing)
+            if reason:
+                supersede_job_unlocked(existing, job["id"], reason)
         save_queue_unlocked(trim_completed_jobs(queue))
         return job, True
 
@@ -583,13 +642,14 @@ def reconcile_running_jobs_unlocked(queue: list[dict]) -> tuple[list[dict], bool
         for candidate in queue:
             if candidate.get("status") not in {"pending", "running"}:
                 continue
-            if not jobs_share_supersedence_scope(candidate, job):
+            reason = supersedence_reason(candidate, job)
+            if not reason:
                 continue
             if replacement is None or candidate.get("queued_at", "") > replacement.get("queued_at", ""):
                 replacement = candidate
 
         if replacement is not None:
-            supersede_job_unlocked(job, replacement["id"], "newer_sha_queued")
+            supersede_job_unlocked(job, replacement["id"], supersedence_reason(replacement, job) or "newer_sha_queued")
             changed = True
             continue
 
@@ -889,6 +949,10 @@ def parse_progress_marker(line: str) -> dict:
         return {"phase": stripped.split(":", 1)[1]}
     if stripped.startswith("__PULP_WAIT__:"):
         return {"wait_reason": stripped.split(":", 1)[1]}
+    if stripped.startswith("__PULP_VALIDATION__:"):
+        return {"validation_mode": stripped.split(":", 1)[1]}
+    if stripped.startswith("__PULP_TEST_POLICY__:"):
+        return {"test_policy": stripped.split(":", 1)[1]}
     return {}
 
 
@@ -909,6 +973,8 @@ def run_logged_command(
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         bufsize=1,
     )
 
@@ -960,6 +1026,10 @@ def run_logged_command(
 
             progress = parse_progress_marker(item)
             if progress:
+                combined.append(item)
+                if log_handle is not None:
+                    log_handle.write(item)
+                    log_handle.flush()
                 progress["last_output_at"] = now_iso()
                 if report_progress:
                     report_progress(**progress)
@@ -984,6 +1054,8 @@ def run_logged_command(
             "duration_secs": round(time.time() - start, 1),
         }
     finally:
+        if proc.stdout is not None:
+            proc.stdout.close()
         if log_handle is not None:
             log_handle.close()
 
@@ -996,7 +1068,7 @@ def run_local_validation(job: dict, exclude_tests: str = "", report_progress=Non
 
     cmd = ["./validate-build.sh", "--quiet", "--ref", job["sha"]]
     if job.get("validation") == "smoke":
-        cmd.append("--smoke")
+        cmd = ["env", "PULP_EXPECT_SMOKE=1", *cmd, "--smoke", "--no-tests"]
     if exclude_tests:
         cmd += ["--exclude-regex", exclude_tests]
 
@@ -1012,7 +1084,17 @@ def run_local_validation(job: dict, exclude_tests: str = "", report_progress=Non
             "log_file": str(log_path),
         }
     tail = run["output"][-2000:] if run["output"] else ""
-    failed = run["returncode"] != 0
+    if job.get("validation") == "smoke":
+        if "__PULP_VALIDATION__:smoke" not in run["output"] or "__PULP_TEST_POLICY__:skip" not in run["output"]:
+            failed = True
+            tail = (
+                "Smoke validation contract violated: expected validation=smoke and test_policy=skip markers.\n"
+                + tail
+            )[-2000:]
+        else:
+            failed = run["returncode"] != 0
+    else:
+        failed = run["returncode"] != 0
     return {
         "target": "mac",
         "status": "pass" if not failed else "fail",
@@ -1056,16 +1138,20 @@ def run_posix_ssh_validation(
     repo_q = shlex.quote(repo_path)
     bundle_name_q = shlex.quote(bundle_name)
     bundle_ref_q = shlex.quote(bundle_ref)
+    script_name_q = shlex.quote(f".pulp-ci-validate-{job['id']}.sh")
     remote_cmd = (
         "set -euo pipefail; "
         f"branch={branch_q}; "
         f"sha={sha_q}; "
         f"bundle_name={bundle_name_q}; "
         f"bundle_ref={bundle_ref_q}; "
+        f"script_name={script_name_q}; "
         "bundle=\"$HOME/$bundle_name\"; "
-        "trap 'rm -f \"$bundle\"' EXIT; "
+        "script=''; "
+        "trap 'rm -f \"$bundle\" \"$script\"' EXIT; "
         "export GIT_LFS_SKIP_SMUDGE=1; "
         f"cd {repo_q}; "
+        "script=\"$PWD/$script_name\"; "
         "if [ -f \"$bundle\" ]; then "
         "printf '__PULP_PHASE__:bundle-sync\n'; "
         "git fetch \"$bundle\" \"$bundle_ref:refs/remotes/origin/$branch\" >/dev/null 2>&1 || true; "
@@ -1080,10 +1166,13 @@ def run_posix_ssh_validation(
         "exit 2; "
         "fi; "
         "printf '__PULP_PHASE__:validate\n'; "
-        "./validate-build.sh --quiet --ref \"$sha\""
+        "git show \"$sha:validate-build.sh\" > \"$script\"; "
+        "chmod +x \"$script\"; "
+        "PULP_EXPECT_SMOKE=0 bash \"$script\" --quiet --ref \"$sha\""
     )
     if job.get("validation") == "smoke":
-        remote_cmd += " --smoke"
+        remote_cmd = remote_cmd.replace("PULP_EXPECT_SMOKE=0", "PULP_EXPECT_SMOKE=1", 1)
+        remote_cmd += " --smoke --no-tests"
     if exclude_tests:
         remote_cmd += f" --exclude-regex {shlex.quote(exclude_tests)}"
 
@@ -1101,7 +1190,17 @@ def run_posix_ssh_validation(
             "log_file": str(log_path),
         }
     tail = run["output"][-2000:] if run["output"] else ""
-    failed = run["returncode"] != 0
+    if job.get("validation") == "smoke":
+        if "__PULP_VALIDATION__:smoke" not in run["output"] or "__PULP_TEST_POLICY__:skip" not in run["output"]:
+            failed = True
+            tail = (
+                "Smoke validation contract violated: expected validation=smoke and test_policy=skip markers.\n"
+                + tail
+            )[-2000:]
+        else:
+            failed = run["returncode"] != 0
+    else:
+        failed = run["returncode"] != 0
     return {
         "target": target_name,
         "status": "pass" if not failed else "fail",
@@ -1365,7 +1464,7 @@ try {{
             Invoke-Native git @(
                 'fetch',
                 $Bundle,
-                "$BundleRef`:refs/remotes/origin/$Branch"
+                "$BundleRef`:refs/pulp-ci-bundles/{job['id']}"
             )
         }} finally {{
             Remove-Item -Force -ErrorAction SilentlyContinue $Bundle
@@ -2117,6 +2216,26 @@ def cmd_bump(args: argparse.Namespace) -> int:
         return 1
 
 
+def cmd_cancel(args: argparse.Namespace) -> int:
+    try:
+        with file_lock(queue_lock_path(), blocking=True):
+            queue = load_queue_unlocked()
+            job = find_job_unlocked(queue, args.job, statuses={"pending", "running"})
+            if job is None:
+                print(f"No active job matches '{args.job}'.")
+                return 1
+            if job["status"] != "pending":
+                print(f"Job is already {job['status']}; only pending jobs can be canceled safely.")
+                return 1
+            cancel_job_unlocked(job)
+            save_queue_unlocked(trim_completed_jobs(queue))
+            print(f"Canceled: {summarize_job(job)}")
+            return 0
+    except ValueError as exc:
+        print(f"Error: {exc}")
+        return 1
+
+
 def cmd_list(_args: argparse.Namespace) -> int:
     if not gh_available():
         print("Error: gh CLI not available. Run: gh auth login")
@@ -2228,6 +2347,10 @@ def cmd_status(_args: argparse.Namespace) -> int:
                 details = []
                 if state.get("phase"):
                     details.append(f"phase={state['phase']}")
+                if state.get("validation_mode"):
+                    details.append(f"mode={state['validation_mode']}")
+                if state.get("test_policy"):
+                    details.append(f"tests={state['test_policy']}")
                 if state.get("wait_reason"):
                     details.append(f"wait={state['wait_reason']}")
                 if state.get("last_output_at"):
@@ -2257,6 +2380,10 @@ def cmd_status(_args: argparse.Namespace) -> int:
                 details = []
                 if state.get("phase"):
                     details.append(f"phase={state['phase']}")
+                if state.get("validation_mode"):
+                    details.append(f"mode={state['validation_mode']}")
+                if state.get("test_policy"):
+                    details.append(f"tests={state['test_policy']}")
                 if state.get("wait_reason"):
                     details.append(f"wait={state['wait_reason']}")
                 if state.get("last_output_at"):
@@ -2365,6 +2492,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_bump.add_argument("job", help="Job id, unique id prefix, or exact branch name")
     p_bump.add_argument("priority", choices=sorted(PRIORITY_VALUES), help="New priority")
 
+    p_cancel = sub.add_parser("cancel", help="Cancel a pending job")
+    p_cancel.add_argument("job", help="Job id, unique id prefix, or exact branch name")
+
     p_logs = sub.add_parser("logs", help="Tail saved logs for a running or completed job")
     p_logs.add_argument("job", nargs="?", help="Job id, unique id prefix, or exact branch name (default: active/latest)")
     p_logs.add_argument("--target", help="Target name to show (mac, ubuntu, windows)")
@@ -2386,6 +2516,7 @@ def main() -> int:
         "check": cmd_check,
         "list": cmd_list,
         "bump": cmd_bump,
+        "cancel": cmd_cancel,
         "logs": cmd_logs,
         "status": cmd_status,
     }

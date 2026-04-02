@@ -202,6 +202,31 @@ reference to the replacement job. If a runner dies and reconciliation finds a ne
 replacement already queued for that same scope, the stale running job is also
 superseded instead of being requeued.
 
+## Working A Failure
+
+Do not wait for a whole matrix to finish before reacting. The fastest loop is:
+
+1. start a run
+2. watch `pulp ci-local status`
+3. tail `pulp ci-local logs <job-id> --target <name>` on the first failing or suspicious target
+4. begin the narrowest local repro or code inspection immediately
+5. rerun only the truthful scope needed after the fix
+
+In practice, that means:
+
+- one process owns CI monitoring and host state
+- one process or agent works the likely fix locally as soon as a failure becomes actionable
+- user updates should be sent when a target changes state or the first actionable failure appears, not only when asked
+- a target that already failed is enough to start debugging; do not burn time waiting for unrelated targets to finish unless their result changes the fix
+- once a failure is actionable, start the fix track in parallel unless it would contend with the same host or invalidate the active run
+- do not rerun a target that already passed on the exact same SHA unless that prior result is untrustworthy or the environment changed
+- if only one or two targets are stale, rerun only those targets instead of the whole matrix
+- once the failure surface is isolated, prefer the minimum sufficient proof instead of a symmetric rerun
+- a direct exact-SHA validate on one target counts as valid evidence for that target; keep earlier same-SHA passes for the other targets unless something actually invalidated them
+- use `--smoke` first when the risk is install/export/build structure rather than runtime test behavior
+- `all targets on one SHA` is a goal, not a reason to blindly rerun already-green same-SHA targets
+- if a broader in-flight job is no longer informative, cut over to the narrower rerun instead of letting the queue drift
+
 ## Priorities
 
 Jobs are ordered by priority first, then FIFO within the same priority.

@@ -25,6 +25,18 @@ pulp run                     # launch the standalone host
 
 That's it — three commands from zero to a working plugin.
 
+If you're developing Pulp itself and want to scaffold a framework example instead of a standalone product project, use:
+
+```bash
+pulp create debug-knob --in-tree
+```
+
+Pulp has two explicit creation/build modes:
+- **SDK mode**: the default for external projects. The generated project builds against a pinned installed SDK artifact and records that expectation in `pulp.toml`.
+- **Source-tree mode**: used for the Pulp repo itself and in-repo examples. These builds use the live checkout directly.
+
+If you run `pulp create my-plugin` from inside a Pulp source checkout, Pulp still creates an SDK-mode product project by default. Unless you override it, that project is created next to the repo root rather than under `examples/`. In that case, Pulp reuses the pinned SDK dependencies from the checkout and caches a local SDK install instead of assuming a public SDK download is available.
+
 ## Building from Source
 
 If you want to build the framework itself (to contribute, modify core code, or work without pre-built binaries):
@@ -65,6 +77,8 @@ pulp doctor --fix       # auto-fix issues where possible
 pulp doctor --ci        # CI mode — exit codes only, no prompts
 pulp doctor --dry-run   # show what --fix would do
 ```
+
+In SDK mode, `pulp doctor` validates the generated project's `pulp.toml`, installed SDK location, checkout hint, and build state. In source-tree mode, it validates the active Pulp checkout and pinned external SDKs instead.
 
 ## Project Structure
 

@@ -724,7 +724,8 @@ TEST_CASE("Stitch Design System round-trip preserves tokens", "[view][import]") 
 
 // ── E2E pipeline test ──────────────────────────────────────────────────
 
-TEST_CASE("E2E: Figma IR → code gen → tokens → round-trip", "[view][import][e2e]") {
+// Keep this name ASCII-only so Catch2/CTest filters remain stable on Windows.
+TEST_CASE("E2E: Figma IR -> code gen -> tokens -> round-trip", "[view][import][e2e]") {
     // Step 1: Parse a Figma IR with audio widgets and tokens
     auto json = R"({
         "type": "frame",

@@ -152,7 +152,7 @@ if(EXISTS "${VST3_SDK_DIR}/pluginterfaces")
         "${VST3_SDK_DIR}/public.sdk/source/vst/vstinitiids.cpp"
         "${VST3_SDK_DIR}/public.sdk/source/vst/vstparameters.cpp"
         "${VST3_SDK_DIR}/public.sdk/source/vst/vstsinglecomponenteffect.cpp"
-        "${VST3_SDK_DIR}/public.sdk/source/common/pluginfactory.cpp"
+        "${VST3_SDK_DIR}/public.sdk/source/main/pluginfactory.cpp"
         "${VST3_SDK_DIR}/public.sdk/source/common/pluginview.cpp"
         "${VST3_SDK_DIR}/public.sdk/source/common/commoniids.cpp"
     )
@@ -234,7 +234,10 @@ if(PULP_MACOS AND EXISTS "${AUSDK_DIR}/include/AudioUnitSDK/AUBase.h")
 
     file(GLOB AUSDK_SOURCES "${AUSDK_DIR}/src/AudioUnitSDK/*.cpp")
     add_library(ausdk STATIC ${AUSDK_SOURCES})
-    target_include_directories(ausdk PUBLIC "${AUSDK_DIR}/include")
+    target_include_directories(ausdk PUBLIC
+        $<BUILD_INTERFACE:${AUSDK_DIR}/include>
+        $<INSTALL_INTERFACE:external/AudioUnitSDK/include>
+    )
     target_link_libraries(ausdk PUBLIC
         "-framework AudioToolbox"
         "-framework CoreFoundation"
@@ -268,6 +271,25 @@ add_subdirectory(core/host)
 if(PULP_ENABLE_GPU)
     add_subdirectory(core/render)
 endif()
+
+add_library(pulp-standalone STATIC
+    core/format/src/standalone.cpp
+)
+add_library(pulp::standalone ALIAS pulp-standalone)
+target_include_directories(pulp-standalone
+    PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/core/format/include>
+        $<INSTALL_INTERFACE:include>
+)
+target_link_libraries(pulp-standalone
+    PUBLIC
+        pulp::format
+        pulp::view
+        $<BUILD_INTERFACE:yogacore>
+        $<INSTALL_INTERFACE:Pulp::yogacore>
+        $<BUILD_INTERFACE:SDL3::SDL3-static>
+        $<INSTALL_INTERFACE:Pulp::sdl3-static>
+)
 
 if(PULP_ENABLE_GPU)
     add_subdirectory(inspect)
@@ -332,14 +354,20 @@ endif()
 # cmake --install build --prefix <staging> produces a complete Pulp SDK
 include(GNUInstallDirs)
 
-# Core libraries for SDK packaging — only targets with clean dependency chains.
-# View, render, host require third-party libs (SDL3, Dawn, Skia) that can't
-# be redistributed in the SDK. Standalone plugins link format + state + audio.
+# Core libraries for SDK packaging. Standalone projects need the same runtime
+# surface as repo examples, so the SDK exports the view/standalone layers plus
+# the bundled third-party pieces they depend on. Some targets, like
+# `pulp-render`, are optional in smoke or non-GPU builds, so only export targets
+# that were actually configured in this build tree.
 set(PULP_SDK_TARGETS
     pulp-platform pulp-runtime pulp-events pulp-state
     pulp-audio pulp-midi pulp-signal pulp-format
-    pulp-canvas
+    pulp-canvas pulp-view pulp-standalone
 )
+
+if(TARGET pulp-render)
+    list(APPEND PULP_SDK_TARGETS pulp-render)
+endif()
 
 foreach(_sdk_target IN LISTS PULP_SDK_TARGETS)
     string(REPLACE "pulp-" "" _sdk_export_name "${_sdk_target}")
@@ -368,9 +396,38 @@ endif()
 if(PULP_HAS_LV2)
     install(TARGETS lv2-headers EXPORT PulpTargets)
 endif()
+if(PULP_HAS_AUSDK)
+    install(TARGETS ausdk
+        EXPORT PulpTargets
+        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        INCLUDES DESTINATION external/AudioUnitSDK/include
+    )
+endif()
+if(TARGET yogacore)
+    set_target_properties(yogacore PROPERTIES EXPORT_NAME yogacore)
+    install(TARGETS yogacore
+        EXPORT PulpTargets
+        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    )
+endif()
+if(TARGET SDL3-static)
+    set_target_properties(SDL3-static PROPERTIES EXPORT_NAME sdl3-static)
+    install(TARGETS SDL3-static
+        EXPORT PulpTargets
+        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+    )
+endif()
+if(TARGET SDL3_Headers)
+    set_target_properties(SDL3_Headers PROPERTIES EXPORT_NAME sdl3-headers)
+    install(TARGETS SDL3_Headers EXPORT PulpTargets)
+endif()
 
 # Public headers for each SDK subsystem
-foreach(subsystem platform runtime events state audio midi signal format canvas)
+foreach(subsystem platform runtime events state audio midi signal format canvas render view)
     set(_inc_dir "${CMAKE_CURRENT_SOURCE_DIR}/core/${subsystem}/include")
     if(EXISTS "${_inc_dir}")
         install(DIRECTORY "${_inc_dir}/pulp/"
@@ -408,6 +465,7 @@ install(FILES
     "${CMAKE_BINARY_DIR}/PulpConfig.cmake"
     "${CMAKE_BINARY_DIR}/PulpConfigVersion.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpPlugin.cmake"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpInfoPlist.au.in"
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/Pulp
 )
 
@@ -416,6 +474,27 @@ install(DIRECTORY tools/templates/
     DESTINATION templates
     PATTERN "*.template"
 )
+
+# Header-only third-party deps referenced by installed public headers
+install(DIRECTORY "${choc_SOURCE_DIR}/choc"
+    DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+)
+
+if(DEFINED SDL3_SOURCE_DIR AND EXISTS "${SDL3_SOURCE_DIR}/include/SDL3")
+    install(DIRECTORY "${SDL3_SOURCE_DIR}/include/SDL3"
+        DESTINATION external/SDL3/include
+    )
+    if(EXISTS "${SDL3_SOURCE_DIR}/include/build_config")
+        install(DIRECTORY "${SDL3_SOURCE_DIR}/include/build_config"
+            DESTINATION external/SDL3/include
+        )
+    endif()
+endif()
+if(DEFINED SDL3_BINARY_DIR AND EXISTS "${SDL3_BINARY_DIR}/include-revision/SDL3")
+    install(DIRECTORY "${SDL3_BINARY_DIR}/include-revision/SDL3"
+        DESTINATION external/SDL3/include
+    )
+endif()
 
 # Format SDK headers (CLAP, LV2 — MIT/ISC compatible)
 if(PULP_HAS_CLAP)
@@ -429,8 +508,23 @@ if(PULP_HAS_LV2)
     )
 endif()
 if(PULP_HAS_VST3)
-    install(DIRECTORY "${VST3_SDK_DIR}/pluginterfaces/"
-        DESTINATION external/vst3sdk/pluginterfaces
+    install(DIRECTORY
+        "${VST3_SDK_DIR}/base"
+        "${VST3_SDK_DIR}/pluginterfaces"
+        "${VST3_SDK_DIR}/public.sdk"
+        DESTINATION external/vst3sdk
         FILES_MATCHING PATTERN "*.h"
     )
 endif()
+if(PULP_HAS_AUSDK)
+    install(DIRECTORY "${AUSDK_DIR}/include/AudioUnitSDK"
+        DESTINATION external/AudioUnitSDK/include
+    )
+endif()
+
+# Adapter sources needed by standalone SDK plugin targets.
+install(FILES
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/format/src/au_v2_adapter.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/format/src/au_v2_instrument.cpp"
+    DESTINATION src/pulp/format
+)

@@ -39,7 +39,13 @@ if(PULP_BUILD_TESTS)
         COMMAND pulp-cli create --help
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
     set_tests_properties(cli-create-help PROPERTIES
-        PASS_REGULAR_EXPRESSION "create a new plugin project")
+        PASS_REGULAR_EXPRESSION "--in-tree")
+
+    add_test(NAME cli-run-help
+        COMMAND pulp-cli run --help
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+    set_tests_properties(cli-run-help PROPERTIES
+        PASS_REGULAR_EXPRESSION "active project build")
 
     add_test(NAME cli-cache-status
         COMMAND pulp-cli cache status

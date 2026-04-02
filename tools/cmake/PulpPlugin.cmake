@@ -83,7 +83,11 @@ function(pulp_add_plugin target)
     if("VST3" IN_LIST PLUGIN_FORMATS)
         if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/vst3_entry.cpp")
             add_library(${target}_VST3 MODULE vst3_entry.cpp)
-            target_link_libraries(${target}_VST3 PRIVATE ${target}_Core Pulp::format)
+            target_link_libraries(${target}_VST3 PRIVATE
+                ${target}_Core
+                Pulp::format
+                Pulp::vst3-sdk
+            )
             target_include_directories(${target}_VST3 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
             if(DEFINED PULP_VST3_INCLUDE_DIR AND EXISTS "${PULP_VST3_INCLUDE_DIR}")
                 target_include_directories(${target}_VST3 PRIVATE "${PULP_VST3_INCLUDE_DIR}")
@@ -101,11 +105,77 @@ function(pulp_add_plugin target)
         endif()
     endif()
 
+    # AU v2 format
+    if("AU" IN_LIST PLUGIN_FORMATS AND APPLE)
+        if(NOT PLUGIN_PLUGIN_CODE OR NOT PLUGIN_MANUFACTURER_CODE)
+            message(WARNING "pulp_add_plugin(${target}): AU format requires PLUGIN_CODE and MANUFACTURER_CODE")
+        elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/au_v2_entry.cpp")
+            if(NOT DEFINED PULP_SOURCE_INCLUDE_DIR OR NOT EXISTS "${PULP_SOURCE_INCLUDE_DIR}/pulp/format")
+                message(FATAL_ERROR "pulp_add_plugin(${target}): missing installed Pulp source tree under ${PULP_SOURCE_INCLUDE_DIR}")
+            endif()
+
+            add_library(${target}_AU MODULE au_v2_entry.cpp)
+            target_link_libraries(${target}_AU PRIVATE
+                ${target}_Core
+                Pulp::format
+                Pulp::ausdk
+                "-framework AudioToolbox"
+                "-framework CoreFoundation"
+                "-framework CoreAudio"
+            )
+            target_include_directories(${target}_AU PRIVATE
+                ${CMAKE_CURRENT_SOURCE_DIR}
+                "${PULP_SOURCE_INCLUDE_DIR}"
+            )
+            if(DEFINED PULP_AUSDK_INCLUDE_DIR AND EXISTS "${PULP_AUSDK_INCLUDE_DIR}")
+                target_include_directories(${target}_AU PRIVATE "${PULP_AUSDK_INCLUDE_DIR}")
+            endif()
+            set_target_properties(${target}_AU PROPERTIES
+                BUNDLE TRUE
+                BUNDLE_EXTENSION "component"
+                OUTPUT_NAME "${PLUGIN_PLUGIN_NAME}"
+                LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/AU"
+            )
+
+            if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/Info.plist.au")
+                set_target_properties(${target}_AU PROPERTIES
+                    MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/Info.plist.au")
+            elseif(EXISTS "${CMAKE_CURRENT_LIST_DIR}/PulpInfoPlist.au.in")
+                set(PULP_PLUGIN_NAME "${PLUGIN_PLUGIN_NAME}")
+                set(PULP_BUNDLE_ID "${PLUGIN_BUNDLE_ID}")
+                set(PULP_VERSION "${PLUGIN_VERSION}")
+                set(PULP_MANUFACTURER "${PLUGIN_MANUFACTURER}")
+                set(PULP_MANUFACTURER_CODE "${PLUGIN_MANUFACTURER_CODE}")
+                set(PULP_PLUGIN_CODE "${PLUGIN_PLUGIN_CODE}")
+                if("${PLUGIN_CATEGORY}" STREQUAL "Instrument")
+                    set(PULP_AU_TYPE "aumu")
+                elseif("${PLUGIN_CATEGORY}" STREQUAL "MidiEffect")
+                    set(PULP_AU_TYPE "aumi")
+                else()
+                    set(PULP_AU_TYPE "aufx")
+                endif()
+                set(PULP_AU_FACTORY_NAME "${target}AUFactory")
+                configure_file(
+                    "${CMAKE_CURRENT_LIST_DIR}/PulpInfoPlist.au.in"
+                    "${CMAKE_CURRENT_BINARY_DIR}/${target}_Info.plist.au"
+                    @ONLY)
+                set_target_properties(${target}_AU PROPERTIES
+                    MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_BINARY_DIR}/${target}_Info.plist.au")
+            endif()
+
+            add_custom_command(TARGET ${target}_AU POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E echo "BNDL????" >
+                    "$<TARGET_BUNDLE_DIR:${target}_AU>/Contents/PkgInfo"
+                COMMENT "Writing PkgInfo into ${PLUGIN_PLUGIN_NAME}.component bundle"
+            )
+        endif()
+    endif()
+
     # Standalone
     if("Standalone" IN_LIST PLUGIN_FORMATS)
         if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/main.cpp")
             add_executable(${target}_Standalone main.cpp)
-            target_link_libraries(${target}_Standalone PRIVATE ${target}_Core Pulp::format)
+            target_link_libraries(${target}_Standalone PRIVATE ${target}_Core Pulp::standalone)
             target_include_directories(${target}_Standalone PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
             set_target_properties(${target}_Standalone PROPERTIES
                 OUTPUT_NAME "${PLUGIN_PLUGIN_NAME}"
@@ -115,9 +185,12 @@ function(pulp_add_plugin target)
     endif()
 
     # Test target
+    # Standalone templates already define ${target}-test explicitly with
+    # Catch2 discovery. Keep this fallback only for hand-written SDK projects
+    # that do not create their own test target.
     set(_test_file "test_${target}.cpp")
     string(TOLOWER "${_test_file}" _test_file)
-    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${_test_file}")
+    if(NOT TARGET ${target}-test AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${_test_file}")
         add_executable(${target}-test "${_test_file}")
         target_link_libraries(${target}-test PRIVATE ${target}_Core Pulp::format)
         target_include_directories(${target}-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

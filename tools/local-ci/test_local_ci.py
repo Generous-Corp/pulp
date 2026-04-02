@@ -11,6 +11,7 @@ from types import SimpleNamespace
 
 
 MODULE_PATH = Path(__file__).with_name("local_ci.py")
+VALIDATE_BUILD_PATH = MODULE_PATH.parent.parent.parent / "validate-build.sh"
 
 
 def load_module():
@@ -147,6 +148,37 @@ class LocalCiTests(unittest.TestCase):
         self.assertEqual(result["overall"], "superseded")
         self.assertEqual(result["superseded_by"], newer_job["id"])
 
+    def test_enqueue_supersedes_broader_pending_same_sha_with_narrower_scope(self):
+        broader_job, broader_created = self.mod.enqueue_job(
+            "feature/test",
+            "a" * 40,
+            "normal",
+            ["mac", "windows"],
+            "run",
+            "smoke",
+        )
+        narrower_job, narrower_created = self.mod.enqueue_job(
+            "feature/test",
+            "a" * 40,
+            "normal",
+            ["windows"],
+            "run",
+            "smoke",
+        )
+
+        self.assertTrue(broader_created)
+        self.assertTrue(narrower_created)
+
+        queue = self.mod.load_queue()
+        broader_stored = next(job for job in queue if job["id"] == broader_job["id"])
+        narrower_stored = next(job for job in queue if job["id"] == narrower_job["id"])
+
+        self.assertEqual(broader_stored["status"], "completed")
+        self.assertEqual(broader_stored["overall"], "superseded")
+        self.assertEqual(broader_stored["superseded_by"], narrower_job["id"])
+        self.assertEqual(broader_stored["superseded_reason"], "narrower_scope_queued")
+        self.assertEqual(narrower_stored["status"], "pending")
+
     def test_claim_next_job_prefers_higher_priority(self):
         low_job, _ = self.mod.enqueue_job("feature/low", "1" * 40, "low", ["mac"], "run", "full")
         high_job, _ = self.mod.enqueue_job("feature/high", "2" * 40, "high", ["mac"], "run", "full")
@@ -155,6 +187,21 @@ class LocalCiTests(unittest.TestCase):
         self.assertIsNotNone(claimed)
         self.assertEqual(claimed["id"], high_job["id"])
         self.assertNotEqual(claimed["id"], low_job["id"])
+
+    def test_cancel_pending_job_marks_it_completed_with_canceled_result(self):
+        job, created = self.mod.enqueue_job("feature/cancel", "5" * 40, "normal", ["ubuntu"], "run", "full")
+        self.assertTrue(created)
+
+        exit_code = self.mod.cmd_cancel(SimpleNamespace(job=job["id"]))
+        self.assertEqual(exit_code, 0)
+
+        stored = self.mod.load_job(job["id"])
+        self.assertIsNotNone(stored)
+        self.assertEqual(stored["status"], "completed")
+        self.assertEqual(stored["overall"], "canceled")
+        result = self.mod.load_result(Path(stored["result_file"]))
+        self.assertEqual(result["overall"], "canceled")
+        self.assertEqual(result["canceled_reason"], "operator_canceled")
 
     def test_resolve_targets_uses_defaults_and_rejects_disabled_targets(self):
         config = self.mod.load_config()
@@ -210,6 +257,32 @@ class LocalCiTests(unittest.TestCase):
         self.assertEqual(older_stored["overall"], "superseded")
         self.assertEqual(older_stored["superseded_by"], newer_job["id"])
         self.assertEqual(newer_stored["status"], "pending")
+
+    def test_stale_running_broader_job_is_superseded_by_narrower_same_sha_scope(self):
+        broader_job = self.mod.make_job("feature/stale", "3" * 40, "normal", ["mac", "windows"], "run", "smoke")
+        broader_job["queued_at"] = "2026-03-31T00:00:00+00:00"
+        broader_job["status"] = "running"
+        broader_job["started_at"] = "2026-03-31T00:10:00+00:00"
+        broader_job["runner"] = {"pid": 999999, "root": "/tmp/pulp"}
+
+        narrower_job = self.mod.make_job("feature/stale", "3" * 40, "normal", ["windows"], "run", "smoke")
+        narrower_job["queued_at"] = "2026-03-31T00:20:00+00:00"
+
+        self.mod.ensure_state_dirs()
+        self.mod.queue_path().write_text(json.dumps([broader_job, narrower_job], indent=2) + "\n")
+        self.mod.runner_info_path().write_text(
+            json.dumps({"pid": 999999, "active_job_id": broader_job["id"], "active_branch": broader_job["branch"]}) + "\n"
+        )
+
+        queue = self.mod.load_queue()
+        broader_stored = next(job for job in queue if job["id"] == broader_job["id"])
+        narrower_stored = next(job for job in queue if job["id"] == narrower_job["id"])
+
+        self.assertEqual(broader_stored["status"], "completed")
+        self.assertEqual(broader_stored["overall"], "superseded")
+        self.assertEqual(broader_stored["superseded_by"], narrower_job["id"])
+        self.assertEqual(broader_stored["superseded_reason"], "narrower_scope_queued")
+        self.assertEqual(narrower_stored["status"], "pending")
 
     def test_summarize_active_targets_uses_requested_order(self):
         summary = self.mod.summarize_active_targets(
@@ -367,6 +440,7 @@ class LocalCiTests(unittest.TestCase):
         self.assertIn("$Platform = 'ARM64'", captured["input_text"])
         self.assertIn("$BundleName = 'pulp-ci-job123.bundle'", captured["input_text"])
         self.assertIn("$BundleRef = 'refs/pulp-ci-bundles/job123'", captured["input_text"])
+        self.assertIn("$BundleRef`:refs/pulp-ci-bundles/job123", captured["input_text"])
 
     def test_windows_smoke_validation_installs_sdk_and_skips_ctest(self):
         captured = {}
@@ -376,7 +450,7 @@ class LocalCiTests(unittest.TestCase):
             return {
                 "timed_out": False,
                 "returncode": 0,
-                "output": "ok\n",
+                "output": "__PULP_VALIDATION__:smoke\n__PULP_TEST_POLICY__:skip\nok\n",
                 "duration_secs": 1.2,
             }
 
@@ -571,6 +645,7 @@ class LocalCiTests(unittest.TestCase):
         self.assertEqual(result["status"], "pass")
         self.assertIn("refs/heads/$Branch`:refs/remotes/origin/$Branch", captured["input_text"])
         self.assertIn("$BundleName = 'pulp-ci-job126.bundle'", captured["input_text"])
+        self.assertIn("$BundleRef`:refs/pulp-ci-bundles/job126", captured["input_text"])
 
     def test_sync_job_bundle_to_ssh_host_uses_scp_and_keeps_local_bundle(self):
         bundle_path = self.state_dir / "bundles" / "job777.bundle"
@@ -670,7 +745,76 @@ class LocalCiTests(unittest.TestCase):
         remote_cmd = captured["cmd"][-1]
         self.assertIn("bundle-sync", remote_cmd)
         self.assertIn('bundle="$HOME/$bundle_name"', remote_cmd)
+        self.assertIn('script="$PWD/$script_name"', remote_cmd)
         self.assertIn('git fetch "$bundle" "$bundle_ref:refs/remotes/origin/$branch"', remote_cmd)
+        self.assertIn('git show "$sha:validate-build.sh" > "$script"', remote_cmd)
+        self.assertIn('bash "$script" --quiet --ref "$sha"', remote_cmd)
+
+    def test_posix_smoke_validation_runs_sha_pinned_script_with_smoke_flag(self):
+        captured = {}
+
+        def fake_sync_bundle(host, job, report_progress=None):
+            return ("pulp-ci-job889.bundle", "refs/pulp-ci-bundles/job889")
+
+        def fake_run_logged_command(cmd, **kwargs):
+            captured["cmd"] = cmd
+            return {
+                "timed_out": False,
+                "returncode": 0,
+                "output": "__PULP_VALIDATION__:smoke\n__PULP_TEST_POLICY__:skip\nok\n",
+                "duration_secs": 1.2,
+            }
+
+        original_sync = self.mod.sync_job_bundle_to_ssh_host
+        original_run_logged = self.mod.run_logged_command
+        self.mod.sync_job_bundle_to_ssh_host = fake_sync_bundle
+        self.mod.run_logged_command = fake_run_logged_command
+        try:
+            result = self.mod.run_posix_ssh_validation(
+                "ubuntu",
+                "ubuntu",
+                "/tmp/pulp",
+                {"id": "job889", "branch": "feature/smoke", "sha": "2" * 40, "validation": "smoke"},
+            )
+        finally:
+            self.mod.sync_job_bundle_to_ssh_host = original_sync
+            self.mod.run_logged_command = original_run_logged
+
+        self.assertEqual(result["status"], "pass")
+        remote_cmd = captured["cmd"][-1]
+        self.assertIn('script_name=.pulp-ci-validate-job889.sh', remote_cmd)
+        self.assertIn('git show "$sha:validate-build.sh" > "$script"', remote_cmd)
+        self.assertIn('PULP_EXPECT_SMOKE=1 bash "$script" --quiet --ref "$sha" --smoke --no-tests', remote_cmd)
+
+    def test_posix_smoke_validation_fails_when_smoke_contract_markers_are_missing(self):
+        def fake_sync_bundle(host, job, report_progress=None):
+            return ("pulp-ci-job890.bundle", "refs/pulp-ci-bundles/job890")
+
+        def fake_run_logged_command(cmd, **kwargs):
+            return {
+                "timed_out": False,
+                "returncode": 0,
+                "output": "ok\n",
+                "duration_secs": 1.2,
+            }
+
+        original_sync = self.mod.sync_job_bundle_to_ssh_host
+        original_run_logged = self.mod.run_logged_command
+        self.mod.sync_job_bundle_to_ssh_host = fake_sync_bundle
+        self.mod.run_logged_command = fake_run_logged_command
+        try:
+            result = self.mod.run_posix_ssh_validation(
+                "ubuntu",
+                "ubuntu",
+                "/tmp/pulp",
+                {"id": "job890", "branch": "feature/smoke", "sha": "3" * 40, "validation": "smoke"},
+            )
+        finally:
+            self.mod.sync_job_bundle_to_ssh_host = original_sync
+            self.mod.run_logged_command = original_run_logged
+
+        self.assertEqual(result["status"], "fail")
+        self.assertIn("Smoke validation contract violated", result["stderr_tail"])
 
     def test_probe_windows_ssh_cmake_settings_parses_remote_json(self):
         class FakeCompleted:
@@ -693,7 +837,7 @@ class LocalCiTests(unittest.TestCase):
         self.assertEqual(platform, "ARM64")
         self.assertEqual(instance, "C:/Program Files/Microsoft Visual Studio/2022/Community")
 
-    def test_parse_progress_marker_detects_phase_and_wait(self):
+    def test_parse_progress_marker_detects_phase_wait_and_smoke_contract(self):
         self.assertEqual(
             self.mod.parse_progress_marker("__PULP_PHASE__:build\n"),
             {"phase": "build"},
@@ -702,7 +846,80 @@ class LocalCiTests(unittest.TestCase):
             self.mod.parse_progress_marker("__PULP_WAIT__:host-lock\n"),
             {"wait_reason": "host-lock"},
         )
+        self.assertEqual(
+            self.mod.parse_progress_marker("__PULP_VALIDATION__:smoke\n"),
+            {"validation_mode": "smoke"},
+        )
+        self.assertEqual(
+            self.mod.parse_progress_marker("__PULP_TEST_POLICY__:skip\n"),
+            {"test_policy": "skip"},
+        )
         self.assertEqual(self.mod.parse_progress_marker("normal output\n"), {})
+
+    def test_validate_build_preserves_original_args_for_lock_reexec(self):
+        text = VALIDATE_BUILD_PATH.read_text()
+        self.assertIn('ORIGINAL_ARGS=("$@")', text)
+        self.assertIn('acquire_validation_lock "${ORIGINAL_ARGS[@]}"', text)
+
+    def test_run_logged_command_keeps_progress_markers_in_output_and_reports_them(self):
+        log_path = self.state_dir / "marker.log"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        seen = {}
+
+        def report_progress(**fields):
+            seen.update(fields)
+
+        result = self.mod.run_logged_command(
+            [
+                "python3",
+                "-c",
+                (
+                    "print('__PULP_VALIDATION__:smoke');"
+                    "print('__PULP_TEST_POLICY__:skip');"
+                    "print('__PULP_PHASE__:build');"
+                    "print('done')"
+                ),
+            ],
+            log_path=log_path,
+            report_progress=report_progress,
+        )
+
+        self.assertEqual(result["returncode"], 0)
+        self.assertIn("__PULP_VALIDATION__:smoke", result["output"])
+        self.assertIn("__PULP_TEST_POLICY__:skip", result["output"])
+        self.assertIn("__PULP_PHASE__:build", result["output"])
+        self.assertIn("done", result["output"])
+        logged = log_path.read_text()
+        self.assertIn("__PULP_VALIDATION__:smoke", logged)
+        self.assertIn("__PULP_TEST_POLICY__:skip", logged)
+        self.assertEqual(seen["validation_mode"], "smoke")
+        self.assertEqual(seen["test_policy"], "skip")
+        self.assertEqual(seen["phase"], "build")
+
+    def test_run_logged_command_replaces_invalid_utf8_bytes(self):
+        log_path = self.state_dir / "nonutf8.log"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+
+        result = self.mod.run_logged_command(
+            [
+                "python3",
+                "-c",
+                (
+                    "import sys; "
+                    "sys.stdout.buffer.write(b'prefix\\xe5suffix\\\\n'); "
+                    "sys.stdout.flush()"
+                ),
+            ],
+            log_path=log_path,
+        )
+
+        self.assertEqual(result["returncode"], 0)
+        self.assertIn("prefix", result["output"])
+        self.assertIn("suffix", result["output"])
+        self.assertIn("\ufffd", result["output"])
+        logged = log_path.read_text()
+        self.assertIn("prefix", logged)
+        self.assertIn("suffix", logged)
 
     def test_target_log_path_uses_machine_global_logs_dir(self):
         path = self.mod.target_log_path("job123", "windows")

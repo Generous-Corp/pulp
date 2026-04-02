@@ -77,6 +77,7 @@ endif()
 # CHOC headers (JS engine, utilities)
 target_include_directories(pulp-view PUBLIC
     $<BUILD_INTERFACE:${choc_SOURCE_DIR}>
+    $<INSTALL_INTERFACE:include>
 )
 
 add_dependencies(pulp-view pulp-view-js-preludes)
@@ -92,13 +93,19 @@ endif()
 
 # Yoga layout engine (MIT)
 if(PULP_HAS_YOGA)
-    target_link_libraries(pulp-view PRIVATE yogacore)
+    target_link_libraries(pulp-view PRIVATE
+        $<BUILD_INTERFACE:yogacore>
+        $<INSTALL_INTERFACE:Pulp::yogacore>
+    )
     target_compile_definitions(pulp-view PRIVATE PULP_HAS_YOGA=1)
 endif()
 
 # SDL3 for cross-platform windowing
 if(PULP_HAS_SDL3)
-    target_link_libraries(pulp-view PRIVATE SDL3::SDL3-static)
+    target_link_libraries(pulp-view PRIVATE
+        $<BUILD_INTERFACE:SDL3::SDL3-static>
+        $<INSTALL_INTERFACE:Pulp::sdl3-static>
+    )
     target_compile_definitions(pulp-view PRIVATE PULP_HAS_SDL3=1)
 endif()
 

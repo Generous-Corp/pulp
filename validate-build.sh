@@ -11,6 +11,8 @@ KEEP_WORKTREE=false
 NO_LOCK=false
 REF="HEAD"
 EXCLUDE_REGEX=""
+EXPECT_SMOKE="${PULP_EXPECT_SMOKE:-0}"
+ORIGINAL_ARGS=("$@")
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -53,6 +55,16 @@ EOF
     esac
     shift
 done
+
+if [ "$EXPECT_SMOKE" = "1" ] && [ "$SMOKE_ONLY" != true ]; then
+    echo "Smoke validation contract violated: expected --smoke to be active" >&2
+    exit 2
+fi
+
+if [ "$EXPECT_SMOKE" = "1" ] && [ "$SKIP_TESTS" != true ]; then
+    echo "Smoke validation contract violated: tests must be skipped" >&2
+    exit 2
+fi
 
 validation_lock_path() {
     if [ -n "${PULP_VALIDATE_LOCK_PATH_OVERRIDE:-}" ]; then
@@ -125,7 +137,7 @@ os.execvpe(cmd[0], cmd, env)
 PY
 }
 
-acquire_validation_lock "$@"
+acquire_validation_lock "${ORIGINAL_ARGS[@]}"
 
 tmp_root="$(mktemp -d "${TMPDIR:-/tmp}/pulp-validate.XXXXXX")"
 src_dir="$tmp_root/src"
@@ -152,6 +164,16 @@ trap cleanup EXIT
 if ! $QUIET; then
     echo "Creating clean validation worktree..."
 fi
+if [ "$SMOKE_ONLY" = true ]; then
+    echo "__PULP_VALIDATION__:smoke"
+else
+    echo "__PULP_VALIDATION__:full"
+fi
+if [ "$SKIP_TESTS" = true ]; then
+    echo "__PULP_TEST_POLICY__:skip"
+else
+    echo "__PULP_TEST_POLICY__:run"
+fi
 git -C "$ROOT" worktree add --detach "$src_dir" "$REF" >/dev/null
 
 run_or_dump() {
@@ -171,6 +193,7 @@ run_or_dump() {
 run_or_dump "dependency bootstrap" "$setup_log" bash -lc "cd \"$src_dir\" && ./setup.sh --ci --deps-only"
 configure_args=(-S "$src_dir" -B "$build_dir" -DCMAKE_BUILD_TYPE=Debug)
 if [ "$SMOKE_ONLY" = true ]; then
+    SKIP_TESTS=true
     configure_args+=(-DPULP_BUILD_TESTS=OFF -DPULP_BUILD_EXAMPLES=OFF -DPULP_ENABLE_GPU=OFF)
 fi
 run_or_dump "configure" "$configure_log" cmake "${configure_args[@]}"
@@ -192,6 +215,10 @@ run_or_dump "install smoke test" "$smoke_log" \
     cmake -S "$smoke_dir" -B "$smoke_dir/build" -DCMAKE_PREFIX_PATH="$install_dir"
 
 if [ "$SKIP_TESTS" = false ]; then
+    if [ "$SMOKE_ONLY" = true ]; then
+        echo "Smoke validation contract violated: refusing to run ctest" >&2
+        exit 2
+    fi
     ctest_args=(--test-dir "$build_dir" --output-on-failure)
     if [ -n "$EXCLUDE_REGEX" ]; then
         ctest_args+=(--exclude-regex "$EXCLUDE_REGEX")

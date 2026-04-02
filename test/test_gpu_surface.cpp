@@ -81,13 +81,20 @@ TEST_CASE("GpuSurface exposes Dawn handles when initialized", "[render][gpu]") {
 
     if (!surface->initialize(config)) return;
 
-    // After init: device and instance handles should be non-null
+    // Dawn C++ interop handles only exist on the Skia-backed path.
+#ifdef PULP_HAS_SKIA
     REQUIRE(surface->dawn_device_handle() != nullptr);
     REQUIRE(surface->dawn_instance_handle() != nullptr);
     REQUIRE(surface->dawn_queue_handle() != nullptr);
 
     // No native surface = no current texture
     REQUIRE(surface->current_texture_handle() != nullptr);  // pointer to member, not the texture value
+#else
+    REQUIRE(surface->dawn_device_handle() == nullptr);
+    REQUIRE(surface->dawn_instance_handle() == nullptr);
+    REQUIRE(surface->dawn_queue_handle() == nullptr);
+    REQUIRE(surface->current_texture_handle() == nullptr);
+#endif
 }
 
 TEST_CASE("GpuSurface begin_frame before initialize returns false", "[render][gpu]") {
