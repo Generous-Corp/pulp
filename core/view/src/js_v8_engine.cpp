@@ -97,8 +97,9 @@ public:
     // V8 has excellent GC but we can request a low-priority collection
     void gc_hint() override {}
 
-    // V8 has the richest native object support — Phase 13 will enable these
-    bool supports_host_objects() const override { return false; }
+    // First host-object slice is now wired through the shared engine-agnostic
+    // native-backed object descriptor seam.
+    bool supports_host_objects() const override { return true; }
     bool supports_typed_arrays() const override { return true; }
     bool supports_promises() const override { return false; }
 

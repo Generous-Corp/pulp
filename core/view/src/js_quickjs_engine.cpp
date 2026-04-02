@@ -111,6 +111,8 @@ public:
         // but it's not necessary — the runtime handles it well.
     }
 
+    bool supports_host_objects() const override { return true; }
+
     // Expose the underlying CHOC context for WidgetBridge backward compatibility
     choc::javascript::Context& choc_context() { return context_; }
 

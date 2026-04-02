@@ -45,6 +45,10 @@ public:
     void register_function(const std::string& name, NativeFunction fn);
     void register_function(const std::string& name, choc::javascript::Context::NativeFunction fn);
 
+    // Register a native-backed global object with snapshot properties and
+    // native methods.
+    void register_host_object(const std::string& name, HostObjectDescriptor descriptor);
+
     // Invoke a global JS function by name with no arguments
     choc::value::Value invoke(std::string_view name);
 

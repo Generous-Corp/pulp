@@ -8,6 +8,7 @@
 #include <vector>
 #include <cstdint>
 #include <choc/containers/choc_Value.h>
+#include <choc/text/choc_JSON.h>
 
 namespace pulp::view {
 
@@ -19,6 +20,26 @@ using LogCallback = std::function<void(std::string_view level, std::string_view 
 
 // Native function callable from JS
 using NativeFunction = std::function<choc::value::Value(const choc::value::Value* args, size_t num_args)>;
+
+// First host-object slice: native-backed global objects with snapshot properties
+// and native method callbacks. This is intentionally smaller than a full opaque
+// proxy / HostObject API, but it gives later bridge phases a truthful native
+// object seam to build on.
+struct HostObjectProperty {
+    std::string name;
+    choc::value::Value value;
+};
+
+struct HostObjectMethod {
+    std::string name;
+    NativeFunction fn;
+};
+
+struct HostObjectDescriptor {
+    std::string class_name;
+    std::vector<HostObjectProperty> properties;
+    std::vector<HostObjectMethod> methods;
+};
 
 // Which JS engine backend is active
 enum class JsEngineType {
@@ -70,6 +91,42 @@ public:
 
     // Set a log callback for console.log/warn/error/info/debug
     virtual void set_log_callback(LogCallback callback) = 0;
+
+    // Register a native-backed global object with snapshot properties and
+    // native method callbacks.
+    virtual void register_host_object(const std::string& name, HostObjectDescriptor descriptor) {
+        const auto quote_string = [] (std::string_view text) {
+            return choc::json::toString(choc::value::createString(std::string(text)));
+        };
+
+        const auto js_literal = [&] (const choc::value::Value& value) -> std::string {
+            if (value.isVoid())
+                return "undefined";
+            return choc::json::toString(value);
+        };
+
+        static uint64_t global_host_symbol = 0;
+
+        std::string target = "globalThis[" + quote_string(name) + "]";
+        std::string script;
+        script.reserve(256 + descriptor.properties.size() * 64 + descriptor.methods.size() * 96);
+        script += target + " = {};\n";
+
+        if (!descriptor.class_name.empty())
+            script += target + "[\"_objectName\"] = " + quote_string(descriptor.class_name) + ";\n";
+
+        for (const auto& property : descriptor.properties)
+            script += target + "[" + quote_string(property.name) + "] = " + js_literal(property.value) + ";\n";
+
+        for (auto& method : descriptor.methods) {
+            auto hidden_name = "__pulp_host_object_" + std::to_string(global_host_symbol++);
+            register_function(hidden_name, std::move(method.fn));
+            script += target + "[" + quote_string(method.name) + "] = globalThis[" + quote_string(hidden_name) + "];\n";
+            script += "delete globalThis[" + quote_string(hidden_name) + "];\n";
+        }
+
+        evaluate(script + target + ";");
+    }
 
     // Hint that now is a good time to collect garbage (advisory)
     virtual void gc_hint() {}

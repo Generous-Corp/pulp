@@ -233,7 +233,7 @@ TEST_CASE("JsEngine default engine creation", "[js_engine]") {
 
 TEST_CASE("JsEngine capability flags are truthful", "[js_engine]") {
     FOR_EACH_ENGINE(engine)
-        REQUIRE_FALSE(engine->supports_host_objects());
+        REQUIRE(engine->supports_host_objects());
         REQUIRE_FALSE(engine->supports_promises());
 
         switch (engine->type()) {
@@ -245,6 +245,38 @@ TEST_CASE("JsEngine capability flags are truthful", "[js_engine]") {
                 REQUIRE(engine->supports_typed_arrays());
                 break;
         }
+    END_FOR_EACH_ENGINE
+}
+
+TEST_CASE("JsEngine host object descriptor exposes properties and native methods", "[js_engine]") {
+    FOR_EACH_ENGINE(engine)
+        if (!engine->supports_host_objects()) {
+            SUCCEED("host objects intentionally unsupported on this backend");
+            continue;
+        }
+
+        int bump_count = 41;
+        HostObjectDescriptor descriptor;
+        descriptor.class_name = "NativeThing";
+        descriptor.properties.push_back({"kind", choc::value::createString("buffer")});
+        descriptor.properties.push_back({"version", choc::value::createInt32(1)});
+        descriptor.methods.push_back({"bump", [&](const choc::value::Value*, size_t) {
+            return choc::value::createInt32(++bump_count);
+        }});
+        descriptor.methods.push_back({"sum", [](const choc::value::Value* args, size_t count) {
+            int total = 0;
+            for (size_t i = 0; i < count; ++i)
+                total += args[i].getWithDefault<int32_t>(0);
+            return choc::value::createInt32(total);
+        }});
+
+        engine->register_host_object("nativeThing", std::move(descriptor));
+
+        REQUIRE(engine->evaluate("nativeThing.kind").toString() == "buffer");
+        REQUIRE(engine->evaluate("nativeThing.version").getWithDefault<int32_t>(0) == 1);
+        REQUIRE(engine->evaluate("nativeThing.bump()").getWithDefault<int32_t>(0) == 42);
+        REQUIRE(engine->evaluate("nativeThing.sum(20, 22)").getWithDefault<int32_t>(0) == 42);
+        REQUIRE(engine->evaluate("nativeThing._objectName").toString() == "NativeThing");
     END_FOR_EACH_ENGINE
 }
 

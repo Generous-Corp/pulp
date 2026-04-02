@@ -39,8 +39,10 @@ READINESS SNAPSHOT (2026-04-02):
 - `v8` is now proven on a real machine path when explicit external inputs are supplied (`V8_INCLUDE_DIR`, `V8_LIB_DIR`, and `V8_LIBRARY_PATH` for non-`v8_monolith` providers such as Homebrew Node's `libnode`).
 - The current `JsEngine` capability floor is only partially raised:
   - typed arrays are now a real tested capability on `jsc`
+  - a first native-backed host-object descriptor seam is now tested across the proven backends
   - `v8` now also has a real configure/build/test proof path with typed-array coverage when built through that explicit provider contract
-  - HostObjects and Promises are still not implemented or proven
+  - Promise-returning native APIs are still not implemented or proven
+  - full opaque wrapper / proxy-style HostObjects are still not implemented or proven
 - Read `planning/v3-phase13-readiness.md` before treating this phase as ready to implement.
 
 CONCEPT:
@@ -117,6 +119,9 @@ NON-NEGOTIABLES:
 - Do not fork or modify Three.js. The goal is API compatibility.
 - Dawn device MUST be shared between Skia Graphite and the WebGPU JS bridge.
   Do not create a second GPU device.
+- Treat the currently landed host-object descriptor seam as the first floor, not the final API.
+  The real bridge still needs opaque wrapper objects and native async promise plumbing before
+  it can honestly claim Three.js/WebGPU compatibility.
 
 DELIVERABLES:
 
