@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 #include <pulp/view/js_engine.hpp>
+#include <pulp/view/script_engine.hpp>
 #include <string>
 #include <vector>
 
@@ -313,6 +314,48 @@ TEST_CASE("JsEngine native promise functions return real Promise objects", "[js_
         REQUIRE(engine->evaluate("Object.prototype.toString.call(asyncAdd(20, 22))").toString() == "[object Promise]");
         REQUIRE(engine->evaluate("typeof asyncAdd(20, 22).then").toString() == "function");
     END_FOR_EACH_ENGINE
+}
+
+TEST_CASE("JsEngine Phase 13 smoke can assemble browser-style GPU bridge primitives", "[js_engine][phase13]") {
+    auto engines_ = available_engines();
+    REQUIRE_FALSE(engines_.empty());
+
+    for (auto engine_type_ : engines_) {
+        DYNAMIC_SECTION("engine=" << engine_type_name(engine_type_)) {
+            ScriptEngine script(engine_type_);
+            auto& engine = script.engine();
+
+            if (!engine.supports_host_objects() || !engine.supports_promises()) {
+                SUCCEED("phase13 smoke intentionally unsupported on this backend");
+                continue;
+            }
+
+            HostObjectDescriptor gpu;
+            gpu.class_name = "GPU";
+            gpu.properties.push_back({"backend", choc::value::createString("mock-dawn")});
+            gpu.methods.push_back({"getPreferredCanvasFormat", [](const choc::value::Value*, size_t) {
+                return choc::value::createString("bgra8unorm");
+            }});
+
+            script.register_host_object("navigatorGPU", std::move(gpu));
+            script.register_promise_function("__requestAdapterImpl", [](const choc::value::Value*, size_t) {
+                auto adapter = choc::value::createObject("GPUAdapter");
+                adapter.addMember("name", choc::value::createString("Mock Adapter"));
+                return adapter;
+            });
+
+            script.evaluate(R"(
+                globalThis.navigator = { gpu: navigatorGPU };
+                navigator.gpu.requestAdapter = () => __requestAdapterImpl();
+                void 0;
+            )");
+
+            REQUIRE(script.evaluate("navigator.gpu.backend").toString() == "mock-dawn");
+            REQUIRE(script.evaluate("navigator.gpu.getPreferredCanvasFormat()").toString() == "bgra8unorm");
+            REQUIRE(script.evaluate("Object.prototype.toString.call(navigator.gpu.requestAdapter())").toString() == "[object Promise]");
+            REQUIRE(script.evaluate("typeof navigator.gpu.requestAdapter().then").toString() == "function");
+        }
+    }
 }
 
 TEST_CASE("JsEngine typed array reaches native callbacks when supported", "[js_engine]") {

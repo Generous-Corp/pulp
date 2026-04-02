@@ -41,8 +41,9 @@ READINESS SNAPSHOT (2026-04-02):
   - typed arrays are now a real tested capability on `jsc`
   - a first native-backed host-object descriptor seam is now tested across the proven backends
   - a first native promise-returning seam is now tested across the proven backends
+  - a first browser-style bridge smoke slice is now tested across the proven backends through `ScriptEngine`
   - `v8` now also has a real configure/build/test proof path with typed-array coverage when built through that explicit provider contract
-  - deferred native async settlement is still not implemented or proven
+  - deferred native async settlement is still not implemented as a held native resolver
   - full opaque wrapper / proxy-style HostObjects are still not implemented or proven
 - Read `planning/v3-phase13-readiness.md` before treating this phase as ready to implement.
 
@@ -55,7 +56,7 @@ This follows the same architectural pattern proven by react-native-webgpu (JSI H
 and aligns with Pulp's philosophy: web-like developer experience without the browser runtime.
 
 DEPENDENCIES:
-- Requires Phase 10 (JS engine abstraction) — V8 strongly preferred for Three.js perf.
+- Requires Phase 10 (JS engine abstraction) — V8 strongly preferred for Three.js perf and now the explicit recommended implementation path for this phase.
   Phase 10 MUST expose a fast native-object binding API (like JSI HostObjects) that Phase 13
   uses to wrap Dawn objects. QuickJS's C API can do this but V8's JIT makes it viable for
   real Three.js scenes.
@@ -121,8 +122,7 @@ NON-NEGOTIABLES:
 - Dawn device MUST be shared between Skia Graphite and the WebGPU JS bridge.
   Do not create a second GPU device.
 - Treat the currently landed host-object descriptor seam as the first floor, not the final API.
-  The real bridge still needs opaque wrapper objects and deferred native async promise plumbing before
-  it can honestly claim Three.js/WebGPU compatibility.
+  The real bridge still needs opaque wrapper objects, and may still need held native async promise plumbing if the first Dawn-backed bridge slices prove the current microtask-wrapped promise seam is insufficient.
 
 DELIVERABLES:
 

@@ -1,8 +1,8 @@
 # Phase 13 Readiness Snapshot
 
 **Last updated:** 2026-04-02
-**Branch:** `feature/v3-phase13-readiness`
-**Base truth:** `origin/main` after Phase 7 (`#91`) and local-CI safety (`#93`)
+**Branch:** `feature/v3-phase13-bridge-smoke`
+**Base truth:** `origin/main` after the host-object floor (`#98`) and promise floor (`#99`)
 
 This note hardens the exact readiness floor for Phase 13 so the Three.js / WebGPU bridge starts from proven facts instead of future-state assumptions.
 
@@ -28,7 +28,7 @@ ctest --test-dir build-phase13-quickjs -R "JsEngine" --output-on-failure
 Result:
 - configure: pass
 - build: pass
-- shared `JsEngine` tests: `21/21` passed
+- shared `JsEngine` tests: `27/27` passed
 
 ### JavaScriptCore
 
@@ -43,7 +43,7 @@ ctest --test-dir build-phase13-jsc -R "JsEngine" --output-on-failure
 Result:
 - configure: pass
 - build: pass
-- shared `JsEngine` tests: `21/21` passed
+- shared `JsEngine` tests: `27/27` passed
 
 ### V8
 
@@ -61,7 +61,7 @@ ctest --test-dir build-phase13-v8 -R "JsEngine" --output-on-failure
 Result:
 - configure: pass with explicit external V8 inputs
 - build: pass with the Node-provided embedder library
-- shared `JsEngine` tests: `24/24` passed
+- shared `JsEngine` tests: `27/27` passed
 
 Truth:
 - the V8 backend exists in code
@@ -87,6 +87,10 @@ Current code truth:
   - native callback result is surfaced as a real JS `Promise`
   - resolution happens on the JS microtask queue through a shared wrapper
   - this is not yet a held native resolver for later completion
+- the first truthful bridge smoke slice now exists on every proven backend:
+  - `ScriptEngine` can register a browser-style `navigator.gpu` host object
+  - `navigator.gpu.requestAdapter()` can be surfaced as a real JS `Promise`
+  - the shared smoke proves the current floor is enough to assemble the first browser-shaped GPU entry points without native WebGPU objects yet
 - `QuickJS` now reports host-object support through the shared descriptor seam, but still reports typed arrays unsupported through the current Pulp seam
 - `JavaScriptCore` now reports host-object support through that same shared descriptor seam
 - `V8` now reports host-object support through that same shared descriptor seam when built with the explicit provider contract
@@ -120,19 +124,16 @@ Before calling Phase 13 implementation "in progress", the following should be tr
 - [x] prove one real V8-enabled configure/build with external V8 inputs
 - [x] raise the first truthful host-object slice: native-backed object descriptors with properties + methods
 - [x] raise the first truthful promise slice: native callbacks surfaced as JS `Promise` objects
-- [ ] decide whether Phase 13 starts as `v8-first` or `quickjs/jsc-first with V8 follow-up`
-- [ ] extend the `JsEngine` contract with the remaining minimum deferred async surface
-- [ ] add tests for that remaining surface before binding Dawn objects
-- [ ] define the first truthful Phase 13 smoke slice
+- [x] decide that Phase 13 implementation starts `v8-preferred`, while keeping the readiness smoke engine-agnostic across all proven backends
+- [x] write down the remaining deferred native-async gap without treating it as a blocker until the real bridge proves it is needed
+- [x] define and prove the first truthful Phase 13 smoke slice
 
 ## Recommended Next Steps
 
-1. Add the next capability slice for deferred native async paths instead of leaving that gap as an undocumented stub.
-2. Decide whether the first bridge slice targets:
-   - a `v8-first` path for Three.js realism, or
-   - a thinner engine-agnostic proof slice first, with V8 performance proof immediately after.
-3. Define the first truthful bridge smoke slice on top of the new host-object floor.
-4. Only then start the actual Three.js / WebGPU bridge branch.
+1. Start the actual Phase 13 bridge work as a `v8`-preferred implementation path.
+2. Keep the existing engine-agnostic smoke slice as the regression floor while the real bridge grows.
+3. Only add held-resolver native async APIs if the first real Dawn-backed bridge work proves the current promise floor is insufficient.
+4. Keep QuickJS/JSC support honest as compatibility backends, not the primary Three.js performance target.
 
 ## Related Tracking
 

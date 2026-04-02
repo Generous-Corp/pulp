@@ -21,7 +21,7 @@
 | 10 | JS engine abstraction (V8/JSC) | phase/dsl-agentic-webgpu-v3-phase10 | **complete** (core abstraction merged; readiness floor now partially proven) | [#63](https://github.com/danielraffel/pulp/pull/63) | pending Phase 14 |
 | 11 | WebGPU compute exploration | phase/dsl-agentic-webgpu-v3-phase11 | **complete** | [#64](https://github.com/danielraffel/pulp/pull/64) | pending Phase 14 |
 | 12 | Offline video exploration | phase/dsl-agentic-webgpu-v3-phase12 | not started | — | — |
-| 13 | Three.js / WebGPU JS bridge | phase/dsl-agentic-webgpu-v3-phase13 | not started (10/11 merged; readiness pass required first) | — | — |
+| 13 | Three.js / WebGPU JS bridge | phase/dsl-agentic-webgpu-v3-phase13 | not started (readiness pass complete; implementation next) | — | readiness floor proven; pending Phase 14 |
 | 14 | Verification pass | — | blocked (needs 7, 12, 13, plus explicit parked disposition for 4/5) | — | — |
 
 **Status values:** not started, in progress, complete, blocked (needs X), failed, parked
@@ -45,7 +45,7 @@ These phases are already on `main`:
 
 Current recommended landing order:
 - [x] Status / planning truth refresh
-- [ ] Phase 13 readiness pass (see `planning/v3-phase13-readiness.md`; typed arrays + V8 proof + first host-object slice + first promise slice landed, deferred async + bridge smoke still open)
+- [x] Phase 13 readiness pass (see `planning/v3-phase13-readiness.md`; typed arrays + V8 proof + first host-object slice + first promise slice + first truthful bridge smoke slice landed)
 - [ ] Phase 12 — Offline video exploration
 - [ ] Phase 13 — Three.js / WebGPU JS bridge
 - [ ] Phase 14 — Final verification pass
@@ -65,12 +65,13 @@ Before starting Phase 13 implementation work in earnest, prove the current merge
 - [x] assess whether the merged `JsEngine` layer already provides enough TypedArray support for the first readiness slice
 - [x] raise and document the first host-object slice (native-backed object descriptors with properties + native methods)
 - [x] raise and document the first promise slice (native callbacks surfaced as JS `Promise` objects)
-- [ ] write down the exact remaining deferred-async / bridge capability floor
-- [ ] define the first truthful Phase 13 test slice (engine selection, bridge smoke, then Three.js init)
+- [x] write down the exact remaining deferred-async / bridge capability floor
+- [x] define the first truthful Phase 13 test slice (engine selection, bridge smoke, then Three.js init)
 
 Readiness note:
 - Current evidence is recorded in `planning/v3-phase13-readiness.md`.
 - Stock-checkout truth today is: `quickjs` and `jsc` are proven; `v8` is optional and dependency-conditional, but now has a real explicit provider path on this machine via Homebrew Node + `V8_LIBRARY_PATH`.
+- Phase 13 should start as `v8`-preferred bridge work, while keeping the current engine-agnostic readiness smoke in regression coverage.
 
 ## Open MVP Blockers
 
@@ -173,8 +174,8 @@ Record when each phase lands with notes on what was delivered vs what was deferr
 ### Phase 10 — JS engine abstraction
 - **Merged:** 2026-04-02 (`e2f7dda`)
 - **Delivered:** JS engine abstraction with QuickJS/JSC/V8 backends and tests
-- **Deferred:** higher-level Phase 13 readiness work still needs deferred native async capability floor and the first bridge smoke slice
-- **Notes:** this is one of the dependency unlocks for Phase 13, but not the end of Phase 13 readiness work
+- **Deferred:** production Three.js / Dawn bridge work and any later held-resolver async plumbing that real bridge work proves necessary
+- **Notes:** this dependency is now backed by a proven readiness floor: typed-array proof, host-object descriptors, promise-returning native functions, and the first truthful browser-style bridge smoke slice
 
 ### Phase 11 — WebGPU compute exploration
 - **Merged:** 2026-04-02 (`097d994`)
@@ -192,7 +193,7 @@ Record when each phase lands with notes on what was delivered vs what was deferr
 - **Merged:** —
 - **Delivered:** —
 - **Deferred:** —
-- **Notes:** prerequisites are merged, but the implementation queue intentionally includes a readiness pass first so the bridge starts from proven engine/build facts; see `planning/v3-phase13-readiness.md`
+- **Notes:** prerequisites and readiness floor are now proven; implementation work should start from the `v8`-preferred bridge path while retaining the engine-agnostic smoke slice from `planning/v3-phase13-readiness.md`
 
 ### Phase 14 — Verification pass
 - **Merged:** —
