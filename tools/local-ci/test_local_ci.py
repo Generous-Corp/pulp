@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 
+import io
 import importlib.util
 import json
 import os
 import tempfile
 import threading
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -924,6 +926,124 @@ class LocalCiTests(unittest.TestCase):
     def test_target_log_path_uses_machine_global_logs_dir(self):
         path = self.mod.target_log_path("job123", "windows")
         self.assertEqual(path, self.state_dir / "logs" / "job123" / "windows.log")
+
+    def test_save_result_updates_evidence_index_with_last_good_target_results(self):
+        result_path_one = self.mod.save_result(
+            {
+                "job_id": "job111",
+                "branch": "feature/evidence",
+                "sha": "1" * 40,
+                "priority": "normal",
+                "validation": "full",
+                "targets": ["mac", "ubuntu"],
+                "queued_at": "2026-04-01T00:00:00+00:00",
+                "completed_at": "2026-04-01T00:10:00+00:00",
+                "results": [
+                    {"target": "mac", "status": "pass", "duration_secs": 10.0},
+                    {"target": "ubuntu", "status": "fail", "duration_secs": 20.0},
+                ],
+                "overall": "fail",
+            }
+        )
+        self.assertTrue(result_path_one.exists())
+
+        self.mod.save_result(
+            {
+                "job_id": "job112",
+                "branch": "feature/evidence",
+                "sha": "1" * 40,
+                "priority": "normal",
+                "validation": "full",
+                "targets": ["ubuntu"],
+                "queued_at": "2026-04-01T00:11:00+00:00",
+                "completed_at": "2026-04-01T00:20:00+00:00",
+                "results": [
+                    {"target": "ubuntu", "status": "pass", "duration_secs": 12.0},
+                ],
+                "overall": "pass",
+            }
+        )
+
+        index = self.mod.load_evidence_index()
+        self.assertIn(self.mod.evidence_entry_key("1" * 40, "mac", "full"), index["entries"])
+        self.assertIn(self.mod.evidence_entry_key("1" * 40, "ubuntu", "full"), index["entries"])
+        self.assertEqual(
+            index["entries"][self.mod.evidence_entry_key("1" * 40, "ubuntu", "full")]["job_id"],
+            "job112",
+        )
+
+    def test_cmd_evidence_prints_grouped_branch_summary(self):
+        self.mod.save_result(
+            {
+                "job_id": "job201",
+                "branch": "feature/evidence",
+                "sha": "2" * 40,
+                "priority": "normal",
+                "validation": "smoke",
+                "targets": ["mac", "windows"],
+                "queued_at": "2026-04-01T01:00:00+00:00",
+                "completed_at": "2026-04-01T01:10:00+00:00",
+                "results": [
+                    {"target": "mac", "status": "pass", "duration_secs": 9.0},
+                    {"target": "windows", "status": "pass", "duration_secs": 15.0},
+                ],
+                "overall": "pass",
+            }
+        )
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            exit_code = self.mod.cmd_evidence(
+                SimpleNamespace(branch="feature/evidence", sha=None, limit=5)
+            )
+
+        output = buf.getvalue()
+        self.assertEqual(exit_code, 0)
+        self.assertIn("Evidence for branch `feature/evidence`:", output)
+        self.assertIn("smoke:", output)
+        self.assertIn("mac=pass, windows=pass", output)
+        self.assertIn("222222222222", output)
+
+    def test_cmd_status_includes_current_branch_evidence_summary(self):
+        self.mod.save_result(
+            {
+                "job_id": "job301",
+                "branch": "feature/status-evidence",
+                "sha": "3" * 40,
+                "priority": "normal",
+                "validation": "full",
+                "targets": ["mac", "ubuntu", "windows"],
+                "queued_at": "2026-04-01T02:00:00+00:00",
+                "completed_at": "2026-04-01T02:30:00+00:00",
+                "results": [
+                    {"target": "mac", "status": "pass", "duration_secs": 10.0},
+                    {"target": "ubuntu", "status": "pass", "duration_secs": 12.0},
+                    {"target": "windows", "status": "pass", "duration_secs": 14.0},
+                ],
+                "overall": "pass",
+            }
+        )
+
+        original_current_branch = self.mod.current_branch
+        original_utm_status = self.mod.utmctl_vm_status
+        original_ssh_reachable = self.mod.ssh_reachable
+        self.mod.current_branch = lambda: "feature/status-evidence"
+        self.mod.utmctl_vm_status = lambda vm_name: "stopped"
+        self.mod.ssh_reachable = lambda host, timeout=5: True
+        try:
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                exit_code = self.mod.cmd_status(SimpleNamespace())
+        finally:
+            self.mod.current_branch = original_current_branch
+            self.mod.utmctl_vm_status = original_utm_status
+            self.mod.ssh_reachable = original_ssh_reachable
+
+        output = buf.getvalue()
+        self.assertEqual(exit_code, 0)
+        self.assertIn("Evidence (feature/status-evidence):", output)
+        self.assertIn("333333333333", output)
+        self.assertIn("mac=pass, ubuntu=pass, windows=pass", output)
 
 
 if __name__ == "__main__":

@@ -74,6 +74,7 @@ python3 tools/local-ci/local_ci.py run [branch] --smoke --targets windows
 python3 tools/local-ci/local_ci.py enqueue [branch] --priority low
 python3 tools/local-ci/local_ci.py bump <job-id> high
 python3 tools/local-ci/local_ci.py logs <job-id> --target windows
+python3 tools/local-ci/local_ci.py evidence [branch]
 ```
 
 ### `check <PR#|URL|latest>` — Validate an existing PR
@@ -116,6 +117,15 @@ When you need to reproduce an intermittent failure locally before spending anoth
 ```bash
 tools/scripts/repeat-until-fail.sh 100 -- ctest --test-dir build -R "<test name>" --output-on-failure
 ```
+
+### `evidence [branch]` — Show last-good exact-SHA target evidence
+
+```bash
+python3 tools/local-ci/local_ci.py evidence
+python3 tools/local-ci/local_ci.py evidence feature/my-branch --limit 3
+```
+
+Use this when a branch has been validated through narrow reruns and you need to know what is already proven without rerunning targets that already passed on the same SHA.
 
 ## Active CI Incident Loop
 

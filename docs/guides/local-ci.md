@@ -13,6 +13,7 @@ Local CI lets you validate branches on your Mac and cross-platform VMs before me
 - While a job is running, `pulp ci-local status` also shows live per-target state such as `mac=pass, ubuntu=pass, windows=running`.
 - If you queue a newer SHA for the same branch, targets, and validation mode, older pending work is superseded automatically instead of sitting behind it forever.
 - `pulp ci-local logs <job-id> --target windows` tails the saved per-target log from the machine-global CI state dir, so you do not need ad hoc SSH just to see whether a target is building or testing.
+- `pulp ci-local evidence [branch]` shows the last-good exact-SHA target evidence already recorded for a branch, so you can keep earlier same-SHA passes instead of rerunning them blindly.
 - If a runner is interrupted, the queued job keeps its last-known per-target state so you can see what already passed before deciding whether to rerun everything or just the remaining target.
 - Jobs submitted through `pulp ci-local` are globally queued, and validation itself now takes a per-host lock on macOS/Linux plus a Windows host mutex, so old `validate-build.sh` runs wait instead of colliding.
 - SSH targets receive a per-job git bundle before validation. That keeps exact-SHA validation working even when the host validates from a stale local mirror instead of GitHub directly.
@@ -163,6 +164,9 @@ pulp ci-local status
 
 # Tail a running or completed target log
 pulp ci-local logs <job-id> --target windows
+
+# Show accumulated exact-SHA target evidence for a branch
+pulp ci-local evidence feature/my-branch --limit 3
 ```
 
 `pulp ci-local run` is the most common command. It enqueues the current `HEAD`, joins the machine-global queue, and waits until that exact job finishes.
@@ -201,6 +205,16 @@ pending work is marked `superseded` and written to the results directory with a
 reference to the replacement job. If a runner dies and reconciliation finds a newer
 replacement already queued for that same scope, the stale running job is also
 superseded instead of being requeued.
+
+## Evidence Tracking
+
+`pulp ci-local evidence` summarizes the last-good recorded results by exact SHA, target, and validation mode. This is the operator-facing answer to:
+
+- what already passed on this branch?
+- which exact SHA has Windows full proof?
+- do we really need to rerun macOS again?
+
+The compact evidence section in `pulp ci-local status` uses the same data so the current branch’s known-good results stay visible during active work.
 
 ## Working A Failure
 

@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import argparse
 from collections import deque
+from collections import defaultdict
 import fcntl
 import hashlib
 import json
@@ -83,6 +84,10 @@ def results_dir() -> Path:
     return state_dir() / "results"
 
 
+def evidence_path() -> Path:
+    return state_dir() / "evidence.json"
+
+
 def logs_dir() -> Path:
     return state_dir() / "logs"
 
@@ -93,6 +98,10 @@ def bundles_dir() -> Path:
 
 def queue_lock_path() -> Path:
     return state_dir() / "queue.lock"
+
+
+def evidence_lock_path() -> Path:
+    return state_dir() / "evidence.lock"
 
 
 def drain_lock_path() -> Path:
@@ -802,6 +811,156 @@ def finalize_job(job_id: str, result: dict, result_path: Path) -> None:
 
 def load_result(path: Path) -> dict:
     return json.loads(path.read_text())
+
+
+def empty_evidence_index() -> dict:
+    return {"version": 1, "entries": {}}
+
+
+def evidence_entry_key(sha: str, target: str, validation: str) -> str:
+    return f"{sha}:{validation}:{target}"
+
+
+def normalize_evidence_index(index: dict | None) -> dict:
+    if not isinstance(index, dict):
+        return empty_evidence_index()
+    entries = index.get("entries")
+    if not isinstance(entries, dict):
+        entries = {}
+    return {"version": int(index.get("version", 1)), "entries": entries}
+
+
+def evidence_record_from_result(result: dict, item: dict, result_path: Path) -> dict:
+    return {
+        "job_id": result.get("job_id", ""),
+        "branch": result.get("branch", ""),
+        "sha": result.get("sha", ""),
+        "validation": result.get("validation", "full"),
+        "target": item.get("target", ""),
+        "status": item.get("status", ""),
+        "completed_at": result.get("completed_at", ""),
+        "duration_secs": item.get("duration_secs", 0),
+        "result_file": str(result_path),
+    }
+
+
+def merge_result_into_evidence_index(index: dict, result: dict, result_path: Path) -> bool:
+    changed = False
+    for item in result.get("results", []):
+        if item.get("status") != "pass":
+            continue
+        record = evidence_record_from_result(result, item, result_path)
+        key = evidence_entry_key(record["sha"], record["target"], record["validation"])
+        existing = index["entries"].get(key)
+        if existing and existing.get("completed_at", "") >= record["completed_at"]:
+            continue
+        index["entries"][key] = record
+        changed = True
+    return changed
+
+
+def rebuild_evidence_index_unlocked() -> dict:
+    index = empty_evidence_index()
+    for path in sorted(results_dir().glob("*.json")):
+        try:
+            result = load_result(path)
+        except (OSError, json.JSONDecodeError):
+            continue
+        merge_result_into_evidence_index(index, result, path)
+    return index
+
+
+def load_evidence_index_unlocked() -> tuple[dict, bool]:
+    path = evidence_path()
+    if not path.exists():
+        return rebuild_evidence_index_unlocked(), True
+
+    try:
+        index = normalize_evidence_index(json.loads(path.read_text()))
+    except (OSError, json.JSONDecodeError):
+        return rebuild_evidence_index_unlocked(), True
+    return index, False
+
+
+def save_evidence_index_unlocked(index: dict) -> None:
+    atomic_write_text(evidence_path(), json.dumps(index, indent=2) + "\n")
+
+
+def load_evidence_index() -> dict:
+    with file_lock(evidence_lock_path(), blocking=True):
+        index, rebuilt = load_evidence_index_unlocked()
+        if rebuilt:
+            save_evidence_index_unlocked(index)
+        return index
+
+
+def update_evidence_index(result: dict, result_path: Path) -> None:
+    with file_lock(evidence_lock_path(), blocking=True):
+        index, rebuilt = load_evidence_index_unlocked()
+        changed = merge_result_into_evidence_index(index, result, result_path)
+        if rebuilt or changed:
+            save_evidence_index_unlocked(index)
+
+
+def collect_evidence_groups(branch: str | None = None, sha: str | None = None) -> dict[str, list[dict]]:
+    index = load_evidence_index()
+    grouped: dict[str, dict[str, dict]] = defaultdict(dict)
+
+    for record in index.get("entries", {}).values():
+        if branch and record.get("branch") != branch:
+            continue
+        if sha and record.get("sha") != sha:
+            continue
+
+        validation = record.get("validation", "full")
+        sha_value = record.get("sha", "")
+        if not sha_value:
+            continue
+
+        bucket = grouped[validation].setdefault(
+            sha_value,
+            {
+                "sha": sha_value,
+                "branch": record.get("branch", ""),
+                "validation": validation,
+                "completed_at": record.get("completed_at", ""),
+                "targets": {},
+            },
+        )
+        bucket["targets"][record.get("target", "")] = record
+        if record.get("completed_at", "") > bucket.get("completed_at", ""):
+            bucket["completed_at"] = record.get("completed_at", "")
+
+    return {
+        validation: sorted(
+            sha_groups.values(),
+            key=lambda item: (item.get("completed_at", ""), item.get("sha", "")),
+            reverse=True,
+        )
+        for validation, sha_groups in grouped.items()
+    }
+
+
+def print_evidence_summary(
+    *,
+    branch: str | None = None,
+    sha: str | None = None,
+    limit: int = 3,
+    indent: str = "",
+) -> bool:
+    groups = collect_evidence_groups(branch=branch, sha=sha)
+    if not groups:
+        return False
+
+    for validation in sorted(groups):
+        print(f"{indent}{validation}:")
+        for item in groups[validation][:limit]:
+            targets = ", ".join(f"{target}=pass" for target in sorted(item.get("targets", {})))
+            print(
+                f"{indent}  {short_sha(item.get('sha', ''))} [{targets}] "
+                f"last={item.get('completed_at', '?')}"
+            )
+    return True
 
 
 def wait_for_job(job_id: str, config: dict) -> tuple[dict | None, int]:
@@ -1825,6 +1984,7 @@ def save_result(result: dict) -> Path:
     branch_slug = result["branch"].replace("/", "-")
     path = results_dir() / f"{ts}-{result['job_id']}-{branch_slug}.json"
     path.write_text(json.dumps(result, indent=2) + "\n")
+    update_evidence_index(result, path)
     return path
 
 
@@ -2307,6 +2467,27 @@ def cmd_logs(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_evidence(args: argparse.Namespace) -> int:
+    branch = args.branch or current_branch()
+    printed_header = False
+
+    if branch:
+        print(f"Evidence for branch `{branch}`:")
+        printed_header = True
+    elif args.sha:
+        print(f"Evidence for sha `{short_sha(args.sha)}`:")
+        printed_header = True
+
+    found = print_evidence_summary(branch=branch, sha=args.sha, limit=args.limit)
+    if not found:
+        if printed_header:
+            print("  (none)")
+        else:
+            print("No local CI evidence recorded.")
+        return 1
+    return 0
+
+
 def cmd_status(_args: argparse.Namespace) -> int:
     try:
         config = load_config()
@@ -2413,6 +2594,12 @@ def cmd_status(_args: argparse.Namespace) -> int:
             else:
                 print(f"  {summarize_job(job)} (result file missing)")
 
+    branch = current_branch()
+    if branch:
+        print(f"\nEvidence ({branch}):")
+        if not print_evidence_summary(branch=branch, limit=2, indent="  "):
+            print("  (none)")
+
     print("\nVM Status:")
     for vm_name in ["Ubuntu 24.04 desktop", "Windows"]:
         print(f"  {vm_name}: {utmctl_vm_status(vm_name) or 'not found'}")
@@ -2500,6 +2687,11 @@ def build_parser() -> argparse.ArgumentParser:
     p_logs.add_argument("--target", help="Target name to show (mac, ubuntu, windows)")
     p_logs.add_argument("--lines", type=int, default=80, help="Number of log lines to show (default: 80)")
 
+    p_evidence = sub.add_parser("evidence", help="Show accumulated last-good target results by exact SHA")
+    p_evidence.add_argument("branch", nargs="?", help="Branch name (default: current)")
+    p_evidence.add_argument("--sha", help="Filter to one exact SHA")
+    p_evidence.add_argument("--limit", type=int, default=5, help="Shas to show per validation mode (default: 5)")
+
     sub.add_parser("status", help="Show queue, runner, results, and VM status")
     return parser
 
@@ -2518,6 +2710,7 @@ def main() -> int:
         "bump": cmd_bump,
         "cancel": cmd_cancel,
         "logs": cmd_logs,
+        "evidence": cmd_evidence,
         "status": cmd_status,
     }
 
