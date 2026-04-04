@@ -285,9 +285,6 @@ int main(int argc, char* argv[]) {
     count_nodes(ir.root);
 
     auto t_write = std::chrono::steady_clock::now();
-    auto ms_total = std::chrono::duration_cast<std::chrono::milliseconds>(t_write - t_start).count();
-    auto ms_codegen = std::chrono::duration_cast<std::chrono::milliseconds>(t_codegen - t_start).count();
-
     std::cout << "Wrote " << output_file << " (" << node_count << " elements: "
               << container_count << " containers, " << widget_count << " widgets, "
               << text_count << " labels";
@@ -308,7 +305,7 @@ int main(int argc, char* argv[]) {
     auto design_name = fs::path(output_file).stem().string();
     auto source_lower = std::string(design_source_name(*source));
     std::transform(source_lower.begin(), source_lower.end(), source_lower.begin(),
-        [](unsigned char c) { return std::tolower(c); });
+        [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
 
     // ── Validation: render generated JS and compare with reference ──────
     if (validate) {
@@ -387,6 +384,10 @@ int main(int argc, char* argv[]) {
     if (debug_json) {
         auto t_end = std::chrono::steady_clock::now();
         auto ms_total = std::chrono::duration_cast<std::chrono::milliseconds>(t_end - t_start).count();
+        auto ms_codegen = std::chrono::duration_cast<std::chrono::milliseconds>(t_codegen - t_start).count();
+        auto ms_write = std::chrono::duration_cast<std::chrono::milliseconds>(t_write - t_codegen).count();
+        auto ms_post_codegen = std::chrono::duration_cast<std::chrono::milliseconds>(t_end - t_codegen).count();
+        auto ms_validation = std::chrono::duration_cast<std::chrono::milliseconds>(t_end - t_write).count();
 
         std::ostringstream dbg;
         dbg << "{\n";
@@ -406,6 +407,10 @@ int main(int argc, char* argv[]) {
         dbg << "    \"strings\": " << ir.tokens.strings.size() << "\n";
         dbg << "  },\n";
         dbg << "  \"timing_ms\": " << ms_total << ",\n";
+        dbg << "  \"timing_codegen_ms\": " << ms_codegen << ",\n";
+        dbg << "  \"timing_write_ms\": " << ms_write << ",\n";
+        dbg << "  \"timing_post_codegen_ms\": " << ms_post_codegen << ",\n";
+        dbg << "  \"timing_validation_ms\": " << ms_validation << ",\n";
         dbg << "  \"render_size\": \"" << render_width << "x" << render_height << "\",\n";
         dbg << "  \"js_bytes\": " << js.size() << ",\n";
 

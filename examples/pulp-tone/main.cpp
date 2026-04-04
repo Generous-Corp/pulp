@@ -39,6 +39,7 @@ static int read_key() {
 }
 #endif
 
+#if defined(__APPLE__)
 // Musical typing keyboard layout (2 octaves)
 // Bottom row: Z-M = C3-B3
 // Top row:    Q-P = C4-B4
@@ -77,6 +78,7 @@ static int key_to_note(int key) {
         default: return -1;
     }
 }
+#endif
 
 static std::atomic<bool> should_quit{false};
 void signal_handler(int) { should_quit.store(true); }

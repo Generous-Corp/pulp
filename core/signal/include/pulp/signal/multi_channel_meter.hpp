@@ -213,7 +213,7 @@ private:
             auto& out = snapshot_.channels[ch];
             out.peak = block_peak_[ch];
             out.rms = block_samples_ > 0
-                ? std::sqrt(block_sum_sq_[ch] / block_samples_)
+                ? static_cast<float>(std::sqrt(block_sum_sq_[ch] / block_samples_))
                 : 0.0f;
             out.clipped = block_clipped_[ch];
 
@@ -221,7 +221,7 @@ private:
             if (lufs_samples_ > 0) {
                 float mean_sq = static_cast<float>(lufs_sum_sq_[ch] / lufs_samples_);
                 out.lufs_momentary = mean_sq > 1e-10f
-                    ? -0.691f + 10.0f * std::log10(mean_sq)
+                    ? static_cast<float>(-0.691 + 10.0 * std::log10(mean_sq))
                     : -std::numeric_limits<float>::infinity();
             }
 

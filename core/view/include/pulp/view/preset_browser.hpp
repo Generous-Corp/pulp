@@ -12,6 +12,7 @@
 #include <string>
 #include <vector>
 #include <algorithm>
+#include <cctype>
 
 namespace pulp::view {
 
@@ -244,21 +245,26 @@ private:
 
     void apply_filter() {
         filtered_.clear();
+        auto normalize = [](const std::string& text) {
+            std::string lowered = text;
+            std::transform(lowered.begin(), lowered.end(), lowered.begin(),
+                           [](unsigned char c) {
+                               return static_cast<char>(std::tolower(c));
+                           });
+            return lowered;
+        };
         for (const auto& p : all_presets_) {
             if (show_mode_ == ShowMode::factory_only && !p.is_factory) continue;
             if (show_mode_ == ShowMode::user_only && p.is_factory) continue;
 
             if (!filter_text_.empty()) {
                 // Case-insensitive search in name and folder
-                std::string lower_name = p.name;
-                std::string lower_filter = filter_text_;
-                std::transform(lower_name.begin(), lower_name.end(), lower_name.begin(),
-                    [](unsigned char c) { return std::tolower(c); });
-                std::transform(lower_filter.begin(), lower_filter.end(), lower_filter.begin(),
-                    [](unsigned char c) { return std::tolower(c); });
+                std::string lower_name = normalize(p.name);
+                std::string lower_folder = normalize(p.folder);
+                std::string lower_filter = normalize(filter_text_);
 
                 if (lower_name.find(lower_filter) == std::string::npos &&
-                    p.folder.find(lower_filter) == std::string::npos) continue;
+                    lower_folder.find(lower_filter) == std::string::npos) continue;
             }
 
             filtered_.push_back(p);

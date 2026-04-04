@@ -2287,7 +2287,6 @@ void WidgetBridge::register_api() {
             std::string colorStr = inner.substr(color_start);
             std::istringstream ss(colorStr);
             std::string tok;
-            int count = 0;
             std::vector<std::string> tokens;
             while (std::getline(ss, tok, ',')) {
                 while (!tok.empty() && tok[0] == ' ') tok.erase(0, 1);

@@ -9,6 +9,7 @@
 #include <pulp/view/screenshot.hpp>
 #include <pulp/view/screenshot_compare.hpp>
 #include <pulp/state/store.hpp>
+#include <pulp/runtime/system.hpp>
 
 #include <array>
 #include <algorithm>
@@ -467,8 +468,8 @@ int main(int argc, char* argv[]) {
         WidgetBridge bridge(engine, root, store);
         if (!opts.ai_cli.empty()) {
             engine.invoke("setAICli", opts.ai_cli);
-        } else if (const char* ai_cli = std::getenv("PULP_AI_CLI")) {
-            engine.invoke("setAICli", ai_cli);
+        } else if (auto ai_cli = pulp::runtime::get_env("PULP_AI_CLI")) {
+            engine.invoke("setAICli", *ai_cli);
         }
 
         try {

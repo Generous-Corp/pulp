@@ -47,7 +47,10 @@ TEST_CASE("BufferingReader signals finished when source ends", "[audio][bufferin
     });
 
     reader.start(1, 1024);
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+    while (!reader.is_finished() && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
 
     REQUIRE(reader.is_finished());
     reader.stop();

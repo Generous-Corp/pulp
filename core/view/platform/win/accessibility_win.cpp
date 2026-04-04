@@ -16,7 +16,7 @@ namespace pulp::view {
 
 // Map Pulp AccessRole to Windows UIA Control Type IDs
 // UIA_SliderControlTypeId = 50015, UIA_ButtonControlTypeId = 50000, etc.
-static int access_role_to_uia_type(View::AccessRole role) {
+[[maybe_unused]] static int access_role_to_uia_type(View::AccessRole role) {
     switch (role) {
         case View::AccessRole::slider: return 50015;  // UIA_SliderControlTypeId
         case View::AccessRole::toggle: return 50000;  // UIA_ButtonControlTypeId

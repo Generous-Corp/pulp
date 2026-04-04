@@ -30,3 +30,20 @@ TEST_CASE("Clipboard missing data returns nullopt", "[platform][clipboard]") {
     auto result = Clipboard::get_data("com.pulp.nonexistent.type");
     REQUIRE_FALSE(result.has_value());
 }
+
+#ifdef __APPLE__
+TEST_CASE("Clipboard text reflects pasteboard contents, not stale fallback", "[platform][clipboard]") {
+    REQUIRE(Clipboard::set_text("pulp stale text"));
+    REQUIRE(Clipboard::set_data("com.pulp.test.binary", {0x01, 0x02, 0x03}));
+
+    REQUIRE_FALSE(Clipboard::has_text());
+    REQUIRE_FALSE(Clipboard::get_text().has_value());
+}
+
+TEST_CASE("Clipboard data reflects pasteboard contents, not stale fallback", "[platform][clipboard]") {
+    REQUIRE(Clipboard::set_data("com.pulp.test.binary", {0xAA, 0xBB}));
+    REQUIRE(Clipboard::set_text("plain text only"));
+
+    REQUIRE_FALSE(Clipboard::get_data("com.pulp.test.binary").has_value());
+}
+#endif

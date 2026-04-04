@@ -23,7 +23,7 @@ jobs:
     name: ${{ matrix.name }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           lfs: true
 
@@ -68,7 +68,7 @@ jobs:
 
       - name: Upload plugin bundles (macOS)
         if: success() && runner.os == 'macOS'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: plugins-${{ matrix.os }}
           path: |
@@ -79,7 +79,7 @@ jobs:
 
       - name: Upload plugin bundles (Windows)
         if: success() && runner.os == 'Windows'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: plugins-${{ matrix.os }}
           path: |
@@ -89,7 +89,7 @@ jobs:
 
       - name: Upload plugin bundles (Linux)
         if: success() && runner.os == 'Linux'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: plugins-${{ matrix.os }}
           path: |

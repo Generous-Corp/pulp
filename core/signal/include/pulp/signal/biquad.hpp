@@ -19,7 +19,7 @@ public:
         float sin_w0 = std::sin(w0);
         float alpha = sin_w0 / (2.0f * q);
 
-        float a0, a1, a2, b0, b1, b2;
+        float a0 = 1.0f, a1 = 0.0f, a2 = 0.0f, b0 = 1.0f, b1 = 0.0f, b2 = 0.0f;
 
         switch (type) {
             case Type::lowpass:

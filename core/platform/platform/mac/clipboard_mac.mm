@@ -3,7 +3,6 @@
 #ifdef __APPLE__
 #import <Cocoa/Cocoa.h>
 
-#include <map>
 #include <mutex>
 
 namespace pulp::platform {
@@ -13,12 +12,31 @@ namespace {
 std::mutex g_fallback_mutex;
 std::string g_fallback_text;
 bool g_fallback_has_text = false;
-std::map<std::string, std::vector<uint8_t>> g_fallback_data;
+long long g_fallback_text_change_count = -1;
+std::string g_fallback_data_type;
+std::vector<uint8_t> g_fallback_data;
+bool g_fallback_has_data = false;
+long long g_fallback_data_change_count = -1;
 
-bool fallback_set_text(const std::string& text) {
+void clear_fallback_text_unlocked() {
+    g_fallback_text.clear();
+    g_fallback_has_text = false;
+    g_fallback_text_change_count = -1;
+}
+
+void clear_fallback_data_unlocked() {
+    g_fallback_data_type.clear();
+    g_fallback_data.clear();
+    g_fallback_has_data = false;
+    g_fallback_data_change_count = -1;
+}
+
+bool fallback_set_text(const std::string& text, long long change_count = -1) {
     std::lock_guard lock(g_fallback_mutex);
+    clear_fallback_data_unlocked();
     g_fallback_text = text;
     g_fallback_has_text = true;
+    g_fallback_text_change_count = change_count;
     return true;
 }
 
@@ -35,19 +53,35 @@ bool fallback_has_text() {
     return g_fallback_has_text;
 }
 
-bool fallback_set_data(const std::string& type, const std::vector<uint8_t>& data) {
+bool fallback_text_matches_change_count(long long change_count) {
     std::lock_guard lock(g_fallback_mutex);
-    g_fallback_data[type] = data;
+    return g_fallback_has_text && g_fallback_text_change_count >= 0
+        && g_fallback_text_change_count == change_count;
+}
+
+bool fallback_set_data(const std::string& type, const std::vector<uint8_t>& data, long long change_count = -1) {
+    std::lock_guard lock(g_fallback_mutex);
+    clear_fallback_text_unlocked();
+    g_fallback_data_type = type;
+    g_fallback_data = data;
+    g_fallback_has_data = true;
+    g_fallback_data_change_count = change_count;
     return true;
 }
 
 std::optional<std::vector<uint8_t>> fallback_get_data(const std::string& type) {
     std::lock_guard lock(g_fallback_mutex);
-    const auto it = g_fallback_data.find(type);
-    if (it == g_fallback_data.end()) {
+    if (!g_fallback_has_data || g_fallback_data_type != type) {
         return std::nullopt;
     }
-    return it->second;
+    return g_fallback_data;
+}
+
+bool fallback_data_matches_change_count(const std::string& type, long long change_count) {
+    std::lock_guard lock(g_fallback_mutex);
+    return g_fallback_has_data && g_fallback_data_type == type
+        && g_fallback_data_change_count >= 0
+        && g_fallback_data_change_count == change_count;
 }
 
 } // namespace
@@ -63,10 +97,10 @@ bool Clipboard::set_text(const std::string& text) {
         const bool ok = [pb setString:[NSString stringWithUTF8String:text.c_str()]
                               forType:NSPasteboardTypeString];
         if (!ok) {
-            return fallback_set_text(text);
+            return fallback_set_text(text, static_cast<long long>([pb changeCount]));
         }
 
-        fallback_set_text(text);
+        fallback_set_text(text, static_cast<long long>([pb changeCount]));
         return true;
     }
 }
@@ -79,7 +113,10 @@ std::optional<std::string> Clipboard::get_text() {
         }
         NSString* str = [pb stringForType:NSPasteboardTypeString];
         if (!str) {
-            return fallback_get_text();
+            if (fallback_text_matches_change_count(static_cast<long long>([pb changeCount]))) {
+                return fallback_get_text();
+            }
+            return std::nullopt;
         }
         return std::string([str UTF8String]);
     }
@@ -91,7 +128,10 @@ bool Clipboard::has_text() {
         if (!pb) {
             return fallback_has_text();
         }
-        return [pb stringForType:NSPasteboardTypeString] != nil || fallback_has_text();
+        if ([pb stringForType:NSPasteboardTypeString] != nil) {
+            return true;
+        }
+        return fallback_text_matches_change_count(static_cast<long long>([pb changeCount]));
     }
 }
 
@@ -106,10 +146,10 @@ bool Clipboard::set_data(const std::string& type, const std::vector<uint8_t>& da
         [pb clearContents];
         const bool ok = [pb setData:ns_data forType:ns_type];
         if (!ok) {
-            return fallback_set_data(type, data);
+            return fallback_set_data(type, data, static_cast<long long>([pb changeCount]));
         }
 
-        fallback_set_data(type, data);
+        fallback_set_data(type, data, static_cast<long long>([pb changeCount]));
         return true;
     }
 }
@@ -123,7 +163,10 @@ std::optional<std::vector<uint8_t>> Clipboard::get_data(const std::string& type)
         NSString* ns_type = [NSString stringWithUTF8String:type.c_str()];
         NSData* ns_data = [pb dataForType:ns_type];
         if (!ns_data) {
-            return fallback_get_data(type);
+            if (fallback_data_matches_change_count(type, static_cast<long long>([pb changeCount]))) {
+                return fallback_get_data(type);
+            }
+            return std::nullopt;
         }
         auto* bytes = static_cast<const uint8_t*>([ns_data bytes]);
         return std::vector<uint8_t>(bytes, bytes + [ns_data length]);

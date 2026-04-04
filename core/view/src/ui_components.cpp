@@ -253,7 +253,7 @@ bool ComboBox::on_key_event(const KeyEvent& event) {
 
 void ComboBox::on_text_input(const TextInputEvent& event) {
     if (event.text.empty()) return;
-    char ch = std::tolower(static_cast<unsigned char>(event.text[0]));
+    char ch = static_cast<char>(std::tolower(static_cast<unsigned char>(event.text[0])));
     // Search from current selection + 1, wrapping around
     int start = selected_ + 1;
     for (int i = 0; i < static_cast<int>(items_.size()); ++i) {

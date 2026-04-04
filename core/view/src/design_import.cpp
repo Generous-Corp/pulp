@@ -35,7 +35,7 @@ const char* design_source_name(DesignSource source) {
 static std::string to_lower(const std::string& s) {
     std::string result = s;
     std::transform(result.begin(), result.end(), result.begin(),
-        [](unsigned char c) { return std::tolower(c); });
+        [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
     return result;
 }
 
@@ -70,12 +70,6 @@ static std::string get_string(const choc::value::ValueView& obj, const char* key
 static float get_float(const choc::value::ValueView& obj, const char* key, float def = 0.0f) {
     if (obj.hasObjectMember(key))
         return static_cast<float>(obj[key].getWithDefault<double>(def));
-    return def;
-}
-
-static int get_int(const choc::value::ValueView& obj, const char* key, int def = 0) {
-    if (obj.hasObjectMember(key))
-        return static_cast<int>(obj[key].getWithDefault<int64_t>(def));
     return def;
 }
 
