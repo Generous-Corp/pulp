@@ -3404,6 +3404,7 @@ static void print_usage() {
     std::cout << "  cache    Manage SDK and asset cache (~/.pulp/)\n";
     std::cout << "  docs     Browse local documentation\n";
     std::cout << "  doctor   Diagnose environment issues (--fix, --ci, --dry-run)\n";
+    std::cout << "  ci-local Run local-first CI across this Mac and configured hosts\n";
     std::cout << "  upgrade  Update the Pulp CLI to the latest version\n";
     std::cout << "  clean    Remove build directory\n";
     std::cout << "  inspect  Launch the component inspector\n";
@@ -3428,6 +3429,8 @@ static void print_usage() {
     std::cout << "  pulp cache fetch skia   # Download Skia GPU binaries\n";
     std::cout << "  pulp docs index         # List available docs\n";
     std::cout << "  pulp status             # Show project info\n";
+    std::cout << "  pulp ci-local cloud workflows\n";
+    std::cout << "  pulp ci-local cloud run build feature/my-branch\n";
     std::cout << "  pulp design             # Build and launch the design tool\n";
     std::cout << "  pulp design --script path/to/design-tool.js\n";
     std::cout << "  pulp design --build-dir /tmp/pulp-design-parity-build\n";

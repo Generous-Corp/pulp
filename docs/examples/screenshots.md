@@ -75,9 +75,11 @@ Screenshots are captured via the headless screenshot tool:
 
 ## Screenshot Automation
 
-Screenshots are auto-captured in CI via the `docs-screenshots` workflow:
+Screenshot capture is currently a local/docs-maintenance workflow, not a
+published `gh-pages` branch flow:
 
 1. Build all plugins and the screenshot tool
 2. For each plugin, render the AutoUi at default size
 3. Save PNGs to `docs/examples/img/`
-4. Commit to the `gh-pages` branch for the docs site
+4. Publish the resulting assets through the docs-site path you are actually
+using; there is no `gh-pages` branch deploy in the current repo setup

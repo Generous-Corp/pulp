@@ -2,11 +2,11 @@
 
 Pulp plugins can run in browsers through two complementary web standards. This guide explains how they work, how to build them, and how to try the live demo.
 
-## Live Demo
+## Browser Host Availability
 
-**[Launch the Pulp Browser Host →](https://generouslabs.github.io/pulp/browser-host/)**
-
-The browser host loads Pulp plugins compiled to WebAssembly and runs them in real-time using the Web Audio API. Drop an audio file to hear your plugin processing live, or use the on-screen MIDI keyboard for instruments.
+The Pulp Browser Host is currently a local tool in `tools/browser-host/`. The
+repo does not yet publish a canonical repo-owned Pages deployment for it, so
+browser-host examples should be treated as local-run instructions for now.
 
 ## Two Paths to the Browser
 
@@ -145,14 +145,13 @@ The Pulp Browser Host (`tools/browser-host/`) is a self-contained HTML app that 
 - Show a real-time oscilloscope
 - Share plugin state via URL (base64-encoded)
 
-### Deploying to GitHub Pages
+### Publishing Status
 
-The browser host deploys as part of the docs site:
-
-```bash
-# The CI workflow copies tools/browser-host/ to the gh-pages branch
-# Access at: https://yourusername.github.io/pulp/browser-host/
-```
+The current docs deployment workflow publishes the generated docs site, API
+reference, and installer scripts. It does not yet publish `tools/browser-host/`
+as part of the Pages artifact. Repo-owned browser-host publication should be
+handled as a later docs-site integration phase instead of assuming a `gh-pages`
+branch flow.
 
 ### Running Locally
 

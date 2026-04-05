@@ -202,6 +202,98 @@ Mode-specific checks:
 
 Exit code is 0 if all checks pass, 1 if any fail.
 
+### ci-local
+
+**Status**: experimental
+
+Local-first CI control plane for Pulp. This is the shared operator surface for:
+
+- machine-global local/SSH queueing
+- exact-SHA validation on this Mac and configured hosts
+- deliberate GitHub Actions dispatch/status when cloud orchestration is needed
+
+```bash
+pulp ci-local run
+pulp ci-local run --smoke
+pulp ci-local check 123
+pulp ci-local status
+pulp ci-local cloud workflows
+pulp ci-local cloud run build feature/my-branch
+pulp ci-local cloud run build feature/my-branch --provider namespace
+pulp ci-local cloud run build feature/my-branch --provider namespace --macos-runner-selector-json '"namespace-profile-big-apple"'
+pulp ci-local cloud run build feature/my-branch --provider namespace --macos-runner-selector-json '"nscloud-macos-tahoe-arm64-6x14"'
+pulp ci-local cloud run docs-check feature/my-branch --provider namespace --wait
+pulp ci-local cloud run docs-check feature/my-branch --provider namespace --runner-selector-json '"namespace-profile-big-apple"'
+pulp ci-local cloud namespace doctor
+pulp ci-local cloud namespace setup
+pulp ci-local cloud status latest --refresh
+```
+
+Local queue commands:
+
+- `run` — queue validation and wait for completion
+- `check` — queue validation for an existing PR
+- `ship` — push, open PR, queue CI, merge on green
+- `enqueue` / `drain` / `bump` / `cancel` — queue management
+- `logs` / `evidence` / `status` — saved results and operator visibility
+
+Cloud companion commands:
+
+- `cloud workflows` — list the GitHub workflows and supported runner providers known to this checkout
+- `cloud run [workflow] [branch]` — dispatch a GitHub Actions workflow by branch; `docs-check` accepts `--runner-selector-json`, while `build` also accepts one-off `--linux-runner-selector-json`, `--windows-runner-selector-json`, and `--macos-runner-selector-json` overrides for per-leg routing
+- `cloud status [dispatch-id|latest]` — show tracked GitHub run state plus queue-delay/elapsed timing when available; `--refresh` re-queries GitHub for the selected run
+- `cloud namespace doctor` — verify that `nsc` is installed, login is valid, and the current workspace is visible
+- `cloud namespace setup` — thin wrapper that runs `nsc login` if needed and then shows the same Namespace status
+
+Current cloud scope:
+
+- GitHub Actions remains the orchestrator
+- `docs-check` is the first runner-provider pilot and supports `github-hosted` and `namespace`
+- `build` now also supports `github-hosted` and `namespace`; the default cloud
+  build covers Linux and Windows only so macOS can stay local-first
+- `docs-check` can use an explicit `--runner-selector-json` override or a docs-check-specific local config default before falling back to the repo Namespace selector variable
+- `build` can take Linux/Windows Namespace selectors from the local config keys
+  `github_actions.workflows.build.providers.namespace.linux_runner_selector_json`
+  and `.windows_runner_selector_json`, or from the repo variables
+  `PULP_NAMESPACE_BUILD_LINUX_RUNS_ON_JSON` and
+  `PULP_NAMESPACE_BUILD_WINDOWS_RUNS_ON_JSON`
+- macOS Namespace is opt-in for `build`: set
+  `--macos-runner-selector-json` for a one-off run, or set
+  `github_actions.workflows.build.providers.namespace.macos_runner_selector_json`
+  locally or `PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON` if you want an explicit
+  macOS Namespace validation run
+- selector overrides can use either a Namespace profile label like
+  `"namespace-profile-generouscorp-macos"` or a direct machine label like
+  `"nscloud-macos-tahoe-arm64-6x14"`
+- that selector must point at a real macOS-capable Namespace profile: GitHub
+  labels and matrix names alone do not prove the underlying OS, so a Linux
+  Namespace profile can appear as a macOS leg while actually executing on Linux
+- if macOS should remain local by default, keep the shared macOS selector unset
+  and use `--macos-runner-selector-json` only for one-off cloud validation runs
+- if you plan to use the Namespace provider, install the `nsc` CLI and run `nsc login` first; that is the recommended operator setup path for this phase
+- VM/SSH target configuration and Namespace provider configuration remain separate: local/SSH hosts stay in the normal local CI target config, while Namespace routing and login state live behind the `cloud namespace` helper surface
+- `validate` and `sanitizers` remain `github-hosted` only in this phase
+- cloud dispatch records are persisted beside local CI state, but they do not enter the local queue
+- `status` includes recent tracked cloud summaries without contacting GitHub; use `cloud status --refresh` when you want live GitHub state
+- tracked cloud runs now persist queue-delay and elapsed-duration timing so later comparison commands can report real provider speedups instead of ad hoc estimates
+
+Namespace profile setup note:
+
+- `nsc` is enough for login verification and instance/history inspection, but
+  GitHub Actions runner-profile creation is still a Namespace dashboard step in
+  this phase
+- create new profiles under `GitHub Actions -> Profiles`
+- the UI profile name omits the GitHub selector prefix; for example a profile
+  shown as `generouscorp-macos` is referenced from Pulp as
+  `"namespace-profile-generouscorp-macos"`
+- for ad hoc runs, Namespace also supports direct machine labels without a saved
+  profile, for example `"nscloud-macos-tahoe-arm64-6x14"`
+- after creating a one-off macOS profile, validate it with:
+  `pulp ci-local cloud run build <branch> --provider namespace --macos-runner-selector-json '"namespace-profile-generouscorp-macos"'`
+- confirm the backing shape with `nsc instance history --all -o json`; a valid
+  macOS profile should report `shape.os = "macos"` and
+  `shape.machine_arch = "arm64"`
+
 ### ship
 
 **Status**: experimental

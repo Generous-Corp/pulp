@@ -8,6 +8,8 @@ on:
       - 'core/**/include/**'
       - 'tools/build-docs.py'
       - 'tools/build-api-docs.sh'
+      - 'tools/install/install.sh'
+      - 'tools/install/install.ps1'
       - 'docs/doxygen/**'
       - '.github/workflows/docs-deploy.yml'
   workflow_dispatch:

@@ -29,6 +29,32 @@
       }
     }
   },
+  "github_actions": {
+    "repository": "danielraffel/pulp",
+    "defaults": {
+      "workflow": "build",
+      "provider": "github-hosted",
+      "wait_poll_secs": 10,
+      "match_timeout_secs": 60
+    },
+    "workflows": {
+      "build": {
+        "providers": {
+          "namespace": {
+            "linux_runner_selector_json": "\"namespace-profile-default\"",
+            "windows_runner_selector_json": "\"namespace-profile-default\""
+          }
+        }
+      },
+      "docs-check": {
+        "providers": {
+          "namespace": {
+            "runner_selector_json": "\"namespace-profile-default\""
+          }
+        }
+      }
+    }
+  },
   "defaults": {
     "priority": "normal",
     "ship_priority": "high",

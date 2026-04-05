@@ -7,6 +7,11 @@ Usage:
     pulp ci-local ship [branch]               # PR -> queued CI -> merge on green
     pulp ci-local check <PR#|latest>          # Validate an existing PR
     pulp ci-local check <PR#|latest> --smoke  # Fast PR smoke preflight
+    pulp ci-local cloud workflows             # List supported GitHub workflows/providers
+    pulp ci-local cloud run [workflow]        # Dispatch a GitHub workflow
+    pulp ci-local cloud status [id|latest]    # Show tracked GitHub workflow state
+    pulp ci-local cloud namespace doctor      # Check Namespace CLI/login/workspace state
+    pulp ci-local cloud namespace setup       # Thin Namespace setup wrapper (`nsc login`)
     pulp ci-local list                        # Show open PRs
     pulp ci-local status                      # Show queue, runner, and VM status
     pulp ci-local enqueue [branch]            # Queue for later drain
@@ -50,6 +55,43 @@ KEEP_COMPLETED_JOBS = 25
 HEARTBEAT_INTERVAL_SECS = 15.0
 STUCK_IDLE_SECS = 90.0
 _BUNDLE_BUILD_LOCK = threading.Lock()
+GITHUB_ACTIONS_DEFAULTS = {
+    "repository": "",
+    "workflow": "build",
+    "provider": "github-hosted",
+    "wait_poll_secs": 10,
+    "match_timeout_secs": 60,
+}
+BUILTIN_GITHUB_WORKFLOWS = {
+    "build": {
+        "file": "build.yml",
+        "display_name": "Build and Test",
+        "providers": ["github-hosted", "namespace"],
+        "provider_input": "runner_provider",
+        "dispatch_fields": [
+            "linux_runner_selector_json",
+            "windows_runner_selector_json",
+            "macos_runner_selector_json",
+        ],
+    },
+    "validate": {
+        "file": "validate.yml",
+        "display_name": "Plugin Validation",
+        "providers": ["github-hosted"],
+    },
+    "sanitizers": {
+        "file": "sanitizers.yml",
+        "display_name": "Sanitizer Tests",
+        "providers": ["github-hosted"],
+    },
+    "docs-check": {
+        "file": "docs-check.yml",
+        "display_name": "Docs Consistency",
+        "providers": ["github-hosted", "namespace"],
+        "provider_input": "runner_provider",
+        "selector_input": "runner_selector_json",
+    },
+}
 
 
 class LockBusyError(RuntimeError):
@@ -99,6 +141,10 @@ def results_dir() -> Path:
     return state_dir() / "results"
 
 
+def cloud_runs_dir() -> Path:
+    return state_dir() / "cloud-runs"
+
+
 def evidence_path() -> Path:
     return state_dir() / "evidence.json"
 
@@ -130,6 +176,7 @@ def runner_info_path() -> Path:
 def ensure_state_dirs() -> None:
     state_dir().mkdir(parents=True, exist_ok=True)
     results_dir().mkdir(parents=True, exist_ok=True)
+    cloud_runs_dir().mkdir(parents=True, exist_ok=True)
     logs_dir().mkdir(parents=True, exist_ok=True)
     bundles_dir().mkdir(parents=True, exist_ok=True)
 
@@ -334,6 +381,190 @@ def load_config() -> dict:
     return json.loads(path.read_text())
 
 
+def load_optional_config() -> dict | None:
+    path = config_path()
+    if not path.exists():
+        return None
+    return json.loads(path.read_text())
+
+
+def resolve_github_actions_settings(config: dict | None) -> dict:
+    settings = dict(GITHUB_ACTIONS_DEFAULTS)
+    github_actions = (config or {}).get("github_actions", {})
+    defaults = github_actions.get("defaults", {})
+
+    repository = github_actions.get("repository")
+    if isinstance(repository, str) and repository.strip():
+        settings["repository"] = repository.strip()
+
+    workflow = defaults.get("workflow")
+    if isinstance(workflow, str) and workflow.strip():
+        settings["workflow"] = workflow.strip()
+
+    provider = defaults.get("provider")
+    if isinstance(provider, str) and provider.strip():
+        settings["provider"] = provider.strip()
+
+    for key in ("wait_poll_secs", "match_timeout_secs"):
+        value = defaults.get(key)
+        if value in (None, ""):
+            continue
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"github_actions.defaults.{key} must be an integer.") from exc
+        if parsed <= 0:
+            raise ValueError(f"github_actions.defaults.{key} must be positive.")
+        settings[key] = parsed
+
+    return settings
+
+
+def normalize_runs_on_json(raw: str, *, setting_name: str) -> str:
+    value = (raw or "").strip()
+    if not value:
+        return ""
+    try:
+        decoded = json.loads(value)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"{setting_name} must be valid JSON.") from exc
+    if not isinstance(decoded, (str, list)):
+        raise ValueError(f"{setting_name} must decode to a string or array accepted by runs-on.")
+    return json.dumps(decoded)
+
+
+def resolve_workflow_runner_selector_json(
+    config: dict | None, workflow_key: str, provider: str
+) -> str:
+    github_actions = (config or {}).get("github_actions", {})
+    workflows = github_actions.get("workflows", {})
+    if not isinstance(workflows, dict):
+        return ""
+    workflow = workflows.get(workflow_key, {})
+    if not isinstance(workflow, dict):
+        return ""
+    providers = workflow.get("providers", {})
+    if not isinstance(providers, dict):
+        return ""
+    provider_info = providers.get(provider, {})
+    if not isinstance(provider_info, dict):
+        return ""
+    selector = provider_info.get("runner_selector_json")
+    if not isinstance(selector, str) or not selector.strip():
+        return ""
+    return normalize_runs_on_json(
+        selector,
+        setting_name=f"github_actions.workflows.{workflow_key}.providers.{provider}.runner_selector_json",
+    )
+
+
+def resolve_workflow_dispatch_field_values(
+    config: dict | None,
+    workflow_key: str,
+    provider: str,
+    field_names: list[str] | tuple[str, ...] | None,
+) -> dict[str, str]:
+    if not field_names:
+        return {}
+
+    github_actions = (config or {}).get("github_actions", {})
+    workflows = github_actions.get("workflows", {})
+    if not isinstance(workflows, dict):
+        return {}
+    workflow = workflows.get(workflow_key, {})
+    if not isinstance(workflow, dict):
+        return {}
+    providers = workflow.get("providers", {})
+    if not isinstance(providers, dict):
+        return {}
+    provider_info = providers.get(provider, {})
+    if not isinstance(provider_info, dict):
+        return {}
+
+    resolved: dict[str, str] = {}
+    for field_name in field_names:
+        value = provider_info.get(field_name)
+        if not isinstance(value, str) or not value.strip():
+            continue
+        resolved[field_name] = normalize_runs_on_json(
+            value,
+            setting_name=(
+                f"github_actions.workflows.{workflow_key}.providers.{provider}.{field_name}"
+            ),
+        )
+    return resolved
+
+
+def resolve_cli_dispatch_field_values(
+    args: argparse.Namespace,
+    field_names: list[str] | tuple[str, ...] | None,
+) -> dict[str, str]:
+    supported = set(field_names or [])
+    override_names = (
+        "linux_runner_selector_json",
+        "windows_runner_selector_json",
+        "macos_runner_selector_json",
+    )
+    resolved: dict[str, str] = {}
+    for field_name in override_names:
+        value = getattr(args, field_name, None)
+        if not value:
+            continue
+        if field_name not in supported:
+            raise ValueError(
+                f"--{field_name.replace('_', '-')} is not supported for this workflow."
+            )
+        resolved[field_name] = normalize_runs_on_json(
+            value,
+            setting_name=f"--{field_name.replace('_', '-')}",
+        )
+    return resolved
+
+
+def normalize_provenance(provenance: dict | None = None) -> dict:
+    normalized = dict(provenance or {})
+    normalized.setdefault("execution_kind", "direct")
+    normalized.setdefault("control_plane", "pulp-ci-local")
+    normalized.setdefault("direct_backend", "local-ci")
+    normalized.setdefault("hosted_orchestrator", "")
+    normalized.setdefault("runner_provider", "")
+    normalized.setdefault("runner_selector", "")
+    normalized.setdefault("run_id", "")
+    normalized.setdefault("run_url", "")
+    return normalized
+
+
+def provenance_summary(provenance: dict | None) -> str:
+    info = normalize_provenance(provenance)
+    execution_kind = info.get("execution_kind", "direct")
+    selector = info.get("runner_selector", "")
+    run_id = info.get("run_id", "")
+
+    if execution_kind == "hosted":
+        orchestrator = info.get("hosted_orchestrator", "") or "unknown-orchestrator"
+        provider = info.get("runner_provider", "")
+        summary = f"hosted via {orchestrator}"
+        if provider:
+            summary += f"/{provider}"
+    else:
+        summary = f"direct via {info.get('direct_backend', 'local-ci') or 'local-ci'}"
+
+    if selector:
+        summary += f" selector={selector}"
+    if run_id:
+        summary += f" run={run_id}"
+    return summary
+
+
+def normalize_result(result: dict) -> dict:
+    normalized = dict(result)
+    submission = normalized.get("submission") or {}
+    normalized["provenance"] = normalize_provenance(
+        normalized.get("provenance") or submission.get("provenance")
+    )
+    return normalized
+
+
 def normalize_job(job: dict) -> dict:
     normalized = dict(job)
     if "id" not in normalized:
@@ -345,6 +576,12 @@ def normalize_job(job: dict) -> dict:
     normalized["targets"] = sorted(dict.fromkeys(normalized.get("targets") or []))
     normalized["status"] = normalized.get("status", "pending")
     normalized["validation"] = normalize_validation_mode(normalized.get("validation", "full"))
+    submission = dict(normalized.get("submission") or {})
+    submission["provenance"] = normalize_provenance(submission.get("provenance"))
+    normalized["submission"] = submission
+    normalized["provenance"] = normalize_provenance(
+        normalized.get("provenance") or submission.get("provenance")
+    )
     return normalized
 
 
@@ -460,6 +697,10 @@ def make_job(
         job["submission"] = submission
         if submission.get("submitted_root"):
             job["submitted_root"] = submission["submitted_root"]
+        if submission.get("provenance"):
+            job["provenance"] = normalize_provenance(submission.get("provenance"))
+    if "provenance" not in job:
+        job["provenance"] = normalize_provenance()
     return job
 
 
@@ -518,6 +759,7 @@ def supersedence_result(job: dict, superseded_by: str, reason: str) -> dict:
         "targets": job.get("targets", []),
         "queued_at": job.get("queued_at", ""),
         "completed_at": now_iso(),
+        "provenance": normalize_provenance(job.get("provenance")),
         "results": [],
         "overall": "superseded",
         "superseded_by": superseded_by,
@@ -549,6 +791,7 @@ def cancellation_result(job: dict, reason: str) -> dict:
         "targets": job.get("targets", []),
         "queued_at": job.get("queued_at", ""),
         "completed_at": now_iso(),
+        "provenance": normalize_provenance(job.get("provenance")),
         "results": [],
         "overall": "canceled",
         "canceled_reason": reason,
@@ -1041,12 +1284,236 @@ def finalize_job(job_id: str, result: dict, result_path: Path) -> None:
         save_queue_unlocked(trim_completed_jobs(queue))
 
 
+def parse_iso_datetime(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    normalized = value.replace("Z", "+00:00")
+    try:
+        return datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+
+
 def load_result(path: Path) -> dict:
-    return json.loads(path.read_text())
+    return normalize_result(json.loads(path.read_text()))
+
+
+def normalize_cloud_record(record: dict | None) -> dict:
+    normalized = dict(record or {})
+    normalized.setdefault("kind", "github-actions-run")
+    normalized.setdefault("dispatch_id", "")
+    normalized.setdefault("run_id", None)
+    normalized.setdefault("repository", "")
+    normalized.setdefault("workflow_key", "")
+    normalized.setdefault("workflow_file", "")
+    normalized.setdefault("workflow_name", "")
+    normalized.setdefault("requested_ref", "")
+    normalized.setdefault("head_branch", "")
+    normalized.setdefault("head_sha", "")
+    normalized.setdefault("requested_by", "")
+    normalized.setdefault("orchestrator", "github-actions")
+    normalized.setdefault("provider_requested", "github-hosted")
+    normalized.setdefault("provider_resolved", "")
+    normalized.setdefault("runner_selector_json", "")
+    normalized.setdefault("dispatch_fields", {})
+    normalized.setdefault("status", "unresolved")
+    normalized.setdefault("conclusion", "")
+    normalized.setdefault("url", "")
+    normalized.setdefault("dispatched_at", "")
+    normalized.setdefault("matched_at", "")
+    normalized.setdefault("started_at", "")
+    normalized.setdefault("updated_at", "")
+    normalized.setdefault("completed_at", "")
+    normalized.setdefault("queue_delay_secs", None)
+    normalized.setdefault("duration_secs", None)
+    normalized.setdefault("match_strategy", "")
+    normalized.setdefault("match_ambiguous", False)
+    normalized.setdefault("jobs", [])
+    return normalized
+
+
+def cloud_run_path(dispatch_id: str) -> Path:
+    return cloud_runs_dir() / f"{dispatch_id}.json"
+
+
+def save_cloud_record(record: dict) -> Path:
+    ensure_state_dirs()
+    normalized = normalize_cloud_record(record)
+    path = cloud_run_path(normalized["dispatch_id"])
+    atomic_write_text(path, json.dumps(normalized, indent=2) + "\n")
+    return path
+
+
+def load_cloud_record(path: Path) -> dict:
+    return normalize_cloud_record(json.loads(path.read_text()))
+
+
+def cloud_record_sort_key(record: dict) -> tuple[str, str]:
+    timestamp = (
+        record.get("completed_at")
+        or record.get("updated_at")
+        or record.get("matched_at")
+        or record.get("dispatched_at")
+        or ""
+    )
+    return (timestamp, record.get("dispatch_id", ""))
+
+
+def list_cloud_records(limit: int | None = None) -> list[dict]:
+    ensure_state_dirs()
+    records: list[dict] = []
+    for path in cloud_runs_dir().glob("*.json"):
+        try:
+            records.append(load_cloud_record(path))
+        except (OSError, json.JSONDecodeError):
+            continue
+    records.sort(key=cloud_record_sort_key, reverse=True)
+    if limit is not None:
+        return records[:limit]
+    return records
+
+
+def find_cloud_record(records: list[dict], identifier: str | None) -> dict | None:
+    if not records:
+        return None
+    if not identifier or identifier == "latest":
+        return records[0]
+
+    exact_dispatch = [record for record in records if record.get("dispatch_id") == identifier]
+    if len(exact_dispatch) == 1:
+        return exact_dispatch[0]
+
+    prefix_dispatch = [record for record in records if record.get("dispatch_id", "").startswith(identifier)]
+    if len(prefix_dispatch) == 1:
+        return prefix_dispatch[0]
+    if len(prefix_dispatch) > 1:
+        raise ValueError(f"Cloud run reference '{identifier}' is ambiguous.")
+
+    run_matches = [record for record in records if str(record.get("run_id") or "") == identifier]
+    if len(run_matches) == 1:
+        return run_matches[0]
+    if len(run_matches) > 1:
+        raise ValueError(f"Cloud run id '{identifier}' matched multiple records.")
+    return None
+
+
+def cloud_record_summary(record: dict) -> str:
+    record = normalize_cloud_record(record)
+    status = record.get("status", "unknown").upper()
+    conclusion = (record.get("conclusion") or "").upper()
+    state = status if not conclusion else f"{status}/{conclusion}"
+    provider = record.get("provider_resolved") or record.get("provider_requested") or "github-hosted"
+    ref = record.get("head_branch") or record.get("requested_ref") or "?"
+    summary = (
+        f"[{record.get('dispatch_id', '?')}] {record.get('workflow_key', '?')} "
+        f"ref={ref} provider={provider} {state}"
+    )
+    selector = summarize_runner_selector(record.get("runner_selector_json", ""))
+    if selector:
+        summary += f" selector={selector}"
+    if record.get("run_id"):
+        summary += f" gha#{record['run_id']}"
+    duration = format_duration_secs(record.get("duration_secs"))
+    if duration:
+        summary += f" duration={duration}"
+    return summary
+
+
+def summarize_runner_selector(selector_json: str) -> str:
+    raw = (selector_json or "").strip()
+    if not raw:
+        return ""
+    try:
+        decoded = json.loads(raw)
+    except json.JSONDecodeError:
+        return raw
+    if isinstance(decoded, str):
+        return decoded
+    if isinstance(decoded, list):
+        return ",".join(str(item) for item in decoded)
+    return raw
+
+
+def normalize_github_timestamp(value: str | None) -> str:
+    raw = (value or "").strip()
+    if not raw or raw.startswith("0001-01-01T00:00:00"):
+        return ""
+    return raw
+
+
+def duration_between(started_at: str | None, completed_at: str | None) -> float | None:
+    start_dt = parse_iso_datetime(normalize_github_timestamp(started_at))
+    end_dt = parse_iso_datetime(normalize_github_timestamp(completed_at))
+    if not start_dt or not end_dt:
+        return None
+    return round(max(0.0, (end_dt - start_dt).total_seconds()), 1)
+
+
+def format_duration_secs(value: float | int | str | None) -> str:
+    if value in (None, ""):
+        return ""
+    try:
+        total = float(value)
+    except (TypeError, ValueError):
+        return ""
+    if total < 0:
+        return ""
+    rounded = int(round(total))
+    hours, remainder = divmod(rounded, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    if hours:
+        return f"{hours}h{minutes:02d}m{seconds:02d}s"
+    if minutes:
+        return f"{minutes}m{seconds:02d}s"
+    if abs(total - rounded) >= 0.05:
+        return f"{total:.1f}s"
+    return f"{rounded}s"
+
+
+def summarize_cloud_timing(snapshot: dict) -> dict[str, str | float | None]:
+    created_at = normalize_github_timestamp(snapshot.get("createdAt"))
+    updated_at = normalize_github_timestamp(snapshot.get("updatedAt"))
+    observed_updates = [updated_at] if updated_at else []
+    job_starts = [
+        normalize_github_timestamp(job.get("startedAt"))
+        for job in snapshot.get("jobs", []) or []
+        if normalize_github_timestamp(job.get("startedAt"))
+    ]
+    job_completions = [
+        normalize_github_timestamp(job.get("completedAt"))
+        for job in snapshot.get("jobs", []) or []
+        if normalize_github_timestamp(job.get("completedAt"))
+    ]
+    for job in snapshot.get("jobs", []) or []:
+        for step in job.get("steps", []) or []:
+            step_started = normalize_github_timestamp(step.get("startedAt"))
+            if step_started:
+                observed_updates.append(step_started)
+            step_completed = normalize_github_timestamp(step.get("completedAt"))
+            if step_completed:
+                observed_updates.append(step_completed)
+
+    started_at = min(job_starts) if job_starts else ""
+    status = snapshot.get("status", "")
+    if status == "completed":
+        if job_completions:
+            completed_at = max(job_completions)
+        else:
+            completed_at = updated_at
+    else:
+        completed_at = ""
+
+    duration_anchor = completed_at or (max(observed_updates) if observed_updates else "")
+    return {
+        "started_at": started_at,
+        "completed_at": completed_at,
+        "queue_delay_secs": duration_between(created_at, started_at),
+        "duration_secs": duration_between(started_at, duration_anchor),
+    }
 
 
 def empty_evidence_index() -> dict:
-    return {"version": 2, "entries": {}}
+    return {"version": 3, "entries": {}}
 
 
 def evidence_entry_key(branch: str, sha: str, target: str, validation: str) -> str:
@@ -1068,6 +1535,7 @@ def evidence_record_from_result(result: dict, item: dict, result_path: Path) -> 
         "branch": result.get("branch", ""),
         "sha": result.get("sha", ""),
         "validation": result.get("validation", "full"),
+        "provenance": normalize_provenance(result.get("provenance")),
         "target": item.get("target", ""),
         "status": item.get("status", ""),
         "completed_at": result.get("completed_at", ""),
@@ -1194,7 +1662,8 @@ def print_evidence_summary(
             targets = ", ".join(f"{target}=pass" for target in sorted(item.get("targets", {})))
             print(
                 f"{indent}  {short_sha(item.get('sha', ''))} [{targets}] "
-                f"last={item.get('completed_at', '?')}"
+                f"last={item.get('completed_at', '?')} "
+                f"via {provenance_summary(item.get('provenance'))}"
             )
     return True
 
@@ -1485,6 +1954,7 @@ def build_submission_metadata(
         "target_hosts": host_preflight,
         "config_drift": config_drift,
         "warnings": warnings,
+        "provenance": normalize_provenance(),
     }
 
 
@@ -1499,6 +1969,8 @@ def print_submission_metadata(metadata: dict) -> None:
     if metadata.get("cwd_git_root"):
         print(f"  cwd git root: {metadata['cwd_git_root']}")
     print(f"  config: {metadata['config_path']} ({metadata['config_source']})")
+    if metadata.get("provenance"):
+        print(f"  provenance: {provenance_summary(metadata.get('provenance'))}")
     for drift in metadata.get("config_drift", []):
         print(f"  config drift: {drift}")
     for target_name in metadata.get("targets", []):
@@ -2545,6 +3017,7 @@ def process_job(job: dict, config: dict) -> dict:
             "sha": job["sha"],
             "priority": job["priority"],
             "submission": job.get("submission"),
+            "provenance": normalize_provenance(job.get("provenance")),
             "targets": job.get("targets", []),
             "queued_at": job.get("queued_at", ""),
             "completed_at": now_iso(),
@@ -2602,6 +3075,7 @@ def process_job(job: dict, config: dict) -> dict:
         "priority": job["priority"],
         "validation": job.get("validation", "full"),
         "submission": job.get("submission"),
+        "provenance": normalize_provenance(job.get("provenance")),
         "targets": job.get("targets", []),
         "queued_at": job.get("queued_at", ""),
         "completed_at": now_iso(),
@@ -2621,9 +3095,11 @@ def save_result(result: dict) -> Path:
 
 
 def print_result(result: dict, result_path: Path | None = None) -> None:
+    result = normalize_result(result)
     print(f"\n--- Result: [{result['job_id']}] {result['branch']} ---")
     if result.get("validation", "full") != "full":
         print(f"  {'validation':10s}  {result['validation']}")
+    print(f"  {'execution':10s}  {provenance_summary(result.get('provenance'))}")
     for item in result["results"]:
         icon = "PASS" if item["status"] == "pass" else item["status"].upper()
         print(f"  {item['target']:10s}  {icon:12s}  {item.get('duration_secs', 0)}s")
@@ -2710,6 +3186,246 @@ def gh_available() -> bool:
     return result.returncode == 0
 
 
+def nsc_run(args: list[str], *, capture_output: bool = True) -> subprocess.CompletedProcess | None:
+    try:
+        return subprocess.run(
+            ["nsc", *args],
+            cwd=ROOT,
+            capture_output=capture_output,
+            text=True,
+            check=False,
+        )
+    except FileNotFoundError:
+        return None
+
+
+def nsc_available() -> bool:
+    result = nsc_run(["version"])
+    return bool(result and result.returncode == 0)
+
+
+def nsc_version() -> str | None:
+    result = nsc_run(["version"])
+    if not result or result.returncode != 0:
+        return None
+    lines = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+    return lines[0] if lines else None
+
+
+def nsc_logged_in() -> bool:
+    result = nsc_run(["auth", "check-login"])
+    return bool(result and result.returncode == 0)
+
+
+def parse_colon_separated_fields(text: str) -> dict[str, str]:
+    fields: dict[str, str] = {}
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line or ":" not in line:
+            continue
+        key, value = line.split(":", 1)
+        fields[key.strip()] = value.strip()
+    return fields
+
+
+def nsc_workspace_info() -> dict[str, str] | None:
+    result = nsc_run(["workspace", "describe"])
+    if not result or result.returncode != 0:
+        return None
+    fields = parse_colon_separated_fields(result.stdout)
+    return fields or None
+
+
+def print_namespace_setup_help() -> None:
+    print("Recommended Namespace setup:")
+    print("  1. Install the `nsc` CLI")
+    print("  2. Run `nsc login`")
+    print("  3. Verify with `nsc workspace describe`")
+    print("  4. Configure a Namespace runner selector/profile for the workflow you want to route")
+
+
+def cmd_cloud_namespace_doctor(_args: argparse.Namespace) -> int:
+    version = nsc_version()
+    if not version:
+        print("Namespace CLI: missing")
+        print_namespace_setup_help()
+        return 1
+
+    print(f"Namespace CLI: ok ({version})")
+    if not nsc_logged_in():
+        print("Namespace login: missing")
+        print("Run: nsc login")
+        return 1
+
+    print("Namespace login: ok")
+    workspace = nsc_workspace_info()
+    if workspace:
+        name = workspace.get("Name")
+        if name:
+            print(f"Workspace: {name}")
+        tenant = workspace.get("Tenant ID")
+        if tenant:
+            print(f"Tenant ID: {tenant}")
+        registry = workspace.get("Registry URL")
+        if registry:
+            print(f"Registry URL: {registry}")
+    else:
+        print("Workspace: unavailable")
+    return 0
+
+
+def cmd_cloud_namespace_setup(_args: argparse.Namespace) -> int:
+    if not nsc_available():
+        print("Namespace CLI: missing")
+        print_namespace_setup_help()
+        return 1
+
+    if not nsc_logged_in():
+        print("Namespace login: starting `nsc login`...")
+        login_result = nsc_run(["login"], capture_output=False)
+        if not login_result or login_result.returncode != 0:
+            print("Namespace login: failed")
+            return 1
+
+    return cmd_cloud_namespace_doctor(argparse.Namespace())
+
+
+def gh_repo_name() -> str | None:
+    result = subprocess.run(
+        ["gh", "repo", "view", "--json", "nameWithOwner"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return None
+    try:
+        return json.loads(result.stdout).get("nameWithOwner")
+    except json.JSONDecodeError:
+        return None
+
+
+def gh_current_login() -> str | None:
+    result = subprocess.run(
+        ["gh", "api", "user", "--jq", ".login"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return None
+    login = result.stdout.strip()
+    return login or None
+
+
+def resolve_github_repository(settings: dict) -> str:
+    repository = settings.get("repository", "").strip()
+    if repository:
+        return repository
+    discovered = gh_repo_name()
+    if discovered:
+        return discovered
+    raise ValueError(
+        "Could not determine GitHub repository. Set github_actions.repository in tools/local-ci/config.json "
+        "or make sure `gh repo view` works in this checkout."
+    )
+
+
+def gh_workflow_dispatch(repository: str, workflow_file: str, ref: str, fields: dict[str, str]) -> None:
+    cmd = ["gh", "workflow", "run", workflow_file, "--repo", repository, "--ref", ref]
+    for key, value in fields.items():
+        cmd += ["-f", f"{key}={value}"]
+    result = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True)
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "").strip()
+        raise RuntimeError(f"Failed to dispatch {workflow_file}: {detail or 'gh workflow run failed'}")
+
+
+def gh_find_dispatched_run(
+    repository: str,
+    workflow_file: str,
+    ref: str,
+    dispatched_at: str,
+    *,
+    timeout_secs: int,
+) -> dict | None:
+    deadline = time.time() + timeout_secs
+    dispatched_dt = parse_iso_datetime(dispatched_at)
+    tolerance_secs = 10
+    fields = (
+        "databaseId,headBranch,headSha,status,conclusion,url,createdAt,updatedAt,workflowName,event"
+    )
+
+    while time.time() < deadline:
+        result = subprocess.run(
+            [
+                "gh",
+                "run",
+                "list",
+                "--repo",
+                repository,
+                "--workflow",
+                workflow_file,
+                "--branch",
+                ref,
+                "--event",
+                "workflow_dispatch",
+                "--json",
+                fields,
+                "--limit",
+                "10",
+            ],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0:
+            try:
+                runs = json.loads(result.stdout)
+            except json.JSONDecodeError:
+                runs = []
+            candidates = []
+            for run in runs:
+                if run.get("headBranch") != ref or run.get("event") != "workflow_dispatch":
+                    continue
+                created_dt = parse_iso_datetime(run.get("createdAt"))
+                if dispatched_dt and created_dt and created_dt.timestamp() + tolerance_secs < dispatched_dt.timestamp():
+                    continue
+                candidates.append(run)
+            if candidates:
+                candidates.sort(key=lambda run: run.get("createdAt", ""), reverse=True)
+                matched = dict(candidates[0])
+                matched["match_ambiguous"] = len(candidates) > 1
+                return matched
+        time.sleep(2)
+
+    return None
+
+
+def gh_run_view(repository: str, run_id: int) -> dict | None:
+    result = subprocess.run(
+        [
+            "gh",
+            "run",
+            "view",
+            str(run_id),
+            "--repo",
+            repository,
+            "--json",
+            "databaseId,status,conclusion,url,headSha,headBranch,workflowName,createdAt,updatedAt,jobs",
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return None
+    try:
+        return json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return None
+
+
 def gh_pr_create(branch: str, base: str = "main") -> int | None:
     result = subprocess.run(
         ["gh", "pr", "create", "--head", branch, "--base", base, "--fill", "--no-maintainer-edit"],
@@ -2791,6 +3507,7 @@ def gh_pr_head(pr_ref: str) -> tuple[int, str, str] | None:
 
 
 def format_ci_comment(result: dict) -> str:
+    result = normalize_result(result)
     validation = result.get("validation", "full")
     title = "Local CI Smoke Results" if validation == "smoke" else "Local CI Results"
     lines = [f"## {title}\n"]
@@ -2798,6 +3515,9 @@ def format_ci_comment(result: dict) -> str:
     icon = "white_check_mark" if overall == "PASS" else "x"
     lines.append(f":{icon}: **Overall: {overall}**\n")
     lines.append(f"Job: `{result.get('job_id', '?')}`  Commit: `{short_sha(result.get('sha', ''))}`\n")
+    lines.append(f"Execution: `{provenance_summary(result.get('provenance'))}`\n")
+    if result.get("provenance", {}).get("run_url"):
+        lines.append(f"Run URL: {result['provenance']['run_url']}\n")
     if validation != "full":
         lines.append(f"Validation: `{validation}`\n")
         lines.append("_Smoke mode is a fast clean install/export preflight and does not run the full test suite._\n")
@@ -2824,6 +3544,284 @@ def format_ci_comment(result: dict) -> str:
 
 
 # ── CLI Commands ─────────────────────────────────────────────────────────────
+
+
+def update_cloud_record_from_run(record: dict, snapshot: dict, *, provider_resolved: str | None = None) -> dict:
+    updated = normalize_cloud_record(record)
+    snapshot_updated_at = snapshot.get("updatedAt") or now_iso()
+    current_updated_at = updated.get("updated_at") or ""
+    if current_updated_at and snapshot_updated_at and current_updated_at > snapshot_updated_at:
+        return updated
+
+    updated["run_id"] = snapshot.get("databaseId", updated.get("run_id"))
+    updated["workflow_name"] = snapshot.get("workflowName", updated.get("workflow_name"))
+    updated["head_branch"] = snapshot.get("headBranch", updated.get("head_branch"))
+    updated["head_sha"] = snapshot.get("headSha", updated.get("head_sha"))
+    updated["status"] = snapshot.get("status", updated.get("status"))
+    updated["conclusion"] = snapshot.get("conclusion") or updated.get("conclusion", "")
+    updated["url"] = snapshot.get("url", updated.get("url"))
+    updated["updated_at"] = snapshot_updated_at
+    if provider_resolved:
+        updated["provider_resolved"] = provider_resolved
+    if snapshot.get("createdAt") and not updated.get("matched_at"):
+        updated["matched_at"] = snapshot["createdAt"]
+
+    timing = summarize_cloud_timing(snapshot)
+    if timing.get("started_at"):
+        updated["started_at"] = timing["started_at"]
+    if timing.get("completed_at"):
+        updated["completed_at"] = timing["completed_at"]
+    elif updated.get("status") == "completed" and not updated.get("completed_at"):
+        updated["completed_at"] = snapshot_updated_at
+    elif updated.get("status") != "completed":
+        updated["completed_at"] = ""
+    updated["queue_delay_secs"] = timing.get("queue_delay_secs")
+    updated["duration_secs"] = timing.get("duration_secs")
+
+    jobs = []
+    for job in snapshot.get("jobs", []) or []:
+        jobs.append(
+            {
+                "name": job.get("name", ""),
+                "status": job.get("status", ""),
+                "conclusion": job.get("conclusion", ""),
+                "started_at": normalize_github_timestamp(job.get("startedAt", "")),
+                "completed_at": normalize_github_timestamp(job.get("completedAt", "")),
+            }
+        )
+    if jobs:
+        updated["jobs"] = jobs
+    return updated
+
+
+def refresh_cloud_record(record: dict, repository: str) -> dict:
+    run_id = record.get("run_id")
+    if not run_id:
+        return normalize_cloud_record(record)
+    snapshot = gh_run_view(repository, int(run_id))
+    if not snapshot:
+        return normalize_cloud_record(record)
+    refreshed = update_cloud_record_from_run(record, snapshot)
+    save_cloud_record(refreshed)
+    return refreshed
+
+
+def cmd_cloud_workflows(_args: argparse.Namespace) -> int:
+    print("GitHub Actions workflows:\n")
+    for key, info in BUILTIN_GITHUB_WORKFLOWS.items():
+        providers = ", ".join(info.get("providers", [])) or "github-hosted"
+        print(f"  {key:12s} {info['display_name']} ({info['file']})")
+        print(f"               providers: {providers}")
+    return 0
+
+
+def cmd_cloud_run(args: argparse.Namespace) -> int:
+    if not gh_available():
+        print("Error: gh CLI not available or not authenticated. Run: gh auth login")
+        return 1
+
+    config = load_optional_config()
+    try:
+        settings = resolve_github_actions_settings(config)
+        repository = resolve_github_repository(settings)
+    except ValueError as exc:
+        print(f"Error: {exc}")
+        return 1
+
+    workflow_key = args.workflow or settings.get("workflow", "build")
+    workflow = BUILTIN_GITHUB_WORKFLOWS.get(workflow_key)
+    if workflow is None:
+        print(
+            f"Error: Unknown workflow '{workflow_key}'. Use `pulp ci-local cloud workflows` to list supported workflows."
+        )
+        return 1
+
+    branch = args.branch or current_branch()
+    provider = (args.provider or settings.get("provider") or "github-hosted").strip()
+    supported = workflow.get("providers", ["github-hosted"])
+    if provider not in supported:
+        print(
+            f"Error: workflow '{workflow_key}' does not support provider '{provider}'. "
+            f"Supported: {', '.join(supported)}"
+        )
+        return 1
+
+    try:
+        config_dispatch_fields = resolve_workflow_dispatch_field_values(
+            config, workflow_key, provider, workflow.get("dispatch_fields")
+        )
+        cli_dispatch_fields = resolve_cli_dispatch_field_values(
+            args, workflow.get("dispatch_fields")
+        )
+        if getattr(args, "runner_selector_json", None):
+            selector_json = normalize_runs_on_json(
+                args.runner_selector_json,
+                setting_name="--runner-selector-json",
+            )
+        else:
+            selector_json = resolve_workflow_runner_selector_json(config, workflow_key, provider)
+        config_dispatch_fields.update(cli_dispatch_fields)
+    except ValueError as exc:
+        print(f"Error: {exc}")
+        return 1
+
+    selector_input = workflow.get("selector_input")
+    if selector_json and not selector_input:
+        print(f"Error: workflow '{workflow_key}' does not accept an explicit runner selector.")
+        return 1
+
+    dispatch_id = uuid.uuid4().hex[:12]
+    dispatch_time = now_iso()
+    record = normalize_cloud_record(
+        {
+            "dispatch_id": dispatch_id,
+            "repository": repository,
+            "workflow_key": workflow_key,
+            "workflow_file": workflow["file"],
+            "workflow_name": workflow["display_name"],
+            "requested_ref": branch,
+            "requested_by": gh_current_login() or "",
+            "provider_requested": provider,
+            "runner_selector_json": selector_json,
+            "dispatch_fields": config_dispatch_fields,
+            "status": "unresolved",
+            "dispatched_at": dispatch_time,
+            "updated_at": dispatch_time,
+            "match_strategy": "workflow+branch+created_at",
+        }
+    )
+    save_cloud_record(record)
+
+    fields: dict[str, str] = {}
+    provider_input = workflow.get("provider_input")
+    if provider_input:
+        fields[provider_input] = provider
+    fields.update(config_dispatch_fields)
+    if selector_input and selector_json:
+        fields[selector_input] = selector_json
+
+    try:
+        gh_workflow_dispatch(repository, workflow["file"], branch, fields)
+    except RuntimeError as exc:
+        print(f"Error: {exc}")
+        return 1
+
+    matched = gh_find_dispatched_run(
+        repository,
+        workflow["file"],
+        branch,
+        dispatch_time,
+        timeout_secs=int(settings["match_timeout_secs"]),
+    )
+
+    if matched:
+        record = update_cloud_record_from_run(record, matched, provider_resolved=provider)
+        record["match_ambiguous"] = bool(matched.get("match_ambiguous"))
+        save_cloud_record(record)
+
+    print(f"Dispatched: {workflow_key} ref={branch} provider={provider}")
+    print(f"  dispatch id: {dispatch_id}")
+    if record.get("run_id"):
+        print(f"  GitHub run: {record['run_id']}")
+        if record.get("url"):
+            print(f"  URL: {record['url']}")
+    else:
+        print("  warning: dispatched workflow could not be matched to a GitHub run yet")
+
+    if not args.wait:
+        return 0
+
+    if not record.get("run_id"):
+        print("Error: blocking wait requested, but the dispatched GitHub run could not be matched.")
+        return 1
+
+    while record.get("status") != "completed":
+        time.sleep(int(settings["wait_poll_secs"]))
+        record = refresh_cloud_record(record, repository)
+
+    print(f"  final: {record.get('status', '?')}/{(record.get('conclusion') or 'unknown').upper()}")
+    return 0 if record.get("conclusion") == "success" else 1
+
+
+def cmd_cloud_status(args: argparse.Namespace) -> int:
+    if args.identifier is None:
+        records = list_cloud_records(limit=args.limit)
+        if not records:
+            print("No tracked cloud runs yet.")
+            return 0
+        print("Recent cloud runs:\n")
+        for item in records:
+            print(f"  {cloud_record_summary(item)}")
+        return 0
+
+    try:
+        record = find_cloud_record(list_cloud_records(), args.identifier)
+    except ValueError as exc:
+        print(f"Error: {exc}")
+        return 1
+
+    if record is None:
+        print("No matching cloud runs found.")
+        return 1
+
+    if args.refresh:
+        if not gh_available():
+            print("Error: gh CLI not available or not authenticated. Run: gh auth login")
+            return 1
+        try:
+            repository = resolve_github_repository(resolve_github_actions_settings(load_optional_config()))
+        except ValueError as exc:
+            print(f"Error: {exc}")
+            return 1
+        record = refresh_cloud_record(record, repository)
+
+    print(cloud_record_summary(record))
+    print(f"  workflow: {record.get('workflow_name')} ({record.get('workflow_file')})")
+    print(f"  repo: {record.get('repository')}")
+    print(f"  requested ref: {record.get('requested_ref')}")
+    selector = summarize_runner_selector(record.get("runner_selector_json", ""))
+    if selector:
+        print(f"  runner selector: {selector}")
+    dispatch_fields = record.get("dispatch_fields") or {}
+    if isinstance(dispatch_fields, dict):
+        for key in sorted(dispatch_fields):
+            value = dispatch_fields.get(key)
+            if not value:
+                continue
+            rendered = (
+                summarize_runner_selector(value)
+                if key.endswith("_selector_json")
+                else str(value)
+            )
+            print(f"  {key}: {rendered}")
+    if record.get("head_sha"):
+        print(f"  sha: {short_sha(record['head_sha'])}")
+    if record.get("url"):
+        print(f"  url: {record['url']}")
+    if record.get("matched_at"):
+        print(f"  matched: {record['matched_at']}")
+    if record.get("started_at"):
+        print(f"  started: {record['started_at']}")
+    if record.get("queue_delay_secs") is not None:
+        print(f"  queue delay: {format_duration_secs(record.get('queue_delay_secs'))}")
+    if record.get("duration_secs") is not None:
+        print(f"  elapsed: {format_duration_secs(record.get('duration_secs'))}")
+    if record.get("updated_at"):
+        print(f"  updated: {record['updated_at']}")
+    if record.get("completed_at"):
+        print(f"  completed: {record['completed_at']}")
+    if record.get("jobs"):
+        print("  jobs:")
+        for job in record["jobs"]:
+            status = job.get("status", "?")
+            conclusion = job.get("conclusion", "")
+            suffix = f"/{conclusion}" if conclusion else ""
+            job_duration = format_duration_secs(
+                duration_between(job.get("started_at"), job.get("completed_at"))
+            )
+            detail = f" duration={job_duration}" if job_duration else ""
+            print(f"    {job.get('name', '?')}: {status}{suffix}{detail}")
+    return 0
 
 
 def resolve_submission_options(
@@ -3187,6 +4185,8 @@ def cmd_status(_args: argparse.Namespace) -> int:
                     f"config={submission.get('config_path')} "
                     f"({submission.get('config_source', '?')})"
                 )
+            if submission.get("provenance"):
+                print(f"    provenance: {provenance_summary(submission.get('provenance'))}")
             active_targets = job.get("active_targets") or (
                 runner.get("active_targets") if runner and runner.get("active_job_id") == job["id"] else None
             )
@@ -3243,6 +4243,8 @@ def cmd_status(_args: argparse.Namespace) -> int:
                     f"config={submission.get('config_path')} "
                     f"({submission.get('config_source', '?')})"
                 )
+            if submission.get("provenance"):
+                print(f"    provenance: {provenance_summary(submission.get('provenance'))}")
             active_targets = job.get("active_targets")
             target_summary = summarize_active_targets(active_targets, job.get("targets"))
             if target_summary:
@@ -3297,7 +4299,8 @@ def cmd_status(_args: argparse.Namespace) -> int:
                 )
                 print(
                     f"  [{job['id']}] {job['branch']} @ {short_sha(job.get('sha', ''))} "
-                    f"{result.get('overall', '?').upper()} [{targets}]"
+                    f"{result.get('overall', '?').upper()} [{targets}] "
+                    f"via {provenance_summary(result.get('provenance'))}"
                 )
             else:
                 print(f"  {summarize_job(job)} (result file missing)")
@@ -3307,6 +4310,12 @@ def cmd_status(_args: argparse.Namespace) -> int:
         print(f"\nEvidence ({branch}):")
         if not print_evidence_summary(branch=branch, limit=2, indent="  "):
             print("  (none)")
+
+    cloud_records = list_cloud_records(limit=5)
+    if cloud_records:
+        print("\nCloud (latest 5 known to this machine):")
+        for record in cloud_records:
+            print(f"  {cloud_record_summary(record)}")
 
     print("\nVM Status:")
     for vm_name in ["Ubuntu 24.04 desktop", "Windows"]:
@@ -3401,6 +4410,70 @@ def build_parser() -> argparse.ArgumentParser:
         help="Run the fast clean install/export preflight instead of full validation",
     )
 
+    p_cloud = sub.add_parser("cloud", help="Operate GitHub Actions workflows through the local CI control plane")
+    cloud_sub = p_cloud.add_subparsers(dest="cloud_command")
+
+    cloud_sub.add_parser("workflows", help="List supported GitHub workflows and providers")
+
+    p_cloud_run = cloud_sub.add_parser("run", help="Dispatch a GitHub Actions workflow")
+    p_cloud_run.add_argument(
+        "workflow",
+        nargs="?",
+        help="Workflow key (for example: build, validate, docs-check)",
+    )
+    p_cloud_run.add_argument("branch", nargs="?", help="Branch name (default: current)")
+    p_cloud_run.add_argument(
+        "--provider",
+        help="Runner provider (for example: github-hosted or namespace)",
+    )
+    p_cloud_run.add_argument(
+        "--runner-selector-json",
+        help="Optional JSON string/array passed through to the workflow runs-on selector",
+    )
+    p_cloud_run.add_argument(
+        "--linux-runner-selector-json",
+        help="Optional JSON string/array override for the Linux build leg runs-on selector",
+    )
+    p_cloud_run.add_argument(
+        "--windows-runner-selector-json",
+        help="Optional JSON string/array override for the Windows build leg runs-on selector",
+    )
+    p_cloud_run.add_argument(
+        "--macos-runner-selector-json",
+        help="Optional JSON string/array override for the macOS build leg runs-on selector",
+    )
+    p_cloud_run.add_argument(
+        "--wait",
+        action="store_true",
+        help="Block until the matched GitHub run completes",
+    )
+
+    p_cloud_status = cloud_sub.add_parser("status", help="Show tracked GitHub workflow state")
+    p_cloud_status.add_argument(
+        "identifier",
+        nargs="?",
+        help="Dispatch id, GitHub run id, or 'latest' (default: list recent tracked runs)",
+    )
+    p_cloud_status.add_argument(
+        "--refresh",
+        action="store_true",
+        help="Refresh the selected matched run from GitHub before rendering",
+    )
+    p_cloud_status.add_argument(
+        "--limit",
+        type=int,
+        default=5,
+        help="Runs to show when listing recent tracked runs (default: 5)",
+    )
+
+    p_cloud_namespace = cloud_sub.add_parser(
+        "namespace",
+        help="Check Namespace CLI/login/workspace setup without replacing the upstream nsc tool",
+    )
+    cloud_namespace_sub = p_cloud_namespace.add_subparsers(dest="cloud_namespace_command")
+    cloud_namespace_sub.add_parser("doctor", help="Show Namespace CLI, login, and workspace status")
+    cloud_namespace_sub.add_parser("setup", help="Run the thin Namespace setup flow (`nsc login` if needed)")
+
     sub.add_parser("list", help="Show open PRs")
 
     p_bump = sub.add_parser("bump", help="Reprioritize a pending job")
@@ -3441,6 +4514,23 @@ def main() -> int:
         "evidence": cmd_evidence,
         "status": cmd_status,
     }
+
+    if args.command == "cloud":
+        if args.cloud_command == "workflows":
+            return cmd_cloud_workflows(args)
+        if args.cloud_command == "run":
+            return cmd_cloud_run(args)
+        if args.cloud_command == "status":
+            return cmd_cloud_status(args)
+        if args.cloud_command == "namespace":
+            if args.cloud_namespace_command == "doctor":
+                return cmd_cloud_namespace_doctor(args)
+            if args.cloud_namespace_command == "setup":
+                return cmd_cloud_namespace_setup(args)
+            print("Error: missing cloud namespace subcommand. Use `pulp ci-local cloud namespace doctor`.")
+            return 1
+        print("Error: missing cloud subcommand. Use `pulp ci-local cloud workflows`.")
+        return 1
 
     if args.command in commands:
         return commands[args.command](args)

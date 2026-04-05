@@ -348,9 +348,15 @@ commands:
         summary: Process pending jobs if no other runner already owns the queue
       - name: bump
         summary: Reprioritize a pending queued job
+      - name: cloud workflows
+        summary: List supported GitHub workflows and runner providers
+      - name: cloud run
+        summary: Dispatch a GitHub Actions workflow through the local CI control plane
+      - name: cloud status
+        summary: Show tracked GitHub workflow state and refresh a selected run on demand
       - name: status
-        summary: Show queue, active runner, recent results, and VM status
-    docs: guides/local-ci.md
+        summary: Show queue, active runner, recent results, tracked cloud runs, and VM status
+    docs: reference/cli.md#ci-local
 
   - name: help
     status: usable

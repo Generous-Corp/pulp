@@ -18,6 +18,9 @@ Local CI lets you validate branches on your Mac and cross-platform VMs before me
 - If you queue a newer SHA for the same branch, targets, and validation mode, older pending work is superseded automatically instead of sitting behind it forever.
 - `pulp ci-local logs <job-id> --target windows` tails the saved per-target log from the machine-global CI state dir, so you do not need ad hoc SSH just to see whether a target is building or testing.
 - `pulp ci-local evidence [branch]` shows the last-good exact-SHA target evidence already recorded for a branch, so you can keep earlier same-SHA passes instead of rerunning them blindly.
+- `pulp ci-local cloud workflows` lists the GitHub Actions workflows that the local CI control plane knows how to dispatch, plus which runner providers each one supports.
+- `pulp ci-local cloud run <workflow> [branch]` dispatches a GitHub Actions workflow deliberately when workflow semantics or neutral-host confirmation matter more than the local queue.
+- `pulp ci-local cloud status` shows the latest tracked GitHub Actions dispatches that this machine has launched; `pulp ci-local status` includes the same recent cloud summary alongside local queue state.
 - Persistent local CI hosts now keep a prepared root per `target + validation` so a narrow same-SHA rerun can reuse earlier work instead of rematerializing from scratch.
 - If a runner is interrupted, the queued job keeps its last-known per-target state so you can see what already passed before deciding whether to rerun everything or just the remaining target.
 - Jobs submitted through `pulp ci-local` are globally queued, and validation itself now takes a per-host lock on macOS/Linux plus a Windows host mutex, so old `validate-build.sh` runs wait instead of colliding.
@@ -29,7 +32,22 @@ Local CI lets you validate branches on your Mac and cross-platform VMs before me
 
 ## Why local instead of cloud
 
-Pulp has GitHub Actions workflows for CI, but running them on every branch costs money. Local CI is free and faster for iterative development — you get results in minutes from machines you already own or have running locally. Cloud CI remains available for release branches and public PRs where you want the full matrix on neutral hardware.
+Pulp has GitHub Actions workflows for CI, but running them on every branch costs money. Local CI is free and faster for iterative development — you get results in minutes from machines you already own or have running locally. Cloud CI remains available for release branches, public PRs, and the narrow cases where you need workflow-level or neutral-host confirmation.
+
+Cloud orchestration is now available through the same control plane:
+
+- `pulp ci-local cloud workflows`
+- `pulp ci-local cloud run <workflow> [branch]`
+- `pulp ci-local cloud status [dispatch-id|latest]`
+
+That cloud surface is intentionally separate from the local queue. `run`,
+`check`, `ship`, `enqueue`, and `drain` still operate on the exact-SHA
+local/SSH queue. `cloud run` dispatches GitHub Actions explicitly and tracks the
+result beside local CI state instead of pretending a hosted workflow is just
+another local target.
+
+Today the narrow Namespace pilot is limited to `docs-check.yml`. All other
+cloud workflows in this phase remain GitHub-hosted only.
 
 ## How it works
 
@@ -44,6 +62,140 @@ When you run `pulp ci-local`, it:
 7. Drains queued work on login or wake if you install the launchd agent
 
 Mac validation always runs. SSH targets are skipped if disabled in config.
+
+## GitHub Actions companion
+
+Use the `cloud` subcommands when you want GitHub Actions as the orchestrator,
+not when you want another exact-SHA local queue job:
+
+```bash
+pulp ci-local cloud workflows
+pulp ci-local cloud run build feature/my-branch
+pulp ci-local cloud run build feature/my-branch --provider namespace
+pulp ci-local cloud run build feature/my-branch --provider namespace --macos-runner-selector-json '"namespace-profile-big-apple"'
+pulp ci-local cloud run build feature/my-branch --provider namespace --macos-runner-selector-json '"nscloud-macos-tahoe-arm64-6x14"'
+pulp ci-local cloud run docs-check feature/my-branch --provider namespace --wait
+pulp ci-local cloud run docs-check feature/my-branch --provider namespace --runner-selector-json '"namespace-profile-big-apple"'
+pulp ci-local cloud namespace doctor
+pulp ci-local cloud namespace setup
+pulp ci-local cloud status
+pulp ci-local cloud status latest --refresh
+```
+
+Important constraints in the current phase:
+
+- `cloud run` dispatches by branch name, not by a detached exact SHA
+- cloud dispatch records are persisted under the same machine-global CI state
+  directory as local results, but they do not enter `queue.json`
+- local `status` remains fast and local-first; it shows the latest tracked cloud
+  summaries without hitting GitHub unless you explicitly run `cloud status --refresh`
+- tracked cloud runs now persist queue-delay and elapsed-duration timing so the
+  later comparison view can answer "how long did GitHub-hosted vs Namespace
+  take?" from saved run history instead of rough notes
+- Namespace routing currently applies only to `docs-check.yml`
+- `build.yml` now accepts `runner_provider` and routes Linux and Windows through
+  the selected provider; macOS is omitted from the cloud build by default so it
+  can stay local-first
+- `build` also accepts one-off leg overrides:
+  `--linux-runner-selector-json`, `--windows-runner-selector-json`, and
+  `--macos-runner-selector-json`; that means you can keep the normal
+  Linux/Windows Namespace + macOS local default and still do an explicit
+  one-off macOS Namespace build without changing saved config
+- those one-off selector overrides can be either:
+  a Namespace profile label such as `"namespace-profile-generouscorp-macos"`,
+  or a direct Namespace machine label such as
+  `"nscloud-macos-tahoe-arm64-6x14"`
+- `docs-check` accepts an explicit `--runner-selector-json` override, for example
+  `"namespace-profile-default"` or `["self-hosted","linux"]`
+- if no explicit selector is passed, `docs-check` falls back to
+  `github_actions.workflows.docs-check.providers.<provider>.runner_selector_json`
+  in local config when present, then to the repo variable
+  `PULP_NAMESPACE_DOCS_CHECK_RUNS_ON_JSON` for the Namespace provider
+- `build` can take Linux/Windows Namespace selectors from
+  `github_actions.workflows.build.providers.namespace.linux_runner_selector_json`
+  and `.windows_runner_selector_json` in local config, and the workflow also
+  supports repo-variable fallbacks
+  `PULP_NAMESPACE_BUILD_LINUX_RUNS_ON_JSON` and
+  `PULP_NAMESPACE_BUILD_WINDOWS_RUNS_ON_JSON`
+- macOS Namespace is an explicit validation path, not part of the default cloud
+  build: if you want to test macOS on Namespace, provide
+  `--macos-runner-selector-json`, or set
+  `github_actions.workflows.build.providers.namespace.macos_runner_selector_json`
+  in local config, or `PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON`
+- make sure that selector points at a real macOS-capable Namespace profile:
+  GitHub job names alone do not guarantee the underlying OS, and a Linux-backed
+  profile can still satisfy the `runs-on` label while executing the leg on
+  Linux instead of macOS
+- if you want macOS to stay local-first by default, leave the macOS selector
+  unset in shared config and repo variables, and pass
+  `--macos-runner-selector-json` only for one-off validation runs
+- for the Namespace path, install the `nsc` CLI and run `nsc login` first
+  before trying to route work there; that is the recommended operator setup path
+  for this pilot
+- SSH/VM target topology and Namespace provider setup stay separate:
+  `targets.*` still configures local/SSH validation hosts, while Namespace
+  provider routing lives under the GitHub Actions workflow/provider config and
+  the `cloud namespace` helper commands
+
+### Creating a Namespace macOS runner profile
+
+Today, `nsc` can verify login/workspace state and inspect the instances created
+by GitHub Actions, but it does not create or edit GitHub Actions runner
+profiles from this workflow. Creating a new runner profile is currently a
+Namespace dashboard step.
+
+Use this path in Namespace:
+
+- `GitHub Actions -> Profiles -> New Profile`
+
+Recommended fields for the first macOS validation profile:
+
+- Name in the UI: `generouscorp-macos`
+- OS & Architecture: `macOS on Apple Silicon`
+- Resources: `6 vCPU, 14 GB RAM`
+- Base image: a recent Xcode/macOS image appropriate for your build
+- Cache toggles: leave enabled unless you have a reason to turn them off
+
+Important selector detail:
+
+- the Namespace UI shows the profile name without the GitHub runner prefix
+- the selector you pass to Pulp/GitHub Actions is the prefixed form
+- example: UI profile `generouscorp-macos` becomes selector
+  `"namespace-profile-generouscorp-macos"`
+- for one-off experiments you can skip profile creation entirely and pass a
+  direct machine label instead, for example:
+  `"nscloud-macos-tahoe-arm64-6x14"`
+
+After creating the profile, validate it with a one-off run:
+
+```bash
+pulp ci-local cloud run build feature/my-branch \
+  --provider namespace \
+  --macos-runner-selector-json '"namespace-profile-generouscorp-macos"'
+```
+
+Or use a direct machine label for an ad hoc run:
+
+```bash
+pulp ci-local cloud run build feature/my-branch \
+  --provider namespace \
+  --macos-runner-selector-json '"nscloud-macos-tahoe-arm64-6x14"'
+```
+
+Then confirm the backing instance shape with:
+
+```bash
+nsc instance history --all -o json --max_entries 10
+```
+
+For a real macOS runner, the matching entry should report:
+
+- `user_label.nsc.runner-profile-tag = "namespace-profile-generouscorp-macos"`
+- `shape.os = "macos"`
+- `shape.machine_arch = "arm64"`
+
+If it instead shows `linux/amd64`, the profile label is valid but the backing
+runner is not a real macOS machine yet.
 
 ## Prerequisites
 
@@ -71,6 +223,37 @@ cp tools/local-ci/config.example.json ~/Library/Application\\ Support/Pulp/local
 ```
 
 Edit the chosen `config.json` and fill in your SSH hostnames and repo paths. The `host` field is the primary SSH target. `fallback_host`, if present, is tried next. The `utm_fallback` block is optional and is only used if SSH targets are unreachable.
+
+The optional `github_actions.workflows.docs-check.providers.namespace.runner_selector_json`
+value lets you set the default Namespace `runs-on` selector that `cloud run docs-check`
+should dispatch when you do not pass `--runner-selector-json` explicitly.
+
+### 1a. Recommended Namespace setup
+
+If you want to use the Namespace runner-provider path, the easiest setup today is:
+
+```bash
+brew install namespace-so/tap/nsc   # or use the install method from Namespace docs
+nsc login
+```
+
+That is the recommended operator path for this pilot. Pulp can dispatch the
+GitHub workflow without shelling out to `nsc`, but keeping `nsc` installed makes
+it much easier to verify your Namespace workspace, inspect the account, and
+later support thin `pulp ci-local cloud namespace ...` helper commands without
+re-implementing Namespace setup logic inside Pulp.
+
+Once `nsc` is installed, Pulp's thin helper commands can verify the state for
+you:
+
+```bash
+pulp ci-local cloud namespace doctor
+pulp ci-local cloud namespace setup
+```
+
+`doctor` checks that `nsc` exists, verifies login state, and prints the current
+workspace identity. `setup` stays deliberately thin: it runs `nsc login` when
+needed and then re-renders the same status.
 
 ```json
 {

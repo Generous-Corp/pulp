@@ -49,6 +49,7 @@ The workflow triggers on pushes to `main` that touch:
 - `docs/**`
 - `core/**/include/**` (public headers affect API docs)
 - `tools/build-docs.py` or `tools/build-api-docs.sh`
+- `tools/install/install.sh` or `tools/install/install.ps1`
 - `docs/doxygen/**`
 - `.github/workflows/docs-deploy.yml`
 
@@ -57,16 +58,20 @@ It can also be triggered manually via `workflow_dispatch`.
 ## Building Locally
 
 ```bash
-# Build the HTML site
+# Build the deployed site shape
 python3 tools/build-docs.py --output build/site --base-url /pulp/
 
 # Build API reference (requires Doxygen)
 ./tools/build-api-docs.sh
 
-# Preview locally
-cd build/site && python3 -m http.server 8000
-# Open http://localhost:8000/pulp/
+# For local preview, build with a root base URL
+python3 tools/build-docs.py --output build/site-local --base-url /
+cd build/site-local && python3 -m http.server 8000
+# Open http://localhost:8000/
 ```
+
+`build/site/` is the Pages artifact shape and keeps the deployed `/pulp/` base URL.
+Use `build/site-local/` only for local preview.
 
 ## Adding a New Page
 

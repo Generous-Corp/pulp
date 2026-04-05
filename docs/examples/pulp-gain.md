@@ -22,9 +22,10 @@ The simplest possible Pulp plugin. A stereo gain effect with input gain, output 
 
 ## Try in Browser
 
-**[Open PulpGain in Browser Host →](../browser-host/?plugin=PulpGain)**
-
-The same Processor code that runs as VST3/AU/CLAP is compiled to WebAssembly and runs in your browser via the Web Audio API. Drop an audio file to hear gain processing in real-time.
+The same Processor code that runs as VST3/AU/CLAP is compiled to WebAssembly and
+can run in the local browser host via the Web Audio API. The repo does not yet
+publish a canonical Pages-hosted browser host, so use `tools/browser-host/`
+locally for now.
 
 ## Supported Formats
 

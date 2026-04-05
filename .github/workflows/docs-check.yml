@@ -5,10 +5,99 @@ on:
   # pull_request:
   #   branches: [main, develop]
   workflow_dispatch:
+    inputs:
+      runner_provider:
+        description: "Runner provider to use for this docs-check run"
+        required: false
+        default: github-hosted
+        type: choice
+        options:
+          - github-hosted
+          - namespace
+      runner_selector_json:
+        description: "Optional JSON string/array for runs-on; overrides the provider default when set"
+        required: false
+        default: ""
+        type: string
 
 jobs:
-  docs-check:
+  resolve-provider:
     runs-on: ubuntu-latest
+    outputs:
+      runs_on_json: ${{ steps.resolve.outputs.runs_on_json }}
+      provider: ${{ steps.resolve.outputs.provider }}
+      runner_selector_json: ${{ steps.resolve.outputs.runner_selector_json }}
+    steps:
+      - id: resolve
+        env:
+          REQUESTED_PROVIDER: ${{ inputs.runner_provider || 'github-hosted' }}
+          EXPLICIT_RUNNER_SELECTOR_JSON: ${{ inputs.runner_selector_json || '' }}
+          NAMESPACE_RUNS_ON_JSON: ${{ vars.PULP_NAMESPACE_DOCS_CHECK_RUNS_ON_JSON }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import sys
+          from pathlib import Path
+
+          requested = (os.environ.get("REQUESTED_PROVIDER") or "github-hosted").strip()
+          explicit = (os.environ.get("EXPLICIT_RUNNER_SELECTOR_JSON") or "").strip()
+          if explicit:
+              raw = explicit
+          elif requested == "github-hosted":
+              raw = json.dumps("ubuntu-latest")
+          elif requested == "namespace":
+              raw = (os.environ.get("NAMESPACE_RUNS_ON_JSON") or "").strip()
+              if not raw:
+                  print(
+                      "PULP_NAMESPACE_DOCS_CHECK_RUNS_ON_JSON is not set; cannot route docs-check to Namespace.",
+                      file=sys.stderr,
+                  )
+                  sys.exit(1)
+              try:
+                  decoded = json.loads(raw)
+              except json.JSONDecodeError as exc:
+                  print(
+                      f"PULP_NAMESPACE_DOCS_CHECK_RUNS_ON_JSON is not valid JSON: {exc}",
+                      file=sys.stderr,
+                  )
+                  sys.exit(1)
+              if not isinstance(decoded, (str, list)):
+                  print(
+                      "PULP_NAMESPACE_DOCS_CHECK_RUNS_ON_JSON must decode to a string or array accepted by runs-on.",
+                      file=sys.stderr,
+                  )
+                  sys.exit(1)
+          else:
+              print(f"Unsupported runner_provider: {requested}", file=sys.stderr)
+              sys.exit(1)
+
+          try:
+              decoded = json.loads(raw)
+          except json.JSONDecodeError as exc:
+              print(
+                  f"runner selector JSON is not valid: {exc}",
+                  file=sys.stderr,
+              )
+              sys.exit(1)
+          if not isinstance(decoded, (str, list)):
+              print(
+                  "runner selector JSON must decode to a string or array accepted by runs-on.",
+                  file=sys.stderr,
+              )
+              sys.exit(1)
+          runs_on = json.dumps(decoded)
+
+          output_path = Path(os.environ["GITHUB_OUTPUT"])
+          with output_path.open("a", encoding="utf-8") as handle:
+              handle.write(f"provider={requested}\n")
+              handle.write(f"runs_on_json={runs_on}\n")
+              handle.write(f"runner_selector_json={runs_on}\n")
+          PY
+
+  docs-check:
+    needs: resolve-provider
+    runs-on: ${{ fromJSON(needs.resolve-provider.outputs.runs_on_json) }}
     name: Validate docs consistency
 
     steps:
