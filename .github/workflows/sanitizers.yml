@@ -11,7 +11,7 @@ jobs:
     runs-on: macos-14
     name: AddressSanitizer (macOS ARM64)
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: recursive
           lfs: true
@@ -42,7 +42,7 @@ jobs:
     runs-on: macos-14
     name: ThreadSanitizer (macOS ARM64)
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: recursive
           lfs: true
@@ -73,7 +73,7 @@ jobs:
     runs-on: macos-14
     name: UndefinedBehaviorSanitizer (macOS ARM64)
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: recursive
           lfs: true
@@ -104,7 +104,7 @@ jobs:
     # RTSan requires upstream LLVM Clang 18+. Not available in Apple Clang.
     # See: https://clang.llvm.org/docs/RealtimeSanitizer.html
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: recursive
           lfs: true

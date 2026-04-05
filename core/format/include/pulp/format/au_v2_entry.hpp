@@ -17,9 +17,7 @@
 //   - A factory function MyPluginAUFactory (for the Info.plist factoryFunction)
 //   - Plugin registration via PULP_REGISTER_PLUGIN
 
-// The AU v2 adapter source must be included by the build system.
-// It defines pulp::format::au::PulpAUEffect which this header references.
-// Include paths: the adapter cpp is compiled as part of the plugin target.
+#include <pulp/format/au_v2_adapter.hpp>
 #include <pulp/format/registry.hpp>
 #include <AudioUnitSDK/AUPlugInDispatch.h>
 #include <AudioUnitSDK/ComponentBase.h>

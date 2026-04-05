@@ -4,6 +4,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include "test_helpers.hpp"
+#include <pulp/view/asset_manager.hpp>
+#include <fstream>
 #include <pulp/view/ui_components.hpp>
 #include <pulp/view/canvas_widget.hpp>
 
@@ -188,6 +190,236 @@ TEST_CASE("WebCompat: createElement tagName", "[webcompat][element]") {
     TestEnvironment env;
     auto result = env.engine.evaluate("document.createElement('span').tagName");
     REQUIRE(std::string(result.getWithDefault<std::string_view>("")) == "SPAN");
+}
+
+TEST_CASE("WebCompat: canvas getContext returns 2d and mock webgpu contexts", "[webcompat][canvas]") {
+    TestEnvironment env;
+    env.eval(R"(
+        var canvas = document.createElement('canvas');
+        canvas.id = 'phase13-canvas';
+        canvas.width = 320;
+        canvas.height = 180;
+        document.body.appendChild(canvas);
+    )");
+
+    auto has2d = env.engine.evaluate("document.getElementById('phase13-canvas').getContext('2d') !== null");
+    auto webGpuType = env.engine.evaluate("document.getElementById('phase13-canvas').getContext('webgpu')._objectName");
+    auto hasWebGpuConfigure = env.engine.evaluate("typeof document.getElementById('phase13-canvas').getContext('webgpu').configure");
+    REQUIRE(has2d.getWithDefault<bool>(false) == true);
+    REQUIRE(std::string(webGpuType.getWithDefault<std::string_view>("")) == "GPUCanvasContext");
+    REQUIRE(std::string(hasWebGpuConfigure.getWithDefault<std::string_view>("")) == "function");
+
+    env.root.layout_children();
+    auto nativeIdValue = env.engine.evaluate("document.getElementById('phase13-canvas')._id");
+    auto nativeId = std::string(nativeIdValue.getWithDefault<std::string_view>(""));
+    auto* canvas = env.widget(nativeId);
+    REQUIRE(canvas != nullptr);
+    REQUIRE(bounds_match(canvas->bounds(), 0, 0, 320, 180));
+}
+
+TEST_CASE("WebCompat: window.pulp.gpu.getInfo exposes native GPU truth", "[webcompat][canvas][gpu]") {
+    TestEnvironment env;
+    auto backend = env.engine.evaluate("window.pulp.gpu.getInfo().backend");
+    auto available = env.engine.evaluate("window.pulp.gpu.getInfo().available");
+    REQUIRE(std::string(backend.getWithDefault<std::string_view>("")) == "Dawn/WebGPU");
+    REQUIRE(available.getWithDefault<bool>(false) == true);
+}
+
+TEST_CASE("WebCompat: navigator.gpu exposes preferred format and adapter promise", "[webcompat][canvas][gpu]") {
+    TestEnvironment env;
+    auto backend = env.engine.evaluate("navigator.gpu.backend");
+    auto format = env.engine.evaluate("navigator.gpu.getPreferredCanvasFormat()");
+    auto promiseTag = env.engine.evaluate("Object.prototype.toString.call(navigator.gpu.requestAdapter())");
+    auto thenType = env.engine.evaluate("typeof navigator.gpu.requestAdapter().then");
+
+    REQUIRE(std::string(backend.getWithDefault<std::string_view>("")) == "Dawn/WebGPU");
+    REQUIRE(std::string(format.getWithDefault<std::string_view>("")) == "bgra8unorm");
+    REQUIRE(std::string(promiseTag.getWithDefault<std::string_view>("")) == "[object Promise]");
+    REQUIRE(std::string(thenType.getWithDefault<std::string_view>("")) == "function");
+}
+
+TEST_CASE("WebCompat: mock adapter and device graph expose early WebGPU entry points", "[webcompat][canvas][gpu]") {
+    TestEnvironment env;
+
+    auto adapterName = env.engine.evaluate("window.pulp.gpu.createMockAdapter().name");
+    auto adapterFeature = env.engine.evaluate("window.pulp.gpu.createMockAdapter().features.has('timestamp-query')");
+    auto deviceQueueType = env.engine.evaluate("window.pulp.gpu.createMockDevice(window.pulp.gpu.createMockAdapter(), { requiredFeatures: ['timestamp-query'] }).queue._objectName");
+    auto deviceFeature = env.engine.evaluate("window.pulp.gpu.createMockDevice(window.pulp.gpu.createMockAdapter(), { requiredFeatures: ['timestamp-query'] }).features.has('timestamp-query')");
+    auto bufferSize = env.engine.evaluate("window.pulp.gpu.createMockDevice().createBuffer({ size: 64, usage: GPUBufferUsage.COPY_DST }).size");
+    auto textureViewFormat = env.engine.evaluate("window.pulp.gpu.createMockDevice().createTexture({ size: { width: 16, height: 8 }, format: 'rgba8unorm', usage: GPUTextureUsage.TEXTURE_BINDING }).createView().format");
+    auto commandBufferType = env.engine.evaluate("window.pulp.gpu.createMockDevice().createCommandEncoder().finish()._objectName");
+
+    REQUIRE(std::string(adapterName.getWithDefault<std::string_view>("")) == "Mock Dawn Adapter");
+    REQUIRE(adapterFeature.getWithDefault<bool>(false) == true);
+    REQUIRE(std::string(deviceQueueType.getWithDefault<std::string_view>("")) == "GPUQueue");
+    REQUIRE(deviceFeature.getWithDefault<bool>(false) == true);
+    REQUIRE(bufferSize.getWithDefault<int32_t>(0) == 64);
+    REQUIRE(std::string(textureViewFormat.getWithDefault<std::string_view>("")) == "rgba8unorm");
+    REQUIRE(std::string(commandBufferType.getWithDefault<std::string_view>("")) == "GPUCommandBuffer");
+}
+
+TEST_CASE("WebCompat: mock GPUCanvasContext configures and returns current texture views", "[webcompat][canvas][gpu]") {
+    TestEnvironment env;
+    env.eval(R"(
+        var canvas = document.createElement('canvas');
+        canvas.id = 'phase13-webgpu-canvas';
+        canvas.width = 256;
+        canvas.height = 144;
+        document.body.appendChild(canvas);
+    )");
+
+    auto configuredFormat = env.engine.evaluate(R"(
+        (function() {
+            var adapter = window.pulp.gpu.createMockAdapter();
+            var device = window.pulp.gpu.createMockDevice(adapter, { requiredFeatures: ['timestamp-query'] });
+            var context = document.getElementById('phase13-webgpu-canvas').getContext('webgpu');
+            context.configure({
+                device: device,
+                format: navigator.gpu.getPreferredCanvasFormat(),
+                alphaMode: 'premultiplied'
+            });
+            return context.getCurrentTexture().createView().format;
+        })()
+    )");
+    auto currentTextureWidth = env.engine.evaluate(R"(
+        (function() {
+            var context = document.getElementById('phase13-webgpu-canvas').getContext('webgpu');
+            return context.getCurrentTexture().width;
+        })()
+    )");
+
+    REQUIRE(std::string(configuredFormat.getWithDefault<std::string_view>("")) == "bgra8unorm");
+    REQUIRE(currentTextureWidth.getWithDefault<int32_t>(0) == 256);
+}
+
+TEST_CASE("WebCompat: WebGPU globals expose core usage and stage constants", "[webcompat][canvas][gpu]") {
+    TestEnvironment env;
+    auto shaderMask = env.engine.evaluate("GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT");
+    auto bufferMask = env.engine.evaluate("GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ");
+    auto textureMask = env.engine.evaluate("GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST");
+    auto mapRead = env.engine.evaluate("GPUMapMode.READ");
+    auto colorAll = env.engine.evaluate("GPUColorWrite.ALL");
+
+    REQUIRE(shaderMask.getWithDefault<int32_t>(0) == 0x3);
+    REQUIRE(bufferMask.getWithDefault<int32_t>(0) == 0x9);
+    REQUIRE(textureMask.getWithDefault<int32_t>(0) == 0x6);
+    REQUIRE(mapRead.getWithDefault<int32_t>(0) == 0x1);
+    REQUIRE(colorAll.getWithDefault<int32_t>(0) == 0xF);
+}
+
+TEST_CASE("WebCompat: performance and storage shims are available", "[webcompat][browser]") {
+    TestEnvironment env;
+    auto perfNow = env.engine.evaluate("typeof performance.now === 'function' && performance.now() >= 0");
+    env.eval("localStorage.setItem('phase13-key', 'phase13-value');");
+    auto stored = env.engine.evaluate("localStorage.getItem('phase13-key')");
+
+    REQUIRE(perfNow.getWithDefault<bool>(false) == true);
+    REQUIRE(std::string(stored.getWithDefault<std::string_view>("")) == "phase13-value");
+}
+
+TEST_CASE("WebCompat: UTF-8 helpers round-trip non-ASCII text", "[webcompat][browser]") {
+    TestEnvironment env;
+    auto byteLength = env.engine.evaluate("new TextEncoder().encode('Pulp ✓').length");
+    auto decoded = env.engine.evaluate("new TextDecoder().decode(new TextEncoder().encode('Pulp ✓'))");
+    auto cloned = env.engine.evaluate("structuredClone({ label: 'Pulp ✓' }).label");
+
+    REQUIRE(byteLength.getWithDefault<int32_t>(0) == 8);
+    REQUIRE(std::string(decoded.getWithDefault<std::string_view>("")) == "Pulp ✓");
+    REQUIRE(std::string(cloned.getWithDefault<std::string_view>("")) == "Pulp ✓");
+}
+
+TEST_CASE("WebCompat: browser utility shims cover base64, crypto, and Image", "[webcompat][browser]") {
+    TestEnvironment env;
+    auto roundTrip = env.engine.evaluate("atob(btoa('pulp'))");
+    auto randomCount = env.engine.evaluate("crypto.getRandomValues(new Uint8Array(4)).length");
+    auto imageComplete = env.engine.evaluate("var img = new Image(); img.src = 'mock.png'; img.complete");
+
+    REQUIRE(std::string(roundTrip.getWithDefault<std::string_view>("")) == "pulp");
+    REQUIRE(randomCount.getWithDefault<int32_t>(0) == 4);
+    REQUIRE(imageComplete.getWithDefault<bool>(false) == true);
+}
+
+TEST_CASE("WebCompat: fetch bridge preserves UTF-8 JSON asset payloads", "[webcompat][browser][fetch]") {
+    TestEnvironment env;
+    auto& assets = AssetManager::instance();
+
+    static const char kJson[] = "{\"label\":\"Pulp ✓\"}";
+    assets.register_embedded("phase13/config.json",
+                             reinterpret_cast<const uint8_t*>(kJson),
+                             sizeof(kJson) - 1);
+
+    auto promiseTag = env.engine.evaluate(
+        "Object.prototype.toString.call(fetch('pulp://phase13/config.json'))");
+    auto contentType = env.engine.evaluate(R"(
+        (function() {
+            var response = __responseFromAssetRecord(__loadAssetSync__('pulp://phase13/config.json'));
+            return response.headers.get('content-type');
+        })()
+    )");
+    auto text = env.engine.evaluate(R"(
+        (function() {
+            var response = __responseFromAssetRecord(__loadAssetSync__('pulp://phase13/config.json'));
+            return response.text();
+        })()
+    )");
+    auto label = env.engine.evaluate(R"(
+        (function() {
+            var response = __responseFromAssetRecord(__loadAssetSync__('pulp://phase13/config.json'));
+            return response.json().label;
+        })()
+    )");
+    auto byteLength = env.engine.evaluate(R"(
+        (function() {
+            var response = __responseFromAssetRecord(__loadAssetSync__('pulp://phase13/config.json'));
+            return new Uint8Array(response.arrayBuffer()).length;
+        })()
+    )");
+
+    REQUIRE(std::string(promiseTag.getWithDefault<std::string_view>("")) == "[object Promise]");
+    REQUIRE(std::string(contentType.getWithDefault<std::string_view>("")) == "application/json;charset=utf-8");
+    REQUIRE(std::string(text.getWithDefault<std::string_view>("")) == kJson);
+    REQUIRE(std::string(label.getWithDefault<std::string_view>("")) == "Pulp ✓");
+    REQUIRE(byteLength.getWithDefault<int32_t>(0) == static_cast<int32_t>(sizeof(kJson) - 1));
+}
+
+TEST_CASE("WebCompat: file and blob URLs stay readable through the browser helpers", "[webcompat][browser][fetch]") {
+    TestEnvironment env;
+
+    const std::string fileText = "Pulp ✓ file";
+    const auto tempPath = std::filesystem::temp_directory_path() / "pulp-phase13-fetch.txt";
+    {
+        std::ofstream out(tempPath, std::ios::binary);
+        out << fileText;
+    }
+
+    const auto genericPath = tempPath.generic_string();
+    const std::string fileUrl = std::string("file://")
+        + (genericPath.empty() || genericPath.front() == '/' ? "" : "/")
+        + genericPath;
+    const std::string fileExpr = "'" + fileUrl + "'";
+
+    auto fetchedText = env.engine.evaluate(
+        "(function() {"
+        "  var response = __responseFromAssetRecord(__loadAssetSync__(" + fileExpr + "));"
+        "  return response.text();"
+        "})()");
+
+    env.eval(R"(
+        var phase13Blob = new Blob(
+            [new TextEncoder().encode('{"label":"Pulp ✓"}')],
+            { type: 'application/json' }
+        );
+        var phase13BlobUrl = URL.createObjectURL(phase13Blob);
+    )");
+    auto blobUrl = env.engine.evaluate("phase13BlobUrl");
+    auto blobLabel = env.engine.evaluate("__responseFromDataUri(phase13BlobUrl, phase13BlobUrl).json().label");
+
+    REQUIRE(std::string(fetchedText.getWithDefault<std::string_view>("")) == fileText);
+    const auto blobUrlString = std::string(blobUrl.getWithDefault<std::string_view>(""));
+    REQUIRE(blobUrlString.find("data:application/json;charset=utf-8;base64,") == 0);
+    REQUIRE(std::string(blobLabel.getWithDefault<std::string_view>("")) == "Pulp ✓");
+
+    std::filesystem::remove(tempPath);
 }
 
 TEST_CASE("WebCompat: element.id assignment", "[webcompat][element]") {

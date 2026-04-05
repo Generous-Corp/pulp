@@ -6,10 +6,13 @@
 #include <cstdlib>
 #include <sstream>
 #include <array>
+#include <filesystem>
 #include <regex>
+#include <sys/wait.h>
 #include <unistd.h>
 
 namespace pulp::ship {
+namespace fs = std::filesystem;
 
 static std::string exec_cmd(const std::string& cmd) {
     std::string result;
@@ -26,7 +29,37 @@ static std::string exec_cmd(const std::string& cmd) {
 
 static int exec_status(const std::string& cmd) {
     int ret = system(cmd.c_str());
-    return WEXITSTATUS(ret);
+    if (ret == -1)
+        return -1;
+    if (WIFEXITED(ret))
+        return WEXITSTATUS(ret);
+    return ret;
+}
+
+static std::optional<fs::path> make_temp_dir(const std::string& prefix) {
+    auto base = fs::temp_directory_path() / (prefix + "-XXXXXX");
+    std::string templ = base.string();
+    if (mkdtemp(templ.data()) == nullptr)
+        return std::nullopt;
+    return fs::path(templ);
+}
+
+static bool file_exists(const std::string& path) {
+    std::error_code ec;
+    return fs::is_regular_file(fs::path(path), ec) && fs::file_size(fs::path(path), ec) > 0;
+}
+
+static bool create_dmg_image(const std::string& source_path,
+                             const std::string& output_path,
+                             const std::string& volume_name) {
+    exec_status("rm -f \"" + output_path + "\"");
+
+    std::string cmd = "hdiutil create"
+        " -volname \"" + volume_name + "\""
+        " -srcfolder \"" + source_path + "\""
+        " -ov -format UDZO"
+        " \"" + output_path + "\" >/dev/null 2>&1";
+    return exec_status(cmd) == 0 && file_exists(output_path);
 }
 
 SigningInfo check_codesign(const std::string& path) {
@@ -145,25 +178,28 @@ bool create_pkg(const std::string& component_path,
 bool create_dmg(const std::string& source_path,
                 const std::string& output_path,
                 const std::string& volume_name) {
-    // Create a temporary directory with the source and an Applications alias
-    std::string tmp_dir = "/tmp/pulp-dmg-staging-" + std::to_string(getpid());
-    exec_status("rm -rf \"" + tmp_dir + "\"");
-    exec_status("mkdir -p \"" + tmp_dir + "\"");
-    exec_status("cp -R \"" + source_path + "\" \"" + tmp_dir + "/\"");
-    exec_status("ln -s /Applications \"" + tmp_dir + "/Applications\"");
+    auto staging_dir = make_temp_dir("pulp-dmg-staging");
+    if (!staging_dir)
+        return create_dmg_image(source_path, output_path, volume_name);
 
-    // Remove existing DMG if present
-    exec_status("rm -f \"" + output_path + "\"");
+    std::error_code ec;
+    auto cleanup = [&]() {
+        fs::remove_all(*staging_dir, ec);
+    };
 
-    std::string cmd = "hdiutil create"
-        " -volname \"" + volume_name + "\""
-        " -srcfolder \"" + tmp_dir + "\""
-        " -ov -format UDZO"
-        " \"" + output_path + "\" 2>/dev/null";
-    bool ok = exec_status(cmd) == 0;
+    auto staged_source = *staging_dir / fs::path(source_path).filename();
+    fs::copy(source_path, staged_source,
+             fs::copy_options::recursive | fs::copy_options::copy_symlinks, ec);
+    if (!ec) {
+        fs::create_directory_symlink("/Applications", *staging_dir / "Applications", ec);
+        if (create_dmg_image(staging_dir->string(), output_path, volume_name)) {
+            cleanup();
+            return true;
+        }
+    }
 
-    exec_status("rm -rf \"" + tmp_dir + "\"");
-    return ok;
+    cleanup();
+    return create_dmg_image(source_path, output_path, volume_name);
 }
 
 bool create_combined_pkg(const std::vector<InstallComponent>& components,

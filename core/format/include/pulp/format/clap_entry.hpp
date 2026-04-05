@@ -13,6 +13,7 @@
 #include <pulp/format/registry.hpp>
 #include <pulp/format/clap_adapter.hpp>
 #include <pulp/runtime/log.hpp>
+#include <pulp/runtime/system.hpp>
 #ifdef PULP_CLAP_GUI
 #include <pulp/view/auto_ui.hpp>
 #endif
@@ -80,7 +81,7 @@ inline bool audio_ports_get(const clap_plugin_t* plugin, uint32_t index, bool is
     auto& bus = buses[index];
 
     info->id = static_cast<clap_id>((is_input ? 0 : 100) + index);
-    strncpy(info->name, bus.name.c_str(), CLAP_NAME_SIZE);
+    runtime::copy_c_string(info->name, bus.name);
     info->channel_count = bus.default_channels;
     info->flags = (index == 0) ? CLAP_AUDIO_PORT_IS_MAIN : 0;
     info->port_type = bus.default_channels == 1 ? CLAP_PORT_MONO : CLAP_PORT_STEREO;
@@ -126,7 +127,7 @@ inline bool params_get_info(const clap_plugin_t* plugin, uint32_t index, clap_pa
     auto& p = params[index];
     memset(info, 0, sizeof(*info));
     info->id = p.id;
-    strncpy(info->name, p.name.c_str(), CLAP_NAME_SIZE - 1);
+    runtime::copy_c_string(info->name, p.name);
     info->min_value = p.range.min;
     info->max_value = p.range.max;
     info->default_value = p.range.default_value;
@@ -205,7 +206,7 @@ inline bool note_ports_get(const clap_plugin_t*, uint32_t index, bool is_input,
     if (!is_input && !g_desc.produces_midi) return false;
 
     info->id = is_input ? 0 : 1;
-    strncpy(info->name, is_input ? "Note In" : "Note Out", CLAP_NAME_SIZE);
+    runtime::copy_c_string(info->name, is_input ? "Note In" : "Note Out");
     info->supported_dialects = CLAP_NOTE_DIALECT_CLAP | CLAP_NOTE_DIALECT_MIDI;
     info->preferred_dialect = CLAP_NOTE_DIALECT_CLAP;
     return true;

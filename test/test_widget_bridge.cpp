@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
+#include <pulp/view/canvas_widget.hpp>
 #include <pulp/view/modal.hpp>
 #include <pulp/view/text_editor.hpp>
 #include <pulp/view/widget_bridge.hpp>
@@ -200,6 +201,39 @@ TEST_CASE("WidgetBridge set/get value from JS", "[view][bridge]") {
 
     auto result = engine.evaluate("getValue('gain')");
     REQUIRE_THAT(result.getWithDefault<double>(0), WithinAbs(0.75, 0.01));
+}
+
+TEST_CASE("WidgetBridge records canvas commands from web-compat 2D context", "[view][bridge][canvas]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        var canvas = document.createElement('canvas');
+        canvas.id = 'phase13-canvas';
+        canvas.width = 240;
+        canvas.height = 120;
+        document.body.appendChild(canvas);
+        var ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#ff8844';
+        ctx.fillRect(12, 16, 44, 28);
+        ctx.strokeStyle = '#99ddff';
+        ctx.lineWidth = 3;
+        ctx.strokeRect(70, 24, 50, 30);
+    )");
+
+    root.layout_children();
+
+    auto nativeIdValue = engine.evaluate("document.getElementById('phase13-canvas')._id");
+    auto nativeId = std::string(nativeIdValue.getWithDefault<std::string_view>(""));
+    auto* canvas = dynamic_cast<CanvasWidget*>(bridge.widget(nativeId));
+    REQUIRE(canvas != nullptr);
+    REQUIRE(canvas->command_count() >= 4);
+    REQUIRE_THAT(canvas->bounds().width, WithinAbs(240.0f, 1.0f));
+    REQUIRE_THAT(canvas->bounds().height, WithinAbs(120.0f, 1.0f));
 }
 
 TEST_CASE("WidgetBridge parameter binding", "[view][bridge]") {

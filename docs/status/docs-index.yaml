@@ -219,6 +219,11 @@ docs:
     kind: guide
     summary: Three rendering layers — JS canvas, C++ Canvas API, Dawn/WebGPU shaders
 
+  - slug: offline-video-feasibility
+    path: reports/offline-video-feasibility.md
+    kind: guide
+    summary: Phase 12 exploration — offline PNG-sequence rendering feasibility and honest recommendation
+
   - slug: example-showcase
     path: examples/showcase.md
     kind: example

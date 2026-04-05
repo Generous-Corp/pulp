@@ -1,8 +1,8 @@
 #include <pulp/state/preset_manager.hpp>
+#include <pulp/runtime/system.hpp>
 #include <fstream>
 #include <sstream>
 #include <algorithm>
-#include <cstdlib>
 
 namespace fs = std::filesystem;
 
@@ -13,20 +13,20 @@ namespace pulp::state {
 fs::path PresetManager::platform_presets_root() {
 #ifdef __APPLE__
     // ~/Library/Audio/Presets/
-    const char* home = std::getenv("HOME");
-    if (home) return fs::path(home) / "Library" / "Audio" / "Presets";
+    if (auto home = runtime::get_env("HOME"))
+        return fs::path(*home) / "Library" / "Audio" / "Presets";
     return {};
 #elif defined(_WIN32)
     // %APPDATA%/
-    const char* appdata = std::getenv("APPDATA");
-    if (appdata) return fs::path(appdata);
+    if (auto appdata = runtime::get_env("APPDATA"))
+        return fs::path(*appdata);
     return {};
 #else
     // ~/.config/
-    const char* home = std::getenv("HOME");
-    if (home) return fs::path(home) / ".config";
-    const char* xdg = std::getenv("XDG_CONFIG_HOME");
-    if (xdg) return fs::path(xdg);
+    if (auto xdg = runtime::get_env("XDG_CONFIG_HOME"))
+        return fs::path(*xdg);
+    if (auto home = runtime::get_env("HOME"))
+        return fs::path(*home) / ".config";
     return {};
 #endif
 }

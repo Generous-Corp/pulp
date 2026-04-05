@@ -4,6 +4,7 @@
 /// System and plugin diagnostic information for troubleshooting.
 
 #include <pulp/format/processor.hpp>
+#include <pulp/runtime/system.hpp>
 #include <pulp/state/store.hpp>
 #include <pulp/platform/platform.hpp>
 #include <string>
@@ -207,7 +208,8 @@ private:
     static std::string timestamp() {
         auto now = std::time(nullptr);
         char buf[64];
-        std::strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", std::localtime(&now));
+        const auto local = runtime::localtime_local(now);
+        std::strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", &local);
         return buf;
     }
 

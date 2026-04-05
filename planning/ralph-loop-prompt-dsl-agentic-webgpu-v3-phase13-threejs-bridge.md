@@ -39,9 +39,39 @@ READINESS SNAPSHOT (2026-04-02):
 - `v8` is now proven on a real machine path when explicit external inputs are supplied (`V8_INCLUDE_DIR`, `V8_LIB_DIR`, and `V8_LIBRARY_PATH` for non-`v8_monolith` providers such as Homebrew Node's `libnode`).
 - The current `JsEngine` capability floor is only partially raised:
   - typed arrays are now a real tested capability on `jsc`
+  - a first native-backed host-object descriptor seam is now tested across the proven backends
+  - a first native promise-returning seam is now tested across the proven backends
+  - a first browser-style bridge smoke slice is now tested across the proven backends through `ScriptEngine`
   - `v8` now also has a real configure/build/test proof path with typed-array coverage when built through that explicit provider contract
-  - HostObjects and Promises are still not implemented or proven
+  - deferred native async settlement is still not implemented as a held native resolver
+  - full opaque wrapper / proxy-style HostObjects are still not implemented or proven
 - Read `planning/v3-phase13-readiness.md` before treating this phase as ready to implement.
+
+CURRENT IMPLEMENTATION TRUTH (current local slices):
+- The current bridge slices stay narrow and truthful:
+  - `HTMLCanvasElement.getContext('2d')` is backed by the existing `CanvasWidget` bridge
+  - `HTMLCanvasElement.getContext('webgpu')` now returns a mock `GPUCanvasContext`
+  - `window.pulp.gpu.getInfo()` exposes native GPU availability/backend truth
+  - `navigator.gpu` is now present as a browser-shaped entry object
+  - `navigator.gpu.getPreferredCanvasFormat()` returns `"bgra8unorm"`
+  - `navigator.gpu.requestAdapter()` returns a real JS `Promise` that resolves to a mock adapter object
+  - a first mock object graph now exists behind that entry surface: `GPUAdapter`, `GPUDevice`, `GPUQueue`, `GPUBuffer`, `GPUTexture`, `GPUCommandEncoder`, and `GPUCanvasContext`
+  - core WebGPU globals are now present for bitmask-driven browser code: `GPUBufferUsage`, `GPUTextureUsage`, `GPUMapMode`, `GPUShaderStage`, and `GPUColorWrite`
+  - browser helper shims from the older monolith are now present in the split prelude too: `performance.now`, storage, `Image`, `atob`/`btoa`, `crypto.getRandomValues`, `TextEncoder`, `TextDecoder`, and `structuredClone`
+  - asset-backed browser helpers now exist for bundled/local resources: `window.pulp.fetch`, `Response`, `Blob`, and `URL.createObjectURL`, backed by `AssetManager`
+- These slices are useful because they prove the browser-style surface can attach to native rendering and GPU facts, expose the first synchronous global constants and early object graph that real WebGPU libraries expect, and now cover common browser helper APIs that loader code tends to assume, without claiming a real Dawn-backed `GPUDevice`, WGSL execution, or Three.js compatibility yet.
+- UTF-8 JSON payloads now have explicit focused proof across the native asset bridge, including byte-length preservation and canonical `application/json;charset=utf-8` data-URI handling.
+- DOM `id` and native widget `_id` are not yet the same contract; do not overclaim DOM/native parity until that seam is intentionally raised.
+- Promise-returning seams are currently proven only at the "real JS Promise object exists" level. The stock backend wrappers do not yet provide a portable cross-backend guarantee that settled `.then(...)` callbacks are observable from synchronous evaluation loops, so do not overclaim resolved adapter/device semantics yet.
+
+ACTIVE EXECUTION ORDER (2026-04-02):
+1. Keep Phase 13 scoped to truthful browser-shaped entry slices until the first real WebGPU object graph is ready.
+2. Prefer narrow bridge increments that can be tested locally in `pulp-test-web-compat-prelude` / `pulp-test-widget-bridge`.
+3. Keep the draft PR [#103](https://github.com/danielraffel/pulp/pull/103) and `planning/v3-phase-status.md` aligned with the real branch state after each landed slice.
+4. Do not reopen Phase 4 or Phase 5 here; their parked licensing disposition stays tracked in [#89](https://github.com/danielraffel/pulp/issues/89).
+5. Phase 14 must explicitly account for both:
+   - parked Phases 4/5 via [#89](https://github.com/danielraffel/pulp/issues/89)
+   - deferred Windows/Linux native WebView parity via [#92](https://github.com/danielraffel/pulp/issues/92)
 
 CONCEPT:
 Three.js's WebGPU renderer calls the standard WebGPU JavaScript API. This phase implements those
@@ -52,7 +82,7 @@ This follows the same architectural pattern proven by react-native-webgpu (JSI H
 and aligns with Pulp's philosophy: web-like developer experience without the browser runtime.
 
 DEPENDENCIES:
-- Requires Phase 10 (JS engine abstraction) — V8 strongly preferred for Three.js perf.
+- Requires Phase 10 (JS engine abstraction) — V8 strongly preferred for Three.js perf and now the explicit recommended implementation path for this phase.
   Phase 10 MUST expose a fast native-object binding API (like JSI HostObjects) that Phase 13
   uses to wrap Dawn objects. QuickJS's C API can do this but V8's JIT makes it viable for
   real Three.js scenes.
@@ -117,6 +147,8 @@ NON-NEGOTIABLES:
 - Do not fork or modify Three.js. The goal is API compatibility.
 - Dawn device MUST be shared between Skia Graphite and the WebGPU JS bridge.
   Do not create a second GPU device.
+- Treat the currently landed host-object descriptor seam as the first floor, not the final API.
+  The real bridge still needs opaque wrapper objects, and may still need held native async promise plumbing if the first Dawn-backed bridge slices prove the current microtask-wrapped promise seam is insufficient.
 
 DELIVERABLES:
 

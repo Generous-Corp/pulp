@@ -42,11 +42,26 @@ public:
     void process(audio::BufferView<float>& output,
                  const audio::BufferView<const float>& input);
 
+    /// Process a block of audio with explicit transport/timeline context.
+    /// Any zero-valued `sample_rate` / `num_samples` fields are defaulted from
+    /// the prepared host configuration and current buffer size.
+    void process(audio::BufferView<float>& output,
+                 const audio::BufferView<const float>& input,
+                 ProcessContext context);
+
     /// Process a block of audio with MIDI input and output.
     void process(audio::BufferView<float>& output,
                  const audio::BufferView<const float>& input,
                  midi::MidiBuffer& midi_in,
                  midi::MidiBuffer& midi_out);
+
+    /// Process a block of audio with MIDI and explicit transport/timeline
+    /// context. This is the low-level seam for deterministic offline stepping.
+    void process(audio::BufferView<float>& output,
+                 const audio::BufferView<const float>& input,
+                 midi::MidiBuffer& midi_in,
+                 midi::MidiBuffer& midi_out,
+                 ProcessContext context);
 
     /// Release processing resources. Safe to call multiple times.
     void release();

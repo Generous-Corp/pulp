@@ -3,7 +3,7 @@
 // Opens the default audio device and passes audio through the gain effect
 
 #include "pulp_gain.hpp"
-#include "../../core/format/src/standalone.hpp"
+#include <pulp/format/standalone.hpp>
 #include <pulp/runtime/log.hpp>
 #include <iostream>
 #include <thread>

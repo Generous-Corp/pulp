@@ -29,6 +29,27 @@ Bridge contract:
 - native `post_message(...)`
 - async `evaluate_js(..., callback)`
 
+## Platform Truth
+
+`PULP_BUILD_WEBVIEW=ON` is now the honest opt-in switch for the common Pulp
+WebView layer on:
+
+- macOS via WebKit
+- Windows via CHOC's WebView2 path
+- Ubuntu/Linux via CHOC's GTK/WebKitGTK path
+
+Required platform notes:
+- macOS: no extra package discovery beyond the system WebKit framework
+- Windows: normal Visual Studio/CMake toolchain plus a WebView2-capable runtime
+- Linux: `gtk+-3.0` and `webkit2gtk-4.1` available through `pkg-config`
+
+Keep claims narrow:
+- macOS has the deepest runtime proof today, including Monaco in a native host
+- Windows and Ubuntu now have truthful opt-in configure/build/test proof plus
+  `pulp-webview-palette` build proof
+- do not describe that as full runtime parity unless the host-level proof is
+  actually there
+
 ## Choose A Loading Mode
 
 1. Simple inline proof
@@ -67,15 +88,15 @@ cd /Users/danielraffel/Code/monaco-editor
 npm install
 npm run build-monaco-editor
 
-cd /private/tmp/pulp-phase7-webview-main
+cd /path/to/pulp
 node examples/webview-monaco/build_monaco_bundle.mjs \
   --monaco-root /Users/danielraffel/Code/monaco-editor \
-  --out-dir /private/tmp/pulp-phase7-webview-main/build-phase7/examples/webview-monaco/dist
+  --out-dir /path/to/pulp/build/examples/webview-monaco/dist
 
-cmake -S . -B build-phase7 -DCMAKE_BUILD_TYPE=Debug -DPULP_BUILD_WEBVIEW=ON \
-  -DPULP_MONACO_BUNDLE_DIR=/private/tmp/pulp-phase7-webview-main/build-phase7/examples/webview-monaco/dist
-cmake --build build-phase7 --target pulp-webview-monaco -j8
-./build-phase7/examples/webview-monaco/pulp-webview-monaco
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DPULP_BUILD_WEBVIEW=ON \
+  -DPULP_MONACO_BUNDLE_DIR=/path/to/pulp/build/examples/webview-monaco/dist
+cmake --build build --target pulp-webview-monaco -j8
+./build/examples/webview-monaco/pulp-webview-monaco
 ```
 
 Important notes from the working proof:
@@ -116,6 +137,7 @@ Current proof expectations:
 - bridge helpers pass
 - resource fetchers pass
 - example builds
+- Windows/Ubuntu opt-in builds can configure and run the focused test slice
 - live callback-ready cases may skip in headless or limited environments
 
 ## Screenshot / Preview Workflow

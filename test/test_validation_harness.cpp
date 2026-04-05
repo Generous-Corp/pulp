@@ -6,6 +6,7 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
 #include <pulp/format/validation_harness.hpp>
+#include <chrono>
 #include <cmath>
 #include <filesystem>
 #include <fstream>
@@ -72,6 +73,12 @@ public:
 
 std::unique_ptr<pulp::format::Processor> create_test_gain() {
     return std::make_unique<TestGainProcessor>();
+}
+
+std::filesystem::path make_temp_path(const char* stem) {
+    auto unique = std::to_string(
+        std::chrono::steady_clock::now().time_since_epoch().count());
+    return std::filesystem::temp_directory_path() / (std::string(stem) + "-" + unique + ".json");
 }
 
 } // anonymous namespace
@@ -209,17 +216,22 @@ TEST_CASE("ValidationHarness write_report creates file", "[harness][phase2]") {
     entry.error_message = "pluginval not found";
     harness.add_entry(entry);
 
-    auto tmp = std::filesystem::temp_directory_path() / "pulp-harness-test-report.json";
+    auto tmp = make_temp_path("pulp-harness-test-report");
     REQUIRE(harness.write_report(tmp));
     REQUIRE(std::filesystem::exists(tmp));
 
-    std::ifstream f(tmp);
-    std::string content((std::istreambuf_iterator<char>(f)),
-                         std::istreambuf_iterator<char>());
+    std::string content;
+    {
+        std::ifstream f(tmp);
+        content.assign(std::istreambuf_iterator<char>(f),
+                       std::istreambuf_iterator<char>());
+    }
     REQUIRE_THAT(content, ContainsSubstring("\"version\": 1"));
     REQUIRE_THAT(content, ContainsSubstring("\"skip\""));
 
-    std::filesystem::remove(tmp);
+    std::error_code ec;
+    std::filesystem::remove(tmp, ec);
+    REQUIRE_FALSE(ec);
 }
 
 // ── Validator graceful degradation ──────────────────────────────────────────

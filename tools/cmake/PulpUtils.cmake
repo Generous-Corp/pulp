@@ -4,6 +4,58 @@
 #   pulp_add_plugin()  — Create a plugin target with format adapters
 #   pulp_add_app()     — Create a standalone application target
 
+function(_pulp_pick_target out_var)
+    foreach(_candidate IN LISTS ARGN)
+        if(TARGET "${_candidate}")
+            set(${out_var} "${_candidate}" PARENT_SCOPE)
+            return()
+        endif()
+    endforeach()
+    set(${out_var} "" PARENT_SCOPE)
+endfunction()
+
+_pulp_pick_target(_PULP_FORMAT_TARGET Pulp::format pulp::format)
+_pulp_pick_target(_PULP_VIEW_TARGET Pulp::view pulp::view)
+_pulp_pick_target(_PULP_AUDIO_TARGET Pulp::audio pulp::audio)
+_pulp_pick_target(_PULP_MIDI_TARGET Pulp::midi pulp::midi)
+_pulp_pick_target(_PULP_STANDALONE_TARGET Pulp::standalone pulp::standalone)
+_pulp_pick_target(_PULP_VST3_SDK_TARGET Pulp::vst3-sdk vst3-sdk)
+_pulp_pick_target(_PULP_CLAP_TARGET Pulp::clap clap)
+_pulp_pick_target(_PULP_LV2_TARGET Pulp::lv2-headers lv2-headers)
+_pulp_pick_target(_PULP_AUSDK_TARGET Pulp::ausdk ausdk)
+
+if(NOT _PULP_FORMAT_TARGET)
+    message(FATAL_ERROR
+        "PulpUtils.cmake requires Pulp targets to exist first. "
+        "Use add_subdirectory(Pulp) or find_package(Pulp) before including it.")
+endif()
+
+if(DEFINED PULP_FORMAT_SOURCE_DIR AND EXISTS "${PULP_FORMAT_SOURCE_DIR}")
+    set(_PULP_FORMAT_SOURCE_DIR "${PULP_FORMAT_SOURCE_DIR}")
+else()
+    set(_PULP_FORMAT_SOURCE_DIR "${CMAKE_SOURCE_DIR}/core/format/src")
+endif()
+
+if(DEFINED PULP_VST3_INCLUDE_DIR AND EXISTS "${PULP_VST3_INCLUDE_DIR}")
+    set(_PULP_VST3_SDK_DIR "${PULP_VST3_INCLUDE_DIR}")
+elseif(DEFINED VST3_SDK_DIR AND EXISTS "${VST3_SDK_DIR}")
+    set(_PULP_VST3_SDK_DIR "${VST3_SDK_DIR}")
+else()
+    set(_PULP_VST3_SDK_DIR "")
+endif()
+
+if(DEFINED PULP_AUV3_TEMPLATE_DIR AND EXISTS "${PULP_AUV3_TEMPLATE_DIR}")
+    set(_PULP_AUV3_TEMPLATE_DIR "${PULP_AUV3_TEMPLATE_DIR}")
+else()
+    set(_PULP_AUV3_TEMPLATE_DIR "${CMAKE_SOURCE_DIR}/tools/templates/auv3")
+endif()
+
+if(DEFINED PULP_IOS_AUV3_TEMPLATE_DIR AND EXISTS "${PULP_IOS_AUV3_TEMPLATE_DIR}")
+    set(_PULP_IOS_AUV3_TEMPLATE_DIR "${PULP_IOS_AUV3_TEMPLATE_DIR}")
+else()
+    set(_PULP_IOS_AUV3_TEMPLATE_DIR "${CMAKE_SOURCE_DIR}/templates/ios-auv3")
+endif()
+
 # ── pulp_add_plugin ─────────────────────────────────────────────────────────
 # Creates plugin targets for each requested format from a single declaration.
 #
@@ -55,12 +107,12 @@ function(pulp_add_plugin target)
     # For compiled processors, create OBJECT library.
     if(PLUGIN_SOURCES)
         add_library(${target}_Core OBJECT ${PLUGIN_SOURCES})
-        target_link_libraries(${target}_Core PUBLIC pulp::format)
+        target_link_libraries(${target}_Core PUBLIC ${_PULP_FORMAT_TARGET})
         target_include_directories(${target}_Core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
         set(_PULP_CORE_OBJECTS "${PULP_${target}_CORE_OBJECTS}")
     else()
         add_library(${target}_Core INTERFACE)
-        target_link_libraries(${target}_Core INTERFACE pulp::format)
+        target_link_libraries(${target}_Core INTERFACE ${_PULP_FORMAT_TARGET})
         target_include_directories(${target}_Core INTERFACE ${CMAKE_CURRENT_SOURCE_DIR})
         set(_PULP_CORE_OBJECTS "")
     endif()
@@ -167,17 +219,24 @@ endfunction()
 
 # ── Internal: VST3 target ────────────────────────────────────────────────
 function(_pulp_add_vst3 target name bundle_id version manufacturer category)
+    if(NOT _PULP_VST3_SDK_DIR OR NOT _PULP_VST3_SDK_TARGET)
+        message(FATAL_ERROR "pulp_add_plugin(${target}): VST3 requested but the VST3 SDK is unavailable")
+    endif()
+    if(NOT _PULP_VIEW_TARGET)
+        message(FATAL_ERROR "pulp_add_plugin(${target}): VST3 GUI targets require ${_PULP_VIEW_TARGET}")
+    endif()
+
     # Platform entry point sources
     set(vst3_platform_src "")
     if(APPLE)
         list(APPEND vst3_platform_src
-            ${VST3_SDK_DIR}/public.sdk/source/main/macmain.cpp)
+            ${_PULP_VST3_SDK_DIR}/public.sdk/source/main/macmain.cpp)
     elseif(WIN32)
         list(APPEND vst3_platform_src
-            ${VST3_SDK_DIR}/public.sdk/source/main/dllmain.cpp)
+            ${_PULP_VST3_SDK_DIR}/public.sdk/source/main/dllmain.cpp)
     elseif(UNIX)
         list(APPEND vst3_platform_src
-            ${VST3_SDK_DIR}/public.sdk/source/main/linuxmain.cpp)
+            ${_PULP_VST3_SDK_DIR}/public.sdk/source/main/linuxmain.cpp)
     endif()
 
     # Find VST3 entry point (convention: vst3_entry.cpp in source dir)
@@ -190,11 +249,16 @@ function(_pulp_add_vst3 target name bundle_id version manufacturer category)
         ${PULP_${target}_CORE_OBJECTS}
         ${vst3_entry}
         ${vst3_platform_src}
-        ${CMAKE_SOURCE_DIR}/core/format/src/vst3_plug_view.cpp
-        ${VST3_SDK_DIR}/public.sdk/source/main/pluginfactory.cpp
-        ${VST3_SDK_DIR}/public.sdk/source/main/moduleinit.cpp
+        ${_PULP_FORMAT_SOURCE_DIR}/vst3_plug_view.cpp
+        ${_PULP_VST3_SDK_DIR}/public.sdk/source/main/pluginfactory.cpp
+        ${_PULP_VST3_SDK_DIR}/public.sdk/source/main/moduleinit.cpp
     )
-    target_link_libraries(${target}_VST3 PRIVATE ${target}_Core pulp::format pulp::view vst3-sdk)
+    target_link_libraries(${target}_VST3 PRIVATE
+        ${target}_Core
+        ${_PULP_FORMAT_TARGET}
+        ${_PULP_VIEW_TARGET}
+        ${_PULP_VST3_SDK_TARGET}
+    )
     target_compile_definitions(${target}_VST3 PRIVATE PULP_VST3_GUI=1)
     target_include_directories(${target}_VST3 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
@@ -212,12 +276,12 @@ function(_pulp_add_vst3 target name bundle_id version manufacturer category)
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/Info.plist.vst3")
         set_target_properties(${target}_VST3 PROPERTIES
             MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/Info.plist.vst3")
-    elseif(EXISTS "${CMAKE_SOURCE_DIR}/tools/cmake/PulpInfoPlist.vst3.in")
+    elseif(EXISTS "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/PulpInfoPlist.vst3.in")
         set(PULP_PLUGIN_NAME "${name}")
         set(PULP_BUNDLE_ID "${bundle_id}")
         set(PULP_VERSION "${version}")
         configure_file(
-            "${CMAKE_SOURCE_DIR}/tools/cmake/PulpInfoPlist.vst3.in"
+            "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/PulpInfoPlist.vst3.in"
             "${CMAKE_CURRENT_BINARY_DIR}/${target}_Info.plist.vst3"
             @ONLY)
         set_target_properties(${target}_VST3 PROPERTIES
@@ -242,10 +306,21 @@ function(_pulp_add_vst3 target name bundle_id version manufacturer category)
             COMMENT "Copying moduleinfo.json into ${name}.vst3 bundle"
         )
     endif()
+
+    if(COMMAND target_copy_webgpu_binaries)
+        target_copy_webgpu_binaries(${target}_VST3)
+    endif()
 endfunction()
 
 # ── Internal: CLAP target ───────────────────────────────────────────────
 function(_pulp_add_clap target name bundle_id version manufacturer category)
+    if(NOT _PULP_CLAP_TARGET)
+        message(FATAL_ERROR "pulp_add_plugin(${target}): CLAP requested but the CLAP SDK is unavailable")
+    endif()
+    if(NOT _PULP_VIEW_TARGET)
+        message(FATAL_ERROR "pulp_add_plugin(${target}): CLAP GUI targets require Pulp::view")
+    endif()
+
     # Find CLAP entry point (convention: clap_entry.cpp in source dir)
     set(clap_entry "")
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/clap_entry.cpp")
@@ -255,9 +330,13 @@ function(_pulp_add_clap target name bundle_id version manufacturer category)
     add_library(${target}_CLAP MODULE
         ${PULP_${target}_CORE_OBJECTS}
         ${clap_entry}
-        ${CMAKE_SOURCE_DIR}/core/format/src/clap_adapter.cpp
     )
-    target_link_libraries(${target}_CLAP PRIVATE ${target}_Core pulp::format pulp::view clap)
+    target_link_libraries(${target}_CLAP PRIVATE
+        ${target}_Core
+        ${_PULP_FORMAT_TARGET}
+        ${_PULP_VIEW_TARGET}
+        ${_PULP_CLAP_TARGET}
+    )
     target_compile_definitions(${target}_CLAP PRIVATE PULP_CLAP_GUI=1)
     target_include_directories(${target}_CLAP PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
@@ -276,10 +355,18 @@ function(_pulp_add_clap target name bundle_id version manufacturer category)
             BUNDLE_EXTENSION "clap"
         )
     endif()
+
+    if(COMMAND target_copy_webgpu_binaries)
+        target_copy_webgpu_binaries(${target}_CLAP)
+    endif()
 endfunction()
 
 # ── Internal: LV2 target ───────────────────────────────────────────────
 function(_pulp_add_lv2 target name bundle_id version manufacturer category)
+    if(NOT _PULP_LV2_TARGET)
+        message(FATAL_ERROR "pulp_add_plugin(${target}): LV2 requested but LV2 headers are unavailable")
+    endif()
+
     # Find LV2 entry point (convention: lv2_entry.cpp in source dir)
     set(lv2_entry "")
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/lv2_entry.cpp")
@@ -289,9 +376,12 @@ function(_pulp_add_lv2 target name bundle_id version manufacturer category)
     add_library(${target}_LV2 MODULE
         ${PULP_${target}_CORE_OBJECTS}
         ${lv2_entry}
-        ${CMAKE_SOURCE_DIR}/core/format/src/lv2_adapter.cpp
     )
-    target_link_libraries(${target}_LV2 PRIVATE ${target}_Core pulp::format lv2-headers)
+    target_link_libraries(${target}_LV2 PRIVATE
+        ${target}_Core
+        ${_PULP_FORMAT_TARGET}
+        ${_PULP_LV2_TARGET}
+    )
     target_include_directories(${target}_LV2 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
     # LV2 bundles: <name>.lv2/ directory containing the .so and .ttl files
@@ -304,6 +394,13 @@ endfunction()
 
 # ── Internal: AU v2 target ──────────────────────────────────────────────
 function(_pulp_add_au target name bundle_id version manufacturer category plugin_code manufacturer_code)
+    if(NOT _PULP_AUSDK_TARGET)
+        message(FATAL_ERROR "pulp_add_plugin(${target}): AU requested but AudioUnitSDK is unavailable")
+    endif()
+    if(NOT _PULP_VIEW_TARGET)
+        message(FATAL_ERROR "pulp_add_plugin(${target}): AU GUI targets require Pulp::view")
+    endif()
+
     # Find AU entry point (convention: au_v2_entry.cpp in source dir)
     set(au_entry "")
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/au_v2_entry.cpp")
@@ -313,13 +410,13 @@ function(_pulp_add_au target name bundle_id version manufacturer category plugin
     add_library(${target}_AU MODULE
         ${PULP_${target}_CORE_OBJECTS}
         ${au_entry}
-        ${CMAKE_SOURCE_DIR}/core/format/src/au_v2_cocoa_view.mm
+        ${_PULP_FORMAT_SOURCE_DIR}/au_v2_cocoa_view.mm
     )
     target_link_libraries(${target}_AU PRIVATE
         ${target}_Core
-        pulp::format
-        pulp::view
-        ausdk
+        ${_PULP_FORMAT_TARGET}
+        ${_PULP_VIEW_TARGET}
+        ${_PULP_AUSDK_TARGET}
         "-framework AudioToolbox"
         "-framework CoreFoundation"
         "-framework CoreAudio"
@@ -339,7 +436,7 @@ function(_pulp_add_au target name bundle_id version manufacturer category plugin
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/Info.plist.au")
         set_target_properties(${target}_AU PROPERTIES
             MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_SOURCE_DIR}/Info.plist.au")
-    elseif(EXISTS "${CMAKE_SOURCE_DIR}/tools/cmake/PulpInfoPlist.au.in")
+    elseif(EXISTS "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/PulpInfoPlist.au.in")
         set(PULP_PLUGIN_NAME "${name}")
         set(PULP_BUNDLE_ID "${bundle_id}")
         set(PULP_VERSION "${version}")
@@ -357,7 +454,7 @@ function(_pulp_add_au target name bundle_id version manufacturer category plugin
         # Factory function name follows the AUSDK_COMPONENT_ENTRY convention
         set(PULP_AU_FACTORY_NAME "${target}AUFactory")
         configure_file(
-            "${CMAKE_SOURCE_DIR}/tools/cmake/PulpInfoPlist.au.in"
+            "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/PulpInfoPlist.au.in"
             "${CMAKE_CURRENT_BINARY_DIR}/${target}_Info.plist.au"
             @ONLY)
         set_target_properties(${target}_AU PROPERTIES
@@ -370,6 +467,10 @@ function(_pulp_add_au target name bundle_id version manufacturer category plugin
             "$<TARGET_BUNDLE_DIR:${target}_AU>/Contents/PkgInfo"
         COMMENT "Writing PkgInfo into ${name}.component bundle"
     )
+
+    if(COMMAND target_copy_webgpu_binaries)
+        target_copy_webgpu_binaries(${target}_AU)
+    endif()
 endfunction()
 
 # ── Internal: AUv3 app extension target ────────────────────────────────
@@ -392,12 +493,12 @@ function(_pulp_add_auv3 target name bundle_id version manufacturer category plug
 
     # AUv3 sources — shared adapter plus platform-specific view controller
     set(auv3_sources
-        ${CMAKE_SOURCE_DIR}/core/format/src/au_adapter.mm
-        ${CMAKE_SOURCE_DIR}/core/format/src/au_entry.mm
+        ${_PULP_FORMAT_SOURCE_DIR}/au_adapter.mm
+        ${_PULP_FORMAT_SOURCE_DIR}/au_entry.mm
     )
     if(PULP_IOS)
         list(APPEND auv3_sources
-            ${CMAKE_SOURCE_DIR}/core/format/src/au_view_controller_ios.mm
+            ${_PULP_FORMAT_SOURCE_DIR}/au_view_controller_ios.mm
         )
     endif()
 
@@ -420,7 +521,9 @@ function(_pulp_add_auv3 target name bundle_id version manufacturer category plug
     endif()
 
     target_link_libraries(${target}_AUv3 PRIVATE
-        ${target}_Core pulp::format pulp::view
+        ${target}_Core
+        ${_PULP_FORMAT_TARGET}
+        ${_PULP_VIEW_TARGET}
         ${auv3_frameworks}
     )
     target_include_directories(${target}_AUv3 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -441,18 +544,18 @@ function(_pulp_add_auv3 target name bundle_id version manufacturer category plug
     list(GET _ver_parts 2 _ver_patch)
     math(EXPR PLUGIN_AU_VERSION_INT "${_ver_major} * 65536 + ${_ver_minor} * 256 + ${_ver_patch}")
 
-    if(PULP_IOS AND EXISTS "${CMAKE_SOURCE_DIR}/templates/ios-auv3/Info.plist.in")
+    if(PULP_IOS AND EXISTS "${_PULP_IOS_AUV3_TEMPLATE_DIR}/Info.plist.in")
         configure_file(
-            "${CMAKE_SOURCE_DIR}/templates/ios-auv3/Info.plist.in"
+            "${_PULP_IOS_AUV3_TEMPLATE_DIR}/Info.plist.in"
             "${CMAKE_BINARY_DIR}/AUv3/${target}.appex/Info.plist"
             @ONLY
         )
         set_target_properties(${target}_AUv3 PROPERTIES
             MACOSX_BUNDLE_INFO_PLIST "${CMAKE_BINARY_DIR}/AUv3/${target}.appex/Info.plist"
         )
-    elseif(EXISTS "${CMAKE_SOURCE_DIR}/tools/templates/auv3/Info.plist.template")
+    elseif(EXISTS "${_PULP_AUV3_TEMPLATE_DIR}/Info.plist.template")
         configure_file(
-            "${CMAKE_SOURCE_DIR}/tools/templates/auv3/Info.plist.template"
+            "${_PULP_AUV3_TEMPLATE_DIR}/Info.plist.template"
             "${CMAKE_BINARY_DIR}/AUv3/${target}.appex/Contents/Info.plist"
             @ONLY
         )
@@ -477,10 +580,18 @@ function(_pulp_add_auv3 target name bundle_id version manufacturer category plug
             XCODE_ATTRIBUTE_IPHONEOS_DEPLOYMENT_TARGET "16.0"
         )
     endif()
+
+    if(COMMAND target_copy_webgpu_binaries)
+        target_copy_webgpu_binaries(${target}_AUv3)
+    endif()
 endfunction()
 
 # ── Internal: Standalone target ─────────────────────────────────────────
 function(_pulp_add_standalone target name)
+    if(NOT _PULP_STANDALONE_TARGET)
+        message(FATAL_ERROR "pulp_add_plugin(${target}): Standalone requested but Pulp::standalone is unavailable")
+    endif()
+
     # Find standalone entry (convention: main.cpp in source dir)
     set(standalone_entry "")
     if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/main.cpp")
@@ -490,13 +601,18 @@ function(_pulp_add_standalone target name)
     add_executable(${target}_Standalone
         ${PULP_${target}_CORE_OBJECTS}
         ${standalone_entry}
-        ${CMAKE_SOURCE_DIR}/core/format/src/standalone.cpp
     )
-    target_link_libraries(${target}_Standalone PRIVATE ${target}_Core pulp::format pulp::view pulp::audio pulp::midi)
+    target_link_libraries(${target}_Standalone PRIVATE
+        ${target}_Core
+        ${_PULP_STANDALONE_TARGET}
+    )
     target_include_directories(${target}_Standalone PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     set_target_properties(${target}_Standalone PROPERTIES
         OUTPUT_NAME "${name}"
     )
+    if(COMMAND target_copy_webgpu_binaries)
+        target_copy_webgpu_binaries(${target}_Standalone)
+    endif()
 endfunction()
 
 # ── pulp_add_app ────────────────────────────────────────────────────────

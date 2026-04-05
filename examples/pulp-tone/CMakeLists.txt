@@ -36,7 +36,7 @@ if(APPLE AND PULP_HAS_AUSDK)
     add_test(
         NAME auval-PulpTone
         COMMAND ${CMAKE_COMMAND} -E env
-            bash -c "cp -R ${CMAKE_BINARY_DIR}/AU/PulpTone.component ~/Library/Audio/Plug-Ins/Components/ && auval -v aumu PTon Pulp 2>&1 | tee /dev/stderr | grep -q 'PASS'"
+            bash -c "cp -R \"${CMAKE_BINARY_DIR}/AU/PulpTone.component\" \"$HOME/Library/Audio/Plug-Ins/Components/\" && auval -v aumu PTon Pulp 2>&1 | tee /dev/stderr | grep -q 'PASS'"
     )
     set_tests_properties(auval-PulpTone PROPERTIES LABELS "validation;au" TIMEOUT 30)
 endif()

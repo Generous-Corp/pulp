@@ -10,6 +10,7 @@
 #include <pulp/view/window_host.hpp>
 #include <pulp/view/hot_reload.hpp>
 #include <pulp/state/store.hpp>
+#include <pulp/runtime/system.hpp>
 #include <filesystem>
 #include <fstream>
 #include <memory>
@@ -235,8 +236,8 @@ int main(int argc, char* argv[]) {
     auto bridge = std::make_unique<WidgetBridge>(*engine, root, store);
     if (!automation.ai_cli.empty()) {
         bridge->set_ai_cli_command(automation.ai_cli);
-    } else if (const char* ai_cli = std::getenv("PULP_AI_CLI")) {
-        bridge->set_ai_cli_command(ai_cli);
+    } else if (auto ai_cli = pulp::runtime::get_env("PULP_AI_CLI")) {
+        bridge->set_ai_cli_command(*ai_cli);
     }
 
     // Load library scripts first (oklch.js)
@@ -320,8 +321,8 @@ int main(int argc, char* argv[]) {
             auto next_bridge = std::make_unique<WidgetBridge>(*next_engine, root, store);
             if (!automation.ai_cli.empty()) {
                 next_bridge->set_ai_cli_command(automation.ai_cli);
-            } else if (const char* ai_cli = std::getenv("PULP_AI_CLI")) {
-                next_bridge->set_ai_cli_command(ai_cli);
+            } else if (auto ai_cli = pulp::runtime::get_env("PULP_AI_CLI")) {
+                next_bridge->set_ai_cli_command(*ai_cli);
             }
             load_library_scripts(*next_bridge);
             next_bridge->load_script(new_code);

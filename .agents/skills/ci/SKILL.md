@@ -67,6 +67,18 @@ python3 tools/local-ci/local_ci.py run [branch] --smoke
 
 If you pass a branch name explicitly, `run [branch]` resolves that branch tip to an exact SHA before queueing. It must not silently reuse the launching checkout's `HEAD`.
 
+Queueing now performs a submission preflight before the job is recorded:
+- prints the queued worktree root, current cwd, config path/source, and per-target host intent
+- rejects accidental wrong-root launches by default
+- rejects obviously unreachable SSH targets by default when they have no fallback path
+
+Override flags exist for deliberate exceptions:
+
+```bash
+python3 tools/local-ci/local_ci.py run [branch] --allow-root-mismatch
+python3 tools/local-ci/local_ci.py run [branch] --allow-unreachable-targets
+```
+
 For SSH targets, `run` uploads the exact queued SHA as a git bundle before validation, so Ubuntu and Windows do not need that branch tip to be visible on the host ahead of time.
 Use `--smoke` for a fast clean install/export preflight when you want early signal before paying for the full test matrix. Smoke runs are explicitly labeled as `validation=smoke`.
 If you queue a newer SHA for the same branch, targets, and validation mode, older pending work is superseded automatically.
@@ -152,6 +164,8 @@ Required behavior while a job is active:
 - On persistent local/self-hosted targets, prefer prepared same-SHA reruns for narrow follow-up validation and make `prepared=clean` vs `prepared=reused` visible in status/logs.
 - Prefer the shared machine-global CI config (`state_dir()/config.json`; on macOS `~/Library/Application Support/Pulp/local-ci/config.json`) so every worktree sees the same host map by default.
 - Treat worktree-local `tools/local-ci/config.json` as a fallback or temporary override only. Hostnames and `repo_path` values can drift between worktrees.
+- Pay attention to the submission preflight. If it says the cwd git root and queued worktree root differ, stop and fix that unless the mismatch is intentional.
+- If preflight reports shared-state vs worktree-local config drift for the selected targets, treat that as a real warning, not cosmetic noise.
 - If a dead runner left behind a stale Windows validator, let the queue reclaim that specific remote validator before starting fresh work; treat that cleanup as part of the truthful narrow-rerun path, not as ad hoc manual SSH.
 
 Minimum incident response once a failure is visible:
@@ -163,20 +177,39 @@ Minimum incident response once a failure is visible:
 
 ### `cloud run [branch]` — Trigger GitHub Actions
 
-Trigger cloud CI manually via workflow_dispatch (when cloud CI is needed):
+Trigger cloud CI only when cloud CI is actually needed, for example
+workflow-semantics changes, release validation, or a neutral-host confirmation
+that local CI cannot provide. Prefer the built-in `pulp ci-local cloud ...`
+surface instead of raw `gh workflow run`:
 
 ```bash
-gh workflow run build.yml --ref <branch>
-gh workflow run sanitizers.yml --ref <branch>
-gh workflow run validate.yml --ref <branch>
-gh workflow run docs-check.yml --ref <branch>
+pulp ci-local cloud workflows
+pulp ci-local cloud defaults
+pulp ci-local cloud history
+pulp ci-local cloud compare build
+pulp ci-local cloud recommend build
+pulp ci-local cloud run build <branch>
+pulp ci-local cloud run validate <branch>
+pulp ci-local cloud run docs-check <branch> --provider namespace
 ```
 
 ### `cloud status` — Check GitHub Actions
 
 ```bash
-gh run list --limit 5
+pulp ci-local cloud status
+pulp ci-local cloud status latest --refresh
 ```
+
+`cloud defaults` is the companion visibility command when you need to see the
+current effective workflow/provider defaults and where Namespace selectors are
+coming from before dispatching a run.
+
+`cloud history`, `cloud compare`, and `cloud recommend` are the next visibility
+layer when you need saved timing/provider evidence from earlier runs. Any cost
+number shown there is `estimated; verify provider pricing`.
+
+Use raw `gh workflow run` / `gh run view` only as a fallback when debugging the
+GitHub side of the operator surface itself.
 
 ## Configuration
 
@@ -196,6 +229,11 @@ Key fields:
 - `defaults.priority` — default queue priority for `run` and `enqueue`
 - `defaults.ship_priority` — default queue priority for `ship`
 - `defaults.check_priority` — default queue priority for `check`
+- `github_actions.repository` — optional `owner/repo` override for cloud commands
+- `github_actions.defaults.workflow` — default workflow key for `cloud run`
+- `github_actions.defaults.provider` — default cloud runner provider
+- `github_actions.defaults.wait_poll_secs` — cloud wait polling interval
+- `github_actions.defaults.match_timeout_secs` — dispatch-to-run match timeout
 
 ## Documentation
 

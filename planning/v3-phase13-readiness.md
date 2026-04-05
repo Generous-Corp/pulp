@@ -1,8 +1,8 @@
 # Phase 13 Readiness Snapshot
 
 **Last updated:** 2026-04-02
-**Branch:** `feature/v3-phase13-readiness`
-**Base truth:** `origin/main` after Phase 7 (`#91`) and local-CI safety (`#93`)
+**Branch:** `feature/v3-phase13-bridge-smoke`
+**Base truth:** `origin/main` after the host-object floor (`#98`) and promise floor (`#99`)
 
 This note hardens the exact readiness floor for Phase 13 so the Three.js / WebGPU bridge starts from proven facts instead of future-state assumptions.
 
@@ -28,7 +28,7 @@ ctest --test-dir build-phase13-quickjs -R "JsEngine" --output-on-failure
 Result:
 - configure: pass
 - build: pass
-- shared `JsEngine` tests: `21/21` passed
+- shared `JsEngine` tests: `27/27` passed
 
 ### JavaScriptCore
 
@@ -43,7 +43,7 @@ ctest --test-dir build-phase13-jsc -R "JsEngine" --output-on-failure
 Result:
 - configure: pass
 - build: pass
-- shared `JsEngine` tests: `21/21` passed
+- shared `JsEngine` tests: `27/27` passed
 
 ### V8
 
@@ -61,7 +61,7 @@ ctest --test-dir build-phase13-v8 -R "JsEngine" --output-on-failure
 Result:
 - configure: pass with explicit external V8 inputs
 - build: pass with the Node-provided embedder library
-- shared `JsEngine` tests: `24/24` passed
+- shared `JsEngine` tests: `27/27` passed
 
 Truth:
 - the V8 backend exists in code
@@ -78,25 +78,42 @@ Truth:
 The merged Phase 10 abstraction is real, but the stronger Phase 13-forward capability floor is only partially implemented today.
 
 Current code truth:
-- `JsEngine::supports_host_objects()` defaults to `false`
+- `JsEngine::register_host_object()` now exposes a first truthful host-object slice on every proven backend:
+  - snapshot properties
+  - native method callbacks
+  - explicit `_objectName` tagging for later bridge code
 - `JsEngine::supports_typed_arrays()` defaults to `false`, but backend overrides now matter
-- `JsEngine::supports_promises()` defaults to `false`
-- `QuickJS` still reports typed arrays unsupported through the current Pulp seam
+- `JsEngine::register_promise_function()` now exposes a first truthful promise slice on every proven backend:
+  - native callback result is surfaced as a real JS `Promise`
+  - resolution happens on the JS microtask queue through a shared wrapper
+  - this is not yet a held native resolver for later completion
+  - cross-backend synchronous observation of settled `.then(...)` callbacks is not yet a proven contract through the current `evaluate()` loop
+- the first truthful bridge smoke slice now exists on every proven backend:
+  - `ScriptEngine` can register a browser-style `navigator.gpu` host object
+  - `navigator.gpu.requestAdapter()` can be surfaced as a real JS `Promise`
+  - the shared smoke proves the current floor is enough to assemble the first browser-shaped GPU entry points without native WebGPU objects yet
+- `QuickJS` now reports host-object support through the shared descriptor seam, but still reports typed arrays unsupported through the current Pulp seam
+- `JavaScriptCore` now reports host-object support through that same shared descriptor seam
+- `V8` now reports host-object support through that same shared descriptor seam when built with the explicit provider contract
 - `JavaScriptCore` now surfaces TypedArray / ArrayBuffer values through the current Pulp seam and is covered by shared `JsEngine` tests
 - the `V8` backend now truthfully reports typed-array support in code and is proven in a real V8-enabled configure/build/test path when explicit external inputs are supplied
-- HostObjects and Promise-returning native APIs are still not implemented on any backend
+- full held-resolver native async APIs are still not implemented on any backend
+- full opaque native wrapper / proxy-style HostObjects are still not implemented on any backend
 
 That means the current engine layer is sufficient for:
 - expression evaluation
 - module execution
 - function registration
 - basic bridge-style JS integration
+- native-backed object descriptors with properties + method callbacks
+- Promise-returning native functions that resolve via the JS microtask queue
 - typed-array argument / return-value flows on `jsc`
 
 It is not yet proven sufficient for:
-- HostObject-style native GPU wrapper objects
 - zero-copy TypedArray / ArrayBuffer exchange
-- Promise-returning native async APIs such as `mapAsync()`
+- held-resolver native async APIs such as `mapAsync()`
+- opaque native GPU wrapper objects with live property interception / lifecycle hooks
+- deterministic cross-backend promise settlement observation from synchronous evaluation loops (`V8` pumps microtasks when its message loop is pumped; the current QuickJS wrapper does not explicitly execute pending jobs after `evaluateExpression()`)
 
 ## First Honest Phase 13 Gate
 
@@ -107,18 +124,18 @@ Before calling Phase 13 implementation "in progress", the following should be tr
 - [x] record the real `v8` configure contract on current `main`
 - [x] raise the first truthful capability slice: typed arrays where the backend already supports them
 - [x] prove one real V8-enabled configure/build with external V8 inputs
-- [ ] decide whether Phase 13 starts as `v8-first` or `quickjs/jsc-first with V8 follow-up`
-- [ ] extend the `JsEngine` contract with the remaining minimum host-object / promise surface
-- [ ] add tests for that remaining surface before binding Dawn objects
-- [ ] define the first truthful Phase 13 smoke slice
+- [x] raise the first truthful host-object slice: native-backed object descriptors with properties + methods
+- [x] raise the first truthful promise slice: native callbacks surfaced as JS `Promise` objects
+- [x] decide that Phase 13 implementation starts `v8-preferred`, while keeping the readiness smoke engine-agnostic across all proven backends
+- [x] write down the remaining deferred native-async gap without treating it as a blocker until the real bridge proves it is needed
+- [x] define and prove the first truthful Phase 13 smoke slice
 
 ## Recommended Next Steps
 
-1. Add the next capability slice for HostObjects and Promise-returning native async paths instead of leaving them as undocumented stubs.
-2. Decide whether the first bridge slice targets:
-   - a `v8-first` path for Three.js realism, or
-   - a thinner engine-agnostic proof slice first, with V8 performance proof immediately after.
-3. Only then start the actual Three.js / WebGPU bridge branch.
+1. Start the actual Phase 13 bridge work as a `v8`-preferred implementation path.
+2. Keep the existing engine-agnostic smoke slice as the regression floor while the real bridge grows.
+3. Only add held-resolver native async APIs if the first real Dawn-backed bridge work proves the current promise floor is insufficient.
+4. Keep QuickJS/JSC support honest as compatibility backends, not the primary Three.js performance target.
 
 ## Related Tracking
 

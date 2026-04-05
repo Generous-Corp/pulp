@@ -224,7 +224,7 @@ GitHub Actions workflows ship with every Pulp project:
 - Windows Authenticode and Azure Trusted Signing
 - EdDSA-signed artifacts for Sparkle/WinSparkle auto-updates
 - Draft GitHub Releases with per-platform installers
-- Automatic download page updates on `gh-pages`
+- GitHub Pages artifact deploy for the docs/download site
 - WASM build and deploy for web demos
 
 ### Build System

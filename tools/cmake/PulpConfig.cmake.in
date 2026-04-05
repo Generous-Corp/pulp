@@ -1,41 +1,163 @@
-# PulpConfig.cmake — find_package(Pulp) support for standalone projects
-#
-# Defines imported targets:
-#   Pulp::platform  Pulp::runtime  Pulp::events  Pulp::state
-#   Pulp::audio     Pulp::midi     Pulp::signal  Pulp::format
-#   Pulp::canvas
-#
-# Also provides:
-#   pulp_add_plugin()  — macro from PulpPlugin.cmake
-#   PULP_SDK_DIR       — root of the installed SDK
+# PulpConfig.cmake — find_package(Pulp) support for installed SDK consumers
 
 @PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
 
 set(PULP_VERSION "@PROJECT_VERSION@")
 get_filename_component(PULP_SDK_DIR "${CMAKE_CURRENT_LIST_DIR}/../../.." ABSOLUTE)
 set(PULP_SDK_STATIC_LIBRARY_PREFIX "@CMAKE_STATIC_LIBRARY_PREFIX@")
 set(PULP_SDK_STATIC_LIBRARY_SUFFIX "@CMAKE_STATIC_LIBRARY_SUFFIX@")
+set(PULP_SDK_SHARED_LIBRARY_PREFIX "@CMAKE_SHARED_LIBRARY_PREFIX@")
+set(PULP_SDK_SHARED_LIBRARY_SUFFIX "@CMAKE_SHARED_LIBRARY_SUFFIX@")
+set(PULP_SDK_LIBRARY_DIR "${PULP_SDK_DIR}/@CMAKE_INSTALL_LIBDIR@")
 
-set(_pulp_sdl3_headers_dir "${PULP_SDK_DIR}/external/SDL3/include")
-
-if(NOT TARGET SDL3::Headers AND EXISTS "${_pulp_sdl3_headers_dir}")
-    add_library(SDL3::Headers INTERFACE IMPORTED)
-    set_target_properties(SDL3::Headers PROPERTIES
-        INTERFACE_INCLUDE_DIRECTORIES "${_pulp_sdl3_headers_dir}"
-    )
-endif()
-
-include("${CMAKE_CURRENT_LIST_DIR}/PulpTargets.cmake")
-
-# Provide the pulp_add_plugin() macro for standalone projects
-include("${CMAKE_CURRENT_LIST_DIR}/PulpPlugin.cmake")
-
-# Locate bundled format SDK headers
 set(PULP_CLAP_INCLUDE_DIR "${PULP_SDK_DIR}/external/clap/include")
 set(PULP_LV2_INCLUDE_DIR "${PULP_SDK_DIR}/external/lv2/include")
 set(PULP_VST3_INCLUDE_DIR "${PULP_SDK_DIR}/external/vst3sdk")
 set(PULP_AUSDK_INCLUDE_DIR "${PULP_SDK_DIR}/external/AudioUnitSDK/include")
 set(PULP_SOURCE_INCLUDE_DIR "${PULP_SDK_DIR}/src")
 set(PULP_FORMAT_SOURCE_DIR "${PULP_SDK_DIR}/src/pulp/format")
+set(PULP_AUV3_TEMPLATE_DIR "${PULP_SDK_DIR}/templates/auv3")
+set(PULP_IOS_AUV3_TEMPLATE_DIR "${PULP_SDK_DIR}/templates/ios-auv3")
+
+if(APPLE)
+    set(PULP_APPLE TRUE)
+    if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
+        set(PULP_IOS TRUE)
+        set(PULP_PLATFORM "ios")
+    else()
+        set(PULP_MACOS TRUE)
+        set(PULP_PLATFORM "mac")
+    endif()
+elseif(WIN32)
+    set(PULP_WINDOWS TRUE)
+    set(PULP_PLATFORM "win")
+elseif(UNIX)
+    set(PULP_LINUX TRUE)
+    set(PULP_PLATFORM "linux")
+endif()
+
+if(PULP_LINUX)
+    find_dependency(ALSA)
+endif()
+
+set(_pulp_webgpu_runtime
+    "${PULP_SDK_LIBRARY_DIR}/${PULP_SDK_SHARED_LIBRARY_PREFIX}wgpu_native${PULP_SDK_SHARED_LIBRARY_SUFFIX}")
+set(_pulp_webgpu_include_dir "${PULP_SDK_DIR}/external/webgpu/include")
+
+if(NOT TARGET webgpu
+   AND EXISTS "${_pulp_webgpu_runtime}"
+   AND EXISTS "${_pulp_webgpu_include_dir}")
+    add_library(webgpu SHARED IMPORTED)
+    set_target_properties(webgpu PROPERTIES
+        IMPORTED_LOCATION "${_pulp_webgpu_runtime}"
+        INTERFACE_COMPILE_DEFINITIONS "WEBGPU_BACKEND_WGPU"
+        INTERFACE_INCLUDE_DIRECTORIES
+            "${_pulp_webgpu_include_dir};${_pulp_webgpu_include_dir}/webgpu"
+    )
+
+    if(WIN32)
+        set(_pulp_webgpu_implib
+            "${PULP_SDK_LIBRARY_DIR}/${PULP_SDK_SHARED_LIBRARY_PREFIX}wgpu_native.lib")
+        if(EXISTS "${_pulp_webgpu_implib}")
+            set_property(TARGET webgpu PROPERTY IMPORTED_IMPLIB "${_pulp_webgpu_implib}")
+        endif()
+    elseif(UNIX AND NOT APPLE)
+        set_property(TARGET webgpu PROPERTY IMPORTED_NO_SONAME TRUE)
+    endif()
+endif()
+
+if(EXISTS "${PULP_SDK_DIR}/external/skia-build")
+    set(_pulp_saved_skia_dir "${SKIA_DIR}")
+    set(SKIA_DIR "${PULP_SDK_DIR}/external/skia-build")
+    include("${CMAKE_CURRENT_LIST_DIR}/FindSkia.cmake")
+    if(DEFINED _pulp_saved_skia_dir)
+        set(SKIA_DIR "${_pulp_saved_skia_dir}")
+    else()
+        unset(SKIA_DIR)
+    endif()
+    unset(_pulp_saved_skia_dir)
+endif()
+
+if(NOT TARGET SDL3::Headers)
+    set(_pulp_sdl3_headers_dir "${PULP_SDK_DIR}/external/SDL3/include")
+    if(EXISTS "${_pulp_sdl3_headers_dir}")
+        add_library(SDL3::Headers INTERFACE IMPORTED)
+        set_target_properties(SDL3::Headers PROPERTIES
+            INTERFACE_INCLUDE_DIRECTORIES "${_pulp_sdl3_headers_dir}"
+        )
+    endif()
+endif()
+
+if(NOT COMMAND target_copy_webgpu_binaries)
+    function(target_copy_webgpu_binaries target)
+        if(TARGET webgpu AND EXISTS "${_pulp_webgpu_runtime}")
+            add_custom_command(
+                TARGET ${target}
+                POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "${_pulp_webgpu_runtime}"
+                    $<TARGET_FILE_DIR:${target}>
+                COMMENT "Copying WebGPU runtime next to ${target}"
+            )
+        endif()
+    endfunction()
+endif()
+
+include("${CMAKE_CURRENT_LIST_DIR}/PulpTargets.cmake")
+
+if(TARGET Pulp::yogacore)
+    set_target_properties(Pulp::yogacore PROPERTIES
+        INTERFACE_INCLUDE_DIRECTORIES "${PULP_SDK_DIR}/include"
+    )
+endif()
+
+set(PULP_HAS_CLAP FALSE)
+if(TARGET Pulp::clap)
+    set(PULP_HAS_CLAP TRUE)
+endif()
+
+set(PULP_HAS_LV2 FALSE)
+if(TARGET Pulp::lv2-headers)
+    set(PULP_HAS_LV2 TRUE)
+endif()
+
+set(PULP_HAS_VST3 FALSE)
+if(TARGET Pulp::vst3-sdk)
+    set(PULP_HAS_VST3 TRUE)
+endif()
+
+set(PULP_HAS_AUSDK FALSE)
+if(TARGET Pulp::ausdk)
+    set(PULP_HAS_AUSDK TRUE)
+endif()
+
+set(PULP_HAS_SDL3 FALSE)
+if(TARGET Pulp::sdl3-static)
+    set(PULP_HAS_SDL3 TRUE)
+endif()
+
+set(PULP_HAS_YOGA FALSE)
+if(TARGET Pulp::yogacore)
+    set(PULP_HAS_YOGA TRUE)
+endif()
+
+set(PULP_HAS_WEBGPU FALSE)
+if(TARGET webgpu)
+    set(PULP_HAS_WEBGPU TRUE)
+endif()
+
+set(PULP_HAS_SKIA FALSE)
+if(TARGET skia::skia)
+    set(PULP_HAS_SKIA TRUE)
+endif()
+
+set(PULP_ENABLE_GPU FALSE)
+if(TARGET Pulp::render)
+    set(PULP_ENABLE_GPU TRUE)
+endif()
+
+include("${CMAKE_CURRENT_LIST_DIR}/PulpUtils.cmake")
 
 check_required_components(Pulp)

@@ -1,9 +1,14 @@
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/ship/codesign.hpp>
-#include <fstream>
 #include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#ifdef __APPLE__
+#include <unistd.h>
+#endif
 
 using namespace pulp::ship;
+namespace fs = std::filesystem;
 
 TEST_CASE("check_codesign on system binary", "[ship][codesign]") {
 #ifdef __APPLE__
@@ -45,21 +50,22 @@ TEST_CASE("default_audio_entitlements returns valid plist", "[ship][codesign]") 
 
 TEST_CASE("create_dmg produces a file from valid source", "[ship][codesign]") {
 #ifdef __APPLE__
-    // Create a temp directory as source
-    std::string tmp = "/tmp/pulp-dmg-test-src";
-    std::system(("mkdir -p " + tmp).c_str());
-    std::system(("touch " + tmp + "/test.txt").c_str());
+    auto root_template = (fs::temp_directory_path() / "pulp-dmg-test-XXXXXX").string();
+    REQUIRE(mkdtemp(root_template.data()) != nullptr);
 
-    std::string dmg_path = "/tmp/pulp-test-output.dmg";
-    bool ok = create_dmg(tmp, dmg_path, "PulpTest");
+    fs::path root(root_template);
+    fs::path source = root / "source";
+    fs::create_directories(source);
+
+    std::ofstream(source / "test.txt") << "pulp";
+
+    fs::path dmg_path = root / "output.dmg";
+    bool ok = create_dmg(source.string(), dmg_path.string(), "PulpTest");
     REQUIRE(ok);
 
-    // Verify the DMG file exists
-    std::ifstream f(dmg_path);
-    REQUIRE(f.good());
+    REQUIRE(fs::is_regular_file(dmg_path));
+    REQUIRE(fs::file_size(dmg_path) > 0);
 
-    // Cleanup
-    std::system(("rm -rf " + tmp).c_str());
-    std::system(("rm -f " + dmg_path).c_str());
+    fs::remove_all(root);
 #endif
 }

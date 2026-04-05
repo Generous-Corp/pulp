@@ -8,11 +8,14 @@ on:
       - 'core/**/include/**'
       - 'tools/build-docs.py'
       - 'tools/build-api-docs.sh'
+      - 'tools/install/install.sh'
+      - 'tools/install/install.ps1'
       - 'docs/doxygen/**'
       - '.github/workflows/docs-deploy.yml'
   workflow_dispatch:
 
 permissions:
+  actions: read
   contents: read
   pages: write
   id-token: write
@@ -25,10 +28,10 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.12'
 
@@ -62,10 +65,24 @@ jobs:
           cp tools/install/install.ps1 build/site/install.ps1
           echo "Install scripts copied to site root"
 
+      - name: Archive Pages artifact
+        run: |
+          tar \
+            --dereference --hard-dereference \
+            --directory build/site \
+            --exclude=.git \
+            --exclude=.github \
+            --exclude='.[^/]*' \
+            -cvf "$RUNNER_TEMP/github-pages.tar" \
+            .
+
       - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-artifact@v7
         with:
-          path: build/site
+          name: github-pages
+          path: ${{ runner.temp }}/github-pages.tar
+          retention-days: 1
+          if-no-files-found: error
 
   deploy:
     needs: build
@@ -76,4 +93,4 @@ jobs:
     steps:
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5

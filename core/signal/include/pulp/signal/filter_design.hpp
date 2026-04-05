@@ -115,9 +115,9 @@ struct FilterDesign {
 
     /// Low shelf filter.
     static Coefficients low_shelf(float freq_hz, float gain_db, float sample_rate, float S = 1.0f) {
-        constexpr float pi = 3.14159265358979323846f;
+        constexpr float pi_value = 3.14159265358979323846f;
         float A = std::pow(10.0f, gain_db / 40.0f);
-        float w0 = 2.0f * pi * freq_hz / sample_rate;
+        float w0 = 2.0f * pi_value * freq_hz / sample_rate;
         float cos_w0 = std::cos(w0);
         float alpha = std::sin(w0) / 2.0f * std::sqrt((A + 1.0f / A) * (1.0f / S - 1.0f) + 2.0f);
         float sqrtA2alpha = 2.0f * std::sqrt(A) * alpha;
@@ -133,9 +133,9 @@ struct FilterDesign {
 
     /// High shelf filter.
     static Coefficients high_shelf(float freq_hz, float gain_db, float sample_rate, float S = 1.0f) {
-        constexpr float pi = 3.14159265358979323846f;
+        constexpr float pi_value = 3.14159265358979323846f;
         float A = std::pow(10.0f, gain_db / 40.0f);
-        float w0 = 2.0f * pi * freq_hz / sample_rate;
+        float w0 = 2.0f * pi_value * freq_hz / sample_rate;
         float cos_w0 = std::cos(w0);
         float alpha = std::sin(w0) / 2.0f * std::sqrt((A + 1.0f / A) * (1.0f / S - 1.0f) + 2.0f);
         float sqrtA2alpha = 2.0f * std::sqrt(A) * alpha;
@@ -158,11 +158,11 @@ struct FilterDesign {
         int num_sections = order / 2;
         std::vector<Coefficients> result;
         result.reserve(static_cast<size_t>(num_sections));
-        constexpr float pi = 3.14159265358979323846f;
+        constexpr float pi_value = 3.14159265358979323846f;
 
         for (int k = 0; k < num_sections; ++k) {
             // Q for each section of Butterworth cascade
-            float angle = pi * (2.0f * static_cast<float>(k) + 1.0f) / (2.0f * static_cast<float>(order));
+            float angle = pi_value * (2.0f * static_cast<float>(k) + 1.0f) / (2.0f * static_cast<float>(order));
             float Q = 1.0f / (2.0f * std::cos(angle));
             result.push_back(lowpass(freq_hz, Q, sample_rate));
         }
@@ -174,10 +174,10 @@ struct FilterDesign {
         int num_sections = order / 2;
         std::vector<Coefficients> result;
         result.reserve(static_cast<size_t>(num_sections));
-        constexpr float pi = 3.14159265358979323846f;
+        constexpr float pi_value = 3.14159265358979323846f;
 
         for (int k = 0; k < num_sections; ++k) {
-            float angle = pi * (2.0f * static_cast<float>(k) + 1.0f) / (2.0f * static_cast<float>(order));
+            float angle = pi_value * (2.0f * static_cast<float>(k) + 1.0f) / (2.0f * static_cast<float>(order));
             float Q = 1.0f / (2.0f * std::cos(angle));
             result.push_back(highpass(freq_hz, Q, sample_rate));
         }

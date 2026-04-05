@@ -172,7 +172,6 @@ PULP_VST3_PLUGIN(kUID, "MyGain", Steinberg::Vst::PlugType::kFx,
 **AU v2** (`au_v2_entry.cpp`, macOS only):
 ```cpp
 #include "my_processor.hpp"
-#include "path/to/pulp/core/format/src/au_v2_adapter.cpp"
 #include <pulp/format/au_v2_entry.hpp>
 PULP_AU_PLUGIN(MyGainAU, create_my_gain)
 ```

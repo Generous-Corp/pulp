@@ -8,11 +8,11 @@ on:
 
 jobs:
   validate-macos:
-    runs-on: macos-14
+    runs-on: macos-15
     name: Validate Plugins (macOS ARM64)
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           lfs: true
 
@@ -51,7 +51,7 @@ jobs:
           cmake --build build --config Release -j$(sysctl -n hw.ncpu)
 
       - name: Run Unit Tests
-        run: ctest --test-dir build --output-on-failure -j$(sysctl -n hw.ncpu)
+        run: ctest --test-dir build --output-on-failure -LE validation -j$(sysctl -n hw.ncpu)
 
       - name: Validate VST3 plugins (pluginval)
         run: |

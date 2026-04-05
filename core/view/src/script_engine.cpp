@@ -46,6 +46,14 @@ void ScriptEngine::register_function(const std::string& name,
         });
 }
 
+void ScriptEngine::register_host_object(const std::string& name, HostObjectDescriptor descriptor) {
+    engine_->register_host_object(name, std::move(descriptor));
+}
+
+void ScriptEngine::register_promise_function(const std::string& name, NativePromiseFunction fn) {
+    engine_->register_promise_function(name, std::move(fn));
+}
+
 choc::value::Value ScriptEngine::invoke(std::string_view name) {
     return engine_->invoke(name);
 }

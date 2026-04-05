@@ -6,6 +6,8 @@
 // Simple test processor for headless testing
 namespace {
 
+static pulp::format::ProcessContext last_context{};
+
 class TestGainProcessor : public pulp::format::Processor {
 public:
     pulp::format::PluginDescriptor descriptor() const override {
@@ -35,8 +37,9 @@ public:
         pulp::audio::BufferView<float>& output,
         const pulp::audio::BufferView<const float>& input,
         pulp::midi::MidiBuffer&, pulp::midi::MidiBuffer&,
-        const pulp::format::ProcessContext&) override
+        const pulp::format::ProcessContext& context) override
     {
+        last_context = context;
         float db = state().get_value(1);
         float gain = std::pow(10.0f, db / 20.0f);
         for (std::size_t ch = 0; ch < output.num_channels() && ch < input.num_channels(); ++ch) {
@@ -101,6 +104,36 @@ TEST_CASE("HeadlessHost applies parameter changes", "[headless]") {
     float expected = 0.5f * std::pow(10.0f, 6.0f / 20.0f);
     REQUIRE_THAT(static_cast<double>(out.channel(0)[0]),
                  Catch::Matchers::WithinRel(static_cast<double>(expected), 0.01));
+}
+
+TEST_CASE("HeadlessHost accepts explicit transport context for offline stepping", "[headless][phase12]") {
+    pulp::format::HeadlessHost host(create_test_gain);
+    host.prepare(48000.0, 256);
+
+    pulp::audio::Buffer<float> in(2, 128), out(2, 128);
+    const float* in_ptrs[2] = {in.channel(0).data(), in.channel(1).data()};
+    pulp::audio::BufferView<const float> in_view(in_ptrs, 2, 128);
+    auto out_view = out.view();
+
+    last_context = {};
+    pulp::format::ProcessContext ctx;
+    ctx.is_playing = true;
+    ctx.tempo_bpm = 98.0;
+    ctx.position_beats = 12.5;
+    ctx.position_samples = 2048;
+    ctx.time_sig_numerator = 7;
+    ctx.time_sig_denominator = 8;
+
+    host.process(out_view, in_view, ctx);
+
+    REQUIRE_THAT(last_context.sample_rate, WithinAbs(48000.0, 0.001));
+    REQUIRE(last_context.num_samples == 128);
+    REQUIRE(last_context.is_playing);
+    REQUIRE_THAT(last_context.tempo_bpm, WithinAbs(98.0, 0.001));
+    REQUIRE_THAT(last_context.position_beats, WithinAbs(12.5, 0.001));
+    REQUIRE(last_context.position_samples == 2048);
+    REQUIRE(last_context.time_sig_numerator == 7);
+    REQUIRE(last_context.time_sig_denominator == 8);
 }
 
 TEST_CASE("HeadlessHost state round-trip", "[headless]") {

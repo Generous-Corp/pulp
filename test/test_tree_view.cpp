@@ -43,7 +43,7 @@ TEST_CASE("TreeView on_select callback", "[view][tree]") {
     TreeView tree;
     auto& synths = tree.root().add_child("Synths");
     synths.expanded = true;
-    auto& bass = synths.add_child("Bass");
+    synths.add_child("Bass");
 
     std::string selected_label;
     tree.on_select = [&](TreeNode& node) { selected_label = node.label; };

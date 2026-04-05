@@ -12,6 +12,7 @@
 #include <cstring>
 #include <numeric>
 #include <sstream>
+#include <thread>
 
 namespace pulp::render {
 
@@ -611,13 +612,13 @@ private:
                 ok = (status == wgpu::MapAsyncStatus::Success);
             });
 
-        // Process events until mapped
-        int max_polls = 10000;
-        while (!mapped && --max_polls > 0) {
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+        while (!mapped && std::chrono::steady_clock::now() < deadline) {
             instance_.ProcessEvents();
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
 
-        if (!ok) return false;
+        if (!mapped || !ok) return false;
 
         const void* data = buffer.GetConstMappedRange(0, size);
         if (!data) return false;

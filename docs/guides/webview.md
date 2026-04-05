@@ -23,6 +23,23 @@ What it is not:
 - the default plugin UI model
 - a promoted replacement for Pulp's native GPU-rendered UI system
 
+## Current Platform Truth
+
+`PULP_BUILD_WEBVIEW=ON` is now the truthful opt-in switch for the common
+WebView layer across the platforms we have focused proof for:
+
+- macOS: system WebKit backend, focused native runtime proof, palette example,
+  Monaco example, and `pulp-test-webview`
+- Windows: CHOC WebView2 backend, focused configure/build/test proof, and
+  `pulp-webview-palette` build proof
+- Ubuntu/Linux: CHOC GTK/WebKitGTK backend, focused configure/build/test proof,
+  and `pulp-webview-palette` build proof
+
+This is enough to claim native backend availability behind
+`PULP_BUILD_WEBVIEW=ON` on those hosts when the required dependencies are
+installed. It is not yet a claim that every higher-level WebView workflow has
+identical runtime polish on all three platforms.
+
 ## Build
 
 Enable the optional WebView layer:
@@ -32,11 +49,22 @@ cmake -S . -B build -DPULP_BUILD_WEBVIEW=ON
 cmake --build build -j8
 ```
 
+Platform requirements:
+- macOS: system `WebKit.framework`
+- Windows: CHOC's WebView2 path plus the normal Visual Studio/CMake toolchain
+- Linux: `gtk+-3.0` and `webkit2gtk-4.1` discoverable through `pkg-config`
+
 The focused validation target is:
 
 ```bash
 cmake --build build --target pulp-test-webview -j8
 ./build/test/pulp-test-webview --reporter compact
+```
+
+If example code changed, also build the palette example:
+
+```bash
+cmake --build build --target pulp-webview-palette -j8
 ```
 
 ## Core API
@@ -199,15 +227,15 @@ cd /Users/danielraffel/Code/monaco-editor
 npm install
 npm run build-monaco-editor
 
-cd /private/tmp/pulp-phase7-webview-main
+cd /path/to/pulp
 node examples/webview-monaco/build_monaco_bundle.mjs \
   --monaco-root /Users/danielraffel/Code/monaco-editor \
-  --out-dir /private/tmp/pulp-phase7-webview-main/build-phase7/examples/webview-monaco/dist
+  --out-dir /path/to/pulp/build/examples/webview-monaco/dist
 
-cmake -S . -B build-phase7 -DCMAKE_BUILD_TYPE=Debug -DPULP_BUILD_WEBVIEW=ON \
-  -DPULP_MONACO_BUNDLE_DIR=/private/tmp/pulp-phase7-webview-main/build-phase7/examples/webview-monaco/dist
-cmake --build build-phase7 --target pulp-webview-monaco -j8
-./build-phase7/examples/webview-monaco/pulp-webview-monaco
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DPULP_BUILD_WEBVIEW=ON \
+  -DPULP_MONACO_BUNDLE_DIR=/path/to/pulp/build/examples/webview-monaco/dist
+cmake --build build --target pulp-webview-monaco -j8
+./build/examples/webview-monaco/pulp-webview-monaco
 ```
 
 Notes from the working proof:
@@ -216,6 +244,12 @@ Notes from the working proof:
 - the current Monaco build imports `@vscode/monaco-lsp-client`; the Phase 7 example stubs that import at bundle time because the example does not use LSP
 - browser preview is valid for layout/bundle proof, but `bridge unavailable` there is expected
 - native host proof is the real bridge proof
+
+The strongest native proof so far is still macOS, because that is where we
+captured the Monaco-in-host runtime screenshot and editor-ready bridge state.
+Windows and Ubuntu now have truthful opt-in backend build/test proof on the
+same Phase 7 API surface, but not the same depth of rich-tool runtime coverage
+yet.
 
 ## Messaging Model
 
@@ -251,8 +285,15 @@ The WebView test target currently proves:
   native child-view embedding handles
 - a small floating `pulp-webview-palette` example builds against the same host
   seam and real `pulp_add_binary_data` bundled-resource path
+- exact-SHA opt-in configure/build/test proof on Windows and Ubuntu with
+  `PULP_BUILD_WEBVIEW=ON`
+- `pulp-webview-palette` build proof on both Windows and Ubuntu
 
 On some local/headless environments, the live callback readiness probe may skip rather than fail. That is treated as an environment limitation, not a blanket pass for the runtime.
+
+That is the current bar for claiming cross-platform backend availability. Do
+not overstate this as full runtime parity until the platform-specific host
+polish work is actually landed.
 
 ## Future Skill
 

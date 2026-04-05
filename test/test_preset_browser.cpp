@@ -3,11 +3,35 @@
 #include <pulp/canvas/canvas.hpp>
 #include <filesystem>
 #include <fstream>
+#include <chrono>
+
+#ifdef _WIN32
+#include <process.h>
+#else
+#include <unistd.h>
+#endif
 
 using namespace pulp::view;
 using namespace pulp::state;
 using namespace pulp::canvas;
 namespace fs = std::filesystem;
+
+namespace {
+
+uint64_t current_process_id() {
+#ifdef _WIN32
+    return static_cast<uint64_t>(_getpid());
+#else
+    return static_cast<uint64_t>(getpid());
+#endif
+}
+
+std::string unique_plugin_name() {
+    const auto now = std::chrono::steady_clock::now().time_since_epoch().count();
+    return "BrowserTest-" + std::to_string(current_process_id()) + "-" + std::to_string(now);
+}
+
+} // namespace
 
 // Helper to set up a store and preset manager with test presets
 struct TestPresetFixture {
@@ -18,7 +42,7 @@ struct TestPresetFixture {
     TestPresetFixture() {
         store.add_parameter({.id = 1, .name = "Gain", .range = {-60, 12, 0}});
         store.add_parameter({.id = 2, .name = "Mix", .range = {0, 100, 50}});
-        pm = std::make_unique<PresetManager>(store, "TestCo", "BrowserTest");
+        pm = std::make_unique<PresetManager>(store, "TestCo", unique_plugin_name());
         tmp_dir = pm->user_presets_dir();
 
         // Create some test presets
@@ -32,7 +56,8 @@ struct TestPresetFixture {
 
     ~TestPresetFixture() {
         if (!tmp_dir.empty() && fs::exists(tmp_dir)) {
-            fs::remove_all(tmp_dir);
+            std::error_code ec;
+            fs::remove_all(tmp_dir, ec);
         }
     }
 };

@@ -142,9 +142,9 @@ public:
     }
 
     void reset() {
-        std::fill(input_buf_.begin(), input_buf_.end(), 0);
-        std::fill(output_buf_.begin(), output_buf_.end(), 0);
-        std::fill(overlap_.begin(), overlap_.end(), 0);
+        std::fill(input_buf_.begin(), input_buf_.end(), 0.0f);
+        std::fill(output_buf_.begin(), output_buf_.end(), 0.0f);
+        std::fill(overlap_.begin(), overlap_.end(), 0.0f);
         pos_ = 0;
     }
 
@@ -188,7 +188,7 @@ private:
             overlap_[i - block_size_] = freq_buf_[i].real();
 
         // Clear input buffer
-        std::fill(input_buf_.begin(), input_buf_.end(), 0);
+        std::fill(input_buf_.begin(), input_buf_.end(), 0.0f);
     }
 };
 

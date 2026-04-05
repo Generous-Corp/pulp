@@ -30,7 +30,7 @@ endif()
 
 if(APPLE AND PULP_HAS_AUSDK)
     add_test(NAME auval-PulpEffect
-        COMMAND bash -c "cp -R ${CMAKE_BINARY_DIR}/AU/PulpEffect.component ~/Library/Audio/Plug-Ins/Components/ && auval -v aufx PEfx Pulp 2>&1 | tee /dev/stderr | grep -q 'PASS'")
+        COMMAND bash -c "cp -R \"${CMAKE_BINARY_DIR}/AU/PulpEffect.component\" \"$HOME/Library/Audio/Plug-Ins/Components/\" && auval -v aufx PEfx Pulp 2>&1 | tee /dev/stderr | grep -q 'PASS'")
     set_tests_properties(auval-PulpEffect PROPERTIES LABELS "validation;au" TIMEOUT 30)
 endif()
 

@@ -2,9 +2,15 @@
 add_executable(pulp-cli pulp_cli.cpp design_binding.cpp)
 set_target_properties(pulp-cli PROPERTIES OUTPUT_NAME "pulp")
 target_compile_features(pulp-cli PRIVATE cxx_std_20)
+target_link_libraries(pulp-cli PRIVATE pulp::runtime)
 
-# Install to project root for easy access
-install(TARGETS pulp-cli DESTINATION "${CMAKE_SOURCE_DIR}")
+# Install into the active prefix so SDK installs do not try to write back into
+# the source checkout.
+set(_pulp_cli_install_bindir "${CMAKE_INSTALL_BINDIR}")
+if(NOT _pulp_cli_install_bindir)
+    set(_pulp_cli_install_bindir "bin")
+endif()
+install(TARGETS pulp-cli RUNTIME DESTINATION "${_pulp_cli_install_bindir}")
 
 # Integration tests for CLI commands
 if(PULP_BUILD_TESTS)

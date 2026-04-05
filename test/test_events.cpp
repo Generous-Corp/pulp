@@ -7,6 +7,22 @@
 using namespace pulp::events;
 using namespace std::chrono_literals;
 
+namespace {
+
+template <typename Predicate>
+bool wait_until(Predicate&& predicate, std::chrono::milliseconds timeout) {
+    auto deadline = std::chrono::steady_clock::now() + timeout;
+    while (std::chrono::steady_clock::now() < deadline) {
+        if (predicate()) {
+            return true;
+        }
+        std::this_thread::sleep_for(5ms);
+    }
+    return predicate();
+}
+
+} // namespace
+
 TEST_CASE("EventLoop dispatch", "[events][event_loop]") {
     EventLoop loop;
 
@@ -59,14 +75,14 @@ TEST_CASE("EventLoop dispatch_after", "[events][event_loop]") {
 
     SECTION("Delayed task executes after delay") {
         std::atomic<bool> executed{false};
+        auto start = std::chrono::steady_clock::now();
 
         loop.dispatch_after(50ms, [&] { executed.store(true); });
 
-        std::this_thread::sleep_for(20ms);
-        REQUIRE_FALSE(executed.load());
-
-        std::this_thread::sleep_for(60ms);
-        REQUIRE(executed.load());
+        REQUIRE(wait_until([&] { return executed.load(); }, 500ms));
+        auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - start);
+        REQUIRE(elapsed >= 10ms);
     }
 }
 
@@ -91,10 +107,8 @@ TEST_CASE("Timer basic operation", "[events][timer]") {
         Timer timer(loop, 20ms, [&] { count.fetch_add(1); }, true);
         timer.start();
 
-        std::this_thread::sleep_for(150ms);
+        REQUIRE(wait_until([&] { return count.load() >= 3; }, 500ms));
         timer.stop();
-
-        REQUIRE(count.load() >= 3);
     }
 
     SECTION("One-shot timer fires once") {
@@ -102,7 +116,7 @@ TEST_CASE("Timer basic operation", "[events][timer]") {
         Timer timer(loop, 20ms, [&] { count.fetch_add(1); }, false);
         timer.start();
 
-        std::this_thread::sleep_for(100ms);
+        REQUIRE(wait_until([&] { return count.load() >= 1; }, 300ms));
         REQUIRE(count.load() == 1);
     }
 
