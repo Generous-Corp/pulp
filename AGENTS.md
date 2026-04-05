@@ -6,7 +6,7 @@ Detailed guidance lives in `CLAUDE.md` — treat it as the single source of trut
 
 ## Key Rules
 
-- **Never push directly to main.** Create a PR and run CI first. Use the `ci` skill.
+- **Never push directly to main. No exceptions.** Every change — no matter how small, even docs-only — must go through: branch → PR → CI green → merge. Use the `ci` skill or create a PR manually. If cloud CI minutes are exhausted, run local CI (`python3 tools/local-ci/local_ci.py run`) and wait for green before merging.
 - **Clean-room discipline.** Never reference JUCE source code. See CLAUDE.md.
 - **License policy.** Only MIT, BSD, Apache 2.0, ISC, zlib, BSL-1.0, public domain. No copyleft.
 - **Tests required.** If it's not tested, it doesn't work.

@@ -220,7 +220,7 @@ Planning docs live in `planning/` locally. When a phase completes, its spec move
 
 - Default to a branch for any non-trivial change. Use `feature/*` unless the work is large enough to deserve a spec-driven `phase/*` branch.
 - Treat `main` as a landing branch, not a scratch branch.
-- Direct commits on `main` are reserved for very small, low-risk changes that have already been validated locally.
+- **Never push directly to main. No exceptions.** Every change must go through: branch → PR → CI green → merge.
 - Before merging to `main`, have high confidence the slice is stable: targeted tests pass, higher-risk changes get a clean detached validation pass with `./validate-build.sh`, and docs/status stay in sync.
 - When multiple people or agents are active in the repo, prefer branches and worktrees even for medium-sized changes to reduce accidental breakage and merge confusion.
 
