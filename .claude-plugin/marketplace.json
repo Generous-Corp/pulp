@@ -1,0 +1,25 @@
+{
+  "name": "pulp",
+  "owner": {
+    "name": "Dan Raffel",
+    "url": "https://github.com/danielraffel"
+  },
+  "metadata": {
+    "description": "Claude Code plugin for the Pulp audio framework",
+    "version": "1.0.0"
+  },
+  "plugins": [
+    {
+      "name": "pulp",
+      "source": ".",
+      "description": "Claude Code plugin for the Pulp audio framework — build, test, design, and ship audio plugins and apps",
+      "version": "0.2.0",
+      "author": {
+        "name": "Dan Raffel"
+      },
+      "repository": "https://github.com/danielraffel/pulp",
+      "license": "MIT",
+      "keywords": ["audio", "plugin", "vst3", "clap", "audiounit", "dsp", "gpu", "webgpu", "faust", "music", "midi"]
+    }
+  ]
+}
