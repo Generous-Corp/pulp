@@ -264,6 +264,7 @@ Example:
 {
   "telemetry": {
     "billing": {
+      "enable_provider_reported_totals": false,
       "currency": "USD",
       "billing_period_start_day": 1,
       "github_hosted_job_os_rates_per_minute": {
@@ -286,6 +287,13 @@ Notes:
 - Namespace estimates prefer a profile-tag hourly rate and fall back to a
   machine-shape rule if you configured one
 - if no matching rate exists, the CLI prints `cost: unavailable (...)`
+- `enable_provider_reported_totals` is off by default; turn it on only if you
+  want Pulp to ask GitHub for repo-wide billing totals when that API is
+  available
+- provider-reported GitHub totals are shown separately from tracked-run
+  estimates because they are repo-wide current-period figures, not per-run truth
+- GitHub can still return `unavailable` here if the account/API path does not
+  support the newer billing endpoints
 
 ### 1a. Recommended Namespace setup
 

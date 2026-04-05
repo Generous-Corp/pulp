@@ -251,8 +251,8 @@ Cloud companion commands:
 
 - `cloud workflows` — list the GitHub workflows and supported runner providers known to this checkout
 - `cloud defaults` — show the effective workflow/provider defaults plus where current selector values came from (local config versus repo-variable fallback)
-- `cloud history` — show recent tracked cloud runs plus any configured estimated billing-period rollup
-- `cloud compare [workflow]` — compare observed cloud providers for one workflow using recorded history
+- `cloud history` — show recent tracked cloud runs plus any configured billing-period rollup
+- `cloud compare [workflow]` — compare observed cloud providers for one workflow using recorded history, including latest success timing
 - `cloud recommend [workflow]` — recommend a cloud provider from recorded history
 - `cloud run [workflow] [branch]` — dispatch a GitHub Actions workflow by branch; `docs-check` accepts `--runner-selector-json`, while `build` also accepts one-off `--linux-runner-selector-json`, `--windows-runner-selector-json`, and `--macos-runner-selector-json` overrides for per-leg routing
 - `cloud status [dispatch-id|latest]` — show tracked GitHub run state plus queue-delay/elapsed timing when available; Namespace-backed runs also report provider runtime/machine-shape truth when `nsc` can match the instances; `--refresh` re-queries GitHub for the selected run
@@ -291,6 +291,9 @@ Current cloud scope:
 - `status` includes recent tracked cloud summaries without contacting GitHub; use `cloud status --refresh` when you want live GitHub state
 - tracked cloud runs now persist queue-delay and elapsed-duration timing so later comparison commands can report real provider speedups instead of ad hoc estimates
 - estimated cost reporting is optional and local-config driven; every derived number is labeled `estimated; verify provider pricing`
+- provider-reported billing totals are opt-in and off by default; when enabled,
+  Pulp shows them separately from tracked-run estimates because they are repo-wide
+  current-period figures
 - if the provider CLI does not expose billing totals, Pulp still reports runtime and machine shape instead of inventing invoice truth
 - `status` also reports the current local-CI footprint for bundles, prepared state, logs, results, and tracked cloud runs
 - `cleanup` supports the operator-facing retention workflow: inspect reclaimable space first, then re-run with `--apply` only when no local CI job is active

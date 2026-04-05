@@ -57,6 +57,7 @@
   },
   "telemetry": {
     "billing": {
+      "enable_provider_reported_totals": false,
       "currency": "USD",
       "billing_period_start_day": 1,
       "github_hosted_job_os_rates_per_minute": {

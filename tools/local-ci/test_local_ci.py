@@ -9,6 +9,7 @@ import threading
 import unittest
 from unittest import mock
 from contextlib import redirect_stdout
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -2475,6 +2476,7 @@ class LocalCiTests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertIn("configured default provider: namespace", output)
         self.assertIn("billing estimates: USD period-day=1 (estimated; verify provider pricing)", output)
+        self.assertIn("provider billing truth: disabled (opt-in; off by default)", output)
         self.assertIn("build: Build and Test (build.yml)", output)
         self.assertIn("linux_runner_selector_json: namespace-profile-default", output)
         self.assertIn("docs-check: Docs Consistency (docs-check.yml)", output)
@@ -2538,6 +2540,90 @@ class LocalCiTests(unittest.TestCase):
         self.assertEqual(summary["currency"], "USD")
         self.assertAlmostEqual(summary["estimated_total"], 1.0)
         self.assertEqual(summary["reason"], "estimated; verify provider pricing")
+
+    def test_fetch_github_repo_actions_billing_summary_sums_repo_usage(self):
+        config = {
+            "telemetry": {
+                "billing": {
+                    "enable_provider_reported_totals": True,
+                }
+            }
+        }
+
+        original_gh_available = self.mod.gh_available
+        original_gh_api_json = self.mod.gh_api_json
+        original_billing_window = self.mod.billing_period_window
+        self.mod.gh_available = lambda: True
+        self.mod.billing_period_window = lambda start_day, now_dt=None: (
+            datetime(2026, 3, 15, tzinfo=timezone.utc),
+            datetime(2026, 4, 15, tzinfo=timezone.utc),
+        )
+
+        def fake_gh_api_json(path, fields=None):
+            if path == "/repos/danielraffel/pulp":
+                return ({"owner": {"login": "danielraffel", "type": "User"}}, "")
+            if path == "/users/danielraffel/settings/billing/usage":
+                if fields == {"year": 2026, "month": 3}:
+                    return (
+                        {
+                            "usageItems": [
+                                {
+                                    "date": "2026-03-14",
+                                    "product": "Actions",
+                                    "repositoryName": "danielraffel/pulp",
+                                    "netAmount": 1.0,
+                                },
+                                {
+                                    "date": "2026-03-15",
+                                    "product": "Actions",
+                                    "repositoryName": "danielraffel/pulp",
+                                    "netAmount": 2.0,
+                                },
+                            ]
+                        },
+                        "",
+                    )
+                if fields == {"year": 2026, "month": 4}:
+                    return (
+                        {
+                            "usageItems": [
+                                {
+                                    "date": "2026-04-01",
+                                    "product": "Actions",
+                                    "repositoryName": "danielraffel/pulp",
+                                    "netAmount": 3.5,
+                                },
+                                {
+                                    "date": "2026-04-02",
+                                    "product": "Packages",
+                                    "repositoryName": "danielraffel/pulp",
+                                    "netAmount": 9.0,
+                                },
+                                {
+                                    "date": "2026-04-03",
+                                    "product": "Actions",
+                                    "repositoryName": "other/repo",
+                                    "netAmount": 7.0,
+                                },
+                            ]
+                        },
+                        "",
+                    )
+            return (None, "unexpected call")
+
+        self.mod.gh_api_json = fake_gh_api_json
+        try:
+            summary = self.mod.fetch_github_repo_actions_billing_summary("danielraffel/pulp", config)
+        finally:
+            self.mod.gh_available = original_gh_available
+            self.mod.gh_api_json = original_gh_api_json
+            self.mod.billing_period_window = original_billing_window
+
+        self.assertEqual(summary["status"], "actual")
+        self.assertEqual(summary["currency"], "USD")
+        self.assertAlmostEqual(summary["actual_total"], 5.5)
+        self.assertEqual(summary["matched_items"], 2)
+        self.assertEqual(summary["reason"], "actual when available")
 
     def test_cmd_cloud_history_shows_estimated_cost_and_period_total(self):
         config = json.loads(self.config_path.read_text())
@@ -2606,6 +2692,53 @@ class LocalCiTests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertIn("cost=est $0.50", output)
         self.assertIn("period cost: est $0.50 over 1 run(s); estimated; verify provider pricing", output)
+
+    def test_cmd_cloud_history_shows_provider_reported_github_billing_when_enabled(self):
+        config = json.loads(self.config_path.read_text())
+        config["telemetry"] = {
+            "billing": {
+                "enable_provider_reported_totals": True,
+            }
+        }
+        self.config_path.write_text(json.dumps(config) + "\n")
+
+        self.mod.save_cloud_record(
+            {
+                "dispatch_id": "histgh123456",
+                "workflow_key": "build",
+                "workflow_name": "Build and Test",
+                "workflow_file": "build.yml",
+                "repository": "danielraffel/pulp",
+                "requested_ref": "feature/cloud",
+                "provider_requested": "github-hosted",
+                "provider_resolved": "github-hosted",
+                "status": "completed",
+                "conclusion": "success",
+                "run_id": 12345,
+                "duration_secs": 30,
+                "completed_at": "2026-04-04T12:00:30+00:00",
+            }
+        )
+
+        original_fetch = self.mod.fetch_github_repo_actions_billing_summary
+        self.mod.fetch_github_repo_actions_billing_summary = lambda repository, cfg: {
+            "status": "actual",
+            "currency": "USD",
+            "actual_total": 2.7,
+            "reason": "actual when available",
+        }
+        try:
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                exit_code = self.mod.cmd_cloud_history(
+                    SimpleNamespace(workflow=None, provider=None, limit=10)
+                )
+        finally:
+            self.mod.fetch_github_repo_actions_billing_summary = original_fetch
+
+        output = buf.getvalue()
+        self.assertEqual(exit_code, 0)
+        self.assertIn("github repo billing: actual $2.70 current period (repo-wide)", output)
 
     def test_cmd_cloud_compare_reports_provider_medians(self):
         config = json.loads(self.config_path.read_text())
@@ -2688,8 +2821,14 @@ class LocalCiTests(unittest.TestCase):
 
         output = buf.getvalue()
         self.assertEqual(exit_code, 0)
-        self.assertIn("github-hosted: runs=1 success=1/1 median_elapsed=3m00s median_queue=15s median_cost=est $0.03", output)
-        self.assertIn("namespace: runs=1 success=1/1 median_elapsed=2m00s median_queue=5s median_provider_time=1h00m00s median_cost=est $0.50", output)
+        self.assertIn(
+            "github-hosted: runs=1 success=1/1 median_elapsed=3m00s median_queue=15s median_cost=est $0.03 latest_success=2026-04-04T12:10:30+00:00",
+            output,
+        )
+        self.assertIn(
+            "namespace: runs=1 success=1/1 median_elapsed=2m00s median_queue=5s median_provider_time=1h00m00s median_cost=est $0.50 latest_success=2026-04-04T12:00:30+00:00",
+            output,
+        )
         self.assertIn("note: estimated; verify provider pricing", output)
 
     def test_cmd_cloud_recommend_prefers_fastest_observed_provider(self):

@@ -587,13 +587,15 @@ Implemented on the active Pulp branch today:
   provider comparisons, and first-pass recommendation heuristics
 - local-config-driven estimated billing output for per-run and billing-period
   cloud reporting, explicitly labeled `estimated; verify provider pricing`
+- opt-in provider-reported GitHub billing totals shown separately from tracked
+  run estimates, still off by default until the signal is more battle-tested
 
 Still deferred from the current branch:
 
 - provider capability reporting beyond the current narrow workflow metadata
 - broader provider routing across the workflow inventory
 - cross-scope local-vs-cloud comparison views
-- provider-reported billing totals when the upstream CLI/API exposes them
+- enabling provider-reported billing totals by default for all operators
 - reusable extraction into `xci`
 
 ### Recommended execution order now
@@ -872,7 +874,8 @@ Implementation scope:
 - prefer provider-reported usage when available
 - fall back to normalized estimates when providers expose runtime but not final
   billing numbers
-- make display default-on with a config switch to hide it
+- keep provider-reported billing opt-in and off by default until the signal is
+  reliable enough to justify turning it on for everyone
 
 Recommended execution inside Phase 4:
 

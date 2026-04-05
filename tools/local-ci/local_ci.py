@@ -50,7 +50,7 @@ import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -1902,11 +1902,20 @@ def parse_rate_value(value) -> float | None:
     return parsed
 
 
+def parse_optional_bool(value, setting_name: str) -> bool | None:
+    if value in (None, ""):
+        return None
+    if isinstance(value, bool):
+        return value
+    raise ValueError(f"{setting_name} must be true or false.")
+
+
 def resolve_billing_settings(config: dict | None) -> dict:
     billing = (((config or {}).get("telemetry") or {}).get("billing") or {})
     settings = {
         "currency": "USD",
         "billing_period_start_day": 1,
+        "enable_provider_reported_totals": False,
         "github_hosted_job_os_rates_per_minute": {},
         "namespace_profile_tag_rates_per_hour": {},
         "namespace_machine_shape_rates_per_hour": [],
@@ -1927,6 +1936,13 @@ def resolve_billing_settings(config: dict | None) -> dict:
         if parsed_start_day < 1 or parsed_start_day > 28:
             raise ValueError("telemetry.billing.billing_period_start_day must be between 1 and 28.")
         settings["billing_period_start_day"] = parsed_start_day
+
+    provider_reported_totals = parse_optional_bool(
+        billing.get("enable_provider_reported_totals"),
+        "telemetry.billing.enable_provider_reported_totals",
+    )
+    if provider_reported_totals is not None:
+        settings["enable_provider_reported_totals"] = provider_reported_totals
 
     github_rates = billing.get("github_hosted_job_os_rates_per_minute")
     if isinstance(github_rates, dict):
@@ -1985,6 +2001,10 @@ def billing_note_text() -> str:
     return "estimated; verify provider pricing"
 
 
+def provider_billing_note_text() -> str:
+    return "actual when available"
+
+
 def billing_period_window(
     start_day: int,
     *,
@@ -2006,6 +2026,31 @@ def billing_period_window(
         next_year += 1
     period_end = datetime(next_year, next_month, start_day, tzinfo=timezone.utc)
     return period_start, period_end
+
+
+def iter_year_months(start_dt: datetime, end_dt: datetime) -> list[tuple[int, int]]:
+    current_year = start_dt.year
+    current_month = start_dt.month
+    months: list[tuple[int, int]] = []
+    while True:
+        months.append((current_year, current_month))
+        if current_year == end_dt.year and current_month == end_dt.month:
+            break
+        current_month += 1
+        if current_month == 13:
+            current_month = 1
+            current_year += 1
+    return months
+
+
+def parse_iso_date(value: str | None) -> date | None:
+    raw = (value or "").strip()
+    if not raw:
+        return None
+    try:
+        return date.fromisoformat(raw)
+    except ValueError:
+        return None
 
 
 def infer_job_os(workflow_key: str, job_name: str) -> str:
@@ -2163,6 +2208,99 @@ def estimate_billing_period_totals(
         "status": "estimated" if estimated_runs else "unavailable",
         "reason": billing_note_text() if estimated_runs else "configure telemetry.billing rates",
     }
+
+
+def fetch_github_repo_actions_billing_summary(repository: str, config: dict | None) -> dict:
+    billing = resolve_billing_settings(config)
+    if not billing.get("enable_provider_reported_totals"):
+        return {"status": "disabled", "reason": "disabled (opt-in)"}
+    if not gh_available():
+        return {"status": "unavailable", "reason": "gh CLI unavailable"}
+
+    repo_payload, repo_error = gh_api_json(f"/repos/{repository}")
+    if not isinstance(repo_payload, dict):
+        return {
+            "status": "unavailable",
+            "reason": f"repo lookup failed ({repo_error or 'gh api failed'})",
+        }
+
+    owner = ((repo_payload.get("owner") or {}).get("login") or "").strip()
+    owner_type = ((repo_payload.get("owner") or {}).get("type") or "").strip().lower()
+    if not owner:
+        return {"status": "unavailable", "reason": "repo owner unknown"}
+
+    if owner_type == "organization":
+        endpoint = f"/organizations/{owner}/settings/billing/usage"
+    elif owner_type == "user":
+        endpoint = f"/users/{owner}/settings/billing/usage"
+    else:
+        return {"status": "unavailable", "reason": f"unsupported owner type '{owner_type or 'unknown'}'"}
+
+    period_start, period_end = billing_period_window(billing["billing_period_start_day"])
+    month_pairs = iter_year_months(period_start, period_end)
+    matched_items: list[dict] = []
+
+    for year, month in month_pairs:
+        payload, error = gh_api_json(endpoint, fields={"year": year, "month": month})
+        if not isinstance(payload, dict):
+            reason = "GitHub billing API unavailable; check auth/platform"
+            if owner_type == "user" and "user" not in gh_token_scopes():
+                reason = "GitHub billing API unavailable; check auth/platform"
+            return {
+                "status": "unavailable",
+                "reason": reason,
+                "detail": error,
+            }
+        for item in payload.get("usageItems") or []:
+            if str(item.get("product", "")).strip().lower() != "actions":
+                continue
+            if str(item.get("repositoryName", "")).strip() != repository:
+                continue
+            item_date = parse_iso_date(item.get("date"))
+            if not item_date:
+                continue
+            item_dt = datetime(item_date.year, item_date.month, item_date.day, tzinfo=timezone.utc)
+            if item_dt < period_start or item_dt >= period_end:
+                continue
+            matched_items.append(item)
+
+    total = 0.0
+    for item in matched_items:
+        amount = item.get("netAmount")
+        if amount in (None, ""):
+            amount = item.get("grossAmount")
+        try:
+            total += float(amount or 0.0)
+        except (TypeError, ValueError):
+            continue
+
+    return {
+        "status": "actual",
+        "provider": "github-hosted",
+        "scope": "repo current period",
+        "currency": "USD",
+        "period_start": period_start.isoformat(),
+        "period_end": period_end.isoformat(),
+        "matched_items": len(matched_items),
+        "actual_total": round(total, 4),
+        "reason": provider_billing_note_text(),
+    }
+
+
+def print_github_repo_billing_summary(summary: dict, *, indent: str = "  ") -> None:
+    status = (summary.get("status") or "").strip()
+    if status == "disabled":
+        return
+    if status == "actual":
+        amount = format_currency_amount(summary.get("actual_total"), summary.get("currency", "USD"))
+        if amount:
+            print(
+                f"{indent}github repo billing: actual {amount} current period (repo-wide)"
+            )
+        return
+    reason = (summary.get("reason") or "").strip()
+    if reason:
+        print(f"{indent}github repo billing: unavailable ({reason})")
 
 
 def print_cloud_field_detail(
@@ -4042,6 +4180,52 @@ def gh_available() -> bool:
     return result.returncode == 0
 
 
+def gh_auth_status_text() -> str:
+    result = subprocess.run(["gh", "auth", "status", "-t"], capture_output=True, text=True)
+    if result.returncode != 0:
+        return ""
+    return result.stdout
+
+
+def gh_token_scopes() -> set[str]:
+    status_text = gh_auth_status_text()
+    if not status_text:
+        return set()
+    marker = "Token scopes:"
+    for raw_line in status_text.splitlines():
+        line = raw_line.strip()
+        if marker not in line:
+            continue
+        suffix = line.split(marker, 1)[1].strip()
+        if suffix.startswith("'") and suffix.endswith("'"):
+            suffix = suffix[1:-1]
+        return {item.strip() for item in suffix.split(",") if item.strip()}
+    return set()
+
+
+def gh_api_json(path: str, *, fields: dict[str, str | int] | None = None) -> tuple[dict | list | None, str]:
+    cmd = [
+        "gh",
+        "api",
+        "-H",
+        "Accept: application/vnd.github+json",
+        "-H",
+        "X-GitHub-Api-Version: 2026-03-10",
+        path,
+    ]
+    for key, value in (fields or {}).items():
+        cmd += ["-F", f"{key}={value}"]
+    result = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True)
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "").strip()
+        return None, detail or "gh api failed"
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return None, "gh api returned invalid JSON"
+    return payload, ""
+
+
 def nsc_run(args: list[str], *, capture_output: bool = True) -> subprocess.CompletedProcess | None:
     try:
         return subprocess.run(
@@ -4561,12 +4745,19 @@ def compare_cloud_providers(
                 "estimated_costs": [],
                 "success_count": 0,
                 "completed_count": 0,
+                "latest_completed_at": "",
+                "latest_success_at": "",
             },
         )
         group["runs"].append(record)
         group["completed_count"] += 1
+        completed_at = record.get("completed_at") or record.get("updated_at") or ""
+        if completed_at and completed_at > group["latest_completed_at"]:
+            group["latest_completed_at"] = completed_at
         if record.get("conclusion") == "success":
             group["success_count"] += 1
+            if completed_at and completed_at > group["latest_success_at"]:
+                group["latest_success_at"] = completed_at
         if record.get("duration_secs") not in (None, ""):
             group["durations"].append(float(record["duration_secs"]))
         if record.get("queue_delay_secs") not in (None, ""):
@@ -4594,6 +4785,8 @@ def compare_cloud_providers(
                 "median_estimated_cost": median_or_none(group["estimated_costs"], digits=4),
                 "currency": resolve_billing_settings(config).get("currency", "USD"),
                 "period": period,
+                "latest_completed_at": group["latest_completed_at"],
+                "latest_success_at": group["latest_success_at"],
             }
         )
 
@@ -4655,6 +4848,13 @@ def cmd_cloud_history(args: argparse.Namespace) -> int:
 
     print()
     print_billing_period_summary(estimate_billing_period_totals(records, config))
+    if getattr(args, "provider", None) in (None, "github-hosted"):
+        try:
+            repository = resolve_github_repository(resolve_github_actions_settings(config))
+        except ValueError as exc:
+            print_github_repo_billing_summary({"status": "unavailable", "reason": str(exc)})
+        else:
+            print_github_repo_billing_summary(fetch_github_repo_actions_billing_summary(repository, config))
     return 0
 
 
@@ -4685,6 +4885,12 @@ def cmd_cloud_compare(args: argparse.Namespace) -> int:
             amount = format_currency_amount(summary.get("median_estimated_cost"), summary.get("currency", "USD"))
             if amount:
                 line += f" median_cost=est {amount}"
+        latest_success = summary.get("latest_success_at") or ""
+        latest_completed = summary.get("latest_completed_at") or ""
+        if latest_success:
+            line += f" latest_success={latest_success}"
+        elif latest_completed:
+            line += f" latest={latest_completed}"
         print(line)
         print_billing_period_summary(summary.get("period") or {}, indent="    ")
     print("\n  note: estimated; verify provider pricing")
@@ -4748,6 +4954,8 @@ def cmd_cloud_defaults(_args: argparse.Namespace) -> int:
         f"  billing estimates: {billing.get('currency', 'USD')} period-day={billing.get('billing_period_start_day', 1)} "
         f"({billing_note_text()})"
     )
+    provider_truth_state = "enabled (local opt-in)" if billing.get("enable_provider_reported_totals") else "disabled (opt-in; off by default)"
+    print(f"  provider billing truth: {provider_truth_state}")
 
     for workflow_key, workflow in BUILTIN_GITHUB_WORKFLOWS.items():
         summary = summarize_workflow_provider_defaults(
