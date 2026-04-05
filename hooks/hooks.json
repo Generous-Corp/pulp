@@ -1,0 +1,19 @@
+{
+  "PostToolUse": [
+    {
+      "matcher": "Edit|Write",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/docs-reminder.sh",
+          "timeout": 3000
+        },
+        {
+          "type": "command",
+          "command": "bash ${CLAUDE_PLUGIN_ROOT}/hooks/scripts/cli-plugin-sync.sh",
+          "timeout": 3000
+        }
+      ]
+    }
+  ]
+}

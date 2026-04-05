@@ -11,16 +11,38 @@ Detailed guidance lives in `CLAUDE.md` — treat it as the single source of trut
 - **License policy.** Only MIT, BSD, Apache 2.0, ISC, zlib, BSL-1.0, public domain. No copyleft.
 - **Tests required.** If it's not tested, it doesn't work.
 
-## Skills
+## Claude Code Plugin
 
-Shared skills live in `.agents/skills/`. They are versioned with the code — a skill must never reference features that don't exist at the same commit.
+Pulp ships with a Claude Code plugin for the full development lifecycle. See [docs/guides/claude-code-plugin.md](docs/guides/claude-code-plugin.md) for installation and usage.
+
+### Commands
+
+| Command | Purpose |
+|---------|---------|
+| `/build` | Build the project |
+| `/test [pattern]` | Run tests, optionally filtered |
+| `/create <name>` | Scaffold a new plugin project |
+| `/status` | Show project status and configuration |
+| `/validate` | Run plugin format validators |
+| `/design [style]` | AI-driven design session |
+| `/ship` | Sign, package, and distribute |
+| `/import-design` | Import from Figma, Stitch, v0, Pencil |
+
+### Skills
 
 | Skill | Purpose |
 |-------|---------|
 | `ci` | Create PRs, run local/cloud CI, merge on green |
-| `import-design` | Import from Figma, Stitch, v0, Pencil |
+| `engine` | Query, recommend, and switch JS engine backend |
+| `import-design` | Import designs with automated visual validation |
+| `webview-ui` | Build WebView UIs with native bridge |
 
-When you create a new repeatable workflow, consider adding it as a skill. See the "Self-Enhancement" section in `CLAUDE.md` for guidelines.
+### Hooks
+
+| Hook | Trigger | Purpose |
+|------|---------|---------|
+| `docs-reminder` | Edit/Write to `core/`, `examples/`, `tools/cli/` | Remind to update docs |
+| `cli-plugin-sync` | Edit/Write to CLI or MCP server | Remind to update plugin |
 
 ## CI Workflow
 

@@ -7,8 +7,13 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash -c 'FILE=$(echo \"$TOOL_INPUT\" | grep -o '\"file_path\"[[:space:]]*:[[:space:]]*\"[^\"]*\"' | head -1 | sed 's/.*\"file_path\"[[:space:]]*:[[:space:]]*\"//;s/\"$//'); if echo \"$FILE\" | grep -qE \"(core/|examples/|tools/cli/)\"; then echo \"DOCS REMINDER: Modified source file. If this changes public behavior, update docs/status/ manifests and docs/ pages.\"; fi'",
-            "timeout": 2000
+            "command": "bash hooks/scripts/docs-reminder.sh",
+            "timeout": 3000
+          },
+          {
+            "type": "command",
+            "command": "bash hooks/scripts/cli-plugin-sync.sh",
+            "timeout": 3000
           }
         ]
       }
