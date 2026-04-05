@@ -187,10 +187,10 @@ The `sanitizers.yml` workflow runs ASan, TSan, UBSan on macOS, and RTSan on Ubun
 ### CLI
 
 ```bash
-# Run all default validators (CLAP + VST3 + AU)
+# Run all default validators (CLAP + VST3 + AU + optional AAX)
 pulp validate
 
-# Run all available validators including vstvalidator
+# Run all available validators including vstvalidator and full AAX validation
 pulp validate --all
 
 # Generate machine-readable report
@@ -239,6 +239,20 @@ auval -v aufx MyPl Mnfr
 - Audio passes through without NaN/Inf
 - State save/load round-trips correctly
 
+### AAX
+
+```bash
+# Fast probe (what `pulp validate` uses by default when the validator is installed)
+pulp validate
+
+# Full AAX validator run
+pulp validate --all
+```
+
+AAX validation is available only on macOS and Windows, and only when DigiShell +
+AAX Validator are installed locally. If the validator is missing, the CLI reports
+a guided skip with the Avid download location instead of failing ambiguously.
+
 ### Validator Coverage Matrix
 
 | Tool | Format | In CLI | In CI | Required |
@@ -247,6 +261,7 @@ auval -v aufx MyPl Mnfr
 | pluginval | VST3 | Yes | Yes | No (skip if missing) |
 | vstvalidator | VST3 | --all | No | No (optional) |
 | auval | AU | Yes | Yes | No (macOS only) |
+| aax-validator | AAX | Yes | No | No (macOS/Windows only, developer-supplied) |
 
 ## Running Tests
 

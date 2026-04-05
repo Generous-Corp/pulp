@@ -11,7 +11,9 @@ pulp_add_plugin({{TARGET_NAME}}
     BUNDLE_ID       "{{BUNDLE_ID}}"
     MANUFACTURER    "{{MANUFACTURER}}"
     VERSION         "{{VERSION}}"
-    CATEGORY        Effect
+    CATEGORY        Instrument
     PLUGIN_CODE     "{{PLUGIN_CODE}}"
     MANUFACTURER_CODE "{{MANUFACTURER_CODE}}"
+    AAX_PRODUCT_CODE "{{AAX_PRODUCT_CODE}}"
+    AAX_NATIVE_CODE "{{AAX_NATIVE_CODE}}"
 )

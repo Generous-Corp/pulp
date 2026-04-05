@@ -332,8 +332,8 @@ Phase specs define: goals, deliverables, acceptance criteria, test plan, clean-r
 | Project | Why |
 |---------|-----|
 | JUCE | Restrictive license, clean-room target |
-| AAX SDK | Proprietary (obtain independently if needed) |
-| ASIO SDK | Proprietary (obtain independently if needed) |
+| AAX SDK example/source code | Separately licensed; never copy, vendor, or mirror it. Only build against a developer-supplied out-of-tree SDK and use the minimum official ABI/docs required. |
+| ASIO SDK example/source code | Separately licensed; same rule as AAX. |
 
 ---
 
@@ -356,11 +356,12 @@ Every third-party dependency is tracked in `DEPENDENCIES.md` at the repo root:
 
 ### License Policy
 
-- **Allowed:** MIT, BSD (2/3-clause), Apache 2.0, ISC, zlib, BSL-1.0, public domain
-- **Not allowed:** GPL, LGPL, AGPL, SSPL, proprietary, any copyleft
+- **Allowed for repo-distributed code:** MIT, BSD (2/3-clause), Apache 2.0, ISC, zlib, BSL-1.0, public domain
+- **Not allowed in repo or shipped artifacts:** GPL, LGPL, AGPL, SSPL, proprietary, any copyleft
 - **Review required:** MPL-2.0 (weak copyleft, case-by-case)
+- **Optional vendor SDK carve-out:** AAX, ASIO, and similar SDKs may be supported only when they stay off by default, outside the source tree, developer-supplied under the user's own agreement, never committed, never exported by `cmake --install`, and never required by public CI.
 
-Before adding ANY dependency: check its license, add it to DEPENDENCIES.md, verify compatibility with MIT release. No exceptions.
+Before adding ANY bundled or redistributed dependency: check its license, add it to DEPENDENCIES.md, verify compatibility with MIT release. No exceptions.
 
 ### Attribution Ordering
 
@@ -554,6 +555,7 @@ When updating existing skills, preserve backward compatibility — don't remove 
 
 | Skill | Location | Purpose |
 |-------|----------|---------|
+| `aax` | `.agents/skills/aax/` | Optional AAX setup, validation, and clean-room workflow |
 | `ci` | `.agents/skills/ci/` | PR creation, local/cloud CI, merge workflow |
 | `engine` | `.agents/skills/engine/` | Query, recommend, switch JS engine backend |
 | `import-design` | `.agents/skills/import-design/` | Import from Figma/Stitch/v0/Pencil |

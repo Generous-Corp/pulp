@@ -166,7 +166,9 @@ Required behavior while a job is active:
 - Treat worktree-local `tools/local-ci/config.json` as a fallback or temporary override only. Hostnames and `repo_path` values can drift between worktrees.
 - Pay attention to the submission preflight. If it says the cwd git root and queued worktree root differ, stop and fix that unless the mismatch is intentional.
 - If preflight reports shared-state vs worktree-local config drift for the selected targets, treat that as a real warning, not cosmetic noise.
+- For Windows SSH validation, prefer the configured target whose non-interactive PowerShell context resolves `git`, `cmake`, and `ctest`. Do not encode developer-specific host aliases in shared instructions; keep the selection criteria generic and environment-driven.
 - If a dead runner left behind a stale Windows validator, let the queue reclaim that specific remote validator before starting fresh work; treat that cleanup as part of the truthful narrow-rerun path, not as ad hoc manual SSH.
+- If a stale same-host job is still compiling an obsolete SHA or path, stop that stale process tree before spending more time diagnosing contention on the current run.
 
 Minimum incident response once a failure is visible:
 1. Capture the failing job id, target, SHA, validation mode, and first failing test/build step.
@@ -211,6 +213,11 @@ number shown there is `estimated; verify provider pricing`.
 Use raw `gh workflow run` / `gh run view` only as a fallback when debugging the
 GitHub side of the operator surface itself.
 
+Provider truth rules:
+- If a Namespace cloud dispatch fails before any matrix leg starts, inspect the GitHub run annotations and `resolve-provider` job result before blaming repo code.
+- Treat provider CLI health, GitHub dispatch health, and provider billing/spend gates as separate failure surfaces.
+- If cloud dispatch is blocked by billing or provider control-plane issues, cut over to the narrowest truthful local/SSH proof instead of retrying the same blocked dispatch loop.
+
 ## Configuration
 
 Config is machine-global by default at `state_dir()/config.json` (on macOS `~/Library/Application Support/Pulp/local-ci/config.json`).
@@ -234,6 +241,8 @@ Key fields:
 - `github_actions.defaults.provider` — default cloud runner provider
 - `github_actions.defaults.wait_poll_secs` — cloud wait polling interval
 - `github_actions.defaults.match_timeout_secs` — dispatch-to-run match timeout
+
+Keep hostnames and VM names local. Shared repo docs and skills should describe how to choose a target, not which personal alias to use.
 
 ## Documentation
 

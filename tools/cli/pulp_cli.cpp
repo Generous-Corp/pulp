@@ -13,6 +13,7 @@
 #include <iomanip>
 #include <iostream>
 #include <random>
+#include <regex>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -87,6 +88,9 @@ static void print_warn(const std::string& msg) {
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
+
+static std::string trim(const std::string& s);
+static std::string strip_quotes(const std::string& s);
 
 static int run(const std::string& cmd) {
     return std::system(cmd.c_str());
@@ -181,6 +185,246 @@ static std::string exec_output(const std::string& cmd) {
     while (!result.empty() && (result.back() == '\n' || result.back() == '\r'))
         result.pop_back();
     return result;
+}
+
+static fs::path user_home_dir() {
+    if (auto home = pulp::runtime::get_env("HOME")) {
+        return fs::path(*home);
+    }
+#ifdef _WIN32
+    if (auto home = pulp::runtime::get_env("USERPROFILE")) {
+        return fs::path(*home);
+    }
+#endif
+    return {};
+}
+
+static std::string find_executable_in_path(const std::string& name) {
+#ifdef _WIN32
+    auto output = exec_output("where " + shell_quote(name) + " 2>nul");
+#else
+    auto output = exec_output("command -v " + shell_quote(name) + " 2>/dev/null");
+#endif
+    if (output.empty()) return {};
+    auto newline = output.find_first_of("\r\n");
+    return newline == std::string::npos ? output : output.substr(0, newline);
+}
+
+static bool aax_supported_on_host() {
+#if defined(__APPLE__) || defined(_WIN32)
+    return true;
+#else
+    return false;
+#endif
+}
+
+static std::string aax_download_url() {
+    return "https://developer.avid.com/aax/";
+}
+
+static std::string aax_sdk_download_label() {
+    return "AAX SDK";
+}
+
+static std::string aax_validator_download_label() {
+    return "DigiShell and AAX Validator";
+}
+
+static bool looks_like_aax_sdk_root(const fs::path& path) {
+    return !path.empty()
+        && fs::exists(path / "Interfaces" / "AAX.h")
+        && fs::exists(path / "Interfaces" / "AAX_Exports.cpp");
+}
+
+static std::vector<fs::path> aax_sdk_candidates() {
+    std::vector<fs::path> candidates;
+    if (auto env = pulp::runtime::get_env("PULP_AAX_SDK_DIR")) {
+        auto trimmed = strip_quotes(trim(*env));
+        if (!trimmed.empty()) candidates.emplace_back(trimmed);
+    }
+
+    auto home = user_home_dir();
+    if (!home.empty()) {
+        candidates.push_back(home / "SDKs" / "avid" / "aax-sdk" / "current");
+        candidates.push_back(home / "SDKs" / "avid" / "aax-sdk");
+        candidates.push_back(home / "SDKs" / "Avid" / "AAXSDK" / "current");
+        candidates.push_back(home / "SDKs" / "Avid" / "AAXSDK");
+    }
+
+    return candidates;
+}
+
+static fs::path find_aax_sdk_root() {
+    for (const auto& candidate : aax_sdk_candidates()) {
+        if (looks_like_aax_sdk_root(candidate)) {
+            return fs::absolute(candidate);
+        }
+    }
+    return {};
+}
+
+static fs::path aax_validator_commandline_dir(const fs::path& root) {
+    if (root.empty()) return {};
+    auto commandline = root / "CommandLineTools";
+    if (fs::exists(platform_executable(commandline / "dsh"))) {
+        return commandline;
+    }
+    if (fs::exists(platform_executable(root / "dsh"))) {
+        return root;
+    }
+    return {};
+}
+
+static bool looks_like_aax_validator_root(const fs::path& path) {
+    auto tool_dir = aax_validator_commandline_dir(path);
+    if (tool_dir.empty()) return false;
+#ifdef __APPLE__
+    return fs::exists(tool_dir / "Dishes" / "aaxval.dish" / "Contents" / "MacOS" / "aaxval");
+#else
+    return fs::exists(tool_dir / "Dishes" / "aaxval.dish");
+#endif
+}
+
+static std::vector<fs::path> aax_validator_candidates() {
+    std::vector<fs::path> candidates;
+    if (auto env = pulp::runtime::get_env("PULP_AAX_VALIDATOR_DIR")) {
+        auto trimmed = strip_quotes(trim(*env));
+        if (!trimmed.empty()) candidates.emplace_back(trimmed);
+    }
+
+    auto home = user_home_dir();
+    if (!home.empty()) {
+        candidates.push_back(home / "SDKs" / "avid" / "aax-validator" / "current");
+        candidates.push_back(home / "SDKs" / "avid" / "aax-validator");
+        candidates.push_back(home / "SDKs" / "Avid" / "AAXValidator" / "current");
+        candidates.push_back(home / "SDKs" / "Avid" / "AAXValidator");
+    }
+
+    return candidates;
+}
+
+static fs::path find_aax_validator_root() {
+    for (const auto& candidate : aax_validator_candidates()) {
+        if (looks_like_aax_validator_root(candidate)) {
+            return fs::absolute(candidate);
+        }
+    }
+    return {};
+}
+
+static void print_aax_setup_guidance(bool need_sdk, bool need_validator) {
+    std::cout << "      AAX is optional and supported only on macOS and Windows.\n";
+    std::cout << "      Sign in at " << aax_download_url() << " and download:\n";
+    if (need_sdk) {
+        std::cout << "        - " << aax_sdk_download_label() << "\n";
+    }
+    if (need_validator) {
+        std::cout << "        - " << aax_validator_download_label() << "\n";
+    }
+    std::cout << "      Suggested install locations:\n";
+    std::cout << "        - ~/SDKs/avid/aax-sdk/current\n";
+    std::cout << "        - ~/SDKs/avid/aax-validator/current\n";
+    if (need_sdk) {
+        std::cout << "      Set PULP_AAX_SDK_DIR to the unpacked AAX SDK root.\n";
+    }
+    if (need_validator) {
+        std::cout << "      Set PULP_AAX_VALIDATOR_DIR to the extracted validator root containing CommandLineTools/.\n";
+    }
+}
+
+static fs::path write_temp_text_file(const std::string& prefix, const std::string& content) {
+    auto tmp = fs::temp_directory_path()
+             / (prefix + "-" + std::to_string(getpid()) + "-"
+                + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".txt");
+    std::ofstream out(tmp);
+    out << content;
+    return tmp;
+}
+
+static std::string sanitize_process_output(std::string output) {
+    output.erase(std::remove(output.begin(), output.end(), '\0'), output.end());
+    return output;
+}
+
+static std::string truncate_message(std::string value, std::size_t max_chars) {
+    if (value.size() <= max_chars) return value;
+    value.resize(max_chars);
+    value += "...";
+    return value;
+}
+
+static bool bundle_contains_payload(const fs::path& bundle_path) {
+    if (bundle_path.empty() || !fs::exists(bundle_path)) return false;
+    if (!fs::is_directory(bundle_path)) return fs::is_regular_file(bundle_path);
+
+    const auto stem = bundle_path.stem().string();
+    const auto ext = bundle_path.extension().string();
+
+    for (auto it = fs::recursive_directory_iterator(bundle_path, fs::directory_options::skip_permission_denied);
+         it != fs::recursive_directory_iterator(); ++it) {
+        if (!it->is_regular_file()) continue;
+        const auto filename = it->path().filename().string();
+        if (filename == stem || filename == stem + ext) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+static std::string run_aax_validator_command(const fs::path& validator_root,
+                                             const fs::path& plugin_path,
+                                             bool run_all)
+{
+    auto tool_dir = aax_validator_commandline_dir(validator_root);
+    if (tool_dir.empty()) return {};
+
+    auto dsh = platform_executable(tool_dir / "dsh");
+    if (!fs::exists(dsh)) return {};
+
+    std::ostringstream script;
+    script << "load_dish aaxval\n";
+    if (run_all) {
+        script << "runtests \"" << plugin_path.string() << "\"\n";
+    } else {
+        script << "runtest [test.describe_validation, \"" << plugin_path.string() << "\"]\n";
+    }
+    script << "quit\n";
+
+    auto script_path = write_temp_text_file("pulp-aaxval", script.str());
+    auto command = "cd " + shell_quote(tool_dir)
+                 + " && " + shell_quote(dsh)
+                 + " < " + shell_quote(script_path)
+                 + " 2>&1";
+    auto output = sanitize_process_output(exec_output(command));
+    std::error_code ec;
+    fs::remove(script_path, ec);
+    return output;
+}
+
+static bool aax_validator_passed(const std::string& output) {
+    if (output.find("result_status: E_COMPLETED_PASS") != std::string::npos) {
+        return true;
+    }
+
+    static const std::regex summary_re(R"((\d+)\s+passed,\s+(\d+)\s+failed,\s+(\d+)\s+warnings,\s+(\d+)\s+cancelled)",
+                                       std::regex::icase);
+    std::smatch match;
+    if (std::regex_search(output, match, summary_re) && match.size() == 5) {
+        const auto failed = std::stoi(match[2].str());
+        const auto cancelled = std::stoi(match[4].str());
+        return failed == 0 && cancelled == 0;
+    }
+
+    if (output.find("result_status: E_COMPLETED_FAIL") != std::string::npos
+        || output.find("result_status: E_FAILED") != std::string::npos
+        || output.find("result_status: E_CANCELED") != std::string::npos
+        || output.find("FAILED:") != std::string::npos
+        || output.find("failed to complete") != std::string::npos) {
+        return false;
+    }
+
+    return false;
 }
 
 static fs::path find_project_root_from(fs::path dir) {
@@ -524,6 +768,9 @@ static std::string default_create_formats(const fs::path& repo_root, const std::
         }
 #endif
         formats.push_back("CLAP");
+#if defined(__APPLE__) || defined(_WIN32)
+        formats.push_back("AAX");
+#endif
 #ifdef __linux__
         formats.push_back("LV2");
 #endif
@@ -537,9 +784,9 @@ static std::string default_create_formats(const fs::path& repo_root, const std::
     }
 
 #ifdef __APPLE__
-    return "VST3 AU CLAP Standalone";
+    return "VST3 AU CLAP AAX Standalone";
 #elif defined(_WIN32)
-    return "VST3 CLAP Standalone";
+    return "VST3 CLAP AAX Standalone";
 #else
     return "VST3 CLAP LV2 Standalone";
 #endif
@@ -960,6 +1207,18 @@ static int cmd_status([[maybe_unused]] const std::vector<std::string>& args) {
 
     std::cout << "  CLAP: available (fetched via CMake)\n";
 
+    if (aax_supported_on_host()) {
+        auto sdk_root = find_aax_sdk_root();
+        if (!sdk_root.empty()) {
+            std::cout << "  AAX:  optional SDK found at " << sdk_root.string() << "\n";
+        } else {
+            std::cout << "  AAX:  optional (set PULP_AAX_SDK_DIR after downloading "
+                      << aax_sdk_download_label() << " from " << aax_download_url() << ")\n";
+        }
+    } else {
+        std::cout << "  AAX:  unsupported on Linux/Ubuntu\n";
+    }
+
     return 0;
 }
 
@@ -1032,11 +1291,20 @@ static int cmd_validate(const std::vector<std::string>& args) {
 
     auto clap_dir = build_dir / "CLAP";
     if (fs::exists(clap_dir)) {
-        bool has_clap_validator = !exec_output("which clap-validator 2>/dev/null").empty();
+        bool has_clap_validator = !find_executable_in_path("clap-validator").empty();
 
         for (auto& entry : fs::directory_iterator(clap_dir)) {
             if (entry.path().extension() == ".clap") {
                 auto name = entry.path().stem().string();
+
+                if (!bundle_contains_payload(entry.path())) {
+                    std::cout << "CLAP: " << name << " SKIPPED (bundle directory exists but plugin binary is missing)\n";
+                    ++skipped;
+                    record("clap-validator", entry.path().string(), "clap", "skip", -1,
+                           "bundle directory exists but plugin binary is missing");
+                    continue;
+                }
+
                 ++total;
 
                 if (has_clap_validator) {
@@ -1075,7 +1343,7 @@ static int cmd_validate(const std::vector<std::string>& args) {
 
     auto vst3_dir = build_dir / "VST3";
     if (fs::exists(vst3_dir)) {
-        bool has_pluginval = !exec_output("which pluginval 2>/dev/null").empty();
+        bool has_pluginval = !find_executable_in_path("pluginval").empty();
 
         for (auto& entry : fs::directory_iterator(vst3_dir)) {
             if (entry.path().extension() == ".vst3") {
@@ -1109,12 +1377,21 @@ static int cmd_validate(const std::vector<std::string>& args) {
     // ── vstvalidator (evaluation: run if --all and tool is available) ────
 
     if (run_all && fs::exists(vst3_dir)) {
-        bool has_vstvalidator = !exec_output("which vstvalidator 2>/dev/null").empty();
+        bool has_vstvalidator = !find_executable_in_path("vstvalidator").empty();
 
         if (has_vstvalidator) {
             for (auto& entry : fs::directory_iterator(vst3_dir)) {
                 if (entry.path().extension() == ".vst3") {
                     auto name = entry.path().stem().string();
+
+                    if (!bundle_contains_payload(entry.path())) {
+                        std::cout << "VST3: " << name << " SKIPPED (bundle directory exists but plugin binary is missing)\n";
+                        ++skipped;
+                        record("pluginval", entry.path().string(), "vst3", "skip", -1,
+                               "bundle directory exists but plugin binary is missing");
+                        continue;
+                    }
+
                     ++total;
                     std::cout << "VST3: validating " << name << " (vstvalidator)... ";
                     auto vst3_path = entry.path().string();
@@ -1146,11 +1423,20 @@ static int cmd_validate(const std::vector<std::string>& args) {
         for (auto& entry : fs::directory_iterator(au_dir)) {
             if (entry.path().extension() == ".component") {
                 auto name = entry.path().stem().string();
+
+                if (!bundle_contains_payload(entry.path())) {
+                    std::cout << "AU: " << name << " SKIPPED (bundle directory exists but plugin binary is missing)\n";
+                    ++skipped;
+                    record("auval", entry.path().string(), "au", "skip", -1,
+                           "bundle directory exists but plugin binary is missing");
+                    continue;
+                }
+
                 ++total;
                 std::cout << "AU: " << name << " (auval check)... ";
 
                 // Check if auval exists
-                if (!exec_output("which auval 2>/dev/null").empty()) {
+                if (!find_executable_in_path("auval").empty()) {
                     // Run auval test from ctest
                     auto test_cmd = "ctest --test-dir " + build_dir.string() + " -R auval-" + name + " --output-on-failure 2>/dev/null";
                     int rc = run(test_cmd);
@@ -1169,6 +1455,60 @@ static int cmd_validate(const std::vector<std::string>& args) {
                     record("auval", entry.path().string(), "au", "skip", -1,
                            "auval not found");
                 }
+            }
+        }
+    }
+#endif
+
+#if defined(__APPLE__) || defined(_WIN32)
+    // ── AAX validation (optional validator) ─────────────────────────────
+
+    auto aax_dir = build_dir / "AAX";
+    if (fs::exists(aax_dir)) {
+        auto validator_root = find_aax_validator_root();
+        bool has_aax_validator = !validator_root.empty();
+        bool printed_guidance = false;
+
+        for (auto& entry : fs::directory_iterator(aax_dir)) {
+            if (entry.path().extension() != ".aaxplugin") continue;
+
+            auto name = entry.path().stem().string();
+
+            if (!bundle_contains_payload(entry.path())) {
+                std::cout << "AAX: " << name << " SKIPPED (bundle directory exists but plugin binary is missing)\n";
+                ++skipped;
+                record("aax-validator", entry.path().string(), "aax", "skip", -1,
+                       "bundle directory exists but plugin binary is missing");
+                continue;
+            }
+
+            ++total;
+
+            if (!has_aax_validator) {
+                std::cout << "AAX: " << name << " SKIPPED (AAX validator not installed)\n";
+                ++skipped;
+                record("aax-validator", entry.path().string(), "aax", "skip", -1,
+                       "AAX validator not found");
+                if (!printed_guidance) {
+                    print_aax_setup_guidance(false, true);
+                    printed_guidance = true;
+                }
+                continue;
+            }
+
+            std::cout << "AAX: validating " << name
+                      << (run_all ? " (aaxval full)... " : " (aaxval describe)... ");
+            auto output = run_aax_validator_command(validator_root, entry.path(), run_all);
+            auto summary = truncate_message(output, 400);
+
+            if (aax_validator_passed(output)) {
+                std::cout << "PASSED\n";
+                ++passed;
+                record("aax-validator", entry.path().string(), "aax", "pass", 0, "");
+            } else {
+                std::cout << "FAILED\n";
+                ++failed;
+                record("aax-validator", entry.path().string(), "aax", "fail", 1, summary);
             }
         }
     }
@@ -1603,6 +1943,33 @@ static std::vector<DoctorCheck> run_doctor_checks(const fs::path& active_root, b
     }
 #endif
 
+#if defined(__APPLE__) || defined(_WIN32)
+    {
+        DoctorCheck c{"AAX SDK (optional)", true, {}, {}};
+        if (auto sdk_root = find_aax_sdk_root(); !sdk_root.empty()) {
+            c.detail = sdk_root.string();
+        } else {
+            c.detail = "Not configured (download AAX SDK from https://developer.avid.com/aax/)";
+        }
+        checks.push_back(c);
+    }
+    {
+        DoctorCheck c{"AAX validator (optional)", true, {}, {}};
+        if (auto validator_root = find_aax_validator_root(); !validator_root.empty()) {
+            c.detail = validator_root.string();
+        } else {
+            c.detail = "Not installed (download DigiShell and AAX Validator from https://developer.avid.com/aax/)";
+        }
+        checks.push_back(c);
+    }
+#else
+    {
+        DoctorCheck c{"AAX", true, {}, {}};
+        c.detail = "Unsupported on Linux/Ubuntu";
+        checks.push_back(c);
+    }
+#endif
+
 #ifdef __linux__
     {
         DoctorCheck c{"ALSA dev headers", false, {}, {}};
@@ -1783,6 +2150,13 @@ static std::string make_plugin_code(const std::string& class_name) {
     return (clean + "xxxx").substr(0, 4);
 }
 
+static std::string make_aax_product_code(const std::string& class_name) {
+    auto clean = make_plugin_code(class_name);
+    if (clean.size() < 4) clean = (clean + "xxxx").substr(0, 4);
+    clean[3] = 'P';
+    return clean;
+}
+
 static std::string make_mfr_code(const std::string& mfr) {
     std::string clean;
     for (char c : mfr) if (std::isalpha(c)) clean += c;
@@ -1889,6 +2263,7 @@ static int cmd_create(const std::vector<std::string>& args) {
     std::string ns = to_namespace_name(name);
     std::string factory = ns;
     std::string plugin_code = make_plugin_code(class_name);
+    std::string aax_product_code = make_aax_product_code(class_name);
     std::string mfr_code = make_mfr_code(manufacturer);
     std::string bundle_id = "com." + to_namespace_name(manufacturer) + "." + ns;
     std::string header_name = replace_all_str(lower_name, "-", "_") + ".hpp";
@@ -1968,6 +2343,13 @@ static int cmd_create(const std::vector<std::string>& args) {
         }
 #endif
     }
+#if defined(__APPLE__) || defined(_WIN32)
+    if (formats.find("AAX") != std::string::npos && find_aax_sdk_root().empty()) {
+        log("AAX is optional. Build the other formats now, or install the AAX SDK later and set PULP_AAX_SDK_DIR.\n");
+        log("See https://developer.avid.com/aax/ for the AAX SDK and DigiShell/AAX Validator downloads.\n\n");
+    }
+#endif
+
     fs::path sdk_dir;
     std::string sdk_version = PULP_SDK_VERSION;
     fs::path templates_base = root.empty() ? fs::path{} : root / "tools" / "templates";
@@ -2001,6 +2383,8 @@ static int cmd_create(const std::vector<std::string>& args) {
         {"BUNDLE_ID", bundle_id},
         {"VERSION", "1.0.0"},
         {"PLUGIN_CODE", plugin_code},
+        {"AAX_PRODUCT_CODE", aax_product_code},
+        {"AAX_NATIVE_CODE", plugin_code},
         {"FORMATS", formats},
         {"DESCRIPTION", type == "app" ? "A standalone Pulp audio application" :
                         type == "bare" ? "A minimal Pulp project" :
@@ -2062,6 +2446,7 @@ static int cmd_create(const std::vector<std::string>& args) {
         {"clap_entry.cpp.template", "clap_entry.cpp"},
         {"vst3_entry.cpp.template", "vst3_entry.cpp"},
         {"au_v2_entry.cpp.template", "au_v2_entry.cpp"},
+        {"aax_entry.cpp.template", "aax_entry.cpp"},
         {"test.cpp.template", test_name},
     };
 
@@ -2069,6 +2454,7 @@ static int cmd_create(const std::vector<std::string>& args) {
         if (tmpl_file == "clap_entry.cpp.template" && formats.find("CLAP") == std::string::npos) continue;
         if (tmpl_file == "vst3_entry.cpp.template" && formats.find("VST3") == std::string::npos) continue;
         if (tmpl_file == "au_v2_entry.cpp.template" && formats.find("AU") == std::string::npos) continue;
+        if (tmpl_file == "aax_entry.cpp.template" && formats.find("AAX") == std::string::npos) continue;
         // CMakeLists.txt comes from cmake_template_dir, others from source_template_dir
         auto tmpl_path = (tmpl_file == "CMakeLists.txt.template")
             ? cmake_template_dir / tmpl_file
@@ -2240,7 +2626,7 @@ static int cmd_create(const std::vector<std::string>& args) {
     }
 
     auto build_dir = standalone_mode ? (out_dir / "build") : (root / "build");
-    for (auto fmt : {"VST3", "CLAP", "AU"}) {
+    for (auto fmt : {"VST3", "CLAP", "AU", "AAX"}) {
         auto fmt_dir = build_dir / fmt;
         if (!fs::exists(fmt_dir)) continue;
         for (auto& entry : fs::directory_iterator(fmt_dir)) {
@@ -3399,7 +3785,7 @@ static void print_usage() {
     std::cout << "  run      Launch a standalone Pulp application\n";
     std::cout << "  test     Run the test suite\n";
     std::cout << "  status   Show project status and info\n";
-    std::cout << "  validate Run plugin format validators (clap-validator, auval)\n";
+    std::cout << "  validate Run plugin format validators (CLAP, VST3, AU, optional AAX)\n";
     std::cout << "  ship     Sign, package, and check plugins\n";
     std::cout << "  cache    Manage SDK and asset cache (~/.pulp/)\n";
     std::cout << "  docs     Browse local documentation\n";

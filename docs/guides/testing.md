@@ -52,7 +52,7 @@ The current branch has 1331 registered tests covering:
 
 - Unit tests for subsystems (runtime, state, audio, midi, signal, format, events, canvas, render, view, osc)
 - Golden-file audio comparison tests
-- Plugin format validation (CLAP dlopen, AU auval)
+- Plugin format validation (CLAP dlopen, VST3 pluginval, AU auval, optional local AAX validation)
 - Example plugin processing tests
 
 ## Test Layers
@@ -73,9 +73,13 @@ pulp validate
 This runs:
 
 - **CLAP**: `clap-validator` if installed, otherwise falls back to dlopen checks
+- **VST3**: `pluginval` if installed, otherwise skips cleanly
 - **AU**: `auval` on macOS if the component is installed
+- **AAX**: DigiShell + AAX Validator on macOS/Windows if installed; otherwise the CLI reports a guided skip
 
 Validation is separate from unit tests. Unit tests verify internal behavior; validation verifies that the built plugin binary loads and behaves correctly from the host's perspective.
+Public CI does not build or validate AAX because the SDK and validator are
+developer-supplied and not bundled by Pulp.
 
 ## Design Tool Debugging
 

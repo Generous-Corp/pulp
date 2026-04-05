@@ -1,6 +1,8 @@
 # Plugin Format Adapters
 
-Pulp supports three plugin formats (CLAP, VST3, AU v2) plus standalone and headless hosts. You write one `Processor` subclass; format adapters handle the rest.
+Pulp supports four native plugin formats (CLAP, VST3, AU v2, and optional AAX)
+plus standalone and headless hosts. You write one `Processor` subclass; format
+adapters handle the rest.
 
 Each format is activated by including a single entry-point header and calling a macro in one `.cpp` file per target. The macro generates all boilerplate: factory functions, extension dispatch, parameter registration, and lifecycle management.
 
@@ -266,6 +268,84 @@ The type codes (`aufx`, `aumu`) and four-character codes are set in your AU's `I
 
 ---
 
+## AAX (optional)
+
+**Entry point header:** `<pulp/format/aax_entry.hpp>`
+
+### Macro
+
+```cpp
+#include "my_processor.hpp"
+#include <pulp/format/aax_entry.hpp>
+
+PULP_AAX_PLUGIN(my_namespace::create_my_processor)
+```
+
+`PULP_AAX_PLUGIN(factory_fn)` generates:
+
+- A `GetEffectDescriptions()` export for the AAX host
+- Clean-room metadata generation from `Processor::descriptor()`
+- Parameter, state, latency, transport, and MIDI registration through the AAX runtime
+
+### Build Requirements
+
+AAX is intentionally opt-in:
+
+- Supported only on macOS and Windows
+- Requires `PULP_ENABLE_AAX=ON`
+- Requires `PULP_AAX_SDK_DIR` to point to a developer-supplied out-of-tree AAX SDK
+- Requires `aax_entry.cpp` in the plugin source directory
+
+Typical CMake usage:
+
+```cmake
+pulp_add_plugin(MyPlugin
+    FORMATS VST3 AU CLAP AAX Standalone
+    PLUGIN_NAME "MyPlugin"
+    BUNDLE_ID "com.example.myplugin"
+    MANUFACTURER "Example Audio"
+    MANUFACTURER_CODE "Exmp"
+    AAX_PRODUCT_CODE "ExPl"
+    AAX_NATIVE_CODE "ExPn"
+)
+```
+
+Linux and Ubuntu do not support AAX. If `FORMATS AAX` is requested there,
+configuration fails with an explicit error.
+
+### Format Model
+
+The current AAX adapter supports:
+
+- Effect, instrument, and MIDI-effect categories
+- One main output bus
+- One main input bus plus one optional mono sidechain
+- State save/load
+- Host automation and latency reporting
+- Transport access
+- Local MIDI input/output nodes when declared by the processor
+
+### Validation
+
+When DigiShell + AAX Validator are installed locally:
+
+- `pulp validate` runs a fast describe-validation probe for each `.aaxplugin`
+- `pulp validate --all` runs the fuller AAX validator suite
+
+If the validator is missing, the CLI reports a guided skip and points to the
+Avid download page instead of guessing.
+
+### Known Limitations
+
+- Native AAX only. DSP and AudioSuite are out of scope.
+- No AAX GUI layer yet. Current validator output may warn that the effect does not contain `EffectGUI`.
+- Public CI does not build or validate AAX because the SDK and validator are not bundled by Pulp.
+- Component layouts are intentionally constrained to keep the clean-room surface small.
+
+For setup, download, and clean-room rules, see [AAX Setup](aax.md).
+
+---
+
 ## Standalone Host
 
 **Header:** `core/format/src/standalone.hpp`
@@ -382,3 +462,6 @@ Each entry-point `.cpp` file includes the processor header and calls the format-
 | Latency reporting | Yes | Yes | Yes (seconds) |
 | Tail reporting | Yes | Yes | Yes (seconds) |
 | Stable ID | `bundle_id` string | `FUID` (128-bit) | Four-char codes in Info.plist |
+
+Optional AAX uses its own clean-room runtime and follows the constraints listed
+in the AAX section above.

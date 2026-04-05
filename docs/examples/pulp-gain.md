@@ -15,10 +15,10 @@ The simplest possible Pulp plugin. A stereo gain effect with input gain, output 
 - Reading parameter values from `StateStore` on the audio thread via `state().get_value()`
 - Stereo audio pass-through and gain processing
 - Bypass parameter handling
-- Building all four plugin format targets from a single processor
-- Format-specific entry point files (`vst3_entry.cpp`, `au_v2_entry.cpp`, `clap_entry.cpp`, `main.cpp`)
+- Building the default plugin format targets plus optional AAX from a single processor
+- Format-specific entry point files (`vst3_entry.cpp`, `au_v2_entry.cpp`, `clap_entry.cpp`, `aax_entry.cpp`, `main.cpp`)
 - Bundle metadata files (`Info.plist.au`, `Info.plist.vst3`, `moduleinfo.json`)
-- Format validation tests (auval, pluginval, CLAP dlopen)
+- Format validation tests (auval, pluginval, CLAP dlopen, optional AAX validator)
 
 ## Try in Browser
 
@@ -34,6 +34,7 @@ locally for now.
 | VST3 | Yes |
 | AU v2 | Yes |
 | CLAP | Yes |
+| AAX | Optional on macOS/Windows |
 | Standalone | Yes |
 | WAMv2 (Browser) | Yes |
 | WebCLAP (WASM) | Yes |
@@ -55,6 +56,7 @@ locally for now.
 | `au_v2_entry.cpp` | Audio Unit v2 entry point |
 | `au_register.cpp` | AU component registration |
 | `clap_entry.cpp` | CLAP format entry point |
+| `aax_entry.cpp` | AAX format entry point |
 | `main.cpp` | Standalone application entry point |
 | `test_pulp_gain.cpp` | Unit tests exercising the processor through the headless host |
 | `Info.plist.au` | AU bundle metadata |

@@ -66,6 +66,7 @@ Options:
 - **Linux:** ALSA dev headers (`sudo apt install libasound2-dev`)
 - Optional: [pluginval](https://github.com/Tracktion/pluginval) for VST3 validation
 - Optional: [clap-validator](https://github.com/free-audio/clap-validator) for CLAP validation
+- Optional on macOS/Windows: AAX SDK + DigiShell/AAX Validator for local AAX builds and validation. See [AAX Setup](aax.md)
 
 ### Environment Diagnosis
 
@@ -91,6 +92,7 @@ my-plugin/
   vst3_entry.cpp         # VST3 format entry
   clap_entry.cpp         # CLAP format entry
   au_v2_entry.cpp        # AU format entry (macOS)
+  aax_entry.cpp          # AAX format entry (optional, macOS/Windows)
   main.cpp               # Standalone entry
 ```
 
@@ -176,18 +178,36 @@ PULP_VST3_PLUGIN(kUID, "MyGain", Steinberg::Vst::PlugType::kFx,
 PULP_AU_PLUGIN(MyGainAU, create_my_gain)
 ```
 
+**AAX** (`aax_entry.cpp`, optional on macOS/Windows):
+```cpp
+#include "my_processor.hpp"
+#include <pulp/format/aax_entry.hpp>
+PULP_AAX_PLUGIN(create_my_gain)
+```
+
 ## Step 3: Add CMakeLists.txt
 
 ```cmake
 pulp_add_plugin(MyGain
-    FORMATS VST3 AU CLAP Standalone
+    FORMATS VST3 AU CLAP AAX Standalone
     PLUGIN_NAME "MyGain"
     BUNDLE_ID "com.mycompany.mygain"
     MANUFACTURER "MyCompany"
     PLUGIN_CODE "MyGn"
     MANUFACTURER_CODE "MyCo"
+    AAX_PRODUCT_CODE "MyGa"
+    AAX_NATIVE_CODE "MyGn"
 )
 ```
+
+If you want AAX, enable it explicitly at configure time with a developer-supplied
+SDK:
+
+```bash
+cmake -S . -B build -DPULP_ENABLE_AAX=ON -DPULP_AAX_SDK_DIR=$HOME/SDKs/avid/aax-sdk/current
+```
+
+On Linux and Ubuntu, AAX is unsupported and must be omitted.
 
 ## Step 4: Build
 
@@ -206,6 +226,7 @@ Output locations:
 - VST3: `build/VST3/MyGain.vst3`
 - CLAP: `build/CLAP/MyGain.clap`
 - AU: `build/AU/MyGain.component`
+- AAX: `build/AAX/MyGain.aaxplugin` (macOS/Windows, opt-in)
 - Standalone: `build/MyGain`
 
 ## Step 5: Validate
@@ -220,6 +241,10 @@ Or manually:
 pluginval --validate build/VST3/MyGain.vst3 --strictness-level 5
 auval -v aufx MyGn MyCo
 ```
+
+If DigiShell + AAX Validator are installed, `pulp validate` also validates any
+built `.aaxplugin` bundles. See [AAX Setup](aax.md) for the download and local
+installation workflow.
 
 ## Step 6: Install
 

@@ -28,6 +28,7 @@ Local CI lets you validate branches on your Mac and cross-platform VMs before me
 - SSH targets receive a per-job git bundle before validation. That keeps exact-SHA validation working even when the host validates from a stale local mirror instead of GitHub directly.
 - Windows SSH jobs execute from short detached worktrees under `C:\pulp-ci`, and stale worktree metadata is pruned automatically before reruns.
 - If a stale runner leaves behind an old Windows validator, the next drain pass now targets that specific remote validator PID for cleanup before starting new work, and `status` keeps the cleanup result visible.
+- For Windows SSH validation, choose the configured target whose non-interactive PowerShell context resolves `git`, `cmake`, and `ctest`. Keep those host aliases local to your environment; shared repo docs should describe the selection rule, not your personal machine names.
 - Reuse is a persistent-host feature for local macOS and SSH-backed/self-hosted hosts. Ephemeral cloud runners should keep the default clean path unless a later policy explicitly opts them in.
 - Truly raw ad hoc `ssh`, `cmake`, or custom background processes still bypass coordination until they are stopped or migrated.
 
@@ -115,6 +116,9 @@ Important constraints in the current phase:
   `estimated; verify provider pricing`
 - if the provider CLI does not expose billing totals, Pulp keeps reporting
   runtime and machine shape instead of inventing invoice truth
+- if a Namespace dispatch dies in `resolve-provider` before any matrix leg starts,
+  inspect the GitHub run annotations first; provider billing or control-plane
+  failures are a different problem from repo or workflow breakage
 - `build.yml` now accepts `runner_provider` and routes Linux and Windows through
   the selected provider; macOS is omitted from the cloud build by default so it
   can stay local-first
@@ -246,6 +250,8 @@ cp tools/local-ci/config.example.json ~/Library/Application\\ Support/Pulp/local
 
 Edit the chosen `config.json` and fill in your SSH hostnames and repo paths. The `host` field is the primary SSH target. `fallback_host`, if present, is tried next. The `utm_fallback` block is optional and is only used if SSH targets are unreachable.
 
+Keep those aliases environment-local. Shared skills and docs should not hardcode your personal hostnames or VM names; they should explain how to choose the right target and where that target is configured.
+
 The optional `github_actions.workflows.docs-check.providers.namespace.runner_selector_json`
 value lets you set the default Namespace `runs-on` selector that `cloud run docs-check`
 should dispatch when you do not pass `--runner-selector-json` explicitly.
@@ -358,6 +364,8 @@ needed and then re-renders the same status.
 ```
 
 SSH host aliases come from `~/.ssh/config`. Set them up there rather than putting raw IPs in this file. This makes it easy to prefer a fast local VM as the primary target and keep a slower hardware-backed machine as the fallback when you only need it for edge cases.
+
+Before trusting a Windows SSH target for CI, verify that its non-interactive PowerShell context resolves `git`, `cmake`, and `ctest`. An interactive shell that works is not sufficient proof for the SSH service context the runner actually uses.
 
 If your Windows VM is Windows on ARM, you can either set `cmake_platform` to `"ARM64"` explicitly or leave it blank and let the runner infer `ARM64` vs `x64` from the remote host. If CMake keeps picking the wrong Visual Studio install, set `cmake_generator_instance` to the exact VS path, for example `C:/Program Files/Microsoft Visual Studio/2022/Community`. If you leave `cmake_generator_instance` blank, the runner prefers a full Visual Studio install over `BuildTools` when both are present. The pinned WebGPU dependency already has a Windows `aarch64` prebuilt for this path, so ARM Windows smoke runs can stay on the normal GPU-enabled configuration. This is useful for fast smoke validation on a local UTM VM. Keep an x64 Windows machine for parity runs when you need the authoritative Windows architecture.
 

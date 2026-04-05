@@ -62,10 +62,15 @@ What it does:
 7. Reports plugin artifact locations
 
 Default formats are platform-gated:
-- **macOS**: VST3, AU, CLAP, Standalone
+- **macOS**: VST3, AU, CLAP, AAX, Standalone
 - **Linux**: VST3, CLAP, LV2, Standalone
-- **Windows**: VST3, CLAP, Standalone
+- **Windows**: VST3, CLAP, AAX, Standalone
 - **app/bare**: Standalone only
+
+On macOS and Windows, `pulp create` scaffolds `aax_entry.cpp` by default, but the
+actual AAX target is still optional. It is only built when
+`PULP_ENABLE_AAX=ON` and `PULP_AAX_SDK_DIR` points to a developer-supplied AAX
+SDK kept outside the repo. Linux and Ubuntu do not support AAX.
 
 ### build
 
@@ -108,6 +113,8 @@ pulp status
 
 `pulp status` reports which mode you are in so external projects never silently depend on a random checkout and repo/examples never silently pick up a cached SDK.
 In SDK mode it also reports the pinned SDK version plus the resolved SDK path and checkout hints when present.
+On macOS and Windows it also reports whether an optional AAX SDK is detected. On
+Linux and Ubuntu it reports AAX as unsupported.
 
 ### validate
 
@@ -116,8 +123,8 @@ In SDK mode it also reports the pinned SDK version plus the resolved SDK path an
 Run plugin format validators on all built plugins.
 
 ```bash
-pulp validate              # CLAP + VST3 (pluginval) + AU
-pulp validate --all        # Also run vstvalidator if installed
+pulp validate              # CLAP + VST3 (pluginval) + AU + optional AAX
+pulp validate --all        # Also run vstvalidator and full AAX validation if installed
 pulp validate --json       # Print JSON report to stdout
 pulp validate --report out.json  # Write JSON report to file
 ```
@@ -126,15 +133,18 @@ Checks:
 - **CLAP**: uses `clap-validator` if installed, otherwise falls back to CTest dlopen checks
 - **VST3**: uses `pluginval` (strictness level 5, 30s timeout) if installed, otherwise skips
 - **AU**: uses `auval` on macOS
+- **AAX**: uses DigiShell + AAX Validator on macOS/Windows if installed via `PULP_AAX_VALIDATOR_DIR` or the recommended `~/SDKs/avid/aax-validator/` layout
 - **VST3 (--all)**: also runs `vstvalidator` if installed (Steinberg SDK tool, optional)
+- **AAX (--all)**: runs the broader `aaxval` test suite instead of the faster describe-validation probe
 
 Flags:
-- `--all` — run every available validator, including vstvalidator
+- `--all` — run every available validator, including `vstvalidator` and full AAX validation
 - `--json` — emit a machine-readable JSON report to stdout (conforms to `validation-report-v1.schema.json`)
 - `--report <path>` — write the JSON report to a file
 
 When a validator tool is not installed, the check is reported as SKIPPED with a clear message.
 The JSON report conforms to `docs/contracts/validation-report-v1.schema.json`.
+On Linux and Ubuntu, AAX validation is never attempted because AAX is unsupported there.
 
 Prints a summary with pass/fail/skip counts.
 
@@ -192,13 +202,15 @@ pulp doctor --dry-run   # show what --fix would do
 ```
 
 Checks are platform-gated — only relevant checks run on each OS:
-- **macOS**: compiler, CMake, git-lfs, LFS files, VST3 SDK, AudioUnitSDK, build state
+- **macOS**: compiler, CMake, git-lfs, LFS files, VST3 SDK, AudioUnitSDK, optional AAX SDK/validator, build state
 - **Linux**: compiler, CMake, git-lfs, LFS files, VST3 SDK, ALSA dev headers, build state
-- **Windows**: compiler, CMake, git-lfs, LFS files, VST3 SDK, build state
+- **Windows**: compiler, CMake, git-lfs, LFS files, VST3 SDK, optional AAX SDK/validator, build state
 
 Mode-specific checks:
 - **SDK mode**: verifies `pulp.toml`, the installed SDK path or cache, optional checkout hints, and build configuration for the external project
 - **Source-tree mode**: verifies the active checkout, pinned external SDKs, LFS state, and build configuration for the repo/examples workflow
+
+For AAX-specific setup details and download guidance, see [AAX Setup](../guides/aax.md).
 
 Exit code is 0 if all checks pass, 1 if any fail.
 

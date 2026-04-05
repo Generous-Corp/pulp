@@ -1,6 +1,23 @@
 {
   "dependencies": [
     {
+      "name": "AAX SDK",
+      "category": "format-sdk",
+      "license": "Separately licensed by Avid (developer-supplied, not redistributed by Pulp)",
+      "version": "user-supplied",
+      "source_kind": "developer-supplied",
+      "repository": "https://my.avid.com/products/cppsdk?toolkit=AAX",
+      "upstream": { "kind": "none" },
+      "documented_in_dependencies_md": true,
+      "documented_in_notice_md": false,
+      "source_files": [
+        "CMakeLists.txt",
+        "tools/cmake/PulpAAX.cmake",
+        "DEPENDENCIES.md",
+        "docs/reference/licensing.md"
+      ]
+    },
+    {
       "name": "AudioUnitSDK",
       "category": "format-sdk",
       "license": "Apache-2.0",

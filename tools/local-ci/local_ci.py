@@ -3678,6 +3678,7 @@ $Sha = '{ps_literal(job['sha'])}'
 $BundleName = '{ps_literal(bundle_name)}'
 $BundleRef = '{ps_literal(bundle_ref)}'
 $Bundle = Join-Path $HOME $BundleName
+$BundleGit = $Bundle.Replace('\\', '/')
 $ExcludeRegex = '{ps_literal(exclude_tests)}'
 $Generator = '{ps_literal(cmake_generator)}'
 $Platform = '{ps_literal(resolved_platform)}'
@@ -3717,7 +3718,7 @@ try {{
         try {{
             Invoke-Native git @(
                 'fetch',
-                $Bundle,
+                $BundleGit,
                 "$BundleRef`:refs/pulp-ci-bundles/{job['id']}"
             )
         }} finally {{

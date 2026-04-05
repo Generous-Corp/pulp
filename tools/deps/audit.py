@@ -24,21 +24,19 @@ def load_manifest() -> list[dict]:
 def parse_dependencies_md() -> set[str]:
     text = DEPENDENCIES_MD.read_text()
     names: set[str] = set()
-    in_table = False
     for raw_line in text.splitlines():
         line = raw_line.strip()
-        if line.startswith("| Name | Version |"):
-            in_table = True
-            continue
-        if not in_table:
-            continue
         if not line.startswith("|"):
-            in_table = False
             continue
         cells = [c.strip() for c in line.strip("|").split("|")]
-        if not cells or cells[0] in {"Name", "------", "-----"}:
+        if not cells:
             continue
-        names.add(cells[0])
+        first = cells[0]
+        if first in {"Name", "SDK", "------", "-----"}:
+            continue
+        if set(first) == {"-"}:
+            continue
+        names.add(first)
     return names
 
 

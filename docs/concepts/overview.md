@@ -14,7 +14,8 @@ See the [Vision](vision.html) page for the full architecture, design decisions, 
 
 On the current branch, Pulp provides:
 
-- **Six native plugin formats** — VST3, AU v2, AUv3, CLAP, LV2, and standalone — with format-specific validation in CI (pluginval for VST3, clap-validator for CLAP, auval for AU with signing caveats)
+- **Six default native plugin formats** — VST3, AU v2, AUv3, CLAP, LV2, and standalone — with format-specific validation in CI (pluginval for VST3, clap-validator for CLAP, auval for AU with signing caveats)
+- **Optional AAX support** — clean-room AAX Native targets on macOS and Windows when developers provide their own AAX SDK and validator locally
 - **Two web plugin formats** — WAMv2 (Web Audio Modules) and WebCLAP (CLAP-to-WebAssembly) for browser-based DAWs
 - **Effects, instruments, and MIDI effects** — all plugin types supported across formats
 - **Three desktop platforms** — macOS (primary), Windows (WASAPI, Win32 MIDI, NSIS installer), Linux (ALSA, JACK, LV2, .deb packaging) — plus experimental iOS (AVAudioSession, AUv3, Metal) and Web/WASM support
@@ -53,7 +54,7 @@ Pulp's code is organized into independent subsystems under `core/`:
 | `midi`    | MIDI device I/O (CoreMIDI, Win32, ALSA, Web MIDI), MIDI 2.0 UMP, MPE, RPN/NRPN |
 | `signal`  | 30+ DSP processors — filters, oscillators, effects, FFT, interpolation |
 | `state`   | Parameters, presets, state serialization, undo/redo, change notification |
-| `format`  | Plugin format adapters (VST3, AU, AUv3, CLAP, LV2, WAMv2, WebCLAP, standalone, headless) |
+| `format`  | Plugin format adapters (VST3, AU, AUv3, CLAP, optional AAX, LV2, WAMv2, WebCLAP, standalone, headless) |
 | `platform`| Platform detection, native dialogs, clipboard |
 | `canvas`  | 2D drawing abstraction (CoreGraphics, Skia), SVG, effects |
 | `render`  | GPU surface management (Dawn/Skia Graphite), render loop, SDL3 surface extraction |

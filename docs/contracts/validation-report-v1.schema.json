@@ -246,7 +246,7 @@
       "properties": {
         "tool": {
           "type": "string",
-          "enum": ["pluginval", "clap-validator", "auval", "vstvalidator"],
+          "enum": ["pluginval", "clap-validator", "auval", "vstvalidator", "aax-validator"],
           "description": "Validation tool used."
         },
         "tool_version": {
@@ -258,7 +258,7 @@
         },
         "plugin_format": {
           "type": "string",
-          "enum": ["vst3", "au", "auv3", "clap"],
+          "enum": ["vst3", "au", "auv3", "clap", "aax"],
           "description": "Plugin format."
         },
         "strictness_level": {

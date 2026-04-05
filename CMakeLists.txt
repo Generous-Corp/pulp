@@ -12,6 +12,16 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+if(APPLE)
+    include(CheckLanguage)
+    check_language(OBJCXX)
+    if(CMAKE_OBJCXX_COMPILER)
+        enable_language(OBJCXX)
+        set(CMAKE_OBJCXX_STANDARD 20)
+        set(CMAKE_OBJCXX_STANDARD_REQUIRED ON)
+    endif()
+endif()
+
 # Required on Linux: static libraries linked into shared objects (.clap, .so) need PIC
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
@@ -43,9 +53,11 @@ option(PULP_BUILD_TESTS "Build unit tests" ON)
 option(PULP_BUILD_EXAMPLES "Build example projects" ON)
 option(PULP_ENABLE_GPU "Enable GPU rendering (Dawn/Skia)" ON)
 option(PULP_ENABLE_SWIFT "Enable Swift layer (Apple only)" OFF)
+option(PULP_ENABLE_AAX "Enable optional AAX support with a developer-supplied SDK" OFF)
 option(PULP_FETCHCONTENT_UPDATES_DISCONNECTED "Avoid implicit FetchContent updates during configure" ON)
 option(PULP_USE_SHARED_FETCHCONTENT_SOURCES "Prefer machine-local shared source caches for FetchContent dependencies" ON)
 set(PULP_SHARED_FETCHCONTENT_SOURCE_DIR "" CACHE PATH "Machine-local shared source cache root for FetchContent dependencies")
+set(PULP_AAX_SDK_DIR "" CACHE PATH "Path to a developer-supplied AAX SDK kept outside the Pulp source tree")
 
 # ── Compiler Warnings ──────────────────────────────────────────────────────
 if(MSVC)
@@ -56,6 +68,8 @@ endif()
 
 # ── Sanitizers (optional) ──────────────────────────────────────────────────
 include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/Sanitizers.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpAAX.cmake)
+pulp_configure_aax_sdk()
 
 # ── Third-Party Dependencies ────────────────────────────────────────────────
 include(FetchContent)
@@ -472,9 +486,11 @@ configure_package_config_file(
 install(FILES
     "${CMAKE_BINARY_DIR}/PulpConfig.cmake"
     "${CMAKE_BINARY_DIR}/PulpConfigVersion.cmake"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpAAX.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpUtils.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpPlugin.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/FindSkia.cmake"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpInfoPlist.aax.in"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpInfoPlist.au.in"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpInfoPlist.vst3.in"
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/Pulp
@@ -547,6 +563,7 @@ endif()
 # Helper sources needed by installed-SDK plugin targets. These are shared by
 # the unified PulpUtils.cmake implementation when it is used from find_package.
 install(FILES
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/format/src/aax_runtime.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/core/format/src/au_adapter.mm"
     "${CMAKE_CURRENT_SOURCE_DIR}/core/format/src/au_audio_unit.h"
     "${CMAKE_CURRENT_SOURCE_DIR}/core/format/src/au_entry.mm"

@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""audit.py — License and clean-room audit tool for Pulp projects.
+"""audit.py — License, clean-room, and vendor-material audit tool for Pulp projects.
 
 Checks for:
 - License compatibility of dependencies
 - Disallowed license types (GPL, LGPL, AGPL, SSPL, proprietary)
 - Clean-room naming violations (JUCE names in source code)
+- Forbidden vendored vendor artifacts or copied AAX SDK text
 - Missing DEPENDENCIES.md entries for detected dependencies
 
 Usage:
@@ -13,7 +14,6 @@ Usage:
 """
 
 import argparse
-import os
 import re
 import sys
 from pathlib import Path
@@ -25,17 +25,34 @@ DISALLOWED = {'GPL-2.0', 'GPL-3.0', 'LGPL-2.1', 'LGPL-3.0', 'AGPL-3.0',
               'SSPL-1.0', 'proprietary'}
 REVIEW = {'MPL-2.0'}
 
-# Names to flag (clean-room violations)
+# Names to flag (clean-room violations).
+# Keep this list to JUCE-specific identifiers. Generic audio/UI names like
+# "MidiBuffer", "Slider", or "Label" create too many false positives to serve
+# as reliable contamination checks.
 JUCE_NAMES = [
-    'AudioProcessor', 'AudioProcessorEditor', 'AudioProcessorValueTreeState',
-    'AudioPluginInstance', 'AudioBuffer', 'MidiBuffer', 'GenericAudioProcessorEditor',
+    'AudioProcessorEditor', 'AudioProcessorValueTreeState',
+    'AudioPluginInstance', 'GenericAudioProcessorEditor',
     'AudioFormatManager', 'AudioThumbnail', 'LookAndFeel', 'ComponentBoundsConstrainer',
-    'FileChooser', 'ResizableWindow', 'DocumentWindow', 'TopLevelWindow',
-    'Slider', 'TextButton', 'ToggleButton', 'Label', 'ComboBox',
-    'TreeView', 'ListBox', 'TabbedComponent', 'PropertyPanel',
+    'DocumentWindow', 'TopLevelWindow', 'TabbedComponent', 'PropertyPanel',
     'juce_audio_basics', 'juce_audio_devices', 'juce_audio_formats',
     'juce_audio_processors', 'juce_gui_basics', 'juce_gui_extra',
     'juce_dsp', 'juce_core', 'JUCE',
+]
+
+SKIP_PREFIXES = ('external/', 'build/', '.git/', 'planning/')
+TEXT_EXTENSIONS = {
+    '.c', '.cc', '.cpp', '.cxx', '.h', '.hh', '.hpp', '.ipp',
+    '.m', '.md', '.mm', '.cmake', '.in', '.json', '.txt', '.xml',
+}
+FORBIDDEN_VENDOR_PATH_PATTERNS = [
+    re.compile(r'(^|/)(aax-sdk-[^/]+|AAXLibrary)(/|$)', re.IGNORECASE),
+    re.compile(r'(^|/)(AAX_[^/]+\.(c|cc|cpp|cxx|h|hh|hpp|mm)|CACF[^/]+\.(c|cc|cpp|cxx|h|hh|hpp))$'),
+    re.compile(r'(^|/)(aax-validator|digishell|aax-page-table-editor|cloudclientservices|hd_driver|pro[ _-]?tools|protoolsktrace|protoolswprtool|juce_to_aax)[^/]*$', re.IGNORECASE),
+]
+FORBIDDEN_VENDOR_TEXT_MARKERS = [
+    'This file is part of the Avid AAX SDK.',
+    'The AAX SDK is subject to commercial or open-source licensing.',
+    'AAX SDK License: https://developer.avid.com/aax',
 ]
 
 
@@ -98,13 +115,20 @@ def audit_directory(path: Path, errors: list, warnings: list):
         warnings.append(f'{path.name}: no LICENSE file found')
 
 
+def should_skip_relative_path(rel: str) -> bool:
+    if rel.startswith(SKIP_PREFIXES):
+        return True
+    first = Path(rel).parts[0] if Path(rel).parts else ''
+    return first.startswith('build')
+
+
 def audit_clean_room(root: Path, errors: list):
     """Check for JUCE naming violations in source code."""
     for ext in ['*.cpp', '*.hpp', '*.h', '*.mm']:
         for f in root.rglob(ext):
             # Skip external/ and build/
             rel = str(f.relative_to(root))
-            if rel.startswith('external/') or rel.startswith('build/'):
+            if should_skip_relative_path(rel):
                 continue
             try:
                 content = f.read_text(errors='replace')
@@ -120,6 +144,33 @@ def audit_clean_room(root: Path, errors: list):
                             if f'"{name}"' not in line and f"'{name}'" not in line:
                                 errors.append(f'{rel}:{i+1}: clean-room violation — uses "{name}"')
                                 break
+
+
+def audit_forbidden_vendor_material(root: Path, errors: list):
+    """Check for vendored AAX/Vendor SDK artifacts or copied vendor text."""
+    for f in root.rglob('*'):
+        if not f.is_file():
+            continue
+
+        rel = str(f.relative_to(root))
+        if should_skip_relative_path(rel):
+            continue
+
+        for pattern in FORBIDDEN_VENDOR_PATH_PATTERNS:
+            if pattern.search(rel):
+                errors.append(f'{rel}: forbidden vendor artifact in repo')
+                break
+        else:
+            if f.suffix.lower() not in TEXT_EXTENSIONS:
+                continue
+            try:
+                content = f.read_text(errors='replace')
+            except Exception:
+                continue
+            for marker in FORBIDDEN_VENDOR_TEXT_MARKERS:
+                if marker in content:
+                    errors.append(f'{rel}: forbidden vendor source marker — contains "{marker}"')
+                    break
 
 
 def main():
@@ -165,6 +216,12 @@ def main():
         audit_clean_room(root, errors)
         if not any('clean-room' in e for e in errors):
             print('  No clean-room violations found')
+
+    if not args.path:
+        print('\nRunning vendor material check...')
+        audit_forbidden_vendor_material(root, errors)
+        if not any('forbidden vendor' in e for e in errors):
+            print('  No forbidden vendor material found')
 
     # Summary
     print()

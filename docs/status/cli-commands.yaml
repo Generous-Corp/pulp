@@ -30,11 +30,11 @@ commands:
 
   - name: validate
     status: usable
-    summary: Run plugin format validators (clap-validator, pluginval, auval) on built plugins. Supports JSON report output.
+    summary: Run plugin format validators (clap-validator, pluginval, auval, optional AAX validator) on built plugins. Supports JSON report output.
     args:
       - name: --all
         kind: flag
-        description: Run all available validators including vstvalidator (graceful skip if not installed)
+        description: Run all available validators including vstvalidator and full AAX validation (graceful skip if not installed)
       - name: --json
         kind: flag
         description: Print validation report as JSON to stdout (conforms to validation-report-v1.schema.json)

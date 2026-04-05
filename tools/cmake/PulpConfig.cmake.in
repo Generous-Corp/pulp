@@ -3,6 +3,7 @@
 @PACKAGE_INIT@
 
 include(CMakeFindDependencyMacro)
+include("${CMAKE_CURRENT_LIST_DIR}/PulpAAX.cmake")
 
 set(PULP_VERSION "@PROJECT_VERSION@")
 get_filename_component(PULP_SDK_DIR "${CMAKE_CURRENT_LIST_DIR}/../../.." ABSOLUTE)
@@ -156,6 +157,16 @@ endif()
 set(PULP_ENABLE_GPU FALSE)
 if(TARGET Pulp::render)
     set(PULP_ENABLE_GPU TRUE)
+endif()
+
+if(NOT DEFINED PULP_ENABLE_AAX)
+    set(PULP_ENABLE_AAX FALSE)
+endif()
+if(PULP_ENABLE_AAX)
+    pulp_configure_aax_sdk()
+else()
+    set(PULP_HAS_AAX FALSE)
+    set(PULP_AAX_SDK_DIR_REAL "")
 endif()
 
 include("${CMAKE_CURRENT_LIST_DIR}/PulpUtils.cmake")

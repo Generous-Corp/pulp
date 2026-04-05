@@ -18,6 +18,8 @@ pulp_add_plugin(<target>
     CATEGORY        <Effect|Instrument|MidiEffect>
     PLUGIN_CODE     <4-char>
     MANUFACTURER_CODE <4-char>
+    AAX_PRODUCT_CODE <4-char>
+    AAX_NATIVE_CODE <4-char>
     SOURCES         <file-list>
     PROCESSOR_FACTORY <function-name>
 )
@@ -27,14 +29,16 @@ pulp_add_plugin(<target>
 
 | Parameter | Required | Default | Description |
 |-----------|----------|---------|-------------|
-| `FORMATS` | Yes | -- | Space-separated list: `VST3`, `AU`, `CLAP`, `Standalone` |
+| `FORMATS` | Yes | -- | Space-separated list: `VST3`, `AU`, `CLAP`, `AAX`, `Standalone` |
 | `PLUGIN_NAME` | No | `<target>` | Display name for the plugin |
 | `BUNDLE_ID` | No | -- | Reverse-DNS identifier (e.g., `com.company.plugin`) |
 | `MANUFACTURER` | No | `"Unknown"` | Manufacturer name |
 | `VERSION` | No | `"1.0.0"` | Plugin version string |
 | `CATEGORY` | No | `"Effect"` | Plugin category: `Effect`, `Instrument`, or `MidiEffect` |
 | `PLUGIN_CODE` | AU only | -- | 4-character AU plugin code |
-| `MANUFACTURER_CODE` | AU only | -- | 4-character AU manufacturer code |
+| `MANUFACTURER_CODE` | AU/AAX only | -- | 4-character manufacturer code used by AU and AAX |
+| `AAX_PRODUCT_CODE` | AAX only | -- | 4-character stable AAX product identifier |
+| `AAX_NATIVE_CODE` | AAX only | -- | 4-character stable AAX Native identifier |
 | `SOURCES` | No | -- | Source files for the core object library |
 | `PROCESSOR_FACTORY` | No | -- | Factory function name (for generated entry points) |
 
@@ -46,6 +50,7 @@ pulp_add_plugin(<target>
 | `${target}_VST3` | MODULE | VST3 bundle (`.vst3`) |
 | `${target}_AU` | MODULE | AU v2 component (`.component`), macOS only |
 | `${target}_CLAP` | MODULE | CLAP bundle (`.clap`) |
+| `${target}_AAX` | MODULE | AAX Native bundle (`.aaxplugin`), macOS/Windows with developer-supplied SDK |
 | `${target}_Standalone` | EXECUTABLE | Standalone app |
 | `pulp-install-${target}` | CUSTOM | Copies built plugins to system folders |
 
@@ -58,6 +63,7 @@ Each format target looks for an entry-point source file by convention:
 | VST3 | `vst3_entry.cpp` |
 | CLAP | `clap_entry.cpp` |
 | AU v2 | `au_v2_entry.cpp` |
+| AAX | `aax_entry.cpp` |
 | Standalone | `main.cpp` |
 
 Info.plist files can be provided per-plugin or generated from templates:
@@ -66,6 +72,7 @@ Info.plist files can be provided per-plugin or generated from templates:
 |--------|-------------|----------|
 | VST3 | `Info.plist.vst3` | `tools/cmake/PulpInfoPlist.vst3.in` |
 | AU | `Info.plist.au` | `tools/cmake/PulpInfoPlist.au.in` |
+| AAX | generated | `tools/cmake/PulpInfoPlist.aax.in` |
 
 ### Format Availability
 
@@ -74,17 +81,20 @@ Format targets are only created when the corresponding SDK is available:
 - VST3: requires `PULP_HAS_VST3` (set when `external/vst3sdk/` exists)
 - AU: requires `APPLE` and `PULP_HAS_AUSDK` (set when `external/AudioUnitSDK/` exists)
 - CLAP: requires `PULP_HAS_CLAP` (fetched via FetchContent)
+- AAX: requires `APPLE` or `WIN32`, `PULP_ENABLE_AAX=ON`, and `PULP_AAX_SDK_DIR` pointing to a developer-supplied out-of-tree AAX SDK
 - Standalone: always available
+
+On Linux and Ubuntu, requesting `AAX` in `FORMATS` is a configure-time error.
 
 ### Install Target
 
 `pulp-install-${target}` copies built bundles to platform-standard locations:
 
-| Platform | VST3 | CLAP | AU |
-|----------|------|------|----|
-| macOS | `~/Library/Audio/Plug-Ins/VST3/` | `~/Library/Audio/Plug-Ins/CLAP/` | `~/Library/Audio/Plug-Ins/Components/` |
-| Windows | `%COMMONPROGRAMFILES%/VST3/` | `%COMMONPROGRAMFILES%/CLAP/` | -- |
-| Linux | `~/.vst3/` | `~/.clap/` | -- |
+| Platform | VST3 | CLAP | AU | AAX |
+|----------|------|------|----|-----|
+| macOS | `~/Library/Audio/Plug-Ins/VST3/` | `~/Library/Audio/Plug-Ins/CLAP/` | `~/Library/Audio/Plug-Ins/Components/` | `/Library/Application Support/Avid/Audio/Plug-Ins/` |
+| Windows | `%COMMONPROGRAMFILES%/VST3/` | `%COMMONPROGRAMFILES%/CLAP/` | -- | `%COMMONPROGRAMFILES%/Avid/Audio/Plug-Ins/` |
+| Linux | `~/.vst3/` | `~/.clap/` | -- | -- |
 
 ## pulp_add_app
 

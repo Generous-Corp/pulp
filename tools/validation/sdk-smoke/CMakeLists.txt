@@ -26,6 +26,9 @@ endif()
 if(APPLE AND TARGET Pulp::ausdk)
     list(APPEND PULP_SDK_SMOKE_FORMATS AU)
 endif()
+if((APPLE OR WIN32) AND PULP_HAS_AAX)
+    list(APPEND PULP_SDK_SMOKE_FORMATS AAX)
+endif()
 
 if(NOT PULP_SDK_SMOKE_FORMATS)
     message(FATAL_ERROR "Pulp SDK smoke project found no supported installed formats")
@@ -40,4 +43,6 @@ pulp_add_plugin(PulpSDKSmokeProbe
     CATEGORY Effect
     PLUGIN_CODE "SdkS"
     MANUFACTURER_CODE "Pulp"
+    AAX_PRODUCT_CODE "SdSm"
+    AAX_NATIVE_CODE "SdkS"
 )

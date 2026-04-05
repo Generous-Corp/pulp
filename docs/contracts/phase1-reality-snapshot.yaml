@@ -136,21 +136,40 @@ subsystems:
       clap_validator: true
       auval: true        # With signing caveats
       vstvalidator: false # Optional, Steinberg SDK build required
+      aax_validator: false # Optional, developer-supplied Avid validator; not run in public CI
     cli_coverage:
       clap_validator: true
       auval: true
       pluginval: true    # Added in Phase 2
       vstvalidator: true # Available via --all flag, graceful skip if missing
+      aax_validator: true # Available on macOS/Windows when DigiShell + AAX Validator are installed
     notes: >
       pluginval now in both CI and `pulp validate` CLI (Phase 2).
       vstvalidator available via `pulp validate --all` with graceful skip
       when not installed. Go/no-go documented: optional, pluginval covers
-      most VST3 needs. clap-validator and auval unchanged.
+      most VST3 needs. Optional AAX validation is available locally on macOS
+      and Windows via DigiShell + AAX Validator, but remains out of public CI
+      because the SDK and validator are developer-supplied. clap-validator and
+      auval otherwise remain unchanged.
       `pulp validate --json` and `--report` emit machine-readable output
       conforming to validation-report-v1.schema.json.
     files:
       - .github/workflows/validate.yml
       - tools/cli/pulp_cli.cpp
+
+  aax_format:
+    status: experimental
+    notes: >
+      Optional clean-room AAX Native support on macOS and Windows. Requires
+      `PULP_ENABLE_AAX=ON` plus a developer-supplied out-of-tree AAX SDK.
+      `pulp validate` can drive DigiShell + AAX Validator when installed.
+      Linux and Ubuntu are explicitly unsupported.
+    files:
+      - core/format/include/pulp/format/aax_entry.hpp
+      - core/format/include/pulp/format/aax_model.hpp
+      - core/format/src/aax_model.cpp
+      - core/format/src/aax_runtime.cpp
+      - tools/cmake/PulpAAX.cmake
 
   dsp_dsls:
     status: planned

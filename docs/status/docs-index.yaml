@@ -34,6 +34,11 @@ docs:
     kind: guide
     summary: Running tests, validation, writing new tests
 
+  - slug: aax
+    path: guides/aax.md
+    kind: guide
+    summary: Optional AAX setup, downloads, validation, clean-room rules, and Linux limitations
+
   - slug: animation
     path: guides/animation.md
     kind: guide
@@ -132,7 +137,7 @@ docs:
   - slug: formats
     path: guides/formats.md
     kind: guide
-    summary: Plugin format adapters — CLAP, VST3, AU v2 entry points, param sync, MIDI, state
+    summary: Plugin format adapters — CLAP, VST3, AU v2, optional AAX entry points, param sync, MIDI, state
 
   - slug: signal-processing
     path: guides/signal-processing.md

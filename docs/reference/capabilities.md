@@ -24,9 +24,12 @@ Pulp wraps a single `Processor` subclass and exposes it through multiple plugin 
 | LV2 (Linux) | experimental | [format](modules.md#format) | | |
 | WAM v2 (Web) | experimental | [format](modules.md#format) | [web-plugins](../guides/web-plugins.md) | |
 | WebCLAP (Web) | experimental | [format](modules.md#format) | | |
-| AAX | planned | | | |
+| AAX native (optional, macOS/Windows) | experimental | [format](modules.md#format) | [aax](../guides/aax.md) | pulp-gain |
 
 Key headers: `pulp/format/processor.hpp`, `pulp/format/vst3_adapter.hpp`, `pulp/format/clap_adapter.hpp`, `pulp/format/headless.hpp`
+
+AAX support is intentionally opt-in. It requires a developer-supplied AAX SDK,
+is not bundled by Pulp, and is unsupported on Linux and Ubuntu.
 
 ---
 
@@ -283,7 +286,7 @@ The `pulp` CLI wraps common development workflows.
 |---|---|---|
 | `pulp build` (configure + build) | usable | [cli](cli.md) |
 | `pulp test` (run test suite) | usable | [cli](cli.md) |
-| `pulp validate` (auval, clap-validator — CLAP and AU only; pluginval not yet in CLI) | usable | [cli](cli.md) |
+| `pulp validate` (pluginval, clap-validator, auval, optional AAX validator) | usable | [cli](cli.md) |
 | `pulp status` (show project info, build state, source counts) | usable | [cli](cli.md) |
 | `pulp clean` (remove build directory) | usable | [cli](cli.md) |
 | `pulp ship sign` | usable | [cli](cli.md) |

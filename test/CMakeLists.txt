@@ -23,6 +23,11 @@ add_executable(pulp-test-validation-harness test_validation_harness.cpp)
 target_link_libraries(pulp-test-validation-harness PRIVATE pulp::format Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-validation-harness)
 
+# AAX metadata/model tests
+add_executable(pulp-test-aax-model test_aax_model.cpp)
+target_link_libraries(pulp-test-aax-model PRIVATE pulp::format Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-aax-model)
+
 # Appcast/auto-update tests
 add_executable(pulp-test-appcast test_appcast.cpp)
 target_link_libraries(pulp-test-appcast PRIVATE pulp::ship Catch2::Catch2WithMain)

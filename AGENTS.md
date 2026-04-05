@@ -8,7 +8,7 @@ Detailed guidance lives in `CLAUDE.md` — treat it as the single source of trut
 
 - **Never push directly to main. No exceptions.** Every change — no matter how small, even docs-only — must go through: branch → PR → CI green → merge. Use the `ci` skill or create a PR manually. If cloud CI minutes are exhausted, run local CI (`python3 tools/local-ci/local_ci.py run`) and wait for green before merging.
 - **Clean-room discipline.** Never reference JUCE source code. See CLAUDE.md.
-- **License policy.** Only MIT, BSD, Apache 2.0, ISC, zlib, BSL-1.0, public domain. No copyleft.
+- **License policy.** Repo-distributed code stays MIT, BSD, Apache 2.0, ISC, zlib, BSL-1.0, or public domain only. No copyleft. Optional vendor SDK integrations must remain developer-supplied and out-of-tree.
 - **Tests required.** If it's not tested, it doesn't work.
 
 ## Claude Code Plugin
@@ -32,6 +32,7 @@ Pulp ships with a Claude Code plugin for the full development lifecycle. See [do
 
 | Skill | Purpose |
 |-------|---------|
+| `aax` | Optional AAX setup, build, validation, and clean-room workflow |
 | `ci` | Create PRs, run local/cloud CI, merge on green |
 | `engine` | Query, recommend, and switch JS engine backend |
 | `import-design` | Import designs with automated visual validation |

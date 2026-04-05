@@ -15,6 +15,8 @@ functions:
       - CATEGORY
       - PLUGIN_CODE
       - MANUFACTURER_CODE
+      - AAX_PRODUCT_CODE
+      - AAX_NATIVE_CODE
       - SOURCES
       - PROCESSOR_FACTORY
     creates:
@@ -22,6 +24,7 @@ functions:
       - ${target}_VST3
       - ${target}_AU
       - ${target}_CLAP
+      - ${target}_AAX
       - ${target}_Standalone
       - pulp-install-${target}
     docs: reference/cmake.md#pulp_add_plugin

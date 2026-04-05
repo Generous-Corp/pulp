@@ -6,7 +6,7 @@ Pulp is released under the **MIT License**. You can use it for any purpose — c
 
 ## Third-Party Dependencies
 
-Pulp builds on excellent open-source software. Every dependency is compatible with MIT licensing — no copyleft in the dependency chain.
+Pulp builds on excellent open-source software. Every dependency that Pulp bundles, fetches automatically, or redistributes is compatible with MIT licensing — there is no copyleft in the shipped dependency chain.
 
 ### Core Dependencies (Always Used)
 
@@ -25,6 +25,18 @@ Pulp builds on excellent open-source software. Every dependency is compatible wi
 | **VST3 SDK** | MIT | VST3 plugin format (pluginterfaces + base) | [github.com/steinbergmedia/vst3sdk](https://github.com/steinbergmedia/vst3sdk) |
 | **AudioUnitSDK** | Apache-2.0 | AU v2 plugin format adapter | [github.com/apple/AudioUnitSDK](https://github.com/apple/AudioUnitSDK) |
 | **LV2** | ISC | LV2 plugin format headers | [github.com/lv2/lv2](https://github.com/lv2/lv2) |
+
+## Optional Vendor SDK Integrations
+
+Some optional integrations depend on separately licensed SDKs that Pulp does not bundle, fetch, export, or redistribute. These SDKs are outside Pulp's MIT dependency chain and are only supported through explicit opt-in local configuration.
+
+| Name | License | Purpose | Distribution |
+|------|---------|---------|--------------|
+| **AAX SDK** | Separately licensed by Avid | Optional AAX plugin format support | Developer obtains it independently and points `PULP_AAX_SDK_DIR` at an out-of-tree SDK copy |
+| **ASIO SDK** | Proprietary (Steinberg) | Optional ASIO device I/O support (planned) | Developer obtains it independently; never bundled or exported by Pulp |
+
+Pulp's MIT license does not grant any rights to these vendor SDKs or to any related Avid/PACE tooling.
+See [AAX Setup](../guides/aax.md) for the supported local workflow.
 
 ### GPU and Windowing
 
@@ -75,16 +87,17 @@ These projects were studied for architecture and patterns (not code). Pulp's imp
 
 ## Clean-Room Discipline
 
-Pulp follows strict clean-room rules. Implementation is from specs, SDK documentation, and original design — never from studying proprietary or restrictively-licensed source code. See [CLAUDE.md](https://github.com/danielraffel/pulp/blob/main/CLAUDE.md) for the full clean-room policy.
+Pulp follows strict clean-room rules. Implementation is from specs, SDK documentation, and original design — never from studying proprietary or restrictively-licensed source code. For optional AAX support, that means no Avid SDK files or example sources in the repo and no copied implementation text from the SDK examples. See [CLAUDE.md](https://github.com/danielraffel/pulp/blob/main/CLAUDE.md) for the full clean-room policy.
 
 ## License Policy
 
-Before adding any dependency to Pulp:
+Before adding any bundled dependency to Pulp:
 
 1. **Check the license** — must be MIT, BSD, Apache 2.0, ISC, zlib, BSL-1.0, or public domain
 2. **Add to DEPENDENCIES.md** — alphabetical order, with version, license, and purpose
 3. **Add to NOTICE.md** — full license text, alphabetical order
 4. **No copyleft** — GPL, LGPL, AGPL, SSPL are not allowed
 5. **MPL-2.0** — requires case-by-case review (weak copyleft)
+6. **Vendor SDKs stay separate** — optional AAX/ASIO-style SDKs must remain developer-supplied, out-of-tree, and excluded from `NOTICE.md`
 
 Dependency update workflow is tracked in `tools/deps/manifest.json` and audited by `tools/deps/audit.py`.

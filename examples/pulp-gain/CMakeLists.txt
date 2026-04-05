@@ -11,8 +11,15 @@ if(PULP_BUILD_TESTS)
 endif()
 
 # ── Plugin (all formats) ──────────────────────────────────────────────────
+set(PULP_GAIN_FORMATS VST3 CLAP Standalone)
+if(APPLE)
+    list(APPEND PULP_GAIN_FORMATS AU AAX)
+elseif(WIN32)
+    list(APPEND PULP_GAIN_FORMATS AAX)
+endif()
+
 pulp_add_plugin(PulpGain
-    FORMATS         VST3 AU CLAP Standalone
+    FORMATS         ${PULP_GAIN_FORMATS}
     PLUGIN_NAME     "PulpGain"
     BUNDLE_ID       "com.pulp.gain"
     MANUFACTURER    "Pulp"
@@ -20,6 +27,8 @@ pulp_add_plugin(PulpGain
     CATEGORY        Effect
     PLUGIN_CODE     "PGan"
     MANUFACTURER_CODE "Pulp"
+    AAX_PRODUCT_CODE "PGAi"
+    AAX_NATIVE_CODE "PGan"
 )
 
 # ── Validation Tests ──────────────────────────────────────────────────────

@@ -23,6 +23,7 @@ _pulp_pick_target(_PULP_VST3_SDK_TARGET Pulp::vst3-sdk vst3-sdk)
 _pulp_pick_target(_PULP_CLAP_TARGET Pulp::clap clap)
 _pulp_pick_target(_PULP_LV2_TARGET Pulp::lv2-headers lv2-headers)
 _pulp_pick_target(_PULP_AUSDK_TARGET Pulp::ausdk ausdk)
+_pulp_pick_target(_PULP_AAX_LIBRARY_TARGET Pulp::aax-library pulp-aax-library)
 
 if(NOT _PULP_FORMAT_TARGET)
     message(FATAL_ERROR
@@ -83,7 +84,7 @@ endif()
 function(pulp_add_plugin target)
     cmake_parse_arguments(PLUGIN
         ""
-        "PLUGIN_NAME;BUNDLE_ID;VERSION;MANUFACTURER;CATEGORY;PLUGIN_CODE;MANUFACTURER_CODE;PROCESSOR_FACTORY"
+        "PLUGIN_NAME;BUNDLE_ID;VERSION;MANUFACTURER;CATEGORY;PLUGIN_CODE;MANUFACTURER_CODE;AAX_PRODUCT_CODE;AAX_NATIVE_CODE;PROCESSOR_FACTORY"
         "FORMATS;SOURCES"
         ${ARGN}
     )
@@ -156,6 +157,26 @@ function(pulp_add_plugin target)
                        "${PLUGIN_VERSION}" "${PLUGIN_MANUFACTURER}" "${PLUGIN_CATEGORY}")
     endif()
 
+    # ── AAX ───────────────────────────────────────────────────────────────
+    if("AAX" IN_LIST PLUGIN_FORMATS)
+        if(NOT APPLE AND NOT WIN32)
+            message(FATAL_ERROR
+                "pulp_add_plugin(${target}): AAX is only supported on macOS and Windows. "
+                "Remove AAX from FORMATS when configuring on Linux or Ubuntu.")
+        elseif(PULP_HAS_AAX)
+            if(NOT PLUGIN_MANUFACTURER_CODE OR NOT PLUGIN_AAX_PRODUCT_CODE OR NOT PLUGIN_AAX_NATIVE_CODE)
+                message(FATAL_ERROR
+                    "pulp_add_plugin(${target}): AAX format requires "
+                    "MANUFACTURER_CODE, AAX_PRODUCT_CODE, and AAX_NATIVE_CODE")
+            endif()
+
+            _pulp_add_aax(${target} "${PLUGIN_PLUGIN_NAME}" "${PLUGIN_BUNDLE_ID}"
+                          "${PLUGIN_VERSION}" "${PLUGIN_MANUFACTURER}"
+                          "${PLUGIN_CATEGORY}" "${PLUGIN_MANUFACTURER_CODE}"
+                          "${PLUGIN_AAX_PRODUCT_CODE}" "${PLUGIN_AAX_NATIVE_CODE}")
+        endif()
+    endif()
+
     # ── AUv3 ──────────────────────────────────────────────────────────────
     if("AUv3" IN_LIST PLUGIN_FORMATS AND APPLE)
         if(NOT PLUGIN_PLUGIN_CODE OR NOT PLUGIN_MANUFACTURER_CODE)
@@ -178,9 +199,11 @@ function(pulp_add_plugin target)
         set(_vst3_dir "$ENV{HOME}/Library/Audio/Plug-Ins/VST3")
         set(_clap_dir "$ENV{HOME}/Library/Audio/Plug-Ins/CLAP")
         set(_au_dir "$ENV{HOME}/Library/Audio/Plug-Ins/Components")
+        set(_aax_dir "/Library/Application Support/Avid/Audio/Plug-Ins")
     elseif(WIN32)
         set(_vst3_dir "$ENV{COMMONPROGRAMFILES}/VST3")
         set(_clap_dir "$ENV{COMMONPROGRAMFILES}/CLAP")
+        set(_aax_dir "$ENV{COMMONPROGRAMFILES}/Avid/Audio/Plug-Ins")
     elseif(UNIX)
         set(_vst3_dir "$ENV{HOME}/.vst3")
         set(_clap_dir "$ENV{HOME}/.clap")
@@ -205,6 +228,12 @@ function(pulp_add_plugin target)
             COMMAND ${CMAKE_COMMAND} -E copy_directory
                 "${CMAKE_BINARY_DIR}/AU/${PLUGIN_PLUGIN_NAME}.component"
                 "${_au_dir}/${PLUGIN_PLUGIN_NAME}.component")
+    endif()
+    if(TARGET ${target}_AAX AND DEFINED _aax_dir)
+        list(APPEND _install_commands
+            COMMAND ${CMAKE_COMMAND} -E copy_directory
+                "${CMAKE_BINARY_DIR}/AAX/${PLUGIN_PLUGIN_NAME}.aaxplugin"
+                "${_aax_dir}/${PLUGIN_PLUGIN_NAME}.aaxplugin")
     endif()
 
     if(_install_commands)
@@ -390,6 +419,86 @@ function(_pulp_add_lv2 target name bundle_id version manufacturer category)
         LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/LV2/${name}.lv2"
         PREFIX ""
     )
+endfunction()
+
+# ── Internal: AAX target ────────────────────────────────────────────────
+function(_pulp_add_aax target name bundle_id version manufacturer category manufacturer_code product_code native_code)
+    if(NOT APPLE AND NOT WIN32)
+        return()
+    endif()
+
+    if(NOT PULP_HAS_AAX)
+        message(FATAL_ERROR
+            "pulp_add_plugin(${target}): AAX requested but PULP_HAS_AAX is false. "
+            "Configure with -DPULP_ENABLE_AAX=ON and an out-of-tree PULP_AAX_SDK_DIR.")
+    endif()
+
+    pulp_ensure_aax_sdk_targets()
+
+    set(aax_entry "")
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/aax_entry.cpp")
+        set(aax_entry "${CMAKE_CURRENT_SOURCE_DIR}/aax_entry.cpp")
+    else()
+        message(FATAL_ERROR
+            "pulp_add_plugin(${target}): AAX requested but no aax_entry.cpp was found "
+            "in ${CMAKE_CURRENT_SOURCE_DIR}")
+    endif()
+
+    add_library(${target}_AAX MODULE
+        ${PULP_${target}_CORE_OBJECTS}
+        ${aax_entry}
+        ${_PULP_FORMAT_SOURCE_DIR}/aax_runtime.cpp
+        $<TARGET_OBJECTS:pulp-aax-export>
+    )
+    target_link_libraries(${target}_AAX PRIVATE
+        ${target}_Core
+        ${_PULP_FORMAT_TARGET}
+        pulp-aax-library
+    )
+    target_include_directories(${target}_AAX PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_definitions(${target}_AAX PRIVATE
+        PULP_AAX=1
+        PULP_MANUFACTURER_CODE="${manufacturer_code}"
+        PULP_AAX_PRODUCT_CODE="${product_code}"
+        PULP_AAX_NATIVE_CODE="${native_code}"
+    )
+    set_target_properties(${target}_AAX PROPERTIES
+        OUTPUT_NAME "${name}"
+        PREFIX ""
+    )
+
+    if(APPLE)
+        set(PULP_PLUGIN_NAME "${name}")
+        set(PULP_BUNDLE_ID "${bundle_id}")
+        set(PULP_VERSION "${version}")
+        configure_file(
+            "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/PulpInfoPlist.aax.in"
+            "${CMAKE_CURRENT_BINARY_DIR}/${target}_Info.plist.aax"
+            @ONLY
+        )
+        set_target_properties(${target}_AAX PROPERTIES
+            BUNDLE TRUE
+            BUNDLE_EXTENSION "aaxplugin"
+            LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/AAX"
+            MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_BINARY_DIR}/${target}_Info.plist.aax"
+        )
+        add_custom_command(TARGET ${target}_AAX POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E echo "TDMwPTul" >
+                "$<TARGET_BUNDLE_DIR:${target}_AAX>/Contents/PkgInfo"
+            COMMENT "Writing PkgInfo into ${name}.aaxplugin bundle"
+        )
+    else()
+        set_target_properties(${target}_AAX PROPERTIES
+            SUFFIX ".aaxplugin"
+            RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/AAX/${name}.aaxplugin/Contents/x64"
+            LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/AAX/${name}.aaxplugin/Contents/x64"
+            ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/AAX-import"
+        )
+    endif()
+
+    if(COMMAND target_copy_webgpu_binaries)
+        target_copy_webgpu_binaries(${target}_AAX)
+    endif()
 endfunction()
 
 # ── Internal: AU v2 target ──────────────────────────────────────────────

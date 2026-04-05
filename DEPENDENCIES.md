@@ -1,12 +1,13 @@
 # Dependencies
 
-All dependencies must be compatible with MIT licensing. No copyleft (GPL, LGPL, AGPL) dependencies in any subsystem.
+All code that Pulp bundles, fetches automatically, exports via `cmake --install`, or redistributes in public releases must be compatible with MIT licensing. No copyleft (GPL, LGPL, AGPL) or proprietary code may be committed, vendored, auto-downloaded into the source tree, or shipped as part of Pulp.
 
 ## Policy
 
-- **Allowed licenses:** MIT, BSD-2-Clause, BSD-3-Clause, Apache-2.0, ISC, zlib, BSL-1.0, Unlicense, public domain
-- **Not allowed:** GPL, LGPL, AGPL, SSPL, proprietary, any copyleft
+- **Allowed for bundled or redistributed code:** MIT, BSD-2-Clause, BSD-3-Clause, Apache-2.0, ISC, zlib, BSL-1.0, Unlicense, public domain
+- **Not allowed in the repo or shipped artifacts:** GPL, LGPL, AGPL, SSPL, proprietary, any copyleft
 - **Review required:** MPL-2.0 (weak copyleft, case-by-case evaluation)
+- **Optional vendor SDK carve-out:** AAX, ASIO, and similar SDKs may be supported only when they are off by default, separately obtained by the developer, kept outside the source tree, never committed, never exported by `cmake --install`, omitted from `NOTICE.md`, and not required by public CI.
 
 ## Current Dependencies
 
@@ -27,9 +28,9 @@ All dependencies must be compatible with MIT licensing. No copyleft (GPL, LGPL, 
 | WebGPU-distribution | 17dcd42a7683 | MIT | WebGPU C API wrapper for Dawn (FetchContent) | pulp-render | 2026-03-25 |
 | Yoga | 3.2.1 | MIT | CSS Flexbox/Grid layout engine (Meta, FetchContent) | pulp-view | 2026-03-29 |
 
-## Format SDKs (Obtained by Developers)
+## Open-Source Format SDKs Pulp Can Bootstrap
 
-These SDKs are not bundled but are required for specific plugin format support:
+These SDKs are permissively licensed and may be cloned, fetched, or installed as part of normal Pulp workflows:
 
 | SDK | License | Required For | Bundled? |
 |-----|---------|-------------|----------|
@@ -37,5 +38,12 @@ These SDKs are not bundled but are required for specific plugin format support:
 | AudioUnit SDK | Apache-2.0 | AU v2 format | Cloned at configure time (`git clone --depth 1`) |
 | CLAP | MIT | CLAP format | FetchContent (automatic) |
 | LV2 SDK | ISC | LV2 format | FetchContent (automatic) |
-| AAX SDK | Proprietary (Avid) | AAX format (planned) | Developer obtains independently |
-| ASIO SDK | Proprietary (Steinberg) | ASIO audio I/O (planned) | Developer obtains independently |
+
+## Optional Developer-Supplied Vendor SDKs
+
+These SDKs are not part of Pulp's redistributed dependency chain. Pulp may integrate with them only through explicit opt-in local configuration.
+
+| SDK | License | Used For | Pulp Boundary |
+|-----|---------|----------|---------------|
+| AAX SDK | Separately licensed by Avid | Optional AAX format integration | Developer obtains independently, keeps it out-of-tree, and points `PULP_AAX_SDK_DIR` at it |
+| ASIO SDK | Proprietary (Steinberg) | ASIO audio I/O (planned) | Developer obtains independently; never bundled or exported by Pulp |

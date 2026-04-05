@@ -45,8 +45,9 @@ formats:
   webclap:
     web: experimental
   aax:
-    macos: planned
-    windows: planned
+    macos: experimental
+    windows: experimental
+    linux: unsupported
 
 audio_io:
   coreaudio:
