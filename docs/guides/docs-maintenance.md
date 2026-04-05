@@ -6,9 +6,14 @@ How documentation stays consistent with the codebase across tools, branches, and
 
 Pulp uses three layers to keep docs aligned with code:
 
-### 1. CI Check (universal gate)
+### 1. CI Check (local truth + manual cloud companion)
 
-The `docs-check.yml` GitHub Actions workflow runs on every push and PR to `main` and `develop`. It executes `tools/check-docs.sh` which validates:
+The authoritative docs consistency check is `tools/check-docs.sh`, which you can
+run locally or through the `docs-check.yml` workflow. The current GitHub Actions
+workflow is `workflow_dispatch`-only; it does not run automatically on every
+push or PR in the current repo state.
+
+`tools/check-docs.sh` validates:
 
 - Every `.md` file in `docs/` is indexed in `docs/status/docs-index.yaml`
 - Every path referenced in YAML manifests resolves to a real file
@@ -17,7 +22,7 @@ The `docs-check.yml` GitHub Actions workflow runs on every push and PR to `main`
 - Format adapters claimed in `support-matrix.yaml` have real source files
 - Subsystem directories listed in `modules.yaml` exist
 
-If any check fails, the CI job fails and the PR cannot merge.
+If any check fails, the local docs check or manually dispatched workflow fails.
 
 ### 2. Claude Code Hook (agent nudge)
 
@@ -62,9 +67,11 @@ Docs version with the branch they live on:
 - `develop` docs describe what is in development
 - When `develop` merges to `main`, docs merge too
 
-All CI workflows (build, test, validate, sanitizers, docs-check) trigger on both `main` and `develop`.
+Not every workflow is always-on in the current repo state. Some workflows remain
+manual `workflow_dispatch` entry points while the repo stays local-first for CI.
 
-This means you can update docs on `develop` as you build features, and they land on `main` cleanly when the branch merges.
+That means branch truth should be documented explicitly instead of assuming an
+always-on cloud gate for every workflow.
 
 ## README Accuracy
 

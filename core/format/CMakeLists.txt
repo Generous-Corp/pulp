@@ -20,8 +20,8 @@ if(PULP_HAS_VST3)
     target_sources(pulp-format PRIVATE
         src/vst3_adapter.cpp
     )
-    target_link_libraries(pulp-format PRIVATE vst3-sdk)
-    target_compile_definitions(pulp-format PRIVATE PULP_VST3=1)
+    target_link_libraries(pulp-format PUBLIC vst3-sdk PRIVATE pulp::view)
+    target_compile_definitions(pulp-format PRIVATE PULP_VST3=1 PULP_VST3_GUI=1)
 endif()
 
 # CLAP adapter
@@ -29,7 +29,7 @@ if(PULP_HAS_CLAP)
     target_sources(pulp-format PRIVATE
         src/clap_adapter.cpp
     )
-    target_link_libraries(pulp-format PRIVATE clap)
+    target_link_libraries(pulp-format PUBLIC clap)
     target_compile_definitions(pulp-format PRIVATE PULP_CLAP=1)
 endif()
 
@@ -38,8 +38,18 @@ if(PULP_HAS_LV2)
     target_sources(pulp-format PRIVATE
         src/lv2_adapter.cpp
     )
-    target_link_libraries(pulp-format PRIVATE lv2-headers)
+    target_link_libraries(pulp-format PUBLIC lv2-headers)
     target_compile_definitions(pulp-format PRIVATE PULP_LV2=1)
+endif()
+
+if(PULP_HAS_AUSDK)
+    if(APPLE)
+        target_sources(pulp-format PRIVATE
+            src/au_v2_adapter.cpp
+            src/au_v2_instrument.cpp
+        )
+    endif()
+    target_link_libraries(pulp-format PUBLIC ausdk)
 endif()
 
 # AU v2 adapter uses Apple AudioUnitSDK — compiled per-plugin in the entry point,

@@ -82,7 +82,6 @@ public:
     {
         // Read parameters
         int waveform = static_cast<int>(state().get_value(kOscWaveform));
-        float detune_cents = state().get_value(kOscDetune);
         float cutoff_hz = state().get_value(kFilterCutoff);
         float reso = state().get_value(kFilterReso);
         float filter_env = state().get_value(kFilterEnv);

@@ -5681,6 +5681,19 @@ function compactShaderError(error) {
     return singleLine;
 }
 
+function shaderCompilerUnavailable(result) {
+    if (!result || result.success) return false;
+    var error = String(result.error || "").toLowerCase();
+    return error.indexOf("skia not available") >= 0 ||
+        error.indexOf("shader compilation requires gpu build") >= 0;
+}
+
+function applyShaderState(widgetId, shaderSource, state) {
+    clearWidgetSchema(widgetId);
+    setWidgetShader(widgetId, shaderSource);
+    widgetLookState[widgetId] = state;
+}
+
 function inferFallbackPreset(widgetId, requestText) {
     var kind = widgetKindForId(widgetId);
     var text = (requestText || "").toLowerCase();
@@ -5803,10 +5816,12 @@ function extractShaderBody(shaderText) {
 function tryApplyCompiledShader(widgetId, shaderSource, statePreset) {
     if (!shaderSource || shaderSource.length === 0) return false;
     var compiled = compileShader(shaderSource);
-    if (compiled && compiled.success) {
-        clearWidgetSchema(widgetId);
-        setWidgetShader(widgetId, shaderSource);
-        widgetLookState[widgetId] = { kind: "shader", preset: statePreset || "custom" };
+    if (compiled && (compiled.success || shaderCompilerUnavailable(compiled))) {
+        applyShaderState(widgetId, shaderSource, {
+            kind: "shader",
+            preset: statePreset || "custom",
+            unvalidated: Boolean(compiled && !compiled.success)
+        });
         return true;
     }
     return compiled || { success: false, error: "Shader compilation failed" };
@@ -5817,10 +5832,12 @@ function applyPresetFallback(widgetId, fallbackPreset, compileError) {
     if (!normalizedFallback || !shaderPresetLibrary[normalizedFallback]) return false;
     var presetShader = buildShaderPreset(normalizedFallback, widgetId, {});
     var compiled = compileShader(presetShader);
-    if (!compiled || !compiled.success) return false;
-    clearWidgetSchema(widgetId);
-    setWidgetShader(widgetId, presetShader);
-    widgetLookState[widgetId] = { kind: "shader", preset: normalizedFallback };
+    if (!compiled || (!compiled.success && !shaderCompilerUnavailable(compiled))) return false;
+    applyShaderState(widgetId, presetShader, {
+        kind: "shader",
+        preset: normalizedFallback,
+        unvalidated: Boolean(compiled && !compiled.success)
+    });
     var note = "Custom shader failed for " + widgetId + "; applied " + normalizedFallback + " fallback.";
     if (compileError) note += " " + compactShaderError(compileError);
     addChatMessage("assistant", note);
@@ -5867,15 +5884,14 @@ function applyWidgetLook(widgetId, spec) {
     if (normalizedPreset && shaderPresetLibrary[normalizedPreset]) {
         var presetShader = buildShaderPreset(normalizedPreset, widgetId, spec.params || {});
         var compiledPreset = compileShader(presetShader);
-        if (compiledPreset && compiledPreset.success) {
-            clearWidgetSchema(widgetId);
-            setWidgetShader(widgetId, presetShader);
-            widgetLookState[widgetId] = {
+        if (compiledPreset && (compiledPreset.success || shaderCompilerUnavailable(compiledPreset))) {
+            applyShaderState(widgetId, presetShader, {
                 kind: "shader",
                 preset: normalizedPreset,
                 family: normalizedFamily,
-                params: spec.params || {}
-            };
+                params: spec.params || {},
+                unvalidated: Boolean(!compiledPreset.success)
+            });
             return true;
         }
         return false;

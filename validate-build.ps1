@@ -217,19 +217,15 @@ try {
         cmake --install $BuildDir --prefix $InstallDir --config Debug
     }
 
+    $SmokeBuildLog = Join-Path $TmpRoot "smoke-build.log"
     New-Item -ItemType Directory -Force -Path $SmokeDir | Out-Null
-    @"
-cmake_minimum_required(VERSION 3.24)
-project(PulpSDKSmoke LANGUAGES CXX)
 
-find_package(Pulp REQUIRED CONFIG)
+    Run-OrDump "install smoke configure" $SmokeLog {
+        cmake -S (Join-Path $SrcDir "tools/validation/sdk-smoke") -B (Join-Path $SmokeDir "build") "-DCMAKE_PREFIX_PATH=$InstallDir"
+    }
 
-add_library(smoke INTERFACE)
-target_link_libraries(smoke INTERFACE Pulp::format Pulp::standalone)
-"@ | Set-Content -Path (Join-Path $SmokeDir "CMakeLists.txt")
-
-    Run-OrDump "install smoke test" $SmokeLog {
-        cmake -S $SmokeDir -B (Join-Path $SmokeDir "build") "-DCMAKE_PREFIX_PATH=$InstallDir"
+    Run-OrDump "install smoke build" $SmokeBuildLog {
+        cmake --build (Join-Path $SmokeDir "build") --config Debug
     }
 
     if (-not $NoTests) {

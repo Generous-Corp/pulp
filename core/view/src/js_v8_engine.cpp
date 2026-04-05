@@ -12,14 +12,13 @@
 // Three.js scene graphs (Phase 13). QuickJS is the portable fallback.
 
 #include <pulp/view/js_engine.hpp>
+#include <stdexcept>
 
 #ifdef PULP_HAS_V8
 
 // Include CHOC's V8 wrapper — must appear in exactly one translation unit
 #include <choc/javascript/choc_javascript_V8.h>
 #include <choc/javascript/choc_javascript_Console.h>
-
-#include <stdexcept>
 
 namespace pulp::view {
 

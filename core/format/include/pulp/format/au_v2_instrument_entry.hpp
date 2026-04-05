@@ -5,10 +5,10 @@
 //
 // Usage (in one .cpp file per AU instrument plugin):
 //   #include "my_synth.hpp"
-//   #include "../../core/format/src/au_v2_instrument.cpp"
 //   #include <pulp/format/au_v2_instrument_entry.hpp>
 //   PULP_AU_INSTRUMENT(MySynthAU, my_namespace::create_my_synth)
 
+#include <pulp/format/au_v2_instrument.hpp>
 #include <pulp/format/registry.hpp>
 #include <AudioUnitSDK/AUPlugInDispatch.h>
 #include <AudioUnitSDK/ComponentBase.h>

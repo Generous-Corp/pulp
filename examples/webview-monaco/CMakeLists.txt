@@ -1,7 +1,7 @@
 set(PULP_MONACO_BUNDLE_DIR "" CACHE PATH
     "Path to a browser-ready Monaco bundle for the optional WebView example")
 
-if(APPLE AND NOT PULP_IOS AND PULP_BUILD_WEBVIEW)
+if(PULP_BUILD_WEBVIEW AND NOT PULP_IOS)
     if(PULP_MONACO_BUNDLE_DIR AND EXISTS "${PULP_MONACO_BUNDLE_DIR}/index.html")
         add_executable(pulp-webview-monaco main.cpp)
         target_link_libraries(pulp-webview-monaco PRIVATE pulp::view)

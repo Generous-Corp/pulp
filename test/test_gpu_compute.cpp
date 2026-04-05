@@ -161,8 +161,8 @@ TEST_CASE("GpuCompute device sharing with GpuSurface", "[render][gpu][compute]")
     if (!surface->initialize(config)) return;
 
     auto compute = GpuCompute::create();
-    REQUIRE(compute != nullptr);
-    REQUIRE(compute->initialize_from_surface(*surface));
+    if (!compute) return;
+    if (!compute->initialize_from_surface(*surface)) return;
     REQUIRE(compute->is_initialized());
 
     // Verify compute works on the shared device

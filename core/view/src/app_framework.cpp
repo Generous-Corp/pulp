@@ -1,9 +1,9 @@
 #include <pulp/view/app_framework.hpp>
+#include <pulp/runtime/system.hpp>
 #include <fstream>
 #include <sstream>
 #include <algorithm>
 #include <cctype>
-#include <cstdlib>
 
 namespace pulp::view {
 
@@ -189,18 +189,18 @@ void Toolbar::install_native(void*) {
 
 static std::filesystem::path platform_settings_root() {
 #ifdef __APPLE__
-    const char* home = std::getenv("HOME");
-    if (home) return std::filesystem::path(home) / "Library" / "Application Support";
+    if (auto home = runtime::get_env("HOME"))
+        return std::filesystem::path(*home) / "Library" / "Application Support";
     return {};
 #elif defined(_WIN32)
-    const char* appdata = std::getenv("APPDATA");
-    if (appdata) return std::filesystem::path(appdata);
+    if (auto appdata = runtime::get_env("APPDATA"))
+        return std::filesystem::path(*appdata);
     return {};
 #else
-    const char* xdg = std::getenv("XDG_CONFIG_HOME");
-    if (xdg) return std::filesystem::path(xdg);
-    const char* home = std::getenv("HOME");
-    if (home) return std::filesystem::path(home) / ".config";
+    if (auto xdg = runtime::get_env("XDG_CONFIG_HOME"))
+        return std::filesystem::path(*xdg);
+    if (auto home = runtime::get_env("HOME"))
+        return std::filesystem::path(*home) / ".config";
     return {};
 #endif
 }

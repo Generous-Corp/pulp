@@ -15,14 +15,14 @@
 | 4 | Cmajor adapter | phase/dsl-agentic-webgpu-v3-phase4 | parked (license policy blocker) | — | — |
 | 5 | JSFX adapter | phase/dsl-agentic-webgpu-v3-phase5 | blocked (needs 4 / licensing decision) | — | — |
 | 6 | Multi-window framework | phase/dsl-agentic-webgpu-v3-phase6 | **complete** | [#60](https://github.com/danielraffel/pulp/pull/60) | pending Phase 14 |
-| 7 | WebView integration (iPlug2-style) | feature/v3-phase7-webview | **complete** (macOS-native scope; Windows/Linux follow-up tracked) | [#91](https://github.com/danielraffel/pulp/pull/91) | focused native proof on macOS; cross-platform gap tracked in [#92](https://github.com/danielraffel/pulp/issues/92) |
+| 7 | WebView integration (iPlug2-style) | feature/v3-phase7-webview | **complete** (core merged; Windows/Linux opt-in backend follow-up active) | [#91](https://github.com/danielraffel/pulp/pull/91) | focused native proof on macOS; opt-in `PULP_BUILD_WEBVIEW=ON` configure/build/test plus `pulp-webview-palette` build now proven on macOS, Windows, and Ubuntu via [#92](https://github.com/danielraffel/pulp/issues/92) |
 | 8 | Audio visualization (STFT/spectrogram) | phase/dsl-agentic-webgpu-v3-phase8 | **complete** | [#62](https://github.com/danielraffel/pulp/pull/62) | pending Phase 14 |
 | 9 | Widgets + assets + themes | phase/dsl-agentic-webgpu-v3-phase9 | **complete** | [#72](https://github.com/danielraffel/pulp/pull/72) | pending Phase 14 |
 | 10 | JS engine abstraction (V8/JSC) | phase/dsl-agentic-webgpu-v3-phase10 | **complete** (core abstraction merged; readiness floor now partially proven) | [#63](https://github.com/danielraffel/pulp/pull/63) | pending Phase 14 |
 | 11 | WebGPU compute exploration | phase/dsl-agentic-webgpu-v3-phase11 | **complete** | [#64](https://github.com/danielraffel/pulp/pull/64) | pending Phase 14 |
 | 12 | Offline video exploration | feature/v3-phase12-offline-video | **complete** (exploration only; library-first recommendation) | [#101](https://github.com/danielraffel/pulp/pull/101) | macOS PNG-sequence proof + explicit offline transport stepping |
-| 13 | Three.js / WebGPU JS bridge | feature/v3-phase13-threejs-bridge | in progress (canvas + navigator.gpu + constants + browser-helper + asset-fetch + first mock object-graph slices landed locally) | [#103](https://github.com/danielraffel/pulp/pull/103) | readiness floor proven; canvas `2d` + mock `webgpu` context + native GPU probe + `navigator.gpu.requestAdapter()` + first mock adapter/device/queue floor + core WebGPU globals + browser helper shims + asset-backed fetch/Response/Blob coverage pass focused proof |
-| 14 | Verification pass | — | blocked (needs 7, 12, 13, plus explicit parked disposition for 4/5) | — | — |
+| 13 | Three.js / WebGPU JS bridge | feature/v3-phase13-threejs-bridge | **complete** | [#103](https://github.com/danielraffel/pulp/pull/103) | readiness floor proven; bridge merged; exact-SHA smoke passed on macOS, Ubuntu, and Windows |
+| 14 | Verification pass | — | blocked (needs [#92](https://github.com/danielraffel/pulp/issues/92), [#102](https://github.com/danielraffel/pulp/issues/102), plus explicit parked disposition for 4/5) | — | — |
 
 **Status values:** not started, in progress, complete, blocked (needs X), failed, parked
 
@@ -47,7 +47,9 @@ Current recommended landing order:
 - [x] Status / planning truth refresh
 - [x] Phase 13 readiness pass (see `planning/v3-phase13-readiness.md`; typed arrays + V8 proof + first host-object slice + first promise slice + first truthful bridge smoke slice landed)
 - [x] Phase 12 — Offline video exploration
-- [~] Phase 13 — Three.js / WebGPU JS bridge (active branch + draft PR `#103`)
+- [x] Phase 13 — Three.js / WebGPU JS bridge
+- [~] [#92](https://github.com/danielraffel/pulp/issues/92) — Windows/Linux native WebView follow-up
+- [ ] [#102](https://github.com/danielraffel/pulp/issues/102) — local CI stale-root/config-drift guardrails
 - [ ] Phase 14 — Final verification pass
 
 Parked pending license-policy resolution:
@@ -58,12 +60,12 @@ Parked pending license-policy resolution:
 ## Active Execution Order
 
 This is the queue to work against until the remaining v3 track is closed:
-1. Finish Phase 13 on `feature/v3-phase13-threejs-bridge` / [#103](https://github.com/danielraffel/pulp/pull/103).
-2. Merge Phase 13 with focused proof plus the minimum truthful local CI evidence.
+1. Land [#92](https://github.com/danielraffel/pulp/issues/92) so Phase 7 is no longer macOS-only in shipped form.
+2. Land [#102](https://github.com/danielraffel/pulp/issues/102) so the remaining verification loop cannot silently queue the wrong SHA or dead host.
 3. Run Phase 14 verification against the final integrated `main` state.
 4. In Phase 14, explicitly account for:
    - parked licensing disposition for Phases 4/5 in [#89](https://github.com/danielraffel/pulp/issues/89)
-   - deferred Windows/Linux native WebView parity in [#92](https://github.com/danielraffel/pulp/issues/92)
+   - the exact shipped WebView platform split after [#92](https://github.com/danielraffel/pulp/issues/92)
 5. Only after Phase 14 closes should the parked Phase 4/5 follow-up or later parity/platform work be resumed.
 
 ## Phase 13 Readiness Gate
@@ -167,8 +169,8 @@ Record when each phase lands with notes on what was delivered vs what was deferr
 ### Phase 7 — WebView integration
 - **Merged:** 2026-04-02 (`ac9a8e2`)
 - **Delivered:** native WebView bridge on macOS, bundled resource serving, host embedding seam, palette example, Monaco example, focused WebView tests, WebView guide, and `webview-ui` skill
-- **Deferred:** Windows/WebView2 and Linux/WebKitGTK native backends remain follow-up platform work
-- **Notes:** shipped scope is macOS-native only today; the cross-platform backend gap is tracked explicitly in [#92](https://github.com/danielraffel/pulp/issues/92)
+- **Deferred:** broader runtime parity/polish across Windows/WebView2 and Linux/WebKitGTK remains follow-up platform work
+- **Notes:** [#92](https://github.com/danielraffel/pulp/issues/92) is now the active follow-up. Its focused proof extends `PULP_BUILD_WEBVIEW=ON` configure/build/test coverage and `pulp-webview-palette` example builds to Windows and Ubuntu without changing the public Phase 7 API.
 
 ### Phase 8 — Audio visualization
 - **Merged:** 2026-04-02 (`de946d1`)
@@ -201,13 +203,13 @@ Record when each phase lands with notes on what was delivered vs what was deferr
 - **Notes:** recommendation is to proceed only as a library-first / PNG-sequence capability if followed up; do not overclaim a shipped offline-video feature yet
 
 ### Phase 13 — Three.js / WebGPU JS bridge
-- **Merged:** —
-- **Delivered:** in-progress browser-shaped slices on the branch: `HTMLCanvasElement` `getContext('2d')`, a mock `GPUCanvasContext` behind `getContext('webgpu')`, `window.pulp.gpu.getInfo()` backed by native truth, a first `navigator.gpu.requestAdapter()` Promise seam returning a mock adapter object, a first mock `GPUAdapter`/`GPUDevice`/`GPUQueue`/resource object graph, core WebGPU globals (`GPUBufferUsage`, `GPUTextureUsage`, `GPUMapMode`, `GPUShaderStage`, `GPUColorWrite`), browser utility shims (`performance`, storage, `Image`, `atob`/`btoa`, `crypto.getRandomValues`, `TextEncoder`, `TextDecoder`, `structuredClone`), and an asset-backed browser helper slice for `fetch`, `Response`, `Blob`, and `URL.createObjectURL`
+- **Merged:** 2026-04-02 (`2434b40`)
+- **Delivered:** browser-shaped slices for `HTMLCanvasElement` `getContext('2d')`, a mock `GPUCanvasContext` behind `getContext('webgpu')`, `window.pulp.gpu.getInfo()` backed by native truth, `navigator.gpu.requestAdapter()` Promise seams returning mock adapter objects, a first mock `GPUAdapter`/`GPUDevice`/`GPUQueue`/resource object graph, core WebGPU globals (`GPUBufferUsage`, `GPUTextureUsage`, `GPUMapMode`, `GPUShaderStage`, `GPUColorWrite`), browser utility shims (`performance`, storage, `Image`, `atob`/`btoa`, `crypto.getRandomValues`, `TextEncoder`, `TextDecoder`, `structuredClone`), and an asset-backed browser helper slice for `fetch`, `Response`, `Blob`, and `URL.createObjectURL`
 - **Deferred:** real Dawn-backed `GPUAdapter` / `GPUDevice` object graph, actual WebGPU canvas presentation, WGSL execution, Three.js compatibility claims, and DOM/native id parity
-- **Notes:** prerequisites and readiness floor are now proven; implementation has started from narrow browser-style entry points before any full WebGPU or Three.js claim. Current focused proof uses DOM lookup for the public surface and native `_id` for bridge/widget assertions, and now explicitly checks UTF-8 byte-length preservation for JSON asset payloads plus the first mock adapter/device/canvas-context floor. Active draft PR: [#103](https://github.com/danielraffel/pulp/pull/103).
+- **Notes:** prerequisites and readiness floor were proven before merge. Final focused smoke passed on the exact Phase 13 SHA across macOS, Ubuntu, and Windows before landing [#103](https://github.com/danielraffel/pulp/pull/103).
 
 ### Phase 14 — Verification pass
 - **Merged:** —
 - **Delivered:** —
 - **Deferred:** —
-- **Notes:** final end-to-end verification remains after Phases 12 and 13, plus explicit disposition tracking for the parked Cmajor/JSFX phases ([#89](https://github.com/danielraffel/pulp/issues/89)) and the deferred Windows/Linux WebView parity gap ([#92](https://github.com/danielraffel/pulp/issues/92))
+- **Notes:** final end-to-end verification remains after [#92](https://github.com/danielraffel/pulp/issues/92) and [#102](https://github.com/danielraffel/pulp/issues/102), plus explicit disposition tracking for the parked Cmajor/JSFX phases ([#89](https://github.com/danielraffel/pulp/issues/89))

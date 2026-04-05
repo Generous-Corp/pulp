@@ -166,7 +166,7 @@ static void build_yoga_subtree(View& view, YGNodeRef node) {
 }
 
 static void apply_yoga_results(View& parent, YGNodeRef node) {
-    const uint32_t childCount = YGNodeGetChildCount(node);
+    const auto childCount = static_cast<uint32_t>(YGNodeGetChildCount(node));
     for (uint32_t i = 0; i < childCount; ++i) {
         YGNodeRef childNode = YGNodeGetChild(node, i);
         auto* child = static_cast<View*>(YGNodeGetContext(childNode));

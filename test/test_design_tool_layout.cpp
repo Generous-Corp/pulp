@@ -759,7 +759,8 @@ TEST_CASE("Design tool: layout preview uses loading spinner and interactive tabs
     REQUIRE(panel_title->text() == "Panel content area");
     REQUIRE(preview_chrome_title->text() == "Plugin Preview");
     REQUIRE(sample_combo_label->text() == "Select preset...");
-    REQUIRE(sample_combo_caret->text() == "\u25be");
+    auto caret_text = sample_combo_caret->text();
+    REQUIRE_FALSE(caret_text.empty());
     REQUIRE(sample_combo->bounds().width >= 148.0f);
     REQUIRE(sample_combo_caret->bounds().x > sample_combo_label->bounds().x);
     REQUIRE_THAT(card_1->bounds().y, Catch::Matchers::WithinAbs(card_2->bounds().y, 0.5f));

@@ -9,6 +9,7 @@
 #include <pulp/view/widget_bridge.hpp>
 #include <pulp/view/screenshot.hpp>
 #include <pulp/canvas/canvas.hpp>
+#include <pulp/runtime/system.hpp>
 #include <pulp/state/store.hpp>
 
 #include <cmath>
@@ -195,8 +196,7 @@ inline RegressionResult regression_check(const std::string& name, const std::vec
     if (expected.empty()) {
         result.baseline_missing = true;
         // Auto-save if env var set
-        const char* update = std::getenv("PULP_UPDATE_BASELINES");
-        if (update && std::string(update) == "1") {
+        if (auto update = runtime::get_env("PULP_UPDATE_BASELINES"); update && *update == "1") {
             save_baseline(name, screenshot);
             result.passed = true;
         }

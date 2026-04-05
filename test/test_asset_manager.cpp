@@ -1,10 +1,21 @@
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/view/asset_manager.hpp>
 #include <pulp/view/theme.hpp>
+#include <chrono>
 #include <fstream>
 #include <filesystem>
 
 using namespace pulp::view;
+
+namespace {
+
+std::filesystem::path make_temp_theme_path(const char* stem) {
+    auto unique = std::to_string(
+        std::chrono::steady_clock::now().time_since_epoch().count());
+    return std::filesystem::temp_directory_path() / (std::string(stem) + "-" + unique + ".json");
+}
+
+} // namespace
 
 // ── Embedded Resources ──────────────────────────────────────────────────────
 
@@ -193,11 +204,11 @@ TEST_CASE("AssetManager blob from embedded", "[view][assets]") {
 
 TEST_CASE("Theme save and load from file", "[view][theme][io]") {
     auto original = Theme::dark();
-    std::string path = "/tmp/pulp_test_theme.json";
+    auto path = make_temp_theme_path("pulp-test-theme");
 
-    REQUIRE(original.save_to_file(path));
+    REQUIRE(original.save_to_file(path.string()));
 
-    auto loaded = Theme::load_from_file(path);
+    auto loaded = Theme::load_from_file(path.string());
     REQUIRE(loaded.color("bg.primary").has_value());
 
     auto orig_bg = original.color("bg.primary").value();
@@ -205,22 +216,23 @@ TEST_CASE("Theme save and load from file", "[view][theme][io]") {
     REQUIRE(orig_bg == load_bg);
 
     // Cleanup
-    std::filesystem::remove(path);
+    std::error_code ec;
+    std::filesystem::remove(path, ec);
 }
 
 TEST_CASE("Theme load from nonexistent file returns empty", "[view][theme][io]") {
-    auto theme = Theme::load_from_file("/tmp/pulp_nonexistent_theme.json");
+    auto theme = Theme::load_from_file(make_temp_theme_path("pulp-nonexistent-theme").string());
     REQUIRE(theme.colors.empty());
 }
 
-TEST_CASE("Theme validation — missing tokens", "[view][theme][validation]") {
+TEST_CASE("Theme validation - missing tokens", "[view][theme][validation]") {
     Theme empty;
     auto missing = empty.missing_tokens();
     REQUIRE(missing.size() == Theme::required_color_tokens().size());
     REQUIRE_FALSE(empty.is_complete());
 }
 
-TEST_CASE("Theme validation — complete theme", "[view][theme][validation]") {
+TEST_CASE("Theme validation - complete theme", "[view][theme][validation]") {
     auto theme = Theme::dark();
     REQUIRE(theme.is_complete());
     REQUIRE(theme.missing_tokens().empty());

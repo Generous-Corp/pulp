@@ -120,7 +120,7 @@ public:
                 float osc = 0.0f;
                 switch (waveform) {
                     case 0: // Sine
-                        osc = std::sin(v.phase * 2.0 * std::numbers::pi_v<double>);
+                        osc = static_cast<float>(std::sin(v.phase * 2.0 * std::numbers::pi_v<double>));
                         break;
                     case 1: // Saw
                         osc = static_cast<float>(2.0 * v.phase - 1.0);
@@ -178,7 +178,7 @@ private:
         target->active = true;
         target->note = note;
         target->velocity = velocity;
-        target->freq = 440.0 * std::pow(2.0, (note - 69) / 12.0);
+        target->freq = static_cast<float>(440.0 * std::pow(2.0, (note - 69) / 12.0));
         target->phase = 0.0;
     }
 

@@ -9,6 +9,11 @@
 
 namespace pulp::runtime {
 
+#ifdef _MSC_VER
+#pragma warning(push)
+#pragma warning(disable : 4324) // intentional cache-line alignment for lock-free snapshots
+#endif
+
 /// Lock-free reader/writer for reading multi-field structs as consistent snapshots.
 ///
 /// Use when a single writer (e.g., the audio thread) publishes a struct that
@@ -81,5 +86,9 @@ private:
     alignas(64) T data_{};
     std::atomic<unsigned> seq_{0};
 };
+
+#ifdef _MSC_VER
+#pragma warning(pop)
+#endif
 
 } // namespace pulp::runtime

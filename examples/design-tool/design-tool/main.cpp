@@ -11,6 +11,7 @@
 #include <pulp/view/window_host.hpp>
 #include <pulp/view/hot_reload.hpp>
 #include <pulp/state/store.hpp>
+#include <pulp/runtime/system.hpp>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -66,8 +67,8 @@ int main(int argc, char* argv[]) {
     // Set up scripting engine + widget bridge
     ScriptEngine engine;
     WidgetBridge bridge(engine, root, store);
-    if (const char* ai_cli = std::getenv("PULP_AI_CLI")) {
-        bridge.set_ai_cli_command(ai_cli);
+    if (auto ai_cli = pulp::runtime::get_env("PULP_AI_CLI")) {
+        bridge.set_ai_cli_command(*ai_cli);
     }
 
     // Load library scripts first (oklch.js, etc.) then the main UI script

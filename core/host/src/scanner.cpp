@@ -4,6 +4,7 @@
 
 #include <pulp/host/scanner.hpp>
 #include <pulp/runtime/log.hpp>
+#include <pulp/runtime/system.hpp>
 #include <filesystem>
 #include <algorithm>
 
@@ -15,8 +16,8 @@ std::vector<std::string> PluginScanner::default_paths(PluginFormat format) {
     std::vector<std::string> paths;
 
 #ifdef __APPLE__
-    const char* home = getenv("HOME");
-    std::string home_str = home ? home : "";
+    auto home = runtime::get_env("HOME");
+    std::string home_str = home.value_or("");
 
     switch (format) {
         case PluginFormat::VST3:
@@ -39,8 +40,8 @@ std::vector<std::string> PluginScanner::default_paths(PluginFormat format) {
     paths.push_back("C:\\Program Files\\Common Files\\VST3");
     paths.push_back("C:\\Program Files\\Common Files\\CLAP");
 #elif defined(__linux__)
-    const char* home = getenv("HOME");
-    std::string home_str = home ? home : "";
+    auto home = runtime::get_env("HOME");
+    std::string home_str = home.value_or("");
 
     switch (format) {
         case PluginFormat::VST3:

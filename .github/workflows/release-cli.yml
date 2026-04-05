@@ -33,7 +33,7 @@ jobs:
     name: CLI ${{ matrix.platform }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
@@ -87,13 +87,13 @@ jobs:
         shell: pwsh
 
       - name: Upload CLI artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: pulp-${{ matrix.platform }}
           path: pulp-${{ matrix.platform }}.*
 
       - name: Upload SDK artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: pulp-sdk-${{ matrix.platform }}
           path: pulp-sdk-${{ matrix.platform }}.*
@@ -107,7 +107,7 @@ jobs:
 
     steps:
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           path: artifacts/
 

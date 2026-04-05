@@ -157,15 +157,21 @@ target_sources(pulp-view PRIVATE
     src/breadcrumb.cpp
 )
 
-# WebView support — compiled separately to avoid WebKit framework auto-loading
-# in plugin hosts. Only link into standalone apps, not AU/VST3/CLAP plugins.
+# WebView support — compiled separately to avoid platform WebView runtime
+# auto-loading in plugin hosts. Only link into standalone apps, not
+# AU/VST3/CLAP plugins.
 # The ObjC runtime loads WebKit on dylib load if any WKWebView references exist,
 # which crashes Logic Pro's sandboxed AUHostingServiceXPC process.
-option(PULP_BUILD_WEBVIEW "Include WebView support (requires WebKit)" OFF)
+option(PULP_BUILD_WEBVIEW "Include native WebView support (WebKit / WebView2 / WebKitGTK)" OFF)
 if(PULP_BUILD_WEBVIEW)
     target_sources(pulp-view PRIVATE src/web_view.cpp)
     if(APPLE AND NOT PULP_IOS)
         target_link_libraries(pulp-view PRIVATE "-framework WebKit")
+    elseif(UNIX AND NOT APPLE)
+        find_package(PkgConfig REQUIRED)
+        pkg_check_modules(GTK3 REQUIRED IMPORTED_TARGET gtk+-3.0)
+        pkg_check_modules(WEBKIT2GTK REQUIRED IMPORTED_TARGET webkit2gtk-4.1)
+        target_link_libraries(pulp-view PRIVATE PkgConfig::GTK3 PkgConfig::WEBKIT2GTK)
     endif()
 endif()
 

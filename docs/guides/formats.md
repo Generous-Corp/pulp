@@ -191,7 +191,6 @@ The factory function name must match the `factoryFunction` in your AU's `Info.pl
 
 ```cpp
 #include "my_synth.hpp"
-#include "../../core/format/src/au_v2_instrument.cpp"
 #include <pulp/format/au_v2_instrument_entry.hpp>
 
 PULP_AU_INSTRUMENT(MySynthAU, my_namespace::create_my_synth)

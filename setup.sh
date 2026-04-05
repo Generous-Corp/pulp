@@ -163,11 +163,22 @@ reuse_shared_git_source() {
 
     if [ "$PLATFORM" = "Windows" ]; then
         info "Cloning $label from shared cache..."
-        dry "git clone --local --recursive $shared_dir $local_dir" || {
-            if ! git clone --local --recursive "$shared_dir" "$local_dir" >/dev/null 2>&1; then
-                git clone --recursive "$shared_dir" "$local_dir"
+        dry "git -c protocol.file.allow=always clone --local --no-hardlinks $shared_dir $local_dir" || {
+            if ! git -c protocol.file.allow=always clone --local --no-hardlinks "$shared_dir" "$local_dir" >/dev/null 2>&1; then
+                git -c protocol.file.allow=always clone "$shared_dir" "$local_dir"
             fi
         }
+
+        if [ -f "$local_dir/.gitmodules" ]; then
+            while read -r key submodule_path; do
+                submodule_name="${key#submodule.}"
+                submodule_name="${submodule_name%.path}"
+                git -C "$local_dir" config "submodule.${submodule_name}.url" "${shared_dir}/${submodule_path}"
+            done < <(git -C "$local_dir" config --file .gitmodules --get-regexp '^submodule\..*\.path$')
+
+            dry "git -c protocol.file.allow=always -C $local_dir submodule update --init --recursive" || \
+                git -c protocol.file.allow=always -C "$local_dir" submodule update --init --recursive
+        fi
     else
         info "Linking $label from shared cache..."
         dry "ln -s $shared_dir $local_dir" || ln -s "$shared_dir" "$local_dir"
@@ -349,8 +360,8 @@ ensure_shared_git_source() {
         fi
 
         if [ -f "$target/.gitmodules" ]; then
-            dry "git -C $target submodule update --init --recursive" || \
-                git -C "$target" submodule update --init --recursive
+            dry "git -c protocol.file.allow=always -C $target submodule update --init --recursive" || \
+                git -c protocol.file.allow=always -C "$target" submodule update --init --recursive
         fi
     )
 }

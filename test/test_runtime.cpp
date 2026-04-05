@@ -1,5 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/runtime/runtime.hpp>
+#include <cstdlib>
+#include <ctime>
 #include <thread>
 
 using namespace pulp::runtime;
@@ -98,4 +100,31 @@ TEST_CASE("Logging does not crash", "[runtime][log]") {
     REQUIRE_NOTHROW(log_warn("warning: {}", "something"));
     REQUIRE_NOTHROW(log_error("error: {}", 3.14));
     REQUIRE_NOTHROW(log_debug("debug: {}", true));
+}
+
+TEST_CASE("Runtime environment helpers", "[runtime][system]") {
+#ifdef _WIN32
+    REQUIRE(_putenv_s("PULP_RUNTIME_TEST_ENV", "value") == 0);
+#else
+    REQUIRE(setenv("PULP_RUNTIME_TEST_ENV", "value", 1) == 0);
+#endif
+
+    REQUIRE(get_env("PULP_RUNTIME_TEST_ENV") == std::optional<std::string>{"value"});
+    REQUIRE_FALSE(get_env("PULP_RUNTIME_TEST_ENV_DOES_NOT_EXIST"));
+}
+
+TEST_CASE("Runtime GMT helper returns UTC tm", "[runtime][system]") {
+    auto tm = gmtime_utc(static_cast<std::time_t>(0));
+    REQUIRE(tm.tm_year == 70);
+    REQUIRE(tm.tm_mon == 0);
+    REQUIRE(tm.tm_mday == 1);
+    REQUIRE(tm.tm_hour == 0);
+    REQUIRE(tm.tm_min == 0);
+    REQUIRE(tm.tm_sec == 0);
+}
+
+TEST_CASE("Runtime C string copy truncates safely", "[runtime][system]") {
+    char buffer[5]{};
+    copy_c_string(buffer, "abcdef");
+    REQUIRE(std::string(buffer) == "abcd");
 }

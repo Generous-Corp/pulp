@@ -155,6 +155,7 @@ install_dir="$tmp_root/install"
 install_log="$tmp_root/install.log"
 smoke_dir="$tmp_root/sdk-smoke"
 smoke_log="$tmp_root/smoke.log"
+smoke_build_log="$tmp_root/smoke-build.log"
 test_log="$tmp_root/test.log"
 prepared_state_file="$tmp_root/prepared-state.txt"
 
@@ -239,25 +240,17 @@ run_or_dump "dependency bootstrap" "$setup_log" bash -lc "cd \"$src_dir\" && ./s
 configure_args=(-S "$src_dir" -B "$build_dir" -DCMAKE_BUILD_TYPE=Debug)
 if [ "$SMOKE_ONLY" = true ]; then
     SKIP_TESTS=true
-    configure_args+=(-DPULP_BUILD_TESTS=OFF -DPULP_BUILD_EXAMPLES=OFF -DPULP_ENABLE_GPU=OFF)
+    configure_args+=(-DPULP_BUILD_TESTS=OFF -DPULP_BUILD_EXAMPLES=OFF)
 fi
 run_or_dump "configure" "$configure_log" cmake "${configure_args[@]}"
 run_or_dump "build" "$build_log" cmake --build "$build_dir" -j"$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4)"
 run_or_dump "install" "$install_log" cmake --install "$build_dir" --prefix "$install_dir"
 
 mkdir -p "$smoke_dir"
-cat >"$smoke_dir/CMakeLists.txt" <<'EOF'
-cmake_minimum_required(VERSION 3.24)
-project(PulpSDKSmoke LANGUAGES CXX)
-
-find_package(Pulp REQUIRED CONFIG)
-
-add_library(smoke INTERFACE)
-target_link_libraries(smoke INTERFACE Pulp::format Pulp::standalone)
-EOF
-
-run_or_dump "install smoke test" "$smoke_log" \
-    cmake -S "$smoke_dir" -B "$smoke_dir/build" -DCMAKE_PREFIX_PATH="$install_dir"
+run_or_dump "install smoke configure" "$smoke_log" \
+    cmake -S "$src_dir/tools/validation/sdk-smoke" -B "$smoke_dir/build" -DCMAKE_PREFIX_PATH="$install_dir"
+run_or_dump "install smoke build" "$smoke_build_log" \
+    cmake --build "$smoke_dir/build" -j"$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4)"
 
 write_prepared_state
 

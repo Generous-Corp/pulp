@@ -22,16 +22,16 @@ TEST_CASE("Platform detection: iOS vs macOS", "[ios][platform]") {
     REQUIRE_FALSE((platform::is_macos && platform::is_ios));
 
     // Both are Apple platforms
-    if (platform::is_ios || platform::is_macos) {
+    if constexpr (platform::is_ios || platform::is_macos) {
         REQUIRE(platform::is_apple);
     }
 
     // iOS is mobile, macOS is desktop
-    if (platform::is_ios) {
+    if constexpr (platform::is_ios) {
         REQUIRE(platform::is_mobile);
         REQUIRE_FALSE(platform::is_desktop);
     }
-    if (platform::is_macos) {
+    if constexpr (platform::is_macos) {
         REQUIRE(platform::is_desktop);
         REQUIRE_FALSE(platform::is_mobile);
     }

@@ -12,6 +12,7 @@ target_link_libraries(pulp-midi PUBLIC pulp::runtime)
 # CHOC headers (used by MidiEvent via choc::midi)
 target_include_directories(pulp-midi PUBLIC
     $<BUILD_INTERFACE:${choc_SOURCE_DIR}>
+    $<INSTALL_INTERFACE:include>
 )
 
 # MIDI file I/O (cross-platform, via CHOC)

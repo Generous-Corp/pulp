@@ -152,7 +152,6 @@ if(EXISTS "${VST3_SDK_DIR}/pluginterfaces")
         "${VST3_SDK_DIR}/public.sdk/source/vst/vstinitiids.cpp"
         "${VST3_SDK_DIR}/public.sdk/source/vst/vstparameters.cpp"
         "${VST3_SDK_DIR}/public.sdk/source/vst/vstsinglecomponenteffect.cpp"
-        "${VST3_SDK_DIR}/public.sdk/source/main/pluginfactory.cpp"
         "${VST3_SDK_DIR}/public.sdk/source/common/pluginview.cpp"
         "${VST3_SDK_DIR}/public.sdk/source/common/commoniids.cpp"
     )
@@ -406,12 +405,20 @@ if(PULP_HAS_AUSDK)
     )
 endif()
 if(TARGET yogacore)
-    set_target_properties(yogacore PROPERTIES EXPORT_NAME yogacore)
+    set_target_properties(yogacore PROPERTIES
+        EXPORT_NAME yogacore
+        INTERFACE_INCLUDE_DIRECTORIES "$<BUILD_INTERFACE:${yoga_SOURCE_DIR}>;$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
+    )
     install(TARGETS yogacore
         EXPORT PulpTargets
         ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
         LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
     )
+    if(DEFINED yoga_SOURCE_DIR AND EXISTS "${yoga_SOURCE_DIR}/yoga")
+        install(DIRECTORY "${yoga_SOURCE_DIR}/yoga"
+            DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+        )
+    endif()
 endif()
 if(TARGET SDL3-static)
     set_target_properties(SDL3-static PROPERTIES EXPORT_NAME sdl3-static)
@@ -465,8 +472,11 @@ configure_package_config_file(
 install(FILES
     "${CMAKE_BINARY_DIR}/PulpConfig.cmake"
     "${CMAKE_BINARY_DIR}/PulpConfigVersion.cmake"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpUtils.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpPlugin.cmake"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/FindSkia.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpInfoPlist.au.in"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpInfoPlist.vst3.in"
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/Pulp
 )
 
@@ -474,6 +484,9 @@ install(FILES
 install(DIRECTORY tools/templates/
     DESTINATION templates
     PATTERN "*.template"
+)
+install(DIRECTORY templates/ios-auv3
+    DESTINATION templates
 )
 
 # Header-only third-party deps referenced by installed public headers
@@ -516,6 +529,14 @@ if(PULP_HAS_VST3)
         DESTINATION external/vst3sdk
         FILES_MATCHING PATTERN "*.h"
     )
+    install(FILES
+        "${VST3_SDK_DIR}/public.sdk/source/main/dllmain.cpp"
+        "${VST3_SDK_DIR}/public.sdk/source/main/linuxmain.cpp"
+        "${VST3_SDK_DIR}/public.sdk/source/main/macmain.cpp"
+        "${VST3_SDK_DIR}/public.sdk/source/main/moduleinit.cpp"
+        "${VST3_SDK_DIR}/public.sdk/source/main/pluginfactory.cpp"
+        DESTINATION external/vst3sdk/public.sdk/source/main
+    )
 endif()
 if(PULP_HAS_AUSDK)
     install(DIRECTORY "${AUSDK_DIR}/include/AudioUnitSDK"
@@ -523,9 +544,48 @@ if(PULP_HAS_AUSDK)
     )
 endif()
 
-# Adapter sources needed by standalone SDK plugin targets.
+# Helper sources needed by installed-SDK plugin targets. These are shared by
+# the unified PulpUtils.cmake implementation when it is used from find_package.
 install(FILES
-    "${CMAKE_CURRENT_SOURCE_DIR}/core/format/src/au_v2_adapter.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/core/format/src/au_v2_instrument.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/format/src/au_adapter.mm"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/format/src/au_audio_unit.h"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/format/src/au_entry.mm"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/format/src/au_v2_cocoa_view.mm"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/format/src/au_view_controller_ios.mm"
+    "${CMAKE_CURRENT_SOURCE_DIR}/core/format/src/vst3_plug_view.cpp"
     DESTINATION src/pulp/format
 )
+
+if(PULP_HAS_WEBGPU AND DEFINED WEBGPU_RUNTIME_LIB AND TARGET webgpu)
+    install(IMPORTED_RUNTIME_ARTIFACTS webgpu
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    )
+
+    get_filename_component(_pulp_webgpu_lib_dir "${WEBGPU_RUNTIME_LIB}" DIRECTORY)
+    get_filename_component(_pulp_webgpu_root "${_pulp_webgpu_lib_dir}" DIRECTORY)
+
+    if(DEFINED FETCHCONTENT_SOURCE_DIR_WEBGPU
+       AND EXISTS "${FETCHCONTENT_SOURCE_DIR_WEBGPU}/wgpu-native/include")
+        install(DIRECTORY "${FETCHCONTENT_SOURCE_DIR_WEBGPU}/wgpu-native/include/"
+            DESTINATION external/webgpu/include
+        )
+    endif()
+
+    if(EXISTS "${_pulp_webgpu_root}/include")
+        install(DIRECTORY "${_pulp_webgpu_root}/include/"
+            DESTINATION external/webgpu/include
+        )
+    endif()
+
+    if(WIN32 AND DEFINED WGPU_IMPLIB AND EXISTS "${WGPU_IMPLIB}")
+        install(FILES "${WGPU_IMPLIB}"
+            DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        )
+    endif()
+endif()
+
+if(PULP_HAS_SKIA)
+    install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/external/skia-build"
+        DESTINATION external
+    )
+endif()

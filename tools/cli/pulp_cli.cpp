@@ -18,6 +18,8 @@
 #include <thread>
 #include <vector>
 
+#include <pulp/runtime/system.hpp>
+
 #include "design_binding.hpp"
 
 #ifdef __APPLE__
@@ -59,7 +61,7 @@ static bool is_tty() {
 static void init_color() {
     if (g_no_color) { g_color_enabled = false; return; }
     // Respect NO_COLOR convention (https://no-color.org/)
-    if (std::getenv("NO_COLOR")) { g_color_enabled = false; return; }
+    if (pulp::runtime::get_env("NO_COLOR")) { g_color_enabled = false; return; }
     g_color_enabled = is_tty();
 }
 
@@ -82,9 +84,6 @@ static void print_fail(const std::string& msg) {
 }
 static void print_warn(const std::string& msg) {
     std::cout << "  " << color::yellow() << "\xe2\x9a\xa0" << color::reset() << " " << msg << "\n";
-}
-static void print_step(const std::string& msg) {
-    std::cout << "\n" << color::bold() << color::cyan() << "\xe2\x94\x80\xe2\x94\x80 " << msg << color::reset() << "\n";
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -272,17 +271,15 @@ static fs::path find_standalone_root() {
 // ── SDK Cache ──────────────────────────────────────────────────────────────
 
 static fs::path pulp_home() {
-    const char* pulp_home_env = std::getenv("PULP_HOME");
-    if (pulp_home_env && *pulp_home_env) {
-        return fs::path(pulp_home_env);
-    }
+    if (auto pulp_home_env = pulp::runtime::get_env("PULP_HOME"))
+        return fs::path(*pulp_home_env);
 
-    const char* home = std::getenv("HOME");
+    auto home = pulp::runtime::get_env("HOME");
 #ifdef _WIN32
-    if (!home) home = std::getenv("USERPROFILE");
+    if (!home) home = pulp::runtime::get_env("USERPROFILE");
 #endif
     if (!home) return {};
-    return fs::path(home) / ".pulp";
+    return fs::path(*home) / ".pulp";
 }
 
 static fs::path sdk_cache_path(const std::string& version) {
@@ -350,7 +347,7 @@ static fs::path ensure_sdk(const std::string& version) {
 
     std::string tmp_dir = "/tmp/pulp-sdk-download-" + version;
 #ifdef _WIN32
-    tmp_dir = std::string(std::getenv("TEMP") ? std::getenv("TEMP") : ".") + "\\pulp-sdk-download-" + version;
+    tmp_dir = pulp::runtime::get_env("TEMP").value_or(".") + "\\pulp-sdk-download-" + version;
 #endif
 
     // Download
@@ -552,14 +549,11 @@ static bool checkout_supports_vst3(const fs::path& repo_root) {
     return fs::exists(repo_root / "external" / "vst3sdk" / "pluginterfaces");
 }
 
-static bool checkout_supports_au(const fs::path& repo_root) {
 #ifdef __APPLE__
+static bool checkout_supports_au(const fs::path& repo_root) {
     return fs::exists(repo_root / "external" / "AudioUnitSDK");
-#else
-    (void) repo_root;
-    return false;
-#endif
 }
+#endif
 
 static fs::path resolve_active_project_root(bool* is_standalone) {
     auto standalone_root = find_standalone_root();
@@ -622,14 +616,14 @@ static bool path_is_within(const fs::path& path, const fs::path& root) {
 }
 
 static fs::path resolve_create_projects_base_dir(const fs::path& repo_root) {
-    const char* home_env = std::getenv("HOME");
+    auto home_env = pulp::runtime::get_env("HOME");
 #ifdef _WIN32
-    if (!home_env) home_env = std::getenv("USERPROFILE");
+    if (!home_env) home_env = pulp::runtime::get_env("USERPROFILE");
 #endif
-    fs::path user_home = home_env ? fs::path(home_env) : fs::path{};
+    fs::path user_home = home_env ? fs::path(*home_env) : fs::path{};
 
-    if (const char* env_projects_dir = std::getenv("PULP_PROJECTS_DIR")) {
-        auto configured = strip_quotes(trim(env_projects_dir));
+    if (auto env_projects_dir = pulp::runtime::get_env("PULP_PROJECTS_DIR")) {
+        auto configured = strip_quotes(trim(*env_projects_dir));
         if (!configured.empty()) {
             auto path = fs::path(configured);
             if (!path.empty() && path.string()[0] == '~' && !user_home.empty()) {
@@ -918,10 +912,10 @@ static int cmd_status([[maybe_unused]] const std::vector<std::string>& args) {
         if (!sdk_hint.empty()) {
             std::cout << "SDK path: " << sdk_hint.string();
             std::cout << (fs::exists(sdk_hint / "lib" / "cmake" / "Pulp" / "PulpConfig.cmake") ? " (ready)\n" : " (missing)\n");
-        } else if (auto sdk_dir = local_sdk_cache_path(version); fs::exists(sdk_dir)) {
-            std::cout << "SDK local cache: " << sdk_dir.string() << "\n";
-        } else if (auto sdk_dir = sdk_cache_path(version); fs::exists(sdk_dir)) {
-            std::cout << "SDK download cache: " << sdk_dir.string() << "\n";
+        } else if (auto local_sdk_dir = local_sdk_cache_path(version); fs::exists(local_sdk_dir)) {
+            std::cout << "SDK local cache: " << local_sdk_dir.string() << "\n";
+        } else if (auto downloaded_sdk_dir = sdk_cache_path(version); fs::exists(downloaded_sdk_dir)) {
+            std::cout << "SDK download cache: " << downloaded_sdk_dir.string() << "\n";
         }
         if (!checkout_hint.empty()) {
             std::cout << "SDK checkout: " << checkout_hint.string();
@@ -1195,7 +1189,8 @@ static int cmd_validate(const std::vector<std::string>& args) {
         // Timestamp
         auto now = std::time(nullptr);
         char ts[64];
-        std::strftime(ts, sizeof(ts), "%Y-%m-%dT%H:%M:%SZ", std::gmtime(&now));
+        auto utc = pulp::runtime::gmtime_utc(now);
+        std::strftime(ts, sizeof(ts), "%Y-%m-%dT%H:%M:%SZ", &utc);
 
         std::ostringstream report;
         report << "{\n";
@@ -1308,7 +1303,7 @@ static int cmd_ship(const std::vector<std::string>& args) {
                     std::string install_loc = "/Library/Audio/Plug-Ins/";
                     if (ext == ".vst3") install_loc += "VST3/";
                     else if (ext == ".clap") install_loc += "CLAP/";
-                    else install_loc = std::string(getenv("HOME") ? getenv("HOME") : "~")
+                    else install_loc = pulp::runtime::get_env("HOME").value_or("~")
                                      + "/Library/Audio/Plug-Ins/Components/";
 
                     std::cout << "Packaging " << name << " (" << dir_name << ")...\n";
@@ -3409,6 +3404,7 @@ static void print_usage() {
     std::cout << "  cache    Manage SDK and asset cache (~/.pulp/)\n";
     std::cout << "  docs     Browse local documentation\n";
     std::cout << "  doctor   Diagnose environment issues (--fix, --ci, --dry-run)\n";
+    std::cout << "  ci-local Run local-first CI across this Mac and configured hosts\n";
     std::cout << "  upgrade  Update the Pulp CLI to the latest version\n";
     std::cout << "  clean    Remove build directory\n";
     std::cout << "  inspect  Launch the component inspector\n";
@@ -3433,6 +3429,8 @@ static void print_usage() {
     std::cout << "  pulp cache fetch skia   # Download Skia GPU binaries\n";
     std::cout << "  pulp docs index         # List available docs\n";
     std::cout << "  pulp status             # Show project info\n";
+    std::cout << "  pulp ci-local cloud workflows\n";
+    std::cout << "  pulp ci-local cloud run build feature/my-branch\n";
     std::cout << "  pulp design             # Build and launch the design tool\n";
     std::cout << "  pulp design --script path/to/design-tool.js\n";
     std::cout << "  pulp design --build-dir /tmp/pulp-design-parity-build\n";

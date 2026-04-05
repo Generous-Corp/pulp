@@ -17,4 +17,5 @@ target_link_libraries(pulp-runtime PUBLIC pulp::platform)
 # CHOC headers (used by SpscQueue wrapper)
 target_include_directories(pulp-runtime PUBLIC
     $<BUILD_INTERFACE:${choc_SOURCE_DIR}>
+    $<INSTALL_INTERFACE:include>
 )
