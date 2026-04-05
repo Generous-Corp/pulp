@@ -19,15 +19,21 @@ claude plugin add /path/to/pulp
 
 Then restart Claude Code or run `/reload-plugins` to activate.
 
-### From the marketplace (coming soon)
+### From the marketplace (when public)
 
-Once Pulp is public, you'll be able to install directly from the Claude Code plugin marketplace:
+Once Pulp is a public repository, you'll be able to install from the Claude Code plugin marketplace:
 
 ```bash
-claude plugin add pulp
+# 1. Add the marketplace (one time)
+/plugin marketplace add danielraffel/generous-corp-marketplace
+
+# 2. Install the Pulp plugin
+/plugin install pulp@generous-corp-marketplace
+
+# 3. Restart Claude Code to load the plugin
 ```
 
-This is not yet available. We'll update these instructions when it is.
+This is not yet available because the Pulp repository is currently private. These instructions will work once the repository is public.
 
 ## What You Get
 
