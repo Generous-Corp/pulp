@@ -15,6 +15,7 @@ on:
   workflow_dispatch:
 
 permissions:
+  actions: read
   contents: read
   pages: write
   id-token: write
@@ -64,10 +65,24 @@ jobs:
           cp tools/install/install.ps1 build/site/install.ps1
           echo "Install scripts copied to site root"
 
+      - name: Archive Pages artifact
+        run: |
+          tar \
+            --dereference --hard-dereference \
+            --directory build/site \
+            --exclude=.git \
+            --exclude=.github \
+            --exclude='.[^/]*' \
+            -cvf "$RUNNER_TEMP/github-pages.tar" \
+            .
+
       - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
-          path: build/site
+          name: github-pages
+          path: ${{ runner.temp }}/github-pages.tar
+          retention-days: 1
+          if-no-files-found: error
 
   deploy:
     needs: build
@@ -78,4 +93,4 @@ jobs:
     steps:
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
