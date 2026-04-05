@@ -41,6 +41,7 @@ import json
 import os
 import queue as queue_module
 import shlex
+import shutil
 import statistics
 import subprocess
 import sys
@@ -168,6 +169,10 @@ def bundles_dir() -> Path:
     return state_dir() / "bundles"
 
 
+def prepared_dir() -> Path:
+    return state_dir() / "prepared"
+
+
 def queue_lock_path() -> Path:
     return state_dir() / "queue.lock"
 
@@ -205,6 +210,68 @@ def prepare_target_log(job_id: str, target_name: str) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("")
     return path
+
+
+def format_size_bytes(value: int | float | None) -> str:
+    if value in (None, ""):
+        return ""
+    amount = float(value)
+    units = ["B", "KB", "MB", "GB", "TB"]
+    for unit in units:
+        if amount < 1024.0 or unit == units[-1]:
+            if unit == "B":
+                return f"{int(amount)} {unit}"
+            return f"{amount:.1f} {unit}"
+        amount /= 1024.0
+    return f"{amount:.1f} TB"
+
+
+def path_size_bytes(path: Path) -> int:
+    try:
+        if not path.exists():
+            return 0
+        if path.is_file():
+            return int(path.stat().st_size)
+    except OSError:
+        return 0
+
+    total = 0
+    for root, _dirs, files in os.walk(path):
+        for filename in files:
+            try:
+                total += int((Path(root) / filename).stat().st_size)
+            except OSError:
+                continue
+    return total
+
+
+def local_ci_state_footprint() -> dict:
+    entries = {}
+    total = 0
+    for label, path in (
+        ("bundles", bundles_dir()),
+        ("prepared", prepared_dir()),
+        ("logs", logs_dir()),
+        ("results", results_dir()),
+        ("cloud-runs", cloud_runs_dir()),
+    ):
+        size_bytes = path_size_bytes(path)
+        entries[label] = {
+            "path": path,
+            "size_bytes": size_bytes,
+        }
+        total += size_bytes
+    return {
+        "entries": entries,
+        "total_bytes": total,
+    }
+
+
+def describe_path_for_cleanup(path: Path) -> str:
+    try:
+        return str(path.relative_to(state_dir()))
+    except ValueError:
+        return str(path)
 
 
 def bundle_ref_name(job_id: str) -> str:
@@ -1053,14 +1120,177 @@ def enqueue_job(
         return job, True
 
 
-def trim_completed_jobs(queue: list[dict]) -> list[dict]:
+def trim_completed_jobs_with_removed_ids(queue: list[dict]) -> tuple[list[dict], set[str]]:
     completed = [job for job in queue if job.get("status") == "completed"]
     if len(completed) <= KEEP_COMPLETED_JOBS:
-        return queue
+        return queue, set()
 
     completed_by_time = sorted(completed, key=lambda job: job.get("completed_at", job.get("queued_at", "")))
     remove_ids = {job["id"] for job in completed_by_time[:-KEEP_COMPLETED_JOBS]}
-    return [job for job in queue if job["id"] not in remove_ids]
+    return [job for job in queue if job["id"] not in remove_ids], remove_ids
+
+
+def trim_completed_jobs(queue: list[dict]) -> list[dict]:
+    trimmed, _removed_ids = trim_completed_jobs_with_removed_ids(queue)
+    return trimmed
+
+
+def result_file_job_id(path: Path) -> str | None:
+    if path.suffix != ".json":
+        return None
+    stem = path.stem
+    parts = stem.split("-", 3)
+    if len(parts) < 3:
+        return None
+    return parts[2]
+
+
+def artifact_entry_sort_key(entry: dict) -> tuple[float, str]:
+    return (float(entry.get("mtime", 0.0)), str(entry.get("path", "")))
+
+
+def collect_local_ci_cleanup_plan(
+    queue: list[dict],
+    *,
+    keep_results: int = KEEP_COMPLETED_JOBS,
+    keep_logs: int = KEEP_COMPLETED_JOBS,
+    keep_bundles: int = 0,
+    include_prepared: bool = False,
+) -> dict:
+    keep_results = max(0, int(keep_results))
+    keep_logs = max(0, int(keep_logs))
+    keep_bundles = max(0, int(keep_bundles))
+    retained_job_ids = {job["id"] for job in queue}
+    live_job_ids = {job["id"] for job in queue if job.get("status") in {"pending", "running"}}
+    categories: dict[str, list[dict]] = {
+        "bundles": [],
+        "logs": [],
+        "results": [],
+        "prepared": [],
+    }
+
+    def add_file_entry(category: str, path: Path, job_id: str | None) -> None:
+        try:
+            stat = path.stat()
+        except OSError:
+            return
+        categories[category].append(
+            {
+                "path": path,
+                "job_id": job_id,
+                "size_bytes": int(stat.st_size),
+                "mtime": float(stat.st_mtime),
+            }
+        )
+
+    def add_dir_entry(category: str, path: Path, job_id: str | None) -> None:
+        if not path.exists() or not path.is_dir():
+            return
+        try:
+            stat = path.stat()
+        except OSError:
+            return
+        categories[category].append(
+            {
+                "path": path,
+                "job_id": job_id,
+                "size_bytes": path_size_bytes(path),
+                "mtime": float(stat.st_mtime),
+            }
+        )
+
+    for path in bundles_dir().glob("*.bundle"):
+        add_file_entry("bundles", path, path.stem)
+    log_root = logs_dir()
+    for path in (log_root.iterdir() if log_root.exists() else []):
+        if path.is_dir():
+            add_dir_entry("logs", path, path.name)
+    for path in results_dir().glob("*.json"):
+        add_file_entry("results", path, result_file_job_id(path))
+    if include_prepared and prepared_dir().exists():
+        for target_dir in prepared_dir().iterdir():
+            if not target_dir.is_dir():
+                continue
+            for mode_dir in target_dir.iterdir():
+                if mode_dir.is_dir():
+                    add_dir_entry("prepared", mode_dir, None)
+
+    plan_categories: dict[str, list[dict]] = {
+        "bundles": [],
+        "logs": [],
+        "results": [],
+        "prepared": [],
+    }
+
+    bundle_candidates = [
+        entry for entry in sorted(categories["bundles"], key=artifact_entry_sort_key, reverse=True)
+        if entry.get("job_id") not in live_job_ids
+    ]
+    plan_categories["bundles"] = bundle_candidates[keep_bundles:]
+
+    def select_queue_orphans(entries: list[dict], keep_count: int) -> list[dict]:
+        always_keep = [entry for entry in entries if entry.get("job_id") in retained_job_ids]
+        orphaned = [entry for entry in entries if entry.get("job_id") not in retained_job_ids]
+        orphaned.sort(key=artifact_entry_sort_key, reverse=True)
+        del always_keep  # clarity: retained-job artifacts are never candidates
+        return orphaned[keep_count:]
+
+    plan_categories["logs"] = select_queue_orphans(categories["logs"], keep_logs)
+    plan_categories["results"] = select_queue_orphans(categories["results"], keep_results)
+    plan_categories["prepared"] = sorted(
+        categories["prepared"],
+        key=artifact_entry_sort_key,
+        reverse=True,
+    )
+
+    total_bytes = sum(
+        int(entry.get("size_bytes", 0))
+        for entries in plan_categories.values()
+        for entry in entries
+    )
+    total_paths = sum(len(entries) for entries in plan_categories.values())
+    return {
+        "categories": plan_categories,
+        "total_bytes": total_bytes,
+        "total_paths": total_paths,
+        "keep_results": keep_results,
+        "keep_logs": keep_logs,
+        "keep_bundles": keep_bundles,
+        "include_prepared": include_prepared,
+    }
+
+
+def apply_local_ci_cleanup_plan(plan: dict) -> dict:
+    removed: list[dict] = []
+    failed: list[dict] = []
+    for category, entries in (plan.get("categories") or {}).items():
+        for entry in entries:
+            path = Path(entry["path"])
+            try:
+                if path.is_dir():
+                    shutil.rmtree(path)
+                else:
+                    path.unlink(missing_ok=True)
+                removed.append(
+                    {
+                        "category": category,
+                        "path": path,
+                        "size_bytes": int(entry.get("size_bytes", 0)),
+                    }
+                )
+            except OSError as exc:
+                failed.append(
+                    {
+                        "category": category,
+                        "path": path,
+                        "error": str(exc),
+                    }
+                )
+    return {
+        "removed": removed,
+        "failed": failed,
+        "removed_bytes": sum(item["size_bytes"] for item in removed),
+    }
 
 
 def job_sort_key(job: dict) -> tuple[int, str, str]:
@@ -1408,6 +1638,7 @@ def claim_next_job() -> dict | None:
 
 
 def finalize_job(job_id: str, result: dict, result_path: Path) -> None:
+    retained_queue: list[dict] | None = None
     with file_lock(queue_lock_path(), blocking=True):
         queue = load_queue_unlocked()
         for job in queue:
@@ -1422,7 +1653,19 @@ def finalize_job(job_id: str, result: dict, result_path: Path) -> None:
             job.pop("last_progress_at", None)
             break
 
-        save_queue_unlocked(trim_completed_jobs(queue))
+        retained_queue, _removed_ids = trim_completed_jobs_with_removed_ids(queue)
+        save_queue_unlocked(retained_queue)
+
+    if retained_queue is not None:
+        apply_local_ci_cleanup_plan(
+            collect_local_ci_cleanup_plan(
+                retained_queue,
+                keep_results=KEEP_COMPLETED_JOBS,
+                keep_logs=KEEP_COMPLETED_JOBS,
+                keep_bundles=0,
+                include_prepared=False,
+            )
+        )
 
 
 def parse_iso_datetime(value: str | None) -> datetime | None:
@@ -4776,6 +5019,78 @@ def cmd_cloud_status(args: argparse.Namespace) -> int:
     return 0
 
 
+def print_local_ci_state_footprint(*, indent: str = "") -> None:
+    footprint = local_ci_state_footprint()
+    print(f"{indent}Local CI footprint: total={format_size_bytes(footprint.get('total_bytes', 0))}")
+    for label in ("bundles", "prepared", "logs", "results", "cloud-runs"):
+        entry = (footprint.get("entries") or {}).get(label) or {}
+        print(
+            f"{indent}  {label}: {format_size_bytes(entry.get('size_bytes', 0))} "
+            f"({describe_path_for_cleanup(entry.get('path', state_dir()))})"
+        )
+
+
+def print_local_ci_cleanup_plan(plan: dict, *, dry_run: bool) -> None:
+    print("Local CI cleanup:\n")
+    print(
+        f"  reclaimable: {format_size_bytes(plan.get('total_bytes', 0))} "
+        f"across {plan.get('total_paths', 0)} path(s)"
+    )
+    for category in ("bundles", "logs", "results", "prepared"):
+        entries = (plan.get("categories") or {}).get(category) or []
+        if not entries:
+            continue
+        category_bytes = sum(int(entry.get("size_bytes", 0)) for entry in entries)
+        print(f"\n  {category}: {format_size_bytes(category_bytes)} across {len(entries)} path(s)")
+        for entry in entries[:10]:
+            print(f"    {describe_path_for_cleanup(Path(entry['path']))} ({format_size_bytes(entry.get('size_bytes', 0))})")
+        if len(entries) > 10:
+            print(f"    ... {len(entries) - 10} more")
+
+    if dry_run:
+        print("\n  dry run only; re-run with --apply to delete these paths")
+    else:
+        print("\n  applying cleanup now")
+
+
+def cmd_cleanup(args: argparse.Namespace) -> int:
+    queue = load_queue()
+    running = [job for job in queue if job.get("status") == "running"]
+    if args.apply and running:
+        print("Error: cleanup --apply is blocked while local CI jobs are running.")
+        return 1
+
+    plan = collect_local_ci_cleanup_plan(
+        queue,
+        keep_results=args.keep_results,
+        keep_logs=args.keep_logs,
+        keep_bundles=args.keep_bundles,
+        include_prepared=args.include_prepared,
+    )
+    print_local_ci_cleanup_plan(plan, dry_run=not args.apply)
+
+    if not args.apply:
+        print_local_ci_state_footprint(indent="  ")
+        if args.include_prepared:
+            print("  note: prepared cleanup removes cached build/install state and later reruns will rebuild it.")
+        return 0
+
+    result = apply_local_ci_cleanup_plan(plan)
+    print(
+        f"\n  removed: {len(result.get('removed', []))} path(s), "
+        f"{format_size_bytes(result.get('removed_bytes', 0))}"
+    )
+    if result.get("failed"):
+        print(f"  failed: {len(result['failed'])} path(s)")
+        for failure in result["failed"][:10]:
+            print(f"    {describe_path_for_cleanup(Path(failure['path']))}: {failure['error']}")
+        return 1
+    print_local_ci_state_footprint(indent="  ")
+    if args.include_prepared:
+        print("  note: prepared cleanup removes cached build/install state and later reruns will rebuild it.")
+    return 0
+
+
 def resolve_submission_options(
     args: argparse.Namespace, command: str
 ) -> tuple[dict, str, str, list[str], str, str, dict]:
@@ -5295,6 +5610,9 @@ def cmd_status(_args: argparse.Namespace) -> int:
         for record in cloud_records:
             print(f"  {cloud_record_summary(record, cloud_config)}")
 
+    print()
+    print_local_ci_state_footprint(indent="  ")
+
     print("\nVM Status:")
     for vm_name in ["Ubuntu 24.04 desktop", "Windows"]:
         print(f"  {vm_name}: {utmctl_vm_status(vm_name) or 'not found'}")
@@ -5497,6 +5815,42 @@ def build_parser() -> argparse.ArgumentParser:
     p_logs.add_argument("--target", help="Target name to show (mac, ubuntu, windows)")
     p_logs.add_argument("--lines", type=int, default=80, help="Number of log lines to show (default: 80)")
 
+    p_cleanup = sub.add_parser("cleanup", help="Inspect or prune retained local CI artifacts")
+    cleanup_mode = p_cleanup.add_mutually_exclusive_group()
+    cleanup_mode.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Show the cleanup plan without deleting anything (default)",
+    )
+    cleanup_mode.add_argument(
+        "--apply",
+        action="store_true",
+        help="Delete the reported stale artifacts instead of only showing a dry-run plan",
+    )
+    p_cleanup.add_argument(
+        "--include-prepared",
+        action="store_true",
+        help="Also include prepared build/install trees; later reruns will rebuild them",
+    )
+    p_cleanup.add_argument(
+        "--keep-results",
+        type=int,
+        default=KEEP_COMPLETED_JOBS,
+        help=f"Keep this many orphaned result files outside retained queue history (default: {KEEP_COMPLETED_JOBS})",
+    )
+    p_cleanup.add_argument(
+        "--keep-logs",
+        type=int,
+        default=KEEP_COMPLETED_JOBS,
+        help=f"Keep this many orphaned log directories outside retained queue history (default: {KEEP_COMPLETED_JOBS})",
+    )
+    p_cleanup.add_argument(
+        "--keep-bundles",
+        type=int,
+        default=0,
+        help="Keep this many non-live git bundles instead of deleting all completed-job bundles (default: 0)",
+    )
+
     p_evidence = sub.add_parser("evidence", help="Show accumulated last-good target results by exact SHA")
     p_evidence.add_argument("branch", nargs="?", help="Branch name (default: current)")
     p_evidence.add_argument("--sha", help="Filter to one exact SHA")
@@ -5520,6 +5874,7 @@ def main() -> int:
         "bump": cmd_bump,
         "cancel": cmd_cancel,
         "logs": cmd_logs,
+        "cleanup": cmd_cleanup,
         "evidence": cmd_evidence,
         "status": cmd_status,
     }

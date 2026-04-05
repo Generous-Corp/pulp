@@ -217,6 +217,9 @@ pulp ci-local run
 pulp ci-local run --smoke
 pulp ci-local check 123
 pulp ci-local status
+pulp ci-local cleanup
+pulp ci-local cleanup --dry-run
+pulp ci-local cleanup --apply
 pulp ci-local cloud workflows
 pulp ci-local cloud defaults
 pulp ci-local cloud history
@@ -240,6 +243,9 @@ Local queue commands:
 - `ship` — push, open PR, queue CI, merge on green
 - `enqueue` / `drain` / `bump` / `cancel` — queue management
 - `logs` / `evidence` / `status` — saved results and operator visibility
+- `cleanup` — inspect or prune retained local-CI artifacts; dry-run by default,
+  `--apply` is blocked while jobs are running, and `--include-prepared` also
+  removes cached build/install state that later reruns will rebuild
 
 Cloud companion commands:
 
@@ -286,6 +292,8 @@ Current cloud scope:
 - tracked cloud runs now persist queue-delay and elapsed-duration timing so later comparison commands can report real provider speedups instead of ad hoc estimates
 - estimated cost reporting is optional and local-config driven; every derived number is labeled `estimated; verify provider pricing`
 - if the provider CLI does not expose billing totals, Pulp still reports runtime and machine shape instead of inventing invoice truth
+- `status` also reports the current local-CI footprint for bundles, prepared state, logs, results, and tracked cloud runs
+- `cleanup` supports the operator-facing retention workflow: inspect reclaimable space first, then re-run with `--apply` only when no local CI job is active
 
 Namespace profile setup note:
 

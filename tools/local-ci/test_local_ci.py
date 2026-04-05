@@ -2954,6 +2954,290 @@ class LocalCiTests(unittest.TestCase):
         self.assertIn("period cost: est $3.00 over 6 run(s); estimated; verify provider pricing", output)
         self.assertIn("Cloud (latest 5 known to this machine):", output)
 
+    def test_collect_local_ci_cleanup_plan_selects_stale_artifacts(self):
+        queue = [
+            {
+                "id": "pending123456",
+                "branch": "feature/pending",
+                "sha": "a" * 40,
+                "priority": "normal",
+                "targets": ["mac"],
+                "queued_at": "2026-04-04T12:00:00+00:00",
+                "status": "pending",
+                "fingerprint": "pending",
+                "mode": "run",
+                "validation": "full",
+            },
+            {
+                "id": "keep12345678",
+                "branch": "feature/keep",
+                "sha": "b" * 40,
+                "priority": "normal",
+                "targets": ["mac"],
+                "queued_at": "2026-04-04T12:01:00+00:00",
+                "completed_at": "2026-04-04T12:02:00+00:00",
+                "status": "completed",
+                "fingerprint": "keep",
+                "mode": "run",
+                "validation": "full",
+            },
+        ]
+        with self.mod.file_lock(self.mod.queue_lock_path(), blocking=True):
+            self.mod.save_queue_unlocked(queue)
+
+        (self.state_dir / "bundles").mkdir(parents=True, exist_ok=True)
+        (self.state_dir / "bundles" / "pending123456.bundle").write_bytes(b"live")
+        (self.state_dir / "bundles" / "stale1234567.bundle").write_bytes(b"stale")
+
+        keep_log_dir = self.state_dir / "logs" / "keep12345678"
+        keep_log_dir.mkdir(parents=True, exist_ok=True)
+        (keep_log_dir / "mac.log").write_text("keep")
+        stale_log_dir = self.state_dir / "logs" / "stale1234567"
+        stale_log_dir.mkdir(parents=True, exist_ok=True)
+        (stale_log_dir / "mac.log").write_text("stale")
+
+        (self.state_dir / "results").mkdir(parents=True, exist_ok=True)
+        (self.state_dir / "results" / "20260404-120000-keep12345678-feature-keep.json").write_text("{}\n")
+        (self.state_dir / "results" / "20260404-120100-stale1234567-feature-stale.json").write_text("{}\n")
+
+        prepared_full = self.state_dir / "prepared" / "mac" / "full"
+        prepared_full.mkdir(parents=True, exist_ok=True)
+        (prepared_full / "marker").write_text("prepared")
+
+        plan = self.mod.collect_local_ci_cleanup_plan(
+            queue,
+            keep_results=0,
+            keep_logs=0,
+            keep_bundles=0,
+            include_prepared=True,
+        )
+
+        bundle_paths = {Path(entry["path"]).name for entry in plan["categories"]["bundles"]}
+        log_paths = {Path(entry["path"]).name for entry in plan["categories"]["logs"]}
+        result_paths = {Path(entry["path"]).name for entry in plan["categories"]["results"]}
+        prepared_paths = {str(Path(entry["path"]).relative_to(self.state_dir)) for entry in plan["categories"]["prepared"]}
+
+        self.assertEqual(bundle_paths, {"stale1234567.bundle"})
+        self.assertEqual(log_paths, {"stale1234567"})
+        self.assertEqual(result_paths, {"20260404-120100-stale1234567-feature-stale.json"})
+        self.assertEqual(prepared_paths, {"prepared/mac/full"})
+
+    def test_cmd_cleanup_dry_run_preserves_files_and_reports_prepared_consequence(self):
+        queue = []
+        with self.mod.file_lock(self.mod.queue_lock_path(), blocking=True):
+            self.mod.save_queue_unlocked(queue)
+
+        (self.state_dir / "bundles").mkdir(parents=True, exist_ok=True)
+        stale_bundle = self.state_dir / "bundles" / "stale1234567.bundle"
+        stale_bundle.write_bytes(b"stale")
+        prepared_full = self.state_dir / "prepared" / "mac" / "full"
+        prepared_full.mkdir(parents=True, exist_ok=True)
+        (prepared_full / "marker").write_text("prepared")
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            exit_code = self.mod.cmd_cleanup(
+                SimpleNamespace(
+                    apply=False,
+                    include_prepared=True,
+                    keep_results=0,
+                    keep_logs=0,
+                    keep_bundles=0,
+                )
+            )
+
+        output = buf.getvalue()
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(stale_bundle.exists())
+        self.assertTrue(prepared_full.exists())
+        self.assertIn("dry run only; re-run with --apply", output)
+        self.assertIn("prepared cleanup removes cached build/install state", output)
+        self.assertIn("Local CI footprint:", output)
+
+    def test_cmd_cleanup_apply_removes_stale_artifacts_and_preserves_retained_state(self):
+        queue = [
+            {
+                "id": "pending123456",
+                "branch": "feature/pending",
+                "sha": "a" * 40,
+                "priority": "normal",
+                "targets": ["mac"],
+                "queued_at": "2026-04-04T12:00:00+00:00",
+                "status": "pending",
+                "fingerprint": "pending",
+                "mode": "run",
+                "validation": "full",
+            },
+            {
+                "id": "keep12345678",
+                "branch": "feature/keep",
+                "sha": "b" * 40,
+                "priority": "normal",
+                "targets": ["mac"],
+                "queued_at": "2026-04-04T12:01:00+00:00",
+                "completed_at": "2026-04-04T12:02:00+00:00",
+                "status": "completed",
+                "fingerprint": "keep",
+                "mode": "run",
+                "validation": "full",
+            },
+        ]
+        with self.mod.file_lock(self.mod.queue_lock_path(), blocking=True):
+            self.mod.save_queue_unlocked(queue)
+
+        (self.state_dir / "bundles").mkdir(parents=True, exist_ok=True)
+        live_bundle = self.state_dir / "bundles" / "pending123456.bundle"
+        live_bundle.write_bytes(b"live")
+        stale_bundle = self.state_dir / "bundles" / "stale1234567.bundle"
+        stale_bundle.write_bytes(b"stale")
+
+        keep_log_dir = self.state_dir / "logs" / "keep12345678"
+        keep_log_dir.mkdir(parents=True, exist_ok=True)
+        (keep_log_dir / "mac.log").write_text("keep")
+        stale_log_dir = self.state_dir / "logs" / "stale1234567"
+        stale_log_dir.mkdir(parents=True, exist_ok=True)
+        (stale_log_dir / "mac.log").write_text("stale")
+
+        (self.state_dir / "results").mkdir(parents=True, exist_ok=True)
+        keep_result = self.state_dir / "results" / "20260404-120000-keep12345678-feature-keep.json"
+        keep_result.write_text("{}\n")
+        stale_result = self.state_dir / "results" / "20260404-120100-stale1234567-feature-stale.json"
+        stale_result.write_text("{}\n")
+
+        prepared_full = self.state_dir / "prepared" / "mac" / "full"
+        prepared_full.mkdir(parents=True, exist_ok=True)
+        (prepared_full / "marker").write_text("prepared")
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            exit_code = self.mod.cmd_cleanup(
+                SimpleNamespace(
+                    apply=True,
+                    include_prepared=True,
+                    keep_results=0,
+                    keep_logs=0,
+                    keep_bundles=0,
+                )
+            )
+
+        self.assertEqual(exit_code, 0)
+        self.assertTrue(live_bundle.exists())
+        self.assertTrue(keep_log_dir.exists())
+        self.assertTrue(keep_result.exists())
+        self.assertFalse(stale_bundle.exists())
+        self.assertFalse(stale_log_dir.exists())
+        self.assertFalse(stale_result.exists())
+        self.assertFalse(prepared_full.exists())
+
+    def test_cmd_cleanup_apply_refuses_to_run_while_job_is_running(self):
+        running_queue = [
+            {
+                "id": "running12345",
+                "branch": "feature/running",
+                "sha": "c" * 40,
+                "priority": "normal",
+                "targets": ["mac"],
+                "queued_at": "2026-04-04T12:00:00+00:00",
+                "status": "running",
+                "fingerprint": "running",
+                "mode": "run",
+                "validation": "full",
+            }
+        ]
+        stale_bundle = self.state_dir / "bundles" / "stale1234567.bundle"
+        stale_bundle.parent.mkdir(parents=True, exist_ok=True)
+        stale_bundle.write_bytes(b"stale")
+
+        original_load_queue = self.mod.load_queue
+        self.mod.load_queue = lambda: list(running_queue)
+        buf = io.StringIO()
+        try:
+            with redirect_stdout(buf):
+                exit_code = self.mod.cmd_cleanup(
+                    SimpleNamespace(
+                        apply=True,
+                        dry_run=False,
+                        include_prepared=False,
+                        keep_results=0,
+                        keep_logs=0,
+                        keep_bundles=0,
+                    )
+                )
+        finally:
+            self.mod.load_queue = original_load_queue
+
+        output = buf.getvalue()
+        self.assertEqual(exit_code, 1)
+        self.assertTrue(stale_bundle.exists())
+        self.assertIn("blocked while local CI jobs are running", output)
+
+    def test_finalize_job_prunes_completed_job_bundle_but_keeps_retained_logs_and_results(self):
+        running_job = {
+            "id": "job123456789",
+            "branch": "feature/job",
+            "sha": "a" * 40,
+            "priority": "normal",
+            "targets": ["mac"],
+            "queued_at": "2026-04-04T12:00:00+00:00",
+            "status": "running",
+            "fingerprint": "job",
+            "mode": "run",
+            "validation": "full",
+        }
+        with self.mod.file_lock(self.mod.queue_lock_path(), blocking=True):
+            self.mod.save_queue_unlocked([running_job])
+
+        bundle_path = self.state_dir / "bundles" / "job123456789.bundle"
+        bundle_path.parent.mkdir(parents=True, exist_ok=True)
+        bundle_path.write_bytes(b"bundle")
+
+        log_dir = self.state_dir / "logs" / "job123456789"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        (log_dir / "mac.log").write_text("keep")
+
+        result_path = self.state_dir / "results" / "20260404-120000-job123456789-feature-job.json"
+        result_path.parent.mkdir(parents=True, exist_ok=True)
+        result_path.write_text("{}\n")
+
+        self.mod.finalize_job(
+            "job123456789",
+            {"overall": "pass"},
+            result_path,
+        )
+
+        self.assertFalse(bundle_path.exists())
+        self.assertTrue(log_dir.exists())
+        self.assertTrue(result_path.exists())
+
+    def test_cmd_status_reports_local_ci_footprint(self):
+        bundle_path = self.state_dir / "bundles" / "job123456789.bundle"
+        bundle_path.parent.mkdir(parents=True, exist_ok=True)
+        bundle_path.write_bytes(b"bundle")
+        prepared_full = self.state_dir / "prepared" / "mac" / "full"
+        prepared_full.mkdir(parents=True, exist_ok=True)
+        (prepared_full / "marker").write_text("prepared")
+
+        original_current_branch = self.mod.current_branch
+        original_utm_status = self.mod.utmctl_vm_status
+        original_ssh_reachable = self.mod.ssh_reachable
+        self.mod.current_branch = lambda: "feature/cloud"
+        self.mod.utmctl_vm_status = lambda vm_name: "stopped"
+        self.mod.ssh_reachable = lambda host, timeout=5: True
+        try:
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                exit_code = self.mod.cmd_status(SimpleNamespace())
+        finally:
+            self.mod.current_branch = original_current_branch
+            self.mod.utmctl_vm_status = original_utm_status
+            self.mod.ssh_reachable = original_ssh_reachable
+
+        output = buf.getvalue()
+        self.assertEqual(exit_code, 0)
+        self.assertIn("Local CI footprint: total=", output)
+        self.assertIn("bundles:", output)
+        self.assertIn("prepared:", output)
+
 
 if __name__ == "__main__":
     unittest.main()

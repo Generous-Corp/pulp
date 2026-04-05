@@ -18,6 +18,7 @@ Local CI lets you validate branches on your Mac and cross-platform VMs before me
 - If you queue a newer SHA for the same branch, targets, and validation mode, older pending work is superseded automatically instead of sitting behind it forever.
 - `pulp ci-local logs <job-id> --target windows` tails the saved per-target log from the machine-global CI state dir, so you do not need ad hoc SSH just to see whether a target is building or testing.
 - `pulp ci-local evidence [branch]` shows the last-good exact-SHA target evidence already recorded for a branch, so you can keep earlier same-SHA passes instead of rerunning them blindly.
+- `pulp ci-local cleanup` shows reclaimable local-CI disk usage without deleting anything; `--apply` is blocked while jobs are running.
 - `pulp ci-local cloud workflows` lists the GitHub Actions workflows that the local CI control plane knows how to dispatch, plus which runner providers each one supports.
 - `pulp ci-local cloud run <workflow> [branch]` dispatches a GitHub Actions workflow deliberately when workflow semantics or neutral-host confirmation matter more than the local queue.
 - `pulp ci-local cloud status` shows the latest tracked GitHub Actions dispatches that this machine has launched; `pulp ci-local status` includes the same recent cloud summary alongside local queue state.
@@ -428,6 +429,16 @@ pulp ci-local logs <job-id> --target windows
 
 # Show accumulated exact-SHA target evidence for a branch
 pulp ci-local evidence feature/my-branch --limit 3
+
+# Show local-CI disk usage and reclaimable artifacts without deleting anything
+pulp ci-local cleanup
+pulp ci-local cleanup --dry-run
+
+# Delete stale bundles/logs/results once no local CI job is running
+pulp ci-local cleanup --apply
+
+# Include prepared build/install caches too; later reruns will rebuild them
+pulp ci-local cleanup --apply --include-prepared
 ```
 
 `pulp ci-local run` is the most common command. It enqueues the current `HEAD`, joins the machine-global queue, and waits until that exact job finishes.
@@ -481,6 +492,59 @@ pending work is marked `superseded` and written to the results directory with a
 reference to the replacement job. If a runner dies and reconciliation finds a newer
 replacement already queued for that same scope, the stale running job is also
 superseded instead of being requeued.
+
+## Cleanup And Disk Usage
+
+`pulp ci-local status` now includes a local footprint summary so retained CI
+state stops being invisible drift:
+
+- bundles
+- prepared build/install caches
+- logs
+- results
+- tracked cloud-run records
+
+Use `pulp ci-local cleanup` to inspect what can be reclaimed. The command is a
+dry run by default, and `--dry-run` is available explicitly when you want that
+spelled out in scripts or notes.
+
+What is cleaned automatically after job completion:
+
+- completed-job git bundles once no pending/running job still needs them
+- orphaned logs outside retained queue history
+- orphaned result files outside retained queue history
+
+What is not cleaned automatically in this first pass:
+
+- prepared build/install state under `prepared/<target>/<mode>`
+
+Prepared state is an intentional reuse cache. If you include it in manual
+cleanup, later reruns will rebuild it from scratch.
+
+Examples:
+
+```bash
+# Inspect reclaimable space
+pulp ci-local cleanup
+
+# Show the same dry-run plan explicitly
+pulp ci-local cleanup --dry-run
+
+# Delete stale bundles/logs/results
+pulp ci-local cleanup --apply
+
+# Also delete prepared caches
+pulp ci-local cleanup --apply --include-prepared
+```
+
+Safety rules:
+
+- `cleanup --apply` is blocked while local CI jobs are running
+- prepared cleanup is destructive to cached build/install state
+- logs/results tied to jobs still present in queue history are retained
+
+If you need immediate manual cleanup outside the CLI, make sure no
+`pulp ci-local` job is active first.
 
 ## Evidence Tracking
 
