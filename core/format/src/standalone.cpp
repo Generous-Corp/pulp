@@ -56,11 +56,15 @@ bool StandaloneApp::start() {
     prep.output_channels = config_.output_channels;
     processor_->prepare(prep);
 
-    // Pre-allocate test signal buffer (no audio-thread allocation)
+    // Pre-allocate test signal buffer and pointer arrays (no audio-thread allocation)
     test_signal_.set_sample_rate(config_.sample_rate);
     int test_ch = std::max(config_.input_channels, config_.output_channels);
     if (test_ch < 2) test_ch = 2;
     test_buffer_.resize(static_cast<size_t>(test_ch), static_cast<size_t>(config_.buffer_size));
+    test_ptrs_.resize(static_cast<size_t>(test_ch));
+    for (int c = 0; c < test_ch; ++c)
+        test_ptrs_[static_cast<size_t>(c)] = test_buffer_.view().channel_ptr(static_cast<size_t>(c));
+    meter_ptrs_.resize(static_cast<size_t>(std::max(test_ch, config_.input_channels)));
 
     // Set up MIDI input (optional)
     if (desc.accepts_midi) {
@@ -97,26 +101,26 @@ bool StandaloneApp::start() {
 
         // Determine actual input: test signal overrides hardware input
         const audio::BufferView<const float>* actual_input = &input;
+        audio::BufferView<const float> test_input_view;
         if (test_signal_.is_active()) {
-            auto test_view = test_buffer_.view();
-            int ch = static_cast<int>(test_view.num_channels());
-            int frames = ctx.buffer_size;
-            std::vector<float*> ptrs(static_cast<size_t>(ch));
-            for (int c = 0; c < ch; ++c)
-                ptrs[static_cast<size_t>(c)] = test_view.channel_ptr(static_cast<size_t>(c));
-            test_signal_.fill(ptrs.data(), ch, frames);
-            // Build a const view from the test buffer
-            // (BufferView<const float> can be constructed from the mutable view data)
+            int ch = static_cast<int>(test_ptrs_.size());
+            // Use pre-allocated pointer array — no allocation on audio thread
+            test_signal_.fill(test_ptrs_.data(), ch, ctx.buffer_size);
+            test_input_view = audio::BufferView<const float>(
+                const_cast<const float* const*>(test_ptrs_.data()),
+                test_ptrs_.size(), static_cast<size_t>(ctx.buffer_size));
+            actual_input = &test_input_view;
         }
 
-        // Push input meter data (meter whatever goes into the processor)
+        // Push input meter data using pre-allocated pointer array
         if (actual_input->num_channels() > 0) {
-            int meter_ch = static_cast<int>(actual_input->num_channels());
-            int meter_frames = ctx.buffer_size;
-            std::vector<const float*> ch_ptrs(static_cast<size_t>(meter_ch));
-            for (int c = 0; c < meter_ch; ++c)
-                ch_ptrs[static_cast<size_t>(c)] = actual_input->channel_ptr(static_cast<size_t>(c));
-            input_meter_bridge_.analyze_and_push(ch_ptrs.data(), meter_ch, meter_frames);
+            size_t meter_ch = actual_input->num_channels();
+            for (size_t c = 0; c < meter_ch && c < meter_ptrs_.size(); ++c)
+                meter_ptrs_[c] = actual_input->channel_ptr(c);
+            input_meter_bridge_.analyze_and_push(
+                meter_ptrs_.data(),
+                static_cast<int>(meter_ch),
+                ctx.buffer_size);
         }
 
         ProcessContext proc_ctx;
