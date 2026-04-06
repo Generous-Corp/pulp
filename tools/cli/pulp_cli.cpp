@@ -4497,13 +4497,10 @@ int main(int argc, char* argv[]) {
     }
     if (command == "cache")    return cmd_cache(args);
     if (command == "install") {
-        // pulp install — download and install the SDK without creating a project
-        std::string version = PULP_SDK_VERSION;
-        for (size_t i = 0; i < args.size(); ++i) {
-            if (args[i] == "--version" && i + 1 < args.size()) version = args[++i];
-        }
-        std::cout << "Installing Pulp SDK v" << version << "...\n";
-        return download_and_cache_sdk(version);
+        // pulp install — download the SDK via the cache subsystem
+        std::cout << "Installing Pulp SDK...\n";
+        std::vector<std::string> cache_args = {"fetch", "skia"};
+        return cmd_cache(cache_args);
     }
     if (command == "create") return cmd_create(args);
     if (command == "help" || command == "--help" || command == "-h") {
