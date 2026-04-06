@@ -16,7 +16,7 @@ TEST_CASE("Convolver: identity IR passes audio through", "[signal][convolver]") 
     conv.load_ir(ir.data(), ir.size(), block_size);
 
     REQUIRE(conv.is_loaded());
-    REQUIRE(conv.latency() == block_size);
+    REQUIRE(conv.latency() == 0);
     REQUIRE(conv.num_partitions() == 1);
 
     std::vector<float> input(block_size);
@@ -24,16 +24,14 @@ TEST_CASE("Convolver: identity IR passes audio through", "[signal][convolver]") 
     for (size_t i = 0; i < block_size; ++i)
         input[i] = std::sin(2.0f * 3.14159f * i / block_size);
 
-    // Process several blocks to capture full latency
-    std::vector<float> total_output;
-    for (int b = 0; b < 4; ++b) {
-        if (b == 0) conv.process(input.data(), output.data(), block_size);
-        else { std::vector<float> z(block_size, 0.0f); conv.process(z.data(), output.data(), block_size); }
-        total_output.insert(total_output.end(), output.begin(), output.end());
-    }
-    float energy = 0;
-    for (float s : total_output) energy += s * s;
-    REQUIRE(energy > 0.01f);
+    // Identity IR should produce immediate output (zero latency)
+    conv.process(input.data(), output.data(), block_size);
+
+    // Output should match input for identity IR (delta at sample 0)
+    float error = 0;
+    for (size_t i = 0; i < block_size; ++i)
+        error += std::abs(output[i] - input[i]);
+    REQUIRE(error < 0.01f);
 }
 
 TEST_CASE("Convolver: reset clears state", "[signal][convolver]") {
@@ -80,5 +78,5 @@ TEST_CASE("Convolver: multi-partition IR", "[signal][convolver]") {
     PartitionedConvolver conv;
     conv.load_ir(ir.data(), ir.size(), block_size);
     REQUIRE(conv.num_partitions() == 3);
-    REQUIRE(conv.latency() == block_size);
+    REQUIRE(conv.latency() == 0);
 }

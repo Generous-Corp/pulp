@@ -3,6 +3,7 @@
 #include <pulp/view/frame_clock.hpp>
 #include <choc/text/choc_JSON.h>
 #include <cmath>
+#include <fstream>
 #include <string>
 
 namespace pulp::view {
@@ -725,8 +726,25 @@ void ImageView::paint(canvas::Canvas& canvas) {
         return;
     }
 
-    // Try to draw the actual image
-    if (canvas.draw_image_from_file(path_, 0, 0, b.width, b.height)) {
+    // Use cached image data if available, otherwise load from file once
+    if (!loaded_ && cached_data_.empty()) {
+        // First paint with this path — read file into cache
+        std::ifstream file(path_, std::ios::binary | std::ios::ate);
+        if (file.is_open()) {
+            auto size = file.tellg();
+            if (size > 0) {
+                cached_data_.resize(static_cast<size_t>(size));
+                file.seekg(0);
+                file.read(reinterpret_cast<char*>(cached_data_.data()),
+                          static_cast<std::streamsize>(size));
+            }
+        }
+    }
+
+    // Draw from cached bytes (avoids re-reading file every frame)
+    if (!cached_data_.empty() &&
+        canvas.draw_image_from_data(cached_data_.data(), cached_data_.size(),
+                                    0, 0, b.width, b.height)) {
         loaded_ = true;
         return;
     }

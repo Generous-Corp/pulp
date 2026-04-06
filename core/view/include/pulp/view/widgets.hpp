@@ -340,7 +340,13 @@ class ImageView : public View {
 public:
     ImageView() {}
 
-    void set_image_path(const std::string& path) { path_ = path; loaded_ = false; }
+    void set_image_path(const std::string& path) {
+        if (path != path_) {
+            path_ = path;
+            loaded_ = false;
+            cached_data_.clear();
+        }
+    }
     const std::string& image_path() const { return path_; }
 
     void paint(canvas::Canvas& canvas) override;
@@ -348,6 +354,7 @@ public:
 private:
     std::string path_;
     bool loaded_ = false;
+    std::vector<uint8_t> cached_data_;  // File bytes cached after first successful load
 };
 
 // ── Meter ────────────────────────────────────────────────────────────────────

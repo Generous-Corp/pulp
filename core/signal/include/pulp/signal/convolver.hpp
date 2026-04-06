@@ -13,7 +13,7 @@ namespace pulp::signal {
 /// Uniform partitioned convolution engine.
 ///
 /// Processes audio through an impulse response using overlap-save with
-/// uniform block partitioning. Latency equals one block_size.
+/// uniform block partitioning. Zero latency (current block output is immediate).
 ///
 /// Usage:
 ///   PartitionedConvolver conv;
@@ -25,8 +25,16 @@ public:
     PartitionedConvolver() = default;
 
     /// Load an impulse response. block_size should match your audio callback size.
-    /// Latency = block_size samples.
+    /// block_size must be a power of two (for the radix-2 FFT).
+    /// If block_size is not a power of two, it is rounded up to the next one.
     void load_ir(const float* ir, size_t ir_length, size_t block_size) {
+        // Validate power-of-two requirement for the radix-2 FFT
+        if (block_size == 0 || (block_size & (block_size - 1)) != 0) {
+            // Round up to next power of two
+            size_t pot = 1;
+            while (pot < block_size) pot <<= 1;
+            block_size = pot;
+        }
         block_size_ = static_cast<int>(block_size);
         fft_size_ = block_size_ * 2;
         fft_ = std::make_unique<Fft>(fft_size_);
@@ -95,7 +103,10 @@ public:
         partition_index_ = 0;
     }
 
-    size_t latency() const { return static_cast<size_t>(block_size_); }
+    /// Returns the algorithmic latency in samples.
+    /// Overlap-save produces valid output for the current block immediately
+    /// (partition 0 is applied in the same callback), so latency is 0.
+    size_t latency() const { return 0; }
     size_t num_partitions() const { return num_partitions_; }
     bool is_loaded() const { return !ir_spectra_.empty(); }
 
