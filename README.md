@@ -133,7 +133,15 @@ pulp_add_plugin(MyGain
 
 ## Claude Code Plugin
 
-Pulp ships with a Claude Code plugin for the full development lifecycle. It activates automatically when you open the Pulp repo in Claude Code — the plugin manifest at `.claude-plugin/plugin.json` is detected on session start.
+Pulp ships with a Claude Code plugin for the full development lifecycle.
+
+**Install:**
+```bash
+claude plugin marketplace add danielraffel/pulp
+claude plugin install pulp
+```
+
+The plugin also activates automatically when you open the Pulp repo in Claude Code.
 
 Use slash commands directly in your Claude Code session:
 
