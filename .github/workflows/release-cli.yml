@@ -121,6 +121,8 @@ jobs:
       contents: write
 
     steps:
+      - uses: actions/checkout@v5
+
       - name: Download all artifacts
         uses: actions/download-artifact@v7
         with:
@@ -135,12 +137,38 @@ jobs:
             echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
           fi
 
+      - name: Extract changelog for this version
+        id: changelog
+        run: |
+          VERSION="${{ steps.version.outputs.tag }}"
+          VERSION="${VERSION#v}"  # strip leading v
+          # Extract the section for this version from CHANGELOG.md
+          NOTES=$(python3 -c "
+          import re, sys
+          with open('CHANGELOG.md') as f:
+              content = f.read()
+          # Find the section for this version
+          pattern = rf'## \[{re.escape(\"$VERSION\")}\].*?\n(.*?)(?=\n## \[|$)'
+          m = re.search(pattern, content, re.DOTALL)
+          if m:
+              print(m.group(1).strip())
+          else:
+              print('See CHANGELOG.md for details.')
+          ")
+          echo "notes<<CHANGELOG_EOF" >> $GITHUB_OUTPUT
+          echo "$NOTES" >> $GITHUB_OUTPUT
+          echo "CHANGELOG_EOF" >> $GITHUB_OUTPUT
+
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.tag }}
           name: Pulp CLI ${{ steps.version.outputs.tag }}
           body: |
+            ${{ steps.changelog.outputs.notes }}
+
+            ---
+
             ## Install
 
             **macOS / Linux:**

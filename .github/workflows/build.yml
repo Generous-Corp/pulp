@@ -1,0 +1,261 @@
+name: Build and Test
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      runner_provider:
+        description: "Runner provider to use for Linux and Windows build legs"
+        required: false
+        default: github-hosted
+        type: choice
+        options:
+          - github-hosted
+          - namespace
+      linux_runner_selector_json:
+        description: "Optional JSON string/array for Linux runs-on when routing through Namespace"
+        required: false
+        default: ""
+        type: string
+      windows_runner_selector_json:
+        description: "Optional JSON string/array for Windows runs-on when routing through Namespace"
+        required: false
+        default: ""
+        type: string
+      macos_runner_selector_json:
+        description: "Optional JSON string/array for macOS runs-on when routing through Namespace; omit to keep macOS local-only"
+        required: false
+        default: ""
+        type: string
+
+jobs:
+  resolve-provider:
+    runs-on: ubuntu-latest
+    outputs:
+      provider: ${{ steps.resolve.outputs.provider }}
+      matrix_json: ${{ steps.resolve.outputs.matrix_json }}
+    steps:
+      - id: resolve
+        env:
+          REQUESTED_PROVIDER: ${{ inputs.runner_provider || 'github-hosted' }}
+          EXPLICIT_LINUX_RUNNER_SELECTOR_JSON: ${{ inputs.linux_runner_selector_json || '' }}
+          EXPLICIT_WINDOWS_RUNNER_SELECTOR_JSON: ${{ inputs.windows_runner_selector_json || '' }}
+          EXPLICIT_MACOS_RUNNER_SELECTOR_JSON: ${{ inputs.macos_runner_selector_json || '' }}
+          NAMESPACE_LINUX_RUNS_ON_JSON: ${{ vars.PULP_NAMESPACE_BUILD_LINUX_RUNS_ON_JSON }}
+          NAMESPACE_WINDOWS_RUNS_ON_JSON: ${{ vars.PULP_NAMESPACE_BUILD_WINDOWS_RUNS_ON_JSON }}
+          NAMESPACE_MACOS_RUNS_ON_JSON: ${{ vars.PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import sys
+          from pathlib import Path
+
+          requested = (os.environ.get("REQUESTED_PROVIDER") or "github-hosted").strip()
+
+          def resolve_runs_on(
+              *,
+              target_name: str,
+              github_hosted_label: str,
+              explicit_env: str,
+              namespace_env: str,
+              namespace_setting_name: str,
+          ) -> str:
+              explicit = (os.environ.get(explicit_env) or "").strip()
+              if explicit:
+                  raw = explicit
+              elif requested == "github-hosted":
+                  raw = json.dumps(github_hosted_label)
+              elif requested == "namespace":
+                  raw = (os.environ.get(namespace_env) or "").strip()
+                  if not raw:
+                      print(
+                          f"{namespace_setting_name} is not set; cannot route {target_name} to Namespace.",
+                          file=sys.stderr,
+                      )
+                      sys.exit(1)
+              else:
+                  print(f"Unsupported runner_provider: {requested}", file=sys.stderr)
+                  sys.exit(1)
+
+              try:
+                  decoded = json.loads(raw)
+              except json.JSONDecodeError as exc:
+                  print(
+                      f"{target_name} runner selector JSON is not valid: {exc}",
+                      file=sys.stderr,
+                  )
+                  sys.exit(1)
+              if not isinstance(decoded, (str, list)):
+                  print(
+                      f"{target_name} runner selector JSON must decode to a string or array accepted by runs-on.",
+                      file=sys.stderr,
+                  )
+                  sys.exit(1)
+              return json.dumps(decoded)
+
+          def resolve_optional_namespace_runs_on(
+              *,
+              explicit_env: str,
+              namespace_env: str,
+              target_name: str,
+          ) -> str:
+              if requested != "namespace":
+                  return ""
+              raw = (os.environ.get(explicit_env) or "").strip()
+              if not raw:
+                  raw = (os.environ.get(namespace_env) or "").strip()
+              if not raw:
+                  return ""
+              try:
+                  decoded = json.loads(raw)
+              except json.JSONDecodeError as exc:
+                  print(
+                      f"{target_name} runner selector JSON is not valid: {exc}",
+                      file=sys.stderr,
+                  )
+                  sys.exit(1)
+              if not isinstance(decoded, (str, list)):
+                  print(
+                      f"{target_name} runner selector JSON must decode to a string or array accepted by runs-on.",
+                      file=sys.stderr,
+                  )
+                  sys.exit(1)
+              return json.dumps(decoded)
+
+          linux_runs_on = resolve_runs_on(
+              target_name="Linux (x64)",
+              github_hosted_label="ubuntu-latest",
+              explicit_env="EXPLICIT_LINUX_RUNNER_SELECTOR_JSON",
+              namespace_env="NAMESPACE_LINUX_RUNS_ON_JSON",
+              namespace_setting_name="PULP_NAMESPACE_BUILD_LINUX_RUNS_ON_JSON",
+          )
+          windows_runs_on = resolve_runs_on(
+              target_name="Windows (x64)",
+              github_hosted_label="windows-latest",
+              explicit_env="EXPLICIT_WINDOWS_RUNNER_SELECTOR_JSON",
+              namespace_env="NAMESPACE_WINDOWS_RUNS_ON_JSON",
+              namespace_setting_name="PULP_NAMESPACE_BUILD_WINDOWS_RUNS_ON_JSON",
+          )
+          macos_runs_on = resolve_optional_namespace_runs_on(
+              explicit_env="EXPLICIT_MACOS_RUNNER_SELECTOR_JSON",
+              namespace_env="NAMESPACE_MACOS_RUNS_ON_JSON",
+              target_name="macOS (ARM64)",
+          )
+
+          # Always include macOS on GitHub-hosted runners unless Namespace provides one
+          macos_final = macos_runs_on if macos_runs_on else json.dumps("macos-15")
+
+          include = [
+              {
+                  "key": "macos",
+                  "name": "macOS (ARM64)",
+                  "runs_on_json": macos_final,
+                  "provider": "namespace" if macos_runs_on else "github-hosted",
+              },
+              {
+                  "key": "windows",
+                  "name": "Windows (x64)",
+                  "runs_on_json": windows_runs_on,
+                  "provider": requested,
+              },
+              {
+                  "key": "linux",
+                  "name": "Linux (x64)",
+                  "runs_on_json": linux_runs_on,
+                  "provider": requested,
+              },
+          ]
+
+          matrix = {"include": include}
+
+          output_path = Path(os.environ["GITHUB_OUTPUT"])
+          with output_path.open("a", encoding="utf-8") as handle:
+              handle.write(f"provider={requested}\n")
+              handle.write(f"matrix_json={json.dumps(matrix)}\n")
+          PY
+
+  build:
+    needs: resolve-provider
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.resolve-provider.outputs.matrix_json) }}
+
+    runs-on: ${{ fromJSON(matrix.runs_on_json) }}
+    name: ${{ matrix.name }} [${{ matrix.provider }}]
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          lfs: true
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libasound2-dev \
+            libdbus-1-dev \
+            libdrm-dev \
+            libegl1-mesa-dev \
+            libgbm-dev \
+            libgl1-mesa-dev \
+            libx11-dev \
+            libxext-dev \
+            libxfixes-dev \
+            libxi-dev \
+            libxinerama-dev \
+            libxkbcommon-dev \
+            libxrandr-dev \
+            libxrender-dev \
+            libxss-dev \
+            libxtst-dev \
+            libwayland-dev \
+            wayland-protocols
+
+      - name: Bootstrap repository dependencies
+        run: ./setup.sh --ci --deps-only
+        shell: bash
+
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      - name: Test
+        working-directory: build
+        run: ctest --output-on-failure -C Release -LE validation -j4
+        shell: bash
+
+      - name: Upload plugin bundles (macOS)
+        if: success() && runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: plugins-${{ matrix.key }}
+          path: |
+            build/VST3/*.vst3
+            build/CLAP/*.clap
+            build/AU/*.component
+          retention-days: 7
+
+      - name: Upload plugin bundles (Windows)
+        if: success() && runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: plugins-${{ matrix.key }}
+          path: |
+            build/VST3/**/*.vst3
+            build/CLAP/**/*.clap
+          retention-days: 7
+
+      - name: Upload plugin bundles (Linux)
+        if: success() && runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: plugins-${{ matrix.key }}
+          path: |
+            build/VST3/**/*.so
+            build/CLAP/**/*.so
+          retention-days: 7

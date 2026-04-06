@@ -49,7 +49,7 @@ namespace fs = std::filesystem;
 
 // ── SDK Constants ───────────────────────────────────────────────────────────
 
-static const char* PULP_SDK_VERSION = "0.1.0";
+static const char* PULP_SDK_VERSION = "0.1.1";
 static const char* PULP_GITHUB_REPO = "danielraffel/pulp";
 
 // ── Color / Terminal ────────────────────────────────────────────────────────
