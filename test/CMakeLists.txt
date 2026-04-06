@@ -81,6 +81,11 @@ add_executable(pulp-test-convolver test_convolver.cpp)
 target_link_libraries(pulp-test-convolver PRIVATE pulp::signal Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-convolver)
 
+# Test signal source (sine tone, file playback)
+add_executable(pulp-test-test-signal test_test_signal.cpp)
+target_link_libraries(pulp-test-test-signal PRIVATE pulp::standalone Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-test-signal)
+
 # STFT and audio visualization signal tests
 add_executable(pulp-test-stft test_stft.cpp)
 target_link_libraries(pulp-test-stft PRIVATE pulp::signal Catch2::Catch2WithMain)
