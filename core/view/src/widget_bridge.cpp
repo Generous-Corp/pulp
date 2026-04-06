@@ -4583,6 +4583,24 @@ void WidgetBridge::register_api() {
         pipeline_desc.multisample.mask = ~0u;
         pipeline_desc.multisample.alphaToCoverageEnabled = false;
 
+        // Add depth/stencil to pipeline if JS payload requests it
+        wgpu::DepthStencilState depth_stencil_state{};
+        bool has_depth = payload.hasObjectMember("depthStencil") || payload.hasObjectMember("pipelineDepthStencil");
+        if (has_depth) {
+            depth_stencil_state.format = wgpu::TextureFormat::Depth24Plus;
+            depth_stencil_state.depthWriteEnabled = true;
+            depth_stencil_state.depthCompare = wgpu::CompareFunction::Less;
+            if (payload.hasObjectMember("pipelineDepthStencil") && payload["pipelineDepthStencil"].isObject()) {
+                auto ds = payload["pipelineDepthStencil"];
+                auto cmp = ds.hasObjectMember("depthCompare") ? ds["depthCompare"].getWithDefault<std::string>("less") : "less";
+                if (cmp == "less-equal") depth_stencil_state.depthCompare = wgpu::CompareFunction::LessEqual;
+                else if (cmp == "greater") depth_stencil_state.depthCompare = wgpu::CompareFunction::Greater;
+                else if (cmp == "always") depth_stencil_state.depthCompare = wgpu::CompareFunction::Always;
+                depth_stencil_state.depthWriteEnabled = ds.hasObjectMember("depthWriteEnabled") ? ds["depthWriteEnabled"].getWithDefault<bool>(true) : true;
+            }
+            pipeline_desc.depthStencil = &depth_stencil_state;
+        }
+
         auto pipeline = device_ptr->CreateRenderPipeline(&pipeline_desc);
         if (!pipeline) return choc::value::createBool(false);
 
@@ -4605,9 +4623,37 @@ void WidgetBridge::register_api() {
             };
         }
 
+        // Create depth texture if depth/stencil is requested
+        wgpu::Texture depth_texture;
+        wgpu::TextureView depth_view;
+        wgpu::RenderPassDepthStencilAttachment depth_attachment{};
+        bool has_depth = payload.hasObjectMember("depthStencil") || payload.hasObjectMember("pipelineDepthStencil");
+
+        if (has_depth) {
+            wgpu::TextureDescriptor depth_tex_desc{};
+            uint32_t depth_w = target_canvas_state ? target_canvas_state->width : (target_texture_state ? target_texture_state->width : 256);
+            uint32_t depth_h = target_canvas_state ? target_canvas_state->height : (target_texture_state ? target_texture_state->height : 256);
+            depth_tex_desc.size = {depth_w, depth_h, 1};
+            depth_tex_desc.format = wgpu::TextureFormat::Depth24Plus;
+            depth_tex_desc.usage = wgpu::TextureUsage::RenderAttachment;
+            depth_texture = device_ptr->CreateTexture(&depth_tex_desc);
+            if (depth_texture) {
+                depth_view = depth_texture.CreateView();
+                depth_attachment.view = depth_view;
+                depth_attachment.depthLoadOp = wgpu::LoadOp::Clear;
+                depth_attachment.depthStoreOp = wgpu::StoreOp::Store;
+                depth_attachment.depthClearValue = 1.0f;
+            } else {
+                has_depth = false;
+            }
+        }
+
         wgpu::RenderPassDescriptor pass_desc{};
         pass_desc.colorAttachmentCount = 1;
         pass_desc.colorAttachments = &color_attachment;
+        if (has_depth) {
+            pass_desc.depthStencilAttachment = &depth_attachment;
+        }
 
         wgpu::CommandEncoderDescriptor encoder_desc{};
         auto encoder = device_ptr->CreateCommandEncoder(&encoder_desc);
