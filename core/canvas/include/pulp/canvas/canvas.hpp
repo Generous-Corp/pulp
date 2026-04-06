@@ -187,6 +187,22 @@ public:
         float line_height = 0;  ///< Recommended line spacing (ascent + descent + leading)
     };
 
+    // ── Images ───────────────────────────────────────────────────────────
+    /// Draw an image from encoded data (PNG, JPEG, WebP) at the given rect.
+    /// Returns true if the image was decoded and drawn successfully.
+    virtual bool draw_image_from_data(const uint8_t* data, size_t size,
+                                      float x, float y, float w, float h) {
+        (void)data; (void)size; (void)x; (void)y; (void)w; (void)h;
+        return false; // Base class can't draw images
+    }
+
+    /// Draw an image from a file path at the given rect.
+    virtual bool draw_image_from_file(const std::string& path,
+                                       float x, float y, float w, float h) {
+        (void)path; (void)x; (void)y; (void)w; (void)h;
+        return false; // Override in Skia backend
+    }
+
     /// Measure text with full font metrics using current font settings.
     virtual TextMetrics measure_text_full(const std::string& text) {
         TextMetrics m;

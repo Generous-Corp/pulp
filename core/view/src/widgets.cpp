@@ -725,8 +725,13 @@ void ImageView::paint(canvas::Canvas& canvas) {
         return;
     }
 
-    // TODO: Load image via Skia SkData::MakeFromFileName + SkImages::DeferredFromEncodedData
-    // For now render path as text placeholder
+    // Try to draw the actual image
+    if (canvas.draw_image_from_file(path_, 0, 0, b.width, b.height)) {
+        loaded_ = true;
+        return;
+    }
+
+    // Fallback: show filename as text placeholder
     canvas.set_fill_color(resolve_color("bg.surface", canvas::Color::rgba(50, 50, 60)));
     canvas.fill_rounded_rect(0, 0, b.width, b.height, 4);
     canvas.set_fill_color(resolve_color("text.secondary", canvas::Color::rgba(120, 120, 140)));

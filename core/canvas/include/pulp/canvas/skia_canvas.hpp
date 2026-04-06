@@ -70,6 +70,12 @@ public:
     void fill_text(const std::string& text, float x, float y) override;
     float measure_text(const std::string& text) override;
     TextMetrics measure_text_full(const std::string& text) override;
+
+    // ── Images ──────────────────────────────────────────────────────────
+    bool draw_image_from_data(const uint8_t* data, size_t size,
+                              float x, float y, float w, float h) override;
+    bool draw_image_from_file(const std::string& path,
+                               float x, float y, float w, float h) override;
     void draw_waveform(const float* samples, size_t count,
                        float x, float y, float width, float height,
                        const WaveformStyle& style) override;

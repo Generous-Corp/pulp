@@ -226,6 +226,36 @@ Canvas::TextMetrics SkiaCanvas::measure_text_full(const std::string& text) {
     return m;
 }
 
+// ── Images ──────────────────────────────────────────────────────────────────
+
+bool SkiaCanvas::draw_image_from_data(const uint8_t* data, size_t size,
+                                       float x, float y, float w, float h) {
+    if (!canvas_ || !data || size == 0) return false;
+
+    auto sk_data = SkData::MakeWithoutCopy(data, size);
+    auto image = SkImages::DeferredFromEncodedData(sk_data);
+    if (!image) return false;
+
+    canvas_->drawImageRect(image, SkRect::MakeXYWH(x, y, w, h),
+                           SkSamplingOptions(SkFilterMode::kLinear));
+    return true;
+}
+
+bool SkiaCanvas::draw_image_from_file(const std::string& path,
+                                       float x, float y, float w, float h) {
+    if (!canvas_ || path.empty()) return false;
+
+    auto sk_data = SkData::MakeFromFileName(path.c_str());
+    if (!sk_data) return false;
+
+    auto image = SkImages::DeferredFromEncodedData(sk_data);
+    if (!image) return false;
+
+    canvas_->drawImageRect(image, SkRect::MakeXYWH(x, y, w, h),
+                           SkSamplingOptions(SkFilterMode::kLinear));
+    return true;
+}
+
 // ── Gradients ────────────────────────────────────────────────────────────────
 
 static void colors_to_skia(const Color* colors, const float* positions, int count,
