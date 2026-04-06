@@ -306,6 +306,7 @@ endif()
 add_library(pulp-standalone STATIC
     core/format/src/standalone.cpp
     core/format/src/test_signal.cpp
+    core/format/src/settings_panel.cpp
 )
 add_library(pulp::standalone ALIAS pulp-standalone)
 target_include_directories(pulp-standalone
