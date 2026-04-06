@@ -6,14 +6,28 @@
 #include <algorithm>
 #include <cstdint>
 
+#if defined(__APPLE__)
+#include <Accelerate/Accelerate.h>
+#define PULP_FFT_HAS_VDSP 1
+#endif
+
 namespace pulp::signal {
 
 // Radix-2 FFT — in-place, decimation-in-time
-// Size must be a power of 2
+// Size must be a power of 2.
+// On Apple platforms, uses vDSP for significantly faster large transforms.
 class Fft {
 public:
     explicit Fft(int size) : size_(size) {
-        // Pre-compute twiddle factors
+#if PULP_FFT_HAS_VDSP
+        // Use vDSP for FFT — much faster for large sizes
+        log2n_ = 0;
+        for (int n = size; n > 1; n >>= 1) ++log2n_;
+        vdsp_setup_ = vDSP_create_fftsetup(log2n_, kFFTRadix2);
+        split_real_.resize(size / 2);
+        split_imag_.resize(size / 2);
+#endif
+        // Pre-compute twiddle factors (used as fallback on non-Apple)
         twiddles_.resize(size / 2);
         for (int i = 0; i < size / 2; ++i) {
             double angle = -2.0 * pi * i / size;
@@ -21,31 +35,23 @@ public:
         }
     }
 
-    int size() const { return size_; }
-
-    // Forward FFT (time → frequency)
-    void forward(std::complex<float>* data) const {
-        bit_reverse(data);
-        for (int len = 2; len <= size_; len <<= 1) {
-            int half = len / 2;
-            int step = size_ / len;
-            for (int i = 0; i < size_; i += len) {
-                for (int j = 0; j < half; ++j) {
-                    auto w = std::complex<float>(twiddles_[j * step]);
-                    auto u = data[i + j];
-                    auto v = data[i + j + half] * w;
-                    data[i + j] = u + v;
-                    data[i + j + half] = u - v;
-                }
-            }
-        }
+    ~Fft() {
+#if PULP_FFT_HAS_VDSP
+        if (vdsp_setup_) vDSP_destroy_fftsetup(vdsp_setup_);
+#endif
     }
 
-    // Inverse FFT (frequency → time)
+    int size() const { return size_; }
+
+    // Forward FFT (time → frequency) — complex in-place
+    void forward(std::complex<float>* data) const {
+        forward_fallback(data);
+    }
+
+    // Inverse FFT (frequency → time) — complex in-place
     void inverse(std::complex<float>* data) const {
-        // Conjugate, forward FFT, conjugate, scale
         for (int i = 0; i < size_; ++i) data[i] = std::conj(data[i]);
-        forward(data);
+        forward_fallback(data);
         float scale = 1.0f / size_;
         for (int i = 0; i < size_; ++i) data[i] = std::conj(data[i]) * scale;
     }
@@ -76,6 +82,29 @@ private:
     static constexpr double pi = 3.14159265358979323846;
     int size_;
     std::vector<std::complex<double>> twiddles_;
+#if PULP_FFT_HAS_VDSP
+    int log2n_ = 0;
+    FFTSetup vdsp_setup_ = nullptr;
+    mutable std::vector<float> split_real_;
+    mutable std::vector<float> split_imag_;
+#endif
+
+    void forward_fallback(std::complex<float>* data) const {
+        bit_reverse(data);
+        for (int len = 2; len <= size_; len <<= 1) {
+            int half = len / 2;
+            int step = size_ / len;
+            for (int i = 0; i < size_; i += len) {
+                for (int j = 0; j < half; ++j) {
+                    auto w = std::complex<float>(twiddles_[j * step]);
+                    auto u = data[i + j];
+                    auto v = data[i + j + half] * w;
+                    data[i + j] = u + v;
+                    data[i + j + half] = u - v;
+                }
+            }
+        }
+    }
 
     void bit_reverse(std::complex<float>* data) const {
         int bits = 0;
