@@ -2991,29 +2991,27 @@ static int cmd_cache(const std::vector<std::string>& args) {
         }
 
         auto platform = detect_platform();
-        std::string skia_tarball = "skia-" + platform + ".tar.gz";
-        auto skia_cache = cache_dir / skia_tarball;
+        std::string sdk_tarball_name = "pulp-sdk-" + platform + ".tar.gz";
+        auto sdk_cache = cache_dir / sdk_tarball_name;
 
-        if (fs::exists(skia_cache)) {
-            std::cout << "Skia binaries already cached at " << skia_cache.string() << "\n";
+        if (fs::exists(sdk_cache)) {
+            std::cout << "SDK (includes Skia) already cached at " << sdk_cache.string() << "\n";
             return 0;
         }
 
         fs::create_directories(cache_dir);
-
-        // Download Skia binaries from the Pulp release
         std::string url = "https://github.com/" + std::string(PULP_GITHUB_REPO)
                         + "/releases/download/v" + std::string(PULP_SDK_VERSION)
-                        + "/" + skia_tarball;
+                        + "/" + sdk_tarball_name;
 
         std::cout << "Downloading Skia binaries for " << platform << "...\n";
 
         std::string download_cmd;
 #ifdef _WIN32
         download_cmd = "powershell -Command \"Invoke-WebRequest -Uri '" + url
-                     + "' -OutFile '" + skia_cache.string() + "'\"";
+                     + "' -OutFile '" + sdk_cache.string() + "'\"";
 #else
-        download_cmd = "curl -fSL -o " + skia_cache.string() + " " + url;
+        download_cmd = "curl -fSL -o " + sdk_cache.string() + " " + url;
 #endif
 
         int rc = run_with_spinner(download_cmd, "Downloading Skia");
@@ -3021,11 +3019,11 @@ static int cmd_cache(const std::vector<std::string>& args) {
             std::cerr << "Error: failed to download Skia binaries.\n";
             std::cerr << "  URL: " << url << "\n";
             std::cerr << "  Skia may not be available for this platform/version.\n";
-            fs::remove(skia_cache);
+            fs::remove(sdk_cache);
             return 1;
         }
 
-        print_ok("Skia binaries cached at " + skia_cache.string());
+        print_ok("Skia binaries cached at " + sdk_cache.string());
         return 0;
     }
 
