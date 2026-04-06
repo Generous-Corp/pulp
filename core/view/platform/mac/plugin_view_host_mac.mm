@@ -64,7 +64,7 @@
 
 @implementation PulpPluginView
 
-- (BOOL)isFlipped { return YES; }
+- (BOOL)isFlipped { return NO; }
 - (BOOL)isAccessibilityElement { return YES; }
 - (NSAccessibilityRole)accessibilityRole { return NSAccessibilityGroupRole; }
 - (NSString*)accessibilityLabel { return @"Plugin UI"; }
@@ -217,7 +217,7 @@ private:
     return self;
 }
 
-- (BOOL)isFlipped { return YES; }
+- (BOOL)isFlipped { return NO; }
 
 - (void)setFrameSize:(NSSize)newSize {
     [super setFrameSize:newSize];

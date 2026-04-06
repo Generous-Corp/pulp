@@ -679,8 +679,25 @@ function __createMockGPUQueue(init) {
         var sliceSize = size == null ? source.length - sliceOffset : size;
         buffer._bytes.set(source.slice(sliceOffset, sliceOffset + sliceSize), begin);
     };
-    queue.writeTexture = function() {};
-    queue.copyExternalImageToTexture = function() {};
+    queue.writeTexture = function(destination, data, dataLayout, size) {
+        if (!destination || !destination.texture) return;
+        var texture = destination.texture;
+        var source = __toUint8Array(data);
+        texture._bytes = source;
+        texture._bytesPerRow = dataLayout && dataLayout.bytesPerRow ? dataLayout.bytesPerRow : 0;
+        texture._rowsPerImage = dataLayout && dataLayout.rowsPerImage ? dataLayout.rowsPerImage : (size && size[1] ? size[1] : texture.height || 1);
+    };
+    queue.copyExternalImageToTexture = function(source, destination, copySize) {
+        if (!source || !destination || !destination.texture) return;
+        var imageBitmap = source.source;
+        if (!imageBitmap || !imageBitmap._decodedPixels) return;
+        var texture = destination.texture;
+        texture._bytes = imageBitmap._decodedPixels;
+        texture._bytesPerRow = imageBitmap.width * 4;
+        texture._rowsPerImage = imageBitmap.height;
+        texture.width = imageBitmap.width;
+        texture.height = imageBitmap.height;
+    };
     queue.onSubmittedWorkDone = function() {
         return Promise.resolve(undefined);
     };
@@ -1080,6 +1097,39 @@ PulpResponse.prototype.clone = function() {
 var __PulpResponse = typeof globalThis.Response !== "undefined" ? globalThis.Response : PulpResponse;
 if (typeof globalThis.Response === "undefined") {
     globalThis.Response = __PulpResponse;
+}
+
+function createImageBitmap(source) {
+    var bytes;
+    if (source && source._bytes) {
+        bytes = source._bytes;
+    } else if (source instanceof ArrayBuffer) {
+        bytes = new Uint8Array(source);
+    } else if (source instanceof Uint8Array) {
+        bytes = source;
+    } else {
+        return Promise.reject(new Error("createImageBitmap: unsupported source type"));
+    }
+
+    if (typeof __decodeImageDataImpl === "function") {
+        var payload = JSON.stringify({ data: Array.from(bytes) });
+        var result = __decodeImageDataImpl(payload);
+        if (result && result.ok) {
+            var bitmap = {
+                width: result.width,
+                height: result.height,
+                _decodedPixels: new Uint8Array(result.pixels),
+                close: function() {}
+            };
+            return Promise.resolve(bitmap);
+        }
+        return Promise.reject(new Error("createImageBitmap: failed to decode image"));
+    }
+
+    return Promise.reject(new Error("createImageBitmap: no native decoder available"));
+}
+if (typeof globalThis.createImageBitmap === "undefined") {
+    globalThis.createImageBitmap = createImageBitmap;
 }
 
 function PulpURL(url) {

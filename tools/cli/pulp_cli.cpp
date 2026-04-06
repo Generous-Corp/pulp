@@ -3217,6 +3217,30 @@ static int cmd_run(const std::vector<std::string>& args) {
     fs::path binary;
     auto app_search_root = standalone_mode ? (build_dir / "bin") : (build_dir / "examples");
 
+    // On macOS, also check for .app bundles in the build directory
+#ifdef __APPLE__
+    auto find_app_bundle = [&](const fs::path& search_dir) -> fs::path {
+        if (!fs::exists(search_dir)) return {};
+        for (auto& entry : fs::directory_iterator(search_dir)) {
+            if (!entry.is_directory()) continue;
+            auto name = entry.path().filename().string();
+            if (name.size() > 4 && name.substr(name.size() - 4) == ".app") {
+                auto macos_dir = entry.path() / "Contents" / "MacOS";
+                if (fs::exists(macos_dir)) {
+                    for (auto& exec_entry : fs::directory_iterator(macos_dir)) {
+                        if (!exec_entry.is_regular_file()) continue;
+                        auto st = fs::status(exec_entry.path());
+                        if ((st.permissions() & fs::perms::owner_exec) != fs::perms::none) {
+                            return exec_entry.path();
+                        }
+                    }
+                }
+            }
+        }
+        return {};
+    };
+#endif
+
     if (!target_name.empty()) {
         // Search for the named target
         if (standalone_mode) {
@@ -3294,6 +3318,17 @@ static int cmd_run(const std::vector<std::string>& args) {
                 if (!binary.empty()) break;
             }
         }
+        // Fallback: search for .app bundles on macOS
+#ifdef __APPLE__
+        if (binary.empty()) {
+            binary = find_app_bundle(build_dir);
+            // found .app bundle
+        }
+        if (binary.empty()) {
+            binary = find_app_bundle(app_search_root);
+            // found .app bundle
+        }
+#endif
         if (binary.empty()) {
             std::cerr << "Error: no standalone binary found in " << app_search_root.string() << "\n";
             std::cerr << "  Create one with: pulp create MyApp --type app\n";

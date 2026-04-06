@@ -65,7 +65,9 @@ private:
     TestSignalSource test_signal_;
     view::AudioBridge input_meter_bridge_;
     audio::Buffer<float> test_buffer_;        // Pre-allocated for audio callback
+    audio::Buffer<float> silence_buffer_;    // Pre-allocated silence for missing input
     std::vector<float*> test_ptrs_;           // Pre-allocated channel pointers
+    std::vector<const float*> silence_ptrs_;  // Pre-allocated silence channel pointers
     std::vector<const float*> meter_ptrs_;    // Pre-allocated for meter analysis
 };
 

@@ -27,7 +27,8 @@ std::string generate_nsis_script(const InstallerConfig& config) {
     nsi << "OutFile \"" << config.output_path << "\"\n";
     nsi << "InstallDir \"" << install_root << "\\" << config.publisher
         << "\\" << config.product_name << "\"\n";
-    nsi << "InstallDirRegKey HKCU \"Software\\" << config.publisher
+    std::string reg_hive = config.per_user_install ? "HKCU" : "HKLM";
+    nsi << "InstallDirRegKey " << reg_hive << " \"Software\\" << config.publisher
         << "\\" << config.product_name << "\" \"\"\n";
 
     if (config.per_user_install) {
@@ -57,6 +58,7 @@ std::string generate_nsis_script(const InstallerConfig& config) {
     if (!config.license_path.empty()) {
         nsi << "!insertmacro MUI_PAGE_LICENSE \"" << config.license_path << "\"\n";
     }
+    nsi << "!insertmacro MUI_PAGE_DIRECTORY\n";
     nsi << "!insertmacro MUI_PAGE_COMPONENTS\n";
     nsi << "!insertmacro MUI_PAGE_INSTFILES\n";
     nsi << "!insertmacro MUI_PAGE_FINISH\n\n";
@@ -119,20 +121,22 @@ std::string generate_nsis_script(const InstallerConfig& config) {
     }
     nsi << "  Delete \"$INSTDIR\\uninstall.exe\"\n";
     nsi << "  RMDir \"$INSTDIR\"\n";
-    nsi << "  DeleteRegKey HKCU \"Software\\" << config.publisher
+    nsi << "  DeleteRegKey " << reg_hive << " \"Software\\" << config.publisher
         << "\\" << config.product_name << "\"\n";
+    nsi << "  DeleteRegKey " << reg_hive << " \"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\"
+        << config.product_name << "\"\n";
     nsi << "SectionEnd\n\n";
 
     // Write uninstaller during install
     nsi << "Section \"-Post\"\n";
     nsi << "  WriteUninstaller \"$INSTDIR\\uninstall.exe\"\n";
-    nsi << "  WriteRegStr HKCU \"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\"
+    nsi << "  WriteRegStr " << reg_hive << " \"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\"
         << config.product_name << "\" \"DisplayName\" \"" << config.product_name << "\"\n";
-    nsi << "  WriteRegStr HKCU \"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\"
+    nsi << "  WriteRegStr " << reg_hive << " \"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\"
         << config.product_name << "\" \"UninstallString\" \"$INSTDIR\\uninstall.exe\"\n";
-    nsi << "  WriteRegStr HKCU \"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\"
+    nsi << "  WriteRegStr " << reg_hive << " \"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\"
         << config.product_name << "\" \"DisplayVersion\" \"" << config.version << "\"\n";
-    nsi << "  WriteRegStr HKCU \"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\"
+    nsi << "  WriteRegStr " << reg_hive << " \"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\"
         << config.product_name << "\" \"Publisher\" \"" << config.publisher << "\"\n";
     nsi << "SectionEnd\n";
 

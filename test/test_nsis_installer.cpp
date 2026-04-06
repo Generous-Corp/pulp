@@ -55,13 +55,31 @@ TEST_CASE("NSIS script per-user install uses LOCALAPPDATA", "[ship][installer]")
     REQUIRE_THAT(script, ContainsSubstring("RequestExecutionLevel user"));
 }
 
-TEST_CASE("NSIS script admin install uses PROGRAMFILES", "[ship][installer]") {
+TEST_CASE("NSIS script admin install uses PROGRAMFILES and HKLM", "[ship][installer]") {
     auto config = make_test_config();
     config.per_user_install = false;
     auto script = generate_nsis_script(config);
 
     REQUIRE_THAT(script, ContainsSubstring("$PROGRAMFILES"));
     REQUIRE_THAT(script, ContainsSubstring("RequestExecutionLevel admin"));
+    REQUIRE_THAT(script, ContainsSubstring("InstallDirRegKey HKLM"));
+    REQUIRE_THAT(script, ContainsSubstring("WriteRegStr HKLM"));
+}
+
+TEST_CASE("NSIS script per-user install uses HKCU registry", "[ship][installer]") {
+    auto config = make_test_config();
+    config.per_user_install = true;
+    auto script = generate_nsis_script(config);
+
+    REQUIRE_THAT(script, ContainsSubstring("InstallDirRegKey HKCU"));
+    REQUIRE_THAT(script, ContainsSubstring("WriteRegStr HKCU"));
+}
+
+TEST_CASE("NSIS script includes directory selection page", "[ship][installer]") {
+    auto config = make_test_config();
+    auto script = generate_nsis_script(config);
+
+    REQUIRE_THAT(script, ContainsSubstring("MUI_PAGE_DIRECTORY"));
 }
 
 TEST_CASE("NSIS script includes license page when path set", "[ship][installer]") {

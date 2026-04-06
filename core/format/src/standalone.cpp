@@ -66,6 +66,13 @@ bool StandaloneApp::start() {
         test_ptrs_[static_cast<size_t>(c)] = test_buffer_.view().channel_ptr(static_cast<size_t>(c));
     meter_ptrs_.resize(static_cast<size_t>(std::max(test_ch, config_.input_channels)));
 
+    // Pre-allocate silence buffer for when no input device is available
+    int silence_ch = std::max(config_.output_channels, 2);
+    silence_buffer_.resize(static_cast<size_t>(silence_ch), static_cast<size_t>(config_.buffer_size));
+    silence_ptrs_.resize(static_cast<size_t>(silence_ch));
+    for (int c = 0; c < silence_ch; ++c)
+        silence_ptrs_[static_cast<size_t>(c)] = silence_buffer_.view().channel_ptr(static_cast<size_t>(c));
+
     // Set up MIDI input (optional)
     if (desc.accepts_midi) {
         midi_system_ = midi::create_midi_system();
@@ -110,6 +117,15 @@ bool StandaloneApp::start() {
                 const_cast<const float* const*>(test_ptrs_.data()),
                 test_ptrs_.size(), static_cast<size_t>(ctx.buffer_size));
             actual_input = &test_input_view;
+        }
+
+        // Provide silence when no input is available (prevents null-channel crash)
+        audio::BufferView<const float> silence_view;
+        if (actual_input->num_channels() == 0) {
+            silence_view = audio::BufferView<const float>(
+                silence_ptrs_.data(), silence_ptrs_.size(),
+                static_cast<size_t>(ctx.buffer_size));
+            actual_input = &silence_view;
         }
 
         // Push input meter data using pre-allocated pointer array

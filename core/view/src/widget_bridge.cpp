@@ -30,6 +30,11 @@
 
 #ifdef PULP_HAS_SKIA
 #include "webgpu/webgpu_cpp.h"
+#include "include/core/SkData.h"
+#include "include/core/SkImage.h"
+#include "include/core/SkPixmap.h"
+#include "include/core/SkImageInfo.h"
+#include "include/gpu/graphite/Image.h"
 #endif
 
 #if defined(_WIN32)
@@ -3714,6 +3719,52 @@ void WidgetBridge::register_api() {
         state.configured = true;
         return choc::value::createString(texture_id);
 #endif
+    });
+
+    engine_.register_function("__decodeImageDataImpl", [](choc::javascript::ArgumentList args) {
+        auto result = choc::value::createObject("");
+        result.addMember("ok", choc::value::createBool(false));
+
+#ifdef PULP_HAS_SKIA
+        auto payload_json = args.get<std::string>(0, "");
+        if (payload_json.empty()) return result;
+
+        choc::value::Value payload;
+        try {
+            payload = choc::json::parse(payload_json);
+        } catch (...) {
+            return result;
+        }
+
+        if (!payload.hasObjectMember("data")) return result;
+        auto encoded_bytes = json_bytes_to_vector(payload["data"]);
+        if (encoded_bytes.empty()) return result;
+
+        auto sk_data = SkData::MakeWithoutCopy(encoded_bytes.data(), encoded_bytes.size());
+        auto image = SkImages::DeferredFromEncodedData(sk_data);
+        if (!image) return result;
+
+        auto width = image->width();
+        auto height = image->height();
+        if (width <= 0 || height <= 0) return result;
+
+        auto info = SkImageInfo::Make(width, height, kRGBA_8888_SkColorType, kUnpremul_SkAlphaType);
+        std::vector<uint8_t> pixels(static_cast<size_t>(width) * height * 4);
+        if (!image->readPixels(info, pixels.data(), static_cast<size_t>(width) * 4, 0, 0)) {
+            return result;
+        }
+
+        auto pixel_array = choc::value::createEmptyArray();
+        for (auto byte : pixels) {
+            pixel_array.addArrayElement(choc::value::createInt32(static_cast<int32_t>(byte)));
+        }
+
+        result.setMember("ok", choc::value::createBool(true));
+        result.addMember("width", choc::value::createInt32(width));
+        result.addMember("height", choc::value::createInt32(height));
+        result.addMember("pixels", pixel_array);
+#endif
+        return result;
     });
 
     engine_.register_function("__gpuDestroyTextureImpl", [this](choc::javascript::ArgumentList args) {
