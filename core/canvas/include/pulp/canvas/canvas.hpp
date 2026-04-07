@@ -382,6 +382,8 @@ public:
         float squircle_power = 4.0f;  ///< For squircle (higher = more rectangular)
         float inner_radius = 0.5f;    ///< For ring (fraction of outer radius)
         float arm_width = 0.3f;       ///< For cross (fraction of half-size)
+        float bezier_cx = 0.0f;       ///< For quadratic_bezier: control point X (normalized -1..1)
+        float bezier_cy = -1.0f;      ///< For quadratic_bezier: control point Y (normalized -1..1)
     };
 
     virtual void draw_sdf_shape(SDFShape shape, float x, float y, float w, float h,

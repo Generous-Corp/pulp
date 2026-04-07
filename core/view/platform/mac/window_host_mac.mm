@@ -1317,6 +1317,35 @@ public:
             [window_ setContentAspectRatio:NSMakeSize(ratio, 1.0)];
     }
 
+    void set_client_decoration(bool enabled) override {
+        if (!window_) return;
+        if (enabled) {
+            [window_ setTitlebarAppearsTransparent:YES];
+            [window_ setTitleVisibility:NSWindowTitleHidden];
+            [window_ setStyleMask:[window_ styleMask] | NSWindowStyleMaskFullSizeContentView];
+        } else {
+            [window_ setTitlebarAppearsTransparent:NO];
+            [window_ setTitleVisibility:NSWindowTitleVisible];
+            [window_ setStyleMask:[window_ styleMask] & ~NSWindowStyleMaskFullSizeContentView];
+        }
+    }
+
+    std::vector<MonitorInfo> get_monitors() const override {
+        std::vector<MonitorInfo> monitors;
+        for (NSScreen* screen in [NSScreen screens]) {
+            NSRect frame = [screen frame];
+            MonitorInfo info;
+            info.bounds = {static_cast<float>(frame.origin.x),
+                           static_cast<float>(frame.origin.y),
+                           static_cast<float>(frame.size.width),
+                           static_cast<float>(frame.size.height)};
+            info.dpi_scale = static_cast<float>([screen backingScaleFactor]);
+            info.name = std::string([[screen localizedName] UTF8String]);
+            monitors.push_back(info);
+        }
+        return monitors;
+    }
+
 private:
     View& root_;
     FrameClock frame_clock_;

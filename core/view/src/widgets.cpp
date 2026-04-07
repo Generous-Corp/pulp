@@ -1046,36 +1046,24 @@ void SpectrumView::paint(canvas::Canvas& canvas) {
             canvas.fill_rect(x, b.height - bar_h, std::max(bar_width - 1, 1.0f), bar_h);
         }
     } else {
-        // Line or filled style
-        canvas.set_stroke_color(spectrum_color);
-        canvas.set_line_width(1.5f);
+        // Line or filled style — use GPU waveform shader for anti-aliased rendering
+        auto fill = resolve_color("waveform.fill", canvas::Color::rgba(spectrum_color.r, spectrum_color.g, spectrum_color.b, 60.0f/255.0f));
 
-        float step = b.width / static_cast<float>(bins_.size() - 1);
-
-        // Draw as connected line segments
-        for (size_t i = 0; i + 1 < bins_.size(); ++i) {
-            float norm0 = std::clamp((bins_[i] - min_db_) / db_range, 0.0f, 1.0f);
-            float norm1 = std::clamp((bins_[i + 1] - min_db_) / db_range, 0.0f, 1.0f);
-            float x0 = i * step;
-            float x1 = (i + 1) * step;
-            float y0 = b.height - norm0 * b.height;
-            float y1 = b.height - norm1 * b.height;
-            canvas.stroke_line(x0, y0, x1, y1);
+        // Normalize dB values to -1..1 for the waveform shader (0 dB → top, min_db → bottom)
+        std::vector<float> normalized(bins_.size());
+        for (size_t i = 0; i < bins_.size(); ++i) {
+            float norm = std::clamp((bins_[i] - min_db_) / db_range, 0.0f, 1.0f);
+            normalized[i] = norm * 2.0f - 1.0f;  // Map 0..1 → -1..1
         }
 
-        // For filled style, also fill below the line
-        if (style_ == Style::filled) {
-            auto fill = resolve_color("waveform.fill", canvas::Color::rgba(spectrum_color.r, spectrum_color.g, spectrum_color.b, 60.0f/255.0f));
-            canvas.set_fill_color(fill);
+        canvas::Canvas::WaveformStyle ws;
+        ws.line_color = spectrum_color;
+        ws.fill_color = fill;
+        ws.line_thickness = 1.5f;
+        ws.show_fill = (style_ == Style::filled);
+        ws.fill_center = 1.0f;  // Fill from bottom
 
-            for (size_t i = 0; i < bins_.size(); ++i) {
-                float norm = std::clamp((bins_[i] - min_db_) / db_range, 0.0f, 1.0f);
-                float x = i * step;
-                float y = b.height - norm * b.height;
-                float bar_w = step > 1 ? step : 1;
-                canvas.fill_rect(x, y, bar_w, b.height - y);
-            }
-        }
+        canvas.draw_waveform(normalized.data(), normalized.size(), 0, 0, b.width, b.height, ws);
     }
 
     // Frequency grid lines (approximate positions)

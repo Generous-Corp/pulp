@@ -162,6 +162,89 @@ private:
     int max_rows_ = 512;
 };
 
+/// Glyph atlas — per-font-size glyph cache as GPU texture.
+/// Skia manages its own internal glyph cache via SkStrike, so this atlas
+/// is a supplementary cache for custom text rendering paths (e.g., SDF text).
+class GlyphAtlas {
+public:
+    struct Entry {
+        AtlasPacker::Region region;
+        uint64_t last_used = 0;
+    };
+
+    explicit GlyphAtlas(int size = 1024) : packer_(size, size) {}
+
+    bool allocate(uint64_t glyph_key, int w, int h, AtlasPacker::Region& out) {
+        auto it = entries_.find(glyph_key);
+        if (it != entries_.end()) { out = it->second.region; return true; }
+        if (!packer_.allocate(w, h, out)) return false;
+        entries_[glyph_key] = {out, 0};
+        return true;
+    }
+
+    void mark_used(uint64_t key, uint64_t frame) {
+        auto it = entries_.find(key);
+        if (it != entries_.end()) it->second.last_used = frame;
+    }
+
+    size_t evict_stale(uint64_t current_frame, uint64_t max_age = 300) {
+        size_t evicted = 0;
+        for (auto it = entries_.begin(); it != entries_.end(); ) {
+            if (current_frame - it->second.last_used > max_age) {
+                it = entries_.erase(it); ++evicted;
+            } else { ++it; }
+        }
+        return evicted;
+    }
+
+    size_t entry_count() const { return entries_.size(); }
+
+private:
+    AtlasPacker packer_;
+    std::unordered_map<uint64_t, Entry> entries_;
+};
+
+/// Path atlas — caches rasterized vector paths (e.g., complex SVG icons).
+/// Paths are keyed by a hash of path data + transform.
+class PathAtlas {
+public:
+    struct Entry {
+        AtlasPacker::Region region;
+        uint64_t last_used = 0;
+    };
+
+    explicit PathAtlas(int size = 2048) : packer_(size, size) {}
+
+    bool allocate(uint64_t path_hash, int w, int h, AtlasPacker::Region& out) {
+        auto it = entries_.find(path_hash);
+        if (it != entries_.end()) { out = it->second.region; return true; }
+        if (!packer_.allocate(w, h, out)) return false;
+        entries_[path_hash] = {out, 0};
+        return true;
+    }
+
+    void mark_used(uint64_t key, uint64_t frame) {
+        auto it = entries_.find(key);
+        if (it != entries_.end()) it->second.last_used = frame;
+    }
+
+    size_t evict_stale(uint64_t current_frame, uint64_t max_age = 600) {
+        size_t evicted = 0;
+        for (auto it = entries_.begin(); it != entries_.end(); ) {
+            if (current_frame - it->second.last_used > max_age) {
+                it = entries_.erase(it); ++evicted;
+            } else { ++it; }
+        }
+        return evicted;
+    }
+
+    size_t entry_count() const { return entries_.size(); }
+
+private:
+    AtlasPacker packer_;
+    std::unordered_map<uint64_t, Entry> entries_;
+};
+
 /// Buffer pool — reuses std::vector allocations in hot rendering paths.
 template <typename T>
 class BufferPool {

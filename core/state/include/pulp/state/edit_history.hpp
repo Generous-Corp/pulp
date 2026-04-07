@@ -40,8 +40,17 @@ public:
     explicit EditHistory(size_t max_depth = 100) : max_depth_(max_depth) {}
 
     /// Execute an action and add it to the history.
+    /// If coalescing is enabled and the last action has the same description,
+    /// replaces it (merging rapid small changes into one undo step).
     void perform(std::unique_ptr<EditAction> action) {
         action->redo();
+        // Coalesce: if same description as last action, replace it
+        if (coalesce_ && !undo_stack_.empty() &&
+            !action->description().empty() &&
+            undo_stack_.back()->description() == action->description()) {
+            undo_stack_.back() = std::move(action);
+            return;
+        }
         // Clear any redo actions
         redo_stack_.clear();
         undo_stack_.push_back(std::move(action));
@@ -49,6 +58,9 @@ public:
         while (undo_stack_.size() > max_depth_)
             undo_stack_.erase(undo_stack_.begin());
     }
+
+    /// Enable/disable coalescing (merge rapid changes with same description).
+    void set_coalesce(bool enabled) { coalesce_ = enabled; }
 
     /// Convenience: perform a lambda-based action.
     void perform(std::function<void()> do_fn, std::function<void()> undo_fn,
@@ -99,6 +111,7 @@ private:
     std::vector<std::unique_ptr<EditAction>> undo_stack_;
     std::vector<std::unique_ptr<EditAction>> redo_stack_;
     size_t max_depth_;
+    bool coalesce_ = true;  ///< Merge rapid changes with same description
 };
 
 } // namespace pulp::state

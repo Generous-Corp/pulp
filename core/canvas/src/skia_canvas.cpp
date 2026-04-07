@@ -395,6 +395,8 @@ static const char* kSDFShapeSkSL = R"(
     uniform float squirclePower;
     uniform float innerRadius;
     uniform float armWidth;
+    uniform float bezierCX;
+    uniform float bezierCY;
     uniform half4 fillColor;
     uniform half4 strokeColor;
 
@@ -539,9 +541,9 @@ static const char* kSDFShapeSkSL = R"(
             float innerR = r * innerRadius;
             d = sdFlatArc(p, outerR, innerR, arcStart, arcSweep);       // 12: flat arc
         } else {
-            // 13: quadratic bezier — control points derived from shape bounds
+            // 13: quadratic bezier — control point from uniform parameters
             float2 a = float2(-halfSize.x, halfSize.y);
-            float2 b = float2(0, -halfSize.y);
+            float2 b = float2(bezierCX * halfSize.x, bezierCY * halfSize.y);
             float2 c = float2(halfSize.x, halfSize.y);
             d = sdQuadBezier(p, a, b, c, max(strokeWidth, 2.0));        // 13: quadratic bezier
         }
@@ -580,6 +582,8 @@ void SkiaCanvas::draw_sdf_shape(SDFShape shape, float x, float y, float w, float
     builder.uniform("squirclePower") = style.squircle_power;
     builder.uniform("innerRadius") = style.inner_radius;
     builder.uniform("armWidth") = style.arm_width;
+    builder.uniform("bezierCX") = style.bezier_cx;
+    builder.uniform("bezierCY") = style.bezier_cy;
     builder.uniform("fillColor") = SkV4{
         style.fill_color.r, style.fill_color.g,
         style.fill_color.b, style.fill_color.a};
