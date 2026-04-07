@@ -51,6 +51,11 @@ add_executable(pulp-test-sync test_sync_primitives.cpp)
 target_link_libraries(pulp-test-sync PRIVATE pulp::runtime Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-sync)
 
+# SIMD operations and aligned buffer tests
+add_executable(pulp-test-simd test_simd.cpp)
+target_link_libraries(pulp-test-simd PRIVATE pulp::runtime pulp::signal Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-simd)
+
 # Drag-and-drop tests
 add_executable(pulp-test-dnd test_drag_drop.cpp)
 target_link_libraries(pulp-test-dnd PRIVATE pulp::view Catch2::Catch2WithMain)

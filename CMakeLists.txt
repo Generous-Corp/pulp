@@ -244,6 +244,23 @@ FetchContent_MakeAvailable(yoga)
 set(PULP_HAS_YOGA TRUE)
 message(STATUS "Pulp: Yoga layout engine enabled")
 
+# Google Highway (Apache 2.0) — portable SIMD abstraction (SSE/NEON/AVX)
+set(HWY_ENABLE_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(HWY_ENABLE_TESTS OFF CACHE BOOL "" FORCE)
+set(HWY_ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
+set(HWY_ENABLE_CONTRIB OFF CACHE BOOL "" FORCE)
+set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
+pulp_register_fetchcontent_source(highway REF 1.2.0)
+FetchContent_Declare(
+    highway
+    GIT_REPOSITORY https://github.com/google/highway.git
+    GIT_TAG 1.2.0
+    GIT_SHALLOW TRUE
+)
+FetchContent_MakeAvailable(highway)
+set(PULP_HAS_HIGHWAY TRUE)
+message(STATUS "Pulp: Highway SIMD library enabled")
+
 # three.js (MIT license) — native WebGPU bridge demos and tests
 if(PULP_BUILD_TESTS AND PULP_ENABLE_GPU)
     pulp_register_fetchcontent_source(threejs REF 077dd13c0e869d9f3dbe55875686f920367de457)
@@ -453,6 +470,13 @@ if(TARGET yogacore)
             DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
         )
     endif()
+endif()
+if(TARGET hwy)
+    install(TARGETS hwy
+        EXPORT PulpTargets
+        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    )
 endif()
 if(TARGET SDL3-static)
     set_target_properties(SDL3-static PROPERTIES EXPORT_NAME sdl3-static)

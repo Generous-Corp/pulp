@@ -92,6 +92,23 @@
       ]
     },
     {
+      "name": "Highway",
+      "category": "runtime",
+      "license": "Apache-2.0",
+      "version": "1.2.0",
+      "source_kind": "fetchcontent",
+      "repository": "https://github.com/google/highway.git",
+      "upstream": { "kind": "git-tag", "ref": "1.2.0" },
+      "documented_in_dependencies_md": true,
+      "documented_in_notice_md": true,
+      "source_files": [
+        "CMakeLists.txt",
+        "core/runtime/CMakeLists.txt",
+        "core/runtime/include/pulp/runtime/simd.hpp",
+        "core/runtime/src/simd.cpp"
+      ]
+    },
+    {
       "name": "LV2",
       "category": "format-sdk",
       "license": "ISC",
