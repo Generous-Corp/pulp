@@ -1377,9 +1377,9 @@ std::string export_w3c_tokens(const Theme& theme) {
 
         char buf[10];
         if (color.a8() == 255)
-            snprintf(buf, sizeof(buf), "#%02x%02x%02x", color.r, color.g, color.b);
+            snprintf(buf, sizeof(buf), "#%02x%02x%02x", color.r8(), color.g8(), color.b8());
         else
-            snprintf(buf, sizeof(buf), "#%02x%02x%02x%02x", color.r, color.g, color.b, color.a);
+            snprintf(buf, sizeof(buf), "#%02x%02x%02x%02x", color.r8(), color.g8(), color.b8(), color.a8());
 
         color_groups[group].emplace_back(key, buf);
     }
@@ -1455,9 +1455,9 @@ IRTokens theme_to_ir_tokens(const Theme& theme) {
     for (auto& [name, color] : theme.colors) {
         char buf[10];
         if (color.a8() == 255)
-            snprintf(buf, sizeof(buf), "#%02x%02x%02x", color.r, color.g, color.b);
+            snprintf(buf, sizeof(buf), "#%02x%02x%02x", color.r8(), color.g8(), color.b8());
         else
-            snprintf(buf, sizeof(buf), "#%02x%02x%02x%02x", color.r, color.g, color.b, color.a);
+            snprintf(buf, sizeof(buf), "#%02x%02x%02x%02x", color.r8(), color.g8(), color.b8(), color.a8());
         tokens.colors[name] = buf;
     }
     tokens.dimensions = theme.dimensions;
@@ -1537,9 +1537,9 @@ std::string export_figma_variables(const Theme& theme) {
     for (auto& [name, color] : theme.colors) {
         char buf[10];
         if (color.a8() == 255)
-            snprintf(buf, sizeof(buf), "#%02x%02x%02x", color.r, color.g, color.b);
+            snprintf(buf, sizeof(buf), "#%02x%02x%02x", color.r8(), color.g8(), color.b8());
         else
-            snprintf(buf, sizeof(buf), "#%02x%02x%02x%02x", color.r, color.g, color.b, color.a);
+            snprintf(buf, sizeof(buf), "#%02x%02x%02x%02x", color.r8(), color.g8(), color.b8(), color.a8());
         emit(name, "COLOR", buf);
     }
     for (auto& [name, value] : theme.dimensions) {
@@ -1620,9 +1620,9 @@ std::string export_stitch_design_system(const Theme& theme) {
         if (key.substr(0, 6) == "color.") key = key.substr(6);
         char buf[10];
         if (color.a8() == 255)
-            snprintf(buf, sizeof(buf), "#%02x%02x%02x", color.r, color.g, color.b);
+            snprintf(buf, sizeof(buf), "#%02x%02x%02x", color.r8(), color.g8(), color.b8());
         else
-            snprintf(buf, sizeof(buf), "#%02x%02x%02x%02x", color.r, color.g, color.b, color.a);
+            snprintf(buf, sizeof(buf), "#%02x%02x%02x%02x", color.r8(), color.g8(), color.b8(), color.a8());
         ss << "    \"" << key << "\": \"" << buf << "\"";
     }
     ss << "\n  },\n";

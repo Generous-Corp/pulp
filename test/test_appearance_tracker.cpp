@@ -73,8 +73,8 @@ TEST_CASE("ThemeManager lock specific theme", "[view][appearance]") {
     mgr.lock_theme(custom);
 
     REQUIRE(mgr.is_locked());
-    REQUIRE(mgr.active_theme().color("bg.primary")->r == 0xFF);
-    REQUIRE(mgr.active_theme().color("bg.primary")->g == 0x00);
+    REQUIRE(mgr.active_theme().color("bg.primary")->r8() == 0xFF);
+    REQUIRE(mgr.active_theme().color("bg.primary")->g8() == 0x00);
 }
 
 TEST_CASE("ThemeManager callback fires on theme change", "[view][appearance]") {

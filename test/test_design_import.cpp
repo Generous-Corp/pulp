@@ -349,9 +349,9 @@ TEST_CASE("W3C token round-trip preserves colors", "[view][import]") {
 
     // Colors should round-trip (names get prefixed by group)
     REQUIRE(restored.colors.count("bg.primary") == 1);
-    REQUIRE(restored.colors["bg.primary"].r == original.colors["bg.primary"].r);
-    REQUIRE(restored.colors["bg.primary"].g == original.colors["bg.primary"].g);
-    REQUIRE(restored.colors["bg.primary"].b == original.colors["bg.primary"].b);
+    REQUIRE(restored.colors["bg.primary"].r8() == original.colors["bg.primary"].r8());
+    REQUIRE(restored.colors["bg.primary"].g8() == original.colors["bg.primary"].g8());
+    REQUIRE(restored.colors["bg.primary"].b8() == original.colors["bg.primary"].b8());
 }
 
 TEST_CASE("parse_w3c_tokens resolves aliases", "[view][import]") {
@@ -660,9 +660,9 @@ TEST_CASE("Figma Variables round-trip preserves colors", "[view][import]") {
     auto restored = parse_figma_variables(json);
 
     REQUIRE(restored.colors.count("color.primary") == 1);
-    REQUIRE(restored.colors["color.primary"].r == original.colors["color.primary"].r);
-    REQUIRE(restored.colors["color.primary"].g == original.colors["color.primary"].g);
-    REQUIRE(restored.colors["color.primary"].b == original.colors["color.primary"].b);
+    REQUIRE(restored.colors["color.primary"].r8() == original.colors["color.primary"].r8());
+    REQUIRE(restored.colors["color.primary"].g8() == original.colors["color.primary"].g8());
+    REQUIRE(restored.colors["color.primary"].b8() == original.colors["color.primary"].b8());
     REQUIRE(restored.dimensions["spacing.md"] == 8.0f);
 }
 

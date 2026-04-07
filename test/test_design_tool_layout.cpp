@@ -366,7 +366,7 @@ TEST_CASE("Design tool: input editors keep visible text contrast", "[design-tool
     REQUIRE(sample_input != nullptr);
 
     auto brightness = [](pulp::canvas::Color c) {
-        return static_cast<int>(c.r) + static_cast<int>(c.g) + static_cast<int>(c.b);
+        return static_cast<int>(c.r8()) + static_cast<int>(c.g8()) + static_cast<int>(c.b8());
     };
 
     auto token_fg = token_search->resolve_color("text.primary", {});
@@ -377,10 +377,10 @@ TEST_CASE("Design tool: input editors keep visible text contrast", "[design-tool
     auto sample_fg = sample_input->resolve_color("text.primary", {});
     auto sample_bg = sample_input->background_color();
 
-    REQUIRE(token_fg.a > 0);
-    REQUIRE(token_placeholder.a > 0);
-    REQUIRE(chat_fg.a > 0);
-    REQUIRE(sample_fg.a > 0);
+    REQUIRE(token_fg.a > 0.0f);
+    REQUIRE(token_placeholder.a > 0.0f);
+    REQUIRE(chat_fg.a > 0.0f);
+    REQUIRE(sample_fg.a > 0.0f);
     REQUIRE(std::abs(brightness(token_fg) - brightness(token_bg)) > 80);
     REQUIRE(std::abs(brightness(chat_fg) - brightness(chat_bg)) > 80);
     REQUIRE(std::abs(brightness(sample_fg) - brightness(sample_bg)) > 80);
@@ -1576,7 +1576,7 @@ TEST_CASE("Design tool: opposite mode lifts semantic backgrounds in light mode",
     REQUIRE(mode_selector != nullptr);
 
     auto brightness = [](pulp::canvas::Color c) {
-        return static_cast<int>(c.r) + static_cast<int>(c.g) + static_cast<int>(c.b);
+        return static_cast<int>(c.r8()) + static_cast<int>(c.g8()) + static_cast<int>(c.b8());
     };
 
     auto dark_l = engine.evaluate("OklchEngine.hexToOklch(JSON.parse(getThemeJson()).colors['bg.primary']).L").getWithDefault<double>(0.0);

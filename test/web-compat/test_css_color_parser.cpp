@@ -120,7 +120,7 @@ TEST_CASE("Color: rgba semi-transparent red", "[parser][color]") {
     setup_bg(env, "rgba(255, 0, 0, 0.5)");
     auto c = get_painted_bg(env, "box");
     REQUIRE(c.r8() == 255); REQUIRE(c.g8() == 0); REQUIRE(c.b8() == 0);
-    REQUIRE(std::abs(static_cast<int>(c.a) - 127) <= 1);
+    REQUIRE(std::abs(static_cast<int>(c.a8()) - 127) <= 1);
 }
 
 TEST_CASE("Color: rgba fully opaque", "[parser][color]") {
@@ -180,9 +180,9 @@ TEST_CASE("Color: hsl gray", "[parser][color]") {
     TestEnvironment env;
     setup_bg(env, "hsl(0, 0%, 50%)");
     auto c = get_painted_bg(env, "box");
-    REQUIRE(std::abs(static_cast<int>(c.r) - 128) <= 1);
-    REQUIRE(std::abs(static_cast<int>(c.g) - 128) <= 1);
-    REQUIRE(std::abs(static_cast<int>(c.b) - 128) <= 1);
+    REQUIRE(std::abs(static_cast<int>(c.r8()) - 128) <= 1);
+    REQUIRE(std::abs(static_cast<int>(c.g8()) - 128) <= 1);
+    REQUIRE(std::abs(static_cast<int>(c.b8()) - 128) <= 1);
 }
 
 TEST_CASE("Color: hsla semi-transparent red", "[parser][color]") {
@@ -190,7 +190,7 @@ TEST_CASE("Color: hsla semi-transparent red", "[parser][color]") {
     setup_bg(env, "hsla(0, 100%, 50%, 0.5)");
     auto c = get_painted_bg(env, "box");
     REQUIRE(c.r8() == 255);
-    REQUIRE(std::abs(static_cast<int>(c.a) - 127) <= 1);
+    REQUIRE(std::abs(static_cast<int>(c.a8()) - 127) <= 1);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -200,7 +200,7 @@ TEST_CASE("Color: hsla semi-transparent red", "[parser][color]") {
 #define COLOR_TEST(cname, er, eg, eb) \
     TEST_CASE("Color: named '" cname "'", "[parser][color][named]") { \
         TestEnvironment env; setup_bg(env, cname); auto c = get_painted_bg(env, "box"); \
-        REQUIRE(c.r == er); REQUIRE(c.g == eg); REQUIRE(c.b == eb); }
+        REQUIRE(c.r8() == er); REQUIRE(c.g8() == eg); REQUIRE(c.b8() == eb); }
 
 COLOR_TEST("black", 0, 0, 0)
 COLOR_TEST("white", 255, 255, 255)

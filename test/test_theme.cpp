@@ -67,8 +67,8 @@ TEST_CASE("Theme apply_overrides", "[view][theme]") {
 
     base.apply_overrides(overrides);
 
-    REQUIRE(base.color("bg.primary")->r == 0xFF);
-    REQUIRE(base.color("bg.primary")->g == 0x00);
+    REQUIRE(base.color("bg.primary")->r8() == 0xFF);
+    REQUIRE(base.color("bg.primary")->g8() == 0x00);
     REQUIRE_THAT(base.dimension("spacing.md").value(), WithinAbs(99.0, 0.001));
 
     // Non-overridden tokens should still be there
@@ -177,9 +177,9 @@ TEST_CASE("Theme from_json with custom tokens", "[view][theme]") {
     })";
 
     auto theme = Theme::from_json(json);
-    REQUIRE(theme.color("custom.accent")->r == 0xFF);
-    REQUIRE(theme.color("custom.accent")->g == 0x66);
-    REQUIRE(theme.color("custom.accent")->b == 0x00);
+    REQUIRE(theme.color("custom.accent")->r8() == 0xFF);
+    REQUIRE(theme.color("custom.accent")->g8() == 0x66);
+    REQUIRE(theme.color("custom.accent")->b8() == 0x00);
     REQUIRE_THAT(theme.dimension("custom.size").value(), WithinAbs(42.5, 0.001));
     REQUIRE(theme.string_token("custom.label").value() == "My Plugin");
 }

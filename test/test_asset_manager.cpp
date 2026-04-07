@@ -246,7 +246,7 @@ TEST_CASE("Theme fill_from fills missing tokens", "[view][theme][validation]") {
 
     REQUIRE(partial.is_complete());
     // Our override should be preserved
-    REQUIRE(partial.color("bg.primary")->r == 0xFF);
+    REQUIRE(partial.color("bg.primary")->r8() == 0xFF);
     // Missing tokens should come from dark
     REQUIRE(partial.color("text.primary").has_value());
 }
