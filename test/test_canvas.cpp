@@ -119,3 +119,67 @@ TEST_CASE("Color construction", "[canvas]") {
     REQUIRE(rt.b8() == 50);
     REQUIRE(rt.a8() == 180);
 }
+
+TEST_CASE("Color HSV round-trip", "[canvas][color]") {
+    // Pure red
+    auto red = Color::rgba(1.0f, 0.0f, 0.0f);
+    auto hsv = red.to_hsv();
+    REQUIRE(hsv.h == Catch::Approx(0.0f).margin(1.0f));
+    REQUIRE(hsv.s == Catch::Approx(1.0f).margin(0.01f));
+    REQUIRE(hsv.v == Catch::Approx(1.0f).margin(0.01f));
+    auto back = Color::from_hsv(hsv);
+    REQUIRE(back.r == Catch::Approx(1.0f).margin(0.01f));
+    REQUIRE(back.g == Catch::Approx(0.0f).margin(0.01f));
+
+    // Gray (zero saturation)
+    auto gray = Color::rgba(0.5f, 0.5f, 0.5f);
+    auto ghsv = gray.to_hsv();
+    REQUIRE(ghsv.s == Catch::Approx(0.0f).margin(0.01f));
+    REQUIRE(ghsv.v == Catch::Approx(0.5f).margin(0.01f));
+}
+
+TEST_CASE("Color HSL round-trip", "[canvas][color]") {
+    auto blue = Color::rgba(0.0f, 0.0f, 1.0f);
+    auto hsl = blue.to_hsl();
+    REQUIRE(hsl.h == Catch::Approx(240.0f).margin(1.0f));
+    REQUIRE(hsl.s == Catch::Approx(1.0f).margin(0.01f));
+    REQUIRE(hsl.l == Catch::Approx(0.5f).margin(0.01f));
+    auto back = Color::from_hsl(hsl);
+    REQUIRE(back.b == Catch::Approx(1.0f).margin(0.01f));
+    REQUIRE(back.r == Catch::Approx(0.0f).margin(0.01f));
+}
+
+TEST_CASE("Color OKLCH round-trip", "[canvas][color]") {
+    // White
+    auto white = Color::rgba(1.0f, 1.0f, 1.0f);
+    auto wlch = white.to_oklch();
+    REQUIRE(wlch.L == Catch::Approx(1.0f).margin(0.01f));
+    REQUIRE(wlch.C == Catch::Approx(0.0f).margin(0.01f));
+    auto wb = Color::from_oklch(wlch);
+    REQUIRE(wb.r == Catch::Approx(1.0f).margin(0.02f));
+
+    // Pure red round-trip
+    auto red = Color::rgba(1.0f, 0.0f, 0.0f);
+    auto rlch = red.to_oklch();
+    REQUIRE(rlch.L > 0.4f);
+    REQUIRE(rlch.C > 0.15f);
+    auto rb = Color::from_oklch(rlch);
+    REQUIRE(rb.r8() >= 250);  // close to 255
+    REQUIRE(rb.g8() <= 5);    // close to 0
+
+    // Black
+    auto black = Color::rgba(0.0f, 0.0f, 0.0f);
+    auto blch = black.to_oklch();
+    REQUIRE(blch.L == Catch::Approx(0.0f).margin(0.01f));
+}
+
+TEST_CASE("Color encode/decode round-trip", "[canvas][color]") {
+    auto c = Color::rgba(0.123f, 0.456f, 0.789f, 0.5f);
+    uint8_t buf[16];
+    c.encode(buf);
+    auto d = Color::decode(buf);
+    REQUIRE(d.r == Catch::Approx(c.r));
+    REQUIRE(d.g == Catch::Approx(c.g));
+    REQUIRE(d.b == Catch::Approx(c.b));
+    REQUIRE(d.a == Catch::Approx(c.a));
+}

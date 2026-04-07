@@ -8,6 +8,7 @@ target_include_directories(pulp-canvas
 )
 
 target_sources(pulp-canvas PRIVATE
+    src/color.cpp
     src/recording_canvas.cpp
     src/svg.cpp
     src/effects.cpp

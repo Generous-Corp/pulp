@@ -1,7 +1,9 @@
 #pragma once
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
+#include <cstring>
 #include <string>
 #include <vector>
 #include <variant>
@@ -30,6 +32,31 @@ struct Color {
                      static_cast<uint8_t>((rgb >> 8) & 0xFF),
                      static_cast<uint8_t>(rgb & 0xFF));
     }
+
+    // ── Color space conversions ─────────────────────────────────────
+
+    struct HSV { float h = 0, s = 0, v = 0; };
+    struct HSL { float h = 0, s = 0, l = 0; };
+    struct OKLCH { float L = 0, C = 0, h = 0; };
+
+    /// Convert to HSV (h in [0,360), s and v in [0,1])
+    HSV to_hsv() const;
+    static Color from_hsv(HSV hsv, float alpha = 1.0f);
+
+    /// Convert to HSL (h in [0,360), s and l in [0,1])
+    HSL to_hsl() const;
+    static Color from_hsl(HSL hsl, float alpha = 1.0f);
+
+    /// Convert to OKLCH (perceptually uniform, CSS Color Level 4)
+    /// L in [0,1], C in [0,~0.4], h in [0,360)
+    OKLCH to_oklch() const;
+    static Color from_oklch(OKLCH oklch, float alpha = 1.0f);
+
+    /// Serialize to compact binary (4x float LE, 16 bytes)
+    void encode(uint8_t* out) const;
+    static Color decode(const uint8_t* data);
+
+    // ── Color math ──────────────────────────────────────────────────
 
     /// Interpolate between this color and other by factor t [0,1]
     Color interpolate(const Color& other, float t) const {
