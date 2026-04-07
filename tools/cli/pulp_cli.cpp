@@ -33,6 +33,9 @@
 #include "tool_registry.hpp"
 #include "design_binding.hpp"
 #include <pulp/ship/installer.hpp>
+
+// External command — implemented in cmd_inspect.cpp
+int cmd_inspect(const std::vector<std::string>& args);
 #include <pulp/view/screenshot.hpp>
 #include <pulp/format/editor_ui.hpp>
 
@@ -4852,21 +4855,7 @@ int main(int argc, char* argv[]) {
         for (auto& arg : args) cmd += " \"" + arg + "\"";
         return run(cmd);
     }
-    if (command == "inspect") {
-        auto root = find_project_root();
-        if (root.empty()) {
-            std::cerr << "Error: not in a Pulp project directory\n";
-            return 1;
-        }
-        auto screenshot_bin = root / "build" / "tools" / "screenshot" / "pulp-screenshot";
-        if (!fs::exists(screenshot_bin)) {
-            std::cerr << "Error: pulp-screenshot not built. Run `pulp build` first.\n";
-            return 1;
-        }
-        std::string cmd = screenshot_bin.string() + " --demo";
-        for (auto& arg : args) cmd += " " + arg;
-        return run(cmd);
-    }
+    if (command == "inspect") return cmd_inspect(args);
     if (command == "import-design" || command == "export-tokens") {
         auto root = find_project_root();
         if (root.empty()) {
