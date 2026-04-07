@@ -69,8 +69,8 @@ TEST_CASE("Gain processor", "[signal][gain]") {
     REQUIRE(out < 0.51f);
 }
 
-TEST_CASE("DryWetMixer", "[signal][mix]") {
-    DryWetMixer mixer;
+TEST_CASE("SimpleMixer", "[signal][mix]") {
+    SimpleMixer mixer;
 
     mixer.set_mix(0.0f); // Fully dry
     REQUIRE_THAT(mixer.process(1.0f, 0.5f), WithinAbs(1.0, 0.001));
