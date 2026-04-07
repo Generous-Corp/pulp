@@ -261,6 +261,20 @@ FetchContent_MakeAvailable(highway)
 set(PULP_HAS_HIGHWAY TRUE)
 message(STATUS "Pulp: Highway SIMD library enabled")
 
+# Mbed TLS (Apache 2.0) — cryptographic primitives (SHA-256, RSA, AES)
+set(ENABLE_TESTING OFF CACHE BOOL "" FORCE)
+set(ENABLE_PROGRAMS OFF CACHE BOOL "" FORCE)
+set(MBEDTLS_FATAL_WARNINGS OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(
+    mbedtls
+    GIT_REPOSITORY https://github.com/Mbed-TLS/mbedtls.git
+    GIT_TAG v3.6.2
+    GIT_SHALLOW TRUE
+)
+FetchContent_MakeAvailable(mbedtls)
+set(PULP_HAS_MBEDTLS TRUE)
+message(STATUS "Pulp: Mbed TLS crypto library enabled")
+
 # three.js (MIT license) — native WebGPU bridge demos and tests
 if(PULP_BUILD_TESTS AND PULP_ENABLE_GPU)
     pulp_register_fetchcontent_source(threejs REF 077dd13c0e869d9f3dbe55875686f920367de457)
@@ -478,6 +492,15 @@ if(TARGET hwy)
         LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
     )
 endif()
+foreach(_mbed_target mbedcrypto p256m everest mbedx509 mbedtls)
+    if(TARGET ${_mbed_target})
+        install(TARGETS ${_mbed_target}
+            EXPORT PulpTargets
+            ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+            LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        )
+    endif()
+endforeach()
 if(TARGET SDL3-static)
     set_target_properties(SDL3-static PROPERTIES EXPORT_NAME sdl3-static)
     install(TARGETS SDL3-static

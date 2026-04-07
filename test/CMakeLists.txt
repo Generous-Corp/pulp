@@ -51,6 +51,11 @@ add_executable(pulp-test-sync test_sync_primitives.cpp)
 target_link_libraries(pulp-test-sync PRIVATE pulp::runtime Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-sync)
 
+# Crypto tests (SHA-256, MD5, AES, machine ID)
+add_executable(pulp-test-crypto test_crypto.cpp)
+target_link_libraries(pulp-test-crypto PRIVATE pulp::runtime Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-crypto)
+
 # IPC (InterprocessConnection) tests
 add_executable(pulp-test-ipc test_ipc.cpp)
 target_link_libraries(pulp-test-ipc PRIVATE pulp::events pulp::runtime Catch2::Catch2WithMain)
