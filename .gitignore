@@ -55,3 +55,4 @@ tools/local-ci/results/
 !.env.example
 examples/web-demos/wasm-build/build/
 /.private/
+test/assets/

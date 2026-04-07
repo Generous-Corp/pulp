@@ -4981,6 +4981,74 @@ fn main(@location(0) uv : vec2<f32>) -> @location(0) vec4<f32> {
     engine_.register_promise_function("__requestAdapterImpl", [gpu_info](const choc::value::Value*, size_t) {
         return gpu_descriptor_to_value(gpu_info);
     });
+
+    // ── Compute pipeline dispatch ───────────────────────────────────────
+    // Receives JSON from the JS compute pass encoder and dispatches
+    // via Dawn's native compute pipeline infrastructure.
+    engine_.register_function("__gpuComputeDispatchImpl", [this](choc::javascript::ArgumentList args) {
+        if (args.numArgs < 1 || !args[0] || gpu_surface_ == nullptr) {
+            return choc::value::createBool(false);
+        }
+
+#ifndef PULP_HAS_SKIA
+        return choc::value::createBool(false);
+#else
+        auto payload_str = args.get<std::string>(0, "");
+        if (payload_str.empty()) return choc::value::createBool(false);
+
+        auto* device_ptr = static_cast<wgpu::Device*>(gpu_surface_->dawn_device_handle());
+        auto* queue_ptr = static_cast<wgpu::Queue*>(gpu_surface_->dawn_queue_handle());
+        if (!device_ptr || !queue_ptr || !(*device_ptr) || !(*queue_ptr))
+            return choc::value::createBool(false);
+
+        try {
+            auto payload = choc::json::parse(payload_str);
+            auto shader_code = payload.hasObjectMember("shaderCode")
+                ? payload["shaderCode"].getWithDefault<std::string>("") : "";
+            auto entry_point = payload.hasObjectMember("entryPoint")
+                ? payload["entryPoint"].getWithDefault<std::string>("main") : "main";
+            auto wg_x = static_cast<uint32_t>(payload.hasObjectMember("workgroupCountX")
+                ? payload["workgroupCountX"].getWithDefault<int64_t>(1) : 1);
+            auto wg_y = static_cast<uint32_t>(payload.hasObjectMember("workgroupCountY")
+                ? payload["workgroupCountY"].getWithDefault<int64_t>(1) : 1);
+            auto wg_z = static_cast<uint32_t>(payload.hasObjectMember("workgroupCountZ")
+                ? payload["workgroupCountZ"].getWithDefault<int64_t>(1) : 1);
+
+            if (shader_code.empty()) return choc::value::createBool(false);
+
+            // Create shader module
+            wgpu::ShaderModuleWGSLDescriptor wgsl_desc{};
+            wgsl_desc.code = shader_code.c_str();
+            wgpu::ShaderModuleDescriptor shader_desc{};
+            shader_desc.nextInChain = &wgsl_desc;
+            auto shader_module = device_ptr->CreateShaderModule(&shader_desc);
+            if (!shader_module) return choc::value::createBool(false);
+
+            // Create compute pipeline
+            wgpu::ComputePipelineDescriptor pipe_desc{};
+            pipe_desc.compute.module = shader_module;
+            pipe_desc.compute.entryPoint = entry_point.c_str();
+            auto pipeline = device_ptr->CreateComputePipeline(&pipe_desc);
+            if (!pipeline) return choc::value::createBool(false);
+
+            // Encode and dispatch
+            wgpu::CommandEncoderDescriptor enc_desc{};
+            auto encoder = device_ptr->CreateCommandEncoder(&enc_desc);
+            wgpu::ComputePassDescriptor pass_desc{};
+            auto pass = encoder.BeginComputePass(&pass_desc);
+            pass.SetPipeline(pipeline);
+            pass.DispatchWorkgroups(wg_x, wg_y, wg_z);
+            pass.End();
+
+            auto command_buffer = encoder.Finish();
+            queue_ptr->Submit(1, &command_buffer);
+
+            return choc::value::createBool(true);
+        } catch (...) {
+            return choc::value::createBool(false);
+        }
+#endif
+    });
 }
 
 void WidgetBridge::forward_key_event(int key_code, uint16_t modifiers, bool is_down) {
