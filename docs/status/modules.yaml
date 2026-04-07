@@ -45,7 +45,7 @@ modules:
     docs: reference/modules.md#format
 
   - name: platform
-    summary: Platform detection, native file dialogs, clipboard, popup menus, Windows registry
+    summary: Platform detection, native file dialogs, clipboard, popup menus, Windows registry, child process execution
     status: usable
     dependencies: []
     docs: reference/modules.md#platform
