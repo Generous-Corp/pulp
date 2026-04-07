@@ -134,6 +134,18 @@ Important constraints in the current phase:
 - `build.yml` now accepts `runner_provider` and routes Linux and Windows through
   the selected provider; macOS is omitted from the cloud build by default so it
   can stay local-first
+- **Default provider for PR checks** is controlled by the GitHub repo variable
+  `PULP_DEFAULT_RUNNER_PROVIDER`. Set it to `namespace` to route all PR checks
+  through Namespace runners (faster, parallel). Set to `github-hosted` to use
+  GitHub-hosted runners (free tier, queued). The `workflow_dispatch` input
+  overrides this for manual runs. To change the default:
+  ```bash
+  # Switch to Namespace (recommended for faster CI)
+  gh variable set PULP_DEFAULT_RUNNER_PROVIDER --body "namespace"
+  
+  # Switch back to GitHub-hosted
+  gh variable set PULP_DEFAULT_RUNNER_PROVIDER --body "github-hosted"
+  ```
 - `build` also accepts one-off leg overrides:
   `--linux-runner-selector-json`, `--windows-runner-selector-json`, and
   `--macos-runner-selector-json`; that means you can keep the normal
