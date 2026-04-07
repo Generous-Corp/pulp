@@ -29,6 +29,7 @@
 
 #include "create_targets.hpp"
 #include "package_commands.hpp"
+#include "package_registry.hpp"
 #include "design_binding.hpp"
 #include <pulp/ship/installer.hpp>
 #include <pulp/view/screenshot.hpp>
