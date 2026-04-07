@@ -41,29 +41,29 @@ public:
         }
     }
 
-    ~SdlWindowHostImpl() override {
+    ~SdlWindowHostImpl() {
         if (renderer_) SDL_DestroyRenderer(renderer_);
         if (window_) SDL_DestroyWindow(window_);
         SDL_Quit();
     }
 
-    void show() override {
+    void show() {
         if (window_) SDL_ShowWindow(window_);
     }
 
-    void hide() override {
+    void hide() {
         if (window_) SDL_HideWindow(window_);
     }
 
-    void repaint() override {
+    void repaint() {
         needs_repaint_ = true;
     }
 
-    void set_close_callback(std::function<void()> cb) override {
+    void set_close_callback(std::function<void()> cb) {
         close_callback_ = std::move(cb);
     }
 
-    void run_event_loop() override {
+    void run_event_loop() {
         if (!window_ || !renderer_) return;
 
         show();
@@ -98,6 +98,37 @@ public:
         }
 
         if (close_callback_) close_callback_();
+    }
+
+    // ── Platform feature overrides (SDL3, Linux/Windows) ──────────────
+
+    void set_mouse_relative_mode(bool enabled) {
+        if (window_) SDL_SetWindowRelativeMouseMode(window_, enabled);
+    }
+
+    float dpi_scale() const {
+        if (!window_) return 1.0f;
+        return SDL_GetWindowDisplayScale(window_);
+    }
+
+    Size max_dimensions() const {
+        SDL_DisplayID display = window_ ? SDL_GetDisplayForWindow(window_) : SDL_GetPrimaryDisplay();
+        const SDL_DisplayMode* mode = SDL_GetCurrentDisplayMode(display);
+        if (mode) return {static_cast<float>(mode->w), static_cast<float>(mode->h)};
+        return {1920, 1080};
+    }
+
+    void set_always_on_top(bool on_top) {
+        if (window_) SDL_SetWindowAlwaysOnTop(window_, on_top);
+    }
+
+    void set_fixed_aspect_ratio(float ratio) {
+        if (window_ && ratio > 0)
+            SDL_SetWindowAspectRatio(window_, ratio, ratio);
+    }
+
+    bool is_visible() const {
+        return window_ && (SDL_GetWindowFlags(window_) & SDL_WINDOW_HIDDEN) == 0;
     }
 
 private:
