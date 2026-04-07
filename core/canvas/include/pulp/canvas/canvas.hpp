@@ -118,10 +118,53 @@ struct LinearGradient {
 
 struct RadialGradient {
     float cx, cy, radius;
+    float focal_x = 0, focal_y = 0;  ///< Focal point offset for spotlight effects
     std::vector<GradientStop> stops;
 };
 
-using Paint = std::variant<Color, LinearGradient, RadialGradient>;
+/// Conic (sweep) gradient — colors sweep around a center point.
+struct ConicGradient {
+    float cx, cy;         ///< Center point
+    float start_angle;    ///< Starting angle in radians
+    std::vector<GradientStop> stops;
+};
+
+/// Gradient repeat mode.
+enum class GradientTileMode { clamp, repeat, mirror };
+
+/// Unified fill style — solid color, linear, radial, or conic gradient.
+/// Usable as fill or stroke paint.
+class FillStyle {
+public:
+    FillStyle() = default;
+    FillStyle(Color c) : color_(c) {} // NOLINT: implicit for convenience
+    FillStyle(LinearGradient g) : linear_(std::move(g)), type_(1) {}
+    FillStyle(RadialGradient g) : radial_(std::move(g)), type_(2) {}
+    FillStyle(ConicGradient g) : conic_(std::move(g)), type_(3) {}
+
+    bool is_solid() const { return type_ == 0; }
+    bool is_linear() const { return type_ == 1; }
+    bool is_radial() const { return type_ == 2; }
+    bool is_conic() const { return type_ == 3; }
+
+    const Color& color() const { return color_; }
+    const LinearGradient& linear() const { return linear_; }
+    const RadialGradient& radial() const { return radial_; }
+    const ConicGradient& conic() const { return conic_; }
+
+    GradientTileMode tile_mode() const { return tile_mode_; }
+    void set_tile_mode(GradientTileMode m) { tile_mode_ = m; }
+
+private:
+    Color color_;
+    LinearGradient linear_;
+    RadialGradient radial_;
+    ConicGradient conic_;
+    int type_ = 0;  // 0=solid, 1=linear, 2=radial, 3=conic
+    GradientTileMode tile_mode_ = GradientTileMode::clamp;
+};
+
+using Paint = std::variant<Color, LinearGradient, RadialGradient, ConicGradient>;
 
 // ── Drawing commands ─────────────────────────────────────────────────────────
 
