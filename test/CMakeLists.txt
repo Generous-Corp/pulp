@@ -56,6 +56,11 @@ add_executable(pulp-test-runtime-utils test_runtime_utils.cpp)
 target_link_libraries(pulp-test-runtime-utils PRIVATE pulp::runtime Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-runtime-utils)
 
+# XML and ZIP/GZIP compression tests
+add_executable(pulp-test-xml-zip test_xml_zip.cpp)
+target_link_libraries(pulp-test-xml-zip PRIVATE pulp::runtime Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-xml-zip)
+
 # SIMD operations and aligned buffer tests
 add_executable(pulp-test-simd test_simd.cpp)
 target_link_libraries(pulp-test-simd PRIVATE pulp::runtime pulp::signal Catch2::Catch2WithMain)

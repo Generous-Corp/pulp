@@ -109,6 +109,23 @@
       ]
     },
     {
+      "name": "miniz",
+      "category": "runtime",
+      "license": "MIT",
+      "version": "3.0.2",
+      "source_kind": "vendored",
+      "repository": "https://github.com/richgel999/miniz.git",
+      "upstream": { "kind": "git-tag", "ref": "3.0.2" },
+      "documented_in_dependencies_md": true,
+      "documented_in_notice_md": true,
+      "source_files": [
+        "external/miniz/miniz.h",
+        "external/miniz/miniz.c",
+        "core/runtime/include/pulp/runtime/zip.hpp",
+        "core/runtime/src/zip.cpp"
+      ]
+    },
+    {
       "name": "LV2",
       "category": "format-sdk",
       "license": "ISC",
@@ -164,6 +181,23 @@
       "documented_in_notice_md": true,
       "source_files": [
         "bindings/python/CMakeLists.txt"
+      ]
+    },
+    {
+      "name": "pugixml",
+      "category": "runtime",
+      "license": "MIT",
+      "version": "1.14",
+      "source_kind": "vendored",
+      "repository": "https://github.com/zeux/pugixml.git",
+      "upstream": { "kind": "git-tag", "ref": "v1.14" },
+      "documented_in_dependencies_md": true,
+      "documented_in_notice_md": true,
+      "source_files": [
+        "external/pugixml/pugixml.hpp",
+        "external/pugixml/pugixml.cpp",
+        "core/runtime/include/pulp/runtime/xml.hpp",
+        "core/runtime/src/xml.cpp"
       ]
     },
     {

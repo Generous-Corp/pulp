@@ -20,11 +20,24 @@ target_sources(pulp-runtime PRIVATE
     src/high_resolution_timer.cpp
     src/system_info.cpp
     src/text_diff.cpp
+    src/xml.cpp
+    src/zip.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../external/pugixml/pugixml.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../external/miniz/miniz.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../external/miniz/miniz_tdef.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../external/miniz/miniz_tinfl.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../external/miniz/miniz_zip.c
 )
 
 # Highway's foreach_target.h uses #include HWY_TARGET_INCLUDE to re-include
 # the source file for each SIMD target. The source dir must be on the include path.
 target_include_directories(pulp-runtime PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+
+# Vendored dependencies (header-only or single-file)
+target_include_directories(pulp-runtime PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../external/pugixml
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../external/miniz
+)
 
 target_link_libraries(pulp-runtime PUBLIC pulp::platform)
 target_link_libraries(pulp-runtime PRIVATE hwy)

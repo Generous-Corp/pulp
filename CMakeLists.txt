@@ -4,7 +4,7 @@ project(Pulp
     VERSION 0.1.1
     DESCRIPTION "Cross-platform audio plugin and application framework"
     HOMEPAGE_URL "https://github.com/danielraffel/pulp"
-    LANGUAGES CXX
+    LANGUAGES CXX C
 )
 
 # ── C++20 Standard ──────────────────────────────────────────────────────────

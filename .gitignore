@@ -30,6 +30,8 @@ Thumbs.db
 # Exception: vendored deps committed to repo
 !/external/nanosvg/
 !/external/skia-build/
+!/external/pugixml/
+!/external/miniz/
 
 # Node (for web/WASM builds)
 node_modules/
