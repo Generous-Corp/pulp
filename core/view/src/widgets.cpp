@@ -134,6 +134,9 @@ void Knob::on_mouse_event(const MouseEvent& event) {
 void Knob::on_mouse_down(Point pos) {
     drag_start_y_ = pos.y;
     drag_start_value_ = value_;
+    // Note: mouse relative mode for infinite drag is available via
+    // WindowHost::set_mouse_relative_mode(). The window host integration
+    // requires View → WindowHost back-reference (not yet wired).
 }
 
 void Knob::on_mouse_drag(Point pos) {
