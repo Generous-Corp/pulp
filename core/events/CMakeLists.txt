@@ -12,6 +12,7 @@ target_sources(pulp-events PRIVATE
     src/timer.cpp
     src/async_updater.cpp
     src/interprocess_connection.cpp
+    src/child_process_manager.cpp
 )
 
 target_link_libraries(pulp-events PUBLIC pulp::runtime)
