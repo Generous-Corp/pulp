@@ -12,8 +12,8 @@ Pulp builds on excellent open-source software. Every dependency that Pulp bundle
 
 | Name | License | Purpose | Link |
 |------|---------|---------|------|
-| **CHOC** | ISC | JS engine, MIDI utilities, audio file I/O, WebView, networking | [github.com/Tracktion/choc](https://github.com/Tracktion/choc) |
 | **Catch2** | BSL-1.0 | Unit testing framework | [github.com/catchorg/Catch2](https://github.com/catchorg/Catch2) |
+| **CHOC** | ISC | JS engine, MIDI utilities, audio file I/O, WebView, networking | [github.com/Tracktion/choc](https://github.com/Tracktion/choc) |
 | **nanosvg** | zlib | SVG parsing and rasterization | [github.com/memononen/nanosvg](https://github.com/memononen/nanosvg) |
 | **Yoga** | MIT | Layout engine for Flexbox/Grid-style native UI | [github.com/facebook/yoga](https://github.com/facebook/yoga) |
 
@@ -21,10 +21,10 @@ Pulp builds on excellent open-source software. Every dependency that Pulp bundle
 
 | Name | License | Purpose | Link |
 |------|---------|---------|------|
-| **CLAP** | MIT | CLAP plugin format headers | [github.com/free-audio/clap](https://github.com/free-audio/clap) |
-| **VST3 SDK** | MIT | VST3 plugin format (pluginterfaces + base) | [github.com/steinbergmedia/vst3sdk](https://github.com/steinbergmedia/vst3sdk) |
 | **AudioUnitSDK** | Apache-2.0 | AU v2 plugin format adapter | [github.com/apple/AudioUnitSDK](https://github.com/apple/AudioUnitSDK) |
+| **CLAP** | MIT | CLAP plugin format headers | [github.com/free-audio/clap](https://github.com/free-audio/clap) |
 | **LV2** | ISC | LV2 plugin format headers | [github.com/lv2/lv2](https://github.com/lv2/lv2) |
+| **VST3 SDK** | MIT | VST3 plugin format (pluginterfaces + base) | [github.com/steinbergmedia/vst3sdk](https://github.com/steinbergmedia/vst3sdk) |
 
 ## Optional Vendor SDK Integrations
 
@@ -43,17 +43,17 @@ See [AAX Setup](../guides/aax.md) for the supported local workflow.
 | Name | License | Purpose | Link |
 |------|---------|---------|------|
 | **Dawn** | BSD-3-Clause | WebGPU implementation (Metal, D3D12, Vulkan) | [dawn.googlesource.com](https://dawn.googlesource.com/dawn) |
-| **Skia Graphite** | BSD-3-Clause | 2D GPU rendering engine | [skia.org](https://skia.org) |
 | **SDL3** | zlib | Cross-platform windowing and input | [github.com/libsdl-org/SDL](https://github.com/libsdl-org/SDL) |
+| **Skia Graphite** | BSD-3-Clause | 2D GPU rendering engine | [skia.org](https://skia.org) |
 | **WebGPU-distribution** | MIT | WebGPU C API wrapper for Dawn | [github.com/eliemichel/WebGPU-distribution](https://github.com/eliemichel/WebGPU-distribution) |
 
 ### Optional Dependencies
 
 | Name | License | Purpose | Link |
 |------|---------|---------|------|
-| **pybind11** | BSD-3-Clause | Python bindings for HeadlessHost | [github.com/pybind/pybind11](https://github.com/pybind/pybind11) |
-| **node-addon-api** | MIT | Node.js bindings via Node-API | [github.com/niclamusic/node-addon-api](https://github.com/niclamusic/node-addon-api) |
 | **Emscripten** | MIT | C++ to WebAssembly compiler (for WAMv2/WebCLAP) | [emscripten.org](https://emscripten.org) |
+| **node-addon-api** | MIT | Node.js bindings via Node-API | [github.com/niclamusic/node-addon-api](https://github.com/niclamusic/node-addon-api) |
+| **pybind11** | BSD-3-Clause | Python bindings for HeadlessHost | [github.com/pybind/pybind11](https://github.com/pybind/pybind11) |
 
 ## Standards and Specifications
 
@@ -61,28 +61,28 @@ Pulp implements or builds on these open standards:
 
 | Standard | Organization | Purpose |
 |----------|-------------|---------|
-| [CLAP](https://cleveraudio.org) | Clever Audio | Plugin format specification |
-| [VST3](https://steinbergmedia.github.io/vst3_dev_portal/) | Steinberg | Plugin format specification |
 | [Audio Unit](https://developer.apple.com/documentation/audiounit) | Apple | Plugin format specification |
+| [CLAP](https://cleveraudio.org) | Clever Audio | Plugin format specification |
 | [LV2](https://lv2plug.in) | LV2 Community | Plugin format specification |
+| [MIDI 2.0 UMP](https://www.midi.org/specifications) | MIDI Association | Universal MIDI Packet format |
+| [OSC 1.0](https://opensoundcontrol.stanford.edu) | CNMAT | Open Sound Control messaging |
+| [VST3](https://steinbergmedia.github.io/vst3_dev_portal/) | Steinberg | Plugin format specification |
 | [WAMv2](https://www.webaudiomodules.com) | Web Audio Modules | Web plugin standard |
-| [WebCLAP](https://github.com/WebCLAP) | WebCLAP | Portable CLAP plugins via WebAssembly |
+| [WASI](https://wasi.dev) | WebAssembly CG | System interface for WebAssembly |
 | [Web Audio API](https://www.w3.org/TR/webaudio/) | W3C | Browser audio processing |
 | [Web MIDI API](https://www.w3.org/TR/webmidi/) | W3C | Browser MIDI access |
+| [WebCLAP](https://github.com/WebCLAP) | WebCLAP | Portable CLAP plugins via WebAssembly |
 | [WebGPU](https://www.w3.org/TR/webgpu/) | W3C | GPU rendering API |
-| [WASI](https://wasi.dev) | WebAssembly CG | System interface for WebAssembly |
-| [OSC 1.0](https://opensoundcontrol.stanford.edu) | CNMAT | Open Sound Control messaging |
-| [MIDI 2.0 UMP](https://www.midi.org/specifications) | MIDI Association | Universal MIDI Packet format |
 
 ## Projects That Inspired Pulp
 
-
 | Project | License | What We Learned |
 |---------|---------|-----------------|
-| [iPlug2](https://github.com/iPlug2/iPlug2) | zlib-like | Multi-format adapter architecture, graphics abstraction |
 | [AudioKit](https://github.com/AudioKit/AudioKit) | MIT | Swift audio patterns, Apple platform integration |
+| [iPlug2](https://github.com/iPlug2/iPlug2) | zlib-like | Multi-format adapter architecture, graphics abstraction |
 | [SignalKit](https://github.com/niclamusic/signalkit) | MIT | Real-time DSP patterns in Swift |
 | [signalsmith-clap-cpp](https://github.com/geraintluff/signalsmith-clap-cpp) | MIT | WCLAP build pipeline, webview extension patterns |
+| [Visage](https://github.com/VitalAudio/visage) | MIT | SDF-first rendering, dirty region tracking, shape batching, and a high bar for visual quality in audio plugin interfaces |
 
 ## Discipline
 

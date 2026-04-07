@@ -32,6 +32,8 @@ Pulp is organized into independent subsystems under `core/`. Each is a separate 
 | System Info | `system.hpp` | CPU model, cores, RAM, OS version, architecture |
 | Range | `range.hpp` | Templated interval with intersection, union, constrain |
 | Text Diff | `text_diff.hpp` | LCS-based line diff with formatted output |
+| Primes | `primes.hpp` | Miller-Rabin primality test, prime generation, Eratosthenes sieve |
+| Expression | `expression.hpp` | Math evaluator with variables, functions (sin/cos/sqrt/min/max), constants |
 | Scope Guard | `scope_guard.hpp` | RAII cleanup — `PULP_ON_SCOPE_EXIT(...)` |
 | Identity | `identity.hpp` | UUIDv4 generation, typed IDs (SessionId, ObjectId, RunId) |
 
@@ -91,6 +93,9 @@ Pulp is organized into independent subsystems under `core/`. Each is a separate 
 | Offline Processor | `offline_processor.hpp` | Batch-process files through a callback — bouncing, golden files |
 | Buffering Reader | `buffering_reader.hpp` | Background-thread ring buffer for gapless streaming |
 | System Volume | `system_volume.hpp` | Get/set system output volume and mute (all platforms) |
+| Streaming Writer | `streaming_writer.hpp` | Chunked WAV write — open, write_frames N times, close (16/24/32-bit) |
+| Memory-Mapped Reader | `mmap_reader.hpp` | Zero-copy audio file access via mmap + FormatRegistry |
+| Subsection Reader | `subsection_reader.hpp` | Read a frame range from audio data without copying |
 | Format Registry | `format_registry.hpp` | Extensible codec registry — register custom readers/writers |
 | Load Measurer | `load_measurer.hpp` | Real-time CPU usage tracking for audio callbacks |
 
@@ -107,6 +112,7 @@ Pulp is organized into independent subsystems under `core/`. Each is a separate 
 | MIDI Files | `midi_file.hpp` | Read/write Standard MIDI Files |
 | UMP | `ump.hpp` | Universal MIDI Packets (MIDI 2.0), MPE zones |
 | MIDI CI | `midi_ci.hpp` | Device discovery, profile management, property exchange |
+| MIDI Sequence | `midi_message_sequence.hpp` | Ordered timestamped events with note pairing, range queries |
 | CoreMIDI | platform/mac | macOS MIDI device I/O |
 | WinMIDI | platform/win | Windows MIDI device I/O |
 | ALSA MIDI | platform/linux | Linux MIDI device I/O |
@@ -149,6 +155,7 @@ Pulp is organized into independent subsystems under `core/`. Each is a separate 
 | Limiter | `compressor.hpp` | Brickwall with instant attack |
 | Noise Gate | `noise_gate.hpp` | Threshold-based gate |
 | DryWetMixer | `dry_wet_mixer.hpp` | Latency-compensated blend (linear or equal-power) |
+| Bias | `bias.hpp` | Add constant DC offset to signal |
 
 **Generators & Math:**
 
@@ -204,6 +211,13 @@ Pulp is organized into independent subsystems under `core/`. Each is a separate 
 | Standalone | ✓ Stable | Desktop app with device selector |
 | WAM | ✓ Experimental | Web Audio Module for browsers |
 | WCLAP | ✓ Experimental | Web CLAP for browsers |
+
+**Other format features:**
+
+| Feature | Header | What It Does |
+|---------|--------|-------------|
+| Host Detection | `host_type.hpp` | Detect DAW from process name (Logic, Reaper, Ableton, etc.) |
+| ARA | `ara.hpp` | Audio Random Access document controller stub |
 
 ---
 

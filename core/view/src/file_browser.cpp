@@ -1,5 +1,6 @@
 #include <pulp/view/file_browser.hpp>
 #include <algorithm>
+#include <fstream>
 
 namespace pulp::view {
 
@@ -136,32 +137,58 @@ void FileTree::paint(canvas::Canvas& canvas) {
 }
 
 // ── ContentSharer ──────────────────────────────────────────────────────
+// Uses safe process-launch APIs (no shell interpretation of user input).
 
 #ifdef __APPLE__
-// macOS implementation is in a separate .mm file if available.
-// Fallback: open the file with the system default handler.
-#include <cstdlib>
+#include <spawn.h>
+extern "C" { extern char** environ; }
+
 void ContentSharer::share_file(const std::filesystem::path& file, void*) {
-    std::string cmd = "open \"" + file.string() + "\"";
-    std::system(cmd.c_str());
+    // Use posix_spawn with /usr/bin/open — no shell, no injection
+    std::string path = file.string();
+    const char* argv[] = {"/usr/bin/open", path.c_str(), nullptr};
+    pid_t pid;
+    posix_spawn(&pid, "/usr/bin/open", nullptr, nullptr,
+                const_cast<char**>(argv), environ);
 }
 
 void ContentSharer::share_text(const std::string& text, void*) {
-    // Copy to clipboard as a share fallback
-    std::string cmd = "echo '" + text + "' | pbcopy";
-    std::system(cmd.c_str());
+    // Write to a temp file and open it — avoids shell with user text
+    auto tmp = std::filesystem::temp_directory_path() / "pulp_share.txt";
+    {
+        std::ofstream f(tmp);
+        f << text;
+    }
+    share_file(tmp, nullptr);
 }
+
 #elif defined(_WIN32)
+#include <windows.h>
+#include <shellapi.h>
+
 void ContentSharer::share_file(const std::filesystem::path& file, void*) {
-    std::string cmd = "start \"\" \"" + file.string() + "\"";
-    std::system(cmd.c_str());
+    // ShellExecuteW — safe, no shell interpretation
+    std::wstring wpath = file.wstring();
+    ShellExecuteW(nullptr, L"open", wpath.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
 }
-void ContentSharer::share_text(const std::string&, void*) {}
+
+void ContentSharer::share_text(const std::string&, void*) {
+    // Windows: no universal text share API; would need UWP DataTransferManager
+}
+
 #else
+#include <spawn.h>
+extern "C" { extern char** environ; }
+
 void ContentSharer::share_file(const std::filesystem::path& file, void*) {
-    std::string cmd = "xdg-open \"" + file.string() + "\"";
-    std::system(cmd.c_str());
+    // posix_spawn with xdg-open — no shell
+    std::string path = file.string();
+    const char* argv[] = {"/usr/bin/xdg-open", path.c_str(), nullptr};
+    pid_t pid;
+    posix_spawn(&pid, "/usr/bin/xdg-open", nullptr, nullptr,
+                const_cast<char**>(argv), environ);
 }
+
 void ContentSharer::share_text(const std::string&, void*) {}
 #endif
 

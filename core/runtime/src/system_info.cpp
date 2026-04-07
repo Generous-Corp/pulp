@@ -110,27 +110,33 @@ static SystemInfo query_system_info() {
         info.total_memory_mb = (si.totalram * si.mem_unit) / (1024 * 1024);
 #endif
 
-    // CPU features
+    // CPU features — runtime detection (not compile-time)
 #if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
-    // x86: check via compiler built-ins or CPUID
-    #ifdef __SSE2__
-    info.has_sse2 = true;
-    #endif
-    #ifdef __SSE4_1__
-    info.has_sse4_1 = true;
-    #endif
-    #ifdef __AVX__
-    info.has_avx = true;
-    #endif
-    #ifdef __AVX2__
-    info.has_avx2 = true;
-    #endif
-    #ifdef __AVX512F__
-    info.has_avx512 = true;
-    #endif
-    #ifdef __FMA__
-    info.has_fma = true;
-    #endif
+    // x86: detect via CPUID at runtime
+    {
+        #ifdef _MSC_VER
+        int cpuinfo[4] = {};
+        __cpuid(cpuinfo, 1);
+        int ecx1 = cpuinfo[2];
+        int edx1 = cpuinfo[3];
+        __cpuid(cpuinfo, 7);
+        int ebx7 = cpuinfo[1];
+        #else
+        unsigned int eax, ebx, ecx, edx;
+        __asm__ __volatile__("cpuid" : "=a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx) : "a"(1));
+        int ecx1 = static_cast<int>(ecx);
+        int edx1 = static_cast<int>(edx);
+        __asm__ __volatile__("cpuid" : "=a"(eax), "=b"(ebx), "=c"(ecx), "=d"(edx) : "a"(7), "c"(0));
+        int ebx7 = static_cast<int>(ebx);
+        #endif
+
+        info.has_sse2    = (edx1 >> 26) & 1;
+        info.has_sse4_1  = (ecx1 >> 19) & 1;
+        info.has_avx     = (ecx1 >> 28) & 1;
+        info.has_fma     = (ecx1 >> 12) & 1;
+        info.has_avx2    = (ebx7 >>  5) & 1;
+        info.has_avx512  = (ebx7 >> 16) & 1;
+    }
 #elif defined(__aarch64__) || defined(__arm64__) || defined(_M_ARM64)
     info.has_neon = true;  // Always available on arm64
 #endif
