@@ -3,6 +3,7 @@
 #include <pulp/view/view.hpp>
 #include <pulp/view/audio_bridge.hpp>
 #include <pulp/view/animation.hpp>
+#include <pulp/view/sprite_strip.hpp>
 #include <pulp/signal/spectrogram.hpp>
 #include <pulp/signal/multi_channel_meter.hpp>
 #include <string>
@@ -158,6 +159,14 @@ public:
     const std::string& lottie_json() const { return lottie_json_; }
     void set_lottie_time(float t) { lottie_time_ = std::clamp(t, 0.0f, 1.0f); }
     float lottie_time() const { return lottie_time_; }
+
+    /// Sprite strip: designer-created filmstrip for knob appearance.
+    /// The current value selects which frame to display.
+    void set_sprite_strip(std::shared_ptr<SpriteStrip> strip) { sprite_strip_ = std::move(strip); }
+    const std::shared_ptr<SpriteStrip>& sprite_strip() const { return sprite_strip_; }
+
+private:
+    std::shared_ptr<SpriteStrip> sprite_strip_;
 };
 
 // ── Fader ────────────────────────────────────────────────────────────────────
@@ -217,6 +226,14 @@ private:
     std::string lottie_json_;
     float lottie_time_ = 0.0f;
     WidgetRenderStyle render_style_ = WidgetRenderStyle::standard;
+
+public:
+    /// Sprite strip: designer-created filmstrip for fader appearance.
+    void set_sprite_strip(std::shared_ptr<SpriteStrip> strip) { sprite_strip_ = std::move(strip); }
+    const std::shared_ptr<SpriteStrip>& sprite_strip() const { return sprite_strip_; }
+
+private:
+    std::shared_ptr<SpriteStrip> sprite_strip_;
 };
 
 // ── Toggle ───────────────────────────────────────────────────────────────────
