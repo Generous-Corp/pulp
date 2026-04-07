@@ -9,10 +9,31 @@
 #include <memory>
 #include <algorithm>
 
+#ifdef _WIN32
+#include <malloc.h>
+#endif
+
 namespace pulp::signal {
 
 /// Alignment in bytes for SIMD operations (covers AVX-512)
 static constexpr size_t kSimdAlignment = 64;
+
+/// Portable aligned allocation (MSVC uses _aligned_malloc, POSIX uses aligned_alloc)
+inline void* aligned_alloc_portable(size_t alignment, size_t size) {
+#ifdef _WIN32
+    return _aligned_malloc(size, alignment);
+#else
+    return std::aligned_alloc(alignment, size);
+#endif
+}
+
+inline void aligned_free_portable(void* ptr) {
+#ifdef _WIN32
+    _aligned_free(ptr);
+#else
+    std::free(ptr);
+#endif
+}
 
 /// RAII aligned buffer with SIMD-friendly access
 class AlignedBuffer {
@@ -24,12 +45,12 @@ public:
         if (num_samples > 0) {
             // Round up to alignment boundary
             size_t bytes = num_samples * sizeof(float);
-            data_ = static_cast<float*>(std::aligned_alloc(kSimdAlignment, align_up(bytes)));
+            data_ = static_cast<float*>(aligned_alloc_portable(kSimdAlignment, align_up(bytes)));
             std::memset(data_, 0, align_up(bytes));
         }
     }
 
-    ~AlignedBuffer() { std::free(data_); }
+    ~AlignedBuffer() { aligned_free_portable(data_); }
 
     // Move only
     AlignedBuffer(AlignedBuffer&& other) noexcept
@@ -40,7 +61,7 @@ public:
 
     AlignedBuffer& operator=(AlignedBuffer&& other) noexcept {
         if (this != &other) {
-            std::free(data_);
+            aligned_free_portable(data_);
             data_ = other.data_;
             size_ = other.size_;
             other.data_ = nullptr;
@@ -74,12 +95,12 @@ public:
     /// Resize (reallocates, does not preserve data)
     void resize(size_t new_size) {
         if (new_size == size_) return;
-        std::free(data_);
+        aligned_free_portable(data_);
         data_ = nullptr;
         size_ = new_size;
         if (new_size > 0) {
             size_t bytes = new_size * sizeof(float);
-            data_ = static_cast<float*>(std::aligned_alloc(kSimdAlignment, align_up(bytes)));
+            data_ = static_cast<float*>(aligned_alloc_portable(kSimdAlignment, align_up(bytes)));
             std::memset(data_, 0, align_up(bytes));
         }
     }
