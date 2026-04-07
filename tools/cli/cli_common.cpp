@@ -38,9 +38,11 @@
 #include <unistd.h>  // isatty, getpid
 #endif
 
+#include "pulp_version_gen.h"
+
 // ── SDK Constants ───────────────────────────────────────────────────────────
 
-const char* PULP_SDK_VERSION = "0.1.0";
+const char* PULP_SDK_VERSION = PULP_SDK_VERSION_GENERATED;
 const char* PULP_GITHUB_REPO = "danielraffel/pulp";
 
 // ── Color / Terminal ────────────────────────────────────────────────────────
@@ -668,6 +670,21 @@ std::string read_user_config_value(const std::string& section, const std::string
         return strip_quotes(trim(trimmed.substr(eq + 1)));
     }
 
+    return {};
+}
+
+std::string read_project_cmake_version(const fs::path& project_root) {
+    auto cmake_path = project_root / "CMakeLists.txt";
+    if (!fs::exists(cmake_path)) return {};
+    std::ifstream f(cmake_path);
+    std::string line;
+    std::regex ver_re(R"(project\s*\([^)]*VERSION\s+([0-9]+\.[0-9]+\.[0-9]+))");
+    std::smatch m;
+    while (std::getline(f, line)) {
+        if (std::regex_search(line, m, ver_re)) {
+            return m[1].str();
+        }
+    }
     return {};
 }
 

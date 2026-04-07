@@ -19,7 +19,7 @@
     <key>CFBundleShortVersionString</key>
     <string>${VERSION}</string>
     <key>CFBundleVersion</key>
-    <string>1</string>
+    <string>@PLUGIN_VERSION@</string>
     <key>NSExtension</key>
     <dict>
         <key>NSExtensionAttributes</key>
@@ -38,7 +38,7 @@
                     <key>type</key>
                     <string>${AU_TYPE}</string>
                     <key>version</key>
-                    <integer>1</integer>
+                    <integer>@PLUGIN_AU_VERSION_INT@</integer>
                     <key>sandboxSafe</key>
                     <true/>
                     <key>tags</key>

@@ -562,6 +562,14 @@ function(_pulp_add_au target name bundle_id version manufacturer category plugin
         endif()
         # Factory function name follows the AUSDK_COMPONENT_ENTRY convention
         set(PULP_AU_FACTORY_NAME "${target}AUFactory")
+
+        # Compute AU integer version: major*65536 + minor*256 + patch
+        string(REPLACE "." ";" _au_ver_parts "${version}")
+        list(GET _au_ver_parts 0 _au_ver_major)
+        list(GET _au_ver_parts 1 _au_ver_minor)
+        list(GET _au_ver_parts 2 _au_ver_patch)
+        math(EXPR PULP_AU_VERSION_INT "${_au_ver_major} * 65536 + ${_au_ver_minor} * 256 + ${_au_ver_patch}")
+
         configure_file(
             "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/PulpInfoPlist.au.in"
             "${CMAKE_CURRENT_BINARY_DIR}/${target}_Info.plist.au"

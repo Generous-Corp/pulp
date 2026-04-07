@@ -17,7 +17,7 @@
     <key>CFBundleShortVersionString</key>
     <string>@PULP_VERSION@</string>
     <key>CFBundleVersion</key>
-    <string>1</string>
+    <string>@PULP_VERSION@</string>
     <key>AudioComponents</key>
     <array>
         <dict>
@@ -32,7 +32,7 @@
             <key>subtype</key>
             <string>@PULP_PLUGIN_CODE@</string>
             <key>version</key>
-            <integer>65536</integer>
+            <integer>@PULP_AU_VERSION_INT@</integer>
             <key>factoryFunction</key>
             <string>@PULP_AU_FACTORY_NAME@</string>
             <key>sandboxSafe</key>

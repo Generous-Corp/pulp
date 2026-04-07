@@ -1,4 +1,12 @@
 # pulp CLI tool
+
+# Generate version header from CMake project version
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/pulp_version_gen.h.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/pulp_version_gen.h"
+    @ONLY
+)
+
 add_executable(pulp-cli
     pulp_cli.cpp
     cli_common.cpp
@@ -11,8 +19,10 @@ add_executable(pulp-cli
     cmd_run.cpp
     cmd_ship.cpp
     cmd_validate.cpp
+    cmd_version.cpp
     design_binding.cpp
 )
+target_include_directories(pulp-cli PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
 set_target_properties(pulp-cli PROPERTIES OUTPUT_NAME "pulp")
 target_compile_features(pulp-cli PRIVATE cxx_std_20)
 target_link_libraries(pulp-cli PRIVATE pulp::runtime)

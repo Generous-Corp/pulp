@@ -29,6 +29,7 @@ static const Command commands[] = {
     {"clean",    "Remove build directory",                cmd_clean},
     {"cache",    "Manage SDK and asset cache",            cmd_cache},
     {"upgrade",  "Update the CLI to the latest version",  cmd_upgrade},
+    {"version",  "Show, bump, or check version info",    cmd_version},
 };
 
 static constexpr int command_count = sizeof(commands) / sizeof(commands[0]);
@@ -169,7 +170,31 @@ int main(int argc, char* argv[]) {
         return 0;
     }
 
+    // Fuzzy "did you mean?" suggestion
     std::cerr << "Unknown command: " << command << "\n";
-    std::cerr << "Run `pulp help` for usage\n";
+    int best_dist = 999;
+    const char* best_name = nullptr;
+    auto levenshtein = [](const std::string& a, const std::string& b) -> int {
+        size_t m = a.size(), n = b.size();
+        std::vector<int> dp((m + 1) * (n + 1));
+        for (size_t i = 0; i <= m; ++i) dp[i * (n + 1)] = static_cast<int>(i);
+        for (size_t j = 0; j <= n; ++j) dp[j] = static_cast<int>(j);
+        for (size_t i = 1; i <= m; ++i)
+            for (size_t j = 1; j <= n; ++j) {
+                int cost = (a[i-1] == b[j-1]) ? 0 : 1;
+                dp[i*(n+1)+j] = std::min({dp[(i-1)*(n+1)+j]+1, dp[i*(n+1)+j-1]+1,
+                                           dp[(i-1)*(n+1)+j-1]+cost});
+            }
+        return dp[m*(n+1)+n];
+    };
+    for (int i = 0; i < command_count; ++i) {
+        int d = levenshtein(command, commands[i].name);
+        if (d < best_dist) { best_dist = d; best_name = commands[i].name; }
+    }
+    if (best_dist <= 3 && best_name) {
+        std::cerr << "Did you mean: pulp " << best_name << "?\n";
+    } else {
+        std::cerr << "Run `pulp help` for usage\n";
+    }
     return 1;
 }

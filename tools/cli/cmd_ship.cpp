@@ -60,7 +60,8 @@ int cmd_ship(const std::vector<std::string>& args) {
         auto artifacts = root / "artifacts";
         fs::create_directories(artifacts);
 
-        std::string version = "0.1.0";
+        std::string version = read_project_cmake_version(root);
+        if (version.empty()) version = PULP_SDK_VERSION;
         for (size_t i = 1; i < args.size(); ++i) {
             if (args[i] == "--version" && i + 1 < args.size())
                 version = args[++i];

@@ -109,6 +109,7 @@ std::string read_sdk_version(const fs::path& project_root);
 fs::path read_sdk_path_hint(const fs::path& project_root);
 fs::path read_sdk_checkout_hint(const fs::path& project_root);
 std::string read_user_config_value(const std::string& section, const std::string& key);
+std::string read_project_cmake_version(const fs::path& project_root);
 
 // ── Build Helpers ───────────────────────────────────────────────────────────
 
@@ -193,3 +194,4 @@ int cmd_docs(const std::vector<std::string>& args);
 int cmd_design(const std::vector<std::string>& args);
 int cmd_cache(const std::vector<std::string>& args);
 int cmd_upgrade(const std::vector<std::string>& args);
+int cmd_version(const std::vector<std::string>& args);
