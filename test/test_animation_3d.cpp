@@ -16,17 +16,22 @@ TEST_CASE("AnimatorSetBuilder sequence", "[animation][animator_set]") {
         .then(1.0f, 0.0f, 1.0f, [&](float v) { value = v; }, easing::linear)
         .build_runner();
 
-    // First tween
+    // First tween — halfway
     runner.advance(0.5f);
     REQUIRE_THAT(value, WithinAbs(0.5f, 0.05f));
 
+    // Complete first tween
     runner.advance(0.5f);
-    // Value should be near 1.0 (first tween complete) or slightly into second tween
-    REQUIRE(value >= 0.9f);
+    REQUIRE_THAT(value, WithinAbs(1.0f, 0.05f));
 
-    // Second tween — advance to finish
-    runner.advance(1.0f);
-    runner.advance(1.0f);
+    // Second tween — advance step by step
+    runner.advance(0.5f);
+    // Value should be partway through second tween (1.0 → 0.0)
+    REQUIRE(value <= 1.0f);
+
+    // Keep advancing until done
+    for (int i = 0; i < 10 && !runner.finished(); ++i)
+        runner.advance(0.5f);
     REQUIRE(runner.finished());
 }
 
