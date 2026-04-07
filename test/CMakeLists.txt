@@ -293,6 +293,16 @@ add_executable(pulp-test-texture-atlas test_texture_atlas.cpp)
 target_link_libraries(pulp-test-texture-atlas PRIVATE pulp::render Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-texture-atlas)
 
+# Sprite strip tests
+add_executable(pulp-test-sprite-strip test_sprite_strip.cpp)
+target_link_libraries(pulp-test-sprite-strip PRIVATE pulp::view Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-sprite-strip)
+
+# Edit history (global undo) tests
+add_executable(pulp-test-edit-history test_edit_history.cpp)
+target_link_libraries(pulp-test-edit-history PRIVATE pulp::state Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-edit-history)
+
 # Platform maturity tests (cursor, focus, IME, context menu, accessibility)
 add_executable(pulp-test-platform-maturity test_platform_maturity.cpp)
 target_link_libraries(pulp-test-platform-maturity PRIVATE pulp::view Catch2::Catch2WithMain)
