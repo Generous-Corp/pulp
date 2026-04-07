@@ -82,6 +82,17 @@ private:
     TextDecoration text_decoration_ = TextDecoration::none;
     canvas::Color decoration_color_{};
     bool has_decoration_color_ = false;
+    canvas::TextDirection text_direction_ = canvas::TextDirection::left_to_right;
+    canvas::TextVerticalAlign vertical_align_ = canvas::TextVerticalAlign::top;
+
+public:
+    /// Set text direction (LTR, RTL, vertical top-to-bottom, vertical bottom-to-top).
+    void set_text_direction(canvas::TextDirection d) { text_direction_ = d; }
+    canvas::TextDirection text_direction() const { return text_direction_; }
+
+    /// Set vertical text alignment within the label's bounds.
+    void set_vertical_align(canvas::TextVerticalAlign a) { vertical_align_ = a; }
+    canvas::TextVerticalAlign vertical_align() const { return vertical_align_; }
 };
 
 // ── Knob ─────────────────────────────────────────────────────────────────────
