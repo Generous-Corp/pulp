@@ -18,6 +18,7 @@ All code that Pulp bundles, fetches automatically, exports via `cmake --install`
 | CHOC | f0f5cdf5a938 | ISC | JS engine abstraction, MIDI utilities, audio helpers | multiple | 2026-03-24 |
 | CLAP | 1.2.2 | MIT | CLAP plugin format headers | pulp-format | 2026-03-24 |
 | cpp-httplib | master | MIT | HTTP client (GET/POST/download) | pulp-runtime | 2026-04-07 |
+| dr_libs | master | Public domain | FLAC, MP3, WAV decode (dr_flac, dr_mp3, dr_wav) | pulp-audio | 2026-04-07 |
 | Dawn | chrome/m144 | BSD-3-Clause | WebGPU implementation used by the GPU render path (via pre-built Skia toolchain) | pulp-render | 2026-03-30 |
 | Highway | 1.2.0 | Apache-2.0 | Portable SIMD abstraction (SSE/NEON/AVX) | pulp-runtime | 2026-04-06 |
 | LV2 | 1.18.10 | ISC | LV2 plugin format headers | pulp-format | 2026-03-30 |

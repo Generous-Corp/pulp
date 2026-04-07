@@ -10,6 +10,10 @@ target_include_directories(pulp-audio
 target_sources(pulp-audio PRIVATE
     src/audio_file.cpp
     src/window_enumerator.cpp
+    src/format_registry.cpp
+    src/codecs.c
+    src/channel_set.cpp
+    src/offline_processor.cpp
 )
 
 target_link_libraries(pulp-audio PUBLIC pulp::runtime)
@@ -17,6 +21,11 @@ target_link_libraries(pulp-audio PUBLIC pulp::runtime)
 # CHOC headers (audio file I/O)
 target_include_directories(pulp-audio PRIVATE
     $<BUILD_INTERFACE:${choc_SOURCE_DIR}>
+)
+
+# dr_libs and stb_vorbis (vendored, public domain / MIT)
+target_include_directories(pulp-audio PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../external/dr_libs
 )
 
 # Platform-specific sources
