@@ -274,11 +274,16 @@ The `planning/` directory is a private git submodule (`pulp-planning`). All inte
 
 ### What goes in `planning/`
 
-- **Capability assessments** — evaluating what Pulp needs to improve
 - **Feature specs** — detailed plans for upcoming work
 - **Roadmaps and phase tracking** — STATUS.md, phase plans
 - **Design exploration** — architecture proposals, workflow designs
-- **Research notes** — reference material, technology evaluations, library reviews
+
+### What goes in `planning/research/`
+
+- **Capability assessments** — evaluating what Pulp needs to improve
+- **Technology evaluations** — library reviews, framework studies
+- **Proposals** — package manager concepts, integration strategies
+- **Reference material** — notes from studying other implementations
 
 ### Workflow
 
