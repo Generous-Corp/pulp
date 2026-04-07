@@ -24,8 +24,8 @@ public:
         log2n_ = 0;
         for (int n = size; n > 1; n >>= 1) ++log2n_;
         vdsp_setup_ = vDSP_create_fftsetup(log2n_, kFFTRadix2);
-        split_real_.resize(size / 2);
-        split_imag_.resize(size / 2);
+        split_real_.resize(size);
+        split_imag_.resize(size);
 #endif
         // Pre-compute twiddle factors (used as fallback on non-Apple)
         twiddles_.resize(size / 2);
@@ -45,22 +45,34 @@ public:
 
     // Forward FFT (time → frequency) — complex in-place
     void forward(std::complex<float>* data) const {
+#if PULP_FFT_HAS_VDSP
+        forward_vdsp(data);
+#else
         forward_fallback(data);
+#endif
     }
 
     // Inverse FFT (frequency → time) — complex in-place
     void inverse(std::complex<float>* data) const {
+#if PULP_FFT_HAS_VDSP
+        inverse_vdsp(data);
+#else
         for (int i = 0; i < size_; ++i) data[i] = std::conj(data[i]);
         forward_fallback(data);
         float scale = 1.0f / size_;
         for (int i = 0; i < size_; ++i) data[i] = std::conj(data[i]) * scale;
+#endif
     }
 
     // Real-valued forward FFT: float input → complex output
     void forward_real(const float* input, std::complex<float>* output) const {
+#if PULP_FFT_HAS_VDSP
+        forward_real_vdsp(input, output);
+#else
         for (int i = 0; i < size_; ++i)
             output[i] = {input[i], 0.0f};
         forward(output);
+#endif
     }
 
     // Compute magnitude spectrum in dB
@@ -87,6 +99,67 @@ private:
     FFTSetup vdsp_setup_ = nullptr;
     mutable std::vector<float> split_real_;
     mutable std::vector<float> split_imag_;
+#endif
+
+#if PULP_FFT_HAS_VDSP
+    // Deinterleave std::complex<float> array into split-complex format
+    void to_split(const std::complex<float>* data) const {
+        for (int i = 0; i < size_; ++i) {
+            split_real_[i] = data[i].real();
+            split_imag_[i] = data[i].imag();
+        }
+    }
+
+    // Interleave split-complex format back to std::complex<float>
+    void from_split(std::complex<float>* data) const {
+        for (int i = 0; i < size_; ++i) {
+            data[i] = {split_real_[i], split_imag_[i]};
+        }
+    }
+
+    void forward_vdsp(std::complex<float>* data) const {
+        to_split(data);
+        DSPSplitComplex split = {split_real_.data(), split_imag_.data()};
+        vDSP_fft_zip(vdsp_setup_, &split, 1, log2n_, kFFTDirection_Forward);
+        from_split(data);
+    }
+
+    void inverse_vdsp(std::complex<float>* data) const {
+        to_split(data);
+        DSPSplitComplex split = {split_real_.data(), split_imag_.data()};
+        vDSP_fft_zip(vdsp_setup_, &split, 1, log2n_, kFFTDirection_Inverse);
+        // vDSP inverse doesn't normalize — divide by N
+        float scale = 1.0f / size_;
+        vDSP_vsmul(split_real_.data(), 1, &scale, split_real_.data(), 1, static_cast<vDSP_Length>(size_));
+        vDSP_vsmul(split_imag_.data(), 1, &scale, split_imag_.data(), 1, static_cast<vDSP_Length>(size_));
+        from_split(data);
+    }
+
+    void forward_real_vdsp(const float* input, std::complex<float>* output) const {
+        // Pack real data into split-complex: even samples → real, odd → imag
+        int half = size_ / 2;
+        for (int i = 0; i < half; ++i) {
+            split_real_[i] = input[2 * i];
+            split_imag_[i] = input[2 * i + 1];
+        }
+        DSPSplitComplex split = {split_real_.data(), split_imag_.data()};
+        vDSP_fft_zrip(vdsp_setup_, &split, 1, log2n_, kFFTDirection_Forward);
+
+        // vDSP_fft_zrip packs result: split.realp[0] = DC, split.imagp[0] = Nyquist
+        // Unpack to standard complex format
+        output[0] = {split_real_[0], 0.0f};        // DC (real only)
+        output[half] = {split_imag_[0], 0.0f};     // Nyquist (real only)
+        for (int i = 1; i < half; ++i) {
+            output[i] = {split_real_[i], split_imag_[i]};
+            // Conjugate symmetry: X[N-k] = conj(X[k])
+            output[size_ - i] = {split_real_[i], -split_imag_[i]};
+        }
+        // vDSP real FFT has implicit 2x scale factor
+        float scale = 0.5f;
+        for (int i = 0; i < size_; ++i) {
+            output[i] = {output[i].real() * scale, output[i].imag() * scale};
+        }
+    }
 #endif
 
     void forward_fallback(std::complex<float>* data) const {
