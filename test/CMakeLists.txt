@@ -101,6 +101,11 @@ add_executable(pulp-test-osc test_osc.cpp)
 target_link_libraries(pulp-test-osc PRIVATE pulp::osc Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-osc)
 
+# RectangleList geometry tests
+add_executable(pulp-test-rectangle-list test_rectangle_list.cpp)
+target_link_libraries(pulp-test-rectangle-list PRIVATE pulp::canvas Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-rectangle-list)
+
 # OSC Bundle serialization tests
 add_executable(pulp-test-osc-bundle test_osc_bundle.cpp)
 target_link_libraries(pulp-test-osc-bundle PRIVATE pulp::osc Catch2::Catch2WithMain)

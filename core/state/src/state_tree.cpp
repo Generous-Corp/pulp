@@ -1,4 +1,5 @@
 #include <pulp/state/state_tree.hpp>
+#include <choc/text/choc_JSON.h>
 
 namespace pulp::state {
 
@@ -136,43 +137,89 @@ void StateTree::notify_property_changed(std::string_view name,
         fn(*this, name, old_val, new_val);
 }
 
-std::string StateTree::to_json() const {
-    // Simplified JSON serialization
-    std::string json = "{\"type\":\"" + type_name_ + "\"";
+static choc::value::Value tree_to_choc(const StateTree& node) {
+    auto obj = choc::value::createObject("StateTreeNode");
+    obj.addMember("type", node.type_name());
 
-    if (!properties_.empty()) {
-        json += ",\"properties\":{";
-        bool first = true;
-        for (auto& [k, v] : properties_) {
-            if (!first) json += ",";
-            json += "\"" + k + "\":";
-            if (auto* b = std::get_if<bool>(&v)) json += *b ? "true" : "false";
-            else if (auto* i = std::get_if<int64_t>(&v)) json += std::to_string(*i);
-            else if (auto* d = std::get_if<double>(&v)) json += std::to_string(*d);
-            else if (auto* s = std::get_if<std::string>(&v)) json += "\"" + *s + "\"";
-            else json += "null";
-            first = false;
-        }
-        json += "}";
+    // Properties
+    auto props = choc::value::createObject("properties");
+    for (auto& name : node.property_names()) {
+        auto val = node.get(name);
+        if (auto* b = std::get_if<bool>(&val))
+            props.addMember(name, *b);
+        else if (auto* i = std::get_if<int64_t>(&val))
+            props.addMember(name, *i);
+        else if (auto* d = std::get_if<double>(&val))
+            props.addMember(name, *d);
+        else if (auto* s = std::get_if<std::string>(&val))
+            props.addMember(name, *s);
+    }
+    if (node.property_names().size() > 0)
+        obj.addMember("properties", props);
+
+    // Children
+    if (node.child_count() > 0) {
+        auto arr = choc::value::createEmptyArray();
+        for (int i = 0; i < node.child_count(); ++i)
+            arr.addArrayElement(tree_to_choc(*node.child(i)));
+        obj.addMember("children", arr);
     }
 
-    if (!children_.empty()) {
-        json += ",\"children\":[";
-        for (size_t i = 0; i < children_.size(); ++i) {
-            if (i > 0) json += ",";
-            json += children_[i]->to_json();
-        }
-        json += "]";
-    }
-
-    json += "}";
-    return json;
+    return obj;
 }
 
-StateTree::Ptr StateTree::from_json(std::string_view /*json*/) {
-    // Full JSON parsing would use pulp::runtime::xml or a JSON parser
-    // Stub for now — returns empty tree
-    return create("root");
+static StateTree::Ptr choc_to_tree(const choc::value::ValueView& val) {
+    if (!val.isObject()) return nullptr;
+
+    std::string type_name = "node";
+    if (val.hasObjectMember("type") && val["type"].isString())
+        type_name = std::string(val["type"].getString());
+
+    auto node = StateTree::create(type_name);
+
+    // Properties
+    if (val.hasObjectMember("properties") && val["properties"].isObject()) {
+        auto& props = val["properties"];
+        for (uint32_t i = 0; i < props.size(); ++i) {
+            auto member = props.getObjectMemberAt(i);
+            std::string key(member.name);
+            if (member.value.isBool())
+                node->set(key, member.value.getBool());
+            else if (member.value.isInt32())
+                node->set(key, static_cast<int64_t>(member.value.getInt32()));
+            else if (member.value.isInt64())
+                node->set(key, member.value.getInt64());
+            else if (member.value.isFloat64())
+                node->set(key, member.value.getFloat64());
+            else if (member.value.isString())
+                node->set(key, std::string(member.value.getString()));
+        }
+    }
+
+    // Children
+    if (val.hasObjectMember("children") && val["children"].isArray()) {
+        auto& children = val["children"];
+        for (uint32_t i = 0; i < children.size(); ++i) {
+            auto child = choc_to_tree(children[i]);
+            if (child) node->add_child(child);
+        }
+    }
+
+    return node;
+}
+
+std::string StateTree::to_json() const {
+    auto val = tree_to_choc(*this);
+    return choc::json::toString(val, true);
+}
+
+StateTree::Ptr StateTree::from_json(std::string_view json) {
+    try {
+        auto val = choc::json::parse(json);
+        return choc_to_tree(val);
+    } catch (...) {
+        return nullptr;
+    }
 }
 
 StateTree::Ptr StateTree::deep_copy() const {
