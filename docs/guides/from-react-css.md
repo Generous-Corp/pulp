@@ -51,7 +51,7 @@ on('gain', 'change', function(val) { setParam('gain', val); });
 | Event handlers (`onClick`) | `element.addEventListener('click', fn)` or `on(id, 'click', fn)` |
 | Event delegation | `container.addEventListener('click', e => { if (e.target.closest('.item')) ... })` |
 | React DevTools | `enableInspectClick()` + component inspector |
-| Hot Module Replacement | Built-in hot-reload — save JS, see changes instantly |
+| Hot Module Replacement | Built-in hot-reload in standalone host — save JS, see changes instantly. Plugin hosts load scripts at startup. |
 
 ## Component Mapping
 
@@ -294,4 +294,4 @@ Audio plugin UIs have unique requirements:
 | Level meters at 60fps | `Meter` widget polls `AudioBridge` via `TripleBuffer` — no JS polling needed |
 | Multiple plugin formats | Same UI JS works in VST3, AU, CLAP, and Standalone |
 | GPU-accelerated rendering | Skia/Dawn backend — Canvas API maps to GPU draw calls |
-| Hot-reload during development | Save JS file → UI updates instantly, no rebuild |
+| Hot-reload during development | Save JS file → UI updates instantly in standalone host, no rebuild |

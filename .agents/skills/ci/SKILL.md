@@ -14,7 +14,7 @@ Validate branches and ship code safely. This skill handles all CI workflows for 
 
 ## Prerequisites Check
 
-Before running any CI command, verify the required tooling exists:
+Before running any CI command, verify the required tooling AND provider config exists:
 
 ```bash
 # Required
@@ -26,9 +26,27 @@ test -f "$HOME/Library/Application Support/Pulp/local-ci/config.json" || echo "W
 
 # Fallback (worktree-local legacy config)
 test -f tools/local-ci/config.json || echo "WARNING: no worktree fallback config.json"
+
+# CRITICAL: Verify Namespace is the default cloud provider
+python3 tools/local-ci/local_ci.py cloud defaults 2>/dev/null | grep -q "default provider: namespace" || echo "WARNING: Namespace is not the default provider — run: python3 tools/local-ci/local_ci.py cloud defaults"
 ```
 
 If `local_ci.py` doesn't exist, the user likely has an older checkout. Tell them to pull latest main.
+
+**If Namespace is not the default provider**, the config needs to be updated. The shared config at `~/Library/Application Support/Pulp/local-ci/config.json` must include:
+
+```json
+{
+  "github_actions": {
+    "defaults": {
+      "provider": "namespace",
+      "workflow": "build"
+    }
+  }
+}
+```
+
+This ensures all cloud CI dispatches use Namespace by default. Without this, the system falls back to slow GitHub-hosted runners. Verify with `python3 tools/local-ci/local_ci.py cloud defaults` — it should show `configured default provider: namespace`.
 
 ## Language Correction
 
@@ -37,6 +55,27 @@ If `local_ci.py` doesn't exist, the user likely has an older checkout. Tell them
 > "I won't push directly to main — that bypasses review. Instead, I'll create a PR, run CI on it, and merge it if everything passes. This keeps main safe."
 
 Then proceed with the `ship` workflow below.
+
+## Runner Priority (hard rule)
+
+**Always use Namespace runners for Ubuntu and Windows CI. Never use GitHub-hosted runners as the primary path.**
+
+Priority order:
+1. **Namespace** — dispatch with `gh workflow run build.yml --ref <branch> -f runner_provider=namespace`
+2. **Local VMs** — fallback if Namespace is unavailable (`ssh ubuntu`, `ssh win`)
+3. **GitHub-hosted** — last resort only if both Namespace and local VMs are down
+
+macOS runs locally in parallel with Namespace Ubuntu/Windows.
+
+**Common mistake:** Pushing a branch and waiting for the auto-triggered GitHub Actions PR checks. Those use GitHub-hosted runners and are slow. Instead: cancel the auto-triggered run and dispatch on Namespace.
+
+```bash
+# Cancel auto-triggered GitHub-hosted run
+gh run cancel <run_id> --repo danielraffel/pulp
+
+# Dispatch on Namespace
+gh workflow run build.yml --repo danielraffel/pulp --ref <branch> -f runner_provider=namespace
+```
 
 ## Commands
 
@@ -279,3 +318,4 @@ Keep hostnames and VM names local. Shared repo docs and skills should describe h
 ## Documentation
 
 Full setup guide: `docs/guides/local-ci.md`
+SSH key setup for Windows/Linux VMs: `docs/guides/local-ci.md` § "Set up SSH keys"

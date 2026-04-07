@@ -186,6 +186,11 @@ add_executable(pulp-test-nsis-installer test_nsis_installer.cpp
 target_link_libraries(pulp-test-nsis-installer PRIVATE pulp::ship Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-nsis-installer)
 
+# Image decode / glTF texture pipeline tests
+add_executable(pulp-test-image-decode test_image_decode.cpp)
+target_link_libraries(pulp-test-image-decode PRIVATE pulp::view Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-image-decode)
+
 # GPU surface tests
 if(PULP_ENABLE_GPU)
     set(PULP_GPU_TEST_DISCOVERY_ARGS)

@@ -21,7 +21,7 @@ A cross-platform audio plugin and application framework. MIT licensed, C++20 cor
 - CSS Flexbox + Grid layout engine with 81 CSS properties
 - Responsive design via `matchMedia` queries
 - 15+ widgets: Knob, Fader, Toggle, TextEditor, ComboBox, XYPad, WaveformView, SpectrumView, and more
-- Hot reload for rapid UI iteration
+- Hot reload for rapid UI iteration (standalone host; plugin host support planned)
 - Screenshot capture and headless rendering
 - Component inspector for debugging view hierarchy
 - AI design tool (`pulp design`) for generating UIs from prompts

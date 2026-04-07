@@ -537,10 +537,25 @@ The CI skill (``.agents/skills/ci/SKILL.md``) is the single process for landing 
 
 PRs also trigger `.github/workflows/build.yml` which builds and tests on all three platforms via GitHub-hosted or Namespace runners. This is a redundant safety net — the local CI skill is the primary validation path.
 
-#### When to use what
+#### Runner priority (hard rule)
 
-- **Local CI (`local_ci.py`):** Primary. Always run before merging. Uses your Mac + SSH VMs.
-- **GitHub Actions:** Automatic on PR. Catches anything local CI missed. Required green before merge.
-- **Namespace:** Use for faster Ubuntu/Windows when local VMs are slow. Available via `workflow_dispatch` with `runner_provider: namespace`.
+**Always use Namespace for cloud CI. Never rely on GitHub-hosted runners as the primary path.**
+
+1. **Namespace** (default): `gh workflow run build.yml --ref <branch> -f runner_provider=namespace` — or use `python3 tools/local-ci/local_ci.py cloud run build <branch>` which respects the configured default.
+2. **Local VMs** (fallback): `ssh ubuntu`, `ssh win` via `local_ci.py run <branch>`
+3. **GitHub-hosted** (last resort): Only if both Namespace and local VMs are unavailable.
+
+macOS runs locally in parallel with Namespace Ubuntu/Windows builds.
+
+**The shared CI config MUST have Namespace as the default provider.** Verify with:
+```bash
+python3 tools/local-ci/local_ci.py cloud defaults
+# Should show: configured default provider: namespace
+```
+
+If it shows `github-hosted`, add this to `~/Library/Application Support/Pulp/local-ci/config.json`:
+```json
+{ "github_actions": { "defaults": { "provider": "namespace", "workflow": "build" } } }
+```
 
 See `docs/guides/local-ci.md` for setup.

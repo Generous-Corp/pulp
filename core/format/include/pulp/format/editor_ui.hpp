@@ -37,6 +37,7 @@ inline EditorUiInstance build_editor_ui(state::StateStore& store,
         view::ScriptedUiOptions options;
         options.script_path = *script_path;
         options.enable_hot_reload = enable_hot_reload;
+        options.enable_theme_reload = enable_hot_reload;  // Only poll theme.json when JS reload is active
         auto scripted_ui = std::make_unique<view::ScriptedUiSession>(*root, store, std::move(options));
 
         std::string load_error;

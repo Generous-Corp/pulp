@@ -26,7 +26,7 @@ If you prefer writing DSP in a dedicated language, Pulp integrates with Faust (o
 
 ### Start from design
 
-Import from Figma, Pencil.dev, Google Stich and more. Define your visual identity as a design token system — colors, typography, widget geometry, knob styles, button shapes, shadows, gradients. Apply one design language across many plugins. Change a token, everything updates live via hot-reload.
+Import from Figma, Pencil.dev, Google Stich and more. Define your visual identity as a design token system — colors, typography, widget geometry, knob styles, button shapes, shadows, gradients. Apply one design language across many plugins. Change a token, and changes appear live in the standalone host via hot-reload.
 
 Describe a look in natural language — "80s Macintosh", "neon cyberpunk", "minimal Dieter Rams" — and watch the entire interface transform. The design system is structured data, not compiled C++, so any AI tool that can read JSON can modify your theme.
 
@@ -38,7 +38,7 @@ The `pulp` CLI covers the full lifecycle: scaffold, build, test, validate, sign,
 
 ### Start from prototype
 
-Write your plugin UI in JavaScript. The renderer is native GPU — WebGPU via Dawn, with Skia Graphite for 2D — running at 60–120 FPS with hot-reload. No browser, no IPC, no subprocess tree. The same JS UI renders through Metal on macOS/iOS, D3D12 on Windows, Vulkan on Linux, and WebGPU in browsers.
+Write your plugin UI in JavaScript. The renderer is native GPU — WebGPU via Dawn, with Skia Graphite for 2D — running at 60–120 FPS with hot-reload in the standalone host. No browser, no IPC, no subprocess tree. The same JS UI renders through Metal on macOS/iOS, D3D12 on Windows, Vulkan on Linux, and WebGPU in browsers.
 
 ### Mix and match
 
@@ -152,7 +152,7 @@ Every DAW developer who's opened Activity Monitor after loading WebView plugins 
 
 ### Why Design Tokens?
 
-Structured data — JSON that any tool can read and write — instead of inheritance hierarchies. AI tools update your design by writing tokens. Changes propagate instantly via hot-reload.
+Structured data — JSON that any tool can read and write — instead of inheritance hierarchies. AI tools update your design by writing tokens. Changes propagate instantly in the standalone host via hot-reload.
 
 ### Why Headless-First?
 

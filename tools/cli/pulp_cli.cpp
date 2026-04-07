@@ -29,6 +29,9 @@
 
 #include "create_targets.hpp"
 #include "design_binding.hpp"
+#include <pulp/ship/installer.hpp>
+#include <pulp/view/screenshot.hpp>
+#include <pulp/format/editor_ui.hpp>
 
 #ifdef __APPLE__
 #include <mach-o/dyld.h>  // _NSGetExecutablePath
@@ -1430,10 +1433,12 @@ static int cmd_validate(const std::vector<std::string>& args) {
     // Parse flags
     bool run_all = false;
     bool json_output = false;
+    bool screenshot = false;
     std::string report_path;
     for (size_t i = 0; i < args.size(); ++i) {
         if (args[i] == "--all") run_all = true;
         else if (args[i] == "--json") json_output = true;
+        else if (args[i] == "--screenshot") screenshot = true;
         else if (args[i] == "--report" && i + 1 < args.size())
             report_path = args[++i];
     }
@@ -1735,6 +1740,56 @@ static int cmd_validate(const std::vector<std::string>& args) {
         }
     }
 
+    // ── Screenshot capture (--screenshot) ───────────────────────────────────
+    if (screenshot) {
+        auto screenshots_dir = root / "artifacts" / "screenshots";
+        fs::create_directories(screenshots_dir);
+        int captured = 0;
+
+        // Capture editor screenshots for each built plugin example
+        auto examples_dir = build_dir / "examples";
+        if (!fs::exists(examples_dir)) examples_dir = build_dir;
+
+        // Use AutoUi to render a generic parameter editor for each plugin's StateStore
+        // This creates the same UI that the plugin would show in a DAW
+        for (auto dir_name : {"VST3", "CLAP", "AU"}) {
+            auto dir = build_dir / dir_name;
+            if (!fs::exists(dir)) continue;
+
+            for (auto& entry : fs::directory_iterator(dir)) {
+                auto ext = entry.path().extension().string();
+                if (ext != ".vst3" && ext != ".clap" && ext != ".component") continue;
+
+                auto name = entry.path().stem().string();
+                auto png_name = name + "-" + dir_name + ".png";
+                auto png_path = screenshots_dir / png_name;
+
+                // Build an editor UI from the StateStore (AutoUi)
+                pulp::state::StateStore store;
+                auto editor_ui = pulp::format::build_editor_ui(store, false);
+
+                if (!editor_ui.root) {
+                    std::cout << "  Screenshot: " << name << " (" << dir_name << ") — no editor, skipping\n";
+                    continue;
+                }
+
+                uint32_t w = 400, h = 300;
+                bool ok = pulp::view::render_to_file(*editor_ui.root, w, h, png_path.string());
+                if (ok) {
+                    std::cout << "  Screenshot: " << png_path.filename().string() << "\n";
+                    ++captured;
+                } else {
+                    std::cerr << "  Screenshot FAILED: " << name << " (" << dir_name << ")\n";
+                }
+            }
+        }
+
+        if (captured > 0)
+            std::cout << captured << " screenshot(s) saved to " << screenshots_dir.string() << "\n";
+        else
+            std::cout << "No plugin screenshots captured.\n";
+    }
+
     return failed > 0 ? 1 : 0;
 }
 
@@ -1795,11 +1850,70 @@ static int cmd_ship(const std::vector<std::string>& args) {
         fs::create_directories(artifacts);
 
         std::string version = "0.1.0";
+        bool per_user = false;
         for (size_t i = 1; i < args.size(); ++i) {
             if (args[i] == "--version" && i + 1 < args.size())
                 version = args[++i];
+            if (args[i] == "--per-user")
+                per_user = true;
         }
 
+#ifdef _WIN32
+        // Windows: use NSIS installer
+        // Check for makensis
+        if (std::system("where makensis >nul 2>&1") != 0) {
+            std::cerr << "Error: makensis not found on PATH\n";
+            std::cerr << "  Install NSIS from https://nsis.sourceforge.io/\n";
+            std::cerr << "  Then add its directory to PATH\n";
+            return 1;
+        }
+
+        // Discover product name from the first plugin found
+        std::string product_name;
+        pulp::ship::InstallerConfig config;
+        config.version = version;
+        config.per_user_install = per_user;
+
+        for (auto dir_name : {"VST3", "CLAP"}) {
+            auto dir = build_dir / dir_name;
+            if (!fs::exists(dir)) continue;
+            std::string format_lower = dir_name;
+            for (auto& c : format_lower) c = static_cast<char>(std::tolower(c));
+
+            for (auto& entry : fs::directory_iterator(dir)) {
+                auto ext = entry.path().extension().string();
+                if (ext == ".vst3" || ext == ".clap") {
+                    if (product_name.empty())
+                        product_name = entry.path().stem().string();
+                    config.plugins.push_back({
+                        entry.path().string(), "", format_lower
+                    });
+                }
+            }
+        }
+
+        if (config.plugins.empty()) {
+            std::cerr << "Error: no plugins found in " << build_dir.string() << "\n";
+            return 1;
+        }
+
+        config.product_name = product_name;
+        config.publisher = "Pulp";
+        config.output_path = (artifacts / (product_name + "-" + version + "-setup.exe")).string();
+
+        auto license = root / "LICENSE.md";
+        if (fs::exists(license)) config.license_path = license.string();
+
+        std::cout << "Creating NSIS installer for " << product_name << "...\n";
+        if (pulp::ship::create_nsis_installer(config)) {
+            std::cout << "  Created " << config.output_path << "\n";
+        } else {
+            std::cerr << "  FAILED to create installer\n";
+            return 1;
+        }
+        return 0;
+#else
+        // macOS/Linux: use pkgbuild (macOS) or deb (Linux)
         int pkg_count = 0;
         for (auto dir_name : {"VST3", "CLAP", "AU"}) {
             auto dir = build_dir / dir_name;
@@ -1833,6 +1947,7 @@ static int cmd_ship(const std::vector<std::string>& args) {
         }
         std::cout << "Created " << pkg_count << " packages in " << artifacts.string() << "\n";
         return 0;
+#endif
     }
 
     if (sub == "check") {
