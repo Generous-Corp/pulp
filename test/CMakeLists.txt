@@ -51,6 +51,16 @@ add_executable(pulp-test-sync test_sync_primitives.cpp)
 target_link_libraries(pulp-test-sync PRIVATE pulp::runtime Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-sync)
 
+# MIDI CI tests
+add_executable(pulp-test-midi-ci test_midi_ci.cpp)
+target_link_libraries(pulp-test-midi-ci PRIVATE pulp::midi Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-midi-ci)
+
+# Analytics tests
+add_executable(pulp-test-analytics test_analytics.cpp)
+target_link_libraries(pulp-test-analytics PRIVATE pulp::runtime Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-analytics)
+
 # Crypto tests (SHA-256, MD5, AES, machine ID)
 add_executable(pulp-test-crypto test_crypto.cpp)
 target_link_libraries(pulp-test-crypto PRIVATE pulp::runtime Catch2::Catch2WithMain)
