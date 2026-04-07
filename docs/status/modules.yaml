@@ -33,7 +33,7 @@ modules:
     docs: reference/modules.md#signal
 
   - name: state
-    summary: Thread-safe parameters, reactive StateTree with JSON sync, PresetManager, PropertiesFile (JSON settings), undo/redo
+    summary: Thread-safe parameters, reactive StateTree with JSON sync, PresetManager, PropertiesFile (JSON settings), EditHistory (global undo/redo with coalescing, Binding integration)
     status: stable
     dependencies: [runtime]
     docs: reference/modules.md#state
@@ -52,38 +52,48 @@ modules:
 
   - name: canvas
     summary: >
-      2D GPU-accelerated drawing (CoreGraphics + Skia Graphite backends), path builder,
-      gradients, clipping, blend modes, SVG, TextShaper (PreText-style measure-once reflow-forever
-      with optional HarfBuzz via Skia), AttributedString with word-wrap, RectangleList for
-      clip regions, ImageConvolutionKernel (blur, sharpen, edge detect)
+      2D GPU-accelerated drawing (CoreGraphics + Skia Graphite backends). HDR float color
+      (HSV/HSL/OKLCH conversions). 14 SDF shape primitives with SkSL shaders (rect, circle,
+      rounded_rect, arc, diamond, squircle, triangle, ring, stadium, cross, segments, bezier).
+      Compositing layers (save_layer with opacity + blur on Skia and CoreGraphics).
+      ConicGradient, FillStyle, gradient tile modes. Path builder, clipping, 16 blend modes,
+      SVG, TextShaper, AttributedString with word-wrap, RectangleList, ImageConvolutionKernel.
+      ViewEffect system: GpuBlurEffect, GpuBloomEffect, ChromaticAberration, Vignette,
+      CustomShaderEffect (arbitrary SkSL), EffectChain.
     status: usable
     dependencies: [runtime]
-    docs: reference/modules.md#canvas
+    docs: reference/rendering.md#canvas
 
   - name: render
     summary: >
       GPU surface management (Dawn, Skia Graphite) — Metal, D3D12, Vulkan backends.
-      Includes experimental WebGPU compute pipeline for batch audio processing (>64K elements).
-      Compute is separate from rendering — not for real-time audio callbacks.
-    status: experimental
+      DirtyTracker for partial repaint optimization with rect coalescing.
+      DrawBatcher for draw call merging with overlap detection.
+      RenderPassManager for multi-pass frame ordering and budget tracking.
+      Atlas systems: ImageAtlas, GradientAtlas, GlyphAtlas, PathAtlas, BufferPool.
+      GPU graph renderers: GpuGraphRenderer (1D), GpuHeatMapRenderer (2D), GpuBarRenderer.
+      WebGPU compute pipeline for PMREM, PBR materials, and batch processing.
+      DRACO mesh decoder (native C++, optional). KTX2 texture decoder with platform
+      format detection (ASTC/BC7/ETC2). Binary transfer optimization.
+    status: usable
     dependencies: [runtime, canvas]
-    docs: reference/modules.md#render
+    docs: reference/rendering.md#render
 
   - name: view
     summary: >
       Full widget toolkit with CSS parity: flexbox, grid layout, transforms, animations,
-      backgrounds/gradients, filters, colors (CSS L4), text styling, positioned layout, z-index,
+      backgrounds/gradients, filters, colors (CSS L4), text styling, positioned layout, z-index.
+      SpriteStrip animation for designer-created knob/fader filmstrips.
+      ThemeEditor widget for live theme editing with swatch grid and JSON export.
+      TextDirection (LTR/RTL/vertical) and TextVerticalAlign on Label.
+      Viewport-relative dimensions (vw/vh/vmin/vmax/%) via DimensionUnit with Yoga integration.
+      View→WindowHost back-reference for widget access to platform features.
+      Mouse relative mode for infinite knob drag (macOS CGAssociate + SDL3).
+      Client-side window decoration, fixed aspect ratio, always-on-top, multi-monitor DPI.
       Canvas 2D (25 commands), ImageView, ListBox (virtualized), ComboBox, ScrollView, TextEditor
-      with IME, TreeView, ProgressBar, Tooltip. Web-compat JS prelude (document/Element/style/events/
-      StyleSheet/querySelector). FrameClock animation with motion tokens. Hot-reload, inspector,
-      app framework, design export. Multi-window framework (WindowManager): window registry,
-      parent-child cascading close, floating palettes, inspectors, popups, dialogs, shared theme
-      propagation, inter-window messaging, screen enumeration, window state save/restore, shared
-      GPU device for Dawn-backed rendering across windows. Platform: cursor management, Tab focus,
-      VoiceOver accessibility, context menus, keyboard shortcuts, file dialogs. Pointer events,
-      gestures, Apple Pencil.
-      JS engine abstraction: pluggable backend (QuickJS default, JavaScriptCore on Apple, V8 optional).
-      Build-time engine selection via PULP_JS_ENGINE, smart workload-based engine recommendation.
+      with IME, TreeView, ProgressBar, Tooltip. Web-compat JS prelude. FrameClock animation with
+      motion tokens. Hot-reload, inspector, app framework, design export. Multi-window framework.
+      Pointer events, gestures, Apple Pencil. JS engine abstraction (QuickJS/JSC/V8).
     status: usable
     dependencies: [canvas, events, state]
     docs: reference/modules.md#view
