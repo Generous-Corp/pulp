@@ -7,12 +7,9 @@
 #include <pulp/view/script_engine.hpp>
 #include <pulp/view/widget_bridge.hpp>
 #include <pulp/state/store.hpp>
-#if __has_include(<pulp/render/gpu_surface.hpp>)
-#include <pulp/render/gpu_surface.hpp>
-#define HAS_GPU_SURFACE 1
-#else
-#define HAS_GPU_SURFACE 0
-#endif
+// Note: no GPU surface dependency — tests the JS-level decode and texture copy
+// without requiring Dawn/Skia. The native decode test skips gracefully when
+// __decodeImageDataImpl is unavailable (no PULP_HAS_SKIA).
 
 using namespace pulp::view;
 
@@ -47,18 +44,7 @@ TEST_CASE("Native image decode via __decodeImageDataImpl", "[webcompat][gltf][te
     root.set_bounds({0, 0, 100, 100});
     root.set_theme(Theme::dark());
 
-#if HAS_GPU_SURFACE
-    auto gpu = pulp::render::GpuSurface::create_dawn();
-    if (gpu) {
-        pulp::render::GpuSurface::Config cfg{};
-        cfg.width = 100; cfg.height = 100;
-        cfg.native_surface_handle = nullptr;
-        if (!gpu->initialize(cfg)) gpu.reset();
-    }
-    auto bridge = std::make_unique<WidgetBridge>(engine, root, store, gpu.get());
-#else
     auto bridge = std::make_unique<WidgetBridge>(engine, root, store);
-#endif
 
     auto bytes = png_byte_array();
     std::string js = R"JS(

@@ -188,7 +188,7 @@ catch_discover_tests(pulp-test-nsis-installer)
 
 # Image decode / glTF texture pipeline tests
 add_executable(pulp-test-image-decode test_image_decode.cpp)
-target_link_libraries(pulp-test-image-decode PRIVATE pulp::view pulp::render Catch2::Catch2WithMain)
+target_link_libraries(pulp-test-image-decode PRIVATE pulp::view Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-image-decode)
 
 # GPU surface tests
