@@ -28,7 +28,7 @@ FetchContent_Declare(
   GIT_SHALLOW    TRUE
 )
 FetchContent_MakeAvailable(q)
-target_link_libraries(MyPlugin PRIVATE cycfi::q)
+target_link_libraries(MyPlugin PRIVATE libq)
 ```
 
 Q depends on `cycfi::infra` which is fetched automatically by its CMakeLists.txt.

@@ -36,7 +36,7 @@ target_include_directories(MyPlugin PRIVATE
 ## Example Usage
 
 ```cpp
-#include "signalsmith-dsp/dsp/spectral.h"
+#include "spectral.h"
 
 class SpectralProcessor : public pulp::Processor {
     signalsmith::spectral::STFT<float> stft;

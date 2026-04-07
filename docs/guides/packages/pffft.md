@@ -28,13 +28,13 @@ FetchContent_Declare(
   GIT_SHALLOW    TRUE
 )
 FetchContent_MakeAvailable(pffft)
-target_link_libraries(MyPlugin PRIVATE pffft)
+target_link_libraries(MyPlugin PRIVATE PFFFT)
 ```
 
 ## Example Usage
 
 ```cpp
-#include "pffft.h"
+#include <pffft/pffft.h>
 
 class FastSpectrum {
     PFFFT_Setup* setup = nullptr;
