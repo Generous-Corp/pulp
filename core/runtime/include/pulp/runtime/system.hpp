@@ -74,6 +74,21 @@ struct SystemInfo {
     int cpu_threads = 0;          // Logical threads
     uint64_t total_memory_mb = 0; // Total RAM in MB
     std::string arch;             // "arm64", "x86_64"
+
+    // Extended CPU features
+    bool has_sse2 = false;
+    bool has_sse4_1 = false;
+    bool has_avx = false;
+    bool has_avx2 = false;
+    bool has_avx512 = false;
+    bool has_neon = false;         // ARM NEON (always true on arm64)
+    bool has_fma = false;          // Fused multiply-add
+
+    // Display info
+    int display_count = 0;
+    int primary_display_width = 0;
+    int primary_display_height = 0;
+    float primary_display_scale = 1.0f;  // HiDPI scale factor
 };
 
 /// Query system information (cached after first call)

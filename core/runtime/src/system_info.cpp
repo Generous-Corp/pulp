@@ -110,6 +110,31 @@ static SystemInfo query_system_info() {
         info.total_memory_mb = (si.totalram * si.mem_unit) / (1024 * 1024);
 #endif
 
+    // CPU features
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
+    // x86: check via compiler built-ins or CPUID
+    #ifdef __SSE2__
+    info.has_sse2 = true;
+    #endif
+    #ifdef __SSE4_1__
+    info.has_sse4_1 = true;
+    #endif
+    #ifdef __AVX__
+    info.has_avx = true;
+    #endif
+    #ifdef __AVX2__
+    info.has_avx2 = true;
+    #endif
+    #ifdef __AVX512F__
+    info.has_avx512 = true;
+    #endif
+    #ifdef __FMA__
+    info.has_fma = true;
+    #endif
+#elif defined(__aarch64__) || defined(__arm64__) || defined(_M_ARM64)
+    info.has_neon = true;  // Always available on arm64
+#endif
+
     return info;
 }
 
