@@ -28,6 +28,7 @@
 #include <pulp/tools/audio/service.hpp>
 
 #include "create_targets.hpp"
+#include "package_commands.hpp"
 #include "design_binding.hpp"
 #include <pulp/ship/installer.hpp>
 #include <pulp/view/screenshot.hpp>
@@ -4671,7 +4672,14 @@ int main(int argc, char* argv[]) {
     if (command == "ship")     return cmd_ship(args);
     if (command == "docs")     return cmd_docs(args);
     if (command == "clean")    return cmd_clean(args);
-    if (command == "add") {
+    if (command == "add")      return pulp::cli::pkg::cmd_add(args);
+    if (command == "remove")   return pulp::cli::pkg::cmd_remove(args);
+    if (command == "list")     return pulp::cli::pkg::cmd_list(args);
+    if (command == "search")   return pulp::cli::pkg::cmd_search(args);
+    if (command == "update")   return pulp::cli::pkg::cmd_update(args);
+    if (command == "suggest")  return pulp::cli::pkg::cmd_suggest(args);
+    if (command == "target")   return pulp::cli::pkg::cmd_target(args);
+    if (command == "add-component") {
         auto root = find_project_root();
         if (root.empty()) {
             std::cerr << "Error: not in a Pulp project directory\n";
@@ -4687,6 +4695,26 @@ int main(int argc, char* argv[]) {
         return run(cmd);
     }
     if (command == "audit") {
+        // Check for package-manager-specific flags
+        bool pkg_flag = false, plat_flag = false, lic_flag = false;
+        for (auto& a : args) {
+            if (a == "--packages") pkg_flag = true;
+            if (a == "--platforms") plat_flag = true;
+            if (a == "--licenses") lic_flag = true;
+        }
+        if (pkg_flag || plat_flag || lic_flag) {
+            auto root = find_project_root();
+            if (root.empty()) {
+                std::cerr << "Error: not in a Pulp project directory\n";
+                return 1;
+            }
+            int rc = 0;
+            if (pkg_flag) rc |= pulp::cli::pkg::audit_packages(root);
+            if (plat_flag) rc |= pulp::cli::pkg::audit_platforms(root);
+            if (lic_flag) rc |= pulp::cli::pkg::audit_licenses(root);
+            return rc;
+        }
+        // Fall through to existing Python audit
         auto root = find_project_root();
         if (root.empty()) {
             std::cerr << "Error: not in a Pulp project directory\n";

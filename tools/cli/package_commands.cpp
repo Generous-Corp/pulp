@@ -1,0 +1,1010 @@
+// SPDX-License-Identifier: MIT
+#include "package_commands.hpp"
+#include "package_registry.hpp"
+
+#include <algorithm>
+#include <filesystem>
+#include <fstream>
+#include <iomanip>
+#include <iostream>
+#include <regex>
+#include <sstream>
+
+namespace pulp::cli::pkg {
+
+// ── Helpers ──
+
+static bool g_color = true;
+
+static std::string green(const std::string& s) {
+    return g_color ? ("\033[32m" + s + "\033[0m") : s;
+}
+static std::string red(const std::string& s) {
+    return g_color ? ("\033[31m" + s + "\033[0m") : s;
+}
+static std::string yellow(const std::string& s) {
+    return g_color ? ("\033[33m" + s + "\033[0m") : s;
+}
+static std::string dim(const std::string& s) {
+    return g_color ? ("\033[2m" + s + "\033[0m") : s;
+}
+
+static void print_ok(const std::string& msg) {
+    std::cout << green("✓") << " " << msg << "\n";
+}
+static void print_fail(const std::string& msg) {
+    std::cerr << red("✗") << " " << msg << "\n";
+}
+static void print_warn(const std::string& msg) {
+    std::cout << yellow("⚠") << " " << msg << "\n";
+}
+
+static fs::path find_project_root() {
+    auto dir = fs::current_path();
+    while (true) {
+        if (fs::exists(dir / "CMakeLists.txt") && fs::exists(dir / "core"))
+            return dir;
+        if (fs::exists(dir / "pulp.toml"))
+            return dir;
+        auto parent = dir.parent_path();
+        if (parent == dir) break;
+        dir = parent;
+    }
+    return {};
+}
+
+static fs::path find_registry_path(const fs::path& root) {
+    auto p = root / "tools" / "packages" / "registry.json";
+    if (fs::exists(p)) return p;
+    return {};
+}
+
+static std::string read_file(const fs::path& path) {
+    std::ifstream f(path);
+    if (!f) return {};
+    return {std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>()};
+}
+
+static bool write_file(const fs::path& path, const std::string& content) {
+    if (auto parent = path.parent_path(); !parent.empty())
+        fs::create_directories(parent);
+    std::ofstream f(path);
+    if (!f) return false;
+    f << content;
+    return f.good();
+}
+
+static std::string dots(const std::string& name, int width = 35) {
+    int n = std::max(1, width - static_cast<int>(name.size()));
+    return std::string(n, '.');
+}
+
+// ── CMake Generation ──
+
+static std::string generate_cmake_block(const PackageDescriptor& pkg,
+                                         bool platform_guard = false,
+                                         const std::string& guard_platform = "") {
+    std::ostringstream os;
+    os << "# ── " << pkg.id << " (" << pkg.version << ")";
+    if (platform_guard) os << " [" << guard_platform << " only]";
+    os << " ──\n";
+
+    if (platform_guard) {
+        if (guard_platform == "macOS") os << "if(APPLE)\n";
+        else if (guard_platform == "Windows") os << "if(WIN32)\n";
+        else if (guard_platform == "Linux") os << "if(UNIX AND NOT APPLE)\n";
+    }
+
+    std::string indent = platform_guard ? "  " : "";
+
+    if (pkg.fetch.method == "header-only") {
+        os << indent << "FetchContent_Declare(" << pkg.id << "\n";
+        os << indent << "  GIT_REPOSITORY " << pkg.fetch.git_repository << "\n";
+        os << indent << "  GIT_TAG        " << pkg.fetch.git_tag << "\n";
+        os << indent << "  GIT_SHALLOW    TRUE\n";
+        os << indent << ")\n";
+        os << indent << "FetchContent_MakeAvailable(" << pkg.id << ")\n";
+        if (!pkg.cmake.targets.empty()) {
+            os << indent << "add_library(" << pkg.cmake.targets[0] << " INTERFACE)\n";
+            os << indent << "target_include_directories(" << pkg.cmake.targets[0]
+               << " INTERFACE ${" << pkg.id << "_SOURCE_DIR}";
+            if (!pkg.cmake.include_dir.empty() && pkg.cmake.include_dir != ".")
+                os << "/" << pkg.cmake.include_dir;
+            os << ")\n";
+        }
+    } else {
+        os << indent << "FetchContent_Declare(" << pkg.id << "\n";
+        os << indent << "  GIT_REPOSITORY " << pkg.fetch.git_repository << "\n";
+        os << indent << "  GIT_TAG        " << pkg.fetch.git_tag << "\n";
+        os << indent << "  GIT_SHALLOW    TRUE\n";
+        os << indent << ")\n";
+        os << indent << "FetchContent_MakeAvailable(" << pkg.id << ")\n";
+    }
+
+    if (platform_guard) {
+        auto upper_id = pkg.id;
+        std::transform(upper_id.begin(), upper_id.end(), upper_id.begin(),
+                       [](unsigned char c) { return c == '-' ? '_' : std::toupper(c); });
+        os << "  target_compile_definitions(${PROJECT_NAME} PRIVATE PULP_HAS_"
+           << upper_id << "=1)\n";
+        os << "endif()\n";
+    }
+
+    os << "# ── end " << pkg.id << " ──\n";
+    return os.str();
+}
+
+static std::string generate_packages_cmake(const LockFile& lock, const Registry& reg,
+                                            const fs::path& project_root) {
+    std::ostringstream os;
+    os << "# Auto-generated by pulp package manager — do not edit manually\n";
+    os << "# Run 'pulp add <pkg>' or 'pulp remove <pkg>' to modify\n";
+    os << "include(FetchContent)\n\n";
+
+    for (auto& [id, lp] : lock.packages) {
+        auto it = reg.packages.find(id);
+        if (it == reg.packages.end()) continue;
+        os << generate_cmake_block(it->second) << "\n";
+    }
+
+    return os.str();
+}
+
+static void ensure_cmake_include(const fs::path& project_root) {
+    auto cml = project_root / "CMakeLists.txt";
+    auto content = read_file(cml);
+    if (content.find("cmake/pulp-packages.cmake") != std::string::npos)
+        return;
+
+    std::ofstream f(cml, std::ios::app);
+    f << "\n# Pulp package manager\n";
+    f << "include(cmake/pulp-packages.cmake OPTIONAL)\n";
+}
+
+// ── Metadata Updates ──
+
+static void update_dependencies_md(const fs::path& root, const PackageDescriptor& pkg,
+                                    bool add) {
+    auto path = root / "DEPENDENCIES.md";
+    auto content = read_file(path);
+    if (content.empty()) return;
+
+    std::string entry = "| " + pkg.name + " | " + pkg.version + " | " +
+                        pkg.license + " | FetchContent | " + pkg.description + " | 2026-04-07 |";
+
+    if (add) {
+        // Insert alphabetically in the table
+        std::istringstream stream(content);
+        std::ostringstream out;
+        std::string line;
+        bool inserted = false;
+        bool in_table = false;
+
+        while (std::getline(stream, line)) {
+            if (line.find("| Name") != std::string::npos || line.find("|---") != std::string::npos) {
+                in_table = true;
+                out << line << "\n";
+                continue;
+            }
+
+            if (in_table && !inserted && line.starts_with("| ")) {
+                // Extract name from table row for alphabetical comparison
+                auto end_name = line.find(" |", 2);
+                auto row_name = line.substr(2, end_name - 2);
+                // Trim the name
+                while (!row_name.empty() && row_name.back() == ' ') row_name.pop_back();
+
+                if (pkg.name < row_name) {
+                    out << entry << "\n";
+                    inserted = true;
+                }
+            }
+
+            if (in_table && !line.starts_with("| ") && !inserted) {
+                out << entry << "\n";
+                inserted = true;
+            }
+
+            out << line << "\n";
+        }
+
+        if (!inserted) out << entry << "\n";
+        write_file(path, out.str());
+    } else {
+        // Remove: find and delete the line containing this package name
+        std::istringstream stream(content);
+        std::ostringstream out;
+        std::string line;
+        while (std::getline(stream, line)) {
+            if (line.find("| " + pkg.name + " |") != std::string::npos) continue;
+            out << line << "\n";
+        }
+        write_file(path, out.str());
+    }
+}
+
+static void update_notice_md(const fs::path& root, const PackageDescriptor& pkg,
+                              bool add) {
+    auto path = root / "NOTICE.md";
+    auto content = read_file(path);
+
+    if (add) {
+        std::string block = "\n## " + pkg.name + "\n\n"
+                          + pkg.license + " — " + pkg.url + "\n";
+
+        // Insert alphabetically by finding the right position
+        auto pos = content.find("## ");
+        while (pos != std::string::npos) {
+            auto end_line = content.find('\n', pos);
+            auto section_name = content.substr(pos + 3, end_line - pos - 3);
+            if (pkg.name < section_name) {
+                content.insert(pos, block + "\n");
+                write_file(path, content);
+                return;
+            }
+            pos = content.find("## ", end_line);
+        }
+        // Append at end
+        content += block;
+        write_file(path, content);
+    } else {
+        // Remove the section for this package
+        auto header = "## " + pkg.name;
+        auto pos = content.find(header);
+        if (pos != std::string::npos) {
+            auto next = content.find("\n## ", pos + 1);
+            if (next == std::string::npos) next = content.size();
+            // Also remove leading blank line
+            if (pos > 0 && content[pos - 1] == '\n') pos--;
+            content.erase(pos, next - pos);
+            write_file(path, content);
+        }
+    }
+}
+
+// ── Commands ──
+
+int cmd_target(const std::vector<std::string>& args) {
+    if (args.empty()) {
+        std::cout << "Usage: pulp target <list|add|remove> [target]\n\n"
+                  << "Manage platform targets for your project.\n"
+                  << "Target format: Platform-arch (e.g., macOS-arm64, Windows-x64)\n\n"
+                  << "Commands:\n"
+                  << "  list              Show current project targets\n"
+                  << "  add <target>      Add a platform target\n"
+                  << "  remove <target>   Remove a platform target\n";
+        return 0;
+    }
+
+    auto root = find_project_root();
+    if (root.empty()) {
+        print_fail("Not in a Pulp project (no CMakeLists.txt or pulp.toml found)");
+        return 1;
+    }
+
+    auto subcmd = args[0];
+
+    if (subcmd == "list") {
+        auto targets = read_project_targets(root);
+        bool has_toml = fs::exists(root / "pulp.toml");
+        std::cout << "Project targets";
+        if (!has_toml) std::cout << " " << dim("(defaults — no pulp.toml)");
+        std::cout << ":\n";
+        for (auto& t : targets)
+            std::cout << "  " << t.to_string() << "\n";
+        return 0;
+    }
+
+    if (subcmd == "add") {
+        if (args.size() < 2) {
+            print_fail("Usage: pulp target add <Platform-arch>");
+            return 1;
+        }
+        auto parsed = PlatformTarget::parse(args[1]);
+        if (!parsed) {
+            print_fail("Invalid target: " + args[1]);
+            std::cout << "Valid platforms: macOS, Windows, Linux, iOS, WASM\n";
+            std::cout << "Valid architectures: arm64, x64, wasm32\n";
+            return 1;
+        }
+        auto targets = read_project_targets(root);
+        for (auto& t : targets) {
+            if (t == *parsed) {
+                print_warn("Target " + parsed->to_string() + " is already configured");
+                return 0;
+            }
+        }
+        targets.push_back(*parsed);
+        if (!write_project_targets(root, targets)) {
+            print_fail("Failed to write pulp.toml");
+            return 1;
+        }
+        print_ok("Added target: " + parsed->to_string());
+
+        // Check installed packages for compatibility
+        auto lock_path = root / "packages.lock.json";
+        if (fs::exists(lock_path)) {
+            auto reg_path = find_registry_path(root);
+            if (!reg_path.empty()) {
+                auto [reg, err] = load_registry(reg_path);
+                auto lock = load_lock_file(lock_path);
+                for (auto& [id, lp] : lock.packages) {
+                    auto it = reg.packages.find(id);
+                    if (it == reg.packages.end()) continue;
+                    auto unsup = unsupported_targets(it->second, {*parsed});
+                    if (!unsup.empty())
+                        print_warn(it->second.name + " does not support " + parsed->to_string());
+                }
+            }
+        }
+        return 0;
+    }
+
+    if (subcmd == "remove") {
+        if (args.size() < 2) {
+            print_fail("Usage: pulp target remove <Platform-arch>");
+            return 1;
+        }
+        auto parsed = PlatformTarget::parse(args[1]);
+        if (!parsed) {
+            print_fail("Invalid target: " + args[1]);
+            return 1;
+        }
+        auto targets = read_project_targets(root);
+        auto it = std::find(targets.begin(), targets.end(), *parsed);
+        if (it == targets.end()) {
+            print_fail("Target " + parsed->to_string() + " is not configured");
+            return 1;
+        }
+        if (targets.size() == 1) {
+            print_fail("Cannot remove the last target");
+            return 1;
+        }
+        targets.erase(it);
+        if (!write_project_targets(root, targets)) {
+            print_fail("Failed to write pulp.toml");
+            return 1;
+        }
+        print_ok("Removed target: " + parsed->to_string());
+        return 0;
+    }
+
+    print_fail("Unknown target subcommand: " + subcmd);
+    return 1;
+}
+
+int cmd_search(const std::vector<std::string>& args) {
+    if (args.empty()) {
+        std::cout << "Usage: pulp search <query>\n\n"
+                  << "Search the package registry by name, description, tags, or category.\n";
+        return 0;
+    }
+
+    auto root = find_project_root();
+    auto reg_path = root.empty() ? fs::path{} : find_registry_path(root);
+    if (reg_path.empty()) {
+        print_fail("Package registry not found at tools/packages/registry.json");
+        return 1;
+    }
+
+    auto [reg, err] = load_registry(reg_path);
+    if (!err.empty()) {
+        print_fail(err);
+        return 1;
+    }
+
+    std::string query;
+    bool json_output = false;
+    for (size_t i = 0; i < args.size(); ++i) {
+        if (args[i] == "--format" && i + 1 < args.size() && args[i + 1] == "json") {
+            json_output = true;
+            ++i;
+        } else {
+            if (!query.empty()) query += " ";
+            query += args[i];
+        }
+    }
+
+    auto results = search(reg, query);
+    if (results.empty()) {
+        std::cout << "No packages found matching: " << query << "\n";
+        return 0;
+    }
+
+    if (json_output) {
+        std::cout << "[\n";
+        for (size_t i = 0; i < results.size(); ++i) {
+            auto& p = *results[i];
+            std::cout << "  {\"id\": \"" << p.id << "\", \"name\": \"" << p.name
+                      << "\", \"version\": \"" << p.version << "\", \"license\": \""
+                      << p.license << "\", \"description\": \"" << p.description << "\"}";
+            if (i + 1 < results.size()) std::cout << ",";
+            std::cout << "\n";
+        }
+        std::cout << "]\n";
+    } else {
+        std::cout << "Found " << results.size() << " package(s) matching \"" << query << "\":\n\n";
+        for (auto* p : results) {
+            auto verdict = check_license(p->license);
+            std::string lic_note;
+            if (verdict == LicenseVerdict::rejected) lic_note = red(" (license incompatible)");
+            else if (verdict == LicenseVerdict::review_required) lic_note = yellow(" (license review required)");
+
+            std::cout << "  " << green(p->id) << " " << dim("v" + p->version)
+                      << " " << dim("[" + p->license + "]") << lic_note << "\n";
+            std::cout << "    " << p->description << "\n\n";
+        }
+    }
+    return 0;
+}
+
+int cmd_list(const std::vector<std::string>& args) {
+    auto root = find_project_root();
+    if (root.empty()) {
+        print_fail("Not in a Pulp project");
+        return 1;
+    }
+
+    auto lock_path = root / "packages.lock.json";
+    if (!fs::exists(lock_path)) {
+        std::cout << "No packages installed.\n";
+        std::cout << dim("Use 'pulp add <package>' to add a package, or 'pulp search <query>' to find packages.") << "\n";
+        return 0;
+    }
+
+    auto lock = load_lock_file(lock_path);
+    if (lock.packages.empty()) {
+        std::cout << "No packages installed.\n";
+        return 0;
+    }
+
+    // Try to enrich with registry data
+    auto reg_path = find_registry_path(root);
+    Registry reg;
+    if (!reg_path.empty()) {
+        auto [r, e] = load_registry(reg_path);
+        if (e.empty()) reg = r;
+    }
+
+    bool json_output = std::find(args.begin(), args.end(), "--json") != args.end();
+
+    if (json_output) {
+        std::cout << "[\n";
+        bool first = true;
+        for (auto& [id, lp] : lock.packages) {
+            if (!first) std::cout << ",\n";
+            first = false;
+            std::cout << "  {\"id\": \"" << id << "\", \"version\": \"" << lp.version << "\"}";
+        }
+        std::cout << "\n]\n";
+    } else {
+        std::cout << "Installed packages (" << lock.packages.size() << "):\n\n";
+        for (auto& [id, lp] : lock.packages) {
+            auto it = reg.packages.find(id);
+            std::string name = it != reg.packages.end() ? it->second.name : id;
+            std::string license = it != reg.packages.end() ? it->second.license : "?";
+            std::string category = it != reg.packages.end() ? it->second.category : "?";
+
+            std::cout << "  " << name << " " << dots(name) << " "
+                      << dim("v" + lp.version) << " " << dim("[" + license + "]")
+                      << " " << dim(category) << "\n";
+        }
+    }
+    return 0;
+}
+
+int cmd_add(const std::vector<std::string>& args) {
+    if (args.empty()) {
+        std::cout << "Usage: pulp add <package> [options]\n\n"
+                  << "Options:\n"
+                  << "  --license-override commercial   Accept a rejected license\n"
+                  << "  --platform-guard                Add with platform guard (skip prompt)\n"
+                  << "  --no-cmake                      Skip CMake wiring\n";
+        return 0;
+    }
+
+    // Parse args
+    std::string package_id;
+    bool license_override = false;
+    bool platform_guard = false;
+    bool no_cmake = false;
+
+    for (size_t i = 0; i < args.size(); ++i) {
+        if (args[i] == "--license-override" && i + 1 < args.size() && args[i + 1] == "commercial") {
+            license_override = true; ++i;
+        } else if (args[i] == "--platform-guard") {
+            platform_guard = true;
+        } else if (args[i] == "--no-cmake") {
+            no_cmake = true;
+        } else if (package_id.empty() && !args[i].starts_with("-")) {
+            package_id = args[i];
+        }
+    }
+
+    if (package_id.empty()) {
+        print_fail("No package specified");
+        return 1;
+    }
+
+    auto root = find_project_root();
+    if (root.empty()) {
+        print_fail("Not in a Pulp project");
+        return 1;
+    }
+
+    // Load registry
+    auto reg_path = find_registry_path(root);
+    if (reg_path.empty()) {
+        print_fail("Package registry not found at tools/packages/registry.json");
+        return 1;
+    }
+
+    auto [reg, reg_err] = load_registry(reg_path);
+    if (!reg_err.empty()) {
+        print_fail(reg_err);
+        return 1;
+    }
+
+    // Find package
+    auto it = reg.packages.find(package_id);
+    if (it == reg.packages.end()) {
+        print_fail("Package '" + package_id + "' not found in registry");
+        // Suggest similar
+        auto results = search(reg, package_id);
+        if (!results.empty()) {
+            std::cout << "\nDid you mean:\n";
+            for (size_t i = 0; i < std::min(results.size(), size_t(3)); ++i)
+                std::cout << "  " << results[i]->id << " — " << results[i]->description << "\n";
+        }
+        return 1;
+    }
+
+    auto& pkg = it->second;
+
+    // License check
+    auto verdict = check_license(pkg.license);
+    if (verdict == LicenseVerdict::rejected && !license_override) {
+        print_fail(pkg.name + " is " + pkg.license + " licensed, which is incompatible with Pulp's MIT license");
+        std::cout << "\n  If you have a commercial license, use:\n"
+                  << "  pulp add " << package_id << " --license-override commercial\n";
+        return 1;
+    }
+    if (verdict == LicenseVerdict::review_required) {
+        print_warn(pkg.name + " license (" + pkg.license + ") requires manual review");
+    }
+
+    // Check if already installed
+    auto lock_path = root / "packages.lock.json";
+    auto lock = load_lock_file(lock_path);
+    auto lock_it = lock.packages.find(package_id);
+    if (lock_it != lock.packages.end()) {
+        if (lock_it->second.version == pkg.version) {
+            std::cout << pkg.name << " v" << pkg.version << " is already installed.\n";
+            return 0;
+        }
+        print_warn(pkg.name + " is installed at v" + lock_it->second.version
+                   + ", registry has v" + pkg.version + ". Use 'pulp update' to upgrade.");
+        return 0;
+    }
+
+    // Platform check
+    auto targets = read_project_targets(root);
+    auto unsup = unsupported_targets(pkg, targets);
+    if (!unsup.empty()) {
+        print_warn(pkg.name + " does not support all your project targets:");
+        for (auto& t : unsup)
+            std::cout << "  " << red("✗") << " " << t.to_string() << "\n";
+
+        if (!platform_guard) {
+            std::cout << "\nOptions:\n"
+                      << "  1. Add with platform guard (compile only on supported platforms)\n"
+                      << "  2. Cancel\n"
+                      << "Use --platform-guard to skip this prompt.\n";
+            return 1;
+        }
+    }
+
+    // Overlap check
+    if (!pkg.overlaps_with_builtin.empty()) {
+        print_warn(pkg.name + " overlaps with Pulp built-ins:");
+        for (auto& [header, desc] : pkg.overlaps_with_builtin)
+            std::cout << "  " << dim(header) << " — " << desc << "\n";
+        std::cout << "  " << green("Unique value:") << " " << pkg.unique_value << "\n";
+    }
+
+    if (!no_cmake) {
+        // Generate/update cmake/pulp-packages.cmake
+        lock.packages[package_id] = {pkg.version, pkg.fetch.git_repository, "", pkg.fetch.git_tag};
+        auto cmake_content = generate_packages_cmake(lock, reg, root);
+        auto cmake_path = root / "cmake" / "pulp-packages.cmake";
+        if (!write_file(cmake_path, cmake_content)) {
+            print_fail("Failed to write " + cmake_path.string());
+            return 1;
+        }
+
+        // Ensure CMakeLists.txt includes the packages file
+        ensure_cmake_include(root);
+    }
+
+    // Update lock file
+    lock.packages[package_id] = {pkg.version, pkg.fetch.git_repository, "", pkg.fetch.git_tag};
+    if (!save_lock_file(lock_path, lock)) {
+        print_fail("Failed to write packages.lock.json");
+        return 1;
+    }
+
+    // Update metadata files
+    update_dependencies_md(root, pkg, true);
+    update_notice_md(root, pkg, true);
+
+    // Print success
+    print_ok("Added " + pkg.name + " v" + pkg.version);
+
+    if (!no_cmake && !pkg.cmake.targets.empty()) {
+        std::cout << "\n  Add to your CMakeLists.txt target:\n";
+        std::cout << "    target_link_libraries(YourTarget PRIVATE " << pkg.cmake.targets[0] << ")\n";
+    }
+
+    return 0;
+}
+
+int cmd_remove(const std::vector<std::string>& args) {
+    if (args.empty()) {
+        std::cout << "Usage: pulp remove <package>\n";
+        return 0;
+    }
+
+    auto root = find_project_root();
+    if (root.empty()) {
+        print_fail("Not in a Pulp project");
+        return 1;
+    }
+
+    auto package_id = args[0];
+    auto lock_path = root / "packages.lock.json";
+    auto lock = load_lock_file(lock_path);
+
+    if (lock.packages.find(package_id) == lock.packages.end()) {
+        print_fail("Package '" + package_id + "' is not installed");
+        return 1;
+    }
+
+    // Get package info for metadata cleanup
+    auto reg_path = find_registry_path(root);
+    PackageDescriptor pkg;
+    pkg.id = package_id;
+    if (!reg_path.empty()) {
+        auto [reg, err] = load_registry(reg_path);
+        auto it = reg.packages.find(package_id);
+        if (it != reg.packages.end()) pkg = it->second;
+    }
+
+    // Remove from lock file
+    lock.packages.erase(package_id);
+    save_lock_file(lock_path, lock);
+
+    // Regenerate cmake/pulp-packages.cmake
+    if (!reg_path.empty()) {
+        auto [reg, err] = load_registry(reg_path);
+        auto cmake_content = generate_packages_cmake(lock, reg, root);
+        auto cmake_path = root / "cmake" / "pulp-packages.cmake";
+        if (lock.packages.empty()) {
+            fs::remove(cmake_path);
+        } else {
+            write_file(cmake_path, cmake_content);
+        }
+    }
+
+    // Update metadata
+    if (!pkg.name.empty()) {
+        update_dependencies_md(root, pkg, false);
+        update_notice_md(root, pkg, false);
+    }
+
+    print_ok("Removed " + (pkg.name.empty() ? package_id : pkg.name));
+    std::cout << dim("  Remember to remove target_link_libraries and #include directives from your code.") << "\n";
+    return 0;
+}
+
+int cmd_update(const std::vector<std::string>& args) {
+    auto root = find_project_root();
+    if (root.empty()) {
+        print_fail("Not in a Pulp project");
+        return 1;
+    }
+
+    auto lock_path = root / "packages.lock.json";
+    if (!fs::exists(lock_path)) {
+        std::cout << "No packages installed.\n";
+        return 0;
+    }
+
+    auto reg_path = find_registry_path(root);
+    if (reg_path.empty()) {
+        print_fail("Package registry not found");
+        return 1;
+    }
+
+    auto [reg, err] = load_registry(reg_path);
+    if (!err.empty()) { print_fail(err); return 1; }
+
+    auto lock = load_lock_file(lock_path);
+    bool apply = std::find(args.begin(), args.end(), "--apply") != args.end();
+    bool has_updates = false;
+
+    for (auto& [id, lp] : lock.packages) {
+        auto it = reg.packages.find(id);
+        if (it == reg.packages.end()) continue;
+
+        if (lp.version != it->second.version) {
+            has_updates = true;
+            std::cout << "  " << it->second.name << ": "
+                      << dim(lp.version) << " → " << green(it->second.version) << "\n";
+            if (apply) {
+                lp.version = it->second.version;
+                lp.commit = it->second.fetch.git_tag;
+            }
+        }
+    }
+
+    if (!has_updates) {
+        print_ok("All packages are up to date");
+        return 0;
+    }
+
+    if (apply) {
+        save_lock_file(lock_path, lock);
+        auto cmake_content = generate_packages_cmake(lock, reg, root);
+        write_file(root / "cmake" / "pulp-packages.cmake", cmake_content);
+        print_ok("Updated packages and regenerated cmake/pulp-packages.cmake");
+    } else {
+        std::cout << "\nRun 'pulp update --apply' to apply these updates.\n";
+    }
+
+    return 0;
+}
+
+int cmd_suggest(const std::vector<std::string>& args) {
+    if (args.empty()) {
+        std::cout << "Usage: pulp suggest [options]\n\n"
+                  << "Options:\n"
+                  << "  --description \"<text>\"   Find packages matching a description\n"
+                  << "  --analyze <file>          Scan a source file for package suggestions\n"
+                  << "  --alternative <package>   Find alternatives to a package\n"
+                  << "  --format json             Output as JSON\n";
+        return 0;
+    }
+
+    auto root = find_project_root();
+    auto reg_path = root.empty() ? fs::path{} : find_registry_path(root);
+    if (reg_path.empty()) {
+        print_fail("Package registry not found");
+        return 1;
+    }
+
+    auto [reg, err] = load_registry(reg_path);
+    if (!err.empty()) { print_fail(err); return 1; }
+
+    // Parse mode
+    std::string mode, value;
+    bool json_output = false;
+    for (size_t i = 0; i < args.size(); ++i) {
+        if (args[i] == "--description" && i + 1 < args.size()) {
+            mode = "description"; value = args[++i];
+        } else if (args[i] == "--analyze" && i + 1 < args.size()) {
+            mode = "analyze"; value = args[++i];
+        } else if (args[i] == "--alternative" && i + 1 < args.size()) {
+            mode = "alternative"; value = args[++i];
+        } else if (args[i] == "--format" && i + 1 < args.size() && args[i + 1] == "json") {
+            json_output = true; ++i;
+        }
+    }
+
+    if (mode == "description") {
+        auto results = search(reg, value);
+        if (results.empty()) {
+            std::cout << "No packages match that description.\n";
+            return 0;
+        }
+        std::cout << "Suggested packages for \"" << value << "\":\n\n";
+        for (size_t i = 0; i < std::min(results.size(), size_t(5)); ++i) {
+            auto& p = *results[i];
+            std::cout << "  " << green(p.id) << " " << dim("v" + p.version)
+                      << " " << dim("[" + p.license + "]") << "\n";
+            std::cout << "    " << p.description << "\n";
+            if (!p.overlaps_with_builtin.empty())
+                std::cout << "    " << yellow("Note:") << " overlaps with Pulp built-ins\n";
+            std::cout << "\n";
+        }
+        return 0;
+    }
+
+    if (mode == "analyze") {
+        auto content = read_file(value);
+        if (content.empty()) {
+            print_fail("Cannot read file: " + value);
+            return 1;
+        }
+
+        // Extract #include directives
+        std::regex include_re("#include\\s*[<\"]([^>\"]+)[>\"]");
+        std::sregex_iterator it(content.begin(), content.end(), include_re);
+        std::sregex_iterator end;
+
+        std::vector<std::string> includes;
+        for (; it != end; ++it)
+            includes.push_back((*it)[1].str());
+
+        // Check each include against registry
+        bool found_any = false;
+        for (auto& [id, pkg] : reg.packages) {
+            for (auto& inc : includes) {
+                bool match = false;
+                for (auto& tag : pkg.tags)
+                    if (inc.find(tag) != std::string::npos) { match = true; break; }
+                if (match) {
+                    if (!found_any) {
+                        std::cout << "Based on includes in " << value << ":\n\n";
+                        found_any = true;
+                    }
+                    std::cout << "  " << green(pkg.id) << " — " << pkg.description << "\n";
+                    break;
+                }
+            }
+        }
+        if (!found_any)
+            std::cout << "No package suggestions based on " << value << "\n";
+        return 0;
+    }
+
+    if (mode == "alternative") {
+        auto it = reg.packages.find(value);
+        if (it == reg.packages.end()) {
+            print_fail("Package '" + value + "' not found");
+            return 1;
+        }
+
+        auto& pkg = it->second;
+        std::cout << "Alternatives to " << pkg.name << ":\n\n";
+
+        // Search by provides
+        for (auto& provide : pkg.provides) {
+            for (auto& [id, other] : reg.packages) {
+                if (id == value) continue;
+                for (auto& op : other.provides) {
+                    if (op == provide) {
+                        std::cout << "  " << green(other.id) << " " << dim("[" + other.license + "]")
+                                  << " — " << other.description << "\n";
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (!pkg.alternatives.empty()) {
+            std::cout << "\nAlso noted (may require commercial license):\n";
+            for (auto& alt : pkg.alternatives)
+                std::cout << "  " << dim(alt) << "\n";
+        }
+        return 0;
+    }
+
+    print_fail("Specify --description, --analyze, or --alternative");
+    return 1;
+}
+
+// ── Audit Extensions ──
+
+int audit_packages(const fs::path& project_root) {
+    auto lock_path = project_root / "packages.lock.json";
+    if (!fs::exists(lock_path)) {
+        std::cout << "No packages installed — nothing to audit.\n";
+        return 0;
+    }
+
+    auto lock = load_lock_file(lock_path);
+    auto reg_path = find_registry_path(project_root);
+    if (reg_path.empty()) {
+        print_fail("Package registry not found");
+        return 1;
+    }
+
+    auto [reg, err] = load_registry(reg_path);
+    if (!err.empty()) { print_fail(err); return 1; }
+
+    int issues = 0;
+    for (auto& [id, lp] : lock.packages) {
+        auto it = reg.packages.find(id);
+        if (it == reg.packages.end()) {
+            std::cout << "  " << id << " " << dots(id) << " " << red("NOT IN REGISTRY") << "\n";
+            ++issues;
+        } else {
+            std::cout << "  " << id << " " << dots(id) << " " << green("OK") << "\n";
+        }
+    }
+
+    std::cout << "\n" << lock.packages.size() << " packages audited, " << issues << " issues.\n";
+    return issues > 0 ? 1 : 0;
+}
+
+int audit_platforms(const fs::path& project_root) {
+    auto lock_path = project_root / "packages.lock.json";
+    if (!fs::exists(lock_path)) {
+        std::cout << "No packages installed.\n";
+        return 0;
+    }
+
+    auto lock = load_lock_file(lock_path);
+    auto reg_path = find_registry_path(project_root);
+    if (reg_path.empty()) { print_fail("Registry not found"); return 1; }
+
+    auto [reg, err] = load_registry(reg_path);
+    if (!err.empty()) { print_fail(err); return 1; }
+
+    auto targets = read_project_targets(project_root);
+    int issues = 0;
+
+    // Header
+    std::cout << std::setw(25) << std::left << "Package";
+    for (auto& t : targets) std::cout << " " << std::setw(15) << t.to_string();
+    std::cout << "\n";
+
+    for (auto& [id, lp] : lock.packages) {
+        auto it = reg.packages.find(id);
+        if (it == reg.packages.end()) continue;
+
+        std::cout << std::setw(25) << std::left << id;
+        auto unsup = unsupported_targets(it->second, targets);
+        for (auto& t : targets) {
+            bool ok = std::find(unsup.begin(), unsup.end(), t) == unsup.end();
+            std::cout << " " << std::setw(15) << (ok ? green("✓") : red("✗"));
+            if (!ok) ++issues;
+        }
+        std::cout << "\n";
+    }
+
+    if (issues > 0)
+        print_warn(std::to_string(issues) + " platform gap(s) found");
+    else
+        print_ok("All packages support all project targets");
+
+    return issues > 0 ? 1 : 0;
+}
+
+int audit_licenses(const fs::path& project_root) {
+    auto lock_path = project_root / "packages.lock.json";
+    if (!fs::exists(lock_path)) {
+        std::cout << "No packages installed.\n";
+        return 0;
+    }
+
+    auto lock = load_lock_file(lock_path);
+    auto reg_path = find_registry_path(project_root);
+    if (reg_path.empty()) { print_fail("Registry not found"); return 1; }
+
+    auto [reg, err] = load_registry(reg_path);
+    if (!err.empty()) { print_fail(err); return 1; }
+
+    int issues = 0;
+    for (auto& [id, lp] : lock.packages) {
+        auto it = reg.packages.find(id);
+        if (it == reg.packages.end()) continue;
+
+        auto verdict = check_license(it->second.license);
+        std::string label;
+        switch (verdict) {
+            case LicenseVerdict::allowed:
+                label = green(it->second.license + " OK"); break;
+            case LicenseVerdict::review_required:
+                label = yellow(it->second.license + " REVIEW"); ++issues; break;
+            case LicenseVerdict::rejected:
+                label = red(it->second.license + " REJECTED"); ++issues; break;
+        }
+        std::cout << "  " << id << " " << dots(id) << " " << label << "\n";
+    }
+
+    std::cout << "\n" << lock.packages.size() << " packages checked, " << issues << " issues.\n";
+    return issues > 0 ? 1 : 0;
+}
+
+}  // namespace pulp::cli::pkg
