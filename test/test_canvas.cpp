@@ -183,3 +183,42 @@ TEST_CASE("Color encode/decode round-trip", "[canvas][color]") {
     REQUIRE(d.b == Catch::Approx(c.b));
     REQUIRE(d.a == Catch::Approx(c.a));
 }
+
+TEST_CASE("SDF shape enum covers all types", "[canvas][sdf]") {
+    using S = Canvas::SDFShape;
+    // Verify the enum values match the shader's shapeType indices
+    REQUIRE(static_cast<int>(S::rect) == 0);
+    REQUIRE(static_cast<int>(S::circle) == 1);
+    REQUIRE(static_cast<int>(S::rounded_rect) == 2);
+    REQUIRE(static_cast<int>(S::arc) == 3);
+    REQUIRE(static_cast<int>(S::diamond) == 4);
+    REQUIRE(static_cast<int>(S::squircle) == 5);
+    REQUIRE(static_cast<int>(S::triangle) == 6);
+    REQUIRE(static_cast<int>(S::ring) == 7);
+    REQUIRE(static_cast<int>(S::stadium) == 8);
+    REQUIRE(static_cast<int>(S::cross) == 9);
+    REQUIRE(static_cast<int>(S::flat_segment) == 10);
+    REQUIRE(static_cast<int>(S::rounded_segment) == 11);
+}
+
+TEST_CASE("SDFStyle defaults are valid", "[canvas][sdf]") {
+    Canvas::SDFStyle style;
+    REQUIRE(style.stroke_width == 0.0f);
+    REQUIRE(style.corner_radius == 0.0f);
+    REQUIRE(style.squircle_power == 4.0f);
+    REQUIRE(style.inner_radius == 0.5f);
+    REQUIRE(style.arm_width == Catch::Approx(0.3f));
+}
+
+TEST_CASE("SDF shapes render via RecordingCanvas fallback", "[canvas][sdf]") {
+    RecordingCanvas rc;
+    Canvas::SDFStyle style;
+    style.fill_color = Color::rgba(1.0f, 0.0f, 0.0f);
+
+    // All new shapes should at least not crash on the CPU fallback path
+    for (int i = 0; i <= 11; ++i) {
+        rc.clear();
+        rc.draw_sdf_shape(static_cast<Canvas::SDFShape>(i), 10, 10, 50, 50, style);
+        REQUIRE(rc.command_count() > 0);
+    }
+}

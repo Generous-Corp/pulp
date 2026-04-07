@@ -380,6 +380,9 @@ static const char* kSDFShapeSkSL = R"(
     uniform float strokeWidth;
     uniform float arcStart;
     uniform float arcSweep;
+    uniform float squirclePower;
+    uniform float innerRadius;
+    uniform float armWidth;
     uniform half4 fillColor;
     uniform half4 strokeColor;
 
@@ -406,6 +409,53 @@ static const char* kSDFShapeSkSL = R"(
         return (q.x + q.y - s) * 0.7071;
     }
 
+    // SDF for squircle (superellipse): |x/a|^n + |y/b|^n = 1
+    float sdSquircle(float2 p, float2 b, float n) {
+        float2 q = abs(p) / b;
+        return (pow(pow(q.x, n) + pow(q.y, n), 1.0/n) - 1.0) * min(b.x, b.y);
+    }
+
+    // SDF for equilateral triangle
+    float sdTriangle(float2 p, float r) {
+        float k = 1.7321; // sqrt(3)
+        p.x = abs(p.x) - r;
+        p.y = p.y + r / k;
+        if (p.x + k * p.y > 0.0) p = float2(p.x - k * p.y, -k * p.x - p.y) / 2.0;
+        p.x -= clamp(p.x, -2.0 * r, 0.0);
+        return -length(p) * sign(p.y);
+    }
+
+    // SDF for ring (annulus)
+    float sdRing(float2 p, float outer, float inner) {
+        return abs(length(p) - (outer + inner) * 0.5) - (outer - inner) * 0.5;
+    }
+
+    // SDF for stadium (pill/capsule)
+    float sdStadium(float2 p, float2 b) {
+        float r = min(b.x, b.y);
+        float2 q = abs(p) - float2(b.x - r, 0.0);
+        return length(max(q, float2(0.0))) + min(max(q.x, q.y), 0.0) - r;
+    }
+
+    // SDF for cross (plus sign)
+    float sdCross(float2 p, float2 b, float armW) {
+        float2 q = abs(p);
+        float d1 = sdBox(q, float2(b.x, b.y * armW));
+        float d2 = sdBox(q, float2(b.x * armW, b.y));
+        return min(d1, d2);
+    }
+
+    // SDF for line segment with flat ends
+    float sdFlatSegment(float2 p, float2 halfSize) {
+        return sdBox(p, float2(halfSize.x, strokeWidth * 0.5));
+    }
+
+    // SDF for line segment with rounded ends
+    float sdRoundedSegment(float2 p, float halfLen, float thickness) {
+        p.x -= clamp(p.x, -halfLen, halfLen);
+        return length(p) - thickness * 0.5;
+    }
+
     half4 main(float2 coord) {
         float2 center = resolution * 0.5;
         float2 p = coord - center;
@@ -414,35 +464,48 @@ static const char* kSDFShapeSkSL = R"(
         float d;
 
         if (shapeType < 0.5) {
-            d = sdBox(p, halfSize);  // rect
+            d = sdBox(p, halfSize);              // 0: rect
         } else if (shapeType < 1.5) {
-            d = sdCircle(p, r);  // circle
+            d = sdCircle(p, r);                  // 1: circle
         } else if (shapeType < 2.5) {
-            d = sdRoundBox(p, halfSize, cornerRadius);  // rounded rect
+            d = sdRoundBox(p, halfSize, cornerRadius); // 2: rounded rect
         } else if (shapeType < 3.5) {
-            // Arc: use circle SDF with angle masking
+            // 3: arc
             float angle = atan2(p.y, p.x);
             float halfSweep = arcSweep * 0.5;
             float midAngle = arcStart + halfSweep;
             float angleDiff = angle - midAngle;
-            // Normalize to [-PI, PI]
             angleDiff = angleDiff - 6.2832 * floor((angleDiff + 3.1416) / 6.2832);
             float arcDist = abs(angleDiff) - halfSweep;
             float ringDist = abs(length(p) - r * 0.8) - strokeWidth * 0.5;
             d = max(ringDist, arcDist * r * 0.5);
+        } else if (shapeType < 4.5) {
+            d = sdDiamond(p, r);                 // 4: diamond
+        } else if (shapeType < 5.5) {
+            d = sdSquircle(p, halfSize, squirclePower); // 5: squircle
+        } else if (shapeType < 6.5) {
+            d = sdTriangle(p, r);                // 6: triangle
+        } else if (shapeType < 7.5) {
+            float outer = r;
+            float inner = r * innerRadius;
+            d = sdRing(p, outer, inner);         // 7: ring
+        } else if (shapeType < 8.5) {
+            d = sdStadium(p, halfSize);          // 8: stadium
+        } else if (shapeType < 9.5) {
+            d = sdCross(p, halfSize, armWidth);  // 9: cross
+        } else if (shapeType < 10.5) {
+            d = sdFlatSegment(p, halfSize);      // 10: flat segment
         } else {
-            d = sdDiamond(p, r);  // diamond
+            d = sdRoundedSegment(p, halfSize.x, max(strokeWidth, 2.0)); // 11: rounded segment
         }
 
         // Render: filled or stroked with AA
-        float aa = 1.0;  // AA width in pixels
+        float aa = 1.0;
         if (strokeWidth > 0.0 && shapeType < 2.5) {
-            // Stroked
             float sd = abs(d) - strokeWidth * 0.5;
             float alpha = 1.0 - smoothstep(-aa, aa, sd);
             return strokeColor * half(alpha);
         } else {
-            // Filled
             float alpha = 1.0 - smoothstep(-aa, aa, d);
             return fillColor * half(alpha);
         }
@@ -467,6 +530,9 @@ void SkiaCanvas::draw_sdf_shape(SDFShape shape, float x, float y, float w, float
     builder.uniform("strokeWidth") = style.stroke_width;
     builder.uniform("arcStart") = style.arc_start;
     builder.uniform("arcSweep") = style.arc_sweep;
+    builder.uniform("squirclePower") = style.squircle_power;
+    builder.uniform("innerRadius") = style.inner_radius;
+    builder.uniform("armWidth") = style.arm_width;
     builder.uniform("fillColor") = SkV4{
         style.fill_color.r, style.fill_color.g,
         style.fill_color.b, style.fill_color.a};

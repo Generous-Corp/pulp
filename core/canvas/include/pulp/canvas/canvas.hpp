@@ -303,7 +303,20 @@ public:
 
     // ── SDF Shape Primitives (GPU-accelerated) ─────────────────────────
     /// Draw an SDF shape with anti-aliased edges via GPU shader.
-    enum class SDFShape { rect, circle, rounded_rect, arc, diamond };
+    enum class SDFShape {
+        rect,           // 0 — axis-aligned rectangle
+        circle,         // 1 — circle (min dimension as radius)
+        rounded_rect,   // 2 — rectangle with corner_radius
+        arc,            // 3 — ring arc (arc_start + arc_sweep)
+        diamond,        // 4 — rotated square
+        squircle,       // 5 — continuous-curvature rounded rect (power param)
+        triangle,       // 6 — equilateral triangle
+        ring,           // 7 — circle with inner radius (donut)
+        stadium,        // 8 — pill/capsule shape
+        cross,          // 9 — plus sign with configurable arm width
+        flat_segment,   // 10 — line segment with flat caps
+        rounded_segment,// 11 — line segment with rounded caps
+    };
 
     struct SDFStyle {
         Color fill_color = Color::rgba(0.392f, 1.0f, 0.392f);
@@ -312,6 +325,9 @@ public:
         float corner_radius = 0;      ///< For rounded_rect
         float arc_start = 0;          ///< For arc (radians)
         float arc_sweep = 4.712f;     ///< For arc (radians, default 270°)
+        float squircle_power = 4.0f;  ///< For squircle (higher = more rectangular)
+        float inner_radius = 0.5f;    ///< For ring (fraction of outer radius)
+        float arm_width = 0.3f;       ///< For cross (fraction of half-size)
     };
 
     virtual void draw_sdf_shape(SDFShape shape, float x, float y, float w, float h,
