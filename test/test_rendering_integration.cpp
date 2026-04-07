@@ -6,6 +6,9 @@
 #include <pulp/view/widgets.hpp>
 #include <pulp/view/geometry.hpp>
 #include <pulp/view/sprite_strip.hpp>
+#include <pulp/view/theme_editor.hpp>
+#include <pulp/view/theme.hpp>
+#include <pulp/state/edit_history.hpp>
 #include <pulp/render/render_pass.hpp>
 
 using namespace pulp;
@@ -181,4 +184,104 @@ TEST_CASE("Fader with sprite strip set", "[view][widget]") {
 
     fader.set_sprite_strip(strip);
     REQUIRE(fader.sprite_strip()->frame_count() == 10);
+}
+
+// ── Gradient tests ──────────────────────────────────────────────────────
+
+TEST_CASE("ConicGradient construction", "[canvas][gradient]") {
+    canvas::ConicGradient cg;
+    cg.cx = 100;
+    cg.cy = 100;
+    cg.start_angle = 0;
+    cg.stops = {{0.0f, canvas::Color::rgba(1, 0, 0)}, {1.0f, canvas::Color::rgba(0, 0, 1)}};
+    REQUIRE(cg.stops.size() == 2);
+}
+
+TEST_CASE("FillStyle solid color", "[canvas][gradient]") {
+    canvas::FillStyle fs(canvas::Color::rgba(1, 0, 0));
+    REQUIRE(fs.is_solid());
+    REQUIRE_FALSE(fs.is_linear());
+    REQUIRE_FALSE(fs.is_conic());
+}
+
+TEST_CASE("FillStyle linear gradient", "[canvas][gradient]") {
+    canvas::LinearGradient lg{0, 0, 100, 0, {{0, canvas::Color::rgba(1,0,0)}, {1, canvas::Color::rgba(0,0,1)}}};
+    canvas::FillStyle fs(lg);
+    REQUIRE(fs.is_linear());
+    REQUIRE_FALSE(fs.is_solid());
+}
+
+TEST_CASE("FillStyle conic gradient", "[canvas][gradient]") {
+    canvas::ConicGradient cg;
+    cg.cx = 50; cg.cy = 50; cg.start_angle = 0;
+    canvas::FillStyle fs(cg);
+    REQUIRE(fs.is_conic());
+}
+
+TEST_CASE("GradientTileMode on FillStyle", "[canvas][gradient]") {
+    canvas::FillStyle fs(canvas::Color::rgba(1, 1, 1));
+    fs.set_tile_mode(canvas::GradientTileMode::repeat);
+    REQUIRE(fs.tile_mode() == canvas::GradientTileMode::repeat);
+}
+
+// ── ThemeEditor tests ───────────────────────────────────────────────────
+
+TEST_CASE("ThemeEditor set and get theme", "[view][theme-editor]") {
+    view::ThemeEditor editor;
+    auto theme = view::Theme::dark();
+    editor.set_theme(theme);
+
+    auto names = editor.token_names();
+    REQUIRE_FALSE(names.empty());
+    REQUIRE(editor.editing_theme().colors.size() > 0);
+}
+
+TEST_CASE("ThemeEditor select token", "[view][theme-editor]") {
+    view::ThemeEditor editor;
+    editor.set_theme(view::Theme::dark());
+    editor.select_token("accent.primary");
+    REQUIRE(editor.selected_token() == "accent.primary");
+}
+
+TEST_CASE("ThemeEditor export JSON", "[view][theme-editor]") {
+    view::ThemeEditor editor;
+    editor.set_theme(view::Theme::dark());
+    auto json = editor.export_json();
+    REQUIRE_FALSE(json.empty());
+    REQUIRE(json.find("accent.primary") != std::string::npos);
+}
+
+TEST_CASE("ThemeEditor paint renders", "[view][theme-editor]") {
+    view::ThemeEditor editor;
+    editor.set_theme(view::Theme::dark());
+    editor.set_bounds({0, 0, 400, 300});
+
+    canvas::RecordingCanvas rc;
+    editor.paint_all(rc);
+    REQUIRE(rc.command_count() > 0);
+}
+
+// ── EditHistory tests ───────────────────────────────────────────────────
+
+TEST_CASE("EditHistory undo redo", "[state][undo]") {
+    state::EditHistory history;
+    int val = 0;
+    history.perform([&]{ val = 42; }, [&]{ val = 0; }, "set 42");
+    REQUIRE(val == 42);
+    REQUIRE(history.can_undo());
+
+    history.undo();
+    REQUIRE(val == 0);
+    REQUIRE(history.can_redo());
+
+    history.redo();
+    REQUIRE(val == 42);
+}
+
+TEST_CASE("EditHistory depth limit", "[state][undo]") {
+    state::EditHistory history(3);
+    int v = 0;
+    for (int i = 0; i < 5; ++i)
+        history.perform([&, i]{ v = i; }, [&]{ v = 0; });
+    REQUIRE(history.undo_count() == 3);
 }

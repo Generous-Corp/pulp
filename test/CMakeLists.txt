@@ -280,7 +280,7 @@ catch_discover_tests(pulp-test-dirty-tracker)
 
 # Rendering integration tests (effects, dimensions, text direction, render passes)
 add_executable(pulp-test-rendering-integration test_rendering_integration.cpp)
-target_link_libraries(pulp-test-rendering-integration PRIVATE pulp::view pulp::render Catch2::Catch2WithMain)
+target_link_libraries(pulp-test-rendering-integration PRIVATE pulp::view pulp::render pulp::state Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-rendering-integration)
 
 # Draw batcher tests
