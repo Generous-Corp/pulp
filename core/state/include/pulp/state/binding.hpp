@@ -4,6 +4,7 @@
 /// Reactive parameter binding for UI integration.
 
 #include <pulp/state/store.hpp>
+#include <pulp/state/edit_history.hpp>
 #include <functional>
 #include <vector>
 #include <cmath>
@@ -74,15 +75,37 @@ public:
 
     /// Notify the host that a user gesture (e.g., mouse drag) has begun.
     /// Call before a series of set()/set_normalized() calls so the host
-    /// groups them into one undo step.
+    /// groups them into one undo step. Captures the value for undo.
     void begin_gesture() {
-        if (store_) store_->begin_gesture(param_id_);
+        if (store_) {
+            gesture_start_value_ = store_->get_value(param_id_);
+            store_->begin_gesture(param_id_);
+        }
     }
 
     /// Notify the host that the current gesture has ended.
+    /// If an EditHistory is attached, pushes an undo action for the value change.
     void end_gesture() {
-        if (store_) store_->end_gesture(param_id_);
+        if (store_) {
+            store_->end_gesture(param_id_);
+            // Push to edit history if available
+            float end_value = store_->get_value(param_id_);
+            if (edit_history_ && std::abs(end_value - gesture_start_value_) > 1e-7f) {
+                auto pid = param_id_;
+                auto* s = store_;
+                float sv = gesture_start_value_;
+                float ev = end_value;
+                edit_history_->perform(
+                    [s, pid, ev]() { s->set_value(pid, ev); },
+                    [s, pid, sv]() { s->set_value(pid, sv); },
+                    info() ? info()->name : "param change");
+            }
+        }
     }
+
+    /// Attach an EditHistory for undo support. Optional — null by default.
+    void set_edit_history(state::EditHistory* h) { edit_history_ = h; }
+    state::EditHistory* edit_history() const { return edit_history_; }
 
     /// Get the immutable metadata for the bound parameter.
     /// @return Pointer to ParamInfo, or nullptr if unbound.
@@ -137,6 +160,8 @@ private:
     StateStore* store_ = nullptr;
     ParamID param_id_ = 0;
     float last_polled_ = 0.0f;
+    float gesture_start_value_ = 0.0f;
+    state::EditHistory* edit_history_ = nullptr;
     std::vector<ChangeCallback> callbacks_;
 };
 
