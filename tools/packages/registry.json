@@ -1,0 +1,469 @@
+{
+  "registry_version": 2,
+  "packages": {
+    "signalsmith-stretch": {
+      "name": "Signalsmith Stretch",
+      "version": "1.1.0",
+      "description": "Polyphonic pitch and time stretching",
+      "license": "MIT",
+      "category": "dsp",
+      "url": "https://github.com/Signalsmith-Audio/signalsmith-stretch",
+      "fetch": {
+        "method": "header-only",
+        "git_repository": "https://github.com/Signalsmith-Audio/signalsmith-stretch.git",
+        "git_tag": "1.1.0"
+      },
+      "cmake": {
+        "targets": ["signalsmith-stretch"],
+        "header_only": true,
+        "include_dir": "."
+      },
+      "platforms": {
+        "macOS":   { "architectures": ["arm64"] },
+        "Windows": { "architectures": ["x64", "arm64"] },
+        "Linux":   { "architectures": ["x64", "arm64"] }
+      },
+      "rt_safe": true,
+      "tags": ["pitch-shifting", "time-stretching", "spectral", "polyphonic"],
+      "provides": ["pitch-shift", "time-stretch"],
+      "overlaps_with_builtin": {},
+      "unique_value": "High-quality polyphonic pitch/time stretching with no GPL dependency",
+      "alternatives": ["Rubber Band (GPL — requires commercial license)"],
+      "migration_notes": {
+        "from:rubber-band": "Signalsmith Stretch is MIT-licensed and header-only; API differs but covers similar use cases"
+      },
+      "verification": {
+        "last_verified": "2026-04-07",
+        "verified_version": "1.1.0",
+        "upstream_commit": "unknown",
+        "upstream_latest": "1.1.0",
+        "pulp_commit": "unknown",
+        "build_status": {
+          "macOS-arm64": "untested",
+          "Windows-x64": "untested",
+          "Windows-arm64": "untested",
+          "Linux-x64": "untested",
+          "Linux-arm64": "untested"
+        }
+      }
+    },
+    "signalsmith-dsp": {
+      "name": "Signalsmith DSP",
+      "version": "v1.7.1",
+      "description": "Filters, envelopes, FFT, delay, spectral processing tools",
+      "license": "MIT",
+      "category": "dsp",
+      "url": "https://github.com/Signalsmith-Audio/dsp",
+      "fetch": {
+        "method": "header-only",
+        "git_repository": "https://github.com/Signalsmith-Audio/dsp.git",
+        "git_tag": "v1.7.1"
+      },
+      "cmake": {
+        "targets": ["signalsmith-dsp"],
+        "header_only": true,
+        "include_dir": "."
+      },
+      "platforms": {
+        "macOS":   { "architectures": ["arm64"] },
+        "Windows": { "architectures": ["x64", "arm64"] },
+        "Linux":   { "architectures": ["x64", "arm64"] }
+      },
+      "rt_safe": true,
+      "tags": ["filters", "fft", "envelopes", "delay", "spectral", "windowing"],
+      "provides": ["filters", "fft", "envelopes", "delay", "spectral-processing"],
+      "overlaps_with_builtin": {
+        "signal/biquad.hpp": "biquad filters",
+        "signal/svf.hpp": "state variable filter",
+        "signal/delay_line.hpp": "delay line",
+        "signal/fft.hpp": "FFT"
+      },
+      "unique_value": "Comprehensive DSP toolkit with spectral processing and advanced envelope designs beyond Pulp built-ins",
+      "alternatives": ["KFR (GPL — requires commercial license)"],
+      "migration_notes": {},
+      "verification": {
+        "last_verified": "2026-04-07",
+        "verified_version": "v1.7.1",
+        "upstream_commit": "unknown",
+        "upstream_latest": "v1.7.1",
+        "pulp_commit": "unknown",
+        "build_status": {
+          "macOS-arm64": "untested",
+          "Windows-x64": "untested",
+          "Windows-arm64": "untested",
+          "Linux-x64": "untested",
+          "Linux-arm64": "untested"
+        }
+      }
+    },
+    "rtneural": {
+      "name": "RTNeural",
+      "version": "1fb1f075",
+      "description": "Real-time neural network inference optimized for audio",
+      "license": "BSD-3-Clause",
+      "category": "ml",
+      "url": "https://github.com/jatinchowdhury18/RTNeural",
+      "fetch": {
+        "method": "FetchContent",
+        "git_repository": "https://github.com/jatinchowdhury18/RTNeural.git",
+        "git_tag": "1fb1f075"
+      },
+      "cmake": {
+        "targets": ["RTNeural"],
+        "header_only": false,
+        "include_dir": "."
+      },
+      "platforms": {
+        "macOS":   { "architectures": ["arm64"] },
+        "Windows": { "architectures": ["x64", "arm64"] },
+        "Linux":   { "architectures": ["x64", "arm64"] }
+      },
+      "rt_safe": true,
+      "tags": ["neural-network", "ml", "inference", "amp-modeling", "real-time"],
+      "provides": ["neural-network-inference", "ml-inference"],
+      "overlaps_with_builtin": {},
+      "unique_value": "Real-time safe neural network inference for amp modeling, vocal processing, and intelligent audio effects",
+      "alternatives": ["ONNX Runtime (MIT — heavier, more general)", "nn-inference-template (MIT — template for multiple backends)"],
+      "migration_notes": {},
+      "verification": {
+        "last_verified": "2026-04-07",
+        "verified_version": "1fb1f075",
+        "upstream_commit": "unknown",
+        "upstream_latest": "1fb1f075",
+        "pulp_commit": "unknown",
+        "build_status": {
+          "macOS-arm64": "untested",
+          "Windows-x64": "untested",
+          "Windows-arm64": "untested",
+          "Linux-x64": "untested",
+          "Linux-arm64": "untested"
+        }
+      }
+    },
+    "cycfi-q": {
+      "name": "Q (Cycfi)",
+      "version": "version_1.0",
+      "description": "Pitch detection via bitstream autocorrelation and DSP primitives",
+      "license": "MIT",
+      "category": "dsp",
+      "url": "https://github.com/cycfi/q",
+      "fetch": {
+        "method": "FetchContent",
+        "git_repository": "https://github.com/cycfi/q.git",
+        "git_tag": "version_1.0"
+      },
+      "cmake": {
+        "targets": ["cycfi::q"],
+        "header_only": false,
+        "include_dir": "."
+      },
+      "platforms": {
+        "macOS":   { "architectures": ["arm64"] },
+        "Windows": { "architectures": ["x64"], "notes": "arm64 not verified" },
+        "Linux":   { "architectures": ["x64", "arm64"] }
+      },
+      "rt_safe": true,
+      "tags": ["pitch-detection", "autocorrelation", "frequency", "tuner"],
+      "provides": ["pitch-detection", "frequency-analysis"],
+      "overlaps_with_builtin": {},
+      "unique_value": "Fast, accurate pitch detection using bitstream autocorrelation — no equivalent in Pulp built-ins",
+      "alternatives": ["Aubio (GPL — requires commercial license)", "Essentia (AGPL — incompatible)"],
+      "migration_notes": {},
+      "verification": {
+        "last_verified": "2026-04-07",
+        "verified_version": "version_1.0",
+        "upstream_commit": "unknown",
+        "upstream_latest": "version_1.0",
+        "pulp_commit": "unknown",
+        "build_status": {
+          "macOS-arm64": "untested",
+          "Windows-x64": "untested",
+          "Linux-x64": "untested",
+          "Linux-arm64": "untested"
+        }
+      }
+    },
+    "libsamplerate": {
+      "name": "libsamplerate",
+      "version": "0.2.2",
+      "description": "High-quality sample rate conversion (Secret Rabbit Code)",
+      "license": "BSD-2-Clause",
+      "category": "audio-io",
+      "url": "https://github.com/libsndfile/libsamplerate",
+      "fetch": {
+        "method": "FetchContent",
+        "git_repository": "https://github.com/libsndfile/libsamplerate.git",
+        "git_tag": "0.2.2"
+      },
+      "cmake": {
+        "targets": ["SampleRate::samplerate"],
+        "header_only": false,
+        "include_dir": "include"
+      },
+      "platforms": {
+        "macOS":   { "architectures": ["arm64"] },
+        "Windows": { "architectures": ["x64", "arm64"] },
+        "Linux":   { "architectures": ["x64", "arm64"] }
+      },
+      "rt_safe": false,
+      "tags": ["resampling", "sample-rate", "conversion", "interpolation"],
+      "provides": ["sample-rate-conversion", "resampling"],
+      "overlaps_with_builtin": {},
+      "unique_value": "Industry-standard sample rate conversion with multiple quality modes (sinc best, sinc medium, sinc fastest, linear, zero-order-hold)",
+      "alternatives": ["r8brain-free-src (MIT — different quality tradeoffs)"],
+      "migration_notes": {
+        "from:libsndfile": "libsamplerate handles resampling only, not file I/O — use dr-libs for file decoding"
+      },
+      "verification": {
+        "last_verified": "2026-04-07",
+        "verified_version": "0.2.2",
+        "upstream_commit": "unknown",
+        "upstream_latest": "0.2.2",
+        "pulp_commit": "unknown",
+        "build_status": {
+          "macOS-arm64": "untested",
+          "Windows-x64": "untested",
+          "Windows-arm64": "untested",
+          "Linux-x64": "untested",
+          "Linux-arm64": "untested"
+        }
+      }
+    },
+    "dr-libs": {
+      "name": "dr_libs",
+      "version": "wav-0.14.5",
+      "description": "Single-file WAV, FLAC, and MP3 decoding",
+      "license": "MIT-0",
+      "category": "audio-io",
+      "url": "https://github.com/mackron/dr_libs",
+      "fetch": {
+        "method": "header-only",
+        "git_repository": "https://github.com/mackron/dr_libs.git",
+        "git_tag": "wav-0.14.5"
+      },
+      "cmake": {
+        "targets": ["dr_libs"],
+        "header_only": true,
+        "include_dir": "."
+      },
+      "platforms": {
+        "macOS":   { "architectures": ["arm64"] },
+        "Windows": { "architectures": ["x64", "arm64"] },
+        "Linux":   { "architectures": ["x64", "arm64"] }
+      },
+      "rt_safe": false,
+      "tags": ["wav", "flac", "mp3", "decoding", "audio-file", "single-header"],
+      "provides": ["wav-decoding", "flac-decoding", "mp3-decoding"],
+      "overlaps_with_builtin": {},
+      "unique_value": "Zero-dependency single-header audio file decoding for WAV, FLAC, and MP3",
+      "alternatives": ["miniaudio (MIT-0 — includes device I/O too)", "libsndfile (LGPL — copyleft)"],
+      "migration_notes": {
+        "from:libsndfile": "dr_libs is MIT-0 and header-only but decode-only — no encode support for FLAC/MP3"
+      },
+      "verification": {
+        "last_verified": "2026-04-07",
+        "verified_version": "wav-0.14.5",
+        "upstream_commit": "unknown",
+        "upstream_latest": "wav-0.14.5",
+        "pulp_commit": "unknown",
+        "build_status": {
+          "macOS-arm64": "untested",
+          "Windows-x64": "untested",
+          "Windows-arm64": "untested",
+          "Linux-x64": "untested",
+          "Linux-arm64": "untested"
+        }
+      }
+    },
+    "pffft": {
+      "name": "PFFFT",
+      "version": "v1.1.0",
+      "description": "SIMD-optimized FFT (SSE on x64, NEON on arm64)",
+      "license": "BSD-3-Clause",
+      "category": "dsp",
+      "url": "https://github.com/marton78/pffft",
+      "fetch": {
+        "method": "FetchContent",
+        "git_repository": "https://github.com/marton78/pffft.git",
+        "git_tag": "v1.1.0"
+      },
+      "cmake": {
+        "targets": ["pffft"],
+        "header_only": false,
+        "include_dir": "."
+      },
+      "platforms": {
+        "macOS":   { "architectures": ["arm64"], "notes": "NEON path" },
+        "Windows": { "architectures": ["x64", "arm64"], "notes": "SSE on x64, NEON on arm64" },
+        "Linux":   { "architectures": ["x64", "arm64"], "notes": "SSE on x64, NEON on arm64" }
+      },
+      "rt_safe": true,
+      "tags": ["fft", "simd", "sse", "neon", "spectral"],
+      "provides": ["fft", "simd-fft"],
+      "overlaps_with_builtin": {
+        "signal/fft.hpp": "FFT"
+      },
+      "unique_value": "SIMD-optimized FFT significantly faster than general-purpose implementations for power-of-two sizes",
+      "alternatives": ["KissFFT (BSD-3 — portable but not SIMD-optimized)", "FFTW (GPL — requires commercial license)"],
+      "migration_notes": {
+        "from:fftw": "PFFFT is BSD-licensed and lighter; covers real and complex FFT for power-of-two sizes"
+      },
+      "verification": {
+        "last_verified": "2026-04-07",
+        "verified_version": "v1.1.0",
+        "upstream_commit": "unknown",
+        "upstream_latest": "v1.1.0",
+        "pulp_commit": "unknown",
+        "build_status": {
+          "macOS-arm64": "untested",
+          "Windows-x64": "untested",
+          "Windows-arm64": "untested",
+          "Linux-x64": "untested",
+          "Linux-arm64": "untested"
+        }
+      }
+    },
+    "daisysp": {
+      "name": "DaisySP",
+      "version": "V1.0.0",
+      "description": "DSP library with oscillators, filters, effects, and physical modeling",
+      "license": "MIT",
+      "category": "dsp",
+      "url": "https://github.com/electro-smith/DaisySP",
+      "fetch": {
+        "method": "FetchContent",
+        "git_repository": "https://github.com/electro-smith/DaisySP.git",
+        "git_tag": "V1.0.0"
+      },
+      "cmake": {
+        "targets": ["DaisySP"],
+        "header_only": false,
+        "include_dir": "Source"
+      },
+      "platforms": {
+        "macOS":   { "architectures": ["arm64"] },
+        "Windows": { "architectures": ["x64", "arm64"] },
+        "Linux":   { "architectures": ["x64", "arm64"] }
+      },
+      "rt_safe": true,
+      "tags": ["oscillators", "filters", "effects", "physical-modeling", "synthesis", "drums"],
+      "provides": ["physical-modeling", "karplus-strong", "modal-synthesis", "fm-synthesis"],
+      "overlaps_with_builtin": {
+        "signal/oscillator.hpp": "oscillators",
+        "signal/biquad.hpp": "biquad filters",
+        "signal/adsr.hpp": "ADSR envelope",
+        "signal/reverb.hpp": "reverb",
+        "signal/compressor.hpp": "compressor"
+      },
+      "unique_value": "Physical modeling synthesis (Karplus-Strong, modal, pluck) and drum synthesis not available in Pulp built-ins",
+      "alternatives": ["STK (MIT with patent caveats — more physical models)", "Maximilian (MIT — teaching-oriented)"],
+      "migration_notes": {},
+      "verification": {
+        "last_verified": "2026-04-07",
+        "verified_version": "V1.0.0",
+        "upstream_commit": "unknown",
+        "upstream_latest": "V1.0.0",
+        "pulp_commit": "unknown",
+        "build_status": {
+          "macOS-arm64": "untested",
+          "Windows-x64": "untested",
+          "Windows-arm64": "untested",
+          "Linux-x64": "untested",
+          "Linux-arm64": "untested"
+        }
+      }
+    },
+    "fontaudio": {
+      "name": "fontaudio",
+      "version": "1.1",
+      "description": "Audio-specific icon font with 200+ icons for plugin UIs",
+      "license": "MIT",
+      "category": "ui",
+      "url": "https://github.com/fefanto/fontaudio",
+      "fetch": {
+        "method": "header-only",
+        "git_repository": "https://github.com/fefanto/fontaudio.git",
+        "git_tag": "1.1"
+      },
+      "cmake": {
+        "targets": ["fontaudio"],
+        "header_only": true,
+        "include_dir": "."
+      },
+      "platforms": {
+        "macOS":   { "architectures": ["arm64"] },
+        "Windows": { "architectures": ["x64", "arm64"] },
+        "Linux":   { "architectures": ["x64", "arm64"] },
+        "iOS":     { "architectures": ["arm64"] },
+        "WASM":    { "architectures": ["wasm32"] }
+      },
+      "rt_safe": true,
+      "tags": ["icons", "font", "ui", "audio-icons", "svg"],
+      "provides": ["audio-icons", "icon-font"],
+      "overlaps_with_builtin": {},
+      "unique_value": "Purpose-built audio icon font — knob, fader, waveform, speaker, MIDI, and plugin format icons",
+      "alternatives": [],
+      "migration_notes": {},
+      "verification": {
+        "last_verified": "2026-04-07",
+        "verified_version": "1.1",
+        "upstream_commit": "unknown",
+        "upstream_latest": "1.1",
+        "pulp_commit": "unknown",
+        "build_status": {
+          "macOS-arm64": "untested",
+          "Windows-x64": "untested",
+          "Windows-arm64": "untested",
+          "Linux-x64": "untested",
+          "Linux-arm64": "untested"
+        }
+      }
+    },
+    "r8brain-free-src": {
+      "name": "r8brain-free-src",
+      "version": "version-6.5",
+      "description": "High-quality sample rate converter with low latency mode",
+      "license": "MIT",
+      "category": "audio-io",
+      "url": "https://github.com/avaneev/r8brain-free-src",
+      "fetch": {
+        "method": "FetchContent",
+        "git_repository": "https://github.com/avaneev/r8brain-free-src.git",
+        "git_tag": "version-6.5"
+      },
+      "cmake": {
+        "targets": ["r8brain"],
+        "header_only": false,
+        "include_dir": "."
+      },
+      "platforms": {
+        "macOS":   { "architectures": ["arm64"] },
+        "Windows": { "architectures": ["x64", "arm64"] },
+        "Linux":   { "architectures": ["x64", "arm64"] }
+      },
+      "rt_safe": false,
+      "tags": ["resampling", "sample-rate", "conversion", "high-quality", "low-latency"],
+      "provides": ["sample-rate-conversion", "resampling"],
+      "overlaps_with_builtin": {},
+      "unique_value": "Audiophile-grade sample rate conversion with configurable quality/latency tradeoffs",
+      "alternatives": ["libsamplerate (BSD-2 — industry standard, different quality profile)"],
+      "migration_notes": {
+        "from:libsamplerate": "r8brain offers different quality/latency tradeoffs — benchmark both for your use case"
+      },
+      "verification": {
+        "last_verified": "2026-04-07",
+        "verified_version": "version-6.5",
+        "upstream_commit": "unknown",
+        "upstream_latest": "version-6.5",
+        "pulp_commit": "unknown",
+        "build_status": {
+          "macOS-arm64": "untested",
+          "Windows-x64": "untested",
+          "Windows-arm64": "untested",
+          "Linux-x64": "untested",
+          "Linux-arm64": "untested"
+        }
+      }
+    }
+  }
+}

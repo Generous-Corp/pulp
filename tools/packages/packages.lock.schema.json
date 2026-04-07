@@ -1,0 +1,30 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Pulp Package Lock File",
+  "description": "Schema for packages.lock.json — records exact resolved versions and integrity hashes",
+  "type": "object",
+  "required": ["lockfile_version", "packages"],
+  "additionalProperties": false,
+  "properties": {
+    "lockfile_version": {
+      "const": 1
+    },
+    "packages": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/definitions/locked-package" }
+    }
+  },
+  "definitions": {
+    "locked-package": {
+      "type": "object",
+      "required": ["version", "resolved", "integrity", "commit"],
+      "additionalProperties": false,
+      "properties": {
+        "version":   { "type": "string", "minLength": 1 },
+        "resolved":  { "type": "string", "format": "uri" },
+        "integrity": { "type": "string", "pattern": "^sha256-" },
+        "commit":    { "type": "string", "minLength": 7 }
+      }
+    }
+  }
+}
