@@ -147,6 +147,37 @@ struct DoctorCheck {
 
 std::vector<DoctorCheck> run_doctor_checks(const fs::path& active_root, bool standalone_mode);
 
+// ── Interactive Prompts ─────────────────────────────────────────────────────
+// Abstract prompt helpers. Built-in C++ implementation; designed so a future
+// gum backend can slot in by detecting the binary and shelling out.
+
+namespace cli {
+
+// Ask a yes/no question. Returns true for yes. default_yes controls the
+// default when the user just presses enter.
+bool confirm(const std::string& question, bool default_yes = true);
+
+// Present a list of choices, return the index of the selected item.
+// Returns -1 if the user cancels.
+int choose(const std::string& prompt, const std::vector<std::string>& options);
+
+// Prompt for text input with an optional default value.
+std::string input(const std::string& prompt, const std::string& default_value = {});
+
+} // namespace cli
+
+// ── File Watching ───────────────────────────────────────────────────────────
+
+// Watch source files under root for changes, calling on_change when detected.
+// Blocks until on_change returns non-zero or the process is interrupted.
+int watch_and_rebuild(const fs::path& root, const fs::path& build_dir,
+                      const std::vector<std::string>& build_args);
+
+// ── Fuzzy Matching ──────────────────────────────────────────────────────────
+
+// Score how well query matches text (higher = better match, 0 = no match).
+int fuzzy_score(const std::string& text, const std::string& query);
+
 // ── Command Forward Declarations (for cross-command calls) ──────────────────
 
 int cmd_build(const std::vector<std::string>& args);

@@ -98,7 +98,52 @@ static int docs_search(const fs::path& docs_dir, const std::string& query) {
     }
 
     if (match_count == 0) {
-        std::cout << "No matches for \"" << query << "\" in docs/\n";
+        // Fuzzy search fallback: score document filenames and headings
+        struct FuzzyResult {
+            std::string path;
+            std::string heading;
+            int score;
+        };
+        std::vector<FuzzyResult> fuzzy_results;
+
+        for (auto& entry : fs::recursive_directory_iterator(docs_dir)) {
+            if (!entry.is_regular_file()) continue;
+            if (entry.path().extension() != ".md") continue;
+
+            auto rel = fs::relative(entry.path(), docs_dir).string();
+            int path_score = fuzzy_score(rel, query);
+            if (path_score > 0) {
+                fuzzy_results.push_back({rel, "", path_score});
+            }
+
+            std::ifstream f2(entry.path());
+            std::string heading_line;
+            while (std::getline(f2, heading_line)) {
+                if (!heading_line.empty() && heading_line[0] == '#') {
+                    int heading_score = fuzzy_score(heading_line, query);
+                    if (heading_score > 0) {
+                        fuzzy_results.push_back({rel, trim(heading_line), heading_score});
+                    }
+                }
+            }
+        }
+
+        if (fuzzy_results.empty()) {
+            std::cout << "No matches for \"" << query << "\" in docs/\n";
+        } else {
+            std::sort(fuzzy_results.begin(), fuzzy_results.end(),
+                      [](const auto& a, const auto& b) { return a.score > b.score; });
+
+            std::cout << "No exact matches for \"" << query << "\". Did you mean:\n\n";
+            int shown = 0;
+            for (auto& r : fuzzy_results) {
+                if (shown >= 10) break;
+                std::cout << "  docs/" << r.path;
+                if (!r.heading.empty()) std::cout << " — " << r.heading;
+                std::cout << "\n";
+                ++shown;
+            }
+        }
     } else {
         std::cout << "\n" << match_count << " match(es) found.\n";
     }

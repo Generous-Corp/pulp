@@ -22,10 +22,15 @@ int cmd_build(const std::vector<std::string>& args) {
         if (cmake_time > cache_time) needs_configure = true;
     }
 
-    // Extract --js-engine= flag before passing args through
+    // Extract flags before passing args through
     std::string js_engine;
+    bool watch_mode = false;
     std::vector<std::string> passthrough_args;
     for (auto& arg : args) {
+        if (arg == "--watch" || arg == "-w") {
+            watch_mode = true;
+            continue;
+        }
         if (arg.rfind("--js-engine=", 0) == 0) {
             js_engine = arg.substr(12);
             if (js_engine != "auto" && js_engine != "quickjs" && js_engine != "jsc" && js_engine != "v8") {
@@ -77,5 +82,8 @@ int cmd_build(const std::vector<std::string>& args) {
         build_cmd += " " + arg;
     }
 
-    return run_with_spinner(build_cmd, "Building");
+    int rc = run_with_spinner(build_cmd, "Building");
+    if (rc != 0 || !watch_mode) return rc;
+
+    return watch_and_rebuild(project_root, build_dir, passthrough_args);
 }

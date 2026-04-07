@@ -12,6 +12,7 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <map>
 #include <random>
 #include <regex>
 #include <sstream>
@@ -960,4 +961,177 @@ int delegate_to_built_binary(const fs::path& relative_binary,
     if (!prepend_flag.empty()) cmd += " " + prepend_flag;
     for (auto& arg : args) cmd += " " + shell_quote(arg);
     return run(cmd);
+}
+
+// ── Interactive Prompts ─────────────────────────────────────────────────────
+
+namespace cli {
+
+bool confirm(const std::string& question, bool default_yes) {
+    std::string hint = default_yes ? "[Y/n]" : "[y/N]";
+    std::cout << color::bold() << question << color::reset() << " " << hint << " ";
+    std::cout.flush();
+
+    std::string line;
+    if (!std::getline(std::cin, line) || line.empty()) {
+        return default_yes;
+    }
+
+    char c = static_cast<char>(std::tolower(static_cast<unsigned char>(line[0])));
+    return c == 'y';
+}
+
+int choose(const std::string& prompt, const std::vector<std::string>& options) {
+    if (options.empty()) return -1;
+
+    std::cout << color::bold() << prompt << color::reset() << "\n";
+    for (size_t i = 0; i < options.size(); ++i) {
+        std::cout << "  " << color::cyan() << (i + 1) << color::reset()
+                  << ") " << options[i] << "\n";
+    }
+    std::cout << color::dim() << "Enter number (1-" << options.size() << "): " << color::reset();
+    std::cout.flush();
+
+    std::string line;
+    if (!std::getline(std::cin, line) || line.empty()) {
+        return 0;  // default to first option
+    }
+
+    try {
+        int choice = std::stoi(line);
+        if (choice >= 1 && choice <= static_cast<int>(options.size())) {
+            return choice - 1;
+        }
+    } catch (...) {}
+
+    return 0;  // default to first
+}
+
+std::string input(const std::string& prompt, const std::string& default_value) {
+    std::cout << color::bold() << prompt << color::reset();
+    if (!default_value.empty()) {
+        std::cout << " " << color::dim() << "(" << default_value << ")" << color::reset();
+    }
+    std::cout << ": ";
+    std::cout.flush();
+
+    std::string line;
+    if (!std::getline(std::cin, line) || line.empty()) {
+        return default_value;
+    }
+    return line;
+}
+
+} // namespace cli
+
+// ── File Watching ───────────────────────────────────────────────────────────
+
+// Collect source file timestamps under a directory
+static std::map<fs::path, fs::file_time_type> snapshot_timestamps(const fs::path& root) {
+    std::map<fs::path, fs::file_time_type> timestamps;
+    static const std::vector<std::string> watch_extensions = {
+        ".cpp", ".hpp", ".h", ".c", ".mm", ".swift", ".js", ".css", ".json"
+    };
+
+    for (auto& entry : fs::recursive_directory_iterator(root,
+            fs::directory_options::skip_permission_denied)) {
+        if (!entry.is_regular_file()) continue;
+        auto ext = entry.path().extension().string();
+        bool watched = false;
+        for (auto& wext : watch_extensions) {
+            if (ext == wext) { watched = true; break; }
+        }
+        if (entry.path().filename() == "CMakeLists.txt") watched = true;
+        if (!watched) continue;
+
+        // Skip build directory
+        auto rel = entry.path().lexically_relative(root);
+        if (!rel.empty() && *rel.begin() == "build") continue;
+
+        std::error_code ec;
+        auto mtime = fs::last_write_time(entry.path(), ec);
+        if (!ec) timestamps[entry.path()] = mtime;
+    }
+    return timestamps;
+}
+
+int watch_and_rebuild(const fs::path& root, const fs::path& build_dir,
+                      const std::vector<std::string>& build_args) {
+    std::cout << color::cyan() << "Watching for changes..." << color::reset()
+              << " (Ctrl-C to stop)\n";
+
+    auto previous = snapshot_timestamps(root);
+
+    for (;;) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+
+        auto current = snapshot_timestamps(root);
+        bool changed = false;
+
+        for (auto& [path, mtime] : current) {
+            auto it = previous.find(path);
+            if (it == previous.end() || it->second != mtime) {
+                if (!changed) {
+                    std::cout << "\n" << color::yellow() << "Change detected"
+                              << color::reset() << ": "
+                              << path.lexically_relative(root).string() << "\n";
+                }
+                changed = true;
+            }
+        }
+
+        if (changed) {
+            std::string build_cmd = "cmake --build " + build_dir.string();
+            for (auto& arg : build_args) build_cmd += " " + arg;
+            int rc = run_with_spinner(build_cmd, "Rebuilding");
+            if (rc != 0) {
+                std::cout << color::red() << "Build failed." << color::reset()
+                          << " Watching for more changes...\n";
+            } else {
+                std::cout << color::cyan() << "Watching for changes..."
+                          << color::reset() << "\n";
+            }
+            previous = snapshot_timestamps(root);
+        } else {
+            previous = current;
+        }
+    }
+
+    return 0;
+}
+
+// ── Fuzzy Matching ──────────────────────────────────────────────────────────
+
+int fuzzy_score(const std::string& text, const std::string& query) {
+    if (query.empty()) return 1;
+    if (text.empty()) return 0;
+
+    std::string lower_text = text;
+    std::string lower_query = query;
+    for (auto& c : lower_text) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    for (auto& c : lower_query) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+
+    // Exact substring match scores highest
+    if (lower_text.find(lower_query) != std::string::npos) {
+        return 100 + static_cast<int>(query.size());
+    }
+
+    // Sequential character matching (fzf-style)
+    int score = 0;
+    size_t qi = 0;
+    bool prev_matched = false;
+    for (size_t ti = 0; ti < lower_text.size() && qi < lower_query.size(); ++ti) {
+        if (lower_text[ti] == lower_query[qi]) {
+            score += prev_matched ? 3 : 1;  // consecutive bonus
+            prev_matched = true;
+            ++qi;
+        } else {
+            prev_matched = false;
+        }
+    }
+
+    // All query chars must be found
+    if (qi < lower_query.size()) return 0;
+
+    return score;
 }
