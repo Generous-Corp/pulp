@@ -10,6 +10,7 @@ target_include_directories(pulp-osc
 target_sources(pulp-osc PRIVATE
     src/osc.cpp
     src/osc_udp.cpp
+    src/bundle.cpp
 )
 
 target_link_libraries(pulp-osc PUBLIC pulp::runtime)
