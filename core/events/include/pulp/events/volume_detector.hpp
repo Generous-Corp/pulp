@@ -11,6 +11,8 @@
 #include <atomic>
 #include <thread>
 #include <chrono>
+#include <mutex>
+#include <condition_variable>
 
 namespace pulp::events {
 
