@@ -45,11 +45,15 @@ void View::paint_all(canvas::Canvas& canvas) {
     if (overflow_ == Overflow::hidden)
         canvas.clip_rect(0, 0, bounds_.width, bounds_.height);
 
-    // Compositing layer for opacity and/or blur — uses GPU offscreen buffer
-    // so the entire subtree is composited as one unit (correct CSS opacity)
-    bool needs_layer = (opacity_ < 1.0f) || (filter_blur_ > 0.0f) || needs_layer_;
-    if (needs_layer)
-        canvas.save_layer(0, 0, bounds_.width, bounds_.height, opacity_, filter_blur_);
+    // Compositing layer for opacity, blur, or post-effects
+    bool needs_layer = (opacity_ < 1.0f) || (filter_blur_ > 0.0f) || needs_layer_
+                       || (effect_ && effect_->needs_layer());
+    if (needs_layer) {
+        if (effect_)
+            effect_->configure_layer(canvas, 0, 0, bounds_.width, bounds_.height);
+        else
+            canvas.save_layer(0, 0, bounds_.width, bounds_.height, opacity_, filter_blur_);
+    }
 
     // Paint box shadow (before background, extends outside bounds)
     if (has_shadow_) {
