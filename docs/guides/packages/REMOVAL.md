@@ -16,6 +16,9 @@ Work through each section as a checklist.
 - [ ] `tools/cli/package_commands.cpp`
 - [ ] `tools/cli/package_registry.hpp`
 - [ ] `tools/cli/package_registry.cpp`
+- [ ] `tools/cli/tool_registry.hpp`
+- [ ] `tools/cli/tool_registry.cpp`
+- [ ] `tools/cli/json_parser.hpp`
 
 ### Registry and tooling
 
@@ -48,7 +51,13 @@ Work through each section as a checklist.
 - [ ] `tools/packages/test-stubs/signalsmith-stretch/CMakeLists.txt`
 - [ ] `tools/packages/test-stubs/signalsmith-stretch/main.cpp`
 
+- [ ] `tools/packages/tool-registry.json`
+
 Or simply: `rm -rf tools/packages/`
+
+### Extended entitlements
+
+- [ ] `ship/templates/entitlements-extended.plist`
 
 ### Documentation guides
 
