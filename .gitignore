@@ -1,6 +1,5 @@
-# Planning and internal docs (private submodule)
+# Legacy planning paths (now a submodule at planning/)
 /.planning-repo/
-/research/
 
 # Build artifacts
 /build/

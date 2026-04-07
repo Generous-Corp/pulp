@@ -208,8 +208,7 @@ pulp/
 Internal planning — capability assessments, feature specs, roadmaps, phase tracking, and design exploration — lives in the `planning/` submodule (private repo `pulp-planning`). This separation keeps the public repo focused on code, docs, and examples.
 
 ```
-planning/            # Private submodule — specs, assessments, roadmaps, phase tracking
-/research/           # Gitignored — research notes, reference material
+planning/            # Private submodule — specs, assessments, roadmaps, research, phase tracking
 ```
 
 When a phase completes, its spec moves to `planning/archive/`. Status is tracked in `planning/STATUS.md`. The `planning/` submodule is optional — external cloners can build and use Pulp without it.
@@ -279,7 +278,7 @@ The `planning/` directory is a private git submodule (`pulp-planning`). All inte
 - **Feature specs** — detailed plans for upcoming work
 - **Roadmaps and phase tracking** — STATUS.md, phase plans
 - **Design exploration** — architecture proposals, workflow designs
-- **Research notes** — reference material, technology evaluations
+- **Research notes** — reference material, technology evaluations, library reviews
 
 ### Workflow
 
