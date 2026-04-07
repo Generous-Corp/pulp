@@ -14,12 +14,13 @@ target_sources(pulp-platform PRIVATE
     src/registry.cpp
 )
 
-# Platform-specific UI services
+# Platform-specific UI services and child process
 if(APPLE)
     target_sources(pulp-platform PRIVATE
         platform/mac/clipboard_mac.mm
         platform/mac/file_dialog_mac.mm
         platform/mac/popup_menu_mac.mm
+        platform/posix/child_process_posix.cpp
     )
     target_link_libraries(pulp-platform PRIVATE
         "-framework Cocoa"
@@ -28,9 +29,11 @@ if(APPLE)
 elseif(WIN32)
     target_sources(pulp-platform PRIVATE
         platform/win/clipboard_win.cpp
+        platform/win/child_process_win.cpp
     )
 elseif(UNIX AND NOT APPLE)
     target_sources(pulp-platform PRIVATE
         platform/linux/clipboard_linux.cpp
+        platform/posix/child_process_posix.cpp
     )
 endif()

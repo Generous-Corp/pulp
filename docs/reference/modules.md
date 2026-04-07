@@ -71,9 +71,9 @@ Supports effects, instruments, and MIDI effects. Multi-bus (sidechain) support i
 
 **Status**: usable
 **Dependencies**: none
-**Headers**: `pulp/platform/platform.hpp`, `pulp/platform/detect.hpp`, `pulp/platform/file_dialog.hpp`, `pulp/platform/popup_menu.hpp`, `pulp/platform/clipboard.hpp`, `pulp/platform/native_handle.hpp`
+**Headers**: `pulp/platform/platform.hpp`, `pulp/platform/detect.hpp`, `pulp/platform/file_dialog.hpp`, `pulp/platform/popup_menu.hpp`, `pulp/platform/clipboard.hpp`, `pulp/platform/native_handle.hpp`, `pulp/platform/child_process.hpp`
 
-Platform detection, native file dialogs, popup menus, clipboard access, and native window handle management. macOS implementation is primary; other platforms have stubs.
+Platform detection, native file dialogs, popup menus, clipboard access, native window handle management, and cross-platform child process execution. The `ChildProcess` class provides blocking and non-blocking subprocess execution with line-by-line output callbacks, timeout, cancellation, and binary discovery via `find_on_path()`. Uses `posix_spawn` on POSIX (sandbox-compatible for AU plugins) and `CreateProcess` on Windows.
 
 ## canvas
 
