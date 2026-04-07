@@ -11,7 +11,9 @@ void ConcertinaPanel::add_section(std::string title, std::unique_ptr<View> conte
 
     if (content) {
         content->set_visible(initially_expanded);
-        section.content = std::move(content);
+        auto* raw = content.get();
+        add_child(std::move(content));
+        section.content_view = raw;  // non-owning ref for layout
     }
 
     sections_.push_back(std::move(section));
@@ -22,17 +24,17 @@ void ConcertinaPanel::expand(int index) {
     if (exclusive_) {
         for (auto& s : sections_) {
             s.expanded = false;
-            if (s.content) s.content->set_visible(false);
+            if (s.content_view) s.content_view->set_visible(false);
         }
     }
     sections_[index].expanded = true;
-    if (sections_[index].content) sections_[index].content->set_visible(true);
+    if (sections_[index].content_view) sections_[index].content_view->set_visible(true);
 }
 
 void ConcertinaPanel::collapse(int index) {
     if (index < 0 || index >= section_count()) return;
     sections_[index].expanded = false;
-    if (sections_[index].content) sections_[index].content->set_visible(false);
+    if (sections_[index].content_view) sections_[index].content_view->set_visible(false);
 }
 
 void ConcertinaPanel::toggle(int index) {
@@ -79,8 +81,8 @@ void ConcertinaPanel::paint(canvas::Canvas& canvas) {
         y += header_height_;
 
         // Content area (if expanded)
-        if (section.expanded && section.content) {
-            float content_h = section.content->intrinsic_height();
+        if (section.expanded && section.content_view) {
+            float content_h = section.content_view->intrinsic_height();
             if (content_h <= 0) content_h = 100.0f;  // Default content height
 
             // Content background
@@ -88,7 +90,7 @@ void ConcertinaPanel::paint(canvas::Canvas& canvas) {
             canvas.fill_rect(0, y, w, content_h);
 
             // The content view would be laid out here via set_bounds
-            // In a real layout pass, we'd call section.content->set_bounds({0, y, w, content_h})
+            // In a real layout pass, we'd call section.content_view->set_bounds({0, y, w, content_h})
 
             y += content_h;
         }
@@ -104,7 +106,7 @@ void ConcertinaPanel::on_mouse_down(Point pos) {
         }
         y += header_height_;
         if (sections_[i].expanded) {
-            float content_h = sections_[i].content ? sections_[i].content->intrinsic_height() : 100.0f;
+            float content_h = sections_[i].content_view ? sections_[i].content_view->intrinsic_height() : 100.0f;
             if (content_h <= 0) content_h = 100.0f;
             y += content_h;
         }
@@ -116,10 +118,10 @@ void ConcertinaPanel::layout_sections() {
     float y = 0;
     for (auto& section : sections_) {
         y += header_height_;
-        if (section.expanded && section.content) {
-            float content_h = section.content->intrinsic_height();
+        if (section.expanded && section.content_view) {
+            float content_h = section.content_view->intrinsic_height();
             if (content_h <= 0) content_h = 100.0f;
-            section.content->set_bounds({0, y, w, content_h});
+            section.content_view->set_bounds({0, y, w, content_h});
             y += content_h;
         }
     }

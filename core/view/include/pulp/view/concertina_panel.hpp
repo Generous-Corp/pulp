@@ -52,7 +52,7 @@ public:
 private:
     struct Section {
         std::string title;
-        std::unique_ptr<View> content;
+        View* content_view = nullptr;  // Non-owning — child owned by View tree
         bool expanded = false;
     };
 

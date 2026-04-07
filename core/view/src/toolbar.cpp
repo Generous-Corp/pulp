@@ -38,7 +38,7 @@ void ToolStrip::add_custom(std::string id, std::unique_ptr<View> view) {
     ToolbarItem item;
     item.id = std::move(id);
     item.type = ToolStripItemType::Custom;
-    item.custom_view = std::move(view);
+    if (view) add_child(std::move(view));  // Attach to view tree for rendering
     items_.push_back(std::move(item));
 }
 
