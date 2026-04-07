@@ -51,6 +51,11 @@ add_executable(pulp-test-appcast test_appcast.cpp)
 target_link_libraries(pulp-test-appcast PRIVATE pulp::ship Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-appcast)
 
+# V3 gaps tests (Bias, MidiSequence, SubsectionReader, HostType, Primes, Expression)
+add_executable(pulp-test-v3-gaps test_v3_gaps.cpp)
+target_link_libraries(pulp-test-v3-gaps PRIVATE pulp::signal pulp::midi pulp::audio pulp::format pulp::runtime Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-v3-gaps)
+
 # Codesign tests
 add_executable(pulp-test-codesign test_codesign.cpp)
 target_link_libraries(pulp-test-codesign PRIVATE pulp::ship Catch2::Catch2WithMain)

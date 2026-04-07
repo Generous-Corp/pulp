@@ -12,6 +12,7 @@ target_sources(pulp-format PRIVATE
     src/headless.cpp
     src/validation_harness.cpp
     src/aax_model.cpp
+    src/host_type.cpp
 )
 
 target_link_libraries(pulp-format

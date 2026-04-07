@@ -31,6 +31,8 @@ target_sources(pulp-runtime PRIVATE
     src/analytics.cpp
     src/big_integer.cpp
     src/license.cpp
+    src/primes.cpp
+    src/expression.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../../external/pugixml/pugixml.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../../external/miniz/miniz.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../../external/miniz/miniz_tdef.c
