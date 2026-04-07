@@ -9,6 +9,8 @@ FetchContent_Declare(
   GIT_TAG        version_1.0
   GIT_SHALLOW    TRUE
 )
+# Only build q_lib (pitch detection), not q_io (needs PortAudio)
+set(Q_BUILD_IO OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(q)
 
 add_executable(test-pkg main.cpp)

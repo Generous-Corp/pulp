@@ -85,15 +85,21 @@ jobs:
                 -B build-stub \
                 -DCMAKE_BUILD_TYPE=Release \
                 -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+        shell: bash
 
       - name: Build stub
-        run: cmake --build build-stub
+        run: cmake --build build-stub --config Release
+        shell: bash
 
       - name: Run stub
         run: |
-          if [ "$RUNNER_OS" = "Windows" ]; then
+          if [ -f build-stub/Release/test-pkg.exe ]; then
             ./build-stub/Release/test-pkg.exe
-          else
+          elif [ -f build-stub/test-pkg ]; then
             ./build-stub/test-pkg
+          elif [ -f build-stub/test-pkg.exe ]; then
+            ./build-stub/test-pkg.exe
+          else
+            echo "Binary not found" && exit 1
           fi
         shell: bash
