@@ -85,15 +85,21 @@ Creates a PR, runs CI, and merges on green. This is the default when someone say
 
 1. Ensure all changes are committed
 2. Push the branch to origin with `-u`
-3. Create a PR to main via `gh pr create`
+3. Create a PR via `gh pr create` (to main, or to a develop branch if specified)
 4. Run local CI: `python3 tools/local-ci/local_ci.py run <branch>`
 5. If ALL targets pass → `gh pr merge <PR#> --squash --delete-branch`
 6. If ANY target fails → report failures, leave PR open
 7. Notify when done (terminal bell)
 
 ```bash
-python3 tools/local-ci/local_ci.py run [branch]
+# Ship to main (default)
+python3 tools/local-ci/local_ci.py ship [branch]
+
+# Ship to a develop branch (for multi-piece features)
+python3 tools/local-ci/local_ci.py ship [branch] --base develop/package-manager
 ```
+
+**Develop branch workflow:** When working on complex features that use a `develop/*` integration branch, PRs target the develop branch instead of main. The develop branch itself merges to main at phase boundaries. Use `--base` to specify the target.
 
 ### `run [branch]` — Just validate, no PR
 

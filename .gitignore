@@ -33,6 +33,7 @@ Thumbs.db
 !/external/pugixml/
 !/external/miniz/
 !/external/cpp-httplib/
+!/external/dr_libs/
 
 # Node (for web/WASM builds)
 node_modules/

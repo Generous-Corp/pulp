@@ -222,11 +222,12 @@ When a phase completes, its spec moves to `planning/archive/`. Status is tracked
 - **`main`** — always clean, always builds, always passes tests. Every commit on main should be something we're proud of.
 - **`explore/*`** — exploration branches for prototyping uncertain ideas. Created in worktrees. Never merged directly to main.
 - **`feature/*`** — the default branch for non-trivial implementation work. Use this for focused features, fixes, and polish slices.
+- **`develop/*`** — integration branches for complex, multi-piece features that need extended testing before merging to main. Feature branches merge to the develop branch first via PR; the develop branch merges to main at phase boundaries after full CI validation. Same quality bar as main.
 - **`phase/*`** — optional name for a larger, spec-driven feature branch tied to a concrete planning document. This is a special case of feature work, not a separate workflow.
 
 ### Default Branch Discipline
 
-- Default to a branch for any non-trivial change. Use `feature/*` unless the work is large enough to deserve a spec-driven `phase/*` branch.
+- Default to a branch for any non-trivial change. Use `feature/*` unless the work is large enough to deserve a spec-driven `phase/*` branch or a `develop/*` integration branch.
 - Treat `main` as a landing branch, not a scratch branch.
 - **Never push directly to main. No exceptions.** Every change must go through: branch → PR → CI green → merge.
 - Before merging to `main`, have high confidence the slice is stable: targeted tests pass, higher-risk changes get a clean detached validation pass with `./validate-build.sh`, and docs/status stay in sync.

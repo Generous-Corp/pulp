@@ -134,6 +134,18 @@ Important constraints in the current phase:
 - `build.yml` now accepts `runner_provider` and routes Linux and Windows through
   the selected provider; macOS is omitted from the cloud build by default so it
   can stay local-first
+- **Default provider for PR checks** is controlled by the GitHub repo variable
+  `PULP_DEFAULT_RUNNER_PROVIDER`. Set it to `namespace` to route all PR checks
+  through Namespace runners (faster, parallel). Set to `github-hosted` to use
+  GitHub-hosted runners (free tier, queued). The `workflow_dispatch` input
+  overrides this for manual runs. To change the default:
+  ```bash
+  # Switch to Namespace (recommended for faster CI)
+  gh variable set PULP_DEFAULT_RUNNER_PROVIDER --body "namespace"
+  
+  # Switch back to GitHub-hosted
+  gh variable set PULP_DEFAULT_RUNNER_PROVIDER --body "github-hosted"
+  ```
 - `build` also accepts one-off leg overrides:
   `--linux-runner-selector-json`, `--windows-runner-selector-json`, and
   `--macos-runner-selector-json`; that means you can keep the normal
@@ -583,6 +595,20 @@ pulp ci-local cleanup --apply --include-prepared
 ```
 
 `pulp ci-local run` is the most common command. It enqueues the current `HEAD`, joins the machine-global queue, and waits until that exact job finishes.
+
+### Develop branch workflow
+
+For complex, multi-piece features that use a `develop/*` integration branch, PRs target the develop branch instead of `main`. The `ship` command supports this via `--base`:
+
+```bash
+# Ship a feature to the develop branch (not main)
+pulp ci-local ship feature/pkg-registry --base develop/package-manager
+
+# The develop branch itself ships to main at phase boundaries
+pulp ci-local ship develop/package-manager
+```
+
+GitHub Actions CI triggers on PRs to both `main` and `develop/**` branches, so CI runs automatically regardless of the target.
 
 If you pass a branch name explicitly, for example `pulp ci-local run feature/my-branch`, local CI resolves and records that branch tip's exact SHA immediately. This prevents a stale launching checkout from accidentally queuing its own `HEAD` while you intended to validate a different branch.
 
