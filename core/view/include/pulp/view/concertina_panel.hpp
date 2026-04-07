@@ -46,8 +46,8 @@ public:
     void paint(canvas::Canvas& canvas) override;
     void on_mouse_down(Point pos) override;
 
-    /// Layout the sections vertically.
-    void layout() override;
+    /// Layout the sections vertically. Call after adding/toggling sections.
+    void layout_sections();
 
 private:
     struct Section {

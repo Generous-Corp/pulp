@@ -160,6 +160,9 @@ target_sources(pulp-view PRIVATE
     src/breadcrumb.cpp
     src/buttons.cpp
     src/file_browser.cpp
+    src/concertina_panel.cpp
+    src/table.cpp
+    src/toolbar.cpp
 )
 
 # WebView support — compiled separately to avoid platform WebView runtime
