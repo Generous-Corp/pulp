@@ -159,6 +159,7 @@ target_sources(pulp-view PRIVATE
     src/property_list.cpp
     src/breadcrumb.cpp
     src/buttons.cpp
+    src/file_browser.cpp
 )
 
 # WebView support — compiled separately to avoid platform WebView runtime
