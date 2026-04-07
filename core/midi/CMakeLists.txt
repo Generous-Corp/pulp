@@ -16,7 +16,10 @@ target_include_directories(pulp-midi PUBLIC
 )
 
 # MIDI file I/O (cross-platform, via CHOC)
-target_sources(pulp-midi PRIVATE src/midi_file.cpp)
+target_sources(pulp-midi PRIVATE
+    src/midi_file.cpp
+    src/midi_ci.cpp
+)
 
 if(APPLE AND NOT IOS)
     target_sources(pulp-midi PRIVATE
