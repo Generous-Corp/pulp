@@ -5032,12 +5032,61 @@ fn main(@location(0) uv : vec2<f32>) -> @location(0) vec4<f32> {
             auto pipeline = device_ptr->CreateComputePipeline(&pipe_desc);
             if (!pipeline) return choc::value::createBool(false);
 
+            // Create bind groups from serialized data
+            std::vector<wgpu::Buffer> gpu_buffers;  // Keep alive until submit
+            std::vector<wgpu::BindGroup> bind_groups;
+
+            if (payload.hasObjectMember("bindGroups")) {
+                auto& bg_data = payload["bindGroups"];
+                for (uint32_t bg_idx = 0; bg_idx < bg_data.size(); ++bg_idx) {
+                    auto member = bg_data.getObjectMemberAt(bg_idx);
+                    auto& entries_val = member.value;
+
+                    std::vector<wgpu::BindGroupEntry> bg_entries;
+                    for (uint32_t e = 0; e < entries_val.size(); ++e) {
+                        auto& entry = entries_val[e];
+                        wgpu::BindGroupEntry bge{};
+                        bge.binding = static_cast<uint32_t>(
+                            entry.hasObjectMember("binding") ? entry["binding"].getWithDefault<int64_t>(0) : 0);
+
+                        if (entry.hasObjectMember("bufferSize")) {
+                            auto buf_size = static_cast<uint64_t>(entry["bufferSize"].getWithDefault<int64_t>(0));
+                            auto buf_usage = static_cast<uint32_t>(entry["bufferUsage"].getWithDefault<int64_t>(0));
+
+                            wgpu::BufferDescriptor buf_desc{};
+                            buf_desc.size = buf_size;
+                            buf_desc.usage = static_cast<wgpu::BufferUsage>(buf_usage) |
+                                             wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::CopySrc;
+                            auto gpu_buf = device_ptr->CreateBuffer(&buf_desc);
+
+                            // TODO: decode base64 data and write to buffer via queue.WriteBuffer
+                            // For now, the buffer is created with zeroed data
+
+                            bge.buffer = gpu_buf;
+                            bge.size = buf_size;
+                            gpu_buffers.push_back(gpu_buf);
+                        }
+                        bg_entries.push_back(bge);
+                    }
+
+                    if (!bg_entries.empty()) {
+                        wgpu::BindGroupDescriptor bgd{};
+                        bgd.layout = pipeline.GetBindGroupLayout(bg_idx);
+                        bgd.entryCount = bg_entries.size();
+                        bgd.entries = bg_entries.data();
+                        bind_groups.push_back(device_ptr->CreateBindGroup(&bgd));
+                    }
+                }
+            }
+
             // Encode and dispatch
             wgpu::CommandEncoderDescriptor enc_desc{};
             auto encoder = device_ptr->CreateCommandEncoder(&enc_desc);
             wgpu::ComputePassDescriptor pass_desc{};
             auto pass = encoder.BeginComputePass(&pass_desc);
             pass.SetPipeline(pipeline);
+            for (uint32_t i = 0; i < bind_groups.size(); ++i)
+                pass.SetBindGroup(i, bind_groups[i]);
             pass.DispatchWorkgroups(wg_x, wg_y, wg_z);
             pass.End();
 
