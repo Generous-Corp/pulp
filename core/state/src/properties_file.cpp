@@ -50,32 +50,28 @@ bool PropertiesFile::load(std::string_view path) {
 
 bool PropertiesFile::save(std::string_view path) {
     path_ = std::string(path);
-    std::string save_path = path_;
-
-    // Ensure parent directory exists
-    auto parent = std::filesystem::path(save_path).parent_path();
-    if (!parent.empty()) {
-        std::error_code ec;
-        std::filesystem::create_directories(parent, ec);
-    }
-
-    // Build JSON using CHOC
-    auto obj = choc::value::createObject("settings");
-    for (auto& [key, value] : values_)
-        obj.addMember(key, value);
-
-    std::string json = choc::json::toString(obj, true);
-
-    std::ofstream file(save_path);
-    if (!file) return false;
-
-    file << json;
-    return file.good();
+    return save_to(path_);
 }
 
 bool PropertiesFile::save() const {
     if (path_.empty()) return false;
-    return save(path_);
+    return save_to(path_);
+}
+
+bool PropertiesFile::save_to(const std::string& dest) const {
+    auto parent = std::filesystem::path(dest).parent_path();
+    if (!parent.empty()) {
+        std::error_code ec;
+        std::filesystem::create_directories(parent, ec);
+    }
+    auto obj = choc::value::createObject("settings");
+    for (auto& [key, value] : values_)
+        obj.addMember(key, value);
+    std::string json = choc::json::toString(obj, true);
+    std::ofstream file(dest);
+    if (!file) return false;
+    file << json;
+    return file.good();
 }
 
 std::optional<std::string> PropertiesFile::get_string(std::string_view key) const {

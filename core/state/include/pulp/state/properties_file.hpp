@@ -62,6 +62,7 @@ public:
     void set_path(std::string_view p) { path_ = std::string(p); }
 
 private:
+    bool save_to(const std::string& dest) const;
     std::map<std::string, std::string, std::less<>> values_;
     std::string path_;
 };
