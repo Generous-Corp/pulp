@@ -51,6 +51,11 @@ add_executable(pulp-test-sync test_sync_primitives.cpp)
 target_link_libraries(pulp-test-sync PRIVATE pulp::runtime Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-sync)
 
+# License and BigInteger tests
+add_executable(pulp-test-license test_license.cpp)
+target_link_libraries(pulp-test-license PRIVATE pulp::runtime Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-license)
+
 # MIDI CI tests
 add_executable(pulp-test-midi-ci test_midi_ci.cpp)
 target_link_libraries(pulp-test-midi-ci PRIVATE pulp::midi Catch2::Catch2WithMain)

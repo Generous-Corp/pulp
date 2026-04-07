@@ -51,20 +51,17 @@ BigInteger BigInteger::from_hex(std::string_view hex) {
 std::string BigInteger::to_string() const {
     size_t olen = 0;
     mbedtls_mpi_write_string(&impl_->mpi, 10, nullptr, 0, &olen);
-    std::string result(olen, '\0');
-    mbedtls_mpi_write_string(&impl_->mpi, 10, result.data(), olen, &olen);
-    // Remove trailing null
-    while (!result.empty() && result.back() == '\0') result.pop_back();
-    return result;
+    std::vector<char> buf(olen);
+    mbedtls_mpi_write_string(&impl_->mpi, 10, buf.data(), olen, &olen);
+    return std::string(buf.data());  // C-string constructor stops at null
 }
 
 std::string BigInteger::to_hex() const {
     size_t olen = 0;
     mbedtls_mpi_write_string(&impl_->mpi, 16, nullptr, 0, &olen);
-    std::string result(olen, '\0');
-    mbedtls_mpi_write_string(&impl_->mpi, 16, result.data(), olen, &olen);
-    while (!result.empty() && result.back() == '\0') result.pop_back();
-    return result;
+    std::vector<char> buf(olen);
+    mbedtls_mpi_write_string(&impl_->mpi, 16, buf.data(), olen, &olen);
+    return std::string(buf.data());
 }
 
 bool BigInteger::is_zero() const {
