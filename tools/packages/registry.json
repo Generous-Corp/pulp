@@ -14,21 +14,47 @@
         "git_tag": "1.1.0"
       },
       "cmake": {
-        "targets": ["signalsmith-stretch"],
+        "targets": [
+          "signalsmith-stretch"
+        ],
         "header_only": true,
         "include_dir": "."
       },
       "platforms": {
-        "macOS":   { "architectures": ["arm64"] },
-        "Windows": { "architectures": ["x64", "arm64"] },
-        "Linux":   { "architectures": ["x64", "arm64"] }
+        "macOS": {
+          "architectures": [
+            "arm64"
+          ]
+        },
+        "Windows": {
+          "architectures": [
+            "x64",
+            "arm64"
+          ]
+        },
+        "Linux": {
+          "architectures": [
+            "x64",
+            "arm64"
+          ]
+        }
       },
       "rt_safe": true,
-      "tags": ["pitch-shifting", "time-stretching", "spectral", "polyphonic"],
-      "provides": ["pitch-shift", "time-stretch"],
+      "tags": [
+        "pitch-shifting",
+        "time-stretching",
+        "spectral",
+        "polyphonic"
+      ],
+      "provides": [
+        "pitch-shift",
+        "time-stretch"
+      ],
       "overlaps_with_builtin": {},
       "unique_value": "High-quality polyphonic pitch/time stretching with no GPL dependency",
-      "alternatives": ["Rubber Band (GPL — requires commercial license)"],
+      "alternatives": [
+        "Rubber Band (GPL \u2014 requires commercial license)"
+      ],
       "migration_notes": {
         "from:rubber-band": "Signalsmith Stretch is MIT-licensed and header-only; API differs but covers similar use cases"
       },
@@ -60,18 +86,47 @@
         "git_tag": "v1.7.1"
       },
       "cmake": {
-        "targets": ["signalsmith-dsp"],
+        "targets": [
+          "signalsmith-dsp"
+        ],
         "header_only": true,
         "include_dir": "."
       },
       "platforms": {
-        "macOS":   { "architectures": ["arm64"] },
-        "Windows": { "architectures": ["x64", "arm64"] },
-        "Linux":   { "architectures": ["x64", "arm64"] }
+        "macOS": {
+          "architectures": [
+            "arm64"
+          ]
+        },
+        "Windows": {
+          "architectures": [
+            "x64",
+            "arm64"
+          ]
+        },
+        "Linux": {
+          "architectures": [
+            "x64",
+            "arm64"
+          ]
+        }
       },
       "rt_safe": true,
-      "tags": ["filters", "fft", "envelopes", "delay", "spectral", "windowing"],
-      "provides": ["filters", "fft", "envelopes", "delay", "spectral-processing"],
+      "tags": [
+        "filters",
+        "fft",
+        "envelopes",
+        "delay",
+        "spectral",
+        "windowing"
+      ],
+      "provides": [
+        "filters",
+        "fft",
+        "envelopes",
+        "delay",
+        "spectral-processing"
+      ],
       "overlaps_with_builtin": {
         "signal/biquad.hpp": "biquad filters",
         "signal/svf.hpp": "state variable filter",
@@ -79,7 +134,9 @@
         "signal/fft.hpp": "FFT"
       },
       "unique_value": "Comprehensive DSP toolkit with spectral processing and advanced envelope designs beyond Pulp built-ins",
-      "alternatives": ["KFR (GPL — requires commercial license)"],
+      "alternatives": [
+        "KFR (GPL \u2014 requires commercial license)"
+      ],
       "migration_notes": {},
       "verification": {
         "last_verified": "2026-04-07",
@@ -109,21 +166,49 @@
         "git_tag": "1fb1f075"
       },
       "cmake": {
-        "targets": ["RTNeural"],
+        "targets": [
+          "RTNeural"
+        ],
         "header_only": false,
         "include_dir": "."
       },
       "platforms": {
-        "macOS":   { "architectures": ["arm64"] },
-        "Windows": { "architectures": ["x64", "arm64"] },
-        "Linux":   { "architectures": ["x64", "arm64"] }
+        "macOS": {
+          "architectures": [
+            "arm64"
+          ]
+        },
+        "Windows": {
+          "architectures": [
+            "x64",
+            "arm64"
+          ]
+        },
+        "Linux": {
+          "architectures": [
+            "x64",
+            "arm64"
+          ]
+        }
       },
       "rt_safe": true,
-      "tags": ["neural-network", "ml", "inference", "amp-modeling", "real-time"],
-      "provides": ["neural-network-inference", "ml-inference"],
+      "tags": [
+        "neural-network",
+        "ml",
+        "inference",
+        "amp-modeling",
+        "real-time"
+      ],
+      "provides": [
+        "neural-network-inference",
+        "ml-inference"
+      ],
       "overlaps_with_builtin": {},
       "unique_value": "Real-time safe neural network inference for amp modeling, vocal processing, and intelligent audio effects",
-      "alternatives": ["ONNX Runtime (MIT — heavier, more general)", "nn-inference-template (MIT — template for multiple backends)"],
+      "alternatives": [
+        "ONNX Runtime (MIT \u2014 heavier, more general)",
+        "nn-inference-template (MIT \u2014 template for multiple backends)"
+      ],
       "migration_notes": {},
       "verification": {
         "last_verified": "2026-04-07",
@@ -153,21 +238,48 @@
         "git_tag": "version_1.0"
       },
       "cmake": {
-        "targets": ["libq"],
+        "targets": [
+          "libq"
+        ],
         "header_only": false,
         "include_dir": "."
       },
       "platforms": {
-        "macOS":   { "architectures": ["arm64"] },
-        "Windows": { "architectures": ["x64"], "notes": "arm64 not verified" },
-        "Linux":   { "architectures": ["x64", "arm64"] }
+        "macOS": {
+          "architectures": [
+            "arm64"
+          ]
+        },
+        "Windows": {
+          "architectures": [
+            "x64"
+          ],
+          "notes": "arm64 not verified"
+        },
+        "Linux": {
+          "architectures": [
+            "x64",
+            "arm64"
+          ]
+        }
       },
       "rt_safe": true,
-      "tags": ["pitch-detection", "autocorrelation", "frequency", "tuner"],
-      "provides": ["pitch-detection", "frequency-analysis"],
+      "tags": [
+        "pitch-detection",
+        "autocorrelation",
+        "frequency",
+        "tuner"
+      ],
+      "provides": [
+        "pitch-detection",
+        "frequency-analysis"
+      ],
       "overlaps_with_builtin": {},
-      "unique_value": "Fast, accurate pitch detection using bitstream autocorrelation — no equivalent in Pulp built-ins",
-      "alternatives": ["Aubio (GPL — requires commercial license)", "Essentia (AGPL — incompatible)"],
+      "unique_value": "Fast, accurate pitch detection using bitstream autocorrelation \u2014 no equivalent in Pulp built-ins",
+      "alternatives": [
+        "Aubio (GPL \u2014 requires commercial license)",
+        "Essentia (AGPL \u2014 incompatible)"
+      ],
       "migration_notes": {},
       "verification": {
         "last_verified": "2026-04-07",
@@ -196,23 +308,49 @@
         "git_tag": "0.2.2"
       },
       "cmake": {
-        "targets": ["SampleRate::samplerate"],
+        "targets": [
+          "SampleRate::samplerate"
+        ],
         "header_only": false,
         "include_dir": "include"
       },
       "platforms": {
-        "macOS":   { "architectures": ["arm64"] },
-        "Windows": { "architectures": ["x64", "arm64"] },
-        "Linux":   { "architectures": ["x64", "arm64"] }
+        "macOS": {
+          "architectures": [
+            "arm64"
+          ]
+        },
+        "Windows": {
+          "architectures": [
+            "x64",
+            "arm64"
+          ]
+        },
+        "Linux": {
+          "architectures": [
+            "x64",
+            "arm64"
+          ]
+        }
       },
       "rt_safe": false,
-      "tags": ["resampling", "sample-rate", "conversion", "interpolation"],
-      "provides": ["sample-rate-conversion", "resampling"],
+      "tags": [
+        "resampling",
+        "sample-rate",
+        "conversion",
+        "interpolation"
+      ],
+      "provides": [
+        "sample-rate-conversion",
+        "resampling"
+      ],
       "overlaps_with_builtin": {},
       "unique_value": "Industry-standard sample rate conversion with multiple quality modes (sinc best, sinc medium, sinc fastest, linear, zero-order-hold)",
-      "alternatives": ["r8brain-free-src (MIT — different quality tradeoffs)"],
+      "alternatives": [
+        "r8brain-free-src (MIT \u2014 different quality tradeoffs)"
+      ],
       "migration_notes": {
-        "from:libsndfile": "libsamplerate handles resampling only, not file I/O — use dr-libs for file decoding"
+        "from:libsndfile": "libsamplerate handles resampling only, not file I/O \u2014 use dr-libs for file decoding"
       },
       "verification": {
         "last_verified": "2026-04-07",
@@ -242,23 +380,53 @@
         "git_tag": "wav-0.14.5"
       },
       "cmake": {
-        "targets": ["dr_libs"],
+        "targets": [
+          "dr_libs"
+        ],
         "header_only": true,
         "include_dir": "."
       },
       "platforms": {
-        "macOS":   { "architectures": ["arm64"] },
-        "Windows": { "architectures": ["x64", "arm64"] },
-        "Linux":   { "architectures": ["x64", "arm64"] }
+        "macOS": {
+          "architectures": [
+            "arm64"
+          ]
+        },
+        "Windows": {
+          "architectures": [
+            "x64",
+            "arm64"
+          ]
+        },
+        "Linux": {
+          "architectures": [
+            "x64",
+            "arm64"
+          ]
+        }
       },
       "rt_safe": false,
-      "tags": ["wav", "flac", "mp3", "decoding", "audio-file", "single-header"],
-      "provides": ["wav-decoding", "flac-decoding", "mp3-decoding"],
+      "tags": [
+        "wav",
+        "flac",
+        "mp3",
+        "decoding",
+        "audio-file",
+        "single-header"
+      ],
+      "provides": [
+        "wav-decoding",
+        "flac-decoding",
+        "mp3-decoding"
+      ],
       "overlaps_with_builtin": {},
       "unique_value": "Zero-dependency single-header audio file decoding for WAV, FLAC, and MP3",
-      "alternatives": ["miniaudio (MIT-0 — includes device I/O too)", "libsndfile (LGPL — copyleft)"],
+      "alternatives": [
+        "miniaudio (MIT-0 \u2014 includes device I/O too)",
+        "libsndfile (LGPL \u2014 copyleft)"
+      ],
       "migration_notes": {
-        "from:libsndfile": "dr_libs is MIT-0 and header-only but decode-only — no encode support for FLAC/MP3"
+        "from:libsndfile": "dr_libs is MIT-0 and header-only but decode-only \u2014 no encode support for FLAC/MP3"
       },
       "verification": {
         "last_verified": "2026-04-07",
@@ -288,23 +456,54 @@
         "git_tag": "v1.1.0"
       },
       "cmake": {
-        "targets": ["PFFFT"],
+        "targets": [
+          "PFFFT"
+        ],
         "header_only": false,
         "include_dir": "."
       },
       "platforms": {
-        "macOS":   { "architectures": ["arm64"], "notes": "NEON path" },
-        "Windows": { "architectures": ["x64", "arm64"], "notes": "SSE on x64, NEON on arm64" },
-        "Linux":   { "architectures": ["x64", "arm64"], "notes": "SSE on x64, NEON on arm64" }
+        "macOS": {
+          "architectures": [
+            "arm64"
+          ],
+          "notes": "NEON path"
+        },
+        "Windows": {
+          "architectures": [
+            "x64",
+            "arm64"
+          ],
+          "notes": "SSE on x64, NEON on arm64"
+        },
+        "Linux": {
+          "architectures": [
+            "x64",
+            "arm64"
+          ],
+          "notes": "SSE on x64, NEON on arm64"
+        }
       },
       "rt_safe": true,
-      "tags": ["fft", "simd", "sse", "neon", "spectral"],
-      "provides": ["fft", "simd-fft"],
+      "tags": [
+        "fft",
+        "simd",
+        "sse",
+        "neon",
+        "spectral"
+      ],
+      "provides": [
+        "fft",
+        "simd-fft"
+      ],
       "overlaps_with_builtin": {
         "signal/fft.hpp": "FFT"
       },
       "unique_value": "SIMD-optimized FFT significantly faster than general-purpose implementations for power-of-two sizes",
-      "alternatives": ["KissFFT (BSD-3 — portable but not SIMD-optimized)", "FFTW (GPL — requires commercial license)"],
+      "alternatives": [
+        "KissFFT (BSD-3 \u2014 portable but not SIMD-optimized)",
+        "FFTW (GPL \u2014 requires commercial license)"
+      ],
       "migration_notes": {
         "from:fftw": "PFFFT is BSD-licensed and lighter; covers real and complex FFT for power-of-two sizes"
       },
@@ -336,18 +535,46 @@
         "git_tag": "V1.0.0"
       },
       "cmake": {
-        "targets": ["DaisySP"],
+        "targets": [
+          "DaisySP"
+        ],
         "header_only": false,
         "include_dir": "Source"
       },
       "platforms": {
-        "macOS":   { "architectures": ["arm64"] },
-        "Windows": { "architectures": ["x64", "arm64"] },
-        "Linux":   { "architectures": ["x64", "arm64"] }
+        "macOS": {
+          "architectures": [
+            "arm64"
+          ]
+        },
+        "Windows": {
+          "architectures": [
+            "x64",
+            "arm64"
+          ]
+        },
+        "Linux": {
+          "architectures": [
+            "x64",
+            "arm64"
+          ]
+        }
       },
       "rt_safe": true,
-      "tags": ["oscillators", "filters", "effects", "physical-modeling", "synthesis", "drums"],
-      "provides": ["physical-modeling", "karplus-strong", "modal-synthesis", "fm-synthesis"],
+      "tags": [
+        "oscillators",
+        "filters",
+        "effects",
+        "physical-modeling",
+        "synthesis",
+        "drums"
+      ],
+      "provides": [
+        "physical-modeling",
+        "karplus-strong",
+        "modal-synthesis",
+        "fm-synthesis"
+      ],
       "overlaps_with_builtin": {
         "signal/oscillator.hpp": "oscillators",
         "signal/biquad.hpp": "biquad filters",
@@ -356,7 +583,10 @@
         "signal/compressor.hpp": "compressor"
       },
       "unique_value": "Physical modeling synthesis (Karplus-Strong, modal, pluck) and drum synthesis not available in Pulp built-ins",
-      "alternatives": ["STK (MIT with patent caveats — more physical models)", "Maximilian (MIT — teaching-oriented)"],
+      "alternatives": [
+        "STK (MIT with patent caveats \u2014 more physical models)",
+        "Maximilian (MIT \u2014 teaching-oriented)"
+      ],
       "migration_notes": {},
       "verification": {
         "last_verified": "2026-04-07",
@@ -386,22 +616,55 @@
         "git_tag": "1.1"
       },
       "cmake": {
-        "targets": ["fontaudio"],
+        "targets": [
+          "fontaudio"
+        ],
         "header_only": true,
         "include_dir": "."
       },
       "platforms": {
-        "macOS":   { "architectures": ["arm64"] },
-        "Windows": { "architectures": ["x64", "arm64"] },
-        "Linux":   { "architectures": ["x64", "arm64"] },
-        "iOS":     { "architectures": ["arm64"] },
-        "WASM":    { "architectures": ["wasm32"] }
+        "macOS": {
+          "architectures": [
+            "arm64"
+          ]
+        },
+        "Windows": {
+          "architectures": [
+            "x64",
+            "arm64"
+          ]
+        },
+        "Linux": {
+          "architectures": [
+            "x64",
+            "arm64"
+          ]
+        },
+        "iOS": {
+          "architectures": [
+            "arm64"
+          ]
+        },
+        "WASM": {
+          "architectures": [
+            "wasm32"
+          ]
+        }
       },
       "rt_safe": true,
-      "tags": ["icons", "font", "ui", "audio-icons", "svg"],
-      "provides": ["audio-icons", "icon-font"],
+      "tags": [
+        "icons",
+        "font",
+        "ui",
+        "audio-icons",
+        "svg"
+      ],
+      "provides": [
+        "audio-icons",
+        "icon-font"
+      ],
       "overlaps_with_builtin": {},
-      "unique_value": "Purpose-built audio icon font — knob, fader, waveform, speaker, MIDI, and plugin format icons",
+      "unique_value": "Purpose-built audio icon font \u2014 knob, fader, waveform, speaker, MIDI, and plugin format icons",
       "alternatives": [],
       "migration_notes": {},
       "verification": {
@@ -432,23 +695,50 @@
         "git_tag": "version-6.5"
       },
       "cmake": {
-        "targets": ["r8brain"],
+        "targets": [
+          "r8brain"
+        ],
         "header_only": false,
         "include_dir": "."
       },
       "platforms": {
-        "macOS":   { "architectures": ["arm64"] },
-        "Windows": { "architectures": ["x64", "arm64"] },
-        "Linux":   { "architectures": ["x64", "arm64"] }
+        "macOS": {
+          "architectures": [
+            "arm64"
+          ]
+        },
+        "Windows": {
+          "architectures": [
+            "x64",
+            "arm64"
+          ]
+        },
+        "Linux": {
+          "architectures": [
+            "x64",
+            "arm64"
+          ]
+        }
       },
       "rt_safe": false,
-      "tags": ["resampling", "sample-rate", "conversion", "high-quality", "low-latency"],
-      "provides": ["sample-rate-conversion", "resampling"],
+      "tags": [
+        "resampling",
+        "sample-rate",
+        "conversion",
+        "high-quality",
+        "low-latency"
+      ],
+      "provides": [
+        "sample-rate-conversion",
+        "resampling"
+      ],
       "overlaps_with_builtin": {},
       "unique_value": "Audiophile-grade sample rate conversion with configurable quality/latency tradeoffs",
-      "alternatives": ["libsamplerate (BSD-2 — industry standard, different quality profile)"],
+      "alternatives": [
+        "libsamplerate (BSD-2 \u2014 industry standard, different quality profile)"
+      ],
       "migration_notes": {
-        "from:libsamplerate": "r8brain offers different quality/latency tradeoffs — benchmark both for your use case"
+        "from:libsamplerate": "r8brain offers different quality/latency tradeoffs \u2014 benchmark both for your use case"
       },
       "verification": {
         "last_verified": "2026-04-07",
@@ -478,23 +768,50 @@
         "git_tag": "v2.1_beta6"
       },
       "cmake": {
-        "targets": ["essentia"],
+        "targets": [
+          "essentia"
+        ],
         "header_only": false,
         "include_dir": "src"
       },
       "platforms": {
-        "macOS": { "architectures": ["arm64"] },
-        "Linux": { "architectures": ["x64", "arm64"] }
+        "macOS": {
+          "architectures": [
+            "arm64"
+          ]
+        },
+        "Linux": {
+          "architectures": [
+            "x64",
+            "arm64"
+          ]
+        }
       },
       "rt_safe": false,
-      "tags": ["mir", "analysis", "pitch", "beat", "mfcc", "spectral", "machine-learning"],
-      "provides": ["pitch-detection", "beat-detection", "audio-analysis", "mfcc", "spectral-analysis"],
+      "tags": [
+        "mir",
+        "analysis",
+        "pitch",
+        "beat",
+        "mfcc",
+        "spectral",
+        "machine-learning"
+      ],
+      "provides": [
+        "pitch-detection",
+        "beat-detection",
+        "audio-analysis",
+        "mfcc",
+        "spectral-analysis"
+      ],
       "overlaps_with_builtin": {
         "signal/fft.hpp": "FFT",
         "signal/biquad.hpp": "filters"
       },
       "unique_value": "250+ MIR algorithms including beat/onset detection, key detection, melody extraction, and audio classification",
-      "alternatives": ["Q (Cycfi, MIT) for pitch detection only"],
+      "alternatives": [
+        "Q (Cycfi, MIT) for pitch detection only"
+      ],
       "migration_notes": {},
       "verification": {
         "last_verified": "2026-04-07",
@@ -518,21 +835,45 @@
         "git_tag": "v3.3.0"
       },
       "cmake": {
-        "targets": ["rubberband"],
+        "targets": [
+          "rubberband"
+        ],
         "header_only": false,
         "include_dir": "rubberband"
       },
       "platforms": {
-        "macOS": { "architectures": ["arm64"] },
-        "Windows": { "architectures": ["x64"] },
-        "Linux": { "architectures": ["x64", "arm64"] }
+        "macOS": {
+          "architectures": [
+            "arm64"
+          ]
+        },
+        "Windows": {
+          "architectures": [
+            "x64"
+          ]
+        },
+        "Linux": {
+          "architectures": [
+            "x64",
+            "arm64"
+          ]
+        }
       },
       "rt_safe": true,
-      "tags": ["time-stretching", "pitch-shifting", "spectral"],
-      "provides": ["time-stretch", "pitch-shift"],
+      "tags": [
+        "time-stretching",
+        "pitch-shifting",
+        "spectral"
+      ],
+      "provides": [
+        "time-stretch",
+        "pitch-shift"
+      ],
       "overlaps_with_builtin": {},
       "unique_value": "Industry-standard time-stretching used in DAWs and production tools",
-      "alternatives": ["Signalsmith Stretch (MIT — polyphonic, lighter)"],
+      "alternatives": [
+        "Signalsmith Stretch (MIT \u2014 polyphonic, lighter)"
+      ],
       "migration_notes": {},
       "verification": {
         "last_verified": "2026-04-07",
@@ -546,7 +887,7 @@
     "fftw": {
       "name": "FFTW",
       "version": "3.3.10",
-      "description": "Fastest Fourier Transform in the West — highly optimized FFT",
+      "description": "Fastest Fourier Transform in the West \u2014 highly optimized FFT",
       "license": "GPL-2.0",
       "category": "dsp",
       "url": "https://www.fftw.org",
@@ -556,23 +897,49 @@
         "git_tag": "fftw-3.3.10"
       },
       "cmake": {
-        "targets": ["fftw3"],
+        "targets": [
+          "fftw3"
+        ],
         "header_only": false,
         "include_dir": "api"
       },
       "platforms": {
-        "macOS": { "architectures": ["arm64"] },
-        "Windows": { "architectures": ["x64"] },
-        "Linux": { "architectures": ["x64", "arm64"] }
+        "macOS": {
+          "architectures": [
+            "arm64"
+          ]
+        },
+        "Windows": {
+          "architectures": [
+            "x64"
+          ]
+        },
+        "Linux": {
+          "architectures": [
+            "x64",
+            "arm64"
+          ]
+        }
       },
       "rt_safe": true,
-      "tags": ["fft", "spectral", "convolution", "simd"],
-      "provides": ["fft", "spectral-processing"],
+      "tags": [
+        "fft",
+        "spectral",
+        "convolution",
+        "simd"
+      ],
+      "provides": [
+        "fft",
+        "spectral-processing"
+      ],
       "overlaps_with_builtin": {
         "signal/fft.hpp": "FFT"
       },
-      "unique_value": "Highly optimized FFT with auto-tuning SIMD code generation — fastest available for large transforms",
-      "alternatives": ["PFFFT (BSD-3 — lighter, SIMD, power-of-two only)", "KissFFT (BSD-3 — portable)"],
+      "unique_value": "Highly optimized FFT with auto-tuning SIMD code generation \u2014 fastest available for large transforms",
+      "alternatives": [
+        "PFFFT (BSD-3 \u2014 lighter, SIMD, power-of-two only)",
+        "KissFFT (BSD-3 \u2014 portable)"
+      ],
       "migration_notes": {},
       "verification": {
         "last_verified": "2026-04-07",
@@ -586,7 +953,7 @@
     "aubio": {
       "name": "Aubio",
       "version": "0.4.9",
-      "description": "Audio labeling — pitch, onset, beat, and tempo detection",
+      "description": "Audio labeling \u2014 pitch, onset, beat, and tempo detection",
       "license": "GPL-3.0",
       "category": "dsp",
       "url": "https://github.com/aubio/aubio",
@@ -596,21 +963,49 @@
         "git_tag": "0.4.9"
       },
       "cmake": {
-        "targets": ["aubio"],
+        "targets": [
+          "aubio"
+        ],
         "header_only": false,
         "include_dir": "src"
       },
       "platforms": {
-        "macOS": { "architectures": ["arm64"] },
-        "Windows": { "architectures": ["x64"] },
-        "Linux": { "architectures": ["x64", "arm64"] }
+        "macOS": {
+          "architectures": [
+            "arm64"
+          ]
+        },
+        "Windows": {
+          "architectures": [
+            "x64"
+          ]
+        },
+        "Linux": {
+          "architectures": [
+            "x64",
+            "arm64"
+          ]
+        }
       },
       "rt_safe": true,
-      "tags": ["pitch", "onset", "beat", "tempo", "mfcc"],
-      "provides": ["pitch-detection", "onset-detection", "beat-detection", "tempo-detection"],
+      "tags": [
+        "pitch",
+        "onset",
+        "beat",
+        "tempo",
+        "mfcc"
+      ],
+      "provides": [
+        "pitch-detection",
+        "onset-detection",
+        "beat-detection",
+        "tempo-detection"
+      ],
       "overlaps_with_builtin": {},
       "unique_value": "Lightweight, real-time pitch/onset/beat detection with minimal dependencies",
-      "alternatives": ["Q (Cycfi, MIT) for pitch detection"],
+      "alternatives": [
+        "Q (Cycfi, MIT) for pitch detection"
+      ],
       "migration_notes": {},
       "verification": {
         "last_verified": "2026-04-07",
@@ -634,21 +1029,53 @@
         "git_tag": "1.2.2"
       },
       "cmake": {
-        "targets": ["SndFile::sndfile"],
+        "targets": [
+          "SndFile::sndfile"
+        ],
         "header_only": false,
         "include_dir": "include"
       },
       "platforms": {
-        "macOS": { "architectures": ["arm64"] },
-        "Windows": { "architectures": ["x64", "arm64"] },
-        "Linux": { "architectures": ["x64", "arm64"] }
+        "macOS": {
+          "architectures": [
+            "arm64"
+          ]
+        },
+        "Windows": {
+          "architectures": [
+            "x64",
+            "arm64"
+          ]
+        },
+        "Linux": {
+          "architectures": [
+            "x64",
+            "arm64"
+          ]
+        }
       },
       "rt_safe": false,
-      "tags": ["wav", "aiff", "flac", "ogg", "audio-file", "read", "write"],
-      "provides": ["audio-file-io", "wav", "aiff", "flac", "ogg"],
+      "tags": [
+        "wav",
+        "aiff",
+        "flac",
+        "ogg",
+        "audio-file",
+        "read",
+        "write"
+      ],
+      "provides": [
+        "audio-file-io",
+        "wav",
+        "aiff",
+        "flac",
+        "ogg"
+      ],
       "overlaps_with_builtin": {},
       "unique_value": "Full-featured audio file I/O supporting 20+ formats with read and write",
-      "alternatives": ["dr_libs (MIT-0 — decode only, fewer formats)"],
+      "alternatives": [
+        "dr_libs (MIT-0 \u2014 decode only, fewer formats)"
+      ],
       "migration_notes": {},
       "verification": {
         "last_verified": "2026-04-07",
@@ -672,21 +1099,47 @@
         "git_tag": "2.4.0"
       },
       "cmake": {
-        "targets": ["SoundTouch"],
+        "targets": [
+          "SoundTouch"
+        ],
         "header_only": false,
         "include_dir": "include"
       },
       "platforms": {
-        "macOS": { "architectures": ["arm64"] },
-        "Windows": { "architectures": ["x64"] },
-        "Linux": { "architectures": ["x64", "arm64"] }
+        "macOS": {
+          "architectures": [
+            "arm64"
+          ]
+        },
+        "Windows": {
+          "architectures": [
+            "x64"
+          ]
+        },
+        "Linux": {
+          "architectures": [
+            "x64",
+            "arm64"
+          ]
+        }
       },
       "rt_safe": true,
-      "tags": ["tempo", "pitch", "rate", "time-stretching"],
-      "provides": ["tempo-change", "pitch-shift", "rate-change"],
+      "tags": [
+        "tempo",
+        "pitch",
+        "rate",
+        "time-stretching"
+      ],
+      "provides": [
+        "tempo-change",
+        "pitch-shift",
+        "rate-change"
+      ],
       "overlaps_with_builtin": {},
-      "unique_value": "Simple API for tempo/pitch/rate changes — widely used in media players",
-      "alternatives": ["Signalsmith Stretch (MIT — more modern, polyphonic)"],
+      "unique_value": "Simple API for tempo/pitch/rate changes \u2014 widely used in media players",
+      "alternatives": [
+        "Signalsmith Stretch (MIT \u2014 more modern, polyphonic)"
+      ],
       "migration_notes": {},
       "verification": {
         "last_verified": "2026-04-07",
@@ -710,21 +1163,48 @@
         "git_tag": "v2.4.0"
       },
       "cmake": {
-        "targets": ["fluidsynth"],
+        "targets": [
+          "fluidsynth"
+        ],
         "header_only": false,
         "include_dir": "include"
       },
       "platforms": {
-        "macOS": { "architectures": ["arm64"] },
-        "Windows": { "architectures": ["x64"] },
-        "Linux": { "architectures": ["x64", "arm64"] }
+        "macOS": {
+          "architectures": [
+            "arm64"
+          ]
+        },
+        "Windows": {
+          "architectures": [
+            "x64"
+          ]
+        },
+        "Linux": {
+          "architectures": [
+            "x64",
+            "arm64"
+          ]
+        }
       },
       "rt_safe": false,
-      "tags": ["soundfont", "sf2", "synthesizer", "midi", "sampler"],
-      "provides": ["soundfont-synthesis", "sf2-playback", "midi-synthesis"],
+      "tags": [
+        "soundfont",
+        "sf2",
+        "synthesizer",
+        "midi",
+        "sampler"
+      ],
+      "provides": [
+        "soundfont-synthesis",
+        "sf2-playback",
+        "midi-synthesis"
+      ],
       "overlaps_with_builtin": {},
-      "unique_value": "Full SoundFont 2 synthesis engine — load .sf2 files for instrument playback",
-      "alternatives": ["FluidLite (MIT — minimal SF2 subset)"],
+      "unique_value": "Full SoundFont 2 synthesis engine \u2014 load .sf2 files for instrument playback",
+      "alternatives": [
+        "FluidLite (MIT \u2014 minimal SF2 subset)"
+      ],
       "migration_notes": {},
       "verification": {
         "last_verified": "2026-04-07",
@@ -748,24 +1228,53 @@
         "git_tag": "6.0.2"
       },
       "cmake": {
-        "targets": ["kfr"],
+        "targets": [
+          "kfr"
+        ],
         "header_only": false,
         "include_dir": "include"
       },
       "platforms": {
-        "macOS": { "architectures": ["arm64"] },
-        "Windows": { "architectures": ["x64"] },
-        "Linux": { "architectures": ["x64", "arm64"] }
+        "macOS": {
+          "architectures": [
+            "arm64"
+          ]
+        },
+        "Windows": {
+          "architectures": [
+            "x64"
+          ]
+        },
+        "Linux": {
+          "architectures": [
+            "x64",
+            "arm64"
+          ]
+        }
       },
       "rt_safe": true,
-      "tags": ["fft", "fir", "iir", "resampling", "simd", "dsp"],
-      "provides": ["fft", "filters", "resampling", "simd-dsp"],
+      "tags": [
+        "fft",
+        "fir",
+        "iir",
+        "resampling",
+        "simd",
+        "dsp"
+      ],
+      "provides": [
+        "fft",
+        "filters",
+        "resampling",
+        "simd-dsp"
+      ],
       "overlaps_with_builtin": {
         "signal/fft.hpp": "FFT",
         "signal/biquad.hpp": "IIR filters"
       },
-      "unique_value": "Comprehensive SIMD-optimized DSP with expression templates — faster than hand-written loops",
-      "alternatives": ["PFFFT (BSD-3) + Signalsmith DSP (MIT) for FFT + filters separately"],
+      "unique_value": "Comprehensive SIMD-optimized DSP with expression templates \u2014 faster than hand-written loops",
+      "alternatives": [
+        "PFFFT (BSD-3) + Signalsmith DSP (MIT) for FFT + filters separately"
+      ],
       "migration_notes": {},
       "verification": {
         "last_verified": "2026-04-07",
@@ -774,6 +1283,245 @@
         "upstream_latest": "6.0.2",
         "pulp_commit": "unknown",
         "build_status": {}
+      }
+    },
+    "lame": {
+      "name": "LAME",
+      "version": "3.100",
+      "description": "MP3 encoder \u2014 high-quality MP3 encoding for audio export",
+      "license": "LGPL-2.0",
+      "category": "audio-io",
+      "url": "https://lame.sourceforge.io",
+      "fetch": {
+        "method": "FetchContent",
+        "git_repository": "https://github.com/lameproject/lame.git",
+        "git_tag": "RELEASE__3_100"
+      },
+      "cmake": {
+        "targets": [
+          "mp3lame"
+        ],
+        "header_only": false
+      },
+      "platforms": {
+        "macOS": {
+          "architectures": [
+            "arm64",
+            "x86_64"
+          ]
+        },
+        "Windows": {
+          "architectures": [
+            "x64",
+            "arm64"
+          ]
+        },
+        "Linux": {
+          "architectures": [
+            "x64",
+            "arm64"
+          ]
+        }
+      },
+      "rt_safe": false,
+      "tags": [
+        "mp3",
+        "encoder",
+        "lossy",
+        "audio-export"
+      ],
+      "provides": [
+        "mp3-encode"
+      ],
+      "overlaps_with_builtin": {
+        "feature": "MP3 read (via dr_mp3)",
+        "note": "dr_mp3 provides decode only. LAME adds encode capability."
+      },
+      "unique_value": "The standard MP3 encoder. Required for MP3 export. LGPL \u2014 requires --accept-license.",
+      "integration_guide": "After pulp add lame --accept-license LGPL-2.0, the FormatRegistry automatically gains an Mp3Writer.",
+      "verification": {
+        "last_verified": "2026-04-07",
+        "status": "metadata-only"
+      }
+    },
+    "fdk-aac": {
+      "name": "FDK AAC",
+      "version": "2.0.3",
+      "description": "AAC encoder/decoder \u2014 Fraunhofer FDK AAC codec for AAC audio export",
+      "license": "FDK-AAC",
+      "category": "audio-io",
+      "url": "https://github.com/mstorsjo/fdk-aac",
+      "fetch": {
+        "method": "FetchContent",
+        "git_repository": "https://github.com/mstorsjo/fdk-aac.git",
+        "git_tag": "v2.0.3"
+      },
+      "cmake": {
+        "targets": [
+          "fdk-aac"
+        ],
+        "header_only": false
+      },
+      "platforms": {
+        "macOS": {
+          "architectures": [
+            "arm64",
+            "x86_64"
+          ]
+        },
+        "Windows": {
+          "architectures": [
+            "x64",
+            "arm64"
+          ]
+        },
+        "Linux": {
+          "architectures": [
+            "x64",
+            "arm64"
+          ]
+        }
+      },
+      "rt_safe": false,
+      "tags": [
+        "aac",
+        "encoder",
+        "decoder",
+        "lossy",
+        "audio-export"
+      ],
+      "provides": [
+        "aac-encode",
+        "aac-decode"
+      ],
+      "overlaps_with_builtin": {
+        "feature": "AAC read on macOS (via CoreAudioFormat/ExtAudioFile)",
+        "note": "CoreAudioFormat provides macOS-only AAC read. FDK adds cross-platform encode+decode."
+      },
+      "unique_value": "Cross-platform AAC encoder. FDK license has patent considerations \u2014 requires --accept-license.",
+      "integration_guide": "After pulp add fdk-aac --accept-license FDK-AAC, the FormatRegistry gains an AacWriter.",
+      "verification": {
+        "last_verified": "2026-04-07",
+        "status": "metadata-only"
+      }
+    },
+    "libflac": {
+      "name": "FLAC",
+      "version": "1.4.3",
+      "description": "FLAC encoder \u2014 lossless audio compression for high-quality export",
+      "license": "BSD-3-Clause",
+      "category": "audio-io",
+      "url": "https://github.com/xiph/flac",
+      "fetch": {
+        "method": "FetchContent",
+        "git_repository": "https://github.com/xiph/flac.git",
+        "git_tag": "1.4.3"
+      },
+      "cmake": {
+        "targets": [
+          "FLAC"
+        ],
+        "header_only": false
+      },
+      "platforms": {
+        "macOS": {
+          "architectures": [
+            "arm64",
+            "x86_64"
+          ]
+        },
+        "Windows": {
+          "architectures": [
+            "x64",
+            "arm64"
+          ]
+        },
+        "Linux": {
+          "architectures": [
+            "x64",
+            "arm64"
+          ]
+        }
+      },
+      "rt_safe": false,
+      "tags": [
+        "flac",
+        "encoder",
+        "lossless",
+        "audio-export"
+      ],
+      "provides": [
+        "flac-encode"
+      ],
+      "overlaps_with_builtin": {
+        "feature": "FLAC read (via dr_flac)",
+        "note": "dr_flac provides decode only. libflac adds encode capability."
+      },
+      "unique_value": "Reference FLAC encoder \u2014 lossless, universally supported, BSD-3 licensed.",
+      "integration_guide": "After pulp add libflac, the FormatRegistry gains a FlacWriter for .flac export.",
+      "verification": {
+        "last_verified": "2026-04-07",
+        "status": "metadata-only"
+      }
+    },
+    "alac": {
+      "name": "Apple ALAC",
+      "version": "master",
+      "description": "Apple Lossless Audio Codec encoder \u2014 cross-platform ALAC write",
+      "license": "Apache-2.0",
+      "category": "audio-io",
+      "url": "https://github.com/macosforge/alac",
+      "fetch": {
+        "method": "FetchContent",
+        "git_repository": "https://github.com/macosforge/alac.git",
+        "git_tag": "master"
+      },
+      "cmake": {
+        "targets": [
+          "alac"
+        ],
+        "header_only": false
+      },
+      "platforms": {
+        "macOS": {
+          "architectures": [
+            "arm64",
+            "x86_64"
+          ]
+        },
+        "Windows": {
+          "architectures": [
+            "x64",
+            "arm64"
+          ]
+        },
+        "Linux": {
+          "architectures": [
+            "x64",
+            "arm64"
+          ]
+        }
+      },
+      "rt_safe": false,
+      "tags": [
+        "alac",
+        "encoder",
+        "lossless",
+        "apple",
+        "audio-export"
+      ],
+      "provides": [
+        "alac-encode"
+      ],
+      "overlaps_with_builtin": {
+        "feature": "ALAC read on macOS (via CoreAudioFormat/ExtAudioFile)",
+        "note": "CoreAudioFormat provides macOS-only ALAC read. Apple ALAC adds cross-platform encode."
+      },
+      "unique_value": "Apple's reference ALAC encoder, cross-platform. Apache 2.0 \u2014 no restrictions.",
+      "integration_guide": "After pulp add alac, the FormatRegistry gains an AlacWriter for .m4a export.",
+      "verification": {
+        "last_verified": "2026-04-07",
+        "status": "metadata-only"
       }
     }
   }

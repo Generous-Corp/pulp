@@ -78,12 +78,16 @@ Pulp is organized into independent subsystems under `core/`. Each is a separate 
 
 | Format | Read | Write | Backend |
 |--------|:----:|:-----:|---------|
-| WAV | ✓ | ✓ | CHOC |
-| FLAC | ✓ | — | dr_flac |
-| MP3 | ✓ | — | dr_mp3 |
+| WAV | ✓ | ✓ | CHOC + StreamingWriter |
+| FLAC | ✓ | ✓* | dr_flac / libflac (BSD-3, `pulp add libflac`) |
+| MP3 | ✓ | ✓* | dr_mp3 / LAME (LGPL, `pulp add lame --accept-license LGPL-2.0`) |
 | OGG Vorbis | ✓ | — | stb_vorbis |
 | AIFF / AIFF-C | ✓ | ✓ | Native (8/16/24/32-bit) |
-| AAC / ALAC / CAF | ✓ | — | ExtAudioFile (macOS only) |
+| AAC | ✓ | ✓* | ExtAudioFile (macOS) / FDK AAC (`pulp add fdk-aac --accept-license FDK-AAC`) |
+| ALAC | ✓ | ✓* | ExtAudioFile (macOS) / Apple ALAC (Apache 2.0, `pulp add alac`) |
+| CAF | ✓ | — | ExtAudioFile (macOS only) |
+
+*\* Write support requires installing the optional package via `pulp add`. Permissive packages (libflac, ALAC) install freely. Copyleft packages (LAME, fdk-aac) require `--accept-license`.*
 
 **Other features:**
 

@@ -27,6 +27,36 @@ if(APPLE)
     target_sources(pulp-audio PRIVATE src/coreaudio_format.mm)
 endif()
 
+# Optional codec writers — conditionally compiled when packages are installed.
+# Install via: pulp add libflac, pulp add lame --accept-license LGPL-2.0, etc.
+if(TARGET FLAC)
+    target_sources(pulp-audio PRIVATE src/flac_writer.cpp)
+    target_link_libraries(pulp-audio PRIVATE FLAC)
+    target_compile_definitions(pulp-audio PRIVATE PULP_HAS_LIBFLAC=1)
+    message(STATUS "Pulp: FLAC write enabled (libflac)")
+endif()
+
+if(TARGET mp3lame)
+    target_sources(pulp-audio PRIVATE src/mp3_writer.cpp)
+    target_link_libraries(pulp-audio PRIVATE mp3lame)
+    target_compile_definitions(pulp-audio PRIVATE PULP_HAS_LAME=1)
+    message(STATUS "Pulp: MP3 write enabled (LAME — LGPL)")
+endif()
+
+if(TARGET fdk-aac)
+    target_sources(pulp-audio PRIVATE src/aac_writer.cpp)
+    target_link_libraries(pulp-audio PRIVATE fdk-aac)
+    target_compile_definitions(pulp-audio PRIVATE PULP_HAS_FDK_AAC=1)
+    message(STATUS "Pulp: AAC write enabled (FDK AAC)")
+endif()
+
+if(TARGET alac)
+    target_sources(pulp-audio PRIVATE src/alac_writer.cpp)
+    target_link_libraries(pulp-audio PRIVATE alac)
+    target_compile_definitions(pulp-audio PRIVATE PULP_HAS_ALAC=1)
+    message(STATUS "Pulp: ALAC write enabled (Apple ALAC — Apache 2.0)")
+endif()
+
 target_link_libraries(pulp-audio PUBLIC pulp::runtime)
 
 # CHOC headers (audio file I/O)
