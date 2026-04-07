@@ -116,6 +116,50 @@ std::vector<PlatformTarget> read_project_targets(const fs::path& project_root);
 bool write_project_targets(const fs::path& project_root,
                            const std::vector<PlatformTarget>& targets);
 
+// ── Remote Registry ──
+
+// Fetch registry from remote URL, cache locally with TTL
+RegistryLoadResult load_remote_registry(const std::string& url,
+                                         const fs::path& cache_dir,
+                                         int ttl_hours = 24);
+
+// Refresh the cached registry (ignore TTL)
+RegistryLoadResult refresh_remote_registry(const std::string& url,
+                                            const fs::path& cache_dir);
+
+// Default remote registry URL
+inline const char* default_remote_registry_url() {
+    return "https://raw.githubusercontent.com/danielraffel/pulp-packages/main/registry.json";
+}
+
+// Default cache directory
+fs::path default_cache_dir();
+
+// ── Semver ──
+
+struct SemVer {
+    int major = 0, minor = 0, patch = 0;
+    std::string pre;  // pre-release label
+
+    bool operator<(const SemVer& o) const;
+    bool operator==(const SemVer& o) const;
+    bool compatible_with(const SemVer& constraint) const;  // ^constraint
+    static std::optional<SemVer> parse(const std::string& s);
+};
+
+// ── Quality Score ──
+
+struct QualityScore {
+    int total = 0;        // 0-100
+    int license = 0;      // 0-25
+    int platforms = 0;    // 0-25
+    int verification = 0; // 0-25
+    int maintenance = 0;  // 0-25
+    std::string tier;     // "official", "community", "experimental"
+};
+
+QualityScore compute_quality(const PackageDescriptor& pkg);
+
 // ── Queries ──
 
 std::vector<PlatformTarget> unsupported_targets(

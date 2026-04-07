@@ -375,23 +375,43 @@ int cmd_target(const std::vector<std::string>& args) {
 
 int cmd_search(const std::vector<std::string>& args) {
     if (args.empty()) {
-        std::cout << "Usage: pulp search <query>\n\n"
-                  << "Search the package registry by name, description, tags, or category.\n";
+        std::cout << "Usage: pulp search <query> [options]\n\n"
+                  << "Search the package registry by name, description, tags, or category.\n\n"
+                  << "Options:\n"
+                  << "  --refresh      Force refresh the remote registry cache\n"
+                  << "  --format json  Output as JSON\n";
         return 0;
     }
 
+    bool refresh = false;
+    for (auto& a : args)
+        if (a == "--refresh") refresh = true;
+
+    // Try local registry first, fall back to remote
     auto root = find_project_root();
     auto reg_path = root.empty() ? fs::path{} : find_registry_path(root);
-    if (reg_path.empty()) {
-        print_fail("Package registry not found at tools/packages/registry.json");
+
+    RegistryLoadResult result;
+    if (!reg_path.empty()) {
+        result = load_registry(reg_path);
+    }
+
+    // If local failed or empty, try remote
+    if (result.registry.packages.empty()) {
+        auto cache_dir = default_cache_dir();
+        if (refresh) {
+            result = refresh_remote_registry(default_remote_registry_url(), cache_dir);
+        } else {
+            result = load_remote_registry(default_remote_registry_url(), cache_dir);
+        }
+    }
+
+    if (!result.error.empty() && result.registry.packages.empty()) {
+        print_fail(result.error);
         return 1;
     }
 
-    auto [reg, err] = load_registry(reg_path);
-    if (!err.empty()) {
-        print_fail(err);
-        return 1;
-    }
+    auto& reg = result.registry;
 
     std::string query;
     bool json_output = false;

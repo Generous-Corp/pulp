@@ -516,6 +516,164 @@ bool write_project_targets(const fs::path& project_root,
     return write_file(toml_path, out.str());
 }
 
+// ── Remote Registry ──
+
+fs::path default_cache_dir() {
+#ifdef __APPLE__
+    if (auto home = std::getenv("HOME"))
+        return fs::path(home) / ".pulp";
+#elif defined(_WIN32)
+    if (auto appdata = std::getenv("LOCALAPPDATA"))
+        return fs::path(appdata) / "Pulp";
+#else
+    if (auto home = std::getenv("HOME"))
+        return fs::path(home) / ".pulp";
+#endif
+    return fs::temp_directory_path() / "pulp-cache";
+}
+
+static bool download_file(const std::string& url, const fs::path& dest) {
+    fs::create_directories(dest.parent_path());
+    // Use curl on macOS/Linux, PowerShell on Windows
+#ifdef _WIN32
+    std::string cmd = "powershell -Command \"Invoke-WebRequest -Uri '" + url +
+                      "' -OutFile '" + dest.string() + "'\" 2>nul";
+#else
+    std::string cmd = "curl -sSfL -o '" + dest.string() + "' '" + url + "' 2>/dev/null";
+#endif
+    return std::system(cmd.c_str()) == 0;
+}
+
+static bool is_cache_fresh(const fs::path& cache_file, int ttl_hours) {
+    if (!fs::exists(cache_file)) return false;
+    auto mod_time = fs::last_write_time(cache_file);
+    auto now = fs::file_time_type::clock::now();
+    auto age = std::chrono::duration_cast<std::chrono::hours>(now - mod_time);
+    return age.count() < ttl_hours;
+}
+
+RegistryLoadResult load_remote_registry(const std::string& url,
+                                         const fs::path& cache_dir,
+                                         int ttl_hours) {
+    auto cache_file = cache_dir / "registry-cache.json";
+
+    if (is_cache_fresh(cache_file, ttl_hours))
+        return load_registry(cache_file);
+
+    if (download_file(url, cache_file))
+        return load_registry(cache_file);
+
+    // Fall back to stale cache if download fails
+    if (fs::exists(cache_file))
+        return load_registry(cache_file);
+
+    return {{}, "Failed to fetch remote registry from " + url};
+}
+
+RegistryLoadResult refresh_remote_registry(const std::string& url,
+                                            const fs::path& cache_dir) {
+    auto cache_file = cache_dir / "registry-cache.json";
+    if (download_file(url, cache_file))
+        return load_registry(cache_file);
+    return {{}, "Failed to fetch remote registry from " + url};
+}
+
+// ── Semver ──
+
+std::optional<SemVer> SemVer::parse(const std::string& s) {
+    SemVer v;
+    std::string input = s;
+    // Strip leading 'v' or 'V'
+    if (!input.empty() && (input[0] == 'v' || input[0] == 'V'))
+        input = input.substr(1);
+
+    // Split on '-' for pre-release
+    auto dash = input.find('-');
+    if (dash != std::string::npos) {
+        v.pre = input.substr(dash + 1);
+        input = input.substr(0, dash);
+    }
+
+    // Parse major.minor.patch
+    int parts[3] = {0, 0, 0};
+    int idx = 0;
+    std::istringstream ss(input);
+    std::string token;
+    while (std::getline(ss, token, '.') && idx < 3) {
+        try { parts[idx] = std::stoi(token); } catch (...) { return std::nullopt; }
+        ++idx;
+    }
+    if (idx == 0) return std::nullopt;
+
+    v.major = parts[0]; v.minor = parts[1]; v.patch = parts[2];
+    return v;
+}
+
+bool SemVer::operator<(const SemVer& o) const {
+    if (major != o.major) return major < o.major;
+    if (minor != o.minor) return minor < o.minor;
+    if (patch != o.patch) return patch < o.patch;
+    // Pre-release sorts before release
+    if (pre.empty() && !o.pre.empty()) return false;
+    if (!pre.empty() && o.pre.empty()) return true;
+    return pre < o.pre;
+}
+
+bool SemVer::operator==(const SemVer& o) const {
+    return major == o.major && minor == o.minor && patch == o.patch && pre == o.pre;
+}
+
+bool SemVer::compatible_with(const SemVer& constraint) const {
+    // ^constraint: same major, >= minor.patch
+    if (major != constraint.major) return false;
+    if (minor < constraint.minor) return false;
+    if (minor == constraint.minor && patch < constraint.patch) return false;
+    return true;
+}
+
+// ── Quality Score ──
+
+QualityScore compute_quality(const PackageDescriptor& pkg) {
+    QualityScore q;
+
+    // License (0-25)
+    auto verdict = check_license(pkg.license);
+    if (verdict == LicenseVerdict::allowed) q.license = 25;
+    else if (verdict == LicenseVerdict::review_required) q.license = 10;
+
+    // Platforms (0-25): 5 points per supported primary platform
+    int plat_count = 0;
+    for (auto& [name, ps] : pkg.platforms) {
+        if (name == "macOS" || name == "Windows" || name == "Linux")
+            ++plat_count;
+    }
+    q.platforms = std::min(25, plat_count * 8);
+
+    // Verification (0-25)
+    int pass_count = 0, total_count = 0;
+    for (auto& [key, status] : pkg.verification.build_status) {
+        ++total_count;
+        if (status == "pass") ++pass_count;
+    }
+    if (total_count > 0)
+        q.verification = 25 * pass_count / total_count;
+
+    // Maintenance (0-25): based on verification date freshness
+    if (!pkg.verification.last_verified.empty()) {
+        // Simple heuristic: verified at all = 15 points, recent = 25
+        q.maintenance = 15;
+        // Could parse date and compare, but for now a static score
+    }
+
+    q.total = q.license + q.platforms + q.verification + q.maintenance;
+
+    if (q.total >= 75) q.tier = "official";
+    else if (q.total >= 40) q.tier = "community";
+    else q.tier = "experimental";
+
+    return q;
+}
+
 // ── Queries ──
 
 std::vector<PlatformTarget> unsupported_targets(
