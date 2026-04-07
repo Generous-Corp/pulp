@@ -368,7 +368,7 @@ void Knob::paint(canvas::Canvas& canvas) {
         float glow = hover_glow_.value();
         if (glow > 0.01f) {
             auto accent = resolve_color("accent.primary", canvas::Color::rgba8(100, 150, 255));
-            canvas.set_stroke_color(canvas::Color::rgba8(accent.r, accent.g, accent.b,
+            canvas.set_stroke_color(canvas::Color::rgba(accent.r, accent.g, accent.b,
                                     static_cast<uint8_t>(40 * glow)));
             canvas.set_line_width(6.0f);
             canvas.stroke_arc(cx, cy, radius + 2.0f, start_angle, end_angle);
@@ -905,7 +905,7 @@ void WaveformView::paint(canvas::Canvas& canvas) {
     canvas.stroke_line(0, cy, b.width, cy);
 
     auto wave_color = resolve_color("waveform.line", canvas::Color::rgba8(100, 180, 250));
-    auto fill_color = resolve_color("waveform.fill", canvas::Color::rgba8(wave_color.r, wave_color.g, wave_color.b, 56));
+    auto fill_color = resolve_color("waveform.fill", canvas::Color::rgba(wave_color.r, wave_color.g, wave_color.b, 56.0f/255.0f));
 
     const float half_h = b.height * 0.42f;
     const float step = samples_.size() > 1 ? (b.width / static_cast<float>(samples_.size() - 1)) : b.width;
@@ -987,7 +987,7 @@ void SpectrumView::paint(canvas::Canvas& canvas) {
 
         // For filled style, also fill below the line
         if (style_ == Style::filled) {
-            auto fill = resolve_color("waveform.fill", canvas::Color::rgba8(spectrum_color.r, spectrum_color.g, spectrum_color.b, 60));
+            auto fill = resolve_color("waveform.fill", canvas::Color::rgba(spectrum_color.r, spectrum_color.g, spectrum_color.b, 60.0f/255.0f));
             canvas.set_fill_color(fill);
 
             for (size_t i = 0; i < bins_.size(); ++i) {
@@ -1073,7 +1073,7 @@ void SpectrogramView::paint(canvas::Canvas& canvas) {
             auto c = buffer_.pixels()[row * buf_w + src_col];
             // Flip vertically: low freq at bottom
             float y = b.height - (row + 1) * px_h;
-            canvas.set_fill_color(canvas::Color::rgba8(c.r, c.g, c.b, c.a));
+            canvas.set_fill_color(canvas::Color::rgba(c.r, c.g, c.b, c.a));
             canvas.fill_rect(x, y, px_w + 0.5f, px_h + 0.5f);
         }
     }

@@ -41,6 +41,8 @@ public:
     void stroke_path(const Point2D* points, size_t count) override;
     void fill_path(const Point2D* points, size_t count) override;
     void set_opacity(float alpha) override;
+    void save_layer(float x, float y, float w, float h,
+                    float opacity, float blur_radius) override;
 
     void set_font(const std::string& family, float size) override;
     void set_text_align(TextAlign align) override;
@@ -51,8 +53,9 @@ public:
 private:
     CGContextRef ctx_;
     float width_, height_;
-    Color fill_color_{255, 255, 255, 255};
-    Color stroke_color_{255, 255, 255, 255};
+    int in_transparency_layer_ = 0;
+    Color fill_color_ = Color::rgba(1.0f, 1.0f, 1.0f);
+    Color stroke_color_ = Color::rgba(1.0f, 1.0f, 1.0f);
     std::string font_family_ = "Helvetica";
     float font_size_ = 14.0f;
     TextAlign text_align_ = TextAlign::left;
