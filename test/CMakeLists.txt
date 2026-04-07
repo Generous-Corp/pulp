@@ -278,6 +278,11 @@ add_executable(pulp-test-dirty-tracker test_dirty_tracker.cpp)
 target_link_libraries(pulp-test-dirty-tracker PRIVATE pulp::render Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-dirty-tracker)
 
+# Rendering integration tests (effects, dimensions, text direction, render passes)
+add_executable(pulp-test-rendering-integration test_rendering_integration.cpp)
+target_link_libraries(pulp-test-rendering-integration PRIVATE pulp::view pulp::render Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-rendering-integration)
+
 # Draw batcher tests
 add_executable(pulp-test-draw-batcher test_draw_batcher.cpp)
 target_link_libraries(pulp-test-draw-batcher PRIVATE pulp::render Catch2::Catch2WithMain)

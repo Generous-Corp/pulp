@@ -1284,6 +1284,39 @@ public:
         }
     }
 
+    // ── Platform feature overrides ──────────────────────────────────────
+
+    void set_mouse_relative_mode(bool enabled) override {
+        if (enabled) {
+            CGAssociateMouseAndMouseCursorPosition(false);
+            [NSCursor hide];
+        } else {
+            CGAssociateMouseAndMouseCursorPosition(true);
+            [NSCursor unhide];
+        }
+    }
+
+    float dpi_scale() const override {
+        if (window_) return static_cast<float>([window_ backingScaleFactor]);
+        return 1.0f;
+    }
+
+    Size max_dimensions() const override {
+        NSScreen* screen = [NSScreen mainScreen];
+        NSRect frame = [screen visibleFrame];
+        return {static_cast<float>(frame.size.width), static_cast<float>(frame.size.height)};
+    }
+
+    void set_always_on_top(bool on_top) override {
+        if (window_)
+            [window_ setLevel:on_top ? NSFloatingWindowLevel : NSNormalWindowLevel];
+    }
+
+    void set_fixed_aspect_ratio(float ratio) override {
+        if (window_ && ratio > 0)
+            [window_ setContentAspectRatio:NSMakeSize(ratio, 1.0)];
+    }
+
 private:
     View& root_;
     FrameClock frame_clock_;

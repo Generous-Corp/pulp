@@ -50,24 +50,34 @@ struct GpuBloomEffect : ViewEffect {
 };
 
 /// Chromatic aberration — RGB channel offset for a glitch/lens effect.
+/// Chromatic aberration — RGB channel offset for glitch/lens effect.
+/// Requires the full GPU post-effect pipeline (render to texture, apply
+/// SkSL shader, composite back). Currently applies a subtle color-shift
+/// approximation via layer opacity. Full per-channel offset requires
+/// SkImageFilter::MakeColorFilter with channel matrices.
 struct ChromaticAberrationEffect : ViewEffect {
     float offset = 2.0f;  ///< Pixel offset between channels
 
     void configure_layer(Canvas& canvas, float x, float y, float w, float h) override {
-        // This would need a custom SkSL post-effect shader — for now, approximate
-        // by rendering the layer normally (the full implementation requires
-        // drawing the layer content three times with channel masks and offsets)
-        canvas.save_layer(x, y, w, h);
+        // The full implementation needs per-channel offset rendering.
+        // Approximation: subtle blur simulates the softness of chromatic aberration.
+        canvas.save_layer(x, y, w, h, 1.0f, offset * 0.5f);
     }
 };
 
-/// Vignette — darken edges of the view.
+/// Vignette — darken edges of the view by drawing a radial gradient overlay.
+/// The overlay is drawn ON TOP of the content after the subtree paints,
+/// so we use needs_layer=false and instead paint the overlay in a post-paint hook.
+/// For now, we apply it as a slight opacity reduction on the layer.
 struct VignetteEffect : ViewEffect {
-    float intensity = 0.5f;
-    float radius = 0.75f;  ///< Fraction of view size where darkening starts
+    float intensity = 0.5f;     ///< Darkening strength (0=none, 1=full black edges)
+    float radius = 0.75f;       ///< Fraction of view size where darkening starts
+    Color edge_color = Color::rgba(0.0f, 0.0f, 0.0f, 0.5f);
 
     void configure_layer(Canvas& canvas, float x, float y, float w, float h) override {
-        canvas.save_layer(x, y, w, h);
+        // Apply as a layer — the vignette darkening happens via reduced edge opacity.
+        // A full implementation would draw a radial gradient overlay after the content.
+        canvas.save_layer(x, y, w, h, 1.0f - intensity * 0.2f);
     }
 };
 

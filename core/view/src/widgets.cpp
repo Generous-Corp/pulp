@@ -253,9 +253,39 @@ void Label::paint(canvas::Canvas& canvas) {
         }
     }
 
-    // Text alignment
+    // Vertical text direction — rotate canvas for top-to-bottom / bottom-to-top
+    bool vertical = (text_direction_ == canvas::TextDirection::top_to_bottom ||
+                     text_direction_ == canvas::TextDirection::bottom_to_top);
+    if (vertical) {
+        canvas.save();
+        if (text_direction_ == canvas::TextDirection::top_to_bottom) {
+            canvas.translate(bounds().width * 0.5f + font_size_ * 0.35f, 0);
+            canvas.rotate(3.14159265f / 2.0f);
+        } else {
+            canvas.translate(bounds().width * 0.5f - font_size_ * 0.35f, bounds().height);
+            canvas.rotate(-3.14159265f / 2.0f);
+        }
+    }
+
+    // Vertical alignment
     float lh = line_height_ > 0 ? line_height_ : font_size_ * 1.4f;
-    float baseline_y = bounds().height * 0.5f + font_size_ * 0.35f;
+    float text_h = multi_line_ ? lh * static_cast<float>(std::count(display_text.begin(), display_text.end(), '\n') + 1) : font_size_;
+    float baseline_y;
+    switch (vertical_align_) {
+        case canvas::TextVerticalAlign::top:
+            baseline_y = font_size_ * 0.85f;
+            break;
+        case canvas::TextVerticalAlign::bottom:
+            baseline_y = bounds().height - text_h + font_size_ * 0.85f;
+            break;
+        case canvas::TextVerticalAlign::baseline:
+            baseline_y = bounds().height * 0.75f;
+            break;
+        case canvas::TextVerticalAlign::center:
+        default:
+            baseline_y = bounds().height * 0.5f + font_size_ * 0.35f;
+            break;
+    }
 
     float x = 0;
     switch (text_align_) {
@@ -320,6 +350,8 @@ void Label::paint(canvas::Canvas& canvas) {
         else if (text_decoration_ == TextDecoration::overline)
             canvas.stroke_line(draw_x, baseline_y - font_size_ * 0.7f, draw_x + text_w, baseline_y - font_size_ * 0.7f);
     }
+
+    if (vertical) canvas.restore();
 }
 
 // ── Knob ─────────────────────────────────────────────────────────────────────
@@ -331,8 +363,39 @@ void Knob::paint(canvas::Canvas& canvas) {
     float radius = std::min(cx, cy) * 0.8f;
     float shader_time = frame_clock() ? frame_clock()->time() : 0.0f;
 
+    // ── Sprite strip path: designer-created filmstrip ─────────────────────
+    if (sprite_strip_ && sprite_strip_->loaded()) {
+        int frame = sprite_strip_->frame_for_value(value_);
+        int fx, fy;
+        sprite_strip_->frame_offset(frame, fx, fy);
+        // Draw the frame from the filmstrip as an image
+        // The sprite strip stores raw RGBA8 pixel data; render via draw_image_from_data
+        // by extracting the frame's pixel region
+        size_t frame_bytes = static_cast<size_t>(sprite_strip_->frame_width() *
+                                                  sprite_strip_->frame_height() * 4);
+        size_t offset = static_cast<size_t>(fy * sprite_strip_->total_width() * 4 +
+                                             fx * 4);
+        if (offset + frame_bytes <= sprite_strip_->data_size()) {
+            // For proper rendering, we'd need to extract and upload just this frame.
+            // For now, render the full strip offset via canvas transform.
+            canvas.save();
+            canvas.clip_rect(0, 0, b.width, b.height);
+            // Scale the frame to fit the knob bounds
+            float sx = b.width / static_cast<float>(sprite_strip_->frame_width());
+            float sy = b.height / static_cast<float>(sprite_strip_->frame_height());
+            canvas.scale(sx, sy);
+            canvas.translate(static_cast<float>(-fx), static_cast<float>(-fy));
+            canvas.draw_image_from_data(sprite_strip_->data(),
+                                         sprite_strip_->data_size(),
+                                         0, 0,
+                                         static_cast<float>(sprite_strip_->total_width()),
+                                         static_cast<float>(sprite_strip_->total_height()));
+            canvas.restore();
+        }
+        // Fall through to draw labels on top
+    }
     // ── Declarative schema path: JSON defines appearance as data ──────────
-    if (!widget_schema_.empty()) {
+    else if (!widget_schema_.empty()) {
         render_schema(canvas, widget_schema_, b.width, b.height, value_, *this);
         // Fall through to draw labels on top
     }
@@ -427,7 +490,28 @@ void Fader::paint(canvas::Canvas& canvas) {
     float track_length = vert ? b.height : b.width;
     float track_width = vert ? b.width : b.height;
 
-    if (!widget_schema_.empty()) {
+    // Sprite strip path
+    if (sprite_strip_ && sprite_strip_->loaded()) {
+        int frame = sprite_strip_->frame_for_value(value_);
+        int fx, fy;
+        sprite_strip_->frame_offset(frame, fx, fy);
+        size_t frame_bytes = static_cast<size_t>(sprite_strip_->frame_width() *
+                                                  sprite_strip_->frame_height() * 4);
+        size_t offset = static_cast<size_t>(fy * sprite_strip_->total_width() * 4 + fx * 4);
+        if (offset + frame_bytes <= sprite_strip_->data_size()) {
+            canvas.save();
+            canvas.clip_rect(0, 0, b.width, b.height);
+            float sx = b.width / static_cast<float>(sprite_strip_->frame_width());
+            float sy = b.height / static_cast<float>(sprite_strip_->frame_height());
+            canvas.scale(sx, sy);
+            canvas.translate(static_cast<float>(-fx), static_cast<float>(-fy));
+            canvas.draw_image_from_data(sprite_strip_->data(), sprite_strip_->data_size(),
+                                         0, 0,
+                                         static_cast<float>(sprite_strip_->total_width()),
+                                         static_cast<float>(sprite_strip_->total_height()));
+            canvas.restore();
+        }
+    } else if (!widget_schema_.empty()) {
         render_schema(canvas, widget_schema_, b.width, b.height, value_, *this);
     } else if (!custom_sksl_.empty()) {
         canvas::Canvas::ShaderUniforms u;
