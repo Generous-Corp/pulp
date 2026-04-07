@@ -62,6 +62,8 @@ uint64_t generate_prime(int bits) {
 }
 
 std::vector<uint32_t> sieve_primes(uint32_t limit) {
+    if (limit < 2) return {};
+
     std::vector<bool> is_p(limit + 1, true);
     is_p[0] = is_p[1] = false;
 

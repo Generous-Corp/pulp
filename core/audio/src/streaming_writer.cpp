@@ -23,6 +23,13 @@ StreamingWriter::~StreamingWriter() {
 bool StreamingWriter::open(std::string_view path, uint32_t sample_rate,
                             uint32_t num_channels, uint32_t bits_per_sample) {
     close();
+
+    // Only support 16, 24, and 32-bit PCM
+    if (bits_per_sample != 16 && bits_per_sample != 24 && bits_per_sample != 32)
+        return false;
+    if (num_channels == 0 || sample_rate == 0)
+        return false;
+
     sample_rate_ = sample_rate;
     num_channels_ = num_channels;
     bits_per_sample_ = bits_per_sample;
@@ -89,6 +96,8 @@ int StreamingWriter::write_frames(const float* interleaved_data, int num_frames)
 }
 
 int StreamingWriter::write_frames(const float* const* channels, int num_channels, int num_frames) {
+    if (!file_ || num_channels != static_cast<int>(num_channels_)) return 0;
+
     // Interleave and write
     std::vector<float> interleaved(static_cast<size_t>(num_frames * num_channels));
     for (int f = 0; f < num_frames; ++f)
