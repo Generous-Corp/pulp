@@ -1,0 +1,57 @@
+name: Package Freshness Check
+
+on:
+  schedule:
+    # Weekly on Monday at 06:00 UTC
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+    inputs:
+      tier:
+        description: 'Check tier (1 = metadata only, 2 = full build)'
+        required: false
+        default: '1'
+        type: choice
+        options:
+          - '1'
+          - '2'
+      package:
+        description: 'Single package slug (blank = all)'
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  freshness:
+    name: Check package freshness
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Run Tier 1 freshness check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ARGS="--format markdown"
+          if [ -n "${{ inputs.package }}" ]; then
+            ARGS="$ARGS --package ${{ inputs.package }}"
+          fi
+          python3 tools/packages/freshness_check.py $ARGS > freshness-report.md 2>&1 || true
+          cat freshness-report.md
+
+      - name: Create issue if stale packages found
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh issue create \
+            --title "Package freshness: $(date +%Y-%m-%d) — updates available" \
+            --body "$(cat freshness-report.md)" \
+            --label "dependencies"
