@@ -45,9 +45,11 @@ void View::paint_all(canvas::Canvas& canvas) {
     if (overflow_ == Overflow::hidden)
         canvas.clip_rect(0, 0, bounds_.width, bounds_.height);
 
-    // Apply opacity as layer alpha
-    if (opacity_ < 1.0f)
-        canvas.set_opacity(opacity_);
+    // Compositing layer for opacity and/or blur — uses GPU offscreen buffer
+    // so the entire subtree is composited as one unit (correct CSS opacity)
+    bool needs_layer = (opacity_ < 1.0f) || (filter_blur_ > 0.0f) || needs_layer_;
+    if (needs_layer)
+        canvas.save_layer(0, 0, bounds_.width, bounds_.height, opacity_, filter_blur_);
 
     // Paint box shadow (before background, extends outside bounds)
     if (has_shadow_) {
@@ -121,9 +123,9 @@ void View::paint_all(canvas::Canvas& canvas) {
         // for views that paint their own focus state
     }
 
-    // Reset opacity
-    if (opacity_ < 1.0f)
-        canvas.set_opacity(1.0f);
+    // End compositing layer (restore pops the saveLayer, compositing the subtree)
+    if (needs_layer)
+        canvas.restore();
 
     canvas.restore();
 }

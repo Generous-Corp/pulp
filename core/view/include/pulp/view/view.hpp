@@ -321,6 +321,11 @@ public:
     void set_filter_blur(float radius) { filter_blur_ = radius; }
     float filter_blur() const { return filter_blur_; }
 
+    /// Force this View's subtree to render into a compositing layer.
+    /// Useful for caching, post-effects, or explicit layer isolation.
+    void set_needs_layer(bool v) { needs_layer_ = v; }
+    bool needs_layer() const { return needs_layer_; }
+
     /// Background gradient (CSS background: linear-gradient / radial-gradient)
     void set_background_gradient_linear(float x0, float y0, float x1, float y1,
                                          const std::vector<Color>& colors,
@@ -392,6 +397,7 @@ private:
     float skew_x_ = 0, skew_y_ = 0;
     float origin_x_ = 0.5f, origin_y_ = 0.5f;  // transform-origin (normalized)
     float filter_blur_ = 0;
+    bool needs_layer_ = false;
     int bg_gradient_type_ = 0;  // 0=none, 1=linear, 2=radial
     float bg_grad_x0_ = 0, bg_grad_y0_ = 0, bg_grad_x1_ = 0, bg_grad_y1_ = 1;
     std::vector<Color> bg_gradient_colors_;

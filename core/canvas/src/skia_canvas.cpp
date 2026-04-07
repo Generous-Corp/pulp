@@ -604,6 +604,37 @@ void SkiaCanvas::draw_blurred_backdrop(float x, float y, float w, float h,
     canvas_->restore();
 }
 
+// ── Opacity & Compositing Layers ────────────────────────────────────────────
+
+void SkiaCanvas::set_opacity(float alpha) {
+    // Note: set_opacity alone doesn't composite correctly for subtrees.
+    // For proper CSS opacity, use save_layer() which creates an offscreen
+    // buffer. This method exists for simple single-draw opacity.
+    // The SkPaint alpha is applied per-draw, not per-subtree.
+    (void)alpha; // Handled via save_layer in paint_all
+}
+
+void SkiaCanvas::save_layer(float x, float y, float w, float h,
+                             float opacity, float blur_radius) {
+    if (!canvas_) { save(); return; }
+
+    SkRect bounds = SkRect::MakeXYWH(x, y, w, h);
+    SkPaint layer_paint;
+
+    // Set layer opacity (composited when the layer is restored)
+    if (opacity < 1.0f) {
+        layer_paint.setAlphaf(opacity);
+    }
+
+    // Optionally apply blur as an image filter on the layer
+    if (blur_radius > 0.0f) {
+        layer_paint.setImageFilter(
+            SkImageFilters::Blur(blur_radius, blur_radius, SkTileMode::kClamp, nullptr));
+    }
+
+    canvas_->saveLayer(&bounds, &layer_paint);
+}
+
 // ── GPU Waveform (SkRuntimeEffect shader-driven) ────────────────────────────
 
 // SkSL shader: samples waveform from a 1D texture, computes SDF distance

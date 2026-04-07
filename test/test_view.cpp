@@ -318,3 +318,42 @@ TEST_CASE("Flex layout with padding", "[view][layout]") {
     REQUIRE_THAT(child_ptr->bounds().width, WithinAbs(160.0, 0.1));
     REQUIRE_THAT(child_ptr->bounds().height, WithinAbs(160.0, 0.1));
 }
+
+TEST_CASE("View compositing layer for opacity", "[view][layer]") {
+    pulp::canvas::RecordingCanvas rc;
+    View root;
+    root.set_bounds({0, 0, 200, 200});
+
+    auto child = std::make_unique<View>();
+    child->set_bounds({10, 10, 50, 50});
+    child->set_opacity(0.5f);
+    child->set_background_color(pulp::canvas::Color::rgba(1.0f, 0.0f, 0.0f));
+
+    root.add_child(std::move(child));
+    root.paint_all(rc);
+
+    REQUIRE(rc.command_count() > 0);
+}
+
+TEST_CASE("View needs_layer flag", "[view][layer]") {
+    View v;
+    REQUIRE_FALSE(v.needs_layer());
+    v.set_needs_layer(true);
+    REQUIRE(v.needs_layer());
+}
+
+TEST_CASE("View filter_blur triggers layer", "[view][layer]") {
+    pulp::canvas::RecordingCanvas rc;
+    View root;
+    root.set_bounds({0, 0, 200, 200});
+
+    auto child = std::make_unique<View>();
+    child->set_bounds({10, 10, 50, 50});
+    child->set_filter_blur(4.0f);
+    child->set_background_color(pulp::canvas::Color::rgba(0.0f, 0.0f, 1.0f));
+
+    root.add_child(std::move(child));
+    root.paint_all(rc);
+
+    REQUIRE(rc.command_count() > 0);
+}

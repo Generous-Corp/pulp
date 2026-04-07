@@ -246,9 +246,20 @@ public:
         (void)points; (void)count; // Default: no-op, subclass should override
     }
 
-    // ── Opacity ───────────────────────────────────────────────────────────
+    // ── Opacity & Layers ──────────────────────────────────────────────────
     /// Set global alpha for subsequent drawing operations (0.0-1.0).
     virtual void set_opacity(float alpha) { (void)alpha; }
+
+    /// Save a compositing layer. All drawing until restore() is composited
+    /// with the given opacity and optional blur. This is the correct way to
+    /// implement CSS opacity and filter:blur() — the subtree paints into an
+    /// offscreen buffer and is composited back as a single unit.
+    virtual void save_layer(float x, float y, float w, float h,
+                            float opacity = 1.0f, float blur_radius = 0.0f) {
+        save(); // fallback: just save state
+        (void)x; (void)y; (void)w; (void)h;
+        (void)opacity; (void)blur_radius;
+    }
 
     // ── Text ─────────────────────────────────────────────────────────────
     virtual void set_font(const std::string& family, float size) = 0;
