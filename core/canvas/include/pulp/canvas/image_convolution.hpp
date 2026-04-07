@@ -15,7 +15,9 @@ class ImageConvolutionKernel {
 public:
     /// Create an NxN kernel (must be odd: 3, 5, 7, etc.)
     explicit ImageConvolutionKernel(int size) : size_(size) {
-        values_.resize(static_cast<size_t>(size * size), 0.0f);
+        if (size < 1) size_ = 1;
+        if (size_ % 2 == 0) size_ += 1;  // Force odd
+        values_.resize(static_cast<size_t>(size_ * size_), 0.0f);
     }
 
     /// Set a kernel value at (row, col)
@@ -33,6 +35,7 @@ public:
 
     /// Apply the kernel to RGBA image data (in-place)
     void apply(uint8_t* pixels, int width, int height, int stride = 0) const {
+        if (!pixels || width <= 0 || height <= 0 || size_ < 1) return;
         if (stride == 0) stride = width * 4;
         int half = size_ / 2;
 

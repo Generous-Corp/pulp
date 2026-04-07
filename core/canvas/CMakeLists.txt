@@ -12,6 +12,7 @@ target_sources(pulp-canvas PRIVATE
     src/svg.cpp
     src/effects.cpp
     src/text_layout.cpp
+    src/attributed_string.cpp
 )
 
 # nanosvg (zlib license) for SVG loading
