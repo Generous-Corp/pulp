@@ -204,10 +204,10 @@ std::vector<PlatformTarget> default_targets() {
 
 bool is_valid_target(const PlatformTarget& t) {
     static const std::vector<std::string> platforms = {
-        "macOS", "Windows", "Linux", "iOS", "WASM"
+        "macOS", "Windows", "Linux", "iOS", "Android", "WASM"
     };
     static const std::vector<std::string> archs = {
-        "arm64", "x64", "x86", "wasm32"
+        "arm64", "arm64-v8a", "x64", "x86_64", "x86", "wasm32"
     };
     bool plat_ok = std::find(platforms.begin(), platforms.end(), t.platform) != platforms.end();
     bool arch_ok = std::find(archs.begin(), archs.end(), t.arch) != archs.end();
@@ -474,6 +474,7 @@ std::vector<PlatformTarget> read_project_targets(const fs::path& project_root) {
             // Expand platform to default arch
             std::string arch = "x64";
             if (val == "macOS" || val == "iOS") arch = "arm64";
+            if (val == "Android") arch = "arm64-v8a";
             if (val == "WASM") arch = "wasm32";
             auto t = PlatformTarget::parse(val + "-" + arch);
             if (t) result.push_back(*t);

@@ -89,6 +89,12 @@ def validate_structural(registry: dict) -> tuple[list[str], list[str]]:
             if not BUILD_STATUS_KEY_PATTERN.match(key):
                 warnings.append(f"  {slug}: build_status key '{key}' should be Platform-arch format")
 
+        # Mobile platform coverage check
+        has_android = "Android" in platforms
+        has_ios = "iOS" in platforms
+        if not has_android and not has_ios:
+            warnings.append(f"  {slug}: no Android or iOS platform entries — consider adding mobile support")
+
     return errors, warnings
 
 

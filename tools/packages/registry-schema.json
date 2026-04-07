@@ -92,11 +92,15 @@
           "type": "array",
           "items": {
             "type": "string",
-            "enum": ["arm64", "x64", "wasm32"]
+            "enum": ["arm64", "arm64-v8a", "x64", "x86_64", "x86", "wasm32"]
           },
           "minItems": 1
         },
-        "notes": { "type": "string" }
+        "notes": { "type": "string" },
+        "min_api": { "type": "integer" },
+        "ndk_compatible": { "type": "boolean" },
+        "min_version": { "type": "string" },
+        "requires_jni": { "type": "boolean" }
       }
     },
     "verification": {
