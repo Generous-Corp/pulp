@@ -106,6 +106,54 @@ public:
     // Run the event loop (blocks until the window is closed)
     // Call this for standalone UI preview mode
     virtual void run_event_loop() = 0;
+
+    // ── D.1 Client-side window decoration ───────────────────────────────
+    /// Remove native title bar and let the app draw its own.
+    virtual void set_client_decoration(bool enabled) { (void)enabled; }
+
+    /// Hit-test region types for client-decorated windows.
+    enum class HitTestRegion {
+        none, client, caption,
+        resize_n, resize_s, resize_e, resize_w,
+        resize_ne, resize_nw, resize_se, resize_sw,
+        close, minimize, maximize
+    };
+
+    // ── D.2 Window features ─────────────────────────────────────────────
+    /// Constrain window resize to maintain aspect ratio.
+    virtual void set_fixed_aspect_ratio(float ratio) { (void)ratio; }
+
+    /// Keep window above all others.
+    virtual void set_always_on_top(bool on_top) { (void)on_top; }
+
+    // ── D.3 DPI / Monitor utilities ─────────────────────────────────────
+    /// Get the DPI scale factor for this window.
+    virtual float dpi_scale() const { return 1.0f; }
+
+    /// Get the maximum available dimensions for this window's screen.
+    virtual Size max_dimensions() const { return {1920, 1080}; }
+
+    /// Convert physical pixels to logical coordinates.
+    float convert_to_logical(float px) const { return px / dpi_scale(); }
+
+    /// Convert logical coordinates to physical pixels.
+    float convert_to_native(float logical) const { return logical * dpi_scale(); }
+
+    /// Monitor information.
+    struct MonitorInfo {
+        Rect bounds;
+        float dpi_scale = 1.0f;
+        std::string name;
+    };
+
+    /// Get list of connected monitors. Default returns one virtual monitor.
+    virtual std::vector<MonitorInfo> get_monitors() const {
+        return {{{{0, 0, 1920, 1080}, 1.0f, "Default"}}};
+    }
+
+    // ── D.4 Mouse relative mode ─────────────────────────────────────────
+    /// Hide cursor and report relative deltas (infinite drag for knobs).
+    virtual void set_mouse_relative_mode(bool enabled) { (void)enabled; }
 };
 
 } // namespace pulp::view
