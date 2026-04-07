@@ -54,17 +54,20 @@ public:
             return;
         }
 
-        // With latency compensation — delay the dry signal
+        // With latency compensation — delay the dry signal.
+        // Process sample-by-sample (all channels per sample) so the delay
+        // position advances once per frame, not once per channel.
         dry_buffer_.resize(static_cast<size_t>(num_channels));
-        for (int ch = 0; ch < num_channels; ++ch) {
+        for (int ch = 0; ch < num_channels; ++ch)
             dry_buffer_[ch].resize(static_cast<size_t>(num_samples));
-            for (int i = 0; i < num_samples; ++i) {
+
+        for (int i = 0; i < num_samples; ++i) {
+            for (int ch = 0; ch < num_channels; ++ch) {
                 size_t idx = static_cast<size_t>(delay_pos_ * max_channels_ + ch);
                 dry_buffer_[ch][i] = delay_buffer_[idx];
                 delay_buffer_[idx] = channels[ch][i];
-                if (ch == num_channels - 1)
-                    delay_pos_ = (delay_pos_ + 1) % latency_;
             }
+            delay_pos_ = (delay_pos_ + 1) % latency_;
         }
     }
 

@@ -27,8 +27,9 @@ private:
     float gain_ = 1.0f;
 };
 
-// Dry/wet mixer
-class DryWetMixer {
+// Simple dry/wet mixer (single-sample, no latency compensation)
+// For the full multi-channel version with latency compensation, use dry_wet_mixer.hpp
+class SimpleMixer {
 public:
     void set_mix(float mix) { mix_ = std::clamp(mix, 0.0f, 1.0f); }
     float mix() const { return mix_; }
