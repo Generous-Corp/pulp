@@ -31,6 +31,11 @@ add_executable(pulp-test-child-process test_child_process.cpp)
 target_link_libraries(pulp-test-child-process PRIVATE pulp::platform Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-child-process)
 
+# Progress parser tests
+add_executable(pulp-test-progress-parser test_progress_parser.cpp)
+target_link_libraries(pulp-test-progress-parser PRIVATE pulp::platform Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-progress-parser)
+
 # Validation harness tests (Phase 2)
 add_executable(pulp-test-validation-harness test_validation_harness.cpp)
 target_link_libraries(pulp-test-validation-harness PRIVATE pulp::format Catch2::Catch2WithMain)

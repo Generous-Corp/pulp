@@ -37,13 +37,7 @@
 #include "include/gpu/graphite/Image.h"
 #endif
 
-#if defined(_WIN32)
-#define PULP_POPEN _popen
-#define PULP_PCLOSE _pclose
-#else
-#define PULP_POPEN popen
-#define PULP_PCLOSE pclose
-#endif
+#include <pulp/platform/child_process.hpp>
 
 namespace pulp::view {
 namespace {
@@ -3002,13 +2996,12 @@ void WidgetBridge::register_api() {
         auto cmd = args.get<std::string>(0, "");
         if (cmd.empty()) return choc::value::createString("");
         auto full_cmd = build_shell_command(cmd);
-        std::string r;
-        FILE* p = PULP_POPEN(full_cmd.c_str(), "r");
-        if (!p) return choc::value::createString("");
-        char buf[4096];
-        while (fgets(buf, sizeof(buf), p)) r += buf;
-        PULP_PCLOSE(p);
-        return choc::value::createString(r);
+#ifdef _WIN32
+        auto result = pulp::platform::exec("cmd", {"/c", full_cmd}, 30000);
+#else
+        auto result = pulp::platform::exec("/bin/sh", {"-c", full_cmd}, 30000);
+#endif
+        return choc::value::createString(result.stdout_output);
     });
 
     // execAsync(cmd, callbackId) — non-blocking shell command
@@ -3023,16 +3016,14 @@ void WidgetBridge::register_api() {
         auto async_results = async_exec_results_;
         auto async_mutex = async_exec_mutex_;
         std::thread([alive, async_results, async_mutex, full_cmd, cbId]() {
-            std::string r;
-            FILE* p = PULP_POPEN(full_cmd.c_str(), "r");
-            if (p) {
-                char buf[4096];
-                while (fgets(buf, sizeof(buf), p)) r += buf;
-                PULP_PCLOSE(p);
-            }
+#ifdef _WIN32
+            auto result = pulp::platform::exec("cmd", {"/c", full_cmd}, 60000);
+#else
+            auto result = pulp::platform::exec("/bin/sh", {"-c", full_cmd}, 60000);
+#endif
             if (!alive || !alive->load(std::memory_order_acquire)) return;
             std::lock_guard<std::mutex> lock(*async_mutex);
-            async_results->push_back({cbId, std::move(r)});
+            async_results->push_back({cbId, std::move(result.stdout_output)});
         }).detach();
         return choc::value::Value();
     });
