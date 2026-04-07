@@ -15,9 +15,15 @@ target_sources(pulp-audio PRIVATE
     src/stb_vorbis_impl.c
     src/ogg_reader.cpp
     src/aiff_reader.cpp
+    src/system_volume.cpp
     src/channel_set.cpp
     src/offline_processor.cpp
 )
+
+# CoreAudioFormat reader (macOS only — AAC, ALAC, CAF via ExtAudioFile)
+if(APPLE)
+    target_sources(pulp-audio PRIVATE src/coreaudio_format.mm)
+endif()
 
 target_link_libraries(pulp-audio PUBLIC pulp::runtime)
 

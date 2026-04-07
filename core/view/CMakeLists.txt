@@ -164,6 +164,8 @@ target_sources(pulp-view PRIVATE
     src/table.cpp
     src/toolbar.cpp
     src/concertina_panel.cpp
+    src/splash_screen.cpp
+    src/live_constant_editor.cpp
 )
 
 # WebView support — compiled separately to avoid platform WebView runtime
