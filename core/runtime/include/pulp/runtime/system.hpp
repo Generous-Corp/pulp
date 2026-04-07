@@ -63,4 +63,25 @@ inline void copy_c_string(char (&dest)[N], std::string_view src) {
     copy_c_string(dest, N, src);
 }
 
+// ── System information ──────────────────────────────────────────────────
+
+struct SystemInfo {
+    std::string os_name;          // "macOS", "Windows", "Linux"
+    std::string os_version;       // "15.0", "10.0.22621", "6.5.0"
+    std::string cpu_model;        // "Apple M2 Pro", "Intel Core i9-13900K"
+    int cpu_cores = 0;            // Physical cores
+    int cpu_threads = 0;          // Logical threads
+    uint64_t total_memory_mb = 0; // Total RAM in MB
+    std::string arch;             // "arm64", "x86_64"
+};
+
+/// Query system information (cached after first call)
+const SystemInfo& get_system_info();
+
+/// Number of logical CPU threads (convenience)
+int cpu_thread_count();
+
+/// Total physical memory in MB (convenience)
+uint64_t total_memory_mb();
+
 } // namespace pulp::runtime

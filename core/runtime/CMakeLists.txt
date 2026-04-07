@@ -17,6 +17,9 @@ target_sources(pulp-runtime PRIVATE
     src/child_process.cpp
     src/inter_process_lock.cpp
     src/base64.cpp
+    src/high_resolution_timer.cpp
+    src/system_info.cpp
+    src/text_diff.cpp
 )
 
 # Highway's foreach_target.h uses #include HWY_TARGET_INCLUDE to re-include
