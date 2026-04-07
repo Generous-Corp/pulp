@@ -51,6 +51,11 @@ add_executable(pulp-test-sync test_sync_primitives.cpp)
 target_link_libraries(pulp-test-sync PRIVATE pulp::runtime Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-sync)
 
+# DSP enhancement tests (dry/wet mixer, processor duplicator, matrix, special functions)
+add_executable(pulp-test-dsp-enhancements test_dsp_enhancements.cpp)
+target_link_libraries(pulp-test-dsp-enhancements PRIVATE pulp::signal Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-dsp-enhancements)
+
 # Runtime utility tests (mmap, temp file, dynlib, base64, range, child process)
 add_executable(pulp-test-runtime-utils test_runtime_utils.cpp)
 target_link_libraries(pulp-test-runtime-utils PRIVATE pulp::runtime Catch2::Catch2WithMain)
