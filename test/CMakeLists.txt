@@ -283,6 +283,16 @@ add_executable(pulp-test-draw-batcher test_draw_batcher.cpp)
 target_link_libraries(pulp-test-draw-batcher PRIVATE pulp::render Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-draw-batcher)
 
+# GPU graph renderer tests
+add_executable(pulp-test-gpu-graph test_gpu_graph.cpp)
+target_link_libraries(pulp-test-gpu-graph PRIVATE pulp::render Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-gpu-graph)
+
+# Texture atlas tests
+add_executable(pulp-test-texture-atlas test_texture_atlas.cpp)
+target_link_libraries(pulp-test-texture-atlas PRIVATE pulp::render Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-texture-atlas)
+
 # Platform maturity tests (cursor, focus, IME, context menu, accessibility)
 add_executable(pulp-test-platform-maturity test_platform_maturity.cpp)
 target_link_libraries(pulp-test-platform-maturity PRIVATE pulp::view Catch2::Catch2WithMain)
