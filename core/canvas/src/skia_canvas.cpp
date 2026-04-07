@@ -293,6 +293,18 @@ void SkiaCanvas::set_fill_gradient_radial(float cx, float cy, float radius,
     has_gradient_ = gradient_shader_ != nullptr;
 }
 
+void SkiaCanvas::set_fill_gradient_conic(float cx, float cy, float start_angle,
+                                          const Color* colors, const float* positions, int count) {
+    std::vector<SkColor> sk_colors;
+    std::vector<SkScalar> sk_pos;
+    colors_to_skia(colors, positions, count, sk_colors, sk_pos);
+    float start_deg = start_angle * 180.0f / 3.14159265f;
+    gradient_shader_ = SkGradientShader::MakeSweep(cx, cy, sk_colors.data(), sk_pos.data(),
+                                                     count, SkTileMode::kClamp,
+                                                     start_deg, start_deg + 360.0f, 0, nullptr);
+    has_gradient_ = gradient_shader_ != nullptr;
+}
+
 void SkiaCanvas::clear_fill_gradient() {
     gradient_shader_ = nullptr;
     has_gradient_ = false;

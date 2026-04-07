@@ -84,6 +84,8 @@ public:
                                    const Color* colors, const float* positions, int count) override;
     void set_fill_gradient_radial(float cx, float cy, float radius,
                                    const Color* colors, const float* positions, int count) override;
+    void set_fill_gradient_conic(float cx, float cy, float start_angle,
+                                  const Color* colors, const float* positions, int count) override;
     void clear_fill_gradient() override;
 
     // Blend modes
