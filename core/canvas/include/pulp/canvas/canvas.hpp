@@ -216,6 +216,13 @@ public:
         if (count > 0) set_fill_color(colors[0]);
     }
 
+    /// Set a conic (sweep) gradient as the fill paint.
+    virtual void set_fill_gradient_conic(float cx, float cy, float start_angle,
+                                          const Color* colors, const float* positions,
+                                          int count) {
+        if (count > 0) set_fill_color(colors[0]); // fallback
+    }
+
     /// Clear gradient, return to solid fill color.
     virtual void clear_fill_gradient() {}
 
