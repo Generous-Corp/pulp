@@ -538,6 +538,27 @@ function __installNativeGpuBufferedDrawAugmentation() {
                         __gpuQueuePresentTextureImpl(command.payload);
                     }
                 }
+
+                // Dispatch compute passes if present
+                var computePasses = commandBuffer._computePasses || [];
+                for (var cp = 0; cp < computePasses.length; ++cp) {
+                    var pass = computePasses[cp];
+                    var cmds = pass._commands || [];
+                    for (var ck = 0; ck < cmds.length; ++ck) {
+                        var cmd = cmds[ck];
+                        if (cmd.type === "dispatch" && typeof __gpuComputeDispatchImpl === "function") {
+                            __gpuComputeDispatchImpl(JSON.stringify({
+                                shaderCode: cmd.pipeline && cmd.pipeline._compute && cmd.pipeline._compute.module
+                                    ? cmd.pipeline._compute.module.code : "",
+                                entryPoint: cmd.pipeline && cmd.pipeline._compute
+                                    ? (cmd.pipeline._compute.entryPoint || "main") : "main",
+                                workgroupCountX: cmd.workgroupCountX,
+                                workgroupCountY: cmd.workgroupCountY,
+                                workgroupCountZ: cmd.workgroupCountZ
+                            }));
+                        }
+                    }
+                }
             }
         };
         return queue;

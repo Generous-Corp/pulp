@@ -562,22 +562,52 @@ function __createMockGPURenderPassEncoder(init) {
 
 function __createMockGPUComputePassEncoder(init) {
     init = init || {};
+    var currentComputePipeline = null;
+    var computeBindGroups = {};
+    var computeCommands = [];
+
     return {
         _objectName: "GPUComputePassEncoder",
         label: init.label || "",
-        setPipeline: function() {},
-        setBindGroup: function() {},
-        dispatchWorkgroups: function() {},
-        dispatchWorkgroupsIndirect: function() {},
-        end: function() {}
+        _commands: computeCommands,
+        setPipeline: function(pipeline) {
+            currentComputePipeline = pipeline;
+        },
+        setBindGroup: function(index, bindGroup) {
+            computeBindGroups[index == null ? 0 : index] = bindGroup || null;
+        },
+        dispatchWorkgroups: function(x, y, z) {
+            computeCommands.push({
+                type: "dispatch",
+                pipeline: currentComputePipeline,
+                bindGroups: Object.assign({}, computeBindGroups),
+                workgroupCountX: x || 1,
+                workgroupCountY: y || 1,
+                workgroupCountZ: z || 1
+            });
+        },
+        dispatchWorkgroupsIndirect: function(indirectBuffer, indirectOffset) {
+            computeCommands.push({
+                type: "dispatch-indirect",
+                pipeline: currentComputePipeline,
+                bindGroups: Object.assign({}, computeBindGroups),
+                indirectBuffer: indirectBuffer,
+                indirectOffset: indirectOffset || 0
+            });
+        },
+        end: function() {
+            // Commands are captured in _commands for native dispatch
+        }
     };
 }
 
 function __createMockGPUCommandEncoder(init) {
     init = init || {};
+    var computePasses = [];
     return {
         _objectName: "GPUCommandEncoder",
         label: init.label || "",
+        _computePasses: computePasses,
         beginRenderPass: function(descriptor) {
             return __createMockGPURenderPassEncoder({
                 label: descriptor && descriptor.label ? descriptor.label : "",
@@ -585,13 +615,18 @@ function __createMockGPUCommandEncoder(init) {
             });
         },
         beginComputePass: function(descriptor) {
-            return __createMockGPUComputePassEncoder({ label: descriptor && descriptor.label ? descriptor.label : "" });
+            var pass = __createMockGPUComputePassEncoder({ label: descriptor && descriptor.label ? descriptor.label : "" });
+            computePasses.push(pass);
+            return pass;
         },
         copyBufferToBuffer: function() {},
         copyTextureToBuffer: function() {},
         copyBufferToTexture: function() {},
         finish: function(descriptor) {
-            return __createMockGPUCommandBuffer({ label: descriptor && descriptor.label ? descriptor.label : "" });
+            var cmdBuf = __createMockGPUCommandBuffer({ label: descriptor && descriptor.label ? descriptor.label : "" });
+            // Attach compute pass commands to the command buffer for native dispatch
+            cmdBuf._computePasses = computePasses;
+            return cmdBuf;
         }
     };
 }
