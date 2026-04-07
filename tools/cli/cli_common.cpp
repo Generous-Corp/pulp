@@ -1658,49 +1658,137 @@ static std::map<fs::path, fs::file_time_type> snapshot_timestamps(const fs::path
     return timestamps;
 }
 
-int watch_and_rebuild(const fs::path& root, const fs::path& build_dir,
-                      const std::vector<std::string>& build_args) {
-    std::cout << color::cyan() << "Watching for changes..." << color::reset()
-              << " (Ctrl-C to stop)\n";
+int watch_loop(const WatchOptions& opts) {
+    std::string mode_label;
+    if (!opts.launch_target.empty()) mode_label += " + launch";
+    if (opts.run_tests) mode_label += " + test";
+    if (opts.run_validate) mode_label += " + validate";
 
-    auto previous = snapshot_timestamps(root);
+    std::cout << color::cyan() << "Dev loop active" << color::reset()
+              << " (build" << mode_label << ") — Ctrl-C to stop\n";
+
+    auto previous = snapshot_timestamps(opts.root);
+
+    // Launch the target process if requested
+    auto launch_child = [&]() {
+        if (opts.launch_target.empty()) return;
+        auto binary = fs::path(opts.launch_target);
+        if (!binary.is_absolute()) binary = opts.build_dir / binary;
+        if (!fs::exists(binary)) {
+            std::cerr << "  " << color::yellow() << "Target not found: "
+                      << binary.string() << color::reset() << "\n";
+            return;
+        }
+        std::string cmd = shell_quote(binary);
+        for (auto& arg : opts.launch_args) cmd += " " + shell_quote(arg);
+        cmd += " &";
+        std::cout << "  " << color::dim() << "Launching "
+                  << binary.filename().string() << "..." << color::reset() << "\n";
+        run(cmd);
+    };
+
+    auto kill_child = [&]() {
+        if (opts.launch_target.empty()) return;
+        auto binary_name = fs::path(opts.launch_target).filename().string();
+#ifdef _WIN32
+        run("taskkill /F /IM " + shell_quote(binary_name) + " 2>nul");
+#else
+        run("pkill -f " + shell_quote(binary_name) + " 2>/dev/null");
+#endif
+    };
+
+    launch_child();
 
     for (;;) {
         std::this_thread::sleep_for(std::chrono::milliseconds(500));
 
-        auto current = snapshot_timestamps(root);
+        auto current = snapshot_timestamps(opts.root);
         bool changed = false;
+        std::string first_changed;
 
         for (auto& [path, mtime] : current) {
             auto it = previous.find(path);
             if (it == previous.end() || it->second != mtime) {
                 if (!changed) {
-                    std::cout << "\n" << color::yellow() << "Change detected"
-                              << color::reset() << ": "
-                              << path.lexically_relative(root).string() << "\n";
+                    first_changed = path.lexically_relative(opts.root).string();
                 }
                 changed = true;
             }
         }
-
-        if (changed) {
-            std::string build_cmd = "cmake --build " + build_dir.string();
-            for (auto& arg : build_args) build_cmd += " " + arg;
-            int rc = run_with_spinner(build_cmd, "Rebuilding");
-            if (rc != 0) {
-                std::cout << color::red() << "Build failed." << color::reset()
-                          << " Watching for more changes...\n";
-            } else {
-                std::cout << color::cyan() << "Watching for changes..."
-                          << color::reset() << "\n";
+        for (auto& [path, mtime] : previous) {
+            if (current.find(path) == current.end()) {
+                if (!changed) first_changed = path.lexically_relative(opts.root).string() + " (deleted)";
+                changed = true;
             }
-            previous = snapshot_timestamps(root);
-        } else {
-            previous = current;
         }
+
+        if (!changed) { previous = current; continue; }
+
+        std::cout << "\n" << color::yellow() << "Change detected"
+                  << color::reset() << ": " << first_changed << "\n";
+
+        // Build
+        std::string build_cmd = "cmake --build " + opts.build_dir.string();
+        for (auto& arg : opts.build_args) build_cmd += " " + arg;
+        int rc = run_with_spinner(build_cmd, "Rebuilding");
+
+        if (rc != 0) {
+            std::cout << color::red() << "Build failed." << color::reset()
+                      << " Watching for more changes...\n";
+            previous = snapshot_timestamps(opts.root);
+            continue;
+        }
+
+        // Tests
+        if (opts.run_tests) {
+            std::string test_cmd = "ctest --test-dir " + opts.build_dir.string()
+                                 + " --output-on-failure";
+            if (!opts.test_filter.empty()) test_cmd += " -R " + shell_quote(opts.test_filter);
+            int trc = run_with_spinner(test_cmd, "Testing");
+            if (trc != 0) {
+                std::cout << color::red() << "Tests failed." << color::reset()
+                          << " Watching for more changes...\n";
+            }
+        }
+
+        // Quick validation (dlopen checks only)
+        if (opts.run_validate) {
+            for (auto dir_name : {"CLAP", "VST3"}) {
+                auto dir = opts.build_dir / dir_name;
+                if (!fs::exists(dir)) continue;
+                for (auto& entry : fs::directory_iterator(dir)) {
+                    auto ext = entry.path().extension().string();
+                    if (ext != ".clap" && ext != ".vst3") continue;
+                    auto name = entry.path().stem().string();
+                    std::string dltest = "ctest --test-dir " + opts.build_dir.string()
+                                       + " -R dlopen-" + name + " --output-on-failure 2>/dev/null";
+                    if (run(dltest) == 0) print_ok(std::string(dir_name) + ": " + name + " loads OK");
+                    else print_fail(std::string(dir_name) + ": " + name + " failed to load");
+                }
+            }
+        }
+
+        // Relaunch target
+        if (!opts.launch_target.empty()) {
+            kill_child();
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));
+            launch_child();
+        }
+
+        std::cout << color::cyan() << "Watching for changes..." << color::reset() << "\n";
+        previous = snapshot_timestamps(opts.root);
     }
 
     return 0;
+}
+
+int watch_and_rebuild(const fs::path& root, const fs::path& build_dir,
+                      const std::vector<std::string>& build_args) {
+    WatchOptions opts;
+    opts.root = root;
+    opts.build_dir = build_dir;
+    opts.build_args = build_args;
+    return watch_loop(opts);
 }
 
 // ── Fuzzy Matching ─────────────────────────────────────────────��────────────

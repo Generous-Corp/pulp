@@ -25,10 +25,26 @@ int cmd_build(const std::vector<std::string>& args) {
     // Extract flags before passing args through
     std::string js_engine;
     bool watch_mode = false;
+    bool watch_test = false;
+    bool watch_validate = false;
+    std::string test_filter;
     std::vector<std::string> passthrough_args;
     for (auto& arg : args) {
         if (arg == "--watch" || arg == "-w") {
             watch_mode = true;
+            continue;
+        }
+        if (arg == "--test" || arg == "-t") {
+            watch_test = true;
+            continue;
+        }
+        if (arg == "--validate") {
+            watch_validate = true;
+            continue;
+        }
+        if (arg.rfind("--test-filter=", 0) == 0) {
+            test_filter = arg.substr(14);
+            watch_test = true;
             continue;
         }
         if (arg.rfind("--js-engine=", 0) == 0) {
@@ -86,5 +102,12 @@ int cmd_build(const std::vector<std::string>& args) {
     int rc = run_with_spinner(build_cmd, "Building");
     if (rc != 0 || !watch_mode) return rc;
 
-    return watch_and_rebuild(project_root, build_dir, passthrough_args);
+    WatchOptions opts;
+    opts.root = project_root;
+    opts.build_dir = build_dir;
+    opts.build_args = passthrough_args;
+    opts.run_tests = watch_test;
+    opts.test_filter = test_filter;
+    opts.run_validate = watch_validate;
+    return watch_loop(opts);
 }

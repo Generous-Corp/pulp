@@ -21,6 +21,7 @@ add_executable(pulp-cli
     cmd_sdk.cpp
     cmd_audio.cpp
     cmd_version.cpp
+    cmd_dev.cpp
     design_binding.cpp
     create_targets.cpp
     package_registry.cpp

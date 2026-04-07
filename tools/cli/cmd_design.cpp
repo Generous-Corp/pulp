@@ -15,7 +15,13 @@ int cmd_design(const std::vector<std::string>& args) {
     std::string build_reason;
     std::string script_reason;
 
+    bool watch_mode = false;
+
     for (size_t i = 0; i < args.size(); ++i) {
+        if (args[i] == "--watch" || args[i] == "-w") {
+            watch_mode = true;
+            continue;
+        }
         if (args[i] == "--build-dir" && i + 1 < args.size()) {
             build_dir = fs::absolute(args[++i]);
             build_dir_explicit = true;
@@ -100,6 +106,19 @@ int cmd_design(const std::vector<std::string>& args) {
     if (design_bin.empty()) {
         std::cerr << "Error: pulp-design-tool not found after build in " << build_dir << "\n";
         return 1;
+    }
+
+    if (watch_mode) {
+        // Watch mode: rebuild design tool on C++ changes, auto-relaunch.
+        // JS hot-reload is handled by the design tool's internal HotReloader.
+        WatchOptions opts;
+        opts.root = root;
+        opts.build_dir = build_dir;
+        opts.build_args = {"--target", "pulp-design-tool"};
+        opts.launch_target = design_bin.string();
+        opts.launch_args = {script_path.string()};
+        for (const auto& arg : pass_through) opts.launch_args.push_back(arg);
+        return watch_loop(opts);
     }
 
     std::string cmd = shell_quote(design_bin) + " " + shell_quote(script_path);

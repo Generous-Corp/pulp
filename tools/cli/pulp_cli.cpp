@@ -34,6 +34,7 @@ static const Command commands[] = {
     {"sdk",      "Manage the Pulp SDK installation",      cmd_sdk},
     {"upgrade",  "Update the CLI to the latest version",  cmd_upgrade},
     {"version",  "Show, bump, or check version info",     cmd_version},
+    {"dev",      "Unified dev loop: watch, build, test, run", cmd_dev},
 };
 
 static constexpr int command_count = sizeof(commands) / sizeof(commands[0]);
