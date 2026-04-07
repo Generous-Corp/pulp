@@ -26,6 +26,11 @@ target_include_directories(pulp-test-cli-create-targets PRIVATE ${CMAKE_SOURCE_D
 target_link_libraries(pulp-test-cli-create-targets PRIVATE Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-cli-create-targets)
 
+# Child process tests
+add_executable(pulp-test-child-process test_child_process.cpp)
+target_link_libraries(pulp-test-child-process PRIVATE pulp::platform Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-child-process)
+
 # Validation harness tests (Phase 2)
 add_executable(pulp-test-validation-harness test_validation_harness.cpp)
 target_link_libraries(pulp-test-validation-harness PRIVATE pulp::format Catch2::Catch2WithMain)
