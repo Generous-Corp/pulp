@@ -33,6 +33,8 @@ enum class LicenseVerdict { allowed, review_required, rejected };
 
 LicenseVerdict check_license(const std::string& spdx_id);
 const char* license_verdict_label(LicenseVerdict v);
+std::string license_tier(const std::string& spdx_id);
+std::string license_explanation(const std::string& spdx_id);
 
 // ── Package Descriptor ──
 

@@ -517,7 +517,8 @@ int cmd_add(const std::vector<std::string>& args) {
     if (args.empty()) {
         std::cout << "Usage: pulp add <package> [options]\n\n"
                   << "Options:\n"
-                  << "  --license-override commercial   Accept a rejected license\n"
+                  << "  --accept-license <SPDX>         Accept a copyleft license (e.g., GPL-3.0, AGPL-3.0)\n"
+                  << "  --license-override commercial   Accept with a commercial license\n"
                   << "  --platform-guard                Add with platform guard (skip prompt)\n"
                   << "  --no-cmake                      Skip CMake wiring\n";
         return 0;
@@ -526,11 +527,14 @@ int cmd_add(const std::vector<std::string>& args) {
     // Parse args
     std::string package_id;
     bool license_override = false;
+    std::string accepted_license;
     bool platform_guard = false;
     bool no_cmake = false;
 
     for (size_t i = 0; i < args.size(); ++i) {
-        if (args[i] == "--license-override" && i + 1 < args.size() && args[i + 1] == "commercial") {
+        if (args[i] == "--accept-license" && i + 1 < args.size()) {
+            accepted_license = args[++i]; license_override = true;
+        } else if (args[i] == "--license-override" && i + 1 < args.size() && args[i + 1] == "commercial") {
             license_override = true; ++i;
         } else if (args[i] == "--platform-guard") {
             platform_guard = true;
@@ -583,11 +587,39 @@ int cmd_add(const std::vector<std::string>& args) {
 
     // License check
     auto verdict = check_license(pkg.license);
+    auto tier = license_tier(pkg.license);
+
     if (verdict == LicenseVerdict::rejected && !license_override) {
-        print_fail(pkg.name + " is " + pkg.license + " licensed, which is incompatible with Pulp's MIT license");
-        std::cout << "\n  If you have a commercial license, use:\n"
-                  << "  pulp add " << package_id << " --license-override commercial\n";
-        return 1;
+        if (tier == "restricted") {
+            // Copyleft — can be accepted with --accept-license
+            print_fail(pkg.name + " is " + pkg.license + " licensed (copyleft).");
+            std::cout << "\n  " << license_explanation(pkg.license) << "\n\n";
+            std::cout << "  This is appropriate if:\n"
+                      << "  " << dim("• Your plugin is open-source under a GPL-compatible license") << "\n"
+                      << "  " << dim("• You have a commercial license from the library author") << "\n"
+                      << "  " << dim("• You're doing research/prototyping and won't distribute") << "\n\n";
+            std::cout << "  To proceed:\n"
+                      << "    pulp add " << package_id << " --accept-license " << pkg.license << "\n";
+            // Suggest MIT alternatives
+            auto alts = search(reg, package_id);
+            bool showed_alt = false;
+            for (auto* alt : alts) {
+                if (alt->id != package_id && check_license(alt->license) == LicenseVerdict::allowed) {
+                    if (!showed_alt) std::cout << "\n  MIT-compatible alternative:\n";
+                    std::cout << "    pulp add " << alt->id << "  " << dim("(" + alt->license + ")") << "\n";
+                    showed_alt = true;
+                    break;
+                }
+            }
+            return 1;
+        } else {
+            // Truly rejected (SSPL, proprietary)
+            print_fail(pkg.name + " is " + pkg.license + " licensed — cannot be used.");
+            return 1;
+        }
+    }
+    if (verdict == LicenseVerdict::rejected && license_override) {
+        print_warn("Installing " + pkg.license + " package — your distributed binary must comply with " + pkg.license);
     }
     if (verdict == LicenseVerdict::review_required) {
         print_warn(pkg.name + " license (" + pkg.license + ") requires manual review");

@@ -464,6 +464,317 @@
           "Linux-arm64": "untested"
         }
       }
+    },
+    "essentia": {
+      "name": "Essentia",
+      "version": "v2.1_beta6",
+      "description": "Comprehensive MIR library with 250+ audio analysis algorithms",
+      "license": "AGPL-3.0",
+      "category": "dsp",
+      "url": "https://github.com/MTG/essentia",
+      "fetch": {
+        "method": "FetchContent",
+        "git_repository": "https://github.com/MTG/essentia.git",
+        "git_tag": "v2.1_beta6"
+      },
+      "cmake": {
+        "targets": ["essentia"],
+        "header_only": false,
+        "include_dir": "src"
+      },
+      "platforms": {
+        "macOS": { "architectures": ["arm64"] },
+        "Linux": { "architectures": ["x64", "arm64"] }
+      },
+      "rt_safe": false,
+      "tags": ["mir", "analysis", "pitch", "beat", "mfcc", "spectral", "machine-learning"],
+      "provides": ["pitch-detection", "beat-detection", "audio-analysis", "mfcc", "spectral-analysis"],
+      "overlaps_with_builtin": {
+        "signal/fft.hpp": "FFT",
+        "signal/biquad.hpp": "filters"
+      },
+      "unique_value": "250+ MIR algorithms including beat/onset detection, key detection, melody extraction, and audio classification",
+      "alternatives": ["Q (Cycfi, MIT) for pitch detection only"],
+      "migration_notes": {},
+      "verification": {
+        "last_verified": "2026-04-07",
+        "verified_version": "v2.1_beta6",
+        "upstream_commit": "unknown",
+        "upstream_latest": "v2.1_beta6",
+        "pulp_commit": "unknown",
+        "build_status": {}
+      }
+    },
+    "rubber-band": {
+      "name": "Rubber Band",
+      "version": "v3.3.0",
+      "description": "High-quality time-stretching and pitch-shifting",
+      "license": "GPL-2.0",
+      "category": "dsp",
+      "url": "https://github.com/breakfastquay/rubberband",
+      "fetch": {
+        "method": "FetchContent",
+        "git_repository": "https://github.com/breakfastquay/rubberband.git",
+        "git_tag": "v3.3.0"
+      },
+      "cmake": {
+        "targets": ["rubberband"],
+        "header_only": false,
+        "include_dir": "rubberband"
+      },
+      "platforms": {
+        "macOS": { "architectures": ["arm64"] },
+        "Windows": { "architectures": ["x64"] },
+        "Linux": { "architectures": ["x64", "arm64"] }
+      },
+      "rt_safe": true,
+      "tags": ["time-stretching", "pitch-shifting", "spectral"],
+      "provides": ["time-stretch", "pitch-shift"],
+      "overlaps_with_builtin": {},
+      "unique_value": "Industry-standard time-stretching used in DAWs and production tools",
+      "alternatives": ["Signalsmith Stretch (MIT — polyphonic, lighter)"],
+      "migration_notes": {},
+      "verification": {
+        "last_verified": "2026-04-07",
+        "verified_version": "v3.3.0",
+        "upstream_commit": "unknown",
+        "upstream_latest": "v3.3.0",
+        "pulp_commit": "unknown",
+        "build_status": {}
+      }
+    },
+    "fftw": {
+      "name": "FFTW",
+      "version": "3.3.10",
+      "description": "Fastest Fourier Transform in the West — highly optimized FFT",
+      "license": "GPL-2.0",
+      "category": "dsp",
+      "url": "https://www.fftw.org",
+      "fetch": {
+        "method": "FetchContent",
+        "git_repository": "https://github.com/FFTW/fftw3.git",
+        "git_tag": "fftw-3.3.10"
+      },
+      "cmake": {
+        "targets": ["fftw3"],
+        "header_only": false,
+        "include_dir": "api"
+      },
+      "platforms": {
+        "macOS": { "architectures": ["arm64"] },
+        "Windows": { "architectures": ["x64"] },
+        "Linux": { "architectures": ["x64", "arm64"] }
+      },
+      "rt_safe": true,
+      "tags": ["fft", "spectral", "convolution", "simd"],
+      "provides": ["fft", "spectral-processing"],
+      "overlaps_with_builtin": {
+        "signal/fft.hpp": "FFT"
+      },
+      "unique_value": "Highly optimized FFT with auto-tuning SIMD code generation — fastest available for large transforms",
+      "alternatives": ["PFFFT (BSD-3 — lighter, SIMD, power-of-two only)", "KissFFT (BSD-3 — portable)"],
+      "migration_notes": {},
+      "verification": {
+        "last_verified": "2026-04-07",
+        "verified_version": "3.3.10",
+        "upstream_commit": "unknown",
+        "upstream_latest": "3.3.10",
+        "pulp_commit": "unknown",
+        "build_status": {}
+      }
+    },
+    "aubio": {
+      "name": "Aubio",
+      "version": "0.4.9",
+      "description": "Audio labeling — pitch, onset, beat, and tempo detection",
+      "license": "GPL-3.0",
+      "category": "dsp",
+      "url": "https://github.com/aubio/aubio",
+      "fetch": {
+        "method": "FetchContent",
+        "git_repository": "https://github.com/aubio/aubio.git",
+        "git_tag": "0.4.9"
+      },
+      "cmake": {
+        "targets": ["aubio"],
+        "header_only": false,
+        "include_dir": "src"
+      },
+      "platforms": {
+        "macOS": { "architectures": ["arm64"] },
+        "Windows": { "architectures": ["x64"] },
+        "Linux": { "architectures": ["x64", "arm64"] }
+      },
+      "rt_safe": true,
+      "tags": ["pitch", "onset", "beat", "tempo", "mfcc"],
+      "provides": ["pitch-detection", "onset-detection", "beat-detection", "tempo-detection"],
+      "overlaps_with_builtin": {},
+      "unique_value": "Lightweight, real-time pitch/onset/beat detection with minimal dependencies",
+      "alternatives": ["Q (Cycfi, MIT) for pitch detection"],
+      "migration_notes": {},
+      "verification": {
+        "last_verified": "2026-04-07",
+        "verified_version": "0.4.9",
+        "upstream_commit": "unknown",
+        "upstream_latest": "0.4.9",
+        "pulp_commit": "unknown",
+        "build_status": {}
+      }
+    },
+    "libsndfile": {
+      "name": "libsndfile",
+      "version": "1.2.2",
+      "description": "Read and write audio files (WAV, AIFF, FLAC, OGG, and more)",
+      "license": "LGPL-2.1",
+      "category": "audio-io",
+      "url": "https://github.com/libsndfile/libsndfile",
+      "fetch": {
+        "method": "FetchContent",
+        "git_repository": "https://github.com/libsndfile/libsndfile.git",
+        "git_tag": "1.2.2"
+      },
+      "cmake": {
+        "targets": ["SndFile::sndfile"],
+        "header_only": false,
+        "include_dir": "include"
+      },
+      "platforms": {
+        "macOS": { "architectures": ["arm64"] },
+        "Windows": { "architectures": ["x64", "arm64"] },
+        "Linux": { "architectures": ["x64", "arm64"] }
+      },
+      "rt_safe": false,
+      "tags": ["wav", "aiff", "flac", "ogg", "audio-file", "read", "write"],
+      "provides": ["audio-file-io", "wav", "aiff", "flac", "ogg"],
+      "overlaps_with_builtin": {},
+      "unique_value": "Full-featured audio file I/O supporting 20+ formats with read and write",
+      "alternatives": ["dr_libs (MIT-0 — decode only, fewer formats)"],
+      "migration_notes": {},
+      "verification": {
+        "last_verified": "2026-04-07",
+        "verified_version": "1.2.2",
+        "upstream_commit": "unknown",
+        "upstream_latest": "1.2.2",
+        "pulp_commit": "unknown",
+        "build_status": {}
+      }
+    },
+    "soundtouch": {
+      "name": "SoundTouch",
+      "version": "2.4.0",
+      "description": "Tempo, pitch, and playback rate adjustment",
+      "license": "LGPL-2.1",
+      "category": "dsp",
+      "url": "https://codeberg.org/soundtouch/soundtouch",
+      "fetch": {
+        "method": "FetchContent",
+        "git_repository": "https://codeberg.org/soundtouch/soundtouch.git",
+        "git_tag": "2.4.0"
+      },
+      "cmake": {
+        "targets": ["SoundTouch"],
+        "header_only": false,
+        "include_dir": "include"
+      },
+      "platforms": {
+        "macOS": { "architectures": ["arm64"] },
+        "Windows": { "architectures": ["x64"] },
+        "Linux": { "architectures": ["x64", "arm64"] }
+      },
+      "rt_safe": true,
+      "tags": ["tempo", "pitch", "rate", "time-stretching"],
+      "provides": ["tempo-change", "pitch-shift", "rate-change"],
+      "overlaps_with_builtin": {},
+      "unique_value": "Simple API for tempo/pitch/rate changes — widely used in media players",
+      "alternatives": ["Signalsmith Stretch (MIT — more modern, polyphonic)"],
+      "migration_notes": {},
+      "verification": {
+        "last_verified": "2026-04-07",
+        "verified_version": "2.4.0",
+        "upstream_commit": "unknown",
+        "upstream_latest": "2.4.0",
+        "pulp_commit": "unknown",
+        "build_status": {}
+      }
+    },
+    "fluidsynth": {
+      "name": "FluidSynth",
+      "version": "v2.4.0",
+      "description": "SoundFont 2 software synthesizer with MIDI support",
+      "license": "LGPL-2.1",
+      "category": "dsp",
+      "url": "https://github.com/FluidSynth/fluidsynth",
+      "fetch": {
+        "method": "FetchContent",
+        "git_repository": "https://github.com/FluidSynth/fluidsynth.git",
+        "git_tag": "v2.4.0"
+      },
+      "cmake": {
+        "targets": ["fluidsynth"],
+        "header_only": false,
+        "include_dir": "include"
+      },
+      "platforms": {
+        "macOS": { "architectures": ["arm64"] },
+        "Windows": { "architectures": ["x64"] },
+        "Linux": { "architectures": ["x64", "arm64"] }
+      },
+      "rt_safe": false,
+      "tags": ["soundfont", "sf2", "synthesizer", "midi", "sampler"],
+      "provides": ["soundfont-synthesis", "sf2-playback", "midi-synthesis"],
+      "overlaps_with_builtin": {},
+      "unique_value": "Full SoundFont 2 synthesis engine — load .sf2 files for instrument playback",
+      "alternatives": ["FluidLite (MIT — minimal SF2 subset)"],
+      "migration_notes": {},
+      "verification": {
+        "last_verified": "2026-04-07",
+        "verified_version": "v2.4.0",
+        "upstream_commit": "unknown",
+        "upstream_latest": "v2.4.0",
+        "pulp_commit": "unknown",
+        "build_status": {}
+      }
+    },
+    "kfr": {
+      "name": "KFR",
+      "version": "6.0.2",
+      "description": "Fast DSP framework with FFT, FIR/IIR, resampling, and SIMD",
+      "license": "GPL-2.0",
+      "category": "dsp",
+      "url": "https://github.com/kfrlib/kfr",
+      "fetch": {
+        "method": "FetchContent",
+        "git_repository": "https://github.com/kfrlib/kfr.git",
+        "git_tag": "6.0.2"
+      },
+      "cmake": {
+        "targets": ["kfr"],
+        "header_only": false,
+        "include_dir": "include"
+      },
+      "platforms": {
+        "macOS": { "architectures": ["arm64"] },
+        "Windows": { "architectures": ["x64"] },
+        "Linux": { "architectures": ["x64", "arm64"] }
+      },
+      "rt_safe": true,
+      "tags": ["fft", "fir", "iir", "resampling", "simd", "dsp"],
+      "provides": ["fft", "filters", "resampling", "simd-dsp"],
+      "overlaps_with_builtin": {
+        "signal/fft.hpp": "FFT",
+        "signal/biquad.hpp": "IIR filters"
+      },
+      "unique_value": "Comprehensive SIMD-optimized DSP with expression templates — faster than hand-written loops",
+      "alternatives": ["PFFFT (BSD-3) + Signalsmith DSP (MIT) for FFT + filters separately"],
+      "migration_notes": {},
+      "verification": {
+        "last_verified": "2026-04-07",
+        "verified_version": "6.0.2",
+        "upstream_commit": "unknown",
+        "upstream_latest": "6.0.2",
+        "pulp_commit": "unknown",
+        "build_status": {}
+      }
     }
   }
 }

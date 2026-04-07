@@ -247,6 +247,45 @@ const char* license_verdict_label(LicenseVerdict v) {
     return "unknown";
 }
 
+std::string license_tier(const std::string& spdx_id) {
+    auto v = check_license(spdx_id);
+    switch (v) {
+        case LicenseVerdict::allowed: return "allowed";
+        case LicenseVerdict::review_required: return "review";
+        case LicenseVerdict::rejected: {
+            auto lower = to_lower(spdx_id);
+            if (lower == "sspl-1.0" || lower == "proprietary") return "rejected";
+            return "restricted";  // GPL/LGPL/AGPL are restricted, not rejected
+        }
+    }
+    return "unknown";
+}
+
+std::string license_explanation(const std::string& spdx_id) {
+    auto lower = to_lower(spdx_id);
+    if (lower.find("agpl") == 0) {
+        return "AGPL requires that if you distribute software linking this library, "
+               "or provide it as a network service, the complete source of your "
+               "application must be available under AGPL. This affects YOUR plugin, "
+               "not Pulp itself.";
+    }
+    if (lower.find("gpl") == 0) {
+        return "GPL requires that software you distribute which links this library "
+               "also be distributed under GPL. This affects YOUR plugin binary, "
+               "not Pulp itself. If your plugin is GPL-licensed, this is fine.";
+    }
+    if (lower.find("lgpl") == 0) {
+        return "LGPL allows use via dynamic linking without affecting your license. "
+               "Static linking requires your code to be LGPL-compatible. For audio "
+               "plugins, dynamic linking is complex — consult your legal advisor.";
+    }
+    if (lower == "mpl-2.0") {
+        return "MPL-2.0 is file-level copyleft. Modifications to MPL-licensed files "
+               "must stay MPL, but your own code remains under your chosen license.";
+    }
+    return "This license may have compatibility implications. Review before distributing.";
+}
+
 // ── Registry Loading ──
 
 static PackageDescriptor parse_package(const std::string& id, const JsonValue& j) {
