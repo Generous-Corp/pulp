@@ -8,11 +8,7 @@ target_include_directories(pulp-inspect
 )
 
 target_sources(pulp-inspect PRIVATE
-    src/placeholder.cpp
-)
-
-file(WRITE ${CMAKE_CURRENT_SOURCE_DIR}/src/placeholder.cpp
-    "// pulp-inspect: placeholder — replaced in Phase 6\nnamespace pulp::inspect {}\n"
+    src/inspector_overlay.cpp
 )
 
 target_link_libraries(pulp-inspect PUBLIC pulp::view pulp::render)
