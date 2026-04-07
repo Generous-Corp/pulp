@@ -71,26 +71,99 @@ FileTree::FileTree() {
     set_background_color(canvas::Color::rgba(30, 30, 40));
 }
 
+using FileTreeNode = FileTree::FileTreeNode;
+
+static void collect_nodes(const std::filesystem::path& dir, int depth,
+                          std::vector<FileTreeNode>& nodes, int max_depth = 4) {
+    if (depth > max_depth) return;
+    std::error_code ec;
+    std::vector<std::filesystem::directory_entry> entries;
+    for (auto& entry : std::filesystem::directory_iterator(dir, ec))
+        entries.push_back(entry);
+
+    // Sort: directories first, then alphabetical
+    std::sort(entries.begin(), entries.end(), [](auto& a, auto& b) {
+        if (a.is_directory() != b.is_directory()) return a.is_directory();
+        return a.path().filename() < b.path().filename();
+    });
+
+    for (auto& entry : entries) {
+        auto name = entry.path().filename().string();
+        if (name.empty() || name[0] == '.') continue;  // Skip hidden
+
+        FileTreeNode node;
+        node.name = name;
+        node.path = entry.path();
+        node.is_directory = entry.is_directory();
+        node.depth = depth;
+        nodes.push_back(node);
+
+        if (entry.is_directory() && depth < 1)  // Auto-expand first level
+            collect_nodes(entry.path(), depth + 1, nodes, max_depth);
+    }
+}
+
 void FileTree::refresh() {
-    // TreeView integration would go here
+    nodes_.clear();
+    if (!root_.empty() && std::filesystem::exists(root_))
+        collect_nodes(root_, 0, nodes_);
 }
 
 void FileTree::paint(canvas::Canvas& canvas) {
-    auto b = local_bounds();
-    canvas.set_fill_color(resolve_color("text.secondary", canvas::Color::rgba(150, 150, 160)));
-    canvas.set_font("Inter", 12.0f);
-    canvas.fill_text("FileTree: " + root_.string(), 8.0f, 16.0f);
+    float w = local_bounds().width;
+    float row_h = 22.0f;
+    float y = 4.0f;
+
+    canvas.set_font("system", 12.0f);
+
+    for (auto& node : nodes_) {
+        float indent = 16.0f + node.depth * 16.0f;
+
+        // Icon
+        canvas.set_fill_color(node.is_directory
+            ? canvas::Color::rgba(200, 180, 80)   // Folder: yellow
+            : canvas::Color::rgba(150, 170, 200)); // File: blue-gray
+        canvas.fill_text(node.is_directory ? "\xf0\x9f\x93\x81" : "\xf0\x9f\x93\x84",
+                        indent - 14.0f, y + 15.0f);
+
+        // Name
+        canvas.set_fill_color(canvas::Color::rgba(210, 210, 220));
+        canvas.fill_text(node.name, indent, y + 15.0f);
+
+        y += row_h;
+        if (y > local_bounds().height) break;
+    }
 }
 
 // ── ContentSharer ──────────────────────────────────────────────────────
 
-void ContentSharer::share_file(const std::filesystem::path&, void*) {
-    // Platform-specific: NSSharingServicePicker on macOS
+#ifdef __APPLE__
+// macOS implementation is in a separate .mm file if available.
+// Fallback: open the file with the system default handler.
+#include <cstdlib>
+void ContentSharer::share_file(const std::filesystem::path& file, void*) {
+    std::string cmd = "open \"" + file.string() + "\"";
+    std::system(cmd.c_str());
 }
 
-void ContentSharer::share_text(const std::string&, void*) {
-    // Platform-specific: NSSharingServicePicker on macOS
+void ContentSharer::share_text(const std::string& text, void*) {
+    // Copy to clipboard as a share fallback
+    std::string cmd = "echo '" + text + "' | pbcopy";
+    std::system(cmd.c_str());
 }
+#elif defined(_WIN32)
+void ContentSharer::share_file(const std::filesystem::path& file, void*) {
+    std::string cmd = "start \"\" \"" + file.string() + "\"";
+    std::system(cmd.c_str());
+}
+void ContentSharer::share_text(const std::string&, void*) {}
+#else
+void ContentSharer::share_file(const std::filesystem::path& file, void*) {
+    std::string cmd = "xdg-open \"" + file.string() + "\"";
+    std::system(cmd.c_str());
+}
+void ContentSharer::share_text(const std::string&, void*) {}
+#endif
 
 // ── MultiDocumentPanel ─────────────────────────────────────────────────
 

@@ -74,9 +74,18 @@ public:
 
     void paint(canvas::Canvas& canvas) override;
 
+    struct FileTreeNode {
+        std::string name;
+        std::filesystem::path path;
+        bool is_directory = false;
+        bool expanded = false;
+        int depth = 0;
+    };
+
 private:
     void refresh();
     std::filesystem::path root_;
+    std::vector<FileTreeNode> nodes_;
 };
 
 /// Content sharer — platform-native share sheet for files/text.

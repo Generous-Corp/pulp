@@ -1,110 +1,327 @@
 # Module Reference
 
-Each Pulp subsystem is a separate CMake library under `core/`. This page lists every module, its purpose, maturity, and key public headers.
+Pulp is organized into independent subsystems under `core/`. Each is a separate CMake library (`pulp::runtime`, `pulp::audio`, etc.) that you link as needed.
+
+---
 
 ## runtime
 
-**Status**: stable
-**Dependencies**: platform
-**Headers**: `pulp/runtime/runtime.hpp`, `pulp/runtime/spsc_queue.hpp`, `pulp/runtime/seqlock.hpp`, `pulp/runtime/triple_buffer.hpp`, `pulp/runtime/log.hpp`, `pulp/runtime/assert.hpp`, `pulp/runtime/scope_guard.hpp`
+> Core utilities — the foundation everything else builds on.
 
-Lock-free synchronization primitives, logging, and assertions. Provides `SeqLock<T>`, `TripleBuffer<T>`, `SPSCQueue<T>`, `ScopeGuard`. Depends on `platform` for OS detection and types.
+| Feature | Header | What It Does |
+|---------|--------|-------------|
+| SIMD | `simd.hpp` | Portable SSE/NEON/AVX via Google Highway — add, mul, fma, reduce, clamp |
+| XML | `xml.hpp` | Parse/generate XML via pugixml — XPath queries, file I/O |
+| ZIP/GZIP | `zip.hpp` | Compress/decompress via miniz — archives, state blobs |
+| HTTP | `http.hpp` | GET, POST, download via cpp-httplib — license checks, cloud presets |
+| Sockets | `socket.hpp` | TCP/UDP client and server |
+| Named Pipes | `named_pipe.hpp` | Cross-platform IPC pipes (mkfifo / CreateNamedPipe) |
+| IP Address | `ip_address.hpp` | IPv4 validation, local address queries, hostname |
+| Crypto | `crypto.hpp` | SHA-256, MD5, AES-256-CBC via Mbed TLS — hashing, encryption |
+| Licensing | `license.hpp` | RSA signature verification, key generation, online activation |
+| BigInteger | `big_integer.hpp` | Arbitrary-precision arithmetic via Mbed TLS MPI — for RSA |
+| i18n | `i18n.hpp` | String translation — .strings, .po, .json file loaders, `tr()` helper |
+| Analytics | `analytics.hpp` | Thread-safe event tracking with pluggable file/HTTP destinations |
+| Base64 | `base64.hpp` | Encode/decode binary ↔ text |
+| Memory Map | `memory_mapped_file.hpp` | RAII mmap / MapViewOfFile for large file access |
+| Child Process | `child_process.hpp` | Launch, capture stdout/stderr, wait for exit |
+| Dynamic Library | `dynamic_library.hpp` | RAII dlopen / LoadLibrary — load plugins at runtime |
+| IPC Lock | `inter_process_lock.hpp` | Cross-process file lock (flock / CreateFile) |
+| Temp File | `temporary_file.hpp` | RAII temp file with auto-delete |
+| Timer | `high_resolution_timer.hpp` | Sub-millisecond periodic callback |
+| System Info | `system.hpp` | CPU model, cores, RAM, OS version, architecture |
+| Range | `range.hpp` | Templated interval with intersection, union, constrain |
+| Text Diff | `text_diff.hpp` | LCS-based line diff with formatted output |
+| Scope Guard | `scope_guard.hpp` | RAII cleanup — `PULP_ON_SCOPE_EXIT(...)` |
+| Identity | `identity.hpp` | UUIDv4 generation, typed IDs (SessionId, ObjectId, RunId) |
+
+---
 
 ## events
 
-**Status**: usable
-**Dependencies**: runtime
-**Headers**: `pulp/events/events.hpp`, `pulp/events/event_loop.hpp`, `pulp/events/timer.hpp`
+> Event loop, timers, IPC, and process management.
 
-Event loop (constructible, not singleton), timers, and async dispatch. Used by UI and host integration layers.
+| Feature | Header | What It Does |
+|---------|--------|-------------|
+| Event Loop | `event_loop.hpp` | Constructible (not singleton) message pump |
+| Timer | `timer.hpp` | Periodic and one-shot timers |
+| Async Updater | `async_updater.hpp` | Coalesce rapid cross-thread updates into one callback |
+| Multi Timer | `async_updater.hpp` | Multiple named timers from one object |
+| Action Broadcaster | `async_updater.hpp` | String-based action dispatch (menu commands) |
+| IPC Connection | `interprocess_connection.hpp` | Length-prefixed messages over named pipes or TCP |
+| IPC Server | `interprocess_connection.hpp` | Accept multiple client connections |
+| Child Process Pool | `child_process_manager.hpp` | Crash-isolated process management (plugin scanning) |
+| Connected Process | `child_process_manager.hpp` | Launch child with bidirectional IPC channel |
+| Volume Detector | `volume_detector.hpp` | Monitor filesystem for volume mount/unmount |
+| Service Discovery | `volume_detector.hpp` | mDNS/Bonjour network service browsing |
+| Low Power Disable | `async_updater.hpp` | Prevent OS power throttling during audio |
+
+---
 
 ## audio
 
-**Status**: usable
-**Dependencies**: runtime
-**Headers**: `pulp/audio/audio.hpp`, `pulp/audio/buffer.hpp`, `pulp/audio/device.hpp`, `pulp/audio/audio_file.hpp`, `pulp/audio/load_measurer.hpp`, `pulp/audio/buffering_reader.hpp`, `pulp/audio/workgroup.hpp`
+> Device I/O, file formats, channel layouts, and offline processing.
 
-Audio buffer types, device I/O (CoreAudio on macOS), and audio file reading/writing. `BufferView<T>` is the primary buffer abstraction used throughout the framework. `AudioProcessLoadMeasurer` tracks real-time CPU usage. `BufferingReader` provides background-thread ring buffer for gapless streaming. `AudioWorkgroup` manages real-time thread priority (macOS os_workgroup API).
+**Device backends:**
+
+| Platform | Backend | Header |
+|----------|---------|--------|
+| macOS | CoreAudio | `platform/mac/coreaudio_device.hpp` |
+| Windows | WASAPI | `platform/win/wasapi_device.hpp` |
+| Linux | ALSA | `platform/linux/alsa_device.hpp` |
+| Linux | JACK | `platform/linux/jack_device.hpp` |
+| Web | Web Audio | `src/web_audio.cpp` |
+
+**Audio file formats** (via `format_registry.hpp`):
+
+| Format | Read | Write | Backend |
+|--------|:----:|:-----:|---------|
+| WAV | ✓ | ✓ | CHOC |
+| FLAC | ✓ | — | dr_flac |
+| MP3 | ✓ | — | dr_mp3 |
+| OGG Vorbis | ✓ | — | stb_vorbis |
+| AIFF / AIFF-C | ✓ | ✓ | Native (8/16/24/32-bit) |
+| AAC / ALAC / CAF | ✓ | — | ExtAudioFile (macOS only) |
+
+**Other features:**
+
+| Feature | Header | What It Does |
+|---------|--------|-------------|
+| Channel Sets | `channel_set.hpp` | Named layouts: mono, stereo, 5.1, 7.1, 7.1.4 (Atmos) |
+| Offline Processor | `offline_processor.hpp` | Batch-process files through a callback — bouncing, golden files |
+| Buffering Reader | `buffering_reader.hpp` | Background-thread ring buffer for gapless streaming |
+| System Volume | `system_volume.hpp` | Get/set system output volume and mute (all platforms) |
+| Format Registry | `format_registry.hpp` | Extensible codec registry — register custom readers/writers |
+| Load Measurer | `load_measurer.hpp` | Real-time CPU usage tracking for audio callbacks |
+
+---
 
 ## midi
 
-**Status**: usable
-**Dependencies**: runtime
-**Headers**: `pulp/midi/midi.hpp`, `pulp/midi/buffer.hpp`, `pulp/midi/message.hpp`, `pulp/midi/device.hpp`, `pulp/midi/midi_file.hpp`, `pulp/midi/rpn_parser.hpp`, `pulp/midi/keyboard_state.hpp`
+> MIDI I/O, file handling, and MIDI 2.0 support.
 
-MIDI message types, buffer management, device I/O (CoreMIDI on macOS), and MIDI file reading/writing. `MidiBuffer` is the primary MIDI container. `RpnParser` extracts 14-bit RPN/NRPN parameter messages from CC sequences. `MidiKeyboardState` tracks polyphonic key state across 16 channels with velocity and listener callbacks.
+| Feature | Header | What It Does |
+|---------|--------|-------------|
+| MIDI Messages | via CHOC | `ShortMessage`, note/CC helpers, channel voice |
+| MIDI Buffer | `midi_buffer.hpp` | Timestamped event buffer for process callbacks |
+| MIDI Files | `midi_file.hpp` | Read/write Standard MIDI Files |
+| UMP | `ump.hpp` | Universal MIDI Packets (MIDI 2.0), MPE zones |
+| MIDI CI | `midi_ci.hpp` | Device discovery, profile management, property exchange |
+| CoreMIDI | platform/mac | macOS MIDI device I/O |
+| WinMIDI | platform/win | Windows MIDI device I/O |
+| ALSA MIDI | platform/linux | Linux MIDI device I/O |
+| Web MIDI | src/web_midi.cpp | Browser MIDI access |
+
+---
 
 ## signal
 
-**Status**: usable
-**Dependencies**: none (header-only INTERFACE library)
-**Headers**: `pulp/signal/signal.hpp`, and individual algorithm headers
+> 30+ real-time-safe DSP processors.
 
-DSP algorithm library. Includes:
+**Filters:**
 
-- Oscillators (sine, saw, square, triangle, noise)
-- Filters: biquad, SVF, ladder, Linkwitz-Riley, FIR (windowed-sinc), TPT first-order
-- Effects: delay line, chorus, phaser, reverb, waveshaper, compressor, noise gate
-- Utilities: gain, panner, ADSR, smoothed value, log-ramped value, oversampling, FFT, windowing, ballistics filter, processor chain, lookup table, interpolators (linear, Hermite, Lagrange, windowed-sinc), filter design (Audio EQ Cookbook + Butterworth cascades)
+| Processor | Header | Description |
+|-----------|--------|-------------|
+| Biquad (IIR) | `biquad.hpp` | Low/high/band pass, notch, allpass, shelf |
+| FIR Filter | `fir_filter.hpp` | Arbitrary-length finite impulse response |
+| State Variable (TPT) | `tpt_filter.hpp` | Zero-delay feedback topology |
+| Ladder Filter | `ladder_filter.hpp` | 4-pole resonant (Moog-style) |
+| Linkwitz-Riley | `linkwitz_riley.hpp` | Crossover-grade linear-phase |
+| Filter Design | `filter_design.hpp` | Butterworth, Chebyshev coefficient calculation |
 
-Each algorithm is a standalone header-only class with no framework coupling.
+**Effects:**
+
+| Processor | Header | Description |
+|-----------|--------|-------------|
+| Convolution | `convolver.hpp` | Partitioned convolution for impulse responses |
+| Reverb | `reverb.hpp` | Algorithmic reverb |
+| Chorus | `chorus.hpp` | Modulated delay chorus |
+| Phaser | `phaser.hpp` | All-pass phaser |
+| Delay Line | `delay_line.hpp` | Interpolated delay (linear, cubic, sinc) |
+| Waveshaper | `waveshaper.hpp` | Nonlinear distortion |
+| Oversampling | `oversampling.hpp` | 2x/4x/8x with anti-aliasing |
+
+**Dynamics:**
+
+| Processor | Header | Description |
+|-----------|--------|-------------|
+| Compressor | `compressor.hpp` | Feed-forward with soft knee |
+| Limiter | `compressor.hpp` | Brickwall with instant attack |
+| Noise Gate | `noise_gate.hpp` | Threshold-based gate |
+| DryWetMixer | `dry_wet_mixer.hpp` | Latency-compensated blend (linear or equal-power) |
+
+**Generators & Math:**
+
+| Processor | Header | Description |
+|-----------|--------|-------------|
+| Oscillator | `oscillator.hpp` | Wavetable with anti-aliased waveforms |
+| ADSR | `adsr.hpp` | Envelope generator |
+| FFT | `fft.hpp` | Radix-2, vDSP on Apple |
+| STFT | `stft.hpp` | Short-time Fourier transform |
+| Windowing | `windowing.hpp` | Hann, Hamming, Blackman, Kaiser |
+| Smoothed Value | `smoothed_value.hpp` | Parameter smoothing (linear, log-ramped) |
+| Lookup Table | `lookup_table.hpp` | Pre-computed function table |
+| Fast Math | `fast_math.hpp` | Approximations for sin, cos, tanh, exp |
+| Special Functions | `special_functions.hpp` | sinc, bessel, lanczos, dB↔linear, MIDI↔freq |
+| Matrix | `matrix.hpp` | 2×2, 3×3, 4×4 matrix ops + transforms |
+| SIMD Buffer | `simd_buffer.hpp` | 64-byte aligned buffer for vectorized access |
+
+---
 
 ## state
 
-**Status**: stable
-**Dependencies**: runtime
-**Headers**: `pulp/state/parameter.hpp`, `pulp/state/store.hpp`, `pulp/state/preset_manager.hpp`, `pulp/state/undo_manager.hpp`
+> Parameters, state trees, presets, and settings.
 
-Thread-safe parameter system. `ParamValue` uses relaxed atomics for lock-free audio-thread reads. `StateStore` manages parameter registration, value access, gesture tracking, change notification, and binary state serialization. Supports modulation offsets (for CLAP per-voice modulation). `PresetManager` provides built-in preset save/load/delete/rename/import with factory vs user separation, JSON file format, and platform-standard storage locations. `UndoManager` provides generic undo/redo with named actions, transaction grouping, and configurable history depth.
+| Feature | Header | What It Does |
+|---------|--------|-------------|
+| StateStore | `store.hpp` | Atomic parameter values with format adapter sync |
+| ParamInfo | `param_info.hpp` | Parameter metadata (range, name, string mapping) |
+| Binding | `binding.hpp` | UI ↔ parameter connection with gesture undo grouping |
+| StateTree | `state_tree.hpp` | Reactive hierarchical key-value store with JSON serialization |
+| StateTree Sync | `state_tree_sync.hpp` | Delta-based binary sync over IPC |
+| Observable Value | `state_tree.hpp` | Generic observable with change listeners |
+| Cached Property | `cached_property.hpp` | Listener-backed StateTree accessor with local cache |
+| PropertiesFile | `properties_file.hpp` | JSON-backed persistent settings (via CHOC) |
+| App Properties | `properties_file.hpp` | Platform-standard user/common settings paths |
+| Preset Manager | `preset_manager.hpp` | Factory/user presets, navigation, import/export |
+| Undo Manager | `undo_manager.hpp` | Undo/redo with action grouping |
+| Serialization | `store.hpp` | Versioned binary format with CRC |
+
+---
 
 ## format
 
-**Status**: usable
-**Dependencies**: state, audio, midi
-**Headers**: `pulp/format/processor.hpp`, `pulp/format/headless.hpp`, `pulp/format/clap_entry.hpp`, `pulp/format/vst3_entry.hpp`, `pulp/format/au_v2_entry.hpp`
+> Plugin format adapters — write once, deploy to 9 formats.
 
-Plugin format adapters. `Processor` is the central interface that plugin developers implement. Format adapters wrap it for VST3, AU v2, CLAP, and standalone. `HeadlessHost` enables processing without a DAW for testing and batch work.
+| Format | Status | Notes |
+|--------|--------|-------|
+| VST3 | ✓ Stable | Full parameter sync, state, editor resize |
+| AU v2 | ✓ Stable | macOS only, via AudioUnitSDK |
+| AU v3 | ✓ Stable | macOS + iOS |
+| CLAP | ✓ Stable | First-class with modulation, WebView |
+| LV2 | ✓ Usable | Linux plugin format |
+| AAX | ✓ Usable | Requires developer-supplied SDK |
+| Standalone | ✓ Stable | Desktop app with device selector |
+| WAM | ✓ Experimental | Web Audio Module for browsers |
+| WCLAP | ✓ Experimental | Web CLAP for browsers |
 
-Supports effects, instruments, and MIDI effects. Multi-bus (sidechain) support is available. Transport context (tempo, time signature, position) is passed via `ProcessContext`.
-
-## platform
-
-**Status**: usable
-**Dependencies**: none
-**Headers**: `pulp/platform/platform.hpp`, `pulp/platform/detect.hpp`, `pulp/platform/file_dialog.hpp`, `pulp/platform/popup_menu.hpp`, `pulp/platform/clipboard.hpp`, `pulp/platform/native_handle.hpp`, `pulp/platform/child_process.hpp`
-
-Platform detection, native file dialogs, popup menus, clipboard access, native window handle management, and cross-platform child process execution. The `ChildProcess` class provides blocking and non-blocking subprocess execution with line-by-line output callbacks, timeout, cancellation, and binary discovery via `find_on_path()`. Uses `posix_spawn` on POSIX (sandbox-compatible for AU plugins) and `CreateProcess` on Windows.
+---
 
 ## canvas
 
-**Status**: experimental
-**Dependencies**: runtime
-**Headers**: `pulp/canvas/canvas.hpp`, `pulp/canvas/cg_canvas.hpp`, `pulp/canvas/skia_canvas.hpp`, `pulp/canvas/svg.hpp`, `pulp/canvas/effects.hpp`
+> 2D drawing with GPU acceleration and smart text layout.
 
-2D drawing abstraction with CoreGraphics and Skia backends. Provides SVG rendering support and post-processing effects (blur, shadow, bloom, color adjustment).
+| Feature | Header | What It Does |
+|---------|--------|-------------|
+| Canvas API | `canvas.hpp` | 25+ draw commands — rect, rounded rect, path, arc, text, image |
+| Skia Backend | `src/skia_canvas.cpp` | GPU-accelerated via Skia Graphite (Metal/Vulkan/D3D12) |
+| CoreGraphics | `platform/mac/cg_canvas.mm` | Native macOS/iOS rendering |
+| TextShaper | `text_shaper.hpp` | **Measure once, reflow forever** — PreText-style layout engine |
+| Attributed String | `attributed_string.hpp` | Rich text spans with font, color, weight, decoration |
+| Text Layout | `text_layout.hpp` | Multi-line layout with word wrapping |
+| Rectangle List | `rectangle_list.hpp` | Clip regions with add/subtract/intersect |
+| Image Convolution | `image_convolution.hpp` | Blur, sharpen, edge detect, emboss kernels |
+| SVG | `svg.hpp` | SVG loading and rendering via nanosvg |
+| Effects | `effects.hpp` | Drop shadow, bloom, blur, color adjust |
+| Recording Canvas | `recording_canvas.hpp` | Record draw calls for replay/serialization |
 
-## render
+**Text shaping option:** `PULP_TEXT_SHAPING` (CMake)
+- Default: **ON** when GPU enabled, **OFF** without
+- ON: Uses SkFont/HarfBuzz (bundled in Skia) for real font metrics
+- OFF: Falls back to character-width estimation
+- Same API either way — only measurement accuracy differs
 
-**Status**: experimental
-**Dependencies**: runtime, canvas
-**Headers**: `pulp/render/gpu_surface.hpp`, `pulp/render/skia_surface.hpp`
-
-GPU surface management. Creates Dawn (WebGPU) GPU contexts and Skia Graphite rendering surfaces. Metal backend on macOS.
+---
 
 ## view
 
-**Status**: usable
-**Dependencies**: canvas, events, state
-**Headers**: `pulp/view/view.hpp`, `pulp/view/widgets.hpp`, `pulp/view/theme.hpp`, `pulp/view/script_engine.hpp`, `pulp/view/hot_reload.hpp`, `pulp/view/inspector.hpp`, `pulp/view/animation.hpp`, `pulp/view/frame_clock.hpp`, `pulp/view/audio_bridge.hpp`, `pulp/view/auto_ui.hpp`, `pulp/view/drag_drop.hpp`, `pulp/view/screenshot.hpp`, `pulp/view/window_host.hpp`, `pulp/view/input_events.hpp`, `pulp/view/text_editor.hpp`, `pulp/view/ui_components.hpp`, `pulp/view/modal.hpp`, `pulp/view/param_attachment.hpp`, `pulp/view/app_framework.hpp`, `pulp/view/design_export.hpp`
+> Full widget toolkit with CSS-inspired layout and JS scripting.
 
-Widget system with JS scripting (QuickJS), theme/design tokens, hot-reload, drag-and-drop, animation, screenshot capture, audio visualization bridge, automatic UI generation, and a component inspector. SDL window host available.
+**Widgets** (30+):
 
-Phase 14 additions: rich input events (MouseEvent/KeyEvent with modifiers and pointer IDs), full TextEditor widget (selection, clipboard, undo/redo, numeric/password modes), UI components (ComboBox, TabPanel, ListBox, ScrollView, Tooltip, ProgressBar, CallOutBox), modal overlay, parameter attachment helpers, application framework (KeyMapping, MenuBar, Toolbar, AppSettings), and design token export (JSON, CSS, C++, OKLCH, WGSL). Phase 19: TreeView widget for hierarchical displays (file browsers, preset trees). Animation phase: `FrameClock` shared time source with automatic invalidation, `ValueAnimation` widget-local animator, motion tokens (`motion.duration.*`, `motion.easing.*`) in the theme system, hover events on View, and JS bridge animation/visibility APIs (`animate()`, `setMotionToken()`, `setVisible()`, `removeWidget()`).
+| Widget | What It Does |
+|--------|-------------|
+| Knob | Rotary control with arc, SkSL shaders, Lottie animation |
+| Fader | Linear slider (vertical/horizontal) |
+| Toggle / Checkbox | Boolean on/off controls |
+| TextButton | Push button with text label |
+| ComboBox | Dropdown selector |
+| TextEditor | Full-featured with IME, selection, undo |
+| Label | Static/dynamic text with styling |
+| ListBox | Virtualized scrollable list |
+| TreeView | Hierarchical tree with expand/collapse |
+| TableListBox | Sortable columns with header click-to-sort |
+| Toolbar | Horizontal/vertical with buttons, toggles, separators |
+| TabPanel | Tabbed container |
+| SplitView | Resizable split panes |
+| ScrollView | Scrollable viewport |
+| ConcertinaPanel | Accordion-style collapsible sections |
+| Panel | Styled container with background/border tokens |
+| Meter | Audio level meter with peak hold |
+| MultiMeter | Multi-channel meter (any channel count) |
+| CorrelationMeter | Stereo phase display |
+| XYPad | 2D parameter surface |
+| WaveformView | Audio waveform display |
+| SpectrumView | Frequency spectrum (bars, line, filled) |
+| SpectrogramView | Scrolling time-frequency heatmap |
+| EqCurveView | Parametric EQ frequency response |
+| MidiKeyboard | Piano keyboard with note display |
+| PresetBrowser | Factory/user presets with search |
+| ColorPicker | HSV/RGB color selection |
+| ImageView | Image display from file |
+| CanvasWidget | Custom drawing via Canvas API |
+| CodeEditor | Code editor with line numbers and syntax highlighting |
+| LassoComponent | Rubber-band marquee selection |
+| FileBrowser | Directory navigation with filters |
+| FileTree | Tree-structured filesystem view |
+| SplashScreen | Borderless window with fade animation |
+| LiveConstantEditor | Debug overlay for tweaking numeric constants |
+
+**Layout:** Yoga flexbox + CSS Grid, absolute/fixed positioning, intrinsic sizing.
+
+**Theming:** Token-based design system (`"bg.surface"`, `"control.border"`), contrast-aware, theme presets.
+
+**JS Scripting:** QuickJS (default), JavaScriptCore (Apple), V8 (optional). Hot-reload. Full `WidgetBridge` + `AudioBridge` for parameter access from JS.
+
+**Accessibility:** AccessRole, value/text/table/cell interfaces, VoiceOver (macOS), UIA (Windows), AT-SPI (Linux).
+
+---
 
 ## osc
 
-**Status**: experimental
-**Dependencies**: runtime
-**Headers**: `pulp/osc/osc.hpp`
+> Open Sound Control messaging.
 
-Open Sound Control messaging. Depends on `runtime` for logging and assertions.
+| Feature | Header | What It Does |
+|---------|--------|-------------|
+| OSC Sender | `osc.hpp` | Send messages over UDP |
+| OSC Receiver | `osc.hpp` | Receive messages over UDP |
+| OSC Bundle | `bundle.hpp` | Timetag + nested messages per OSC 1.0 |
+| Address Matching | `bundle.hpp` | Wildcard patterns: `*`, `?`, `[...]`, `{...}` |
+| Argument Types | `osc.hpp` | int, float, string, blob |
+
+---
+
+## render
+
+> GPU surface management.
+
+| Feature | What It Does |
+|---------|-------------|
+| Dawn/WebGPU | Cross-platform GPU abstraction (Metal, Vulkan, D3D12, OpenGL) |
+| Skia Graphite | 2D rendering engine on top of Dawn |
+| GPU Compute | Experimental batch audio processing (>64K elements) |
+
+---
+
+## ship
+
+> Packaging and distribution.
+
+| Feature | What It Does |
+|---------|-------------|
+| Code Signing | macOS (`codesign`) and Windows (`signtool`) |
+| Notarization | macOS notarization workflow |
+| DMG / PKG | macOS installer creation |
+| Windows Installer | NSIS-based installer |
+| Linux Packaging | .deb and .tar.gz |
+| Appcast | Sparkle/WinSparkle update feed generation |
