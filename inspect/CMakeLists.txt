@@ -9,6 +9,8 @@ target_include_directories(pulp-inspect
 
 target_sources(pulp-inspect PRIVATE
     src/inspector_overlay.cpp
+    src/state_inspector.cpp
+    src/console_capture.cpp
 )
 
-target_link_libraries(pulp-inspect PUBLIC pulp::view pulp::render)
+target_link_libraries(pulp-inspect PUBLIC pulp::view pulp::render pulp::state)
