@@ -40,6 +40,16 @@ namespace easing {
 
 using EasingFunction = float(*)(float);
 
+/// Compile-time animation limits for optimization.
+/// Used to bound animation values without runtime checks.
+struct StaticAnimationLimits {
+    float min_value = 0.0f;
+    float max_value = 1.0f;
+    float min_duration = 0.0f;     // 0 = instant allowed
+    float max_duration = 60.0f;    // 60 seconds max
+    bool clamp_value = true;       // Whether to clamp output to [min, max]
+};
+
 // ── Tween ────────────────────────────────────────────────────────────────────
 
 // Animates a float from start to end over a duration
