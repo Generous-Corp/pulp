@@ -2326,6 +2326,60 @@ static std::vector<DoctorCheck> run_doctor_checks(const fs::path& active_root, b
         checks.push_back(c);
     }
 
+    // Package health checks
+    if (!active_root.empty()) {
+        auto lock_path = active_root / "packages.lock.json";
+        auto reg_path = active_root / "tools" / "packages" / "registry.json";
+
+        // Check: lock file freshness
+        {
+            DoctorCheck c{"Package lock file", false, {}, {}};
+            if (!fs::exists(lock_path)) {
+                c.passed = true;
+                c.detail = "No packages installed (OK)";
+            } else if (!fs::exists(reg_path)) {
+                c.passed = false;
+                c.detail = "Lock file exists but registry missing";
+            } else {
+                c.passed = true;
+                // Count packages
+                std::ifstream f(lock_path);
+                std::string content((std::istreambuf_iterator<char>(f)),
+                                     std::istreambuf_iterator<char>());
+                int count = 0;
+                std::string::size_type pos = 0;
+                while ((pos = content.find("\"version\"", pos)) != std::string::npos) {
+                    ++count; ++pos;
+                }
+                c.detail = std::to_string(count) + " package(s) installed";
+            }
+            checks.push_back(c);
+        }
+
+        // Check: package/platform alignment
+        if (fs::exists(lock_path) && fs::exists(reg_path)) {
+            DoctorCheck c{"Package platform alignment", false, {}, {}};
+            auto targets = pulp::cli::pkg::read_project_targets(active_root);
+            auto [reg, err] = pulp::cli::pkg::load_registry(reg_path);
+            auto lock = pulp::cli::pkg::load_lock_file(lock_path);
+            int gaps = 0;
+            for (auto& [id, lp] : lock.packages) {
+                auto it = reg.packages.find(id);
+                if (it == reg.packages.end()) continue;
+                auto unsup = pulp::cli::pkg::unsupported_targets(it->second, targets);
+                gaps += static_cast<int>(unsup.size());
+            }
+            if (gaps == 0) {
+                c.passed = true;
+                c.detail = "All packages support all project targets";
+            } else {
+                c.detail = std::to_string(gaps) + " platform gap(s)";
+                c.fix = "pulp audit --platforms";
+            }
+            checks.push_back(c);
+        }
+    }
+
     return checks;
 }
 

@@ -55,3 +55,45 @@ jobs:
             --title "Package freshness: $(date +%Y-%m-%d) — updates available" \
             --body "$(cat freshness-report.md)" \
             --label "dependencies"
+
+  # Tier 2: Full build validation (monthly or on-demand)
+  build-validation:
+    name: Build validation (${{ matrix.package }}) — ${{ matrix.os }}
+    if: inputs.tier == '2'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest, windows-latest]
+        package:
+          - signalsmith-stretch
+          - signalsmith-dsp
+          - rtneural
+          - cycfi-q
+          - libsamplerate
+          - dr-libs
+          - pffft
+          - daisysp
+          - fontaudio
+          - r8brain-free-src
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure stub
+        run: |
+          cmake -S tools/packages/test-stubs/${{ matrix.package }} \
+                -B build-stub \
+                -DCMAKE_BUILD_TYPE=Release \
+                -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+
+      - name: Build stub
+        run: cmake --build build-stub
+
+      - name: Run stub
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            ./build-stub/Release/test-pkg.exe
+          else
+            ./build-stub/test-pkg
+          fi
+        shell: bash
