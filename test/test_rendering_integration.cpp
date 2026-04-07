@@ -10,6 +10,8 @@
 #include <pulp/view/theme.hpp>
 #include <pulp/state/edit_history.hpp>
 #include <pulp/render/render_pass.hpp>
+#include <pulp/render/draco_decoder.hpp>
+#include <pulp/render/ktx2_decoder.hpp>
 
 using namespace pulp;
 
@@ -284,4 +286,35 @@ TEST_CASE("EditHistory depth limit", "[state][undo]") {
     for (int i = 0; i < 5; ++i)
         history.perform([&, i]{ v = i; }, [&]{ v = 0; });
     REQUIRE(history.undo_count() == 3);
+}
+
+// ── DRACO decoder ───────────────────────────────────────────────────────
+
+TEST_CASE("DRACO decoder returns empty for invalid data", "[render][draco]") {
+    auto result = render::decode_draco(nullptr, 0);
+    REQUIRE_FALSE(result.success);
+
+    uint8_t garbage[] = {0, 1, 2, 3};
+    auto result2 = render::decode_draco(garbage, 4);
+    REQUIRE_FALSE(result2.success);
+}
+
+// ── KTX2 decoder ────────────────────────────────────────────────────────
+
+TEST_CASE("KTX2 decoder validates magic bytes", "[render][ktx2]") {
+    uint8_t not_ktx2[] = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12};
+    auto result = render::decode_ktx2(not_ktx2, 13);
+    REQUIRE_FALSE(result.success);
+}
+
+TEST_CASE("KTX2 optimal_gpu_format returns non-empty", "[render][ktx2]") {
+    auto fmt = render::optimal_gpu_format();
+    REQUIRE_FALSE(fmt.empty());
+}
+
+TEST_CASE("KTX2 availability check", "[render][ktx2]") {
+    // Without libktx linked, should return false
+    // With libktx, should return true
+    auto avail = render::ktx2_available();
+    (void)avail;  // Just verify it doesn't crash
 }
