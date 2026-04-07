@@ -12,6 +12,8 @@ target_sources(pulp-audio PRIVATE
     src/window_enumerator.cpp
     src/format_registry.cpp
     src/codecs.c
+    src/channel_set.cpp
+    src/offline_processor.cpp
 )
 
 target_link_libraries(pulp-audio PUBLIC pulp::runtime)
