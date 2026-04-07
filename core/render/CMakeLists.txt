@@ -14,6 +14,7 @@ target_sources(pulp-render PRIVATE
     src/render_loop.cpp
     src/sdl3_surface.cpp
     src/draco_decoder.cpp
+    src/ktx2_decoder.cpp
 )
 
 # DRACO mesh decompression (optional)
