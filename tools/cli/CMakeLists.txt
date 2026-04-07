@@ -1,5 +1,18 @@
 # pulp CLI tool
-add_executable(pulp-cli pulp_cli.cpp design_binding.cpp)
+add_executable(pulp-cli
+    pulp_cli.cpp
+    cli_common.cpp
+    cmd_build.cpp
+    cmd_create.cpp
+    cmd_design.cpp
+    cmd_doctor.cpp
+    cmd_docs.cpp
+    cmd_misc.cpp
+    cmd_run.cpp
+    cmd_ship.cpp
+    cmd_validate.cpp
+    design_binding.cpp
+)
 set_target_properties(pulp-cli PROPERTIES OUTPUT_NAME "pulp")
 target_compile_features(pulp-cli PRIVATE cxx_std_20)
 target_link_libraries(pulp-cli PRIVATE pulp::runtime)

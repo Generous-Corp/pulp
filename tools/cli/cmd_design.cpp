@@ -1,0 +1,110 @@
+// cmd_design.cpp — pulp design command
+
+#include "cli_common.hpp"
+#include "design_binding.hpp"
+
+#include <iostream>
+
+int cmd_design(const std::vector<std::string>& args) {
+    fs::path cwd_root = find_project_root();
+    fs::path build_dir;
+    fs::path script_path;
+    std::vector<std::string> pass_through;
+    bool build_dir_explicit = false;
+    std::string root_reason = cwd_root.empty() ? "" : "current checkout";
+    std::string build_reason;
+    std::string script_reason;
+
+    for (size_t i = 0; i < args.size(); ++i) {
+        if (args[i] == "--build-dir" && i + 1 < args.size()) {
+            build_dir = fs::absolute(args[++i]);
+            build_dir_explicit = true;
+            build_reason = "explicit --build-dir";
+            continue;
+        }
+        if (args[i] == "--script" && i + 1 < args.size()) {
+            script_path = fs::absolute(args[++i]);
+            script_reason = "explicit --script";
+            continue;
+        }
+        pass_through.push_back(args[i]);
+    }
+
+    if (script_path.empty() && !pass_through.empty() && !pass_through.front().empty()
+        && pass_through.front()[0] != '-') {
+        fs::path candidate = pass_through.front();
+        auto ext = candidate.extension().string();
+        if (ext == ".js" || ext == ".mjs" || ext == ".cjs") {
+            script_path = candidate.is_absolute() ? candidate : fs::absolute(candidate);
+            script_reason = "positional script argument";
+            pass_through.erase(pass_through.begin());
+        }
+    }
+
+    auto binary_build_dir = build_dir_from_current_binary();
+    auto binary_root = cmake_home_directory(binary_build_dir);
+    auto cache_root = cmake_home_directory(build_dir);
+    pulp::cli::DesignBindingInput binding_input;
+    binding_input.cwd_root = cwd_root;
+    binding_input.build_dir = build_dir;
+    binding_input.script_path = script_path;
+    binding_input.script_root = script_path.empty() ? fs::path{} : find_project_root_from(script_path.parent_path());
+    binding_input.build_dir_cache_root = cache_root;
+    binding_input.binary_build_dir = binary_build_dir;
+    binding_input.binary_root = binary_root;
+    binding_input.build_dir_explicit = build_dir_explicit;
+    binding_input.script_explicit = !script_reason.empty() && script_reason != "positional script argument";
+
+    auto binding = pulp::cli::resolve_design_binding(binding_input);
+    if (!binding.ok) {
+        std::cerr << "Error: " << binding.error << "\n";
+        return 1;
+    }
+
+    auto root = binding.root;
+    build_dir = binding.build_dir;
+    script_path = binding.script_path;
+    root_reason = binding.root_reason;
+    build_reason = binding.build_reason;
+    script_reason = binding.script_reason;
+
+    if (!fs::exists(script_path)) {
+        std::cerr << "Error: design tool script not found at " << script_path << "\n";
+        return 1;
+    }
+
+    std::cout << "Design root:  " << root << " (" << root_reason << ")\n";
+    std::cout << "Build dir:    " << build_dir << " (" << build_reason << ")\n";
+    std::cout << "Script:       " << script_path << " (" << script_reason << ")\n";
+
+    int rc = ensure_repo_build_configured(root, build_dir);
+    if (rc != 0) return rc;
+
+    rc = run_with_spinner("cmake --build " + shell_quote(build_dir) + " --target pulp-design-tool",
+                          "Building design tool");
+    if (rc != 0) return rc;
+
+    std::vector<fs::path> candidates = {
+        platform_executable(build_dir / "tools" / "design" / "pulp-design"),
+        platform_executable(build_dir / "examples" / "design-tool" / "pulp-design-tool"),
+    };
+
+    fs::path design_bin;
+    for (const auto& candidate : candidates) {
+        if (fs::exists(candidate)) {
+            design_bin = candidate;
+            break;
+        }
+    }
+
+    if (design_bin.empty()) {
+        std::cerr << "Error: pulp-design-tool not found after build in " << build_dir << "\n";
+        return 1;
+    }
+
+    std::string cmd = shell_quote(design_bin) + " " + shell_quote(script_path);
+    for (const auto& arg : pass_through) {
+        cmd += " " + shell_quote(arg);
+    }
+    return run(cmd);
+}
