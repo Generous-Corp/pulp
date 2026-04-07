@@ -145,9 +145,9 @@ TEST_CASE("ScriptedUiSession reapplies sibling theme.json overrides", "[view][sc
 
     auto initial_bg = root.theme().color("bg.primary");
     REQUIRE(initial_bg.has_value());
-    REQUIRE(initial_bg->r == 0xFF);
-    REQUIRE(initial_bg->g == 0x00);
-    REQUIRE(initial_bg->b == 0x00);
+    REQUIRE(initial_bg->r8() == 0xFF);
+    REQUIRE(initial_bg->g8() == 0x00);
+    REQUIRE(initial_bg->b8() == 0x00);
 
     std::this_thread::sleep_for(std::chrono::milliseconds(300));
     write_text(theme_path, R"({
@@ -163,9 +163,9 @@ TEST_CASE("ScriptedUiSession reapplies sibling theme.json overrides", "[view][sc
 
     auto updated_bg = root.theme().color("bg.primary");
     REQUIRE(updated_bg.has_value());
-    REQUIRE(updated_bg->r == 0x00);
-    REQUIRE(updated_bg->g == 0xFF);
-    REQUIRE(updated_bg->b == 0x00);
+    REQUIRE(updated_bg->r8() == 0x00);
+    REQUIRE(updated_bg->g8() == 0xFF);
+    REQUIRE(updated_bg->b8() == 0x00);
 
     fs::remove_all(temp_dir);
 }
@@ -201,9 +201,9 @@ TEST_CASE("ScriptedUiSession drops stale theme overrides after script reload", "
 
     auto overridden_bg = root.theme().color("bg.primary");
     REQUIRE(overridden_bg.has_value());
-    REQUIRE(overridden_bg->r == 0xFF);
-    REQUIRE(overridden_bg->g == 0x00);
-    REQUIRE(overridden_bg->b == 0x00);
+    REQUIRE(overridden_bg->r8() == 0xFF);
+    REQUIRE(overridden_bg->g8() == 0x00);
+    REQUIRE(overridden_bg->b8() == 0x00);
 
     std::this_thread::sleep_for(std::chrono::milliseconds(300));
     write_text(script_path, "createLabel('status', 'reloaded', '');");

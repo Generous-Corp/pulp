@@ -278,6 +278,11 @@ add_executable(pulp-test-dirty-tracker test_dirty_tracker.cpp)
 target_link_libraries(pulp-test-dirty-tracker PRIVATE pulp::render Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-dirty-tracker)
 
+# Draw batcher tests
+add_executable(pulp-test-draw-batcher test_draw_batcher.cpp)
+target_link_libraries(pulp-test-draw-batcher PRIVATE pulp::render Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-draw-batcher)
+
 # Platform maturity tests (cursor, focus, IME, context menu, accessibility)
 add_executable(pulp-test-platform-maturity test_platform_maturity.cpp)
 target_link_libraries(pulp-test-platform-maturity PRIVATE pulp::view Catch2::Catch2WithMain)
