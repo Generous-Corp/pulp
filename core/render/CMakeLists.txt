@@ -13,7 +13,14 @@ target_sources(pulp-render PRIVATE
     src/skia_surface.cpp
     src/render_loop.cpp
     src/sdl3_surface.cpp
+    src/draco_decoder.cpp
 )
+
+# DRACO mesh decompression (optional)
+if(PULP_HAS_DRACO)
+    target_link_libraries(pulp-render PRIVATE draco)
+    target_compile_definitions(pulp-render PRIVATE PULP_HAS_DRACO)
+endif()
 
 # Apple Metal surface helpers for Dawn rendering
 if(PULP_MACOS OR (APPLE AND NOT PULP_IOS))

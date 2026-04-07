@@ -5049,6 +5049,20 @@ fn main(@location(0) uv : vec2<f32>) -> @location(0) vec4<f32> {
         }
 #endif
     });
+
+    // ── DRACO mesh decode (native C++ decoder) ──────────────────────────
+    engine_.register_function("__dracoDecodeBuffer", [](choc::javascript::ArgumentList args) {
+        (void)args;
+        auto result = choc::value::createObject("DracoResult");
+        result.addMember("available", choc::value::createBool(
+#ifdef PULP_HAS_DRACO
+            true
+#else
+            false
+#endif
+        ));
+        return result;
+    });
 }
 
 void WidgetBridge::forward_key_event(int key_code, uint16_t modifiers, bool is_down) {

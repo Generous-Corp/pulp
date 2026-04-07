@@ -149,6 +149,27 @@ FetchContent_MakeAvailable(SDL3)
 set(PULP_HAS_SDL3 TRUE)
 message(STATUS "Pulp: SDL3 enabled")
 
+# DRACO mesh compression decoder (Apache 2.0) — for glTF compressed geometry
+option(PULP_ENABLE_DRACO "Enable DRACO mesh decompression for glTF" ON)
+if(PULP_ENABLE_DRACO)
+    FetchContent_Declare(
+        draco
+        GIT_REPOSITORY https://github.com/google/draco.git
+        GIT_TAG 1.5.7
+        GIT_SHALLOW TRUE
+    )
+    set(DRACO_TRANSCODER_SUPPORTED OFF CACHE BOOL "" FORCE)
+    set(DRACO_TESTS OFF CACHE BOOL "" FORCE)
+    set(DRACO_JS_GLUE OFF CACHE BOOL "" FORCE)
+    set(DRACO_WASM OFF CACHE BOOL "" FORCE)
+    set(DRACO_UNITY_PLUGIN OFF CACHE BOOL "" FORCE)
+    set(DRACO_MAYA_PLUGIN OFF CACHE BOOL "" FORCE)
+    set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+    FetchContent_MakeAvailable(draco)
+    set(PULP_HAS_DRACO TRUE)
+    message(STATUS "Pulp: DRACO mesh decompression enabled")
+endif()
+
 # VST3 SDK (MIT license) — cloned into external/vst3sdk/
 set(VST3_SDK_DIR "${CMAKE_CURRENT_SOURCE_DIR}/external/vst3sdk")
 if(EXISTS "${VST3_SDK_DIR}/pluginterfaces")
