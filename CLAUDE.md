@@ -492,6 +492,24 @@ Use RepoPrompt to build context efficiently across Pulp's codebase. Key workflow
 
 RepoPrompt is available globally as an MCP server.
 
+### CRITICAL: RepoPrompt explores the local worktree, not origin/main
+
+RepoPrompt's `context_builder`, `file_search`, and `get_code_structure` read files from whatever branch/commit the local worktree has checked out. **If the worktree is on a feature branch or behind main, RepoPrompt will not see code that has been merged to main via PR.**
+
+**Before any audit, assessment, or "what exists in the codebase" query:**
+
+```bash
+# Always verify what's actually on main first
+git fetch origin main
+git log --oneline origin/main | head -10
+
+# For thorough exploration, create a fresh worktree from origin/main
+git worktree add /tmp/pulp-audit origin/main
+# Then point all searches at /tmp/pulp-audit, NOT the main repo dir
+```
+
+**Never trust "file not found" from RepoPrompt without checking which branch you're on.** Multiple worktrees (feature branches, depth-pass branches, etc.) can cause RepoPrompt to explore the wrong code.
+
 ---
 
 ## Commit Standards
