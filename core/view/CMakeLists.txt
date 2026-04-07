@@ -154,6 +154,7 @@ target_sources(pulp-view PRIVATE
     src/eq_curve_view.cpp
     src/midi_keyboard.cpp
     src/color_picker.cpp
+    src/theme_editor.cpp
     src/file_drop_zone.cpp
     src/split_view.cpp
     src/property_list.cpp
