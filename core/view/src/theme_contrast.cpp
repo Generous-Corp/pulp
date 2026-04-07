@@ -39,78 +39,18 @@ bool meets_contrast(Color foreground, Color background, ContrastLevel level) {
     return contrast_ratio(foreground, background) >= min_contrast_for_level(level);
 }
 
-// ── HSL Conversion ──────────────────────────────────────────────────────────
-
-HSL rgb_to_hsl(Color c) {
-    float r = std::clamp(c.r, 0.0f, 1.0f);
-    float g = std::clamp(c.g, 0.0f, 1.0f);
-    float b = std::clamp(c.b, 0.0f, 1.0f);
-
-    float mx = std::max({r, g, b});
-    float mn = std::min({r, g, b});
-    float d = mx - mn;
-
-    HSL hsl;
-    hsl.l = (mx + mn) / 2.0f;
-
-    if (d < 1e-6f) {
-        hsl.h = 0;
-        hsl.s = 0;
-        return hsl;
-    }
-
-    hsl.s = (hsl.l > 0.5f) ? d / (2.0f - mx - mn) : d / (mx + mn);
-
-    if (mx == r)
-        hsl.h = std::fmod((g - b) / d + 6.0f, 6.0f) * 60.0f;
-    else if (mx == g)
-        hsl.h = ((b - r) / d + 2.0f) * 60.0f;
-    else
-        hsl.h = ((r - g) / d + 4.0f) * 60.0f;
-
-    return hsl;
-}
-
-static float hue_to_rgb(float p, float q, float t) {
-    if (t < 0) t += 1.0f;
-    if (t > 1) t -= 1.0f;
-    if (t < 1.0f / 6.0f) return p + (q - p) * 6.0f * t;
-    if (t < 1.0f / 2.0f) return q;
-    if (t < 2.0f / 3.0f) return p + (q - p) * (2.0f / 3.0f - t) * 6.0f;
-    return p;
-}
-
-Color hsl_to_rgb(HSL hsl, float alpha) {
-    if (hsl.s < 1e-6f) {
-        float v = std::clamp(hsl.l, 0.0f, 1.0f);
-        return Color::rgba(v, v, v, alpha);
-    }
-
-    float q = (hsl.l < 0.5f) ? hsl.l * (1.0f + hsl.s) : hsl.l + hsl.s - hsl.l * hsl.s;
-    float p = 2.0f * hsl.l - q;
-    float h = hsl.h / 360.0f;
-
-    float r = hue_to_rgb(p, q, h + 1.0f / 3.0f);
-    float g = hue_to_rgb(p, q, h);
-    float b = hue_to_rgb(p, q, h - 1.0f / 3.0f);
-
-    return Color::rgba(
-        std::clamp(r, 0.0f, 1.0f),
-        std::clamp(g, 0.0f, 1.0f),
-        std::clamp(b, 0.0f, 1.0f),
-        alpha);
-}
+// ── Color utilities (delegate to Color methods) ────────────────────────────
 
 Color shift_hue(Color c, float degrees) {
-    auto hsl = rgb_to_hsl(c);
+    auto hsl = c.to_hsl();
     hsl.h = std::fmod(hsl.h + degrees + 360.0f, 360.0f);
-    return hsl_to_rgb(hsl, c.a);
+    return Color::from_hsl(hsl, c.a);
 }
 
 Color adjust_lightness(Color c, float delta) {
-    auto hsl = rgb_to_hsl(c);
+    auto hsl = c.to_hsl();
     hsl.l = std::clamp(hsl.l + delta, 0.0f, 1.0f);
-    return hsl_to_rgb(hsl, c.a);
+    return Color::from_hsl(hsl, c.a);
 }
 
 Color blend_colors(Color a, Color b, float t) {
