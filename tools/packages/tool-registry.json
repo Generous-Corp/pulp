@@ -1,0 +1,126 @@
+{
+  "schema_version": 1,
+  "tools": {
+    "uv": {
+      "display_name": "UV (Python package manager)",
+      "category": "runtime",
+      "description": "Fast Python package installer and resolver",
+      "upstream_url": "https://github.com/astral-sh/uv",
+      "license": "MIT OR Apache-2.0",
+      "install_method": "binary_download",
+      "binary_sources": {
+        "macOS-arm64": {
+          "url_template": "https://github.com/astral-sh/uv/releases/download/${version}/uv-aarch64-apple-darwin.tar.gz",
+          "archive_format": "tar.gz",
+          "binary_name": "uv"
+        },
+        "Windows-x64": {
+          "url_template": "https://github.com/astral-sh/uv/releases/download/${version}/uv-x86_64-pc-windows-msvc.zip",
+          "archive_format": "zip",
+          "binary_name": "uv.exe"
+        },
+        "Linux-x64": {
+          "url_template": "https://github.com/astral-sh/uv/releases/download/${version}/uv-x86_64-unknown-linux-gnu.tar.gz",
+          "archive_format": "tar.gz",
+          "binary_name": "uv"
+        },
+        "Linux-arm64": {
+          "url_template": "https://github.com/astral-sh/uv/releases/download/${version}/uv-aarch64-unknown-linux-gnu.tar.gz",
+          "archive_format": "tar.gz",
+          "binary_name": "uv"
+        }
+      },
+      "pinned_version": "0.6.14",
+      "requires_tools": [],
+      "managed_by_pulp": true,
+      "bundleable": false
+    },
+    "ffmpeg": {
+      "display_name": "FFmpeg",
+      "category": "binary",
+      "description": "Audio/video transcoding and format conversion",
+      "upstream_url": "https://ffmpeg.org",
+      "license": "LGPL-2.1-or-later",
+      "license_note": "Used as a separate process, not linked. LGPL applies to ffmpeg itself, not to plugins invoking it.",
+      "install_method": "binary_download",
+      "binary_sources": {
+        "macOS-arm64": {
+          "url_template": "https://evermeet.cx/ffmpeg/getrelease/ffmpeg/zip",
+          "archive_format": "zip",
+          "binary_name": "ffmpeg"
+        },
+        "Windows-x64": {
+          "url_template": "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip",
+          "archive_format": "zip",
+          "binary_name": "ffmpeg.exe"
+        },
+        "Linux-x64": {
+          "url_template": "https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz",
+          "archive_format": "tar.xz",
+          "binary_name": "ffmpeg"
+        }
+      },
+      "pinned_version": "7.1",
+      "requires_tools": [],
+      "managed_by_pulp": true,
+      "bundleable": true,
+      "bundle_note": "Can be included in standalone app installers for audio conversion"
+    },
+    "yt-dlp": {
+      "display_name": "yt-dlp",
+      "category": "python_tool",
+      "description": "Audio/video downloader supporting 1000+ sites",
+      "upstream_url": "https://github.com/yt-dlp/yt-dlp",
+      "license": "Unlicense",
+      "install_method": "python_pip",
+      "pip_package": "yt-dlp",
+      "pinned_version": "2025.3.31",
+      "requires_tools": ["uv", "ffmpeg", "deno"],
+      "managed_by_pulp": true,
+      "bundleable": false,
+      "bundle_note": "Development-time only. Plugins should pre-process audio."
+    },
+    "pydub": {
+      "display_name": "pydub",
+      "category": "python_tool",
+      "description": "Simple audio manipulation (trim, convert, effects)",
+      "upstream_url": "https://github.com/jiaaro/pydub",
+      "license": "MIT",
+      "install_method": "python_pip",
+      "pip_package": "pydub",
+      "pinned_version": "0.25.1",
+      "requires_tools": ["uv", "ffmpeg"],
+      "managed_by_pulp": true,
+      "bundleable": false
+    },
+    "deno": {
+      "display_name": "Deno",
+      "category": "runtime",
+      "description": "JavaScript/TypeScript runtime (required by yt-dlp for YouTube)",
+      "upstream_url": "https://deno.land",
+      "license": "MIT",
+      "install_method": "binary_download",
+      "binary_sources": {
+        "macOS-arm64": {
+          "url_template": "https://github.com/denoland/deno/releases/download/v${version}/deno-aarch64-apple-darwin.zip",
+          "archive_format": "zip",
+          "binary_name": "deno"
+        },
+        "Windows-x64": {
+          "url_template": "https://github.com/denoland/deno/releases/download/v${version}/deno-x86_64-pc-windows-msvc.zip",
+          "archive_format": "zip",
+          "binary_name": "deno.exe"
+        },
+        "Linux-x64": {
+          "url_template": "https://github.com/denoland/deno/releases/download/v${version}/deno-x86_64-unknown-linux-gnu.zip",
+          "archive_format": "zip",
+          "binary_name": "deno"
+        }
+      },
+      "pinned_version": "2.2.0",
+      "requires_tools": [],
+      "managed_by_pulp": true,
+      "bundleable": false
+    }
+  }
+}

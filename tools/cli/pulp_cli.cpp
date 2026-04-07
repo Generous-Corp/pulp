@@ -30,6 +30,7 @@
 #include "create_targets.hpp"
 #include "package_commands.hpp"
 #include "package_registry.hpp"
+#include "tool_registry.hpp"
 #include "design_binding.hpp"
 #include <pulp/ship/installer.hpp>
 #include <pulp/view/screenshot.hpp>
@@ -4734,6 +4735,7 @@ int main(int argc, char* argv[]) {
     if (command == "update")   return pulp::cli::pkg::cmd_update(args);
     if (command == "suggest")  return pulp::cli::pkg::cmd_suggest(args);
     if (command == "target")   return pulp::cli::pkg::cmd_target(args);
+    if (command == "tool")     return pulp::cli::tools::cmd_tool(args);
     if (command == "add-component") {
         auto root = find_project_root();
         if (root.empty()) {
