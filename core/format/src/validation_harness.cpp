@@ -2,22 +2,13 @@
 /// Implementation of the deterministic validation harness.
 
 #include <pulp/format/validation_harness.hpp>
+#include <pulp/platform/child_process.hpp>
 #include <pulp/platform/platform.hpp>
 #include <chrono>
 #include <ctime>
 #include <fstream>
 #include <iomanip>
 #include <sstream>
-
-#ifdef _WIN32
-#define PULP_POPEN _popen
-#define PULP_PCLOSE _pclose
-#include <io.h>
-#else
-#define PULP_POPEN popen
-#define PULP_PCLOSE pclose
-#include <sys/wait.h>
-#endif
 
 namespace pulp::format {
 
@@ -269,21 +260,8 @@ ReportEntry ValidationHarness::run_validator(
     }
 
     // Check if the tool is available
-#ifdef _WIN32
-    std::string which_cmd = "where " + tool + " 2>NUL";
-#else
-    std::string which_cmd = "which " + tool + " 2>/dev/null";
-#endif
-    FILE* pipe = PULP_POPEN(which_cmd.c_str(), "r");
-    std::string tool_path;
-    if (pipe) {
-        char buf[256];
-        while (fgets(buf, sizeof(buf), pipe)) tool_path += buf;
-        PULP_PCLOSE(pipe);
-    }
-    // Trim
-    while (!tool_path.empty() && (tool_path.back() == '\n' || tool_path.back() == '\r'))
-        tool_path.pop_back();
+    auto tool_found = pulp::platform::find_on_path(tool);
+    std::string tool_path = tool_found ? tool_found->string() : std::string{};
 
     if (tool_path.empty()) {
         entry.status = ValidationStatus::skip;
@@ -325,37 +303,27 @@ ReportEntry ValidationHarness::run_validator(
         return entry;
     }
 
-    // Run the validator
-    std::string output;
-    pipe = PULP_POPEN(cmd.c_str(), "r");
-    if (pipe) {
-        char buf[1024];
-        while (fgets(buf, sizeof(buf), pipe)) output += buf;
-        int exit_code = PULP_PCLOSE(pipe);
-        // On POSIX, pclose returns waitpid status; extract exit code.
-        // On Windows, _pclose returns the process exit code directly.
-#ifndef _WIN32
-        exit_code = WIFEXITED(exit_code) ? WEXITSTATUS(exit_code) : -1;
-#endif
-
+    // Run the validator via ChildProcess (with 30s timeout)
+    auto result = pulp::platform::exec("/bin/sh", {"-c", cmd}, 30000);
+    {
         auto end = std::chrono::steady_clock::now();
         entry.duration_ms = std::chrono::duration<double, std::milli>(end - start).count();
+        int exit_code = result.exit_code;
+        std::string output = result.stdout_output + result.stderr_output;
+
         entry.status = (exit_code == 0) ? ValidationStatus::pass : ValidationStatus::fail;
-        if (exit_code != 0) {
+        if (result.timed_out) {
+            entry.status = ValidationStatus::fail;
+            entry.error_message = tool + " timed out after 30 seconds";
+        } else if (exit_code != 0) {
             entry.error_message = tool + " exited with code " + std::to_string(exit_code);
         }
 
         // Get tool version
-        std::string version_cmd = tool + " --version 2>&1";
-        std::string version;
-        FILE* vpipe = PULP_POPEN(version_cmd.c_str(), "r");
-        if (vpipe) {
-            char vbuf[256];
-            while (fgets(vbuf, sizeof(vbuf), vpipe)) version += vbuf;
-            PULP_PCLOSE(vpipe);
-            while (!version.empty() && (version.back() == '\n' || version.back() == '\r'))
-                version.pop_back();
-        }
+        auto ver_result = pulp::platform::exec(tool, {"--version"}, 5000);
+        std::string version = ver_result.stdout_output;
+        while (!version.empty() && (version.back() == '\n' || version.back() == '\r'))
+            version.pop_back();
 
         std::ostringstream payload;
         payload << "{"

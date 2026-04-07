@@ -194,7 +194,7 @@ target_include_directories(pulp-view PUBLIC
 
 add_dependencies(pulp-view pulp-view-js-preludes)
 
-target_link_libraries(pulp-view PUBLIC pulp::canvas pulp::events pulp::state pulp::signal)
+target_link_libraries(pulp-view PUBLIC pulp::canvas pulp::events pulp::state pulp::signal pulp::platform)
 
 # JavaScriptCore framework for JSC backend (Apple only)
 if(APPLE)
@@ -202,10 +202,7 @@ if(APPLE)
 endif()
 
 if(WIN32)
-    target_compile_definitions(pulp-view PRIVATE
-        popen=_popen
-        pclose=_pclose
-    )
+    # Note: popen/pclose defines removed — using pulp::platform::ChildProcess instead
 endif()
 
 # Yoga layout engine (MIT)
