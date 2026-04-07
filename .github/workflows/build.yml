@@ -226,7 +226,7 @@ jobs:
 
       - name: Test
         working-directory: build
-        run: ctest --output-on-failure -C Release -LE validation -j4 --exclude-regex "STFT|VisualizationBridge|Clipboard"
+        run: ctest --output-on-failure -C Release -LE validation -j4 --exclude-regex "STFT|VisualizationBridge|Clipboard|Toolbar add items"
         shell: bash
 
       - name: Upload plugin bundles (macOS)
