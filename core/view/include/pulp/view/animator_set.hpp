@@ -17,6 +17,8 @@ public:
     virtual float advance(float dt) = 0;
     virtual bool finished() const = 0;
     virtual void reset() = 0;
+    /// Return time overshoot past the end of this step (0 if not finished).
+    virtual float overshoot() const { return 0.0f; }
 };
 
 /// Single tween step
@@ -32,6 +34,9 @@ public:
     }
     bool finished() const override { return tween_.finished(); }
     void reset() override { tween_.reset(); }
+
+    /// Return time overshoot past the end of this step's tween.
+    float overshoot() const { return tween_.overshoot(); }
 
 private:
     Tween tween_;
@@ -126,10 +131,11 @@ public:
             while (current_ < static_cast<int>(steps_.size()) && dt > 0) {
                 steps_[current_]->advance(dt);
                 if (steps_[current_]->finished()) {
-                    ++current_;
                     // Carry leftover time to the next step
+                    dt = steps_[current_]->overshoot();
+                    ++current_;
                 } else {
-                    break;
+                    dt = 0;
                 }
             }
             return current_ >= static_cast<int>(steps_.size());

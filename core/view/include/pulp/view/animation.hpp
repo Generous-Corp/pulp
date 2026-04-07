@@ -61,6 +61,11 @@ public:
     float current() const { return current_; }
     bool finished() const { return elapsed_ >= duration_; }
 
+    /// Return the time overshoot past the end (positive when finished).
+    float overshoot() const {
+        return elapsed_ > duration_ ? elapsed_ - duration_ : 0.0f;
+    }
+
     void reset() { elapsed_ = 0; current_ = from_; }
 
 private:
