@@ -235,7 +235,7 @@ ProcessResult ChildProcess::run(const std::string& command,
 ProcessResult exec(const std::string& command,
                    const std::vector<std::string>& args,
                    int timeout_ms) {
-    ChildProcess::Options opts;
+    ProcessOptions opts;
     opts.timeout_ms = timeout_ms;
     return ChildProcess::run(command, args, opts);
 }
