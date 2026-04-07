@@ -6488,6 +6488,27 @@ def build_submission_metadata(
         if state.get("error"):
             errors.append(state["error"])
 
+    # Auto-failover unreachable SSH targets to Namespace if configured
+    namespace_failover_targets: list[str] = []
+    failover_cfg = config.get("failover", {})
+    namespace_auto = failover_cfg.get("namespace_auto", True)  # Default enabled
+    ga_defaults = config.get("github_actions", {}).get("defaults", {})
+    default_provider = ga_defaults.get("provider", "github-hosted")
+
+    if errors and namespace_auto and default_provider == "namespace":
+        for name in targets:
+            state = host_preflight.get(name, {})
+            if state.get("status") == "unreachable":
+                namespace_failover_targets.append(name)
+                state["status"] = "namespace-failover"
+                state["warning"] = (
+                    f"{name}: SSH host unreachable — auto-failover to Namespace"
+                )
+                state.pop("error", None)
+                warnings.append(state["warning"])
+        # Clear errors for targets that were failed over
+        errors = [e for e in errors if not any(t in e for t in namespace_failover_targets)]
+
     if errors and not allow_unreachable_targets:
         raise ValueError("; ".join(errors) + ". Pass --allow-unreachable-targets to queue anyway.")
 
@@ -6507,6 +6528,7 @@ def build_submission_metadata(
         "validation": validation,
         "targets": targets,
         "target_hosts": host_preflight,
+        "namespace_failover_targets": namespace_failover_targets,
         "config_drift": config_drift,
         "warnings": warnings,
         "provenance": normalize_provenance(),
@@ -9268,12 +9290,36 @@ def cmd_run(args: argparse.Namespace) -> int:
         return 1
 
     print_submission_metadata(submission)
-    job, created = enqueue_job(branch, sha, priority, targets, "run", validation, submission=submission)
-    print(("Enqueued" if created else "Already queued/running") + f": {summarize_job(job)}")
 
-    result, exit_code = wait_for_job(job["id"], config)
-    if result is not None:
-        print_result(result, Path(load_job(job["id"])["result_file"]))
+    # Auto-dispatch Namespace for unreachable targets
+    failover_targets = submission.get("namespace_failover_targets", [])
+    if failover_targets:
+        ga_cfg = config.get("github_actions", {})
+        repository = ga_cfg.get("repository", "danielraffel/pulp")
+        print(f"\n⚠️  Namespace failover: dispatching {', '.join(failover_targets)} to Namespace")
+        try:
+            gh_workflow_dispatch(repository, "build.yml", branch, {"runner_provider": "namespace"})
+            print(f"  Dispatched Namespace run for {branch}")
+        except Exception as exc:
+            print(f"  Warning: Namespace dispatch failed: {exc}")
+
+    # Only run local targets (skip unreachable ones that were dispatched to Namespace)
+    local_targets = [t for t in targets if t not in failover_targets]
+    if local_targets:
+        job, created = enqueue_job(branch, sha, priority, local_targets, "run", validation, submission=submission)
+        print(("Enqueued" if created else "Already queued/running") + f": {summarize_job(job)}")
+
+        result, exit_code = wait_for_job(job["id"], config)
+        if result is not None:
+            print_result(result, Path(load_job(job["id"])["result_file"]))
+    else:
+        print("All targets dispatched to Namespace — no local work to do.")
+        exit_code = 0
+
+    if failover_targets:
+        print(f"\nNote: {', '.join(failover_targets)} results are on Namespace.")
+        print(f"  Check with: python3 tools/local-ci/local_ci.py cloud status")
+
     notify("CI run complete" + (" - PASSED" if exit_code == 0 else " - FAILED"))
     return exit_code
 

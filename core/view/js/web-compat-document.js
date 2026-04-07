@@ -748,6 +748,28 @@ function __createMockGPUDevice(adapter, descriptor) {
                 ? pipelineDescriptor.layout.bindGroupLayouts : []
         });
     };
+    device.createComputePipeline = function(descriptor) {
+        descriptor = descriptor || {};
+        var compute = descriptor.compute || {};
+        var pipeline = {
+            _objectName: "GPUComputePipeline",
+            label: descriptor.label || "",
+            _compute: compute,
+            _nativeBridge: device._nativeBridge || false,
+            _bindGroupLayouts: descriptor.layout && descriptor.layout.bindGroupLayouts
+                ? descriptor.layout.bindGroupLayouts : []
+        };
+        pipeline.getBindGroupLayout = function(index) {
+            return pipeline._bindGroupLayouts[index] || __createMockGPUBindGroupLayout({});
+        };
+        return pipeline;
+    };
+    device.createComputePipelineAsync = function(descriptor) {
+        return Promise.resolve(device.createComputePipeline(descriptor));
+    };
+    device.createRenderPipelineAsync = function(descriptor) {
+        return Promise.resolve(device.createRenderPipeline(descriptor));
+    };
     device.createCommandEncoder = function(commandDescriptor) { return __createMockGPUCommandEncoder(commandDescriptor || {}); };
     device.destroy = function() { device._destroyed = true; };
     return device;
