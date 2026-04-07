@@ -224,6 +224,7 @@ void View::set_bounds(Rect r) {
 
 void View::add_child(std::unique_ptr<View> child) {
     child->parent_ = this;
+    child->window_host_ = window_host_;  // Propagate host reference
     children_.push_back(std::move(child));
     children_.back()->on_attached();
 }

@@ -1,6 +1,7 @@
 #include <pulp/view/widgets.hpp>
 #include <pulp/view/animation.hpp>
 #include <pulp/view/frame_clock.hpp>
+#include <pulp/view/window_host.hpp>
 #include <choc/text/choc_JSON.h>
 #include <cmath>
 #include <string>
@@ -134,9 +135,13 @@ void Knob::on_mouse_event(const MouseEvent& event) {
 void Knob::on_mouse_down(Point pos) {
     drag_start_y_ = pos.y;
     drag_start_value_ = value_;
-    // Note: mouse relative mode for infinite drag is available via
-    // WindowHost::set_mouse_relative_mode(). The window host integration
-    // requires View → WindowHost back-reference (not yet wired).
+    if (window_host())
+        window_host()->set_mouse_relative_mode(true);
+}
+
+void Knob::on_mouse_up(Point) {
+    if (window_host())
+        window_host()->set_mouse_relative_mode(false);
 }
 
 void Knob::on_mouse_drag(Point pos) {

@@ -129,6 +129,7 @@ public:
     void on_mouse_enter() override;
     void on_mouse_leave() override;
     void on_mouse_down(Point pos) override;
+    void on_mouse_up(Point pos) override;
     void on_mouse_drag(Point pos) override;
 
     // Animation accessors for testing
