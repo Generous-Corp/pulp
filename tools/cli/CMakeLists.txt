@@ -1,9 +1,9 @@
 # pulp CLI tool
 add_executable(pulp-cli pulp_cli.cpp design_binding.cpp create_targets.cpp
-    package_registry.cpp package_commands.cpp tool_registry.cpp)
+    package_registry.cpp package_commands.cpp tool_registry.cpp cmd_inspect.cpp)
 set_target_properties(pulp-cli PROPERTIES OUTPUT_NAME "pulp")
 target_compile_features(pulp-cli PRIVATE cxx_std_20)
-target_link_libraries(pulp-cli PRIVATE pulp::runtime pulp::tool-audio pulp::ship pulp::view pulp::format)
+target_link_libraries(pulp-cli PRIVATE pulp::runtime pulp::tool-audio pulp::ship pulp::view pulp::format pulp::inspect)
 
 # Install into the active prefix so SDK installs do not try to write back into
 # the source checkout.
