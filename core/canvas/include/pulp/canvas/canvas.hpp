@@ -128,7 +128,9 @@ using Paint = std::variant<Color, LinearGradient, RadialGradient>;
 enum class LineCap { butt, round, square };
 enum class LineJoin { miter, round, bevel };
 enum class TextAlign { left, center, right };
+enum class TextVerticalAlign { top, center, bottom, baseline };
 enum class TextBaseline { top, middle, bottom };
+enum class TextDirection { left_to_right, right_to_left, top_to_bottom, bottom_to_top };
 
 // Abstract canvas for 2D drawing
 // Widgets paint against this interface. Concrete backends (Skia, CoreGraphics,

@@ -165,4 +165,52 @@ struct GridStyle {
     static std::vector<GridTrack> parse_template(const std::string& tmpl);
 };
 
+// ── Viewport-Relative Dimension Units ───────────────────────────────────────
+
+enum class DimensionUnit {
+    px,      ///< Absolute pixels
+    percent, ///< Percentage of parent dimension
+    vw,      ///< Percentage of viewport width
+    vh,      ///< Percentage of viewport height
+    vmin,    ///< Percentage of min(viewport width, height)
+    vmax,    ///< Percentage of max(viewport width, height)
+    auto_    ///< Auto-sized (let layout decide)
+};
+
+struct Dimension {
+    float value = 0.0f;
+    DimensionUnit unit = DimensionUnit::px;
+
+    /// Resolve this dimension to pixels given context.
+    float resolve(float parent_size, float viewport_w, float viewport_h,
+                  float dpi_scale = 1.0f) const {
+        switch (unit) {
+            case DimensionUnit::px:      return value * dpi_scale;
+            case DimensionUnit::percent: return value / 100.0f * parent_size;
+            case DimensionUnit::vw:      return value / 100.0f * viewport_w;
+            case DimensionUnit::vh:      return value / 100.0f * viewport_h;
+            case DimensionUnit::vmin:    return value / 100.0f * std::min(viewport_w, viewport_h);
+            case DimensionUnit::vmax:    return value / 100.0f * std::max(viewport_w, viewport_h);
+            case DimensionUnit::auto_:   return 0.0f;  // Caller handles auto
+        }
+        return value;
+    }
+
+    /// Parse a CSS-like dimension string (e.g., "50vw", "10px", "100%").
+    static Dimension parse(const std::string& str) {
+        if (str == "auto") return {0, DimensionUnit::auto_};
+        Dimension d;
+        size_t pos = 0;
+        try { d.value = std::stof(str, &pos); } catch (...) { return d; }
+        auto suffix = str.substr(pos);
+        if (suffix == "vw") d.unit = DimensionUnit::vw;
+        else if (suffix == "vh") d.unit = DimensionUnit::vh;
+        else if (suffix == "vmin") d.unit = DimensionUnit::vmin;
+        else if (suffix == "vmax") d.unit = DimensionUnit::vmax;
+        else if (suffix == "%") d.unit = DimensionUnit::percent;
+        else d.unit = DimensionUnit::px;
+        return d;
+    }
+};
+
 } // namespace pulp::view
