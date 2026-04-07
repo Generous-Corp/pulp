@@ -59,12 +59,16 @@ static sk_sp<SkFontMgr> get_font_manager() {
 }
 
 static SkColor to_sk_color(Color c) {
-    return SkColorSetARGB(c.a, c.r, c.g, c.b);
+    return c.to_argb32();
+}
+
+static SkColor4f to_sk_color4f(Color c) {
+    return {c.r, c.g, c.b, c.a};
 }
 
 static SkPaint make_fill_paint(Color c) {
     SkPaint paint;
-    paint.setColor(to_sk_color(c));
+    paint.setColor4f(to_sk_color4f(c));
     paint.setStyle(SkPaint::kFill_Style);
     paint.setAntiAlias(true);
     return paint;
@@ -72,7 +76,7 @@ static SkPaint make_fill_paint(Color c) {
 
 static SkPaint make_stroke_paint(Color c, float width) {
     SkPaint paint;
-    paint.setColor(to_sk_color(c));
+    paint.setColor4f(to_sk_color4f(c));
     paint.setStyle(SkPaint::kStroke_Style);
     paint.setStrokeWidth(width);
     paint.setAntiAlias(true);
@@ -263,7 +267,7 @@ static void colors_to_skia(const Color* colors, const float* positions, int coun
     sk_colors.resize(static_cast<size_t>(count));
     sk_pos.resize(static_cast<size_t>(count));
     for (int i = 0; i < count; ++i) {
-        sk_colors[static_cast<size_t>(i)] = SkColorSetARGB(colors[i].a, colors[i].r, colors[i].g, colors[i].b);
+        sk_colors[static_cast<size_t>(i)] = colors[i].to_argb32();
         sk_pos[static_cast<size_t>(i)] = positions[i];
     }
 }
@@ -341,7 +345,7 @@ void SkiaCanvas::fill_current_path() {
     if (has_gradient_ && gradient_shader_) {
         paint.setShader(gradient_shader_);
     } else {
-        paint.setColor(SkColorSetARGB(fill_color_.a, fill_color_.r, fill_color_.g, fill_color_.b));
+        paint.setColor4f(to_sk_color4f(fill_color_));
     }
     paint.setBlendMode(blend_mode_);
     canvas_->drawPath(path_builder_->detach(), paint);
@@ -352,9 +356,7 @@ void SkiaCanvas::stroke_current_path() {
     SkPaint paint;
     paint.setAntiAlias(true);
     paint.setStyle(SkPaint::kStroke_Style);
-    paint.setColor(SkColorSetARGB(stroke_color_.r, stroke_color_.g, stroke_color_.b, stroke_color_.a));
-    // Fix: ARGB order
-    paint.setColor(SkColorSetARGB(stroke_color_.a, stroke_color_.r, stroke_color_.g, stroke_color_.b));
+    paint.setColor4f(to_sk_color4f(stroke_color_));
     paint.setStrokeWidth(line_width_);
     paint.setBlendMode(blend_mode_);
     canvas_->drawPath(path_builder_->detach(), paint);
@@ -466,11 +468,11 @@ void SkiaCanvas::draw_sdf_shape(SDFShape shape, float x, float y, float w, float
     builder.uniform("arcStart") = style.arc_start;
     builder.uniform("arcSweep") = style.arc_sweep;
     builder.uniform("fillColor") = SkV4{
-        style.fill_color.r / 255.0f, style.fill_color.g / 255.0f,
-        style.fill_color.b / 255.0f, style.fill_color.a / 255.0f};
+        style.fill_color.r, style.fill_color.g,
+        style.fill_color.b, style.fill_color.a};
     builder.uniform("strokeColor") = SkV4{
-        style.stroke_color.r / 255.0f, style.stroke_color.g / 255.0f,
-        style.stroke_color.b / 255.0f, style.stroke_color.a / 255.0f};
+        style.stroke_color.r, style.stroke_color.g,
+        style.stroke_color.b, style.stroke_color.a};
 
     auto shader = builder.makeShader();
     if (!shader) { Canvas::draw_sdf_shape(shape, x, y, w, h, style); return; }
@@ -504,7 +506,7 @@ bool SkiaCanvas::draw_with_sksl(const std::string& sksl,
         builder.uniform("time") = uniforms.time;
 
     auto toSkV4 = [](Color c) -> SkV4 {
-        return {c.r / 255.0f, c.g / 255.0f, c.b / 255.0f, c.a / 255.0f};
+        return {c.r, c.g, c.b, c.a};
     };
 
     if (effect->findUniform("accentColor"))
@@ -592,7 +594,7 @@ void SkiaCanvas::draw_blurred_backdrop(float x, float y, float w, float h,
 
     // Tint overlay
     SkPaint tintPaint;
-    tintPaint.setColor(SkColorSetARGB(tint.a, tint.r, tint.g, tint.b));
+    tintPaint.setColor4f(to_sk_color4f(tint));
     if (corner_radius > 0) {
         canvas_->drawRRect(SkRRect::MakeRectXY(rect, corner_radius, corner_radius), tintPaint);
     } else {
@@ -722,11 +724,11 @@ void SkiaCanvas::draw_waveform(const float* samples, size_t count,
     builder.uniform("thickness") = style.line_thickness;
     builder.uniform("fillCenter") = style.fill_center;
     builder.uniform("lineColor") = SkV4{
-        style.line_color.r / 255.0f, style.line_color.g / 255.0f,
-        style.line_color.b / 255.0f, style.line_color.a / 255.0f};
+        style.line_color.r, style.line_color.g,
+        style.line_color.b, style.line_color.a};
     builder.uniform("fillColor") = SkV4{
-        style.fill_color.r / 255.0f, style.fill_color.g / 255.0f,
-        style.fill_color.b / 255.0f, style.fill_color.a / 255.0f};
+        style.fill_color.r, style.fill_color.g,
+        style.fill_color.b, style.fill_color.a};
 
     auto shader = builder.makeShader();
     if (!shader) {

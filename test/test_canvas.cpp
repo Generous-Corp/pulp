@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_approx.hpp>
 #include <pulp/canvas/canvas.hpp>
 
 using namespace pulp::canvas;
@@ -74,15 +75,47 @@ TEST_CASE("RecordingCanvas clear", "[canvas]") {
 }
 
 TEST_CASE("Color construction", "[canvas]") {
-    auto c = Color::rgba(128, 64, 32, 200);
-    REQUIRE(c.r == 128);
-    REQUIRE(c.g == 64);
-    REQUIRE(c.b == 32);
-    REQUIRE(c.a == 200);
+    auto c = Color::rgba8(128, 64, 32, 200);
+    REQUIRE(c.r8() == 128);
+    REQUIRE(c.g8() == 64);
+    REQUIRE(c.b8() == 32);
+    REQUIRE(c.a8() == 200);
 
     auto h = Color::hex(0x3B82F6);
-    REQUIRE(h.r == 0x3B);
-    REQUIRE(h.g == 0x82);
-    REQUIRE(h.b == 0xF6);
-    REQUIRE(h.a == 255);
+    REQUIRE(h.r8() == 0x3B);
+    REQUIRE(h.g8() == 0x82);
+    REQUIRE(h.b8() == 0xF6);
+    REQUIRE(h.a8() == 255);
+
+    // Float-based construction
+    auto f = Color::rgba(0.5f, 0.25f, 0.75f, 1.0f);
+    REQUIRE(f.r == Catch::Approx(0.5f));
+    REQUIRE(f.g == Catch::Approx(0.25f));
+    REQUIRE(f.b == Catch::Approx(0.75f));
+    REQUIRE(f.a == Catch::Approx(1.0f));
+
+    // Interpolation
+    auto a = Color::rgba(0.0f, 0.0f, 0.0f);
+    auto b = Color::rgba(1.0f, 1.0f, 1.0f);
+    auto mid = a.interpolate(b, 0.5f);
+    REQUIRE(mid.r == Catch::Approx(0.5f));
+    REQUIRE(mid.g == Catch::Approx(0.5f));
+
+    // HDR intensity
+    auto hdr = Color::rgba(0.5f, 0.5f, 0.5f).with_hdr_intensity(2.0f);
+    REQUIRE(hdr.r == Catch::Approx(1.0f));
+    REQUIRE(hdr.a == Catch::Approx(1.0f));  // alpha unchanged
+
+    // with_alpha
+    auto wa = Color::rgba(1.0f, 0.0f, 0.0f).with_alpha(0.5f);
+    REQUIRE(wa.r == Catch::Approx(1.0f));
+    REQUIRE(wa.a == Catch::Approx(0.5f));
+
+    // ARGB32 round-trip
+    auto orig = Color::rgba8(100, 200, 50, 180);
+    auto rt = Color::from_argb32(orig.to_argb32());
+    REQUIRE(rt.r8() == 100);
+    REQUIRE(rt.g8() == 200);
+    REQUIRE(rt.b8() == 50);
+    REQUIRE(rt.a8() == 180);
 }

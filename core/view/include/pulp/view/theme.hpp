@@ -13,14 +13,14 @@ using Color = canvas::Color;
 
 // Convenience helpers for hex color creation
 inline Color color_from_hex(uint32_t hex) {
-    return Color::rgba(
+    return Color::rgba8(
         static_cast<uint8_t>((hex >> 16) & 0xFF),
         static_cast<uint8_t>((hex >> 8) & 0xFF),
         static_cast<uint8_t>(hex & 0xFF));
 }
 
 inline Color color_from_hex_alpha(uint32_t hex) {
-    return Color::rgba(
+    return Color::rgba8(
         static_cast<uint8_t>((hex >> 24) & 0xFF),
         static_cast<uint8_t>((hex >> 16) & 0xFF),
         static_cast<uint8_t>((hex >> 8) & 0xFF),

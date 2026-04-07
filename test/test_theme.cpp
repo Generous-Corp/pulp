@@ -7,16 +7,16 @@ using Catch::Matchers::WithinAbs;
 
 TEST_CASE("Color from hex", "[view][theme]") {
     auto c = color_from_hex(0xFF8800);
-    REQUIRE(c.r == 0xFF);
-    REQUIRE(c.g == 0x88);
-    REQUIRE(c.b == 0x00);
-    REQUIRE(c.a == 0xFF);
+    REQUIRE(c.r8() == 0xFF);
+    REQUIRE(c.g8() == 0x88);
+    REQUIRE(c.b8() == 0x00);
+    REQUIRE(c.a8() == 0xFF);
 
     auto c2 = color_from_hex_alpha(0xFF880080);
-    REQUIRE(c2.r == 0xFF);
-    REQUIRE(c2.g == 0x88);
-    REQUIRE(c2.b == 0x00);
-    REQUIRE(c2.a == 0x80);
+    REQUIRE(c2.r8() == 0xFF);
+    REQUIRE(c2.g8() == 0x88);
+    REQUIRE(c2.b8() == 0x00);
+    REQUIRE(c2.a8() == 0x80);
 }
 
 TEST_CASE("Theme dark has required tokens", "[view][theme]") {

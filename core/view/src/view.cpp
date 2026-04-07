@@ -57,12 +57,12 @@ void View::paint_all(canvas::Canvas& canvas) {
         float spread = shadow_.spread;
         // Approximate blur with multiple translucent rects at increasing offsets
         int steps = std::max(1, static_cast<int>(blur / 2));
-        uint8_t base_alpha = shadow_.color.a;
+        float base_alpha = shadow_.color.a;
         for (int i = steps; i >= 0; --i) {
             float t = static_cast<float>(i) / static_cast<float>(steps);
             float expand = spread + blur * t;
-            auto alpha = static_cast<uint8_t>(base_alpha * (1.0f - t) * (1.0f - t));
-            canvas.set_fill_color({shadow_.color.r, shadow_.color.g, shadow_.color.b, alpha});
+            float alpha = base_alpha * (1.0f - t) * (1.0f - t);
+            canvas.set_fill_color(Color::rgba(shadow_.color.r, shadow_.color.g, shadow_.color.b, alpha));
             canvas.fill_rounded_rect(-expand + sx, -expand + sy,
                                      bounds_.width + expand * 2,
                                      bounds_.height + expand * 2,

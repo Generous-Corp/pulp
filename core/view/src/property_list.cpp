@@ -43,12 +43,12 @@ float PropertyList::intrinsic_height() const {
 
 void PropertyList::paint(canvas::Canvas& canvas) {
     auto b = local_bounds();
-    auto bg = resolve_color("bg.surface", Color::rgba(30, 30, 40));
-    auto text_color = resolve_color("text.primary", Color::rgba(200, 200, 210));
-    auto label_color = resolve_color("text.secondary", Color::rgba(140, 140, 160));
-    auto cat_color = resolve_color("accent.primary", Color::rgba(100, 160, 255));
-    auto border_c = resolve_color("control.border", Color::rgba(60, 60, 70));
-    auto hover_bg = resolve_color("bg.elevated", Color::rgba(50, 50, 60));
+    auto bg = resolve_color("bg.surface", Color::rgba8(30, 30, 40));
+    auto text_color = resolve_color("text.primary", Color::rgba8(200, 200, 210));
+    auto label_color = resolve_color("text.secondary", Color::rgba8(140, 140, 160));
+    auto cat_color = resolve_color("accent.primary", Color::rgba8(100, 160, 255));
+    auto border_c = resolve_color("control.border", Color::rgba8(60, 60, 70));
+    auto hover_bg = resolve_color("bg.elevated", Color::rgba8(50, 50, 60));
 
     canvas.set_fill_color(bg);
     canvas.fill_rect(b.x, b.y, b.width, b.height);

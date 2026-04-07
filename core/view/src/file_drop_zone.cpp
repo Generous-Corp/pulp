@@ -59,19 +59,19 @@ void FileDropZone::paint(canvas::Canvas& canvas) {
 
     Color bg, border_c, text_c;
     if (drag_over_ && drag_valid_) {
-        auto accent = resolve_color("accent.primary", Color::rgba(80, 140, 255));
-        bg = Color::rgba(accent.r, accent.g, accent.b, 30);
+        auto accent = resolve_color("accent.primary", Color::rgba8(80, 140, 255));
+        bg = Color::rgba8(accent.r, accent.g, accent.b, 30);
         border_c = accent;
         text_c = accent;
     } else if (drag_over_) {
-        auto err = resolve_color("accent.error", Color::rgba(255, 80, 80));
-        bg = Color::rgba(err.r, err.g, err.b, 20);
+        auto err = resolve_color("accent.error", Color::rgba8(255, 80, 80));
+        bg = Color::rgba8(err.r, err.g, err.b, 20);
         border_c = err;
         text_c = err;
     } else {
-        bg = resolve_color("bg.surface", Color::rgba(40, 40, 50));
-        border_c = resolve_color("control.border", Color::rgba(80, 80, 90));
-        text_c = resolve_color("text.secondary", Color::rgba(140, 140, 160));
+        bg = resolve_color("bg.surface", Color::rgba8(40, 40, 50));
+        border_c = resolve_color("control.border", Color::rgba8(80, 80, 90));
+        text_c = resolve_color("text.secondary", Color::rgba8(140, 140, 160));
     }
 
     canvas.set_fill_color(bg);

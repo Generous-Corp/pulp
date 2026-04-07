@@ -72,7 +72,7 @@ TEST_CASE("SkiaSurface offscreen frame cycle", "[render][skia]") {
     REQUIRE(canvas != nullptr);
 
     // Draw something
-    canvas->set_fill_color(pulp::canvas::Color::rgba(255, 0, 0));
+    canvas->set_fill_color(pulp::canvas::Color::rgba8(255, 0, 0));
     canvas->fill_rect(0, 0, 200, 150);
 
     skia->end_frame();  // submit Graphite recording

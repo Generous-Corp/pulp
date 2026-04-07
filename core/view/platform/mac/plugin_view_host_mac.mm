@@ -99,7 +99,7 @@
         static_cast<float>(bounds.size.height));
 
     // Clear with theme background
-    canvas.set_fill_color(pulp::canvas::Color::rgba(30, 30, 46));
+    canvas.set_fill_color(pulp::canvas::Color::rgba8(30, 30, 46));
     canvas.fill_rect(0, 0,
         static_cast<float>(bounds.size.width),
         static_cast<float>(bounds.size.height));
@@ -352,7 +352,7 @@ private:
             root_.set_bounds({0, 0, w, h});
             root_.layout_children();
 
-            canvas->set_fill_color(pulp::canvas::Color::rgba(30, 30, 46));
+            canvas->set_fill_color(pulp::canvas::Color::rgba8(30, 30, 46));
             canvas->fill_rect(0, 0, w, h);
             root_.paint_all(*canvas);
         }

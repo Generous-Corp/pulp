@@ -101,9 +101,9 @@ float EqCurveView::compute_magnitude_at(float freq) const {
 
 void EqCurveView::paint(canvas::Canvas& canvas) {
     auto b = local_bounds();
-    auto bg = resolve_color("bg.surface", Color::rgba(30, 30, 40));
-    auto grid_color = resolve_color("waveform.grid", Color::rgba(60, 60, 80));
-    auto curve_color = resolve_color("accent.primary", Color::rgba(100, 180, 255));
+    auto bg = resolve_color("bg.surface", Color::rgba8(30, 30, 40));
+    auto grid_color = resolve_color("waveform.grid", Color::rgba8(60, 60, 80));
+    auto curve_color = resolve_color("accent.primary", Color::rgba8(100, 180, 255));
 
     // Background
     canvas.set_fill_color(bg);
@@ -169,7 +169,7 @@ void EqCurveView::paint(canvas::Canvas& canvas) {
         auto handle_color = band.color.a > 0 ? band.color : curve_color;
         canvas.set_fill_color(handle_color);
         canvas.fill_circle(hx, hy, radius);
-        canvas.set_stroke_color(Color::rgba(255, 255, 255));
+        canvas.set_stroke_color(Color::rgba8(255, 255, 255));
         canvas.set_line_width(1.5f);
         canvas.stroke_circle(hx, hy, radius);
     }

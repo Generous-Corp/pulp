@@ -1968,24 +1968,24 @@ void WidgetBridge::register_api() {
 
     // CSS Color Level 4 parser — accepts hex, rgb(), rgba(), hsl(), hsla(), named, transparent
     auto parseColor = [](const std::string& str) -> canvas::Color {
-        canvas::Color c{255,255,255,255};
+        canvas::Color c = canvas::Color::rgba(1.0f, 1.0f, 1.0f, 1.0f);
         if (str.empty()) return c;
 
         // transparent
-        if (str == "transparent") return {0, 0, 0, 0};
+        if (str == "transparent") return canvas::Color::rgba(0.0f, 0.0f, 0.0f, 0.0f);
 
         // Hex: #RGB, #RRGGBB, #RRGGBBAA
         if (str[0] == '#') {
             if (str.size() == 4) {  // #RGB → #RRGGBB
-                c.r = static_cast<uint8_t>(std::stoul(std::string(2, str[1]), nullptr, 16));
-                c.g = static_cast<uint8_t>(std::stoul(std::string(2, str[2]), nullptr, 16));
-                c.b = static_cast<uint8_t>(std::stoul(std::string(2, str[3]), nullptr, 16));
+                c.r = static_cast<float>(std::stoul(std::string(2, str[1]), nullptr, 16)) / 255.0f;
+                c.g = static_cast<float>(std::stoul(std::string(2, str[2]), nullptr, 16)) / 255.0f;
+                c.b = static_cast<float>(std::stoul(std::string(2, str[3]), nullptr, 16)) / 255.0f;
             } else if (str.size() >= 7) {
-                c.r = static_cast<uint8_t>(std::stoul(str.substr(1,2), nullptr, 16));
-                c.g = static_cast<uint8_t>(std::stoul(str.substr(3,2), nullptr, 16));
-                c.b = static_cast<uint8_t>(std::stoul(str.substr(5,2), nullptr, 16));
+                c.r = static_cast<float>(std::stoul(str.substr(1,2), nullptr, 16)) / 255.0f;
+                c.g = static_cast<float>(std::stoul(str.substr(3,2), nullptr, 16)) / 255.0f;
+                c.b = static_cast<float>(std::stoul(str.substr(5,2), nullptr, 16)) / 255.0f;
                 if (str.size() >= 9)
-                    c.a = static_cast<uint8_t>(std::stoul(str.substr(7,2), nullptr, 16));
+                    c.a = static_cast<float>(std::stoul(str.substr(7,2), nullptr, 16)) / 255.0f;
             }
             return c;
         }
@@ -2002,10 +2002,10 @@ void WidgetBridge::register_api() {
                 while (!tok.empty() && tok[0] == ' ') tok.erase(0, 1);
                 vals[n++] = std::stof(tok);
             }
-            c.r = static_cast<uint8_t>(std::clamp(vals[0], 0.0f, 255.0f));
-            c.g = static_cast<uint8_t>(std::clamp(vals[1], 0.0f, 255.0f));
-            c.b = static_cast<uint8_t>(std::clamp(vals[2], 0.0f, 255.0f));
-            c.a = static_cast<uint8_t>(std::clamp(vals[3] * 255.0f, 0.0f, 255.0f));
+            c.r = std::clamp(vals[0] / 255.0f, 0.0f, 1.0f);
+            c.g = std::clamp(vals[1] / 255.0f, 0.0f, 1.0f);
+            c.b = std::clamp(vals[2] / 255.0f, 0.0f, 1.0f);
+            c.a = std::clamp(vals[3], 0.0f, 1.0f);  // alpha is already 0-1 in CSS
             return c;
         }
 
@@ -2042,9 +2042,10 @@ void WidgetBridge::register_api() {
                 g = hue2rgb(p, q, h);
                 b = hue2rgb(p, q, h - 1.0f/3);
             }
-            c.r = static_cast<uint8_t>(r * 255); c.g = static_cast<uint8_t>(g * 255);
-            c.b = static_cast<uint8_t>(b * 255);
-            c.a = static_cast<uint8_t>(std::clamp(vals[3] * 255.0f, 0.0f, 255.0f));
+            c.r = std::clamp(r, 0.0f, 1.0f);
+            c.g = std::clamp(g, 0.0f, 1.0f);
+            c.b = std::clamp(b, 0.0f, 1.0f);
+            c.a = std::clamp(vals[3], 0.0f, 1.0f);
             return c;
         }
 
@@ -2087,7 +2088,7 @@ void WidgetBridge::register_api() {
         auto it = named.find(str);
         if (it != named.end()) {
             uint32_t v = it->second;
-            c.r = (v >> 16) & 0xFF; c.g = (v >> 8) & 0xFF; c.b = v & 0xFF; c.a = 255;
+            c = canvas::Color::rgba8((v >> 16) & 0xFF, (v >> 8) & 0xFF, v & 0xFF);
             return c;
         }
 
@@ -2122,7 +2123,7 @@ void WidgetBridge::register_api() {
         auto hex = args.get<std::string>(3, "");
         auto* v = id.empty() ? &root_ : widget(id);
         if (v) {
-            auto c = hex.empty() ? canvas::Color{128,128,128,255} : parseHexColor(hex);
+            auto c = hex.empty() ? canvas::Color::rgba8(128,128,128) : parseHexColor(hex);
             if (side == "top") v->set_border_top(c, width);
             else if (side == "right") v->set_border_right(c, width);
             else if (side == "bottom") v->set_border_bottom(c, width);

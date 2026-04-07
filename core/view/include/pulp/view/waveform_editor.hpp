@@ -18,7 +18,7 @@ struct WaveformRegion {
     int start_sample = 0;    ///< Start sample index
     int end_sample = 0;      ///< End sample index (exclusive)
     std::string label;
-    canvas::Color color = canvas::Color::rgba(65, 105, 225, 80);
+    canvas::Color color = canvas::Color::rgba8(65, 105, 225, 80);
 
     int length() const { return end_sample - start_sample; }
 };
@@ -150,7 +150,7 @@ public:
             float sx = sample_to_x(selection_start(), b);
             float sw = sample_to_x(selection_end(), b) - sx;
             canvas.set_fill_color(resolve_color("selection",
-                canvas::Color::rgba(65, 105, 225, 60)));
+                canvas::Color::rgba8(65, 105, 225, 60)));
             canvas.fill_rect(sx, b.y, sw, b.height);
         }
 
@@ -181,7 +181,7 @@ public:
 
         // Center line
         canvas.set_stroke_color(resolve_color("waveform_center",
-            canvas::Color::rgba(255, 255, 255, 30)));
+            canvas::Color::rgba8(255, 255, 255, 30)));
         canvas.stroke_line(b.x, center_y, b.x + b.width, center_y);
 
         // Playhead

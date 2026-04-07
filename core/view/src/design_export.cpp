@@ -19,10 +19,10 @@ std::string DesignExport::to_json(const Theme& theme) {
         first = false;
         ss << "    \"" << name << "\": \"#"
            << std::hex << std::setfill('0')
-           << std::setw(2) << static_cast<int>(color.r)
-           << std::setw(2) << static_cast<int>(color.g)
-           << std::setw(2) << static_cast<int>(color.b);
-        if (color.a != 255) ss << std::setw(2) << static_cast<int>(color.a);
+           << std::setw(2) << static_cast<int>(color.r8())
+           << std::setw(2) << static_cast<int>(color.g8())
+           << std::setw(2) << static_cast<int>(color.b8());
+        if (color.a8() != 255) ss << std::setw(2) << static_cast<int>(color.a8());
         ss << "\"" << std::dec;
     }
     ss << "\n  },\n";
@@ -60,10 +60,10 @@ std::string DesignExport::to_css(const Theme& theme, const std::string& prefix) 
     for (const auto& [name, color] : theme.colors) {
         ss << "  --" << prefix << "-" << name << ": #"
            << std::hex << std::setfill('0')
-           << std::setw(2) << static_cast<int>(color.r)
-           << std::setw(2) << static_cast<int>(color.g)
-           << std::setw(2) << static_cast<int>(color.b);
-        if (color.a != 255) ss << std::setw(2) << static_cast<int>(color.a);
+           << std::setw(2) << static_cast<int>(color.r8())
+           << std::setw(2) << static_cast<int>(color.g8())
+           << std::setw(2) << static_cast<int>(color.b8());
+        if (color.a8() != 255) ss << std::setw(2) << static_cast<int>(color.a8());
         ss << ";\n" << std::dec;
     }
 
@@ -161,7 +161,7 @@ std::string DesignExport::to_oklch_css(const Theme& theme, const std::string& pr
         rgb_to_oklch(color.r, color.g, color.b, L, C, h);
         ss << "  --" << prefix << "-" << name << ": oklch("
            << L << " " << C << " " << h;
-        if (color.a != 255) ss << " / " << (color.a / 255.0f);
+        if (color.a8() != 255) ss << " / " << (color.a);
         ss << ");\n";
     }
 
@@ -180,9 +180,9 @@ std::string DesignExport::to_wgsl_uniforms(const Theme& theme, const std::string
         for (auto& c : field) if (c == '-') c = '_';
         ss << "  " << field << ": vec4<f32>,  // #"
            << std::hex << std::setfill('0')
-           << std::setw(2) << static_cast<int>(color.r)
-           << std::setw(2) << static_cast<int>(color.g)
-           << std::setw(2) << static_cast<int>(color.b)
+           << std::setw(2) << static_cast<int>(color.r8())
+           << std::setw(2) << static_cast<int>(color.g8())
+           << std::setw(2) << static_cast<int>(color.b8())
            << "\n" << std::dec;
     }
 

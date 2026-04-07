@@ -178,20 +178,20 @@ TEST_CASE("Style: no background by default", "[style][computed]") {
 
 TEST_CASE("Style: set_background_color makes has_background true", "[style][computed]") {
     View v;
-    v.set_background_color(Color::rgba(255, 0, 0));
+    v.set_background_color(Color::rgba8(255, 0, 0));
     REQUIRE(v.has_background_color());
 }
 
 TEST_CASE("Style: clear_background_color resets state", "[style][computed]") {
     View v;
-    v.set_background_color(Color::rgba(255, 0, 0));
+    v.set_background_color(Color::rgba8(255, 0, 0));
     v.clear_background_color();
     REQUIRE_FALSE(v.has_background_color());
 }
 
 TEST_CASE("Style: set_border sets corner_radius", "[style][computed]") {
     View v;
-    v.set_border(Color::rgba(0, 0, 0), 2.0f, 8.0f);
+    v.set_border(Color::rgba8(0, 0, 0), 2.0f, 8.0f);
     REQUIRE(v.corner_radius() == 8.0f);
 }
 
@@ -202,13 +202,13 @@ TEST_CASE("Style: no box_shadow by default", "[style][computed]") {
 
 TEST_CASE("Style: set_box_shadow makes has_box_shadow true", "[style][computed]") {
     View v;
-    v.set_box_shadow(0, 2, 4, 0, Color::rgba(0, 0, 0, 80));
+    v.set_box_shadow(0, 2, 4, 0, Color::rgba8(0, 0, 0, 80));
     REQUIRE(v.has_box_shadow());
 }
 
 TEST_CASE("Style: clear_box_shadow resets state", "[style][computed]") {
     View v;
-    v.set_box_shadow(0, 2, 4, 0, Color::rgba(0, 0, 0, 80));
+    v.set_box_shadow(0, 2, 4, 0, Color::rgba8(0, 0, 0, 80));
     v.clear_box_shadow();
     REQUIRE_FALSE(v.has_box_shadow());
 }

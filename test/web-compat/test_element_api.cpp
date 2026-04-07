@@ -182,7 +182,7 @@ TEST_CASE("Element: createProgress via JS", "[element][api]") {
 TEST_CASE("Element: paint_all generates commands", "[element][paint]") {
     View v;
     v.set_bounds({0, 0, 100, 50});
-    v.set_background_color(Color::rgba(30, 30, 46));
+    v.set_background_color(Color::rgba8(30, 30, 46));
 
     RecordingCanvas rc;
     v.paint_all(rc);
@@ -203,7 +203,7 @@ TEST_CASE("Element: RecordingCanvas clear resets", "[element][paint]") {
     RecordingCanvas rc;
     View v;
     v.set_bounds({0, 0, 100, 50});
-    v.set_background_color(Color::rgba(255, 0, 0));
+    v.set_background_color(Color::rgba8(255, 0, 0));
     v.paint_all(rc);
     REQUIRE(rc.command_count() > 0);
     rc.clear();

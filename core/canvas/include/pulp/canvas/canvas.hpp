@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -11,20 +12,69 @@ namespace pulp::canvas {
 // ── Color ────────────────────────────────────────────────────────────────────
 
 struct Color {
-    uint8_t r = 0, g = 0, b = 0, a = 255;
+    float r = 0.0f, g = 0.0f, b = 0.0f, a = 1.0f;
 
-    static Color rgba(uint8_t r, uint8_t g, uint8_t b, uint8_t a = 255) {
+    /// Construct from float channels [0,1] (>1.0 allowed for HDR)
+    static constexpr Color rgba(float r, float g, float b, float a = 1.0f) {
         return {r, g, b, a};
     }
+
+    /// Construct from 8-bit channels [0,255] — convenience for legacy/hex code
+    static constexpr Color rgba8(uint8_t r, uint8_t g, uint8_t b, uint8_t a = 255) {
+        return {r / 255.0f, g / 255.0f, b / 255.0f, a / 255.0f};
+    }
+
+    /// Construct from hex 0xRRGGBB (alpha = 1.0)
     static Color hex(uint32_t rgb) {
-        return {static_cast<uint8_t>((rgb >> 16) & 0xFF),
-                static_cast<uint8_t>((rgb >> 8) & 0xFF),
-                static_cast<uint8_t>(rgb & 0xFF), 255};
+        return rgba8(static_cast<uint8_t>((rgb >> 16) & 0xFF),
+                     static_cast<uint8_t>((rgb >> 8) & 0xFF),
+                     static_cast<uint8_t>(rgb & 0xFF));
+    }
+
+    /// Interpolate between this color and other by factor t [0,1]
+    Color interpolate(const Color& other, float t) const {
+        return {r + (other.r - r) * t,
+                g + (other.g - g) * t,
+                b + (other.b - b) * t,
+                a + (other.a - a) * t};
+    }
+
+    /// Scale color intensity for HDR (channels can exceed 1.0)
+    Color with_hdr_intensity(float multiplier) const {
+        return {r * multiplier, g * multiplier, b * multiplier, a};
+    }
+
+    /// Return copy with different alpha
+    Color with_alpha(float alpha) const {
+        return {r, g, b, alpha};
+    }
+
+    /// Convert to 8-bit values for serialization/interop
+    uint8_t r8() const { return static_cast<uint8_t>(std::clamp(r, 0.0f, 1.0f) * 255.0f + 0.5f); }
+    uint8_t g8() const { return static_cast<uint8_t>(std::clamp(g, 0.0f, 1.0f) * 255.0f + 0.5f); }
+    uint8_t b8() const { return static_cast<uint8_t>(std::clamp(b, 0.0f, 1.0f) * 255.0f + 0.5f); }
+    uint8_t a8() const { return static_cast<uint8_t>(std::clamp(a, 0.0f, 1.0f) * 255.0f + 0.5f); }
+
+    /// Pack to uint32_t ARGB (clamped to [0,255]) for Skia/platform interop
+    uint32_t to_argb32() const {
+        return (static_cast<uint32_t>(a8()) << 24) |
+               (static_cast<uint32_t>(r8()) << 16) |
+               (static_cast<uint32_t>(g8()) << 8) |
+               static_cast<uint32_t>(b8());
+    }
+
+    /// Unpack from uint32_t ARGB
+    static Color from_argb32(uint32_t argb) {
+        return rgba8(static_cast<uint8_t>((argb >> 16) & 0xFF),
+                     static_cast<uint8_t>((argb >> 8) & 0xFF),
+                     static_cast<uint8_t>(argb & 0xFF),
+                     static_cast<uint8_t>((argb >> 24) & 0xFF));
     }
 
     bool operator==(const Color& other) const {
         return r == other.r && g == other.g && b == other.b && a == other.a;
     }
+    bool operator!=(const Color& other) const { return !(*this == other); }
 };
 
 // ── Paint ────────────────────────────────────────────────────────────────────
@@ -218,8 +268,8 @@ public:
     enum class SDFShape { rect, circle, rounded_rect, arc, diamond };
 
     struct SDFStyle {
-        Color fill_color{100, 255, 100, 255};
-        Color stroke_color{100, 255, 100, 255};
+        Color fill_color = Color::rgba(0.392f, 1.0f, 0.392f);
+        Color stroke_color = Color::rgba(0.392f, 1.0f, 0.392f);
         float stroke_width = 0;       ///< 0 = filled, >0 = stroked
         float corner_radius = 0;      ///< For rounded_rect
         float arc_start = 0;          ///< For arc (radians)
@@ -254,7 +304,7 @@ public:
     /// Call before painting the overlay content.
     virtual void draw_blurred_backdrop(float x, float y, float w, float h,
                                        float blur_radius, float corner_radius = 0,
-                                       Color tint = {0, 0, 0, 80}) {
+                                       Color tint = Color::rgba(0.0f, 0.0f, 0.0f, 0.314f)) {
         // CPU fallback: just draw a semi-transparent rect (no blur)
         set_fill_color(tint);
         fill_rounded_rect(x, y, w, h, corner_radius);
@@ -264,8 +314,8 @@ public:
     /// Draw a waveform using GPU shader (SDF anti-aliased line + fill).
     /// Samples are normalized -1 to 1. Default implementation falls back to polyline.
     struct WaveformStyle {
-        Color line_color{100, 180, 250, 255};
-        Color fill_color{100, 180, 250, 40};
+        Color line_color = Color::rgba(0.392f, 0.706f, 0.980f);
+        Color fill_color = Color::rgba(0.392f, 0.706f, 0.980f, 0.157f);
         float line_thickness = 1.5f;
         bool show_fill = true;
         float fill_center = 0.5f;  ///< 0=top, 0.5=center, 1=bottom
@@ -315,7 +365,7 @@ public:
                                 float x, float y, float w, float h,
                                 const ShaderUniforms& uniforms) {
         // CPU fallback: draw a colored placeholder rect
-        set_fill_color(uniforms.fill_color.a > 0 ? uniforms.fill_color : Color{80, 80, 100, 200});
+        set_fill_color(uniforms.fill_color.a > 0.0f ? uniforms.fill_color : Color::rgba(0.314f, 0.314f, 0.392f, 0.784f));
         fill_rect(x, y, w, h);
         return false; // shader not rendered
     }

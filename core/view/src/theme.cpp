@@ -39,10 +39,10 @@ static Color parse_hex_color(const std::string& hex) {
 
 static std::string color_to_hex(const Color& c) {
     char buf[10];
-    if (c.a == 255)
-        snprintf(buf, sizeof(buf), "#%02x%02x%02x", c.r, c.g, c.b);
+    if (c.a8() == 255)
+        snprintf(buf, sizeof(buf), "#%02x%02x%02x", c.r8(), c.g8(), c.b8());
     else
-        snprintf(buf, sizeof(buf), "#%02x%02x%02x%02x", c.r, c.g, c.b, c.a);
+        snprintf(buf, sizeof(buf), "#%02x%02x%02x%02x", c.r8(), c.g8(), c.b8(), c.a8());
     return buf;
 }
 

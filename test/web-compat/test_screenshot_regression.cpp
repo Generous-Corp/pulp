@@ -15,7 +15,7 @@ TEST_CASE("Regression: render_to_png produces valid PNG", "[screenshot][regressi
     View root;
     root.set_bounds({0, 0, 100, 100});
     root.set_theme(Theme::dark());
-    root.set_background_color(Color::rgba(30, 30, 46));
+    root.set_background_color(Color::rgba8(30, 30, 46));
 
     auto png = render_to_png(root, 100, 100, 1.0f);
     REQUIRE_FALSE(png.empty());
@@ -30,7 +30,7 @@ TEST_CASE("Regression: render_to_png produces valid PNG", "[screenshot][regressi
 TEST_CASE("Regression: render_to_file creates file on disk", "[screenshot][regression]") {
     View root;
     root.set_bounds({0, 0, 100, 100});
-    root.set_background_color(Color::rgba(255, 0, 0));
+    root.set_background_color(Color::rgba8(255, 0, 0));
 
     auto path = std::filesystem::temp_directory_path() / "pulp_regression_test.png";
     bool ok = render_to_file(root, 100, 100, path.string(), 1.0f);
@@ -43,7 +43,7 @@ TEST_CASE("Regression: render_to_file creates file on disk", "[screenshot][regre
 TEST_CASE("Regression: same view renders identically", "[screenshot][regression]") {
     View root;
     root.set_bounds({0, 0, 100, 100});
-    root.set_background_color(Color::rgba(128, 64, 255));
+    root.set_background_color(Color::rgba8(128, 64, 255));
 
     auto a = render_to_png(root, 100, 100, 1.0f);
     auto b = render_to_png(root, 100, 100, 1.0f);
@@ -55,11 +55,11 @@ TEST_CASE("Regression: same view renders identically", "[screenshot][regression]
 TEST_CASE("Regression: different backgrounds produce different images", "[screenshot][regression]") {
     View root_a;
     root_a.set_bounds({0, 0, 100, 100});
-    root_a.set_background_color(Color::rgba(255, 0, 0));
+    root_a.set_background_color(Color::rgba8(255, 0, 0));
 
     View root_b;
     root_b.set_bounds({0, 0, 100, 100});
-    root_b.set_background_color(Color::rgba(0, 0, 255));
+    root_b.set_background_color(Color::rgba8(0, 0, 255));
 
     auto a = render_to_png(root_a, 100, 100, 1.0f);
     auto b = render_to_png(root_b, 100, 100, 1.0f);
@@ -90,7 +90,7 @@ TEST_CASE("Regression: widget rendering is non-empty", "[screenshot][regression]
 TEST_CASE("Regression: scale factor 2x produces larger image data", "[screenshot][regression]") {
     View root;
     root.set_bounds({0, 0, 100, 100});
-    root.set_background_color(Color::rgba(0, 128, 0));
+    root.set_background_color(Color::rgba8(0, 128, 0));
 
     auto png_1x = render_to_png(root, 100, 100, 1.0f);
     auto png_2x = render_to_png(root, 100, 100, 2.0f);

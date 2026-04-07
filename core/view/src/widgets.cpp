@@ -3,7 +3,6 @@
 #include <pulp/view/frame_clock.hpp>
 #include <choc/text/choc_JSON.h>
 #include <cmath>
-#include <fstream>
 #include <string>
 
 namespace pulp::view {
@@ -233,7 +232,7 @@ void Toggle::advance_animations(float dt) {
 void Label::paint(canvas::Canvas& canvas) {
     if (text_.empty()) return;
 
-    auto text_color = resolve_color("text.primary", canvas::Color::rgba(200, 200, 200));
+    auto text_color = resolve_color("text.primary", canvas::Color::rgba8(200, 200, 200));
     canvas.set_fill_color({text_color.r, text_color.g, text_color.b, text_color.a});
     canvas.set_font("Inter", font_size_);
 
@@ -342,23 +341,23 @@ void Knob::paint(canvas::Canvas& canvas) {
         canvas::Canvas::ShaderUniforms u;
         u.value = value_;
         u.time = shader_time;
-        u.accent_color = resolve_color("accent.primary", canvas::Color::rgba(100, 150, 255));
-        u.bg_color = resolve_color("bg.primary", canvas::Color::rgba(30, 30, 46));
-        u.track_color = resolve_color("control.track", canvas::Color::rgba(60, 60, 60));
-        u.fill_color = resolve_color("control.fill", canvas::Color::rgba(100, 150, 255));
-        u.thumb_color = resolve_color("control.thumb", canvas::Color::rgba(220, 220, 220));
+        u.accent_color = resolve_color("accent.primary", canvas::Color::rgba8(100, 150, 255));
+        u.bg_color = resolve_color("bg.primary", canvas::Color::rgba8(30, 30, 46));
+        u.track_color = resolve_color("control.track", canvas::Color::rgba8(60, 60, 60));
+        u.fill_color = resolve_color("control.fill", canvas::Color::rgba8(100, 150, 255));
+        u.thumb_color = resolve_color("control.thumb", canvas::Color::rgba8(220, 220, 220));
         canvas.draw_with_sksl(custom_sksl_, 0, 0, b.width, b.height, u);
         // Fall through to draw labels and value text on top of the shader
     } else if (render_style_ == WidgetRenderStyle::minimal) {
         // ── Minimal/design-preview: simple circle outline (matches design tools) ──
         float full_r = std::min(cx, cy) - 2.0f;
-        auto fill_bg = resolve_color("bg.surface", canvas::Color::rgba(49, 50, 68));
+        auto fill_bg = resolve_color("bg.surface", canvas::Color::rgba8(49, 50, 68));
         canvas.set_fill_color(fill_bg);
         canvas.fill_circle(cx, cy, full_r);
 
         // Use per-widget border color if set via setBorder, otherwise theme color
         auto stroke = has_border()
-            ? border_color() : resolve_color("control.fill", canvas::Color::rgba(100, 150, 255));
+            ? border_color() : resolve_color("control.fill", canvas::Color::rgba8(100, 150, 255));
         canvas.set_stroke_color(stroke);
         canvas.set_line_width(2.5f);
         canvas.stroke_circle(cx, cy, full_r);
@@ -368,15 +367,15 @@ void Knob::paint(canvas::Canvas& canvas) {
         // Hover glow ring (drawn behind everything)
         float glow = hover_glow_.value();
         if (glow > 0.01f) {
-            auto accent = resolve_color("accent.primary", canvas::Color::rgba(100, 150, 255));
-            canvas.set_stroke_color(canvas::Color::rgba(accent.r, accent.g, accent.b,
+            auto accent = resolve_color("accent.primary", canvas::Color::rgba8(100, 150, 255));
+            canvas.set_stroke_color(canvas::Color::rgba8(accent.r, accent.g, accent.b,
                                     static_cast<uint8_t>(40 * glow)));
             canvas.set_line_width(6.0f);
             canvas.stroke_arc(cx, cy, radius + 2.0f, start_angle, end_angle);
         }
 
         // Track (background arc)
-        auto track_color = resolve_color("control.track", canvas::Color::rgba(60, 60, 60));
+        auto track_color = resolve_color("control.track", canvas::Color::rgba8(60, 60, 60));
         canvas.set_stroke_color({track_color.r, track_color.g, track_color.b, track_color.a});
         canvas.set_line_width(3.0f);
         canvas.set_line_cap(canvas::LineCap::round);
@@ -384,7 +383,7 @@ void Knob::paint(canvas::Canvas& canvas) {
 
         // Value arc
         float value_angle = start_angle + value_ * (end_angle - start_angle);
-        auto fill_color = resolve_color("control.fill", canvas::Color::rgba(100, 150, 255));
+        auto fill_color = resolve_color("control.fill", canvas::Color::rgba8(100, 150, 255));
         canvas.set_stroke_color({fill_color.r, fill_color.g, fill_color.b, fill_color.a});
         canvas.stroke_arc(cx, cy, radius, start_angle, value_angle);
 
@@ -393,7 +392,7 @@ void Knob::paint(canvas::Canvas& canvas) {
         float thumb_y = cy + radius * 0.6f * std::sin(value_angle);
         float inner_x = cx + radius * 0.3f * std::cos(value_angle);
         float inner_y = cy + radius * 0.3f * std::sin(value_angle);
-        auto thumb_color = resolve_color("control.thumb", canvas::Color::rgba(220, 220, 220));
+        auto thumb_color = resolve_color("control.thumb", canvas::Color::rgba8(220, 220, 220));
         canvas.set_stroke_color({thumb_color.r, thumb_color.g, thumb_color.b, thumb_color.a});
         canvas.set_line_width(2.0f);
         canvas.stroke_line(inner_x, inner_y, thumb_x, thumb_y);
@@ -401,7 +400,7 @@ void Knob::paint(canvas::Canvas& canvas) {
 
     // Label below (always drawn, even with shader)
     if (!label_.empty()) {
-        auto text_color = resolve_color("text.secondary", canvas::Color::rgba(150, 150, 150));
+        auto text_color = resolve_color("text.secondary", canvas::Color::rgba8(150, 150, 150));
         canvas.set_fill_color({text_color.r, text_color.g, text_color.b, text_color.a});
         canvas.set_font("Inter", 10.0f);
         canvas.set_text_align(canvas::TextAlign::center);
@@ -410,7 +409,7 @@ void Knob::paint(canvas::Canvas& canvas) {
 
     // Value text in center (always drawn, even with shader)
     if (format_) {
-        auto text_color = resolve_color("text.primary", canvas::Color::rgba(200, 200, 200));
+        auto text_color = resolve_color("text.primary", canvas::Color::rgba8(200, 200, 200));
         canvas.set_fill_color({text_color.r, text_color.g, text_color.b, text_color.a});
         canvas.set_font("Inter", 11.0f);
         canvas.set_text_align(canvas::TextAlign::center);
@@ -434,15 +433,15 @@ void Fader::paint(canvas::Canvas& canvas) {
         canvas::Canvas::ShaderUniforms u;
         u.value = value_;
         u.time = shader_time;
-        u.accent_color = resolve_color("accent.primary", canvas::Color::rgba(100, 150, 255));
-        u.bg_color = resolve_color("bg.primary", canvas::Color::rgba(30, 30, 46));
-        u.track_color = resolve_color("control.track", canvas::Color::rgba(60, 60, 60));
-        u.fill_color = resolve_color("control.fill", canvas::Color::rgba(100, 150, 255));
-        u.thumb_color = resolve_color("control.thumb", canvas::Color::rgba(220, 220, 220));
+        u.accent_color = resolve_color("accent.primary", canvas::Color::rgba8(100, 150, 255));
+        u.bg_color = resolve_color("bg.primary", canvas::Color::rgba8(30, 30, 46));
+        u.track_color = resolve_color("control.track", canvas::Color::rgba8(60, 60, 60));
+        u.fill_color = resolve_color("control.fill", canvas::Color::rgba8(100, 150, 255));
+        u.thumb_color = resolve_color("control.thumb", canvas::Color::rgba8(220, 220, 220));
         canvas.draw_with_sksl(custom_sksl_, 0, 0, b.width, b.height, u);
     } else if (render_style_ == WidgetRenderStyle::minimal) {
         // ── Minimal: thin track only, no fill, no thumb (matches design tools) ──
-        auto track_color = resolve_color("control.track", canvas::Color::rgba(69, 71, 90));
+        auto track_color = resolve_color("control.track", canvas::Color::rgba8(69, 71, 90));
         canvas.set_fill_color(track_color);
         float track_thick = vert ? std::min(b.width * 0.4f, 6.0f) : std::min(b.height * 0.4f, 6.0f);
         if (vert) {
@@ -455,7 +454,7 @@ void Fader::paint(canvas::Canvas& canvas) {
     } else {
 
         // Track
-        auto track_color = resolve_color("control.track", canvas::Color::rgba(60, 60, 60));
+        auto track_color = resolve_color("control.track", canvas::Color::rgba8(60, 60, 60));
         canvas.set_fill_color({track_color.r, track_color.g, track_color.b, track_color.a});
 
         float track_thick = 4.0f;
@@ -468,7 +467,7 @@ void Fader::paint(canvas::Canvas& canvas) {
         }
 
         // Fill (value portion)
-        auto fill_color = resolve_color("control.fill", canvas::Color::rgba(100, 150, 255));
+        auto fill_color = resolve_color("control.fill", canvas::Color::rgba8(100, 150, 255));
         canvas.set_fill_color({fill_color.r, fill_color.g, fill_color.b, fill_color.a});
 
         if (vert) {
@@ -482,7 +481,7 @@ void Fader::paint(canvas::Canvas& canvas) {
         }
 
         // Thumb (with hover scale animation)
-        auto thumb_color = resolve_color("control.thumb", canvas::Color::rgba(220, 220, 220));
+        auto thumb_color = resolve_color("control.thumb", canvas::Color::rgba8(220, 220, 220));
         canvas.set_fill_color({thumb_color.r, thumb_color.g, thumb_color.b, thumb_color.a});
 
         float thumb_radius = std::min(track_width * 0.35f, 8.0f) * hover_thumb_scale_.value();
@@ -497,7 +496,7 @@ void Fader::paint(canvas::Canvas& canvas) {
 
     // Label
     if (!label_.empty()) {
-        auto text_color = resolve_color("text.secondary", canvas::Color::rgba(150, 150, 150));
+        auto text_color = resolve_color("text.secondary", canvas::Color::rgba8(150, 150, 150));
         canvas.set_fill_color({text_color.r, text_color.g, text_color.b, text_color.a});
         canvas.set_font("Inter", 10.0f);
         canvas.set_text_align(canvas::TextAlign::center);
@@ -526,35 +525,31 @@ void Toggle::paint(canvas::Canvas& canvas) {
         canvas::Canvas::ShaderUniforms u;
         u.value = on_ ? 1.0f : 0.0f;
         u.time = shader_time;
-        u.accent_color = resolve_color("accent.primary", canvas::Color::rgba(100, 150, 255));
-        u.bg_color = resolve_color("bg.primary", canvas::Color::rgba(30, 30, 46));
-        u.track_color = resolve_color("control.track", canvas::Color::rgba(60, 60, 60));
-        u.fill_color = resolve_color("control.fill", canvas::Color::rgba(100, 150, 255));
-        u.thumb_color = resolve_color("control.thumb", canvas::Color::rgba(220, 220, 220));
+        u.accent_color = resolve_color("accent.primary", canvas::Color::rgba8(100, 150, 255));
+        u.bg_color = resolve_color("bg.primary", canvas::Color::rgba8(30, 30, 46));
+        u.track_color = resolve_color("control.track", canvas::Color::rgba8(60, 60, 60));
+        u.fill_color = resolve_color("control.fill", canvas::Color::rgba8(100, 150, 255));
+        u.thumb_color = resolve_color("control.thumb", canvas::Color::rgba8(220, 220, 220));
         canvas.draw_with_sksl(custom_sksl_, 0, 0, b.width, b.height, u);
     } else {
 
         // Track — blend color based on animated thumb position
         float t = thumb_position_.value();
-        auto on_color = resolve_color("accent.primary", canvas::Color::rgba(100, 150, 255));
-        auto off_color = resolve_color("control.track", canvas::Color::rgba(60, 60, 60));
-        auto bg_color = canvas::Color::rgba(
-            static_cast<uint8_t>(off_color.r + (on_color.r - off_color.r) * t),
-            static_cast<uint8_t>(off_color.g + (on_color.g - off_color.g) * t),
-            static_cast<uint8_t>(off_color.b + (on_color.b - off_color.b) * t),
-            255);
+        auto on_color = resolve_color("accent.primary", canvas::Color::rgba8(100, 150, 255));
+        auto off_color = resolve_color("control.track", canvas::Color::rgba8(60, 60, 60));
+        auto bg_color = off_color.interpolate(on_color, t);
         canvas.set_fill_color(bg_color);
         canvas.fill_rounded_rect(sx, sy, switch_w, switch_h, switch_h * 0.5f);
 
         // Hover highlight on track
         float hov = hover_opacity_.value();
         if (hov > 0.01f) {
-            canvas.set_fill_color(canvas::Color::rgba(255, 255, 255, static_cast<uint8_t>(15 * hov)));
+            canvas.set_fill_color(canvas::Color::rgba8(255, 255, 255, static_cast<uint8_t>(15 * hov)));
             canvas.fill_rounded_rect(sx, sy, switch_w, switch_h, switch_h * 0.5f);
         }
 
         // Thumb circle — position animated between off and on
-        auto thumb_color = resolve_color("control.thumb", canvas::Color::rgba(220, 220, 220));
+        auto thumb_color = resolve_color("control.thumb", canvas::Color::rgba8(220, 220, 220));
         canvas.set_fill_color({thumb_color.r, thumb_color.g, thumb_color.b, thumb_color.a});
         float thumb_r = switch_h * 0.4f;
         float off_x = sx + switch_h * 0.5f;
@@ -565,7 +560,7 @@ void Toggle::paint(canvas::Canvas& canvas) {
 
     // Label
     if (!label_.empty()) {
-        auto text_color = resolve_color("text.secondary", canvas::Color::rgba(150, 150, 150));
+        auto text_color = resolve_color("text.secondary", canvas::Color::rgba8(150, 150, 150));
         canvas.set_fill_color({text_color.r, text_color.g, text_color.b, text_color.a});
         canvas.set_font("Inter", 10.0f);
         canvas.set_text_align(canvas::TextAlign::center);
@@ -584,17 +579,17 @@ void Checkbox::paint(canvas::Canvas& canvas) {
 
     if (checked_) {
         // Filled circle
-        auto fill = resolve_color("control.fill", canvas::Color::rgba(100, 150, 255));
+        auto fill = resolve_color("control.fill", canvas::Color::rgba8(100, 150, 255));
         canvas.set_fill_color(fill);
         canvas.fill_rounded_rect(cx - r, cy - r, r * 2, r * 2, r);
         // Check glyph (simple checkmark using lines)
-        canvas.set_stroke_color(canvas::Color::rgba(30, 30, 40));
+        canvas.set_stroke_color(canvas::Color::rgba8(30, 30, 40));
         canvas.set_line_width(2.0f);
         canvas.stroke_line(cx - r * 0.35f, cy, cx - r * 0.05f, cy + r * 0.3f);
         canvas.stroke_line(cx - r * 0.05f, cy + r * 0.3f, cx + r * 0.4f, cy - r * 0.3f);
     } else {
         // Stroked circle
-        auto border = resolve_color("control.border", canvas::Color::rgba(80, 80, 100));
+        auto border = resolve_color("control.border", canvas::Color::rgba8(80, 80, 100));
         canvas.set_stroke_color(border);
         canvas.set_line_width(1.5f);
         canvas.stroke_rounded_rect(cx - r, cy - r, r * 2, r * 2, r);
@@ -611,9 +606,9 @@ void Checkbox::on_mouse_down(Point) {
 void ToggleButton::paint(canvas::Canvas& canvas) {
     auto b = local_bounds();
 
-    auto bg = on_ ? resolve_color("accent.primary", canvas::Color::rgba(100, 150, 255))
-                  : resolve_color("bg.surface", canvas::Color::rgba(50, 50, 60));
-    auto border = resolve_color("control.border", canvas::Color::rgba(80, 80, 100));
+    auto bg = on_ ? resolve_color("accent.primary", canvas::Color::rgba8(100, 150, 255))
+                  : resolve_color("bg.surface", canvas::Color::rgba8(50, 50, 60));
+    auto border = resolve_color("control.border", canvas::Color::rgba8(80, 80, 100));
 
     canvas.set_fill_color(bg);
     canvas.fill_rounded_rect(0, 0, b.width, b.height, 6);
@@ -624,8 +619,8 @@ void ToggleButton::paint(canvas::Canvas& canvas) {
     }
 
     if (!label_.empty()) {
-        auto text_color = on_ ? canvas::Color::rgba(255, 255, 255)
-                              : resolve_color("text.primary", canvas::Color::rgba(200, 200, 210));
+        auto text_color = on_ ? canvas::Color::rgba8(255, 255, 255)
+                              : resolve_color("text.primary", canvas::Color::rgba8(200, 200, 210));
         canvas.set_fill_color(text_color);
         canvas.set_font("Inter", 13);
         canvas.set_text_align(canvas::TextAlign::center);
@@ -646,7 +641,7 @@ void Icon::paint(canvas::Canvas& canvas) {
     float cy = b.height * 0.5f;
     float s = std::min(b.width, b.height) * 0.35f; // icon scale
 
-    auto color = resolve_color("text.secondary", canvas::Color::rgba(160, 160, 180));
+    auto color = resolve_color("text.secondary", canvas::Color::rgba8(160, 160, 180));
     canvas.set_stroke_color(color);
     canvas.set_line_width(1.5f);
     canvas.set_line_cap(canvas::LineCap::round);
@@ -678,7 +673,7 @@ void Icon::paint(canvas::Canvas& canvas) {
         }
         case Type::send: {
             float plane = std::min(b.width, b.height) * 0.82f;
-            auto paper = canvas::Color::rgba(255, 255, 255, 244);
+            auto paper = canvas::Color::rgba8(255, 255, 255, 244);
             canvas.set_fill_color(paper);
             canvas.begin_path();
             canvas.move_to(cx - plane * 0.42f, cy - plane * 0.10f);
@@ -688,7 +683,7 @@ void Icon::paint(canvas::Canvas& canvas) {
             canvas.close_path();
             canvas.fill_current_path();
 
-            canvas.set_stroke_color(canvas::Color::rgba(255, 255, 255, 210));
+            canvas.set_stroke_color(canvas::Color::rgba8(255, 255, 255, 210));
             canvas.set_line_width(1.15f);
             canvas.stroke_line(cx - plane * 0.02f, cy + plane * 0.10f,
                                cx + plane * 0.14f, cy - plane * 0.02f);
@@ -717,42 +712,20 @@ void ImageView::paint(canvas::Canvas& canvas) {
 
     if (path_.empty()) {
         // Placeholder: gray rect with "IMG" text
-        canvas.set_fill_color(resolve_color("bg.surface", canvas::Color::rgba(50, 50, 60)));
+        canvas.set_fill_color(resolve_color("bg.surface", canvas::Color::rgba8(50, 50, 60)));
         canvas.fill_rounded_rect(0, 0, b.width, b.height, 4);
-        canvas.set_fill_color(resolve_color("text.secondary", canvas::Color::rgba(120, 120, 140)));
+        canvas.set_fill_color(resolve_color("text.secondary", canvas::Color::rgba8(120, 120, 140)));
         canvas.set_font("Inter", 10);
         canvas.set_text_align(canvas::TextAlign::center);
         canvas.fill_text("IMG", b.width * 0.5f, b.height * 0.5f + 3);
         return;
     }
 
-    // Use cached image data if available, otherwise load from file once
-    if (!loaded_ && cached_data_.empty()) {
-        // First paint with this path — read file into cache
-        std::ifstream file(path_, std::ios::binary | std::ios::ate);
-        if (file.is_open()) {
-            auto size = file.tellg();
-            if (size > 0) {
-                cached_data_.resize(static_cast<size_t>(size));
-                file.seekg(0);
-                file.read(reinterpret_cast<char*>(cached_data_.data()),
-                          static_cast<std::streamsize>(size));
-            }
-        }
-    }
-
-    // Draw from cached bytes (avoids re-reading file every frame)
-    if (!cached_data_.empty() &&
-        canvas.draw_image_from_data(cached_data_.data(), cached_data_.size(),
-                                    0, 0, b.width, b.height)) {
-        loaded_ = true;
-        return;
-    }
-
-    // Fallback: show filename as text placeholder
-    canvas.set_fill_color(resolve_color("bg.surface", canvas::Color::rgba(50, 50, 60)));
+    // TODO: Load image via Skia SkData::MakeFromFileName + SkImages::DeferredFromEncodedData
+    // For now render path as text placeholder
+    canvas.set_fill_color(resolve_color("bg.surface", canvas::Color::rgba8(50, 50, 60)));
     canvas.fill_rounded_rect(0, 0, b.width, b.height, 4);
-    canvas.set_fill_color(resolve_color("text.secondary", canvas::Color::rgba(120, 120, 140)));
+    canvas.set_fill_color(resolve_color("text.secondary", canvas::Color::rgba8(120, 120, 140)));
     canvas.set_font("Inter", 9);
     canvas.set_text_align(canvas::TextAlign::center);
 
@@ -782,15 +755,12 @@ void Meter::paint(canvas::Canvas& canvas) {
 
     if (render_style_ == WidgetRenderStyle::minimal) {
         // ── Minimal: gradient bar (green→red) matching design tool appearance ──
-        auto green = resolve_color("accent.success", canvas::Color::rgba(166, 227, 161));
-        auto red = resolve_color("accent.error", canvas::Color::rgba(243, 139, 168));
+        auto green = resolve_color("accent.success", canvas::Color::rgba8(166, 227, 161));
+        auto red = resolve_color("accent.error", canvas::Color::rgba8(243, 139, 168));
         // Simple two-stop vertical gradient approximation
         for (int y = 0; y < static_cast<int>(b.height); ++y) {
             float t = static_cast<float>(y) / b.height;
-            uint8_t r = static_cast<uint8_t>(red.r * t + green.r * (1.0f - t));
-            uint8_t g = static_cast<uint8_t>(red.g * t + green.g * (1.0f - t));
-            uint8_t bl = static_cast<uint8_t>(red.b * t + green.b * (1.0f - t));
-            canvas.set_fill_color(canvas::Color::rgba(r, g, bl));
+            canvas.set_fill_color(green.interpolate(red, t));
             canvas.fill_rect(0, static_cast<float>(y), b.width, 1);
         }
         // Round corners by clipping (approximate with rounded rect overlay)
@@ -798,21 +768,21 @@ void Meter::paint(canvas::Canvas& canvas) {
     }
 
     // Background
-    auto bg = resolve_color("control.track", canvas::Color::rgba(30, 30, 30));
+    auto bg = resolve_color("control.track", canvas::Color::rgba8(30, 30, 30));
     canvas.set_fill_color(bg);
     canvas.fill_rounded_rect(0, 0, b.width, b.height, 2.0f);
 
     float meter_length = vert ? b.height : b.width;
 
     // RMS fill (main body)
-    auto rms_color = resolve_color("accent.success", canvas::Color::rgba(80, 200, 80));
+    auto rms_color = resolve_color("accent.success", canvas::Color::rgba8(80, 200, 80));
     float rms_level = ballistics_.display_rms;
 
     // Color changes at different levels
     if (rms_level > 0.9f)
-        rms_color = resolve_color("accent.error", canvas::Color::rgba(240, 60, 60));
+        rms_color = resolve_color("accent.error", canvas::Color::rgba8(240, 60, 60));
     else if (rms_level > 0.7f)
-        rms_color = resolve_color("accent.warning", canvas::Color::rgba(240, 180, 60));
+        rms_color = resolve_color("accent.warning", canvas::Color::rgba8(240, 180, 60));
 
     canvas.set_fill_color(rms_color);
     float fill = rms_level * meter_length;
@@ -826,7 +796,7 @@ void Meter::paint(canvas::Canvas& canvas) {
     // Peak indicator line
     float peak_level = ballistics_.display_peak;
     if (peak_level > 0.01f) {
-        auto peak_color = resolve_color("control.thumb", canvas::Color::rgba(255, 255, 255));
+        auto peak_color = resolve_color("control.thumb", canvas::Color::rgba8(255, 255, 255));
         canvas.set_stroke_color(peak_color);
         canvas.set_line_width(1.0f);
 
@@ -842,9 +812,9 @@ void Meter::paint(canvas::Canvas& canvas) {
     // Held peak indicator
     float held = ballistics_.held_peak;
     if (held > 0.01f) {
-        auto held_color = canvas::Color::rgba(255, 100, 100);
+        auto held_color = canvas::Color::rgba8(255, 100, 100);
         if (held > 0.9f)
-            held_color = resolve_color("accent.error", canvas::Color::rgba(255, 50, 50));
+            held_color = resolve_color("accent.error", canvas::Color::rgba8(255, 50, 50));
 
         canvas.set_stroke_color(held_color);
         canvas.set_line_width(2.0f);
@@ -865,12 +835,12 @@ void XYPad::paint(canvas::Canvas& canvas) {
     auto b = local_bounds();
 
     // Background
-    auto bg = resolve_color("bg.surface", canvas::Color::rgba(40, 40, 55));
+    auto bg = resolve_color("bg.surface", canvas::Color::rgba8(40, 40, 55));
     canvas.set_fill_color(bg);
     canvas.fill_rounded_rect(0, 0, b.width, b.height, 4.0f);
 
     // Grid lines
-    auto grid = resolve_color("control.border", canvas::Color::rgba(60, 60, 75));
+    auto grid = resolve_color("control.border", canvas::Color::rgba8(60, 60, 75));
     canvas.set_stroke_color(grid);
     canvas.set_line_width(0.5f);
     canvas.stroke_line(b.width * 0.5f, 0, b.width * 0.5f, b.height);
@@ -881,19 +851,19 @@ void XYPad::paint(canvas::Canvas& canvas) {
     float cy = (1.0f - y_) * b.height; // Y is inverted (0=bottom, 1=top)
 
     // Crosshair lines
-    auto hair_color = resolve_color("control.fill", canvas::Color::rgba(100, 150, 255));
+    auto hair_color = resolve_color("control.fill", canvas::Color::rgba8(100, 150, 255));
     canvas.set_stroke_color(hair_color);
     canvas.set_line_width(1.0f);
     canvas.stroke_line(cx, 0, cx, b.height);
     canvas.stroke_line(0, cy, b.width, cy);
 
     // Thumb dot
-    auto thumb = resolve_color("control.thumb", canvas::Color::rgba(220, 220, 220));
+    auto thumb = resolve_color("control.thumb", canvas::Color::rgba8(220, 220, 220));
     canvas.set_fill_color(thumb);
     canvas.fill_circle(cx, cy, 5.0f);
 
     // Labels
-    auto text_color = resolve_color("text.secondary", canvas::Color::rgba(150, 150, 150));
+    auto text_color = resolve_color("text.secondary", canvas::Color::rgba8(150, 150, 150));
     canvas.set_fill_color(text_color);
     canvas.set_font("Inter", 9.0f);
 
@@ -921,21 +891,21 @@ void WaveformView::paint(canvas::Canvas& canvas) {
     auto b = local_bounds();
 
     // Background
-    auto bg = resolve_color("bg.surface", canvas::Color::rgba(30, 30, 40));
+    auto bg = resolve_color("bg.surface", canvas::Color::rgba8(30, 30, 40));
     canvas.set_fill_color(bg);
     canvas.fill_rounded_rect(0, 0, b.width, b.height, 2.0f);
 
     if (samples_.empty()) return;
 
     // Center line
-    auto center_color = resolve_color("waveform.grid", canvas::Color::rgba(50, 50, 60));
+    auto center_color = resolve_color("waveform.grid", canvas::Color::rgba8(50, 50, 60));
     canvas.set_stroke_color(center_color);
     canvas.set_line_width(0.5f);
     float cy = b.height * 0.5f;
     canvas.stroke_line(0, cy, b.width, cy);
 
-    auto wave_color = resolve_color("waveform.line", canvas::Color::rgba(100, 180, 250));
-    auto fill_color = resolve_color("waveform.fill", canvas::Color::rgba(wave_color.r, wave_color.g, wave_color.b, 56));
+    auto wave_color = resolve_color("waveform.line", canvas::Color::rgba8(100, 180, 250));
+    auto fill_color = resolve_color("waveform.fill", canvas::Color::rgba8(wave_color.r, wave_color.g, wave_color.b, 56));
 
     const float half_h = b.height * 0.42f;
     const float step = samples_.size() > 1 ? (b.width / static_cast<float>(samples_.size() - 1)) : b.width;
@@ -976,7 +946,7 @@ void SpectrumView::paint(canvas::Canvas& canvas) {
     auto b = local_bounds();
 
     // Background
-    auto bg = resolve_color("bg.surface", canvas::Color::rgba(25, 25, 35));
+    auto bg = resolve_color("bg.surface", canvas::Color::rgba8(25, 25, 35));
     canvas.set_fill_color(bg);
     canvas.fill_rounded_rect(0, 0, b.width, b.height, 2.0f);
 
@@ -985,7 +955,7 @@ void SpectrumView::paint(canvas::Canvas& canvas) {
     float db_range = max_db_ - min_db_;
     if (db_range <= 0) return;
 
-    auto spectrum_color = resolve_color("waveform.line", canvas::Color::rgba(100, 180, 250));
+    auto spectrum_color = resolve_color("waveform.line", canvas::Color::rgba8(100, 180, 250));
 
     if (style_ == Style::bars) {
         canvas.set_fill_color(spectrum_color);
@@ -1017,7 +987,7 @@ void SpectrumView::paint(canvas::Canvas& canvas) {
 
         // For filled style, also fill below the line
         if (style_ == Style::filled) {
-            auto fill = resolve_color("waveform.fill", canvas::Color::rgba(spectrum_color.r, spectrum_color.g, spectrum_color.b, 60));
+            auto fill = resolve_color("waveform.fill", canvas::Color::rgba8(spectrum_color.r, spectrum_color.g, spectrum_color.b, 60));
             canvas.set_fill_color(fill);
 
             for (size_t i = 0; i < bins_.size(); ++i) {
@@ -1031,7 +1001,7 @@ void SpectrumView::paint(canvas::Canvas& canvas) {
     }
 
     // Frequency grid lines (approximate positions)
-    auto grid = resolve_color("waveform.grid", canvas::Color::rgba(50, 50, 65));
+    auto grid = resolve_color("waveform.grid", canvas::Color::rgba8(50, 50, 65));
     canvas.set_stroke_color(grid);
     canvas.set_line_width(0.5f);
 
@@ -1047,12 +1017,12 @@ void SpectrumView::paint(canvas::Canvas& canvas) {
 
 void Panel::paint(canvas::Canvas& canvas) {
     auto b = local_bounds();
-    auto bg = resolve_color(bg_token_, canvas::Color::rgba(45, 45, 60));
+    auto bg = resolve_color(bg_token_, canvas::Color::rgba8(45, 45, 60));
     canvas.set_fill_color(bg);
     canvas.fill_rounded_rect(0, 0, b.width, b.height, corner_radius_);
 
     if (border_width_ > 0) {
-        auto border = resolve_color(border_token_, canvas::Color::rgba(80, 80, 100));
+        auto border = resolve_color(border_token_, canvas::Color::rgba8(80, 80, 100));
         canvas.set_stroke_color(border);
         canvas.set_line_width(border_width_);
         canvas.stroke_rounded_rect(0, 0, b.width, b.height, corner_radius_);
@@ -1082,7 +1052,7 @@ void SpectrogramView::paint(canvas::Canvas& canvas) {
     auto b = local_bounds();
 
     // Background
-    auto bg = resolve_color("bg.surface", canvas::Color::rgba(10, 10, 15));
+    auto bg = resolve_color("bg.surface", canvas::Color::rgba8(10, 10, 15));
     canvas.set_fill_color(bg);
     canvas.fill_rect(0, 0, b.width, b.height);
 
@@ -1103,7 +1073,7 @@ void SpectrogramView::paint(canvas::Canvas& canvas) {
             auto c = buffer_.pixels()[row * buf_w + src_col];
             // Flip vertically: low freq at bottom
             float y = b.height - (row + 1) * px_h;
-            canvas.set_fill_color(canvas::Color::rgba(c.r, c.g, c.b, c.a));
+            canvas.set_fill_color(canvas::Color::rgba8(c.r, c.g, c.b, c.a));
             canvas.fill_rect(x, y, px_w + 0.5f, px_h + 0.5f);
         }
     }
@@ -1125,7 +1095,7 @@ void MultiMeter::paint(canvas::Canvas& canvas) {
     if (num_ch <= 0) return;
 
     // Background
-    auto bg = resolve_color("control.track", canvas::Color::rgba(30, 30, 30));
+    auto bg = resolve_color("control.track", canvas::Color::rgba8(30, 30, 30));
     canvas.set_fill_color(bg);
     canvas.fill_rounded_rect(0, 0, b.width, b.height, 2.0f);
 
@@ -1158,12 +1128,12 @@ void MultiMeter::paint(canvas::Canvas& canvas) {
         }
 
         // RMS fill
-        auto rms_color = resolve_color("accent.success", canvas::Color::rgba(80, 200, 80));
+        auto rms_color = resolve_color("accent.success", canvas::Color::rgba8(80, 200, 80));
         float rms_level = bc.display_rms;
         if (rms_level > 0.9f)
-            rms_color = resolve_color("accent.error", canvas::Color::rgba(240, 60, 60));
+            rms_color = resolve_color("accent.error", canvas::Color::rgba8(240, 60, 60));
         else if (rms_level > 0.7f)
-            rms_color = resolve_color("accent.warning", canvas::Color::rgba(240, 180, 60));
+            rms_color = resolve_color("accent.warning", canvas::Color::rgba8(240, 180, 60));
 
         canvas.set_fill_color(rms_color);
         float fill = rms_level * meter_length;
@@ -1175,7 +1145,7 @@ void MultiMeter::paint(canvas::Canvas& canvas) {
         // Peak indicator
         float peak_level = bc.display_peak;
         if (peak_level > 0.01f) {
-            canvas.set_stroke_color(canvas::Color::rgba(255, 255, 255));
+            canvas.set_stroke_color(canvas::Color::rgba8(255, 255, 255));
             canvas.set_line_width(1.0f);
             float peak_pos = peak_level * meter_length;
             if (vert) {
@@ -1190,8 +1160,8 @@ void MultiMeter::paint(canvas::Canvas& canvas) {
         float held = bc.held_peak;
         if (held > 0.01f) {
             auto held_color = held > 0.9f
-                ? resolve_color("accent.error", canvas::Color::rgba(255, 50, 50))
-                : canvas::Color::rgba(255, 100, 100);
+                ? resolve_color("accent.error", canvas::Color::rgba8(255, 50, 50))
+                : canvas::Color::rgba8(255, 100, 100);
             canvas.set_stroke_color(held_color);
             canvas.set_line_width(2.0f);
             float held_pos = held * meter_length;
@@ -1205,7 +1175,7 @@ void MultiMeter::paint(canvas::Canvas& canvas) {
 
         // Clip indicator
         if (bc.clip_indicator) {
-            canvas.set_fill_color(resolve_color("accent.error", canvas::Color::rgba(255, 0, 0)));
+            canvas.set_fill_color(resolve_color("accent.error", canvas::Color::rgba8(255, 0, 0)));
             if (vert)
                 canvas.fill_rect(x0, 0, cw, 3.0f);
             else
@@ -1226,19 +1196,19 @@ void CorrelationMeter::paint(canvas::Canvas& canvas) {
     auto b = local_bounds();
 
     // Background
-    auto bg = resolve_color("control.track", canvas::Color::rgba(30, 30, 30));
+    auto bg = resolve_color("control.track", canvas::Color::rgba8(30, 30, 30));
     canvas.set_fill_color(bg);
     canvas.fill_rounded_rect(0, 0, b.width, b.height, 2.0f);
 
     // Center line (0.0 correlation)
     float center_x = b.width * 0.5f;
-    canvas.set_stroke_color(canvas::Color::rgba(80, 80, 80));
+    canvas.set_stroke_color(canvas::Color::rgba8(80, 80, 80));
     canvas.set_line_width(1.0f);
     canvas.stroke_line(center_x, 0, center_x, b.height);
 
     // -1 and +1 labels position markers
     float quarter = b.width * 0.25f;
-    canvas.set_stroke_color(canvas::Color::rgba(50, 50, 50));
+    canvas.set_stroke_color(canvas::Color::rgba8(50, 50, 50));
     canvas.stroke_line(quarter, 0, quarter, b.height);
     canvas.stroke_line(b.width - quarter, 0, b.width - quarter, b.height);
 
@@ -1252,14 +1222,14 @@ void CorrelationMeter::paint(canvas::Canvas& canvas) {
     if (display_correlation_ > 0.0f) {
         // Green to yellow
         float t = display_correlation_;
-        indicator_color = canvas::Color::rgba(
+        indicator_color = canvas::Color::rgba8(
             static_cast<uint8_t>(240 * (1.0f - t)),
             static_cast<uint8_t>(200 + 55 * t),
             static_cast<uint8_t>(60 * (1.0f - t)));
     } else {
         // Yellow to red
         float t = -display_correlation_;
-        indicator_color = canvas::Color::rgba(
+        indicator_color = canvas::Color::rgba8(
             static_cast<uint8_t>(240),
             static_cast<uint8_t>(200 * (1.0f - t)),
             static_cast<uint8_t>(60 * (1.0f - t)));

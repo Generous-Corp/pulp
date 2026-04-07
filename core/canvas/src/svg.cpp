@@ -95,7 +95,7 @@ void SvgImage::render(Canvas& canvas, float x, float y, float w, float h) const 
         // Set fill color
         if (shape->fill.type == NSVG_PAINT_COLOR) {
             uint32_t c = shape->fill.color;
-            canvas.set_fill_color(Color::rgba(
+            canvas.set_fill_color(Color::rgba8(
                 c & 0xFF, (c >> 8) & 0xFF, (c >> 16) & 0xFF,
                 static_cast<uint8_t>(shape->opacity * 255)));
         }
@@ -103,7 +103,7 @@ void SvgImage::render(Canvas& canvas, float x, float y, float w, float h) const 
         // Set stroke
         if (shape->stroke.type == NSVG_PAINT_COLOR) {
             uint32_t c = shape->stroke.color;
-            canvas.set_stroke_color(Color::rgba(
+            canvas.set_stroke_color(Color::rgba8(
                 c & 0xFF, (c >> 8) & 0xFF, (c >> 16) & 0xFF,
                 static_cast<uint8_t>(shape->opacity * 255)));
             canvas.set_line_width(shape->strokeWidth);

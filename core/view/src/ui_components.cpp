@@ -43,9 +43,9 @@ float ComboBox::dropdown_width_hint() const {
 
 void ComboBox::paint(canvas::Canvas& canvas) {
     auto b = local_bounds();
-    auto bg = resolve_color("bg.surface", canvas::Color::rgba(30, 30, 46));
-    auto border_c = resolve_color("control.border", canvas::Color::rgba(80, 80, 100));
-    auto text_c = resolve_color("text.primary", canvas::Color::rgba(220, 220, 230));
+    auto bg = resolve_color("bg.surface", canvas::Color::rgba8(30, 30, 46));
+    auto border_c = resolve_color("control.border", canvas::Color::rgba8(80, 80, 100));
+    auto text_c = resolve_color("text.primary", canvas::Color::rgba8(220, 220, 230));
 
     float base_h = std::min(b.height, 28.0f);
 
@@ -76,7 +76,7 @@ void ComboBox::paint(canvas::Canvas& canvas) {
     // Dropdown arrow
     float ax = b.width - 16;
     float ay = base_h / 2;
-    auto arrow_c = resolve_color("text.secondary", canvas::Color::rgba(150, 150, 170));
+    auto arrow_c = resolve_color("text.secondary", canvas::Color::rgba8(150, 150, 170));
     canvas.set_stroke_color(arrow_c);
     canvas.set_line_width(1.5f);
     canvas.stroke_line(ax - 3, ay - 2, ax, ay + 2);
@@ -100,8 +100,8 @@ void ComboBox::paint(canvas::Canvas& canvas) {
         int sel = selected_;
         int* hover_ptr = &hover_index_;  // live pointer for dynamic hover tracking
         auto items_copy = items_;
-        auto dropdown_bg = resolve_color("bg.elevated", canvas::Color::rgba(45, 45, 60));
-        auto accent_c = resolve_color("accent.primary", canvas::Color::rgba(100, 150, 255));
+        auto dropdown_bg = resolve_color("bg.elevated", canvas::Color::rgba8(45, 45, 60));
+        auto accent_c = resolve_color("accent.primary", canvas::Color::rgba8(100, 150, 255));
         auto border = border_c;
         auto text = text_c;
         canvas.set_font("Inter", 12);
@@ -141,7 +141,7 @@ void ComboBox::paint(canvas::Canvas& canvas) {
                 }
                 // Check glyph only for the selected item
                 if (i == sel) {
-                    auto check_color = (i == hov) ? canvas::Color::rgba(255, 255, 255)
+                    auto check_color = (i == hov) ? canvas::Color::rgba8(255, 255, 255)
                                                   : accent_c;
                     c.set_fill_color(check_color);
                     c.fill_text("\xe2\x9c\x93", abs_x + 6, iy + 16);
@@ -292,10 +292,10 @@ void Tooltip::advance_animations(float dt) {
 void Tooltip::paint(canvas::Canvas& canvas) {
     auto b = local_bounds();
     auto alpha = static_cast<uint8_t>(255 * opacity_.value());
-    canvas.set_fill_color(canvas::Color::rgba(0x33, 0x33, 0x44, alpha));
+    canvas.set_fill_color(canvas::Color::rgba8(0x33, 0x33, 0x44, alpha));
     canvas.fill_rounded_rect(b.x, b.y, b.width, b.height, 4);
     canvas.set_font("system", 11);
-    canvas.set_fill_color(canvas::Color::rgba(0xe0, 0xe0, 0xe0, alpha));
+    canvas.set_fill_color(canvas::Color::rgba8(0xe0, 0xe0, 0xe0, alpha));
     canvas.fill_text(text_, b.x + 6, b.y + 15);
 }
 
@@ -556,7 +556,7 @@ void ScrollView::paint(canvas::Canvas& canvas) {
         float max_scroll = content_size_.height - b.height;
         float bar_y = b.y + (max_scroll > 0 ? (sy / max_scroll) * (b.height - bar_h) : 0);
         auto alpha = static_cast<uint8_t>(255 * opacity * 0.4f);
-        canvas.set_fill_color(canvas::Color::rgba(255, 255, 255, alpha));
+        canvas.set_fill_color(canvas::Color::rgba8(255, 255, 255, alpha));
         canvas.fill_rounded_rect(b.x + b.width - width - 2, bar_y, width, bar_h, width * 0.5f);
     }
 
@@ -567,7 +567,7 @@ void ScrollView::paint(canvas::Canvas& canvas) {
         float max_scroll = content_size_.width - b.width;
         float bar_x = b.x + (max_scroll > 0 ? (sx / max_scroll) * (b.width - bar_w) : 0);
         auto alpha = static_cast<uint8_t>(255 * opacity * 0.4f);
-        canvas.set_fill_color(canvas::Color::rgba(255, 255, 255, alpha));
+        canvas.set_fill_color(canvas::Color::rgba8(255, 255, 255, alpha));
         canvas.fill_rounded_rect(bar_x, b.y + b.height - width - 2, bar_w, width, width * 0.5f);
     }
 }
@@ -765,7 +765,7 @@ void ListBox::paint(canvas::Canvas& canvas) {
         float ratio = b.height / total_h;
         float bar_h = b.height * ratio;
         float bar_y = b.y + (scroll_offset_ / total_h) * b.height;
-        canvas.set_fill_color(canvas::Color::rgba(255, 255, 255, 40));
+        canvas.set_fill_color(canvas::Color::rgba8(255, 255, 255, 40));
         canvas.fill_rounded_rect(b.x + b.width - 6, bar_y, 4, bar_h, 2);
     }
 }

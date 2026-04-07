@@ -43,10 +43,10 @@ int Breadcrumb::item_at_position(Point pos) const {
 
 void Breadcrumb::paint(canvas::Canvas& canvas) {
     auto b = local_bounds();
-    auto bg = resolve_color("bg.surface", Color::rgba(40, 40, 50));
-    auto text_color = resolve_color("text.secondary", Color::rgba(140, 140, 160));
-    auto active_color = resolve_color("text.primary", Color::rgba(220, 220, 230));
-    auto sep_color = resolve_color("text.disabled", Color::rgba(80, 80, 100));
+    auto bg = resolve_color("bg.surface", Color::rgba8(40, 40, 50));
+    auto text_color = resolve_color("text.secondary", Color::rgba8(140, 140, 160));
+    auto active_color = resolve_color("text.primary", Color::rgba8(220, 220, 230));
+    auto sep_color = resolve_color("text.disabled", Color::rgba8(80, 80, 100));
 
     canvas.set_fill_color(bg);
     canvas.fill_rounded_rect(b.x, b.y, b.width, b.height, 4.0f);

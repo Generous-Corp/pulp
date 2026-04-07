@@ -350,7 +350,7 @@ void TextEditor::paint(canvas::Canvas& canvas) {
     auto stroke = has_border()
         ? border_color()
         : (has_focus()
-            ? resolve_color("accent.primary", canvas::Color::rgba(140, 120, 255, 255))
+            ? resolve_color("accent.primary", canvas::Color::rgba8(140, 120, 255, 255))
             : resolve_color("control.border",
                             resolve_color("border", canvas::Color::hex(0x3a3a5a))));
     float stroke_width = has_border() ? border_width() : (has_focus() ? 2.0f : 1.0f);
@@ -505,7 +505,7 @@ void TextEditor::paint(canvas::Canvas& canvas) {
     float text_x = text_inner_x - scroll_offset_;
     auto text_primary = resolve_color("text.primary", canvas::Color::hex(0xe0e0e0));
     auto text_secondary = resolve_color("text.secondary", canvas::Color::hex(0x808090));
-    auto selection_fill = resolve_color("accent.primary", canvas::Color::rgba(65, 105, 225, 255));
+    auto selection_fill = resolve_color("accent.primary", canvas::Color::rgba8(65, 105, 225, 255));
     selection_fill.a = 168;
     auto selected_text_color = resolve_color("bg.primary", bg_color);
 

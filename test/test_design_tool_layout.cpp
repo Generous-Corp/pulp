@@ -683,25 +683,25 @@ TEST_CASE("Design tool: waveform and spectrum previews render populated data", "
     waveform->paint(themed_waveform_canvas);
     REQUIRE(has_canvas_color(themed_waveform_canvas,
                              pulp::canvas::DrawCommand::Type::set_stroke_color,
-                             pulp::canvas::Color::rgba(127, 209, 255)));
+                             pulp::canvas::Color::rgba8(127, 209, 255)));
     REQUIRE(has_canvas_color(themed_waveform_canvas,
                              pulp::canvas::DrawCommand::Type::set_fill_color,
-                             pulp::canvas::Color::rgba(51, 85, 119, 136)));
+                             pulp::canvas::Color::rgba8(51, 85, 119, 136)));
     REQUIRE(has_canvas_color(themed_waveform_canvas,
                              pulp::canvas::DrawCommand::Type::set_stroke_color,
-                             pulp::canvas::Color::rgba(51, 68, 85)));
+                             pulp::canvas::Color::rgba8(51, 68, 85)));
 
     pulp::canvas::RecordingCanvas themed_spectrum_canvas;
     spectrum->paint(themed_spectrum_canvas);
     REQUIRE(has_canvas_color(themed_spectrum_canvas,
                              pulp::canvas::DrawCommand::Type::set_stroke_color,
-                             pulp::canvas::Color::rgba(127, 209, 255)));
+                             pulp::canvas::Color::rgba8(127, 209, 255)));
     REQUIRE(has_canvas_color(themed_spectrum_canvas,
                              pulp::canvas::DrawCommand::Type::set_fill_color,
-                             pulp::canvas::Color::rgba(51, 85, 119, 136)));
+                             pulp::canvas::Color::rgba8(51, 85, 119, 136)));
     REQUIRE(has_canvas_color(themed_spectrum_canvas,
                              pulp::canvas::DrawCommand::Type::set_stroke_color,
-                             pulp::canvas::Color::rgba(51, 68, 85)));
+                             pulp::canvas::Color::rgba8(51, 68, 85)));
 }
 
 TEST_CASE("Design tool: layout preview uses loading spinner and interactive tabs", "[design-tool]") {

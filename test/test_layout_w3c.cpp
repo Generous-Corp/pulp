@@ -180,7 +180,7 @@ TEST_CASE("View: set_opacity clamps to 0-1", "[view][w3c]") {
 TEST_CASE("View: background color", "[view][w3c]") {
     View v;
     REQUIRE_FALSE(v.has_background_color());
-    v.set_background_color(Color::rgba(255, 0, 0));
+    v.set_background_color(Color::rgba8(255, 0, 0));
     REQUIRE(v.has_background_color());
     v.clear_background_color();
     REQUIRE_FALSE(v.has_background_color());
@@ -188,7 +188,7 @@ TEST_CASE("View: background color", "[view][w3c]") {
 
 TEST_CASE("View: border", "[view][w3c]") {
     View v;
-    v.set_border(Color::rgba(0, 255, 0), 2.0f, 8.0f);
+    v.set_border(Color::rgba8(0, 255, 0), 2.0f, 8.0f);
     REQUIRE(v.corner_radius() == 8.0f);
 }
 
@@ -354,8 +354,8 @@ TEST_CASE("View: paint_all with background renders without crash", "[view][w3c]"
     RecordingCanvas rc;
     View v;
     v.set_bounds({0, 0, 100, 50});
-    v.set_background_color(Color::rgba(30, 30, 46));
-    v.set_border(Color::rgba(80, 80, 100), 1.0f, 4.0f);
+    v.set_background_color(Color::rgba8(30, 30, 46));
+    v.set_border(Color::rgba8(80, 80, 100), 1.0f, 4.0f);
     v.set_opacity(0.8f);
     v.paint_all(rc);
     REQUIRE(rc.commands().size() > 0);

@@ -91,11 +91,11 @@ public:
         float top_y = h * 0.08f;                    // 8% top margin
 
         // Background
-        c.set_fill_color(Color::rgba(22, 22, 35));
+        c.set_fill_color(Color::rgba8(22, 22, 35));
         c.fill_rect(0, 0, w, h);
 
         // Title
-        c.set_fill_color(Color::rgba(200, 200, 220));
+        c.set_fill_color(Color::rgba8(200, 200, 220));
         c.fill_text("GPU Modulation Matrix", w * 0.3f, h * 0.04f);
 
         // FPS counter
@@ -108,17 +108,17 @@ public:
         }
         char fps_buf[32];
         snprintf(fps_buf, sizeof(fps_buf), "%.0f FPS", fps_);
-        c.set_fill_color(Color::rgba(100, 255, 100));
+        c.set_fill_color(Color::rgba8(100, 255, 100));
         c.fill_text(fps_buf, w - 80.0f, 30.0f);
 
         // Cable count
         char cable_buf[32];
         snprintf(cable_buf, sizeof(cable_buf), "%zu cables", connections_.size());
-        c.set_fill_color(Color::rgba(180, 180, 200));
+        c.set_fill_color(Color::rgba8(180, 180, 200));
         c.fill_text(cable_buf, w - 80.0f, 14.0f);
 
         // Source column
-        c.set_fill_color(Color::rgba(40, 40, 60));
+        c.set_fill_color(Color::rgba8(40, 40, 60));
         c.fill_rect(left_x, top_y, col_w, row_h * sources.size() + 10.0f);
 
         for (size_t i = 0; i < sources.size(); ++i) {
@@ -126,38 +126,38 @@ public:
             bool hovered = (hover_source_ == static_cast<int>(i));
 
             // Source node
-            c.set_fill_color(hovered ? Color::rgba(80, 180, 255) : Color::rgba(60, 120, 200));
+            c.set_fill_color(hovered ? Color::rgba8(80, 180, 255) : Color::rgba8(60, 120, 200));
             c.fill_rect(left_x + 4.0f, y, col_w - 8.0f, row_h - 6.0f);
 
             // Label
-            c.set_fill_color(Color::rgba(220, 220, 240));
+            c.set_fill_color(Color::rgba8(220, 220, 240));
             c.fill_text(sources[i], left_x + 10.0f, y + row_h / 2.0f + 4.0f);
 
             // Socket
             float socket_x = left_x + col_w;
             float socket_y = y + (row_h - 6.0f) / 2.0f;
-            c.set_fill_color(Color::rgba(100, 200, 255));
+            c.set_fill_color(Color::rgba8(100, 200, 255));
             c.fill_rect(socket_x - 4.0f, socket_y - 4.0f, 8.0f, 8.0f);
         }
 
         // Destination column
-        c.set_fill_color(Color::rgba(40, 40, 60));
+        c.set_fill_color(Color::rgba8(40, 40, 60));
         c.fill_rect(right_x, top_y, col_w, row_h * destinations.size() + 10.0f);
 
         for (size_t i = 0; i < destinations.size(); ++i) {
             float y = top_y + 8.0f + i * row_h;
             bool hovered = (hover_dest_ == static_cast<int>(i));
 
-            c.set_fill_color(hovered ? Color::rgba(255, 140, 80) : Color::rgba(200, 100, 60));
+            c.set_fill_color(hovered ? Color::rgba8(255, 140, 80) : Color::rgba8(200, 100, 60));
             c.fill_rect(right_x + 4.0f, y, col_w - 8.0f, row_h - 6.0f);
 
-            c.set_fill_color(Color::rgba(220, 220, 240));
+            c.set_fill_color(Color::rgba8(220, 220, 240));
             c.fill_text(destinations[i], right_x + 10.0f, y + row_h / 2.0f + 4.0f);
 
             // Socket
             float socket_x = right_x;
             float socket_y = y + (row_h - 6.0f) / 2.0f;
-            c.set_fill_color(Color::rgba(255, 160, 100));
+            c.set_fill_color(Color::rgba8(255, 160, 100));
             c.fill_rect(socket_x - 4.0f, socket_y - 4.0f, 8.0f, 8.0f);
         }
 
@@ -218,7 +218,7 @@ public:
                 uint8_t cg = static_cast<uint8_t>(g * 255.0f * pulse_alpha);
                 uint8_t cb = static_cast<uint8_t>(b_val * 255.0f * pulse_alpha);
 
-                c.set_stroke_color(Color::rgba(cr, cg, cb, static_cast<uint8_t>(pulse_alpha * 255)));
+                c.set_stroke_color(Color::rgba8(cr, cg, cb, static_cast<uint8_t>(pulse_alpha * 255)));
                 c.set_line_width(thickness);
                 c.stroke_line(prev_x, prev_y, px, py);
 
@@ -242,20 +242,20 @@ public:
                 conn.amount * 100.0f);
 
             // Label background
-            c.set_fill_color(Color::rgba(20, 20, 40, 220));
+            c.set_fill_color(Color::rgba8(20, 20, 40, 220));
             c.fill_rect(mid_x - 80.0f, mid_y - 20.0f, 160.0f, 22.0f);
 
             // Label text
-            c.set_fill_color(Color::rgba(255, 255, 255));
+            c.set_fill_color(Color::rgba8(255, 255, 255));
             c.fill_text(label_buf, mid_x - 75.0f, mid_y - 4.0f);
         }
 
         // Connection matrix (bottom panel)
         float matrix_y = top_y + row_h * std::max(sources.size(), destinations.size()) + 30.0f;
-        c.set_fill_color(Color::rgba(30, 30, 50));
+        c.set_fill_color(Color::rgba8(30, 30, 50));
         c.fill_rect(20.0f, matrix_y, w - 40.0f, 160.0f);
 
-        c.set_fill_color(Color::rgba(180, 180, 200));
+        c.set_fill_color(Color::rgba8(180, 180, 200));
         c.fill_text("Connection Matrix", 30.0f, matrix_y + 18.0f);
 
         float row_y = matrix_y + 30.0f;
@@ -267,17 +267,17 @@ public:
                 destinations[conn.dest_idx].c_str(),
                 conn.amount * 100.0f);
 
-            c.set_fill_color(Color::rgba(160, 160, 180));
+            c.set_fill_color(Color::rgba8(160, 160, 180));
             c.fill_text(buf, 30.0f, row_y + 14.0f);
 
             // Amount bar
             float bar_x = 280.0f;
             float bar_w = 100.0f;
-            c.set_fill_color(Color::rgba(50, 50, 70));
+            c.set_fill_color(Color::rgba8(50, 50, 70));
             c.fill_rect(bar_x, row_y + 2.0f, bar_w, 12.0f);
             float fill_w = std::abs(conn.amount) * bar_w;
             float fill_x = conn.amount >= 0 ? bar_x + bar_w / 2.0f : bar_x + bar_w / 2.0f - fill_w;
-            c.set_fill_color(conn.amount >= 0 ? Color::rgba(80, 200, 120) : Color::rgba(200, 80, 80));
+            c.set_fill_color(conn.amount >= 0 ? Color::rgba8(80, 200, 120) : Color::rgba8(200, 80, 80));
             c.fill_rect(fill_x, row_y + 2.0f, fill_w, 12.0f);
 
             row_y += 16.0f;

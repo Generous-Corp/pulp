@@ -66,14 +66,14 @@ void SplitView::layout_children() {
 
 void SplitView::paint(canvas::Canvas& canvas) {
     auto dr = divider_rect();
-    auto divider_color = resolve_color("control.border", Color::rgba(80, 80, 90));
+    auto divider_color = resolve_color("control.border", Color::rgba8(80, 80, 90));
     canvas.set_fill_color(divider_color);
     canvas.fill_rect(dr.x, dr.y, dr.width, dr.height);
 
     // Grip dots
     float cx = dr.x + dr.width / 2;
     float cy = dr.y + dr.height / 2;
-    auto grip = resolve_color("text.disabled", Color::rgba(100, 100, 110));
+    auto grip = resolve_color("text.disabled", Color::rgba8(100, 100, 110));
     canvas.set_fill_color(grip);
 
     if (orientation_ == Orientation::horizontal) {

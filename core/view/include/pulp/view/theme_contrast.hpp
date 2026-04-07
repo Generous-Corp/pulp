@@ -53,7 +53,7 @@ struct HSL {
 };
 
 HSL rgb_to_hsl(Color c);
-Color hsl_to_rgb(HSL hsl, uint8_t alpha = 255);
+Color hsl_to_rgb(HSL hsl, float alpha = 1.0f);
 
 /// Shift hue by degrees (wraps around 360).
 Color shift_hue(Color c, float degrees);
@@ -64,8 +64,8 @@ Color adjust_lightness(Color c, float delta);
 /// Blend two colors by factor t in [0,1]. t=0 returns a, t=1 returns b.
 Color blend_colors(Color a, Color b, float t);
 
-/// Apply alpha to a color (0-255).
-Color with_alpha(Color c, uint8_t alpha);
+/// Apply alpha to a color [0.0-1.0].
+Color with_alpha(Color c, float alpha);
 
 // ── Theme Contrast Validation ───────────────────────────────────────────────
 

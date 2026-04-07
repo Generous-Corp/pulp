@@ -38,14 +38,14 @@ void CoreGraphicsCanvas::clip_rect(float x, float y, float w, float h) {
 
 void CoreGraphicsCanvas::apply_fill_color() {
     CGContextSetRGBFillColor(ctx_,
-        fill_color_.r / 255.0, fill_color_.g / 255.0,
-        fill_color_.b / 255.0, fill_color_.a / 255.0);
+        fill_color_.r, fill_color_.g,
+        fill_color_.b, fill_color_.a);
 }
 
 void CoreGraphicsCanvas::apply_stroke_color() {
     CGContextSetRGBStrokeColor(ctx_,
-        stroke_color_.r / 255.0, stroke_color_.g / 255.0,
-        stroke_color_.b / 255.0, stroke_color_.a / 255.0);
+        stroke_color_.r, stroke_color_.g,
+        stroke_color_.b, stroke_color_.a);
 }
 
 void CoreGraphicsCanvas::set_fill_color(Color c) { fill_color_ = c; }

@@ -110,13 +110,13 @@ int MidiKeyboard::note_at_position(Point pos) const {
 
 void MidiKeyboard::paint(canvas::Canvas& canvas) {
     auto b = local_bounds();
-    auto white_color = resolve_color("bg.elevated", Color::rgba(240, 240, 240));
-    auto black_color = resolve_color("bg.primary", Color::rgba(30, 30, 30));
+    auto white_color = resolve_color("bg.elevated", Color::rgba8(240, 240, 240));
+    auto black_color = resolve_color("bg.primary", Color::rgba8(30, 30, 30));
     auto active_color = highlight_color_.a > 0
         ? highlight_color_
-        : resolve_color("accent.primary", Color::rgba(100, 160, 255));
-    auto border_c = resolve_color("control.border", Color::rgba(100, 100, 100));
-    auto text_c = resolve_color("text.secondary", Color::rgba(120, 120, 120));
+        : resolve_color("accent.primary", Color::rgba8(100, 160, 255));
+    auto border_c = resolve_color("control.border", Color::rgba8(100, 100, 100));
+    auto text_c = resolve_color("text.secondary", Color::rgba8(120, 120, 120));
 
     // Draw white keys first
     for (int n = first_note_; n <= last_note_; ++n) {

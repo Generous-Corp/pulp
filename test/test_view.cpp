@@ -117,8 +117,8 @@ TEST_CASE("View theme resolution", "[view][theme]") {
     child_ptr->set_theme(override_theme);
 
     auto c2 = child_ptr->resolve_color("bg.primary");
-    REQUIRE(c2.r == 0xFF);
-    REQUIRE(c2.g == 0x00);
+    REQUIRE(c2.r8() == 0xFF);
+    REQUIRE(c2.g8() == 0x00);
 
     // Non-overridden colors still resolve from parent
     auto c3 = child_ptr->resolve_color("text.primary");

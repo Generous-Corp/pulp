@@ -19,7 +19,7 @@ TEST_CASE("ShadowEffect parameters", "[canvas][effects]") {
     REQUIRE(shadow.offset_x == 2.0f);
     REQUIRE(shadow.offset_y == 2.0f);
     REQUIRE(shadow.blur_radius == 4.0f);
-    REQUIRE(shadow.color.a == 128);
+    REQUIRE(shadow.color.a8() == 128);
 }
 
 TEST_CASE("BloomEffect parameters", "[canvas][effects]") {
@@ -56,7 +56,7 @@ TEST_CASE("Shadow effect with RecordingCanvas", "[canvas][effects]") {
     ShadowEffect shadow;
     shadow.offset_x = 3;
     shadow.offset_y = 3;
-    shadow.color = Color::rgba(0, 0, 0, 100);
+    shadow.color = Color::rgba8(0, 0, 0, 100);
 
     begin_effect_layer(canvas, shadow);
     canvas.fill_rounded_rect(20, 20, 80, 40, 8);

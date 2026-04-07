@@ -30,10 +30,10 @@ void ColorPicker::set_hex(const std::string& hex) {
 
 std::string ColorPicker::hex() const {
     char buf[10];
-    if (color_.a == 255)
-        snprintf(buf, sizeof(buf), "#%02x%02x%02x", color_.r, color_.g, color_.b);
+    if (color_.a8() == 255)
+        snprintf(buf, sizeof(buf), "#%02x%02x%02x", color_.r8(), color_.g8(), color_.b8());
     else
-        snprintf(buf, sizeof(buf), "#%02x%02x%02x%02x", color_.r, color_.g, color_.b, color_.a);
+        snprintf(buf, sizeof(buf), "#%02x%02x%02x%02x", color_.r8(), color_.g8(), color_.b8(), color_.a8());
     return buf;
 }
 
@@ -73,8 +73,8 @@ Rect ColorPicker::swatch_area() const {
 
 void ColorPicker::paint(canvas::Canvas& canvas) {
     auto b = local_bounds();
-    auto bg = resolve_color("bg.surface", Color::rgba(40, 40, 50));
-    auto border_color = resolve_color("control.border", Color::rgba(80, 80, 90));
+    auto bg = resolve_color("bg.surface", Color::rgba8(40, 40, 50));
+    auto border_color = resolve_color("control.border", Color::rgba8(80, 80, 90));
 
     canvas.set_fill_color(bg);
     canvas.fill_rounded_rect(b.x, b.y, b.width, b.height, 8.0f);
@@ -90,7 +90,7 @@ void ColorPicker::paint(canvas::Canvas& canvas) {
             float s = static_cast<float>(sx) / (steps - 1);
             float l = 1.0f - static_cast<float>(sy) / (steps - 1);
             HSL sample{hsl_.h, s, l};
-            auto c = hsl_to_rgb(sample, 255);
+            auto c = hsl_to_rgb(sample);
             canvas.set_fill_color(c);
             canvas.fill_rect(sl.x + sx * cell_w, sl.y + sy * cell_h, cell_w + 0.5f, cell_h + 0.5f);
         }
@@ -99,7 +99,7 @@ void ColorPicker::paint(canvas::Canvas& canvas) {
     // SL cursor
     float cx = sl.x + hsl_.s * sl.width;
     float cy = sl.y + (1.0f - hsl_.l) * sl.height;
-    canvas.set_stroke_color(Color::rgba(255, 255, 255));
+    canvas.set_stroke_color(Color::rgba8(255, 255, 255));
     canvas.set_line_width(2.0f);
     canvas.stroke_circle(cx, cy, 6.0f);
     canvas.set_fill_color(color_);
@@ -110,13 +110,13 @@ void ColorPicker::paint(canvas::Canvas& canvas) {
     float hue_step = hb.width / 36.0f;
     for (int i = 0; i < 36; ++i) {
         float h = static_cast<float>(i) * 10.0f;
-        auto c = hsl_to_rgb({h, 1.0f, 0.5f}, 255);
+        auto c = hsl_to_rgb({h, 1.0f, 0.5f});
         canvas.set_fill_color(c);
         canvas.fill_rect(hb.x + i * hue_step, hb.y, hue_step + 0.5f, hb.height);
     }
     // Hue cursor
     float hue_x = hb.x + (hsl_.h / 360.0f) * hb.width;
-    canvas.set_fill_color(Color::rgba(255, 255, 255));
+    canvas.set_fill_color(Color::rgba8(255, 255, 255));
     canvas.fill_rect(hue_x - 2, hb.y - 2, 4, hb.height + 4);
 
     // Alpha bar
@@ -124,13 +124,13 @@ void ColorPicker::paint(canvas::Canvas& canvas) {
         auto ab = alpha_bar();
         for (int i = 0; i <= 20; ++i) {
             float t = static_cast<float>(i) / 20.0f;
-            auto c = Color::rgba(color_.r, color_.g, color_.b, static_cast<uint8_t>(t * 255));
+            auto c = Color::rgba(color_.r, color_.g, color_.b, t);
             float w = ab.width / 20.0f;
             canvas.set_fill_color(c);
             canvas.fill_rect(ab.x + i * w, ab.y, w + 0.5f, ab.height);
         }
-        float alpha_x = ab.x + (static_cast<float>(color_.a) / 255.0f) * ab.width;
-        canvas.set_fill_color(Color::rgba(255, 255, 255));
+        float alpha_x = ab.x + color_.a * ab.width;
+        canvas.set_fill_color(Color::rgba8(255, 255, 255));
         canvas.fill_rect(alpha_x - 2, ab.y - 2, 4, ab.height + 4);
     }
 
@@ -197,7 +197,7 @@ void ColorPicker::on_mouse_drag(Point pos) {
     } else if (drag_target_ == DragTarget::alpha && show_alpha_) {
         auto ab = alpha_bar();
         float t = std::clamp((pos.x - ab.x) / ab.width, 0.0f, 1.0f);
-        color_.a = static_cast<uint8_t>(t * 255.0f);
+        color_.a = t;
         if (on_change) on_change(color_);
     }
 }

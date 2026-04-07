@@ -307,12 +307,12 @@ TEST_CASE("parse_w3c_tokens reads W3C format", "[view][import]") {
     auto theme = parse_w3c_tokens(json);
 
     REQUIRE(theme.colors.count("color.primary") == 1);
-    REQUIRE(theme.colors["color.primary"].r == 0x89);
-    REQUIRE(theme.colors["color.primary"].g == 0xB4);
-    REQUIRE(theme.colors["color.primary"].b == 0xFA);
+    REQUIRE(theme.colors["color.primary"].r8() == 0x89);
+    REQUIRE(theme.colors["color.primary"].g8() == 0xB4);
+    REQUIRE(theme.colors["color.primary"].b8() == 0xFA);
 
     REQUIRE(theme.colors.count("color.bg") == 1);
-    REQUIRE(theme.colors["color.bg"].r == 0x1E);
+    REQUIRE(theme.colors["color.bg"].r8() == 0x1E);
 
     REQUIRE(theme.dimensions.count("spacing.md") == 1);
     REQUIRE(theme.dimensions["spacing.md"] == 8.0f);
@@ -374,16 +374,16 @@ TEST_CASE("parse_w3c_tokens resolves aliases", "[view][import]") {
 
     // Direct values
     REQUIRE(theme.colors.count("color.blue") == 1);
-    REQUIRE(theme.colors["color.blue"].r == 0x3B);
+    REQUIRE(theme.colors["color.blue"].r8() == 0x3B);
 
     // Single alias: primary → blue
     REQUIRE(theme.colors.count("color.primary") == 1);
-    REQUIRE(theme.colors["color.primary"].r == 0x3B);
-    REQUIRE(theme.colors["color.primary"].g == 0x82);
+    REQUIRE(theme.colors["color.primary"].r8() == 0x3B);
+    REQUIRE(theme.colors["color.primary"].g8() == 0x82);
 
     // Chained alias: accent → primary → blue
     REQUIRE(theme.colors.count("color.accent") == 1);
-    REQUIRE(theme.colors["color.accent"].r == 0x3B);
+    REQUIRE(theme.colors["color.accent"].r8() == 0x3B);
 
     // Dimension alias: md → base
     REQUIRE(theme.dimensions["spacing.md"] == 8.0f);
@@ -504,7 +504,7 @@ TEST_CASE("ir_tokens_to_theme converts token maps to Theme", "[view][import]") {
     auto theme = ir_tokens_to_theme(tokens);
 
     REQUIRE(theme.colors.count("bg.primary") == 1);
-    REQUIRE(theme.colors["bg.primary"].r == 0x1a);
+    REQUIRE(theme.colors["bg.primary"].r8() == 0x1a);
     REQUIRE(theme.dimensions["spacing.md"] == 8.0f);
     REQUIRE(theme.strings["font.family"] == "Inter");
 }
@@ -588,7 +588,7 @@ TEST_CASE("parse_w3c_tokens handles circular aliases without infinite loop", "[v
 
     // The safe token should still resolve
     REQUIRE(theme.colors.count("color.safe") == 1);
-    REQUIRE(theme.colors["color.safe"].r == 0xFF);
+    REQUIRE(theme.colors["color.safe"].r8() == 0xFF);
 
     // Circular tokens won't resolve to valid colors — they should not crash
     // (they may or may not be in the theme depending on what the unresolved
@@ -623,11 +623,11 @@ TEST_CASE("parse_figma_variables reads Figma variable format", "[view][import]")
     auto theme = parse_figma_variables(json);
 
     REQUIRE(theme.colors.count("color.primary") == 1);
-    REQUIRE(theme.colors["color.primary"].r == 0x89);
-    REQUIRE(theme.colors["color.primary"].g == 0xB4);
+    REQUIRE(theme.colors["color.primary"].r8() == 0x89);
+    REQUIRE(theme.colors["color.primary"].g8() == 0xB4);
 
     REQUIRE(theme.colors.count("color.bg") == 1);
-    REQUIRE(theme.colors["color.bg"].r == 0x1E);
+    REQUIRE(theme.colors["color.bg"].r8() == 0x1E);
 
     REQUIRE(theme.dimensions["spacing.md"] == 8.0f);
     REQUIRE(theme.strings["font.heading"] == "Inter");
@@ -680,7 +680,7 @@ TEST_CASE("parse_stitch_design_system reads Stitch format", "[view][import]") {
     auto theme = parse_stitch_design_system(json);
 
     REQUIRE(theme.colors.count("color.primary") == 1);
-    REQUIRE(theme.colors["color.primary"].r == 0x89);
+    REQUIRE(theme.colors["color.primary"].r8() == 0x89);
     REQUIRE(theme.colors.count("color.background") == 1);
     REQUIRE(theme.strings["font.heading"] == "Inter");
     REQUIRE(theme.strings["font.body"] == "Roboto");
@@ -716,7 +716,7 @@ TEST_CASE("Stitch Design System round-trip preserves tokens", "[view][import]") 
     auto json = export_stitch_design_system(original);
     auto restored = parse_stitch_design_system(json);
 
-    REQUIRE(restored.colors["color.accent"].r == 0xE9);
+    REQUIRE(restored.colors["color.accent"].r8() == 0xE9);
     REQUIRE(restored.strings["font.body"] == "Roboto");
     REQUIRE(restored.dimensions["roundness"] == 4.0f);  // "small" maps back to 4
     REQUIRE(restored.dimensions["spacing.base"] == 8.0f);
@@ -780,7 +780,7 @@ TEST_CASE("E2E: Figma IR -> code gen -> tokens -> round-trip", "[view][import][e
     auto w3c = export_w3c_tokens(theme);
     auto restored = parse_w3c_tokens(w3c);
     REQUIRE(restored.colors.count("bg.primary") == 1);
-    REQUIRE(restored.colors["bg.primary"].r == 0x1a);
+    REQUIRE(restored.colors["bg.primary"].r8() == 0x1a);
 
     // Step 5: Figma Variables export/import cycle
     auto figma_vars = export_figma_variables(theme);

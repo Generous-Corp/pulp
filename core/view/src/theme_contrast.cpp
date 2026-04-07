@@ -6,8 +6,8 @@ namespace pulp::view {
 
 // ── Relative Luminance (WCAG 2.1) ──────────────────────────────────────────
 
-static float linearize(uint8_t channel) {
-    float s = static_cast<float>(channel) / 255.0f;
+static float linearize(float s) {
+    s = std::clamp(s, 0.0f, 1.0f);
     return (s <= 0.04045f) ? (s / 12.92f) : std::pow((s + 0.055f) / 1.055f, 2.4f);
 }
 
@@ -42,9 +42,9 @@ bool meets_contrast(Color foreground, Color background, ContrastLevel level) {
 // ── HSL Conversion ──────────────────────────────────────────────────────────
 
 HSL rgb_to_hsl(Color c) {
-    float r = c.r / 255.0f;
-    float g = c.g / 255.0f;
-    float b = c.b / 255.0f;
+    float r = std::clamp(c.r, 0.0f, 1.0f);
+    float g = std::clamp(c.g, 0.0f, 1.0f);
+    float b = std::clamp(c.b, 0.0f, 1.0f);
 
     float mx = std::max({r, g, b});
     float mn = std::min({r, g, b});
@@ -80,9 +80,9 @@ static float hue_to_rgb(float p, float q, float t) {
     return p;
 }
 
-Color hsl_to_rgb(HSL hsl, uint8_t alpha) {
+Color hsl_to_rgb(HSL hsl, float alpha) {
     if (hsl.s < 1e-6f) {
-        auto v = static_cast<uint8_t>(std::clamp(hsl.l * 255.0f, 0.0f, 255.0f));
+        float v = std::clamp(hsl.l, 0.0f, 1.0f);
         return Color::rgba(v, v, v, alpha);
     }
 
@@ -95,9 +95,9 @@ Color hsl_to_rgb(HSL hsl, uint8_t alpha) {
     float b = hue_to_rgb(p, q, h - 1.0f / 3.0f);
 
     return Color::rgba(
-        static_cast<uint8_t>(std::clamp(r * 255.0f, 0.0f, 255.0f)),
-        static_cast<uint8_t>(std::clamp(g * 255.0f, 0.0f, 255.0f)),
-        static_cast<uint8_t>(std::clamp(b * 255.0f, 0.0f, 255.0f)),
+        std::clamp(r, 0.0f, 1.0f),
+        std::clamp(g, 0.0f, 1.0f),
+        std::clamp(b, 0.0f, 1.0f),
         alpha);
 }
 
@@ -114,24 +114,19 @@ Color adjust_lightness(Color c, float delta) {
 }
 
 Color blend_colors(Color a, Color b, float t) {
-    t = std::clamp(t, 0.0f, 1.0f);
-    return Color::rgba(
-        static_cast<uint8_t>(a.r + (b.r - a.r) * t),
-        static_cast<uint8_t>(a.g + (b.g - a.g) * t),
-        static_cast<uint8_t>(a.b + (b.b - a.b) * t),
-        static_cast<uint8_t>(a.a + (b.a - a.a) * t));
+    return a.interpolate(b, std::clamp(t, 0.0f, 1.0f));
 }
 
-Color with_alpha(Color c, uint8_t alpha) {
-    return Color::rgba(c.r, c.g, c.b, alpha);
+Color with_alpha(Color c, float alpha) {
+    return c.with_alpha(alpha);
 }
 
 // ── Auto-Contrast ───────────────────────────────────────────────────────────
 
 Color auto_contrast_foreground(Color background, ContrastLevel level) {
     float threshold = min_contrast_for_level(level);
-    Color white = Color::rgba(255, 255, 255);
-    Color black = Color::rgba(0, 0, 0);
+    Color white = Color::rgba(1.0f, 1.0f, 1.0f);
+    Color black = Color::rgba(0.0f, 0.0f, 0.0f);
 
     if (contrast_ratio(white, background) >= threshold)
         return white;

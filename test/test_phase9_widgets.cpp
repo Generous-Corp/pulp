@@ -117,19 +117,19 @@ TEST_CASE("MidiKeyboard interaction callback", "[view][midi_keyboard]") {
 TEST_CASE("ColorPicker set/get color", "[view][color_picker]") {
     ColorPicker picker;
 
-    picker.set_color(Color::rgba(255, 128, 0));
-    REQUIRE(picker.color().r == 255);
-    REQUIRE(picker.color().g == 128);
-    REQUIRE(picker.color().b == 0);
+    picker.set_color(Color::rgba8(255, 128, 0));
+    REQUIRE(picker.color().r8() == 255);
+    REQUIRE(picker.color().g8() == 128);
+    REQUIRE(picker.color().b8() == 0);
 }
 
 TEST_CASE("ColorPicker hex round-trip", "[view][color_picker]") {
     ColorPicker picker;
     picker.set_hex("#ff6600");
     REQUIRE(picker.hex() == "#ff6600");
-    REQUIRE(picker.color().r == 0xFF);
-    REQUIRE(picker.color().g == 0x66);
-    REQUIRE(picker.color().b == 0x00);
+    REQUIRE(picker.color().r8() == 0xFF);
+    REQUIRE(picker.color().g8() == 0x66);
+    REQUIRE(picker.color().b8() == 0x00);
 }
 
 TEST_CASE("ColorPicker HSL round-trip", "[view][color_picker]") {
@@ -143,9 +143,9 @@ TEST_CASE("ColorPicker HSL round-trip", "[view][color_picker]") {
 TEST_CASE("ColorPicker swatches", "[view][color_picker]") {
     ColorPicker picker;
     picker.set_swatches({
-        Color::rgba(255, 0, 0),
-        Color::rgba(0, 255, 0),
-        Color::rgba(0, 0, 255)
+        Color::rgba8(255, 0, 0),
+        Color::rgba8(0, 255, 0),
+        Color::rgba8(0, 0, 255)
     });
     REQUIRE(picker.swatches().size() == 3);
 }
@@ -249,7 +249,7 @@ TEST_CASE("PropertyList basic operations", "[view][property_list]") {
         {"version", "Version", std::string("1.0.0"), true, "General"},
         {"gain", "Gain", 0.5f, false, "Audio"},
         {"bypass", "Bypass", false, false, "Audio"},
-        {"color", "Color", Color::rgba(255, 0, 0), false, "Visual"},
+        {"color", "Color", Color::rgba8(255, 0, 0), false, "Visual"},
     };
 
     list.set_properties(props);

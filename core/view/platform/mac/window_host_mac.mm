@@ -795,7 +795,7 @@ static pulp::view::KeyCode keyCodeFromNS(unsigned short code) {
         static_cast<float>(bounds.size.width),
         static_cast<float>(bounds.size.height));
 
-    canvas.set_fill_color(pulp::canvas::Color::rgba(30, 30, 46));
+    canvas.set_fill_color(pulp::canvas::Color::rgba8(30, 30, 46));
     canvas.fill_rect(0, 0,
         static_cast<float>(bounds.size.width),
         static_cast<float>(bounds.size.height));
@@ -1396,7 +1396,7 @@ private:
         root_.set_bounds({0, 0, width_, height_});
         root_.layout_children();
 
-        canvas.set_fill_color(canvas::Color::rgba(30, 30, 46));
+        canvas.set_fill_color(canvas::Color::rgba8(30, 30, 46));
         canvas.fill_rect(0, 0, width_, height_);
 
         root_.paint_all(canvas);

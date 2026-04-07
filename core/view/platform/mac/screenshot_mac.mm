@@ -98,7 +98,7 @@ std::vector<uint8_t> render_to_png_coregraphics(View& root,
     canvas::CoreGraphicsCanvas canvas(ctx,
         static_cast<float>(width), static_cast<float>(height));
 
-    canvas.set_fill_color(canvas::Color::rgba(30, 30, 46));
+    canvas.set_fill_color(canvas::Color::rgba8(30, 30, 46));
     canvas.fill_rect(0, 0, static_cast<float>(width), static_cast<float>(height));
 
     root.set_bounds({0, 0, static_cast<float>(width), static_cast<float>(height)});
@@ -148,7 +148,7 @@ std::vector<uint8_t> render_to_png_skia(View& root,
     if (scale != 1.0f) sk_canvas->scale(scale, scale);
 
     pulp::canvas::SkiaCanvas canvas(sk_canvas);
-    canvas.set_fill_color(pulp::canvas::Color::rgba(30, 30, 46));
+    canvas.set_fill_color(pulp::canvas::Color::rgba8(30, 30, 46));
     canvas.fill_rect(0, 0, static_cast<float>(width), static_cast<float>(height));
 
     root.set_bounds({0, 0, static_cast<float>(width), static_cast<float>(height)});

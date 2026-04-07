@@ -22,7 +22,7 @@ struct ShadowEffect {
     float offset_x = 2.0f;
     float offset_y = 2.0f;
     float blur_radius = 4.0f;
-    Color color = {0, 0, 0, 128};  // Semi-transparent black
+    Color color = Color::rgba(0.0f, 0.0f, 0.0f, 0.502f);  // Semi-transparent black
 };
 
 // Bloom/glow effect (bright areas bleed outward)

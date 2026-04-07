@@ -36,7 +36,7 @@ public:
     void paint(canvas::Canvas& canvas) override {
         // Draw dimmed backdrop
         auto b = local_bounds();
-        canvas.set_fill_color(canvas::Color::rgba(0, 0, 0,
+        canvas.set_fill_color(canvas::Color::rgba8(0, 0, 0,
             static_cast<uint8_t>(backdrop_opacity * 255)));
         canvas.fill_rect(b.x, b.y, b.width, b.height);
     }
