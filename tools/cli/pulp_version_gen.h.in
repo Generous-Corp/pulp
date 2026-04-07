@@ -1,0 +1,2 @@
+#pragma once
+#define PULP_SDK_VERSION_GENERATED "@PROJECT_VERSION@"
