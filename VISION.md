@@ -172,11 +172,11 @@ Pulp started primarily for one end customer — the original author — with the
 
 | Platform | Audio | MIDI | Plugin Formats | UI | GPU | Swift |
 |----------|-------|------|----------------|-----|-----|-------|
-| macOS (ARM64) | CoreAudio | CoreMIDI | VST3, AU, AUv3, CLAP, AAX, Standalone | JS + GPU | Metal | Yes |
-| Windows (x64) | WASAPI | Win32 MIDI | VST3, CLAP, AAX, Standalone | JS + GPU | D3D12 | — |
-| Linux (x64) | ALSA, JACK | ALSA MIDI | VST3, CLAP, LV2, Standalone | JS + GPU | Vulkan | — |
 | iOS (ARM64) | AVAudioSession | CoreMIDI | AUv3, Standalone | JS + GPU | Metal | Yes |
+| Linux (x64, ARM64) | ALSA, JACK | ALSA MIDI | VST3, CLAP, LV2, Standalone | JS + GPU | Vulkan | — |
+| macOS (ARM64) | CoreAudio | CoreMIDI | VST3, AU, AUv3, CLAP, AAX, LV2, Standalone | JS + GPU | Metal | Yes |
 | Web (WASM) | Web Audio | Web MIDI | — | JS + WebGPU | WebGPU | — |
+| Windows (x64, ARM64) | WASAPI | Win32 MIDI | VST3, CLAP, AAX, Standalone | JS + GPU | D3D12 | — |
 
 ASIO on Windows supported when developers provide the Steinberg SDK independently. AAX requires the Avid SDK from Avid.
 
