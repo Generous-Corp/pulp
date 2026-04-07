@@ -368,6 +368,8 @@ public:
         cross,          // 9 — plus sign with configurable arm width
         flat_segment,   // 10 — line segment with flat caps
         rounded_segment,// 11 — line segment with rounded caps
+        flat_arc,       // 12 — arc with thickness and flat caps
+        quadratic_bezier,// 13 — quadratic bezier curve with thickness
     };
 
     struct SDFStyle {

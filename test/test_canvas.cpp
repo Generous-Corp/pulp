@@ -199,6 +199,8 @@ TEST_CASE("SDF shape enum covers all types", "[canvas][sdf]") {
     REQUIRE(static_cast<int>(S::cross) == 9);
     REQUIRE(static_cast<int>(S::flat_segment) == 10);
     REQUIRE(static_cast<int>(S::rounded_segment) == 11);
+    REQUIRE(static_cast<int>(S::flat_arc) == 12);
+    REQUIRE(static_cast<int>(S::quadratic_bezier) == 13);
 }
 
 TEST_CASE("SDFStyle defaults are valid", "[canvas][sdf]") {
@@ -216,7 +218,7 @@ TEST_CASE("SDF shapes render via RecordingCanvas fallback", "[canvas][sdf]") {
     style.fill_color = Color::rgba(1.0f, 0.0f, 0.0f);
 
     // All new shapes should at least not crash on the CPU fallback path
-    for (int i = 0; i <= 11; ++i) {
+    for (int i = 0; i <= 13; ++i) {
         rc.clear();
         rc.draw_sdf_shape(static_cast<Canvas::SDFShape>(i), 10, 10, 50, 50, style);
         REQUIRE(rc.command_count() > 0);

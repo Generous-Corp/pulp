@@ -468,6 +468,31 @@ static const char* kSDFShapeSkSL = R"(
         return length(p) - thickness * 0.5;
     }
 
+    // SDF for arc with thickness (flat caps)
+    float sdFlatArc(float2 p, float outerR, float innerR, float startAngle, float sweepAngle) {
+        float angle = atan2(p.y, p.x);
+        float halfSweep = sweepAngle * 0.5;
+        float midAngle = startAngle + halfSweep;
+        float angleDiff = angle - midAngle;
+        angleDiff = angleDiff - 6.2832 * floor((angleDiff + 3.1416) / 6.2832);
+        float arcMask = abs(angleDiff) - halfSweep;
+        float ringDist = abs(length(p) - (outerR + innerR) * 0.5) - (outerR - innerR) * 0.5;
+        return max(ringDist, arcMask * outerR * 0.3);
+    }
+
+    // SDF for quadratic bezier curve with thickness (approximation)
+    // Uses distance to the closest point on the curve segment
+    float sdQuadBezier(float2 p, float2 a, float2 b, float2 c, float thickness) {
+        // Approximate by sampling the curve at several points
+        float minDist = 1e10;
+        for (float t = 0.0; t <= 1.0; t += 0.05) {
+            float2 q = (1.0-t)*(1.0-t)*a + 2.0*(1.0-t)*t*b + t*t*c;
+            float d = length(p - q);
+            minDist = min(minDist, d);
+        }
+        return minDist - thickness * 0.5;
+    }
+
     half4 main(float2 coord) {
         float2 center = resolution * 0.5;
         float2 p = coord - center;
@@ -507,8 +532,18 @@ static const char* kSDFShapeSkSL = R"(
             d = sdCross(p, halfSize, armWidth);  // 9: cross
         } else if (shapeType < 10.5) {
             d = sdFlatSegment(p, halfSize);      // 10: flat segment
-        } else {
+        } else if (shapeType < 11.5) {
             d = sdRoundedSegment(p, halfSize.x, max(strokeWidth, 2.0)); // 11: rounded segment
+        } else if (shapeType < 12.5) {
+            float outerR = r;
+            float innerR = r * innerRadius;
+            d = sdFlatArc(p, outerR, innerR, arcStart, arcSweep);       // 12: flat arc
+        } else {
+            // 13: quadratic bezier — control points derived from shape bounds
+            float2 a = float2(-halfSize.x, halfSize.y);
+            float2 b = float2(0, -halfSize.y);
+            float2 c = float2(halfSize.x, halfSize.y);
+            d = sdQuadBezier(p, a, b, c, max(strokeWidth, 2.0));        // 13: quadratic bezier
         }
 
         // Render: filled or stroked with AA
