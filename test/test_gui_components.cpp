@@ -1,6 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/view/table.hpp>
-#include <pulp/view/toolbar.hpp>
+#include <pulp/view/toolbar.hpp>.hpp>
 #include <pulp/view/concertina_panel.hpp>
 #include <pulp/view/buttons.hpp>
 #include <pulp/view/lasso.hpp>
@@ -74,7 +74,7 @@ TEST_CASE("TableListBox column management", "[gui][table]") {
 // ── Toolbar ─────────────────────────────────────────────────────────────
 
 TEST_CASE("Toolbar add items", "[gui][toolbar][!mayfail][!mayfail]") {
-    Toolbar toolbar;
+    ToolStrip toolbar;
     REQUIRE(toolbar.item_count() == 0);
 
     toolbar.add_button("play", "Play", []() {});
@@ -86,7 +86,7 @@ TEST_CASE("Toolbar add items", "[gui][toolbar][!mayfail][!mayfail]") {
 }
 
 TEST_CASE("Toolbar toggle state", "[gui][toolbar][!mayfail]") {
-    Toolbar toolbar;
+    ToolStrip toolbar;
     toolbar.add_toggle("mute", "Mute", [](bool) {});
 
     REQUIRE_FALSE(toolbar.is_toggled("mute"));
@@ -95,7 +95,7 @@ TEST_CASE("Toolbar toggle state", "[gui][toolbar][!mayfail]") {
 }
 
 TEST_CASE("Toolbar enable/disable", "[gui][toolbar][!mayfail]") {
-    Toolbar toolbar;
+    ToolStrip toolbar;
     bool clicked = false;
     toolbar.add_button("save", "Save", [&]() { clicked = true; });
 
@@ -104,7 +104,7 @@ TEST_CASE("Toolbar enable/disable", "[gui][toolbar][!mayfail]") {
 }
 
 TEST_CASE("Toolbar remove item", "[gui][toolbar][!mayfail]") {
-    Toolbar toolbar;
+    ToolStrip toolbar;
     toolbar.add_button("a", "A", []() {});
     toolbar.add_button("b", "B", []() {});
     REQUIRE(toolbar.item_count() == 2);

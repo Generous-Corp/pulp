@@ -4,64 +4,68 @@
 
 namespace pulp::view {
 
-void Toolbar::add_button(std::string id, std::string label, std::function<void()> on_click) {
+void ToolStrip::add_button(std::string id, std::string label, std::function<void()> on_click) {
     ToolbarItem item;
     item.id = std::move(id);
     item.label = std::move(label);
-    item.type = ToolbarItemType::Button;
+    item.type = ToolStripItemType::Button;
     item.on_click = std::move(on_click);
     items_.push_back(std::move(item));
 }
 
-void Toolbar::add_toggle(std::string id, std::string label, std::function<void(bool)> on_toggle) {
+void ToolStrip::add_toggle(std::string id, std::string label, std::function<void(bool)> on_toggle) {
     ToolbarItem item;
     item.id = std::move(id);
     item.label = std::move(label);
-    item.type = ToolbarItemType::Toggle;
+    item.type = ToolStripItemType::Toggle;
     item.on_toggle = std::move(on_toggle);
     items_.push_back(std::move(item));
 }
 
-// add_separator() is defined in app_framework.cpp
-
-void Toolbar::add_spacer() {
+void ToolStrip::add_separator() {
     ToolbarItem item;
-    item.type = ToolbarItemType::Spacer;
+    item.type = ToolStripItemType::Separator;
     items_.push_back(std::move(item));
 }
 
-void Toolbar::add_custom(std::string id, std::unique_ptr<View> view) {
+void ToolStrip::add_spacer() {
+    ToolbarItem item;
+    item.type = ToolStripItemType::Spacer;
+    items_.push_back(std::move(item));
+}
+
+void ToolStrip::add_custom(std::string id, std::unique_ptr<View> view) {
     ToolbarItem item;
     item.id = std::move(id);
-    item.type = ToolbarItemType::Custom;
+    item.type = ToolStripItemType::Custom;
     item.custom_view = std::move(view);
     items_.push_back(std::move(item));
 }
 
-void Toolbar::remove_item(std::string_view id) {
+void ToolStrip::remove_item(std::string_view id) {
     items_.erase(
         std::remove_if(items_.begin(), items_.end(),
                       [id](const ToolbarItem& item) { return item.id == id; }),
         items_.end());
 }
 
-bool Toolbar::is_toggled(std::string_view id) const {
+bool ToolStrip::is_toggled(std::string_view id) const {
     for (auto& item : items_)
         if (item.id == id) return item.toggled;
     return false;
 }
 
-void Toolbar::set_toggled(std::string_view id, bool state) {
+void ToolStrip::set_toggled(std::string_view id, bool state) {
     for (auto& item : items_)
         if (item.id == id) { item.toggled = state; return; }
 }
 
-void Toolbar::set_enabled(std::string_view id, bool enabled) {
+void ToolStrip::set_enabled(std::string_view id, bool enabled) {
     for (auto& item : items_)
         if (item.id == id) { item.enabled = enabled; return; }
 }
 
-void Toolbar::paint(canvas::Canvas& canvas) {
+void ToolStrip::paint(canvas::Canvas& canvas) {
     float w = bounds().width, h = bounds().height;
 
     // Background
@@ -72,13 +76,13 @@ void Toolbar::paint(canvas::Canvas& canvas) {
     float pos = spacing_;
 
     for (auto& item : items_) {
-        if (item.type == ToolbarItemType::Spacer) {
+        if (item.type == ToolStripItemType::Spacer) {
             // Spacer takes remaining space (simplified: fixed 20px)
             pos += 20.0f;
             continue;
         }
 
-        if (item.type == ToolbarItemType::Separator) {
+        if (item.type == ToolStripItemType::Separator) {
             canvas.set_stroke_color(canvas::Color::rgba(70, 70, 80));
             canvas.set_line_width(1.0f);
             if (horiz) {
@@ -138,14 +142,14 @@ void Toolbar::paint(canvas::Canvas& canvas) {
         canvas.stroke_line(w - 1, 0, w - 1, h);
 }
 
-int Toolbar::hit_test_item(Point pos) const {
+int ToolStrip::hit_test_item(Point pos) const {
     bool horiz = (orientation_ == Orientation::horizontal);
     float item_pos = spacing_;
 
     for (int i = 0; i < static_cast<int>(items_.size()); ++i) {
         auto& item = items_[i];
-        if (item.type == ToolbarItemType::Spacer) { item_pos += 20.0f; continue; }
-        if (item.type == ToolbarItemType::Separator) { item_pos += spacing_ * 2; continue; }
+        if (item.type == ToolStripItemType::Spacer) { item_pos += 20.0f; continue; }
+        if (item.type == ToolStripItemType::Separator) { item_pos += spacing_ * 2; continue; }
 
         float coord = horiz ? pos.x : pos.y;
         if (coord >= item_pos && coord < item_pos + item_size_)
@@ -156,16 +160,16 @@ int Toolbar::hit_test_item(Point pos) const {
     return -1;
 }
 
-void Toolbar::on_mouse_down(Point pos) {
+void ToolStrip::on_mouse_down(Point pos) {
     int idx = hit_test_item(pos);
     if (idx < 0 || idx >= static_cast<int>(items_.size())) return;
 
     auto& item = items_[idx];
     if (!item.enabled) return;
 
-    if (item.type == ToolbarItemType::Button && item.on_click)
+    if (item.type == ToolStripItemType::Button && item.on_click)
         item.on_click();
-    else if (item.type == ToolbarItemType::Toggle) {
+    else if (item.type == ToolStripItemType::Toggle) {
         item.toggled = !item.toggled;
         if (item.on_toggle) item.on_toggle(item.toggled);
     }

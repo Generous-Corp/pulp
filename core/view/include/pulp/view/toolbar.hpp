@@ -12,7 +12,7 @@
 namespace pulp::view {
 
 /// Toolbar item types
-enum class ToolbarItemType {
+enum class ToolStripItemType {
     Button,     // Clickable button with icon/text
     Toggle,     // On/off toggle
     Separator,  // Visual separator
@@ -25,7 +25,7 @@ struct ToolbarItem {
     std::string id;
     std::string label;
     std::string tooltip;
-    ToolbarItemType type = ToolbarItemType::Button;
+    ToolStripItemType type = ToolStripItemType::Button;
     bool enabled = true;
     bool toggled = false;
     std::function<void()> on_click;
@@ -34,11 +34,11 @@ struct ToolbarItem {
 };
 
 /// Toolbar container
-class Toolbar : public View {
+class ToolStrip : public View {
 public:
     enum class Orientation { horizontal, vertical };
 
-    Toolbar() = default;
+    ToolStrip() = default;
 
     /// Add a button item
     void add_button(std::string id, std::string label, std::function<void()> on_click);
