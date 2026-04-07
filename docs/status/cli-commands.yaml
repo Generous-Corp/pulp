@@ -385,6 +385,98 @@ commands:
             summary: Launch an app and capture screenshot plus available UI state; supports shared source flags (--source-mode, --branch, --sha, --prepare-command, --prepare-timeout)
     docs: guides/local-ci.md
 
+  - name: add
+    status: usable
+    summary: Add a third-party package from the registry. License check, platform check, CMake wiring, metadata updates.
+    args:
+      - name: package
+        kind: positional
+        required: true
+        description: Package slug from tools/packages/registry.json
+      - name: --license-override
+        kind: option
+        description: "Accept a rejected license (value: commercial)"
+      - name: --platform-guard
+        kind: flag
+        description: Add with platform guard (skip prompt for unsupported targets)
+      - name: --no-cmake
+        kind: flag
+        description: Skip CMake wiring (metadata only)
+    docs: reference/cli.md#add
+
+  - name: remove
+    status: usable
+    summary: Remove a previously added package. Cleans lock file, CMake, and metadata.
+    args:
+      - name: package
+        kind: positional
+        required: true
+        description: Package slug to remove
+    docs: reference/cli.md#remove
+
+  - name: list
+    status: usable
+    summary: Show installed packages from packages.lock.json.
+    args:
+      - name: --json
+        kind: flag
+        description: Output as JSON
+    docs: reference/cli.md#list
+
+  - name: search
+    status: usable
+    summary: Search the package registry by name, tags, description, or category.
+    args:
+      - name: query
+        kind: positional
+        required: true
+        description: Search query string
+      - name: --format
+        kind: option
+        description: "Output format (text or json)"
+    docs: reference/cli.md#search
+
+  - name: update
+    status: usable
+    summary: Check for and apply package version updates.
+    args:
+      - name: --apply
+        kind: flag
+        description: Apply updates (default is dry-run)
+    docs: reference/cli.md#update
+
+  - name: suggest
+    status: usable
+    summary: Context-aware package recommendations.
+    args:
+      - name: --description
+        kind: option
+        description: Find packages matching a text description
+      - name: --analyze
+        kind: option
+        description: Scan a source file for package suggestions
+      - name: --alternative
+        kind: option
+        description: Find alternatives to a specific package
+      - name: --format
+        kind: option
+        description: "Output format (text or json)"
+    docs: reference/cli.md#suggest
+
+  - name: target
+    status: usable
+    summary: Manage project platform targets in pulp.toml.
+    args:
+      - name: subcommand
+        kind: positional
+        required: true
+        description: "list, add, or remove"
+      - name: target
+        kind: positional
+        required: false
+        description: "Platform-arch target (e.g., macOS-arm64, Windows-x64)"
+    docs: reference/cli.md#target
+
   - name: help
     status: usable
     summary: Print usage information.

@@ -682,6 +682,105 @@ Print usage information.
 pulp help
 ```
 
+### add
+
+**Status**: usable
+
+Add a third-party package from the Pulp package registry.
+
+```bash
+pulp add signalsmith-stretch                       # add a package
+pulp add rtneural --license-override commercial    # accept a non-standard license
+pulp add some-lib --platform-guard                 # add with platform guard
+pulp add dr-libs --no-cmake                        # metadata only, skip CMake wiring
+```
+
+Performs license checking, platform compatibility analysis, overlap detection, CMake generation (`cmake/pulp-packages.cmake`), and updates `packages.lock.json`, `DEPENDENCIES.md`, and `NOTICE.md`.
+
+### remove
+
+**Status**: usable
+
+Remove a previously added package.
+
+```bash
+pulp remove signalsmith-stretch
+```
+
+Cleans up the lock file, CMake declarations, and metadata entries.
+
+### list
+
+**Status**: usable
+
+Show installed packages.
+
+```bash
+pulp list              # human-readable table
+pulp list --json       # JSON output
+```
+
+### search
+
+**Status**: usable
+
+Search the package registry.
+
+```bash
+pulp search "pitch detection"
+pulp search dsp
+pulp search fft --format json
+```
+
+### update
+
+**Status**: usable
+
+Check for and apply package updates.
+
+```bash
+pulp update            # dry-run: show available updates
+pulp update --apply    # apply updates and regenerate CMake
+```
+
+### suggest
+
+**Status**: usable
+
+Context-aware package recommendations.
+
+```bash
+pulp suggest --description "pitch shifting"
+pulp suggest --analyze src/my_processor.cpp
+pulp suggest --alternative pffft
+```
+
+### target
+
+**Status**: usable
+
+Manage project platform targets stored in `pulp.toml`.
+
+```bash
+pulp target list                  # show current targets
+pulp target add Windows-arm64     # add a target
+pulp target remove Linux-x64     # remove a target
+```
+
+Default targets (if none configured): `macOS-arm64`, `Windows-x64`, `Linux-x64`.
+
+### audit (package extensions)
+
+The existing `pulp audit` command now supports package-specific flags:
+
+```bash
+pulp audit --packages     # verify lock file integrity
+pulp audit --platforms    # check package/platform coverage
+pulp audit --licenses     # verify license compatibility
+```
+
+These flags are handled natively; without them, `pulp audit` delegates to the Python audit script as before.
+
 ## Global Flags
 
 | Flag | Description |
