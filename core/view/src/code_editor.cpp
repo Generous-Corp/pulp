@@ -56,7 +56,8 @@ void RecentlyOpenedFilesList::remove(std::string_view path) {
     files_.erase(std::remove(files_.begin(), files_.end(), p), files_.end());
 }
 bool RecentlyOpenedFilesList::load(std::string_view path) {
-    std::ifstream f(std::string(path));
+    std::string file_path(path);
+    std::ifstream f(file_path);
     if (!f) return false;
     files_.clear();
     std::string line;
@@ -65,7 +66,8 @@ bool RecentlyOpenedFilesList::load(std::string_view path) {
     return true;
 }
 bool RecentlyOpenedFilesList::save(std::string_view path) const {
-    std::ofstream f(std::string(path));
+    std::string file_path(path);
+    std::ofstream f(file_path);
     if (!f) return false;
     for (auto& file : files_) f << file << '\n';
     return true;
