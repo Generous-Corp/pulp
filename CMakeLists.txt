@@ -150,7 +150,7 @@ set(PULP_HAS_SDL3 TRUE)
 message(STATUS "Pulp: SDL3 enabled")
 
 # DRACO mesh compression decoder (Apache 2.0) — for glTF compressed geometry
-option(PULP_ENABLE_DRACO "Enable DRACO mesh decompression for glTF" ON)
+option(PULP_ENABLE_DRACO "Enable DRACO mesh decompression for glTF" OFF)
 if(PULP_ENABLE_DRACO)
     FetchContent_Declare(
         draco
