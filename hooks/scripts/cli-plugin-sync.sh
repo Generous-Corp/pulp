@@ -16,7 +16,20 @@ if [ -z "$FILE" ]; then
 fi
 
 case "$FILE" in
-    */tools/cli/pulp_cli.cpp|*/tools/mcp/pulp_mcp.cpp)
-        echo "PLUGIN SYNC: CLI or MCP server modified. Check if .agents/skills/, .claude/commands/, or hooks/ need matching updates."
+    */tools/cli/pulp_cli.cpp|*/tools/cli/cmd_*.cpp|*/tools/cli/cli_common.hpp)
+        echo "CLI SYNC: CLI source modified. Run: python3 tools/scripts/cli_sync_check.py"
+        echo "  Update: cli-commands.yaml, slash commands, reference docs, skills"
+        ;;
+    */tools/mcp/pulp_mcp.cpp)
+        echo "CLI SYNC: MCP server modified. Verify MCP tools still map to CLI commands."
+        ;;
+    */.claude/commands/*.md)
+        echo "CLI SYNC: Slash command modified. Verify it matches cli-commands.yaml and CLI source."
+        ;;
+    */.agents/skills/*/SKILL.md)
+        echo "CLI SYNC: Skill modified. Verify CLI command references are current."
+        ;;
+    */docs/status/cli-commands.yaml)
+        echo "CLI SYNC: CLI manifest modified. Verify it matches CLI source and slash commands."
         ;;
 esac
