@@ -200,20 +200,19 @@ pulp/
 ├── examples/              # Example projects
 ├── external/              # Third-party dependencies (vendored or fetched)
 ├── docs/                  # PUBLIC documentation (getting-started, API, guides)
-└── planning/              # LOCAL ONLY — gitignored, committed to a separate private repo
+└── planning/              # Private submodule (pulp-planning) — specs, roadmaps, assessments
 ```
 
-### What Does NOT Go in the Repo
+### What Does NOT Go in the Public Repo
 
-Planning documents, spec drafts, audit notes, phase tracking, and internal design exploration stay in `planning/` locally but are **gitignored** from this repo. They are committed to a separate private repository.
+Internal planning — capability assessments, feature specs, roadmaps, phase tracking, and design exploration — lives in the `planning/` submodule (private repo `pulp-planning`). This separation keeps the public repo focused on code, docs, and examples.
 
 ```
-# In .gitignore:
-/planning/           # Phase specs, status tracking, archived plans
-/research/           # Audit notes, competitive analysis
+planning/            # Private submodule — specs, assessments, roadmaps, phase tracking
+/research/           # Gitignored — research notes, reference material
 ```
 
-Planning docs live in `planning/` locally. When a phase completes, its spec moves to `planning/archive/`. Status is tracked in `planning/STATUS.md`. None of this is committed to this repo.
+When a phase completes, its spec moves to `planning/archive/`. Status is tracked in `planning/STATUS.md`. The `planning/` submodule is optional — external cloners can build and use Pulp without it.
 
 ---
 
@@ -266,10 +265,40 @@ Multiple explorations can run simultaneously. Multiple phases can be implemented
 
 ### Status Tracking
 
-Status is tracked locally in `planning/STATUS.md` (gitignored). Phase specs live in `planning/` with goals, deliverables, acceptance criteria, test plans, and notes.
+Status is tracked in `planning/STATUS.md` (private submodule). Phase specs live in `planning/` with goals, deliverables, acceptance criteria, test plans, and notes. After writing or updating files in `planning/`, always commit and push to the planning repo.
 
 ---
 
+## Planning & Internal Docs
+
+The `planning/` directory is a private git submodule (`pulp-planning`). All internal documents go here — never in the public repo.
+
+### What goes in `planning/`
+
+- **Capability assessments** — evaluating what Pulp needs to improve
+- **Feature specs** — detailed plans for upcoming work
+- **Roadmaps and phase tracking** — STATUS.md, phase plans
+- **Design exploration** — architecture proposals, workflow designs
+- **Research notes** — reference material, technology evaluations
+
+### Workflow
+
+When creating or updating planning documents:
+
+1. Write files to `planning/`
+2. Commit in the planning submodule: `cd planning && git add . && git commit`
+3. Push to the planning repo: `git push origin main`
+4. Optionally update the submodule pointer in the parent repo
+
+Never create branches or worktrees on the public repo for planning work. Write directly to the submodule.
+
+### Language guidelines
+
+Planning docs should use neutral, professional language:
+- "Capability assessment" not "competitive analysis"
+- "Feature evaluation" not "gap analysis against [project]"
+- "Reference implementation study" not "reverse engineering"
+- Focus on what Pulp needs, not on critiquing other projects
 
 ---
 
@@ -537,10 +566,25 @@ The CI skill (``.agents/skills/ci/SKILL.md``) is the single process for landing 
 
 PRs also trigger `.github/workflows/build.yml` which builds and tests on all three platforms via GitHub-hosted or Namespace runners. This is a redundant safety net — the local CI skill is the primary validation path.
 
-#### When to use what
+#### Runner priority (hard rule)
 
-- **Local CI (`local_ci.py`):** Primary. Always run before merging. Uses your Mac + SSH VMs.
-- **GitHub Actions:** Automatic on PR. Catches anything local CI missed. Required green before merge.
-- **Namespace:** Use for faster Ubuntu/Windows when local VMs are slow. Available via `workflow_dispatch` with `runner_provider: namespace`.
+**Always use Namespace for cloud CI. Never rely on GitHub-hosted runners as the primary path.**
+
+1. **Namespace** (default): `gh workflow run build.yml --ref <branch> -f runner_provider=namespace` — or use `python3 tools/local-ci/local_ci.py cloud run build <branch>` which respects the configured default.
+2. **Local VMs** (fallback): `ssh ubuntu`, `ssh win` via `local_ci.py run <branch>`
+3. **GitHub-hosted** (last resort): Only if both Namespace and local VMs are unavailable.
+
+macOS runs locally in parallel with Namespace Ubuntu/Windows builds.
+
+**The shared CI config MUST have Namespace as the default provider.** Verify with:
+```bash
+python3 tools/local-ci/local_ci.py cloud defaults
+# Should show: configured default provider: namespace
+```
+
+If it shows `github-hosted`, add this to `~/Library/Application Support/Pulp/local-ci/config.json`:
+```json
+{ "github_actions": { "defaults": { "provider": "namespace", "workflow": "build" } } }
+```
 
 See `docs/guides/local-ci.md` for setup.
