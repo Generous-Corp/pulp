@@ -572,6 +572,7 @@ When updating existing skills, preserve backward compatibility — don't remove 
 | `import-design` | `.agents/skills/import-design/` | Import from Figma/Stitch/v0/Pencil |
 | `jsfx` | `.agents/skills/jsfx/` | Bounded JSFX subset support |
 | `webview-ui` | `.agents/skills/webview-ui/` | Build WebView UIs with native bridge |
+| `cli-maintenance` | `.agents/skills/cli-maintenance/` | CLI command add/modify/remove checklist and sync |
 
 ### Claude Code Plugin
 

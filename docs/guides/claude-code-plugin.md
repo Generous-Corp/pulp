@@ -48,6 +48,7 @@ This is not yet available because the Pulp repository is currently private. Thes
 | `/validate` | Run plugin format validators (auval, clap-validator) |
 | `/design [style]` | AI-driven design session with natural language |
 | `/ship` | Sign, notarize, and package for distribution |
+| `/version` | Show, bump, or check version consistency |
 | `/import-design` | Import from Figma, Stitch, v0, or Pencil |
 
 ### Skills
@@ -60,6 +61,7 @@ Skills activate automatically based on context. You don't need to invoke them ex
 | **engine** | Ask about JS engines, Three.js performance, switching to V8/JSC |
 | **import-design** | Want to import a design from Figma or other tools |
 | **webview-ui** | Want to build a WebView-based UI panel |
+| **cli-maintenance** | Add, modify, or remove CLI commands — keeps source, docs, and plugin in sync |
 
 ### Hooks
 

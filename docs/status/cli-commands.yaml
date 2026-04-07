@@ -6,6 +6,9 @@ commands:
     status: usable
     summary: Configure and build the project. Auto-detects CMake reconfiguration needs. Works with repo and standalone projects.
     args:
+      - name: --watch
+        kind: flag
+        description: "After building, watch source files for changes and rebuild automatically (500ms poll interval)."
       - name: --js-engine
         kind: option
         description: "JS engine backend: auto (default), quickjs, jsc (Apple only), v8 (requires V8 libs). Forces reconfigure."
@@ -481,3 +484,13 @@ commands:
     status: usable
     summary: Print usage information.
     docs: reference/cli.md#help
+
+  - name: version
+    status: usable
+    summary: Show, bump, or check version consistency across all surfaces.
+    subcommands:
+      - name: bump
+        summary: "Increment SDK or plugin version (major|minor|patch). Updates CMakeLists.txt and CHANGELOG.md."
+      - name: check
+        summary: "Verify version consistency: SDK constant matches CMake, AU template uses computed integer, CHANGELOG matches."
+    docs: reference/cli.md#version

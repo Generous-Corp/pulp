@@ -86,9 +86,12 @@ Configure and build the project. Auto-detects when CMake reconfiguration is need
 pulp build                    # Build all targets
 pulp build --target PulpGain_VST3  # Build specific target
 pulp build -j8                # Parallel jobs
+pulp build --watch            # Build, then watch for changes and rebuild
 ```
 
 Extra arguments are passed through to `cmake --build`.
+
+The `--watch` flag enables continuous rebuild: after the initial build, the CLI polls source files (`.cpp`, `.hpp`, `.h`, `CMakeLists.txt`) every 500ms and triggers a rebuild when changes are detected. Press Ctrl-C to stop.
 
 For standalone projects (detected via `pulp.toml`), automatically sets `CMAKE_PREFIX_PATH` to the hinted local SDK when available, otherwise to the cached SDK release.
 On Windows, `pulp build` also selects a Visual Studio generator automatically when no active MSVC shell is detected on `PATH`.
@@ -780,6 +783,48 @@ pulp audit --licenses     # verify license compatibility
 ```
 
 These flags are handled natively; without them, `pulp audit` delegates to the Python audit script as before.
+
+### version
+
+**Status**: usable
+
+Show, bump, or check version consistency.
+
+```bash
+pulp version                      # Show SDK and project version
+pulp version bump patch           # Bump SDK: 0.1.1 → 0.1.2
+pulp version bump minor           # Bump SDK: 0.1.1 → 0.2.0
+pulp version bump major           # Bump SDK: 0.1.1 → 1.0.0
+pulp version bump patch --plugin  # Bump plugin version instead
+pulp version check                # Verify all version surfaces are consistent
+```
+
+`bump` updates `CMakeLists.txt` and adds a `CHANGELOG.md` entry. The CLI's `PULP_SDK_VERSION` constant is derived from `CMakeLists.txt project(VERSION)` via a CMake-generated header — rebuild to pick up the new version.
+
+`check` verifies: SDK constant matches CMakeLists.txt, AU Info.plist template uses computed integer version (not hardcoded), and CHANGELOG latest heading matches.
+
+## Contributing to the CLI
+
+The CLI source lives in `tools/cli/` and is organized into focused files:
+
+| File | Purpose |
+|------|---------|
+| `cli_common.hpp/cpp` | Shared infrastructure: constants, color, shell exec, project detection, SDK helpers |
+| `cmd_build.cpp` | `pulp build` (configure + compile + watch mode) |
+| `cmd_create.cpp` | `pulp create` (project scaffolding) |
+| `cmd_design.cpp` | `pulp design` (AI design tool) |
+| `cmd_doctor.cpp` | `pulp doctor` + shared `run_doctor_checks()` |
+| `cmd_docs.cpp` | `pulp docs` (browse docs, fuzzy search) |
+| `cmd_misc.cpp` | `pulp test`, `status`, `clean`, `cache`, `upgrade` |
+| `cmd_run.cpp` | `pulp run` (launch standalone) |
+| `cmd_ship.cpp` | `pulp ship` (sign, package, check) |
+| `cmd_validate.cpp` | `pulp validate` (CLAP, VST3, AU, AAX) |
+| `cmd_sdk.cpp` | `pulp sdk` (install, status, clean) |
+| `cmd_audio.cpp` | `pulp audio` (model store, excerpts) |
+| `cmd_version.cpp` | `pulp version` (show, bump, check) |
+| `pulp_cli.cpp` | Main dispatch: command table + usage |
+
+To add a new command: create `cmd_<name>.cpp`, add to `CMakeLists.txt`, declare in `cli_common.hpp`, add to the command table in `pulp_cli.cpp`. See the `cli-maintenance` skill for the full checklist.
 
 ## Global Flags
 
