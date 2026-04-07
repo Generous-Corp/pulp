@@ -81,6 +81,52 @@ enum class FlexOverflow {
     auto_,      ///< Like scroll but scrollbar only when content overflows
 };
 
+// ── Viewport-Relative Dimension Units ───────────────────────────────────────
+
+enum class DimensionUnit {
+    px,      ///< Absolute pixels
+    percent, ///< Percentage of parent dimension
+    vw,      ///< Percentage of viewport width
+    vh,      ///< Percentage of viewport height
+    vmin,    ///< Percentage of min(viewport width, height)
+    vmax,    ///< Percentage of max(viewport width, height)
+    auto_    ///< Auto-sized (let layout decide)
+};
+
+struct Dimension {
+    float value = 0.0f;
+    DimensionUnit unit = DimensionUnit::px;
+
+    float resolve(float parent_size, float viewport_w, float viewport_h,
+                  float dpi_scale = 1.0f) const {
+        switch (unit) {
+            case DimensionUnit::px:      return value * dpi_scale;
+            case DimensionUnit::percent: return value / 100.0f * parent_size;
+            case DimensionUnit::vw:      return value / 100.0f * viewport_w;
+            case DimensionUnit::vh:      return value / 100.0f * viewport_h;
+            case DimensionUnit::vmin:    return value / 100.0f * std::min(viewport_w, viewport_h);
+            case DimensionUnit::vmax:    return value / 100.0f * std::max(viewport_w, viewport_h);
+            case DimensionUnit::auto_:   return 0.0f;
+        }
+        return value;
+    }
+
+    static Dimension parse(const std::string& str) {
+        if (str == "auto") return {0, DimensionUnit::auto_};
+        Dimension d;
+        size_t pos = 0;
+        try { d.value = std::stof(str, &pos); } catch (...) { return d; }
+        auto suffix = str.substr(pos);
+        if (suffix == "vw") d.unit = DimensionUnit::vw;
+        else if (suffix == "vh") d.unit = DimensionUnit::vh;
+        else if (suffix == "vmin") d.unit = DimensionUnit::vmin;
+        else if (suffix == "vmax") d.unit = DimensionUnit::vmax;
+        else if (suffix == "%") d.unit = DimensionUnit::percent;
+        else d.unit = DimensionUnit::px;
+        return d;
+    }
+};
+
 // Flex layout properties for a view
 struct FlexStyle {
     FlexDirection direction = FlexDirection::column;
@@ -114,6 +160,27 @@ struct FlexStyle {
     float preferred_height = 0;
     float max_width = 0;        ///< 0 = no maximum
     float max_height = 0;       ///< 0 = no maximum
+
+    /// Viewport-relative dimension overrides. When set (unit != px with value 0),
+    /// these are resolved before layout and override the corresponding float fields.
+    Dimension dim_width;
+    Dimension dim_height;
+    Dimension dim_min_width;
+    Dimension dim_min_height;
+
+    /// Resolve viewport-relative dimensions and apply to float fields.
+    /// Call before layout pass with the viewport size.
+    void resolve_dimensions(float parent_w, float parent_h,
+                            float viewport_w, float viewport_h, float dpi = 1.0f) {
+        if (dim_width.unit != DimensionUnit::px || dim_width.value != 0)
+            preferred_width = dim_width.resolve(parent_w, viewport_w, viewport_h, dpi);
+        if (dim_height.unit != DimensionUnit::px || dim_height.value != 0)
+            preferred_height = dim_height.resolve(parent_h, viewport_w, viewport_h, dpi);
+        if (dim_min_width.unit != DimensionUnit::px || dim_min_width.value != 0)
+            min_width = dim_min_width.resolve(parent_w, viewport_w, viewport_h, dpi);
+        if (dim_min_height.unit != DimensionUnit::px || dim_min_height.value != 0)
+            min_height = dim_min_height.resolve(parent_h, viewport_w, viewport_h, dpi);
+    }
 
     bool flex_wrap = false;     ///< Wrap to next line when main axis overflows
     int order = 0;              ///< Layout order (lower values first, default 0)
@@ -163,54 +230,6 @@ struct GridStyle {
 
     /// Parse "1fr 2fr auto 100px" into track list
     static std::vector<GridTrack> parse_template(const std::string& tmpl);
-};
-
-// ── Viewport-Relative Dimension Units ───────────────────────────────────────
-
-enum class DimensionUnit {
-    px,      ///< Absolute pixels
-    percent, ///< Percentage of parent dimension
-    vw,      ///< Percentage of viewport width
-    vh,      ///< Percentage of viewport height
-    vmin,    ///< Percentage of min(viewport width, height)
-    vmax,    ///< Percentage of max(viewport width, height)
-    auto_    ///< Auto-sized (let layout decide)
-};
-
-struct Dimension {
-    float value = 0.0f;
-    DimensionUnit unit = DimensionUnit::px;
-
-    /// Resolve this dimension to pixels given context.
-    float resolve(float parent_size, float viewport_w, float viewport_h,
-                  float dpi_scale = 1.0f) const {
-        switch (unit) {
-            case DimensionUnit::px:      return value * dpi_scale;
-            case DimensionUnit::percent: return value / 100.0f * parent_size;
-            case DimensionUnit::vw:      return value / 100.0f * viewport_w;
-            case DimensionUnit::vh:      return value / 100.0f * viewport_h;
-            case DimensionUnit::vmin:    return value / 100.0f * std::min(viewport_w, viewport_h);
-            case DimensionUnit::vmax:    return value / 100.0f * std::max(viewport_w, viewport_h);
-            case DimensionUnit::auto_:   return 0.0f;  // Caller handles auto
-        }
-        return value;
-    }
-
-    /// Parse a CSS-like dimension string (e.g., "50vw", "10px", "100%").
-    static Dimension parse(const std::string& str) {
-        if (str == "auto") return {0, DimensionUnit::auto_};
-        Dimension d;
-        size_t pos = 0;
-        try { d.value = std::stof(str, &pos); } catch (...) { return d; }
-        auto suffix = str.substr(pos);
-        if (suffix == "vw") d.unit = DimensionUnit::vw;
-        else if (suffix == "vh") d.unit = DimensionUnit::vh;
-        else if (suffix == "vmin") d.unit = DimensionUnit::vmin;
-        else if (suffix == "vmax") d.unit = DimensionUnit::vmax;
-        else if (suffix == "%") d.unit = DimensionUnit::percent;
-        else d.unit = DimensionUnit::px;
-        return d;
-    }
 };
 
 } // namespace pulp::view
