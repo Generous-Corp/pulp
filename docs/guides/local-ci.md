@@ -383,18 +383,131 @@ If your Windows VM is Windows on ARM, you can either set `cmake_platform` to `"A
 
 ### 2. Set up SSH keys
 
-Each VM needs your public key in its `authorized_keys`. Standard procedure:
+Each VM needs your public key in its `authorized_keys`. The Linux path is
+straightforward; Windows requires extra steps because OpenSSH on Windows uses a
+separate file with strict ACLs for admin users.
+
+#### Find your public key (on your Mac)
+
+If your private key is `~/.ssh/id_ed25519`, your public key is:
+
+```bash
+cat ~/.ssh/id_ed25519.pub
+```
+
+Copy the output — you'll paste it on each VM. If you're running the VM in UTM
+or another hypervisor and can't copy/paste between host and guest, install the
+guest tools for your hypervisor first (e.g. SPICE guest tools for UTM/QEMU,
+VMware Tools, VirtualBox Guest Additions).
+
+#### Linux (Ubuntu)
+
+If `ssh-copy-id` is available and you can already reach the VM by password:
 
 ```bash
 ssh-copy-id ubuntu    # or whatever your host alias is
-ssh-copy-id win2
 ```
 
-Test that passwordless login works before proceeding:
+If you're setting up from scratch on a fresh VM, SSH into it (or open its
+console) and run:
+
+**1. Note the VM's IP address:**
+
+```bash
+ip addr show
+```
+
+Look for the `inet` line under your active adapter (usually `enp0s1` or `eth0`).
+
+**2. Install and enable the SSH server** (if not already running):
+
+```bash
+sudo apt update && sudo apt install -y openssh-server
+sudo systemctl enable --now ssh
+```
+
+**3. Add your public key:**
+
+```bash
+mkdir -p ~/.ssh && chmod 700 ~/.ssh
+echo "ssh-ed25519 AAAA...your-key-here..." >> ~/.ssh/authorized_keys
+chmod 600 ~/.ssh/authorized_keys
+```
+
+**4. (Optional) Disable password auth** for tighter security:
+
+```bash
+sudo sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
+sudo systemctl restart ssh
+```
+
+#### Windows
+
+On the Windows VM, open PowerShell **as Administrator** and run:
+
+**1. Note the VM's IP address** (you'll need it for SSH config later):
+
+```powershell
+ipconfig
+```
+
+Look for the `IPv4 Address` line under your active adapter.
+
+**2. Create the admin authorized_keys file and add your public key:**
+
+```powershell
+New-Item -Force -ItemType File -Path "C:\ProgramData\ssh\administrators_authorized_keys"
+Add-Content -Path "C:\ProgramData\ssh\administrators_authorized_keys" -Value "ssh-ed25519 AAAA...your-key-here..."
+```
+
+**3. Fix the ACL** (OpenSSH ignores the file if permissions are wrong):
+
+```powershell
+icacls "C:\ProgramData\ssh\administrators_authorized_keys" /inheritance:r /grant "SYSTEM:(F)" /grant "Administrators:(F)"
+```
+
+**4. Make sure sshd is running and set to auto-start:**
+
+```powershell
+Set-Service -Name sshd -StartupType Automatic
+Start-Service sshd
+```
+
+> **Why `administrators_authorized_keys`?** Windows OpenSSH uses
+> `C:\ProgramData\ssh\administrators_authorized_keys` for users in the
+> Administrators group, not `~/.ssh/authorized_keys`. The ACL step is required —
+> without it, sshd silently skips the file and falls back to password auth.
+
+#### Set up SSH config on your Mac
+
+Add entries to `~/.ssh/config` so you can type `ssh win` instead of remembering
+IPs and usernames:
+
+```
+Host win
+  HostName 192.168.64.5
+  User your-username
+  IdentityFile ~/.ssh/id_ed25519
+  IdentitiesOnly yes
+  ConnectTimeout 5
+
+Host ubuntu
+  HostName 192.168.64.4
+  User your-username
+  IdentityFile ~/.ssh/id_ed25519
+  IdentitiesOnly yes
+  ConnectTimeout 5
+```
+
+Replace the `HostName` values with the actual IPs from `ipconfig` (Windows) or
+`ip addr` (Linux). The host aliases here (`win`, `ubuntu`) are what you'll use
+in `hosts.local.json` for CI targets.
+
+#### Test passwordless login
 
 ```bash
 ssh ubuntu exit && echo "ok"
-ssh win2 exit && echo "ok"
+ssh win exit && echo "ok"
 ```
 
 ### 3. Clone the repo on each VM
