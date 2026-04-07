@@ -119,6 +119,10 @@ pulp doctor --dry-run   # show what --fix would do
 
 In SDK mode, `pulp doctor` validates the generated project's `pulp.toml`, installed SDK location, checkout hint, and build state. In source-tree mode, it validates the active Pulp checkout and pinned external SDKs instead.
 
+### Cross-Platform CI (Optional)
+
+If you want to validate builds on macOS, Ubuntu, and Windows before merging, see the [Local CI guide](local-ci.md) — it covers SSH key setup for Windows and Linux VMs, host configuration, and the `pulp ci-local` runner.
+
 ## Project Structure
 
 A minimal Pulp plugin project:

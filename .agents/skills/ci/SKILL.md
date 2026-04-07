@@ -279,3 +279,4 @@ Keep hostnames and VM names local. Shared repo docs and skills should describe h
 ## Documentation
 
 Full setup guide: `docs/guides/local-ci.md`
+SSH key setup for Windows/Linux VMs: `docs/guides/local-ci.md` § "Set up SSH keys"
