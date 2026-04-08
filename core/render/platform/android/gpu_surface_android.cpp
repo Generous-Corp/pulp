@@ -438,8 +438,8 @@ static void draw_section_labels(canvas::Canvas& canvas) {
 
     // Title: "PULP SYNTH"
     canvas.set_fill_color(canvas::Color::rgba(205, 214, 244));
-    canvas.set_font("sans-serif", 22);
-    canvas.fill_text("PULP SYNTH", label_x, pad_top + 22);
+    canvas.set_font("sans-serif", 24);
+    canvas.fill_text("PULP SYNTH", label_x, pad_top + 24);
 
     // Helper: get widget bounds by pointer or by bridge ID
     auto widget_y = [&](const char* id) -> float {
@@ -456,10 +456,10 @@ static void draw_section_labels(canvas::Canvas& canvas) {
         return -1;
     };
 
-    // Section headers
-    auto section_color = canvas::Color::rgba(140, 148, 180);
+    // Section headers — use 12px for readability
+    auto section_color = canvas::Color::rgba(150, 158, 190);
     canvas.set_fill_color(section_color);
-    canvas.set_font("sans-serif", 10);
+    canvas.set_font("sans-serif", 12);
     canvas.set_text_align(canvas::TextAlign::left);
 
     // For JS UI: use widget IDs to find positions
@@ -490,15 +490,15 @@ static void draw_section_labels(canvas::Canvas& canvas) {
         }
         if (y > 0) {
             canvas.set_fill_color(section_color);
-            canvas.set_font("sans-serif", 10);
+            canvas.set_font("sans-serif", 12);
             canvas.fill_text(s.text, label_x, y + s.offset);
         }
     }
 
     // Knob labels (small text under each knob)
-    auto dim_color = canvas::Color::rgba(120, 125, 150);
+    auto dim_color = canvas::Color::rgba(130, 135, 165);
     canvas.set_fill_color(dim_color);
-    canvas.set_font("sans-serif", 8);
+    canvas.set_font("sans-serif", 9);
     canvas.set_text_align(canvas::TextAlign::center);
 
     struct KnobLabel { const char* text; const char* id; };
@@ -561,8 +561,9 @@ static void draw_section_labels(canvas::Canvas& canvas) {
         }
     }
 
-    // Fader labels
-    const char* fader_names[] = {"CH 1", "CH 2", "CH 3", "CH 4"};
+    // Fader labels — positioned to the left, compact
+    const char* fader_names[] = {"1", "2", "3", "4"};
+    canvas.set_font("sans-serif", 9);
     canvas.set_text_align(canvas::TextAlign::right);
     for (int i = 0; i < 4; ++i) {
         view::View* w = g_widgets.mixer[i];
@@ -574,7 +575,7 @@ static void draw_section_labels(canvas::Canvas& canvas) {
                 abs_x += v->bounds().x;
                 abs_y += v->bounds().y;
             }
-            canvas.fill_text(fader_names[i], abs_x - 4, abs_y + w->bounds().height * 0.5f + 3);
+            canvas.fill_text(fader_names[i], abs_x - 2, abs_y + w->bounds().height * 0.5f + 3);
         }
     }
     canvas.set_text_align(canvas::TextAlign::left);
@@ -659,7 +660,7 @@ static void draw_section_labels(canvas::Canvas& canvas) {
     char db_str[16];
     snprintf(db_str, sizeof(db_str), "%.1f dB", db);
     canvas.set_fill_color(canvas::Color::rgba(160, 160, 180));
-    canvas.set_font("sans-serif", 9);
+    canvas.set_font("sans-serif", 10);
     canvas.set_text_align(canvas::TextAlign::right);
     canvas.fill_text(db_str, meter_x + meter_w, meter_y - 4);
     canvas.set_text_align(canvas::TextAlign::left);

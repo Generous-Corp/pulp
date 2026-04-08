@@ -149,6 +149,11 @@ private:
         bool osc2 = p.osc2_on.load(std::memory_order_relaxed);
         bool osc3 = p.osc3_on.load(std::memory_order_relaxed);
         bool osc4 = p.osc4_on.load(std::memory_order_relaxed);
+        // Channel faders control per-oscillator volume
+        float ch1_vol = p.mix1.load(std::memory_order_relaxed);
+        float ch2_vol = p.mix2.load(std::memory_order_relaxed);
+        float ch3_vol = p.mix3.load(std::memory_order_relaxed);
+        float ch4_vol = p.mix4.load(std::memory_order_relaxed);
 
         float freq1 = pitch_to_hz(pitch);
         float freq2 = freq1 * (1.0f + detune * 0.02f);  // slight detune
@@ -160,23 +165,23 @@ private:
         float peak = 0.0f;
 
         for (int i = 0; i < num_frames; ++i) {
-            // Oscillators — each toggle enables a different voice
+            // Oscillators — toggle enables, channel fader controls volume
             float osc = 0.0f;
-            if (osc1) {  // Base pitch
+            if (osc1) {  // Base pitch — CH 1
                 float s = saw(phase1_, freq1);
-                osc += (1.0f - mix) * s + mix * square(phase1_);
+                osc += ((1.0f - mix) * s + mix * square(phase1_)) * ch1_vol;
             }
-            if (osc2) {  // Detuned
+            if (osc2) {  // Detuned — CH 2
                 float s = saw(phase2_, freq2);
-                osc += ((1.0f - mix) * s + mix * square(phase2_)) * 0.7f;
+                osc += ((1.0f - mix) * s + mix * square(phase2_)) * ch2_vol;
             }
-            if (osc3) {  // Octave up
+            if (osc3) {  // Octave up — CH 3
                 float s = saw(phase3_, freq3);
-                osc += ((1.0f - mix) * s + mix * square(phase3_)) * 0.5f;
+                osc += ((1.0f - mix) * s + mix * square(phase3_)) * ch3_vol * 0.7f;
             }
-            if (osc4) {  // Octave down (sub)
+            if (osc4) {  // Sub octave — CH 4
                 float s = saw(phase4_, freq4);
-                osc += s * 0.6f;  // sub is always saw
+                osc += s * ch4_vol * 0.8f;
             }
 
             // Envelope
