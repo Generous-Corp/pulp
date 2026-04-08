@@ -20,7 +20,7 @@ class PulpActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         Log.i(PulpApplication.LOG_TAG, "PulpActivity.onCreate")
 
-        nativeOnForeground()
+        if (PulpApplication.nativeLoaded) nativeOnForeground()
 
         setContent {
             MaterialTheme {
@@ -35,16 +35,16 @@ class PulpActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        nativeOnForeground()
+        if (PulpApplication.nativeLoaded) nativeOnForeground()
     }
 
     override fun onPause() {
         super.onPause()
-        nativeOnBackground()
+        if (PulpApplication.nativeLoaded) nativeOnBackground()
     }
 
     override fun onDestroy() {
-        nativeOnShutdown()
+        if (PulpApplication.nativeLoaded) nativeOnShutdown()
         super.onDestroy()
     }
 

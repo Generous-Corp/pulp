@@ -92,8 +92,8 @@
 54
 55    <application
 55-->/Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:30:5-68:19
-56        android:name="com.pulp.app.PulpApplication"
-56-->/Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:31:9-40
+56        android:name="com.pulp.PulpApplication"
+56-->/Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:31:9-48
 57        android:allowBackup="true"
 57-->/Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:32:9-35
 58        android:appComponentFactory="androidx.core.app.CoreComponentFactory"
@@ -111,8 +111,8 @@
 65        <!-- Main activity — configChanges prevents destruction on rotation/fold -->
 66        <activity
 66-->/Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:39:9-47:20
-67            android:name="com.pulp.app.PulpActivity"
-67-->/Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:40:13-41
+67            android:name="com.pulp.PulpActivity"
+67-->/Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:40:13-49
 68            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|keyboard|uiMode|density|fontScale|layoutDirection|locale|colorMode"
 68-->/Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:41:13-173
 69            android:exported="true" >
@@ -132,8 +132,8 @@
 77        <!-- Foreground service for background audio processing -->
 78        <service
 78-->/Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:50:9-53:39
-79            android:name="com.pulp.app.PulpAudioService"
-79-->/Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:51:13-45
+79            android:name="com.pulp.PulpAudioService"
+79-->/Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:51:13-53
 80            android:exported="false"
 80-->/Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:53:13-37
 81            android:foregroundServiceType="mediaPlayback|microphone" />
@@ -142,8 +142,8 @@
 83        <!-- Virtual MIDI port service -->
 84        <service
 84-->/Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:56:9-66:19
-85            android:name="com.pulp.app.midi.PulpMidiService"
-85-->/Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:57:13-49
+85            android:name="com.pulp.midi.PulpMidiService"
+85-->/Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:57:13-57
 86            android:exported="true"
 86-->/Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:59:13-36
 87            android:permission="android.permission.BIND_MIDI_DEVICE_SERVICE" >

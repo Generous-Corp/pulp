@@ -462,6 +462,39 @@ if(PULP_BUILD_EXAMPLES)
     add_subdirectory(examples)
 endif()
 
+# ── Android Shared Library ─────────────────────────────────────────────────
+# Android apps load native code via System.loadLibrary("pulp") which expects
+# a single libpulp.so shared library. This thin .so links all Pulp static
+# libraries and exports the JNI_OnLoad entry point.
+if(ANDROID)
+    add_library(pulp-jni SHARED
+        core/platform/src/android/jni_bridge.cpp
+    )
+    set_target_properties(pulp-jni PROPERTIES OUTPUT_NAME "pulp")
+    target_link_libraries(pulp-jni PRIVATE
+        pulp::platform
+        pulp::runtime
+        pulp::events
+        pulp::state
+        pulp::audio
+        pulp::midi
+        pulp::signal
+        pulp::format
+        pulp::canvas
+        pulp::view
+        pulp::osc
+        pulp::host
+        pulp::dsl
+        pulp::standalone
+        oboe
+        android
+        log
+    )
+    # Ensure all static library symbols are included (needed for JNI registration)
+    target_link_options(pulp-jni PRIVATE -Wl,--whole-archive
+        $<TARGET_FILE:pulp-platform> -Wl,--no-whole-archive)
+endif()
+
 # ── SDK Install Rules ──────────────────────────────────────────────────────
 # cmake --install build --prefix <staging> produces a complete Pulp SDK
 # Android builds use Gradle for packaging — skip CMake install rules.

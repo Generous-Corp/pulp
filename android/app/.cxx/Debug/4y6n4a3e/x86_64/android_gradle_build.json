@@ -188,6 +188,13 @@
       "output": "/Users/danielraffel/Code/pulp-android/android/app/build/intermediates/cxx/Debug/4y6n4a3e/obj/x86_64/pulp-import-design",
       "runtimeFiles": []
     },
+    "pulp-jni::@6890427a1f51a3e7e1df": {
+      "toolchain": "toolchain",
+      "abi": "x86_64",
+      "artifactName": "pulp-jni",
+      "output": "/Users/danielraffel/Code/pulp-android/android/app/build/intermediates/cxx/Debug/4y6n4a3e/obj/x86_64/libpulp.so",
+      "runtimeFiles": []
+    },
     "pulp-mcp::@0fdaaccf90e60f0bfbba": {
       "toolchain": "toolchain",
       "abi": "x86_64",

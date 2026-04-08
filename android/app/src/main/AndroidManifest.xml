@@ -28,7 +28,7 @@
     <uses-feature android:glEsVersion="0x00030000" android:required="false"/>
 
     <application
-        android:name=".PulpApplication"
+        android:name="com.pulp.PulpApplication"
         android:allowBackup="true"
         android:label="Pulp"
         android:supportsRtl="true"
@@ -37,7 +37,7 @@
 
         <!-- Main activity — configChanges prevents destruction on rotation/fold -->
         <activity
-            android:name=".PulpActivity"
+            android:name="com.pulp.PulpActivity"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|keyboard|uiMode|density|fontScale|layoutDirection|locale|colorMode"
             android:exported="true">
             <intent-filter>
@@ -48,13 +48,13 @@
 
         <!-- Foreground service for background audio processing -->
         <service
-            android:name=".PulpAudioService"
+            android:name="com.pulp.PulpAudioService"
             android:foregroundServiceType="mediaPlayback|microphone"
             android:exported="false"/>
 
         <!-- Virtual MIDI port service -->
         <service
-            android:name=".midi.PulpMidiService"
+            android:name="com.pulp.midi.PulpMidiService"
             android:permission="android.permission.BIND_MIDI_DEVICE_SERVICE"
             android:exported="true">
             <intent-filter>

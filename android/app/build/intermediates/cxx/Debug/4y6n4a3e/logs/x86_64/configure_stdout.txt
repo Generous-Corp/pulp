@@ -536,6 +536,6 @@
 -- Pulp: Configuring Android platform (API 26)
 -- Pulp: Oboe audio library enabled (AAudio-first)
 -- Pulp: Android platform sources wired
--- Configuring done (67.0s)
+-- Configuring done (111.8s)
 -- Generating done (0.1s)
 -- Build files have been written to: /Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/x86_64

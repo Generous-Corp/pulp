@@ -10,15 +10,22 @@ class PulpApplication : Application(), LifecycleEventObserver {
 
     override fun onCreate() {
         super.onCreate()
-        System.loadLibrary("pulp")
+        try {
+            System.loadLibrary("pulp")
+            nativeLoaded = true
+        } catch (e: UnsatisfiedLinkError) {
+            android.util.Log.e(LOG_TAG, "Failed to load libpulp.so: ${e.message}")
+        }
         ProcessLifecycleOwner.get().lifecycle.addObserver(this)
-    }
-
-    override fun onStateChanged(source: LifecycleOwner, event: Lifecycle.Event) {
-        // Process-level lifecycle — not per-activity
     }
 
     companion object {
         const val LOG_TAG = "Pulp"
+        var nativeLoaded = false
+            private set
+    }
+
+    override fun onStateChanged(source: LifecycleOwner, event: Lifecycle.Event) {
+        // Process-level lifecycle — not per-activity
     }
 }

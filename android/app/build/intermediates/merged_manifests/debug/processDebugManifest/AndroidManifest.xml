@@ -53,7 +53,7 @@
     <uses-permission android:name="com.pulp.app.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION" />
 
     <application
-        android:name="com.pulp.app.PulpApplication"
+        android:name="com.pulp.PulpApplication"
         android:allowBackup="true"
         android:appComponentFactory="androidx.core.app.CoreComponentFactory"
         android:debuggable="true"
@@ -64,7 +64,7 @@
 
         <!-- Main activity — configChanges prevents destruction on rotation/fold -->
         <activity
-            android:name="com.pulp.app.PulpActivity"
+            android:name="com.pulp.PulpActivity"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|keyboard|uiMode|density|fontScale|layoutDirection|locale|colorMode"
             android:exported="true" >
             <intent-filter>
@@ -76,13 +76,13 @@
 
         <!-- Foreground service for background audio processing -->
         <service
-            android:name="com.pulp.app.PulpAudioService"
+            android:name="com.pulp.PulpAudioService"
             android:exported="false"
             android:foregroundServiceType="mediaPlayback|microphone" />
 
         <!-- Virtual MIDI port service -->
         <service
-            android:name="com.pulp.app.midi.PulpMidiService"
+            android:name="com.pulp.midi.PulpMidiService"
             android:exported="true"
             android:permission="android.permission.BIND_MIDI_DEVICE_SERVICE" >
             <intent-filter>

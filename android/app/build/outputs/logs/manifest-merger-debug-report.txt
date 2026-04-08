@@ -147,15 +147,15 @@ MERGED from [androidx.startup:startup-runtime:1.1.1] /Users/danielraffel/.gradle
 	android:theme
 		ADDED from /Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:36:9-72
 	android:name
-		ADDED from /Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:31:9-40
-activity#com.pulp.app.PulpActivity
+		ADDED from /Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:31:9-48
+activity#com.pulp.PulpActivity
 ADDED from /Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:39:9-47:20
 	android:exported
 		ADDED from /Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:42:13-36
 	android:configChanges
 		ADDED from /Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:41:13-173
 	android:name
-		ADDED from /Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:40:13-41
+		ADDED from /Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:40:13-49
 intent-filter#action:name:android.intent.action.MAIN+category:name:android.intent.category.LAUNCHER
 ADDED from /Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:43:13-46:29
 action#android.intent.action.MAIN
@@ -166,22 +166,22 @@ category#android.intent.category.LAUNCHER
 ADDED from /Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:45:17-76
 	android:name
 		ADDED from /Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:45:27-74
-service#com.pulp.app.PulpAudioService
+service#com.pulp.PulpAudioService
 ADDED from /Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:50:9-53:39
 	android:exported
 		ADDED from /Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:53:13-37
 	android:foregroundServiceType
 		ADDED from /Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:52:13-69
 	android:name
-		ADDED from /Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:51:13-45
-service#com.pulp.app.midi.PulpMidiService
+		ADDED from /Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:51:13-53
+service#com.pulp.midi.PulpMidiService
 ADDED from /Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:56:9-66:19
 	android:exported
 		ADDED from /Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:59:13-36
 	android:permission
 		ADDED from /Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:58:13-77
 	android:name
-		ADDED from /Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:57:13-49
+		ADDED from /Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:57:13-57
 intent-filter#action:name:android.media.midi.MidiDeviceService
 ADDED from /Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:60:13-62:29
 action#android.media.midi.MidiDeviceService

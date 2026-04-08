@@ -100,6 +100,49 @@ build libpulp-standalone.a: CXX_STATIC_LIBRARY_LINKER__pulp-standalone_Debug CMa
   TARGET_FILE = libpulp-standalone.a
   TARGET_PDB = libpulp-standalone.pdb
 
+# =============================================================================
+# Object build statements for SHARED_LIBRARY target pulp-jni
+
+
+#############################################
+# Order-only phony target for pulp-jni
+
+build cmake_object_order_depends_target_pulp-jni: phony || cmake_object_order_depends_target_SDL3-static cmake_object_order_depends_target_everest cmake_object_order_depends_target_hwy cmake_object_order_depends_target_mbedcrypto cmake_object_order_depends_target_mbedtls cmake_object_order_depends_target_mbedx509 cmake_object_order_depends_target_oboe cmake_object_order_depends_target_p256m cmake_object_order_depends_target_pulp-audio cmake_object_order_depends_target_pulp-canvas cmake_object_order_depends_target_pulp-events cmake_object_order_depends_target_pulp-format cmake_object_order_depends_target_pulp-host cmake_object_order_depends_target_pulp-midi cmake_object_order_depends_target_pulp-osc cmake_object_order_depends_target_pulp-platform cmake_object_order_depends_target_pulp-runtime cmake_object_order_depends_target_pulp-standalone cmake_object_order_depends_target_pulp-state cmake_object_order_depends_target_pulp-view cmake_object_order_depends_target_yogacore
+
+build CMakeFiles/pulp-jni.dir/core/platform/src/android/jni_bridge.cpp.o: CXX_COMPILER__pulp-jni_unscanned_Debug /Users/danielraffel/Code/pulp-android/core/platform/src/android/jni_bridge.cpp || cmake_object_order_depends_target_pulp-jni
+  CONFIG = Debug
+  DEFINES = -DOBOE_ENABLE_LOGGING=1 -DPULP_ANDROID_TARGET=1 -Dpulp_jni_EXPORTS
+  DEP_FILE = CMakeFiles/pulp-jni.dir/core/platform/src/android/jni_bridge.cpp.o.d
+  FLAGS = -g -DANDROID -fdata-sections -ffunction-sections -funwind-tables -fstack-protector-strong -no-canonical-prefixes -D_FORTIFY_SOURCE=2 -Wformat -Werror=format-security  -std=c++20 -fexceptions -frtti -fno-limit-debug-info  -std=c++20 -fPIC -Wall -Wextra -Wpedantic -Wno-unused-parameter
+  INCLUDES = -I/Users/danielraffel/Code/pulp-android/core/platform/include -I/Users/danielraffel/Code/pulp-android/core/runtime/include -I/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/choc-src -I/Users/danielraffel/Code/pulp-android/core/events/include -I/Users/danielraffel/Code/pulp-android/core/state/include -I/Users/danielraffel/Code/pulp-android/core/audio/include -I/Users/danielraffel/Code/pulp-android/core/midi/include -I/Users/danielraffel/Code/pulp-android/core/signal/include -I/Users/danielraffel/Code/pulp-android/core/format/include -I/Users/danielraffel/Code/pulp-android/core/view/include -I/Users/danielraffel/Code/pulp-android/core/canvas/include -I/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/clap-src/include -I/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/lv2-src/include -I/Users/danielraffel/Code/pulp-android/core/osc/include -I/Users/danielraffel/Code/pulp-android/core/host/include -I/Users/danielraffel/Code/pulp-android/core/dsl/include -I/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/yoga-src/yoga/.. -I/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/sdl3-build/include-revision -I/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/sdl3-src/include -I/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/oboe-src/include
+  OBJECT_DIR = CMakeFiles/pulp-jni.dir
+  OBJECT_FILE_DIR = CMakeFiles/pulp-jni.dir/core/platform/src/android
+  TARGET_COMPILE_PDB = CMakeFiles/pulp-jni.dir/
+  TARGET_PDB = /Users/danielraffel/Code/pulp-android/android/app/build/intermediates/cxx/Debug/4y6n4a3e/obj/arm64-v8a/libpulp.pdb
+
+
+# =============================================================================
+# Link build statements for SHARED_LIBRARY target pulp-jni
+
+
+#############################################
+# Link the shared library /Users/danielraffel/Code/pulp-android/android/app/build/intermediates/cxx/Debug/4y6n4a3e/obj/arm64-v8a/libpulp.so
+
+build /Users/danielraffel/Code/pulp-android/android/app/build/intermediates/cxx/Debug/4y6n4a3e/obj/arm64-v8a/libpulp.so: CXX_SHARED_LIBRARY_LINKER__pulp-jni_Debug CMakeFiles/pulp-jni.dir/core/platform/src/android/jni_bridge.cpp.o | core/platform/libpulp-platform.a core/runtime/libpulp-runtime.a core/events/libpulp-events.a core/state/libpulp-state.a core/audio/libpulp-audio.a core/midi/libpulp-midi.a core/format/libpulp-format.a core/canvas/libpulp-canvas.a core/view/libpulp-view.a core/osc/libpulp-osc.a core/host/libpulp-host.a libpulp-standalone.a _deps/oboe-build/liboboe.a core/format/libpulp-format.a core/audio/libpulp-audio.a _deps/oboe-build/liboboe.a core/midi/libpulp-midi.a core/view/libpulp-view.a core/events/libpulp-events.a core/state/libpulp-state.a core/canvas/libpulp-canvas.a core/runtime/libpulp-runtime.a core/platform/libpulp-platform.a _deps/highway-build/libhwy.a _deps/mbedtls-build/library/libmbedtls.a _deps/mbedtls-build/library/libmbedx509.a _deps/mbedtls-build/library/libmbedcrypto.a _deps/mbedtls-build/3rdparty/everest/libeverest.a _deps/mbedtls-build/3rdparty/p256-m/libp256m.a _deps/yoga-build/libyogacore.a _deps/sdl3-build/libSDL3.a || _deps/highway-build/libhwy.a _deps/mbedtls-build/3rdparty/everest/libeverest.a _deps/mbedtls-build/3rdparty/p256-m/libp256m.a _deps/mbedtls-build/library/libmbedcrypto.a _deps/mbedtls-build/library/libmbedtls.a _deps/mbedtls-build/library/libmbedx509.a _deps/oboe-build/liboboe.a _deps/sdl3-build/libSDL3.a _deps/yoga-build/libyogacore.a core/audio/libpulp-audio.a core/canvas/libpulp-canvas.a core/events/libpulp-events.a core/format/libpulp-format.a core/host/libpulp-host.a core/midi/libpulp-midi.a core/osc/libpulp-osc.a core/platform/libpulp-platform.a core/runtime/libpulp-runtime.a core/state/libpulp-state.a core/view/libpulp-view.a libpulp-standalone.a
+  CONFIG = Debug
+  DEP_FILE = CMakeFiles/pulp-jni.dir/link.d
+  LANGUAGE_COMPILE_FLAGS = -g -DANDROID -fdata-sections -ffunction-sections -funwind-tables -fstack-protector-strong -no-canonical-prefixes -D_FORTIFY_SOURCE=2 -Wformat -Werror=format-security  -std=c++20 -fexceptions -frtti -fno-limit-debug-info
+  LINK_FLAGS = -shared -Wl,--build-id=sha1 -Wl,--no-rosegment -Wl,--no-undefined-version -Wl,--fatal-warnings -Wl,--no-undefined -Qunused-arguments  -Wl,--whole-archive /Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/core/platform/libpulp-platform.a -Wl,--no-whole-archive -Xlinker --dependency-file=CMakeFiles/pulp-jni.dir/link.d
+  LINK_LIBRARIES = core/platform/libpulp-platform.a  core/runtime/libpulp-runtime.a  core/events/libpulp-events.a  core/state/libpulp-state.a  core/audio/libpulp-audio.a  core/midi/libpulp-midi.a  core/format/libpulp-format.a  core/canvas/libpulp-canvas.a  core/view/libpulp-view.a  core/osc/libpulp-osc.a  core/host/libpulp-host.a  libpulp-standalone.a  _deps/oboe-build/liboboe.a  -landroid  -llog  core/format/libpulp-format.a  core/audio/libpulp-audio.a  _deps/oboe-build/liboboe.a  core/midi/libpulp-midi.a  core/view/libpulp-view.a  core/events/libpulp-events.a  core/state/libpulp-state.a  core/canvas/libpulp-canvas.a  core/runtime/libpulp-runtime.a  core/platform/libpulp-platform.a  _deps/highway-build/libhwy.a  _deps/mbedtls-build/library/libmbedtls.a  _deps/mbedtls-build/library/libmbedx509.a  _deps/mbedtls-build/library/libmbedcrypto.a  _deps/mbedtls-build/3rdparty/everest/libeverest.a  _deps/mbedtls-build/3rdparty/p256-m/libp256m.a  _deps/yoga-build/libyogacore.a  _deps/sdl3-build/libSDL3.a  -lm  -lOpenSLES  -ldl  -landroid  -llog  -lGLESv1_CM  -lGLESv2  -latomic -lm
+  OBJECT_DIR = CMakeFiles/pulp-jni.dir
+  POST_BUILD = :
+  PRE_LINK = :
+  SONAME = libpulp.so
+  SONAME_FLAG = -Wl,-soname,
+  TARGET_COMPILE_PDB = CMakeFiles/pulp-jni.dir/
+  TARGET_FILE = /Users/danielraffel/Code/pulp-android/android/app/build/intermediates/cxx/Debug/4y6n4a3e/obj/arm64-v8a/libpulp.so
+  TARGET_PDB = /Users/danielraffel/Code/pulp-android/android/app/build/intermediates/cxx/Debug/4y6n4a3e/obj/arm64-v8a/libpulp.pdb
+
 
 #############################################
 # Utility command for edit_cache
@@ -6452,17 +6495,6 @@ build core/platform/CMakeFiles/pulp-platform.dir/src/android/file_provider.cpp.o
   TARGET_COMPILE_PDB = core/platform/CMakeFiles/pulp-platform.dir/pulp-platform.pdb
   TARGET_PDB = core/platform/libpulp-platform.pdb
 
-build core/platform/CMakeFiles/pulp-platform.dir/src/android/jni_bridge.cpp.o: CXX_COMPILER__pulp-platform_unscanned_Debug /Users/danielraffel/Code/pulp-android/core/platform/src/android/jni_bridge.cpp || cmake_object_order_depends_target_pulp-platform
-  CONFIG = Debug
-  DEFINES = -DPULP_ANDROID_TARGET=1
-  DEP_FILE = core/platform/CMakeFiles/pulp-platform.dir/src/android/jni_bridge.cpp.o.d
-  FLAGS = -g -DANDROID -fdata-sections -ffunction-sections -funwind-tables -fstack-protector-strong -no-canonical-prefixes -D_FORTIFY_SOURCE=2 -Wformat -Werror=format-security  -std=c++20 -fexceptions -frtti -fno-limit-debug-info  -std=c++20 -fPIC -Wall -Wextra -Wpedantic -Wno-unused-parameter
-  INCLUDES = -I/Users/danielraffel/Code/pulp-android/core/platform/include
-  OBJECT_DIR = core/platform/CMakeFiles/pulp-platform.dir
-  OBJECT_FILE_DIR = core/platform/CMakeFiles/pulp-platform.dir/src/android
-  TARGET_COMPILE_PDB = core/platform/CMakeFiles/pulp-platform.dir/pulp-platform.pdb
-  TARGET_PDB = core/platform/libpulp-platform.pdb
-
 build core/platform/CMakeFiles/pulp-platform.dir/src/android/lifecycle.cpp.o: CXX_COMPILER__pulp-platform_unscanned_Debug /Users/danielraffel/Code/pulp-android/core/platform/src/android/lifecycle.cpp || cmake_object_order_depends_target_pulp-platform
   CONFIG = Debug
   DEFINES = -DPULP_ANDROID_TARGET=1
@@ -6493,7 +6525,7 @@ build core/platform/CMakeFiles/pulp-platform.dir/src/android/permissions.cpp.o: 
 #############################################
 # Link the static library core/platform/libpulp-platform.a
 
-build core/platform/libpulp-platform.a: CXX_STATIC_LIBRARY_LINKER__pulp-platform_Debug core/platform/CMakeFiles/pulp-platform.dir/src/platform.cpp.o core/platform/CMakeFiles/pulp-platform.dir/src/file_dialog_stub.cpp.o core/platform/CMakeFiles/pulp-platform.dir/src/popup_menu_stub.cpp.o core/platform/CMakeFiles/pulp-platform.dir/src/registry.cpp.o core/platform/CMakeFiles/pulp-platform.dir/platform/posix/child_process_posix.cpp.o core/platform/CMakeFiles/pulp-platform.dir/src/android/clipboard_android.cpp.o core/platform/CMakeFiles/pulp-platform.dir/src/android/file_provider.cpp.o core/platform/CMakeFiles/pulp-platform.dir/src/android/jni_bridge.cpp.o core/platform/CMakeFiles/pulp-platform.dir/src/android/lifecycle.cpp.o core/platform/CMakeFiles/pulp-platform.dir/src/android/permissions.cpp.o
+build core/platform/libpulp-platform.a: CXX_STATIC_LIBRARY_LINKER__pulp-platform_Debug core/platform/CMakeFiles/pulp-platform.dir/src/platform.cpp.o core/platform/CMakeFiles/pulp-platform.dir/src/file_dialog_stub.cpp.o core/platform/CMakeFiles/pulp-platform.dir/src/popup_menu_stub.cpp.o core/platform/CMakeFiles/pulp-platform.dir/src/registry.cpp.o core/platform/CMakeFiles/pulp-platform.dir/platform/posix/child_process_posix.cpp.o core/platform/CMakeFiles/pulp-platform.dir/src/android/clipboard_android.cpp.o core/platform/CMakeFiles/pulp-platform.dir/src/android/file_provider.cpp.o core/platform/CMakeFiles/pulp-platform.dir/src/android/lifecycle.cpp.o core/platform/CMakeFiles/pulp-platform.dir/src/android/permissions.cpp.o
   CONFIG = Debug
   LANGUAGE_COMPILE_FLAGS = -g -DANDROID -fdata-sections -ffunction-sections -funwind-tables -fstack-protector-strong -no-canonical-prefixes -D_FORTIFY_SOURCE=2 -Wformat -Werror=format-security  -std=c++20 -fexceptions -frtti -fno-limit-debug-info
   OBJECT_DIR = core/platform/CMakeFiles/pulp-platform.dir
@@ -9876,6 +9908,8 @@ build libpulp-tool-audio.a: phony tools/audio/libpulp-tool-audio.a
 
 build libpulp-view.a: phony core/view/libpulp-view.a
 
+build libpulp.so: phony /Users/danielraffel/Code/pulp-android/android/app/build/intermediates/cxx/Debug/4y6n4a3e/obj/arm64-v8a/libpulp.so
+
 build libyogacore.a: phony _deps/yoga-build/libyogacore.a
 
 build mbedcrypto: phony _deps/mbedtls-build/library/libmbedcrypto.a
@@ -9903,6 +9937,8 @@ build pulp-format: phony core/format/libpulp-format.a
 build pulp-host: phony core/host/libpulp-host.a
 
 build pulp-import-design: phony /Users/danielraffel/Code/pulp-android/android/app/build/intermediates/cxx/Debug/4y6n4a3e/obj/arm64-v8a/pulp-import-design
+
+build pulp-jni: phony /Users/danielraffel/Code/pulp-android/android/app/build/intermediates/cxx/Debug/4y6n4a3e/obj/arm64-v8a/libpulp.so
 
 build pulp-mcp: phony /Users/danielraffel/Code/pulp-android/android/app/build/intermediates/cxx/Debug/4y6n4a3e/obj/arm64-v8a/pulp-mcp
 
@@ -9936,7 +9972,7 @@ build yogacore: phony _deps/yoga-build/libyogacore.a
 #############################################
 # Folder: /Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a
 
-build all: phony libpulp-standalone.a _deps/choc-build/all _deps/sdl3-build/all _deps/clap-build/all _deps/yoga-build/all _deps/highway-build/all _deps/mbedtls-build/all _deps/oboe-build/all core/platform/all core/runtime/all core/events/all core/state/all core/audio/all core/midi/all core/signal/all core/format/all core/canvas/all core/view/all core/osc/all core/host/all core/dsl/all ship/all tools/audio/all tools/cli/all tools/mcp/all tools/screenshot/all tools/design/all tools/import-design/all
+build all: phony libpulp-standalone.a /Users/danielraffel/Code/pulp-android/android/app/build/intermediates/cxx/Debug/4y6n4a3e/obj/arm64-v8a/libpulp.so _deps/choc-build/all _deps/sdl3-build/all _deps/clap-build/all _deps/yoga-build/all _deps/highway-build/all _deps/mbedtls-build/all _deps/oboe-build/all core/platform/all core/runtime/all core/events/all core/state/all core/audio/all core/midi/all core/signal/all core/format/all core/canvas/all core/view/all core/osc/all core/host/all core/dsl/all ship/all tools/audio/all tools/cli/all tools/mcp/all tools/screenshot/all tools/design/all tools/import-design/all
 
 # =============================================================================
 

@@ -162,6 +162,12 @@
       "output": "/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/core/host/libpulp-host.a",
       "runtimeFiles": []
     },
+    "pulp-jni::@6890427a1f51a3e7e1df": {
+      "artifactName": "pulp-jni",
+      "abi": "arm64-v8a",
+      "output": "/Users/danielraffel/Code/pulp-android/android/app/build/intermediates/cxx/Debug/4y6n4a3e/obj/arm64-v8a/libpulp.so",
+      "runtimeFiles": []
+    },
     "everest::@6a00fa865c827e880155": {
       "artifactName": "everest",
       "abi": "arm64-v8a",

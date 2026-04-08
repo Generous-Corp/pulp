@@ -95,10 +95,13 @@ function(pulp_wire_android_sources)
         target_link_libraries(pulp-midi PRIVATE log)
     endif()
 
-    # -- Platform: JNI bridge, permissions, lifecycle, file provider --
+    # -- Platform: permissions, lifecycle, file provider, clipboard --
+    # Note: jni_bridge.cpp is NOT added here — it's compiled into the
+    # pulp-jni shared library target instead (see root CMakeLists.txt).
     if(TARGET pulp-platform)
         set(_android_plat_dir "${CMAKE_SOURCE_DIR}/core/platform/src/android")
         file(GLOB _android_plat_sources "${_android_plat_dir}/*.cpp")
+        list(FILTER _android_plat_sources EXCLUDE REGEX "jni_bridge\\.cpp$")
         if(_android_plat_sources)
             target_sources(pulp-platform PRIVATE ${_android_plat_sources})
         endif()

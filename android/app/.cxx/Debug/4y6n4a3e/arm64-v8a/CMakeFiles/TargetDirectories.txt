@@ -1,4 +1,5 @@
 /Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/CMakeFiles/pulp-standalone.dir
+/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/CMakeFiles/pulp-jni.dir
 /Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/CMakeFiles/edit_cache.dir
 /Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/CMakeFiles/rebuild_cache.dir
 /Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/CMakeFiles/list_install_components.dir
