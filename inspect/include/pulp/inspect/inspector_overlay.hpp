@@ -96,4 +96,10 @@ private:
     static constexpr float kStatsBarHeight = 24.0f;
 };
 
+/// Global inspector instance for the current window.
+/// Set by the host when creating the inspector. The platform WindowHost
+/// checks this to intercept key/mouse events before normal dispatch.
+/// Thread-safe: only accessed on the UI thread.
+inline InspectorOverlay* g_active_inspector = nullptr;
+
 } // namespace pulp::inspect

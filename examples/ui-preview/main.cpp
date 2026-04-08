@@ -429,6 +429,7 @@ int main(int argc, char* argv[]) {
 
     // Inspector overlay — toggle with Cmd+I, or pre-enable via PULP_INSPECTOR=1
     pulp::inspect::InspectorOverlay inspector(root);
+    pulp::inspect::g_active_inspector = &inspector;
     if (pulp::runtime::get_env("PULP_INSPECTOR")) {
         inspector.set_active(true);
         std::cout << "Inspector enabled (Cmd+I to toggle)\n";

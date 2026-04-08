@@ -43,6 +43,7 @@ target_include_directories(pulp-view
         $<INSTALL_INTERFACE:include>
     PRIVATE
         ${CMAKE_CURRENT_BINARY_DIR}  # For generated web_compat_preludes_gen.hpp
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../inspect/include>  # Inspector overlay header for platform key/mouse interception
 )
 
 # ── JS engine backend selection ──────────────────────────────────────────────
