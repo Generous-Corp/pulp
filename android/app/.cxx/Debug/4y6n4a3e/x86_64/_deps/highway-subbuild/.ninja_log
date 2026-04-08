@@ -1,0 +1,21 @@
+# ninja log v6
+0	19	1775607128214027612	highway-populate-prefix/src/highway-populate-stamp/highway-populate-mkdir	e635ecd1d00471c1
+0	19	1775607128214027612	/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/x86_64/_deps/highway-subbuild/highway-populate-prefix/src/highway-populate-stamp/highway-populate-mkdir	e635ecd1d00471c1
+19	7434	1775607135628940429	highway-populate-prefix/src/highway-populate-stamp/highway-populate-download	af42818d86de96a1
+19	7434	1775607135628940429	/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/x86_64/_deps/highway-subbuild/highway-populate-prefix/src/highway-populate-stamp/highway-populate-download	af42818d86de96a1
+7434	7471	1775607135666362403	highway-populate-prefix/src/highway-populate-stamp/highway-populate-update_disconnected	96680f39e474b9da
+7434	7471	1775607135666362403	/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/x86_64/_deps/highway-subbuild/highway-populate-prefix/src/highway-populate-stamp/highway-populate-update_disconnected	96680f39e474b9da
+7471	7489	1775607135684286617	highway-populate-prefix/src/highway-populate-stamp/highway-populate-patch_disconnected	798c398a84d9dc95
+7471	7489	1775607135684286617	/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/x86_64/_deps/highway-subbuild/highway-populate-prefix/src/highway-populate-stamp/highway-populate-patch_disconnected	798c398a84d9dc95
+7489	7506	1775607135701293787	highway-populate-prefix/src/highway-populate-stamp/highway-populate-configure	bb5c8f7d95d59baf
+7489	7506	1775607135701293787	/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/x86_64/_deps/highway-subbuild/highway-populate-prefix/src/highway-populate-stamp/highway-populate-configure	bb5c8f7d95d59baf
+7506	7523	1775607135718610875	highway-populate-prefix/src/highway-populate-stamp/highway-populate-build	5ec3ab6f0d284b15
+7506	7523	1775607135718610875	/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/x86_64/_deps/highway-subbuild/highway-populate-prefix/src/highway-populate-stamp/highway-populate-build	5ec3ab6f0d284b15
+7523	7541	1775607135735927838	highway-populate-prefix/src/highway-populate-stamp/highway-populate-install	c2652a4516966966
+7523	7541	1775607135735927838	/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/x86_64/_deps/highway-subbuild/highway-populate-prefix/src/highway-populate-stamp/highway-populate-install	c2652a4516966966
+7541	7559	1775607135754548512	highway-populate-prefix/src/highway-populate-stamp/highway-populate-test	9fdf594522025161
+7541	7559	1775607135754548512	/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/x86_64/_deps/highway-subbuild/highway-populate-prefix/src/highway-populate-stamp/highway-populate-test	9fdf594522025161
+7559	7582	1775607135777802199	CMakeFiles/highway-populate-complete	2944ad79ed5c069e
+7559	7582	1775607135777802199	highway-populate-prefix/src/highway-populate-stamp/highway-populate-done	2944ad79ed5c069e
+7559	7582	1775607135777802199	/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/x86_64/_deps/highway-subbuild/CMakeFiles/highway-populate-complete	2944ad79ed5c069e
+7559	7582	1775607135777802199	/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/x86_64/_deps/highway-subbuild/highway-populate-prefix/src/highway-populate-stamp/highway-populate-done	2944ad79ed5c069e

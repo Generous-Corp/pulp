@@ -1,0 +1,78 @@
+{
+	"backtrace" : 1,
+	"backtraceGraph" : 
+	{
+		"commands" : 
+		[
+			"add_custom_target"
+		],
+		"files" : 
+		[
+			"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/library/CMakeLists.txt"
+		],
+		"nodes" : 
+		[
+			{
+				"file" : 0
+			},
+			{
+				"command" : 0,
+				"file" : 0,
+				"line" : 356,
+				"parent" : 0
+			}
+		]
+	},
+	"dependencies" : 
+	[
+		{
+			"id" : "mbedcrypto::@085c30ee5801d290d8db"
+		},
+		{
+			"id" : "mbedx509::@085c30ee5801d290d8db"
+		},
+		{
+			"id" : "mbedtls::@085c30ee5801d290d8db"
+		}
+	],
+	"id" : "lib::@085c30ee5801d290d8db",
+	"name" : "lib",
+	"paths" : 
+	{
+		"build" : "_deps/mbedtls-build/library",
+		"source" : "android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/library"
+	},
+	"sourceGroups" : 
+	[
+		{
+			"name" : "",
+			"sourceIndexes" : 
+			[
+				0
+			]
+		},
+		{
+			"name" : "CMake Rules",
+			"sourceIndexes" : 
+			[
+				1
+			]
+		}
+	],
+	"sources" : 
+	[
+		{
+			"backtrace" : 1,
+			"isGenerated" : true,
+			"path" : "android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-build/library/CMakeFiles/lib",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 0,
+			"isGenerated" : true,
+			"path" : "android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-build/library/CMakeFiles/lib.rule",
+			"sourceGroupIndex" : 1
+		}
+	],
+	"type" : "UTILITY"
+}

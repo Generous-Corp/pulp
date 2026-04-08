@@ -1,0 +1,704 @@
+{
+	"artifacts" : 
+	[
+		{
+			"path" : "/Users/danielraffel/Code/pulp-android/android/app/build/intermediates/cxx/Debug/4y6n4a3e/obj/arm64-v8a/pulp"
+		}
+	],
+	"backtrace" : 1,
+	"backtraceGraph" : 
+	{
+		"commands" : 
+		[
+			"add_executable",
+			"install",
+			"target_link_libraries",
+			"sdl_generic_link_dependency",
+			"sdl_link_dependency",
+			"pulp_wire_android_sources",
+			"add_compile_options",
+			"add_compile_definitions",
+			"include",
+			"target_compile_features"
+		],
+		"files" : 
+		[
+			"tools/cli/CMakeLists.txt",
+			"core/view/CMakeLists.txt",
+			"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/sdl3-src/cmake/sdltargets.cmake",
+			"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/sdl3-src/CMakeLists.txt",
+			"tools/audio/CMakeLists.txt",
+			"tools/cmake/PulpAndroid.cmake",
+			"CMakeLists.txt",
+			"core/format/CMakeLists.txt",
+			"core/runtime/CMakeLists.txt",
+			"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/library/CMakeLists.txt"
+		],
+		"nodes" : 
+		[
+			{
+				"file" : 0
+			},
+			{
+				"command" : 0,
+				"file" : 0,
+				"line" : 2,
+				"parent" : 0
+			},
+			{
+				"command" : 1,
+				"file" : 0,
+				"line" : 14,
+				"parent" : 0
+			},
+			{
+				"command" : 2,
+				"file" : 0,
+				"line" : 6,
+				"parent" : 0
+			},
+			{
+				"file" : 1
+			},
+			{
+				"command" : 2,
+				"file" : 1,
+				"line" : 198,
+				"parent" : 4
+			},
+			{
+				"command" : 2,
+				"file" : 1,
+				"line" : 211,
+				"parent" : 4
+			},
+			{
+				"command" : 2,
+				"file" : 1,
+				"line" : 220,
+				"parent" : 4
+			},
+			{
+				"file" : 3
+			},
+			{
+				"command" : 4,
+				"file" : 3,
+				"line" : 1041,
+				"parent" : 8
+			},
+			{
+				"command" : 3,
+				"file" : 2,
+				"line" : 75,
+				"parent" : 9
+			},
+			{
+				"command" : 2,
+				"file" : 2,
+				"line" : 56,
+				"parent" : 10
+			},
+			{
+				"command" : 4,
+				"file" : 3,
+				"line" : 1392,
+				"parent" : 8
+			},
+			{
+				"command" : 3,
+				"file" : 2,
+				"line" : 75,
+				"parent" : 12
+			},
+			{
+				"command" : 2,
+				"file" : 2,
+				"line" : 56,
+				"parent" : 13
+			},
+			{
+				"command" : 4,
+				"file" : 3,
+				"line" : 1403,
+				"parent" : 8
+			},
+			{
+				"command" : 3,
+				"file" : 2,
+				"line" : 75,
+				"parent" : 15
+			},
+			{
+				"command" : 2,
+				"file" : 2,
+				"line" : 56,
+				"parent" : 16
+			},
+			{
+				"file" : 4
+			},
+			{
+				"command" : 2,
+				"file" : 4,
+				"line" : 17,
+				"parent" : 18
+			},
+			{
+				"file" : 6
+			},
+			{
+				"command" : 5,
+				"file" : 6,
+				"line" : 356,
+				"parent" : 20
+			},
+			{
+				"command" : 2,
+				"file" : 5,
+				"line" : 77,
+				"parent" : 21
+			},
+			{
+				"command" : 4,
+				"file" : 3,
+				"line" : 1317,
+				"parent" : 8
+			},
+			{
+				"command" : 3,
+				"file" : 2,
+				"line" : 75,
+				"parent" : 23
+			},
+			{
+				"command" : 2,
+				"file" : 2,
+				"line" : 56,
+				"parent" : 24
+			},
+			{
+				"file" : 7
+			},
+			{
+				"command" : 2,
+				"file" : 7,
+				"line" : 17,
+				"parent" : 26
+			},
+			{
+				"file" : 8
+			},
+			{
+				"command" : 2,
+				"file" : 8,
+				"line" : 52,
+				"parent" : 28
+			},
+			{
+				"command" : 2,
+				"file" : 5,
+				"line" : 105,
+				"parent" : 21
+			},
+			{
+				"command" : 2,
+				"file" : 8,
+				"line" : 53,
+				"parent" : 28
+			},
+			{
+				"command" : 2,
+				"file" : 8,
+				"line" : 57,
+				"parent" : 28
+			},
+			{
+				"file" : 9
+			},
+			{
+				"command" : 2,
+				"file" : 9,
+				"line" : 284,
+				"parent" : 33
+			},
+			{
+				"command" : 2,
+				"file" : 9,
+				"line" : 288,
+				"parent" : 33
+			},
+			{
+				"command" : 6,
+				"file" : 6,
+				"line" : 68,
+				"parent" : 20
+			},
+			{
+				"command" : 8,
+				"file" : 6,
+				"line" : 337,
+				"parent" : 20
+			},
+			{
+				"file" : 5,
+				"parent" : 37
+			},
+			{
+				"command" : 7,
+				"file" : 5,
+				"line" : 50,
+				"parent" : 38
+			},
+			{
+				"command" : 9,
+				"file" : 0,
+				"line" : 5,
+				"parent" : 0
+			}
+		]
+	},
+	"compileGroups" : 
+	[
+		{
+			"compileCommandFragments" : 
+			[
+				{
+					"fragment" : "-g -DANDROID -fdata-sections -ffunction-sections -funwind-tables -fstack-protector-strong -no-canonical-prefixes -D_FORTIFY_SOURCE=2 -Wformat -Werror=format-security  -std=c++20 -fexceptions -frtti -fno-limit-debug-info  -std=c++20 -fPIE"
+				},
+				{
+					"backtrace" : 36,
+					"fragment" : "-Wall"
+				},
+				{
+					"backtrace" : 36,
+					"fragment" : "-Wextra"
+				},
+				{
+					"backtrace" : 36,
+					"fragment" : "-Wpedantic"
+				},
+				{
+					"backtrace" : 36,
+					"fragment" : "-Wno-unused-parameter"
+				}
+			],
+			"defines" : 
+			[
+				{
+					"backtrace" : 39,
+					"define" : "PULP_ANDROID_TARGET=1"
+				}
+			],
+			"includes" : 
+			[
+				{
+					"backtrace" : 3,
+					"path" : "/Users/danielraffel/Code/pulp-android/core/runtime/include"
+				},
+				{
+					"backtrace" : 3,
+					"path" : "/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/choc-src"
+				},
+				{
+					"backtrace" : 3,
+					"path" : "/Users/danielraffel/Code/pulp-android/core/platform/include"
+				},
+				{
+					"backtrace" : 3,
+					"path" : "/Users/danielraffel/Code/pulp-android/tools/audio/include"
+				},
+				{
+					"backtrace" : 3,
+					"path" : "/Users/danielraffel/Code/pulp-android/core/audio/include"
+				},
+				{
+					"backtrace" : 3,
+					"path" : "/Users/danielraffel/Code/pulp-android/ship/include"
+				},
+				{
+					"backtrace" : 3,
+					"path" : "/Users/danielraffel/Code/pulp-android/core/view/include"
+				},
+				{
+					"backtrace" : 3,
+					"path" : "/Users/danielraffel/Code/pulp-android/core/canvas/include"
+				},
+				{
+					"backtrace" : 3,
+					"path" : "/Users/danielraffel/Code/pulp-android/core/events/include"
+				},
+				{
+					"backtrace" : 3,
+					"path" : "/Users/danielraffel/Code/pulp-android/core/state/include"
+				},
+				{
+					"backtrace" : 3,
+					"path" : "/Users/danielraffel/Code/pulp-android/core/signal/include"
+				},
+				{
+					"backtrace" : 3,
+					"path" : "/Users/danielraffel/Code/pulp-android/core/format/include"
+				},
+				{
+					"backtrace" : 3,
+					"path" : "/Users/danielraffel/Code/pulp-android/core/midi/include"
+				},
+				{
+					"backtrace" : 3,
+					"path" : "/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/clap-src/include"
+				},
+				{
+					"backtrace" : 3,
+					"path" : "/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/lv2-src/include"
+				}
+			],
+			"language" : "CXX",
+			"languageStandard" : 
+			{
+				"backtraces" : 
+				[
+					40
+				],
+				"standard" : "20"
+			},
+			"sourceIndexes" : 
+			[
+				0,
+				1,
+				2,
+				3,
+				4
+			],
+			"sysroot" : 
+			{
+				"path" : "/Users/danielraffel/Library/Android/sdk/ndk/30.0.14904198/toolchains/llvm/prebuilt/darwin-x86_64/sysroot"
+			}
+		}
+	],
+	"dependencies" : 
+	[
+		{
+			"backtrace" : 3,
+			"id" : "SDL3-static::@405c074760d2f6728126"
+		},
+		{
+			"backtrace" : 3,
+			"id" : "yogacore::@5d2a3e0bec94e06e80db"
+		},
+		{
+			"backtrace" : 3,
+			"id" : "hwy::@6818ec3213dbbeb74f3c"
+		},
+		{
+			"backtrace" : 3,
+			"id" : "everest::@6a00fa865c827e880155"
+		},
+		{
+			"backtrace" : 3,
+			"id" : "p256m::@f348ccf1dd5d547d79c9"
+		},
+		{
+			"backtrace" : 3,
+			"id" : "mbedcrypto::@085c30ee5801d290d8db"
+		},
+		{
+			"backtrace" : 3,
+			"id" : "mbedx509::@085c30ee5801d290d8db"
+		},
+		{
+			"backtrace" : 3,
+			"id" : "mbedtls::@085c30ee5801d290d8db"
+		},
+		{
+			"backtrace" : 3,
+			"id" : "oboe::@34d0455163043826f65a"
+		},
+		{
+			"backtrace" : 3,
+			"id" : "pulp-platform::@cdc606a2e1aadfff6cfa"
+		},
+		{
+			"backtrace" : 3,
+			"id" : "pulp-runtime::@f39d3a19e87f308081fa"
+		},
+		{
+			"backtrace" : 3,
+			"id" : "pulp-events::@ac3f04d75d7a018b61ec"
+		},
+		{
+			"backtrace" : 3,
+			"id" : "pulp-state::@2fc49d3348e5ccf49dd0"
+		},
+		{
+			"backtrace" : 3,
+			"id" : "pulp-audio::@7878d1e6cf37967c1795"
+		},
+		{
+			"backtrace" : 3,
+			"id" : "pulp-midi::@96176ce33efe89cb9e17"
+		},
+		{
+			"backtrace" : 3,
+			"id" : "pulp-format::@dbb2fdbec15caffeb085"
+		},
+		{
+			"backtrace" : 3,
+			"id" : "pulp-canvas::@3a2e95c93ac539041230"
+		},
+		{
+			"backtrace" : 3,
+			"id" : "pulp-view::@239ece156436bc6f395e"
+		},
+		{
+			"backtrace" : 3,
+			"id" : "pulp-ship::@2e35c1ca9dd9986b6ac9"
+		},
+		{
+			"backtrace" : 3,
+			"id" : "pulp-tool-audio::@71ec5fe62708f6fa4d8f"
+		}
+	],
+	"id" : "pulp-cli::@4b41690f618ed184e625",
+	"install" : 
+	{
+		"destinations" : 
+		[
+			{
+				"backtrace" : 2,
+				"path" : "bin"
+			}
+		],
+		"prefix" : 
+		{
+			"path" : "/usr/local"
+		}
+	},
+	"link" : 
+	{
+		"commandFragments" : 
+		[
+			{
+				"fragment" : "-g -DANDROID -fdata-sections -ffunction-sections -funwind-tables -fstack-protector-strong -no-canonical-prefixes -D_FORTIFY_SOURCE=2 -Wformat -Werror=format-security  -std=c++20 -fexceptions -frtti -fno-limit-debug-info",
+				"role" : "flags"
+			},
+			{
+				"fragment" : "-Wl,--build-id=sha1 -Wl,--no-rosegment -Wl,--no-undefined-version -Wl,--fatal-warnings -Wl,--no-undefined -Qunused-arguments",
+				"role" : "flags"
+			},
+			{
+				"fragment" : "-fPIE -pie",
+				"role" : "flags"
+			},
+			{
+				"backtrace" : 3,
+				"fragment" : "core/runtime/libpulp-runtime.a",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 3,
+				"fragment" : "tools/audio/libpulp-tool-audio.a",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 3,
+				"fragment" : "ship/libpulp-ship.a",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 3,
+				"fragment" : "core/view/libpulp-view.a",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 3,
+				"fragment" : "core/format/libpulp-format.a",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 3,
+				"fragment" : "core/view/libpulp-view.a",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 5,
+				"fragment" : "core/canvas/libpulp-canvas.a",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 5,
+				"fragment" : "core/events/libpulp-events.a",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 6,
+				"fragment" : "_deps/yoga-build/libyogacore.a",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 7,
+				"fragment" : "_deps/sdl3-build/libSDL3.a",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 11,
+				"fragment" : "-lm",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 14,
+				"fragment" : "-ldl",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 17,
+				"fragment" : "-lGLESv1_CM",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 17,
+				"fragment" : "-lGLESv2",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 19,
+				"fragment" : "core/audio/libpulp-audio.a",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 22,
+				"fragment" : "_deps/oboe-build/liboboe.a",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 25,
+				"fragment" : "-lOpenSLES",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 5,
+				"fragment" : "core/state/libpulp-state.a",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 27,
+				"fragment" : "core/midi/libpulp-midi.a",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 3,
+				"fragment" : "core/runtime/libpulp-runtime.a",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 29,
+				"fragment" : "core/platform/libpulp-platform.a",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 30,
+				"fragment" : "-landroid",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 31,
+				"fragment" : "_deps/highway-build/libhwy.a",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 32,
+				"fragment" : "_deps/mbedtls-build/library/libmbedtls.a",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 32,
+				"fragment" : "_deps/mbedtls-build/library/libmbedx509.a",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 32,
+				"fragment" : "_deps/mbedtls-build/library/libmbedcrypto.a",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 34,
+				"fragment" : "_deps/mbedtls-build/3rdparty/everest/libeverest.a",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 35,
+				"fragment" : "_deps/mbedtls-build/3rdparty/p256-m/libp256m.a",
+				"role" : "libraries"
+			},
+			{
+				"backtrace" : 30,
+				"fragment" : "-llog",
+				"role" : "libraries"
+			},
+			{
+				"fragment" : "-latomic -lm",
+				"role" : "libraries"
+			}
+		],
+		"language" : "CXX",
+		"sysroot" : 
+		{
+			"path" : "/Users/danielraffel/Library/Android/sdk/ndk/30.0.14904198/toolchains/llvm/prebuilt/darwin-x86_64/sysroot"
+		}
+	},
+	"name" : "pulp-cli",
+	"nameOnDisk" : "pulp",
+	"paths" : 
+	{
+		"build" : "tools/cli",
+		"source" : "tools/cli"
+	},
+	"sourceGroups" : 
+	[
+		{
+			"name" : "Source Files",
+			"sourceIndexes" : 
+			[
+				0,
+				1,
+				2,
+				3,
+				4
+			]
+		}
+	],
+	"sources" : 
+	[
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "tools/cli/pulp_cli.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "tools/cli/design_binding.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "tools/cli/create_targets.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "tools/cli/package_registry.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "tools/cli/package_commands.cpp",
+			"sourceGroupIndex" : 0
+		}
+	],
+	"type" : "EXECUTABLE"
+}

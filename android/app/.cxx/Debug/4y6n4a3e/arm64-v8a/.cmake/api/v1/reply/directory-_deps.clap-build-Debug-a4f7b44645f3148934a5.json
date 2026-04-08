@@ -1,0 +1,99 @@
+{
+	"backtraceGraph" : 
+	{
+		"commands" : 
+		[
+			"install"
+		],
+		"files" : 
+		[
+			"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/clap-src/CMakeLists.txt"
+		],
+		"nodes" : 
+		[
+			{
+				"file" : 0
+			},
+			{
+				"command" : 0,
+				"file" : 0,
+				"line" : 30,
+				"parent" : 0
+			},
+			{
+				"command" : 0,
+				"file" : 0,
+				"line" : 32,
+				"parent" : 0
+			},
+			{
+				"command" : 0,
+				"file" : 0,
+				"line" : 39,
+				"parent" : 0
+			},
+			{
+				"command" : 0,
+				"file" : 0,
+				"line" : 45,
+				"parent" : 0
+			}
+		]
+	},
+	"installers" : 
+	[
+		{
+			"backtrace" : 1,
+			"component" : "Unspecified",
+			"destination" : "include",
+			"paths" : 
+			[
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/clap-src/include/clap"
+			],
+			"type" : "directory"
+		},
+		{
+			"backtrace" : 2,
+			"component" : "Unspecified",
+			"destination" : "lib/cmake/clap",
+			"exportName" : "clap",
+			"exportTargets" : 
+			[
+				{
+					"id" : "clap::@b71d22d765a1a6238c56",
+					"index" : 0
+				}
+			],
+			"paths" : 
+			[
+				"_deps/clap-build/CMakeFiles/Export/0799b36fd95976e47fed8257dc9b6298/clap-config.cmake"
+			],
+			"type" : "export"
+		},
+		{
+			"backtrace" : 3,
+			"component" : "Unspecified",
+			"destination" : "lib/cmake/clap",
+			"paths" : 
+			[
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/clap-build/clap-config-version.cmake"
+			],
+			"type" : "file"
+		},
+		{
+			"backtrace" : 4,
+			"component" : "Unspecified",
+			"destination" : "lib/pkgconfig",
+			"paths" : 
+			[
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/clap-build/clap.pc"
+			],
+			"type" : "file"
+		}
+	],
+	"paths" : 
+	{
+		"build" : "_deps/clap-build",
+		"source" : "android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/clap-src"
+	}
+}

@@ -1,0 +1,257 @@
+{
+	"archive" : {},
+	"artifacts" : 
+	[
+		{
+			"path" : "core/events/libpulp-events.a"
+		}
+	],
+	"backtrace" : 1,
+	"backtraceGraph" : 
+	{
+		"commands" : 
+		[
+			"add_library",
+			"target_link_libraries",
+			"add_compile_options",
+			"add_compile_definitions",
+			"include",
+			"target_include_directories",
+			"target_sources"
+		],
+		"files" : 
+		[
+			"core/events/CMakeLists.txt",
+			"CMakeLists.txt",
+			"tools/cmake/PulpAndroid.cmake"
+		],
+		"nodes" : 
+		[
+			{
+				"file" : 0
+			},
+			{
+				"command" : 0,
+				"file" : 0,
+				"line" : 1,
+				"parent" : 0
+			},
+			{
+				"command" : 1,
+				"file" : 0,
+				"line" : 19,
+				"parent" : 0
+			},
+			{
+				"file" : 1
+			},
+			{
+				"command" : 2,
+				"file" : 1,
+				"line" : 68,
+				"parent" : 3
+			},
+			{
+				"command" : 4,
+				"file" : 1,
+				"line" : 337,
+				"parent" : 3
+			},
+			{
+				"file" : 2,
+				"parent" : 5
+			},
+			{
+				"command" : 3,
+				"file" : 2,
+				"line" : 50,
+				"parent" : 6
+			},
+			{
+				"command" : 5,
+				"file" : 0,
+				"line" : 4,
+				"parent" : 0
+			},
+			{
+				"command" : 6,
+				"file" : 0,
+				"line" : 10,
+				"parent" : 0
+			}
+		]
+	},
+	"compileGroups" : 
+	[
+		{
+			"compileCommandFragments" : 
+			[
+				{
+					"fragment" : "-g -DANDROID -fdata-sections -ffunction-sections -funwind-tables -fstack-protector-strong -no-canonical-prefixes -D_FORTIFY_SOURCE=2 -Wformat -Werror=format-security  -std=c++20 -fexceptions -frtti -fno-limit-debug-info  -std=c++20 -fPIC"
+				},
+				{
+					"backtrace" : 4,
+					"fragment" : "-Wall"
+				},
+				{
+					"backtrace" : 4,
+					"fragment" : "-Wextra"
+				},
+				{
+					"backtrace" : 4,
+					"fragment" : "-Wpedantic"
+				},
+				{
+					"backtrace" : 4,
+					"fragment" : "-Wno-unused-parameter"
+				}
+			],
+			"defines" : 
+			[
+				{
+					"backtrace" : 7,
+					"define" : "PULP_ANDROID_TARGET=1"
+				}
+			],
+			"includes" : 
+			[
+				{
+					"backtrace" : 8,
+					"path" : "/Users/danielraffel/Code/pulp-android/core/events/include"
+				},
+				{
+					"backtrace" : 2,
+					"path" : "/Users/danielraffel/Code/pulp-android/core/runtime/include"
+				},
+				{
+					"backtrace" : 2,
+					"path" : "/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/x86_64/_deps/choc-src"
+				},
+				{
+					"backtrace" : 2,
+					"path" : "/Users/danielraffel/Code/pulp-android/core/platform/include"
+				}
+			],
+			"language" : "CXX",
+			"languageStandard" : 
+			{
+				"backtraces" : 
+				[
+					1
+				],
+				"standard" : "20"
+			},
+			"sourceIndexes" : 
+			[
+				0,
+				1,
+				2,
+				3,
+				4,
+				5
+			],
+			"sysroot" : 
+			{
+				"path" : "/Users/danielraffel/Library/Android/sdk/ndk/30.0.14904198/toolchains/llvm/prebuilt/darwin-x86_64/sysroot"
+			}
+		}
+	],
+	"dependencies" : 
+	[
+		{
+			"backtrace" : 2,
+			"id" : "hwy::@6818ec3213dbbeb74f3c"
+		},
+		{
+			"backtrace" : 2,
+			"id" : "everest::@6a00fa865c827e880155"
+		},
+		{
+			"backtrace" : 2,
+			"id" : "p256m::@f348ccf1dd5d547d79c9"
+		},
+		{
+			"backtrace" : 2,
+			"id" : "mbedcrypto::@085c30ee5801d290d8db"
+		},
+		{
+			"backtrace" : 2,
+			"id" : "mbedx509::@085c30ee5801d290d8db"
+		},
+		{
+			"backtrace" : 2,
+			"id" : "mbedtls::@085c30ee5801d290d8db"
+		},
+		{
+			"backtrace" : 2,
+			"id" : "pulp-platform::@cdc606a2e1aadfff6cfa"
+		},
+		{
+			"backtrace" : 2,
+			"id" : "pulp-runtime::@f39d3a19e87f308081fa"
+		}
+	],
+	"id" : "pulp-events::@ac3f04d75d7a018b61ec",
+	"name" : "pulp-events",
+	"nameOnDisk" : "libpulp-events.a",
+	"paths" : 
+	{
+		"build" : "core/events",
+		"source" : "core/events"
+	},
+	"sourceGroups" : 
+	[
+		{
+			"name" : "Source Files",
+			"sourceIndexes" : 
+			[
+				0,
+				1,
+				2,
+				3,
+				4,
+				5
+			]
+		}
+	],
+	"sources" : 
+	[
+		{
+			"backtrace" : 9,
+			"compileGroupIndex" : 0,
+			"path" : "core/events/src/event_loop.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 9,
+			"compileGroupIndex" : 0,
+			"path" : "core/events/src/timer.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 9,
+			"compileGroupIndex" : 0,
+			"path" : "core/events/src/async_updater.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 9,
+			"compileGroupIndex" : 0,
+			"path" : "core/events/src/interprocess_connection.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 9,
+			"compileGroupIndex" : 0,
+			"path" : "core/events/src/child_process_manager.cpp",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 9,
+			"compileGroupIndex" : 0,
+			"path" : "core/events/src/volume_detector.cpp",
+			"sourceGroupIndex" : 0
+		}
+	],
+	"type" : "STATIC_LIBRARY"
+}

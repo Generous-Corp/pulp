@@ -1,0 +1,21 @@
+# ninja log v6
+1	17	1775607125526393309	yoga-populate-prefix/src/yoga-populate-stamp/yoga-populate-mkdir	c293a81ca03b1375
+1	17	1775607125526393309	/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/x86_64/_deps/yoga-subbuild/yoga-populate-prefix/src/yoga-populate-stamp/yoga-populate-mkdir	c293a81ca03b1375
+17	2023	1775607127532119594	yoga-populate-prefix/src/yoga-populate-stamp/yoga-populate-download	7e8ec6b35c425654
+17	2023	1775607127532119594	/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/x86_64/_deps/yoga-subbuild/yoga-populate-prefix/src/yoga-populate-stamp/yoga-populate-download	7e8ec6b35c425654
+2023	2065	1775607127574654457	yoga-populate-prefix/src/yoga-populate-stamp/yoga-populate-update_disconnected	180e102f9e5fdee7
+2023	2065	1775607127574654457	/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/x86_64/_deps/yoga-subbuild/yoga-populate-prefix/src/yoga-populate-stamp/yoga-populate-update_disconnected	180e102f9e5fdee7
+2065	2085	1775607127593852508	yoga-populate-prefix/src/yoga-populate-stamp/yoga-populate-patch_disconnected	969a47e4dd162b40
+2065	2085	1775607127593852508	/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/x86_64/_deps/yoga-subbuild/yoga-populate-prefix/src/yoga-populate-stamp/yoga-populate-patch_disconnected	969a47e4dd162b40
+2085	2107	1775607127616267401	yoga-populate-prefix/src/yoga-populate-stamp/yoga-populate-configure	c0fe8b1de1e7f0cf
+2085	2107	1775607127616267401	/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/x86_64/_deps/yoga-subbuild/yoga-populate-prefix/src/yoga-populate-stamp/yoga-populate-configure	c0fe8b1de1e7f0cf
+2107	2126	1775607127635241951	yoga-populate-prefix/src/yoga-populate-stamp/yoga-populate-build	b80fd156bd966fad
+2107	2126	1775607127635241951	/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/x86_64/_deps/yoga-subbuild/yoga-populate-prefix/src/yoga-populate-stamp/yoga-populate-build	b80fd156bd966fad
+2126	2144	1775607127653207957	yoga-populate-prefix/src/yoga-populate-stamp/yoga-populate-install	a8e47d65988bbd91
+2126	2144	1775607127653207957	/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/x86_64/_deps/yoga-subbuild/yoga-populate-prefix/src/yoga-populate-stamp/yoga-populate-install	a8e47d65988bbd91
+2144	2162	1775607127671543964	yoga-populate-prefix/src/yoga-populate-stamp/yoga-populate-test	a547eaba6094f956
+2144	2162	1775607127671543964	/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/x86_64/_deps/yoga-subbuild/yoga-populate-prefix/src/yoga-populate-stamp/yoga-populate-test	a547eaba6094f956
+2162	2187	1775607127696029404	CMakeFiles/yoga-populate-complete	d2d7fb407fcb1a8d
+2162	2187	1775607127696029404	yoga-populate-prefix/src/yoga-populate-stamp/yoga-populate-done	d2d7fb407fcb1a8d
+2162	2187	1775607127696029404	/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/x86_64/_deps/yoga-subbuild/CMakeFiles/yoga-populate-complete	d2d7fb407fcb1a8d
+2162	2187	1775607127696029404	/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/x86_64/_deps/yoga-subbuild/yoga-populate-prefix/src/yoga-populate-stamp/yoga-populate-done	d2d7fb407fcb1a8d

@@ -1,0 +1,21 @@
+# ninja log v6
+0	19	1775607014793645045	clap-populate-prefix/src/clap-populate-stamp/clap-populate-mkdir	d029b8d964daf37e
+0	19	1775607014793645045	/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/clap-subbuild/clap-populate-prefix/src/clap-populate-stamp/clap-populate-mkdir	d029b8d964daf37e
+19	1054	1775607015828924043	clap-populate-prefix/src/clap-populate-stamp/clap-populate-download	c9d9ee2e6acdc151
+19	1054	1775607015828924043	/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/clap-subbuild/clap-populate-prefix/src/clap-populate-stamp/clap-populate-download	c9d9ee2e6acdc151
+1054	1091	1775607015866263101	clap-populate-prefix/src/clap-populate-stamp/clap-populate-update_disconnected	89668fe1e5090697
+1054	1091	1775607015866263101	/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/clap-subbuild/clap-populate-prefix/src/clap-populate-stamp/clap-populate-update_disconnected	89668fe1e5090697
+1091	1107	1775607015882323185	clap-populate-prefix/src/clap-populate-stamp/clap-populate-patch_disconnected	8f043d1e4e07e4fc
+1091	1107	1775607015882323185	/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/clap-subbuild/clap-populate-prefix/src/clap-populate-stamp/clap-populate-patch_disconnected	8f043d1e4e07e4fc
+1107	1124	1775607015899274480	clap-populate-prefix/src/clap-populate-stamp/clap-populate-configure	1f683edcb7654112
+1107	1124	1775607015899274480	/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/clap-subbuild/clap-populate-prefix/src/clap-populate-stamp/clap-populate-configure	1f683edcb7654112
+1124	1140	1775607015915225272	clap-populate-prefix/src/clap-populate-stamp/clap-populate-build	119e750959e87703
+1124	1140	1775607015915225272	/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/clap-subbuild/clap-populate-prefix/src/clap-populate-stamp/clap-populate-build	119e750959e87703
+1140	1156	1775607015931316440	clap-populate-prefix/src/clap-populate-stamp/clap-populate-install	cf82dd5f51c95635
+1140	1156	1775607015931316440	/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/clap-subbuild/clap-populate-prefix/src/clap-populate-stamp/clap-populate-install	cf82dd5f51c95635
+1156	1173	1775607015947837026	clap-populate-prefix/src/clap-populate-stamp/clap-populate-test	ca71b6c70aebdc31
+1156	1173	1775607015947837026	/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/clap-subbuild/clap-populate-prefix/src/clap-populate-stamp/clap-populate-test	ca71b6c70aebdc31
+1173	1198	1775607015973123176	CMakeFiles/clap-populate-complete	83f76b5f4aff7654
+1173	1198	1775607015973123176	clap-populate-prefix/src/clap-populate-stamp/clap-populate-done	83f76b5f4aff7654
+1173	1198	1775607015973123176	/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/clap-subbuild/CMakeFiles/clap-populate-complete	83f76b5f4aff7654
+1173	1198	1775607015973123176	/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/clap-subbuild/clap-populate-prefix/src/clap-populate-stamp/clap-populate-done	83f76b5f4aff7654

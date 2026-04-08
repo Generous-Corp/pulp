@@ -1,0 +1,6 @@
+[
+    {
+        "merged": "com.pulp.app-debug-42:/xml_midi_device_info.xml.flat",
+        "source": "com.pulp.app-main-44:/xml/midi_device_info.xml"
+    }
+]

@@ -1,0 +1,21 @@
+# ninja log v6
+0	19	1775607028997737180	mbedtls-populate-prefix/src/mbedtls-populate-stamp/mbedtls-populate-mkdir	44a4d2b2a129e7cb
+0	19	1775607028997737180	/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-subbuild/mbedtls-populate-prefix/src/mbedtls-populate-stamp/mbedtls-populate-mkdir	44a4d2b2a129e7cb
+19	12628	1775607041606611623	mbedtls-populate-prefix/src/mbedtls-populate-stamp/mbedtls-populate-download	cd4b63c3a70a0dc1
+19	12628	1775607041606611623	/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-subbuild/mbedtls-populate-prefix/src/mbedtls-populate-stamp/mbedtls-populate-download	cd4b63c3a70a0dc1
+12628	12667	1775607041646464479	mbedtls-populate-prefix/src/mbedtls-populate-stamp/mbedtls-populate-update_disconnected	f340dc7b428c7116
+12628	12667	1775607041646464479	/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-subbuild/mbedtls-populate-prefix/src/mbedtls-populate-stamp/mbedtls-populate-update_disconnected	f340dc7b428c7116
+12667	12689	1775607041668148786	mbedtls-populate-prefix/src/mbedtls-populate-stamp/mbedtls-populate-patch_disconnected	2e6bcab473b7f983
+12667	12689	1775607041668148786	/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-subbuild/mbedtls-populate-prefix/src/mbedtls-populate-stamp/mbedtls-populate-patch_disconnected	2e6bcab473b7f983
+12689	12707	1775607041685529249	mbedtls-populate-prefix/src/mbedtls-populate-stamp/mbedtls-populate-configure	af16abb3925ca0b0
+12689	12707	1775607041685529249	/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-subbuild/mbedtls-populate-prefix/src/mbedtls-populate-stamp/mbedtls-populate-configure	af16abb3925ca0b0
+12707	12724	1775607041703444922	mbedtls-populate-prefix/src/mbedtls-populate-stamp/mbedtls-populate-build	5d561628f0a5fbce
+12707	12724	1775607041703444922	/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-subbuild/mbedtls-populate-prefix/src/mbedtls-populate-stamp/mbedtls-populate-build	5d561628f0a5fbce
+12725	12742	1775607041721372428	mbedtls-populate-prefix/src/mbedtls-populate-stamp/mbedtls-populate-install	9eedd6505ed8e98b
+12725	12742	1775607041721372428	/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-subbuild/mbedtls-populate-prefix/src/mbedtls-populate-stamp/mbedtls-populate-install	9eedd6505ed8e98b
+12742	12762	1775607041740775354	mbedtls-populate-prefix/src/mbedtls-populate-stamp/mbedtls-populate-test	4968e6dab71bb735
+12742	12762	1775607041740775354	/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-subbuild/mbedtls-populate-prefix/src/mbedtls-populate-stamp/mbedtls-populate-test	4968e6dab71bb735
+12762	12790	1775607041769425264	CMakeFiles/mbedtls-populate-complete	f09b6585e2683208
+12762	12790	1775607041769425264	mbedtls-populate-prefix/src/mbedtls-populate-stamp/mbedtls-populate-done	f09b6585e2683208
+12762	12790	1775607041769425264	/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-subbuild/CMakeFiles/mbedtls-populate-complete	f09b6585e2683208
+12762	12790	1775607041769425264	/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-subbuild/mbedtls-populate-prefix/src/mbedtls-populate-stamp/mbedtls-populate-done	f09b6585e2683208

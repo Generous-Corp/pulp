@@ -1,0 +1,260 @@
+{
+  "buildFiles": [
+    "/Users/danielraffel/Code/pulp-android/CMakeLists.txt",
+    "/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/choc-src/CMakeLists.txt",
+    "/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/clap-src/CMakeLists.txt",
+    "/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/highway-src/CMakeLists.txt",
+    "/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/3rdparty/CMakeLists.txt",
+    "/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/3rdparty/everest/CMakeLists.txt",
+    "/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/3rdparty/p256-m/CMakeLists.txt",
+    "/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/CMakeLists.txt",
+    "/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/framework/CMakeLists.txt",
+    "/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/CMakeLists.txt",
+    "/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/library/CMakeLists.txt",
+    "/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/pkgconfig/CMakeLists.txt",
+    "/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/oboe-src/CMakeLists.txt",
+    "/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/sdl3-src/CMakeLists.txt",
+    "/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/yoga-src/yoga/CMakeLists.txt",
+    "/Users/danielraffel/Code/pulp-android/core/audio/CMakeLists.txt",
+    "/Users/danielraffel/Code/pulp-android/core/canvas/CMakeLists.txt",
+    "/Users/danielraffel/Code/pulp-android/core/dsl/CMakeLists.txt",
+    "/Users/danielraffel/Code/pulp-android/core/events/CMakeLists.txt",
+    "/Users/danielraffel/Code/pulp-android/core/format/CMakeLists.txt",
+    "/Users/danielraffel/Code/pulp-android/core/host/CMakeLists.txt",
+    "/Users/danielraffel/Code/pulp-android/core/midi/CMakeLists.txt",
+    "/Users/danielraffel/Code/pulp-android/core/osc/CMakeLists.txt",
+    "/Users/danielraffel/Code/pulp-android/core/platform/CMakeLists.txt",
+    "/Users/danielraffel/Code/pulp-android/core/runtime/CMakeLists.txt",
+    "/Users/danielraffel/Code/pulp-android/core/signal/CMakeLists.txt",
+    "/Users/danielraffel/Code/pulp-android/core/state/CMakeLists.txt",
+    "/Users/danielraffel/Code/pulp-android/core/view/CMakeLists.txt",
+    "/Users/danielraffel/Code/pulp-android/ship/CMakeLists.txt",
+    "/Users/danielraffel/Code/pulp-android/tools/audio/CMakeLists.txt",
+    "/Users/danielraffel/Code/pulp-android/tools/cli/CMakeLists.txt",
+    "/Users/danielraffel/Code/pulp-android/tools/cmake/PulpAAX.cmake",
+    "/Users/danielraffel/Code/pulp-android/tools/cmake/PulpAndroid.cmake",
+    "/Users/danielraffel/Code/pulp-android/tools/cmake/PulpFetchContent.cmake",
+    "/Users/danielraffel/Code/pulp-android/tools/cmake/PulpUtils.cmake",
+    "/Users/danielraffel/Code/pulp-android/tools/cmake/Sanitizers.cmake",
+    "/Users/danielraffel/Code/pulp-android/tools/design/CMakeLists.txt",
+    "/Users/danielraffel/Code/pulp-android/tools/import-design/CMakeLists.txt",
+    "/Users/danielraffel/Code/pulp-android/tools/mcp/CMakeLists.txt",
+    "/Users/danielraffel/Code/pulp-android/tools/screenshot/CMakeLists.txt"
+  ],
+  "cleanCommandsComponents": [
+    [
+      "/opt/homebrew/bin/ninja",
+      "-C",
+      "/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a",
+      "clean"
+    ]
+  ],
+  "buildTargetsCommandComponents": [
+    "/opt/homebrew/bin/ninja",
+    "-C",
+    "/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a",
+    "{LIST_OF_TARGETS_TO_BUILD}"
+  ],
+  "libraries": {
+    "SDL3_test::@405c074760d2f6728126": {
+      "artifactName": "SDL3_test",
+      "abi": "arm64-v8a",
+      "output": "/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/sdl3-build/libSDL3_test.a",
+      "runtimeFiles": []
+    },
+    "pulp-mcp::@0fdaaccf90e60f0bfbba": {
+      "artifactName": "pulp-mcp",
+      "abi": "arm64-v8a",
+      "output": "/Users/danielraffel/Code/pulp-android/android/app/build/intermediates/cxx/Debug/4y6n4a3e/obj/arm64-v8a/pulp-mcp",
+      "runtimeFiles": []
+    },
+    "yogacore::@5d2a3e0bec94e06e80db": {
+      "artifactName": "yogacore",
+      "abi": "arm64-v8a",
+      "output": "/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/yoga-build/libyogacore.a",
+      "runtimeFiles": []
+    },
+    "pulp-runtime::@f39d3a19e87f308081fa": {
+      "artifactName": "pulp-runtime",
+      "abi": "arm64-v8a",
+      "output": "/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/core/runtime/libpulp-runtime.a",
+      "runtimeFiles": []
+    },
+    "hwy_test::@6818ec3213dbbeb74f3c": {
+      "artifactName": "hwy_test",
+      "abi": "arm64-v8a",
+      "output": "/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/highway-build/libhwy_test.a",
+      "runtimeFiles": []
+    },
+    "pulp-import-design::@857a05fea02aeb9a2fe5": {
+      "artifactName": "pulp-import-design",
+      "abi": "arm64-v8a",
+      "output": "/Users/danielraffel/Code/pulp-android/android/app/build/intermediates/cxx/Debug/4y6n4a3e/obj/arm64-v8a/pulp-import-design",
+      "runtimeFiles": []
+    },
+    "pulp-format::@dbb2fdbec15caffeb085": {
+      "artifactName": "pulp-format",
+      "abi": "arm64-v8a",
+      "output": "/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/core/format/libpulp-format.a",
+      "runtimeFiles": []
+    },
+    "pulp-midi::@96176ce33efe89cb9e17": {
+      "artifactName": "pulp-midi",
+      "abi": "arm64-v8a",
+      "output": "/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/core/midi/libpulp-midi.a",
+      "runtimeFiles": []
+    },
+    "mbedx509::@085c30ee5801d290d8db": {
+      "artifactName": "mbedx509",
+      "abi": "arm64-v8a",
+      "output": "/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-build/library/libmbedx509.a",
+      "runtimeFiles": []
+    },
+    "oboe::@34d0455163043826f65a": {
+      "artifactName": "oboe",
+      "abi": "arm64-v8a",
+      "output": "/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/oboe-build/liboboe.a",
+      "runtimeFiles": []
+    },
+    "clap-tests::@b71d22d765a1a6238c56": {
+      "artifactName": "clap-tests",
+      "abi": "arm64-v8a",
+      "runtimeFiles": []
+    },
+    "hwy::@6818ec3213dbbeb74f3c": {
+      "artifactName": "hwy",
+      "abi": "arm64-v8a",
+      "output": "/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/highway-build/libhwy.a",
+      "runtimeFiles": []
+    },
+    "SDL_uclibc::@405c074760d2f6728126": {
+      "artifactName": "SDL_uclibc",
+      "abi": "arm64-v8a",
+      "output": "/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/sdl3-build/libSDL_uclibc.a",
+      "runtimeFiles": []
+    },
+    "pulp-state::@2fc49d3348e5ccf49dd0": {
+      "artifactName": "pulp-state",
+      "abi": "arm64-v8a",
+      "output": "/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/core/state/libpulp-state.a",
+      "runtimeFiles": []
+    },
+    "pulp-events::@ac3f04d75d7a018b61ec": {
+      "artifactName": "pulp-events",
+      "abi": "arm64-v8a",
+      "output": "/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/core/events/libpulp-events.a",
+      "runtimeFiles": []
+    },
+    "pulp-view::@239ece156436bc6f395e": {
+      "artifactName": "pulp-view",
+      "abi": "arm64-v8a",
+      "output": "/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/core/view/libpulp-view.a",
+      "runtimeFiles": []
+    },
+    "pulp-view-js-preludes::@239ece156436bc6f395e": {
+      "artifactName": "pulp-view-js-preludes",
+      "abi": "arm64-v8a",
+      "runtimeFiles": []
+    },
+    "pulp-host::@cfe3e6f91b6ef959b6d6": {
+      "artifactName": "pulp-host",
+      "abi": "arm64-v8a",
+      "output": "/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/core/host/libpulp-host.a",
+      "runtimeFiles": []
+    },
+    "everest::@6a00fa865c827e880155": {
+      "artifactName": "everest",
+      "abi": "arm64-v8a",
+      "output": "/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-build/3rdparty/everest/libeverest.a",
+      "runtimeFiles": []
+    },
+    "pulp-audio::@7878d1e6cf37967c1795": {
+      "artifactName": "pulp-audio",
+      "abi": "arm64-v8a",
+      "output": "/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/core/audio/libpulp-audio.a",
+      "runtimeFiles": []
+    },
+    "hwy_list_targets::@6818ec3213dbbeb74f3c": {
+      "artifactName": "hwy_list_targets",
+      "abi": "arm64-v8a",
+      "output": "/Users/danielraffel/Code/pulp-android/android/app/build/intermediates/cxx/Debug/4y6n4a3e/obj/arm64-v8a/hwy_list_targets",
+      "runtimeFiles": []
+    },
+    "pulp-osc::@4237e8f0717b1e831146": {
+      "artifactName": "pulp-osc",
+      "abi": "arm64-v8a",
+      "output": "/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/core/osc/libpulp-osc.a",
+      "runtimeFiles": []
+    },
+    "mbedtls::@085c30ee5801d290d8db": {
+      "artifactName": "mbedtls",
+      "abi": "arm64-v8a",
+      "output": "/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-build/library/libmbedtls.a",
+      "runtimeFiles": []
+    },
+    "SDL3-static::@405c074760d2f6728126": {
+      "artifactName": "SDL3-static",
+      "abi": "arm64-v8a",
+      "output": "/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/sdl3-build/libSDL3.a",
+      "runtimeFiles": []
+    },
+    "pulp-canvas::@3a2e95c93ac539041230": {
+      "artifactName": "pulp-canvas",
+      "abi": "arm64-v8a",
+      "output": "/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/core/canvas/libpulp-canvas.a",
+      "runtimeFiles": []
+    },
+    "apidoc::@36d44abad58ef682ea5b": {
+      "artifactName": "apidoc",
+      "abi": "arm64-v8a",
+      "runtimeFiles": []
+    },
+    "p256m::@f348ccf1dd5d547d79c9": {
+      "artifactName": "p256m",
+      "abi": "arm64-v8a",
+      "output": "/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-build/3rdparty/p256-m/libp256m.a",
+      "runtimeFiles": []
+    },
+    "pulp-platform::@cdc606a2e1aadfff6cfa": {
+      "artifactName": "pulp-platform",
+      "abi": "arm64-v8a",
+      "output": "/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/core/platform/libpulp-platform.a",
+      "runtimeFiles": []
+    },
+    "mbedcrypto::@085c30ee5801d290d8db": {
+      "artifactName": "mbedcrypto",
+      "abi": "arm64-v8a",
+      "output": "/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-build/library/libmbedcrypto.a",
+      "runtimeFiles": []
+    },
+    "pulp-cli::@4b41690f618ed184e625": {
+      "artifactName": "pulp-cli",
+      "abi": "arm64-v8a",
+      "output": "/Users/danielraffel/Code/pulp-android/android/app/build/intermediates/cxx/Debug/4y6n4a3e/obj/arm64-v8a/pulp",
+      "runtimeFiles": []
+    },
+    "pulp-ship::@2e35c1ca9dd9986b6ac9": {
+      "artifactName": "pulp-ship",
+      "abi": "arm64-v8a",
+      "output": "/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/ship/libpulp-ship.a",
+      "runtimeFiles": []
+    },
+    "pulp-tool-audio::@71ec5fe62708f6fa4d8f": {
+      "artifactName": "pulp-tool-audio",
+      "abi": "arm64-v8a",
+      "output": "/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/tools/audio/libpulp-tool-audio.a",
+      "runtimeFiles": []
+    },
+    "pulp-standalone::@6890427a1f51a3e7e1df": {
+      "artifactName": "pulp-standalone",
+      "abi": "arm64-v8a",
+      "output": "/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/libpulp-standalone.a",
+      "runtimeFiles": []
+    },
+    "lib::@085c30ee5801d290d8db": {
+      "artifactName": "lib",
+      "abi": "arm64-v8a",
+      "runtimeFiles": []
+    }
+  }
+}

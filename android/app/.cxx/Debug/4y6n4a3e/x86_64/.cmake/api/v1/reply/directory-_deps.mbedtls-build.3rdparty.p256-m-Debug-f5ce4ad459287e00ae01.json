@@ -1,0 +1,72 @@
+{
+	"backtraceGraph" : 
+	{
+		"commands" : 
+		[
+			"install"
+		],
+		"files" : 
+		[
+			"android/app/.cxx/Debug/4y6n4a3e/x86_64/_deps/mbedtls-src/3rdparty/p256-m/CMakeLists.txt"
+		],
+		"nodes" : 
+		[
+			{
+				"file" : 0
+			},
+			{
+				"command" : 0,
+				"file" : 0,
+				"line" : 29,
+				"parent" : 0
+			},
+			{
+				"command" : 0,
+				"file" : 0,
+				"line" : 37,
+				"parent" : 0
+			}
+		]
+	},
+	"installers" : 
+	[
+		{
+			"backtrace" : 1,
+			"component" : "Unspecified",
+			"destination" : "include",
+			"paths" : 
+			[
+				"android/app/.cxx/Debug/4y6n4a3e/x86_64/_deps/mbedtls-src/3rdparty/p256-m/:/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/x86_64/_deps/mbedtls-src/3rdparty/p256-m"
+			],
+			"type" : "directory"
+		},
+		{
+			"backtrace" : 2,
+			"component" : "Unspecified",
+			"destination" : "lib",
+			"paths" : 
+			[
+				"_deps/mbedtls-build/3rdparty/p256-m/libp256m.a"
+			],
+			"targetId" : "p256m::@f348ccf1dd5d547d79c9",
+			"targetIndex" : 14,
+			"type" : "target"
+		},
+		{
+			"backtrace" : 2,
+			"component" : "Unspecified",
+			"cxxModuleBmiTarget" : 
+			{
+				"id" : "p256m::@f348ccf1dd5d547d79c9",
+				"index" : 14
+			},
+			"destination" : "lib",
+			"type" : "cxxModuleBmi"
+		}
+	],
+	"paths" : 
+	{
+		"build" : "_deps/mbedtls-build/3rdparty/p256-m",
+		"source" : "android/app/.cxx/Debug/4y6n4a3e/x86_64/_deps/mbedtls-src/3rdparty/p256-m"
+	}
+}

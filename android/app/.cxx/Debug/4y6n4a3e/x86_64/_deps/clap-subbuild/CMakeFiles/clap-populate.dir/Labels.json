@@ -1,0 +1,46 @@
+{
+	"sources" : 
+	[
+		{
+			"file" : "/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/x86_64/_deps/clap-subbuild/CMakeFiles/clap-populate"
+		},
+		{
+			"file" : "/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/x86_64/_deps/clap-subbuild/CMakeFiles/clap-populate.rule"
+		},
+		{
+			"file" : "/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/x86_64/_deps/clap-subbuild/CMakeFiles/clap-populate-complete.rule"
+		},
+		{
+			"file" : "/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/x86_64/_deps/clap-subbuild/clap-populate-prefix/src/clap-populate-stamp/clap-populate-build.rule"
+		},
+		{
+			"file" : "/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/x86_64/_deps/clap-subbuild/clap-populate-prefix/src/clap-populate-stamp/clap-populate-configure.rule"
+		},
+		{
+			"file" : "/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/x86_64/_deps/clap-subbuild/clap-populate-prefix/src/clap-populate-stamp/clap-populate-download.rule"
+		},
+		{
+			"file" : "/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/x86_64/_deps/clap-subbuild/clap-populate-prefix/src/clap-populate-stamp/clap-populate-install.rule"
+		},
+		{
+			"file" : "/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/x86_64/_deps/clap-subbuild/clap-populate-prefix/src/clap-populate-stamp/clap-populate-mkdir.rule"
+		},
+		{
+			"file" : "/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/x86_64/_deps/clap-subbuild/clap-populate-prefix/src/clap-populate-stamp/clap-populate-patch_disconnected.rule"
+		},
+		{
+			"file" : "/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/x86_64/_deps/clap-subbuild/clap-populate-prefix/src/clap-populate-stamp/clap-populate-test.rule"
+		},
+		{
+			"file" : "/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/x86_64/_deps/clap-subbuild/clap-populate-prefix/src/clap-populate-stamp/clap-populate-update_disconnected.rule"
+		}
+	],
+	"target" : 
+	{
+		"labels" : 
+		[
+			"clap-populate"
+		],
+		"name" : "clap-populate"
+	}
+}

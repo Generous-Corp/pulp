@@ -8,6 +8,8 @@ android {
     namespace = "com.pulp.app"
     compileSdk = 35
 
+    ndkVersion = "30.0.14904198"
+
     defaultConfig {
         applicationId = "com.pulp.app"
         minSdk = 26
@@ -27,7 +29,8 @@ android {
                     "-DANDROID_ARM_NEON=TRUE",
                     "-DPULP_ENABLE_GPU=OFF",
                     "-DPULP_BUILD_TESTS=OFF",
-                    "-DPULP_BUILD_EXAMPLES=OFF"
+                    "-DPULP_BUILD_EXAMPLES=OFF",
+                    "-DCMAKE_POLICY_VERSION_MINIMUM=3.5"
                 )
             }
         }

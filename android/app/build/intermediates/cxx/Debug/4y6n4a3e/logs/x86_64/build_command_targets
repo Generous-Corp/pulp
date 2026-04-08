@@ -1,0 +1,7 @@
+/opt/homebrew/bin/ninja \
+  -C \
+  /Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/x86_64 \
+  hwy_list_targets \
+  pulp-cli \
+  pulp-import-design \
+  pulp-mcp

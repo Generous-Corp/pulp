@@ -1,0 +1,14 @@
+# Target labels
+ yoga-populate
+# Source files and their labels
+/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/yoga-subbuild/CMakeFiles/yoga-populate
+/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/yoga-subbuild/CMakeFiles/yoga-populate.rule
+/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/yoga-subbuild/CMakeFiles/yoga-populate-complete.rule
+/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/yoga-subbuild/yoga-populate-prefix/src/yoga-populate-stamp/yoga-populate-build.rule
+/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/yoga-subbuild/yoga-populate-prefix/src/yoga-populate-stamp/yoga-populate-configure.rule
+/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/yoga-subbuild/yoga-populate-prefix/src/yoga-populate-stamp/yoga-populate-download.rule
+/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/yoga-subbuild/yoga-populate-prefix/src/yoga-populate-stamp/yoga-populate-install.rule
+/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/yoga-subbuild/yoga-populate-prefix/src/yoga-populate-stamp/yoga-populate-mkdir.rule
+/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/yoga-subbuild/yoga-populate-prefix/src/yoga-populate-stamp/yoga-populate-patch_disconnected.rule
+/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/yoga-subbuild/yoga-populate-prefix/src/yoga-populate-stamp/yoga-populate-test.rule
+/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/yoga-subbuild/yoga-populate-prefix/src/yoga-populate-stamp/yoga-populate-update_disconnected.rule

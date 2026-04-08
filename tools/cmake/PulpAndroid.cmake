@@ -37,6 +37,10 @@ FetchContent_Declare(
     GIT_SHALLOW TRUE
 )
 FetchContent_MakeAvailable(oboe)
+# Suppress warnings in third-party Oboe code (NDK 30 Clang is stricter)
+if(TARGET oboe)
+    target_compile_options(oboe PRIVATE -w)
+endif()
 set(PULP_HAS_OBOE TRUE)
 message(STATUS "Pulp: Oboe audio library enabled (AAudio-first)")
 

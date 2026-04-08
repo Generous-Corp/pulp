@@ -1,0 +1,21 @@
+# ninja log v6
+1	19	1775607016107344783	lv2-populate-prefix/src/lv2-populate-stamp/lv2-populate-mkdir	f136bfa7949d6ea3
+1	19	1775607016107344783	/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/lv2-subbuild/lv2-populate-prefix/src/lv2-populate-stamp/lv2-populate-mkdir	f136bfa7949d6ea3
+20	1209	1775607017296701858	lv2-populate-prefix/src/lv2-populate-stamp/lv2-populate-download	9f53fbd832b633f1
+20	1209	1775607017296701858	/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/lv2-subbuild/lv2-populate-prefix/src/lv2-populate-stamp/lv2-populate-download	9f53fbd832b633f1
+1209	1248	1775607017336482297	lv2-populate-prefix/src/lv2-populate-stamp/lv2-populate-update_disconnected	6f16729339265b05
+1209	1248	1775607017336482297	/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/lv2-subbuild/lv2-populate-prefix/src/lv2-populate-stamp/lv2-populate-update_disconnected	6f16729339265b05
+1249	1267	1775607017354486470	lv2-populate-prefix/src/lv2-populate-stamp/lv2-populate-patch_disconnected	c160ed3def0a25b5
+1249	1267	1775607017354486470	/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/lv2-subbuild/lv2-populate-prefix/src/lv2-populate-stamp/lv2-populate-patch_disconnected	c160ed3def0a25b5
+1267	1285	1775607017372995477	lv2-populate-prefix/src/lv2-populate-stamp/lv2-populate-configure	32b29910283f3b0a
+1267	1285	1775607017372995477	/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/lv2-subbuild/lv2-populate-prefix/src/lv2-populate-stamp/lv2-populate-configure	32b29910283f3b0a
+1285	1303	1775607017390879775	lv2-populate-prefix/src/lv2-populate-stamp/lv2-populate-build	764354c2f06e26df
+1285	1303	1775607017390879775	/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/lv2-subbuild/lv2-populate-prefix/src/lv2-populate-stamp/lv2-populate-build	764354c2f06e26df
+1303	1320	1775607017408489822	lv2-populate-prefix/src/lv2-populate-stamp/lv2-populate-install	a2e66ffd7d9ead8
+1303	1320	1775607017408489822	/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/lv2-subbuild/lv2-populate-prefix/src/lv2-populate-stamp/lv2-populate-install	a2e66ffd7d9ead8
+1321	1337	1775607017425323575	lv2-populate-prefix/src/lv2-populate-stamp/lv2-populate-test	11c94246e01bde86
+1321	1337	1775607017425323575	/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/lv2-subbuild/lv2-populate-prefix/src/lv2-populate-stamp/lv2-populate-test	11c94246e01bde86
+1337	1362	1775607017450041182	CMakeFiles/lv2-populate-complete	e991cde5790d6402
+1337	1362	1775607017450041182	lv2-populate-prefix/src/lv2-populate-stamp/lv2-populate-done	e991cde5790d6402
+1337	1362	1775607017450041182	/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/lv2-subbuild/CMakeFiles/lv2-populate-complete	e991cde5790d6402
+1337	1362	1775607017450041182	/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/lv2-subbuild/lv2-populate-prefix/src/lv2-populate-stamp/lv2-populate-done	e991cde5790d6402

@@ -1,0 +1,21 @@
+# ninja log v6
+1	27	1775607089096750693	choc-populate-prefix/src/choc-populate-stamp/choc-populate-mkdir	924fec0e1ea735b0
+1	27	1775607089096750693	/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/x86_64/_deps/choc-subbuild/choc-populate-prefix/src/choc-populate-stamp/choc-populate-mkdir	924fec0e1ea735b0
+27	1958	1775607091028241822	choc-populate-prefix/src/choc-populate-stamp/choc-populate-download	e2917b6c722bddf
+27	1958	1775607091028241822	/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/x86_64/_deps/choc-subbuild/choc-populate-prefix/src/choc-populate-stamp/choc-populate-download	e2917b6c722bddf
+1958	1997	1775607091067393426	choc-populate-prefix/src/choc-populate-stamp/choc-populate-update_disconnected	82ad52e4aac6853f
+1958	1997	1775607091067393426	/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/x86_64/_deps/choc-subbuild/choc-populate-prefix/src/choc-populate-stamp/choc-populate-update_disconnected	82ad52e4aac6853f
+1997	2014	1775607091084262762	choc-populate-prefix/src/choc-populate-stamp/choc-populate-patch_disconnected	2f660ec719754845
+1997	2014	1775607091084262762	/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/x86_64/_deps/choc-subbuild/choc-populate-prefix/src/choc-populate-stamp/choc-populate-patch_disconnected	2f660ec719754845
+2014	2030	1775607091100479347	choc-populate-prefix/src/choc-populate-stamp/choc-populate-configure	b6496ccb1a4a4f78
+2014	2030	1775607091100479347	/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/x86_64/_deps/choc-subbuild/choc-populate-prefix/src/choc-populate-stamp/choc-populate-configure	b6496ccb1a4a4f78
+2030	2047	1775607091117004641	choc-populate-prefix/src/choc-populate-stamp/choc-populate-build	4c1aededb242240c
+2030	2047	1775607091117004641	/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/x86_64/_deps/choc-subbuild/choc-populate-prefix/src/choc-populate-stamp/choc-populate-build	4c1aededb242240c
+2047	2062	1775607091132127098	choc-populate-prefix/src/choc-populate-stamp/choc-populate-install	2cf22fc3def5c0fb
+2047	2062	1775607091132127098	/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/x86_64/_deps/choc-subbuild/choc-populate-prefix/src/choc-populate-stamp/choc-populate-install	2cf22fc3def5c0fb
+2062	2077	1775607091147770973	choc-populate-prefix/src/choc-populate-stamp/choc-populate-test	ed9bd08d466fe1aa
+2062	2077	1775607091147770973	/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/x86_64/_deps/choc-subbuild/choc-populate-prefix/src/choc-populate-stamp/choc-populate-test	ed9bd08d466fe1aa
+2078	2101	1775607091171303452	CMakeFiles/choc-populate-complete	e820b01cfbd066fa
+2078	2101	1775607091171303452	choc-populate-prefix/src/choc-populate-stamp/choc-populate-done	e820b01cfbd066fa
+2078	2101	1775607091171303452	/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/x86_64/_deps/choc-subbuild/CMakeFiles/choc-populate-complete	e820b01cfbd066fa
+2078	2101	1775607091171303452	/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/x86_64/_deps/choc-subbuild/choc-populate-prefix/src/choc-populate-stamp/choc-populate-done	e820b01cfbd066fa

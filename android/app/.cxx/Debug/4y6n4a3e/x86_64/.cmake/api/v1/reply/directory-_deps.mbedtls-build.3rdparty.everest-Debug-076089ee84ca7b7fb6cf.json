@@ -1,0 +1,72 @@
+{
+	"backtraceGraph" : 
+	{
+		"commands" : 
+		[
+			"install"
+		],
+		"files" : 
+		[
+			"android/app/.cxx/Debug/4y6n4a3e/x86_64/_deps/mbedtls-src/3rdparty/everest/CMakeLists.txt"
+		],
+		"nodes" : 
+		[
+			{
+				"file" : 0
+			},
+			{
+				"command" : 0,
+				"file" : 0,
+				"line" : 31,
+				"parent" : 0
+			},
+			{
+				"command" : 0,
+				"file" : 0,
+				"line" : 39,
+				"parent" : 0
+			}
+		]
+	},
+	"installers" : 
+	[
+		{
+			"backtrace" : 1,
+			"component" : "Unspecified",
+			"destination" : "include",
+			"paths" : 
+			[
+				"android/app/.cxx/Debug/4y6n4a3e/x86_64/_deps/mbedtls-src/3rdparty/everest/include/everest"
+			],
+			"type" : "directory"
+		},
+		{
+			"backtrace" : 2,
+			"component" : "Unspecified",
+			"destination" : "lib",
+			"paths" : 
+			[
+				"_deps/mbedtls-build/3rdparty/everest/libeverest.a"
+			],
+			"targetId" : "everest::@6a00fa865c827e880155",
+			"targetIndex" : 5,
+			"type" : "target"
+		},
+		{
+			"backtrace" : 2,
+			"component" : "Unspecified",
+			"cxxModuleBmiTarget" : 
+			{
+				"id" : "everest::@6a00fa865c827e880155",
+				"index" : 5
+			},
+			"destination" : "lib",
+			"type" : "cxxModuleBmi"
+		}
+	],
+	"paths" : 
+	{
+		"build" : "_deps/mbedtls-build/3rdparty/everest",
+		"source" : "android/app/.cxx/Debug/4y6n4a3e/x86_64/_deps/mbedtls-src/3rdparty/everest"
+	}
+}

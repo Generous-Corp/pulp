@@ -1,0 +1,61 @@
+{
+	"backtraceGraph" : 
+	{
+		"commands" : 
+		[
+			"install"
+		],
+		"files" : 
+		[
+			"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/oboe-src/CMakeLists.txt"
+		],
+		"nodes" : 
+		[
+			{
+				"file" : 0
+			},
+			{
+				"command" : 0,
+				"file" : 0,
+				"line" : 101,
+				"parent" : 0
+			},
+			{
+				"command" : 0,
+				"file" : 0,
+				"line" : 106,
+				"parent" : 0
+			}
+		]
+	},
+	"installers" : 
+	[
+		{
+			"backtrace" : 1,
+			"component" : "Unspecified",
+			"destination" : "lib/arm64-v8a",
+			"paths" : 
+			[
+				"_deps/oboe-build/liboboe.a"
+			],
+			"targetId" : "oboe::@34d0455163043826f65a",
+			"targetIndex" : 13,
+			"type" : "target"
+		},
+		{
+			"backtrace" : 2,
+			"component" : "Unspecified",
+			"destination" : "include",
+			"paths" : 
+			[
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/oboe-src/include/oboe"
+			],
+			"type" : "directory"
+		}
+	],
+	"paths" : 
+	{
+		"build" : "_deps/oboe-build",
+		"source" : "android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/oboe-src"
+	}
+}

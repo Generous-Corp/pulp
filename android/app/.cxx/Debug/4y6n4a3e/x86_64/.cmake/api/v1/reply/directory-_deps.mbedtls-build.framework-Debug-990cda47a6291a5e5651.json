@@ -1,0 +1,14 @@
+{
+	"backtraceGraph" : 
+	{
+		"commands" : [],
+		"files" : [],
+		"nodes" : []
+	},
+	"installers" : [],
+	"paths" : 
+	{
+		"build" : "_deps/mbedtls-build/framework",
+		"source" : "android/app/.cxx/Debug/4y6n4a3e/x86_64/_deps/mbedtls-src/framework"
+	}
+}

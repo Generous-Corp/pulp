@@ -1,0 +1,46 @@
+{
+	"sources" : 
+	[
+		{
+			"file" : "/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/lv2-subbuild/CMakeFiles/lv2-populate"
+		},
+		{
+			"file" : "/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/lv2-subbuild/CMakeFiles/lv2-populate.rule"
+		},
+		{
+			"file" : "/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/lv2-subbuild/CMakeFiles/lv2-populate-complete.rule"
+		},
+		{
+			"file" : "/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/lv2-subbuild/lv2-populate-prefix/src/lv2-populate-stamp/lv2-populate-build.rule"
+		},
+		{
+			"file" : "/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/lv2-subbuild/lv2-populate-prefix/src/lv2-populate-stamp/lv2-populate-configure.rule"
+		},
+		{
+			"file" : "/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/lv2-subbuild/lv2-populate-prefix/src/lv2-populate-stamp/lv2-populate-download.rule"
+		},
+		{
+			"file" : "/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/lv2-subbuild/lv2-populate-prefix/src/lv2-populate-stamp/lv2-populate-install.rule"
+		},
+		{
+			"file" : "/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/lv2-subbuild/lv2-populate-prefix/src/lv2-populate-stamp/lv2-populate-mkdir.rule"
+		},
+		{
+			"file" : "/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/lv2-subbuild/lv2-populate-prefix/src/lv2-populate-stamp/lv2-populate-patch_disconnected.rule"
+		},
+		{
+			"file" : "/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/lv2-subbuild/lv2-populate-prefix/src/lv2-populate-stamp/lv2-populate-test.rule"
+		},
+		{
+			"file" : "/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/lv2-subbuild/lv2-populate-prefix/src/lv2-populate-stamp/lv2-populate-update_disconnected.rule"
+		}
+	],
+	"target" : 
+	{
+		"labels" : 
+		[
+			"lv2-populate"
+		],
+		"name" : "lv2-populate"
+	}
+}

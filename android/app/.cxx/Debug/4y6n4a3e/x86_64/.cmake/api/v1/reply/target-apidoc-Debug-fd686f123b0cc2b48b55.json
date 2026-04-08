@@ -1,0 +1,66 @@
+{
+	"backtrace" : 1,
+	"backtraceGraph" : 
+	{
+		"commands" : 
+		[
+			"ADD_CUSTOM_TARGET"
+		],
+		"files" : 
+		[
+			"android/app/.cxx/Debug/4y6n4a3e/x86_64/_deps/mbedtls-src/CMakeLists.txt"
+		],
+		"nodes" : 
+		[
+			{
+				"file" : 0
+			},
+			{
+				"command" : 0,
+				"file" : 0,
+				"line" : 401,
+				"parent" : 0
+			}
+		]
+	},
+	"id" : "apidoc::@36d44abad58ef682ea5b",
+	"name" : "apidoc",
+	"paths" : 
+	{
+		"build" : "_deps/mbedtls-build",
+		"source" : "android/app/.cxx/Debug/4y6n4a3e/x86_64/_deps/mbedtls-src"
+	},
+	"sourceGroups" : 
+	[
+		{
+			"name" : "",
+			"sourceIndexes" : 
+			[
+				0
+			]
+		},
+		{
+			"name" : "CMake Rules",
+			"sourceIndexes" : 
+			[
+				1
+			]
+		}
+	],
+	"sources" : 
+	[
+		{
+			"backtrace" : 1,
+			"isGenerated" : true,
+			"path" : "android/app/.cxx/Debug/4y6n4a3e/x86_64/_deps/mbedtls-build/CMakeFiles/apidoc",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 0,
+			"isGenerated" : true,
+			"path" : "android/app/.cxx/Debug/4y6n4a3e/x86_64/_deps/mbedtls-build/CMakeFiles/apidoc.rule",
+			"sourceGroupIndex" : 1
+		}
+	],
+	"type" : "UTILITY"
+}

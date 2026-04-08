@@ -1,0 +1,21 @@
+# ninja log v6
+0	20	1775607042353816398	oboe-populate-prefix/src/oboe-populate-stamp/oboe-populate-mkdir	ddcc2d7e02c189e4
+0	20	1775607042353816398	/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/oboe-subbuild/oboe-populate-prefix/src/oboe-populate-stamp/oboe-populate-mkdir	ddcc2d7e02c189e4
+20	16473	1775607058806526464	oboe-populate-prefix/src/oboe-populate-stamp/oboe-populate-download	54d8dd60ffce617a
+20	16473	1775607058806526464	/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/oboe-subbuild/oboe-populate-prefix/src/oboe-populate-stamp/oboe-populate-download	54d8dd60ffce617a
+16473	16519	1775607058852879462	oboe-populate-prefix/src/oboe-populate-stamp/oboe-populate-update_disconnected	ab5a11580cd7eac1
+16473	16519	1775607058852879462	/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/oboe-subbuild/oboe-populate-prefix/src/oboe-populate-stamp/oboe-populate-update_disconnected	ab5a11580cd7eac1
+16519	16536	1775607058870233550	oboe-populate-prefix/src/oboe-populate-stamp/oboe-populate-patch_disconnected	84b397d3423b0d13
+16519	16536	1775607058870233550	/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/oboe-subbuild/oboe-populate-prefix/src/oboe-populate-stamp/oboe-populate-patch_disconnected	84b397d3423b0d13
+16536	16554	1775607058887584929	oboe-populate-prefix/src/oboe-populate-stamp/oboe-populate-configure	4684c7d7c98c5236
+16536	16554	1775607058887584929	/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/oboe-subbuild/oboe-populate-prefix/src/oboe-populate-stamp/oboe-populate-configure	4684c7d7c98c5236
+16554	16572	1775607058906057895	oboe-populate-prefix/src/oboe-populate-stamp/oboe-populate-build	7a7f87a3aae426e9
+16554	16572	1775607058906057895	/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/oboe-subbuild/oboe-populate-prefix/src/oboe-populate-stamp/oboe-populate-build	7a7f87a3aae426e9
+16572	16589	1775607058923150690	oboe-populate-prefix/src/oboe-populate-stamp/oboe-populate-install	34b38d1d2f8f0bfe
+16572	16589	1775607058923150690	/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/oboe-subbuild/oboe-populate-prefix/src/oboe-populate-stamp/oboe-populate-install	34b38d1d2f8f0bfe
+16589	16607	1775607058941532781	oboe-populate-prefix/src/oboe-populate-stamp/oboe-populate-test	b67fcda55d910284
+16589	16607	1775607058941532781	/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/oboe-subbuild/oboe-populate-prefix/src/oboe-populate-stamp/oboe-populate-test	b67fcda55d910284
+16608	16632	1775607058965546053	CMakeFiles/oboe-populate-complete	800fe586b9bd99b8
+16608	16632	1775607058965546053	oboe-populate-prefix/src/oboe-populate-stamp/oboe-populate-done	800fe586b9bd99b8
+16608	16632	1775607058965546053	/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/oboe-subbuild/CMakeFiles/oboe-populate-complete	800fe586b9bd99b8
+16608	16632	1775607058965546053	/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/oboe-subbuild/oboe-populate-prefix/src/oboe-populate-stamp/oboe-populate-done	800fe586b9bd99b8

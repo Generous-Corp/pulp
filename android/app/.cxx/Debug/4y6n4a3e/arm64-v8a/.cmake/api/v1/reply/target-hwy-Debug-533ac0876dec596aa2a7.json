@@ -1,0 +1,505 @@
+{
+	"archive" : {},
+	"artifacts" : 
+	[
+		{
+			"path" : "_deps/highway-build/libhwy.a"
+		}
+	],
+	"backtrace" : 1,
+	"backtraceGraph" : 
+	{
+		"commands" : 
+		[
+			"add_library",
+			"add_compile_options",
+			"target_compile_options",
+			"target_compile_definitions",
+			"target_include_directories"
+		],
+		"files" : 
+		[
+			"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/highway-src/CMakeLists.txt",
+			"CMakeLists.txt"
+		],
+		"nodes" : 
+		[
+			{
+				"file" : 0
+			},
+			{
+				"command" : 0,
+				"file" : 0,
+				"line" : 431,
+				"parent" : 0
+			},
+			{
+				"file" : 1
+			},
+			{
+				"command" : 1,
+				"file" : 1,
+				"line" : 68,
+				"parent" : 2
+			},
+			{
+				"command" : 2,
+				"file" : 0,
+				"line" : 439,
+				"parent" : 0
+			},
+			{
+				"command" : 3,
+				"file" : 0,
+				"line" : 438,
+				"parent" : 0
+			},
+			{
+				"command" : 4,
+				"file" : 0,
+				"line" : 442,
+				"parent" : 0
+			}
+		]
+	},
+	"compileGroups" : 
+	[
+		{
+			"compileCommandFragments" : 
+			[
+				{
+					"fragment" : "-g -DANDROID -fdata-sections -ffunction-sections -funwind-tables -fstack-protector-strong -no-canonical-prefixes -D_FORTIFY_SOURCE=2 -Wformat -Werror=format-security  -std=c++20 -fexceptions -frtti -fno-limit-debug-info  -fPIC -fvisibility=hidden -fvisibility-inlines-hidden"
+				},
+				{
+					"backtrace" : 3,
+					"fragment" : "-Wall"
+				},
+				{
+					"backtrace" : 3,
+					"fragment" : "-Wextra"
+				},
+				{
+					"backtrace" : 3,
+					"fragment" : "-Wpedantic"
+				},
+				{
+					"backtrace" : 3,
+					"fragment" : "-Wno-unused-parameter"
+				},
+				{
+					"backtrace" : 4,
+					"fragment" : "-Wno-builtin-macro-redefined"
+				},
+				{
+					"backtrace" : 4,
+					"fragment" : "-D__DATE__=\\\"redacted\\\""
+				},
+				{
+					"backtrace" : 4,
+					"fragment" : "-D__TIMESTAMP__=\\\"redacted\\\""
+				},
+				{
+					"backtrace" : 4,
+					"fragment" : "-D__TIME__=\\\"redacted\\\""
+				},
+				{
+					"backtrace" : 4,
+					"fragment" : "-fmerge-all-constants"
+				},
+				{
+					"backtrace" : 4,
+					"fragment" : "-Wconversion"
+				},
+				{
+					"backtrace" : 4,
+					"fragment" : "-Wsign-conversion"
+				},
+				{
+					"backtrace" : 4,
+					"fragment" : "-Wvla"
+				},
+				{
+					"backtrace" : 4,
+					"fragment" : "-Wnon-virtual-dtor"
+				},
+				{
+					"backtrace" : 4,
+					"fragment" : "-Wcast-align"
+				},
+				{
+					"backtrace" : 4,
+					"fragment" : "-Wfloat-overflow-conversion"
+				},
+				{
+					"backtrace" : 4,
+					"fragment" : "-Wfloat-zero-conversion"
+				},
+				{
+					"backtrace" : 4,
+					"fragment" : "-Wfor-loop-analysis"
+				},
+				{
+					"backtrace" : 4,
+					"fragment" : "-Wgnu-redeclared-enum"
+				},
+				{
+					"backtrace" : 4,
+					"fragment" : "-Winfinite-recursion"
+				},
+				{
+					"backtrace" : 4,
+					"fragment" : "-Wself-assign"
+				},
+				{
+					"backtrace" : 4,
+					"fragment" : "-Wstring-conversion"
+				},
+				{
+					"backtrace" : 4,
+					"fragment" : "-Wtautological-overlap-compare"
+				},
+				{
+					"backtrace" : 4,
+					"fragment" : "-Wthread-safety-analysis"
+				},
+				{
+					"backtrace" : 4,
+					"fragment" : "-Wundefined-func-template"
+				},
+				{
+					"backtrace" : 4,
+					"fragment" : "-fno-cxx-exceptions"
+				},
+				{
+					"backtrace" : 4,
+					"fragment" : "-fno-slp-vectorize"
+				},
+				{
+					"backtrace" : 4,
+					"fragment" : "-fno-vectorize"
+				},
+				{
+					"backtrace" : 4,
+					"fragment" : "-fdiagnostics-show-option"
+				},
+				{
+					"backtrace" : 4,
+					"fragment" : "-fcolor-diagnostics"
+				},
+				{
+					"backtrace" : 4,
+					"fragment" : "-Wc++2a-extensions"
+				},
+				{
+					"backtrace" : 4,
+					"fragment" : "-fmath-errno"
+				},
+				{
+					"backtrace" : 4,
+					"fragment" : "-fno-exceptions"
+				},
+				{
+					"backtrace" : 4,
+					"fragment" : "-Wno-psabi"
+				}
+			],
+			"defines" : 
+			[
+				{
+					"backtrace" : 5,
+					"define" : "HWY_STATIC_DEFINE"
+				}
+			],
+			"includes" : 
+			[
+				{
+					"backtrace" : 6,
+					"path" : "/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/highway-src"
+				}
+			],
+			"language" : "CXX",
+			"sourceIndexes" : 
+			[
+				32,
+				33,
+				34,
+				35,
+				36,
+				37,
+				38
+			],
+			"sysroot" : 
+			{
+				"path" : "/Users/danielraffel/Library/Android/sdk/ndk/30.0.14904198/toolchains/llvm/prebuilt/darwin-x86_64/sysroot"
+			}
+		}
+	],
+	"id" : "hwy::@6818ec3213dbbeb74f3c",
+	"name" : "hwy",
+	"nameOnDisk" : "libhwy.a",
+	"paths" : 
+	{
+		"build" : "_deps/highway-build",
+		"source" : "android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/highway-src"
+	},
+	"sourceGroups" : 
+	[
+		{
+			"name" : "Header Files",
+			"sourceIndexes" : 
+			[
+				0,
+				1,
+				2,
+				3,
+				4,
+				5,
+				6,
+				7,
+				8,
+				9,
+				10,
+				11,
+				12,
+				13,
+				14,
+				15,
+				16,
+				17,
+				18,
+				19,
+				20,
+				21,
+				22,
+				23,
+				24,
+				25,
+				26,
+				27,
+				28,
+				29,
+				30,
+				31
+			]
+		},
+		{
+			"name" : "Source Files",
+			"sourceIndexes" : 
+			[
+				32,
+				33,
+				34,
+				35,
+				36,
+				37,
+				38
+			]
+		}
+	],
+	"sources" : 
+	[
+		{
+			"backtrace" : 1,
+			"path" : "android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/highway-src/hwy/abort.h",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"path" : "android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/highway-src/hwy/aligned_allocator.h",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"path" : "android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/highway-src/hwy/base.h",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"path" : "android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/highway-src/hwy/cache_control.h",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"path" : "android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/highway-src/hwy/detect_compiler_arch.h",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"path" : "android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/highway-src/hwy/detect_targets.h",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"path" : "android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/highway-src/hwy/foreach_target.h",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"path" : "android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/highway-src/hwy/highway_export.h",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"path" : "android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/highway-src/hwy/highway.h",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"path" : "android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/highway-src/hwy/nanobenchmark.h",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"path" : "android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/highway-src/hwy/ops/arm_neon-inl.h",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"path" : "android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/highway-src/hwy/ops/arm_sve-inl.h",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"path" : "android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/highway-src/hwy/ops/emu128-inl.h",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"path" : "android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/highway-src/hwy/ops/generic_ops-inl.h",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"path" : "android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/highway-src/hwy/ops/inside-inl.h",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"path" : "android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/highway-src/hwy/ops/ppc_vsx-inl.h",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"path" : "android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/highway-src/hwy/ops/rvv-inl.h",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"path" : "android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/highway-src/hwy/ops/scalar-inl.h",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"path" : "android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/highway-src/hwy/ops/set_macros-inl.h",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"path" : "android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/highway-src/hwy/ops/shared-inl.h",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"path" : "android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/highway-src/hwy/ops/wasm_128-inl.h",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"path" : "android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/highway-src/hwy/ops/x86_128-inl.h",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"path" : "android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/highway-src/hwy/ops/x86_256-inl.h",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"path" : "android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/highway-src/hwy/ops/x86_512-inl.h",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"path" : "android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/highway-src/hwy/per_target.h",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"path" : "android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/highway-src/hwy/print-inl.h",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"path" : "android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/highway-src/hwy/print.h",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"path" : "android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/highway-src/hwy/profiler.h",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"path" : "android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/highway-src/hwy/robust_statistics.h",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"path" : "android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/highway-src/hwy/targets.h",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"path" : "android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/highway-src/hwy/timer-inl.h",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"path" : "android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/highway-src/hwy/timer.h",
+			"sourceGroupIndex" : 0
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/highway-src/hwy/abort.cc",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/highway-src/hwy/aligned_allocator.cc",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/highway-src/hwy/nanobenchmark.cc",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/highway-src/hwy/per_target.cc",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/highway-src/hwy/print.cc",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/highway-src/hwy/targets.cc",
+			"sourceGroupIndex" : 1
+		},
+		{
+			"backtrace" : 1,
+			"compileGroupIndex" : 0,
+			"path" : "android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/highway-src/hwy/timer.cc",
+			"sourceGroupIndex" : 1
+		}
+	],
+	"type" : "STATIC_LIBRARY"
+}

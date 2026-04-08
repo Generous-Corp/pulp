@@ -1,0 +1,154 @@
+{
+	"backtraceGraph" : 
+	{
+		"commands" : 
+		[
+			"install"
+		],
+		"files" : 
+		[
+			"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/CMakeLists.txt"
+		],
+		"nodes" : 
+		[
+			{
+				"file" : 0
+			},
+			{
+				"command" : 0,
+				"file" : 0,
+				"line" : 8,
+				"parent" : 0
+			},
+			{
+				"command" : 0,
+				"file" : 0,
+				"line" : 12,
+				"parent" : 0
+			}
+		]
+	},
+	"installers" : 
+	[
+		{
+			"backtrace" : 1,
+			"component" : "Unspecified",
+			"destination" : "include/mbedtls",
+			"paths" : 
+			[
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/mbedtls/aes.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/mbedtls/aria.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/mbedtls/asn1.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/mbedtls/asn1write.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/mbedtls/base64.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/mbedtls/bignum.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/mbedtls/block_cipher.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/mbedtls/build_info.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/mbedtls/camellia.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/mbedtls/ccm.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/mbedtls/chacha20.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/mbedtls/chachapoly.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/mbedtls/check_config.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/mbedtls/cipher.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/mbedtls/cmac.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/mbedtls/compat-2.x.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/mbedtls/config_adjust_legacy_crypto.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/mbedtls/config_adjust_legacy_from_psa.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/mbedtls/config_adjust_psa_from_legacy.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/mbedtls/config_adjust_psa_superset_legacy.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/mbedtls/config_adjust_ssl.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/mbedtls/config_adjust_x509.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/mbedtls/config_psa.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/mbedtls/constant_time.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/mbedtls/ctr_drbg.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/mbedtls/debug.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/mbedtls/des.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/mbedtls/dhm.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/mbedtls/ecdh.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/mbedtls/ecdsa.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/mbedtls/ecjpake.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/mbedtls/ecp.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/mbedtls/entropy.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/mbedtls/error.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/mbedtls/gcm.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/mbedtls/hkdf.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/mbedtls/hmac_drbg.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/mbedtls/lms.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/mbedtls/mbedtls_config.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/mbedtls/md.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/mbedtls/md5.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/mbedtls/memory_buffer_alloc.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/mbedtls/net_sockets.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/mbedtls/nist_kw.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/mbedtls/oid.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/mbedtls/pem.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/mbedtls/pk.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/mbedtls/pkcs12.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/mbedtls/pkcs5.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/mbedtls/pkcs7.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/mbedtls/platform.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/mbedtls/platform_time.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/mbedtls/platform_util.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/mbedtls/poly1305.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/mbedtls/private_access.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/mbedtls/psa_util.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/mbedtls/ripemd160.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/mbedtls/rsa.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/mbedtls/sha1.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/mbedtls/sha256.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/mbedtls/sha3.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/mbedtls/sha512.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/mbedtls/ssl.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/mbedtls/ssl_cache.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/mbedtls/ssl_ciphersuites.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/mbedtls/ssl_cookie.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/mbedtls/ssl_ticket.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/mbedtls/threading.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/mbedtls/timing.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/mbedtls/version.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/mbedtls/x509.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/mbedtls/x509_crl.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/mbedtls/x509_crt.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/mbedtls/x509_csr.h"
+			],
+			"type" : "file"
+		},
+		{
+			"backtrace" : 2,
+			"component" : "Unspecified",
+			"destination" : "include/psa",
+			"paths" : 
+			[
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/psa/build_info.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/psa/crypto.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/psa/crypto_adjust_auto_enabled.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/psa/crypto_adjust_config_dependencies.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/psa/crypto_adjust_config_key_pair_types.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/psa/crypto_adjust_config_synonyms.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/psa/crypto_builtin_composites.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/psa/crypto_builtin_key_derivation.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/psa/crypto_builtin_primitives.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/psa/crypto_compat.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/psa/crypto_config.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/psa/crypto_driver_common.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/psa/crypto_driver_contexts_composites.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/psa/crypto_driver_contexts_key_derivation.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/psa/crypto_driver_contexts_primitives.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/psa/crypto_extra.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/psa/crypto_legacy.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/psa/crypto_platform.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/psa/crypto_se_driver.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/psa/crypto_sizes.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/psa/crypto_struct.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/psa/crypto_types.h",
+				"android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include/psa/crypto_values.h"
+			],
+			"type" : "file"
+		}
+	],
+	"paths" : 
+	{
+		"build" : "_deps/mbedtls-build/include",
+		"source" : "android/app/.cxx/Debug/4y6n4a3e/arm64-v8a/_deps/mbedtls-src/include"
+	}
+}

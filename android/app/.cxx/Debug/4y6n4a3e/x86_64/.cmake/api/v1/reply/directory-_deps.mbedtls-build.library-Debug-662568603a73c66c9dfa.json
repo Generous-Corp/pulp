@@ -1,0 +1,81 @@
+{
+	"backtraceGraph" : 
+	{
+		"commands" : 
+		[
+			"install"
+		],
+		"files" : 
+		[
+			"android/app/.cxx/Debug/4y6n4a3e/x86_64/_deps/mbedtls-src/library/CMakeLists.txt"
+		],
+		"nodes" : 
+		[
+			{
+				"file" : 0
+			},
+			{
+				"command" : 0,
+				"file" : 0,
+				"line" : 345,
+				"parent" : 0
+			},
+			{
+				"command" : 0,
+				"file" : 0,
+				"line" : 345,
+				"parent" : 0
+			},
+			{
+				"command" : 0,
+				"file" : 0,
+				"line" : 345,
+				"parent" : 0
+			}
+		]
+	},
+	"installers" : 
+	[
+		{
+			"backtrace" : 1,
+			"component" : "Unspecified",
+			"destination" : "lib",
+			"paths" : 
+			[
+				"_deps/mbedtls-build/library/libmbedcrypto.a"
+			],
+			"targetId" : "mbedcrypto::@085c30ee5801d290d8db",
+			"targetIndex" : 10,
+			"type" : "target"
+		},
+		{
+			"backtrace" : 2,
+			"component" : "Unspecified",
+			"destination" : "lib",
+			"paths" : 
+			[
+				"_deps/mbedtls-build/library/libmbedx509.a"
+			],
+			"targetId" : "mbedx509::@085c30ee5801d290d8db",
+			"targetIndex" : 12,
+			"type" : "target"
+		},
+		{
+			"backtrace" : 3,
+			"component" : "Unspecified",
+			"destination" : "lib",
+			"paths" : 
+			[
+				"_deps/mbedtls-build/library/libmbedtls.a"
+			],
+			"targetId" : "mbedtls::@085c30ee5801d290d8db",
+			"targetIndex" : 11,
+			"type" : "target"
+		}
+	],
+	"paths" : 
+	{
+		"build" : "_deps/mbedtls-build/library",
+		"source" : "android/app/.cxx/Debug/4y6n4a3e/x86_64/_deps/mbedtls-src/library"
+	}
+}

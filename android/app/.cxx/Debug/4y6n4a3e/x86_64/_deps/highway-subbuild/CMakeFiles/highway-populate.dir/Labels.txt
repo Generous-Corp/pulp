@@ -1,0 +1,14 @@
+# Target labels
+ highway-populate
+# Source files and their labels
+/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/x86_64/_deps/highway-subbuild/CMakeFiles/highway-populate
+/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/x86_64/_deps/highway-subbuild/CMakeFiles/highway-populate.rule
+/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/x86_64/_deps/highway-subbuild/CMakeFiles/highway-populate-complete.rule
+/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/x86_64/_deps/highway-subbuild/highway-populate-prefix/src/highway-populate-stamp/highway-populate-build.rule
+/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/x86_64/_deps/highway-subbuild/highway-populate-prefix/src/highway-populate-stamp/highway-populate-configure.rule
+/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/x86_64/_deps/highway-subbuild/highway-populate-prefix/src/highway-populate-stamp/highway-populate-download.rule
+/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/x86_64/_deps/highway-subbuild/highway-populate-prefix/src/highway-populate-stamp/highway-populate-install.rule
+/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/x86_64/_deps/highway-subbuild/highway-populate-prefix/src/highway-populate-stamp/highway-populate-mkdir.rule
+/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/x86_64/_deps/highway-subbuild/highway-populate-prefix/src/highway-populate-stamp/highway-populate-patch_disconnected.rule
+/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/x86_64/_deps/highway-subbuild/highway-populate-prefix/src/highway-populate-stamp/highway-populate-test.rule
+/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/x86_64/_deps/highway-subbuild/highway-populate-prefix/src/highway-populate-stamp/highway-populate-update_disconnected.rule

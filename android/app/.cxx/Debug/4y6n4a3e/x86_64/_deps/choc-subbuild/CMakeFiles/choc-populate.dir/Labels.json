@@ -1,0 +1,46 @@
+{
+	"sources" : 
+	[
+		{
+			"file" : "/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/x86_64/_deps/choc-subbuild/CMakeFiles/choc-populate"
+		},
+		{
+			"file" : "/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/x86_64/_deps/choc-subbuild/CMakeFiles/choc-populate.rule"
+		},
+		{
+			"file" : "/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/x86_64/_deps/choc-subbuild/CMakeFiles/choc-populate-complete.rule"
+		},
+		{
+			"file" : "/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/x86_64/_deps/choc-subbuild/choc-populate-prefix/src/choc-populate-stamp/choc-populate-build.rule"
+		},
+		{
+			"file" : "/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/x86_64/_deps/choc-subbuild/choc-populate-prefix/src/choc-populate-stamp/choc-populate-configure.rule"
+		},
+		{
+			"file" : "/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/x86_64/_deps/choc-subbuild/choc-populate-prefix/src/choc-populate-stamp/choc-populate-download.rule"
+		},
+		{
+			"file" : "/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/x86_64/_deps/choc-subbuild/choc-populate-prefix/src/choc-populate-stamp/choc-populate-install.rule"
+		},
+		{
+			"file" : "/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/x86_64/_deps/choc-subbuild/choc-populate-prefix/src/choc-populate-stamp/choc-populate-mkdir.rule"
+		},
+		{
+			"file" : "/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/x86_64/_deps/choc-subbuild/choc-populate-prefix/src/choc-populate-stamp/choc-populate-patch_disconnected.rule"
+		},
+		{
+			"file" : "/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/x86_64/_deps/choc-subbuild/choc-populate-prefix/src/choc-populate-stamp/choc-populate-test.rule"
+		},
+		{
+			"file" : "/Users/danielraffel/Code/pulp-android/android/app/.cxx/Debug/4y6n4a3e/x86_64/_deps/choc-subbuild/choc-populate-prefix/src/choc-populate-stamp/choc-populate-update_disconnected.rule"
+		}
+	],
+	"target" : 
+	{
+		"labels" : 
+		[
+			"choc-populate"
+		],
+		"name" : "choc-populate"
+	}
+}

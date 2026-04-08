@@ -1,0 +1,233 @@
+1<?xml version="1.0" encoding="utf-8"?>
+2<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+3    package="com.pulp.app"
+4    android:versionCode="1"
+5    android:versionName="0.1.0" >
+6
+7    <uses-sdk
+8        android:minSdkVersion="26"
+9        android:targetSdkVersion="35" />
+10
+11    <!-- Audio recording (microphone input) -->
+12    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+12-->/Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:5:5-70
+12-->/Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:5:22-68
+13
+14    <!-- Foreground service for background audio -->
+15    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+15-->/Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:8:5-76
+15-->/Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:8:22-74
+16    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+16-->/Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:9:5-91
+16-->/Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:9:22-89
+17    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+17-->/Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:10:5-87
+17-->/Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:10:22-85
+18
+19    <!-- Android 14+ notification permission for FGS -->
+20    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+20-->/Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:13:5-76
+20-->/Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:13:22-74
+21
+22    <!-- Bluetooth MIDI (API 31+) -->
+23    <uses-permission
+23-->/Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:16:5-17:70
+24        android:name="android.permission.BLUETOOTH_SCAN"
+24-->/Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:16:22-70
+25        android:usesPermissionFlags="neverForLocation" />
+25-->/Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:17:22-68
+26    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+26-->/Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:18:5-75
+26-->/Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:18:22-73
+27
+28    <!-- Internet for license validation, analytics -->
+29    <uses-permission android:name="android.permission.INTERNET" />
+29-->/Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:21:5-66
+29-->/Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:21:22-64
+30
+31    <!-- Optional hardware features -->
+32    <uses-feature
+32-->/Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:24:5-87
+33        android:name="android.hardware.audio.pro"
+33-->/Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:24:19-60
+34        android:required="false" />
+34-->/Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:24:61-85
+35    <uses-feature
+35-->/Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:25:5-95
+36        android:name="android.hardware.audio.low_latency"
+36-->/Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:25:19-68
+37        android:required="false" />
+37-->/Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:25:69-93
+38    <uses-feature
+38-->/Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:26:5-82
+39        android:name="android.hardware.midi"
+39-->/Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:26:19-55
+40        android:required="false" />
+40-->/Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:26:56-80
+41    <uses-feature
+41-->/Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:27:5-110
+42        android:name="android.hardware.vulkan.level"
+42-->/Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:27:19-63
+43        android:required="false"
+43-->/Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:27:84-108
+44        android:version="1" />
+44-->/Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:27:64-83
+45    <uses-feature
+45-->/Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:28:5-78
+46        android:glEsVersion="0x00030000"
+46-->/Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:28:19-51
+47        android:required="false" />
+47-->/Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:28:52-76
+48
+49    <permission
+49-->[androidx.core:core:1.13.1] /Users/danielraffel/.gradle/caches/8.11/transforms/1608c905ffdc3c8ebd7c8aeb299dcb12/transformed/core-1.13.1/AndroidManifest.xml:22:5-24:47
+50        android:name="com.pulp.app.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"
+50-->[androidx.core:core:1.13.1] /Users/danielraffel/.gradle/caches/8.11/transforms/1608c905ffdc3c8ebd7c8aeb299dcb12/transformed/core-1.13.1/AndroidManifest.xml:23:9-81
+51        android:protectionLevel="signature" />
+51-->[androidx.core:core:1.13.1] /Users/danielraffel/.gradle/caches/8.11/transforms/1608c905ffdc3c8ebd7c8aeb299dcb12/transformed/core-1.13.1/AndroidManifest.xml:24:9-44
+52
+53    <uses-permission android:name="com.pulp.app.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION" />
+53-->[androidx.core:core:1.13.1] /Users/danielraffel/.gradle/caches/8.11/transforms/1608c905ffdc3c8ebd7c8aeb299dcb12/transformed/core-1.13.1/AndroidManifest.xml:26:5-97
+53-->[androidx.core:core:1.13.1] /Users/danielraffel/.gradle/caches/8.11/transforms/1608c905ffdc3c8ebd7c8aeb299dcb12/transformed/core-1.13.1/AndroidManifest.xml:26:22-94
+54
+55    <application
+55-->/Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:30:5-68:19
+56        android:name="com.pulp.app.PulpApplication"
+56-->/Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:31:9-40
+57        android:allowBackup="true"
+57-->/Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:32:9-35
+58        android:appComponentFactory="androidx.core.app.CoreComponentFactory"
+58-->[androidx.core:core:1.13.1] /Users/danielraffel/.gradle/caches/8.11/transforms/1608c905ffdc3c8ebd7c8aeb299dcb12/transformed/core-1.13.1/AndroidManifest.xml:28:18-86
+59        android:debuggable="true"
+60        android:extractNativeLibs="true"
+60-->/Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:35:9-41
+61        android:label="Pulp"
+61-->/Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:33:9-29
+62        android:supportsRtl="true"
+62-->/Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:34:9-35
+63        android:theme="@android:style/Theme.Material.Light.NoActionBar" >
+63-->/Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:36:9-72
+64
+65        <!-- Main activity — configChanges prevents destruction on rotation/fold -->
+66        <activity
+66-->/Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:39:9-47:20
+67            android:name="com.pulp.app.PulpActivity"
+67-->/Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:40:13-41
+68            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|keyboard|uiMode|density|fontScale|layoutDirection|locale|colorMode"
+68-->/Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:41:13-173
+69            android:exported="true" >
+69-->/Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:42:13-36
+70            <intent-filter>
+70-->/Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:43:13-46:29
+71                <action android:name="android.intent.action.MAIN" />
+71-->/Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:44:17-68
+71-->/Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:44:25-66
+72
+73                <category android:name="android.intent.category.LAUNCHER" />
+73-->/Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:45:17-76
+73-->/Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:45:27-74
+74            </intent-filter>
+75        </activity>
+76
+77        <!-- Foreground service for background audio processing -->
+78        <service
+78-->/Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:50:9-53:39
+79            android:name="com.pulp.app.PulpAudioService"
+79-->/Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:51:13-45
+80            android:exported="false"
+80-->/Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:53:13-37
+81            android:foregroundServiceType="mediaPlayback|microphone" />
+81-->/Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:52:13-69
+82
+83        <!-- Virtual MIDI port service -->
+84        <service
+84-->/Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:56:9-66:19
+85            android:name="com.pulp.app.midi.PulpMidiService"
+85-->/Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:57:13-49
+86            android:exported="true"
+86-->/Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:59:13-36
+87            android:permission="android.permission.BIND_MIDI_DEVICE_SERVICE" >
+87-->/Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:58:13-77
+88            <intent-filter>
+88-->/Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:60:13-62:29
+89                <action android:name="android.media.midi.MidiDeviceService" />
+89-->/Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:61:17-78
+89-->/Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:61:25-76
+90            </intent-filter>
+91
+92            <meta-data
+92-->/Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:63:13-65:59
+93                android:name="android.media.midi.MidiDeviceService"
+93-->/Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:64:17-68
+94                android:resource="@xml/midi_device_info" />
+94-->/Users/danielraffel/Code/pulp-android/android/app/src/main/AndroidManifest.xml:65:17-57
+95        </service>
+96
+97        <provider
+97-->[androidx.emoji2:emoji2:1.3.0] /Users/danielraffel/.gradle/caches/8.11/transforms/1a1b4717c9bff043cda81304a66ba559/transformed/emoji2-1.3.0/AndroidManifest.xml:24:9-32:20
+98            android:name="androidx.startup.InitializationProvider"
+98-->[androidx.emoji2:emoji2:1.3.0] /Users/danielraffel/.gradle/caches/8.11/transforms/1a1b4717c9bff043cda81304a66ba559/transformed/emoji2-1.3.0/AndroidManifest.xml:25:13-67
+99            android:authorities="com.pulp.app.androidx-startup"
+99-->[androidx.emoji2:emoji2:1.3.0] /Users/danielraffel/.gradle/caches/8.11/transforms/1a1b4717c9bff043cda81304a66ba559/transformed/emoji2-1.3.0/AndroidManifest.xml:26:13-68
+100            android:exported="false" >
+100-->[androidx.emoji2:emoji2:1.3.0] /Users/danielraffel/.gradle/caches/8.11/transforms/1a1b4717c9bff043cda81304a66ba559/transformed/emoji2-1.3.0/AndroidManifest.xml:27:13-37
+101            <meta-data
+101-->[androidx.emoji2:emoji2:1.3.0] /Users/danielraffel/.gradle/caches/8.11/transforms/1a1b4717c9bff043cda81304a66ba559/transformed/emoji2-1.3.0/AndroidManifest.xml:29:13-31:52
+102                android:name="androidx.emoji2.text.EmojiCompatInitializer"
+102-->[androidx.emoji2:emoji2:1.3.0] /Users/danielraffel/.gradle/caches/8.11/transforms/1a1b4717c9bff043cda81304a66ba559/transformed/emoji2-1.3.0/AndroidManifest.xml:30:17-75
+103                android:value="androidx.startup" />
+103-->[androidx.emoji2:emoji2:1.3.0] /Users/danielraffel/.gradle/caches/8.11/transforms/1a1b4717c9bff043cda81304a66ba559/transformed/emoji2-1.3.0/AndroidManifest.xml:31:17-49
+104            <meta-data
+104-->[androidx.lifecycle:lifecycle-process:2.8.7] /Users/danielraffel/.gradle/caches/8.11/transforms/b90cacacd7c0c7c0e0a731c40c20d71b/transformed/lifecycle-process-2.8.7/AndroidManifest.xml:29:13-31:52
+105                android:name="androidx.lifecycle.ProcessLifecycleInitializer"
+105-->[androidx.lifecycle:lifecycle-process:2.8.7] /Users/danielraffel/.gradle/caches/8.11/transforms/b90cacacd7c0c7c0e0a731c40c20d71b/transformed/lifecycle-process-2.8.7/AndroidManifest.xml:30:17-78
+106                android:value="androidx.startup" />
+106-->[androidx.lifecycle:lifecycle-process:2.8.7] /Users/danielraffel/.gradle/caches/8.11/transforms/b90cacacd7c0c7c0e0a731c40c20d71b/transformed/lifecycle-process-2.8.7/AndroidManifest.xml:31:17-49
+107            <meta-data
+107-->[androidx.profileinstaller:profileinstaller:1.3.1] /Users/danielraffel/.gradle/caches/8.11/transforms/bcb07c1cc3696700e504a9f7df2c2e96/transformed/profileinstaller-1.3.1/AndroidManifest.xml:29:13-31:52
+108                android:name="androidx.profileinstaller.ProfileInstallerInitializer"
+108-->[androidx.profileinstaller:profileinstaller:1.3.1] /Users/danielraffel/.gradle/caches/8.11/transforms/bcb07c1cc3696700e504a9f7df2c2e96/transformed/profileinstaller-1.3.1/AndroidManifest.xml:30:17-85
+109                android:value="androidx.startup" />
+109-->[androidx.profileinstaller:profileinstaller:1.3.1] /Users/danielraffel/.gradle/caches/8.11/transforms/bcb07c1cc3696700e504a9f7df2c2e96/transformed/profileinstaller-1.3.1/AndroidManifest.xml:31:17-49
+110        </provider>
+111
+112        <receiver
+112-->[androidx.profileinstaller:profileinstaller:1.3.1] /Users/danielraffel/.gradle/caches/8.11/transforms/bcb07c1cc3696700e504a9f7df2c2e96/transformed/profileinstaller-1.3.1/AndroidManifest.xml:34:9-52:20
+113            android:name="androidx.profileinstaller.ProfileInstallReceiver"
+113-->[androidx.profileinstaller:profileinstaller:1.3.1] /Users/danielraffel/.gradle/caches/8.11/transforms/bcb07c1cc3696700e504a9f7df2c2e96/transformed/profileinstaller-1.3.1/AndroidManifest.xml:35:13-76
+114            android:directBootAware="false"
+114-->[androidx.profileinstaller:profileinstaller:1.3.1] /Users/danielraffel/.gradle/caches/8.11/transforms/bcb07c1cc3696700e504a9f7df2c2e96/transformed/profileinstaller-1.3.1/AndroidManifest.xml:36:13-44
+115            android:enabled="true"
+115-->[androidx.profileinstaller:profileinstaller:1.3.1] /Users/danielraffel/.gradle/caches/8.11/transforms/bcb07c1cc3696700e504a9f7df2c2e96/transformed/profileinstaller-1.3.1/AndroidManifest.xml:37:13-35
+116            android:exported="true"
+116-->[androidx.profileinstaller:profileinstaller:1.3.1] /Users/danielraffel/.gradle/caches/8.11/transforms/bcb07c1cc3696700e504a9f7df2c2e96/transformed/profileinstaller-1.3.1/AndroidManifest.xml:38:13-36
+117            android:permission="android.permission.DUMP" >
+117-->[androidx.profileinstaller:profileinstaller:1.3.1] /Users/danielraffel/.gradle/caches/8.11/transforms/bcb07c1cc3696700e504a9f7df2c2e96/transformed/profileinstaller-1.3.1/AndroidManifest.xml:39:13-57
+118            <intent-filter>
+118-->[androidx.profileinstaller:profileinstaller:1.3.1] /Users/danielraffel/.gradle/caches/8.11/transforms/bcb07c1cc3696700e504a9f7df2c2e96/transformed/profileinstaller-1.3.1/AndroidManifest.xml:40:13-42:29
+119                <action android:name="androidx.profileinstaller.action.INSTALL_PROFILE" />
+119-->[androidx.profileinstaller:profileinstaller:1.3.1] /Users/danielraffel/.gradle/caches/8.11/transforms/bcb07c1cc3696700e504a9f7df2c2e96/transformed/profileinstaller-1.3.1/AndroidManifest.xml:41:17-91
+119-->[androidx.profileinstaller:profileinstaller:1.3.1] /Users/danielraffel/.gradle/caches/8.11/transforms/bcb07c1cc3696700e504a9f7df2c2e96/transformed/profileinstaller-1.3.1/AndroidManifest.xml:41:25-88
+120            </intent-filter>
+121            <intent-filter>
+121-->[androidx.profileinstaller:profileinstaller:1.3.1] /Users/danielraffel/.gradle/caches/8.11/transforms/bcb07c1cc3696700e504a9f7df2c2e96/transformed/profileinstaller-1.3.1/AndroidManifest.xml:43:13-45:29
+122                <action android:name="androidx.profileinstaller.action.SKIP_FILE" />
+122-->[androidx.profileinstaller:profileinstaller:1.3.1] /Users/danielraffel/.gradle/caches/8.11/transforms/bcb07c1cc3696700e504a9f7df2c2e96/transformed/profileinstaller-1.3.1/AndroidManifest.xml:44:17-85
+122-->[androidx.profileinstaller:profileinstaller:1.3.1] /Users/danielraffel/.gradle/caches/8.11/transforms/bcb07c1cc3696700e504a9f7df2c2e96/transformed/profileinstaller-1.3.1/AndroidManifest.xml:44:25-82
+123            </intent-filter>
+124            <intent-filter>
+124-->[androidx.profileinstaller:profileinstaller:1.3.1] /Users/danielraffel/.gradle/caches/8.11/transforms/bcb07c1cc3696700e504a9f7df2c2e96/transformed/profileinstaller-1.3.1/AndroidManifest.xml:46:13-48:29
+125                <action android:name="androidx.profileinstaller.action.SAVE_PROFILE" />
+125-->[androidx.profileinstaller:profileinstaller:1.3.1] /Users/danielraffel/.gradle/caches/8.11/transforms/bcb07c1cc3696700e504a9f7df2c2e96/transformed/profileinstaller-1.3.1/AndroidManifest.xml:47:17-88
+125-->[androidx.profileinstaller:profileinstaller:1.3.1] /Users/danielraffel/.gradle/caches/8.11/transforms/bcb07c1cc3696700e504a9f7df2c2e96/transformed/profileinstaller-1.3.1/AndroidManifest.xml:47:25-85
+126            </intent-filter>
+127            <intent-filter>
+127-->[androidx.profileinstaller:profileinstaller:1.3.1] /Users/danielraffel/.gradle/caches/8.11/transforms/bcb07c1cc3696700e504a9f7df2c2e96/transformed/profileinstaller-1.3.1/AndroidManifest.xml:49:13-51:29
+128                <action android:name="androidx.profileinstaller.action.BENCHMARK_OPERATION" />
+128-->[androidx.profileinstaller:profileinstaller:1.3.1] /Users/danielraffel/.gradle/caches/8.11/transforms/bcb07c1cc3696700e504a9f7df2c2e96/transformed/profileinstaller-1.3.1/AndroidManifest.xml:50:17-95
+128-->[androidx.profileinstaller:profileinstaller:1.3.1] /Users/danielraffel/.gradle/caches/8.11/transforms/bcb07c1cc3696700e504a9f7df2c2e96/transformed/profileinstaller-1.3.1/AndroidManifest.xml:50:25-92
+129            </intent-filter>
+130        </receiver>
+131    </application>
+132
+133</manifest>
