@@ -9,6 +9,15 @@
 #include <memory>
 #include <algorithm>
 
+#ifdef _MSC_VER
+#include <malloc.h>
+inline void* pulp_aligned_alloc(size_t alignment, size_t size) { return _aligned_malloc(size, alignment); }
+inline void pulp_aligned_free(void* p) { _aligned_free(p); }
+#else
+inline void* pulp_aligned_alloc(size_t alignment, size_t size) { return std::aligned_alloc(alignment, size); }
+inline void pulp_aligned_free(void* p) { std::free(p); }
+#endif
+
 namespace pulp::signal {
 
 /// Alignment in bytes for SIMD operations (covers AVX-512)
@@ -24,12 +33,12 @@ public:
         if (num_samples > 0) {
             // Round up to alignment boundary
             size_t bytes = num_samples * sizeof(float);
-            data_ = static_cast<float*>(std::aligned_alloc(kSimdAlignment, align_up(bytes)));
+            data_ = static_cast<float*>(pulp_aligned_alloc(kSimdAlignment, align_up(bytes)));
             std::memset(data_, 0, align_up(bytes));
         }
     }
 
-    ~AlignedBuffer() { std::free(data_); }
+    ~AlignedBuffer() { pulp_aligned_free(data_); }
 
     // Move only
     AlignedBuffer(AlignedBuffer&& other) noexcept
@@ -40,7 +49,7 @@ public:
 
     AlignedBuffer& operator=(AlignedBuffer&& other) noexcept {
         if (this != &other) {
-            std::free(data_);
+            pulp_aligned_free(data_);
             data_ = other.data_;
             size_ = other.size_;
             other.data_ = nullptr;
@@ -74,12 +83,12 @@ public:
     /// Resize (reallocates, does not preserve data)
     void resize(size_t new_size) {
         if (new_size == size_) return;
-        std::free(data_);
+        pulp_aligned_free(data_);
         data_ = nullptr;
         size_ = new_size;
         if (new_size > 0) {
             size_t bytes = new_size * sizeof(float);
-            data_ = static_cast<float*>(std::aligned_alloc(kSimdAlignment, align_up(bytes)));
+            data_ = static_cast<float*>(pulp_aligned_alloc(kSimdAlignment, align_up(bytes)));
             std::memset(data_, 0, align_up(bytes));
         }
     }
