@@ -1542,8 +1542,11 @@ std::vector<DoctorCheck> run_doctor_checks(const fs::path& active_root, bool sta
             if (ec) { ec.clear(); continue; }
             if (it->is_directory()) {
                 auto name = it->path().filename().string();
-                if (name == "build" || name == "external" || name == ".git" ||
-                    name == "node_modules" || name == "examples" || name == "test")
+                // Always skip build artifacts and VCS dirs.
+                // In source-tree mode, also skip examples/ and test/ (Pulp's own bundled patches).
+                // In standalone mode, those are user-owned and should be scanned.
+                if (name == "build" || name == "external" || name == ".git" || name == "node_modules" ||
+                    (!standalone_mode && (name == "examples" || name == "test")))
                     it.disable_recursion_pending();
                 continue;
             }
