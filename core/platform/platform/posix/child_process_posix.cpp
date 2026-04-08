@@ -105,6 +105,8 @@ bool ChildProcess::start(const std::string& command,
     impl_->stdout_lines_buf.clear();
     impl_->stderr_lines_buf.clear();
     impl_->finished = false;
+    impl_->exit_cached = false;
+    impl_->cached_exit_status = -1;
 
     if (!impl_->stdout_pipe.create() || !impl_->stderr_pipe.create()) {
         impl_->result.exit_code = -1;
