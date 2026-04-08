@@ -16,6 +16,7 @@
 #include <mutex>
 #include <condition_variable>
 #include <memory>
+#include <chrono>
 
 #define PULP_LOG_TAG "Pulp"
 #define PULP_LOGI(...) __android_log_print(ANDROID_LOG_INFO, PULP_LOG_TAG, __VA_ARGS__)
@@ -36,8 +37,10 @@ static std::unique_ptr<view::View> g_root_view;
 // Display density from Android (set by Kotlin before surface creation)
 static float g_display_density = 2.625f;  // default xxhdpi, overridden by Kotlin
 
-// Touch state: which view is being dragged
+// Touch state
 static view::View* g_captured_view = nullptr;
+static std::chrono::steady_clock::time_point g_last_tap_time{};
+static float g_last_tap_x = 0, g_last_tap_y = 0;
 
 void android_set_display_density(float density) {
     g_display_density = density;
@@ -68,6 +71,7 @@ static std::unique_ptr<view::Fader> make_fader(float value, float height) {
     using namespace view;
     auto fader = std::make_unique<Fader>();
     fader->set_value(value);
+    fader->set_orientation(Fader::Orientation::horizontal);
     fader->flex().preferred_height = height;
     fader->flex().margin_left = 8;
     fader->flex().margin_right = 8;
@@ -85,14 +89,9 @@ static void create_demo_view_hierarchy(float width, float height) {
     g_root_view->set_theme(Theme::dark());
     g_root_view->flex().padding = 12;
 
-    // ── Status bar spacer ────────────────────────────────────────────
-    auto status_spacer = std::make_unique<Panel>();
-    status_spacer->flex().preferred_height = 28;
-    g_root_view->add_child(std::move(status_spacer));
-
     // ── Oscillator section: 4 knobs (Pitch, Shape, PW, Detune) ──────
     auto osc_section = std::make_unique<Panel>();
-    osc_section->flex().margin_top = 8;
+    osc_section->flex().margin_top = 4;
     auto osc_knobs = make_knob_row({0.5f, 0.3f, 0.5f, 0.15f}, 48, 56);
     osc_section->flex().preferred_height = 60;
     osc_section->add_child(std::move(osc_knobs));
@@ -316,14 +315,24 @@ void android_touch_down(int pointer_id, float px_x, float px_y, float pressure) 
     float dp_x = px_x / g_display_density;
     float dp_y = px_y / g_display_density;
 
+    // Detect double-tap (within 300ms and 30dp)
+    auto now = std::chrono::steady_clock::now();
+    auto dt = std::chrono::duration_cast<std::chrono::milliseconds>(now - g_last_tap_time).count();
+    float dist = std::abs(dp_x - g_last_tap_x) + std::abs(dp_y - g_last_tap_y);
+    int click_count = (dt < 300 && dist < 30.0f) ? 2 : 1;
+    g_last_tap_time = now;
+    g_last_tap_x = dp_x;
+    g_last_tap_y = dp_y;
+
     view::Point pt{dp_x, dp_y};
     auto* target = g_root_view->hit_test(pt);
     if (target) {
         auto local = to_local(target, dp_x, dp_y);
-        // Dispatch rich event (Fader uses this for dragging_ flag)
+        // Dispatch rich event (Fader dragging_, Knob double-click reset)
         auto ev = make_touch_event(local, pt, pointer_id, pressure, true);
+        ev.click_count = click_count;
         target->on_mouse_event(ev);
-        // Dispatch legacy event (Knob uses this for drag_start_y_)
+        // Dispatch legacy event (Knob drag_start_y_, Toggle on/off)
         target->on_mouse_down(local);
         g_captured_view = target;
     }

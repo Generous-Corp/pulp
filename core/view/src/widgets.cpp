@@ -925,6 +925,21 @@ void Meter::paint(canvas::Canvas& canvas) {
 
 // ── XYPad ────────────────────────────────────────────────────────────────────
 
+void XYPad::update_from_pos(Point pos) {
+    auto b = local_bounds();
+    if (b.width <= 0 || b.height <= 0) return;
+    float new_x = std::clamp(pos.x / b.width, 0.0f, 1.0f);
+    float new_y = std::clamp(1.0f - pos.y / b.height, 0.0f, 1.0f);
+    if (new_x != x_ || new_y != y_) {
+        x_ = new_x;
+        y_ = new_y;
+        if (on_change) on_change(x_, y_);
+    }
+}
+
+void XYPad::on_mouse_down(Point pos) { update_from_pos(pos); }
+void XYPad::on_mouse_drag(Point pos) { update_from_pos(pos); }
+
 void XYPad::paint(canvas::Canvas& canvas) {
     auto b = local_bounds();
 
