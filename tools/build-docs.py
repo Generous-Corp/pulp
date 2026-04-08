@@ -668,18 +668,45 @@ def build_landing_page(base_url: str) -> str:
 MIT-licensed. No royalties. No copyleft.</p>
 
 <h2>What is supported today</h2>
+
+<h3>Plugin Formats</h3>
 <ul>
-<li><strong>Formats</strong>: VST3, AU v2, AUv3, CLAP, LV2, WAMv2, WebCLAP, standalone, headless</li>
-<li><strong>Platforms</strong>: macOS, Windows (WASAPI, NSIS), Linux (ALSA, JACK, LV2), Browser (WASM)</li>
-<li><strong>Audio</strong>: CoreAudio, WASAPI, ALSA, JACK, Web Audio API — device I/O, buffer processing, file read/write</li>
-<li><strong>MIDI</strong>: CoreMIDI, Win32 MIDI, ALSA MIDI, Web MIDI, MIDI 2.0 UMP, MPE</li>
-<li><strong>DSP</strong>: 30+ signal processors (oscillator, biquad, SVF, ladder, FIR, TPT, compressor, reverb, delay, chorus, phaser, FFT, convolver, and more)</li>
-<li><strong>Parameters</strong>: thread-safe, automatable, serializable, with CLAP modulation, presets, undo/redo</li>
-<li><strong>GPU rendering</strong>: Dawn (Metal/D3D12/Vulkan) + Skia Graphite on all platforms</li>
-<li><strong>View system</strong>: TextEditor, ComboBox, TabPanel, ListBox, TreeView, and more — flex layout, JS scripting, hot-reload</li>
-<li><strong>Plugin hosting</strong>: PluginScanner, PluginSlot, SignalGraph for DAW-like apps</li>
-<li><strong>Testing</strong>: 1622+ automated tests across 13 subsystems</li>
-<li><strong>Shipping</strong>: codesign, notarization, DMG/PKG (macOS), NSIS (Windows), .deb (Linux), appcast</li>
+<li>VST3, Audio Unit v2, AUv3, CLAP, LV2, Standalone</li>
+<li>WAM / WebCLAP browser targets (experimental)</li>
+<li>Optional AAX support via external SDK</li>
+</ul>
+
+<h3>UI &amp; Design</h3>
+<ul>
+<li>JS-scripted GPU UIs via Dawn, Skia, and QuickJS</li>
+<li>CSS Flexbox + Grid layout engine with 81 CSS properties</li>
+<li>15+ widgets: Knob, Fader, Toggle, TextEditor, ComboBox, XYPad, WaveformView, SpectrumView, and more</li>
+<li>Hot reload, screenshot capture, component inspector, AI design tool</li>
+<li>Import from Figma, Stitch, and Pencil via MCP</li>
+</ul>
+
+<h3>DSP &amp; Audio</h3>
+<ul>
+<li>30+ signal processors: oscillator, filters, compressor, reverb, delay, FFT, and more</li>
+<li>Thread-safe parameter system with atomic reads and gesture-aware bindings</li>
+<li>Audio file read/write (WAV, AIFF, FLAC, MP3) and MIDI I/O</li>
+<li>GPU rendering via Dawn + Skia Graphite (Metal, D3D12, Vulkan)</li>
+</ul>
+
+<h3>Shipping &amp; CI</h3>
+<ul>
+<li>Code signing, notarization, DMG/PKG (macOS), NSIS (Windows), .deb (Linux), appcast</li>
+<li>1,622+ automated tests across 13 subsystems</li>
+<li>Local CI runner + Namespace.so cloud CI + GitHub Actions</li>
+</ul>
+
+<h3>Platform Support</h3>
+<ul>
+<li><strong>macOS</strong> — primary, ARM64 (Apple Silicon)</li>
+<li><strong>Windows</strong> — experimental, CI-backed</li>
+<li><strong>Linux</strong> — experimental, CI-backed</li>
+<li><strong>iOS</strong> — experimental</li>
+<li><strong>Web/WASM</strong> — experimental</li>
 </ul>
 
 <h2>Where to start</h2>
