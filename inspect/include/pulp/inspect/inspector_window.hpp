@@ -1,0 +1,172 @@
+// inspector_window.hpp — Tabbed inspector window with collapsable property panels
+#pragma once
+
+#include <pulp/view/view.hpp>
+#include <pulp/view/widgets.hpp>
+#include <pulp/view/ui_components.hpp>
+#include <pulp/view/tree_view.hpp>
+#include <pulp/view/inspector.hpp>
+#include <pulp/inspect/console_capture.hpp>
+#include <pulp/inspect/state_inspector.hpp>
+#include <pulp/render/render_pass.hpp>
+
+#include <chrono>
+#include <functional>
+#include <memory>
+#include <string>
+#include <vector>
+
+namespace pulp::inspect {
+
+using namespace pulp::view;
+using namespace pulp::canvas;
+
+// ── CollapsableSection ─────────────────────────────────────────────────────
+/// A disclosure-triangle section: click header to expand/collapse content.
+
+class CollapsableSection : public View {
+public:
+    CollapsableSection(std::string title, bool initially_expanded = true);
+
+    bool is_expanded() const { return expanded_; }
+    void set_expanded(bool e);
+
+    /// The content container — add children here.
+    View* content() const { return content_; }
+
+    void paint(canvas::Canvas& canvas) override;
+    void on_mouse_event(const MouseEvent& event) override;
+
+private:
+    std::string title_;
+    bool expanded_;
+    View* header_ = nullptr;   // owned as child
+    View* content_ = nullptr;  // owned as child
+
+    static constexpr float kHeaderHeight = 24.0f;
+};
+
+// ── ConsoleEntry (visual row) ──────────────────────────────────────────────
+
+/// Displays a single console log entry with colored level badge and timestamp.
+class ConsoleEntryView : public View {
+public:
+    void set_entry(const ConsoleCapture::Entry& entry);
+
+    void paint(canvas::Canvas& canvas) override;
+
+    float intrinsic_height() const override { return 22.0f; }
+
+private:
+    std::string level_;
+    std::string message_;
+    std::string timestamp_;
+};
+
+// ── InspectorWindow ────────────────────────────────────────────────────────
+/// Main tabbed inspector panel with four tabs:
+///   Elements | Console | Performance | State
+
+class InspectorWindow : public View {
+public:
+    InspectorWindow();
+
+    /// Convenience: construct and immediately set the inspected root.
+    explicit InspectorWindow(View& root);
+
+    // ── Data sources ────────────────────────────────────────────────
+    /// Set the root view to inspect (Elements tab).
+    void set_inspected_root(View* root);
+
+    /// Set the console capture for the Console tab.
+    void set_console_capture(ConsoleCapture* capture) { console_capture_ = capture; }
+
+    /// Set the render pass manager for the Performance tab.
+    void set_render_pass_manager(render::RenderPassManager* rpm) { rpm_ = rpm; }
+
+    /// Set the state inspector for the State tab.
+    void set_state_inspector(StateInspector* si) { state_inspector_ = si; }
+
+    /// Refresh all tabs with latest data. Call once per frame.
+    void refresh();
+
+    /// Called when a view is selected in the tree.
+    std::function<void(View* view)> on_view_selected;
+
+private:
+    // ── Tab construction ────────────────────────────────────────────
+    std::unique_ptr<View> build_elements_tab();
+    std::unique_ptr<View> build_console_tab();
+    std::unique_ptr<View> build_performance_tab();
+    std::unique_ptr<View> build_state_tab();
+
+    // ── Refresh helpers ─────────────────────────────────────────────
+    void refresh_elements();
+    void refresh_console();
+    void refresh_performance();
+    void refresh_state();
+
+    void populate_tree_from_view(TreeNode& parent, View* view);
+    void show_properties_for(View* view);
+
+    // ── Data sources ────────────────────────────────────────────────
+    View* inspected_root_ = nullptr;
+    ConsoleCapture* console_capture_ = nullptr;
+    render::RenderPassManager* rpm_ = nullptr;
+    StateInspector* state_inspector_ = nullptr;
+
+    // ── Widgets (non-owning, owned as children) ─────────────────────
+    TabPanel* tabs_ = nullptr;
+
+    // Elements tab
+    TreeView* tree_view_ = nullptr;
+    CollapsableSection* identity_section_ = nullptr;
+    CollapsableSection* layout_section_ = nullptr;
+    CollapsableSection* visual_section_ = nullptr;
+    CollapsableSection* widget_section_ = nullptr;
+    CollapsableSection* theme_section_ = nullptr;
+    View* elements_props_container_ = nullptr;
+
+    // Console tab
+    ScrollView* console_scroll_ = nullptr;
+    View* console_list_ = nullptr;
+
+    // Performance tab
+    Label* fps_label_ = nullptr;
+    Label* frame_time_label_ = nullptr;
+    Label* budget_label_ = nullptr;
+    View* pass_list_ = nullptr;
+    Label* view_count_label_ = nullptr;
+
+    // State tab
+    ScrollView* state_scroll_ = nullptr;
+    View* state_list_ = nullptr;
+
+    // Currently selected view (Elements tab)
+    View* selected_view_ = nullptr;
+
+    // Property labels (Elements tab, Identity section)
+    Label* prop_type_label_ = nullptr;
+    Label* prop_id_label_ = nullptr;
+
+    // Layout section labels
+    Label* prop_bounds_label_ = nullptr;
+    Label* prop_direction_label_ = nullptr;
+    Label* prop_gap_label_ = nullptr;
+    Label* prop_padding_label_ = nullptr;
+    Label* prop_margin_label_ = nullptr;
+    Label* prop_grow_shrink_label_ = nullptr;
+
+    // Visual section labels
+    Label* prop_opacity_label_ = nullptr;
+    Label* prop_bgcolor_label_ = nullptr;
+    Label* prop_border_label_ = nullptr;
+    Label* prop_corner_label_ = nullptr;
+    Label* prop_visible_label_ = nullptr;
+    Label* prop_enabled_label_ = nullptr;
+
+    // Widget section labels
+    Label* prop_widget_value_label_ = nullptr;
+};
+
+} // namespace pulp::inspect

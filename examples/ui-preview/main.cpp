@@ -8,8 +8,8 @@
 #include <pulp/view/theme.hpp>
 #include <pulp/view/frame_clock.hpp>
 #include <pulp/view/inspector.hpp>
-#include <pulp/view/inspector_window.hpp>
 #include <pulp/inspect/inspector_overlay.hpp>
+#include <pulp/inspect/inspector_window.hpp>
 #include <pulp/runtime/system.hpp>
 #include <pulp/view/screenshot.hpp>
 #include <pulp/view/script_engine.hpp>
@@ -436,14 +436,83 @@ int main(int argc, char* argv[]) {
     }
 #endif
 
-    // Inspector overlay was set up before screenshot_only check above.
-    // Cmd+I toggle is handled by the platform WindowHost key dispatch.
+    // Inspector: open a separate floating window when Cmd+I is pressed
+    std::unique_ptr<WindowHost> inspector_window;
+    auto inspector_view = std::make_unique<pulp::inspect::InspectorWindow>(root);
+    auto* inspector_view_ptr = inspector_view.get();
+    View* inspector_selected = nullptr;
 
-    // Floating inspector window (separate OS window with TreeView + PropertyList)
-    auto inspector_win = std::make_unique<pulp::view::InspectorWindow>(root, nullptr, window.get());
-    inspector_win->install_keyboard_shortcut();
-    if (pulp::runtime::get_env("PULP_INSPECTOR"))
-        inspector_win->show();
+    auto open_inspector = [&]() {
+        if (inspector_window) return;
+        WindowOptions iopts;
+        iopts.title = "Inspector";
+        iopts.width = 340;
+        iopts.height = static_cast<float>(opts.height);
+        iopts.resizable = true;
+        iopts.use_gpu = false;
+        inspector_window = WindowHost::create(*inspector_view_ptr, iopts);
+        if (inspector_window) {
+            inspector_window->set_close_callback([&] { inspector_window.reset(); });
+            inspector_window->show();
+            inspector_window->position_beside(window.get());
+            inspector_view_ptr->refresh();
+        }
+    };
+
+    View::set_inspector_key_hook([&](const KeyEvent& e) -> bool {
+        if (e.is_down && e.key == KeyCode::i && e.isMainModifier()) {
+            if (!inspector_window) open_inspector();
+            else { inspector_window.reset(); inspector_selected = nullptr; }
+            return true;
+        }
+        return false;
+    });
+
+    View::set_inspector_mouse_hook([&](const MouseEvent& e) -> bool {
+        if (!inspector_window) return false;
+        if (e.is_down && e.isMainModifier()) {
+            auto* hit = root.hit_test(e.position);
+            if (hit) {
+                inspector_selected = hit;
+                inspector_view_ptr->select_view(hit);
+                if (inspector_window) inspector_window->repaint();
+                if (window) window->repaint();
+            }
+            return true;
+        }
+        return false;
+    });
+
+    inspector_view_ptr->on_view_selected = [&](View* view) {
+        inspector_selected = view;
+        if (window) window->repaint();
+    };
+
+    bool plugin_painting = false;
+    View::set_inspector_paint_hook([&](pulp::canvas::Canvas& canvas) {
+        if (!inspector_selected || !inspector_window || !plugin_painting) return;
+        plugin_painting = false;
+        float x = 0, y = 0;
+        const View* cur = inspector_selected;
+        while (cur && cur != &root) { x += cur->bounds().x; y += cur->bounds().y; cur = cur->parent(); }
+        float w = inspector_selected->bounds().width, h = inspector_selected->bounds().height;
+        canvas.set_fill_color(pulp::canvas::Color::rgba(0.25f, 0.5f, 1.0f, 0.15f));
+        canvas.fill_rect(x, y, w, h);
+        canvas.set_stroke_color(pulp::canvas::Color::rgba(0.25f, 0.5f, 1.0f, 0.8f));
+        canvas.set_line_width(2.0f);
+        canvas.stroke_rect(x, y, w, h);
+    });
+
+    window->set_idle_callback([&] {
+        if (inspector_window) {
+            plugin_painting = true;
+            window->repaint();
+            inspector_view_ptr->refresh();
+            inspector_window->repaint();
+        }
+    });
+
+    if (pulp::runtime::get_env("PULP_INSPECTOR")) open_inspector();
 
     std::cout << "Opening window... (Cmd+I for inspector)\n";
     window->run_event_loop();

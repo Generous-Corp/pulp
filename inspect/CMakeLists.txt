@@ -9,6 +9,7 @@ target_include_directories(pulp-inspect
 
 target_sources(pulp-inspect PRIVATE
     src/inspector_overlay.cpp
+    src/inspector_window.cpp
     src/state_inspector.cpp
     src/console_capture.cpp
     src/protocol.cpp
