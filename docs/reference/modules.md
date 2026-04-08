@@ -10,16 +10,16 @@ Pulp is organized into independent subsystems under `core/`. Each is a separate 
 
 | Feature | Header | What It Does |
 |---------|--------|-------------|
-| SIMD | `simd.hpp` | Portable SSE/NEON/AVX via Google Highway — add, mul, fma, reduce, clamp |
-| XML | `xml.hpp` | Parse/generate XML via pugixml — XPath queries, file I/O |
-| ZIP/GZIP | `zip.hpp` | Compress/decompress via miniz — archives, state blobs |
-| HTTP | `http.hpp` | GET, POST, download via cpp-httplib — license checks, cloud presets |
+| SIMD | `simd.hpp` | Portable [SSE2](https://en.wikipedia.org/wiki/SSE2)/[NEON](https://developer.arm.com/Architectures/Neon)/[AVX2](https://en.wikipedia.org/wiki/Advanced_Vector_Extensions#AVX2) via [Google Highway](https://github.com/google/highway) — add, mul, fma, reduce, clamp |
+| XML | `xml.hpp` | Parse/generate XML via [pugixml](https://github.com/zeux/pugixml) — XPath queries, file I/O |
+| ZIP/GZIP | `zip.hpp` | Compress/decompress via [miniz](https://github.com/richgel999/miniz) — archives, state blobs |
+| HTTP | `http.hpp` | GET, POST, download via [cpp-httplib](https://github.com/yhirose/cpp-httplib) — license checks, cloud presets |
 | Sockets | `socket.hpp` | TCP/UDP client and server |
 | Named Pipes | `named_pipe.hpp` | Cross-platform IPC pipes (mkfifo / CreateNamedPipe) |
 | IP Address | `ip_address.hpp` | IPv4 validation, local address queries, hostname |
-| Crypto | `crypto.hpp` | SHA-256, MD5, AES-256-CBC via Mbed TLS — hashing, encryption |
+| Crypto | `crypto.hpp` | SHA-256, MD5, AES-256-CBC via [Mbed TLS](https://github.com/Mbed-TLS/mbedtls) — hashing, encryption |
 | Licensing | `license.hpp` | RSA signature verification, key generation, online activation |
-| BigInteger | `big_integer.hpp` | Arbitrary-precision arithmetic via Mbed TLS MPI — for RSA |
+| BigInteger | `big_integer.hpp` | Arbitrary-precision arithmetic via [Mbed TLS](https://github.com/Mbed-TLS/mbedtls) MPI — for RSA |
 | i18n | `i18n.hpp` | String translation — .strings, .po, .json file loaders, `tr()` helper |
 | Analytics | `analytics.hpp` | Thread-safe event tracking with pluggable file/HTTP destinations |
 | Base64 | `base64.hpp` | Encode/decode binary ↔ text |
@@ -77,9 +77,9 @@ Pulp is organized into independent subsystems under `core/`. Each is a separate 
 | Format | Read | Write | Backend |
 |--------|:----:|:-----:|---------|
 | WAV | ✓ | ✓ | CHOC |
-| FLAC | ✓ | — | dr_flac |
-| MP3 | ✓ | — | dr_mp3 |
-| OGG Vorbis | ✓ | — | stb_vorbis |
+| FLAC | ✓ | — | [dr_flac](https://github.com/mackron/dr_libs) |
+| MP3 | ✓ | — | [dr_mp3](https://github.com/mackron/dr_libs) |
+| OGG Vorbis | ✓ | — | [stb_vorbis](https://github.com/nothings/stb) |
 | AIFF / AIFF-C | ✓ | ✓ | Native (8/16/24/32-bit) |
 | AAC / ALAC / CAF | ✓ | — | ExtAudioFile (macOS only) |
 
@@ -214,20 +214,20 @@ Pulp is organized into independent subsystems under `core/`. Each is a separate 
 | Feature | Header | What It Does |
 |---------|--------|-------------|
 | Canvas API | `canvas.hpp` | 25+ draw commands — rect, rounded rect, path, arc, text, image |
-| Skia Backend | `src/skia_canvas.cpp` | GPU-accelerated via Skia Graphite (Metal/Vulkan/D3D12) |
+| Skia Backend | `src/skia_canvas.cpp` | GPU-accelerated via [Skia Graphite](https://skia.org) (Metal/Vulkan/D3D12) |
 | CoreGraphics | `platform/mac/cg_canvas.mm` | Native macOS/iOS rendering |
-| TextShaper | `text_shaper.hpp` | **Measure once, reflow forever** — PreText-style layout engine |
+| TextShaper | `text_shaper.hpp` | **Measure once, reflow forever** — [PreText](https://github.com/chenglou/pretext)-style layout engine |
 | Attributed String | `attributed_string.hpp` | Rich text spans with font, color, weight, decoration |
 | Text Layout | `text_layout.hpp` | Multi-line layout with word wrapping |
 | Rectangle List | `rectangle_list.hpp` | Clip regions with add/subtract/intersect |
 | Image Convolution | `image_convolution.hpp` | Blur, sharpen, edge detect, emboss kernels |
-| SVG | `svg.hpp` | SVG loading and rendering via nanosvg |
+| SVG | `svg.hpp` | SVG loading and rendering via [nanosvg](https://github.com/memononen/nanosvg) |
 | Effects | `effects.hpp` | Drop shadow, bloom, blur, color adjust |
 | Recording Canvas | `recording_canvas.hpp` | Record draw calls for replay/serialization |
 
 **Text shaping option:** `PULP_TEXT_SHAPING` (CMake)
 - Default: **ON** when GPU enabled, **OFF** without
-- ON: Uses SkFont/HarfBuzz (bundled in Skia) for real font metrics
+- ON: Uses SkFont/[HarfBuzz](https://github.com/harfbuzz/harfbuzz) (bundled in Skia) for real font metrics
 - OFF: Falls back to character-width estimation
 - Same API either way — only measurement accuracy differs
 
@@ -277,11 +277,11 @@ Pulp is organized into independent subsystems under `core/`. Each is a separate 
 | SplashScreen | Borderless window with fade animation |
 | LiveConstantEditor | Debug overlay for tweaking numeric constants |
 
-**Layout:** Yoga flexbox + CSS Grid, absolute/fixed positioning, intrinsic sizing.
+**Layout:** [Yoga](https://github.com/facebook/yoga) flexbox + CSS Grid, absolute/fixed positioning, intrinsic sizing.
 
 **Theming:** Token-based design system (`"bg.surface"`, `"control.border"`), contrast-aware, theme presets.
 
-**JS Scripting:** QuickJS (default), JavaScriptCore (Apple), V8 (optional). Hot-reload. Full `WidgetBridge` + `AudioBridge` for parameter access from JS.
+**JS Scripting:** [QuickJS](https://bellard.org/quickjs/) (default), [JavaScriptCore](https://developer.apple.com/documentation/javascriptcore) (Apple), [V8](https://v8.dev) (optional). Hot-reload. Full `WidgetBridge` + `AudioBridge` for parameter access from JS.
 
 **Accessibility:** AccessRole, value/text/table/cell interfaces, VoiceOver (macOS), UIA (Windows), AT-SPI (Linux).
 
@@ -307,8 +307,8 @@ Pulp is organized into independent subsystems under `core/`. Each is a separate 
 
 | Feature | What It Does |
 |---------|-------------|
-| Dawn/WebGPU | Cross-platform GPU abstraction (Metal, Vulkan, D3D12, OpenGL) |
-| Skia Graphite | 2D rendering engine on top of Dawn |
+| [Dawn](https://dawn.googlesource.com/dawn)/[WebGPU](https://www.w3.org/TR/webgpu/) | Cross-platform GPU abstraction (Metal, Vulkan, D3D12, OpenGL) |
+| [Skia Graphite](https://skia.org) | 2D rendering engine on top of Dawn |
 | GPU Compute | Experimental batch audio processing (>64K elements) |
 
 ---

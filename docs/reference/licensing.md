@@ -12,9 +12,14 @@ Pulp builds on excellent open-source software. Every dependency that Pulp bundle
 
 | Name | License | Purpose | Link |
 |------|---------|---------|------|
-| **CHOC** | ISC | JS engine, MIDI utilities, audio file I/O, WebView, networking | [github.com/Tracktion/choc](https://github.com/Tracktion/choc) |
 | **Catch2** | BSL-1.0 | Unit testing framework | [github.com/catchorg/Catch2](https://github.com/catchorg/Catch2) |
+| **CHOC** | ISC | JS engine, MIDI utilities, audio file I/O, WebView, networking | [github.com/Tracktion/choc](https://github.com/Tracktion/choc) |
+| **cpp-httplib** | MIT | HTTP client (GET, POST, download) | [github.com/yhirose/cpp-httplib](https://github.com/yhirose/cpp-httplib) |
+| **Google Highway** | Apache-2.0 | SIMD dispatch (SSE2, AVX2, NEON) | [github.com/google/highway](https://github.com/google/highway) |
+| **Mbed TLS** | Apache-2.0 | Crypto: SHA-256, AES-256-CBC, RSA via MPI | [github.com/Mbed-TLS/mbedtls](https://github.com/Mbed-TLS/mbedtls) |
+| **miniz** | MIT | ZIP/GZIP compression | [github.com/richgel999/miniz](https://github.com/richgel999/miniz) |
 | **nanosvg** | zlib | SVG parsing and rasterization | [github.com/memononen/nanosvg](https://github.com/memononen/nanosvg) |
+| **pugixml** | MIT | XML parsing with XPath | [github.com/zeux/pugixml](https://github.com/zeux/pugixml) |
 | **Yoga** | MIT | Layout engine for Flexbox/Grid-style native UI | [github.com/facebook/yoga](https://github.com/facebook/yoga) |
 
 ### Plugin Format SDKs
