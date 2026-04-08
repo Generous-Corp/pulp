@@ -241,17 +241,25 @@ void SkiaCanvas::set_text_align(TextAlign align) {
     text_align_ = align;
 }
 
-// Cached shaper — created once, reused for all fill_text calls.
-// Uses HarfBuzz when available (proper OpenType kerning, ligatures,
-// complex scripts), falls back to primitive shaper otherwise.
-static std::unique_ptr<SkShaper>& get_shaper() {
-    static std::unique_ptr<SkShaper> shaper;
+// Thread-local cached shaper — HarfBuzz keeps a mutable hb_buffer_t per
+// instance, so sharing across threads is unsafe. thread_local ensures each
+// render thread gets its own shaper instance.
+static SkShaper* get_shaper() {
+    thread_local std::unique_ptr<SkShaper> shaper;
     if (!shaper) {
         auto mgr = get_font_manager();
-        shaper = SkShaper::Make(mgr);
+        shaper = SkShaper::Make(mgr);  // HarfBuzz when available, else primitive
         if (!shaper) shaper = SkShaper::MakePrimitive();
     }
-    return shaper;
+    return shaper.get();
+}
+
+// Shape text and return total advance width (for measure_text consistency)
+static float shape_and_measure(SkShaper* shaper, const std::string& text,
+                                const SkFont& font) {
+    SkTextBlobBuilderRunHandler handler(text.c_str(), {0, 0});
+    shaper->shape(text.c_str(), text.size(), font, true, FLT_MAX, &handler);
+    return handler.endPoint().fX;
 }
 
 void SkiaCanvas::fill_text(const std::string& text, float x, float y) {
@@ -262,7 +270,7 @@ void SkiaCanvas::fill_text(const std::string& text, float x, float y) {
     if (!font.getTypeface()) return;
 
     auto paint = make_fill_paint(fill_color_);
-    auto& shaper = get_shaper();
+    auto* shaper = get_shaper();
 
     if (shaper) {
         // SkShaper path — full HarfBuzz shaping with OpenType kerning and ligatures.
@@ -298,7 +306,15 @@ void SkiaCanvas::fill_text(const std::string& text, float x, float y) {
 
 float SkiaCanvas::measure_text(const std::string& text) {
     SkFont font = make_font(font_family_, font_size_);
-    if (!font.getTypeface()) return font_size_ * text.size() * 0.5f;  // rough estimate
+    if (!font.getTypeface()) return font_size_ * text.size() * 0.5f;
+
+    // Use the same shaper as fill_text so measurement matches rendering.
+    // Without this, measure_text returns unshaped widths while fill_text
+    // renders with HarfBuzz kerning — causing layout/rendering divergence.
+    auto* shaper = get_shaper();
+    if (shaper) {
+        return shape_and_measure(shaper, text, font);
+    }
 
     SkRect bounds;
     font.measureText(text.c_str(), text.size(), SkTextEncoding::kUTF8, &bounds);
