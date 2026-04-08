@@ -2385,17 +2385,20 @@ static std::vector<DoctorCheck> run_doctor_checks(const fs::path& active_root, b
     // Cmajor CLI check — only if project has .cmajorpatch files
     if (!active_root.empty()) {
         bool has_patches = false;
-        // Check common locations for .cmajorpatch files
-        for (auto& dir : {".", "examples", "src"}) {
-            auto check_dir = active_root / dir;
-            if (!fs::exists(check_dir)) continue;
-            for (auto& entry : fs::directory_iterator(check_dir)) {
-                if (entry.path().extension() == ".cmajorpatch") {
-                    has_patches = true;
-                    break;
+        for (auto it = fs::recursive_directory_iterator(active_root,
+                 fs::directory_options::skip_permission_denied);
+             it != fs::recursive_directory_iterator(); ++it) {
+            if (it->is_directory()) {
+                auto name = it->path().filename().string();
+                if (name == "build" || name == "external" || name == ".git" || name == "node_modules") {
+                    it.disable_recursion_pending();
+                    continue;
                 }
             }
-            if (has_patches) break;
+            if (it->path().extension() == ".cmajorpatch") {
+                has_patches = true;
+                break;
+            }
         }
         if (has_patches) {
             DoctorCheck c{"Cmajor CLI (cmaj)", false, {}, {}};

@@ -674,20 +674,42 @@ int cmd_add(const std::vector<std::string>& args) {
         lock.packages[package_id] = {pkg.version, pkg.fetch.git_repository, "", pkg.fetch.git_tag};
 
         // If platform_guard is set and package doesn't support all targets,
-        // write a guarded cmake block for this specific package
+        // write a guarded cmake block covering all supported desktop platforms
         bool needs_guard = platform_guard && !unsup.empty();
         std::string guard_cmake;
         if (needs_guard) {
-            // Determine which platforms ARE supported
-            std::string guard_platform;
+            // Build a compound CMake guard for all supported desktop platforms
+            std::vector<std::string> conditions;
             for (auto& [name, ps] : pkg.platforms) {
-                if (name == "macOS" || name == "Windows" || name == "Linux") {
-                    guard_platform = name;
-                    break;
-                }
+                if (name == "macOS") conditions.push_back("APPLE");
+                else if (name == "Windows") conditions.push_back("WIN32");
+                else if (name == "Linux") conditions.push_back("UNIX AND NOT APPLE");
             }
-            if (!guard_platform.empty())
-                guard_cmake = generate_cmake_block(pkg, true, guard_platform);
+            if (!conditions.empty()) {
+                std::string guard_condition;
+                for (size_t i = 0; i < conditions.size(); ++i) {
+                    if (i > 0) guard_condition += " OR ";
+                    guard_condition += conditions[i];
+                }
+                // Generate block with custom compound guard
+                std::ostringstream os;
+                os << "# ── " << pkg.id << " (" << pkg.version << ") [platform guard] ──\n";
+                os << "if(" << guard_condition << ")\n";
+                os << "  FetchContent_Declare(" << pkg.id << "\n";
+                os << "    GIT_REPOSITORY " << pkg.fetch.git_repository << "\n";
+                os << "    GIT_TAG        " << pkg.fetch.git_tag << "\n";
+                os << "    GIT_SHALLOW    TRUE\n";
+                os << "  )\n";
+                os << "  FetchContent_MakeAvailable(" << pkg.id << ")\n";
+                auto upper_id = pkg.id;
+                std::transform(upper_id.begin(), upper_id.end(), upper_id.begin(),
+                    [](unsigned char c) { return c == '-' ? '_' : std::toupper(c); });
+                os << "  target_compile_definitions(${PROJECT_NAME} PRIVATE PULP_HAS_"
+                   << upper_id << "=1)\n";
+                os << "endif()\n";
+                os << "# ── end " << pkg.id << " ──\n";
+                guard_cmake = os.str();
+            }
         }
 
         auto cmake_content = generate_packages_cmake(lock, reg, root);

@@ -101,21 +101,24 @@ bool ChildProcess::start(const std::string& command,
 
     if (!impl_->stdout_pipe.create() || !impl_->stderr_pipe.create()) return false;
 
-    // Build command line — handle quoting carefully.
-    // For cmd.exe /c, the command after /c should not be double-quoted
-    // as cmd.exe strips the outer quotes itself.
+    // Build command line with platform-appropriate quoting.
+    // Special case: cmd.exe /c passes everything after /c to the shell,
+    // so metacharacters and embedded quotes must be preserved.
+    bool is_cmd_c = (command == "cmd" || command == "cmd.exe") &&
+                    !args.empty() && (args[0] == "/c" || args[0] == "/C");
+
     std::string cmdline = "\"" + command + "\"";
-    for (auto& a : args) {
-        // Don't add extra quotes if the arg already contains quotes
-        // or if it's a shell command (contains spaces, pipes, redirects)
-        if (a.find('"') != std::string::npos || a.find('|') != std::string::npos ||
-            a.find('>') != std::string::npos || a.find('<') != std::string::npos ||
-            a.find('&') != std::string::npos) {
-            cmdline += " " + a;  // pass through as-is
-        } else if (a.find(' ') != std::string::npos) {
-            cmdline += " \"" + a + "\"";  // quote if has spaces
+    for (size_t i = 0; i < args.size(); ++i) {
+        auto& a = args[i];
+        if (a.empty()) {
+            cmdline += " \"\"";  // preserve empty args
+        } else if (is_cmd_c && i == args.size() - 1) {
+            // Last arg to cmd /c is the shell command — pass through raw
+            cmdline += " " + a;
+        } else if (a.find(' ') != std::string::npos && a.find('"') == std::string::npos) {
+            cmdline += " \"" + a + "\"";
         } else {
-            cmdline += " " + a;  // no quoting needed
+            cmdline += " " + a;
         }
     }
 

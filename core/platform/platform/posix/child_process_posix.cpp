@@ -80,8 +80,10 @@ struct ChildProcess::Impl {
     std::string stdout_lines_buf;  // partial line accumulator for callbacks
     std::string stderr_lines_buf;
     bool started = false;
-    mutable bool finished = false;       // mutable: is_running() caches waitpid result
-    mutable ProcessResult result;        // mutable: is_running() stores exit code
+    bool finished = false;
+    mutable int cached_exit_status = -1; // cached by is_running() for wait()
+    mutable bool exit_cached = false;
+    ProcessResult result;
 };
 
 ChildProcess::ChildProcess() : impl_(std::make_unique<Impl>()) {}
@@ -155,18 +157,18 @@ bool ChildProcess::start(const std::string& command,
 
 bool ChildProcess::is_running() const {
     if (!impl_->started || impl_->finished) return false;
-    // Use waitpid WNOHANG — if child has exited, store the status so
-    // wait() doesn't hang. This handles zombies correctly (kill(pid,0)
-    // returns success for zombies, which is wrong).
+    if (impl_->exit_cached) return false;
+    // Use waitpid WNOHANG to detect exit including zombies.
+    // Cache the exit status but do NOT set finished — wait() still needs
+    // to drain pipes and build the full ProcessResult.
     int status = 0;
     auto rc = waitpid(impl_->pid, &status, WNOHANG);
     if (rc > 0) {
-        // Child exited — cache the result for wait()
-        impl_->finished = true;
-        impl_->result.exit_code = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+        impl_->cached_exit_status = status;
+        impl_->exit_cached = true;
         return false;
     }
-    return rc == 0;  // 0 = still running, -1 = error
+    return rc == 0;
 }
 
 void ChildProcess::cancel() {
@@ -214,10 +216,17 @@ ProcessResult ChildProcess::wait() {
         drain_pipe(impl_->stderr_pipe.read_end(), impl_->stderr_full,
                    impl_->stderr_lines_buf, max_bytes, impl_->options.on_stderr_line);
 
-        // Check if process exited
+        // Check if process exited (use cached result from is_running() if available)
         int status = 0;
-        auto rc = waitpid(impl_->pid, &status, WNOHANG);
-        if (rc > 0) {
+        bool exited = false;
+        if (impl_->exit_cached) {
+            status = impl_->cached_exit_status;
+            exited = true;
+        } else {
+            auto rc = waitpid(impl_->pid, &status, WNOHANG);
+            exited = (rc > 0);
+        }
+        if (exited) {
             // Process exited — drain remaining output
             drain_pipe(impl_->stdout_pipe.read_end(), impl_->stdout_full,
                        impl_->stdout_lines_buf, max_bytes, impl_->options.on_stdout_line);
