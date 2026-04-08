@@ -185,12 +185,25 @@ bool InspectorWindow::is_visible() const {
 void InspectorWindow::refresh() {
     if (!tree_view_) return;
 
+    // Save selected view pointer before rebuilding (old TreeNode pointers become stale)
+    void* saved_selection = nullptr;
+    if (tree_view_->selected_node()) {
+        saved_selection = tree_view_->selected_node()->user_data;
+    }
+
     // Clear and rebuild the tree
     tree_view_->root().children.clear();
     tree_view_->root().label = "Root";
     tree_view_->root().expanded = true;
 
     ViewInspector::populate_tree(tree_view_->root(), target_root_);
+
+    // Restore selection by finding the matching node in the new tree
+    if (saved_selection) {
+        tree_view_->set_selected_node(tree_view_->find_node_by_user_data(saved_selection));
+    } else {
+        tree_view_->set_selected_node(nullptr);
+    }
 
     // Update highlight bounds to match current target root size
     if (highlight_ptr_)

@@ -81,6 +81,15 @@ public:
     /// Get the currently selected node (nullptr if none).
     TreeNode* selected_node() const { return selected_; }
 
+    /// Programmatically select a node (without firing on_select).
+    void set_selected_node(TreeNode* node) { selected_ = node; }
+
+    /// Find a node whose user_data matches the given pointer.
+    /// Returns nullptr if not found.
+    TreeNode* find_node_by_user_data(void* data) {
+        return find_by_user_data(root_, data);
+    }
+
     void paint(canvas::Canvas& canvas) override {
         auto b = local_bounds();
 
@@ -187,6 +196,14 @@ private:
                 paint_node(canvas, *child, depth + 1, x, y, width);
             }
         }
+    }
+
+    TreeNode* find_by_user_data(TreeNode& node, void* data) {
+        if (node.user_data == data && data != nullptr) return &node;
+        for (auto& child : node.children) {
+            if (auto* found = find_by_user_data(*child, data)) return found;
+        }
+        return nullptr;
     }
 
     TreeNode* find_node_at_y(TreeNode& node, int depth, float& current_y, float target_y,

@@ -488,10 +488,11 @@ int main(int argc, char* argv[]) {
         if (window) window->repaint();
     };
 
-    bool plugin_painting = false;
     View::set_inspector_paint_hook([&](pulp::canvas::Canvas& canvas) {
-        if (!inspector_selected || !inspector_window || !plugin_painting) return;
-        plugin_painting = false;
+        // Always paint the highlight overlay when a view is selected and the
+        // inspector is open. No consumed-flag — this avoids flicker during
+        // fast repaints (e.g., dragging a knob).
+        if (!inspector_selected || !inspector_window) return;
         float x = 0, y = 0;
         const View* cur = inspector_selected;
         while (cur && cur != &root) { x += cur->bounds().x; y += cur->bounds().y; cur = cur->parent(); }
@@ -505,10 +506,11 @@ int main(int argc, char* argv[]) {
 
     window->set_idle_callback([&] {
         if (inspector_window) {
-            plugin_painting = true;
-            window->repaint();
+            // Only refresh the active tab's data (refresh() already does this).
+            // The NSTimer fires at 30 Hz regardless of window focus.
             inspector_view_ptr->refresh();
             inspector_window->repaint();
+            window->repaint();
         }
     });
 

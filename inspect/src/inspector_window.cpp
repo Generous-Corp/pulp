@@ -485,11 +485,26 @@ void InspectorWindow::refresh() {
 void InspectorWindow::refresh_elements() {
     if (!tree_view_ || !inspected_root_) return;
 
+    // Save the selected view's identity before rebuilding the tree.
+    // The old TreeNode pointers become invalid after clear().
+    void* saved_selection = nullptr;
+    if (tree_view_->selected_node()) {
+        saved_selection = tree_view_->selected_node()->user_data;
+    }
+
     // Rebuild tree from inspected root
     auto& root_node = tree_view_->root();
     root_node.children.clear();
     populate_tree_from_view(root_node, inspected_root_);
     root_node.expanded = true;
+
+    // Restore selection: find the new node matching the previously selected view
+    if (saved_selection) {
+        auto* restored = tree_view_->find_node_by_user_data(saved_selection);
+        tree_view_->set_selected_node(restored);
+    } else {
+        tree_view_->set_selected_node(nullptr);
+    }
 
     // Refresh theme colors section
     if (theme_section_ && inspected_root_) {

@@ -23,6 +23,11 @@
 #import <Metal/Metal.h>
 #endif
 
+// ── Cursor hide/unhide balance ───────────────────────────────────────────────
+// NSCursor hide/unhide calls are reference-counted by AppKit, so we must track
+// our own hidden state and always unhide before setting a different cursor.
+static bool s_cursor_hidden = false;
+
 // ── App menu helper ──────────────────────────────────────────────────────────
 
 @interface PulpAppTerminationHandler : NSObject
@@ -693,7 +698,13 @@ static pulp::view::KeyCode keyCodeFromNS(unsigned short code) {
 
             auto* target = self.rootView->hit_test(pt);
             if (target) {
-                switch (target->cursor()) {
+                auto style = target->cursor();
+                // Unhide cursor before switching to any non-invisible style
+                if (style != pulp::view::View::CursorStyle::invisible && s_cursor_hidden) {
+                    [NSCursor unhide];
+                    s_cursor_hidden = false;
+                }
+                switch (style) {
                     case pulp::view::View::CursorStyle::pointer:
                         [[NSCursor pointingHandCursor] set]; break;
                     case pulp::view::View::CursorStyle::crosshair:
@@ -707,7 +718,11 @@ static pulp::view::KeyCode keyCodeFromNS(unsigned short code) {
                     case pulp::view::View::CursorStyle::not_allowed:
                         [[NSCursor operationNotAllowedCursor] set]; break;
                     case pulp::view::View::CursorStyle::invisible:
-                        [NSCursor hide]; break;
+                        if (!s_cursor_hidden) {
+                            [NSCursor hide];
+                            s_cursor_hidden = true;
+                        }
+                        break;
                     case pulp::view::View::CursorStyle::horizontal_resize:
                         [[NSCursor resizeLeftRightCursor] set]; break;
                     case pulp::view::View::CursorStyle::vertical_resize:
@@ -1157,14 +1172,22 @@ public:
         auto screen_frame = [[other_nswin screen] visibleFrame];
         auto my_size = [window_ frame].size;
 
+        // Align top of inspector with top of other window (macOS uses bottom-left origin)
+        CGFloat target_y = other_frame.origin.y + other_frame.size.height - my_size.height;
+        // Clamp vertically to screen bounds
+        CGFloat screen_bottom = screen_frame.origin.y;
+        CGFloat screen_top = screen_frame.origin.y + screen_frame.size.height;
+        if (target_y + my_size.height > screen_top) target_y = screen_top - my_size.height;
+        if (target_y < screen_bottom) target_y = screen_bottom;
+
         // Try right side first
         CGFloat right_x = other_frame.origin.x + other_frame.size.width + 8;
         if (right_x + my_size.width <= screen_frame.origin.x + screen_frame.size.width) {
-            [window_ setFrameOrigin:NSMakePoint(right_x, other_frame.origin.y)];
+            [window_ setFrameOrigin:NSMakePoint(right_x, target_y)];
         } else {
             // Fall back to left side
             CGFloat left_x = other_frame.origin.x - my_size.width - 8;
-            [window_ setFrameOrigin:NSMakePoint(std::max(left_x, screen_frame.origin.x), other_frame.origin.y)];
+            [window_ setFrameOrigin:NSMakePoint(std::max(left_x, screen_frame.origin.x), target_y)];
         }
     }
 
@@ -1299,12 +1322,21 @@ public:
         auto other_frame = [other_nswin frame];
         auto screen_frame = [[other_nswin screen] visibleFrame];
         auto my_size = [window_ frame].size;
+
+        // Align top of inspector with top of other window (macOS uses bottom-left origin)
+        CGFloat target_y = other_frame.origin.y + other_frame.size.height - my_size.height;
+        // Clamp vertically to screen bounds
+        CGFloat screen_bottom = screen_frame.origin.y;
+        CGFloat screen_top = screen_frame.origin.y + screen_frame.size.height;
+        if (target_y + my_size.height > screen_top) target_y = screen_top - my_size.height;
+        if (target_y < screen_bottom) target_y = screen_bottom;
+
         CGFloat right_x = other_frame.origin.x + other_frame.size.width + 8;
         if (right_x + my_size.width <= screen_frame.origin.x + screen_frame.size.width) {
-            [window_ setFrameOrigin:NSMakePoint(right_x, other_frame.origin.y)];
+            [window_ setFrameOrigin:NSMakePoint(right_x, target_y)];
         } else {
             CGFloat left_x = other_frame.origin.x - my_size.width - 8;
-            [window_ setFrameOrigin:NSMakePoint(std::max(left_x, screen_frame.origin.x), other_frame.origin.y)];
+            [window_ setFrameOrigin:NSMakePoint(std::max(left_x, screen_frame.origin.x), target_y)];
         }
     }
 

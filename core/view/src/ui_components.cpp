@@ -515,12 +515,7 @@ void ScrollView::paint_all(canvas::Canvas& canvas) {
     if (has_background_color()) {
         // Use the view's internal bg painting
     }
-    // Let the base paint handle bg/border via paint() call path
-    // Actually just call paint() for scrollbar drawing, and handle children ourselves
-
-    // Paint background + border via a minimal approach
-    // (View::paint_all does this but also paints children without scroll offset)
-    paint(canvas);  // This draws scrollbars + any ScrollView-specific visuals
+    // Paint children first, then scrollbar on top so it isn't occluded.
 
     float sx = smooth_scroll_x_.value();
     float sy = smooth_scroll_y_.value();
@@ -533,6 +528,9 @@ void ScrollView::paint_all(canvas::Canvas& canvas) {
         child_at(i)->paint_all(canvas);
     }
     canvas.restore();
+
+    // Paint scrollbar indicators AFTER children so they render on top
+    paint(canvas);
 
     if (opacity() < 1.0f)
         canvas.set_opacity(1.0f);
