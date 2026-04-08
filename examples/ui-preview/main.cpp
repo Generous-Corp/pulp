@@ -306,6 +306,13 @@ int main(int argc, char* argv[]) {
         return true;
     };
 
+    // Set up inspector before screenshot so it renders in headless mode too
+    pulp::inspect::InspectorOverlay inspector(root);
+    pulp::inspect::g_active_inspector = &inspector;
+    if (pulp::runtime::get_env("PULP_INSPECTOR")) {
+        inspector.set_active(true);
+    }
+
     if (screenshot_only) {
         if (!emit_view_tree(render_w, render_h)) return 1;
         bool ok = render_to_file(
@@ -314,6 +321,7 @@ int main(int argc, char* argv[]) {
             static_cast<uint32_t>(render_h),
             screenshot_path.c_str());
         std::cout << (ok ? "Screenshot saved to " + screenshot_path + "\n" : "Screenshot failed\n");
+        pulp::inspect::g_active_inspector = nullptr;
         return ok ? 0 : 1;
     }
 
@@ -427,25 +435,8 @@ int main(int argc, char* argv[]) {
     }
 #endif
 
-    // Inspector overlay — toggle with Cmd+I, or pre-enable via PULP_INSPECTOR=1
-    pulp::inspect::InspectorOverlay inspector(root);
-    pulp::inspect::g_active_inspector = &inspector;
-    if (pulp::runtime::get_env("PULP_INSPECTOR")) {
-        inspector.set_active(true);
-        std::cout << "Inspector enabled (Cmd+I to toggle)\n";
-    }
-
-    // Wire inspector into idle callback — push overlay paint each frame
-    window->set_idle_callback([&inspector, &root] {
-        if (inspector.is_active()) {
-            View::overlay_queue().push_back({
-                [&inspector](pulp::canvas::Canvas& canvas) {
-                    inspector.paint(canvas);
-                },
-                &root
-            });
-        }
-    });
+    // Inspector was set up before screenshot_only check above.
+    // Cmd+I toggle is handled by the platform WindowHost key dispatch.
 
     std::cout << "Opening window... (Cmd+I for inspector)\n";
     window->run_event_loop();

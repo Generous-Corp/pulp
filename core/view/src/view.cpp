@@ -1,4 +1,5 @@
 #include <pulp/view/view.hpp>
+#include <pulp/inspect/inspector_overlay.hpp>
 #include <algorithm>
 #include <numeric>
 #include <sstream>
@@ -288,6 +289,11 @@ void View::paint_overlays(canvas::Canvas& canvas) {
         if (req.paint_fn) req.paint_fn(canvas);
     }
     queue.clear();
+
+    // Inspector overlay — always paint last (on top of everything)
+    if (auto* inspector = inspect::g_active_inspector) {
+        inspector->paint(canvas);
+    }
 }
 
 Color View::resolve_color(const std::string& name, Color fallback) const {

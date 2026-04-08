@@ -125,28 +125,32 @@ bool InspectorOverlay::handle_mouse_event(const MouseEvent& event) {
         return true;  // consume all panel events
     }
 
-    // Mouse in view area — pick view under cursor
+    // Mouse in view area — pick view under cursor for highlighting
     auto* hit = root_.hit_test(pos);
     if (hit) {
         hovered_ = hit;
-        if (event.is_down) {
+    }
+
+    if (event.is_down) {
+        // Click: select the hovered view (consume click to prevent widget interaction)
+        if (hit) {
             if (event.modifiers & kModAlt) {
                 // Alt+click: distance measurement
                 if (!distance_anchor_) {
                     distance_anchor_ = hit;
                 } else {
-                    // Second click: we have both endpoints, keep showing
                     selected_ = hit;
-                    // distance_anchor_ stays set for display
                 }
             } else {
                 selected_ = hit;
                 distance_anchor_ = nullptr;
             }
         }
+        return true;  // consume clicks when inspector is active
     }
 
-    return true;  // consume all mouse events when inspector is active
+    // Hover events: don't consume — let normal hover effects work
+    return false;
 }
 
 bool InspectorOverlay::point_in_panel(Point p) const {

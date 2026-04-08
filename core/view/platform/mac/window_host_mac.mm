@@ -848,6 +848,8 @@ static pulp::view::KeyCode keyCodeFromNS(unsigned short code) {
         self.rootView->layout_children();
         self.rootView->paint_all(canvas);
         pulp::view::View::paint_overlays(canvas);
+
+        // Inspector overlay is painted automatically via View::paint_overlays()
     }
 }
 
@@ -1504,6 +1506,8 @@ private:
 
         root_.paint_all(canvas);
         pulp::view::View::paint_overlays(canvas);
+
+        // Inspector overlay is painted automatically via View::paint_overlays()
     }
 
     bool render_frame(std::vector<uint8_t>* capture_pixels = nullptr,
