@@ -4,5 +4,6 @@ if(APPLE)
     target_link_libraries(pulp-ui-preview PRIVATE
         pulp::view
         pulp::state
+        pulp::inspect
     )
 endif()

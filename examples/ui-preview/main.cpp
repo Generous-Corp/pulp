@@ -8,6 +8,8 @@
 #include <pulp/view/theme.hpp>
 #include <pulp/view/frame_clock.hpp>
 #include <pulp/view/inspector.hpp>
+#include <pulp/inspect/inspector_overlay.hpp>
+#include <pulp/runtime/system.hpp>
 #include <pulp/view/screenshot.hpp>
 #include <pulp/view/script_engine.hpp>
 #include <pulp/view/widget_bridge.hpp>
@@ -425,7 +427,26 @@ int main(int argc, char* argv[]) {
     }
 #endif
 
-    std::cout << "Opening window...\n";
+    // Inspector overlay — toggle with Cmd+I, or pre-enable via PULP_INSPECTOR=1
+    pulp::inspect::InspectorOverlay inspector(root);
+    if (pulp::runtime::get_env("PULP_INSPECTOR")) {
+        inspector.set_active(true);
+        std::cout << "Inspector enabled (Cmd+I to toggle)\n";
+    }
+
+    // Wire inspector into idle callback — push overlay paint each frame
+    window->set_idle_callback([&inspector, &root] {
+        if (inspector.is_active()) {
+            View::overlay_queue().push_back({
+                [&inspector](pulp::canvas::Canvas& canvas) {
+                    inspector.paint(canvas);
+                },
+                &root
+            });
+        }
+    });
+
+    std::cout << "Opening window... (Cmd+I for inspector)\n";
     window->run_event_loop();
     return automation_exit_code;
 }
