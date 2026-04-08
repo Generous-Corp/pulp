@@ -36,12 +36,12 @@
 #elif defined(_WIN32)
 #include "include/ports/SkTypeface_win.h"
 #elif defined(__ANDROID__)
-// Android: use the built-in Android font manager
+// Android: use the built-in Android font manager with FreeType scanner
 #include "include/ports/SkFontMgr_android.h"
-#include "include/core/SkFontScanner.h"
+#include "include/ports/SkFontScanner_FreeType.h"
 #elif defined(__linux__)
 #include "include/ports/SkFontMgr_fontconfig.h"
-#include "include/core/SkFontScanner.h"
+#include "include/ports/SkFontScanner_FreeType.h"
 #endif
 
 namespace pulp::canvas {
@@ -58,11 +58,11 @@ static sk_sp<SkFontMgr> get_font_manager() {
 #elif defined(_WIN32)
         mgr = SkFontMgr_New_DirectWrite();
 #elif defined(__ANDROID__)
-        // Android font manager needs access to /system/fonts/
-        // If this fails (e.g., missing fonts.xml), mgr stays null
-        mgr = SkFontMgr_New_Android(nullptr, nullptr);
+        // Android font manager needs a FreeType scanner to rasterize glyphs.
+        // Passing nullptr for the scanner causes SIGSEGV in drawSimpleText.
+        mgr = SkFontMgr_New_Android(nullptr, SkFontScanner_Make_FreeType());
 #elif defined(__linux__)
-        mgr = SkFontMgr_New_FontConfig(nullptr, nullptr);
+        mgr = SkFontMgr_New_FontConfig(nullptr, SkFontScanner_Make_FreeType());
 #endif
         // Don't fall back to RefEmpty — callers check for null
     }
@@ -210,12 +210,6 @@ void SkiaCanvas::set_text_align(TextAlign align) {
 
 void SkiaCanvas::fill_text(const std::string& text, float x, float y) {
     GUARD_CANVAS;
-#ifdef __ANDROID__
-    // TODO: Android text rendering crashes in Skia Graphite glyph cache.
-    // Root cause is under investigation — skip text to prevent SIGSEGV.
-    // Labels will be blank until this is resolved.
-    return;
-#endif
     SkFont font = make_font(font_family_, font_size_);
     if (!font.getTypeface()) return;  // no typeface — skip rather than crash
 
