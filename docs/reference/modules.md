@@ -185,7 +185,7 @@ worker->on_message = [](std::string_view result) { update_list(result); };
 |---------|--------|-------------|
 | Action Broadcaster | `async_updater.hpp` | `broadcaster.send_action("file_open")` to all listeners |
 | Async Updater | `async_updater.hpp` | Coalesce rapid cross-thread triggers into one callback |
-| Event Loop | `event_loop.hpp` | `EventLoop loop; loop.post([]{...}); loop.run()` |
+| Event Loop | `event_loop.hpp` | `EventLoop loop; loop.dispatch([]{...}); loop.dispatch_after(100ms, []{...})` |
 | Service Discovery | `volume_detector.hpp` | mDNS/Bonjour browsing for networked audio devices |
 | Timer | `timer.hpp` | `Timer t; t.start(100ms, []{...})` — periodic or one-shot |
 | Volume Detector | `volume_detector.hpp` | Poll for USB drive mount/unmount events |
@@ -544,20 +544,24 @@ Plugin format adapters — write your plugin once, deploy to 9 formats.
 
 class MyPlugin : public Processor {
 public:
-    Descriptor descriptor() override {
+    PluginDescriptor descriptor() const override {
         return {.name = "MyGain", .vendor = "MyCompany", .uid = "com.myco.gain"};
     }
     
-    void define_parameters(StateStore& store) override {
+    void define_parameters(state::StateStore& store) override {
         gain_id_ = store.add_param({.name = "Gain", .min = -60, .max = 12});
     }
     
-    void process(BufferView<float>& audio, MidiBuffer& midi,
+    void prepare(const PrepareContext& context) override {}
+    
+    void process(audio::BufferView<float>& audio_output,
+                 const audio::BufferView<const float>& audio_input,
+                 midi::MidiBuffer& midi_in, midi::MidiBuffer& midi_out,
                  const ProcessContext& ctx) override {
         float gain = db_to_linear(store().get(gain_id_));
-        for (int ch = 0; ch < audio.num_channels(); ++ch)
-            for (int i = 0; i < audio.num_frames(); ++i)
-                audio[ch][i] *= gain;
+        for (int ch = 0; ch < audio_output.num_channels(); ++ch)
+            for (int i = 0; i < audio_output.num_frames(); ++i)
+                audio_output[ch][i] = audio_input[ch][i] * gain;
     }
 };
 ```
@@ -839,24 +843,19 @@ Packaging and distribution — from code signing to installer to update feed.
 **Link:** `pulp::ship` · **Include prefix:** `<pulp/ship/...>`
 
 ```bash
-# Sign
+# Sign all plugin bundles
 pulp ship sign --identity "Developer ID Application: My Company"
 
-# Package
-pulp ship package --version 1.2.0   # Creates DMG (macOS), NSIS (Windows), .deb (Linux)
+# Package — creates .pkg (macOS) or NSIS installer (Windows)
+pulp ship package --version 1.2.0
 
-# Notarize (macOS)
-pulp ship notarize
-
-# Generate update feed
-pulp ship appcast --version 1.2.0 --notes "Bug fixes and new presets"
+# Check signing status
+pulp ship check
 ```
 
 | Feature | What It Does |
 |---------|-------------|
-| Appcast | Sparkle (macOS) / WinSparkle (Windows) update feed |
 | Code Signing | macOS `codesign` + Windows `signtool` |
-| DMG / PKG | macOS installer creation |
-| Linux Packaging | `.deb` and `.tar.gz` |
-| Notarization | macOS notarization with `notarytool` |
-| Windows Installer | NSIS-based with optional Authenticode |
+| macOS Packaging | `.pkg` installers via `pkgbuild` |
+| Signing Check | Verify signing status of all built plugin bundles |
+| Windows Installer | NSIS-based installer with optional Authenticode |
