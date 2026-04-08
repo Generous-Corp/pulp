@@ -14,7 +14,7 @@ Ship a Pulp plugin or app — sign, notarize, package, and generate update feeds
 ## Before running any ship command
 
 1. Run `pulp config show` to check saved credentials.
-2. If no config exists, use AskUserQuestion to offer setup:
+2. If no config exists, OR if the config file exists but all signing fields are commented out (only section headers shown), use AskUserQuestion to offer setup:
    - "No signing config found. Would you like to set up signing credentials now?"
    - Options: "Yes, set up macOS signing" / "Yes, set up Android signing" / "Skip for now"
    - If yes, walk through `pulp config set` for each required field.
@@ -104,7 +104,7 @@ Proceed?
   - Cancel
 ```
 
-If the user chooses "Edit signing identity first", show the current value and let them provide a new one, then offer to save it with `pulp config set`.
+If the user chooses "Edit signing identity first", use AskUserQuestion to collect the new value (show the current value as context), then offer to save it with `pulp config set`.
 
 Similarly for notarize:
 ```
@@ -138,6 +138,10 @@ This "show then confirm" pattern applies to:
 - `pulp ship package` — show target, version, and signing mode
 - `pulp ship package --target android` — show ABIs, keystore, Gradle project
 
-Run the appropriate subcommand based on $ARGUMENTS. If no arguments, show signing status first with `pulp ship check`, then suggest the next step in the workflow.
+Run the appropriate subcommand based on $ARGUMENTS. If no arguments, run `pulp ship check` to show current signing status, then use AskUserQuestion to suggest next steps:
+- "Sign plugin bundles" (if unsigned bundles found)
+- "Set up signing credentials" (if no config)
+- "Package for distribution" (if bundles are signed)
+- "Generate appcast update feed" (if packages exist in artifacts/)
 
 For full CI-driven shipping (PR + validate + merge + release), use the `ci` skill instead: say "ship this" or use `/ci ship`.
