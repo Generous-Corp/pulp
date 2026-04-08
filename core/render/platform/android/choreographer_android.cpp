@@ -39,7 +39,8 @@ public:
 
     void request_frame() {
         if (choreographer_ && !frame_requested_.exchange(true)) {
-            AChoreographer_postFrameCallback64(choreographer_, on_vsync, this);
+            // AChoreographer_postFrameCallback (API 24+) uses long, not int64_t
+            AChoreographer_postFrameCallback(choreographer_, on_vsync, this);
         }
     }
 
@@ -52,7 +53,7 @@ public:
     }
 
 private:
-    static void on_vsync(int64_t frame_time_nanos, void* data) {
+    static void on_vsync(long frame_time_nanos, void* data) {
         auto* self = static_cast<ChoreographerFramePacer*>(data);
         self->frame_requested_.store(false);
 

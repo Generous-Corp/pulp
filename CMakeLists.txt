@@ -375,6 +375,10 @@ add_subdirectory(core/midi)
 add_subdirectory(core/signal)
 add_subdirectory(core/format)
 add_subdirectory(core/canvas)
+# Render must come before view so pulp-view can link pulp-render via if(TARGET)
+if(PULP_ENABLE_GPU)
+    add_subdirectory(core/render)
+endif()
 add_subdirectory(core/view)
 add_subdirectory(core/osc)
 add_subdirectory(core/host)
@@ -383,11 +387,6 @@ add_subdirectory(core/dsl)
 # Wire Android-specific sources into subsystem targets (must come after add_subdirectory)
 if(ANDROID)
     pulp_wire_android_sources()
-endif()
-
-# ── Optional Subsystems ────────────────────────────────────────────────────
-if(PULP_ENABLE_GPU AND NOT ANDROID)
-    add_subdirectory(core/render)
 endif()
 
 add_library(pulp-standalone STATIC

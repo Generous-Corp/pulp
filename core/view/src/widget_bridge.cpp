@@ -7,19 +7,11 @@
 #include <pulp/view/modal.hpp>
 #include <pulp/view/asset_manager.hpp>
 #include <pulp/view/design_import.hpp>
-#if __has_include(<pulp/render/gpu_surface.hpp>) && !defined(__ANDROID__)
+#if __has_include(<pulp/render/gpu_surface.hpp>)
 #include <pulp/render/gpu_surface.hpp>
 #define PULP_WIDGET_BRIDGE_HAS_GPU_SURFACE 1
 #else
 #define PULP_WIDGET_BRIDGE_HAS_GPU_SURFACE 0
-namespace pulp::render {
-struct GpuSurface {
-    struct AdapterInfo { bool available = false; bool native_bridge = false; std::string backend, backend_type, name, vendor, driver, architecture; };
-    AdapterInfo adapter_info() const { return {}; }
-    void* dawn_device_handle() { return nullptr; }
-    void* dawn_queue_handle() { return nullptr; }
-};
-} // namespace pulp::render
 #endif
 #include <pulp/platform/popup_menu.hpp>
 #include <pulp/platform/file_dialog.hpp>
