@@ -374,7 +374,9 @@ add_subdirectory(core/host)
 add_subdirectory(core/dsl)
 
 # Wire Android-specific sources into subsystem targets (must come after add_subdirectory)
-pulp_wire_android_sources()
+if(ANDROID)
+    pulp_wire_android_sources()
+endif()
 
 # ── Optional Subsystems ────────────────────────────────────────────────────
 if(PULP_ENABLE_GPU)
@@ -469,8 +471,13 @@ endif()
 if(ANDROID)
     add_library(pulp-jni SHARED
         core/platform/src/android/jni_bridge.cpp
+        core/platform/src/android/tone_generator.cpp
     )
     set_target_properties(pulp-jni PROPERTIES OUTPUT_NAME "pulp")
+    target_include_directories(pulp-jni PRIVATE
+        ${CMAKE_SOURCE_DIR}/core/platform/include
+        $<TARGET_PROPERTY:oboe,INTERFACE_INCLUDE_DIRECTORIES>
+    )
     target_link_libraries(pulp-jni PRIVATE
         pulp::platform
         pulp::runtime
