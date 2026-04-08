@@ -166,6 +166,16 @@ bool InterprocessConnection::send_message(std::string_view message) {
     return send_message(message.data(), message.size());
 }
 
+void InterprocessConnection::adopt_socket(runtime::Socket&& socket) {
+    disconnect();
+    impl_->transport = IpcTransport::Socket;
+    impl_->socket = std::move(socket);
+    state_.store(IpcState::Connected);
+    connection_made();
+    if (on_connected) on_connected();
+    start_read_thread();
+}
+
 void InterprocessConnection::start_read_thread() {
     running_.store(true);
     read_thread_ = std::thread([this]() { read_loop(); });
@@ -257,13 +267,11 @@ bool InterprocessConnectionServer::start(std::string_view name, IpcTransport tra
                 if (!client_sock) continue;
 
                 auto conn = std::make_unique<InterprocessConnection>();
-                // Transfer the accepted socket to the connection
-                // (This would need a friend or setter — simplified here)
-                client_connected(std::move(conn));
-                if (on_client_connected) {
-                    auto conn2 = std::make_unique<InterprocessConnection>();
-                    on_client_connected(std::move(conn2));
-                }
+                conn->adopt_socket(std::move(*client_sock));
+                if (on_client_connected)
+                    on_client_connected(std::move(conn));
+                else
+                    client_connected(std::move(conn));
             }
         }
     });

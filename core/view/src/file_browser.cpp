@@ -153,8 +153,9 @@ void ContentSharer::share_file(const std::filesystem::path& file, void*) {
 }
 
 void ContentSharer::share_text(const std::string& text, void*) {
-    // Write to a temp file and open it — avoids shell with user text
-    auto tmp = std::filesystem::temp_directory_path() / "pulp_share.txt";
+    // Write to a unique temp file and open it
+    auto tmp = std::filesystem::temp_directory_path() /
+               ("pulp_share_" + std::to_string(std::hash<std::string>{}(text)) + ".txt");
     {
         std::ofstream f(tmp);
         f << text;
@@ -181,11 +182,11 @@ void ContentSharer::share_text(const std::string&, void*) {
 extern "C" { extern char** environ; }
 
 void ContentSharer::share_file(const std::filesystem::path& file, void*) {
-    // posix_spawn with xdg-open — no shell
+    // posix_spawnp with xdg-open — uses PATH lookup, no hardcoded path
     std::string path = file.string();
-    const char* argv[] = {"/usr/bin/xdg-open", path.c_str(), nullptr};
+    const char* argv[] = {"xdg-open", path.c_str(), nullptr};
     pid_t pid;
-    posix_spawn(&pid, "/usr/bin/xdg-open", nullptr, nullptr,
+    posix_spawnp(&pid, "xdg-open", nullptr, nullptr,
                 const_cast<char**>(argv), environ);
 }
 

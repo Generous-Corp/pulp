@@ -87,6 +87,13 @@ void ConcertinaPanel::paint(canvas::Canvas& canvas) {
             canvas.set_fill_color(canvas::Color::rgba(35, 35, 42));
             canvas.fill_rect(0, y, w, content_h);
 
+            // Paint the content view with translated origin
+            section.content->set_bounds({0, y, w, content_h});
+            canvas.save();
+            canvas.translate(0, y);
+            section.content->paint(canvas);
+            canvas.restore();
+
             // The content view would be laid out here via set_bounds
             // In a real layout pass, we'd call section.content->set_bounds({0, y, w, content_h})
 

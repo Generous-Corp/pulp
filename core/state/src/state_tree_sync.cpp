@@ -118,23 +118,32 @@ std::vector<SyncDelta> StateTreeSynchroniser::decode(const uint8_t* data, size_t
 
     for (uint32_t i = 0; i < count && pos < size; ++i) {
         SyncDelta d;
+        if (pos >= size) break;
         d.type = static_cast<SyncDeltaType>(data[pos++]);
 
         // Path
+        if (pos + 2 > size) break;
         uint16_t path_len = data[pos] | (data[pos + 1] << 8); pos += 2;
+        if (pos + path_len > size) break;
         d.path = std::string(reinterpret_cast<const char*>(data + pos), path_len); pos += path_len;
 
         // Key
+        if (pos + 2 > size) break;
         uint16_t key_len = data[pos] | (data[pos + 1] << 8); pos += 2;
+        if (pos + key_len > size) break;
         d.key = std::string(reinterpret_cast<const char*>(data + pos), key_len); pos += key_len;
 
         // Child index
+        if (pos >= size) break;
         d.child_index = static_cast<int8_t>(data[pos++]);
 
         // Value
+        if (pos >= size) break;
         uint8_t val_type = data[pos++];
         if (val_type == 1) {
+            if (pos + 2 > size) break;
             uint16_t len = data[pos] | (data[pos + 1] << 8); pos += 2;
+            if (pos + len > size) break;
             d.value = std::string(reinterpret_cast<const char*>(data + pos), len); pos += len;
         } else if (val_type == 2) {
             int64_t v = 0;

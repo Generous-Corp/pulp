@@ -5,6 +5,7 @@
 // and background receive thread. Used for crash-isolated plugin scanning,
 // multi-process architectures, and standalone↔plugin communication.
 
+#include <pulp/runtime/socket.hpp>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -86,6 +87,9 @@ public:
     // No copy
     InterprocessConnection(const InterprocessConnection&) = delete;
     InterprocessConnection& operator=(const InterprocessConnection&) = delete;
+
+    /// Adopt an already-connected socket (used by InterprocessConnectionServer).
+    void adopt_socket(runtime::Socket&& socket);
 
 private:
     struct Impl;

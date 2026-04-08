@@ -94,6 +94,17 @@ void Toolbar::paint(canvas::Canvas& canvas) {
         float item_x = horiz ? pos : 0;
         float item_y = horiz ? 0 : pos;
 
+        // Custom view — paint it directly
+        if (item.type == ToolbarItemType::Custom && item.custom_view) {
+            item.custom_view->set_bounds({item_x, item_y, item_size_, item_size_});
+            canvas.save();
+            canvas.translate(item_x, item_y);
+            item.custom_view->paint(canvas);
+            canvas.restore();
+            pos += item_size_ + spacing_;
+            continue;
+        }
+
         // Button/toggle background
         auto bg_color = item.toggled
             ? canvas::Color::rgba(60, 80, 140)
@@ -163,7 +174,19 @@ void Toolbar::on_mouse_down(Point pos) {
     auto& item = items_[idx];
     if (!item.enabled) return;
 
-    if (item.type == ToolbarItemType::Button && item.on_click)
+    if (item.type == ToolbarItemType::Custom && item.custom_view) {
+        // Forward click to custom view
+        bool horiz = (orientation_ == Orientation::horizontal);
+        float item_start = spacing_;
+        for (int i = 0; i < idx; ++i) {
+            if (items_[i].type == ToolbarItemType::Spacer) item_start += 20.0f;
+            else if (items_[i].type == ToolbarItemType::Separator) item_start += spacing_ * 2;
+            else item_start += item_size_ + spacing_;
+        }
+        Point local = {pos.x - (horiz ? item_start : 0),
+                       pos.y - (horiz ? 0 : item_start)};
+        item.custom_view->on_mouse_down(local);
+    } else if (item.type == ToolbarItemType::Button && item.on_click)
         item.on_click();
     else if (item.type == ToolbarItemType::Toggle) {
         item.toggled = !item.toggled;
