@@ -44,67 +44,142 @@ void android_set_display_density(float density) {
     PULP_LOGI("Display density set to %.2f", density);
 }
 
+// Helper: create a row of knobs in a panel container
+static std::unique_ptr<view::Panel> make_knob_row(
+    const std::vector<float>& values, float knob_size, float row_height) {
+    using namespace view;
+    auto row = std::make_unique<Panel>();
+    row->flex().direction = FlexDirection::row;
+    row->flex().preferred_height = row_height;
+    row->flex().justify_content = FlexJustify::space_evenly;
+    row->flex().align_items = FlexAlign::center;
+    for (float v : values) {
+        auto knob = std::make_unique<Knob>();
+        knob->set_value(v);
+        knob->flex().preferred_width = knob_size;
+        knob->flex().preferred_height = knob_size;
+        row->add_child(std::move(knob));
+    }
+    return row;
+}
+
+// Helper: horizontal fader with margins
+static std::unique_ptr<view::Fader> make_fader(float value, float height) {
+    using namespace view;
+    auto fader = std::make_unique<Fader>();
+    fader->set_value(value);
+    fader->flex().preferred_height = height;
+    fader->flex().margin_left = 8;
+    fader->flex().margin_right = 8;
+    return fader;
+}
+
 static void create_demo_view_hierarchy(float width, float height) {
     using namespace view;
 
-    // Convert pixel dimensions to density-independent pixels
     float dp_w = width / g_display_density;
     float dp_h = height / g_display_density;
 
     g_root_view = std::make_unique<Panel>();
     g_root_view->set_bounds({0, 0, dp_w, dp_h});
     g_root_view->set_theme(Theme::dark());
-    g_root_view->flex().padding = 16;
+    g_root_view->flex().padding = 12;
 
-    // Skip Labels for now — fill_text crashes on Android Vulkan swapchain
-    // Spacer instead of title
-    auto spacer = std::make_unique<Panel>();
-    spacer->flex().preferred_height = 40;
-    spacer->flex().margin_top = 24;
-    g_root_view->add_child(std::move(spacer));
+    // ── Status bar spacer ────────────────────────────────────────────
+    auto status_spacer = std::make_unique<Panel>();
+    status_spacer->flex().preferred_height = 28;
+    g_root_view->add_child(std::move(status_spacer));
 
-    // Knob row
-    auto knob_row = std::make_unique<Panel>();
-    knob_row->flex().direction = FlexDirection::row;
-    knob_row->flex().preferred_height = 64;
-    knob_row->flex().margin_top = 16;
-    knob_row->flex().justify_content = FlexJustify::space_evenly;
+    // ── Oscillator section: 4 knobs (Pitch, Shape, PW, Detune) ──────
+    auto osc_section = std::make_unique<Panel>();
+    osc_section->flex().margin_top = 8;
+    auto osc_knobs = make_knob_row({0.5f, 0.3f, 0.5f, 0.15f}, 48, 56);
+    osc_section->flex().preferred_height = 60;
+    osc_section->add_child(std::move(osc_knobs));
+    // layout_children() called on root only — it recurses
+    g_root_view->add_child(std::move(osc_section));
 
-    for (int i = 0; i < 3; ++i) {
-        auto knob = std::make_unique<Knob>();
-        knob->set_value(0.3f + i * 0.2f);
-        knob->flex().preferred_width = 56;
-        knob->flex().preferred_height = 56;
-        knob_row->add_child(std::move(knob));
+    // ── Toggle row (Osc 1 / Osc 2 / Sub / Noise) ────────────────────
+    auto toggle_row = std::make_unique<Panel>();
+    toggle_row->flex().direction = FlexDirection::row;
+    toggle_row->flex().preferred_height = 32;
+    toggle_row->flex().margin_top = 8;
+    toggle_row->flex().justify_content = FlexJustify::space_evenly;
+    toggle_row->flex().align_items = FlexAlign::center;
+    bool toggle_states[] = {true, false, true, false};
+    for (int i = 0; i < 4; ++i) {
+        auto toggle = std::make_unique<Toggle>();
+        toggle->set_on(toggle_states[i]);
+        toggle->flex().preferred_width = 44;
+        toggle->flex().preferred_height = 24;
+        toggle_row->add_child(std::move(toggle));
     }
-    g_root_view->add_child(std::move(knob_row));
+    g_root_view->add_child(std::move(toggle_row));
 
-    // Fader
-    auto fader = std::make_unique<Fader>();
-    fader->set_value(0.7f);
-    fader->flex().preferred_height = 32;
-    fader->flex().margin_top = 16;
-    fader->flex().margin_left = 16;
-    fader->flex().margin_right = 16;
-    g_root_view->add_child(std::move(fader));
+    // ── XY Pad (filter cutoff × resonance) ──────────────────────────
+    auto xy = std::make_unique<XYPad>();
+    xy->set_x(0.65f);
+    xy->set_y(0.35f);
+    xy->flex().preferred_height = 140;
+    xy->flex().margin_top = 12;
+    xy->flex().margin_left = 8;
+    xy->flex().margin_right = 8;
+    g_root_view->add_child(std::move(xy));
 
-    // Meter
+    // ── Filter section: 3 knobs (Cutoff, Res, Env Amt) ──────────────
+    auto filter_section = std::make_unique<Panel>();
+    filter_section->flex().margin_top = 10;
+    auto filter_knobs = make_knob_row({0.65f, 0.35f, 0.5f}, 44, 52);
+    filter_section->flex().preferred_height = 56;
+    filter_section->add_child(std::move(filter_knobs));
+    // root layout_children() handles this
+    g_root_view->add_child(std::move(filter_section));
+
+    // ── Envelope knobs (A, D, S, R) ─────────────────────────────────
+    auto env_section = std::make_unique<Panel>();
+    env_section->flex().margin_top = 8;
+    auto env_knobs = make_knob_row({0.05f, 0.3f, 0.7f, 0.4f}, 40, 48);
+    env_section->flex().preferred_height = 52;
+    env_section->add_child(std::move(env_knobs));
+    // root layout_children() handles this
+    g_root_view->add_child(std::move(env_section));
+
+    // ── Mixer faders (Osc1 Vol, Osc2 Vol, Sub, Noise) ──────────────
+    auto mixer = std::make_unique<Panel>();
+    mixer->flex().margin_top = 10;
+    mixer->flex().preferred_height = 100;
+
+    float fader_values[] = {0.75f, 0.6f, 0.4f, 0.2f};
+    for (int i = 0; i < 4; ++i) {
+        auto f = make_fader(fader_values[i], 20);
+        f->flex().margin_top = (i == 0) ? 4 : 2;
+        mixer->add_child(std::move(f));
+    }
+    // root layout_children() handles this
+    g_root_view->add_child(std::move(mixer));
+
+    // ── Output meter + master fader ─────────────────────────────────
+    auto output_section = std::make_unique<Panel>();
+    output_section->flex().margin_top = 10;
+    output_section->flex().preferred_height = 56;
+
+    auto master_fader = make_fader(0.8f, 24);
+    master_fader->flex().margin_top = 4;
+    output_section->add_child(std::move(master_fader));
+
     auto meter = std::make_unique<Meter>();
-    meter->set_level(-12.0f, -6.0f);
-    meter->flex().preferred_height = 24;
-    meter->flex().margin_top = 16;
-    meter->flex().margin_left = 16;
-    meter->flex().margin_right = 16;
-    g_root_view->add_child(std::move(meter));
+    meter->set_level(-8.0f, -3.0f);
+    meter->flex().preferred_height = 20;
+    meter->flex().margin_top = 4;
+    meter->flex().margin_left = 8;
+    meter->flex().margin_right = 8;
+    output_section->add_child(std::move(meter));
 
-    // Bottom spacer
-    auto bottom = std::make_unique<Panel>();
-    bottom->flex().preferred_height = 16;
-    bottom->flex().margin_top = 16;
-    g_root_view->add_child(std::move(bottom));
+    // root layout_children() handles this
+    g_root_view->add_child(std::move(output_section));
 
     g_root_view->layout_children();
-    PULP_LOGI("Android GPU surface: View hierarchy created (%d children, %.0fx%.0f dp)",
+    PULP_LOGI("Android GPU surface: Synth UI created (%d children, %.0fx%.0f dp)",
               static_cast<int>(g_root_view->child_count()), dp_w, dp_h);
 }
 
