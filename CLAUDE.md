@@ -424,6 +424,24 @@ When you modify files in `core/`, `examples/`, or `tools/cli/`:
    - Example pages in `docs/examples/` if examples changed
 4. Run `tools/check-docs.sh` (or `pulp docs check`) to validate consistency.
 
+### Skill Maintenance Rule
+
+Skills in `.agents/skills/` are living documents. When you discover a gotcha, fix a non-obvious bug, or establish a new pattern while working in a skill's domain, update the relevant skill:
+
+1. **Trigger**: You made a change that taught you something non-obvious about a subsystem that has a matching skill (e.g., fixed a platform bug → update the `android` skill's gotchas section).
+2. **What to add**: Gotchas, conventions, corrected assumptions, new build/deploy recipes. Not ephemeral task state.
+3. **What NOT to add**: Things derivable from reading the code or git log. Skills capture *why* and *watch out for*, not *what exists*.
+4. **Mapping**: Match the change path to the skill:
+   - `core/render/platform/android/`, `android/`, `tools/cmake/PulpAndroid.cmake` → `android`
+   - `tools/cli/`, `core/format/src/standalone.cpp` → `cli-maintenance`
+   - `core/format/src/aax*`, AAX SDK → `aax`
+   - `ci/`, `tools/local-ci/`, `.github/workflows/` → `ci`
+   - `core/view/src/webview*`, `core/view/include/*/webview*` → `webview-ui`
+   - Design import paths → `import-design`
+5. **No skill exists**: If you've accumulated 3+ gotchas for a domain with no skill, create one.
+
+This rule applies to all agents (Claude Code, Codex) and humans. Skills are checked into the repo alongside the code they document.
+
 ### Status Vocabulary
 
 Use only these values for `status:` fields in manifests:
