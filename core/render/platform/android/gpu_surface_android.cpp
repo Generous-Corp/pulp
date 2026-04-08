@@ -39,6 +39,9 @@ static std::unique_ptr<view::View> g_root_view;
 // Display density from Android (set by Kotlin before surface creation)
 static float g_display_density = 2.625f;  // default xxhdpi, overridden by Kotlin
 
+// Safe area insets (dp) — status bar, nav bar, notch. Set by Kotlin via WindowInsetsCompat.
+static float g_safe_top = 0, g_safe_bottom = 0, g_safe_left = 0, g_safe_right = 0;
+
 // Touch state
 static view::View* g_captured_view = nullptr;
 static std::chrono::steady_clock::time_point g_last_tap_time{};
@@ -72,6 +75,18 @@ static void stop_render_loop() {
 void android_set_display_density(float density) {
     g_display_density = density;
     PULP_LOGI("Display density set to %.2f", density);
+}
+
+void android_set_safe_area_insets(float top, float bottom, float left, float right) {
+    g_safe_top = top;
+    g_safe_bottom = bottom;
+    g_safe_left = left;
+    g_safe_right = right;
+    PULP_LOGI("Safe area insets (dp): top=%.1f bottom=%.1f left=%.1f right=%.1f",
+              top, bottom, left, right);
+    // Force hierarchy recreation on next frame to pick up new insets
+    g_root_view.reset();
+    g_captured_view = nullptr;
 }
 
 // Helper: create a row of knobs in a panel container
@@ -142,7 +157,12 @@ static void create_demo_view_hierarchy(float width, float height) {
     g_root_view = std::make_unique<Panel>();
     g_root_view->set_bounds({0, 0, dp_w, dp_h});
     g_root_view->set_theme(Theme::dark());
-    g_root_view->flex().padding = 12;
+    // Apply safe area insets so content clears the status bar, nav bar, and notch
+    float content_pad = 12.0f;
+    g_root_view->flex().padding_top = std::max(content_pad, g_safe_top + 4.0f);
+    g_root_view->flex().padding_bottom = std::max(content_pad, g_safe_bottom + 4.0f);
+    g_root_view->flex().padding_left = std::max(content_pad, g_safe_left);
+    g_root_view->flex().padding_right = std::max(content_pad, g_safe_right);
 
     // ── Title spacer (text drawn directly in render_frame) ──────────
     auto title_spacer = std::make_unique<Panel>();
@@ -277,13 +297,14 @@ static void create_demo_view_hierarchy(float width, float height) {
 static void draw_section_labels(canvas::Canvas& canvas) {
     if (!g_root_view || g_root_view->child_count() == 0) return;
 
-    float pad = 12.0f;  // root padding
-    float label_x = pad + 8.0f;
+    float pad_left = std::max(12.0f, g_safe_left);
+    float pad_top = std::max(12.0f, g_safe_top + 4.0f);
+    float label_x = pad_left + 8.0f;
 
     // Title: "PULP SYNTH"
     canvas.set_fill_color(canvas::Color::rgba(205, 214, 244));  // text.primary from dark theme
     canvas.set_font("sans-serif", 22);
-    canvas.fill_text("PULP SYNTH", label_x, pad + 22);
+    canvas.fill_text("PULP SYNTH", label_x, pad_top + 22);
 
     // Section labels: smaller, secondary color
     auto label_color = canvas::Color::rgba(166, 173, 200);  // text.secondary
@@ -611,6 +632,13 @@ JNIEXPORT void JNICALL
 Java_com_pulp_render_PulpSurfaceView_nativeSetDisplayDensity(
     JNIEnv*, jobject, jfloat density) {
     pulp::render::android_set_display_density(density);
+}
+
+// Safe area insets (dp) — status bar, nav bar, notch
+JNIEXPORT void JNICALL
+Java_com_pulp_render_PulpSurfaceView_nativeSetSafeAreaInsets(
+    JNIEnv*, jobject, jfloat top, jfloat bottom, jfloat left, jfloat right) {
+    pulp::render::android_set_safe_area_insets(top, bottom, left, right);
 }
 
 JNIEXPORT void JNICALL

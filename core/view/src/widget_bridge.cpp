@@ -5009,7 +5009,7 @@ fn main(@location(0) uv : vec2<f32>) -> @location(0) vec4<f32> {
             if (shader_code.empty()) return choc::value::createBool(false);
 
             // Create shader module
-            wgpu::ShaderModuleWGSLDescriptor wgsl_desc{};
+            wgpu::ShaderSourceWGSL wgsl_desc{};
             wgsl_desc.code = shader_code.c_str();
             wgpu::ShaderModuleDescriptor shader_desc{};
             shader_desc.nextInChain = &wgsl_desc;
@@ -5028,14 +5028,14 @@ fn main(@location(0) uv : vec2<f32>) -> @location(0) vec4<f32> {
             std::vector<wgpu::BindGroup> bind_groups;
 
             if (payload.hasObjectMember("bindGroups")) {
-                auto& bg_data = payload["bindGroups"];
+                auto bg_data = payload["bindGroups"];
                 for (uint32_t bg_idx = 0; bg_idx < bg_data.size(); ++bg_idx) {
                     auto member = bg_data.getObjectMemberAt(bg_idx);
                     auto& entries_val = member.value;
 
                     std::vector<wgpu::BindGroupEntry> bg_entries;
                     for (uint32_t e = 0; e < entries_val.size(); ++e) {
-                        auto& entry = entries_val[e];
+                        auto entry = entries_val[e];
                         wgpu::BindGroupEntry bge{};
                         bge.binding = static_cast<uint32_t>(
                             entry.hasObjectMember("binding") ? entry["binding"].getWithDefault<int64_t>(0) : 0);

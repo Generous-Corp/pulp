@@ -6,6 +6,8 @@ import android.view.MotionEvent
 import android.view.Surface
 import android.view.SurfaceHolder
 import android.view.SurfaceView
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import com.pulp.PulpApplication
 
 /**
@@ -26,6 +28,23 @@ class PulpSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
             val density = resources.displayMetrics.density
             Log.i(TAG, "Setting display density: $density")
             nativeSetDisplayDensity(density)
+        }
+
+        // Pass system bar insets (status bar, nav bar) to C++ for safe area padding
+        ViewCompat.setOnApplyWindowInsetsListener(this) { _, insets ->
+            val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
+            val density = resources.displayMetrics.density
+            // Convert px insets to dp for the C++ view system
+            if (PulpApplication.nativeLoaded) {
+                nativeSetSafeAreaInsets(
+                    bars.top / density,
+                    bars.bottom / density,
+                    bars.left / density,
+                    bars.right / density
+                )
+                Log.i(TAG, "Safe area insets (dp): top=${bars.top/density} bottom=${bars.bottom/density}")
+            }
+            insets
         }
     }
 
@@ -96,6 +115,8 @@ class PulpSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
 
     // Display density — called once in init, before surface lifecycle
     private external fun nativeSetDisplayDensity(density: Float)
+    // Safe area insets (dp) — status bar, nav bar, notch
+    private external fun nativeSetSafeAreaInsets(top: Float, bottom: Float, left: Float, right: Float)
 
     // Surface lifecycle — called on main thread
     private external fun nativeOnSurfaceCreated(surface: Surface)

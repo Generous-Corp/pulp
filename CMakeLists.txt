@@ -419,7 +419,7 @@ add_subdirectory(ship)
 add_subdirectory(tools/audio)
 
 # ── Testing ─────────────────────────────────────────────────────────────────
-if(PULP_BUILD_TESTS)
+if(PULP_BUILD_TESTS AND NOT ANDROID)
     enable_testing()
     include(FetchContent)
     pulp_register_fetchcontent_source(Catch2 DIR catch2 REF v3.7.1)
@@ -438,11 +438,15 @@ endif()
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake")
 include(PulpUtils)
 
-# ── CLI Tool ───────────────────────────────────────────────────────────────
-add_subdirectory(tools/cli)
+# ── CLI Tool (desktop only) ────────────────────────────────────────────────
+if(NOT ANDROID)
+    add_subdirectory(tools/cli)
+endif()
 
-# ── MCP Server ─────────────────────────────────────────────────────────────
-add_subdirectory(tools/mcp)
+# ── MCP Server (desktop only) ─────────────────────────────────────────────
+if(NOT ANDROID)
+    add_subdirectory(tools/mcp)
+endif()
 
 # ── Screenshot Tool ────────────────────────────────────────────────────────
 add_subdirectory(tools/screenshot)
@@ -468,7 +472,7 @@ if(PULP_BUILD_NODEJS)
 endif()
 
 # ── Examples ────────────────────────────────────────────────────────────────
-if(PULP_BUILD_EXAMPLES)
+if(PULP_BUILD_EXAMPLES AND NOT ANDROID)
     add_subdirectory(examples)
 endif()
 

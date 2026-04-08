@@ -2,7 +2,9 @@
 #include <pulp/format/editor_ui.hpp>
 #include <pulp/format/settings_panel.hpp>
 #include <pulp/view/window_host.hpp>
+#if !defined(__ANDROID__)
 #include <pulp/inspect/inspector_overlay.hpp>
+#endif
 #include <pulp/runtime/log.hpp>
 #include <pulp/runtime/system.hpp>
 
@@ -252,14 +254,17 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
 
     window->set_close_callback([this]() { stop(); });
 
+#if !defined(__ANDROID__)
     // Create inspector overlay — activated via Cmd+I / Ctrl+I
     auto inspector = std::make_unique<inspect::InspectorOverlay>(*tab_panel);
     auto* inspector_ptr = inspector.get();
     inspect::install_inspector_hooks(*inspector);
+#endif
 
     // Wire inspector into the idle callback to push overlay paint each frame.
     // The inspector uses View::overlay_queue() for rendering and intercepts
     // key events through the root view's on_global_click callback for Cmd+I.
+#if !defined(__ANDROID__)
     if (editor_ui.scripted_ui) {
         auto* scripted_ui_ptr = editor_ui.scripted_ui.get();
         window->set_idle_callback([scripted_ui_ptr, settings_ptr, inspector_ptr, &tab_panel] {
@@ -293,6 +298,19 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
         inspector_ptr->set_active(true);
         runtime::log_info("Standalone: inspector enabled via PULP_INSPECTOR env var");
     }
+#else
+    if (editor_ui.scripted_ui) {
+        auto* scripted_ui_ptr = editor_ui.scripted_ui.get();
+        window->set_idle_callback([scripted_ui_ptr, settings_ptr] {
+            if (scripted_ui_ptr) scripted_ui_ptr->poll();
+            if (settings_ptr) settings_ptr->poll();
+        });
+    } else {
+        window->set_idle_callback([settings_ptr] {
+            if (settings_ptr) settings_ptr->poll();
+        });
+    }
+#endif
 
     window->show();
 

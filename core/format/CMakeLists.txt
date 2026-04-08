@@ -22,8 +22,10 @@ target_link_libraries(pulp-format
         pulp::midi
         pulp::state
         pulp::view
-        pulp::inspect
 )
+if(TARGET pulp-inspect)
+    target_link_libraries(pulp-format PUBLIC pulp::inspect)
+endif()
 
 # VST3 adapter (when SDK is available)
 if(PULP_HAS_VST3)
