@@ -474,6 +474,10 @@ if(TARGET pulp-render)
     list(APPEND PULP_SDK_TARGETS pulp-render)
 endif()
 
+if(TARGET pulp-inspect)
+    list(APPEND PULP_SDK_TARGETS pulp-inspect)
+endif()
+
 foreach(_sdk_target IN LISTS PULP_SDK_TARGETS)
     string(REPLACE "pulp-" "" _sdk_export_name "${_sdk_target}")
     set_target_properties(${_sdk_target} PROPERTIES EXPORT_NAME "${_sdk_export_name}")
