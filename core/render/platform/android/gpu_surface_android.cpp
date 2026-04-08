@@ -1,6 +1,8 @@
 #if defined(__ANDROID__)
 
 #include <pulp/render/gpu_surface.hpp>
+#include <pulp/render/skia_surface.hpp>
+#include <pulp/canvas/canvas.hpp>
 #include <pulp/platform/android/jni.hpp>
 #include <android/native_window.h>
 #include <android/native_window_jni.h>
@@ -22,8 +24,9 @@ namespace pulp::render {
 // Manages the lifecycle of Dawn/Vulkan rendering on Android.
 // Bridges ANativeWindow from Kotlin SurfaceView to GpuSurface.
 
-static void android_render_test_frame();  // forward declaration
+static void android_render_test_frame();
 static std::unique_ptr<GpuSurface> g_gpu_surface;
+static std::unique_ptr<SkiaSurface> g_skia_surface;
 static ANativeWindow* g_native_window = nullptr;
 static std::mutex g_surface_mutex;
 static std::condition_variable g_surface_cv;
@@ -58,11 +61,27 @@ void android_surface_created(ANativeWindow* window) {
         PULP_LOGI("Android GPU surface: adapter=%s backend=%s",
                   info.name.c_str(), info.backend.c_str());
 
+        // Create Skia Graphite surface wrapping the Dawn device
+        SkiaSurface::Config skia_config;
+        skia_config.width = config.width;
+        skia_config.height = config.height;
+        skia_config.scale_factor = 2.0f;  // typical Android density
+
+        g_skia_surface = SkiaSurface::create(*g_gpu_surface, skia_config);
+        if (g_skia_surface && g_skia_surface->is_available()) {
+            PULP_LOGI("Android GPU surface: Skia Graphite context created");
+        } else {
+            PULP_LOGW("Android GPU surface: Skia Graphite failed — Dawn-only mode");
+        }
+
         {
             std::lock_guard lock(g_surface_mutex);
             g_surface_valid = true;
             g_render_stopped = false;
         }
+
+        // Render an initial test frame
+        android_render_test_frame();
     } else {
         PULP_LOGW("Android GPU surface: Dawn initialization failed — no GPU rendering");
         g_gpu_surface.reset();
@@ -86,12 +105,45 @@ void android_render_test_frame() {
     if (!g_gpu_surface || !g_gpu_surface->is_initialized()) return;
 
     if (g_gpu_surface->begin_frame()) {
-        // The surface is now presenting — begin_frame acquired the texture
-        // In the full pipeline, SkiaSurface would wrap this texture and
-        // our View hierarchy would paint to it. For now, just end_frame
-        // which presents whatever Dawn's clear color is.
+        if (g_skia_surface && g_skia_surface->is_available()) {
+            auto* canvas = g_skia_surface->begin_frame();
+            if (canvas) {
+                using Color = canvas::Color;
+                float w = static_cast<float>(g_gpu_surface->width());
+                float h = static_cast<float>(g_gpu_surface->height());
+
+                // Bright red background — impossible to miss
+                canvas->set_fill_color(Color::rgba(255, 0, 0));
+                canvas->fill_rect(0, 0, w, h);
+
+                // Green bar
+                canvas->set_fill_color(Color::rgba(0, 255, 0));
+                canvas->fill_rect(20, 20, w - 40, 80);
+
+                // Blue rectangle
+                canvas->set_fill_color(Color::rgba(0, 100, 255));
+                canvas->fill_rect(50, 120, w - 100, 80);
+
+                // White center square
+                canvas->set_fill_color(Color::rgba(255, 255, 255));
+                float cx = w / 2;
+                float cy = h / 2;
+                canvas->fill_rect(cx - 60, cy - 60, 120, 120);
+
+                // Purple inner
+                canvas->set_fill_color(Color::rgba(108, 92, 231));
+                canvas->fill_rect(cx - 40, cy - 40, 80, 80);
+
+                // Yellow bar at bottom
+                canvas->set_fill_color(Color::rgba(255, 255, 0));
+                canvas->fill_rect(20, h - 60, w - 40, 40);
+
+                g_skia_surface->end_frame();
+                PULP_LOGI("Android GPU surface: Skia frame rendered (%dx%d)",
+                          g_gpu_surface->width(), g_gpu_surface->height());
+            }
+        }
         g_gpu_surface->end_frame();
-        PULP_LOGI("Android GPU surface: test frame rendered");
     }
 }
 

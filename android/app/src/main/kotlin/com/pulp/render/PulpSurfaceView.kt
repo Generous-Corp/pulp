@@ -21,6 +21,9 @@ class PulpSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
 
     init {
         holder.addCallback(this)
+        // Render above the Compose window layer so Vulkan content is visible
+        setZOrderOnTop(true)
+        holder.setFormat(android.graphics.PixelFormat.TRANSLUCENT)
     }
 
     // ── Surface Lifecycle ─────────────────────────────────────────────────

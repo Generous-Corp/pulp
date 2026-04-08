@@ -221,19 +221,12 @@ fun PulpDemoApp() {
                         fontSize = 16.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
-                    Card(
+                    AndroidView(
+                        factory = { context -> PulpSurfaceView(context) },
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(200.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceVariant
-                        )
-                    ) {
-                        AndroidView(
-                            factory = { context -> PulpSurfaceView(context) },
-                            modifier = Modifier.fillMaxSize()
-                        )
-                    }
+                            .height(250.dp)
+                    )
                 }
             }
         }
