@@ -597,8 +597,14 @@ RegistryLoadResult load_remote_registry(const std::string& url,
                                          int ttl_hours) {
     auto cache_file = cache_dir / "registry-cache.json";
 
-    if (is_cache_fresh(cache_file, ttl_hours))
-        return load_registry(cache_file);
+    if (is_cache_fresh(cache_file, ttl_hours)) {
+        auto result = load_registry(cache_file);
+        if (!result.error.empty() || result.registry.packages.empty()) {
+            // Cache is corrupt — try re-downloading
+        } else {
+            return result;
+        }
+    }
 
     if (download_file(url, cache_file))
         return load_registry(cache_file);

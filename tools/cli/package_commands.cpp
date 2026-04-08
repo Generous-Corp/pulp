@@ -672,7 +672,32 @@ int cmd_add(const std::vector<std::string>& args) {
     if (!no_cmake) {
         // Generate/update cmake/pulp-packages.cmake
         lock.packages[package_id] = {pkg.version, pkg.fetch.git_repository, "", pkg.fetch.git_tag};
+
+        // If platform_guard is set and package doesn't support all targets,
+        // write a guarded cmake block for this specific package
+        bool needs_guard = platform_guard && !unsup.empty();
+        std::string guard_cmake;
+        if (needs_guard) {
+            // Determine which platforms ARE supported
+            std::string guard_platform;
+            for (auto& [name, ps] : pkg.platforms) {
+                if (name == "macOS" || name == "Windows" || name == "Linux") {
+                    guard_platform = name;
+                    break;
+                }
+            }
+            if (!guard_platform.empty())
+                guard_cmake = generate_cmake_block(pkg, true, guard_platform);
+        }
+
         auto cmake_content = generate_packages_cmake(lock, reg, root);
+        // If we have a guarded block, replace the unguarded one
+        if (needs_guard && !guard_cmake.empty()) {
+            auto unguarded = generate_cmake_block(pkg);
+            auto pos = cmake_content.find(unguarded);
+            if (pos != std::string::npos)
+                cmake_content.replace(pos, unguarded.size(), guard_cmake);
+        }
         auto cmake_path = root / "cmake" / "pulp-packages.cmake";
         if (!write_file(cmake_path, cmake_content)) {
             print_fail("Failed to write " + cmake_path.string());
@@ -860,18 +885,30 @@ int cmd_suggest(const std::vector<std::string>& args) {
     if (mode == "description") {
         auto results = search(reg, value);
         if (results.empty()) {
-            std::cout << "No packages match that description.\n";
+            std::cout << (json_output ? "[]" : "No packages match that description.") << "\n";
             return 0;
         }
-        std::cout << "Suggested packages for \"" << value << "\":\n\n";
-        for (size_t i = 0; i < std::min(results.size(), size_t(5)); ++i) {
-            auto& p = *results[i];
-            std::cout << "  " << green(p.id) << " " << dim("v" + p.version)
-                      << " " << dim("[" + p.license + "]") << "\n";
-            std::cout << "    " << p.description << "\n";
-            if (!p.overlaps_with_builtin.empty())
-                std::cout << "    " << yellow("Note:") << " overlaps with Pulp built-ins\n";
-            std::cout << "\n";
+        if (json_output) {
+            std::cout << "[\n";
+            for (size_t i = 0; i < std::min(results.size(), size_t(5)); ++i) {
+                auto& p = *results[i];
+                if (i > 0) std::cout << ",\n";
+                std::cout << "  {\"id\": \"" << p.id << "\", \"version\": \"" << p.version
+                          << "\", \"license\": \"" << p.license << "\", \"description\": \""
+                          << p.description << "\"}";
+            }
+            std::cout << "\n]\n";
+        } else {
+            std::cout << "Suggested packages for \"" << value << "\":\n\n";
+            for (size_t i = 0; i < std::min(results.size(), size_t(5)); ++i) {
+                auto& p = *results[i];
+                std::cout << "  " << green(p.id) << " " << dim("v" + p.version)
+                          << " " << dim("[" + p.license + "]") << "\n";
+                std::cout << "    " << p.description << "\n";
+                if (!p.overlaps_with_builtin.empty())
+                    std::cout << "    " << yellow("Note:") << " overlaps with Pulp built-ins\n";
+                std::cout << "\n";
+            }
         }
         return 0;
     }

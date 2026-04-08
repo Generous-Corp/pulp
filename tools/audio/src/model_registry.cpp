@@ -25,13 +25,16 @@ const RegisteredModel* find_registered_model(std::string_view model_id) {
 }
 
 std::string resolve_checkpoint_url(const std::string& checkpoint_ref) {
-    // Handle hf:// protocol
+    // Handle hf:// protocol: hf://user/repo/path/to/file → https://huggingface.co/user/repo/resolve/main/path/to/file
     if (checkpoint_ref.starts_with("hf://")) {
         auto path = checkpoint_ref.substr(5);  // after "hf://"
-        return "https://huggingface.co/" + path.substr(0, path.find('/')) + "/"
-             + path.substr(path.find('/') + 1, path.rfind('/') - path.find('/') - 1)
-             + "/resolve/main/"
-             + path.substr(path.rfind('/') + 1);
+        auto first_slash = path.find('/');
+        if (first_slash == std::string::npos) return {};
+        auto second_slash = path.find('/', first_slash + 1);
+        if (second_slash == std::string::npos) return {};
+        auto user_repo = path.substr(0, second_slash);   // "user/repo"
+        auto file_path = path.substr(second_slash + 1);  // "path/to/file"
+        return "https://huggingface.co/" + user_repo + "/resolve/main/" + file_path;
     }
     // Handle direct URLs
     if (checkpoint_ref.starts_with("http://") || checkpoint_ref.starts_with("https://"))

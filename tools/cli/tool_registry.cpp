@@ -237,10 +237,21 @@ ToolInstallResult install_binary_tool(const ToolDescriptor& tool, bool force) {
     if (!force) {
         auto existing = locate_tool(tool);
         if (existing.found && existing.source == "pulp-managed") {
-            result.ok = true;
-            result.binary_path = existing.path;
-            result.installed_version = tool.pinned_version;
-            return result;
+            // Check if installed version matches pinned version
+            auto manifest = existing.path.parent_path() / "manifest.json";
+            bool version_ok = true;
+            if (fs::exists(manifest)) {
+                auto content = read_file(manifest);
+                // Simple check: does manifest contain the pinned version?
+                version_ok = content.find(tool.pinned_version) != std::string::npos;
+            }
+            if (version_ok) {
+                result.ok = true;
+                result.binary_path = existing.path;
+                result.installed_version = tool.pinned_version;
+                return result;
+            }
+            // Version mismatch — reinstall
         }
     }
 
@@ -547,10 +558,15 @@ int cmd_tool(const std::vector<std::string>& args) {
                 auto dep_loc = locate_tool(dep_it->second);
                 if (!dep_loc.found) {
                     std::cout << "  Installing dependency: " << dep << "\n";
+                    ToolInstallResult dep_result;
                     if (dep_it->second.install_method == "binary_download")
-                        install_binary_tool(dep_it->second);
+                        dep_result = install_binary_tool(dep_it->second);
                     else if (dep_it->second.install_method == "python_pip")
-                        install_python_tool(dep_it->second, reg);
+                        dep_result = install_python_tool(dep_it->second, reg);
+                    if (!dep_result.ok) {
+                        print_fail("Failed to install dependency " + dep + ": " + dep_result.error);
+                        return 1;
+                    }
                 }
             }
 

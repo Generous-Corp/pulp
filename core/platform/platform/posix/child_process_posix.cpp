@@ -50,9 +50,9 @@ size_t drain_pipe(int fd, std::string& full_output, std::string& line_buf,
         // Always accumulate into full_output (capped)
         if (full_output.size() < max_bytes)
             full_output.append(chunk, std::min(bytes, max_bytes - full_output.size()));
-        // If line callback, also accumulate into line_buf for splitting
-        if (line_cb)
-            line_buf.append(chunk, bytes);
+        // If line callback, also accumulate into line_buf for splitting (capped)
+        if (line_cb && line_buf.size() < max_bytes)
+            line_buf.append(chunk, std::min(bytes, max_bytes - line_buf.size()));
     }
     // Fire callbacks for complete lines
     if (line_cb && !line_buf.empty()) {
@@ -80,8 +80,8 @@ struct ChildProcess::Impl {
     std::string stdout_lines_buf;  // partial line accumulator for callbacks
     std::string stderr_lines_buf;
     bool started = false;
-    bool finished = false;
-    ProcessResult result;
+    mutable bool finished = false;       // mutable: is_running() caches waitpid result
+    mutable ProcessResult result;        // mutable: is_running() stores exit code
 };
 
 ChildProcess::ChildProcess() : impl_(std::make_unique<Impl>()) {}
@@ -155,9 +155,18 @@ bool ChildProcess::start(const std::string& command,
 
 bool ChildProcess::is_running() const {
     if (!impl_->started || impl_->finished) return false;
-    // Use kill(pid, 0) to check existence without reaping.
-    // waitpid with WNOHANG would reap the child, causing wait() to hang.
-    return kill(impl_->pid, 0) == 0;
+    // Use waitpid WNOHANG — if child has exited, store the status so
+    // wait() doesn't hang. This handles zombies correctly (kill(pid,0)
+    // returns success for zombies, which is wrong).
+    int status = 0;
+    auto rc = waitpid(impl_->pid, &status, WNOHANG);
+    if (rc > 0) {
+        // Child exited — cache the result for wait()
+        impl_->finished = true;
+        impl_->result.exit_code = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+        return false;
+    }
+    return rc == 0;  // 0 = still running, -1 = error
 }
 
 void ChildProcess::cancel() {
