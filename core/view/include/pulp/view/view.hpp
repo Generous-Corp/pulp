@@ -373,7 +373,17 @@ public:
     bool text_overflow_ellipsis() const { return text_ellipsis_; }
 
     /// Cursor style hint (CSS cursor property)
-    enum class CursorStyle { default_, pointer, crosshair, text, grab, grabbing, not_allowed };
+    enum class CursorStyle {
+        default_, pointer, crosshair, text, grab, grabbing, not_allowed,
+        invisible,                ///< Hidden cursor (custom drag, knob rotation)
+        horizontal_resize,        ///< ↔ Left-right resize (SplitView, column borders)
+        vertical_resize,          ///< ↕ Up-down resize (SplitView, row borders)
+        top_left_resize,          ///< ↖↘ Diagonal resize (NW-SE)
+        top_right_resize,         ///< ↗↙ Diagonal resize (NE-SW)
+        bottom_left_resize,       ///< ↗↙ Diagonal resize (alias for top_right)
+        bottom_right_resize,      ///< ↖↘ Diagonal resize (alias for top_left)
+        multi_directional_resize  ///< ✥ All-direction move/resize
+    };
     void set_cursor(CursorStyle c) { cursor_ = c; }
     CursorStyle cursor() const { return cursor_; }
 

@@ -12,11 +12,21 @@
 
 static bool write_cmake_project_version(const fs::path& cmake_path,
                                          const std::string& old_ver,
-                                         const std::string& new_ver) {
+                                         const std::string& new_ver,
+                                         bool plugin_only = false) {
     auto content = read_file_contents(cmake_path);
-    auto pos = content.find(old_ver);
-    if (pos == std::string::npos) return false;
-    content.replace(pos, old_ver.size(), new_ver);
+    if (plugin_only) {
+        // Only replace the version inside pulp_add_plugin(...VERSION "x.y.z"...)
+        std::regex re(R"((pulp_add_plugin\s*\([^)]*VERSION\s+"))" + std::string(old_ver) + R"(")");
+        std::string replacement = "$1" + new_ver + "\"";
+        auto result = std::regex_replace(content, re, replacement, std::regex_constants::format_first_only);
+        if (result == content) return false;  // no match
+        content = result;
+    } else {
+        auto pos = content.find(old_ver);
+        if (pos == std::string::npos) return false;
+        content.replace(pos, old_ver.size(), new_ver);
+    }
     std::ofstream f(cmake_path);
     if (!f) return false;
     f << content;
@@ -111,7 +121,7 @@ static int version_bump(const std::vector<std::string>& args) {
     auto new_ver = old_ver.bumped(component);
     auto new_str = new_ver.str();
 
-    if (!write_cmake_project_version(cmake_path, current, new_str)) {
+    if (!write_cmake_project_version(cmake_path, current, new_str, plugin_mode)) {
         std::cerr << "Error: failed to update version in " << cmake_path.string() << "\n";
         return 1;
     }

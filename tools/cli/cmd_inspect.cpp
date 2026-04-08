@@ -102,6 +102,7 @@ int cmd_inspect(const std::vector<std::string>& args) {
     std::string host = "127.0.0.1";
     int port = 0;
     std::string one_shot_command;
+    std::string one_shot_params = "{}";
     std::string output_file;
 
     for (size_t i = 0; i < args.size(); ++i) {
@@ -112,6 +113,7 @@ int cmd_inspect(const std::vector<std::string>& args) {
             std::cout << "  --host HOST       Connect to HOST (default: 127.0.0.1)\n";
             std::cout << "  --port PORT       Connect to PORT (default: auto-discover)\n";
             std::cout << "  --command METHOD  Send one command and print result\n";
+            std::cout << "  --params JSON     JSON params for --command (default: {})\n";
             std::cout << "  --output FILE     Write result to FILE (with --command)\n\n";
             std::cout << "Examples:\n";
             std::cout << "  pulp inspect                              # Interactive REPL\n";
@@ -123,6 +125,7 @@ int cmd_inspect(const std::vector<std::string>& args) {
         if (args[i] == "--host" && i + 1 < args.size()) host = args[++i];
         else if (args[i] == "--port" && i + 1 < args.size()) port = std::stoi(args[++i]);
         else if (args[i] == "--command" && i + 1 < args.size()) one_shot_command = args[++i];
+        else if (args[i] == "--params" && i + 1 < args.size()) one_shot_params = args[++i];
         else if (args[i] == "--output" && i + 1 < args.size()) output_file = args[++i];
     }
 
@@ -187,7 +190,7 @@ int cmd_inspect(const std::vector<std::string>& args) {
 
     // One-shot mode
     if (!one_shot_command.empty()) {
-        auto msg = make_request(1, one_shot_command);
+        auto msg = make_request(1, one_shot_command, one_shot_params);
         auto json = encode_message(msg);
         conn.send_message(json);
 

@@ -706,6 +706,22 @@ static pulp::view::KeyCode keyCodeFromNS(unsigned short code) {
                         [[NSCursor closedHandCursor] set]; break;
                     case pulp::view::View::CursorStyle::not_allowed:
                         [[NSCursor operationNotAllowedCursor] set]; break;
+                    case pulp::view::View::CursorStyle::invisible:
+                        [NSCursor hide]; break;
+                    case pulp::view::View::CursorStyle::horizontal_resize:
+                        [[NSCursor resizeLeftRightCursor] set]; break;
+                    case pulp::view::View::CursorStyle::vertical_resize:
+                        [[NSCursor resizeUpDownCursor] set]; break;
+                    case pulp::view::View::CursorStyle::top_left_resize:
+                    case pulp::view::View::CursorStyle::bottom_right_resize:
+                        // macOS doesn't have a diagonal NW-SE cursor — use crosshair
+                        [[NSCursor crosshairCursor] set]; break;
+                    case pulp::view::View::CursorStyle::top_right_resize:
+                    case pulp::view::View::CursorStyle::bottom_left_resize:
+                        // macOS doesn't have a diagonal NE-SW cursor — use crosshair
+                        [[NSCursor crosshairCursor] set]; break;
+                    case pulp::view::View::CursorStyle::multi_directional_resize:
+                        [[NSCursor openHandCursor] set]; break;
                     default:
                         [[NSCursor arrowCursor] set]; break;
                 }
@@ -1131,6 +1147,27 @@ public:
     void hide() override { [window_ orderOut:nil]; }
     bool is_visible() const override { return [window_ isVisible]; }
     void repaint() override { [view_ setNeedsDisplay:YES]; }
+
+    void position_beside(WindowHost* other) override {
+        if (!other) return;
+        auto* other_nswin = (__bridge NSWindow*)(other->native_window_handle());
+        if (!other_nswin || !window_) return;
+
+        auto other_frame = [other_nswin frame];
+        auto screen_frame = [[other_nswin screen] visibleFrame];
+        auto my_size = [window_ frame].size;
+
+        // Try right side first
+        CGFloat right_x = other_frame.origin.x + other_frame.size.width + 8;
+        if (right_x + my_size.width <= screen_frame.origin.x + screen_frame.size.width) {
+            [window_ setFrameOrigin:NSMakePoint(right_x, other_frame.origin.y)];
+        } else {
+            // Fall back to left side
+            CGFloat left_x = other_frame.origin.x - my_size.width - 8;
+            [window_ setFrameOrigin:NSMakePoint(std::max(left_x, screen_frame.origin.x), other_frame.origin.y)];
+        }
+    }
+
     void* native_window_handle() const override { return (__bridge void*) window_; }
     void* native_content_view_handle() const override { return (__bridge void*) view_; }
     bool attach_native_child_view(void* child_view,
@@ -1162,6 +1199,16 @@ public:
         delegate_.onClose = ^{ if (close_callback_) close_callback_(); };
     }
 
+    void set_idle_callback(std::function<void()> cb) override {
+        idle_callback_ = std::move(cb);
+        if (idle_callback_ && !idle_timer_) {
+            idle_timer_ = [NSTimer scheduledTimerWithTimeInterval:1.0/30.0
+                repeats:YES block:^(NSTimer*) {
+                    if (idle_callback_) idle_callback_();
+                }];
+        }
+    }
+
     void run_event_loop() override {
         @autoreleasepool {
             [NSApplication sharedApplication];
@@ -1179,7 +1226,9 @@ private:
     NSWindow* window_ = nil;
     PulpView* view_ = nil;
     PulpWindowDelegate* delegate_ = nil;
+    NSTimer* idle_timer_ = nil;
     std::function<void()> close_callback_;
+    std::function<void()> idle_callback_;
 };
 
 // ── MacGpuWindowHost (Dawn/Skia Graphite) ────────────────────────────────────
@@ -1242,6 +1291,23 @@ public:
     void show() override { [window_ makeKeyAndOrderFront:nil]; }
     void hide() override { [window_ orderOut:nil]; }
     bool is_visible() const override { return [window_ isVisible]; }
+
+    void position_beside(WindowHost* other) override {
+        if (!other) return;
+        auto* other_nswin = (__bridge NSWindow*)(other->native_window_handle());
+        if (!other_nswin || !window_) return;
+        auto other_frame = [other_nswin frame];
+        auto screen_frame = [[other_nswin screen] visibleFrame];
+        auto my_size = [window_ frame].size;
+        CGFloat right_x = other_frame.origin.x + other_frame.size.width + 8;
+        if (right_x + my_size.width <= screen_frame.origin.x + screen_frame.size.width) {
+            [window_ setFrameOrigin:NSMakePoint(right_x, other_frame.origin.y)];
+        } else {
+            CGFloat left_x = other_frame.origin.x - my_size.width - 8;
+            [window_ setFrameOrigin:NSMakePoint(std::max(left_x, screen_frame.origin.x), other_frame.origin.y)];
+        }
+    }
+
     void* native_window_handle() const override { return (__bridge void*) window_; }
     void* native_content_view_handle() const override { return (__bridge void*) metal_view_; }
     void* dawn_device_handle() const override {

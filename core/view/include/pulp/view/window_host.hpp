@@ -52,6 +52,10 @@ public:
     // Native host/window handles for embedding child platform views such as
     // WebViews. Default implementations return nullptr on platforms that do
     // not expose these seams yet.
+    /// Position this window alongside another window.
+    /// Places to the right if there's screen space, otherwise to the left.
+    virtual void position_beside(WindowHost* other) { (void)other; }
+
     virtual void* native_window_handle() const { return nullptr; }
     virtual void* native_content_view_handle() const { return nullptr; }
     virtual void* dawn_device_handle() const { return nullptr; }

@@ -75,7 +75,7 @@ int cmd_dev(const std::vector<std::string>& args) {
 
             // Find design binary
             std::vector<fs::path> candidates = {
-                platform_executable(build_dir / "tools" / "design" / "pulp-design"),
+                platform_executable(build_dir / "tools" / "design" / "pulp-design-tool"),
                 platform_executable(build_dir / "examples" / "design-tool" / "pulp-design-tool"),
             };
             for (const auto& c : candidates) {
@@ -83,7 +83,7 @@ int cmd_dev(const std::vector<std::string>& args) {
             }
             if (launch_target.empty()) {
                 // Will be found after first build
-                launch_target = (build_dir / "tools" / "design" / "pulp-design").string();
+                launch_target = (build_dir / "tools" / "design" / "pulp-design-tool").string();
             }
             launch_args.insert(launch_args.begin(), script);
         } else if (args[i] == "--target" && i + 1 < args.size()) {

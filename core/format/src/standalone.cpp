@@ -255,6 +255,7 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
     // Create inspector overlay — activated via Cmd+I / Ctrl+I
     auto inspector = std::make_unique<inspect::InspectorOverlay>(*tab_panel);
     auto* inspector_ptr = inspector.get();
+    inspect::install_inspector_hooks(*inspector);
 
     // Wire inspector into the idle callback to push overlay paint each frame.
     // The inspector uses View::overlay_queue() for rendering and intercepts

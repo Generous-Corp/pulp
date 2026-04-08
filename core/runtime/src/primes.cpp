@@ -4,12 +4,20 @@
 
 // MSVC doesn't support __uint128_t. Use a portable multiply-mod helper.
 #ifdef _MSC_VER
+static uint64_t addmod(uint64_t a, uint64_t b, uint64_t m) {
+    // Guard against uint64_t overflow: if a + b would wrap, subtract m first.
+    // Since a < m and b < m, (a - (m - b)) is the correct reduced result.
+    if (a >= m - b)
+        return a - (m - b);
+    return a + b;
+}
+
 static uint64_t mulmod(uint64_t a, uint64_t b, uint64_t m) {
     uint64_t result = 0;
     a %= m;
     while (b > 0) {
-        if (b & 1) result = (result + a) % m;
-        a = (a * 2) % m;
+        if (b & 1) result = addmod(result, a, m);
+        a = addmod(a, a, m);
         b >>= 1;
     }
     return result;

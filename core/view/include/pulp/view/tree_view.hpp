@@ -98,15 +98,17 @@ public:
 
         float y = event.position.y + scroll_offset_;
         float current_y = 0;
-        TreeNode* hit = find_node_at_y(root_, -1, current_y, y);
+        int hit_depth = 0;
+        TreeNode* hit = find_node_at_y(root_, -1, current_y, y, &hit_depth);
 
         if (hit) {
             if (event.click_count == 2) {
                 if (on_activate) on_activate(*hit);
             } else {
-                // Check if click is on the expand triangle
-                // (simplified: clicking anywhere toggles if has children)
-                if (hit->has_children() && event.position.x < indent_ * 2) {
+                // Check if click is on the expand triangle area
+                float indent_x = static_cast<float>(hit_depth) * indent_;
+                float triangle_end = indent_x + indent_;
+                if (hit->has_children() && event.position.x < triangle_end) {
                     hit->toggle();
                     if (on_toggle) on_toggle(*hit, hit->expanded);
                 } else {
@@ -142,6 +144,8 @@ private:
     float indent_ = 18.0f;
     float scroll_offset_ = 0.0f;
 
+    static constexpr float kTriangleWidth = 16.0f; ///< Space reserved for the disclosure triangle
+
     void paint_node(canvas::Canvas& canvas, TreeNode& node, int depth,
                     float x, float& y, float width) {
         if (depth >= 0) { // Don't paint the invisible root
@@ -158,7 +162,7 @@ private:
             if (node.has_children()) {
                 canvas.set_fill_color(resolve_color("text_muted",
                     canvas::Color::hex(0x808090)));
-                float tx = indent_x + 4;
+                float tx = indent_x + 2;
                 float ty = y + row_height_ / 2;
                 if (node.expanded) {
                     // Down-pointing triangle
@@ -168,11 +172,12 @@ private:
                 }
             }
 
-            // Label
+            // Label — offset past the triangle area to prevent overlap
+            float label_x = indent_x + kTriangleWidth;
             canvas.set_font("system", 13);
             canvas.set_fill_color(resolve_color("text",
                 canvas::Color::hex(0xe0e0e0)));
-            canvas.fill_text(node.label, indent_x + indent_, y + row_height_ * 0.7f);
+            canvas.fill_text(node.label, label_x, y + row_height_ * 0.7f);
 
             y += row_height_;
         }
@@ -184,9 +189,11 @@ private:
         }
     }
 
-    TreeNode* find_node_at_y(TreeNode& node, int depth, float& current_y, float target_y) {
+    TreeNode* find_node_at_y(TreeNode& node, int depth, float& current_y, float target_y,
+                             int* out_depth = nullptr) {
         if (depth >= 0) {
             if (target_y >= current_y && target_y < current_y + row_height_) {
+                if (out_depth) *out_depth = depth;
                 return &node;
             }
             current_y += row_height_;
@@ -194,7 +201,7 @@ private:
 
         if (depth < 0 || node.expanded) {
             for (auto& child : node.children) {
-                auto* result = find_node_at_y(*child, depth + 1, current_y, target_y);
+                auto* result = find_node_at_y(*child, depth + 1, current_y, target_y, out_depth);
                 if (result) return result;
             }
         }
