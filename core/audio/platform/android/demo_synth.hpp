@@ -51,4 +51,7 @@ bool synth_start();
 void synth_stop();
 bool synth_is_playing();
 
+// Peak level for visual metering (written by audio thread, read by UI)
+float synth_peak_level();
+
 } // namespace pulp::demo

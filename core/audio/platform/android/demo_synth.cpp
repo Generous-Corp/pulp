@@ -64,6 +64,7 @@ public:
     }
 
     bool is_playing() const { return playing_.load(); }
+    float peak_level() const { return peak_level_.load(std::memory_order_relaxed); }
 
 private:
     // Map 0..1 knob to frequency (MIDI note range 36..96)
@@ -147,6 +148,7 @@ private:
         float cut_hz = cutoff_to_hz(cutoff);
         float coeff = lp_coeff(cut_hz);
         float feedback = reso * 0.9f;  // resonance feedback
+        float peak = 0.0f;
 
         for (int i = 0; i < num_frames; ++i) {
             // Oscillators
@@ -170,14 +172,18 @@ private:
             filter_state_ += coeff * (input - filter_state_);
             float filtered = filter_state_;
 
-            // Output
-            float sample = filtered * master * 0.3f;  // headroom
+            // Output — level is 0..1 from UI, scale up for audibility
+            float sample = filtered * master * 0.7f;
             sample = std::clamp(sample, -1.0f, 1.0f);
+            peak = std::max(peak, std::abs(sample));
 
             // Stereo (slight pan spread)
-            out[i * 2]     = sample * 0.9f;  // L
-            out[i * 2 + 1] = sample;         // R
+            out[i * 2]     = sample * 0.95f;  // L
+            out[i * 2 + 1] = sample;          // R
         }
+
+        // Update peak for visual metering (relaxed — UI reads it)
+        peak_level_.store(peak, std::memory_order_relaxed);
 
         return oboe::DataCallbackResult::Continue;
     }
@@ -201,6 +207,9 @@ private:
     // Envelope state
     float env_level_ = 0.0f;
     int env_stage_ = 0;  // 0=attack, 1=decay, 2=sustain, 3=release
+
+    // Peak metering (for visual indicator)
+    std::atomic<float> peak_level_{0.0f};
 };
 
 static DemoSynth g_synth;
@@ -208,6 +217,7 @@ static DemoSynth g_synth;
 bool synth_start() { return g_synth.start(); }
 void synth_stop() { g_synth.stop(); }
 bool synth_is_playing() { return g_synth.is_playing(); }
+float synth_peak_level() { return g_synth.peak_level(); }
 
 } // namespace pulp::demo
 

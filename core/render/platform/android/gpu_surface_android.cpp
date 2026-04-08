@@ -24,6 +24,7 @@
 #include <condition_variable>
 #include <memory>
 #include <chrono>
+#include <cmath>
 
 #define PULP_LOG_TAG "Pulp"
 #define PULP_LOGI(...) __android_log_print(ANDROID_LOG_INFO, PULP_LOG_TAG, __VA_ARGS__)
@@ -477,6 +478,44 @@ static void draw_section_labels(canvas::Canvas& canvas) {
         float y = child_y(g_sections.master_fader - 1) + 12;
         canvas.fill_text("MASTER", label_x, y);
     }
+
+    // ── Visual audio peak indicator ──────────────────────────────────
+    // Draws a horizontal bar showing the current audio peak level.
+    // Green < -12dB, yellow < -3dB, red above.
+    float peak = demo::synth_peak_level();
+    float dp_w = g_root_view->bounds().width;
+    float meter_y = g_root_view->bounds().height - std::max(12.0f, g_safe_bottom + 4.0f) - 24;
+    float meter_w = dp_w - 2.0f * pad_left;
+    float bar_w = peak * meter_w;
+
+    // Background
+    canvas.set_fill_color(canvas::Color::rgba(30, 30, 40));
+    canvas.fill_rounded_rect(pad_left, meter_y, meter_w, 16, 4);
+
+    // Peak bar with color gradient
+    if (bar_w > 0.5f) {
+        canvas::Color bar_color;
+        if (peak < 0.25f)
+            bar_color = canvas::Color::rgba(100, 200, 120);   // green
+        else if (peak < 0.7f)
+            bar_color = canvas::Color::rgba(120, 180, 250);   // blue (accent)
+        else if (peak < 0.9f)
+            bar_color = canvas::Color::rgba(240, 200, 80);    // yellow
+        else
+            bar_color = canvas::Color::rgba(240, 100, 100);   // red (clipping)
+        canvas.set_fill_color(bar_color);
+        canvas.fill_rounded_rect(pad_left, meter_y, bar_w, 16, 4);
+    }
+
+    // Peak dB readout
+    float db = peak > 0.0001f ? 20.0f * std::log10(peak) : -96.0f;
+    char db_str[16];
+    snprintf(db_str, sizeof(db_str), "%.1f dB", db);
+    canvas.set_fill_color(canvas::Color::rgba(200, 200, 220));
+    canvas.set_font("sans-serif", 10);
+    canvas.set_text_align(canvas::TextAlign::right);
+    canvas.fill_text(db_str, pad_left + meter_w - 4, meter_y + 12);
+    canvas.set_text_align(canvas::TextAlign::left);
 }
 
 static ANativeWindow* g_native_window = nullptr;
@@ -577,6 +616,16 @@ void android_render_frame(float dt) {
 
                 // Sync widget values → synth parameters (lock-free)
                 sync_ui_to_synth();
+
+                // Log audio peak every ~60 frames for CLI debugging
+                static int frame_count = 0;
+                if (++frame_count % 60 == 0) {
+                    float peak = demo::synth_peak_level();
+                    if (peak > 0.0001f) {
+                        float db = 20.0f * std::log10(peak);
+                        PULP_LOGI("Audio peak: %.3f (%.1f dB)", peak, db);
+                    }
+                }
 
                 // Advance animations with real dt from choreographer,
                 // or 1.0f to snap to completion on touch-only repaints
