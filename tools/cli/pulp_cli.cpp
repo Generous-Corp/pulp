@@ -2110,8 +2110,11 @@ static int cmd_ship(const std::vector<std::string>& args) {
                 }
             }
         }
-        std::cout << "Signed " << signed_count << " bundles.\n";
-        return 0;
+        if (signed_count == 0)
+            std::cerr << "No plugin bundles found to sign. Run `pulp build` first.\n";
+        else
+            std::cout << "Signed " << signed_count << " bundles.\n";
+        return signed_count > 0 ? 0 : 1;
     }
 
     // ── package ─────────────────────────────────────────────────────────────
@@ -2378,9 +2381,12 @@ static int cmd_ship(const std::vector<std::string>& args) {
         for (auto& path : bundles) {
             auto name = fs::path(path).filename().string();
             std::cout << "Submitting " << name << " for notarization...\n";
+            // notarize_submit uses `xcrun notarytool submit --wait` which blocks
+            // for up to 20 minutes until notarization completes
             auto uuid = pulp::ship::notarize_submit(path, apple_id, team_id, password);
             if (!uuid) { std::cerr << "  Submission FAILED\n"; continue; }
             std::cout << "  Request UUID: " << *uuid << "\n";
+            // Verify final status (submit --wait already blocked until completion)
             auto status = pulp::ship::notarize_check(*uuid);
             if (status.success) {
                 std::cout << "  Notarization succeeded. Stapling...\n";

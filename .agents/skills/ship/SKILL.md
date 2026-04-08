@@ -47,32 +47,45 @@ pulp config set signing.android.keystore "~/keystores/release.jks"
 
 ### Config file location
 
-`~/.pulp/config.toml` (or `$PULP_HOME/config.toml`)
+`~/.pulp/config.toml` (override with `$PULP_HOME`)
 
 See `config.example.toml` in the repo root for all options with documentation.
 
+## Interactive safety contract
+
+Before executing any signing, notarization, or packaging action, the `/ship` command uses AskUserQuestion to:
+1. Show resolved config values (identity, keystore, credentials) and their source (CLI/env/config.toml)
+2. Let the user review, edit, or cancel before proceeding
+3. Offer to save new values with `pulp config set`
+
+When invoked via skill trigger (not slash command), apply the same pattern: always show what will happen and confirm before executing.
+
 ## Workflows
 
-### macOS: Sign → Notarize → Package
+### macOS: Build → Sign → Notarize → Package → Appcast
 
 ```bash
+pulp build                                              # Must build first
 pulp ship sign                                          # Uses identity from config
 pulp ship notarize                                      # Uses apple_id/team_id from config
 pulp ship package --version 1.0.0                       # Creates .pkg in artifacts/
 pulp ship appcast --url https://example.com/Plugin.pkg --version 1.0.0
 ```
 
-### Android: Package → Sign → Verify
+### Android: Build → Package (includes Gradle build + optional signing) → Verify
 
 ```bash
-pulp ship package --target android --keystore ~/key.jks # Build APK+AAB via Gradle
-pulp ship sign --target android                         # Uses keystore from config
+pulp build --target android                             # Build native libs
+pulp ship package --target android --keystore ~/key.jks # Gradle build + sign APK/AAB
 pulp ship check --target android                        # Verify APK/AAB signatures
 ```
 
-### Windows: Sign → Package
+Note: `pulp ship package --target android` invokes Gradle which builds AND signs in one step when a keystore is provided. Use `pulp ship sign --target android` only to re-sign existing artifacts in `artifacts/`.
+
+### Windows: Build → Sign → Package
 
 ```bash
+pulp build                                              # Must build first
 pulp ship sign --identity "Your Company"                # Uses signtool
 pulp ship package --version 1.0.0                       # Creates NSIS .exe installer
 ```

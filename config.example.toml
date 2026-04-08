@@ -11,7 +11,8 @@
 #
 # Or set PULP_HOME to use a different config directory (default: ~/.pulp)
 #
-# Precedence: CLI flags > environment variables > project pulp.toml > this file
+# Precedence: CLI flags > environment variables > this file
+# (Future: project pulp.toml will override this file for per-project settings)
 # ============================================================================
 
 

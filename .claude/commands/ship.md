@@ -42,7 +42,9 @@ Ship a Pulp plugin or app — sign, notarize, package, and generate update feeds
 - `pulp ship sign` — uses identity from `~/.pulp/config.toml` (macOS/Windows)
 - `pulp ship sign --identity "Developer ID Application: ..."` — explicit identity
 - `pulp ship sign --target android` — uses keystore from config
-- `pulp ship sign --target android --keystore key.jks --key-alias mykey --store-pass @env:PASS`
+- `pulp ship sign --target android --keystore key.jks --key-alias mykey --store-pass @env:PASS --key-pass @env:KEY_PASS`
+
+Note: `--key-pass` defaults to `--store-pass` if omitted. `sign --target android` operates on existing APK/AAB files in `artifacts/` — use `package --target android` to build from Gradle.
 
 **Notarization (macOS only):**
 - `pulp ship notarize` — uses apple_id/team_id from config

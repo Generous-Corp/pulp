@@ -62,6 +62,8 @@ commands:
             required: false
           - name: --store-pass
             required: false
+          - name: --key-pass
+            required: false
       - name: notarize
         summary: Submit signed bundles for Apple notarization (macOS)
         args:
@@ -82,11 +84,19 @@ commands:
             required: false
           - name: --keystore
             required: false
+          - name: --key-alias
+            required: false
+          - name: --store-pass
+            required: false
+          - name: --key-pass
+            required: false
           - name: --abi
             required: false
           - name: --apk-only
             required: false
           - name: --aab-only
+            required: false
+          - name: --per-user
             required: false
       - name: appcast
         summary: Generate Sparkle-compatible XML update feed
