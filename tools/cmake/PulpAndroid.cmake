@@ -74,9 +74,18 @@ function(pulp_wire_android_sources)
                 ${_android_audio_dir}/adpf_hints.cpp
             )
         endif()
+        if(EXISTS "${_android_audio_dir}/tone_generator.cpp")
+            target_sources(pulp-audio PRIVATE
+                ${_android_audio_dir}/tone_generator.cpp
+            )
+        endif()
         target_link_libraries(pulp-audio PRIVATE oboe)
         # Link android lib for ADPF (APerformanceHint*) and ANativeWindow
         target_link_libraries(pulp-audio PRIVATE android log)
+        # Platform JNI headers needed by tone_generator.cpp
+        target_include_directories(pulp-audio PRIVATE
+            ${CMAKE_SOURCE_DIR}/core/platform/include
+        )
     endif()
 
     # -- MIDI: Android MIDI API --

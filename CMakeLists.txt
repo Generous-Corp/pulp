@@ -471,12 +471,10 @@ endif()
 if(ANDROID)
     add_library(pulp-jni SHARED
         core/platform/src/android/jni_bridge.cpp
-        core/platform/src/android/tone_generator.cpp
     )
     set_target_properties(pulp-jni PROPERTIES OUTPUT_NAME "pulp")
     target_include_directories(pulp-jni PRIVATE
         ${CMAKE_SOURCE_DIR}/core/platform/include
-        $<TARGET_PROPERTY:oboe,INTERFACE_INCLUDE_DIRECTORIES>
     )
     target_link_libraries(pulp-jni PRIVATE
         pulp::platform
