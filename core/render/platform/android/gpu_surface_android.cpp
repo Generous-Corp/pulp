@@ -426,8 +426,9 @@ static void create_demo_view_hierarchy(float width, float height) {
               static_cast<int>(g_root_view->child_count()), dp_w, dp_h);
 }
 
-// Draw section labels directly on the canvas (bypasses Label widget pipeline
-// which has a known text rendering issue under nested Skia Graphite clips)
+// Draw section labels + knob/fader names directly on the canvas.
+// Bypasses Label widget pipeline (Graphite clip issue).
+// Works for both JS and C++ UI paths.
 static void draw_section_labels(canvas::Canvas& canvas) {
     if (!g_root_view || g_root_view->child_count() == 0) return;
 
@@ -436,94 +437,231 @@ static void draw_section_labels(canvas::Canvas& canvas) {
     float label_x = pad_left + 8.0f;
 
     // Title: "PULP SYNTH"
-    canvas.set_fill_color(canvas::Color::rgba(205, 214, 244));  // text.primary from dark theme
+    canvas.set_fill_color(canvas::Color::rgba(205, 214, 244));
     canvas.set_font("sans-serif", 22);
     canvas.fill_text("PULP SYNTH", label_x, pad_top + 22);
 
-    // Section labels: smaller, secondary color
-    auto label_color = canvas::Color::rgba(166, 173, 200);  // text.secondary
-    canvas.set_fill_color(label_color);
-    canvas.set_font("sans-serif", 11);
-    canvas.set_text_align(canvas::TextAlign::left);
-
-    // Helper: get child y position for label placement
-    auto child_y = [&](int idx) -> float {
-        if (idx < 0 || idx >= static_cast<int>(g_root_view->child_count())) return 0;
-        return g_root_view->child_at(idx)->bounds().y;
+    // Helper: get widget bounds by pointer or by bridge ID
+    auto widget_y = [&](const char* id) -> float {
+        if (g_using_js_ui && g_widget_bridge) {
+            auto* w = g_widget_bridge->widget(id);
+            if (w) {
+                // Walk up parent chain to get absolute y
+                float abs_y = 0;
+                for (auto* v = w; v != nullptr; v = v->parent())
+                    abs_y += v->bounds().y;
+                return abs_y;
+            }
+        }
+        return -1;
     };
 
-    // OSC label: above the osc knob row (child before it is the spacer)
-    if (g_sections.osc_knobs >= 1) {
-        float y = child_y(g_sections.osc_knobs - 1) + 12;
-        canvas.fill_text("OSCILLATOR", label_x, y);
+    // Section headers
+    auto section_color = canvas::Color::rgba(140, 148, 180);
+    canvas.set_fill_color(section_color);
+    canvas.set_font("sans-serif", 10);
+    canvas.set_text_align(canvas::TextAlign::left);
+
+    // For JS UI: use widget IDs to find positions
+    // For C++ UI: use section indices
+    struct SectionLabel { const char* text; const char* widget_id; int section_idx; float offset; };
+    SectionLabel sections[] = {
+        {"OSCILLATOR",  "osc-0",    -1, -14},
+        {"XY PAD",      "xy",       -1, -14},
+        {"FILTER",      "filter-0", -1, -14},
+        {"ENVELOPE",    "env-0",    -1, -14},
+        {"MIXER",       "mix-0",    -1, -14},
+        {"MASTER",      "master",   -1, -14},
+    };
+    // Set C++ section indices
+    sections[0].section_idx = g_sections.osc_knobs;
+    sections[1].section_idx = g_sections.xy_pad;
+    sections[2].section_idx = g_sections.filter_knobs;
+    sections[3].section_idx = g_sections.env_knobs;
+    sections[4].section_idx = g_sections.mixer_start;
+    sections[5].section_idx = g_sections.master_fader;
+
+    for (auto& s : sections) {
+        float y = -1;
+        if (g_using_js_ui) {
+            y = widget_y(s.widget_id);
+        } else if (s.section_idx >= 1) {
+            y = g_root_view->child_at(s.section_idx)->bounds().y;
+        }
+        if (y > 0) {
+            canvas.set_fill_color(section_color);
+            canvas.set_font("sans-serif", 10);
+            canvas.fill_text(s.text, label_x, y + s.offset);
+        }
     }
 
-    // XY PAD label
-    if (g_sections.xy_pad >= 1) {
-        float y = child_y(g_sections.xy_pad - 1) + 12;
-        canvas.fill_text("XY PAD", label_x, y);
+    // Knob labels (small text under each knob)
+    auto dim_color = canvas::Color::rgba(120, 125, 150);
+    canvas.set_fill_color(dim_color);
+    canvas.set_font("sans-serif", 8);
+    canvas.set_text_align(canvas::TextAlign::center);
+
+    struct KnobLabel { const char* text; const char* id; };
+    KnobLabel knob_labels[] = {
+        {"PITCH",   "osc-0"},  {"DETUNE", "osc-1"},
+        {"MIX",     "osc-2"},  {"LEVEL",  "osc-3"},
+        {"CUTOFF",  "filter-0"}, {"RESO", "filter-1"}, {"ENV", "filter-2"},
+        {"ATK",     "env-0"},  {"DEC",    "env-1"},
+        {"SUS",     "env-2"},  {"REL",    "env-3"},
+    };
+    for (auto& kl : knob_labels) {
+        view::View* w = nullptr;
+        if (g_using_js_ui && g_widget_bridge)
+            w = g_widget_bridge->widget(kl.id);
+        else {
+            // Find by matching widget pointer
+            for (int i = 0; i < 4; ++i) {
+                if (g_widgets.osc[i] && std::string("osc-") + std::to_string(i) == kl.id)
+                    w = g_widgets.osc[i];
+            }
+            for (int i = 0; i < 3; ++i) {
+                if (g_widgets.filter[i] && std::string("filter-") + std::to_string(i) == kl.id)
+                    w = g_widgets.filter[i];
+            }
+            for (int i = 0; i < 4; ++i) {
+                if (g_widgets.env[i] && std::string("env-") + std::to_string(i) == kl.id)
+                    w = g_widgets.env[i];
+            }
+        }
+        if (w) {
+            // Get absolute center position
+            float abs_x = 0, abs_y = 0;
+            for (auto* v = w; v != nullptr; v = v->parent()) {
+                abs_x += v->bounds().x;
+                abs_y += v->bounds().y;
+            }
+            float cx = abs_x + w->bounds().width * 0.5f;
+            float bot = abs_y + w->bounds().height;
+            canvas.fill_text(kl.text, cx, bot + 10);
+        }
     }
 
-    // FILTER label
-    if (g_sections.filter_knobs >= 1) {
-        float y = child_y(g_sections.filter_knobs - 1) + 12;
-        canvas.fill_text("FILTER", label_x, y);
+    // Toggle labels
+    const char* toggle_names[] = {"OSC 1", "OSC 2", "OCT+", "SUB"};
+    for (int i = 0; i < 4; ++i) {
+        view::View* w = nullptr;
+        if (g_using_js_ui && g_widget_bridge)
+            w = g_widget_bridge->widget(std::string("toggle-") + std::to_string(i));
+        else
+            w = g_widgets.toggles[i];
+        if (w) {
+            float abs_x = 0, abs_y = 0;
+            for (auto* v = w; v != nullptr; v = v->parent()) {
+                abs_x += v->bounds().x;
+                abs_y += v->bounds().y;
+            }
+            float cx = abs_x + w->bounds().width * 0.5f;
+            float bot = abs_y + w->bounds().height;
+            canvas.fill_text(toggle_names[i], cx, bot + 10);
+        }
     }
 
-    // ENVELOPE label
-    if (g_sections.env_knobs >= 1) {
-        float y = child_y(g_sections.env_knobs - 1) + 12;
-        canvas.fill_text("ENVELOPE", label_x, y);
+    // Fader labels
+    const char* fader_names[] = {"CH 1", "CH 2", "CH 3", "CH 4"};
+    canvas.set_text_align(canvas::TextAlign::right);
+    for (int i = 0; i < 4; ++i) {
+        view::View* w = g_widgets.mixer[i];
+        if (g_using_js_ui && g_widget_bridge)
+            w = g_widget_bridge->widget(std::string("mix-") + std::to_string(i));
+        if (w) {
+            float abs_x = 0, abs_y = 0;
+            for (auto* v = w; v != nullptr; v = v->parent()) {
+                abs_x += v->bounds().x;
+                abs_y += v->bounds().y;
+            }
+            canvas.fill_text(fader_names[i], abs_x - 4, abs_y + w->bounds().height * 0.5f + 3);
+        }
+    }
+    canvas.set_text_align(canvas::TextAlign::left);
+
+    // ── Segmented VU-style meter with peak hold ───────────────────────
+    // Classic green → yellow → red segments with smooth decay and peak marker.
+    static float smoothed_level = 0.0f;
+    static float peak_hold = 0.0f;
+    static int peak_hold_frames = 0;
+
+    float raw_peak = demo::synth_peak_level();
+    // Smooth attack/release (fast attack, slow release like a real VU meter)
+    if (raw_peak > smoothed_level)
+        smoothed_level = raw_peak;  // instant attack
+    else
+        smoothed_level *= 0.92f;    // ~300ms release at 60fps
+
+    // Peak hold (holds for ~1.5 seconds then decays)
+    if (raw_peak > peak_hold) {
+        peak_hold = raw_peak;
+        peak_hold_frames = 90;  // hold for ~1.5s at 60fps
+    } else if (peak_hold_frames > 0) {
+        peak_hold_frames--;
+    } else {
+        peak_hold *= 0.96f;  // slow decay after hold
     }
 
-    // MIXER label
-    if (g_sections.mixer_start >= 1) {
-        float y = child_y(g_sections.mixer_start - 1) + 12;
-        canvas.fill_text("MIXER", label_x, y);
-    }
-
-    // MASTER label
-    if (g_sections.master_fader >= 1) {
-        float y = child_y(g_sections.master_fader - 1) + 12;
-        canvas.fill_text("MASTER", label_x, y);
-    }
-
-    // ── Visual audio peak indicator ──────────────────────────────────
-    // Draws a horizontal bar showing the current audio peak level.
-    // Green < -12dB, yellow < -3dB, red above.
-    float peak = demo::synth_peak_level();
     float dp_w = g_root_view->bounds().width;
-    float meter_y = g_root_view->bounds().height - std::max(12.0f, g_safe_bottom + 4.0f) - 24;
+    float meter_x = pad_left;
+    float meter_y = g_root_view->bounds().height - std::max(12.0f, g_safe_bottom + 4.0f) - 28;
     float meter_w = dp_w - 2.0f * pad_left;
-    float bar_w = peak * meter_w;
+    float meter_h = 20.0f;
+    int num_segments = 20;
+    float seg_gap = 3.0f;
+    float seg_w = (meter_w - (num_segments - 1) * seg_gap) / num_segments;
 
     // Background
-    canvas.set_fill_color(canvas::Color::rgba(30, 30, 40));
-    canvas.fill_rounded_rect(pad_left, meter_y, meter_w, 16, 4);
+    canvas.set_fill_color(canvas::Color::rgba(20, 20, 30));
+    canvas.fill_rounded_rect(meter_x - 2, meter_y - 2, meter_w + 4, meter_h + 4, 4);
 
-    // Peak bar with color gradient
-    if (bar_w > 0.5f) {
-        canvas::Color bar_color;
-        if (peak < 0.25f)
-            bar_color = canvas::Color::rgba(100, 200, 120);   // green
-        else if (peak < 0.7f)
-            bar_color = canvas::Color::rgba(120, 180, 250);   // blue (accent)
-        else if (peak < 0.9f)
-            bar_color = canvas::Color::rgba(240, 200, 80);    // yellow
-        else
-            bar_color = canvas::Color::rgba(240, 100, 100);   // red (clipping)
-        canvas.set_fill_color(bar_color);
-        canvas.fill_rounded_rect(pad_left, meter_y, bar_w, 16, 4);
+    // Draw segments
+    float level = smoothed_level;
+    for (int i = 0; i < num_segments; ++i) {
+        float t = static_cast<float>(i) / num_segments;  // 0..1
+        float seg_x = meter_x + i * (seg_w + seg_gap);
+        bool lit = (t < level);
+
+        canvas::Color seg_color;
+        if (t < 0.6f) {
+            // Green zone (0-60%)
+            seg_color = lit ? canvas::Color::rgba(80, 200, 100)
+                           : canvas::Color::rgba(25, 50, 30);
+        } else if (t < 0.8f) {
+            // Yellow zone (60-80%)
+            seg_color = lit ? canvas::Color::rgba(240, 210, 60)
+                           : canvas::Color::rgba(50, 45, 20);
+        } else {
+            // Red zone (80-100%)
+            seg_color = lit ? canvas::Color::rgba(240, 70, 70)
+                           : canvas::Color::rgba(50, 20, 20);
+        }
+        canvas.set_fill_color(seg_color);
+        canvas.fill_rounded_rect(seg_x, meter_y, seg_w, meter_h, 2);
     }
 
-    // Peak dB readout
-    float db = peak > 0.0001f ? 20.0f * std::log10(peak) : -96.0f;
+    // Peak hold marker (thin bright line)
+    if (peak_hold > 0.02f) {
+        int peak_seg = static_cast<int>(peak_hold * num_segments);
+        peak_seg = std::clamp(peak_seg, 0, num_segments - 1);
+        float peak_x = meter_x + peak_seg * (seg_w + seg_gap);
+        canvas::Color peak_color;
+        float pt = static_cast<float>(peak_seg) / num_segments;
+        if (pt < 0.6f)      peak_color = canvas::Color::rgba(150, 255, 170);
+        else if (pt < 0.8f) peak_color = canvas::Color::rgba(255, 240, 120);
+        else                 peak_color = canvas::Color::rgba(255, 120, 120);
+        canvas.set_fill_color(peak_color);
+        canvas.fill_rect(peak_x, meter_y, seg_w, meter_h);
+    }
+
+    // dB readout
+    float db = raw_peak > 0.0001f ? 20.0f * std::log10(raw_peak) : -96.0f;
     char db_str[16];
     snprintf(db_str, sizeof(db_str), "%.1f dB", db);
-    canvas.set_fill_color(canvas::Color::rgba(200, 200, 220));
-    canvas.set_font("sans-serif", 10);
+    canvas.set_fill_color(canvas::Color::rgba(160, 160, 180));
+    canvas.set_font("sans-serif", 9);
     canvas.set_text_align(canvas::TextAlign::right);
-    canvas.fill_text(db_str, pad_left + meter_w - 4, meter_y + 12);
+    canvas.fill_text(db_str, meter_x + meter_w, meter_y - 4);
     canvas.set_text_align(canvas::TextAlign::left);
 }
 
