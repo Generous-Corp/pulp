@@ -278,6 +278,10 @@ public:
     static std::vector<OverlayRequest>& overlay_queue();
     static void paint_overlays(canvas::Canvas& canvas);
 
+    /// Set a paint hook called after all overlays. Used by the inspector module
+    /// to paint on top of everything without a circular dependency.
+    static void set_inspector_paint_hook(std::function<void(canvas::Canvas&)> hook);
+
     /// Global click callback (fires on any view click with widget id). Set on root.
     std::function<void(const std::string& id, uint16_t modifiers)> on_global_click;
 

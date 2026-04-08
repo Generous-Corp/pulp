@@ -1,5 +1,4 @@
 #include <pulp/view/view.hpp>
-#include <pulp/inspect/inspector_overlay.hpp>
 #include <algorithm>
 #include <numeric>
 #include <sstream>
@@ -283,6 +282,14 @@ std::vector<View::OverlayRequest>& View::overlay_queue() {
     return queue;
 }
 
+// Global inspector paint hook — set by the inspector module, called after overlays.
+// Uses a function pointer to avoid circular dependency (view → inspect).
+static std::function<void(canvas::Canvas&)> s_inspector_paint_hook;
+
+void View::set_inspector_paint_hook(std::function<void(canvas::Canvas&)> hook) {
+    s_inspector_paint_hook = std::move(hook);
+}
+
 void View::paint_overlays(canvas::Canvas& canvas) {
     auto& queue = overlay_queue();
     for (auto& req : queue) {
@@ -290,9 +297,9 @@ void View::paint_overlays(canvas::Canvas& canvas) {
     }
     queue.clear();
 
-    // Inspector overlay — always paint last (on top of everything)
-    if (auto* inspector = inspect::g_active_inspector) {
-        inspector->paint(canvas);
+    // Inspector paint hook — called after all overlays, topmost layer
+    if (s_inspector_paint_hook) {
+        s_inspector_paint_hook(canvas);
     }
 }
 
