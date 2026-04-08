@@ -141,27 +141,37 @@ private:
         float rel = p.env_release.load(std::memory_order_relaxed) * 3.0f;
         float master = p.master.load(std::memory_order_relaxed);
         bool osc1 = p.osc1_on.load(std::memory_order_relaxed);
+        bool osc2 = p.osc2_on.load(std::memory_order_relaxed);
         bool osc3 = p.osc3_on.load(std::memory_order_relaxed);
+        bool osc4 = p.osc4_on.load(std::memory_order_relaxed);
 
         float freq1 = pitch_to_hz(pitch);
         float freq2 = freq1 * (1.0f + detune * 0.02f);  // slight detune
+        float freq3 = freq1 * 2.0f;                      // octave up
+        float freq4 = freq1 * 0.5f;                      // octave down
         float cut_hz = cutoff_to_hz(cutoff);
         float coeff = lp_coeff(cut_hz);
         float feedback = reso * 0.9f;  // resonance feedback
         float peak = 0.0f;
 
         for (int i = 0; i < num_frames; ++i) {
-            // Oscillators
+            // Oscillators — each toggle enables a different voice
             float osc = 0.0f;
-            if (osc1) {
-                float s1 = saw(phase1_, freq1);
-                float sq1 = square(phase1_);
-                osc += (1.0f - mix) * s1 + mix * sq1;
+            if (osc1) {  // Base pitch
+                float s = saw(phase1_, freq1);
+                osc += (1.0f - mix) * s + mix * square(phase1_);
             }
-            if (osc3) {
-                float s2 = saw(phase2_, freq2);
-                float sq2 = square(phase2_);
-                osc += ((1.0f - mix) * s2 + mix * sq2) * 0.7f;
+            if (osc2) {  // Detuned
+                float s = saw(phase2_, freq2);
+                osc += ((1.0f - mix) * s + mix * square(phase2_)) * 0.7f;
+            }
+            if (osc3) {  // Octave up
+                float s = saw(phase3_, freq3);
+                osc += ((1.0f - mix) * s + mix * square(phase3_)) * 0.5f;
+            }
+            if (osc4) {  // Octave down (sub)
+                float s = saw(phase4_, freq4);
+                osc += s * 0.6f;  // sub is always saw
             }
 
             // Envelope
@@ -197,9 +207,11 @@ private:
     std::atomic<bool> playing_{false};
     float sample_rate_ = 48000.0f;
 
-    // Oscillator state
+    // Oscillator state (4 voices)
     float phase1_ = 0.0f;
     float phase2_ = 0.0f;
+    float phase3_ = 0.0f;
+    float phase4_ = 0.0f;
 
     // Filter state
     float filter_state_ = 0.0f;
