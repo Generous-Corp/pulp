@@ -44,23 +44,68 @@ commands:
     docs: reference/cli.md#validate
 
   - name: ship
-    status: experimental
-    summary: Signing and packaging subcommands (sign, package, check). macOS only.
+    status: usable
+    summary: Sign, notarize, package, and generate update feeds for all platforms.
     subcommands:
       - name: sign
-        summary: Code-sign all built plugin bundles
+        summary: Code-sign plugin bundles (macOS/Windows) or Android APK/AAB
         args:
           - name: --identity
-            required: true
+            required: false
           - name: --entitlements
             required: false
+          - name: --target
+            required: false
+          - name: --keystore
+            required: false
+          - name: --key-alias
+            required: false
+          - name: --store-pass
+            required: false
+      - name: notarize
+        summary: Submit signed bundles for Apple notarization (macOS)
+        args:
+          - name: --apple-id
+            required: true
+          - name: --team-id
+            required: true
+          - name: --password
+            required: false
+          - name: --staple
+            required: false
       - name: package
-        summary: Create .pkg installers
+        summary: Create installers (.pkg, NSIS, APK/AAB)
         args:
           - name: --version
             required: false
+          - name: --target
+            required: false
+          - name: --keystore
+            required: false
+          - name: --abi
+            required: false
+          - name: --apk-only
+            required: false
+          - name: --aab-only
+            required: false
+      - name: appcast
+        summary: Generate Sparkle-compatible XML update feed
+        args:
+          - name: --url
+            required: true
+          - name: --version
+            required: false
+          - name: --notes
+            required: false
+          - name: --output
+            required: false
+          - name: --sign-key
+            required: false
       - name: check
-        summary: Check signing status of built plugins
+        summary: Check signing status of built plugins or Android artifacts
+        args:
+          - name: --target
+            required: false
     docs: reference/cli.md#ship
 
   - name: docs

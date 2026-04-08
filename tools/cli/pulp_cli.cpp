@@ -32,6 +32,9 @@
 #include "package_registry.hpp"
 #include "tool_registry.hpp"
 #include "design_binding.hpp"
+#include <pulp/ship/android.hpp>
+#include <pulp/ship/appcast.hpp>
+#include <pulp/ship/codesign.hpp>
 #include <pulp/ship/installer.hpp>
 #include <pulp/view/screenshot.hpp>
 #include <pulp/format/editor_ui.hpp>
@@ -1804,26 +1807,66 @@ static int cmd_ship(const std::vector<std::string>& args) {
     }
 
     auto build_dir = root / "build";
-    if (!fs::exists(build_dir / "CMakeCache.txt")) {
-        std::cerr << "Build directory not found. Run `pulp build` first.\n";
-        return 1;
-    }
 
     // Parse subcommand
     std::string sub = args.empty() ? "help" : args[0];
 
+    // ── sign ────────────────────────────────────────────────────────────────
     if (sub == "sign") {
-        // Sign all plugin bundles
-        std::string identity;
+        std::string target, identity, keystore_path, key_alias, store_pass, key_pass;
         std::string entitlements = (root / "ship" / "templates" / "entitlements.plist").string();
         for (size_t i = 1; i < args.size(); ++i) {
-            if (args[i] == "--identity" && i + 1 < args.size())
-                identity = args[++i];
-            else if (args[i] == "--entitlements" && i + 1 < args.size())
-                entitlements = args[++i];
+            if (args[i] == "--target" && i + 1 < args.size()) target = args[++i];
+            else if (args[i] == "--identity" && i + 1 < args.size()) identity = args[++i];
+            else if (args[i] == "--entitlements" && i + 1 < args.size()) entitlements = args[++i];
+            else if (args[i] == "--keystore" && i + 1 < args.size()) keystore_path = args[++i];
+            else if (args[i] == "--key-alias" && i + 1 < args.size()) key_alias = args[++i];
+            else if (args[i] == "--store-pass" && i + 1 < args.size()) store_pass = args[++i];
+            else if (args[i] == "--key-pass" && i + 1 < args.size()) key_pass = args[++i];
         }
+
+        if (target == "android") {
+            if (keystore_path.empty()) {
+                std::cerr << "Usage: pulp ship sign --target android --keystore key.jks --key-alias mykey\n";
+                return 1;
+            }
+            pulp::ship::AndroidKeystoreConfig ks;
+            ks.keystore_path = keystore_path;
+            ks.key_alias = key_alias.empty() ? "key0" : key_alias;
+            ks.store_password = store_pass;
+            ks.key_password = key_pass;
+
+            auto artifacts = root / "artifacts";
+            int signed_count = 0;
+            if (fs::exists(artifacts)) {
+                for (auto& entry : fs::directory_iterator(artifacts)) {
+                    auto ext = entry.path().extension().string();
+                    if (ext == ".apk") {
+                        std::cout << "Signing " << entry.path().filename().string() << "...\n";
+                        auto aligned = entry.path().parent_path()
+                            / (entry.path().stem().string() + "-aligned.apk");
+                        if (pulp::ship::zipalign_apk(entry.path(), aligned)) {
+                            fs::rename(aligned, entry.path());
+                            if (pulp::ship::sign_apk(entry.path(), ks)) ++signed_count;
+                            else std::cerr << "  Sign FAILED\n";
+                        } else {
+                            std::cerr << "  zipalign FAILED\n";
+                        }
+                    } else if (ext == ".aab") {
+                        std::cout << "Signing " << entry.path().filename().string() << "...\n";
+                        if (pulp::ship::sign_aab(entry.path(), ks)) ++signed_count;
+                        else std::cerr << "  Sign FAILED\n";
+                    }
+                }
+            }
+            std::cout << "Signed " << signed_count << " Android artifacts.\n";
+            return signed_count > 0 ? 0 : 1;
+        }
+
+        // Desktop signing (macOS/Windows)
         if (identity.empty()) {
             std::cerr << "Usage: pulp ship sign --identity \"Developer ID Application: ...\"\n";
+            std::cerr << "       pulp ship sign --target android --keystore key.jks\n";
             return 1;
         }
 
@@ -1848,30 +1891,79 @@ static int cmd_ship(const std::vector<std::string>& args) {
         return 0;
     }
 
+    // ── package ─────────────────────────────────────────────────────────────
     if (sub == "package") {
         auto artifacts = root / "artifacts";
         fs::create_directories(artifacts);
 
-        std::string version = "0.1.0";
-        bool per_user = false;
+        std::string version = "0.1.0", target, keystore_path, key_alias, store_pass, key_pass, abi_arg;
+        bool per_user = false, apk_only = false, aab_only = false;
         for (size_t i = 1; i < args.size(); ++i) {
-            if (args[i] == "--version" && i + 1 < args.size())
-                version = args[++i];
-            if (args[i] == "--per-user")
-                per_user = true;
+            if (args[i] == "--version" && i + 1 < args.size()) version = args[++i];
+            else if (args[i] == "--target" && i + 1 < args.size()) target = args[++i];
+            else if (args[i] == "--keystore" && i + 1 < args.size()) keystore_path = args[++i];
+            else if (args[i] == "--key-alias" && i + 1 < args.size()) key_alias = args[++i];
+            else if (args[i] == "--store-pass" && i + 1 < args.size()) store_pass = args[++i];
+            else if (args[i] == "--key-pass" && i + 1 < args.size()) key_pass = args[++i];
+            else if (args[i] == "--abi" && i + 1 < args.size()) abi_arg = args[++i];
+            else if (args[i] == "--apk-only") apk_only = true;
+            else if (args[i] == "--aab-only") aab_only = true;
+            else if (args[i] == "--per-user") per_user = true;
+        }
+
+        if (target == "android") {
+            auto android_dir = root / "android";
+            if (!fs::exists(android_dir / "build.gradle.kts")
+                && !fs::exists(android_dir / "build.gradle")) {
+                std::cerr << "No android/ project found. Run `pulp create --targets android` first.\n";
+                return 1;
+            }
+
+            std::vector<std::string> abis;
+            if (abi_arg == "all") abis = {"arm64-v8a", "x86_64", "armeabi-v7a"};
+            else if (!abi_arg.empty()) abis = {abi_arg};
+            else abis = {"arm64-v8a"};
+
+            std::unique_ptr<pulp::ship::AndroidKeystoreConfig> ks;
+            if (!keystore_path.empty()) {
+                ks = std::make_unique<pulp::ship::AndroidKeystoreConfig>();
+                ks->keystore_path = keystore_path;
+                ks->key_alias = key_alias.empty() ? "key0" : key_alias;
+                ks->store_password = store_pass;
+                ks->key_password = key_pass;
+            }
+
+            bool build_apk = !aab_only, build_aab = !apk_only;
+            std::cout << "Building Android package...\n";
+            auto result = pulp::ship::build_android_package(
+                android_dir, abis, ks.get(), build_aab, build_apk);
+
+            if (!result.success) {
+                std::cerr << "Android build failed: " << result.error << "\n";
+                return 1;
+            }
+
+            if (!result.apk_path.empty()) {
+                auto dest = artifacts / result.apk_path.filename();
+                fs::copy_file(result.apk_path, dest, fs::copy_options::overwrite_existing);
+                std::cout << "  APK: " << dest.string() << "\n";
+            }
+            if (!result.aab_path.empty()) {
+                auto dest = artifacts / result.aab_path.filename();
+                fs::copy_file(result.aab_path, dest, fs::copy_options::overwrite_existing);
+                std::cout << "  AAB: " << dest.string() << "\n";
+            }
+            std::cout << "Android package created in " << artifacts.string() << "\n";
+            return 0;
         }
 
 #ifdef _WIN32
-        // Windows: use NSIS installer
-        // Check for makensis
+        // Windows: NSIS installer
         if (std::system("where makensis >nul 2>&1") != 0) {
             std::cerr << "Error: makensis not found on PATH\n";
-            std::cerr << "  Install NSIS from https://nsis.sourceforge.io/\n";
-            std::cerr << "  Then add its directory to PATH\n";
             return 1;
         }
 
-        // Discover product name from the first plugin found
         std::string product_name;
         pulp::ship::InstallerConfig config;
         config.version = version;
@@ -1882,15 +1974,11 @@ static int cmd_ship(const std::vector<std::string>& args) {
             if (!fs::exists(dir)) continue;
             std::string format_lower = dir_name;
             for (auto& c : format_lower) c = static_cast<char>(std::tolower(c));
-
             for (auto& entry : fs::directory_iterator(dir)) {
                 auto ext = entry.path().extension().string();
                 if (ext == ".vst3" || ext == ".clap") {
-                    if (product_name.empty())
-                        product_name = entry.path().stem().string();
-                    config.plugins.push_back({
-                        entry.path().string(), "", format_lower
-                    });
+                    if (product_name.empty()) product_name = entry.path().stem().string();
+                    config.plugins.push_back({entry.path().string(), "", format_lower});
                 }
             }
         }
@@ -1903,7 +1991,6 @@ static int cmd_ship(const std::vector<std::string>& args) {
         config.product_name = product_name;
         config.publisher = "Pulp";
         config.output_path = (artifacts / (product_name + "-" + version + "-setup.exe")).string();
-
         auto license = root / "LICENSE.md";
         if (fs::exists(license)) config.license_path = license.string();
 
@@ -1916,27 +2003,24 @@ static int cmd_ship(const std::vector<std::string>& args) {
         }
         return 0;
 #else
-        // macOS/Linux: use pkgbuild (macOS) or deb (Linux)
+        // macOS/Linux: pkgbuild
         int pkg_count = 0;
         for (auto dir_name : {"VST3", "CLAP", "AU"}) {
             auto dir = build_dir / dir_name;
             if (!fs::exists(dir)) continue;
             std::string format_lower = dir_name;
             for (auto& c : format_lower) c = static_cast<char>(std::tolower(c));
-
             for (auto& entry : fs::directory_iterator(dir)) {
                 auto ext = entry.path().extension().string();
                 if (ext == ".vst3" || ext == ".clap" || ext == ".component") {
                     auto name = entry.path().stem().string();
                     auto pkg_name = name + "-" + dir_name + "-" + version + ".pkg";
                     auto pkg_path = artifacts / pkg_name;
-
                     std::string install_loc = "/Library/Audio/Plug-Ins/";
                     if (ext == ".vst3") install_loc += "VST3/";
                     else if (ext == ".clap") install_loc += "CLAP/";
                     else install_loc = pulp::runtime::get_env("HOME").value_or("~")
                                      + "/Library/Audio/Plug-Ins/Components/";
-
                     std::cout << "Packaging " << name << " (" << dir_name << ")...\n";
                     std::string cmd = "pkgbuild --component \"" + entry.path().string() + "\""
                         + " --identifier \"com.pulp." + name + "." + format_lower + "\""
@@ -1953,8 +2037,39 @@ static int cmd_ship(const std::vector<std::string>& args) {
 #endif
     }
 
+    // ── check ───────────────────────────────────────────────────────────────
     if (sub == "check") {
-        // Check signing status of all built plugins
+        std::string target;
+        for (size_t i = 1; i < args.size(); ++i)
+            if (args[i] == "--target" && i + 1 < args.size()) target = args[++i];
+
+        if (target == "android") {
+            auto art_dir = root / "artifacts";
+            if (!fs::exists(art_dir)) {
+                std::cerr << "No artifacts/ directory. Run `pulp ship package --target android` first.\n";
+                return 1;
+            }
+            for (auto& entry : fs::directory_iterator(art_dir)) {
+                auto ext = entry.path().extension().string();
+                if (ext == ".apk" || ext == ".aab") {
+                    std::cout << entry.path().filename().string() << ": ";
+                    auto info = pulp::ship::check_android_signing(entry.path());
+                    if (info.is_signed) {
+                        std::cout << "signed";
+                        if (ext == ".apk") {
+                            if (info.v2_signed) std::cout << " v2";
+                            if (info.v3_signed) std::cout << " v3";
+                        }
+                        if (!info.signer_cn.empty()) std::cout << " (" << info.signer_cn << ")";
+                        std::cout << "\n";
+                    } else {
+                        std::cout << "unsigned\n";
+                    }
+                }
+            }
+            return 0;
+        }
+
         for (auto dir_name : {"VST3", "CLAP", "AU"}) {
             auto dir = build_dir / dir_name;
             if (!fs::exists(dir)) continue;
@@ -1971,15 +2086,153 @@ static int cmd_ship(const std::vector<std::string>& args) {
         return 0;
     }
 
-    // Help
-    std::cout << "pulp ship — signing and packaging commands\n\n";
+    // ── notarize ────────────────────────────────────────────────────────────
+    if (sub == "notarize") {
+#ifndef __APPLE__
+        std::cerr << "Notarization is only available on macOS.\n";
+        return 1;
+#else
+        std::string apple_id, team_id, password;
+        bool staple_only = false;
+        for (size_t i = 1; i < args.size(); ++i) {
+            if (args[i] == "--apple-id" && i + 1 < args.size()) apple_id = args[++i];
+            else if (args[i] == "--team-id" && i + 1 < args.size()) team_id = args[++i];
+            else if (args[i] == "--password" && i + 1 < args.size()) password = args[++i];
+            else if (args[i] == "--staple") staple_only = true;
+        }
+
+        std::vector<std::string> bundles;
+        for (auto dir_name : {"VST3", "CLAP", "AU"}) {
+            auto dir = build_dir / dir_name;
+            if (!fs::exists(dir)) continue;
+            for (auto& entry : fs::directory_iterator(dir)) {
+                auto ext = entry.path().extension().string();
+                if (ext == ".vst3" || ext == ".clap" || ext == ".component")
+                    bundles.push_back(entry.path().string());
+            }
+        }
+
+        if (bundles.empty()) {
+            std::cerr << "No plugin bundles found.\n";
+            return 1;
+        }
+
+        if (staple_only) {
+            int stapled = 0;
+            for (auto& path : bundles) {
+                std::cout << "Stapling " << fs::path(path).filename().string() << "...\n";
+                if (pulp::ship::notarize_staple(path)) ++stapled;
+                else std::cerr << "  FAILED\n";
+            }
+            std::cout << "Stapled " << stapled << "/" << bundles.size() << " bundles.\n";
+            return stapled == static_cast<int>(bundles.size()) ? 0 : 1;
+        }
+
+        if (apple_id.empty() || team_id.empty()) {
+            std::cerr << "Usage: pulp ship notarize --apple-id you@example.com --team-id ABCDE12345\n";
+            return 1;
+        }
+        if (password.empty()) password = "@keychain:AC_PASSWORD";
+
+        int success_count = 0;
+        for (auto& path : bundles) {
+            auto name = fs::path(path).filename().string();
+            std::cout << "Submitting " << name << " for notarization...\n";
+            auto uuid = pulp::ship::notarize_submit(path, apple_id, team_id, password);
+            if (!uuid) { std::cerr << "  Submission FAILED\n"; continue; }
+            std::cout << "  Request UUID: " << *uuid << "\n";
+            auto status = pulp::ship::notarize_check(*uuid);
+            if (status.success) {
+                std::cout << "  Notarization succeeded. Stapling...\n";
+                if (pulp::ship::notarize_staple(path)) std::cout << "  Stapled " << name << "\n";
+                else std::cerr << "  Staple FAILED\n";
+                ++success_count;
+            } else {
+                std::cerr << "  Notarization FAILED: " << status.message << "\n";
+            }
+        }
+        std::cout << "Notarized " << success_count << "/" << bundles.size() << " bundles.\n";
+        return success_count == static_cast<int>(bundles.size()) ? 0 : 1;
+#endif
+    }
+
+    // ── appcast ─────────────────────────────────────────────────────────────
+    if (sub == "appcast") {
+        std::string version, notes, url, output_path, title, sign_key, min_os;
+        for (size_t i = 1; i < args.size(); ++i) {
+            if (args[i] == "--version" && i + 1 < args.size()) version = args[++i];
+            else if (args[i] == "--notes" && i + 1 < args.size()) notes = args[++i];
+            else if (args[i] == "--url" && i + 1 < args.size()) url = args[++i];
+            else if (args[i] == "--output" && i + 1 < args.size()) output_path = args[++i];
+            else if (args[i] == "--title" && i + 1 < args.size()) title = args[++i];
+            else if (args[i] == "--sign-key" && i + 1 < args.size()) sign_key = args[++i];
+            else if (args[i] == "--min-os" && i + 1 < args.size()) min_os = args[++i];
+        }
+
+        if (version.empty()) version = "0.1.0";
+        if (url.empty()) {
+            std::cerr << "Usage: pulp ship appcast --url https://example.com/Plugin-1.0.pkg --version 1.0.0\n";
+            return 1;
+        }
+        if (output_path.empty()) output_path = (root / "artifacts" / "appcast.xml").string();
+
+        // Load existing appcast to append
+        pulp::ship::Appcast feed;
+        {
+            std::ifstream existing(output_path);
+            if (existing.good()) {
+                std::string xml((std::istreambuf_iterator<char>(existing)),
+                                std::istreambuf_iterator<char>());
+                if (auto parsed = pulp::ship::Appcast::from_xml(xml)) feed = std::move(*parsed);
+            }
+        }
+
+        if (title.empty() && feed.title.empty()) title = "Plugin Updates";
+        if (!title.empty()) feed.title = title;
+
+        pulp::ship::AppcastItem item;
+        item.version = version;
+        item.title = "Version " + version;
+        item.description = notes.empty() ? "" : "<p>" + notes + "</p>";
+        item.download_url = url;
+        if (!min_os.empty()) item.minimum_os = min_os;
+
+        auto url_as_path = fs::path(url);
+        if (fs::exists(url_as_path)) {
+            item.file_size = fs::file_size(url_as_path);
+            if (!sign_key.empty())
+                item.ed_signature = pulp::ship::sign_file_ed25519(url_as_path.string(), sign_key);
+        }
+
+        { auto now = std::time(nullptr); char buf[64];
+          std::strftime(buf, sizeof(buf), "%a, %d %b %Y %H:%M:%S %z", std::localtime(&now));
+          item.pub_date = buf; }
+
+        feed.items.insert(feed.items.begin(), std::move(item));
+        fs::create_directories(fs::path(output_path).parent_path());
+        std::ofstream out(output_path);
+        if (!out) { std::cerr << "Error: cannot write to " << output_path << "\n"; return 1; }
+        out << feed.to_xml();
+        std::cout << "Appcast written to " << output_path << " (" << feed.items.size() << " items)\n";
+        return 0;
+    }
+
+    // ── help ────────────────────────────────────────────────────────────────
+    std::cout << "pulp ship — signing, notarization, packaging, and update feeds\n\n";
     std::cout << "Subcommands:\n";
-    std::cout << "  sign     Sign all plugin bundles\n";
-    std::cout << "           --identity \"Developer ID Application: ...\"\n";
-    std::cout << "           --entitlements path/to/entitlements.plist\n";
-    std::cout << "  package  Create .pkg installers for all built plugins\n";
-    std::cout << "           --version 1.0.0\n";
-    std::cout << "  check    Check signing status of built plugins\n";
+    std::cout << "  sign       Sign plugin bundles or Android artifacts\n";
+    std::cout << "             --identity \"Developer ID Application: ...\"  (macOS/Windows)\n";
+    std::cout << "             --target android --keystore key.jks  (Android)\n";
+    std::cout << "  notarize   Submit signed bundles for Apple notarization (macOS)\n";
+    std::cout << "             --apple-id you@example.com --team-id ABCDE12345\n";
+    std::cout << "             --staple  (staple only, skip submission)\n";
+    std::cout << "  package    Create installers for the target platform\n";
+    std::cout << "             --version 1.0.0\n";
+    std::cout << "             --target android --keystore key.jks --abi arm64-v8a|x86_64|all\n";
+    std::cout << "  appcast    Generate Sparkle-compatible update feed\n";
+    std::cout << "             --url https://... --version 1.0.0 --notes \"...\"\n";
+    std::cout << "  check      Check signing status of built plugins\n";
+    std::cout << "             --target android  (check APK/AAB in artifacts/)\n";
     return 0;
 }
 
