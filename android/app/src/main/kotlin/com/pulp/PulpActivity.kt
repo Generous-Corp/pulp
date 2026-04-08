@@ -4,9 +4,9 @@ import android.content.ComponentCallbacks2
 import android.content.res.Configuration
 import android.os.Bundle
 import android.util.Log
-import android.widget.FrameLayout
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.ui.viewinterop.AndroidView
 import com.pulp.render.PulpSurfaceView
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
@@ -16,6 +16,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
 
 class PulpActivity : ComponentActivity() {
 
@@ -210,6 +211,29 @@ fun PulpDemoApp() {
                         color = MaterialTheme.colorScheme.error,
                         fontSize = 14.sp
                     )
+                }
+
+                // Vulkan/Dawn rendering surface
+                if (nativeLoaded) {
+                    Spacer(Modifier.height(16.dp))
+                    Text(
+                        "GPU Surface",
+                        fontSize = 16.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(200.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant
+                        )
+                    ) {
+                        AndroidView(
+                            factory = { context -> PulpSurfaceView(context) },
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
                 }
             }
         }

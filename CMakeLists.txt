@@ -509,6 +509,7 @@ if(ANDROID)
         -Wl,--whole-archive
         $<TARGET_FILE:pulp-platform>
         $<TARGET_FILE:pulp-audio>
+        $<$<TARGET_EXISTS:pulp-render>:$<TARGET_FILE:pulp-render>>
         -Wl,--no-whole-archive)
 endif()
 
