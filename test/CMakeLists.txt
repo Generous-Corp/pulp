@@ -450,7 +450,7 @@ catch_discover_tests(pulp-test-hot-reload)
 
 # Inspector tests
 add_executable(pulp-test-inspector test_inspector.cpp)
-target_link_libraries(pulp-test-inspector PRIVATE pulp::view Catch2::Catch2WithMain)
+target_link_libraries(pulp-test-inspector PRIVATE pulp::view pulp::inspect pulp::state Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-inspector)
 
 # Widget bridge tests
