@@ -1530,7 +1530,9 @@ std::vector<DoctorCheck> run_doctor_checks(const fs::path& active_root, bool sta
         }
     }
 
-    // Cmajor CLI check — only if project has .cmajorpatch files
+    // Cmajor CLI check — only if project has .cmajorpatch files outside
+    // examples/ and test/ (those are Pulp's own bundled patches, not the
+    // developer's). Standalone projects always check.
     if (!active_root.empty()) {
         bool has_patches = false;
         std::error_code ec;
@@ -1540,7 +1542,8 @@ std::vector<DoctorCheck> run_doctor_checks(const fs::path& active_root, bool sta
             if (ec) { ec.clear(); continue; }
             if (it->is_directory()) {
                 auto name = it->path().filename().string();
-                if (name == "build" || name == "external" || name == ".git" || name == "node_modules")
+                if (name == "build" || name == "external" || name == ".git" ||
+                    name == "node_modules" || name == "examples" || name == "test")
                     it.disable_recursion_pending();
                 continue;
             }
@@ -1555,7 +1558,8 @@ std::vector<DoctorCheck> run_doctor_checks(const fs::path& active_root, bool sta
             if (!cmaj_path.empty()) {
                 c.passed = true;
                 c.detail = cmaj_path;
-            } else if (auto env = std::getenv("CMAJ_BIN"); env && fs::exists(env)) {
+            } else if (auto env = std::getenv("CMAJ_BIN"); env &&
+                       fs::exists(env) && fs::is_regular_file(env)) {
                 c.passed = true;
                 c.detail = std::string(env) + " (via CMAJ_BIN)";
             } else {
