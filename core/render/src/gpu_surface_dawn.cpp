@@ -278,15 +278,21 @@ private:
         } else {
             runtime::log_warn("GpuSurface: failed to create Windows surface");
         }
+#elif defined(__ANDROID__)
+        // Android: ANativeWindow* → Vulkan surface via Dawn
+        wgpu::SurfaceDescriptor surface_desc{};
+        wgpu::SurfaceSourceAndroidNativeWindow android_source{};
+        android_source.window = native_handle;  // caller passes ANativeWindow* as void*
+        surface_desc.nextInChain = &android_source;
+
+        surface_ = instance_.CreateSurface(&surface_desc);
+        if (surface_) {
+            runtime::log_info("GpuSurface: created Vulkan surface from ANativeWindow");
+        } else {
+            runtime::log_warn("GpuSurface: failed to create Android Vulkan surface");
+        }
 #elif defined(__linux__)
         // Linux: native_layer is platform-dependent.
-        // The caller must pass the correct handle type:
-        //   - X11: pack Display* and Window into a NativeLinuxSurface struct
-        //   - Wayland: pack wl_display* and wl_surface* similarly
-        //   - XCB: pack xcb_connection_t* and xcb_window_t similarly
-        //
-        // For now, log that Linux surface creation requires platform integration.
-        // SDL3 windowing will provide the native handles via SDL_GetWindowProperties().
         (void)native_handle;
         runtime::log_warn("GpuSurface: Linux surface creation requires platform-specific handle — use SDL3 integration");
 #else
