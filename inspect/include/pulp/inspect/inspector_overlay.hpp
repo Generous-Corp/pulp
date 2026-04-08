@@ -102,4 +102,8 @@ private:
 /// Thread-safe: only accessed on the UI thread.
 inline InspectorOverlay* g_active_inspector = nullptr;
 
+/// Install the inspector into the View system's paint and input hooks.
+/// Call this after creating the InspectorOverlay and setting g_active_inspector.
+void install_inspector_hooks(InspectorOverlay& inspector);
+
 } // namespace pulp::inspect

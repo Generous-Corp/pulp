@@ -33,6 +33,14 @@ static const Color kStatsWarn        = Color::rgba(1.0f, 0.4f, 0.3f, 1.0f);
 
 InspectorOverlay::InspectorOverlay(View& root) : root_(root) {}
 
+void install_inspector_hooks(InspectorOverlay& inspector) {
+    g_active_inspector = &inspector;
+    // Install paint hook via function pointer — no circular dependency
+    View::set_inspector_paint_hook([&inspector](Canvas& canvas) {
+        inspector.paint(canvas);
+    });
+}
+
 void InspectorOverlay::set_active(bool active) {
     active_ = active;
     if (!active) {

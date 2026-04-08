@@ -308,7 +308,7 @@ int main(int argc, char* argv[]) {
 
     // Set up inspector before screenshot so it renders in headless mode too
     pulp::inspect::InspectorOverlay inspector(root);
-    pulp::inspect::g_active_inspector = &inspector;
+    pulp::inspect::install_inspector_hooks(inspector);
     if (pulp::runtime::get_env("PULP_INSPECTOR")) {
         inspector.set_active(true);
     }
