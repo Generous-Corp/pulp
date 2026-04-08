@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <unordered_map>
 #include <pulp/canvas/skia_canvas.hpp>
 
 #ifdef PULP_HAS_SKIA
@@ -94,22 +95,51 @@ static SkPaint make_stroke_paint(Color c, float width) {
     return paint;
 }
 
+// Cached typeface loaded directly from a known path — bypasses family name
+// matching for deterministic metrics (Visage-style approach).
+static sk_sp<SkTypeface> get_cached_typeface(const std::string& family) {
+    static std::unordered_map<std::string, sk_sp<SkTypeface>> cache;
+    auto it = cache.find(family);
+    if (it != cache.end()) return it->second;
+
+    sk_sp<SkTypeface> typeface;
+
+#if defined(__ANDROID__)
+    // Load Roboto directly from filesystem for deterministic rendering.
+    // This avoids the font manager's family matching which can return
+    // different fonts depending on the device/API level.
+    if (family == "sans-serif" || family == "Roboto" || family.empty()) {
+        auto mgr = get_font_manager();
+        if (mgr) {
+            typeface = mgr->makeFromFile("/system/fonts/Roboto-Regular.ttf");
+        }
+    }
+#endif
+
+    // Fall back to family name matching
+    if (!typeface) {
+        auto mgr = get_font_manager();
+        if (mgr && mgr->countFamilies() > 0) {
+            typeface = mgr->matchFamilyStyle(family.c_str(), SkFontStyle::Normal());
+            if (!typeface)
+                typeface = mgr->matchFamilyStyle(nullptr, SkFontStyle::Normal());
+        }
+    }
+
+    cache[family] = typeface;
+    return typeface;
+}
+
 static SkFont make_font(const std::string& family, float size) {
     SkFont font;
     font.setSize(size);
-    font.setSubpixel(true);                               // Subpixel glyph positioning — tighter spacing
+    font.setSubpixel(true);                               // Subpixel glyph positioning
     font.setEdging(SkFont::Edging::kSubpixelAntiAlias);   // LCD-quality anti-aliasing
     font.setHinting(SkFontHinting::kSlight);               // Light hinting preserves glyph shapes
+    font.setLinearMetrics(true);                           // Linear scaling for consistent metrics
 
-    auto mgr = get_font_manager();
-    if (mgr && mgr->countFamilies() > 0) {
-        auto typeface = mgr->matchFamilyStyle(family.c_str(), SkFontStyle::Normal());
-        if (!typeface) {
-            // Requested family not found — fall back to default
-            typeface = mgr->matchFamilyStyle(nullptr, SkFontStyle::Normal());
-        }
-        if (typeface) font.setTypeface(std::move(typeface));
-    }
+    auto typeface = get_cached_typeface(family);
+    if (typeface) font.setTypeface(std::move(typeface));
 
     return font;
 }
