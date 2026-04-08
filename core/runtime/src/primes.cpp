@@ -2,6 +2,20 @@
 #include <cmath>
 #include <random>
 
+// MSVC doesn't support __uint128_t. Use a portable multiply-mod helper.
+#ifdef _MSC_VER
+static uint64_t mulmod(uint64_t a, uint64_t b, uint64_t m) {
+    uint64_t result = 0;
+    a %= m;
+    while (b > 0) {
+        if (b & 1) result = (result + a) % m;
+        a = (a * 2) % m;
+        b >>= 1;
+    }
+    return result;
+}
+#endif
+
 namespace pulp::runtime {
 
 bool is_prime(uint64_t n, int rounds) {
@@ -22,22 +36,37 @@ bool is_prime(uint64_t n, int rounds) {
         uint64_t a = dist(rng);
 
         // Compute a^d mod n using modular exponentiation
-        __uint128_t x = 1;
-        __uint128_t base = a;
+#ifdef _MSC_VER
+        uint64_t x = 1;
+        uint64_t base_val = a % n;
         uint64_t exp = d;
         while (exp > 0) {
-            if (exp & 1) x = (x * base) % n;
-            base = (base * base) % n;
+            if (exp & 1) x = mulmod(x, base_val, n);
+            base_val = mulmod(base_val, base_val, n);
             exp >>= 1;
         }
-
+        uint64_t result = x;
+#else
+        __uint128_t x = 1;
+        __uint128_t base_val = a;
+        uint64_t exp = d;
+        while (exp > 0) {
+            if (exp & 1) x = (x * base_val) % n;
+            base_val = (base_val * base_val) % n;
+            exp >>= 1;
+        }
         uint64_t result = static_cast<uint64_t>(x);
+#endif
         if (result == 1 || result == n - 1) continue;
 
         bool found = false;
         for (int j = 0; j < r - 1; ++j) {
-            x = (static_cast<__uint128_t>(result) * result) % n;
-            result = static_cast<uint64_t>(x);
+#ifdef _MSC_VER
+            result = mulmod(result, result, n);
+#else
+            __uint128_t xx = (static_cast<__uint128_t>(result) * result) % n;
+            result = static_cast<uint64_t>(xx);
+#endif
             if (result == n - 1) { found = true; break; }
         }
         if (!found) return false;

@@ -168,7 +168,11 @@ TEST_CASE("InspectorOverlay: Cmd+I toggles") {
     InspectorOverlay overlay(root);
     KeyEvent ke;
     ke.key = KeyCode::i;
+#ifdef __APPLE__
     ke.modifiers = kModCmd;
+#else
+    ke.modifiers = kModCtrl;  // Ctrl+I on Linux/Windows
+#endif
     ke.is_down = true;
     REQUIRE(overlay.handle_key_event(ke));
     REQUIRE(overlay.is_active());
