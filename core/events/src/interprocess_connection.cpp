@@ -266,15 +266,18 @@ bool InterprocessConnectionServer::start(std::string_view name, IpcTransport tra
                 conn->connection_made();
                 if (conn->on_connected) conn->on_connected();
 
-                // Hand off to callback FIRST, then start reading.
-                auto* raw = conn.get();
+                // Start read thread while we still own the connection,
+                // then hand off. This avoids use-after-free if the
+                // callback destroys the connection immediately.
+                // The read thread uses atomics so it's safe to start
+                // before handlers are set — worst case it reads a
+                // message and calls the default no-op virtual methods.
+                conn->start_read_thread();
+
                 if (on_client_connected)
                     on_client_connected(std::move(conn));
                 else
                     client_connected(std::move(conn));
-
-                // Now start the read thread (handlers are wired)
-                raw->start_read_thread();
             }
         }
     });
