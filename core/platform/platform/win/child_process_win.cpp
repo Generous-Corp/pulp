@@ -101,10 +101,22 @@ bool ChildProcess::start(const std::string& command,
 
     if (!impl_->stdout_pipe.create() || !impl_->stderr_pipe.create()) return false;
 
-    // Build command line
+    // Build command line — handle quoting carefully.
+    // For cmd.exe /c, the command after /c should not be double-quoted
+    // as cmd.exe strips the outer quotes itself.
     std::string cmdline = "\"" + command + "\"";
     for (auto& a : args) {
-        cmdline += " \"" + a + "\"";
+        // Don't add extra quotes if the arg already contains quotes
+        // or if it's a shell command (contains spaces, pipes, redirects)
+        if (a.find('"') != std::string::npos || a.find('|') != std::string::npos ||
+            a.find('>') != std::string::npos || a.find('<') != std::string::npos ||
+            a.find('&') != std::string::npos) {
+            cmdline += " " + a;  // pass through as-is
+        } else if (a.find(' ') != std::string::npos) {
+            cmdline += " \"" + a + "\"";  // quote if has spaces
+        } else {
+            cmdline += " " + a;  // no quoting needed
+        }
     }
 
     STARTUPINFOA si{};
