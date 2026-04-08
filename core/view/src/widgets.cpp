@@ -1114,7 +1114,12 @@ void Panel::paint(canvas::Canvas& canvas) {
         auto border = resolve_color(border_token_, canvas::Color::rgba8(80, 80, 100));
         canvas.set_stroke_color(border);
         canvas.set_line_width(border_width_);
-        canvas.stroke_rounded_rect(0, 0, b.width, b.height, corner_radius_);
+        // Inset stroke by half its width so the center lands on pixel boundaries
+        // (Visage-style half-pixel alignment for crisper edges)
+        float inset = border_width_ * 0.5f;
+        canvas.stroke_rounded_rect(inset, inset,
+                                    b.width - border_width_, b.height - border_width_,
+                                    std::max(0.0f, corner_radius_ - inset));
     }
 }
 

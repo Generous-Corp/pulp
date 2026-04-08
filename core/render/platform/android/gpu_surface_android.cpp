@@ -120,6 +120,19 @@ static void advance_view_animations(view::View* v, float dt) {
         advance_view_animations(v->child_at(i), dt);
 }
 
+// Section indices in the root view child list (for label positioning)
+struct SectionIndices {
+    int osc_knobs = -1;
+    int toggles = -1;
+    int xy_pad = -1;
+    int filter_knobs = -1;
+    int env_knobs = -1;
+    int mixer_start = -1;  // first fader
+    int master_fader = -1;
+    int meter = -1;
+};
+static SectionIndices g_sections;
+
 static void create_demo_view_hierarchy(float width, float height) {
     using namespace view;
 
@@ -131,18 +144,24 @@ static void create_demo_view_hierarchy(float width, float height) {
     g_root_view->set_theme(Theme::dark());
     g_root_view->flex().padding = 12;
 
-    // ── Test label for text rendering ─────────────────────────────────
-    auto test_label = std::make_unique<Label>();
-    test_label->set_text("PULP SYNTH");
-    test_label->set_font_size(24);
-    test_label->flex().preferred_height = 36;
-    test_label->flex().margin_top = 4;
-    test_label->flex().margin_left = 8;
-    g_root_view->add_child(std::move(test_label));
+    // ── Title spacer (text drawn directly in render_frame) ──────────
+    auto title_spacer = std::make_unique<Panel>();
+    title_spacer->flex().preferred_height = 32;
+    title_spacer->flex().margin_top = 4;
+    // spacer — Panel bg blends with root, label text drawn in draw_section_labels()
+    g_root_view->add_child(std::move(title_spacer));
+
+    // ── Section label spacer for OSC ─────────────────────────────────
+    auto osc_label = std::make_unique<Panel>();
+    osc_label->flex().preferred_height = 16;
+    osc_label->flex().margin_top = 2;
+    // spacer for label text
+    g_root_view->add_child(std::move(osc_label));
 
     // ── Oscillator: 4 knobs directly in a row ────────────────────────
     auto osc_knobs = make_knob_row({0.5f, 0.3f, 0.5f, 0.15f}, 48, 56);
-    osc_knobs->flex().margin_top = 4;
+    osc_knobs->flex().margin_top = 0;
+    g_sections.osc_knobs = static_cast<int>(g_root_view->child_count());
     g_root_view->add_child(std::move(osc_knobs));
 
     // ── Toggle row: 4 toggles directly in root ──────────────────────
@@ -162,39 +181,80 @@ static void create_demo_view_hierarchy(float width, float height) {
         toggle->flex().preferred_height = 28;
         toggle_row->add_child(std::move(toggle));
     }
+    g_sections.toggles = static_cast<int>(g_root_view->child_count());
     g_root_view->add_child(std::move(toggle_row));
+
+    // ── Section label spacer for XY ──────────────────────────────────
+    auto xy_label = std::make_unique<Panel>();
+    xy_label->flex().preferred_height = 16;
+    xy_label->flex().margin_top = 6;
+    // spacer for label text
+    g_root_view->add_child(std::move(xy_label));
 
     // ── XY Pad ──────────────────────────────────────────────────────
     auto xy = std::make_unique<XYPad>();
     xy->set_x(0.65f);
     xy->set_y(0.35f);
     xy->flex().preferred_height = 120;
-    xy->flex().margin_top = 10;
+    xy->flex().margin_top = 0;
     xy->flex().margin_left = 8;
     xy->flex().margin_right = 8;
+    g_sections.xy_pad = static_cast<int>(g_root_view->child_count());
     g_root_view->add_child(std::move(xy));
+
+    // ── Section label spacer for FILTER ──────────────────────────────
+    auto filter_label = std::make_unique<Panel>();
+    filter_label->flex().preferred_height = 16;
+    filter_label->flex().margin_top = 6;
+    // spacer for label text
+    g_root_view->add_child(std::move(filter_label));
 
     // ── Filter: 3 knobs directly in a row ───────────────────────────
     auto filter_knobs = make_knob_row({0.65f, 0.35f, 0.5f}, 44, 52);
-    filter_knobs->flex().margin_top = 10;
+    filter_knobs->flex().margin_top = 0;
+    g_sections.filter_knobs = static_cast<int>(g_root_view->child_count());
     g_root_view->add_child(std::move(filter_knobs));
+
+    // ── Section label spacer for ENVELOPE ────────────────────────────
+    auto env_label = std::make_unique<Panel>();
+    env_label->flex().preferred_height = 16;
+    env_label->flex().margin_top = 4;
+    // spacer for label text
+    g_root_view->add_child(std::move(env_label));
 
     // ── Envelope: 4 ADSR knobs directly in a row ────────────────────
     auto env_knobs = make_knob_row({0.05f, 0.3f, 0.7f, 0.4f}, 40, 48);
-    env_knobs->flex().margin_top = 8;
+    env_knobs->flex().margin_top = 0;
+    g_sections.env_knobs = static_cast<int>(g_root_view->child_count());
     g_root_view->add_child(std::move(env_knobs));
+
+    // ── Section label spacer for MIXER ───────────────────────────────
+    auto mixer_label = std::make_unique<Panel>();
+    mixer_label->flex().preferred_height = 16;
+    mixer_label->flex().margin_top = 6;
+    // spacer for label text
+    g_root_view->add_child(std::move(mixer_label));
 
     // ── Mixer: 4 horizontal faders stacked vertically ───────────────
     float fader_values[] = {0.75f, 0.6f, 0.4f, 0.2f};
+    g_sections.mixer_start = static_cast<int>(g_root_view->child_count());
     for (int i = 0; i < 4; ++i) {
         auto f = make_fader(fader_values[i], 22);
-        f->flex().margin_top = (i == 0) ? 10 : 4;
+        f->flex().margin_top = (i == 0) ? 0 : 4;
         g_root_view->add_child(std::move(f));
     }
 
+    // ── Section label spacer for MASTER ──────────────────────────────
+    auto master_label = std::make_unique<Panel>();
+    master_label->flex().preferred_height = 16;
+    master_label->flex().margin_top = 6;
+    // spacer for label text
+    g_root_view->add_child(std::move(master_label));
+
     // ── Master fader ────────────────────────────────────────────────
     auto master_fader = make_fader(0.8f, 26);
-    master_fader->flex().margin_top = 12;
+    master_fader->flex().margin_top = 0;
+    g_sections.master_fader = static_cast<int>(g_root_view->child_count());
     g_root_view->add_child(std::move(master_fader));
 
     // ── Output meter (read-only audio level display) ────────────────
@@ -204,11 +264,74 @@ static void create_demo_view_hierarchy(float width, float height) {
     meter->flex().margin_top = 6;
     meter->flex().margin_left = 8;
     meter->flex().margin_right = 8;
+    g_sections.meter = static_cast<int>(g_root_view->child_count());
     g_root_view->add_child(std::move(meter));
 
     g_root_view->layout_children();
     PULP_LOGI("Android GPU surface: Synth UI created (%d children, %.0fx%.0f dp)",
               static_cast<int>(g_root_view->child_count()), dp_w, dp_h);
+}
+
+// Draw section labels directly on the canvas (bypasses Label widget pipeline
+// which has a known text rendering issue under nested Skia Graphite clips)
+static void draw_section_labels(canvas::Canvas& canvas) {
+    if (!g_root_view || g_root_view->child_count() == 0) return;
+
+    float pad = 12.0f;  // root padding
+    float label_x = pad + 8.0f;
+
+    // Title: "PULP SYNTH"
+    canvas.set_fill_color(canvas::Color::rgba(205, 214, 244));  // text.primary from dark theme
+    canvas.set_font("sans-serif", 22);
+    canvas.fill_text("PULP SYNTH", label_x, pad + 22);
+
+    // Section labels: smaller, secondary color
+    auto label_color = canvas::Color::rgba(166, 173, 200);  // text.secondary
+    canvas.set_fill_color(label_color);
+    canvas.set_font("sans-serif", 11);
+    canvas.set_text_align(canvas::TextAlign::left);
+
+    // Helper: get child y position for label placement
+    auto child_y = [&](int idx) -> float {
+        if (idx < 0 || idx >= static_cast<int>(g_root_view->child_count())) return 0;
+        return g_root_view->child_at(idx)->bounds().y;
+    };
+
+    // OSC label: above the osc knob row (child before it is the spacer)
+    if (g_sections.osc_knobs >= 1) {
+        float y = child_y(g_sections.osc_knobs - 1) + 12;
+        canvas.fill_text("OSCILLATOR", label_x, y);
+    }
+
+    // XY PAD label
+    if (g_sections.xy_pad >= 1) {
+        float y = child_y(g_sections.xy_pad - 1) + 12;
+        canvas.fill_text("XY PAD", label_x, y);
+    }
+
+    // FILTER label
+    if (g_sections.filter_knobs >= 1) {
+        float y = child_y(g_sections.filter_knobs - 1) + 12;
+        canvas.fill_text("FILTER", label_x, y);
+    }
+
+    // ENVELOPE label
+    if (g_sections.env_knobs >= 1) {
+        float y = child_y(g_sections.env_knobs - 1) + 12;
+        canvas.fill_text("ENVELOPE", label_x, y);
+    }
+
+    // MIXER label
+    if (g_sections.mixer_start >= 1) {
+        float y = child_y(g_sections.mixer_start - 1) + 12;
+        canvas.fill_text("MIXER", label_x, y);
+    }
+
+    // MASTER label
+    if (g_sections.master_fader >= 1) {
+        float y = child_y(g_sections.master_fader - 1) + 12;
+        canvas.fill_text("MASTER", label_x, y);
+    }
 }
 
 static ANativeWindow* g_native_window = nullptr;
@@ -308,6 +431,10 @@ void android_render_frame(float dt) {
 
                 // SkiaSurface applies display density scaling internally
                 g_root_view->paint_all(*canvas);
+
+                // Draw section labels directly on canvas (workaround for
+                // Label widget text not rendering under nested Graphite clips)
+                draw_section_labels(*canvas);
 
                 g_skia_surface->end_frame();
             }
