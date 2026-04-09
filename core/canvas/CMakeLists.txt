@@ -15,6 +15,7 @@ target_sources(pulp-canvas PRIVATE
     src/text_layout.cpp
     src/attributed_string.cpp
     src/text_shaper.cpp
+    src/sdf_atlas.cpp
 )
 
 # Text shaping via SkParagraph (default ON when Skia available, can be disabled)

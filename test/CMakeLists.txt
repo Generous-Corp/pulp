@@ -388,6 +388,11 @@ add_executable(pulp-test-canvas test_canvas.cpp)
 target_link_libraries(pulp-test-canvas PRIVATE pulp::canvas Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-canvas)
 
+# SDF glyph atlas exploration (#76)
+add_executable(pulp-test-sdf-atlas test_sdf_atlas.cpp)
+target_link_libraries(pulp-test-sdf-atlas PRIVATE pulp::canvas Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-sdf-atlas)
+
 # View and layout tests
 add_executable(pulp-test-view test_view.cpp)
 target_link_libraries(pulp-test-view PRIVATE pulp::view Catch2::Catch2WithMain)
