@@ -228,7 +228,22 @@ static bool create_js_ui(float dp_w, float dp_h) {
         g_widget_bridge = std::make_unique<WidgetBridge>(
             *g_script_engine, *g_root_view, g_state_store);
 
-        g_widget_bridge->load_script(kSynthUiScript);
+        // Prefer loading the JS UI from the APK via AAssetManager so the
+        // script can be edited without recompiling C++. Fall back to the
+        // embedded string if the asset manager is not initialized (e.g.,
+        // PulpFileProvider.init() was never called) or if the asset is
+        // missing from the APK.
+        std::string script;
+        if (pulp::android::has_asset_manager()) {
+            script = pulp::android::read_asset_text("synth_ui.js");
+        }
+        if (script.empty()) {
+            PULP_LOGI("synth_ui.js: loading embedded fallback (assets unavailable)");
+            script = kSynthUiScript;
+        } else {
+            PULP_LOGI("synth_ui.js: loaded from APK assets (%zu bytes)", script.size());
+        }
+        g_widget_bridge->load_script(script);
         g_root_view->layout_children();
 
         // Capture widget refs for synth param sync

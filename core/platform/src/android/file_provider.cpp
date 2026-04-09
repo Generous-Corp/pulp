@@ -51,6 +51,16 @@ std::vector<uint8_t> read_asset(const std::string& path) {
     return data;
 }
 
+std::string read_asset_text(const std::string& path) {
+    auto bytes = read_asset(path);
+    if (bytes.empty()) return {};
+    return std::string(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+}
+
+bool has_asset_manager() {
+    return g_asset_manager != nullptr;
+}
+
 // ── App Data Directory ────────────────────────────────────────────────────
 // Returns the app-private files directory (always writable with native I/O).
 // Must be queried from Kotlin on startup via context.filesDir.

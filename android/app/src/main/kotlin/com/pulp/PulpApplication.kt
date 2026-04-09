@@ -16,6 +16,15 @@ class PulpApplication : Application(), LifecycleEventObserver {
         } catch (e: UnsatisfiedLinkError) {
             android.util.Log.e(LOG_TAG, "Failed to load libpulp.so: ${e.message}")
         }
+        if (nativeLoaded) {
+            // Wire the C++ AAssetManager bridge so native code can read
+            // bundled assets (e.g., synth_ui.js) from the APK.
+            try {
+                PulpFileProvider(this).init()
+            } catch (e: Throwable) {
+                android.util.Log.e(LOG_TAG, "PulpFileProvider init failed: ${e.message}")
+            }
+        }
         ProcessLifecycleOwner.get().lifecycle.addObserver(this)
     }
 

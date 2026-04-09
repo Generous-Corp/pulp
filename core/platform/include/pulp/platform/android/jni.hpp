@@ -12,12 +12,24 @@
 #include <jni.h>
 #include <cassert>
 #include <atomic>
+#include <string>
+#include <vector>
 
 namespace pulp::android {
 
 // ── Global JVM Reference ──────────────────────────────────────────────────
 // Set in JNI_OnLoad, never changes. Safe to read from any thread.
 inline JavaVM* g_vm = nullptr;
+
+// ── APK Asset Reader ──────────────────────────────────────────────────────
+// Reads bundled assets from the APK via AAssetManager.
+// Must be initialized from Kotlin via PulpFileProvider.init() before use.
+// Thread-safe: AAssetManager is safe to use from any thread.
+
+void init_asset_manager(JNIEnv* env, jobject context);
+std::vector<uint8_t> read_asset(const std::string& path);
+std::string read_asset_text(const std::string& path);
+bool has_asset_manager();
 
 // ── Get JNIEnv for Current Thread ─────────────────────────────────────────
 // Auto-attaches non-Java threads via AttachCurrentThread.
