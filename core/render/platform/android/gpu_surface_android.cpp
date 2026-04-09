@@ -9,6 +9,7 @@
 #include <pulp/view/input_events.hpp>
 #include <pulp/view/script_engine.hpp>
 #include <pulp/view/widget_bridge.hpp>
+#include <pulp/view/accessibility.hpp>
 #include <pulp/state/store.hpp>
 #include <pulp/platform/android/jni.hpp>
 #include "../../../../core/audio/platform/android/demo_synth.hpp"
@@ -1104,6 +1105,167 @@ Java_com_pulp_render_PulpSurfaceView_nativeOnTouchUp(
 JNIEXPORT void JNICALL
 Java_com_pulp_render_PulpSurfaceView_nativeOnTouchCancel(JNIEnv*, jobject) {
     pulp::render::g_captured_view = nullptr;
+}
+
+// ── Accessibility (TalkBack) ─────────────────────────────────────────────
+//
+// Walks the current C++ view tree and exposes a flat list of views with
+// a non-default AccessRole. The Kotlin PulpAccessibilityDelegate queries
+// this list to populate AccessibilityNodeInfo for TalkBack (#87).
+//
+// The list is rebuilt on every query so it stays in sync with UI changes
+// without needing explicit invalidation — TalkBack queries are
+// infrequent (typically on focus change), so the walk cost is
+// acceptable.
+//
+// Thread model: all accessibility JNI calls run on the main (UI)
+// thread. The view tree is also mutated on the main thread, so no
+// additional locking is required for Phase 1. If Pulp later mutates
+// the tree from other threads, this will need a lock or a snapshot.
+
+namespace {
+
+// Pulp AccessRole → Kotlin PulpAccessibilityDelegate ROLE_* constants.
+// Keep in sync with android/app/src/main/kotlin/com/pulp/accessibility/
+// PulpAccessibility.kt:107-111.
+static int android_role_for_view(pulp::view::View::AccessRole role) {
+    using R = pulp::view::View::AccessRole;
+    switch (role) {
+        case R::slider: return 1;  // ROLE_SLIDER
+        case R::toggle: return 3;  // ROLE_TOGGLE
+        case R::label:  return 2;  // ROLE_TEXT
+        case R::meter:  return 1;  // treat meters like read-only sliders
+        case R::group:  return 4;  // ROLE_LIST (closest approximation)
+        case R::image:  return 2;  // ROLE_TEXT with contentDescription
+        case R::none:
+        default:        return 0;  // ROLE_BUTTON (safe default)
+    }
+}
+
+static void collect_accessible_views(pulp::view::View* root,
+                                     std::vector<pulp::view::View*>& out) {
+    if (!root) return;
+    if (root->access_role() != pulp::view::View::AccessRole::none) {
+        out.push_back(root);
+    }
+    for (std::size_t i = 0; i < root->child_count(); ++i) {
+        collect_accessible_views(root->child_at(i), out);
+    }
+}
+
+static std::vector<pulp::view::View*>& accessibility_cache() {
+    static std::vector<pulp::view::View*> cache;
+    return cache;
+}
+
+static pulp::view::View* accessibility_node_at(int index) {
+    auto& cache = accessibility_cache();
+    if (index < 0 || static_cast<std::size_t>(index) >= cache.size()) {
+        return nullptr;
+    }
+    return cache[static_cast<std::size_t>(index)];
+}
+
+} // anonymous namespace
+
+JNIEXPORT jint JNICALL
+Java_com_pulp_accessibility_PulpAccessibilityDelegate_nativeGetAccessibilityNodeCount(
+    JNIEnv*, jobject) {
+    auto& cache = accessibility_cache();
+    cache.clear();
+    collect_accessible_views(pulp::render::g_root_view.get(), cache);
+    return static_cast<jint>(cache.size());
+}
+
+JNIEXPORT jint JNICALL
+Java_com_pulp_accessibility_PulpAccessibilityDelegate_nativeGetNodeRole(
+    JNIEnv*, jobject, jint index) {
+    auto* view = accessibility_node_at(index);
+    if (!view) return 0;
+    return android_role_for_view(view->access_role());
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_pulp_accessibility_PulpAccessibilityDelegate_nativeGetNodeLabel(
+    JNIEnv* env, jobject, jint index) {
+    auto* view = accessibility_node_at(index);
+    if (!view) return env->NewStringUTF("");
+    return env->NewStringUTF(view->access_label().c_str());
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_pulp_accessibility_PulpAccessibilityDelegate_nativeGetNodeValue(
+    JNIEnv* env, jobject, jint index) {
+    auto* view = accessibility_node_at(index);
+    if (!view) return env->NewStringUTF("");
+    if (auto* val = dynamic_cast<pulp::view::AccessibilityValueInterface*>(view)) {
+        return env->NewStringUTF(val->get_value_string().c_str());
+    }
+    return env->NewStringUTF("");
+}
+
+JNIEXPORT jfloat JNICALL
+Java_com_pulp_accessibility_PulpAccessibilityDelegate_nativeGetNodeRangeMin(
+    JNIEnv*, jobject, jint index) {
+    auto* view = accessibility_node_at(index);
+    if (auto* val = dynamic_cast<pulp::view::AccessibilityValueInterface*>(view)) {
+        return static_cast<jfloat>(val->get_minimum_value());
+    }
+    return 0.0f;
+}
+
+JNIEXPORT jfloat JNICALL
+Java_com_pulp_accessibility_PulpAccessibilityDelegate_nativeGetNodeRangeMax(
+    JNIEnv*, jobject, jint index) {
+    auto* view = accessibility_node_at(index);
+    if (auto* val = dynamic_cast<pulp::view::AccessibilityValueInterface*>(view)) {
+        return static_cast<jfloat>(val->get_maximum_value());
+    }
+    return 1.0f;
+}
+
+JNIEXPORT jint JNICALL
+Java_com_pulp_accessibility_PulpAccessibilityDelegate_nativeGetNodeRowCount(
+    JNIEnv*, jobject, jint index) {
+    auto* view = accessibility_node_at(index);
+    if (auto* table = dynamic_cast<pulp::view::AccessibilityTableInterface*>(view)) {
+        return static_cast<jint>(table->get_row_count());
+    }
+    return 0;
+}
+
+JNIEXPORT jint JNICALL
+Java_com_pulp_accessibility_PulpAccessibilityDelegate_nativeGetNodeColumnCount(
+    JNIEnv*, jobject, jint index) {
+    auto* view = accessibility_node_at(index);
+    if (auto* table = dynamic_cast<pulp::view::AccessibilityTableInterface*>(view)) {
+        return static_cast<jint>(table->get_column_count());
+    }
+    return 0;
+}
+
+JNIEXPORT void JNICALL
+Java_com_pulp_accessibility_PulpAccessibilityDelegate_nativePerformAction(
+    JNIEnv*, jobject, jint action, jint nodeIndex, jfloat value) {
+    auto* view = accessibility_node_at(nodeIndex);
+    if (!view) return;
+    // action values match the companion object in PulpAccessibility.kt:
+    //   ACTION_CLICK = 0, ACTION_INCREMENT = 1, ACTION_DECREMENT = 2
+    switch (action) {
+        case 0:  // click
+            if (auto* val = dynamic_cast<pulp::view::AccessibilityValueInterface*>(view)) {
+                val->set_current_value(static_cast<double>(value));
+            }
+            break;
+        case 1:  // increment
+            view->on_accessibility_adjust(1.0f);
+            break;
+        case 2:  // decrement
+            view->on_accessibility_adjust(-1.0f);
+            break;
+        default:
+            break;
+    }
 }
 
 } // extern "C"
