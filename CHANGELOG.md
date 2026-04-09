@@ -2,6 +2,23 @@
 
 All notable changes to Pulp are documented here.
 
+## [0.2.1] — 2026-04-09
+
+### Fixed
+- **Windows SDK**: ship `wgpu_native.lib` import library (#94). v0.2.0 silently dropped this file from the install, breaking `find_package(Pulp)` on Windows for any downstream plugin. Existing v0.2.0 Windows installs are broken and must be reinstalled.
+- **Windows ARM64 build** (#92): move `windows.h` and `shellapi.h` includes outside the `pulp::view` namespace in `core/view/src/file_browser.cpp` so winbase.h `_Interlocked*` intrinsics no longer leak into the namespace and break compilation.
+- **Visual Studio multi-config generator**: add `CMAKE_MAP_IMPORTED_CONFIG_*=Release` to PulpConfig.cmake so plugins built in Debug / MinSizeRel / RelWithDebInfo can resolve Pulp's Release-only imported targets.
+
+### Added
+- **Android MIDI I/O Phase 1** (#86): lock-free SPSC FIFO between the Kotlin MIDI receiver thread and the audio thread, plus `PulpMidiManager` instantiation in `PulpApplication.onCreate`. USB MIDI bytestream input now flows from Android `MidiManager` into the audio thread's `MidiBuffer`. BLE MIDI and virtual ports remain Phase 2/3.
+- **Android TalkBack accessibility bridge** (#87): JNI exports that walk the C++ view tree, expose `AccessibilityValueInterface` / `AccessibilityTableInterface` data to Android, and route `ACTION_CLICK` / `ACTION_SCROLL_FORWARD` / `ACTION_SCROLL_BACKWARD` back into Pulp widgets. `PulpAccessibilityDelegate` is now attached to `PulpSurfaceView` automatically.
+- **Out-of-line accessibility interface vtables** (`core/view/src/accessibility.cpp`): anchor the typeinfo for `AccessibilityValueInterface` / `AccessibilityTextInterface` / `AccessibilityTableInterface` / `AccessibilityCellInterface` so `dynamic_cast` links cleanly under the Android NDK's `-Wl,--no-undefined`. Adds the missing default `get_value_string()` implementation.
+- **Nested-clip text rendering regression test** (#75): guards the existing per-glyph SkTextBlob workaround so a future refactor cannot re-introduce SkShaper for the widget paint path without first solving the underlying Graphite ghost issue.
+- **SDF glyph atlas exploration prototype** (#76, `explore/sdf-text` foundation): clean public API, Felzenszwalb-Huttenlocher Euclidean distance transform, and 54 assertions of test coverage. Foundation only — GPU shader and canvas integration follow.
+
+### Re-enabled
+- `windows-arm64` row in the `release-cli.yml` matrix, now that #92 is fixed.
+
 ## [0.2.0] — 2026-04-09
 
 ### Added
