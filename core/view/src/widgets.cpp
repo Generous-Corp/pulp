@@ -994,12 +994,39 @@ void XYPad::paint(canvas::Canvas& canvas) {
 
 // ── WaveformView ─────────────────────────────────────────────────────────────
 
+size_t WaveformView::find_trigger_index(const float* samples, size_t count,
+                                         TriggerMode mode) {
+    if (mode == TriggerMode::free_run || count < 2) return 0;
+    const bool want_rising = (mode == TriggerMode::rising_zero);
+    for (size_t i = 1; i < count; ++i) {
+        float prev = samples[i - 1];
+        float curr = samples[i];
+        if (want_rising) {
+            if (prev <= 0.0f && curr > 0.0f) return i;
+        } else {
+            if (prev >= 0.0f && curr < 0.0f) return i;
+        }
+    }
+    return 0;
+}
+
+void WaveformView::apply_trigger() {
+    if (trigger_mode_ == TriggerMode::free_run || samples_.size() < 2) return;
+    size_t idx = find_trigger_index(samples_.data(), samples_.size(), trigger_mode_);
+    if (idx == 0) return;  // no crossing — leave as-is
+    std::rotate(samples_.begin(),
+                samples_.begin() + static_cast<std::ptrdiff_t>(idx),
+                samples_.end());
+}
+
 void WaveformView::set_data(const float* samples, size_t count) {
     samples_.assign(samples, samples + count);
+    apply_trigger();
 }
 
 void WaveformView::set_data(std::vector<float> samples) {
     samples_ = std::move(samples);
+    apply_trigger();
 }
 
 void WaveformView::paint(canvas::Canvas& canvas) {

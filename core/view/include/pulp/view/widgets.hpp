@@ -455,18 +455,39 @@ private:
 
 class WaveformView : public View {
 public:
+    // Triggering mode for periodic signal display.
+    // free_run:     no triggering — caller is responsible for continuity
+    // rising_zero:  align to the first rising-edge zero crossing
+    // falling_zero: align to the first falling-edge zero crossing
+    enum class TriggerMode { free_run, rising_zero, falling_zero };
+
     WaveformView() = default;
 
-    // Set waveform data (normalized -1 to 1)
+    // Set waveform data (normalized -1 to 1). If a non-free_run trigger
+    // mode is active, the buffer is rotated so the first matching
+    // crossing becomes index 0, producing a stable display for periodic
+    // signals. If no crossing is found, the buffer is stored as-is.
     void set_data(const float* samples, size_t count);
     void set_data(std::vector<float> samples);
 
     size_t sample_count() const { return samples_.size(); }
 
+    void set_trigger_mode(TriggerMode mode) { trigger_mode_ = mode; }
+    TriggerMode trigger_mode() const { return trigger_mode_; }
+
+    // Locate the first crossing of `mode` in the buffer without mutating
+    // it. Returns the crossing index, or 0 if none is found or
+    // mode is free_run.
+    static size_t find_trigger_index(const float* samples, size_t count,
+                                     TriggerMode mode);
+
     void paint(canvas::Canvas& canvas) override;
 
 private:
+    void apply_trigger();
+
     std::vector<float> samples_;
+    TriggerMode trigger_mode_ = TriggerMode::free_run;
 };
 
 // ── SpectrumView ─────────────────────────────────────────────────────────────
