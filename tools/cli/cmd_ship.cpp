@@ -179,6 +179,11 @@ int cmd_ship(const std::vector<std::string>& args) {
             else if (args[i] == "--per-user") per_user = true;
         }
 
+        if (apk_only && aab_only) {
+            std::cerr << "Error: --apk-only and --aab-only are mutually exclusive.\n";
+            return 1;
+        }
+
         if (target == "android") {
             auto android_dir = root / "android";
             if (!fs::exists(android_dir / "build.gradle.kts")
@@ -191,6 +196,12 @@ int cmd_ship(const std::vector<std::string>& args) {
             if (abi_arg == "all") abis = {"arm64-v8a", "x86_64", "armeabi-v7a"};
             else if (!abi_arg.empty()) abis = {abi_arg};
             else abis = {"arm64-v8a"};
+
+            // Resolve keystore from CLI flags, env vars, or config.toml
+            keystore_path = ship_config(keystore_path, "", "signing.android", "keystore");
+            key_alias = ship_config(key_alias, "", "signing.android", "key_alias");
+            store_pass = ship_config(store_pass, "ANDROID_STORE_PASS", "signing.android", "store_pass");
+            key_pass = ship_config(key_pass, "ANDROID_KEY_PASS", "signing.android", "key_pass");
 
             std::unique_ptr<pulp::ship::AndroidKeystoreConfig> ks;
             if (!keystore_path.empty()) {
@@ -497,6 +508,10 @@ int cmd_ship(const std::vector<std::string>& args) {
             item.file_size = fs::file_size(url_as_path);
             if (!sign_key.empty())
                 item.ed_signature = pulp::ship::sign_file_ed25519(url_as_path.string(), sign_key);
+        } else if (!sign_key.empty()) {
+            std::cerr << "Warning: --sign-key requires a local file path to compute the signature.\n";
+            std::cerr << "  The remote URL cannot be signed. Download the file first, then pass\n";
+            std::cerr << "  the local path as --url and set --download-url for the enclosure URL.\n";
         }
 
         { auto now = std::time(nullptr); char buf[64];
