@@ -20,24 +20,53 @@ platforms = ["macos", "linux", "windows"]
 # ── Validation pipeline ────────────────────────────────────────────────────
 # Each stage maps to a step in tools/validate-build.sh. Shipyard runs
 # them in order; stage failure short-circuits the pipeline.
+#
+# Stage names are ["setup", "configure", "build", "test"] only —
+# Shipyard v0.1.2's executors compose those four canonical stages
+# when building remote commands. Custom stage names like "install" or
+# "smoke" are silently dropped on the ssh-windows backend, so we
+# fold those steps into the canonical four for now and revisit when
+# Shipyard supports arbitrary stage lists end-to-end.
+#
+# The build command intentionally avoids POSIX-only shell syntax
+# (`$(...)`, `||`) so it parses on PowerShell. CMake's `--parallel`
+# flag is portable across all generators and platforms; let CMake
+# pick the parallelism instead of computing core count in the shell.
 
 [validation.default]
 stages = ["setup", "configure", "build", "test"]
 setup     = "./setup.sh --ci --deps-only"
 configure = "cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug"
-build     = "cmake --build build -j$(nproc 2>/dev/null || sysctl -n hw.ncpu)"
+build     = "cmake --build build --parallel"
 test      = "ctest --test-dir build --output-on-failure --exclude-regex AudioWorkgroup"
 
+# Per-target overrides — ssh-windows needs `cmake --build` with the
+# Visual Studio multi-config generator's --config flag. The base
+# build line above is left platform-neutral; this section refines it
+# for the Windows target only.
+[validation.default.overrides.windows]
+configure = "cmake -S . -B build -G \"Visual Studio 17 2022\" -A x64"
+build     = "cmake --build build --config Release --parallel"
+test      = "ctest --test-dir build -C Release --output-on-failure --exclude-regex AudioWorkgroup"
+
 [validation.smoke]
-# Lighter validation for develop-branch ships and quick sanity checks.
-# Builds without tests + GPU + examples; includes a downstream SDK
-# install + scaffold smoke pipeline.
-stages = ["setup", "configure", "build", "install", "smoke"]
+# Lighter validation for quick sanity checks. Builds without tests +
+# GPU + examples; the smoke pipeline (SDK install + downstream
+# scaffold build) is folded into the build stage so it works on
+# every backend. When Shipyard supports custom stage names on the
+# ssh-windows executor, we will split this back out into named
+# stages for clearer per-stage failure messages.
+stages = ["setup", "configure", "build"]
 setup     = "./setup.sh --ci --deps-only"
 configure = "cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DPULP_BUILD_TESTS=OFF -DPULP_BUILD_EXAMPLES=OFF"
-build     = "cmake --build build"
-install   = "cmake --install build --prefix install"
-smoke     = "cmake -S tools/validation/sdk-smoke -B smoke/build -DCMAKE_PREFIX_PATH=$(pwd)/install && cmake --build smoke/build"
+build     = "cmake --build build --parallel && cmake --install build --prefix install && cmake -S tools/validation/sdk-smoke -B smoke/build -DCMAKE_PREFIX_PATH=install && cmake --build smoke/build --parallel"
+
+[validation.smoke.overrides.windows]
+configure = "cmake -S . -B build -G \"Visual Studio 17 2022\" -A x64 -DPULP_BUILD_TESTS=OFF -DPULP_BUILD_EXAMPLES=OFF"
+# PowerShell uses ; as the statement separator, not && — note the
+# different chaining. The semantics differ: PowerShell does NOT
+# short-circuit on failure, so each step is wrapped in a guard.
+build     = "cmake --build build --config Release --parallel; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; cmake --install build --prefix install --config Release; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; cmake -S tools/validation/sdk-smoke -B smoke/build -G \"Visual Studio 17 2022\" -A x64 -DCMAKE_PREFIX_PATH=install; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; cmake --build smoke/build --config Release --parallel"
 
 # ── Targets ────────────────────────────────────────────────────────────────
 # Three platforms today: mac (local), ubuntu (SSH), windows (SSH).
