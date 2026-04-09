@@ -29,16 +29,22 @@ profile   = "solo"
 # ── Governance defaults ────────────────────────────────────────────────────
 # Required status check names MUST match the job names GitHub
 # Actions actually produces. Pulp's `.github/workflows/build.yml`
-# names include the runner provider suffix, so the list is:
-#   macOS (ARM64) [github-hosted], Linux (x64) [namespace],
-#   Windows (x64) [namespace]
-# Keep this in sync if the workflow job names ever change.
+# emits provider-neutral job names — no `[github-hosted]` or
+# `[namespace]` suffix — so switching runner providers does not
+# require re-running `shipyard governance apply`. The provider
+# information still surfaces in each job's first step via a
+# `::notice::` annotation, so failures are traceable to the
+# specific runner pool that produced them.
+#
+# If build.yml's job names ever change (e.g. adding a new
+# platform or renaming an existing one), update this list and
+# run `shipyard governance apply` to refresh branch protection.
 
 [governance]
 required_status_checks = [
-    "macOS (ARM64) [github-hosted]",
-    "Linux (x64) [namespace]",
-    "Windows (x64) [namespace]",
+    "macOS (ARM64)",
+    "Linux (x64)",
+    "Windows (x64)",
 ]
 
 # ── Validation pipeline ────────────────────────────────────────────────────

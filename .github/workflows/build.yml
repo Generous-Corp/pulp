@@ -183,9 +183,18 @@ jobs:
       matrix: ${{ fromJSON(needs.resolve-provider.outputs.matrix_json) }}
 
     runs-on: ${{ fromJSON(matrix.runs_on_json) }}
-    name: ${{ matrix.name }} [${{ matrix.provider }}]
+    # Job name is stable across providers so branch protection
+    # doesn't need to be re-applied every time the runner provider
+    # changes. The provider is still visible in the first step's
+    # summary annotation below.
+    name: ${{ matrix.name }}
 
     steps:
+      - name: Show runner provider
+        run: |
+          echo "Runner provider for ${{ matrix.name }}: ${{ matrix.provider }}"
+          echo "::notice title=Runner provider::${{ matrix.name }} ran on ${{ matrix.provider }}"
+
       - uses: actions/checkout@v5
         with:
           lfs: true
