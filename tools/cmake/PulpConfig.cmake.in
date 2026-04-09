@@ -68,18 +68,33 @@ if(NOT TARGET webgpu
    AND EXISTS "${_pulp_webgpu_runtime}"
    AND EXISTS "${_pulp_webgpu_include_dir}")
 
-    # On Windows, MSVC needs an import library (wgpu_native.lib) in
-    # addition to the runtime DLL. Fail fast with a clear message if the
-    # SDK install is broken (#94 was caused by this silently missing).
+    # On Windows, MSVC needs an import library in addition to the
+    # runtime DLL. Modern wgpu-native builds ship the import library
+    # as `wgpu_native.dll.lib` (the MSVC IMPLIB convention since
+    # wgpu-native v0.19+); older builds shipped `wgpu_native.lib`.
+    # Look for either name. Fail fast with a clear message if neither
+    # is present so a broken SDK install (#94) gives a useful error
+    # instead of a confusing "IMPORTED_IMPLIB not set" later.
     if(WIN32)
-        set(_pulp_webgpu_implib
+        set(_pulp_webgpu_implib_candidates
+            "${PULP_SDK_LIBRARY_DIR}/wgpu_native.dll.lib"
+            "${PULP_SDK_LIBRARY_DIR}/wgpu_native.lib"
             "${PULP_SDK_LIBRARY_DIR}/${PULP_SDK_SHARED_LIBRARY_PREFIX}wgpu_native.lib")
-        if(NOT EXISTS "${_pulp_webgpu_implib}")
+        set(_pulp_webgpu_implib "")
+        foreach(_pulp_candidate IN LISTS _pulp_webgpu_implib_candidates)
+            if(EXISTS "${_pulp_candidate}")
+                set(_pulp_webgpu_implib "${_pulp_candidate}")
+                break()
+            endif()
+        endforeach()
+        unset(_pulp_candidate)
+        if(NOT _pulp_webgpu_implib)
             message(FATAL_ERROR
-                "Pulp SDK is missing wgpu_native.lib at ${_pulp_webgpu_implib}. "
+                "Pulp SDK is missing the wgpu_native import library. "
+                "Looked for: ${_pulp_webgpu_implib_candidates}. "
                 "This is a broken SDK install — the runtime DLL is present "
                 "but the import library needed for linking is not. "
-                "Reinstall the Pulp SDK (v0.2.1 or newer) to pick up the fix "
+                "Reinstall the Pulp SDK (v0.2.2 or newer) to pick up the fix "
                 "from https://github.com/danielraffel/pulp/issues/94.")
         endif()
     endif()
