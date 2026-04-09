@@ -12,10 +12,13 @@ target_sources(pulp-render PRIVATE
     src/gpu_compute.cpp
     src/skia_surface.cpp
     src/render_loop.cpp
-    src/sdl3_surface.cpp
     src/draco_decoder.cpp
     src/ktx2_decoder.cpp
 )
+# SDL3 surface is desktop-only (Android uses PulpSurfaceView via JNI)
+if(NOT ANDROID)
+    target_sources(pulp-render PRIVATE src/sdl3_surface.cpp)
+endif()
 
 # DRACO mesh decompression (optional)
 if(PULP_HAS_DRACO)
@@ -61,8 +64,11 @@ if(APPLE AND NOT PULP_IOS)
 endif()
 
 # Link WebGPU if available
-if(PULP_HAS_WEBGPU)
+# On Android, Dawn is bundled in Skia — no separate webgpu target needed
+if(PULP_HAS_WEBGPU AND TARGET webgpu)
     target_link_libraries(pulp-render PUBLIC webgpu)
+endif()
+if(PULP_HAS_WEBGPU)
     target_compile_definitions(pulp-render PUBLIC PULP_HAS_WEBGPU=1)
 endif()
 

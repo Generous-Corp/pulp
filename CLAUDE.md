@@ -588,6 +588,7 @@ When updating existing skills, preserve backward compatibility — don't remove 
 
 | Skill | Location | Purpose |
 |-------|----------|---------|
+| `android` | `.agents/skills/android/` | Android NDK build, deploy, debug, and platform gotchas |
 | `aax` | `.agents/skills/aax/` | Optional AAX setup, validation, and workflow |
 | `ci` | `.agents/skills/ci/` | PR creation, local/cloud CI, merge workflow |
 | `cmajor-external` | `.agents/skills/cmajor-external/` | Cmajor external toolchain codegen |

@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <unordered_map>
 #include <pulp/canvas/skia_canvas.hpp>
 
 #ifdef PULP_HAS_SKIA
@@ -13,6 +14,7 @@
 #include "include/core/SkFontMgr.h"
 #include "include/core/SkTypeface.h"
 #include "include/core/SkTextBlob.h"
+#include "modules/skshaper/include/SkShaper.h"
 #include "include/core/SkRRect.h"
 #include "include/core/SkColorSpace.h"
 #include "include/core/SkImage.h"
@@ -35,9 +37,13 @@
 #include "include/ports/SkFontMgr_mac_ct.h"
 #elif defined(_WIN32)
 #include "include/ports/SkTypeface_win.h"
+#elif defined(__ANDROID__)
+// Android: use the built-in Android font manager with FreeType scanner
+#include "include/ports/SkFontMgr_android.h"
+#include "include/ports/SkFontScanner_FreeType.h"
 #elif defined(__linux__)
 #include "include/ports/SkFontMgr_fontconfig.h"
-#include "include/core/SkFontScanner.h"
+#include "include/ports/SkFontScanner_FreeType.h"
 #endif
 
 namespace pulp::canvas {
@@ -46,16 +52,21 @@ namespace pulp::canvas {
 // macOS: CoreText, Windows: DirectWrite, Linux: fontconfig
 static sk_sp<SkFontMgr> get_font_manager() {
     static sk_sp<SkFontMgr> mgr;
-    if (!mgr) {
+    static bool tried = false;
+    if (!tried) {
+        tried = true;
 #ifdef __APPLE__
         mgr = SkFontMgr_New_CoreText(nullptr);
 #elif defined(_WIN32)
         mgr = SkFontMgr_New_DirectWrite();
+#elif defined(__ANDROID__)
+        // Android font manager needs a FreeType scanner to rasterize glyphs.
+        // Passing nullptr for the scanner causes SIGSEGV in drawSimpleText.
+        mgr = SkFontMgr_New_Android(nullptr, SkFontScanner_Make_FreeType());
 #elif defined(__linux__)
-        mgr = SkFontMgr_New_FontConfig(nullptr, nullptr);
-#else
-        mgr = SkFontMgr::RefEmpty();
+        mgr = SkFontMgr_New_FontConfig(nullptr, SkFontScanner_Make_FreeType());
 #endif
+        // Don't fall back to RefEmpty — callers check for null
     }
     return mgr;
 }
@@ -85,15 +96,51 @@ static SkPaint make_stroke_paint(Color c, float width) {
     return paint;
 }
 
+// Cached typeface loaded directly from a known path — bypasses family name
+// matching for deterministic metrics (Visage-style approach).
+static sk_sp<SkTypeface> get_cached_typeface(const std::string& family) {
+    static std::unordered_map<std::string, sk_sp<SkTypeface>> cache;
+    auto it = cache.find(family);
+    if (it != cache.end()) return it->second;
+
+    sk_sp<SkTypeface> typeface;
+
+#if defined(__ANDROID__)
+    // Load Roboto directly from filesystem for deterministic rendering.
+    // This avoids the font manager's family matching which can return
+    // different fonts depending on the device/API level.
+    if (family == "sans-serif" || family == "Roboto" || family.empty()) {
+        auto mgr = get_font_manager();
+        if (mgr) {
+            typeface = mgr->makeFromFile("/system/fonts/Roboto-Regular.ttf");
+        }
+    }
+#endif
+
+    // Fall back to family name matching
+    if (!typeface) {
+        auto mgr = get_font_manager();
+        if (mgr && mgr->countFamilies() > 0) {
+            typeface = mgr->matchFamilyStyle(family.c_str(), SkFontStyle::Normal());
+            if (!typeface)
+                typeface = mgr->matchFamilyStyle(nullptr, SkFontStyle::Normal());
+        }
+    }
+
+    cache[family] = typeface;
+    return typeface;
+}
+
 static SkFont make_font(const std::string& family, float size) {
     SkFont font;
     font.setSize(size);
+    font.setSubpixel(true);                               // Subpixel glyph positioning
+    font.setEdging(SkFont::Edging::kSubpixelAntiAlias);   // LCD-quality anti-aliasing
+    font.setHinting(SkFontHinting::kSlight);               // Light hinting preserves glyph shapes
+    font.setLinearMetrics(true);                           // Linear scaling for consistent metrics
 
-    auto mgr = get_font_manager();
-    if (mgr) {
-        auto typeface = mgr->matchFamilyStyle(family.c_str(), SkFontStyle::Normal());
-        if (typeface) font.setTypeface(std::move(typeface));
-    }
+    auto typeface = get_cached_typeface(family);
+    if (typeface) font.setTypeface(std::move(typeface));
 
     return font;
 }
@@ -113,16 +160,21 @@ SkiaCanvas::SkiaCanvas(SkCanvas* canvas, skgpu::graphite::Recorder* recorder)
     : canvas_(canvas), recorder_(recorder) {}
 SkiaCanvas::~SkiaCanvas() = default;
 
-void SkiaCanvas::save() { canvas_->save(); }
-void SkiaCanvas::restore() { canvas_->restore(); }
+// Null-safe: canvas_ can be null when swapchain texture wrap fails on Android
+#define GUARD_CANVAS if (!canvas_) return
 
-void SkiaCanvas::translate(float x, float y) { canvas_->translate(x, y); }
-void SkiaCanvas::scale(float sx, float sy) { canvas_->scale(sx, sy); }
+void SkiaCanvas::save() { GUARD_CANVAS; canvas_->save(); }
+void SkiaCanvas::restore() { GUARD_CANVAS; canvas_->restore(); }
+
+void SkiaCanvas::translate(float x, float y) { GUARD_CANVAS; canvas_->translate(x, y); }
+void SkiaCanvas::scale(float sx, float sy) { GUARD_CANVAS; canvas_->scale(sx, sy); }
 void SkiaCanvas::rotate(float radians) {
-    canvas_->rotate(radians * 180.0f / 3.14159265f); // Skia uses degrees
+    GUARD_CANVAS;
+    canvas_->rotate(radians * 180.0f / 3.14159265f);
 }
 
 void SkiaCanvas::clip_rect(float x, float y, float w, float h) {
+    GUARD_CANVAS;
     canvas_->clipRect(SkRect::MakeXYWH(x, y, w, h));
 }
 
@@ -139,32 +191,32 @@ void SkiaCanvas::set_line_join(LineJoin join) {
 }
 
 void SkiaCanvas::fill_rect(float x, float y, float w, float h) {
-    canvas_->drawRect(SkRect::MakeXYWH(x, y, w, h), make_fill_paint(fill_color_));
+    GUARD_CANVAS; canvas_->drawRect(SkRect::MakeXYWH(x, y, w, h), make_fill_paint(fill_color_));
 }
 
 void SkiaCanvas::stroke_rect(float x, float y, float w, float h) {
-    auto paint = make_stroke_paint(stroke_color_, line_width_);
+    GUARD_CANVAS; auto paint = make_stroke_paint(stroke_color_, line_width_);
     canvas_->drawRect(SkRect::MakeXYWH(x, y, w, h), paint);
 }
 
 void SkiaCanvas::fill_rounded_rect(float x, float y, float w, float h, float radius) {
-    SkRRect rrect;
+    GUARD_CANVAS; SkRRect rrect;
     rrect.setRectXY(SkRect::MakeXYWH(x, y, w, h), radius, radius);
     canvas_->drawRRect(rrect, make_fill_paint(fill_color_));
 }
 
 void SkiaCanvas::stroke_rounded_rect(float x, float y, float w, float h, float radius) {
-    SkRRect rrect;
+    GUARD_CANVAS; SkRRect rrect;
     rrect.setRectXY(SkRect::MakeXYWH(x, y, w, h), radius, radius);
     canvas_->drawRRect(rrect, make_stroke_paint(stroke_color_, line_width_));
 }
 
 void SkiaCanvas::fill_circle(float cx, float cy, float radius) {
-    canvas_->drawCircle(cx, cy, radius, make_fill_paint(fill_color_));
+    GUARD_CANVAS; canvas_->drawCircle(cx, cy, radius, make_fill_paint(fill_color_));
 }
 
 void SkiaCanvas::stroke_circle(float cx, float cy, float radius) {
-    canvas_->drawCircle(cx, cy, radius, make_stroke_paint(stroke_color_, line_width_));
+    GUARD_CANVAS; canvas_->drawCircle(cx, cy, radius, make_stroke_paint(stroke_color_, line_width_));
 }
 
 void SkiaCanvas::stroke_arc(float cx, float cy, float radius,
@@ -173,11 +225,11 @@ void SkiaCanvas::stroke_arc(float cx, float cy, float radius,
     float sweep_deg = (end_angle - start_angle) * 180.0f / 3.14159265f;
     SkRect oval = SkRect::MakeXYWH(cx - radius, cy - radius, radius * 2, radius * 2);
     SkPath path = SkPathBuilder().addArc(oval, start_deg, sweep_deg).detach();
-    canvas_->drawPath(path, make_stroke_paint(stroke_color_, line_width_));
+    if (canvas_) canvas_->drawPath(path, make_stroke_paint(stroke_color_, line_width_));
 }
 
 void SkiaCanvas::stroke_line(float x0, float y0, float x1, float y1) {
-    canvas_->drawLine(x0, y0, x1, y1, make_stroke_paint(stroke_color_, line_width_));
+    GUARD_CANVAS; canvas_->drawLine(x0, y0, x1, y1, make_stroke_paint(stroke_color_, line_width_));
 }
 
 void SkiaCanvas::set_font(const std::string& family, float size) {
@@ -190,33 +242,72 @@ void SkiaCanvas::set_text_align(TextAlign align) {
 }
 
 void SkiaCanvas::fill_text(const std::string& text, float x, float y) {
+    GUARD_CANVAS;
+    if (text.empty()) return;
+
     SkFont font = make_font(font_family_, font_size_);
+    if (!font.getTypeface()) return;
 
     auto paint = make_fill_paint(fill_color_);
 
-    // Handle text alignment
+    // Per-glyph positioned SkTextBlob with exact advance widths from the font.
+    // This gives proper glyph spacing + subpixel positioning without the
+    // ghost/doubling artifacts that SkShaper::shape() produces in nested
+    // save/translate/clip contexts (widget paint pipeline).
+    int glyph_count = static_cast<int>(font.countText(text.c_str(), text.size(), SkTextEncoding::kUTF8));
+    if (glyph_count <= 0) return;
+
+    std::vector<SkGlyphID> glyphs(glyph_count);
+    font.textToGlyphs(text.c_str(), text.size(), SkTextEncoding::kUTF8,
+                      SkSpan<SkGlyphID>(glyphs.data(), glyph_count));
+
+    std::vector<SkScalar> widths(glyph_count);
+    font.getWidths(SkSpan<const SkGlyphID>(glyphs.data(), glyph_count),
+                   SkSpan<SkScalar>(widths.data(), glyph_count));
+
+    float total_w = 0;
+    for (int i = 0; i < glyph_count; ++i) total_w += widths[i];
+
     float draw_x = x;
-    if (text_align_ != TextAlign::left) {
-        SkRect bounds;
-        font.measureText(text.c_str(), text.size(), SkTextEncoding::kUTF8, &bounds);
-        if (text_align_ == TextAlign::center) draw_x -= bounds.width() * 0.5f;
-        else if (text_align_ == TextAlign::right) draw_x -= bounds.width();
+    if (text_align_ == TextAlign::center) draw_x -= total_w * 0.5f;
+    else if (text_align_ == TextAlign::right) draw_x -= total_w;
+
+    SkTextBlobBuilder builder;
+    const auto& run = builder.allocRunPosH(font, glyph_count, y);
+    float cursor = draw_x;
+    for (int i = 0; i < glyph_count; ++i) {
+        run.glyphs[i] = glyphs[i];
+        run.pos[i] = cursor;
+        cursor += widths[i];
     }
 
-    canvas_->drawSimpleText(text.c_str(), text.size(), SkTextEncoding::kUTF8,
-                           draw_x, y, font, paint);
+    canvas_->drawTextBlob(builder.make(), 0, 0, paint);
 }
 
 float SkiaCanvas::measure_text(const std::string& text) {
     SkFont font = make_font(font_family_, font_size_);
+    if (!font.getTypeface()) return font_size_ * text.size() * 0.5f;
 
-    SkRect bounds;
-    font.measureText(text.c_str(), text.size(), SkTextEncoding::kUTF8, &bounds);
-    return bounds.width();
+    // Measure using per-glyph advances (same method as fill_text) for consistency
+    int glyph_count = static_cast<int>(font.countText(text.c_str(), text.size(), SkTextEncoding::kUTF8));
+    if (glyph_count <= 0) return 0;
+
+    std::vector<SkGlyphID> glyphs(glyph_count);
+    font.textToGlyphs(text.c_str(), text.size(), SkTextEncoding::kUTF8,
+                      SkSpan<SkGlyphID>(glyphs.data(), glyph_count));
+
+    std::vector<SkScalar> widths(glyph_count);
+    font.getWidths(SkSpan<const SkGlyphID>(glyphs.data(), glyph_count),
+                   SkSpan<SkScalar>(widths.data(), glyph_count));
+
+    float total = 0;
+    for (int i = 0; i < glyph_count; ++i) total += widths[i];
+    return total;
 }
 
 Canvas::TextMetrics SkiaCanvas::measure_text_full(const std::string& text) {
     SkFont font = make_font(font_family_, font_size_);
+    if (!font.getTypeface()) return {font_size_ * text.size() * 0.5f, font_size_, 0, font_size_ * 0.8f};
 
     SkFontMetrics sk_metrics;
     font.getMetrics(&sk_metrics);

@@ -98,9 +98,10 @@ void ColorPicker::paint(canvas::Canvas& canvas) {
         }
     }
 
-    // SL cursor
-    float cx = sl.x + hsl_.s * sl.width;
-    float cy = sl.y + (1.0f - hsl_.l) * sl.height;
+    // SL cursor — inset by cursor radius to prevent edge clipping
+    float cursor_r = 6.0f;
+    float cx = sl.x + cursor_r + hsl_.s * (sl.width - 2.0f * cursor_r);
+    float cy = sl.y + cursor_r + (1.0f - hsl_.l) * (sl.height - 2.0f * cursor_r);
     canvas.set_stroke_color(Color::rgba8(255, 255, 255));
     canvas.set_line_width(2.0f);
     canvas.stroke_circle(cx, cy, 6.0f);
@@ -116,10 +117,11 @@ void ColorPicker::paint(canvas::Canvas& canvas) {
         canvas.set_fill_color(c);
         canvas.fill_rect(hb.x + i * hue_step, hb.y, hue_step + 0.5f, hb.height);
     }
-    // Hue cursor
-    float hue_x = hb.x + (hsl_.h / 360.0f) * hb.width;
+    // Hue cursor — inset by half cursor width to prevent edge clipping
+    float hue_cursor_w = 4.0f;
+    float hue_x = hb.x + hue_cursor_w * 0.5f + (hsl_.h / 360.0f) * (hb.width - hue_cursor_w);
     canvas.set_fill_color(Color::rgba8(255, 255, 255));
-    canvas.fill_rect(hue_x - 2, hb.y - 2, 4, hb.height + 4);
+    canvas.fill_rect(hue_x - 2, hb.y - 2, hue_cursor_w, hb.height + 4);
 
     // Alpha bar
     if (show_alpha_) {
@@ -131,9 +133,11 @@ void ColorPicker::paint(canvas::Canvas& canvas) {
             canvas.set_fill_color(c);
             canvas.fill_rect(ab.x + i * w, ab.y, w + 0.5f, ab.height);
         }
-        float alpha_x = ab.x + color_.a * ab.width;
+        // Alpha cursor — inset by half cursor width to prevent edge clipping
+        float alpha_cursor_w = 4.0f;
+        float alpha_x = ab.x + alpha_cursor_w * 0.5f + (static_cast<float>(color_.a) / 255.0f) * (ab.width - alpha_cursor_w);
         canvas.set_fill_color(Color::rgba8(255, 255, 255));
-        canvas.fill_rect(alpha_x - 2, ab.y - 2, 4, ab.height + 4);
+        canvas.fill_rect(alpha_x - 2, ab.y - 2, alpha_cursor_w, ab.height + 4);
     }
 
     // Swatches

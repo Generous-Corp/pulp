@@ -1,0 +1,322 @@
+#if defined(__ANDROID__)
+
+#include "demo_synth.hpp"
+#include <oboe/Oboe.h>
+#include <android/log.h>
+#include <sys/system_properties.h>
+#include <cmath>
+#include <algorithm>
+#include <cstring>
+#include <thread>
+#include <chrono>
+
+#define PULP_LOG_TAG "PulpAudio"
+#define PULP_LOGI(...) __android_log_print(ANDROID_LOG_INFO, PULP_LOG_TAG, __VA_ARGS__)
+#define PULP_LOGW(...) __android_log_print(ANDROID_LOG_WARN, PULP_LOG_TAG, __VA_ARGS__)
+#define PULP_LOGE(...) __android_log_print(ANDROID_LOG_ERROR, PULP_LOG_TAG, __VA_ARGS__)
+
+namespace pulp::demo {
+
+static SynthParams g_params;
+SynthParams& synth_params() { return g_params; }
+
+// ── Simple Subtractive Synth ─────────────────────────────────────────────
+// Two oscillators (saw + square mix), one-pole lowpass filter, ADSR envelope.
+// All parameters read from g_params via relaxed atomics — lock-free.
+
+class DemoSynth : public oboe::AudioStreamDataCallback,
+                  public oboe::AudioStreamErrorCallback {
+public:
+    // Detect emulator vs real device at runtime
+    static bool is_emulator() {
+        // Check for known emulator fingerprints
+        char prop[256] = {};
+        __system_property_get("ro.hardware", prop);
+        if (strstr(prop, "ranchu") || strstr(prop, "goldfish")) return true;
+        __system_property_get("ro.product.model", prop);
+        if (strstr(prop, "Emulator") || strstr(prop, "SDK")) return true;
+        __system_property_get("ro.build.characteristics", prop);
+        if (strstr(prop, "emulator")) return true;
+        return false;
+    }
+
+    bool start() {
+        bool emulator = is_emulator();
+        PULP_LOGI("DemoSynth: device=%s", emulator ? "EMULATOR" : "HARDWARE");
+
+        oboe::AudioStreamBuilder builder;
+        builder.setDirection(oboe::Direction::Output)
+            ->setFormat(oboe::AudioFormat::Float)
+            ->setChannelCount(oboe::ChannelCount::Stereo)
+            ->setDataCallback(this)
+            ->setErrorCallback(this);
+
+        if (emulator) {
+            // Emulator: conservative settings to avoid HAL pipe starvation.
+            // The Ranchu virtual audio HAL can't handle Exclusive or LowLatency
+            // when competing with heavy GPU work (Dawn shader compilation).
+            builder.setPerformanceMode(oboe::PerformanceMode::None)
+                ->setSharingMode(oboe::SharingMode::Shared)
+                ->setSampleRateConversionQuality(oboe::SampleRateConversionQuality::Medium);
+            PULP_LOGI("DemoSynth: using Shared/None mode (emulator-safe)");
+        } else {
+            // Real device: low-latency exclusive for best performance.
+            builder.setPerformanceMode(oboe::PerformanceMode::LowLatency)
+                ->setSharingMode(oboe::SharingMode::Exclusive)
+                ->setSampleRateConversionQuality(oboe::SampleRateConversionQuality::Best);
+            PULP_LOGI("DemoSynth: using Exclusive/LowLatency (hardware)");
+        }
+
+        auto result = builder.openManagedStream(stream_);
+        if (result != oboe::Result::OK) {
+            PULP_LOGI("DemoSynth: failed to open stream: %s", oboe::convertToText(result));
+            return false;
+        }
+
+        sample_rate_ = static_cast<float>(stream_->getSampleRate());
+        PULP_LOGI("DemoSynth: stream opened — %.0f Hz, %d frames/burst, api=%s, share=%d, perf=%d",
+                  sample_rate_, stream_->getFramesPerBurst(),
+                  stream_->getAudioApi() == oboe::AudioApi::AAudio ? "AAudio" : "OpenSLES",
+                  static_cast<int>(stream_->getSharingMode()),
+                  static_cast<int>(stream_->getPerformanceMode()));
+
+        result = stream_->requestStart();
+        if (result != oboe::Result::OK) {
+            PULP_LOGI("DemoSynth: failed to start: %s", oboe::convertToText(result));
+            return false;
+        }
+
+        playing_.store(true);
+        restart_count_ = 0;
+        PULP_LOGI("DemoSynth: playing");
+        return true;
+    }
+
+    void stop() {
+        playing_.store(false);
+        if (stream_) {
+            stream_->requestStop();
+            stream_->close();
+            stream_.reset();
+        }
+        PULP_LOGI("DemoSynth: stopped");
+    }
+
+    bool is_playing() const { return playing_.load(); }
+    float peak_level() const { return peak_level_.load(std::memory_order_relaxed); }
+    const float* waveform_snapshot() const {
+        int front = waveform_front_.load(std::memory_order_acquire);
+        return waveform_[front];
+    }
+
+private:
+    // Map 0..1 knob to frequency (MIDI note range 36..96)
+    float pitch_to_hz(float norm) {
+        float note = 36.0f + norm * 60.0f;  // C2 to C7
+        return 440.0f * std::pow(2.0f, (note - 69.0f) / 12.0f);
+    }
+
+    // Map 0..1 to filter cutoff Hz (20..20000, exponential)
+    float cutoff_to_hz(float norm) {
+        return 20.0f * std::pow(1000.0f, norm);
+    }
+
+    // One-pole lowpass coefficient from cutoff frequency
+    float lp_coeff(float cutoff_hz) {
+        float w = 2.0f * 3.14159265f * cutoff_hz / sample_rate_;
+        return std::clamp(w / (1.0f + w), 0.0f, 1.0f);
+    }
+
+    // Band-limited saw via naive with mild rolloff
+    float saw(float& phase, float freq) {
+        phase += freq / sample_rate_;
+        if (phase >= 1.0f) phase -= 2.0f;
+        return phase;
+    }
+
+    // Square from saw
+    float square(float phase) {
+        return phase >= 0.0f ? 0.5f : -0.5f;
+    }
+
+    // Simple ADSR (linear segments, per-sample)
+    float process_env(float a, float d, float s, float r) {
+        float a_rate = a > 0.001f ? 1.0f / (a * sample_rate_) : 1.0f;
+        float d_rate = d > 0.001f ? 1.0f / (d * sample_rate_) : 1.0f;
+        float r_rate = r > 0.001f ? 1.0f / (r * sample_rate_) : 1.0f;
+
+        switch (env_stage_) {
+            case 0: // attack
+                env_level_ += a_rate;
+                if (env_level_ >= 1.0f) { env_level_ = 1.0f; env_stage_ = 1; }
+                break;
+            case 1: // decay
+                env_level_ -= d_rate * (1.0f - s);
+                if (env_level_ <= s) { env_level_ = s; env_stage_ = 2; }
+                break;
+            case 2: // sustain
+                env_level_ = s;
+                break;
+            case 3: // release
+                env_level_ -= r_rate;
+                if (env_level_ <= 0.0f) { env_level_ = 0.0f; env_stage_ = 0; }
+                break;
+        }
+        return env_level_;
+    }
+
+    oboe::DataCallbackResult onAudioReady(
+        oboe::AudioStream*, void* audio_data, int32_t num_frames) override {
+
+        auto* out = static_cast<float*>(audio_data);
+        auto& p = g_params;
+
+        // Read all params once per buffer (relaxed is fine for audio)
+        float pitch = p.osc_pitch.load(std::memory_order_relaxed);
+        float detune = p.osc_detune.load(std::memory_order_relaxed);
+        float mix = p.osc_mix.load(std::memory_order_relaxed);
+        float level = p.osc_level.load(std::memory_order_relaxed);
+        float cutoff = p.filter_cutoff.load(std::memory_order_relaxed);
+        float reso = p.filter_reso.load(std::memory_order_relaxed);
+        float att = p.env_attack.load(std::memory_order_relaxed) * 2.0f;  // 0..2s
+        float dec = p.env_decay.load(std::memory_order_relaxed) * 2.0f;
+        float sus = p.env_sustain.load(std::memory_order_relaxed);
+        float rel = p.env_release.load(std::memory_order_relaxed) * 3.0f;
+        float master = p.master.load(std::memory_order_relaxed);
+        bool osc1 = p.osc1_on.load(std::memory_order_relaxed);
+        bool osc2 = p.osc2_on.load(std::memory_order_relaxed);
+        bool osc3 = p.osc3_on.load(std::memory_order_relaxed);
+        bool osc4 = p.osc4_on.load(std::memory_order_relaxed);
+        // Channel faders control per-oscillator volume
+        float ch1_vol = p.mix1.load(std::memory_order_relaxed);
+        float ch2_vol = p.mix2.load(std::memory_order_relaxed);
+        float ch3_vol = p.mix3.load(std::memory_order_relaxed);
+        float ch4_vol = p.mix4.load(std::memory_order_relaxed);
+
+        float freq1 = pitch_to_hz(pitch);
+        float freq2 = freq1 * (1.0f + detune * 0.02f);  // slight detune
+        float freq3 = freq1 * 2.0f;                      // octave up
+        float freq4 = freq1 * 0.5f;                      // octave down
+        float cut_hz = cutoff_to_hz(cutoff);
+        float coeff = lp_coeff(cut_hz);
+        float feedback = reso * 0.9f;  // resonance feedback
+        float peak = 0.0f;
+
+        for (int i = 0; i < num_frames; ++i) {
+            // Oscillators — toggle enables, channel fader controls volume
+            float osc = 0.0f;
+            if (osc1) {  // Base pitch — CH 1
+                float s = saw(phase1_, freq1);
+                osc += ((1.0f - mix) * s + mix * square(phase1_)) * ch1_vol;
+            }
+            if (osc2) {  // Detuned — CH 2
+                float s = saw(phase2_, freq2);
+                osc += ((1.0f - mix) * s + mix * square(phase2_)) * ch2_vol;
+            }
+            if (osc3) {  // Octave up — CH 3
+                float s = saw(phase3_, freq3);
+                osc += ((1.0f - mix) * s + mix * square(phase3_)) * ch3_vol * 0.7f;
+            }
+            if (osc4) {  // Sub octave — CH 4
+                float s = saw(phase4_, freq4);
+                osc += s * ch4_vol * 0.8f;
+            }
+
+            // Envelope
+            float env = process_env(att, dec, sus, rel);
+
+            // Filter (one-pole with resonance feedback)
+            float input = osc * env * level - filter_state_ * feedback;
+            filter_state_ += coeff * (input - filter_state_);
+            float filtered = filter_state_;
+
+            // Output — level is 0..1 from UI, scale up for audibility
+            float sample = filtered * master * 0.7f;
+            sample = std::clamp(sample, -1.0f, 1.0f);
+            peak = std::max(peak, std::abs(sample));
+
+            // Stereo (slight pan spread)
+            out[i * 2]     = sample * 0.95f;  // L
+            out[i * 2 + 1] = sample;          // R
+        }
+
+        // Update peak for visual metering (relaxed — UI reads it)
+        peak_level_.store(peak, std::memory_order_relaxed);
+
+        // Capture waveform snapshot for oscilloscope display.
+        // Write to back buffer, swap to front when full.
+        int back = 1 - waveform_front_.load(std::memory_order_relaxed);
+        for (int i = 0; i < num_frames; ++i) {
+            if (waveform_write_pos_ < kWaveformSize) {
+                waveform_[back][waveform_write_pos_++] = out[i * 2];  // L channel
+            }
+            if (waveform_write_pos_ >= kWaveformSize) {
+                waveform_front_.store(back, std::memory_order_release);
+                back = 1 - back;
+                waveform_write_pos_ = 0;
+            }
+        }
+
+        return oboe::DataCallbackResult::Continue;
+    }
+
+    void onErrorAfterClose(oboe::AudioStream*, oboe::Result error) override {
+        if (!playing_.load()) return;
+
+        restart_count_++;
+        if (restart_count_ > 5) {
+            PULP_LOGE("DemoSynth: stream error — %s. Giving up after %d restarts. "
+                      "If on emulator, launch with: QEMU_AUDIO_DRV=coreaudio emulator -gpu host",
+                      oboe::convertToText(error), restart_count_);
+            playing_.store(false);
+            return;
+        }
+
+        PULP_LOGW("DemoSynth: stream error — %s. Restarting (attempt %d/5)...",
+                  oboe::convertToText(error), restart_count_);
+
+        // Brief delay before restart to avoid tight retry loops
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        start();
+    }
+
+    oboe::ManagedStream stream_;
+    std::atomic<bool> playing_{false};
+    int restart_count_ = 0;
+    float sample_rate_ = 48000.0f;
+
+    // Waveform double buffer — audio writes to back, UI reads from front
+    float waveform_[2][kWaveformSize] = {};
+    std::atomic<int> waveform_front_{0};  // 0 or 1
+    int waveform_write_pos_ = 0;
+
+    // Oscillator state (4 voices)
+    float phase1_ = 0.0f;
+    float phase2_ = 0.0f;
+    float phase3_ = 0.0f;
+    float phase4_ = 0.0f;
+
+    // Filter state
+    float filter_state_ = 0.0f;
+
+    // Envelope state
+    float env_level_ = 0.0f;
+    int env_stage_ = 0;  // 0=attack, 1=decay, 2=sustain, 3=release
+
+    // Peak metering (for visual indicator)
+    std::atomic<float> peak_level_{0.0f};
+};
+
+static DemoSynth g_synth;
+
+bool synth_start() { return g_synth.start(); }
+void synth_stop() { g_synth.stop(); }
+bool synth_is_playing() { return g_synth.is_playing(); }
+float synth_peak_level() { return g_synth.peak_level(); }
+const float* synth_waveform_snapshot() {
+    return g_synth.waveform_snapshot();
+}
+
+} // namespace pulp::demo
+
+#endif // __ANDROID__

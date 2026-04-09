@@ -22,8 +22,12 @@ target_link_libraries(pulp-format
         pulp::midi
         pulp::state
         pulp::view
-        pulp::inspect
 )
+if(NOT ANDROID)
+    # Inspector is desktop-only; it's defined later in the CMake order,
+    # so we link by name rather than using if(TARGET ...).
+    target_link_libraries(pulp-format PUBLIC pulp::inspect)
+endif()
 
 # VST3 adapter (when SDK is available)
 if(PULP_HAS_VST3)

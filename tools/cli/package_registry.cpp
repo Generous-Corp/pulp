@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cctype>
 #include <fstream>
+#include <memory>
 #include <regex>
 #include <sstream>
 
@@ -49,12 +50,29 @@ struct JsonValue {
     bool bool_val = false;
     double num_val = 0;
     std::string str_val;
-    std::vector<JsonValue> arr;
-    std::vector<std::pair<std::string, JsonValue>> obj;
+    std::unique_ptr<std::vector<JsonValue>> arr_ptr;
+    std::unique_ptr<std::vector<std::pair<std::string, JsonValue>>> obj_ptr;
+
+    std::vector<JsonValue>& arr() {
+        if (!arr_ptr) arr_ptr = std::make_unique<std::vector<JsonValue>>();
+        return *arr_ptr;
+    }
+    const std::vector<JsonValue>& arr() const {
+        static const std::vector<JsonValue> empty;
+        return arr_ptr ? *arr_ptr : empty;
+    }
+    std::vector<std::pair<std::string, JsonValue>>& obj() {
+        if (!obj_ptr) obj_ptr = std::make_unique<std::vector<std::pair<std::string, JsonValue>>>();
+        return *obj_ptr;
+    }
+    const std::vector<std::pair<std::string, JsonValue>>& obj() const {
+        static const std::vector<std::pair<std::string, JsonValue>> empty;
+        return obj_ptr ? *obj_ptr : empty;
+    }
 
     const JsonValue* get(const std::string& key) const {
         if (type != Object) return nullptr;
-        for (auto& [k, v] : obj)
+        for (auto& [k, v] : obj())
             if (k == key) return &v;
         return nullptr;
     }
@@ -70,7 +88,7 @@ struct JsonValue {
     std::vector<std::string> as_string_array() const {
         std::vector<std::string> r;
         if (type == Array)
-            for (auto& v : arr)
+            for (auto& v : arr())
                 if (v.type == String) r.push_back(v.str_val);
         return r;
     }
@@ -147,7 +165,7 @@ struct JsonParser {
             auto key = parse_string();
             next();  // skip ':'
             auto val = parse_value();
-            r.obj.push_back({key, val});
+            r.obj().push_back({std::move(key), std::move(val)});
             if (peek() == '}') { next(); return r; }
             next();  // skip ','
         }
@@ -159,7 +177,7 @@ struct JsonParser {
         next();  // skip '['
         if (peek() == ']') { next(); return r; }
         while (true) {
-            r.arr.push_back(parse_value());
+            r.arr().push_back(std::move(parse_value()));
             if (peek() == ']') { next(); return r; }
             next();  // skip ','
         }
@@ -316,7 +334,7 @@ static PackageDescriptor parse_package(const std::string& id, const JsonValue& j
     }
 
     if (auto p = j.get("platforms"); p && p->type == JsonValue::Object) {
-        for (auto& [name, val] : p->obj) {
+        for (auto& [name, val] : p->obj()) {
             PlatformSupport ps;
             if (auto a = val.get("architectures")) ps.architectures = a->as_string_array();
             if (auto n = val.get("notes")) ps.notes = n->as_string();
@@ -325,7 +343,7 @@ static PackageDescriptor parse_package(const std::string& id, const JsonValue& j
     }
 
     if (auto o = j.get("overlaps_with_builtin"); o && o->type == JsonValue::Object) {
-        for (auto& [k, v] : o->obj)
+        for (auto& [k, v] : o->obj())
             pkg.overlaps_with_builtin[k] = v.as_string();
     }
 
@@ -333,7 +351,7 @@ static PackageDescriptor parse_package(const std::string& id, const JsonValue& j
         if (auto v = ver->get("last_verified")) pkg.verification.last_verified = v->as_string();
         if (auto v = ver->get("verified_version")) pkg.verification.verified_version = v->as_string();
         if (auto bs = ver->get("build_status"); bs && bs->type == JsonValue::Object) {
-            for (auto& [k, v] : bs->obj)
+            for (auto& [k, v] : bs->obj())
                 pkg.verification.build_status[k] = v.as_string();
         }
     }
@@ -361,7 +379,7 @@ RegistryLoadResult load_registry(const fs::path& registry_path) {
         result.registry.version = v->as_int();
 
     if (auto pkgs = root.get("packages"); pkgs && pkgs->type == JsonValue::Object) {
-        for (auto& [id, val] : pkgs->obj)
+        for (auto& [id, val] : pkgs->obj())
             result.registry.packages[id] = parse_package(id, val);
     }
 
@@ -382,7 +400,7 @@ LockFile load_lock_file(const fs::path& path) {
     if (auto v = root.get("lockfile_version")) lock.version = v->as_int();
 
     if (auto pkgs = root.get("packages"); pkgs && pkgs->type == JsonValue::Object) {
-        for (auto& [id, val] : pkgs->obj) {
+        for (auto& [id, val] : pkgs->obj()) {
             LockedPackage lp;
             if (auto v = val.get("version")) lp.version = v->as_string();
             if (auto v = val.get("resolved")) lp.resolved = v->as_string();

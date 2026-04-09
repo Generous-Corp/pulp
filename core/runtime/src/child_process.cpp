@@ -6,7 +6,9 @@
 #include <unistd.h>
 #include <sys/wait.h>
 #include <signal.h>
+#ifndef __ANDROID__
 #include <spawn.h>
+#endif
 #include <poll.h>
 #endif
 
@@ -140,6 +142,27 @@ std::optional<ProcessResult> run_process(
         argv.push_back(a.c_str());
     argv.push_back(nullptr);
 
+    pid_t pid;
+    int status;
+
+#ifdef __ANDROID__
+    // Android Bionic doesn't support posix_spawn on older API levels.
+    // Use fork/exec instead.
+    (void)working_dir;
+    pid = fork();
+    if (pid == 0) {
+        // Child process
+        dup2(stdout_pipe[1], STDOUT_FILENO);
+        dup2(stderr_pipe[1], STDERR_FILENO);
+        ::close(stdout_pipe[0]);
+        ::close(stderr_pipe[0]);
+        ::close(stdout_pipe[1]);
+        ::close(stderr_pipe[1]);
+        execvp(exe_str.c_str(), const_cast<char**>(argv.data()));
+        _exit(127);  // exec failed
+    }
+    status = (pid > 0) ? 0 : -1;
+#else
     posix_spawn_file_actions_t actions;
     posix_spawn_file_actions_init(&actions);
     posix_spawn_file_actions_adddup2(&actions, stdout_pipe[1], STDOUT_FILENO);
@@ -161,10 +184,10 @@ std::optional<ProcessResult> run_process(
     (void)working_dir;  // Not supported on this platform
 #endif
 
-    pid_t pid;
-    int status = posix_spawn(&pid, exe_str.c_str(), &actions, nullptr,
+    status = posix_spawn(&pid, exe_str.c_str(), &actions, nullptr,
                              const_cast<char**>(argv.data()), environ);
     posix_spawn_file_actions_destroy(&actions);
+#endif
 
     ::close(stdout_pipe[1]);
     ::close(stderr_pipe[1]);
@@ -220,9 +243,18 @@ int launch_process(std::string_view executable, const std::vector<std::string>& 
     argv.push_back(nullptr);
 
     pid_t pid;
+#ifdef __ANDROID__
+    pid = fork();
+    if (pid == 0) {
+        execvp(exe_str.c_str(), const_cast<char**>(argv.data()));
+        _exit(127);
+    }
+    return (pid > 0) ? static_cast<int>(pid) : -1;
+#else
     int status = posix_spawn(&pid, exe_str.c_str(), nullptr, nullptr,
                              const_cast<char**>(argv.data()), environ);
     return (status == 0) ? static_cast<int>(pid) : -1;
+#endif
 }
 
 bool is_process_running(int pid) {

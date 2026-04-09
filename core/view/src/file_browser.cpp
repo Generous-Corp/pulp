@@ -177,6 +177,10 @@ void ContentSharer::share_text(const std::string&, void*) {
     // Windows: no universal text share API; would need UWP DataTransferManager
 }
 
+#elif defined(__ANDROID__)
+// Android: file sharing is done through JNI/Intent — stub for now
+void ContentSharer::share_file(const std::filesystem::path&, void*) {}
+void ContentSharer::share_text(const std::string&, void*) {}
 #else
 #include <spawn.h>
 extern "C" { extern char** environ; }

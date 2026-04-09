@@ -36,12 +36,13 @@ elseif(WIN32)
     target_link_libraries(pulp-midi PRIVATE
         winmm
     )
-elseif(UNIX AND NOT APPLE)
+elseif(UNIX AND NOT APPLE AND NOT ANDROID)
     target_sources(pulp-midi PRIVATE
         platform/linux/alsa_midi_device.cpp
     )
     find_package(ALSA REQUIRED)
     target_link_libraries(pulp-midi PRIVATE ALSA::ALSA)
+# Android MIDI wired via PulpAndroid.cmake → pulp_wire_android_sources()
 else()
     target_sources(pulp-midi PRIVATE src/placeholder.cpp)
     file(WRITE ${CMAKE_CURRENT_SOURCE_DIR}/src/placeholder.cpp

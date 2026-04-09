@@ -18,6 +18,42 @@ namespace pulp::signal {
 // On Apple platforms, uses vDSP for significantly faster large transforms.
 class Fft {
 public:
+    Fft() = default;
+
+    // Non-copyable (vDSP_setup handle), movable
+    Fft(const Fft&) = delete;
+    Fft& operator=(const Fft&) = delete;
+
+    Fft(Fft&& other) noexcept
+        : size_(other.size_), twiddles_(std::move(other.twiddles_))
+#if PULP_FFT_HAS_VDSP
+        , log2n_(other.log2n_), vdsp_setup_(other.vdsp_setup_)
+        , split_real_(std::move(other.split_real_)), split_imag_(std::move(other.split_imag_))
+#endif
+    {
+#if PULP_FFT_HAS_VDSP
+        other.vdsp_setup_ = nullptr;  // Prevent double-free
+#endif
+        other.size_ = 0;
+    }
+
+    Fft& operator=(Fft&& other) noexcept {
+        if (this != &other) {
+#if PULP_FFT_HAS_VDSP
+            if (vdsp_setup_) vDSP_destroy_fftsetup(vdsp_setup_);
+            vdsp_setup_ = other.vdsp_setup_;
+            other.vdsp_setup_ = nullptr;
+            log2n_ = other.log2n_;
+            split_real_ = std::move(other.split_real_);
+            split_imag_ = std::move(other.split_imag_);
+#endif
+            size_ = other.size_;
+            other.size_ = 0;
+            twiddles_ = std::move(other.twiddles_);
+        }
+        return *this;
+    }
+
     explicit Fft(int size) : size_(size) {
 #if PULP_FFT_HAS_VDSP
         // Use vDSP for FFT — much faster for large sizes

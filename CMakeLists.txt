@@ -26,6 +26,7 @@ endif()
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 # ── Platform Detection ──────────────────────────────────────────────────────
+# Note: ANDROID must be checked before UNIX because Android is also UNIX.
 if(APPLE)
     if(CMAKE_SYSTEM_NAME STREQUAL "iOS")
         set(PULP_IOS TRUE)
@@ -38,12 +39,12 @@ if(APPLE)
 elseif(WIN32)
     set(PULP_WINDOWS TRUE)
     set(PULP_PLATFORM "win")
-elseif(UNIX)
-    set(PULP_LINUX TRUE)
-    set(PULP_PLATFORM "linux")
 elseif(ANDROID)
     set(PULP_ANDROID TRUE)
     set(PULP_PLATFORM "android")
+elseif(UNIX)
+    set(PULP_LINUX TRUE)
+    set(PULP_PLATFORM "linux")
 endif()
 
 message(STATUS "Pulp ${PROJECT_VERSION} — platform: ${PULP_PLATFORM}")
@@ -93,7 +94,8 @@ FetchContent_MakeAvailable(choc)
 
 # WebGPU (Dawn) — cross-platform GPU abstraction (BSD-3-Clause)
 # Uses eliemichel/WebGPU-distribution for CMake-friendly integration
-if(PULP_ENABLE_GPU)
+# On Android, Dawn is bundled in Skia's pre-built libs — skip FetchContent.
+if(PULP_ENABLE_GPU AND NOT ANDROID)
     pulp_register_fetchcontent_source(webgpu REF 17dcd42a7683355e7a40ac4e97e77f36dff5b5ab)
     pulp_register_wgpu_native_precompiled_source(v24.0.3.1)
     FetchContent_Declare(
@@ -127,11 +129,18 @@ if(PULP_ENABLE_GPU)
     set(PULP_HAS_WEBGPU TRUE)
     message(STATUS "Pulp: WebGPU (Dawn) enabled")
 
-    # Skia Graphite — GPU-accelerated 2D rendering (BSD-3-Clause)
-    # Pre-built via skia-builder (https://github.com/olilarkin/skia-builder)
+endif()
+
+# Skia Graphite — GPU-accelerated 2D rendering (BSD-3-Clause)
+# Pre-built via skia-builder (desktop) or build-skia-android.sh (Android)
+if(PULP_ENABLE_GPU)
     include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/FindSkia.cmake)
     if(SKIA_FOUND)
         set(PULP_HAS_SKIA TRUE)
+        # On Android, Dawn is bundled in Skia — set the flag so render subsystem builds
+        if(ANDROID)
+            set(PULP_HAS_WEBGPU TRUE)
+        endif()
 
         # Text shaping via SkParagraph (HarfBuzz + ICU, bundled in Skia pre-built)
         if(PULP_TEXT_SHAPING)
@@ -144,7 +153,6 @@ if(PULP_ENABLE_GPU)
             set(PULP_TEXT_SHAPING OFF)
         endif()
     endif()
-
 endif()
 
 # Text shaping requires GPU/Skia — validate even when GPU is off
@@ -353,6 +361,11 @@ else()
     message(STATUS "Pulp: AudioUnitSDK not found — AU v2 format disabled")
 endif()
 
+# ── Android NDK Support ───────────────────────────────────────────────────
+if(ANDROID)
+    include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpAndroid.cmake)
+endif()
+
 # ── Core Subsystems ─────────────────────────────────────────────────────────
 # Order matters: dependencies first
 add_subdirectory(core/platform)
@@ -364,14 +377,18 @@ add_subdirectory(core/midi)
 add_subdirectory(core/signal)
 add_subdirectory(core/format)
 add_subdirectory(core/canvas)
+# Render must come before view so pulp-view can link pulp-render via if(TARGET)
+if(PULP_ENABLE_GPU)
+    add_subdirectory(core/render)
+endif()
 add_subdirectory(core/view)
 add_subdirectory(core/osc)
 add_subdirectory(core/host)
 add_subdirectory(core/dsl)
 
-# ── Optional Subsystems ────────────────────────────────────────────────────
-if(PULP_ENABLE_GPU)
-    add_subdirectory(core/render)
+# Wire Android-specific sources into subsystem targets (must come after add_subdirectory)
+if(ANDROID)
+    pulp_wire_android_sources()
 endif()
 
 add_library(pulp-standalone STATIC
@@ -395,14 +412,14 @@ target_link_libraries(pulp-standalone
         $<INSTALL_INTERFACE:Pulp::sdl3-static>
 )
 
-if(PULP_ENABLE_GPU)
+if(PULP_ENABLE_GPU AND NOT ANDROID)
     add_subdirectory(inspect)
 endif()
 add_subdirectory(ship)
 add_subdirectory(tools/audio)
 
 # ── Testing ─────────────────────────────────────────────────────────────────
-if(PULP_BUILD_TESTS)
+if(PULP_BUILD_TESTS AND NOT ANDROID)
     enable_testing()
     include(FetchContent)
     pulp_register_fetchcontent_source(Catch2 DIR catch2 REF v3.7.1)
@@ -421,11 +438,15 @@ endif()
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake")
 include(PulpUtils)
 
-# ── CLI Tool ───────────────────────────────────────────────────────────────
-add_subdirectory(tools/cli)
+# ── CLI Tool (desktop only) ────────────────────────────────────────────────
+if(NOT ANDROID)
+    add_subdirectory(tools/cli)
+endif()
 
-# ── MCP Server ─────────────────────────────────────────────────────────────
-add_subdirectory(tools/mcp)
+# ── MCP Server (desktop only) ─────────────────────────────────────────────
+if(NOT ANDROID)
+    add_subdirectory(tools/mcp)
+endif()
 
 # ── Screenshot Tool ────────────────────────────────────────────────────────
 add_subdirectory(tools/screenshot)
@@ -451,12 +472,59 @@ if(PULP_BUILD_NODEJS)
 endif()
 
 # ── Examples ────────────────────────────────────────────────────────────────
-if(PULP_BUILD_EXAMPLES)
+if(PULP_BUILD_EXAMPLES AND NOT ANDROID)
     add_subdirectory(examples)
+endif()
+
+# ── Android Shared Library ─────────────────────────────────────────────────
+# Android apps load native code via System.loadLibrary("pulp") which expects
+# a single libpulp.so shared library. This thin .so links all Pulp static
+# libraries and exports the JNI_OnLoad entry point.
+if(ANDROID)
+    add_library(pulp-jni SHARED
+        core/platform/src/android/jni_bridge.cpp
+    )
+    set_target_properties(pulp-jni PROPERTIES OUTPUT_NAME "pulp")
+    target_include_directories(pulp-jni PRIVATE
+        ${CMAKE_SOURCE_DIR}/core/platform/include
+    )
+    target_link_libraries(pulp-jni PRIVATE
+        pulp::platform
+        pulp::runtime
+        pulp::events
+        pulp::state
+        pulp::audio
+        pulp::midi
+        pulp::signal
+        pulp::format
+        pulp::canvas
+        pulp::view
+        pulp::osc
+        pulp::host
+        pulp::dsl
+        pulp::standalone
+        oboe
+        android
+        log
+    )
+    # Ensure all static library symbols are included (needed for JNI registration)
+    # Ensure JNI exports from static libs are included in the shared lib.
+    # Without --whole-archive, the linker strips "unused" JNI_OnLoad and
+    # Java_* functions since nothing in the .so itself references them.
+    target_link_options(pulp-jni PRIVATE
+        -Wl,--whole-archive
+        $<TARGET_FILE:pulp-platform>
+        $<TARGET_FILE:pulp-audio>
+        $<$<TARGET_EXISTS:pulp-render>:$<TARGET_FILE:pulp-render>>
+        -Wl,--no-whole-archive)
 endif()
 
 # ── SDK Install Rules ──────────────────────────────────────────────────────
 # cmake --install build --prefix <staging> produces a complete Pulp SDK
+# Android builds use Gradle for packaging — skip CMake install rules.
+if(ANDROID)
+    return()
+endif()
 include(GNUInstallDirs)
 
 # Core libraries for SDK packaging. Standalone projects need the same runtime
@@ -501,6 +569,13 @@ if(PULP_HAS_VST3)
 endif()
 if(PULP_HAS_CLAP)
     install(TARGETS clap EXPORT PulpTargets)
+endif()
+if(PULP_HAS_OBOE AND TARGET oboe)
+    install(TARGETS oboe
+        EXPORT PulpTargets
+        ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    )
 endif()
 if(PULP_HAS_LV2)
     install(TARGETS lv2-headers EXPORT PulpTargets)

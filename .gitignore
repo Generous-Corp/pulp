@@ -58,3 +58,13 @@ tools/local-ci/results/
 examples/web-demos/wasm-build/build/
 /.private/
 test/assets/
+android/app/.cxx/
+android/app/build/
+android/local.properties
+android/.gradle/
+build-android/
+android/.gradle/
+android/app/.cxx/
+android/app/build/
+external/skia-src/
+external/skia-build/android-gpu/

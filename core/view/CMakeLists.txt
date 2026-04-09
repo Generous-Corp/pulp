@@ -180,11 +180,12 @@ if(PULP_BUILD_WEBVIEW)
     target_sources(pulp-view PRIVATE src/web_view.cpp)
     if(APPLE AND NOT PULP_IOS)
         target_link_libraries(pulp-view PRIVATE "-framework WebKit")
-    elseif(UNIX AND NOT APPLE)
+    elseif(UNIX AND NOT APPLE AND NOT ANDROID)
         find_package(PkgConfig REQUIRED)
         pkg_check_modules(GTK3 REQUIRED IMPORTED_TARGET gtk+-3.0)
         pkg_check_modules(WEBKIT2GTK REQUIRED IMPORTED_TARGET webkit2gtk-4.1)
         target_link_libraries(pulp-view PRIVATE PkgConfig::GTK3 PkgConfig::WEBKIT2GTK)
+    # Android: WebView is handled by the Kotlin layer, not native GTK
     endif()
 endif()
 
@@ -270,6 +271,13 @@ elseif(WIN32)
         platform/win/accessibility_win.cpp
         platform/win/appearance_win.cpp
     )
+elseif(ANDROID)
+    target_sources(pulp-view PRIVATE
+        src/plugin_view_host_stub.cpp
+        src/screenshot_stub.cpp
+        src/window_host_stub.cpp
+    )
+    # Android accessibility wired via Kotlin TalkBack integration
 elseif(UNIX)
     target_sources(pulp-view PRIVATE
         src/plugin_view_host_stub.cpp

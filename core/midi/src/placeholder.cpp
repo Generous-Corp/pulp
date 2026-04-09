@@ -1,2 +1,2 @@
-// pulp-midi: placeholder — replaced in Phase 2+
+// pulp-midi: platform backend pending
 namespace pulp::midi {}

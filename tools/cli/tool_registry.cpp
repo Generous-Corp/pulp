@@ -104,7 +104,7 @@ ToolRegistryLoadResult load_tool_registry(const fs::path& path) {
         result.registry.schema_version = v->as_int();
 
     if (auto tools = root.get("tools"); tools && tools->type == JsonValue::Object) {
-        for (auto& [id, val] : tools->obj) {
+        for (auto& [id, val] : tools->obj()) {
             ToolDescriptor tool;
             tool.id = id;
             if (auto v = val.get("display_name")) tool.display_name = v->as_string();
@@ -119,7 +119,7 @@ ToolRegistryLoadResult load_tool_registry(const fs::path& path) {
             if (auto v = val.get("bundleable")) tool.bundleable = v->as_bool();
 
             if (auto bs = val.get("binary_sources"); bs && bs->type == JsonValue::Object) {
-                for (auto& [platform, src] : bs->obj) {
+                for (auto& [platform, src] : bs->obj()) {
                     BinarySource s;
                     if (auto v = src.get("url_template")) s.url_template = v->as_string();
                     if (auto v = src.get("archive_format")) s.archive_format = v->as_string();

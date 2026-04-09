@@ -40,6 +40,8 @@ if(APPLE)
     endif()
 elseif(WIN32)
     set(_skia_platform "win")
+elseif(ANDROID)
+    set(_skia_platform "android")
 elseif(UNIX)
     set(_skia_platform "linux")
 else()
@@ -72,25 +74,50 @@ else()
     set(_dawn_lib_name "libdawn_combined.a")
 endif()
 
-find_library(SKIA_LIBRARY
-    NAMES ${_skia_lib_name} skia
-    PATHS ${_skia_lib_dir}
-    NO_DEFAULT_PATH
-)
+# find_library doesn't work reliably in cross-compilation (Android NDK restricts
+# search to sysroot). Use direct path check instead.
+set(SKIA_LIBRARY "${_skia_lib_dir}/${_skia_lib_name}")
+set(DAWN_LIBRARY "${_skia_lib_dir}/${_dawn_lib_name}")
 
-find_library(DAWN_LIBRARY
-    NAMES ${_dawn_lib_name} dawn_combined
-    PATHS ${_skia_lib_dir}
-    NO_DEFAULT_PATH
-)
+if(NOT EXISTS "${SKIA_LIBRARY}")
+    set(SKIA_LIBRARY "SKIA_LIBRARY-NOTFOUND")
+endif()
+if(NOT EXISTS "${DAWN_LIBRARY}")
+    set(DAWN_LIBRARY "DAWN_LIBRARY-NOTFOUND")
+endif()
 
-if(SKIA_LIBRARY AND EXISTS "${_skia_include_dir}")
+if(EXISTS "${SKIA_LIBRARY}" AND EXISTS "${_skia_include_dir}")
     set(SKIA_FOUND TRUE)
-    # Include dirs: Skia headers + Dawn headers (both source and generated)
-    set(SKIA_INCLUDE_DIRS
-        "${_skia_include_dir}"
-        "${_skia_include_dir}/include"
-    )
+    # Include dirs: Skia headers, modules, and Dawn headers
+    # Skia code uses both `#include "include/core/Sk*.h"` (root-relative)
+    # and `#include "core/Sk*.h"` (include-relative). Add both.
+    set(SKIA_INCLUDE_DIRS "${_skia_include_dir}")
+    # If _skia_include_dir IS the include/ dir, also add its parent for root-relative includes
+    if("${_skia_include_dir}" MATCHES "/include$")
+        get_filename_component(_skia_root_dir "${_skia_include_dir}" DIRECTORY)
+        list(APPEND SKIA_INCLUDE_DIRS "${_skia_root_dir}")
+    endif()
+    # SkParagraph, skshaper, svg, skottie module headers
+    foreach(_mod skparagraph skshaper svg skottie)
+        if(EXISTS "${SKIA_DIR}/modules/${_mod}/include")
+            list(APPEND SKIA_INCLUDE_DIRS "${SKIA_DIR}/modules/${_mod}/include")
+        endif()
+    endforeach()
+    # Skia headers reference src/ and modules/ from the source tree.
+    # If skia-src exists (built from source), add it and Dawn as include paths.
+    if(EXISTS "${SKIA_DIR}/../skia-src/src/core")
+        get_filename_component(_skia_src_abs "${SKIA_DIR}/../skia-src" ABSOLUTE)
+        list(APPEND SKIA_INCLUDE_DIRS "${_skia_src_abs}")
+        # Dawn headers (source + generated)
+        if(EXISTS "${_skia_src_abs}/third_party/externals/dawn/include")
+            list(APPEND SKIA_INCLUDE_DIRS "${_skia_src_abs}/third_party/externals/dawn/include")
+        endif()
+        # Generated Dawn headers (webgpu.h, dawn_proc_table.h)
+        file(GLOB _dawn_gen_dirs "${_skia_src_abs}/out/*/gen/third_party/dawn/include")
+        foreach(_d ${_dawn_gen_dirs})
+            list(APPEND SKIA_INCLUDE_DIRS "${_d}")
+        endforeach()
+    endif()
     # Dawn headers from skia-builder
     if(EXISTS "${_skia_include_dir}/third_party/externals/dawn/include")
         list(APPEND SKIA_INCLUDE_DIRS "${_skia_include_dir}/third_party/externals/dawn/include")
@@ -117,6 +144,11 @@ if(SKIA_LIBRARY AND EXISTS "${_skia_include_dir}")
             set_property(TARGET skia::skia APPEND PROPERTY
                 INTERFACE_LINK_LIBRARIES
                     "-framework Metal;-framework MetalKit;-framework CoreFoundation;-framework CoreGraphics;-framework CoreText;-framework Foundation;-framework IOKit;-framework IOSurface;-framework QuartzCore"
+            )
+        elseif(ANDROID)
+            set_property(TARGET skia::skia APPEND PROPERTY
+                INTERFACE_LINK_LIBRARIES
+                    "vulkan;android;log;EGL;GLESv2"
             )
         endif()
     endif()

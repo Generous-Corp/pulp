@@ -3,24 +3,46 @@
 // strings, numbers, booleans, null. No external dependencies.
 #pragma once
 
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
 
 namespace pulp::cli::pkg {
 
+// JsonValue is recursive (contains vectors of itself). GCC 13 requires
+// the type to be complete when instantiating std::vector<T>. Using
+// unique_ptr<vector> defers the completeness requirement.
 struct JsonValue {
     enum Type { Null, Bool, Number, String, Array, Object };
     Type type = Null;
     bool bool_val = false;
     double num_val = 0;
     std::string str_val;
-    std::vector<JsonValue> arr;
-    std::vector<std::pair<std::string, JsonValue>> obj;
+    std::unique_ptr<std::vector<JsonValue>> arr_ptr;
+    std::unique_ptr<std::vector<std::pair<std::string, JsonValue>>> obj_ptr;
+
+    // Accessors that lazily create the vectors
+    std::vector<JsonValue>& arr() {
+        if (!arr_ptr) arr_ptr = std::make_unique<std::vector<JsonValue>>();
+        return *arr_ptr;
+    }
+    const std::vector<JsonValue>& arr() const {
+        static const std::vector<JsonValue> empty;
+        return arr_ptr ? *arr_ptr : empty;
+    }
+    std::vector<std::pair<std::string, JsonValue>>& obj() {
+        if (!obj_ptr) obj_ptr = std::make_unique<std::vector<std::pair<std::string, JsonValue>>>();
+        return *obj_ptr;
+    }
+    const std::vector<std::pair<std::string, JsonValue>>& obj() const {
+        static const std::vector<std::pair<std::string, JsonValue>> empty;
+        return obj_ptr ? *obj_ptr : empty;
+    }
 
     const JsonValue* get(const std::string& key) const {
         if (type != Object) return nullptr;
-        for (auto& [k, v] : obj)
+        for (auto& [k, v] : obj())
             if (k == key) return &v;
         return nullptr;
     }
@@ -35,7 +57,7 @@ struct JsonValue {
     std::vector<std::string> as_string_array() const {
         std::vector<std::string> r;
         if (type == Array)
-            for (auto& v : arr)
+            for (auto& v : arr())
                 if (v.type == String) r.push_back(v.str_val);
         return r;
     }
@@ -109,7 +131,7 @@ struct JsonParser {
             auto key = parse_string();
             next();
             auto val = parse_value();
-            r.obj.push_back({key, val});
+            r.obj().push_back({std::move(key), std::move(val)});
             if (peek() == '}') { next(); return r; }
             next();
         }
@@ -120,7 +142,7 @@ struct JsonParser {
         next();
         if (peek() == ']') { next(); return r; }
         while (true) {
-            r.arr.push_back(parse_value());
+            r.arr().push_back(std::move(parse_value()));
             if (peek() == ']') { next(); return r; }
             next();
         }

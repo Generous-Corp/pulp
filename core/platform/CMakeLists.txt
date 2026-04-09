@@ -31,6 +31,11 @@ elseif(WIN32)
         platform/win/clipboard_win.cpp
         platform/win/child_process_win.cpp
     )
+elseif(ANDROID)
+    # Android platform sources wired via PulpAndroid.cmake → pulp_wire_android_sources()
+    target_sources(pulp-platform PRIVATE
+        platform/posix/child_process_posix.cpp
+    )
 elseif(UNIX AND NOT APPLE)
     target_sources(pulp-platform PRIVATE
         platform/linux/clipboard_linux.cpp

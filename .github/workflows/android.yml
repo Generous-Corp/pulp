@@ -1,0 +1,139 @@
+name: Android Build
+
+on:
+  pull_request:
+    paths:
+      - 'android/**'
+      - 'core/**'
+      - 'tools/cmake/PulpAndroid.cmake'
+      - 'CMakeLists.txt'
+      - '.github/workflows/android.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'android/**'
+      - 'core/**'
+      - 'tools/cmake/PulpAndroid.cmake'
+      - 'CMakeLists.txt'
+
+jobs:
+  android-build:
+    strategy:
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install NDK
+        run: sdkmanager "ndk;30.0.14904198"
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+            android/app/.cxx
+          key: ${{ runner.os }}-gradle-${{ hashFiles('android/**/*.gradle.kts') }}
+          restore-keys: ${{ runner.os }}-gradle-
+
+      - name: Build Android APK (arm64-v8a + x86_64)
+        working-directory: android
+        run: ./gradlew assembleDebug
+        env:
+          ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/30.0.14904198
+
+      - name: Verify APK contains libpulp.so
+        shell: bash
+        run: |
+          APK=android/app/build/outputs/apk/debug/app-debug.apk
+          if unzip -l "$APK" | grep -q "libpulp.so"; then
+            echo "✅ libpulp.so found in APK"
+            unzip -l "$APK" | grep "\.so"
+          else
+            echo "❌ libpulp.so NOT found in APK"
+            exit 1
+          fi
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pulp-android-${{ matrix.os }}
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 7
+
+  # Emulator test — only on macOS (KVM not available on GitHub Windows runners)
+  android-emulator-test:
+    runs-on: macos-latest
+    needs: android-build
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install NDK and emulator
+        run: |
+          sdkmanager "ndk;30.0.14904198"
+          sdkmanager "system-images;android-34;google_apis;arm64-v8a"
+          sdkmanager "emulator"
+
+      - name: Download APK
+        uses: actions/download-artifact@v4
+        with:
+          name: pulp-android-macos-latest
+
+      - name: Create AVD and boot emulator
+        run: |
+          echo "no" | avdmanager create avd -n pulp-ci -k "system-images;android-34;google_apis;arm64-v8a" --force
+          $ANDROID_HOME/emulator/emulator -avd pulp-ci -no-window -no-audio -no-boot-anim &
+          adb wait-for-device
+          # Wait for boot
+          for i in $(seq 1 60); do
+            BOOT=$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')
+            [ "$BOOT" = "1" ] && echo "Emulator booted" && break
+            sleep 2
+          done
+
+      - name: Install and launch
+        run: |
+          adb install app-debug.apk
+          adb shell am start -n com.pulp.app/com.pulp.PulpActivity
+          sleep 5
+
+      - name: Verify JNI bridge initialization
+        run: |
+          adb logcat -d -s Pulp:V | tee /tmp/pulp-logcat.txt
+          if grep -q "JNI_OnLoad: Pulp native bridge initialized" /tmp/pulp-logcat.txt; then
+            echo "✅ JNI bridge initialized successfully"
+          else
+            echo "❌ JNI bridge did not initialize"
+            cat /tmp/pulp-logcat.txt
+            exit 1
+          fi
+
+      - name: Kill emulator
+        if: always()
+        run: adb emu kill 2>/dev/null || true

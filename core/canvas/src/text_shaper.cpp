@@ -141,7 +141,7 @@ struct TextShaper::Impl {
     Impl() {
         font_collection = sk_sp<skia::textlayout::FontCollection>(
             new skia::textlayout::FontCollection());
-        font_collection->setDefaultFontManager(SkFontMgr::RefDefault());
+        font_collection->setDefaultFontManager(SkFontMgr::RefEmpty());
         has_real_shaping = true;
     }
 #else
@@ -183,7 +183,7 @@ struct TextShaper::Impl {
 #ifdef PULP_HAS_TEXT_SHAPING
         // Real measurement via SkFont
         SkFont font;
-        auto mgr = SkFontMgr::RefDefault();
+        auto mgr = SkFontMgr::RefEmpty();
         if (mgr) {
             auto typeface = mgr->matchFamilyStyle(font_family.c_str(), SkFontStyle::Normal());
             if (typeface) font.setTypeface(std::move(typeface));

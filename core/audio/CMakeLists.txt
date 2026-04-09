@@ -87,7 +87,7 @@ elseif(WIN32)
         ole32
         winmm
     )
-elseif(UNIX AND NOT APPLE)
+elseif(UNIX AND NOT APPLE AND NOT ANDROID)
     target_sources(pulp-audio PRIVATE
         platform/linux/alsa_device.cpp
     )

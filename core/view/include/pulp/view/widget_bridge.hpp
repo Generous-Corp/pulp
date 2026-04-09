@@ -1,5 +1,13 @@
 #pragma once
 
+// Windows: include system headers before any namespace block to prevent
+// CHOC/QuickJS intrinsic declarations from polluting our namespace.
+// Without this, _InterlockedIncrement etc. get declared in pulp::view::
+// and conflict with winbase.h's expectations.
+#if defined(_WIN32)
+#include <windows.h>
+#endif
+
 #include <pulp/view/script_engine.hpp>
 #include <pulp/view/canvas_widget.hpp>
 #include <pulp/view/view.hpp>

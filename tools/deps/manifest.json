@@ -140,6 +140,21 @@
       ]
     },
     {
+      "name": "Oboe",
+      "category": "audio",
+      "license": "Apache-2.0",
+      "version": "1.9.0",
+      "source_kind": "FetchContent",
+      "repository": "https://github.com/google/oboe",
+      "upstream": { "kind": "tag", "ref": "1.9.0" },
+      "documented_in_dependencies_md": true,
+      "documented_in_notice_md": false,
+      "platforms": ["android"],
+      "source_files": [
+        "tools/cmake/PulpAndroid.cmake"
+      ]
+    },
+    {
       "name": "nanosvg",
       "category": "canvas",
       "license": "zlib",

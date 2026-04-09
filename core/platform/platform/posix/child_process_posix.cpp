@@ -10,7 +10,9 @@
 
 #include <fcntl.h>
 #include <signal.h>
+#ifndef __ANDROID__
 #include <spawn.h>
+#endif
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -119,6 +121,24 @@ bool ChildProcess::start(const std::string& command,
     for (auto& a : args) argv.push_back(a.c_str());
     argv.push_back(nullptr);
 
+    int rc;
+
+#ifdef __ANDROID__
+    // Android Bionic doesn't reliably support posix_spawn. Use fork/exec.
+    impl_->pid = fork();
+    if (impl_->pid == 0) {
+        // Child process
+        dup2(impl_->stdout_pipe.write_end(), STDOUT_FILENO);
+        dup2(impl_->stderr_pipe.write_end(), STDERR_FILENO);
+        impl_->stdout_pipe.close_all();
+        impl_->stderr_pipe.close_all();
+        if (!options.working_directory.empty())
+            chdir(options.working_directory.c_str());
+        execvp(command.c_str(), const_cast<char* const*>(argv.data()));
+        _exit(127);  // exec failed
+    }
+    rc = (impl_->pid > 0) ? 0 : errno;
+#else
     // Set up file actions: redirect stdout/stderr to pipes
     posix_spawn_file_actions_t actions;
     posix_spawn_file_actions_init(&actions);
@@ -133,7 +153,7 @@ bool ChildProcess::start(const std::string& command,
         posix_spawn_file_actions_addchdir_np(&actions, options.working_directory.c_str());
     }
 
-    int rc = posix_spawnp(&impl_->pid,
+    rc = posix_spawnp(&impl_->pid,
                           command.c_str(),
                           &actions,
                           nullptr,  // default attributes
@@ -141,6 +161,7 @@ bool ChildProcess::start(const std::string& command,
                           environ);
 
     posix_spawn_file_actions_destroy(&actions);
+#endif
 
     // Close write ends in parent
     impl_->stdout_pipe.close_write();

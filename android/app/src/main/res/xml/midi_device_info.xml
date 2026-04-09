@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<devices>
+    <device manufacturer="Pulp" product="Pulp Audio">
+        <input-port name="input"/>
+        <output-port name="output"/>
+    </device>
+</devices>

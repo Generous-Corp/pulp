@@ -97,10 +97,16 @@ public:
                     runtime::log_warn("SkiaSurface: BackendTexture::MakeDawn returned invalid texture");
                 } else {
                     // Wrap it as an SkSurface for Skia drawing
+                    // Android Vulkan swapchains typically use RGBA8; desktop uses BGRA8
+#ifdef __ANDROID__
+                    auto surface_color_type = kRGBA_8888_SkColorType;
+#else
+                    auto surface_color_type = kBGRA_8888_SkColorType;
+#endif
                     frame_surface_ = SkSurfaces::WrapBackendTexture(
                         recorder_.get(),
                         backend_tex,
-                        kBGRA_8888_SkColorType,
+                        surface_color_type,
                         SkColorSpace::MakeSRGB(),
                         nullptr);  // props
 
