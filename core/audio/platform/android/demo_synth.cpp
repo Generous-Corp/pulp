@@ -104,6 +104,10 @@ public:
 
     bool is_playing() const { return playing_.load(); }
     float peak_level() const { return peak_level_.load(std::memory_order_relaxed); }
+    const float* waveform_snapshot() const {
+        int front = waveform_front_.load(std::memory_order_acquire);
+        return waveform_[front];
+    }
 
 private:
     // Map 0..1 knob to frequency (MIDI note range 36..96)
@@ -239,6 +243,20 @@ private:
         // Update peak for visual metering (relaxed — UI reads it)
         peak_level_.store(peak, std::memory_order_relaxed);
 
+        // Capture waveform snapshot for oscilloscope display.
+        // Write to back buffer, swap to front when full.
+        int back = 1 - waveform_front_.load(std::memory_order_relaxed);
+        for (int i = 0; i < num_frames; ++i) {
+            if (waveform_write_pos_ < kWaveformSize) {
+                waveform_[back][waveform_write_pos_++] = out[i * 2];  // L channel
+            }
+            if (waveform_write_pos_ >= kWaveformSize) {
+                waveform_front_.store(back, std::memory_order_release);
+                back = 1 - back;
+                waveform_write_pos_ = 0;
+            }
+        }
+
         return oboe::DataCallbackResult::Continue;
     }
 
@@ -267,6 +285,11 @@ private:
     int restart_count_ = 0;
     float sample_rate_ = 48000.0f;
 
+    // Waveform double buffer — audio writes to back, UI reads from front
+    float waveform_[2][kWaveformSize] = {};
+    std::atomic<int> waveform_front_{0};  // 0 or 1
+    int waveform_write_pos_ = 0;
+
     // Oscillator state (4 voices)
     float phase1_ = 0.0f;
     float phase2_ = 0.0f;
@@ -290,6 +313,9 @@ bool synth_start() { return g_synth.start(); }
 void synth_stop() { g_synth.stop(); }
 bool synth_is_playing() { return g_synth.is_playing(); }
 float synth_peak_level() { return g_synth.peak_level(); }
+const float* synth_waveform_snapshot() {
+    return g_synth.waveform_snapshot();
+}
 
 } // namespace pulp::demo
 

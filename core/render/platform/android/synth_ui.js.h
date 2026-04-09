@@ -147,11 +147,7 @@ setFlex("master", "margin_left", 8);
 setFlex("master", "margin_right", 8);
 setValue("master", 0.8);
 
-// ── OUTPUT METER ─────────────────────────────────────────────────────────
-createMeter("meter", "root");
-setFlex("meter", "height", 20);
-setFlex("meter", "margin_top", 6);
-setFlex("meter", "margin_left", 8);
-setFlex("meter", "margin_right", 8);
+// Oscilloscope + VU meter are drawn directly by the C++ render loop
+// using GPU canvas drawing for crisp, animated waveform display.
 
 )JS";

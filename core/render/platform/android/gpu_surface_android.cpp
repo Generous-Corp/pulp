@@ -437,7 +437,7 @@ static void draw_section_labels(canvas::Canvas& canvas) {
     float label_x = pad_left + 8.0f;
 
     // Title: "PULP SYNTH"
-    canvas.set_fill_color(canvas::Color::rgba(205, 214, 244));
+    canvas.set_fill_color(canvas::Color::rgba8(205, 214, 244));
     canvas.set_font("sans-serif", 24);
     canvas.fill_text("PULP SYNTH", label_x, pad_top + 24);
 
@@ -457,7 +457,7 @@ static void draw_section_labels(canvas::Canvas& canvas) {
     };
 
     // Section headers — use 12px for readability
-    auto section_color = canvas::Color::rgba(150, 158, 190);
+    auto section_color = canvas::Color::rgba8(150, 158, 190);
     canvas.set_fill_color(section_color);
     canvas.set_font("sans-serif", 12);
     canvas.set_text_align(canvas::TextAlign::left);
@@ -496,7 +496,7 @@ static void draw_section_labels(canvas::Canvas& canvas) {
     }
 
     // Knob labels (small text under each knob)
-    auto dim_color = canvas::Color::rgba(130, 135, 165);
+    auto dim_color = canvas::Color::rgba8(130, 135, 165);
     canvas.set_fill_color(dim_color);
     canvas.set_font("sans-serif", 9);
     canvas.set_text_align(canvas::TextAlign::center);
@@ -580,89 +580,142 @@ static void draw_section_labels(canvas::Canvas& canvas) {
     }
     canvas.set_text_align(canvas::TextAlign::left);
 
-    // ── Segmented VU-style meter with peak hold ───────────────────────
-    // Classic green → yellow → red segments with smooth decay and peak marker.
+    // ── Live Oscilloscope + VU Meter ──────────────────────────────────
+    float dp_w = g_root_view->bounds().width;
+    float pad_bottom = std::max(12.0f, g_safe_bottom + 4.0f);
+    float viz_x = pad_left;
+    float viz_w = dp_w - 2.0f * pad_left;
+
+    // ── Oscilloscope waveform ────────────────────────────────────────
+    float scope_h = 80.0f;
+    float scope_y = g_root_view->bounds().height - pad_bottom - scope_h - 28;
+
+    // Background with subtle gradient feel
+    canvas.set_fill_color(canvas::Color::rgba8(15, 15, 25));
+    canvas.fill_rounded_rect(viz_x, scope_y, viz_w, scope_h, 6);
+
+    // Grid lines (subtle)
+    canvas.set_stroke_color(canvas::Color::rgba8(40, 40, 60));
+    canvas.set_line_width(0.5f);
+    float center_y = scope_y + scope_h * 0.5f;
+    canvas.stroke_line(viz_x, center_y, viz_x + viz_w, center_y);
+    canvas.stroke_line(viz_x + viz_w * 0.25f, scope_y, viz_x + viz_w * 0.25f, scope_y + scope_h);
+    canvas.stroke_line(viz_x + viz_w * 0.5f, scope_y, viz_x + viz_w * 0.5f, scope_y + scope_h);
+    canvas.stroke_line(viz_x + viz_w * 0.75f, scope_y, viz_x + viz_w * 0.75f, scope_y + scope_h);
+
+    // Draw waveform — glow effect via multiple passes at decreasing opacity
+    const float* waveform = demo::synth_waveform_snapshot();
+    if (waveform) {
+        float inset = 4.0f;
+        float draw_w = viz_w - 2 * inset;
+        float draw_h = scope_h - 2 * inset;
+        float mid_y = scope_y + scope_h * 0.5f;
+
+        // Bloom pass: thick, dim, blurred line (simulates glow)
+        canvas.set_stroke_color(canvas::Color::rgba8(80, 160, 255, 40));
+        canvas.set_line_width(6.0f);
+        for (int i = 1; i < demo::kWaveformSize; ++i) {
+            float x0 = viz_x + inset + (i - 1) * draw_w / (demo::kWaveformSize - 1);
+            float x1 = viz_x + inset + i * draw_w / (demo::kWaveformSize - 1);
+            float y0 = mid_y - waveform[i - 1] * draw_h * 0.5f;
+            float y1 = mid_y - waveform[i] * draw_h * 0.5f;
+            y0 = std::clamp(y0, scope_y + inset, scope_y + scope_h - inset);
+            y1 = std::clamp(y1, scope_y + inset, scope_y + scope_h - inset);
+            canvas.stroke_line(x0, y0, x1, y1);
+        }
+
+        // Medium glow pass
+        canvas.set_stroke_color(canvas::Color::rgba8(100, 180, 255, 80));
+        canvas.set_line_width(3.0f);
+        for (int i = 1; i < demo::kWaveformSize; ++i) {
+            float x0 = viz_x + inset + (i - 1) * draw_w / (demo::kWaveformSize - 1);
+            float x1 = viz_x + inset + i * draw_w / (demo::kWaveformSize - 1);
+            float y0 = mid_y - waveform[i - 1] * draw_h * 0.5f;
+            float y1 = mid_y - waveform[i] * draw_h * 0.5f;
+            y0 = std::clamp(y0, scope_y + inset, scope_y + scope_h - inset);
+            y1 = std::clamp(y1, scope_y + inset, scope_y + scope_h - inset);
+            canvas.stroke_line(x0, y0, x1, y1);
+        }
+
+        // Crisp core line
+        canvas.set_stroke_color(canvas::Color::rgba8(140, 210, 255, 230));
+        canvas.set_line_width(1.5f);
+        for (int i = 1; i < demo::kWaveformSize; ++i) {
+            float x0 = viz_x + inset + (i - 1) * draw_w / (demo::kWaveformSize - 1);
+            float x1 = viz_x + inset + i * draw_w / (demo::kWaveformSize - 1);
+            float y0 = mid_y - waveform[i - 1] * draw_h * 0.5f;
+            float y1 = mid_y - waveform[i] * draw_h * 0.5f;
+            y0 = std::clamp(y0, scope_y + inset, scope_y + scope_h - inset);
+            y1 = std::clamp(y1, scope_y + inset, scope_y + scope_h - inset);
+            canvas.stroke_line(x0, y0, x1, y1);
+        }
+    }
+
+    // Scope border
+    canvas.set_stroke_color(canvas::Color::rgba8(60, 70, 100));
+    canvas.set_line_width(1.0f);
+    canvas.stroke_rounded_rect(viz_x, scope_y, viz_w, scope_h, 6);
+
+    // ── VU Meter (segmented, below oscilloscope) ─────────────────────
     static float smoothed_level = 0.0f;
     static float peak_hold = 0.0f;
     static int peak_hold_frames = 0;
 
     float raw_peak = demo::synth_peak_level();
-    // Smooth attack/release (fast attack, slow release like a real VU meter)
-    if (raw_peak > smoothed_level)
-        smoothed_level = raw_peak;  // instant attack
-    else
-        smoothed_level *= 0.92f;    // ~300ms release at 60fps
+    if (raw_peak > smoothed_level) smoothed_level = raw_peak;
+    else smoothed_level *= 0.93f;
 
-    // Peak hold (holds for ~1.5 seconds then decays)
-    if (raw_peak > peak_hold) {
-        peak_hold = raw_peak;
-        peak_hold_frames = 90;  // hold for ~1.5s at 60fps
-    } else if (peak_hold_frames > 0) {
-        peak_hold_frames--;
-    } else {
-        peak_hold *= 0.96f;  // slow decay after hold
+    if (raw_peak > peak_hold) { peak_hold = raw_peak; peak_hold_frames = 90; }
+    else if (peak_hold_frames > 0) peak_hold_frames--;
+    else peak_hold *= 0.97f;
+
+    float vu_y = scope_y + scope_h + 6;
+    float vu_h = 14.0f;
+    int num_seg = 24;
+    float seg_gap = 2.0f;
+    float seg_w = (viz_w - (num_seg - 1) * seg_gap) / num_seg;
+
+    // VU background
+    canvas.set_fill_color(canvas::Color::rgba8(15, 15, 25));
+    canvas.fill_rounded_rect(viz_x, vu_y, viz_w, vu_h, 3);
+
+    for (int i = 0; i < num_seg; ++i) {
+        float t = static_cast<float>(i) / num_seg;
+        float sx = viz_x + i * (seg_w + seg_gap);
+        bool lit = (t < smoothed_level);
+
+        canvas::Color c;
+        if (t < 0.6f)
+            c = lit ? canvas::Color::rgba8(80, 220, 120) : canvas::Color::rgba8(20, 40, 25);
+        else if (t < 0.8f)
+            c = lit ? canvas::Color::rgba8(240, 210, 60) : canvas::Color::rgba8(40, 38, 18);
+        else
+            c = lit ? canvas::Color::rgba8(240, 70, 70) : canvas::Color::rgba8(40, 18, 18);
+
+        canvas.set_fill_color(c);
+        canvas.fill_rounded_rect(sx, vu_y, seg_w, vu_h, 1.5f);
     }
 
-    float dp_w = g_root_view->bounds().width;
-    float meter_x = pad_left;
-    float meter_y = g_root_view->bounds().height - std::max(12.0f, g_safe_bottom + 4.0f) - 28;
-    float meter_w = dp_w - 2.0f * pad_left;
-    float meter_h = 20.0f;
-    int num_segments = 20;
-    float seg_gap = 3.0f;
-    float seg_w = (meter_w - (num_segments - 1) * seg_gap) / num_segments;
-
-    // Background
-    canvas.set_fill_color(canvas::Color::rgba(20, 20, 30));
-    canvas.fill_rounded_rect(meter_x - 2, meter_y - 2, meter_w + 4, meter_h + 4, 4);
-
-    // Draw segments
-    float level = smoothed_level;
-    for (int i = 0; i < num_segments; ++i) {
-        float t = static_cast<float>(i) / num_segments;  // 0..1
-        float seg_x = meter_x + i * (seg_w + seg_gap);
-        bool lit = (t < level);
-
-        canvas::Color seg_color;
-        if (t < 0.6f) {
-            // Green zone (0-60%)
-            seg_color = lit ? canvas::Color::rgba(80, 200, 100)
-                           : canvas::Color::rgba(25, 50, 30);
-        } else if (t < 0.8f) {
-            // Yellow zone (60-80%)
-            seg_color = lit ? canvas::Color::rgba(240, 210, 60)
-                           : canvas::Color::rgba(50, 45, 20);
-        } else {
-            // Red zone (80-100%)
-            seg_color = lit ? canvas::Color::rgba(240, 70, 70)
-                           : canvas::Color::rgba(50, 20, 20);
-        }
-        canvas.set_fill_color(seg_color);
-        canvas.fill_rounded_rect(seg_x, meter_y, seg_w, meter_h, 2);
-    }
-
-    // Peak hold marker (thin bright line)
+    // Peak hold line
     if (peak_hold > 0.02f) {
-        int peak_seg = static_cast<int>(peak_hold * num_segments);
-        peak_seg = std::clamp(peak_seg, 0, num_segments - 1);
-        float peak_x = meter_x + peak_seg * (seg_w + seg_gap);
-        canvas::Color peak_color;
-        float pt = static_cast<float>(peak_seg) / num_segments;
-        if (pt < 0.6f)      peak_color = canvas::Color::rgba(150, 255, 170);
-        else if (pt < 0.8f) peak_color = canvas::Color::rgba(255, 240, 120);
-        else                 peak_color = canvas::Color::rgba(255, 120, 120);
-        canvas.set_fill_color(peak_color);
-        canvas.fill_rect(peak_x, meter_y, seg_w, meter_h);
+        int ps = std::clamp(static_cast<int>(peak_hold * num_seg), 0, num_seg - 1);
+        float px = viz_x + ps * (seg_w + seg_gap);
+        float pt = static_cast<float>(ps) / num_seg;
+        auto pc = pt < 0.6f ? canvas::Color::rgba8(150, 255, 170)
+                : pt < 0.8f ? canvas::Color::rgba8(255, 240, 120)
+                             : canvas::Color::rgba8(255, 120, 120);
+        canvas.set_fill_color(pc);
+        canvas.fill_rect(px, vu_y, seg_w, vu_h);
     }
 
     // dB readout
     float db = raw_peak > 0.0001f ? 20.0f * std::log10(raw_peak) : -96.0f;
     char db_str[16];
     snprintf(db_str, sizeof(db_str), "%.1f dB", db);
-    canvas.set_fill_color(canvas::Color::rgba(160, 160, 180));
-    canvas.set_font("sans-serif", 10);
+    canvas.set_fill_color(canvas::Color::rgba8(120, 130, 160));
+    canvas.set_font("sans-serif", 9);
     canvas.set_text_align(canvas::TextAlign::right);
-    canvas.fill_text(db_str, meter_x + meter_w, meter_y - 4);
+    canvas.fill_text(db_str, viz_x + viz_w, vu_y - 3);
     canvas.set_text_align(canvas::TextAlign::left);
 }
 

@@ -54,4 +54,8 @@ bool synth_is_playing();
 // Peak level for visual metering (written by audio thread, read by UI)
 float synth_peak_level();
 
+// Waveform snapshot for oscilloscope display (lock-free via double buffer)
+static constexpr int kWaveformSize = 256;
+const float* synth_waveform_snapshot();  // Returns pointer to kWaveformSize floats
+
 } // namespace pulp::demo
