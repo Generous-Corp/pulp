@@ -41,7 +41,14 @@ if(APPLE)
 elseif(WIN32)
     set(_skia_platform "win")
 elseif(ANDROID)
-    set(_skia_platform "android")
+    # Per-ABI staging directory produced by build-skia-android.sh.
+    # arm64-v8a uses the canonical "android" (→ android-gpu/) so existing
+    # workflows and bundled prebuilts keep working.
+    if(CMAKE_ANDROID_ARCH_ABI STREQUAL "x86_64")
+        set(_skia_platform "android-x86_64")
+    else()
+        set(_skia_platform "android")
+    endif()
 elseif(UNIX)
     set(_skia_platform "linux")
 else()

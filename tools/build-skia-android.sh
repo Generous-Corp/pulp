@@ -1,5 +1,5 @@
 #!/bin/bash
-# build-skia-android.sh — Build Skia Graphite + Dawn for Android arm64
+# build-skia-android.sh — Build Skia Graphite + Dawn for Android
 #
 # Produces static libraries compatible with Pulp's FindSkia.cmake.
 # Uses Skia's own GN build system with Android NDK cross-compilation.
@@ -9,10 +9,14 @@
 #   - Android NDK (ANDROID_NDK_HOME or auto-detected)
 #
 # Usage:
-#   ./tools/build-skia-android.sh
+#   ./tools/build-skia-android.sh [arm64|x86_64|all]
+#
+# Default ABI is arm64. Pass "x86_64" to build for the emulator or
+# "all" to build both ABIs sequentially.
 #
 # Output:
-#   external/skia-build/android-gpu/lib/Release/*.a
+#   external/skia-build/android-gpu/lib/Release/*.a            (arm64)
+#   external/skia-build/android-gpu-x86_64/lib/Release/*.a     (x86_64)
 #   external/skia-build/include/  (shared with other platforms)
 
 set -e
@@ -22,6 +26,18 @@ PULP_ROOT="$(dirname "$SCRIPT_DIR")"
 SKIA_SRC="$PULP_ROOT/external/skia-src"
 SKIA_OUTPUT="$PULP_ROOT/external/skia-build"
 SKIA_BRANCH="${SKIA_BRANCH:-chrome/m144}"
+
+# ── ABI selection ────────────────────────────────────────────────────────
+ABI_ARG="${1:-arm64}"
+case "$ABI_ARG" in
+    arm64|arm64-v8a) ABIS=(arm64);;
+    x86_64|x64)      ABIS=(x86_64);;
+    all)             ABIS=(arm64 x86_64);;
+    *)
+        echo "Error: unknown ABI '$ABI_ARG' (expected arm64, x86_64, or all)"
+        exit 1
+        ;;
+esac
 
 # Find Android NDK
 if [ -z "$ANDROID_NDK_HOME" ]; then
@@ -40,7 +56,7 @@ fi
 echo "=== Pulp Skia Android Builder ==="
 echo "Skia branch: $SKIA_BRANCH"
 echo "NDK: $ANDROID_NDK_HOME"
-echo "Output: $SKIA_OUTPUT/android-gpu/"
+echo "ABIs: ${ABIS[*]}"
 echo ""
 
 # ── Step 1: Get Skia source ──────────────────────────────────────────────
@@ -58,16 +74,33 @@ echo "Syncing Skia dependencies..."
 cd "$SKIA_SRC"
 python3 tools/git-sync-deps
 
-# ── Step 3: Configure with GN ────────────────────────────────────────────
-echo "Configuring Skia for Android arm64..."
+# ── Step 3-5: Configure, build, and stage each requested ABI ──────────────
+for ABI in "${ABIS[@]}"; do
+    # Map Pulp ABI label → GN target_cpu and output subdirectory
+    case "$ABI" in
+        arm64)
+            GN_CPU="arm64"
+            OUT_SUBDIR="android-gpu"         # default/canonical
+            ;;
+        x86_64)
+            GN_CPU="x64"
+            OUT_SUBDIR="android-gpu-x86_64"
+            ;;
+        *)
+            echo "Error: unsupported ABI '$ABI' in build loop"
+            exit 1
+            ;;
+    esac
 
-BUILD_DIR="out/android-arm64-release"
-mkdir -p "$BUILD_DIR"
+    BUILD_DIR="out/android-${ABI}-release"
+    echo ""
+    echo "── Configuring Skia for Android ${ABI} (target_cpu=${GN_CPU}) ──────"
+    mkdir -p "$SKIA_SRC/$BUILD_DIR"
 
-cat > "$BUILD_DIR/args.gn" << 'SKIA_GN_ARGS'
-# Pulp Android arm64 build — Skia Graphite + Dawn
+    cat > "$SKIA_SRC/$BUILD_DIR/args.gn" << SKIA_GN_ARGS
+# Pulp Android ${ABI} build — Skia Graphite + Dawn
 target_os = "android"
-target_cpu = "arm64"
+target_cpu = "${GN_CPU}"
 is_official_build = true
 is_debug = false
 
@@ -106,7 +139,7 @@ skia_use_libpng_encode = true
 skia_use_zlib = true
 
 # Android NDK
-ndk = ""
+ndk = "${ANDROID_NDK_HOME}"
 ndk_api = 26
 
 # Optimizations
@@ -114,36 +147,31 @@ skia_enable_pdf = false
 skia_enable_sksl = true
 SKIA_GN_ARGS
 
-# Set NDK path in the GN args
-sed -i '' "s|ndk = \"\"|ndk = \"$ANDROID_NDK_HOME\"|" "$BUILD_DIR/args.gn"
+    echo "GN args for ${ABI}:"
+    cat "$SKIA_SRC/$BUILD_DIR/args.gn"
+    echo ""
 
-echo "GN args:"
-cat "$BUILD_DIR/args.gn"
-echo ""
+    cd "$SKIA_SRC"
+    bin/gn gen "$BUILD_DIR"
 
-# Run GN
-bin/gn gen "$BUILD_DIR"
+    echo "Building Skia for Android ${ABI} (this may take a few minutes)..."
+    ninja -C "$BUILD_DIR" \
+        skia \
+        skshaper \
+        skparagraph \
+        skunicode_core \
+        skunicode_icu \
+        svg \
+        skottie \
+        sksg
 
-# ── Step 4: Build ────────────────────────────────────────────────────────
-echo "Building Skia for Android arm64 (this may take a few minutes)..."
-ninja -C "$BUILD_DIR" \
-    skia \
-    skshaper \
-    skparagraph \
-    skunicode_core \
-    skunicode_icu \
-    svg \
-    skottie \
-    sksg
+    echo "Copying ${ABI} libraries to $SKIA_OUTPUT/${OUT_SUBDIR}/lib/Release/..."
+    mkdir -p "$SKIA_OUTPUT/${OUT_SUBDIR}/lib/Release"
 
-# ── Step 5: Copy to Pulp output ─────────────────────────────────────────
-echo "Copying to $SKIA_OUTPUT/android-gpu/..."
-mkdir -p "$SKIA_OUTPUT/android-gpu/lib/Release"
-
-# Copy static libraries
-cp "$BUILD_DIR"/*.a "$SKIA_OUTPUT/android-gpu/lib/Release/" 2>/dev/null || true
-# Some builds put libs in subdirectories
-find "$BUILD_DIR" -name "*.a" -maxdepth 1 -exec cp {} "$SKIA_OUTPUT/android-gpu/lib/Release/" \;
+    cp "$SKIA_SRC/$BUILD_DIR"/*.a "$SKIA_OUTPUT/${OUT_SUBDIR}/lib/Release/" 2>/dev/null || true
+    find "$SKIA_SRC/$BUILD_DIR" -name "*.a" -maxdepth 1 \
+        -exec cp {} "$SKIA_OUTPUT/${OUT_SUBDIR}/lib/Release/" \;
+done
 
 # Copy ALL headers from Skia source (shared with other platforms)
 echo "Copying Skia headers..."
@@ -163,6 +191,17 @@ done
 
 echo ""
 echo "=== Skia Android build complete ==="
-echo "Libraries: $(ls "$SKIA_OUTPUT/android-gpu/lib/Release/"*.a 2>/dev/null | wc -l | tr -d ' ') static libs"
+for ABI in "${ABIS[@]}"; do
+    case "$ABI" in
+        arm64)  OUT_SUBDIR="android-gpu";;
+        x86_64) OUT_SUBDIR="android-gpu-x86_64";;
+    esac
+    COUNT=$(ls "$SKIA_OUTPUT/${OUT_SUBDIR}/lib/Release/"*.a 2>/dev/null | wc -l | tr -d ' ')
+    echo "  ${ABI}: ${COUNT} static libs in $SKIA_OUTPUT/${OUT_SUBDIR}/lib/Release/"
+done
 echo ""
-echo "To use: cmake -DSKIA_DIR=$SKIA_OUTPUT -DPULP_ENABLE_GPU=ON ..."
+echo "To use (arm64 is the default and picks android-gpu/ automatically):"
+echo "  cmake -DSKIA_DIR=$SKIA_OUTPUT -DPULP_ENABLE_GPU=ON ..."
+echo ""
+echo "For x86_64 emulator builds, set ANDROID_ABI=x86_64 and FindSkia.cmake"
+echo "will pick android-gpu-x86_64/ automatically."
