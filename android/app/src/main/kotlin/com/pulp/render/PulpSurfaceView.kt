@@ -9,6 +9,7 @@ import android.view.SurfaceView
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import com.pulp.PulpApplication
+import com.pulp.accessibility.PulpAccessibilityDelegate
 
 /**
  * SurfaceView that hosts the Vulkan/Dawn rendering surface.
@@ -29,6 +30,12 @@ class PulpSurfaceView(context: Context) : SurfaceView(context), SurfaceHolder.Ca
             Log.i(TAG, "Setting display density: $density")
             nativeSetDisplayDensity(density)
         }
+
+        // TalkBack: route accessibility queries into the C++ view
+        // hierarchy via PulpAccessibilityDelegate's JNI bridge (#87).
+        isFocusable = true
+        importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_YES
+        accessibilityDelegate = PulpAccessibilityDelegate()
 
         // Pass system bar insets (status bar, nav bar) to C++ for safe area padding
         ViewCompat.setOnApplyWindowInsetsListener(this) { _, insets ->

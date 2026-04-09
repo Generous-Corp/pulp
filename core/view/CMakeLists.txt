@@ -126,6 +126,7 @@ endif()
 
 target_sources(pulp-view PRIVATE
     ${PULP_JS_ENGINE_SOURCES}
+    src/accessibility.cpp
     src/script_engine.cpp
     src/js_engine_recommend.cpp
     src/theme.cpp
