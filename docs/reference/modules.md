@@ -11,7 +11,7 @@ target_link_libraries(my_plugin PRIVATE pulp::format pulp::signal pulp::view)
 
 ## runtime
 
-> Core utilities — the foundation everything else builds on.
+Core utilities — the foundation everything else builds on.
 
 **Link:** `pulp::runtime` · **Include prefix:** `<pulp/runtime/...>`
 
@@ -120,31 +120,31 @@ eval.evaluate("x * 100 + 10");  // 60.0
 
 | Feature | Header | Description |
 |---------|--------|-------------|
-| ZIP/GZIP | `zip.hpp` | Compress/decompress data and archives (miniz) |
-| Sockets | `socket.hpp` | TCP/UDP client and server for networked audio |
-| Named Pipes | `named_pipe.hpp` | Cross-platform IPC (mkfifo / CreateNamedPipe) |
+| Analytics | `analytics.hpp` | Thread-safe `Analytics::instance().log("preset_load", {{"name", "Init"}})` |
 | Base64 | `base64.hpp` | `base64_encode(data)` / `base64_decode(text)` |
-| Memory Map | `memory_mapped_file.hpp` | Zero-copy large file access via mmap |
+| BigInteger | `big_integer.hpp` | Arbitrary-precision math for RSA — `a.mod_pow(exp, modulus)` |
 | Child Process | `child_process.hpp` | `run_process("/usr/bin/auval", {"-a"})` with stdout capture |
 | Dynamic Library | `dynamic_library.hpp` | `lib.open("plugin.dylib"); lib.find_symbol("entry")` |
-| IPC Lock | `inter_process_lock.hpp` | Cross-process mutex via file locks |
-| Temp File | `temporary_file.hpp` | Auto-deleting temp file — `TemporaryFile tmp(".wav")` |
-| Timer | `high_resolution_timer.hpp` | Sub-millisecond periodic callback on a dedicated thread |
-| System Info | `system.hpp` | CPU model, core count, RAM, OS, SIMD features (runtime detected) |
-| BigInteger | `big_integer.hpp` | Arbitrary-precision math for RSA — `a.mod_pow(exp, modulus)` |
-| Analytics | `analytics.hpp` | Thread-safe `Analytics::instance().log("preset_load", {{"name", "Init"}})` |
-| Range | `range.hpp` | `Range<float>(0, 1).contains(0.5)`, intersection, union |
-| Primes | `primes.hpp` | `is_prime(97)`, `generate_prime(32)`, `sieve_primes(1000)` |
-| Scope Guard | `scope_guard.hpp` | `PULP_ON_SCOPE_EXIT(file.close())` |
 | Identity | `identity.hpp` | `Uuid::generate()`, typed SessionId/ObjectId/RunId |
-| Text Diff | `text_diff.hpp` | Line-by-line diff with formatted +/- output |
 | IP Address | `ip_address.hpp` | `local_ipv4_address()`, `hostname()`, `is_valid_ipv4(addr)` |
+| IPC Lock | `inter_process_lock.hpp` | Cross-process mutex via file locks |
+| Memory Map | `memory_mapped_file.hpp` | Zero-copy large file access via mmap |
+| Named Pipes | `named_pipe.hpp` | Cross-platform IPC (mkfifo / CreateNamedPipe) |
+| Primes | `primes.hpp` | `is_prime(97)`, `generate_prime(32)`, `sieve_primes(1000)` |
+| Range | `range.hpp` | `Range<float>(0, 1).contains(0.5)`, intersection, union |
+| Scope Guard | `scope_guard.hpp` | `PULP_ON_SCOPE_EXIT(file.close())` |
+| Sockets | `socket.hpp` | TCP/UDP client and server for networked audio |
+| System Info | `system.hpp` | CPU model, core count, RAM, OS, SIMD features (runtime detected) |
+| Temp File | `temporary_file.hpp` | Auto-deleting temp file — `TemporaryFile tmp(".wav")` |
+| Text Diff | `text_diff.hpp` | Line-by-line diff with formatted +/- output |
+| Timer | `high_resolution_timer.hpp` | Sub-millisecond periodic callback on a dedicated thread |
+| ZIP/GZIP | `zip.hpp` | Compress/decompress data and archives (miniz) |
 
 ---
 
 ## events
 
-> Event loop, timers, IPC, and process management.
+Event loop, timers, IPC, and process management.
 
 **Link:** `pulp::events` · **Include prefix:** `<pulp/events/...>`
 
@@ -183,18 +183,18 @@ worker->on_message = [](std::string_view result) { update_list(result); };
 
 | Feature | Header | Description |
 |---------|--------|-------------|
-| Event Loop | `event_loop.hpp` | `EventLoop loop; loop.post([]{...}); loop.run()` |
-| Timer | `timer.hpp` | `Timer t; t.start(100ms, []{...})` — periodic or one-shot |
-| Async Updater | `async_updater.hpp` | Coalesce rapid cross-thread triggers into one callback |
 | Action Broadcaster | `async_updater.hpp` | `broadcaster.send_action("file_open")` to all listeners |
-| Volume Detector | `volume_detector.hpp` | Poll for USB drive mount/unmount events |
+| Async Updater | `async_updater.hpp` | Coalesce rapid cross-thread triggers into one callback |
+| Event Loop | `event_loop.hpp` | `EventLoop loop; loop.dispatch([]{...}); loop.dispatch_after(100ms, []{...})` |
 | Service Discovery | `volume_detector.hpp` | mDNS/Bonjour browsing for networked audio devices |
+| Timer | `timer.hpp` | `Timer t; t.start(100ms, []{...})` — periodic or one-shot |
+| Volume Detector | `volume_detector.hpp` | Poll for USB drive mount/unmount events |
 
 ---
 
 ## audio
 
-> Device I/O, file formats, channel layouts, and offline processing.
+Device I/O, file formats, channel layouts, and offline processing.
 
 **Link:** `pulp::audio` · **Include prefix:** `<pulp/audio/...>`
 
@@ -257,13 +257,13 @@ device->start([](const auto& input, auto& output, const auto& ctx) {
 
 | Format | Read | Write | Backend |
 |--------|:----:|:-----:|---------|
-| WAV | ✓ | ✓ | CHOC + StreamingWriter |
+| AAC | ✓ | ✓* | ExtAudioFile (macOS) / FDK AAC (`pulp add fdk-aac --accept-license FDK-AAC`) |
+| AIFF / AIFF-C | ✓ | ✓ | Native (8/16/24/32-bit big-endian) |
+| ALAC | ✓ | ✓* | ExtAudioFile (macOS) / Apple ALAC (`pulp add alac`) |
 | FLAC | ✓ | ✓* | dr_flac / libflac (`pulp add libflac`) |
 | MP3 | ✓ | ✓* | dr_mp3 / LAME (`pulp add lame --accept-license LGPL-2.0`) |
 | OGG Vorbis | ✓ | — | stb_vorbis |
-| AIFF / AIFF-C | ✓ | ✓ | Native (8/16/24/32-bit big-endian) |
-| AAC | ✓ | ✓* | ExtAudioFile (macOS) / FDK AAC (`pulp add fdk-aac --accept-license FDK-AAC`) |
-| ALAC | ✓ | ✓* | ExtAudioFile (macOS) / Apple ALAC (`pulp add alac`) |
+| WAV | ✓ | ✓ | CHOC + StreamingWriter |
 
 *\*Write via optional `pulp add` packages. Permissive (libflac, ALAC) install freely. Copyleft (LAME, fdk-aac) require `--accept-license`.*
 
@@ -271,19 +271,19 @@ device->start([](const auto& input, auto& output, const auto& ctx) {
 
 | Feature | Header | Description |
 |---------|--------|-------------|
-| Channel Sets | `channel_set.hpp` | `ChannelSet::surround_5_1()`, mono through 7.1.4 Atmos |
-| Offline Processor | `offline_processor.hpp` | `offline_process(input, callback, 512)` — batch render |
 | Buffering Reader | `buffering_reader.hpp` | Ring buffer with background read thread for streaming |
-| System Volume | `system_volume.hpp` | `get_system_volume()` / `set_system_volume(0.8f)` |
-| Memory-Mapped Reader | `mmap_reader.hpp` | Zero-copy access for large sample libraries |
-| Subsection Reader | `subsection_reader.hpp` | Read frame range without copying — `reader.sample(ch, frame)` |
+| Channel Sets | `channel_set.hpp` | `ChannelSet::surround_5_1()`, mono through 7.1.4 Atmos |
 | Load Measurer | `load_measurer.hpp` | Track CPU usage of your audio callback |
+| Memory-Mapped Reader | `mmap_reader.hpp` | Zero-copy access for large sample libraries |
+| Offline Processor | `offline_processor.hpp` | `offline_process(input, callback, 512)` — batch render |
+| Subsection Reader | `subsection_reader.hpp` | Read frame range without copying — `reader.sample(ch, frame)` |
+| System Volume | `system_volume.hpp` | `get_system_volume()` / `set_system_volume(0.8f)` |
 
 ---
 
 ## midi
 
-> MIDI I/O, file handling, and MIDI 2.0 support.
+MIDI I/O, file handling, and MIDI 2.0 support.
 
 **Link:** `pulp::midi` · **Include prefix:** `<pulp/midi/...>`
 
@@ -319,17 +319,17 @@ send_sysex(inquiry);  // Send over MIDI port
 
 | Feature | Header | Description |
 |---------|--------|-------------|
-| Messages | via CHOC | `ShortMessage::noteOn(0, 60, 100)` |
 | Buffer | `midi_buffer.hpp` | Timestamped event buffer for `process()` callbacks |
-| Files | `midi_file.hpp` | Read/write Standard MIDI Files |
-| UMP | `ump.hpp` | MIDI 2.0 Universal MIDI Packets, MPE zones |
 | Device I/O | platform/ | CoreMIDI (macOS), WinMIDI (Windows), ALSA (Linux), Web MIDI |
+| Files | `midi_file.hpp` | Read/write Standard MIDI Files |
+| Messages | via CHOC | `ShortMessage::noteOn(0, 60, 100)` |
+| UMP | `ump.hpp` | MIDI 2.0 Universal MIDI Packets, MPE zones |
 
 ---
 
 ## signal
 
-> 30+ real-time-safe DSP processors. All operate on single samples or buffers. All are safe for the audio thread.
+30+ real-time-safe DSP processors. All operate on single samples or buffers. All are safe for the audio thread.
 
 **Link:** `pulp::signal` · **Include prefix:** `<pulp/signal/...>`
 
@@ -389,21 +389,73 @@ conv.process(input, output, block_size);
 
 ### Available processors
 
-**Filters:** Biquad (IIR), FIR, State Variable (TPT), Ladder (4-pole Moog-style), Linkwitz-Riley, Filter Design (Butterworth/Chebyshev)
+#### Filters
 
-**Effects:** Partitioned Convolution, Reverb, Chorus, Phaser, Delay Line (linear/cubic/sinc), Waveshaper, Oversampling (2x/4x/8x)
+| Processor | Header | Description |
+|-----------|--------|-------------|
+| Biquad | `biquad.hpp` | Second-order IIR filter — low/high/band-pass, notch, shelf, peaking EQ |
+| Filter Design | `filter_design.hpp` | Generate Butterworth and Chebyshev coefficient sets for arbitrary order |
+| FIR | `fir_filter.hpp` | Finite impulse response filter with arbitrary tap count for linear-phase EQ |
+| Ladder | `ladder_filter.hpp` | 4-pole Moog-style resonant filter with saturation — classic analog synth sound |
+| Linkwitz-Riley | `linkwitz_riley.hpp` | Phase-aligned crossover filter for splitting audio into frequency bands |
+| State Variable (TPT) | `svf.hpp` / `tpt_filter.hpp` | Topology-preserving transform filter — simultaneous LP/HP/BP/notch outputs |
 
-**Dynamics:** Compressor (soft knee), Limiter (brickwall), Noise Gate, DryWetMixer (latency-compensated)
+#### Effects
 
-**Generators:** Oscillator (wavetable), ADSR envelope, FFT (vDSP on Apple), STFT, Windowing (Hann/Hamming/Blackman/Kaiser)
+| Processor | Header | Description |
+|-----------|--------|-------------|
+| Chorus | `chorus.hpp` | Modulated delay for stereo widening and detuning effects |
+| Convolver | `convolver.hpp` | Partitioned frequency-domain convolution for reverb impulse responses |
+| Delay Line | `delay_line.hpp` | Sample-accurate delay with linear, cubic, or sinc interpolation |
+| Oversampling | `oversampling.hpp` | 2x/4x/8x up/downsampling with anti-alias filtering for nonlinear processing |
+| Phaser | `phaser.hpp` | All-pass filter chain with LFO modulation for sweeping comb effects |
+| Reverb | `reverb.hpp` | Algorithmic stereo reverb with room size, damping, and width controls |
+| Waveshaper | `waveshaper.hpp` | Static nonlinear distortion via transfer function (tanh, soft clip, custom) |
 
-**Math:** Smoothed Value, Lookup Table, Fast Math (sin/cos/tanh approx), Special Functions (sinc/bessel/dB/MIDI↔freq), Matrix (2×2–4×4), Bias, SIMD Buffer
+#### Dynamics
+
+| Processor | Header | Description |
+|-----------|--------|-------------|
+| Ballistics Filter | `ballistics_filter.hpp` | Envelope follower with configurable attack/release for meter and dynamics |
+| Compressor | `compressor.hpp` | Soft-knee downward compressor with threshold, ratio, attack, release |
+| DryWetMixer | `dry_wet_mixer.hpp` | Parallel mix with latency compensation — equal-power or linear crossfade |
+| Gain | `gain.hpp` | Smoothed gain stage that ramps between values to avoid clicks |
+| Noise Gate | `noise_gate.hpp` | Silence signals below threshold with hysteresis to avoid chatter |
+
+#### Generators and analysis
+
+| Processor | Header | Description |
+|-----------|--------|-------------|
+| ADSR | `adsr.hpp` | Attack-decay-sustain-release envelope generator for amplitude or filter modulation |
+| FFT | `fft.hpp` | Fast Fourier Transform — uses vDSP on Apple, fallback on other platforms |
+| Multi-Channel Meter | `multi_channel_meter.hpp` | Peak and RMS level measurement across multiple channels |
+| Oscillator | `oscillator.hpp` | Wavetable oscillator with sine, saw, square, triangle waveforms |
+| Spectrogram | `spectrogram.hpp` | Rolling time-frequency analysis for visual display of spectral content |
+| STFT | `stft.hpp` | Short-time Fourier Transform for overlap-add spectral processing |
+| Windowing | `windowing.hpp` | Hann, Hamming, Blackman, Kaiser window functions for FFT analysis |
+
+#### Math and utilities
+
+| Processor | Header | Description |
+|-----------|--------|-------------|
+| Bias | `bias.hpp` | Shift a signal's DC offset — useful for asymmetric waveshaping |
+| Fast Math | `fast_math.hpp` | Approximations of sin, cos, tanh, exp for inner loops where precision is traded for speed |
+| Interpolator | `interpolator.hpp` | Lagrange and Hermite interpolation for fractional-sample delay and resampling |
+| Log Ramped Value | `log_ramped_value.hpp` | Logarithmic smoothing for perceptually linear parameter transitions |
+| Lookup Table | `lookup_table.hpp` | Pre-computed function table for fast repeated evaluation of expensive functions |
+| Matrix | `matrix.hpp` | 2×2 through 4×4 matrix math for mid/side encoding, rotation, spatial processing |
+| Panner | `panner.hpp` | Stereo and surround panning with equal-power or linear law |
+| Polynomial Math | `poly_math.hpp` | Polynomial evaluation and Horner's method for waveshaper transfer functions |
+| Processor Chain | `processor_chain.hpp` | Connect multiple processors in series — automatic prepare/process forwarding |
+| SIMD Buffer | `simd_buffer.hpp` | Aligned memory buffer for SIMD-safe block processing |
+| Smoothed Value | `smoothed_value.hpp` | Linear or exponential parameter smoothing to prevent zipper noise |
+| Special Functions | `special_functions.hpp` | sinc, Bessel, dB↔linear, MIDI note↔frequency conversions |
 
 ---
 
 ## state
 
-> Parameters, state trees, presets, and settings.
+Parameters, state trees, presets, and settings.
 
 **Link:** `pulp::state` · **Include prefix:** `<pulp/state/...>`
 
@@ -474,14 +526,14 @@ app.save();
 | Binding | `binding.hpp` | Connect UI widget ↔ parameter with undo gesture grouping |
 | Cached Property | `cached_property.hpp` | `CachedProperty<double> freq(tree, "freq", 440.0)` — auto-updates |
 | Preset Manager | `preset_manager.hpp` | Factory/user presets, next/prev navigation, import/export |
-| Undo Manager | `undo_manager.hpp` | `undo_mgr.perform(action)` / `undo_mgr.undo()` |
 | StateTree Sync | `state_tree_sync.hpp` | Binary delta sync over IPC for multi-process state |
+| Undo Manager | `undo_manager.hpp` | `undo_mgr.perform(action)` / `undo_mgr.undo()` |
 
 ---
 
 ## format
 
-> Plugin format adapters — write your plugin once, deploy to 9 formats.
+Plugin format adapters — write your plugin once, deploy to 9 formats.
 
 **Link:** `pulp::format` · **Include prefix:** `<pulp/format/...>`
 
@@ -492,20 +544,24 @@ app.save();
 
 class MyPlugin : public Processor {
 public:
-    Descriptor descriptor() override {
+    PluginDescriptor descriptor() const override {
         return {.name = "MyGain", .vendor = "MyCompany", .uid = "com.myco.gain"};
     }
     
-    void define_parameters(StateStore& store) override {
+    void define_parameters(state::StateStore& store) override {
         gain_id_ = store.add_param({.name = "Gain", .min = -60, .max = 12});
     }
     
-    void process(BufferView<float>& audio, MidiBuffer& midi,
+    void prepare(const PrepareContext& context) override {}
+    
+    void process(audio::BufferView<float>& audio_output,
+                 const audio::BufferView<const float>& audio_input,
+                 midi::MidiBuffer& midi_in, midi::MidiBuffer& midi_out,
                  const ProcessContext& ctx) override {
         float gain = db_to_linear(store().get(gain_id_));
-        for (int ch = 0; ch < audio.num_channels(); ++ch)
-            for (int i = 0; i < audio.num_frames(); ++i)
-                audio[ch][i] *= gain;
+        for (int ch = 0; ch < audio_output.num_channels(); ++ch)
+            for (int i = 0; i < audio_output.num_frames(); ++i)
+                audio_output[ch][i] = audio_input[ch][i] * gain;
     }
 };
 ```
@@ -516,13 +572,13 @@ This single class automatically works as VST3, AU, CLAP, LV2, AAX, Standalone, W
 
 | Format | Status | Notes |
 |--------|--------|-------|
-| VST3 | ✓ Stable | Full parameter sync, state, editor resize |
+| AAX | ✓ Usable | Requires developer-supplied Avid SDK |
 | AU v2 | ✓ Stable | macOS only, via AudioUnitSDK |
 | AU v3 | ✓ Stable | macOS + iOS |
 | CLAP | ✓ Stable | First-class — modulation, WebView, note expressions |
 | LV2 | ✓ Usable | Linux plugin format |
-| AAX | ✓ Usable | Requires developer-supplied Avid SDK |
 | Standalone | ✓ Stable | Desktop app with audio settings, test signal |
+| VST3 | ✓ Stable | Full parameter sync, state, editor resize |
 | WAM | ✓ Experimental | Web Audio Module (browser) |
 | WCLAP | ✓ Experimental | Web CLAP (browser) |
 
@@ -530,15 +586,15 @@ This single class automatically works as VST3, AU, CLAP, LV2, AAX, Standalone, W
 
 | Feature | Header | Description |
 |---------|--------|-------------|
+| ARA | `ara.hpp` | Audio Random Access document controller (stub) |
 | Host Detection | `host_type.hpp` | `detect_host_type()` → Logic, Reaper, Ableton, etc. |
 | Settings Panel | `settings_panel.hpp` | Audio/MIDI device selector with test signal and meters |
-| ARA | `ara.hpp` | Audio Random Access document controller (stub) |
 
 ---
 
 ## canvas
 
-> 2D drawing with GPU acceleration and smart text layout.
+2D drawing with GPU acceleration and smart text layout.
 
 **Link:** `pulp::canvas` · **Include prefix:** `<pulp/canvas/...>`
 
@@ -591,16 +647,16 @@ float height = shaper.measure_height(prepared, 300.0f);  // Fast
 | Feature | Header | Description |
 |---------|--------|-------------|
 | Attributed String | `attributed_string.hpp` | Rich text spans — mixed font, color, weight per range |
-| Rectangle List | `rectangle_list.hpp` | Clip regions with add/subtract/intersect for dirty tracking |
-| Image Convolution | `image_convolution.hpp` | `ImageConvolutionKernel::gaussian_blur_5().apply(pixels, w, h)` |
-| SVG | `svg.hpp` | Load and render SVG vector graphics via nanosvg |
 | Effects | `effects.hpp` | Drop shadow, bloom, blur, color adjustment |
+| Image Convolution | `image_convolution.hpp` | `ImageConvolutionKernel::gaussian_blur_5().apply(pixels, w, h)` |
+| Rectangle List | `rectangle_list.hpp` | Clip regions with add/subtract/intersect for dirty tracking |
+| SVG | `svg.hpp` | Load and render SVG vector graphics via nanosvg |
 
 ---
 
 ## view
 
-> Full widget toolkit with CSS-inspired layout and JS scripting.
+Full widget toolkit with CSS-inspired layout and JS scripting.
 
 **Link:** `pulp::view` · **Include prefix:** `<pulp/view/...>`
 
@@ -625,15 +681,71 @@ root->add_child(std::move(meter));
 
 ### Available widgets (30+)
 
-**Controls:** Knob, Fader, Toggle, Checkbox, TextButton, ComboBox, TextEditor
+#### Controls
 
-**Containers:** Panel, TabPanel, SplitView, ScrollView, ConcertinaPanel (accordion), Toolbar
+| Widget | Description |
+|--------|-------------|
+| Checkbox | Boolean on/off control rendered as a checkmark box |
+| ComboBox | Drop-down menu for selecting one option from a list |
+| Fader | Vertical or horizontal slider for continuous parameter control |
+| Knob | Rotary control for parameters like gain, frequency, resonance |
+| TextButton | Clickable button with a text label — supports toggle mode |
+| TextEditor | Single or multi-line text input with selection, copy/paste, undo |
+| Toggle | Two-state switch control for enabling/disabling features |
 
-**Data display:** Label, ListBox, TreeView, TableListBox (sortable), FileBrowser, FileTree
+#### Containers
 
-**Audio visualization:** Meter, MultiMeter, CorrelationMeter, WaveformView, SpectrumView, SpectrogramView, EqCurveView, XYPad
+| Widget | Description |
+|--------|-------------|
+| ConcertinaPanel | Accordion-style stacked panels — expand one section, collapse others |
+| Panel | Basic container with optional background, border, and layout |
+| ScrollView | Scrollable viewport for content larger than the visible area |
+| SplitView | Resizable split between two child views with a draggable divider |
+| TabPanel | Tabbed container — switch between child views via tab bar |
+| Toolbar | Horizontal or vertical bar of buttons, toggles, separators, and custom views |
 
-**Specialized:** MidiKeyboard, PresetBrowser, ColorPicker, CodeEditor, LassoComponent (marquee selection), ImageView, CanvasWidget, SplashScreen, LiveConstantEditor
+#### Data display
+
+| Widget | Description |
+|--------|-------------|
+| Breadcrumb | Navigation trail showing the current location in a hierarchy |
+| FileBrowser | File system browser with navigation, filtering, and selection |
+| FileTree | Hierarchical file/folder tree with expand/collapse |
+| Label | Static text display with font, color, and alignment options |
+| ListBox | Scrollable list of selectable items with virtual rendering for large datasets |
+| PropertyList | Two-column key/value editor for inspector-style property panels |
+| TableListBox | Sortable, scrollable table with column headers and row selection |
+| TreeView | Hierarchical data display with expand/collapse and lazy loading |
+
+#### Audio visualization
+
+| Widget | Description |
+|--------|-------------|
+| CorrelationMeter | Displays stereo phase correlation from -1 (out of phase) to +1 (mono) |
+| EqCurveView | Interactive frequency response curve for parametric EQ — drag handles to edit bands |
+| Meter | Peak/RMS level meter with configurable ballistics and clip indicators |
+| MultiMeter | Multiple level meters side-by-side for multi-channel monitoring |
+| SpectrogramView | Rolling time-frequency heatmap showing spectral content over time |
+| SpectrumView | Real-time frequency spectrum analyzer with configurable FFT size |
+| WaveformView | Audio waveform display with zoom, selection, and playhead |
+| XYPad | Two-dimensional control surface for parameters like pan/width or filter freq/res |
+
+#### Specialized
+
+| Widget | Description |
+|--------|-------------|
+| CanvasWidget | Custom-drawn view — override `paint()` to draw anything with the Canvas API |
+| CodeEditor | Syntax-highlighted text editor with line numbers, designed for script editing |
+| ColorPicker | HSV color selector with hue ring, saturation/value square, and hex input |
+| FileDropZone | Drop target that accepts files dragged from the OS file manager |
+| ImageView | Display raster images (PNG, JPEG) with optional scaling and aspect ratio |
+| LassoComponent | Rubber-band marquee selection tool for selecting multiple items by dragging |
+| LiveConstantEditor | In-app slider overlay for tweaking magic numbers during development |
+| MidiKeyboard | Interactive piano keyboard — click to play notes, highlight active voices |
+| PresetBrowser | Factory/user preset list with next/prev navigation and search |
+| SplashScreen | Timed overlay window for branding or loading screens on app startup |
+| SpriteStrip | Filmstrip-based control rendered from a sprite sheet image |
+| WaveformEditor | Editable waveform display for drawing custom oscillator shapes |
 
 ### Layout — Yoga flexbox + CSS Grid
 
@@ -686,7 +798,7 @@ knob->set_access_value("-6 dB");
 
 ## osc
 
-> Open Sound Control messaging for networked audio control.
+Open Sound Control messaging for networked audio control.
 
 **Link:** `pulp::osc` · **Include prefix:** `<pulp/osc/...>`
 
@@ -714,41 +826,36 @@ Supports bundles with timetags and address pattern matching (`*`, `?`, `[...]`, 
 
 ## render
 
-> GPU surface management — you rarely use this directly. Canvas and View handle it.
+GPU surface management — you rarely use this directly. Canvas and View handle it.
 
 | Feature | What It Does |
 |---------|-------------|
 | Dawn/WebGPU | Cross-platform GPU abstraction (Metal, Vulkan, D3D12, OpenGL) |
-| Skia Graphite | 2D rendering on top of Dawn — what Canvas uses internally |
 | GPU Compute | Experimental batch processing for >64K element workloads |
+| Skia Graphite | 2D rendering on top of Dawn — what Canvas uses internally |
 
 ---
 
 ## ship
 
-> Packaging and distribution — from code signing to installer to update feed.
+Packaging and distribution — from code signing to installer to update feed.
 
 **Link:** `pulp::ship` · **Include prefix:** `<pulp/ship/...>`
 
 ```bash
-# Sign
+# Sign all plugin bundles
 pulp ship sign --identity "Developer ID Application: My Company"
 
-# Package
-pulp ship package --version 1.2.0   # Creates DMG (macOS), NSIS (Windows), .deb (Linux)
+# Package — creates .pkg (macOS) or NSIS installer (Windows)
+pulp ship package --version 1.2.0
 
-# Notarize (macOS)
-pulp ship notarize
-
-# Generate update feed
-pulp ship appcast --version 1.2.0 --notes "Bug fixes and new presets"
+# Check signing status
+pulp ship check
 ```
 
 | Feature | What It Does |
 |---------|-------------|
 | Code Signing | macOS `codesign` + Windows `signtool` |
-| Notarization | macOS notarization with `notarytool` |
-| DMG / PKG | macOS installer creation |
-| Windows Installer | NSIS-based with optional Authenticode |
-| Linux Packaging | `.deb` and `.tar.gz` |
-| Appcast | Sparkle (macOS) / WinSparkle (Windows) update feed |
+| macOS Packaging | `.pkg` installers via `pkgbuild` |
+| Signing Check | Verify signing status of all built plugin bundles |
+| Windows Installer | NSIS-based installer with optional Authenticode |
