@@ -45,9 +45,12 @@
 #   - doctor drift integration with honest immutable-releases row
 #
 # v0.1.1 was a no-op stub on macOS — do not pin to anything older
-# than v0.1.2. v0.1.6 is the Phase 6 complete release — nothing in
-# the original Phase 6 follow-up plan remains deferred.
-version = "v0.1.6"
+# than v0.1.2. v0.1.7 adds the first wave of dogfood-driven fixes:
+# all executors accept resume_from + mode kwargs, branch create
+# resolves the base SHA from the remote instead of local
+# tracking refs, and ship --json no longer leaks human text from
+# the auto-create-base helper.
+version = "v0.1.7"
 
 # Public release source. The bootstrap script downloads from
 # https://github.com/{repo}/releases/download/{version}/{asset}
