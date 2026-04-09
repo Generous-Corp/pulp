@@ -1,0 +1,109 @@
+# ============================================================================
+# Pulp Developer Configuration
+# ============================================================================
+#
+# Copy this file to ~/.pulp/config.toml to set your developer defaults.
+# These settings persist across all Pulp projects on your machine.
+#
+# Quick setup:
+#   pulp config init          # copies this template to ~/.pulp/config.toml
+#   pulp config set KEY VALUE # set a single value
+#
+# Or set PULP_HOME to use a different config directory (default: ~/.pulp)
+#
+# Precedence: CLI flags > environment variables > this file
+# (Future: project pulp.toml will override this file for per-project settings)
+# ============================================================================
+
+
+# ── Developer Identity ─────────────────────────────────────────────────────
+# Used in plugin metadata, bundle IDs, and installer publisher fields.
+
+[developer]
+# name = "Your Name"
+# company = "My Company"              # Optional — overrides name for publisher
+
+
+# ── Apple Code Signing (macOS) ─────────────────────────────────────────────
+# Required for: pulp ship sign, pulp ship notarize
+#
+# To find your signing identity, run:
+#   security find-identity -v -p codesigning
+# Or open: Keychain Access → My Certificates
+
+[signing.apple]
+# identity = "Developer ID Application: Your Name (TEAMID)"
+# installer_identity = "Developer ID Installer: Your Name (TEAMID)"
+
+# Apple Developer Team ID
+# Find yours at: https://developer.apple.com/account → Membership → Team ID
+# team_id = "ABCDE12345"
+
+# Apple ID (email) for notarization
+# apple_id = "you@example.com"
+
+# App-specific password for notarization (NEVER use your Apple ID password)
+# Generate one at: https://appleid.apple.com → Sign-In and Security → App-Specific Passwords
+# Then store in Keychain:
+#   security add-generic-password -s AC_PASSWORD -a you@example.com -w "xxxx-xxxx-xxxx-xxxx"
+# password = "@keychain:AC_PASSWORD"
+
+
+# ── Android Signing ────────────────────────────────────────────────────────
+# Required for: pulp ship sign --target android, pulp ship package --target android
+#
+# To create a release keystore:
+#   keytool -genkey -v -keystore release.jks -keyalg RSA -keysize 2048 -validity 10000
+#
+# Install Android Studio for SDK + NDK:
+#   https://developer.android.com/studio
+#
+# Then install required SDK components:
+#   sdkmanager "platform-tools" "build-tools;34.0.0" "ndk;27.0.12077973" "platforms;android-34"
+
+[signing.android]
+# keystore = "~/keystores/release.jks"
+# key_alias = "release"
+
+# Use environment variables for passwords — never store plaintext
+# Set the env var: export ANDROID_STORE_PASS="your-password"
+# store_pass = "@env:ANDROID_STORE_PASS"
+# key_pass = "@env:ANDROID_KEY_PASS"    # Defaults to store_pass if omitted
+
+
+# ── Windows Code Signing ───────────────────────────────────────────────────
+# Required for: pulp ship sign (on Windows)
+#
+# Options:
+#   A) Traditional Authenticode — buy a certificate from DigiCert, Sectigo, or GlobalSign
+#      Export as .pfx, then use pfx_path below
+#   B) Azure Trusted Signing — cloud-based, ~$10/month, instant SmartScreen reputation
+#      See: https://learn.microsoft.com/en-us/azure/trusted-signing/
+
+[signing.windows]
+# identity = "Your Company"
+# pfx_path = "~/certs/codesign.pfx"
+# pfx_password = "@env:WINDOWS_PFX_PASS"
+
+
+# ── Project Creation Defaults ──────────────────────────────────────────────
+# Used by: pulp create
+
+[create]
+# projects_dir = "~/Code"                       # Where new projects are created
+# default_formats = "VST3 CLAP AU Standalone"   # Plugin formats to scaffold
+
+
+# ── Appcast / Update Feed ─────────────────────────────────────────────────
+# Used by: pulp ship appcast
+#
+# Generate an Ed25519 signing key:
+#   openssl genpkey -algorithm ed25519 -out ed25519_private.key
+#   openssl pkey -in ed25519_private.key -pubout -out ed25519_public.key
+#
+# For Sparkle (macOS): embed the public key in your app's Info.plist
+# For WinSparkle (Windows): embed in the updater configuration
+
+[appcast]
+# title = "My Plugins"
+# sign_key = "~/keys/ed25519_private.key"

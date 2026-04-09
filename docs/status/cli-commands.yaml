@@ -9,9 +9,6 @@ commands:
       - name: --js-engine
         kind: option
         description: "JS engine backend: auto (default), quickjs, jsc (Apple only), v8 (requires V8 libs). Forces reconfigure."
-      - name: --watch
-        kind: flag
-        description: "After building, watch source files for changes and rebuild automatically (500ms poll interval)."
       - name: extra_args
         kind: passthrough
         description: Passed through to cmake --build (e.g., --target, -j)
@@ -47,23 +44,78 @@ commands:
     docs: reference/cli.md#validate
 
   - name: ship
-    status: experimental
-    summary: Signing and packaging subcommands (sign, package, check). macOS only.
+    status: usable
+    summary: Sign, notarize, package, and generate update feeds for all platforms.
     subcommands:
       - name: sign
-        summary: Code-sign all built plugin bundles
+        summary: Code-sign plugin bundles (macOS/Windows) or Android APK/AAB
         args:
           - name: --identity
-            required: true
+            required: false
           - name: --entitlements
             required: false
+          - name: --target
+            required: false
+          - name: --keystore
+            required: false
+          - name: --key-alias
+            required: false
+          - name: --store-pass
+            required: false
+          - name: --key-pass
+            required: false
+      - name: notarize
+        summary: Submit signed bundles for Apple notarization (macOS)
+        args:
+          - name: --apple-id
+            required: true
+          - name: --team-id
+            required: true
+          - name: --password
+            required: false
+          - name: --staple
+            required: false
       - name: package
-        summary: Create .pkg installers
+        summary: Create installers (.pkg, NSIS, APK/AAB)
         args:
           - name: --version
             required: false
+          - name: --target
+            required: false
+          - name: --keystore
+            required: false
+          - name: --key-alias
+            required: false
+          - name: --store-pass
+            required: false
+          - name: --key-pass
+            required: false
+          - name: --abi
+            required: false
+          - name: --apk-only
+            required: false
+          - name: --aab-only
+            required: false
+          - name: --per-user
+            required: false
+      - name: appcast
+        summary: Generate Sparkle-compatible XML update feed
+        args:
+          - name: --url
+            required: true
+          - name: --version
+            required: false
+          - name: --notes
+            required: false
+          - name: --output
+            required: false
+          - name: --sign-key
+            required: false
       - name: check
-        summary: Check signing status of built plugins
+        summary: Check signing status of built plugins or Android artifacts
+        args:
+          - name: --target
+            required: false
     docs: reference/cli.md#ship
 
   - name: docs
@@ -171,6 +223,30 @@ commands:
     status: usable
     summary: Remove the build directory.
     docs: reference/cli.md#clean
+
+  - name: config
+    status: usable
+    summary: Manage global developer configuration (~/.pulp/config.toml).
+    subcommands:
+      - name: init
+        summary: Create config from template (safe — never overwrites)
+        args:
+          - name: --force
+            required: false
+      - name: set
+        summary: Set a config value (e.g., signing.apple.identity)
+        args:
+          - name: key
+            kind: positional
+            required: true
+          - name: value
+            kind: positional
+            required: true
+      - name: show
+        summary: Show current non-comment config values
+      - name: path
+        summary: Print config file path
+    docs: reference/cli.md#config
 
   - name: design
     status: experimental
@@ -484,13 +560,3 @@ commands:
     status: usable
     summary: Print usage information.
     docs: reference/cli.md#help
-
-  - name: version
-    status: usable
-    summary: Show, bump, or check version consistency across all surfaces.
-    subcommands:
-      - name: bump
-        summary: "Increment SDK or plugin version (major|minor|patch). Updates CMakeLists.txt and CHANGELOG.md."
-      - name: check
-        summary: "Verify version consistency: SDK constant matches CMake, AU template uses computed integer, CHANGELOG matches."
-    docs: reference/cli.md#version

@@ -10,6 +10,7 @@ target_include_directories(pulp-ship
 # Cross-platform sources
 target_sources(pulp-ship PRIVATE
     src/appcast.cpp
+    platform/android/package_android.cpp
 )
 
 target_link_libraries(pulp-ship PUBLIC pulp::platform)
