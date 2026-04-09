@@ -76,7 +76,11 @@ jobs:
           retention-days: 7
 
   # Emulator test — only on macOS (KVM not available on GitHub Windows runners)
+  # Disabled until emulator CI infrastructure is set up (see #77).
+  # The emulator test requires GPU support (Dawn/Vulkan) which CI runners
+  # don't have, causing a guaranteed 20-minute timeout on every PR.
   android-emulator-test:
+    if: false  # Disabled — see issue #77
     runs-on: macos-latest
     needs: android-build
     timeout-minutes: 20
