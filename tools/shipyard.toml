@@ -50,7 +50,7 @@
 # resolves the base SHA from the remote instead of local
 # tracking refs, and ship --json no longer leaks human text from
 # the auto-create-base helper.
-version = "v0.1.9"
+version = "v0.1.10"
 
 # Public release source. The bootstrap script downloads from
 # https://github.com/{repo}/releases/download/{version}/{asset}
