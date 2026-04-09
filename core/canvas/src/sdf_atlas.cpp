@@ -2,9 +2,10 @@
 //
 // Algorithm:
 //   1. For each requested codepoint, rasterize a binary mask at
-//      base_size + 2*padding using a glyph rasterizer (currently a
-//      stub that produces a circle for testing — Skia integration is
-//      the next step).
+//      base_size + 2*padding. With Skia available
+//      (PULP_HAS_SKIA), the mask comes from SkFont::drawText into an
+//      offscreen SkBitmap. Without Skia, falls back to a placeholder
+//      circle rasterizer so the test suite still runs.
 //   2. Run a 2-pass Euclidean distance transform (Felzenszwalb &
 //      Huttenlocher 2004) over the mask to produce signed distance
 //      values in pixels.
@@ -12,12 +13,6 @@
 //      range of [-padding, +padding] pixels.
 //   4. Pack tiles into a single atlas image using a simple shelf
 //      packer.
-//
-// The placeholder rasterizer is intentionally minimal: it produces a
-// filled circle whose radius scales with the codepoint, so tests can
-// verify that the SDF distance values are correct without depending
-// on a specific font being installed. Real glyph rendering follows
-// in the next iteration when Skia is wired in.
 
 #include <pulp/canvas/sdf_atlas.hpp>
 
@@ -26,6 +21,17 @@
 #include <limits>
 #include <unordered_map>
 #include <vector>
+
+#if PULP_HAS_SKIA
+    #include "include/core/SkBitmap.h"
+    #include "include/core/SkCanvas.h"
+    #include "include/core/SkColor.h"
+    #include "include/core/SkFont.h"
+    #include "include/core/SkFontMgr.h"
+    #include "include/core/SkPaint.h"
+    #include "include/core/SkTypeface.h"
+    #include "include/core/SkImageInfo.h"
+#endif
 
 namespace pulp::canvas {
 
@@ -136,6 +142,88 @@ std::vector<std::uint8_t> rasterize_placeholder(char32_t codepoint, int w, int h
     return mask;
 }
 
+#if PULP_HAS_SKIA
+// Skia-backed glyph rasterizer.
+//
+// Builds a temporary SkBitmap of size w × h, paints the requested
+// codepoint into the centre using the requested font, and reads back
+// the alpha channel as a binary mask. Returns an empty vector if the
+// font cannot be loaded so the caller can fall back to the
+// placeholder.
+std::vector<std::uint8_t> rasterize_skia(const std::string& font_family,
+                                          char32_t codepoint,
+                                          int base_size,
+                                          int w, int h, int padding) {
+    auto mgr = SkFontMgr::RefDefault();
+    if (!mgr) return {};
+
+    sk_sp<SkTypeface> face;
+    if (!font_family.empty()) {
+        face = mgr->matchFamilyStyle(font_family.c_str(), SkFontStyle::Normal());
+    }
+    if (!face) {
+        // Fall back to the platform default by leaving the family null.
+        face = mgr->legacyMakeTypeface(nullptr, SkFontStyle::Normal());
+    }
+    if (!face) return {};
+
+    SkFont font(face, static_cast<SkScalar>(base_size));
+    font.setEdging(SkFont::Edging::kAntiAlias);
+    font.setHinting(SkFontHinting::kNone);
+    font.setSubpixel(false);
+
+    SkBitmap bitmap;
+    auto info = SkImageInfo::MakeA8(w, h);
+    if (!bitmap.tryAllocPixels(info)) return {};
+    bitmap.eraseColor(SK_ColorTRANSPARENT);
+
+    SkCanvas canvas(bitmap);
+    SkPaint paint;
+    paint.setColor(SK_ColorWHITE);
+    paint.setAntiAlias(true);
+
+    // Convert codepoint → glyph and draw centered. We use drawSimpleText
+    // with UTF-32 to dodge any UTF-8 encoding edge cases.
+    char32_t cps[1] = { codepoint };
+    SkScalar baseline_y = static_cast<SkScalar>(h - padding);
+    SkScalar text_x = static_cast<SkScalar>(padding);
+    canvas.drawSimpleText(cps, sizeof(cps),
+                          SkTextEncoding::kUTF32,
+                          text_x, baseline_y,
+                          font, paint);
+
+    // Read back the A8 plane as a binary mask. Any non-zero alpha
+    // counts as inside — the distance transform handles antialiasing
+    // implicitly via the smoothstep at sample time.
+    std::vector<std::uint8_t> mask(static_cast<std::size_t>(w * h), 0);
+    const std::uint8_t* src = static_cast<const std::uint8_t*>(bitmap.getPixels());
+    if (!src) return {};
+    const int row_bytes = static_cast<int>(bitmap.rowBytes());
+    for (int y = 0; y < h; ++y) {
+        for (int x = 0; x < w; ++x) {
+            mask[static_cast<std::size_t>(y * w + x)] =
+                (src[y * row_bytes + x] > 32) ? 1 : 0;
+        }
+    }
+    return mask;
+}
+#endif // PULP_HAS_SKIA
+
+// Dispatcher: prefer Skia rasterization, fall back to the placeholder.
+std::vector<std::uint8_t> rasterize_glyph(const std::string& font_family,
+                                           char32_t codepoint,
+                                           int base_size,
+                                           int w, int h, int padding) {
+#if PULP_HAS_SKIA
+    auto mask = rasterize_skia(font_family, codepoint, base_size, w, h, padding);
+    if (!mask.empty()) return mask;
+#else
+    (void)font_family;
+    (void)base_size;
+#endif
+    return rasterize_placeholder(codepoint, w, h, padding);
+}
+
 } // anonymous namespace
 
 // ── SdfAtlas::Impl ───────────────────────────────────────────────────────
@@ -154,7 +242,7 @@ SdfAtlas::~SdfAtlas() = default;
 SdfAtlas::SdfAtlas(SdfAtlas&&) noexcept = default;
 SdfAtlas& SdfAtlas::operator=(SdfAtlas&&) noexcept = default;
 
-bool SdfAtlas::build(const std::string& /*font_family*/,
+bool SdfAtlas::build(const std::string& font_family,
                      const std::vector<char32_t>& chars,
                      int base_size,
                      int padding,
@@ -182,8 +270,11 @@ bool SdfAtlas::build(const std::string& /*font_family*/,
         const int x0 = col * tile;
         const int y0 = row * tile;
 
-        // Rasterize a binary mask for this glyph (placeholder for now).
-        auto mask = rasterize_placeholder(chars[i], tile, tile, padding);
+        // Rasterize a binary mask for this glyph. Uses Skia/SkFont
+        // when PULP_HAS_SKIA is set; otherwise falls back to the
+        // placeholder so the test suite still passes on hosts without
+        // Skia.
+        auto mask = rasterize_glyph(font_family, chars[i], base_size, tile, tile, padding);
 
         // Distance transform.
         auto dist = distance_transform(mask.data(), tile, tile);
