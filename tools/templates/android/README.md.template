@@ -1,0 +1,34 @@
+# {{PLUGIN_NAME}} — Android
+
+Scaffolded Android project for the {{PLUGIN_NAME}} Pulp plugin.
+
+## Build
+
+Requires:
+- Android Studio (or the standalone Android SDK) with SDK 35 + NDK 27.0.12077973 installed
+- Java 17+
+- Access to a Pulp source tree (the SDK does not yet ship Android libraries)
+
+```bash
+cd android
+./gradlew assembleDebug
+```
+
+The resulting APK will be at `android/app/build/outputs/apk/debug/app-debug.apk`.
+
+## Status
+
+This Android scaffold is **experimental**. It wires the plugin's native
+CMakeLists.txt into the Gradle build via `externalNativeBuild.cmake.path`.
+For Android builds to succeed you currently need:
+
+- A local Pulp source tree referenced from the plugin's `CMakeLists.txt`
+- Skia prebuilt for Android (see `tools/build-skia-android.sh` in the Pulp repo)
+
+Future work will ship Android libraries in the Pulp SDK so standalone
+Android builds are self-contained.
+
+See also:
+- https://github.com/danielraffel/pulp/issues/81 (x86_64 Skia)
+- https://github.com/danielraffel/pulp/issues/82 (APK asset loading)
+- https://github.com/danielraffel/pulp/issues/83 (this scaffold)

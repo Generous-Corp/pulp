@@ -110,7 +110,7 @@ int cmd_create(const std::vector<std::string>& args) {
     }
 
     // Parse args
-    std::string name, type = "effect", manufacturer = "Pulp", output_path, tmpl;
+    std::string name, type = "effect", manufacturer = "Pulp", output_path, tmpl, targets_arg;
     bool no_build = false;
     bool ci_mode = false;
     bool in_tree_mode = false;
@@ -119,6 +119,9 @@ int cmd_create(const std::vector<std::string>& args) {
         if (args[i] == "--template" && i + 1 < args.size()) { tmpl = args[++i]; continue; }
         if (args[i] == "--manufacturer" && i + 1 < args.size()) { manufacturer = args[++i]; continue; }
         if (args[i] == "--output" && i + 1 < args.size()) { output_path = args[++i]; continue; }
+        if ((args[i] == "--targets" || args[i] == "--target") && i + 1 < args.size()) {
+            targets_arg = args[++i]; continue;
+        }
         if (args[i] == "--in-tree" || args[i] == "--example") { in_tree_mode = true; continue; }
         if (args[i] == "--no-build") { no_build = true; continue; }
         if (args[i] == "--no-interactive" || args[i] == "--ci") { ci_mode = true; continue; }
@@ -130,6 +133,7 @@ int cmd_create(const std::vector<std::string>& args) {
             std::cout << "  --template <name>                    Use named template (e.g. gain)\n";
             std::cout << "  --manufacturer <name>                Manufacturer (default: Pulp)\n";
             std::cout << "  --output <dir>                       Override output directory\n";
+            std::cout << "  --targets <list>                     Comma-separated extra targets (e.g. android)\n";
             std::cout << "  --in-tree, --example                 Add the project to examples/ using the local Pulp checkout\n";
             std::cout << "  --no-build                           Skip build after scaffolding\n";
             std::cout << "  --no-interactive, --ci               Non-interactive mode (use defaults)\n";
@@ -139,6 +143,27 @@ int cmd_create(const std::vector<std::string>& args) {
             return 0;
         }
         if (name.empty() && !args[i].empty() && args[i][0] != '-') { name = args[i]; continue; }
+    }
+
+    // Parse --targets list (comma-separated, case-insensitive)
+    bool want_android = false;
+    if (!targets_arg.empty()) {
+        std::string buf;
+        auto flush = [&]() {
+            std::string lower;
+            for (char c : buf) lower += static_cast<char>(std::tolower(c));
+            lower = trim(lower);
+            if (lower == "android") want_android = true;
+            // Desktop targets (vst3/au/clap/standalone) are already handled via
+            // default_create_formats() — accepting them here is a no-op so the
+            // flag can be used uniformly.
+            buf.clear();
+        };
+        for (char c : targets_arg) {
+            if (c == ',' || c == ' ') flush();
+            else buf += c;
+        }
+        flush();
     }
 
     if (name.empty()) {
@@ -416,6 +441,47 @@ int cmd_create(const std::vector<std::string>& args) {
             f << "sdk_checkout = \"" << root.generic_string() << "\"\n";
         }
         log("  Created pulp.toml\n");
+    }
+
+    // Android target scaffold (experimental — see issue #83)
+    if (want_android) {
+        auto android_tmpl_dir = templates_base / "android";
+        if (!fs::exists(android_tmpl_dir) && !root.empty()) {
+            android_tmpl_dir = root / "tools" / "templates" / "android";
+        }
+        if (!fs::exists(android_tmpl_dir)) {
+            print_warn("Android template directory not found — skipping Android scaffold");
+        } else {
+            auto android_out = out_dir / "android";
+            fs::create_directories(android_out);
+            log("\nScaffolding Android project (experimental)...\n");
+
+            // Walk the template tree and expand every .template file.
+            for (auto& entry : fs::recursive_directory_iterator(android_tmpl_dir)) {
+                if (!entry.is_regular_file()) continue;
+                auto rel = fs::relative(entry.path(), android_tmpl_dir);
+                auto rel_str = rel.generic_string();
+                std::string out_rel = rel_str;
+                if (out_rel.size() > 9 && out_rel.substr(out_rel.size() - 9) == ".template") {
+                    out_rel = out_rel.substr(0, out_rel.size() - 9);
+                }
+                // Rename MainActivity placeholder path to real namespace package.
+                // Template lives at app/src/main/java/MainActivity.kt.template;
+                // put it under app/src/main/java/<namespace>/MainActivity.kt
+                if (out_rel == "app/src/main/java/MainActivity.kt") {
+                    out_rel = "app/src/main/java/" + ns + "/MainActivity.kt";
+                }
+                auto out_path = android_out / out_rel;
+                fs::create_directories(out_path.parent_path());
+                auto content = read_file_contents(entry.path());
+                auto expanded = expand_template_str(content, vars);
+                std::ofstream f(out_path);
+                f << expanded;
+                log("  Created android/" + out_rel + "\n");
+            }
+            log("\n  Android scaffold is experimental. See android/README.md for\n"
+                "  build instructions and current limitations.\n");
+        }
     }
 
     // Add to examples/CMakeLists.txt (in-tree mode only)

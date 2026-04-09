@@ -1,0 +1,26 @@
+package com.{{NAMESPACE}}
+
+import android.app.Activity
+import android.os.Bundle
+import android.widget.TextView
+
+class MainActivity : Activity() {
+
+    companion object {
+        init {
+            // Load the native library produced by the plugin's CMakeLists.
+            // The library name matches the {{CLASS_NAME}} target in CMakeLists.txt.
+            System.loadLibrary("{{LOWER_NAME}}")
+        }
+    }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        val label = TextView(this).apply {
+            text = "{{PLUGIN_NAME}} — Pulp Android scaffold"
+            textSize = 20f
+            setPadding(48, 48, 48, 48)
+        }
+        setContentView(label)
+    }
+}
