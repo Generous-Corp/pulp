@@ -16,6 +16,18 @@
 #   2. Run `./tools/install-shipyard.sh` to download the new binary.
 #   3. Run `shipyard run` on a feature branch to verify.
 #   4. Open a PR with this file change and your verification notes.
+#
+# Lockstep docs:
+# When bumping the pin, also re-check that the following docs still
+# accurately describe what Shipyard provides at the new version:
+#   - README.md (Contributing + Security & CI policy section)
+#   - CONTRIBUTING.md (Contributor expectations section)
+#   - .agents/skills/ci/SKILL.md (tool-selection logic)
+#   - docs/guides/local-ci.md (cross-references between local_ci.py
+#     and shipyard, eventual removal once local_ci.py is retired)
+# If a Shipyard release introduces a new command, deprecates one, or
+# changes governance defaults, update those docs in the same PR that
+# bumps this pin.
 
 [shipyard]
 # Pinned to the first Shipyard release that bundles Phases 1-4

@@ -78,6 +78,7 @@ Pulp implements or builds on these open standards:
 
 | Project | License | What We Learned |
 |---------|---------|-----------------|
+| [Astral (uv, Ruff, ty)](https://astral.sh/) | Apache-2.0 / MIT | CI/CD security baseline, supply chain hardening, and release process discipline. We adopted several patterns from [their open-source security post](https://astral.sh/blog/open-source-security-at-astral) — immutable releases, tag protection, action SHA pinning, default read-only workflow tokens. |
 | [AudioKit](https://github.com/AudioKit/AudioKit) | MIT | Swift audio patterns, Apple platform integration |
 | [iPlug2](https://github.com/iPlug2/iPlug2) | zlib-like | Multi-format adapter architecture, graphics abstraction |
 | [SignalKit](https://github.com/niclamusic/signalkit) | MIT | Real-time DSP patterns in Swift |

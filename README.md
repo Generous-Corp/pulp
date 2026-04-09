@@ -169,16 +169,26 @@ See [docs/guides/claude-code-plugin.md](docs/guides/claude-code-plugin.md) for s
 
 ## Contributing
 
-Every change goes through: **branch → local CI → PR → GitHub Actions → merge on green**.
+Every change goes through: **branch → CI → PR → merge on green**. Pulp accepts third-party PRs.
 
 ```bash
 # Validate on macOS + Ubuntu + Windows before creating a PR
-python3 tools/local-ci/local_ci.py run <branch>
+shipyard ship                              # preferred (when shipyard is on PATH)
+python3 tools/local-ci/local_ci.py ship    # fallback
 
 # Or use the CI skill: "ship this"
 ```
 
-Local CI runs on your Mac and validates cross-platform via SSH to Ubuntu/Windows VMs. GitHub Actions runs automatically on every PR as a backup gate. See [docs/guides/local-ci.md](docs/guides/local-ci.md) for setup.
+Pulp's CI controller is migrating from `local_ci.py` to [Shipyard](https://github.com/danielraffel/Shipyard). The CI skill detects which one is on PATH and prefers Shipyard; both tools cover the same target matrix (macOS local + Linux SSH + Windows SSH + Namespace cloud). See [docs/guides/local-ci.md](docs/guides/local-ci.md) for setup and [CONTRIBUTING.md](CONTRIBUTING.md) for the full contributor expectations.
+
+### Security & CI policy
+
+- Pulp's `main` branch is protected: every change must go through a PR, and a PR cannot merge until macOS, Linux, and Windows builds + tests are all green.
+- Release tags (`v*`) are immutable — once published they cannot be force-pushed, deleted, or updated.
+- The default CI workflow token is read-only; only the release workflow holds write access.
+- Pulp is currently a **single-maintainer project**, so the governance settings are tuned to a "solo profile". Settings will be revisited if/when Pulp gains co-maintainers — see [CONTRIBUTING.md](CONTRIBUTING.md) for the current contract.
+
+These practices follow patterns documented in [Astral's open-source security post](https://astral.sh/blog/open-source-security-at-astral) and are managed (or in the process of being managed) by [Shipyard](https://github.com/danielraffel/Shipyard).
 
 ## License
 
