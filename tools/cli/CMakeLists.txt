@@ -34,6 +34,23 @@ target_compile_features(pulp-cli PRIVATE cxx_std_20)
 target_link_libraries(pulp-cli PRIVATE pulp::runtime pulp::tool-audio pulp::ship pulp::view pulp::format pulp::inspect)
 target_include_directories(pulp-cli PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
 
+# RPATH so the installed binary can find shared libraries (e.g.,
+# libwgpu_native.dylib / libwgpu_native.so) inside its install prefix.
+# Without this the installed CLI crashes immediately on launch with
+# "Library not loaded: @rpath/libwgpu_native.dylib — no LC_RPATH's
+# found" because the wgpu-native prebuilt sets @rpath but nothing
+# adds an LC_RPATH entry to pulp-cli (#74).
+if(APPLE)
+    set_target_properties(pulp-cli PROPERTIES
+        INSTALL_RPATH "@executable_path/../lib"
+        BUILD_WITH_INSTALL_RPATH FALSE
+        MACOSX_RPATH TRUE)
+elseif(UNIX)
+    set_target_properties(pulp-cli PROPERTIES
+        INSTALL_RPATH "$ORIGIN/../lib"
+        BUILD_WITH_INSTALL_RPATH FALSE)
+endif()
+
 # Install into the active prefix so SDK installs do not try to write back into
 # the source checkout.
 set(_pulp_cli_install_bindir "${CMAKE_INSTALL_BINDIR}")
