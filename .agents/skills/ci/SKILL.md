@@ -12,6 +12,43 @@ requires:
 
 Validate branches and ship code safely. This skill handles all CI workflows for Pulp across local machines and VMs.
 
+## Tool selection: Shipyard (preferred) or local_ci.py (fallback)
+
+Pulp is migrating from `tools/local-ci/local_ci.py` to **Shipyard** — a
+reusable CI controller pinned in `tools/shipyard.toml`. Both tools are
+supported during the transition. Detect which one to use:
+
+```bash
+if command -v shipyard >/dev/null 2>&1; then
+    # Preferred: Shipyard, pinned via tools/shipyard.toml
+    shipyard run     # validate current branch
+    shipyard ship    # PR + validate + merge on green
+else
+    # Fallback: legacy local_ci.py
+    python3 tools/local-ci/local_ci.py run     # validate current branch
+    python3 tools/local-ci/local_ci.py ship    # PR + validate + merge on green
+fi
+```
+
+To install Shipyard locally for the first time:
+
+```bash
+./tools/install-shipyard.sh           # download + verify pinned binary
+./tools/install-shipyard.sh --status  # show installed vs pinned version
+export PATH="$HOME/.pulp/bin:$PATH"   # add ~/.pulp/bin to PATH (one-time)
+```
+
+After install, every Pulp checkout that has `~/.pulp/bin` on PATH gets
+the same pinned Shipyard version automatically. The pin lives in
+`tools/shipyard.toml` and is bumped via PR after each Shipyard release
+that passes Pulp's CI matrix.
+
+The two tools cover the same target matrix (mac local + Linux SSH +
+Windows SSH + Namespace cloud) and accept the same `--base` flag for
+develop branches. Shipyard adds evidence-gated merge that checks
+per-platform proof for the exact merge-candidate SHA, which is stricter
+than `local_ci.py`'s `job.passed` check.
+
 ## Prerequisites Check
 
 Before running any CI command, verify the required tooling AND provider config exists:

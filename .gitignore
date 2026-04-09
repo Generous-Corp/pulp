@@ -1,6 +1,10 @@
 # Legacy planning paths (now a submodule at planning/)
 /.planning-repo/
 
+# Per-machine Shipyard config (SSH host details, paths, secrets).
+# The committed template lives at .shipyard.local/config.toml.example.
+/.shipyard.local/config.toml
+
 # Build artifacts
 /build/
 /build-*/

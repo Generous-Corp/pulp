@@ -1,0 +1,41 @@
+# Pulp's pinned Shipyard release.
+#
+# Shipyard is the cross-platform CI controller Pulp uses for queue,
+# multi-platform validation, and merge gating. Pulp pins a specific
+# Shipyard release here so every checkout uses the same version.
+#
+# To install or upgrade:
+#   ./tools/install-shipyard.sh
+#
+# To check what's installed vs what's pinned:
+#   ./tools/install-shipyard.sh --status
+#
+# To bump the pin (after verifying a new Shipyard release works on
+# Pulp's CI matrix):
+#   1. Edit `version` below.
+#   2. Run `./tools/install-shipyard.sh` to download the new binary.
+#   3. Run `shipyard run` on a feature branch to verify.
+#   4. Open a PR with this file change and your verification notes.
+
+[shipyard]
+# Pinned to the first Shipyard release that bundles Phases 1-4
+# (multi-backend dispatch + preflight + cloud CLI + progress) and the
+# PyInstaller entrypoint fix. v0.1.1 was a no-op stub on macOS — do
+# not pin to anything older than v0.1.2.
+version = "v0.1.2"
+
+# Public release source. The bootstrap script downloads from
+# https://github.com/{repo}/releases/download/{version}/{asset}
+repo = "danielraffel/Shipyard"
+
+# SHA-256 verification asset name (downloaded alongside the binary).
+checksums_asset = "checksums.sha256"
+
+# Per-platform binary asset names. The bootstrap script picks the
+# right one for the current host.
+[shipyard.assets]
+darwin-arm64  = "shipyard-macos-arm64"
+darwin-x64    = "shipyard-macos-x64"
+linux-arm64   = "shipyard-linux-arm64"
+linux-x64     = "shipyard-linux-x64"
+windows-x64   = "shipyard-windows-x64.exe"

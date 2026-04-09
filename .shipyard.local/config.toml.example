@@ -1,0 +1,27 @@
+# Per-machine Shipyard overrides for Pulp.
+#
+# This file is gitignored — it contains SSH host details, paths, and
+# anything else that varies between checkouts. Copy this to
+# .shipyard.local/config.toml on each machine and edit to match your
+# local SSH config.
+#
+# Shipyard merges this file on top of .shipyard/config.toml, so you
+# only need to declare the fields that differ from the project
+# defaults.
+
+[targets.ubuntu]
+host          = "ubuntu"            # ssh host alias
+repo_path     = "/home/<you>/pulp"  # absolute path on the remote
+fallback_host = "ubuntu2"           # optional, used when ubuntu is down
+
+[targets.windows]
+host          = "win"
+repo_path     = "C:\\Users\\<you>\\pulp"
+cmake_generator = "Visual Studio 17 2022"
+cmake_platform  = "x64"
+
+# Optional: per-host Namespace selectors if you want to override
+# Pulp's defaults from the workflow file.
+[cloud.namespace]
+linux_runner_selector_json   = '["nscloud-ubuntu-22.04-amd64-8x16"]'
+windows_runner_selector_json = '["nscloud-windows-amd64-8x32"]'

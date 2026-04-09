@@ -1,0 +1,81 @@
+# Shipyard configuration for Pulp.
+#
+# This file declares Pulp's CI targets, validation pipeline, and merge
+# requirements in a form that Shipyard understands. Per-machine secrets
+# (SSH host details, runner credentials) live in .shipyard.local/
+# (gitignored) — see .shipyard.local/config.toml.example for the
+# template, and run `shipyard doctor` to verify everything is wired up.
+#
+# To use this config:
+#   ./tools/install-shipyard.sh   # install pinned Shipyard binary
+#   shipyard doctor               # verify reachability + config sanity
+#   shipyard run                  # validate the current branch
+#   shipyard ship                 # PR + validate + merge on green
+
+[project]
+name      = "pulp"
+type      = "cmake"
+platforms = ["macos", "linux", "windows"]
+
+# ── Validation pipeline ────────────────────────────────────────────────────
+# Each stage maps to a step in tools/validate-build.sh. Shipyard runs
+# them in order; stage failure short-circuits the pipeline.
+
+[validation.default]
+stages = ["setup", "configure", "build", "test"]
+setup     = "./setup.sh --ci --deps-only"
+configure = "cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug"
+build     = "cmake --build build -j$(nproc 2>/dev/null || sysctl -n hw.ncpu)"
+test      = "ctest --test-dir build --output-on-failure --exclude-regex AudioWorkgroup"
+
+[validation.smoke]
+# Lighter validation for develop-branch ships and quick sanity checks.
+# Builds without tests + GPU + examples; includes a downstream SDK
+# install + scaffold smoke pipeline.
+stages = ["setup", "configure", "build", "install", "smoke"]
+setup     = "./setup.sh --ci --deps-only"
+configure = "cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DPULP_BUILD_TESTS=OFF -DPULP_BUILD_EXAMPLES=OFF"
+build     = "cmake --build build"
+install   = "cmake --install build --prefix install"
+smoke     = "cmake -S tools/validation/sdk-smoke -B smoke/build -DCMAKE_PREFIX_PATH=$(pwd)/install && cmake --build smoke/build"
+
+# ── Targets ────────────────────────────────────────────────────────────────
+# Three platforms today: mac (local), ubuntu (SSH), windows (SSH).
+# Per-host details live in .shipyard.local/config.toml.
+
+[targets.mac]
+backend  = "local"
+platform = "macos-arm64"
+
+[targets.ubuntu]
+backend  = "ssh"
+platform = "linux-x64"
+# host and repo_path go in .shipyard.local/config.toml
+
+[targets.windows]
+backend  = "ssh-windows"
+platform = "windows-x64"
+# host, repo_path, cmake settings go in .shipyard.local/config.toml
+
+# ── Cloud dispatch (Namespace) ─────────────────────────────────────────────
+# Used when shipyard cloud run is invoked, and as the failover target
+# when an SSH host is unreachable in preflight.
+
+[cloud]
+provider   = "namespace"
+workflow   = "build"
+repository = "danielraffel/pulp"
+
+# ── Merge gating ───────────────────────────────────────────────────────────
+# Shipyard's can_merge() requires evidence (passing validation) for
+# every required platform on the exact merge-candidate SHA before
+# `shipyard ship` will merge. This is stricter than local_ci.py's
+# job.passed check, which only required the most recent run to pass.
+
+[merge]
+require_platforms = ["macos", "linux", "windows"]
+
+# ── Ship defaults ──────────────────────────────────────────────────────────
+
+[ship]
+base_branch = "main"
