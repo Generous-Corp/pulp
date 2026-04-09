@@ -2,6 +2,16 @@
 
 All notable changes to Pulp are documented here.
 
+## [0.2.2] — 2026-04-09
+
+### Fixed
+- **Installed `pulp` CLI now runs without crashing** (#74): added `INSTALL_RPATH` to the `pulp-cli` target so the installed binary resolves `libwgpu_native.dylib` / `libwgpu_native.so` from `<prefix>/lib`. Previously every installed CLI crashed immediately on launch with `dyld: Library not loaded: @rpath/libwgpu_native.dylib`.
+- **Windows SDK now ships the wgpu_native import library under both names** (#94, #104 follow-up): PulpConfig.cmake now looks for `wgpu_native.dll.lib` (the modern MSVC IMPLIB convention used by wgpu-native v0.19+) in addition to `wgpu_native.lib` and the legacy prefixed name. The fail-fast error message lists every name it tried.
+- **Bare/app standalone templates now link `Pulp::standalone` explicitly** (#104 follow-up): scaffolded plugins built with `--type bare` or `--type app` failed to link on Windows MSVC with `LNK2019: unresolved external symbol StandaloneApp::~StandaloneApp` because the templates only linked `Pulp::format`, not `Pulp::standalone`. Both templates now link both targets.
+
+### Added
+- **SDF glyph atlas: real SkFont rasterizer** (#76 follow-up): replaces the placeholder circle rasterizer with `SkFont::drawSimpleText` into an offscreen `SkBitmap` when `PULP_HAS_SKIA` is defined. Falls back to the placeholder for builds without Skia so the host-only test suite still passes.
+
 ## [0.2.1] — 2026-04-09
 
 ### Fixed
