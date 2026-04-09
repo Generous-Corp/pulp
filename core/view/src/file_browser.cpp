@@ -2,6 +2,19 @@
 #include <algorithm>
 #include <fstream>
 
+// Platform-specific includes must live outside the pulp::view namespace.
+// Previously windows.h was included inside the namespace, which on Windows
+// ARM64 leaked winbase.h's _Interlocked* intrinsics into pulp::view and
+// caused "'pulp::view::_InterlockedCompareExchange': no overloaded
+// function could convert all the argument types" build failures. See #92.
+#if defined(__APPLE__) || defined(__linux__)
+    #include <spawn.h>
+    extern "C" { extern char** environ; }
+#elif defined(_WIN32)
+    #include <windows.h>
+    #include <shellapi.h>
+#endif
+
 namespace pulp::view {
 
 // ── FileBrowser ────────────────────────────────────────────────────────
@@ -140,8 +153,6 @@ void FileTree::paint(canvas::Canvas& canvas) {
 // Uses safe process-launch APIs (no shell interpretation of user input).
 
 #ifdef __APPLE__
-#include <spawn.h>
-extern "C" { extern char** environ; }
 
 void ContentSharer::share_file(const std::filesystem::path& file, void*) {
     // Use posix_spawn with /usr/bin/open — no shell, no injection
@@ -164,8 +175,6 @@ void ContentSharer::share_text(const std::string& text, void*) {
 }
 
 #elif defined(_WIN32)
-#include <windows.h>
-#include <shellapi.h>
 
 void ContentSharer::share_file(const std::filesystem::path& file, void*) {
     // ShellExecuteW — safe, no shell interpretation
@@ -182,8 +191,6 @@ void ContentSharer::share_text(const std::string&, void*) {
 void ContentSharer::share_file(const std::filesystem::path&, void*) {}
 void ContentSharer::share_text(const std::string&, void*) {}
 #else
-#include <spawn.h>
-extern "C" { extern char** environ; }
 
 void ContentSharer::share_file(const std::filesystem::path& file, void*) {
     // posix_spawnp with xdg-open — uses PATH lookup, no hardcoded path
