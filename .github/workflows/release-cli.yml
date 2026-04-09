@@ -28,13 +28,9 @@ jobs:
           - os: windows-latest
             platform: windows-x64
             artifact: pulp.exe
-          # windows-arm64 temporarily disabled — pre-existing compile failure
-          # in core/view on Windows ARM64 where winbase.h _Interlocked*
-          # intrinsics leak into the pulp::view namespace. Tracked in a
-          # follow-up issue.
-          # - os: windows-11-arm
-          #   platform: windows-arm64
-          #   artifact: pulp.exe
+          - os: windows-11-arm
+            platform: windows-arm64
+            artifact: pulp.exe
 
     runs-on: ${{ matrix.os }}
     name: CLI ${{ matrix.platform }}
