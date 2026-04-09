@@ -20,9 +20,10 @@ If you're interested in the rationale behind these rules, see [Astral's open-sou
 
 1. Fork the repo (or create a feature branch if you have write access).
 2. Make your changes on a branch named `feature/short-description` or `fix/short-description`.
-3. Run CI locally before opening the PR: `shipyard ship` (preferred, when shipyard is on PATH) or `python3 tools/local-ci/local_ci.py ship` (fallback).
-4. Open the PR. CI will run automatically on macOS, Linux, and Windows.
-5. The maintainer will merge the PR after CI passes. If anything is unclear, leave a comment.
+3. **Pre-PR validation** (optional but recommended): `shipyard run` (preferred, when shipyard is on PATH) or `python3 tools/local-ci/local_ci.py run` (fallback). This validates on macOS + Linux + Windows without creating a PR.
+4. Open the PR with `git push` + `gh pr create`, or use `shipyard ship` / `python3 tools/local-ci/local_ci.py ship` to push, open the PR, validate, and merge on green automatically.
+5. CI will run automatically on macOS, Linux, and Windows.
+6. The maintainer will merge the PR after CI passes. If anything is unclear, leave a comment.
 
 ## Developer Certificate of Origin
 

@@ -173,10 +173,14 @@ Every change goes through: **branch → CI → PR → merge on green**. Pulp acc
 
 ```bash
 # Validate on macOS + Ubuntu + Windows before creating a PR
-shipyard ship                              # preferred (when shipyard is on PATH)
-python3 tools/local-ci/local_ci.py ship    # fallback
+shipyard run                               # preferred (when shipyard is on PATH)
+python3 tools/local-ci/local_ci.py run     # fallback
 
-# Or use the CI skill: "ship this"
+# Or use the CI skill: "validate this"
+#
+# When you're ready to open a PR + merge on green automatically:
+shipyard ship                              # creates the PR, waits for CI, merges
+python3 tools/local-ci/local_ci.py ship    # fallback
 ```
 
 Pulp's CI controller is migrating from `local_ci.py` to [Shipyard](https://github.com/danielraffel/Shipyard). The CI skill detects which one is on PATH and prefers Shipyard; both tools cover the same target matrix (macOS local + Linux SSH + Windows SSH + Namespace cloud). See [docs/guides/local-ci.md](docs/guides/local-ci.md) for setup and [CONTRIBUTING.md](CONTRIBUTING.md) for the full contributor expectations.
@@ -185,7 +189,7 @@ Pulp's CI controller is migrating from `local_ci.py` to [Shipyard](https://githu
 
 - Pulp's `main` branch is protected: every change must go through a PR, and a PR cannot merge until macOS, Linux, and Windows builds + tests are all green.
 - Release tags (`v*`) are immutable — once published they cannot be force-pushed, deleted, or updated.
-- The default CI workflow token is read-only; only the release workflow holds write access.
+- The repository default for the CI workflow token is read-only. Workflows that need write access (the release workflow's `contents: write`, `auto-label-issues.yml`'s `issues: write`, `freshness-check.yml`'s `issues: write`, and `docs-deploy.yml`'s `pages: write` + `id-token: write`) declare those scopes explicitly per job rather than inheriting a broad default.
 - Pulp is currently a **single-maintainer project**, so the governance settings are tuned to a "solo profile". Settings will be revisited if/when Pulp gains co-maintainers — see [CONTRIBUTING.md](CONTRIBUTING.md) for the current contract.
 
 These practices follow patterns documented in [Astral's open-source security post](https://astral.sh/blog/open-source-security-at-astral) and are managed (or in the process of being managed) by [Shipyard](https://github.com/danielraffel/Shipyard).
