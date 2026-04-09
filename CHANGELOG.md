@@ -2,6 +2,26 @@
 
 All notable changes to Pulp are documented here.
 
+## [0.2.0] — 2026-04-09
+
+### Added
+- **Android platform**: Full GPU rendering pipeline + interactive Pulp widgets (#53)
+- **`pulp ship notarize`**: Apple notarization with submit, poll, and staple (#79)
+- **`pulp ship appcast`**: Sparkle-compatible XML update feed generation with EdDSA signing (#79)
+- **`pulp ship android`**: APK/AAB packaging via Gradle with keystore signing, ABI selection, Android SDK discovery (#79)
+- **Ship config fallback**: CLI flags → env vars → `~/.pulp/config.toml` for all signing credentials (#79)
+- **`config.example.toml`**: Developer configuration template for signing identities, keystores, and appcast keys
+- **Inspector polish**: cursor balance, selection persistence, highlight stability, scrollbar, positioning (#71)
+- **Modular CLI**: `pulp_cli.cpp` refactored into per-command `cmd_*.cpp` files (#61)
+
+### Fixed
+- `modules.md` code examples now match the actual APIs (#70)
+- Android emulator CI job disabled until infrastructure is ready (#77, #78)
+
+### Changed
+- Skill Maintenance Rule added to CLAUDE.md (#72)
+- Ship CLI command manifest and `/ship` slash command updated with notarize/appcast/android subcommands
+
 ## [0.1.1] — 2026-04-06
 
 ### Added
