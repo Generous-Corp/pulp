@@ -43,6 +43,23 @@ if(PULP_LINUX)
     find_dependency(ALSA)
 endif()
 
+# The Pulp SDK is built and installed in the Release configuration only.
+# When a downstream plugin is built in Debug / MinSizeRel / RelWithDebInfo
+# (or the Visual Studio multi-config generator picks those configs), CMake
+# needs to know to use the Release configuration of Pulp's imported
+# targets. Without this, the Visual Studio generator errors with
+# "IMPORTED_IMPLIB not set for imported target 'webgpu' configuration
+# 'MinSizeRel'" etc.
+#
+# Set CMAKE_MAP_IMPORTED_CONFIG_<CONFIG>=Release for every non-Release
+# config unless the consuming project has already overridden it.
+foreach(_pulp_cfg Debug MinSizeRel RelWithDebInfo)
+    if(NOT DEFINED CMAKE_MAP_IMPORTED_CONFIG_${_pulp_cfg})
+        set(CMAKE_MAP_IMPORTED_CONFIG_${_pulp_cfg} "Release;")
+    endif()
+endforeach()
+unset(_pulp_cfg)
+
 set(_pulp_webgpu_runtime
     "${PULP_SDK_LIBRARY_DIR}/${PULP_SDK_SHARED_LIBRARY_PREFIX}wgpu_native${PULP_SDK_SHARED_LIBRARY_SUFFIX}")
 set(_pulp_webgpu_include_dir "${PULP_SDK_DIR}/external/webgpu/include")
@@ -50,20 +67,36 @@ set(_pulp_webgpu_include_dir "${PULP_SDK_DIR}/external/webgpu/include")
 if(NOT TARGET webgpu
    AND EXISTS "${_pulp_webgpu_runtime}"
    AND EXISTS "${_pulp_webgpu_include_dir}")
+
+    # On Windows, MSVC needs an import library (wgpu_native.lib) in
+    # addition to the runtime DLL. Fail fast with a clear message if the
+    # SDK install is broken (#94 was caused by this silently missing).
+    if(WIN32)
+        set(_pulp_webgpu_implib
+            "${PULP_SDK_LIBRARY_DIR}/${PULP_SDK_SHARED_LIBRARY_PREFIX}wgpu_native.lib")
+        if(NOT EXISTS "${_pulp_webgpu_implib}")
+            message(FATAL_ERROR
+                "Pulp SDK is missing wgpu_native.lib at ${_pulp_webgpu_implib}. "
+                "This is a broken SDK install — the runtime DLL is present "
+                "but the import library needed for linking is not. "
+                "Reinstall the Pulp SDK (v0.2.1 or newer) to pick up the fix "
+                "from https://github.com/danielraffel/pulp/issues/94.")
+        endif()
+    endif()
+
     add_library(webgpu SHARED IMPORTED)
     set_target_properties(webgpu PROPERTIES
         IMPORTED_LOCATION "${_pulp_webgpu_runtime}"
+        IMPORTED_LOCATION_RELEASE "${_pulp_webgpu_runtime}"
         INTERFACE_COMPILE_DEFINITIONS "WEBGPU_BACKEND_WGPU"
         INTERFACE_INCLUDE_DIRECTORIES
             "${_pulp_webgpu_include_dir};${_pulp_webgpu_include_dir}/webgpu"
     )
 
     if(WIN32)
-        set(_pulp_webgpu_implib
-            "${PULP_SDK_LIBRARY_DIR}/${PULP_SDK_SHARED_LIBRARY_PREFIX}wgpu_native.lib")
-        if(EXISTS "${_pulp_webgpu_implib}")
-            set_property(TARGET webgpu PROPERTY IMPORTED_IMPLIB "${_pulp_webgpu_implib}")
-        endif()
+        set_property(TARGET webgpu PROPERTY IMPORTED_IMPLIB "${_pulp_webgpu_implib}")
+        set_property(TARGET webgpu PROPERTY
+            IMPORTED_IMPLIB_RELEASE "${_pulp_webgpu_implib}")
     elseif(UNIX AND NOT APPLE)
         set_property(TARGET webgpu PROPERTY IMPORTED_NO_SONAME TRUE)
     endif()

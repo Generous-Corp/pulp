@@ -780,10 +780,45 @@ if(PULP_HAS_WEBGPU AND DEFINED WEBGPU_RUNTIME_LIB AND TARGET webgpu)
         )
     endif()
 
-    if(WIN32 AND DEFINED WGPU_IMPLIB AND EXISTS "${WGPU_IMPLIB}")
-        install(FILES "${WGPU_IMPLIB}"
-            DESTINATION ${CMAKE_INSTALL_LIBDIR}
-        )
+    # Install the wgpu_native import library alongside the runtime DLL.
+    #
+    # The WebGPU-distribution CMake sets WGPU_IMPLIB as a local variable
+    # inside FetchWgpuNativePrecompiled.cmake, so by the time execution
+    # returns to this file the variable is out of scope — the original
+    # guard `if(DEFINED WGPU_IMPLIB ...)` always evaluated to FALSE and
+    # the .lib was silently skipped from the SDK. That's why scaffolded
+    # Windows plugins fail with "IMPORTED_IMPLIB not set for imported
+    # target 'webgpu'" (see #94).
+    #
+    # Read the path from the imported target directly. Prefer the
+    # config-specific property (some WebGPU-distribution versions only
+    # populate IMPORTED_IMPLIB_RELEASE) and fall back to the plain
+    # IMPORTED_IMPLIB.
+    if(WIN32)
+        set(_pulp_wgpu_implib_src "")
+        get_target_property(_pulp_wgpu_implib_release webgpu IMPORTED_IMPLIB_RELEASE)
+        get_target_property(_pulp_wgpu_implib_plain webgpu IMPORTED_IMPLIB)
+        if(_pulp_wgpu_implib_release AND EXISTS "${_pulp_wgpu_implib_release}")
+            set(_pulp_wgpu_implib_src "${_pulp_wgpu_implib_release}")
+        elseif(_pulp_wgpu_implib_plain AND EXISTS "${_pulp_wgpu_implib_plain}")
+            set(_pulp_wgpu_implib_src "${_pulp_wgpu_implib_plain}")
+        elseif(DEFINED WGPU_IMPLIB AND EXISTS "${WGPU_IMPLIB}")
+            # Legacy fallback for older WebGPU-distribution versions.
+            set(_pulp_wgpu_implib_src "${WGPU_IMPLIB}")
+        endif()
+        if(_pulp_wgpu_implib_src)
+            install(FILES "${_pulp_wgpu_implib_src}"
+                DESTINATION ${CMAKE_INSTALL_LIBDIR}
+            )
+        else()
+            message(WARNING
+                "Pulp: could not locate wgpu_native.lib for the Windows SDK "
+                "install. Downstream plugins will fail to link against webgpu. "
+                "Check that the webgpu imported target has IMPORTED_IMPLIB set.")
+        endif()
+        unset(_pulp_wgpu_implib_src)
+        unset(_pulp_wgpu_implib_release)
+        unset(_pulp_wgpu_implib_plain)
     endif()
 endif()
 
