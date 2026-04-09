@@ -49,6 +49,44 @@ TEST_CASE("RecordingCanvas text", "[canvas]") {
     REQUIRE(w > 0);
 }
 
+// Regression test for #75: text draws inside nested clip/translate
+// contexts should still emit exactly one fill_text command per call.
+// The Skia path uses SkTextBlob with explicit per-glyph advances
+// instead of SkShaper::shape(), which prevented ghost/double rendering
+// in the widget paint pipeline. This test guards against a regression
+// where a future refactor re-introduces SkShaper::shape() for the
+// widget paint path.
+TEST_CASE("Canvas text in nested clip contexts — no duplication (#75)",
+          "[canvas][regression]") {
+    RecordingCanvas canvas;
+    canvas.set_font("Inter", 14.0f);
+
+    // Simulate a three-level nested widget paint:
+    //   root panel → section panel → label
+    canvas.save();
+    canvas.translate(10, 10);
+    canvas.clip_rect(0, 0, 300, 200);
+
+    canvas.save();
+    canvas.translate(20, 30);
+    canvas.clip_rect(0, 0, 260, 160);
+
+    canvas.save();
+    canvas.translate(5, 5);
+    canvas.clip_rect(0, 0, 250, 150);
+
+    canvas.fill_text("Hello, nested clip", 0, 0);
+
+    canvas.restore();
+    canvas.restore();
+    canvas.restore();
+
+    REQUIRE(canvas.count(DrawCommand::Type::fill_text) == 1);
+    REQUIRE(canvas.count(DrawCommand::Type::save) == 3);
+    REQUIRE(canvas.count(DrawCommand::Type::restore) == 3);
+    REQUIRE(canvas.count(DrawCommand::Type::clip_rect) == 3);
+}
+
 TEST_CASE("RecordingCanvas transforms", "[canvas]") {
     RecordingCanvas canvas;
 
