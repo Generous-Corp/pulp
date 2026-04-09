@@ -15,7 +15,10 @@ namespace pulp::view {
 /// Interface for accessible values (sliders, knobs, progress bars)
 class AccessibilityValueInterface {
 public:
-    virtual ~AccessibilityValueInterface() = default;
+    // Out-of-line in src/accessibility.cpp so the vtable + typeinfo
+    // anchors there — required for dynamic_cast on Android NDK builds
+    // that link with -Wl,--no-undefined.
+    virtual ~AccessibilityValueInterface();
 
     /// Current value as a number
     virtual double get_current_value() const = 0;
@@ -39,7 +42,7 @@ public:
 /// Interface for accessible text content (text editors, labels)
 class AccessibilityTextInterface {
 public:
-    virtual ~AccessibilityTextInterface() = default;
+    virtual ~AccessibilityTextInterface();
 
     /// Get the full text
     virtual std::string get_text() const = 0;
@@ -74,7 +77,7 @@ public:
 /// Interface for accessible tables and lists
 class AccessibilityTableInterface {
 public:
-    virtual ~AccessibilityTableInterface() = default;
+    virtual ~AccessibilityTableInterface();
 
     /// Number of rows
     virtual int get_row_count() const = 0;
@@ -104,7 +107,7 @@ public:
 /// Interface for individual table cells
 class AccessibilityCellInterface {
 public:
-    virtual ~AccessibilityCellInterface() = default;
+    virtual ~AccessibilityCellInterface();
 
     /// Cell text content
     virtual std::string get_cell_text(int row, int column) const = 0;
