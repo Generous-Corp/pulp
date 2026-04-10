@@ -56,7 +56,7 @@
 #
 # v0.1.1 was a no-op stub on macOS — do not pin to anything older
 # than v0.1.2.
-version = "v0.1.13"
+version = "v0.1.16"
 
 # Public release source. The bootstrap script downloads from
 # https://github.com/{repo}/releases/download/{version}/{asset}
