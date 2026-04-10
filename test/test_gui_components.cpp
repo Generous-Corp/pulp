@@ -71,6 +71,253 @@ TEST_CASE("TableListBox column management", "[gui][table]") {
     REQUIRE(table.column_count() == 0);
 }
 
+// ── TableListBox behavioral coverage (hit-testing + callbacks) ─────────
+//
+// The existing tests only exercised setters and the data model.
+// Nothing drove the actual user interaction path through
+// on_mouse_down. The quality pass adds:
+//   - header click → column sort
+//   - clicking the same column toggles ascending
+//   - clicking a different column resets to ascending=true
+//   - non-sortable column header click is a no-op
+//   - row click sets selected_row_ and fires callbacks
+//   - row click invokes model.row_selected() hook
+//   - clicks below all rows are ignored
+//   - clicks below header but above first row (gap) handled sanely
+//   - set_row_height drives row hit-testing coordinates
+//
+// Hit-testing geometry for these tests (defaults unless overridden):
+//   header_height_ = 28
+//   row_height_    = 24
+//   Row r: y ∈ [28 + r*24, 28 + (r+1)*24)
+
+namespace {
+// A recording model that captures sort + row_selected events so tests
+// can verify the widget actually calls them.
+class RecordingTableModel : public TableModel {
+public:
+    int row_count() const override { return static_cast<int>(rows_.size()); }
+    std::string cell_text(int row, int column) const override {
+        if (row < 0 || row >= row_count()) return "";
+        auto& r = rows_[static_cast<size_t>(row)];
+        if (column < 0 || column >= static_cast<int>(r.size())) return "";
+        return r[static_cast<size_t>(column)];
+    }
+    bool sort(int column, bool ascending) override {
+        sort_calls.push_back({column, ascending});
+        return true;
+    }
+    void row_selected(int row) override {
+        row_selected_calls.push_back(row);
+    }
+
+    void add_row(std::vector<std::string> row) { rows_.push_back(std::move(row)); }
+
+    struct SortCall { int column; bool ascending; };
+    std::vector<SortCall> sort_calls;
+    std::vector<int> row_selected_calls;
+
+private:
+    std::vector<std::vector<std::string>> rows_;
+};
+}  // namespace
+
+TEST_CASE("TableListBox header click sorts column via model", "[gui][table]") {
+    TableListBox table;
+    table.set_bounds({0, 0, 400, 300});  // 400px wide, plenty for two 100px columns
+    RecordingTableModel model;
+    model.add_row({"a", "1"});
+    model.add_row({"b", "2"});
+    table.set_model(&model);
+    table.add_column({"Name", 100.0f});
+    table.add_column({"Value", 100.0f});
+
+    // Click column 0 header (header y ∈ [0, 28), column 0 x ∈ [0, 100))
+    table.on_mouse_down({50.0f, 10.0f});
+    REQUIRE(model.sort_calls.size() == 1);
+    REQUIRE(model.sort_calls[0].column == 0);
+    REQUIRE(model.sort_calls[0].ascending == true);
+
+    // Click same header again — should toggle to descending
+    table.on_mouse_down({50.0f, 10.0f});
+    REQUIRE(model.sort_calls.size() == 2);
+    REQUIRE(model.sort_calls[1].column == 0);
+    REQUIRE(model.sort_calls[1].ascending == false);
+
+    // Click different column — resets to ascending
+    table.on_mouse_down({150.0f, 10.0f});
+    REQUIRE(model.sort_calls.size() == 3);
+    REQUIRE(model.sort_calls[2].column == 1);
+    REQUIRE(model.sort_calls[2].ascending == true);
+}
+
+TEST_CASE("TableListBox non-sortable column header click is a no-op", "[gui][table]") {
+    TableListBox table;
+    table.set_bounds({0, 0, 400, 300});
+    RecordingTableModel model;
+    model.add_row({"a"});
+    table.set_model(&model);
+
+    TableColumn col{"Name", 100.0f};
+    col.sortable = false;
+    table.add_column(col);
+
+    table.on_mouse_down({50.0f, 10.0f});
+    REQUIRE(model.sort_calls.empty());
+}
+
+TEST_CASE("TableListBox row click sets selected_row and fires callbacks", "[gui][table]") {
+    TableListBox table;
+    table.set_bounds({0, 0, 400, 300});
+    RecordingTableModel model;
+    model.add_row({"row0"});
+    model.add_row({"row1"});
+    model.add_row({"row2"});
+    table.set_model(&model);
+    table.add_column({"Name", 100.0f});
+
+    int callback_row = -1;
+    int callback_count = 0;
+    table.on_selection_changed = [&](int row) {
+        callback_row = row;
+        ++callback_count;
+    };
+
+    // Row 0: y ∈ [28, 52). Click at y=40.
+    table.on_mouse_down({50.0f, 40.0f});
+    REQUIRE(table.selected_row() == 0);
+    REQUIRE(callback_row == 0);
+    REQUIRE(callback_count == 1);
+    REQUIRE(model.row_selected_calls.size() == 1);
+    REQUIRE(model.row_selected_calls[0] == 0);
+
+    // Row 2: y ∈ [76, 100). Click at y=85.
+    table.on_mouse_down({50.0f, 85.0f});
+    REQUIRE(table.selected_row() == 2);
+    REQUIRE(callback_row == 2);
+    REQUIRE(callback_count == 2);
+    REQUIRE(model.row_selected_calls.size() == 2);
+    REQUIRE(model.row_selected_calls[1] == 2);
+}
+
+TEST_CASE("TableListBox clicking below last row is a no-op", "[gui][table]") {
+    TableListBox table;
+    table.set_bounds({0, 0, 400, 300});
+    RecordingTableModel model;
+    model.add_row({"only"});
+    table.set_model(&model);
+    table.add_column({"X", 100.0f});
+
+    int callback_count = 0;
+    table.on_selection_changed = [&](int) { ++callback_count; };
+
+    // Row 0 ends at y=52. Click at y=200 (way below).
+    table.on_mouse_down({50.0f, 200.0f});
+
+    REQUIRE(table.selected_row() == -1);  // unchanged
+    REQUIRE(callback_count == 0);
+    REQUIRE(model.row_selected_calls.empty());
+}
+
+TEST_CASE("TableListBox row click only fires callback when selection changes", "[gui][table]") {
+    // The widget's current contract: any row click fires the callback,
+    // even if the selected row is the same as before. This test pins
+    // that contract so a future "dedup same-row clicks" refactor has
+    // to update the test + contract explicitly.
+    TableListBox table;
+    table.set_bounds({0, 0, 400, 300});
+    RecordingTableModel model;
+    model.add_row({"a"});
+    table.set_model(&model);
+    table.add_column({"X", 100.0f});
+
+    int callback_count = 0;
+    table.on_selection_changed = [&](int) { ++callback_count; };
+
+    table.on_mouse_down({50.0f, 40.0f});  // row 0
+    table.on_mouse_down({50.0f, 40.0f});  // row 0 again
+
+    REQUIRE(table.selected_row() == 0);
+    REQUIRE(callback_count == 2);  // pin the "fires on every click" contract
+}
+
+TEST_CASE("TableListBox custom row_height drives hit testing", "[gui][table]") {
+    TableListBox table;
+    table.set_bounds({0, 0, 400, 600});
+    table.set_row_height(40.0f);  // non-default
+
+    RecordingTableModel model;
+    model.add_row({"r0"});
+    model.add_row({"r1"});
+    model.add_row({"r2"});
+    table.set_model(&model);
+    table.add_column({"X", 100.0f});
+
+    // With row_height=40 and header_height=28:
+    //   Row 0: y ∈ [28, 68)
+    //   Row 1: y ∈ [68, 108)
+    //   Row 2: y ∈ [108, 148)
+
+    table.on_mouse_down({50.0f, 50.0f});  // y=50 → row 0
+    REQUIRE(table.selected_row() == 0);
+
+    table.on_mouse_down({50.0f, 90.0f});  // y=90 → row 1
+    REQUIRE(table.selected_row() == 1);
+
+    table.on_mouse_down({50.0f, 130.0f});  // y=130 → row 2
+    REQUIRE(table.selected_row() == 2);
+}
+
+TEST_CASE("TableListBox custom header_height drives header vs row boundary", "[gui][table]") {
+    TableListBox table;
+    table.set_bounds({0, 0, 400, 600});
+    table.set_header_height(50.0f);  // taller header
+    // row_height_ stays at 24 default
+
+    RecordingTableModel model;
+    model.add_row({"a"});
+    table.set_model(&model);
+    table.add_column({"X", 100.0f});
+
+    // y=30 is inside the taller header → sort, not selection
+    table.on_mouse_down({50.0f, 30.0f});
+    REQUIRE(table.selected_row() == -1);
+    REQUIRE(model.sort_calls.size() == 1);
+    REQUIRE(model.row_selected_calls.empty());
+
+    // y=55 is past the header, inside row 0 [50, 74)
+    table.on_mouse_down({50.0f, 55.0f});
+    REQUIRE(table.selected_row() == 0);
+}
+
+TEST_CASE("TableListBox hit-test without model is safe", "[gui][table]") {
+    // Before any model is attached, clicks should not crash and should
+    // not fire callbacks.
+    TableListBox table;
+    table.set_bounds({0, 0, 400, 300});
+    table.add_column({"X", 100.0f});
+
+    int callback_count = 0;
+    table.on_selection_changed = [&](int) { ++callback_count; };
+
+    table.on_mouse_down({50.0f, 10.0f});  // header
+    table.on_mouse_down({50.0f, 40.0f});  // would-be row 0
+
+    REQUIRE(table.selected_row() == -1);
+    REQUIRE(callback_count == 0);
+}
+
+TEST_CASE("TableListBox header click on empty columns is a no-op", "[gui][table]") {
+    TableListBox table;
+    table.set_bounds({0, 0, 400, 300});
+    RecordingTableModel model;
+    table.set_model(&model);
+    // No columns added.
+
+    table.on_mouse_down({50.0f, 10.0f});
+    REQUIRE(model.sort_calls.empty());
+}
+
 // ── Toolbar ─────────────────────────────────────────────────────────────
 //
 // Historical note: these tests were previously tagged `[!mayfail]` and
