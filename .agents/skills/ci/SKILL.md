@@ -373,6 +373,26 @@ Key fields:
 
 Keep hostnames and VM names local. Shared repo docs and skills should describe how to choose a target, not which personal alias to use.
 
+## Cross-platform SSH gotchas (hard-won)
+
+### Windows SSH → PowerShell transport
+
+**Always send multi-line PowerShell scripts via `-EncodedCommand` (base64 UTF-16LE).** The two "obvious" alternatives are both silently broken on Windows and produce false-greens (rc=0 with empty stdout):
+
+1. **Inline argv** (`powershell -Command "<script>"`): Windows OpenSSH flattens remote argv to a single command string via cmd.exe, which interprets newlines as command separators. Only the first line of the script ever runs. A multi-line mutex wrapper executes `$ErrorActionPreference = 'Stop'`, produces no output, exits 0 → reported as "pass" in 0.9 seconds with an empty log.
+
+2. **Stdin transport** (`powershell -Command -` + script on stdin): PowerShell reads stdin one line at a time and treats each line as a separate command pipeline. Multi-line constructs (`try { ... } catch`, function definitions, `& { ... }` script blocks) parse as incomplete commands and produce zero stdout. Also rc=0. Looks plausible because it matches the pattern in some older code, but that older code was itself silently broken and returning None.
+
+3. **EncodedCommand** (`powershell -EncodedCommand <base64>`): the payload is a single opaque argv token that neither cmd.exe nor PowerShell's line-based stdin parser can mangle. This is what Shipyard v0.1.13+ uses everywhere.
+
+### Windows host platform detection
+
+The default `ssh win` host in Pulp's setup is **ARM64 Windows**, not x64. If `detect_vs_toolchain` returns None (or falls back to defaults), CMake builds target x64 and either fail or run through slow emulation. Shipyard v0.1.13 fixed a years-old latent bug where this detection was silently broken and returning None on every run. If another tool in the chain bypasses Shipyard and talks to the Windows host directly, it must either call `detect_vs_toolchain`-equivalent logic or hard-code `-A ARM64` for that host.
+
+### Verify cross-platform CI fixes against the real host
+
+**Unit tests cannot catch transport-layer bugs.** Any fix that touches SSH, PowerShell, subprocess, or remote-exec must be verified end-to-end against a real host before merging — not just "tests pass." Two consecutive fixes for the same root cause shipped with green unit tests and still produced false-greens before the third fix was verified against the win VM. See `planning/shipyard-migration-status.md` live log for the full history.
+
 ## Documentation
 
 Full setup guide: `docs/guides/local-ci.md`
