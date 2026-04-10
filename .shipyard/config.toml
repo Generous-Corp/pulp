@@ -50,8 +50,17 @@ test      = "ctest --test-dir build --output-on-failure --exclude-regex AudioWor
 # Visual Studio multi-config generator's --config flag. The base
 # build line above is left platform-neutral; this section refines it
 # for the Windows target only.
+# Per-target overrides — ssh-windows needs the Visual Studio
+# multi-config generator. The platform (-A) is read from
+# $env:SHIPYARD_CMAKE_PLATFORM which detect_vs_toolchain sets to
+# ARM64 or x64 depending on the remote host's architecture. The
+# fallback to x64 covers hosts where detection fails or Shipyard is
+# too old to set the env var. Without this, an ARM64 host would
+# download ARM64 wgpu binaries (based on the host architecture) but
+# try to link them into an x64 build, producing LNK2019 unresolved
+# externals on every wgpu symbol.
 [validation.default.overrides.windows]
-configure = "cmake -S . -B build -G \"Visual Studio 17 2022\" -A x64 -DPULP_BUILD_TESTS=ON -DPULP_BUILD_EXAMPLES=ON"
+configure = "$Platform = if ($env:SHIPYARD_CMAKE_PLATFORM) { $env:SHIPYARD_CMAKE_PLATFORM } else { 'x64' }; cmake -S . -B build -G \"Visual Studio 17 2022\" -A $Platform -DPULP_BUILD_TESTS=ON -DPULP_BUILD_EXAMPLES=ON"
 build     = "cmake --build build --config Release --parallel"
 test      = "ctest --test-dir build -C Release --output-on-failure --exclude-regex AudioWorkgroup"
 
@@ -68,11 +77,11 @@ configure = "cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DPULP_BUILD_TESTS=OFF
 build     = "cmake --build build --parallel && cmake --install build --prefix install && cmake -S tools/validation/sdk-smoke -B smoke/build -DCMAKE_PREFIX_PATH=install && cmake --build smoke/build --parallel"
 
 [validation.smoke.overrides.windows]
-configure = "cmake -S . -B build -G \"Visual Studio 17 2022\" -A x64 -DPULP_BUILD_TESTS=OFF -DPULP_BUILD_EXAMPLES=OFF"
+configure = "$Platform = if ($env:SHIPYARD_CMAKE_PLATFORM) { $env:SHIPYARD_CMAKE_PLATFORM } else { 'x64' }; cmake -S . -B build -G \"Visual Studio 17 2022\" -A $Platform -DPULP_BUILD_TESTS=OFF -DPULP_BUILD_EXAMPLES=OFF"
 # PowerShell uses ; as the statement separator, not && — note the
 # different chaining. The semantics differ: PowerShell does NOT
 # short-circuit on failure, so each step is wrapped in a guard.
-build     = "cmake --build build --config Release --parallel; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; cmake --install build --prefix install --config Release; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; cmake -S tools/validation/sdk-smoke -B smoke/build -G \"Visual Studio 17 2022\" -A x64 -DCMAKE_PREFIX_PATH=install; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; cmake --build smoke/build --config Release --parallel"
+build     = "$Platform = if ($env:SHIPYARD_CMAKE_PLATFORM) { $env:SHIPYARD_CMAKE_PLATFORM } else { 'x64' }; cmake --build build --config Release --parallel; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; cmake --install build --prefix install --config Release; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; cmake -S tools/validation/sdk-smoke -B smoke/build -G \"Visual Studio 17 2022\" -A $Platform -DCMAKE_PREFIX_PATH=install; if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }; cmake --build smoke/build --config Release --parallel"
 
 # ── Targets ────────────────────────────────────────────────────────────────
 # Three platforms today: mac (local), ubuntu (SSH), windows (SSH).
