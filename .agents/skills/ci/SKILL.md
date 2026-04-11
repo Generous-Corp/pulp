@@ -12,22 +12,23 @@ requires:
 
 Validate branches and ship code safely. This skill handles all CI workflows for Pulp across local machines and VMs.
 
-## Tool selection: Shipyard (preferred) or local_ci.py (fallback)
+## Tool selection: Shipyard (primary)
 
-Pulp is migrating from `tools/local-ci/local_ci.py` to **Shipyard** — a
-reusable CI controller pinned in `tools/shipyard.toml`. Both tools are
-supported during the transition. Detect which one to use:
+**Shipyard is Pulp's primary CI tool.** All merges, validations, and
+ship cycles should use Shipyard. `local_ci.py` remains in the repo as
+a fallback but is scheduled for removal after a 2-week observation
+period (see danielraffel/pulp#120).
 
 ```bash
-if command -v shipyard >/dev/null 2>&1; then
-    # Preferred: Shipyard, pinned via tools/shipyard.toml
-    shipyard run     # validate current branch
-    shipyard ship    # PR + validate + merge on green
-else
-    # Fallback: legacy local_ci.py
-    python3 tools/local-ci/local_ci.py run     # validate current branch
-    python3 tools/local-ci/local_ci.py ship    # PR + validate + merge on green
-fi
+# Primary: Shipyard
+shipyard run                              # validate current branch
+shipyard ship                             # PR + validate + merge on green
+shipyard run --targets windows --smoke    # fast Windows-only check
+shipyard cloud run build <branch>         # dispatch to Namespace
+
+# Fallback only (if Shipyard is broken or unavailable):
+python3 tools/local-ci/local_ci.py run
+python3 tools/local-ci/local_ci.py ship
 ```
 
 To install Shipyard locally for the first time:
