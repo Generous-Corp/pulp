@@ -44,6 +44,16 @@ test      = "ctest --test-dir build --output-on-failure --exclude-regex AudioWor
 # Visual Studio multi-config generator's --config flag. The base
 # build line above is left platform-neutral; this section refines it
 # for the Windows target only.
+#
+# Windows test exclusions (--exclude-regex):
+#   AudioWorkgroup  — macOS-only API, no Windows implementation
+#   Toolbar add items — SEGFAULT in headless Yoga layout (no parent
+#                       context), tagged [!mayfail] but CTest still
+#                       reports failure because the crash kills the
+#                       executable before Catch2 processes the tag
+#   EventLoop       — timing-sensitive dispatch tests that flake on
+#                     the ARM64 Windows VM (50ms sleep not reliable
+#                     under SSH + cross-compile emulation overhead)
 [validation.default.overrides.windows]
 configure = "cmake -S . -B build -G \"Visual Studio 17 2022\" -A x64 -DPULP_BUILD_TESTS=ON -DPULP_BUILD_EXAMPLES=ON"
 build     = "cmake --build build --config Release --parallel"
