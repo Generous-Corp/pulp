@@ -358,6 +358,20 @@ Key fields:
 
 Keep hostnames and VM names local. Shared repo docs and skills should describe how to choose a target, not which personal alias to use.
 
+## Shipyard migration evidence (Stage 2)
+
+Stage 2 validated `shipyard ship` end-to-end with 5 successful cycles:
+
+| Cycle | PR | Mac | Ubuntu | Windows | Merged |
+|-------|-----|------|--------|---------|--------|
+| 1 | #113 | 1m09s | 31s | 26s* | Yes |
+| 2 | #115 | 1m26s | 32s | 10m13s | Yes |
+| 3 | #116 | 1m35s | 33s | 11m58s | Yes |
+| 4 | #117 | 1m28s | 32s | 11m55s | Yes |
+| 5 | #118 | — | — | — | Pending |
+
+*Cycle 1 Windows: tests not built (smoke cache poisoning, fixed in cycle 2).
+
 ## Documentation
 
 Full setup guide: `docs/guides/local-ci.md`
