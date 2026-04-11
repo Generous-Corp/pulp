@@ -36,7 +36,7 @@ platforms = ["macos", "linux", "windows"]
 [validation.default]
 stages = ["setup", "configure", "build", "test"]
 setup     = "./setup.sh --ci --deps-only"
-configure = "cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug"
+configure = "cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DPULP_BUILD_TESTS=ON -DPULP_BUILD_EXAMPLES=ON"
 build     = "cmake --build build --parallel"
 test      = "ctest --test-dir build --output-on-failure --exclude-regex AudioWorkgroup"
 
@@ -45,7 +45,7 @@ test      = "ctest --test-dir build --output-on-failure --exclude-regex AudioWor
 # build line above is left platform-neutral; this section refines it
 # for the Windows target only.
 [validation.default.overrides.windows]
-configure = "cmake -S . -B build -G \"Visual Studio 17 2022\" -A x64"
+configure = "cmake -S . -B build -G \"Visual Studio 17 2022\" -A x64 -DPULP_BUILD_TESTS=ON -DPULP_BUILD_EXAMPLES=ON"
 build     = "cmake --build build --config Release --parallel"
 test      = "ctest --test-dir build -C Release --output-on-failure --exclude-regex AudioWorkgroup"
 
