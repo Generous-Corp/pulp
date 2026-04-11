@@ -9,7 +9,11 @@
 using namespace pulp::platform;
 
 TEST_CASE("exec captures stdout", "[child_process]") {
+#ifdef _WIN32
+    auto r = exec("cmd", {"/c", "echo", "hello world"}, 5000);
+#else
     auto r = exec("echo", {"hello world"}, 5000);
+#endif
     REQUIRE(r.exit_code == 0);
     REQUIRE(r.stdout_output.find("hello") != std::string::npos);
 }

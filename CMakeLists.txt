@@ -105,14 +105,36 @@ if(PULP_ENABLE_GPU AND NOT ANDROID)
     )
     set(_pulp_restore_arch FALSE)
     if(WIN32)
-        string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" _pulp_webgpu_processor)
+        # Use the TARGET platform for wgpu arch selection, not the host
+        # processor. CMAKE_SYSTEM_PROCESSOR reports the HOST arch on
+        # Windows, which is wrong when cross-compiling via -A <platform>.
+        # An ARM64 host building with -A x64 needs x64 wgpu binaries,
+        # not ARM64 — otherwise the linker fails with
+        # "library machine type 'ARM64' conflicts with target 'x64'."
+        if(CMAKE_GENERATOR_PLATFORM)
+            string(TOLOWER "${CMAKE_GENERATOR_PLATFORM}" _pulp_webgpu_processor)
+        else()
+            string(TOLOWER "${CMAKE_SYSTEM_PROCESSOR}" _pulp_webgpu_processor)
+        endif()
         if(_pulp_webgpu_processor STREQUAL "arm64" OR _pulp_webgpu_processor STREQUAL "aarch64")
             if(DEFINED ARCH)
                 set(_pulp_saved_arch "${ARCH}")
             endif()
             set(ARCH "aarch64")
             set(_pulp_restore_arch TRUE)
-            message(STATUS "Pulp: forcing WebGPU prebuilt architecture to aarch64 for ${CMAKE_SYSTEM_PROCESSOR}")
+            message(STATUS "Pulp: forcing WebGPU prebuilt architecture to aarch64 for ARM64")
+        elseif(_pulp_webgpu_processor STREQUAL "x64" AND CMAKE_SYSTEM_PROCESSOR MATCHES "[Aa][Rr][Mm]64")
+            # Cross-compiling x64 on an ARM64 host. wgpu-native's
+            # detect_system_architecture() sees the HOST processor
+            # (ARM64) and fails with "Unknown architecture" because
+            # it doesn't map Windows ARM64 to a prebuilt arch string.
+            # Explicitly set ARCH=x86_64 so it downloads x64 binaries.
+            if(DEFINED ARCH)
+                set(_pulp_saved_arch "${ARCH}")
+            endif()
+            set(ARCH "x86_64")
+            set(_pulp_restore_arch TRUE)
+            message(STATUS "Pulp: forcing WebGPU prebuilt architecture to x86_64 for x64 cross-compile on ARM64 host")
         endif()
     endif()
     FetchContent_MakeAvailable(webgpu)

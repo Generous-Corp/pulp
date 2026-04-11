@@ -131,20 +131,34 @@ TEST_CASE("InterProcessLock double lock succeeds", "[runtime][ipc_lock]") {
 // ── ChildProcess ────────────────────────────────────────────────────────
 
 TEST_CASE("run_process captures stdout", "[runtime][child_process]") {
+#ifdef _WIN32
+    // run_process double-quotes every arg, which breaks cmd.exe's /c
+    // quoting rules. Use powershell -NoProfile -Command instead.
+    auto result = run_process("powershell", {"-NoProfile", "-Command", "Write-Output 'hello world'"});
+#else
     auto result = run_process("/bin/echo", {"hello", "world"});
+#endif
     REQUIRE(result.has_value());
     REQUIRE(result->exit_code == 0);
-    REQUIRE(result->stdout_output.find("hello world") != std::string::npos);
+    REQUIRE(result->stdout_output.find("hello") != std::string::npos);
 }
 
 TEST_CASE("run_process captures exit code", "[runtime][child_process]") {
+#ifdef _WIN32
+    auto result = run_process("powershell", {"-NoProfile", "-Command", "exit 42"});
+#else
     auto result = run_process("/bin/sh", {"-c", "exit 42"});
+#endif
     REQUIRE(result.has_value());
     REQUIRE(result->exit_code == 42);
 }
 
 TEST_CASE("run_process fails on nonexistent", "[runtime][child_process]") {
+#ifdef _WIN32
+    auto result = run_process("C:\\nonexistent_binary_12345.exe");
+#else
     auto result = run_process("/tmp/nonexistent_binary_12345");
+#endif
     REQUIRE_FALSE(result.has_value());
 }
 

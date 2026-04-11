@@ -242,7 +242,7 @@ TEST_CASE("WaveformView empty renders background only", "[view][widget]") {
     REQUIRE(canvas.count(DrawCommand::Type::stroke_line) == 0); // No waveform
 }
 
-TEST_CASE("WaveformView trigger — rising zero crossing", "[view][widget][trigger]") {
+TEST_CASE("WaveformView trigger -- rising zero crossing", "[view][widget][trigger]") {
     // Phase-shifted sine: starts at +0.5, crosses zero downward, crosses
     // zero upward roughly at index N/2. With rising_zero trigger, the
     // display should be rotated so the rising crossing is at index 0.
@@ -276,7 +276,7 @@ TEST_CASE("WaveformView trigger — rising zero crossing", "[view][widget][trigg
     REQUIRE(waveform2.sample_count() == N);
 }
 
-TEST_CASE("WaveformView trigger — free run leaves buffer unchanged", "[view][widget][trigger]") {
+TEST_CASE("WaveformView trigger -- free run leaves buffer unchanged", "[view][widget][trigger]") {
     constexpr size_t N = 32;
     std::vector<float> samples(N);
     for (size_t i = 0; i < N; ++i) samples[i] = static_cast<float>(i);
@@ -291,7 +291,7 @@ TEST_CASE("WaveformView trigger — free run leaves buffer unchanged", "[view][w
         WaveformView::TriggerMode::free_run) == 0);
 }
 
-TEST_CASE("WaveformView trigger — falling zero crossing", "[view][widget][trigger]") {
+TEST_CASE("WaveformView trigger -- falling zero crossing", "[view][widget][trigger]") {
     // A simple ramp that crosses zero downward at the midpoint.
     std::vector<float> samples = {2, 1, 0.5f, 0, -0.5f, -1, -2, -1};
     size_t idx = WaveformView::find_trigger_index(
@@ -301,7 +301,7 @@ TEST_CASE("WaveformView trigger — falling zero crossing", "[view][widget][trig
     REQUIRE(idx == 4);
 }
 
-TEST_CASE("WaveformView trigger — no crossing leaves buffer alone", "[view][widget][trigger]") {
+TEST_CASE("WaveformView trigger -- no crossing leaves buffer alone", "[view][widget][trigger]") {
     // All positive samples — no rising zero crossing possible
     std::vector<float> samples = {0.5f, 0.6f, 0.7f, 0.8f, 0.9f};
     size_t idx = WaveformView::find_trigger_index(
