@@ -56,7 +56,7 @@ TEST_CASE("RecordingCanvas text", "[canvas]") {
 // in the widget paint pipeline. This test guards against a regression
 // where a future refactor re-introduces SkShaper::shape() for the
 // widget paint path.
-TEST_CASE("Canvas text in nested clip contexts — no duplication (#75)",
+TEST_CASE("Canvas text in nested clip contexts -- no duplication (#75)",
           "[canvas][regression]") {
     RecordingCanvas canvas;
     canvas.set_font("Inter", 14.0f);
