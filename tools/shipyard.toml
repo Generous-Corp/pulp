@@ -38,9 +38,10 @@
 #   - SSH→cloud auto-failover via [failover.cloud_auto]
 #
 # v0.1.1 was a no-op stub on macOS — do not pin to anything older
-# than v0.1.2. v0.1.3 is the first release Pulp actually depends on
-# for feature parity.
-version = "v0.1.3"
+# than v0.1.2. v0.1.16 adds: EncodedCommand transport (v0.1.13),
+# bundle skip when remote has SHA (v0.1.14), ssh-based upload
+# replacing scp/SFTP (v0.1.16), stale queue recovery (v0.1.16).
+version = "v0.1.16"
 
 # Public release source. The bootstrap script downloads from
 # https://github.com/{repo}/releases/download/{version}/{asset}
