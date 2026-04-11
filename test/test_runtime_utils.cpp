@@ -132,7 +132,8 @@ TEST_CASE("InterProcessLock double lock succeeds", "[runtime][ipc_lock]") {
 
 TEST_CASE("run_process captures stdout", "[runtime][child_process]") {
 #ifdef _WIN32
-    auto result = run_process("cmd", {"/c", "echo", "hello world"});
+    // cmd /c expects the entire command as a single argument after /c
+    auto result = run_process("cmd", {"/c", "echo hello world"});
 #else
     auto result = run_process("/bin/echo", {"hello", "world"});
 #endif
@@ -143,7 +144,7 @@ TEST_CASE("run_process captures stdout", "[runtime][child_process]") {
 
 TEST_CASE("run_process captures exit code", "[runtime][child_process]") {
 #ifdef _WIN32
-    auto result = run_process("cmd", {"/c", "exit", "42"});
+    auto result = run_process("cmd", {"/c", "exit /b 42"});
 #else
     auto result = run_process("/bin/sh", {"-c", "exit 42"});
 #endif
