@@ -19,6 +19,11 @@ TEST_CASE("path_to_sdf: centred square mask produces high centre, low corner",
     auto sdf = path_to_sdf(mask.data(), W, H, 8);
     REQUIRE(sdf.size() == static_cast<std::size_t>(W * H));
 
+    // Debug dump around the centre before asserting.
+    INFO("sdf[16,16]=" << static_cast<int>(sdf[16 * W + 16])
+         << " sdf[12,16]=" << static_cast<int>(sdf[16 * W + 12])
+         << " sdf[20,16]=" << static_cast<int>(sdf[16 * W + 20])
+         << " sdf[0]="     << static_cast<int>(sdf[0]));
     // Centre of the square: deep inside, near 255.
     REQUIRE(sdf[16 * W + 16] > 200);
     // Corner of the image: far outside, near 0.
