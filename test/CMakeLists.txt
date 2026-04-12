@@ -398,6 +398,11 @@ add_executable(pulp-test-msdf-atlas test_msdf_atlas.cpp)
 target_link_libraries(pulp-test-msdf-atlas PRIVATE pulp::canvas Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-msdf-atlas)
 
+# PSDF glyph atlas + vector-fallback (Phase 3 scaffold)
+add_executable(pulp-test-psdf-atlas test_psdf_atlas.cpp)
+target_link_libraries(pulp-test-psdf-atlas PRIVATE pulp::canvas Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-psdf-atlas)
+
 # View and layout tests
 add_executable(pulp-test-view test_view.cpp)
 target_link_libraries(pulp-test-view PRIVATE pulp::view Catch2::Catch2WithMain)

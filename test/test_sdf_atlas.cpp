@@ -11,6 +11,7 @@
 //   - the value at a far "outside" texel is low (close to 0)
 
 #include <pulp/canvas/sdf_atlas.hpp>
+#include <pulp/canvas/sdf_text.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -117,6 +118,31 @@ TEST_CASE("SdfAtlas captures real glyph metrics when Skia is available",
         REQUIRE(gM->bearing_y >  0.0f);
         REQUIRE(gM->bearing_y <= 96.0f);
     }
+}
+
+TEST_CASE("SDF pen snapping policies produce expected positions",
+          "[canvas][sdf][subpixel]") {
+    using pulp::canvas::SdfPenSnap;
+    using pulp::canvas::snap_pen_x;
+    using pulp::canvas::snap_pen_y;
+
+    // Free: passthrough.
+    REQUIRE(snap_pen_x(10.37f, SdfPenSnap::Free) == 10.37f);
+    REQUIRE(snap_pen_y(10.37f, SdfPenSnap::Free) == 10.37f);
+
+    // Nearest: integer rounding.
+    REQUIRE(snap_pen_x(10.49f, SdfPenSnap::Nearest) == 10.0f);
+    REQUIRE(snap_pen_x(10.51f, SdfPenSnap::Nearest) == 11.0f);
+    REQUIRE(snap_pen_y(10.51f, SdfPenSnap::Nearest) == 11.0f);
+
+    // SubpixelThird: round to nearest 1/3 on x, integer on y.
+    const float t1 = snap_pen_x(10.10f, SdfPenSnap::SubpixelThird);
+    const float t2 = snap_pen_x(10.40f, SdfPenSnap::SubpixelThird);
+    const float t3 = snap_pen_x(10.80f, SdfPenSnap::SubpixelThird);
+    REQUIRE(std::abs(t1 - 10.0f) < 1e-4f);
+    REQUIRE(std::abs(t2 - (10.0f + 1.0f / 3.0f)) < 1e-4f);
+    REQUIRE(std::abs(t3 - (10.0f + 2.0f / 3.0f)) < 1e-4f);
+    REQUIRE(snap_pen_y(10.80f, SdfPenSnap::SubpixelThird) == 11.0f);
 }
 
 TEST_CASE("SdfAtlas refuses to build when atlas would exceed max size",
