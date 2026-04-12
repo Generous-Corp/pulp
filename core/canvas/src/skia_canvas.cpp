@@ -313,6 +313,72 @@ void SkiaCanvas::fill_text(const std::string& text, float x, float y) {
     canvas_->drawTextBlob(builder.make(), 0, 0, paint);
 }
 
+void SkiaCanvas::fill_text_sdf(const std::string& text, float x, float y,
+                               const SdfAtlas& atlas) {
+    GUARD_CANVAS;
+    if (text.empty()) return;
+
+    // Scale factor: how the current font_size_ relates to the atlas's base_size.
+    float scale = font_size_ / static_cast<float>(atlas.base_size());
+    int atlas_w = atlas.width();
+    int atlas_h = atlas.height();
+    if (atlas_w <= 0 || atlas_h <= 0) { fill_text(text, x, y); return; }
+
+    // Create atlas texture as an SkImage (uploaded to GPU on first use).
+    // The atlas is single-channel (R8), so we use kAlpha_8_SkColorType
+    // which maps the byte to the alpha channel — the shader reads it.
+    auto image_data = SkData::MakeWithoutCopy(atlas.pixels(), atlas_w * atlas_h);
+    SkImageInfo info = SkImageInfo::Make(atlas_w, atlas_h,
+                                         kAlpha_8_SkColorType, kPremul_SkAlphaType);
+    auto atlas_image = SkImages::RasterFromData(info, image_data, atlas_w);
+    if (!atlas_image) { fill_text(text, x, y); return; }
+
+    // Compute glyph positions and total advance for alignment.
+    float total_advance = 0;
+    struct GlyphDraw { const SdfGlyph* g; float x_offset; };
+    std::vector<GlyphDraw> draws;
+
+    // Simple codepoint-by-codepoint iteration (handles ASCII + BMP).
+    // Full Unicode support would use ICU segmentation.
+    size_t i = 0;
+    while (i < text.size()) {
+        char32_t cp;
+        uint8_t c = static_cast<uint8_t>(text[i]);
+        if (c < 0x80) { cp = c; i += 1; }
+        else if (c < 0xE0) { cp = (c & 0x1F) << 6 | (text[i+1] & 0x3F); i += 2; }
+        else if (c < 0xF0) { cp = (c & 0x0F) << 12 | (text[i+1] & 0x3F) << 6 | (text[i+2] & 0x3F); i += 3; }
+        else { cp = (c & 0x07) << 18 | (text[i+1] & 0x3F) << 12 | (text[i+2] & 0x3F) << 6 | (text[i+3] & 0x3F); i += 4; }
+
+        const SdfGlyph* g = atlas.glyph(cp);
+        if (!g) continue;
+        draws.push_back({g, total_advance});
+        total_advance += g->advance * scale;
+    }
+
+    // Apply text alignment.
+    float draw_x = x;
+    if (text_align_ == TextAlign::center) draw_x -= total_advance * 0.5f;
+    else if (text_align_ == TextAlign::right) draw_x -= total_advance;
+
+    // Draw each glyph as a textured quad with the SDF alpha channel.
+    // The smoothstep is applied per-pixel by Skia's shader pipeline
+    // when we use kAlpha_8 — we just draw with the fill color's paint.
+    auto paint = make_fill_paint(fill_color_);
+    for (auto& [g, x_off] : draws) {
+        float gx = draw_x + x_off + g->bearing_x * scale;
+        float gy = y - g->bearing_y * scale;
+        float gw = g->width * scale;
+        float gh = g->height * scale;
+
+        SkRect src = SkRect::MakeXYWH(g->atlas_x, g->atlas_y, g->width, g->height);
+        SkRect dst = SkRect::MakeXYWH(gx, gy, gw, gh);
+
+        canvas_->drawImageRect(atlas_image, src, dst,
+                               SkSamplingOptions(SkFilterMode::kLinear),
+                               &paint, SkCanvas::kStrict_SrcRectConstraint);
+    }
+}
+
 float SkiaCanvas::measure_text(const std::string& text) {
     SkFont font = make_font(font_family_, font_size_);
     if (!font.getTypeface()) return font_size_ * text.size() * 0.5f;

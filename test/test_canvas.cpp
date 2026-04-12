@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/catch_approx.hpp>
 #include <pulp/canvas/canvas.hpp>
+#include <pulp/canvas/sdf_atlas.hpp>
 
 using namespace pulp::canvas;
 
@@ -85,6 +86,20 @@ TEST_CASE("Canvas text in nested clip contexts -- no duplication (#75)",
     REQUIRE(canvas.count(DrawCommand::Type::save) == 3);
     REQUIRE(canvas.count(DrawCommand::Type::restore) == 3);
     REQUIRE(canvas.count(DrawCommand::Type::clip_rect) == 3);
+}
+
+TEST_CASE("fill_text_sdf falls back to fill_text on RecordingCanvas", "[canvas][sdf]") {
+    RecordingCanvas canvas;
+    canvas.set_font("Inter", 14.0f);
+
+    SdfAtlas atlas;
+    std::vector<char32_t> chars = {U'H', U'i'};
+    REQUIRE(atlas.build("stub", chars, 32, 4, 256));
+
+    canvas.fill_text_sdf("Hi", 10, 20, atlas);
+
+    // RecordingCanvas base class fallback records a fill_text command
+    REQUIRE(canvas.count(DrawCommand::Type::fill_text) == 1);
 }
 
 TEST_CASE("RecordingCanvas transforms", "[canvas]") {

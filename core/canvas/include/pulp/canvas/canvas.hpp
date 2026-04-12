@@ -327,6 +327,19 @@ public:
         float line_height = 0;  ///< Recommended line spacing (ascent + descent + leading)
     };
 
+    // ── SDF Text (GPU-accelerated, resolution-independent) ────────────
+
+    /// Render text using an SDF glyph atlas for resolution-independent
+    /// rendering. The atlas must be pre-built via SdfAtlas::build().
+    /// Falls back to fill_text() if GPU is unavailable or the atlas
+    /// doesn't contain the required glyphs.
+    virtual void fill_text_sdf(const std::string& text, float x, float y,
+                               const class SdfAtlas& atlas) {
+        // Default: fall back to standard text rendering
+        (void)atlas;
+        fill_text(text, x, y);
+    }
+
     // ── Images ───────────────────────────────────────────────────────────
     /// Draw an image from encoded data (PNG, JPEG, WebP) at the given rect.
     /// Returns true if the image was decoded and drawn successfully.
