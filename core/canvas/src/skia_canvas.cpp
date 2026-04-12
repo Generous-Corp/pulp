@@ -250,10 +250,39 @@ void SkiaCanvas::fill_text(const std::string& text, float x, float y) {
 
     auto paint = make_fill_paint(fill_color_);
 
-    // Per-glyph positioned SkTextBlob with exact advance widths from the font.
-    // This gives proper glyph spacing + subpixel positioning without the
-    // ghost/doubling artifacts that SkShaper::shape() produces in nested
-    // save/translate/clip contexts (widget paint pipeline).
+#ifdef PULP_HAS_TEXT_SHAPING
+    // SkShaper path: full OpenType kerning + ligatures via HarfBuzz.
+    //
+    // The RunHandler origin MUST be {0,0}. The draw position is passed
+    // exclusively to drawTextBlob() to avoid double-offset in nested
+    // save/translate/clip contexts (issue #75). The bug: if the handler
+    // is seeded with {x,y} AND drawTextBlob also receives {x,y}, glyph
+    // positions are offset twice — once inside the blob and once by the
+    // draw call — producing a ghost/double image that worsens with each
+    // nesting level in the widget paint pipeline.
+    auto shaper = SkShaper::Make();
+    if (shaper) {
+        // Shape at origin {0,0}, then read the total shaped advance
+        // from endPoint() for accurate text alignment.
+        SkTextBlobBuilderRunHandler handler(text.c_str(), {0, 0});
+        shaper->shape(text.c_str(), text.size(), font,
+                      /*leftToRight=*/true, SK_ScalarInfinity, &handler);
+        float total_w = handler.endPoint().x();
+
+        float draw_x = x;
+        if (text_align_ == TextAlign::center) draw_x -= total_w * 0.5f;
+        else if (text_align_ == TextAlign::right) draw_x -= total_w;
+
+        auto blob = handler.makeBlob();
+        if (blob) {
+            canvas_->drawTextBlob(blob, draw_x, y, paint);
+            return;
+        }
+    }
+#endif
+
+    // Fallback: per-glyph SkTextBlob without kerning/ligatures.
+    // Used when text shaping is disabled or SkShaper::Make() fails.
     int glyph_count = static_cast<int>(font.countText(text.c_str(), text.size(), SkTextEncoding::kUTF8));
     if (glyph_count <= 0) return;
 
