@@ -33,7 +33,6 @@ class PulpAccessibilityDelegate : View.AccessibilityDelegate() {
 
             // Map Pulp roles to Android class names for TalkBack
             when (role) {
-                ROLE_BUTTON -> info.className = "android.widget.Button"
                 ROLE_SLIDER -> {
                     info.className = "android.widget.SeekBar"
                     val rangeInfo = AccessibilityNodeInfo.RangeInfo.obtain(
@@ -44,15 +43,20 @@ class PulpAccessibilityDelegate : View.AccessibilityDelegate() {
                     )
                     info.rangeInfo = rangeInfo
                 }
-                ROLE_TEXT -> info.className = "android.widget.TextView"
                 ROLE_TOGGLE -> info.className = "android.widget.ToggleButton"
-                ROLE_LIST -> {
-                    info.className = "android.widget.ListView"
-                    val collectionInfo = AccessibilityNodeInfo.CollectionInfo.obtain(
-                        nativeGetNodeRowCount(i), nativeGetNodeColumnCount(i), false
+                ROLE_LABEL -> info.className = "android.widget.TextView"
+                ROLE_GROUP -> info.className = "android.view.ViewGroup"
+                ROLE_METER -> {
+                    info.className = "android.widget.ProgressBar"
+                    val rangeInfo = AccessibilityNodeInfo.RangeInfo.obtain(
+                        AccessibilityNodeInfo.RangeInfo.RANGE_TYPE_FLOAT,
+                        nativeGetNodeRangeMin(i),
+                        nativeGetNodeRangeMax(i),
+                        value.toFloatOrNull() ?: 0f
                     )
-                    info.collectionInfo = collectionInfo
+                    info.rangeInfo = rangeInfo
                 }
+                ROLE_IMAGE -> info.className = "android.widget.ImageView"
             }
 
             if (label.isNotEmpty()) {
@@ -103,12 +107,16 @@ class PulpAccessibilityDelegate : View.AccessibilityDelegate() {
     companion object {
         private const val TAG = PulpApplication.LOG_TAG
 
-        // Pulp AccessRole enum values (must match C++ View::AccessRole)
-        const val ROLE_BUTTON = 0
-        const val ROLE_SLIDER = 1
-        const val ROLE_TEXT = 2
-        const val ROLE_TOGGLE = 3
-        const val ROLE_LIST = 4
+        // Pulp AccessRole enum values — must match C++ View::AccessRole
+        // enum class AccessRole { none=0, slider=1, toggle=2, label=3,
+        //                         group=4, meter=5, image=6 };
+        const val ROLE_NONE    = 0
+        const val ROLE_SLIDER  = 1
+        const val ROLE_TOGGLE  = 2
+        const val ROLE_LABEL   = 3
+        const val ROLE_GROUP   = 4
+        const val ROLE_METER   = 5
+        const val ROLE_IMAGE   = 6
 
         // Pulp action enum
         const val ACTION_CLICK = 0
