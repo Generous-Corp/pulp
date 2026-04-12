@@ -147,8 +147,11 @@ Java_com_pulp_accessibility_PulpAccessibilityDelegate_nativePerformAction(
 
     switch (action) {
         case ACTION_CLICK: {
-            // Simulate a click at the centre of the view, expressed in root
-            // coordinates (walk up the parent chain to accumulate offsets).
+            // Compute the target's centre in root coordinates and dispatch
+            // through the root view. simulate_click() interprets its arg as
+            // a root-relative point and then hit_tests from the receiver,
+            // so it must be called on the root, not the target.
+            if (!g_root_view) break;
             auto b = target->bounds();
             float cx = b.x + b.width * 0.5f;
             float cy = b.y + b.height * 0.5f;
@@ -156,7 +159,7 @@ Java_com_pulp_accessibility_PulpAccessibilityDelegate_nativePerformAction(
                 cx += p->bounds().x;
                 cy += p->bounds().y;
             }
-            target->simulate_click(pulp::view::Point{cx, cy});
+            g_root_view->simulate_click(pulp::view::Point{cx, cy});
             break;
         }
         case ACTION_INCREMENT:
