@@ -66,3 +66,6 @@ endif()
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/threejs-native-demo/CMakeLists.txt)
     add_subdirectory(threejs-native-demo)
 endif()
+
+# Streams feature demo (unified Stream / AsyncStream / HttpStream)
+add_subdirectory(stream-demo)

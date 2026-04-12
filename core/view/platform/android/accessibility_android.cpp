@@ -19,6 +19,7 @@
 #include <pulp/view/accessibility.hpp>
 
 using pulp::view::View;
+using pulp::view::Point;
 
 // ── Flat node cache ─────────────────────────────────────────────────────
 // Rebuilt on each onInitializeAccessibilityNodeInfo call (Kotlin calls
