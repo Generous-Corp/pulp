@@ -27,6 +27,7 @@ target_sources(pulp-runtime PRIVATE
     src/named_pipe.cpp
     src/stream.cpp
     src/async_stream.cpp
+    src/network_stream.cpp
     src/ip_address.cpp
     src/i18n.cpp
     src/crypto.cpp

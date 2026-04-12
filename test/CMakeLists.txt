@@ -46,6 +46,11 @@ add_executable(pulp-test-async-stream test_async_stream.cpp)
 target_link_libraries(pulp-test-async-stream PRIVATE pulp::runtime Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-async-stream)
 
+# Network Stream tests (Phase 3)
+add_executable(pulp-test-network-stream test_network_stream.cpp)
+target_link_libraries(pulp-test-network-stream PRIVATE pulp::runtime Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-network-stream)
+
 # Validation harness tests (Phase 2)
 add_executable(pulp-test-validation-harness test_validation_harness.cpp)
 target_link_libraries(pulp-test-validation-harness PRIVATE pulp::format Catch2::Catch2WithMain)
