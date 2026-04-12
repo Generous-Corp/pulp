@@ -27,7 +27,8 @@ inline void render_sdf_text_software(const AtlasT& atlas,
                                      std::uint8_t* out, int out_w, int out_h,
                                      const SdfTextOptions& opts = {}) {
     const int aw = atlas.width();
-    if (aw <= 0) return;
+    const int ah = atlas.height();
+    if (aw <= 0 || ah <= 0) return;
 
     const float edge255 = opts.edge * 255.0f;
 
@@ -51,7 +52,7 @@ inline void render_sdf_text_software(const AtlasT& atlas,
                 const float sy = q.src_y + (y + 0.5f - q.dst_y) * sy_per_px;
                 const int ix = static_cast<int>(sx);
                 const int iy = static_cast<int>(sy);
-                if (ix < 0 || iy < 0 || ix >= aw) continue;
+                if (ix < 0 || iy < 0 || ix >= aw || iy >= ah) continue;
 
                 const std::uint8_t d = atlas.pixels()[iy * aw + ix];
                 // Pixel-scale AA: half a texel of source per output pixel.

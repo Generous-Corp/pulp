@@ -34,7 +34,7 @@
     #ifdef __APPLE__
         #include "include/ports/SkFontMgr_mac_ct.h"
     #elif defined(_WIN32)
-        #include "include/ports/SkFontMgr_directory.h"
+        #include "include/ports/SkTypeface_win.h"
     #elif defined(__ANDROID__)
         #include "include/ports/SkFontMgr_android.h"
         #include "include/ports/SkFontScanner_FreeType.h"

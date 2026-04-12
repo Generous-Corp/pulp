@@ -91,7 +91,10 @@ half4 main(float2 coord) {
     out_color.rgb  += bevel_lit         * a_fill;
     out_color.a    += a_fill;
 
-    // Gamma correction.
-    out_color.a = pow(max(out_color.a, 0.0001), 1.0 / max(gamma, 0.01));
+    // Gamma correction. Preserve exact zero alpha for fully-outside samples
+    // so the effect quads don't leave faint rectangle halos on contrasting
+    // backgrounds (matches sdf_text.sksl / msdf_text.sksl behavior).
+    out_color.a = out_color.a <= 0.0 ? 0.0
+                                     : pow(out_color.a, 1.0 / max(gamma, 0.01));
     return out_color * color.a;
 }
