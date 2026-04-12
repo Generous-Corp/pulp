@@ -30,17 +30,18 @@
 # bumps this pin.
 
 [shipyard]
-# Pinned to the first Shipyard release that bundles Phase 5's
-# capability-parity features with Pulp's local_ci.py:
-#   - validation contract markers (__PULP_VALIDATION__:smoke|full)
-#   - prepared-state reuse keyed by (sha, target, mode)
-#   - Windows host mutex + Visual Studio auto-detection
-#   - SSH→cloud auto-failover via [failover.cloud_auto]
-#
-# v0.1.1 was a no-op stub on macOS — do not pin to anything older
-# than v0.1.2. v0.1.3 is the first release Pulp actually depends on
-# for feature parity.
-version = "v0.1.3"
+# v0.2.0 is the first major feature release after the migration
+# validation (Part 13 Stages 1-6, completed April 2026). Adds:
+#   - Incremental bundles: delta instead of full 443 MB uploads
+#   - --resume-from for SSH targets: skip to test phase (~2 min vs 15)
+#   - shipyard targets: list/test/add/remove targets from CLI
+#   - shipyard config: show merged config, switch profiles
+#   - Cloud polling timeout (60 min default, configurable)
+#   - EncodedCommand transport for Windows SSH (since v0.1.13)
+#   - Bundle skip when remote has SHA (since v0.1.14)
+#   - ssh-based upload replacing scp/SFTP (since v0.1.16)
+#   - Stale queue recovery on startup (since v0.1.16)
+version = "v0.2.0"
 
 # Public release source. The bootstrap script downloads from
 # https://github.com/{repo}/releases/download/{version}/{asset}

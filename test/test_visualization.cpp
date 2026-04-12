@@ -200,9 +200,11 @@ TEST_CASE("VisualizationBridge lock-free stress test", "[view][vizbridge]") {
     audio_thread.join();
     ui_thread.join();
 
-    // Both threads should have executed without crash
-    REQUIRE(write_count.load() > 0);
-    REQUIRE(read_count.load() > 0);
+    // Both threads should have executed meaningfully — at 48kHz with
+    // 128-sample blocks, 500ms should yield ~187 audio blocks. Even on
+    // an ARM64 VM with x64 emulation overhead, 5 is a safe floor.
+    REQUIRE(write_count.load() > 5);
+    REQUIRE(read_count.load() > 5);
 }
 
 // ── Widget Tests ────────────────────────────────────────────────────────────
