@@ -651,6 +651,8 @@ float height = shaper.measure_height(prepared, 300.0f);  // Fast
 | Image Convolution | `image_convolution.hpp` | `ImageConvolutionKernel::gaussian_blur_5().apply(pixels, w, h)` |
 | Rectangle List | `rectangle_list.hpp` | Clip regions with add/subtract/intersect for dirty tracking |
 | SVG | `svg.hpp` | Load and render SVG vector graphics via nanosvg |
+| SDF text | `sdf_atlas.hpp` | Single-channel signed distance field glyph atlas for resolution-independent GPU text. See [docs/reference/sdf-text.md](./sdf-text.md). |
+| MSDF text | `msdf_atlas.hpp` | Multi-channel SDF atlas with `median(r,g,b)` sampler for sharp corners at extreme zoom (Phase 2 scaffold, msdfgen integration pending). |
 
 ---
 

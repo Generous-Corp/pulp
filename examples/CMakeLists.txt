@@ -60,3 +60,8 @@ endif()
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/threejs-native-demo/CMakeLists.txt)
     add_subdirectory(threejs-native-demo)
 endif()
+
+# Advanced SDF/MSDF text: side-by-side quality comparison
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/sdf-text-demo/CMakeLists.txt)
+    add_subdirectory(sdf-text-demo)
+endif()
