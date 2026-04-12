@@ -43,6 +43,42 @@ const CachedGlyph* SdfAtlasCache::touch(char32_t codepoint) {
     return nullptr;
 }
 
+bool SdfAtlasCache::ensure(char32_t codepoint) {
+    if (entries_.find(codepoint) != entries_.end()) {
+        return true;  // already resident
+    }
+    // Rebuild the atlas with the union of cached codepoints + the new one.
+    std::vector<char32_t> all;
+    all.reserve(entries_.size() + 1);
+    for (const auto& kv : entries_) all.push_back(kv.first);
+    all.push_back(codepoint);
+
+    SdfAtlas rebuilt;
+    if (!rebuilt.build(font_family_, all, base_size_, padding_, max_size_)) {
+        return false;
+    }
+    atlas_ = std::move(rebuilt);
+
+    // Reseed the entries map against the rebuilt glyph layout, preserving
+    // prior frame_last_used values so LRU ordering is intact. Every glyph
+    // is marked dirty because the rebuilt atlas texture is a new allocation.
+    std::unordered_map<char32_t, CachedGlyph> next;
+    next.reserve(all.size());
+    for (auto c : all) {
+        const SdfGlyph* g = atlas_.glyph(c);
+        if (!g) continue;
+        CachedGlyph ce;
+        ce.glyph = *g;
+        auto prior = entries_.find(c);
+        ce.frame_last_used =
+            prior != entries_.end() ? prior->second.frame_last_used : current_frame_;
+        ce.dirty = true;
+        next.emplace(c, ce);
+    }
+    entries_ = std::move(next);
+    return entries_.find(codepoint) != entries_.end();
+}
+
 std::size_t SdfAtlasCache::evict_older_than(std::uint64_t max_age_frames) {
     std::size_t removed = 0;
     for (auto it = entries_.begin(); it != entries_.end(); ) {

@@ -44,3 +44,22 @@ TEST_CASE("SdfAtlasCache evicts glyphs unused beyond max_age",
     REQUIRE(cache.touch(U'B') != nullptr);
     REQUIRE(cache.touch(U'A') == nullptr);
 }
+
+TEST_CASE("SdfAtlasCache ensure grows the atlas on demand",
+          "[canvas][cache][phase5]") {
+    SdfAtlasCache cache;
+    REQUIRE(cache.initialize("", {U'A', U'B'}, 24, 4, 512));
+    REQUIRE(cache.size() == 2);
+    REQUIRE(cache.touch(U'X') == nullptr);  // miss before ensure
+
+    REQUIRE(cache.ensure(U'X'));
+    REQUIRE(cache.size() == 3);
+    const auto* x = cache.touch(U'X');
+    REQUIRE(x != nullptr);
+    REQUIRE(x->dirty);  // newly-added glyph needs GPU upload
+
+    // Calling ensure on an already-resident glyph is a no-op and still
+    // reports success.
+    REQUIRE(cache.ensure(U'A'));
+    REQUIRE(cache.size() == 3);
+}

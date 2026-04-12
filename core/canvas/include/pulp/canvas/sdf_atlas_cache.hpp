@@ -46,6 +46,14 @@ public:
     // the number of glyphs removed.
     std::size_t evict_older_than(std::uint64_t max_age_frames);
 
+    // Dynamic atlas growth: ensure `codepoint` has a slot in the atlas,
+    // rebuilding with the union of currently cached codepoints + the
+    // new one if necessary. Returns true when the codepoint is resident
+    // on return (whether it was already present or newly added). Every
+    // newly inserted glyph lands with `dirty = true` so the GPU upload
+    // path knows to re-transfer the affected region.
+    bool ensure(char32_t codepoint);
+
     // Advance the frame counter; call once per presented frame.
     void next_frame() { ++current_frame_; }
 
