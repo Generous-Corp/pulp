@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+# Pulp pre-push hook (agent-agnostic).
+#
+# Runs the versioning + skill-sync gates against origin/main before pushing.
+# Advisory by default — warnings print but don't block. Set
+# PULP_ENFORCE_PREPUSH=1 to upgrade warnings to hard errors (CI does this).
+#
+# Install once via tools/scripts/install-githooks.sh (or setup.sh):
+#   git config core.hooksPath .githooks
+#
+# To skip on a single push (emergencies only):
+#   PULP_SKIP_PREPUSH=1 git push
+
+set -u
+
+ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
+cd "$ROOT" || exit 0
+
+if [ "${PULP_SKIP_PREPUSH:-0}" = "1" ]; then
+    echo "[pre-push] PULP_SKIP_PREPUSH=1 — skipping gates." >&2
+    exit 0
+fi
+
+PYTHON="${PYTHON:-python3}"
+VBC="$ROOT/tools/scripts/version_bump_check.py"
+SSC="$ROOT/tools/scripts/skill_sync_check.py"
+CFG="$ROOT/tools/scripts/versioning.json"
+
+if [ ! -f "$VBC" ] || [ ! -f "$SSC" ] || [ ! -f "$CFG" ]; then
+    # Repo predates the gates; no-op so the hook doesn't block legitimate
+    # pushes on older checkouts.
+    exit 0
+fi
+
+BASE="${PULP_PREPUSH_BASE:-origin/main}"
+
+fail=0
+
+# Skill-sync first — it fails fast and the output is the most actionable.
+"$PYTHON" "$SSC" --base "$BASE" --config "$CFG" --mode=report
+case $? in
+    0) ;;
+    1) fail=1 ;;
+    *) echo "[pre-push] skill_sync_check: internal error" >&2 ;;
+esac
+
+"$PYTHON" "$VBC" --base "$BASE" --config "$CFG" --mode=report
+case $? in
+    0) ;;
+    1) fail=1 ;;
+    *) echo "[pre-push] version_bump_check: internal error" >&2 ;;
+esac
+
+if [ "$fail" = "0" ]; then
+    echo "[pre-push] gates clean." >&2
+    exit 0
+fi
+
+if [ "${PULP_ENFORCE_PREPUSH:-0}" = "1" ]; then
+    echo "[pre-push] PULP_ENFORCE_PREPUSH=1 — blocking push due to gate failures above." >&2
+    exit 1
+fi
+
+echo "[pre-push] warnings above are advisory (export PULP_ENFORCE_PREPUSH=1 to block)." >&2
+exit 0
