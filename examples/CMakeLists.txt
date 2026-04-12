@@ -65,3 +65,8 @@ endif()
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/sdf-text-demo/CMakeLists.txt)
     add_subdirectory(sdf-text-demo)
 endif()
+
+# SDF effects showcase (outline, glow, shadow, bevel)
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/sdf-effects-demo/CMakeLists.txt)
+    add_subdirectory(sdf-effects-demo)
+endif()
