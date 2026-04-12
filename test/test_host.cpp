@@ -144,3 +144,48 @@ TEST_CASE("SignalGraph MIDI nodes", "[host][graph]") {
     REQUIRE(graph.node(midi_out)->type == NodeType::MidiOutput);
     REQUIRE(graph.connect(midi_in, 0, midi_out, 0));
 }
+
+// ── Real CLAP loader (integration test, skipped when no test plugin built) ──
+
+#include <filesystem>
+#include <vector>
+
+#ifdef PULP_TEST_CLAP_PATH
+TEST_CASE("PluginSlot loads and processes a real CLAP plugin", "[host][clap][integration]") {
+    namespace fs = std::filesystem;
+    const std::string path = PULP_TEST_CLAP_PATH;
+    if (!fs::exists(path)) {
+        WARN("CLAP test plugin not built at " << path << " — skipping");
+        return;
+    }
+
+    PluginInfo info;
+    info.name   = "PulpGain";
+    info.path   = path;
+    info.format = PluginFormat::CLAP;
+
+    auto slot = PluginSlot::load(info);
+    REQUIRE(slot != nullptr);
+    REQUIRE(slot->is_loaded());
+    REQUIRE(slot->prepare(48000.0, 256));
+
+    std::vector<float> in_l(256, 0.5f), in_r(256, 0.5f);
+    std::vector<float> out_l(256, 0.0f), out_r(256, 0.0f);
+    const float* in_ptrs[2]  = {in_l.data(), in_r.data()};
+    float*       out_ptrs[2] = {out_l.data(), out_r.data()};
+
+    pulp::audio::BufferView<const float> in(in_ptrs, 2, 256);
+    pulp::audio::BufferView<float>       out(out_ptrs, 2, 256);
+    pulp::midi::MidiBuffer mi, mo;
+
+    slot->process(out, in, mi, mo, 256);
+
+    // PulpGain is a unity-ish gain plugin; output should not be all zeros
+    // after processing a non-zero input.
+    float sum = 0.0f;
+    for (int i = 0; i < 256; ++i) sum += std::abs(out_l[i]) + std::abs(out_r[i]);
+    REQUIRE(sum > 0.0f);
+
+    slot->release();
+}
+#endif
