@@ -54,6 +54,34 @@ TEST_CASE("MsdfAtlas pixel buffer is RGB8 (3 bytes per texel)",
     (void)h;
 }
 
+TEST_CASE("MsdfAtlas hybrid-alpha mode emits RGBA with A-channel SDF",
+          "[canvas][msdf][alpha]") {
+    MsdfAtlas atlas;
+    std::vector<char32_t> chars = {U'A'};
+    REQUIRE(atlas.build("stub", chars, 32, 4, 1024, /*include_alpha*/ true));
+    REQUIRE(atlas.channels() == 4);
+
+    const MsdfGlyph* g = atlas.glyph(U'A');
+    REQUIRE(g != nullptr);
+
+    const int w = atlas.width();
+    auto at = [&](int x, int y, int c) {
+        return atlas.pixels()[(y * w + x) * 4 + c];
+    };
+    const int cx = g->atlas_x + g->width / 2;
+    const int cy = g->atlas_y + g->height / 2;
+    REQUIRE(at(cx, cy, 3) > 200);
+    REQUIRE(at(cx, cy, 0) > 200);
+    REQUIRE(at(g->atlas_x - 2, g->atlas_y - 2, 3) < 60);
+}
+
+TEST_CASE("MsdfAtlas default mode is RGB (no alpha channel)",
+          "[canvas][msdf][alpha]") {
+    MsdfAtlas atlas;
+    REQUIRE(atlas.build("stub", {U'X'}, 24, 4, 1024));
+    REQUIRE(atlas.channels() == 3);
+}
+
 TEST_CASE("MsdfAtlas refuses to build when exceeding max size",
           "[canvas][msdf]") {
     MsdfAtlas atlas;

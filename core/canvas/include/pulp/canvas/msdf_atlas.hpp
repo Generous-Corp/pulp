@@ -48,18 +48,28 @@ public:
     // Build the atlas for `chars` at `base_size` with `padding` texels of
     // SDF spread around each glyph. Returns false if the font cannot be
     // resolved or the resulting atlas would exceed `max_atlas_size`.
+    //
+    // When `include_alpha` is true the output is RGBA8 where A holds a
+    // true single-channel SDF (same encoding as `SdfAtlas`). Shaders
+    // can median(r,g,b) for sharp corners and fall back to .a where
+    // MSDF artifacts would otherwise appear (thin strokes, discontinuities
+    // in the channel decomposition). When `include_alpha` is false the
+    // output is RGB8.
     bool build(const std::string& font_family,
                const std::vector<char32_t>& chars,
                int base_size = 48,
                int padding   = 8,
-               int max_atlas_size = 2048);
+               int max_atlas_size = 2048,
+               bool include_alpha = false);
 
     const MsdfGlyph* glyph(char32_t codepoint) const;
 
-    // RGB8 atlas image: width() * height() * 3 bytes, row-major.
+    // Atlas image: width() * height() * channels() bytes, row-major.
     const std::uint8_t* pixels() const;
     int width()  const;
     int height() const;
+    // 3 for RGB8, 4 for RGBA8 (hybrid-alpha).
+    int channels() const;
     std::size_t glyph_count() const;
     int base_size() const;
 
