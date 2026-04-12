@@ -50,6 +50,15 @@ half3 s = sample(atlas, coord).rgb;
 half d  = max(min(s.r, s.g), min(max(s.r, s.g), s.b));
 ```
 
+## Subpixel positioning
+
+`fwidth(d)` in the sampler shader gives a pixel-accurate AA width at
+any zoom, so glyph quads can be placed at fractional pixel positions
+without introducing distance-field aliasing. For animated UIs that
+prefer stable edges to minimal sample error, snap quad origins to a
+whole-pixel grid before draw (`std::round(x)`, `std::round(y)`); the
+sampler needs no change.
+
 ## Effects (planned)
 
 Phase 4 adds a reusable effects layer: `glow`, `shadow`, `outline`,
