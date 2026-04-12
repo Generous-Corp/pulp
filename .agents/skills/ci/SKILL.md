@@ -12,6 +12,33 @@ requires:
 
 Validate branches and ship code safely. This skill handles all CI workflows for Pulp across local machines and VMs.
 
+## Shipping a PR: route through `pulp pr`
+
+When the user says any of: **"push to main"**, **"ship this"**, **"ship it"**,
+**"we're done"**, **"merge this"**, **"push it"**, **"run CI"**, **"push a PR"** —
+run `pulp pr` (not `gh pr create` + `shipyard ship` separately).
+
+`pulp pr` is the single orchestrator. It:
+
+1. Calls `tools/scripts/skill_sync_check.py` and hard-fails if a mapped skill
+   path was touched without a `SKILL.md` update or a `Skill-Update:` trailer.
+2. Calls `tools/scripts/version_bump_check.py --mode=apply` to bump SDK, Claude
+   plugin, and marketplace versions consistently, honoring any
+   `Version-Bump:` trailers.
+3. Commits the bump (if any) as `chore: bump <surfaces>`.
+4. `gh pr create` with a generated body.
+5. `shipyard ship` for cross-platform validate + merge on green.
+6. Auto-release workflow (`.github/workflows/auto-release.yml`) tags and
+   publishes binaries on merge.
+
+Never run `gh pr create` + `shipyard ship` separately for a normal ship
+cycle. Never invoke the two version/skill scripts by hand — `pulp pr`
+wires them together with the right flags.
+
+Backward compatibility: raw `shipyard ship` / `shipyard run` still work for
+diagnostics, experimental branches, or when `pulp pr` itself is being
+debugged. Do not use them as the primary ship path.
+
 ## Tool selection: Shipyard (primary)
 
 **Shipyard is Pulp's primary CI tool.** All merges, validations, and
