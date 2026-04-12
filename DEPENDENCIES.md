@@ -23,6 +23,7 @@ All code that Pulp bundles, fetches automatically, exports via `cmake --install`
 | Highway | 1.2.0 | Apache-2.0 | Portable SIMD abstraction (SSE/NEON/AVX) | pulp-runtime | 2026-04-06 |
 | LV2 | 1.18.10 | ISC | LV2 plugin format headers | pulp-format | 2026-03-30 |
 | miniz | 3.0.2 | MIT | ZIP/GZIP compression | pulp-runtime | 2026-04-07 |
+| msdfgen | 1.12 | MIT | Multi-channel SDF glyph generation (planned, FetchContent) | pulp-canvas | 2026-04-12 |
 | nanosvg | master | zlib | SVG parsing and rasterization | pulp-canvas | 2026-03-25 |
 | Oboe | 1.9.0 | Apache-2.0 | Android audio backend (AAudio/OpenSL ES abstraction) | pulp-audio | 2026-04-07 |
 | pugixml | 1.14 | MIT | XML parsing and generation | pulp-runtime | 2026-04-07 |

@@ -1,0 +1,30 @@
+// SkSL fragment shader for Multi-Channel SDF (MSDF) text sampling.
+//
+// MSDF encodes three distance signals into R, G, B. The true distance
+// at a sample point is `median(r, g, b)` — this preserves sharp corners
+// where single-channel SDF rounds off because three signals cannot
+// simultaneously disagree about which side of an edge we are on.
+//
+// Uniforms mirror sdf_text.sksl so call-sites can switch pipelines by
+// swapping the shader and the atlas type (A8 → RGB8).
+
+uniform shader atlas;
+uniform half   edge;
+uniform half   softness;
+uniform half   mip_bias;
+uniform half   gamma;
+uniform half4  color;
+
+half median3(half a, half b, half c) {
+    return max(min(a, b), min(max(a, b), c));
+}
+
+half4 main(float2 coord) {
+    half3 s = sample(atlas, coord).rgb;
+    half  d = median3(s.r, s.g, s.b);
+    half  w = fwidth(d) * (1.0 + max(mip_bias, 0.0)) + softness;
+    half  a = smoothstep(edge - w, edge + w, d);
+    // Preserve exact zero alpha for fully-outside samples (no halos).
+    half ag = a <= 0.0 ? 0.0 : pow(a, 1.0 / max(gamma, 0.01));
+    return half4(color.rgb, color.a) * ag;
+}

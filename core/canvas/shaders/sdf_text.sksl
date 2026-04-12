@@ -1,0 +1,34 @@
+// SkSL fragment shader for single-channel SDF text sampling.
+//
+// Uniforms:
+//   atlas      — SDF atlas as a child shader (A8 or R8, edge at `edge`)
+//   edge       — distance value that marks the glyph edge, conventionally 0.5
+//   softness   — extra smoothing added on top of the derivative-based AA width
+//   mip_bias   — pixel-scale bias for zoom stability (positive = blurrier, safer
+//                at extreme minification; negative = sharper)
+//   gamma      — output gamma for gamma-correct edge rendering (1.0 = linear,
+//                2.2 ≈ sRGB perceptual; apply as `pow(alpha, 1/gamma)`)
+//   color      — pre-multiplied text color
+//
+// fwidth(d) gives the screen-space derivative of the signed distance — the
+// correct AA width for any transform (zoom, skew, rotation) with no extra
+// uniforms. We add `softness` for intentional bloom and `mip_bias` for
+// stability across large zoom ranges.
+
+uniform shader atlas;
+uniform half   edge;
+uniform half   softness;
+uniform half   mip_bias;
+uniform half   gamma;
+uniform half4  color;
+
+half4 main(float2 coord) {
+    half d  = sample(atlas, coord).r;
+    half w  = fwidth(d) * (1.0 + max(mip_bias, 0.0)) + softness;
+    half a  = smoothstep(edge - w, edge + w, d);
+    // Gamma-correct the alpha so edges stay perceptually uniform on sRGB.
+    // Preserve exact zero alpha for fully-outside samples to avoid faint
+    // rectangle halos on contrasting backgrounds.
+    half ag = a <= 0.0 ? 0.0 : pow(a, 1.0 / max(gamma, 0.01));
+    return half4(color.rgb, color.a) * ag;
+}
