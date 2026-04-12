@@ -593,6 +593,24 @@ This single class automatically works as VST3, AU, CLAP, LV2, AAX, Standalone, W
 
 ---
 
+## host
+
+Plugin *hosting* — the mirror of `format`. Load VST3 / AU / CLAP / LV2
+plug-ins, wire them into a DAG, and process audio through the chain.
+
+| Feature | Header | Description |
+|---------|--------|-------------|
+| Scanner | `pulp/host/scanner.hpp` | Walk system plug-in paths; return `PluginInfo` |
+| PluginSlot | `pulp/host/plugin_slot.hpp` | Uniform load/prepare/process interface over every format |
+| SignalGraph | `pulp/host/signal_graph.hpp` | DAG topology + topological sort |
+
+Today CLAP loads and processes audio; VST3 / AU / LV2 loaders are stubbed
+(log a warning and return `nullptr`). See
+[hosting guide](../guides/hosting.md) and
+[signal-graph reference](./signal-graph.md).
+
+---
+
 ## canvas
 
 2D drawing with GPU acceleration and smart text layout.
