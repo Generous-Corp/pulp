@@ -1,18 +1,32 @@
-# Local CI
+# CI Validation
 
-Local CI lets you validate branches on your Mac and cross-platform VMs before merging, without spending money on cloud CI minutes.
+Pulp validates branches on macOS (local), Ubuntu (SSH), and Windows (SSH) before merging.
+
+## Primary: Shipyard
+
+[Shipyard](https://github.com/danielraffel/Shipyard) is Pulp's primary CI tool. It delivers exact SHAs via git bundles, runs your build/test commands on each platform, and gates merges on per-SHA evidence.
+
+```bash
+./tools/install-shipyard.sh              # install pinned version
+shipyard run                              # validate current branch
+shipyard ship                             # PR + validate + merge on green
+shipyard cloud run build <branch>         # dispatch to Namespace
+```
 
 ## Required Merge Process (All Agents)
 
-Every change to `main` must go through this workflow — no exceptions, regardless of which AI agent or human is doing the work:
+Every change to `main` must go through this workflow — no exceptions:
 
 1. **Branch** — work on `feature/*` or `fix/*`, never directly on main
-2. **Local CI** — run `python3 tools/local-ci/local_ci.py run <branch>` to validate on macOS + Ubuntu + Windows
-3. **PR** — push and create a PR via `gh pr create`
-4. **GitHub Actions** — PR triggers build+test CI on all 3 platforms (automatic)
-5. **Merge** — only when both local CI and GitHub Actions are green
+2. **Validate** — run `shipyard run` to validate on macOS + Ubuntu + Windows
+3. **Ship** — run `shipyard ship` to create PR, validate, and merge on green
+4. **GitHub Actions** — PR also triggers build+test CI on all 3 platforms (redundant safety net)
 
-The `ci` skill (`.agents/skills/ci/SKILL.md`) wraps this into a single `ship` command. Use it.
+The `ci` skill (`.agents/skills/ci/SKILL.md`) wraps this into a single command. Use it.
+
+## Legacy: pulp ci-local
+
+`tools/local-ci/local_ci.py` is the previous CI controller. It remains available as a fallback but is scheduled for removal (see issue #120).
 
 ## TL;DR
 

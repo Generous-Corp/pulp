@@ -51,7 +51,7 @@ A cross-platform audio plugin and application framework. MIT licensed, C++20 cor
 - `pulp ship sign`, `pulp ship package`, `pulp ship check`
 
 **CI & Automation**
-- Local CI runner (`pulp ci-local`) validates on Mac + remote VMs over SSH
+- [Shipyard](https://github.com/danielraffel/Shipyard) cross-platform CI: local Mac + SSH to Linux/Windows VMs
 - Namespace.so cloud CI integration
 - GitHub Actions CI for the full build matrix
 - MCP server for repo automation and tool integration
@@ -173,17 +173,11 @@ Every change goes through: **branch → CI → PR → merge on green**. Pulp acc
 
 ```bash
 # Validate on macOS + Ubuntu + Windows before creating a PR
-shipyard run                               # preferred (when shipyard is on PATH)
-python3 tools/local-ci/local_ci.py run     # fallback
-
-# Or use the CI skill: "validate this"
-#
-# When you're ready to open a PR + merge on green automatically:
-shipyard ship                              # creates the PR, waits for CI, merges
-python3 tools/local-ci/local_ci.py ship    # fallback
+shipyard run                              # validate current branch
+shipyard ship                             # PR + validate + merge on green
 ```
 
-Pulp's CI controller is migrating from `local_ci.py` to [Shipyard](https://github.com/danielraffel/Shipyard). The CI skill detects which one is on PATH and prefers Shipyard; both tools cover the same target matrix (macOS local + Linux SSH + Windows SSH + Namespace cloud). See [docs/guides/local-ci.md](docs/guides/local-ci.md) for setup and [CONTRIBUTING.md](CONTRIBUTING.md) for the full contributor expectations.
+Pulp uses [Shipyard](https://github.com/danielraffel/Shipyard) for cross-platform CI — it validates on macOS (local), Linux (SSH), and Windows (SSH), and gates merges on per-SHA evidence across all three platforms. Install with `./tools/install-shipyard.sh`. See [docs/guides/local-ci.md](docs/guides/local-ci.md) for setup and [CONTRIBUTING.md](CONTRIBUTING.md) for the full contributor expectations.
 
 ### Security & CI policy
 

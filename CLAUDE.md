@@ -609,40 +609,32 @@ Pulp ships as a Claude Code plugin with slash commands (`/build`, `/test`, `/cre
 #### The `ship` workflow (primary path for all agents)
 
 ```bash
-# The ci skill handles: commit → push → PR → local CI (mac + ubuntu + windows) → merge on green
-# Say "ship this" or use the ci skill directly
-python3 tools/local-ci/local_ci.py run <branch>   # validate before or after PR creation
+# Shipyard is the primary CI tool. Say "ship this" or use directly:
+shipyard run                              # validate current branch
+shipyard ship                             # PR + validate + merge on green
+shipyard cloud run build <branch>         # dispatch to Namespace
 ```
 
-The CI skill (``.agents/skills/ci/SKILL.md``) is the single process for landing code. It:
+The CI skill (`.agents/skills/ci/SKILL.md`) is the single process for landing code. It:
 1. Creates a PR to main
-2. Runs `local_ci.py` which validates on macOS (locally), Ubuntu (SSH), and Windows (SSH)
+2. Runs `shipyard ship` which validates on macOS (locally), Ubuntu (SSH), and Windows (SSH)
 3. Merges only when ALL targets pass
 4. Posts a closeout comment
 
+`local_ci.py` remains in the repo as a legacy fallback but is scheduled for removal (see issue #120).
+
 #### GitHub Actions (backup gate)
 
-PRs also trigger `.github/workflows/build.yml` which builds and tests on all three platforms via GitHub-hosted or Namespace runners. This is a redundant safety net — the local CI skill is the primary validation path.
+PRs also trigger `.github/workflows/build.yml` which builds and tests on all three platforms via Namespace runners. This is a redundant safety net — Shipyard's local validation is the primary path.
 
 #### Runner priority (hard rule)
 
 **Always use Namespace for cloud CI. Never rely on GitHub-hosted runners as the primary path.**
 
-1. **Namespace** (default): `gh workflow run build.yml --ref <branch> -f runner_provider=namespace` — or use `python3 tools/local-ci/local_ci.py cloud run build <branch>` which respects the configured default.
-2. **Local VMs** (fallback): `ssh ubuntu`, `ssh win` via `local_ci.py run <branch>`
-3. **GitHub-hosted** (last resort): Only if both Namespace and local VMs are unavailable.
+1. **Namespace** (default): `shipyard cloud run build <branch>`
+2. **Local VMs** (fallback): `ssh ubuntu`, `ssh win` via `shipyard run`
+3. **GitHub-hosted** (last resort): Only if Namespace is unavailable.
 
-macOS runs locally in parallel with Namespace Ubuntu/Windows builds.
-
-**The shared CI config MUST have Namespace as the default provider.** Verify with:
-```bash
-python3 tools/local-ci/local_ci.py cloud defaults
-# Should show: configured default provider: namespace
-```
-
-If it shows `github-hosted`, add this to `~/Library/Application Support/Pulp/local-ci/config.json`:
-```json
-{ "github_actions": { "defaults": { "provider": "namespace", "workflow": "build" } } }
-```
+macOS runs locally in parallel with Namespace/SSH Ubuntu/Windows builds.
 
 See `docs/guides/local-ci.md` for setup.

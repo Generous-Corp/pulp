@@ -57,7 +57,7 @@ Skills activate automatically based on context. You don't need to invoke them ex
 
 | Skill | Activates when you... |
 |-------|-----------------------|
-| **ci** | Say "ship this", "create a PR", "run CI", "merge to main" |
+| **ci** | Say "ship this", "create a PR", "run CI", "merge to main" — uses Shipyard for cross-platform validation (macOS + Linux + Windows) |
 | **engine** | Ask about JS engines, Three.js performance, switching to V8/JSC |
 | **import-design** | Want to import a design from Figma or other tools |
 | **webview-ui** | Want to build a WebView-based UI panel |
