@@ -40,8 +40,10 @@ void collect_accessible_views(View& root, std::vector<AccessNode>& out) {
     if (root.access_role() != View::AccessRole::none) {
         out.push_back({&root, static_cast<int>(root.access_role())});
     }
-    for (auto& child : root.children()) {
-        collect_accessible_views(*child, out);
+    for (size_t i = 0; i < root.child_count(); ++i) {
+        if (auto* child = root.child_at(i)) {
+            collect_accessible_views(*child, out);
+        }
     }
 }
 
@@ -144,10 +146,19 @@ Java_com_pulp_accessibility_PulpAccessibilityDelegate_nativePerformAction(
     constexpr int ACTION_DECREMENT = 2;
 
     switch (action) {
-        case ACTION_CLICK:
-            // Simulate a click at the centre of the view
-            target->simulate_click();
+        case ACTION_CLICK: {
+            // Simulate a click at the centre of the view, expressed in root
+            // coordinates (walk up the parent chain to accumulate offsets).
+            auto b = target->bounds();
+            float cx = b.x + b.width * 0.5f;
+            float cy = b.y + b.height * 0.5f;
+            for (auto* p = target->parent(); p; p = p->parent()) {
+                cx += p->bounds().x;
+                cy += p->bounds().y;
+            }
+            target->simulate_click(pulp::view::Point{cx, cy});
             break;
+        }
         case ACTION_INCREMENT:
             target->on_accessibility_adjust(0.05f);
             break;
