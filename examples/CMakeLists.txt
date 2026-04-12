@@ -67,5 +67,15 @@ if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/threejs-native-demo/CMakeLists.txt)
     add_subdirectory(threejs-native-demo)
 endif()
 
+# Advanced SDF vs MSDF text: console atlas dumper for side-by-side quality comparison
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/sdf-vs-msdf-demo/CMakeLists.txt)
+    add_subdirectory(sdf-vs-msdf-demo)
+endif()
+
+# SDF effects showcase (outline, glow, shadow, bevel)
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/sdf-effects-demo/CMakeLists.txt)
+    add_subdirectory(sdf-effects-demo)
+endif()
+
 # Streams feature demo (unified Stream / AsyncStream / HttpStream)
 add_subdirectory(stream-demo)

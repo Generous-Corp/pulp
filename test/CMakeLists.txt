@@ -408,6 +408,41 @@ add_executable(pulp-test-sdf-atlas test_sdf_atlas.cpp)
 target_link_libraries(pulp-test-sdf-atlas PRIVATE pulp::canvas Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-sdf-atlas)
 
+# MSDF glyph atlas (Phase 2 scaffold)
+add_executable(pulp-test-msdf-atlas test_msdf_atlas.cpp)
+target_link_libraries(pulp-test-msdf-atlas PRIVATE pulp::canvas Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-msdf-atlas)
+
+# PSDF glyph atlas + vector-fallback (Phase 3 scaffold)
+add_executable(pulp-test-psdf-atlas test_psdf_atlas.cpp)
+target_link_libraries(pulp-test-psdf-atlas PRIVATE pulp::canvas Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-psdf-atlas)
+
+# Shared SDF/MSDF text helpers (pen snap + build_text_quads + fill_text_*)
+add_executable(pulp-test-sdf-text test_sdf_text.cpp)
+target_link_libraries(pulp-test-sdf-text PRIVATE pulp::canvas Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-sdf-text)
+
+# SDF effects layer (Phase 4 — host-side API + presets)
+add_executable(pulp-test-sdf-effects test_sdf_effects.cpp)
+target_link_libraries(pulp-test-sdf-effects PRIVATE pulp::canvas Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-sdf-effects)
+
+# Runtime SDF atlas cache (Phase 5 — LRU + frame-based eviction)
+add_executable(pulp-test-sdf-atlas-cache test_sdf_atlas_cache.cpp)
+target_link_libraries(pulp-test-sdf-atlas-cache PRIVATE pulp::canvas Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-sdf-atlas-cache)
+
+# Software SDF renderer (end-to-end headless raster)
+add_executable(pulp-test-sdf-software-renderer test_sdf_software_renderer.cpp)
+target_link_libraries(pulp-test-sdf-software-renderer PRIVATE pulp::canvas Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-sdf-software-renderer)
+
+# Runtime path → SDF conversion (Phase 5 — on-device SDF generation)
+add_executable(pulp-test-path-to-sdf test_path_to_sdf.cpp)
+target_link_libraries(pulp-test-path-to-sdf PRIVATE pulp::canvas Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-path-to-sdf)
+
 # View and layout tests
 add_executable(pulp-test-view test_view.cpp)
 target_link_libraries(pulp-test-view PRIVATE pulp::view Catch2::Catch2WithMain)
