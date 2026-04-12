@@ -1,0 +1,24 @@
+// SkSL fragment shader for single-channel SDF text sampling.
+//
+// Usage (host side):
+//   auto effect = SkRuntimeEffect::MakeForShader(SkString(kSdfTextSkSL));
+//   builder.uniform("edge")     = 0.5f;          // SDF level that marks the edge (0..1)
+//   builder.uniform("softness") = 0.0f;          // extra smoothing on top of fwidth
+//   builder.child("atlas")      = atlasShader;   // SkShader with the A8 SDF atlas
+//
+// The atlas encodes distance in [0,1] with the glyph edge at `edge`
+// (conventionally 128/255 ≈ 0.5). fwidth() gives us the screen-space
+// derivative of the distance field, which is the correct pixel-scale AA
+// width for any transform (zoom, skew, rotation) without extra uniforms.
+
+uniform shader atlas;
+uniform half  edge;
+uniform half  softness;
+uniform half4 color;
+
+half4 main(float2 coord) {
+    half d = sample(atlas, coord).r;
+    half w = fwidth(d) + softness;
+    half a = smoothstep(edge - w, edge + w, d);
+    return half4(color.rgb, color.a) * a;
+}
