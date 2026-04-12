@@ -36,6 +36,9 @@ add_subdirectory(faust-tremolo)
 # GPU Validation Demo: Modulation Matrix with animated cables
 add_subdirectory(gpu-demo)
 
+# SDF Text Demo: Resolution-independent text with bloom post-effect
+add_subdirectory(sdf-text-demo)
+
 # AI Style Designer: JS-defined design tool with hot reload
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/design-tool/CMakeLists.txt)
     add_subdirectory(design-tool)
