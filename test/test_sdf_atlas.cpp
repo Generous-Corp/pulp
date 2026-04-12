@@ -87,6 +87,31 @@ TEST_CASE("SdfAtlas SDF gradient is monotonic from centre outward",
     }
 }
 
+TEST_CASE("SdfAtlas captures real glyph metrics when Skia is available",
+          "[canvas][sdf][metrics]") {
+    SdfAtlas atlas;
+    std::vector<char32_t> chars = {U'i', U'M', U' '};
+    REQUIRE(atlas.build("", chars, 48, 6, 1024));
+
+    const SdfGlyph* gi = atlas.glyph(U'i');
+    const SdfGlyph* gM = atlas.glyph(U'M');
+    const SdfGlyph* gsp = atlas.glyph(U' ');
+    REQUIRE(gi != nullptr);
+    REQUIRE(gM != nullptr);
+    REQUIRE(gsp != nullptr);
+
+    // Metrics are in pixels at base_size. All advances must be > 0; 'M'
+    // should be considerably wider than 'i'; space should have a non-zero
+    // advance but (essentially) no ink, so its bearing_y may be 0.
+    REQUIRE(gi->advance > 0.0f);
+    REQUIRE(gM->advance > gi->advance);
+    REQUIRE(gsp->advance > 0.0f);
+
+    // Bearings for a 48px font: ink-top within [0, 2*base_size].
+    REQUIRE(gM->bearing_y >  0.0f);
+    REQUIRE(gM->bearing_y <= 96.0f);
+}
+
 TEST_CASE("SdfAtlas refuses to build when atlas would exceed max size",
           "[canvas][sdf]") {
     SdfAtlas atlas;
