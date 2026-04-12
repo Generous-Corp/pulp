@@ -171,6 +171,35 @@ TEST_CASE("AsyncStream cancel drains pending writes with Closed", "[async_stream
     REQUIRE(last_err.load() == StreamError::Closed);
 }
 
+TEST_CASE("AsyncStream cancel drains queue even before worker starts", "[async_stream]") {
+    auto backing = std::make_unique<TestStream>();
+    AsyncStream::Options opts;
+    opts.auto_read = false;
+    AsyncStream stream(std::move(backing), opts);
+
+    std::atomic<int> completions{0};
+    std::atomic<StreamError> last_err{StreamError::Ok};
+
+    // Queue writes *without* starting the worker, then cancel. The previous
+    // implementation dropped these callbacks; now they must all complete
+    // with Closed.
+    std::uint8_t payload[4] = {};
+    REQUIRE(stream.write_async(payload, 4, [&](std::size_t, StreamError err) {
+        last_err.store(err);
+        completions.fetch_add(1);
+    }));
+    REQUIRE(stream.write_async(payload, 4, [&](std::size_t, StreamError err) {
+        last_err.store(err);
+        completions.fetch_add(1);
+    }));
+
+    stream.cancel();
+
+    REQUIRE(wait_until([&] { return completions.load() == 2; }));
+    REQUIRE(last_err.load() == StreamError::Closed);
+    REQUIRE(stream.pending_write_bytes() == 0);
+}
+
 TEST_CASE("AsyncStream executor routes callbacks off worker", "[async_stream]") {
     auto backing = std::make_unique<TestStream>();
     auto* raw = backing.get();

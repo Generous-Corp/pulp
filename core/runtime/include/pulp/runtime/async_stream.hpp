@@ -157,10 +157,11 @@ private:
         AsyncWriteCallback callback;
     };
 
-    void worker_main();
+    void write_loop();
+    void read_loop();
     void dispatch(std::function<void()> task);
     void fire_close();
-    void fire_drain_if_idle_locked();
+    void drain_queue_as_closed();  ///< completes queued writes with StreamError::Closed
 
     std::unique_ptr<Stream> stream_;
     Options options_;
@@ -177,7 +178,8 @@ private:
     std::size_t pending_bytes_ = 0;
     bool running_ = false;
     bool close_fired_ = false;
-    std::thread worker_;
+    std::thread writer_thread_;
+    std::thread reader_thread_;
 };
 
 }  // namespace pulp::runtime
