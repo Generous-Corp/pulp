@@ -225,7 +225,9 @@ Exit code is 0 if all checks pass, 1 if any fail.
 
 ### ci-local
 
-**Status**: experimental
+**Status**: legacy (prefer [Shipyard](https://github.com/danielraffel/Shipyard))
+
+> **Note:** For most CI workflows, use `shipyard run` and `shipyard ship` instead of `pulp ci-local`. Shipyard is Pulp's primary CI tool as of v0.3.0 and provides the same target matrix with evidence-gated merges. `pulp ci-local` remains available as an advanced fallback — see issue #120 for removal timeline.
 
 Local-first CI control plane for Pulp. This is the shared operator surface for:
 
