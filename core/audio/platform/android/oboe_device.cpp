@@ -2,6 +2,8 @@
 
 #include <oboe/Oboe.h>
 #include <pulp/platform/android/jni.hpp>
+#include <pulp/midi/buffer.hpp>
+#include <pulp/midi/android_midi_fifo.hpp>
 #include <android/log.h>
 #include <atomic>
 #include <chrono>
@@ -71,6 +73,12 @@ public:
     int64_t xrun_count() const { return xrun_count_.load(std::memory_order_relaxed); }
     bool is_bluetooth_active() const { return bluetooth_active_.load(std::memory_order_acquire); }
 
+    /// MIDI buffer for the current audio block. Drained from the
+    /// lock-free FIFO at the start of each onAudioReady callback.
+    /// The standalone adapter reads this after its audio callback
+    /// to feed the Processor's MIDI input.
+    const pulp::midi::MidiBuffer& midi_buffer() const { return midi_buffer_; }
+
     // -- Dynamic routing --
 
     struct PendingConfig {
@@ -104,6 +112,20 @@ private:
         auto start = std::chrono::steady_clock::now();
 
         auto* output = static_cast<float*>(audio_data);
+
+        // Drain pending MIDI events from the lock-free FIFO into the
+        // per-block MIDI buffer. The FIFO is fed by the Kotlin MIDI
+        // receiver thread via JNI (android_midi.cpp). This must happen
+        // before the audio callback so the Processor sees MIDI events
+        // at the correct sample offsets within this block.
+        midi_buffer_.clear();
+#ifdef PULP_HAS_MIDI
+        pulp::midi::android::drain_into(
+            midi_buffer_,
+            std::chrono::steady_clock::now().time_since_epoch().count(),
+            static_cast<double>(current_sample_rate_),
+            num_frames);
+#endif
 
         if (callback_) {
             // Input: read from input stream if available (non-blocking, lock-free)
@@ -226,6 +248,9 @@ private:
     std::atomic<int64_t> xrun_count_{0};
     int32_t last_reported_xruns_ = 0;
     std::atomic<int64_t> last_callback_duration_ns_{0};
+
+    // Per-block MIDI buffer, drained from the lock-free FIFO each callback.
+    pulp::midi::MidiBuffer midi_buffer_;
 };
 
 } // namespace pulp::audio
