@@ -1,6 +1,7 @@
 #pragma once
 
 #include <pulp/canvas/canvas.hpp>
+#include <pulp/canvas/sdf_atlas.hpp>
 
 #ifdef PULP_HAS_SKIA
 
@@ -68,6 +69,8 @@ public:
     void set_font(const std::string& family, float size) override;
     void set_text_align(TextAlign align) override;
     void fill_text(const std::string& text, float x, float y) override;
+    void fill_text_sdf(const std::string& text, float x, float y,
+                       const SdfAtlas& atlas) override;
     float measure_text(const std::string& text) override;
     TextMetrics measure_text_full(const std::string& text) override;
 
