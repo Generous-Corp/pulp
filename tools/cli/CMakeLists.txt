@@ -23,6 +23,7 @@ add_executable(pulp-cli
     cmd_audio.cpp
     cmd_version.cpp
     cmd_dev.cpp
+    cmd_host.cpp
     cmd_inspect.cpp
     design_binding.cpp
     create_targets.cpp
@@ -31,7 +32,7 @@ add_executable(pulp-cli
     tool_registry.cpp)
 set_target_properties(pulp-cli PROPERTIES OUTPUT_NAME "pulp")
 target_compile_features(pulp-cli PRIVATE cxx_std_20)
-target_link_libraries(pulp-cli PRIVATE pulp::runtime pulp::tool-audio pulp::ship pulp::view pulp::format pulp::inspect)
+target_link_libraries(pulp-cli PRIVATE pulp::runtime pulp::tool-audio pulp::ship pulp::view pulp::format pulp::inspect pulp::host)
 target_include_directories(pulp-cli PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
 
 # RPATH so the installed binary can find shared libraries (e.g.,
