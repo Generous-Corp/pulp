@@ -2,6 +2,7 @@
 
 #include <pulp/audio/buffer.hpp>
 #include <pulp/midi/buffer.hpp>
+#include <pulp/midi/mpe_buffer.hpp>
 #include <pulp/state/store.hpp>
 #include <string>
 #include <memory>
@@ -56,6 +57,14 @@ struct PluginDescriptor {
 
     bool accepts_midi = false;   ///< true if plugin receives MIDI input
     bool produces_midi = false;  ///< true if plugin sends MIDI output
+
+    /// Opt in to MPE (MIDI Polyphonic Expression). When true, format
+    /// adapters that recognise MPE will run the inbound MIDI stream
+    /// through an MpeVoiceTracker, build an MpeBuffer for the block, and
+    /// make it available via Processor::mpe_input() during process().
+    /// The standard process() signature is unchanged; plugins that don't
+    /// set this flag see no MPE-specific behaviour.
+    bool supports_mpe = false;
 
     /// Tail time in samples (0 = no tail, -1 = infinite).
     /// Used by hosts to flush reverb/delay tails after playback stops.
@@ -189,14 +198,22 @@ public:
     /// Returns nullptr if no sidechain is connected or the bus is inactive.
     const audio::BufferView<const float>* sidechain_input() const { return sidechain_; }
 
+    /// Access the per-note MPE expression buffer for this block. Returns
+    /// nullptr unless the plugin declared PluginDescriptor::supports_mpe = true
+    /// and the host/format adapter populated it.
+    const midi::MpeBuffer* mpe_input() const { return mpe_input_; }
+
     /// @internal Framework sets these during initialization / processing.
     void set_state_store(state::StateStore* store) { state_store_ = store; }
     /// @internal
     void set_sidechain(const audio::BufferView<const float>* sc) { sidechain_ = sc; }
+    /// @internal Called by format adapters before process() when MPE is on.
+    void set_mpe_input(const midi::MpeBuffer* mpe) { mpe_input_ = mpe; }
 
 private:
     state::StateStore* state_store_ = nullptr;
     const audio::BufferView<const float>* sidechain_ = nullptr;
+    const midi::MpeBuffer* mpe_input_ = nullptr;
 };
 
 /// Factory function type — plugins provide this to create processor instances.

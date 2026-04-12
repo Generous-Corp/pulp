@@ -37,6 +37,13 @@ struct PulpClapPlugin {
     // Parameter snapshot for detecting plugin-side changes during process
     std::vector<float> param_snapshot;
 
+    // MPE sidecar — populated from midi_in before each process() call when
+    // the Processor declares supports_mpe in its PluginDescriptor.
+    midi::MpeVoiceTracker mpe_tracker;
+    midi::MpeBuffer mpe_buffer;
+    int32_t mpe_current_sample_offset = 0;
+    bool mpe_enabled = false;
+
     // Preset management (optional — set by plugins that provide presets)
     std::unique_ptr<state::PresetManager> preset_manager;
 
