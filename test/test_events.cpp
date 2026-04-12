@@ -29,11 +29,11 @@ TEST_CASE("EventLoop dispatch", "[events][event_loop]") {
     SECTION("Dispatch executes task") {
         std::atomic<int> value{0};
         loop.dispatch([&] { value.store(42); });
-        std::this_thread::sleep_for(50ms);
-        REQUIRE(value.load() == 42);
+        REQUIRE(wait_until([&] { return value.load() == 42; }, 2000ms));
     }
 
     SECTION("Multiple dispatches execute in order") {
+        std::atomic<int> done_count{0};
         std::vector<int> results;
         std::mutex mtx;
 
@@ -41,10 +41,11 @@ TEST_CASE("EventLoop dispatch", "[events][event_loop]") {
             loop.dispatch([&, i] {
                 std::lock_guard lock(mtx);
                 results.push_back(i);
+                done_count.fetch_add(1);
             });
         }
 
-        std::this_thread::sleep_for(100ms);
+        REQUIRE(wait_until([&] { return done_count.load() == 10; }, 2000ms));
         std::lock_guard lock(mtx);
         REQUIRE(results.size() == 10);
         for (int i = 0; i < 10; ++i) {
@@ -65,8 +66,7 @@ TEST_CASE("EventLoop dispatch", "[events][event_loop]") {
         }
 
         for (auto& t : threads) t.join();
-        std::this_thread::sleep_for(200ms);
-        REQUIRE(count.load() == 400);
+        REQUIRE(wait_until([&] { return count.load() == 400; }, 5000ms));
     }
 }
 
@@ -79,7 +79,7 @@ TEST_CASE("EventLoop dispatch_after", "[events][event_loop]") {
 
         loop.dispatch_after(50ms, [&] { executed.store(true); });
 
-        REQUIRE(wait_until([&] { return executed.load(); }, 500ms));
+        REQUIRE(wait_until([&] { return executed.load(); }, 2000ms));
         auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::steady_clock::now() - start);
         REQUIRE(elapsed >= 10ms);
@@ -94,9 +94,7 @@ TEST_CASE("EventLoop is non-singleton", "[events][event_loop]") {
     loop1.dispatch([&] { v1.store(1); });
     loop2.dispatch([&] { v2.store(2); });
 
-    std::this_thread::sleep_for(50ms);
-    REQUIRE(v1.load() == 1);
-    REQUIRE(v2.load() == 2);
+    REQUIRE(wait_until([&] { return v1.load() == 1 && v2.load() == 2; }, 2000ms));
 }
 
 TEST_CASE("Timer basic operation", "[events][timer]") {

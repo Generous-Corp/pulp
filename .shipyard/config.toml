@@ -61,7 +61,11 @@ configure = "cmake -S . -B build -G \"Visual Studio 17 2022\" -A x64 -DPULP_BUIL
 # Windows because concurrent x64-emulated link steps create file
 # contention that Windows' file locking can't handle gracefully.
 build     = "cmake --build build --config Release --parallel"
-test      = "ctest --test-dir build -C Release --output-on-failure --exclude-regex \"AudioWorkgroup|Toolbar add items|EventLoop|BufferingReader|VisualizationBridge\""
+# Only exclude tests with genuine platform incompatibility or
+# undiagnosable crashes. Timing-sensitive tests (EventLoop,
+# BufferingReader, VisualizationBridge) were fixed with proper
+# wait_until patterns and longer timeouts — no longer excluded.
+test      = "ctest --test-dir build -C Release --output-on-failure --exclude-regex \"AudioWorkgroup|Toolbar add items\""
 
 [validation.smoke]
 # Lighter validation for quick sanity checks. Builds without tests +

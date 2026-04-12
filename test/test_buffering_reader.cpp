@@ -21,8 +21,11 @@ TEST_CASE("BufferingReader reads from callback", "[audio][buffering]") {
 
     reader.start(1, 4096);
 
-    // Wait for background thread to fill some buffer
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    // Wait for background thread to fill some buffer (up to 2s)
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (reader.frames_available() == 0 && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
 
     REQUIRE(reader.frames_available() > 0);
 
@@ -68,7 +71,12 @@ TEST_CASE("BufferingReader stereo interleaved", "[audio][buffering]") {
     });
 
     reader.start(2, 4096);
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+    // Wait for background thread to fill buffer (up to 2s)
+    auto deadline2 = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (reader.frames_available() == 0 && std::chrono::steady_clock::now() < deadline2) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
 
     float buf[512]; // 256 frames * 2 channels
     int got = reader.read(buf, 256, 2);
