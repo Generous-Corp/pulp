@@ -413,6 +413,11 @@ add_executable(pulp-test-sdf-effects test_sdf_effects.cpp)
 target_link_libraries(pulp-test-sdf-effects PRIVATE pulp::canvas Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-sdf-effects)
 
+# Runtime SDF atlas cache (Phase 5 — LRU + frame-based eviction)
+add_executable(pulp-test-sdf-atlas-cache test_sdf_atlas_cache.cpp)
+target_link_libraries(pulp-test-sdf-atlas-cache PRIVATE pulp::canvas Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-sdf-atlas-cache)
+
 # View and layout tests
 add_executable(pulp-test-view test_view.cpp)
 target_link_libraries(pulp-test-view PRIVATE pulp::view Catch2::Catch2WithMain)
