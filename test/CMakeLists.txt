@@ -403,6 +403,11 @@ add_executable(pulp-test-psdf-atlas test_psdf_atlas.cpp)
 target_link_libraries(pulp-test-psdf-atlas PRIVATE pulp::canvas Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-psdf-atlas)
 
+# Shared SDF/MSDF text helpers (pen snap + build_text_quads + fill_text_*)
+add_executable(pulp-test-sdf-text test_sdf_text.cpp)
+target_link_libraries(pulp-test-sdf-text PRIVATE pulp::canvas Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-sdf-text)
+
 # View and layout tests
 add_executable(pulp-test-view test_view.cpp)
 target_link_libraries(pulp-test-view PRIVATE pulp::view Catch2::Catch2WithMain)
