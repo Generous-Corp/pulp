@@ -207,3 +207,4 @@ int cmd_audio(const std::vector<std::string>& args);
 int cmd_sdk(const std::vector<std::string>& args);
 int cmd_version(const std::vector<std::string>& args);
 int cmd_dev(const std::vector<std::string>& args);
+int cmd_pr(const std::vector<std::string>& args);

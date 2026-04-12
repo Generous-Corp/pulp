@@ -2,6 +2,10 @@
 
 All notable changes to Pulp are documented here.
 
+## [0.3.0]
+
+## [0.4.0]
+
 ## [0.2.2] — 2026-04-09
 
 ### Fixed
