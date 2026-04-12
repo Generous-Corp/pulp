@@ -408,6 +408,11 @@ add_executable(pulp-test-sdf-text test_sdf_text.cpp)
 target_link_libraries(pulp-test-sdf-text PRIVATE pulp::canvas Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-sdf-text)
 
+# SDF effects layer (Phase 4 — host-side API + presets)
+add_executable(pulp-test-sdf-effects test_sdf_effects.cpp)
+target_link_libraries(pulp-test-sdf-effects PRIVATE pulp::canvas Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-sdf-effects)
+
 # View and layout tests
 add_executable(pulp-test-view test_view.cpp)
 target_link_libraries(pulp-test-view PRIVATE pulp::view Catch2::Catch2WithMain)
