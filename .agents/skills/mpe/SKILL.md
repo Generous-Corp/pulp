@@ -68,27 +68,52 @@ stealing will mis-decrement the glide counter.
 ```cpp
 pulp::midi::MpeVoiceAllocator<Voice> allocator_{8};  // 8-voice polyphony
 
-void process(ProcessContext& ctx) override {
-    allocator_.dispatch(ctx.mpe_input());  // handles note-on/off/expressions
-    for (auto& v : allocator_.voices()) {
-        if (v.active()) v.render(ctx.output.channel_ptr(0), ctx.num_samples);
+void process(pulp::audio::BufferView<float>& out,
+             const pulp::audio::BufferView<const float>& /*in*/,
+             pulp::midi::MidiBuffer& /*midi_in*/,
+             pulp::midi::MidiBuffer& /*midi_out*/,
+             const pulp::format::ProcessContext& ctx) override {
+    if (auto* mpe = mpe_input()) {                       // nullptr unless
+                                                         // supports_mpe=true
+        for (const auto& e : mpe->events()) {
+            allocator_.dispatch(e);                      // one event at a time
+        }
+    }
+    for (std::size_t i = 0; i < allocator_.polyphony(); ++i) {
+        auto& v = allocator_.voice(i);
+        if (v.active()) v.render(out.channel(0), ctx.num_samples);
     }
 }
 ```
 
-`MpeVoiceAllocator::dispatch()` walks the buffer in order, handles
-note-on allocation (oldest-steal when full), routes per-note expression
-updates to the right voice, and runs note-off logic including the glide
+`MpeVoiceAllocator::dispatch(const MpeExpressionEvent&)` takes a single
+event at a time — iterate over `mpe_input()->events()` (the per-note
+`MpeBuffer` the host/format adapter populates when the processor sets
+`PluginDescriptor::supports_mpe = true`). The allocator handles note-on
+allocation (oldest-steal when full), routes per-note expression updates
+to the right voice, and runs note-off logic including the glide
 refcount. Do not call `on_note_on` / `on_note_off` directly.
+
+Voices are accessed by index via `allocator_.voice(i)` with
+`allocator_.polyphony()` giving the count — there's no `voices()`
+iterator.
 
 ## Gotchas
 
-### Zones are negotiated, not assumed
+### Zones are configured, not auto-discovered
 
-`MpeVoiceTracker` reads RPN 6 / 7 (MPE Configuration Message) to
-discover whether the controller sent a lower zone (master ch 1, members
-2–N) or upper zone (master ch 16, members N–15). Don't hard-code
-channel 1 as the master — trust the zone config.
+`MpeVoiceTracker::process()` handles note on/off, pitch bend, channel
+pressure, and CC 74 — it does **not** parse RPN 6 / 7 (MPE Configuration
+Messages). Which channels belong to the lower zone (master ch 1,
+members 2–N) vs the upper zone (master ch 16, members N–15) is decided
+by the `MpeConfig` you pass to the tracker at construction; you're
+responsible for supplying it (usually from the plugin's own
+configuration / saved state), not for trusting the controller to
+negotiate it.
+
+If you need live RPN 6/7 negotiation, parse it separately (see
+`core/midi/include/pulp/midi/rpn_parser.hpp`) and reconfigure the
+tracker off the audio thread.
 
 ### Pressure ≠ velocity
 
