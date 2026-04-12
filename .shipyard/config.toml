@@ -67,6 +67,19 @@ build     = "cmake --build build --config Release --parallel"
 # wait_until patterns and longer timeouts — no longer excluded.
 test      = "ctest --test-dir build -C Release --output-on-failure --exclude-regex \"AudioWorkgroup|Toolbar add items\""
 
+[validation.gates]
+# Layer-3 authoritative gates — same scripts CI runs via
+# .github/workflows/version-skill-check.yml. Named `gates` so you can
+# run it standalone with `shipyard run --pipeline gates`. Shipyard's
+# executors only support the canonical stage set, so all gate checks
+# are chained into the `setup` step and exit non-zero on first failure.
+#
+# PULP_ENFORCE_PREPUSH=1 makes the pre-push hook upgrade warnings to
+# errors; the Python scripts inspect the same env var for parity.
+# See docs/guides/versioning.md for the full three-layer design.
+stages = ["setup"]
+setup = "PULP_ENFORCE_PREPUSH=1 python3 tools/scripts/skill_sync_check.py --base origin/main --mode=report && PULP_ENFORCE_PREPUSH=1 python3 tools/scripts/version_bump_check.py --base origin/main --mode=report"
+
 [validation.smoke]
 # Lighter validation for quick sanity checks. Builds without tests +
 # GPU + examples; the smoke pipeline (SDK install + downstream

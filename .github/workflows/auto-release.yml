@@ -1,0 +1,155 @@
+name: Auto-Release on Version Bump
+
+# Component J of the versioning-v2 design. On every push to main, diff the
+# version-bearing files against the previous push range. If a version
+# moved, create the corresponding tag; the existing tag-triggered
+# workflows (release-cli.yml, sign-and-release.yml) then build + publish.
+#
+# This workflow does NOT build binaries or create GitHub Releases
+# directly — it is purely the "tag when a version moves" step that
+# bridges `pulp pr`-driven merges to the binary pipeline we already have.
+#
+# Safety properties:
+#   - concurrency group prevents overlapping tag pushes.
+#   - Idempotent-strict: tagging fails loudly if the tag already points
+#     elsewhere. Never silently overwrites.
+#   - Release-block via commit trailer: `Release: skip reason="..."` on
+#     the merging commit suppresses the tag creation.
+#   - Revert detection: `Revert "..."` subject or `Revert-Of:` trailer
+#     suppresses tagging for that range.
+#   - Does NOT auto-delete tags on downstream failure. Manual recovery is
+#     documented in docs/guides/versioning.md.
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: auto-release
+  cancel-in-progress: false
+
+permissions:
+  contents: write   # tag push
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    name: Tag moved versions
+
+    steps:
+      - name: Checkout with range context
+        uses: actions/checkout@v5
+        with:
+          # Need enough history to diff against event.before.
+          fetch-depth: 0
+          token: ${{ secrets.RELEASE_BOT_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Skip on trailer or revert
+        id: guard
+        shell: bash
+        run: |
+          # Inspect the tip commit for Release: skip or Revert subject.
+          subject=$(git log -1 --format=%s HEAD)
+          body=$(git log -1 --format=%B HEAD)
+
+          if echo "$body" | git interpret-trailers --parse | grep -iq '^release: skip'; then
+              echo "Release: skip trailer present — no tagging."
+              echo "skip=1" >> "$GITHUB_OUTPUT"
+              exit 0
+          fi
+          if [[ "$subject" =~ ^[Rr]evert ]]; then
+              echo "Revert commit — no tagging."
+              echo "skip=1" >> "$GITHUB_OUTPUT"
+              exit 0
+          fi
+          if echo "$body" | git interpret-trailers --parse | grep -iq '^revert-of:'; then
+              echo "Revert-Of trailer — no tagging."
+              echo "skip=1" >> "$GITHUB_OUTPUT"
+              exit 0
+          fi
+          echo "skip=0" >> "$GITHUB_OUTPUT"
+
+      - name: Read version files at before/after
+        id: versions
+        if: steps.guard.outputs.skip == '0'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Diff range for this push. Fallback to HEAD^ when event.before
+          # is all-zeros (first push or forced reset).
+          before='${{ github.event.before }}'
+          if [ -z "$before" ] || [ "$before" = "0000000000000000000000000000000000000000" ]; then
+              before="HEAD~1"
+          fi
+
+          extract_cmake_version() {
+              local ref="$1"
+              git show "${ref}:CMakeLists.txt" 2>/dev/null \
+                | python3 -c 'import sys, re; m = re.search(r"project\s*\(\s*[A-Za-z_][\w]*\s+VERSION\s+(\d+\.\d+\.\d+)", sys.stdin.read(), re.M); print(m.group(1) if m else "")'
+          }
+          extract_json_version() {
+              local ref="$1" path="$2"
+              git show "${ref}:${path}" 2>/dev/null \
+                | python3 -c 'import sys, json; d = json.loads(sys.stdin.read() or "{}"); print(d.get("version", ""))'
+          }
+
+          sdk_before=$(extract_cmake_version "$before" || true)
+          sdk_after=$(extract_cmake_version HEAD || true)
+          plugin_before=$(extract_json_version "$before" .claude-plugin/plugin.json || true)
+          plugin_after=$(extract_json_version HEAD .claude-plugin/plugin.json || true)
+
+          echo "sdk_before=$sdk_before"       >> "$GITHUB_OUTPUT"
+          echo "sdk_after=$sdk_after"         >> "$GITHUB_OUTPUT"
+          echo "plugin_before=$plugin_before" >> "$GITHUB_OUTPUT"
+          echo "plugin_after=$plugin_after"   >> "$GITHUB_OUTPUT"
+
+          echo "sdk:    $sdk_before -> $sdk_after"
+          echo "plugin: $plugin_before -> $plugin_after"
+
+      - name: Create tags for moved surfaces
+        if: steps.guard.outputs.skip == '0'
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_BOT_TOKEN || secrets.GITHUB_TOKEN }}
+          SDK_BEFORE: ${{ steps.versions.outputs.sdk_before }}
+          SDK_AFTER: ${{ steps.versions.outputs.sdk_after }}
+          PLUGIN_BEFORE: ${{ steps.versions.outputs.plugin_before }}
+          PLUGIN_AFTER: ${{ steps.versions.outputs.plugin_after }}
+        run: |
+          set -euo pipefail
+
+          git config user.name  "pulp-release-bot"
+          git config user.email "pulp-release-bot@users.noreply.github.com"
+
+          create_tag() {
+              local tag="$1"
+
+              # Idempotent-strict: if the tag already exists and points at
+              # this commit, skip. If it exists and points elsewhere, fail
+              # loudly — a human must reconcile before the release binaries
+              # can move.
+              if git ls-remote --tags origin "$tag" | grep -q .; then
+                  remote_sha=$(git ls-remote --tags origin "$tag" | awk '{print $1}')
+                  local_sha=$(git rev-parse HEAD)
+                  if [ "$remote_sha" = "$local_sha" ]; then
+                      echo "tag $tag already at $local_sha — no-op"
+                      return 0
+                  fi
+                  echo "ERROR: tag $tag exists at $remote_sha but HEAD is $local_sha" >&2
+                  echo "Manual reconciliation required. See docs/guides/versioning.md." >&2
+                  exit 1
+              fi
+
+              git tag -a "$tag" -m "Release $tag (automated by auto-release.yml)"
+              git push origin "$tag"
+              echo "created $tag"
+          }
+
+          if [ -n "$SDK_AFTER" ] && [ "$SDK_BEFORE" != "$SDK_AFTER" ]; then
+              create_tag "v${SDK_AFTER}"
+          fi
+
+          if [ -n "$PLUGIN_AFTER" ] && [ "$PLUGIN_BEFORE" != "$PLUGIN_AFTER" ]; then
+              create_tag "plugin-v${PLUGIN_AFTER}"
+          fi
