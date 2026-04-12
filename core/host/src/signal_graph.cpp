@@ -186,6 +186,11 @@ std::vector<NodeId> SignalGraph::processing_order() const {
 }
 
 bool SignalGraph::prepare(double sample_rate, int max_block_size) {
+    if (max_block_size <= 0) return false;
+
+    max_block_size_ = max_block_size;
+    runtime_.clear();
+
     for (auto& n : nodes_) {
         if (n.plugin) {
             if (!n.plugin->prepare(sample_rate, max_block_size)) {
@@ -193,7 +198,28 @@ bool SignalGraph::prepare(double sample_rate, int max_block_size) {
                 return false;
             }
         }
+
+        // Allocate scratch buffers sized to the largest port-count the node
+        // will exercise. Allocating zero-sized channels is harmless; we just
+        // leave the vectors empty.
+        NodeRuntime rt;
+        const int out_ch = std::max(0, n.num_output_ports);
+        const int in_ch  = std::max(0, n.num_input_ports);
+        rt.output_data.assign(static_cast<size_t>(out_ch) * max_block_size, 0.f);
+        rt.input_data.assign(static_cast<size_t>(in_ch) * max_block_size, 0.f);
+        rt.output_ptrs.resize(out_ch);
+        rt.input_ptrs.resize(in_ch);
+        for (int c = 0; c < out_ch; ++c) {
+            rt.output_ptrs[c] = rt.output_data.data() + static_cast<size_t>(c) * max_block_size;
+        }
+        for (int c = 0; c < in_ch; ++c) {
+            rt.input_ptrs[c] = rt.input_data.data() + static_cast<size_t>(c) * max_block_size;
+        }
+        runtime_[n.id] = std::move(rt);
     }
+
+    cached_order_ = processing_order();
+    prepared_ = true;
     return true;
 }
 
@@ -201,29 +227,146 @@ void SignalGraph::release() {
     for (auto& n : nodes_) {
         if (n.plugin) n.plugin->release();
     }
+    prepared_ = false;
+    runtime_.clear();
+    cached_order_.clear();
 }
 
 void SignalGraph::process(audio::BufferView<float>& output,
                           const audio::BufferView<const float>& input,
                           int num_samples) {
-    auto order = processing_order();
+    if (!prepared_ || num_samples <= 0 || num_samples > max_block_size_) return;
 
-    // Process each node in topological order
-    // TODO: implement intermediate buffer management for proper routing
-    // For now, this is a placeholder that processes the graph linearly
-    for (auto id : order) {
+    // Clear the final destination; AudioOutput nodes accumulate into it.
+    for (std::size_t c = 0; c < output.num_channels(); ++c) {
+        std::memset(output.channel_ptr(c), 0, sizeof(float) * static_cast<size_t>(num_samples));
+    }
+
+    // Walk the cached topological order. For each node:
+    //   1. Zero its input scratch.
+    //   2. Sum each inbound connection from the source's output port.
+    //   3. Produce output in the node's own output scratch, based on type.
+    for (NodeId id : cached_order_) {
         auto* n = node(id);
-        if (!n || !n->plugin) continue;
+        if (!n) continue;
+        auto rt_it = runtime_.find(id);
+        if (rt_it == runtime_.end()) continue;
+        auto& rt = rt_it->second;
 
-        midi::MidiBuffer midi_in, midi_out;
-        n->plugin->process(output, input, midi_in, midi_out, num_samples);
+        // 1. Zero input scratch.
+        if (!rt.input_data.empty()) {
+            std::memset(rt.input_data.data(), 0, rt.input_data.size() * sizeof(float));
+        }
+
+        // 2. Gather inbound connections.
+        for (const auto& c : connections_) {
+            if (c.dest_node != id) continue;
+            const int dport = static_cast<int>(c.dest_port);
+            if (dport < 0 || dport >= static_cast<int>(rt.input_ptrs.size())) continue;
+
+            if (c.source_node == 0) {
+                // Reserved sentinel; skip.
+                continue;
+            }
+            auto src_rt_it = runtime_.find(c.source_node);
+            if (src_rt_it == runtime_.end()) continue;
+            const auto& src_rt = src_rt_it->second;
+            const int sport = static_cast<int>(c.source_port);
+            if (sport < 0 || sport >= static_cast<int>(src_rt.output_ptrs.size())) continue;
+
+            float* dst = rt.input_ptrs[dport];
+            const float* src = src_rt.output_ptrs[sport];
+            for (int i = 0; i < num_samples; ++i) dst[i] += src[i];
+        }
+
+        // 3. Produce output based on node type.
+        switch (n->type) {
+            case NodeType::AudioInput: {
+                // Copy from host `input` into this node's output ports.
+                const int chs = std::min(
+                    static_cast<int>(rt.output_ptrs.size()),
+                    static_cast<int>(input.num_channels()));
+                for (int c = 0; c < chs; ++c) {
+                    std::memcpy(rt.output_ptrs[c], input.channel_ptr(c),
+                                sizeof(float) * static_cast<size_t>(num_samples));
+                }
+                // If the node has more output ports than the host provides,
+                // the extras stay zero (already zeroed by allocation).
+                break;
+            }
+            case NodeType::Plugin: {
+                if (!n->plugin) break;
+                audio::BufferView<float> in_view(
+                    rt.input_ptrs.data(),
+                    rt.input_ptrs.size(),
+                    static_cast<std::size_t>(num_samples));
+                audio::BufferView<float> out_view(
+                    rt.output_ptrs.data(),
+                    rt.output_ptrs.size(),
+                    static_cast<std::size_t>(num_samples));
+                // Build a const input view without casting away constness in
+                // process()'s signature — the plugin slot takes a
+                // BufferView<const float> so wrap the same pointers.
+                std::vector<const float*> in_const(rt.input_ptrs.begin(), rt.input_ptrs.end());
+                audio::BufferView<const float> in_c(
+                    in_const.data(), in_const.size(),
+                    static_cast<std::size_t>(num_samples));
+                midi::MidiBuffer midi_in, midi_out;
+                n->plugin->process(out_view, in_c, midi_in, midi_out, num_samples);
+                break;
+            }
+            case NodeType::Gain: {
+                const float g = rt.gain;
+                const int chs = std::min(
+                    static_cast<int>(rt.input_ptrs.size()),
+                    static_cast<int>(rt.output_ptrs.size()));
+                for (int c = 0; c < chs; ++c) {
+                    const float* in = rt.input_ptrs[c];
+                    float* out = rt.output_ptrs[c];
+                    for (int i = 0; i < num_samples; ++i) out[i] = in[i] * g;
+                }
+                break;
+            }
+            case NodeType::AudioOutput: {
+                // Sum this node's input scratch into the host `output` view.
+                const int chs = std::min(
+                    static_cast<int>(rt.input_ptrs.size()),
+                    static_cast<int>(output.num_channels()));
+                for (int c = 0; c < chs; ++c) {
+                    float* dst = output.channel_ptr(c);
+                    const float* src = rt.input_ptrs[c];
+                    for (int i = 0; i < num_samples; ++i) dst[i] += src[i];
+                }
+                break;
+            }
+            case NodeType::MidiInput:
+            case NodeType::MidiOutput:
+                // MIDI routing lands in Phase 2 (events wired via the graph).
+                break;
+        }
     }
 }
 
 void SignalGraph::clear() {
     connections_.clear();
     nodes_.clear();
+    runtime_.clear();
+    cached_order_.clear();
+    prepared_ = false;
     next_id_ = 1;
+}
+
+bool SignalGraph::set_node_gain(NodeId id, float linear_gain) {
+    auto it = runtime_.find(id);
+    if (it == runtime_.end()) return false;
+    it->second.gain = linear_gain;
+    return true;
+}
+
+float SignalGraph::node_gain(NodeId id) const {
+    auto it = runtime_.find(id);
+    if (it == runtime_.end()) return 1.0f;
+    return it->second.gain;
 }
 
 } // namespace pulp::host

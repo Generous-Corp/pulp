@@ -145,6 +145,63 @@ TEST_CASE("SignalGraph MIDI nodes", "[host][graph]") {
     REQUIRE(graph.connect(midi_in, 0, midi_out, 0));
 }
 
+TEST_CASE("SignalGraph routes input → gain → output", "[host][graph][routing]") {
+    // Validates the Phase 2 graph execution path: per-node scratch buffers,
+    // inbound connection summing, gain application, and output accumulation.
+    SignalGraph graph;
+    auto in  = graph.add_input_node(2, "in");
+    auto gain = graph.add_gain_node("gain");
+    auto out = graph.add_output_node(2, "out");
+
+    REQUIRE(graph.connect(in,   0, gain, 0));
+    REQUIRE(graph.connect(in,   1, gain, 1));
+    REQUIRE(graph.connect(gain, 0, out,  0));
+    REQUIRE(graph.connect(gain, 1, out,  1));
+
+    REQUIRE(graph.prepare(48000.0, 64));
+    REQUIRE(graph.set_node_gain(gain, 0.5f));
+
+    std::vector<float> in_l(64, 0.8f), in_r(64, 0.4f);
+    std::vector<float> out_l(64, 0.0f), out_r(64, 0.0f);
+    const float* in_ptrs[2]  = {in_l.data(), in_r.data()};
+    float*       out_ptrs[2] = {out_l.data(), out_r.data()};
+    pulp::audio::BufferView<const float> in_view(in_ptrs, 2, 64);
+    pulp::audio::BufferView<float>       out_view(out_ptrs, 2, 64);
+
+    graph.process(out_view, in_view, 64);
+
+    // Expected: output = input * 0.5 across both channels, every sample.
+    for (int i = 0; i < 64; ++i) {
+        REQUIRE(std::abs(out_l[i] - 0.4f) < 1e-6f);
+        REQUIRE(std::abs(out_r[i] - 0.2f) < 1e-6f);
+    }
+    graph.release();
+}
+
+TEST_CASE("SignalGraph disconnected output stays silent", "[host][graph][routing]") {
+    // If no node connects to the AudioOutput, process() must leave the
+    // output silent regardless of input content.
+    SignalGraph graph;
+    graph.add_input_node(2, "in");
+    graph.add_output_node(2, "out");
+    REQUIRE(graph.prepare(48000.0, 32));
+
+    std::vector<float> in_l(32, 1.0f), in_r(32, 1.0f);
+    std::vector<float> out_l(32, 99.0f), out_r(32, 99.0f);
+    const float* in_ptrs[2]  = {in_l.data(), in_r.data()};
+    float*       out_ptrs[2] = {out_l.data(), out_r.data()};
+    pulp::audio::BufferView<const float> in_view(in_ptrs, 2, 32);
+    pulp::audio::BufferView<float>       out_view(out_ptrs, 2, 32);
+
+    graph.process(out_view, in_view, 32);
+
+    for (int i = 0; i < 32; ++i) {
+        REQUIRE(out_l[i] == 0.0f);
+        REQUIRE(out_r[i] == 0.0f);
+    }
+    graph.release();
+}
+
 // ── Real CLAP loader (integration test, skipped when no test plugin built) ──
 
 #include <filesystem>

@@ -19,6 +19,7 @@
 #include <pulp/midi/buffer.hpp>
 #include <memory>
 #include <vector>
+#include <unordered_map>
 #include <string>
 #include <cstdint>
 
@@ -113,10 +114,34 @@ public:
     // Clear all nodes and connections
     void clear();
 
+    // Gain for a Gain node (linear, not dB). Defaults to 1.0.
+    bool set_node_gain(NodeId id, float linear_gain);
+    float node_gain(NodeId id) const;
+
 private:
+    struct NodeRuntime {
+        // Per-node output-port channel storage (interleaved per-port, flat).
+        // data_ has size num_output_ports * max_block_size_; channel_ptrs_[p]
+        // points at data_[p * max_block_size_].
+        std::vector<float> output_data;
+        std::vector<float*> output_ptrs;
+        // Per-node input-port scratch — callers write into these before the
+        // node processes, then zero before the next block.
+        std::vector<float> input_data;
+        std::vector<float*> input_ptrs;
+        float gain = 1.0f;
+    };
+
     std::vector<GraphNode> nodes_;
     std::vector<Connection> connections_;
     NodeId next_id_ = 1;
+
+    // Populated by prepare(); consumed by process(). Kept flat rather than
+    // per-node to keep allocation lifetime predictable.
+    std::unordered_map<NodeId, NodeRuntime> runtime_;
+    std::vector<NodeId> cached_order_;
+    int max_block_size_ = 0;
+    bool prepared_ = false;
 
     bool has_path(NodeId from, NodeId to) const;
 };
