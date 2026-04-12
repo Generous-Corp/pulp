@@ -93,8 +93,52 @@ lowpass.
 - **Phase 1** — `MpeVoiceTracker` (landed)
 - **Phase 2** — `MpeBuffer` sidecar, `Processor::mpe_input()`, CLAP wiring (landed)
 - **Phase 3** — `MpeSynthVoice`, `MpeVoiceAllocator`, `MpeGlideDetector`, `examples/mpe-synth/` (landed)
-- **Phase 4** — MIDI 2.0 UMP native path (deferred)
+- **Phase 4** — MIDI 2.0 UMP native path (landed)
 
 VST3 and AU adapters will gain the same sidecar wiring in a follow-up
 pass; the API is stable so plugins can opt in today and benefit
 automatically once the other adapters ship.
+
+## MIDI 2.0 UMP sidecar
+
+Plugins that want native MIDI 2.0 resolution — 16-bit velocity, per-note
+pitch bend, per-note CCs — can opt in separately:
+
+```cpp
+PluginDescriptor descriptor() const override {
+    return {
+        // ...
+        .accepts_midi = true,
+        .supports_ump = true,   // ← MIDI 2.0 UMP sidecar
+    };
+}
+
+void process(...) override {
+    if (const auto* ump = ump_input()) {
+        for (const auto& ue : *ump) {
+            // ue.packet is a UmpPacket, ue.sample_offset is sample-accurate
+        }
+    }
+}
+```
+
+`supports_mpe` and `supports_ump` are independent and can both be set.
+The CLAP adapter populates the UMP sidecar by converting the inbound
+MIDI 1.0 stream with `midi1_to_ump()`; when CLAP ships
+`CLAP_EVENT_MIDI2` the adapter will feed the host's native packets
+directly with no code change on the plugin side.
+
+`MpeVoiceTracker::process(UmpPacket)` accepts UMP input in addition to
+`MidiEvent`, routing MIDI 2.0 per-note pitch bend (status `0x60`) and
+per-note CC (status `0x00`) directly to the matching note rather than
+via the member-channel cache, so per-note expression stays truly
+per-note even within the same MPE member channel.
+
+Helpers in `pulp/midi/ump_conversion.hpp`:
+
+| Function | Purpose |
+|----------|---------|
+| `midi1_to_ump(MidiBuffer&, UmpBuffer&)` | Convert a MIDI 1.0 block to MIDI 2.0 UMP packets, preserving sample offsets |
+| `ump_to_midi1(UmpBuffer&, MidiBuffer&)` | Flatten UMP back to MIDI 1.0 (packets with no MIDI 1.0 equivalent are skipped — route those via `mpe_input()`) |
+| `scale_7_to_16` / `scale_16_to_7` | Velocity scaling, round-trip-preserving for exact values |
+| `scale_14_to_32` / `scale_32_to_14` | Pitch-bend scaling with centre (0x2000 ↔ 0x80000000) preserved exactly |

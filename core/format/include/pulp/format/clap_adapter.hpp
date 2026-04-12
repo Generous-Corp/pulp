@@ -44,6 +44,12 @@ struct PulpClapPlugin {
     int32_t mpe_current_sample_offset = 0;
     bool mpe_enabled = false;
 
+    // UMP sidecar — populated by converting midi_in to MIDI 2.0 UMP packets
+    // when the Processor declares supports_ump. In the future, CLAP hosts
+    // that deliver CLAP_EVENT_MIDI2 can populate this buffer directly.
+    midi::UmpBuffer ump_buffer;
+    bool ump_enabled = false;
+
     // Preset management (optional — set by plugins that provide presets)
     std::unique_ptr<state::PresetManager> preset_manager;
 

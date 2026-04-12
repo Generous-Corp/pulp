@@ -3,6 +3,7 @@
 #include <pulp/audio/buffer.hpp>
 #include <pulp/midi/buffer.hpp>
 #include <pulp/midi/mpe_buffer.hpp>
+#include <pulp/midi/ump_buffer.hpp>
 #include <pulp/state/store.hpp>
 #include <string>
 #include <memory>
@@ -65,6 +66,15 @@ struct PluginDescriptor {
     /// The standard process() signature is unchanged; plugins that don't
     /// set this flag see no MPE-specific behaviour.
     bool supports_mpe = false;
+
+    /// Opt in to the native MIDI 2.0 UMP sidecar. When true, format
+    /// adapters that recognise UMP provide a UmpBuffer of full-resolution
+    /// channel-voice packets (16-bit velocity, per-note pitch bend,
+    /// per-note CCs) through Processor::ump_input() during process().
+    /// Adapters without native UMP transport synthesise the buffer by
+    /// converting the inbound MIDI 1.0 stream. `supports_mpe` and
+    /// `supports_ump` are independent and can both be set.
+    bool supports_ump = false;
 
     /// Tail time in samples (0 = no tail, -1 = infinite).
     /// Used by hosts to flush reverb/delay tails after playback stops.
@@ -203,17 +213,25 @@ public:
     /// and the host/format adapter populated it.
     const midi::MpeBuffer* mpe_input() const { return mpe_input_; }
 
+    /// Access the MIDI 2.0 UMP buffer for this block. Returns nullptr
+    /// unless the plugin declared PluginDescriptor::supports_ump = true
+    /// and the host/format adapter populated it.
+    const midi::UmpBuffer* ump_input() const { return ump_input_; }
+
     /// @internal Framework sets these during initialization / processing.
     void set_state_store(state::StateStore* store) { state_store_ = store; }
     /// @internal
     void set_sidechain(const audio::BufferView<const float>* sc) { sidechain_ = sc; }
     /// @internal Called by format adapters before process() when MPE is on.
     void set_mpe_input(const midi::MpeBuffer* mpe) { mpe_input_ = mpe; }
+    /// @internal Called by format adapters before process() when UMP is on.
+    void set_ump_input(const midi::UmpBuffer* ump) { ump_input_ = ump; }
 
 private:
     state::StateStore* state_store_ = nullptr;
     const audio::BufferView<const float>* sidechain_ = nullptr;
     const midi::MpeBuffer* mpe_input_ = nullptr;
+    const midi::UmpBuffer* ump_input_ = nullptr;
 };
 
 /// Factory function type — plugins provide this to create processor instances.
