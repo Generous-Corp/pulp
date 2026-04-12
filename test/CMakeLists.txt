@@ -728,6 +728,21 @@ add_executable(pulp-test-ump-mpe test_ump_mpe.cpp)
 target_link_libraries(pulp-test-ump-mpe PRIVATE pulp::midi Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-ump-mpe)
 
+# MPE voice tracker tests
+add_executable(pulp-test-mpe-voice-tracker test_mpe_voice_tracker.cpp)
+target_link_libraries(pulp-test-mpe-voice-tracker PRIVATE pulp::midi Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-mpe-voice-tracker)
+
+# MPE buffer + Processor sidecar tests
+add_executable(pulp-test-mpe-buffer test_mpe_buffer.cpp)
+target_link_libraries(pulp-test-mpe-buffer PRIVATE pulp::format Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-mpe-buffer)
+
+# MPE synth voice helpers (voice, allocator, glide detector)
+add_executable(pulp-test-mpe-synth-voice test_mpe_synth_voice.cpp)
+target_link_libraries(pulp-test-mpe-synth-voice PRIVATE pulp::midi Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-mpe-synth-voice)
+
 # Plugin hosting tests (scanner, signal graph)
 add_executable(pulp-test-host test_host.cpp)
 target_link_libraries(pulp-test-host PRIVATE pulp::host Catch2::Catch2WithMain)

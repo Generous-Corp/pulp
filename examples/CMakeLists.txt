@@ -22,6 +22,9 @@ add_subdirectory(PulpDrums)
 # Phase 7: PulpSynth (macro oscillator with DSP library)
 add_subdirectory(PulpSynth)
 
+# MPE demo: MPE-aware sine synth validating the per-note expression path
+add_subdirectory(mpe-synth)
+
 # Phase 17: PulpSampler (audio file sampler with MIDI + ADSR)
 add_subdirectory(PulpSampler)
 

@@ -324,6 +324,7 @@ send_sysex(inquiry);  // Send over MIDI port
 | Files | `midi_file.hpp` | Read/write Standard MIDI Files |
 | Messages | via CHOC | `ShortMessage::noteOn(0, 60, 100)` |
 | UMP | `ump.hpp` | MIDI 2.0 Universal MIDI Packets, MPE zones |
+| MPE | `mpe_voice_tracker.hpp`, `mpe_buffer.hpp`, `mpe_synth_voice.hpp` | Per-note pitch bend / pressure / timbre tracking, opt-in sidecar buffer, and voice/allocator helpers. See [docs/guides/mpe.md](../guides/mpe.md) |
 
 ---
 

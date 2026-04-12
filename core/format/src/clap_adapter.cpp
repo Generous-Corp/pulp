@@ -26,6 +26,14 @@ bool clap_init(const clap_plugin_t* plugin) {
     self->preset_manager = std::make_unique<state::PresetManager>(
         self->store, desc.manufacturer, desc.name);
 
+    // Wire MPE sidecar when the plugin opts in.
+    self->mpe_enabled = desc.supports_mpe;
+    if (self->mpe_enabled) {
+        midi::bind_tracker_to_buffer(
+            self->mpe_tracker, self->mpe_buffer, self->mpe_current_sample_offset);
+        runtime::log_info("CLAP: MPE sidecar enabled for '{}'", desc.name);
+    }
+
     runtime::log_info("CLAP: initialized '{}'", desc.name);
     return true;
 }
@@ -164,6 +172,21 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
     self->param_snapshot.resize(all_params.size());
     for (std::size_t i = 0; i < all_params.size(); ++i) {
         self->param_snapshot[i] = self->store.get_value(all_params[i].id);
+    }
+
+    // MPE sidecar: run inbound MIDI through the voice tracker and attach
+    // the resulting expression buffer to the processor for the duration
+    // of this process() call. Events stay sample-ordered because midi_in
+    // is already in host delivery order.
+    if (self->mpe_enabled) {
+        self->mpe_buffer.clear();
+        for (const auto& ev : midi_in) {
+            self->mpe_current_sample_offset = ev.sample_offset;
+            self->mpe_tracker.process(ev);
+        }
+        self->processor->set_mpe_input(&self->mpe_buffer);
+    } else {
+        self->processor->set_mpe_input(nullptr);
     }
 
     // Process!
