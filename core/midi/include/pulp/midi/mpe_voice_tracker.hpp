@@ -216,7 +216,9 @@ public:
                 return true;
             }
             case 0x00: {  // Registered per-note CC
-                const uint8_t cc = static_cast<uint8_t>((p.words[0] >> 8) & 0x7F);
+                // MIDI 2.0 per-note controller layout: byte 2 is the note
+                // number (p.note_number()), byte 3 is the controller index.
+                const uint8_t cc = static_cast<uint8_t>(p.words[0] & 0x7F);
                 if (cc == 74) {
                     apply_per_note_timbre(ch, p.note_number(),
                                           static_cast<float>(p.data_32()) / 4294967295.0f);

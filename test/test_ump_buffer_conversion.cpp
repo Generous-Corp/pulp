@@ -124,6 +124,21 @@ TEST_CASE("MpeVoiceTracker applies UMP channel pitch bend to all notes on channe
     REQUIRE(n->pitch_bend_semitones > 40.0f);
 }
 
+TEST_CASE("MpeVoiceTracker routes UMP per-note CC 74 by controller index", "[midi][ump][mpe]") {
+    // Regression for PR #141 Codex P1: the per-note controller index lives
+    // in byte 3 (bits 0-7) of word 0, NOT byte 2 (which is the note number).
+    MpeVoiceTracker tracker{MpeConfig::standard_lower(15)};
+    tracker.process(UmpPacket::note_on_2(0, 1, 60, 0x8000));
+
+    // Per-note CC 74 (timbre) on note 60, full value. Before the fix,
+    // this was silently ignored because the code read the note byte (60)
+    // as the controller index.
+    tracker.process(UmpPacket::registered_per_note_cc(0, 1, 60, 74, 0xFFFFFFFFu));
+    const auto* n = tracker.find(1, 60);
+    REQUIRE(n != nullptr);
+    REQUIRE(n->timbre > 0.9f);
+}
+
 TEST_CASE("MpeVoiceTracker note-off via UMP status 0x80", "[midi][ump][mpe]") {
     MpeVoiceTracker tracker{MpeConfig::standard_lower(15)};
     tracker.process(UmpPacket::note_on_2(0, 3, 64, 0x8000));
