@@ -43,6 +43,25 @@ auto params = doc.xpath_strings("//param"); // ["Gain"]
 doc.save_file("settings.xml");
 ```
 
+### Streams — Unified byte I/O
+
+One interface (`pulp::runtime::Stream`) for files, memory, pipes, TCP, and HTTP. See [docs/reference/streams.md](./streams.md) for the full API.
+
+```cpp
+#include <pulp/runtime/stream.hpp>
+#include <pulp/runtime/async_stream.hpp>
+
+// Synchronous file I/O via the common interface.
+FileStream f("preset.bin", FileStream::Mode::Read);
+std::uint8_t buf[512]{};
+auto r = f.read(buf, sizeof(buf));   // StreamResult{bytes, error}
+
+// Wrap any Stream in AsyncStream for backpressure + cancellation.
+AsyncStream async(std::make_unique<FileStream>("large.wav"));
+async.on_data([](auto* data, auto n) { /* on worker thread */ });
+async.start();
+```
+
 ### HTTP — Network requests
 
 GET, POST, and file download via cpp-httplib (MIT). Use for license checks, cloud presets, update notifications.
