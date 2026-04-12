@@ -1,0 +1,125 @@
+{
+  "$schema": "./skill_path_map.schema.json",
+  "schema_version": 1,
+  "_comment": "Skill name -> glob patterns. When a diff touches any pattern, the corresponding SKILL.md must be updated in the same diff or a Skill-Update: skip trailer must appear on the tip commit. Paired with tools/scripts/versioning.json. Every subdir under .agents/skills/ MUST have an entry here; skill_sync_check.py fails if one is missing.",
+
+  "skills": {
+    "aax": {
+      "paths": [
+        "core/format/src/aax*",
+        "core/format/include/pulp/format/aax*",
+        "external/AAX-SDK/**",
+        "tools/cmake/PulpAAX.cmake"
+      ]
+    },
+    "android": {
+      "paths": [
+        "core/render/platform/android/**",
+        "core/audio/platform/android/**",
+        "core/view/platform/android/**",
+        "core/midi/platform/android/**",
+        "android/**",
+        "tools/cmake/PulpAndroid.cmake",
+        "tools/build-skia-android.sh"
+      ]
+    },
+    "ci": {
+      "paths": [
+        ".github/workflows/**",
+        "ci/**",
+        "tools/local-ci/**",
+        "tools/shipyard.toml",
+        "tools/install-shipyard.sh",
+        "tools/scripts/install-githooks.sh",
+        ".githooks/**"
+      ]
+    },
+    "cli-maintenance": {
+      "paths": [
+        "tools/cli/**",
+        "tools/mcp/pulp_mcp.cpp",
+        "docs/status/cli-commands.yaml",
+        "tools/scripts/cli_sync_check.py",
+        ".claude/commands/**"
+      ]
+    },
+    "cmajor-external": {
+      "paths": [
+        "tools/scripts/cmajor_external.py",
+        "tools/scripts/test_cmajor_external.py",
+        "examples/cmajor-*/**",
+        "core/**/*cmajor*"
+      ]
+    },
+    "engine": {
+      "paths": [
+        "core/view/src/js_bridge*",
+        "core/view/include/**/js_bridge*",
+        "core/view/src/engine*",
+        "external/quickjs*/**",
+        "tools/cmake/PulpJsEngine.cmake"
+      ]
+    },
+    "faust": {
+      "paths": [
+        "examples/faust-*/**",
+        "tools/scripts/faust*",
+        "core/signal/**/*faust*"
+      ]
+    },
+    "import-design": {
+      "paths": [
+        "tools/import-design/**",
+        "tools/design/**",
+        "core/view/src/design_import*"
+      ]
+    },
+    "jsfx-subset": {
+      "paths": [
+        "tools/scripts/jsfx_subset.py",
+        "tools/scripts/test_jsfx_subset.py",
+        "examples/jsfx-*/**",
+        "core/signal/**/*jsfx*"
+      ]
+    },
+    "packages": {
+      "paths": [
+        "tools/packages/**",
+        "tools/cli/cmd_add.cpp",
+        "tools/cli/cmd_audit.cpp",
+        "tools/cli/cmd_fetch.cpp",
+        "tools/cli/cmd_install.cpp",
+        "tools/cli/cmd_remove.cpp",
+        "tools/cli/cmd_search.cpp",
+        "DEPENDENCIES.md",
+        "NOTICE.md",
+        "tools/deps/manifest.json"
+      ]
+    },
+    "ship": {
+      "paths": [
+        "ship/**",
+        "tools/cli/cmd_ship.cpp",
+        "tools/scripts/release-cli-local.sh",
+        ".github/workflows/sign-and-release.yml",
+        ".github/workflows/release-cli.yml"
+      ]
+    },
+    "threejs-bridge": {
+      "paths": [
+        "core/view/src/threejs*",
+        "core/view/include/**/threejs*",
+        "examples/threejs-*/**",
+        "tools/scripts/threejs*"
+      ]
+    },
+    "webview-ui": {
+      "paths": [
+        "core/view/src/webview*",
+        "core/view/include/**/webview*",
+        "core/view/platform/**/webview*",
+        "examples/webview-*/**"
+      ]
+    }
+  }
+}

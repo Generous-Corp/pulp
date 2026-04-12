@@ -1,0 +1,77 @@
+{
+  "$schema": "./versioning.schema.json",
+  "schema_version": 1,
+  "_comment": "Repo-agnostic config for version_bump_check.py and skill_sync_check.py. Pivoted from YAML to JSON to avoid the PyYAML install friction on PEP-668 Python. Schema and field names unchanged; see planning/versioning-and-skill-sync-plan.md for the design.",
+
+  "surfaces": {
+    "sdk": {
+      "label": "Pulp SDK / CLI",
+      "version_files": [
+        { "path": "CMakeLists.txt", "kind": "cmake_project_version" }
+      ],
+      "trigger_paths": [
+        "core/**/include/**/*.hpp",
+        "core/**/include/**/*.h",
+        "core/**/src/**/*.cpp",
+        "core/**/src/**/*.mm",
+        "core/**/src/**/*.c",
+        "core/**/platform/**",
+        "tools/cli/**/*.cpp",
+        "tools/cli/**/*.hpp",
+        "tools/cli/**/*.h"
+      ],
+      "public_api_paths": [
+        "core/**/include/**/*.hpp",
+        "core/**/include/**/*.h"
+      ],
+      "internal_only_paths": [
+        "core/**/src/**",
+        "core/**/platform/**"
+      ],
+      "changelog": "CHANGELOG.md"
+    },
+
+    "plugin": {
+      "label": "Claude Code plugin",
+      "version_files": [
+        { "path": ".claude-plugin/plugin.json", "kind": "json_field", "field": "version" },
+        { "path": ".claude-plugin/marketplace.json", "kind": "json_field", "field": "version" }
+      ],
+      "trigger_paths": [
+        ".claude-plugin/**",
+        ".claude/commands/**",
+        ".agents/skills/**",
+        "hooks/**"
+      ],
+      "public_api_paths": [
+        ".claude-plugin/plugin.json",
+        ".claude/commands/**"
+      ],
+      "internal_only_paths": [
+        "hooks/scripts/**"
+      ],
+      "changelog": "CHANGELOG.md"
+    }
+  },
+
+  "skills": {
+    "skills_dir": ".agents/skills",
+    "path_map": "tools/scripts/skill_path_map.json"
+  },
+
+  "generated_globs": [
+    "build/**",
+    "**/*.generated.*",
+    "tools/cli/pulp_version_gen.h*",
+    "external/**",
+    "node_modules/**",
+    "*.lock",
+    "*.lockb"
+  ],
+
+  "trailers": {
+    "version_bump": "Version-Bump",
+    "skill_update": "Skill-Update",
+    "release": "Release"
+  }
+}
