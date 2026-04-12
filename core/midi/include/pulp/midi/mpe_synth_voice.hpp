@@ -177,8 +177,14 @@ public:
                 break;
             }
             case MpeExpressionEvent::Kind::NoteOff: {
-                glide_detector_.observe_note_off(e.state);
-                if (Voice* v = find_voice_by_id(e.state.note_id)) v->on_note_off();
+                // Only decrement the glide refcount if the note is still
+                // tracked. Stolen notes were already retired (and their
+                // channel refcount decremented) in the NoteOn steal path;
+                // decrementing here again would double-count.
+                if (Voice* v = find_voice_by_id(e.state.note_id)) {
+                    glide_detector_.observe_note_off(e.state);
+                    v->on_note_off();
+                }
                 break;
             }
             case MpeExpressionEvent::Kind::PitchBend:
