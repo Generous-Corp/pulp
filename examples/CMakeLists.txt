@@ -76,3 +76,6 @@ endif()
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/sdf-effects-demo/CMakeLists.txt)
     add_subdirectory(sdf-effects-demo)
 endif()
+
+# Streams feature demo (unified Stream / AsyncStream / HttpStream)
+add_subdirectory(stream-demo)

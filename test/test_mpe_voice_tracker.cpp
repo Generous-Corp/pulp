@@ -159,3 +159,20 @@ TEST_CASE("MpeVoiceTracker reset clears all state", "[midi][mpe]") {
     REQUIRE(tracker.active_count() == 0);
     REQUIRE(tracker.lower_zone_state().pitch_bend_semitones == 0.0f);
 }
+
+TEST_CASE("MpeVoiceTracker reset clears per-channel expression caches", "[midi][mpe]") {
+    // Regression for Codex P2: notes added after reset() must not inherit
+    // stale bend/pressure/timbre values from a previous session.
+    MpeVoiceTracker tracker{MpeConfig::standard_lower(15)};
+    tracker.process(MidiEvent::pitch_bend(1, 16383));  // member pitch bend
+    tracker.process(channel_pressure(1, 127));
+    tracker.process(MidiEvent::cc(1, 74, 127));
+    tracker.reset();
+
+    tracker.process(MidiEvent::note_on(1, 60, 100));
+    const auto* n = tracker.find(1, 60);
+    REQUIRE(n != nullptr);
+    REQUIRE(n->pitch_bend_semitones == Approx(0.0f).margin(1e-6f));
+    REQUIRE(n->pressure == Approx(0.0f).margin(1e-6f));
+    REQUIRE(n->timbre == Approx(0.0f).margin(1e-6f));
+}

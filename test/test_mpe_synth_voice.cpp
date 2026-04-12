@@ -149,3 +149,41 @@ TEST_CASE("MpeVoiceAllocator reports last_was_glide", "[midi][mpe]") {
     alloc.dispatch(note_on_event(1, 62, 100, 2));
     REQUIRE(alloc.last_was_glide());
 }
+
+TEST_CASE("MpeVoiceAllocator steal does not double-decrement glide on later note-off", "[midi][mpe]") {
+    // Regression for PR #138 Codex P2: if a voice is stolen mid-life, the
+    // deferred NoteOff for that note must not decrement the glide
+    // refcount again (its channel is already released by the steal path).
+    MpeVoiceAllocator<TestVoice> alloc{1};
+    alloc.set_steal_mode(MpeVoiceStealMode::Oldest);
+
+    // note_id=1 on channel 1; gets stolen by note_id=2 on the same channel.
+    alloc.dispatch(note_on_event(1, 60, 100, 1));
+    alloc.dispatch(note_on_event(1, 62, 100, 2));   // steals id=1, legato
+    REQUIRE(alloc.last_was_glide());
+
+    // Host now delivers the note-off for the stolen note (id=1). It must
+    // not drive the channel refcount below the live note's contribution.
+    alloc.dispatch(note_off_event(1));
+
+    // A further note-on on the same channel while id=2 is still held
+    // must still be flagged as glide.
+    alloc.dispatch(note_on_event(1, 64, 100, 3));
+    REQUIRE(alloc.last_was_glide());
+}
+
+TEST_CASE("MpeVoiceAllocator steal path decrements glide refcount", "[midi][mpe]") {
+    // Regression for Codex P2: when a steal retires a held note on some
+    // channel, subsequent note-ons on that channel must not be flagged as
+    // glide because the stolen note's refcount stayed elevated.
+    MpeVoiceAllocator<TestVoice> alloc{1};
+    alloc.set_steal_mode(MpeVoiceStealMode::Oldest);
+
+    alloc.dispatch(note_on_event(3, 60, 100, 1));   // held on channel 3
+    alloc.dispatch(note_on_event(4, 64, 100, 2));   // steals id=1, channel 3 no longer held
+    REQUIRE(alloc.active_count() == 1);
+
+    // Now a note on channel 3 should be fresh, not flagged as glide.
+    alloc.dispatch(note_on_event(3, 67, 100, 3));
+    REQUIRE_FALSE(alloc.last_was_glide());
+}

@@ -154,10 +154,21 @@ public:
         switch (e.kind) {
             case MpeExpressionEvent::Kind::NoteOn: {
                 const bool glide = glide_detector_.observe_note_on(e.state);
-                (void)glide;  // available via last_was_glide()
                 last_was_glide_ = glide;
                 Voice* v = pick_free_voice();
-                if (!v) v = steal_voice();
+                if (!v) {
+                    v = steal_voice();
+                    // Stealing ends the stolen note's lifetime; decrement
+                    // the glide refcount so later note-ons on its channel
+                    // aren't misclassified as legato.
+                    if (v && v->active()) {
+                        MpeNoteState released{};
+                        released.channel = v->channel();
+                        released.note = v->note_number();
+                        released.note_id = v->note_id();
+                        glide_detector_.observe_note_off(released);
+                    }
+                }
                 if (v) {
                     v->reset();
                     v->on_note_on(e.state);
@@ -166,8 +177,14 @@ public:
                 break;
             }
             case MpeExpressionEvent::Kind::NoteOff: {
-                glide_detector_.observe_note_off(e.state);
-                if (Voice* v = find_voice_by_id(e.state.note_id)) v->on_note_off();
+                // Only decrement the glide refcount if the note is still
+                // tracked. Stolen notes were already retired (and their
+                // channel refcount decremented) in the NoteOn steal path;
+                // decrementing here again would double-count.
+                if (Voice* v = find_voice_by_id(e.state.note_id)) {
+                    glide_detector_.observe_note_off(e.state);
+                    v->on_note_off();
+                }
                 break;
             }
             case MpeExpressionEvent::Kind::PitchBend:
