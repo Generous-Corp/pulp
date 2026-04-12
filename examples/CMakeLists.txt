@@ -42,6 +42,9 @@ add_subdirectory(gpu-demo)
 # SDF Text Demo: Resolution-independent text with bloom post-effect
 add_subdirectory(sdf-text-demo)
 
+# Feature 5 Phase 1: plugin hosting validation — loads a real CLAP plugin
+add_subdirectory(plugin-host-demo)
+
 # AI Style Designer: JS-defined design tool with hot reload
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/design-tool/CMakeLists.txt)
     add_subdirectory(design-tool)

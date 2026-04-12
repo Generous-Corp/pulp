@@ -15,9 +15,12 @@ target_sources(pulp-host PRIVATE
 
 target_link_libraries(pulp-host PUBLIC pulp::audio pulp::midi pulp::runtime)
 
-# CLAP plugin loader (requires CLAP SDK)
+# CLAP plugin loader + scanner (requires CLAP SDK)
 if(PULP_HAS_CLAP)
-    target_sources(pulp-host PRIVATE src/plugin_slot_clap.cpp)
+    target_sources(pulp-host PRIVATE
+        src/plugin_slot_clap.cpp
+        src/scanner_clap.cpp
+    )
     target_link_libraries(pulp-host PRIVATE clap)
     target_compile_definitions(pulp-host PRIVATE PULP_HOST_HAS_CLAP=1)
 endif()
