@@ -5,6 +5,7 @@
 // bounds) rather than the true multi-channel signal.
 
 #include <pulp/canvas/msdf_atlas.hpp>
+#include <pulp/canvas/sdf_text.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -80,6 +81,32 @@ TEST_CASE("MsdfAtlas default mode is RGB (no alpha channel)",
     MsdfAtlas atlas;
     REQUIRE(atlas.build("stub", {U'X'}, 24, 4, 1024));
     REQUIRE(atlas.channels() == 3);
+}
+
+TEST_CASE("fill_text_msdf produces one quad per glyph and advances the pen",
+          "[canvas][msdf][fill_text]") {
+    using pulp::canvas::MsdfAtlas;
+    using pulp::canvas::SdfTextOptions;
+    using pulp::canvas::fill_text_msdf;
+    using pulp::canvas::SdfPenSnap;
+
+    MsdfAtlas atlas;
+    REQUIRE(atlas.build("stub", {U'A', U'B', U'C'}, 32, 4, 1024));
+
+    SdfTextOptions opts;
+    opts.snap = SdfPenSnap::Nearest;
+    const auto quads = fill_text_msdf(atlas, U"ABC", 10.5f, 20.0f,
+                                      /*render_size*/ 32.0f, opts);
+    REQUIRE(quads.size() == 3);
+    // Pen x is snapped with Nearest → 11.0f on the first glyph.
+    REQUIRE(quads[0].dst_x == 11.0f);
+    // Subsequent glyphs advance monotonically.
+    REQUIRE(quads[1].dst_x >= quads[0].dst_x);
+    REQUIRE(quads[2].dst_x >= quads[1].dst_x);
+    // Codepoints round-trip.
+    REQUIRE(quads[0].codepoint == U'A');
+    REQUIRE(quads[1].codepoint == U'B');
+    REQUIRE(quads[2].codepoint == U'C');
 }
 
 TEST_CASE("MsdfAtlas refuses to build when exceeding max size",
