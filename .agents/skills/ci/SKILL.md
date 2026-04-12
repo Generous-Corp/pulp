@@ -24,12 +24,41 @@ period (see danielraffel/pulp#120).
 shipyard run                              # validate current branch
 shipyard ship                             # PR + validate + merge on green
 shipyard run --targets windows --smoke    # fast Windows-only check
+shipyard run --resume-from test           # skip configure+build, run tests only
 shipyard cloud run build <branch>         # dispatch to Namespace
+
+# Target management
+shipyard targets                          # list targets with reachability
+shipyard targets test windows             # probe a single target
+
+# Config inspection
+shipyard config show                      # effective merged config
+shipyard config profiles                  # list profiles + active
 
 # Fallback only (if Shipyard is broken or unavailable):
 python3 tools/local-ci/local_ci.py run
 python3 tools/local-ci/local_ci.py ship
 ```
+
+### Fast test iteration on SSH targets
+
+`--resume-from` now works on SSH and SSH-Windows targets. Shipyard
+probes the remote for a marker file proving the previous stage
+passed for the exact SHA. If found, earlier stages are skipped:
+
+```bash
+# After a full build passes, iterate on test failures only:
+shipyard run --targets windows --resume-from test   # ~2 min vs 15 min
+
+# Resume from build (skip setup + configure):
+shipyard run --resume-from build
+```
+
+### Incremental bundles (automatic)
+
+SSH validation now sends only the git delta between the remote HEAD
+and the target SHA. Typical cycles drop from ~443 MB to a few KB.
+No configuration needed — falls back to full bundle automatically.
 
 To install Shipyard locally for the first time:
 
