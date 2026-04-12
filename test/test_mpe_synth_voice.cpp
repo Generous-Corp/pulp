@@ -149,3 +149,19 @@ TEST_CASE("MpeVoiceAllocator reports last_was_glide", "[midi][mpe]") {
     alloc.dispatch(note_on_event(1, 62, 100, 2));
     REQUIRE(alloc.last_was_glide());
 }
+
+TEST_CASE("MpeVoiceAllocator steal path decrements glide refcount", "[midi][mpe]") {
+    // Regression for Codex P2: when a steal retires a held note on some
+    // channel, subsequent note-ons on that channel must not be flagged as
+    // glide because the stolen note's refcount stayed elevated.
+    MpeVoiceAllocator<TestVoice> alloc{1};
+    alloc.set_steal_mode(MpeVoiceStealMode::Oldest);
+
+    alloc.dispatch(note_on_event(3, 60, 100, 1));   // held on channel 3
+    alloc.dispatch(note_on_event(4, 64, 100, 2));   // steals id=1, channel 3 no longer held
+    REQUIRE(alloc.active_count() == 1);
+
+    // Now a note on channel 3 should be fresh, not flagged as glide.
+    alloc.dispatch(note_on_event(3, 67, 100, 3));
+    REQUIRE_FALSE(alloc.last_was_glide());
+}

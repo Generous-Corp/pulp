@@ -154,10 +154,21 @@ public:
         switch (e.kind) {
             case MpeExpressionEvent::Kind::NoteOn: {
                 const bool glide = glide_detector_.observe_note_on(e.state);
-                (void)glide;  // available via last_was_glide()
                 last_was_glide_ = glide;
                 Voice* v = pick_free_voice();
-                if (!v) v = steal_voice();
+                if (!v) {
+                    v = steal_voice();
+                    // Stealing ends the stolen note's lifetime; decrement
+                    // the glide refcount so later note-ons on its channel
+                    // aren't misclassified as legato.
+                    if (v && v->active()) {
+                        MpeNoteState released{};
+                        released.channel = v->channel();
+                        released.note = v->note_number();
+                        released.note_id = v->note_id();
+                        glide_detector_.observe_note_off(released);
+                    }
+                }
                 if (v) {
                     v->reset();
                     v->on_note_on(e.state);

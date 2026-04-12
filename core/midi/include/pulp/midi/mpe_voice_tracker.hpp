@@ -195,6 +195,9 @@ public:
 
     void reset() {
         for (auto& s : notes_) s = {};
+        channel_pitch_bend_.fill(0.0f);
+        channel_pressure_.fill(0.0f);
+        channel_timbre_.fill(0.0f);
         lower_zone_state_ = {};
         upper_zone_state_ = {};
         next_note_id_ = 1;
