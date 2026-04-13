@@ -268,7 +268,15 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
         });
     }
 
-    window->set_close_callback([this]() { stop(); });
+    // Close the ViewBridge *before* stop() tears down the Processor.
+    // `bridge->close()` dispatches Processor::on_view_closed(*view),
+    // which reads the host-side Processor; if `stop()` had already
+    // reset processor_, the callback would fire on freed memory.
+    auto* bridge_raw = bridge.get();
+    window->set_close_callback([this, bridge_raw]() {
+        if (bridge_raw) bridge_raw->close();
+        stop();
+    });
 
 #if !defined(__ANDROID__)
     // Create inspector overlay — activated via Cmd+I / Ctrl+I
@@ -333,14 +341,12 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
     runtime::log_info("Standalone: editor window open ({}x{}, gpu={}, mode={}, inspector=ready)",
                       w, h, use_gpu, bridge->uses_script_ui() ? "scripted" : "autoui");
 
-    // Blocks until the window is closed
+    // Blocks until the window is closed. The close callback above has
+    // already fired bridge->close() (before stop() reset processor_),
+    // so on_view_closed ran while both processor and released view were
+    // still alive. Calling close() again here is a no-op because it's
+    // idempotent after the first close() clears view_.
     window->run_event_loop();
-
-    // Fire Processor::on_view_closed while the released view is still alive
-    // inside tab_panel. tab_panel (and its owned view) is destroyed after
-    // this scope ends; closing the bridge here keeps the raw-pointer
-    // contract documented in ViewBridge::release_view().
-    bridge->close();
 
     stop();
     return true;
