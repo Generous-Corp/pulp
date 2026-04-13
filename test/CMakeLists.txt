@@ -748,6 +748,11 @@ add_executable(pulp-test-mpe-voice-tracker test_mpe_voice_tracker.cpp)
 target_link_libraries(pulp-test-mpe-voice-tracker PRIVATE pulp::midi Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-mpe-voice-tracker)
 
+# UMP buffer + MIDI 1.0 <-> UMP conversion + UMP-aware MpeVoiceTracker
+add_executable(pulp-test-ump-buffer-conversion test_ump_buffer_conversion.cpp)
+target_link_libraries(pulp-test-ump-buffer-conversion PRIVATE pulp::format Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-ump-buffer-conversion)
+
 # MPE buffer + Processor sidecar tests
 add_executable(pulp-test-mpe-buffer test_mpe_buffer.cpp)
 target_link_libraries(pulp-test-mpe-buffer PRIVATE pulp::format Catch2::Catch2WithMain)
