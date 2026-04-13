@@ -140,6 +140,14 @@
         "core/events/include/**/*stream*",
         "examples/streams-*/**"
       ]
+    },
+    "mpe": {
+      "paths": [
+        "core/midi/src/*mpe*",
+        "core/midi/include/**/*mpe*",
+        "core/format/src/*mpe*",
+        "examples/mpe-*/**"
+      ]
     }
   }
 }

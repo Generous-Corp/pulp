@@ -159,6 +159,33 @@ def git_commit_files(sha: str) -> list[str]:
     return [line for line in out.stdout.splitlines() if line.strip()]
 
 
+def git_range_trailers(base: str, head: str) -> dict[str, list[str]]:
+    """Collect trailers from every commit in base..head (CI checks out
+    a synthetic merge commit as HEAD, so a bypass on the branch tip
+    wouldn't be visible if we only looked at HEAD)."""
+    try:
+        body = subprocess.run(
+            ["git", "log", "--format=%B%x00", f"{base}..{head}"],
+            check=True, capture_output=True, text=True,
+        ).stdout
+    except subprocess.CalledProcessError:
+        return {}
+    result: dict[str, list[str]] = {}
+    for body_chunk in body.split("\x00"):
+        if not body_chunk.strip():
+            continue
+        trailers = subprocess.run(
+            ["git", "interpret-trailers", "--parse"],
+            input=body_chunk, capture_output=True, text=True,
+        )
+        for line in trailers.stdout.splitlines():
+            if ":" not in line:
+                continue
+            key, _, value = line.partition(":")
+            result.setdefault(key.strip().lower(), []).append(value.strip())
+    return result
+
+
 def git_commit_trailers(ref: str) -> dict[str, list[str]]:
     try:
         body = subprocess.run(
@@ -454,7 +481,7 @@ def assess_surfaces(
     head: str,
     repo: Path,
 ) -> list[Verdict]:
-    trailers = git_commit_trailers(head)
+    trailers = git_range_trailers(base, head)
     verdicts: list[Verdict] = []
     for s in cfg.surfaces:
         heur = heuristic_for_surface(s, changed, base, head)
