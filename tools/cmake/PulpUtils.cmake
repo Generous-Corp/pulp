@@ -581,11 +581,13 @@ function(_pulp_add_au target name bundle_id version manufacturer category plugin
         "-framework Cocoa"
     )
     target_compile_definitions(${target}_AU PRIVATE PULP_AU_GUI=1)
-    # AudioUnitSDK 1.4 headers use std::expected (C++23). The ausdk target
-    # sets cxx_std_23 PUBLIC, but CMake's CMAKE_CXX_STANDARD=20 at the root
-    # can shadow transitive feature requirements on some toolchains. Force
-    # it here so CI macOS runners don't regress.
-    target_compile_features(${target}_AU PRIVATE cxx_std_23)
+    # AudioUnitSDK 1.4 headers use std::expected (C++23). CMAKE_CXX_STANDARD=20
+    # at the repo root is authoritative under CMake 3.24's policy — target
+    # compile_features are ignored when a lower CXX_STANDARD is already set.
+    # Pin the per-target property AND the feature (PUBLIC so loaders linking
+    # this target also inherit).
+    set_target_properties(${target}_AU PROPERTIES CXX_STANDARD 23)
+    target_compile_features(${target}_AU PUBLIC cxx_std_23)
     _pulp_apply_ui_script_definition(${target}_AU "${PULP_${target}_UI_SCRIPT}")
     target_include_directories(${target}_AU PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
