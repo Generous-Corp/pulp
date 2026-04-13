@@ -8,7 +8,19 @@
 #include <iostream>
 #include <regex>
 #include <sstream>
-#include <sys/wait.h>
+
+#if !defined(_WIN32)
+#  include <sys/wait.h>
+#else
+   // MSVC std::system() returns the child exit code directly (no wait(2)-style
+   // encoding), so WIFEXITED is always true and WEXITSTATUS is the identity.
+#  ifndef WIFEXITED
+#    define WIFEXITED(status)   (true)
+#  endif
+#  ifndef WEXITSTATUS
+#    define WEXITSTATUS(status) (status)
+#  endif
+#endif
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 

@@ -69,6 +69,40 @@ def git_diff_names(base: str, head: str) -> list[str]:
     return [line for line in out.stdout.splitlines() if line.strip()]
 
 
+def git_range_trailers(base: str, head: str) -> dict[str, list[str]]:
+    """Collect trailers from ALL commits in `base..head`, merged.
+
+    CI checks out a synthetic merge commit as HEAD, so a bypass trailer on
+    the branch's tip commit wouldn't be seen if we only looked at HEAD.
+    Walk the whole range instead — any commit in the range carries the
+    bypass.
+    """
+    try:
+        body = subprocess.run(
+            ["git", "log", "--format=%B%x00", f"{base}..{head}"],
+            check=True, capture_output=True, text=True,
+        ).stdout
+    except subprocess.CalledProcessError:
+        return {}
+
+    result: dict[str, list[str]] = {}
+    # Each commit body ends with a NUL byte.
+    for body_chunk in body.split("\x00"):
+        if not body_chunk.strip():
+            continue
+        trailers = subprocess.run(
+            ["git", "interpret-trailers", "--parse"],
+            input=body_chunk, capture_output=True, text=True,
+        )
+        for line in trailers.stdout.splitlines():
+            if ":" not in line:
+                continue
+            key, _, value = line.partition(":")
+            result.setdefault(key.strip().lower(), []).append(value.strip())
+    return result
+
+
+# Back-compat shim for any external callers.
 def git_commit_trailers(ref: str) -> dict[str, list[str]]:
     try:
         body = subprocess.run(
@@ -77,7 +111,6 @@ def git_commit_trailers(ref: str) -> dict[str, list[str]]:
         ).stdout
     except subprocess.CalledProcessError:
         return {}
-
     trailers = subprocess.run(
         ["git", "interpret-trailers", "--parse"],
         input=body, capture_output=True, text=True,
@@ -225,8 +258,16 @@ def compute_findings(
         touched = [p for p in changed if _matches_any(p, patterns)]
         if not touched:
             continue
-        skill_md_prefix = f"{rel_skills_dir}/{skill}/"
-        skill_md_modified = any(p.startswith(skill_md_prefix) for p in changed)
+        # Require SKILL.md specifically, not side files (fixtures, notes,
+        # logs) that happen to live next to it. A nested SKILL.md inside
+        # a subfolder (rare but allowed) also counts as updating the skill.
+        skill_md_exact = f"{rel_skills_dir}/{skill}/SKILL.md"
+        skill_md_subdir_prefix = f"{rel_skills_dir}/{skill}/"
+        skill_md_modified = any(
+            p == skill_md_exact
+            or (p.startswith(skill_md_subdir_prefix) and p.endswith("/SKILL.md"))
+            for p in changed
+        )
         findings.append(
             Finding(
                 skill=skill,
@@ -330,7 +371,7 @@ def main(argv: list[str]) -> int:
     changed = git_diff_names(args.base, args.head)
     changed = filter_generated(changed, cfg.generated_globs)
 
-    trailers = git_commit_trailers(args.head)
+    trailers = git_range_trailers(args.base, args.head)
     bypasses = parse_skill_update_trailer(trailers, cfg.trailer_skill_update)
 
     findings = compute_findings(

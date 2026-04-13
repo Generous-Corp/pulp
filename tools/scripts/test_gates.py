@@ -310,6 +310,46 @@ class GateFixtureTests(unittest.TestCase):
         self.assertEqual(code, 0, msg=out)
         self.assertIn("bypassed", out)
 
+    # ── Regression tests for Codex P1/P2 review on the first merge ─────
+
+    def test_partial_multi_file_bump_fails(self) -> None:
+        """Plugin surface with two version files: bumping only ONE used to
+        let the gate pass (Codex P1). Now fails hard."""
+        r = self.tmp
+        (r / ".claude-plugin" / "marketplace.json").write_text(
+            json.dumps({"name": "test", "version": "0.1.0"}, indent=2) + "\n"
+        )
+        cfg_path = r / "tools/scripts/versioning.json"
+        cfg = json.loads(cfg_path.read_text())
+        cfg["surfaces"]["plugin"]["version_files"].append({
+            "path": ".claude-plugin/marketplace.json",
+            "kind": "json_field", "field": "version",
+        })
+        cfg_path.write_text(json.dumps(cfg, indent=2) + "\n")
+        self.f.commit("chore: add marketplace manifest")
+
+        # Trigger the plugin surface AND bump plugin.json only.
+        (r / ".claude-plugin" / "plugin.json").write_text(
+            json.dumps({"name": "test", "version": "0.2.0"}, indent=2) + "\n"
+        )
+        self.f.commit("feat: bump plugin.json only")
+        code, out = self.f.run_vbc()
+        self.assertEqual(code, 1, msg=out)
+        self.assertIn("partial bump", out)
+        self.assertIn("marketplace.json", out)
+
+    def test_skill_side_file_does_not_satisfy_md_requirement(self) -> None:
+        """Side files under the skill dir used to count as SKILL.md
+        updates (Codex P2). Now only SKILL.md counts."""
+        self.f.write("tools/cli/cmd_foo.cpp", "// added\nint x();\n")
+        self.f.write(".agents/skills/cli-maintenance/notes.md",
+                     "# scratch — not SKILL.md\n")
+        self.f.commit("cli: tweak cmd_foo + add scratch notes")
+        code, out = self.f.run_ssc()
+        self.assertEqual(code, 1, msg=out)
+        self.assertIn("cli-maintenance", out)
+        self.assertIn("SKILL.md NOT updated", out)
+
     def test_revert_does_not_trigger_version_bump(self) -> None:
         # Forward commit that would normally require a minor bump.
         self.f.write(
