@@ -156,13 +156,15 @@ static int version_bump(const std::vector<std::string>& args) {
     return 0;
 }
 
-// Read a top-level "version" field from a JSON file via a tiny regex — we
+// Read the TOP-LEVEL "version" field from a JSON file via a tiny regex — we
 // intentionally avoid pulling in a JSON library here. The config files are
-// small and under our control.
+// small and under our control. "Top-level" means two-space indentation (or
+// zero): `"version":` nested deeper (metadata.version, plugins[0].version)
+// is skipped because those are not the canonical version for the file.
 static std::string read_json_version_field(const fs::path& path) {
     if (!fs::exists(path)) return {};
     auto content = read_file_contents(path);
-    std::regex re(R"#(^\s*"version"\s*:\s*"([^"]+)")#", std::regex::multiline);
+    std::regex re(R"#(^(?:  )?"version"\s*:\s*"([^"]+)")#", std::regex::multiline);
     std::smatch m;
     if (std::regex_search(content, m, re)) return m[1].str();
     return {};
