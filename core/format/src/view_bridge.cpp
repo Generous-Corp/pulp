@@ -1,5 +1,6 @@
 #include <pulp/format/view_bridge.hpp>
 #include <pulp/format/editor_ui.hpp>
+#include <pulp/format/remote_view_session.hpp>
 #include <pulp/view/scripted_ui.hpp>
 #include <pulp/view/view.hpp>
 
@@ -121,6 +122,36 @@ ViewRole ViewBridge::role_at(size_t index) const {
     }
     if (index < secondaries_.size()) return secondaries_[index].role;
     return ViewRole::Editor;
+}
+
+RemoteViewSession* ViewBridge::attach_remote_channel(
+    std::unique_ptr<runtime::MessageChannel> channel,
+    std::string label)
+{
+    if (!channel) {
+        last_error_ = "attach_remote_channel: null channel";
+        return nullptr;
+    }
+    auto session = std::unique_ptr<RemoteViewSession>(
+        new RemoteViewSession(std::move(label), store_, std::move(channel)));
+    if (!session->handshake_(processor_)) {
+        last_error_ = session->last_error();
+        return nullptr;
+    }
+    auto* raw = session.get();
+    remotes_.push_back(std::move(session));
+    return raw;
+}
+
+bool ViewBridge::detach_remote(RemoteViewSession* session) {
+    for (auto it = remotes_.begin(); it != remotes_.end(); ++it) {
+        if (it->get() == session) {
+            (*it)->close();
+            remotes_.erase(it);
+            return true;
+        }
+    }
+    return false;
 }
 
 } // namespace pulp::format

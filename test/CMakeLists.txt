@@ -389,6 +389,11 @@ add_executable(pulp-test-view-bridge test_view_bridge.cpp)
 target_link_libraries(pulp-test-view-bridge PRIVATE pulp::format Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-view-bridge)
 
+# Remote View Protocol loopback tests (Feature 1, Phase 4)
+add_executable(pulp-test-remote-view test_remote_view.cpp)
+target_link_libraries(pulp-test-remote-view PRIVATE pulp::format pulp::runtime Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-remote-view)
+
 # Script engine tests (legacy API)
 add_executable(pulp-test-script test_script_engine.cpp)
 target_link_libraries(pulp-test-script PRIVATE pulp::view Catch2::Catch2WithMain)

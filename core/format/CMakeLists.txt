@@ -16,6 +16,7 @@ target_sources(pulp-format PRIVATE
     src/host_type.cpp
     src/ara.cpp
     src/view_bridge.cpp
+    src/remote_view_session.cpp
 )
 
 target_link_libraries(pulp-format
@@ -24,6 +25,7 @@ target_link_libraries(pulp-format
         pulp::midi
         pulp::state
         pulp::view
+        pulp::runtime
 )
 if(NOT ANDROID)
     # Inspector is desktop-only; it's defined later in the CMake order,

@@ -133,12 +133,55 @@ Phase 4's `attach_remote_view(url)` (WebSocket-backed) will land as a
 7 cases, 67 assertions. Run with
 `ctest --test-dir build -R ViewBridge --output-on-failure`.
 
+## Remote views (Phase 4)
+
+`ViewBridge::attach_remote_channel(channel, label)` registers a
+`RemoteViewSession` driving a `MessageChannel` (WebSocket or in-process
+loopback) as a `ViewRole::Remote` secondary. The session speaks the
+protocol in `docs/reference/remote-view-protocol.md`:
+
+- `view.hello` + `view.metadata` handshake
+- `view.param_set` / `view.param_changed` wire through `StateStore`
+- `view.param_get` request/response
+- `view.input` (notification)
+- `view.close` (either side)
+
+Tests: `test/test_remote_view.cpp` — 4 Catch2 cases / 23 assertions via
+MemoryMessageChannel loopback.
+
+### Attaching from an MCP server
+
+An MCP server that runs alongside a Pulp plugin host can open a
+`RemoteViewSession` to drive the plugin's view from Claude Code:
+
+1. MCP server declares a tool (e.g. `view_attach`, `view_param_set`,
+   `view_param_get`) backed by `pulp::runtime::WebSocketChannel::connect(...)`.
+2. Tool handler calls `bridge->attach_remote_channel(std::move(ws), "mcp")`
+   where `bridge` is the host's ViewBridge (same process) — or opens
+   the socket *to* a separate Pulp host process that listens via
+   `WebSocketChannel::accept`.
+3. Subsequent MCP tool calls drive `RemoteViewSession::set_parameter`
+   / `get_parameter` / `send_input`.
+
+This is the pattern. A concrete MCP-tool wrapper bundled with Pulp is
+a small follow-up on top of `tools/mcp/pulp_mcp.cpp`.
+
+### Paint-op streaming
+
+Not yet wired. Current MVP: the remote renderer is expected to mirror
+its own view hierarchy informed by `view.metadata`. Canvas-command
+streaming is the next increment — see the "Not yet wired" section of
+the protocol doc.
+
 ## References
 
 - `core/format/include/pulp/format/view_bridge.hpp` — public API
 - `core/format/src/view_bridge.cpp` — implementation
 - `core/format/include/pulp/format/processor.hpp` — `create_view`,
   `view_size`, `on_view_*`
+- `core/format/include/pulp/format/remote_view_session.hpp` — Phase 4
 - `docs/guides/view-bridge.md` — user-facing guide
+- `docs/reference/remote-view-protocol.md` — Phase 4 wire format
 - `examples/view-bridge-demo/main.cpp` — runnable headless demo
+- `test/test_remote_view.cpp` — loopback tests for the remote protocol
 - `planning/next-features-plan.md` § Feature 1 — phase tracking
