@@ -89,3 +89,33 @@ predictable output, no MIDI.
   configure.
 - CLAP bundles on macOS: don't `dlopen` the `.clap` directory; resolve to
   the executable inside `Contents/MacOS/` first.
+
+## Phase 0 contracts (PR #153)
+
+The host exposes an immutable audio-thread snapshot now, not direct
+member reads. Anything you write that touches the audio thread (a
+graph editor, an MCP bridge, a preset loader) must account for these
+rules:
+
+- **Mutation protocol.** Every UI-thread `SignalGraph` mutator
+  (`add_*`, `connect*`, `disconnect`, `remove_node`, `clear`)
+  invalidates the live snapshot. `process()` returns silence until
+  the next `prepare()` call republishes. Batch edits: mutate, then
+  `prepare()`, not the other way around.
+- **Plugin ownership.** `GraphNode::plugin` is a `std::shared_ptr<PluginSlot>`.
+  The published snapshot copies the shared_ptr, so a plugin survives
+  past the removal of its GraphNode until the audio thread's stale
+  snapshot reference drops. Do not stash raw plugin pointers.
+- **Parameter domain.** `HostParamInfo::min_value` / `max_value` /
+  `default_value` are the **plain** parameter domain. VST3-internal
+  normalization is hidden behind the loader.
+- **Parameter flags.** Consumers must honor
+  `HostParamInfo::flags.{automatable, read_only, stepped, is_bypass}`
+  before writing. Automation routing (Phase 1E) refuses
+  non-automatable edges.
+- **ParameterEventQueue.** `PluginSlot::process()` takes a
+  `const ParameterEventQueue&`. Phase 1 loaders consume it;
+  Phase 0 loaders accept and ignore. Use it — not `set_parameter` —
+  for per-block automation.
+- **Thread rules doc.** `docs/reference/host-thread-rules.md` is the
+  canonical reference.

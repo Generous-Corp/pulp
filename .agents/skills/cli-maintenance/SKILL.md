@@ -115,3 +115,11 @@ These commands live in `tools/cli/cmd_host.cpp` (scan + host share a
 file). When changing scanner.scan() signatures, update cmd_host.cpp's
 ScanOptions construction in lockstep — the cross-format loop builds an
 options struct per iteration.
+
+## Phase 0 host-contracts touchpoints
+
+`tools/cli/cmd_host.cpp` calls `PluginSlot::process()` which now takes
+a `ParameterEventQueue`. When adding new CLI hosting commands, include
+`pulp/host/parameter_event_queue.hpp` and pass an empty queue if you
+have no automation to deliver. See `docs/reference/host-thread-rules.md`
+for the full contract.
