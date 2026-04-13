@@ -182,6 +182,24 @@ static std::string read_json_version_field(const fs::path& path) {
     return {};
 }
 
+// Read marketplace.json `plugins[0].version` — the per-plugin entry inside
+// the marketplace catalog. This is the version the Claude Code marketplace
+// surfaces per plugin, so it has to stay in lockstep with plugin.json's
+// top-level `.version`. The top-level marketplace `.version` is the
+// MARKETPLACE format version and drifts independently.
+static std::string read_marketplace_plugin_entry_version(const fs::path& path) {
+    if (!fs::exists(path)) return {};
+    auto content = read_file_contents(path);
+    // Match the first occurrence of `"version": "x.y.z"` at 6 spaces of
+    // indentation (inside `plugins[0]`). If the file grows a second plugin
+    // entry, this still picks the first one — matching how scroll /
+    // marketplace listings render.
+    std::regex re(R"#(^      "version"\s*:\s*"([^"]+)")#", std::regex::multiline);
+    std::smatch m;
+    if (std::regex_search(content, m, re)) return m[1].str();
+    return {};
+}
+
 static int version_check_inner(bool with_bump_check) {
     auto root = find_project_root();
     if (root.empty()) {
@@ -253,6 +271,19 @@ static int version_check_inner(bool with_bump_check) {
         all_ok = false;
     } else if (!market_ver.empty()) {
         print_ok("marketplace.json version matches plugin.json");
+    }
+
+    // marketplace.json `plugins[0].version` must also match plugin.json.
+    // Drifts silently because it's nested and not covered by the top-level
+    // regex above — exactly how we ended up at 0.3.0 vs 0.4.0 on main.
+    auto market_plugin_entry_ver = read_marketplace_plugin_entry_version(market_path);
+    if (!market_plugin_entry_ver.empty() && !plugin_ver.empty()
+        && market_plugin_entry_ver != plugin_ver) {
+        print_fail("marketplace.json plugins[0].version (" + market_plugin_entry_ver
+                   + ") differs from plugin.json (" + plugin_ver + ")");
+        all_ok = false;
+    } else if (!market_plugin_entry_ver.empty()) {
+        print_ok("marketplace.json plugins[0].version matches plugin.json");
     }
 
     // ── Optional bump-check integration ────────────────────────────────
