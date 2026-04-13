@@ -347,25 +347,20 @@ def heuristic_for_surface(
     if not touched:
         return "none"
 
-    # Public-API paths: minor-required if diff has real content (not just
-    # comments/whitespace). Downgrade to patch if the diff is trivial.
-    public_touched = [p for p in touched if _matches_any(p, surface.public_api_paths)]
-    meaningful_public = False
-    for p in public_touched:
-        if git_diff_ignore_whitespace_nonempty(base, head, p):
-            meaningful_public = True
-            break
+    # Filter to touched paths with a meaningful (non-whitespace, non-comment-only)
+    # diff. Paths whose changes are entirely whitespace or comments don't
+    # trigger a version bump — fall through to "none".
+    meaningful = [p for p in touched if git_diff_ignore_whitespace_nonempty(base, head, p)]
+    if not meaningful:
+        return "none"
 
-    if meaningful_public:
+    # Any public-API path with a meaningful diff → minor-required.
+    if any(_matches_any(p, surface.public_api_paths) for p in meaningful):
         return "minor"
 
-    # Only internal paths touched → patch-suggested (warning, not hard fail
-    # at the CI level; we still report it so humans can decide).
-    internal_touched = [p for p in touched if _matches_any(p, surface.internal_only_paths)]
-    if internal_touched or touched:
-        return "patch"
-
-    return "none"
+    # Otherwise internal-only changes → patch-suggested (advisory; report mode
+    # treats this as a warning, never hard fail).
+    return "patch"
 
 
 def surface_trailer_override(
@@ -455,7 +450,9 @@ def assess_surfaces(
 
         override = surface_trailer_override(trailers, cfg.trailer_version_bump, s.name)
         final = heur
-        if override == "skip":
+        skip_requested = (override == "skip")
+
+        if skip_requested:
             final = "none"
         elif override in LEVELS:
             # Only raise, never lower. And only if the surface was actually touched.
@@ -469,8 +466,11 @@ def assess_surfaces(
                 final = "none"
 
         # Promote via conventional-commit subjects on commits that touched
-        # this surface — this is a ceiling raise only.
-        if heur != "none":
+        # this surface — this is a ceiling raise only. An explicit
+        # `Version-Bump: <surface>=skip` on the tip commit is authoritative
+        # and is NOT raised back up by a feat:/BREAKING: subject on an
+        # earlier commit in the range.
+        if heur != "none" and not skip_requested:
             conv_ceiling = "none"
             for subject, body in git_log_subjects_and_bodies(base, head):
                 if is_revert_commit(subject, {}):
@@ -513,7 +513,13 @@ def render_report(
             continue
         # Already bumped since base?
         bumped = any(already_bumped(base, vf, repo) for vf in v.surface.version_files)
-        tag = "✓ bumped" if bumped else "✗ bump required"
+        if bumped:
+            tag = "✓ bumped"
+        elif v.final_level == "patch":
+            # Advisory only — not a hard fail.
+            tag = "? bump suggested (patch)"
+        else:
+            tag = "✗ bump required"
         lines.append(
             f"[{v.surface.name}] {v.surface.label}: "
             f"heuristic={v.heuristic}"

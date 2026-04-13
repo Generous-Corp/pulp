@@ -554,6 +554,18 @@ else
     info "Skia build directory not found (GPU rendering stays disabled unless Skia is present)"
 fi
 
+# ── Install agent-agnostic git hooks ───────────────────────────────────────
+# Wires core.hooksPath at .githooks so every push runs the versioning +
+# skill-sync gates (advisory by default; CI sets PULP_ENFORCE_PREPUSH=1
+# to upgrade to hard fail). Idempotent — safe to rerun.
+
+if [ -x "$REPO_ROOT/tools/scripts/install-githooks.sh" ]; then
+    step "Installing git hooks"
+    "$REPO_ROOT/tools/scripts/install-githooks.sh" || {
+        info "install-githooks exited non-zero; continuing setup."
+    }
+fi
+
 # ── Check: External SDKs ───────────────────────────────────────────────────
 
 step "Setting up external SDKs"

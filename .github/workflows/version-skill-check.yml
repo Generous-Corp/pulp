@@ -71,3 +71,7 @@ jobs:
               --base "${{ steps.base.outputs.ref }}" \
               --config tools/scripts/versioning.json \
               --mode=report
+
+      - name: Gate-script fixture tests
+        run: |
+          python3 tools/scripts/test_gates.py
