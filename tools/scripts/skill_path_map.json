@@ -2,7 +2,6 @@
   "$schema": "./skill_path_map.schema.json",
   "schema_version": 1,
   "_comment": "Skill name -> glob patterns. When a diff touches any pattern, the corresponding SKILL.md must be updated in the same diff or a Skill-Update: skip trailer must appear on the tip commit. Paired with tools/scripts/versioning.json. Every subdir under .agents/skills/ MUST have an entry here; skill_sync_check.py fails if one is missing.",
-
   "skills": {
     "aax": {
       "paths": [
@@ -67,6 +66,16 @@
         "core/signal/**/*faust*"
       ]
     },
+    "hosting": {
+      "paths": [
+        "core/host/**",
+        "tools/cli/cmd_host.cpp",
+        "tools/cli/cmd_scan.cpp",
+        "examples/plugin-host-demo/**",
+        "docs/guides/hosting.md",
+        "docs/reference/signal-graph.md"
+      ]
+    },
     "import-design": {
       "paths": [
         "tools/import-design/**",
@@ -80,6 +89,14 @@
         "tools/scripts/test_jsfx_subset.py",
         "examples/jsfx-*/**",
         "core/signal/**/*jsfx*"
+      ]
+    },
+    "mpe": {
+      "paths": [
+        "core/midi/include/pulp/midi/mpe_*.hpp",
+        "core/midi/src/mpe_*.cpp",
+        "examples/mpe-synth/**",
+        "docs/guides/mpe.md"
       ]
     },
     "packages": {
@@ -96,6 +113,17 @@
         "tools/deps/manifest.json"
       ]
     },
+    "sdf-text": {
+      "paths": [
+        "core/canvas/src/*sdf*",
+        "core/canvas/src/*msdf*",
+        "core/canvas/src/*psdf*",
+        "core/canvas/include/**/*sdf*",
+        "core/canvas/include/**/*msdf*",
+        "core/canvas/include/**/*psdf*",
+        "examples/sdf-*/**"
+      ]
+    },
     "ship": {
       "paths": [
         "ship/**",
@@ -103,6 +131,15 @@
         "tools/scripts/release-cli-local.sh",
         ".github/workflows/sign-and-release.yml",
         ".github/workflows/release-cli.yml"
+      ]
+    },
+    "streams": {
+      "paths": [
+        "core/runtime/src/*stream*",
+        "core/runtime/include/**/*stream*",
+        "core/events/src/*stream*",
+        "core/events/include/**/*stream*",
+        "examples/streams-*/**"
       ]
     },
     "threejs-bridge": {
@@ -119,34 +156,6 @@
         "core/view/include/**/webview*",
         "core/view/platform/**/webview*",
         "examples/webview-*/**"
-      ]
-    },
-    "sdf-text": {
-      "paths": [
-        "core/canvas/src/*sdf*",
-        "core/canvas/src/*msdf*",
-        "core/canvas/src/*psdf*",
-        "core/canvas/include/**/*sdf*",
-        "core/canvas/include/**/*msdf*",
-        "core/canvas/include/**/*psdf*",
-        "examples/sdf-*/**"
-      ]
-    },
-    "streams": {
-      "paths": [
-        "core/runtime/src/*stream*",
-        "core/runtime/include/**/*stream*",
-        "core/events/src/*stream*",
-        "core/events/include/**/*stream*",
-        "examples/streams-*/**"
-      ]
-    },
-    "mpe": {
-      "paths": [
-        "core/midi/src/*mpe*",
-        "core/midi/include/**/*mpe*",
-        "core/format/src/*mpe*",
-        "examples/mpe-*/**"
       ]
     }
   }

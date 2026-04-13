@@ -771,6 +771,13 @@ catch_discover_tests(pulp-test-mpe-synth-voice)
 # Plugin hosting tests (scanner, signal graph)
 add_executable(pulp-test-host test_host.cpp)
 target_link_libraries(pulp-test-host PRIVATE pulp::host Catch2::Catch2WithMain)
+# Point the integration test at the locally-built PulpGain.clap so the CLAP
+# loader runs against a known real plugin.
+if(TARGET PulpGain_CLAP)
+    target_compile_definitions(pulp-test-host PRIVATE
+        PULP_TEST_CLAP_PATH="${CMAKE_BINARY_DIR}/CLAP/PulpGain.clap")
+    add_dependencies(pulp-test-host PulpGain_CLAP)
+endif()
 catch_discover_tests(pulp-test-host)
 
 # WAMv2 + WebCLAP format adapter tests

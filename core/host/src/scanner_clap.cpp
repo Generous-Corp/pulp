@@ -1,0 +1,124 @@
+// CLAP bundle descriptor enumeration.
+//
+// A single .clap bundle can expose multiple plugins (each with its own id).
+// The filesystem scanner produces one PluginInfo per descriptor instead of
+// per bundle. This is needed so the loader can instantiate the correct
+// plugin inside multi-plugin bundles (e.g. bundled test kits, effect suites).
+//
+// Falls back to a single filename-derived entry if clap_entry can't be loaded
+// (missing symbol, deinit failure, etc.) so scan() stays best-effort.
+
+#include <pulp/host/scanner.hpp>
+#include <pulp/runtime/log.hpp>
+
+#include <clap/clap.h>
+
+#include <dlfcn.h>
+#include <cstring>
+#include <filesystem>
+#include <vector>
+
+namespace pulp::host {
+namespace {
+
+namespace fs = std::filesystem;
+
+std::string resolve_clap_binary(const std::string& path) {
+#if defined(__APPLE__)
+    fs::path p(path);
+    std::error_code ec;
+    if (fs::is_directory(p, ec)) {
+        auto stem = p.stem().string();
+        auto inner = p / "Contents" / "MacOS" / stem;
+        if (fs::exists(inner, ec)) return inner.string();
+    }
+#endif
+    return path;
+}
+
+}  // namespace
+
+// Called from scanner.cpp — enumerate descriptors by briefly loading
+// the bundle, reading clap_plugin_factory, and extracting metadata per
+// descriptor. The bundle is unloaded before return.
+std::vector<PluginInfo> scan_clap_bundle_descriptors(const std::string& path) {
+    std::vector<PluginInfo> results;
+
+    auto binary = resolve_clap_binary(path);
+    void* handle = dlopen(binary.c_str(), RTLD_LAZY | RTLD_LOCAL);
+    if (!handle) {
+        runtime::log_warn("CLAP scan: dlopen failed for '{}': {}",
+                          binary, dlerror() ? dlerror() : "unknown");
+        // Fallback to filename-only entry.
+        PluginInfo info;
+        info.path = path;
+        info.format = PluginFormat::CLAP;
+        info.name = fs::path(path).stem().string();
+        info.unique_id = info.name;
+        results.push_back(std::move(info));
+        return results;
+    }
+
+    auto* entry = static_cast<const clap_plugin_entry_t*>(dlsym(handle, "clap_entry"));
+    if (!entry || !entry->init || !entry->get_factory) {
+        runtime::log_warn("CLAP scan: no clap_entry in '{}'", binary);
+        dlclose(handle);
+        PluginInfo info;
+        info.path = path;
+        info.format = PluginFormat::CLAP;
+        info.name = fs::path(path).stem().string();
+        info.unique_id = info.name;
+        results.push_back(std::move(info));
+        return results;
+    }
+
+    if (!entry->init(path.c_str())) {
+        runtime::log_warn("CLAP scan: entry->init failed for '{}'", path);
+        dlclose(handle);
+        return results;
+    }
+
+    const auto* factory = static_cast<const clap_plugin_factory_t*>(
+        entry->get_factory(CLAP_PLUGIN_FACTORY_ID));
+
+    if (!factory || !factory->get_plugin_count || !factory->get_plugin_descriptor) {
+        entry->deinit();
+        dlclose(handle);
+        return results;
+    }
+
+    const uint32_t count = factory->get_plugin_count(factory);
+    results.reserve(count);
+    for (uint32_t i = 0; i < count; ++i) {
+        const auto* desc = factory->get_plugin_descriptor(factory, i);
+        if (!desc) continue;
+
+        PluginInfo info;
+        info.path = path;
+        info.format = PluginFormat::CLAP;
+        info.name = desc->name ? desc->name : fs::path(path).stem().string();
+        info.manufacturer = desc->vendor ? desc->vendor : "";
+        info.version = desc->version ? desc->version : "";
+        info.unique_id = desc->id ? desc->id : info.name;
+
+        // Classify from `features` if present — CLAP declares category strings
+        // like "instrument", "audio-effect", "note-effect".
+        info.is_instrument = false;
+        info.is_effect = true;
+        if (desc->features) {
+            for (const char* const* f = desc->features; *f; ++f) {
+                if (std::strcmp(*f, CLAP_PLUGIN_FEATURE_INSTRUMENT) == 0) {
+                    info.is_instrument = true;
+                    info.is_effect = false;
+                }
+            }
+        }
+        results.push_back(std::move(info));
+    }
+
+    entry->deinit();
+    dlclose(handle);
+    return results;
+}
+
+}  // namespace pulp::host

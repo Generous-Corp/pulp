@@ -19,6 +19,7 @@
 #include <pulp/midi/buffer.hpp>
 #include <memory>
 #include <vector>
+#include <unordered_map>
 #include <string>
 #include <cstdint>
 
@@ -45,6 +46,10 @@ struct Connection {
     PortIndex source_port;
     NodeId dest_node;
     PortIndex dest_port;
+    bool feedback = false;  // back-edge: reads previous block's audio, breaks
+                            // the cycle for topological sort and PDC.
+    bool midi = false;      // event-edge: routes MidiBuffer events instead of
+                            // audio samples. Ports are ignored.
 
     bool operator==(const Connection& o) const {
         return source_node == o.source_node && source_port == o.source_port
@@ -75,6 +80,13 @@ public:
     NodeId add_input_node(int channels, const std::string& name = "Input");
     NodeId add_output_node(int channels, const std::string& name = "Output");
     NodeId add_plugin_node(const PluginInfo& info);
+
+    // Add a plugin node wrapping a caller-provided slot. Useful for tests
+    // (mock latency, mock processing) and for hosts that build their own
+    // PluginSlot implementations outside of PluginSlot::load().
+    NodeId add_plugin_node(std::unique_ptr<PluginSlot> slot,
+                           int num_inputs, int num_outputs,
+                           const std::string& name = "Plugin");
     NodeId add_gain_node(const std::string& name = "Gain");
     NodeId add_midi_input_node(const std::string& name = "MIDI In");
     NodeId add_midi_output_node(const std::string& name = "MIDI Out");
@@ -85,6 +97,27 @@ public:
     // Connect two nodes (port-to-port)
     bool connect(NodeId source, PortIndex source_port,
                  NodeId dest, PortIndex dest_port);
+
+    // Connect with an explicit one-block delay. Permitted to close a cycle
+    // (the back-edge the user is intentionally introducing) and invisible to
+    // topological sort. The destination reads the source's previous-block
+    // output, giving the feedback loop a block-sized delay.
+    bool connect_feedback(NodeId source, PortIndex source_port,
+                          NodeId dest, PortIndex dest_port);
+
+    // MIDI connection: routes events from source's MIDI output into dest's
+    // MIDI input. Ports are ignored (MIDI is node-scoped, not port-scoped).
+    // Participates in cycle detection and topological sort the same way as
+    // audio connections.
+    bool connect_midi(NodeId source, NodeId dest);
+
+    // Inject a MIDI buffer into a MidiInput source node. Call before
+    // process(); the events become that node's MIDI output this block.
+    bool inject_midi(NodeId midi_input_node, const midi::MidiBuffer& events);
+
+    // Drain the MIDI events that arrived at a MidiOutput sink node during
+    // the last process() call. Appends to `out`.
+    bool extract_midi(NodeId midi_output_node, midi::MidiBuffer& out) const;
 
     // Disconnect
     bool disconnect(NodeId source, PortIndex source_port,
@@ -113,12 +146,86 @@ public:
     // Clear all nodes and connections
     void clear();
 
+    // Gain for a Gain node (linear, not dB). Defaults to 1.0.
+    bool set_node_gain(NodeId id, float linear_gain);
+    float node_gain(NodeId id) const;
+
+    // Latency in samples from any AudioInput to the graph's AudioOutput, as
+    // computed by prepare(). Reflects plugin-reported latencies plus any
+    // delay inserted by PDC. Returns 0 when not prepared.
+    int latency_samples() const { return (int)total_latency_samples_; }
+
+    // Latency arriving at a specific node's input (samples). Returns 0 when
+    // the node is unknown or the graph is not prepared.
+    int node_latency_samples(NodeId id) const;
+
+    // Set a parameter on a Plugin node at the graph level. The call is
+    // forwarded to PluginSlot::set_parameter(). Returns false if the node
+    // is not a Plugin node or has no loaded slot. This is the single-value
+    // knob — full automation-curve routing (one node's output driving
+    // another node's parameter over a block) is follow-up work.
+    bool set_node_parameter(NodeId id, uint32_t param_id, float value);
+
+    // Read a parameter's current value from a Plugin node (returns 0.0f if
+    // the node is not a Plugin or has no slot).
+    float get_node_parameter(NodeId id, uint32_t param_id) const;
+
 private:
+    struct NodeRuntime {
+        // Per-node output-port channel storage (interleaved per-port, flat).
+        // data_ has size num_output_ports * max_block_size_; channel_ptrs_[p]
+        // points at data_[p * max_block_size_].
+        std::vector<float> output_data;
+        std::vector<float*> output_ptrs;
+        // Per-node input-port scratch — callers write into these before the
+        // node processes, then zero before the next block.
+        std::vector<float> input_data;
+        std::vector<float*> input_ptrs;
+        float gain = 1.0f;
+
+        // PDC: cumulative samples of latency from AudioInput to this node's
+        // input ports (input_latency) and output ports (output_latency).
+        // output_latency = input_latency + (plugin->latency_samples() for
+        // Plugin nodes, 0 otherwise).
+        int64_t input_latency = 0;
+        int64_t output_latency = 0;
+
+        // MIDI scratch. Cleared at the start of each process() call except
+        // for MidiInput nodes, whose midi_out is populated by inject_midi()
+        // and must survive the process() entry-clear.
+        midi::MidiBuffer midi_in;
+        midi::MidiBuffer midi_out;
+    };
+
+    // One delay line per graph connection, parallel to connections_. Used to
+    // align branch latencies so a node receives all its inbound audio with a
+    // common alignment at input_latency samples.
+    struct ConnectionDelay {
+        int delay_samples = 0;
+        // Ring buffer: delay_samples + max_block_size_ frames per source
+        // channel. Empty when delay_samples == 0 (pass-through path).
+        std::vector<float> ring;
+        int write_pos = 0;
+        // Feedback edges hold the previous block's source-port audio so the
+        // destination can read it before the source writes the current block.
+        std::vector<float> feedback_prev;  // size = max_block_size_
+    };
+
     std::vector<GraphNode> nodes_;
     std::vector<Connection> connections_;
     NodeId next_id_ = 1;
 
+    // Populated by prepare(); consumed by process(). Kept flat rather than
+    // per-node to keep allocation lifetime predictable.
+    std::unordered_map<NodeId, NodeRuntime> runtime_;
+    std::vector<ConnectionDelay> connection_delays_;  // parallel to connections_
+    std::vector<NodeId> cached_order_;
+    int max_block_size_ = 0;
+    bool prepared_ = false;
+    int64_t total_latency_samples_ = 0;
+
     bool has_path(NodeId from, NodeId to) const;
+    void compute_latencies_();
 };
 
 } // namespace pulp::host

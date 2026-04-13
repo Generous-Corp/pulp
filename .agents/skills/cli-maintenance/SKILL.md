@@ -107,3 +107,11 @@ Validates consistency across the three version-bearing surfaces:
 - Marketplace: top-level `"version"` in `.claude-plugin/marketplace.json` (must match `plugin.json`).
 
 Gotcha: JSON files can have multiple `"version"` fields (e.g. `metadata.version`, `plugins[0].version`). The check anchors on the top-level field via a `^(?:  )?"version":` regex — don't introduce a JSON parser unless you genuinely need schema validation.
+
+
+### Note: pulp scan / pulp host added
+
+These commands live in `tools/cli/cmd_host.cpp` (scan + host share a
+file). When changing scanner.scan() signatures, update cmd_host.cpp's
+ScanOptions construction in lockstep — the cross-format loop builds an
+options struct per iteration.
