@@ -11,16 +11,17 @@
 
 #ifdef PULP_VST3_GUI
 
+#include <pulp/format/view_bridge.hpp>
 #include <pulp/view/plugin_view_host.hpp>
-#include <pulp/view/scripted_ui.hpp>
 
 // VST3 SDK
 #include <public.sdk/source/common/pluginview.h>
 
 namespace pulp::format::vst3 {
 
-// IPlugView implementation that hosts an AutoUi-generated view tree
-// inside the DAW's editor window via PluginViewHost
+// IPlugView implementation that owns a ViewBridge. The bridge builds the
+// view tree (custom create_view() or scripted/AutoUi fallback), dispatches
+// lifecycle callbacks on the Processor, and tracks secondary views.
 class PulpPlugView : public Steinberg::CPluginView {
 public:
     PulpPlugView(Processor& processor, state::StateStore& store);
@@ -35,9 +36,8 @@ public:
 private:
     Processor& processor_;
     state::StateStore& store_;
-    std::unique_ptr<view::View> editor_root_;
+    ViewBridge bridge_;
     std::unique_ptr<view::PluginViewHost> editor_host_;
-    std::unique_ptr<view::ScriptedUiSession> scripted_ui_;
 };
 
 } // namespace pulp::format::vst3

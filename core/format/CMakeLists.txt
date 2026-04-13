@@ -8,12 +8,14 @@ target_include_directories(pulp-format
 )
 
 target_sources(pulp-format PRIVATE
+    src/format.cpp
     src/registry.cpp
     src/headless.cpp
     src/validation_harness.cpp
     src/aax_model.cpp
     src/host_type.cpp
     src/ara.cpp
+    src/view_bridge.cpp
 )
 
 target_link_libraries(pulp-format

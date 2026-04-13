@@ -36,11 +36,17 @@ add_subdirectory(faust-gain)
 add_subdirectory(faust-filter)
 add_subdirectory(faust-tremolo)
 
+# ViewBridge demo: custom create_view() + secondary-view attach
+add_subdirectory(view-bridge-demo)
+
 # GPU Validation Demo: Modulation Matrix with animated cables
 add_subdirectory(gpu-demo)
 
 # SDF Text Demo: Resolution-independent text with bloom post-effect
 add_subdirectory(sdf-text-demo)
+
+# Feature 5 Phase 1: plugin hosting validation — loads a real CLAP plugin
+add_subdirectory(plugin-host-demo)
 
 # AI Style Designer: JS-defined design tool with hot reload
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/design-tool/CMakeLists.txt)

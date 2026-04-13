@@ -3,10 +3,12 @@
 
 #include "cli_common.hpp"
 
+#include <cstdlib>
 #include <fstream>
 #include <iostream>
 #include <regex>
 #include <sstream>
+#include <sys/wait.h>
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -154,7 +156,21 @@ static int version_bump(const std::vector<std::string>& args) {
     return 0;
 }
 
-static int version_check() {
+// Read the TOP-LEVEL "version" field from a JSON file via a tiny regex — we
+// intentionally avoid pulling in a JSON library here. The config files are
+// small and under our control. "Top-level" means two-space indentation (or
+// zero): `"version":` nested deeper (metadata.version, plugins[0].version)
+// is skipped because those are not the canonical version for the file.
+static std::string read_json_version_field(const fs::path& path) {
+    if (!fs::exists(path)) return {};
+    auto content = read_file_contents(path);
+    std::regex re(R"#(^(?:  )?"version"\s*:\s*"([^"]+)")#", std::regex::multiline);
+    std::smatch m;
+    if (std::regex_search(content, m, re)) return m[1].str();
+    return {};
+}
+
+static int version_check_inner(bool with_bump_check) {
     auto root = find_project_root();
     if (root.empty()) {
         std::cerr << "Error: not in a Pulp project directory\n";
@@ -164,7 +180,7 @@ static int version_check() {
     bool all_ok = true;
     auto cmake_ver = read_project_cmake_version(root);
 
-    // Check: SDK constant matches CMakeLists.txt
+    // ── SDK consistency ────────────────────────────────────────────────
     if (!cmake_ver.empty() && cmake_ver != PULP_SDK_VERSION) {
         print_fail("SDK version mismatch: CMakeLists.txt=" + cmake_ver +
                    " cli=" + std::string(PULP_SDK_VERSION));
@@ -173,7 +189,7 @@ static int version_check() {
         print_ok("SDK version consistent: " + cmake_ver);
     }
 
-    // Check: AU Info.plist template not hardcoded
+    // ── AU Info.plist template not hardcoded ───────────────────────────
     auto au_plist = root / "tools" / "cmake" / "PulpInfoPlist.au.in";
     if (fs::exists(au_plist)) {
         auto content = read_file_contents(au_plist);
@@ -185,7 +201,7 @@ static int version_check() {
         }
     }
 
-    // Check: CHANGELOG heading matches
+    // ── CHANGELOG heading matches ──────────────────────────────────────
     auto changelog = root / "CHANGELOG.md";
     if (fs::exists(changelog)) {
         auto cl_content = read_file_contents(changelog);
@@ -200,8 +216,53 @@ static int version_check() {
         }
     }
 
+    // ── Claude plugin manifest ─────────────────────────────────────────
+    auto plugin_path = root / ".claude-plugin" / "plugin.json";
+    auto market_path = root / ".claude-plugin" / "marketplace.json";
+    auto plugin_ver = read_json_version_field(plugin_path);
+    auto market_ver = read_json_version_field(market_path);
+
+    if (plugin_ver.empty() && fs::exists(plugin_path)) {
+        print_warn(".claude-plugin/plugin.json has no \"version\" field");
+    } else if (!plugin_ver.empty()) {
+        // Validate semver shape.
+        std::regex semver(R"(^\d+\.\d+\.\d+$)");
+        if (!std::regex_match(plugin_ver, semver)) {
+            print_fail("plugin.json version is not semver: " + plugin_ver);
+            all_ok = false;
+        } else {
+            print_ok("Claude plugin version: " + plugin_ver);
+        }
+    }
+
+    if (!market_ver.empty() && !plugin_ver.empty() && market_ver != plugin_ver) {
+        print_fail("marketplace.json version (" + market_ver
+                   + ") differs from plugin.json (" + plugin_ver + ")");
+        all_ok = false;
+    } else if (!market_ver.empty()) {
+        print_ok("marketplace.json version matches plugin.json");
+    }
+
+    // ── Optional bump-check integration ────────────────────────────────
+    if (with_bump_check) {
+        auto vbc = root / "tools" / "scripts" / "version_bump_check.py";
+        if (!fs::exists(vbc)) {
+            print_warn("version_bump_check.py not present — skipping --with-bump-check");
+        } else {
+            std::cout << "\n--- version_bump_check (mode=report) ---\n";
+            std::string cmd = "python3 '" + vbc.string() + "' --base origin/main --mode=report";
+            int rc = std::system(cmd.c_str());
+            if (WIFEXITED(rc) && WEXITSTATUS(rc) != 0) {
+                print_fail("version-bump gate reported missing bump(s)");
+                all_ok = false;
+            }
+        }
+    }
+
     return all_ok ? 0 : 1;
 }
+
+static int version_check() { return version_check_inner(false); }
 
 // ── Entry point ─────────────────────────────────────────────────────────────
 
@@ -212,8 +273,14 @@ int cmd_version(const std::vector<std::string>& args) {
         std::vector<std::string> bump_args(args.begin() + 1, args.end());
         return version_bump(bump_args);
     }
-    if (args[0] == "check") return version_check();
+    if (args[0] == "check") {
+        bool with_bump = false;
+        for (size_t i = 1; i < args.size(); ++i) {
+            if (args[i] == "--with-bump-check") with_bump = true;
+        }
+        return version_check_inner(with_bump);
+    }
 
-    std::cerr << "Usage: pulp version [bump <major|minor|patch>] [check]\n";
+    std::cerr << "Usage: pulp version [bump <major|minor|patch>] [check [--with-bump-check]]\n";
     return 1;
 }

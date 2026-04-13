@@ -178,6 +178,21 @@ struct UmpPacket {
         return p;
     }
 
+    // MIDI 2.0 Registered Per-Note Controller (status 0x00). Byte 2 is
+    // the note number, byte 3 is the controller index per the UMP spec.
+    static UmpPacket registered_per_note_cc(uint8_t group, uint8_t channel,
+                                             uint8_t note, uint8_t cc_index,
+                                             uint32_t value) {
+        UmpPacket p;
+        p.word_count = 2;
+        p.words[0] = (0x4u << 28) | (uint32_t(group & 0x0F) << 24)
+                    | (uint32_t(0x00 | (channel & 0x0F)) << 16)
+                    | (uint32_t(note & 0x7F) << 8)
+                    | uint32_t(cc_index & 0x7F);
+        p.words[1] = value;
+        return p;
+    }
+
     // MIDI 1.0 Channel Voice (32-bit backwards compat)
     static UmpPacket midi1_note_on(uint8_t group, uint8_t channel,
                                     uint8_t note, uint8_t velocity) {

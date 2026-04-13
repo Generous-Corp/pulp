@@ -10,9 +10,8 @@
 
 // View includes only when building plugin targets (not the shared format lib)
 #ifdef PULP_CLAP_GUI
+#include <pulp/format/view_bridge.hpp>
 #include <pulp/view/plugin_view_host.hpp>
-#include <pulp/view/scripted_ui.hpp>
-#include <pulp/view/view.hpp>
 #endif
 
 namespace pulp::format::clap_adapter {
@@ -44,15 +43,22 @@ struct PulpClapPlugin {
     int32_t mpe_current_sample_offset = 0;
     bool mpe_enabled = false;
 
+    // UMP sidecar — populated by converting midi_in to MIDI 2.0 UMP packets
+    // when the Processor declares supports_ump. In the future, CLAP hosts
+    // that deliver CLAP_EVENT_MIDI2 can populate this buffer directly.
+    midi::UmpBuffer ump_buffer;
+    bool ump_enabled = false;
+
     // Preset management (optional — set by plugins that provide presets)
     std::unique_ptr<state::PresetManager> preset_manager;
 
-    // Editor state (created on GUI create, destroyed on GUI destroy)
-    // Only available in plugin targets that link pulp::view
+    // Editor state (created on GUI create, destroyed on GUI destroy).
+    // `bridge` owns the view tree and dispatches Processor lifecycle
+    // callbacks (on_view_opened/closed/resized). editor_host is the
+    // platform-native window surface that hosts bridge->view().
 #ifdef PULP_CLAP_GUI
-    std::unique_ptr<view::View> editor_root;
+    std::unique_ptr<ViewBridge> bridge;
     std::unique_ptr<view::PluginViewHost> editor_host;
-    std::unique_ptr<view::ScriptedUiSession> scripted_ui;
 #endif
     bool editor_visible = false;
 };

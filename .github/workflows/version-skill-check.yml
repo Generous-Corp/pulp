@@ -1,0 +1,77 @@
+name: Versioning & Skill-Sync
+
+# Authoritative gate (Layer 3) for the versioning-v2 design:
+# runs version_bump_check.py and skill_sync_check.py on every PR and
+# refuses to merge when either reports a required bump or missing
+# SKILL.md update that isn't explicitly bypassed on the tip commit.
+#
+# Pre-push hook + Shipyard stage run the same scripts locally; this
+# workflow is the no-bypass enforcement layer.
+
+on:
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+    inputs:
+      runner_provider:
+        description: "Runner provider (github-hosted or namespace)"
+        required: false
+        default: github-hosted
+        type: choice
+        options:
+          - github-hosted
+          - namespace
+
+concurrency:
+  group: version-skill-check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  version-skill-check:
+    runs-on: ubuntu-latest
+    name: Enforce version & skill sync
+
+    env:
+      PULP_ENFORCE_PREPUSH: "1"
+
+    steps:
+      - name: Checkout PR head with full history
+        uses: actions/checkout@v5
+        with:
+          # version_bump_check and skill_sync_check both diff against
+          # origin/main — we need the real base to be reachable.
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Resolve diff base
+        id: base
+        run: |
+          # On pull_request events, the merge-base with origin/main is the
+          # right diff source; on workflow_dispatch, fall back to origin/main.
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "ref=origin/${{ github.base_ref }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "ref=origin/main" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Skill-sync check
+        run: |
+          python3 tools/scripts/skill_sync_check.py \
+              --base "${{ steps.base.outputs.ref }}" \
+              --config tools/scripts/versioning.json \
+              --mode=report
+
+      - name: Version-bump check
+        run: |
+          python3 tools/scripts/version_bump_check.py \
+              --base "${{ steps.base.outputs.ref }}" \
+              --config tools/scripts/versioning.json \
+              --mode=report
+
+      - name: Gate-script fixture tests
+        run: |
+          python3 tools/scripts/test_gates.py

@@ -609,6 +609,25 @@ This single class automatically works as VST3, AU, CLAP, LV2, AAX, Standalone, W
 | ARA | `ara.hpp` | Audio Random Access document controller (stub) |
 | Host Detection | `host_type.hpp` | `detect_host_type()` → Logic, Reaper, Ableton, etc. |
 | Settings Panel | `settings_panel.hpp` | Audio/MIDI device selector with test signal and meters |
+| ViewBridge | `view_bridge.hpp` | Editor-view lifecycle: `create_view()`, `on_view_{opened,closed,resized}`, multi-view attach (editor + inspector + remote). See `docs/guides/view-bridge.md`. |
+
+---
+
+## host
+
+Plugin *hosting* — the mirror of `format`. Load VST3 / AU / CLAP / LV2
+plug-ins, wire them into a DAG, and process audio through the chain.
+
+| Feature | Header | Description |
+|---------|--------|-------------|
+| Scanner | `pulp/host/scanner.hpp` | Walk system plug-in paths; return `PluginInfo` |
+| PluginSlot | `pulp/host/plugin_slot.hpp` | Uniform load/prepare/process interface over every format |
+| SignalGraph | `pulp/host/signal_graph.hpp` | DAG topology + topological sort |
+
+Today CLAP loads and processes audio; VST3 / AU / LV2 loaders are stubbed
+(log a warning and return `nullptr`). See
+[hosting guide](../guides/hosting.md) and
+[signal-graph reference](./signal-graph.md).
 
 ---
 

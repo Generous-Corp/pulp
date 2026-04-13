@@ -89,12 +89,21 @@ PluginInfo PluginScanner::scan_vst3_bundle(const std::string& path) {
     return info;
 }
 
+// Forward-declared in scanner_clap.cpp when CLAP SDK is available; returns
+// all descriptors in a bundle (one .clap file may host multiple plugins).
+#if PULP_HOST_HAS_CLAP
+std::vector<PluginInfo> scan_clap_bundle_descriptors(const std::string& path);
+#endif
+
 PluginInfo PluginScanner::scan_clap_bundle(const std::string& path) {
+    // Single-entry stub retained for callers that expect one PluginInfo per
+    // bundle. Real multi-plugin enumeration happens in scan_directory via
+    // scan_clap_bundle_descriptors.
     PluginInfo info;
     info.path = path;
     info.format = PluginFormat::CLAP;
     info.name = fs::path(path).stem().string();
-    info.unique_id = info.name; // TODO: load and query clap_plugin_descriptor
+    info.unique_id = info.name;
     return info;
 }
 
@@ -121,9 +130,15 @@ std::vector<PluginInfo> PluginScanner::scan_directory(const std::string& dir, Pl
             case PluginFormat::VST3:
                 results.push_back(scan_vst3_bundle(path));
                 break;
-            case PluginFormat::CLAP:
+            case PluginFormat::CLAP: {
+#if PULP_HOST_HAS_CLAP
+                auto descs = scan_clap_bundle_descriptors(path);
+                results.insert(results.end(), descs.begin(), descs.end());
+#else
                 results.push_back(scan_clap_bundle(path));
+#endif
                 break;
+            }
             case PluginFormat::LV2:
                 results.push_back(scan_lv2_bundle(path));
                 break;
@@ -135,25 +150,12 @@ std::vector<PluginInfo> PluginScanner::scan_directory(const std::string& dir, Pl
 }
 
 #ifdef __APPLE__
+// Implemented in scanner_au.mm using AudioComponent APIs (the supported
+// discovery mechanism — also handles AUv3 app extensions).
+std::vector<PluginInfo> scan_audio_units_api();
+
 std::vector<PluginInfo> PluginScanner::scan_audio_units() {
-    std::vector<PluginInfo> results;
-    // Scan .component bundles in AU directories
-    for (auto& dir : default_paths(PluginFormat::AudioUnit)) {
-        std::error_code ec;
-        if (!fs::exists(dir, ec)) continue;
-        for (const auto& entry : fs::directory_iterator(dir, ec)) {
-            auto path = entry.path().string();
-            if (path.ends_with(".component")) {
-                PluginInfo info;
-                info.path = path;
-                info.format = PluginFormat::AudioUnit;
-                info.name = entry.path().stem().string();
-                info.unique_id = info.name;
-                results.push_back(std::move(info));
-            }
-        }
-    }
-    return results;
+    return scan_audio_units_api();
 }
 #endif
 

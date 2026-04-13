@@ -36,6 +36,9 @@ static const Command commands[] = {
     {"upgrade",  "Update the CLI to the latest version",  cmd_upgrade},
     {"version",  "Show, bump, or check version info",     cmd_version},
     {"dev",      "Unified dev loop: watch, build, test, run", cmd_dev},
+    {"scan",     "Scan system paths for VST3 / AU / CLAP / LV2 plug-ins", cmd_scan},
+    {"host",     "Load a plug-in and run a synthetic audio block through it", cmd_host},
+    {"pr",       "One-shot push-a-PR: gates + bump + ship",   cmd_pr},
 };
 
 static constexpr int command_count = sizeof(commands) / sizeof(commands[0]);

@@ -442,6 +442,41 @@ Skills in `.agents/skills/` are living documents. When you discover a gotcha, fi
 
 This rule applies to all agents (Claude Code, Codex) and humans. Skills are checked into the repo alongside the code they document.
 
+The rule is **enforced** by `tools/scripts/skill_sync_check.py` via the path map in `tools/scripts/skill_path_map.json`. A PR that touches a skill's mapped paths without also updating the corresponding `SKILL.md` is rejected by CI (`.github/workflows/version-skill-check.yml`) and by the pre-push hook (`.githooks/pre-push`). The explicit per-commit bypass is:
+
+```
+Skill-Update: skip skill=<name> reason="..."
+```
+
+See `docs/guides/versioning.md` for the full three-layer enforcement design.
+
+### Versioning & Skill-Sync Policy
+
+Pulp versions three surfaces independently: SDK/CLI (`CMakeLists.txt`), Claude plugin (`.claude-plugin/plugin.json` + `marketplace.json`), and Shipyard-binary pin (`tools/install-shipyard.sh` — covered by the Dependency Update Workflow, not this policy).
+
+**Enforcement (three layers, one source of truth):**
+
+1. **Agent hooks (Layer 1)** — `hooks/scripts/cli-plugin-sync.sh` runs `version_bump_check.py` and `skill_sync_check.py` in `--mode=hint` on every PostToolUse so you see drift while iterating. Advisory only.
+2. **Pre-push hook (Layer 2)** — `.githooks/pre-push` runs both scripts in `--mode=report`. Advisory by default; `PULP_ENFORCE_PREPUSH=1` upgrades to hard failure.
+3. **CI + Shipyard (Layer 3, authoritative)** — `.github/workflows/version-skill-check.yml` and the `validation.gates` stage in `.shipyard/config.toml` both invoke the same scripts in `--mode=report` with `PULP_ENFORCE_PREPUSH=1`. No bypass other than the commit trailers below.
+
+**Shipping a PR** — when the user says any of "push a PR", "ship this", "ship it", "we're done", "merge this", or "push it", invoke `pulp pr` (the existing `ci` skill routes through this). Never run `gh pr create` + `shipyard ship` separately; never run the version-bump or skill-sync scripts by hand. `pulp pr` orchestrates:
+
+1. `skill_sync_check.py --mode=report` — hard-fails on missing SKILL.md updates.
+2. `version_bump_check.py --mode=apply` — rewrites version files and CHANGELOG stub.
+3. `git commit` + `gh pr create` + `shipyard ship` — one command, merges on green.
+4. `.github/workflows/auto-release.yml` — on merge to main, tags the new version(s) and the existing tag-triggered release workflows build + publish binaries.
+
+**Bypass trailers** (tip commit, never PR body — audit trail lives in git):
+
+| Gate           | Trailer                                                          |
+|----------------|------------------------------------------------------------------|
+| Version bump   | `Version-Bump: <surface>=<patch\|minor\|major\|skip> reason="..."` |
+| Skill update   | `Skill-Update: skip skill=<name> reason="..."`                  |
+| Auto-release   | `Release: skip reason="..."`                                     |
+
+Codex picks this policy up via the existing `AGENTS.md → CLAUDE.md` pointer; `AGENTS.md` intentionally stays a thin redirect so the two never drift. Full design: [docs/guides/versioning.md](docs/guides/versioning.md).
+
 ### Status Vocabulary
 
 Use only these values for `status:` fields in manifests:

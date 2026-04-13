@@ -33,3 +33,31 @@ case "$FILE" in
         echo "CLI SYNC: CLI manifest modified. Verify it matches CLI source and slash commands."
         ;;
 esac
+
+# ── Layer-1 versioning & skill-sync hints ────────────────────────────────
+# Advisory only. The authoritative gate is CI + .githooks/pre-push; this
+# just surfaces drift as early as possible so pulp pr at push time rarely
+# hard-fails. See docs/guides/versioning.md for the full three-layer design.
+#
+# Locate the repo root relative to $FILE so agents in multi-worktree setups
+# call the right scripts.
+REPO_ROOT=""
+candidate="$(dirname "$FILE")"
+while [ -n "$candidate" ] && [ "$candidate" != "/" ]; do
+    if [ -f "$candidate/tools/scripts/versioning.json" ]; then
+        REPO_ROOT="$candidate"
+        break
+    fi
+    candidate="$(dirname "$candidate")"
+done
+
+if [ -n "$REPO_ROOT" ]; then
+    VBC="$REPO_ROOT/tools/scripts/version_bump_check.py"
+    SSC="$REPO_ROOT/tools/scripts/skill_sync_check.py"
+    if [ -x "$VBC" ]; then
+        "$VBC" --base origin/main --config "$REPO_ROOT/tools/scripts/versioning.json" --mode=hint 2>/dev/null || true
+    fi
+    if [ -x "$SSC" ]; then
+        "$SSC" --base origin/main --config "$REPO_ROOT/tools/scripts/versioning.json" --mode=hint 2>/dev/null || true
+    fi
+fi

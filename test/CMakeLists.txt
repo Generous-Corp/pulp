@@ -384,6 +384,11 @@ add_executable(pulp-test-auto-ui test_auto_ui.cpp)
 target_link_libraries(pulp-test-auto-ui PRIVATE pulp::view Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-auto-ui)
 
+# ViewBridge lifecycle tests
+add_executable(pulp-test-view-bridge test_view_bridge.cpp)
+target_link_libraries(pulp-test-view-bridge PRIVATE pulp::format Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-view-bridge)
+
 # Script engine tests (legacy API)
 add_executable(pulp-test-script test_script_engine.cpp)
 target_link_libraries(pulp-test-script PRIVATE pulp::view Catch2::Catch2WithMain)
@@ -761,6 +766,11 @@ add_executable(pulp-test-mpe-voice-tracker test_mpe_voice_tracker.cpp)
 target_link_libraries(pulp-test-mpe-voice-tracker PRIVATE pulp::midi Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-mpe-voice-tracker)
 
+# UMP buffer + MIDI 1.0 <-> UMP conversion + UMP-aware MpeVoiceTracker
+add_executable(pulp-test-ump-buffer-conversion test_ump_buffer_conversion.cpp)
+target_link_libraries(pulp-test-ump-buffer-conversion PRIVATE pulp::format Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-ump-buffer-conversion)
+
 # MPE buffer + Processor sidecar tests
 add_executable(pulp-test-mpe-buffer test_mpe_buffer.cpp)
 target_link_libraries(pulp-test-mpe-buffer PRIVATE pulp::format Catch2::Catch2WithMain)
@@ -774,6 +784,13 @@ catch_discover_tests(pulp-test-mpe-synth-voice)
 # Plugin hosting tests (scanner, signal graph)
 add_executable(pulp-test-host test_host.cpp)
 target_link_libraries(pulp-test-host PRIVATE pulp::host Catch2::Catch2WithMain)
+# Point the integration test at the locally-built PulpGain.clap so the CLAP
+# loader runs against a known real plugin.
+if(TARGET PulpGain_CLAP)
+    target_compile_definitions(pulp-test-host PRIVATE
+        PULP_TEST_CLAP_PATH="${CMAKE_BINARY_DIR}/CLAP/PulpGain.clap")
+    add_dependencies(pulp-test-host PulpGain_CLAP)
+endif()
 catch_discover_tests(pulp-test-host)
 
 # WAMv2 + WebCLAP format adapter tests

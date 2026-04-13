@@ -12,6 +12,33 @@ requires:
 
 Validate branches and ship code safely. This skill handles all CI workflows for Pulp across local machines and VMs.
 
+## Shipping a PR: route through `pulp pr`
+
+When the user says any of: **"push to main"**, **"ship this"**, **"ship it"**,
+**"we're done"**, **"merge this"**, **"push it"**, **"run CI"**, **"push a PR"** —
+run `pulp pr` (not `gh pr create` + `shipyard ship` separately).
+
+`pulp pr` is the single orchestrator. It:
+
+1. Calls `tools/scripts/skill_sync_check.py` and hard-fails if a mapped skill
+   path was touched without a `SKILL.md` update or a `Skill-Update:` trailer.
+2. Calls `tools/scripts/version_bump_check.py --mode=apply` to bump SDK, Claude
+   plugin, and marketplace versions consistently, honoring any
+   `Version-Bump:` trailers.
+3. Commits the bump (if any) as `chore: bump <surfaces>`.
+4. `gh pr create` with a generated body.
+5. `shipyard ship` for cross-platform validate + merge on green.
+6. Auto-release workflow (`.github/workflows/auto-release.yml`) tags and
+   publishes binaries on merge.
+
+Never run `gh pr create` + `shipyard ship` separately for a normal ship
+cycle. Never invoke the two version/skill scripts by hand — `pulp pr`
+wires them together with the right flags.
+
+Backward compatibility: raw `shipyard ship` / `shipyard run` still work for
+diagnostics, experimental branches, or when `pulp pr` itself is being
+debugged. Do not use them as the primary ship path.
+
 ## Tool selection: Shipyard (primary)
 
 **Shipyard is Pulp's primary CI tool.** All merges, validations, and
@@ -392,3 +419,20 @@ Keep hostnames and VM names local. Shared repo docs and skills should describe h
 
 Full setup guide: `docs/guides/local-ci.md`
 SSH key setup for Windows/Linux VMs: `docs/guides/local-ci.md` § "Set up SSH keys"
+
+## Versioning & Skill-Sync gates (Layer 3)
+
+`pulp pr` orchestrates the full shipping flow. CI enforces two gates on every PR to `main`:
+
+- `.github/workflows/version-skill-check.yml` — runs `tools/scripts/version_bump_check.py` and `tools/scripts/skill_sync_check.py` in `--mode=report`. Failure blocks merge. No bypass except the commit trailers documented in `docs/guides/versioning.md`.
+- `.shipyard/config.toml` → `[validation.gates]` pipeline — same scripts via `shipyard run --pipeline gates`. Runs with `PULP_ENFORCE_PREPUSH=1` so warnings become errors.
+
+Locally:
+
+- `.githooks/pre-push` (install via `tools/scripts/install-githooks.sh`) runs both scripts advisory-by-default. `PULP_ENFORCE_PREPUSH=1` upgrades to hard fail; `PULP_SKIP_PREPUSH=1` is the single-push emergency bypass.
+
+**Gotcha:** changing anything under `.github/workflows/**`, `tools/shipyard.toml`, `.shipyard/**`, `.githooks/**`, `tools/install-shipyard.sh`, or `tools/scripts/install-githooks.sh` triggers the skill-sync gate for the `ci` skill — keep this file in sync when those paths move. The map lives at `tools/scripts/skill_path_map.json`.
+
+**Auto-release:** `.github/workflows/auto-release.yml` fires on push to `main`. It diffs the two version-bearing files (`CMakeLists.txt` project version, `.claude-plugin/plugin.json` version) against the previous push range and creates the corresponding `v<x.y.z>` or `plugin-v<x.y.z>` tag. The existing tag-triggered release workflows (`release-cli.yml`, `sign-and-release.yml`) then build and publish. `Release: skip reason="..."` on the merging commit suppresses the tag.
+
+**Tag safety:** the auto-release workflow is idempotent-strict — if a tag already exists pointing at a different SHA, it fails loudly rather than overwriting. See `docs/guides/versioning.md` for the manual recovery recipe.
