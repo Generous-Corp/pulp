@@ -437,39 +437,46 @@ def bump_version(current: str, level: str) -> str:
 # ── Reporting / apply ───────────────────────────────────────────────────
 
 
-def already_bumped(base: str, vf: VersionFile, repo: Path) -> bool:
-    """True iff the version file's version at HEAD differs from at base."""
-    p = repo / vf.path
-    if not p.exists():
-        return False
+def _extract_version_from_text(text: str, vf: VersionFile) -> str | None:
+    if vf.kind == "cmake_project_version":
+        m = _CMAKE_PROJECT_VERSION_RE.search(text)
+        return m.group(2) if m else None
+    if vf.kind == "json_field":
+        try:
+            return json.loads(text).get(vf.field)
+        except json.JSONDecodeError:
+            return None
+    if vf.kind == "pyproject_version":
+        m = re.search(r'^\s*version\s*=\s*"([^"]+)"', text, re.MULTILINE)
+        return m.group(1) if m else None
+    if vf.kind == "python_dunder_version":
+        m = re.search(r'^\s*__version__\s*=\s*"([^"]+)"', text, re.MULTILINE)
+        return m.group(1) if m else None
+    return None
+
+
+def version_at_base(base: str, vf: VersionFile) -> str | None:
+    """Read the version from a file as it existed at `base`, or None."""
     try:
         base_text = subprocess.run(
             ["git", "show", f"{base}:{vf.path}"],
             check=True, capture_output=True, text=True,
         ).stdout
     except subprocess.CalledProcessError:
-        return False
-
-    def extract(text: str) -> str | None:
-        if vf.kind == "cmake_project_version":
-            m = _CMAKE_PROJECT_VERSION_RE.search(text)
-            return m.group(2) if m else None
-        if vf.kind == "json_field":
-            try:
-                return json.loads(text).get(vf.field)
-            except json.JSONDecodeError:
-                return None
-        if vf.kind == "pyproject_version":
-            m = re.search(r'^\s*version\s*=\s*"([^"]+)"', text, re.MULTILINE)
-            return m.group(1) if m else None
-        if vf.kind == "python_dunder_version":
-            m = re.search(r'^\s*__version__\s*=\s*"([^"]+)"', text, re.MULTILINE)
-            return m.group(1) if m else None
         return None
+    return _extract_version_from_text(base_text, vf)
 
-    base_ver = extract(base_text)
-    head_ver = extract((repo / vf.path).read_text())
-    if base_ver is None or head_ver is None:
+
+def already_bumped(base: str, vf: VersionFile, repo: Path) -> bool:
+    """True iff the version file's version at HEAD differs from at base."""
+    p = repo / vf.path
+    if not p.exists():
+        return False
+    base_ver = version_at_base(base, vf)
+    if base_ver is None:
+        return False
+    head_ver = _extract_version_from_text((repo / vf.path).read_text(), vf)
+    if head_ver is None:
         return False
     return base_ver != head_ver
 
@@ -622,7 +629,18 @@ def apply_bumps(
         all_bumped = all(already_bumped(base, vf, repo) for vf in v.surface.version_files)
         if all_bumped or not v.current_version:
             continue
-        new_ver = bump_version(v.current_version, v.final_level)
+        # Compute the target from the BASE version, not v.current_version.
+        # v.current_version reflects the first readable file at HEAD, which
+        # may already have been bumped by a prior partial run — bumping it
+        # again would double-bump (e.g. 0.1.0 -> 0.2.0 -> 0.3.0). Reading
+        # the base keeps a partial-apply idempotent.
+        base_ver: str | None = None
+        for vf in v.surface.version_files:
+            base_ver = version_at_base(base, vf)
+            if base_ver:
+                break
+        source_ver = base_ver or v.current_version
+        new_ver = bump_version(source_ver, v.final_level)
         for vf in v.surface.version_files:
             if write_version(repo, vf, new_ver):
                 edited.append(vf.path)
