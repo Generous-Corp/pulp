@@ -12,22 +12,26 @@
 #import <Cocoa/Cocoa.h>
 #import <objc/runtime.h>
 
-#include <pulp/format/editor_ui.hpp>
+#include <pulp/format/au_v2_adapter.hpp>
 #include <pulp/format/processor.hpp>
-#include <pulp/format/registry.hpp>
+#include <pulp/format/view_bridge.hpp>
 #include <pulp/view/plugin_view_host.hpp>
 #include <pulp/runtime/log.hpp>
 
 // ── Ownership wrapper ──────────────────────────────────────────────────
 // Wraps C++ ownership objects in an ObjC class so they share the NSView's
 // lifetime via an associated object.
+//
+// IMPORTANT: we no longer own a Processor / StateStore here — those are
+// fetched from the host's PulpAUEffect via the private
+// `kPulpEditorContextProperty`. Creating a second Processor for the
+// view (the pre-ViewBridge behavior) silently desynchronized parameter
+// state between the audio thread and the UI; see the plan for Feature 1
+// Phase 3 and au_v2_adapter.{hpp,cpp}.
 
 struct PulpAUEditorOwnership {
-    std::unique_ptr<pulp::view::View> root;
+    std::unique_ptr<pulp::format::ViewBridge> bridge;
     std::unique_ptr<pulp::view::PluginViewHost> host;
-    std::unique_ptr<pulp::view::ScriptedUiSession> scripted_ui;
-    std::shared_ptr<pulp::state::StateStore> store;
-    std::unique_ptr<pulp::format::Processor> processor;
 };
 
 @interface PulpAUEditorOwner : NSObject {
@@ -43,7 +47,10 @@ struct PulpAUEditorOwnership {
     return self;
 }
 - (void)dealloc {
-    delete _ownership;
+    if (_ownership) {
+        if (_ownership->bridge) _ownership->bridge->close();
+        delete _ownership;
+    }
     [super dealloc];
 }
 @end
@@ -64,66 +71,63 @@ static const char kOwnershipKey = 0;
 - (NSView *)uiViewForAudioUnit:(AudioUnit)inAU withSize:(NSSize)inPreferredSize {
     using namespace pulp;
 
-    // Get the processor factory from the registry
-    auto factory_fn = format::registered_factory();
-    if (!factory_fn) {
-        runtime::log_error("AU v2 editor: no registered processor factory");
+    // Fetch the host's Processor + StateStore via a private AU property.
+    // This is the fix for the former dual-Processor bug — previously we
+    // called `registered_factory()` here to spin up a second Processor
+    // instance whose parameters drifted from the audio-thread Processor's.
+    format::au::PulpEditorContext ctx{};
+    UInt32 size = sizeof(ctx);
+    OSStatus status = AudioUnitGetProperty(
+        inAU,
+        format::au::kPulpEditorContextProperty,
+        kAudioUnitScope_Global, 0, &ctx, &size);
+    if (status != noErr || !ctx.processor || !ctx.store) {
+        runtime::log_error("AU v2 editor: could not fetch editor context (status={})",
+                           static_cast<int>(status));
         return nil;
     }
 
-    // Create a processor to get editor size and build parameters
-    auto processor = factory_fn();
-    if (!processor || !processor->has_editor()) {
+    if (!ctx.processor->has_editor()) {
         runtime::log_error("AU v2 editor: processor has no editor");
         return nil;
     }
 
-    // Create a StateStore and define parameters
-    auto store = std::make_shared<state::StateStore>();
-    processor->set_state_store(store.get());
-    processor->define_parameters(*store);
-
-    // Sync current parameter values from the AudioUnit
-    auto params = store->all_params();
-    for (const auto& param : params) {
-        Float32 value = 0;
-        AudioUnitGetParameter(inAU,
-            static_cast<AudioUnitParameterID>(param.id),
-            kAudioUnitScope_Global, 0, &value);
-        store->set_value(param.id, value);
-    }
-
+    auto bridge = std::make_unique<format::ViewBridge>(
+        *ctx.processor, *ctx.store,
+        format::ViewBridge::Options{.enable_hot_reload = false,
+                                    .role = format::ViewRole::Editor});
     std::string editor_error;
-    auto editor_ui = format::build_editor_ui(*store, false, &editor_error);
-    auto root = std::move(editor_ui.root);
-    if (!root) {
-        runtime::log_error("AU v2 editor: failed to build editor UI ({})", editor_error);
+    if (!bridge->open(&editor_error)) {
+        runtime::log_error("AU v2 editor: ViewBridge::open failed ({})", editor_error);
         return nil;
     }
 
-    auto [w, h] = processor->editor_size();
+    const uint32_t w = bridge->size_hints().preferred_width;
+    const uint32_t h = bridge->size_hints().preferred_height;
+
     view::PluginViewHost::Options opts;
     opts.size = {w, h};
     opts.use_gpu = false;
 
-    auto host = view::PluginViewHost::create(*root, opts);
+    auto host = view::PluginViewHost::create(*bridge->view(), opts);
     if (!host) {
         runtime::log_error("AU v2 editor: PluginViewHost::create() failed");
+        bridge->close();
         return nil;
     }
 
+    bridge->notify_attached();
+
     runtime::log_info("AU v2 editor: created view ({}x{}, mode={})",
-                      w, h, editor_ui.uses_script_ui ? "scripted" : "autoui");
+                      w, h, bridge->uses_script_ui() ? "scripted" : "autoui");
 
     NSView* editorView = (__bridge NSView*)host->native_handle();
     [editorView setFrame:NSMakeRect(0, 0, w, h)];
 
     // Transfer C++ ownership to an ObjC wrapper attached to the NSView.
-    // When the NSView is deallocated, the wrapper's dealloc frees the C++ objects.
-    auto* ownership = new PulpAUEditorOwnership{
-        std::move(root), std::move(host), std::move(editor_ui.scripted_ui),
-        std::move(store), std::move(processor)
-    };
+    // When the NSView is deallocated, the wrapper's dealloc closes the
+    // bridge (fires Processor::on_view_closed) and frees the host.
+    auto* ownership = new PulpAUEditorOwnership{std::move(bridge), std::move(host)};
     PulpAUEditorOwner* owner = [[PulpAUEditorOwner alloc] initWithOwnership:ownership];
     objc_setAssociatedObject(editorView, &kOwnershipKey, owner,
                              OBJC_ASSOCIATION_RETAIN_NONATOMIC);

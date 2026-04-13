@@ -9,6 +9,18 @@
 
 namespace pulp::format::au {
 
+/// Custom AU property ID the Cocoa view factory queries to obtain
+/// the host-side Processor + StateStore pointers. Fixes the former
+/// "dual-Processor" bug where the Cocoa view created a second Processor
+/// instance that silently desynchronized from the host's audio-thread
+/// Processor. Property is Global scope, read-only.
+static constexpr AudioUnitPropertyID kPulpEditorContextProperty = 0x50754564; // 'PuEd'
+
+struct PulpEditorContext {
+    pulp::format::Processor* processor;
+    pulp::state::StateStore* store;
+};
+
 class PulpAUEffect : public ausdk::AUEffectBase {
 public:
     explicit PulpAUEffect(AudioComponentInstance ci);
@@ -22,6 +34,12 @@ public:
     OSStatus GetParameterValueStrings(AudioUnitScope inScope,
                                       AudioUnitParameterID inParameterID,
                                       CFArrayRef* outStrings) override;
+
+    OSStatus GetPropertyInfo(AudioUnitPropertyID inID, AudioUnitScope inScope,
+                             AudioUnitElement inElement, UInt32& outDataSize,
+                             bool& outWritable) override;
+    OSStatus GetProperty(AudioUnitPropertyID inID, AudioUnitScope inScope,
+                         AudioUnitElement inElement, void* outData) override;
 
     OSStatus Initialize() override;
     void Cleanup() override;

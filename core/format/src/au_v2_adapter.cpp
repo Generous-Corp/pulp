@@ -146,6 +146,35 @@ OSStatus PulpAUEffect::GetParameterValueStrings(AudioUnitScope inScope,
     return noErr;
 }
 
+OSStatus PulpAUEffect::GetPropertyInfo(AudioUnitPropertyID inID, AudioUnitScope inScope,
+                                       AudioUnitElement inElement, UInt32& outDataSize,
+                                       bool& outWritable)
+{
+    if (inID == kPulpEditorContextProperty) {
+        if (inScope != kAudioUnitScope_Global) return kAudioUnitErr_InvalidScope;
+        if (inElement != 0) return kAudioUnitErr_InvalidElement;
+        outDataSize = sizeof(PulpEditorContext);
+        outWritable = false;
+        return noErr;
+    }
+    return AUEffectBase::GetPropertyInfo(inID, inScope, inElement, outDataSize, outWritable);
+}
+
+OSStatus PulpAUEffect::GetProperty(AudioUnitPropertyID inID, AudioUnitScope inScope,
+                                   AudioUnitElement inElement, void* outData)
+{
+    if (inID == kPulpEditorContextProperty) {
+        if (inScope != kAudioUnitScope_Global) return kAudioUnitErr_InvalidScope;
+        if (inElement != 0) return kAudioUnitErr_InvalidElement;
+        if (!outData) return kAudioUnitErr_InvalidProperty;
+        auto* ctx = static_cast<PulpEditorContext*>(outData);
+        ctx->processor = processor_.get();
+        ctx->store = &store_;
+        return noErr;
+    }
+    return AUEffectBase::GetProperty(inID, inScope, inElement, outData);
+}
+
 OSStatus PulpAUEffect::Initialize()
 {
     auto result = AUEffectBase::Initialize();
