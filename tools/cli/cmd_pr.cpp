@@ -31,8 +31,18 @@
 #include <iostream>
 #include <sstream>
 #include <string>
-#include <sys/wait.h>
 #include <vector>
+
+#if !defined(_WIN32)
+#  include <sys/wait.h>
+#else
+#  ifndef WIFEXITED
+#    define WIFEXITED(status)   (true)
+#  endif
+#  ifndef WEXITSTATUS
+#    define WEXITSTATUS(status) (status)
+#  endif
+#endif
 
 namespace {
 
