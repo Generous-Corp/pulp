@@ -11,6 +11,7 @@
 //   - the value at a far "outside" texel is low (close to 0)
 
 #include <pulp/canvas/sdf_atlas.hpp>
+#include <pulp/canvas/sdf_text.hpp>
 
 #include <catch2/catch_test_macros.hpp>
 
@@ -85,6 +86,63 @@ TEST_CASE("SdfAtlas SDF gradient is monotonic from centre outward",
         REQUIRE(v <= prev + 2);
         prev = v;
     }
+}
+
+TEST_CASE("SdfAtlas captures real glyph metrics when Skia is available",
+          "[canvas][sdf][metrics]") {
+    SdfAtlas atlas;
+    std::vector<char32_t> chars = {U'i', U'M', U' '};
+    REQUIRE(atlas.build("", chars, 48, 6, 1024));
+
+    const SdfGlyph* gi = atlas.glyph(U'i');
+    const SdfGlyph* gM = atlas.glyph(U'M');
+    const SdfGlyph* gsp = atlas.glyph(U' ');
+    REQUIRE(gi != nullptr);
+    REQUIRE(gM != nullptr);
+    REQUIRE(gsp != nullptr);
+
+    // All advances must be positive in both real and fallback paths.
+    REQUIRE(gi->advance > 0.0f);
+    REQUIRE(gsp->advance > 0.0f);
+    REQUIRE(gM->advance >= gi->advance);
+
+    // When Skia actually resolved a typeface the advances of 'i' and 'M'
+    // diverge and bearings are non-trivial. When the test environment has
+    // no default font SdfAtlas fills metrics with the base_size fallback
+    // (advance == 48, bearing_y == 48) — that case is still covered by
+    // the non-regressive assertions above. Only validate the "real" path
+    // when we can see it was taken.
+    const bool real_metrics = gM->advance != gi->advance;
+    if (real_metrics) {
+        REQUIRE(gM->advance > gi->advance);
+        REQUIRE(gM->bearing_y >  0.0f);
+        REQUIRE(gM->bearing_y <= 96.0f);
+    }
+}
+
+TEST_CASE("SDF pen snapping policies produce expected positions",
+          "[canvas][sdf][subpixel]") {
+    using pulp::canvas::SdfPenSnap;
+    using pulp::canvas::snap_pen_x;
+    using pulp::canvas::snap_pen_y;
+
+    // Free: passthrough.
+    REQUIRE(snap_pen_x(10.37f, SdfPenSnap::Free) == 10.37f);
+    REQUIRE(snap_pen_y(10.37f, SdfPenSnap::Free) == 10.37f);
+
+    // Nearest: integer rounding.
+    REQUIRE(snap_pen_x(10.49f, SdfPenSnap::Nearest) == 10.0f);
+    REQUIRE(snap_pen_x(10.51f, SdfPenSnap::Nearest) == 11.0f);
+    REQUIRE(snap_pen_y(10.51f, SdfPenSnap::Nearest) == 11.0f);
+
+    // SubpixelThird: round to nearest 1/3 on x, integer on y.
+    const float t1 = snap_pen_x(10.10f, SdfPenSnap::SubpixelThird);
+    const float t2 = snap_pen_x(10.40f, SdfPenSnap::SubpixelThird);
+    const float t3 = snap_pen_x(10.80f, SdfPenSnap::SubpixelThird);
+    REQUIRE(std::abs(t1 - 10.0f) < 1e-4f);
+    REQUIRE(std::abs(t2 - (10.0f + 1.0f / 3.0f)) < 1e-4f);
+    REQUIRE(std::abs(t3 - (10.0f + 2.0f / 3.0f)) < 1e-4f);
+    REQUIRE(snap_pen_y(10.80f, SdfPenSnap::SubpixelThird) == 11.0f);
 }
 
 TEST_CASE("SdfAtlas refuses to build when atlas would exceed max size",

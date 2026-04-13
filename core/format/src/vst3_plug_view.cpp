@@ -4,7 +4,6 @@
 
 #ifdef PULP_VST3_GUI
 
-#include <pulp/format/editor_ui.hpp>
 #include <pulp/format/vst3_plug_view.hpp>
 #include <pulp/runtime/log.hpp>
 #include <cstring>
@@ -17,9 +16,11 @@ PulpPlugView::PulpPlugView(Processor& processor, state::StateStore& store)
     : CPluginView(nullptr)
     , processor_(processor)
     , store_(store)
+    , bridge_(processor, store)
 {
-    auto [w, h] = processor_.editor_size();
-    ViewRect r(0, 0, static_cast<int32>(w), static_cast<int32>(h));
+    const auto& hints = bridge_.size_hints();
+    ViewRect r(0, 0, static_cast<int32>(hints.preferred_width),
+               static_cast<int32>(hints.preferred_height));
     setRect(r);
 }
 
@@ -36,34 +37,38 @@ tresult PLUGIN_API PulpPlugView::isPlatformTypeSupported(FIDString type) {
 
 tresult PLUGIN_API PulpPlugView::attached(void* parent, FIDString type) {
     std::string editor_error;
-    auto editor_ui = build_editor_ui(store_, false, &editor_error);
-    editor_root_ = std::move(editor_ui.root);
-    scripted_ui_ = std::move(editor_ui.scripted_ui);
-    if (!editor_root_) {
+    if (!bridge_.open(&editor_error)) {
         runtime::log_error("VST3 editor: failed to build editor UI ({})", editor_error);
         return kResultFalse;
     }
 
-    auto [w, h] = processor_.editor_size();
+    const auto& hints = bridge_.size_hints();
     view::PluginViewHost::Options opts;
-    opts.size = {w, h};
+    opts.size = {hints.preferred_width, hints.preferred_height};
     opts.use_gpu = false;  // CoreGraphics for now; GPU opt-in later
 
-    editor_host_ = view::PluginViewHost::create(*editor_root_, opts);
+    editor_host_ = view::PluginViewHost::create(*bridge_.view(), opts);
     if (!editor_host_) {
         runtime::log_error("VST3 editor: PluginViewHost::create() failed");
-        editor_root_.reset();
+        bridge_.close();
         return kResultFalse;
     }
 
-    // Attach to the host's parent window
     editor_host_->attach_to_parent(parent);
-
-    // Let CPluginView track the system window
     auto result = CPluginView::attached(parent, type);
+    if (result != kResultTrue) {
+        editor_host_->detach();
+        editor_host_.reset();
+        bridge_.close();
+        return result;
+    }
+
+    // Attach succeeded — now fire Processor::on_view_opened.
+    bridge_.notify_attached();
 
     runtime::log_info("VST3 editor: attached ({}x{}, mode={})",
-                      w, h, editor_ui.uses_script_ui ? "scripted" : "autoui");
+                      hints.preferred_width, hints.preferred_height,
+                      bridge_.uses_script_ui() ? "scripted" : "autoui");
     return result;
 }
 
@@ -72,8 +77,7 @@ tresult PLUGIN_API PulpPlugView::removed() {
         editor_host_->detach();
         editor_host_.reset();
     }
-    scripted_ui_.reset();
-    editor_root_.reset();
+    bridge_.close();
 
     runtime::log_info("VST3 editor: removed");
     return CPluginView::removed();
@@ -81,11 +85,11 @@ tresult PLUGIN_API PulpPlugView::removed() {
 
 tresult PLUGIN_API PulpPlugView::getSize(ViewRect* size) {
     if (!size) return kInvalidArgument;
-    auto [w, h] = processor_.editor_size();
+    const auto& hints = bridge_.size_hints();
     size->left = 0;
     size->top = 0;
-    size->right = static_cast<int32>(w);
-    size->bottom = static_cast<int32>(h);
+    size->right = static_cast<int32>(hints.preferred_width);
+    size->bottom = static_cast<int32>(hints.preferred_height);
     return kResultTrue;
 }
 
@@ -94,9 +98,10 @@ tresult PLUGIN_API PulpPlugView::onSize(ViewRect* newSize) {
 
     auto result = CPluginView::onSize(newSize);
 
+    uint32_t w = static_cast<uint32_t>(newSize->getWidth());
+    uint32_t h = static_cast<uint32_t>(newSize->getHeight());
+    bridge_.resize(w, h);
     if (editor_host_) {
-        uint32_t w = static_cast<uint32_t>(newSize->getWidth());
-        uint32_t h = static_cast<uint32_t>(newSize->getHeight());
         editor_host_->set_size(w, h);
     }
 

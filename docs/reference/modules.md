@@ -43,6 +43,25 @@ auto params = doc.xpath_strings("//param"); // ["Gain"]
 doc.save_file("settings.xml");
 ```
 
+### Streams — Unified byte I/O
+
+One interface (`pulp::runtime::Stream`) for files, memory, pipes, TCP, and HTTP. See [docs/reference/streams.md](./streams.md) for the full API.
+
+```cpp
+#include <pulp/runtime/stream.hpp>
+#include <pulp/runtime/async_stream.hpp>
+
+// Synchronous file I/O via the common interface.
+FileStream f("preset.bin", FileStream::Mode::Read);
+std::uint8_t buf[512]{};
+auto r = f.read(buf, sizeof(buf));   // StreamResult{bytes, error}
+
+// Wrap any Stream in AsyncStream for backpressure + cancellation.
+AsyncStream async(std::make_unique<FileStream>("large.wav"));
+async.on_data([](auto* data, auto n) { /* on worker thread */ });
+async.start();
+```
+
 ### HTTP — Network requests
 
 GET, POST, and file download via cpp-httplib (MIT). Use for license checks, cloud presets, update notifications.
@@ -324,6 +343,7 @@ send_sysex(inquiry);  // Send over MIDI port
 | Files | `midi_file.hpp` | Read/write Standard MIDI Files |
 | Messages | via CHOC | `ShortMessage::noteOn(0, 60, 100)` |
 | UMP | `ump.hpp` | MIDI 2.0 Universal MIDI Packets, MPE zones |
+| MPE | `mpe_voice_tracker.hpp`, `mpe_buffer.hpp`, `mpe_synth_voice.hpp` | Per-note pitch bend / pressure / timbre tracking, opt-in sidecar buffer, and voice/allocator helpers. See [docs/guides/mpe.md](../guides/mpe.md) |
 
 ---
 
@@ -589,6 +609,7 @@ This single class automatically works as VST3, AU, CLAP, LV2, AAX, Standalone, W
 | ARA | `ara.hpp` | Audio Random Access document controller (stub) |
 | Host Detection | `host_type.hpp` | `detect_host_type()` → Logic, Reaper, Ableton, etc. |
 | Settings Panel | `settings_panel.hpp` | Audio/MIDI device selector with test signal and meters |
+| ViewBridge | `view_bridge.hpp` | Editor-view lifecycle: `create_view()`, `on_view_{opened,closed,resized}`, multi-view attach (editor + inspector + remote). See `docs/guides/view-bridge.md`. |
 
 ---
 
@@ -651,6 +672,12 @@ float height = shaper.measure_height(prepared, 300.0f);  // Fast
 | Image Convolution | `image_convolution.hpp` | `ImageConvolutionKernel::gaussian_blur_5().apply(pixels, w, h)` |
 | Rectangle List | `rectangle_list.hpp` | Clip regions with add/subtract/intersect for dirty tracking |
 | SVG | `svg.hpp` | Load and render SVG vector graphics via nanosvg |
+| SDF text | `sdf_atlas.hpp` | Single-channel signed distance field glyph atlas for resolution-independent GPU text. See [docs/reference/sdf-text.md](./sdf-text.md). |
+| MSDF text | `msdf_atlas.hpp` | Multi-channel SDF atlas with `median(r,g,b)` sampler for sharp corners at extreme zoom (in-house median-of-three generator). |
+| PSDF text | `psdf_atlas.hpp` | Pseudo-SDF variant with vector-fallback helper for extreme zoom. |
+| SDF effects | `sdf_effects.hpp` | Design-token presets for outline / shadow / glow / bevel over any SDF atlas (SkSL effect module). |
+| SDF atlas cache | `sdf_atlas_cache.hpp` | Frame-based LRU glyph sharing across `fill_text_sdf` call-sites with dirty-rect upload hints. |
+| Path → SDF | `path_to_sdf.hpp` | Runtime EDT of a binary mask to produce an SDF for procedural shapes (Phase 5). |
 
 ---
 

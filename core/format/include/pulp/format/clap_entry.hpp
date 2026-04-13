@@ -273,22 +273,27 @@ inline bool gui_create(const clap_plugin_t* plugin, const char*, bool) {
     if (!p->processor || !p->processor->has_editor()) return false;
 
     std::string editor_error;
-    auto editor_ui = build_editor_ui(p->store, false, &editor_error);
-    p->editor_root = std::move(editor_ui.root);
-    p->scripted_ui = std::move(editor_ui.scripted_ui);
-    if (!p->editor_root) return false;
+    p->bridge = std::make_unique<ViewBridge>(*p->processor, p->store);
+    if (!p->bridge->open(&editor_error)) {
+        runtime::log_error("CLAP editor: bridge->open failed ({})", editor_error);
+        p->bridge.reset();
+        return false;
+    }
 
-    auto [w, h] = p->processor->editor_size();
+    const auto& hints = p->bridge->size_hints();
     view::PluginViewHost::Options opts;
-    opts.size = {w, h};
+    opts.size = {hints.preferred_width, hints.preferred_height};
     opts.use_gpu = false;  // Start with CoreGraphics; GPU opt-in later
 
-    p->editor_host = view::PluginViewHost::create(*p->editor_root, opts);
+    p->editor_host = view::PluginViewHost::create(*p->bridge->view(), opts);
     if (p->editor_host) {
         runtime::log_info("CLAP editor: created ({}x{}, mode={})",
-                          w, h, editor_ui.uses_script_ui ? "scripted" : "autoui");
+                          hints.preferred_width, hints.preferred_height,
+                          p->bridge->uses_script_ui() ? "scripted" : "autoui");
     } else {
-        runtime::log_error("CLAP editor: failed to create host ({})", editor_error);
+        runtime::log_error("CLAP editor: failed to create host");
+        p->bridge->close();
+        p->bridge.reset();
     }
     return p->editor_host != nullptr;
 }
@@ -296,8 +301,10 @@ inline bool gui_create(const clap_plugin_t* plugin, const char*, bool) {
 inline void gui_destroy(const clap_plugin_t* plugin) {
     auto* p = static_cast<clap_adapter::PulpClapPlugin*>(plugin->plugin_data);
     p->editor_host.reset();
-    p->scripted_ui.reset();
-    p->editor_root.reset();
+    if (p->bridge) {
+        p->bridge->close();
+        p->bridge.reset();
+    }
     p->editor_visible = false;
 }
 
@@ -308,9 +315,15 @@ inline bool gui_set_scale(const clap_plugin_t*, double) {
 inline bool gui_get_size(const clap_plugin_t* plugin, uint32_t* width, uint32_t* height) {
     auto* p = static_cast<clap_adapter::PulpClapPlugin*>(plugin->plugin_data);
     if (!p->processor) return false;
-    auto [w, h] = p->processor->editor_size();
-    *width = w;
-    *height = h;
+    if (p->bridge) {
+        const auto& h = p->bridge->size_hints();
+        *width = h.preferred_width;
+        *height = h.preferred_height;
+    } else {
+        auto [w, ht] = p->processor->editor_size();
+        *width = w;
+        *height = ht;
+    }
     return true;
 }
 
@@ -326,6 +339,7 @@ inline bool gui_adjust_size(const clap_plugin_t*, uint32_t*, uint32_t*) {
 
 inline bool gui_set_size(const clap_plugin_t* plugin, uint32_t width, uint32_t height) {
     auto* p = static_cast<clap_adapter::PulpClapPlugin*>(plugin->plugin_data);
+    if (p->bridge) p->bridge->resize(width, height);
     if (p->editor_host) {
         p->editor_host->set_size(width, height);
         return true;
@@ -337,23 +351,27 @@ inline bool gui_set_parent(const clap_plugin_t* plugin, const clap_window_t* win
     auto* p = static_cast<clap_adapter::PulpClapPlugin*>(plugin->plugin_data);
     if (!p->editor_host) return false;
 
+    bool attached = false;
 #ifdef __APPLE__
     if (strcmp(window->api, CLAP_WINDOW_API_COCOA) == 0) {
         p->editor_host->attach_to_parent(window->cocoa);
-        return true;
+        attached = true;
     }
 #elif defined(_WIN32)
     if (strcmp(window->api, CLAP_WINDOW_API_WIN32) == 0) {
         p->editor_host->attach_to_parent(window->win32);
-        return true;
+        attached = true;
     }
 #elif defined(__linux__)
     if (strcmp(window->api, CLAP_WINDOW_API_X11) == 0) {
         p->editor_host->attach_to_parent(reinterpret_cast<void*>(window->x11));
-        return true;
+        attached = true;
     }
 #endif
-    return false;
+    if (attached && p->bridge) {
+        p->bridge->notify_attached();
+    }
+    return attached;
 }
 
 inline bool gui_set_transient(const clap_plugin_t*, const clap_window_t*) {

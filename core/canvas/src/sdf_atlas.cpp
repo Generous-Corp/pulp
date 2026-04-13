@@ -28,6 +28,9 @@
     #include "include/core/SkColor.h"
     #include "include/core/SkFont.h"
     #include "include/core/SkFontMgr.h"
+    #include "include/core/SkPaint.h"
+    #include "include/core/SkTypeface.h"
+    #include "include/core/SkImageInfo.h"
     #ifdef __APPLE__
         #include "include/ports/SkFontMgr_mac_ct.h"
     #elif defined(_WIN32)
@@ -39,9 +42,6 @@
         #include "include/ports/SkFontMgr_fontconfig.h"
         #include "include/ports/SkFontScanner_FreeType.h"
     #endif
-    #include "include/core/SkPaint.h"
-    #include "include/core/SkTypeface.h"
-    #include "include/core/SkImageInfo.h"
 #endif
 
 namespace pulp::canvas {
@@ -129,6 +129,16 @@ std::vector<float> distance_transform(const std::uint8_t* mask, int w, int h) {
     return result;
 }
 
+// Real glyph metrics captured from SkFont. Replaces the placeholder
+// values that were previously stored on SdfGlyph. Units are pixels at
+// base_size.
+struct GlyphMetrics {
+    float bearing_x = 0.0f;  // left side bearing (positive = inset from origin)
+    float bearing_y = 0.0f;  // top bearing above baseline (positive up)
+    float advance   = 0.0f;  // pen advance after drawing
+    bool  valid     = false;
+};
+
 // Placeholder glyph rasterizer: draws a filled circle whose radius is
 // derived from the codepoint, so the test suite can validate the
 // distance transform without depending on a font.
@@ -154,6 +164,68 @@ std::vector<std::uint8_t> rasterize_placeholder(char32_t codepoint, int w, int h
 }
 
 #if PULP_HAS_SKIA
+// Resolve a typeface the same way rasterize_skia() does so metrics and
+// rasterization agree on which font is in use.
+sk_sp<SkFontMgr> make_font_mgr() {
+#ifdef __APPLE__
+    return SkFontMgr_New_CoreText(nullptr);
+#elif defined(_WIN32)
+    return SkFontMgr_New_DirectWrite();
+#elif defined(__ANDROID__)
+    return SkFontMgr_New_Android(nullptr, SkFontScanner_Make_FreeType());
+#elif defined(__linux__)
+    return SkFontMgr_New_FontConfig(nullptr, SkFontScanner_Make_FreeType());
+#else
+    return nullptr;
+#endif
+}
+
+sk_sp<SkTypeface> resolve_typeface(const std::string& font_family) {
+    auto mgr = make_font_mgr();
+    if (!mgr) return nullptr;
+    sk_sp<SkTypeface> face;
+    if (!font_family.empty()) {
+        face = mgr->matchFamilyStyle(font_family.c_str(), SkFontStyle::Normal());
+    }
+    if (!face) {
+        face = mgr->legacyMakeTypeface(nullptr, SkFontStyle::Normal());
+    }
+    return face;
+}
+
+// Capture glyph metrics from SkFont at base_size. Returns valid=false
+// when the font or glyph cannot be resolved.
+GlyphMetrics glyph_metrics_skia(const sk_sp<SkTypeface>& face,
+                                 char32_t codepoint,
+                                 int base_size) {
+    GlyphMetrics m;
+    if (!face) return m;
+
+    SkFont font(face, static_cast<SkScalar>(base_size));
+    font.setEdging(SkFont::Edging::kAntiAlias);
+    font.setHinting(SkFontHinting::kNone);
+    font.setSubpixel(true);
+
+    SkGlyphID gid = 0;
+    {
+        SkUnichar uni = static_cast<SkUnichar>(codepoint);
+        font.unicharsToGlyphs(&uni, 1, &gid);
+    }
+    if (gid == 0) return m;  // .notdef — still emit advance below
+
+    SkScalar advance = 0;
+    SkRect bounds{};
+    font.getWidthsBounds(&gid, 1, &advance, &bounds, nullptr);
+
+    m.advance = static_cast<float>(advance);
+    // SkRect here is in device-space relative to the pen origin, y-down
+    // (top is the most negative). Convert to Pulp's "bearing_y positive up":
+    m.bearing_x = static_cast<float>(bounds.fLeft);
+    m.bearing_y = static_cast<float>(-bounds.fTop);
+    m.valid = true;
+    return m;
+}
+
 // Skia-backed glyph rasterizer.
 //
 // Builds a temporary SkBitmap of size w × h, paints the requested
@@ -165,18 +237,7 @@ std::vector<std::uint8_t> rasterize_skia(const std::string& font_family,
                                           char32_t codepoint,
                                           int base_size,
                                           int w, int h, int padding) {
-    // Use the platform-specific font manager — matches skia_canvas.cpp
-#ifdef __APPLE__
-    auto mgr = SkFontMgr_New_CoreText(nullptr);
-#elif defined(_WIN32)
-    auto mgr = SkFontMgr_New_DirectWrite();
-#elif defined(__ANDROID__)
-    auto mgr = SkFontMgr_New_Android(nullptr, SkFontScanner_Make_FreeType());
-#elif defined(__linux__)
-    auto mgr = SkFontMgr_New_FontConfig(nullptr, SkFontScanner_Make_FreeType());
-#else
-    sk_sp<SkFontMgr> mgr;
-#endif
+    auto mgr = make_font_mgr();
     if (!mgr) return {};
 
     sk_sp<SkTypeface> face;
@@ -286,6 +347,10 @@ bool SdfAtlas::build(const std::string& font_family,
     }
     impl_->pixels.assign(static_cast<std::size_t>(impl_->width * impl_->height), 0);
 
+#if PULP_HAS_SKIA
+    auto shared_face = resolve_typeface(font_family);
+#endif
+
     for (std::size_t i = 0; i < chars.size(); ++i) {
         const int col = static_cast<int>(i) % cols;
         const int row = static_cast<int>(i) / cols;
@@ -326,9 +391,18 @@ bool SdfAtlas::build(const std::string& font_family,
         g.atlas_y = y0 + padding;
         g.width   = base_size;
         g.height  = base_size;
+        // Default (fallback) metrics if SkFont is unavailable.
         g.bearing_x = 0.0f;
         g.bearing_y = static_cast<float>(base_size);
         g.advance   = static_cast<float>(base_size);
+#if PULP_HAS_SKIA
+        auto m = glyph_metrics_skia(shared_face, chars[i], base_size);
+        if (m.valid) {
+            g.bearing_x = m.bearing_x;
+            g.bearing_y = m.bearing_y;
+            g.advance   = m.advance;
+        }
+#endif
         impl_->glyphs[chars[i]] = g;
     }
 

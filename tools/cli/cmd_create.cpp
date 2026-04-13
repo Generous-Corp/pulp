@@ -114,8 +114,10 @@ int cmd_create(const std::vector<std::string>& args) {
     bool no_build = false;
     bool ci_mode = false;
     bool in_tree_mode = false;
+    bool mpe_mode = false;
     for (size_t i = 0; i < args.size(); ++i) {
         if (args[i] == "--type" && i + 1 < args.size()) { type = args[++i]; continue; }
+        if (args[i] == "--mpe") { mpe_mode = true; continue; }
         if (args[i] == "--template" && i + 1 < args.size()) { tmpl = args[++i]; continue; }
         if (args[i] == "--manufacturer" && i + 1 < args.size()) { manufacturer = args[++i]; continue; }
         if (args[i] == "--output" && i + 1 < args.size()) { output_path = args[++i]; continue; }
@@ -130,6 +132,7 @@ int cmd_create(const std::vector<std::string>& args) {
             std::cout << "Usage: pulp create <name> [options]\n\n";
             std::cout << "Options:\n";
             std::cout << "  --type <effect|instrument|app|bare>  Plugin type (default: effect)\n";
+            std::cout << "  --mpe                                Opt into MPE (per-note expression) — only with --type instrument\n";
             std::cout << "  --template <name>                    Use named template (e.g. gain)\n";
             std::cout << "  --manufacturer <name>                Manufacturer (default: Pulp)\n";
             std::cout << "  --output <dir>                       Override output directory\n";
@@ -378,6 +381,11 @@ int cmd_create(const std::vector<std::string>& args) {
         {"test.cpp.template", test_name},
     };
 
+    if (mpe_mode && type != "instrument") {
+        std::cerr << "Warning: --mpe has no effect unless --type instrument; ignoring.\n";
+        mpe_mode = false;
+    }
+
     for (auto& [tmpl_file, outfile] : file_map) {
         if (tmpl_file == "clap_entry.cpp.template" && formats.find("CLAP") == std::string::npos) continue;
         if (tmpl_file == "vst3_entry.cpp.template" && formats.find("VST3") == std::string::npos) continue;
@@ -390,9 +398,25 @@ int cmd_create(const std::vector<std::string>& args) {
         if (!fs::exists(tmpl_path)) continue;
         auto content = read_file_contents(tmpl_path);
         auto expanded = expand_template_str(content, vars);
+        // --mpe post-processing: add supports_mpe = true to the descriptor
+        // and insert an include for mpe_buffer.hpp in the processor header.
+        if (mpe_mode && tmpl_file == "processor.hpp.template") {
+            const std::string accepts_line = ".accepts_midi = true,";
+            auto pos = expanded.find(accepts_line);
+            if (pos != std::string::npos) {
+                expanded.insert(pos + accepts_line.size(),
+                    "\n        .supports_mpe = true,");
+            }
+            const std::string include_anchor = "#include <pulp/format/processor.hpp>";
+            pos = expanded.find(include_anchor);
+            if (pos != std::string::npos) {
+                expanded.insert(pos + include_anchor.size(),
+                    "\n#include <pulp/midi/mpe_buffer.hpp>");
+            }
+        }
         std::ofstream f(out_dir / outfile);
         f << expanded;
-        log("  Created " + outfile + "\n");
+        log("  Created " + outfile + (mpe_mode && outfile == header_name ? " (MPE)" : "") + "\n");
     }
 
     // Standalone main.cpp

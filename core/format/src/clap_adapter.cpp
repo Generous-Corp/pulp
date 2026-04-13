@@ -2,6 +2,7 @@
 // Implements the CLAP C API wrapping a Pulp Processor
 
 #include <pulp/format/clap_adapter.hpp>
+#include <pulp/midi/ump_conversion.hpp>
 #include <pulp/runtime/log.hpp>
 #include <clap/ext/preset-load.h>
 #include <algorithm>
@@ -25,6 +26,20 @@ bool clap_init(const clap_plugin_t* plugin) {
     auto desc = self->processor->descriptor();
     self->preset_manager = std::make_unique<state::PresetManager>(
         self->store, desc.manufacturer, desc.name);
+
+    // Wire MPE sidecar when the plugin opts in.
+    self->mpe_enabled = desc.supports_mpe;
+    if (self->mpe_enabled) {
+        midi::bind_tracker_to_buffer(
+            self->mpe_tracker, self->mpe_buffer, self->mpe_current_sample_offset);
+        runtime::log_info("CLAP: MPE sidecar enabled for '{}'", desc.name);
+    }
+
+    // Wire UMP sidecar when the plugin opts in.
+    self->ump_enabled = desc.supports_ump;
+    if (self->ump_enabled) {
+        runtime::log_info("CLAP: UMP sidecar enabled for '{}'", desc.name);
+    }
 
     runtime::log_info("CLAP: initialized '{}'", desc.name);
     return true;
@@ -164,6 +179,33 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
     self->param_snapshot.resize(all_params.size());
     for (std::size_t i = 0; i < all_params.size(); ++i) {
         self->param_snapshot[i] = self->store.get_value(all_params[i].id);
+    }
+
+    // MPE sidecar: run inbound MIDI through the voice tracker and attach
+    // the resulting expression buffer to the processor for the duration
+    // of this process() call. Events stay sample-ordered because midi_in
+    // is already in host delivery order.
+    if (self->mpe_enabled) {
+        self->mpe_buffer.clear();
+        for (const auto& ev : midi_in) {
+            self->mpe_current_sample_offset = ev.sample_offset;
+            self->mpe_tracker.process(ev);
+        }
+        self->processor->set_mpe_input(&self->mpe_buffer);
+    } else {
+        self->processor->set_mpe_input(nullptr);
+    }
+
+    // UMP sidecar: until CLAP ships CLAP_EVENT_MIDI2, synthesise the UMP
+    // stream by converting the inbound MIDI 1.0 events to MIDI 2.0
+    // Channel Voice packets. Plugins that declare supports_ump see the
+    // same sample-ordered stream the host would otherwise deliver natively.
+    if (self->ump_enabled) {
+        self->ump_buffer.clear();
+        midi::midi1_to_ump(midi_in, self->ump_buffer);
+        self->processor->set_ump_input(&self->ump_buffer);
+    } else {
+        self->processor->set_ump_input(nullptr);
     }
 
     // Process!

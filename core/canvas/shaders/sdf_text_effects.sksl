@@ -1,0 +1,100 @@
+// SkSL fragment shader for SDF text with an effects layer.
+//
+// Extends the plain `sdf_text.sksl` sampler with four standard effects
+// that every design system needs and that are easy to express as extra
+// samples of the same distance field:
+//
+//   glow    — radial softening beyond the glyph, colored independently
+//   shadow  — directional offset copy of the glyph under the glyph
+//   outline — fixed-width ring outside the glyph edge
+//   bevel   — signed-distance gradient used as a lighting normal
+//
+// Effects compose additively; disable one by setting its mix uniform to 0.
+
+uniform shader atlas;
+uniform half   edge;
+uniform half   softness;
+uniform half   mip_bias;
+uniform half   gamma;
+uniform half4  color;
+
+// Effect parameters.
+uniform half   outline_mix;      // 0 = off
+uniform half   outline_width;    // pixels of ring thickness
+uniform half4  outline_color;
+
+uniform half   glow_mix;         // 0 = off
+uniform half   glow_radius;      // falloff distance in pixels
+uniform half4  glow_color;
+
+uniform half   shadow_mix;       // 0 = off
+uniform half2  shadow_offset;    // xy pixels (positive y = down)
+uniform half   shadow_softness;
+uniform half4  shadow_color;
+
+uniform half   bevel_mix;        // 0 = off, 1 = full lighting
+uniform half2  bevel_light_dir;  // unit vector, image space
+
+half aa_alpha(half d, half w, half edge_) {
+    return smoothstep(edge_ - w, edge_ + w, d);
+}
+
+half4 main(float2 coord) {
+    half d  = sample(atlas, coord).r;
+    half w  = fwidth(d) * (1.0 + max(mip_bias, 0.0)) + softness;
+
+    // Base glyph alpha.
+    half a_fill = aa_alpha(d, w, edge);
+
+    // Outline: edge ring between (edge - width) and edge.
+    half a_outline = 0.0;
+    if (outline_mix > 0.0) {
+        half inner = aa_alpha(d, w, edge);
+        half outer = aa_alpha(d, w, edge - outline_width);
+        a_outline = clamp(outer - inner, 0.0, 1.0);
+    }
+
+    // Glow: smooth falloff outside the edge.
+    half a_glow = 0.0;
+    if (glow_mix > 0.0) {
+        half outside = 1.0 - aa_alpha(d, w, edge - glow_radius);
+        a_glow = outside * (1.0 - a_fill);
+    }
+
+    // Shadow: sample the atlas at a small offset.
+    half a_shadow = 0.0;
+    if (shadow_mix > 0.0) {
+        float2 off = coord - float2(shadow_offset);
+        half d2 = sample(atlas, off).r;
+        half w2 = fwidth(d2) + shadow_softness;
+        a_shadow = aa_alpha(d2, w2, edge) * (1.0 - a_fill);
+    }
+
+    // Bevel: gradient direction of the distance field acts as a normal.
+    half3 bevel_lit = color.rgb;
+    if (bevel_mix > 0.0) {
+        half dx = dFdx(d);
+        half dy = dFdy(d);
+        half2 n = normalize(half2(dx, dy) + half2(1e-5, 0.0));
+        half lit = clamp(dot(n, bevel_light_dir), 0.0, 1.0);
+        bevel_lit = mix(color.rgb, color.rgb * (0.5 + lit), bevel_mix);
+    }
+
+    // Compose front-to-back so the fill wins where alphas collide.
+    half4 out_color = half4(0.0, 0.0, 0.0, 0.0);
+    out_color.rgb  += shadow_color.rgb  * (a_shadow  * shadow_mix);
+    out_color.a    += a_shadow  * shadow_mix;
+    out_color.rgb  += glow_color.rgb    * (a_glow    * glow_mix);
+    out_color.a    += a_glow    * glow_mix;
+    out_color.rgb  += outline_color.rgb * (a_outline * outline_mix);
+    out_color.a    += a_outline * outline_mix;
+    out_color.rgb  += bevel_lit         * a_fill;
+    out_color.a    += a_fill;
+
+    // Gamma correction. Preserve exact zero alpha for fully-outside samples
+    // so the effect quads don't leave faint rectangle halos on contrasting
+    // backgrounds (matches sdf_text.sksl / msdf_text.sksl behavior).
+    out_color.a = out_color.a <= 0.0 ? 0.0
+                                     : pow(out_color.a, 1.0 / max(gamma, 0.01));
+    return out_color * color.a;
+}
