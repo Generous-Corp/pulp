@@ -7,7 +7,23 @@
 
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+# Walk up from this script's directory until we find a .git entry. Works
+# whether the script lives at tools/scripts/ (pulp) or scripts/ (Shipyard)
+# without needing a layout-specific relative path.
+script_dir="$(cd "$(dirname "$0")" && pwd)"
+candidate="$script_dir"
+ROOT=""
+while [ "$candidate" != "/" ] && [ -n "$candidate" ]; do
+    if [ -e "$candidate/.git" ]; then
+        ROOT="$candidate"
+        break
+    fi
+    candidate="$(dirname "$candidate")"
+done
+if [ -z "$ROOT" ]; then
+    echo "install-githooks: could not find git repo root above $script_dir" >&2
+    exit 1
+fi
 cd "$ROOT"
 
 if [ ! -d ".githooks" ]; then
