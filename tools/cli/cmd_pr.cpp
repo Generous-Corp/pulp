@@ -284,10 +284,20 @@ int cmd_pr(const std::vector<std::string>& args) {
     {
         auto repo = ::trim(run_capture("gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null").stdout_text);
         if (!repo.empty() && repo.find('/') != std::string::npos) {
-            auto secrets = run_capture(
-                "gh api 'repos/" + repo + "/actions/secrets' "
-                "--jq '.secrets[].name' 2>/dev/null").stdout_text;
-            if (!secrets.empty() && secrets.find("RELEASE_BOT_TOKEN") == std::string::npos) {
+            // Probe without --jq so we can distinguish "gh errored" (empty
+            // stdout) from "repo has zero secrets" (non-empty JSON, no
+            // matches). Codex P1 on #149: the previous guard gated on
+            // `!secrets.empty()` which collapsed both cases into silence
+            // and suppressed the warning in the exact bootstrap scenario
+            // where the user needs it most. --paginate also handles repos
+            // with many secrets where the token might be on page 2+.
+            auto raw = run_capture(
+                "gh api 'repos/" + repo + "/actions/secrets' --paginate 2>/dev/null"
+            ).stdout_text;
+            bool gh_call_succeeded = !raw.empty();
+            bool present = raw.find("\"name\":\"RELEASE_BOT_TOKEN\"") != std::string::npos
+                        || raw.find("\"name\": \"RELEASE_BOT_TOKEN\"") != std::string::npos;
+            if (gh_call_succeeded && !present) {
                 std::cerr << color::yellow()
                           << "\n▸ Heads-up: RELEASE_BOT_TOKEN secret is missing on "
                           << repo << ".\n"

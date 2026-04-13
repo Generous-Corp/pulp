@@ -1589,13 +1589,26 @@ std::vector<DoctorCheck> run_doctor_checks(const fs::path& active_root, bool sta
         auto repo_slug = first_line(exec_output(
             "gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null"));
         if (!repo_slug.empty() && repo_slug.find('/') != std::string::npos) {
-            auto secrets_list = exec_output(
-                "gh api 'repos/" + repo_slug + "/actions/secrets' "
-                "--jq '.secrets[].name' 2>/dev/null");
-            // Only emit a check if we got a usable response.
-            if (!secrets_list.empty()) {
+            // Probe WITHOUT --jq so we can distinguish:
+            //   - empty-response-from-gh (means gh errored: no auth, no
+            //     actions:read, network fail) → skip the check silently.
+            //   - non-empty JSON with zero secrets → repo genuinely has no
+            //     secrets yet, which is exactly the bootstrap scenario this
+            //     check needs to flag. The previous version used --jq
+            //     '.secrets[].name' and gated on the output being non-empty,
+            //     which made the bootstrap case (zero secrets) look the
+            //     same as the "gh failed" case and skipped silently. Codex
+            //     P1 on #149.
+            auto raw = exec_output(
+                "gh api 'repos/" + repo_slug + "/actions/secrets' --paginate 2>/dev/null");
+            if (!raw.empty()) {
                 DoctorCheck c{"RELEASE_BOT_TOKEN secret", false, {}, {}};
-                bool present = secrets_list.find("RELEASE_BOT_TOKEN") != std::string::npos;
+                // Any occurrence of "name":"RELEASE_BOT_TOKEN" across all
+                // pages means it's configured. --paginate concatenates
+                // page bodies so the substring check catches it whether
+                // it's on page 1 or page N.
+                bool present = raw.find("\"name\":\"RELEASE_BOT_TOKEN\"") != std::string::npos
+                            || raw.find("\"name\": \"RELEASE_BOT_TOKEN\"") != std::string::npos;
                 if (present) {
                     c.passed = true;
                     c.detail = "configured on " + repo_slug
