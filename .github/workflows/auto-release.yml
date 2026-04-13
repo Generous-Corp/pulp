@@ -129,14 +129,25 @@ jobs:
               # this commit, skip. If it exists and points elsewhere, fail
               # loudly — a human must reconcile before the release binaries
               # can move.
+              #
+              # `git ls-remote --tags origin <tag>` returns the TAG OBJECT SHA
+              # for annotated tags (the default created by this workflow via
+              # `git tag -a`), not the commit SHA. Compare dereferenced
+              # target commits instead — the `^{}` suffix peels the tag
+              # object to its referenced commit.
               if git ls-remote --tags origin "$tag" | grep -q .; then
-                  remote_sha=$(git ls-remote --tags origin "$tag" | awk '{print $1}')
+                  remote_target=$(git ls-remote --tags origin "${tag}^{}" | awk '{print $1}')
+                  # Fallback: lightweight tag (no ^{} entry) — use the ls-remote
+                  # sha directly, which IS the commit SHA in that case.
+                  if [ -z "$remote_target" ]; then
+                      remote_target=$(git ls-remote --tags origin "$tag" | awk '{print $1}')
+                  fi
                   local_sha=$(git rev-parse HEAD)
-                  if [ "$remote_sha" = "$local_sha" ]; then
+                  if [ "$remote_target" = "$local_sha" ]; then
                       echo "tag $tag already at $local_sha — no-op"
                       return 0
                   fi
-                  echo "ERROR: tag $tag exists at $remote_sha but HEAD is $local_sha" >&2
+                  echo "ERROR: tag $tag exists at $remote_target but HEAD is $local_sha" >&2
                   echo "Manual reconciliation required. See docs/guides/versioning.md." >&2
                   exit 1
               fi

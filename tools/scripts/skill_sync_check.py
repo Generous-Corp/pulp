@@ -225,8 +225,16 @@ def compute_findings(
         touched = [p for p in changed if _matches_any(p, patterns)]
         if not touched:
             continue
-        skill_md_prefix = f"{rel_skills_dir}/{skill}/"
-        skill_md_modified = any(p.startswith(skill_md_prefix) for p in changed)
+        # Require SKILL.md specifically, not side files (fixtures, notes,
+        # logs) that happen to live next to it. A nested SKILL.md inside
+        # a subfolder (rare but allowed) also counts as updating the skill.
+        skill_md_exact = f"{rel_skills_dir}/{skill}/SKILL.md"
+        skill_md_subdir_prefix = f"{rel_skills_dir}/{skill}/"
+        skill_md_modified = any(
+            p == skill_md_exact
+            or (p.startswith(skill_md_subdir_prefix) and p.endswith("/SKILL.md"))
+            for p in changed
+        )
         findings.append(
             Finding(
                 skill=skill,
