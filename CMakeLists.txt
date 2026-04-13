@@ -533,11 +533,15 @@ if(ANDROID)
     # Ensure JNI exports from static libs are included in the shared lib.
     # Without --whole-archive, the linker strips "unused" JNI_OnLoad and
     # Java_* functions since nothing in the .so itself references them.
+    # pulp-view contains accessibility_android.cpp (TalkBack JNI entry
+    # points Java_com_pulp_accessibility_*); its only references are from
+    # the Kotlin side, so it must be whole-archived too.
     target_link_options(pulp-jni PRIVATE
         -Wl,--whole-archive
         $<TARGET_FILE:pulp-platform>
         $<TARGET_FILE:pulp-audio>
         $<$<TARGET_EXISTS:pulp-render>:$<TARGET_FILE:pulp-render>>
+        $<TARGET_FILE:pulp-view>
         -Wl,--no-whole-archive)
 endif()
 
