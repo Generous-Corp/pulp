@@ -11,6 +11,7 @@ target_sources(pulp-osc PRIVATE
     src/osc.cpp
     src/osc_udp.cpp
     src/bundle.cpp
+    src/osc_channel.cpp
 )
 
 target_link_libraries(pulp-osc PUBLIC pulp::runtime)

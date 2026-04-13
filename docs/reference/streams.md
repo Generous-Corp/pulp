@@ -124,12 +124,75 @@ The `stream-demo` example in `examples/stream-demo/` exercises all three layers:
 ./build/examples/stream-demo/pulp-stream-demo --http https://example.com
 ```
 
-## Deferred: message channels (Phase 4)
+## Message channels (Phase 4)
 
-Phase 4 of the feature plan will add a separate `MessageChannel` abstraction for structured messages (`WebSocketChannel`, `OscChannel`, JSON-RPC over channels). Bytewise transports stay in `Stream`; message semantics layer on top.
+Bytewise transports stay in `Stream`. Structured messages — where one `send` matches one delivered message — live behind `pulp::runtime::MessageChannel`:
+
+```cpp
+class MessageChannel {
+    virtual bool send(const uint8_t* data, size_t size);
+    virtual bool send_text(std::string_view);
+    virtual void on_message(MessageCallback);
+    virtual void on_closed(ChannelClosedCallback);
+    virtual void on_error(ChannelErrorCallback);
+    virtual void close();
+    virtual bool is_open() const;
+};
+```
+
+Four implementations ship with this phase:
+
+| Channel | Header | Transport |
+|---------|--------|-----------|
+| `WebSocketChannel` | `pulp/runtime/websocket_channel.hpp` | RFC 6455 over `TcpStream`; client handshake, server handshake, text/binary frames, ping/pong/close. |
+| `OscChannel` | `pulp/osc/osc_channel.hpp` | UDP via the existing `pulp::osc::Sender` / `Receiver`. Messages are carried as encoded OSC packets. |
+| `MemoryMessageChannel` | `pulp/runtime/memory_message_channel.hpp` | In-process pair for tests and intra-process bridges. |
+| `JsonRpcPeer` | `pulp/runtime/json_rpc.hpp` | JSON-RPC 2.0 *over* any `MessageChannel` — symmetric peer that can send/serve requests and notifications. |
+
+### WebSocket
+
+```cpp
+auto tcp = std::make_unique<TcpStream>();
+tcp->connect("example.com", 80);
+auto ws = WebSocketChannel::connect(std::move(tcp), "example.com", "/chat");
+ws->on_message([](const Message& m) { /* m.kind is Text or Binary */ });
+ws->send_text("hello");
+```
+
+- TLS is not currently handled at the channel layer — for `wss://`, supply a TLS-wrapped TCP stream (future `SecureTcpStream`).
+- Control frames (ping/pong/close) are handled internally; ping triggers an automatic pong.
+- Payloads up to `options.max_payload` (default 16 MiB) are accepted; larger frames fire `on_error` and close the channel.
+
+### OSC
+
+```cpp
+auto osc = OscChannel::open("127.0.0.1", /*remote=*/8000, /*local=*/9000);
+osc->on_message([](const Message& m) {
+    auto decoded = pulp::osc::decode(m.payload.data(), m.payload.size());
+});
+osc->send(pulp::osc::Message("/synth/freq").add(440.f));
+```
+
+### JSON-RPC
+
+`JsonRpcPeer` is symmetric — either side can send requests, serve requests, emit notifications, and subscribe to notifications. It works over any `MessageChannel`:
+
+```cpp
+JsonRpcPeer peer(*ws);
+peer.register_method("add", [](std::string_view params) {
+    // params is a JSON-encoded array/object; return a JSON-encoded result
+    return JsonRpcResult::ok("42");
+});
+peer.send_request("echo", R"(["hi"])", [](const JsonRpcResult& r) {
+    if (r.error) { /* handle */ } else { /* r.result_json */ }
+});
+peer.notify("progress", R"({"percent":50})");
+```
+
+Errors follow JSON-RPC 2.0 §5: `-32601` is reported for unknown methods, `-32603` for handler exceptions, and custom codes can be returned via `JsonRpcResult::fail`.
 
 ## Further reading
 
 - Feature plan: `planning/next-features-plan.md` § Feature 3
 - Ralph automation prompt: `planning/ralph-prompt-streams.md`
-- Related headers: `pulp/runtime/socket.hpp`, `pulp/runtime/http.hpp`, `pulp/runtime/named_pipe.hpp`
+- Related headers: `pulp/runtime/socket.hpp`, `pulp/runtime/http.hpp`, `pulp/runtime/named_pipe.hpp`, `pulp/runtime/message_channel.hpp`, `pulp/osc/osc_channel.hpp`

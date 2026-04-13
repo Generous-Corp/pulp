@@ -1,0 +1,152 @@
+#include <catch2/catch_test_macros.hpp>
+
+#include <pulp/runtime/network_stream.hpp>
+#include <pulp/runtime/socket.hpp>
+#include <pulp/runtime/websocket_channel.hpp>
+
+#include <atomic>
+#include <chrono>
+#include <condition_variable>
+#include <cstring>
+#include <memory>
+#include <mutex>
+#include <optional>
+#include <string>
+#include <thread>
+
+using namespace pulp::runtime;
+using namespace std::chrono_literals;
+
+namespace {
+
+std::optional<std::uint16_t> bind_loopback(Socket& server, std::uint16_t start) {
+    for (std::uint16_t port = start; port < start + 400; ++port) {
+        if (!server.bind("127.0.0.1", port)) continue;
+        if (!server.listen(1)) continue;
+        return port;
+    }
+    return std::nullopt;
+}
+
+template <typename Pred>
+bool wait_until(Pred pred, std::chrono::milliseconds budget = 3s) {
+    auto deadline = std::chrono::steady_clock::now() + budget;
+    while (std::chrono::steady_clock::now() < deadline) {
+        if (pred()) return true;
+        std::this_thread::sleep_for(1ms);
+    }
+    return pred();
+}
+
+}  // namespace
+
+TEST_CASE("WebSocket accept_key follows RFC 6455 §4.2.2", "[websocket]") {
+    // Canonical example from the RFC:
+    //   client key = "dGhlIHNhbXBsZSBub25jZQ=="
+    //   accept     = "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="
+    REQUIRE(WebSocketChannel::compute_accept_key("dGhlIHNhbXBsZSBub25jZQ==")
+            == "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=");
+}
+
+TEST_CASE("WebSocketChannel echo round-trip on loopback", "[websocket]") {
+    Socket listener;
+    REQUIRE(listener.create(SocketType::TCP));
+    auto port = bind_loopback(listener, 46401);
+    if (!port) {
+        SUCCEED("could not bind loopback; skipping");
+        return;
+    }
+
+    std::atomic<bool> server_ready{false};
+    std::atomic<bool> server_done{false};
+    std::unique_ptr<WebSocketChannel> server_ws;
+    std::mutex server_mu;
+    std::vector<std::string> server_seen;
+
+    std::thread server_thread([&] {
+        server_ready.store(true);
+        auto accepted = listener.accept();
+        if (!accepted) return;
+        auto server_tcp = std::make_unique<TcpStream>(std::move(*accepted));
+        server_ws = WebSocketChannel::accept(std::move(server_tcp));
+        if (!server_ws) return;
+        server_ws->on_message([&](const Message& m) {
+            {
+                std::lock_guard<std::mutex> lock(server_mu);
+                server_seen.emplace_back(m.as_text());
+            }
+            // echo back
+            server_ws->send_text(std::string("echo:") + std::string(m.as_text()));
+        });
+        server_done.store(true);
+    });
+
+    while (!server_ready.load()) std::this_thread::sleep_for(1ms);
+
+    auto client_tcp = std::make_unique<TcpStream>();
+    REQUIRE(client_tcp->connect("127.0.0.1", *port));
+    auto client = WebSocketChannel::connect(std::move(client_tcp), "127.0.0.1", "/");
+    REQUIRE(client != nullptr);
+    REQUIRE(client->is_open());
+
+    std::mutex client_mu;
+    std::vector<std::string> client_seen;
+    client->on_message([&](const Message& m) {
+        std::lock_guard<std::mutex> lock(client_mu);
+        client_seen.emplace_back(m.as_text());
+    });
+
+    REQUIRE(client->send_text("hello"));
+    REQUIRE(client->send_text("pulp"));
+
+    REQUIRE(wait_until([&] {
+        std::lock_guard<std::mutex> lock(client_mu);
+        return client_seen.size() >= 2;
+    }));
+
+    {
+        std::lock_guard<std::mutex> lock(client_mu);
+        REQUIRE(client_seen[0] == "echo:hello");
+        REQUIRE(client_seen[1] == "echo:pulp");
+    }
+    {
+        std::lock_guard<std::mutex> lock(server_mu);
+        REQUIRE(server_seen.size() == 2);
+        REQUIRE(server_seen[0] == "hello");
+    }
+
+    client->close();
+    if (server_ws) server_ws->close();
+    server_thread.join();
+}
+
+TEST_CASE("WebSocketChannel rejects handshake without upgrade header", "[websocket]") {
+    Socket listener;
+    REQUIRE(listener.create(SocketType::TCP));
+    auto port = bind_loopback(listener, 46801);
+    if (!port) {
+        SUCCEED("could not bind loopback; skipping");
+        return;
+    }
+
+    std::atomic<bool> ready{false};
+    std::thread server_thread([&] {
+        ready.store(true);
+        auto accepted = listener.accept();
+        if (!accepted) return;
+        auto tcp = std::make_unique<TcpStream>(std::move(*accepted));
+        // Server should refuse the non-upgrade request.
+        auto ws = WebSocketChannel::accept(std::move(tcp));
+        REQUIRE(ws == nullptr);
+    });
+    while (!ready.load()) std::this_thread::sleep_for(1ms);
+
+    Socket client;
+    REQUIRE(client.create(SocketType::TCP));
+    REQUIRE(client.connect("127.0.0.1", *port));
+    const char plain_http[] = "GET / HTTP/1.1\r\nHost: x\r\n\r\n";
+    client.send(reinterpret_cast<const std::uint8_t*>(plain_http),
+                std::strlen(plain_http));
+    client.close();
+    server_thread.join();
+}

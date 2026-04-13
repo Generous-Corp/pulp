@@ -3,6 +3,7 @@
 #include <pulp/runtime/system.hpp>
 
 #include <mbedtls/sha256.h>
+#include <mbedtls/sha1.h>
 #include <mbedtls/md5.h>
 #include <mbedtls/aes.h>
 
@@ -41,6 +42,18 @@ std::string sha256_hex(const uint8_t* data, size_t size) {
 
 std::string sha256_hex(std::string_view data) {
     return sha256_hex(reinterpret_cast<const uint8_t*>(data.data()), data.size());
+}
+
+// ── SHA-1 (legacy protocols only) ───────────────────────────────────────
+
+std::vector<uint8_t> sha1(const uint8_t* data, size_t size) {
+    std::vector<uint8_t> digest(20);
+    mbedtls_sha1(data, size, digest.data());
+    return digest;
+}
+
+std::vector<uint8_t> sha1(std::string_view data) {
+    return sha1(reinterpret_cast<const uint8_t*>(data.data()), data.size());
 }
 
 // ── MD5 ─────────────────────────────────────────────────────────────────

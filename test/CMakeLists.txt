@@ -51,6 +51,19 @@ add_executable(pulp-test-network-stream test_network_stream.cpp)
 target_link_libraries(pulp-test-network-stream PRIVATE pulp::runtime Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-network-stream)
 
+# MessageChannel tests (Phase 4)
+add_executable(pulp-test-websocket-channel test_websocket_channel.cpp)
+target_link_libraries(pulp-test-websocket-channel PRIVATE pulp::runtime Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-websocket-channel)
+
+add_executable(pulp-test-osc-channel test_osc_channel.cpp)
+target_link_libraries(pulp-test-osc-channel PRIVATE pulp::osc Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-osc-channel)
+
+add_executable(pulp-test-json-rpc test_json_rpc.cpp)
+target_link_libraries(pulp-test-json-rpc PRIVATE pulp::runtime Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-json-rpc)
+
 # Validation harness tests (Phase 2)
 add_executable(pulp-test-validation-harness test_validation_harness.cpp)
 target_link_libraries(pulp-test-validation-harness PRIVATE pulp::format Catch2::Catch2WithMain)
