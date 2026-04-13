@@ -67,6 +67,34 @@ public:
             for (std::size_t i = 0; i < output.num_samples(); ++i)
                 output.channel(ch)[i] = input.channel(ch)[i] * gain;
     }
+
+    // ── Custom editor (optional) ─────────────────────────────────────────
+    //
+    // Leave this alone to get the default scripted / AutoUi editor built
+    // from the parameters you registered above. Every plugin format
+    // (VST3, AU v2, AU v3, CLAP, Standalone) will open it through a
+    // `pulp::format::ViewBridge` — lifecycle callbacks below are wired
+    // automatically.
+    //
+    // Override `create_view()` to return your own `view::View` tree, and
+    // `view_size()` to publish min/max/preferred bounds for host-side
+    // resize. See docs/guides/view-bridge.md for the full pattern.
+    //
+    // std::unique_ptr<pulp::view::View> create_view() override {
+    //     auto root = std::make_unique<pulp::view::View>();
+    //     // build your custom widget hierarchy here …
+    //     return root;
+    // }
+    //
+    // pulp::format::ViewSize view_size() const override {
+    //     return {/*preferred_w*/ 640, /*preferred_h*/ 480,
+    //             /*min_w*/       400, /*min_h*/       300,
+    //             /*max_w*/      1280, /*max_h*/       960};
+    // }
+    //
+    // void on_view_opened (pulp::view::View&)                     override {}
+    // void on_view_closed (pulp::view::View&)                     override {}
+    // void on_view_resized(pulp::view::View&, uint32_t, uint32_t) override {}
 };
 
 inline std::unique_ptr<pulp::format::Processor> create_{{FACTORY_NAME}}() {
