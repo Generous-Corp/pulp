@@ -1,30 +1,42 @@
-// iOS AUv3 view controller — provides a UIViewController for the AUv3 extension UI
+// iOS AUv3 view controller — provides a UIViewController for the AUv3 extension UI.
 // On iOS, AUv3 extensions present their UI via a UIViewController subclass.
-// This wraps the Pulp view system into the AUv3 hosting model.
+// This wraps the Pulp view system into the AUv3 hosting model and routes
+// editor lifecycle through `pulp::format::ViewBridge` so custom views,
+// `Processor::create_view`, and `on_view_*` callbacks work identically
+// to VST3 / CLAP / AU v2.
 
 #if TARGET_OS_IOS
 
 #import <UIKit/UIKit.h>
 #import <AudioToolbox/AudioToolbox.h>
 #import <CoreAudioKit/CoreAudioKit.h>
+#include <pulp/format/processor.hpp>
+#include <pulp/format/view_bridge.hpp>
 #include <pulp/view/plugin_view_host.hpp>
 #include <pulp/view/view.hpp>
 #include <pulp/runtime/log.hpp>
 
+// Forward-declared selectors on PulpAudioUnit (implemented in au_adapter.mm).
+@interface NSObject (PulpAUIntrospection)
+- (pulp::format::Processor *)pulpProcessor;
+- (pulp::state::StateStore *)pulpStore;
+@end
+
 /// AUViewController subclass that hosts a Pulp View tree inside an AUv3 extension.
-///
-/// The host DAW instantiates this controller when it wants to show the plugin's UI.
-/// It creates a PluginViewHost (iOS variant) and attaches it to the controller's view.
+/// When `self.audioUnit` is set, the controller fetches its Processor +
+/// StateStore, builds a ViewBridge against them, and attaches the
+/// resulting view tree to the UIKit hierarchy. Dealloc closes the bridge
+/// so `Processor::on_view_closed` fires exactly once.
 @interface PulpAUViewController : AUViewController
 
-/// The audio unit whose UI we are presenting.
 @property (nonatomic, strong) AUAudioUnit *audioUnit;
 
 @end
 
 @implementation PulpAUViewController {
+    std::unique_ptr<pulp::format::ViewBridge> _bridge;
     std::unique_ptr<pulp::view::PluginViewHost> _viewHost;
-    std::unique_ptr<pulp::view::View> _rootView;
+    std::unique_ptr<pulp::view::View> _fallbackView;
 }
 
 - (void)viewDidLoad {
@@ -33,19 +45,49 @@
     self.view.backgroundColor = [UIColor blackColor];
     self.preferredContentSize = CGSizeMake(400, 300);
 
-    // Create a root view for the plugin UI
-    _rootView = std::make_unique<pulp::view::View>();
+    pulp::format::Processor *processor = nil;
+    pulp::state::StateStore *store = nil;
+    if ([self.audioUnit respondsToSelector:@selector(pulpProcessor)] &&
+        [self.audioUnit respondsToSelector:@selector(pulpStore)]) {
+        processor = [self.audioUnit pulpProcessor];
+        store = [self.audioUnit pulpStore];
+    }
 
-    // Create the iOS plugin view host
-    auto size = pulp::view::PluginViewHost::Size{
-        static_cast<uint32_t>(self.preferredContentSize.width),
-        static_cast<uint32_t>(self.preferredContentSize.height)
-    };
-    _viewHost = pulp::view::PluginViewHost::create(*_rootView, size);
+    pulp::view::View *root = nullptr;
+    uint32_t w = 400, h = 300;
+    if (processor && store) {
+        _bridge = std::make_unique<pulp::format::ViewBridge>(
+            *processor, *store,
+            pulp::format::ViewBridge::Options{.enable_hot_reload = false,
+                                              .role = pulp::format::ViewRole::Editor});
+        std::string err;
+        if (!_bridge->open(&err)) {
+            pulp::runtime::log_error("AU iOS: ViewBridge::open failed ({})", err);
+            _bridge.reset();
+        } else {
+            root = _bridge->view();
+            w = _bridge->size_hints().preferred_width;
+            h = _bridge->size_hints().preferred_height;
+        }
+    }
+
+    if (!root) {
+        // No audioUnit yet (preview case) — fall back to an empty View.
+        _fallbackView = std::make_unique<pulp::view::View>();
+        root = _fallbackView.get();
+    }
+
+    self.preferredContentSize = CGSizeMake(w, h);
+    auto size = pulp::view::PluginViewHost::Size{w, h};
+    _viewHost = pulp::view::PluginViewHost::create(*root, size);
 
     if (_viewHost) {
         _viewHost->attach_to_parent((__bridge void*)self.view);
-        pulp::runtime::log_info("AU iOS: view controller loaded, {}x{}", size.width, size.height);
+        if (_bridge) _bridge->notify_attached();
+        pulp::runtime::log_info("AU iOS: view controller loaded, {}x{}, mode={}",
+                                size.width, size.height,
+                                _bridge ? (_bridge->uses_script_ui() ? "scripted" : "autoui")
+                                        : "fallback");
     }
 }
 
@@ -54,16 +96,20 @@
 
     if (_viewHost) {
         CGSize size = self.view.bounds.size;
-        _viewHost->set_size(
-            static_cast<uint32_t>(size.width),
-            static_cast<uint32_t>(size.height));
+        const uint32_t w = static_cast<uint32_t>(size.width);
+        const uint32_t h = static_cast<uint32_t>(size.height);
+        _viewHost->set_size(w, h);
+        if (_bridge) _bridge->resize(w, h);
     }
+}
+
+- (void)dealloc {
+    if (_bridge) _bridge->close();
+    [super dealloc];
 }
 
 - (AUAudioUnit *)createAudioUnitWithComponentDescription:(AudioComponentDescription)desc
                                                     error:(NSError **)error {
-    // The host calls this to get the AU instance associated with this view.
-    // If audioUnit was already set externally, return it.
     return self.audioUnit;
 }
 

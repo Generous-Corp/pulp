@@ -45,6 +45,14 @@ struct AUBridge {
     AUAudioUnitBusArray *_inputBusArray;
     AUAudioUnitBusArray *_outputBusArray;
 }
+
+/// Raw pointer to the host-owned Processor + StateStore. Used by the
+/// AUv3 view controller to construct a `ViewBridge` against the same
+/// Processor that runs the audio callback (avoiding the dual-Processor
+/// bug that the AU v2 path used to hit).
+- (pulp::format::Processor *)pulpProcessor;
+- (pulp::state::StateStore *)pulpStore;
+
 @end
 
 @implementation PulpAudioUnit
@@ -325,6 +333,14 @@ struct AUBridge {
         auto* bytes = static_cast<const uint8_t*>(nsData.bytes);
         _bridge.store.deserialize({bytes, nsData.length});
     }
+}
+
+- (pulp::format::Processor *)pulpProcessor {
+    return _bridge.processor.get();
+}
+
+- (pulp::state::StateStore *)pulpStore {
+    return &_bridge.store;
 }
 
 @end
