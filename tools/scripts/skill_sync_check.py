@@ -215,7 +215,11 @@ def compute_findings(
         rel = skills_dir.relative_to(repo)
     except ValueError:
         rel = skills_dir
-    rel_skills_dir = str(rel).replace(os.sep, "/").lstrip("./")
+    # str.lstrip removes *characters* not a prefix, which would eat the
+    # leading '.' in '.agents/skills'. Normalize manually instead.
+    rel_skills_dir = str(rel).replace(os.sep, "/")
+    if rel_skills_dir.startswith("./"):
+        rel_skills_dir = rel_skills_dir[2:]
 
     for skill, patterns in skill_map.skills.items():
         touched = [p for p in changed if _matches_any(p, patterns)]

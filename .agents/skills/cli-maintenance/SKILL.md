@@ -80,3 +80,30 @@ Same as above, focus on steps 2, 4, 5, 6, 7. Key risks:
 - [ ] Search all skills: `grep -r "pulp <name>" .agents/skills/`
 - [ ] Search CLAUDE.md
 - [ ] Run sync check
+
+## `pulp pr` — one-shot PR orchestrator
+
+The canonical way to ship a branch. `cmd_pr.cpp` chains skill-sync → version-bump apply → commit → push → `gh pr create` → `shipyard ship`. The `/pr` slash command and the natural-language triggers in the `ci` skill both route here.
+
+Invariants:
+
+- `pulp pr` refuses to run on `main` (feature branch required).
+- `pulp pr` refuses to create the PR if the worktree isn't clean after the bump commit.
+- Never fan out to `gh pr create` + `shipyard ship` separately. One command, one orchestrator.
+- The only inputs that require human judgment are the commit trailers (`Version-Bump`, `Skill-Update`, `Release`). Everything else is automatic.
+
+Gotchas:
+
+- **Don't call the Python scripts by hand.** `pulp pr` invokes them in the right order with the right flags. Direct invocation skips the commit trailer parsing and the PR-body rendering.
+- **Bump level is per-surface.** A plugin-only `feat:` in a commit subject does not upgrade the SDK. The `Version-Bump: <surface>=<level>` trailer is authoritative and surface-scoped.
+- **`pulp version check --with-bump-check`** is the fast sanity check to run *before* `pulp pr` if you want to see what the gate will say. Same script, `--mode=report`.
+
+## `pulp version check`
+
+Validates consistency across the three version-bearing surfaces:
+
+- SDK: `CMakeLists.txt` `project(... VERSION x.y.z ...)` ↔ compile-time `PULP_SDK_VERSION` constant.
+- Claude plugin: top-level `"version"` in `.claude-plugin/plugin.json` (semver).
+- Marketplace: top-level `"version"` in `.claude-plugin/marketplace.json` (must match `plugin.json`).
+
+Gotcha: JSON files can have multiple `"version"` fields (e.g. `metadata.version`, `plugins[0].version`). The check anchors on the top-level field via a `^(?:  )?"version":` regex — don't introduce a JSON parser unless you genuinely need schema validation.
