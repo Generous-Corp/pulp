@@ -1573,6 +1573,52 @@ std::vector<DoctorCheck> run_doctor_checks(const fs::path& active_root, bool sta
         }
     }
 
+    // Release-bot token check (best-effort, repo-aware).
+    // The auto-release workflow falls back to GITHUB_TOKEN when
+    // RELEASE_BOT_TOKEN isn't set, but tags pushed by GITHUB_TOKEN
+    // don't trigger downstream workflows (GitHub anti-infinite-loop
+    // safety), so the binary release pipeline silently never fires.
+    // Surfacing this in doctor is the cheapest way to keep contributors
+    // out of that trap. Skipped silently when:
+    //   - we can't detect the GitHub repo (not a checkout, no remote)
+    //   - `gh` is unavailable or unauthenticated
+    //   - the user lacks `actions:read` for the repo
+    // because none of those mean the user did anything wrong; the
+    // existing `gh` row already reports the gh tool's health.
+    {
+        auto repo_slug = first_line(exec_output(
+            "gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null"));
+        if (!repo_slug.empty() && repo_slug.find('/') != std::string::npos) {
+            auto secrets_list = exec_output(
+                "gh api 'repos/" + repo_slug + "/actions/secrets' "
+                "--jq '.secrets[].name' 2>/dev/null");
+            // Only emit a check if we got a usable response.
+            if (!secrets_list.empty()) {
+                DoctorCheck c{"RELEASE_BOT_TOKEN secret", false, {}, {}};
+                bool present = secrets_list.find("RELEASE_BOT_TOKEN") != std::string::npos;
+                if (present) {
+                    c.passed = true;
+                    c.detail = "configured on " + repo_slug
+                             + " — auto-release tags will trigger release-cli.yml + sign-and-release.yml";
+                } else {
+                    c.detail = "missing on " + repo_slug
+                             + " — auto-release tags will fall back to GITHUB_TOKEN, "
+                               "which does NOT trigger the binary release workflows";
+                    c.fix =
+                        "Create a fine-grained PAT and store as RELEASE_BOT_TOKEN:\n"
+                        "    1. github.com -> Settings -> Developer settings -> Personal access tokens\n"
+                        "       -> Fine-grained tokens -> Generate new token\n"
+                        "    2. Repo access: only " + repo_slug + "\n"
+                        "    3. Permission: Contents = Read and write\n"
+                        "    4. github.com/" + repo_slug + "/settings/secrets/actions\n"
+                        "       -> New repository secret named RELEASE_BOT_TOKEN\n"
+                        "    See docs/guides/versioning.md for the full walkthrough.";
+                }
+                checks.push_back(c);
+            }
+        }
+    }
+
     return checks;
 }
 

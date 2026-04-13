@@ -96,7 +96,10 @@ int run_passthrough(const std::string& cmd) {
 
 // ── Helpers ─────────────────────────────────────────────────────────────
 
-std::string trim(const std::string& s) {
+// Local trim — defined as static so it doesn't collide with the
+// equivalent non-static definition in cli_common.cpp. Both have the same
+// behavior; we keep the local one to avoid forcing a header rebuild.
+static std::string trim(const std::string& s) {
     size_t a = s.find_first_not_of(" \t\r\n");
     if (a == std::string::npos) return {};
     size_t b = s.find_last_not_of(" \t\r\n");
@@ -272,6 +275,29 @@ int cmd_pr(const std::vector<std::string>& args) {
                   << "  5. gh pr create\n";
         if (!opt.no_ship) std::cout << "  6. shipyard ship\n";
         return 0;
+    }
+
+    // Best-effort heads-up: warn if RELEASE_BOT_TOKEN is missing on the
+    // active GitHub repo. Doesn't block — gates and merge are unaffected
+    // — but surfacing the trap here means the user finds out before they
+    // wonder why the post-merge GitHub Release never appeared.
+    {
+        auto repo = ::trim(run_capture("gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null").stdout_text);
+        if (!repo.empty() && repo.find('/') != std::string::npos) {
+            auto secrets = run_capture(
+                "gh api 'repos/" + repo + "/actions/secrets' "
+                "--jq '.secrets[].name' 2>/dev/null").stdout_text;
+            if (!secrets.empty() && secrets.find("RELEASE_BOT_TOKEN") == std::string::npos) {
+                std::cerr << color::yellow()
+                          << "\n▸ Heads-up: RELEASE_BOT_TOKEN secret is missing on "
+                          << repo << ".\n"
+                          << "         Auto-release will tag the version bump but "
+                             "the binary release workflows won't fire.\n"
+                          << "         Run `pulp doctor` for the one-time setup steps "
+                             "(or see docs/guides/versioning.md).\n"
+                          << color::reset();
+            }
+        }
     }
 
     // Step 1: skill-sync — must pass before any file is rewritten.

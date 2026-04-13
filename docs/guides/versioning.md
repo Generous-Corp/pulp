@@ -124,6 +124,36 @@ Never type `gh pr create` + `shipyard ship` separately. Never run the version-bu
 
 ---
 
+## One-time setup: `RELEASE_BOT_TOKEN` secret
+
+The auto-release workflow needs a fine-grained PAT to push tags so that the tag-triggered binary workflows (`release-cli.yml`, `sign-and-release.yml`) actually fire. **Without this secret, auto-release silently degrades**: tags are still created via `GITHUB_TOKEN`, but GitHub Actions deliberately does not chain workflows from `GITHUB_TOKEN`-pushed tags (anti-infinite-loop safety), so the binary release workflows never run and no GitHub Release appears.
+
+Run `pulp doctor` to check whether the secret is configured. If it shows `RELEASE_BOT_TOKEN secret — missing`, set it up:
+
+1. **Generate the token.** github.com → top-right avatar → Settings → Developer settings → Personal access tokens → **Fine-grained tokens** → Generate new token.
+2. **Token name:** `pulp-release-bot` (or any descriptive name).
+3. **Expiration:** 1 year (mark your calendar to renew).
+4. **Resource owner:** the org or user that owns this repo.
+5. **Repository access:** Only select repositories → this repo only.
+6. **Permissions** (Repository permissions section): **Contents: Read and write**. Leave everything else at the default.
+7. **Generate**, copy the token (starts with `github_pat_…`).
+8. **Add to repo secrets:** github.com/&lt;owner&gt;/&lt;repo&gt;/settings/secrets/actions → New repository secret. Name: `RELEASE_BOT_TOKEN`. Value: paste the token.
+
+That's it — no code change needed. The workflow already reads `${{ secrets.RELEASE_BOT_TOKEN || secrets.GITHUB_TOKEN }}`. `pulp doctor` will then report `RELEASE_BOT_TOKEN secret — configured ...`. `pulp pr` will also stop printing the heads-up warning before each push.
+
+### Manual fallback when the secret isn't set
+
+The chain still works but requires one manual step per release after the auto-tag appears:
+
+```bash
+gh workflow run release-cli.yml --ref v<x.y.z>
+gh workflow run sign-and-release.yml --ref v<x.y.z>
+```
+
+(Pulp's first auto-released tag, `v0.4.0`, used this fallback before `RELEASE_BOT_TOKEN` was provisioned.)
+
+---
+
 ## Agent parity
 
 Both Claude Code and Codex pick up this policy from `CLAUDE.md`. Codex reads `AGENTS.md` which is a thin pointer at `CLAUDE.md` — the single source of truth for both agents. There is no separate policy file for Codex, and `AGENTS.md` intentionally stays empty so the two never drift.
