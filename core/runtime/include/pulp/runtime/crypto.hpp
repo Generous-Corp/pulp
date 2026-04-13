@@ -21,6 +21,11 @@ std::vector<uint8_t> sha256(std::string_view data);
 std::string sha256_hex(const uint8_t* data, size_t size);
 std::string sha256_hex(std::string_view data);
 
+/// Compute SHA-1 hash. Returns 20-byte digest. (Legacy protocols only —
+/// e.g., WebSocket handshake per RFC 6455.)
+std::vector<uint8_t> sha1(const uint8_t* data, size_t size);
+std::vector<uint8_t> sha1(std::string_view data);
+
 /// Compute MD5 hash. Returns 16-byte digest. (Legacy use only.)
 std::vector<uint8_t> md5(const uint8_t* data, size_t size);
 std::vector<uint8_t> md5(std::string_view data);

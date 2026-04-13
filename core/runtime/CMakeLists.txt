@@ -28,6 +28,9 @@ target_sources(pulp-runtime PRIVATE
     src/stream.cpp
     src/async_stream.cpp
     src/network_stream.cpp
+    src/memory_message_channel.cpp
+    src/websocket_channel.cpp
+    src/json_rpc.cpp
     src/ip_address.cpp
     src/i18n.cpp
     src/crypto.cpp

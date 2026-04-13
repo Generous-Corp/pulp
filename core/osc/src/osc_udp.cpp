@@ -121,15 +121,19 @@ bool Sender::connect(const std::string& host, uint16_t port) {
 }
 
 bool Sender::send(const Message& msg) {
-    if (!impl_->connected) return false;
     auto data = encode(msg);
+    return send_raw(data.data(), data.size());
+}
+
+bool Sender::send_raw(const uint8_t* data, size_t size) {
+    if (!impl_->connected || data == nullptr || size == 0) return false;
     auto sent = sendto(impl_->sock,
-                       reinterpret_cast<const char*>(data.data()),
-                       static_cast<int>(data.size()),
+                       reinterpret_cast<const char*>(data),
+                       static_cast<int>(size),
                        0,
                        reinterpret_cast<sockaddr*>(&impl_->dest),
                        static_cast<SockLen>(sizeof(impl_->dest)));
-    return sent == static_cast<int>(data.size());
+    return sent == static_cast<int>(size);
 }
 
 void Sender::disconnect() {

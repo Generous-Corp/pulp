@@ -20,7 +20,10 @@ hierarchy is the sanctioned path; do not add new `Socket::send` /
 | Talk to another process via pipe | `PipeStream` around `NamedPipe` |
 | Open a TCP connection | `TcpStream`, wrapped in `AsyncStream` so `connect()` doesn't block the caller |
 | Fetch an HTTP/S body | `HttpStream::get(url)` / `post(url, body)` |
-| Send structured messages (JSON, OSC, WebSocket frames) | **Not yet** — Phase 4 `MessageChannel` is deferred |
+| Send structured WebSocket frames | `WebSocketChannel::connect()` / `::accept()` over a `TcpStream` |
+| Send/receive OSC messages | `OscChannel::open(host, remote_port, local_port)` |
+| RPC-style request/response over any transport | `JsonRpcPeer` wrapping any `MessageChannel` |
+| In-process message bridge (tests, inspector) | `MemoryMessageChannel::make_pair()` |
 
 ## AsyncStream — the patterns that actually work
 
@@ -67,12 +70,34 @@ To add WebSocket, S3, or any other transport:
    document it so callers know to always wrap in `AsyncStream` with
    `auto_read = true`.
 
+## Message channels (Phase 4)
+
+`MessageChannel` is the structured-message layer: one `send()` = one
+delivered message. Use it when the peer protocol doesn't tolerate
+partial reads (WebSocket, OSC, JSON-RPC, etc.). Callback dispatch
+follows the same executor contract as `AsyncStream`.
+
+Patterns that are easy to get wrong:
+
+1. **WebSocket handshake failure returns `nullptr`.** `WebSocketChannel::connect`
+   and `::accept` both return an empty unique_ptr on a bad handshake — do not
+   dereference blindly.
+2. **OSC is UDP; packets can be dropped or reordered.** For anything that
+   needs reliability, layer `JsonRpcPeer` over `WebSocketChannel`, not
+   `OscChannel`.
+3. **`JsonRpcPeer` is symmetric.** Either side can register methods, send
+   requests, and fire notifications; a client/server split is only a
+   convention.
+4. **JSON-RPC params are JSON strings, not choc values.** This keeps the
+   public surface free of CHOC types. Format with `choc::json::toString`
+   on the way in and `choc::json::parse` on the way out if you need
+   structured access.
+
 ## References
 
-- Docs: `docs/reference/streams.md` (full API + backpressure flow)
-- Headers: `core/runtime/include/pulp/runtime/{stream,async_stream,network_stream}.hpp`
+- Docs: `docs/reference/streams.md` (full API + backpressure flow + MessageChannel)
+- Headers: `core/runtime/include/pulp/runtime/{stream,async_stream,network_stream,message_channel,websocket_channel,memory_message_channel,json_rpc}.hpp`, `core/osc/include/pulp/osc/osc_channel.hpp`
 - Example: `examples/stream-demo/main.cpp`
-- Tests: `test/test_{stream,async_stream,network_stream}.cpp` — copy these
+- Tests: `test/test_{stream,async_stream,network_stream,websocket_channel,osc_channel,json_rpc}.cpp` — copy these
   patterns for new transport tests
-- Feature plan: `planning/next-features-plan.md` § Feature 3 (Phase 4
-  MessageChannel is the next piece, currently deferred)
+- Feature plan: `planning/next-features-plan.md` § Feature 3 (Phase 1–4 landed)

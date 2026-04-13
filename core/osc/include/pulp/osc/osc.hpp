@@ -57,6 +57,11 @@ public:
     // Send a message
     bool send(const Message& msg);
 
+    // Send a raw, already-encoded OSC datagram (e.g., a #bundle or any
+    // byte-exact payload the caller has pre-built). Returns true if the
+    // full payload was sent.
+    bool send_raw(const uint8_t* data, size_t size);
+
     // Disconnect
     void disconnect();
 
