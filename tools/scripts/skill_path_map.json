@@ -120,6 +120,26 @@
         "core/view/platform/**/webview*",
         "examples/webview-*/**"
       ]
+    },
+    "sdf-text": {
+      "paths": [
+        "core/canvas/src/*sdf*",
+        "core/canvas/src/*msdf*",
+        "core/canvas/src/*psdf*",
+        "core/canvas/include/**/*sdf*",
+        "core/canvas/include/**/*msdf*",
+        "core/canvas/include/**/*psdf*",
+        "examples/sdf-*/**"
+      ]
+    },
+    "streams": {
+      "paths": [
+        "core/runtime/src/*stream*",
+        "core/runtime/include/**/*stream*",
+        "core/events/src/*stream*",
+        "core/events/include/**/*stream*",
+        "examples/streams-*/**"
+      ]
     }
   }
 }
