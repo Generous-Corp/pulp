@@ -539,6 +539,28 @@ if(ANDROID)
         $<TARGET_FILE:pulp-audio>
         $<$<TARGET_EXISTS:pulp-render>:$<TARGET_FILE:pulp-render>>
         -Wl,--no-whole-archive)
+
+    # TalkBack accessibility JNI entry points live in pulp-view
+    # (core/view/platform/android/accessibility_android.cpp). pulp-view is
+    # not whole-archived — whole-archiving it pulls in SDL3's JNI_OnLoad
+    # and duplicates ours (see closed PR #148). Instead, force-reference
+    # each Java_com_pulp_accessibility_* symbol so the linker keeps the
+    # containing object file. This preserves just the JNI exports without
+    # dragging SDL3 into the JNI closure. Without this the app hits
+    # UnsatisfiedLinkError the first time TalkBack walks the node tree.
+    foreach(_a11y_sym IN ITEMS
+        Java_com_pulp_accessibility_PulpAccessibilityDelegate_nativeGetAccessibilityNodeCount
+        Java_com_pulp_accessibility_PulpAccessibilityDelegate_nativeGetNodeColumnCount
+        Java_com_pulp_accessibility_PulpAccessibilityDelegate_nativeGetNodeLabel
+        Java_com_pulp_accessibility_PulpAccessibilityDelegate_nativeGetNodeRangeMax
+        Java_com_pulp_accessibility_PulpAccessibilityDelegate_nativeGetNodeRangeMin
+        Java_com_pulp_accessibility_PulpAccessibilityDelegate_nativeGetNodeRole
+        Java_com_pulp_accessibility_PulpAccessibilityDelegate_nativeGetNodeRowCount
+        Java_com_pulp_accessibility_PulpAccessibilityDelegate_nativeGetNodeValue
+        Java_com_pulp_accessibility_PulpAccessibilityDelegate_nativePerformAction
+    )
+        target_link_options(pulp-jni PRIVATE "-Wl,--undefined=${_a11y_sym}")
+    endforeach()
 endif()
 
 # ── SDK Install Rules ──────────────────────────────────────────────────────
