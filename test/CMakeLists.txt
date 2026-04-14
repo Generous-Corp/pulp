@@ -109,6 +109,11 @@ add_executable(pulp-test-image-cache test_image_cache.cpp)
 target_link_libraries(pulp-test-image-cache PRIVATE pulp::view Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-image-cache)
 
+# A/B compare (workstream 07 slice 7.2)
+add_executable(pulp-test-ab-compare test_ab_compare.cpp)
+target_link_libraries(pulp-test-ab-compare PRIVATE pulp::view Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-ab-compare)
+
 # TextShaper (PreText-style measure-once-reflow-forever)
 add_executable(pulp-test-text-shaper test_text_shaper.cpp)
 target_link_libraries(pulp-test-text-shaper PRIVATE pulp::canvas Catch2::Catch2WithMain)
