@@ -325,6 +325,7 @@ struct AUBridge {
             }
         }
 
+<<<<<<< HEAD
         // Sidechain: pull bus 1 into its own ABL so it doesn't alias the
         // main input block. Processor::set_sidechain() takes a BufferView
         // that remains valid for the duration of process(). Workstream 01
@@ -370,18 +371,30 @@ struct AUBridge {
         }
 
         // MIDI events
+=======
+        // MIDI events. Pulp's MidiEvent is a choc::midi::ShortMessage
+        // (1–3 bytes); AU can also deliver longer messages (sysex, UMP)
+        // via AURenderEventMIDIEventList — we skip those here so a
+        // malformed ShortMessage is never constructed from truncated
+        // bytes. Workstream 01 slice 1.4.
+>>>>>>> f80d3b04 (auv3: reject malformed AUMIDIEvent packets (workstream 01 slice 1.4))
         pulp::midi::MidiBuffer midi_in, midi_out;
         const AURenderEvent* event = realtimeEventListHead;
         while (event) {
             if (event->head.eventType == AURenderEventMIDI) {
                 const AUMIDIEvent& m = event->MIDI;
-                pulp::midi::MidiEvent me;
-                me.message = choc::midi::ShortMessage(
-                    m.data[0],
-                    m.length > 1 ? m.data[1] : uint8_t(0),
-                    m.length > 2 ? m.data[2] : uint8_t(0));
-                me.sample_offset = static_cast<int32_t>(event->head.eventSampleTime);
-                midi_in.add(me);
+                // A well-formed short MIDI message has a status byte
+                // (MSB set) and total length 1..3. Skip anything else.
+                if (m.length >= 1 && m.length <= 3 && (m.data[0] & 0x80)) {
+                    pulp::midi::MidiEvent me;
+                    me.message = choc::midi::ShortMessage(
+                        m.data[0],
+                        m.length > 1 ? m.data[1] : uint8_t(0),
+                        m.length > 2 ? m.data[2] : uint8_t(0));
+                    me.sample_offset =
+                        static_cast<int32_t>(event->head.eventSampleTime);
+                    midi_in.add(me);
+                }
             }
             event = event->head.next;
         }
