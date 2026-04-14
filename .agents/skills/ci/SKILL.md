@@ -438,3 +438,59 @@ Locally:
 **Tag safety:** the auto-release workflow is idempotent-strict — if a tag already exists pointing at a different SHA, it fails loudly rather than overwriting. See `docs/guides/versioning.md` for the manual recovery recipe.
 
 **`RELEASE_BOT_TOKEN` is required for the auto-release chain to fire.** Without it, auto-release silently degrades — tags get created via `GITHUB_TOKEN` but GitHub doesn't trigger workflows on `GITHUB_TOKEN`-pushed tags, so `release-cli.yml` and `sign-and-release.yml` never run and no GitHub Release appears. Run `pulp doctor` to check; if missing, follow the "One-time setup" section in `docs/guides/versioning.md`. `pulp pr` will also print a heads-up before pushing the PR if the secret isn't present.
+
+## SignalGraph Phase 0 learnings (PR #153)
+
+Gotchas surfaced while landing the four-phase SignalGraph follow-up:
+
+- **AudioUnitSDK 1.4 uses `std::expected` (C++23).** Targets that `#include`
+  AUSDK headers need `set_target_properties(<target> PROPERTIES CXX_STANDARD 23)`
+  at the per-target level. `target_compile_features(<target> PUBLIC cxx_std_23)`
+  alone is **not** enough when `CMAKE_CXX_STANDARD=20` is set at the repo
+  root — CMake 3.24's policy makes CXX_STANDARD authoritative over feature
+  requirements. Apply to both the `ausdk` target and every consumer
+  (`pulp-format`, per-plugin `${target}_AU`). Symptom: GH-hosted mac fails
+  with "no template named 'unexpected'"; local Xcode mac builds fine
+  because Apple's libc++ is ahead. Linux/Windows are unaffected because
+  they don't touch AUSDK.
+
+- **`std::atomic<std::shared_ptr<T>>` needs C++20 libc++ which our
+  toolchain doesn't ship.** The workaround is the deprecated
+  `std::atomic_load_explicit(&shared_ptr_var, order)` /
+  `std::atomic_store_explicit(&shared_ptr_var, value, order)`
+  free-function overloads. These still work everywhere we build and
+  preserve acquire/release semantics. Revisit when libc++ catches up.
+
+- **Catch2 `REQUIRE` inside a `std::thread` body terminates the process.**
+  The REQUIRE throws and std::thread's dtor calls std::terminate when
+  unwinding across the thread boundary. For concurrency tests, use an
+  `std::atomic<int>` failure counter from the worker and assert on the
+  main thread after join.
+
+- **GH-hosted macOS vs local mac for upstream SDK issues.** When an
+  upstream SDK (AUSDK, VST3, …) breaks only on `macos-latest` while the
+  exact same code builds on a developer's Xcode, that's an Apple clang
+  version mismatch. Options: (a) pin the SDK to a known-good commit,
+  (b) set CXX_STANDARD per target, (c) `gh pr merge --admin` if
+  Linux+Windows Namespace are green and local mac validated. Don't
+  chase GH-hosted mac issues on the PR branch — fix upstream or admin-merge.
+
+- **FetchContent threejs clones hang on some macs.** The threejs git
+  clone inside CMake's FetchContent step has hung indefinitely several
+  times during fresh configures. Mitigations: reuse an existing
+  configured build dir; `rm -rf build/_deps/threejs-*` then build only
+  the targets that don't need it (e.g., `pulp-host`, `pulp-test-host`);
+  or set `-DPULP_ENABLE_GPU=OFF` to bypass the threejs fetch entirely.
+
+- **Fresh worktree cmake configure is expensive (~15+ min)** because every
+  FetchContent dep re-populates. Reuse strategy: `git checkout -B
+  feature/<new-phase> origin/main` on an already-configured worktree to
+  inherit the populated `_deps/`. Saves ~70% on per-phase bootstrap.
+
+- **Skill-sync + version-bump CI gates run on every push.** After each
+  push that touches `tools/cli/`, `core/host/`, `.agents/skills/`,
+  you'll likely need to (a) append a new bullet to `hosting/SKILL.md`
+  or `cli-maintenance/SKILL.md`, and (b) run
+  `python3 tools/scripts/version_bump_check.py --mode=apply` to update
+  `CMakeLists.txt` + `CHANGELOG.md`. The gate reports "SDK X.Y.Z ✓
+  bumped" when satisfied.

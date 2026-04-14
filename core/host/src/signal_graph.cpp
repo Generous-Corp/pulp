@@ -137,6 +137,54 @@ bool SignalGraph::connect_midi(NodeId source, NodeId dest) {
     return true;
 }
 
+bool SignalGraph::connect_automation(NodeId src, PortIndex src_audio_port,
+                                     NodeId dest, uint32_t dest_param_id,
+                                     float range_lo, float range_hi,
+                                     float smoothing_ms,
+                                     AutomationMix mix) {
+    const GraphNode* src_n = node(src);
+    const GraphNode* dst_n = node(dest);
+    if (!src_n || !dst_n) return false;
+    if (dst_n->type != NodeType::Plugin || !dst_n->plugin) return false;
+    if ((int)src_audio_port >= src_n->num_output_ports) return false;
+
+    // Parameter must exist, be automatable, and not read-only.
+    bool ok_param = false;
+    for (const auto& pi : dst_n->plugin->parameters()) {
+        if (pi.id != dest_param_id) continue;
+        if (!pi.flags.automatable || pi.flags.read_only) return false;
+        ok_param = true;
+        break;
+    }
+    if (!ok_param) return false;
+
+    // Second Replace edge to same (dest, param) is rejected.
+    if (mix == AutomationMix::Replace) {
+        for (const auto& c : connections_) {
+            if (c.automation && c.dest_node == dest
+                && c.automation_param_id == dest_param_id
+                && c.automation_mix == AutomationMix::Replace) {
+                return false;
+            }
+        }
+    }
+
+    Connection conn{};
+    conn.source_node              = src;
+    conn.source_port              = src_audio_port;
+    conn.dest_node                = dest;
+    conn.dest_port                = 0;
+    conn.automation               = true;
+    conn.automation_param_id      = dest_param_id;
+    conn.automation_range_lo      = range_lo;
+    conn.automation_range_hi      = range_hi;
+    conn.automation_smoothing_ms  = std::max(0.0f, smoothing_ms);
+    conn.automation_mix           = mix;
+    connections_.push_back(conn);
+    invalidate_live_();
+    return true;
+}
+
 bool SignalGraph::inject_midi(NodeId id, const midi::MidiBuffer& events) {
     auto cg = std::atomic_load_explicit(&live_, std::memory_order_acquire);
     if (!cg) return false;
@@ -219,6 +267,9 @@ std::vector<NodeId> SignalGraph::processing_order() const {
         order.push_back(current);
         for (auto& c : connections_) {
             if (c.feedback) continue;
+            // Automation edges DO contribute to topological order — the
+            // source must be processed before the dest so its output
+            // buffer is valid when we sample it for param events.
             if (c.source_node == current) {
                 if (--in_degree[c.dest_node] == 0) queue.push(c.dest_node);
             }
@@ -267,7 +318,7 @@ void SignalGraph::compute_latencies_for_(CompiledGraph& cg,
         bool has_upstream = false;
         for (const auto& c : cg.connections) {
             if (c.dest_node != id) continue;
-            if (c.feedback || c.midi) continue;
+            if (c.feedback || c.midi || c.automation) continue;
             auto src_it = cg.runtime.find(c.source_node);
             if (src_it == cg.runtime.end()) continue;
             max_upstream = std::max(max_upstream, src_it->second.output_latency);
@@ -303,7 +354,7 @@ void SignalGraph::compute_latencies_for_(CompiledGraph& cg,
                 static_cast<size_t>(cg.max_block_size), 0.0f);
             continue;
         }
-        if (c.midi) continue;
+        if (c.midi || c.automation) continue;
 
         int64_t want = dst_it->second.input_latency - src_it->second.output_latency;
         if (want < 0) want = 0;
@@ -417,6 +468,7 @@ void SignalGraph::process(audio::BufferView<float>& output,
             const auto& c = cg->connections[ci];
             if (c.dest_node != id) continue;
             if (c.midi) continue;
+            if (c.automation) continue;  // dispatched in the Plugin branch
             const int dport = static_cast<int>(c.dest_port);
             if (dport < 0 || dport >= static_cast<int>(rt.input_ptrs.size())) continue;
             if (c.source_node == 0) continue;
@@ -477,7 +529,59 @@ void SignalGraph::process(audio::BufferView<float>& output,
                     in_const.data(), in_const.size(),
                     static_cast<std::size_t>(num_samples));
                 rt.midi_out.clear();
+
+                // Build per-block automation event queue. For each
+                // (param_id) target, collect values from every automation
+                // edge and mix per edges' MixMode. Two control points per
+                // block (sample 0 and N-1) so the plugin can interpolate.
                 ParameterEventQueue param_events;
+                {
+                    struct Accum {
+                        float v0 = 0.f, vN = 0.f;
+                        float lo = 0.f, hi = 1.f;
+                        bool has_add = false;
+                    };
+                    std::unordered_map<uint32_t, Accum> acc;
+                    const int last = num_samples - 1;
+                    for (const auto& c : cg->connections) {
+                        if (!c.automation || c.dest_node != id) continue;
+                        auto src_it = cg->runtime.find(c.source_node);
+                        if (src_it == cg->runtime.end()) continue;
+                        const int sport = static_cast<int>(c.source_port);
+                        if (sport < 0 || sport >= (int)src_it->second.output_ptrs.size()) continue;
+                        const float* src = src_it->second.output_ptrs[sport];
+                        const float s0 = std::clamp(src[0], 0.0f, 1.0f);
+                        const float sN = std::clamp(src[last < 0 ? 0 : last], 0.0f, 1.0f);
+                        const float m0 = c.automation_range_lo
+                            + s0 * (c.automation_range_hi - c.automation_range_lo);
+                        const float mN = c.automation_range_lo
+                            + sN * (c.automation_range_hi - c.automation_range_lo);
+                        auto& a = acc[c.automation_param_id];
+                        a.lo = c.automation_range_lo;
+                        a.hi = c.automation_range_hi;
+                        if (c.automation_mix == AutomationMix::Replace) {
+                            a.v0 = m0;
+                            a.vN = mN;
+                        } else {
+                            a.v0 += m0;
+                            a.vN += mN;
+                            a.has_add = true;
+                        }
+                    }
+                    for (auto& [pid, a] : acc) {
+                        float v0 = a.v0, vN = a.vN;
+                        if (a.has_add) {
+                            const float lo = std::min(a.lo, a.hi);
+                            const float hi = std::max(a.lo, a.hi);
+                            v0 = std::clamp(v0, lo, hi);
+                            vN = std::clamp(vN, lo, hi);
+                        }
+                        param_events.push({pid, 0, v0});
+                        if (last > 0) param_events.push({pid, last, vN});
+                    }
+                    param_events.sort();
+                }
+
                 pit->second->process(out_view, in_c, rt.midi_in, rt.midi_out,
                                      param_events, num_samples);
                 break;

@@ -561,6 +561,112 @@ TEST_CASE("SignalGraph connect_midi routes events through the graph",
     graph.release();
 }
 
+// ── Phase 1E connect_automation test ────────────────────────────────────
+
+namespace {
+// Plugin exposing a single automatable param and recording every
+// ParameterEvent it receives. Audio output is silence.
+class MockAutomatable final : public PluginSlot {
+public:
+    static constexpr uint32_t kParamId = 42;
+
+    const PluginInfo& info() const override { return info_; }
+    bool is_loaded() const override { return true; }
+    bool prepare(double, int) override { return true; }
+    void release() override {}
+
+    void process(pulp::audio::BufferView<float>& out,
+                 const pulp::audio::BufferView<const float>&,
+                 const pulp::midi::MidiBuffer&,
+                 pulp::midi::MidiBuffer&,
+                 const pulp::host::ParameterEventQueue& pe,
+                 int n) override {
+        for (const auto& e : pe) received_.push_back(e);
+        for (size_t c = 0; c < out.num_channels(); ++c)
+            std::memset(out.channel_ptr(c), 0, sizeof(float) * (size_t)n);
+    }
+
+    std::vector<HostParamInfo> parameters() const override {
+        HostParamInfo p;
+        p.id = kParamId;
+        p.name = "mod";
+        p.min_value = 0.0f;
+        p.max_value = 1.0f;
+        p.default_value = 0.0f;
+        p.flags.automatable = true;
+        return {p};
+    }
+    float get_parameter(uint32_t) const override { return 0.f; }
+    void set_parameter(uint32_t, float) override {}
+    void set_bypass(bool) override {}
+    bool is_bypassed() const override { return false; }
+    std::vector<uint8_t> save_state() const override { return {}; }
+    bool restore_state(const std::vector<uint8_t>&) override { return false; }
+    bool has_editor() const override { return false; }
+    void* create_editor_view() override { return nullptr; }
+    void destroy_editor_view() override {}
+    int latency_samples() const override { return 0; }
+    int tail_samples() const override { return 0; }
+
+    const std::vector<pulp::host::ParameterEvent>& received() const { return received_; }
+
+private:
+    PluginInfo info_{"MockAuto", "", "", "", "", PluginFormat::CLAP};
+    std::vector<pulp::host::ParameterEvent> received_;
+};
+} // namespace
+
+TEST_CASE("SignalGraph connect_automation delivers two-point events per block",
+          "[host][graph][automation]") {
+    SignalGraph graph;
+    auto in_node = graph.add_input_node(1, "in");
+    auto slot    = std::make_unique<MockAutomatable>();
+    auto* slot_ptr = slot.get();
+    auto plug    = graph.add_plugin_node(std::move(slot), 0, 1, "auto");
+
+    // Source is audio port 0 of the AudioInput; target is the plugin's
+    // kParamId with range [0, 1] (unity mapping so we can read values
+    // directly from the input sample).
+    REQUIRE(graph.connect_automation(
+        in_node, 0, plug, MockAutomatable::kParamId, 0.0f, 1.0f));
+    REQUIRE(graph.prepare(48000.0, 64));
+
+    std::vector<float> in_l(64, 0.0f);
+    in_l[0]  = 0.25f;
+    in_l[63] = 0.75f;
+    std::vector<float> out_l(64, 0.0f);
+    const float* in_ptrs[1]  = {in_l.data()};
+    float*       out_ptrs[1] = {out_l.data()};
+    pulp::audio::BufferView<const float> iv(in_ptrs, 1, 64);
+    pulp::audio::BufferView<float>       ov(out_ptrs, 1, 64);
+
+    graph.process(ov, iv, 64);
+
+    const auto& ev = slot_ptr->received();
+    REQUIRE(ev.size() == 2);
+    REQUIRE(ev[0].param_id == MockAutomatable::kParamId);
+    REQUIRE(ev[0].sample_offset == 0);
+    REQUIRE(std::abs(ev[0].value - 0.25f) < 1e-6f);
+    REQUIRE(ev[1].sample_offset == 63);
+    REQUIRE(std::abs(ev[1].value - 0.75f) < 1e-6f);
+}
+
+TEST_CASE("SignalGraph connect_automation rejects duplicate Replace edges",
+          "[host][graph][automation]") {
+    SignalGraph graph;
+    auto in_node = graph.add_input_node(1);
+    auto plug    = graph.add_plugin_node(std::make_unique<MockAutomatable>(), 0, 1);
+    REQUIRE(graph.connect_automation(
+        in_node, 0, plug, MockAutomatable::kParamId, 0.0f, 1.0f));
+    // Second Replace -> reject.
+    REQUIRE_FALSE(graph.connect_automation(
+        in_node, 0, plug, MockAutomatable::kParamId, 0.5f, 1.0f));
+    // Add-mode alongside Replace is allowed.
+    REQUIRE(graph.connect_automation(
+        in_node, 0, plug, MockAutomatable::kParamId, 0.0f, 1.0f,
+        0.0f, pulp::host::AutomationMix::Add));
+}
+
 // ── Real CLAP loader (integration test, skipped when no test plugin built) ──
 
 #include <filesystem>

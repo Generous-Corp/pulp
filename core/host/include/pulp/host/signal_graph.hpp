@@ -42,19 +42,35 @@ using PortIndex = uint32_t;
 
 // ── Connection ──────────────────────────────────────────────────────────
 
+enum class AutomationMix : uint8_t {
+    Replace = 0,  // default; graph refuses a 2nd Replace edge to same (node,param)
+    Add     = 1,  // summed with other Add edges, clamped to param range
+};
+
 struct Connection {
     NodeId source_node;
     PortIndex source_port;
     NodeId dest_node;
-    PortIndex dest_port;
-    bool feedback = false;  // back-edge: reads previous block's audio, breaks
-                            // the cycle for topological sort and PDC.
-    bool midi = false;      // event-edge: routes MidiBuffer events instead of
-                            // audio samples. Ports are ignored.
+    PortIndex dest_port;      // audio: dest port index; automation: ignored
+    bool feedback = false;    // back-edge: reads previous block's audio, breaks
+                              // the cycle for topological sort and PDC.
+    bool midi = false;        // event-edge: routes MidiBuffer events instead of
+                              // audio samples. Ports are ignored.
+    bool automation = false;  // automation-edge: source audio drives a param on
+                              // the dest plugin.
+
+    // Automation fields (valid only when automation == true).
+    uint32_t automation_param_id  = 0;
+    float automation_range_lo     = 0.0f;  // plain param domain
+    float automation_range_hi     = 1.0f;  // plain param domain
+    float automation_smoothing_ms = 0.0f;  // per-source pre-mix slew
+    AutomationMix automation_mix  = AutomationMix::Replace;
 
     bool operator==(const Connection& o) const {
         return source_node == o.source_node && source_port == o.source_port
-            && dest_node == o.dest_node && dest_port == o.dest_port;
+            && dest_node == o.dest_node && dest_port == o.dest_port
+            && automation == o.automation
+            && (automation ? automation_param_id == o.automation_param_id : true);
     }
 };
 
@@ -117,6 +133,25 @@ public:
     // Participates in cycle detection and topological sort the same way as
     // audio connections.
     bool connect_midi(NodeId source, NodeId dest);
+
+    // Automation connection: the audio samples on `src`'s output port drive
+    // `dest`'s parameter `dest_param_id`. Two control points per block (first
+    // + last sample) are delivered to the plugin via
+    // PluginSlot::process()'s ParameterEventQueue so plugins can interpolate
+    // sample-accurately.
+    //
+    // Source values are clamped to [0,1] then mapped linearly to
+    // [range_lo, range_hi] in the plugin's plain parameter domain.
+    //
+    // smoothing_ms applies a per-source linear slew before mixing (TODO).
+    // MixMode::Replace is the default; a second Replace edge targeting the
+    // same (dest, param) is rejected. MixMode::Add sums multiple edges,
+    // then clamps to the param's range.
+    bool connect_automation(NodeId src, PortIndex src_audio_port,
+                            NodeId dest, uint32_t dest_param_id,
+                            float range_lo, float range_hi,
+                            float smoothing_ms = 0.0f,
+                            AutomationMix mix = AutomationMix::Replace);
 
     // Inject a MIDI buffer into a MidiInput source node. Call before
     // process(); the events become that node's MIDI output this block.
