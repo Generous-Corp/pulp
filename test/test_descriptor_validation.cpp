@@ -107,6 +107,22 @@ TEST_CASE("supports_mpe without accepts_midi warns",
     REQUIRE(has_warning_on(issues, "accepts_midi"));
 }
 
+TEST_CASE("MidiEffect without audio output is valid",
+          "[format][descriptor-validation]") {
+    auto d = well_formed_effect();
+    d.category = PluginCategory::MidiEffect;
+    d.accepts_midi = true;
+    d.produces_midi = true;
+    d.output_buses.clear();
+    auto issues = validate_descriptor(d);
+    for (const auto& i : issues) {
+        if (i.severity == DescriptorIssueSeverity::Error) {
+            REQUIRE(i.field != "output_buses");
+        }
+    }
+    REQUIRE(descriptor_is_valid(issues));
+}
+
 TEST_CASE("reverse-DNS bundle_id passes",
           "[format][descriptor-validation]") {
     auto d = well_formed_effect();
