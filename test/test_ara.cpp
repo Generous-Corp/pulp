@@ -37,3 +37,14 @@ TEST_CASE("AraDocumentController subclass overrides work", "[ara]") {
     REQUIRE((c.supported_roles() & static_cast<int>(AraRole::PlaybackRenderer)) != 0);
     REQUIRE((c.supported_roles() & static_cast<int>(AraRole::EditorView)) != 0);
 }
+
+TEST_CASE("ara_sdk_generation reflects SDK headers", "[ara]") {
+#ifdef PULP_HAS_ARA
+    // Compiled with the Celemony SDK — generation constant is at least
+    // the 2.3 Final enum value (6). A future header upgrade can only
+    // raise this, never lower it.
+    REQUIRE(ara_sdk_generation() >= 6);
+#else
+    REQUIRE(ara_sdk_generation() == 0);
+#endif
+}

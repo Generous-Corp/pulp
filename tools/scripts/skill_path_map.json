@@ -11,6 +11,15 @@
         "tools/cmake/PulpAAX.cmake"
       ]
     },
+    "ara": {
+      "paths": [
+        "core/format/src/ara*",
+        "core/format/src/ara/**",
+        "core/format/include/pulp/format/ara*",
+        "core/format/include/pulp/format/ara/**",
+        "external/ara-sdk/**"
+      ]
+    },
     "android": {
       "paths": [
         "core/render/platform/android/**",
