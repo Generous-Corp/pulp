@@ -38,6 +38,32 @@ struct PluginInfo {
     bool is_effect = true;
     int num_inputs = 2;
     int num_outputs = 2;
+
+    // ── Richer metadata (workstream 03 slice 3.7) ────────────────────────
+    //
+    // Each scanner populates the subset it can cheaply extract. Callers
+    // filter plugins on these instead of parsing `name` strings. All
+    // fields are additive — older cache blobs that don't carry them
+    // deserialize with defaults, so scan_cache.hpp's round-trip stays
+    // backwards-compatible.
+    //
+    // category    — broad taxonomy: "Fx", "Instrument", "Analyzer",
+    //               "MidiEffect". Sourced from VST3 PClassInfo::category,
+    //               AU AUSysExCategory, CLAP descriptor category.
+    // features    — free-form tags (CLAP `features` array, VST3
+    //               subcategories joined, AU tag list).
+    // description — longer human-readable description if the format
+    //               surfaces one; empty otherwise.
+    // has_editor  — plugin declares an embedded editor view.
+    // supports_sidechain — declares a second input bus.
+    // supports_midi_in / supports_midi_out — MIDI wiring.
+    std::string category;
+    std::vector<std::string> features;
+    std::string description;
+    bool has_editor = false;
+    bool supports_sidechain = false;
+    bool supports_midi_in = false;
+    bool supports_midi_out = false;
 };
 
 // ── Scanner configuration ───────────────────────────────────────────────

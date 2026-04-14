@@ -14,6 +14,7 @@ target_sources(pulp-host PRIVATE
     src/graph_serializer.cpp
     src/scan_blacklist.cpp
     src/scan_cache.cpp
+    src/background_scanner.cpp
 )
 
 target_link_libraries(pulp-host PUBLIC pulp::audio pulp::midi pulp::runtime)

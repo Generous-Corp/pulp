@@ -64,6 +64,32 @@ plugin_extensions:
       - "AraDocumentController is a stub — playback renderer not implemented."
       - "VST3, CLAP, AU adapters do not declare ARA extension support."
       - "Celemony ARA SDK is developer-supplied; not bundled."
+# Known limitations per format. Keyed the same as `formats:`. The renderer
+# in capabilities.md surfaces these as a "Known limitations" link on each
+# row. Production-readiness workstream 08 sub-deliverable 8.5.
+#
+# Adding an entry here is non-blocking — the entry's status in `formats:`
+# is the load-bearing label. `format_limitations:` exists so readers don't
+# confuse "the adapter compiles" with "the adapter is feature-complete."
+format_limitations:
+  vst3:
+    - "Dynamic bus arrangements limited; setBusArrangements only renegotiates the primary stereo bus today (workstream 01)."
+  au_v2:
+    - "Outbound parameter changes are not emitted to the host — automation read on AU v2 effects only flows host → plugin (workstream 01)."
+  clap:
+    - "Only the first input bus and first output bus are routed; declared sidechain or additional buses are ignored (workstream 01)."
+    - "Processor::set_sidechain is never called from the CLAP adapter — sidechain inputs land on the primary bus (workstream 01)."
+  lv2:
+    - "MIDI atom parsing is incomplete; connect_port has no atom/MIDI port branch beyond control range. URID feature is not resolved (workstream 01)."
+  aax:
+    - "Custom editor surface not wired — Pro Tools shows the auto-generated parameter strip rather than a Pulp ViewBridge editor (followups plan, row 7)."
+    - "AudioSuite role is declared but not exercised end-to-end (followups plan, row 13)."
+  auv3:
+    - "iOS jetsam pressure not modeled — heavy V8 / WebView workloads in the AUv3 process risk termination at ~50 MB (workstream 05)."
+  wam_v2:
+    - "Browser origin sandbox only; no Pulp-side capability manifest yet (security plan v4 §4.5)."
+  webclap:
+    - "Same browser-sandbox-only constraint as wam_v2."
 
 scripted_ui:
   ui_script_target_wiring:
@@ -86,6 +112,7 @@ scripted_ui:
     notes: Sibling theme.json overrides reload in ScriptedUiSession. Runtime-validated only in the standalone macOS scripted UI lane.
   state_preservation:
     status: usable
+    ci_test: pulp-test-state
     notes: Knob, fader, toggle, checkbox, toggle-button, and XY pad values are restored across scripted UI reloads. JavaScript heap state is rebuilt.
 
 audio_io:
@@ -203,6 +230,9 @@ css_parity:
       JS bridge: setPosition, setTop/Right/Bottom/Left, setZIndex.
   canvas_2d:
     status: usable
+    ci_test:
+      - pulp-test-canvas
+      - pulp-test-canvas-widget
     notes: >
       25 draw command types on CanvasWidget: fillRect, strokeRect, fillRoundedRect,
       strokeRoundedRect, fillCircle, strokeCircle, strokeLine, fillText, setFont,
@@ -262,6 +292,9 @@ css_parity:
       Per-corner border-radius (border-top-left-radius etc., 4 independent corners).
   animation_properties:
     status: usable
+    ci_test:
+      - pulp-test-animation
+      - pulp-test-widget-animation
     notes: >
       CSS animation-* properties parsed: name, duration, timing-function, delay,
       iteration-count (including infinite), direction, fill-mode. animation shorthand.
@@ -310,6 +343,7 @@ widgets:
       JS bridge: createListBox, setListItems, setListSelected, setListRowHeight.
   combo_box:
     status: usable
+    ci_test: pulp-test-combo-dropdown
     notes: Dropdown with global click-outside dismiss, keyboard navigation, hover tracking.
   scroll_view:
     status: usable
@@ -513,6 +547,9 @@ input:
 runtime_apis:
   canvas_2d:
     status: usable
+    ci_test:
+      - pulp-test-canvas
+      - pulp-test-canvas-widget
     notes: >
       25+ draw commands including gradient fills (linear/radial), arc/ellipse,
       textAlign/textBaseline, clearRect, clipRect, globalAlpha, lineCap/lineJoin,
