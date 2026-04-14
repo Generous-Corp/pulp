@@ -104,6 +104,11 @@ add_executable(pulp-test-midi-ci test_midi_ci.cpp)
 target_link_libraries(pulp-test-midi-ci PRIVATE pulp::midi Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-midi-ci)
 
+# PluginDescriptor vendor_url + vendor_email (workstream 01 slice 1.8)
+add_executable(pulp-test-vendor-url test_vendor_url.cpp)
+target_link_libraries(pulp-test-vendor-url PRIVATE pulp::format Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-vendor-url)
+
 # TextShaper (PreText-style measure-once-reflow-forever)
 add_executable(pulp-test-text-shaper test_text_shaper.cpp)
 target_link_libraries(pulp-test-text-shaper PRIVATE pulp::canvas Catch2::Catch2WithMain)

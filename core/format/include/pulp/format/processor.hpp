@@ -62,6 +62,14 @@ struct PluginDescriptor {
     std::string manufacturer;
     std::string bundle_id;
     std::string version;       ///< Semantic version string, e.g. "1.0.0"
+    std::string vendor_url;    ///< Optional. https:// URL. Surfaced by VST3
+                               ///< PFactoryInfo::url, CLAP manufacturer_url,
+                               ///< AU properties kAudioUnitProperty_URL.
+                               ///< Leave empty when the plugin has no
+                               ///< canonical web page.
+    std::string vendor_email;  ///< Optional. RFC 5322 address. Surfaced by
+                               ///< VST3 PFactoryInfo::email and CLAP
+                               ///< manufacturer_email. Leave empty to skip.
     PluginCategory category = PluginCategory::Effect;
 
     /// Bus configuration — defaults to single stereo in/out for compatibility.
