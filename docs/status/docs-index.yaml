@@ -69,6 +69,11 @@ docs:
     kind: guide
     summary: HeadlessHost API, golden-file testing, sanitizer builds, format validation
 
+  - slug: status-ladder
+    path: guides/status-ladder.md
+    kind: guide
+    summary: Production-readiness status ladder — evidence rule for usable labels
+
   - slug: local-ci
     path: guides/local-ci.md
     kind: guide
