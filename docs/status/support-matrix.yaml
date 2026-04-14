@@ -280,6 +280,7 @@ css_parity:
       focus()/blur(), cloneNode, createDocumentFragment(), <option> sync for <select>.
   events:
     status: usable
+    ci_test: pulp-test-events
     notes: >
       click, dblclick, mousedown/up, mouseenter/leave, wheel, scroll, contextmenu,
       keydown/keyup, input/change, focus/blur, pointer events (L2), gesture events.
@@ -347,15 +348,18 @@ widgets:
     notes: Dropdown with global click-outside dismiss, keyboard navigation, hover tracking.
   scroll_view:
     status: usable
+    ci_test: pulp-test-scroll-view
     notes: ScrollView with smooth scroll animation, bar fade-in/out, content size management.
   text_editor:
     status: usable
+    ci_test: pulp-test-text-editor
     notes: >
       Full text editor: selection (click/double/triple), clipboard (Cmd+C/X/V/A),
       undo/redo (Cmd+Z/Shift+Z), numeric-only, password mode, multi-line,
       placeholder, IME composition with marked text.
   tree_view:
     status: usable
+    ci_test: pulp-test-tree-view
     notes: Hierarchical tree with expand/collapse, indent levels.
   progress_bar:
     status: usable
@@ -556,6 +560,7 @@ runtime_apis:
       globalCompositeOperation (blend modes), fillRoundedRect, strokeCircle.
   clipboard:
     status: usable
+    ci_test: pulp-test-clipboard
     notes: navigator.clipboard.readText/writeText via platform::Clipboard C++ API.
   local_storage:
     status: usable

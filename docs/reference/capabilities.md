@@ -4,6 +4,18 @@ A categorized inventory of what Pulp can do today. Each capability lists its cur
 
 **Status vocabulary**: `stable` | `usable` | `experimental` | `partial` | `planned` | `unsupported`
 
+See [docs/guides/status-ladder.md](../guides/status-ladder.md) for the evidence rule on `usable` labels.
+
+---
+
+## Known Limitations
+
+The following section is auto-generated from the `limitations:` block of `docs/status/support-matrix.yaml`. Run `python3 tools/docs_generate.py generate` to refresh.
+
+<!-- generated:start id=limitations -->
+_(limitations generator missing)_
+<!-- generated:end id=limitations -->
+
 ---
 
 ## Plugin Formats

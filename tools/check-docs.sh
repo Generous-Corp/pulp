@@ -214,9 +214,6 @@ fi
 # ── Status ladder (warn-mode during phase-in) ─────────────────────────────────
 if [ -x "$ROOT/tools/check_status_ladder.py" ]; then
     echo "Checking status ladder (usable ⇒ validation evidence)..."
-    # warn-mode: surface violations, do not fail. Set PULP_STATUS_LADDER_STRICT=1
-    # to upgrade to report-mode (hard fail). Plan to flip CI to strict after
-    # one release of soak time.
     if [ "${PULP_STATUS_LADDER_STRICT:-0}" = "1" ]; then
         python3 "$ROOT/tools/check_status_ladder.py" --mode=report || ERRORS=$((ERRORS + 1))
     else
@@ -224,6 +221,13 @@ if [ -x "$ROOT/tools/check_status_ladder.py" ]; then
     fi
 fi
 
+# ── Generated-table drift check (workstream 08 slice 8.3) ─────────────────────
+if [ -x "$ROOT/tools/docs_generate.py" ]; then
+    echo "Checking generated-table drift in capabilities.md..."
+    if ! python3 "$ROOT/tools/docs_generate.py" check; then
+        ERRORS=$((ERRORS + 1))
+    fi
+fi
 # ── Summary ───────────────────────────────────────────────────────────────────
 echo ""
 if [ $ERRORS -gt 0 ]; then
