@@ -584,7 +584,16 @@ function(_pulp_add_au target name bundle_id version manufacturer category plugin
     _pulp_apply_ui_script_definition(${target}_AU "${PULP_${target}_UI_SCRIPT}")
     target_include_directories(${target}_AU PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
+    # AudioUnitSDK 1.4 headers (`AUUtility.h`) use `std::expected` /
+    # `std::unexpected` (C++23). The host pulp-format static lib already
+    # marks `cxx_std_23` PUBLIC so downstream C++ TUs inherit it, but
+    # per-plugin `.mm` sources added directly to ${target}_AU compile with
+    # that target's own CXX_STANDARD. Apple clang's Objective-C++ mode
+    # only exposes <expected> at -std=c++23, so pin it explicitly here
+    # (same rationale as core/format/CMakeLists.txt L76).
     set_target_properties(${target}_AU PROPERTIES
+        CXX_STANDARD 23
+        CXX_STANDARD_REQUIRED ON
         BUNDLE TRUE
         BUNDLE_EXTENSION "component"
         OUTPUT_NAME "${name}"
