@@ -109,6 +109,11 @@ add_executable(pulp-test-image-cache test_image_cache.cpp)
 target_link_libraries(pulp-test-image-cache PRIVATE pulp::view Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-image-cache)
 
+# Accessibility tree snapshot (workstream 04 slice 4.4)
+add_executable(pulp-test-accessibility-tree test_accessibility_tree.cpp)
+target_link_libraries(pulp-test-accessibility-tree PRIVATE pulp::view Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-accessibility-tree)
+
 # TextShaper (PreText-style measure-once-reflow-forever)
 add_executable(pulp-test-text-shaper test_text_shaper.cpp)
 target_link_libraries(pulp-test-text-shaper PRIVATE pulp::canvas Catch2::Catch2WithMain)
