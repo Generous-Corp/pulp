@@ -103,16 +103,49 @@ std::vector<PluginInfo> scan_clap_bundle_descriptors(const std::string& path) {
 
         // Classify from `features` if present — CLAP declares category strings
         // like "instrument", "audio-effect", "note-effect".
+        //
+        // Category assignment runs in two passes so a plugin advertising
+        // both `audio-effect` and `analyzer` gets the more specific
+        // Analyzer label regardless of feature string order (#198 P2).
         info.is_instrument = false;
         info.is_effect = true;
+        bool has_audio_effect_tag = false;
+        bool has_analyzer_tag = false;
         if (desc->features) {
             for (const char* const* f = desc->features; *f; ++f) {
+                info.features.emplace_back(*f);
                 if (std::strcmp(*f, CLAP_PLUGIN_FEATURE_INSTRUMENT) == 0) {
                     info.is_instrument = true;
                     info.is_effect = false;
+                    info.category = "Instrument";
+                } else if (std::strcmp(*f, CLAP_PLUGIN_FEATURE_AUDIO_EFFECT) == 0) {
+                    has_audio_effect_tag = true;
+                } else if (std::strcmp(*f, CLAP_PLUGIN_FEATURE_NOTE_EFFECT) == 0) {
+                    info.category = "MidiEffect";
+                    // #198 P2: note-effects are still effects — they process
+                    // MIDI, just with no audio output. Before this fix
+                    // is_effect was cleared here so existing filters that
+                    // grouped by is_effect silently dropped MIDI effects.
+                    info.is_effect = true;
+                    info.is_instrument = false;
+                    info.supports_midi_in = true;
+                    info.supports_midi_out = true;
+                } else if (std::strcmp(*f, CLAP_PLUGIN_FEATURE_ANALYZER) == 0) {
+                    has_analyzer_tag = true;
                 }
             }
         }
+        // Deterministic fallback category. Analyzer takes precedence over
+        // Fx when a plugin advertises both tags (matches the narrower
+        // user expectation for spectrum/level-meter tools). Instrument /
+        // MidiEffect already assigned above win over both.
+        if (info.category.empty()) {
+            if (has_analyzer_tag)          info.category = "Analyzer";
+            else if (has_audio_effect_tag) info.category = "Fx";
+        }
+        // CLAP plugins that declare the note-ports extension produce MIDI.
+        // Without extension probing we infer conservatively from features.
+        info.description = desc->description ? desc->description : "";
         results.push_back(std::move(info));
     }
 

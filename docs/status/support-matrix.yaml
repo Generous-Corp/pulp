@@ -64,6 +64,32 @@ plugin_extensions:
       - "AraDocumentController is a stub — playback renderer not implemented."
       - "VST3, CLAP, AU adapters do not declare ARA extension support."
       - "Celemony ARA SDK is developer-supplied; not bundled."
+# Known limitations per format. Keyed the same as `formats:`. The renderer
+# in capabilities.md surfaces these as a "Known limitations" link on each
+# row. Production-readiness workstream 08 sub-deliverable 8.5.
+#
+# Adding an entry here is non-blocking — the entry's status in `formats:`
+# is the load-bearing label. `format_limitations:` exists so readers don't
+# confuse "the adapter compiles" with "the adapter is feature-complete."
+format_limitations:
+  vst3:
+    - "Dynamic bus arrangements limited; setBusArrangements only renegotiates the primary stereo bus today (workstream 01)."
+  au_v2:
+    - "Outbound parameter changes are not emitted to the host — automation read on AU v2 effects only flows host → plugin (workstream 01)."
+  clap:
+    - "Only the first input bus and first output bus are routed; declared sidechain or additional buses are ignored (workstream 01)."
+    - "Processor::set_sidechain is never called from the CLAP adapter — sidechain inputs land on the primary bus (workstream 01)."
+  lv2:
+    - "MIDI atom parsing is incomplete; connect_port has no atom/MIDI port branch beyond control range. URID feature is not resolved (workstream 01)."
+  aax:
+    - "Custom editor surface not wired — Pro Tools shows the auto-generated parameter strip rather than a Pulp ViewBridge editor (followups plan, row 7)."
+    - "AudioSuite role is declared but not exercised end-to-end (followups plan, row 13)."
+  auv3:
+    - "iOS jetsam pressure not modeled — heavy V8 / WebView workloads in the AUv3 process risk termination at ~50 MB (workstream 05)."
+  wam_v2:
+    - "Browser origin sandbox only; no Pulp-side capability manifest yet (security plan v4 §4.5)."
+  webclap:
+    - "Same browser-sandbox-only constraint as wam_v2."
 
 scripted_ui:
   ui_script_target_wiring:
