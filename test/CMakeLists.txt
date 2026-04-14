@@ -104,6 +104,11 @@ add_executable(pulp-test-midi-ci test_midi_ci.cpp)
 target_link_libraries(pulp-test-midi-ci PRIVATE pulp::midi Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-midi-ci)
 
+# Image cache (workstream 07 slice 7.4)
+add_executable(pulp-test-image-cache test_image_cache.cpp)
+target_link_libraries(pulp-test-image-cache PRIVATE pulp::view Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-image-cache)
+
 # TextShaper (PreText-style measure-once-reflow-forever)
 add_executable(pulp-test-text-shaper test_text_shaper.cpp)
 target_link_libraries(pulp-test-text-shaper PRIVATE pulp::canvas Catch2::Catch2WithMain)
