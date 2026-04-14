@@ -211,6 +211,19 @@ if [ -x "$ROOT/tools/check-docs-consistency.py" ]; then
     fi
 fi
 
+# ── Status ladder (warn-mode during phase-in) ─────────────────────────────────
+if [ -x "$ROOT/tools/check_status_ladder.py" ]; then
+    echo "Checking status ladder (usable ⇒ validation evidence)..."
+    # warn-mode: surface violations, do not fail. Set PULP_STATUS_LADDER_STRICT=1
+    # to upgrade to report-mode (hard fail). Plan to flip CI to strict after
+    # one release of soak time.
+    if [ "${PULP_STATUS_LADDER_STRICT:-0}" = "1" ]; then
+        python3 "$ROOT/tools/check_status_ladder.py" --mode=report || ERRORS=$((ERRORS + 1))
+    else
+        python3 "$ROOT/tools/check_status_ladder.py" --mode=warn || true
+    fi
+fi
+
 # ── Summary ───────────────────────────────────────────────────────────────────
 echo ""
 if [ $ERRORS -gt 0 ]; then
