@@ -174,6 +174,7 @@ public:
                  const audio::BufferView<const float>& input,
                  const midi::MidiBuffer& /*midi_in*/,
                  midi::MidiBuffer& /*midi_out*/,
+                 const ParameterEventQueue& /*param_events*/,
                  int num_samples) override {
         if (!active_ || !processor_ || bypassed_.load(std::memory_order_relaxed)) {
             for (size_t c = 0; c < output.num_channels(); ++c) {

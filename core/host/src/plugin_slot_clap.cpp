@@ -113,6 +113,7 @@ public:
                  const audio::BufferView<const float>& input,
                  const midi::MidiBuffer& /*midi_in*/,
                  midi::MidiBuffer& /*midi_out*/,
+                 const ParameterEventQueue& /*param_events*/,
                  int num_samples) override {
         if (!plugin_ || !processing_ || bypassed_.load(std::memory_order_relaxed)) {
             copy_or_zero(output, input, num_samples);
@@ -225,6 +226,17 @@ private:
             h.min_value = (float)pi.min_value;
             h.max_value = (float)pi.max_value;
             h.default_value = (float)pi.default_value;
+            // Map CLAP param flags onto Pulp's HostParamInfo::ParamFlags.
+            const uint32_t f = pi.flags;
+            h.flags.automatable = (f & CLAP_PARAM_IS_AUTOMATABLE) != 0;
+            h.flags.read_only   = (f & CLAP_PARAM_IS_READONLY) != 0;
+            h.flags.hidden      = (f & CLAP_PARAM_IS_HIDDEN) != 0;
+            h.flags.stepped     = (f & CLAP_PARAM_IS_STEPPED) != 0;
+            h.flags.is_bypass   = (f & CLAP_PARAM_IS_BYPASS) != 0;
+            // CLAP doesn't have a "rampable" bit; conservatively assume true
+            // unless the param is stepped (steps shouldn't ramp).
+            h.flags.rampable    = !h.flags.stepped;
+            h.flags.modulatable = (f & CLAP_PARAM_IS_MODULATABLE) != 0;
             params_.push_back(std::move(h));
         }
     }

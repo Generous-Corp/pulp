@@ -196,7 +196,8 @@ int main(int argc, char** argv) {
     pulp::audio::BufferView<float>       out(out_ptrs, kNumChannels, kBlockSize);
     pulp::midi::MidiBuffer mi, mo;
 
-    slot->process(out, in, mi, mo, kBlockSize);
+    pulp::host::ParameterEventQueue pe;
+    slot->process(out, in, mi, mo, pe, kBlockSize);
 
     float peak = 0.f;
     for (int i = 0; i < kBlockSize; ++i) {

@@ -66,6 +66,11 @@ if(PULP_HAS_AUSDK)
             src/au_v2_adapter.cpp
             src/au_v2_instrument.cpp
         )
+        # AudioUnitSDK 1.4 headers use std::expected (C++23). PUBLIC feature
+        # propagation from the ausdk target isn't reliable across all Apple
+        # clang toolchains when the consumer has CMAKE_CXX_STANDARD=20, so
+        # pin it here explicitly for pulp-format.
+        target_compile_features(pulp-format PRIVATE cxx_std_23)
     endif()
     target_link_libraries(pulp-format PUBLIC ausdk)
     # AudioUnitSDK 1.4 headers `#include <expected>` (C++23). Apple clang

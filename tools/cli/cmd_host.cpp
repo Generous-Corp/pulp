@@ -159,7 +159,8 @@ int cmd_host(const std::vector<std::string>& args) {
     pulp::audio::BufferView<float>       out(out_ptrs, 2, 256);
     pulp::midi::MidiBuffer mi, mo;
 
-    slot->process(out, in, mi, mo, 256);
+    pulp::host::ParameterEventQueue pe;
+    slot->process(out, in, mi, mo, pe, 256);
 
     float peak = 0.0f;
     for (int i = 0; i < 256; ++i)

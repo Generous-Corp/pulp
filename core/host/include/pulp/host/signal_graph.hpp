@@ -17,6 +17,7 @@
 #include <pulp/host/plugin_slot.hpp>
 #include <pulp/audio/buffer.hpp>
 #include <pulp/midi/buffer.hpp>
+#include <atomic>
 #include <memory>
 #include <vector>
 #include <unordered_map>
@@ -66,8 +67,14 @@ struct GraphNode {
     int num_input_ports = 0;
     int num_output_ports = 0;
 
-    // For Plugin nodes, the loaded plugin slot
-    std::unique_ptr<PluginSlot> plugin;
+    // For Plugin nodes, the loaded plugin slot. Held as shared_ptr so that
+    // published CompiledGraph snapshots can keep the plugin alive while the
+    // audio thread is still referencing a now-stale snapshot.
+    std::shared_ptr<PluginSlot> plugin;
+
+    // UI-thread-owned scalar state that needs to survive snapshot
+    // recompilation. compile_() copies these into per-snapshot NodeRuntime.
+    float gain = 1.0f;
 };
 
 // ── Signal Graph ────────────────────────────────────────────────────────
@@ -153,7 +160,7 @@ public:
     // Latency in samples from any AudioInput to the graph's AudioOutput, as
     // computed by prepare(). Reflects plugin-reported latencies plus any
     // delay inserted by PDC. Returns 0 when not prepared.
-    int latency_samples() const { return (int)total_latency_samples_; }
+    int latency_samples() const { return (int)total_latency_samples_.load(std::memory_order_relaxed); }
 
     // Latency arriving at a specific node's input (samples). Returns 0 when
     // the node is unknown or the graph is not prepared.
@@ -211,21 +218,54 @@ private:
         std::vector<float> feedback_prev;  // size = max_block_size_
     };
 
+    // CompiledGraph — immutable audio-thread-safe snapshot of the graph
+    // after prepare(). Published via atomic<shared_ptr> so topology mutations
+    // on the UI thread never tear state the audio thread is reading.
+    //
+    // Mutation protocol:
+    //   1. UI thread changes nodes_ / connections_ / etc. (NOT snapshot state).
+    //   2. Snapshot is atomically reset to nullptr, making process() return
+    //      silence until the caller invokes prepare() again.
+    //   3. prepare() rebuilds a fresh CompiledGraph and atomic-swaps it in.
+    //
+    // Because the snapshot owns its own copies of connections / delays / per
+    // node runtime AND holds shared_ptr<PluginSlot>, it's safe to read even
+    // if GraphNode owners are mutated before the audio thread releases its
+    // reference. The old snapshot is destroyed only when both threads let go.
+    struct CompiledGraph {
+        std::vector<NodeId> order;
+        std::vector<Connection> connections;
+        std::vector<ConnectionDelay> connection_delays;  // parallel to connections
+        // Runtime + plugin + node-info keyed by NodeId so we don't rely on
+        // pointers into an outer container.
+        std::unordered_map<NodeId, NodeRuntime> runtime;
+        std::unordered_map<NodeId, std::shared_ptr<PluginSlot>> plugins;
+        struct NodeShape {
+            NodeType type;
+            int num_input_ports;
+            int num_output_ports;
+        };
+        std::unordered_map<NodeId, NodeShape> shapes;
+        int max_block_size = 0;
+        int64_t total_latency_samples = 0;
+    };
+
     std::vector<GraphNode> nodes_;
     std::vector<Connection> connections_;
     NodeId next_id_ = 1;
 
-    // Populated by prepare(); consumed by process(). Kept flat rather than
-    // per-node to keep allocation lifetime predictable.
-    std::unordered_map<NodeId, NodeRuntime> runtime_;
-    std::vector<ConnectionDelay> connection_delays_;  // parallel to connections_
-    std::vector<NodeId> cached_order_;
-    int max_block_size_ = 0;
-    bool prepared_ = false;
-    int64_t total_latency_samples_ = 0;
+    // Audio-thread snapshot, published by prepare() / mutators. Uses the
+    // deprecated-but-supported std::atomic_store/atomic_load free-function
+    // overloads on shared_ptr because libc++ in our toolchain does not yet
+    // specialize std::atomic<std::shared_ptr<T>>. Acquire/release semantics.
+    std::shared_ptr<CompiledGraph> live_;
+    std::atomic<int64_t> total_latency_samples_{0};  // reflected for const-query access
 
     bool has_path(NodeId from, NodeId to) const;
-    void compute_latencies_();
+    std::shared_ptr<CompiledGraph> compile_(double sample_rate, int max_block_size);
+    void invalidate_live_();
+    static void compute_latencies_for_(CompiledGraph& cg,
+                                       const std::vector<Connection>& connections);
 };
 
 } // namespace pulp::host

@@ -132,6 +132,7 @@ public:
                  const audio::BufferView<const float>& input,
                  const midi::MidiBuffer& /*midi_in*/,
                  midi::MidiBuffer& /*midi_out*/,
+                 const ParameterEventQueue& /*param_events*/,
                  int num_samples) override {
         if (!au_ || !prepared_) return;
         if (num_samples <= 0 || num_samples > max_block_size_) return;
@@ -334,6 +335,17 @@ private:
             } else {
                 h.name = info.name;
             }
+            // Map AudioUnitParameterFlags onto HostParamInfo::ParamFlags.
+            const UInt32 f = info.flags;
+            h.flags.read_only   = (f & kAudioUnitParameterFlag_IsReadable) != 0
+                                && !(f & kAudioUnitParameterFlag_IsWritable);
+            h.flags.hidden      = (f & kAudioUnitParameterFlag_NonRealTime) != 0;
+            h.flags.automatable = !h.flags.read_only;
+            // AU parameter unit kAudioUnitParameterUnit_Indexed marks discrete.
+            h.flags.stepped     = (info.unit == kAudioUnitParameterUnit_Indexed
+                                || info.unit == kAudioUnitParameterUnit_Boolean);
+            h.flags.rampable    = !h.flags.stepped;
+            h.flags.modulatable = false;  // AU has no per-voice mod concept.
             params_.push_back(std::move(h));
         }
     }
