@@ -89,6 +89,18 @@ struct PluginDescriptor {
     /// `supports_ump` are independent and can both be set.
     bool supports_ump = false;
 
+    /// iOS-only: true when the plugin renders audio that must continue
+    /// while the host app is backgrounded (live synth in AUM, looper
+    /// that keeps running while the user switches apps, etc.). The
+    /// host-app layer uses this flag to decide whether to set the
+    /// `audio` UIBackgroundModes entitlement and keep the AVAudioSession
+    /// active in background. Workstream 05 slice 5.5.
+    ///
+    /// Default false — most effects don't need background audio and
+    /// setting the entitlement unnecessarily attracts App Store review
+    /// scrutiny.
+    bool ios_requires_background_audio = false;
+
     /// Tail time in samples (0 = no tail, -1 = infinite).
     /// Used by hosts to flush reverb/delay tails after playback stops.
     int tail_samples = 0;
