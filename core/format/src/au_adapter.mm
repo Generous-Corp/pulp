@@ -22,16 +22,31 @@ struct AUBridge {
     AUAudioFrameCount max_frames = 512;
     int input_channels = 0;
     int output_channels = 0;
+    // Workstream 01 slice 1.4: sidechain bus channel count. 0 when the
+    // descriptor has no second input bus — the render block then skips
+    // the sidechain pull + calls Processor::set_sidechain(nullptr).
+    int sidechain_channels = 0;
 
     // Pre-allocated — no heap allocation on audio thread
     float* output_ptrs[kMaxChannels] = {};
     const float* input_ptrs[kMaxChannels] = {};
+    const float* sidechain_ptrs[kMaxChannels] = {};
 
     // Pre-allocated input buffer list for pulling input (stereo max for now)
     struct InputBufferStorage {
         UInt32 mNumberBuffers;
         AudioBuffer mBuffers[kMaxChannels];
     } input_abl = {};
+    // Separate storage for the sidechain pull so it doesn't alias the
+    // main input block.
+    struct SidechainBufferStorage {
+        UInt32 mNumberBuffers;
+        AudioBuffer mBuffers[kMaxChannels];
+    } sidechain_abl = {};
+    // Backing buffer for the sidechain pull — AURenderPullInputBlock writes
+    // into this on each process call. Keeps the audio thread allocation-free
+    // (sized at init to match max_frames * kMaxChannels).
+    std::vector<float> sidechain_storage;
 };
 
 } // namespace pulp::format::au
@@ -90,6 +105,14 @@ struct AUBridge {
     auto desc = _bridge.processor->descriptor();
     _bridge.input_channels = desc.default_input_channels();
     _bridge.output_channels = desc.default_output_channels();
+    _bridge.sidechain_channels =
+        (desc.input_buses.size() > 1 && desc.input_buses[1].default_channels > 0)
+            ? desc.input_buses[1].default_channels
+            : 0;
+    if (_bridge.sidechain_channels > 0) {
+        _bridge.sidechain_storage.assign(
+            _bridge.sidechain_channels * 512 /*max_frames hint*/, 0.0f);
+    }
 
     // Create buses
     AVAudioFormat *format = [[AVAudioFormat alloc]
@@ -110,6 +133,20 @@ struct AUBridge {
         _inputBus = [[AUAudioUnitBus alloc] initWithFormat:inFormat error:outError];
         if (!_inputBus) return nil;
         [inBusses addObject:_inputBus];
+    }
+
+    // Workstream 01 slice 1.4 — sidechain input. When the descriptor declares
+    // a second input_bus, expose it as a second AUAudioUnitBus so hosts can
+    // connect a sidechain source that the render block will route through
+    // Processor::set_sidechain(). Mirrors CLAP slice 1.1 / VST3 slice 1.2.
+    if (desc.input_buses.size() > 1 && desc.input_buses[1].default_channels > 0) {
+        AVAudioFormat *scFormat = [[AVAudioFormat alloc]
+            initStandardFormatWithSampleRate:48000.0
+            channels:static_cast<AVAudioChannelCount>(desc.input_buses[1].default_channels)];
+        AUAudioUnitBus *sidechainBus =
+            [[AUAudioUnitBus alloc] initWithFormat:scFormat error:outError];
+        if (!sidechainBus) return nil;
+        [inBusses addObject:sidechainBus];
     }
 
     _outputBusArray = [[AUAudioUnitBusArray alloc]
@@ -286,6 +323,50 @@ struct AUBridge {
                 input_view = pulp::audio::BufferView<const float>(
                     bridge->input_ptrs, outChans, frameCount);
             }
+        }
+
+        // Sidechain: pull bus 1 into its own ABL so it doesn't alias the
+        // main input block. Processor::set_sidechain() takes a BufferView
+        // that remains valid for the duration of process(). Workstream 01
+        // slice 1.4.
+        pulp::audio::BufferView<const float> sidechain_view;
+        int scChans = bridge->sidechain_channels;
+        if (pullInputBlock && scChans > 0) {
+            UInt32 scBufs = std::min(static_cast<UInt32>(scChans),
+                                     static_cast<UInt32>(kMaxChannels));
+            // Size sidechain_storage for this block if needed (rare —
+            // max_frames should cover; guard anyway).
+            std::size_t needed = static_cast<std::size_t>(scBufs) * frameCount;
+            if (bridge->sidechain_storage.size() < needed) {
+                bridge->sidechain_storage.assign(needed, 0.0f);
+            }
+            auto& scAbl = bridge->sidechain_abl;
+            scAbl.mNumberBuffers = scBufs;
+            for (UInt32 i = 0; i < scBufs; ++i) {
+                scAbl.mBuffers[i].mNumberChannels = 1;
+                scAbl.mBuffers[i].mDataByteSize = frameCount * sizeof(float);
+                scAbl.mBuffers[i].mData =
+                    bridge->sidechain_storage.data() + i * frameCount;
+            }
+            AudioUnitRenderActionFlags pullFlags = 0;
+            // Input bus index 1 is the sidechain, per the bus-array init
+            // order in initWithComponentDescription.
+            auto scStatus = pullInputBlock(
+                &pullFlags, timestamp, frameCount, 1,
+                reinterpret_cast<AudioBufferList*>(&scAbl));
+            if (scStatus == noErr) {
+                for (UInt32 i = 0; i < scBufs; ++i) {
+                    bridge->sidechain_ptrs[i] =
+                        static_cast<const float*>(scAbl.mBuffers[i].mData);
+                }
+                sidechain_view = pulp::audio::BufferView<const float>(
+                    bridge->sidechain_ptrs, scBufs, frameCount);
+                bridge->processor->set_sidechain(&sidechain_view);
+            } else {
+                bridge->processor->set_sidechain(nullptr);
+            }
+        } else {
+            bridge->processor->set_sidechain(nullptr);
         }
 
         // MIDI events
