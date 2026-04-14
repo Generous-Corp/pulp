@@ -1,5 +1,6 @@
 # Pulp support matrix
 # Vocabulary: stable, usable, experimental, partial, planned, unsupported
+schema_version: 2
 
 platforms:
   macos:
@@ -48,6 +49,21 @@ formats:
     macos: experimental
     windows: experimental
     linux: unsupported
+
+# Plugin extensions / host-query interfaces that ride on top of a format
+# (separate from the format itself). Status reflects the Pulp side of the
+# integration; SDKs are developer-supplied where required.
+plugin_extensions:
+  ara:
+    status: experimental
+    notes: >
+      Interface stubs in core/format/include/pulp/format/ara.{hpp,cpp}; impl
+      returns false. No format adapter wires the host-query path yet.
+      Tracked under production-readiness workstream 06.
+    limitations:
+      - "AraDocumentController is a stub — playback renderer not implemented."
+      - "VST3, CLAP, AU adapters do not declare ARA extension support."
+      - "Celemony ARA SDK is developer-supplied; not bundled."
 
 scripted_ui:
   ui_script_target_wiring:
@@ -690,3 +706,90 @@ limitations:
   platform_maturity.accessibility.linux:
     - text: "AT-SPI registration is a stub — D-Bus bridge not yet connected."
       tracked_in: "planning/production-readiness/04-accessibility.md#4.2"
+
+# ── Schema-v2 additions (workstream 08 slice 8.1) ─────────────────────────────
+#
+# Widgets: inventory every widget in core/view/include/pulp/view/ so the
+# consistency checker can cross-reference capabilities.md and catch stale
+# widget tables. Status reflects the widget class itself, not the theme/
+# platform surface it renders on.
+widgets:
+  label:            { status: usable, header: widgets.hpp }
+  knob:             { status: usable, header: widgets.hpp }
+  fader:            { status: usable, header: widgets.hpp }
+  toggle:           { status: usable, header: widgets.hpp }
+  checkbox:         { status: usable, header: widgets.hpp }
+  toggle_button:    { status: usable, header: widgets.hpp }
+  icon:             { status: usable, header: widgets.hpp }
+  image_view:       { status: partial, header: widgets.hpp,
+                      notes: "Placeholder rendering; Skia decode lands in workstream 07 slice 7.4." }
+  meter:            { status: usable, header: widgets.hpp }
+  multi_meter:      { status: usable, header: widgets.hpp }
+  correlation_meter: { status: usable, header: widgets.hpp }
+  xy_pad:           { status: usable, header: widgets.hpp }
+  waveform_view:    { status: usable, header: widgets.hpp }
+  spectrum_view:    { status: usable, header: widgets.hpp }
+  spectrogram_view: { status: usable, header: widgets.hpp }
+  panel:            { status: usable, header: widgets.hpp }
+  combo_box:        { status: usable, header: ui_components.hpp }
+  tooltip:          { status: usable, header: ui_components.hpp }
+  progress_bar:     { status: usable, header: ui_components.hpp }
+  list_box:         { status: usable, header: ui_components.hpp }
+  scroll_view:      { status: usable, header: ui_components.hpp }
+  text_editor:      { status: usable, header: text_editor.hpp }
+  tree_view:        { status: usable, header: tree_view.hpp }
+  preset_browser:   { status: usable, header: preset_browser.hpp }
+  midi_keyboard:    { status: usable, header: midi_keyboard.hpp }
+  waveform_editor:  { status: usable, header: waveform_editor.hpp }
+  eq_curve_view:    { status: usable, header: eq_curve_view.hpp }
+  file_browser:     { status: usable, header: file_browser.hpp }
+  file_drop_zone:   { status: usable, header: file_drop_zone.hpp }
+  code_editor:      { status: usable, header: code_editor.hpp }
+  breadcrumb:       { status: usable, header: breadcrumb.hpp }
+  split_view:       { status: usable, header: split_view.hpp }
+  concertina_panel: { status: usable, header: concertina_panel.hpp }
+  toolbar:          { status: usable, header: toolbar.hpp }
+  color_picker:     { status: usable, header: color_picker.hpp }
+  property_list:    { status: usable, header: property_list.hpp }
+  graph_editor_view: { status: usable, header: graph_editor_view.hpp,
+                       notes: "Canvas-based node editor driving SignalGraph." }
+  canvas_widget:    { status: usable, header: canvas_widget.hpp }
+  table:            { status: partial, header: table.hpp,
+                      notes: "Basic rows; sortable columns + virtualization land in workstream 07 slice 7.3." }
+  modulation_matrix:   { status: planned, notes: "Workstream 07 slice 7.1." }
+  ab_compare:          { status: planned, notes: "Workstream 07 slice 7.2." }
+  resizable_shell:     { status: planned, notes: "Workstream 07 slice 7.5 (documented pattern)." }
+
+# Plugin formats beyond audio host integration.
+ara:
+  status: planned
+  notes: >
+    Interface stub exists in core/format/{include,src}/pulp/format/ara.{hpp,cpp};
+    host_supports_ara() returns false. No format adapter integration yet.
+    Production-readiness workstream 06 tracks the ARA 2.x implementation
+    across VST3 + AU + CLAP.
+  tracked_in: "planning/production-readiness/06-ara.md"
+
+# Accessibility feature coverage (beyond platform bridge existence). This is
+# separate from platform_maturity.accessibility.* which records per-platform
+# bridge status. The entries below describe which cross-platform a11y
+# primitives are uniformly exposed.
+accessibility_features:
+  roles_labels_values:
+    status: usable
+    notes: AccessRole enum + access_label + access_value on View; exposed on all four functional bridges (macos/ios/android and matrix skeleton on windows/linux).
+  slider_increment_decrement:
+    status: usable
+    notes: on_accessibility_adjust(float) routed through VoiceOver/TalkBack increment/decrement actions.
+  actions:
+    status: planned
+    notes: Per-widget std::vector<Action> exposure lands in workstream 04 slice 4.3.
+  live_region_announce:
+    status: planned
+    notes: announce(text, politeness) cross-platform API lands in workstream 04 slice 4.3.
+  tree_invalidation_events:
+    status: planned
+    notes: View-tree change notifications (NSAccessibilityPostNotification / UiaRaiseAutomationEvent / object:text-changed) land in workstream 04 slice 4.3.
+  a11y_test_harness:
+    status: planned
+    notes: Headless AX introspection tests per platform land in workstream 04 slice 4.4.
