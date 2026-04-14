@@ -39,8 +39,13 @@ struct ResizableShellConfig {
 
 class ResizableShell {
 public:
+    /// Construct with a config. `current()` is seeded by passing
+    /// `cfg.initial_size` through negotiate(), so a misconfigured
+    /// initial (outside min/max or violating aspect) reports the
+    /// clamped size from the very first call — callers can never
+    /// observe an invalid state. Fix per #206 review.
     explicit ResizableShell(ResizableShellConfig cfg = {})
-        : cfg_(cfg), current_(cfg.initial_size) {}
+        : cfg_(cfg), current_(negotiate_static_(cfg, cfg.initial_size)) {}
 
     /// Intended size → clamped to [min, max] and (when aspect is locked)
     /// snapped to the nearest aspect-correct rectangle.
@@ -67,6 +72,10 @@ public:
     bool deserialize(std::span<const uint8_t> blob);
 
 private:
+    // Free-function version of negotiate used by the ctor (negotiate()
+    // depends on cfg_ which isn't initialised yet at member-init time).
+    static Size negotiate_static_(const ResizableShellConfig& cfg, Size requested);
+
     ResizableShellConfig cfg_;
     Size current_;
 };

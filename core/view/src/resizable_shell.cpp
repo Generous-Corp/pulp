@@ -5,6 +5,26 @@
 
 namespace pulp::view {
 
+Size ResizableShell::negotiate_static_(const ResizableShellConfig& cfg,
+                                       Size requested) {
+    // Keep implementation in sync with the member negotiate() — the ctor
+    // needs a version that doesn't depend on cfg_ being initialised.
+    uint32_t w = std::clamp(requested.width, cfg.min_size.width, cfg.max_size.width);
+    uint32_t h = std::clamp(requested.height, cfg.min_size.height, cfg.max_size.height);
+    if (cfg.aspect_ratio <= 0.0) return {w, h};
+    const double target = cfg.aspect_ratio;
+    const double cur = static_cast<double>(w) / std::max<uint32_t>(h, 1);
+    if (cur > target)      w = static_cast<uint32_t>(std::round(h * target));
+    else if (cur < target) h = static_cast<uint32_t>(std::round(w / target));
+    if (w < cfg.min_size.width)  { w = cfg.min_size.width;  h = static_cast<uint32_t>(std::round(w / target)); }
+    if (h < cfg.min_size.height) { h = cfg.min_size.height; w = static_cast<uint32_t>(std::round(h * target)); }
+    if (w > cfg.max_size.width || h > cfg.max_size.height) {
+        w = std::min(w, cfg.max_size.width);
+        h = std::min(h, cfg.max_size.height);
+    }
+    return {w, h};
+}
+
 Size ResizableShell::negotiate(Size requested) const {
     // Clamp to min/max first. This is the bound every plugin adapter
     // must honour regardless of aspect lock.
@@ -43,6 +63,15 @@ Size ResizableShell::negotiate(Size requested) const {
     if (h < cfg_.min_size.height) {
         h = cfg_.min_size.height;
         w = static_cast<uint32_t>(std::round(h * target));
+    }
+    // The min-correction above can push the rebuilt dimension beyond
+    // max. Re-apply the max clamp so the advertised bounds always win
+    // over the aspect lock. Without this, negotiate({210,160}) with
+    // min={200,150}, max={210,160}, aspect=2.0 returned {300,150} —
+    // outside max. Fix per #206 review.
+    if (w > cfg_.max_size.width || h > cfg_.max_size.height) {
+        w = std::min(w, cfg_.max_size.width);
+        h = std::min(h, cfg_.max_size.height);
     }
     return {w, h};
 }

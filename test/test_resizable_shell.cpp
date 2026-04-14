@@ -90,3 +90,26 @@ TEST_CASE("deserialize rejects too-short blob",
     uint8_t b[] = {1, 2, 3};
     REQUIRE_FALSE(s.deserialize({b, sizeof(b)}));
 }
+
+TEST_CASE("aspect min-correction re-applies max clamp",
+          "[ui][resizable-shell]") {
+    // #206 review case: tight bounds with aspect lock, over-requested
+    // dimensions. Min-correction would otherwise push past max.
+    ResizableShell s({.min_size = {200, 150},
+                      .max_size = {210, 160},
+                      .initial_size = {205, 155},
+                      .aspect_ratio = 2.0});
+    auto got = s.negotiate({210, 160});
+    REQUIRE(got.width  <= 210);
+    REQUIRE(got.height <= 160);
+}
+
+TEST_CASE("constructor normalizes initial size through negotiate",
+          "[ui][resizable-shell]") {
+    // Out-of-range initial — current() must report the clamped size
+    // immediately, not the bogus initial.
+    ResizableShell s({.max_size = {300, 300},
+                      .initial_size = {640, 480}});
+    REQUIRE(s.current().width  <= 300);
+    REQUIRE(s.current().height <= 300);
+}
