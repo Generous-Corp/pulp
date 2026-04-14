@@ -268,6 +268,13 @@ public:
     /// notification.
     virtual void on_host_transport_changed(bool /*is_playing*/,
                                            double /*position_seconds*/) {}
+    /// Called when the host's transport tempo changes. Default no-op.
+    /// Override for plugins that care about tempo outside of a process()
+    /// call — delay sync recomputation, tempo-synced LFO rate caches,
+    /// UI BPM read-outs. Runs on the main/UI thread; the audio thread
+    /// keeps reading the current tempo from ProcessContext as usual.
+    /// Workstream 01 slice 1.10.
+    virtual void on_host_tempo_changed(double /*new_tempo_bpm*/) {}
 
     /// Access the parameter state store.
     /// Use state().get_value(id) to read parameter values in process().
