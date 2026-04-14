@@ -92,3 +92,53 @@ TEST_CASE("CiDiscovery profile inquiry response", "[midi][ci]") {
     // Profile inquiry is type 0x24, we handle it
     REQUIRE_FALSE(reply.empty());
 }
+
+TEST_CASE("CiDiscovery profile reply echoes inquirer MUID", "[midi][ci]") {
+    // Regression: handle_profile_inquiry previously ignored data/size and
+    // wrote only our source MUID into the reply, dropping the inquirer's
+    // destination field. Multi-device CI buses couldn't route our reply.
+    CiDiscovery responder;
+    ProfileId p{0x11, 0x01, 0x00, 0x00, 0x00};
+    responder.add_profile({p, true, 0});
+
+    // Synthesize a profile inquiry from a distinct peer MUID.
+    MUID peer_muid{0x01234567};
+    std::vector<uint8_t> inquiry;
+    inquiry.push_back(0xF0);
+    inquiry.push_back(0x7E);
+    inquiry.push_back(0x7F);
+    inquiry.push_back(0x0D);
+    inquiry.push_back(static_cast<uint8_t>(CiMessageType::ProfileInquiry));
+    inquiry.push_back(responder.device_info().ci_version);
+    // Source = peer
+    inquiry.push_back(peer_muid.value & 0x7F);
+    inquiry.push_back((peer_muid.value >> 7) & 0x7F);
+    inquiry.push_back((peer_muid.value >> 14) & 0x7F);
+    inquiry.push_back((peer_muid.value >> 21) & 0x7F);
+    // Destination = responder
+    MUID resp_muid = responder.local_muid();
+    inquiry.push_back(resp_muid.value & 0x7F);
+    inquiry.push_back((resp_muid.value >> 7) & 0x7F);
+    inquiry.push_back((resp_muid.value >> 14) & 0x7F);
+    inquiry.push_back((resp_muid.value >> 21) & 0x7F);
+    inquiry.push_back(0xF7);
+
+    auto reply = responder.process_message(inquiry.data(), inquiry.size());
+    REQUIRE(reply.size() >= 14);
+
+    // Reply header: F0 7E 7F 0D ProfileReply version src(4) dst(4)
+    REQUIRE(reply[0] == 0xF0);
+    REQUIRE(reply[4] == static_cast<uint8_t>(CiMessageType::ProfileReply));
+    // Source MUID = responder (bytes 6..9)
+    uint32_t src =  (uint32_t)reply[6]
+                 | ((uint32_t)reply[7]  << 7)
+                 | ((uint32_t)reply[8]  << 14)
+                 | ((uint32_t)reply[9]  << 21);
+    REQUIRE(src == resp_muid.value);
+    // Destination MUID = peer (bytes 10..13) — this is the regression assertion.
+    uint32_t dst =  (uint32_t)reply[10]
+                 | ((uint32_t)reply[11] << 7)
+                 | ((uint32_t)reply[12] << 14)
+                 | ((uint32_t)reply[13] << 21);
+    REQUIRE(dst == peer_muid.value);
+}

@@ -14,6 +14,9 @@
 #include <pulp/runtime/log.hpp>
 
 #include <lv2/core/lv2.h>
+#include <lv2/atom/atom.h>
+#include <lv2/midi/midi.h>
+#include <lv2/urid/urid.h>
 
 #include <cstring>
 #include <vector>
@@ -30,13 +33,29 @@ inline LV2_Handle instantiate(
     const LV2_Descriptor*,
     double sample_rate,
     const char*,
-    const LV2_Feature* const*)
+    const LV2_Feature* const* features)
 {
     if (!g_factory) return nullptr;
+
+    // Resolve LV2_URID_Map — required by any real LV2 host. Pre-production
+    // fix (workstream 01 slice 1.5): we previously ignored the features
+    // array entirely, which would cause real hosts to fail to load the
+    // plugin in surprising ways. Now we fail instantiation loudly and
+    // return nullptr so the host surfaces a clear error.
+    LV2_URID_Map* urid_map = lv2_adapter::find_urid_map(features);
+    if (!urid_map) {
+        pulp::runtime::log_warn(
+            "lv2: host did not provide LV2_URID__map; refusing to instantiate");
+        return nullptr;
+    }
 
     auto* inst = new lv2_adapter::PulpLv2Instance();
     inst->factory = g_factory;
     inst->sample_rate = sample_rate;
+    inst->urid_map = urid_map;
+    inst->urid_midi_event = urid_map->map(urid_map->handle, LV2_MIDI__MidiEvent);
+    inst->urid_atom_sequence = urid_map->map(urid_map->handle, LV2_ATOM__Sequence);
+    inst->urid_atom_chunk = urid_map->map(urid_map->handle, LV2_ATOM__Chunk);
     inst->processor = g_factory();
     if (!inst->processor) {
         delete inst;

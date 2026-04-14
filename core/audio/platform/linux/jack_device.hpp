@@ -50,4 +50,16 @@ private:
 // Check if a JACK server is available
 bool jack_is_available();
 
+/// AudioSystem wrapper that routes create_device() to JackDevice.
+/// Workstream 02 slice 2.2 — previously no JackSystem existed, so the
+/// Linux factory unconditionally returned AlsaSystem even when a JACK
+/// server was running.
+class JackSystem : public AudioSystem {
+public:
+    std::vector<DeviceInfo> enumerate_devices() override;
+    std::unique_ptr<AudioDevice> create_device(const std::string& device_id) override;
+    DeviceInfo default_output_device() override;
+    DeviceInfo default_input_device() override;
+};
+
 } // namespace pulp::audio::linux_platform
