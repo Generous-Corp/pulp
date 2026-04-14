@@ -170,8 +170,17 @@ std::vector<uint8_t> CiDiscovery::handle_discovery(const uint8_t* data, size_t s
     return reply;
 }
 
-std::vector<uint8_t> CiDiscovery::handle_profile_inquiry(const uint8_t* /*data*/, size_t /*size*/) {
-    // Build profile reply
+std::vector<uint8_t> CiDiscovery::handle_profile_inquiry(const uint8_t* data, size_t size) {
+    // ProfileInquiry layout: F0 7E dev 0D sub-id version src(4) dst(4) F7.
+    // The reply must echo the inquirer's MUID back as destination so the
+    // peer can identify the response. Previous implementation ignored
+    // `data`/`size` and dropped the destination field from the reply,
+    // leaving multi-device CI buses unable to route our profile reply.
+    MUID inquirer = MUID::broadcast();
+    if (size >= 14) {
+        inquirer = read_muid(data + 6);
+    }
+
     std::vector<uint8_t> reply;
     reply.push_back(0xF0);
     reply.push_back(0x7E);
@@ -180,6 +189,7 @@ std::vector<uint8_t> CiDiscovery::handle_profile_inquiry(const uint8_t* /*data*/
     reply.push_back(static_cast<uint8_t>(CiMessageType::ProfileReply));
     reply.push_back(local_info_.ci_version);
     write_muid(reply, local_info_.muid);
+    write_muid(reply, inquirer);
     // Count of enabled profiles
     uint16_t enabled_count = 0;
     for (auto& p : profiles_) if (p.enabled) enabled_count++;

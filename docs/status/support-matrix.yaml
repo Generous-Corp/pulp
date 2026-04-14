@@ -86,6 +86,7 @@ scripted_ui:
     notes: Sibling theme.json overrides reload in ScriptedUiSession. Runtime-validated only in the standalone macOS scripted UI lane.
   state_preservation:
     status: usable
+    ci_test: pulp-test-state
     notes: Knob, fader, toggle, checkbox, toggle-button, and XY pad values are restored across scripted UI reloads. JavaScript heap state is rebuilt.
 
 audio_io:
@@ -203,6 +204,9 @@ css_parity:
       JS bridge: setPosition, setTop/Right/Bottom/Left, setZIndex.
   canvas_2d:
     status: usable
+    ci_test:
+      - pulp-test-canvas
+      - pulp-test-canvas-widget
     notes: >
       25 draw command types on CanvasWidget: fillRect, strokeRect, fillRoundedRect,
       strokeRoundedRect, fillCircle, strokeCircle, strokeLine, fillText, setFont,
@@ -262,6 +266,9 @@ css_parity:
       Per-corner border-radius (border-top-left-radius etc., 4 independent corners).
   animation_properties:
     status: usable
+    ci_test:
+      - pulp-test-animation
+      - pulp-test-widget-animation
     notes: >
       CSS animation-* properties parsed: name, duration, timing-function, delay,
       iteration-count (including infinite), direction, fill-mode. animation shorthand.
@@ -310,6 +317,7 @@ widgets:
       JS bridge: createListBox, setListItems, setListSelected, setListRowHeight.
   combo_box:
     status: usable
+    ci_test: pulp-test-combo-dropdown
     notes: Dropdown with global click-outside dismiss, keyboard navigation, hover tracking.
   scroll_view:
     status: usable
@@ -329,6 +337,58 @@ widgets:
   tooltip:
     status: usable
     notes: Fade-in/out tooltip attached to any view.
+  # Audio / music-domain widgets.
+  meter:
+    status: usable
+    notes: Meter, MultiMeter, CorrelationMeter — peak/RMS level bars with ballistics. See core/view/include/pulp/view/widgets.hpp.
+  spectrum_view:
+    status: usable
+    notes: Real-time FFT spectrum display with log/linear frequency axis. See core/view/include/pulp/view/widgets.hpp.
+  spectrogram_view:
+    status: usable
+    notes: Scrolling STFT spectrogram. See core/view/include/pulp/view/widgets.hpp.
+  waveform_view:
+    status: usable
+    notes: WaveformView for rendering audio buffers. See core/view/include/pulp/view/widgets.hpp.
+  waveform_editor:
+    status: usable
+    notes: Selection, zoom, region-based editor built on WaveformView. See core/view/include/pulp/view/widgets/waveform_editor.hpp.
+  midi_keyboard:
+    status: usable
+    notes: Display + interaction keyboard; note-on/off events routed through Binding. See core/view/include/pulp/view/widgets/midi_keyboard.hpp.
+  preset_browser:
+    status: usable
+    notes: Searchable, category-grouped preset browser with keyboard navigation. See core/view/include/pulp/view/widgets/preset_browser.hpp.
+  eq_curve_view:
+    status: usable
+    notes: Draggable EQ band handles with live curve render. See core/view/include/pulp/view/widgets/eq_curve_view.hpp.
+  graph_editor_view:
+    status: usable
+    ci_test: pulp-test-graph-serializer
+    notes: Canvas-based node editor on top of pulp::canvas; renders a SignalGraph as a draggable, connectable graph. See core/view/include/pulp/view/widgets/graph_editor_view.hpp.
+  # General-purpose UI widgets surfaced by the audit as missing rows.
+  file_browser:
+    status: usable
+    notes: FileBrowser + FileDropZone. See core/view/include/pulp/view/widgets/file_browser.hpp.
+  color_picker:
+    status: usable
+    notes: HSV + hex color picker with live swatch. See core/view/include/pulp/view/widgets/color_picker.hpp.
+  concertina_panel:
+    status: usable
+    notes: Stacked accordion-style panel with expand/collapse per section. See core/view/include/pulp/view/widgets/concertina_panel.hpp.
+  split_view:
+    status: usable
+    notes: Draggable splitter between two views; horizontal and vertical. See core/view/include/pulp/view/widgets/split_view.hpp.
+  breadcrumb:
+    status: usable
+    notes: Breadcrumb trail navigation. See core/view/include/pulp/view/widgets/breadcrumb.hpp.
+  lasso:
+    status: usable
+    notes: Marquee / drag-to-select overlay. See core/view/include/pulp/view/widgets/lasso.hpp.
+  code_editor:
+    status: usable
+    ci_test: pulp-test-code-editor
+    notes: Syntax-highlighted text editor with gutter and line numbers. See core/view/include/pulp/view/widgets/code_editor.hpp.
 
 js_authoring:
   web_compat_layer:
@@ -461,6 +521,9 @@ input:
 runtime_apis:
   canvas_2d:
     status: usable
+    ci_test:
+      - pulp-test-canvas
+      - pulp-test-canvas-widget
     notes: >
       25+ draw commands including gradient fills (linear/radial), arc/ellipse,
       textAlign/textBaseline, clearRect, clipRect, globalAlpha, lineCap/lineJoin,

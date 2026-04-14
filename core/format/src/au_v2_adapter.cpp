@@ -219,10 +219,16 @@ OSStatus PulpAUEffect::ProcessBufferLists(AudioUnitRenderActionFlags& ioActionFl
         return noErr;
     }
 
-    for (const auto& param : store_.all_params()) {
-        auto au_id = static_cast<AudioUnitParameterID>(param.id);
+    // Host → plugin: pull current parameter values into the store before
+    // processing. Also snapshot them so we can detect plugin-driven changes
+    // after process() returns.
+    auto params = store_.all_params();
+    param_snapshot_.resize(params.size());
+    for (std::size_t i = 0; i < params.size(); ++i) {
+        auto au_id = static_cast<AudioUnitParameterID>(params[i].id);
         float value = GetParameter(au_id);
-        store_.set_value(param.id, value);
+        store_.set_value(params[i].id, value);
+        param_snapshot_[i] = value;
     }
 
     UInt32 in_channels = inBuffer.mNumberBuffers;
@@ -250,6 +256,28 @@ OSStatus PulpAUEffect::ProcessBufferLists(AudioUnitRenderActionFlags& ioActionFl
     ctx.num_samples = static_cast<int>(inFramesToProcess);
 
     processor_->process(output_view, input_view, midi_in, midi_out, ctx);
+
+    // Plugin → host: diff params against the pre-process snapshot and push
+    // any plugin-side changes back to the host's parameter system. Without
+    // this loop, plugin-driven automation (e.g. a modulated parameter that
+    // the plugin writes to its store during process()) would never reach the
+    // host's automation lane, mirror widgets, or generic UI.
+    // Matches the VST3 and CLAP adapters' snapshot/diff pattern; workstream
+    // 01 slice 1.3.
+    for (std::size_t i = 0; i < params.size(); ++i) {
+        float post = store_.get_value(params[i].id);
+        if (post == param_snapshot_[i]) continue;
+        auto au_id = static_cast<AudioUnitParameterID>(params[i].id);
+        SetParameter(au_id, post);
+        AudioUnitEvent event;
+        std::memset(&event, 0, sizeof(event));
+        event.mEventType = kAudioUnitEvent_ParameterValueChange;
+        event.mArgument.mParameter.mAudioUnit = GetComponentInstance();
+        event.mArgument.mParameter.mParameterID = au_id;
+        event.mArgument.mParameter.mScope = kAudioUnitScope_Global;
+        event.mArgument.mParameter.mElement = 0;
+        AUEventListenerNotify(nullptr, nullptr, &event);
+    }
 
     return noErr;
 }

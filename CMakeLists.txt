@@ -242,6 +242,9 @@ if(EXISTS "${VST3_SDK_DIR}/pluginterfaces")
         "${VST3_SDK_DIR}/public.sdk/source/vst/vstsinglecomponenteffect.cpp"
         "${VST3_SDK_DIR}/public.sdk/source/common/pluginview.cpp"
         "${VST3_SDK_DIR}/public.sdk/source/common/commoniids.cpp"
+        # Hosting helpers used by the VST3 plugin slot (workstream 03 3.5).
+        "${VST3_SDK_DIR}/public.sdk/source/vst/hosting/parameterchanges.cpp"
+        "${VST3_SDK_DIR}/public.sdk/source/vst/hosting/eventlist.cpp"
     )
 
     add_library(vst3-sdk STATIC

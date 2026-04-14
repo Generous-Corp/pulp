@@ -53,8 +53,24 @@ public:
 
     const MidiEvent& operator[](std::size_t index) const { return events_[index]; }
 
+    /// Attach a UmpBuffer sidecar carrying MIDI 2.0 packets that can't be
+    /// represented as choc::midi::ShortMessage (UMP type-4 channel voice,
+    /// type-3/5 data, type-0 utility, etc.). Format adapters set this
+    /// before process(); plugins opting in to
+    /// PluginDescriptor::supports_ump read it via ump(). Ownership stays
+    /// with the caller; the buffer must outlive the process() block.
+    /// Workstream 02 slice 2.6.
+    void attach_ump(class UmpBuffer* ump) { ump_ = ump; }
+
+    /// Attached UmpBuffer or nullptr. A null return means "no UMP events
+    /// this block", not "UMP unsupported" — that's declared at descriptor
+    /// time via PluginDescriptor::supports_ump.
+    const class UmpBuffer* ump() const { return ump_; }
+    class UmpBuffer* ump() { return ump_; }
+
 private:
     std::vector<MidiEvent> events_;
+    class UmpBuffer* ump_ = nullptr;
 };
 
 } // namespace pulp::midi
