@@ -13,6 +13,7 @@ target_sources(pulp-host PRIVATE
     src/plugin_slot.cpp
     src/graph_serializer.cpp
     src/scan_blacklist.cpp
+    src/background_scanner.cpp
 )
 
 target_link_libraries(pulp-host PUBLIC pulp::audio pulp::midi pulp::runtime)

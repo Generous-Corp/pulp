@@ -86,6 +86,7 @@ scripted_ui:
     notes: Sibling theme.json overrides reload in ScriptedUiSession. Runtime-validated only in the standalone macOS scripted UI lane.
   state_preservation:
     status: usable
+    ci_test: pulp-test-state
     notes: Knob, fader, toggle, checkbox, toggle-button, and XY pad values are restored across scripted UI reloads. JavaScript heap state is rebuilt.
 
 audio_io:
@@ -203,6 +204,9 @@ css_parity:
       JS bridge: setPosition, setTop/Right/Bottom/Left, setZIndex.
   canvas_2d:
     status: usable
+    ci_test:
+      - pulp-test-canvas
+      - pulp-test-canvas-widget
     notes: >
       25 draw command types on CanvasWidget: fillRect, strokeRect, fillRoundedRect,
       strokeRoundedRect, fillCircle, strokeCircle, strokeLine, fillText, setFont,
@@ -262,6 +266,9 @@ css_parity:
       Per-corner border-radius (border-top-left-radius etc., 4 independent corners).
   animation_properties:
     status: usable
+    ci_test:
+      - pulp-test-animation
+      - pulp-test-widget-animation
     notes: >
       CSS animation-* properties parsed: name, duration, timing-function, delay,
       iteration-count (including infinite), direction, fill-mode. animation shorthand.
@@ -310,6 +317,7 @@ widgets:
       JS bridge: createListBox, setListItems, setListSelected, setListRowHeight.
   combo_box:
     status: usable
+    ci_test: pulp-test-combo-dropdown
     notes: Dropdown with global click-outside dismiss, keyboard navigation, hover tracking.
   scroll_view:
     status: usable
@@ -513,6 +521,9 @@ input:
 runtime_apis:
   canvas_2d:
     status: usable
+    ci_test:
+      - pulp-test-canvas
+      - pulp-test-canvas-widget
     notes: >
       25+ draw commands including gradient fills (linear/radial), arc/ellipse,
       textAlign/textBaseline, clearRect, clipRect, globalAlpha, lineCap/lineJoin,
