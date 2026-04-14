@@ -152,12 +152,19 @@ public:
             const auto& m = me.message;
             auto len = m.length();
             if (len < 1 || len > 3 || (m.data()[0] & 0x80) == 0) continue;
+            // Clamp to [0, num_samples - 1]. SignalGraph::inject_midi
+            // forwards caller-provided offsets without normalization, so
+            // a >= num_samples value can sneak in; AU rejects or mistimes
+            // such events. Fix per #191 review.
+            int32_t offset = me.sample_offset;
+            if (offset < 0) offset = 0;
+            if (offset >= num_samples) offset = num_samples - 1;
             MusicDeviceMIDIEvent(
                 au_,
                 m.data()[0],
                 len > 1 ? m.data()[1] : 0,
                 len > 2 ? m.data()[2] : 0,
-                static_cast<UInt32>(std::max(0, me.sample_offset)));
+                static_cast<UInt32>(offset));
         }
 
         // Deliver host-automation events via AudioUnitScheduleParameters,
