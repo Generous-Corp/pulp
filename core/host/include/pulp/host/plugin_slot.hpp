@@ -96,10 +96,53 @@ public:
     virtual std::vector<uint8_t> save_state() const = 0;
     virtual bool restore_state(const std::vector<uint8_t>& data) = 0;
 
-    // Editor
+    // Editor — legacy void* handle API. Kept for slots that still need it
+    // while slices migrate to the richer HostedEditor API below.
     virtual bool has_editor() const = 0;
     virtual void* create_editor_view() = 0;  // Returns platform-native view handle
     virtual void destroy_editor_view() = 0;
+
+    // ── Hosted editor (workstream 03 slice 3.4) ────────────────────────
+    //
+    // Typed replacement for the void* editor API. Slot implementations
+    // fill in a platform-native parent-window handle, initial size, and
+    // resizable-ness so the host can lay the view out without guessing.
+    //
+    // Lifecycle:
+    //   auto ed = slot->create_hosted_editor(parent_window);
+    //   if (ed) { /* host attaches ed->native_handle into its window */ }
+    //   // ... on close ...
+    //   slot->destroy_hosted_editor(std::move(ed));
+    //
+    // Format wiring per slice (6.3..6.5 / 3.4 follow-ups):
+    //   CLAP   — clap_plugin_gui: create / set_parent / show / get_size
+    //   VST3   — IEditController::createView("editor") + IPlugView::attached
+    //   AU     — AUAudioUnit.requestViewControllerWithCompletionHandler
+    //   LV2    — ui: extension + shared-object UI
+    struct HostedEditor {
+        void* native_handle = nullptr;   ///< NSView*, HWND, GdkWindow*, clap_plugin_gui* etc.
+        uint32_t width = 0;
+        uint32_t height = 0;
+        bool resizable = false;
+    };
+
+    /// Create the hosted editor. Default implementation preserves the
+    /// legacy void* path so every slot already compiled against
+    /// create_editor_view() still works; new slots override this directly.
+    virtual std::unique_ptr<HostedEditor>
+    create_hosted_editor(void* /*parent_window*/) {
+        if (!has_editor()) return nullptr;
+        void* h = create_editor_view();
+        if (!h) return nullptr;
+        auto ed = std::make_unique<HostedEditor>();
+        ed->native_handle = h;
+        return ed;
+    }
+
+    /// Tear down a hosted editor. Default routes to destroy_editor_view().
+    virtual void destroy_hosted_editor(std::unique_ptr<HostedEditor> ed) {
+        if (ed) destroy_editor_view();
+    }
 
     // Latency
     virtual int latency_samples() const = 0;

@@ -301,13 +301,6 @@ public:
     /// Called when the host's transport state transitions between
     /// playing and stopped, or jumps to a new position. Default no-op.
     /// Workstream 01 slice 1.11.
-    ///
-    /// Override for plugins that need to react outside of a process()
-    /// block: clear reverb tails on stop, seek a sample playback head
-    /// to `position_seconds` on a locate, arm tempo-synced LFOs on
-    /// play-start. The audio thread continues to read the live state
-    /// from ProcessContext as usual — this hook is the UI-thread
-    /// notification.
     virtual void on_host_transport_changed(bool /*is_playing*/,
                                            double /*position_seconds*/) {}
     /// Called when the host's transport tempo changes. Default no-op.
@@ -317,6 +310,16 @@ public:
     /// keeps reading the current tempo from ProcessContext as usual.
     /// Workstream 01 slice 1.10.
     virtual void on_host_tempo_changed(double /*new_tempo_bpm*/) {}
+
+    /// Optional ARA 2.x document-controller factory (workstream 06 slice 6.3).
+    /// Plugins that opt in to ARA return a new AraDocumentController from
+    /// this method; the format-adapter companion factory (VST3 / AU /
+    /// CLAP) owns the instance and tears it down with the plugin.
+    /// Default returns nullptr — the plugin is not ARA-aware.
+    /// Forward-declared so plugin TUs that don't implement ARA don't
+    /// need to pull `pulp/format/ara.hpp`.
+    virtual std::unique_ptr<class AraDocumentController>
+    create_ara_document_controller() { return nullptr; }
 
     /// Access the parameter state store.
     /// Use state().get_value(id) to read parameter values in process().
