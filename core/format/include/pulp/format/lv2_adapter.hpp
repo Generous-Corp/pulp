@@ -11,6 +11,11 @@
 
 #include <pulp/format/processor.hpp>
 
+#include <lv2/core/lv2.h>
+#include <lv2/urid/urid.h>
+
+#include <cstdint>
+
 namespace pulp::format::lv2_adapter {
 
 static constexpr int kMaxChannels = 8;
@@ -35,7 +40,22 @@ struct PulpLv2Instance {
     int num_audio_outputs = 0;
     int num_params = 0;
     std::vector<state::ParamID> param_ids;  // Maps control port index → ParamID
+
+    // URID feature resolution (workstream 01 slice 1.5). The LV2 host passes
+    // an LV2_URID_Map feature in instantiate(); we cache the map function
+    // plus the URIDs we need at runtime so inner-loop code does not call
+    // map() on hot paths. All fields are 0 when the feature is absent —
+    // instantiate() returns nullptr in that case, so real plugin code
+    // always sees non-zero values here.
+    LV2_URID_Map* urid_map = nullptr;
+    LV2_URID urid_midi_event = 0;      // LV2_MIDI__MidiEvent
+    LV2_URID urid_atom_sequence = 0;   // LV2_ATOM__Sequence
+    LV2_URID urid_atom_chunk = 0;      // LV2_ATOM__Chunk
 };
+
+/// Resolve LV2_URID_Map from a features array.
+/// Returns nullptr if the feature is absent. Exposed for unit testing.
+LV2_URID_Map* find_urid_map(const LV2_Feature* const* features);
 
 // Generate an LV2 TTL manifest string for a plugin
 // This creates the plugin.ttl content with port definitions

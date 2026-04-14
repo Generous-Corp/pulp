@@ -31,6 +31,37 @@ Key headers: `pulp/format/processor.hpp`, `pulp/format/vst3_adapter.hpp`, `pulp/
 AAX support is intentionally opt-in. It requires a developer-supplied AAX SDK,
 is not bundled by Pulp, and is unsupported on Linux and Ubuntu.
 
+### Known Limitations (plugin formats)
+
+These are the production gaps currently tracked per adapter. The authoritative
+list lives at `docs/status/support-matrix.yaml` under `format_limitations:`;
+this section mirrors it for human readers. A status of `usable` means the
+adapter compiles and loads — not that every host-facing feature is wired.
+
+- **VST3** — Dynamic bus arrangements limited; `setBusArrangements` only
+  renegotiates the primary stereo bus today. Tracked: production-readiness
+  workstream 01.
+- **Audio Unit v2** — Outbound parameter changes are not emitted to the host;
+  automation read on AU v2 effects only flows host → plugin. Tracked:
+  workstream 01.
+- **CLAP** — Only the first input bus and first output bus are routed;
+  declared sidechain or additional buses are ignored. `Processor::set_sidechain`
+  is never called from the CLAP adapter. Tracked: workstream 01.
+- **LV2** — MIDI atom parsing is incomplete; `connect_port` has no atom/MIDI
+  port branch beyond control range. URID feature is not resolved. Tracked:
+  workstream 01.
+- **AAX** — Custom editor surface not wired; Pro Tools shows the
+  auto-generated parameter strip rather than a Pulp ViewBridge editor.
+  AudioSuite role is declared but not exercised end-to-end. Tracked:
+  `planning/signalgraph-and-bridge-followups-plan.md` rows 7 and 13.
+- **AUv3** — iOS jetsam pressure not modeled; heavy V8 / WebView workloads in
+  the AUv3 process risk termination at ~50 MB. Tracked: workstream 05.
+- **WAM v2 / WebCLAP** — Browser origin sandbox only; no Pulp-side capability
+  manifest yet. Tracked: `planning/security/container-and-sandbox-strategy-v4.md`.
+
+If you hit a limitation not listed, check
+`planning/production-readiness/01-format-adapters.md` and file an issue.
+
 ---
 
 ## Platforms
