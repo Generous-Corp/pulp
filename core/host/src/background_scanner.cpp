@@ -9,6 +9,13 @@ bool BackgroundScanner::start(ScanWorkerFn worker,
     if (running_.load(std::memory_order_acquire)) {
         return false;
     }
+    // A completed-but-not-joined worker leaves worker_ joinable. Assigning
+    // a fresh std::thread over a joinable one triggers std::terminate,
+    // which a "scan finishes → start another scan" flow would otherwise
+    // crash through. Join first so the sequence is always safe regardless
+    // of whether the caller explicitly joined.
+    if (worker_.joinable()) worker_.join();
+
     // Reset token for a fresh run (std::atomic isn't copy-assignable, so
     // clear the flag in place rather than reassigning).
     token_.reset();
