@@ -244,6 +244,21 @@ public:
     /// logical pixels. Runs on the UI thread.
     virtual void on_view_resized(view::View& /*view*/, uint32_t /*w*/, uint32_t /*h*/) {}
 
+    /// Optional ARA 2.x document-controller factory (workstream 06 slice 6.3).
+    /// Plugins that opt in to ARA return a new AraDocumentController from
+    /// this method; the format-adapter companion factory (VST3 / AU /
+    /// CLAP) owns the instance and tears it down with the plugin.
+    ///
+    /// Default returns nullptr — the plugin is not ARA-aware and adapters
+    /// skip the ARA companion factory entirely. See
+    /// planning/production-readiness/06-ara.md for the roadmap.
+    ///
+    /// Forward-declared to avoid pulling the ARA header into every plugin
+    /// TU. Include `pulp/format/ara.hpp` in the plugin's .cpp to return
+    /// a real instance.
+    virtual std::unique_ptr<class AraDocumentController>
+    create_ara_document_controller() { return nullptr; }
+
     /// Access the parameter state store.
     /// Use state().get_value(id) to read parameter values in process().
     state::StateStore& state() { return *state_store_; }
