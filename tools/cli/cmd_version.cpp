@@ -2,6 +2,7 @@
 // Show, bump, and verify version consistency across all surfaces.
 
 #include "cli_common.hpp"
+#include "json_parser.hpp"
 
 #include <cstdlib>
 #include <fstream>
@@ -168,17 +169,18 @@ static int version_bump(const std::vector<std::string>& args) {
     return 0;
 }
 
-// Read the TOP-LEVEL "version" field from a JSON file via a tiny regex — we
-// intentionally avoid pulling in a JSON library here. The config files are
-// small and under our control. "Top-level" means two-space indentation (or
-// zero): `"version":` nested deeper (metadata.version, plugins[0].version)
-// is skipped because those are not the canonical version for the file.
+// Read the TOP-LEVEL "version" field from a JSON file using the in-repo
+// parser. Reformatting the file (different indent width, tabs, minification)
+// no longer breaks the check. Codex P2 on PR #152.
 static std::string read_json_version_field(const fs::path& path) {
     if (!fs::exists(path)) return {};
     auto content = read_file_contents(path);
-    std::regex re(R"#(^(?:  )?"version"\s*:\s*"([^"]+)")#", std::regex::multiline);
-    std::smatch m;
-    if (std::regex_search(content, m, re)) return m[1].str();
+    pulp::cli::pkg::JsonParser parser{content};
+    parser.skip_ws();
+    auto root = parser.parse_value();
+    if (auto* v = root.get("version"); v && v->type == pulp::cli::pkg::JsonValue::String) {
+        return v->str_val;
+    }
     return {};
 }
 
@@ -187,16 +189,22 @@ static std::string read_json_version_field(const fs::path& path) {
 // surfaces per plugin, so it has to stay in lockstep with plugin.json's
 // top-level `.version`. The top-level marketplace `.version` is the
 // MARKETPLACE format version and drifts independently.
+//
+// Uses the in-repo JSON parser so indentation changes don't silently
+// re-introduce the drift this check exists to catch (Codex P2 on #152).
 static std::string read_marketplace_plugin_entry_version(const fs::path& path) {
     if (!fs::exists(path)) return {};
     auto content = read_file_contents(path);
-    // Match the first occurrence of `"version": "x.y.z"` at 6 spaces of
-    // indentation (inside `plugins[0]`). If the file grows a second plugin
-    // entry, this still picks the first one — matching how scroll /
-    // marketplace listings render.
-    std::regex re(R"#(^      "version"\s*:\s*"([^"]+)")#", std::regex::multiline);
-    std::smatch m;
-    if (std::regex_search(content, m, re)) return m[1].str();
+    pulp::cli::pkg::JsonParser parser{content};
+    parser.skip_ws();
+    auto root = parser.parse_value();
+    auto* plugins = root.get("plugins");
+    if (!plugins || plugins->type != pulp::cli::pkg::JsonValue::Array) return {};
+    const auto& arr = plugins->arr();
+    if (arr.empty()) return {};
+    if (auto* v = arr.front().get("version"); v && v->type == pulp::cli::pkg::JsonValue::String) {
+        return v->str_val;
+    }
     return {};
 }
 
