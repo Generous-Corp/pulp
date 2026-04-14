@@ -2,6 +2,8 @@
 
 All notable changes to Pulp are documented here.
 
+## [0.10.0]
+
 ## [0.9.0]
 
 ## [0.5.0]
