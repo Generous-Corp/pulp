@@ -131,6 +131,7 @@ target_sources(pulp-view PRIVATE
     src/modulation_matrix.cpp
     src/accessibility_tree.cpp
     src/image_cache.cpp
+    src/resizable_shell.cpp
     src/graph_editor_view.cpp
     src/script_engine.cpp
     src/js_engine_recommend.cpp
