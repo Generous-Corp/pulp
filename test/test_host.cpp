@@ -667,6 +667,49 @@ TEST_CASE("SignalGraph connect_automation rejects duplicate Replace edges",
         0.0f, pulp::host::AutomationMix::Add));
 }
 
+// ── Phase 3 GraphSerializer round-trip ──────────────────────────────────
+
+#include <pulp/host/graph_serializer.hpp>
+
+TEST_CASE("GraphSerializer round-trips topology + connections + layout",
+          "[host][serializer]") {
+    SignalGraph g1;
+    auto a = g1.add_input_node(2, "in");
+    auto b = g1.add_gain_node("g");
+    auto c = g1.add_output_node(2, "out");
+    REQUIRE(g1.connect(a, 0, b, 0));
+    REQUIRE(g1.connect(a, 1, b, 1));
+    REQUIRE(g1.connect(b, 0, c, 0));
+    REQUIRE(g1.connect(b, 1, c, 1));
+    g1.set_node_gain(b, 0.75f);
+
+    std::unordered_map<NodeId, std::pair<float,float>> layout = {
+        {a, {10.f, 20.f}}, {b, {200.f, 20.f}}, {c, {400.f, 20.f}}
+    };
+    std::string json = GraphSerializer::to_json(g1, layout);
+    REQUIRE(!json.empty());
+
+    SignalGraph g2;
+    auto result = GraphSerializer::from_json(g2, json);
+    REQUIRE(result.ok);
+    REQUIRE(result.missing_plugins.empty());
+    REQUIRE(g2.nodes().size() == 3);
+    REQUIRE(g2.connections().size() == 4);
+    REQUIRE(result.editor_layout.size() == 3);
+
+    // The new node ids may differ from the originals; verify by name.
+    NodeId in2 = 0, g2id = 0, out2 = 0;
+    for (const auto& n : g2.nodes()) {
+        if (n.name == "in")  in2 = n.id;
+        if (n.name == "g")   g2id = n.id;
+        if (n.name == "out") out2 = n.id;
+    }
+    REQUIRE(in2 != 0);
+    REQUIRE(g2id != 0);
+    REQUIRE(out2 != 0);
+    REQUIRE(std::abs(g2.node_gain(g2id) - 0.75f) < 1e-6f);
+}
+
 // ── Real CLAP loader (integration test, skipped when no test plugin built) ──
 
 #include <filesystem>
