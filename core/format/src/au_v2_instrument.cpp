@@ -156,7 +156,13 @@ OSStatus PulpAUInstrument::Render(AudioUnitRenderActionFlags& ioActionFlags,
     if (!processor_) return noErr;
 
     for (const auto& param : store_.all_params()) {
-        float value = Globals()->GetParameterRT(
+        // AudioUnitSDK 1.4 renamed the RT-safe parameter read to
+        // GetParameterRT; 1.3.0 uses GetParameter and is equivalent
+        // (inline atomic load of a float). We pin to 1.3.0 on this
+        // branch because AppleClang/libc++ on the GitHub-hosted macOS
+        // runner doesn't ship std::expected yet — see issue #155. Flip
+        // back to GetParameterRT when we can adopt 1.4+ again.
+        float value = Globals()->GetParameter(
             static_cast<AudioUnitParameterID>(param.id));
         store_.set_value(param.id, value);
     }
