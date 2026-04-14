@@ -132,13 +132,27 @@ public:
                  const audio::BufferView<const float>& input,
                  const midi::MidiBuffer& /*midi_in*/,
                  midi::MidiBuffer& /*midi_out*/,
-                 const ParameterEventQueue& /*param_events*/,
+                 const ParameterEventQueue& param_events,
                  int num_samples) override {
         if (!au_ || !prepared_) return;
         if (num_samples <= 0 || num_samples > max_block_size_) return;
         if (bypassed_.load(std::memory_order_relaxed)) {
             copy_or_zero(output, input, num_samples);
             return;
+        }
+
+        // Deliver host-automation events via AudioUnitScheduleParameters,
+        // which is AU v2's sample-accurate parameter write path.
+        for (const auto& pe : param_events) {
+            AudioUnitParameterEvent aupe{};
+            aupe.scope     = kAudioUnitScope_Global;
+            aupe.element   = 0;
+            aupe.parameter = (AudioUnitParameterID)pe.param_id;
+            aupe.eventType = kParameterEvent_Immediate;
+            aupe.eventValues.immediate.bufferOffset =
+                (UInt32)std::max(0, pe.sample_offset);
+            aupe.eventValues.immediate.value = pe.value;
+            AudioUnitScheduleParameters(au_, &aupe, 1);
         }
 
         // Make the input pointers visible to the render callback.
