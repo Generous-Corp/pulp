@@ -30,17 +30,16 @@ TEST_CASE("snapshot captures role + label + value", "[a11y][harness]") {
     label->set_access_label("Title");
     root.add_child(std::move(label));
 
+    // #192 review: root excluded to match platform bridge output;
+    // only descendants reported, child depth resets to 0.
     auto nodes = snapshot_accessibility_tree(root);
-    REQUIRE(nodes.size() == 3);
-    REQUIRE(nodes[0].role == View::AccessRole::group);
-    REQUIRE(nodes[0].label == "Root");
+    REQUIRE(nodes.size() == 2);
+    REQUIRE(nodes[0].role == View::AccessRole::slider);
+    REQUIRE(nodes[0].label == "Gain");
+    REQUIRE(nodes[0].value == "0 dB");
     REQUIRE(nodes[0].depth == 0);
-    REQUIRE(nodes[1].role == View::AccessRole::slider);
-    REQUIRE(nodes[1].label == "Gain");
-    REQUIRE(nodes[1].value == "0 dB");
-    REQUIRE(nodes[1].depth == 1);
-    REQUIRE(nodes[2].role == View::AccessRole::label);
-    REQUIRE(nodes[2].depth == 1);
+    REQUIRE(nodes[1].role == View::AccessRole::label);
+    REQUIRE(nodes[1].depth == 0);
 }
 
 TEST_CASE("count_announceable excludes AccessRole::none", "[a11y][harness]") {

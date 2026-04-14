@@ -35,8 +35,18 @@ void walk(const View& v, int depth,
 
 std::vector<AccessibilityNodeSnapshot>
 snapshot_accessibility_tree(const View& root) {
+    // Match platform bridge output by excluding the root node itself
+    // and returning only its descendants. macOS (accessibility_mac.mm)
+    // and iOS (accessibility_ios.mm) VoiceOver bridges iterate
+    // root.child_count() and never push the root; including it here
+    // created false cross-platform parity failures when the root had a
+    // non-none role (e.g. group). Fix per #192 review.
     std::vector<AccessibilityNodeSnapshot> out;
-    walk(root, 0, out);
+    for (std::size_t i = 0; i < root.child_count(); ++i) {
+        if (const View* child = root.child_at(i)) {
+            walk(*child, 0, out);
+        }
+    }
     return out;
 }
 
