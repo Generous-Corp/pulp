@@ -22,6 +22,14 @@ struct ViewSize {
     uint32_t min_height = 0;
     uint32_t max_width = 0;   ///< 0 = unbounded
     uint32_t max_height = 0;  ///< 0 = unbounded
+
+    /// When > 0, the host should hold this aspect ratio (width/height)
+    /// during interactive resize. Workstream 07 slice 7.5 pairs this
+    /// with pulp::view::ResizableShell, which owns the clamp + snap
+    /// arithmetic. 0 means "any ratio"; hosts then let the user drag
+    /// freely within [min, max]. Typical values: 16.0/9.0, 4.0/3.0,
+    /// preferred_width/preferred_height.
+    double aspect_ratio = 0.0;
 };
 
 /// Plugin category — determines bus layout expectations and DAW behavior.
@@ -104,6 +112,13 @@ struct PluginDescriptor {
     /// Tail time in samples (0 = no tail, -1 = infinite).
     /// Used by hosts to flush reverb/delay tails after playback stops.
     int tail_samples = 0;
+
+    /// Optional contact info — appended here so existing positional
+    /// aggregate initializers keep working. Surfaced by VST3
+    /// PFactoryInfo::url/email, CLAP manufacturer_url/manufacturer_email,
+    /// AU kAudioUnitProperty_URL. Leave empty to skip.
+    std::string vendor_url;
+    std::string vendor_email;
 
     /// Channel count of the first (main) input bus.
     int default_input_channels() const {
@@ -191,6 +206,33 @@ public:
 
     /// Release resources. Called on the host thread with audio stopped.
     virtual void release() {}
+
+    /// Memory-pressure levels a host can surface to a plugin. Mirrors the
+    /// broad shape of iOS didReceiveMemoryWarning + Windows low-memory
+    /// notifications + Android TrimMemory. Workstream 05 slice 5.3.
+    enum class MemoryPressure {
+        /// Hint only — trim obviously disposable caches, keep working set.
+        Advisory,
+        /// Serious — drop every cache the plugin can rebuild on demand
+        /// (image atlases, analysis buffers, undo history beyond the last
+        /// N entries). Audio rendering must continue.
+        Critical,
+    };
+
+    /// Called on the main/UI thread when the host observes memory
+    /// pressure. Default is a no-op — plugins that cache decoded images,
+    /// analysis buffers, or paged samples override this to drop caches.
+    /// Implementations MUST NOT block the audio thread; use the existing
+    /// state/sync-strategy guidance for cache invalidation.
+    ///
+    /// Wiring:
+    ///   iOS       — PulpAudioSessionBridge routes didReceiveMemoryWarning
+    ///               (slice 5.1 hooks this into the running processor).
+    ///   macOS     — no-op today; host apps can still invoke manually to
+    ///               test plugin behaviour.
+    ///   Android   — ComponentCallbacks2.onTrimMemory (future slice).
+    ///   Windows   — CreateMemoryResourceNotification (future slice).
+    virtual void on_memory_pressure(MemoryPressure /*level*/) {}
 
     /// Latency in samples introduced by this processor (default 0).
     /// Override for plugins that buffer or lookahead (e.g., compressors,

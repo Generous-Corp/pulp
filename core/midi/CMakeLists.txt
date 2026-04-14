@@ -19,6 +19,7 @@ target_include_directories(pulp-midi PUBLIC
 target_sources(pulp-midi PRIVATE
     src/midi_file.cpp
     src/midi_ci.cpp
+    src/running_status.cpp
 )
 
 if(APPLE AND NOT IOS)
