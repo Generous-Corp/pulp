@@ -114,6 +114,11 @@ add_executable(pulp-test-ab-compare test_ab_compare.cpp)
 target_link_libraries(pulp-test-ab-compare PRIVATE pulp::view Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-ab-compare)
 
+# MidiBuffer UMP sidecar (workstream 02 slice 2.6a)
+add_executable(pulp-test-midi-buffer-ump test_midi_buffer_ump.cpp)
+target_link_libraries(pulp-test-midi-buffer-ump PRIVATE pulp::midi Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-midi-buffer-ump)
+
 # TextShaper (PreText-style measure-once-reflow-forever)
 add_executable(pulp-test-text-shaper test_text_shaper.cpp)
 target_link_libraries(pulp-test-text-shaper PRIVATE pulp::canvas Catch2::Catch2WithMain)
