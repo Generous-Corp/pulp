@@ -594,6 +594,8 @@ function(_pulp_add_au target name bundle_id version manufacturer category plugin
     set_target_properties(${target}_AU PROPERTIES
         CXX_STANDARD 23
         CXX_STANDARD_REQUIRED ON
+        OBJCXX_STANDARD 23
+        OBJCXX_STANDARD_REQUIRED ON
         BUNDLE TRUE
         BUNDLE_EXTENSION "component"
         OUTPUT_NAME "${name}"
