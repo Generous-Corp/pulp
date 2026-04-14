@@ -214,7 +214,16 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
             input_ptrs_[ch] = data.inputs[0].channelBuffers32[ch];
         }
     }
-    if (data.numInputs > 1 && data.inputs[1].numChannels > 0) {
+    // A VST3 bus can report numChannels > 0 while inactive — in that
+    // state channelBuffers32 and its entries can be null. Publishing a
+    // non-null sidechain then would hand processors null pointers they
+    // would happily dereference. Require an active channel-buffer array
+    // with a non-null first pointer before accepting the sidechain; fall
+    // back to nullptr otherwise. Fix per #178 review.
+    if (data.numInputs > 1 &&
+        data.inputs[1].numChannels > 0 &&
+        data.inputs[1].channelBuffers32 &&
+        data.inputs[1].channelBuffers32[0]) {
         sc_channels = data.inputs[1].numChannels;
         sidechain_ptrs_.resize(sc_channels);
         for (int ch = 0; ch < sc_channels; ++ch) {
