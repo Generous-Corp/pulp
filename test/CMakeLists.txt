@@ -131,6 +131,11 @@ add_executable(pulp-test-midi-buffer-ump test_midi_buffer_ump.cpp)
 target_link_libraries(pulp-test-midi-buffer-ump PRIVATE pulp::midi Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-midi-buffer-ump)
 
+# AudioSystem hotplug base plumbing (workstream 02 slice 2.7)
+add_executable(pulp-test-audio-system-hotplug test_audio_system_hotplug.cpp)
+target_link_libraries(pulp-test-audio-system-hotplug PRIVATE pulp::audio Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-audio-system-hotplug)
+
 # TextShaper (PreText-style measure-once-reflow-forever)
 add_executable(pulp-test-text-shaper test_text_shaper.cpp)
 target_link_libraries(pulp-test-text-shaper PRIVATE pulp::canvas Catch2::Catch2WithMain)
