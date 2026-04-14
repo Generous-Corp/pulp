@@ -48,10 +48,23 @@ public:
     }
 
     /// Add a row. Pads with empty cells if short.
+    ///
+    /// If a previous sort was active, sort state is dropped but the
+    /// insertion-order mapping is restored first so a later clear_sort()
+    /// can still return rows to their original order. This matches the
+    /// clear_sort contract documented above; without the restore step a
+    /// dynamic table that receives new rows after sorting would get
+    /// stuck at the post-sort layout. Fix per #200 review.
     void add_row(std::vector<TableCell> cells) {
         cells.resize(columns_.size());
+        if (sort_order_ != TableSortOrder::None && !original_order_.empty()
+                                                && original_order_.size() == rows_.size()) {
+            restore_original_order_();
+        }
         rows_.push_back(std::move(cells));
-        // Invalidate any current sorted view; callers re-sort if needed.
+        if (!original_order_.empty()) {
+            original_order_.push_back(rows_.size() - 1);
+        }
         sort_column_ = -1;
         sort_order_ = TableSortOrder::None;
     }

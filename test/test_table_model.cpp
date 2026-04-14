@@ -99,3 +99,23 @@ TEST_CASE("clear_sort restores original insertion order",
     REQUIRE(m.cell(2, 0).text == "Lush");
     REQUIRE(m.sort_order() == TableSortOrder::None);
 }
+
+TEST_CASE("adding rows after sort then clear_sort restores insertion order",
+          "[ui][table-model]") {
+    // Regression: original_order_ bookkeeping must survive add_row
+    // after a sort so clear_sort() returns to true insertion order.
+    // Without the fix, new rows ended up on top of a stale identity
+    // permutation and clear_sort() either no-op'd or stayed on the
+    // post-sort layout.
+    auto m = make_preset_table();
+    m.sort_by(0, TableSortOrder::Ascending);
+    m.add_row({{"Kick"},   {"Carl"},  {"4.0", 4.0}});
+    m.add_row({{"Atlas"},  {"Dora"},  {"4.2", 4.2}});
+    m.sort_by(0, TableSortOrder::Descending);
+    m.clear_sort();
+    REQUIRE(m.cell(0, 0).text == "Dreamy Pad");
+    REQUIRE(m.cell(1, 0).text == "Stab");
+    REQUIRE(m.cell(2, 0).text == "Lush");
+    REQUIRE(m.cell(3, 0).text == "Kick");
+    REQUIRE(m.cell(4, 0).text == "Atlas");
+}
