@@ -14,6 +14,19 @@
 #include <string>
 #include <thread>
 
+#if defined(__APPLE__) || defined(__linux__)
+#include <csignal>
+namespace {
+// Static initializer: ignore SIGPIPE so a write() to a closed peer
+// returns EPIPE instead of terminating the process. The round-trip test
+// below regularly races socket close vs. final write on macOS
+// github-hosted runners; without this guard the test flakes. POSIX only.
+struct IgnoreSigpipe {
+    IgnoreSigpipe() { std::signal(SIGPIPE, SIG_IGN); }
+} g_ignore_sigpipe;
+}
+#endif
+
 using namespace pulp::runtime;
 using namespace std::chrono_literals;
 
