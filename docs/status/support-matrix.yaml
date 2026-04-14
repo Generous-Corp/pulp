@@ -375,12 +375,18 @@ platform_maturity:
     macos:
       status: usable
       notes: VoiceOver via NSAccessibilityElement. AccessRole maps to NSAccessibilityRole.
+    ios:
+      status: usable
+      notes: VoiceOver via UIAccessibilityElement with accessibilityIncrement/Decrement for sliders. See core/view/platform/ios/accessibility_ios.mm.
+    android:
+      status: usable
+      notes: TalkBack via JNI bridge exposing role, label, value, table metadata, and click/increment/decrement actions. See core/view/platform/android/accessibility_android.cpp.
     windows:
       status: partial
-      notes: UIA stub — role mapping defined, provider not yet implemented.
+      notes: UIA stub — role mapping defined, IRawElementProviderSimple/WM_GETOBJECT/event firing pending. See production-readiness workstream 04.
     linux:
       status: partial
-      notes: AT-SPI stub — role mapping defined, D-Bus registration not yet implemented.
+      notes: AT-SPI stub — role mapping defined, D-Bus registration pending. See production-readiness workstream 04.
   ime_composition:
     status: usable
     platform: macos

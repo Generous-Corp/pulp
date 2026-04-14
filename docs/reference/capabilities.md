@@ -171,7 +171,18 @@ Key headers: `pulp/state/parameter.hpp`, `pulp/state/store.hpp`, `pulp/state/bin
 | XYPad, WaveformView, SpectrumView | usable | [view](modules.md#view) | |
 | ImageView | usable | [view](modules.md#view) | Placeholder rendering |
 | TreeView, Tooltip, Panel, Icon | usable | [view](modules.md#view) | |
+| SpectrogramView (scrolling STFT) | usable | [view](modules.md#view) | |
+| MultiMeter, CorrelationMeter | usable | [view](modules.md#view) | |
+| PresetBrowser (search, categories, nav) | usable | [view](modules.md#view) | |
+| MidiKeyboard (display + interaction) | usable | [view](modules.md#view) | |
+| WaveformEditor (selection, zoom, regions) | usable | [view](modules.md#view) | |
+| EqCurveView (draggable band handles) | usable | [view](modules.md#view) | |
+| FileBrowser, FileDropZone | usable | [view](modules.md#view) | |
+| GraphEditorView (canvas-based node editor) | usable | [view](modules.md#view) | SignalGraph UI |
+| ConcertinaPanel, SplitView, Breadcrumb, Toolbar | usable | [view](modules.md#view) | |
+| ColorPicker, Lasso, PropertyList, CodeEditor | usable | [view](modules.md#view) | |
 | CanvasWidget (25 draw commands) | usable | [view](modules.md#view) | [custom-rendering](../guides/custom-rendering.md) |
+| ModulationMatrix, A/B compare, sortable TableView | planned | [view](modules.md#view) | Production-readiness workstream 07 |
 
 ### Web-Compat Layer
 
@@ -196,6 +207,10 @@ Key headers: `pulp/state/parameter.hpp`, `pulp/state/store.hpp`, `pulp/state/bin
 | Cursor management (7 styles) | usable | macOS | NSCursor in mouseMoved |
 | Tab focus traversal | usable | all | Tab/Shift+Tab cycles focusable views |
 | VoiceOver accessibility | usable | macOS | NSAccessibilityElement + AccessRole |
+| VoiceOver accessibility | usable | iOS | UIAccessibilityElement with slider increment/decrement |
+| TalkBack accessibility | usable | Android | JNI bridge: role, label, value, table metadata, actions |
+| UIA accessibility | partial | Windows | Role map only; provider pending (production-readiness 04) |
+| AT-SPI accessibility | partial | Linux | Role map only; D-Bus registration pending (production-readiness 04) |
 | IME composition (marked text) | usable | macOS | Full NSTextInputClient |
 | Right-click context menu | usable | macOS | on_context_menu + PopupMenu |
 | Keyboard shortcuts | usable | all | registerShortcut bridge |
