@@ -104,6 +104,11 @@ add_executable(pulp-test-midi-ci test_midi_ci.cpp)
 target_link_libraries(pulp-test-midi-ci PRIVATE pulp::midi Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-midi-ci)
 
+# TableModel data/sort layer (workstream 07 slice 7.3)
+add_executable(pulp-test-table-model test_table_model.cpp)
+target_link_libraries(pulp-test-table-model PRIVATE pulp::view Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-table-model)
+
 # TextShaper (PreText-style measure-once-reflow-forever)
 add_executable(pulp-test-text-shaper test_text_shaper.cpp)
 target_link_libraries(pulp-test-text-shaper PRIVATE pulp::canvas Catch2::Catch2WithMain)
