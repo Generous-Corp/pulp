@@ -203,6 +203,14 @@ if [ -f "$ROOT/VISION.md" ]; then
     fi
 fi
 
+# ── Docs consistency (support-matrix.yaml ↔ capabilities.md) ──────────────────
+if [ -x "$ROOT/tools/check-docs-consistency.py" ]; then
+    echo "Checking docs consistency (support-matrix ↔ capabilities)..."
+    if ! python3 "$ROOT/tools/check-docs-consistency.py"; then
+        ERRORS=$((ERRORS + 1))
+    fi
+fi
+
 # ── Summary ───────────────────────────────────────────────────────────────────
 echo ""
 if [ $ERRORS -gt 0 ]; then
