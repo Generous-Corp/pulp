@@ -153,3 +153,16 @@ sample-at-block-start so the offset-(N-1) value wins.
 
 MixMode::Replace is the default; second Replace edge to the same
 (node, param) is rejected. MixMode::Add sums then clamps.
+
+## Phase 1 P1 follow-ups (PR #159)
+
+Four bugs caught in Codex review of the Phase 0/1 series:
+
+- `connect_automation` rejects cycles via `would_create_cycle` (automation
+  edges contribute to topo order so back-edges are invalid).
+- `Vst3Slot` dtor only calls `terminate()` once on combined
+  IComponent + IEditController objects (FUnknown-pointer equality check).
+- `SignalGraph::process()` returns immediately on `num_samples <= 0`
+  rather than memset'ing with a wrapped size_t.
+- MidiInput nodes' `midi_out` is drained at the END of `process()`, not
+  the start. Hosts call `inject_midi()` before each `process()` to refill.
