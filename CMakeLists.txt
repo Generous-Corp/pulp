@@ -590,7 +590,7 @@ include(GNUInstallDirs)
 set(PULP_SDK_TARGETS
     pulp-platform pulp-runtime pulp-events pulp-state
     pulp-audio pulp-midi pulp-signal pulp-format
-    pulp-canvas pulp-view pulp-standalone pulp-dsl
+    pulp-canvas pulp-view pulp-host pulp-standalone pulp-dsl
 )
 
 if(TARGET pulp-render)

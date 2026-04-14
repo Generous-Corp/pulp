@@ -127,6 +127,7 @@ endif()
 target_sources(pulp-view PRIVATE
     ${PULP_JS_ENGINE_SOURCES}
     src/accessibility.cpp
+    src/graph_editor_view.cpp
     src/script_engine.cpp
     src/js_engine_recommend.cpp
     src/theme.cpp
@@ -198,7 +199,7 @@ target_include_directories(pulp-view PUBLIC
 
 add_dependencies(pulp-view pulp-view-js-preludes)
 
-target_link_libraries(pulp-view PUBLIC pulp::canvas pulp::events pulp::state pulp::signal pulp::platform)
+target_link_libraries(pulp-view PUBLIC pulp::canvas pulp::events pulp::state pulp::signal pulp::platform pulp::host)
 
 # JavaScriptCore framework for JSC backend (Apple only)
 if(APPLE)
