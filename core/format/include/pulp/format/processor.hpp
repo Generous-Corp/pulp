@@ -180,6 +180,33 @@ public:
     /// Release resources. Called on the host thread with audio stopped.
     virtual void release() {}
 
+    /// Memory-pressure levels a host can surface to a plugin. Mirrors the
+    /// broad shape of iOS didReceiveMemoryWarning + Windows low-memory
+    /// notifications + Android TrimMemory. Workstream 05 slice 5.3.
+    enum class MemoryPressure {
+        /// Hint only — trim obviously disposable caches, keep working set.
+        Advisory,
+        /// Serious — drop every cache the plugin can rebuild on demand
+        /// (image atlases, analysis buffers, undo history beyond the last
+        /// N entries). Audio rendering must continue.
+        Critical,
+    };
+
+    /// Called on the main/UI thread when the host observes memory
+    /// pressure. Default is a no-op — plugins that cache decoded images,
+    /// analysis buffers, or paged samples override this to drop caches.
+    /// Implementations MUST NOT block the audio thread; use the existing
+    /// state/sync-strategy guidance for cache invalidation.
+    ///
+    /// Wiring:
+    ///   iOS       — PulpAudioSessionBridge routes didReceiveMemoryWarning
+    ///               (slice 5.1 hooks this into the running processor).
+    ///   macOS     — no-op today; host apps can still invoke manually to
+    ///               test plugin behaviour.
+    ///   Android   — ComponentCallbacks2.onTrimMemory (future slice).
+    ///   Windows   — CreateMemoryResourceNotification (future slice).
+    virtual void on_memory_pressure(MemoryPressure /*level*/) {}
+
     /// Latency in samples introduced by this processor (default 0).
     /// Override for plugins that buffer or lookahead (e.g., compressors,
     /// linear-phase EQs). Hosts use this for delay compensation.
