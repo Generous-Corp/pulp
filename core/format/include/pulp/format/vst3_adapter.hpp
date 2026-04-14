@@ -72,6 +72,10 @@ private:
     // Working buffers
     std::vector<float*> input_ptrs_;
     std::vector<float*> output_ptrs_;
+    // Second input bus routed to Processor::set_sidechain() (workstream 01
+    // slice 1.2). Only input bus 1 is consumed; additional buses are
+    // ignored because the Processor API exposes a single sidechain slot.
+    std::vector<float*> sidechain_ptrs_;
 
     // Parameter output: snapshot values before process to detect plugin-side changes
     std::vector<float> param_snapshot_;

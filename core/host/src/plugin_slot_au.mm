@@ -130,7 +130,7 @@ public:
 
     void process(audio::BufferView<float>& output,
                  const audio::BufferView<const float>& input,
-                 const midi::MidiBuffer& /*midi_in*/,
+                 const midi::MidiBuffer& midi_in,
                  midi::MidiBuffer& /*midi_out*/,
                  const ParameterEventQueue& param_events,
                  int num_samples) override {
@@ -139,6 +139,32 @@ public:
         if (bypassed_.load(std::memory_order_relaxed)) {
             copy_or_zero(output, input, num_samples);
             return;
+        }
+
+        // Deliver MIDI input via MusicDeviceMIDIEvent, AU v2's sample-
+        // accurate MIDI write path. Workstream 03 slice 3.6 — previously
+        // midi_in was discarded, so hosted AU instruments received no
+        // MIDI. Skips malformed messages (length outside [1..3] or no
+        // status byte) to avoid polluting the plugin with garbage, same
+        // validation the AUv3 adapter adopted in PR #179.
+        for (auto it = midi_in.begin(); it != midi_in.end(); ++it) {
+            const auto& me = *it;
+            const auto& m = me.message;
+            auto len = m.length();
+            if (len < 1 || len > 3 || (m.data()[0] & 0x80) == 0) continue;
+            // Clamp to [0, num_samples - 1]. SignalGraph::inject_midi
+            // forwards caller-provided offsets without normalization, so
+            // a >= num_samples value can sneak in; AU rejects or mistimes
+            // such events. Fix per #191 review.
+            int32_t offset = me.sample_offset;
+            if (offset < 0) offset = 0;
+            if (offset >= num_samples) offset = num_samples - 1;
+            MusicDeviceMIDIEvent(
+                au_,
+                m.data()[0],
+                len > 1 ? m.data()[1] : 0,
+                len > 2 ? m.data()[2] : 0,
+                static_cast<UInt32>(offset));
         }
 
         // Deliver host-automation events via AudioUnitScheduleParameters,
