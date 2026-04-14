@@ -22,7 +22,7 @@
 
 #include <lv2/core/lv2.h>
 
-#include <dlfcn.h>
+#include <pulp/host/dl_shim.hpp>
 #include <algorithm>
 #include <atomic>
 #include <cstring>

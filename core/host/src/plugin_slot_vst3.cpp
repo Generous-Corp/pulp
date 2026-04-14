@@ -22,7 +22,7 @@
 #include <pluginterfaces/vst/ivstparameterchanges.h>
 #include <pluginterfaces/base/ibstream.h>
 
-#include <dlfcn.h>
+#include <pulp/host/dl_shim.hpp>
 #include <atomic>
 #include <cstring>
 #include <filesystem>

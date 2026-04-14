@@ -10,7 +10,7 @@
 
 #include <clap/clap.h>
 
-#include <dlfcn.h>
+#include <pulp/host/dl_shim.hpp>
 #include <algorithm>
 #include <atomic>
 #include <cstring>

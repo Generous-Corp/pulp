@@ -13,7 +13,7 @@
 
 #include <clap/clap.h>
 
-#include <dlfcn.h>
+#include <pulp/host/dl_shim.hpp>
 #include <cstring>
 #include <filesystem>
 #include <vector>
