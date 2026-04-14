@@ -166,3 +166,20 @@ Four bugs caught in Codex review of the Phase 0/1 series:
   rather than memset'ing with a wrapped size_t.
 - MidiInput nodes' `midi_out` is drained at the END of `process()`, not
   the start. Hosts call `inject_midi()` before each `process()` to refill.
+
+## Phase 3 — `.pulpgraph` save/load
+
+`pulp::host::GraphSerializer::to_json(graph, layout)` /
+`from_json(graph, json)` round-trips topology + per-node plugin state
++ editor layout. Plugin entries store identity (format, unique_id,
+manufacturer, name, version, last_path) plus a base64 state blob from
+`PluginSlot::save_state()`. **Plugin binaries are never embedded.**
+
+Two-pass deserialize: instantiate every node (mapping old → new
+NodeId), then walk connections and replay `connect / connect_midi /
+connect_feedback / connect_automation`. Plugin re-resolution is
+scanner-identity-first; missing plugins surface in
+`LoadResult::missing_plugins` and the corresponding nodes are still
+created with null slots so connection ids stay stable. `GraphNode`
+gained a `plugin_info` member that survives a failed slot load so
+re-saving an unresolved-plugin node preserves its identity.
