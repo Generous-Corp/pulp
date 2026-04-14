@@ -89,6 +89,18 @@ struct PluginDescriptor {
     /// `supports_ump` are independent and can both be set.
     bool supports_ump = false;
 
+    /// iOS-only: true when the plugin renders audio that must continue
+    /// while the host app is backgrounded (live synth in AUM, looper
+    /// that keeps running while the user switches apps, etc.). The
+    /// host-app layer uses this flag to decide whether to set the
+    /// `audio` UIBackgroundModes entitlement and keep the AVAudioSession
+    /// active in background. Workstream 05 slice 5.5.
+    ///
+    /// Default false — most effects don't need background audio and
+    /// setting the entitlement unnecessarily attracts App Store review
+    /// scrutiny.
+    bool ios_requires_background_audio = false;
+
     /// Tail time in samples (0 = no tail, -1 = infinite).
     /// Used by hosts to flush reverb/delay tails after playback stops.
     int tail_samples = 0;
@@ -243,6 +255,19 @@ public:
     /// Called when the host resizes the editor window. Dimensions are in
     /// logical pixels. Runs on the UI thread.
     virtual void on_view_resized(view::View& /*view*/, uint32_t /*w*/, uint32_t /*h*/) {}
+
+    /// Called when the host's transport state transitions between
+    /// playing and stopped, or jumps to a new position. Default no-op.
+    /// Workstream 01 slice 1.11.
+    ///
+    /// Override for plugins that need to react outside of a process()
+    /// block: clear reverb tails on stop, seek a sample playback head
+    /// to `position_seconds` on a locate, arm tempo-synced LFOs on
+    /// play-start. The audio thread continues to read the live state
+    /// from ProcessContext as usual — this hook is the UI-thread
+    /// notification.
+    virtual void on_host_transport_changed(bool /*is_playing*/,
+                                           double /*position_seconds*/) {}
 
     /// Access the parameter state store.
     /// Use state().get_value(id) to read parameter values in process().

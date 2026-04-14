@@ -1,4 +1,6 @@
 #include <pulp/midi/device.hpp>
+#include <pulp/midi/ump.hpp>
+#include <pulp/midi/ump_conversion.hpp>
 #include <pulp/runtime/log.hpp>
 #include <CoreMIDI/CoreMIDI.h>
 
@@ -20,14 +22,25 @@ public:
         status = MIDIInputPortCreateWithProtocol(client_, CFSTR("PulpInput"),
             kMIDIProtocol_1_0, &port_,
             ^(const MIDIEventList* evtlist, void* __nullable) {
-                // Parse MIDI 1.0 events from the event list
+                // Walk UMP messages by their declared word size (MIDI 2.0
+                // spec M2-104-UM). Workstream 01 slice 1.6 — previously
+                // we incremented one word at a time and only handled type
+                // 0x02, so a type-0x04 packet's second word would have
+                // been mis-parsed as a new message header.
+                static constexpr uint8_t kWordsByType[16] = {
+                    1, 1, 1, 2, 2, 4, 4, 1,
+                    2, 2, 2, 3, 3, 4, 4, 4
+                };
                 const MIDIEventPacket* packet = &evtlist->packet[0];
                 for (UInt32 i = 0; i < evtlist->numPackets; ++i) {
-                    for (UInt32 wordIdx = 0; wordIdx < packet->wordCount; ++wordIdx) {
+                    UInt32 wordIdx = 0;
+                    while (wordIdx < packet->wordCount) {
                         uint32_t word = packet->words[wordIdx];
                         uint8_t type = (word >> 28) & 0x0F;
+                        const uint8_t words_in_message = kWordsByType[type];
+                        if (wordIdx + words_in_message > packet->wordCount) break;
 
-                        if (type == 0x02) { // MIDI 1.0 channel voice message
+                        if (type == 0x02) {
                             MidiEvent evt;
                             evt.message = choc::midi::ShortMessage(
                                 static_cast<uint8_t>((word >> 16) & 0xFF),
@@ -35,7 +48,21 @@ public:
                                 static_cast<uint8_t>(word & 0xFF));
                             evt.timestamp = static_cast<double>(packet->timeStamp) / 1e9;
                             if (this->callback_) this->callback_(evt);
+                        } else if (type == 0x04) {
+                            UmpPacket p;
+                            p.word_count = 2;
+                            p.words[0] = word;
+                            p.words[1] = packet->words[wordIdx + 1];
+                            MidiEvent evt{};
+                            if (ump_to_midi1_event(p, evt)) {
+                                evt.timestamp =
+                                    static_cast<double>(packet->timeStamp) / 1e9;
+                                if (this->callback_) this->callback_(evt);
+                            }
                         }
+                        // Other UMP types (utility, system, SysEx7/8,
+                        // stream, flex) intentionally skipped this slice.
+                        wordIdx += words_in_message;
                     }
                     packet = MIDIEventPacketNext(packet);
                 }

@@ -76,7 +76,31 @@ public:
     /// The callback may fire on an OS thread — callers should dispatch to the
     /// main/UI thread if needed. Pass nullptr to unregister.
     using DeviceChangeCallback = std::function<void()>;
-    virtual void set_device_change_callback(DeviceChangeCallback) {}
+
+    /// Default implementation stores the callback in a base-class slot.
+    /// Non-macOS backends that gain real hotplug probing in later slices
+    /// (workstream 02 — WASAPI IMMNotificationClient, ALSA udev monitor,
+    /// Win32 MIDI DeviceWatcher, ALSA seq monitor) call `fire_device_change()`
+    /// when a change is detected. Backends with richer semantics can still
+    /// override this entirely.
+    virtual void set_device_change_callback(DeviceChangeCallback cb) {
+        device_change_callback_ = std::move(cb);
+    }
+
+protected:
+    /// Dispatch a stored device-change callback. Safe to call from any
+    /// thread; the callback itself is responsible for UI-thread marshalling.
+    void fire_device_change() {
+        if (device_change_callback_) device_change_callback_();
+    }
+    /// Accessible to subclasses that want to observe whether a caller
+    /// registered a callback.
+    bool has_device_change_callback() const {
+        return static_cast<bool>(device_change_callback_);
+    }
+
+private:
+    DeviceChangeCallback device_change_callback_;
 };
 
 // Create the platform-appropriate audio system
