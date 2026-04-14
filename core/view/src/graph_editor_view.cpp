@@ -149,8 +149,10 @@ void GraphEditorView::paint_connection_(canvas::Canvas& c, const host::Connectio
     }
     const float dx = std::max(40.0f, std::abs(to.x - from.x) * 0.5f);
     c.set_stroke_color(edge_color(kind));
+    c.begin_path();
     c.move_to(from.x, from.y);
     c.cubic_to(from.x + dx, from.y, to.x - dx, to.y, to.x, to.y);
+    c.stroke_path(nullptr, 0);  // backend strokes the just-built path
 }
 
 void GraphEditorView::paint_ghost_(canvas::Canvas& c) {
@@ -160,10 +162,12 @@ void GraphEditorView::paint_ghost_(canvas::Canvas& c) {
         : input_port_pos_(drag_src_node_, drag_src_port_);
     const float dx = std::max(40.0f, std::abs(drag_cursor_.x - origin.x) * 0.5f);
     c.set_stroke_color({0.7f, 0.7f, 0.7f, 0.6f});
+    c.begin_path();
     c.move_to(origin.x, origin.y);
     c.cubic_to(origin.x + dx, origin.y,
                drag_cursor_.x - dx, drag_cursor_.y,
                drag_cursor_.x, drag_cursor_.y);
+    c.stroke_path(nullptr, 0);
 }
 
 void GraphEditorView::paint(canvas::Canvas& c) {
@@ -178,77 +182,76 @@ void GraphEditorView::paint(canvas::Canvas& c) {
 }
 
 void GraphEditorView::on_mouse_event(const MouseEvent& ev) {
-    const float mx = ev.position.x;
-    const float my = ev.position.y;
+    // Capture modifier state for on_mouse_up; the legacy callbacks only
+    // give us a Point. The base class dispatches through this overload
+    // before the per-phase callbacks.
+    last_modifiers_ = ev.modifiers;
+    View::on_mouse_event(ev);
+}
 
-    if (ev.is_down) {
-        // Begin drag-to-connect: start at an output port, optionally an input.
-        host::NodeId nid = 0;
-        int port = -1;
-        if (hit_output_port_(mx, my, nid, port)) {
-            dragging_ = true;
-            drag_src_node_ = nid;
-            drag_src_port_ = port;
-            drag_src_is_output_ = true;
-            drag_cursor_ = {mx, my};
-        } else if (hit_input_port_(mx, my, nid, port)) {
-            dragging_ = true;
-            drag_src_node_ = nid;
-            drag_src_port_ = port;
-            drag_src_is_output_ = false;
-            drag_cursor_ = {mx, my};
-        } else if (hit_node_(mx, my, nid)) {
-            selected_node_ = nid;
-        } else {
-            selected_node_ = 0;
-        }
-        return;
-    }
-
-    if (dragging_ && !ev.is_down) {
-        // Mouse-up: try to commit a connection.
-        host::NodeId other_id = 0;
-        int other_port = -1;
-        bool committed = false;
-        if (drag_src_is_output_) {
-            if (hit_input_port_(mx, my, other_id, other_port)) {
-                // src(output) → other(input). Modifier keys pick variant.
-                if (ev.isShiftDown()) {
-                    graph_.connect_feedback(drag_src_node_, drag_src_port_,
-                                            other_id, other_port);
-                } else if (ev.isAltDown()) {
-                    graph_.connect_midi(drag_src_node_, other_id);
-                } else {
-                    graph_.connect(drag_src_node_, drag_src_port_,
-                                   other_id, other_port);
-                }
-                committed = true;
-            }
-        } else {
-            if (hit_output_port_(mx, my, other_id, other_port)) {
-                // other(output) → src(input). Reverse direction.
-                if (ev.isShiftDown()) {
-                    graph_.connect_feedback(other_id, other_port,
-                                            drag_src_node_, drag_src_port_);
-                } else if (ev.isAltDown()) {
-                    graph_.connect_midi(other_id, drag_src_node_);
-                } else {
-                    graph_.connect(other_id, other_port,
-                                   drag_src_node_, drag_src_port_);
-                }
-                committed = true;
-            }
-        }
-        (void)committed;
-        dragging_ = false;
-        drag_src_port_ = -1;
-        return;
-    }
-
-    // Drag move
-    if (dragging_) {
+void GraphEditorView::on_mouse_down(Point pos) {
+    const float mx = pos.x, my = pos.y;
+    host::NodeId nid = 0;
+    int port = -1;
+    if (hit_output_port_(mx, my, nid, port)) {
+        dragging_ = true;
+        drag_src_node_ = nid;
+        drag_src_port_ = port;
+        drag_src_is_output_ = true;
         drag_cursor_ = {mx, my};
+    } else if (hit_input_port_(mx, my, nid, port)) {
+        dragging_ = true;
+        drag_src_node_ = nid;
+        drag_src_port_ = port;
+        drag_src_is_output_ = false;
+        drag_cursor_ = {mx, my};
+    } else if (hit_node_(mx, my, nid)) {
+        selected_node_ = nid;
+    } else {
+        selected_node_ = 0;
     }
+}
+
+void GraphEditorView::on_mouse_drag(Point pos) {
+    if (!dragging_) return;
+    drag_cursor_ = {pos.x, pos.y};
+}
+
+void GraphEditorView::on_mouse_up(Point pos) {
+    if (!dragging_) return;
+    const float mx = pos.x, my = pos.y;
+    const bool shift = (last_modifiers_ & kModShift) != 0;
+    const bool alt   = (last_modifiers_ & kModAlt)   != 0;
+
+    host::NodeId other_id = 0;
+    int other_port = -1;
+    if (drag_src_is_output_) {
+        if (hit_input_port_(mx, my, other_id, other_port)) {
+            if (shift) {
+                graph_.connect_feedback(drag_src_node_, drag_src_port_,
+                                        other_id, other_port);
+            } else if (alt) {
+                graph_.connect_midi(drag_src_node_, other_id);
+            } else {
+                graph_.connect(drag_src_node_, drag_src_port_,
+                               other_id, other_port);
+            }
+        }
+    } else {
+        if (hit_output_port_(mx, my, other_id, other_port)) {
+            if (shift) {
+                graph_.connect_feedback(other_id, other_port,
+                                        drag_src_node_, drag_src_port_);
+            } else if (alt) {
+                graph_.connect_midi(other_id, drag_src_node_);
+            } else {
+                graph_.connect(other_id, other_port,
+                               drag_src_node_, drag_src_port_);
+            }
+        }
+    }
+    dragging_ = false;
+    drag_src_port_ = -1;
 }
 
 } // namespace pulp::view::widgets

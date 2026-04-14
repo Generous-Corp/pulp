@@ -37,6 +37,18 @@ public:
 
     void paint(canvas::Canvas& c) override;
 
+    // Use the dispatched legacy mouse callbacks (down/up/drag) so press
+    // and release each get their own entry point — on_mouse_event would
+    // require disambiguating press/release/drag from MouseEvent::is_down,
+    // which platforms set inconsistently during in-flight drags.
+    void on_mouse_down(Point pos) override;
+    void on_mouse_drag(Point pos) override;
+    void on_mouse_up(Point pos) override;
+
+    // Modifier-key state for the next on_mouse_up: the legacy down/up
+    // callbacks pass only Point, so we capture modifiers via on_mouse_event
+    // (which fires before the dispatch to legacy handlers) and consume
+    // them in on_mouse_up to pick the connect variant.
     void on_mouse_event(const MouseEvent& ev) override;
 
     enum class EdgeKind { Audio, Midi, Automation, Feedback };
@@ -75,6 +87,10 @@ private:
 
     // Selection (for delete via backspace; not yet wired into key events).
     host::NodeId selected_node_ = 0;
+
+    // Last-seen modifier state from on_mouse_event, consumed in on_mouse_up
+    // to pick the connect/connect_midi/connect_feedback variant.
+    uint16_t last_modifiers_ = 0;
 };
 
 } // namespace pulp::view::widgets
