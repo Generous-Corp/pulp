@@ -613,7 +613,12 @@ reuse_shared_git_source "VST3 SDK" "$VST3_SHARED_DIR" "$VST3_DIR" "pluginterface
 
 # AudioUnit SDK (macOS only)
 if [ "$PLATFORM" = "macOS" ]; then
-    AU_SDK_REF="AudioUnitSDK-1.4.0"
+    # Pinned to 1.3.0 — the 1.4.0 release started including <expected>
+    # (C++23) in its headers, but the AppleClang/libc++ shipping on
+    # GitHub-hosted macOS-14 runners doesn't yet expose std::expected
+    # even at -std=c++23. 1.3.0 is the last C++17/20-friendly tag;
+    # bump to 1.4.x when AppleClang catches up. See issue #155.
+    AU_SDK_REF="AudioUnitSDK-1.3.0"
     AU_SHARED_DIR="$FETCHCONTENT_CACHE_ROOT/$(fetchcontent_cache_dir_name "AudioUnitSDK" "$AU_SDK_REF")"
     ensure_shared_git_source "AudioUnitSDK" "https://github.com/apple/AudioUnitSDK.git" \
         "$AU_SDK_REF" "$(fetchcontent_cache_dir_name "AudioUnitSDK" "$AU_SDK_REF")"

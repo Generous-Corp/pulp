@@ -375,7 +375,18 @@ if(PULP_MACOS AND EXISTS "${AUSDK_DIR}/include/AudioUnitSDK/AUBase.h")
         "-framework CoreAudio"
     )
     target_compile_options(ausdk PRIVATE -w)  # Suppress third-party warnings
-    target_compile_features(ausdk PUBLIC cxx_std_23)  # AudioUnitSDK 1.4 requires std::expected
+    # AudioUnitSDK 1.4's own .cpp files #include <expected> (C++23). Under
+    # CMake 3.24's policy, the root's CMAKE_CXX_STANDARD=20 is authoritative
+    # on every target and silently downgrades target_compile_features's
+    # minimum (cxx_std_23) to whatever the root says. The target property
+    # CXX_STANDARD bypasses that and forces C++23 for AU-SDK compilation.
+    # PUBLIC compile_features stays so downstream consumers inherit the
+    # minimum requirement if they rebuild with an older root standard.
+    set_target_properties(ausdk PROPERTIES
+        CXX_STANDARD 23
+        CXX_STANDARD_REQUIRED ON
+    )
+    target_compile_features(ausdk PUBLIC cxx_std_23)
 
     message(STATUS "Pulp: AudioUnitSDK found — AU v2 support enabled")
 else()
