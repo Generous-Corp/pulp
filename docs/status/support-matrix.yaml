@@ -606,3 +606,47 @@ subsystems:
   render: experimental
   view: usable
   osc: experimental
+
+# ── Adapter-vs-production split (workstream 08 slice 8.6) ─────────────────────
+#
+# The `formats:` block above records the *adapter* status — does the format
+# adapter build, load, and pass unit/validator tests? That is necessary but
+# not sufficient for production use. Real DAW workflows surface adapter gaps
+# that validators do not.
+#
+# `production_validated:` tracks which format+platform pairs have been
+# successfully exercised in real hosts as part of the host-smoke matrix (see
+# planning/production-readiness/01-format-adapters.md). Each list entry is a
+# host string. An empty list means "adapter works, no host validation yet".
+#
+# Consistency rule (enforced in warn-mode by check-docs-consistency.py):
+# any `formats.<format>.<platform>` marked `usable` SHOULD have at least
+# one host listed here. Migration period uses warn-only; report-mode flips
+# once we publish the first host-smoke matrix.
+production_validated:
+  vst3:
+    macos: []
+    windows: []
+    linux: []
+  au_v2:
+    macos: []
+  clap:
+    macos: []
+    windows: []
+    linux: []
+  auv3:
+    macos: []
+    ios: []
+  lv2:
+    linux: []
+  aax:
+    macos: []
+    windows: []
+  standalone:
+    macos: []
+    windows: []
+    linux: []
+  wam_v2:
+    web: []
+  webclap:
+    web: []
