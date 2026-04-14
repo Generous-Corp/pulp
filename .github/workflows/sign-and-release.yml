@@ -24,7 +24,10 @@ jobs:
 
       - name: Clone AudioUnitSDK
         run: |
-          git clone --depth 1 \
+          # Pinned to 1.3.0 — 1.4.0 introduced <expected> (C++23) in its
+          # headers, and AppleClang/libc++ on GitHub-hosted macOS runners
+          # doesn't yet expose std::expected even at -std=c++23. See #155.
+          git clone --depth 1 --branch AudioUnitSDK-1.3.0 \
             https://github.com/apple/AudioUnitSDK.git \
             external/AudioUnitSDK
 
