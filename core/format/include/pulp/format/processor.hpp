@@ -22,6 +22,14 @@ struct ViewSize {
     uint32_t min_height = 0;
     uint32_t max_width = 0;   ///< 0 = unbounded
     uint32_t max_height = 0;  ///< 0 = unbounded
+
+    /// When > 0, the host should hold this aspect ratio (width/height)
+    /// during interactive resize. Workstream 07 slice 7.5 pairs this
+    /// with pulp::view::ResizableShell, which owns the clamp + snap
+    /// arithmetic. 0 means "any ratio"; hosts then let the user drag
+    /// freely within [min, max]. Typical values: 16.0/9.0, 4.0/3.0,
+    /// preferred_width/preferred_height.
+    double aspect_ratio = 0.0;
 };
 
 /// Plugin category — determines bus layout expectations and DAW behavior.
