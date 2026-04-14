@@ -15,6 +15,7 @@ target_sources(pulp-format PRIVATE
     src/aax_model.cpp
     src/host_type.cpp
     src/ara.cpp
+    src/descriptor_validation.cpp
     src/view_bridge.cpp
     src/remote_view_session.cpp
 )

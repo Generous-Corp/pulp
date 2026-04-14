@@ -8,6 +8,7 @@
 // the vtables here is the standard fix.
 
 #include <pulp/view/accessibility.hpp>
+#include <pulp/runtime/log.hpp>
 
 #include <sstream>
 
@@ -38,6 +39,32 @@ std::string AccessibilityValueInterface::get_value_string() const {
         out << v;
     }
     return out.str();
+}
+
+// ── Live-region announcements (workstream 04 slice 4.3) ─────────────────
+
+namespace {
+    AnnouncementSink& current_sink() {
+        static AnnouncementSink sink;
+        return sink;
+    }
+}
+
+void set_announcement_sink(AnnouncementSink sink) {
+    current_sink() = std::move(sink);
+}
+
+void announce_accessibility(std::string_view text,
+                            AnnouncementPriority priority) {
+    const auto& sink = current_sink();
+    if (sink) {
+        sink(text, priority);
+        return;
+    }
+    const char* pol =
+        priority == AnnouncementPriority::Assertive ? "assertive" : "polite";
+    pulp::runtime::log_info("a11y announce ({}): {}", pol,
+                            std::string(text));
 }
 
 } // namespace pulp::view
