@@ -61,6 +61,9 @@ private:
     state::StateStore store_;
     std::vector<const float*> input_ptrs_;
     std::vector<float*> output_ptrs_;
+    // Pre-process snapshot of parameter values; used to diff plugin-side
+    // changes back to the host's parameter system (workstream 01 slice 1.3).
+    std::vector<float> param_snapshot_;
 };
 
 } // namespace pulp::format::au
