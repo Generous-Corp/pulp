@@ -199,14 +199,35 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
     int32 num_samples = data.numSamples;
     if (num_samples == 0) return kResultOk;
 
+    // Bus 0 routes to main input/output; bus 1 routes to
+    // Processor::set_sidechain(). Additional input buses beyond index 1
+    // are ignored — the Processor API exposes a single sidechain slot.
+    // Workstream 01 slice 1.2 (mirror of CLAP slice 1.1).
     int in_channels = 0;
     int out_channels = 0;
+    int sc_channels = 0;
 
     if (data.numInputs > 0 && data.inputs[0].numChannels > 0) {
         in_channels = data.inputs[0].numChannels;
         input_ptrs_.resize(in_channels);
         for (int ch = 0; ch < in_channels; ++ch) {
             input_ptrs_[ch] = data.inputs[0].channelBuffers32[ch];
+        }
+    }
+    // A VST3 bus can report numChannels > 0 while inactive — in that
+    // state channelBuffers32 and its entries can be null. Publishing a
+    // non-null sidechain then would hand processors null pointers they
+    // would happily dereference. Require an active channel-buffer array
+    // with a non-null first pointer before accepting the sidechain; fall
+    // back to nullptr otherwise. Fix per #178 review.
+    if (data.numInputs > 1 &&
+        data.inputs[1].numChannels > 0 &&
+        data.inputs[1].channelBuffers32 &&
+        data.inputs[1].channelBuffers32[0]) {
+        sc_channels = data.inputs[1].numChannels;
+        sidechain_ptrs_.resize(sc_channels);
+        for (int ch = 0; ch < sc_channels; ++ch) {
+            sidechain_ptrs_[ch] = data.inputs[1].channelBuffers32[ch];
         }
     }
 
@@ -217,12 +238,28 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
             output_ptrs_[ch] = data.outputs[0].channelBuffers32[ch];
         }
     }
+    // Secondary output buses are zero-filled so hosts do not read
+    // uninitialised memory on multi-out instruments. Full multi-out
+    // routing to the Processor is a separate audit-5.2 slice.
+    for (int32 b = 1; b < data.numOutputs; ++b) {
+        auto& bus = data.outputs[b];
+        for (int32 ch = 0; ch < bus.numChannels; ++ch) {
+            if (bus.channelBuffers32 && bus.channelBuffers32[ch]) {
+                std::memset(bus.channelBuffers32[ch], 0,
+                            sizeof(float) * num_samples);
+            }
+        }
+    }
 
     audio::BufferView<const float> input_view(
         const_cast<const float* const*>(input_ptrs_.data()),
         in_channels, num_samples);
     audio::BufferView<float> output_view(
         output_ptrs_.data(), out_channels, num_samples);
+    audio::BufferView<const float> sidechain_view(
+        const_cast<const float* const*>(sidechain_ptrs_.data()),
+        sc_channels, num_samples);
+    processor_->set_sidechain(sc_channels > 0 ? &sidechain_view : nullptr);
 
     // Build MIDI buffers from VST3 events
     midi::MidiBuffer midi_in, midi_out;
