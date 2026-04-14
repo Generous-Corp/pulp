@@ -1,5 +1,6 @@
 #include <pulp/view/modulation_matrix.hpp>
 
+#include <algorithm>
 #include <cstring>
 
 namespace pulp::view {
@@ -96,6 +97,7 @@ std::vector<uint8_t> ModulationMatrix::serialize() const {
 }
 
 bool ModulationMatrix::deserialize(const uint8_t* data, std::size_t size) {
+    if (!data) return false;
     if (size < kHeaderSize) return false;
     if (read_u32(data) != kMagic) return false;
     uint32_t count = read_u32(data + 4);
