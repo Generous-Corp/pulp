@@ -11,6 +11,18 @@
 
 namespace pulp::format::lv2_adapter {
 
+// ── URID feature resolution (workstream 01 slice 1.5) ────────────────────
+
+LV2_URID_Map* find_urid_map(const LV2_Feature* const* features) {
+    if (!features) return nullptr;
+    for (const LV2_Feature* const* f = features; *f != nullptr; ++f) {
+        if ((*f)->URI && std::strcmp((*f)->URI, LV2_URID__map) == 0) {
+            return static_cast<LV2_URID_Map*>((*f)->data);
+        }
+    }
+    return nullptr;
+}
+
 // ── TTL Generation ───────────────────────────────────────────────────────
 
 std::string generate_plugin_ttl(const PluginDescriptor& desc,
