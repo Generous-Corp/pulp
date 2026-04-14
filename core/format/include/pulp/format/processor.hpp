@@ -244,6 +244,19 @@ public:
     /// logical pixels. Runs on the UI thread.
     virtual void on_view_resized(view::View& /*view*/, uint32_t /*w*/, uint32_t /*h*/) {}
 
+    /// Called when the host's transport state transitions between
+    /// playing and stopped, or jumps to a new position. Default no-op.
+    /// Workstream 01 slice 1.11.
+    ///
+    /// Override for plugins that need to react outside of a process()
+    /// block: clear reverb tails on stop, seek a sample playback head
+    /// to `position_seconds` on a locate, arm tempo-synced LFOs on
+    /// play-start. The audio thread continues to read the live state
+    /// from ProcessContext as usual — this hook is the UI-thread
+    /// notification.
+    virtual void on_host_transport_changed(bool /*is_playing*/,
+                                           double /*position_seconds*/) {}
+
     /// Access the parameter state store.
     /// Use state().get_value(id) to read parameter values in process().
     state::StateStore& state() { return *state_store_; }
