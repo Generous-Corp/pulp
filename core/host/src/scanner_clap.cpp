@@ -107,12 +107,26 @@ std::vector<PluginInfo> scan_clap_bundle_descriptors(const std::string& path) {
         info.is_effect = true;
         if (desc->features) {
             for (const char* const* f = desc->features; *f; ++f) {
+                info.features.emplace_back(*f);
                 if (std::strcmp(*f, CLAP_PLUGIN_FEATURE_INSTRUMENT) == 0) {
                     info.is_instrument = true;
                     info.is_effect = false;
+                    info.category = "Instrument";
+                } else if (std::strcmp(*f, CLAP_PLUGIN_FEATURE_AUDIO_EFFECT) == 0) {
+                    if (info.category.empty()) info.category = "Fx";
+                } else if (std::strcmp(*f, CLAP_PLUGIN_FEATURE_NOTE_EFFECT) == 0) {
+                    info.category = "MidiEffect";
+                    info.is_effect = false;
+                    info.supports_midi_in = true;
+                    info.supports_midi_out = true;
+                } else if (std::strcmp(*f, CLAP_PLUGIN_FEATURE_ANALYZER) == 0) {
+                    if (info.category.empty()) info.category = "Analyzer";
                 }
             }
         }
+        // CLAP plugins that declare the note-ports extension produce MIDI.
+        // Without extension probing we infer conservatively from features.
+        info.description = desc->description ? desc->description : "";
         results.push_back(std::move(info));
     }
 
