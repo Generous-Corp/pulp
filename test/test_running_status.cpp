@@ -108,3 +108,30 @@ TEST_CASE("reset clears running status", "[midi][running-status]") {
     p.feed(b.data(), b.size());
     REQUIRE(shorts.size() == 1);
 }
+
+TEST_CASE("one-byte system common doesn't leak into running state",
+          "[midi][running-status]") {
+    // #202 P1 regression: F6 Tune Request is one byte; an immediately
+    // following stray data byte must be dropped, not emitted as a
+    // phantom second F6.
+    auto v = parse({0xF6, 0x42});
+    REQUIRE(v.size() == 1);
+    REQUIRE(v[0].status == 0xF6);
+}
+
+TEST_CASE("reset() clears pending system-common state",
+          "[midi][running-status]") {
+    // #202 P2 regression: if reset fires while F1/F2/F3 is partially
+    // accumulated, the first data byte after reset must be dropped.
+    RunningStatusParser p;
+    std::vector<uint8_t> shorts;
+    p.on_short_message([&](const MidiEvent& e) {
+        shorts.push_back(e.message.data()[0]);
+    });
+    std::vector<uint8_t> a = {0xF2, 0x10};   // song-position pointer lsb only
+    p.feed(a.data(), a.size());
+    p.reset();
+    std::vector<uint8_t> b = {0x20};         // stray byte — must drop
+    p.feed(b.data(), b.size());
+    REQUIRE(shorts.empty());
+}

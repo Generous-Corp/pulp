@@ -31,6 +31,7 @@ void RunningStatusParser::emit_short(uint8_t status, uint8_t d1, uint8_t d2) {
 
 void RunningStatusParser::reset() {
     running_status_ = 0;
+    current_system_common_ = 0;   // #202 P2: reset must drop this too
     data_count_ = 0;
     data_expected_ = 0;
     in_sysex_ = false;
@@ -98,10 +99,19 @@ void RunningStatusParser::feed(const uint8_t* data, std::size_t size) {
                 running_status_ = 0;
                 data_expected_ = expected;
                 data_count_ = 0;
-                if (expected == 0) emit_short(b, 0, 0);
-                // For F1/F2/F3 fall through to collect data bytes, but
-                // without a running status to rebind.
-                current_system_common_ = b;
+                if (expected == 0) {
+                    // One-byte system common (e.g. F6 Tune Request) — emit
+                    // immediately and do NOT retain it as current_system_
+                    // common. Otherwise a stray trailing data byte would
+                    // pass the guard below and trigger a phantom extra
+                    // emission under the stale status. Fix per #202 P1.
+                    emit_short(b, 0, 0);
+                    current_system_common_ = 0;
+                } else {
+                    // F1/F2/F3: bind as one-shot system-common so the
+                    // next expected data bytes complete the message.
+                    current_system_common_ = b;
+                }
             }
         } else {
             // Data byte
