@@ -85,17 +85,20 @@ struct AraRegionSequence {
     int colour_argb = 0;          ///< Track colour, AARRGGBB; 0 if unset
 };
 
-/// A playback region maps a slice of an audio modification onto the host's
-/// timeline. start/duration are in seconds along the host's playhead;
-/// modification_offset is in samples within the underlying modification.
+/// A playback region maps a slice of an audio modification onto the
+/// host's timeline. All four time fields are in seconds, matching ARA's
+/// ARAPlaybackRegionProperties contract. Earlier drafts modelled the
+/// modification-time pair as int64 samples, which would have forced
+/// sample-rate-dependent conversion in every adapter and dropped
+/// fractional-time precision (#185 review).
 struct AraPlaybackRegion {
     PlaybackRegionId id = 0;
     AudioModificationId modification_id = 0;
     RegionSequenceId region_sequence_id = 0;
-    double start_in_playback_time = 0.0;
-    double duration_in_playback_time = 0.0;
-    int64_t start_in_modification_time = 0;   // samples
-    int64_t duration_in_modification_time = 0; // samples
+    double start_in_playback_time = 0.0;        // seconds
+    double duration_in_playback_time = 0.0;     // seconds
+    double start_in_modification_time = 0.0;    // seconds
+    double duration_in_modification_time = 0.0; // seconds
     std::string name;
     int colour_argb = 0;
 };

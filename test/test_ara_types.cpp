@@ -45,11 +45,12 @@ TEST_CASE("AraPlaybackRegion is a value type with zero-init defaults",
     r.region_sequence_id = 300;
     r.start_in_playback_time = 1.5;
     r.duration_in_playback_time = 2.5;
-    r.start_in_modification_time = 48000;
-    r.duration_in_modification_time = 96000;
+    r.start_in_modification_time = 1.0;      // seconds
+    r.duration_in_modification_time = 2.0;   // seconds
 
     AraPlaybackRegion copy = r;
     REQUIRE(copy.id == 100);
     REQUIRE(copy.duration_in_playback_time == 2.5);
-    REQUIRE(copy.duration_in_modification_time == 96000);
+    REQUIRE(copy.start_in_modification_time == 1.0);
+    REQUIRE(copy.duration_in_modification_time == 2.0);
 }
