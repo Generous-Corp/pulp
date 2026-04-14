@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 
+namespace pulp::runtime { class MessageChannel; }
 namespace pulp::view { class ScriptedUiSession; }
 
 namespace pulp::format {
@@ -117,6 +118,20 @@ public:
     /// true if the view was found and removed.
     bool detach_secondary_view(view::View* view);
 
+    /// Attach a remote view session driving a `MessageChannel` (usually
+    /// a `WebSocketChannel`). The session speaks the Remote View
+    /// Protocol — see `docs/reference/remote-view-protocol.md`. The
+    /// bridge takes ownership of the session and its channel; callers
+    /// use the returned non-owning pointer to drive the protocol.
+    /// Returns nullptr if the handshake fails; the bridge's
+    /// `last_error()` records the reason.
+    class RemoteViewSession* attach_remote_channel(
+        std::unique_ptr<runtime::MessageChannel> channel,
+        std::string label = {});
+
+    /// Detach and destroy a remote view session. Idempotent.
+    bool detach_remote(class RemoteViewSession* session);
+
     /// Total number of attached views (primary + secondary). Zero when
     /// not open and no secondaries are attached.
     size_t view_count() const;
@@ -146,6 +161,8 @@ private:
         ViewRole role;
     };
     std::vector<Secondary> secondaries_;
+
+    std::vector<std::unique_ptr<class RemoteViewSession>> remotes_;
 
     ViewSize size_hints_;
     uint32_t width_ = 0;
