@@ -129,6 +129,7 @@ target_sources(pulp-view PRIVATE
     src/accessibility.cpp
     src/table_model.cpp
     src/modulation_matrix.cpp
+    src/modulation_matrix_widget.cpp
     src/accessibility_tree.cpp
     src/image_cache.cpp
     src/resizable_shell.cpp
