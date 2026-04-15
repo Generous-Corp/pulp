@@ -9,6 +9,7 @@
 
 #ifdef _WIN32
 
+#include <pulp/view/accessibility_provider.hpp>
 #include <pulp/view/view.hpp>
 #include <pulp/runtime/log.hpp>
 
@@ -34,6 +35,26 @@ void init_win_accessibility(View& /*root*/) {
     // TODO: implement IRawElementProviderSimple + IAccessible
     // TODO: handle WM_GETOBJECT in HWND message proc
     // TODO: fire UIA events on value/focus changes
+}
+
+// Cross-platform entry — see accessibility_provider.hpp. Today these
+// route to the existing UIA stub; a future commit will spin up a
+// fragment-root provider, retain it per window, and tear it down in
+// shutdown_accessibility.
+void* init_accessibility(View& root, void* /*hwnd*/) {
+    init_win_accessibility(root);
+    // Returning a non-null sentinel lets callers pair init/shutdown
+    // without pretending we have a real COM provider yet.
+    return reinterpret_cast<void*>(static_cast<uintptr_t>(1));
+}
+
+void shutdown_accessibility(void* /*handle*/) {
+    // TODO: release the UIA fragment-root and its child providers.
+    runtime::log_info("Windows UI Automation: shutdown (stub)");
+}
+
+void accessibility_tree_changed(void* /*handle*/) {
+    // TODO: UiaRaiseStructureChangedEvent(root_provider, StructureChangeType_ChildrenReordered, ...)
 }
 
 } // namespace pulp::view

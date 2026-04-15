@@ -13,6 +13,7 @@
 
 #if defined(__linux__) && !defined(__ANDROID__)
 
+#include <pulp/view/accessibility_provider.hpp>
 #include <pulp/view/view.hpp>
 #include <pulp/runtime/log.hpp>
 
@@ -40,6 +41,23 @@ void init_atspi_accessibility(View& /*root*/) {
     // TODO: emit state-change signals on focus/value changes
     // TODO: support AtkText for TextEditor widgets
     // TODO: support AtkValue for Knob/Fader/Slider widgets
+}
+
+// Cross-platform entry — see accessibility_provider.hpp. Today these
+// route to the existing AT-SPI stub; a future commit wires atk_bridge
+// + GdkDisplay signalling per window.
+void* init_accessibility(View& root, void* /*gdk_surface*/) {
+    init_atspi_accessibility(root);
+    return reinterpret_cast<void*>(static_cast<uintptr_t>(1));
+}
+
+void shutdown_accessibility(void* /*handle*/) {
+    runtime::log_info("Linux AT-SPI: shutdown (stub)");
+    // TODO: g_object_unref the AtkObject root + unregister D-Bus name.
+}
+
+void accessibility_tree_changed(void* /*handle*/) {
+    // TODO: g_signal_emit_by_name(root, "children-changed::add", ...)
 }
 
 } // namespace pulp::view
