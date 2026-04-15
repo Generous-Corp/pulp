@@ -1,0 +1,238 @@
+---
+name: ios
+description: iOS platform development for Pulp — iPhone/iPad AUv3 app extensions, iOS Simulator builds, UIKit window host, CoreAudio IO audio, touch & Apple Pencil input, XcodeBuildMCP automation. Covers configure, build, deploy to simulator/device, and the gotchas discovered during iOS bringup.
+requires:
+  scripts:
+    - tools/cmake/PulpUtils.cmake
+  tools:
+    - xcodebuild
+  optional_tools:
+    - xcrun simctl
+    - XcodeBuildMCP
+---
+
+# iOS Skill
+
+Build, deploy, and debug Pulp on iOS — both standalone AUv3 host apps and AUv3 app extensions. This skill captures iOS-specific architecture and gotchas uncovered during the iOS Simulator bringup (PR #222, issue #218).
+
+## Architecture Overview
+
+```
+Swift / UIKit (iOS UI)        C++ (Pulp core)
+├── HostApp (Xcode target)    ├── libpulp-format.a
+│   └── AVAudioEngine         │   └── PulpAudioUnit (AUv3)
+├── AUv3 App Extension        │
+│   ├── Info.plist/NSExtension│   ├── core/view/platform/ios/
+│   └── MetalView (optional)  │   │   ├── window_host_ios.mm (UIView)
+└── CoreAudio IO              │   │   ├── plugin_view_host_ios.mm
+                              │   │   └── accessibility_ios.mm
+                              │   └── core/platform (UIKit stubs)
+```
+
+### Key Files
+
+| File | Purpose |
+|------|---------|
+| `core/view/platform/ios/window_host_ios.mm` | UIView root, touch/pencil dispatch → `View::on_mouse_*` |
+| `core/view/platform/ios/plugin_view_host_ios.mm` | AUv3 editor UIView |
+| `core/view/platform/ios/accessibility_ios.mm` | UIAccessibility bridge |
+| `core/format/src/au_view_controller_ios.mm` | AUv3 NSExtensionPrincipalClass |
+| `core/platform/CMakeLists.txt` (`IOS` branch) | UIKit link, omit Cocoa/fork-exec |
+| `tools/cmake/PulpUtils.cmake` (`PULP_IOS` blocks) | AUv3 bundle, Info.plist generation |
+| `templates/ios-auv3/Info.plist.in` | AUv3 extension manifest template |
+
+## Configure & Build
+
+### iOS Simulator (arm64)
+
+```bash
+# Xcode generator is required — the bundled tools/cmake/ios.toolchain.cmake
+# has a recursive enable_language bug with Makefile/Ninja generators.
+
+cmake -S . -B build-ios-sim -G Xcode \
+  -DCMAKE_SYSTEM_NAME=iOS \
+  -DCMAKE_OSX_SYSROOT=iphonesimulator \
+  -DCMAKE_OSX_ARCHITECTURES=arm64 \
+  -DCMAKE_OSX_DEPLOYMENT_TARGET=16.4 \
+  -DPULP_ENABLE_GPU=OFF \
+  -DPULP_BUILD_TESTS=OFF \
+  -DPULP_BUILD_EXAMPLES=OFF
+
+# Build a target
+xcodebuild -project build-ios-sim/Pulp.xcodeproj \
+  -target pulp-format -configuration Debug \
+  -sdk iphonesimulator -arch arm64 \
+  IPHONEOS_DEPLOYMENT_TARGET=16.4 build
+```
+
+### iOS Device (arm64)
+
+```bash
+cmake -S . -B build-ios \
+  -G Xcode \
+  -DCMAKE_SYSTEM_NAME=iOS \
+  -DCMAKE_OSX_SYSROOT=iphoneos \
+  -DCMAKE_OSX_ARCHITECTURES=arm64 \
+  -DCMAKE_OSX_DEPLOYMENT_TARGET=16.4 \
+  -DCMAKE_XCODE_ATTRIBUTE_CODE_SIGN_IDENTITY="Apple Development" \
+  -DCMAKE_XCODE_ATTRIBUTE_DEVELOPMENT_TEAM=<TEAM_ID>
+```
+
+## Deploying to the Simulator
+
+Pulp standardizes on **XcodeBuildMCP** when available (fast, structured output). Falls back to raw `xcodebuild` + `xcrun simctl`.
+
+### With XcodeBuildMCP (preferred)
+
+Check availability: if the `mcp__XcodeBuildMCP__*` tools are exposed in the session, use them.
+
+```text
+session_show_defaults         # inspect current project/scheme/sim
+list_sims                     # enumerate booted/shutdown simulators
+build_sim                     # build for selected simulator
+install_app_sim               # install .app
+launch_app_sim                # launch + stream logs
+screenshot                    # capture for visual regression
+```
+
+Preferred simulator: **iPhone 17 Pro** on iOS-26 runtime for most testing (fastest on Apple Silicon). Use iPad Pro 13-inch for layout validation.
+
+### Without XcodeBuildMCP (fallback)
+
+```bash
+# List simulators
+xcrun simctl list devices available
+
+# Boot + install + launch
+xcrun simctl boot "iPhone 17 Pro"
+xcrun simctl install booted path/to/MyApp.app
+xcrun simctl launch --console booted com.example.MyApp
+```
+
+**Policy**: assume XcodeBuildMCP when the user has it configured; do not hard-require or auto-install it. Leave install to user preference.
+
+## AUv3 App Extension
+
+An AUv3 plugin on iOS ships as an **App Extension** bundled inside a **host app** (App Store requires a host container). Both targets must be in the same Xcode project.
+
+Minimal structure:
+
+```
+examples/ios-auv3-synth/
+├── HostApp/
+│   ├── HostApp.entitlements
+│   ├── Info.plist
+│   ├── ContentView.swift          # simple SwiftUI AUv3 host
+│   └── Assets.xcassets
+├── AUv3Extension/
+│   ├── Info.plist                 # NSExtension / audiocomponents
+│   ├── AUv3Extension.entitlements
+│   └── AudioUnitViewController.mm # wraps PulpAudioUnit
+└── CMakeLists.txt                 # uses pulp_add_ios_auv3()
+```
+
+### Required Info.plist keys (extension)
+
+```xml
+<key>NSExtension</key>
+<dict>
+  <key>NSExtensionAttributes</key>
+  <dict>
+    <key>AudioComponents</key>
+    <array>
+      <dict>
+        <key>description</key><string>MySynth</string>
+        <key>manufacturer</key><string>EXMP</string>
+        <key>name</key><string>Example: MySynth</string>
+        <key>sandboxSafe</key><true/>
+        <key>subtype</key><string>mySy</string>
+        <key>tags</key><array><string>Synth</string></array>
+        <key>type</key><string>aumu</string>
+        <key>version</key><integer>0x00010000</integer>
+      </dict>
+    </array>
+  </dict>
+  <key>NSExtensionPointIdentifier</key>
+  <string>com.apple.AudioUnit-UI</string>
+  <key>NSExtensionPrincipalClass</key>
+  <string>AudioUnitViewController</string>
+</dict>
+```
+
+## Validation
+
+```bash
+# On device (AUv3 must be installed from App Store or sideload)
+auval -v aumu mySy EXMP        # type / subtype / manufacturer
+
+# Simulator sanity (compile + load, no audio render)
+xcodebuild test -project ... -scheme AUv3Tests -sdk iphonesimulator
+```
+
+## Gotchas (hard-won)
+
+### Platform
+
+- **Deployment target ≥ 16.4** — iPhoneSimulator SDK 26.x marks `std::to_chars`
+  (`<format>`/`<charconv>` floating-point) as available only on iOS 16.3+. Anything
+  lower will fail with cryptic errors inside `__format/formatter_floating_point.h`.
+- **No `Cocoa.h`** — mac platform files (`clipboard_mac.mm`, `file_dialog_mac.mm`,
+  `popup_menu_mac.mm`) must be excluded via `APPLE AND NOT IOS`. Link `UIKit`
+  instead of `Cocoa` on iOS.
+- **No `posix_spawn_file_actions_addchdir_np`** — wrap the call in
+  `#if !(TARGET_OS_IPHONE || TARGET_OS_TV || TARGET_OS_WATCH)`. `TargetConditionals.h`
+  only exists on Apple, so include it under `#ifdef __APPLE__`.
+- **No `CoreAudio/AudioToolbox` device APIs** — iOS uses `AVAudioSession` for the
+  device-level work that `AudioHardwarePropertyDefaultOutputDevice` and friends
+  do on macOS. Gate with `PULP_HAS_COREAUDIO_DEVICE`.
+- **No FSEvents** — `choc_FileWatcher.h` pulls `FSEventStreamRef` which does not
+  exist on iOS. `hot_reload.hpp` must be gated on `NOT IOS` (or provided a no-op
+  iOS implementation). This is currently the last blocker for a full `pulp-view`
+  iOS build (as of PR #222).
+
+### Toolchain
+
+- **Use the Xcode generator**, not Unix Makefiles/Ninja with
+  `tools/cmake/ios.toolchain.cmake` — the vendored toolchain has a recursive
+  `enable_language(C)` bug with non-Xcode generators.
+- **`CLI` and `MCP` targets are desktop-only** — gate with `NOT IOS AND NOT ANDROID`
+  (they depend on process spawning and `MACOSX_BUNDLE` install rules).
+- **`pulp::inspect` is desktop-only** — it needs Dawn/Skia GPU. Gate the link
+  in `core/format/CMakeLists.txt`.
+
+### Input
+
+- **Touch events** — UIKit's `touchesBegan/Moved/Ended/Cancelled` route through
+  `window_host_ios.mm`. The handlers call `View::on_mouse_{down,up,drag}(Point)` —
+  pass `me.position`, not the full `MouseEvent` (the View API is `Point`-based).
+- **Apple Pencil** — `UITouch.type == UITouchTypePencil` sets
+  `MouseEvent::pointer_type = PointerType::pen` plus altitude/azimuth.
+- **Multi-touch** — each `UITouch*` gets a stable `pointer_id` via
+  `stableIdForTouch:` so widgets that use `set_pointer_capture()` work correctly.
+
+### Accessibility
+
+- `UIAccessibility` is the iOS equivalent of NSAccessibility. `accessibility_ios.mm`
+  bridges `AccessibilityNode` → `UIAccessibilityElement`. Unlike macOS, iOS
+  accessibility is **opt-in per view**: `isAccessibilityElement = YES`.
+
+### Sandboxing
+
+- AUv3 extensions run in a sandbox with **no filesystem access** beyond the
+  container. Presets must be bundled in the app's resources or fetched via
+  `NSFileCoordinator` from the host app's group container.
+- No `fork`/`exec`, no `NSTask` — all child-process code must be `NOT IOS`.
+
+## Follow-ups / Known Gaps
+
+- Full `pulp-view` iOS build requires gating `hot_reload.hpp`.
+- No AUv3 example project yet (`examples/ios-auv3-synth/`). Tracked in issue #218.
+- Device-target code signing is documented but not scripted.
+- Visual regression for iOS UIs not wired up yet.
+
+## See Also
+
+- `android` skill — parallel structure for Android NDK.
+- `view-bridge` skill — `au_v2_cocoa_view.mm` + `au_view_controller_ios.mm` linkage.
+- `ci` skill — how iOS builds integrate into PR validation (when added).
+- Issue #218 — AUv3 mobile validation workstream.
