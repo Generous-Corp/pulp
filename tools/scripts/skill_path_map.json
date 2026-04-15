@@ -83,6 +83,16 @@
         "tools/cli/commands/scan.cpp"
       ]
     },
+    "ios": {
+      "paths": [
+        "core/view/platform/ios/**",
+        "core/format/src/au_view_controller_ios.mm",
+        "core/format/src/au_v2_cocoa_view.mm",
+        "tools/cmake/ios.toolchain.cmake",
+        "templates/ios-auv3/**",
+        "examples/ios-auv3-*/**"
+      ]
+    },
     "import-design": {
       "paths": [
         "tools/import-design/**",
