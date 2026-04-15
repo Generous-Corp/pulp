@@ -90,3 +90,8 @@ add_subdirectory(stream-demo)
 if(IOS)
     add_subdirectory(ios-auv3-synth)
 endif()
+
+# ARA pitch tracker example (workstream 06 slice A3)
+if(NOT ANDROID AND NOT IOS)
+    add_subdirectory(ara-pitch-tracker)
+endif()
