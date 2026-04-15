@@ -68,4 +68,19 @@ bool ara_sdk_compiled_in();
 /// Callers gate feature use by comparing to a known constant.
 int ara_sdk_generation();
 
+/// Well-known extension id for the CLAP-ARA companion factory.
+/// Matches Celemony's convention for identifying the ARA extension
+/// inside a CLAP plugin's `clap_plugin::get_extension` callback.
+/// Workstream 06 slice 6.5 — the adapter surfaces this to CLAP hosts
+/// that know how to pair a CLAP plugin with an ARA document controller.
+constexpr const char* kClapAraFactoryExtension = "com.celemony.ara/clap-factory-v1";
+
+/// Return an opaque pointer to an `ARA::ARAFactory`-compatible struct
+/// when the processor is ARA-aware and Pulp was built with PULP_HAS_ARA,
+/// otherwise nullptr. Called by format-adapter `get_extension` handlers.
+/// The returned pointer is owned by Pulp and lives as long as the
+/// processor. `void*` at the public boundary so non-ARA TUs do not need
+/// to pull `ARA_API/ARAInterface.h`.
+const void* ara_companion_factory_for(class AraDocumentController* controller);
+
 }  // namespace pulp::format

@@ -5,6 +5,7 @@
 // Built from CLAP specification headers (MIT license)
 
 #include <pulp/format/processor.hpp>
+#include <pulp/format/ara.hpp>
 #include <pulp/state/preset_manager.hpp>
 #include <clap/clap.h>
 
@@ -55,6 +56,12 @@ struct PulpClapPlugin {
 
     // Preset management (optional — set by plugins that provide presets)
     std::unique_ptr<state::PresetManager> preset_manager;
+
+    // ARA document controller (optional — Processor opts in by overriding
+    // create_ara_document_controller(). Workstream 06 slice 6.5).
+    // Lives for the plugin's lifetime once created; surfaced through
+    // get_extension(kClapAraFactoryExtension).
+    std::unique_ptr<AraDocumentController> ara_controller;
 
     // Editor state (created on GUI create, destroyed on GUI destroy).
     // `bridge` owns the view tree and dispatches Processor lifecycle

@@ -45,5 +45,14 @@ int ara_sdk_generation() {
 std::unique_ptr<AraDocumentController>
 Processor::create_ara_document_controller() { return nullptr; }
 
+const void* ara_companion_factory_for(AraDocumentController* controller) {
+    (void)controller;
+    // Full companion-factory construction belongs to VST3 / AU / CLAP
+    // ARA slices (6.3, 6.4). When PULP_HAS_ARA is set but no concrete
+    // factory impl exists yet, return nullptr so hosts treat the plugin
+    // as non-ARA instead of crashing on a bad factory pointer.
+    return nullptr;
+}
+
 }  // namespace pulp::format
 

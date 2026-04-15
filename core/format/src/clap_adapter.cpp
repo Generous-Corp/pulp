@@ -2,6 +2,7 @@
 // Implements the CLAP C API wrapping a Pulp Processor
 
 #include <pulp/format/clap_adapter.hpp>
+#include <pulp/format/ara.hpp>
 #include <pulp/midi/ump_conversion.hpp>
 #include <pulp/runtime/log.hpp>
 #include <clap/ext/preset-load.h>
@@ -292,6 +293,17 @@ const void* clap_get_extension(const clap_plugin_t* plugin, const char* id) {
     if (self->preset_manager) {
         if (std::strcmp(id, CLAP_EXT_PRESET_LOAD) == 0) return &s_preset_load;
         if (std::strcmp(id, CLAP_EXT_PRESET_LOAD_COMPAT) == 0) return &s_preset_load;
+    }
+
+    // ARA companion factory (workstream 06 slice 6.5). Lazily instantiate
+    // the controller the first time an ARA-aware host asks for it, then
+    // hand back the factory pointer. Returns nullptr if the plugin did
+    // not override create_ara_document_controller().
+    if (std::strcmp(id, kClapAraFactoryExtension) == 0) {
+        if (!self->ara_controller) {
+            self->ara_controller = self->processor->create_ara_document_controller();
+        }
+        return ara_companion_factory_for(self->ara_controller.get());
     }
 
     return nullptr;

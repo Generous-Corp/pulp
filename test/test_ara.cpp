@@ -48,3 +48,18 @@ TEST_CASE("ara_sdk_generation reflects SDK headers", "[ara]") {
     REQUIRE(ara_sdk_generation() == 0);
 #endif
 }
+
+TEST_CASE("ara_companion_factory_for returns nullptr without a controller", "[ara]") {
+    // Until slices 6.3/6.4 land a real ARA::ARAFactory, the bridge is a
+    // stub: it accepts any AraDocumentController pointer (including
+    // nullptr) and returns nullptr. Hosts treat nullptr as "plugin is
+    // not ARA-aware" instead of crashing on a garbage factory pointer.
+    REQUIRE(ara_companion_factory_for(nullptr) == nullptr);
+}
+
+TEST_CASE("kClapAraFactoryExtension id matches Celemony convention", "[ara]") {
+    // The extension id is surfaced to CLAP hosts via
+    // clap_plugin::get_extension. The string must stay stable because
+    // hosts match on it exactly.
+    REQUIRE(std::string(kClapAraFactoryExtension) == "com.celemony.ara/clap-factory-v1");
+}
