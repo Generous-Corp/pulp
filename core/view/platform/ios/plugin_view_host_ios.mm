@@ -133,7 +133,7 @@
     for (UITouch *touch in touches) {
         auto me = [self mouseEventFromTouch:touch isDown:NO];
         me.is_cancelled = true;
-        self.rootView->on_mouse_up(me.position);
+        self.rootView->on_mouse_cancel(me.position);
         [self removeTouchId:touch];
     }
 }

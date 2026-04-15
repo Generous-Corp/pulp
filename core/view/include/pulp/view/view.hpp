@@ -127,6 +127,11 @@ public:
     virtual void on_mouse_down(Point pos) { (void)pos; }
     virtual void on_mouse_up(Point pos) { (void)pos; }
     virtual void on_mouse_drag(Point pos) { (void)pos; }
+
+    /// Pointer / touch cancellation (iOS touchesCancelled, etc.).
+    /// Distinct from on_mouse_up so widgets can roll back in-progress
+    /// gestures. Default forwards to on_mouse_up for back-compat.
+    virtual void on_mouse_cancel(Point pos) { on_mouse_up(pos); }
     virtual void on_key_press(int key_code) { (void)key_code; }
 
     // ── Hover events ──────────────────────────────────────────────────────

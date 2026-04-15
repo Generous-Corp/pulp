@@ -319,7 +319,7 @@ public:
     /// Forward-declared so plugin TUs that don't implement ARA don't
     /// need to pull `pulp/format/ara.hpp`.
     virtual std::unique_ptr<class AraDocumentController>
-    create_ara_document_controller() { return nullptr; }
+    create_ara_document_controller();
 
     /// Access the parameter state store.
     /// Use state().get_value(id) to read parameter values in process().

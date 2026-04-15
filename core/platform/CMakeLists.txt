@@ -27,7 +27,13 @@ if(APPLE AND NOT IOS)
         "-framework UniformTypeIdentifiers"
     )
 elseif(IOS)
-    # iOS: no Cocoa, no child_process (sandboxed). Use stubs only.
+    # iOS: UIKit-backed clipboard; posix_spawn works (addchdir_np is
+    # gated inside child_process_posix.cpp via TargetConditionals).
+    # File dialogs and popup menus fall through to the stubs.
+    target_sources(pulp-platform PRIVATE
+        platform/ios/clipboard_ios.mm
+        platform/posix/child_process_posix.cpp
+    )
     target_link_libraries(pulp-platform PRIVATE
         "-framework UIKit"
         "-framework UniformTypeIdentifiers"
