@@ -1,6 +1,7 @@
 #pragma once
 
 #include <pulp/midi/message.hpp>
+#include <cstdint>
 #include <vector>
 #include <algorithm>
 
@@ -68,8 +69,32 @@ public:
     const class UmpBuffer* ump() const { return ump_; }
     class UmpBuffer* ump() { return ump_; }
 
+    // ── SysEx sidecar (workstream 01 — full MIDI vocabulary) ──────────────
+    //
+    // choc::midi::ShortMessage is fixed 3 bytes; system-exclusive payloads
+    // can run to kilobytes. Sysex therefore travels in a parallel vector
+    // whose entries are referenced by sample_offset the same way MidiEvent
+    // entries are. Format adapters that carry sysex (CoreMIDI, VST3 event
+    // list with kData type, CLAP CLAP_EVENT_MIDI_SYSEX) populate this
+    // alongside the short-message stream; plugins that don't care can
+    // ignore it.
+    struct SysexEvent {
+        std::vector<uint8_t> data;   ///< full F0 .. F7 payload
+        int32_t sample_offset = 0;   ///< sample position within the block
+        double  timestamp = 0.0;     ///< absolute time in seconds
+    };
+
+    void add_sysex(std::vector<uint8_t> data, int32_t sample_offset = 0, double ts = 0.0) {
+        sysex_.push_back({std::move(data), sample_offset, ts});
+    }
+    void clear_sysex() { sysex_.clear(); }
+    std::size_t sysex_size() const { return sysex_.size(); }
+    const std::vector<SysexEvent>& sysex() const { return sysex_; }
+    std::vector<SysexEvent>& sysex() { return sysex_; }
+
 private:
     std::vector<MidiEvent> events_;
+    std::vector<SysexEvent> sysex_;
     class UmpBuffer* ump_ = nullptr;
 };
 
