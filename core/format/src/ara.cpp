@@ -1,4 +1,5 @@
 #include <pulp/format/ara.hpp>
+#include <pulp/format/processor.hpp>
 
 #ifdef PULP_HAS_ARA
 #include <ARA_API/ARAInterface.h>
@@ -37,4 +38,12 @@ int ara_sdk_generation() {
 #endif
 }
 
+// Out-of-line default so processor.hpp can forward-declare
+// AraDocumentController without forcing every TU to include ara.hpp.
+// Defining it here ensures the unique_ptr deleter is instantiated
+// in a TU where the class is complete.
+std::unique_ptr<AraDocumentController>
+Processor::create_ara_document_controller() { return nullptr; }
+
 }  // namespace pulp::format
+

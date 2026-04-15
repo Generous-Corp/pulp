@@ -13,6 +13,9 @@
 #ifndef __ANDROID__
 #include <spawn.h>
 #endif
+#if defined(__APPLE__)
+#  include <TargetConditionals.h>
+#endif
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -148,10 +151,16 @@ bool ChildProcess::start(const std::string& command,
     posix_spawn_file_actions_addclose(&actions, impl_->stderr_pipe.read_end());
 
     // Working directory
+    // posix_spawn_file_actions_addchdir_np is available on macOS 10.15+
+    // and glibc 2.29+, but NOT on iOS/tvOS/watchOS simulators.
+#if (defined(__APPLE__) && !(TARGET_OS_IPHONE || TARGET_OS_TV || TARGET_OS_WATCH)) \
+    || (defined(__GLIBC__) && __GLIBC__ >= 2 && __GLIBC_MINOR__ >= 29)
     if (!options.working_directory.empty()) {
-        // posix_spawn_file_actions_addchdir_np is available on macOS 10.15+ and glibc 2.29+
         posix_spawn_file_actions_addchdir_np(&actions, options.working_directory.c_str());
     }
+#else
+    // working_directory is silently ignored on iOS/older glibc
+#endif
 
     rc = posix_spawnp(&impl_->pid,
                           command.c_str(),
