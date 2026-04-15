@@ -5,7 +5,15 @@ description: Show Pulp project status, build state, and configuration
 
 Show the current project status.
 
-Run: `./build/tools/cli/pulp status`
+Always start by printing the canonical version line so "what Pulp am I using?" is answered on every `/status` invocation:
+
+```
+Claude plugin <plugin_version> · Pulp SDK/CLI <sdk_version>
+```
+
+See `.claude/commands/version.md` for the exact parsing recipe. Reuse the same logic — do not reinvent it.
+
+Then run: `./build/tools/cli/pulp status`
 
 If the CLI binary doesn't exist, fall back to showing:
 1. `git status` — current branch and changes
