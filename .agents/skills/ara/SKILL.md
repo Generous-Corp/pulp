@@ -95,6 +95,47 @@ returns 0 without failing.
 3. Format-adapter companion factories translate between Pulp types and
    the SDK's C structs (landing in workstream 06 slices 6.3/6.4/6.5).
 
+## Using ARA with each adapter
+
+A real `ARA::ARAFactory` is surfaced out of `core/format/src/ara_factory.cpp`
+whenever `PULP_HAS_ARA` is defined. Hosts reach it via the adapter-specific
+hook listed below — the integration code is done on the adapter side, so
+plugin authors only subclass `AraDocumentController`.
+
+### CLAP
+Already end-to-end wired: `clap_plugin::get_extension(kClapAraFactoryExtension)`
+returns the live factory. Example: see slice 6.5 in
+`core/format/src/clap_adapter.cpp` (search for `kClapAraFactoryExtension`).
+Validate with `./build/tools/scan-worker/pulp-scan-worker path/to/MyPlug.clap`
+once ARA is initialised.
+
+### VST3 (Cubase, Studio One)
+The adapter slice (6.3) wires `PulpVst3Processor::initialize(FUnknown*)` to
+query `IPluginFactory3::setHostContext` for the attribute key
+`kVst3AraFactoryContextKey`. The plug-in side does nothing beyond subclassing
+`AraDocumentController`; the adapter binding is in
+`core/format/src/vst3_adapter.cpp`.
+
+### AU (Logic Pro)
+The adapter slice (6.4) exposes `kAuAraFactoryPropertyKey` as the KVO property
+`audioUnitARAFactory` on `PulpAudioUnit`. Logic reads it on scan, caches the
+factory, and binds a document controller per loaded plug-in instance.
+
+### Verifying live (not a stub)
+```bash
+# Build with the SDK on:
+cmake -S . -B build -DPULP_ENABLE_ARA=ON -DPULP_ARA_SDK_DIR=$PWD/external/ara-sdk
+cmake --build build --target pulp-test-ara
+
+# Run the live-factory tests (guarded on PULP_HAS_ARA):
+./build/test/pulp-test-ara '[factory]'
+```
+
+The ABI-conformance test asserts that the factory's `highestSupportedApiGeneration`
+is `kARAAPIGeneration_2_3_Final`, that `createDocumentControllerWithDocument`
+returns a non-null `ARADocumentControllerInstance`, and that `getFactory()`
+round-trips back to the same factory pointer.
+
 ## Known gotchas
 
 - **All time fields are seconds (double)**, not samples. Pulp's
@@ -107,6 +148,12 @@ returns 0 without failing.
   Cubase's. Budget time for host-specific workarounds.
 - `host_supports_ara()` currently returns `false` even with the SDK
   compiled in — adapter companion factories (6.3–6.5) flip that.
+- **Factory is valid but controller interface is stubs.** When
+  `PULP_HAS_ARA` is on, `ara_companion_factory_for()` returns a real
+  `ARA::ARAFactory`. Its `createDocumentControllerWithDocument` returns
+  a valid `ARADocumentControllerInstance`, but every call on the
+  controller interface is a no-op until plug-ins override them. Hosts
+  see a working factory; they just cannot edit audio yet.
 
 ## Planning & issue tracking
 
