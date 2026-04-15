@@ -50,6 +50,12 @@ period (see danielraffel/pulp#120).
 # Primary: Shipyard
 shipyard run                              # validate current branch
 shipyard ship                             # PR + validate + merge on green
+shipyard ship --resume                    # pick up an interrupted ship (v0.3.0+)
+shipyard ship --no-resume                 # discard stale state, start fresh
+shipyard ship-state list                  # in-flight ships (title, url, sha)
+shipyard ship-state show <pr>             # full state for one PR
+shipyard ship-state discard <pr>          # archive stale state
+shipyard cleanup --ship-state --apply     # prune closed-PR + aged state
 shipyard run --targets windows --smoke    # fast Windows-only check
 shipyard run --resume-from test           # skip configure+build, run tests only
 shipyard cloud run build <branch>         # dispatch to Namespace
@@ -66,6 +72,19 @@ shipyard config profiles                  # list profiles + active
 python3 tools/local-ci/local_ci.py run
 python3 tools/local-ci/local_ci.py ship
 ```
+
+### Resuming an interrupted ship (v0.3.0+)
+
+If a ship was interrupted (laptop closed, session ended, OS restart),
+run `shipyard ship` again — it auto-resumes from a per-PR state file
+at `<state_dir>/ship/<pr>.json` without re-dispatching. Shipyard
+refuses to resume if the PR head SHA or merge policy changed since
+the state was written; re-run with `--no-resume` to discard and ship
+fresh.
+
+`shipyard ship-state list` is the self-describing inventory (PR,
+title, URL, tip commit subject, dispatched-run IDs). Come back to
+a week-old laptop state and still know what you were shipping.
 
 ### Fast test iteration on SSH targets
 
