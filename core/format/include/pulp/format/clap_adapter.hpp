@@ -32,6 +32,10 @@ struct PulpClapPlugin {
     // Pre-allocated buffers — no heap allocation on audio thread
     float* output_ptrs[kMaxChannels] = {};
     const float* input_ptrs[kMaxChannels] = {};
+    // Second input bus routed to Processor::set_sidechain() (workstream 01
+    // slice 1.1). Up to kMaxChannels. Additional input buses beyond index 1
+    // are currently ignored — the Processor API is single-sidechain today.
+    const float* sidechain_ptrs[kMaxChannels] = {};
 
     // Parameter snapshot for detecting plugin-side changes during process
     std::vector<float> param_snapshot;

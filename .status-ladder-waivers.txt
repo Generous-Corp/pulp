@@ -1,0 +1,107 @@
+# Status ladder waivers — production-readiness workstream 08 (slice 8.4)
+#
+# Paths in this file are exempt from the `usable`-requires-validation-evidence
+# rule enforced by tools/check_status_ladder.py. This list is the migration
+# backlog as of the ladder's introduction; every future `usable` entry must
+# either carry validation language in its `notes:` or be explicitly added
+# here with a reason.
+#
+# Policy: PRs SHOULD NOT add new waivers without justification in the PR body.
+# PRs SHOULD remove entries from this file by adding validation evidence to
+# the corresponding `notes:` field in docs/status/support-matrix.yaml.
+#
+# Format: one YAML path per line (e.g. `platform_maturity.accessibility.macos`).
+# Lines starting with `#` and blank lines are ignored.
+
+ai_shader_design.declarative_schema
+ai_shader_design.design_tokens_interop
+ai_shader_design.model_agnostic_ai
+ai_shader_design.shader_engine
+ai_shader_design.web_animations_api
+ai_shader_design.yoga_layout
+audio_io.coreaudio
+css_parity.animation_properties
+css_parity.animations
+css_parity.aspect_ratio
+css_parity.backgrounds_borders
+css_parity.calc_expressions
+css_parity.canvas_2d
+css_parity.colors
+css_parity.css_shorthands
+css_parity.cursor
+css_parity.dom_api
+css_parity.events
+css_parity.filters
+css_parity.flexbox
+css_parity.grid_layout
+css_parity.media_queries
+css_parity.opacity
+css_parity.outline
+css_parity.overflow
+css_parity.per_side_borders
+css_parity.pointer_events_css
+css_parity.positioning
+css_parity.selectors
+css_parity.text
+css_parity.transforms
+css_parity.unit_resolution
+css_parity.visibility
+css_parity.white_space
+design_import.claude_skill
+design_import.code_generator
+design_import.figma_adapter
+design_import.pencil_adapter
+design_import.stitch_adapter
+design_import.v0_adapter
+design_import.validation
+design_import.w3c_tokens
+documentation.api_reference
+documentation.component_showcase
+documentation.cookbook
+documentation.custom_rendering_guide
+documentation.design_token_guide
+documentation.getting_started
+documentation.migration_guide
+documentation.starter_template
+input.gesture_events
+input.ipados_hover
+input.pointer_capture
+input.pointer_events
+input.stylus
+input.touch_action_css
+js_authoring.web_compat_layer
+midi_io.coremidi
+platform_maturity.context_menu
+platform_maturity.cursor_management
+platform_maturity.file_dialogs
+platform_maturity.ime_composition
+platform_maturity.keyboard_shortcuts
+platform_maturity.tab_focus
+rendering.coregraphics_fallback
+runtime_apis.canvas_2d
+runtime_apis.clipboard
+runtime_apis.console_extended
+runtime_apis.custom_event
+runtime_apis.drag_and_drop
+runtime_apis.encoding
+runtime_apis.fetch
+runtime_apis.image_constructor
+runtime_apis.local_storage
+runtime_apis.performance
+runtime_apis.structured_clone
+runtime_apis.timers
+runtime_apis.webgpu_shaders
+scripted_ui.state_preservation
+scripted_ui.ui_script_target_wiring
+testing.audio_golden_files
+testing.format_validation
+testing.unit_tests
+testing.web_compat_validation
+widgets.combo_box
+widgets.image_view
+widgets.list_box
+widgets.progress_bar
+widgets.scroll_view
+widgets.text_editor
+widgets.tooltip
+widgets.tree_view

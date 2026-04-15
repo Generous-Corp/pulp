@@ -22,6 +22,14 @@ struct ViewSize {
     uint32_t min_height = 0;
     uint32_t max_width = 0;   ///< 0 = unbounded
     uint32_t max_height = 0;  ///< 0 = unbounded
+
+    /// When > 0, the host should hold this aspect ratio (width/height)
+    /// during interactive resize. Workstream 07 slice 7.5 pairs this
+    /// with pulp::view::ResizableShell, which owns the clamp + snap
+    /// arithmetic. 0 means "any ratio"; hosts then let the user drag
+    /// freely within [min, max]. Typical values: 16.0/9.0, 4.0/3.0,
+    /// preferred_width/preferred_height.
+    double aspect_ratio = 0.0;
 };
 
 /// Plugin category — determines bus layout expectations and DAW behavior.
@@ -89,9 +97,28 @@ struct PluginDescriptor {
     /// `supports_ump` are independent and can both be set.
     bool supports_ump = false;
 
+    /// iOS-only: true when the plugin renders audio that must continue
+    /// while the host app is backgrounded (live synth in AUM, looper
+    /// that keeps running while the user switches apps, etc.). The
+    /// host-app layer uses this flag to decide whether to set the
+    /// `audio` UIBackgroundModes entitlement and keep the AVAudioSession
+    /// active in background. Workstream 05 slice 5.5.
+    ///
+    /// Default false — most effects don't need background audio and
+    /// setting the entitlement unnecessarily attracts App Store review
+    /// scrutiny.
+    bool ios_requires_background_audio = false;
+
     /// Tail time in samples (0 = no tail, -1 = infinite).
     /// Used by hosts to flush reverb/delay tails after playback stops.
     int tail_samples = 0;
+
+    /// Optional contact info — appended here so existing positional
+    /// aggregate initializers keep working. Surfaced by VST3
+    /// PFactoryInfo::url/email, CLAP manufacturer_url/manufacturer_email,
+    /// AU kAudioUnitProperty_URL. Leave empty to skip.
+    std::string vendor_url;
+    std::string vendor_email;
 
     /// Channel count of the first (main) input bus.
     int default_input_channels() const {
@@ -180,6 +207,33 @@ public:
     /// Release resources. Called on the host thread with audio stopped.
     virtual void release() {}
 
+    /// Memory-pressure levels a host can surface to a plugin. Mirrors the
+    /// broad shape of iOS didReceiveMemoryWarning + Windows low-memory
+    /// notifications + Android TrimMemory. Workstream 05 slice 5.3.
+    enum class MemoryPressure {
+        /// Hint only — trim obviously disposable caches, keep working set.
+        Advisory,
+        /// Serious — drop every cache the plugin can rebuild on demand
+        /// (image atlases, analysis buffers, undo history beyond the last
+        /// N entries). Audio rendering must continue.
+        Critical,
+    };
+
+    /// Called on the main/UI thread when the host observes memory
+    /// pressure. Default is a no-op — plugins that cache decoded images,
+    /// analysis buffers, or paged samples override this to drop caches.
+    /// Implementations MUST NOT block the audio thread; use the existing
+    /// state/sync-strategy guidance for cache invalidation.
+    ///
+    /// Wiring:
+    ///   iOS       — PulpAudioSessionBridge routes didReceiveMemoryWarning
+    ///               (slice 5.1 hooks this into the running processor).
+    ///   macOS     — no-op today; host apps can still invoke manually to
+    ///               test plugin behaviour.
+    ///   Android   — ComponentCallbacks2.onTrimMemory (future slice).
+    ///   Windows   — CreateMemoryResourceNotification (future slice).
+    virtual void on_memory_pressure(MemoryPressure /*level*/) {}
+
     /// Latency in samples introduced by this processor (default 0).
     /// Override for plugins that buffer or lookahead (e.g., compressors,
     /// linear-phase EQs). Hosts use this for delay compensation.
@@ -243,6 +297,29 @@ public:
     /// Called when the host resizes the editor window. Dimensions are in
     /// logical pixels. Runs on the UI thread.
     virtual void on_view_resized(view::View& /*view*/, uint32_t /*w*/, uint32_t /*h*/) {}
+
+    /// Called when the host's transport state transitions between
+    /// playing and stopped, or jumps to a new position. Default no-op.
+    /// Workstream 01 slice 1.11.
+    virtual void on_host_transport_changed(bool /*is_playing*/,
+                                           double /*position_seconds*/) {}
+    /// Called when the host's transport tempo changes. Default no-op.
+    /// Override for plugins that care about tempo outside of a process()
+    /// call — delay sync recomputation, tempo-synced LFO rate caches,
+    /// UI BPM read-outs. Runs on the main/UI thread; the audio thread
+    /// keeps reading the current tempo from ProcessContext as usual.
+    /// Workstream 01 slice 1.10.
+    virtual void on_host_tempo_changed(double /*new_tempo_bpm*/) {}
+
+    /// Optional ARA 2.x document-controller factory (workstream 06 slice 6.3).
+    /// Plugins that opt in to ARA return a new AraDocumentController from
+    /// this method; the format-adapter companion factory (VST3 / AU /
+    /// CLAP) owns the instance and tears it down with the plugin.
+    /// Default returns nullptr — the plugin is not ARA-aware.
+    /// Forward-declared so plugin TUs that don't implement ARA don't
+    /// need to pull `pulp/format/ara.hpp`.
+    virtual std::unique_ptr<class AraDocumentController>
+    create_ara_document_controller() { return nullptr; }
 
     /// Access the parameter state store.
     /// Use state().get_value(id) to read parameter values in process().

@@ -119,3 +119,36 @@ TEST_CASE("LV2 TTL port indices are sequential", "[format][lv2]") {
     REQUIRE_THAT(ttl, ContainsSubstring("lv2:index 4"));
     REQUIRE_THAT(ttl, ContainsSubstring("lv2:index 5"));
 }
+
+// ── URID feature resolution (workstream 01 slice 1.5) ─────────────────────
+
+static LV2_URID fake_map(LV2_URID_Map_Handle handle, const char* uri) {
+    // Simple table: return stable IDs per URI, starting at 100.
+    auto* table = static_cast<std::vector<std::string>*>(handle);
+    for (size_t i = 0; i < table->size(); ++i) {
+        if ((*table)[i] == uri) return static_cast<LV2_URID>(100 + i);
+    }
+    table->push_back(uri);
+    return static_cast<LV2_URID>(100 + table->size() - 1);
+}
+
+TEST_CASE("find_urid_map locates LV2_URID__map in features", "[format][lv2]") {
+    std::vector<std::string> table;
+    LV2_URID_Map map{&table, &fake_map};
+    LV2_Feature feat_map{LV2_URID__map, &map};
+    LV2_Feature feat_other{"http://example.com/irrelevant", nullptr};
+
+    // Feature array must be NULL-terminated.
+    const LV2_Feature* features[] = {&feat_other, &feat_map, nullptr};
+    REQUIRE(find_urid_map(features) == &map);
+}
+
+TEST_CASE("find_urid_map returns nullptr when feature absent", "[format][lv2]") {
+    LV2_Feature feat_other{"http://example.com/irrelevant", nullptr};
+    const LV2_Feature* features[] = {&feat_other, nullptr};
+    REQUIRE(find_urid_map(features) == nullptr);
+    REQUIRE(find_urid_map(nullptr) == nullptr);
+    // Empty array (only sentinel)
+    const LV2_Feature* empty[] = {nullptr};
+    REQUIRE(find_urid_map(empty) == nullptr);
+}

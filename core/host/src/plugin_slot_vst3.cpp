@@ -22,7 +22,11 @@
 #include <pluginterfaces/vst/ivstparameterchanges.h>
 #include <pluginterfaces/base/ibstream.h>
 
-#include <dlfcn.h>
+// Hosting helpers — workstream 03 slice 3.5.
+#include <public.sdk/source/vst/hosting/parameterchanges.h>
+#include <public.sdk/source/vst/hosting/eventlist.h>
+
+#include <pulp/host/dl_shim.hpp>
 #include <atomic>
 #include <cstring>
 #include <filesystem>
@@ -194,9 +198,9 @@ public:
 
     void process(audio::BufferView<float>& output,
                  const audio::BufferView<const float>& input,
-                 const midi::MidiBuffer& /*midi_in*/,
+                 const midi::MidiBuffer& midi_in,
                  midi::MidiBuffer& /*midi_out*/,
-                 const ParameterEventQueue& /*param_events*/,
+                 const ParameterEventQueue& param_events,
                  int num_samples) override {
         if (!active_ || !processor_ || bypassed_.load(std::memory_order_relaxed)) {
             for (size_t c = 0; c < output.num_channels(); ++c) {
@@ -235,6 +239,61 @@ public:
         ctx.sampleRate = sample_rate_;
         ctx.state      = Vst::ProcessContext::kPlaying;
 
+        // Build VST3 event list from Pulp's MidiBuffer. Workstream 03 3.5 —
+        // previously midi_in was discarded, so instruments loaded in the
+        // host received no MIDI. Maps note_on/note_off; other event types
+        // (CC, pitchbend, aftertouch) will follow when the host queue
+        // itself carries them — MidiBuffer today is choc::ShortMessage only.
+        in_events_.clear();
+        for (auto it = midi_in.begin(); it != midi_in.end(); ++it) {
+            const auto& me = *it;
+            const auto& m = me.message;
+            if (m.length() < 3) continue;
+            uint8_t status = m.data()[0] & 0xF0;
+            uint8_t ch     = m.data()[0] & 0x0F;
+            if (status == 0x90 && m.data()[2] > 0) {
+                Vst::Event e{};
+                e.busIndex      = 0;
+                e.sampleOffset  = me.sample_offset;
+                e.flags         = Vst::Event::kIsLive;
+                e.type          = Vst::Event::kNoteOnEvent;
+                e.noteOn.channel  = ch;
+                e.noteOn.pitch    = static_cast<int16>(m.data()[1]);
+                e.noteOn.velocity = static_cast<float>(m.data()[2]) / 127.0f;
+                e.noteOn.noteId   = -1;
+                in_events_.addEvent(e);
+            } else if (status == 0x80 ||
+                       (status == 0x90 && m.data()[2] == 0)) {
+                Vst::Event e{};
+                e.busIndex      = 0;
+                e.sampleOffset  = me.sample_offset;
+                e.flags         = Vst::Event::kIsLive;
+                e.type          = Vst::Event::kNoteOffEvent;
+                e.noteOff.channel  = ch;
+                e.noteOff.pitch    = static_cast<int16>(m.data()[1]);
+                e.noteOff.velocity = static_cast<float>(m.data()[2]) / 127.0f;
+                e.noteOff.noteId   = -1;
+                in_events_.addEvent(e);
+            }
+        }
+
+        // Build parameter-automation input. Each Pulp ParameterEvent
+        // becomes one queue-point at its sample_offset. Values are already
+        // in plain domain on our side; VST3 expects normalized [0..1], so
+        // we round-trip via controller_->plainParamToNormalized().
+        in_param_changes_.clearQueue();
+        if (controller_ && !param_events.empty()) {
+            for (const auto& pe : param_events) {
+                Steinberg::int32 idx = 0;
+                auto* q = in_param_changes_.addParameterData(pe.param_id, idx);
+                if (!q) continue;
+                Vst::ParamValue norm = controller_->plainParamToNormalized(
+                    pe.param_id, static_cast<Vst::ParamValue>(pe.value));
+                Steinberg::int32 point = 0;
+                q->addPoint(pe.sample_offset, norm, point);
+            }
+        }
+
         Vst::ProcessData data{};
         data.processMode        = Vst::kRealtime;
         data.symbolicSampleSize = Vst::kSample32;
@@ -243,6 +302,9 @@ public:
         data.numOutputs         = nch_out ? 1 : 0;
         data.inputs             = nch_in  ? &in_bus  : nullptr;
         data.outputs            = nch_out ? &out_bus : nullptr;
+        data.inputEvents        = in_events_.getEventCount() > 0 ? &in_events_ : nullptr;
+        data.inputParameterChanges =
+            in_param_changes_.getParameterCount() > 0 ? &in_param_changes_ : nullptr;
         data.processContext     = &ctx;
 
         if (processor_->process(data) != kResultOk) {
@@ -419,6 +481,10 @@ private:
     std::vector<PendingEdit> pending_host_edits_;
     std::vector<float*> in_ptrs_;
     std::vector<float*> out_ptrs_;
+    // Workstream 03 slice 3.5 — pre-allocated event/param buffers so the
+    // process callback never heap-allocates.
+    Vst::EventList in_events_;
+    Vst::ParameterChanges in_param_changes_;
     std::atomic<bool> bypassed_{false};
     double sample_rate_ = 44100.0;
     int max_block_size_ = 0;

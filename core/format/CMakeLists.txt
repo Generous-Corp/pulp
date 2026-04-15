@@ -15,6 +15,8 @@ target_sources(pulp-format PRIVATE
     src/aax_model.cpp
     src/host_type.cpp
     src/ara.cpp
+    src/ios_audio_session.cpp
+    src/descriptor_validation.cpp
     src/view_bridge.cpp
     src/remote_view_session.cpp
 )
@@ -97,4 +99,26 @@ if(APPLE)
         )
         target_compile_definitions(pulp-format PRIVATE PULP_IOS=1)
     endif()
+endif()
+
+# ── ARA 2.x (workstream 06 slice 6.1) ────────────────────────────────────────
+# Celemony's ARA SDK is developer-supplied; not bundled. Point
+# PULP_ARA_SDK_DIR at a local checkout of https://github.com/Celemony/ARA_SDK
+# and set PULP_ENABLE_ARA=ON to enable the integration.
+if(PULP_ENABLE_ARA)
+    if(NOT PULP_ARA_SDK_DIR)
+        message(FATAL_ERROR
+            "PULP_ENABLE_ARA=ON requires PULP_ARA_SDK_DIR to point at a "
+            "Celemony ARA SDK checkout")
+    endif()
+    if(NOT EXISTS "${PULP_ARA_SDK_DIR}/ARA_API/ARAInterface.h")
+        message(FATAL_ERROR
+            "PULP_ARA_SDK_DIR='${PULP_ARA_SDK_DIR}' does not look like an "
+            "ARA SDK — ARA_API/ARAInterface.h not found")
+    endif()
+    target_compile_definitions(pulp-format PUBLIC PULP_HAS_ARA=1)
+    target_include_directories(pulp-format PUBLIC
+        $<BUILD_INTERFACE:${PULP_ARA_SDK_DIR}>
+    )
+    message(STATUS "Pulp: ARA SDK enabled (${PULP_ARA_SDK_DIR})")
 endif()

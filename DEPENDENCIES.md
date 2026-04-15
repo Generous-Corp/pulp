@@ -53,4 +53,5 @@ These SDKs are not part of Pulp's redistributed dependency chain. Pulp may integ
 | SDK | License | Used For | Pulp Boundary |
 |-----|---------|----------|---------------|
 | AAX SDK | Separately licensed by Avid | Optional AAX format integration | Developer obtains independently, keeps it out-of-tree, and points `PULP_AAX_SDK_DIR` at it |
+| ARA SDK | MIT-compatible (Celemony) | Optional ARA 2.x integration (pitch correction, spectral editing, clip-aware workflows) | Developer obtains independently (https://github.com/Celemony/ARA_SDK), keeps it out-of-tree, points `PULP_ARA_SDK_DIR` at it, and sets `PULP_ENABLE_ARA=ON`. Never bundled. |
 | ASIO SDK | Proprietary (Steinberg) | ASIO audio I/O (planned) | Developer obtains independently; never bundled or exported by Pulp |

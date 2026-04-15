@@ -122,4 +122,35 @@ public:
     }
 };
 
+// ── Live-region announcements (workstream 04 slice 4.3) ─────────────────
+
+/// Politeness level for a live-region announcement. Mirrors the WAI-ARIA
+/// `aria-live` values: polite announcements wait for the current reader
+/// utterance to finish; assertive announcements interrupt.
+enum class AnnouncementPriority {
+    Polite,
+    Assertive,
+};
+
+/// Request the current platform screen reader speak `text`. On platforms
+/// without a wired backend (or when no screen reader is active) the call
+/// is logged at info level and otherwise a no-op — it is always safe to
+/// call, including from test harnesses.
+///
+/// Backends (populated via set_announcement_sink at window-attach time):
+///   macOS   — NSAccessibilityAnnouncementRequestedNotification
+///   iOS     — UIAccessibilityPostNotification(AnnouncementNotification)
+///   Android — Kotlin-side TalkBack TYPE_ANNOUNCEMENT (pending)
+///   Windows — UIA UiaRaiseNotificationEvent (pending, workstream 04 4.1)
+///   Linux   — AT-SPI object:announcement (pending, workstream 04 4.2)
+void announce_accessibility(std::string_view text,
+                            AnnouncementPriority priority = AnnouncementPriority::Polite);
+
+/// Install a platform-specific announcement sink. Called by accessibility
+/// bridges at window-attach time. Pass nullptr to detach (the default
+/// logger is restored). Not thread-safe — UI thread only.
+using AnnouncementSink =
+    std::function<void(std::string_view text, AnnouncementPriority)>;
+void set_announcement_sink(AnnouncementSink sink);
+
 }  // namespace pulp::view

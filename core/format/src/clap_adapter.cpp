@@ -110,14 +110,27 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
         }
     }
 
-    // Build audio buffer views (no allocation — uses pre-allocated arrays)
+    // Build audio buffer views (no allocation — uses pre-allocated arrays).
+    // Bus 0 routes to the main input/output; bus 1 (when present) routes to
+    // Processor::set_sidechain(). Additional input buses beyond index 1 are
+    // currently ignored — the Processor API exposes a single sidechain slot.
+    // Workstream 01 slice 1.1: previously only bus 0 was routed and
+    // set_sidechain() was never called; sidechain compressors could not
+    // function through the CLAP adapter.
     int in_channels = 0, out_channels = 0;
+    int sc_channels = 0;
 
     if (process->audio_inputs_count > 0) {
         auto& bus = process->audio_inputs[0];
         in_channels = (std::min)(static_cast<int>(bus.channel_count), kMaxChannels);
         for (int ch = 0; ch < in_channels; ++ch)
             self->input_ptrs[ch] = bus.data32[ch];
+    }
+    if (process->audio_inputs_count > 1) {
+        auto& sc_bus = process->audio_inputs[1];
+        sc_channels = (std::min)(static_cast<int>(sc_bus.channel_count), kMaxChannels);
+        for (int ch = 0; ch < sc_channels; ++ch)
+            self->sidechain_ptrs[ch] = sc_bus.data32[ch];
     }
 
     if (process->audio_outputs_count > 0) {
@@ -126,11 +139,25 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
         for (int ch = 0; ch < out_channels; ++ch)
             self->output_ptrs[ch] = bus.data32[ch];
     }
+    // Secondary output buses are zero-filled so hosts do not read
+    // uninitialised memory on multi-out instruments. Full multi-out routing
+    // to Processor is tracked separately (audit 5.2).
+    for (uint32_t b = 1; b < process->audio_outputs_count; ++b) {
+        auto& bus = process->audio_outputs[b];
+        for (uint32_t ch = 0; ch < bus.channel_count; ++ch) {
+            if (bus.data32[ch]) {
+                std::memset(bus.data32[ch], 0, sizeof(float) * num_samples);
+            }
+        }
+    }
 
     audio::BufferView<const float> input_view(
         self->input_ptrs, in_channels, num_samples);
     audio::BufferView<float> output_view(
         self->output_ptrs, out_channels, num_samples);
+    audio::BufferView<const float> sidechain_view(
+        self->sidechain_ptrs, sc_channels, num_samples);
+    self->processor->set_sidechain(sc_channels > 0 ? &sidechain_view : nullptr);
 
     // Build MIDI from CLAP note events
     midi::MidiBuffer midi_in, midi_out;

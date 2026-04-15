@@ -217,4 +217,45 @@ bool jack_is_available() {
     return false;
 }
 
+// ── JackSystem (workstream 02 slice 2.2) ───────────────────────────────
+
+std::vector<DeviceInfo> JackSystem::enumerate_devices() {
+    // JACK exposes a single logical "server" as the device. Sample rate
+    // and buffer size come from the running server; probe once to read
+    // real values rather than hard-coded guesses.
+    DeviceInfo info;
+    info.id = "jack";
+    info.name = "JACK Audio Server";
+    info.max_input_channels = 64;
+    info.max_output_channels = 64;
+    info.default_sample_rate = 48000.0;
+    info.buffer_sizes = {64, 128, 256, 512, 1024};
+    info.is_default = true;
+    jack_status_t status;
+    if (jack_client_t* probe = jack_client_open(
+            "pulp_enum", JackNoStartServer, &status)) {
+        info.default_sample_rate =
+            static_cast<double>(jack_get_sample_rate(probe));
+        int bs = static_cast<int>(jack_get_buffer_size(probe));
+        if (bs > 0) info.buffer_sizes = {bs};
+        jack_client_close(probe);
+    }
+    return {info};
+}
+
+std::unique_ptr<AudioDevice> JackSystem::create_device(const std::string& device_id) {
+    (void)device_id;
+    return std::make_unique<JackDevice>("pulp");
+}
+
+DeviceInfo JackSystem::default_output_device() {
+    auto devs = enumerate_devices();
+    return devs.empty() ? DeviceInfo{} : devs.front();
+}
+
+DeviceInfo JackSystem::default_input_device() {
+    auto devs = enumerate_devices();
+    return devs.empty() ? DeviceInfo{} : devs.front();
+}
+
 } // namespace pulp::audio::linux_platform

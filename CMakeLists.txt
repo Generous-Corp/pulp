@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.24)
 
 project(Pulp
-    VERSION 0.10.0
+    VERSION 0.10.1
     DESCRIPTION "Cross-platform audio plugin and application framework"
     HOMEPAGE_URL "https://github.com/danielraffel/pulp"
     LANGUAGES CXX C
@@ -56,10 +56,12 @@ option(PULP_ENABLE_GPU "Enable GPU rendering (Dawn/Skia)" ON)
 option(PULP_TEXT_SHAPING "Enable SkParagraph text shaping (HarfBuzz/ICU via Skia). Default: ON when GPU enabled." ON)
 option(PULP_ENABLE_SWIFT "Enable Swift layer (Apple only)" OFF)
 option(PULP_ENABLE_AAX "Enable optional AAX support with a developer-supplied SDK" OFF)
+option(PULP_ENABLE_ARA "Enable optional ARA 2.x support with a developer-supplied Celemony SDK" OFF)
 option(PULP_FETCHCONTENT_UPDATES_DISCONNECTED "Avoid implicit FetchContent updates during configure" ON)
 option(PULP_USE_SHARED_FETCHCONTENT_SOURCES "Prefer machine-local shared source caches for FetchContent dependencies" ON)
 set(PULP_SHARED_FETCHCONTENT_SOURCE_DIR "" CACHE PATH "Machine-local shared source cache root for FetchContent dependencies")
 set(PULP_AAX_SDK_DIR "" CACHE PATH "Path to a developer-supplied AAX SDK kept outside the Pulp source tree")
+set(PULP_ARA_SDK_DIR "" CACHE PATH "Path to a developer-supplied Celemony ARA SDK. Enables ARA 2.x when PULP_ENABLE_ARA=ON.")
 
 # ── Compiler Warnings ──────────────────────────────────────────────────────
 if(MSVC)
@@ -242,6 +244,9 @@ if(EXISTS "${VST3_SDK_DIR}/pluginterfaces")
         "${VST3_SDK_DIR}/public.sdk/source/vst/vstsinglecomponenteffect.cpp"
         "${VST3_SDK_DIR}/public.sdk/source/common/pluginview.cpp"
         "${VST3_SDK_DIR}/public.sdk/source/common/commoniids.cpp"
+        # Hosting helpers used by the VST3 plugin slot (workstream 03 3.5).
+        "${VST3_SDK_DIR}/public.sdk/source/vst/hosting/parameterchanges.cpp"
+        "${VST3_SDK_DIR}/public.sdk/source/vst/hosting/eventlist.cpp"
     )
 
     add_library(vst3-sdk STATIC

@@ -1,5 +1,6 @@
 # Pulp support matrix
 # Vocabulary: stable, usable, experimental, partial, planned, unsupported
+schema_version: 2
 
 platforms:
   macos:
@@ -49,6 +50,47 @@ formats:
     windows: experimental
     linux: unsupported
 
+# Plugin extensions / host-query interfaces that ride on top of a format
+# (separate from the format itself). Status reflects the Pulp side of the
+# integration; SDKs are developer-supplied where required.
+plugin_extensions:
+  ara:
+    status: experimental
+    notes: >
+      Interface stubs in core/format/include/pulp/format/ara.{hpp,cpp}; impl
+      returns false. No format adapter wires the host-query path yet.
+      Tracked under production-readiness workstream 06.
+    limitations:
+      - "AraDocumentController is a stub — playback renderer not implemented."
+      - "VST3, CLAP, AU adapters do not declare ARA extension support."
+      - "Celemony ARA SDK is developer-supplied; not bundled."
+# Known limitations per format. Keyed the same as `formats:`. The renderer
+# in capabilities.md surfaces these as a "Known limitations" link on each
+# row. Production-readiness workstream 08 sub-deliverable 8.5.
+#
+# Adding an entry here is non-blocking — the entry's status in `formats:`
+# is the load-bearing label. `format_limitations:` exists so readers don't
+# confuse "the adapter compiles" with "the adapter is feature-complete."
+format_limitations:
+  vst3:
+    - "Dynamic bus arrangements limited; setBusArrangements only renegotiates the primary stereo bus today (workstream 01)."
+  au_v2:
+    - "Outbound parameter changes are not emitted to the host — automation read on AU v2 effects only flows host → plugin (workstream 01)."
+  clap:
+    - "Only the first input bus and first output bus are routed; declared sidechain or additional buses are ignored (workstream 01)."
+    - "Processor::set_sidechain is never called from the CLAP adapter — sidechain inputs land on the primary bus (workstream 01)."
+  lv2:
+    - "MIDI atom parsing is incomplete; connect_port has no atom/MIDI port branch beyond control range. URID feature is not resolved (workstream 01)."
+  aax:
+    - "Custom editor surface not wired — Pro Tools shows the auto-generated parameter strip rather than a Pulp ViewBridge editor (followups plan, row 7)."
+    - "AudioSuite role is declared but not exercised end-to-end (followups plan, row 13)."
+  auv3:
+    - "iOS jetsam pressure not modeled — heavy V8 / WebView workloads in the AUv3 process risk termination at ~50 MB (workstream 05)."
+  wam_v2:
+    - "Browser origin sandbox only; no Pulp-side capability manifest yet (security plan v4 §4.5)."
+  webclap:
+    - "Same browser-sandbox-only constraint as wam_v2."
+
 scripted_ui:
   ui_script_target_wiring:
     status: usable
@@ -70,6 +112,7 @@ scripted_ui:
     notes: Sibling theme.json overrides reload in ScriptedUiSession. Runtime-validated only in the standalone macOS scripted UI lane.
   state_preservation:
     status: usable
+    ci_test: pulp-test-state
     notes: Knob, fader, toggle, checkbox, toggle-button, and XY pad values are restored across scripted UI reloads. JavaScript heap state is rebuilt.
 
 audio_io:
@@ -85,6 +128,10 @@ audio_io:
   alsa:
     status: experimental
     platform: linux
+  jack:
+    status: planned
+    platform: linux
+    notes: Source exists at core/audio/platform/linux/jack_device.cpp but the factory unconditionally returns AlsaSystem; JACK is never selected at runtime. See production-readiness workstream 02.2.
 
 midi_io:
   coremidi:
@@ -183,6 +230,9 @@ css_parity:
       JS bridge: setPosition, setTop/Right/Bottom/Left, setZIndex.
   canvas_2d:
     status: usable
+    ci_test:
+      - pulp-test-canvas
+      - pulp-test-canvas-widget
     notes: >
       25 draw command types on CanvasWidget: fillRect, strokeRect, fillRoundedRect,
       strokeRoundedRect, fillCircle, strokeCircle, strokeLine, fillText, setFont,
@@ -230,6 +280,7 @@ css_parity:
       focus()/blur(), cloneNode, createDocumentFragment(), <option> sync for <select>.
   events:
     status: usable
+    ci_test: pulp-test-events
     notes: >
       click, dblclick, mousedown/up, mouseenter/leave, wheel, scroll, contextmenu,
       keydown/keyup, input/change, focus/blur, pointer events (L2), gesture events.
@@ -242,6 +293,9 @@ css_parity:
       Per-corner border-radius (border-top-left-radius etc., 4 independent corners).
   animation_properties:
     status: usable
+    ci_test:
+      - pulp-test-animation
+      - pulp-test-widget-animation
     notes: >
       CSS animation-* properties parsed: name, duration, timing-function, delay,
       iteration-count (including infinite), direction, fill-mode. animation shorthand.
@@ -290,18 +344,22 @@ widgets:
       JS bridge: createListBox, setListItems, setListSelected, setListRowHeight.
   combo_box:
     status: usable
+    ci_test: pulp-test-combo-dropdown
     notes: Dropdown with global click-outside dismiss, keyboard navigation, hover tracking.
   scroll_view:
     status: usable
+    ci_test: pulp-test-scroll-view
     notes: ScrollView with smooth scroll animation, bar fade-in/out, content size management.
   text_editor:
     status: usable
+    ci_test: pulp-test-text-editor
     notes: >
       Full text editor: selection (click/double/triple), clipboard (Cmd+C/X/V/A),
       undo/redo (Cmd+Z/Shift+Z), numeric-only, password mode, multi-line,
       placeholder, IME composition with marked text.
   tree_view:
     status: usable
+    ci_test: pulp-test-tree-view
     notes: Hierarchical tree with expand/collapse, indent levels.
   progress_bar:
     status: usable
@@ -309,6 +367,58 @@ widgets:
   tooltip:
     status: usable
     notes: Fade-in/out tooltip attached to any view.
+  # Audio / music-domain widgets.
+  meter:
+    status: usable
+    notes: Meter, MultiMeter, CorrelationMeter — peak/RMS level bars with ballistics. See core/view/include/pulp/view/widgets.hpp.
+  spectrum_view:
+    status: usable
+    notes: Real-time FFT spectrum display with log/linear frequency axis. See core/view/include/pulp/view/widgets.hpp.
+  spectrogram_view:
+    status: usable
+    notes: Scrolling STFT spectrogram. See core/view/include/pulp/view/widgets.hpp.
+  waveform_view:
+    status: usable
+    notes: WaveformView for rendering audio buffers. See core/view/include/pulp/view/widgets.hpp.
+  waveform_editor:
+    status: usable
+    notes: Selection, zoom, region-based editor built on WaveformView. See core/view/include/pulp/view/widgets/waveform_editor.hpp.
+  midi_keyboard:
+    status: usable
+    notes: Display + interaction keyboard; note-on/off events routed through Binding. See core/view/include/pulp/view/widgets/midi_keyboard.hpp.
+  preset_browser:
+    status: usable
+    notes: Searchable, category-grouped preset browser with keyboard navigation. See core/view/include/pulp/view/widgets/preset_browser.hpp.
+  eq_curve_view:
+    status: usable
+    notes: Draggable EQ band handles with live curve render. See core/view/include/pulp/view/widgets/eq_curve_view.hpp.
+  graph_editor_view:
+    status: usable
+    ci_test: pulp-test-graph-serializer
+    notes: Canvas-based node editor on top of pulp::canvas; renders a SignalGraph as a draggable, connectable graph. See core/view/include/pulp/view/widgets/graph_editor_view.hpp.
+  # General-purpose UI widgets surfaced by the audit as missing rows.
+  file_browser:
+    status: usable
+    notes: FileBrowser + FileDropZone. See core/view/include/pulp/view/widgets/file_browser.hpp.
+  color_picker:
+    status: usable
+    notes: HSV + hex color picker with live swatch. See core/view/include/pulp/view/widgets/color_picker.hpp.
+  concertina_panel:
+    status: usable
+    notes: Stacked accordion-style panel with expand/collapse per section. See core/view/include/pulp/view/widgets/concertina_panel.hpp.
+  split_view:
+    status: usable
+    notes: Draggable splitter between two views; horizontal and vertical. See core/view/include/pulp/view/widgets/split_view.hpp.
+  breadcrumb:
+    status: usable
+    notes: Breadcrumb trail navigation. See core/view/include/pulp/view/widgets/breadcrumb.hpp.
+  lasso:
+    status: usable
+    notes: Marquee / drag-to-select overlay. See core/view/include/pulp/view/widgets/lasso.hpp.
+  code_editor:
+    status: usable
+    ci_test: pulp-test-code-editor
+    notes: Syntax-highlighted text editor with gutter and line numbers. See core/view/include/pulp/view/widgets/code_editor.hpp.
 
 js_authoring:
   web_compat_layer:
@@ -375,12 +485,18 @@ platform_maturity:
     macos:
       status: usable
       notes: VoiceOver via NSAccessibilityElement. AccessRole maps to NSAccessibilityRole.
+    ios:
+      status: usable
+      notes: VoiceOver via UIAccessibilityElement with accessibilityIncrement/Decrement for sliders. See core/view/platform/ios/accessibility_ios.mm.
+    android:
+      status: usable
+      notes: TalkBack via JNI bridge exposing role, label, value, table metadata, and click/increment/decrement actions. See core/view/platform/android/accessibility_android.cpp.
     windows:
       status: partial
-      notes: UIA stub — role mapping defined, provider not yet implemented.
+      notes: UIA stub — role mapping defined, IRawElementProviderSimple/WM_GETOBJECT/event firing pending. See production-readiness workstream 04.
     linux:
       status: partial
-      notes: AT-SPI stub — role mapping defined, D-Bus registration not yet implemented.
+      notes: AT-SPI stub — role mapping defined, D-Bus registration pending. See production-readiness workstream 04.
   ime_composition:
     status: usable
     platform: macos
@@ -435,12 +551,16 @@ input:
 runtime_apis:
   canvas_2d:
     status: usable
+    ci_test:
+      - pulp-test-canvas
+      - pulp-test-canvas-widget
     notes: >
       25+ draw commands including gradient fills (linear/radial), arc/ellipse,
       textAlign/textBaseline, clearRect, clipRect, globalAlpha, lineCap/lineJoin,
       globalCompositeOperation (blend modes), fillRoundedRect, strokeCircle.
   clipboard:
     status: usable
+    ci_test: pulp-test-clipboard
     notes: navigator.clipboard.readText/writeText via platform::Clipboard C++ API.
   local_storage:
     status: usable
@@ -607,46 +727,163 @@ subsystems:
   view: usable
   osc: experimental
 
-# ── Adapter-vs-production split (workstream 08 slice 8.6) ─────────────────────
+# ── Known limitations (workstream 08 slice 8.5) ───────────────────────────────
 #
-# The `formats:` block above records the *adapter* status — does the format
-# adapter build, load, and pass unit/validator tests? That is necessary but
-# not sufficient for production use. Real DAW workflows surface adapter gaps
-# that validators do not.
+# Each entry keys a capability path already declared above and carries a list
+# of known limitations that should be visible to plugin authors. Every
+# limitation MUST cite a tracking location — typically a planning doc or
+# a GitHub issue — so readers can follow the work.
 #
-# `production_validated:` tracks which format+platform pairs have been
-# successfully exercised in real hosts as part of the host-smoke matrix (see
-# planning/production-readiness/01-format-adapters.md). Each list entry is a
-# host string. An empty list means "adapter works, no host validation yet".
+# tools/list_limitations.py renders this block as a markdown table for
+# injection into docs/reference/capabilities.md (manual for v1; auto-inject
+# follows in slice 8.3).
 #
-# Consistency rule (enforced in warn-mode by check-docs-consistency.py):
-# any `formats.<format>.<platform>` marked `usable` SHOULD have at least
-# one host listed here. Migration period uses warn-only; report-mode flips
-# once we publish the first host-smoke matrix.
-production_validated:
-  vst3:
-    macos: []
-    windows: []
-    linux: []
-  au_v2:
-    macos: []
-  clap:
-    macos: []
-    windows: []
-    linux: []
-  auv3:
-    macos: []
-    ios: []
-  lv2:
-    linux: []
-  aax:
-    macos: []
-    windows: []
-  standalone:
-    macos: []
-    windows: []
-    linux: []
-  wam_v2:
-    web: []
-  webclap:
-    web: []
+# Consistency rule enforced by check-docs-consistency.py (warn-mode):
+# every key under limitations: must resolve to a real entry in the matrix.
+limitations:
+  formats.clap:
+    - text: "Only bus index 0 is routed to process(); multi-bus + sidechain not wired to set_sidechain()."
+      tracked_in: "planning/production-readiness/01-format-adapters.md#1.1"
+    - text: "MIDI vocabulary limited to note on/off; CC, pitchbend, aftertouch, sysex, MIDI 2.0/UMP not routed."
+      tracked_in: "planning/production-readiness/01-format-adapters.md#1.1"
+  formats.vst3:
+    - text: "Only bus index 0 routed to process(); multi-bus + sidechain not wired."
+      tracked_in: "planning/production-readiness/01-format-adapters.md#1.2"
+    - text: "setBusArrangements forwards without validating channel counts or reading negotiated layout."
+      tracked_in: "planning/production-readiness/01-format-adapters.md#1.2"
+    - text: "MIDI vocabulary limited to note on/off; controller, poly pressure, note expression not routed."
+      tracked_in: "planning/production-readiness/01-format-adapters.md#1.2"
+  formats.au_v2:
+    - text: "Plugin-side parameter changes do not propagate back to the host (no AUParameterListenerNotify)."
+      tracked_in: "planning/production-readiness/01-format-adapters.md#1.3"
+    - text: "MIDI input dead: AUEffectBase has no MIDI routing."
+      tracked_in: "planning/production-readiness/01-format-adapters.md#1.3"
+  formats.auv3:
+    - text: "Single input bus; no sidechain support."
+      tracked_in: "planning/production-readiness/01-format-adapters.md#1.4"
+    - text: "MIDI arrives as raw bytes; no type dispatch to note/CC/pitchbend/aftertouch."
+      tracked_in: "planning/production-readiness/01-format-adapters.md#1.4"
+    - text: "iOS validation is stale — no on-device example or AVAudioSession ↔ C++ bridge."
+      tracked_in: "planning/production-readiness/05-auv3-mobile.md"
+  formats.lv2:
+    - text: "Atom MIDI sequences silently dropped — connect_port has no branch for atom ports."
+      tracked_in: "planning/production-readiness/01-format-adapters.md#1.5"
+    - text: "LV2_URID_Map feature never resolved in instantiate(); real hosts may fail to load."
+      tracked_in: "planning/production-readiness/01-format-adapters.md#1.5"
+  audio_io.wasapi:
+    - text: "Shared mode only; no exclusive mode."
+      tracked_in: "planning/production-readiness/02-audio-midi-io.md#2.1"
+    - text: "Input capture not wired — input_view is always empty."
+      tracked_in: "planning/production-readiness/02-audio-midi-io.md#2.1"
+    - text: "No IMMNotificationClient hotplug; device-change callback is inert."
+      tracked_in: "planning/production-readiness/02-audio-midi-io.md#2.1"
+  audio_io.alsa:
+    - text: "No input capture path."
+      tracked_in: "planning/production-readiness/02-audio-midi-io.md#2.2"
+    - text: "Hardcoded sample-rate list; no real enumeration."
+      tracked_in: "planning/production-readiness/02-audio-midi-io.md#2.2"
+  audio_io.jack:
+    - text: "Dead code — factory always returns AlsaSystem; JACK is never selected at runtime."
+      tracked_in: "planning/production-readiness/02-audio-midi-io.md#2.2"
+  midi_io.coremidi:
+    - text: "UMP type-4 (MIDI 2.0 channel voice) packets are silently dropped in the input handler."
+      tracked_in: "planning/production-readiness/02-audio-midi-io.md#2.6"
+  midi_io.win32_midi:
+    - text: "Legacy mmeapi; no windows.devices.midi2, no hotplug, no SysEx input."
+      tracked_in: "planning/production-readiness/02-audio-midi-io.md#2.4"
+  midi_io.alsa_midi:
+    - text: "Running status not handled; timestamps always 0; no hotplug; no SysEx."
+      tracked_in: "planning/production-readiness/02-audio-midi-io.md#2.5"
+  platform_maturity.accessibility.windows:
+    - text: "UIA provider is a stub — IRawElementProviderSimple/WM_GETOBJECT/event firing pending."
+      tracked_in: "planning/production-readiness/04-accessibility.md#4.1"
+  platform_maturity.accessibility.linux:
+    - text: "AT-SPI registration is a stub — D-Bus bridge not yet connected."
+      tracked_in: "planning/production-readiness/04-accessibility.md#4.2"
+
+# ── Schema-v2 additions (workstream 08 slice 8.1) ─────────────────────────────
+#
+# Widgets: inventory every widget in core/view/include/pulp/view/ so the
+# consistency checker can cross-reference capabilities.md and catch stale
+# widget tables. Status reflects the widget class itself, not the theme/
+# platform surface it renders on.
+widgets:
+  label:            { status: usable, header: widgets.hpp }
+  knob:             { status: usable, header: widgets.hpp }
+  fader:            { status: usable, header: widgets.hpp }
+  toggle:           { status: usable, header: widgets.hpp }
+  checkbox:         { status: usable, header: widgets.hpp }
+  toggle_button:    { status: usable, header: widgets.hpp }
+  icon:             { status: usable, header: widgets.hpp }
+  image_view:       { status: partial, header: widgets.hpp,
+                      notes: "Placeholder rendering; Skia decode lands in workstream 07 slice 7.4." }
+  meter:            { status: usable, header: widgets.hpp }
+  multi_meter:      { status: usable, header: widgets.hpp }
+  correlation_meter: { status: usable, header: widgets.hpp }
+  xy_pad:           { status: usable, header: widgets.hpp }
+  waveform_view:    { status: usable, header: widgets.hpp }
+  spectrum_view:    { status: usable, header: widgets.hpp }
+  spectrogram_view: { status: usable, header: widgets.hpp }
+  panel:            { status: usable, header: widgets.hpp }
+  combo_box:        { status: usable, header: ui_components.hpp }
+  tooltip:          { status: usable, header: ui_components.hpp }
+  progress_bar:     { status: usable, header: ui_components.hpp }
+  list_box:         { status: usable, header: ui_components.hpp }
+  scroll_view:      { status: usable, header: ui_components.hpp }
+  text_editor:      { status: usable, header: text_editor.hpp }
+  tree_view:        { status: usable, header: tree_view.hpp }
+  preset_browser:   { status: usable, header: preset_browser.hpp }
+  midi_keyboard:    { status: usable, header: midi_keyboard.hpp }
+  waveform_editor:  { status: usable, header: waveform_editor.hpp }
+  eq_curve_view:    { status: usable, header: eq_curve_view.hpp }
+  file_browser:     { status: usable, header: file_browser.hpp }
+  file_drop_zone:   { status: usable, header: file_drop_zone.hpp }
+  code_editor:      { status: usable, header: code_editor.hpp }
+  breadcrumb:       { status: usable, header: breadcrumb.hpp }
+  split_view:       { status: usable, header: split_view.hpp }
+  concertina_panel: { status: usable, header: concertina_panel.hpp }
+  toolbar:          { status: usable, header: toolbar.hpp }
+  color_picker:     { status: usable, header: color_picker.hpp }
+  property_list:    { status: usable, header: property_list.hpp }
+  graph_editor_view: { status: usable, header: graph_editor_view.hpp,
+                       notes: "Canvas-based node editor driving SignalGraph." }
+  canvas_widget:    { status: usable, header: canvas_widget.hpp }
+  table:            { status: partial, header: table.hpp,
+                      notes: "Basic rows; sortable columns + virtualization land in workstream 07 slice 7.3." }
+  modulation_matrix:   { status: planned, notes: "Workstream 07 slice 7.1." }
+  ab_compare:          { status: planned, notes: "Workstream 07 slice 7.2." }
+  resizable_shell:     { status: planned, notes: "Workstream 07 slice 7.5 (documented pattern)." }
+
+# Plugin formats beyond audio host integration.
+ara:
+  status: planned
+  notes: >
+    Interface stub exists in core/format/{include,src}/pulp/format/ara.{hpp,cpp};
+    host_supports_ara() returns false. No format adapter integration yet.
+    Production-readiness workstream 06 tracks the ARA 2.x implementation
+    across VST3 + AU + CLAP.
+  tracked_in: "planning/production-readiness/06-ara.md"
+
+# Accessibility feature coverage (beyond platform bridge existence). This is
+# separate from platform_maturity.accessibility.* which records per-platform
+# bridge status. The entries below describe which cross-platform a11y
+# primitives are uniformly exposed.
+accessibility_features:
+  roles_labels_values:
+    status: usable
+    notes: AccessRole enum + access_label + access_value on View; exposed on all four functional bridges (macos/ios/android and matrix skeleton on windows/linux).
+  slider_increment_decrement:
+    status: usable
+    notes: on_accessibility_adjust(float) routed through VoiceOver/TalkBack increment/decrement actions.
+  actions:
+    status: planned
+    notes: Per-widget std::vector<Action> exposure lands in workstream 04 slice 4.3.
+  live_region_announce:
+    status: planned
+    notes: announce(text, politeness) cross-platform API lands in workstream 04 slice 4.3.
+  tree_invalidation_events:
+    status: planned
+    notes: View-tree change notifications (NSAccessibilityPostNotification / UiaRaiseAutomationEvent / object:text-changed) land in workstream 04 slice 4.3.
+  a11y_test_harness:
+    status: planned
+    notes: Headless AX introspection tests per platform land in workstream 04 slice 4.4.
