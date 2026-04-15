@@ -85,3 +85,8 @@ endif()
 
 # Streams feature demo (unified Stream / AsyncStream / HttpStream)
 add_subdirectory(stream-demo)
+
+# iOS AUv3 example (workstream 05 slice 5.1) — gated on CMAKE_SYSTEM_NAME=iOS
+if(IOS)
+    add_subdirectory(ios-auv3-synth)
+endif()
