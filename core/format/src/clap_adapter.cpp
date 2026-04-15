@@ -300,7 +300,11 @@ const void* clap_get_extension(const clap_plugin_t* plugin, const char* id) {
     // hand back the factory pointer. Returns nullptr if the plugin did
     // not override create_ara_document_controller().
     if (std::strcmp(id, kClapAraFactoryExtension) == 0) {
-        if (!self->ara_controller) {
+        // Guard: hosts may query extensions before clap_init populated
+        // self->processor. The factory is process-global so we can still
+        // return it; the per-plug-in controller lazy-creates only once
+        // we have a live Processor instance.
+        if (!self->ara_controller && self->processor) {
             self->ara_controller = self->processor->create_ara_document_controller();
         }
         return ara_companion_factory_for(self->ara_controller.get());
