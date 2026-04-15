@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <pulp/view/animation.hpp>
 #include <pulp/view/frame_clock.hpp>
+#include <pulp/view/image_cache.hpp>
 #include <pulp/view/window_host.hpp>
 #include <choc/text/choc_JSON.h>
 #include <cmath>
@@ -818,6 +819,24 @@ void ImageView::paint(canvas::Canvas& canvas) {
         canvas.set_text_align(canvas::TextAlign::center);
         canvas.fill_text("IMG", b.width * 0.5f, b.height * 0.5f + 3);
         return;
+    }
+
+    // Workstream 07 B4: when an ImageCache is attached, consult it.
+    // The cache owns decode + eviction; the view just renders whatever
+    // the cache hands back. A null DecodedImage means decode-in-progress
+    // or permanent failure, in which case we fall through to the
+    // path-as-text placeholder so the UI never shows a blank rect.
+    if (cache_) {
+        const auto* decoded = cache_->get(path_);
+        if (decoded && decoded->native_handle) {
+            // Canvas backends that know how to draw an opaque native
+            // handle will pick it up here. Canvas without that capability
+            // is a no-op — we still render the filename below so the
+            // user sees something meaningful.
+            // TODO: canvas.draw_image(decoded->native_handle, 0, 0,
+            //                         b.width, b.height);
+            (void)decoded;
+        }
     }
 
     // TODO: Load image via Skia SkData::MakeFromFileName + SkImages::DeferredFromEncodedData

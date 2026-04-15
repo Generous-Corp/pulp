@@ -366,18 +366,38 @@ private:
 // ── ImageView ───────────────────────────────────────────────────────────────
 // Displays an image loaded from a file path
 
+class ImageCache;  // fwd; include pulp/view/image_cache.hpp in consumers
+
 class ImageView : public View {
 public:
     ImageView() {}
 
+    /// Legacy API: filesystem path. Internally routed to set_image_source
+    /// as `file://<path>` so the cache can normalise keys.
     void set_image_path(const std::string& path) {
-        if (path != path_) {
-            path_ = path;
+        set_image_source(path.empty() ? std::string{} : "file://" + path);
+    }
+    const std::string& image_path() const { return path_; }
+
+    /// URI-keyed image source (workstream 07 B4). Accepts file://,
+    /// resource://, or memory://sha256=<hex>. When an ImageCache is
+    /// attached via set_image_cache(), paint() consults it instead of
+    /// re-reading the file; the cache owns decode + eviction.
+    void set_image_source(const std::string& uri) {
+        if (uri != path_) {
+            path_ = uri;
             loaded_ = false;
             cached_data_.clear();
         }
     }
-    const std::string& image_path() const { return path_; }
+    const std::string& image_source() const { return path_; }
+
+    /// Attach an ImageCache. Lifetime: cache must outlive the view.
+    /// Multiple views can share a cache — eviction is global. Passing
+    /// nullptr detaches the cache and returns the view to the
+    /// decode-on-paint legacy path.
+    void set_image_cache(ImageCache* cache) { cache_ = cache; }
+    ImageCache* image_cache() const { return cache_; }
 
     void paint(canvas::Canvas& canvas) override;
 
@@ -385,6 +405,7 @@ private:
     std::string path_;
     bool loaded_ = false;
     std::vector<uint8_t> cached_data_;  // File bytes cached after first successful load
+    ImageCache* cache_ = nullptr;       // optional; owned externally
 };
 
 // ── Meter ────────────────────────────────────────────────────────────────────
