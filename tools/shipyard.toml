@@ -30,18 +30,27 @@
 # bumps this pin.
 
 [shipyard]
-# v0.2.0 is the first major feature release after the migration
-# validation (Part 13 Stages 1-6, completed April 2026). Adds:
-#   - Incremental bundles: delta instead of full 443 MB uploads
-#   - --resume-from for SSH targets: skip to test phase (~2 min vs 15)
-#   - shipyard targets: list/test/add/remove targets from CLI
-#   - shipyard config: show merged config, switch profiles
-#   - Cloud polling timeout (60 min default, configurable)
-#   - EncodedCommand transport for Windows SSH (since v0.1.13)
-#   - Bundle skip when remote has SHA (since v0.1.14)
-#   - ssh-based upload replacing scp/SFTP (since v0.1.16)
-#   - Stale queue recovery on startup (since v0.1.16)
-version = "v0.2.0"
+# v0.3.0 introduces durable ship resume — Phase 1 of the close-the-
+# laptop work (see shipyard/planning → pulp-planning/
+# shipyard-routines-integration-proposal-2026-04-15.md). Adds:
+#   - shipyard ship --resume / --no-resume: an interrupted ship now
+#     persists per-PR state to disk on every material event, so a
+#     fresh session picks up from the same cloud run IDs without
+#     re-dispatching. Survives closed laptops, OS restarts, and
+#     agent-to-agent handoffs (Claude Code → Codex and back). Refuses
+#     to resume on SHA or merge-policy drift.
+#   - shipyard ship-state list | show <pr> | discard <pr>: inspect
+#     and manage in-flight ship state. The list/show output is self-
+#     describing — PR title, GitHub URL, tip commit subject are
+#     recorded alongside run IDs, so a week-old state file tells you
+#     what you were shipping.
+#   - shipyard cleanup --ship-state: opt-in pruning. Archived files
+#     older than 30 days and active files older than 14 days for
+#     closed/merged PRs are removed; open PRs are always preserved.
+# v0.2.0 (Part 13 Stages 1-6) also remains in this release with:
+#   - Incremental bundles, --resume-from SSH, shipyard targets/config,
+#     cloud polling timeout, ssh upload, stale queue recovery.
+version = "v0.3.0"
 
 # Public release source. The bootstrap script downloads from
 # https://github.com/{repo}/releases/download/{version}/{asset}
