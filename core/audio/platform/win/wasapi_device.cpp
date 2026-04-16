@@ -2,6 +2,7 @@
 #include <pulp/runtime/log.hpp>
 
 #include <combaseapi.h>
+#include <atomic>
 #include <cstring>
 #include <algorithm>
 
@@ -299,6 +300,53 @@ std::string WasapiDevice::wide_to_utf8(const std::wstring& wide) {
 
 // ── WasapiSystem ─────────────────────────────────────────────────────────
 
+// IMMNotificationClient — hotplug receiver for WASAPI (issue #243).
+//
+// Windows calls our OnDeviceAdded / OnDeviceRemoved / OnDeviceStateChanged /
+// OnDefaultDeviceChanged on a background thread owned by mmdevapi. We
+// forward them into AudioSystem::fire_device_change so UI code subscribed
+// via on_device_change sees hotplug without polling.
+class WasapiNotificationClient : public IMMNotificationClient {
+public:
+    explicit WasapiNotificationClient(WasapiSystem* owner) : owner_(owner) {}
+
+    // IUnknown — COM refcounting is touched from mmdevapi's background
+    // threads during hotplug, so the counter must be atomic. Plain
+    // `++`/`--` raced with the default-device-change thread. (Codex P1
+    // on the original PR.)
+    ULONG STDMETHODCALLTYPE AddRef() override  {
+        return static_cast<ULONG>(
+            refcount_.fetch_add(1, std::memory_order_acq_rel) + 1);
+    }
+    ULONG STDMETHODCALLTYPE Release() override {
+        const ULONG prev = static_cast<ULONG>(
+            refcount_.fetch_sub(1, std::memory_order_acq_rel));
+        if (prev == 1) delete this;
+        return prev - 1;
+    }
+    HRESULT STDMETHODCALLTYPE QueryInterface(REFIID riid, void** ppv) override {
+        if (!ppv) return E_POINTER;
+        if (riid == __uuidof(IUnknown) || riid == __uuidof(IMMNotificationClient)) {
+            *ppv = static_cast<IMMNotificationClient*>(this);
+            AddRef();
+            return S_OK;
+        }
+        *ppv = nullptr;
+        return E_NOINTERFACE;
+    }
+
+    // IMMNotificationClient — all forward through fire_device_change.
+    HRESULT STDMETHODCALLTYPE OnDeviceAdded(LPCWSTR)             override { if (owner_) owner_->fire_device_change(); return S_OK; }
+    HRESULT STDMETHODCALLTYPE OnDeviceRemoved(LPCWSTR)           override { if (owner_) owner_->fire_device_change(); return S_OK; }
+    HRESULT STDMETHODCALLTYPE OnDeviceStateChanged(LPCWSTR, DWORD) override { if (owner_) owner_->fire_device_change(); return S_OK; }
+    HRESULT STDMETHODCALLTYPE OnDefaultDeviceChanged(EDataFlow, ERole, LPCWSTR) override { if (owner_) owner_->fire_device_change(); return S_OK; }
+    HRESULT STDMETHODCALLTYPE OnPropertyValueChanged(LPCWSTR, const PROPERTYKEY) override { return S_OK; }
+
+private:
+    WasapiSystem* owner_;
+    std::atomic<LONG> refcount_{1};
+};
+
 WasapiSystem::WasapiSystem() {
     HRESULT hr = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
     com_initialized_ = SUCCEEDED(hr) || hr == S_FALSE;  // S_FALSE = already initialized
@@ -310,10 +358,24 @@ WasapiSystem::WasapiSystem() {
     if (FAILED(hr)) {
         runtime::log_error("WASAPI: could not create device enumerator (0x{:08x})", static_cast<unsigned>(hr));
         enumerator_ = nullptr;
+        return;
+    }
+
+    // Register hotplug notifier (issue #243).
+    notifier_ = new WasapiNotificationClient(this);
+    if (FAILED(enumerator_->RegisterEndpointNotificationCallback(notifier_))) {
+        runtime::log_warn("WASAPI: RegisterEndpointNotificationCallback failed; "
+                          "device hotplug will not notify AudioSystem listeners");
+        notifier_->Release();
+        notifier_ = nullptr;
     }
 }
 
 WasapiSystem::~WasapiSystem() {
+    if (enumerator_ && notifier_) {
+        enumerator_->UnregisterEndpointNotificationCallback(notifier_);
+    }
+    if (notifier_) notifier_->Release();
     if (enumerator_) enumerator_->Release();
     if (com_initialized_) CoUninitialize();
 }

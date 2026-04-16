@@ -66,6 +66,8 @@ private:
     std::vector<float*> output_ptrs_;
 };
 
+class WasapiNotificationClient;  // fwd, issue #243 hotplug
+
 class WasapiSystem : public AudioSystem {
 public:
     WasapiSystem();
@@ -80,6 +82,12 @@ public:
 
 private:
     IMMDeviceEnumerator* enumerator_ = nullptr;
+    // Workstream 02 #243: IMMNotificationClient receives OS events when
+    // audio endpoints are added/removed/activated/deactivated. We own
+    // one instance per WasapiSystem and forward OnDeviceAdded etc. to
+    // AudioSystem::fire_device_change so UI code can refresh its device
+    // list without polling.
+    WasapiNotificationClient* notifier_ = nullptr;
     bool com_initialized_ = false;
 };
 
