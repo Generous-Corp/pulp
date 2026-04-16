@@ -120,3 +120,66 @@ TEST_CASE("NSD forwards discovered services via on_service_found",
     nsd.notify_service_lost(s);
     REQUIRE(lost.size() == 1);
 }
+
+// Codex P2 on #310: re-announces with changed metadata must refresh
+// the cached entry and fire on_service_found, not silently drop.
+TEST_CASE("NSD refreshes cached entries when metadata changes on re-announce",
+          "[events][service-discovery][issue-310]") {
+    NetworkServiceDiscovery nsd;
+    nsd.install_backend(std::make_unique<FakeBackend>());
+
+    std::vector<uint16_t> found_ports;
+    nsd.on_service_found = [&](const NetworkServiceDiscovery::Service& s) {
+        found_ports.push_back(s.port);
+    };
+
+    NetworkServiceDiscovery::Service s;
+    s.name = "pulpd"; s.type = "_pulp._tcp";
+    s.address = "10.0.0.1"; s.port = 2222;
+    nsd.notify_service_found(s);
+
+    // Identical re-announce: dedup, no callback.
+    nsd.notify_service_found(s);
+    REQUIRE(found_ports == std::vector<uint16_t>{2222});
+
+    // Port change: refresh + callback.
+    s.port = 3333;
+    nsd.notify_service_found(s);
+    REQUIRE(found_ports == std::vector<uint16_t>{2222, 3333});
+    REQUIRE(nsd.discovered().size() == 1);
+    REQUIRE(nsd.discovered().front().port == 3333);
+
+    // Address change: refresh + callback.
+    s.address = "10.0.0.2";
+    nsd.notify_service_found(s);
+    REQUIRE(found_ports.size() == 3);
+    REQUIRE(nsd.discovered().front().address == "10.0.0.2");
+}
+
+// Codex P2 on #310: swapping backends must clear the cache so a
+// stale discovery from the previous backend doesn't leak into
+// queries against the new one. on_service_lost should fire for
+// each evicted entry so subscribers can react.
+TEST_CASE("NSD clears discoveries and fires on_service_lost when swapping backends",
+          "[events][service-discovery][issue-310]") {
+    NetworkServiceDiscovery nsd;
+    nsd.install_backend(std::make_unique<FakeBackend>());
+
+    std::vector<std::string> lost;
+    nsd.on_service_lost = [&](const NetworkServiceDiscovery::Service& s) {
+        lost.push_back(s.name);
+    };
+
+    NetworkServiceDiscovery::Service a, b;
+    a.name = "alpha"; a.type = "_pulp._tcp"; a.port = 1;
+    b.name = "beta";  b.type = "_pulp._tcp"; b.port = 2;
+    nsd.notify_service_found(a);
+    nsd.notify_service_found(b);
+    REQUIRE(nsd.discovered().size() == 2);
+
+    // Swap backends: both cached entries evicted, each fires lost.
+    nsd.install_backend(std::make_unique<FakeBackend>());
+    REQUIRE(nsd.discovered().empty());
+    REQUIRE(lost.size() == 2);
+    REQUIRE((lost[0] == "alpha" || lost[0] == "beta"));
+}

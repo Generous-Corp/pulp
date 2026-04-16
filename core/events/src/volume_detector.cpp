@@ -81,7 +81,17 @@ std::vector<std::string> MountedVolumeListChangeDetector::get_mounted_volumes() 
 NetworkServiceDiscovery::~NetworkServiceDiscovery() { stop(); }
 
 void NetworkServiceDiscovery::install_backend(std::unique_ptr<Backend> backend) {
+    // Codex P2 on #310: swapping backends must clear the cached
+    // discoveries, otherwise stale services from the previous backend
+    // leak into queries against the new one.
     stop();
+    if (!services_.empty()) {
+        auto lost = std::move(services_);
+        services_.clear();
+        if (on_service_lost) {
+            for (const auto& s : lost) on_service_lost(s);
+        }
+    }
     backend_ = std::move(backend);
 }
 
@@ -114,10 +124,23 @@ void NetworkServiceDiscovery::unregister_service() {
 }
 
 void NetworkServiceDiscovery::notify_service_found(const Service& svc) {
-    // Deduplicate by (name, type) — common case is a backend re-
-    // reporting the same service on a cache refresh.
-    for (const auto& s : services_) {
-        if (s.name == svc.name && s.type == svc.type) return;
+    // Codex P2 on #310: re-announces from the same backend must
+    // refresh the cached entry (hostname/address/port can change
+    // when a service restarts on a new port or moves to a new IP)
+    // instead of silently dropping. Match by (name, type); replace
+    // the entry if anything else differs and fire on_service_found
+    // so subscribers learn about the change.
+    for (auto& existing : services_) {
+        if (existing.name == svc.name && existing.type == svc.type) {
+            const bool changed =
+                existing.hostname != svc.hostname
+                || existing.address  != svc.address
+                || existing.port     != svc.port;
+            if (!changed) return; // true duplicate — dedup silently
+            existing = svc;
+            if (on_service_found) on_service_found(svc);
+            return;
+        }
     }
     services_.push_back(svc);
     if (on_service_found) on_service_found(svc);
