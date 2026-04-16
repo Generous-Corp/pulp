@@ -14,6 +14,13 @@
 
 #include <mutex>
 
+// TargetConditionals provides TARGET_OS_OSX / TARGET_OS_IOS macros
+// so has_backend() can narrow its unconditional-true to macOS only
+// (Apple has no built-in file_dialog impl on iOS yet — #316 P2).
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
+#endif
+
 namespace pulp::platform {
 
 namespace {
@@ -35,12 +42,14 @@ void FileDialog::clear_backend() {
 }
 
 bool FileDialog::has_backend() {
-    // #312 Codex P2: on Apple platforms the native file_dialog_mac.mm /
-    // UIDocumentPicker impl is always available, so "has a working
-    // dialog backend" is unconditionally true. Non-Apple platforms
-    // report the host-registered state. This keeps callers' "probe
-    // before calling" checks meaningful across platforms.
-#if defined(__APPLE__)
+    // #312 + #316 Codex P2s: report "true" only on platforms where a
+    // real native dialog impl is compiled in. macOS ships
+    // file_dialog_mac.mm; iOS does NOT have a built-in file_dialog
+    // impl yet (UIDocumentPicker wiring is a follow-up). Narrow the
+    // unconditional-true to macOS only; iOS and everyone else
+    // reflect the host-registered state so callers get honest
+    // "unsupported" signaling until the iOS impl lands.
+#if defined(__APPLE__) && TARGET_OS_OSX
     return true;
 #else
     std::lock_guard lock(g_backend_mu);
