@@ -16,6 +16,8 @@
 #include <cstring>
 #include <filesystem>
 #include <memory>
+#include <mutex>
+#include <unordered_map>
 #include <vector>
 
 namespace pulp::host {
@@ -146,6 +148,32 @@ public:
         // event-pointer array keyed by sample_offset so the plugin can
         // iterate them in time order.
         in_event_storage_.clear();
+        // Drain host-initiated set_parameter edits as time=0 events. Uses
+        // try_lock so the audio thread never blocks on the host side;
+        // if contended, pending edits ride to the next block (#296).
+        {
+            std::unique_lock<std::mutex> lock(pending_edits_mu_, std::try_to_lock);
+            if (lock.owns_lock() && !pending_edits_.empty()) {
+                for (const auto& [pid, pval] : pending_edits_) {
+                    clap_event_param_value_t ev{};
+                    ev.header.size = sizeof(ev);
+                    ev.header.time = 0;
+                    ev.header.space_id = CLAP_CORE_EVENT_SPACE_ID;
+                    ev.header.type = CLAP_EVENT_PARAM_VALUE;
+                    ev.header.flags = 0;
+                    ev.param_id = (clap_id)pid;
+                    ev.cookie = nullptr;
+                    ev.note_id = -1;
+                    ev.port_index = -1;
+                    ev.channel = -1;
+                    ev.key = -1;
+                    ev.value = pval;
+                    in_event_storage_.emplace_back(
+                        EventAny{.param_value = ev, .kind = EventKind::ParamValue});
+                }
+                pending_edits_.clear();
+            }
+        }
         for (const auto& pe : param_events) {
             clap_event_param_value_t ev{};
             ev.header.size = sizeof(ev);
@@ -236,14 +264,57 @@ public:
     std::vector<HostParamInfo> parameters() const override { return params_; }
 
     float get_parameter(uint32_t id) const override {
+        // Prefer the cached last-set value so a set_parameter call is
+        // observable to the host immediately, even before the next
+        // process() block delivers the edit to the plugin (#296).
+        // Falls through to the plugin's own get_value if no cached
+        // entry exists yet.
+        {
+            std::lock_guard<std::mutex> lock(pending_edits_mu_);
+            auto it = cached_values_.find(id);
+            if (it != cached_values_.end()) return it->second;
+        }
         if (!params_ext_ || !plugin_) return 0.0f;
         double v = 0.0;
         if (params_ext_->get_value(plugin_, id, &v)) return (float)v;
         return 0.0f;
     }
 
-    void set_parameter(uint32_t /*id*/, float /*normalized_value*/) override {
-        // TODO: route via CLAP_EVENT_PARAM_VALUE events to next process() call.
+    // True if `id` corresponds to one of the parameters the plugin
+    // published via the clap_plugin_params extension. Used to fail
+    // visibly on set_parameter with an unknown ID (#296).
+    bool is_known_param(uint32_t id) const {
+        for (const auto& p : params_) {
+            if (p.id == id) return true;
+        }
+        return false;
+    }
+
+    void set_parameter(uint32_t id, float value) override {
+        // Resolving #296: queue a pending host edit so the next process()
+        // block delivers it as a CLAP_EVENT_PARAM_VALUE at time=0.
+        //
+        // Thread model: set_parameter is called from host/UI threads;
+        // process() runs on the audio thread. We use a mutex but the
+        // audio thread uses try_lock — if the host side is writing when
+        // the block starts, this block's edits just wait one more block
+        // (the pending edit isn't lost, it's re-checked next process()).
+        // This trades one block of parameter latency for strict RT-safety
+        // on the audio thread, which is the right default for parameter
+        // automation (user-gesture rate, not sample rate).
+        //
+        // Param IDs that the plugin doesn't expose are rejected: we check
+        // against the cached params_ list so invalid IDs fail visibly
+        // instead of being silently enqueued.
+        if (!is_known_param(id)) {
+            runtime::log_warn(
+                "ClapSlot::set_parameter: unknown param_id={} on '{}'",
+                id, info_.name);
+            return;
+        }
+        std::lock_guard<std::mutex> lock(pending_edits_mu_);
+        pending_edits_[id] = value;  // coalesce: latest wins per id
+        cached_values_[id] = value;  // so get_parameter reads-back cleanly
     }
 
     void set_bypass(bool bypassed) override {
@@ -393,6 +464,13 @@ private:
     };
     std::vector<EventAny> in_event_storage_;
     midi::MidiBuffer* out_midi_sink_ = nullptr;
+
+    // Host-initiated set_parameter queue (#296). Mutex-guarded on the
+    // host side, try_lock on the audio side. unordered_map gives us
+    // latest-wins coalescing per param_id.
+    mutable std::mutex pending_edits_mu_;
+    std::unordered_map<uint32_t, float> pending_edits_;
+    std::unordered_map<uint32_t, float> cached_values_;
 
     bool active_ = false;
     bool processing_ = false;
