@@ -183,3 +183,27 @@ TEST_CASE("NSD clears discoveries and fires on_service_lost when swapping backen
     REQUIRE(lost.size() == 2);
     REQUIRE((lost[0] == "alpha" || lost[0] == "beta"));
 }
+
+// Codex P2 follow-up on #314: if a subscriber's on_service_lost
+// handler re-enters the NSD API during a backend swap, it must see
+// the NEW backend state — not the torn-down old one.
+TEST_CASE("NSD install_backend: on_service_lost re-entry sees the new backend",
+          "[events][service-discovery][issue-314]") {
+    NetworkServiceDiscovery nsd;
+    nsd.install_backend(std::make_unique<FakeBackend>());
+
+    NetworkServiceDiscovery::Service s;
+    s.name = "alpha"; s.type = "_pulp._tcp"; s.port = 1;
+    nsd.notify_service_found(s);
+
+    bool had_backend_during_lost = false;
+    nsd.on_service_lost = [&](const NetworkServiceDiscovery::Service&) {
+        // At this point the swap is supposed to be complete. Probe.
+        had_backend_during_lost = nsd.has_backend();
+    };
+
+    // Swap. During the eviction drain, on_service_lost runs — and
+    // should observe the new backend already installed.
+    nsd.install_backend(std::make_unique<FakeBackend>());
+    REQUIRE(had_backend_during_lost);
+}

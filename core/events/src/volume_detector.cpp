@@ -81,10 +81,18 @@ std::vector<std::string> MountedVolumeListChangeDetector::get_mounted_volumes() 
 NetworkServiceDiscovery::~NetworkServiceDiscovery() { stop(); }
 
 void NetworkServiceDiscovery::install_backend(std::unique_ptr<Backend> backend) {
-    // Codex P2 on #310: swapping backends must clear the cached
-    // discoveries, otherwise stale services from the previous backend
+    // Codex P2 on #310: swapping backends clears the cached
+    // discoveries so stale services from the previous backend don't
     // leak into queries against the new one.
+    //
+    // Codex P2 follow-up on #314: assign backend_ BEFORE emitting
+    // on_service_lost, not after. If a subscriber's on_service_lost
+    // handler re-enters the NSD API (has_backend(), register_service(),
+    // etc.) while we're evicting, it must see the NEW backend state,
+    // not the old one we just tore down via stop(). Swap first, then
+    // drain lost-callbacks.
     stop();
+    backend_ = std::move(backend);
     if (!services_.empty()) {
         auto lost = std::move(services_);
         services_.clear();
@@ -92,7 +100,6 @@ void NetworkServiceDiscovery::install_backend(std::unique_ptr<Backend> backend) 
             for (const auto& s : lost) on_service_lost(s);
         }
     }
-    backend_ = std::move(backend);
 }
 
 void NetworkServiceDiscovery::browse(std::string_view service_type) {
