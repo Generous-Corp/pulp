@@ -16,11 +16,19 @@
 using pulp::platform::FileDialog;
 using pulp::platform::FileFilter;
 
-TEST_CASE("FileDialog has_backend starts false everywhere",
-          "[platform][file-dialog][issue-301]") {
-    // Clean state — test suite may run in any order.
+TEST_CASE("FileDialog has_backend reflects native vs host-registered availability",
+          "[platform][file-dialog][issue-301][issue-312]") {
+    // Clean host-registered state — test suite may run in any order.
+    // Post-#312 (Codex P2) semantics: Apple reports has_backend() == true
+    // unconditionally because the native NSOpenPanel/UIDocumentPicker
+    // impl is always available. Non-Apple reflects the host-registered
+    // state, which is false here after clear_backend().
     FileDialog::clear_backend();
+#if defined(__APPLE__)
+    REQUIRE(FileDialog::has_backend());
+#else
     REQUIRE_FALSE(FileDialog::has_backend());
+#endif
 }
 
 #if !defined(__APPLE__)
@@ -103,7 +111,7 @@ TEST_CASE("FileDialog non-Apple: backend routes through",
 #endif // !defined(__APPLE__)
 
 TEST_CASE("FileDialog backend registration is safe to call on any platform",
-          "[platform][file-dialog][issue-301]") {
+          "[platform][file-dialog][issue-301][issue-312]") {
     // Just register + clear — must not throw or crash on any platform
     // even if the native impl is in the .mm file.
     FileDialog::Backend b;
@@ -113,5 +121,11 @@ TEST_CASE("FileDialog backend registration is safe to call on any platform",
     };
     FileDialog::set_backend(b);
     FileDialog::clear_backend();
+    // Post-#312: has_backend() is true on Apple (native impl), reflects
+    // host-registered state on non-Apple.
+#if defined(__APPLE__)
+    REQUIRE(FileDialog::has_backend());
+#else
     REQUIRE_FALSE(FileDialog::has_backend());
+#endif
 }
