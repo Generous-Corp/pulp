@@ -1,0 +1,63 @@
+name: Coverage
+
+# Non-blocking coverage artifact. Informational only; no merge gate.
+# Local equivalent: scripts/run_coverage.sh.
+# Full design: planning/coverage-sanitizers-spec-2026-04-16.md.
+
+on:
+  pull_request:
+    branches: [main, develop]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: coverage-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  coverage:
+    runs-on: ubuntu-24.04
+    name: Coverage report (Linux, Clang)
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: false
+          lfs: true
+
+      - name: Install Linux dependencies + Clang tooling
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            clang llvm lld \
+            libasound2-dev libdbus-1-dev libdrm-dev libegl1-mesa-dev \
+            libgbm-dev libgl1-mesa-dev libx11-dev libxext-dev libxfixes-dev \
+            libxi-dev libxinerama-dev libxkbcommon-dev libxrandr-dev \
+            libxrender-dev libxss-dev libxtst-dev libwayland-dev wayland-protocols
+
+      - name: Bootstrap dependencies
+        run: ./setup.sh --ci --deps-only
+        shell: bash
+
+      - name: Run coverage suite
+        # Coverage never fails the run — thresholds come later per
+        # the #290 hardening initiative.
+        continue-on-error: true
+        run: scripts/run_coverage.sh
+        shell: bash
+
+      - name: Upload HTML report
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: coverage-report-${{ github.sha }}
+          path: build-coverage/coverage/
+          retention-days: 30
+
+      - name: Upload summary
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: coverage-summary-${{ github.sha }}
+          path: build-coverage/coverage/summary.txt
+          retention-days: 90
