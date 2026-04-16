@@ -1,121 +1,311 @@
 # Changelog
 
-All notable changes to Pulp are documented here.
+All notable changes to Pulp are documented here. Each entry links
+to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 
-## [0.14.0]
+<a id="v0131"></a>
+## [0.13.1] - 2026-04-16
 
-## [0.6.0]
+- fix(cli): Windows popen/pclose — unblock release-cli.yml builds ([#259](https://github.com/danielraffel/pulp/pull/259))
+- docs: Pulp version clarity + plugin surface (D3/D4/D5) ([#257](https://github.com/danielraffel/pulp/pull/257))
+- view: ModulationMatrixWidget canvas widget (W07 slice B5) ([#238](https://github.com/danielraffel/pulp/pull/238))
+- view: ImageView consumes ImageCache (W07 slice B4) ([#237](https://github.com/danielraffel/pulp/pull/237))
+- ara: CLAP live-factory end-to-end test (W06 slice A2a) ([#234](https://github.com/danielraffel/pulp/pull/234))
+- docs: host-compatibility matrix (W06 slice A4) ([#236](https://github.com/danielraffel/pulp/pull/236))
+- examples: ara-pitch-tracker — minimum viable ARA-aware CLAP plug-in (W06 A3) ([#235](https://github.com/danielraffel/pulp/pull/235))
+- a11y: cross-platform accessibility_provider entry point (W04 4.1+4.2) ([#230](https://github.com/danielraffel/pulp/pull/230))
 
-## [0.13.0]
+<a id="v0130"></a>
+## [0.13.0] - 2026-04-15
 
-## [0.12.0]
+- ara: real ARA::ARAFactory construction (W06 A1 — beyond the stub) ([#232](https://github.com/danielraffel/pulp/pull/232))
+- Ship chore/bump-shipyard-0.3.0 ([#233](https://github.com/danielraffel/pulp/pull/233))
+- host: pulp-scan-worker out-of-process scan binary (W03 slice 3.3b) ([#229](https://github.com/danielraffel/pulp/pull/229))
+- midi: MidiBuffer::add_sysex() variable-length sidecar (W01 MIDI vocab) ([#231](https://github.com/danielraffel/pulp/pull/231))
+- ara: VST3 + AU companion-factory extension keys (W06 6.3/6.4) ([#228](https://github.com/danielraffel/pulp/pull/228))
+- examples: ios-auv3-synth scaffold (workstream 05 slice 5.1) ([#227](https://github.com/danielraffel/pulp/pull/227))
 
-## [0.11.0]
+<a id="v0120"></a>
+## [0.12.0] - 2026-04-15
 
-## [0.10.0]
+- clap: ARA companion-factory extension hook (workstream 06 slice 6.5) ([#226](https://github.com/danielraffel/pulp/pull/226))
+- docs: iOS AUv3 & mobile guidance (workstream 05 slice 5.6) ([#225](https://github.com/danielraffel/pulp/pull/225))
 
-## [0.9.0]
+<a id="v0110"></a>
+## [0.11.0] - 2026-04-15
 
-## [0.5.0]
+- iOS review fixes: clipboard + child_process + on_mouse_cancel ([#224](https://github.com/danielraffel/pulp/pull/224))
+- Add iOS skill (.agents/skills/ios/) ([#223](https://github.com/danielraffel/pulp/pull/223))
+- iOS Simulator build: gate desktop-only code, fix stale view API ([#222](https://github.com/danielraffel/pulp/pull/222))
+- matrix(prod-readiness 08): seed ci_test on 5 usable entries (8.4 sweep) ([#169](https://github.com/danielraffel/pulp/pull/169))
+- host: persistent plugin scan cache (workstream 03 slice 3.1) ([#182](https://github.com/danielraffel/pulp/pull/182))
+- docs(06): ARA integration guide — current state + SDK acquisition + roadmap ([#181](https://github.com/danielraffel/pulp/pull/181))
+- format: Processor::on_host_tempo_changed() hook (slice 1.10) ([#212](https://github.com/danielraffel/pulp/pull/212))
+- ara: Processor::create_ara_document_controller() hook (slice 6.3a) ([#190](https://github.com/danielraffel/pulp/pull/190))
+- Workstream 07 slice 7.5: resizable plugin shell (size + aspect lock) ([#206](https://github.com/danielraffel/pulp/pull/206))
+- host: typed HostedEditor API on PluginSlot (slice 3.4) ([#201](https://github.com/danielraffel/pulp/pull/201))
+- Workstream 07 slice 7.3: TableModel data + sort layer ([#200](https://github.com/danielraffel/pulp/pull/200))
+- Workstream 01 slice 1.9: validate_descriptor() helper ([#211](https://github.com/danielraffel/pulp/pull/211))
+- Workstream 04 slice 4.2a: ATK / AT-SPI mapping table ([#204](https://github.com/danielraffel/pulp/pull/204))
+- Workstream 07 slice 7.1: ModulationMatrix data model ([#196](https://github.com/danielraffel/pulp/pull/196))
+- a11y: cross-platform announce_accessibility() API (slice 4.3) ([#187](https://github.com/danielraffel/pulp/pull/187))
+- docs(8.5): capabilities.md Known Limitations section (renderer half) ([#175](https://github.com/danielraffel/pulp/pull/175))
+- matrix(8.5): format_limitations section — surface known per-format gaps ([#171](https://github.com/danielraffel/pulp/pull/171))
+- Workstream 01 slice 1.8: PluginDescriptor::vendor_url + vendor_email ([#210](https://github.com/danielraffel/pulp/pull/210))
+- format: ViewSize::aspect_ratio field (workstream 07 slice 7.5b) ([#209](https://github.com/danielraffel/pulp/pull/209))
+- Workstream 02 slice 2.5: MIDI 1.0 running-status parser ([#202](https://github.com/danielraffel/pulp/pull/202))
+- Workstream 03 slice 3.7: richer PluginInfo metadata + CLAP extraction ([#198](https://github.com/danielraffel/pulp/pull/198))
+- format: Processor::on_memory_pressure() optional hook (slice 5.3) ([#195](https://github.com/danielraffel/pulp/pull/195))
+- Workstream 04 slice 4.4: cross-platform accessibility tree snapshot ([#192](https://github.com/danielraffel/pulp/pull/192))
+- Workstream 06 slice 6.2: ARA core type layer ([#185](https://github.com/danielraffel/pulp/pull/185))
+- Workstream 03 slice 3.2: background plugin scanner ([#194](https://github.com/danielraffel/pulp/pull/194))
+- Workstream 03 slice 3.6: AU slot — route MIDI via MusicDeviceMIDIEvent ([#191](https://github.com/danielraffel/pulp/pull/191))
+- Workstream 01 slice 1.2: VST3 multi-bus + sidechain routing ([#178](https://github.com/danielraffel/pulp/pull/178))
+- midi_ci: echo inquirer MUID in profile reply destination field ([#180](https://github.com/danielraffel/pulp/pull/180))
+- matrix(8.4): seed ci_test: on 5 more usable entries (sweep batch 2) ([#172](https://github.com/danielraffel/pulp/pull/172))
+- lv2: resolve LV2_URID__map in instantiate() (workstream 01 slice 1.5) ([#174](https://github.com/danielraffel/pulp/pull/174))
+- a11y: Windows UIA mapping table (workstream 04 slice 4.1a) ([#203](https://github.com/danielraffel/pulp/pull/203))
+- Workstream 01 slice 1.3: AU v2 outbound parameter changes ([#176](https://github.com/danielraffel/pulp/pull/176))
+- audio: AudioSystem hotplug callback base plumbing (slice 2.7) ([#199](https://github.com/danielraffel/pulp/pull/199))
+- format: ios_requires_background_audio descriptor flag (slice 5.5) ([#208](https://github.com/danielraffel/pulp/pull/208))
+- midi: MidiBuffer UMP sidecar accessor (workstream 02 slice 2.6a) ([#193](https://github.com/danielraffel/pulp/pull/193))
+- format: Processor::on_host_transport_changed() hook (slice 1.11) ([#213](https://github.com/danielraffel/pulp/pull/213))
+- host: scan blacklist store (workstream 03 slice 3.3a) ([#205](https://github.com/danielraffel/pulp/pull/205))
+- auv3: sidechain input bus + render-block routing (workstream 01 slice 1.4b) ([#183](https://github.com/danielraffel/pulp/pull/183))
+- coremidi: iterate UMP by message size; decode type-0x04 (slice 1.6) ([#184](https://github.com/danielraffel/pulp/pull/184))
+- audio: Linux factory now selects JACK when server is running (slice 2.2) ([#188](https://github.com/danielraffel/pulp/pull/188))
+- host: VST3 slot — route MIDI and parameter automation (slice 3.5) ([#186](https://github.com/danielraffel/pulp/pull/186))
+- view: A/B compare two-slot state snapshot (slice 7.2) ([#189](https://github.com/danielraffel/pulp/pull/189))
+- view: ImageCache with LRU + memory-pressure hook (slice 7.4) ([#207](https://github.com/danielraffel/pulp/pull/207))
+- format(clap 1.1): route second input bus to Processor::set_sidechain() ([#177](https://github.com/danielraffel/pulp/pull/177))
+- matrix(8.1): widget rows — 16 structured entries for existing widgets ([#173](https://github.com/danielraffel/pulp/pull/173))
+- matrix(8.1): schema_version: 2 + ARA plugin_extensions entry ([#170](https://github.com/danielraffel/pulp/pull/170))
+- matrix: known-limitations schema + renderer (workstream 08 slice 8.5) ([#168](https://github.com/danielraffel/pulp/pull/168))
 
-## [0.8.0]
+<a id="v0101"></a>
+## [0.10.1] - 2026-04-14
 
-## [0.7.0]
+- fix(host): dlfcn.h Windows shim — unblock release-cli builds (row 17) ([#163](https://github.com/danielraffel/pulp/pull/163))
+- docs(prod-readiness 08): consistency checker — locks in 8.7 a11y fix ([#166](https://github.com/danielraffel/pulp/pull/166))
+- docs: reconcile capability/a11y drift; bump planning for prod-readiness plan ([#164](https://github.com/danielraffel/pulp/pull/164))
+- test: GraphSerializer round-trip coverage (row 11) ([#162](https://github.com/danielraffel/pulp/pull/162))
+- SignalGraph Phase 3: GraphSerializer (.pulpgraph format) ([#161](https://github.com/danielraffel/pulp/pull/161))
 
-## [0.4.0]
+<a id="v0100"></a>
+## [0.10.0] - 2026-04-14
 
-## [0.6.0]
+- SignalGraph Phase 2: GraphEditorView (canvas-based node editor) ([#160](https://github.com/danielraffel/pulp/pull/160))
+- Fix Codex P1 review comments on signal-graph PRs (#143/#153/#158) ([#159](https://github.com/danielraffel/pulp/pull/159))
 
-## [0.5.0]
+<a id="v090"></a>
+## [0.9.0] - 2026-04-14
 
-## [0.3.0]
+- SignalGraph Phase 1: per-format depth (CLAP/VST3/AU/LV2) + connect_automation ([#158](https://github.com/danielraffel/pulp/pull/158))
+- Replace indent-fragile version regex with real JSON parser; fix drift ([#157](https://github.com/danielraffel/pulp/pull/157))
+- Fix Android: force-keep TalkBack JNI symbols without whole-archiving pulp-view ([#151](https://github.com/danielraffel/pulp/pull/151))
+- Fix macOS build break: pin ausdk target to CXX_STANDARD=23 (closes #155) ([#156](https://github.com/danielraffel/pulp/pull/156))
+- version: fix marketplace.json plugins[0].version drift + guard against re-drift ([#152](https://github.com/danielraffel/pulp/pull/152))
+- SignalGraph Phase 0: host contracts (snapshot publish + event queue + param flags + thread rules) ([#153](https://github.com/danielraffel/pulp/pull/153))
 
-## [0.4.0]
+<a id="v080"></a>
+## [0.8.0] - 2026-04-14
 
-## [0.2.2] — 2026-04-09
+- ViewBridge Phase 4 MVP: Remote View Protocol + attach_remote_channel ([#154](https://github.com/danielraffel/pulp/pull/154))
+- chore(planning): bump submodule to pick up Feature 1 Phase 2/3 checkoffs ([#150](https://github.com/danielraffel/pulp/pull/150))
 
-### Fixed
-- **Installed `pulp` CLI now runs without crashing** (#74): added `INSTALL_RPATH` to the `pulp-cli` target so the installed binary resolves `libwgpu_native.dylib` / `libwgpu_native.so` from `<prefix>/lib`. Previously every installed CLI crashed immediately on launch with `dyld: Library not loaded: @rpath/libwgpu_native.dylib`.
-- **Windows SDK now ships the wgpu_native import library under both names** (#94, #104 follow-up): PulpConfig.cmake now looks for `wgpu_native.dll.lib` (the modern MSVC IMPLIB convention used by wgpu-native v0.19+) in addition to `wgpu_native.lib` and the legacy prefixed name. The fail-fast error message lists every name it tried.
-- **Bare/app standalone templates now link `Pulp::standalone` explicitly** (#104 follow-up): scaffolded plugins built with `--type bare` or `--type app` failed to link on Windows MSVC with `LNK2019: unresolved external symbol StandaloneApp::~StandaloneApp` because the templates only linked `Pulp::format`, not `Pulp::standalone`. Both templates now link both targets.
+<a id="v070"></a>
+## [0.7.0] - 2026-04-14
 
-### Added
-- **SDF glyph atlas: real SkFont rasterizer** (#76 follow-up): replaces the placeholder circle rasterizer with `SkFont::drawSimpleText` into an offscreen `SkBitmap` when `PULP_HAS_SKIA` is defined. Falls back to the placeholder for builds without Skia so the host-only test suite still passes.
+- ViewBridge Phase 3: standalone, AU v2 (+ dual-Processor fix), AU v3, cross-format tests ([#146](https://github.com/danielraffel/pulp/pull/146))
+- doctor + pulp pr: surface missing RELEASE_BOT_TOKEN; doc one-time setup ([#149](https://github.com/danielraffel/pulp/pull/149))
 
-## [0.2.1] — 2026-04-09
+<a id="v060"></a>
+## [0.6.0] - 2026-04-13
 
-### Fixed
-- **Windows SDK**: ship `wgpu_native.lib` import library (#94). v0.2.0 silently dropped this file from the install, breaking `find_package(Pulp)` on Windows for any downstream plugin. Existing v0.2.0 Windows installs are broken and must be reinstalled.
-- **Windows ARM64 build** (#92): move `windows.h` and `shellapi.h` includes outside the `pulp::view` namespace in `core/view/src/file_browser.cpp` so winbase.h `_Interlocked*` intrinsics no longer leak into the namespace and break compilation.
-- **Visual Studio multi-config generator**: add `CMAKE_MAP_IMPORTED_CONFIG_*=Release` to PulpConfig.cmake so plugins built in Debug / MinSizeRel / RelWithDebInfo can resolve Pulp's Release-only imported targets.
+- Streams Phase 4: MessageChannel + WebSocket + OSC + JSON-RPC (closes Feature 3) ([#145](https://github.com/danielraffel/pulp/pull/145))
+- Fix Codex P1 + P2 review on PR #144 (versioning gates) ([#147](https://github.com/danielraffel/pulp/pull/147))
 
-### Added
-- **Android MIDI I/O Phase 1** (#86): lock-free SPSC FIFO between the Kotlin MIDI receiver thread and the audio thread, plus `PulpMidiManager` instantiation in `PulpApplication.onCreate`. USB MIDI bytestream input now flows from Android `MidiManager` into the audio thread's `MidiBuffer`. BLE MIDI and virtual ports remain Phase 2/3.
-- **Android TalkBack accessibility bridge** (#87): JNI exports that walk the C++ view tree, expose `AccessibilityValueInterface` / `AccessibilityTableInterface` data to Android, and route `ACTION_CLICK` / `ACTION_SCROLL_FORWARD` / `ACTION_SCROLL_BACKWARD` back into Pulp widgets. `PulpAccessibilityDelegate` is now attached to `PulpSurfaceView` automatically.
-- **Out-of-line accessibility interface vtables** (`core/view/src/accessibility.cpp`): anchor the typeinfo for `AccessibilityValueInterface` / `AccessibilityTextInterface` / `AccessibilityTableInterface` / `AccessibilityCellInterface` so `dynamic_cast` links cleanly under the Android NDK's `-Wl,--no-undefined`. Adds the missing default `get_value_string()` implementation.
-- **Nested-clip text rendering regression test** (#75): guards the existing per-glyph SkTextBlob workaround so a future refactor cannot re-introduce SkShaper for the widget paint path without first solving the underlying Graphite ghost issue.
-- **SDF glyph atlas exploration prototype** (#76, `explore/sdf-text` foundation): clean public API, Felzenszwalb-Huttenlocher Euclidean distance transform, and 54 assertions of test coverage. Foundation only — GPU shader and canvas integration follow.
+<a id="v050"></a>
+## [0.5.0] - 2026-04-13
 
-### Re-enabled
-- `windows-arm64` row in the `release-cli.yml` matrix, now that #92 is fixed.
+- SignalGraph: full DAW hosting engine (Feature 5 Phases 1-3) ([#143](https://github.com/danielraffel/pulp/pull/143))
 
-## [0.2.0] — 2026-04-09
+<a id="v040"></a>
+## [0.4.0] - 2026-04-13
 
-### Added
-- **Android platform**: Full GPU rendering pipeline + interactive Pulp widgets (#53)
-- **`pulp ship notarize`**: Apple notarization with submit, poll, and staple (#79)
-- **`pulp ship appcast`**: Sparkle-compatible XML update feed generation with EdDSA signing (#79)
-- **`pulp ship android`**: APK/AAB packaging via Gradle with keystore signing, ABI selection, Android SDK discovery (#79)
-- **Ship config fallback**: CLI flags → env vars → `~/.pulp/config.toml` for all signing credentials (#79)
-- **`config.example.toml`**: Developer configuration template for signing identities, keystores, and appcast keys
-- **Inspector polish**: cursor balance, selection persistence, highlight stability, scrollbar, positioning (#71)
-- **Modular CLI**: `pulp_cli.cpp` refactored into per-command `cmd_*.cpp` files (#61)
+- skills(mpe): add MPE developer skill ([#142](https://github.com/danielraffel/pulp/pull/142))
+- Versioning & skill-sync gates + pulp pr + auto-release on merge ([#144](https://github.com/danielraffel/pulp/pull/144))
+- ViewBridge: Processor editor lifecycle + VST3/CLAP wiring (Feature 1, Phase 1 + core Phase 2) ([#140](https://github.com/danielraffel/pulp/pull/140))
+- MPE Phase 4: MIDI 2.0 UMP native path (closes #139) ([#141](https://github.com/danielraffel/pulp/pull/141))
+- Advanced SDF text: MSDF + PSDF + effects + runtime atlas (supersedes #133) ([#136](https://github.com/danielraffel/pulp/pull/136))
+- Address Codex P2 review on PR #135 (MPE) ([#138](https://github.com/danielraffel/pulp/pull/138))
+- Streams: unified Stream / AsyncStream / network backends (Feature 3, Phase 1-3) ([#134](https://github.com/danielraffel/pulp/pull/134))
+- Fix Android build: accessibility bridge API mismatch ([#137](https://github.com/danielraffel/pulp/pull/137))
+- Add MPE (MIDI Polyphonic Expression) full support — Phases 1-3 ([#135](https://github.com/danielraffel/pulp/pull/135))
+- Fix Codex P1 reviews: wire Android accessibility + fix Windows SDF include ([#132](https://github.com/danielraffel/pulp/pull/132))
+- Fix SDF atlas font manager for Skia + add --screenshot mode to demo ([#131](https://github.com/danielraffel/pulp/pull/131))
+- Add SDF text demo with bloom post-effect (#76 validation) ([#130](https://github.com/danielraffel/pulp/pull/130))
+- Fix P1 Codex review issues from PRs #125-128 ([#129](https://github.com/danielraffel/pulp/pull/129))
+- Wire Android MIDI FIFO to audio callback (#86) ([#128](https://github.com/danielraffel/pulp/pull/128))
+- Implement Android TalkBack accessibility bridge (#87) ([#127](https://github.com/danielraffel/pulp/pull/127))
+- Add fill_text_sdf() for GPU-accelerated resolution-independent text (#76) ([#126](https://github.com/danielraffel/pulp/pull/126))
+- Enable SkShaper for OpenType kerning + ligatures in fill_text (fixes #75) ([#125](https://github.com/danielraffel/pulp/pull/125))
+- CI: bump actions to Node.js 24 compatible versions ([#112](https://github.com/danielraffel/pulp/pull/112))
+- Ship feature/shipyard-new-features ([#124](https://github.com/danielraffel/pulp/pull/124))
+- Update docs for Shipyard as primary CI tool (post v0.3.0) ([#123](https://github.com/danielraffel/pulp/pull/123))
+- Fix flaky Windows tests with proper wait patterns ([#122](https://github.com/danielraffel/pulp/pull/122))
+- Ship feature/ci-skill-shipyard-preference ([#121](https://github.com/danielraffel/pulp/pull/121))
 
-### Fixed
-- `modules.md` code examples now match the actual APIs (#70)
-- Android emulator CI job disabled until infrastructure is ready (#77, #78)
+<a id="v030"></a>
+## [0.3.0] - 2026-04-11
 
-### Changed
-- Skill Maintenance Rule added to CLAUDE.md (#72)
-- Ship CLI command manifest and `/ship` slash command updated with notarize/appcast/android subcommands
+- Ship release/v0.3.0 ([#119](https://github.com/danielraffel/pulp/pull/119))
+- Bump Shipyard pin to v0.1.3 (Phase 5 capability parity) ([#109](https://github.com/danielraffel/pulp/pull/109))
+- Address Codex review on PR #106: Windows-safe shell + canonical stages ([#108](https://github.com/danielraffel/pulp/pull/108))
+- Document contributor expectations + security baseline + Shipyard migration ([#107](https://github.com/danielraffel/pulp/pull/107))
+- Add Shipyard adoption: pinned binary + project config + CI skill update ([#106](https://github.com/danielraffel/pulp/pull/106))
 
-## [0.1.1] — 2026-04-06
+<a id="v022"></a>
+## [0.2.2] - 2026-04-09
 
-### Added
-- `pulp install` command for standalone SDK download without project scaffolding
-- Auto-labeling workflow for new GitHub issues
-- JavaScript engine architecture documentation (QuickJS, V8, JavaScriptCore)
-- Audit tests for license and vendor checks
-- Private audit hook — `tools/audit.py` auto-runs `.private/audit-naming.py` when available
+- Fix Windows SDK consumption: implib filename + standalone link ([#104](https://github.com/danielraffel/pulp/pull/104))
+- SDF atlas: real SkFont rasterizer (replaces placeholder when Skia present) ([#103](https://github.com/danielraffel/pulp/pull/103))
+- Fix #74: Add INSTALL_RPATH to pulp-cli for installed binaries ([#102](https://github.com/danielraffel/pulp/pull/102))
 
-### Fixed
-- `pulp cache fetch skia` now downloads from the correct SDK release URL
-- Docs link rewriting for anchored `.md` references (e.g., `modules.md#format`)
-- AAX docs opening paragraph rewritten for clarity
-- macOS platform support corrected to ARM64 only (not x86_64)
-- Test count updated across all docs (1622+)
-- DSL support status updated from "experimental" to shipped
+<a id="v021"></a>
+## [0.2.1] - 2026-04-09
 
-### Changed
-- Capabilities page now shows all three JS engines as available
-- License audit workflow renamed for clarity
-- Audit tool focused on license and vendor checks with extensible private hooks
+- SDF glyph atlas: foundation prototype + Felzenszwalb distance transform ([#100](https://github.com/danielraffel/pulp/pull/100))
+- Android TalkBack: wire C++ view tree to AccessibilityDelegate ([#98](https://github.com/danielraffel/pulp/pull/98))
+- Add regression test for #75 nested-clip text rendering ([#99](https://github.com/danielraffel/pulp/pull/99))
+- Android MIDI I/O Phase 1: lock-free FIFO + PulpApplication wiring ([#97](https://github.com/danielraffel/pulp/pull/97))
+- Fix #92: Move Windows platform includes outside pulp::view namespace ([#96](https://github.com/danielraffel/pulp/pull/96))
+- Fix #94: Ship wgpu_native.lib in Windows SDK install ([#95](https://github.com/danielraffel/pulp/pull/95))
 
-## [0.1.0] — 2026-04-06
+<a id="v020"></a>
+## [0.2.0] - 2026-04-09
 
-Initial release.
+- release-cli: temporarily disable windows-arm64 matrix entry ([#93](https://github.com/danielraffel/pulp/pull/93))
+- Android: support x86_64 Skia builds for emulator dev cycle ([#91](https://github.com/danielraffel/pulp/pull/91))
+- Android: load synth_ui.js from APK assets via AAssetManager ([#90](https://github.com/danielraffel/pulp/pull/90))
+- Add \`pulp create --targets android\` experimental scaffold ([#89](https://github.com/danielraffel/pulp/pull/89))
+- Add zero-crossing trigger to WaveformView for stable scope display ([#88](https://github.com/danielraffel/pulp/pull/88))
+- Add notarize, appcast, and Android packaging to ship CLI ([#79](https://github.com/danielraffel/pulp/pull/79))
+- Disable android-emulator-test CI job until infrastructure ready (#77) ([#78](https://github.com/danielraffel/pulp/pull/78))
+- Android Platform: Full GPU rendering pipeline + interactive Pulp widgets ([#53](https://github.com/danielraffel/pulp/pull/53))
+- Fix modules.md code examples to match actual APIs ([#70](https://github.com/danielraffel/pulp/pull/70))
+- Add Skill Maintenance Rule to CLAUDE.md ([#72](https://github.com/danielraffel/pulp/pull/72))
+- Inspector polish: cursor balance, selection persistence, highlight stability, scrollbar, positioning ([#71](https://github.com/danielraffel/pulp/pull/71))
+- Inspector: tabs, smart positioning, cursor types, highlight sync, PR review fixes ([#68](https://github.com/danielraffel/pulp/pull/68))
+- Add separate floating inspector window with TreeView and PropertyList ([#64](https://github.com/danielraffel/pulp/pull/64))
+- Fix MSVC portability: add missing #include <algorithm> across 16 files ([#62](https://github.com/danielraffel/pulp/pull/62))
+- Modularize CLI: split 4,903-line monolith into focused command files ([#61](https://github.com/danielraffel/pulp/pull/61))
+- Add plugin inspector: visual overlay, audio monitoring, TCP protocol, CLI client ([#60](https://github.com/danielraffel/pulp/pull/60))
+- Fix PR #52 review: IPC handoff ordering + iOS accessibility CMakeLists ([#54](https://github.com/danielraffel/pulp/pull/54))
+- Add iOS VoiceOver accessibility via UIAccessibility ([#43](https://github.com/danielraffel/pulp/pull/43))
+- Add rendering reference docs and update module descriptions ([#45](https://github.com/danielraffel/pulp/pull/45))
+- Rendering capability Phase A: Foundation infrastructure ([#14](https://github.com/danielraffel/pulp/pull/14))
+- Add planning as private submodule, codify planning workflow ([#11](https://github.com/danielraffel/pulp/pull/11))
+- Add compute pipeline, CI failover, SDK commands ([#12](https://github.com/danielraffel/pulp/pull/12))
+- Add pulp sdk install/status/clean commands (closes #8) ([#10](https://github.com/danielraffel/pulp/pull/10))
+- Add step-by-step SSH setup guides for Windows and Linux VMs ([#6](https://github.com/danielraffel/pulp/pull/6))
+- Complete Phase 1: vDSP FFT, NSIS CLI, glTF texture tests ([#5](https://github.com/danielraffel/pulp/pull/5))
+- Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
+- Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
-- 6 plugin formats: VST3, AU v2, AUv3, CLAP, LV2, Standalone (+ WAM/WebCLAP experimental)
-- 5 platform builds: macOS ARM64, Linux x64, Linux ARM64, Windows x64, Windows ARM64
-- 30+ DSP signal processors
-- GPU rendering via Dawn + Skia Graphite
-- JS-scripted UI with hot-reload (QuickJS default, V8/JSC available)
-- Three.js native GPU demo
-- FAUST, Cmajor, JSFX DSL integration
-- Design import from Figma, Pencil, Stitch
-- Full CLI: create, build, test, validate, ship, install, doctor, inspect, design
-- MCP server with 11 tools
-- Local + cloud CI (Namespace, GitHub Actions)
-- Code signing, notarization, DMG/PKG packaging
-- 1622+ automated tests
-- Claude Code plugin with slash commands and skills
+<a id="v010"></a>
+## [0.1.0] - 2026-04-06
+
+- Remove Quick Start caveat and clean up terminology ([#188](https://github.com/danielraffel/pulp/pull/188))
+- Fix release workflow: git-lfs for Skia ([#187](https://github.com/danielraffel/pulp/pull/187))
+- Add ARM64 targets to release matrix ([#186](https://github.com/danielraffel/pulp/pull/186))
+- Consolidate AGENTS.md into CLAUDE.md and add code-verification rule ([#178](https://github.com/danielraffel/pulp/pull/178))
+- Enable build+test CI on pull requests ([#180](https://github.com/danielraffel/pulp/pull/180))
+- fix/flaky async test ([#183](https://github.com/danielraffel/pulp/pull/183))
+- Fix VST3 adapter build break from getArrangement ([#179](https://github.com/danielraffel/pulp/pull/179))
+- Update claim audit baseline to reflect shipped DSL and hot reload ([#177](https://github.com/danielraffel/pulp/pull/177))
+- Land Cmajor and JSFX DSL support lanes ([#176](https://github.com/danielraffel/pulp/pull/176))
+- Fix format adapter channel counts, WAM sample rate, and state version ([#175](https://github.com/danielraffel/pulp/pull/175))
+- Remove planning docs from public repo ([#174](https://github.com/danielraffel/pulp/pull/174))
+- Fix CoreGraphics canvas text rendering and layout metrics ([#173](https://github.com/danielraffel/pulp/pull/173))
+- Fix scripted UI hot-reload review regressions ([#172](https://github.com/danielraffel/pulp/pull/172))
+- Fix recent docs truth and link drift ([#171](https://github.com/danielraffel/pulp/pull/171))
+- Fix create targets for app and bare projects ([#170](https://github.com/danielraffel/pulp/pull/170))
+- Add Phase 15 claim audit baseline ([#169](https://github.com/danielraffel/pulp/pull/169))
+- Tighten Phase 15 planning truth surfaces ([#167](https://github.com/danielraffel/pulp/pull/167))
+- Audit docs truth and index missing references ([#164](https://github.com/danielraffel/pulp/pull/164))
+- Reject malformed excerpt bundle results arrays ([#165](https://github.com/danielraffel/pulp/pull/165))
+- Add deterministic audio excerpt-find bundle service ([#162](https://github.com/danielraffel/pulp/pull/162))
+- Add shared audio model and bundle service ([#160](https://github.com/danielraffel/pulp/pull/160))
+- Preserve Windows bundle probe host metadata ([#161](https://github.com/danielraffel/pulp/pull/161))
+- Add audio excerpt window foundation ([#159](https://github.com/danielraffel/pulp/pull/159))
+- Fix macOS standalone bundling for generated projects ([#158](https://github.com/danielraffel/pulp/pull/158))
+- Extend scripted UI hot reload state preservation ([#157](https://github.com/danielraffel/pulp/pull/157))
+- Close out desktop automation Phase 14 slice ([#156](https://github.com/danielraffel/pulp/pull/156))
+- Harden installed SDK first-time create/build setup ([#155](https://github.com/danielraffel/pulp/pull/155))
+- feature/phase14 hotreload ([#154](https://github.com/danielraffel/pulp/pull/154))
+- Complete desktop automation agent and first-time setup hardening ([#153](https://github.com/danielraffel/pulp/pull/153))
+- Add optional AAX format support ([#152](https://github.com/danielraffel/pulp/pull/152))
+- feature/plugin audit ([#151](https://github.com/danielraffel/pulp/pull/151))
+- feature/plugin audit ([#150](https://github.com/danielraffel/pulp/pull/150))
+- feature/plugin audit ([#149](https://github.com/danielraffel/pulp/pull/149))
+- feature/v3 phase13 threejs bridge ([#148](https://github.com/danielraffel/pulp/pull/148))
+- feature/v3 phase13 v8 proof ([#147](https://github.com/danielraffel/pulp/pull/147))
+- Add opt-in cloud billing truth telemetry ([#144](https://github.com/danielraffel/pulp/pull/144))
+- Add local-ci cleanup and footprint reporting ([#141](https://github.com/danielraffel/pulp/pull/141))
+- Fix cloud billing summaries and refresh errors ([#140](https://github.com/danielraffel/pulp/pull/140))
+- Add cloud history, estimates, and provider recommendations ([#138](https://github.com/danielraffel/pulp/pull/138))
+- Update Pages deploy workflow to Node 24-safe actions ([#137](https://github.com/danielraffel/pulp/pull/137))
+- Improve CI defaults visibility and docs deploy actions ([#136](https://github.com/danielraffel/pulp/pull/136))
+- Plan Pulp-first Namespace CI rollout ([#133](https://github.com/danielraffel/pulp/pull/133))
+- Follow up issue #121 SDK and CI fixes ([#132](https://github.com/danielraffel/pulp/pull/132))
+- Fix installed SDK packaging and downstream validation ([#131](https://github.com/danielraffel/pulp/pull/131))
+- Add local CI submission guardrails ([#105](https://github.com/danielraffel/pulp/pull/105))
+- Phase 7 follow-up: enable opt-in WebView builds on Windows and Linux ([#104](https://github.com/danielraffel/pulp/pull/104))
+- Phase 13: start the browser-shaped Three.js/WebGPU bridge ([#103](https://github.com/danielraffel/pulp/pull/103))
+- Land the Phase 12 offline video exploration ([#101](https://github.com/danielraffel/pulp/pull/101))
+- Land the first truthful Phase 13 bridge smoke slice ([#100](https://github.com/danielraffel/pulp/pull/100))
+- Raise the first promise floor for Phase 13 ([#99](https://github.com/danielraffel/pulp/pull/99))
+- Raise the first host-object floor for Phase 13 ([#98](https://github.com/danielraffel/pulp/pull/98))
+- Prove a real V8 build path for Phase 13 ([#97](https://github.com/danielraffel/pulp/pull/97))
+- Raise typed-array floor for Phase 13 ([#96](https://github.com/danielraffel/pulp/pull/96))
+- Harden Phase 13 readiness planning truth ([#94](https://github.com/danielraffel/pulp/pull/94))
+- Harden local CI branch SHA and config resolution ([#93](https://github.com/danielraffel/pulp/pull/93))
+- Phase 7: add native WebView bridge and Monaco example ([#91](https://github.com/danielraffel/pulp/pull/91))
+- Refresh v3 phase tracking and verification gating ([#90](https://github.com/danielraffel/pulp/pull/90))
+- Add local CI quiet-phase heartbeats ([#88](https://github.com/danielraffel/pulp/pull/88))
+- Auto-clean stale local CI Windows validators ([#87](https://github.com/danielraffel/pulp/pull/87))
+- Add Phase 9: themeable widget library, asset system, contrast utilities ([#72](https://github.com/danielraffel/pulp/pull/72))
+- Add Phase 8: audio visualization system (STFT, metering, spectrogram) ([#62](https://github.com/danielraffel/pulp/pull/62))
+- Add JS engine abstraction with QuickJS, JSC, and V8 backends ([#63](https://github.com/danielraffel/pulp/pull/63))
+- Add multi-window framework (Phase 6) ([#60](https://github.com/danielraffel/pulp/pull/60))
+- Add Phase 3: FAUST offline codegen with pulp-dsl contract ([#61](https://github.com/danielraffel/pulp/pull/61))
+- Add Phase 2: validation harness, RTSan, pluginval CLI expansion ([#59](https://github.com/danielraffel/pulp/pull/59))
+- Add Phase 11: WebGPU compute feasibility spike with benchmarks ([#64](https://github.com/danielraffel/pulp/pull/64))
+- Reuse prepared local CI state for narrow reruns ([#86](https://github.com/danielraffel/pulp/pull/86))
+- Add local CI evidence summaries ([#84](https://github.com/danielraffel/pulp/pull/84))
+- Design tool parity polish and on-demand launcher ([#81](https://github.com/danielraffel/pulp/pull/81))
+- [codex] Make pulp create default to standalone product projects ([#56](https://github.com/danielraffel/pulp/pull/56))
+- [codex] Finish local CI hardening after #65 merge ([#78](https://github.com/danielraffel/pulp/pull/78))
+- Add Phase 1 validation contract and truth pass ([#58](https://github.com/danielraffel/pulp/pull/58))
+- Add parallel execution, ship, check, list, and PR reporting ([#57](https://github.com/danielraffel/pulp/pull/57))
+- Local CI docs, config template, and smoke test ([#53](https://github.com/danielraffel/pulp/pull/53))
+- feature/local ci ([#52](https://github.com/danielraffel/pulp/pull/52))
+
+[0.13.1]: https://github.com/danielraffel/pulp/releases/tag/v0.13.1
+[0.13.0]: https://github.com/danielraffel/pulp/releases/tag/v0.13.0
+[0.12.0]: https://github.com/danielraffel/pulp/releases/tag/v0.12.0
+[0.11.0]: https://github.com/danielraffel/pulp/releases/tag/v0.11.0
+[0.10.1]: https://github.com/danielraffel/pulp/releases/tag/v0.10.1
+[0.10.0]: https://github.com/danielraffel/pulp/releases/tag/v0.10.0
+[0.9.0]: https://github.com/danielraffel/pulp/releases/tag/v0.9.0
+[0.8.0]: https://github.com/danielraffel/pulp/releases/tag/v0.8.0
+[0.7.0]: https://github.com/danielraffel/pulp/releases/tag/v0.7.0
+[0.6.0]: https://github.com/danielraffel/pulp/releases/tag/v0.6.0
+[0.5.0]: https://github.com/danielraffel/pulp/releases/tag/v0.5.0
+[0.4.0]: https://github.com/danielraffel/pulp/releases/tag/v0.4.0
+[0.3.0]: https://github.com/danielraffel/pulp/releases/tag/v0.3.0
+[0.2.2]: https://github.com/danielraffel/pulp/releases/tag/v0.2.2
+[0.2.1]: https://github.com/danielraffel/pulp/releases/tag/v0.2.1
+[0.2.0]: https://github.com/danielraffel/pulp/releases/tag/v0.2.0
+[0.1.0]: https://github.com/danielraffel/pulp/releases/tag/v0.1.0
