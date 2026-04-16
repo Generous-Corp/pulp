@@ -55,7 +55,7 @@ examples/ios-auv3-synth/
 └── CMakeLists.txt            # uses pulp_add_ios_auv3()
 ```
 
-`tools/cmake/PulpUtils.cmake` already has the `pulp_add_ios_auv3()` helper (see the `PULP_IOS` blocks). It reads `${PULP_IOS_AUV3_TEMPLATE_DIR}` (defaults to `templates/ios-auv3/`) for the `Info.plist.in` and entitlements templates.
+`tools/cmake/PulpUtils.cmake` already has the `pulp_add_ios_auv3()` helper (see the `PULP_IOS` blocks). It reads `${PULP_IOS_AUV3_TEMPLATE_DIR}` (defaults to `templates/ios-auv3/`) for the `Info.plist.in`, entitlements, **and a minimal SwiftUI host (`HostApp/ContentView.swift` + `HostApp/PulpHostApp.swift`)** that plug-in authors can copy in to sanity-check the extension loads. The template host instantiates the AUv3 via `AVAudioUnit.instantiate`, lists parameters from the AU's `parameterTree`, and gives you a play/stop toggle — enough to verify the bundle + Info.plist round-trip without a full DAW.
 
 ---
 
