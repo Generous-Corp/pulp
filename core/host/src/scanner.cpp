@@ -118,6 +118,12 @@ PluginInfo PluginScanner::scan_lv2_bundle(const std::string& path) {
 }
 
 std::vector<PluginInfo> PluginScanner::scan_directory(const std::string& dir, PluginFormat format) {
+    return scan_directory(dir, format, nullptr);
+}
+
+std::vector<PluginInfo> PluginScanner::scan_directory(const std::string& dir,
+                                                     PluginFormat format,
+                                                     const ScanBlacklist* blacklist) {
     std::vector<PluginInfo> results;
 
     std::error_code ec;
@@ -126,6 +132,12 @@ std::vector<PluginInfo> PluginScanner::scan_directory(const std::string& dir, Pl
     for (const auto& entry : fs::directory_iterator(dir, ec)) {
         auto path = entry.path().string();
         if (!is_plugin_bundle(path, format)) continue;
+
+        // #271 Codex P1 follow-up: consult blacklist BEFORE opening the
+        // bundle, so a bundle that crashed us on a previous scan never
+        // gets dlopen'd again. Post-scan filtering (the prior impl) still
+        // opened the bundle and could crash the scanner on every run.
+        if (blacklist && blacklist->is_blacklisted(path)) continue;
 
         switch (format) {
             case PluginFormat::VST3:
@@ -173,19 +185,11 @@ std::vector<PluginInfo> PluginScanner::scan(const ScanOptions& options) {
             if (options.on_progress) {
                 options.on_progress(dir, scanned++, total_dirs);
             }
-            auto found = scan_directory(dir, fmt);
-            // Workstream 03 #246: drop blacklisted bundles before
-            // the result reaches the caller. `pulp-scan-worker`
-            // populates the blacklist when a prior scan crashed on
-            // a bundle; we never re-scan that bundle until the user
-            // explicitly clears its entry.
-            if (options.blacklist) {
-                found.erase(std::remove_if(found.begin(), found.end(),
-                    [&](const PluginInfo& info) {
-                        return options.blacklist->is_blacklisted(info.path);
-                    }),
-                    found.end());
-            }
+            // Workstream 03 #246: pass the blacklist into scan_directory
+            // so bundles known to crash us never get dlopen'd. (Codex P1
+            // follow-up: old code filtered post-scan, which still
+            // crashed the scanner on the offending bundle every time.)
+            auto found = scan_directory(dir, fmt, options.blacklist);
             all.insert(all.end(), found.begin(), found.end());
         }
     };
