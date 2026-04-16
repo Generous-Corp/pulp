@@ -58,10 +58,20 @@ echo "=== Running tests with LLVM_PROFILE_FILE ==="
 mkdir -p "${PROFRAW_DIR}"
 cd "${BUILD_DIR}"
 export LLVM_PROFILE_FILE="${PROFRAW_DIR}/pulp-%p-%m.profraw"
+
+# #317 Codex P2: track test-suite outcome without aborting the
+# coverage report. A broken test run should still upload its
+# partial coverage (so reviewers can see what DID exercise), but
+# the script MUST exit non-zero so CI flags the failure —
+# silently swallowing test failures hid real regressions.
+CTEST_RC=0
 if [[ -n "${TESTS_REGEX}" ]]; then
-    ctest -R "${TESTS_REGEX}" --output-on-failure || true
+    ctest -R "${TESTS_REGEX}" --output-on-failure || CTEST_RC=$?
 else
-    ctest --output-on-failure || true
+    ctest --output-on-failure || CTEST_RC=$?
+fi
+if [[ "${CTEST_RC}" -ne 0 ]]; then
+    echo "=== ctest failed with exit ${CTEST_RC} — coverage report WILL be generated from partial profile data, then the script will exit with that code. ==="
 fi
 
 echo "=== Merging profiles ==="
@@ -102,3 +112,10 @@ llvm-cov show \
 echo ""
 echo "HTML report: ${REPORT_DIR}/index.html"
 echo "Summary:     ${REPORT_DIR}/summary.txt"
+
+# Propagate test-suite failure to callers/CI.
+if [[ "${CTEST_RC}" -ne 0 ]]; then
+    echo ""
+    echo "=== FAIL: ctest exited non-zero (${CTEST_RC}). Coverage report above is based on partial profile data from tests that did run. ==="
+    exit "${CTEST_RC}"
+fi

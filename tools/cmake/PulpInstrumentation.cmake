@@ -28,12 +28,23 @@ if(NOT PULP_ENABLE_COVERAGE)
     return()
 endif()
 
-# Coverage requires Clang.
+# Coverage requires Clang for BOTH C and C++ compilers. If CC is
+# gcc while CXX is clang++, the coverage flags produce incompatible
+# profraw shapes and llvm-cov can't merge them. #317 Codex P2.
 if(NOT (CMAKE_CXX_COMPILER_ID MATCHES "Clang"))
     message(FATAL_ERROR
-        "PULP_ENABLE_COVERAGE requires Clang (GCC gcov is not supported "
-        "in year 1 — shape differences between llvm-cov and gcovr "
-        "would confuse the per-subsystem summary table).")
+        "PULP_ENABLE_COVERAGE requires Clang for C++ "
+        "(CMAKE_CXX_COMPILER_ID=${CMAKE_CXX_COMPILER_ID}). "
+        "GCC gcov is not supported in year 1 — shape differences "
+        "between llvm-cov and gcovr would confuse the per-subsystem "
+        "summary table.")
+endif()
+if(NOT (CMAKE_C_COMPILER_ID MATCHES "Clang"))
+    message(FATAL_ERROR
+        "PULP_ENABLE_COVERAGE requires Clang for C "
+        "(CMAKE_C_COMPILER_ID=${CMAKE_C_COMPILER_ID}). "
+        "Mixing gcc for .c and clang++ for .cpp produces profraw "
+        "shape incompatibilities that llvm-cov can't merge.")
 endif()
 
 # Warn on Release.

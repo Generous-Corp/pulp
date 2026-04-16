@@ -9,7 +9,7 @@ builds are unaffected.
 | **Coverage** | `-DPULP_ENABLE_COVERAGE=ON` | Measure what the test suite actually exercises | Non-blocking artifact |
 | **AddressSanitizer + UBSan** | `-DPULP_SANITIZER=address` | Heap/stack overflow, use-after-free, UB | Blocking (when enabled) |
 | **ThreadSanitizer** | `-DPULP_SANITIZER=thread` | Data races, lock ordering | Advisory |
-| UndefinedBehaviorSanitizer | `-DPULP_SANITIZER=undefined` | Signed overflow, null deref, alignment | On-demand |
+| UndefinedBehaviorSanitizer | `-DPULP_SANITIZER=undefined` | Signed overflow, null deref, alignment | On-demand (`scripts/run_ubsan.sh`) |
 | MemorySanitizer | `-DPULP_SANITIZER=memory` | Uninitialized reads (Clang only; requires all-deps instrumented) | Manual |
 | RealtimeSanitizer | `-DPULP_SANITIZER=realtime` | Malloc / lock / syscall inside an RT section (Clang 18+) | Manual |
 
