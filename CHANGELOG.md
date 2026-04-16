@@ -3,6 +3,13 @@
 All notable changes to Pulp are documented here. Each entry links
 to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 
+<a id="v0140"></a>
+## [0.14.0] - 2026-04-16
+
+- view: ModulationMatrixWidget depth/curve/remove editing (#256) ([#264](https://github.com/danielraffel/pulp/pull/264))
+- ara(au): audioUnitARAFactory KVO property on PulpAudioUnit (#252) ([#263](https://github.com/danielraffel/pulp/pull/263))
+- ara(vst3): detect IHostApplication + surface ARA factory (#251) ([#261](https://github.com/danielraffel/pulp/pull/261))
+
 <a id="v0131"></a>
 ## [0.13.1] - 2026-04-16
 
@@ -292,6 +299,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Local CI docs, config template, and smoke test ([#53](https://github.com/danielraffel/pulp/pull/53))
 - feature/local ci ([#52](https://github.com/danielraffel/pulp/pull/52))
 
+[0.14.0]: https://github.com/danielraffel/pulp/releases/tag/v0.14.0
 [0.13.1]: https://github.com/danielraffel/pulp/releases/tag/v0.13.1
 [0.13.0]: https://github.com/danielraffel/pulp/releases/tag/v0.13.0
 [0.12.0]: https://github.com/danielraffel/pulp/releases/tag/v0.12.0
