@@ -49,8 +49,24 @@ public:
     // -- Lifecycle --
 
     bool start() {
-        return open_output_stream() && output_stream_->requestStart() == oboe::Result::OK;
+        if (!open_output_stream()) return false;
+        if (output_stream_->requestStart() != oboe::Result::OK) return false;
+        // Workstream 02 #244: open an input stream symmetrically when the
+        // caller asked for input channels. Failure to open is logged but
+        // non-fatal — playback continues without capture.
+        if (requested_input_channels_ > 0) {
+            if (!open_input_stream()) {
+                PULP_LOGW("Oboe: input-stream open failed; continuing output-only");
+            } else if (input_stream_->requestStart() != oboe::Result::OK) {
+                PULP_LOGW("Oboe: input-stream start failed");
+                input_stream_->close();
+                input_stream_.reset();
+            }
+        }
+        return true;
     }
+
+    void set_requested_input_channels(int32_t n) { requested_input_channels_ = n; }
 
     void stop() {
         if (output_stream_) {
@@ -193,6 +209,37 @@ private:
 
     // -- Stream creation --
 
+    // Workstream 02 #244: symmetric input-stream opener. Runs in parallel
+    // with the output stream when requested_input_channels_ > 0. Shares
+    // the same low-latency / exclusive configuration so the two streams
+    // stay in step with AAudio's MMAP path on Bluetooth and USB devices.
+    bool open_input_stream() {
+        oboe::AudioStreamBuilder builder;
+        builder.setDirection(oboe::Direction::Input)
+               ->setPerformanceMode(oboe::PerformanceMode::LowLatency)
+               ->setSharingMode(oboe::SharingMode::Shared)
+               ->setFormat(oboe::AudioFormat::Float)
+               ->setChannelCount(requested_input_channels_);
+
+        if (requested_sample_rate_ > 0) {
+            builder.setSampleRate(requested_sample_rate_);
+        }
+        if (requested_buffer_size_ > 0) {
+            builder.setFramesPerCallback(requested_buffer_size_);
+        }
+
+        auto result = builder.openManagedStream(input_stream_);
+        if (result != oboe::Result::OK) {
+            PULP_LOGE("Failed to open Oboe input stream: %s",
+                      oboe::convertToText(result));
+            return false;
+        }
+        PULP_LOGI("Oboe input stream opened: %dHz, %d channels",
+                  input_stream_->getSampleRate(),
+                  input_stream_->getChannelCount());
+        return true;
+    }
+
     bool open_output_stream() {
         oboe::AudioStreamBuilder builder;
         builder.setDirection(oboe::Direction::Output)
@@ -240,6 +287,7 @@ private:
     int32_t requested_sample_rate_ = 0;
     int32_t requested_buffer_size_ = 0;
     int32_t requested_channels_ = 2;
+    int32_t requested_input_channels_ = 0;  // #244: 0 = output-only
 
     int32_t current_sample_rate_ = 48000;
     int32_t current_buffer_size_ = 256;
