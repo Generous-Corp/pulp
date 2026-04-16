@@ -33,7 +33,6 @@
 #include <memory>
 #include <mutex>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 namespace pulp::host {
@@ -188,6 +187,16 @@ public:
         processor_->setProcessing(true);
         max_block_size_ = max_block_size;
         active_ = true;
+        // #307 Codex P1 follow-up: reserve both pending-edit vectors
+        // so the audio-thread swap + drain cycle never hits a
+        // grow-and-copy allocation. One slot per advertised
+        // parameter is the worst case when every knob moves in a
+        // single block.
+        {
+            std::lock_guard<std::mutex> lock(pending_host_edits_mu_);
+            pending_host_edits_.reserve(params_.size());
+            drain_scratch_.reserve(params_.size());
+        }
         return true;
     }
 
@@ -288,21 +297,40 @@ public:
         // #297 drain: pull any host-originated set_parameter edits that
         // arrived since the previous block. Delivered as time=0 points.
         // try_lock so the audio thread never blocks on the host side;
-        // if contended, the edit rides to the next process() call and
-        // is not lost (it's still in the map).
+        // if contended, edits ride to the next process() call.
+        //
+        // #307 Codex P1 follow-up: the old impl kept pending_host_edits_
+        // as an unordered_map<uint32_t, ParamValue> and called .clear()
+        // under lock on the audio thread — stdlib unordered_map::clear()
+        // may deallocate bucket nodes, which violates RT-safety.
+        //
+        // Fix: two-buffer swap. The host thread writes into
+        // pending_host_edits_ (a std::vector<PendingEdit> with reserved
+        // capacity). The audio thread, under try_lock, std::swaps it
+        // with drain_scratch_ (also reserved) in O(1) — just swaps the
+        // internal pointers, no allocation. Lock goes out of scope; the
+        // audio thread iterates drain_scratch_ outside the lock to push
+        // CLAP_EVENT_PARAM_VALUE, then calls drain_scratch_.clear()
+        // which for std::vector is element destruction only — vector
+        // capacity is preserved by the standard, and ParamValue +
+        // uint32_t are trivially destructible so clear() compiles to
+        // "set size = 0". RT-safe by construction.
         if (controller_) {
             std::unique_lock<std::mutex> lock(pending_host_edits_mu_,
                                               std::try_to_lock);
             if (lock.owns_lock() && !pending_host_edits_.empty()) {
-                for (const auto& [pid, norm] : pending_host_edits_) {
-                    Steinberg::int32 idx = 0;
-                    auto* q = in_param_changes_.addParameterData(pid, idx);
-                    if (!q) continue;
-                    Steinberg::int32 point = 0;
-                    q->addPoint(0, norm, point);
-                }
-                pending_host_edits_.clear();
+                std::swap(pending_host_edits_, drain_scratch_);
             }
+        }
+        if (controller_ && !drain_scratch_.empty()) {
+            for (const auto& e : drain_scratch_) {
+                Steinberg::int32 idx = 0;
+                auto* q = in_param_changes_.addParameterData(e.id, idx);
+                if (!q) continue;
+                Steinberg::int32 point = 0;
+                q->addPoint(0, e.normalized, point);
+            }
+            drain_scratch_.clear();  // vector::clear preserves capacity
         }
 
         if (controller_ && !param_events.empty()) {
@@ -364,11 +392,16 @@ public:
             controller_->plainParamToNormalized(id, plain_value);
         controller_->setParamNormalized(id, norm);
 
-        // Mutex-guarded coalesced map; the audio thread drains via
-        // try_lock so set_parameter never blocks process(). Latest-wins
-        // per param_id so rapid knob drags coalesce.
+        // #307 Codex P1 follow-up: pending edits live in a reserved-
+        // capacity std::vector. Coalesce on the host side (linear scan)
+        // so the audio-thread drain stays allocation-free. set_parameter
+        // is user-gesture rate, not sample rate, so linear coalesce is
+        // cheap; the RT-safety win on the audio thread is worth it.
         std::lock_guard<std::mutex> lock(pending_host_edits_mu_);
-        pending_host_edits_[id] = norm;
+        for (auto& e : pending_host_edits_) {
+            if (e.id == id) { e.normalized = norm; return; }
+        }
+        pending_host_edits_.push_back({id, norm});
     }
 
     void set_bypass(bool bypassed) override {
@@ -504,12 +537,19 @@ private:
     Vst::IAudioProcessor* processor_ = nullptr;
     Vst::IEditController* controller_ = nullptr;
     std::vector<HostParamInfo> params_;
-    // #297: host set_parameter edits are coalesced by param_id (latest
-    // wins per block) and delivered as time=0 IParameterChanges points
-    // at the start of the next process(). Mutex-guarded, try_lock on
-    // the audio thread for RT-safety.
-    std::mutex pending_host_edits_mu_;
-    std::unordered_map<uint32_t, Vst::ParamValue> pending_host_edits_;
+    // #297 + #307 Codex P1 follow-up: host set_parameter edits.
+    // Vector-backed so the audio thread's drain is allocation-free —
+    // std::swap(pending, drain_scratch_) is O(1); drain_scratch_.clear()
+    // preserves capacity. Coalescing happens on the host side in
+    // set_parameter (linear scan). Both vectors reserve() at
+    // prepare() time based on the plugin's parameter count.
+    struct PendingEdit {
+        uint32_t id;
+        Vst::ParamValue normalized;
+    };
+    std::mutex                  pending_host_edits_mu_;
+    std::vector<PendingEdit>    pending_host_edits_;   // written by host
+    std::vector<PendingEdit>    drain_scratch_;        // drained by audio
     std::vector<float*> in_ptrs_;
     std::vector<float*> out_ptrs_;
     // Workstream 03 slice 3.5 — pre-allocated event/param buffers so the
