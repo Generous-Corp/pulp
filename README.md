@@ -1,6 +1,6 @@
 # Pulp
 
-A cross-platform audio plugin and application framework. MIT licensed, C++20 core, Swift on Apple, JS-scripted GPU UIs.
+A cross-platform audio plugin and application framework. MIT licensed, C++20 core, Swift on Apple, JS-scripted GPU UIs. Note: this project is currently in early alpha testing.
 
 > **What version is Pulp?** The SDK / CLI version is the `project(Pulp VERSION …)` number in `CMakeLists.txt`. The Claude Code plugin has its own version (`.claude-plugin/plugin.json`). Full explanation: [docs/reference/versioning.md](docs/reference/versioning.md).
 
