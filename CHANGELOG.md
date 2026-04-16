@@ -8,9 +8,16 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
-<a id="v0150"></a>
-## [0.16.0]
+<a id="v0160"></a>
+## [0.16.0] - 2026-04-17
 
+- platform: native file dialog backend-registration + explicit unsupported (#301) ([#312](https://github.com/danielraffel/pulp/pull/312))
+- format: guard compare_screenshots against filesystem exceptions (#308 Codex P1) ([#311](https://github.com/danielraffel/pulp/pull/311))
+- events: NetworkServiceDiscovery backend-registration + honest no-op (#302) ([#310](https://github.com/danielraffel/pulp/pull/310))
+- host: consume VST3 set_parameter edits via IParameterChanges (#297) ([#307](https://github.com/danielraffel/pulp/pull/307))
+- format: ValidationHarness screenshot/inspector via provider callbacks (#298) ([#308](https://github.com/danielraffel/pulp/pull/308))
+
+<a id="v0150"></a>
 ## [0.15.0] - 2026-04-16
 
 - host: skip blacklisted bundles before opening them (#271 P1 follow-up) ([#287](https://github.com/danielraffel/pulp/pull/287))
@@ -256,6 +263,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.16.0]: https://github.com/danielraffel/pulp/releases/tag/v0.16.0
 [0.15.0]: https://github.com/danielraffel/pulp/releases/tag/v0.15.0
 [0.14.0]: https://github.com/danielraffel/pulp/releases/tag/v0.14.0
 [0.13.1]: https://github.com/danielraffel/pulp/releases/tag/v0.13.1
