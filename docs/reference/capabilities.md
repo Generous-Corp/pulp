@@ -428,7 +428,7 @@ The `pulp` CLI wraps common development workflows.
 | Signing identity listing | usable | ship | |
 | Appcast feed generation (Sparkle-compatible) | usable | ship | |
 | Appcast XML parsing | usable | ship | |
-| Ed25519 update signing | usable | ship | |
+| Ed25519 update signing | planned | ship | API present; CLI hard-fails when invoked until impl lands (#295) |
 | Semantic version comparison | usable | ship | |
 | Windows code signing | partial | ship | Stub exists |
 | Linux packaging | partial | ship | Stub exists |

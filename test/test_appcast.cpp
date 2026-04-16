@@ -70,3 +70,18 @@ TEST_CASE("Version comparison", "[ship][version]") {
     REQUIRE(compare_versions("1.0", "1.0.0") == 0);
     REQUIRE(compare_versions("1.0.0.1", "1.0.0") == 1);
 }
+
+// #295 P0 regression: sign_file_ed25519 MUST NOT silently return an
+// empty signature. It must return std::nullopt so callers can hard-
+// fail instead of emitting `edSignature=""` into an appcast.
+// When the real implementation lands, this test flips to asserting
+// a non-empty base64 signature against a known test vector.
+TEST_CASE("sign_file_ed25519 never silently returns empty", "[ship][sign][issue-295]") {
+    auto result = sign_file_ed25519("/nonexistent/path", "invalid-key");
+    // Today: nullopt (no impl linked).
+    // Tomorrow: Some(sig) on valid inputs, nullopt on invalid.
+    // Either way, never Some("") — that's the #295 P0 regression.
+    if (result.has_value()) {
+        REQUIRE_FALSE(result->empty());
+    }
+}

@@ -506,12 +506,27 @@ int cmd_ship(const std::vector<std::string>& args) {
         auto url_as_path = fs::path(url);
         if (fs::exists(url_as_path)) {
             item.file_size = fs::file_size(url_as_path);
-            if (!sign_key.empty())
-                item.ed_signature = pulp::ship::sign_file_ed25519(url_as_path.string(), sign_key);
+            if (!sign_key.empty()) {
+                // Hard-fail on missing/failed signing (#295 P0). Writing
+                // an empty edSignature into the appcast looked like a
+                // successful sign but produced unsigned XML that Sparkle
+                // rejects silently — worse than no signing at all.
+                auto sig = pulp::ship::sign_file_ed25519(url_as_path.string(), sign_key);
+                if (!sig || sig->empty()) {
+                    std::cerr << "Error: --sign-key requested but Ed25519 signing is not "
+                                 "available in this build. Refusing to emit an empty "
+                                 "signature into the appcast.\n";
+                    std::cerr << "  Follow-up tracked at: "
+                                 "https://github.com/danielraffel/pulp/issues/295\n";
+                    return 1;
+                }
+                item.ed_signature = std::move(*sig);
+            }
         } else if (!sign_key.empty()) {
-            std::cerr << "Warning: --sign-key requires a local file path to compute the signature.\n";
+            std::cerr << "Error: --sign-key requires a local file path to compute the signature.\n";
             std::cerr << "  The remote URL cannot be signed. Download the file first, then pass\n";
             std::cerr << "  the local path as --url and set --download-url for the enclosure URL.\n";
+            return 1;
         }
 
         { auto now = std::time(nullptr); char buf[64];

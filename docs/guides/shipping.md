@@ -140,14 +140,23 @@ Generate a Sparkle-compatible appcast:
 ```cpp
 #include <pulp/ship/appcast.hpp>
 
-pulp::ship::AppcastEntry entry{
-    .version = "1.0.1",
-    .url = "https://example.com/MyPlugin-1.0.1.dmg",
-    .release_notes = "Bug fixes and performance improvements.",
-    .signature = pulp::ship::ed25519_sign(file_data, private_key),
-};
+pulp::ship::AppcastItem item;
+item.version      = "1.0.1";
+item.download_url = "https://example.com/MyPlugin-1.0.1.dmg";
+item.description  = "Bug fixes and performance improvements.";
 
-auto xml = pulp::ship::to_xml({entry});
+// Ed25519 signing: API present but implementation is planned (#295).
+// sign_file_ed25519 returns std::nullopt today, and the CLI refuses
+// to emit `edSignature=""` into an appcast rather than produce a
+// silently-unsigned feed. Until the real impl lands, leave
+// item.ed_signature unset (unsigned appcast) or sign out-of-band.
+if (auto sig = pulp::ship::sign_file_ed25519(local_file_path, private_key_b64)) {
+    item.ed_signature = *sig;
+}
+
+pulp::ship::Appcast feed;
+feed.items.push_back(item);
+auto xml = feed.to_xml();
 ```
 
 ### CI Release Pipeline
@@ -158,7 +167,7 @@ The `sign-and-release.yml` workflow runs on version tags (`v*`):
 2. Signs with Developer ID from GitHub Secrets
 3. Notarizes via `notarytool`
 4. Creates PKG installers
-5. Generates appcast.xml with Ed25519 signatures
+5. Generates appcast.xml (Ed25519 signatures planned — #295)
 6. Creates GitHub Release with artifacts
 
 ## Plugin Install Locations (macOS)

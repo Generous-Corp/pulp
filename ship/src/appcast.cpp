@@ -3,6 +3,7 @@
 #include <cstring>
 #include <regex>
 #include <algorithm>
+#include <optional>
 
 namespace pulp::ship {
 
@@ -154,18 +155,36 @@ int compare_versions(const std::string& a, const std::string& b) {
     return 0;
 }
 
-// ── EdDSA signing stub ───────────────────────────────────────────────────────
+// ── EdDSA signing ────────────────────────────────────────────────────────────
+//
+// Real Ed25519 signing is a follow-up to this P0 fix (#295). Until
+// a vetted implementation lands, this function returns std::nullopt
+// unconditionally so the CLI refuses to emit `edSignature=""` into
+// an appcast — which is what Sparkle-speaking hosts parse as
+// "unsigned" while our CLI logs a successful-looking "signed" line.
+// The silent-empty-signature behaviour was worse than no signing,
+// because operators thought their releases were signed.
+//
+// Vendoring options for the follow-up implementation:
+//   1. monocypher (2-clause BSD, single-file, pulled in as subset)
+//   2. mbedTLS PSA_WANT_ALG_PURE_EDDSA (flip PSA config flags, no
+//      additional dependency; requires mbedTLS 3.6+ with PSA crypto)
+//   3. Apple CryptoKit on mac/iOS + mbedTLS elsewhere
+//
+// Whichever lands, it must:
+//   - parse a base64 Ed25519 private key (32-byte seed or 64-byte full)
+//   - read + SHA-512 the file contents (Ed25519 hashes internally)
+//   - emit a 64-byte signature, base64-encoded
+//   - include a round-trip verify() call in tests
 
-std::string sign_file_ed25519(const std::string& file_path,
-                              const std::string& private_key_b64) {
-    // Delegate to system openssl or generate_appcast tool
-    // This is a stub — real Ed25519 signing requires either:
-    // 1. Linking libsodium/monocypher (MIT/BSD)
-    // 2. Using system openssl CLI
-    // For now, return empty string indicating unsigned
+std::optional<std::string> sign_file_ed25519(const std::string& file_path,
+                                             const std::string& private_key_b64) {
     (void)file_path;
     (void)private_key_b64;
-    return {};
+    // Intentional nullopt: no Ed25519 impl linked in. Callers must
+    // surface this as a hard error instead of writing an empty
+    // signature into the appcast.
+    return std::nullopt;
 }
 
 } // namespace pulp::ship

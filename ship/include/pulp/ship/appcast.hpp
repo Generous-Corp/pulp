@@ -48,9 +48,18 @@ struct KeyPair {
     std::string public_key_b64;
 };
 
-// Sign a file with Ed25519 and return base64 signature
-// Uses the system's openssl or a built-in implementation
-std::string sign_file_ed25519(const std::string& file_path,
-                              const std::string& private_key_b64);
+// Sign a file with Ed25519 and return base64 signature.
+//
+// Returns std::nullopt when signing is unavailable (no vetted Ed25519
+// implementation linked in yet — tracked as follow-up to #295) OR when
+// inputs are invalid (unreadable file, malformed key). Callers MUST
+// treat nullopt as a hard failure and refuse to produce an unsigned
+// appcast. Returning an empty string silently was the #295 P0 bug —
+// it looked like a successful sign to the CLI but emitted
+// `edSignature=""` into the appcast, which Sparkle won't validate
+// against the public key. Worse than no signing because the signed-
+// looking workflow hid the problem from operators.
+std::optional<std::string> sign_file_ed25519(const std::string& file_path,
+                                             const std::string& private_key_b64);
 
 } // namespace pulp::ship
