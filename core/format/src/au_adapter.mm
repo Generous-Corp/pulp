@@ -334,7 +334,6 @@ struct AUBridge {
             }
         }
 
-<<<<<<< HEAD
         // Sidechain: pull bus 1 into its own ABL so it doesn't alias the
         // main input block. Processor::set_sidechain() takes a BufferView
         // that remains valid for the duration of process(). Workstream 01
@@ -379,14 +378,11 @@ struct AUBridge {
             bridge->processor->set_sidechain(nullptr);
         }
 
-        // MIDI events
-=======
         // MIDI events. Pulp's MidiEvent is a choc::midi::ShortMessage
         // (1–3 bytes); AU can also deliver longer messages (sysex, UMP)
         // via AURenderEventMIDIEventList — we skip those here so a
         // malformed ShortMessage is never constructed from truncated
         // bytes. Workstream 01 slice 1.4.
->>>>>>> f80d3b04 (auv3: reject malformed AUMIDIEvent packets (workstream 01 slice 1.4))
         pulp::midi::MidiBuffer midi_in, midi_out;
         const AURenderEvent* event = realtimeEventListHead;
         while (event) {
@@ -413,6 +409,29 @@ struct AUBridge {
         ctx.sample_rate = bridge->sample_rate;
         ctx.num_samples = static_cast<int>(frameCount);
         bridge->processor->process(output_view, input_view, midi_in, midi_out, ctx);
+
+        // Forward any MIDI the Processor emitted to the host via the
+        // AUv3 MIDIOutputEventBlock. The block is installed by the host
+        // on an ARC-managed retained property; we capture it via `self`
+        // at block-creation time so the retain cycle stays safe.
+        // Workstream 01 — AUv3 MIDI-out (#242).
+        if (midi_out.size() > 0) {
+            AUMIDIOutputEventBlock outBlock = self.MIDIOutputEventBlock;
+            if (outBlock) {
+                for (const auto& e : midi_out) {
+                    const AUEventSampleTime sampleTime =
+                        static_cast<AUEventSampleTime>(
+                            timestamp->mSampleTime + e.sample_offset);
+                    uint8_t bytes[3] = {0, 0, 0};
+                    const uint32_t n = e.message.length();
+                    if (n >= 1) bytes[0] = e.data()[0];
+                    if (n >= 2) bytes[1] = e.data()[1];
+                    if (n >= 3) bytes[2] = e.data()[2];
+                    // cable = 0 (single-port AUv3), length = short-msg size.
+                    outBlock(sampleTime, 0, static_cast<NSInteger>(n), bytes);
+                }
+            }
+        }
 
         return noErr;
     };
