@@ -150,11 +150,54 @@ tresult PLUGIN_API PulpVst3Processor::setBusArrangements(
     SpeakerArrangement* inputs, int32 numIns,
     SpeakerArrangement* outputs, int32 numOuts)
 {
-    // Accept stereo or mono
-    if (numIns >= 1 && numOuts >= 1) {
-        return SingleComponentEffect::setBusArrangements(inputs, numIns, outputs, numOuts);
+    // Dynamic bus-arrangement negotiation (issue #240).
+    //
+    // VST3 hosts call this when the project's channel layout changes
+    // (e.g. loading a stereo project over a mono plugin slot) and
+    // expect the plug-in to either accept the request and apply it
+    // to every bus or reject the whole proposal with kResultFalse.
+    // Our prior impl just delegated to the parent, which left the
+    // plug-in's view of `processor_->descriptor()` out of sync with
+    // the actual VST3 bus channel counts.
+    //
+    // Strategy:
+    //   * Reject if counts don't match what the descriptor declared.
+    //   * Otherwise update every bus's ChannelCount in place and
+    //     re-propagate to the base class. The descriptor's bus count
+    //     is authoritative for bus identity; the *channel* count
+    //     within each bus may shift mono↔stereo.
+    if (!processor_) return kResultFalse;
+    auto desc = processor_->descriptor();
+
+    if (numIns != static_cast<int32>(desc.input_buses.size()) ||
+        numOuts != static_cast<int32>(desc.output_buses.size())) {
+        return kResultFalse;
     }
-    return kResultFalse;
+
+    // Only mono + stereo are negotiable today — anything else is
+    // refused so the host falls back to the default arrangement.
+    auto supported = [](SpeakerArrangement a) {
+        return a == SpeakerArr::kMono || a == SpeakerArr::kStereo;
+    };
+    for (int32 i = 0; i < numIns;  ++i) if (!supported(inputs[i]))  return kResultFalse;
+    for (int32 i = 0; i < numOuts; ++i) if (!supported(outputs[i])) return kResultFalse;
+
+    // Apply channel counts to the AudioBus objects the parent registered
+    // from descriptor() during initialize(). setArrangement is the VST3
+    // SDK's canonical in-place mutator for a bus's channel layout.
+    for (int32 i = 0; i < numIns; ++i) {
+        if (auto* bus = FCast<AudioBus>(audioInputs.at(i))) {
+            bus->setArrangement(inputs[i]);
+        }
+    }
+    for (int32 i = 0; i < numOuts; ++i) {
+        if (auto* bus = FCast<AudioBus>(audioOutputs.at(i))) {
+            bus->setArrangement(outputs[i]);
+        }
+    }
+    runtime::log_info(
+        "VST3 setBusArrangements: accepted {} in / {} out buses", numIns, numOuts);
+    return kResultTrue;
 }
 
 tresult PLUGIN_API PulpVst3Processor::setupProcessing(ProcessSetup& setup) {
