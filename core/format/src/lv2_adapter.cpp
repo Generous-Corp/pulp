@@ -52,7 +52,12 @@ std::string generate_plugin_ttl(const PluginDescriptor& desc,
             // Effects don't need a specific subclass
             break;
         case PluginCategory::MidiEffect:
-            ttl << " , lv2:ConverterPlugin";
+            // MIDI processors are not format/unit converters; mapping to
+            // lv2:ConverterPlugin (#276) misled hosts that group by LV2
+            // class. lv2:UtilityPlugin + a more specific MIDIPlugin
+            // marker is the conventional placement for MIDI effects in
+            // the LV2 taxonomy.
+            ttl << " , lv2:UtilityPlugin , lv2:MIDIPlugin";
             break;
     }
     ttl << " ;\n";

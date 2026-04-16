@@ -168,7 +168,10 @@ echo "Checking VISION.md status claims..."
 if [ -f "$ROOT/VISION.md" ]; then
     # Check "not yet implemented" claims against actual code
     # AUv3 — should NOT be listed as unimplemented (it exists)
-    if grep -q 'AUv3.*format adapter' "$ROOT/VISION.md" | grep -qi 'not yet'; then
+    # #275: drop -q on the first grep so stdout actually carries the
+    # match to the second grep. The prior `grep -q … | grep -qi …`
+    # pattern silently produced an empty pipe and the check never fired.
+    if grep 'AUv3.*format adapter' "$ROOT/VISION.md" 2>/dev/null | grep -qi 'not yet'; then
         warn "VISION.md lists AUv3 as not implemented but core/format/src/au_adapter.mm exists"
     fi
 
@@ -196,7 +199,8 @@ if [ -f "$ROOT/VISION.md" ]; then
         # If VISION.md says WASAPI but support-matrix says planned, that's a drift
         for backend in wasapi alsa coremidi; do
             yaml_status=$(grep -A1 "  $backend:" "$STATUS/support-matrix.yaml" 2>/dev/null | grep 'status:' | awk '{print $2}')
-            if [ "$yaml_status" = "planned" ] && grep -qi "$backend" "$ROOT/VISION.md" | grep -qi "works today"; then
+            # #275: same grep -q → grep -qi broken-pipe pattern.
+            if [ "$yaml_status" = "planned" ] && grep -i "$backend" "$ROOT/VISION.md" 2>/dev/null | grep -qi "works today"; then
                 warn "VISION.md claims $backend works but support-matrix.yaml says planned"
             fi
         done

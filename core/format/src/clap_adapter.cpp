@@ -129,9 +129,22 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
     }
     if (process->audio_inputs_count > 1) {
         auto& sc_bus = process->audio_inputs[1];
-        sc_channels = (std::min)(static_cast<int>(sc_bus.channel_count), kMaxChannels);
-        for (int ch = 0; ch < sc_channels; ++ch)
-            self->sidechain_ptrs[ch] = sc_bus.data32[ch];
+        // #277: guard against a host that reports a sidechain bus but
+        // hands us a null data32 pointer (bus deactivated). Mirrors the
+        // defensive guard the VST3 adapter already has.
+        if (sc_bus.data32) {
+            sc_channels = (std::min)(static_cast<int>(sc_bus.channel_count), kMaxChannels);
+            for (int ch = 0; ch < sc_channels; ++ch) {
+                self->sidechain_ptrs[ch] = sc_bus.data32[ch];
+                if (!self->sidechain_ptrs[ch]) {
+                    // Any null per-channel pointer demotes the whole bus
+                    // to "not supplied" so Processor::set_sidechain sees
+                    // nullptr rather than a half-valid BufferView.
+                    sc_channels = 0;
+                    break;
+                }
+            }
+        }
     }
 
     if (process->audio_outputs_count > 0) {
