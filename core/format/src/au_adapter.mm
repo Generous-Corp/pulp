@@ -378,11 +378,12 @@ struct AUBridge {
             bridge->processor->set_sidechain(nullptr);
         }
 
-        // MIDI events. Pulp's MidiEvent is a choc::midi::ShortMessage
-        // (1–3 bytes); AU can also deliver longer messages (sysex, UMP)
-        // via AURenderEventMIDIEventList — we skip those here so a
-        // malformed ShortMessage is never constructed from truncated
-        // bytes. Workstream 01 slice 1.4.
+        // MIDI events. Short messages arrive as AURenderEventMIDI;
+        // sysex (and long MIDI 2.0 UMP groups from AU v3.1+) arrive
+        // as AURenderEventMIDIEventList. Workstream 01 #288 completes
+        // the sysex triad — CLAP half #269, VST3 half #274, AU half
+        // here — by routing long packets into MidiBuffer's variable-
+        // length sysex sidecar (#231).
         pulp::midi::MidiBuffer midi_in, midi_out;
         const AURenderEvent* event = realtimeEventListHead;
         while (event) {
@@ -399,6 +400,57 @@ struct AUBridge {
                     me.sample_offset =
                         static_cast<int32_t>(event->head.eventSampleTime);
                     midi_in.add(me);
+                }
+            } else if (event->head.eventType == AURenderEventMIDIEventList) {
+                // AUMIDIEventList delivers UMP-encoded events. For
+                // sysex the UMP type-3 (7-bit Data Messages, status
+                // 0x3x) stream carries the F0..F7 payload spread
+                // across 8-byte packets with continuation flags.
+                // We reassemble into a single std::vector<uint8_t>
+                // and hand it to MidiBuffer::add_sysex.
+                const auto& elist = event->MIDIEventsList;
+                const MIDIEventList* packets = &elist.eventList;
+                if (packets) {
+                    std::vector<uint8_t> payload;
+                    const MIDIEventPacket* pkt = &packets->packet[0];
+                    for (UInt32 i = 0; i < packets->numPackets; ++i) {
+                        // Each packet's `words[0..wordCount]` holds
+                        // UMP 32-bit words. Type-3 (sysex7) status
+                        // lives in the top nibble of word 0.
+                        for (UInt32 w = 0; w < pkt->wordCount; ++w) {
+                            const uint32_t word = pkt->words[w];
+                            const uint8_t mt = (word >> 28) & 0x0F;
+                            if (mt != 0x3) continue; // not sysex7 UMP
+                            // word bytes: [mt/group][status|size][data..]
+                            const uint32_t size = (word >> 16) & 0x0F;
+                            const uint8_t b2 = (word >>  8) & 0xFF;
+                            const uint8_t b3 = (word >>  0) & 0xFF;
+                            if (size >= 1) payload.push_back(b2);
+                            if (size >= 2) payload.push_back(b3);
+                            // Additional 4 data bytes live in word 1
+                            // for size > 2; walk them here.
+                            if (w + 1 < pkt->wordCount && size > 2) {
+                                const uint32_t w1 = pkt->words[w + 1];
+                                const uint8_t extras[4] = {
+                                    static_cast<uint8_t>((w1 >> 24) & 0xFF),
+                                    static_cast<uint8_t>((w1 >> 16) & 0xFF),
+                                    static_cast<uint8_t>((w1 >>  8) & 0xFF),
+                                    static_cast<uint8_t>((w1 >>  0) & 0xFF),
+                                };
+                                for (uint32_t e = 0; e < size - 2 && e < 4; ++e)
+                                    payload.push_back(extras[e]);
+                            }
+                        }
+                        pkt = reinterpret_cast<const MIDIEventPacket*>(
+                            reinterpret_cast<const uint8_t*>(pkt) +
+                            sizeof(MIDIEventPacket) +
+                            (pkt->wordCount > 0 ? (pkt->wordCount - 1) * sizeof(UInt32) : 0));
+                    }
+                    if (!payload.empty()) {
+                        midi_in.add_sysex(std::move(payload),
+                            static_cast<int32_t>(event->head.eventSampleTime),
+                            0.0);
+                    }
                 }
             }
             event = event->head.next;
