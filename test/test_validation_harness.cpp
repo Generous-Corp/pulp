@@ -264,25 +264,118 @@ TEST_CASE("ValidationHarness run_validator errors on missing plugin", "[harness]
     REQUIRE_THAT(entry.error_message, ContainsSubstring("not found"));
 }
 
-// ── Screenshot/inspector stubs (headless mode) ──────────────────────────────
+// ── Screenshot / inspector providers (#298) ─────────────────────────────────
 
-TEST_CASE("ValidationHarness screenshot skips in headless mode", "[harness][phase2]") {
+TEST_CASE("ValidationHarness screenshot skips without provider",
+          "[harness][phase2][issue-298]") {
     pulp::format::ValidationHarness harness(create_test_gain);
     harness.configure({});
 
-    auto entry = harness.capture_screenshot("/tmp/test.png");
+    // No provider installed — must report skip, never pass.
+    auto entry = harness.capture_screenshot("/tmp/test-unprovided.png");
     REQUIRE(entry.status == pulp::format::ValidationStatus::skip);
-    REQUIRE_THAT(entry.error_message, ContainsSubstring("headless"));
+    REQUIRE_THAT(entry.error_message, ContainsSubstring("provider"));
     REQUIRE_FALSE(entry.payload_json.empty());
 }
 
-TEST_CASE("ValidationHarness inspector skips in headless mode", "[harness][phase2]") {
+TEST_CASE("ValidationHarness screenshot passes when provider returns true",
+          "[harness][phase2][issue-298]") {
+    pulp::format::ValidationHarness harness(create_test_gain);
+    harness.configure({});
+
+    std::filesystem::path captured_path;
+    uint32_t captured_w = 0, captured_h = 0;
+    harness.set_capture_screenshot_provider(
+        [&](const std::filesystem::path& p,
+            uint32_t w, uint32_t h, float, const std::string&) {
+            captured_path = p;
+            captured_w = w;
+            captured_h = h;
+            // Simulate a successful write.
+            std::ofstream(p) << "PNG-STUB";
+            return true;
+        });
+
+    auto entry = harness.capture_screenshot("/tmp/test-provided.png");
+    REQUIRE(entry.status == pulp::format::ValidationStatus::pass);
+    REQUIRE(captured_path == std::filesystem::path("/tmp/test-provided.png"));
+    REQUIRE(captured_w > 0);
+    REQUIRE(captured_h > 0);
+    REQUIRE_THAT(entry.payload_json, ContainsSubstring("\"view_id\": \"provider\""));
+    std::filesystem::remove("/tmp/test-provided.png");
+}
+
+TEST_CASE("ValidationHarness screenshot fails when provider returns false",
+          "[harness][phase2][issue-298]") {
+    pulp::format::ValidationHarness harness(create_test_gain);
+    harness.configure({});
+
+    harness.set_capture_screenshot_provider(
+        [](const std::filesystem::path&, uint32_t, uint32_t, float, const std::string&) {
+            return false;  // simulate capture failure
+        });
+
+    auto entry = harness.capture_screenshot("/tmp/test-fail.png");
+    REQUIRE(entry.status == pulp::format::ValidationStatus::fail);
+    REQUIRE_THAT(entry.error_message, ContainsSubstring("returned false"));
+}
+
+TEST_CASE("ValidationHarness inspector skips without provider",
+          "[harness][phase2][issue-298]") {
     pulp::format::ValidationHarness harness(create_test_gain);
     harness.configure({});
 
     auto entry = harness.capture_inspector();
     REQUIRE(entry.status == pulp::format::ValidationStatus::skip);
-    REQUIRE_THAT(entry.error_message, ContainsSubstring("headless"));
+    REQUIRE_THAT(entry.error_message, ContainsSubstring("provider"));
+}
+
+TEST_CASE("ValidationHarness inspector passes with provider",
+          "[harness][phase2][issue-298]") {
+    pulp::format::ValidationHarness harness(create_test_gain);
+    harness.configure({});
+
+    harness.set_capture_inspector_provider([]() {
+        return std::string("{\"type\":\"View\",\"children\":[]}");
+    });
+
+    auto entry = harness.capture_inspector();
+    REQUIRE(entry.status == pulp::format::ValidationStatus::pass);
+    REQUIRE_THAT(entry.payload_json, ContainsSubstring("\"children\""));
+}
+
+TEST_CASE("ValidationHarness compare_screenshots identical files → pass",
+          "[harness][phase2][issue-298]") {
+    pulp::format::ValidationHarness harness(create_test_gain);
+    harness.configure({});
+
+    auto a = std::filesystem::temp_directory_path() / "harness-ref.bin";
+    auto b = std::filesystem::temp_directory_path() / "harness-ren.bin";
+    std::ofstream(a) << "byte-identical-content";
+    std::ofstream(b) << "byte-identical-content";
+
+    auto entry = harness.compare_screenshots(a, b);
+    REQUIRE(entry.status == pulp::format::ValidationStatus::pass);
+    REQUIRE_THAT(entry.payload_json, ContainsSubstring("\"similarity\": 1"));
+    std::filesystem::remove(a);
+    std::filesystem::remove(b);
+}
+
+TEST_CASE("ValidationHarness compare_screenshots differing files → fail",
+          "[harness][phase2][issue-298]") {
+    pulp::format::ValidationHarness harness(create_test_gain);
+    harness.configure({});
+
+    auto a = std::filesystem::temp_directory_path() / "harness-ref2.bin";
+    auto b = std::filesystem::temp_directory_path() / "harness-ren2.bin";
+    std::ofstream(a) << "content-A";
+    std::ofstream(b) << "content-B";
+
+    auto entry = harness.compare_screenshots(a, b);
+    REQUIRE(entry.status == pulp::format::ValidationStatus::fail);
+    REQUIRE_THAT(entry.error_message, ContainsSubstring("differ"));
+    std::filesystem::remove(a);
+    std::filesystem::remove(b);
 }
 
 // ── Clear entries ───────────────────────────────────────────────────────────

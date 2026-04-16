@@ -121,16 +121,48 @@ public:
     bool load_state(std::span<const uint8_t> data);
 
     // ── Capture ─────────────────────────────────────────────────────────
+    //
+    // Screenshot and inspector capture are delegated to an external
+    // provider callback so the harness stays free of a direct view-
+    // library dependency (#298). Register a provider before calling
+    // capture_screenshot()/capture_inspector() — without one, the
+    // entry is reported as `skip` with a clear "no provider attached"
+    // message. Callers must never confuse skip with pass.
+
+    /// Callback that captures a screenshot of the current view/render
+    /// state into `output_path`. Returns true on success.
+    using CaptureScreenshotProvider = std::function<bool(
+        const std::filesystem::path& output_path,
+        uint32_t width, uint32_t height, float scale,
+        const std::string& backend)>;
+
+    /// Callback that produces a JSON snapshot of the view tree.
+    /// Returns the JSON string; empty string means "no tree available".
+    using CaptureInspectorProvider = std::function<std::string()>;
+
+    /// Install the screenshot capture provider. Pass an empty
+    /// std::function to remove.
+    void set_capture_screenshot_provider(CaptureScreenshotProvider p);
+
+    /// Install the inspector capture provider.
+    void set_capture_inspector_provider(CaptureInspectorProvider p);
 
     /// Capture a screenshot to the given path. Returns a ReportEntry.
-    /// Note: requires a View root to be set via set_view_root().
+    /// Requires a capture-screenshot provider installed via
+    /// set_capture_screenshot_provider(); otherwise reports `skip`.
     ReportEntry capture_screenshot(const std::filesystem::path& output_path);
 
     /// Compare two screenshot files and generate a diff entry.
+    /// Today this does a byte-level file comparison — pixel-level
+    /// diffing (with a tolerance) is a follow-up once a PNG codec
+    /// is available to the format layer. A real pixel diff always
+    /// produces pass/fail, never skip.
     ReportEntry compare_screenshots(const std::filesystem::path& reference,
                                      const std::filesystem::path& rendered);
 
     /// Capture the view inspector tree as JSON. Returns a ReportEntry.
+    /// Requires a capture-inspector provider installed via
+    /// set_capture_inspector_provider(); otherwise reports `skip`.
     ReportEntry capture_inspector();
 
     // ── External validators ─────────────────────────────────────────────
@@ -172,6 +204,12 @@ private:
     std::vector<ReportEntry> entries_;
     midi::MidiBuffer pending_midi_in_;
     bool prepared_ = false;
+
+    // #298 capture delegation. Unset by default; callers register a
+    // provider backed by the view layer (or a test fake) before
+    // invoking capture_screenshot / capture_inspector.
+    CaptureScreenshotProvider screenshot_provider_;
+    CaptureInspectorProvider  inspector_provider_;
 
     std::string platform_string() const;
     std::string iso_timestamp() const;

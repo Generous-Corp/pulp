@@ -4,11 +4,15 @@
 #include <pulp/format/validation_harness.hpp>
 #include <pulp/platform/child_process.hpp>
 #include <pulp/platform/platform.hpp>
+#include <algorithm>
 #include <chrono>
+#include <cstdint>
 #include <ctime>
 #include <fstream>
 #include <iomanip>
+#include <iterator>
 #include <sstream>
+#include <utility>
 
 namespace pulp::format {
 
@@ -153,17 +157,49 @@ bool ValidationHarness::load_state(std::span<const uint8_t> data) {
 
 // ── Capture ─────────────────────────────────────────────────────────────────
 
-ReportEntry ValidationHarness::capture_screenshot(
-    [[maybe_unused]] const std::filesystem::path& output_path)
+void ValidationHarness::set_capture_screenshot_provider(
+    CaptureScreenshotProvider p)
 {
-    // Screenshot capture requires a View root, which the harness doesn't own.
-    // This is a headless-only stub that records the intent in the report.
-    // For actual screenshot capture, use the view layer directly.
+    screenshot_provider_ = std::move(p);
+}
+
+void ValidationHarness::set_capture_inspector_provider(
+    CaptureInspectorProvider p)
+{
+    inspector_provider_ = std::move(p);
+}
+
+ReportEntry ValidationHarness::capture_screenshot(
+    const std::filesystem::path& output_path)
+{
+    // #298: delegate to the registered provider. Without one, the
+    // entry is explicitly `skip` so callers cannot confuse the
+    // headless state with a successful validation.
     ReportEntry entry;
     entry.type = "screenshot";
-    entry.status = ValidationStatus::skip;
     entry.target = descriptor().name;
-    entry.error_message = "No view root attached (headless-only mode)";
+
+    std::string view_id = "none";
+    if (screenshot_provider_) {
+        const bool ok = screenshot_provider_(
+            output_path,
+            opts_.screenshot_width,
+            opts_.screenshot_height,
+            opts_.screenshot_scale,
+            opts_.screenshot_backend);
+        if (ok) {
+            entry.status = ValidationStatus::pass;
+            view_id = "provider";
+        } else {
+            entry.status = ValidationStatus::fail;
+            entry.error_message =
+                "capture_screenshot_provider returned false";
+        }
+    } else {
+        entry.status = ValidationStatus::skip;
+        entry.error_message =
+            "No capture-screenshot provider attached";
+    }
 
     std::ostringstream payload;
     payload << "{"
@@ -172,7 +208,7 @@ ReportEntry ValidationHarness::capture_screenshot(
             << "\"height\": " << opts_.screenshot_height << ","
             << "\"scale\": " << opts_.screenshot_scale << ","
             << "\"backend\": \"" << opts_.screenshot_backend << "\","
-            << "\"view_id\": \"none\""
+            << "\"view_id\": \"" << view_id << "\""
             << "}";
     entry.payload_json = payload.str();
 
@@ -181,14 +217,15 @@ ReportEntry ValidationHarness::capture_screenshot(
 }
 
 ReportEntry ValidationHarness::compare_screenshots(
-    [[maybe_unused]] const std::filesystem::path& reference,
-    [[maybe_unused]] const std::filesystem::path& rendered)
+    const std::filesystem::path& reference,
+    const std::filesystem::path& rendered)
 {
     ReportEntry entry;
     entry.type = "screenshot_diff";
     entry.target = descriptor().name;
 
-    // Check files exist
+    // File-existence checks first so missing inputs are always an
+    // error (never skip).
     if (!std::filesystem::exists(reference)) {
         entry.status = ValidationStatus::error;
         entry.error_message = "Reference file not found: " + reference.string();
@@ -202,20 +239,42 @@ ReportEntry ValidationHarness::compare_screenshots(
         return entry;
     }
 
-    // Delegate to the screenshot comparison API
-    // (included via view headers when available, otherwise stub)
-    entry.status = ValidationStatus::skip;
-    entry.error_message = "Screenshot diff requires view library linkage";
+    // Byte-level file comparison. Good enough to detect bit-identical
+    // regression-rendered output (the common case in deterministic
+    // golden-file tests); pixel-level tolerant diff ships when a PNG
+    // codec becomes available to the format layer (#298 follow-up).
+    // Produces pass/fail — never skip — so callers can't confuse
+    // "images differ" with "comparison not available."
+    std::uintmax_t ref_size = std::filesystem::file_size(reference);
+    std::uintmax_t ren_size = std::filesystem::file_size(rendered);
+    double similarity = 0.0;
+    bool identical = false;
+    if (ref_size == ren_size) {
+        std::ifstream a(reference, std::ios::binary);
+        std::ifstream b(rendered, std::ios::binary);
+        identical = a.good() && b.good()
+            && std::equal(std::istreambuf_iterator<char>(a), {},
+                          std::istreambuf_iterator<char>(b));
+        similarity = identical ? 1.0 : 0.0;
+    }
+
+    entry.status = identical
+        ? ValidationStatus::pass
+        : ValidationStatus::fail;
+    if (!identical) {
+        entry.error_message = "Files differ (byte-level comparison)";
+    }
 
     std::ostringstream payload;
     payload << "{"
             << "\"reference_path\": \"" << escape_json(reference.string()) << "\","
             << "\"rendered_path\": \"" << escape_json(rendered.string()) << "\","
-            << "\"similarity\": 0.0,"
+            << "\"similarity\": " << similarity << ","
             << "\"total_pixels\": 0,"
             << "\"diff_pixels\": 0,"
             << "\"tolerance\": " << static_cast<int>(opts_.diff_tolerance) << ","
-            << "\"threshold\": " << opts_.diff_threshold
+            << "\"threshold\": " << opts_.diff_threshold << ","
+            << "\"comparison\": \"byte-level\""
             << "}";
     entry.payload_json = payload.str();
 
@@ -227,12 +286,26 @@ ReportEntry ValidationHarness::capture_inspector() {
     ReportEntry entry;
     entry.type = "inspector";
     entry.target = descriptor().name;
-    entry.status = ValidationStatus::skip;
-    entry.error_message = "No view root attached (headless-only mode)";
 
-    std::ostringstream payload;
-    payload << "{\"view_tree\": {}, \"view_count\": 0}";
-    entry.payload_json = payload.str();
+    if (inspector_provider_) {
+        std::string tree_json = inspector_provider_();
+        if (tree_json.empty()) {
+            entry.status = ValidationStatus::fail;
+            entry.error_message =
+                "capture_inspector_provider returned empty tree";
+            entry.payload_json = "{\"view_tree\": {}, \"view_count\": 0}";
+        } else {
+            entry.status = ValidationStatus::pass;
+            std::ostringstream p;
+            p << "{\"view_tree\": " << tree_json << "}";
+            entry.payload_json = p.str();
+        }
+    } else {
+        entry.status = ValidationStatus::skip;
+        entry.error_message =
+            "No capture-inspector provider attached";
+        entry.payload_json = "{\"view_tree\": {}, \"view_count\": 0}";
+    }
 
     entries_.push_back(entry);
     return entry;
