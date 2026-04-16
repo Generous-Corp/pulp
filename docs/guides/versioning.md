@@ -154,6 +154,43 @@ gh workflow run sign-and-release.yml --ref v<x.y.z>
 
 ---
 
+## Release pipeline — how CHANGELOG.md and the Release page stay in sync
+
+Two artifacts have to stay in lockstep after every release: the **GitHub Release page** (shown to users at `github.com/.../releases/tag/vX.Y.Z`) and the repo's **CHANGELOG.md** (shown to developers on main). Both are produced by the same generator so they cannot drift.
+
+**Division of labor:**
+
+- **Shipyard** — pre-merge. Runs `shipyard ship` to validate + merge PRs on green across macOS + Linux + Windows. Stops when the PR lands on main. Does not touch tags, CHANGELOG.md, or the Release page.
+- **Pulp's `.github/workflows/auto-release.yml`** — post-merge. On push to main, diffs version files and, if an SDK version moved, creates the `vX.Y.Z` tag and regenerates CHANGELOG.md.
+- **Pulp's `.github/workflows/release-cli.yml`** — post-tag. On `vX.Y.Z` push, builds binaries and creates the GitHub Release with body populated from the same generator.
+
+**End-to-end sequence:**
+
+```
+pulp pr  (shipyard ship merges the bump PR on green)
+       ↓
+auto-release.yml  (diffs version files)
+       ├── push vX.Y.Z tag
+       └── regenerate CHANGELOG.md, commit with [skip ci] + Release: skip
+              ↓
+release-cli.yml  (triggered by tag push)
+       ├── build CLI + SDK binaries (5 platforms)
+       └── create GitHub Release, body = regenerate_changelog.py --release-notes vX.Y.Z
+```
+
+**Single source of truth:** `tools/scripts/regenerate_changelog.py`. Two consumers:
+
+1. `python3 tools/scripts/regenerate_changelog.py` (no args) — rewrites `CHANGELOG.md` from the full tag graph. Called by `auto-release.yml` after the tag push. Idempotent: running twice produces identical output.
+2. `python3 tools/scripts/regenerate_changelog.py --release-notes vX.Y.Z` — prints just the one release's markdown (what's new + CHANGELOG anchor link + previous-release link). Called by `release-cli.yml` to populate the Release body.
+
+Both formats use matching anchors: `<a id="v0140"></a>` in CHANGELOG.md, `#v0140` in the release body link. GitHub's slugifier doesn't interfere because the anchor is explicit.
+
+**Why the ordering matters:** the CHANGELOG-regen step sits after the tag push, not before, so the script sees the new tag when it walks the tag graph. `[skip ci]` on the bot commit prevents auto-release from recursing; `Release: skip` on the trailer is belt-and-suspenders.
+
+**What breaks if you bypass it:** manually editing `CHANGELOG.md` between releases is fine (the script is idempotent and picks up your edits on the next regen pass as long as they land in the right release's bullet block). Creating a tag manually via `git tag -a vX.Y.Z && git push origin vX.Y.Z` skips the CHANGELOG auto-regen — you'll need to run `python3 tools/scripts/regenerate_changelog.py` and commit the result yourself. Don't do this unless recovering from a bot failure.
+
+---
+
 ## Agent parity
 
 Both Claude Code and Codex pick up this policy from `CLAUDE.md`. Codex reads `AGENTS.md` which is a thin pointer at `CLAUDE.md` — the single source of truth for both agents. There is no separate policy file for Codex, and `AGENTS.md` intentionally stays empty so the two never drift.
