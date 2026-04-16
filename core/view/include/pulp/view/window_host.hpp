@@ -32,12 +32,29 @@ struct WindowOptions {
     void* shared_gpu_device = nullptr;  ///< Shared Dawn device for multi-window GPU
 };
 
-// Native window that hosts a View tree and renders it
-// Platform-specific implementation (NSWindow on macOS)
+// Native window that hosts a View tree and renders it.
+//
+// Platform support (#299):
+//   - macOS: native NSWindow-backed impl in window_host_mac.mm.
+//   - iOS: native UIWindow-backed impl in window_host_ios.mm.
+//   - Windows/Linux/Android: no built-in impl — the host app or a
+//     future platform module registers a factory via
+//     set_factory(). Without a factory, create() returns nullptr
+//     so callers can surface "platform unsupported" through
+//     has_factory() rather than a silent null.
 class WindowHost {
 public:
     // Create a window hosting the given view tree
     static std::unique_ptr<WindowHost> create(View& root, const WindowOptions& options);
+
+    // Host-registered factory (#299). Installed by the platform
+    // layer of a host app on non-Apple targets. Apple targets use
+    // the built-in native impl and ignore the factory.
+    using Factory = std::function<std::unique_ptr<WindowHost>(
+        View& root, const WindowOptions& options)>;
+    static void set_factory(Factory factory);
+    static void clear_factory();
+    static bool has_factory();
 
     virtual ~WindowHost() = default;
 

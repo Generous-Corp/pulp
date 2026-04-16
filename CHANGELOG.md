@@ -18,6 +18,8 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - format: ValidationHarness screenshot/inspector via provider callbacks (#298) ([#308](https://github.com/danielraffel/pulp/pull/308))
 
 <a id="v0150"></a>
+## [0.16.0]
+
 ## [0.15.0] - 2026-04-16
 
 - host: skip blacklisted bundles before opening them (#271 P1 follow-up) ([#287](https://github.com/danielraffel/pulp/pull/287))

@@ -256,6 +256,15 @@ if(APPLE)
             platform/mac/drag_drop_mac.mm
             platform/mac/accessibility_mac.mm
             platform/mac/appearance_mac.mm
+            # #299: host-backend registration APIs. The stub files
+            # compile set_factory/set_screenshot_provider etc.
+            # unconditionally; only the create/render impls are
+            # gated by `#if !defined(__APPLE__)`. Including them
+            # here surfaces the registration API on mac without
+            # conflicting with the native impls.
+            src/plugin_view_host_stub.cpp
+            src/screenshot_stub.cpp
+            src/window_host_stub.cpp
         )
         target_link_libraries(pulp-view PRIVATE
             "-framework CoreServices"

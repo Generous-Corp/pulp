@@ -3,6 +3,7 @@
 #include <pulp/view/view.hpp>
 #include <memory>
 #include <cstdint>
+#include <functional>
 
 namespace pulp::view {
 
@@ -29,9 +30,24 @@ public:
         bool use_gpu = false;  ///< Use GPU rendering (Dawn/Skia Graphite) instead of CoreGraphics
     };
 
-    // Create a plugin view host for the given view tree
+    // Create a plugin view host for the given view tree.
+    //
+    // Platform support (#299):
+    //   - macOS: NSView-backed impl in plugin_view_host_mac.mm.
+    //   - iOS: UIView-backed impl in plugin_view_host_ios.mm.
+    //   - Windows/Linux/Android: no built-in impl — host app
+    //     registers a factory via set_factory(). Without a
+    //     factory, create() returns nullptr explicitly.
     static std::unique_ptr<PluginViewHost> create(View& root, Size size);
     static std::unique_ptr<PluginViewHost> create(View& root, const Options& options);
+
+    // Host-registered factory (#299). Installed by the host app's
+    // platform layer on non-Apple targets.
+    using Factory = std::function<std::unique_ptr<PluginViewHost>(
+        View& root, const Options& options)>;
+    static void set_factory(Factory factory);
+    static void clear_factory();
+    static bool has_factory();
 
     virtual ~PluginViewHost() = default;
 

@@ -218,7 +218,7 @@ Key headers: `pulp/state/parameter.hpp`, `pulp/state/store.hpp`, `pulp/state/bin
 | Theme system (color/dimension tokens, inheritance) | usable | [view](modules.md#view) | [design-tokens](../guides/design-tokens.md) |
 | JS scripting (QuickJS default, V8 and JavaScriptCore available) | usable | [view](modules.md#view) | [js-bridge](js-bridge.md) |
 | Hot reload | partial | [view](modules.md#view) | Scripted UI live reload is runtime-validated in the standalone macOS lane. Plugin targets can load `UI_SCRIPT`, but live reload is not yet guaranteed across hosts/platforms. |
-| Screenshot capture (headless PNG) | usable | [view](modules.md#view) | |
+| Screenshot capture (headless PNG) | partial | [view](modules.md#view) | Native on mac/iOS; Windows/Linux/Android require a host-registered provider via `set_screenshot_provider` (#299). |
 | Component inspector | usable | [view](modules.md#view) | |
 | Animation (FrameClock, ValueAnimation, motion tokens) | usable | [view](modules.md#view) | [animation](../guides/animation.md) |
 | Design export (JSON, SVG) | usable | [view](modules.md#view) | |
@@ -285,8 +285,8 @@ Key headers: `pulp/state/parameter.hpp`, `pulp/state/store.hpp`, `pulp/state/bin
 | Keyboard shortcuts | usable | all | registerShortcut bridge |
 | File dialogs (open, save, folder) | usable | macOS | NSOpenPanel/NSSavePanel |
 | Drag and drop | usable | macOS | File + text drop targets |
-| Plugin view hosting | usable | macOS | NSView + Metal |
-| SDL window host | usable | all | Cross-platform windowing |
+| Plugin view hosting | usable | macOS/iOS | Native NSView/UIView + Metal. Windows/Linux/Android require a host-registered `PluginViewHost::Factory` (#299). |
+| SDL window host | partial | all | Cross-platform windowing via SDL3. Non-Apple platforms require a host-registered `WindowHost::Factory` for native presentation (#299); recording-canvas-only for now. |
 
 Key headers: `pulp/view/view.hpp`, `pulp/view/widgets.hpp`, `pulp/view/theme.hpp`, `pulp/view/script_engine.hpp`, `pulp/view/widget_bridge.hpp`
 
