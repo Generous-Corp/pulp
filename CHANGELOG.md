@@ -49,6 +49,8 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - canvas: Canvas::draw_image(native_handle) + ImageView wire (#255) ([#266](https://github.com/danielraffel/pulp/pull/266))
 
 <a id="v0140"></a>
+## [0.16.0]
+
 ## [0.14.0] - 2026-04-16
 
 - view: ModulationMatrixWidget depth/curve/remove editing (#256) ([#264](https://github.com/danielraffel/pulp/pull/264))
