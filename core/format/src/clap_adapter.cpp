@@ -182,6 +182,16 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
                     static_cast<uint8_t>(ev->velocity * 127.0));
                 me.sample_offset = static_cast<int32_t>(hdr->time);
                 midi_in.add(me);
+            } else if (hdr->type == CLAP_EVENT_MIDI_SYSEX) {
+                // Workstream 01 — route CLAP sysex into MidiBuffer's
+                // variable-length sidecar (issue #239).
+                auto* ev = reinterpret_cast<const clap_event_midi_sysex_t*>(hdr);
+                if (ev->buffer && ev->size > 0) {
+                    midi_in.add_sysex(
+                        std::vector<uint8_t>(ev->buffer, ev->buffer + ev->size),
+                        static_cast<int32_t>(hdr->time),
+                        0.0);
+                }
             }
         }
     }
