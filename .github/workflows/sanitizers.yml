@@ -1,10 +1,19 @@
 name: Sanitizer Tests
 
+# ASan + UBSan on every PR, TSan advisory, RTSan on-demand.
+# Non-Apple RTSan needs Clang 18 from apt.llvm.org.
+# Local equivalents: scripts/run_asan.sh, scripts/run_tsan.sh.
+
 on:
-  # Uncomment to re-enable cloud CI on pull requests:
-  # pull_request:
-  #   branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  push:
+    branches: [main]
   workflow_dispatch:
+
+concurrency:
+  group: sanitizers-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   asan:
