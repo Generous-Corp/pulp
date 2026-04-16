@@ -36,6 +36,14 @@
 #if !defined(_WIN32)
 #  include <sys/wait.h>
 #else
+// Windows MSVC ships POSIX-named shims under leading-underscore names:
+// _popen / _pclose live in <stdio.h>. Map the POSIX spellings onto them
+// so the TU below compiles unchanged on both toolchains. This was the
+// root cause of every release-cli.yml run v0.4.0..v0.13.0 failing on
+// the CLI windows-x64 and CLI windows-arm64 jobs.
+#  include <stdio.h>
+#  define popen  _popen
+#  define pclose _pclose
 #  ifndef WIFEXITED
 #    define WIFEXITED(status)   (true)
 #  endif
