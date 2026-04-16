@@ -106,6 +106,8 @@ public:
 
 private:
     std::vector<PluginInfo> scan_directory(const std::string& dir, PluginFormat format);
+    std::vector<PluginInfo> scan_directory(const std::string& dir, PluginFormat format,
+                                           const class ScanBlacklist* blacklist);
     PluginInfo scan_vst3_bundle(const std::string& path);
     PluginInfo scan_clap_bundle(const std::string& path);
     PluginInfo scan_lv2_bundle(const std::string& path);
