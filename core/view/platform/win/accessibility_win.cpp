@@ -12,6 +12,8 @@
 #include <pulp/view/accessibility_provider.hpp>
 #include <pulp/view/view.hpp>
 #include <pulp/runtime/log.hpp>
+#include <pulp/platform/win32_sane.hpp>
+#include <UIAutomation.h>
 
 namespace pulp::view {
 
@@ -37,24 +39,44 @@ void init_win_accessibility(View& /*root*/) {
     // TODO: fire UIA events on value/focus changes
 }
 
-// Cross-platform entry — see accessibility_provider.hpp. Today these
-// route to the existing UIA stub; a future commit will spin up a
-// fragment-root provider, retain it per window, and tear it down in
-// shutdown_accessibility.
-void* init_accessibility(View& root, void* /*hwnd*/) {
+// ── Phase 1 bootstrap (workstream 04 #247) ──────────────────────────────
+// Record the HWND + root so the WindowHost can forward WM_GETOBJECT, and
+// probe UiaClientsAreListening so cheap paths can bail early when no
+// assistive tech is attached. Full IRawElementProviderSimple + Fragment(Root)
+// impls land in phase 2.
+struct UiaSession {
+    HWND hwnd = nullptr;
+    View* root = nullptr;
+    bool clients_listening = false;
+};
+
+void* init_accessibility(View& root, void* hwnd) {
     init_win_accessibility(root);
-    // Returning a non-null sentinel lets callers pair init/shutdown
-    // without pretending we have a real COM provider yet.
-    return reinterpret_cast<void*>(static_cast<uintptr_t>(1));
+    auto* session = new UiaSession{};
+    session->hwnd = static_cast<HWND>(hwnd);
+    session->root = &root;
+    session->clients_listening = UiaClientsAreListening();
+    runtime::log_info(
+        "Windows UIA: session ready (clients_listening={})",
+        session->clients_listening);
+    return session;
 }
 
-void shutdown_accessibility(void* /*handle*/) {
-    // TODO: release the UIA fragment-root and its child providers.
-    runtime::log_info("Windows UI Automation: shutdown (stub)");
+void shutdown_accessibility(void* handle) {
+    auto* session = static_cast<UiaSession*>(handle);
+    if (!session) return;
+    runtime::log_info("Windows UIA: session shutdown");
+    delete session;
+    // TODO phase 2: UiaReturnRawElementProvider(hwnd, 0, 0, nullptr)
+    // + release the fragment-root and any per-widget providers.
 }
 
-void accessibility_tree_changed(void* /*handle*/) {
-    // TODO: UiaRaiseStructureChangedEvent(root_provider, StructureChangeType_ChildrenReordered, ...)
+void accessibility_tree_changed(void* handle) {
+    auto* session = static_cast<UiaSession*>(handle);
+    if (!session) return;
+    // TODO phase 2: UiaRaiseStructureChangedEvent(provider,
+    //                StructureChangeType_ChildrenReordered, nullptr, 0);
+    (void)session;
 }
 
 } // namespace pulp::view

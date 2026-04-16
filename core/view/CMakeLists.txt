@@ -279,6 +279,10 @@ elseif(WIN32)
         platform/win/accessibility_win.cpp
         platform/win/appearance_win.cpp
     )
+    # Workstream 04 #247 phase 1: UIAutomationCore for
+    # UiaClientsAreListening and (in phase 2) UiaReturnRawElementProvider +
+    # UiaRaiseStructureChangedEvent.
+    target_link_libraries(pulp-view PRIVATE uiautomationcore)
 elseif(ANDROID)
     target_sources(pulp-view PRIVATE
         src/plugin_view_host_stub.cpp
