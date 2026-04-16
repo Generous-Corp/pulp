@@ -210,4 +210,45 @@ jobs:
               -m "Skill-Update: skip skill=ci reason=\"no workflow shape change\"" \
               -m "Release: skip reason=\"bot commit; prevent recursive auto-release\""
 
-          git push origin HEAD:main
+          # Race handling: another PR may have landed on main while we
+          # were building binaries. Rebase onto origin/main before
+          # pushing so we never fail with non-fast-forward and silently
+          # drop the CHANGELOG sync (#294 Codex P1). Retry a few times
+          # because a burst of merges can collide repeatedly.
+          attempts=0
+          max_attempts=5
+          while : ; do
+              git fetch origin main
+              if git rebase origin/main; then
+                  if git push origin HEAD:main; then
+                      echo "CHANGELOG sync pushed to main."
+                      break
+                  fi
+              else
+                  # Rebase failed — likely a conflict on CHANGELOG.md
+                  # from a concurrent docs regen. Reset and regenerate
+                  # from the new main so we pick up their content.
+                  git rebase --abort || true
+                  git reset --hard origin/main
+                  python3 tools/scripts/regenerate_changelog.py
+                  if git diff --quiet CHANGELOG.md; then
+                      echo "CHANGELOG.md now matches origin/main after fetch; no sync needed."
+                      exit 0
+                  fi
+                  git add CHANGELOG.md
+                  git commit -m "docs: regenerate CHANGELOG.md for v${SDK_AFTER} [skip ci]" \
+                      -m "Automated by auto-release.yml after tag push." \
+                      -m "" \
+                      -m "Version-Bump: sdk=skip reason=\"docs-only automated regeneration\"" \
+                      -m "Skill-Update: skip skill=ci reason=\"no workflow shape change\"" \
+                      -m "Release: skip reason=\"bot commit; prevent recursive auto-release\""
+              fi
+
+              attempts=$((attempts + 1))
+              if [ "$attempts" -ge "$max_attempts" ]; then
+                  echo "ERROR: CHANGELOG sync push failed after $max_attempts attempts; main is churning faster than we can rebase." >&2
+                  echo "Manual recovery: run \`python3 tools/scripts/regenerate_changelog.py\` and open a PR." >&2
+                  exit 1
+              fi
+              sleep $((attempts * 5))
+          done
