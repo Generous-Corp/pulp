@@ -17,6 +17,16 @@
 #include <pulp/view/view.hpp>
 #include <pulp/runtime/log.hpp>
 
+// PULP_HAS_ATSPI is set by CMake when atk-bridge-2.0 is found via
+// pkg-config. When unset, the init path stays a no-op so Linux distros
+// without the bridge (minimal / headless CI images) still link.
+#ifdef PULP_HAS_ATSPI
+extern "C" {
+int  atk_bridge_adaptor_init(int* argc, char*** argv);
+void atk_bridge_adaptor_cleanup(void);
+}
+#endif
+
 namespace pulp::view {
 
 // Map Pulp AccessRole to ATK role constants
@@ -43,17 +53,42 @@ void init_atspi_accessibility(View& /*root*/) {
     // TODO: support AtkValue for Knob/Fader/Slider widgets
 }
 
-// Cross-platform entry — see accessibility_provider.hpp. Today these
-// route to the existing AT-SPI stub; a future commit wires atk_bridge
-// + GdkDisplay signalling per window.
+// Cross-platform entry — see accessibility_provider.hpp.
+//
+// Phase 1 (this commit, issue #248): when CMake finds atk-bridge-2.0
+// via pkg-config we register the bridge with D-Bus so Orca + other
+// AT-SPI clients can discover the process at all. AtkObject-per-widget
+// creation lands when an AtkObject subclass for View is added next.
+// Without PULP_HAS_ATSPI we keep the pre-#248 no-op so headless/minimal
+// Linux installations still load pulp-view.
 void* init_accessibility(View& root, void* /*gdk_surface*/) {
     init_atspi_accessibility(root);
+#ifdef PULP_HAS_ATSPI
+    // atk_bridge_adaptor_init takes argc/argv the same way glib does
+    // for main-thread bootstrap; pass nullptrs so it uses the process's
+    // existing GLib main context. Safe to call twice — the bridge
+    // refuses re-init with a warning rather than crashing.
+    int argc = 0;
+    char** argv = nullptr;
+    if (atk_bridge_adaptor_init(&argc, &argv) != 0) {
+        runtime::log_warn("Linux AT-SPI: atk_bridge_adaptor_init failed; "
+                          "screen readers may not see this process");
+    } else {
+        runtime::log_info("Linux AT-SPI: bridge registered with D-Bus");
+    }
     return reinterpret_cast<void*>(static_cast<uintptr_t>(1));
+#else
+    return reinterpret_cast<void*>(static_cast<uintptr_t>(1));
+#endif
 }
 
 void shutdown_accessibility(void* /*handle*/) {
+#ifdef PULP_HAS_ATSPI
+    atk_bridge_adaptor_cleanup();
+    runtime::log_info("Linux AT-SPI: bridge cleaned up");
+#else
     runtime::log_info("Linux AT-SPI: shutdown (stub)");
-    // TODO: g_object_unref the AtkObject root + unregister D-Bus name.
+#endif
 }
 
 void accessibility_tree_changed(void* /*handle*/) {

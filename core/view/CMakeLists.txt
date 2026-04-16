@@ -293,6 +293,18 @@ elseif(UNIX)
         src/window_host_stub.cpp
         platform/linux/accessibility_linux.cpp
     )
+    # Linux AT-SPI bridge (workstream 04 #248). Optional: linking atk-
+    # bridge-2.0 when pkg-config finds it enables screen-reader
+    # (Orca) registration via atk_bridge_adaptor_init. Skipped on
+    # minimal/headless distros so the library still loads.
+    if(PkgConfig_FOUND OR PKG_CONFIG_FOUND)
+        pkg_check_modules(ATK_BRIDGE IMPORTED_TARGET atk-bridge-2.0)
+        if(ATK_BRIDGE_FOUND)
+            target_compile_definitions(pulp-view PRIVATE PULP_HAS_ATSPI=1)
+            target_link_libraries(pulp-view PRIVATE PkgConfig::ATK_BRIDGE)
+            message(STATUS "Pulp: AT-SPI bridge enabled (atk-bridge-2.0)")
+        endif()
+    endif()
 endif()
 
 # Link against render for native GPU bridge (Three.js, WebGPU canvas)
