@@ -13,7 +13,33 @@ See [docs/guides/status-ladder.md](../guides/status-ladder.md) for the evidence 
 The following section is auto-generated from the `limitations:` block of `docs/status/support-matrix.yaml`. Run `python3 tools/docs_generate.py generate` to refresh.
 
 <!-- generated:start id=limitations -->
-_(limitations generator missing)_
+### Known limitations (23 items across 13 capabilities)
+
+| Capability | Limitation | Tracked in |
+|---|---|---|
+| `formats.clap` | Only bus index 0 is routed to process(); multi-bus + sidechain not wired to set_sidechain(). | [link](planning/production-readiness/01-format-adapters.md#1.1) |
+| `formats.clap` | MIDI vocabulary limited to note on/off; CC, pitchbend, aftertouch, sysex, MIDI 2.0/UMP not routed. | [link](planning/production-readiness/01-format-adapters.md#1.1) |
+| `formats.vst3` | Only bus index 0 routed to process(); multi-bus + sidechain not wired. | [link](planning/production-readiness/01-format-adapters.md#1.2) |
+| `formats.vst3` | setBusArrangements forwards without validating channel counts or reading negotiated layout. | [link](planning/production-readiness/01-format-adapters.md#1.2) |
+| `formats.vst3` | MIDI vocabulary limited to note on/off; controller, poly pressure, note expression not routed. | [link](planning/production-readiness/01-format-adapters.md#1.2) |
+| `formats.au_v2` | Plugin-side parameter changes do not propagate back to the host (no AUParameterListenerNotify). | [link](planning/production-readiness/01-format-adapters.md#1.3) |
+| `formats.au_v2` | MIDI input dead: AUEffectBase has no MIDI routing. | [link](planning/production-readiness/01-format-adapters.md#1.3) |
+| `formats.auv3` | Single input bus; no sidechain support. | [link](planning/production-readiness/01-format-adapters.md#1.4) |
+| `formats.auv3` | MIDI arrives as raw bytes; no type dispatch to note/CC/pitchbend/aftertouch. | [link](planning/production-readiness/01-format-adapters.md#1.4) |
+| `formats.auv3` | iOS validation is stale — no on-device example or AVAudioSession ↔ C++ bridge. | [link](planning/production-readiness/05-auv3-mobile.md) |
+| `formats.lv2` | Atom MIDI sequences silently dropped — connect_port has no branch for atom ports. | [link](planning/production-readiness/01-format-adapters.md#1.5) |
+| `formats.lv2` | LV2_URID_Map feature never resolved in instantiate(); real hosts may fail to load. | [link](planning/production-readiness/01-format-adapters.md#1.5) |
+| `audio_io.wasapi` | Shared mode only; no exclusive mode. | [link](planning/production-readiness/02-audio-midi-io.md#2.1) |
+| `audio_io.wasapi` | Input capture not wired — input_view is always empty. | [link](planning/production-readiness/02-audio-midi-io.md#2.1) |
+| `audio_io.wasapi` | No IMMNotificationClient hotplug; device-change callback is inert. | [link](planning/production-readiness/02-audio-midi-io.md#2.1) |
+| `audio_io.alsa` | No input capture path. | [link](planning/production-readiness/02-audio-midi-io.md#2.2) |
+| `audio_io.alsa` | Hardcoded sample-rate list; no real enumeration. | [link](planning/production-readiness/02-audio-midi-io.md#2.2) |
+| `audio_io.jack` | Dead code — factory always returns AlsaSystem; JACK is never selected at runtime. | [link](planning/production-readiness/02-audio-midi-io.md#2.2) |
+| `midi_io.coremidi` | UMP type-4 (MIDI 2.0 channel voice) packets are silently dropped in the input handler. | [link](planning/production-readiness/02-audio-midi-io.md#2.6) |
+| `midi_io.win32_midi` | Legacy mmeapi; no windows.devices.midi2, no hotplug, no SysEx input. | [link](planning/production-readiness/02-audio-midi-io.md#2.4) |
+| `midi_io.alsa_midi` | Running status not handled; timestamps always 0; no hotplug; no SysEx. | [link](planning/production-readiness/02-audio-midi-io.md#2.5) |
+| `platform_maturity.accessibility.windows` | UIA provider is a stub — IRawElementProviderSimple/WM_GETOBJECT/event firing pending. | [link](planning/production-readiness/04-accessibility.md#4.1) |
+| `platform_maturity.accessibility.linux` | AT-SPI registration is a stub — D-Bus bridge not yet connected. | [link](planning/production-readiness/04-accessibility.md#4.2) |
 <!-- generated:end id=limitations -->
 
 ---
