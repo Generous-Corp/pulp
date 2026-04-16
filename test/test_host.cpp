@@ -1,11 +1,14 @@
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/host/scanner.hpp>
 #include <pulp/host/plugin_slot.hpp>
 #include <pulp/host/signal_graph.hpp>
 #include <atomic>
+#include <filesystem>
 #include <thread>
 
 using namespace pulp::host;
+using Catch::Matchers::WithinAbs;
 
 // ── Scanner tests ───────────────────────────────────────────────────────
 
@@ -54,6 +57,64 @@ TEST_CASE("PluginSlot load returns nullptr for stub", "[host][slot]") {
 
     auto slot = PluginSlot::load(info);
     REQUIRE(slot == nullptr); // Stub always returns nullptr
+}
+
+// #296 regression: set_parameter on the CLAP slot must be observable via
+// get_parameter immediately (cached readback), not silently dropped.
+// Unknown param IDs must be rejected instead of polluting the cache.
+//
+// If a built pulpsynth.clap isn't findable the test skips gracefully.
+TEST_CASE("ClapSlot::set_parameter round-trip via get_parameter",
+          "[host][slot][clap][issue-296]") {
+    namespace fs = std::filesystem;
+    std::vector<fs::path> candidates = {
+        fs::current_path() / "examples" / "pulpsynth" / "pulpsynth.clap",
+        fs::current_path().parent_path() / "examples" / "pulpsynth" / "pulpsynth.clap",
+    };
+    fs::path found;
+    for (const auto& p : candidates) {
+        std::error_code ec;
+        if (fs::exists(p, ec)) { found = p; break; }
+    }
+    if (found.empty()) {
+        SUCCEED("pulpsynth.clap not built — skipping CLAP set_parameter integration");
+        return;
+    }
+
+    PluginInfo info;
+    info.name = "pulpsynth";
+    info.path = found.string();
+    info.format = PluginFormat::CLAP;
+
+    auto slot = PluginSlot::load(info);
+    if (!slot) {
+        SUCCEED("CLAP slot load returned nullptr at this path");
+        return;
+    }
+
+    auto params = slot->parameters();
+    if (params.empty()) {
+        SUCCEED("plugin exposes no parameters — cannot exercise set_parameter");
+        return;
+    }
+
+    const auto pid = params.front().id;
+
+    SECTION("set_parameter round-trips via get_parameter") {
+        slot->set_parameter(pid, 0.25f);
+        REQUIRE_THAT(slot->get_parameter(pid), WithinAbs(0.25f, 1e-6f));
+        slot->set_parameter(pid, 0.75f);
+        REQUIRE_THAT(slot->get_parameter(pid), WithinAbs(0.75f, 1e-6f));
+    }
+
+    SECTION("unknown param IDs are rejected, not cached") {
+        const uint32_t bogus_id = 0xDEADBEEF;
+        const float before = slot->get_parameter(bogus_id);
+        slot->set_parameter(bogus_id, 99.0f);
+        const float after = slot->get_parameter(bogus_id);
+        // bogus_id rejected — readback must not reflect 99.0f.
+        REQUIRE_THAT(after, WithinAbs(before, 1e-6f));
+    }
 }
 
 // ── SignalGraph tests ───────────────────────────────────────────────────
