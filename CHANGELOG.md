@@ -8,9 +8,13 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
-<a id="v0170"></a>
-## [0.18.0]
+<a id="v0180"></a>
+## [0.18.0] - 2026-04-17
 
+- platform: introduce pulp::platform::Permissions API + desktop backend (#331) ([#354](https://github.com/danielraffel/pulp/pull/354))
+- ios: add pulp_add_ios_auv3() CMake helper (#328) ([#350](https://github.com/danielraffel/pulp/pull/350))
+
+<a id="v0170"></a>
 ## [0.17.0] - 2026-04-17
 
 - audio: fix MSVC C2248 on fire_device_change + add release-guard.yml ([#318](https://github.com/danielraffel/pulp/pull/318))
@@ -281,6 +285,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.18.0]: https://github.com/danielraffel/pulp/releases/tag/v0.18.0
 [0.17.0]: https://github.com/danielraffel/pulp/releases/tag/v0.17.0
 [0.16.0]: https://github.com/danielraffel/pulp/releases/tag/v0.16.0
 [0.15.0]: https://github.com/danielraffel/pulp/releases/tag/v0.15.0
