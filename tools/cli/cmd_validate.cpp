@@ -12,19 +12,11 @@
 #include <pulp/format/editor_ui.hpp>
 
 int cmd_validate(const std::vector<std::string>& args) {
-    auto root = resolve_active_project_root(nullptr);
-    if (root.empty()) {
-        std::cerr << "Error: not in a Pulp project directory\n";
-        return 1;
-    }
-
-    auto build_dir = root / "build";
-    if (!fs::exists(build_dir)) {
-        std::cerr << "Build directory not found. Run `pulp build` first.\n";
-        return 1;
-    }
-
-    // Parse flags
+    // Parse flags first so invalid flags fail loud before we do any
+    // project-root / build-dir work. Codex P2 on PR #381 flagged that
+    // the shellout test couldn't actually distinguish `--strict` from
+    // any other unknown flag because flag parsing ran after the
+    // project-root check bail-out.
     bool run_all = false;
     bool json_output = false;
     bool screenshot = false;
@@ -37,6 +29,24 @@ int cmd_validate(const std::vector<std::string>& args) {
         else if (args[i] == "--strict") strict = true;
         else if (args[i] == "--report" && i + 1 < args.size())
             report_path = args[++i];
+        else if (args[i].size() >= 2 && args[i].substr(0, 2) == "--") {
+            std::cerr << "pulp validate: unknown flag: " << args[i] << "\n";
+            std::cerr << "Known flags: --all --json --screenshot --strict "
+                         "--report <path>\n";
+            return 2;
+        }
+    }
+
+    auto root = resolve_active_project_root(nullptr);
+    if (root.empty()) {
+        std::cerr << "Error: not in a Pulp project directory\n";
+        return 1;
+    }
+
+    auto build_dir = root / "build";
+    if (!fs::exists(build_dir)) {
+        std::cerr << "Build directory not found. Run `pulp build` first.\n";
+        return 1;
     }
 
     int total = 0, passed = 0, failed = 0, skipped = 0;

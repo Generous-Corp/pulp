@@ -109,9 +109,13 @@ TEST_CASE("Audio matrix: PulpGain unity gain bit-exact across SR×block",
             pulp::format::HeadlessHost host(pulp::examples::create_pulp_gain);
             host.prepare(sr, block);
 
-            // 2048 samples is evenly divisible by every block size we
-            // sweep, so the last block is never short.
-            constexpr int total = 2048;
+            // 8192 is the smallest multiple of every block size we
+            // sweep (including 4096) that guarantees the largest cell
+            // runs at least two full-size blocks rather than short-
+            // blocking the last call to min(block, total-pos). Codex
+            // P2 on PR #378 flagged that the earlier total=2048
+            // silently short-blocked the 4096 cell.
+            constexpr int total = 8192;
             auto in_L = make_sine_vec(total, 440.0f, sr);
             auto in_R = make_sine_vec(total, 660.0f, sr);
 
@@ -138,7 +142,7 @@ TEST_CASE("Audio matrix: PulpGain silent-in → silent-out across SR×block",
             pulp::format::HeadlessHost host(pulp::examples::create_pulp_gain);
             host.prepare(sr, block);
 
-            constexpr int total = 2048;
+            constexpr int total = 8192;  // see unity-gain test for rationale
             std::vector<float> zeros(total, 0.0f);
             auto out = process_blocked(host, zeros, zeros, block);
 
@@ -154,10 +158,10 @@ TEST_CASE("Audio matrix: PulpGain silent-in → silent-out across SR×block",
 TEST_CASE("Audio matrix: PulpGain block-size invariance at unity",
           "[audio][matrix][determinism][issue-356]") {
     constexpr double sr = 48000.0;
-    constexpr int total = 2048;
+    constexpr int total = 8192;
 
-    pulp::format::HeadlessHost host_mono(pulp::examples::create_pulp_gain);
-    host_mono.prepare(sr, 2048);
+    pulp::format::HeadlessHost host_big(pulp::examples::create_pulp_gain);
+    host_big.prepare(sr, 4096);
 
     pulp::format::HeadlessHost host_tiny(pulp::examples::create_pulp_gain);
     host_tiny.prepare(sr, 1);
@@ -165,13 +169,15 @@ TEST_CASE("Audio matrix: PulpGain block-size invariance at unity",
     auto in_L = make_sine_vec(total, 440.0f, sr);
     auto in_R = make_sine_vec(total, 660.0f, sr);
 
-    auto out_mono = process_blocked(host_mono, in_L, in_R, 2048);
+    // block=4096 vs block=1 over 8192 samples: at least two full
+    // 4096-frame process calls against 8192 single-sample calls.
+    auto out_big  = process_blocked(host_big,  in_L, in_R, 4096);
     auto out_tiny = process_blocked(host_tiny, in_L, in_R, 1);
 
     // Unity gain is purely numeric — the host should be oblivious to
     // the block size it was prepared with for this particular path.
     for (int i = 0; i < total; ++i) {
-        REQUIRE(out_mono[static_cast<std::size_t>(i)]
+        REQUIRE(out_big[static_cast<std::size_t>(i)]
                 == out_tiny[static_cast<std::size_t>(i)]);
     }
 }
@@ -216,9 +222,11 @@ TEST_CASE("Audio matrix: PulpTone silence invariant across SR×block",
             pulp::format::HeadlessHost host(pulp::examples::create_pulp_tone);
             host.prepare(sr, block, /*inputs*/ 0, /*outputs*/ 2);
 
-            // Enough samples that any finite-grained envelope,
-            // oscillator, or DC-block state would show up as non-zero.
-            constexpr int total = 2048;
+            // 8192 samples, a clean multiple of every sweep block size
+            // including 4096 (no short last block). Any finite-grained
+            // envelope / oscillator / DC-block state would show up as
+            // non-zero over this window.
+            constexpr int total = 8192;
             std::vector<float> out_L(total, 0.0f);
             std::vector<float> out_R(total, 0.0f);
 
