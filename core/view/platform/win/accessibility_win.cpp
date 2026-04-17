@@ -13,6 +13,15 @@
 #include <pulp/view/view.hpp>
 #include <pulp/runtime/log.hpp>
 #include <pulp/platform/win32_sane.hpp>
+// win32_sane.hpp defines WIN32_LEAN_AND_MEAN which strips COM headers
+// from <windows.h>. UIAutomation.h needs IUnknown from ObjBase.h, and
+// ITextProvider* interfaces from oleidl.h, otherwise MSVC fails with
+// C2146 ("missing ';' before IRawElementProviderSimple", v0.17.0) or
+// C2371 ("ITextRangeProvider redefinition; different basic types",
+// v0.18.0) — both symptoms of the same COM-base-types mismatch.
+// See release-cli.yml failures on tags v0.15.0–v0.18.0.
+#include <ObjBase.h>
+#include <oleidl.h>
 #include <UIAutomation.h>
 
 namespace pulp::view {
