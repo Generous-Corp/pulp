@@ -78,6 +78,35 @@ TEST_CASE("find_on_path finds known binary", "[child_process]") {
     REQUIRE(p.has_value());
 }
 
+TEST_CASE("find_on_path returns nullopt for missing binary",
+          "[child_process][edge]") {
+    auto p = find_on_path("pulp-does-not-exist-xyz-12345");
+    REQUIRE_FALSE(p.has_value());
+}
+
+TEST_CASE("exec with a binary that does not exist reports failure",
+          "[child_process][edge]") {
+    auto r = exec("pulp-also-does-not-exist-xyz", {}, 1000);
+    // Implementations report this as non-zero exit + empty stdout;
+    // must not time out and must not claim success.
+    REQUIRE(r.exit_code != 0);
+    REQUIRE_FALSE(r.timed_out);
+}
+
+TEST_CASE("exec captures empty-stdout cleanly", "[child_process][edge]") {
+#ifdef _WIN32
+    auto r = exec("cmd", {"/c", "rem nothing"}, 5000);
+#else
+    auto r = exec("/bin/sh", {"-c", ":"}, 5000);  // ':' = no-op builtin
+#endif
+    REQUIRE(r.exit_code == 0);
+    // Accept zero-length or whitespace-only output; the key invariant
+    // is that the capture path doesn't crash on a zero-byte read.
+    for (char c : r.stdout_output) {
+        REQUIRE((c == ' ' || c == '\t' || c == '\r' || c == '\n'));
+    }
+}
+
 TEST_CASE("find_on_path returns nullopt for nonexistent", "[child_process]") {
     auto p = find_on_path("this_binary_definitely_does_not_exist_xyz123");
     REQUIRE_FALSE(p.has_value());

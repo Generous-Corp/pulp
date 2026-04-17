@@ -1,6 +1,10 @@
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/platform/clipboard.hpp>
 
+#include <algorithm>
+#include <cstdint>
+#include <vector>
+
 using namespace pulp::platform;
 
 // #300 — tests no longer assume every platform has a real clipboard.
@@ -59,6 +63,40 @@ TEST_CASE("Clipboard binary data — mac/win supported, others explicit unsuppor
 TEST_CASE("Clipboard missing data returns nullopt", "[platform][clipboard]") {
     auto result = Clipboard::get_data("com.pulp.nonexistent.type");
     REQUIRE_FALSE(result.has_value());
+}
+
+TEST_CASE("Clipboard empty-string text is honest — round-trip or unsupported",
+          "[platform][clipboard][edge]") {
+    // An explicit empty string is a legitimate value. The set call
+    // must either (a) accept it and round-trip an empty string, or
+    // (b) return false on a platform that doesn't support clipboard
+    // at all. It must not fake-succeed and round-trip our prior
+    // non-empty payload.
+    const bool ok = Clipboard::set_text("");
+    if (!ok) return;
+    auto text = Clipboard::get_text();
+    REQUIRE(text.has_value());
+    REQUIRE(text.value().empty());
+}
+
+TEST_CASE("Clipboard large binary payload round-trips byte-for-byte",
+          "[platform][clipboard][edge]") {
+    // 128 KiB of deterministic bytes exercises the scatter/copy path.
+    // Skip if binary clipboard is unsupported on this platform (Linux
+    // / Android return false — the round-trip test already pins that).
+    std::vector<uint8_t> big(128 * 1024);
+    for (std::size_t i = 0; i < big.size(); ++i) {
+        big[i] = static_cast<uint8_t>((i * 31) ^ 0xA5);
+    }
+    const bool ok = Clipboard::set_data("com.pulp.bigblob", big);
+    if (!ok) {
+        SUCCEED("binary clipboard unsupported on this platform");
+        return;
+    }
+    auto got = Clipboard::get_data("com.pulp.bigblob");
+    REQUIRE(got.has_value());
+    REQUIRE(got->size() == big.size());
+    REQUIRE(std::equal(got->begin(), got->end(), big.begin()));
 }
 
 // #300: Android-bridge registration API is public on every platform
