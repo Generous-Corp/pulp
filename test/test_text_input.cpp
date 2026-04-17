@@ -120,3 +120,136 @@ TEST_CASE("TextEditor: focusable by default after fix", "[text_editor][input]") 
     TextEditor editor;
     REQUIRE(editor.focusable() == true);
 }
+
+// ── Undo / redo ─────────────────────────────────────────────────────────
+
+TEST_CASE("TextEditor: undo restores the previous text content",
+          "[text_editor][undo]") {
+    TextEditor editor;
+    editor.set_bounds({0, 0, 200, 30});
+    editor.on_focus_changed(true);
+    for (char c : std::string("hello")) {
+        TextInputEvent te;
+        te.text = std::string(1, c);
+        editor.on_text_input(te);
+    }
+    REQUIRE(editor.text() == "hello");
+
+    auto before = editor.text();
+    REQUIRE(editor.undo());
+    REQUIRE(editor.text() != before);
+    REQUIRE(editor.text().size() < before.size());
+}
+
+TEST_CASE("TextEditor: redo reapplies an undone edit",
+          "[text_editor][undo][redo]") {
+    TextEditor editor;
+    editor.set_bounds({0, 0, 200, 30});
+    editor.on_focus_changed(true);
+
+    TextInputEvent te;
+    te.text = "x";
+    editor.on_text_input(te);
+    REQUIRE(editor.text() == "x");
+
+    REQUIRE(editor.undo());
+    REQUIRE(editor.redo());
+    REQUIRE(editor.text() == "x");
+}
+
+// ── Selection ───────────────────────────────────────────────────────────
+
+TEST_CASE("TextEditor: select_all + backspace clears the buffer",
+          "[text_editor][selection]") {
+    TextEditor editor;
+    editor.set_bounds({0, 0, 200, 30});
+    editor.on_focus_changed(true);
+    for (char c : std::string("delete-me")) {
+        TextInputEvent te;
+        te.text = std::string(1, c);
+        editor.on_text_input(te);
+    }
+    REQUIRE(editor.text() == "delete-me");
+
+    editor.select_all();
+    REQUIRE(editor.has_selection());
+    REQUIRE(editor.selected_text() == "delete-me");
+
+    KeyEvent bs;
+    bs.key = KeyCode::backspace;
+    bs.is_down = true;
+    editor.on_key_event(bs);
+    REQUIRE(editor.text().empty());
+}
+
+TEST_CASE("TextEditor: clear_selection leaves text intact",
+          "[text_editor][selection]") {
+    TextEditor editor;
+    editor.set_bounds({0, 0, 200, 30});
+    editor.on_focus_changed(true);
+    TextInputEvent te;
+    te.text = "abc";
+    editor.on_text_input(te);
+    editor.select_all();
+    REQUIRE(editor.has_selection());
+
+    editor.clear_selection();
+    REQUIRE_FALSE(editor.has_selection());
+    REQUIRE(editor.text() == "abc");
+}
+
+// ── set_text + caret position ───────────────────────────────────────────
+
+TEST_CASE("TextEditor: set_text replaces buffer and bounds the caret",
+          "[text_editor][caret]") {
+    TextEditor editor;
+    editor.set_bounds({0, 0, 200, 30});
+    editor.on_focus_changed(true);
+    TextInputEvent te;
+    te.text = "old";
+    editor.on_text_input(te);
+    REQUIRE(editor.text() == "old");
+    REQUIRE(editor.caret_pos() >= 0);
+    REQUIRE(editor.caret_pos() <= 3);
+
+    editor.set_text("replaced");
+    REQUIRE(editor.text() == "replaced");
+    REQUIRE(editor.caret_pos() >= 0);
+    REQUIRE(editor.caret_pos() <= static_cast<int>(editor.text().size()));
+}
+
+// ── Numeric-only / password-mode invariants ─────────────────────────────
+
+TEST_CASE("TextEditor: numeric_only drops alphabetic input",
+          "[text_editor][numeric]") {
+    TextEditor editor;
+    editor.set_bounds({0, 0, 200, 30});
+    editor.numeric_only = true;
+    editor.on_focus_changed(true);
+    for (char c : std::string("1a2b3c")) {
+        TextInputEvent te;
+        te.text = std::string(1, c);
+        editor.on_text_input(te);
+    }
+    for (char c : editor.text()) {
+        INFO("unexpected non-digit: " << c);
+        REQUIRE((c >= '0' && c <= '9'));
+    }
+    REQUIRE(editor.text() == "123");
+}
+
+TEST_CASE("TextEditor: password_mode preserves the underlying text",
+          "[text_editor][password]") {
+    TextEditor editor;
+    editor.set_bounds({0, 0, 200, 30});
+    editor.password_mode = true;
+    editor.on_focus_changed(true);
+    for (char c : std::string("s3cr3t")) {
+        TextInputEvent te;
+        te.text = std::string(1, c);
+        editor.on_text_input(te);
+    }
+    // Password masking is a rendering concern — text() returns the
+    // real buffer so the host can validate user input.
+    REQUIRE(editor.text() == "s3cr3t");
+}
