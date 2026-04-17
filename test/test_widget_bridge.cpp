@@ -691,3 +691,99 @@ TEST_CASE("WidgetBridge text editor escape dispatches JS handler", "[view][bridg
     REQUIRE(field->on_key_event(esc));
     REQUIRE(engine.evaluate("escaped").getWithDefault<int>(0) == 1);
 }
+
+// ── clear() lifecycle + snapshot/restore across hot reload ──────────────
+
+TEST_CASE("WidgetBridge::clear drops widgets — subsequent lookups return nullptr",
+          "[view][bridge][lifetime][clear]") {
+    // clear() is the hot-reload entry point — it must actually purge
+    // registered widgets so a fresh script build can start from an
+    // empty registry. A silent no-op here is exactly the kind of
+    // bug the #295 audit lesson targets.
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createKnob('gain', 0, 0, 1, 0.5);
+        createFader('volume', 0, 1, 0.75);
+        createToggle('bypass', false);
+    )");
+    REQUIRE(bridge.widget("gain") != nullptr);
+    REQUIRE(bridge.widget("volume") != nullptr);
+    REQUIRE(bridge.widget("bypass") != nullptr);
+
+    bridge.clear();
+
+    REQUIRE(bridge.widget("gain") == nullptr);
+    REQUIRE(bridge.widget("volume") == nullptr);
+    REQUIRE(bridge.widget("bypass") == nullptr);
+}
+
+TEST_CASE("WidgetBridge::clear is safe to call before any script loads",
+          "[view][bridge][lifetime][clear]") {
+    // Fresh bridge — no widgets have been registered yet. clear() must
+    // be a safe no-op. Second call also safe.
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    REQUIRE_NOTHROW(bridge.clear());
+    REQUIRE(bridge.widget("nothing") == nullptr);
+    REQUIRE_NOTHROW(bridge.clear());
+}
+
+TEST_CASE("WidgetBridge snapshot_values captures every registered widget value",
+          "[view][bridge][hot-reload][snapshot]") {
+    // snapshot_values is the first half of the hot-reload dance.
+    // Pin the contract: it records every widget's current value into
+    // the provided map by id, so restore_values can put them back.
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createKnob('gain', -60, 12, 0);
+        createFader('mix', 0, 1, 0.25);
+        createToggle('bypass', false);
+    )");
+
+    std::unordered_map<std::string, float> snap;
+    bridge.snapshot_values(snap);
+
+    // All three widgets contribute to the snapshot. Exact values are
+    // implementation-defined at creation — the contract is coverage.
+    REQUIRE(snap.count("gain") == 1);
+    REQUIRE(snap.count("mix") == 1);
+    REQUIRE(snap.count("bypass") == 1);
+}
+
+TEST_CASE("WidgetBridge restore_values handles missing snapshot entries gracefully",
+          "[view][bridge][hot-reload][restore]") {
+    // Real-world hot reload scenario: user adds a new widget between
+    // snapshot and restore. The new widget's id is NOT in the snapshot;
+    // restore_values must not crash or throw — it should just leave
+    // that widget at its default.
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createKnob('gain', -60, 12, 0);
+    )");
+
+    std::unordered_map<std::string, float> stale;  // empty snapshot
+    stale["old-widget"] = 42.0f;  // id that no longer exists
+
+    REQUIRE_NOTHROW(bridge.restore_values(stale));
+    REQUIRE(bridge.widget("gain") != nullptr);  // still registered
+    REQUIRE(bridge.widget("old-widget") == nullptr);
+}
