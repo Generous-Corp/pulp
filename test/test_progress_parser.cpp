@@ -56,6 +56,44 @@ TEST_CASE("ProgressParser handles multiple events", "[progress_parser]") {
     REQUIRE(events[2].payload == "5:Network timeout");
 }
 
+TEST_CASE("ProgressParser rejects malformed prefix variants", "[progress_parser][edge]") {
+    // Prefixes that look like PROGRESS but aren't: must not emit events.
+    std::vector<ProgressEvent> events;
+    ProgressParser parser([&](const ProgressEvent& e) { events.push_back(e); });
+
+    parser.feed_line("PROGRESSsomething");      // no colon separator
+    parser.feed_line("progress:type");          // lowercase, not the sentinel
+    parser.feed_line(" PROGRESS:type");         // leading whitespace
+    parser.feed_line("PROGRES:type");           // typo
+    REQUIRE(events.empty());
+}
+
+TEST_CASE("ProgressParser handles lone PROGRESS: prefix with empty type", "[progress_parser][edge]") {
+    // The implementation parses PROGRESS:<type>[:<payload>]. "PROGRESS:"
+    // alone means a zero-length type — either drop or emit with "".
+    // Accept both; just make sure we don't crash or spray events.
+    std::vector<ProgressEvent> events;
+    ProgressParser parser([&](const ProgressEvent& e) { events.push_back(e); });
+
+    parser.feed_line("PROGRESS:");
+    REQUIRE(events.size() <= 1);
+    if (events.size() == 1) {
+        REQUIRE(events[0].type.empty());
+        REQUIRE(events[0].payload.empty());
+    }
+}
+
+TEST_CASE("ProgressParser drops whitespace-only and empty-string inputs", "[progress_parser][edge]") {
+    std::vector<ProgressEvent> events;
+    ProgressParser parser([&](const ProgressEvent& e) { events.push_back(e); });
+
+    parser.feed_line("");
+    parser.feed_line(" ");
+    parser.feed_line("\t");
+    parser.feed_line("   \t   ");
+    REQUIRE(events.empty());
+}
+
 TEST_CASE("ProgressParser works with ChildProcess line callback", "[progress_parser]") {
     std::vector<ProgressEvent> events;
     ProgressParser parser([&](const ProgressEvent& e) { events.push_back(e); });
