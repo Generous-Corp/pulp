@@ -400,6 +400,11 @@ add_executable(pulp-test-platform test_platform.cpp)
 target_link_libraries(pulp-test-platform PRIVATE pulp::platform Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-platform)
 
+# Permissions tests
+add_executable(pulp-test-permissions test_permissions.cpp)
+target_link_libraries(pulp-test-permissions PRIVATE pulp::platform Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-permissions)
+
 # Runtime tests
 add_executable(pulp-test-runtime test_runtime.cpp)
 target_link_libraries(pulp-test-runtime PRIVATE pulp::runtime Catch2::Catch2WithMain)

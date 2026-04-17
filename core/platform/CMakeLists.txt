@@ -11,6 +11,7 @@ target_sources(pulp-platform PRIVATE
     src/platform.cpp
     src/file_dialog_stub.cpp
     src/popup_menu_stub.cpp
+    src/permissions.cpp
     src/registry.cpp
     src/clipboard_common.cpp
 )
