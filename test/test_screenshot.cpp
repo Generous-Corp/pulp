@@ -72,6 +72,79 @@ TEST_CASE("Screenshot renders to file", "[view][screenshot]") {
 #endif
 }
 
+// ── Edge cases: non-Apple, scale, malformed output path ─────────────────
+
+TEST_CASE("Screenshot on non-Apple reports unsupported honestly",
+          "[view][screenshot][edge]") {
+    // The doc contract on every non-Apple platform is "return empty
+    // PNG bytes, return false from render_to_file" — never silently
+    // fake-success. Pin it against an empty view tree too, so a
+    // future refactor doesn't start fake-succeeding when there's
+    // nothing to render.
+    View root;
+    auto png = render_to_png(root, 32, 32, 1.0f);
+#ifdef __APPLE__
+    REQUIRE_FALSE(png.empty());
+#else
+    REQUIRE(png.empty());
+#endif
+}
+
+TEST_CASE("Screenshot render_to_png handles high DPI scale factors",
+          "[view][screenshot][dpi]") {
+#ifdef __APPLE__
+    View root;
+    root.set_theme(Theme::dark());
+    auto knob = std::make_unique<Knob>();
+    knob->set_bounds({2, 2, 28, 28});
+    root.add_child(std::move(knob));
+
+    // 2x, 3x, and the extreme 4x that Apple Silicon devices can hit.
+    // Each must produce non-empty PNG bytes with the magic header —
+    // regression guard for a scale-dependent early exit.
+    for (float scale : {2.0f, 3.0f, 4.0f}) {
+        INFO("scale=" << scale);
+        auto png = render_to_png(root, 32, 32, scale);
+        REQUIRE_FALSE(png.empty());
+        REQUIRE(png.size() > 8);
+        REQUIRE(png[0] == 0x89);
+        REQUIRE(png[1] == 'P');
+    }
+#else
+    SUCCEED("non-Apple screenshot path is explicitly unsupported");
+#endif
+}
+
+TEST_CASE("Screenshot render_to_file rejects an unwritable output path",
+          "[view][screenshot][edge]") {
+#ifdef __APPLE__
+    View root;
+    root.set_theme(Theme::dark());
+
+    // Path inside a directory that definitely does not exist.
+    // render_to_file must return false, not silently succeed.
+    auto bad = std::filesystem::path("/nonexistent-pulp-root/screenshot-should-fail.png");
+    REQUIRE_FALSE(render_to_file(root, 16, 16, bad.string(), 1.0f));
+    REQUIRE_FALSE(std::filesystem::exists(bad));
+#else
+    SUCCEED("non-Apple render_to_file is a no-op");
+#endif
+}
+
+TEST_CASE("Screenshot of an empty root view still produces a valid PNG",
+          "[view][screenshot][empty]") {
+#ifdef __APPLE__
+    View root;
+    auto png = render_to_png(root, 8, 8, 1.0f);
+    REQUIRE_FALSE(png.empty());
+    REQUIRE(png.size() >= 8);
+    REQUIRE(png[0] == 0x89);
+#else
+    View root;
+    REQUIRE(render_to_png(root, 8, 8, 1.0f).empty());
+#endif
+}
+
 TEST_CASE("Screenshot can export a deterministic PNG sequence", "[view][screenshot][phase12]") {
 #ifdef __APPLE__
     FrameClock clock;
