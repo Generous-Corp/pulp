@@ -140,12 +140,19 @@ TEST_CASE("PulpDrums golden: tempo change changes MIDI density",
 // Audio pass-through must remain bit-exact even while the MIDI
 // sequencer fires. Regression guard against a future change that
 // accidentally reads/writes the audio buffer in the MIDI path.
+//
+// Codex P2 on PR #379: the old single-block version never fired a
+// step event (samples_per_step ≈ 3600 at 200 BPM 48 kHz, block=512),
+// so the "while sequencing" promise wasn't exercised. We now loop
+// blocks until midi_out has non-zero size at least once — and keep
+// asserting bit-exact pass-through on every block.
 TEST_CASE("PulpDrums golden: audio is bit-exact pass-through while sequencing",
           "[examples][drums][golden][issue-356]") {
     HeadlessHost host(create_pulp_drums);
     host.prepare(48000, 512, 2, 2);
     host.state().set_value(kTempo, 200.0f);
     host.state().set_value(kDensity, 1.0f);
+    host.state().set_value(kRandomize, 0.0f);
 
     constexpr int block = 512;
     std::vector<float> in_l(block), in_r(block);
@@ -155,20 +162,33 @@ TEST_CASE("PulpDrums golden: audio is bit-exact pass-through while sequencing",
         in_r[static_cast<std::size_t>(i)] =
             -0.5f * std::sin(static_cast<float>(i) * 0.01f);
     }
-    std::vector<float> out_l(block, 123.0f);  // poison
-    std::vector<float> out_r(block, 123.0f);
 
     const float* ip[] = {in_l.data(), in_r.data()};
-    float* op[] = {out_l.data(), out_r.data()};
     pulp::audio::BufferView<const float> iv(ip, 2, block);
-    pulp::audio::BufferView<float> ov(op, 2, block);
-    pulp::midi::MidiBuffer midi_in, midi_out;
-    host.process(ov, iv, midi_in, midi_out);
 
-    for (int i = 0; i < block; ++i) {
-        REQUIRE(out_l[static_cast<std::size_t>(i)]
-                == in_l[static_cast<std::size_t>(i)]);
-        REQUIRE(out_r[static_cast<std::size_t>(i)]
-                == in_r[static_cast<std::size_t>(i)]);
+    // ~20 blocks (≈213 ms @ 48 kHz) guarantees multiple steps at
+    // 200 BPM — samples_per_step is ~3600 so at block=512 we cross a
+    // step boundary roughly every 7 blocks.
+    bool midi_observed = false;
+    for (int b = 0; b < 20; ++b) {
+        std::vector<float> out_l(block, 123.0f);  // poison each block
+        std::vector<float> out_r(block, 123.0f);
+        float* op[] = {out_l.data(), out_r.data()};
+        pulp::audio::BufferView<float> ov(op, 2, block);
+
+        pulp::midi::MidiBuffer midi_in, midi_out;
+        host.process(ov, iv, midi_in, midi_out);
+        if (midi_out.size() > 0) midi_observed = true;
+
+        for (int i = 0; i < block; ++i) {
+            REQUIRE(out_l[static_cast<std::size_t>(i)]
+                    == in_l[static_cast<std::size_t>(i)]);
+            REQUIRE(out_r[static_cast<std::size_t>(i)]
+                    == in_r[static_cast<std::size_t>(i)]);
+        }
     }
+    // The "while sequencing" in the test name is load-bearing: if the
+    // sequencer never actually fired during this window, we haven't
+    // proven anything about audio integrity during a step event.
+    REQUIRE(midi_observed);
 }
