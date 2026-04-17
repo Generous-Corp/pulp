@@ -188,6 +188,11 @@ public:
 
         if (bus_layout_.num_inputs > 0) {
             desc.input_buses = {{"Audio In", bus_layout_.num_inputs}};
+        } else {
+            // An instrument (0 inputs) must not inherit PluginDescriptor's
+            // default stereo "Main In" — hosts will try to route audio in
+            // and complain. Explicitly clear.
+            desc.input_buses.clear();
         }
         desc.output_buses = {{"Audio Out", bus_layout_.num_outputs}};
         desc.accepts_midi = bus_layout_.accepts_midi;

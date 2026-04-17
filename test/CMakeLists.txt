@@ -377,6 +377,13 @@ add_executable(pulp-test-signal test_signal.cpp)
 target_link_libraries(pulp-test-signal PRIVATE pulp::signal Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-signal)
 
+# DSL processor contract tests (FaustProcessor + PulpFaustUI + PulpFaustMeta)
+add_executable(pulp-test-dsl-processor test_dsl_processor.cpp)
+target_link_libraries(pulp-test-dsl-processor PRIVATE
+    pulp::dsl pulp::format pulp::state pulp::audio pulp::midi
+    Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-dsl-processor)
+
 # Convolution engine tests
 add_executable(pulp-test-convolver test_convolver.cpp)
 target_link_libraries(pulp-test-convolver PRIVATE pulp::signal Catch2::Catch2WithMain)
