@@ -2,6 +2,16 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/osc/bundle.hpp>
 
+#if defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#define WIN32_LEAN_AND_MEAN
+#include <winsock2.h>
+#else
+#include <arpa/inet.h>
+#endif
+
 using namespace pulp::osc;
 using Catch::Matchers::WithinAbs;
 
