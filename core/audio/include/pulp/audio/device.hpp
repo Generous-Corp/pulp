@@ -87,14 +87,26 @@ public:
         device_change_callback_ = std::move(cb);
     }
 
-protected:
     /// Dispatch a stored device-change callback. Safe to call from any
-    /// thread; the callback itself is responsible for UI-thread marshalling.
+    /// thread; the callback itself is responsible for UI-thread
+    /// marshalling.
+    ///
+    /// **Must be public, not protected.** Platform notifiers
+    /// (WasapiNotificationClient, Win32 MIDI DeviceWatcher, ALSA
+    /// seq monitor, etc.) are NOT AudioSystem subclasses — they own
+    /// a pointer to an AudioSystem and invoke this method from an
+    /// OS callback thread. C++ `protected` would require the access
+    /// to go through the notifier's own derived-class `this`, which
+    /// doesn't apply here. MSVC enforces this strictly and failed
+    /// to build #281's WASAPI hotplug path (C2248 in
+    /// wasapi_device.cpp:339–341), silently breaking release-cli.yml
+    /// on Windows x64 for v0.15.0 and v0.16.0 tags. Clang/GCC were
+    /// lenient; making this public matches the design intent the
+    /// doc comment always described.
     void fire_device_change() {
         if (device_change_callback_) device_change_callback_();
     }
-    /// Accessible to subclasses that want to observe whether a caller
-    /// registered a callback.
+    /// Observe whether a caller registered a callback.
     bool has_device_change_callback() const {
         return static_cast<bool>(device_change_callback_);
     }

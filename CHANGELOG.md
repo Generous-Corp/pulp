@@ -9,6 +9,8 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
 <a id="v0160"></a>
+## [0.17.0]
+
 ## [0.16.0] - 2026-04-17
 
 - platform: native file dialog backend-registration + explicit unsupported (#301) ([#312](https://github.com/danielraffel/pulp/pull/312))
