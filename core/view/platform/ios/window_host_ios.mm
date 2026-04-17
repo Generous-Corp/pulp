@@ -7,6 +7,7 @@
 
 #include <pulp/canvas/cg_canvas.hpp>
 #import <UIKit/UIKit.h>
+#include <atomic>
 #include <unordered_map>
 
 // ── PulpRootView: UIView subclass that paints the View tree ─────────────────
@@ -291,6 +292,29 @@ private:
 #include <pulp/render/gpu_surface.hpp>
 #include <pulp/render/skia_surface.hpp>
 
+// Forward decl for the display-link bridge.
+class IOSGpuWindowHost;
+
+}  // namespace pulp::view
+
+// Metal-backed UIView — file-local class so we don't depend on the
+// private PulpMetalView in metal_surface_ios.mm.
+@interface PulpMetalWindowView : UIView
+@end
+
+@implementation PulpMetalWindowView
++ (Class)layerClass { return [CAMetalLayer class]; }
+- (CAMetalLayer *)metalLayer { return (CAMetalLayer *)self.layer; }
+@end
+
+// CADisplayLink target — relays the vsync tick to the C++ host.
+@interface PulpIOSDisplayLinkTarget : NSObject
+@property (nonatomic, assign) pulp::view::IOSGpuWindowHost* host;
+- (void)tick:(CADisplayLink*)link;
+@end
+
+namespace pulp::view {
+
 class IOSGpuWindowHost : public WindowHost {
 public:
     IOSGpuWindowHost(View& root, const WindowOptions& options)
@@ -299,6 +323,7 @@ public:
     }
 
     ~IOSGpuWindowHost() override {
+        stop_display_link();
         skia_surface_.reset();
         gpu_surface_.reset();
     }
@@ -309,7 +334,13 @@ public:
     render::GpuSurface* gpu_surface() const override { return gpu_surface_.get(); }
 
     void repaint() override {
-        needs_repaint_ = true;
+        needs_repaint_.store(true, std::memory_order_relaxed);
+    }
+
+    void tick() {
+        if (needs_repaint_.exchange(false, std::memory_order_relaxed)) {
+            render_frame();
+        }
     }
 
     void set_close_callback(std::function<void()> cb) override {
@@ -333,7 +364,7 @@ public:
             }
 
             // Create Metal-backed view
-            metal_view_ = [[PulpMetalView alloc] initWithFrame:window_.bounds];
+            metal_view_ = [[PulpMetalWindowView alloc] initWithFrame:window_.bounds];
             metal_view_.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
             metal_view_.multipleTouchEnabled = YES;
 
@@ -374,6 +405,9 @@ public:
             window_.rootViewController = vc;
             [window_ makeKeyAndVisible];
 
+            start_display_link();
+            needs_repaint_.store(true, std::memory_order_relaxed);
+
             runtime::log_info("iOS GPU: window host ready ({}x{} physical)", pw, ph);
         }
     }
@@ -381,29 +415,75 @@ public:
 private:
     View& root_;
     UIWindow* window_ = nil;
-    PulpMetalView* metal_view_ = nil;
+    PulpMetalWindowView* metal_view_ = nil;
     std::unique_ptr<render::GpuSurface> gpu_surface_;
     std::unique_ptr<render::SkiaSurface> skia_surface_;
     std::function<void()> close_callback_;
-    bool needs_repaint_ = false;
+    std::atomic<bool> needs_repaint_{false};
+    CADisplayLink* display_link_ = nil;
+    PulpIOSDisplayLinkTarget* display_link_target_ = nil;
+
+    void start_display_link() {
+        if (display_link_) return;
+        @autoreleasepool {
+            display_link_target_ = [[PulpIOSDisplayLinkTarget alloc] init];
+            display_link_target_.host = this;
+            display_link_ = [CADisplayLink displayLinkWithTarget:display_link_target_
+                                                        selector:@selector(tick:)];
+            [display_link_ addToRunLoop:[NSRunLoop mainRunLoop]
+                                forMode:NSRunLoopCommonModes];
+        }
+    }
+
+    void stop_display_link() {
+        @autoreleasepool {
+            if (display_link_) {
+                [display_link_ invalidate];
+                display_link_ = nil;
+            }
+            display_link_target_ = nil;
+        }
+    }
 
     void render_frame() {
         if (!gpu_surface_ || !skia_surface_) return;
         if (!gpu_surface_->begin_frame()) return;
 
-        auto* canvas = skia_surface_->begin_frame(gpu_surface_->current_texture_handle());
+        auto* canvas = skia_surface_->begin_frame();
         if (canvas) {
-            // Paint the view tree
             auto b = root_.bounds();
-            root_.set_bounds({0, 0, b.width, b.height});
+            // Keep bounds aligned with logical window size, not the
+            // pixel-scaled GPU surface. paint_all() handles content scale.
+            CGSize logical = window_.bounds.size;
+            root_.set_bounds({0, 0,
+                              static_cast<float>(logical.width),
+                              static_cast<float>(logical.height)});
             root_.layout_children();
-            // TODO: wrap SkCanvas in SkiaCanvas adapter and call root_.paint_all()
+
+            canvas->set_fill_color(canvas::Color::rgba8(30, 30, 46));
+            canvas->fill_rect(0, 0,
+                              static_cast<float>(logical.width),
+                              static_cast<float>(logical.height));
+            root_.paint_all(*canvas);
+            View::paint_overlays(*canvas);
+            (void)b;
         }
 
         skia_surface_->end_frame();
         gpu_surface_->end_frame();
     }
 };
+
+}  // namespace pulp::view
+
+@implementation PulpIOSDisplayLinkTarget
+- (void)tick:(CADisplayLink*)link {
+    (void)link;
+    if (_host) _host->tick();
+}
+@end
+
+namespace pulp::view {
 
 #endif // PULP_HAS_SKIA
 
