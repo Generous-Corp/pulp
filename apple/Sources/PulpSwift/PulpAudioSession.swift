@@ -170,17 +170,26 @@ public final class PulpAudioSession: ObservableObject {
         case .began:
             state.isInterrupted = true
             onInterruptionBegan?()
+            emitNative(event: PULP_IOS_AUDIO_EVENT_INTERRUPTION_BEGAN, options: 0, reason: 0)
 
         case .ended:
             state.isInterrupted = false
             let shouldResume: Bool
+            var optionsBitfield: Int32 = 0
             if let optionsValue = userInfo[AVAudioSessionInterruptionOptionKey] as? UInt {
                 let options = AVAudioSession.InterruptionOptions(rawValue: optionsValue)
                 shouldResume = options.contains(.shouldResume)
+                if shouldResume {
+                    optionsBitfield |= Int32(PULP_IOS_INTERRUPTION_OPTION_SHOULD_RESUME.rawValue)
+                }
             } else {
                 shouldResume = false
             }
             onInterruptionEnded?(shouldResume)
+            emitNative(
+                event: PULP_IOS_AUDIO_EVENT_INTERRUPTION_ENDED,
+                options: optionsBitfield,
+                reason: 0)
 
         @unknown default:
             break
@@ -196,6 +205,10 @@ public final class PulpAudioSession: ObservableObject {
 
         refreshState()
         onRouteChanged?(reason)
+        emitNative(
+            event: PULP_IOS_AUDIO_EVENT_ROUTE_CHANGED,
+            options: 0,
+            reason: Self.mapRouteChangeReason(reason))
     }
 
     private func handleMediaServicesReset() {
@@ -204,6 +217,55 @@ public final class PulpAudioSession: ObservableObject {
         state.isActive = false
         state.isInterrupted = false
         refreshState()
+        emitNative(event: PULP_IOS_AUDIO_EVENT_MEDIA_SERVICES_RESET, options: 0, reason: 0)
+    }
+
+    // MARK: - Native C ABI forwarding
+
+    /// Build a PulpIosAudioSessionEvent from the current session state and
+    /// deliver it to the C ABI listener registered via
+    /// pulp_ios_audio_session_set_callback. No-op when no listener is
+    /// attached — pulp_ios_audio_session_emit handles that internally.
+    private func emitNative(event: PulpIosAudioEvent,
+                            options: Int32,
+                            reason: Int32) {
+        var payload = PulpIosAudioSessionEvent(
+            event: event,
+            reason: reason,
+            options: options,
+            sample_rate: session.sampleRate,
+            io_buffer_duration_seconds: session.ioBufferDuration,
+            output_channels: Int32(session.outputNumberOfChannels),
+            input_channels: Int32(session.inputNumberOfChannels))
+        pulp_ios_audio_session_emit(&payload)
+    }
+
+    /// Map AVAudioSession.RouteChangeReason → PulpIosRouteChangeReason so
+    /// native listeners can branch on the same taxonomy without linking
+    /// AVFoundation.
+    private static func mapRouteChangeReason(
+        _ reason: AVAudioSession.RouteChangeReason
+    ) -> Int32 {
+        switch reason {
+        case .unknown:
+            return Int32(PULP_IOS_ROUTE_CHANGE_UNKNOWN.rawValue)
+        case .newDeviceAvailable:
+            return Int32(PULP_IOS_ROUTE_CHANGE_NEW_DEVICE_AVAILABLE.rawValue)
+        case .oldDeviceUnavailable:
+            return Int32(PULP_IOS_ROUTE_CHANGE_OLD_DEVICE_UNAVAILABLE.rawValue)
+        case .categoryChange:
+            return Int32(PULP_IOS_ROUTE_CHANGE_CATEGORY_CHANGE.rawValue)
+        case .override:
+            return Int32(PULP_IOS_ROUTE_CHANGE_OVERRIDE.rawValue)
+        case .wakeFromSleep:
+            return Int32(PULP_IOS_ROUTE_CHANGE_WAKE_FROM_SLEEP.rawValue)
+        case .noSuitableRouteForCategory:
+            return Int32(PULP_IOS_ROUTE_CHANGE_NO_SUITABLE_ROUTE.rawValue)
+        case .routeConfigurationChange:
+            return Int32(PULP_IOS_ROUTE_CHANGE_CONFIGURATION_CHANGE.rawValue)
+        @unknown default:
+            return Int32(PULP_IOS_ROUTE_CHANGE_UNKNOWN.rawValue)
+        }
     }
 }
 

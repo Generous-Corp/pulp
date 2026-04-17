@@ -7,6 +7,12 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+// Pull in the iOS AVAudioSession C ABI so Swift (PulpAudioSession.swift)
+// can call pulp_ios_audio_session_emit() directly through this umbrella
+// header. Underlying declarations live with the format module so C++
+// consumers keep a clean <pulp/format/ios_audio_session.h> include path.
+#include <pulp/format/ios_audio_session.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
