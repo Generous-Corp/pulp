@@ -938,6 +938,17 @@ target_include_directories(pulp-test-audio-matrix PRIVATE
 )
 catch_discover_tests(pulp-test-audio-matrix)
 
+# Audio edge-case corpus (#49 / #356): zero-length blocks, denormals,
+# impulse position, DC extremes, param change between blocks,
+# re-prepare idempotency. Framework-layer contract only.
+add_executable(pulp-test-audio-edge-cases test_audio_edge_cases.cpp)
+target_link_libraries(pulp-test-audio-edge-cases PRIVATE
+    pulp::format pulp::signal Catch2::Catch2WithMain)
+target_include_directories(pulp-test-audio-edge-cases PRIVATE
+    ${CMAKE_SOURCE_DIR}/examples/pulp-gain
+)
+catch_discover_tests(pulp-test-audio-edge-cases)
+
 # Golden-file tests for PulpEffect (separate to avoid enum collision with PulpGain)
 add_executable(pulp-test-golden-effect test_golden_effect.cpp)
 target_link_libraries(pulp-test-golden-effect PRIVATE pulp::format Catch2::Catch2WithMain)
