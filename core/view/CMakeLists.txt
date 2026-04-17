@@ -241,6 +241,17 @@ if(APPLE)
             platform/ios/window_host_ios.mm
             platform/ios/plugin_view_host_ios.mm
             platform/ios/accessibility_ios.mm
+            # #299 + #313 Codex P1 follow-up: bridge stubs compile
+            # on iOS too. They provide set_factory /
+            # set_screenshot_provider / has_* registration APIs
+            # unconditionally; create/render impls stay gated by
+            # their own #if checks so the iOS-native window +
+            # plugin-view impls aren't shadowed. screenshot has no
+            # iOS-native impl yet, so the stub's provider-backed
+            # path is the one iOS actually uses.
+            src/plugin_view_host_stub.cpp
+            src/screenshot_stub.cpp
+            src/window_host_stub.cpp
         )
         target_link_libraries(pulp-view PRIVATE
             "-framework UIKit"

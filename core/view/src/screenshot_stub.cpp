@@ -1,18 +1,32 @@
-// Non-Apple screenshot fallback (#299). No built-in backend in
-// core/view — hosts install a provider via set_screenshot_provider()
-// for real captures. Without a provider, render_to_png returns an
-// empty buffer and render_to_file returns false explicitly — callers
-// probe has_screenshot_provider() to tell "unsupported" apart from
-// "render failed".
+// Non-native-platform screenshot fallback (#299 + #313).
 //
-// The provider-registration API is always compiled; the render_*
-// forwards live only on non-Apple (Apple platforms have a native
-// impl in screenshot_mac.mm / screenshot_ios.mm).
+// The provider-registration API (set/clear/has_screenshot_provider)
+// is always compiled. The render_to_png / render_to_file
+// implementations are compiled when no platform-native impl exists
+// for this build:
+//   - macOS:  screenshot_mac.mm provides native, stubs not compiled here.
+//   - iOS:    no iOS-native screenshot impl yet — stub compiled (#19 P1).
+//   - Other:  stub compiled.
+//
+// When the stub path is active, render_* delegates to the registered
+// provider; without one, it returns empty / false explicitly so
+// callers can distinguish "unsupported" from "render failed".
+//
+// Codex P2 on #313 follow-up: the provider callback is NOT invoked
+// under the registration mutex. We copy the callback to a local
+// under lock, release, then call. If the callback takes long
+// (real screenshot capture) or re-enters set/clear/has, the mutex
+// is free.
 
 #include <pulp/view/screenshot.hpp>
 
 #include <fstream>
 #include <mutex>
+#include <utility>
+
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
+#endif
 
 namespace pulp::view {
 
@@ -39,15 +53,24 @@ bool has_screenshot_provider() {
     return g_provider_installed;
 }
 
-#if !defined(__APPLE__)
+// Compile render impls when no native impl takes precedence.
+// macOS has native screenshot_mac.mm; iOS does NOT yet have native,
+// so include the stub on iOS too.
+#if !defined(__APPLE__) || TARGET_OS_IOS
 
 std::vector<uint8_t> render_to_png(
     View& root, uint32_t width, uint32_t height, float scale,
     ScreenshotBackend backend)
 {
-    std::lock_guard lock(g_provider_mu);
-    if (!g_provider_installed || !g_provider) return {};
-    return g_provider(root, width, height, scale, backend);
+    // #313 Codex P2: copy the provider out, release the lock, then
+    // invoke. The provider can be long-running or re-enter the API.
+    ScreenshotProvider local;
+    {
+        std::lock_guard lock(g_provider_mu);
+        if (!g_provider_installed || !g_provider) return {};
+        local = g_provider;
+    }
+    return local(root, width, height, scale, backend);
 }
 
 bool render_to_file(
@@ -64,6 +87,6 @@ bool render_to_file(
     return out.good();
 }
 
-#endif // !defined(__APPLE__)
+#endif // !defined(__APPLE__) || TARGET_OS_IOS
 
 } // namespace pulp::view

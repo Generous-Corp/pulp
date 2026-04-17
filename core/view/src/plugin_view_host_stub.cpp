@@ -43,9 +43,17 @@ std::unique_ptr<PluginViewHost> PluginViewHost::create(View& root, Size size) {
 
 std::unique_ptr<PluginViewHost> PluginViewHost::create(View& root,
                                                        const Options& options) {
-    std::lock_guard lock(g_factory_mu);
-    if (!g_factory_installed || !g_factory) return nullptr;
-    return g_factory(root, options);
+    // #313 Codex P2: copy the factory out, release the lock, then
+    // invoke. Instantiating a plugin view involves attaching to a
+    // DAW's editor window — can block; definitely shouldn't hold a
+    // registration mutex while it does.
+    PluginViewHost::Factory local;
+    {
+        std::lock_guard lock(g_factory_mu);
+        if (!g_factory_installed || !g_factory) return nullptr;
+        local = g_factory;
+    }
+    return local(root, options);
 }
 
 #endif // !defined(__APPLE__)

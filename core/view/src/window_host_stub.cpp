@@ -41,9 +41,16 @@ bool WindowHost::has_factory() {
 
 std::unique_ptr<WindowHost> WindowHost::create(View& root,
                                                 const WindowOptions& options) {
-    std::lock_guard lock(g_factory_mu);
-    if (!g_factory_installed || !g_factory) return nullptr;
-    return g_factory(root, options);
+    // #313 Codex P2: copy the factory out, release the lock, then
+    // invoke. Creating a native window can take milliseconds and
+    // the factory might call back into set_factory/has_factory.
+    WindowHost::Factory local;
+    {
+        std::lock_guard lock(g_factory_mu);
+        if (!g_factory_installed || !g_factory) return nullptr;
+        local = g_factory;
+    }
+    return local(root, options);
 }
 
 #endif // !defined(__APPLE__)
