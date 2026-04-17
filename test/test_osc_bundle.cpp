@@ -2,6 +2,16 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/osc/bundle.hpp>
 
+#if defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#define WIN32_LEAN_AND_MEAN
+#include <winsock2.h>
+#else
+#include <arpa/inet.h>
+#endif
+
 using namespace pulp::osc;
 using Catch::Matchers::WithinAbs;
 
@@ -118,4 +128,185 @@ TEST_CASE("OSC address wildcard ?", "[osc][bundle]") {
     REQUIRE(address_matches("/foo/ba?", "/foo/bar"));
     REQUIRE(address_matches("/foo/ba?", "/foo/baz"));
     REQUIRE_FALSE(address_matches("/foo/ba?", "/foo/ba"));
+}
+
+// ── TimeTag edges ──────────────────────────────────────────────────────
+
+TEST_CASE("TimeTag::from_unix with negative time returns immediate",
+          "[osc][bundle][timetag]") {
+    auto tt = TimeTag::from_unix(-1.0);
+    REQUIRE(tt == TimeTag::immediate());
+}
+
+TEST_CASE("TimeTag::from_unix with zero returns immediate",
+          "[osc][bundle][timetag]") {
+    auto tt = TimeTag::from_unix(0.0);
+    REQUIRE(tt == TimeTag::immediate());
+}
+
+TEST_CASE("TimeTag inequality on different fractional components",
+          "[osc][bundle][timetag]") {
+    TimeTag a{100, 0};
+    TimeTag b{100, 1};
+    REQUIRE_FALSE(a == b);
+}
+
+// ── Bundle deserialize rejection paths ─────────────────────────────────
+
+TEST_CASE("Bundle::deserialize rejects data shorter than 16 bytes",
+          "[osc][bundle][deserialize-edge]") {
+    const uint8_t tiny[] = {'#', 'b', 'u', 'n', 'd', 'l', 'e', 0, 0, 0};
+    REQUIRE_FALSE(Bundle::deserialize(tiny, sizeof(tiny)).has_value());
+}
+
+TEST_CASE("Bundle::deserialize rejects non-#bundle header",
+          "[osc][bundle][deserialize-edge]") {
+    // 16 bytes, valid size, but first 8 bytes aren't "#bundle\0".
+    const uint8_t bad[16] = {
+        'X', 'b', 'u', 'n', 'd', 'l', 'e', 0,
+        0, 0, 0, 0, 0, 0, 0, 1
+    };
+    REQUIRE_FALSE(Bundle::deserialize(bad, sizeof(bad)).has_value());
+}
+
+TEST_CASE("Bundle::deserialize rejects element size that walks past end",
+          "[osc][bundle][deserialize-edge]") {
+    // Header + timetag (16 bytes) + element size prefix (4 bytes) claiming
+    // 64 payload bytes, but only 4 actual bytes follow. Deserialize must
+    // bail out rather than reading past the end.
+    std::vector<uint8_t> buf;
+    const char header[] = "#bundle";
+    buf.insert(buf.end(), header, header + 8);
+    for (int i = 0; i < 8; ++i) buf.push_back(0);
+    uint32_t size_claim = htonl(64);
+    auto* p = reinterpret_cast<const uint8_t*>(&size_claim);
+    buf.insert(buf.end(), p, p + 4);
+    buf.insert(buf.end(), {0xAA, 0xBB, 0xCC, 0xDD});
+
+    REQUIRE_FALSE(Bundle::deserialize(buf.data(), buf.size()).has_value());
+}
+
+// ── Bundle round-trip edges ────────────────────────────────────────────
+
+TEST_CASE("Empty Bundle serialize/deserialize round-trip",
+          "[osc][bundle][roundtrip]") {
+    Bundle b;
+    b.timetag = {0, 1};  // immediate
+    auto data = b.serialize();
+    REQUIRE(data.size() == 16);  // header(8) + timetag(8), no elements
+
+    auto restored = Bundle::deserialize(data.data(), data.size());
+    REQUIRE(restored.has_value());
+    REQUIRE(restored->timetag == b.timetag);
+    REQUIRE(restored->elements.empty());
+}
+
+TEST_CASE("Bundle with mixed messages and nested bundles round-trips",
+          "[osc][bundle][roundtrip]") {
+    Bundle inner;
+    inner.timetag = TimeTag::from_unix(1700000001.0);
+    Message inner_msg("/inner");
+    inner_msg.add(7);
+    inner.add(std::move(inner_msg));
+
+    Bundle outer;
+    outer.timetag = TimeTag::from_unix(1700000000.0);
+    Message m1("/a"); m1.add(1);
+    Message m2("/b"); m2.add(std::string("two"));
+    outer.add(std::move(m1));
+    outer.add(std::move(inner));
+    outer.add(std::move(m2));
+
+    auto data = outer.serialize();
+    auto restored = Bundle::deserialize(data.data(), data.size());
+    REQUIRE(restored.has_value());
+    REQUIRE(restored->elements.size() == 3);
+    REQUIRE(restored->elements[0].is_message());
+    REQUIRE(restored->elements[1].is_bundle());
+    REQUIRE(restored->elements[2].is_message());
+    REQUIRE(restored->elements[0].message().address == "/a");
+    REQUIRE(restored->elements[1].bundle().elements.size() == 1);
+    REQUIRE(restored->elements[1].bundle().elements[0].message().address == "/inner");
+    REQUIRE(restored->elements[2].message().get_string(0) == "two");
+}
+
+TEST_CASE("Bundle deep nesting (3 levels) round-trips",
+          "[osc][bundle][roundtrip]") {
+    Bundle level3;
+    Message leaf("/leaf"); leaf.add(42);
+    level3.add(std::move(leaf));
+
+    Bundle level2;
+    level2.add(std::move(level3));
+
+    Bundle level1;
+    level1.add(std::move(level2));
+
+    auto data = level1.serialize();
+    auto restored = Bundle::deserialize(data.data(), data.size());
+    REQUIRE(restored.has_value());
+    REQUIRE(restored->elements.size() == 1);
+    REQUIRE(restored->elements[0].is_bundle());
+    const auto& l2 = restored->elements[0].bundle();
+    REQUIRE(l2.elements[0].is_bundle());
+    const auto& l3 = l2.elements[0].bundle();
+    REQUIRE(l3.elements[0].is_message());
+    REQUIRE(l3.elements[0].message().get_int(0) == 42);
+}
+
+// ── Address pattern: character class ───────────────────────────────────
+
+TEST_CASE("Address pattern character class range [a-z]",
+          "[osc][bundle][pattern]") {
+    REQUIRE(address_matches("/note/[a-z]", "/note/c"));
+    REQUIRE(address_matches("/note/[a-z]", "/note/z"));
+    REQUIRE_FALSE(address_matches("/note/[a-z]", "/note/A"));
+    REQUIRE_FALSE(address_matches("/note/[a-z]", "/note/1"));
+}
+
+TEST_CASE("Address pattern character class enumeration [abc]",
+          "[osc][bundle][pattern]") {
+    REQUIRE(address_matches("/pad/[xyz]", "/pad/y"));
+    REQUIRE_FALSE(address_matches("/pad/[xyz]", "/pad/w"));
+}
+
+TEST_CASE("Address pattern character class negation [!...]",
+          "[osc][bundle][pattern]") {
+    REQUIRE(address_matches("/ch/[!0-9]", "/ch/a"));
+    REQUIRE_FALSE(address_matches("/ch/[!0-9]", "/ch/5"));
+}
+
+// ── Address pattern: alternatives ──────────────────────────────────────
+
+TEST_CASE("Address pattern alternatives {foo,bar}",
+          "[osc][bundle][pattern]") {
+    REQUIRE(address_matches("/{in,out}/gain", "/in/gain"));
+    REQUIRE(address_matches("/{in,out}/gain", "/out/gain"));
+    REQUIRE_FALSE(address_matches("/{in,out}/gain", "/mid/gain"));
+}
+
+TEST_CASE("Address pattern alternatives with trailing literal",
+          "[osc][bundle][pattern]") {
+    REQUIRE(address_matches("/{f,bar}oo", "/foo"));
+    REQUIRE(address_matches("/{f,bar}oo", "/baroo"));
+    REQUIRE_FALSE(address_matches("/{f,bar}oo", "/bazoo"));
+}
+
+// ── Address pattern: lengths & bounds ──────────────────────────────────
+
+TEST_CASE("Address pattern pattern shorter than address fails",
+          "[osc][bundle][pattern]") {
+    REQUIRE_FALSE(address_matches("/foo", "/foo/bar"));
+}
+
+TEST_CASE("Address pattern pattern longer than address fails",
+          "[osc][bundle][pattern]") {
+    REQUIRE_FALSE(address_matches("/foo/bar", "/foo"));
+}
+
+TEST_CASE("Address pattern star bounded by path separator",
+          "[osc][bundle][pattern]") {
+    // '*' matches any run of characters up to the next '/', not across.
+    REQUIRE(address_matches("/*/bar", "/any/bar"));
+    REQUIRE_FALSE(address_matches("/*/bar", "/any/thing/bar"));
 }

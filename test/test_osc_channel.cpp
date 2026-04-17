@@ -68,3 +68,97 @@ TEST_CASE("OscChannel round-trips an OSC message over UDP loopback", "[osc_chann
     a->close();
     b->close();
 }
+
+TEST_CASE("OscChannel send empty payload is rejected", "[osc_channel][lifecycle]") {
+    auto a = OscChannel::open("127.0.0.1", 49911, 49912);
+    if (!a) {
+        SUCCEED("could not open loopback UDP pair; skipping");
+        return;
+    }
+    REQUIRE(a->is_open());
+    REQUIRE_FALSE(a->send(nullptr, 0));
+    const uint8_t byte = 0;
+    REQUIRE_FALSE(a->send(&byte, 0));
+    a->close();
+}
+
+TEST_CASE("OscChannel send after close is rejected", "[osc_channel][lifecycle]") {
+    auto a = OscChannel::open("127.0.0.1", 49913, 49914);
+    if (!a) {
+        SUCCEED("could not open loopback UDP pair; skipping");
+        return;
+    }
+    REQUIRE(a->is_open());
+    a->close();
+    REQUIRE_FALSE(a->is_open());
+
+    Message msg("/x");
+    msg.add(1);
+    REQUIRE_FALSE(a->send(msg));
+
+    const uint8_t bytes[] = {0, 0, 0, 0};
+    REQUIRE_FALSE(a->send(bytes, sizeof(bytes)));
+}
+
+TEST_CASE("OscChannel close is idempotent and on_closed fires exactly once",
+          "[osc_channel][lifecycle]") {
+    auto a = OscChannel::open("127.0.0.1", 49915, 49916);
+    if (!a) {
+        SUCCEED("could not open loopback UDP pair; skipping");
+        return;
+    }
+
+    std::atomic<int> closed_count{0};
+    a->on_closed([&] { closed_count.fetch_add(1, std::memory_order_release); });
+
+    a->close();
+    a->close();  // second close must not re-fire
+    a->close();  // third close must not re-fire
+
+    // Inline executor — no wait needed, but give any background thread
+    // a moment just in case.
+    REQUIRE(wait_until([&] {
+        return closed_count.load(std::memory_order_acquire) == 1;
+    }, 500ms));
+    REQUIRE(closed_count.load() == 1);
+}
+
+TEST_CASE("OscChannel delivers raw send() bytes verbatim to the peer",
+          "[osc_channel][raw]") {
+    auto a = OscChannel::open("127.0.0.1", 49917, 49918);
+    auto b = OscChannel::open("127.0.0.1", 49918, 49917);
+    if (!a || !b) {
+        SUCCEED("could not open loopback UDP pair; skipping");
+        return;
+    }
+
+    std::mutex mu;
+    std::vector<uint8_t> received;
+    b->on_message([&](const pulp::runtime::Message& m) {
+        std::lock_guard<std::mutex> lock(mu);
+        received = m.payload;
+    });
+
+    // Hand-crafted OSC message bytes that *don't* come from encode() —
+    // raw send must preserve them exactly.
+    Message golden("/raw/path");
+    golden.add(int32_t{7}).add(std::string("abc"));
+    const auto encoded = encode(golden);
+
+    REQUIRE(a->send(encoded.data(), encoded.size()));
+
+    REQUIRE(wait_until([&] {
+        std::lock_guard<std::mutex> lock(mu);
+        return !received.empty();
+    }));
+
+    std::lock_guard<std::mutex> lock(mu);
+    // Re-decode on this end and verify every field survives the trip.
+    auto decoded = decode(received.data(), received.size());
+    REQUIRE(decoded.address == "/raw/path");
+    REQUIRE(decoded.get_int(0) == 7);
+    REQUIRE(decoded.get_string(1) == "abc");
+
+    a->close();
+    b->close();
+}
