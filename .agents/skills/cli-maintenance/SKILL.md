@@ -81,22 +81,46 @@ Same as above, focus on steps 2, 4, 5, 6, 7. Key risks:
 - [ ] Search CLAUDE.md
 - [ ] Run sync check
 
-## `pulp pr` — one-shot PR orchestrator
+## `pulp pr` — shim over `shipyard pr`
 
-The canonical way to ship a branch. `cmd_pr.cpp` chains skill-sync → version-bump apply → commit → push → `gh pr create` → `shipyard ship`. The `/pr` slash command and the natural-language triggers in the `ci` skill both route here.
+By default `pulp pr` now delegates to `shipyard pr` (on PATH), forwarding
+argv. Shipyard owns skill-sync, version-bump, PR creation, and cross-host
+validation; `pulp pr` exists so the old invocation, the `/pr` slash command,
+and the natural-language triggers in the `ci` skill all continue to work.
 
 Invariants:
 
-- `pulp pr` refuses to run on `main` (feature branch required).
-- `pulp pr` refuses to create the PR if the worktree isn't clean after the bump commit.
-- Never fan out to `gh pr create` + `shipyard ship` separately. One command, one orchestrator.
-- The only inputs that require human judgment are the commit trailers (`Version-Bump`, `Skill-Update`, `Release`). Everything else is automatic.
+- When `shipyard` is on PATH, `pulp pr` execs `shipyard pr <args>` and exits
+  with shipyard's status. Do NOT add pre/post-processing in `cmd_pr.cpp` —
+  shipyard is the single source of truth.
+- When `shipyard` is NOT on PATH, `pulp pr` prints an install hint pointing
+  at `tools/install-shipyard.sh` and exits non-zero. Update the hint text
+  in `cmd_pr.cpp::print_install_shipyard_hint()` when the install path
+  changes.
+- `--native` keeps the legacy in-process orchestrator (skill-sync →
+  version-bump apply → commit → push → `gh pr create` → `shipyard ship`)
+  for forensic/debugging use. Do not use it as the default path and do not
+  document it as the primary surface — the shim IS the primary surface.
+- `pulp pr` (shim or `--native`) still refuses to run on `main`.
 
 Gotchas:
 
-- **Don't call the Python scripts by hand.** `pulp pr` invokes them in the right order with the right flags. Direct invocation skips the commit trailer parsing and the PR-body rendering.
-- **Bump level is per-surface.** A plugin-only `feat:` in a commit subject does not upgrade the SDK. The `Version-Bump: <surface>=<level>` trailer is authoritative and surface-scoped.
-- **`pulp version check --with-bump-check`** is the fast sanity check to run *before* `pulp pr` if you want to see what the gate will say. Same script, `--mode=report`.
+- **Changing `cmd_pr.cpp` triggers the cli-maintenance skill-sync gate.**
+  If you're modifying the shim, the install hint, or `--native` logic,
+  add a bullet here and you're covered. If the change is mechanical (e.g.
+  renaming a helper) and genuinely doesn't need skill documentation, add a
+  `Skill-Update: skip skill=cli-maintenance reason="..."` trailer on the
+  tip commit.
+- **Don't call the Python scripts (`skill_sync_check.py`,
+  `version_bump_check.py`) by hand.** `shipyard pr` calls them with the
+  right flags via the shim. Direct invocation skips the commit-trailer
+  parsing and the PR-body rendering.
+- **Bump level is per-surface.** A plugin-only `feat:` in a commit subject
+  does not upgrade the SDK. The `Version-Bump: <surface>=<level>` trailer
+  is authoritative and surface-scoped.
+- **`pulp version check --with-bump-check`** is the fast sanity check to
+  run *before* `pulp pr` if you want to see what the gate will say. Same
+  script, `--mode=report`.
 
 ## `pulp version check`
 

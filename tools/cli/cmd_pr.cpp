@@ -1,7 +1,16 @@
 // cmd_pr.cpp — `pulp pr` subcommand.
 //
-// One-shot "push a PR" orchestrator. Wraps the three things that used to be
-// three separate human actions:
+// Primary behavior: delegate to `shipyard pr` when shipyard is installed.
+// Shipyard is Pulp's single-source-of-truth ship orchestrator; keeping a
+// parallel native implementation in two tools is how drift starts. See
+// issue #352.
+//
+// Fallback: if shipyard is not on PATH, print a concise install guide
+// (tools/install-shipyard.sh + PATH hint) and exit 2. `--native` forces
+// the in-CLI implementation below, which stays as a diagnostic fallback
+// when shipyard itself is broken or under debug.
+//
+// The in-CLI fallback does the same 4 steps shipyard pr does:
 //
 //   1. Skill-sync gate — hard-fails if a mapped path is touched without
 //      updating the corresponding SKILL.md (or a Skill-Update trailer on
@@ -248,16 +257,107 @@ void print_usage() {
 
 // ── Entry point ─────────────────────────────────────────────────────────
 
+namespace {
+
+// Resolve `shipyard` on PATH without depending on platform shell helpers.
+// Honours PATH env; matches how `find_on_path` works in platform/, but
+// local so cmd_pr.cpp keeps no new link-level dependencies.
+std::string locate_shipyard() {
+    const char* path = std::getenv("PATH");
+    if (!path) return {};
+#if defined(_WIN32)
+    const char sep = ';';
+    const char* exe = "shipyard.exe";
+#else
+    const char sep = ':';
+    const char* exe = "shipyard";
+#endif
+    std::string pathstr(path);
+    std::string::size_type start = 0;
+    while (start <= pathstr.size()) {
+        auto end = pathstr.find(sep, start);
+        auto dir = pathstr.substr(start, end - start);
+        if (!dir.empty()) {
+            fs::path candidate = fs::path(dir) / exe;
+            std::error_code ec;
+            if (fs::exists(candidate, ec) && !ec) {
+                return candidate.string();
+            }
+        }
+        if (end == std::string::npos) break;
+        start = end + 1;
+    }
+    return {};
+}
+
+void print_install_shipyard_hint() {
+    std::cerr <<
+        "pulp pr: shipyard is not on PATH, and the ship flow is the one source\n"
+        "of truth across pulp + shipyard.\n\n"
+        "Install shipyard in a Pulp checkout:\n"
+        "  ./tools/install-shipyard.sh           # downloads the pinned binary\n"
+        "  export PATH=\"$HOME/.pulp/bin:$PATH\"   # add to your shell rc once\n\n"
+        "Re-run `pulp pr` after install. If you're debugging the native\n"
+        "pulp-cli implementation of the same flow, re-run with:\n"
+        "  pulp pr --native\n";
+}
+
+int exec_shipyard_pr(const std::string& shipyard_bin,
+                     const std::vector<std::string>& args) {
+    std::ostringstream cmd;
+    // Quote the binary path in case it sits under a space-containing path.
+    cmd << '\'' << shipyard_bin << "' pr";
+    for (const auto& a : args) {
+        cmd << " '" << a << '\'';
+    }
+    // run_passthrough streams stdio through the shell so the user sees
+    // shipyard's colored output live.
+    return run_passthrough(cmd.str());
+}
+
+}  // namespace
+
 int cmd_pr(const std::vector<std::string>& args) {
+    // Filter out `--native` before any other option lookup so the shim
+    // decision is independent of the native parser's flags.
+    bool force_native = false;
+    std::vector<std::string> forward;
+    forward.reserve(args.size());
+    for (const auto& a : args) {
+        if (a == "--native") { force_native = true; continue; }
+        forward.push_back(a);
+    }
+
+    if (!force_native) {
+        if (!forward.empty() && (forward[0] == "--help" || forward[0] == "-h")) {
+            // `pulp pr --help` always shows the shim's help too, so the
+            // user learns about --native. Then fall through to shipyard's
+            // own help when available.
+            std::cout <<
+                "Usage: pulp pr [--native] [<shipyard pr options>]\n"
+                "\n"
+                "By default this delegates to `shipyard pr`, the canonical\n"
+                "push-a-PR orchestrator. Pass --native to run the in-CLI\n"
+                "fallback implementation instead (for diagnostics).\n\n";
+        }
+        auto shipyard = locate_shipyard();
+        if (!shipyard.empty()) {
+            return exec_shipyard_pr(shipyard, forward);
+        }
+        print_install_shipyard_hint();
+        return 2;
+    }
+
+    // ── Native fallback (pre-shipyard behaviour) ────────────────────────
     Options opt;
-    for (size_t i = 0; i < args.size(); ++i) {
-        const auto& a = args[i];
+    for (size_t i = 0; i < forward.size(); ++i) {
+        const auto& a = forward[i];
         if (a == "--help" || a == "-h") { print_usage(); return 0; }
         else if (a == "--dry-run") opt.dry_run = true;
         else if (a == "--no-ship") opt.no_ship = true;
         else if (a == "--no-push") opt.no_push = true;
-        else if (a == "--base"  && i + 1 < args.size()) opt.base  = args[++i];
-        else if (a == "--title" && i + 1 < args.size()) opt.title = args[++i];
+        else if (a == "--base"  && i + 1 < forward.size()) opt.base  = forward[++i];
+        else if (a == "--title" && i + 1 < forward.size()) opt.title = forward[++i];
         else { std::cerr << "pulp pr: unknown option '" << a << "'\n"; print_usage(); return 2; }
     }
 
