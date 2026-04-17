@@ -122,6 +122,34 @@ Gotchas:
   run *before* `pulp pr` if you want to see what the gate will say. Same
   script, `--mode=report`.
 
+## `pulp upgrade` — self-update
+
+Lives in `tools/cli/cmd_misc.cpp` and calls `pulp::cli::pulp_upgrade_url_for()`
+from `tools/cli/upgrade_url.hpp`. The URL/asset-name convention is **pinned
+by the release workflow** (`.github/workflows/release-cli.yml`) and guarded
+by `test/test_cli_upgrade_url.cpp` — both need to agree.
+
+Convention (don't drift):
+
+```
+Asset = "pulp-<platform>-<arch>.<ext>"  (NO version in the filename)
+URL   = ".../releases/download/v<version>/<asset>"
+arch  = "arm64" | "x64"                  (NOT "x86_64")
+ext   = "zip" for windows, "tar.gz" otherwise
+```
+
+Gotchas:
+
+- **Don't bake the version into the asset filename.** The version sits in
+  the release *tag* (path segment `v<version>`), not in the file name.
+  PR #377 / issue #352 was the bug where the filename contained the
+  version and every upgrade 404'd. `test_cli_upgrade_url.cpp` explicitly
+  fails if the version reappears in the filename.
+- **Use `x64`, not `x86_64`.** The release workflow uploads under `x64`.
+- **If you change `upgrade_url.hpp`, update the regression test in the
+  same PR.** Both live at HEAD; drift between them is the whole reason
+  the header exists.
+
 ## `pulp version check`
 
 Validates consistency across the three version-bearing surfaces:

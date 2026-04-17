@@ -1,6 +1,7 @@
 // cmd_misc.cpp — pulp test, status, clean, cache, upgrade commands
 
 #include "cli_common.hpp"
+#include "upgrade_url.hpp"
 
 #include <fstream>
 #include <iostream>
@@ -297,6 +298,11 @@ int cmd_cache(const std::vector<std::string>& args) {
 
 // ── cmd_upgrade ─────────────────────────────────────────────────────────────
 
+// URL / asset-name logic lives in upgrade_url.hpp so the regression test
+// can link against it without pulling cmd_misc's transitive CLI deps.
+// Release workflow this mirrors: .github/workflows/release-cli.yml.
+// Issue: #352.
+
 int cmd_upgrade(const std::vector<std::string>& args) {
     std::string target_version;
     for (size_t i = 0; i < args.size(); ++i) {
@@ -338,7 +344,10 @@ int cmd_upgrade(const std::vector<std::string>& args) {
 #if defined(__aarch64__) || defined(__arm64__) || defined(_M_ARM64)
     arch = "arm64";
 #elif defined(__x86_64__) || defined(_M_X64)
-    arch = "x86_64";
+    // Release assets use "x64" (not "x86_64"). Keep this in sync with the
+    // release workflow in .github/workflows/release-cli.yml — otherwise
+    // `pulp upgrade` 404s on the download step.
+    arch = "x64";
 #else
     arch = "unknown";
 #endif
@@ -353,9 +362,7 @@ int cmd_upgrade(const std::vector<std::string>& args) {
 
     auto install_dir = fs::path(self_path).parent_path();
 
-    std::string ext = (platform == "windows") ? "zip" : "tar.gz";
-    std::string tarball = "pulp-" + version + "-" + platform + "-" + arch + "." + ext;
-    std::string url = "https://github.com/danielraffel/pulp/releases/download/v" + version + "/" + tarball;
+    auto [tarball, url] = pulp::cli::pulp_upgrade_url_for(version, platform, arch);
 
     std::cout << "  Downloading " << tarball << "...\n";
 

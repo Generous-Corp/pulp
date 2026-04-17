@@ -56,6 +56,14 @@ if(TARGET pulp-cli)
 endif()
 catch_discover_tests(pulp-test-cli-ship-shellout)
 
+# CLI upgrade URL regression test (#352): asset filename stays
+# "pulp-<platform>-<arch>.<ext>" — the version sits in the release tag.
+# Test includes tools/cli/upgrade_url.hpp directly, no link deps needed.
+add_executable(pulp-test-cli-upgrade-url test_cli_upgrade_url.cpp)
+target_include_directories(pulp-test-cli-upgrade-url PRIVATE ${CMAKE_SOURCE_DIR})
+target_link_libraries(pulp-test-cli-upgrade-url PRIVATE Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-cli-upgrade-url)
+
 # Child process tests
 add_executable(pulp-test-child-process test_child_process.cpp)
 target_link_libraries(pulp-test-child-process PRIVATE pulp::platform Catch2::Catch2WithMain)
