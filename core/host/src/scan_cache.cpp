@@ -69,6 +69,20 @@ choc::value::Value entry_to_json(const std::string& path,
     obj.addMember("is_effect", e.info.is_effect);
     obj.addMember("num_inputs", e.info.num_inputs);
     obj.addMember("num_outputs", e.info.num_outputs);
+
+    // Richer metadata (workstream 03 slice 3.7). Emit as additive fields
+    // so older schema-v1 blobs (without them) still parse via defaults
+    // on the reader side.
+    obj.addMember("category", e.info.category);
+    obj.addMember("description", e.info.description);
+    obj.addMember("has_editor", e.info.has_editor);
+    obj.addMember("supports_sidechain", e.info.supports_sidechain);
+    obj.addMember("supports_midi_in", e.info.supports_midi_in);
+    obj.addMember("supports_midi_out", e.info.supports_midi_out);
+
+    auto features_arr = choc::value::createEmptyArray();
+    for (const auto& f : e.info.features) features_arr.addArrayElement(f);
+    obj.addMember("features", features_arr);
     return obj;
 }
 
@@ -96,6 +110,32 @@ bool entry_from_json(const choc::value::ValueView& v,
         v.hasObjectMember("num_inputs") ? v["num_inputs"].getInt64() : 2;
     out_entry.info.num_outputs =
         v.hasObjectMember("num_outputs") ? v["num_outputs"].getInt64() : 2;
+
+    // Richer metadata (workstream 03 slice 3.7). All additive; missing
+    // fields preserve struct defaults for older schema-v1 blobs.
+    out_entry.info.category =
+        v.hasObjectMember("category") ? v["category"].toString() : "";
+    out_entry.info.description =
+        v.hasObjectMember("description") ? v["description"].toString() : "";
+    out_entry.info.has_editor =
+        v.hasObjectMember("has_editor") ? v["has_editor"].getBool() : false;
+    out_entry.info.supports_sidechain =
+        v.hasObjectMember("supports_sidechain")
+            ? v["supports_sidechain"].getBool() : false;
+    out_entry.info.supports_midi_in =
+        v.hasObjectMember("supports_midi_in")
+            ? v["supports_midi_in"].getBool() : false;
+    out_entry.info.supports_midi_out =
+        v.hasObjectMember("supports_midi_out")
+            ? v["supports_midi_out"].getBool() : false;
+
+    out_entry.info.features.clear();
+    if (v.hasObjectMember("features") && v["features"].isArray()) {
+        auto features = v["features"];
+        for (uint32_t i = 0; i < features.size(); ++i) {
+            out_entry.info.features.emplace_back(features[i].toString());
+        }
+    }
     return true;
 }
 

@@ -92,6 +92,89 @@ TEST_CASE("JSON round-trip preserves all fields", "[scan_cache]") {
     REQUIRE(e.info.format == PluginFormat::VST3);
 }
 
+TEST_CASE("JSON round-trip preserves workstream 03 slice 3.7 metadata",
+          "[scan_cache][metadata]") {
+    // Covers the additive richer-metadata fields on PluginInfo —
+    // scan_cache.hpp's doc promises "older cache blobs that don't
+    // carry them deserialize with defaults". This case pins that
+    // promise when the fields *are* carried, complementing the
+    // default-init verification in test_plugin_info_metadata.cpp.
+    HostScanCache a;
+    PluginInfo rich;
+    rich.name = "SpectrumMeter";
+    rich.manufacturer = "Pulp";
+    rich.version = "2.0.0";
+    rich.path = "/tmp/rich-plugin.clap";
+    rich.unique_id = "com.pulp.spectrum";
+    rich.format = PluginFormat::CLAP;
+    rich.is_instrument = false;
+    rich.is_effect = true;
+    rich.num_inputs = 2;
+    rich.num_outputs = 2;
+    rich.category = "Analyzer";
+    rich.features = {"audio-effect", "analyzer", "utility"};
+    rich.description = "Real-time spectrum + phase analyzer.";
+    rich.has_editor = true;
+    rich.supports_sidechain = true;
+    rich.supports_midi_in = false;
+    rich.supports_midi_out = false;
+
+    a.put("/tmp/rich-plugin.clap", rich);
+    auto json = a.to_json();
+
+    HostScanCache b;
+    REQUIRE(b.from_json(json));
+    const auto& e = b.entries().at("/tmp/rich-plugin.clap");
+    REQUIRE(e.info.category == "Analyzer");
+    REQUIRE(e.info.features.size() == 3);
+    REQUIRE(e.info.features[0] == "audio-effect");
+    REQUIRE(e.info.features[1] == "analyzer");
+    REQUIRE(e.info.features[2] == "utility");
+    REQUIRE(e.info.description == "Real-time spectrum + phase analyzer.");
+    REQUIRE(e.info.has_editor);
+    REQUIRE(e.info.supports_sidechain);
+    REQUIRE_FALSE(e.info.supports_midi_in);
+    REQUIRE_FALSE(e.info.supports_midi_out);
+}
+
+TEST_CASE("from_json on pre-metadata blob leaves new fields at defaults",
+          "[scan_cache][metadata][backcompat]") {
+    // Schema-v1 cache blobs from before the richer-metadata fields
+    // shipped must still deserialise cleanly with defaults — that's
+    // the explicit scan_cache.hpp contract for older versions.
+    std::string legacy = R"({
+        "schema_version": 1,
+        "entries": [{
+            "path": "/tmp/legacy.vst3",
+            "mtime": 0,
+            "size": 0,
+            "name": "Legacy",
+            "manufacturer": "OldCorp",
+            "version": "0.1",
+            "plugin_path": "/tmp/legacy.vst3",
+            "unique_id": "legacy-id",
+            "format": "vst3",
+            "is_instrument": false,
+            "is_effect": true,
+            "num_inputs": 2,
+            "num_outputs": 2
+        }]
+    })";
+
+    HostScanCache c;
+    REQUIRE(c.from_json(legacy));
+    REQUIRE(c.size() == 1);
+    const auto& e = c.entries().at("/tmp/legacy.vst3");
+    REQUIRE(e.info.name == "Legacy");
+    REQUIRE(e.info.category.empty());
+    REQUIRE(e.info.features.empty());
+    REQUIRE(e.info.description.empty());
+    REQUIRE_FALSE(e.info.has_editor);
+    REQUIRE_FALSE(e.info.supports_sidechain);
+    REQUIRE_FALSE(e.info.supports_midi_in);
+    REQUIRE_FALSE(e.info.supports_midi_out);
+}
+
 TEST_CASE("from_json rejects wrong schema version", "[scan_cache]") {
     HostScanCache b;
     REQUIRE_FALSE(b.from_json(R"({"schema_version": 999, "entries": []})"));
