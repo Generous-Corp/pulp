@@ -8,9 +8,23 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
-<a id="v0160"></a>
-## [0.17.0]
+<a id="v0170"></a>
+## [0.17.0] - 2026-04-17
 
+- audio: fix MSVC C2248 on fire_device_change + add release-guard.yml ([#318](https://github.com/danielraffel/pulp/pull/318))
+- platform(linux): preserve clipboard bytes + correct has_text semantics (#309 P2) ([#320](https://github.com/danielraffel/pulp/pull/320))
+- view: compile bridge stubs on iOS + invoke providers outside mutex (#313 P1 + P2) ([#323](https://github.com/danielraffel/pulp/pull/323))
+- ci(tooling): coverage-fail propagation + C-compiler check + run_ubsan.sh (#317 P2s) ([#322](https://github.com/danielraffel/pulp/pull/322))
+- platform: narrow FileDialog::has_backend=true to macOS only (#316 P2) ([#321](https://github.com/danielraffel/pulp/pull/321))
+- events: install_backend assigns backend before emitting lost callbacks (#314 P2) ([#319](https://github.com/danielraffel/pulp/pull/319))
+- platform: FileDialog::has_backend returns true on Apple (#312 Codex P2) ([#316](https://github.com/danielraffel/pulp/pull/316))
+- ci: LLVM coverage instrumentation + enable sanitizers.yml (#290 tooling) ([#317](https://github.com/danielraffel/pulp/pull/317))
+- platform: real Linux clipboard + Android bridge registration (#300 P1) ([#309](https://github.com/danielraffel/pulp/pull/309))
+- host(vst3): RT-safe pending-edit drain via two-buffer swap (#307 Codex P1) ([#315](https://github.com/danielraffel/pulp/pull/315))
+- events: NSD refresh on re-announce + clear on backend swap (#310 Codex P2) ([#314](https://github.com/danielraffel/pulp/pull/314))
+- view: host-backend bridges for screenshot/WindowHost/PluginViewHost (#299) ([#313](https://github.com/danielraffel/pulp/pull/313))
+
+<a id="v0160"></a>
 ## [0.16.0] - 2026-04-17
 
 - platform: native file dialog backend-registration + explicit unsupported (#301) ([#312](https://github.com/danielraffel/pulp/pull/312))
@@ -20,8 +34,6 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - format: ValidationHarness screenshot/inspector via provider callbacks (#298) ([#308](https://github.com/danielraffel/pulp/pull/308))
 
 <a id="v0150"></a>
-## [0.16.0]
-
 ## [0.15.0] - 2026-04-16
 
 - host: skip blacklisted bundles before opening them (#271 P1 follow-up) ([#287](https://github.com/danielraffel/pulp/pull/287))
@@ -51,8 +63,6 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - canvas: Canvas::draw_image(native_handle) + ImageView wire (#255) ([#266](https://github.com/danielraffel/pulp/pull/266))
 
 <a id="v0140"></a>
-## [0.16.0]
-
 ## [0.14.0] - 2026-04-16
 
 - view: ModulationMatrixWidget depth/curve/remove editing (#256) ([#264](https://github.com/danielraffel/pulp/pull/264))
@@ -269,6 +279,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.17.0]: https://github.com/danielraffel/pulp/releases/tag/v0.17.0
 [0.16.0]: https://github.com/danielraffel/pulp/releases/tag/v0.16.0
 [0.15.0]: https://github.com/danielraffel/pulp/releases/tag/v0.15.0
 [0.14.0]: https://github.com/danielraffel/pulp/releases/tag/v0.14.0
