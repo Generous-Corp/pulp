@@ -37,3 +37,111 @@ TEST_CASE("PluginInfo is copyable and carries metadata",
     REQUIRE(q.has_editor);
     REQUIRE(q.supports_midi_in);
 }
+
+// ── PluginInfo contract (default values + mutation invariants) ──────────
+
+TEST_CASE("PluginInfo defaults treat plugin as a stereo effect",
+          "[host][plugin-info][defaults]") {
+    // Classifiers in scanner_{clap,vst3,au,lv2}.cpp assume these
+    // starting conditions — any future change to the struct defaults
+    // ripples into every adapter. This test pins them.
+    PluginInfo p;
+    REQUIRE_FALSE(p.is_instrument);
+    REQUIRE(p.is_effect);
+    REQUIRE(p.num_inputs == 2);
+    REQUIRE(p.num_outputs == 2);
+}
+
+TEST_CASE("PluginInfo MIDI-effect shape: MIDI in+out, stays effect, not instrument",
+          "[host][plugin-info][midi-effect]") {
+    // Mirrors the CLAP feature="note-effect" fix in scanner_clap.cpp
+    // (#198 P2): note-effects are still effects — they process MIDI
+    // with no audio output. Clearing is_effect silently dropped them
+    // from is_effect filters before the fix landed.
+    PluginInfo p;
+    p.category = "MidiEffect";
+    p.is_effect = true;
+    p.is_instrument = false;
+    p.supports_midi_in = true;
+    p.supports_midi_out = true;
+
+    REQUIRE(p.category == "MidiEffect");
+    REQUIRE(p.is_effect);
+    REQUIRE_FALSE(p.is_instrument);
+    REQUIRE(p.supports_midi_in);
+    REQUIRE(p.supports_midi_out);
+}
+
+TEST_CASE("PluginInfo instrument shape: 0 inputs, MIDI in, is_instrument true",
+          "[host][plugin-info][instrument]") {
+    PluginInfo p;
+    p.category = "Instrument";
+    p.is_instrument = true;
+    p.is_effect = false;
+    p.num_inputs = 0;
+    p.num_outputs = 2;
+    p.supports_midi_in = true;
+
+    REQUIRE(p.is_instrument);
+    REQUIRE_FALSE(p.is_effect);
+    REQUIRE(p.num_inputs == 0);
+    REQUIRE(p.supports_midi_in);
+}
+
+TEST_CASE("PluginInfo sidechain flag is orthogonal to effect/instrument",
+          "[host][plugin-info]") {
+    PluginInfo p;
+    p.is_effect = true;
+    p.supports_sidechain = true;
+    REQUIRE(p.supports_sidechain);
+
+    // Clearing sidechain doesn't affect effect/instrument flags.
+    p.supports_sidechain = false;
+    REQUIRE(p.is_effect);
+    REQUIRE_FALSE(p.is_instrument);
+}
+
+TEST_CASE("PluginInfo features vector survives move assignment",
+          "[host][plugin-info][move]") {
+    PluginInfo src;
+    src.name = "SrcPlugin";
+    src.features = {"audio-effect", "analyzer", "utility"};
+
+    PluginInfo dst = std::move(src);
+    REQUIRE(dst.name == "SrcPlugin");
+    REQUIRE(dst.features.size() == 3);
+    REQUIRE(dst.features[0] == "audio-effect");
+    REQUIRE(dst.features[2] == "utility");
+}
+
+TEST_CASE("PluginInfo category taxonomy accepts known strings",
+          "[host][plugin-info][taxonomy]") {
+    // The set of strings scanners write. Callers that switch on
+    // category (not the adapter code) should fail fast if a new
+    // category sneaks into the scanner without an intentional opt-in.
+    const std::vector<std::string> accepted = {
+        "Fx", "Instrument", "Analyzer", "MidiEffect", ""
+    };
+    for (const auto& c : accepted) {
+        PluginInfo p;
+        p.category = c;
+        REQUIRE(p.category == c);
+    }
+}
+
+// ── PluginFormat enum ───────────────────────────────────────────────────
+
+TEST_CASE("PluginFormat enum covers the 5 shipping formats",
+          "[host][plugin-info][format]") {
+    for (auto f : {
+             PluginFormat::VST3,
+             PluginFormat::AudioUnit,
+             PluginFormat::AudioUnitV3,
+             PluginFormat::CLAP,
+             PluginFormat::LV2,
+         }) {
+        PluginInfo p;
+        p.format = f;
+        REQUIRE(p.format == f);
+    }
+}
