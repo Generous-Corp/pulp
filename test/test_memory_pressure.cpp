@@ -53,3 +53,49 @@ TEST_CASE("plugin receives pressure levels and can drop caches",
     REQUIRE(p.critical_calls == 1);
     REQUIRE(p.cache_size == 0);     // critical: drop
 }
+
+TEST_CASE("repeated advisory pressure never drops the working set",
+          "[processor][memory][advisory]") {
+    // iOS / Android memory-pressure contract: advisory is a
+    // suggestion for the plugin to release soft caches on its own
+    // schedule. Hammering it must not cumulatively force a critical
+    // drop — only a real Critical does.
+    CacheDroppingProcessor p;
+    for (int i = 0; i < 20; ++i) {
+        p.on_memory_pressure(Processor::MemoryPressure::Advisory);
+    }
+    REQUIRE(p.advisory_calls == 20);
+    REQUIRE(p.critical_calls == 0);
+    REQUIRE(p.cache_size == 1024);
+}
+
+TEST_CASE("critical-then-advisory sequence lets the plugin re-warm caches",
+          "[processor][memory][recovery]") {
+    // After a drop, the OS may come back with Advisory as memory
+    // pressure eases. The hook needs to convey that so a plugin can
+    // safely re-warm caches without the next Advisory clobbering them.
+    CacheDroppingProcessor p;
+    p.on_memory_pressure(Processor::MemoryPressure::Critical);
+    REQUIRE(p.cache_size == 0);
+
+    // Re-warm via an imaginary post-pressure path.
+    p.cache_size = 2048;
+
+    p.on_memory_pressure(Processor::MemoryPressure::Advisory);
+    REQUIRE(p.advisory_calls == 1);
+    REQUIRE(p.cache_size == 2048);   // advisory does not drop
+}
+
+TEST_CASE("memory pressure hook tolerates unknown enum values",
+          "[processor][memory][unknown]") {
+    // Simulate the OS surfacing a pressure level Pulp doesn't yet
+    // model. Plugins with a switch should fall through rather than
+    // crash — verify the hook dispatch itself doesn't explode and
+    // neither counter ticks.
+    CacheDroppingProcessor p;
+    auto unknown = static_cast<Processor::MemoryPressure>(99);
+    p.on_memory_pressure(unknown);
+    REQUIRE(p.advisory_calls == 0);
+    REQUIRE(p.critical_calls == 0);
+    REQUIRE(p.cache_size == 1024);
+}
