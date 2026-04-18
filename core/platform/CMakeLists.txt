@@ -14,6 +14,7 @@ target_sources(pulp-platform PRIVATE
     src/permissions.cpp
     src/registry.cpp
     src/clipboard_common.cpp
+    src/environment.cpp
 )
 
 # Platform-specific UI services and child process

@@ -472,6 +472,11 @@ add_executable(pulp-test-permissions test_permissions.cpp)
 target_link_libraries(pulp-test-permissions PRIVATE pulp::platform Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-permissions)
 
+# Environment API tests (#342)
+add_executable(pulp-test-environment test_environment.cpp)
+target_link_libraries(pulp-test-environment PRIVATE pulp::platform Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-environment)
+
 # Runtime tests
 add_executable(pulp-test-runtime test_runtime.cpp)
 target_link_libraries(pulp-test-runtime PRIVATE pulp::runtime Catch2::Catch2WithMain)
