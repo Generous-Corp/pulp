@@ -121,8 +121,153 @@ jobs:
           name: pulp-sdk-${{ matrix.platform }}
           path: pulp-sdk-${{ matrix.platform }}.*
 
-  release:
+  # ── Portable-binary smoke gate (#391) ─────────────────────────────
+  #
+  # Catches the class of bug v0.20.0 shipped: the macOS tarball
+  # baked an LC_RPATH pointing at the GitHub Actions runner's
+  # home directory (/Users/runner/Library/Caches/Pulp/...), so the
+  # binary worked on the runner that built it but crashed on every
+  # user machine with "Library not loaded". The build-cli job above
+  # can't catch this because it runs the binary on the SAME runner
+  # that built it — the bad path happens to resolve.
+  #
+  # Strategy: download each platform's freshly-uploaded artifact on
+  # a separate runner (different runner ID = clean home directory),
+  # untar to /tmp, and run `pulp help`. Any dyld / ld.so / DLL
+  # error fails the release before users see it.
+  #
+  # Equivalent in spirit to the Windows MSVC release-path PR gate
+  # added in #349, but at the artifact-portability axis instead of
+  # MSVC compile-time.
+  smoke-cli:
     needs: build-cli
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            platform: darwin-arm64
+            artifact: pulp
+          - os: ubuntu-24.04
+            platform: linux-x64
+            artifact: pulp
+          - os: ubuntu-24.04-arm
+            platform: linux-arm64
+            artifact: pulp
+          - os: windows-latest
+            platform: windows-x64
+            artifact: pulp.exe
+          - os: windows-11-arm
+            platform: windows-arm64
+            artifact: pulp.exe
+    runs-on: ${{ matrix.os }}
+    name: Smoke ${{ matrix.platform }}
+
+    steps:
+      - name: Download CLI artifact for this platform
+        uses: actions/download-artifact@v7
+        with:
+          name: pulp-${{ matrix.platform }}
+          path: artifact-in/
+
+      - name: Unpack to /tmp/pulp-smoke (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p /tmp/pulp-smoke
+          tar -xzf artifact-in/pulp-${{ matrix.platform }}.tar.gz -C /tmp/pulp-smoke
+          ls -la /tmp/pulp-smoke
+
+      - name: Unpack to %TEMP%\pulp-smoke (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Force -Path $env:TEMP\pulp-smoke | Out-Null
+          Expand-Archive -Force -Path artifact-in\pulp-${{ matrix.platform }}.zip -DestinationPath $env:TEMP\pulp-smoke
+          Get-ChildItem $env:TEMP\pulp-smoke
+
+      # Smoke test — the binary must run portably.
+      #
+      # If `pulp help` exits non-zero or produces dyld/ld.so/DLL
+      # errors on stderr, the release tarball is broken on this
+      # platform and we fail the release. Capture output to a file
+      # so we can grep stderr for the diagnostic patterns even when
+      # pulp itself exits 0 (defense-in-depth — some runtime loaders
+      # warn but don't fail).
+      - name: Smoke `pulp help` (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          BIN=/tmp/pulp-smoke/${{ matrix.artifact }}
+          echo "Testing $BIN"
+          file "$BIN" || true
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            echo "--- otool -L (load commands) ---"
+            otool -L "$BIN" || true
+            echo "--- otool -l rpaths ---"
+            otool -l "$BIN" | awk '/LC_RPATH/{flag=1} flag{print; if (/path /) {flag=0}}' | head -20 || true
+          else
+            echo "--- ldd ---"
+            ldd "$BIN" || true
+          fi
+          echo "--- pulp help ---"
+          set +e
+          "$BIN" help > /tmp/pulp-smoke.out 2> /tmp/pulp-smoke.err
+          rc=$?
+          set -e
+          echo "exit=$rc"
+          echo "--- stdout ---"; cat /tmp/pulp-smoke.out || true
+          echo "--- stderr ---"; cat /tmp/pulp-smoke.err || true
+          if [ "$rc" -ne 0 ]; then
+            echo "FAIL: pulp help returned exit $rc"
+            exit 1
+          fi
+          # Belt + suspenders: dyld/ld.so warnings shouldn't appear even on rc=0.
+          if grep -qE "Library not loaded|Symbol not found|cannot open shared object|undefined symbol|@rpath/" /tmp/pulp-smoke.err; then
+            echo "FAIL: dyld/ld.so error in stderr (artifact is non-portable)"
+            exit 1
+          fi
+          # Same check for stdout (some loaders write there).
+          if grep -qE "Library not loaded|Symbol not found|cannot open shared object" /tmp/pulp-smoke.out; then
+            echo "FAIL: loader error in stdout"
+            exit 1
+          fi
+          echo "OK: pulp help is portable on ${{ matrix.platform }}."
+
+      - name: Smoke `pulp help` (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $bin = Join-Path $env:TEMP "pulp-smoke\${{ matrix.artifact }}"
+          Write-Host "Testing $bin"
+          # Print imported DLLs for diagnostic context (no failure if dumpbin missing).
+          try { dumpbin /dependents $bin 2>$null } catch { Write-Host "(dumpbin unavailable; skipping)" }
+          $stdout = New-TemporaryFile
+          $stderr = New-TemporaryFile
+          $proc = Start-Process -FilePath $bin -ArgumentList "help" `
+              -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru -Wait -NoNewWindow
+          Write-Host "exit=$($proc.ExitCode)"
+          Write-Host "--- stdout ---"
+          Get-Content $stdout -ErrorAction SilentlyContinue
+          Write-Host "--- stderr ---"
+          $err = Get-Content $stderr -ErrorAction SilentlyContinue
+          $err
+          if ($proc.ExitCode -ne 0) {
+              Write-Error "FAIL: pulp.exe help returned exit $($proc.ExitCode)"
+              exit 1
+          }
+          if ($err -match "DLL was not found|side-by-side|ImportError|missing.*\.dll") {
+              Write-Error "FAIL: missing-DLL error in stderr (artifact is non-portable)"
+              exit 1
+          }
+          Write-Host "OK: pulp.exe help is portable on ${{ matrix.platform }}."
+
+  release:
+    needs: [build-cli, smoke-cli]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     permissions:
