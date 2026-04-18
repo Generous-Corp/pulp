@@ -1740,8 +1740,13 @@ std::vector<DoctorCheck> run_doctor_android_checks() {
         DoctorCheck c{"adb (platform-tools)", false, {}, {}};
         std::string adb = find_executable_in_path("adb");
         if (adb.empty() && !sdk.empty()) {
+            // Default Android SDK installs ship adb.exe on Windows,
+            // adb on macOS / Linux — probe both so the fallback
+            // doesn't miss a perfectly valid SDK. #438 P2 for #389.
             auto candidate = sdk / "platform-tools" / "adb";
-            if (fs::exists(candidate)) adb = candidate.string();
+            auto candidate_exe = sdk / "platform-tools" / "adb.exe";
+            if (fs::exists(candidate_exe)) adb = candidate_exe.string();
+            else if (fs::exists(candidate))  adb = candidate.string();
         }
         if (!adb.empty()) {
             c.passed = true;
@@ -1758,7 +1763,9 @@ std::vector<DoctorCheck> run_doctor_android_checks() {
         std::string emu = find_executable_in_path("emulator");
         if (emu.empty() && !sdk.empty()) {
             auto candidate = sdk / "emulator" / "emulator";
-            if (fs::exists(candidate)) emu = candidate.string();
+            auto candidate_exe = sdk / "emulator" / "emulator.exe";
+            if (fs::exists(candidate_exe)) emu = candidate_exe.string();
+            else if (fs::exists(candidate))  emu = candidate.string();
         }
         if (!emu.empty()) {
             auto avds = exec_output(emu + " -list-avds 2>/dev/null");
@@ -1791,7 +1798,7 @@ std::vector<DoctorCheck> run_doctor_android_checks() {
     // its own.
     {
         DoctorCheck c{"Google Android CLI (optional accelerator, #355)",
-                      false, {}, {}};
+                      false, {}, {}, /*optional=*/true};
         auto cli = detect_android_cli();
 
         // Detect host platform support. macOS we assume arm64 because
