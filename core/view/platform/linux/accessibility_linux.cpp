@@ -17,9 +17,14 @@
 #include <pulp/view/view.hpp>
 #include <pulp/runtime/log.hpp>
 
-// PULP_HAS_ATSPI is set by CMake when atk-bridge-2.0 is found via
-// pkg-config. When unset, the init path stays a no-op so Linux distros
-// without the bridge (minimal / headless CI images) still link.
+// PULP_HAS_ATK is set by CMake when atk is found via pkg-config; this
+// gives us the real AtkRole enum so the role mapping below survives any
+// future renumbering by GNOME. PULP_HAS_ATSPI is set when the at-spi2
+// bridge runtime is also linkable — that path is currently a stub and
+// is filled in by the follow-up PR that adds AtkObject implementations.
+#ifdef PULP_HAS_ATK
+#include <atk/atk.h>
+#endif
 #ifdef PULP_HAS_ATSPI
 extern "C" {
 int  atk_bridge_adaptor_init(int* argc, char*** argv);
@@ -29,18 +34,31 @@ void atk_bridge_adaptor_cleanup(void);
 
 namespace pulp::view {
 
-// Map Pulp AccessRole to ATK role constants
-// These match the AtkRole enum from atk/atk.h
+// Map Pulp AccessRole to ATK role values. With PULP_HAS_ATK we use the
+// AtkRole enum directly; without it we fall back to the integer values
+// from ATK 2.52 so headless CI images without libatk-dev still link.
 static int access_role_to_atk_role(View::AccessRole role) {
+#ifdef PULP_HAS_ATK
+    switch (role) {
+        case View::AccessRole::slider: return ATK_ROLE_SLIDER;
+        case View::AccessRole::toggle: return ATK_ROLE_TOGGLE_BUTTON;
+        case View::AccessRole::label:  return ATK_ROLE_LABEL;
+        case View::AccessRole::group:  return ATK_ROLE_PANEL;
+        case View::AccessRole::meter:  return ATK_ROLE_PROGRESS_BAR;
+        case View::AccessRole::image:  return ATK_ROLE_IMAGE;
+        default:                       return ATK_ROLE_UNKNOWN;
+    }
+#else
     switch (role) {
         case View::AccessRole::slider: return 34;  // ATK_ROLE_SLIDER
         case View::AccessRole::toggle: return 42;  // ATK_ROLE_TOGGLE_BUTTON
         case View::AccessRole::label:  return 24;  // ATK_ROLE_LABEL
-        case View::AccessRole::group:  return 35;  // ATK_ROLE_PANEL (container)
+        case View::AccessRole::group:  return 35;  // ATK_ROLE_PANEL
         case View::AccessRole::meter:  return 33;  // ATK_ROLE_PROGRESS_BAR
         case View::AccessRole::image:  return 21;  // ATK_ROLE_IMAGE
-        default: return 66; // ATK_ROLE_UNKNOWN
+        default:                       return 66;  // ATK_ROLE_UNKNOWN
     }
+#endif
 }
 
 // Stub: Initialize AT-SPI accessibility for a view tree
