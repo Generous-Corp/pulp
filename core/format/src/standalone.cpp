@@ -3,7 +3,7 @@
 #include <pulp/format/settings_panel.hpp>
 #include <pulp/format/view_bridge.hpp>
 #include <pulp/view/window_host.hpp>
-#if !defined(__ANDROID__)
+#if !defined(__ANDROID__) && defined(PULP_HAS_INSPECT)
 #include <pulp/inspect/inspector_overlay.hpp>
 #endif
 #include <pulp/runtime/log.hpp>
@@ -278,7 +278,7 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
         stop();
     });
 
-#if !defined(__ANDROID__)
+#if !defined(__ANDROID__) && defined(PULP_HAS_INSPECT)
     // Create inspector overlay — activated via Cmd+I / Ctrl+I
     auto inspector = std::make_unique<inspect::InspectorOverlay>(*tab_panel);
     auto* inspector_ptr = inspector.get();
@@ -288,7 +288,7 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
     // Wire inspector into the idle callback to push overlay paint each frame.
     // The inspector uses View::overlay_queue() for rendering and intercepts
     // key events through the root view's on_global_click callback for Cmd+I.
-#if !defined(__ANDROID__)
+#if !defined(__ANDROID__) && defined(PULP_HAS_INSPECT)
     if (bridge->scripted_ui()) {
         auto* scripted_ui_ptr = bridge->scripted_ui();
         window->set_idle_callback([scripted_ui_ptr, settings_ptr, inspector_ptr, &tab_panel] {

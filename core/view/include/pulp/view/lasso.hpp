@@ -90,11 +90,14 @@ public:
 
         auto rect = selection_rect();
 
-        // Draw selection rectangle with semi-transparent fill and border
-        canvas.set_fill_color(canvas::Color(100, 150, 255, 40));
+        // Draw selection rectangle with semi-transparent fill and border.
+        // Use rgba8 factory — Color has float r/g/b/a fields, no int ctor;
+        // paren-aggregate-init (C++20 P0960) only works on Clang 16+
+        // (macos-15), not macos-14's Clang 15 used by the sanitizer matrix.
+        canvas.set_fill_color(canvas::Color::rgba8(100, 150, 255, 40));
         canvas.fill_rect(rect.x, rect.y, rect.width, rect.height);
 
-        canvas.set_stroke_color(canvas::Color(100, 150, 255, 180));
+        canvas.set_stroke_color(canvas::Color::rgba8(100, 150, 255, 180));
         canvas.set_line_width(1.0f);
         canvas.stroke_rect(rect.x, rect.y, rect.width, rect.height);
     }

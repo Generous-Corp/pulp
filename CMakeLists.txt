@@ -480,8 +480,13 @@ endif()
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake")
 include(PulpUtils)
 
-# ── CLI Tool (desktop only) ────────────────────────────────────────────────
-if(NOT ANDROID AND NOT IOS)
+# ── CLI Tool (desktop only, requires GPU stack via cmd_inspect) ───────────
+# pulp-cli unconditionally links pulp::inspect (for `pulp inspect`), and
+# pulp::inspect depends on pulp::render which is GPU-only. Without the
+# GPU guard, PULP_ENABLE_GPU=OFF builds (sanitizer matrix in
+# .github/workflows/sanitizers.yml) fail at CMake configure with
+# "Target ... links to pulp::inspect but the target was not found".
+if(NOT ANDROID AND NOT IOS AND PULP_ENABLE_GPU)
     add_subdirectory(tools/cli)
 endif()
 

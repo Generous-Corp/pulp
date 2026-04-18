@@ -1,0 +1,35 @@
+# ThreadSanitizer suppressions for Pulp.
+#
+# Each entry must include a "Why benign:" comment explaining why TSan's
+# flag is a false positive — without that, the entry doesn't go in.
+# Reviewers should treat additions to this file with the same care as
+# code: a wrong suppression silently masks real bugs forever.
+#
+# Activate via:
+#   TSAN_OPTIONS=halt_on_error=1:suppressions=test/tsan.supp
+#
+# Format reference:
+#   https://github.com/google/sanitizers/wiki/ThreadSanitizerSuppressions
+
+# ── SeqLock byte-stripe writes ────────────────────────────────────────────
+#
+# SeqLock<T>::copy_bytes() is an intentionally-racy memcpy under the
+# seqlock protocol:
+#   writer:  seq.fetch_add(1, release);   // mark "in flight"
+#            memcpy(buffer, src, n);       // <-- TSan flags this
+#            seq.fetch_add(1, release);   // mark "valid"
+#   reader:  s1 = seq.load(acquire);
+#            if (s1 & 1) retry;           // skip if writer in flight
+#            memcpy(dst, buffer, n);
+#            s2 = seq.load(acquire);
+#            if (s1 != s2) retry;          // torn read - retry
+#
+# The byte-stripe writes are expected to race with concurrent readers;
+# the seq-counter dance ensures readers detect torn reads and retry.
+# This pattern is canonical in audio code (RtAudio, JUCE AudioBuffer).
+#
+# Why benign: seqlock byte writes ARE racy by design; the protocol
+# guarantees readers either see a fully-valid snapshot or detect the
+# torn read and retry. Suppressing the byte-write race is required
+# for any seqlock implementation to coexist with TSan.
+race:pulp::runtime::SeqLock*::copy_bytes
