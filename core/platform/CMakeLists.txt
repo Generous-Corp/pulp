@@ -47,7 +47,9 @@ elseif(WIN32)
     target_sources(pulp-platform PRIVATE
         platform/win/clipboard_win.cpp
         platform/win/child_process_win.cpp
+        platform/win/environment_win.cpp
     )
+    target_link_libraries(pulp-platform PRIVATE user32 advapi32)
 elseif(ANDROID)
     # Android platform sources wired via PulpAndroid.cmake → pulp_wire_android_sources()
     target_sources(pulp-platform PRIVATE
