@@ -1783,39 +1783,81 @@ std::vector<DoctorCheck> run_doctor_android_checks() {
         checks.push_back(c);
     }
 
-    // Google Android CLI (#355) — OPTIONAL accelerator. Detail-only
-    // when missing; never the cause of overall doctor failure on its
-    // own. Doctor's exit-code logic upstream filters this entry out
-    // of the failure count.
+    // Google Android CLI (#355) — OPTIONAL accelerator. Per Google's
+    // published support matrix: macOS arm64, Linux x86_64, Windows
+    // x86_64 are supported. Linux arm64, Windows arm64, and macOS
+    // Intel are NOT (no published binaries). Detail-only when missing
+    // or unsupported; never the cause of overall doctor failure on
+    // its own.
     {
         DoctorCheck c{"Google Android CLI (optional accelerator, #355)",
                       false, {}, {}};
         auto cli = detect_android_cli();
+
+        // Detect host platform support. macOS we assume arm64 because
+        // x86_64 macOS isn't in Google's support matrix; arch detect
+        // would be more rigorous but every supported macOS host is
+        // arm64 by 2026.
+#if defined(__APPLE__)
+        const bool platform_supported = true;
+        const char* platform_label    = "macOS arm64 (supported)";
+#elif defined(__linux__) && defined(__x86_64__)
+        const bool platform_supported = true;
+        const char* platform_label    = "Linux x86_64 (supported)";
+#elif defined(__linux__) && defined(__aarch64__)
+        const bool platform_supported = false;
+        const char* platform_label    = "Linux arm64 (NOT supported by Google)";
+#elif defined(_WIN32) && (defined(_M_X64) || defined(__x86_64__))
+        const bool platform_supported = true;
+        const char* platform_label    = "Windows x86_64 (supported)";
+#elif defined(_WIN32) && (defined(_M_ARM64) || defined(__aarch64__))
+        const bool platform_supported = false;
+        const char* platform_label    = "Windows arm64 (NOT supported by Google)";
+#else
+        const bool platform_supported = false;
+        const char* platform_label    = "host arch not in Google's support matrix";
+#endif
+
         if (!cli.empty()) {
             c.passed = true;
-            c.detail = cli.string()
-                + " (use `pulp build --android --cli` for faster iteration"
-                  " — Gradle stays the authoritative path)";
+            c.detail = std::string(platform_label) + " — installed at " + cli.string()
+                + " (Gradle stays the authoritative build path; the CLI is for"
+                  " fast inner-loop iteration only — see android skill for"
+                  " when to reach for it)";
+        } else if (!platform_supported) {
+            // Treat as PASSED (it's optional and we can't install it
+            // here anyway). Detail explains why.
+            c.passed = true;
+            c.detail = std::string(platform_label)
+                + " — Google does not publish a binary for this arch."
+                  " Use Gradle (the authoritative path) on this host."
+                  " Stay on a supported host (macOS arm64, Linux x86_64, Windows x86_64)"
+                  " when you want CLI-accelerated iteration.";
         } else {
-            c.detail = "not installed (optional)";
+            c.detail = std::string(platform_label) + " — not installed (optional)";
             c.fix =
 #ifdef __APPLE__
-                "Install (macOS arm64):\n"
+                "Install (macOS arm64 — supported):\n"
                 "    mkdir -p ~/.android-cli/bin\n"
                 "    curl -fsSL -o ~/.android-cli/bin/android \\\n"
                 "        https://dl.google.com/android/cli/latest/darwin_arm64/android\n"
                 "    chmod +x ~/.android-cli/bin/android\n"
                 "    export PATH=\"$HOME/.android-cli/bin:$PATH\"\n"
-                "  Then accept the ToS on first run: `android --version`."
-#elif defined(__linux__)
-                "Install (Linux x86_64 only — arm64 not supported by Google):\n"
-                "    curl -fsSL https://dl.google.com/android/cli/latest/linux_x86_64/install.sh | bash"
-#elif defined(_WIN32)
-                "Install (Windows x86_64):\n"
+                "  Then accept the ToS on first run: `android --version`.\n"
+                "  See .agents/skills/android/SKILL.md for when to use it."
+#elif defined(__linux__) && defined(__x86_64__)
+                "Install (Linux x86_64 — supported):\n"
+                "    curl -fsSL https://dl.google.com/android/cli/latest/linux_x86_64/install.sh | bash\n"
+                "  See .agents/skills/android/SKILL.md for when to use it."
+#elif defined(_WIN32) && (defined(_M_X64) || defined(__x86_64__))
+                "Install (Windows x86_64 — supported):\n"
                 "    curl.exe -fsSL https://dl.google.com/android/cli/latest/windows_x86_64/install.cmd"
-                " -o \"%TEMP%\\i.cmd\" && \"%TEMP%\\i.cmd\""
+                " -o \"%TEMP%\\i.cmd\" && \"%TEMP%\\i.cmd\"\n"
+                "  See .agents/skills/android/SKILL.md for when to use it."
 #else
-                "See https://developer.android.com/tools/agents for install instructions."
+                "See https://developer.android.com/tools/agents for install"
+                " instructions on supported platforms (macOS arm64,"
+                " Linux x86_64, Windows x86_64)."
 #endif
             ;
         }

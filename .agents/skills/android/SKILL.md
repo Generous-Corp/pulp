@@ -63,14 +63,117 @@ verifier. It checks:
 - `adb` (platform-tools) on PATH or under the SDK.
 - `emulator` + at least one configured AVD.
 - **Optional accelerator** — Google's Android CLI (#355) for faster
-  agent-driven iteration. Detected at `~/.android-cli/bin/android`
-  or on PATH; if absent, the doctor prints the per-host install
-  command. **Never required** — Gradle stays the authoritative
-  build path. Use `pulp build --android --cli` once installed.
+  agent-driven iteration. See § "Android CLI accelerator" below for
+  when to reach for it and which platforms ship a binary.
 
 Each missing piece comes with a per-host install hint
-(brew / apt / winget / sdkmanager). The skill below documents the
-build flow for the common case where everything is present.
+(brew / apt / winget / sdkmanager).
+
+## Android CLI accelerator (#355) — when and where
+
+Google ships an "Android CLI" binary that promises ~3× faster
+iteration on the Kotlin / Gradle layer. It's a tool for the inner
+loop, not a replacement for Gradle.
+
+### Platform support matrix (Google-published)
+
+| Host                   | CLI binary | Use it? |
+|------------------------|------------|---------|
+| macOS arm64            | ✅          | Yes — fast-iteration mode. Install via `pulp doctor android` hint. |
+| Linux x86_64           | ✅          | Yes — same as above. |
+| Windows x86_64         | ✅          | Yes — same as above. |
+| **Linux arm64**        | ❌          | **No binary.** Stay on Gradle. Pulp's CI Linux ARM64 host (`ssh ubuntu`) is in this bucket. |
+| **Windows arm64**      | ❌          | **No binary.** Stay on Gradle. Pulp's `ssh win2` ARM64 Windows host is in this bucket. |
+| **macOS Intel**        | ❌          | Not in Google's matrix. Stay on Gradle. |
+
+`pulp doctor android` reports your host's status under "Google
+Android CLI (optional accelerator)" — green when the binary is
+installed on a supported host, green-with-explanation on
+unsupported hosts (no install hint to follow), yellow with an
+install command on supported hosts where the binary is absent.
+
+### When to reach for it
+
+- **Local inner loop** on a supported host: rebuild + reinstall the
+  Kotlin/JNI shell after a tiny code edit. The CLI's incremental
+  cache makes this 2–3× faster than `gradle assembleDebug`.
+- **Agent-driven Android work** (Claude Code, Codex): same case.
+  Most of the iteration cost is Kotlin compilation; the CLI
+  short-circuits it.
+
+### When NOT to use it
+
+- **Release builds + signing** — Gradle is the only authoritative
+  path that produces store-grade artifacts. The CLI is for the
+  inner loop, not for `pulp ship`.
+- **CI** — Pulp's CI runs on hosts with mixed support (Linux ARM64
+  via `ssh ubuntu`, Windows ARM64 via `ssh win2`); a CI lane that
+  required the CLI would silently fail on those targets. CI uses
+  Gradle exclusively.
+- **NDK / C++ rebuilds** — Pulp's slow path is `libpulp.so` (NDK
+  C++ + Vulkan/Dawn/Skia link), most of which CMake/Ninja handle
+  outside Gradle's main graph. The CLI doesn't accelerate this leg
+  beyond what CMake's own incremental build already does.
+
+### Agent compatibility
+
+The Android CLI is **agent-agnostic**. Per Google's own docs
+(developer.android.com/tools/agents): *"Use any agent of your
+choice while still being able to easily leverage Android development
+best practices."* Claude Code, Codex, plain bash — all use it the
+same way. It is **not** Gemini-locked.
+
+### Fallback contract (planned)
+
+The future `pulp build --android --cli` flag (when wired) will:
+
+1. Run `pulp doctor android` internally to confirm the CLI is
+   installed AND the host is in the supported matrix.
+2. If yes → exec the CLI for the Kotlin/Gradle leg.
+3. If no → fall through to the standard Gradle build with a one-line
+   hint pointing at the install command. **Never** silently produce a
+   different artifact than the Gradle path would have.
+
+Until that flag lands, the CLI is invoked manually from the
+project's `android/` directory after `cd android && android build
+--debug` (or whatever the current Google docs prescribe).
+
+## Google's Android Skills catalog (github.com/android/skills)
+
+Google publishes a set of agent skills under the
+[agentskills.io](https://agentskills.io/home) open standard at
+[github.com/android/skills](https://github.com/android/skills).
+These follow the same `SKILL.md` + frontmatter convention Pulp
+uses, so any agent that loads `.agents/skills/` can also consume
+them by cloning the Android repo into its skill search path.
+
+### Pulp-relevant skills (curated subset)
+
+Not all 6 published skills apply to Pulp's Android target. Pulp's
+Android UI is C++/Skia rendered to a `SurfaceView`, not Jetpack
+Compose, so the Compose-flavoured skills are inert here.
+
+| Google skill | Path | Pulp relevance |
+|--------------|------|----------------|
+| **AGP 9 upgrade** | `build/agp/agp-9-upgrade` | ✅ Use when bumping `android/app/build.gradle.kts` past AGP 8.x. Skill walks the migration steps; pair with `pulp doctor android` to confirm Gradle/SDK versions. |
+| **R8 analyzer** | `performance/r8-analyzer` | 🟡 Use only if/when Pulp's Android shell ever enables R8 shrink/optimize. Pulp ships JNI bridges (`com.pulp.*`) that need explicit `-keep` rules; R8 audit is the right tool when that day comes. |
+| **Make app edge-to-edge** | `system/edge-to-edge` | ✅ Pulp's full-screen Vulkan Surface should declare edge-to-edge support so the system bars don't crop the canvas. Useful when wiring `WindowCompat.setDecorFitsSystemWindows`. |
+| Migrate to Compose | `jetpack-compose/...` | ❌ N/A — Pulp UI is C++/Skia, not Compose. |
+| Set up Navigation 3 | `navigation/...` | ❌ N/A — Pulp's shell is single-Activity SurfaceView; no Compose Navigation. |
+| Upgrade Play Billing | `play/...` | ❌ N/A — Pulp doesn't ship in-app purchases. |
+
+### How to load
+
+Either:
+
+- Clone once into a sibling agent-skills directory:
+  `git clone https://github.com/android/skills ~/.agents/external/android-skills`
+  and add to your agent's skill search path.
+- Or just `WebFetch` the specific SKILL.md when its applicability
+  comes up — they're short and version-current at the URL.
+
+When in doubt, ask `pulp doctor android` first; one of these
+external skills usually covers what's missing.
 
 ## Build
 
