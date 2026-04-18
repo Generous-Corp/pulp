@@ -45,7 +45,14 @@ jobs:
       - name: Test with ASan
         env:
           ASAN_OPTIONS: "detect_leaks=0:halt_on_error=1"  # leak detection off (Catch2 false positives)
-        run: ctest --test-dir build --output-on-failure -j$(sysctl -n hw.ncpu)
+        # 120s per-test timeout — prevents a single hung test from
+        # stalling the matrix. Instrumentation already slows tests 5-10×;
+        # anything that can't complete in 2 minutes under ASan is a
+        # flake or a real hang worth separate investigation (#412).
+        run: |
+          ctest --test-dir build --output-on-failure \
+            -j$(sysctl -n hw.ncpu) \
+            --timeout 120
 
   tsan:
     runs-on: macos-14
@@ -76,12 +83,15 @@ jobs:
       - name: Test with TSan
         env:
           TSAN_OPTIONS: "halt_on_error=1"
-        # AudioWorkgroup is a known pre-existing flake — times out
-        # under instrumentation; tracked separately. Skip so the
-        # sanitizer matrix doesn't hang indefinitely.
+        # AudioWorkgroup is a known pre-existing flake. 120s per-test
+        # timeout means no single test can stall the matrix again.
+        # TSan needs serial execution (-j1) so its race reports aren't
+        # garbled by interleaved output. Further scoping tracked in
+        # #412 (suppressions + tag-based subset).
         run: |
           ctest --test-dir build --output-on-failure -j1 \
-            --exclude-regex 'AudioWorkgroup'  # TSan needs serial execution
+            --timeout 120 \
+            --exclude-regex 'AudioWorkgroup'
 
   ubsan:
     runs-on: macos-14
@@ -113,10 +123,12 @@ jobs:
         # Skip "Toolbar add items" — pre-existing UBSan-only failure
         # (BUS in ToolbarItem move-ctor, libc++ alignment edge case).
         # Tracked in #411; safe to skip until the fix lands so this
-        # job can gate everything else.
+        # job can gate everything else. 120s timeout prevents a single
+        # hung test from stalling the matrix.
         run: |
           ctest --test-dir build --output-on-failure \
             -j$(sysctl -n hw.ncpu) \
+            --timeout 120 \
             --exclude-regex 'Toolbar add items'
 
   rtsan:
