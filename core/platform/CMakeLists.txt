@@ -55,6 +55,7 @@ elseif(ANDROID)
 elseif(UNIX AND NOT APPLE)
     target_sources(pulp-platform PRIVATE
         platform/linux/clipboard_linux.cpp
+        platform/linux/environment_linux.cpp
         platform/posix/child_process_posix.cpp
     )
 endif()

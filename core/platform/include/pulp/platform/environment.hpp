@@ -226,14 +226,18 @@ private:
 // the right one based on the build target.
 
 void start_environment_observer_mac();
+#if defined(__linux__) && !defined(__ANDROID__)
+void start_environment_observer_linux();
+#endif
 // void start_environment_observer_android(); // follow-up
 // void start_environment_observer_ios();     // follow-up
-// void start_environment_observer_linux();   // follow-up
 // void start_environment_observer_win();     // follow-up
 
 inline void start_environment_observer() {
 #if defined(__APPLE__) && !defined(PULP_IOS)
     start_environment_observer_mac();
+#elif defined(__linux__) && !defined(__ANDROID__)
+    start_environment_observer_linux();
 #endif
     // Other platforms wire their adapters in follow-up PRs; until then
     // their hosts simply see the EnvironmentState defaults.
