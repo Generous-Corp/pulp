@@ -161,33 +161,36 @@ Two artifacts have to stay in lockstep after every release: the **GitHub Release
 **Division of labor:**
 
 - **Shipyard** — pre-merge. Runs `shipyard ship` to validate + merge PRs on green across macOS + Linux + Windows. Stops when the PR lands on main. Does not touch tags, CHANGELOG.md, or the Release page.
-- **Pulp's `.github/workflows/auto-release.yml`** — post-merge. On push to main, diffs version files and, if an SDK version moved, creates the `vX.Y.Z` tag and regenerates CHANGELOG.md.
-- **Pulp's `.github/workflows/release-cli.yml`** — post-tag. On `vX.Y.Z` push, builds binaries and creates the GitHub Release with body populated from the same generator.
+- **Pulp's `.github/workflows/auto-release.yml`** — post-merge. On push to main, diffs version files and, if an SDK version moved, creates the `vX.Y.Z` tag. CHANGELOG regeneration is handled separately by `post-tag-sync.yml` (below) so binary builds and docs sync can fail independently.
+- **Shipyard's `.github/workflows/post-tag-sync.yml`** — post-tag (installed by `shipyard release-bot hook install`). On tag push, runs `shipyard changelog regenerate` to rewrite `CHANGELOG.md`, commits as `pulp-release-bot` with `[skip ci]` and the three bypass trailers, and pushes back to main (rebase-retry loop handles races).
+- **Pulp's `.github/workflows/release-cli.yml`** — post-tag. On `vX.Y.Z` push, builds binaries and creates the GitHub Release with body populated via `shipyard changelog regenerate --release-notes vX.Y.Z` (same generator as `CHANGELOG.md`, so the two cannot drift).
 
 **End-to-end sequence:**
 
 ```
 pulp pr  (shipyard ship merges the bump PR on green)
        ↓
-auto-release.yml  (diffs version files)
-       ├── push vX.Y.Z tag
-       └── regenerate CHANGELOG.md, commit with [skip ci] + Release: skip
-              ↓
-release-cli.yml  (triggered by tag push)
-       ├── build CLI + SDK binaries (5 platforms)
-       └── create GitHub Release, body = regenerate_changelog.py --release-notes vX.Y.Z
+auto-release.yml  (diffs version files, pushes vX.Y.Z tag)
+       ↓
+  ┌────────────────────────────────────────┬──────────────────────────────────┐
+  ↓                                        ↓                                  ↓
+post-tag-sync.yml                    release-cli.yml                  (tag visible on GitHub)
+  (shipyard hook)                     (build binaries)
+  └── shipyard changelog regenerate   └── shipyard changelog regenerate
+      → commit CHANGELOG.md, [skip ci]     --release-notes vX.Y.Z
+      → push to main (rebase-retry)    → create GitHub Release body
 ```
 
-**Single source of truth:** `tools/scripts/regenerate_changelog.py`. Two consumers:
+**Single source of truth:** `shipyard changelog regenerate` (shipyard v0.11+). Configured via `[release.changelog]` in `.shipyard/config.toml`:
 
-1. `python3 tools/scripts/regenerate_changelog.py` (no args) — rewrites `CHANGELOG.md` from the full tag graph. Called by `auto-release.yml` after the tag push. Idempotent: running twice produces identical output.
-2. `python3 tools/scripts/regenerate_changelog.py --release-notes vX.Y.Z` — prints just the one release's markdown (what's new + CHANGELOG anchor link + previous-release link). Called by `release-cli.yml` to populate the Release body.
+- No args — rewrites `CHANGELOG.md` from the full tag graph. Called by `post-tag-sync.yml`. Idempotent.
+- `--release-notes vX.Y.Z` — prints the one release's markdown (what's new + CHANGELOG anchor + previous-release link). Called by `release-cli.yml`.
 
 Both formats use matching anchors: `<a id="v0140"></a>` in CHANGELOG.md, `#v0140` in the release body link. GitHub's slugifier doesn't interfere because the anchor is explicit.
 
-**Why the ordering matters:** the CHANGELOG-regen step sits after the tag push, not before, so the script sees the new tag when it walks the tag graph. `[skip ci]` on the bot commit prevents auto-release from recursing; `Release: skip` on the trailer is belt-and-suspenders.
+**Why the split between auto-release.yml and post-tag-sync.yml:** decoupling the tag push from the docs regen means binary builds aren't blocked if the CHANGELOG commit push races against another merge, and vice versa. If `post-tag-sync.yml` fails, run `shipyard changelog regenerate` locally and open a docs PR — no binary impact.
 
-**What breaks if you bypass it:** manually editing `CHANGELOG.md` between releases is fine (the script is idempotent and picks up your edits on the next regen pass as long as they land in the right release's bullet block). Creating a tag manually via `git tag -a vX.Y.Z && git push origin vX.Y.Z` skips the CHANGELOG auto-regen — you'll need to run `python3 tools/scripts/regenerate_changelog.py` and commit the result yourself. Don't do this unless recovering from a bot failure.
+**What breaks if you bypass it:** manually editing `CHANGELOG.md` between releases is fine (the generator is idempotent and picks up your edits on the next regen pass as long as they land in the right release's bullet block). Creating a tag manually via `git tag -a vX.Y.Z && git push origin vX.Y.Z` still fires `post-tag-sync.yml`. The pre-v0.21 in-tree `tools/scripts/regenerate_changelog.py` was deleted when this migrated to shipyard — if you're on an older checkout, rebase before digging in.
 
 ---
 

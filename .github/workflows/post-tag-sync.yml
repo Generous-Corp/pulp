@@ -1,0 +1,58 @@
+name: Post-tag docs sync
+
+# Installed by `shipyard release-bot hook install`. Shipyard-owned file:
+# re-running the install command overwrites this file in place.
+#
+# Fires after any tag matching the configured pattern lands on the
+# default branch. Installs the pinned shipyard CLI, then hands off to
+# `shipyard release-bot hook run` which reads `[release.post_tag_hook]`
+# from `.shipyard/config.toml` to know what to do.
+
+on:
+  push:
+    tags: ["v*"]
+
+concurrency:
+  group: shipyard-post-tag-sync
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+env:
+  SHIPYARD_VERSION: "0.11.0"
+
+jobs:
+  sync:
+    name: Regenerate docs for ${{ github.ref_name }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main with full history
+        uses: actions/checkout@v5
+        with:
+          ref: main
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: true
+          # RELEASE_BOT_TOKEN if present so the subsequent commit re-
+          # triggers CI checks that are gated to non-GITHUB_TOKEN
+          # pushes; fall back to GITHUB_TOKEN for bootstrap.
+          token: ${{ secrets.RELEASE_BOT_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Install shipyard (pinned)
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Pipe to bash, not sh — install.sh uses `set -o pipefail`,
+          # which dash (Ubuntu's /bin/sh) doesn't support. Caught
+          # dogfooding shipyard's own first post-tag-sync run.
+          curl -fsSL "https://generouscorp.com/Shipyard/install.sh" | SHIPYARD_VERSION="$SHIPYARD_VERSION" bash
+          shipyard --version
+
+      - name: Run post-tag docs sync
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_BOT_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          tag="${GITHUB_REF#refs/tags/}"
+          shipyard release-bot hook run --tag "$tag"

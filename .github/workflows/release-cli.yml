@@ -18,6 +18,12 @@ concurrency:
   group: release-cli-${{ github.ref }}
   cancel-in-progress: false
 
+env:
+  # Pin shipyard to the same version post-tag-sync.yml uses so
+  # `shipyard changelog regenerate --release-notes` produces the
+  # same output as the hook that writes CHANGELOG.md.
+  SHIPYARD_VERSION: "0.11.0"
+
 jobs:
   build-cli:
     strategy:
@@ -152,15 +158,24 @@ jobs:
             echo "tag=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
           fi
 
+      - name: Install shipyard
+        # Pipe to bash, not sh — install.sh uses bashisms (shipyard 0.11
+        # fixed the earlier post-tag-sync.yml bug where /bin/sh (dash)
+        # rejected the script).
+        run: |
+          curl -fsSL https://generouscorp.com/Shipyard/install.sh \
+            | SHIPYARD_VERSION="$SHIPYARD_VERSION" bash
+
       - name: Generate release notes
         id: changelog
-        # Uses tools/scripts/regenerate_changelog.py --release-notes to
-        # build the same markdown shape as CHANGELOG.md itself, so the
-        # Releases page and CHANGELOG.md stay in sync (one generator, one
-        # source of truth — issue #262).
+        # Uses `shipyard changelog regenerate --release-notes` to build the
+        # same markdown shape as CHANGELOG.md itself, so the Releases page
+        # and CHANGELOG.md stay in sync (one generator, one source of
+        # truth — issue #262). Migrated from tools/scripts/regenerate_changelog.py
+        # (shipyard issue #53 + PR #73).
         run: |
           TAG="${{ steps.version.outputs.tag }}"
-          NOTES=$(python3 tools/scripts/regenerate_changelog.py --release-notes "$TAG" 2>/dev/null \
+          NOTES=$(shipyard changelog regenerate --release-notes "$TAG" 2>/dev/null \
               || echo "See [CHANGELOG.md](https://github.com/danielraffel/pulp/blob/main/CHANGELOG.md) for details.")
           echo "notes<<CHANGELOG_EOF" >> $GITHUB_OUTPUT
           echo "$NOTES" >> $GITHUB_OUTPUT
