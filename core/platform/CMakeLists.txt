@@ -23,6 +23,7 @@ if(APPLE AND NOT IOS)
         platform/mac/clipboard_mac.mm
         platform/mac/file_dialog_mac.mm
         platform/mac/popup_menu_mac.mm
+        platform/mac/environment_mac.mm
         platform/posix/child_process_posix.cpp
     )
     target_link_libraries(pulp-platform PRIVATE

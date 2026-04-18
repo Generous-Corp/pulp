@@ -216,4 +216,27 @@ private:
     uint64_t           next_id_ = 1;
 };
 
+// ── Per-platform observer bootstraps ─────────────────────────────────
+// Hosts call start_environment_observer() once during startup. Each
+// platform adapter is idempotent — duplicate calls are a no-op so
+// plugin hosts loaded multiple times don't double-register.
+//
+// Adapters land per platform; this header forward-declares them
+// alphabetically. The convenience wrapper at the bottom dispatches to
+// the right one based on the build target.
+
+void start_environment_observer_mac();
+// void start_environment_observer_android(); // follow-up
+// void start_environment_observer_ios();     // follow-up
+// void start_environment_observer_linux();   // follow-up
+// void start_environment_observer_win();     // follow-up
+
+inline void start_environment_observer() {
+#if defined(__APPLE__) && !defined(PULP_IOS)
+    start_environment_observer_mac();
+#endif
+    // Other platforms wire their adapters in follow-up PRs; until then
+    // their hosts simply see the EnvironmentState defaults.
+}
+
 } // namespace pulp::platform
