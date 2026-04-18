@@ -35,6 +35,7 @@ elseif(IOS)
     # File dialogs and popup menus fall through to the stubs.
     target_sources(pulp-platform PRIVATE
         platform/ios/clipboard_ios.mm
+        platform/ios/environment_ios.mm
         platform/posix/child_process_posix.cpp
     )
     target_link_libraries(pulp-platform PRIVATE
