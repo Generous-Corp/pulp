@@ -201,3 +201,35 @@ TEST_CASE("pulp validate --strict is a recognized flag",
     REQUIRE(bogus.stderr_output.find("--this-flag-does-not-exist")
             != std::string::npos);
 }
+
+// #8 / #355 — `pulp doctor android` and `pulp doctor ios` are
+// recognized subcommands; bogus subcommand fails with exit 2 + Usage.
+TEST_CASE("pulp doctor android|ios are recognized subcommands",
+          "[cli][shellout][doctor][issue-355]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    const auto bin = fs::absolute(pulp_binary());
+
+    auto android = exec(bin.string(), {"doctor", "android"}, 30000);
+    auto ios     = exec(bin.string(), {"doctor", "ios"},     30000);
+    auto bogus   = exec(bin.string(), {"doctor", "potato"},  10000);
+
+    REQUIRE_FALSE(android.timed_out);
+    REQUIRE_FALSE(ios.timed_out);
+    REQUIRE_FALSE(bogus.timed_out);
+
+    // android + ios run the new check sets — exit 0 when the host
+    // has the tooling, exit 1 when something's missing. Either is
+    // fine here; we're verifying the SUBCOMMAND is recognized, not
+    // that the dev host is fully provisioned. exit 2 is the
+    // "unknown subcommand" failure path we're guarding against.
+    REQUIRE(android.exit_code != 2);
+    REQUIRE(ios.exit_code != 2);
+    REQUIRE(android.stdout_output.find("Pulp Doctor") != std::string::npos);
+    REQUIRE(ios.stdout_output.find("Pulp Doctor") != std::string::npos);
+
+    // bogus subcommand: rejected at the parser with a helpful Usage line.
+    REQUIRE(bogus.exit_code == 2);
+    REQUIRE(bogus.stderr_output.find("unknown subcommand") != std::string::npos);
+    REQUIRE(bogus.stderr_output.find("Usage:") != std::string::npos);
+}

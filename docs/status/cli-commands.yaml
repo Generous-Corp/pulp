@@ -212,8 +212,11 @@ commands:
 
   - name: doctor
     status: usable
-    summary: Diagnose environment issues. Checks compiler, CMake, git-lfs, platform deps, and either the active checkout or the installed SDK workflow depending on source-tree vs sdk mode.
+    summary: Diagnose environment issues. Default mode checks compiler, CMake, git-lfs, platform deps, and either the active checkout or the installed SDK workflow. Optional `android` and `ios` subcommands check mobile dev environments and emit per-host install hints (#8 / #355).
     args:
+      - name: target
+        kind: positional
+        description: Optional `android` or `ios` to check the mobile dev environment instead of the default core checks.
       - name: --fix
         kind: flag
         description: Auto-fix issues where possible (with confirmation)

@@ -153,6 +153,16 @@ struct DoctorCheck {
 
 std::vector<DoctorCheck> run_doctor_checks(const fs::path& active_root, bool standalone_mode);
 
+// `pulp doctor android` — Android NDK / SDK / emulator checks plus
+// optional Google "Android CLI" detection (#355). Passes the host
+// platform implicitly via #ifdef in the implementation.
+std::vector<DoctorCheck> run_doctor_android_checks();
+
+// `pulp doctor ios` — Xcode + iOS Simulator checks. macOS-only;
+// returns a single explanatory entry on other hosts so users still
+// see a useful message.
+std::vector<DoctorCheck> run_doctor_ios_checks();
+
 // ── Interactive Prompts ─────────────────────────────────────────────────────
 
 namespace cli {

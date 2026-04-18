@@ -1635,6 +1635,257 @@ std::vector<DoctorCheck> run_doctor_checks(const fs::path& active_root, bool sta
     return checks;
 }
 
+// ── pulp doctor android (#8 / #355) ─────────────────────────────────────────
+//
+// Detects: ANDROID_HOME / ANDROID_SDK_ROOT, the SDK layout under the
+// per-host default if env vars aren't set, NDK, platform-tools (adb),
+// emulator + at least one configured AVD, and the optional Google
+// Android CLI (#355) — treated as an accelerator, NOT a hard
+// requirement. Per-host install hints fall through OS detection so
+// `pulp doctor android` is the single place a contributor goes to
+// figure out what they're missing.
+
+static fs::path detect_android_sdk_root() {
+    if (const char* env = std::getenv("ANDROID_HOME"); env && *env) {
+        if (fs::exists(env)) return env;
+    }
+    if (const char* env = std::getenv("ANDROID_SDK_ROOT"); env && *env) {
+        if (fs::exists(env)) return env;
+    }
+#ifdef __APPLE__
+    if (const char* home = std::getenv("HOME")) {
+        fs::path mac_path = fs::path(home) / "Library" / "Android" / "sdk";
+        if (fs::exists(mac_path)) return mac_path;
+    }
+#elif defined(__linux__)
+    if (const char* home = std::getenv("HOME")) {
+        fs::path linux_path = fs::path(home) / "Android" / "Sdk";
+        if (fs::exists(linux_path)) return linux_path;
+    }
+#elif defined(_WIN32)
+    if (const char* localapp = std::getenv("LOCALAPPDATA")) {
+        fs::path win_path = fs::path(localapp) / "Android" / "Sdk";
+        if (fs::exists(win_path)) return win_path;
+    }
+#endif
+    return {};
+}
+
+static fs::path detect_android_cli() {
+    std::string found = find_executable_in_path("android");
+    if (!found.empty()) return fs::path(found);
+    if (const char* home = std::getenv("HOME")) {
+        fs::path local = fs::path(home) / ".android-cli" / "bin" / "android";
+        if (fs::exists(local)) return local;
+    }
+    return {};
+}
+
+std::vector<DoctorCheck> run_doctor_android_checks() {
+    std::vector<DoctorCheck> checks;
+    auto sdk = detect_android_sdk_root();
+
+    {
+        DoctorCheck c{"Android SDK", false, {}, {}};
+        if (!sdk.empty()) {
+            c.passed = true;
+            c.detail = sdk.string();
+        } else {
+#ifdef __APPLE__
+            c.fix = "Install via Android Studio or:\n"
+                    "    brew install --cask android-commandlinetools\n"
+                    "    export ANDROID_HOME=$HOME/Library/Android/sdk\n"
+                    "    Then sdkmanager 'platform-tools' 'platforms;android-34' 'ndk;27.0.12077973'";
+#elif defined(__linux__)
+            c.fix = "Install Android Studio or commandline-tools:\n"
+                    "    https://developer.android.com/studio#command-line-tools-only\n"
+                    "    Then export ANDROID_HOME=$HOME/Android/Sdk and add platform-tools to PATH";
+#elif defined(_WIN32)
+            c.fix = "Install Android Studio (preferred) or:\n"
+                    "    winget install Google.AndroidStudio\n"
+                    "    Then set ANDROID_HOME=%LOCALAPPDATA%\\Android\\Sdk";
+#else
+            c.fix = "Install Android Studio + Android SDK from https://developer.android.com/studio";
+#endif
+        }
+        checks.push_back(c);
+    }
+
+    {
+        DoctorCheck c{"Android NDK", false, {}, {}};
+        if (!sdk.empty()) {
+            fs::path ndk_root = sdk / "ndk";
+            if (fs::exists(ndk_root)) {
+                std::string versions;
+                for (auto& entry : fs::directory_iterator(ndk_root)) {
+                    if (entry.is_directory()) {
+                        if (!versions.empty()) versions += ", ";
+                        versions += entry.path().filename().string();
+                    }
+                }
+                if (!versions.empty()) {
+                    c.passed = true;
+                    c.detail = versions;
+                }
+            }
+        }
+        if (!c.passed) {
+            c.fix = "Install NDK r27 or newer via Android Studio's SDK Manager,"
+                    " or: sdkmanager 'ndk;27.0.12077973'";
+        }
+        checks.push_back(c);
+    }
+
+    {
+        DoctorCheck c{"adb (platform-tools)", false, {}, {}};
+        std::string adb = find_executable_in_path("adb");
+        if (adb.empty() && !sdk.empty()) {
+            auto candidate = sdk / "platform-tools" / "adb";
+            if (fs::exists(candidate)) adb = candidate.string();
+        }
+        if (!adb.empty()) {
+            c.passed = true;
+            c.detail = first_line(exec_output(adb + " version 2>&1"));
+        } else {
+            c.fix = "sdkmanager 'platform-tools' or install via Android Studio.\n"
+                    "    Then add $ANDROID_HOME/platform-tools to PATH.";
+        }
+        checks.push_back(c);
+    }
+
+    {
+        DoctorCheck c{"Android emulator + AVD", false, {}, {}};
+        std::string emu = find_executable_in_path("emulator");
+        if (emu.empty() && !sdk.empty()) {
+            auto candidate = sdk / "emulator" / "emulator";
+            if (fs::exists(candidate)) emu = candidate.string();
+        }
+        if (!emu.empty()) {
+            auto avds = exec_output(emu + " -list-avds 2>/dev/null");
+            avds.erase(0, avds.find_first_not_of(" \t\r\n"));
+            if (!avds.empty()) {
+                c.passed = true;
+                std::string first;
+                for (char ch : avds) {
+                    if (ch == '\n') break;
+                    first += ch;
+                }
+                c.detail = first.empty() ? "AVDs configured" : ("first: " + first);
+            } else {
+                c.fix = "No AVDs configured. Create one via Android Studio's Device Manager,"
+                        " or: avdmanager create avd -n pulp_test"
+                        " -k 'system-images;android-34;google_apis;arm64-v8a'";
+            }
+        } else {
+            c.fix = "Install the emulator package: sdkmanager 'emulator'"
+                    " or via Android Studio's SDK Manager.";
+        }
+        checks.push_back(c);
+    }
+
+    // Google Android CLI (#355) — OPTIONAL accelerator. Detail-only
+    // when missing; never the cause of overall doctor failure on its
+    // own. Doctor's exit-code logic upstream filters this entry out
+    // of the failure count.
+    {
+        DoctorCheck c{"Google Android CLI (optional accelerator, #355)",
+                      false, {}, {}};
+        auto cli = detect_android_cli();
+        if (!cli.empty()) {
+            c.passed = true;
+            c.detail = cli.string()
+                + " (use `pulp build --android --cli` for faster iteration"
+                  " — Gradle stays the authoritative path)";
+        } else {
+            c.detail = "not installed (optional)";
+            c.fix =
+#ifdef __APPLE__
+                "Install (macOS arm64):\n"
+                "    mkdir -p ~/.android-cli/bin\n"
+                "    curl -fsSL -o ~/.android-cli/bin/android \\\n"
+                "        https://dl.google.com/android/cli/latest/darwin_arm64/android\n"
+                "    chmod +x ~/.android-cli/bin/android\n"
+                "    export PATH=\"$HOME/.android-cli/bin:$PATH\"\n"
+                "  Then accept the ToS on first run: `android --version`."
+#elif defined(__linux__)
+                "Install (Linux x86_64 only — arm64 not supported by Google):\n"
+                "    curl -fsSL https://dl.google.com/android/cli/latest/linux_x86_64/install.sh | bash"
+#elif defined(_WIN32)
+                "Install (Windows x86_64):\n"
+                "    curl.exe -fsSL https://dl.google.com/android/cli/latest/windows_x86_64/install.cmd"
+                " -o \"%TEMP%\\i.cmd\" && \"%TEMP%\\i.cmd\""
+#else
+                "See https://developer.android.com/tools/agents for install instructions."
+#endif
+            ;
+        }
+        checks.push_back(c);
+    }
+
+    return checks;
+}
+
+// ── pulp doctor ios (#60 follow-up) ─────────────────────────────────────────
+
+std::vector<DoctorCheck> run_doctor_ios_checks() {
+    std::vector<DoctorCheck> checks;
+
+#ifndef __APPLE__
+    DoctorCheck c{"iOS development", false, "macOS-only",
+        "iOS development requires macOS + Xcode. Use a Mac for iOS work;"
+        " Pulp's other targets are cross-platform."};
+    checks.push_back(c);
+    return checks;
+#else
+    {
+        DoctorCheck c{"Xcode", false, {}, {}};
+        auto xc_path = first_line(exec_output("xcode-select -p 2>/dev/null"));
+        auto xcrun_ver = first_line(exec_output("xcrun --version 2>&1"));
+        if (!xc_path.empty()) {
+            c.passed = true;
+            c.detail = xc_path
+                + (xcrun_ver.empty() ? "" : " (" + xcrun_ver + ")");
+        } else {
+            c.fix = "Install Xcode from the App Store, then:\n"
+                    "    sudo xcode-select -s /Applications/Xcode.app\n"
+                    "    sudo xcodebuild -license accept";
+        }
+        checks.push_back(c);
+    }
+
+    {
+        DoctorCheck c{"iOS SDK installed", false, {}, {}};
+        auto sdks = exec_output("xcodebuild -showsdks 2>/dev/null");
+        if (sdks.find("iphoneos") != std::string::npos
+         || sdks.find("iphonesimulator") != std::string::npos) {
+            c.passed = true;
+            c.detail = "iphoneos / iphonesimulator SDK present";
+        } else {
+            c.fix = "Open Xcode > Settings > Components and install the iOS SDK.";
+        }
+        checks.push_back(c);
+    }
+
+    {
+        DoctorCheck c{"iOS Simulator runtime + at least one device",
+                      false, {}, {}};
+        auto sims = exec_output(
+            "xcrun simctl list devices available 2>/dev/null");
+        if (sims.find("iPhone") != std::string::npos
+         || sims.find("iPad") != std::string::npos) {
+            c.passed = true;
+            c.detail = "at least one iOS Simulator device available";
+        } else {
+            c.fix = "Open Xcode > Settings > Components > Simulators, install a runtime,"
+                    " then add an iOS device from Window > Devices and Simulators.";
+        }
+        checks.push_back(c);
+    }
+
+    return checks;
+#endif
+}
+
 // ── Script/Binary Delegation ────────────────────────────────────────────────
 
 int delegate_to_python_script(const fs::path& relative_script,

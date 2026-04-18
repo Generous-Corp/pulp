@@ -52,6 +52,26 @@ git worktree add ../pulp-android feature/android-targeting
 cd ../pulp-android
 ```
 
+## Verify dev environment first
+
+Before any Android work — `pulp doctor android` is the single-stop
+verifier. It checks:
+
+- Android SDK location (ANDROID_HOME, ANDROID_SDK_ROOT, or per-host
+  default at `~/Library/Android/sdk` / `~/Android/Sdk` / `%LOCALAPPDATA%\Android\Sdk`).
+- NDK install + version listing.
+- `adb` (platform-tools) on PATH or under the SDK.
+- `emulator` + at least one configured AVD.
+- **Optional accelerator** — Google's Android CLI (#355) for faster
+  agent-driven iteration. Detected at `~/.android-cli/bin/android`
+  or on PATH; if absent, the doctor prints the per-host install
+  command. **Never required** — Gradle stays the authoritative
+  build path. Use `pulp build --android --cli` once installed.
+
+Each missing piece comes with a per-host install hint
+(brew / apt / winget / sdkmanager). The skill below documents the
+build flow for the common case where everything is present.
+
 ## Build
 
 ### Cross-compile for Android
