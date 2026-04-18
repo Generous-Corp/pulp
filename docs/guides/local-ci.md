@@ -2,6 +2,11 @@
 
 Pulp validates branches on macOS (local), Ubuntu (SSH), and Windows (SSH) before merging.
 
+> Setting up a dedicated machine as a persistent CI runner? See
+> [self-hosted-runner.md](self-hosted-runner.md) for the walkthrough
+> + first-run gotchas (git-lfs hook conflict, Xcode license,
+> Apple Clang version skew).
+
 ## Primary: Shipyard
 
 [Shipyard](https://github.com/danielraffel/Shipyard) is Pulp's primary CI tool. It delivers exact SHAs via git bundles, runs your build/test commands on each platform, and gates merges on per-SHA evidence.
