@@ -298,3 +298,65 @@ jobs:
       - name: Build
         run: cmake --build build --config Release
         shell: pwsh
+
+  # ── Stable-name status aliases for branch protection ──────────────────────
+  # Branch-protection on `main` requires contexts literally named
+  # `macos`, `linux`, `windows`. The real build jobs above are matrix
+  # entries with provider-suffixed names (e.g. "macOS (ARM64) [namespace]")
+  # that change whenever the runner provider flips — breaking the
+  # required-contexts match. These three alias jobs expose stable
+  # names that carry the build matrix's result forward.
+  #
+  # Each alias reads `needs.build.result` (the aggregate matrix
+  # conclusion) and fails if the matrix didn't succeed. Per-platform
+  # filtering at this layer would need matrix outputs plumbing; for
+  # branch-protection purposes "all-build-matrix-green" is the gate
+  # we actually want (no PR should merge with any platform red).
+  #
+  # Discovered in #401 admin-merge: without these aliases every PR
+  # stays BLOCKED forever even when all checks pass.
+
+  macos:
+    needs: build
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Gate on build matrix
+        run: |
+          if [ "${{ needs.build.result }}" = "success" ]; then
+            echo "build matrix succeeded — macOS gate ✓"
+            exit 0
+          else
+            echo "build matrix result: ${{ needs.build.result }}"
+            exit 1
+          fi
+
+  linux:
+    needs: build
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Gate on build matrix
+        run: |
+          if [ "${{ needs.build.result }}" = "success" ]; then
+            echo "build matrix succeeded — Linux gate ✓"
+            exit 0
+          else
+            echo "build matrix result: ${{ needs.build.result }}"
+            exit 1
+          fi
+
+  windows:
+    needs: build
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Gate on build matrix
+        run: |
+          if [ "${{ needs.build.result }}" = "success" ]; then
+            echo "build matrix succeeded — Windows gate ✓"
+            exit 0
+          else
+            echo "build matrix result: ${{ needs.build.result }}"
+            exit 1
+          fi
