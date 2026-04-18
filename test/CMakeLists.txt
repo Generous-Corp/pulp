@@ -17,6 +17,15 @@ if(APPLE AND NOT PULP_IOS)
         TIMEOUT 900)
 endif()
 
+# retry_git_clone unit test (setup.sh helper). Guards the #425 P1
+# Codex fix — a partial clone target is scrubbed between retries so
+# attempt 2+ can actually re-run the network fetch.
+if(UNIX)
+    add_test(NAME retry-git-clone
+        COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/test_retry_git_clone.sh)
+    set_tests_properties(retry-git-clone PROPERTIES TIMEOUT 30)
+endif()
+
 # Validation contract tests (Phase 1 — schema and reality snapshot)
 add_executable(pulp-test-validation-contract test_validation_contract.cpp)
 target_link_libraries(pulp-test-validation-contract PRIVATE Catch2::Catch2WithMain)

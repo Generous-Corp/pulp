@@ -334,6 +334,39 @@ retry_git() {
     return 1
 }
 
+# git clone refuses to write into a non-empty target, so a generic
+# retry_git around `git clone URL DEST` fails on attempt 2+ with
+# "destination path already exists" instead of actually retrying
+# the network fetch. Wrap clone with a clean-target-between-attempts
+# shim. See #438 P1 Codex review on #425.
+retry_git_clone() {
+    local label="$1"
+    local target="${@: -1}"   # last positional arg is the destination
+    shift
+    local attempts=3
+    local sleep_s=5
+    local i
+    for i in $(seq 1 $attempts); do
+        if "$@"; then
+            return 0
+        fi
+        if [ "$i" -lt "$attempts" ]; then
+            # Scrub partial clone — safe because we're inside
+            # ensure_shared_git_source's per-target lock and the
+            # target only exists because an earlier attempt partially
+            # wrote it.
+            if [ -n "$target" ] && [ -e "$target" ]; then
+                rm -rf "$target"
+            fi
+            info "$label clone attempt $i/$attempts failed; retrying in ${sleep_s}s..."
+            sleep "$sleep_s"
+            sleep_s=$((sleep_s * 2))
+        fi
+    done
+    warn "$label clone failed after $attempts attempts"
+    return 1
+}
+
 ensure_shared_git_source() {
     local label="$1"
     local repo="$2"
@@ -376,8 +409,11 @@ ensure_shared_git_source() {
                     fi
                 fi
             elif ! dry "git clone --filter=blob:none $repo $target"; then
-                # Network clone: retry to tolerate transient GitHub blips.
-                retry_git "$label clone" \
+                # Network clone: retry to tolerate transient GitHub
+                # blips. retry_git_clone removes a partial $target
+                # between attempts so the second try can actually
+                # re-run the network fetch.
+                retry_git_clone "$label" \
                     git clone --filter=blob:none "$repo" "$target"
             fi
 
