@@ -159,24 +159,31 @@ jobs:
           lfs: true
 
       - name: Install Clang 18
-        run: |
-          wget https://apt.llvm.org/llvm.sh
-          chmod +x llvm.sh
-          sudo ./llvm.sh 18
-          sudo apt-get install -y clang-18 lld-18
+        # apt.llvm.org intermittently 5xx's during release cuts; retry
+        # the whole install rather than bubble a transient up. #418.
+        uses: ./.github/actions/retry
+        with:
+          label: 'Install Clang 18'
+          run: |
+            wget https://apt.llvm.org/llvm.sh
+            chmod +x llvm.sh
+            sudo ./llvm.sh 18
+            sudo apt-get install -y clang-18 lld-18
 
       - name: Install Linux dev headers
         # setup.sh --ci hard-fails when ALSA/X11/Wayland dev headers are
-        # missing (✗ ALSA dev headers not found, etc.). Mirrors the
-        # apt-install step in build.yml + release-cli.yml; without it
-        # the rtsan job dies before configure.
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libasound2-dev libdbus-1-dev libdrm-dev libegl1-mesa-dev \
-            libgbm-dev libgl1-mesa-dev libx11-dev libxext-dev libxfixes-dev \
-            libxi-dev libxinerama-dev libxkbcommon-dev libxrandr-dev \
-            libxrender-dev libxss-dev libxtst-dev libwayland-dev wayland-protocols
+        # missing. apt-get update + install can flake on mirror 5xx;
+        # retry rather than rebuild the whole workflow.
+        uses: ./.github/actions/retry
+        with:
+          label: 'Install Linux dev headers (rtsan)'
+          run: |
+            sudo apt-get update
+            sudo apt-get install -y \
+              libasound2-dev libdbus-1-dev libdrm-dev libegl1-mesa-dev \
+              libgbm-dev libgl1-mesa-dev libx11-dev libxext-dev libxfixes-dev \
+              libxi-dev libxinerama-dev libxkbcommon-dev libxrandr-dev \
+              libxrender-dev libxss-dev libxtst-dev libwayland-dev wayland-protocols
 
       - name: Bootstrap repository dependencies
         run: ./setup.sh --ci --deps-only

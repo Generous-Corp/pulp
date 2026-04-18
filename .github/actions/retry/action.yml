@@ -1,0 +1,56 @@
+name: 'Retry a shell command'
+description: >
+  Runs a shell command with automatic retry on non-zero exit.
+  Tolerates transient network failures (apt.llvm.org 5xx,
+  GitHub git-clone blips, Homebrew bottle-fetch timeouts) without
+  needing the whole workflow to close/reopen to retrigger.
+  Standard pattern across all long-running Pulp workflows.
+
+inputs:
+  run:
+    description: Shell command to execute
+    required: true
+  attempts:
+    description: Maximum attempts (including first run)
+    default: '3'
+  initial-delay-seconds:
+    description: Wait before the first retry (doubles each subsequent retry)
+    default: '15'
+  shell:
+    description: Shell to use (bash|pwsh|sh)
+    default: 'bash'
+  label:
+    description: Human-readable step label used in log messages
+    default: 'command'
+
+runs:
+  using: composite
+  steps:
+    - name: Run with retry
+      shell: ${{ inputs.shell }}
+      env:
+        RETRY_ATTEMPTS: ${{ inputs.attempts }}
+        RETRY_INITIAL_DELAY: ${{ inputs.initial-delay-seconds }}
+        RETRY_LABEL: ${{ inputs.label }}
+        RETRY_SCRIPT: ${{ inputs.run }}
+      run: |
+        set +e
+        attempt=1
+        delay="${RETRY_INITIAL_DELAY}"
+        while : ; do
+          echo "::group::${RETRY_LABEL} (attempt ${attempt}/${RETRY_ATTEMPTS})"
+          bash -c "${RETRY_SCRIPT}"
+          status=$?
+          echo "::endgroup::"
+          if [ "${status}" -eq 0 ]; then
+            exit 0
+          fi
+          if [ "${attempt}" -ge "${RETRY_ATTEMPTS}" ]; then
+            echo "::error::${RETRY_LABEL} failed after ${RETRY_ATTEMPTS} attempts (exit ${status})"
+            exit "${status}"
+          fi
+          echo "${RETRY_LABEL} exited ${status}; retrying in ${delay}s..."
+          sleep "${delay}"
+          attempt=$((attempt + 1))
+          delay=$((delay * 2))
+        done
