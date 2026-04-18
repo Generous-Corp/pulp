@@ -218,6 +218,71 @@ Java_com_pulp_PulpActivity_nativeOnDisplayChanged(
     }
 }
 
+extern "C" JNIEXPORT void JNICALL
+Java_com_pulp_PulpActivity_nativeOnOrientationChanged(
+    JNIEnv* env, jobject thiz, jint orientation) {
+    try {
+        PULP_LOGI("nativeOnOrientationChanged: %d", orientation);
+        // Kotlin side's orientationToEnum() maps Android's
+        // Configuration.ORIENTATION_* into Pulp's Orientation enum
+        // (declared in environment.hpp). The mapping is documented
+        // there; this is just a numeric pass-through.
+        namespace pp = pulp::platform;
+        auto s = pp::Environment::instance().snapshot();
+        s.orientation = static_cast<pp::Orientation>(orientation);
+        pp::Environment::instance().publish(s);
+    } catch (const std::exception& e) {
+        env->ThrowNew(env->FindClass("java/lang/RuntimeException"), e.what());
+    } catch (...) {
+        env->ThrowNew(env->FindClass("java/lang/RuntimeException"),
+                      "Unknown C++ exception in nativeOnOrientationChanged");
+    }
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_pulp_PulpActivity_nativeOnSafeAreaChanged(
+    JNIEnv* env, jobject thiz,
+    jfloat top, jfloat bottom, jfloat left, jfloat right) {
+    try {
+        PULP_LOGI("nativeOnSafeAreaChanged: top=%.1f bottom=%.1f left=%.1f right=%.1f",
+                  top, bottom, left, right);
+        namespace pp = pulp::platform;
+        auto s = pp::Environment::instance().snapshot();
+        s.safe_area.top    = static_cast<float>(top);
+        s.safe_area.bottom = static_cast<float>(bottom);
+        s.safe_area.left   = static_cast<float>(left);
+        s.safe_area.right  = static_cast<float>(right);
+        pp::Environment::instance().publish(s);
+    } catch (const std::exception& e) {
+        env->ThrowNew(env->FindClass("java/lang/RuntimeException"), e.what());
+    } catch (...) {
+        env->ThrowNew(env->FindClass("java/lang/RuntimeException"),
+                      "Unknown C++ exception in nativeOnSafeAreaChanged");
+    }
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_com_pulp_PulpActivity_nativeOnKeyboardChanged(
+    JNIEnv* env, jobject thiz, jfloat bottom) {
+    try {
+        PULP_LOGI("nativeOnKeyboardChanged: bottom=%.1f", bottom);
+        namespace pp = pulp::platform;
+        auto s = pp::Environment::instance().snapshot();
+        s.keyboard.bottom = static_cast<float>(bottom);
+        // Android's basic WindowInsetsCompat doesn't surface animation
+        // duration here — that lives on WindowInsetsAnimationCompat,
+        // which is a frame-by-frame callback API. Leave 0 until the
+        // animation plumbing is added in a follow-up PR.
+        s.keyboard.animation_duration = 0.0f;
+        pp::Environment::instance().publish(s);
+    } catch (const std::exception& e) {
+        env->ThrowNew(env->FindClass("java/lang/RuntimeException"), e.what());
+    } catch (...) {
+        env->ThrowNew(env->FindClass("java/lang/RuntimeException"),
+                      "Unknown C++ exception in nativeOnKeyboardChanged");
+    }
+}
+
 // ── Audio Focus JNI Callbacks ─────────────────────────────────────────────
 
 extern "C" JNIEXPORT void JNICALL
