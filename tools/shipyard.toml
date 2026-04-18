@@ -30,27 +30,25 @@
 # bumps this pin.
 
 [shipyard]
-# v0.3.0 introduces durable ship resume — Phase 1 of the close-the-
-# laptop work (see shipyard/planning → pulp-planning/
-# shipyard-routines-integration-proposal-2026-04-15.md). Adds:
-#   - shipyard ship --resume / --no-resume: an interrupted ship now
-#     persists per-PR state to disk on every material event, so a
-#     fresh session picks up from the same cloud run IDs without
-#     re-dispatching. Survives closed laptops, OS restarts, and
-#     agent-to-agent handoffs (Claude Code → Codex and back). Refuses
-#     to resume on SHA or merge-policy drift.
-#   - shipyard ship-state list | show <pr> | discard <pr>: inspect
-#     and manage in-flight ship state. The list/show output is self-
-#     describing — PR title, GitHub URL, tip commit subject are
-#     recorded alongside run IDs, so a week-old state file tells you
-#     what you were shipping.
-#   - shipyard cleanup --ship-state: opt-in pruning. Archived files
-#     older than 30 days and active files older than 14 days for
-#     closed/merged PRs are removed; open PRs are always preserved.
-# v0.2.0 (Part 13 Stages 1-6) also remains in this release with:
-#   - Incremental bundles, --resume-from SSH, shipyard targets/config,
-#     cloud polling timeout, ssh upload, stale queue recovery.
-version = "v0.3.0"
+# v0.8.0 — five releases past v0.3.0. Cumulative additions on top of
+# v0.3.0's durable ship-resume work and v0.2.0's incremental bundles:
+#
+#   v0.4.0 — release-bot setup helpers + multi-repo PAT guidance + a
+#            secret-drift playbook (Shipyard PRs #45/#46/#51).
+#   v0.5.0 — `shipyard doctor release-chain` + `cloud run --require-sha`
+#            (Shipyard PRs #52/#54/#55).
+#   v0.6.0/v0.7.0 — release-pipeline batch fixes (Shipyard #56/#57).
+#   v0.8.0 — trailer shortcuts, `watch-stream` output, `ship --auto-merge`,
+#            cloud retarget (Shipyard PRs #59/#62/#64/#66).
+#
+# v0.3.0 surface still present in v0.8.0:
+#   - `shipyard ship --resume` / `--no-resume`, `ship-state list/show/discard`,
+#     `cleanup --ship-state`. Close-the-laptop workflow.
+#
+# v0.2.0 surface still present in v0.8.0:
+#   - Incremental bundles, `--resume-from` SSH, targets/config, cloud
+#     polling timeout, ssh upload, stale queue recovery.
+version = "v0.8.0"
 
 # Public release source. The bootstrap script downloads from
 # https://github.com/{repo}/releases/download/{version}/{asset}
