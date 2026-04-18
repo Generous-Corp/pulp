@@ -30,9 +30,13 @@ target_link_libraries(pulp-format
         pulp::view
         pulp::runtime
 )
-if(NOT ANDROID AND NOT IOS)
-    # Inspector is desktop-only; it's defined later in the CMake order,
-    # so we link by name rather than using if(TARGET ...).
+if(PULP_ENABLE_GPU AND NOT ANDROID AND NOT IOS)
+    # Inspector is desktop-only AND GPU-only — pulp-inspect is added in
+    # the root CMakeLists.txt under `if(PULP_ENABLE_GPU AND NOT ANDROID)`.
+    # Linking it here without the same guard breaks PULP_ENABLE_GPU=OFF
+    # builds (the sanitizer matrix in .github/workflows/sanitizers.yml
+    # disables GPU). Defined later in CMake order, so we link by name
+    # rather than using if(TARGET ...).
     target_link_libraries(pulp-format PUBLIC pulp::inspect)
 endif()
 
