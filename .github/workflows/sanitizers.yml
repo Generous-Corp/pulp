@@ -117,7 +117,7 @@ jobs:
       - uses: actions/checkout@v5
         with:
           submodules: false
-          lfs: true
+          lfs: false
 
       - name: Bootstrap repository dependencies
         run: ./setup.sh --ci --deps-only
@@ -156,7 +156,7 @@ jobs:
       - uses: actions/checkout@v5
         with:
           submodules: false
-          lfs: true
+          lfs: false
 
       - name: Bootstrap repository dependencies
         run: ./setup.sh --ci --deps-only
@@ -205,7 +205,7 @@ jobs:
       - uses: actions/checkout@v5
         with:
           submodules: false
-          lfs: true
+          lfs: false
 
       - name: Bootstrap repository dependencies
         run: ./setup.sh --ci --deps-only
@@ -253,7 +253,7 @@ jobs:
       - uses: actions/checkout@v5
         with:
           submodules: false
-          lfs: true
+          lfs: false
 
       - name: Install Clang 18
         run: |
