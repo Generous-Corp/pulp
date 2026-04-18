@@ -1,0 +1,7 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Discussion / question / help
+    url: https://github.com/danielraffel/pulp/discussions
+    about: >
+      For open-ended questions, design conversations, or help using Pulp —
+      please open a discussion instead of an issue.

@@ -1,0 +1,114 @@
+name: Bug report
+description: Pulp crashed, misbehaved, or produced wrong output
+title: "[bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: >
+        Thanks for filing a bug. The more specific the repro, the faster
+        someone can land a fix. If you'd like Pulp to collect a diagnostic
+        bundle (anonymized; you see every file before upload), run
+        `pulp report bug` and attach the resulting bundle — the CLI
+        redacts your home directory, username, hostname, IPs, MAC
+        addresses, and common secret patterns before producing anything.
+
+  - type: input
+    id: summary
+    attributes:
+      label: One-line summary
+      placeholder: "e.g. CLAP adapter drops first MIDI note on every process() call"
+    validations:
+      required: true
+
+  - type: input
+    id: pulp_version
+    attributes:
+      label: Pulp version
+      description: Run `pulp version` if you have the CLI, or paste the commit SHA for a from-source build.
+      placeholder: "e.g. 0.20.0 or commit abc1234"
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: OS + version
+      placeholder: "macOS 15.2 (arm64) / Ubuntu 24.04 / Windows 11 24H2 / iPadOS 18 / Android 14"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: format
+    attributes:
+      label: Plugin format(s) in use
+      multiple: true
+      options:
+        - Standalone
+        - VST3
+        - Audio Unit (AU v2)
+        - Audio Unit (AU v3 / AUv3)
+        - CLAP
+        - AAX
+        - LV2
+        - Other / N/A
+    validations:
+      required: true
+
+  - type: input
+    id: host
+    attributes:
+      label: Host / DAW + version
+      description: Leave blank if the bug reproduces in standalone.
+      placeholder: "e.g. Logic Pro 11.1 / Ableton Live 12.0.5 / REAPER 7.30"
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: The tighter the repro, the faster the fix.
+      placeholder: |
+        1. Open Pulp standalone
+        2. Load Pulp Compressor preset "FX bus"
+        3. Start playback
+        4. ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected_actual
+    attributes:
+      label: Expected vs actual behavior
+      placeholder: |
+        Expected: meter stays at -18 dBFS
+        Actual:   meter reads 0 dBFS after ~3 seconds
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / stack trace
+      description: >
+        Paste any crash log, stderr output, or `pulp doctor` output.
+        If you'd rather share a Pulp diagnostic bundle with automatic
+        anonymization, run `pulp report bug --attach` and drag the bundle
+        in below.
+      render: shell
+
+  - type: checkboxes
+    id: consent
+    attributes:
+      label: Before filing
+      options:
+        - label: I searched existing issues and didn't find a duplicate.
+          required: true
+        - label: I'm on a supported platform per `docs/reference/capabilities.md`.
+          required: false
+
+  - type: markdown
+    attributes:
+      value: >
+        _Reference: JUCE's Projucer diagnostic bundle is prior art for the
+        CLI-side anonymization. Pulp's `report` subcommand is designed to be
+        agent- and CI-friendly — see #413 for the full scope._

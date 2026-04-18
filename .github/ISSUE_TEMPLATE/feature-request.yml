@@ -1,0 +1,120 @@
+name: Feature request
+description: Propose a new capability or improvement, and optionally volunteer to help
+title: "[feat]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: >
+        Feature requests are how we prioritize. Clear proposals with concrete
+        use-cases land faster than wishlist items. If you're open to helping
+        build or test the feature — even a small slice — please say so
+        below. Pulp is agent- and human-friendly; both count.
+
+  - type: input
+    id: summary
+    attributes:
+      label: One-line summary
+      placeholder: "e.g. Expose per-parameter smoothing time on Binding"
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: >
+        Describe the pain, the use-case, or the gap. Real workflows beat
+        abstract wishes.
+      placeholder: |
+        When building a synth with an envelope-shaped parameter, I want per-
+        param smoothing that follows the attack curve, but today all params
+        smooth on the same global time constant.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed API / UX / behavior
+      description: >
+        How should it work from the caller's perspective? Rough API sketches
+        are welcome. "I don't know, suggest one" is also a valid answer.
+      placeholder: |
+        Binding::set_smoothing_time(ms) on a per-binding basis, defaulting
+        to the StateStore global; UI would pick this up via Binding::poll().
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: What else did you try or think about? Why wasn't it enough?
+      placeholder: |
+        Tried wrapping Binding in a custom smoother, but then the UI side
+        doesn't know what the effective value is and meters lag.
+
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Which area(s) of Pulp?
+      multiple: true
+      options:
+        - Plugin formats (VST3 / AU / CLAP / AAX / LV2)
+        - DSP / signal
+        - State / parameters
+        - UI / View / Canvas
+        - MIDI / MIDI CI
+        - Audio I/O / device layer
+        - Mobile (iOS / Android)
+        - Desktop standalone
+        - Web / WASM
+        - CLI / dev tooling
+        - Docs / examples
+        - CI / test infrastructure
+        - Accessibility
+        - Other / unsure
+    validations:
+      required: true
+
+  - type: dropdown
+    id: volunteer
+    attributes:
+      label: Would you like to help build or test this?
+      description: >
+        Completely optional — feature requests are welcome whether or not
+        you plan to contribute. If you're interested, saying so here helps
+        maintainers reach out and scope work with you.
+      options:
+        - "No — just requesting"
+        - "I could test a prototype or provide feedback"
+        - "I could help design the API"
+        - "I could write a patch with guidance"
+        - "I could drive the implementation end-to-end"
+    validations:
+      required: true
+
+  - type: input
+    id: timebox
+    attributes:
+      label: How urgent is this for you?
+      description: Rough deadline or project context, if any — helps with triage.
+      placeholder: "e.g. blocking my v1 release in June / nice-to-have"
+
+  - type: checkboxes
+    id: consent
+    attributes:
+      label: Before filing
+      options:
+        - label: I searched existing issues and discussions and didn't find a duplicate.
+          required: true
+        - label: I've skimmed `VISION.md` and this request aligns with Pulp's direction (or I'm explicitly proposing a directional change).
+          required: false
+
+  - type: markdown
+    attributes:
+      value: >
+        _Pulp keeps a "help wanted" label and a low-friction PR flow — see
+        `CONTRIBUTING.md`. Volunteering is never a commitment; we'll always
+        confirm scope with you before assigning._
