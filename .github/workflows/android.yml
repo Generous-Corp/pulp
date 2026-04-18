@@ -16,6 +16,14 @@ on:
       - 'tools/cmake/PulpAndroid.cmake'
       - 'CMakeLists.txt'
 
+# Cancel superseded PR runs when a new commit lands on the same ref.
+# Main-branch pushes share `refs/heads/main` so consecutive main runs
+# still serialize under the same group — acceptable: Android-on-main
+# is a background signal, not a release gate.
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   android-build:
     strategy:

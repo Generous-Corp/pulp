@@ -36,6 +36,10 @@ on:
         default: ""
         type: string
 
+concurrency:
+  group: docs-check-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   resolve-provider:
     runs-on: ubuntu-latest

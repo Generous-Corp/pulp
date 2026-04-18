@@ -4,6 +4,12 @@ on:
   push:
     tags: ['v*']
 
+# Never cancel in-flight signing/notarization. Partial notarization
+# artifacts are hard to recover; serialize instead.
+concurrency:
+  group: sign-and-release-${{ github.ref }}
+  cancel-in-progress: false
+
 env:
   BUILD_TYPE: Release
 

@@ -10,6 +10,14 @@ on:
         description: 'Version tag (e.g., v0.1.0)'
         required: true
 
+# Never cancel an in-flight release. If two tags push back-to-back,
+# serialize rather than cancel — interrupting a binary build halfway
+# through leaves partial artifacts on the runner and can miss
+# publishing the earlier tag's release.
+concurrency:
+  group: release-cli-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   build-cli:
     strategy:

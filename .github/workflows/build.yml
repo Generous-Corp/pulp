@@ -29,6 +29,15 @@ on:
         default: ""
         type: string
 
+# Cancel superseded runs when a new commit lands on the same PR.
+# Stops stale build matrix runs (20-30 min each) from eating runner
+# capacity when a PR accumulates fixup commits. workflow_dispatch
+# runs share the same group so a manual retrigger cancels any
+# auto-triggered run in flight.
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   resolve-provider:
     runs-on: ubuntu-latest
