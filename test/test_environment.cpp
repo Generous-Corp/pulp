@@ -177,6 +177,45 @@ TEST_CASE("Environment: callback that drops its own token does not deadlock",
     SUCCEED("no deadlock");
 }
 
+TEST_CASE("Environment: listener unsubscribed mid-dispatch is not invoked "
+          "(#403 codex P1)",
+          "[environment][issue-403]") {
+    Environment::reset_for_test();
+
+    int a_calls = 0;
+    int b_calls = 0;
+
+    Environment::Token a = Environment::instance().subscribe(
+        [&](const EnvironmentState&, EnvironmentChange) { ++a_calls; });
+    Environment::Token b = Environment::instance().subscribe(
+        [&](const EnvironmentState&, EnvironmentChange) { ++b_calls; });
+
+    // Subscribe a listener that tears down `b`'s subscription while
+    // the publish is iterating the copied listener list. Before the
+    // #403 fix, `b`'s callback still fired once because publish held
+    // a copy that didn't re-check registration. After the fix, the
+    // atomic `active` flag is flipped before erase and the second
+    // invocation is skipped.
+    Environment::Token killer = Environment::instance().subscribe(
+        [&](const EnvironmentState&, EnvironmentChange) { b.reset(); });
+
+    Environment::inject_for_test(make_state(ColorScheme::dark));
+
+    REQUIRE(a_calls == 1);
+    // Whether `b` fires before or after `killer` depends on
+    // subscription order; subscribe() appends, so iteration is
+    // deterministically a, b, killer. `b` is invoked before `killer`
+    // clears it — so b_calls should be 1 for this first publish.
+    REQUIRE(b_calls == 1);
+
+    // Second publish — `b` is now unsubscribed. `a` still fires,
+    // `b` must not fire again (the bug would have it fire once more
+    // if the listener list were copied without the active flag).
+    Environment::inject_for_test(make_state(ColorScheme::light));
+    REQUIRE(a_calls == 2);
+    REQUIRE(b_calls == 1);
+}
+
 TEST_CASE("Environment: snapshot is consistent with last publish",
           "[environment]") {
     Environment::reset_for_test();

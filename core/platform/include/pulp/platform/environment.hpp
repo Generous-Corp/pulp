@@ -22,6 +22,7 @@
 /// Windows `WM_DPICHANGED`/`WM_SETTINGCHANGE`, Linux XSettings + Wayland
 /// fractional scale).
 
+#include <atomic>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -211,7 +212,18 @@ private:
 
     mutable std::mutex mu_;
     EnvironmentState   state_;
-    struct Entry { uint64_t id; Listener fn; };
+    // Entry carries an `active` flag so `publish` can take a snapshot
+    // of the subscription list under the lock, then drop the lock and
+    // still skip any listener that was unsubscribed in the meantime —
+    // either by another listener during the same dispatch or by a
+    // different thread calling `Token::reset()`. Using shared_ptr so
+    // the copy in `publish` and the live list share the same flag.
+    // See #403 Codex P1 review.
+    struct Entry {
+        uint64_t id;
+        Listener fn;
+        std::shared_ptr<std::atomic<bool>> active;
+    };
     std::vector<Entry> listeners_;
     uint64_t           next_id_ = 1;
 };

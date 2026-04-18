@@ -46,7 +46,10 @@ Environment::Token Environment::subscribe(Listener listener) {
     if (!listener) return Token{};
     std::lock_guard<std::mutex> lock(mu_);
     uint64_t id = next_id_++;
-    listeners_.push_back(Entry{id, std::move(listener)});
+    listeners_.push_back(Entry{
+        id,
+        std::move(listener),
+        std::make_shared<std::atomic<bool>>(true)});
     return Token{id};
 }
 
@@ -54,6 +57,14 @@ void Environment::unsubscribe(uint64_t id) {
     std::lock_guard<std::mutex> lock(mu_);
     for (auto it = listeners_.begin(); it != listeners_.end(); ++it) {
         if (it->id == id) {
+            // Flip the flag before erasing. If an in-flight `publish`
+            // already copied this Entry (before the lock was taken),
+            // the copy shares the same shared_ptr and will see the
+            // false value when it re-checks before invoking. Without
+            // this, a listener unsubscribed between lock-release and
+            // callback-dispatch would still fire once — use-after-reset.
+            if (it->active) it->active->store(false,
+                                              std::memory_order_release);
             listeners_.erase(it);
             return;
         }
@@ -101,6 +112,16 @@ void Environment::publish(const EnvironmentState& next) {
         listeners_copy = listeners_;
     }
     for (const auto& entry : listeners_copy) {
+        // Re-check the active flag after dropping the lock. If another
+        // listener in the same dispatch (or another thread) called
+        // Token::reset() between the snapshot and now, entry.active
+        // is false and we must skip — otherwise the callback fires
+        // against captures whose owner has already been destroyed.
+        // See #403 Codex P1.
+        if (entry.active
+            && !entry.active->load(std::memory_order_acquire)) {
+            continue;
+        }
         entry.fn(next, change);
     }
 }
@@ -113,6 +134,14 @@ void Environment::reset_for_test() {
     auto& env = instance();
     std::lock_guard<std::mutex> lock(env.mu_);
     env.state_ = EnvironmentState{};
+    // Flip active flags before clearing so any copy held by an
+    // in-flight publish stops invoking immediately — otherwise tests
+    // that reset mid-dispatch hit the same callback-after-reset race
+    // in reverse.
+    for (auto& entry : env.listeners_) {
+        if (entry.active) entry.active->store(false,
+                                              std::memory_order_release);
+    }
     env.listeners_.clear();
     env.next_id_ = 1;
 }
