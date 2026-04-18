@@ -150,6 +150,23 @@ choice while still being able to easily leverage Android development
 best practices."* Claude Code, Codex, plain bash — all use it the
 same way. It is **not** Gemini-locked.
 
+### Empirical note
+
+Tested 2026-04-18 against this repo: the Android CLI binary
+itself installs cleanly and `android info` / `android emulator
+list` / `android skills list` work. But `android run --apks=...`
+needs a successfully-built APK first, and Pulp's `./gradlew
+assembleDebug` can fail for reasons outside the CLI's reach
+(stale local checkout missing `tools/cmake/PulpInstrumentation.cmake`,
+NDK version mismatch with AGP, etc.). Treat the CLI as a
+post-build amplifier; it doesn't fix build-stage breakage.
+
+A future `pulp doctor android` extension should add a
+"build-configures-cleanly" check (run `./gradlew
+:app:configureCMakeDebug --dry-run` and grep for `CMake Error`)
+so the agent catches stale-checkout / missing-NDK issues before
+attempting a full build cycle.
+
 ### Fallback contract
 
 There is no `pulp` flag that wraps the CLI today, and given the
@@ -750,3 +767,13 @@ Falls back to C++ widget hierarchy if JS fails (any exception → catch → C++ 
 ## Known Blockers
 
 1. **x86_64 Skia build** — Only arm64 Skia is built. Emulator runs arm64 via translation but an x86_64 build would be faster.
+
+---
+
+*Android CLI integration last verified against Google's docs:
+2026-04-18 (Pulp #389). New CLI commands, install-URL changes, and
+known-issue resolutions are tracked by the planned
+`android-cli-monitor` workflow (#390) which polls Google's docs
+twice a month and files an issue when the surface drifts. Until
+that lands, refresh by hand if it's been > 1 month since the
+verification date above.*
