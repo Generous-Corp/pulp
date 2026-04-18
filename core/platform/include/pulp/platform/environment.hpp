@@ -216,4 +216,14 @@ private:
     uint64_t           next_id_ = 1;
 };
 
+// ── Per-platform observer bootstraps ─────────────────────────────────
+// Idempotent — duplicate calls are no-ops so plugin hosts loaded
+// multiple times don't double-register OS observers. Hosts call the
+// entry-point matching their platform during startup; each is a no-op
+// until the matching adapter PR lands.
+
+#if defined(__linux__) && !defined(__ANDROID__)
+void start_environment_observer_linux();
+#endif
+
 } // namespace pulp::platform
