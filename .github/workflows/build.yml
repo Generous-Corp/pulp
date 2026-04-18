@@ -212,7 +212,49 @@ jobs:
             libxss-dev \
             libxtst-dev \
             libwayland-dev \
-            wayland-protocols
+            wayland-protocols \
+            ccache
+
+      - name: Install ccache (macOS)
+        if: runner.os == 'macOS'
+        run: brew install ccache
+
+      - name: Install ccache (Windows)
+        if: runner.os == 'Windows'
+        run: choco install ccache --no-progress -y
+
+      # ── Caches (#420) ──────────────────────────────────────────────────
+      # FetchContent source cache: Skia / Dawn / Yoga / SDL3 / Catch2 /
+      # mbedtls / CHOC / CLAP / LV2 / VST3 SDK, keyed on setup.sh's
+      # content (which pins every ref). Hit → setup.sh finds everything
+      # already unpacked and returns in seconds. Cold → ~3-5 min
+      # downloading + unpacking.
+      - name: Cache FetchContent sources
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Caches/Pulp/fetchcontent-src
+            ~/.cache/Pulp/fetchcontent-src
+            ~/AppData/Local/Pulp/Cache/fetchcontent-src
+          key: ${{ runner.os }}-${{ matrix.key || 'build' }}-fetchcontent-${{ hashFiles('setup.sh') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ matrix.key || 'build' }}-fetchcontent-
+
+      # ccache: skip compilation of unchanged translation units. Keyed
+      # on CMakeLists + PR ref so each PR has its own warm cache. The
+      # restore-key fallback shares warm cache across PRs on the same
+      # base branch, so first-run-per-PR starts near-warm.
+      - name: Cache ccache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/Library/Caches/ccache
+            ~/.cache/ccache
+            ~/AppData/Local/ccache
+          key: ${{ runner.os }}-${{ matrix.key || 'build' }}-ccache-${{ hashFiles('**/CMakeLists.txt', 'tools/cmake/*.cmake') }}-${{ github.ref }}
+          restore-keys: |
+            ${{ runner.os }}-${{ matrix.key || 'build' }}-ccache-${{ hashFiles('**/CMakeLists.txt', 'tools/cmake/*.cmake') }}-
+            ${{ runner.os }}-${{ matrix.key || 'build' }}-ccache-
 
       - name: Bootstrap repository dependencies
         run: ./setup.sh --ci --deps-only
@@ -223,6 +265,11 @@ jobs:
 
       - name: Build
         run: cmake --build build --config Release
+
+      - name: Ccache stats
+        if: always()
+        run: ccache --show-stats
+        shell: bash
 
       - name: Test
         working-directory: build

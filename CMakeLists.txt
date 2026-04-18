@@ -74,6 +74,11 @@ if(WIN32)
     add_compile_definitions(NOMINMAX WIN32_LEAN_AND_MEAN)
 endif()
 
+# ── Build acceleration (optional) ──────────────────────────────────────────
+# Use ccache when available. Must be included BEFORE the first target
+# is declared so the CMAKE_<LANG>_COMPILER_LAUNCHER setting applies.
+include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/Ccache.cmake)
+
 # ── Instrumentation (optional) ─────────────────────────────────────────────
 # Sanitizers via PULP_SANITIZER=address|thread|undefined|memory|realtime
 # Coverage via PULP_ENABLE_COVERAGE=ON (Clang only, mutually exclusive
