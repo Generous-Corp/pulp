@@ -486,6 +486,14 @@ add_executable(pulp-test-runtime test_runtime.cpp)
 target_link_libraries(pulp-test-runtime PRIVATE pulp::runtime Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-runtime)
 
+# Sync-primitive hammer (TSan-focused, #412 step 4).
+# Runs under the tag-scoped TSan subset via the [concurrent][race]
+# tags embedded in each TEST_CASE (matches the 'Race|Concurrent'
+# alternation in sanitizers.yml's --tests-regex).
+add_executable(pulp-test-sync-race-hammer test_sync_race_hammer.cpp)
+target_link_libraries(pulp-test-sync-race-hammer PRIVATE pulp::runtime Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-sync-race-hammer)
+
 # Events tests
 add_executable(pulp-test-events test_events.cpp)
 target_link_libraries(pulp-test-events PRIVATE pulp::events Catch2::Catch2WithMain)
