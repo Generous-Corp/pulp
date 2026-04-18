@@ -16,6 +16,19 @@ Timer::~Timer() {
 }
 
 void Timer::start() {
+    // Fresh sentinel for this lifecycle. Safe to reassign alive_ here
+    // because start() runs on the owner thread — no in-flight dispatch
+    // lambda can be copying alive_ concurrently at this point; any
+    // prior-cycle lambdas hold their own shared_ptr copies captured
+    // before stop() flipped them to false.
+    //
+    // Previously this reassignment lived in stop(), racing with
+    // schedule_next()'s `auto alive = alive_;` copy on the event-loop
+    // thread — std::shared_ptr is NOT thread-safe for concurrent
+    // read/write of the same instance. TSan caught it as a
+    // std::swap-of-atomic<bool>* race in test_events.cpp "Timer basic
+    // operation". Issue #414.
+    alive_ = std::make_shared<std::atomic<bool>>(true);
     active_.store(true, std::memory_order_release);
     schedule_next();
 }
@@ -23,8 +36,11 @@ void Timer::start() {
 void Timer::stop() {
     active_.store(false, std::memory_order_release);
     alive_->store(false, std::memory_order_release);
-    // Create a new sentinel for potential reuse
-    alive_ = std::make_shared<std::atomic<bool>>(true);
+    // Don't replace alive_ here. In-flight dispatch lambdas still
+    // hold a shared_ptr copy to this sentinel and correctly see the
+    // false value set above; the old sentinel is reclaimed when the
+    // last in-flight lambda drops its ref. start() allocates a fresh
+    // sentinel for the next lifecycle.
 }
 
 void Timer::set_interval(Duration interval) {

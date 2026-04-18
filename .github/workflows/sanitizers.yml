@@ -100,7 +100,7 @@ jobs:
           ctest --test-dir build --output-on-failure -j1 \
             --timeout 120 \
             --tests-regex 'AudioWorkgroup|EventLoop|StateStore|Timer|TripleBuffer|SeqLock|SpscQueue|ParamValue|MidiBuffer|MpeTracker|UmpCursor|AsyncUpdater|InterprocessConnection|ChildProcessManager|Atomic|Mutex|Concurrent|Race|Workgroup|AudioBridge|RingBuffer|Lockfree' \
-            --exclude-regex 'AudioWorkgroup|Timer basic operation'  # Timer race tracked in #414
+            --exclude-regex 'AudioWorkgroup'  # Timer race fixed by the Timer::start/stop shared_ptr fix (#414)
 
   ubsan:
     runs-on: macos-14
