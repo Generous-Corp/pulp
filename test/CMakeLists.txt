@@ -270,6 +270,14 @@ add_executable(pulp-test-wasapi-input test_wasapi_input.cpp)
 target_link_libraries(pulp-test-wasapi-input PRIVATE pulp::audio Catch2::Catch2WithMain)
 target_include_directories(pulp-test-wasapi-input PRIVATE ${CMAKE_SOURCE_DIR})
 catch_discover_tests(pulp-test-wasapi-input)
+
+# ALSA capture + real device metadata (#20 / #215). Linux-only;
+# cross-platform stub keeps CI green elsewhere. Skips at runtime on
+# hosts without an ALSA-routable default device.
+add_executable(pulp-test-alsa-input test_alsa_input.cpp)
+target_link_libraries(pulp-test-alsa-input PRIVATE pulp::audio Catch2::Catch2WithMain)
+target_include_directories(pulp-test-alsa-input PRIVATE ${CMAKE_SOURCE_DIR})
+catch_discover_tests(pulp-test-alsa-input)
 # Processor on_host_tempo_changed hook (workstream 01 slice 1.10)
 add_executable(pulp-test-tempo-hook test_tempo_hook.cpp)
 target_link_libraries(pulp-test-tempo-hook PRIVATE pulp::format Catch2::Catch2WithMain)

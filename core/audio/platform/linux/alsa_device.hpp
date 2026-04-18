@@ -15,10 +15,15 @@
 
 namespace pulp::audio::linux_platform {
 
-// ALSA audio device with double-buffered write-ahead rendering
+// ALSA audio device. Single instance wraps EITHER a PLAYBACK
+// (output) endpoint OR a CAPTURE (input) endpoint, selected via the
+// stream parameter at construction. Duplex callers open two devices
+// and synchronise externally — same model as WASAPI on Windows and
+// CoreAudio on macOS.
 class AlsaDevice : public AudioDevice {
 public:
-    explicit AlsaDevice(const std::string& device_name);
+    explicit AlsaDevice(const std::string& device_name,
+                        snd_pcm_stream_t stream = SND_PCM_STREAM_PLAYBACK);
     ~AlsaDevice() override;
 
     bool open(const DeviceConfig& config) override;
@@ -32,10 +37,15 @@ public:
     double sample_rate() const override { return config_.sample_rate; }
     int buffer_size() const override { return config_.buffer_size; }
 
+    /// Direction this device wraps (PLAYBACK = output, CAPTURE = input).
+    snd_pcm_stream_t stream() const { return stream_; }
+
 private:
     void render_thread_func();
+    void capture_thread_func();
 
     std::string device_name_;
+    snd_pcm_stream_t stream_ = SND_PCM_STREAM_PLAYBACK;
     snd_pcm_t* pcm_ = nullptr;
     DeviceConfig config_;
     AudioCallback callback_;
@@ -45,12 +55,14 @@ private:
     snd_pcm_uframes_t period_size_ = 0;
     int actual_channels_ = 0;
 
-    std::thread render_thread_;
+    std::thread io_thread_;
 
-    // Non-interleaved buffers for callback
+    // Non-interleaved buffers for callback. For PLAYBACK these are
+    // user-filled output channels; for CAPTURE they're the input we
+    // hand the user as BufferView<const float>.
     std::vector<std::vector<float>> channel_buffers_;
-    std::vector<float*> output_ptrs_;
-    // Interleaved buffer for ALSA write
+    std::vector<float*> channel_ptrs_;
+    // Interleaved buffer for ALSA read or write.
     std::vector<float> interleaved_;
 };
 
