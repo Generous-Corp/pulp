@@ -259,3 +259,42 @@ jobs:
             build/VST3/**/*.so
             build/CLAP/**/*.so
           retention-days: 7
+
+  # ── Windows MSVC release-path PR gate ────────────────────────────────────
+  #
+  # The main `build-and-test` matrix above runs Windows via Namespace with a
+  # configure that differs from release-cli.yml's. Result: MSVC-specific
+  # errors (protected-member strictness, WIN32_LEAN_AND_MEAN / COM header
+  # interactions, etc.) only surface AFTER a tag is pushed, when
+  # release-cli.yml builds on a GitHub-hosted windows-latest runner. That's
+  # how v0.15.0 / v0.16.0 / v0.17.0 shipped broken release pipelines —
+  # wasapi_device.cpp and accessibility_win.cpp both hit MSVC errors that
+  # the PR gate didn't catch.
+  #
+  # This job mirrors release-cli.yml's CLI-build configure on windows-latest
+  # for every PR so MSVC errors block merge instead of silently failing at
+  # tag-push time. Build-only; no test step — release-cli.yml doesn't run
+  # tests either, and the main matrix above already covers Windows tests on
+  # Namespace.
+  windows-msvc-release-gate:
+    runs-on: windows-latest
+    name: Windows MSVC release-path gate
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          lfs: true
+
+      - name: Bootstrap repository dependencies
+        run: ./setup.sh --ci --deps-only
+        shell: bash
+
+      - name: Configure (matches release-cli.yml)
+        run: |
+          cmake -S . -B build `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DPULP_BUILD_TESTS=OFF
+        shell: pwsh
+
+      - name: Build
+        run: cmake --build build --config Release
+        shell: pwsh
