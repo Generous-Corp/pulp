@@ -21,10 +21,16 @@
 
 namespace pulp::audio::win {
 
-// WASAPI shared-mode audio device with event-driven rendering
+// WASAPI shared-mode audio device with event-driven I/O.
+//
+// A single instance wraps EITHER a render endpoint OR a capture
+// endpoint; the EDataFlow passed at construction selects which path
+// open() / start() take. Duplex callers open two devices and
+// synchronise externally — same model as the rest of the AudioSystem
+// interface, which is direction-agnostic at the device level.
 class WasapiDevice : public AudioDevice {
 public:
-    explicit WasapiDevice(IMMDevice* device);  // Takes ownership (AddRef'd by caller)
+    explicit WasapiDevice(IMMDevice* device, EDataFlow flow = eRender);
     ~WasapiDevice() override;
 
     bool open(const DeviceConfig& config) override;
@@ -38,16 +44,22 @@ public:
     double sample_rate() const override { return config_.sample_rate; }
     int buffer_size() const override { return config_.buffer_size; }
 
+    /// Direction this device wraps. eRender = output, eCapture = input.
+    EDataFlow flow() const { return flow_; }
+
     // Shared helpers used by WasapiSystem during device enumeration.
     static std::wstring get_device_name(IMMDevice* device);
     static std::string wide_to_utf8(const std::wstring& wide);
 
 private:
     void render_thread_func();
+    void capture_thread_func();
 
-    IMMDevice* device_ = nullptr;
-    IAudioClient* audio_client_ = nullptr;
-    IAudioRenderClient* render_client_ = nullptr;
+    IMMDevice*           device_         = nullptr;
+    EDataFlow            flow_           = eRender;
+    IAudioClient*        audio_client_   = nullptr;
+    IAudioRenderClient*  render_client_  = nullptr;  // populated when flow_ == eRender
+    IAudioCaptureClient* capture_client_ = nullptr;  // populated when flow_ == eCapture
     HANDLE buffer_event_ = nullptr;
     HANDLE stop_event_ = nullptr;
 
@@ -59,11 +71,13 @@ private:
     UINT32 buffer_frames_ = 0;
     int actual_channels_ = 0;
 
-    std::thread render_thread_;
+    std::thread io_thread_;
 
-    // Deinterleave buffer for callback
+    // Deinterleave / planar buffers for the callback.  For render
+    // direction these are output channels; for capture they're the
+    // input channels we hand to the user via BufferView<const float>.
     std::vector<std::vector<float>> channel_buffers_;
-    std::vector<float*> output_ptrs_;
+    std::vector<float*> channel_ptrs_;
 };
 
 class WasapiNotificationClient;  // fwd, issue #243 hotplug

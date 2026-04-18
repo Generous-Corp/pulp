@@ -262,6 +262,14 @@ catch_discover_tests(pulp-test-uia-mapping)
 add_executable(pulp-test-audio-system-hotplug test_audio_system_hotplug.cpp)
 target_link_libraries(pulp-test-audio-system-hotplug PRIVATE pulp::audio Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-audio-system-hotplug)
+
+# WASAPI capture path (#243). Windows-only; cross-platform stub keeps
+# CI green elsewhere. Skips at runtime on hosts without a default
+# capture endpoint.
+add_executable(pulp-test-wasapi-input test_wasapi_input.cpp)
+target_link_libraries(pulp-test-wasapi-input PRIVATE pulp::audio Catch2::Catch2WithMain)
+target_include_directories(pulp-test-wasapi-input PRIVATE ${CMAKE_SOURCE_DIR})
+catch_discover_tests(pulp-test-wasapi-input)
 # Processor on_host_tempo_changed hook (workstream 01 slice 1.10)
 add_executable(pulp-test-tempo-hook test_tempo_hook.cpp)
 target_link_libraries(pulp-test-tempo-hook PRIVATE pulp::format Catch2::Catch2WithMain)
