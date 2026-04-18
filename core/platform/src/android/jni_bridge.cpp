@@ -1,6 +1,7 @@
 #if defined(__ANDROID__)
 
 #include <pulp/platform/android/jni.hpp>
+#include <pulp/platform/environment.hpp>
 #include <android/log.h>
 #include <stdexcept>
 #include <string>
@@ -110,7 +111,12 @@ extern "C" JNIEXPORT void JNICALL
 Java_com_pulp_PulpActivity_nativeOnForeground(JNIEnv* env, jobject thiz) {
     try {
         PULP_LOGI("nativeOnForeground");
-        // TODO: Resume rendering, restore GPU caches
+        // Publish to the unified environment notifier (#342). Callers
+        // subscribed via Environment::subscribe receive the new lifecycle
+        // state and can resume rendering / restore GPU caches.
+        auto s = pulp::platform::Environment::instance().snapshot();
+        s.lifecycle = pulp::platform::LifecycleState::foreground;
+        pulp::platform::Environment::instance().publish(s);
     } catch (const std::exception& e) {
         env->ThrowNew(env->FindClass("java/lang/RuntimeException"), e.what());
     } catch (...) {
@@ -123,7 +129,11 @@ extern "C" JNIEXPORT void JNICALL
 Java_com_pulp_PulpActivity_nativeOnBackground(JNIEnv* env, jobject thiz) {
     try {
         PULP_LOGI("nativeOnBackground");
-        // TODO: Reduce rendering, prepare for possible LMK
+        // Publish via the unified environment notifier (#342). Callers
+        // reduce rendering / drop optional caches in response.
+        auto s = pulp::platform::Environment::instance().snapshot();
+        s.lifecycle = pulp::platform::LifecycleState::background;
+        pulp::platform::Environment::instance().publish(s);
     } catch (const std::exception& e) {
         env->ThrowNew(env->FindClass("java/lang/RuntimeException"), e.what());
     } catch (...) {
@@ -149,7 +159,27 @@ extern "C" JNIEXPORT void JNICALL
 Java_com_pulp_PulpActivity_nativeOnMemoryPressure(JNIEnv* env, jobject thiz, jint level) {
     try {
         PULP_LOGI("nativeOnMemoryPressure: level=%d", level);
-        // TODO: Wire to on_memory_pressure() for tiered cache release
+        // Translate Android onTrimMemory level into Pulp's coarser
+        // MemoryPressure tiers. The Android level values are stable
+        // public API constants on ComponentCallbacks2:
+        //   TRIM_MEMORY_COMPLETE   = 80  (critical — next to be killed)
+        //   TRIM_MEMORY_MODERATE   = 60  (significant — foreground at risk)
+        //   TRIM_MEMORY_BACKGROUND = 40  (background — start releasing)
+        //   TRIM_MEMORY_UI_HIDDEN  = 20  (UI no longer visible)
+        //   TRIM_MEMORY_RUNNING_*   (5/10/15 — foreground running low)
+        namespace pp = pulp::platform;
+        auto pressure = pp::MemoryPressure::normal;
+        if (level >= 80) {
+            pressure = pp::MemoryPressure::critical;
+        } else if (level >= 40) {
+            pressure = pp::MemoryPressure::moderate;
+        } else if (level >= 10) {
+            // RUNNING_LOW / RUNNING_CRITICAL on a still-foreground app.
+            pressure = pp::MemoryPressure::moderate;
+        }
+        auto s = pp::Environment::instance().snapshot();
+        s.memory_pressure = pressure;
+        pp::Environment::instance().publish(s);
     } catch (const std::exception& e) {
         env->ThrowNew(env->FindClass("java/lang/RuntimeException"), e.what());
     } catch (...) {
@@ -164,7 +194,22 @@ Java_com_pulp_PulpActivity_nativeOnDisplayChanged(
     try {
         PULP_LOGI("nativeOnDisplayChanged: %dx%d density=%.1f dark=%d",
                   width, height, density, darkMode);
-        // TODO: Update view hierarchy layout and theme
+        // Publish display + color scheme together (#342). width/height
+        // from the Kotlin side arrive as CSS-pixel equivalents: Android
+        // reports physical pixels, so we divide by density for the
+        // logical size and keep physical_* for the raw resolution.
+        namespace pp = pulp::platform;
+        auto s = pp::Environment::instance().snapshot();
+        s.display.physical_width  = static_cast<int>(width);
+        s.display.physical_height = static_cast<int>(height);
+        s.display.scale = density > 0.0f ? static_cast<float>(density) : 1.0f;
+        s.display.width  = s.display.scale > 0.0f
+            ? static_cast<float>(width)  / s.display.scale : static_cast<float>(width);
+        s.display.height = s.display.scale > 0.0f
+            ? static_cast<float>(height) / s.display.scale : static_cast<float>(height);
+        s.color_scheme = darkMode ? pp::ColorScheme::dark
+                                  : pp::ColorScheme::light;
+        pp::Environment::instance().publish(s);
     } catch (const std::exception& e) {
         env->ThrowNew(env->FindClass("java/lang/RuntimeException"), e.what());
     } catch (...) {
