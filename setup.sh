@@ -309,6 +309,31 @@ ensure_shared_archive_source() {
     )
 }
 
+# Retry a git network command up to 3 times with exponential backoff.
+# GitHub occasionally returns 5xx on git-over-https; without retry any
+# transient outage fails the whole CI job. Applies to clone/fetch/
+# submodule-update (the VST3 SDK in particular has five sub-submodules,
+# any of which failing aborts the lot). See #418.
+retry_git() {
+    local label="$1"
+    shift
+    local attempts=3
+    local sleep_s=5
+    local i
+    for i in $(seq 1 $attempts); do
+        if "$@"; then
+            return 0
+        fi
+        if [ "$i" -lt "$attempts" ]; then
+            info "$label git attempt $i/$attempts failed; retrying in ${sleep_s}s..."
+            sleep "$sleep_s"
+            sleep_s=$((sleep_s * 2))
+        fi
+    done
+    warn "$label git command failed after $attempts attempts"
+    return 1
+}
+
 ensure_shared_git_source() {
     local label="$1"
     local repo="$2"
@@ -351,9 +376,9 @@ ensure_shared_git_source() {
                     fi
                 fi
             elif ! dry "git clone --filter=blob:none $repo $target"; then
-                if ! git clone --filter=blob:none "$repo" "$target" >/dev/null 2>&1; then
-                    git clone "$repo" "$target"
-                fi
+                # Network clone: retry to tolerate transient GitHub blips.
+                retry_git "$label clone" \
+                    git clone --filter=blob:none "$repo" "$target"
             fi
 
             current_remote="$(git -C "$target" remote get-url origin 2>/dev/null || true)"
@@ -365,12 +390,14 @@ ensure_shared_git_source() {
 
         if ! git -C "$target" cat-file -e "${ref}^{commit}" 2>/dev/null; then
             info "Updating shared $label source cache to include $ref..."
-            dry "git -C $target fetch --tags origin" || git -C "$target" fetch --tags origin
+            dry "git -C $target fetch --tags origin" || \
+                retry_git "$label fetch --tags" git -C "$target" fetch --tags origin
         fi
 
         if ! git -C "$target" cat-file -e "${ref}^{commit}" 2>/dev/null; then
             info "Fetching explicit shared $label ref $ref..."
-            dry "git -C $target fetch --force origin $ref" || git -C "$target" fetch --force origin "$ref"
+            dry "git -C $target fetch --force origin $ref" || \
+                retry_git "$label fetch $ref" git -C "$target" fetch --force origin "$ref"
             checkout_ref="FETCH_HEAD"
         fi
 
@@ -381,8 +408,12 @@ ensure_shared_git_source() {
         fi
 
         if [ -f "$target/.gitmodules" ]; then
+            # submodule update fetches over the network per sub-submodule
+            # (e.g. VST3 SDK has 5 sub-submodules). Retry the whole thing
+            # so one transient failure doesn't cost a full CI cycle (#402).
             dry "git -c protocol.file.allow=always -C $target submodule update --init --recursive" || \
-                git -c protocol.file.allow=always -C "$target" submodule update --init --recursive
+                retry_git "$label submodule update" \
+                    git -c protocol.file.allow=always -C "$target" submodule update --init --recursive
         fi
     )
 }
