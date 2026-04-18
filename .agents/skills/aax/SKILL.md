@@ -112,6 +112,38 @@ Notes:
 - On Linux or Ubuntu, explain that AAX is unsupported and remove `AAX` from `FORMATS`.
 - If validation reports that a bundle exists but the plugin binary is missing, build the target before validating it.
 
+## Gotchas
+
+### MIDI sysex accumulator
+
+AAX splits multi-byte sysex (F0 … F7) across sequential `AAX_CMidiPacket`
+entries — the first packet carries the F0 status byte, continuation
+packets can appear with no status byte, and the final packet carries F7.
+Each packet's `mData` field is at most 4 bytes. A single-packet decoder
+will silently drop everything after the first 4 sysex bytes, and the
+host will never see the real message.
+
+The correct shape is a per-node accumulator:
+
+```cpp
+std::vector<uint8_t> sysex_buffer;
+bool sysex_in_progress = false;
+int32_t sysex_start_offset = 0;
+// for each packet in the node's buffer:
+//   if byte == 0xF0 → start accumulator, capture start_offset from mTimestamp
+//   while sysex_in_progress → append every payload byte (no status-byte requirement)
+//   if byte == 0xF7 → flush accumulator as one MidiEvent, reset
+```
+
+This matches the shape used for CLAP/VST3/AU/CoreMIDI/ALSA sysex (#239).
+See `core/format/src/aax_runtime.cpp::decode_midi_node` for the canonical
+implementation landed in #408.
+
+When adding or changing any AAX MIDI input path, exercise this against a
+multi-packet sysex vector (at least one packet across the 4-byte boundary
+and one terminator-only packet) in a unit test. Shipping without the test
+is the #290 "tests ship with fixes" rule.
+
 ## Review Checklist
 
 After any AAX-related change:
