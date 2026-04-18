@@ -145,6 +145,33 @@ export ANDROID_HOME=~/Library/Android/sdk  # macOS
 - Ensure `android/` project exists (`pulp create --targets android`)
 - Check Gradle output in the terminal for specific errors
 
+### Released CLI tarball crashes on user machines
+
+Symptom: `dyld: Library not loaded: @rpath/libwgpu_native.dylib` or
+`error while loading shared libraries: libwgpu_native.so` after the
+user extracts `pulp-<platform>.tar.gz` from a GitHub Release.
+
+Root cause: `release-cli.yml` historically uploaded the bare
+`build/tools/cli/pulp` binary, which carries an `LC_RPATH` /
+`DT_RUNPATH` pointing at the build runner's home directory (e.g.
+`/Users/runner/Library/Caches/Pulp/...` on macOS, the
+GitHub-hosted-runner workspace on Linux). That path doesn't exist on
+user machines.
+
+Fix (active since v0.20.x): `tools/scripts/package_cli.py` is invoked
+by `release-cli.yml` to:
+1. Copy `libwgpu_native.{dylib,so,dll}` next to the binary.
+2. macOS: `install_name_tool -delete_rpath` every absolute LC_RPATH
+   and add `@loader_path`.
+3. Linux: `patchelf --set-rpath '$ORIGIN'`.
+4. Windows: no rewrite needed — DLLs resolve from the binary's
+   directory automatically.
+
+The portable-binary smoke gate in `release-cli.yml` runs the produced
+artifact on a *clean* runner that did not build it, catching the bug
+class before tagging. If you change rpath logic, run the smoke job
+locally first or it will fail in CI for everyone else.
+
 ## Doctor Checks
 
 `pulp doctor` validates Android toolchain:

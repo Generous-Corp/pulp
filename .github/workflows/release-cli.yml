@@ -69,18 +69,34 @@ jobs:
         if: runner.os != 'Windows'
         run: strip build/tools/cli/pulp
 
+      - name: Install Linux rpath helper
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y patchelf
+
+      # Bundle the wgpu-native dynamic dependency next to the binary
+      # and rewrite the rpath so the artifact is portable. Closes
+      # #391 (v0.20.0 macOS tarball baked an absolute rpath pointing
+      # at /Users/runner/Library/Caches/Pulp/... and crashed on every
+      # user machine). The smoke-cli matrix gate (PR #395) verifies
+      # the result actually runs on a clean runner.
       - name: Package CLI (Unix)
         if: runner.os != 'Windows'
         run: |
-          cd build/tools/cli
-          tar czf ../../../pulp-${{ matrix.platform }}.tar.gz pulp
+          python3 tools/scripts/package_cli.py \
+            --binary build/tools/cli/pulp \
+            --build-dir build \
+            --platform ${{ matrix.platform }} \
+            --out pulp-${{ matrix.platform }}.tar.gz
         shell: bash
 
       - name: Package CLI (Windows)
         if: runner.os == 'Windows'
         run: |
-          cd build/tools/cli/Release
-          Compress-Archive -Path pulp.exe -DestinationPath ../../../../pulp-${{ matrix.platform }}.zip
+          python tools/scripts/package_cli.py `
+            --binary build/tools/cli/Release/pulp.exe `
+            --build-dir build `
+            --platform ${{ matrix.platform }} `
+            --out pulp-${{ matrix.platform }}.zip
         shell: pwsh
 
       - name: Build SDK tarball (Unix)
