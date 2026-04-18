@@ -105,8 +105,11 @@ FetchContent_MakeAvailable(choc)
 
 # WebGPU (Dawn) — cross-platform GPU abstraction (BSD-3-Clause)
 # Uses eliemichel/WebGPU-distribution for CMake-friendly integration
-# On Android, Dawn is bundled in Skia's pre-built libs — skip FetchContent.
-if(PULP_ENABLE_GPU AND NOT ANDROID)
+# On Android + iOS, Dawn is bundled in Skia's pre-built libs — skip
+# FetchContent. wgpu-native doesn't publish iOS prebuilds (tracked in
+# #359); pulp's render path is Dawn-only whenever Skia is the backend
+# anyway (pulp::render::GpuSurface uses Dawn's C++ API under PULP_HAS_SKIA).
+if(PULP_ENABLE_GPU AND NOT ANDROID AND NOT IOS)
     pulp_register_fetchcontent_source(webgpu REF 17dcd42a7683355e7a40ac4e97e77f36dff5b5ab)
     pulp_register_wgpu_native_precompiled_source(v24.0.3.1)
     FetchContent_Declare(
@@ -170,8 +173,13 @@ if(PULP_ENABLE_GPU)
     include(${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/FindSkia.cmake)
     if(SKIA_FOUND)
         set(PULP_HAS_SKIA TRUE)
-        # On Android, Dawn is bundled in Skia — set the flag so render subsystem builds
-        if(ANDROID)
+        # On Android + iOS, Dawn is bundled in Skia's pre-built libs.
+        # Set PULP_HAS_WEBGPU so the render subsystem builds without
+        # needing the desktop wgpu-native FetchContent path. iOS in
+        # particular has no wgpu-native prebuild and won't until #359
+        # is resolved — Dawn is the only viable backend, which matches
+        # how pulp::render uses Dawn when PULP_HAS_SKIA is set.
+        if(ANDROID OR IOS)
             set(PULP_HAS_WEBGPU TRUE)
         endif()
 
