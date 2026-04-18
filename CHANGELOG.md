@@ -38,6 +38,8 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - ci(sanitizers): skip private planning submodule (unblock all PRs) ([#401](https://github.com/danielraffel/pulp/pull/401))
 
 <a id="v0200"></a>
+## [0.21.0]
+
 ## [0.20.0] - 2026-04-18
 
 - midi(win): MIM_LONGDATA SysEx + QPC timestamps (#19 / #245 partial) ([#388](https://github.com/danielraffel/pulp/pull/388))

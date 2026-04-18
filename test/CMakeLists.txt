@@ -250,6 +250,13 @@ catch_discover_tests(pulp-test-midi-buffer-ump)
 add_executable(pulp-test-midi-buffer-sysex test_midi_buffer_sysex.cpp)
 target_link_libraries(pulp-test-midi-buffer-sysex PRIVATE pulp::midi Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-midi-buffer-sysex)
+# Raw MIDI byte-stream parser — shared by ALSA raw-midi and any future
+# raw-byte MIDI transport. Tests aborted-sysex recovery (#406 codex P2),
+# realtime-inside-sysex passthrough (#239), runaway cap, and multi-read
+# accumulator state.
+add_executable(pulp-test-raw-midi-parser test_raw_midi_parser.cpp)
+target_link_libraries(pulp-test-raw-midi-parser PRIVATE pulp::midi Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-raw-midi-parser)
 # Win MIDI MIM_LONGDATA SysEx + QPC timestamps (#19 / #245 partial).
 # Cross-platform — compiles everywhere; Windows-specific cases are
 # guarded behind #ifdef _WIN32.
