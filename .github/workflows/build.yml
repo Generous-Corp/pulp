@@ -403,16 +403,19 @@ jobs:
           fi
 
   windows:
-    needs: build
+    needs: [build, windows-msvc-release-gate]
     runs-on: ubuntu-latest
     if: always()
     steps:
-      - name: Gate on build matrix
+      - name: Gate on build matrix + MSVC release-path
         run: |
-          if [ "${{ needs.build.result }}" = "success" ]; then
-            echo "build matrix succeeded — Windows gate ✓"
+          build_ok="${{ needs.build.result }}"
+          msvc_ok="${{ needs.windows-msvc-release-gate.result }}"
+          if [ "$build_ok" = "success" ] && [ "$msvc_ok" = "success" ]; then
+            echo "build matrix + MSVC release-path both green — Windows gate ✓"
             exit 0
           else
-            echo "build matrix result: ${{ needs.build.result }}"
+            echo "build matrix result: $build_ok"
+            echo "MSVC release-path result: $msvc_ok"
             exit 1
           fi
