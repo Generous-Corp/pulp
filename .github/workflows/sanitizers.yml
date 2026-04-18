@@ -7,8 +7,31 @@ name: Sanitizer Tests
 on:
   pull_request:
     branches: [main, develop]
+    # Path filter: only run sanitizers when the touched code can
+    # plausibly affect memory safety / threading. Docs-only and
+    # workflow-YAML-only PRs skip the 30-min matrix. #412 step 5.
+    paths:
+      - 'core/**'
+      - 'examples/**'
+      - 'tools/cli/**'
+      - 'test/**'
+      - 'CMakeLists.txt'
+      - 'tools/cmake/**'
+      - '.github/workflows/sanitizers.yml'
+      - 'setup.sh'
+      - 'external/**'
   push:
     branches: [main]
+    paths:
+      - 'core/**'
+      - 'examples/**'
+      - 'tools/cli/**'
+      - 'test/**'
+      - 'CMakeLists.txt'
+      - 'tools/cmake/**'
+      - '.github/workflows/sanitizers.yml'
+      - 'setup.sh'
+      - 'external/**'
   workflow_dispatch:
 
 concurrency:
