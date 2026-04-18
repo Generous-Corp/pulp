@@ -3,6 +3,18 @@ name: Sanitizer Tests
 # ASan + UBSan on every PR, TSan advisory, RTSan on-demand.
 # Non-Apple RTSan needs Clang 18 from apt.llvm.org.
 # Local equivalents: scripts/run_asan.sh, scripts/run_tsan.sh.
+#
+# Each sanitizer job's runs-on is routable via three signals (priority order):
+#   1. per-target workflow_dispatch input (e.g. tsan_runner_selector_json)
+#   2. repository variable override (e.g. PULP_SANITIZER_TSAN_RUNS_ON_JSON)
+#   3. hard-coded default (e.g. "macos-14" / "ubuntu-24.04")
+#
+# When all the new repo variables are unset, this workflow resolves to
+# today's hard-coded defaults — no behavior change. Opt-in via
+# `gh variable set PULP_SANITIZER_<TARGET>_RUNS_ON_JSON ...` to move a
+# single sanitizer (e.g. TSan) to a self-hosted Mac without editing code.
+# See docs/guides/local-ci.md § "Switching a job's runner without a code
+# change" for the full variable list and gh examples.
 
 on:
   pull_request:
@@ -10,14 +22,96 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      asan_runner_selector_json:
+        description: "Optional JSON runs-on override for ASan"
+        required: false
+        default: ""
+        type: string
+      tsan_runner_selector_json:
+        description: "Optional JSON runs-on override for TSan"
+        required: false
+        default: ""
+        type: string
+      ubsan_runner_selector_json:
+        description: "Optional JSON runs-on override for UBSan"
+        required: false
+        default: ""
+        type: string
+      rtsan_runner_selector_json:
+        description: "Optional JSON runs-on override for RTSan"
+        required: false
+        default: ""
+        type: string
 
 concurrency:
   group: sanitizers-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  # ── Resolve per-sanitizer runs-on via shared helper ──────────────────────
+  resolve-runners:
+    runs-on: ubuntu-latest
+    outputs:
+      asan_runs_on: ${{ steps.resolve.outputs.asan_runs_on }}
+      tsan_runs_on: ${{ steps.resolve.outputs.tsan_runs_on }}
+      ubsan_runs_on: ${{ steps.resolve.outputs.ubsan_runs_on }}
+      rtsan_runs_on: ${{ steps.resolve.outputs.rtsan_runs_on }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: false
+          lfs: false
+      - id: resolve
+        env:
+          EXPLICIT_ASAN_RUNNER_SELECTOR_JSON: ${{ inputs.asan_runner_selector_json || '' }}
+          EXPLICIT_TSAN_RUNNER_SELECTOR_JSON: ${{ inputs.tsan_runner_selector_json || '' }}
+          EXPLICIT_UBSAN_RUNNER_SELECTOR_JSON: ${{ inputs.ubsan_runner_selector_json || '' }}
+          EXPLICIT_RTSAN_RUNNER_SELECTOR_JSON: ${{ inputs.rtsan_runner_selector_json || '' }}
+          ASAN_RUNS_ON_JSON: ${{ vars.PULP_SANITIZER_ASAN_RUNS_ON_JSON }}
+          TSAN_RUNS_ON_JSON: ${{ vars.PULP_SANITIZER_TSAN_RUNS_ON_JSON }}
+          UBSAN_RUNS_ON_JSON: ${{ vars.PULP_SANITIZER_UBSAN_RUNS_ON_JSON }}
+          RTSAN_RUNS_ON_JSON: ${{ vars.PULP_SANITIZER_RTSAN_RUNS_ON_JSON }}
+        run: |
+          set -euo pipefail
+          resolve() {
+            python3 tools/scripts/resolve_runs_on.py \
+              --target-name "$1" \
+              --mode default \
+              --explicit-env "$2" \
+              --override-env "$3" \
+              --default-label "$4"
+          }
+          asan=$(resolve \
+            "AddressSanitizer (macOS ARM64)" \
+            EXPLICIT_ASAN_RUNNER_SELECTOR_JSON \
+            ASAN_RUNS_ON_JSON \
+            macos-14)
+          tsan=$(resolve \
+            "ThreadSanitizer (macOS ARM64)" \
+            EXPLICIT_TSAN_RUNNER_SELECTOR_JSON \
+            TSAN_RUNS_ON_JSON \
+            macos-14)
+          ubsan=$(resolve \
+            "UndefinedBehaviorSanitizer (macOS ARM64)" \
+            EXPLICIT_UBSAN_RUNNER_SELECTOR_JSON \
+            UBSAN_RUNS_ON_JSON \
+            macos-14)
+          rtsan=$(resolve \
+            "RealtimeSanitizer (Linux x86_64)" \
+            EXPLICIT_RTSAN_RUNNER_SELECTOR_JSON \
+            RTSAN_RUNS_ON_JSON \
+            ubuntu-24.04)
+          {
+            echo "asan_runs_on=${asan}"
+            echo "tsan_runs_on=${tsan}"
+            echo "ubsan_runs_on=${ubsan}"
+            echo "rtsan_runs_on=${rtsan}"
+          } >>"${GITHUB_OUTPUT}"
+
   asan:
-    runs-on: macos-14
+    needs: resolve-runners
+    runs-on: ${{ fromJSON(needs.resolve-runners.outputs.asan_runs_on) }}
     name: AddressSanitizer (macOS ARM64)
     steps:
       - uses: actions/checkout@v5
@@ -55,7 +149,8 @@ jobs:
             --timeout 120
 
   tsan:
-    runs-on: macos-14
+    needs: resolve-runners
+    runs-on: ${{ fromJSON(needs.resolve-runners.outputs.tsan_runs_on) }}
     name: ThreadSanitizer (macOS ARM64)
     steps:
       - uses: actions/checkout@v5
@@ -103,7 +198,8 @@ jobs:
             --exclude-regex 'AudioWorkgroup|Timer basic operation'  # Timer race tracked in #414
 
   ubsan:
-    runs-on: macos-14
+    needs: resolve-runners
+    runs-on: ${{ fromJSON(needs.resolve-runners.outputs.ubsan_runs_on) }}
     name: UndefinedBehaviorSanitizer (macOS ARM64)
     steps:
       - uses: actions/checkout@v5
@@ -141,7 +237,8 @@ jobs:
             --exclude-regex 'Toolbar add items'
 
   rtsan:
-    runs-on: ubuntu-24.04
+    needs: resolve-runners
+    runs-on: ${{ fromJSON(needs.resolve-runners.outputs.rtsan_runs_on) }}
     name: RealtimeSanitizer (Linux x86_64, Clang 18)
     # RTSan requires upstream LLVM Clang 18+. Not available in Apple Clang.
     # See: https://clang.llvm.org/docs/RealtimeSanitizer.html

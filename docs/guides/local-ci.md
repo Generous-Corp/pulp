@@ -201,6 +201,134 @@ Important constraints in the current phase:
   provider routing lives under the GitHub Actions workflow/provider config and
   the `cloud namespace` helper commands
 
+## Switching a job's runner without a code change
+
+Every runner-selection decision in `.github/workflows/*.yml` is driven by
+`tools/scripts/resolve_runs_on.py`. That means the runner for any job
+below can be flipped between **GitHub-hosted**, **Namespace**, and **local
+self-hosted** by setting a repository variable — no workflow edit, no
+full-matrix re-run, no PR. This is the fluidity we want: move a job
+mid-incident without touching code.
+
+### Precedence (identical for every variable below)
+
+For each target the resolver checks, in this order:
+
+1. A `workflow_dispatch` input (if present on the workflow) — one-off override.
+2. The target's repository variable (the `PULP_*_RUNS_ON_JSON` values below).
+3. For the build matrix only: `PULP_DEFAULT_RUNNER_PROVIDER` + the
+   provider's selector var (`PULP_NAMESPACE_*` or `PULP_LOCAL_*`).
+4. A hard-coded default label (e.g. `macos-14`, `ubuntu-24.04`, `macos-15`).
+
+**When every variable below is unset, the workflows resolve to exactly the
+hard-coded defaults they had before this mechanism was lifted into a
+shared resolver. Nothing changes by default.** Setting one variable moves
+one job. Nothing more.
+
+### Global default (`build.yml` matrix only)
+
+| Variable | Effect | Example |
+|---|---|---|
+| `PULP_DEFAULT_RUNNER_PROVIDER` | Default provider for Linux and Windows legs of `build.yml`. One of `github-hosted` \| `namespace` \| `local`. Falls back to `github-hosted` when unset. | `gh variable set PULP_DEFAULT_RUNNER_PROVIDER --body "namespace"` |
+
+### `build.yml` — Linux / Windows / macOS legs
+
+| Variable | Provider | Example |
+|---|---|---|
+| `PULP_NAMESPACE_BUILD_LINUX_RUNS_ON_JSON` | Namespace | `gh variable set PULP_NAMESPACE_BUILD_LINUX_RUNS_ON_JSON --body '["namespace-profile-generouscorp"]'` |
+| `PULP_NAMESPACE_BUILD_WINDOWS_RUNS_ON_JSON` | Namespace | `gh variable set PULP_NAMESPACE_BUILD_WINDOWS_RUNS_ON_JSON --body '["namespace-profile-generouscorp-windows"]'` |
+| `PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON` | Namespace (optional) | `gh variable set PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON --body '"namespace-profile-generouscorp-macos"'` |
+| `PULP_LOCAL_MAC_RUNS_ON_JSON` | Local (reserved for a follow-up PR) | `gh variable set PULP_LOCAL_MAC_RUNS_ON_JSON --body '["self-hosted","macos","arm64","build"]'` |
+| `PULP_LOCAL_LINUX_RUNS_ON_JSON` | Local (reserved for a follow-up PR) | `gh variable set PULP_LOCAL_LINUX_RUNS_ON_JSON --body '["self-hosted","linux","arm64","build"]'` |
+| `PULP_LOCAL_WINDOWS_RUNS_ON_JSON` | Local (reserved for a follow-up PR) | `gh variable set PULP_LOCAL_WINDOWS_RUNS_ON_JSON --body '["self-hosted","windows","x64","build"]'` |
+
+The `PULP_LOCAL_*_RUNS_ON_JSON` family is recognized by the shared
+resolver, but `build.yml` currently does not pass a `--local-env` for
+those legs. Wiring `local` into `build.yml`'s Linux/Windows legs is a
+separate follow-up; call that out in the PR that does it.
+
+### `sanitizers.yml` — per-sanitizer target selection
+
+Each sanitizer job resolves independently. Setting one variable moves
+exactly that sanitizer; the others stay on their defaults.
+
+| Variable | Default label when unset | Example |
+|---|---|---|
+| `PULP_SANITIZER_ASAN_RUNS_ON_JSON` | `macos-14` | `gh variable set PULP_SANITIZER_ASAN_RUNS_ON_JSON --body '["self-hosted","macos","arm64","sanitizer"]'` |
+| `PULP_SANITIZER_TSAN_RUNS_ON_JSON` | `macos-14` | `gh variable set PULP_SANITIZER_TSAN_RUNS_ON_JSON --body '["self-hosted","macos","arm64","sanitizer"]'` |
+| `PULP_SANITIZER_UBSAN_RUNS_ON_JSON` | `macos-14` | `gh variable set PULP_SANITIZER_UBSAN_RUNS_ON_JSON --body '["self-hosted","macos","arm64","sanitizer"]'` |
+| `PULP_SANITIZER_RTSAN_RUNS_ON_JSON` | `ubuntu-24.04` | `gh variable set PULP_SANITIZER_RTSAN_RUNS_ON_JSON --body '["self-hosted","linux","x64","sanitizer"]'` |
+
+**TSan is the first candidate to move.** The GitHub-hosted `macos-14`
+runner is 3 vCPU / 7 GB. A user's Mac is almost always much bigger, so
+the scoped TSan sweep (`-j1` serial under instrumentation) typically
+drops from ~45 min on GitHub-hosted to under 5 min on a well-resourced
+self-hosted runner. ASan / UBSan can stay on GitHub-hosted or move per
+your preference — the mechanism is the same for every sanitizer.
+
+### One-off overrides via `workflow_dispatch`
+
+`sanitizers.yml` accepts one `*_runner_selector_json` input per
+sanitizer. They win over the corresponding repo variable for a single
+manual run:
+
+```bash
+gh workflow run sanitizers.yml \
+  -f tsan_runner_selector_json='["self-hosted","macos","arm64","sanitizer"]'
+```
+
+`build.yml` has the equivalent `linux_runner_selector_json`,
+`windows_runner_selector_json`, and `macos_runner_selector_json` inputs.
+These are the same inputs already documented above; they are listed
+here for completeness alongside the repo-variable knobs.
+
+### Reverting
+
+Unset the variable and the job falls back to the hard-coded default
+immediately on the next run:
+
+```bash
+gh variable delete PULP_SANITIZER_TSAN_RUNS_ON_JSON
+```
+
+No code change is needed to revert, either.
+
+### Registering a self-hosted Mac runner (appendix)
+
+Flipping a job to `"self-hosted"` labels assumes those labels are
+advertised by a running GitHub Actions runner somewhere. Register one
+on the Mac you want the job to run on:
+
+```bash
+# 1. From repo Settings -> Actions -> Runners, click "New self-hosted runner"
+#    to get a short-lived registration token. Then on the Mac:
+mkdir -p ~/actions-runner && cd ~/actions-runner
+curl -o actions-runner.tar.gz -L https://github.com/actions/runner/releases/latest/download/actions-runner-osx-arm64.tar.gz
+tar xzf actions-runner.tar.gz
+
+# 2. Register with labels that match the JSON you set in the repo var.
+#    Example for the TSan / sanitizer lane:
+./config.sh --url https://github.com/danielraffel/pulp \
+            --token <REGISTRATION_TOKEN> \
+            --name "$(hostname)-sanitizer" \
+            --labels "self-hosted,macos,arm64,sanitizer" \
+            --work _work
+
+# 3. Install as a launchd service so it runs at login and survives reboots.
+./svc.sh install
+./svc.sh start
+./svc.sh status
+```
+
+> **Operational note.** Self-hosted runners execute arbitrary code from
+> any branch that can trigger the workflow. Use them on dedicated
+> hardware / VMs you control, not shared personal machines. Apple
+> Silicon hosts should prefer `arm64` labels so jobs don't try to
+> match Intel-only labels.
+>
+> Agents do NOT register runners. Treat these commands as a human ops
+> task documented here for completeness.
+
 ### Creating a Namespace macOS runner profile
 
 Today, `nsc` can verify login/workspace state and inspect the instances created

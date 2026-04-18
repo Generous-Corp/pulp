@@ -182,6 +182,28 @@ macOS runs locally in parallel with Namespace Ubuntu/Windows.
 
 **Common mistake:** Pushing a branch and waiting for the auto-triggered GitHub Actions PR checks. Those use GitHub-hosted runners and are slow. Instead: cancel the auto-triggered run and dispatch on Namespace.
 
+### Runner selection is repo-variable driven (no code change needed)
+
+Every `runs-on:` decision in `.github/workflows/*.yml` routes through
+`tools/scripts/resolve_runs_on.py` and a per-target `PULP_*_RUNS_ON_JSON`
+repo variable. When every variable is unset the workflows resolve to
+their hard-coded defaults (backwards-compatible). Setting one variable
+moves one job — no workflow edit, no full-matrix re-run. The full
+variable list and `gh variable set` examples live in
+`docs/guides/local-ci.md` § "Switching a job's runner without a code
+change".
+
+Practical use case: if a sanitizer is slow on a GitHub-hosted runner
+(TSan on `macos-14` routinely exceeds 45 min), flip it to a self-hosted
+runner with `gh variable set PULP_SANITIZER_TSAN_RUNS_ON_JSON --body
+'["self-hosted","macos","arm64","sanitizer"]'`. The next sanitizer
+run picks up the new runner automatically.
+
+Sanitizer per-job `workflow_dispatch` inputs (`asan_runner_selector_json`
+/ `tsan_runner_selector_json` / `ubsan_runner_selector_json` /
+`rtsan_runner_selector_json`) are the equivalent one-off overrides for
+a single manual run.
+
 ```bash
 # Cancel auto-triggered GitHub-hosted run
 gh run cancel <run_id> --repo danielraffel/pulp
