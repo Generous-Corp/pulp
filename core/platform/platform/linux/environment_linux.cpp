@@ -172,9 +172,21 @@ MemoryPressure detect_memory_pressure() {
 
 class LinuxEnvObserver {
 public:
+    ~LinuxEnvObserver() {
+        // Signal the poll loop to exit and join, so process teardown
+        // (or an unloaded plugin module) doesn't destroy a still-
+        // joinable std::thread — which calls std::terminate(). The
+        // 5 s sleep means worst-case we block for 5 s at shutdown;
+        // acceptable for a singleton observer. See #438 P1 / #444.
+        running_.store(false, std::memory_order_release);
+        if (poll_thread_.joinable()) {
+            poll_thread_.join();
+        }
+    }
+
     void start() {
         std::call_once(start_once_, [this]() {
-            running_.store(true);
+            running_.store(true, std::memory_order_release);
             poll_thread_ = std::thread([this]() { run(); });
         });
     }
@@ -194,11 +206,20 @@ private:
     void run() {
         // Poll cadence: 5 s. Fast enough that a theme switch from a
         // settings-app click is visible; slow enough that the popen()
-        // calls don't show up in profiling.
+        // calls don't show up in profiling. Use 100 ms sub-sleeps so
+        // the destructor's running_ flip is noticed within 100 ms
+        // rather than blocking shutdown for up to 5 s.
         publish_snapshot();
-        while (running_.load()) {
-            std::this_thread::sleep_for(std::chrono::seconds(5));
-            if (!running_.load()) break;
+        constexpr int kPollMs = 5000;
+        constexpr int kTickMs = 100;
+        while (running_.load(std::memory_order_acquire)) {
+            for (int slept = 0;
+                 slept < kPollMs && running_.load(std::memory_order_acquire);
+                 slept += kTickMs) {
+                std::this_thread::sleep_for(
+                    std::chrono::milliseconds(kTickMs));
+            }
+            if (!running_.load(std::memory_order_acquire)) break;
             publish_snapshot();
         }
     }
