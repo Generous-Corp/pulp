@@ -226,15 +226,17 @@ private:
 // the right one based on the build target.
 
 void start_environment_observer_mac();
+void start_environment_observer_ios();
 #if defined(__linux__) && !defined(__ANDROID__)
 void start_environment_observer_linux();
 #endif
 // void start_environment_observer_android(); // follow-up
-// void start_environment_observer_ios();     // follow-up
 // void start_environment_observer_win();     // follow-up
 
 inline void start_environment_observer() {
-#if defined(__APPLE__) && !defined(PULP_IOS)
+#if defined(__APPLE__) && defined(PULP_IOS)
+    start_environment_observer_ios();
+#elif defined(__APPLE__)
     start_environment_observer_mac();
 #elif defined(__linux__) && !defined(__ANDROID__)
     start_environment_observer_linux();
