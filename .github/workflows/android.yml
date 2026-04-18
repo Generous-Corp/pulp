@@ -60,6 +60,9 @@ jobs:
         shell: bash
         run: |
           APK=android/app/build/outputs/apk/debug/app-debug.apk
+          echo "--- APK full contents ---"
+          unzip -l "$APK" || echo "(APK unreadable)"
+          echo "---"
           if unzip -l "$APK" | grep -q "libpulp.so"; then
             echo "✅ libpulp.so found in APK"
             unzip -l "$APK" | grep "\.so"
@@ -67,6 +70,26 @@ jobs:
             echo "❌ libpulp.so NOT found in APK"
             exit 1
           fi
+
+      # Always upload APK + Gradle/NDK logs so a failed "Verify APK"
+      # step (historically flaky on windows-latest — #403, #418) can
+      # be diagnosed from artifacts instead of requiring a close/reopen
+      # retry cycle. The `if: always()` ensures this runs even when the
+      # verify step above fails.
+      - name: Upload APK + build logs (diagnostic)
+        if: always()
+        uses: actions/upload-artifact@v5
+        with:
+          name: pulp-android-${{ matrix.os }}-diag
+          path: |
+            android/app/build/outputs/apk/debug/app-debug.apk
+            android/app/build/outputs/logs/**
+            android/app/.cxx/**/build.ninja
+            android/app/.cxx/**/CMakeCache.txt
+            android/app/.cxx/**/CMakeFiles/CMakeOutput.log
+            android/app/.cxx/**/CMakeFiles/CMakeError.log
+          retention-days: 7
+          if-no-files-found: ignore
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v5
