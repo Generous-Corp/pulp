@@ -63,7 +63,7 @@ int cmd_doctor(const std::vector<std::string>& args) {
     else if (mode == "ios")   checks = run_doctor_ios_checks();
     else                      checks = run_doctor_checks(active_root, standalone_mode);
 
-    int pass_count = 0, fail_count = 0;
+    int pass_count = 0, fail_count = 0, optional_skipped = 0;
     for (auto& c : checks) {
         if (c.passed) {
             ++pass_count;
@@ -73,6 +73,24 @@ int cmd_doctor(const std::vector<std::string>& args) {
                 print_ok(msg);
             }
         } else {
+            // Optional checks report advice but don't count toward
+            // fail_count, so `pulp doctor android` returns 0 when
+            // only optional accelerators (e.g. Google Android CLI,
+            // #355) are missing. See #438 P1 for #389.
+            if (c.optional) {
+                ++optional_skipped;
+                if (!ci_mode) {
+                    std::string msg = c.name;
+                    if (!c.detail.empty()) msg += " — " + c.detail;
+                    print_warn(msg);
+                    if (!c.fix.empty()) {
+                        std::cout << "    Install (optional): "
+                                  << color::yellow() << c.fix
+                                  << color::reset() << "\n";
+                    }
+                }
+                continue;
+            }
             ++fail_count;
             if (ci_mode) {
                 std::cerr << "FAIL: " << c.name;
@@ -108,6 +126,9 @@ int cmd_doctor(const std::vector<std::string>& args) {
     if (!ci_mode) {
         std::cout << "\n  " << color::bold() << pass_count << "/" << (pass_count + fail_count)
                   << " checks passed" << color::reset();
+        if (optional_skipped > 0) {
+            std::cout << " (+" << optional_skipped << " optional skipped)";
+        }
         if (fail_count > 0) {
             std::cout << " — run " << color::cyan() << "`pulp doctor --fix`" << color::reset() << " to resolve";
         }
