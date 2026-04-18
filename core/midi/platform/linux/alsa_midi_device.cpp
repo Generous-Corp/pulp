@@ -20,6 +20,10 @@ class AlsaMidiInput : public MidiInput {
 public:
     ~AlsaMidiInput() override { close(); }
 
+    void set_sysex_callback(MidiSysexCallback cb) override {
+        sysex_callback_ = std::move(cb);
+    }
+
     bool open(const std::string& port_id, MidiInputCallback callback) override {
         callback_ = std::move(callback);
 
@@ -68,32 +72,88 @@ private:
                 break; // Error
             }
 
-            // Parse raw MIDI bytes into events
-            for (ssize_t i = 0; i < n; ) {
-                uint8_t status = buf[i];
-                if (status < 0x80) { ++i; continue; } // Skip data bytes without status
+            // Parse raw MIDI bytes into events. Sysex (F0..F7) is
+            // variable-length and can span multiple snd_rawmidi_read
+            // calls, so the accumulator state lives on the instance
+            // (sysex_buffer_, sysex_in_progress_). A real-time message
+            // (F8..FF) may appear INSIDE a sysex without terminating it
+            // — MIDI 1.0 §3.1 allows that for clock/start/stop. We emit
+            // the real-time message inline and keep collecting sysex
+            // bytes. #239.
+            for (ssize_t i = 0; i < n; ++i) {
+                uint8_t b = buf[i];
 
-                int msg_len = 3; // Default for most channel messages
-                if ((status & 0xF0) == 0xC0 || (status & 0xF0) == 0xD0) {
+                // Real-time messages (F8..FF) pass through unconditionally.
+                if (b >= 0xF8) {
+                    MidiEvent evt;
+                    evt.message = choc::midi::ShortMessage(b, 0, 0);
+                    evt.timestamp = 0.0;
+                    if (callback_) callback_(evt);
+                    continue;
+                }
+
+                // Inside a sysex: append until F7 terminator.
+                if (sysex_in_progress_) {
+                    sysex_buffer_.push_back(b);
+                    if (b == 0xF7) {
+                        if (sysex_callback_) {
+                            sysex_callback_(sysex_buffer_, 0.0);
+                        }
+                        sysex_buffer_.clear();
+                        sysex_in_progress_ = false;
+                    } else if (sysex_buffer_.size() > kSysexLimit) {
+                        // Runaway — drop rather than leak indefinitely.
+                        sysex_buffer_.clear();
+                        sysex_in_progress_ = false;
+                    }
+                    continue;
+                }
+
+                // Sysex start — begin accumulating.
+                if (b == 0xF0) {
+                    sysex_buffer_.clear();
+                    sysex_buffer_.push_back(b);
+                    sysex_in_progress_ = true;
+                    continue;
+                }
+
+                // Short message parsing (status + 1 or 2 data bytes).
+                if ((b & 0x80) == 0) continue; // stray data byte
+                int msg_len = 3;
+                if ((b & 0xF0) == 0xC0 || (b & 0xF0) == 0xD0) {
                     msg_len = 2; // Program Change, Channel Pressure
+                } else if (b == 0xF1 || b == 0xF3) {
+                    msg_len = 2; // MTC Quarter Frame, Song Select
+                } else if (b == 0xF2) {
+                    msg_len = 3; // Song Position Pointer
+                } else if (b == 0xF6 || b == 0xF7) {
+                    msg_len = 1; // Tune Request, stray End-of-Exclusive
                 }
 
                 if (i + msg_len <= n) {
                     MidiEvent evt;
                     evt.message = choc::midi::ShortMessage(
-                        buf[i],
+                        b,
                         msg_len > 1 ? buf[i + 1] : 0,
                         msg_len > 2 ? buf[i + 2] : 0);
-                    evt.timestamp = 0.0; // Raw MIDI has no timestamps
+                    evt.timestamp = 0.0;
                     if (callback_) callback_(evt);
+                    i += msg_len - 1; // loop's ++i advances past the last byte
                 }
-                i += msg_len;
             }
         }
     }
 
+    // Runaway-guard: typical device sysex dumps fit comfortably under
+    // 64 KB. If we somehow collect more without seeing F7, assume the
+    // device is misbehaving and drop the accumulator.
+    static constexpr size_t kSysexLimit = 64 * 1024;
+
     snd_rawmidi_t* handle_ = nullptr;
     MidiInputCallback callback_;
+    MidiSysexCallback sysex_callback_;
+    std::vector<uint8_t> sysex_buffer_;
+    bool sysex_in_progress_ = false;
     bool is_open_ = false;
     std::atomic<bool> running_{false};
     std::thread read_thread_;
