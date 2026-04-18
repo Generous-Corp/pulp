@@ -183,6 +183,38 @@ target_sources(pulp-view PRIVATE
 # AU/VST3/CLAP plugins.
 # The ObjC runtime loads WebKit on dylib load if any WKWebView references exist,
 # which crashes Logic Pro's sandboxed AUHostingServiceXPC process.
+# ── Linux ATK accessibility (#18 phase 1) ───────────────────────────────────
+#
+# Pulp publishes accessibility info to Linux screen readers (Orca) via
+# ATK + the at-spi2-atk bridge. This slice only wires the ATK headers
+# into the build so accessibility_linux.cpp can use the real AtkRole
+# enum instead of hard-coded integer constants. The full AtkObject
+# vtable + at-spi2 bridge runtime is a follow-up PR that needs
+# screen-reader validation on a real Linux desktop.
+#
+# Without libatk-dev, accessibility_linux.cpp keeps the pre-existing
+# fallback constants so contributors on minimal images still build.
+#
+# Install on Debian/Ubuntu: sudo apt install -y libatk1.0-dev
+if(UNIX AND NOT APPLE AND NOT ANDROID)
+    find_package(PkgConfig QUIET)
+    if(PkgConfig_FOUND)
+        pkg_check_modules(PULP_ATK QUIET IMPORTED_TARGET atk)
+        if(PULP_ATK_FOUND)
+            target_compile_definitions(pulp-view PRIVATE PULP_HAS_ATK=1)
+            target_link_libraries(pulp-view PRIVATE PkgConfig::PULP_ATK)
+            message(STATUS
+                "Pulp: Linux ATK ${PULP_ATK_VERSION} found — "
+                "accessibility_linux.cpp will use real AtkRole enum")
+        else()
+            message(STATUS
+                "Pulp: Linux ATK dev headers not found "
+                "(install: sudo apt install libatk1.0-dev) — "
+                "accessibility_linux.cpp will use stub constants")
+        endif()
+    endif()
+endif()
+
 option(PULP_BUILD_WEBVIEW "Include native WebView support (WebKit / WebView2 / WebKitGTK)" OFF)
 if(PULP_BUILD_WEBVIEW)
     target_sources(pulp-view PRIVATE src/web_view.cpp)
