@@ -210,8 +210,13 @@ TEST_CASE("pulp doctor android|ios are recognized subcommands",
 
     const auto bin = fs::absolute(pulp_binary());
 
-    auto android = exec(bin.string(), {"doctor", "android"}, 30000);
-    auto ios     = exec(bin.string(), {"doctor", "ios"},     30000);
+    // Doctor walks xcode-select / xcrun / simctl on macOS and the Android
+    // SDK probe on non-macOS; under CI load (github-hosted ARM64 runners
+    // especially) these routinely run 30-45s. 90s is a real-regression
+    // signal, not routine variance. Previous 30s ceiling tripped on
+    // healthy runs in #466 and #458.
+    auto android = exec(bin.string(), {"doctor", "android"}, 90000);
+    auto ios     = exec(bin.string(), {"doctor", "ios"},     90000);
     auto bogus   = exec(bin.string(), {"doctor", "potato"},  10000);
 
     REQUIRE_FALSE(android.timed_out);
