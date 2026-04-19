@@ -9,6 +9,8 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
 <a id="v0210"></a>
+## [0.22.0]
+
 ## [0.21.0] - 2026-04-19
 
 - platform: unified Environment API for display/safe-area/keyboard/scheme/lifecycle/memory (#342) ([#403](https://github.com/danielraffel/pulp/pull/403))
