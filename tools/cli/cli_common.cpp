@@ -1749,8 +1749,21 @@ std::vector<DoctorCheck> run_doctor_android_checks() {
             else if (fs::exists(candidate))  adb = candidate.string();
         }
         if (!adb.empty()) {
-            c.passed = true;
-            c.detail = first_line(exec_output(adb + " version 2>&1"));
+            // Shell-quote the path — SDK installs under directories
+            // with spaces (e.g. Windows `Program Files`, macOS
+            // `Application Support`) would otherwise split on
+            // whitespace and the probe would silently fail while
+            // c.passed stayed true, producing a false positive.
+            // See #438 P2 Codex review on #442.
+            auto detail = first_line(
+                exec_output(shell_quote(adb) + " version 2>&1"));
+            // If the probe failed (empty output), don't claim pass —
+            // surface the missing version detail so the user can see
+            // something is off even though we found the binary.
+            c.passed = !detail.empty();
+            c.detail = detail.empty()
+                ? "found at " + adb + " but `version` probe returned no output"
+                : detail;
         } else {
             c.fix = "sdkmanager 'platform-tools' or install via Android Studio.\n"
                     "    Then add $ANDROID_HOME/platform-tools to PATH.";
@@ -1768,7 +1781,11 @@ std::vector<DoctorCheck> run_doctor_android_checks() {
             else if (fs::exists(candidate))  emu = candidate.string();
         }
         if (!emu.empty()) {
-            auto avds = exec_output(emu + " -list-avds 2>/dev/null");
+            // Shell-quote per #438 P2 Codex review on #442 — same
+            // argv-split risk as the adb fallback above. SDK paths
+            // with spaces would otherwise produce a misleading
+            // "No AVDs configured" failure.
+            auto avds = exec_output(shell_quote(emu) + " -list-avds 2>/dev/null");
             avds.erase(0, avds.find_first_not_of(" \t\r\n"));
             if (!avds.empty()) {
                 c.passed = true;
