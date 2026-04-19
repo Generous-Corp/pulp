@@ -55,6 +55,12 @@ bool WasapiDevice::open(const DeviceConfig& config) {
     actual_channels_ = std::min(
         static_cast<int>(mix_format->nChannels),
         std::max(requested_channels, 1));
+    // engine_channels_ is the WASAPI packet stride (mix-format channel
+    // count negotiated in Initialize). Capture packets are interleaved
+    // at this stride regardless of what the user asked for, so the
+    // deinterleave loop must use it as the per-frame source step.
+    // See #438 P1 Codex review on #386.
+    engine_channels_ = static_cast<int>(mix_format->nChannels);
     config_.sample_rate = static_cast<double>(mix_format->nSamplesPerSec);
 
     // Calculate buffer duration from requested buffer size
@@ -362,10 +368,14 @@ void WasapiDevice::capture_thread_func() {
                 // per-channel buffers. WASAPI gives us the device's
                 // mix format which we already negotiated to float.
                 auto* src = reinterpret_cast<const float*>(data);
+                // Source stride is engine_channels_ (the WASAPI mix
+                // format), even when the user asked for fewer channels.
+                // Copy only actual_channels_ into the planar output;
+                // any extra source channels are intentionally dropped.
                 for (UINT32 frame = 0; frame < frames; ++frame) {
                     for (int ch = 0; ch < actual_channels_; ++ch) {
                         channel_ptrs_[ch][frame] =
-                            src[frame * actual_channels_ + ch];
+                            src[frame * engine_channels_ + ch];
                     }
                 }
             }

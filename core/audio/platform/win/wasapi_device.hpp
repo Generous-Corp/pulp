@@ -69,7 +69,8 @@ private:
     std::atomic<bool> is_running_{false};
     uint64_t sample_position_ = 0;
     UINT32 buffer_frames_ = 0;
-    int actual_channels_ = 0;
+    int actual_channels_ = 0;     ///< channels delivered to the user callback
+    int engine_channels_ = 0;     ///< channels in the WASAPI packet stride
 
     std::thread io_thread_;
 
