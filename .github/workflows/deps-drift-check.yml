@@ -1,0 +1,239 @@
+name: Dependency Drift Check
+
+# Issue #467. Weekly upstream-drift audit against tools/deps/manifest.json.
+# Complements the existing `dependency-audit.yml` (which publishes a job
+# summary) by maintaining a single tracking issue (title: "Dependency
+# drift: weekly audit") so pin-bump work has a durable home that doesn't
+# spam notifications.
+#
+# Behavior:
+#   - Runs `python3 tools/deps/audit.py --strict --check-upstream
+#     --format markdown` and captures the output.
+#   - "Drift" is any manifest entry whose upstream column is not exactly
+#     one of the clean markers ("present", "manual", "skipped"). Anything
+#     else (e.g. "present; latest=…", "missing", a floating branch sha,
+#     or a raw HEAD sha that differs from the pinned version) counts.
+#     This keeps the signal close to what a human reading the markdown
+#     table would flag as "needs attention".
+#   - Idempotently maintains a single tracking issue:
+#       * Creates it if missing and drift > 0.
+#       * Updates the body on every run while drift > 0.
+#       * Closes it (with a dated comment) when drift == 0.
+#   - `workflow_dispatch` input `dry_run` (default false) skips the
+#     issue create/update/close step — useful for testing the audit
+#     output without touching GitHub state.
+#
+# Safety properties:
+#   - Read-mostly. Never edits `manifest.json`, `DEPENDENCIES.md`, or
+#     `NOTICE.md`. A human (or the Dependency Update Workflow in
+#     CLAUDE.md) still drives the actual bump on a branch.
+#   - Concurrency group prevents overlapping runs from racing on the
+#     tracking issue.
+#   - `workflow_dispatch` supports ad-hoc runs and testing.
+
+on:
+  schedule:
+    # Mondays at 08:00 UTC (~01:00 PT / 00:00 PST). Weekly cadence per #467.
+    - cron: '0 8 * * 1'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'If true, run the audit but do not touch the tracking issue'
+        required: false
+        default: 'false'
+
+concurrency:
+  group: deps-drift-check
+  cancel-in-progress: false
+
+permissions:
+  contents: read    # read manifest + audit script
+  issues: write     # maintain the tracking issue
+
+jobs:
+  drift:
+    runs-on: ubuntu-latest
+    name: Audit dependency upstream drift
+
+    env:
+      DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
+      TRACKING_TITLE: 'Dependency drift: weekly audit'
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Run dependency audit
+        id: audit
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Capture the markdown report. `--strict` fails when docs/notices
+          # are incomplete; we want the report regardless, so tolerate a
+          # non-zero exit code and surface the strict status separately.
+          set +e
+          python3 tools/deps/audit.py --strict --check-upstream --format markdown > audit.md
+          audit_rc=$?
+          set -e
+
+          echo "audit exit code: $audit_rc"
+          echo "strict_failed=$([ "$audit_rc" -eq 0 ] && echo 0 || echo 1)" >> "$GITHUB_OUTPUT"
+
+          echo "Audit report:"
+          echo "----"
+          cat audit.md
+          echo "----"
+
+          # Count drift rows: any line in the dependency table whose
+          # "Upstream" cell is NOT a clean marker. Clean markers are
+          # exactly "present", "manual", or "skipped". Anything else
+          # (e.g. "present; latest=…", "missing", a bare sha) counts
+          # as drift.
+          drift_count=$(python3 - <<'PY'
+          import sys
+          clean = {"present", "manual", "skipped"}
+          count = 0
+          with open("audit.md", "r", encoding="utf-8") as f:
+              for line in f:
+                  s = line.strip()
+                  if not s.startswith("|"):
+                      continue
+                  cells = [c.strip() for c in s.strip("|").split("|")]
+                  # Header row + separator row have fewer/different cells;
+                  # real rows have 7 cells matching the render_markdown
+                  # header in tools/deps/audit.py.
+                  if len(cells) < 7:
+                      continue
+                  name = cells[0]
+                  if name in {"Name", ""} or set(name) == {"-"}:
+                      continue
+                  upstream = cells[4]
+                  if upstream not in clean:
+                      count += 1
+          print(count)
+          PY
+          )
+
+          echo "drift_count=$drift_count"
+          echo "drift_count=$drift_count" >> "$GITHUB_OUTPUT"
+
+      - name: Render tracking issue body
+        id: render
+        if: env.DRY_RUN != 'true'
+        shell: bash
+        env:
+          DRIFT_COUNT: ${{ steps.audit.outputs.drift_count }}
+          STRICT_FAILED: ${{ steps.audit.outputs.strict_failed }}
+        run: |
+          set -euo pipefail
+
+          python3 - <<'PY' > body.md
+          import datetime, os
+
+          drift = int(os.environ.get("DRIFT_COUNT", "0"))
+          strict_failed = os.environ.get("STRICT_FAILED", "0") == "1"
+          now = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
+
+          with open("audit.md", "r", encoding="utf-8") as f:
+              audit_body = f.read().rstrip() + "\n"
+
+          lines = []
+          lines.append(f"_Auto-generated by `.github/workflows/deps-drift-check.yml` on {now}._")
+          lines.append("")
+          lines.append(
+              "Weekly upstream-drift audit against `tools/deps/manifest.json`. "
+              "Rows where the **Upstream** column is not `present`, `manual`, "
+              "or `skipped` indicate a pin that may need a bump."
+          )
+          lines.append("")
+          lines.append(
+              "Per CLAUDE.md's Dependency Update Workflow, drive any bump on a "
+              "branch: update `manifest.json`, `DEPENDENCIES.md`, and `NOTICE.md` "
+              "together, then run `python3 tools/deps/validate_hosts.py` before "
+              "opening a PR. Tracked under #467."
+          )
+          lines.append("")
+          lines.append(f"**Drift rows:** {drift}")
+          if strict_failed:
+              lines.append("")
+              lines.append(
+                  "**Strict audit failed** — `DEPENDENCIES.md` and/or `NOTICE.md` "
+                  "are missing entries for a manifest dependency. See the "
+                  "\"Missing from …\" sections below."
+              )
+          lines.append("")
+          lines.append("---")
+          lines.append("")
+          lines.append(audit_body)
+
+          print("\n".join(lines))
+          PY
+
+          echo "Rendered body:"
+          echo "----"
+          cat body.md
+          echo "----"
+
+      - name: Maintain tracking issue
+        if: env.DRY_RUN != 'true'
+        shell: bash
+        env:
+          DRIFT_COUNT: ${{ steps.audit.outputs.drift_count }}
+        run: |
+          set -euo pipefail
+
+          repo='${{ github.repository }}'
+          title="${TRACKING_TITLE}"
+
+          # Find any open issue with this exact title in this repo.
+          existing=$(
+              gh issue list \
+                  --repo "$repo" \
+                  --state open \
+                  --search "in:title \"${title}\"" \
+                  --json number,title \
+                  --jq "[.[] | select(.title == \"${title}\")] | first | .number // empty"
+          )
+
+          if [ "${DRIFT_COUNT:-0}" -eq 0 ]; then
+              if [ -n "${existing:-}" ]; then
+                  echo "No drift remaining — closing tracking issue #${existing}."
+                  gh issue comment "$existing" --repo "$repo" \
+                      --body "Audit on $(date -u +%Y-%m-%d) found no upstream drift. Closing."
+                  gh issue close "$existing" --repo "$repo" --reason completed
+              else
+                  echo "No drift and no open tracking issue — nothing to do."
+              fi
+              exit 0
+          fi
+
+          if [ -z "${existing:-}" ]; then
+              echo "Creating tracking issue (drift=$DRIFT_COUNT)."
+              gh issue create \
+                  --repo "$repo" \
+                  --title "$title" \
+                  --body-file body.md
+          else
+              echo "Updating tracking issue #${existing} (drift=$DRIFT_COUNT)."
+              gh issue edit "$existing" --repo "$repo" --body-file body.md
+              # Re-open if a previous run closed it and drift came back.
+              gh issue reopen "$existing" --repo "$repo" 2>/dev/null || true
+          fi
+
+      - name: Upload audit artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dependency-drift-audit
+          path: audit.md
+          if-no-files-found: ignore
+          retention-days: 30
