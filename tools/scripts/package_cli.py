@@ -61,10 +61,41 @@ def find_wgpu_lib(build_dir: Path, platform: str) -> Path | None:
         "windows-arm64": "*.dll",
     }.get(platform, "*")
 
+    # Source cache roots must match what setup.sh /
+    # tools/cmake/PulpFetchContent.cmake actually use across platforms,
+    # otherwise the packager silently misses the runtime library and
+    # ships a tarball that crashes on clean machines (#438 P1 / #397).
+    roots: list[Path] = [build_dir]
+    home = Path.home()
+    # macOS Pulp cache (Title-Case matches setup.sh)
+    roots.append(home / "Library" / "Caches" / "Pulp")
+    # Linux XDG cache — pulp uses lowercase 'pulp' dir per
+    # tools/cmake/PulpFetchContent.cmake + setup.sh
+    xdg_cache = os.environ.get("XDG_CACHE_HOME")
+    if xdg_cache:
+        roots.append(Path(xdg_cache) / "pulp")
+        roots.append(Path(xdg_cache) / "Pulp")
+    roots.append(home / ".cache" / "pulp")
+    roots.append(home / ".cache" / "Pulp")
+    # Windows: %LOCALAPPDATA%\Pulp\fetchcontent-src (PulpFetchContent.cmake)
+    local_appdata = os.environ.get("LOCALAPPDATA")
+    if local_appdata:
+        roots.append(Path(local_appdata) / "Pulp")
+    # GitHub-hosted runner historical default (kept for backwards
+    # compatibility with tarballs built on runners that still hardcode
+    # the runner's home directory).
+    roots.append(Path("/Users/runner/Library/Caches/Pulp"))
+
+    # De-dupe while preserving order.
+    seen: set[Path] = set()
+    unique_roots = []
+    for root in roots:
+        if root not in seen:
+            seen.add(root)
+            unique_roots.append(root)
+
     candidates: list[Path] = []
-    for root in [build_dir, Path.home() / "Library" / "Caches" / "Pulp",
-                 Path.home() / ".cache" / "Pulp",
-                 Path("/Users/runner/Library/Caches/Pulp")]:
+    for root in unique_roots:
         if not root.exists():
             continue
         for path in root.rglob(f"libwgpu_native{suffix.lstrip('*')}"):
@@ -180,9 +211,19 @@ def main() -> int:
             names.append(wgpu.name)
             print(f"bundled: {wgpu} -> {wgpu.name}", flush=True)
         else:
-            print("WARN: wgpu native library not found — release will be "
-                  "unportable on hosts without the build cache. "
-                  "Check FetchContent layout.", file=sys.stderr)
+            # Hard failure. Previously this was a warning-and-continue,
+            # which lets release-cli.yml treat script success as a pass
+            # and publish an artifact without its required runtime
+            # library — crashing every user machine on startup.
+            # See #438 P1 Codex review on #397 and the v0.15/0.16/0.17
+            # release-pipeline history.
+            print("ERROR: wgpu native library not found — refusing to "
+                  "package an unportable tarball. Searched cache roots "
+                  "(see find_wgpu_lib). Verify setup.sh ran and the "
+                  "FetchContent cache is populated before running "
+                  "package_cli.py.",
+                  file=sys.stderr)
+            return 1
 
         # Rewrite rpaths so the bundled dylib is found via @loader_path
         # (macOS) or $ORIGIN (Linux). Windows finds DLLs in the same
