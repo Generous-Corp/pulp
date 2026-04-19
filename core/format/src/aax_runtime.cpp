@@ -179,8 +179,18 @@ void copy_audio(float** output,
 }
 
 void copy_midi(const midi::MidiBuffer& in, midi::MidiBuffer& out) {
+    // Short MidiEvent entries (note/CC/pitchbend/etc).
     for (const auto& event : in) {
         out.add(event);
+    }
+    // Sysex entries — MidiBuffer splits short events and sysex into
+    // separate sidecar storage, so `for (event : in)` doesn't walk
+    // them. Without this the bypass MIDI-thru path silently drops
+    // every F0..F7 run while short MIDI passes through, which breaks
+    // bulk dumps and MIDI-CI workflows in bypass mode specifically.
+    // See #438 P2 Codex review on #408.
+    for (const auto& sx : in.sysex()) {
+        out.add_sysex(sx.data, sx.sample_offset, sx.timestamp);
     }
 }
 
