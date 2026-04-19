@@ -237,8 +237,15 @@ private:
 // alphabetically. The convenience wrapper at the bottom dispatches to
 // the right one based on the build target.
 
-void start_environment_observer_mac();
+#if defined(__APPLE__)
+#include <TargetConditionals.h>
+#endif
+
+#if defined(__APPLE__) && TARGET_OS_IPHONE
 void start_environment_observer_ios();
+#elif defined(__APPLE__)
+void start_environment_observer_mac();
+#endif
 #if defined(__linux__) && !defined(__ANDROID__)
 void start_environment_observer_linux();
 #endif
@@ -247,8 +254,16 @@ void start_environment_observer_win();
 #endif
 // void start_environment_observer_android(); // follow-up
 
+// Use Apple's TargetConditionals.h macro rather than the CMake-defined
+// PULP_IOS variable — the CMake iOS branch adds environment_ios.mm to
+// pulp-platform but does not define PULP_IOS for the target, so before
+// this change an iOS build would fall through to the macOS branch and
+// try to link start_environment_observer_mac() (which is not in the
+// iOS source set). TARGET_OS_IPHONE is always defined on Apple via
+// TargetConditionals.h and is 1 only for iOS/tvOS/watchOS.
+// See #438 P1 Codex review on #445.
 inline void start_environment_observer() {
-#if defined(__APPLE__) && defined(PULP_IOS)
+#if defined(__APPLE__) && TARGET_OS_IPHONE
     start_environment_observer_ios();
 #elif defined(__APPLE__)
     start_environment_observer_mac();
