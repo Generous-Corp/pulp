@@ -535,6 +535,7 @@ h4:hover .permalink {{ opacity: 0.6; }}
   flex: 1;
   max-width: 360px;
   margin: 0 16px;
+  position: relative;     /* anchor the absolutely-positioned drawer */
 }}
 .header-search .pagefind-ui {{
   --pagefind-ui-scale: 0.7;
@@ -546,6 +547,29 @@ h4:hover .permalink {{ opacity: 0.6; }}
   --pagefind-ui-border-width: 1px;
   --pagefind-ui-border-radius: 6px;
   --pagefind-ui-font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}}
+/* Detach the results drawer from the fixed-height header so it opens
+   as an overlay below the input instead of pushing the input up and
+   rendering transparently over the page body. */
+.header-search .pagefind-ui__drawer {{
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  max-height: calc(100vh - 96px);
+  overflow-y: auto;
+  background: #0d1117;
+  border: 1px solid #2a2a4a;
+  border-radius: 8px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.6);
+  z-index: 101;           /* header is 100; drawer sits above its siblings */
+  padding: 8px 12px;
+}}
+/* When the drawer is empty (no input yet) keep it fully collapsed so
+   the empty overlay box doesn't ghost under the input. */
+.header-search .pagefind-ui__drawer:empty,
+.header-search .pagefind-ui__drawer.pagefind-ui__hidden {{
+  display: none;
 }}
 .pagefind-ui--reset mark,
 .pagefind-ui mark {{
