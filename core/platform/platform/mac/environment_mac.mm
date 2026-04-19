@@ -142,11 +142,15 @@ void publish_full_snapshot(LifecycleState lifecycle, MemoryPressure pressure) {
                    context:nullptr];
     }
 
-    // Memory pressure dispatch source. Coalesces warning + critical so
-    // a transition warning -> critical becomes two publish() calls.
+    // Memory pressure dispatch source. Includes NORMAL so apps receive a
+    // memory_pressure = normal recovery event after WARN/CRITICAL clears
+    // (otherwise listeners that released caches on pressure never know
+    // it's safe to repopulate them).
     _pressureSource = dispatch_source_create(
         DISPATCH_SOURCE_TYPE_MEMORYPRESSURE, 0,
-        DISPATCH_MEMORYPRESSURE_WARN | DISPATCH_MEMORYPRESSURE_CRITICAL,
+        DISPATCH_MEMORYPRESSURE_NORMAL
+            | DISPATCH_MEMORYPRESSURE_WARN
+            | DISPATCH_MEMORYPRESSURE_CRITICAL,
         dispatch_get_main_queue());
     if (_pressureSource) {
         // Observer is process-lived (created via dispatch_once and never

@@ -161,6 +161,30 @@ TEST_CASE("Environment: memory pressure transitions", "[environment]") {
     REQUIRE(observed == 1);
 }
 
+TEST_CASE("Environment: memory pressure recovery to normal fires diff",
+          "[environment][issue-404]") {
+    Environment::reset_for_test();
+    EnvironmentChange last_change{};
+    EnvironmentState  last_state{};
+    auto token = Environment::instance().subscribe(
+        [&](const EnvironmentState& s, EnvironmentChange c) {
+            last_change = c;
+            last_state  = s;
+        });
+
+    auto base = make_state(ColorScheme::dark);
+    base.memory_pressure = MemoryPressure::critical;
+    Environment::inject_for_test(base);
+
+    last_change = {};
+    auto recovered = base;
+    recovered.memory_pressure = MemoryPressure::normal;
+    Environment::inject_for_test(recovered);
+
+    REQUIRE(last_change.memory_pressure);
+    REQUIRE(last_state.memory_pressure == MemoryPressure::normal);
+}
+
 TEST_CASE("Environment: callback that drops its own token does not deadlock",
           "[environment]") {
     Environment::reset_for_test();
