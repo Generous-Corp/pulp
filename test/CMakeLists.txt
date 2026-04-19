@@ -94,6 +94,12 @@ add_executable(pulp-test-frame-fill test_frame_fill.cpp)
 target_link_libraries(pulp-test-frame-fill PRIVATE pulp::audio Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-frame-fill)
 
+# #86: SysExAccumulator — cross-platform MIDI SysEx aggregation state
+# machine shared by Android/ALSA/Windows/iOS MIDI backends. Header-only.
+add_executable(pulp-test-sysex-accumulator test_sysex_accumulator.cpp)
+target_link_libraries(pulp-test-sysex-accumulator PRIVATE pulp::midi Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-sysex-accumulator)
+
 # AsyncStream tests (Phase 2)
 add_executable(pulp-test-async-stream test_async_stream.cpp)
 target_link_libraries(pulp-test-async-stream PRIVATE pulp::runtime Catch2::Catch2WithMain)
