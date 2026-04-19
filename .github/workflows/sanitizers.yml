@@ -120,11 +120,22 @@ jobs:
             EXPLICIT_UBSAN_RUNNER_SELECTOR_JSON \
             UBSAN_RUNS_ON_JSON \
             macos-14)
-          rtsan=$(resolve \
-            "RealtimeSanitizer (Linux x86_64)" \
-            EXPLICIT_RTSAN_RUNNER_SELECTOR_JSON \
-            RTSAN_RUNS_ON_JSON \
-            ubuntu-24.04)
+          # RTSan only runs on workflow_dispatch (see rtsan job's
+          # if:), so skip its selector resolution on pull_request/push
+          # runs. Previously a malformed `PULP_SANITIZER_RTSAN_RUNS_ON_JSON`
+          # (or a debugging mistake on the var) would fail resolve-runners
+          # entirely and block ASan/TSan/UBSan for every PR — turning a
+          # dispatch-only knob into a required-check outage.
+          # See #438 P2 Codex review on #424.
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            rtsan=$(resolve \
+              "RealtimeSanitizer (Linux x86_64)" \
+              EXPLICIT_RTSAN_RUNNER_SELECTOR_JSON \
+              RTSAN_RUNS_ON_JSON \
+              ubuntu-24.04)
+          else
+            rtsan='"ubuntu-24.04"'
+          fi
           {
             echo "asan_runs_on=${asan}"
             echo "tsan_runs_on=${tsan}"
