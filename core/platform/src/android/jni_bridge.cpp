@@ -1,5 +1,6 @@
 #if defined(__ANDROID__)
 
+#include <pulp/audio/audio_focus.hpp>
 #include <pulp/platform/android/jni.hpp>
 #include <pulp/platform/environment.hpp>
 #include <android/log.h>
@@ -285,22 +286,30 @@ Java_com_pulp_PulpActivity_nativeOnKeyboardChanged(
 
 // ── Audio Focus JNI Callbacks ─────────────────────────────────────────────
 
+// #334: forward AudioManager.OnAudioFocusChangeListener events into the
+// cross-platform AudioFocusRegistry. Subscribers (OboeDevice, standalone
+// adapter, tooling) react without caring whether the signal came from JNI,
+// AVAudioSession, or a desktop stub — same observer pattern as Environment.
+
 extern "C" JNIEXPORT void JNICALL
 Java_com_pulp_audio_PulpAudioFocus_nativeOnAudioFocusLost(JNIEnv*, jobject) {
     PULP_LOGI("Audio focus lost");
-    // TODO: pause synth output
+    pulp::audio::AudioFocusRegistry::instance().publish(
+        pulp::audio::AudioFocusState::lost);
 }
 
 extern "C" JNIEXPORT void JNICALL
 Java_com_pulp_audio_PulpAudioFocus_nativeOnAudioFocusDuck(JNIEnv*, jobject) {
     PULP_LOGI("Audio focus duck");
-    // TODO: reduce volume
+    pulp::audio::AudioFocusRegistry::instance().publish(
+        pulp::audio::AudioFocusState::duck);
 }
 
 extern "C" JNIEXPORT void JNICALL
 Java_com_pulp_audio_PulpAudioFocus_nativeOnAudioFocusGained(JNIEnv*, jobject) {
     PULP_LOGI("Audio focus gained");
-    // TODO: resume synth output
+    pulp::audio::AudioFocusRegistry::instance().publish(
+        pulp::audio::AudioFocusState::gained);
 }
 
 #endif // __ANDROID__

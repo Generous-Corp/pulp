@@ -88,6 +88,13 @@ add_executable(pulp-test-stream test_stream.cpp)
 target_link_libraries(pulp-test-stream PRIVATE pulp::runtime Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-stream)
 
+# #334: AudioFocusRegistry — cross-platform observer for OS audio-focus
+# signals (Android AudioManager.OnAudioFocusChangeListener,
+# AVAudioSession interruptions). Pure C++ unit tests — no platform deps.
+add_executable(pulp-test-audio-focus test_audio_focus.cpp)
+target_link_libraries(pulp-test-audio-focus PRIVATE pulp::audio Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-audio-focus)
+
 # #244: zero-fill helper for the Oboe input-frame-read short-read path.
 # Header-only math, so no library link required beyond Catch2.
 add_executable(pulp-test-frame-fill test_frame_fill.cpp)
