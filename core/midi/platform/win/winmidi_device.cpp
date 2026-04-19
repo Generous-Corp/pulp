@@ -102,6 +102,15 @@ public:
 
     void close() override {
         if (handle_) {
+            // Set the closing flag BEFORE midiInReset so any
+            // MIM_LONGDATA callback fired during reset (or already in
+            // flight when stop() races with an arriving SysEx) skips
+            // the midiInAddBuffer re-queue. Without this, a re-queued
+            // header collides with the unprepare/close sequence and
+            // either leaks (MIDIERR_STILLPLAYING) or invalidates
+            // memory the callback's still walking. See #438 P1
+            // Codex review on #388.
+            closing_.store(true, std::memory_order_release);
             midiInStop(handle_);
             // midiInReset returns any pending SysEx buffers via
             // MIM_LONGDATA with dwBytesRecorded==0. Unprepare each
@@ -120,6 +129,7 @@ public:
             ZeroMemory(&slot.hdr, sizeof(slot.hdr));
         }
         is_open_ = false;
+        closing_.store(false, std::memory_order_release);
     }
 
     bool is_open() const override { return is_open_; }
@@ -164,15 +174,21 @@ private:
                     self->qpc_seconds_since_open());
             }
 
-            // Re-arm the buffer for the next packet. dwBytesRecorded
-            // must be cleared first (driver populates it).
+            // Re-arm the buffer for the next packet — but skip if the
+            // device is closing. midiInReset can deliver the last
+            // batch of buffers with non-zero dwBytesRecorded; re-queuing
+            // them races with the unprepare/close sequence and can
+            // leave headers MIDIERR_STILLPLAYING. See #438 P1 / #388.
+            if (self->closing_.load(std::memory_order_acquire)) return;
             hdr->dwBytesRecorded = 0;
             midiInAddBuffer(self->handle_, hdr, sizeof(*hdr));
             return;
         }
 
         if (msg == MIM_LONGERROR) {
-            // Long packet was malformed — re-arm the buffer.
+            // Long packet was malformed — re-arm the buffer (unless
+            // we're closing, same race window as MIM_LONGDATA above).
+            if (self->closing_.load(std::memory_order_acquire)) return;
             auto* hdr = reinterpret_cast<LPMIDIHDR>(param1);
             if (hdr) {
                 hdr->dwBytesRecorded = 0;
@@ -197,6 +213,10 @@ private:
     LARGE_INTEGER      qpc_freq_{};
     LARGE_INTEGER      qpc_open_{};
     SysexSlot          sysex_slots_[kSysexSlots]{};
+    // closing_ guards the MIM_LONGDATA / MIM_LONGERROR re-queue paths
+    // during close() so a callback racing with midiInReset doesn't add
+    // a buffer that's about to be unprepared. See #438 P1 / #388.
+    std::atomic<bool>  closing_{false};
 };
 
 // ── WinMidiOutput ────────────────────────────────────────────────────────
