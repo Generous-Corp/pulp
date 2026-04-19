@@ -40,8 +40,12 @@ jobs:
       - name: Checkout with range context
         uses: actions/checkout@v5
         with:
-          # Need enough history to diff against event.before.
+          # Need enough history to diff against the latest tag.
           fetch-depth: 0
+          # Explicitly fetch tags — needed for the latest-tag diff logic
+          # below. actions/checkout@v5's default fetches tags along with
+          # fetch-depth=0, but spell it out for clarity.
+          fetch-tags: true
           token: ${{ secrets.RELEASE_BOT_TOKEN || secrets.GITHUB_TOKEN }}
 
       - name: Skip on trailer or revert
@@ -76,12 +80,23 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Diff range for this push. Fallback to HEAD^ when event.before
-          # is all-zeros (first push or forced reset).
-          before='${{ github.event.before }}'
-          if [ -z "$before" ] || [ "$before" = "0000000000000000000000000000000000000000" ]; then
-              before="HEAD~1"
-          fi
+          # Previous behaviour used `event.before` as the diff base. That
+          # works when pushes land one at a time but BREAKS when multiple
+          # PRs squash-merge in quick succession:
+          #
+          #   - push A (0.21→0.22) fires run A  [runs, tags v0.22]
+          #   - push B (0.22→0.23) fires run B  [queued behind A]
+          #   - push C (0.23→0.23 no-op) fires run C  [queued behind A]
+          #   - GitHub cancels run B (replaced in queue by C)
+          #   - run C sees before=B, after=C → 0.23→0.23, NO TAG for 0.23
+          #
+          # Result: main's CMakeLists sits at 0.23.0 with no v0.23.0 tag,
+          # no release, no binaries. 2026-04-19 cascade hit this exactly.
+          #
+          # Fix: diff against the LATEST TAGGED VERSION on origin rather
+          # than event.before. Each run becomes self-healing — a
+          # cancelled intermediate run no longer loses tags; the next
+          # run sees the accumulated gap and tags the missing version.
 
           extract_cmake_version() {
               local ref="$1"
@@ -94,9 +109,18 @@ jobs:
                 | python3 -c 'import sys, json; d = json.loads(sys.stdin.read() or "{}"); print(d.get("version", ""))'
           }
 
-          sdk_before=$(extract_cmake_version "$before" || true)
+          # Find the latest existing tag per surface. If none exists
+          # (fresh repo or clean slate), fall back to HEAD~1 so we still
+          # produce a meaningful diff.
+          latest_sdk_tag=$(git tag --list 'v[0-9]*' --sort=-version:refname | head -1)
+          latest_plugin_tag=$(git tag --list 'plugin-v[0-9]*' --sort=-version:refname | head -1)
+
+          sdk_before_ref="${latest_sdk_tag:-HEAD~1}"
+          plugin_before_ref="${latest_plugin_tag:-HEAD~1}"
+
+          sdk_before=$(extract_cmake_version "$sdk_before_ref" || true)
           sdk_after=$(extract_cmake_version HEAD || true)
-          plugin_before=$(extract_json_version "$before" .claude-plugin/plugin.json || true)
+          plugin_before=$(extract_json_version "$plugin_before_ref" .claude-plugin/plugin.json || true)
           plugin_after=$(extract_json_version HEAD .claude-plugin/plugin.json || true)
 
           echo "sdk_before=$sdk_before"       >> "$GITHUB_OUTPUT"
@@ -104,8 +128,8 @@ jobs:
           echo "plugin_before=$plugin_before" >> "$GITHUB_OUTPUT"
           echo "plugin_after=$plugin_after"   >> "$GITHUB_OUTPUT"
 
-          echo "sdk:    $sdk_before -> $sdk_after"
-          echo "plugin: $plugin_before -> $plugin_after"
+          echo "sdk:    $sdk_before (from ${sdk_before_ref}) -> $sdk_after (HEAD)"
+          echo "plugin: $plugin_before (from ${plugin_before_ref}) -> $plugin_after (HEAD)"
 
       - name: Create tags for moved surfaces
         if: steps.guard.outputs.skip == '0'
