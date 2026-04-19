@@ -1,0 +1,263 @@
+name: Orphan Branch Sweep
+
+# Issue #463. Weekly scan of remote branches on origin to surface
+# "orphans" — branches that have never been associated with a pull
+# request and have not been touched recently. Maintains a single
+# tracking issue (title: "Orphan branches: weekly sweep") so the list
+# is visible without spamming notifications.
+#
+# Behavior:
+#   - Lists every branch on origin via `gh api`.
+#   - For each branch, checks for any PR ever opened (state=all).
+#   - Filters out bot/queue branches (dependabot/, gh-readonly-queue/,
+#     release/*, chore/bump-shipyard-*) and `main`.
+#   - Considers a branch an orphan if it has no PR (ever) AND its tip
+#     commit is older than ORPHAN_DAYS days.
+#   - Idempotently maintains a single tracking issue:
+#       * Creates it if missing.
+#       * Updates the body when the orphan list changes.
+#       * Closes it (with a comment) when the list is empty.
+#
+# Safety properties:
+#   - Read-mostly. Never deletes branches. Surfaces the list to humans.
+#   - Concurrency group prevents overlapping sweeps from racing on the
+#     tracking issue.
+#   - manual `workflow_dispatch` for ad-hoc runs and testing.
+
+on:
+  schedule:
+    # Mondays at 14:00 UTC (~07:00 PT). Weekly cadence per #463.
+    - cron: '0 14 * * 1'
+  workflow_dispatch:
+    inputs:
+      orphan_days:
+        description: 'Minimum age (days) of last commit to be considered orphan'
+        required: false
+        default: '7'
+      dry_run:
+        description: 'If true, log the orphan list but do not touch the tracking issue'
+        required: false
+        default: 'false'
+
+concurrency:
+  group: orphan-branch-sweep
+  cancel-in-progress: false
+
+permissions:
+  contents: read    # list branches, read commit dates
+  issues: write     # maintain the tracking issue
+  pull-requests: read  # check PR history per branch
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    name: Identify and report orphan branches
+
+    env:
+      ORPHAN_DAYS: ${{ github.event.inputs.orphan_days || '7' }}
+      DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
+      TRACKING_TITLE: 'Orphan branches: weekly sweep'
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+      - name: Checkout (shallow)
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Identify orphan branches
+        id: scan
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          repo='${{ github.repository }}'
+          orphan_days="${ORPHAN_DAYS}"
+          now_epoch=$(date -u +%s)
+          cutoff_epoch=$(( now_epoch - orphan_days * 86400 ))
+
+          echo "Repo:          $repo"
+          echo "Orphan window: $orphan_days days (cutoff epoch $cutoff_epoch)"
+
+          # Page through every branch on origin. `gh api --paginate`
+          # follows Link headers transparently.
+          mapfile -t branches < <(
+              gh api --paginate -H "Accept: application/vnd.github+json" \
+                  "/repos/${repo}/branches?per_page=100" \
+                  --jq '.[].name'
+          )
+
+          echo "Total remote branches: ${#branches[@]}"
+
+          orphans_jsonl=""
+
+          for branch in "${branches[@]}"; do
+              # Skip protected/bot/queue patterns.
+              case "$branch" in
+                  main) continue ;;
+                  dependabot/*) continue ;;
+                  gh-readonly-queue/*) continue ;;
+                  release/*) continue ;;
+                  chore/bump-shipyard-*) continue ;;
+              esac
+
+              # Look up PR history for this branch (state=all). The
+              # `head` filter is `owner:branch`. If anything comes
+              # back, the branch is not an orphan.
+              owner="${repo%%/*}"
+              pr_count=$(
+                  gh api -H "Accept: application/vnd.github+json" \
+                      "/repos/${repo}/pulls?state=all&head=${owner}:${branch}&per_page=1" \
+                      --jq 'length' \
+                      2>/dev/null || echo 0
+              )
+
+              if [ "${pr_count:-0}" -gt 0 ]; then
+                  continue
+              fi
+
+              # Get the tip commit's committer date to apply the age filter.
+              tip_iso=$(
+                  gh api -H "Accept: application/vnd.github+json" \
+                      "/repos/${repo}/branches/${branch}" \
+                      --jq '.commit.commit.committer.date' \
+                      2>/dev/null || echo ''
+              )
+
+              if [ -z "$tip_iso" ]; then
+                  echo "  $branch: could not read tip date — skipping"
+                  continue
+              fi
+
+              tip_epoch=$(python3 -c "import datetime,sys; print(int(datetime.datetime.fromisoformat(sys.argv[1].replace('Z','+00:00')).timestamp()))" "$tip_iso")
+
+              if [ "$tip_epoch" -gt "$cutoff_epoch" ]; then
+                  # Recent activity, not an orphan yet.
+                  continue
+              fi
+
+              age_days=$(( (now_epoch - tip_epoch) / 86400 ))
+              echo "  ORPHAN: $branch  (last commit ${tip_iso}, ${age_days}d ago)"
+
+              # Append a JSON line per orphan; assembled into a JSON array below.
+              line=$(python3 -c "import json,sys; print(json.dumps({'name': sys.argv[1], 'last_commit': sys.argv[2], 'age_days': int(sys.argv[3])}))" "$branch" "$tip_iso" "$age_days")
+              orphans_jsonl="${orphans_jsonl}${line}"$'\n'
+          done
+
+          # Convert JSONL -> JSON array (empty array if no orphans).
+          if [ -z "$orphans_jsonl" ]; then
+              echo "[]" > orphans.json
+          else
+              printf '%s' "$orphans_jsonl" | python3 -c "import json,sys; print(json.dumps([json.loads(l) for l in sys.stdin if l.strip()], indent=2))" > orphans.json
+          fi
+
+          count=$(python3 -c "import json; print(len(json.load(open('orphans.json'))))")
+          echo "Orphan count: $count"
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+
+      - name: Render tracking issue body
+        id: render
+        if: env.DRY_RUN != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python3 - <<'PY' > body.md
+          import json, datetime, os
+
+          orphans = json.load(open('orphans.json'))
+          orphan_days = os.environ['ORPHAN_DAYS']
+          now = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
+
+          lines = []
+          lines.append(f"_Auto-generated by `.github/workflows/orphan-branch-sweep.yml` on {now}._")
+          lines.append("")
+          lines.append(
+              f"Branches on `origin` with **no PR ever opened** and a tip commit "
+              f"older than **{orphan_days} days**. Excludes `main`, `dependabot/*`, "
+              f"`gh-readonly-queue/*`, `release/*`, and `chore/bump-shipyard-*`."
+          )
+          lines.append("")
+          lines.append("Per #463, treat this as a janitorial checklist — confirm each")
+          lines.append("branch is truly abandoned before deleting. If a branch should")
+          lines.append("stick around, open a PR (even a draft) so the next sweep skips it.")
+          lines.append("")
+
+          if not orphans:
+              lines.append("No orphan branches detected. This issue will be closed automatically.")
+          else:
+              lines.append(f"**{len(orphans)} orphan branch(es):**")
+              lines.append("")
+              lines.append("| Branch | Last commit (UTC) | Age |")
+              lines.append("|--------|-------------------|-----|")
+              for o in sorted(orphans, key=lambda x: x['age_days'], reverse=True):
+                  lines.append(f"| `{o['name']}` | {o['last_commit']} | {o['age_days']}d |")
+
+          print("\n".join(lines))
+          PY
+
+          echo "Rendered body:"
+          echo "----"
+          cat body.md
+          echo "----"
+
+      - name: Maintain tracking issue
+        if: env.DRY_RUN != 'true'
+        shell: bash
+        env:
+          ORPHAN_COUNT: ${{ steps.scan.outputs.count }}
+        run: |
+          set -euo pipefail
+
+          repo='${{ github.repository }}'
+          title="${TRACKING_TITLE}"
+
+          # Find any open issue with this exact title authored by anyone.
+          # Restrict the search to this repo to avoid global matches.
+          existing=$(
+              gh issue list \
+                  --repo "$repo" \
+                  --state open \
+                  --search "in:title \"${title}\"" \
+                  --json number,title \
+                  --jq "[.[] | select(.title == \"${title}\")] | first | .number // empty"
+          )
+
+          if [ "$ORPHAN_COUNT" -eq 0 ]; then
+              if [ -n "${existing:-}" ]; then
+                  echo "No orphans remaining — closing tracking issue #${existing}."
+                  gh issue comment "$existing" --repo "$repo" \
+                      --body "Sweep on $(date -u +%Y-%m-%d) found no orphan branches. Closing."
+                  gh issue close "$existing" --repo "$repo" --reason completed
+              else
+                  echo "No orphans and no open tracking issue — nothing to do."
+              fi
+              exit 0
+          fi
+
+          if [ -z "${existing:-}" ]; then
+              echo "Creating tracking issue."
+              gh issue create \
+                  --repo "$repo" \
+                  --title "$title" \
+                  --body-file body.md
+          else
+              echo "Updating tracking issue #${existing}."
+              gh issue edit "$existing" --repo "$repo" --body-file body.md
+              # Re-open if a previous sweep closed it and orphans came back.
+              gh issue reopen "$existing" --repo "$repo" 2>/dev/null || true
+          fi
+
+      - name: Upload orphan list artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: orphan-branches
+          path: orphans.json
+          if-no-files-found: ignore
+          retention-days: 30
