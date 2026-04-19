@@ -152,13 +152,24 @@ void AlsaDevice::stop() {
 
     is_running_.store(false, std::memory_order_release);
 
+    // On capture we MUST drop BEFORE joining — snd_pcm_readi blocks
+    // inside the io thread until frames arrive, so the thread never
+    // reaches its loop-check on a quiet input device. snd_pcm_drop
+    // aborts any outstanding read from this side of the stream so the
+    // thread unwinds immediately. On playback the existing join-then-
+    // drain order is fine because the render thread exits on its own
+    // fill cycle. See #438 P1 Codex review on #387.
+    if (pcm_ && stream_ == SND_PCM_STREAM_CAPTURE) {
+        snd_pcm_drop(pcm_);
+    }
+
     if (io_thread_.joinable()) io_thread_.join();
 
     if (pcm_) {
         // Drain only on playback — drain on capture blocks until the
-        // ring buffer empties, which is meaningless for input.
+        // ring buffer empties, which is meaningless for input. Capture
+        // was already dropped above before join.
         if (stream_ == SND_PCM_STREAM_PLAYBACK) snd_pcm_drain(pcm_);
-        else                                    snd_pcm_drop(pcm_);
     }
 
     callback_ = nullptr;
