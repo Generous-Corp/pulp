@@ -1,13 +1,16 @@
 #if defined(__ANDROID__)
 
 #include <oboe/Oboe.h>
+#include <pulp/audio/frame_fill.hpp>
 #include <pulp/platform/android/jni.hpp>
 #include <pulp/midi/buffer.hpp>
 #include <pulp/midi/android_midi_fifo.hpp>
 #include <android/log.h>
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstring>
+#include <vector>
 
 #define PULP_LOG_TAG "Pulp"
 #define PULP_LOGI(...) __android_log_print(ANDROID_LOG_INFO, PULP_LOG_TAG, __VA_ARGS__)
@@ -61,6 +64,23 @@ public:
                 PULP_LOGW("Oboe: input-stream start failed");
                 input_stream_->close();
                 input_stream_.reset();
+                input_buffer_.clear();
+                current_input_channels_ = 0;
+            } else {
+                // Size the persistent input buffer to the effective burst
+                // size × channel count. Allocation happens here (main
+                // thread) so the audio callback stays malloc-free. We
+                // overprovision to 4× the negotiated burst to absorb any
+                // catch-up reads when the two streams drift briefly.
+                current_input_channels_ = input_stream_->getChannelCount();
+                const int32_t capacity_frames = std::max(
+                    current_buffer_size_ * 4, input_stream_->getFramesPerBurst() * 4);
+                input_buffer_.assign(
+                    static_cast<size_t>(capacity_frames) *
+                        static_cast<size_t>(current_input_channels_),
+                    0.0f);
+                PULP_LOGI("Oboe: input buffer provisioned for %d frames × %d ch",
+                          capacity_frames, current_input_channels_);
             }
         }
         return true;
@@ -79,6 +99,9 @@ public:
             input_stream_->close();
             input_stream_.reset();
         }
+        input_buffer_.clear();
+        input_buffer_.shrink_to_fit();
+        current_input_channels_ = 0;
     }
 
     // -- State --
@@ -88,6 +111,18 @@ public:
     int32_t channel_count() const { return current_channels_; }
     int64_t xrun_count() const { return xrun_count_.load(std::memory_order_relaxed); }
     bool is_bluetooth_active() const { return bluetooth_active_.load(std::memory_order_acquire); }
+
+    // #244: input-stream diagnostics. short_reads increments when
+    // onAudioReady drains fewer frames than requested (warm-up, transient
+    // drift); read_errors increments on a hard read failure that zero-filled
+    // the block. Both are useful for UI-level input-health indicators.
+    int32_t input_channel_count() const { return current_input_channels_; }
+    int64_t input_short_read_count() const {
+        return input_short_reads_.load(std::memory_order_relaxed);
+    }
+    int64_t input_read_error_count() const {
+        return input_read_errors_.load(std::memory_order_relaxed);
+    }
 
     /// MIDI buffer for the current audio block. Drained from the
     /// lock-free FIFO at the start of each onAudioReady callback.
@@ -144,9 +179,46 @@ private:
 #endif
 
         if (callback_) {
-            // Input: read from input stream if available (non-blocking, lock-free)
+            // #244: Drain the input stream on the same callback tick. Oboe's
+            // recommended full-duplex pattern is to do a non-blocking read
+            // on the output-stream callback — AAudio keeps the two streams
+            // in step on a shared device period in practice.
+            //
+            // Non-blocking = timeoutNanos 0. Short-read (fewer frames
+            // available than num_frames) is expected on the first few
+            // callbacks while the input stream warms up; we zero-fill the
+            // tail so the Processor sees a deterministic buffer shape.
+            //
+            // All allocation happens in start() / on_input_config_changed();
+            // this path is lock-free and malloc-free.
             const float* input_data = nullptr;
-            // TODO: Read from input_stream_ if open
+            if (input_stream_ && !input_buffer_.empty()) {
+                const int32_t in_channels = current_input_channels_;
+                const size_t samples_needed =
+                    static_cast<size_t>(num_frames) * static_cast<size_t>(in_channels);
+                float* buf = input_buffer_.data();
+
+                auto result = input_stream_->read(buf, num_frames, /*timeoutNanos=*/0);
+                if (result == oboe::Result::OK) {
+                    int32_t frames_read = result.value();
+                    if (frames_read < num_frames) {
+                        // Zero-fill the tail so the callback sees a
+                        // full-sized buffer with silence for the
+                        // unavailable frames.
+                        pulp::audio::zero_fill_short_read(
+                            buf, frames_read, num_frames, in_channels);
+                        input_short_reads_.fetch_add(1, std::memory_order_relaxed);
+                    }
+                    input_data = buf;
+                } else {
+                    // Read failure (stream disconnected mid-callback): zero
+                    // the buffer and surface nullptr so the Processor knows
+                    // input isn't available this block. onErrorAfterClose
+                    // will trigger a reopen out-of-band.
+                    std::memset(buf, 0, sizeof(float) * samples_needed);
+                    input_read_errors_.fetch_add(1, std::memory_order_relaxed);
+                }
+            }
 
             callback_(output, input_data, num_frames, current_channels_, user_data_);
         } else {
@@ -292,10 +364,18 @@ private:
     int32_t current_sample_rate_ = 48000;
     int32_t current_buffer_size_ = 256;
     int32_t current_channels_ = 2;
+    int32_t current_input_channels_ = 0;  // #244
 
     std::atomic<int64_t> xrun_count_{0};
     int32_t last_reported_xruns_ = 0;
     std::atomic<int64_t> last_callback_duration_ns_{0};
+
+    // #244: persistent input-frame buffer. Allocated in start() (main
+    // thread); sized to cover 4× the burst so onAudioReady can drain
+    // without allocating. Accessed only on the audio thread.
+    std::vector<float> input_buffer_;
+    std::atomic<int64_t> input_short_reads_{0};
+    std::atomic<int64_t> input_read_errors_{0};
 
     // Per-block MIDI buffer, drained from the lock-free FIFO each callback.
     pulp::midi::MidiBuffer midi_buffer_;

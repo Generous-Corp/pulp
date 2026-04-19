@@ -88,6 +88,12 @@ add_executable(pulp-test-stream test_stream.cpp)
 target_link_libraries(pulp-test-stream PRIVATE pulp::runtime Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-stream)
 
+# #244: zero-fill helper for the Oboe input-frame-read short-read path.
+# Header-only math, so no library link required beyond Catch2.
+add_executable(pulp-test-frame-fill test_frame_fill.cpp)
+target_link_libraries(pulp-test-frame-fill PRIVATE pulp::audio Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-frame-fill)
+
 # AsyncStream tests (Phase 2)
 add_executable(pulp-test-async-stream test_async_stream.cpp)
 target_link_libraries(pulp-test-async-stream PRIVATE pulp::runtime Catch2::Catch2WithMain)
