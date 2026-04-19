@@ -80,13 +80,16 @@ jobs:
 
           repo='${{ github.repository }}'
 
-          # List all rulesets on the repo. The list endpoint returns summaries;
-          # we have to fetch the full ruleset by id to see the `rules` payload.
+          # List repo-scoped rulesets only. The default /rulesets response
+          # includes inherited org-level rulesets — if any of those share a
+          # name with our repo ruleset, `ids[0]` could pick the org-level one
+          # and falsely report drift. Filter to source_type == "Repository"
+          # so we only diff against the one actually defined in this repo.
           gh api -H "Accept: application/vnd.github+json" \
-              "/repos/${repo}/rulesets" > rulesets-list.json
+              "/repos/${repo}/rulesets?includes_parents=false" > rulesets-list.json
 
           ruleset_id=$(
-              python3 -c "import json,sys,os; name=os.environ['RULESET_NAME']; data=json.load(open('rulesets-list.json')); ids=[r['id'] for r in data if r.get('name')==name]; print(ids[0] if ids else '')"
+              python3 -c "import json,os; name=os.environ['RULESET_NAME']; data=json.load(open('rulesets-list.json')); ids=[r['id'] for r in data if r.get('name')==name and r.get('source_type')=='Repository']; print(ids[0] if ids else '')"
           )
 
           if [ -z "${ruleset_id}" ]; then
@@ -210,7 +213,11 @@ jobs:
           echo "----"
 
       - name: Comment on PR with drift report
-        if: github.event_name == 'pull_request'
+        # Skip fork/Dependabot PRs — GITHUB_TOKEN is read-only on fork heads
+        # so gh pr comment fails with 403 and hard-fails the workflow even
+        # though PR-mode drift is meant to be advisory. The artifact upload
+        # still runs, so drift reports remain accessible.
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
         shell: bash
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}

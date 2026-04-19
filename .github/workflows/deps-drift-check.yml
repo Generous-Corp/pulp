@@ -194,11 +194,14 @@ jobs:
           repo='${{ github.repository }}'
           title="${TRACKING_TITLE}"
 
-          # Find any open issue with this exact title in this repo.
+          # Find any issue (open OR closed) with this exact title. --state all
+          # ensures we reopen the same tracker instead of creating a new one
+          # when drift reappears after a clean run; otherwise history
+          # fragments across multiple closed issues.
           existing=$(
               gh issue list \
                   --repo "$repo" \
-                  --state open \
+                  --state all \
                   --search "in:title \"${title}\"" \
                   --json number,title \
                   --jq "[.[] | select(.title == \"${title}\")] | first | .number // empty"

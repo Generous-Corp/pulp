@@ -122,9 +122,14 @@ jobs:
               fi
 
               # Get the tip commit's committer date to apply the age filter.
+              # URL-encode the branch name — `feature/stream`-style names are
+              # dominant in this repo and unencoded slashes break the path
+              # segment, so the request 404s and the orphan gets silently
+              # skipped. python3 --quote preserves unreserved chars.
+              branch_enc=$(python3 -c "import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1], safe=''))" "$branch")
               tip_iso=$(
                   gh api -H "Accept: application/vnd.github+json" \
-                      "/repos/${repo}/branches/${branch}" \
+                      "/repos/${repo}/branches/${branch_enc}" \
                       --jq '.commit.commit.committer.date' \
                       2>/dev/null || echo ''
               )
@@ -217,12 +222,15 @@ jobs:
           repo='${{ github.repository }}'
           title="${TRACKING_TITLE}"
 
-          # Find any open issue with this exact title authored by anyone.
-          # Restrict the search to this repo to avoid global matches.
+          # Find any issue (open OR closed) with this exact title. If we
+          # only look at --state open, a previous sweep that closed the
+          # tracker will cause a new tracking issue to be created when
+          # orphans reappear, fragmenting history. --state all lets us
+          # reopen the existing tracker instead.
           existing=$(
               gh issue list \
                   --repo "$repo" \
-                  --state open \
+                  --state all \
                   --search "in:title \"${title}\"" \
                   --json number,title \
                   --jq "[.[] | select(.title == \"${title}\")] | first | .number // empty"
