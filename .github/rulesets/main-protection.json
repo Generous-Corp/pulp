@@ -1,0 +1,100 @@
+{
+  "_comment": [
+    "Branch-protection ruleset for `main`, checked in as code so drift between",
+    "the GitHub ruleset UI and repo intent is visible in PR review.",
+    "",
+    "Tracked by Pulp issue #462 (formalize required-check fast/slow split).",
+    "Drift is detected by .github/workflows/ruleset-drift-check.yml, which",
+    "diffs this file against the live ruleset returned by",
+    "`gh api /repos/{owner}/{repo}/rulesets`.",
+    "",
+    "Schema reference (do NOT fetch at runtime): https://docs.github.com/en/rest/repos/rules",
+    "",
+    "Required-check contract (fast lane, blocks merge):",
+    "  - macos   : macOS build+test leg of .github/workflows/build.yml",
+    "  - linux   : Linux (x64) build+test leg of .github/workflows/build.yml",
+    "  - windows : Windows (x64) build+test leg of .github/workflows/build.yml",
+    "  - Enforce version & skill sync : .github/workflows/version-skill-check.yml",
+    "",
+    "The three platform names are intended as *stable aliases* that survive",
+    "runner-provider swaps (github-hosted <-> namespace). The concrete job",
+    "names in build.yml today resolve to e.g. `macOS (ARM64) [namespace]`,",
+    "which is not a stable contract. Landing the alias layer is part of #462;",
+    "until then, the drift workflow should be run with an alias map that maps",
+    "alias -> current context so the diff stays meaningful.",
+    "",
+    "Advisory (slow lane, does NOT block merge) — tracked here for visibility",
+    "and drift enforcement only. Do NOT move these into `required_status_checks`",
+    "without an explicit policy change, because they currently run on",
+    "workflow_dispatch only (see .github/workflows/sanitizers.yml):",
+    "  - AddressSanitizer (macOS ARM64)",
+    "  - ThreadSanitizer (macOS ARM64)",
+    "  - UndefinedBehaviorSanitizer (macOS ARM64)",
+    "  - RealtimeSanitizer (Linux x86_64, Clang 18)",
+    "",
+    "Pattern inspired by Astral's ruleset-as-code approach:",
+    "  https://gist.github.com/woodruffw/643a6cf70ad72d404ce6f9f333181cf8"
+  ],
+  "name": "main-protection",
+  "target": "branch",
+  "source_type": "Repository",
+  "enforcement": "active",
+  "conditions": {
+    "ref_name": {
+      "include": ["refs/heads/main"],
+      "exclude": []
+    }
+  },
+  "bypass_actors": [],
+  "rules": [
+    {
+      "type": "deletion"
+    },
+    {
+      "type": "non_fast_forward"
+    },
+    {
+      "type": "pull_request",
+      "parameters": {
+        "required_approving_review_count": 0,
+        "dismiss_stale_reviews_on_push": true,
+        "require_code_owner_review": false,
+        "require_last_push_approval": false,
+        "required_review_thread_resolution": true
+      }
+    },
+    {
+      "type": "required_status_checks",
+      "parameters": {
+        "strict_required_status_checks_policy": true,
+        "required_status_checks": [
+          {
+            "context": "macos",
+            "integration_id": null
+          },
+          {
+            "context": "linux",
+            "integration_id": null
+          },
+          {
+            "context": "windows",
+            "integration_id": null
+          },
+          {
+            "context": "Enforce version & skill sync",
+            "integration_id": null
+          }
+        ]
+      }
+    }
+  ],
+  "advisory_status_checks": {
+    "_comment": "Not part of the GitHub rulesets schema. Consumed only by .github/workflows/ruleset-drift-check.yml so advisory drift is visible alongside required drift. Never copy into `rules[].required_status_checks`.",
+    "checks": [
+      { "context": "AddressSanitizer (macOS ARM64)" },
+      { "context": "ThreadSanitizer (macOS ARM64)" },
+      { "context": "UndefinedBehaviorSanitizer (macOS ARM64)" },
+      { "context": "RealtimeSanitizer (Linux x86_64, Clang 18)" }
+    ]
+  }
+}

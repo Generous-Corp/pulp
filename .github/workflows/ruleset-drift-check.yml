@@ -1,0 +1,270 @@
+name: Ruleset Drift Check
+
+# Issue #462. Detects drift between the checked-in branch-protection intent
+# (.github/rulesets/main-protection.json) and the live ruleset configured on
+# GitHub. Keeps the UI and the repo honest.
+#
+# Behavior:
+#   - On pull requests that touch .github/rulesets/** or this workflow:
+#       * Fetch the live ruleset via `gh api /repos/{owner}/{repo}/rulesets`.
+#       * Diff `rules[].required_status_checks` against the checked-in JSON.
+#       * Post/update a single PR comment summarizing any drift.
+#       * Job still passes on drift — PR-time behavior is advisory so authors
+#         can intentionally update the JSON alongside the GitHub UI.
+#   - Weekly cron (and workflow_dispatch):
+#       * Same diff, but drift on `main` is a hard failure so the next human
+#         looking at the repo sees a red check.
+#
+# The required vs. advisory split lives in the checked-in JSON:
+#   - rules[].parameters.required_status_checks -> merge-blocking
+#   - advisory_status_checks.checks             -> visibility/drift only
+#
+# Schema reference (do NOT fetch at runtime):
+#   https://docs.github.com/en/rest/repos/rules
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/rulesets/**'
+      - '.github/workflows/ruleset-drift-check.yml'
+  schedule:
+    # Tuesdays at 14:00 UTC (~07:00 PT). One business day after the orphan
+    # sweep so the two janitorial signals don't land on the same morning.
+    - cron: '0 14 * * 2'
+  workflow_dispatch:
+    inputs:
+      fail_on_drift:
+        description: 'If true, fail the job when drift is detected (default: schedule=true, pr=false)'
+        required: false
+        default: ''
+
+concurrency:
+  group: ruleset-drift-check-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read         # read checked-in ruleset JSON
+  pull-requests: write   # post/update the drift comment on PRs
+  # Note: reading org/repo rulesets via `gh api /repos/{owner}/{repo}/rulesets`
+  # requires the default GITHUB_TOKEN to have `administration: read`. If the
+  # workflow returns 403, grant the token that scope in repo settings or swap
+  # GH_TOKEN for a PAT/RELEASE_BOT_TOKEN with admin:read.
+
+jobs:
+  diff:
+    runs-on: ubuntu-latest
+    name: Diff checked-in ruleset against live GitHub ruleset
+
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      CHECKED_IN_PATH: .github/rulesets/main-protection.json
+      RULESET_NAME: main-protection
+
+    steps:
+      - name: Checkout (shallow)
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Fetch live rulesets
+        id: fetch
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          repo='${{ github.repository }}'
+
+          # List all rulesets on the repo. The list endpoint returns summaries;
+          # we have to fetch the full ruleset by id to see the `rules` payload.
+          gh api -H "Accept: application/vnd.github+json" \
+              "/repos/${repo}/rulesets" > rulesets-list.json
+
+          ruleset_id=$(
+              python3 -c "import json,sys,os; name=os.environ['RULESET_NAME']; data=json.load(open('rulesets-list.json')); ids=[r['id'] for r in data if r.get('name')==name]; print(ids[0] if ids else '')"
+          )
+
+          if [ -z "${ruleset_id}" ]; then
+              echo "No live ruleset named '${RULESET_NAME}' found on ${repo}."
+              echo "found=false" >> "$GITHUB_OUTPUT"
+              echo '{}' > live-ruleset.json
+          else
+              echo "Found live ruleset #${ruleset_id} named '${RULESET_NAME}'."
+              echo "found=true" >> "$GITHUB_OUTPUT"
+              gh api -H "Accept: application/vnd.github+json" \
+                  "/repos/${repo}/rulesets/${ruleset_id}" > live-ruleset.json
+          fi
+
+      - name: Diff required and advisory checks
+        id: diff
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python3 - <<'PY' > drift-report.md
+          import json
+          import os
+          import pathlib
+          import sys
+
+          checked_in_path = pathlib.Path(os.environ['CHECKED_IN_PATH'])
+          live_path = pathlib.Path('live-ruleset.json')
+
+          checked_in = json.loads(checked_in_path.read_text())
+          live = json.loads(live_path.read_text()) if live_path.exists() else {}
+
+          def required_contexts(doc: dict) -> list[str]:
+              out: list[str] = []
+              for rule in doc.get('rules', []) or []:
+                  if rule.get('type') != 'required_status_checks':
+                      continue
+                  params = rule.get('parameters', {}) or {}
+                  for check in params.get('required_status_checks', []) or []:
+                      ctx = check.get('context')
+                      if ctx:
+                          out.append(ctx)
+              return sorted(out)
+
+          def advisory_contexts(doc: dict) -> list[str]:
+              out: list[str] = []
+              advisory = doc.get('advisory_status_checks') or {}
+              for check in advisory.get('checks', []) or []:
+                  ctx = check.get('context')
+                  if ctx:
+                      out.append(ctx)
+              return sorted(out)
+
+          checked_required = required_contexts(checked_in)
+          live_required = required_contexts(live) if live else []
+          checked_advisory = advisory_contexts(checked_in)
+
+          missing_on_github = [c for c in checked_required if c not in live_required]
+          extra_on_github = [c for c in live_required if c not in checked_required]
+
+          drift_found = bool(missing_on_github or extra_on_github) or not live
+
+          def fmt(items: list[str]) -> str:
+              return '\n'.join(f'- `{x}`' for x in items) if items else '_(none)_'
+
+          lines = []
+          lines.append('## Ruleset drift report')
+          lines.append('')
+          lines.append(f'_Checked-in intent: `{checked_in_path}`_')
+          lines.append(f'_Live ruleset name: `{os.environ["RULESET_NAME"]}`_')
+          lines.append('')
+
+          if not live:
+              lines.append('**No live ruleset with the expected name was found on this repo.**')
+              lines.append('')
+              lines.append('Either the ruleset has not been created yet, or `GITHUB_TOKEN`')
+              lines.append('does not have `administration: read`. Create the ruleset via the')
+              lines.append('GitHub UI using the contexts listed below, or grant the workflow')
+              lines.append('token admin-read.')
+              lines.append('')
+
+          lines.append('### Required checks (merge-blocking)')
+          lines.append('')
+          lines.append('**Checked in:**')
+          lines.append(fmt(checked_required))
+          lines.append('')
+          lines.append('**Live on GitHub:**')
+          lines.append(fmt(live_required))
+          lines.append('')
+
+          if missing_on_github:
+              lines.append('**Missing on GitHub (declared in repo, not enforced live):**')
+              lines.append(fmt(missing_on_github))
+              lines.append('')
+          if extra_on_github:
+              lines.append('**Extra on GitHub (enforced live, not declared in repo):**')
+              lines.append(fmt(extra_on_github))
+              lines.append('')
+
+          lines.append('### Advisory checks (visibility only, never required)')
+          lines.append('')
+          lines.append(fmt(checked_advisory))
+          lines.append('')
+
+          lines.append('---')
+          if drift_found:
+              lines.append('**Drift detected.** Update `.github/rulesets/main-protection.json`')
+              lines.append('to match intent, or update the ruleset on GitHub to match the file.')
+          else:
+              lines.append('No drift detected. Required checks match the checked-in intent.')
+
+          print('\n'.join(lines))
+
+          out_path = pathlib.Path(os.environ['GITHUB_OUTPUT'])
+          with out_path.open('a', encoding='utf-8') as handle:
+              handle.write(f'drift={"true" if drift_found else "false"}\n')
+          PY
+
+          echo "Rendered drift report:"
+          echo "----"
+          cat drift-report.md
+          echo "----"
+
+      - name: Comment on PR with drift report
+        if: github.event_name == 'pull_request'
+        shell: bash
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          MARKER: '<!-- ruleset-drift-check -->'
+        run: |
+          set -euo pipefail
+
+          repo='${{ github.repository }}'
+          body="${MARKER}"$'\n'"$(cat drift-report.md)"
+
+          # Find an existing bot-authored comment with our marker, if any.
+          existing=$(
+              gh api -H "Accept: application/vnd.github+json" \
+                  "/repos/${repo}/issues/${PR_NUMBER}/comments" \
+                  --paginate \
+                  --jq "[.[] | select(.body != null and (.body | contains(\"${MARKER}\")))] | first | .id // empty"
+          )
+
+          if [ -z "${existing:-}" ]; then
+              echo "Creating drift comment on PR #${PR_NUMBER}."
+              printf '%s' "$body" | gh pr comment "$PR_NUMBER" --repo "$repo" --body-file -
+          else
+              echo "Updating drift comment #${existing} on PR #${PR_NUMBER}."
+              gh api \
+                  --method PATCH \
+                  -H "Accept: application/vnd.github+json" \
+                  "/repos/${repo}/issues/comments/${existing}" \
+                  -f body="$body" >/dev/null
+          fi
+
+      - name: Upload drift report artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ruleset-drift-report
+          path: |
+            drift-report.md
+            live-ruleset.json
+            ${{ env.CHECKED_IN_PATH }}
+          if-no-files-found: ignore
+          retention-days: 30
+
+      - name: Fail on drift (scheduled/manual runs)
+        if: steps.diff.outputs.drift == 'true' && github.event_name != 'pull_request'
+        shell: bash
+        env:
+          FAIL_OVERRIDE: ${{ inputs.fail_on_drift }}
+        run: |
+          # Scheduled runs on `main` treat drift as a hard failure so it
+          # surfaces as a red check without blocking in-flight PRs.
+          # workflow_dispatch honors the `fail_on_drift` input if provided.
+          if [ "${FAIL_OVERRIDE:-}" = "false" ]; then
+              echo "Drift detected, but fail_on_drift=false was requested — leaving job green."
+              exit 0
+          fi
+          echo "Drift detected on ${{ github.ref }} — failing the job."
+          exit 1

@@ -182,28 +182,6 @@ macOS runs locally in parallel with Namespace Ubuntu/Windows.
 
 **Common mistake:** Pushing a branch and waiting for the auto-triggered GitHub Actions PR checks. Those use GitHub-hosted runners and are slow. Instead: cancel the auto-triggered run and dispatch on Namespace.
 
-### Runner selection is repo-variable driven (no code change needed)
-
-Every `runs-on:` decision in `.github/workflows/*.yml` routes through
-`tools/scripts/resolve_runs_on.py` and a per-target `PULP_*_RUNS_ON_JSON`
-repo variable. When every variable is unset the workflows resolve to
-their hard-coded defaults (backwards-compatible). Setting one variable
-moves one job — no workflow edit, no full-matrix re-run. The full
-variable list and `gh variable set` examples live in
-`docs/guides/local-ci.md` § "Switching a job's runner without a code
-change".
-
-Practical use case: if a sanitizer is slow on a GitHub-hosted runner
-(TSan on `macos-14` routinely exceeds 45 min), flip it to a self-hosted
-runner with `gh variable set PULP_SANITIZER_TSAN_RUNS_ON_JSON --body
-'["self-hosted","macos","arm64","sanitizer"]'`. The next sanitizer
-run picks up the new runner automatically.
-
-Sanitizer per-job `workflow_dispatch` inputs (`asan_runner_selector_json`
-/ `tsan_runner_selector_json` / `ubsan_runner_selector_json` /
-`rtsan_runner_selector_json`) are the equivalent one-off overrides for
-a single manual run.
-
 ```bash
 # Cancel auto-triggered GitHub-hosted run
 gh run cancel <run_id> --repo danielraffel/pulp
@@ -460,6 +438,48 @@ Keep hostnames and VM names local. Shared repo docs and skills should describe h
 
 Full setup guide: `docs/guides/local-ci.md`
 SSH key setup for Windows/Linux VMs: `docs/guides/local-ci.md` § "Set up SSH keys"
+
+## Required-check ruleset (issue #462)
+
+The branch-protection ruleset for `main` is checked into the repo at
+`.github/rulesets/main-protection.json` so drift between the GitHub
+ruleset UI and repo intent is visible in PR review. Pattern inspired
+by [Astral's ruleset-as-code approach](https://gist.github.com/woodruffw/643a6cf70ad72d404ce6f9f333181cf8).
+
+**Fast lane — required (blocks merge):**
+
+- `macos` — macOS build+test leg of `.github/workflows/build.yml`
+- `linux` — Linux (x64) build+test leg of `.github/workflows/build.yml`
+- `windows` — Windows (x64) build+test leg of `.github/workflows/build.yml`
+- `Enforce version & skill sync` — `.github/workflows/version-skill-check.yml`
+
+The three platform names are intentionally declared as **stable aliases**
+so the merge contract survives runner-provider swaps (github-hosted ↔
+namespace). The concrete context strings in `build.yml` today resolve
+to e.g. `macOS (ARM64) [namespace]`, which is not stable; landing the
+alias layer is part of #462.
+
+**Slow lane — advisory (does NOT block merge):**
+
+- `AddressSanitizer (macOS ARM64)`
+- `ThreadSanitizer (macOS ARM64)`
+- `UndefinedBehaviorSanitizer (macOS ARM64)`
+- `RealtimeSanitizer (Linux x86_64, Clang 18)`
+
+These run via `.github/workflows/sanitizers.yml` on `workflow_dispatch`
+only and are tracked in the checked-in JSON under `advisory_status_checks`
+for visibility/drift, never inside `rules[].required_status_checks`.
+
+**Drift enforcement:** `.github/workflows/ruleset-drift-check.yml` runs
+on PR (when `.github/rulesets/**` changes) and weekly on cron. It fetches
+the live ruleset via `gh api /repos/{owner}/{repo}/rulesets` and diffs
+against the checked-in JSON. PR runs post/update a single comment; the
+cron job fails loudly on drift so it shows up as a red check on `main`.
+
+**Making a change to required checks:** always edit the JSON first, open
+a PR, and let the drift-check workflow confirm the plan. Then mirror the
+change in the GitHub ruleset UI (or reapply via `gh api PUT`). Never edit
+the live ruleset in isolation — the next scheduled drift run will fail.
 
 ## Versioning & Skill-Sync gates (Layer 3)
 
