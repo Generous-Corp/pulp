@@ -600,13 +600,20 @@ h4:hover .permalink {{ opacity: 0.6; }}
 <main class="content" data-pagefind-body data-pagefind-meta="title:{html.escape(title)}">
 {content}
 </main>
-<script src="{base_url}pagefind/pagefind-ui.js"></script>
+<script src="{base_url}pagefind/pagefind-ui.js" onerror="window.__pagefindMissing=true"></script>
 <script>
-new PagefindUI({{
-  element: "#search",
-  showSubResults: true,
-  showImages: false
-}});
+// Pagefind is only built in the docs-deploy CI workflow; local previews
+// via `python3 tools/build-docs.py` or `pulp docs build-site` don't
+// produce the `pagefind/` directory, so PagefindUI is undefined and the
+// page throws ReferenceError. Guard the init so local previews render
+// the rest of the site without the search widget.
+if (typeof PagefindUI !== 'undefined' && !window.__pagefindMissing) {{
+  new PagefindUI({{
+    element: "#search",
+    showSubResults: true,
+    showImages: false
+  }});
+}}
 </script>
 <script>
 // Persist sidebar scroll position across page loads
