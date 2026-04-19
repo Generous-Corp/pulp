@@ -4,6 +4,7 @@ import android.content.ComponentCallbacks2
 import android.content.res.Configuration
 import android.os.Bundle
 import android.util.Log
+import android.view.Surface
 import android.view.View
 import android.view.WindowInsets
 import android.widget.FrameLayout
@@ -37,26 +38,32 @@ class PulpActivity : ComponentActivity() {
         // rotation, split-screen insets). Forwards into the C++
         // Environment API (#342).
         if (PulpApplication.nativeLoaded) {
-            val initialOrientation = resources.configuration.orientation
-            nativeOnOrientationChanged(orientationToEnum(initialOrientation))
+            nativeOnOrientationChanged(orientationToEnum())
 
             ViewCompat.setOnApplyWindowInsetsListener(frame) { _, insets ->
                 val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
                 val ime  = insets.getInsets(WindowInsetsCompat.Type.ime())
                 if (PulpApplication.nativeLoaded) {
+                    // EnvironmentState documents safe_area in CSS-pixel
+                    // space (already divided by content scale). Android's
+                    // WindowInsetsCompat returns physical pixels — divide
+                    // by display density so high-DPI devices don't get
+                    // 3x oversized insets. See #438 P2 Codex review on
+                    // #443.
+                    val density = resources.displayMetrics.density
                     nativeOnSafeAreaChanged(
-                        bars.top.toFloat(),
-                        bars.bottom.toFloat(),
-                        bars.left.toFloat(),
-                        bars.right.toFloat()
+                        bars.top    / density,
+                        bars.bottom / density,
+                        bars.left   / density,
+                        bars.right  / density
                     )
                     // Keyboard is considered visible when IME height
                     // exceeds the system bars' bottom inset; subtract
                     // so callers see the "additional" bottom padding
                     // the keyboard introduced, not the full IME height
                     // (which already includes the system nav bar).
-                    val keyboardBottom = maxOf(0, ime.bottom - bars.bottom).toFloat()
-                    nativeOnKeyboardChanged(keyboardBottom)
+                    val keyboardBottomPx = maxOf(0, ime.bottom - bars.bottom)
+                    nativeOnKeyboardChanged(keyboardBottomPx / density)
                 }
                 insets
             }
@@ -90,17 +97,33 @@ class PulpActivity : ComponentActivity() {
                 Configuration.UI_MODE_NIGHT_YES
         if (PulpApplication.nativeLoaded) {
             nativeOnDisplayChanged(dm.widthPixels, dm.heightPixels, dm.density, dark)
-            nativeOnOrientationChanged(orientationToEnum(newConfig.orientation))
+            nativeOnOrientationChanged(orientationToEnum())
         }
     }
 
-    // Map Android's Configuration.ORIENTATION_* to the Pulp C++
-    // Orientation enum values (declared in environment.hpp). Kept
-    // side-by-side with the C++ to keep the mapping obvious.
-    private fun orientationToEnum(androidOrientation: Int): Int = when (androidOrientation) {
-        Configuration.ORIENTATION_PORTRAIT  -> 0   // Orientation::portrait
-        Configuration.ORIENTATION_LANDSCAPE -> 2   // Orientation::landscape_left
-        else                                -> 5   // Orientation::unknown
+    // Map current display rotation to the Pulp C++ Orientation enum
+    // values (declared in environment.hpp). Configuration.ORIENTATION_*
+    // collapses both landscape sides into LANDSCAPE; we use
+    // display.rotation to recover the side. See #438 P2 Codex review
+    // on #443. Enum values:
+    //   0 portrait, 1 portrait_upside_down,
+    //   2 landscape_left, 3 landscape_right,
+    //   4 flat, 5 unknown
+    private fun orientationToEnum(): Int {
+        val rotation = if (android.os.Build.VERSION.SDK_INT >=
+                           android.os.Build.VERSION_CODES.R) {
+            display?.rotation ?: Surface.ROTATION_0
+        } else {
+            @Suppress("DEPRECATION")
+            windowManager.defaultDisplay.rotation
+        }
+        return when (rotation) {
+            Surface.ROTATION_0   -> 0  // portrait
+            Surface.ROTATION_90  -> 2  // landscape_left  (device rotated CCW)
+            Surface.ROTATION_180 -> 1  // portrait_upside_down
+            Surface.ROTATION_270 -> 3  // landscape_right (device rotated CW)
+            else                 -> 5  // unknown
+        }
     }
 
     override fun onTrimMemory(level: Int) {
