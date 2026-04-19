@@ -53,36 +53,61 @@ public:
 
     bool start() {
         if (!open_output_stream()) return false;
-        if (output_stream_->requestStart() != oboe::Result::OK) return false;
-        // Workstream 02 #244: open an input stream symmetrically when the
-        // caller asked for input channels. Failure to open is logged but
-        // non-fatal — playback continues without capture.
+
+        // Provision the input stream + buffer BEFORE starting the output
+        // stream. The previous order started the output callback while
+        // input_buffer_.assign() was still running on the main thread —
+        // onAudioReady could race the resize and read buf.data() while
+        // the vector was mid-reallocation. Opening input first means the
+        // buffer is fully constructed before any audio-thread read.
         if (requested_input_channels_ > 0) {
             if (!open_input_stream()) {
                 PULP_LOGW("Oboe: input-stream open failed; continuing output-only");
-            } else if (input_stream_->requestStart() != oboe::Result::OK) {
-                PULP_LOGW("Oboe: input-stream start failed");
-                input_stream_->close();
-                input_stream_.reset();
-                input_buffer_.clear();
-                current_input_channels_ = 0;
             } else {
-                // Size the persistent input buffer to the effective burst
-                // size × channel count. Allocation happens here (main
-                // thread) so the audio callback stays malloc-free. We
-                // overprovision to 4× the negotiated burst to absorb any
-                // catch-up reads when the two streams drift briefly.
                 current_input_channels_ = input_stream_->getChannelCount();
-                const int32_t capacity_frames = std::max(
-                    current_buffer_size_ * 4, input_stream_->getFramesPerBurst() * 4);
+                // Size the persistent input buffer to cover the WORST CASE
+                // onAudioReady frame count. That upper bound is the max of:
+                //   - output callback frames (what num_frames will be)
+                //   - the output FramesPerBurst (Oboe's preferred cadence)
+                //   - the input FramesPerBurst (Oboe may deliver bursts)
+                //   - requested_buffer_size_ if the caller overrode it
+                // Then 4× for catch-up slack. Undersizing here was the
+                // #478 Codex P1 finding: a caller that sets
+                // requested_buffer_size_ > output burst (e.g. 1024 vs 192)
+                // would overflow the vector on the first read call.
+                const int32_t out_burst = output_stream_->getFramesPerBurst();
+                const int32_t in_burst = input_stream_->getFramesPerBurst();
+                const int32_t max_frames = std::max({
+                    current_buffer_size_,
+                    out_burst,
+                    in_burst,
+                    requested_buffer_size_
+                });
+                const int32_t capacity_frames = max_frames * 4;
                 input_buffer_.assign(
                     static_cast<size_t>(capacity_frames) *
                         static_cast<size_t>(current_input_channels_),
                     0.0f);
-                PULP_LOGI("Oboe: input buffer provisioned for %d frames × %d ch",
-                          capacity_frames, current_input_channels_);
+                PULP_LOGI("Oboe: input buffer provisioned for %d frames × %d ch "
+                          "(max_frames=%d, out_burst=%d, in_burst=%d)",
+                          capacity_frames, current_input_channels_,
+                          max_frames, out_burst, in_burst);
+
+                if (input_stream_->requestStart() != oboe::Result::OK) {
+                    PULP_LOGW("Oboe: input-stream start failed");
+                    input_stream_->close();
+                    input_stream_.reset();
+                    input_buffer_.clear();
+                    current_input_channels_ = 0;
+                }
             }
         }
+
+        // Start output AFTER input buffer is provisioned. The audio
+        // callback will now observe a fully-constructed input_buffer_ on
+        // its first tick, not an in-progress resize.
+        if (output_stream_->requestStart() != oboe::Result::OK) return false;
+
         return true;
     }
 
@@ -198,25 +223,35 @@ private:
                     static_cast<size_t>(num_frames) * static_cast<size_t>(in_channels);
                 float* buf = input_buffer_.data();
 
-                auto result = input_stream_->read(buf, num_frames, /*timeoutNanos=*/0);
-                if (result == oboe::Result::OK) {
-                    int32_t frames_read = result.value();
-                    if (frames_read < num_frames) {
-                        // Zero-fill the tail so the callback sees a
-                        // full-sized buffer with silence for the
-                        // unavailable frames.
-                        pulp::audio::zero_fill_short_read(
-                            buf, frames_read, num_frames, in_channels);
-                        input_short_reads_.fetch_add(1, std::memory_order_relaxed);
-                    }
-                    input_data = buf;
-                } else {
-                    // Read failure (stream disconnected mid-callback): zero
-                    // the buffer and surface nullptr so the Processor knows
-                    // input isn't available this block. onErrorAfterClose
-                    // will trigger a reopen out-of-band.
-                    std::memset(buf, 0, sizeof(float) * samples_needed);
+                // Bounds guard: if Oboe delivers a callback size larger
+                // than what start() provisioned (shouldn't happen given
+                // the 4× slack, but protect against a later reroute
+                // raising FramesPerCallback), skip the input read rather
+                // than corrupt memory. Counts as a read error; callback
+                // gets input_data = nullptr for this block.
+                if (samples_needed > input_buffer_.size()) {
                     input_read_errors_.fetch_add(1, std::memory_order_relaxed);
+                } else {
+                    auto result = input_stream_->read(buf, num_frames, /*timeoutNanos=*/0);
+                    if (result == oboe::Result::OK) {
+                        int32_t frames_read = result.value();
+                        if (frames_read < num_frames) {
+                            // Zero-fill the tail so the callback sees a
+                            // full-sized buffer with silence for the
+                            // unavailable frames.
+                            pulp::audio::zero_fill_short_read(
+                                buf, frames_read, num_frames, in_channels);
+                            input_short_reads_.fetch_add(1, std::memory_order_relaxed);
+                        }
+                        input_data = buf;
+                    } else {
+                        // Read failure (stream disconnected mid-callback):
+                        // zero the buffer and surface nullptr so the
+                        // Processor knows input isn't available. The
+                        // onErrorAfterClose path reopens out-of-band.
+                        std::memset(buf, 0, sizeof(float) * samples_needed);
+                        input_read_errors_.fetch_add(1, std::memory_order_relaxed);
+                    }
                 }
             }
 
