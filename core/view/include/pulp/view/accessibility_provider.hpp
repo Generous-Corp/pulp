@@ -43,4 +43,31 @@ void shutdown_accessibility(void* handle);
 /// value updates don't need this — those fire per-property events.
 void accessibility_tree_changed(void* handle);
 
+// ── Phase 2 event-raising surface (#247) ────────────────────────────────
+//
+// Widgets call these when their accessibility-relevant state changes so
+// the platform provider can raise the matching OS event. A no-op on
+// platforms that have no provider attached (or no accessibility clients
+// listening). Safe to call from the UI thread — the implementation is
+// cheap when no assistive tech is active.
+//
+// The `handle` is the opaque returned by init_accessibility().
+
+/// Notify the provider that a View's access_value has changed. On
+/// Windows this raises UIA_AutomationPropertyChangedEvent(UIA_ValueValueProperty).
+/// On Linux AT-SPI this emits object::property-change::accessible-value.
+/// On macOS/iOS this forwards to the NSAccessibility/UIAccessibility
+/// notification APIs on the view side.
+void notify_accessibility_value_changed(void* handle, View& target);
+
+/// Notify the provider that focus moved to a different View. On Windows
+/// this raises UIA_AutomationFocusChangedEventId. On Linux AT-SPI this
+/// emits object::state-changed::focused (true on focus, false on blur).
+void notify_accessibility_focus_changed(void* handle, View& target);
+
+/// Notify the provider that a View's accessible name or role changed
+/// (e.g. a button's label was updated). Fires UIA_AutomationPropertyChangedEvent
+/// for Name / LocalizedControlType; AT-SPI object::property-change.
+void notify_accessibility_name_changed(void* handle, View& target);
+
 } // namespace pulp::view

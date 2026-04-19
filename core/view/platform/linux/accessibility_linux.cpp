@@ -113,6 +113,15 @@ void accessibility_tree_changed(void* /*handle*/) {
     // TODO: g_signal_emit_by_name(root, "children-changed::add", ...)
 }
 
+// Phase 2 (#247): cross-platform notification API. Linux AT-SPI will
+// eventually emit object::property-change and object::state-changed on
+// the per-widget AtkObjects; currently no-op until Phase 2 per-widget
+// providers land (#217 follow-up). Keeping the API surface present so
+// widget code can call these unconditionally.
+void notify_accessibility_value_changed(void* /*handle*/, View& /*target*/) {}
+void notify_accessibility_focus_changed(void* /*handle*/, View& /*target*/) {}
+void notify_accessibility_name_changed(void* /*handle*/, View& /*target*/) {}
+
 } // namespace pulp::view
 
 #endif // __linux__
