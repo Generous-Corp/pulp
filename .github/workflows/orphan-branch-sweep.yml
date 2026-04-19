@@ -222,22 +222,27 @@ jobs:
           repo='${{ github.repository }}'
           title="${TRACKING_TITLE}"
 
-          # Find any issue (open OR closed) with this exact title. If we
-          # only look at --state open, a previous sweep that closed the
-          # tracker will cause a new tracking issue to be created when
-          # orphans reappear, fragmenting history. --state all lets us
-          # reopen the existing tracker instead.
-          existing=$(
+          # Look up the tracking issue in both OPEN and CLOSED states so we
+          # can reopen an existing tracker when orphans reappear after a
+          # clean run. We capture the state alongside the number because
+          # the zero-orphan close-path below needs to avoid re-commenting
+          # and re-closing an already-closed tracker (Codex finding on
+          # #475).
+          existing_json=$(
               gh issue list \
                   --repo "$repo" \
                   --state all \
                   --search "in:title \"${title}\"" \
-                  --json number,title \
-                  --jq "[.[] | select(.title == \"${title}\")] | first | .number // empty"
+                  --json number,title,state \
+                  --jq "[.[] | select(.title == \"${title}\")] | first // {}"
           )
+          existing=$(echo "$existing_json" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('number','') or '')")
+          existing_state=$(echo "$existing_json" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('state','') or '')")
 
           if [ "$ORPHAN_COUNT" -eq 0 ]; then
-              if [ -n "${existing:-}" ]; then
+              # Only act when there's an OPEN tracker. Closed trackers stay
+              # closed — no new closure comment on every clean run.
+              if [ -n "${existing:-}" ] && [ "$existing_state" = "OPEN" ]; then
                   echo "No orphans remaining — closing tracking issue #${existing}."
                   gh issue comment "$existing" --repo "$repo" \
                       --body "Sweep on $(date -u +%Y-%m-%d) found no orphan branches. Closing."
