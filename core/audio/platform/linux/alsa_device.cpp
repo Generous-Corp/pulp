@@ -372,10 +372,35 @@ std::unique_ptr<AudioDevice> AlsaSystem::create_device(const std::string& device
     // that have both).
     std::string name = device_id.empty() ? "default" : device_id;
     snd_pcm_stream_t stream = SND_PCM_STREAM_PLAYBACK;
-    const auto out_ch = probe_max_channels(name, SND_PCM_STREAM_PLAYBACK);
-    const auto in_ch  = probe_max_channels(name, SND_PCM_STREAM_CAPTURE);
-    if (out_ch == 0 && in_ch > 0) {
-        stream = SND_PCM_STREAM_CAPTURE;
+
+    // Previously we inferred capture-only from
+    //   probe_max_channels(playback) == 0 && probe_max_channels(capture) > 0
+    // but probe_max_channels returns 0 for ANY open-failure (including
+    // transient busy-device errors). On a playback-capable card whose
+    // playback probe fails just this once, the heuristic silently
+    // flipped the device into capture mode and output callers got a
+    // useless capture stream.
+    //
+    // Distinguish "open failed" (could be transient) from "opened but
+    // reports 0 channels" (definitive not-supported) by re-opening
+    // for playback explicitly. Only downgrade to capture when playback
+    // open actually fails with a stable error (ENODEV, ENOENT) and
+    // capture succeeds. For anything else, leave the default PLAYBACK
+    // — the subsequent start() call will surface a clear error if the
+    // device truly can't play back. See #438 P1 Codex review on #387.
+    auto open_direction = [](const std::string& id,
+                             snd_pcm_stream_t s) -> int {
+        snd_pcm_t* pcm = nullptr;
+        int err = snd_pcm_open(&pcm, id.c_str(), s, SND_PCM_NONBLOCK);
+        if (pcm) snd_pcm_close(pcm);
+        return err;
+    };
+    const int play_err = open_direction(name, SND_PCM_STREAM_PLAYBACK);
+    if (play_err == -ENODEV || play_err == -ENOENT) {
+        const int cap_err = open_direction(name, SND_PCM_STREAM_CAPTURE);
+        if (cap_err == 0) {
+            stream = SND_PCM_STREAM_CAPTURE;
+        }
     }
     return std::make_unique<AlsaDevice>(name, stream);
 }
