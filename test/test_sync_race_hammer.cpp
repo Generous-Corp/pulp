@@ -135,18 +135,52 @@ TEST_CASE("SpscQueue hammer: producer + consumer for 500ms", "[concurrent][race]
         }
     });
 
+    // Gate the consumer's shutdown drain until after the producer has
+    // fully exited. Without this gate, the consumer could exit the main
+    // loop (stop observed) and try to drain the queue while the producer
+    // is still racing toward its own exit — pushing more items after the
+    // consumer thinks it's done. SPSC assumes strict single-producer, so
+    // any overlap is undefined behaviour.
+    std::atomic<bool> producer_done{false};
+
     std::thread consumer([&] {
-        while (!stop.load(std::memory_order_acquire) || produced.load() != consumed.load()) {
+        // Main hammer loop — drain concurrently while producer is pushing.
+        while (!stop.load(std::memory_order_acquire)) {
             if (auto item = q.try_pop()) {
                 (void) *item;
                 consumed.fetch_add(1, std::memory_order_relaxed);
             }
+        }
+        // Shutdown drain. The previous exit condition
+        //     `!stop || produced != consumed`
+        // relied on `produced` being up-to-date. But `produced.fetch_add`
+        // uses relaxed ordering, so the consumer could read a stale value
+        // of `produced` that happened to equal `consumed` while an item
+        // was still in the queue — exit prematurely, leave one item
+        // stranded, fail the final REQUIRE. Under CI load this reproduced
+        // in roughly 1 of 5 runs and has blocked 6 PRs today.
+        //
+        // Fix: ignore `produced` at shutdown. Wait for the producer to
+        // fully exit (via the `producer_done` flag set by main after
+        // producer.join()), then drain the queue until empty. Once the
+        // producer is verifiably done, no new items can appear — every
+        // item pushed has been observably counted in `produced`.
+        while (!producer_done.load(std::memory_order_acquire)) {
+            std::this_thread::yield();
+        }
+        while (auto item = q.try_pop()) {
+            (void) *item;
+            consumed.fetch_add(1, std::memory_order_relaxed);
         }
     });
 
     std::this_thread::sleep_for(kHammerDuration);
     stop.store(true, std::memory_order_release);
     producer.join();
+    // Producer has fully exited — its final relaxed fetch_add on
+    // `produced` is now visible to main (join synchronizes). Signal the
+    // consumer that it's safe to drain.
+    producer_done.store(true, std::memory_order_release);
     consumer.join();
 
     INFO("produced=" << produced.load() << " consumed=" << consumed.load());
