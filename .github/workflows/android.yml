@@ -123,7 +123,7 @@ jobs:
   # is a separate slice.
   android-emulator-smoke:
     name: Android emulator smoke (native-init)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     needs: android-build
     timeout-minutes: 45
 
