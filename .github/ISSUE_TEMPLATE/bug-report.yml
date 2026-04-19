@@ -7,11 +7,11 @@ body:
     attributes:
       value: >
         Thanks for filing a bug. The more specific the repro, the faster
-        someone can land a fix. If you'd like Pulp to collect a diagnostic
-        bundle (anonymized; you see every file before upload), run
-        `pulp report bug` and attach the resulting bundle — the CLI
-        redacts your home directory, username, hostname, IPs, MAC
-        addresses, and common secret patterns before producing anything.
+        someone can land a fix. Logs, stack traces, and `pulp doctor`
+        output are the most useful attachments today; an automated
+        diagnostic-bundle CLI (`pulp report bug`) is on the roadmap
+        (tracking in #413) and this template will point at it once it
+        ships.
 
   - type: input
     id: summary
@@ -91,9 +91,7 @@ body:
       label: Logs / stack trace
       description: >
         Paste any crash log, stderr output, or `pulp doctor` output.
-        If you'd rather share a Pulp diagnostic bundle with automatic
-        anonymization, run `pulp report bug --attach` and drag the bundle
-        in below.
+        Redact paths or other sensitive content before pasting if needed.
       render: shell
 
   - type: checkboxes
