@@ -145,6 +145,28 @@ TEST_CASE("Timer basic operation", "[events][timer]") {
         REQUIRE(wait_until([&] { return count.load() > captured; }, 500ms));
         timer.stop();
     }
+
+    SECTION("start() is idempotent when already running (#438 P1 / #428)") {
+        // Before the fix, an unconditional `alive_ = make_shared<>`
+        // in start() races against schedule_next()'s `auto alive = alive_;`
+        // if a second start() lands while the timer is already active.
+        // After the fix, start() early-returns when active_ is true.
+        //
+        // The test can't deterministically prove the race is gone (TSan
+        // does that on the CI sanitizer job), but it can assert that
+        // calling start() twice in a row doesn't break repeat behavior
+        // or double-schedule.
+        std::atomic<int> count{0};
+        Timer timer(loop, 10ms, [&] { count.fetch_add(1); }, true);
+        timer.start();
+        timer.start();  // second start — should no-op, not reschedule
+        REQUIRE(wait_until([&] { return count.load() >= 3; }, 500ms));
+        timer.stop();
+        auto captured = count.load();
+        std::this_thread::sleep_for(50ms);
+        // Still stopped after the double-start + single-stop pair:
+        REQUIRE(count.load() == captured);
+    }
 }
 
 // ── EventLoop lifecycle edges ───────────────────────────────────────────

@@ -16,11 +16,21 @@ Timer::~Timer() {
 }
 
 void Timer::start() {
+    // Idempotent against concurrent schedule_next() lambdas copying
+    // alive_. If start() is called while the timer is already active,
+    // skipping the reassignment avoids an unsynchronized write to the
+    // shared_ptr that an in-flight event-loop copy is reading — the
+    // original #414 race pattern. See #438 P1 Codex review on #428.
+    if (active_.load(std::memory_order_acquire)) {
+        return;
+    }
+
     // Fresh sentinel for this lifecycle. Safe to reassign alive_ here
     // because start() runs on the owner thread — no in-flight dispatch
-    // lambda can be copying alive_ concurrently at this point; any
-    // prior-cycle lambdas hold their own shared_ptr copies captured
-    // before stop() flipped them to false.
+    // lambda can be copying alive_ concurrently at this point (active_
+    // is false, schedule_next() gated on it), and any prior-cycle
+    // lambdas hold their own shared_ptr copies captured before stop()
+    // flipped them to false.
     //
     // Previously this reassignment lived in stop(), racing with
     // schedule_next()'s `auto alive = alive_;` copy on the event-loop
