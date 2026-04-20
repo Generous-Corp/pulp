@@ -172,18 +172,30 @@ def main() -> int:
         )
     )
 
-    base_mb = baseline.get("memory_bandwidth_fraction", 0.0)
-    curr_mb = current.get("memory_bandwidth_fraction", 0.0)
+    # Codex P1 on #518: missing `memory_bandwidth_fraction` is UNKNOWN,
+    # not zero. Defaulting to 0.0 would silently emit "below threshold —
+    # ROI may be limited" for snapshots where the field was never
+    # captured (schema drift, partial profiling runs, etc.) and mask a
+    # real missing-data problem. Distinguish "absent" from "0%".
+    base_mb = baseline.get("memory_bandwidth_fraction")
+    curr_mb = current.get("memory_bandwidth_fraction")
     out.append("## Memory-bandwidth fraction")
     out.append("")
-    out.append(f"- Baseline: {fmt_pct(base_mb)}")
-    out.append(f"- Current:  {fmt_pct(curr_mb)}")
-    out.append(f"- Δ:        {fmt_delta(base_mb, curr_mb)}")
+    out.append(f"- Baseline: {fmt_pct(base_mb) if base_mb is not None else '(not reported)'}")
+    out.append(f"- Current:  {fmt_pct(curr_mb) if curr_mb is not None else '(not reported)'}")
+    if base_mb is not None and curr_mb is not None:
+        out.append(f"- Δ:        {fmt_delta(base_mb, curr_mb)}")
     out.append(f"- Threshold: {fmt_pct(args.threshold)} of frame budget")
     out.append("")
 
     verdict = []
-    if base_mb >= args.threshold:
+    if base_mb is None:
+        verdict.append(
+            "**Baseline** did not report `memory_bandwidth_fraction` — "
+            "threshold evaluation skipped. This field is required for the "
+            "zero-copy go/no-go decision; check the capture harness."
+        )
+    elif base_mb >= args.threshold:
         verdict.append(
             f"**Baseline** exceeds {fmt_pct(args.threshold)} threshold — "
             "zero-copy has leverage here."
@@ -193,8 +205,19 @@ def main() -> int:
             f"**Baseline** below {fmt_pct(args.threshold)} threshold — "
             "zero-copy ROI may be limited on this widget."
         )
-    if curr_mb < base_mb:
-        saved = (base_mb - curr_mb) / base_mb
+
+    if curr_mb is None:
+        verdict.append(
+            "**Current** did not report `memory_bandwidth_fraction` — "
+            "no before/after comparison possible on this metric."
+        )
+    elif base_mb is None:
+        verdict.append(
+            "Current reported the fraction but baseline didn't — record "
+            "a fresh baseline before drawing conclusions."
+        )
+    elif curr_mb < base_mb:
+        saved = (base_mb - curr_mb) / base_mb if base_mb > 0 else 0.0
         verdict.append(
             f"**Current** reduced memory-bandwidth fraction by {fmt_pct(saved)} "
             "relative to baseline."
