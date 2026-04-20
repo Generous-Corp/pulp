@@ -7,6 +7,8 @@
 #include <cmath>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
+#include <string>
 #include <thread>
 #include <vector>
 
@@ -48,6 +50,133 @@ TEST_CASE("PluginScanner scan runs without crash", "[host][scanner]") {
     auto plugins = scanner.scan(opts);
     // May find real plugins on the system — just verify no crash
     REQUIRE(plugins.size() >= 0);
+}
+
+// Issue #491 P2: scan_lv2_bundle must set unique_id to the plugin URI
+// parsed from manifest.ttl, not the filesystem stem. This keeps
+// graph_serializer rehydration stable across sessions even when two
+// LV2 bundles share a directory name.
+TEST_CASE("PluginScanner LV2 bundle uses URI from manifest.ttl as unique_id",
+          "[host][scanner][issue-491]") {
+    namespace fs = std::filesystem;
+    auto tmp = fs::temp_directory_path() / "pulp_lv2_scan_test.lv2";
+    std::error_code ec;
+    fs::remove_all(tmp, ec);
+    fs::create_directories(tmp);
+
+    // Minimal manifest.ttl in the canonical LV2 shape.
+    const char* manifest = R"(
+@prefix lv2:  <http://lv2plug.in/ns/lv2core#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+
+<http://example.com/plugins/PulpTestCompressor> a lv2:Plugin ;
+    lv2:binary <plugin.so> ;
+    rdfs:seeAlso <plugin.ttl> .
+)";
+    {
+        std::ofstream f(tmp / "manifest.ttl");
+        REQUIRE(f.good());
+        f << manifest;
+    }
+
+    ScanOptions opts;
+    opts.scan_vst3 = false;
+    opts.scan_clap = false;
+    opts.scan_au = false;
+    opts.scan_lv2 = true;
+    opts.extra_paths.push_back(tmp.parent_path().string());
+
+    PluginScanner scanner;
+    auto all = scanner.scan(opts);
+    bool found = false;
+    for (const auto& p : all) {
+        if (p.path == tmp.string()) {
+            found = true;
+            // The stable identifier is the URI from manifest.ttl.
+            REQUIRE(p.unique_id == "http://example.com/plugins/PulpTestCompressor");
+            // unique_id must not collapse to the filesystem stem.
+            REQUIRE(p.unique_id != p.name);
+            REQUIRE(p.unique_id.find("http") != std::string::npos);
+        }
+    }
+    REQUIRE(found);
+
+    fs::remove_all(tmp, ec);
+}
+
+TEST_CASE("PluginScanner LV2 bundle falls back to stem when manifest.ttl missing",
+          "[host][scanner][issue-491]") {
+    namespace fs = std::filesystem;
+    auto tmp = fs::temp_directory_path() / "pulp_lv2_nomanifest_test.lv2";
+    std::error_code ec;
+    fs::remove_all(tmp, ec);
+    fs::create_directories(tmp);
+
+    ScanOptions opts;
+    opts.scan_vst3 = false;
+    opts.scan_clap = false;
+    opts.scan_au = false;
+    opts.scan_lv2 = true;
+    opts.extra_paths.push_back(tmp.parent_path().string());
+
+    PluginScanner scanner;
+    auto all = scanner.scan(opts);
+    for (const auto& p : all) {
+        if (p.path == tmp.string()) {
+            // Graceful fallback: same as pre-fix behaviour.
+            REQUIRE(p.unique_id == p.name);
+        }
+    }
+
+    fs::remove_all(tmp, ec);
+}
+
+// Issue #491 P2: scan_vst3_bundle must set unique_id to the VST3 FUID
+// (PClassInfo::cid serialized as 32-char lowercase hex) when the SDK
+// is available, not the display name. This walks any VST3 plugins
+// installed on the CI host; the check is a structural assertion —
+// unique_id must be a 32-char lowercase hex string or the stem
+// fallback. CI hosts without a VST3 install skip gracefully.
+TEST_CASE("PluginScanner VST3 bundle uses FUID as unique_id when SDK available",
+          "[host][scanner][issue-491]") {
+    PluginScanner scanner;
+    ScanOptions opts;
+    opts.scan_clap = false;
+    opts.scan_au = false;
+    opts.scan_lv2 = false;
+    opts.scan_vst3 = true;
+    auto plugins = scanner.scan(opts);
+
+    int fuid_shaped = 0;
+    int total_vst3 = 0;
+    for (const auto& p : plugins) {
+        if (p.format != PluginFormat::VST3) continue;
+        total_vst3++;
+        // unique_id must either:
+        //  (a) equal the filesystem stem — fallback path when the
+        //      bundle couldn't be opened or VST3 SDK wasn't linked,
+        //      matching the pre-fix best-effort contract; or
+        //  (b) be a 32-char lowercase hex FUID.
+        // Anything else is a regression.
+        if (p.unique_id == p.name) continue;
+        REQUIRE(p.unique_id.size() == 32);
+        for (char c : p.unique_id) {
+            const bool is_hex = (c >= '0' && c <= '9')
+                             || (c >= 'a' && c <= 'f');
+            REQUIRE(is_hex);
+        }
+        fuid_shaped++;
+    }
+    // No strict "must find FUID" assertion — plugin_slot_vst3 links
+    // live behind PULP_HAS_VST3 and CI hosts vary. If any VST3 opens
+    // at all, fuid_shaped should be > 0; the loop above fails loudly
+    // on malformed IDs either way.
+    if (total_vst3 > 0) {
+        SUCCEED("scanned " << total_vst3 << " VST3 plugin(s), "
+                           << fuid_shaped << " with FUID-shaped unique_id");
+    } else {
+        SUCCEED("no VST3 plugins installed — structural test skipped");
+    }
 }
 
 // ── PluginSlot tests ────────────────────────────────────────────────────

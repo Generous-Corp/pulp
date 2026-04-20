@@ -183,3 +183,44 @@ scanner-identity-first; missing plugins surface in
 created with null slots so connection ids stay stable. `GraphNode`
 gained a `plugin_info` member that survives a failed slot load so
 re-saving an unresolved-plugin node preserves its identity.
+
+## Scanner identity rules (issue #491 P2)
+
+`PluginScanner` produces `PluginInfo::unique_id` values that
+`graph_serializer.cpp` keys against on rehydration. Two plugins with
+the same *display name* used to collide silently — the identity
+contract now is:
+
+- **VST3**: the first audio-effect class's CID from
+  `Contents/Resources/moduleinfo.json`, normalized to a 32-char
+  lowercase hex string. Read via `scanner_vst3.cpp` — **no dlopen at
+  scan time**. This is deliberate: opening random VST3 bundles during
+  a bulk scan used to crash on Visage/JUCE-based plugins with
+  duplicate ObjC classes and on plugins whose `bundleEntry()` requires
+  a real `CFBundleRef`. moduleinfo.json is Steinberg's declarative
+  discovery format (VST 3.7+) and lets us read identity without
+  running any plugin code.
+- **LV2**: the plugin URI from `manifest.ttl` (the same URI
+  `plugin_slot_lv2.cpp` uses at load time to pick a descriptor).
+  Parsed via a tiny regex — we deliberately don't pull in
+  lilv/serd/sord for a single-field read.
+- **CLAP**: `desc->id` from `clap_plugin_descriptor_t`, extracted by
+  briefly loading the bundle in `scanner_clap.cpp`. CLAP bundles are
+  the only format where scan-time dlopen is safe — the CLAP ABI is
+  designed for cheap metadata reads and the bundles don't ship ObjC.
+- **AU**: scanned by `AudioComponent` API, not file-system walk. The
+  AU component's type/subtype/manu four-char codes serve as identity.
+
+Bundles that don't expose their identity through the safe path (e.g.
+VST3 without moduleinfo.json) fall back to the directory stem. The
+graph_serializer rehydration handles stem IDs the same way it always
+did — best-effort — so the scanner stays safe across a user's entire
+plugin folder.
+
+**Placeholder plugin node**: when graph_serializer can't resolve a
+saved plugin at load time, it creates a Plugin node with a null
+PluginSlot so topology survives. `SignalGraph::process()` treats
+null-slot nodes as deterministic input→output pass-through (or
+zero-fill on channel-count mismatch). Don't assume a Plugin node
+always has a live slot — always null-check `plugins[id]` before
+dereferencing.

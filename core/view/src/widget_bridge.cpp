@@ -16,6 +16,7 @@
 #include <pulp/platform/popup_menu.hpp>
 #include <pulp/platform/file_dialog.hpp>
 #include <pulp/platform/clipboard.hpp>
+#include <pulp/runtime/base64.hpp>
 #include <web_compat_preludes_gen.hpp>
 #include <thread>
 #include <chrono>
@@ -5075,8 +5076,27 @@ fn main(@location(0) uv : vec2<f32>) -> @location(0) vec4<f32> {
                                              wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::CopySrc;
                             auto gpu_buf = device_ptr->CreateBuffer(&buf_desc);
 
-                            // TODO: decode base64 data and write to buffer via queue.WriteBuffer
-                            // For now, the buffer is created with zeroed data
+                            // Issue #491 P2: decode the base64 payload the JS
+                            // serializer (web-compat-gpu-buffered.js) attaches
+                            // as `bufferDataBase64` and upload it to the GPU
+                            // buffer. Without this every compute dispatch
+                            // runs against zeroed buffers regardless of what
+                            // the JS shader seeded them with.
+                            if (entry.hasObjectMember("bufferDataBase64") && buf_size > 0) {
+                                auto b64 = entry["bufferDataBase64"].getWithDefault<std::string>("");
+                                if (!b64.empty()) {
+                                    if (auto decoded = runtime::base64_decode(b64)) {
+                                        const auto& bytes = *decoded;
+                                        const uint64_t to_copy = std::min<uint64_t>(
+                                            bytes.size(), buf_size);
+                                        if (to_copy > 0) {
+                                            queue_ptr->WriteBuffer(gpu_buf, 0,
+                                                                   bytes.data(),
+                                                                   static_cast<size_t>(to_copy));
+                                        }
+                                    }
+                                }
+                            }
 
                             bge.buffer = gpu_buf;
                             bge.size = buf_size;

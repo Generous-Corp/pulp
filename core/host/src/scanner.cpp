@@ -8,10 +8,59 @@
 #include <pulp/runtime/system.hpp>
 #include <filesystem>
 #include <algorithm>
+#include <fstream>
+#include <regex>
+#include <string>
 
 namespace fs = std::filesystem;
 
 namespace pulp::host {
+
+namespace {
+
+// Parse the plugin URI out of an LV2 bundle's manifest.ttl so we can set
+// PluginInfo::unique_id to the stable LV2 URI instead of the directory
+// name. The URI is what `plugin_slot_lv2.cpp` keys against when selecting
+// a descriptor at load time, and it's what graph_serializer rehydration
+// uses to re-find the plugin across sessions (filenames collide; URIs
+// don't). Issue #491 P2.
+//
+// We only support the common manifest.ttl shape:
+//   <URI> a lv2:Plugin ;  ...
+// This matches LV2's canonical manifest pattern. If we can't find a URI
+// stanza we fall back to the previous behaviour (directory stem) so the
+// scanner stays best-effort.
+std::string parse_lv2_plugin_uri(const std::string& bundle_dir) {
+    std::error_code ec;
+    auto manifest = fs::path(bundle_dir) / "manifest.ttl";
+    if (!fs::exists(manifest, ec)) return {};
+
+    std::ifstream f(manifest);
+    if (!f) return {};
+    std::string content((std::istreambuf_iterator<char>(f)),
+                        std::istreambuf_iterator<char>());
+
+    // Match `<URI>` followed (possibly across whitespace/newlines) by an
+    // `a` predicate that names lv2:Plugin (directly or via an alias).
+    std::regex re(R"(<([^>]+)>\s*(?:[^;.]*?;\s*)?a\s+(?:[A-Za-z_][\w-]*:)?(?:[A-Za-z_][\w-]*\s*,\s*)*lv2:Plugin)",
+                  std::regex::ECMAScript);
+    std::smatch m;
+    if (std::regex_search(content, m, re)) {
+        return m[1].str();
+    }
+    return {};
+}
+
+}  // namespace
+
+// Forward-declared in scanner_vst3.cpp. Reads
+// Contents/Resources/moduleinfo.json and returns the first audio-effect
+// class's CID normalized to a 32-char lowercase hex string. Returns
+// empty string when moduleinfo.json is missing or unparseable — the
+// scanner then falls back to the directory stem. No dlopen, no
+// bundleEntry: safe to call across an entire plugin folder. Issue
+// #491 P2.
+std::string read_vst3_bundle_fuid(const std::string& path);
 
 std::vector<std::string> PluginScanner::default_paths(PluginFormat format) {
     std::vector<std::string> paths;
@@ -86,7 +135,22 @@ PluginInfo PluginScanner::scan_vst3_bundle(const std::string& path) {
     info.path = path;
     info.format = PluginFormat::VST3;
     info.name = fs::path(path).stem().string();
-    info.unique_id = info.name; // TODO: read moduleinfo.json for proper FUID
+
+    // Issue #491 P2: prefer the real VST3 FUID (`PClassInfo::cid`) over
+    // the display name so graph_serializer rehydration keys against a
+    // stable 32-char plugin identity. Two plugins that happen to share
+    // a display name (e.g. "Compressor.vst3") used to collide when the
+    // graph serialized and reloaded across sessions. We read the CID
+    // from Contents/Resources/moduleinfo.json — Steinberg's declarative
+    // bundle metadata — so we never dlopen the plugin at scan time.
+    std::string fuid = read_vst3_bundle_fuid(path);
+    if (!fuid.empty()) {
+        info.unique_id = std::move(fuid);
+        return info;
+    }
+    // Fallback: bundle doesn't ship moduleinfo.json. Keep the old
+    // stem-based identifier so rehydration remains best-effort.
+    info.unique_id = info.name;
     return info;
 }
 
@@ -113,7 +177,18 @@ PluginInfo PluginScanner::scan_lv2_bundle(const std::string& path) {
     info.path = path;
     info.format = PluginFormat::LV2;
     info.name = fs::path(path).stem().string();
-    info.unique_id = info.name; // TODO: parse manifest.ttl for plugin URI
+
+    // Issue #491 P2: prefer the plugin URI from manifest.ttl. The URI is
+    // what plugin_slot_lv2.cpp uses at load time to select the correct
+    // descriptor, and what graph_serializer rehydration matches against
+    // across sessions. Falls back to the directory stem on parse failure
+    // so the scanner stays best-effort.
+    std::string uri = parse_lv2_plugin_uri(path);
+    if (!uri.empty()) {
+        info.unique_id = std::move(uri);
+    } else {
+        info.unique_id = info.name;
+    }
     return info;
 }
 
