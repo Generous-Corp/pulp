@@ -28,7 +28,9 @@
         "core/midi/platform/android/**",
         "android/**",
         "tools/cmake/PulpAndroid.cmake",
-        "tools/build-skia-android.sh"
+        "tools/build-skia-android.sh",
+        "tools/scripts/android_smoke.sh",
+        "docs/guides/platforms/android.md"
       ]
     },
     "ci": {

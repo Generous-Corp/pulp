@@ -1,9 +1,10 @@
 ---
 name: android
-description: Android platform development for Pulp — NDK cross-compilation, Oboe audio, Dawn/Skia GPU rendering, JNI bridge, touch interaction, emulator workflows. Covers build, deploy, debug, and the gotchas discovered during bringup.
+description: Android platform development for Pulp — NDK cross-compilation, Oboe audio, Dawn/Skia GPU rendering, JNI bridge, touch interaction, emulator workflows, end-to-end smoke validation (#337). Covers build, deploy, debug, and the gotchas discovered during bringup.
 requires:
   scripts:
     - tools/cmake/PulpAndroid.cmake
+    - tools/scripts/android_smoke.sh
   tools:
     - adb
     - emulator
@@ -344,6 +345,79 @@ adb logcat -s PulpAudio PulpRender Pulp
 # Clear and watch
 adb logcat -c && adb logcat -s Pulp
 ```
+
+## End-to-end smoke (#337)
+
+`tools/scripts/android_smoke.sh` is the single-invocation validator for
+the full generator → build → install → launch → render → audio →
+permission → lifecycle → shutdown path. It runs against whatever device
+or emulator `adb devices` reports; it does not start its own emulator.
+
+```bash
+# Full cycle (builds APK + runs smoke) — about 3 min cold on M-series
+tools/scripts/android_smoke.sh
+
+# Fast loop — reuse existing APK (~5s)
+tools/scripts/android_smoke.sh --skip-build
+
+# Skia-Android prebuilts missing — continue without Dawn/Skia
+tools/scripts/android_smoke.sh --skip-build --allow-no-gpu
+
+# ctest integration (gated behind opt-in env var)
+PULP_ANDROID_SMOKE_ENABLED=1 ctest --test-dir build -R android-smoke
+```
+
+### Stage ordering gotchas
+
+Three ordering rules the script enforces — violating any of them
+breaks validation:
+
+1. **Lifecycle before permissions.** `pm revoke RECORD_AUDIO` kills the
+   app process (standard Android behavior for a granted-and-in-use
+   permission). The smoke runs `exercise_lifecycle` before
+   `exercise_permissions` so the background/foreground transition is
+   observed in a live process.
+2. **Cursor-advance only in lifecycle.** `nativeOnForeground` fires
+   multiple times at app startup (onCreate, onResume). For the `--
+   foreground bring-back` check to see the POST-HOME foreground and
+   not an initial one, the lifecycle stage passes `advance` to
+   `wait_for_logcat` to skip past prior matches. Non-lifecycle stages
+   leave the cursor at 0 because stage order on Android is
+   non-deterministic — DemoSynth's `playing` marker can log BEFORE
+   Dawn's failure marker despite being fired from a later code path.
+3. **Permission verification via `dumpsys`, not via callback.**
+   `pm grant` / `pm revoke` flip the runtime-permission state but do
+   **not** fire Kotlin's `ActivityResultContracts` callback — so
+   `permissions.cpp`'s "Permission result" log line never shows up on
+   the `pm`-driven path. The smoke confirms the grant flipped via
+   `dumpsys package com.pulp.app | grep -A1 RECORD_AUDIO` rather than
+   a logcat marker.
+
+### Log marker inventory
+
+Per-stage, the script greps for these markers (tag in parens):
+
+| Stage | Marker | Tag |
+|-------|--------|-----|
+| JNI load | `JNI_OnLoad: Pulp native bridge initialized` | `Pulp` |
+| Surface | `Android GPU surface: ANativeWindow received` | `Pulp` |
+| Dawn OK | `Dawn initialized` | `Pulp` |
+| Dawn bad | `Dawn initialization failed` / `failed to create Dawn GpuSurface` | `Pulp` |
+| Skia | `Skia Graphite context created` / `Dawn-only mode` | `Pulp` |
+| Audio | `DemoSynth: playing` | `PulpAudio` |
+| Background | `nativeOnBackground` | `Pulp` |
+| Foreground | `nativeOnForeground` | `Pulp` |
+
+Note: `demo_synth.cpp` uses `PULP_LOG_TAG="PulpAudio"`, everything else
+uses `Pulp`. Pass both tags (space-separated) when grepping audio.
+
+### CI gate
+
+`.github/workflows/android.yml` has an `android-emulator-test` job
+gated on `vars.PULP_ANDROID_EMULATOR_ENABLED`. On `macos-latest` (Apple
+Silicon) the arm64-v8a emulator hits `HV_UNSUPPORTED` — keep the gate
+OFF until Linux arm64 + KVM or x86\_64 APK lanes land (see #487).
+Run the smoke locally in the meantime.
 
 ## Critical Gotchas
 

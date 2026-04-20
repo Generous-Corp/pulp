@@ -26,6 +26,23 @@ if(UNIX)
     set_tests_properties(retry-git-clone PROPERTIES TIMEOUT 30)
 endif()
 
+# Android end-to-end smoke (issue #337). Runs the tools/scripts/android_smoke.sh
+# against a locally attached emulator or device. Skipped by default because
+# the smoke requires an already-booted AVD/device and an arm64-v8a APK —
+# set `PULP_ANDROID_SMOKE_ENABLED=1` in the environment to opt in. The
+# script returns 77 when the env var is unset (ctest SKIP_RETURN_CODE).
+# See docs/guides/platforms/android.md for the prereq list.
+if(UNIX)
+    add_test(NAME android-smoke
+        COMMAND bash ${CMAKE_SOURCE_DIR}/tools/scripts/android_smoke.sh
+                --skip-build --allow-no-gpu)
+    set_tests_properties(android-smoke PROPERTIES
+        ENVIRONMENT "PULP_ANDROID_SMOKE_FORCE_CTEST_SKIP=1"
+        SKIP_RETURN_CODE 77
+        TIMEOUT 600
+        LABELS "android;smoke;manual")
+endif()
+
 # Validation contract tests (Phase 1 — schema and reality snapshot)
 add_executable(pulp-test-validation-contract test_validation_contract.cpp)
 target_link_libraries(pulp-test-validation-contract PRIVATE Catch2::Catch2WithMain)
