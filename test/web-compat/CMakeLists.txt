@@ -103,3 +103,16 @@ elseif(UNIX)
     target_link_options(pulp-test-minimal-append PRIVATE -Wl,-z,stacksize=16777216)
 endif()
 catch_discover_tests(pulp-test-minimal-append)
+
+# #542 regression: headless loader loops must flush requestAnimationFrame
+# callbacks, not just microtasks, or three.webgpu.js-style demos hang at
+# status: 'starting' on the --capture path.
+add_executable(pulp-test-headless-frame-pump test_headless_frame_pump.cpp)
+target_link_libraries(pulp-test-headless-frame-pump PRIVATE pulp::view Catch2::Catch2WithMain)
+target_include_directories(pulp-test-headless-frame-pump PRIVATE ${WEBCOMPAT_INCLUDE_DIR})
+if(APPLE)
+    target_link_options(pulp-test-headless-frame-pump PRIVATE -Wl,-stack_size,0x2000000)
+elseif(UNIX)
+    target_link_options(pulp-test-headless-frame-pump PRIVATE -Wl,-z,stacksize=16777216)
+endif()
+catch_discover_tests(pulp-test-headless-frame-pump)

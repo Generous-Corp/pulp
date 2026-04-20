@@ -1318,15 +1318,27 @@ bool load_demo(DemoEnvironment& env, int width, int height, DemoMode mode, std::
             module_error = error;
         });
 
+    // Drain microtasks AND pump requestAnimationFrame callbacks while waiting for
+    // the module's top-level promise to settle. Without servicing frame callbacks
+    // here, a headless `--capture` run hangs at `status: 'starting'` because the
+    // frame clock (normally driven by the windowed NSTimer/run_event_loop) never
+    // ticks, so any rAF registered by three.webgpu.js / OrbitControls during the
+    // `await renderer.init()` chain never fires and the module promise stays
+    // pending. Fixes #542.
     for (int i = 0; i < 1024; ++i) {
+        env.advance_sources(1.0f / 60.0f);
+        if (env.bridge) env.bridge->service_frame_callbacks();
         env.engine.pump_message_loop();
-        const auto status = eval_string(env.engine, "globalThis.__pulpThreeDemoState && globalThis.__pulpThreeDemoState.status || ''");
+        const auto status = eval_string(
+            env.engine,
+            "globalThis.__pulpThreeDemoState && globalThis.__pulpThreeDemoState.status || ''");
         if (status == "ready" || status == "error") {
             break;
         }
     }
 
     for (int i = 0; i < 64; ++i) {
+        if (env.bridge) env.bridge->service_frame_callbacks();
         env.engine.pump_message_loop();
     }
 
