@@ -53,7 +53,34 @@ def md_to_html(md: str) -> str:
             in_table = False
 
     def inline(text):
-        # Code spans first (protect from other transforms)
+        # Order matters: links FIRST (before code-span split) so link text
+        # containing backticks — e.g. [`DEPENDENCIES.md`](...) — is kept
+        # intact. Previous order split on backticks first, which shattered
+        # the [...](...) brackets and left literal `[` / `](url)` in the
+        # output. Inside link text we still honour backticks as code.
+        def rewrite_link(m):
+            link_text, url = m.group(1), m.group(2)
+            if '.md' in url and not url.startswith('http'):
+                url = url.replace('.md', '.html')
+                # Strip path prefixes — all pages are at root level
+                # But preserve anchors: modules.html#format → modules.html#format
+                anchor = ''
+                if '#' in url:
+                    url, anchor = url.split('#', 1)
+                    anchor = '#' + anchor
+                url = url.split('/')[-1] + anchor
+            # Render backticks inside link text as inline <code>.
+            inner_parts = re.split(r'(`[^`]+`)', link_text)
+            rendered = []
+            for ip in inner_parts:
+                if ip.startswith('`') and ip.endswith('`'):
+                    rendered.append(f'<code>{html.escape(ip[1:-1])}</code>')
+                else:
+                    rendered.append(ip)
+            return f'<a href="{url}">{"".join(rendered)}</a>'
+        text = re.sub(r'\[([^\]]+)\]\(([^)]+)\)', rewrite_link, text)
+
+        # Code spans (after links, so backticks inside links were already handled)
         parts = re.split(r'(`[^`]+`)', text)
         result = []
         for part in parts:
@@ -65,20 +92,6 @@ def md_to_html(md: str) -> str:
                 p = re.sub(r'__(.+?)__', r'<strong>\1</strong>', p)
                 p = re.sub(r'\*(.+?)\*', r'<em>\1</em>', p)
                 p = re.sub(r'_(.+?)_', r'<em>\1</em>', p)
-                # Links: [text](url) — rewrite .md refs to .html
-                def rewrite_link(m):
-                    text, url = m.group(1), m.group(2)
-                    if '.md' in url and not url.startswith('http'):
-                        url = url.replace('.md', '.html')
-                        # Strip path prefixes — all pages are at root level
-                        # But preserve anchors: modules.html#format → modules.html#format
-                        anchor = ''
-                        if '#' in url:
-                            url, anchor = url.split('#', 1)
-                            anchor = '#' + anchor
-                        url = url.split('/')[-1] + anchor
-                    return f'<a href="{url}">{text}</a>'
-                p = re.sub(r'\[([^\]]+)\]\(([^)]+)\)', rewrite_link, p)
                 result.append(p)
         return ''.join(result)
 
