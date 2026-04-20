@@ -1451,3 +1451,17 @@ You don't need the same VM setup as the original developer. Options:
 - **Physical machines**: A spare Linux box or Windows machine on your network works fine.
 
 Local CI config is intentionally gitignored. Keep your host topology local, and prefer the machine-global config path so every worktree uses the same host map by default.
+
+## Troubleshooting
+
+### `JSONDecodeError` on Shipyard queue file
+
+Shipyard's local job queue lives at `~/Library/Application Support/shipyard/queue/queue.json` on macOS (`~/AppData/Local/shipyard/queue/queue.json` on Windows, `${XDG_STATE_HOME:-~/.local/state}/shipyard/queue/queue.json` on Linux). On rare crashes Shipyard can truncate this file to zero bytes, which then breaks every subsequent invocation with a `JSONDecodeError`.
+
+Recovery (run once):
+
+```bash
+echo '{"jobs": []}' > ~/Library/Application\ Support/shipyard/queue/queue.json
+```
+
+Re-running `tools/install-shipyard.sh` also performs this reset automatically. Tracked as #528.

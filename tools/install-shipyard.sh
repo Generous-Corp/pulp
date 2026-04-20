@@ -192,6 +192,32 @@ chmod +x "$INSTALLED"
 ln -sf "$INSTALLED" "$SYMLINK"
 echo "→ Symlinked $SYMLINK → $INSTALLED"
 
+# ── Queue-file truncation recovery (#528) ───────────────────────────────────
+# A crash between open(O_TRUNC) and the subsequent write() in Shipyard can
+# leave the machine-global job queue at zero bytes. Any subsequent Shipyard
+# invocation then dies with JSONDecodeError, which blocks autonomous
+# ship cycles. Defensively re-initialize the file when we see it truncated.
+#
+# Platform layout matches shipyard.core.config._default_state_dir():
+#   macOS   → ~/Library/Application Support/shipyard/queue/queue.json
+#   Windows → ~/AppData/Local/shipyard/queue/queue.json
+#   Linux   → ~/.local/state/shipyard/queue/queue.json
+
+case "$PLATFORM" in
+    darwin-*)  SHIPYARD_STATE_DIR="$HOME/Library/Application Support/shipyard" ;;
+    windows-*) SHIPYARD_STATE_DIR="$HOME/AppData/Local/shipyard" ;;
+    linux-*)   SHIPYARD_STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/shipyard" ;;
+    *)         SHIPYARD_STATE_DIR="" ;;
+esac
+
+if [ -n "$SHIPYARD_STATE_DIR" ]; then
+    SHIPYARD_QUEUE_FILE="$SHIPYARD_STATE_DIR/queue/queue.json"
+    if [ -f "$SHIPYARD_QUEUE_FILE" ] && [ ! -s "$SHIPYARD_QUEUE_FILE" ]; then
+        echo "→ Shipyard queue file is empty — reinitializing (#528)"
+        echo '{"jobs": []}' > "$SHIPYARD_QUEUE_FILE"
+    fi
+fi
+
 # ── Final report ────────────────────────────────────────────────────────────
 
 echo ""
