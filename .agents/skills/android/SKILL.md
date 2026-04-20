@@ -874,7 +874,14 @@ Falls back to C++ widget hierarchy if JS fails (any exception → catch → C++ 
 ---
 
 *Android CLI integration last verified against Google's docs:
-2026-04-18 (Pulp #389). New CLI commands, install-URL changes, and
+2026-04-21 (spike #355 follow-up, CLI 0.7.15232955). Spike report:
+`planning/android-cli-agent-control-spike-2026-04-21.md` —
+confirms 0.7.15232955 has no `logcat`/`pm`/`am`/`input`/`build`
+wrappers, so `android_smoke.sh` and `pulp build` stay on raw
+adb/Gradle. Useful adopt-opportunistically surfaces: `layout -p`
+(JSON UI hierarchy), `screen capture --annotate` + `screen
+resolve` (label-based tap coords), `describe` (JSON project
+metadata). New CLI commands, install-URL changes, and
 known-issue resolutions are tracked by the planned
 `android-cli-monitor` workflow (#390) which polls Google's docs
 twice a month and files an issue when the surface drifts. Until
