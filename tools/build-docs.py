@@ -55,11 +55,41 @@ def md_to_html(md: str) -> str:
             in_table = False
 
     def inline(text):
-        # Order matters: links FIRST (before code-span split) so link text
-        # containing backticks — e.g. [`DEPENDENCIES.md`](...) — is kept
-        # intact. Previous order split on backticks first, which shattered
-        # the [...](...) brackets and left literal `[` / `](url)` in the
-        # output. Inside link text we still honour backticks as code.
+        # Pipeline (order matters — mis-ordering regressed twice):
+        #
+        #   1. Tokenize inline code spans into opaque placeholders so the
+        #      link regex below can never look inside them. This is what
+        #      CommonMark calls "code span precedence over link": a backtick
+        #      span like `` `[x](y)` `` must render as literal `[x](y)`
+        #      inside <code>, not as a link.
+        #   2. Rewrite links. Link-text that itself contains backticks
+        #      (e.g. [`foo`](url)) is handled specially so the backtick
+        #      run inside the link text becomes inline <code>.
+        #   3. Restore code-span placeholders as escaped <code>…</code>.
+        #   4. Apply bold/italic to remaining text.
+        #
+        # Before this pipeline we ran links first, which turned
+        # `` `[x](y)` `` into `` `<a href="y">x</a>` `` — the renderer
+        # then escaped the HTML and emitted <code>&lt;a …&gt;</code>
+        # instead of <code>[x](y)</code>. Before THAT we ran code spans
+        # first with a naive split, which shattered `[` `` `foo` `` `](url)`
+        # because the code-span boundaries cut the link brackets in half.
+        # Tokenize → link → restore is the only order that handles both.
+
+        placeholders: list[str] = []
+
+        def _tokenize_code(m: re.Match) -> str:
+            idx = len(placeholders)
+            placeholders.append(f'<code>{html.escape(m.group(1))}</code>')
+            # Use a marker the link regex can't match: no `[`, `]`, or `(`.
+            return f'\x00CODE{idx}\x00'
+
+        # Tokenize standalone code spans. A code span inside link text
+        # (i.e. [`foo`](url)) is still matched here — but the subsequent
+        # link regex accepts placeholders inside its text, and we render
+        # the placeholder back out to <code> via `restore_placeholders`.
+        text = re.sub(r'`([^`]+)`', _tokenize_code, text)
+
         def rewrite_link(m):
             link_text, url = m.group(1), m.group(2)
             if '.md' in url and not url.startswith('http'):
@@ -71,31 +101,39 @@ def md_to_html(md: str) -> str:
                     url, anchor = url.split('#', 1)
                     anchor = '#' + anchor
                 url = url.split('/')[-1] + anchor
-            # Render backticks inside link text as inline <code>.
-            inner_parts = re.split(r'(`[^`]+`)', link_text)
-            rendered = []
-            for ip in inner_parts:
-                if ip.startswith('`') and ip.endswith('`'):
-                    rendered.append(f'<code>{html.escape(ip[1:-1])}</code>')
-                else:
-                    rendered.append(ip)
-            return f'<a href="{url}">{"".join(rendered)}</a>'
+            return f'<a href="{url}">{link_text}</a>'
+
+        # Link-text intentionally allows placeholder markers (no `]` in them).
         text = re.sub(r'\[([^\]]+)\]\(([^)]+)\)', rewrite_link, text)
 
-        # Code spans (after links, so backticks inside links were already handled)
-        parts = re.split(r'(`[^`]+`)', text)
-        result = []
-        for part in parts:
-            if part.startswith('`') and part.endswith('`'):
-                result.append(f'<code>{html.escape(part[1:-1])}</code>')
-            else:
-                p = part
-                p = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', p)
-                p = re.sub(r'__(.+?)__', r'<strong>\1</strong>', p)
-                p = re.sub(r'\*(.+?)\*', r'<em>\1</em>', p)
-                p = re.sub(r'_(.+?)_', r'<em>\1</em>', p)
-                result.append(p)
-        return ''.join(result)
+        # Restore code spans now that both links (which could contain them)
+        # and the surrounding context have been rewritten.
+        def restore_placeholders(s: str) -> str:
+            return re.sub(
+                r'\x00CODE(\d+)\x00',
+                lambda m: placeholders[int(m.group(1))],
+                s,
+            )
+
+        text = restore_placeholders(text)
+
+        # Bold / italic on the remaining surface. Do NOT touch placeholder
+        # markers (they don't contain `*` or `_`) or already-rendered
+        # <code>/<a> spans (bold/italic inside them is intentionally ignored).
+        # Walk around <code>...</code> and <a ...>...</a> to avoid mangling
+        # escaped HTML — split on tag boundaries, apply emphasis to plain
+        # runs only.
+        parts = re.split(r'(<code>.*?</code>|<a [^>]*>.*?</a>)', text)
+        for i, part in enumerate(parts):
+            if part.startswith('<'):
+                continue
+            p = part
+            p = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', p)
+            p = re.sub(r'__(.+?)__', r'<strong>\1</strong>', p)
+            p = re.sub(r'\*(.+?)\*', r'<em>\1</em>', p)
+            p = re.sub(r'_(.+?)_', r'<em>\1</em>', p)
+            parts[i] = p
+        return ''.join(parts)
 
     i = 0
     while i < len(lines):

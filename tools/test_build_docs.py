@@ -132,6 +132,28 @@ class LinkRenderingTests(unittest.TestCase):
         self.assertIn("<em>italic</em>", html)
         self.assertIn("<code>code</code>", html)
 
+    def test_link_syntax_inside_code_span_stays_literal(self):
+        # Regression (Codex post-merge sweep wave 3, PR #575 follow-up):
+        # `[x](y)` inside a code span must render as literal text inside
+        # <code>, NOT as a link. Before this fix the link regex ran first
+        # and transformed the inside of the backticks into <a href="y">x</a>,
+        # which the code-span pass then HTML-escaped into literal
+        # <code>&lt;a href="y"&gt;x&lt;/a&gt;</code>.
+        html = render("Docs showing the literal form `[text](url)` here.")
+        self.assertIn("<code>[text](url)</code>", html)
+        # Must NOT have turned the inside of the code span into an anchor
+        # tag, escaped or otherwise.
+        self.assertNotIn('<a href="url">text</a>', html)
+        self.assertNotIn("&lt;a href=", html)
+
+    def test_markdown_link_syntax_inside_code_span_with_md_url(self):
+        # .md-rewriting must also not fire inside a code span. The link
+        # rewriter rewrites foo.md → foo.html; if it ran inside a code
+        # span the user would see the wrong literal in the docs.
+        html = render("Example: `[docs](modules.md)` renders as-is.")
+        self.assertIn("<code>[docs](modules.md)</code>", html)
+        self.assertNotIn('<a href="modules.html">', html)
+
 
 if __name__ == "__main__":
     unittest.main()

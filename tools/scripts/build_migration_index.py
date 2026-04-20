@@ -175,6 +175,37 @@ def load_entry(path: pathlib.Path) -> Entry:
     version = frontmatter["version"]
     if not isinstance(version, str):
         _fatal(path, f"`version` must be a string, got {type(version).__name__}")
+    # Reject non-semver `version` strings up front so typos like
+    # `version = "0.29"` or `version = "abc"` fail the build instead of
+    # sorting as (0,0,0) and silently disappearing from the runtime
+    # hop-filter (which parses the same semver at load time and drops
+    # anything it can't parse). Every migration doc must pin a real
+    # released version to be discoverable by `pulp upgrade migration-notes`.
+    if not SEMVER_RE.match(version):
+        _fatal(
+            path,
+            f"`version` must be semver (X.Y.Z), got {version!r}. "
+            "Examples: \"0.27.0\", \"1.2.3\", \"v0.30.0\".",
+        )
+
+    # Types must match the schema. `bool("false")` is True — accepting
+    # strings for a boolean field would silently flip migration notes
+    # to breaking in shipped CLI output; accepting ints for string
+    # fields would stringify "42" into the summary. Fail fast instead.
+    breaking_raw = frontmatter.get("breaking", False)
+    if not isinstance(breaking_raw, bool):
+        _fatal(
+            path,
+            f"`breaking` must be a boolean (true|false), got "
+            f"{type(breaking_raw).__name__}: {breaking_raw!r}.",
+        )
+    for key in ("applies_if", "summary"):
+        if key in frontmatter and not isinstance(frontmatter[key], str):
+            _fatal(
+                path,
+                f"`{key}` must be a double-quoted string, got "
+                f"{type(frontmatter[key]).__name__}: {frontmatter[key]!r}.",
+            )
 
     extra = {k: v for k, v in frontmatter.items() if k not in SUPPORTED_FIELDS}
     if extra:
@@ -183,9 +214,9 @@ def load_entry(path: pathlib.Path) -> Entry:
 
     return Entry(
         version=version,
-        breaking=bool(frontmatter.get("breaking", False)),
-        applies_if=str(frontmatter.get("applies_if", "")),
-        summary=str(frontmatter.get("summary", "")),
+        breaking=breaking_raw,
+        applies_if=frontmatter.get("applies_if", ""),
+        summary=frontmatter.get("summary", ""),
         body=body,
         source_path=path,
         extra=extra,

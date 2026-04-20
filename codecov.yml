@@ -30,20 +30,25 @@ coverage:
         target: 75%
         informational: true
 
-  # Exclude lists mirror scripts/run_coverage.sh COVERAGE_IGNORE_REGEX
-  # so Codecov and our local tooling count the same set of files.
-  # External FetchContent sources (Dawn, Skia, mbedTLS, QuickJS,
-  # Catch2, etc.) and our test trees are never counted as coverage-
-  # bearing. See planning/coverage-tooling-decision-2026-04-21.md §4.
-  ignore:
-    - "external/**"
-    - "_deps/**"
-    - "test/**"
-    - "examples/**"
-    - "build/**"
-    - "build-coverage/**"
-    - "**/Catch2/**"
-    - "**/catch2/**"
+# Exclude lists mirror scripts/run_coverage.sh COVERAGE_IGNORE_REGEX
+# so Codecov and our local tooling count the same set of files.
+# External FetchContent sources (Dawn, Skia, mbedTLS, QuickJS,
+# Catch2, etc.) and our test trees are never counted as coverage-
+# bearing. See planning/coverage-tooling-decision-2026-04-21.md §4.
+#
+# `ignore` is a TOP-LEVEL key in Codecov config — nesting it under
+# `coverage:` silently no-ops, which would count files we explicitly
+# want excluded and skew the baseline metrics. See Codecov config
+# schema: https://docs.codecov.com/docs/codecov-yaml
+ignore:
+  - "external/**"
+  - "_deps/**"
+  - "test/**"
+  - "examples/**"
+  - "build/**"
+  - "build-coverage/**"
+  - "**/Catch2/**"
+  - "**/catch2/**"
 
 # PR comment. Focused on reach + diff + flags + tree so contributors
 # see "how many lines of THIS PR are covered by THIS PR's tests"
@@ -171,3 +176,98 @@ flags:
 # flag from main so the dashboard doesn't report a false 0%. Standard
 # Codecov practice for multi-job uploads (we have one job per OS
 # starting in Phase 1 PR 4).
+
+# Components are Codecov's canonical mechanism for path-based coverage
+# slicing driven by a single upload. Flags (above) are ultimately keyed
+# to upload sources and come into their own once Phase 1 PR 4 splits
+# the coverage job per-OS; components give us the subsystem / platform /
+# surface breakdown today from the single-upload Cobertura XML without
+# relying on Codecov's flag-with-paths behaviour (which is documented
+# but has historically been less reliable for trend analysis across
+# 20 flags attached to one upload).
+#
+# Keep component_id values aligned with the flag names above so the
+# dashboard reads consistently whichever dimension you filter by.
+component_management:
+  default_rules:
+    statuses:
+      - type: project
+        target: auto
+        threshold: 1%
+        informational: true
+  individual_components:
+    # Core subsystems (13)
+    - component_id: audio
+      name: audio
+      paths: ["core/audio/**"]
+    - component_id: canvas
+      name: canvas
+      paths: ["core/canvas/**"]
+    - component_id: events
+      name: events
+      paths: ["core/events/**"]
+    - component_id: format
+      name: format
+      paths: ["core/format/**"]
+    - component_id: host
+      name: host
+      paths: ["core/host/**"]
+    - component_id: midi
+      name: midi
+      paths: ["core/midi/**"]
+    - component_id: osc
+      name: osc
+      paths: ["core/osc/**"]
+    - component_id: platform
+      name: platform
+      paths: ["core/platform/**"]
+    - component_id: render
+      name: render
+      paths: ["core/render/**"]
+    - component_id: runtime
+      name: runtime
+      paths: ["core/runtime/**"]
+    - component_id: signal
+      name: signal
+      paths: ["core/signal/**"]
+    - component_id: state
+      name: state
+      paths: ["core/state/**"]
+    - component_id: view
+      name: view
+      paths: ["core/view/**"]
+    # Platform (4) — cross-cut the subsystems.
+    - component_id: android
+      name: android
+      paths:
+        - "core/platform/src/android/**"
+        - "android/**"
+        - "core/render/platform/android/**"
+        - "core/**/android/**"
+    - component_id: apple
+      name: apple
+      paths:
+        - "apple/**"
+        - "core/**/macos/**"
+        - "core/**/ios/**"
+        - "core/**/mac/**"
+    - component_id: linux
+      name: linux
+      paths:
+        - "core/**/linux/**"
+        - "core/**/alsa/**"
+    - component_id: windows
+      name: windows
+      paths:
+        - "core/**/windows/**"
+        - "core/**/wasapi/**"
+    # Surface (3)
+    - component_id: cli
+      name: cli
+      paths: ["tools/cli/**"]
+    - component_id: ship
+      name: ship
+      paths: ["ship/**"]
+    - component_id: tools
+      name: tools
+      paths: ["tools/**"]
