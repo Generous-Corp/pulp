@@ -205,6 +205,19 @@ void shutdown_accessibility(void* handle) {
         UiaReturnRawElementProvider(session->hwnd, 0, 0, nullptr);
     }
     if (session->host_provider) {
+        // #500 / #485: PulpHostProvider holds a raw UiaSession*, but
+        // UIA clients cache provider pointers and can make method
+        // calls on them asynchronously. If we simply Release() our ref
+        // and delete session, a cached client could call any provider
+        // method (e.g. get_HostRawElementProvider, GetPropertyValue)
+        // and dereference the now-freed session_ → UAF.
+        //
+        // UiaDisconnectProvider is the officially-sanctioned shutdown
+        // barrier: it waits for in-flight UIA calls to drain AND
+        // rejects all subsequent calls (returning UIA_E_ELEMENTNOTAVAILABLE).
+        // After it returns, no UIA-originated call can reach the
+        // provider, so our session deletion below is safe.
+        UiaDisconnectProvider(session->host_provider);
         session->host_provider->Release();
         session->host_provider = nullptr;
     }

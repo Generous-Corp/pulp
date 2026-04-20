@@ -33,6 +33,25 @@ TEST_CASE("accessibility_tree_changed tolerates a null handle",
     accessibility_tree_changed(nullptr);
     SUCCEED();
 }
+
+TEST_CASE("shutdown_accessibility: repeated init+shutdown cycles are safe",
+          "[a11y][provider][issue-500]") {
+    // #500 / #485: earlier shutdown ordering released our ref before
+    // UIA clients were disconnected from the provider, creating a
+    // UAF window if a cached client called any provider method after
+    // we deleted the session. The fix calls UiaDisconnectProvider
+    // before releasing our ref so in-flight calls drain and no new
+    // ones can land. Exercise many cycles to surface refcount or
+    // lifetime regressions; on Windows this drives the real UIA
+    // shutdown barrier, on Linux it exercises the stub.
+    View root;
+    for (int i = 0; i < 32; ++i) {
+        void* h = init_accessibility(root, nullptr);
+        REQUIRE(h != nullptr);
+        shutdown_accessibility(h);
+    }
+    SUCCEED("no crash across repeated attach/detach");
+}
 #else
 TEST_CASE("accessibility_provider is a no-op on this platform",
           "[a11y][provider]") {
