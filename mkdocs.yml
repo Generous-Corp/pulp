@@ -3,13 +3,15 @@
 # `docs-material` CI workflow, which uploads an artifact for visual inspection.
 # It does NOT replace tools/build-docs.py yet — that switchover is PR 3 of #577.
 #
-# URL scheme note (PR 1):
+# URL scheme note (PR 2):
 #   The custom generator emits flat URLs `/pulp/<slug>.html` from nested
 #   source files (e.g. `docs/reference/modules.md` → `/pulp/modules.html`).
-#   MkDocs mirrors the source tree, so this parallel build will emit nested
-#   URLs (`/pulp/reference/modules.html`). Flat-URL preservation is deferred
-#   to PR 2 via a pre-build staging hook. PR 1 is artifact-only, no deploy,
-#   so nothing external breaks.
+#   Material mirrors the source tree by default, so the
+#   `tools/mkdocs_hooks.py` `on_files` hook rewrites each File's `url` /
+#   `dest_uri` to the flat slug from `docs/status/docs-index.yaml` — giving
+#   Material the same URLs the custom generator produces. Pages not listed
+#   in docs-index.yaml keep their nested MkDocs default URL (the custom
+#   generator doesn't publish those either, so no external contract exists).
 
 site_name: Pulp
 site_description: Cross-platform audio plugin and application framework. MIT-licensed.
@@ -25,10 +27,15 @@ site_dir: build/site-material
 # switchover doesn't break external deep-links (see PR 3 switchover plan).
 use_directory_urls: false
 
-# During PR 1 we tolerate warnings for pages present in docs/ but not in nav,
-# since the current custom generator builds a superset of sidebar entries.
-# PR 2 will decide whether to surface them or keep the curated subset.
+# Same behaviour as the custom generator: sidebar is a curated subset of all
+# built pages. MkDocs treats pages-not-in-nav as a warning under --strict, so
+# keep strict off. Link-level warnings surfaced by MkDocs are the meaningful
+# signal and are separately addressed by the URL-flatten hook.
 strict: false
+
+# Pre-build drift checks + URL-flatten hook (tools/mkdocs_hooks.py).
+hooks:
+  - tools/mkdocs_hooks.py
 
 theme:
   name: material
