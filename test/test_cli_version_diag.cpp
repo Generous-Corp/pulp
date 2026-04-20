@@ -14,6 +14,8 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <iostream>
+#include <sstream>
 #include <string>
 
 namespace fs = std::filesystem;
@@ -280,4 +282,117 @@ TEST_CASE("read_project_cli_min_version still reads through comments",
     REQUIRE(v.major == 0);
     REQUIRE(v.minor == 23);
     REQUIRE(v.patch == 0);
+}
+
+// ── Slice 1b (#552) — per-project skew via VersionReport.projects ──
+
+TEST_CASE("analyze warns per-project when project[].cli_min exceeds CLI",
+          "[version-diag][issue-552]") {
+    VersionReport r;
+    r.cli = parse_semver("0.20.0");
+    ProjectEntry p;
+    p.path = "/tmp/a";
+    p.name = "A";
+    p.cli_min = parse_semver("0.24.0");
+    r.projects.push_back(p);
+
+    auto findings = r.analyze();
+    bool saw_a_warn = false;
+    for (auto& f : findings) {
+        if (f.severity == SkewSeverity::Warn &&
+            f.message.find("Project 'A' requires CLI") != std::string::npos) {
+            saw_a_warn = true;
+        }
+    }
+    REQUIRE(saw_a_warn);
+}
+
+TEST_CASE("analyze warns per-project when project[].sdk is ahead of CLI",
+          "[version-diag][issue-552]") {
+    VersionReport r;
+    r.cli = parse_semver("0.20.0");
+    ProjectEntry p;
+    p.path = "/tmp/other";
+    p.name = "Other";
+    p.sdk = parse_semver("0.24.0");
+    r.projects.push_back(p);
+
+    auto findings = r.analyze();
+    bool saw_warn = false;
+    for (auto& f : findings) {
+        if (f.severity == SkewSeverity::Warn &&
+            f.message.find("Project 'Other' SDK is v0.24.0") != std::string::npos) {
+            saw_warn = true;
+        }
+    }
+    REQUIRE(saw_warn);
+}
+
+TEST_CASE("analyze warns when a registered project has gone missing on disk",
+          "[version-diag][issue-552]") {
+    // Stale-entry policy: keep the entry (never auto-prune) but surface
+    // a prominent warning with a copy-paste remove hint. Documented in
+    // projects_registry.hpp.
+    VersionReport r;
+    r.cli = parse_semver("0.24.0");
+    ProjectEntry p;
+    p.path = "/tmp/gone-away";
+    p.name = "GoneAway";
+    p.missing_on_disk = true;
+    r.projects.push_back(p);
+
+    auto findings = r.analyze();
+    bool saw_missing = false;
+    for (auto& f : findings) {
+        if (f.severity == SkewSeverity::Warn &&
+            f.message.find("no longer exists") != std::string::npos &&
+            f.message.find("pulp projects remove") != std::string::npos) {
+            saw_missing = true;
+        }
+    }
+    REQUIRE(saw_missing);
+}
+
+TEST_CASE("analyze is silent when a per-project SDK matches the CLI",
+          "[version-diag][issue-552]") {
+    VersionReport r;
+    r.cli = parse_semver("0.24.0");
+    ProjectEntry p;
+    p.path = "/tmp/ok";
+    p.name = "OK";
+    p.sdk = parse_semver("0.24.0");
+    r.projects.push_back(p);
+
+    auto findings = r.analyze();
+    for (auto& f : findings) {
+        if (f.severity == SkewSeverity::Warn) {
+            REQUIRE(f.message.find("'OK'") == std::string::npos);
+        }
+    }
+}
+
+TEST_CASE("render_report_json emits JSON with projects[] and findings[]",
+          "[version-diag][issue-552]") {
+    // Capture std::cout via a redirected rdbuf so we can test without
+    // shelling out. The JSON shape is a documented surface — see
+    // docs/reference/cli.md#doctor.
+    VersionReport r;
+    r.cli = parse_semver("0.20.0");
+    ProjectEntry p;
+    p.path = "/tmp/a";
+    p.name = "A";
+    p.cli_min = parse_semver("0.24.0");
+    r.projects.push_back(p);
+
+    std::stringstream capture;
+    auto* prev = std::cout.rdbuf(capture.rdbuf());
+    int rc = render_report_json(r);
+    std::cout.rdbuf(prev);
+
+    REQUIRE(rc == 0);
+    auto out = capture.str();
+    REQUIRE(out.find("\"projects\":") != std::string::npos);
+    REQUIRE(out.find("\"findings\":") != std::string::npos);
+    REQUIRE(out.find("\"name\": \"A\"") != std::string::npos);
+    REQUIRE(out.find("\"severity\": \"warn\"") != std::string::npos);
 }

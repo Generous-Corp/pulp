@@ -1,9 +1,43 @@
 // cmd_doctor.cpp — pulp doctor command
 
 #include "cli_common.hpp"
+#include "projects_registry.hpp"
 #include "version_diag.hpp"
 
+#include <algorithm>
 #include <iostream>
+
+namespace {
+
+// Populate a ProjectEntry for a given root by reading the project's
+// sdk_version (CMakeLists.txt for source-tree projects, pulp.toml
+// otherwise) and cli_min_version. Mirrors the Slice 1 logic for the
+// active project but applied to each registered/scanned entry.
+// Issue #552.
+pulp::cli::version_diag::ProjectEntry make_project_entry(
+    const fs::path& root, const std::string& display_name,
+    bool scanned)
+{
+    pulp::cli::version_diag::ProjectEntry e;
+    e.path = root;
+    e.name = display_name.empty() ? root.filename().string() : display_name;
+    e.scanned = scanned;
+
+    if (!fs::exists(root)) {
+        e.missing_on_disk = true;
+        return e;
+    }
+
+    // Prefer pulp.toml sdk_version, fall back to CMakeLists.txt VERSION
+    // — matches the source-tree vs standalone split used elsewhere.
+    std::string sdk_raw = read_pulp_toml_value(root, "sdk_version");
+    if (sdk_raw.empty()) sdk_raw = read_project_cmake_version(root);
+    e.sdk = pulp::cli::version_diag::parse_semver(sdk_raw);
+    e.cli_min = pulp::cli::version_diag::read_project_cli_min_version(root);
+    return e;
+}
+
+}  // namespace
 
 int cmd_doctor(const std::vector<std::string>& args) {
     bool standalone_mode = false;
@@ -19,14 +53,18 @@ int cmd_doctor(const std::vector<std::string>& args) {
     bool ci_mode = false;
     bool dry_run = false;
     bool versions_mode = false;   // --versions: issue #499 Slice 1
+    bool scan_parents = false;    // --scan-parents: issue #552 Slice 1b
+    bool json_mode = false;       // --json (only meaningful with --versions today)
     for (auto& arg : args) {
         if (arg == "--fix") fix_mode = true;
         else if (arg == "--ci") ci_mode = true;
         else if (arg == "--dry-run") dry_run = true;
         else if (arg == "--versions") versions_mode = true;
+        else if (arg == "--scan-parents") scan_parents = true;
+        else if (arg == "--json") json_mode = true;
         else if (arg.rfind("--", 0) == 0) {
             std::cerr << "pulp doctor: unknown flag: " << arg << "\n";
-            std::cerr << "Usage: pulp doctor [android|ios] [--fix] [--ci] [--dry-run] [--versions]\n";
+            std::cerr << "Usage: pulp doctor [android|ios] [--fix] [--ci] [--dry-run] [--versions] [--scan-parents] [--json]\n";
             return 2;
         } else if (mode.empty()) {
             mode = arg;
@@ -35,7 +73,7 @@ int cmd_doctor(const std::vector<std::string>& args) {
 
     if (!mode.empty() && mode != "android" && mode != "ios") {
         std::cerr << "pulp doctor: unknown subcommand '" << mode << "'\n";
-        std::cerr << "Usage: pulp doctor [android|ios] [--fix] [--ci] [--dry-run] [--versions]\n";
+        std::cerr << "Usage: pulp doctor [android|ios] [--fix] [--ci] [--dry-run] [--versions] [--scan-parents] [--json]\n";
         return 2;
     }
 
@@ -74,11 +112,51 @@ int cmd_doctor(const std::vector<std::string>& args) {
                 pulp::cli::version_diag::read_project_cli_min_version(active_root);
         }
 
+        // Per-project registry (issue #552 Slice 1b). The registry is
+        // authoritative; only `pulp projects add/remove` and
+        // `pulp create` mutate it. We dedupe against the active
+        // project so it isn't shown twice in the diagnostic.
+        auto reg_path = pulp::cli::projects_registry::registry_path();
+        auto registered = pulp::cli::projects_registry::read_registry(reg_path);
+        std::vector<fs::path> seen_paths;
+        if (!active_root.empty()) seen_paths.push_back(active_root);
+
+        for (const auto& rp : registered) {
+            if (std::find(seen_paths.begin(), seen_paths.end(), rp.path) !=
+                seen_paths.end()) {
+                continue;
+            }
+            report.projects.push_back(make_project_entry(rp.path, rp.name, false));
+            seen_paths.push_back(rp.path);
+        }
+
+        // --scan-parents: opt-in ancestor walk. Matches happen deepest-
+        // first (see projects_registry::scan_parent_pulp_projects). We
+        // skip the active project so we don't duplicate it, and flag
+        // every match as `scanned=true` so the report renders "(scanned)"
+        // beside the name and the caller can tell it isn't registered.
+        if (scan_parents) {
+            auto cwd = fs::current_path();
+            auto ancestors = pulp::cli::projects_registry::scan_parent_pulp_projects(cwd);
+            for (const auto& a : ancestors) {
+                if (std::find(seen_paths.begin(), seen_paths.end(), a) !=
+                    seen_paths.end()) {
+                    continue;
+                }
+                report.projects.push_back(make_project_entry(a, {}, true));
+                seen_paths.push_back(a);
+            }
+        }
+
         // Always return 0 — skew findings are advisory. The rendered
         // "WARN" lines communicate the actionable information; gating
         // exit code on them would make this command unusable inside
         // scripts that gate on `pulp doctor` more broadly.
-        (void)pulp::cli::version_diag::render_report(report);
+        if (json_mode) {
+            (void)pulp::cli::version_diag::render_report_json(report);
+        } else {
+            (void)pulp::cli::version_diag::render_report(report);
+        }
         return 0;
     }
 

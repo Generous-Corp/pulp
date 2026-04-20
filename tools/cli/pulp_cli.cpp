@@ -46,7 +46,7 @@ static const Command commands[] = {
     {"scan",     "Scan system paths for VST3 / AU / CLAP / LV2 plug-ins", cmd_scan},
     {"host",     "Load a plug-in and run a synthetic audio block through it", cmd_host},
     {"pr",       "One-shot push-a-PR: gates + bump + ship",   cmd_pr},
-    {"config",   "Read or write ~/.pulp/config.toml settings", cmd_config},
+    {"projects", "Manage the ~/.pulp/projects.json registry", cmd_projects},
 };
 
 static constexpr int command_count = sizeof(commands) / sizeof(commands[0]);

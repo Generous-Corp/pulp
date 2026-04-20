@@ -43,7 +43,7 @@ requires:
 - It's a subcommand of something already covered
 
 **Commands that intentionally don't have slash commands:**
-audio, cache, clean, upgrade, config, export-tokens, ci-local, design-debug, help
+audio, cache, clean, upgrade, export-tokens, ci-local, design-debug, help, projects
 
 ### 4. Update docs
 - [ ] Add/update section in `docs/reference/cli.md`
@@ -212,6 +212,47 @@ a `ParameterEventQueue`. When adding new CLI hosting commands, include
 have no automation to deliver. See `docs/reference/host-thread-rules.md`
 for the full contract.
 
+## `pulp projects` + registry wiring (#499 / #552 Slice 1b)
+
+`pulp projects list/add/remove` live in `tools/cli/cmd_projects.cpp`.
+The JSON file at `~/.pulp/projects.json` (or `$PULP_HOME/projects.json`)
+is maintained by `tools/cli/projects_registry.{hpp,cpp}` and is
+populated automatically from `cmd_create.cpp` on successful scaffold
+via `pulp::cli::projects_registry::add_project(...)`.
+
+Design decision (2026-04-21, locked in): **registry is authoritative.**
+`pulp create` writes to it; `pulp projects add/remove` is the user
+surface; `pulp doctor --versions --scan-parents` walks CWD ancestors
+as an opt-in diagnostic but never mutates the registry. No silent
+disk scans.
+
+Gotchas:
+
+- **`projects_registry` is deliberately decoupled from `cli_common`.**
+  Same rule as `version_diag` — the unit test (`pulp-test-cli-
+  projects-registry`) links just `projects_registry.cpp` +
+  Catch2 so the test binary stays small. Don't reach into
+  `cli_common.hpp` from inside the registry module.
+- **`add_project` dedupes by canonical path, not by string.** The
+  canonicalish helper resolves symlinks via
+  `fs::weakly_canonical`; `/tmp/...` and `/private/tmp/...` land at
+  the same canonical form on macOS. Registry round-trip tests must
+  canonicalise the `TempDir.path` up front or `REQUIRE(x == y)`
+  comparisons will break.
+- **Missing-on-disk entries are kept, not pruned.** Stale-entry
+  policy (from the design doc): the entry is flagged with a
+  `(missing)` line and a copy-paste `pulp projects remove <path>`
+  hint — never auto-removed. Only explicit `pulp projects remove`
+  (or a manual JSON edit) mutates the registry.
+- **Nested parent + child both appear under `--scan-parents`.** The
+  scan returns deepest-first. The caller (`cmd_doctor`) dedupes
+  against the active project but keeps both ancestors if both
+  contain a `pulp_add_*` macro. The user resolves the ambiguity —
+  we surface both rather than picking arbitrarily.
+- **`--scan-parents` reads `CMakeLists.txt` with a simple regex**
+  (`\bpulp_add_[A-Za-z0-9_]+\s*\(`). Matches any `pulp_add_*` macro
+  the SDK introduces without requiring a new entry here.
+
 ## `pulp doctor --versions` — version diagnostics (#499 Slice 1)
 
 The first slice of the release-discovery UX (issue #499) is a pure
@@ -244,6 +285,11 @@ Gotchas:
   becomes meaningful from the first release that needs it; before
   then it's silently absent and skew analysis skips. Don't
   retroactively add it to every `pulp.toml` in the repo.
+
+Slice 1b (#552) extended the diagnostic with `--scan-parents` and
+`--json` plus the `~/.pulp/projects.json` registry — see the section
+above for registry gotchas. The `--versions` core remains pure-logic
+and scoped to `version_diag.{hpp,cpp}`.
 
 Follow-up slices (2-6) are tracked against #499: update-check,
 migration docs, `/upgrade` skill, mode enforcement, and plugin ↔ CLI

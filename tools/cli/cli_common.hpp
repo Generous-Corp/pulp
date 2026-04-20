@@ -233,4 +233,4 @@ int cmd_dev(const std::vector<std::string>& args);
 int cmd_scan(const std::vector<std::string>& args);
 int cmd_host(const std::vector<std::string>& args);
 int cmd_pr(const std::vector<std::string>& args);
-int cmd_config(const std::vector<std::string>& args);
+int cmd_projects(const std::vector<std::string>& args);

@@ -158,6 +158,28 @@ commands:
         required: false
     docs: reference/cli.md#pr
 
+  - name: projects
+    status: usable
+    summary: Manage the ~/.pulp/projects.json registry. Populated automatically by `pulp create`; use these commands to add existing projects or prune stale entries. `pulp doctor --versions` reads this registry for per-project skew reporting. (#552)
+    subcommands:
+      - name: list
+        summary: Show registered projects (and flag any whose path no longer exists)
+      - name: add
+        summary: Register a project (defaults to CWD) in the registry
+        args:
+          - name: path
+            kind: positional
+            required: false
+            description: Project directory to register (default CWD)
+      - name: remove
+        summary: Remove a project from the registry by path
+        args:
+          - name: path
+            kind: positional
+            required: true
+            description: Project directory to forget
+    docs: reference/cli.md#projects
+
   - name: docs
     status: usable
     summary: Browse local documentation and status manifests.
@@ -278,6 +300,12 @@ commands:
       - name: --versions
         kind: flag
         description: Print CLI/SDK/Plugin version diagnostics and advisory skew warnings (always exits 0)
+      - name: --scan-parents
+        kind: flag
+        description: With --versions, also walk the CWD's ancestor directories for CMakeLists.txt files invoking pulp_add_* macros and surface them inline (never auto-registered; opt-in escape hatch for projects created outside `pulp create`)
+      - name: --json
+        kind: flag
+        description: With --versions, emit the diagnostic as a single JSON object (stable schema — see reference/cli.md#doctor)
     docs: reference/cli.md#doctor
 
   - name: clean

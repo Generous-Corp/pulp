@@ -2,6 +2,7 @@
 
 #include "cli_common.hpp"
 #include "create_targets.hpp"
+#include "projects_registry.hpp"
 
 #include <array>
 #include <fstream>
@@ -523,6 +524,18 @@ int cmd_create(const std::vector<std::string>& args) {
                 log("  Added to examples/CMakeLists.txt\n");
             }
         }
+    }
+
+    // Register the new project in ~/.pulp/projects.json so
+    // `pulp doctor --versions` can report per-project skew without an
+    // opt-in disk scan. Issue #552 Slice 1b. The registry is a
+    // best-effort diagnostic surface — a failure here is non-fatal
+    // and logged only in non-CI mode so we don't clutter scaffold
+    // output of CI-driven scaffolds.
+    {
+        auto reg = pulp::cli::projects_registry::registry_path();
+        pulp::cli::projects_registry::add_project(reg, out_dir, name);
+        log("  Registered in " + reg.string() + "\n");
     }
 
     log("\n");

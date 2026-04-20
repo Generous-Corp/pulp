@@ -14,6 +14,11 @@ SKIP_SLASH_COMMANDS = {
     "inspect", "import-design", "install", "version",
     "sdk", "fetch", "list", "remove", "search", "suggest",
     "target", "update",
+    # `pulp projects` is a registry-management plumbing command; it's
+    # adequately documented via `--help` and the cli-maintenance
+    # skill. Adding a slash command for pure plumbing would clutter
+    # the slash-command surface for agents. #552
+    "projects",
 }
 
 

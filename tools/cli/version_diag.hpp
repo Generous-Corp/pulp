@@ -67,6 +67,20 @@ struct SkewFinding {
     std::string message;
 };
 
+// A single registered project's version snapshot, used for per-project
+// skew lines in `pulp doctor --versions`. Populated by cmd_doctor from
+// `~/.pulp/projects.json` (or the `--scan-parents` ancestor walk) and
+// fed into VersionReport::analyze() so each project contributes its
+// own skew findings. See issue #552 (Slice 1b).
+struct ProjectEntry {
+    fs::path path;               // canonical project root
+    std::string name;            // display name (directory basename or custom)
+    Semver sdk;                  // parsed from CMakeLists.txt / pulp.toml
+    Semver cli_min;              // parsed from pulp.toml cli_min_version
+    bool missing_on_disk = false;  // `path` doesn't exist — warn but keep
+    bool scanned = false;        // discovered via --scan-parents, not registered
+};
+
 // Inputs to the skew analyzer. All fields optional — the analyzer
 // skips checks silently when data is missing (forward-compatible
 // behaviour: never hard-fail on missing or untagged versions).
@@ -78,9 +92,15 @@ struct VersionReport {
     fs::path project_root;       // for report lines
     fs::path plugin_json_path;   // for report lines
 
-    // Analyse and return user-visible findings. Today's rules (Slice 1):
+    // Other registered projects (from ~/.pulp/projects.json) plus any
+    // ancestor projects surfaced by `--scan-parents`. See issue #552.
+    std::vector<ProjectEntry> projects;
+
+    // Analyse and return user-visible findings. Rules (Slice 1 + 1b):
     //   - project_cli_min set AND project_cli_min > cli  -> Warn "upgrade CLI"
     //   - project_sdk set AND project_sdk > cli          -> Warn "CLI behind project SDK"
+    //   - for each projects[] entry: same rules, message names the project
+    //   - missing-on-disk entries                        -> Warn "path missing"
     //   - otherwise                                      -> Info "compatible"
     std::vector<SkewFinding> analyze() const;
 };
@@ -89,5 +109,11 @@ struct VersionReport {
 // from the design doc). Returns 0 on no-warn, 1 if any Warn-level
 // finding is emitted — callers can use this for a non-zero exit code.
 int render_report(const VersionReport& report);
+
+// Render the same report as a single JSON object to stdout. The shape
+// is stable enough for scripts to parse (see docs/reference/cli.md).
+// Always returns 0 — the JSON lane is a pure data surface and mirrors
+// the human lane's advisory-only posture. Issue #552.
+int render_report_json(const VersionReport& report);
 
 }  // namespace pulp::cli::version_diag

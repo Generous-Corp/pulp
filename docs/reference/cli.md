@@ -213,11 +213,13 @@ Set `PULP_HOME` to relocate the cache, SDK, and config root.
 Diagnose environment issues. Checks C++20 compiler, CMake version, git-lfs, LFS file state, external SDKs (VST3, AudioUnit), platform-specific dependencies, and the expected project mode.
 
 ```bash
-pulp doctor             # show all checks
-pulp doctor --fix       # auto-fix issues where possible
-pulp doctor --ci        # non-interactive, exit codes only
-pulp doctor --dry-run   # show what --fix would do
-pulp doctor --versions  # CLI/SDK/Plugin version diagnostics (#499 Slice 1)
+pulp doctor                          # show all checks
+pulp doctor --fix                    # auto-fix issues where possible
+pulp doctor --ci                     # non-interactive, exit codes only
+pulp doctor --dry-run                # show what --fix would do
+pulp doctor --versions               # CLI/SDK/Plugin version diagnostics (#499 Slice 1)
+pulp doctor --versions --scan-parents # ALSO walk CWD ancestors for pulp_add_* projects (#552)
+pulp doctor --versions --json        # emit the diagnostic as stable JSON (#552)
 ```
 
 Checks are platform-gated — only relevant checks run on each OS:
@@ -260,6 +262,59 @@ cli_min_version = "0.24.0"   # optional — warn if installed CLI is older
 Untagged CLI builds (anything not matching `M.N.P` exactly) are
 skipped silently, matching the design's forward-compatible
 convention.
+
+**Multi-project skew (#552 Slice 1b).** When `~/.pulp/projects.json`
+contains registered projects, `pulp doctor --versions` lists each
+project with its own SDK / `cli_min_version` pair and surfaces any
+skew inline. Entries whose `path` no longer exists are shown with a
+`(missing)` tag and a `pulp projects remove <path>` hint — we never
+auto-prune; only explicit removal mutates the registry.
+
+`--scan-parents` is an opt-in escape hatch for projects that were
+never registered (for instance, a cloned example). It walks the
+current directory's ancestor chain looking for `CMakeLists.txt`
+files that invoke any `pulp_add_*` macro and surfaces those matches
+in-line with a `(scanned)` tag. Ancestor hits are NOT added to the
+registry — the design decision is "registry is authoritative,
+ancestor scan is a diagnostic escape hatch."
+
+If both a parent directory and a nested child directory contain a
+`pulp_add_*` invocation, both appear in the report (deepest-first —
+closest ancestor to the current directory comes first). Resolving
+"which is the canonical project" is the user's call; the diagnostic
+surfaces both so the ambiguity is visible.
+
+`--json` emits the same information as a single JSON object with a
+stable shape — `{"cli": {...}, "plugin": {...}, "project_sdk": {...},
+"projects": [{"path": ..., "sdk": {...}, "cli_min": {...},
+"missing_on_disk": bool, "scanned": bool}, ...], "findings": [...]}`.
+Scripts should use the `findings[]` array for user-visible warnings;
+per-field semver fields carry `comparable: true` only when they
+parse as pure `M.N.P`.
+
+### projects
+
+**Status**: usable
+
+Manage the `~/.pulp/projects.json` registry. `pulp create` and
+`pulp new` register new projects automatically on successful
+scaffold; these commands exist so users can add projects created
+outside of `pulp create` (clones, manual checkouts) and prune stale
+entries. Registry entries are read by `pulp doctor --versions` to
+produce per-project skew reports.
+
+```bash
+pulp projects list                       # show registered projects
+pulp projects add                        # register the current directory
+pulp projects add ~/code/my-plugin       # register a specific directory
+pulp projects remove ~/code/old-plugin   # forget a project by path
+```
+
+The registry is a plain JSON file with one top-level `projects`
+array; each entry has `path`, `name`, and `registered_at`. The
+location is `$PULP_HOME/projects.json` (defaulting to
+`~/.pulp/projects.json`). A missing registry file is treated as an
+empty list — no first-run setup is required.
 
 ### ci-local
 

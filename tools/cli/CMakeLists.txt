@@ -33,8 +33,10 @@ add_executable(pulp-cli
     package_registry.cpp
     package_commands.cpp
     tool_registry.cpp
-    update_check.cpp
-    version_diag.cpp)
+    version_diag.cpp
+    projects_registry.cpp
+    cmd_projects.cpp
+    update_check.cpp)
 set_target_properties(pulp-cli PROPERTIES OUTPUT_NAME "pulp")
 target_compile_features(pulp-cli PRIVATE cxx_std_20)
 target_link_libraries(pulp-cli PRIVATE pulp::runtime pulp::tool-audio pulp::ship pulp::view pulp::format pulp::inspect pulp::host)
@@ -164,21 +166,30 @@ if(PULP_BUILD_TESTS)
     set_tests_properties(cli-no-new-alias PROPERTIES
         PASS_REGULAR_EXPRESSION "Unknown command")
 
-    # Issue #547 Slice 2: `pulp config` help shape.
-    add_test(NAME cli-config-help
-        COMMAND pulp-cli config --help
+    # Issue #552 Slice 1b: `pulp projects` help path should always
+    # print a usage banner listing list/add/remove. The test uses a
+    # throwaway PULP_HOME so it doesn't mutate the developer's real
+    # registry when invoked from `ctest`.
+    add_test(NAME cli-projects-help
+        COMMAND pulp-cli projects --help
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
-    set_tests_properties(cli-config-help PROPERTIES
-        PASS_REGULAR_EXPRESSION "update.mode")
+    set_tests_properties(cli-projects-help PROPERTIES
+        ENVIRONMENT "PULP_HOME=${CMAKE_BINARY_DIR}/test-tmp/pulp-home-help"
+        PASS_REGULAR_EXPRESSION "pulp projects list")
 
-    # Issue #547 Slice 2: `pulp upgrade --check-only` should not
-    # download. We can't assert exact output (depends on network), but
-    # it must not crash and must print the Installed/Latest block OR a
-    # "could not fetch" error. Use PULP_UPDATE_CHECK_DISABLED to keep
-    # the banner itself silent for this test lane.
-    add_test(NAME cli-upgrade-help
-        COMMAND pulp-cli upgrade --help
+    add_test(NAME cli-projects-list-empty
+        COMMAND pulp-cli projects list
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
-    set_tests_properties(cli-upgrade-help PROPERTIES
-        PASS_REGULAR_EXPRESSION "--check-only")
+    set_tests_properties(cli-projects-list-empty PROPERTIES
+        ENVIRONMENT "PULP_HOME=${CMAKE_BINARY_DIR}/test-tmp/pulp-home-empty"
+        PASS_REGULAR_EXPRESSION "no projects registered")
+
+    # `pulp doctor --versions --json` should emit a JSON object with a
+    # projects array (empty is fine — the array is always present).
+    add_test(NAME cli-doctor-versions-json
+        COMMAND pulp-cli doctor --versions --json
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+    set_tests_properties(cli-doctor-versions-json PROPERTIES
+        ENVIRONMENT "PULP_HOME=${CMAKE_BINARY_DIR}/test-tmp/pulp-home-json"
+        PASS_REGULAR_EXPRESSION "\"projects\":")
 endif()

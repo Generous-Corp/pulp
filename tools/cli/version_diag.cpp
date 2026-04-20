@@ -7,9 +7,11 @@
 #include "version_diag.hpp"
 
 #include <algorithm>
+#include <cstdio>
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
+#include <ostream>
 #include <regex>
 #include <sstream>
 #include <string>
@@ -244,6 +246,47 @@ std::vector<SkewFinding> VersionReport::analyze() const {
         }
     }
 
+    // Rule 3 (Slice 1b / #552): per-project registry entries. Same
+    // semantics as rules 1/2 but each finding names the project so the
+    // user can tell which entry in a multi-project fleet is behind.
+    // Missing-on-disk entries produce a tidy "run `pulp projects
+    // remove`" hint — we never auto-prune (see design doc).
+    for (const auto& p : projects) {
+        const std::string label = p.name.empty()
+            ? p.path.filename().string()
+            : p.name;
+
+        if (p.missing_on_disk) {
+            findings.push_back({
+                SkewSeverity::Warn,
+                "Registered project '" + label + "' at " + p.path.string() +
+                    " no longer exists — run `pulp projects remove " +
+                    p.path.string() + "` to forget it",
+            });
+            continue;
+        }
+
+        if (cli.comparable && p.cli_min.comparable &&
+            compare_semver(p.cli_min, cli) > 0) {
+            findings.push_back({
+                SkewSeverity::Warn,
+                "Project '" + label + "' requires CLI >= v" + p.cli_min.raw +
+                    " but installed CLI is v" + cli.raw +
+                    " — run `pulp upgrade`",
+            });
+        }
+
+        if (cli.comparable && p.sdk.comparable &&
+            compare_semver(p.sdk, cli) > 0) {
+            findings.push_back({
+                SkewSeverity::Warn,
+                "Project '" + label + "' SDK is v" + p.sdk.raw +
+                    " but installed CLI is v" + cli.raw +
+                    " — consider `pulp upgrade`",
+            });
+        }
+    }
+
     return findings;
 }
 
@@ -286,6 +329,33 @@ int render_report(const VersionReport& report) {
                             "   (from pulp.toml)");
     }
 
+    // Per-project lines (issue #552 Slice 1b). Sourced from the
+    // registry at ~/.pulp/projects.json plus any ancestor projects
+    // surfaced via --scan-parents. Displayed as a separate block so
+    // the "active project" line above keeps its primacy.
+    if (!report.projects.empty()) {
+        std::cout << "\n  Projects:\n";
+        for (const auto& p : report.projects) {
+            std::string label = p.name.empty()
+                ? p.path.filename().string()
+                : p.name;
+            std::string tag = p.scanned ? " (scanned)" : "";
+            if (p.missing_on_disk) tag = " (missing)";
+
+            std::string sdk_display = p.sdk.raw.empty()
+                ? std::string("(sdk ?)")
+                : std::string("sdk v") + p.sdk.raw;
+            std::string cli_min_display = p.cli_min.comparable
+                ? std::string(", cli_min v") + p.cli_min.raw
+                : std::string{};
+
+            std::cout << "    - " << label << tag
+                      << " [" << sdk_display << cli_min_display << "]\n"
+                      << "      " << ansi_dim() << p.path.string()
+                      << ansi_reset() << "\n";
+        }
+    }
+
     std::cout << "\n";
 
     auto findings = report.analyze();
@@ -319,6 +389,102 @@ int render_report(const VersionReport& report) {
                   << " — advisory only, commands continue to run.\n";
     }
     return warn_count > 0 ? 1 : 0;
+}
+
+namespace {
+
+// Local JSON string escaper. The render_report_json surface is small
+// enough that we deliberately don't pull in the pkg::JsonValue
+// machinery — keeping version_diag link-light for the unit test.
+std::string json_escape(const std::string& s) {
+    std::string out;
+    out.reserve(s.size() + 4);
+    for (char c : s) {
+        switch (c) {
+            case '"':  out += "\\\""; break;
+            case '\\': out += "\\\\"; break;
+            case '\n': out += "\\n";  break;
+            case '\r': out += "\\r";  break;
+            case '\t': out += "\\t";  break;
+            default:
+                if (static_cast<unsigned char>(c) < 0x20) {
+                    char buf[8];
+                    std::snprintf(buf, sizeof(buf), "\\u%04x",
+                                  static_cast<unsigned>(c) & 0xff);
+                    out += buf;
+                } else {
+                    out += c;
+                }
+        }
+    }
+    return out;
+}
+
+void write_semver_json(std::ostream& os, const Semver& v) {
+    os << "{\"raw\": \"" << json_escape(v.raw) << "\""
+       << ", \"comparable\": " << (v.comparable ? "true" : "false");
+    if (v.comparable) {
+        os << ", \"major\": " << v.major
+           << ", \"minor\": " << v.minor
+           << ", \"patch\": " << v.patch;
+    }
+    os << "}";
+}
+
+}  // namespace
+
+int render_report_json(const VersionReport& report) {
+    auto findings = report.analyze();
+
+    std::cout << "{\n";
+    std::cout << "  \"cli\": ";
+    write_semver_json(std::cout, report.cli);
+    std::cout << ",\n  \"plugin\": ";
+    write_semver_json(std::cout, report.plugin);
+    std::cout << ",\n  \"plugin_json_path\": \""
+              << json_escape(report.plugin_json_path.generic_string())
+              << "\"";
+    std::cout << ",\n  \"project_root\": \""
+              << json_escape(report.project_root.generic_string()) << "\"";
+    std::cout << ",\n  \"project_sdk\": ";
+    write_semver_json(std::cout, report.project_sdk);
+    std::cout << ",\n  \"project_cli_min\": ";
+    write_semver_json(std::cout, report.project_cli_min);
+
+    std::cout << ",\n  \"projects\": [";
+    for (size_t i = 0; i < report.projects.size(); ++i) {
+        const auto& p = report.projects[i];
+        std::cout << (i == 0 ? "\n    " : ",\n    ") << "{";
+        std::cout << "\"path\": \""           << json_escape(p.path.generic_string()) << "\", "
+                  << "\"name\": \""           << json_escape(p.name) << "\", "
+                  << "\"sdk\": ";
+        write_semver_json(std::cout, p.sdk);
+        std::cout << ", \"cli_min\": ";
+        write_semver_json(std::cout, p.cli_min);
+        std::cout << ", \"missing_on_disk\": "
+                  << (p.missing_on_disk ? "true" : "false");
+        std::cout << ", \"scanned\": "
+                  << (p.scanned ? "true" : "false");
+        std::cout << "}";
+    }
+    if (!report.projects.empty()) std::cout << "\n  ";
+    std::cout << "]";
+
+    std::cout << ",\n  \"findings\": [";
+    for (size_t i = 0; i < findings.size(); ++i) {
+        const auto& f = findings[i];
+        std::cout << (i == 0 ? "\n    " : ",\n    ") << "{"
+                  << "\"severity\": \""
+                  << (f.severity == SkewSeverity::Warn ? "warn" : "info")
+                  << "\", "
+                  << "\"message\": \"" << json_escape(f.message) << "\""
+                  << "}";
+    }
+    if (!findings.empty()) std::cout << "\n  ";
+    std::cout << "]\n";
+
+    std::cout << "}\n";
+    return 0;
 }
 
 }  // namespace pulp::cli::version_diag

@@ -105,20 +105,20 @@ target_link_libraries(pulp-test-cli-version-diag PRIVATE
     Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-cli-version-diag)
 
-# Release-discovery Slice 2 (#547): pure-logic tests for the update
-# cache, semver comparator, banner composer, TOML writer, and
-# Fetcher-injected refresh orchestrator. No network, no cli_common
-# link deps — same pattern as version_diag.
-add_executable(pulp-test-cli-update-check
-    test_cli_update_check.cpp
-    ${CMAKE_SOURCE_DIR}/tools/cli/update_check.cpp
+# CLI projects registry (#499 / #552 Slice 1b): pure-logic tests for
+# the ~/.pulp/projects.json read/write surface and the opt-in
+# parent-directory scan. projects_registry is deliberately free of
+# cli_common link deps for the same reason as version_diag.
+add_executable(pulp-test-cli-projects-registry
+    test_cli_projects_registry.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/projects_registry.cpp
 )
-target_include_directories(pulp-test-cli-update-check PRIVATE
+target_include_directories(pulp-test-cli-projects-registry PRIVATE
     ${CMAKE_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/tools/cli)
-target_link_libraries(pulp-test-cli-update-check PRIVATE
+target_link_libraries(pulp-test-cli-projects-registry PRIVATE
     Catch2::Catch2WithMain)
-catch_discover_tests(pulp-test-cli-update-check)
+catch_discover_tests(pulp-test-cli-projects-registry)
 
 # Child process tests
 add_executable(pulp-test-child-process test_child_process.cpp)
