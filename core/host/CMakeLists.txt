@@ -29,6 +29,13 @@ if(PULP_HAS_CLAP)
     target_compile_definitions(pulp-host PRIVATE PULP_HOST_HAS_CLAP=1)
 endif()
 
+# scanner_vst3.cpp reads Contents/Resources/moduleinfo.json via
+# choc::json (pure JSON, no VST3 SDK required). choc headers come
+# transitively through pulp::runtime's PUBLIC include dir. Always
+# compiled so plugins that ship moduleinfo.json get stable FUIDs
+# even on non-VST3-SDK builds.
+target_sources(pulp-host PRIVATE src/scanner_vst3.cpp)
+
 # VST3 loader (requires VST3 SDK)
 if(PULP_HAS_VST3)
     target_sources(pulp-host PRIVATE src/plugin_slot_vst3.cpp)

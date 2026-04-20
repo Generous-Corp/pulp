@@ -8,8 +8,11 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <pulp/audio/buffer.hpp>
 #include <pulp/host/graph_serializer.hpp>
 #include <pulp/host/signal_graph.hpp>
+
+#include <vector>
 
 using namespace pulp::host;
 
@@ -175,4 +178,74 @@ TEST_CASE("GraphSerializer round-trips MIDI routing", "[host][serializer]") {
         if (c.midi) midi_edge_count++;
     }
     REQUIRE(midi_edge_count == 1);
+}
+
+// Issue #491 P2 bonus: when graph_serializer rehydrates a graph with a
+// plugin that can't be resolved, it creates a "placeholder" Plugin node
+// with a null slot. Without an explicit branch in SignalGraph::process()
+// the node's output scratch kept stale data across blocks. The fix
+// deterministically passes input through to output (or zero-fills when
+// channel counts mismatch) so downstream AudioOutput never sees stale
+// audio.
+TEST_CASE("SignalGraph processes missing-plugin node as deterministic pass-through",
+          "[host][serializer][issue-491]") {
+    SignalGraph src;
+    auto input = src.add_input_node(2, "In");
+    auto plugin = src.add_plugin_node(
+        make_fake_plugin_info("Ghost", "com.pulp.test.ghost"));
+    auto output = src.add_output_node(2, "Out");
+    // Wire both L and R channels so the missing-plugin node has
+    // something meaningful to pass through.
+    REQUIRE(src.connect(input, 0, plugin, 0));
+    REQUIRE(src.connect(input, 1, plugin, 1));
+    REQUIRE(src.connect(plugin, 0, output, 0));
+    REQUIRE(src.connect(plugin, 1, output, 1));
+
+    const auto json = GraphSerializer::to_json(src);
+    SignalGraph dst;
+    auto result = GraphSerializer::from_json(dst, json);
+    REQUIRE(result.ok);
+    REQUIRE_FALSE(result.missing_plugins.empty());
+
+    REQUIRE(dst.prepare(48000.0, 64));
+
+    const int num_samples = 64;
+    std::vector<float> in_l(num_samples), in_r(num_samples);
+    std::vector<float> out_l(num_samples, 123.0f), out_r(num_samples, -456.0f);
+    for (int i = 0; i < num_samples; ++i) {
+        in_l[i] = 0.25f;
+        in_r[i] = -0.5f;
+    }
+    float* in_chs[2]  = { in_l.data(),  in_r.data()  };
+    float* out_chs[2] = { out_l.data(), out_r.data() };
+    pulp::audio::BufferView<const float> in_view(
+        const_cast<const float**>(in_chs), 2,
+        static_cast<std::size_t>(num_samples));
+    pulp::audio::BufferView<float> out_view(
+        out_chs, 2, static_cast<std::size_t>(num_samples));
+
+    dst.process(out_view, in_view, num_samples);
+
+    // Pass-through behaviour: output == input (the missing-plugin node
+    // forwarded audio verbatim, then AudioOutput accumulated it).
+    for (int i = 0; i < num_samples; ++i) {
+        REQUIRE(out_l[i] == 0.25f);
+        REQUIRE(out_r[i] == -0.5f);
+    }
+
+    // Run a second block whose input is all zeros; stale data from the
+    // first block must NOT leak through. Before the fix, the placeholder
+    // node wrote nothing and the next AudioOutput accumulation carried
+    // whatever lived in output_data scratch.
+    for (int i = 0; i < num_samples; ++i) {
+        in_l[i] = 0.0f;
+        in_r[i] = 0.0f;
+        out_l[i] = 77.0f;
+        out_r[i] = 77.0f;
+    }
+    dst.process(out_view, in_view, num_samples);
+    for (int i = 0; i < num_samples; ++i) {
+        REQUIRE(out_l[i] == 0.0f);
+        REQUIRE(out_r[i] == 0.0f);
+    }
 }

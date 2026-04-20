@@ -537,7 +537,28 @@ void SignalGraph::process(audio::BufferView<float>& output,
             }
             case NodeType::Plugin: {
                 auto pit = cg->plugins.find(id);
-                if (pit == cg->plugins.end() || !pit->second) break;
+                if (pit == cg->plugins.end() || !pit->second) {
+                    // Issue #491 P2 bonus: graph_serializer rehydration
+                    // creates a "placeholder" Plugin node when the saved
+                    // plugin can't be resolved (missing / moved / wrong
+                    // format). Without an explicit branch here, output
+                    // scratch keeps whatever stale data it carried —
+                    // audible artifacts on the next AudioOutput gather.
+                    // Deterministic fallback: pass input → output when
+                    // channel counts match, zero-fill when they don't.
+                    const int in_ch  = static_cast<int>(rt.input_ptrs.size());
+                    const int out_ch = static_cast<int>(rt.output_ptrs.size());
+                    const int chs = std::min(in_ch, out_ch);
+                    for (int c = 0; c < chs; ++c) {
+                        std::memcpy(rt.output_ptrs[c], rt.input_ptrs[c],
+                                    sizeof(float) * static_cast<size_t>(num_samples));
+                    }
+                    for (int c = chs; c < out_ch; ++c) {
+                        std::memset(rt.output_ptrs[c], 0,
+                                    sizeof(float) * static_cast<size_t>(num_samples));
+                    }
+                    break;
+                }
                 audio::BufferView<float> out_view(
                     rt.output_ptrs.data(), rt.output_ptrs.size(),
                     static_cast<std::size_t>(num_samples));
