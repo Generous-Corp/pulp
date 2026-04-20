@@ -8,9 +8,16 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
-<a id="v0260"></a>
-## [0.27.0]
+<a id="v0270"></a>
+## [0.27.0] - 2026-04-21
 
+- fix: Codex post-merge sweep (2026-04-21) ([#560](https://github.com/danielraffel/pulp/pull/560))
+- android skill: bump CLI-verified footer to 2026-04-21 spike ([#558](https://github.com/danielraffel/pulp/pull/558))
+- android: end-to-end smoke validation script (#337) ([#556](https://github.com/danielraffel/pulp/pull/556))
+- tools/scripts: fix fnmatch `**` glob bug in version + skill gates ([#554](https://github.com/danielraffel/pulp/pull/554))
+- cli: pulp doctor --versions foundation (#499 Slice 1) ([#546](https://github.com/danielraffel/pulp/pull/546))
+
+<a id="v0260"></a>
 ## [0.26.0] - 2026-04-20
 
 - bench: Slice 0.5 honest re-eval on Three.js particles — PerfCounters + threejs-native-demo benchmark mode ([#541](https://github.com/danielraffel/pulp/pull/541))
@@ -457,6 +464,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.27.0]: https://github.com/danielraffel/pulp/releases/tag/v0.27.0
 [0.26.0]: https://github.com/danielraffel/pulp/releases/tag/v0.26.0
 [0.25.1]: https://github.com/danielraffel/pulp/releases/tag/v0.25.1
 [0.25.0]: https://github.com/danielraffel/pulp/releases/tag/v0.25.0
