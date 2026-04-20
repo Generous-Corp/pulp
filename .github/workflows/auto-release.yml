@@ -160,62 +160,99 @@ jobs:
           PYEOF
           }
 
-          # event.before — the push's immediate ancestor.
-          prev='${{ github.event.before }}'
-          if [ -z "$prev" ] || [ "$prev" = "0000000000000000000000000000000000000000" ]; then
-              prev="HEAD~1"
-          fi
-
-          # Latest existing tag per surface.
+          # Latest existing tag per surface (HEAD~1 fallback is intentional —
+          # safer to compare against HEAD~1 than a missing-tag sentinel; for
+          # first-release cases the tag lookup returns empty and our
+          # decision script treats empty as "less than anything").
           latest_sdk_tag=$(git tag --list 'v[0-9]*' --sort=-version:refname | head -1)
           latest_plugin_tag=$(git tag --list 'plugin-v[0-9]*' --sort=-version:refname | head -1)
 
-          sdk_prev=$(extract_cmake_version "$prev" || true)
           sdk_tag=$(extract_cmake_version "${latest_sdk_tag:-HEAD~1}" || true)
           sdk_after=$(extract_cmake_version HEAD || true)
-          plugin_prev=$(extract_json_version "$prev" .claude-plugin/plugin.json || true)
           plugin_tag=$(extract_json_version "${latest_plugin_tag:-HEAD~1}" .claude-plugin/plugin.json || true)
           plugin_after=$(extract_json_version HEAD .claude-plugin/plugin.json || true)
 
-          # Decision: create tag iff HEAD > prev AND HEAD > latest-tag.
-          sdk_should_tag=0
-          if [ -n "$sdk_after" ]; then
-              gt_prev=$(semver_cmp "$sdk_after" "$sdk_prev")
-              gt_tag=$(semver_cmp "$sdk_after" "$sdk_tag")
-              if [ "$gt_prev" = "gt" ] && [ "$gt_tag" = "gt" ]; then
-                  sdk_should_tag=1
-              fi
-          fi
+          # #513 fix — trailer-aware bump detection. Walk history from
+          # HEAD backward to find the commit that set a given version
+          # file to its current value. If that bump commit carries
+          # `Release: skip`, the skip is sticky (permanent for that
+          # bumped value) and no future push re-evaluates it. Prior
+          # logic tried to approximate this using event.before and
+          # broke the self-heal case (v0.23.1 recovery on 2026-04-20
+          # showed the pattern).
+          find_bump_commit() {
+              local file="$1"
+              local extract="$2"
+              local current
+              current=$("$extract" HEAD "$file" 2>/dev/null || echo "")
+              [ -z "$current" ] && return 1
+              # Walk commits that touched the file, newest first.
+              local sha
+              for sha in $(git log --format=%H -- "$file" 2>/dev/null); do
+                  local at prev_v
+                  at=$("$extract" "$sha" "$file" 2>/dev/null || echo "")
+                  prev_v=$("$extract" "${sha}~1" "$file" 2>/dev/null || echo "")
+                  if [ "$at" = "$current" ] && [ "$at" != "$prev_v" ]; then
+                      echo "$sha"
+                      return 0
+                  fi
+              done
+              return 1
+          }
+          bump_has_skip() {
+              local sha="$1"
+              [ -z "$sha" ] && return 1
+              git log -1 --format=%B "$sha" \
+                  | git interpret-trailers --parse \
+                  | grep -iq '^release: skip'
+          }
+          # Wrap extractors to take (ref, file) for find_bump_commit's API.
+          extract_sdk_version_at() {
+              extract_cmake_version "$1"
+          }
+          extract_plugin_version_at() {
+              extract_json_version "$1" "$2"
+          }
 
-          plugin_should_tag=0
-          if [ -n "$plugin_after" ]; then
-              gt_prev=$(semver_cmp "$plugin_after" "$plugin_prev")
-              gt_tag=$(semver_cmp "$plugin_after" "$plugin_tag")
-              if [ "$gt_prev" = "gt" ] && [ "$gt_tag" = "gt" ]; then
-                  plugin_should_tag=1
-              fi
-          fi
+          sdk_bump=$(find_bump_commit CMakeLists.txt extract_sdk_version_at || true)
+          plugin_bump=$(find_bump_commit .claude-plugin/plugin.json extract_plugin_version_at || true)
+          sdk_skip=0; [ -n "$sdk_bump" ] && bump_has_skip "$sdk_bump" && sdk_skip=1
+          plugin_skip=0; [ -n "$plugin_bump" ] && bump_has_skip "$plugin_bump" && plugin_skip=1
 
-          # Expose the decision + context to the tagging step.
+          # Delegate the final decision to a pure-Python script we can
+          # unit test (tools/scripts/auto_release_decision.py). Inputs
+          # come from bash/git; decision logic lives somewhere diff-able
+          # and exercisable outside this workflow.
+          sdk_decision=$(python3 tools/scripts/auto_release_decision.py \
+              --head-version "$sdk_after" \
+              --tag-version "$sdk_tag" \
+              --bump-commit-has-skip "$sdk_skip" \
+              --surface sdk)
+          plugin_decision=$(python3 tools/scripts/auto_release_decision.py \
+              --head-version "$plugin_after" \
+              --tag-version "$plugin_tag" \
+              --bump-commit-has-skip "$plugin_skip" \
+              --surface plugin)
+
+          sdk_should_tag=$(echo "$sdk_decision" | python3 -c 'import json, sys; print(json.load(sys.stdin)["should_tag"])')
+          plugin_should_tag=$(echo "$plugin_decision" | python3 -c 'import json, sys; print(json.load(sys.stdin)["should_tag"])')
+
+          # Expose decision + inputs to the tagging step + the log.
           echo "sdk_should_tag=$sdk_should_tag"       >> "$GITHUB_OUTPUT"
           echo "plugin_should_tag=$plugin_should_tag" >> "$GITHUB_OUTPUT"
-          echo "sdk_before=$sdk_prev"                 >> "$GITHUB_OUTPUT"
           echo "sdk_after=$sdk_after"                 >> "$GITHUB_OUTPUT"
-          echo "plugin_before=$plugin_prev"           >> "$GITHUB_OUTPUT"
           echo "plugin_after=$plugin_after"           >> "$GITHUB_OUTPUT"
 
-          echo "sdk:    prev=$sdk_prev tag=$sdk_tag head=$sdk_after should_tag=$sdk_should_tag"
-          echo "plugin: prev=$plugin_prev tag=$plugin_tag head=$plugin_after should_tag=$plugin_should_tag"
+          echo "sdk decision:    $sdk_decision"
+          echo "plugin decision: $plugin_decision"
 
       - name: Create tags for moved surfaces
         if: steps.guard.outputs.skip == '0'
         shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.RELEASE_BOT_TOKEN || secrets.GITHUB_TOKEN }}
-          SDK_BEFORE: ${{ steps.versions.outputs.sdk_before }}
           SDK_AFTER: ${{ steps.versions.outputs.sdk_after }}
           SDK_SHOULD_TAG: ${{ steps.versions.outputs.sdk_should_tag }}
-          PLUGIN_BEFORE: ${{ steps.versions.outputs.plugin_before }}
           PLUGIN_AFTER: ${{ steps.versions.outputs.plugin_after }}
           PLUGIN_SHOULD_TAG: ${{ steps.versions.outputs.plugin_should_tag }}
         run: |
