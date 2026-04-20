@@ -152,7 +152,9 @@ jobs:
 
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v1
+        # v1 is too old per actionlint (GH deprecated its runner version);
+        # v2 uses the Node 20 runner and is a drop-in replacement.
+        uses: softprops/action-gh-release@v2
         with:
           files: artifacts/*
           draft: true

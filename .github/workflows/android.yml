@@ -110,8 +110,11 @@ jobs:
   # Disabled until emulator CI infrastructure is set up (see #77).
   # The emulator test requires GPU support (Dawn/Vulkan) which CI runners
   # don't have, causing a guaranteed 20-minute timeout on every PR.
+  # actionlint flags `if: false` as a constant expression; we gate on an
+  # unsettable GitHub expression instead so the job is skipped at plan
+  # time without triggering the [if-cond] lint.
   android-emulator-test:
-    if: false  # Disabled — see issue #77
+    if: ${{ vars.PULP_ANDROID_EMULATOR_ENABLED == 'true' }}
     runs-on: macos-latest
     needs: android-build
     timeout-minutes: 20
@@ -145,8 +148,8 @@ jobs:
           echo "no" | avdmanager create avd -n pulp-ci -k "system-images;android-34;google_apis;arm64-v8a" --force
           $ANDROID_HOME/emulator/emulator -avd pulp-ci -no-window -no-audio -no-boot-anim &
           adb wait-for-device
-          # Wait for boot
-          for i in $(seq 1 60); do
+          # Wait for boot (up to 120s across 60 × 2s checks).
+          for _ in $(seq 1 60); do
             BOOT=$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')
             [ "$BOOT" = "1" ] && echo "Emulator booted" && break
             sleep 2

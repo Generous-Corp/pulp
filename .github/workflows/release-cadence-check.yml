@@ -1,0 +1,250 @@
+name: Release cadence check
+
+# Layer 3 of the release-watchdog triad (docs/guides/release-watchdog.md).
+#
+# Outcome-based invariant: "every commit on main that bumped
+# CMakeLists.txt VERSION must have a corresponding git tag within N
+# minutes of landing." Fires regardless of what broke auto-release.yml
+# this time — YAML today, missing secret tomorrow, GitHub API outage
+# next month. The trigger is the *symptom* (missing release), not the
+# cause.
+#
+# Complements:
+#   - workflow-lint.yml (Layer 1): catches workflow-file bugs pre-merge
+#   - auto-release-watchdog.yml (Layer 2): catches auto-release.yml
+#       runtime failures immediately
+#   - THIS (Layer 3): catches any other path that causes a bump to land
+#     without a tag — orthogonal to whether auto-release.yml even fired
+#
+# Cadence: every 30 minutes. Scans the last 24h of `main` commits; if
+# any touched CMakeLists.txt VERSION and no tag points at that commit
+# or a descendant, open/update a tracking issue. Grace window defaults
+# to 15 minutes (auto-release + release-cli + sign-and-release can
+# take ~10 min end-to-end; 15 min leaves slack).
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'
+  workflow_dispatch:
+    inputs:
+      lookback_hours:
+        description: 'Hours of main history to scan'
+        required: false
+        default: '24'
+      grace_minutes:
+        description: 'Minutes to wait before flagging a bump as untagged'
+        required: false
+        default: '15'
+      dry_run:
+        description: 'Log findings but do not touch the tracking issue'
+        required: false
+        default: 'false'
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: release-cadence-check
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    name: Check bumps-vs-tags invariant
+
+    env:
+      LOOKBACK_HOURS: ${{ github.event.inputs.lookback_hours || '24' }}
+      GRACE_MINUTES: ${{ github.event.inputs.grace_minutes || '15' }}
+      DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
+      TRACKING_TITLE: 'Release cadence: version bumped but no tag'
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0  # need history + all tags
+
+      - name: Fetch tags explicitly
+        run: git fetch --tags --force
+
+      - name: Scan bumps-without-tags
+        id: scan
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          lookback="${LOOKBACK_HOURS}"
+          grace="${GRACE_MINUTES}"
+          cutoff=$(date -u -d "${lookback} hours ago" +%s 2>/dev/null \
+              || python3 -c "import datetime; print(int((datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=${lookback})).timestamp()))")
+          grace_cutoff=$(date -u -d "${grace} minutes ago" +%s 2>/dev/null \
+              || python3 -c "import datetime; print(int((datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(minutes=${grace})).timestamp()))")
+
+          # Walk commits on main touching CMakeLists.txt since cutoff.
+          mapfile -t candidates < <(
+              git log origin/main --since="${lookback} hours ago" \
+                  --pretty='%H' -- CMakeLists.txt
+          )
+
+          echo "Candidates (touch CMakeLists.txt in last ${lookback}h): ${#candidates[@]}"
+
+          findings='[]'
+
+          for sha in "${candidates[@]}"; do
+              # Did this commit actually change the SDK VERSION line?
+              # Codex P1 on #512: `python3 - <<'PY'` reads the SCRIPT
+              # from stdin, so piping `diff_content` in would be silently
+              # discarded (heredoc wins). Pass the diff through argv so
+              # both script AND data reach Python.
+              diff_content=$(git show --unified=0 "${sha}" -- CMakeLists.txt)
+              bumped_to=$(python3 - "$diff_content" <<'PY'
+          import re, sys
+          text = sys.argv[1]
+          # Look for `+    VERSION X.Y.Z` or `+VERSION X.Y.Z` inside the
+          # project(...) call's diff hunk.
+          for line in text.splitlines():
+              if line.startswith('+') and not line.startswith('+++'):
+                  m = re.search(r'VERSION\s+(\d+\.\d+\.\d+)', line)
+                  if m:
+                      print(m.group(1))
+                      break
+          PY
+              )
+              if [ -z "$bumped_to" ]; then
+                  continue  # touched CMakeLists.txt but no VERSION change
+              fi
+
+              commit_ts=$(git log -1 --format=%ct "${sha}")
+              if [ "$commit_ts" -gt "$grace_cutoff" ]; then
+                  # Within grace window — auto-release may still be running.
+                  echo "  skip ${sha:0:8} (bumped to v${bumped_to}, within grace)"
+                  continue
+              fi
+
+              # Does a tag at or descendant of this commit point at v${bumped_to}?
+              tag="v${bumped_to}"
+              if git rev-parse --verify --quiet "refs/tags/${tag}" > /dev/null; then
+                  tag_sha=$(git rev-parse "refs/tags/${tag}^{commit}")
+                  if git merge-base --is-ancestor "${sha}" "${tag_sha}"; then
+                      echo "  ok   ${sha:0:8} -> ${tag} at ${tag_sha:0:8}"
+                      continue
+                  fi
+              fi
+
+              # Bump landed, grace expired, no tag.
+              commit_msg=$(git log -1 --format='%s' "${sha}")
+              commit_date=$(git log -1 --format='%cI' "${sha}")
+              age_min=$(( ($(date -u +%s) - commit_ts) / 60 ))
+              findings=$(echo "$findings" | python3 -c "
+          import json, sys
+          arr = json.load(sys.stdin)
+          arr.append({
+              'sha': '${sha}',
+              'short': '${sha:0:8}',
+              'bumped_to': '${bumped_to}',
+              'expected_tag': '${tag}',
+              'subject': '''${commit_msg//\'/\\\'}'''[:200],
+              'landed_at': '${commit_date}',
+              'age_minutes': ${age_min},
+          })
+          print(json.dumps(arr))
+          ")
+              echo "  MISS ${sha:0:8} bumped to v${bumped_to} ${age_min}min ago, tag ${tag} missing"
+          done
+
+          echo "$findings" > findings.json
+          count=$(python3 -c "import json; print(len(json.load(open('findings.json'))))")
+          echo "count=${count}" >> "$GITHUB_OUTPUT"
+          echo "Missing-tag count: ${count}"
+
+      - name: Render issue body
+        if: env.DRY_RUN != 'true' && steps.scan.outputs.count != '0'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python3 - <<'PY' > body.md
+          import json, datetime
+          findings = json.load(open('findings.json'))
+          now = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
+          lines = []
+          lines.append(f"_Auto-generated by `.github/workflows/release-cadence-check.yml` on {now}._")
+          lines.append("")
+          lines.append("**Invariant violated:** one or more commits on `main` bumped "
+                       "`CMakeLists.txt` VERSION but no matching git tag was created "
+                       "within the grace window. Binary releases are effectively blocked "
+                       "for the affected versions.")
+          lines.append("")
+          lines.append("Likely root causes:")
+          lines.append("- `auto-release.yml` is broken at the workflow-file or runtime level (check the watchdog tracker)")
+          lines.append("- `Release: skip` trailer applied to a merge that should NOT have skipped")
+          lines.append("- Manual tag-push permissions / token drift")
+          lines.append("- Tagged but failed downstream (release-cli.yml / sign-and-release.yml)")
+          lines.append("")
+          lines.append("### Missing tags")
+          lines.append("")
+          for f in findings:
+              lines.append(f"- **`{f['expected_tag']}`** — commit `{f['short']}` "
+                           f"bumped to `{f['bumped_to']}` {f['age_minutes']} min ago "
+                           f"(landed {f['landed_at']})")
+              lines.append(f"  > {f['subject']}")
+          lines.append("")
+          lines.append("**Resolution:** either tag manually (`git tag -a vX.Y.Z -m '...' && git push origin vX.Y.Z`) "
+                       "if the bump was legitimate, or revert the bump if it was accidental. "
+                       "This tracker closes automatically on the next sweep when every bump has a tag.")
+          print('\n'.join(lines))
+          PY
+
+      - name: Maintain tracking issue
+        if: env.DRY_RUN != 'true'
+        shell: bash
+        env:
+          COUNT: ${{ steps.scan.outputs.count }}
+        run: |
+          set -euo pipefail
+
+          repo='${{ github.repository }}'
+          title="${TRACKING_TITLE}"
+
+          existing_json=$(
+              gh issue list \
+                  --repo "$repo" \
+                  --state all \
+                  --search "in:title \"${title}\"" \
+                  --json number,title,state \
+                  --jq "[.[] | select(.title == \"${title}\")] | first // {}"
+          )
+          existing=$(echo "$existing_json" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('number','') or '')")
+          existing_state=$(echo "$existing_json" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('state','') or '')")
+
+          if [ "$COUNT" -eq 0 ]; then
+              if [ -n "${existing:-}" ] && [ "$existing_state" = "OPEN" ]; then
+                  echo "Cadence invariant restored — closing #${existing}."
+                  gh issue comment "$existing" --repo "$repo" \
+                      --body "Sweep on $(date -u +%Y-%m-%d\ %H:%M) found every bump has a tag. Closing."
+                  gh issue close "$existing" --repo "$repo" --reason completed
+              else
+                  echo "No findings and no open tracker — nothing to do."
+              fi
+              exit 0
+          fi
+
+          if [ -z "${existing:-}" ]; then
+              echo "Creating tracking issue."
+              gh issue create --repo "$repo" --title "$title" --body-file body.md --label ci,blocks-release 2>&1 || \
+                  gh issue create --repo "$repo" --title "$title" --body-file body.md
+          else
+              echo "Updating tracking issue #${existing}."
+              gh issue edit "$existing" --repo "$repo" --body-file body.md
+              gh issue reopen "$existing" --repo "$repo" 2>/dev/null || true
+          fi
+
+      - name: Upload artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-cadence-findings
+          path: findings.json
+          retention-days: 14
+          if-no-files-found: ignore

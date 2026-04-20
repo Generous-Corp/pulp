@@ -1,0 +1,156 @@
+name: Auto-release watchdog
+
+# Layer 2 of the release-watchdog triad (docs/guides/release-watchdog.md):
+# alert when auto-release.yml fails at the workflow-file level (0 jobs
+# dispatched) or at any job-level failure. Catches runtime failures that
+# slip past workflow-lint.yml — e.g. a missing secret, a permissions
+# drift, an `actions/checkout` breaking change — which would otherwise
+# fail silently: `conclusion=failure` but no logs, no tag, no binaries.
+#
+# Motivating incident: 2026-04-20 — #501 broke auto-release.yml with an
+# indent bug. Every run since (8 of them) concluded `failure` with 0
+# jobs. Because the tip commits kept flowing to main, no one noticed
+# until v0.23.1 didn't auto-tag. This workflow opens a tracking issue
+# within minutes of the first such failure.
+#
+# Design:
+# - Triggers on workflow_run completion for auto-release.yml.
+# - Dispatches in the target repo (no secondary permissions dance).
+# - Maintains a single tracking issue "Auto-release workflow failed —
+#   RELEASES BLOCKED" with edit-in-place semantics (mirrors the #475
+#   close-path pattern).
+# - Closes the issue automatically when auto-release.yml returns to
+#   success.
+
+on:
+  workflow_run:
+    workflows: ["Auto-Release on Version Bump"]
+    types: [completed]
+
+permissions:
+  contents: read
+  issues: write
+  actions: read
+
+concurrency:
+  group: auto-release-watchdog
+  cancel-in-progress: false
+
+jobs:
+  alert:
+    runs-on: ubuntu-latest
+    name: Alert on auto-release failure
+
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      TRACKING_TITLE: 'Auto-release workflow failed — RELEASES BLOCKED'
+      RUN_ID: ${{ github.event.workflow_run.id }}
+      RUN_URL: ${{ github.event.workflow_run.html_url }}
+      RUN_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+      RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+
+    steps:
+      - name: Classify run outcome
+        id: classify
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          repo='${{ github.repository }}'
+
+          # workflow_run provides conclusion but not the job count —
+          # fetch that separately so we can distinguish "workflow-file
+          # rejected by GitHub" (0 jobs) from "a job failed" (>=1 jobs,
+          # at least one failed).
+          jobs_json=$(gh api "/repos/${repo}/actions/runs/${RUN_ID}/jobs")
+          jobs_count=$(echo "$jobs_json" | python3 -c "import json, sys; print(len(json.load(sys.stdin).get('jobs', [])))")
+
+          kind="none"
+          if [ "$RUN_CONCLUSION" = "failure" ] && [ "$jobs_count" -eq 0 ]; then
+              kind="workflow_file_error"
+          elif [ "$RUN_CONCLUSION" = "failure" ]; then
+              kind="job_failure"
+          elif [ "$RUN_CONCLUSION" = "success" ]; then
+              kind="success"
+          fi
+
+          echo "kind=$kind"              >> "$GITHUB_OUTPUT"
+          echo "jobs_count=$jobs_count"  >> "$GITHUB_OUTPUT"
+          echo "Run ${RUN_ID} conclusion=${RUN_CONCLUSION} jobs=${jobs_count} → kind=${kind}"
+
+      - name: Maintain tracking issue
+        shell: bash
+        env:
+          KIND: ${{ steps.classify.outputs.kind }}
+          JOBS: ${{ steps.classify.outputs.jobs_count }}
+        run: |
+          set -euo pipefail
+
+          repo='${{ github.repository }}'
+          title="${TRACKING_TITLE}"
+
+          # Look up in both OPEN and CLOSED state; only close OPEN trackers
+          # when we return to green (mirror of #475 close-path pattern).
+          existing_json=$(
+              gh issue list \
+                  --repo "$repo" \
+                  --state all \
+                  --search "in:title \"${title}\"" \
+                  --json number,title,state \
+                  --jq "[.[] | select(.title == \"${title}\")] | first // {}"
+          )
+          existing=$(echo "$existing_json" | python3 -c "import json, sys; d=json.load(sys.stdin); print(d.get('number','') or '')")
+          existing_state=$(echo "$existing_json" | python3 -c "import json, sys; d=json.load(sys.stdin); print(d.get('state','') or '')")
+
+          if [ "$KIND" = "success" ]; then
+              if [ -n "${existing:-}" ] && [ "$existing_state" = "OPEN" ]; then
+                  echo "Auto-release recovered — closing tracker #${existing}."
+                  gh issue comment "$existing" --repo "$repo" \
+                      --body "Auto-release returned to success on run ${RUN_URL}. Closing. (sha ${RUN_SHA})"
+                  gh issue close "$existing" --repo "$repo" --reason completed
+              else
+                  echo "Auto-release succeeded and no open tracker — nothing to do."
+              fi
+              exit 0
+          fi
+
+          if [ "$KIND" = "none" ]; then
+              echo "Run was not a terminal failure (conclusion=${RUN_CONCLUSION}); nothing to alert on."
+              exit 0
+          fi
+
+          # Build body based on failure kind.
+          {
+            echo "_Auto-generated by \`.github/workflows/auto-release-watchdog.yml\` on $(date -u '+%Y-%m-%d %H:%M UTC')._"
+            echo
+            if [ "$KIND" = "workflow_file_error" ]; then
+                echo "**auto-release.yml was rejected at the workflow-file level** — GitHub"
+                echo "refused to dispatch any jobs. This almost always means invalid YAML,"
+                echo "a typo in a \`uses:\` ref, or a permissions/secret configuration error."
+                echo "Logs are unavailable when this happens, so \`gh run view\` will not help;"
+                echo "the fix is to inspect the workflow file locally and run"
+                echo "\`yamllint\` / \`actionlint\` against it."
+                echo
+                echo "See the #501 / #510 incident for the pattern."
+            else
+                echo "**An auto-release job failed.** Inspect the run log to find which step"
+                echo "broke (likely the version-extract, semver-compare, or git-tag-push step)."
+            fi
+            echo
+            echo "**Run:** ${RUN_URL}"
+            echo "**Tip SHA:** \`${RUN_SHA}\`"
+            echo "**Jobs dispatched:** ${JOBS}"
+            echo
+            echo "_Releases are BLOCKED until auto-release.yml returns to green._"
+            echo "_This tracker closes automatically on the next successful run._"
+          } > body.md
+
+          if [ -z "${existing:-}" ]; then
+              echo "Creating tracking issue."
+              gh issue create --repo "$repo" --title "$title" --body-file body.md --label bug,ci,blocks-release 2>&1 || \
+                  gh issue create --repo "$repo" --title "$title" --body-file body.md
+          else
+              echo "Updating tracking issue #${existing}."
+              gh issue edit "$existing" --repo "$repo" --body-file body.md
+              gh issue reopen "$existing" --repo "$repo" 2>/dev/null || true
+          fi

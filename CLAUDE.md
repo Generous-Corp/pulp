@@ -502,6 +502,28 @@ Pulp versions three surfaces independently: SDK/CLI (`CMakeLists.txt`), Claude p
 
 Codex picks this policy up via the existing `AGENTS.md → CLAUDE.md` pointer; `AGENTS.md` intentionally stays a thin redirect so the two never drift. Full design: [docs/guides/versioning.md](docs/guides/versioning.md).
 
+### Release Watchdog
+
+Three layers of protection against silent release failures, independent
+of the versioning gates above. Motivated by the 2026-04-20 incident
+where a YAML-indent bug in `auto-release.yml` caused every release
+attempt for 24h to fail silently with zero jobs dispatched.
+
+1. **`.github/workflows/workflow-lint.yml`** — PR-gate: `yamllint` +
+   `actionlint` + structural `yaml.safe_load` on every PR that touches
+   `.github/workflows/**`. Catches YAML syntax, action refs, shell
+   escaping. Same tools any contributor/agent runs locally.
+2. **`.github/workflows/auto-release-watchdog.yml`** — runtime: fires on
+   `auto-release.yml` completion; opens a tracking issue on
+   `conclusion=failure` (distinguishes workflow-file-rejected from
+   job-level failures). Auto-closes on recovery.
+3. **`.github/workflows/release-cadence-check.yml`** — invariant
+   (every 30 min): scans `main` for commits that bumped `CMakeLists.txt`
+   VERSION in the last 24h; flags any bump without a matching tag
+   after the grace window. Cause-agnostic — catches unknown-unknowns.
+
+Full design: [docs/guides/release-watchdog.md](docs/guides/release-watchdog.md).
+
 ### Status Vocabulary
 
 Use only these values for `status:` fields in manifests:

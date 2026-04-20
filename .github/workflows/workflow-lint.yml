@@ -1,0 +1,105 @@
+name: Workflow lint
+
+# Layer 1 of the release-watchdog triad (docs/guides/release-watchdog.md):
+# catch bad `.github/workflows/*.yml` before merge. Uses agent-agnostic
+# tooling (yamllint, actionlint, `python3 -c yaml.safe_load`) so any
+# contributor or agent — Claude, Codex, a human — can run the same
+# checks locally.
+#
+# Motivating incident: #501 shipped an auto-release.yml with Python
+# code at column 1 nested inside a YAML `run: |` block whose indent
+# indicator was 10 spaces. YAML terminated the block scalar at the
+# first less-indented line, producing a workflow file GitHub refused
+# to execute. Every auto-release run since #501 failed silently with
+# "workflow file issue" and 0 jobs — v0.23.1 never auto-tagged. Fixed
+# in #510; this lint workflow prevents the re-occurrence class.
+#
+# Scope: runs only on PRs that touch `.github/workflows/**` or this
+# file itself. Keeps the check fast on the 99% of PRs that don't
+# touch CI.
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/**'
+      - '.github/actions/**'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/**'
+      - '.github/actions/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: workflow-lint-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    name: yamllint + actionlint + structural parse
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: yamllint
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet yamllint==1.35.1
+          # Pulp style: default "relaxed" profile except line-length,
+          # which we suppress since GH Actions YAML runs long frequently.
+          yamllint --no-warnings -d 'relaxed' .github/workflows/
+
+      - name: Structural YAML parse
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m pip install --quiet 'pyyaml>=6'
+          # Dumb-but-decisive: every workflow file must round-trip
+          # through `yaml.safe_load` without raising. Catches the #501
+          # class (block-scalar terminated by less-indented content)
+          # even if yamllint's rules don't flag it.
+          python3 - <<'PY'
+          import sys, pathlib, yaml
+          failures = []
+          for wf in sorted(pathlib.Path('.github/workflows').rglob('*.yml')):
+              try:
+                  yaml.safe_load(wf.read_text())
+              except yaml.YAMLError as e:
+                  failures.append(f"{wf}: {e}")
+          for wf in sorted(pathlib.Path('.github/workflows').rglob('*.yaml')):
+              try:
+                  yaml.safe_load(wf.read_text())
+              except yaml.YAMLError as e:
+                  failures.append(f"{wf}: {e}")
+          if failures:
+              print("\n\n".join(failures), file=sys.stderr)
+              sys.exit(1)
+          print(f"structural parse OK across {sum(1 for _ in pathlib.Path('.github/workflows').rglob('*.y*ml'))} files")
+          PY
+
+      - name: actionlint
+        # Disable shellcheck + pyflakes — the Pulp repo has accumulated
+        # ~30 pre-existing shellcheck findings across auto-release.yml,
+        # release-cli.yml, android.yml, freshness-check.yml, etc. that
+        # pre-date this watchdog and aren't in scope here. Core actionlint
+        # still catches the #501 class (YAML block-scalar issues), bad
+        # `uses:` refs, missing required keys, and deprecated action
+        # versions — which are the failure modes Layer 1 exists to catch.
+        # A follow-up sweep to clean up shellcheck findings can re-enable
+        # it later.
+        uses: raven-actions/actionlint@v2
+        with:
+          matcher: true
+          shellcheck: false
+          pyflakes: false
+          flags: ''
