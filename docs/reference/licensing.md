@@ -8,7 +8,7 @@ Pulp is released under the **MIT License**. You can use it for any purpose — c
 
 Pulp builds on excellent open-source software. Every dependency that Pulp bundles, fetches automatically, or redistributes is compatible with MIT licensing — there is no copyleft in the shipped dependency chain.
 
-Tables are sorted alphabetically (case-insensitive) by name. Entries here must stay in sync with [`DEPENDENCIES.md`](https://github.com/danielraffel/pulp/blob/main/DEPENDENCIES.md), [`NOTICE.md`](https://github.com/danielraffel/pulp/blob/main/NOTICE.md), and [`tools/deps/manifest.json`](https://github.com/danielraffel/pulp/blob/main/tools/deps/manifest.json) (the machine-readable source of truth).
+Tables are sorted alphabetically (case-insensitive) by name. Entries here must stay in sync with [DEPENDENCIES.md](https://github.com/danielraffel/pulp/blob/main/DEPENDENCIES.md), [NOTICE.md](https://github.com/danielraffel/pulp/blob/main/NOTICE.md), and [tools/deps/manifest.json](https://github.com/danielraffel/pulp/blob/main/tools/deps/manifest.json) (the machine-readable source of truth).
 
 ### Core Dependencies (Always Used)
 

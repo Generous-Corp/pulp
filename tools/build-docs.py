@@ -29,6 +29,8 @@ def md_to_html(md: str) -> str:
     in_ul = False
     in_ol = False
     code_lang = ''
+    code_cls = ''
+    code_lines = []
     para = []
 
     def flush_para():
@@ -53,7 +55,34 @@ def md_to_html(md: str) -> str:
             in_table = False
 
     def inline(text):
-        # Code spans first (protect from other transforms)
+        # Order matters: links FIRST (before code-span split) so link text
+        # containing backticks — e.g. [`DEPENDENCIES.md`](...) — is kept
+        # intact. Previous order split on backticks first, which shattered
+        # the [...](...) brackets and left literal `[` / `](url)` in the
+        # output. Inside link text we still honour backticks as code.
+        def rewrite_link(m):
+            link_text, url = m.group(1), m.group(2)
+            if '.md' in url and not url.startswith('http'):
+                url = url.replace('.md', '.html')
+                # Strip path prefixes — all pages are at root level
+                # But preserve anchors: modules.html#format → modules.html#format
+                anchor = ''
+                if '#' in url:
+                    url, anchor = url.split('#', 1)
+                    anchor = '#' + anchor
+                url = url.split('/')[-1] + anchor
+            # Render backticks inside link text as inline <code>.
+            inner_parts = re.split(r'(`[^`]+`)', link_text)
+            rendered = []
+            for ip in inner_parts:
+                if ip.startswith('`') and ip.endswith('`'):
+                    rendered.append(f'<code>{html.escape(ip[1:-1])}</code>')
+                else:
+                    rendered.append(ip)
+            return f'<a href="{url}">{"".join(rendered)}</a>'
+        text = re.sub(r'\[([^\]]+)\]\(([^)]+)\)', rewrite_link, text)
+
+        # Code spans (after links, so backticks inside links were already handled)
         parts = re.split(r'(`[^`]+`)', text)
         result = []
         for part in parts:
@@ -65,20 +94,6 @@ def md_to_html(md: str) -> str:
                 p = re.sub(r'__(.+?)__', r'<strong>\1</strong>', p)
                 p = re.sub(r'\*(.+?)\*', r'<em>\1</em>', p)
                 p = re.sub(r'_(.+?)_', r'<em>\1</em>', p)
-                # Links: [text](url) — rewrite .md refs to .html
-                def rewrite_link(m):
-                    text, url = m.group(1), m.group(2)
-                    if '.md' in url and not url.startswith('http'):
-                        url = url.replace('.md', '.html')
-                        # Strip path prefixes — all pages are at root level
-                        # But preserve anchors: modules.html#format → modules.html#format
-                        anchor = ''
-                        if '#' in url:
-                            url, anchor = url.split('#', 1)
-                            anchor = '#' + anchor
-                        url = url.split('/')[-1] + anchor
-                    return f'<a href="{url}">{text}</a>'
-                p = re.sub(r'\[([^\]]+)\]\(([^)]+)\)', rewrite_link, p)
                 result.append(p)
         return ''.join(result)
 
@@ -93,17 +108,43 @@ def md_to_html(md: str) -> str:
                 flush_list()
                 flush_table()
                 code_lang = line.strip()[3:].strip()
-                cls = f' class="language-{html.escape(code_lang)}"' if code_lang else ''
-                out.append(f'<pre><code{cls}>')
+                code_cls = f' class="language-{html.escape(code_lang)}"' if code_lang else ''
+                code_lines = []
                 in_code = True
             else:
-                out.append('</code></pre>')
+                # Emit the whole block as a single `out` entry so the outer
+                # '\n'.join() doesn't inject a blank line between <pre><code>
+                # and the first line of code (which would appear as a phantom
+                # top-of-block blank line because <pre> preserves whitespace).
+                lang_label_html = (
+                    f'<span class="code-lang" aria-hidden="true">{html.escape(code_lang)}</span>'
+                    if code_lang else ''
+                )
+                copy_btn_html = (
+                    '<button type="button" class="copy-btn" '
+                    'aria-label="Copy code to clipboard" '
+                    'data-copy-label="Copy" data-copied-label="Copied">'
+                    '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" '
+                    'stroke="currentColor" stroke-width="1.5" aria-hidden="true">'
+                    '<rect x="4" y="4" width="9" height="9" rx="1.5"/>'
+                    '<path d="M10 4V3a1 1 0 0 0-1-1H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h1"/>'
+                    '</svg>'
+                    '<span class="copy-btn-label">Copy</span>'
+                    '</button>'
+                )
+                code_body = '\n'.join(code_lines)
+                out.append(
+                    f'<figure class="code-block">{lang_label_html}{copy_btn_html}'
+                    f'<pre><code{code_cls}>{code_body}</code></pre></figure>'
+                )
+                code_lines = []
+                code_lang = ''
                 in_code = False
             i += 1
             continue
 
         if in_code:
-            out.append(html.escape(line))
+            code_lines.append(html.escape(line))
             i += 1
             continue
 
@@ -454,13 +495,70 @@ a:hover {{ text-decoration: underline; }}
   border-radius: 6px;
   padding: 16px;
   overflow-x: auto;
-  margin: 12px 0;
+  margin: 0;
 }}
 .content pre code {{
   background: none;
   padding: 0;
   font-size: 13px;
   line-height: 1.5;
+}}
+/* Code block wrapper for copy button + language label */
+.content figure.code-block {{
+  position: relative;
+  margin: 12px 0;
+}}
+.content figure.code-block .code-lang {{
+  position: absolute;
+  top: 6px;
+  left: 12px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  opacity: 0.5;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  pointer-events: none;
+  user-select: none;
+  z-index: 1;
+}}
+.content figure.code-block .copy-btn {{
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  font-size: 11px;
+  font-family: inherit;
+  color: inherit;
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  cursor: pointer;
+  opacity: 0.5;
+  transition: opacity 120ms ease, background 120ms ease;
+  z-index: 2;
+}}
+.content figure.code-block:hover .copy-btn,
+.content figure.code-block .copy-btn:focus-visible {{
+  opacity: 1;
+}}
+.content figure.code-block .copy-btn:hover {{
+  background: var(--bg);
+}}
+.content figure.code-block .copy-btn.copied {{
+  opacity: 1;
+  color: #4caf50;
+  border-color: #4caf50;
+}}
+.content figure.code-block .copy-btn svg {{
+  flex-shrink: 0;
+}}
+@media (prefers-reduced-motion: reduce) {{
+  .content figure.code-block .copy-btn {{
+    transition: none;
+  }}
 }}
 
 /* Tables */
@@ -632,6 +730,55 @@ if (typeof PagefindUI !== 'undefined' && !window.__pagefindMissing) {{
   links.forEach(function(a) {{
     a.addEventListener('click', function() {{
       sidebar.classList.remove('open');
+    }});
+  }});
+}})();
+</script>
+<script>
+// Copy-to-clipboard on fenced code blocks. Each figure.code-block got a
+// <button class="copy-btn"> inserted server-side; we wire click → copy the
+// adjacent <pre><code> text → flip the button label to "Copied" for 2s.
+(function() {{
+  var buttons = document.querySelectorAll('figure.code-block .copy-btn');
+  buttons.forEach(function(btn) {{
+    btn.addEventListener('click', async function() {{
+      var fig = btn.closest('figure.code-block');
+      if (!fig) return;
+      var code = fig.querySelector('pre code');
+      if (!code) return;
+      var text = code.innerText;
+      var label = btn.querySelector('.copy-btn-label');
+      var original = btn.dataset.copyLabel || 'Copy';
+      var copied = btn.dataset.copiedLabel || 'Copied';
+      try {{
+        if (navigator.clipboard && window.isSecureContext) {{
+          await navigator.clipboard.writeText(text);
+        }} else {{
+          // Fallback for insecure contexts / older browsers
+          var ta = document.createElement('textarea');
+          ta.value = text;
+          ta.style.position = 'fixed';
+          ta.style.opacity = '0';
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand('copy');
+          document.body.removeChild(ta);
+        }}
+        btn.classList.add('copied');
+        btn.setAttribute('aria-label', 'Copied to clipboard');
+        if (label) label.textContent = copied;
+        setTimeout(function() {{
+          btn.classList.remove('copied');
+          btn.setAttribute('aria-label', 'Copy code to clipboard');
+          if (label) label.textContent = original;
+        }}, 2000);
+      }} catch (err) {{
+        // Surface the failure briefly rather than silently
+        if (label) label.textContent = 'Failed';
+        setTimeout(function() {{
+          if (label) label.textContent = original;
+        }}, 2000);
+      }}
     }});
   }});
 }})();
