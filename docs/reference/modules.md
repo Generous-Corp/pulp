@@ -624,8 +624,15 @@ plug-ins, wire them into a DAG, and process audio through the chain.
 | PluginSlot | `pulp/host/plugin_slot.hpp` | Uniform load/prepare/process interface over every format |
 | SignalGraph | `pulp/host/signal_graph.hpp` | DAG topology + topological sort |
 
-Today CLAP loads and processes audio; VST3 / AU / LV2 loaders are stubbed
-(log a warning and return `nullptr`). See
+All four format loaders (CLAP, VST3, AU, LV2) are implemented in
+`core/host/src/plugin_slot_*`: each opens the bundle, resolves the
+format's factory/descriptor, and wires the host-side PluginSlot onto
+the format's real processing entry point. Feature coverage varies per
+format (parameter automation, MIDI routing, editor views, and state
+serialization are each at different stages); see the per-format
+source files for the current scope. If an SDK is not compiled in at
+configure time (for example, AU on Linux), the matching case in
+`PluginSlot::load()` logs a warning and returns `nullptr`. See
 [hosting guide](../guides/hosting.md) and
 [signal-graph reference](./signal-graph.md).
 

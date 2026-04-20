@@ -13,7 +13,7 @@ See [docs/guides/status-ladder.md](../guides/status-ladder.md) for the evidence 
 The following section is auto-generated from the `limitations:` block of `docs/status/support-matrix.yaml`. Run `python3 tools/docs_generate.py generate` to refresh.
 
 <!-- generated:start id=limitations -->
-### Known limitations (22 items across 13 capabilities)
+### Known limitations (21 items across 13 capabilities)
 
 | Capability | Limitation | Tracked in |
 |---|---|---|
@@ -27,8 +27,7 @@ The following section is auto-generated from the `limitations:` block of `docs/s
 | `formats.auv3` | Single input bus; no sidechain support. | [link](planning/production-readiness/01-format-adapters.md#1.4) |
 | `formats.auv3` | MIDI arrives as raw bytes; no type dispatch to note/CC/pitchbend/aftertouch. | [link](planning/production-readiness/01-format-adapters.md#1.4) |
 | `formats.auv3` | iOS validation is stale — no on-device example or AVAudioSession ↔ C++ bridge. | [link](planning/production-readiness/05-auv3-mobile.md) |
-| `formats.lv2` | Atom MIDI sequences silently dropped — connect_port has no branch for atom ports. | [link](planning/production-readiness/01-format-adapters.md#1.5) |
-| `formats.lv2` | LV2_URID_Map feature never resolved in instantiate(); real hosts may fail to load. | [link](planning/production-readiness/01-format-adapters.md#1.5) |
+| `formats.lv2` | Atom sysex events are not routed — only 1–3-byte short MIDI messages in the atom input sequence reach Processor::process(). | [link](planning/production-readiness/01-format-adapters.md#1.5) |
 | `audio_io.wasapi` | Shared mode only; no exclusive mode. | [link](planning/production-readiness/02-audio-midi-io.md#2.1) |
 | `audio_io.wasapi` | Input capture not wired — input_view is always empty. | [link](planning/production-readiness/02-audio-midi-io.md#2.1) |
 | `audio_io.alsa` | No input capture path. | [link](planning/production-readiness/02-audio-midi-io.md#2.2) |
@@ -84,9 +83,9 @@ adapter compiles and loads — not that every host-facing feature is wired.
 - **CLAP** — Only the first input bus and first output bus are routed;
   declared sidechain or additional buses are ignored. `Processor::set_sidechain`
   is never called from the CLAP adapter. Tracked: workstream 01.
-- **LV2** — MIDI atom parsing is incomplete; `connect_port` has no atom/MIDI
-  port branch beyond control range. URID feature is not resolved. Tracked:
-  workstream 01.
+- **LV2** — Atom sysex is ignored; the `run()` loop only promotes 1–3-byte
+  short MIDI messages out of the input atom sequence. Sysex sidecar wiring is
+  tracked under issue #239 (workstream 01).
 - **AAX** — Custom editor surface not wired; Pro Tools shows the
   auto-generated parameter strip rather than a Pulp ViewBridge editor.
   AudioSuite role is declared but not exercised end-to-end. Tracked:

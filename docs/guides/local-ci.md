@@ -18,16 +18,88 @@ shipyard ship                             # PR + validate + merge on green
 shipyard cloud run build <branch>         # dispatch to Namespace
 ```
 
+### Shipping a PR: `pulp pr`
+
+`pulp pr` is the single "ship this" orchestrator. Agents and humans should
+route every normal ship cycle through it rather than running `gh pr create`
++ `shipyard ship` separately. It:
+
+1. Runs `tools/scripts/skill_sync_check.py` (hard-fails on missing SKILL.md updates).
+2. Runs `tools/scripts/version_bump_check.py --mode=apply` to bump SDK / Claude plugin / marketplace versions consistently.
+3. Commits the bump (if any) as `chore: bump <surfaces>`.
+4. `gh pr create` with a generated body.
+5. `shipyard ship` for cross-platform validate + merge on green.
+6. The auto-release workflow tags and publishes binaries on merge.
+
+```bash
+pulp pr                                  # primary ship path (delegates to shipyard pr)
+pulp pr --base develop/package-manager   # ship to a develop branch
+pulp pr --title "..."                    # override PR title
+pulp pr --no-ship                        # open the PR but skip shipyard ship
+pulp pr --dry-run                        # print the plan without executing
+```
+
+If `pulp pr` itself is broken (for example, a dylib load failure after a
+release bump), the equivalent fallback is to invoke `shipyard pr` directly —
+it runs the same gates + PR + ship flow.
+
+### Shipyard v0.3.0 workflow surface
+
+Shipyard v0.3.0 adds stateful ship resume, SSH `--resume-from` staging, and
+incremental git bundles on top of the basic `run` / `ship` / `cloud run`
+surface above.
+
+```bash
+# Resume an interrupted ship
+shipyard ship --resume                    # pick up where the last session left off
+shipyard ship --no-resume                 # discard stale state and ship fresh
+
+# Inspect in-flight ship state
+shipyard ship-state list                  # self-describing inventory: PR, title, URL, tip SHA, dispatched run IDs
+shipyard ship-state show <pr>             # full state for one PR
+shipyard ship-state discard <pr>          # archive stale state
+
+# Prune old ship state + evidence
+shipyard cleanup --ship-state             # dry run — show what would be pruned
+shipyard cleanup --ship-state --apply     # prune closed-PR state + aged records
+
+# Fast test iteration on any target
+shipyard run --resume-from build          # skip configure+setup, start at the build stage
+shipyard run --resume-from test           # skip configure+build, run tests only
+shipyard run --targets windows --smoke    # fast Windows-only preflight
+shipyard run --targets windows --resume-from test   # ~2 min rerun vs ~15 min full
+
+# Target and config inspection
+shipyard targets                          # list configured targets with reachability
+shipyard targets test windows             # probe a single target
+shipyard config show                      # effective merged config
+shipyard config profiles                  # list profiles plus the active one
+```
+
+Ship state lives at `<state_dir>/ship/<pr>.json`. Shipyard auto-resumes the
+next time you run `shipyard ship` on the same PR — it refuses to resume if
+the PR's head SHA or merge policy changed since the state was written, so a
+rebase or force-push deliberately forces a fresh ship.
+
+`--resume-from` works on both local and SSH targets. On SSH targets,
+Shipyard probes the remote for a marker file proving the previous stage
+passed for the exact SHA, and skips earlier stages when it finds one.
+
+**Incremental bundles** — SSH validation now sends only the git delta
+between the remote HEAD and the target SHA. Typical cycles drop from
+~443 MB to a few KB. No configuration needed — Shipyard falls back to a
+full bundle automatically when the delta would be larger than the full
+pack.
+
 ## Required Merge Process (All Agents)
 
 Every change to `main` must go through this workflow — no exceptions:
 
 1. **Branch** — work on `feature/*` or `fix/*`, never directly on main
-2. **Validate** — run `shipyard run` to validate on macOS + Ubuntu + Windows
-3. **Ship** — run `shipyard ship` to create PR, validate, and merge on green
-4. **GitHub Actions** — PR also triggers build+test CI on all 3 platforms (redundant safety net)
+2. **Ship** — run `pulp pr` (which wraps `shipyard ship`) to create the PR, validate on macOS + Ubuntu + Windows, and merge on green
+3. **GitHub Actions** — PR also triggers build+test CI on all 3 platforms (redundant safety net)
 
-The `ci` skill (`.agents/skills/ci/SKILL.md`) wraps this into a single command. Use it.
+The `ci` skill (`.agents/skills/ci/SKILL.md`) captures this as the authoritative trigger list — natural-language phrases like "ship this", "push a PR", "we're done", and "run CI" all route through `pulp pr`.
 
 ## Legacy: pulp ci-local
 

@@ -578,143 +578,140 @@ pulp export-tokens --file theme.json --tokens tokens.json
 pulp export-tokens --dry-run
 ```
 
-### ci-local
+### audio
 
 **Status**: experimental
 
-Run local CI and desktop automation workflows from the same control plane.
+Repo-level audio analysis tooling. Manages offline audio models (text-to-audio / text-to-excerpt retrieval) and reads reproducible excerpt bundles. This is developer tooling for building datasets and evaluation corpora — not a runtime API.
 
 ```bash
-pulp ci-local run
-pulp ci-local run --smoke --targets mac
-pulp ci-local status
-pulp ci-local logs <job-id> --target windows
-pulp ci-local evidence feature/my-branch
+pulp audio                                      # Show help
+pulp audio model list [--json]                  # List registered models
+pulp audio model status [--json]                # Show configured + resolved model
+pulp audio model activate <model-id> [--json]   # Pick the active model
+pulp audio excerpt-find --text "warm analog pad" --input /path/to/corpus [options]
+pulp audio read-bundle <path-to-bundle> [--json]
 ```
 
-Core CI subcommands:
+**Subcommands**:
 
-- `run` — queue validation and wait for completion
-- `ship` — push, open PR, queue CI, merge on green
-- `check` — validate an existing PR by number, URL, or `latest`
-- `list` — list open PRs
-- `enqueue` — queue background validation
-- `drain` — process pending jobs if no runner already owns the queue
-- `bump` — change priority for a queued job
-- `status` — show queue, live per-target state, and VM status
-- `logs` — tail one target log from the machine-global state dir
-- `evidence` — show last-good exact-SHA target evidence
+| Subcommand | What it does |
+|------------|-------------|
+| `model list` | List all registered audio models with backend and tags |
+| `model status` | Show the configured model, resolved checkpoint, and whether it is loadable |
+| `model activate <id>` | Select the active model and persist the state file |
+| `excerpt-find` | Score audio files (or a directory) against a text query and emit an excerpt bundle |
+| `read-bundle` | Pretty-print a previously emitted excerpt bundle |
 
-Desktop automation subcommands live under `pulp ci-local desktop ...`.
+Useful `excerpt-find` flags: `--text`, `--input`, `--model`, `--recursive`, `--top`, `--window-ms`, `--hop-ms`, `--min-score`, `--max-candidates-per-file`, `--bundle-out`, `--dry-run`. All subcommands accept `--json` for machine-readable output.
+
+### sdk
+
+**Status**: usable
+
+Manage the pinned Pulp SDK installation at `~/.pulp/sdk*/` used by standalone projects. `pulp create` and `pulp build` already pull the SDK in transparently when needed; `pulp sdk` is the explicit control surface.
 
 ```bash
-# setup / health
-pulp ci-local desktop install mac
-pulp ci-local desktop doctor windows --json
-pulp ci-local desktop status
-
-# config
-pulp ci-local desktop config show
-pulp ci-local desktop config set artifact_root ~/Library/Application\\ Support/Pulp/desktop-automation/runs
-pulp ci-local desktop config set target.mac.webview_driver true
-pulp ci-local desktop config set target.mac.webdriver_url http://127.0.0.1:4444
-pulp ci-local desktop config set target.mac.debug_attach true
-
-# inspect / interact
-pulp ci-local desktop smoke mac --bundle-id com.apple.TextEdit --label textedit-smoke
-pulp ci-local desktop inspect mac --command '/path/to/pulp-ui-preview' --pulp-app-automation
-pulp ci-local desktop click mac --command '/path/to/pulp-ui-preview' --click-view-id bypass-toggle --capture-ui-snapshot --pulp-app-automation
-pulp ci-local desktop inspect windows --command 'notepad.exe' --label notepad-inspect
-pulp ci-local desktop click windows --command 'notepad.exe' --click 885,18 --capture-before --label notepad-maximize
-
-# exact-SHA source mode
-pulp ci-local desktop inspect mac \
-  --command './build-desktop-automation/examples/ui-preview/pulp-ui-preview' \
-  --source-mode exact-sha \
-  --sha <commit-sha> \
-  --prepare-command 'cmake -S . -B build-desktop-automation && cmake --build build-desktop-automation --target pulp-ui-preview' \
-  --pulp-app-automation
-
-# artifact workflows
-pulp ci-local desktop recent mac --limit 5
-pulp ci-local desktop proof windows --action inspect --source-mode exact-sha --sha <commit-sha>
-pulp ci-local desktop publish mac --limit 5 --label mac-gallery
-pulp ci-local desktop cleanup mac --older-than-days 14 --keep-last 10
+pulp sdk                                      # Show help
+pulp sdk install                              # Download and cache the pinned SDK from GitHub releases
+pulp sdk install --version 0.2.0              # Install a specific version
+pulp sdk install --local                      # Build and install the SDK from the current Pulp checkout
+pulp sdk status                               # Show cached and locally-built SDK versions
+pulp sdk clean                                # Remove all cached SDK versions
 ```
 
-Current desktop subcommands:
+Set `PULP_HOME` to relocate the SDK cache, asset cache, and config root.
 
-- `install <target>` — prepare one desktop automation target and record its receipt/contract
-- `doctor <target>` — run health checks and capability reporting for one target
-- `status [target]` — show desktop automation config, contracts, latest run history, and latest successful proof
-- `config show|set` — show/update `artifact_root`, `publish_mode`, `publish_branch`, `retention_days`, and target-level optional tiers such as `target.<name>.webview_driver` and `target.<name>.debug_attach`
-  - `publish_mode=none` keeps reports local only
-  - `publish_mode=branch` mirrors reports to `publish_branch` under `desktop-automation/latest/` and `desktop-automation/reports/<report-id>/`
-- `recent [target]` — list recent desktop runs (raw history, including failed attempts)
-- `proof [target]` — list successful desktop proofs grouped by `target/action/source.mode/source.sha`
-- `publish [target]` — stage a local HTML/JSON gallery from recent bundles, and optionally mirror it to `publish_branch` when `publish_mode=branch`
-- `cleanup [target]` — prune old bundles
-- `smoke <target>` — launch an app and capture a smoke screenshot/log bundle
-- `click <target>` — perform one click interaction and capture before/after evidence
-- `inspect <target>` — launch an app and capture screenshot + available UI state
+### dev
 
-Shared desktop source flags for `smoke`, `click`, and `inspect`:
+**Status**: usable
 
-- `--source-mode live|exact-sha` — use the live checkout (default) or a prepared exact-SHA source root
-- `--branch` — record a branch label for desktop source provenance
-- `--sha` — select the exact commit to prepare/launch
-- `--prepare-command` — optional shell command to build/setup the prepared root before launch
-- `--prepare-timeout` — timeout in seconds for the optional prepare command
+Unified development loop. Combines `build --watch` with optional test, validate, and launch-an-app steps in a single command so you can keep one terminal open while iterating.
 
-Windows note:
+```bash
+pulp dev                                      # Watch and rebuild
+pulp dev --test                               # Watch, rebuild, run tests
+pulp dev --test --test-filter=Knob            # Watch, rebuild, run tests matching Knob
+pulp dev --test --validate                    # Watch, rebuild, test, and validate built plugins
+pulp dev --run pulp-gain-standalone           # Watch, rebuild, relaunch app on each rebuild
+pulp dev --design ui.js                       # Watch, rebuild pulp-design-tool, relaunch with ui.js
+pulp dev --target pulp-format                 # Pass --target to cmake --build
+pulp dev --run my-app -- --arg1 --arg2        # Arguments after `--` go to the launched binary
+```
 
-- Windows exact-SHA `--prepare-command` values run from a generated `.cmd` script under `cmd.exe`.
-- Use double quotes for paths, generator names, and arguments.
-- POSIX-style single-quoted tokens are treated as literal text on Windows and are rejected by the controller before remote prepare starts.
+Flags:
 
-Exact-SHA desktop runs record additive provenance in `manifest.json` under `source.*`, and attach `artifacts.prepare_log` when a fresh prepare step produces a log.
+| Flag | Description |
+|------|-------------|
+| `--test`, `-t` | Run tests after each successful build |
+| `--test-filter=PATTERN` | Run only tests matching PATTERN (implies `--test`) |
+| `--validate` | Run quick plugin dlopen validation after build |
+| `--run TARGET` | Launch TARGET from the build dir; relaunch on rebuild |
+| `--design SCRIPT` | Build `pulp-design-tool` and launch it with SCRIPT |
+| `--target T` | Pass `--target T` to `cmake --build` |
+| `-- args...` | Arguments passed to the launched app |
 
-Desktop artifact roots also maintain rolling summaries for agents and status tooling:
+### scan
 
-- `latest-run.json` — newest observed run summary
-- `latest-proof.json` — newest successful proof summary
-- `runs.jsonl` — raw summary stream for recent desktop automation runs
-- target-scoped copies under `<artifact-root>/<target>/...`
-- `_published/latest-report.json` — newest staged local HTML/JSON gallery summary
-- `_published/reports.jsonl` — raw summary stream for local published galleries
+**Status**: usable
 
-`desktop proof` filters:
+Walk the OS plug-in paths and print every VST3 / AU / AUv3 / CLAP / LV2 plug-in that was found. Mirrors what `pulp::host::PluginScanner` does at runtime. Useful for sanity-checking your local plug-in installation or for narrowing down which plug-in to feed to `pulp host`.
 
-- `--action`
-- `--source-mode live|exact-sha|legacy`
-- `--sha`
-- `--branch`
-- `--limit`
+```bash
+pulp scan                           # Scan every supported format the build includes
+pulp scan --format clap             # Scan only CLAP
+pulp scan --format vst3             # Only VST3
+pulp scan --format au               # Only AU v2
+pulp scan --format auv3             # Only AUv3
+pulp scan --format lv2              # Only LV2
+pulp scan -f clap                   # Short alias for --format
+```
 
-`desktop status` now reports both:
+Output is one line per plug-in: `[<format>]` header per section, then `<name>  <bundle-path>`.
 
-- `latest_run` — newest observed run, regardless of success
-- `latest_proof` — newest successful proof summary for the target
-- `latest_publish` — newest local HTML/JSON gallery summary staged under `_published/`
+### host
 
-Adapter truth:
+**Status**: experimental
 
-- `macos-local`
-  - local logged-in session
-  - supports `--bundle-id`
-  - supports Pulp-owned direct-app automation with `--pulp-app-automation`
-- `linux-xvfb`
-  - wraps app launch in `xvfb-run`
-  - currently supports `--command` only
-  - supports generic X11 smoke/click capture with `xvfb`, `xauth`, `xdotool`, `imagemagick`, and `wmctrl`
-  - supports Pulp-owned UI snapshots and view-target selectors only with `--pulp-app-automation`
-- `windows-session-agent`
-  - bootstraps a Scheduled Task plus target-side PowerShell agent
-  - requires a real logged-in Windows desktop session
-  - currently supports `--command` only
-  - supports generic `window-capture` smoke/inspect/click for normal desktop apps
-  - supports coordinate clicks and before/after capture without `--pulp-app-automation`
-  - supports `ViewInspector` snapshots and view-target selectors only with `--pulp-app-automation`
+Load a plug-in out-of-DAW and run a short synthetic audio block through it. Smoke-tests the hosting pipeline without launching Logic, Reaper, or Ableton.
+
+```bash
+pulp host /path/to/MyPlugin.clap                       # Load a CLAP bundle
+pulp host /path/to/MyPlugin.clap --format clap         # Explicit format
+pulp host /path/to/MyPlugin.vst3 --format vst3
+pulp host /path/to/MyPlugin.component --format au
+pulp host /path/to/MyPlugin.lv2 --format lv2 --id https://example.com/plugins/my-plugin
+pulp host -h                                           # Show help
+```
+
+Flags:
+
+| Flag | Description |
+|------|-------------|
+| `--format <fmt>`, `-f <fmt>` | Format: `clap` (default), `vst3`, `au`, `auv3`, `lv2` |
+| `--id <unique-id>` | Select a specific plug-in descriptor by URI / unique-id (used for LV2 and multi-plugin CLAP bundles) |
+
+Prints plug-in metadata (name, vendor, version, format, parameter count) and the peak output level from a 256-sample synthetic block at 48 kHz. Exit code 0 on success, 1 if the bundle could not be loaded, 2 if `prepare()` failed.
+
+### tool
+
+**Status**: usable
+
+Manage the third-party developer tools Pulp can optionally use (formatters, validators, importers). Tools are described in `tools/packages/tool-registry.json` and installed under `~/.pulp/tools/` — they are kept out of the system PATH so Pulp-managed installs can never clobber the system copy.
+
+```bash
+pulp tool                           # Show help
+pulp tool list                      # Show every registered tool and its install state
+pulp tool install clap-validator    # Download and install one tool
+pulp tool install --all             # Install every tool available on the current platform
+pulp tool install <id> --force      # Reinstall even if already present
+pulp tool uninstall <id>            # Remove a pulp-managed tool install
+pulp tool path <id>                 # Print the absolute path to the installed tool's binary
+pulp tool run <id> [args...]        # Run the installed tool with pass-through arguments
+pulp tool doctor                    # Health check: which tools are installed, which are missing, which are unavailable on this platform
+```
+
+Install methods come from the registry — today `binary_download` (pinned release artifact) and `python_pip` (pipx-style isolated install). `pulp tool doctor` is the per-platform companion to `pulp doctor`.
 
 ### upgrade
 

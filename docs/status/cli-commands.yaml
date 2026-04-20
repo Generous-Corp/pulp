@@ -599,6 +599,141 @@ commands:
         description: "Platform-arch target (e.g., macOS-arm64, Windows-x64)"
     docs: reference/cli.md#target
 
+  - name: audio
+    status: experimental
+    summary: Repo-level audio analysis tooling. Manage offline audio models (text-to-audio retrieval) and read reproducible excerpt bundles.
+    subcommands:
+      - name: model list
+        summary: List registered audio models with backend and tags
+      - name: model status
+        summary: Show the configured model, resolved checkpoint, and whether it is loadable
+      - name: model activate
+        summary: Select the active model and persist the state file
+      - name: excerpt-find
+        summary: Score audio files against a text query and emit an excerpt bundle
+        args:
+          - name: --text
+            required: true
+          - name: --input
+            required: true
+          - name: --model
+            required: false
+          - name: --recursive
+            kind: flag
+          - name: --top
+            kind: option
+          - name: --window-ms
+            kind: option
+          - name: --hop-ms
+            kind: option
+          - name: --min-score
+            kind: option
+          - name: --max-candidates-per-file
+            kind: option
+          - name: --bundle-out
+            kind: option
+          - name: --dry-run
+            kind: flag
+      - name: read-bundle
+        summary: Pretty-print a previously emitted excerpt bundle
+    docs: reference/cli.md#audio
+
+  - name: sdk
+    status: usable
+    summary: Manage the pinned Pulp SDK installation at ~/.pulp/sdk*/ used by standalone projects.
+    subcommands:
+      - name: install
+        summary: Download and cache the pinned SDK from GitHub releases; --local builds from the current checkout; --version X.Y.Z pins a version
+        args:
+          - name: --version
+            kind: option
+            required: false
+          - name: --local
+            kind: flag
+            required: false
+      - name: status
+        summary: Show cached and locally-built SDK versions
+      - name: clean
+        summary: Remove all cached SDK versions
+    docs: reference/cli.md#sdk
+
+  - name: dev
+    status: usable
+    summary: Unified development loop — watch, rebuild, and optionally test, validate, or relaunch an app on every change.
+    args:
+      - name: --test
+        kind: flag
+        description: Run tests after each successful build
+      - name: --test-filter
+        kind: option
+        description: Run only tests matching PATTERN (implies --test)
+      - name: --validate
+        kind: flag
+        description: Run quick plugin dlopen validation after build
+      - name: --run
+        kind: option
+        description: Launch a build-dir binary and relaunch it on rebuild
+      - name: --design
+        kind: option
+        description: Build pulp-design-tool and launch it with the given JS script
+      - name: --target
+        kind: option
+        description: Pass --target to cmake --build
+      - name: passthrough
+        kind: passthrough
+        description: Arguments after `--` are forwarded to the launched binary
+    docs: reference/cli.md#dev
+
+  - name: scan
+    status: usable
+    summary: Walk the OS plug-in paths and print every VST3 / AU / AUv3 / CLAP / LV2 plug-in found. Mirrors pulp::host::PluginScanner.
+    args:
+      - name: --format
+        kind: option
+        description: Restrict to one format (clap, vst3, au, auv3, lv2); default is every compiled-in format
+    docs: reference/cli.md#scan
+
+  - name: host
+    status: experimental
+    summary: Load a plug-in out-of-DAW and run a 256-sample synthetic block through it. Smoke-tests the hosting pipeline without a DAW.
+    args:
+      - name: path
+        kind: positional
+        required: true
+        description: Path to the plug-in bundle (.clap / .vst3 / .component / .lv2)
+      - name: --format
+        kind: option
+        description: Format selector (clap default, vst3, au, auv3, lv2)
+      - name: --id
+        kind: option
+        description: Unique id / URI to select a specific descriptor in the bundle (LV2 and multi-plugin CLAP)
+    docs: reference/cli.md#host
+
+  - name: tool
+    status: usable
+    summary: Manage third-party developer tools (validators, formatters, importers) installed under ~/.pulp/tools/. Driven by tools/packages/tool-registry.json.
+    subcommands:
+      - name: list
+        summary: Show every registered tool and its install state
+      - name: install
+        summary: Download and install a tool; --all installs every tool available on this platform; --force reinstalls even if present
+        args:
+          - name: --force
+            kind: flag
+            required: false
+          - name: --all
+            kind: flag
+            required: false
+      - name: uninstall
+        summary: Remove a pulp-managed tool install
+      - name: path
+        summary: Print the absolute path to the installed tool's binary
+      - name: run
+        summary: Run the installed tool with pass-through arguments
+      - name: doctor
+        summary: Health check — which tools are installed, missing, or unavailable on this platform
+    docs: reference/cli.md#tool
+
   - name: help
     status: usable
     summary: Print usage information.
