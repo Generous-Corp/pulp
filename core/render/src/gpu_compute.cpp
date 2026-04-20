@@ -7,12 +7,16 @@
 #include "dawn/native/DawnNative.h"
 #include "dawn/dawn_proc.h"
 
+#include "gpu_compute_pool.hpp"
+
 #include <chrono>
 #include <cmath>
 #include <cstring>
+#include <memory>
 #include <numeric>
 #include <sstream>
 #include <thread>
+#include <vector>
 
 #ifdef PULP_BENCHMARK
 #include <pulp/render/bench/perf_counters.hpp>
@@ -82,6 +86,9 @@ static double now_us() {
 class DawnGpuCompute : public GpuCompute {
 public:
     ~DawnGpuCompute() override {
+        // Release pool buffers before the device is torn down — their
+        // destructors call into Dawn internals and need a live device.
+        pool_.reset();
         magnitude_pipeline_ = nullptr;
         complex_mul_pipeline_ = nullptr;
         queue_ = nullptr;
@@ -160,11 +167,11 @@ public:
         uint32_t input_bytes = num_bins * 2 * sizeof(float);
         uint32_t output_bytes = num_bins * sizeof(float);
 
-        auto input_buf = create_storage_buffer(input_bytes,
+        auto input_buf = acquire_storage_buffer(input_bytes,
             wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst);
-        auto output_buf = create_storage_buffer(output_bytes,
+        auto output_buf = acquire_storage_buffer(output_bytes,
             wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopySrc);
-        auto readback_buf = create_readback_buffer(output_bytes);
+        auto readback_buf = acquire_readback_buffer(output_bytes);
 
 #ifdef PULP_BENCHMARK
         {
@@ -200,7 +207,19 @@ public:
         copy_buffer(output_buf, readback_buf, output_bytes);
 #endif
 
-        return read_back(readback_buf, magnitudes, output_bytes);
+        // Register OnSubmittedWorkDone to release the storage buffers once the
+        // GPU confirms the dispatch+copy submission completed. The readback
+        // buffer is still live (it's about to be MapAsync'd) — we release it
+        // synchronously after read_back() has Unmap'd it. See design doc
+        // planning/zero-copy-slice-1-design-2026-04-20.md "GPU-in-flight".
+        schedule_pool_release({input_buf, output_buf});
+
+        const bool ok = read_back(readback_buf, magnitudes, output_bytes);
+
+        // read_back completed (success or timeout) — GPU is done with the
+        // readback buffer either way. Safe to return it to the pool.
+        pool_->release(readback_buf);
+        return ok;
     }
 
     bool complex_multiply(const float* a, const float* b, float* result,
@@ -209,13 +228,13 @@ public:
 
         uint32_t bytes = count * 2 * sizeof(float);
 
-        auto buf_a = create_storage_buffer(bytes,
+        auto buf_a = acquire_storage_buffer(bytes,
             wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst);
-        auto buf_b = create_storage_buffer(bytes,
+        auto buf_b = acquire_storage_buffer(bytes,
             wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst);
-        auto buf_result = create_storage_buffer(bytes,
+        auto buf_result = acquire_storage_buffer(bytes,
             wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopySrc);
-        auto readback_buf = create_readback_buffer(bytes);
+        auto readback_buf = acquire_readback_buffer(bytes);
 
 #ifdef PULP_BENCHMARK
         {
@@ -254,7 +273,14 @@ public:
         copy_buffer(buf_result, readback_buf, bytes);
 #endif
 
-        return read_back(readback_buf, result, bytes);
+        // Release storage buffers via OnSubmittedWorkDone; readback_buf stays
+        // live until read_back() unmaps it. See compute_magnitude() for the
+        // parallel comment on the GPU-in-flight tracking model.
+        schedule_pool_release({buf_a, buf_b, buf_result});
+
+        const bool ok = read_back(readback_buf, result, bytes);
+        pool_->release(readback_buf);
+        return ok;
     }
 
     bool batch_magnitude(const float* complex_frames, float* magnitude_frames,
@@ -565,12 +591,25 @@ private:
     wgpu::ComputePipeline magnitude_pipeline_;
     wgpu::ComputePipeline complex_mul_pipeline_;
 
+    // Pool of persistent staging buffers, keyed by usage bitmask. Replaces
+    // per-call device_.CreateBuffer() in compute_magnitude / complex_multiply
+    // to eliminate allocator churn. Created lazily in create_pipelines().
+    std::unique_ptr<detail::StagingBufferPool> pool_;
+
     bool create_pipelines() {
         magnitude_pipeline_ = create_pipeline("magnitude", kMagnitudeShader);
         if (!magnitude_pipeline_) return false;
 
         complex_mul_pipeline_ = create_pipeline("complex_multiply", kComplexMultiplyShader);
         if (!complex_mul_pipeline_) return false;
+
+        // Staging buffer pool: pre-allocated ring of persistent wgpu::Buffer
+        // objects that replaces per-call device_.CreateBuffer() in the compute
+        // hot path. Planning reference:
+        // planning/zero-copy-slice-1-design-2026-04-20.md. Default cap of 8
+        // covers typical GPU dispatch depth (3–4 in flight) × per-call buffer
+        // count (2–3 inputs + output) with headroom.
+        pool_ = std::make_unique<detail::StagingBufferPool>(device_, 8);
 
         initialized_ = true;
         runtime::log_info("GpuCompute: pipelines created (device shared: {})",
@@ -618,6 +657,40 @@ private:
         desc.size = size;
         desc.usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::MapRead;
         return device_.CreateBuffer(&desc);
+    }
+
+    // Pool-backed buffer acquisition for the compute hot path. These wrap
+    // StagingBufferPool::acquire() and fall back to raw create_*() if the
+    // pool is not yet initialized (should only happen in error paths).
+    wgpu::Buffer acquire_storage_buffer(uint32_t size, wgpu::BufferUsage usage) {
+        if (pool_) return pool_->acquire(size, usage);
+        return create_storage_buffer(size, usage);
+    }
+
+    wgpu::Buffer acquire_readback_buffer(uint32_t size) {
+        const auto usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::MapRead;
+        if (pool_) return pool_->acquire(size, usage);
+        return create_readback_buffer(size);
+    }
+
+    // Register an OnSubmittedWorkDone callback on the queue that releases
+    // each of the given buffers back to the pool once the GPU confirms the
+    // most-recent submission is complete. The lambda captures the buffers
+    // (which are wgpu::Buffer ref-counted handles) to keep them alive until
+    // the callback fires. The pool itself also holds a reference via
+    // in_flight_, so this keeps the ref count coherent.
+    void schedule_pool_release(std::vector<wgpu::Buffer> bufs) {
+        if (!pool_ || bufs.empty()) return;
+
+        auto* pool_raw = pool_.get();
+        queue_.OnSubmittedWorkDone(
+            wgpu::CallbackMode::AllowProcessEvents,
+            [pool_raw, bufs = std::move(bufs)](wgpu::QueueWorkDoneStatus,
+                                                wgpu::StringView) mutable {
+                for (auto& b : bufs) {
+                    pool_raw->release(b);
+                }
+            });
     }
 
     wgpu::BindGroup create_bind_group(const wgpu::ComputePipeline& pipeline,
