@@ -80,23 +80,46 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Previous behaviour used `event.before` as the diff base. That
-          # works when pushes land one at a time but BREAKS when multiple
-          # PRs squash-merge in quick succession:
+          # Baseline selection — three-way blend:
           #
-          #   - push A (0.21→0.22) fires run A  [runs, tags v0.22]
-          #   - push B (0.22→0.23) fires run B  [queued behind A]
-          #   - push C (0.23→0.23 no-op) fires run C  [queued behind A]
-          #   - GitHub cancels run B (replaced in queue by C)
-          #   - run C sees before=B, after=C → 0.23→0.23, NO TAG for 0.23
+          # 1. `event.before` — this push's immediate ancestor. What the
+          #    original auto-release.yml used. Breaks when multiple PRs
+          #    squash-merge in quick succession and a queued run is
+          #    cancelled (see 2026-04-19 cascade: v0.23.0 lost).
           #
-          # Result: main's CMakeLists sits at 0.23.0 with no v0.23.0 tag,
-          # no release, no binaries. 2026-04-19 cascade hit this exactly.
+          # 2. Latest existing tag. #498 switched to this; fixed the
+          #    self-heal case but broke TWO other cases (Codex review):
           #
-          # Fix: diff against the LATEST TAGGED VERSION on origin rather
-          # than event.before. Each run becomes self-healing — a
-          # cancelled intermediate run no longer loses tags; the next
-          # run sees the accumulated gap and tags the missing version.
+          #    a. `Release: skip` trailer — if a bump merges WITH the
+          #       trailer, latest-tag stays at the older version. Next
+          #       unrelated push sees latest-tag < HEAD-version and tags
+          #       the skipped version anyway. The trailer's one-run
+          #       effect silently expires.
+          #
+          #    b. Revert / downgrade — after reverting 0.23→0.22, the
+          #       latest tag is still v0.23. Workflow tries to create
+          #       v0.22 at HEAD, which already exists at an older commit,
+          #       so `create_tag` fails loudly on every subsequent push
+          #       until manual tag cleanup.
+          #
+          # Fix: baseline = MAX(event.before-version, HEAD-version). In
+          # other words: only tag when HEAD-version > previous-commit-
+          # version AND > latest-tag-version. Same-commit state doesn't
+          # change (no-op). Revert below latest-tag → no-op (no false
+          # retag). Self-heal past cancelled intermediate: if
+          # event.before-version == HEAD-version (both 0.23) but latest
+          # tag is v0.22, the previous-commit side says no-op AND the
+          # tag-gap detector below sees tag<HEAD and creates v0.23.
+          #
+          # Split into two signals:
+          #   - `*_prev` = version at event.before
+          #   - `*_tag`  = version of latest tag
+          #   - Create tag iff HEAD > prev AND HEAD > tag (strict greater)
+          #
+          # This preserves all three invariants:
+          #   - self-heal: cancelled run gap filled on next push
+          #   - skip-trailer: one push with skip stays skipped forever
+          #   - revert: downgrade doesn't re-tag the old version
 
           extract_cmake_version() {
               local ref="$1"
@@ -109,22 +132,72 @@ jobs:
                 | python3 -c 'import sys, json; d = json.loads(sys.stdin.read() or "{}"); print(d.get("version", ""))'
           }
 
-          # Find the latest existing tag per surface. If none exists
-          # (fresh repo or clean slate), fall back to HEAD~1 so we still
-          # produce a meaningful diff.
+          # Python helper: strict-greater semver compare. Returns "gt",
+          # "eq", or "lt". Empty strings behave like "missing" — treat
+          # as "lt" so HEAD always wins over nothing.
+          semver_cmp() {
+              python3 -c '
+import sys
+a, b = sys.argv[1], sys.argv[2]
+def parse(v):
+    if not v: return None
+    return tuple(int(x) for x in v.split("."))
+pa, pb = parse(a), parse(b)
+if pa is None and pb is None: print("eq")
+elif pa is None: print("lt")
+elif pb is None: print("gt")
+elif pa > pb: print("gt")
+elif pa < pb: print("lt")
+else: print("eq")
+' "$1" "$2"
+          }
+
+          # event.before — the push's immediate ancestor.
+          prev='${{ github.event.before }}'
+          if [ -z "$prev" ] || [ "$prev" = "0000000000000000000000000000000000000000" ]; then
+              prev="HEAD~1"
+          fi
+
+          # Latest existing tag per surface.
           latest_sdk_tag=$(git tag --list 'v[0-9]*' --sort=-version:refname | head -1)
           latest_plugin_tag=$(git tag --list 'plugin-v[0-9]*' --sort=-version:refname | head -1)
 
-          sdk_before_ref="${latest_sdk_tag:-HEAD~1}"
-          plugin_before_ref="${latest_plugin_tag:-HEAD~1}"
-
-          sdk_before=$(extract_cmake_version "$sdk_before_ref" || true)
+          sdk_prev=$(extract_cmake_version "$prev" || true)
+          sdk_tag=$(extract_cmake_version "${latest_sdk_tag:-HEAD~1}" || true)
           sdk_after=$(extract_cmake_version HEAD || true)
-          plugin_before=$(extract_json_version "$plugin_before_ref" .claude-plugin/plugin.json || true)
+          plugin_prev=$(extract_json_version "$prev" .claude-plugin/plugin.json || true)
+          plugin_tag=$(extract_json_version "${latest_plugin_tag:-HEAD~1}" .claude-plugin/plugin.json || true)
           plugin_after=$(extract_json_version HEAD .claude-plugin/plugin.json || true)
 
-          echo "sdk_before=$sdk_before"       >> "$GITHUB_OUTPUT"
-          echo "sdk_after=$sdk_after"         >> "$GITHUB_OUTPUT"
+          # Decision: create tag iff HEAD > prev AND HEAD > latest-tag.
+          sdk_should_tag=0
+          if [ -n "$sdk_after" ]; then
+              gt_prev=$(semver_cmp "$sdk_after" "$sdk_prev")
+              gt_tag=$(semver_cmp "$sdk_after" "$sdk_tag")
+              if [ "$gt_prev" = "gt" ] && [ "$gt_tag" = "gt" ]; then
+                  sdk_should_tag=1
+              fi
+          fi
+
+          plugin_should_tag=0
+          if [ -n "$plugin_after" ]; then
+              gt_prev=$(semver_cmp "$plugin_after" "$plugin_prev")
+              gt_tag=$(semver_cmp "$plugin_after" "$plugin_tag")
+              if [ "$gt_prev" = "gt" ] && [ "$gt_tag" = "gt" ]; then
+                  plugin_should_tag=1
+              fi
+          fi
+
+          # Expose the decision + context to the tagging step.
+          echo "sdk_should_tag=$sdk_should_tag"       >> "$GITHUB_OUTPUT"
+          echo "plugin_should_tag=$plugin_should_tag" >> "$GITHUB_OUTPUT"
+          echo "sdk_before=$sdk_prev"                 >> "$GITHUB_OUTPUT"
+          echo "sdk_after=$sdk_after"                 >> "$GITHUB_OUTPUT"
+          echo "plugin_before=$plugin_prev"           >> "$GITHUB_OUTPUT"
+          echo "plugin_after=$plugin_after"           >> "$GITHUB_OUTPUT"
+
+          echo "sdk:    prev=$sdk_prev tag=$sdk_tag head=$sdk_after should_tag=$sdk_should_tag"
+          echo "plugin: prev=$plugin_prev tag=$plugin_tag head=$plugin_after should_tag=$plugin_should_tag"
           echo "plugin_before=$plugin_before" >> "$GITHUB_OUTPUT"
           echo "plugin_after=$plugin_after"   >> "$GITHUB_OUTPUT"
 
@@ -138,8 +211,10 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.RELEASE_BOT_TOKEN || secrets.GITHUB_TOKEN }}
           SDK_BEFORE: ${{ steps.versions.outputs.sdk_before }}
           SDK_AFTER: ${{ steps.versions.outputs.sdk_after }}
+          SDK_SHOULD_TAG: ${{ steps.versions.outputs.sdk_should_tag }}
           PLUGIN_BEFORE: ${{ steps.versions.outputs.plugin_before }}
           PLUGIN_AFTER: ${{ steps.versions.outputs.plugin_after }}
+          PLUGIN_SHOULD_TAG: ${{ steps.versions.outputs.plugin_should_tag }}
         run: |
           set -euo pipefail
 
@@ -181,11 +256,15 @@ jobs:
               echo "created $tag"
           }
 
-          if [ -n "$SDK_AFTER" ] && [ "$SDK_BEFORE" != "$SDK_AFTER" ]; then
+          # Tag iff the should_tag decision in the versions step said so
+          # (HEAD > prev AND HEAD > latest-tag — captures self-heal gap
+          # fills while rejecting reverts and skipped-then-revisited
+          # bumps).
+          if [ "$SDK_SHOULD_TAG" = "1" ] && [ -n "$SDK_AFTER" ]; then
               create_tag "v${SDK_AFTER}"
           fi
 
-          if [ -n "$PLUGIN_AFTER" ] && [ "$PLUGIN_BEFORE" != "$PLUGIN_AFTER" ]; then
+          if [ "$PLUGIN_SHOULD_TAG" = "1" ] && [ -n "$PLUGIN_AFTER" ]; then
               create_tag "plugin-v${PLUGIN_AFTER}"
           fi
 
