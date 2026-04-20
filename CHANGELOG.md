@@ -9,6 +9,8 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
 <a id="v0300"></a>
+## [0.7.0]
+
 ## [0.30.0] - 2026-04-20
 
 - cli: release-discovery Slice 3 migration-doc infrastructure (#548) ([#571](https://github.com/danielraffel/pulp/pull/571))
