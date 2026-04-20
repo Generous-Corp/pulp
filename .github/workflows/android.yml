@@ -112,13 +112,28 @@ jobs:
   # JNI_OnLoad marker. Full GPU/rendering validation is out of scope here
   # (tracked under #77).
   #
-  # Re-enabled in #487 after identifying the real cause of earlier failures:
-  # the workflow was targeting an x86_64 system image while the APK only
-  # contains arm64-v8a (see android/app/build.gradle.kts), which produced
-  # INSTALL_FAILED_NO_MATCHING_ABIS and made every subsequent adb command
-  # appear to hang. The AVD arch and the `am start` intent below are the
-  # matched pair — touch both together if the applicationId ever changes.
+  # Re-gated 2026-04 after #530 (re-enable attempt) proved a third failure
+  # mode beyond the two originally documented in #487:
+  #
+  #   1. ABI mismatch (x86_64 emulator vs arm64-only APK) — fixed in workflow.
+  #   2. Wrong launch intent (com.pulp vs com.pulp.app) — fixed in workflow.
+  #   3. `macos-latest` is now Apple Silicon (ARM64). Booting an arm64-v8a
+  #      Android system image via QEMU + HVF hits `HV_UNSUPPORTED`, so
+  #      `qemu-system-aarch64-headless` exits with "failed to initialize HVF:
+  #      Invalid argument" immediately after startup. `adb wait-for-device`
+  #      then hangs, and the job burns its full `timeout-minutes: 20`.
+  #
+  # The AVD arch + `am start` intent below are still the matched pair for
+  # the APK (arm64-v8a / com.pulp.app/com.pulp.PulpActivity); do not change
+  # one without the other. What's missing is a runner that can actually
+  # accelerate arm64 Android guests — Linux arm64 + KVM, x86_64 APK + x86_64
+  # emulator, or a self-hosted ARM macOS with nested-HVF — see #487 for the
+  # path-forward discussion.
+  #
+  # `PULP_ANDROID_EMULATOR_ENABLED=true` in repo vars re-enables the job
+  # once a working runner configuration lands.
   android-emulator-test:
+    if: ${{ vars.PULP_ANDROID_EMULATOR_ENABLED == 'true' }}
     runs-on: macos-latest
     needs: android-build
     timeout-minutes: 20
