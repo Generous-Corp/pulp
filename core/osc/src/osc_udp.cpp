@@ -229,12 +229,33 @@ bool Receiver::listen(uint16_t port, MessageHandler handler) {
 }
 
 void Receiver::stop() {
+    // Shutdown ordering matters (#490). The receive thread may be
+    // blocked inside recv() on this FD right now. If we close the FD
+    // before joining, POSIX kernels are free to recycle that FD number
+    // for an unrelated file/socket immediately — the receive thread's
+    // NEXT iteration would then read from the wrong FD. That's UB.
+    //
+    // Correct order:
+    //   1. Flip `running` so the thread exits its loop after any
+    //      current recv() returns.
+    //   2. shutdown() the socket to wake recv() with the sentinel
+    //      error we classify as is_recv_shutdown(). The FD stays
+    //      valid, so there's no race window.
+    //   3. Join the thread — guaranteed to see running=false and exit.
+    //   4. Only then close the FD. No one else holds it anymore.
     impl_->running = false;
+    if (impl_->sock != kInvalidSocket) {
+#if defined(_WIN32)
+        ::shutdown(impl_->sock, SD_BOTH);
+#else
+        ::shutdown(impl_->sock, SHUT_RDWR);
+#endif
+    }
+    if (impl_->thread.joinable()) impl_->thread.join();
     if (impl_->sock != kInvalidSocket) {
         close_socket(impl_->sock);
         impl_->sock = kInvalidSocket;
     }
-    if (impl_->thread.joinable()) impl_->thread.join();
 }
 
 bool Receiver::is_listening() const { return impl_->running; }
