@@ -120,6 +120,26 @@ target_link_libraries(pulp-test-cli-projects-registry PRIVATE
     Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-cli-projects-registry)
 
+# CLI migration index (#499 Slice 3 / #548): pure-logic tests for the
+# applies_if expression evaluator, hop filter, text/JSON renderers,
+# and the Python codegen round-trip. The generated translation unit
+# `migration_index.cpp` is deliberately NOT linked into this test —
+# the test provides its own empty index so the helpers stay link-safe,
+# and the real embedded index is exercised by the shell-out tests.
+add_executable(pulp-test-cli-migration-index
+    test_cli_migration_index.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/migration_runtime.cpp
+)
+target_include_directories(pulp-test-cli-migration-index PRIVATE
+    ${CMAKE_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/tools/cli)
+target_link_libraries(pulp-test-cli-migration-index PRIVATE
+    Catch2::Catch2WithMain)
+target_compile_definitions(pulp-test-cli-migration-index PRIVATE
+    PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+catch_discover_tests(pulp-test-cli-migration-index
+    PROPERTIES ENVIRONMENT "PULP_SOURCE_DIR=${CMAKE_SOURCE_DIR}")
+
 # Child process tests
 add_executable(pulp-test-child-process test_child_process.cpp)
 target_link_libraries(pulp-test-child-process PRIVATE pulp::platform Catch2::Catch2WithMain)

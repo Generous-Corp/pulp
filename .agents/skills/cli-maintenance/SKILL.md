@@ -351,3 +351,76 @@ Gotchas:
 - **Commit trailer block must be contiguous.** Version-bump + skill
   trailers live on the tip commit. Do NOT split with blank lines —
   `git interpret-trailers --parse` treats them as non-trailers.
+
+## Migration notes + `pulp upgrade --notes` (#499 Slice 3 / #548)
+
+Slice 3 extends `cmd_upgrade` with an embedded, per-release migration
+index. The table is generated at CMake configure time from
+`docs/migrations/*.md` and compiled into the binary so upgrade notes
+are always in lock-step with the shipped version — no runtime
+download, no filesystem scan.
+
+Key layout:
+
+- **`docs/migrations/vX.Y.Z.md`** — one file per release with notes
+  worth surfacing. TOML frontmatter fields: `version` (required),
+  `breaking` (bool), `applies_if` (expression string), `summary`.
+  `docs/migrations/README.md` is the schema reference; the codegen
+  skips it. Only write a note when a reasonable pro developer needs
+  to change code / config / habits — not every PR.
+- **`tools/scripts/build_migration_index.py`** — standalone Python
+  codegen. Parses the TOML frontmatter, escapes the Markdown body for
+  a C++ string literal, sorts entries by parsed semver, and writes
+  `tools/cli/generated/migration_index.cpp`. Runs from
+  `tools/cli/CMakeLists.txt` via `add_custom_command`; also invokable
+  directly for iteration.
+- **`tools/cli/migration_index.hpp`** — schema (`MigrationEntry`),
+  `EvalContext`, `evaluate_applies_if`, `entries_for_hop`,
+  `applicable_entries`, `render_notes_text`, `render_notes_json`.
+  Link-free from `cli_common` (same pattern as `version_diag` /
+  `update_check`).
+- **`tools/cli/migration_runtime.cpp`** — evaluator + renderers. The
+  generated `migration_index.cpp` defines only the data table so
+  `migration_runtime.cpp` is the single TU unit tests build against
+  (the test provides its own stub `kMigrationIndex`).
+- **`pulp upgrade --notes [--json] [--from X --to Y]`** — new flag.
+  No network, no binary swap. `--json` is stable-shape for Slice 4
+  (`/upgrade` Claude skill); do NOT rename the keys (`from`, `to`,
+  `entries[].version|breaking|summary|applies_if|body`) without
+  bumping the skill.
+
+`applies_if` grammar:
+
+```
+expr    := or
+or      := and ("||" and)*
+and     := cmp ("&&" cmp)*
+cmp     := ident op version | "(" expr ")"
+ident   := "cli_version_from" | "cli_version_to"
+op      := "<" | "<=" | ">" | ">=" | "==" | "!="
+```
+
+Fail-closed semantics: unknown idents, malformed expressions, or
+unparseable context versions all evaluate to false (so a bad note
+doesn't noise the output). Empty expression matches every hop.
+
+Gotchas:
+
+- **Version literals in `applies_if` have optional `v` prefix, but
+  the lexer requires `v` to be followed by a digit.** `vnull` is
+  NOT a version; it's an identifier (and fails closed). If you need
+  a plain `v`-prefixed literal, make sure the next char is `0-9`.
+- **`from` is exclusive, `to` is inclusive.** `entries_for_hop(A, B)`
+  returns entries with version strictly `> A` and `<= B`. Stepping
+  `--from 0.27.0 --to 0.27.0` returns zero entries. This is
+  intentional — a no-op hop prints "No migration notes apply."
+- **`docs/migrations/README.md` is excluded from the index.** It's
+  the schema reference, not a migration note. Don't rename it without
+  updating `build_migration_index.py`.
+- **Generated `.cpp` lives under `${CMAKE_BINARY_DIR}/` — it is NOT
+  checked in.** The source of truth is `docs/migrations/*.md`.
+- **Duplicate `version = "X.Y.Z"` across two files is a hard error.**
+  The codegen exits 2 and CMake fails to configure. Rename one.
+- **MSVC transitive-include hygiene.** `migration_runtime.cpp`
+  explicitly `#include <cstddef>`, `<sstream>`, `<string>`, `<vector>`,
+  `<tuple>`. Don't rely on libc++ giving you those transitively.

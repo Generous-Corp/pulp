@@ -16,6 +16,7 @@
 // "`pulp upgrade`" section and test_cli_upgrade_url.cpp.
 
 #include "cli_common.hpp"
+#include "migration_index.hpp"
 #include "update_check.hpp"
 #include "upgrade_url.hpp"
 
@@ -29,6 +30,7 @@
 #include <vector>
 
 namespace uc = pulp::cli::update_check;
+namespace mig = pulp::cli::migration;
 
 // ── Cache location helpers (shared with pulp_cli.cpp dispatch path) ─────────
 
@@ -40,22 +42,69 @@ fs::path update_cache_path() {
 
 int cmd_upgrade(const std::vector<std::string>& args) {
     bool check_only = false;
+    bool notes_only = false;
+    bool notes_json = false;
+    std::string from_override;
+    std::string to_override;
     std::string target_version;
     for (size_t i = 0; i < args.size(); ++i) {
         if (args[i] == "--help" || args[i] == "-h") {
             std::cout << "pulp upgrade — update the Pulp CLI to the latest version\n\n";
-            std::cout << "Usage: pulp upgrade [--check-only] [version]\n\n";
+            std::cout << "Usage: pulp upgrade [--check-only] [--notes [--json]] [--from X --to Y] [version]\n\n";
             std::cout << "Options:\n";
             std::cout << "  --check-only   Report the latest available version and exit.\n";
             std::cout << "                 Reads the update cache; does not download.\n";
             std::cout << "                 (Full enforcement lands in #499 Slice 5.)\n";
+            std::cout << "  --notes        Print migration notes for the upgrade hop and exit.\n";
+            std::cout << "                 No binary swap. Reads the embedded migration index.\n";
+            std::cout << "  --notes --json Same, but emit a stable-shape JSON document instead\n";
+            std::cout << "                 of human-readable text. Agent-consumable.\n";
+            std::cout << "  --from X       Override the `from` version (default: installed CLI).\n";
+            std::cout << "  --to   Y       Override the `to`   version (default: cached latest).\n";
             std::cout << "\n";
             std::cout << "If no version is specified, upgrades to the latest release.\n";
             std::cout << "Requires curl (macOS/Linux) or Invoke-WebRequest (Windows).\n";
             return 0;
         }
         if (args[i] == "--check-only") { check_only = true; continue; }
+        if (args[i] == "--notes")      { notes_only = true; continue; }
+        if (args[i] == "--json")       { notes_json = true; continue; }
+        if (args[i] == "--from" && i + 1 < args.size()) { from_override = args[++i]; continue; }
+        if (args[i] == "--to"   && i + 1 < args.size()) { to_override   = args[++i]; continue; }
         if (args[i][0] != '-') target_version = args[i];
+    }
+
+    // ── --notes path (Slice 3 surface) ──────────────────────────────────────
+    //
+    // Print migration notes that apply to the hop `from` → `to` and
+    // exit. No network, no binary swap. Defaults:
+    //   from = PULP_SDK_VERSION (the version of the running binary)
+    //   to   = cached latest_version (falls back to `from` if no cache)
+    //
+    // The JSON variant is stable-shape (see migration_index.hpp) — Slice 4
+    // depends on it. Printed to stdout so scripts can `pulp upgrade
+    // --notes --json | jq` without stripping a banner.
+    if (notes_only) {
+        std::string from = !from_override.empty() ? from_override : std::string(PULP_SDK_VERSION);
+        std::string to = to_override;
+        if (to.empty()) {
+            auto cache_path = update_cache_path();
+            if (!cache_path.empty()) {
+                if (auto cache = uc::read_cache_file(cache_path);
+                    cache && !cache->latest_version.empty()) {
+                    to = cache->latest_version;
+                }
+            }
+            if (to.empty()) to = from;  // no cache; degenerate hop = no notes
+        }
+
+        auto entries = mig::applicable_entries(from, to);
+        if (notes_json) {
+            std::cout << mig::render_notes_json(entries, from, to);
+        } else {
+            std::cout << mig::render_notes_text(entries, from, to);
+        }
+        return 0;
     }
 
     // ── --check-only path (Slice 2 surface) ─────────────────────────────────
@@ -205,6 +254,16 @@ int cmd_upgrade(const std::vector<std::string>& args) {
     run("rm -rf " + tmp_dir);
 
     std::cout << "\n  \xe2\x9c\x93 Pulp CLI upgraded to v" << version << "\n";
+
+    // Hint about the embedded migration notes — the `--notes` surface
+    // lives in this same binary so the just-installed CLI can replay
+    // the guidance for the hop the user just performed.
+    std::string installed = PULP_SDK_VERSION;
+    if (installed != version) {
+        std::cout << "    Run `pulp upgrade --notes --from " << installed
+                  << " --to " << version
+                  << "` to see what changed.\n";
+    }
 
     // Bump the banner-shown marker so we don't nag the user again
     // about the version they just installed.

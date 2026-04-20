@@ -273,3 +273,54 @@ TEST_CASE("pulp doctor --versions prints diagnostics and exits 0",
     // We always print the CLI line, even when no project is active.
     REQUIRE(r.stdout_output.find("CLI:") != std::string::npos);
 }
+
+// Issue #548 Slice 3: `pulp upgrade --notes` prints migration notes
+// for the hop without downloading anything. `--from`/`--to` overrides
+// let us exercise the filter deterministically regardless of the
+// installed CLI version on the test host.
+TEST_CASE("pulp upgrade --notes --from A --to B prints migration header",
+          "[cli][shellout][upgrade][issue-548]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    // Use an env override to neutralise the network-facing update
+    // banner so its stderr noise doesn't interfere.
+    auto r = run_pulp({"upgrade", "--notes", "--from", "0.23.0", "--to", "0.29.0"}, 15000);
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(r.stdout_output.find("Pulp migration notes: 0.23.0 -> 0.29.0")
+            != std::string::npos);
+    // At least one of the seeded migration docs must surface between
+    // 0.23.0 and 0.29.0 — otherwise the embedded index was not
+    // regenerated from docs/migrations/.
+    REQUIRE(r.stdout_output.find("v0.") != std::string::npos);
+}
+
+TEST_CASE("pulp upgrade --notes --json emits stable-shape JSON keys",
+          "[cli][shellout][upgrade][issue-548]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    auto r = run_pulp({"upgrade", "--notes", "--json",
+                       "--from", "0.23.0", "--to", "0.29.0"}, 15000);
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 0);
+    // Slice 4 depends on these keys — they are a stable public surface.
+    REQUIRE(r.stdout_output.find("\"from\":")       != std::string::npos);
+    REQUIRE(r.stdout_output.find("\"to\":")         != std::string::npos);
+    REQUIRE(r.stdout_output.find("\"entries\":")    != std::string::npos);
+    REQUIRE(r.stdout_output.find("\"version\":")    != std::string::npos);
+    REQUIRE(r.stdout_output.find("\"breaking\":")   != std::string::npos);
+    REQUIRE(r.stdout_output.find("\"summary\":")    != std::string::npos);
+    REQUIRE(r.stdout_output.find("\"applies_if\":") != std::string::npos);
+    REQUIRE(r.stdout_output.find("\"body\":")       != std::string::npos);
+}
+
+TEST_CASE("pulp upgrade --notes with no hop prints the empty-notes line",
+          "[cli][shellout][upgrade][issue-548]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    // from == to → degenerate hop with zero applicable notes.
+    auto r = run_pulp({"upgrade", "--notes", "--from", "0.29.0", "--to", "0.29.0"}, 15000);
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(r.stdout_output.find("No migration notes apply") != std::string::npos);
+}

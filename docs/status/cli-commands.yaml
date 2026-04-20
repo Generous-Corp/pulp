@@ -258,7 +258,7 @@ commands:
 
   - name: upgrade
     status: usable
-    summary: Update the Pulp CLI binary to the latest or a specific version. `--check-only` reports the cached latest release without downloading.
+    summary: Update the Pulp CLI binary to the latest or a specific version. `--check-only` reports the cached latest release without downloading. `--notes` prints embedded migration notes for the upgrade hop.
     args:
       - name: version
         kind: positional
@@ -267,6 +267,18 @@ commands:
       - name: --check-only
         kind: flag
         description: Report cached latest release and exit; no download (#547 Slice 2).
+      - name: --notes
+        kind: flag
+        description: Print embedded migration notes for the upgrade hop; no binary swap (#548 Slice 3).
+      - name: --json
+        kind: flag
+        description: With `--notes`, emit stable-shape JSON for agent consumers (#548 Slice 3 → Slice 4).
+      - name: --from
+        kind: option
+        description: Override the `from` version for `--notes` (default is the installed CLI).
+      - name: --to
+        kind: option
+        description: Override the `to` version for `--notes` (default is the cached latest).
     docs: reference/cli.md#upgrade
 
   - name: config

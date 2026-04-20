@@ -14,6 +14,8 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - fix: Codex post-merge sweep (2026-04-21 wave 2) ([#574](https://github.com/danielraffel/pulp/pull/574))
 
 <a id="v0290"></a>
+## [0.30.0]
+
 ## [0.29.0] - 2026-04-20
 
 - cli: ~/.pulp/projects.json registry + pulp projects commands (#552 Slice 1b) ([#563](https://github.com/danielraffel/pulp/pull/563))
