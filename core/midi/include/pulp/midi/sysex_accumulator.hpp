@@ -134,11 +134,20 @@ public:
 private:
     static bool is_status(std::uint8_t b) noexcept { return (b & 0x80) != 0; }
     static bool is_realtime(std::uint8_t b) noexcept {
-        // MIDI 1.0 System Realtime Messages: 0xF8 (Timing Clock),
-        // 0xFA-0xFC (Start/Continue/Stop), 0xFE (Active Sensing),
-        // 0xFF (System Reset). 0xF9 and 0xFD are undefined. 0xF7 is
-        // EOX and intentionally excluded (handled by feed() explicitly).
-        return b >= 0xF8 && b <= 0xFF && b != 0xF9 && b != 0xFD;
+        // MIDI 1.0 System Realtime Messages occupy 0xF8-0xFF, minus
+        // 0xF7 (EOX, handled explicitly in feed()). 0xF9 and 0xFD are
+        // officially undefined/reserved by MIDI 1.0, but the contract
+        // documented at the top of this file — and the behavior
+        // required by transports that emit them — is that everything
+        // in 0xF8-0xFF *except F7* passes through without disturbing
+        // the SysEx state machine. Treating 0xF9/0xFD as generic
+        // status bytes aborted otherwise-valid SysEx on devices that
+        // forwarded the reserved codes (Codex P2 on PR #484 / #500).
+        //
+        // Pass-through is safe because the accumulator only classifies
+        // the byte — the caller's normal short-message path decides
+        // whether to ignore, log, or forward the reserved code.
+        return b >= 0xF8 && b <= 0xFF;
     }
 
     bool in_sysex_ = false;

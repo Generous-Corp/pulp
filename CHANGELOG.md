@@ -9,6 +9,8 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
 <a id="v0240"></a>
+## [0.25.0]
+
 ## [0.24.0] - 2026-04-20
 
 - view: PluginManagerPanel widget over scanner backend (#494) ([#538](https://github.com/danielraffel/pulp/pull/538))
@@ -32,6 +34,8 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - lv2: serialize midi_out back to atom output port (#491) ([#511](https://github.com/danielraffel/pulp/pull/511))
 
 <a id="v0231"></a>
+## [0.24.0]
+
 ## [0.23.1] - 2026-04-20
 
 - chore: bump SDK to v0.23.1 ([#509](https://github.com/danielraffel/pulp/pull/509))

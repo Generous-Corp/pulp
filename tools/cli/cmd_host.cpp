@@ -70,10 +70,30 @@ int cmd_scan(const std::vector<std::string>& args) {
         if (!all_formats && f != requested) continue;
         ScanOptions opts;
         opts.scan_vst3 = (f == PluginFormat::VST3);
+        // AU and AUv3 share the single AudioComponent discovery path
+        // (scanner_au.mm), so scan_au covers both. The actual
+        // PluginInfo.format is already tagged per-entry by
+        // scanner_au.mm's infer_format(), which lets us narrow the
+        // results to exactly AU v2 or exactly AUv3 below. Codex P2 on
+        // PR #531 / #500: without that post-scan filter, a user who
+        // asked for `--format au` still got mixed AU/AUv3 results,
+        // contradicting the docs and making plugin selection
+        // unreliable.
         opts.scan_au   = (f == PluginFormat::AudioUnit || f == PluginFormat::AudioUnitV3);
         opts.scan_clap = (f == PluginFormat::CLAP);
         opts.scan_lv2  = (f == PluginFormat::LV2);
         auto results = scanner.scan(opts);
+        // Narrow AU / AUv3 results to the exact requested flavour. When
+        // `all_formats` is in play each iteration's `f` is authoritative
+        // for the bucket, so we still trim mixed entries out of the
+        // wrong bucket and print each plugin in its own [au]/[auv3]
+        // section.
+        if (f == PluginFormat::AudioUnit || f == PluginFormat::AudioUnitV3) {
+            results.erase(
+                std::remove_if(results.begin(), results.end(),
+                    [&](const PluginInfo& info) { return info.format != f; }),
+                results.end());
+        }
         if (results.empty()) continue;
         std::printf("[%s] %zu plugin(s)\n", format_name(f), results.size());
         for (auto& info : results) {

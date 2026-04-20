@@ -157,6 +157,7 @@ target_sources(pulp-view PRIVATE
     src/screenshot_compare.cpp
     src/app_framework.cpp
     src/canvas_widget.cpp
+    src/visualization_bridge.cpp
     src/frame_clock.cpp
     src/window_manager.cpp
     src/eq_curve_view.cpp
@@ -364,14 +365,14 @@ elseif(UNIX)
 endif()
 
 # Link against render for native GPU bridge (Three.js, WebGPU canvas).
-# When PULP_BENCHMARK is on, visualization_bridge.hpp pulls a public
-# header from pulp::render (perf_counters.hpp) — downstream consumers
-# must be able to resolve the include path, so the link goes PUBLIC in
-# that case. Off-by-default production builds keep the PRIVATE link.
+# Codex P1 on PR #526 / #500: previously visualization_bridge.hpp
+# directly included pulp/render/bench/perf_counters.hpp under
+# PULP_BENCHMARK, which forced this link to go PUBLIC and leaked the
+# render include tree through every view consumer. The header now
+# forward-declares PerfCounters and the dereferencing code lives in
+# visualization_bridge.cpp — so the link stays PRIVATE regardless of
+# PULP_BENCHMARK, and downstream targets that only use view APIs do
+# NOT need to link pulp::render when PULP_BENCHMARK is enabled.
 if(TARGET pulp-render)
-    if(PULP_BENCHMARK)
-        target_link_libraries(pulp-view PUBLIC pulp::render)
-    else()
-        target_link_libraries(pulp-view PRIVATE pulp::render)
-    endif()
+    target_link_libraries(pulp-view PRIVATE pulp::render)
 endif()

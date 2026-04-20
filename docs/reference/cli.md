@@ -383,9 +383,9 @@ By default it delegates to `shipyard pr` (single source of truth for ship
 orchestration). Use `--native` only for diagnostics when debugging the
 CLI-side fallback path. Natural-language triggers in agent conversations
 ("push to main", "ship this", "ship it", "we're done", "merge this",
-"push it", "run CI", "push a PR") all route here — see
-[`.agents/skills/ci/SKILL.md`](../../.agents/skills/ci/SKILL.md) for the
-authoritative trigger list.
+"push it", "run CI", "push a PR") all route here — see the
+[CI skill](../../.agents/skills/ci/SKILL.md) (`.agents/skills/ci/SKILL.md`)
+for the authoritative trigger list.
 
 ```bash
 pulp pr
@@ -420,7 +420,8 @@ Notes:
 - `--native` runs an in-CLI fallback that performs the same gates + PR flow
   without delegating to Shipyard. Diagnostic use only.
 - For the canonical list of natural-language ship triggers and the full
-  policy, see [`.agents/skills/ci/SKILL.md`](../../.agents/skills/ci/SKILL.md).
+  policy, see the [CI skill](../../.agents/skills/ci/SKILL.md)
+  (`.agents/skills/ci/SKILL.md`).
 
 ### docs
 

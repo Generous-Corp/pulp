@@ -193,6 +193,39 @@ TEST_CASE("SysexAccumulator: large sysex (>1KB) accumulates correctly",
     REQUIRE(e.complete[0].back() == 0xF7);
 }
 
+TEST_CASE("SysexAccumulator: reserved 0xF9/0xFD pass through mid-sysex",
+          "[midi][sysex][issue-500]") {
+    // Regression for the Codex P2 finding on #484 / #500: 0xF9 and 0xFD
+    // are MIDI-1.0-undefined codes in the System Realtime range. The
+    // accumulator's pass-through contract covers all of F8-FF except F7,
+    // but an earlier is_realtime() carved out 0xF9 and 0xFD, which sent
+    // them down the aborted-status path and truncated otherwise-valid
+    // SysEx streams on transports that emitted the reserved codes.
+    SysexAccumulator acc;
+    Emit e;
+    auto cb = make_callback(e);
+
+    REQUIRE(acc.feed(0xF0, cb) == Classification::in_sysex);
+    REQUIRE(acc.feed(0x41, cb) == Classification::in_sysex);
+    // Reserved realtime 0xF9 — treat as pass-through, NOT an abort.
+    REQUIRE(acc.feed(0xF9, cb) == Classification::passthrough);
+    REQUIRE(acc.in_progress());
+    REQUIRE(acc.feed(0x10, cb) == Classification::in_sysex);
+    // Reserved realtime 0xFD — same story.
+    REQUIRE(acc.feed(0xFD, cb) == Classification::passthrough);
+    REQUIRE(acc.in_progress());
+    REQUIRE(acc.feed(0xF7, cb) == Classification::completed);
+
+    REQUIRE(e.aborted.empty());
+    REQUIRE(e.complete.size() == 1);
+    // Reserved bytes are NOT buffered into the payload — only F0 41 10 F7.
+    REQUIRE(e.complete[0].size() == 4);
+    REQUIRE(e.complete[0][0] == 0xF0);
+    REQUIRE(e.complete[0][1] == 0x41);
+    REQUIRE(e.complete[0][2] == 0x10);
+    REQUIRE(e.complete[0][3] == 0xF7);
+}
+
 TEST_CASE("SysexAccumulator: aborted then recovered sysex",
           "[midi][sysex][issue-86]") {
     SysexAccumulator acc;

@@ -3,6 +3,7 @@
 #include <pulp/host/scanner.hpp>
 #include <pulp/host/plugin_slot.hpp>
 #include <pulp/host/signal_graph.hpp>
+#include <algorithm>
 #include <atomic>
 #include <cmath>
 #include <cstdlib>
@@ -41,6 +42,45 @@ TEST_CASE("PluginScanner bundle detection", "[host][scanner]") {
     REQUIRE(PluginScanner::is_plugin_bundle("MyPlugin.component", PluginFormat::AudioUnit));
     REQUIRE(PluginScanner::is_plugin_bundle("MyPlugin.lv2", PluginFormat::LV2));
     REQUIRE_FALSE(PluginScanner::is_plugin_bundle("MyPlugin.dll", PluginFormat::VST3));
+}
+
+TEST_CASE("AU / AUv3 post-scan narrowing keeps exact flavour",
+          "[host][scanner][issue-500]") {
+    // Regression for the Codex P2 finding on PR #531 / #500: `pulp scan`
+    // advertised `--format au` and `--format auv3` as mutually-exclusive
+    // filters, but both values set the same ScanOptions::scan_au flag,
+    // and PluginScanner::scan_audio_units() returns mixed AU + AUv3
+    // entries. The CLI now runs a post-scan narrowing step — this test
+    // models that step on a synthetic mixed slice so the narrowing
+    // logic is covered independently of any installed AudioComponents.
+    std::vector<PluginInfo> mixed;
+    PluginInfo v2;  v2.format = PluginFormat::AudioUnit;    v2.name = "EffectV2";
+    PluginInfo v3;  v3.format = PluginFormat::AudioUnitV3;  v3.name = "EffectV3";
+    PluginInfo v2b; v2b.format = PluginFormat::AudioUnit;   v2b.name = "SynthV2";
+    mixed = {v2, v3, v2b};
+
+    auto narrow = [&](PluginFormat wanted) {
+        auto out = mixed;
+        out.erase(std::remove_if(out.begin(), out.end(),
+            [&](const PluginInfo& info) { return info.format != wanted; }),
+            out.end());
+        return out;
+    };
+
+    SECTION("asking for AU v2 drops AUv3 entries") {
+        auto v2_only = narrow(PluginFormat::AudioUnit);
+        REQUIRE(v2_only.size() == 2);
+        for (const auto& info : v2_only) {
+            REQUIRE(info.format == PluginFormat::AudioUnit);
+        }
+    }
+
+    SECTION("asking for AUv3 drops AU v2 entries") {
+        auto v3_only = narrow(PluginFormat::AudioUnitV3);
+        REQUIRE(v3_only.size() == 1);
+        REQUIRE(v3_only[0].format == PluginFormat::AudioUnitV3);
+        REQUIRE(v3_only[0].name == "EffectV3");
+    }
 }
 
 TEST_CASE("PluginScanner scan runs without crash", "[host][scanner]") {

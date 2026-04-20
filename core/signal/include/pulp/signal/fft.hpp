@@ -1,10 +1,11 @@
 #pragma once
 
-#include <vector>
-#include <complex>
-#include <cmath>
 #include <algorithm>
+#include <cmath>
+#include <complex>
 #include <cstdint>
+#include <memory>
+#include <vector>
 
 #if defined(__APPLE__)
 #include <Accelerate/Accelerate.h>

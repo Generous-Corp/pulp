@@ -78,17 +78,25 @@ jobs:
           echo "Repo:     $repo"
           echo "Lookback: ${lookback}h (cutoff ${cutoff})"
 
-          # List PRs merged since cutoff. Codex post-merge review:
+          # List PRs merged since cutoff. Codex post-merge review
+          # history on this file:
           # - `--base main` filter: without it, merges into feature/develop
           #   branches are ingested too, polluting the tracker.
           # - `--search` with `is:merged merged:>DATE` lets the GitHub
           #   search backend do the time filter server-side, eliminating
           #   the `--limit 100` hard cap that was a silent data-loss
           #   risk in a busy 48h window.
+          # - Explicit `--limit 500` (Codex P2 on PR #515 / #500):
+          #   `gh pr list`'s default is 30 items even when `--search` is
+          #   used. Without an explicit high limit, the sweep silently
+          #   inspected at most 30 PRs in a busy window and delayed bot
+          #   findings on older PRs were never ingested. 500 covers any
+          #   realistic 48h window without paginating.
           mapfile -t prs < <(
               gh pr list --repo "$repo" \
                   --base main \
                   --search "is:merged merged:>${cutoff}" \
+                  --limit 500 \
                   --json number,title,mergedAt \
                   --jq ".[] | .number"
           )

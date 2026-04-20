@@ -1221,9 +1221,13 @@ add_subdirectory(web-compat)
 # ── Zero-copy benchmark (Slice 0 of #516) ──────────────────────────────────
 #
 # Tooling-only tests, gated on PULP_BENCHMARK. The perf-counter unit
-# test is portable; the integration test shell-outs to pulp-ui-preview
-# which is currently Apple-desktop-only (same guard as the target).
-if(PULP_BENCHMARK)
+# test links pulp::render, which is only added to the build when
+# PULP_ENABLE_GPU=ON (see root CMakeLists.txt). Gating the test on the
+# render target's presence lets -DPULP_BENCHMARK=ON -DPULP_ENABLE_GPU=OFF
+# configure cleanly without a missing-target error (Codex P2 on PR #526
+# / #500). The integration test shell-outs to pulp-ui-preview which is
+# currently Apple-desktop-only (same guard as the target).
+if(PULP_BENCHMARK AND TARGET pulp-render)
     add_executable(pulp-test-bench-perf-counters test_bench_perf_counters.cpp)
     target_link_libraries(pulp-test-bench-perf-counters PRIVATE
         pulp::render Catch2::Catch2WithMain)
