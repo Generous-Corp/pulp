@@ -59,6 +59,16 @@ struct PulpLv2Instance {
     // feeds them to the Processor.
     bool accepts_midi = false;
     void* midi_in_atom = nullptr;
+
+    // #491: parallel output-atom port for plugins that emit MIDI. The
+    // TTL manifest already declared this port when produces_midi was
+    // set, but run() never serialized the Processor's midi_out buffer
+    // into it — silently dropping every outgoing event. The host pre-
+    // sizes the buffer via lv2:minimumSize and signals capacity in the
+    // atom.size field on entry to run(); the plugin overwrites the
+    // sequence using the lv2_atom_sequence_clear + append_event helpers.
+    bool produces_midi = false;
+    void* midi_out_atom = nullptr;
 };
 
 /// Resolve LV2_URID_Map from a features array.

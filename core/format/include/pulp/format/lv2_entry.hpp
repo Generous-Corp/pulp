@@ -87,6 +87,7 @@ inline LV2_Handle instantiate(
         inst->num_audio_outputs += bus.default_channels;
     }
     inst->accepts_midi = desc.accepts_midi;
+    inst->produces_midi = desc.produces_midi;
 
     // Prepare the processor
     format::PrepareContext ctx;
@@ -106,6 +107,10 @@ inline void connect_port(LV2_Handle handle, uint32_t port, void* data) {
     // MIDI atom ports follow control ports. A plug-in with accepts_midi
     // gets one atom input port at index control_end. Workstream 01 #241.
     int atom_in_end = control_end + (inst->accepts_midi ? 1 : 0);
+    // #491: plug-ins with produces_midi get one atom output port right
+    // after the (optional) input. TTL emits these in the same order in
+    // generate_plugin_ttl(), so the host's port index matches.
+    int atom_out_end = atom_in_end + (inst->produces_midi ? 1 : 0);
 
     int idx = static_cast<int>(port);
 
@@ -118,11 +123,54 @@ inline void connect_port(LV2_Handle handle, uint32_t port, void* data) {
     } else if (idx < atom_in_end) {
         // LV2 atom input port — host hands us an LV2_Atom_Sequence buffer.
         inst->midi_in_atom = data;
+    } else if (idx < atom_out_end) {
+        // LV2 atom output port — host pre-allocates an LV2_Atom_Sequence
+        // buffer sized by lv2:minimumSize in the TTL. run() writes
+        // outgoing MIDI events into it.
+        inst->midi_out_atom = data;
     }
 }
 
 inline void activate(LV2_Handle) {
     // Nothing needed — processor is prepared at instantiation
+}
+
+// #491: write a MidiBuffer into an LV2_Atom_Sequence output port. Uses
+// the standard lv2_atom_sequence_clear + append_event helpers. On entry
+// the host's out_seq->atom.size carries the buffer capacity; clear()
+// resets it to sizeof(body) and append_event() increments it per event.
+// Events that don't fit are dropped, not truncated — matches every
+// other format adapter's overflow behavior. Exposed non-static for unit
+// testing; all arguments validated so missing URIDs are a no-op.
+inline void write_midi_out_to_sequence(
+    LV2_Atom_Sequence* out_seq,
+    LV2_URID urid_atom_sequence,
+    LV2_URID urid_midi_event,
+    const midi::MidiBuffer& midi_out) {
+    if (!out_seq || urid_atom_sequence == 0 || urid_midi_event == 0) return;
+    const uint32_t capacity = out_seq->atom.size;
+    out_seq->atom.type = urid_atom_sequence;
+    out_seq->body.unit = 0;  // frames
+    out_seq->body.pad = 0;
+    lv2_atom_sequence_clear(out_seq);
+
+    for (const auto& ev : midi_out) {
+        const uint32_t msg_size = ev.size();
+        if (msg_size == 0 || msg_size > 3) continue;
+        // Pack LV2_Atom_Event header + up to 3 MIDI bytes on the stack;
+        // append_event copies into out_seq.
+        struct alignas(8) {
+            LV2_Atom_Event hdr;
+            uint8_t payload[3];
+        } pkt{};
+        pkt.hdr.time.frames = ev.sample_offset;
+        pkt.hdr.body.type = urid_midi_event;
+        pkt.hdr.body.size = msg_size;
+        std::memcpy(pkt.payload, ev.data(), msg_size);
+        if (!lv2_atom_sequence_append_event(out_seq, capacity, &pkt.hdr)) {
+            break;  // out of capacity — drop remaining events
+        }
+    }
 }
 
 inline void run(LV2_Handle handle, uint32_t n_samples) {
@@ -183,6 +231,16 @@ inline void run(LV2_Handle handle, uint32_t n_samples) {
     proc_ctx.num_samples = static_cast<int>(n_samples);
 
     inst->processor->process(output, input, midi_in, midi_out, proc_ctx);
+
+    // #491: serialize outgoing MIDI back to the LV2 atom output port.
+    // Prior to this, any Processor that populated midi_out (arpeggiator,
+    // note generator, MIDI-effect passthrough) had its events silently
+    // dropped when hosted via LV2.
+    write_midi_out_to_sequence(
+        static_cast<LV2_Atom_Sequence*>(inst->midi_out_atom),
+        inst->urid_atom_sequence,
+        inst->urid_midi_event,
+        midi_out);
 }
 
 inline void deactivate(LV2_Handle) {
