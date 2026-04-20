@@ -4,7 +4,7 @@ macOS is Pulp's primary development platform. This guide covers signing, notariz
 
 ## Requirements
 
-- macOS 13+ (ARM64 or x86_64)
+- macOS 13+ on Apple Silicon (ARM64). Intel x86_64 is **not supported** — Rosetta 2 translates x86_64 → ARM64 on Apple Silicon, not the reverse, so Intel Macs cannot run Pulp's ARM64 release binaries. Intel users must build from source via `./setup.sh`, and no lane of Pulp's CI / release pipeline / development targets that configuration
 - Xcode 15+ command-line tools
 - CMake 3.24+
 - C++20 compiler (Apple Clang 15+)
@@ -119,20 +119,31 @@ auval -v aumi MyPl Mnfr
 | CLAP | `~/Library/Audio/Plug-Ins/CLAP/` | Per-user |
 | Standalone | `~/Applications/` or `/Applications/` | DMG drag-to-install |
 
-## Universal Binaries
+## Architectures
 
-To build for both ARM64 and x86_64:
+Pulp officially supports **Apple Silicon (ARM64) only** on macOS. Released
+binaries (`pulp-darwin-arm64.tar.gz`, `pulp-sdk-darwin-arm64.tar.gz`) target
+ARM64. Intel Macs cannot run these binaries (Rosetta 2 translates x86_64 →
+ARM64, not the reverse) and `tools/install/install.sh` declines to install
+on x86_64 hosts without building from source.
 
-```bash
-cmake -B build -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
-cmake --build build
-```
+Building a universal (arm64+x86_64) plugin from source is possible in
+principle via `-DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"`, but this is an
+**unsupported source-build experiment** — Pulp's CI lanes, release pipeline,
+and ongoing development assume Apple Silicon. Don't expect parity with the
+ARM64 build.
 
 ## Sandbox Considerations
 
-- AU v2 plugins run in the host's process (no sandbox)
-- AUv3 plugins run in an app extension sandbox (future — not yet implemented)
-- Standalone apps should request entitlements appropriate to their needs
+- **AU v2** plugins run in the host's process (no sandbox)
+- **AU v3** plugins run in an app extension (`.appex`) and therefore in a
+  sandbox — this is Apple's platform model for AUv3; there is no
+  non-sandboxed AUv3 deployment form. AUv3 is shipped today via
+  `pulp_add_plugin(... FORMATS AUv3 ...)` (see
+  `docs/guides/ios-auv3-guidance.md` for the iOS path + entitlement story)
+- **VST3** plugins run in the host's process (no sandbox)
+- **CLAP** plugins run in the host's process (no sandbox)
+- **Standalone apps** should request entitlements appropriate to their needs
 
 ## Debugging in DAWs
 

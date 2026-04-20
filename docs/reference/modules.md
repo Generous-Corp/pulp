@@ -593,8 +593,8 @@ This single class automatically works as VST3, AU, CLAP, LV2, AAX, Standalone, W
 | Format | Status | Notes |
 |--------|--------|-------|
 | AAX | ✓ Usable | Requires developer-supplied Avid SDK |
-| AU v2 | ✓ Stable | macOS only, via AudioUnitSDK |
-| AU v3 | ✓ Stable | macOS + iOS |
+| AU v2 | ✓ Usable | macOS only, via AudioUnitSDK |
+| AU v3 | ✓ Usable | macOS + iOS (always runs sandboxed as `.appex` extension) |
 | CLAP | ✓ Stable | First-class — modulation, WebView, note expressions |
 | LV2 | ✓ Usable | Linux plugin format |
 | Standalone | ✓ Stable | Desktop app with audio settings, test signal |

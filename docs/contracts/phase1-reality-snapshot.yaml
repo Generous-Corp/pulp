@@ -1,10 +1,35 @@
-# Phase 1 Reality Snapshot — Authoritative Contract
+# Phase 1 Reality Snapshot — Frozen Historical Baseline
 # Generated: 2026-03-31
-# Purpose: Later phases (2-12) point to this file as the single source of
-#          truth for what is real today. No phase prompt should re-litigate
-#          claims documented here.
+# STATUS AS OF 2026-04-20: FROZEN. This file is an archaeological snapshot
+# of what Phase 1 looked like on its generation date. Do NOT treat it as
+# the current source of truth — major subsystems have shipped since.
+# Notable drift (keys named without colons to avoid false matches in the
+# validation-contract tests that search this file for specific YAML keys):
+#   - js-engine subsystem: now multi-backend (QuickJS + V8 + JSC), not
+#     QuickJS-only as recorded here. See docs/reference/capabilities.md +
+#     README.md "JS Engines".
+#   - dsp-dsls subsystem: FAUST, Cmajor, and JSFX have shipped since this
+#     snapshot was taken. Status here is still the Phase-1 framing; that's
+#     stale for current main. See CHANGELOG.md 0.1.1+ +
+#     docs/reference/capabilities.md.
+#   - multi-window / webview subsystems: WebView has DevTools/inspector
+#     toggles, palette examples, and embedded-resource fetchers now. This
+#     file's "partial" framing is no longer accurate; see
+#     docs/guides/webview.md.
+# The canonical current-state sources are:
+#   - docs/status/support-matrix.yaml     (per-format, per-platform status)
+#   - docs/reference/capabilities.md       (narrative capability table)
+#   - docs/status/modules.yaml             (per-module maturity)
+#   - planning/STATUS.md                   (phase tracking, private submodule)
+# New phase work should reference those, not this file.
 #
-# Status vocabulary:
+# Original purpose: Phases 2-12 were to point here as the single source of
+# truth for what was real as of 2026-03-31, so phase prompts wouldn't
+# re-litigate known shipped claims. That role now belongs to the
+# capabilities.md + support-matrix.yaml pair; this file is preserved for
+# historical reference only.
+#
+# Status vocabulary (as used WHEN THIS SNAPSHOT WAS TAKEN):
 #   shipped      — production-quality, tested, documented
 #   partial      — code exists but incomplete or has known caveats
 #   experimental — works in limited scenarios, not production-ready

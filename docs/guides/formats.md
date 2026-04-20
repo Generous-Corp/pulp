@@ -1,6 +1,6 @@
 # Plugin Format Adapters
 
-Pulp supports four native plugin formats (CLAP, VST3, AU v2, and optional AAX)
+Pulp supports six native plugin formats (CLAP, VST3, AU v2, AU v3, LV2, and optional AAX)
 plus standalone and headless hosts. You write one `Processor` subclass; format
 adapters handle the rest.
 
@@ -263,8 +263,29 @@ The type codes (`aufx`, `aumu`) and four-character codes are set in your AU's `I
 
 - Effects do not emit parameter output changes back to the host.
 - AU v2 effects use `ProcessBufferLists` which receives interleaved audio. The adapter de-interleaves per buffer.
-- No AU v3 adapter exists yet.
 - Instruments use a `std::mutex` to buffer MIDI between the host's note callbacks and the render call. This is safe because Apple guarantees these calls occur on the same thread or with proper synchronization, but it adds a small overhead.
+
+---
+
+## AU v3 (AUAudioUnit — app extension)
+
+**Entry point:** `pulp_add_plugin(... FORMATS AUv3 ...)` generates a
+`.appex` bundle via the CMake helper `_pulp_add_auv3()` in
+`tools/cmake/PulpUtils.cmake`. On iOS, use the wrapper
+`pulp_add_ios_auv3()` — see [`ios-auv3-guidance.md`](ios-auv3-guidance.md)
+for the iOS-specific entitlement, bundle-id, and signing story.
+
+Unlike AU v2, AU v3 plugins are **always app extensions** and always run
+sandboxed. This is Apple's deployment model for AUv3; there is no non-
+sandboxed AUv3 form. In a compatible host (Logic Pro, GarageBand, Cubase,
+AUM, AUAudioUnit-aware DAWs), the host loads the `.appex` as an out-of-
+process extension with its own audio-unit view controller.
+
+Status: `experimental` on macOS and iOS per
+[`docs/status/support-matrix.yaml`](../status/support-matrix.yaml). AUv3 ships
+today but hasn't yet passed the host-compatibility bar (auval v2 validation,
+Logic Pro + GarageBand + AUM cross-check) that would justify promotion to
+`usable`; see the status manifest for the current promotion criteria.
 
 ---
 
