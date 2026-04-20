@@ -805,14 +805,19 @@ Install methods come from the registry — today `binary_download` (pinned relea
 Update the Pulp CLI binary to the latest (or a specific) version.
 
 ```bash
-pulp upgrade              # upgrade to latest release
-pulp upgrade 0.2.0        # install specific version
-pulp upgrade --check-only # report cached latest release; no download
+pulp upgrade                                      # upgrade to latest release
+pulp upgrade 0.2.0                                # install specific version
+pulp upgrade --check-only                         # report cached latest release; no download
+pulp upgrade --notes                              # print migration notes for installed -> cached latest
+pulp upgrade --notes --json                       # same, stable-shape JSON (agent-consumable)
+pulp upgrade --notes --from 0.25.0 --to 0.29.0    # explicit hop override
 ```
 
 Downloads the release from GitHub, replaces the current binary, and verifies. Requires `curl`.
 
 `--check-only` reads the on-disk cache written by the on-every-invocation background refresh (release-discovery #547 Slice 2) and prints installed/latest/notes. If the cache is empty (first run), it falls through to a single live GitHub query.
+
+`--notes` is the Slice 3 (#548) surface: it filters the embedded migration index (built from `docs/migrations/*.md` at compile time) through each entry's `applies_if` expression and prints only the notes relevant to the upgrade hop. No network, no binary swap. The JSON variant emits a stable-shape document (`from`, `to`, `entries[].{version, breaking, summary, applies_if, body}`) that Slice 4's `/upgrade` Claude Code skill consumes.
 
 ### config
 

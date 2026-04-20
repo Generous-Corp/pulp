@@ -7,6 +7,36 @@ configure_file(
     "${CMAKE_CURRENT_BINARY_DIR}/pulp_version_gen.h"
     @ONLY)
 
+# ── Migration index codegen (release-discovery Slice 3, #548) ───────────────
+#
+# Scan docs/migrations/*.md at configure time, parse the TOML
+# frontmatter, and emit a C++ source file holding the embedded
+# migration index. The generated TU is compiled into pulp-cli so
+# `pulp upgrade --notes` never needs a network or filesystem round-trip
+# to decide which release notes apply to the user's upgrade hop.
+#
+# The DEPENDS list ensures reconfigure / rebuild when either the
+# generator script changes or any migration doc is added/modified.
+
+find_package(Python3 COMPONENTS Interpreter REQUIRED)
+
+set(_pulp_migration_index_src "${CMAKE_CURRENT_BINARY_DIR}/generated/migration_index.cpp")
+file(GLOB _pulp_migration_docs
+     LIST_DIRECTORIES FALSE
+     CONFIGURE_DEPENDS
+     "${CMAKE_SOURCE_DIR}/docs/migrations/*.md")
+
+add_custom_command(
+    OUTPUT  "${_pulp_migration_index_src}"
+    COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_SOURCE_DIR}/tools/scripts/build_migration_index.py"
+            --docs-dir "${CMAKE_SOURCE_DIR}/docs/migrations"
+            --out      "${_pulp_migration_index_src}"
+    DEPENDS "${CMAKE_SOURCE_DIR}/tools/scripts/build_migration_index.py"
+            ${_pulp_migration_docs}
+    COMMENT "Generating migration_index.cpp from docs/migrations/*.md"
+    VERBATIM)
+
 add_executable(pulp-cli
     pulp_cli.cpp
     cli_common.cpp
@@ -36,11 +66,15 @@ add_executable(pulp-cli
     version_diag.cpp
     projects_registry.cpp
     cmd_projects.cpp
-    update_check.cpp)
+    update_check.cpp
+    migration_runtime.cpp
+    "${_pulp_migration_index_src}")
 set_target_properties(pulp-cli PROPERTIES OUTPUT_NAME "pulp")
 target_compile_features(pulp-cli PRIVATE cxx_std_20)
 target_link_libraries(pulp-cli PRIVATE pulp::runtime pulp::tool-audio pulp::ship pulp::view pulp::format pulp::inspect pulp::host)
-target_include_directories(pulp-cli PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
+target_include_directories(pulp-cli PRIVATE
+    ${CMAKE_CURRENT_BINARY_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR})
 
 # RPATH so the installed binary can find shared libraries (e.g.,
 # libwgpu_native.dylib / libwgpu_native.so) inside its install prefix.
