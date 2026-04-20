@@ -43,7 +43,7 @@ requires:
 - It's a subcommand of something already covered
 
 **Commands that intentionally don't have slash commands:**
-audio, cache, clean, upgrade, export-tokens, ci-local, design-debug, help
+audio, cache, clean, upgrade, config, export-tokens, ci-local, design-debug, help
 
 ### 4. Update docs
 - [ ] Add/update section in `docs/reference/cli.md`
@@ -158,8 +158,10 @@ Gotchas:
 
 ## `pulp upgrade` — self-update
 
-Lives in `tools/cli/cmd_misc.cpp` and calls `pulp::cli::pulp_upgrade_url_for()`
-from `tools/cli/upgrade_url.hpp`. The URL/asset-name convention is **pinned
+Lives in `tools/cli/cmd_upgrade.cpp` (moved out of `cmd_misc.cpp` in
+#547 Slice 2 so the update-check surface can grow independently) and
+calls `pulp::cli::pulp_upgrade_url_for()` from
+`tools/cli/upgrade_url.hpp`. The URL/asset-name convention is **pinned
 by the release workflow** (`.github/workflows/release-cli.yml`) and guarded
 by `test/test_cli_upgrade_url.cpp` — both need to agree.
 
@@ -247,3 +249,59 @@ Follow-up slices (2-6) are tracked against #499: update-check,
 migration docs, `/upgrade` skill, mode enforcement, and plugin ↔ CLI
 skew detection. Do not land them piecemeal under Slice 1's PR; file
 new issues and PRs.
+
+## `pulp config` + update-check (#499 Slice 2 / #547)
+
+Slice 2 wires a 24h update-check cache plus a config surface for
+`~/.pulp/config.toml`. Key layout:
+
+- **`tools/cli/update_check.{hpp,cpp}`** — pure-logic core. No
+  `cli_common` link dep so the unit tests in
+  `test/test_cli_update_check.cpp` can compile it standalone (same
+  pattern as `version_diag`). Exposes `CacheEntry`, `parse_cache_json`,
+  `serialize_cache_json`, `read_cache_file`, `write_cache_file`,
+  `is_cache_stale`, `is_newer`, `compose_banner`,
+  `write_toml_key_in_section`, and the `Fetcher` interface with a
+  real `GitHubReleasesFetcher` (curl/PowerShell) so tests can inject
+  a fake and never hit the network.
+- **`tools/cli/cmd_upgrade.cpp`** — moved out of `cmd_misc.cpp`. Adds
+  `--check-only` reading the cache. Writes
+  `banner_shown_for_version` after a successful upgrade so the
+  next-invocation banner stays quiet for the version we just installed.
+- **`tools/cli/cmd_config.cpp`** — `pulp config get|set|list` with an
+  allow-list of keys (`update.mode`, `update.check_interval_hours`,
+  `update.channel`). Allow-list prevents typos silently inflating the
+  config surface.
+- **`tools/cli/pulp_cli.cpp`** — `maybe_emit_update_banner_and_refresh()`
+  runs before dispatch. `PULP_UPDATE_CHECK_DISABLED` env short-circuits
+  it (used by CI). `banner_blocked_commands` = `config`, `version`,
+  `help` so machine-parseable output stays clean.
+- **Banner shape** (locked, tested verbatim):
+  `Pulp vX.Y.Z available (you have vA.B.C). Run \`pulp upgrade\` or \`pulp config set update.mode manual\` to silence.`
+  Emitted on **stderr**, not stdout — never corrupts piped output.
+
+Gotchas:
+
+- **Slice 2 does NOT implement the interactive y/N prompt.** Full
+  auto/prompt/manual/off enforcement lands in Slice 5. Today's `prompt`
+  mode prints the one-shot informational banner only. Don't
+  retroactively add interactive blocking to `prompt` mode without
+  reading the design doc Section A first.
+- **`update.channel = "beta"` is accepted by the allow-list but
+  ignored.** Reserved for Slice 5. Accepting it now means users can
+  set it ahead of time without the config reader errors; don't surface
+  it in the `pulp config --help` Examples until Slice 5 honours it.
+- **Anonymous GitHub API only.** 60 req/hr/IP. The 24h cache default
+  keeps us well under that. Do NOT add authenticated fetches — the
+  design is explicit about "no GitHub App, no auth".
+- **`std::async(std::launch::async, ...)` is stored in a static
+  future** so the destructor doesn't block `main` on Windows. The
+  refresh thread finishes in < 2s normally and the process exits
+  either way — don't replace with `std::thread::detach` without
+  thinking about signal delivery and CRT finalization on Windows.
+- **Cache file is atomic via `.tmp` + rename.** A torn write just
+  forces a re-fetch on the next invocation, not corruption. Cross-device
+  rename falls back to `copy_file` + `remove`.
+- **Commit trailer block must be contiguous.** Version-bump + skill
+  trailers live on the tip commit. Do NOT split with blank lines —
+  `git interpret-trailers --parse` treats them as non-trailers.

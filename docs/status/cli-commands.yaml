@@ -236,13 +236,28 @@ commands:
 
   - name: upgrade
     status: usable
-    summary: Update the Pulp CLI binary to the latest or a specific version.
+    summary: Update the Pulp CLI binary to the latest or a specific version. `--check-only` reports the cached latest release without downloading.
     args:
       - name: version
         kind: positional
         required: false
         description: "Version to install (default: latest)"
+      - name: --check-only
+        kind: flag
+        description: Report cached latest release and exit; no download (#547 Slice 2).
     docs: reference/cli.md#upgrade
+
+  - name: config
+    status: usable
+    summary: Read or write ~/.pulp/config.toml settings (release-discovery #547 Slice 2). Supports the `[update]` section (mode, check_interval_hours, channel).
+    subcommands:
+      - name: get
+        summary: Print the value for a dotted key (e.g. `update.mode`). Empty output if unset.
+      - name: set
+        summary: Write a value for a dotted key. Validates against the allowed enum (mode) or integer shape (check_interval_hours).
+      - name: list
+        summary: Dump current `update.*` settings with defaults filled in.
+    docs: reference/cli.md#config
 
   - name: doctor
     status: usable

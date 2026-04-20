@@ -105,6 +105,21 @@ target_link_libraries(pulp-test-cli-version-diag PRIVATE
     Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-cli-version-diag)
 
+# Release-discovery Slice 2 (#547): pure-logic tests for the update
+# cache, semver comparator, banner composer, TOML writer, and
+# Fetcher-injected refresh orchestrator. No network, no cli_common
+# link deps — same pattern as version_diag.
+add_executable(pulp-test-cli-update-check
+    test_cli_update_check.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/update_check.cpp
+)
+target_include_directories(pulp-test-cli-update-check PRIVATE
+    ${CMAKE_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/tools/cli)
+target_link_libraries(pulp-test-cli-update-check PRIVATE
+    Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-cli-update-check)
+
 # Child process tests
 add_executable(pulp-test-child-process test_child_process.cpp)
 target_link_libraries(pulp-test-child-process PRIVATE pulp::platform Catch2::Catch2WithMain)

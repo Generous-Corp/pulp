@@ -9,7 +9,7 @@ from pathlib import Path
 
 # Commands that intentionally don't have slash commands
 SKIP_SLASH_COMMANDS = {
-    "audio", "cache", "clean", "upgrade", "export-tokens",
+    "audio", "cache", "clean", "upgrade", "config", "export-tokens",
     "ci-local", "design-debug", "help", "add", "audit",
     "inspect", "import-design", "install", "version",
     "sdk", "fetch", "list", "remove", "search", "suggest",

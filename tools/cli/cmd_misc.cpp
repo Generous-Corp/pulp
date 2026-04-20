@@ -1,7 +1,9 @@
-// cmd_misc.cpp — pulp test, status, clean, cache, upgrade commands
+// cmd_misc.cpp — pulp test, status, clean, cache commands
+//
+// Note: `pulp upgrade` moved to cmd_upgrade.cpp in release-discovery
+// Slice 2 (#547) so the update-check surface can grow independently.
 
 #include "cli_common.hpp"
-#include "upgrade_url.hpp"
 
 #include <fstream>
 #include <iostream>
@@ -296,118 +298,3 @@ int cmd_cache(const std::vector<std::string>& args) {
     return 1;
 }
 
-// ── cmd_upgrade ─────────────────────────────────────────────────────────────
-
-// URL / asset-name logic lives in upgrade_url.hpp so the regression test
-// can link against it without pulling cmd_misc's transitive CLI deps.
-// Release workflow this mirrors: .github/workflows/release-cli.yml.
-// Issue: #352.
-
-int cmd_upgrade(const std::vector<std::string>& args) {
-    std::string target_version;
-    for (size_t i = 0; i < args.size(); ++i) {
-        if (args[i] == "--help" || args[i] == "-h") {
-            std::cout << "pulp upgrade — update the Pulp CLI to the latest version\n\n";
-            std::cout << "Usage: pulp upgrade [version]\n\n";
-            std::cout << "If no version is specified, upgrades to the latest release.\n";
-            std::cout << "Requires curl (macOS/Linux) or Invoke-WebRequest (Windows).\n";
-            return 0;
-        }
-        if (args[i][0] != '-') target_version = args[i];
-    }
-
-    std::cout << "Checking for updates...\n";
-
-    std::string version_cmd = "curl -fsSL https://api.github.com/repos/danielraffel/pulp/releases/latest 2>/dev/null"
-                              " | grep '\"tag_name\"' | sed 's/.*\"v\\(.*\\)\".*/\\1/'";
-    std::string latest = exec_output(version_cmd);
-
-    if (latest.empty() && target_version.empty()) {
-        std::cerr << "Error: could not fetch latest version from GitHub.\n";
-        std::cerr << "  Check your internet connection, or specify a version:\n";
-        std::cerr << "    pulp upgrade 0.2.0\n";
-        return 1;
-    }
-
-    std::string version = target_version.empty() ? latest : target_version;
-    std::cout << "  Target version: " << version << "\n";
-
-    std::string platform, arch;
-#ifdef __APPLE__
-    platform = "darwin";
-#elif defined(_WIN32)
-    platform = "windows";
-#else
-    platform = "linux";
-#endif
-
-#if defined(__aarch64__) || defined(__arm64__) || defined(_M_ARM64)
-    arch = "arm64";
-#elif defined(__x86_64__) || defined(_M_X64)
-    // Release assets use "x64" (not "x86_64"). Keep this in sync with the
-    // release workflow in .github/workflows/release-cli.yml — otherwise
-    // `pulp upgrade` 404s on the download step.
-    arch = "x64";
-#else
-    arch = "unknown";
-#endif
-
-    std::string self_path = current_executable_path().string();
-
-    if (self_path.empty()) {
-        std::cerr << "Error: could not determine current binary path.\n";
-        std::cerr << "  Download manually from: https://github.com/danielraffel/pulp/releases\n";
-        return 1;
-    }
-
-    auto install_dir = fs::path(self_path).parent_path();
-
-    auto [tarball, url] = pulp::cli::pulp_upgrade_url_for(version, platform, arch);
-
-    std::cout << "  Downloading " << tarball << "...\n";
-
-    std::string tmp_dir = "/tmp/pulp-upgrade-" + version;
-    int rc = run("mkdir -p " + tmp_dir + " && curl -fSL -o " + tmp_dir + "/" + tarball + " " + url);
-    if (rc != 0) {
-        std::cerr << "Download failed. Check: https://github.com/danielraffel/pulp/releases/tag/v" << version << "\n";
-        run("rm -rf " + tmp_dir);
-        return 1;
-    }
-
-    rc = run("tar -xzf " + tmp_dir + "/" + tarball + " -C " + tmp_dir);
-    if (rc != 0) {
-        std::cerr << "Extraction failed.\n";
-        run("rm -rf " + tmp_dir);
-        return 1;
-    }
-
-    std::string new_binary = tmp_dir + "/pulp";
-    if (!fs::exists(new_binary)) {
-        std::cerr << "Error: extracted archive does not contain 'pulp' binary.\n";
-        run("rm -rf " + tmp_dir);
-        return 1;
-    }
-
-    std::string backup = self_path + ".bak";
-    try {
-        if (fs::exists(backup)) fs::remove(backup);
-        fs::rename(self_path, backup);
-        fs::copy_file(new_binary, self_path);
-        fs::permissions(self_path, fs::perms::owner_exec | fs::perms::owner_read | fs::perms::owner_write
-                                 | fs::perms::group_exec | fs::perms::group_read
-                                 | fs::perms::others_exec | fs::perms::others_read);
-        fs::remove(backup);
-    } catch (const std::exception& e) {
-        std::cerr << "Error replacing binary: " << e.what() << "\n";
-        if (fs::exists(backup) && !fs::exists(self_path)) {
-            fs::rename(backup, self_path);
-        }
-        run("rm -rf " + tmp_dir);
-        return 1;
-    }
-
-    run("rm -rf " + tmp_dir);
-
-    std::cout << "\n  \xe2\x9c\x93 Pulp CLI upgraded to v" << version << "\n";
-    return 0;
-}

@@ -11,6 +11,7 @@ add_executable(pulp-cli
     pulp_cli.cpp
     cli_common.cpp
     cmd_build.cpp
+    cmd_config.cpp
     cmd_create.cpp
     cmd_design.cpp
     cmd_doctor.cpp
@@ -18,6 +19,7 @@ add_executable(pulp-cli
     cmd_misc.cpp
     cmd_run.cpp
     cmd_ship.cpp
+    cmd_upgrade.cpp
     cmd_validate.cpp
     cmd_sdk.cpp
     cmd_audio.cpp
@@ -31,6 +33,7 @@ add_executable(pulp-cli
     package_registry.cpp
     package_commands.cpp
     tool_registry.cpp
+    update_check.cpp
     version_diag.cpp)
 set_target_properties(pulp-cli PROPERTIES OUTPUT_NAME "pulp")
 target_compile_features(pulp-cli PRIVATE cxx_std_20)
@@ -160,4 +163,22 @@ if(PULP_BUILD_TESTS)
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
     set_tests_properties(cli-no-new-alias PROPERTIES
         PASS_REGULAR_EXPRESSION "Unknown command")
+
+    # Issue #547 Slice 2: `pulp config` help shape.
+    add_test(NAME cli-config-help
+        COMMAND pulp-cli config --help
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+    set_tests_properties(cli-config-help PROPERTIES
+        PASS_REGULAR_EXPRESSION "update.mode")
+
+    # Issue #547 Slice 2: `pulp upgrade --check-only` should not
+    # download. We can't assert exact output (depends on network), but
+    # it must not crash and must print the Installed/Latest block OR a
+    # "could not fetch" error. Use PULP_UPDATE_CHECK_DISABLED to keep
+    # the banner itself silent for this test lane.
+    add_test(NAME cli-upgrade-help
+        COMMAND pulp-cli upgrade --help
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+    set_tests_properties(cli-upgrade-help PROPERTIES
+        PASS_REGULAR_EXPRESSION "--check-only")
 endif()

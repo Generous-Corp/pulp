@@ -5,10 +5,17 @@
 #include "package_commands.hpp"
 #include "package_registry.hpp"
 #include "tool_registry.hpp"
+#include "update_check.hpp"
 
+#include <atomic>
 #include <cstring>
+#include <future>
 #include <iomanip>
 #include <iostream>
+#include <memory>
+#include <mutex>
+#include <string>
+#include <thread>
 
 // ── Command Table ───────────────────────────────────────────────────────────
 
@@ -39,6 +46,7 @@ static const Command commands[] = {
     {"scan",     "Scan system paths for VST3 / AU / CLAP / LV2 plug-ins", cmd_scan},
     {"host",     "Load a plug-in and run a synthetic audio block through it", cmd_host},
     {"pr",       "One-shot push-a-PR: gates + bump + ship",   cmd_pr},
+    {"config",   "Read or write ~/.pulp/config.toml settings", cmd_config},
 };
 
 static constexpr int command_count = sizeof(commands) / sizeof(commands[0]);
@@ -141,6 +149,151 @@ static void print_usage() {
     std::cout << "  pulp status             # Show project info\n";
 }
 
+// ── Update-check dispatch (Slice 2 of #499, issue #547) ────────────────────
+//
+// Before we dispatch the user's command, we optionally:
+//   1. Read the cached latest-release JSON (~/.pulp/update-cache.json).
+//   2. Emit a single-line banner on stderr if `update.mode != off` and
+//      the cached latest_version is strictly newer than the installed
+//      PULP_SDK_VERSION, and we haven't already shown the banner for
+//      this version (tracked by banner_shown_for_version).
+//   3. Kick off a non-blocking background refresh if the cache is
+//      older than `update.check_interval_hours` (default 24).
+//
+// Slice 2 scope ends at "print the banner and refresh the cache". The
+// full auto/prompt/manual/off enforcement (interactive y/N, snooze,
+// pending-upgrade markers) lives in Slice 5. That's why `prompt` mode
+// today prints a one-shot informational banner — the interactive
+// prompt comes later so we can ship this without re-tooling the
+// whole dispatch path.
+//
+// Commands that should NEVER emit the banner (so they stay
+// machine-parseable for scripts) are listed in `banner_blocked_commands`
+// below. `config` is on that list so `pulp config get update.mode` has
+// clean stdout.
+
+namespace {
+
+const char* kBannerBlockedCommands[] = {
+    "config",     // machine-parseable output
+    "version",    // same — used by shell scripts
+    "help",
+    "--help",
+    "-h",
+};
+
+bool banner_blocked(const std::string& cmd) {
+    for (const char* blocked : kBannerBlockedCommands) {
+        if (cmd == blocked) return true;
+    }
+    return false;
+}
+
+// Read configured mode. Defaults to "prompt" when absent, matching the
+// design doc Section A. "off" short-circuits the whole update path.
+std::string read_update_mode() {
+    auto v = read_user_config_value("update", "mode");
+    if (v.empty()) return "prompt";
+    return v;
+}
+
+int read_check_interval_hours() {
+    auto v = read_user_config_value("update", "check_interval_hours");
+    if (v.empty()) return 24;
+    try {
+        int n = std::stoi(v);
+        return n > 0 ? n : 24;
+    } catch (...) {
+        return 24;
+    }
+}
+
+fs::path banner_cache_path() {
+    auto home = pulp_home();
+    if (home.empty()) return {};
+    return home / "update-cache.json";
+}
+
+// Fire a best-effort background refresh. We deliberately don't block
+// on the result — the banner will pick it up on the *next* invocation.
+// `std::async` with `std::launch::async` runs detached; we leak the
+// future intentionally so the thread survives `main` returning. (In
+// practice the network call completes in < 2s; the OS cleans up on
+// exit either way.)
+//
+// Race-window note: the main thread may write the cache after the
+// banner check (to stamp banner_shown_for_version). To avoid clobbering
+// that write, the background thread re-reads the cache from disk right
+// before writing. This keeps `banner_shown_for_version` set even if
+// the refresh finishes later than the banner-write.
+void kick_background_refresh(const fs::path& cache_path) {
+    if (cache_path.empty()) return;
+    static std::future<void> s_refresh_future;
+    s_refresh_future = std::async(std::launch::async, [cache_path]() {
+        pulp::cli::update_check::GitHubReleasesFetcher fetcher;
+        auto r = fetcher.fetch_latest_release(PULP_GITHUB_REPO);
+        // Re-read from disk — this is the race-avoidance point.
+        auto latest = pulp::cli::update_check::read_cache_file(cache_path)
+                          .value_or(pulp::cli::update_check::CacheEntry{});
+        latest.schema = pulp::cli::update_check::kCacheSchemaVersion;
+        latest.last_check_epoch_sec = pulp::cli::update_check::now_epoch_sec();
+        if (r.ok) {
+            latest.latest_version = r.latest_version;
+            latest.release_notes_url = r.release_notes_url;
+        }
+        pulp::cli::update_check::write_cache_file(cache_path, latest);
+    });
+}
+
+// Top-level hook invoked before dispatching the user's command. Best
+// effort — any exception is swallowed so a cache-read bug can never
+// fail the real command.
+void maybe_emit_update_banner_and_refresh(const std::string& command) {
+    try {
+        if (banner_blocked(command)) return;
+
+        // Explicit off-switch that bypasses config entirely. Used by
+        // CI / air-gapped envs and by the unit-test shell-out lane.
+        if (pulp::runtime::get_env("PULP_UPDATE_CHECK_DISABLED")) return;
+
+        auto mode = read_update_mode();
+        if (mode == "off") return;
+
+        auto cache_path = banner_cache_path();
+        if (cache_path.empty()) return;
+
+        auto cache_opt = pulp::cli::update_check::read_cache_file(cache_path);
+        pulp::cli::update_check::CacheEntry cache =
+            cache_opt.value_or(pulp::cli::update_check::CacheEntry{});
+
+        if (mode == "prompt" &&
+            !cache.latest_version.empty() &&
+            pulp::cli::update_check::is_newer(PULP_SDK_VERSION, cache.latest_version) &&
+            cache.banner_shown_for_version != cache.latest_version) {
+            std::cerr << pulp::cli::update_check::compose_banner(
+                             PULP_SDK_VERSION, cache.latest_version)
+                      << "\n";
+            // Mark so we don't nag the user every invocation. The
+            // banner reprints only when a newer release arrives and
+            // resets banner_shown_for_version via the refresh below.
+            cache.banner_shown_for_version = cache.latest_version;
+            pulp::cli::update_check::write_cache_file(cache_path, cache);
+        }
+        // `manual` mode: no banner today. Slice 5 will surface it
+        // differently (print on --help, not on every invocation).
+
+        auto interval = read_check_interval_hours();
+        if (pulp::cli::update_check::is_cache_stale(
+                cache, pulp::cli::update_check::now_epoch_sec(), interval)) {
+            kick_background_refresh(cache_path);
+        }
+    } catch (...) {
+        // Never let a banner bug break a user's actual command.
+    }
+}
+
+}  // namespace
+
 // ── Main ────────────────────────────────────────────────────────────────────
 
 int main(int argc, char* argv[]) {
@@ -162,6 +315,8 @@ int main(int argc, char* argv[]) {
         if (std::strcmp(argv[i], "--no-color") == 0) continue;
         args.push_back(argv[i]);
     }
+
+    maybe_emit_update_banner_and_refresh(command);
 
     // Lookup in command table
     for (int i = 0; i < command_count; ++i) {

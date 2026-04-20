@@ -752,9 +752,31 @@ Update the Pulp CLI binary to the latest (or a specific) version.
 ```bash
 pulp upgrade              # upgrade to latest release
 pulp upgrade 0.2.0        # install specific version
+pulp upgrade --check-only # report cached latest release; no download
 ```
 
 Downloads the release from GitHub, replaces the current binary, and verifies. Requires `curl`.
+
+`--check-only` reads the on-disk cache written by the on-every-invocation background refresh (release-discovery #547 Slice 2) and prints installed/latest/notes. If the cache is empty (first run), it falls through to a single live GitHub query.
+
+### config
+
+**Status**: usable
+
+Read or write `~/.pulp/config.toml` settings. Release-discovery Slice 2 (#547).
+
+```bash
+pulp config get update.mode
+pulp config set update.mode manual
+pulp config set update.check_interval_hours 12
+pulp config list
+```
+
+Supported keys (all under `[update]`):
+
+- `update.mode` — one of `auto | prompt | manual | off` (default `prompt`). Full enforcement of auto/prompt/manual/off lands in Slice 5 (#499); Slice 2 honours `off` (no banner, no network) and emits an informational banner in `prompt` mode when a newer release is available in cache.
+- `update.check_interval_hours` — integer hours between background checks (default `24`). The 24h default stays under the 60/hour anonymous GitHub API rate limit by a wide margin.
+- `update.channel` — `stable | beta` (default `stable`). Reserved for Slice 5; ignored today.
 
 ### clean
 

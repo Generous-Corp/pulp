@@ -42,6 +42,7 @@
 
 #include "pulp_version_gen.h"
 #include "package_registry.hpp"
+#include "update_check.hpp"
 
 // ── SDK Constants ────────────────���──────────────────────────────────────────
 
@@ -787,6 +788,34 @@ std::string read_user_config_value(const std::string& section, const std::string
     }
 
     return {};
+}
+
+bool write_user_config_value(const std::string& section,
+                             const std::string& key,
+                             const std::string& value) {
+    auto home = pulp_home();
+    if (home.empty()) return false;
+    auto path = home / "config.toml";
+
+    std::string contents;
+    if (fs::exists(path)) {
+        std::ifstream f(path);
+        if (f.is_open()) {
+            std::ostringstream buf;
+            buf << f.rdbuf();
+            contents = buf.str();
+        }
+    }
+
+    auto rewritten = pulp::cli::update_check::write_toml_key_in_section(
+        contents, section, key, value);
+
+    std::error_code ec;
+    fs::create_directories(path.parent_path(), ec);
+    std::ofstream f(path, std::ios::binary | std::ios::trunc);
+    if (!f.is_open()) return false;
+    f << rewritten;
+    return f.good();
 }
 
 std::string read_project_cmake_version(const fs::path& project_root) {

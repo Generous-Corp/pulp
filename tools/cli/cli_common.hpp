@@ -113,6 +113,14 @@ std::string read_sdk_version(const fs::path& project_root);
 fs::path read_sdk_path_hint(const fs::path& project_root);
 fs::path read_sdk_checkout_hint(const fs::path& project_root);
 std::string read_user_config_value(const std::string& section, const std::string& key);
+
+// Write/update `key = "value"` under `[section]` in ~/.pulp/config.toml.
+// Creates the file if missing. Preserves all other content verbatim.
+// Release-discovery Slice 2 (#547) surface — used by `pulp config set`
+// and by the banner-suppression bookkeeping inside cmd_upgrade.
+bool write_user_config_value(const std::string& section,
+                             const std::string& key,
+                             const std::string& value);
 std::string read_project_cmake_version(const fs::path& project_root);
 
 // ── Build Helpers ───────────────────────────────────────────────────────────
@@ -225,3 +233,4 @@ int cmd_dev(const std::vector<std::string>& args);
 int cmd_scan(const std::vector<std::string>& args);
 int cmd_host(const std::vector<std::string>& args);
 int cmd_pr(const std::vector<std::string>& args);
+int cmd_config(const std::vector<std::string>& args);
