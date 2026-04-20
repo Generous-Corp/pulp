@@ -8,6 +8,12 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v0290"></a>
+## [0.29.0] - 2026-04-20
+
+- cli: ~/.pulp/projects.json registry + pulp projects commands (#552 Slice 1b) ([#563](https://github.com/danielraffel/pulp/pull/563))
+- deps: full attribution audit across 4 files (DEPENDENCIES, NOTICE, licensing.md, manifest) ([#565](https://github.com/danielraffel/pulp/pull/565))
+
 <a id="v0280"></a>
 ## [0.28.0] - 2026-04-21
 
@@ -15,10 +21,6 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - fix(cli): cmd_host format-specific error messages (#537) ([#557](https://github.com/danielraffel/pulp/pull/557))
 
 <a id="v0270"></a>
-## [0.29.0]
-
-## [0.28.0]
-
 ## [0.27.0] - 2026-04-21
 
 - fix: Codex post-merge sweep (2026-04-21) ([#560](https://github.com/danielraffel/pulp/pull/560))
@@ -474,6 +476,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.29.0]: https://github.com/danielraffel/pulp/releases/tag/v0.29.0
 [0.28.0]: https://github.com/danielraffel/pulp/releases/tag/v0.28.0
 [0.27.0]: https://github.com/danielraffel/pulp/releases/tag/v0.27.0
 [0.26.0]: https://github.com/danielraffel/pulp/releases/tag/v0.26.0
