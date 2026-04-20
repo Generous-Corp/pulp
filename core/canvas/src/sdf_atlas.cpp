@@ -209,13 +209,22 @@ GlyphMetrics glyph_metrics_skia(const sk_sp<SkTypeface>& face,
     SkGlyphID gid = 0;
     {
         SkUnichar uni = static_cast<SkUnichar>(codepoint);
-        font.unicharsToGlyphs(&uni, 1, &gid);
+        // Use the SkSpan-taking overload: it is always available in
+        // chrome/m144 and newer Skia, whereas the (ptr, count) overload
+        // is gated behind SK_SUPPORT_UNSPANNED_APIS and disappears on
+        // Skia builds that compile with that macro undefined. See #543.
+        font.unicharsToGlyphs(SkSpan<const SkUnichar>(&uni, 1),
+                              SkSpan<SkGlyphID>(&gid, 1));
     }
     if (gid == 0) return m;  // .notdef — still emit advance below
 
     SkScalar advance = 0;
     SkRect bounds{};
-    font.getWidthsBounds(&gid, 1, &advance, &bounds, nullptr);
+    // Same SkSpan migration for getWidthsBounds — see #543.
+    font.getWidthsBounds(SkSpan<const SkGlyphID>(&gid, 1),
+                         SkSpan<SkScalar>(&advance, 1),
+                         SkSpan<SkRect>(&bounds, 1),
+                         nullptr);
 
     m.advance = static_cast<float>(advance);
     // SkRect here is in device-space relative to the pen origin, y-down

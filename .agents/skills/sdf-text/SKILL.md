@@ -43,6 +43,17 @@ consume `pulp/canvas/sdf_text.hpp`.
 5. **Vector fallback threshold defaults to 8×**. `should_use_vector_fallback`
    is a pure policy helper; callers decide at draw time whether to hit
    the Skia path rasterizer instead of the SDF sampler.
+6. **Always call `SkFont` via the `SkSpan` overloads.** The historical
+   `(pointer, count, ...)` forms of `unicharsToGlyphs`, `textToGlyphs`,
+   `getWidthsBounds`, `getWidths`, `getPos`, `getXPos`, `getPaths`, and
+   `getIntercepts` are gated behind `SK_SUPPORT_UNSPANNED_APIS` in
+   `include/core/SkFont.h`. On Skia builds where that macro is not
+   defined (including some chrome/m144 drops), the overloads vanish and
+   `sdf_atlas.cpp` fails to compile. On this repo `PULP_HAS_SKIA` is
+   only set when `libskia.a` links successfully, so the break can hide
+   behind a headers-only pin — confirm by building `pulp-canvas`
+   against a tree that ships `libskia.a` (e.g.
+   `SKIA_DIR=<other-worktree>/external/skia-build`). See #543.
 
 ## Build + test loop
 

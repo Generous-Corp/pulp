@@ -30,7 +30,7 @@ All code that Pulp bundles, fetches automatically, exports via `cmake --install`
 | node-addon-api | 8.x | MIT | Node.js bindings via Node-API (optional, npm install) | bindings/nodejs | 2026-03-25 |
 | pybind11 | 2.13.6 | BSD-3-Clause | Python bindings for HeadlessHost (optional, FetchContent) | bindings/python | 2026-03-25 |
 | SDL3 | 3.2.12 | zlib | Cross-platform windowing, input, GPU context | pulp-view | 2026-03-25 |
-| Skia | chrome/m144 | BSD-3-Clause | GPU 2D rendering engine (pre-built via skia-builder) | pulp-canvas, pulp-render | 2026-03-25 |
+| Skia | chrome/m144 | BSD-3-Clause | GPU 2D rendering engine (pre-built via skia-builder). Call sites use the `SkSpan`-based `SkFont` API so Pulp compiles whether the Skia build defines `SK_SUPPORT_UNSPANNED_APIS` or not (#543). | pulp-canvas, pulp-render | 2026-03-25 |
 | VST3 SDK | v3.7.12_build_20 | MIT | VST3 plugin format (pluginterfaces + base) | pulp-format | 2026-03-24 |
 | WebGPU-distribution | 17dcd42a7683 | MIT | WebGPU C API wrapper for Dawn (FetchContent) | pulp-render | 2026-03-25 |
 | Yoga | 3.2.1 | MIT | CSS Flexbox/Grid layout engine (Meta, FetchContent) | pulp-view | 2026-03-29 |
