@@ -485,12 +485,14 @@ Pulp versions three surfaces independently: SDK/CLI (`CMakeLists.txt`), Claude p
 2. **Pre-push hook (Layer 2)** — `.githooks/pre-push` runs both scripts in `--mode=report`. Advisory by default; `PULP_ENFORCE_PREPUSH=1` upgrades to hard failure.
 3. **CI + Shipyard (Layer 3, authoritative)** — `.github/workflows/version-skill-check.yml` and the `validation.gates` stage in `.shipyard/config.toml` both invoke the same scripts in `--mode=report` with `PULP_ENFORCE_PREPUSH=1`. No bypass other than the commit trailers below.
 
-**Shipping a PR** — when the user says any of "push a PR", "ship this", "ship it", "we're done", "merge this", or "push it", invoke `pulp pr` (the existing `ci` skill routes through this). Never run `gh pr create` + `shipyard ship` separately; never run the version-bump or skill-sync scripts by hand. `pulp pr` orchestrates:
+**Shipping a PR** — when the user says any of "push a PR", "ship this", "ship it", "we're done", "merge this", or "push it", invoke `shipyard pr` (the existing `ci` skill routes through this). Never run `gh pr create` + `shipyard ship` separately; never run the version-bump or skill-sync scripts by hand. `shipyard pr` orchestrates:
 
 1. `skill_sync_check.py --mode=report` — hard-fails on missing SKILL.md updates.
 2. `version_bump_check.py --mode=apply` — rewrites version files and CHANGELOG stub.
 3. `git commit` + `gh pr create` + `shipyard ship` — one command, merges on green.
 4. `.github/workflows/auto-release.yml` — on merge to main, tags the new version(s) and the existing tag-triggered release workflows build + publish binaries.
+
+Shipyard v0.19.1+ (pinned as v0.20.0 in `tools/shipyard.toml`) auto-discovers Pulp's `tools/scripts/` layout; `.shipyard/config.toml [validation]` additionally pins the paths explicitly for reproducibility.
 
 **Bypass trailers** (tip commit, never PR body — audit trail lives in git):
 
@@ -692,28 +694,39 @@ Pulp ships as a Claude Code plugin with slash commands (`/build`, `/test`, `/cre
 
 ```bash
 # Primary path for "ship this" / "push a PR" / any natural-language ship trigger:
-pulp pr
-
-# Useful options:
-pulp pr --base origin/main
-pulp pr --title "<title>"
-pulp pr --no-ship
-pulp pr --no-push
-pulp pr --dry-run
-
-# Fallback ONLY when the local `pulp` binary is broken (e.g. wgpu dylib load failure):
 shipyard pr
+
+# Useful options (v0.20.0):
+shipyard pr --base origin/main
+shipyard pr --no-apply-bumps                    # hard-fail on missing version bumps
+shipyard pr --skip-bump plugin --bump-reason="test-only change"
+shipyard pr --skip-skill-update ci --skill-reason="docs-only"
+shipyard pr --skip-target ubuntu                # deliberate lane skip
+
+# `pulp pr` is a Pulp-side wrapper; it still works and delegates to shipyard pr.
+# Use either — agents should prefer `shipyard pr` for directness.
+pulp pr
 
 # Lower-level Shipyard commands — use only for diagnostics or recovery, NOT as the
 # default ship path:
 shipyard run                              # validate current branch
 shipyard ship                             # PR + validate + merge on green
 shipyard cloud run build <branch>         # dispatch to Namespace
+
+# SSH preflight (v0.20.0+ / Shipyard #106): exit codes are distinct.
+#   0 — success
+#   1 — validation failed
+#   2 — configuration error
+#   3 — backend unreachable (new; surfaces within 10s with classified reason)
+# Use --skip-target NAME for DELIBERATE lane skips (no probe).
+# Use --allow-unreachable-targets only when you genuinely want to proceed despite
+# an unreachable backend — it now prints a loud "⚠︎ VALIDATION GAP" banner naming
+# the skipped lane.
 ```
 
 The CI skill (`.agents/skills/ci/SKILL.md`) is the single source of truth for landing code. Normal ship cycle:
 
-1. Run `pulp pr` — never `gh pr create` + `shipyard ship` separately (that bypasses the skill-sync and version-bump gates)
+1. Run `shipyard pr` — never `gh pr create` + `shipyard ship` separately (that bypasses the skill-sync and version-bump gates)
 2. The orchestrator runs skill-sync + version-bump gates, commits any bumps, pushes, opens a PR, and invokes `shipyard ship`
 3. `shipyard ship` validates on macOS (locally), Ubuntu (SSH), and Windows (SSH)
 4. Merges only when ALL targets pass

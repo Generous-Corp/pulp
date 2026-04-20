@@ -12,18 +12,21 @@ requires:
 
 Validate branches and ship code safely. This skill handles all CI workflows for Pulp across local machines and VMs.
 
-## Shipping a PR: route through `pulp pr`
+## Shipping a PR: route through `shipyard pr`
 
 When the user says any of: **"push to main"**, **"ship this"**, **"ship it"**,
 **"we're done"**, **"merge this"**, **"push it"**, **"run CI"**, **"push a PR"** —
-run `pulp pr` (not `gh pr create` + `shipyard ship` separately).
+run `shipyard pr` (not `gh pr create` + `shipyard ship` separately).
 
-`pulp pr` is the single orchestrator. It:
+`shipyard pr` is the single orchestrator (Shipyard v0.19.1+; pinned as v0.20.0
+in `tools/shipyard.toml`). It:
 
-1. Calls `tools/scripts/skill_sync_check.py` and hard-fails if a mapped skill
-   path was touched without a `SKILL.md` update or a `Skill-Update:` trailer.
-2. Calls `tools/scripts/version_bump_check.py --mode=apply` to bump SDK, Claude
-   plugin, and marketplace versions consistently, honoring any
+1. Calls `tools/scripts/skill_sync_check.py` (resolved via Shipyard's
+   `[validation]` path-discovery, explicit in `.shipyard/config.toml`) and
+   hard-fails if a mapped skill path was touched without a `SKILL.md` update
+   or a `Skill-Update:` trailer.
+2. Calls `tools/scripts/version_bump_check.py --mode=apply` to bump SDK,
+   Claude plugin, and marketplace versions consistently, honoring any
    `Version-Bump:` trailers.
 3. Commits the bump (if any) as `chore: bump <surfaces>`.
 4. `gh pr create` with a generated body.
@@ -32,12 +35,40 @@ run `pulp pr` (not `gh pr create` + `shipyard ship` separately).
    publishes binaries on merge.
 
 Never run `gh pr create` + `shipyard ship` separately for a normal ship
-cycle. Never invoke the two version/skill scripts by hand — `pulp pr`
+cycle. Never invoke the two version/skill scripts by hand — `shipyard pr`
 wires them together with the right flags.
 
+`pulp pr` is a Pulp-side wrapper that delegates to `shipyard pr`; both are
+valid, agents should prefer `shipyard pr` for directness.
+
 Backward compatibility: raw `shipyard ship` / `shipyard run` still work for
-diagnostics, experimental branches, or when `pulp pr` itself is being
+diagnostics, experimental branches, or when `shipyard pr` itself is being
 debugged. Do not use them as the primary ship path.
+
+### SSH preflight (v0.20.0+ / Shipyard #106)
+
+Exit codes are distinct:
+
+| Exit | Meaning |
+|------|---------|
+| 0 | Success |
+| 1 | Validation failed |
+| 2 | Configuration error |
+| 3 | Backend unreachable (new; surfaces within 10s with classified reason) |
+
+The unreachable-backend error names the failure class (auth / host_key /
+network / timeout / configuration / unknown) and prints the last ssh stderr.
+
+Flags:
+
+- `--skip-target NAME` — **DELIBERATE** lane skip (no probe runs). Use when
+  you know a target is irrelevant for this PR.
+- `--allow-unreachable-targets` — proceed despite an unreachable backend.
+  Prints a loud `⚠︎ VALIDATION GAP: <target> skipped` banner. Use only when
+  you genuinely cannot reach a backend and accept the validation gap.
+
+Automation (crons, agents) should branch on exit code 3 specifically rather
+than parsing error strings.
 
 ## Tool selection: Shipyard (primary)
 

@@ -17,6 +17,17 @@ name      = "pulp"
 type      = "cmake"
 platforms = ["macos", "linux", "windows"]
 
+# ── Gate script paths (Shipyard v0.19.1+ path discovery) ───────────────────
+# Pulp keeps the skill-sync, version-bump, and versioning-config files
+# under tools/scripts/. Shipyard v0.19.1+ auto-discovers this layout, but
+# we pin the paths explicitly here so any future Shipyard bump can't
+# accidentally drop the discovery order and silently fall back to
+# scripts/ (which Pulp doesn't use).
+[validation]
+skill_sync_script   = "tools/scripts/skill_sync_check.py"
+version_bump_script = "tools/scripts/version_bump_check.py"
+versioning_config   = "tools/scripts/versioning.json"
+
 # ── Validation pipeline ────────────────────────────────────────────────────
 # Each stage maps to a step in tools/validate-build.sh. Shipyard runs
 # them in order; stage failure short-circuits the pipeline.
