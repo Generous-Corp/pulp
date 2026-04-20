@@ -2,7 +2,8 @@ name: Coverage
 
 # Non-blocking coverage artifact. Informational only; no merge gate.
 # Local equivalent: scripts/run_coverage.sh.
-# Full design: planning/coverage-sanitizers-spec-2026-04-16.md.
+# Full design: planning/coverage-sanitizers-spec-2026-04-16.md
+#              planning/coverage-tooling-decision-2026-04-21.md (Phase 0 spike)
 
 on:
   pull_request:
@@ -35,6 +36,23 @@ jobs:
             libxi-dev libxinerama-dev libxkbcommon-dev libxrandr-dev \
             libxrender-dev libxss-dev libxtst-dev libwayland-dev wayland-protocols
 
+      - name: Install coverage reporting tools (gcovr)
+        # gcovr bridges Clang source-based coverage → Cobertura XML,
+        # which Codecov (PR 2) and diff-cover (PR 3) consume.
+        # Pin >=8.2 for the --llvm-profdata-executable path used by
+        # scripts/run_coverage.sh.
+        run: python3 -m pip install --user 'gcovr>=8.2'
+        shell: bash
+
+      - name: run_coverage.sh fixture tests (#569 / #570)
+        # Assert the canonical ignore-regex excludes _deps/catch2-build
+        # spam (#569) AND that the stale-cache guard trips loudly
+        # instead of silently producing empty profdata (#570). Runs
+        # before the heavy build so a regex/guard regression fails
+        # fast without burning the full coverage build.
+        run: python3 tools/scripts/test_run_coverage.py
+        shell: bash
+
       - name: Bootstrap dependencies
         run: ./setup.sh --ci --deps-only
         shell: bash
@@ -61,3 +79,15 @@ jobs:
           name: coverage-summary-${{ github.sha }}
           path: build-coverage/coverage/summary.txt
           retention-days: 90
+
+      - name: Upload Cobertura XML
+        # PR 1 lands the XML artifact; PR 2 wires it into Codecov and
+        # PR 3 wires it into diff-cover. Keep the retention short —
+        # once Codecov is live the XML lives there.
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: coverage-cobertura-${{ github.sha }}
+          path: build-coverage/coverage.cobertura.xml
+          retention-days: 14
+          if-no-files-found: warn
