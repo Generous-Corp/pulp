@@ -514,6 +514,35 @@ if(ANDROID)
 endif()
 ```
 
+### Permissions — one JNI sink, one C++ backend
+
+`core/platform/src/android/permissions.cpp` owns the JNI callback
+(`Java_com_pulp_PulpActivity_nativeOnPermissionResult`) and a single
+`pulp::android::g_permission_callback` function pointer.
+`permissions_backend.cpp` subscribes to that hook via
+`set_permission_callback()` and fans results out to pending
+`pulp::platform::RequestCallback` entries keyed by
+`pulp::android::Permission`.
+
+Two rules:
+
+1. **Don't** add a second callback subscriber — the slot is a single
+   function pointer, the second `set_permission_callback()` call wins
+   and the first is silently orphaned. If you need more than one
+   listener, extend the registry in `permissions_backend.cpp` rather
+   than adding another hook to `permissions.cpp`.
+2. The cross-platform TU defines `PULP_PERMISSIONS_HAS_BACKEND=1` as
+   a **PUBLIC** compile definition on `pulp-platform` (see
+   `core/platform/CMakeLists.txt`). Tests read that define, so keeping
+   it PUBLIC is what lets `test_permissions.cpp` branch on
+   `has_platform_backend()` correctly on Android.
+
+The enum surface stays at three values (RecordAudio, BluetoothMidi,
+PostNotifications) — anything else (`LocalNetwork`, `BackgroundAudio`,
+`ForegroundService`) is handled on the C++ side by `to_android()`
+returning `std::nullopt` and the request callback firing synchronously
+with the desktop default.
+
 ## Widget Painting Convention
 
 When mapping a 0..1 value to a pixel position with a circular/rect indicator, **always inset by the indicator's radius** so it stays fully within widget bounds:

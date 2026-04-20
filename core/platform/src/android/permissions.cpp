@@ -1,5 +1,7 @@
 #if defined(__ANDROID__)
 
+#include "permissions_internal.hpp"
+
 #include <pulp/platform/android/jni.hpp>
 #include <android/log.h>
 #include <stdexcept>
@@ -11,15 +13,10 @@ namespace pulp::android {
 
 // Permission request callbacks from Kotlin.
 // The actual permission request UI is handled by Kotlin's ActivityResultContracts.
-// These JNI callbacks notify the C++ side of the result.
+// These JNI callbacks notify the C++ side of the result. The cross-platform
+// pulp::platform permissions backend (permissions_backend.cpp) subscribes
+// here via set_permission_callback().
 
-enum class Permission {
-    RecordAudio = 0,
-    BluetoothMidi = 1,
-    PostNotifications = 2,
-};
-
-using PermissionCallback = void(*)(Permission, bool granted);
 static PermissionCallback g_permission_callback = nullptr;
 
 void set_permission_callback(PermissionCallback cb) {

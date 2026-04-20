@@ -69,19 +69,29 @@ OverrideRegistry& registry() {
 
 }  // namespace
 
+// Internal hook consulted by platform backends to honour PermissionsOverride
+// without duplicating the registry across TUs. Returns std::nullopt when
+// no override is active for `p`.
+namespace detail {
+std::optional<PermissionState> override_lookup(Permission p) {
+    auto& reg = registry();
+    if (!reg.active()) return std::nullopt;
+    auto idx = static_cast<std::size_t>(p);
+    if (idx < reg.entries.size() && reg.entries[idx].has_value()) {
+        return reg.entries[idx];
+    }
+    return std::nullopt;
+}
+}  // namespace detail
+
 #if !defined(PULP_PERMISSIONS_HAS_BACKEND)
 // Default implementation — desktop and any platform that hasn't been
 // taught to answer permission prompts. Mobile backends provide their
-// own TU and define PULP_PERMISSIONS_HAS_BACKEND to suppress this one.
+// own TU and define PULP_PERMISSIONS_HAS_BACKEND (via the build system)
+// to suppress these three symbols.
 
 PermissionState query(Permission p) {
-    auto& reg = registry();
-    if (reg.active()) {
-        auto idx = static_cast<std::size_t>(p);
-        if (idx < reg.entries.size() && reg.entries[idx].has_value()) {
-            return *reg.entries[idx];
-        }
-    }
+    if (auto ov = detail::override_lookup(p)) return *ov;
     return desktop_default(p);
 }
 
@@ -95,6 +105,8 @@ bool has_platform_backend() { return false; }
 #endif  // !PULP_PERMISSIONS_HAS_BACKEND
 
 // ── PermissionsOverride ──────────────────────────────────────────────
+// Always provided by this TU — the registry and guard live here for every
+// platform so backends can share one override surface.
 
 struct PermissionsOverride::Impl {
     OverrideRegistry* reg;

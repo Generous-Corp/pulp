@@ -111,3 +111,29 @@ adb shell am start -n com.pulp.app/com.pulp.PulpActivity
 - **Always use `-gpu host`** (not `swiftshader_indirect`). SwiftShader is a CPU rasterizer that starves the audio HAL.
 - **`QEMU_AUDIO_DRV=coreaudio`** is required on macOS for the audio pipe to work.
 - Dawn shader compilation takes ~2s on device, ~15s on emulator. The render thread with Looper prevents ANR.
+
+## Runtime Permissions
+
+This synth is output-only so it doesn't need `RECORD_AUDIO`, but any plugin
+that adds mic input or Bluetooth MIDI should use the cross-platform
+`pulp::platform::Permissions` API (same code path on iOS, Android, and
+desktop — see `examples/ios-auv3-synth` for the iOS side):
+
+```cpp
+#include <pulp/platform/permissions.hpp>
+
+using namespace pulp::platform;
+
+if (query(Permission::Microphone) != PermissionState::Granted) {
+    request(Permission::Microphone, [](PermissionState s) {
+        if (s == PermissionState::Granted) {
+            // Safe to start Oboe input stream.
+        }
+    });
+}
+```
+
+On Android the prompt UI is surfaced by the Kotlin host
+(`ActivityResultContracts.RequestPermission`); the native callback fires
+once the user taps Allow or Deny. Tests can short-circuit with
+`PermissionsOverride` — no real prompt, no JNI round-trip.

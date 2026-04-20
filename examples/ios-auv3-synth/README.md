@@ -41,6 +41,30 @@ examples/ios-auv3-synth/
 
 The Info.plist and entitlements come from `templates/ios-auv3/`.
 
+## Runtime Permissions
+
+Plugins that add mic input, Bluetooth MIDI, or notifications should use the
+cross-platform `pulp::platform::Permissions` API — identical source on iOS,
+Android, and desktop:
+
+```cpp
+#include <pulp/platform/permissions.hpp>
+
+using namespace pulp::platform;
+
+request(Permission::Microphone, [](PermissionState s) {
+    // iOS delivers this on the main thread; safe to touch UIKit.
+    if (s == PermissionState::Granted) {
+        start_recording();
+    }
+});
+```
+
+On iOS the backend maps onto `AVAudioSession.requestRecordPermission`,
+`AVCaptureDevice.requestAccessForMediaType:`, `CBManager.authorization`,
+and `UNUserNotificationCenter.requestAuthorizationWithOptions:`. Tests can
+redirect the whole surface with `PermissionsOverride` — no real prompt.
+
 ## Known follow-ups
 
 - `pulp_add_ios_auv3()` builds the `.appex` today; host-app target

@@ -223,6 +223,31 @@ xcodebuild test -project ... -scheme AUv3Tests -sdk iphonesimulator
   `NSFileCoordinator` from the host app's group container.
 - No `fork`/`exec`, no `NSTask` — all child-process code must be `NOT IOS`.
 
+### Permissions (pulp::platform::Permissions)
+
+`core/platform/platform/ios/permissions_ios.mm` is the iOS backend for the
+cross-platform `pulp::platform::Permissions` API. Three rules:
+
+1. **Always hop to the main queue** before firing the user `RequestCallback`.
+   AVFoundation/UserNotifications completion blocks don't promise a specific
+   queue, and iOS callers invariably touch UIKit from the callback. The
+   backend owns a `RequestCallback*` on the heap, dispatches to
+   `dispatch_get_main_queue()`, and deletes after invocation.
+2. **`CBManager.authorization` is iOS 13.1+ only** — anything older has no
+   discrete authorization surface. Wrap in `@available` and fall back to
+   `PermissionState::Granted`; the system will prompt on first
+   `CBCentralManager` instantiation provided `NSBluetoothAlwaysUsageDescription`
+   is set in Info.plist.
+3. **Don't forget the Info.plist keys.** The iOS backend only surfaces the
+   request; the prompt itself is gated on `NSMicrophoneUsageDescription`,
+   `NSCameraUsageDescription`, `NSBluetoothAlwaysUsageDescription`, and
+   `NSLocalNetworkUsageDescription` being present. No key → prompt never
+   fires and the callback delivers `Denied`.
+
+The required frameworks (`AVFoundation`, `CoreBluetooth`,
+`UserNotifications`) are linked in the `IOS` branch of
+`core/platform/CMakeLists.txt`.
+
 ## `pulp_add_ios_auv3()` helper
 
 ```cmake

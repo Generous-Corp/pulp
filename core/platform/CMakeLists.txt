@@ -37,11 +37,19 @@ elseif(IOS)
     target_sources(pulp-platform PRIVATE
         platform/ios/clipboard_ios.mm
         platform/ios/environment_ios.mm
+        platform/ios/permissions_ios.mm
         platform/posix/child_process_posix.cpp
     )
+    # PUBLIC so downstream test binaries can branch on the same define as the
+    # backend TU — otherwise the test expecting has_platform_backend()==true
+    # silently takes the desktop code path.
+    target_compile_definitions(pulp-platform PUBLIC PULP_PERMISSIONS_HAS_BACKEND=1)
     target_link_libraries(pulp-platform PRIVATE
         "-framework UIKit"
         "-framework UniformTypeIdentifiers"
+        "-framework AVFoundation"
+        "-framework CoreBluetooth"
+        "-framework UserNotifications"
     )
 elseif(WIN32)
     target_sources(pulp-platform PRIVATE
@@ -52,9 +60,16 @@ elseif(WIN32)
     target_link_libraries(pulp-platform PRIVATE user32 advapi32)
 elseif(ANDROID)
     # Android platform sources wired via PulpAndroid.cmake → pulp_wire_android_sources()
+    # The Android permissions_backend.cpp (picked up by that glob) defines
+    # PULP_PERMISSIONS_HAS_BACKEND via the compile definition below so the
+    # desktop fallback in src/permissions.cpp compiles out.
     target_sources(pulp-platform PRIVATE
         platform/posix/child_process_posix.cpp
     )
+    # PUBLIC so downstream test binaries can branch on the same define as the
+    # backend TU — otherwise the test expecting has_platform_backend()==true
+    # silently takes the desktop code path.
+    target_compile_definitions(pulp-platform PUBLIC PULP_PERMISSIONS_HAS_BACKEND=1)
 elseif(UNIX AND NOT APPLE)
     target_sources(pulp-platform PRIVATE
         platform/linux/clipboard_linux.cpp
