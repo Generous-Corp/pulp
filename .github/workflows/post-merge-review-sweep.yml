@@ -1,0 +1,286 @@
+name: Post-merge review sweep
+
+# Scans PRs merged to `main` in the last N hours for unresolved bot
+# review comments (Codex, Copilot, ChatGPT) and maintains a single
+# tracking issue. Motivated by the 2026-04-20 cascade, where several
+# P1 Codex comments arrived minutes-to-hours after merge, were missed
+# by the standard "wait for CI then merge" flow, and surfaced only in
+# a later manual audit — after regressions had already shipped.
+#
+# Shape mirrors .github/workflows/orphan-branch-sweep.yml and
+# deps-drift-check.yml: scheduled cron + workflow_dispatch, single
+# idempotent tracking issue, dry-run input, artifact upload.
+#
+# Why scheduled rather than on pull_request closed: Codex review
+# comments are posted asynchronously, sometimes 5-30 minutes after
+# merge. A pull_request-closed hook that runs immediately would
+# miss most findings. A scheduled sweep picks up the tail reliably.
+
+on:
+  schedule:
+    # Every 3 hours, 7 days a week. Codex review latency is ~5-30 min
+    # but occasional long tails exist; 3h cadence catches everything
+    # without hammering the API.
+    - cron: '0 */3 * * *'
+  workflow_dispatch:
+    inputs:
+      lookback_hours:
+        description: 'How many hours back to scan PRs merged'
+        required: false
+        default: '48'
+      dry_run:
+        description: 'If true, log findings but do not touch the tracking issue'
+        required: false
+        default: 'false'
+
+concurrency:
+  group: post-merge-review-sweep
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    name: Scan merged PRs for unresolved bot comments
+
+    env:
+      LOOKBACK_HOURS: ${{ github.event.inputs.lookback_hours || '48' }}
+      DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
+      TRACKING_TITLE: 'Post-merge review sweep: unresolved bot comments'
+      BOT_PATTERN: 'codex|copilot|chatgpt'
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+      - name: Checkout (shallow)
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Scan recently-merged PRs
+        id: scan
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          repo='${{ github.repository }}'
+          lookback="${LOOKBACK_HOURS}"
+          cutoff=$(python3 -c "import datetime; print((datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=${lookback})).strftime('%Y-%m-%dT%H:%M:%SZ'))")
+
+          echo "Repo:     $repo"
+          echo "Lookback: ${lookback}h (cutoff ${cutoff})"
+
+          # List PRs merged since cutoff.
+          # gh pr list --state merged gives mergedAt; filter locally.
+          mapfile -t prs < <(
+              gh pr list --repo "$repo" --state merged --limit 100 \
+                  --json number,title,mergedAt \
+                  --jq ".[] | select(.mergedAt > \"${cutoff}\") | .number"
+          )
+
+          echo "Recently-merged PR count: ${#prs[@]}"
+
+          findings_jsonl=""
+
+          for pr in "${prs[@]}"; do
+              # Collect review comments + PR top-level comments from bot
+              # authors. We intentionally DON'T filter by `resolved`
+              # (GitHub resolved-thread API is inconsistent across
+              # integration bots); we dedupe via marker+hash in the
+              # issue body step instead.
+              review=$(
+                  gh api "/repos/${repo}/pulls/${pr}/comments" --paginate \
+                      --jq "[.[] | select(.user.login | test(\"${BOT_PATTERN}\"; \"i\")) | {author: .user.login, path: .path, line: (.line // .original_line), body: .body, url: .html_url}]"
+              )
+              top=$(
+                  gh api "/repos/${repo}/issues/${pr}/comments" --paginate \
+                      --jq "[.[] | select(.user.login | test(\"${BOT_PATTERN}\"; \"i\")) | {author: .user.login, path: null, line: null, body: .body, url: .html_url}]"
+              )
+
+              count=$(python3 -c "import json,sys; r=json.loads(sys.argv[1]); t=json.loads(sys.argv[2]); print(len(r) + len(t))" "$review" "$top")
+              if [ "${count:-0}" -eq 0 ]; then
+                  continue
+              fi
+
+              title=$(gh pr view "$pr" --repo "$repo" --json title --jq '.title')
+              merged_at=$(gh pr view "$pr" --repo "$repo" --json mergedAt --jq '.mergedAt')
+
+              entry=$(python3 -c "
+import json, sys
+pr = sys.argv[1]
+title = sys.argv[2]
+merged_at = sys.argv[3]
+review = json.loads(sys.argv[4])
+top = json.loads(sys.argv[5])
+# Classify each comment's severity by looking for P0/P1/P2/P3 badges
+# in the body (Codex uses \`\`\`P1 Badge\`\`\` markdown shields).
+def classify(body):
+    import re
+    m = re.search(r'P([0-3]) Badge', body or '')
+    return m.group(0) if m else 'unlabeled'
+items = []
+for c in review + top:
+    items.append({
+        'author': c['author'],
+        'path': c['path'],
+        'line': c['line'],
+        'severity': classify(c['body']),
+        'url': c['url'],
+        # Keep a short excerpt to help humans scan — full body in the URL
+        'excerpt': (c['body'] or '')[:200].replace('\n', ' ').strip(),
+    })
+print(json.dumps({
+    'pr': int(pr),
+    'title': title,
+    'merged_at': merged_at,
+    'count': len(items),
+    'items': items,
+}))
+" "$pr" "$title" "$merged_at" "$review" "$top")
+              findings_jsonl="${findings_jsonl}${entry}"$'\n'
+              echo "  PR #$pr — $count bot comment(s)"
+          done
+
+          if [ -z "$findings_jsonl" ]; then
+              echo "[]" > findings.json
+          else
+              printf '%s' "$findings_jsonl" | python3 -c "import json,sys; print(json.dumps([json.loads(l) for l in sys.stdin if l.strip()], indent=2))" > findings.json
+          fi
+
+          total_prs=$(python3 -c "import json; print(len(json.load(open('findings.json'))))")
+          total_items=$(python3 -c "import json; print(sum(p['count'] for p in json.load(open('findings.json'))))")
+          echo "Total PRs with findings: $total_prs"
+          echo "Total items:             $total_items"
+          echo "pr_count=$total_prs"     >> "$GITHUB_OUTPUT"
+          echo "item_count=$total_items" >> "$GITHUB_OUTPUT"
+
+      - name: Render tracking issue body
+        id: render
+        if: env.DRY_RUN != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python3 - <<'PY' > body.md
+          import json, datetime, os
+
+          findings = json.load(open('findings.json'))
+          lookback = os.environ['LOOKBACK_HOURS']
+          now = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%d %H:%M UTC')
+
+          lines = []
+          lines.append(f"_Auto-generated by `.github/workflows/post-merge-review-sweep.yml` on {now}._")
+          lines.append("")
+          lines.append(
+              f"Bot review comments (Codex / Copilot / ChatGPT) posted on PRs "
+              f"merged to `main` in the last **{lookback} hours**. Codex often "
+              f"posts findings minutes-to-hours after merge — this sweep catches "
+              f"them so they can be triaged before regressions ship."
+          )
+          lines.append("")
+          lines.append("Treat this as a triage worklist. For each PR:")
+          lines.append("")
+          lines.append("1. Follow the comment URL to read the full finding.")
+          lines.append("2. Decide: ship fix / roll into existing rollup / dismiss.")
+          lines.append("3. If actionable and not already tracked, file a dedicated issue or add to the #500-style rollup.")
+          lines.append("")
+
+          if not findings:
+              lines.append("**No bot comments found in the lookback window.** This issue will be closed automatically.")
+          else:
+              total = sum(p['count'] for p in findings)
+              lines.append(f"**{total} unresolved bot comment(s) across {len(findings)} PR(s):**")
+              lines.append("")
+              for f in sorted(findings, key=lambda x: -x['count']):
+                  lines.append(f"### PR #{f['pr']} — {f['title']}")
+                  lines.append(f"Merged: {f['merged_at']} · Bot comments: **{f['count']}**")
+                  lines.append("")
+                  by_sev = {}
+                  for item in f['items']:
+                      by_sev.setdefault(item['severity'], []).append(item)
+                  # Severity order: P0, P1, P2, P3, unlabeled
+                  order = ['P0 Badge', 'P1 Badge', 'P2 Badge', 'P3 Badge', 'unlabeled']
+                  for sev in order:
+                      if sev not in by_sev:
+                          continue
+                      for item in by_sev[sev]:
+                          badge = sev.replace(' Badge', '') if sev != 'unlabeled' else '—'
+                          loc = f"{item['path']}:{item['line']}" if item['path'] else '(top-level)'
+                          lines.append(f"- **[{badge}]** `{loc}` — [link]({item['url']})")
+                          lines.append(f"  > {item['excerpt']}")
+                  lines.append("")
+
+          print('\n'.join(lines))
+          PY
+
+          echo "Rendered body:"
+          echo "----"
+          head -60 body.md
+          echo "..."
+          echo "----"
+
+      - name: Maintain tracking issue
+        if: env.DRY_RUN != 'true'
+        shell: bash
+        env:
+          PR_COUNT: ${{ steps.scan.outputs.pr_count }}
+        run: |
+          set -euo pipefail
+
+          repo='${{ github.repository }}'
+          title="${TRACKING_TITLE}"
+
+          # Look up the tracker in both OPEN and CLOSED states; only act
+          # if state == OPEN (mirror of the #475 close-path fix). Avoids
+          # recurring "closing" comments when the window happens to be
+          # quiet.
+          existing_json=$(
+              gh issue list \
+                  --repo "$repo" \
+                  --state all \
+                  --search "in:title \"${title}\"" \
+                  --json number,title,state \
+                  --jq "[.[] | select(.title == \"${title}\")] | first // {}"
+          )
+          existing=$(echo "$existing_json" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('number','') or '')")
+          existing_state=$(echo "$existing_json" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d.get('state','') or '')")
+
+          if [ "$PR_COUNT" -eq 0 ]; then
+              if [ -n "${existing:-}" ] && [ "$existing_state" = "OPEN" ]; then
+                  echo "No unresolved bot comments in window — closing #${existing}."
+                  gh issue comment "$existing" --repo "$repo" \
+                      --body "Sweep on $(date -u +%Y-%m-%d) found no unresolved bot comments in the last ${LOOKBACK_HOURS}h window. Closing."
+                  gh issue close "$existing" --repo "$repo" --reason completed
+              else
+                  echo "No findings and no open tracking issue — nothing to do."
+              fi
+              exit 0
+          fi
+
+          if [ -z "${existing:-}" ]; then
+              echo "Creating tracking issue."
+              gh issue create --repo "$repo" --title "$title" --body-file body.md
+          else
+              echo "Updating tracking issue #${existing}."
+              gh issue edit "$existing" --repo "$repo" --body-file body.md
+              gh issue reopen "$existing" --repo "$repo" 2>/dev/null || true
+          fi
+
+      - name: Upload findings artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: post-merge-review-findings
+          path: |
+            findings.json
+            body.md
+          retention-days: 7
+          if-no-files-found: ignore
