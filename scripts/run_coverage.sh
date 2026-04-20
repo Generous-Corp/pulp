@@ -5,12 +5,16 @@
 #   scripts/run_coverage.sh [--jobs N] [--tests REGEX]
 #
 # Produces:
-#   build-coverage/coverage/index.html         — per-file drilldown
-#   build-coverage/coverage/summary.txt        — top-level table
+#   build-coverage/coverage/index.html          — per-file drilldown
+#   build-coverage/coverage/summary.txt         — top-level table
+#   build-coverage/coverage.cobertura.xml       — Cobertura XML (for
+#                                                 Codecov + diff-cover);
+#                                                 skipped if gcovr not on
+#                                                 PATH (local-only).
 #
 # Coverage is informational only. This script never fails on a
-# coverage threshold; thresholds would be noise without a baseline
-# and the #290 hardening initiative.
+# coverage threshold; thresholds come via the Phase 2/3 diff-cover
+# gate (see planning/coverage-tooling-decision-2026-04-21.md).
 
 set -euo pipefail
 
@@ -21,6 +25,23 @@ PROFRAW_DIR="${BUILD_DIR}/profraw"
 REPORT_DIR="${BUILD_DIR}/coverage"
 JOBS=$(command -v nproc >/dev/null 2>&1 && nproc || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 TESTS_REGEX=""
+
+# Canonical source-filter regex used by both llvm-cov and gcovr.
+# Matches paths we explicitly DO NOT want in the coverage report:
+#   _deps/          — FetchContent build trees (incl. Catch2)
+#   external/       — vendored dependencies
+#   test/           — test code itself (we measure coverage OF code under test)
+#   catch2/Catch2/  — Catch2 headers/src anywhere; papers over the
+#                     `build-coverage/_deps/catch2-build/src/src/` mapping
+#                     that produces "No such file or directory" stderr spam
+#                     on every llvm-cov show invocation (issue #569).
+#   build-coverage/ — this build tree itself.
+#   build/          — any other build tree.
+#
+# Each alternative uses `(^|/)` as the leading anchor so relative and
+# absolute paths are both matched. Keep in sync with `gcovr --exclude`
+# flags below and with planning/coverage-tooling-decision-2026-04-21.md §4.
+COVERAGE_IGNORE_REGEX='(^|/)(_deps|external|test|[Cc]atch2|build|build-coverage)/'
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -50,6 +71,31 @@ cmake -S "${REPO_ROOT}" -B "${BUILD_DIR}" \
     -DPULP_ENABLE_COVERAGE=ON \
     -DCMAKE_C_COMPILER=clang \
     -DCMAKE_CXX_COMPILER=clang++
+
+# Issue #570: if build-coverage/CMakeCache.txt was previously populated
+# with PULP_ENABLE_COVERAGE:BOOL=OFF (e.g. from a non-coverage run
+# that reused the same directory), the cached value wins on
+# reconfigure even though we pass -DPULP_ENABLE_COVERAGE=ON. The
+# instrumentation flags never reach flags.make, no profraw files are
+# emitted, and llvm-profdata merge later dies with "could not read
+# profile data!" — a symptom that looks like a test/instrumentation
+# bug, not a stale-cache bug. Assert the expected value stuck and
+# error loudly with the fix if not.
+CACHE_FILE="${BUILD_DIR}/CMakeCache.txt"
+if ! grep -q '^PULP_ENABLE_COVERAGE:BOOL=ON$' "${CACHE_FILE}" 2>/dev/null; then
+    echo "" >&2
+    echo "ERROR: PULP_ENABLE_COVERAGE=ON did not stick in the CMake cache." >&2
+    echo "  ${CACHE_FILE}" >&2
+    echo "  still holds the previous (non-coverage) value, so no" >&2
+    echo "  instrumentation flags will reach the compiler and no" >&2
+    echo "  profraw files will be emitted. This is issue #570." >&2
+    echo "" >&2
+    echo "  Fix: remove the stale cache and re-run this script:" >&2
+    echo "      rm -rf ${BUILD_DIR}" >&2
+    echo "      ${BASH_SOURCE[0]}" >&2
+    echo "" >&2
+    exit 3
+fi
 
 echo "=== Building ==="
 cmake --build "${BUILD_DIR}" -j"${JOBS}"
@@ -98,16 +144,55 @@ echo "=== llvm-cov report (top-level summary) ==="
 llvm-cov report \
     "${BINARIES[@]}" \
     -instr-profile="${PROFDATA}" \
-    -ignore-filename-regex='_deps/|/external/|/test/' \
+    -ignore-filename-regex="${COVERAGE_IGNORE_REGEX}" \
     | tee "${REPORT_DIR}/summary.txt"
 
 echo "=== llvm-cov show (HTML drilldown) ==="
 llvm-cov show \
     "${BINARIES[@]}" \
     -instr-profile="${PROFDATA}" \
-    -ignore-filename-regex='_deps/|/external/|/test/' \
+    -ignore-filename-regex="${COVERAGE_IGNORE_REGEX}" \
     -format=html \
     -output-dir="${REPORT_DIR}"
+
+# Issue #569 Phase 1 PR 1: also emit Cobertura XML alongside the HTML
+# report. Codecov + diff-cover both consume Cobertura; llvm-cov does
+# NOT produce Cobertura natively, so gcovr bridges llvm-cov JSON →
+# Cobertura XML. If gcovr isn't installed (local developer machine
+# without the optional dep), skip with a hint rather than fail — the
+# CI workflow explicitly installs gcovr, so CI coverage always has XML.
+COBERTURA_XML="${BUILD_DIR}/coverage.cobertura.xml"
+if command -v gcovr >/dev/null 2>&1; then
+    echo "=== gcovr (Cobertura XML for Codecov + diff-cover) ==="
+    # gcovr consumes the raw profdata + instrumented binaries and
+    # produces Cobertura XML. Pass the same filter set as llvm-cov
+    # (filters are anchored at repo root; excludes are regexes).
+    GCOVR_LLVM_BINS=()
+    for obj in "${BINARIES[@]}"; do
+        if [[ "${obj}" != "-object" ]]; then
+            GCOVR_LLVM_BINS+=("--llvm-cov-binary" "${obj}")
+        fi
+    done
+    gcovr \
+        --root "${REPO_ROOT}" \
+        --llvm-profdata-executable llvm-profdata \
+        "${GCOVR_LLVM_BINS[@]}" \
+        --filter 'core/' \
+        --filter 'tools/cli/' \
+        --exclude '.*/external/' \
+        --exclude '.*/test/' \
+        --exclude '.*/_deps/' \
+        --exclude '.*/[Cc]atch2/' \
+        --exclude '.*/build-coverage/' \
+        --exclude '.*/build/' \
+        --cobertura "${COBERTURA_XML}" \
+        "${PROFRAW_DIR}" \
+        || echo "gcovr exited non-zero — Cobertura XML may be partial (non-fatal)."
+    echo "Cobertura:  ${COBERTURA_XML}"
+else
+    echo "=== gcovr not found on PATH — skipping Cobertura XML ==="
+    echo "    (Codecov + diff-cover need this in CI; install: pip install gcovr)"
+fi
 
 echo ""
 echo "HTML report: ${REPORT_DIR}/index.html"
