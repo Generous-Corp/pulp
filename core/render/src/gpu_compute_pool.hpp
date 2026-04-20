@@ -163,6 +163,33 @@ public:
         // aborting from inside a queue callback.
     }
 
+    // Drop a buffer from in_flight_ WITHOUT returning it to the free
+    // list. Use when a caller cannot guarantee the GPU is done with
+    // the buffer (e.g. MapAsync timed out) but the pool must still
+    // reclaim its in_flight_ slot so subsequent acquire()s don't
+    // accumulate tracked handles and grow the pool unboundedly.
+    //
+    // Codex 2026-04-21 review on #560: the previous fix for #536
+    // skipped release() on timeout but left the buffer tracked in
+    // in_flight_ forever; over a long run of timeouts (the exact
+    // scenario #536 targets) the map grew without bound. discard()
+    // drops the pool's reference so the wgpu::Buffer lands on the
+    // normal refcounted teardown path once the GPU stops mapping it.
+    void discard(const wgpu::Buffer& buf) {
+        if (!buf) return;
+        const std::uint64_t key = usage_key(buf.GetUsage());
+
+        std::lock_guard<std::mutex> lock(mu_);
+        auto& in_flight = in_flight_[key];
+        for (auto it = in_flight.begin(); it != in_flight.end(); ++it) {
+            if (it->Get() == buf.Get()) {
+                in_flight.erase(it);
+                return;
+            }
+        }
+        // Unknown buffer — ignore (same policy as release()).
+    }
+
     // Test accessors — read-only snapshot of pool state. Safe to call
     // concurrently with acquire()/release() but the returned counts are
     // a point-in-time snapshot.

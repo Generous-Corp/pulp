@@ -198,6 +198,12 @@ int cmd_config(const std::vector<std::string>& args) {
         return 0;
     }
 
-    std::cerr << "Unknown config subcommand: " << sub << "\n";
-    return usage();
+    // Codex 2026-04-21 wave 2 P2 on #562: previous version returned
+    // `usage()` (which exits 0) on unknown subcommands, making invalid
+    // invocations like `pulp config foo` look successful to scripts
+    // and CI. Print help to stderr and return a non-zero exit so
+    // shell `|| fail` semantics work.
+    std::cerr << "Unknown config subcommand: " << sub << "\n\n";
+    (void)usage();
+    return 2;
 }

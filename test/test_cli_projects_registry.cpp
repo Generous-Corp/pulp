@@ -212,6 +212,89 @@ TEST_CASE("scan_parent_pulp_projects skips dirs without the pulp_add_* macro",
     }
 }
 
+TEST_CASE("read_registry tolerates forward-compatible non-string fields",
+          "[projects-registry][codex-563]") {
+    // Codex 2026-04-21 wave 2 P1 on #563: the schema documents
+    // unknown fields as forward-compatible, so a future writer is
+    // allowed to emit non-string values (objects, booleans, arrays).
+    // The previous parser assumed every value was a string and did
+    // not advance past unrecognised values — on a `"meta": {...}`
+    // field the parse position stalled, which in turn corrupted
+    // subsequent project entries or hung `pulp projects list` /
+    // `pulp doctor --versions`.
+    //
+    // This case writes a hand-crafted projects.json carrying both
+    // an object-valued field AND a boolean-valued field INSIDE a
+    // project, followed by a second well-formed project. Both
+    // projects must round-trip intact.
+    TempDir tmp;
+    auto reg = tmp.path / "projects.json";
+
+    std::string body = R"({
+  "projects": [
+    {
+      "path": "/fake/forward-compat",
+      "name": "ForwardCompat",
+      "registered_at": "2026-04-21T10:00:00Z",
+      "meta": {"schema_rev": 2, "tags": ["alpha", "beta"]},
+      "pinned": true
+    },
+    {
+      "path": "/fake/second",
+      "name": "Second",
+      "registered_at": "2026-04-21T10:05:00Z"
+    }
+  ]
+}
+)";
+    {
+        std::ofstream f(reg);
+        f << body;
+    }
+
+    auto list = read_registry(reg);
+    REQUIRE(list.size() == 2);
+    REQUIRE(list[0].name == "ForwardCompat");
+    REQUIRE(list[0].registered_at == "2026-04-21T10:00:00Z");
+    REQUIRE(list[1].name == "Second");
+    REQUIRE(list[1].registered_at == "2026-04-21T10:05:00Z");
+}
+
+TEST_CASE("add_project reports write_registry failure via out_wrote_ok",
+          "[projects-registry][codex-563]") {
+    // Codex 2026-04-21 wave 2 P2 on #563: add_project previously
+    // swallowed write_registry() failures — callers saw the
+    // in-memory list as if the write had succeeded, producing
+    // silent data loss on unwritable $PULP_HOME. The new
+    // out-parameter surface lets callers distinguish "registered
+    // and durable" from "registered in-memory only".
+    TempDir tmp;
+
+    // Happy path: out_wrote_ok should be true when the file is writable.
+    {
+        auto reg = tmp.path / "ok.json";
+        auto proj = tmp.path / "ok-proj";
+        fs::create_directories(proj);
+        bool wrote_ok = false;
+        add_project(reg, proj, "OK", &wrote_ok);
+        REQUIRE(wrote_ok);
+        REQUIRE(fs::exists(reg));
+    }
+
+    // Failure path: point the registry at a path whose parent
+    // directory we can't create (an empty path resolves to "" in
+    // write_registry → early false return). out_wrote_ok must be
+    // surfaced as false.
+    {
+        fs::path bogus = {};  // empty — write_registry short-circuits
+        auto proj = tmp.path / "fail-proj";
+        fs::create_directories(proj);
+        bool wrote_ok = true;  // preset to opposite of expected
+        add_project(bogus, proj, "Fail", &wrote_ok);
+        REQUIRE_FALSE(wrote_ok);
+    }
+}
+
 TEST_CASE("now_iso8601_utc produces Z-suffixed timestamps",
           "[projects-registry][issue-552]") {
     auto s = now_iso8601_utc();

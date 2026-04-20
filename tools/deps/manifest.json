@@ -108,6 +108,21 @@
       ]
     },
     {
+      "name": "DRACO",
+      "category": "render",
+      "license": "Apache-2.0",
+      "version": "1.5.7",
+      "source_kind": "fetchcontent",
+      "repository": "https://github.com/google/draco.git",
+      "upstream": { "kind": "git-tag", "ref": "1.5.7" },
+      "documented_in_dependencies_md": true,
+      "documented_in_notice_md": true,
+      "notes": "Optional, only fetched when PULP_ENABLE_DRACO=ON. Codex 2026-04-21 wave 2 P2 on #565: reclassified from the developer-supplied vendor-SDK carve-out into the normal dependency graph so strict audits and upstream-drift checks cover it.",
+      "source_files": [
+        "CMakeLists.txt"
+      ]
+    },
+    {
       "name": "dr_libs",
       "category": "audio",
       "license": "Public domain (Unlicense)",

@@ -57,9 +57,16 @@ bool write_registry(const fs::path& registry_json,
 // with the same canonical path is already present, its `name` and
 // `registered_at` are refreshed in place instead of duplicating.
 // Returns the resulting list (same behaviour as read + upsert + write).
+//
+// The optional `out_wrote_ok` out-param reports whether the backing
+// `write_registry()` actually persisted the update; callers that
+// surface user-visible confirmation ("Project registered at ...")
+// should check it so a failed write doesn't silently present as
+// success. Codex 2026-04-21 wave 2 P2 on #563.
 std::vector<Project> add_project(const fs::path& registry_json,
                                  const fs::path& project_path,
-                                 const std::string& project_name);
+                                 const std::string& project_name,
+                                 bool* out_wrote_ok = nullptr);
 
 // Remove a project by path (canonicalised). Returns true if an entry
 // was removed, false if no matching entry existed or the write failed.

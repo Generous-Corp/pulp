@@ -286,6 +286,44 @@ TEST_CASE("StagingBufferPool clear() drops all tracked buffers",
     REQUIRE(pool.free_count() == 0);
 }
 
+TEST_CASE("StagingBufferPool::discard drops in_flight slot without recycling",
+          "[render][gpu][pool][codex-560]") {
+    // Codex 2026-04-21 wave 2 P1 on #560: on MapAsync timeout the
+    // caller cannot hand the buffer back via release() (the GPU may
+    // still be mapping it) but must drop the pool's reference so
+    // subsequent acquires don't grow in_flight_ without bound. This
+    // test hammers that path: 32 discarded buffers must leave both
+    // free_count() and in_flight_count() bounded; without discard()
+    // in_flight_count() would grow linearly.
+    auto env = make_dawn_env();
+    if (!env.valid()) {
+        WARN("no Dawn device available; skipping");
+        return;
+    }
+
+    std::size_t created = 0;
+    StagingBufferPool::InstrumentationHooks hooks;
+    hooks.created_count = &created;
+
+    StagingBufferPool pool(env.device, 4, hooks);
+    const auto usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::MapRead;
+
+    for (int i = 0; i < 32; ++i) {
+        auto buf = pool.acquire(4096, usage);
+        REQUIRE(buf != nullptr);
+        // Simulate a timeout path: we can't release() because the GPU
+        // may still hold a mapping. discard() drops the in_flight
+        // reference so the pool reclaims its slot.
+        pool.discard(buf);
+    }
+
+    // The pool cap is 4. Neither free_ nor in_flight_ should grow
+    // beyond cap_ in the timeout-heavy path; if discard() were a
+    // no-op, in_flight_count() would now be 32.
+    REQUIRE(pool.in_flight_count() == 0);
+    REQUIRE(pool.free_count() == 0);
+}
+
 TEST_CASE("StagingBufferPool separates pools by usage mask",
           "[render][gpu][pool]") {
     auto env = make_dawn_env();

@@ -218,13 +218,28 @@ std::vector<Project> read_registry(const fs::path& registry_json) {
                         auto field = j.read_string();
                         j.skip_ws();
                         if (!j.match(':')) break;
-                        auto val = j.read_string();
-                        if (field == "path") p.path = fs::path(val);
-                        else if (field == "name") p.name = val;
-                        else if (field == "registered_at") p.registered_at = val;
-                        // Unknown fields: values were strings, so
-                        // read_string() already consumed them. Other
-                        // shapes aren't expected in today's schema.
+                        // Codex 2026-04-21 wave 2 P1 on #563: the schema
+                        // documents unknown fields as forward-compatible,
+                        // so a future writer is allowed to emit e.g.
+                        // `"meta": {...}` or `"pinned": true`. If we
+                        // assume every value is a string (`read_string`
+                        // returns "" on non-quoted input) and do NOT
+                        // advance past the non-string value, the parser
+                        // can loop indefinitely on that object. Peek at
+                        // the next char: strings go through the normal
+                        // path so we can capture known fields; anything
+                        // else is consumed by `skip_value()` which
+                        // correctly walks arrays/objects/primitives.
+                        j.skip_ws();
+                        if (j.pos < j.src.size() && j.src[j.pos] == '"') {
+                            auto val = j.read_string();
+                            if (field == "path") p.path = fs::path(val);
+                            else if (field == "name") p.name = val;
+                            else if (field == "registered_at") p.registered_at = val;
+                            // Other known-string fields would go here.
+                        } else {
+                            j.skip_value();
+                        }
                         j.skip_ws();
                         if (j.match(',')) continue;
                     }
@@ -286,7 +301,8 @@ bool write_registry(const fs::path& registry_json,
 
 std::vector<Project> add_project(const fs::path& registry_json,
                                  const fs::path& project_path,
-                                 const std::string& project_name) {
+                                 const std::string& project_name,
+                                 bool* out_wrote_ok) {
     auto projects = read_registry(registry_json);
     auto canon = canonicalish(project_path);
 
@@ -307,7 +323,14 @@ std::vector<Project> add_project(const fs::path& registry_json,
         projects.push_back(std::move(p));
     }
 
-    write_registry(registry_json, projects);
+    // Codex 2026-04-21 wave 2 P2 on #563: previous version dropped the
+    // `write_registry()` return value, so callers saw a successful
+    // in-memory upsert even when the backing store failed to persist
+    // (unwritable $PULP_HOME, missing parent directory, etc.). Surface
+    // the write result via `out_wrote_ok` so callers can distinguish
+    // "registered and saved" from "intended but not durable".
+    const bool wrote = write_registry(registry_json, projects);
+    if (out_wrote_ok) *out_wrote_ok = wrote;
     return projects;
 }
 

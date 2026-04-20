@@ -534,8 +534,20 @@ int cmd_create(const std::vector<std::string>& args) {
     // output of CI-driven scaffolds.
     {
         auto reg = pulp::cli::projects_registry::registry_path();
-        pulp::cli::projects_registry::add_project(reg, out_dir, name);
-        log("  Registered in " + reg.string() + "\n");
+        // Codex 2026-04-21 wave 2 P2 on #563: check the write result
+        // rather than blindly printing "Registered" — otherwise a
+        // failed `write_registry()` in an unwritable $PULP_HOME
+        // surfaces as "registered" to the user but the project is
+        // missing from the file. Scaffold itself still succeeds
+        // (the project tree IS on disk) — we just report honestly
+        // that the diagnostic registry didn't persist.
+        bool wrote_ok = false;
+        pulp::cli::projects_registry::add_project(reg, out_dir, name, &wrote_ok);
+        if (wrote_ok) {
+            log("  Registered in " + reg.string() + "\n");
+        } else {
+            log("  (note) could not write registry at " + reg.string() + "\n");
+        }
     }
 
     log("\n");

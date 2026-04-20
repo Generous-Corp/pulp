@@ -47,6 +47,13 @@ static const Command commands[] = {
     {"host",     "Load a plug-in and run a synthetic audio block through it", cmd_host},
     {"pr",       "One-shot push-a-PR: gates + bump + ship",   cmd_pr},
     {"projects", "Manage the ~/.pulp/projects.json registry", cmd_projects},
+    // Regression fix 2026-04-21 (Codex post-merge sweep wave 2): the
+    // #562 PR added `{"config", ..., cmd_config}` to this dispatch
+    // table, but the #563 merge dropped the line, leaving `pulp config`
+    // (and the update.mode / channel / check_interval_hours surface
+    // it guards) completely unreachable. Restore so Codex's P1/P2
+    // findings on cmd_config.cpp are actually observable behaviour.
+    {"config",   "Read or write ~/.pulp/config.toml settings", cmd_config},
 };
 
 static constexpr int command_count = sizeof(commands) / sizeof(commands[0]);
@@ -216,10 +223,18 @@ fs::path banner_cache_path() {
 
 // Fire a best-effort background refresh. We deliberately don't block
 // on the result — the banner will pick it up on the *next* invocation.
-// `std::async` with `std::launch::async` runs detached; we leak the
-// future intentionally so the thread survives `main` returning. (In
-// practice the network call completes in < 2s; the OS cleans up on
-// exit either way.)
+//
+// Codex 2026-04-21 wave 2 P1 on #562: a previous version stored the
+// `std::future` returned by `std::async(std::launch::async, ...)` in
+// a static local. That future's destructor is NOT detached — it
+// blocks on the task to finish. On process exit (or on the next
+// kick_background_refresh() call, which assigns over it) the CLI
+// could hang waiting for a stale network fetch — exactly the
+// non-blocking guarantee this path advertised. Switch to a raw
+// detached `std::thread` so the refresh truly cannot block `main`.
+// If the process exits before the fetch completes the OS reclaims
+// the thread; the stale HTTP connection is closed along with the
+// socket FD.
 //
 // Race-window note: the main thread may write the cache after the
 // banner check (to stamp banner_shown_for_version). To avoid clobbering
@@ -228,8 +243,7 @@ fs::path banner_cache_path() {
 // the refresh finishes later than the banner-write.
 void kick_background_refresh(const fs::path& cache_path) {
     if (cache_path.empty()) return;
-    static std::future<void> s_refresh_future;
-    s_refresh_future = std::async(std::launch::async, [cache_path]() {
+    std::thread([cache_path]() {
         pulp::cli::update_check::GitHubReleasesFetcher fetcher;
         auto r = fetcher.fetch_latest_release(PULP_GITHUB_REPO);
         // Re-read from disk — this is the race-avoidance point.
@@ -242,7 +256,7 @@ void kick_background_refresh(const fs::path& cache_path) {
             latest.release_notes_url = r.release_notes_url;
         }
         pulp::cli::update_check::write_cache_file(cache_path, latest);
-    });
+    }).detach();
 }
 
 // Top-level hook invoked before dispatching the user's command. Best

@@ -111,6 +111,20 @@ TEST_CASE("pulp <unknown-command> exits non-zero with a diagnostic",
     REQUIRE(mentioned);
 }
 
+TEST_CASE("pulp config <unknown-subcommand> exits non-zero with a diagnostic",
+          "[cli][shellout][codex-562]") {
+    // Codex 2026-04-21 wave 2 P2 on #562: `pulp config foo` previously
+    // fell through to usage() which returned 0, so scripts/CI could
+    // not detect a typo'd subcommand. The new behaviour returns
+    // exit code 2 with an "Unknown config subcommand" diagnostic on
+    // stderr. Known subcommands (get/set/list/help) keep exit 0.
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    auto r = run_pulp({"config", "thisisnotarealsubcommand"});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code != 0);
+    REQUIRE(r.stderr_output.find("Unknown config subcommand") != std::string::npos);
+}
+
 TEST_CASE("pulp version subcommand runs and mentions the SDK",
           "[cli][shellout][version]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }

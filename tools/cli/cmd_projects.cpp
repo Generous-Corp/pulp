@@ -85,7 +85,18 @@ int do_add(const std::vector<std::string>& args) {
     name = target.filename().string();
 
     auto reg = prjreg::registry_path();
-    prjreg::add_project(reg, target, name);
+    // Codex 2026-04-21 wave 2 P2 on #563: surface registry write
+    // failures so an unwritable ~/.pulp doesn't silently present as
+    // success. The in-memory update still returns the refreshed list,
+    // but the caller deserves to know the file wasn't persisted.
+    bool wrote_ok = false;
+    prjreg::add_project(reg, target, name, &wrote_ok);
+    if (!wrote_ok) {
+        std::cerr << "pulp projects add: failed to write registry at "
+                  << reg.string() << "\n";
+        std::cerr << "  (check $PULP_HOME / ~/.pulp permissions)\n";
+        return 1;
+    }
     std::cout << color::green() << "Registered" << color::reset()
               << " " << name << " at " << target.string() << "\n";
     return 0;

@@ -202,10 +202,21 @@ public:
         // Single-plugin rescan just removes any cached failure and kicks
         // the generic rescan. A richer implementation would call into
         // pulp-scan-worker for the one bundle.
-        std::lock_guard<std::mutex> lk(mu_);
-        failed_.erase(std::remove_if(failed_.begin(), failed_.end(),
-            [&](const auto& r) { return r.path == path; }), failed_.end());
-        // Fire-and-forget.
+        //
+        // Codex 2026-04-21 wave 2 P1 on #560: `std::mutex` is NOT
+        // recursive; calling `start_rescan()` while still holding `mu_`
+        // self-deadlocks the UI thread (the no-arg overload takes the
+        // same lock on entry via is_scanning()/worker_ manipulation).
+        // Release the lock before re-entering the parameterless
+        // overload so the UI thread can actually reach the scanner
+        // worker.
+        {
+            std::lock_guard<std::mutex> lk(mu_);
+            failed_.erase(std::remove_if(failed_.begin(), failed_.end(),
+                [&](const auto& r) { return r.path == path; }), failed_.end());
+        }
+        // Fire-and-forget. Lock released above so the nested call can
+        // take it again without deadlocking.
         start_rescan();
     }
     float progress_fraction() const override { return progress_.load(); }

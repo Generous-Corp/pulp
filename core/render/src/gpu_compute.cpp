@@ -221,11 +221,17 @@ public:
         // when this function returns; handing it back to the pool lets
         // a subsequent call re-acquire and reuse it while the prior map
         // is still in flight — a validation error / silent corruption
-        // risk under slow GPU workloads. On failure we drop the handle
-        // and let the wgpu::Buffer dtor reclaim it when no other ref
-        // is pending.
+        // risk under slow GPU workloads.
+        //
+        // Codex 2026-04-21 review on #560 (wave 2) P1: on failure we
+        // still must drop the pool's in_flight_ reference via discard(),
+        // otherwise repeated timeouts accumulate tracked handles and
+        // grow the pool without bound. discard() is a release() that
+        // skips the free-list recycle step.
         if (ok) {
             pool_->release(readback_buf);
+        } else {
+            pool_->discard(readback_buf);
         }
         return ok;
     }
@@ -290,8 +296,14 @@ public:
         // Codex 2026-04-21 review on #536 P1 — matched to the magnitude
         // path: only recycle on success. On read_back failure the GPU
         // may still hold a mapping on this buffer.
+        //
+        // Codex 2026-04-21 wave 2 P1 on #560: use discard() on failure
+        // so repeated timeouts don't accumulate tracked handles in
+        // in_flight_ — see compute_magnitude() for the full rationale.
         if (ok) {
             pool_->release(readback_buf);
+        } else {
+            pool_->discard(readback_buf);
         }
         return ok;
     }

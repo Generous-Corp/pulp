@@ -159,8 +159,16 @@ int cmd_host(const std::vector<std::string>& args) {
 #if !PULP_HOST_HAS_AU
             case PluginFormat::AudioUnit:
             case PluginFormat::AudioUnitV3:
+                // Codex 2026-04-21 wave 2 P2 on #557: the AU loader is
+                // gated by AudioUnitSDK presence (`PULP_HAS_AUSDK`,
+                // auto-detected when external/AudioUnitSDK exists) +
+                // the APPLE platform, NOT a `PULP_HAS_AU` option —
+                // that flag does not exist in the build system, so
+                // the old hint was not actionable. Point users at the
+                // real fix: clone the AudioUnitSDK (macOS only).
                 std::fprintf(stderr, "  AU host loader not available in this build (macOS only).\n"
-                                     "  Rebuild with -DPULP_HAS_AU=ON on Apple platforms.\n");
+                                     "  Rebuild on macOS with external/AudioUnitSDK present\n"
+                                     "  (git clone https://github.com/apple/AudioUnitSDK external/AudioUnitSDK).\n");
                 break;
 #endif
 #if !PULP_HOST_HAS_LV2
