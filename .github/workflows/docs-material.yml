@@ -1,9 +1,16 @@
-# MkDocs Material parallel build (#577 PR 1).
+# MkDocs Material parallel build (#577 PR 1, extended in PR 2).
 #
 # Runs alongside docs-deploy.yml (which still deploys the custom-generator
 # site). This workflow builds ONLY the Material artifact and uploads it for
 # visual inspection. It does not deploy to GitHub Pages; switchover happens
 # in PR 3 of #577.
+#
+# PR 2 additions:
+#   - Install Doxygen and build the API reference so the homepage's
+#     `api/index.html` link resolves in the preview artifact (Codex P2 on
+#     #582).
+#   - Trigger on header changes under `core/**/include/**` so API-reference
+#     drift is caught in the parallel lane.
 name: Docs (Material preview)
 
 on:
@@ -13,12 +20,18 @@ on:
       - 'docs/**'
       - 'mkdocs.yml'
       - 'requirements-docs.txt'
+      - 'tools/mkdocs_hooks.py'
+      - 'tools/build-api-docs.sh'
+      - 'core/**/include/**'
       - '.github/workflows/docs-material.yml'
   pull_request:
     paths:
       - 'docs/**'
       - 'mkdocs.yml'
       - 'requirements-docs.txt'
+      - 'tools/mkdocs_hooks.py'
+      - 'tools/build-api-docs.sh'
+      - 'core/**/include/**'
       - '.github/workflows/docs-material.yml'
   workflow_dispatch:
 
@@ -47,8 +60,27 @@ jobs:
       - name: Install MkDocs Material
         run: pip install -r requirements-docs.txt
 
+      - name: Install Doxygen
+        run: sudo apt-get install -y doxygen
+
       - name: Build Material site
         run: mkdocs build --site-dir build/site-material
+
+      - name: Build API reference (Doxygen)
+        run: |
+          chmod +x tools/build-api-docs.sh
+          tools/build-api-docs.sh
+
+      - name: Merge API reference into Material site
+        run: |
+          if [ -d build/api-docs/html ]; then
+            mkdir -p build/site-material/api
+            cp -r build/api-docs/html/. build/site-material/api/
+            echo "API docs merged into Material site at /api/"
+          else
+            echo "No API docs produced — homepage /api/ link will 404" >&2
+            exit 1
+          fi
 
       - name: Upload artifact for visual inspection
         uses: actions/upload-artifact@v4
