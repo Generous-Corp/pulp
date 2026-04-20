@@ -106,15 +106,19 @@ jobs:
           path: android/app/build/outputs/apk/debug/app-debug.apk
           retention-days: 7
 
-  # Emulator test — only on macOS (KVM not available on GitHub Windows runners)
-  # Disabled until emulator CI infrastructure is set up (see #77).
-  # The emulator test requires GPU support (Dawn/Vulkan) which CI runners
-  # don't have, causing a guaranteed 20-minute timeout on every PR.
-  # actionlint flags `if: false` as a constant expression; we gate on an
-  # unsettable GitHub expression instead so the job is skipped at plan
-  # time without triggering the [if-cond] lint.
+  # Emulator test — only on macOS (KVM not available on GitHub Windows runners).
+  # This is a native-init smoke: boots a headless arm64-v8a emulator, installs
+  # the arm64-only debug APK, launches PulpActivity, and greps logcat for the
+  # JNI_OnLoad marker. Full GPU/rendering validation is out of scope here
+  # (tracked under #77).
+  #
+  # Re-enabled in #487 after identifying the real cause of earlier failures:
+  # the workflow was targeting an x86_64 system image while the APK only
+  # contains arm64-v8a (see android/app/build.gradle.kts), which produced
+  # INSTALL_FAILED_NO_MATCHING_ABIS and made every subsequent adb command
+  # appear to hang. The AVD arch and the `am start` intent below are the
+  # matched pair — touch both together if the applicationId ever changes.
   android-emulator-test:
-    if: ${{ vars.PULP_ANDROID_EMULATOR_ENABLED == 'true' }}
     runs-on: macos-latest
     needs: android-build
     timeout-minutes: 20
