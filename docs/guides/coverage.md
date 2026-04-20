@@ -106,8 +106,21 @@ finishes. The comment layout is `reach, diff, flags, tree`:
   lines are uncovered.
 
 In Phase 1 all of this is advisory — nothing fails a PR on coverage.
-Phase 3 adds a diff-cover gate at 75% for 2 weeks, flipping to
-tier-based thresholds after contributors have had time to adjust.
+
+> **Diff-cover advisory window (2026-04-21 → 2026-05-04).** Every PR now
+> receives an additional "Diff coverage (Phase 1 advisory)" comment
+> rendered by `.github/workflows/coverage.yml` (`coverage-diff-gate`
+> job). It answers the single question "of the lines this PR adds or
+> modifies, how many are covered?" at a **75%** floor. During the
+> 2-week advisory window the percentage is **informational only** —
+> even 0% will not block a merge. **On 2026-05-04 the gate flips to
+> required**; after that date a PR whose diff coverage falls below 75%
+> will hard-fail this check and block the merge. File an issue if the
+> flip date needs to slip.
+
+Phase 2 narrows the gate further, moving from a flat 75% to the
+tier-based targets tracked in `ci/coverage-targets.yaml` (audio-critical
+80% / user-facing 70% / infra 50%).
 
 ## How the collection works
 
@@ -155,8 +168,9 @@ architecture-portable, see
 - **Phase 0** — spike & stack decision (done, see planning doc above).
 - **Phase 1** (this phase) — measurement baseline
   - PR 1: infra fixes (#569, #570 — landed)
-  - PR 2: Codecov integration (this change)
-  - PR 3: diff-cover advisory gate
+  - PR 2: Codecov integration (landed)
+  - PR 3: diff-cover advisory gate (this change — advisory until
+    2026-05-04)
   - PR 4: cross-platform matrix
 - **Phase 2** — per-tier targets encoded in
   `ci/coverage-targets.yaml`. Audio-critical subsystems (`audio`,

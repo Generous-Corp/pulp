@@ -500,6 +500,20 @@ Locally:
 
 **`RELEASE_BOT_TOKEN` is required for the auto-release chain to fire.** Without it, auto-release silently degrades — tags get created via `GITHUB_TOKEN` but GitHub doesn't trigger workflows on `GITHUB_TOKEN`-pushed tags, so `release-cli.yml` and `sign-and-release.yml` never run and no GitHub Release appears. Run `pulp doctor` to check; if missing, follow the "One-time setup" section in `docs/guides/versioning.md`. `pulp pr` will also print a heads-up before pushing the PR if the secret isn't present.
 
+## Coverage workflow (`#566` Phase 1)
+
+`.github/workflows/coverage.yml` has two jobs:
+
+- `coverage` — builds with Clang source-based coverage, runs the test suite, uploads HTML + summary + Cobertura artifacts, and pushes to Codecov using the 20 flags defined in `codecov.yml`. Has `continue-on-error: true` — never blocks a merge.
+- `coverage-diff-gate` — downloads the Cobertura XML from the upstream job, runs `diff-cover --fail-under=75` against `origin/<base>`, and upserts a "Diff coverage (Phase 1 advisory)" PR comment rendered by `tools/scripts/coverage_diff_comment.py`. Advisory-only until **2026-05-04**; flips to required on that date per `docs/guides/coverage.md`.
+
+Gotchas:
+
+- **Don't remove `continue-on-error`** from the diff-cover step before 2026-05-04. The whole point of the 2-week advisory window is that sub-threshold diffs don't block merges while contributors adapt.
+- **Fork PRs**: the comment-upsert step has an `if:` guard skipping forks because `GITHUB_TOKEN` is read-only on fork heads; otherwise the job would hard-fail with 403 even though the gate is advisory.
+- **The comment renderer is unit-tested.** When touching `tools/scripts/coverage_diff_comment.py`, run `python3 tools/scripts/test_coverage_diff_comment.py` locally — the workflow also runs it as a pre-flight fixture check so a regression fails fast.
+- **Adding a new core subsystem** means adding a flag in `codecov.yml`, listing it in the `flags:` csv in the `coverage` job's Codecov upload step, and documenting it in `docs/guides/coverage.md` — three-way change kept in sync manually until Phase 4's doc-sync gate lands.
+
 ## SignalGraph Phase 0 learnings (PR #153)
 
 Gotchas surfaced while landing the four-phase SignalGraph follow-up:

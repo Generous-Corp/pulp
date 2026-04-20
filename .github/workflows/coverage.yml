@@ -114,3 +114,160 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: false
           verbose: true
+
+  coverage-diff-gate:
+    # #566 Phase 1 PR 3: per-PR diff coverage advisory gate.
+    #
+    # Runs only on pull_request events — the gate question "of the lines
+    # this PR adds, how many are covered?" is meaningless on a direct
+    # push to main where there is no diff to compute against.
+    #
+    # Advisory-only for the first 2 weeks per the Phase 1 plan:
+    # `continue-on-error: true` means a sub-threshold diff does not
+    # block the PR. The job still posts a summary comment so
+    # contributors see the number. Phase 3 flips the gate to required.
+    name: Diff coverage advisory (${{ needs.coverage.result == 'success' && '75%' || 'coverage job failed' }})
+    runs-on: ubuntu-24.04
+    needs: coverage
+    if: always() && github.event_name == 'pull_request'
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # diff-cover compares HEAD against --compare-branch using real
+          # git history, so we need enough depth to include the merge
+          # base with origin/${{ github.base_ref }}. fetch-depth: 0
+          # avoids guessing a shallow depth that works for most PRs but
+          # breaks on long-lived branches.
+          fetch-depth: 0
+          submodules: false
+          lfs: false
+
+      - name: Ensure base branch is fetched
+        # actions/checkout fetches the PR head and the merge-ref but not
+        # the full base branch history. diff-cover needs origin/<base>
+        # to resolve --compare-branch, so fetch it explicitly.
+        run: git fetch --no-tags origin "${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }}"
+        shell: bash
+
+      - name: Download Cobertura XML from coverage job
+        # Downloads the artifact produced by the `coverage` job above.
+        # If the coverage job failed or was skipped the artifact may be
+        # missing; the next step handles that case by rendering a
+        # graceful fallback comment instead of hard-failing.
+        uses: actions/download-artifact@v6
+        with:
+          name: coverage-cobertura-${{ github.sha }}
+          path: coverage-artifact/
+        continue-on-error: true
+
+      - name: Install diff-cover
+        # Pinned to >=9 for the --markdown-report flag; earlier
+        # releases only supported --html-report.
+        run: python3 -m pip install --user 'diff-cover>=9'
+        shell: bash
+
+      - name: coverage_diff_comment.py fixture tests
+        # Guard the PR-comment renderer the same way the upstream
+        # `coverage` job guards scripts/run_coverage.sh — run the
+        # unit tests before we depend on the script in a live step
+        # so a regression fails fast without waiting on diff-cover.
+        run: python3 tools/scripts/test_coverage_diff_comment.py
+        shell: bash
+
+      - name: Run diff-cover (advisory)
+        id: diff_cover
+        # continue-on-error: true — Phase 1 is advisory. A sub-threshold
+        # result still marks the step red in the logs so contributors
+        # can see it at a glance, but does not fail the job and does
+        # not block the PR. Phase 3 removes continue-on-error here.
+        continue-on-error: true
+        shell: bash
+        run: |
+          set +e
+          xml="coverage-artifact/coverage.cobertura.xml"
+          if [ ! -f "$xml" ]; then
+            echo "No Cobertura XML from upstream job — writing empty diff report."
+            : > coverage-diff.md
+            echo "exit_code=skip" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          python3 -m diff_cover.diff_cover_tool \
+              "$xml" \
+              --compare-branch="origin/${{ github.base_ref }}" \
+              --fail-under=75 \
+              --markdown-report=coverage-diff.md
+          rc=$?
+          echo "exit_code=$rc" >> "$GITHUB_OUTPUT"
+          # Always print the report so the raw output is in the logs
+          # even if the artifact upload step fails.
+          if [ -f coverage-diff.md ]; then
+            echo "----- coverage-diff.md -----"
+            cat coverage-diff.md
+            echo "----- end coverage-diff.md -----"
+          fi
+          exit 0
+
+      - name: Render PR comment body
+        run: |
+          python3 tools/scripts/coverage_diff_comment.py \
+              --report coverage-diff.md \
+              --flip-date 2026-05-04 \
+              --threshold 75 \
+              --advisory \
+              --out coverage-diff-comment.md
+          echo "----- coverage-diff-comment.md -----"
+          cat coverage-diff-comment.md
+          echo "----- end comment -----"
+        shell: bash
+
+      - name: Upload diff-cover report artifact
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: coverage-diff-${{ github.sha }}
+          path: |
+            coverage-diff.md
+            coverage-diff-comment.md
+          retention-days: 14
+          if-no-files-found: warn
+
+      - name: Upsert PR comment with diff-coverage summary
+        # Same upsert pattern as .github/workflows/ruleset-drift-check.yml:
+        # find a bot comment carrying our stable marker and PATCH its
+        # body in place, else POST a new one. Prevents comment spam on
+        # PRs that push multiple times.
+        #
+        # Skip fork PRs where GITHUB_TOKEN is read-only — posting would
+        # hard-fail with a 403 even though this whole job is advisory.
+        if: github.event.pull_request.head.repo.full_name == github.repository
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          MARKER: '<!-- pulp-coverage-diff-gate -->'
+        run: |
+          set -euo pipefail
+          repo='${{ github.repository }}'
+          body="$(cat coverage-diff-comment.md)"
+
+          existing=$(
+              gh api -H "Accept: application/vnd.github+json" \
+                  "/repos/${repo}/issues/${PR_NUMBER}/comments" \
+                  --paginate \
+                  --jq "[.[] | select(.body != null and (.body | contains(\"${MARKER}\")))] | first | .id // empty"
+          )
+
+          if [ -z "${existing:-}" ]; then
+              echo "Creating diff-coverage comment on PR #${PR_NUMBER}."
+              printf '%s' "$body" | gh pr comment "$PR_NUMBER" --repo "$repo" --body-file -
+          else
+              echo "Updating diff-coverage comment #${existing} on PR #${PR_NUMBER}."
+              gh api \
+                  --method PATCH \
+                  -H "Accept: application/vnd.github+json" \
+                  "/repos/${repo}/issues/comments/${existing}" \
+                  -f body="$body" >/dev/null
+          fi
