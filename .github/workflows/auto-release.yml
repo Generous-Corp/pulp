@@ -135,21 +135,29 @@ jobs:
           # Python helper: strict-greater semver compare. Returns "gt",
           # "eq", or "lt". Empty strings behave like "missing" — treat
           # as "lt" so HEAD always wins over nothing.
+          #
+          # #501 shipped this with the Python body at column 1, which
+          # broke the YAML `run: |` block scalar (any line less-indented
+          # than the block ends the scalar). GitHub rejected the workflow
+          # file with "workflow file issue" on every push since — every
+          # auto-release run silently failed, so v0.23.1 never tagged.
+          # Fix: use a heredoc that python3 reads from stdin so script
+          # indentation is divorced from YAML indentation.
           semver_cmp() {
-              python3 -c '
-import sys
-a, b = sys.argv[1], sys.argv[2]
-def parse(v):
-    if not v: return None
-    return tuple(int(x) for x in v.split("."))
-pa, pb = parse(a), parse(b)
-if pa is None and pb is None: print("eq")
-elif pa is None: print("lt")
-elif pb is None: print("gt")
-elif pa > pb: print("gt")
-elif pa < pb: print("lt")
-else: print("eq")
-' "$1" "$2"
+              python3 - "$1" "$2" <<'PYEOF'
+          import sys
+          a, b = sys.argv[1], sys.argv[2]
+          def parse(v):
+              if not v: return None
+              return tuple(int(x) for x in v.split("."))
+          pa, pb = parse(a), parse(b)
+          if pa is None and pb is None: print("eq")
+          elif pa is None: print("lt")
+          elif pb is None: print("gt")
+          elif pa > pb: print("gt")
+          elif pa < pb: print("lt")
+          else: print("eq")
+          PYEOF
           }
 
           # event.before — the push's immediate ancestor.
