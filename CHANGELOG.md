@@ -8,9 +8,12 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
-<a id="v0240"></a>
-## [0.25.0]
+<a id="v0250"></a>
+## [0.25.0] - 2026-04-20
 
+- fix: Codex sweep rollup - sysex, view header, scan AU/AUv3, post-merge limit (#500 #529) ([#540](https://github.com/danielraffel/pulp/pull/540))
+
+<a id="v0240"></a>
 ## [0.24.0] - 2026-04-20
 
 - view: PluginManagerPanel widget over scanner backend (#494) ([#538](https://github.com/danielraffel/pulp/pull/538))
@@ -34,8 +37,6 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - lv2: serialize midi_out back to atom output port (#491) ([#511](https://github.com/danielraffel/pulp/pull/511))
 
 <a id="v0231"></a>
-## [0.24.0]
-
 ## [0.23.1] - 2026-04-20
 
 - chore: bump SDK to v0.23.1 ([#509](https://github.com/danielraffel/pulp/pull/509))
@@ -442,6 +443,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.25.0]: https://github.com/danielraffel/pulp/releases/tag/v0.25.0
 [0.24.0]: https://github.com/danielraffel/pulp/releases/tag/v0.24.0
 [0.23.1]: https://github.com/danielraffel/pulp/releases/tag/v0.23.1
 [0.23.0]: https://github.com/danielraffel/pulp/releases/tag/v0.23.0
