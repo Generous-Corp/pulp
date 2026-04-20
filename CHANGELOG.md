@@ -9,6 +9,8 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
 <a id="v0260"></a>
+## [0.27.0]
+
 ## [0.26.0] - 2026-04-20
 
 - bench: Slice 0.5 honest re-eval on Three.js particles — PerfCounters + threejs-native-demo benchmark mode ([#541](https://github.com/danielraffel/pulp/pull/541))
