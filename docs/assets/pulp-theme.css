@@ -1,0 +1,26 @@
+/* Pulp brand overrides for MkDocs Material (#577 PR 1).
+ *
+ * Mirrors the color palette used by tools/build-docs.py so the parallel
+ * Material preview is visually comparable to the current custom-generator
+ * output. Only primary/accent hues are overridden; typography, spacing,
+ * and component shapes are Material defaults.
+ *
+ * Source reference: tools/build-docs.py :root block, 2026-04-22.
+ */
+
+:root > * {
+  --md-primary-fg-color:        #e94560; /* pink accent */
+  --md-primary-fg-color--light:  #ff6b81;
+  --md-primary-fg-color--dark:   #b92f47;
+  --md-accent-fg-color:          #533483; /* purple accent2 */
+}
+
+/* Dark scheme: match the current site's deep-navy background + slate surface. */
+[data-md-color-scheme="slate"] {
+  --md-default-bg-color:         #1a1a2e;
+  --md-default-bg-color--light:  #16213e;
+  --md-default-fg-color:         #e0e0e0;
+  --md-default-fg-color--light:  #a0a0b0;
+  --md-code-bg-color:            #0d1117;
+  --md-typeset-a-color:          #64b5f6;
+}

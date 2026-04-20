@@ -1,0 +1,158 @@
+# MkDocs Material configuration — added under issue #577 alongside the existing
+# tools/build-docs.py generator. This file is consumed by the parallel
+# `docs-material` CI workflow, which uploads an artifact for visual inspection.
+# It does NOT replace tools/build-docs.py yet — that switchover is PR 3 of #577.
+#
+# URL scheme note (PR 1):
+#   The custom generator emits flat URLs `/pulp/<slug>.html` from nested
+#   source files (e.g. `docs/reference/modules.md` → `/pulp/modules.html`).
+#   MkDocs mirrors the source tree, so this parallel build will emit nested
+#   URLs (`/pulp/reference/modules.html`). Flat-URL preservation is deferred
+#   to PR 2 via a pre-build staging hook. PR 1 is artifact-only, no deploy,
+#   so nothing external breaks.
+
+site_name: Pulp
+site_description: Cross-platform audio plugin and application framework. MIT-licensed.
+site_url: https://generouscorp.com/pulp/
+repo_url: https://github.com/danielraffel/pulp
+repo_name: danielraffel/pulp
+edit_uri: edit/main/docs/
+
+docs_dir: docs
+site_dir: build/site-material
+
+# Preserve `.html` URLs instead of `page/` directory-style URLs so the final
+# switchover doesn't break external deep-links (see PR 3 switchover plan).
+use_directory_urls: false
+
+# During PR 1 we tolerate warnings for pages present in docs/ but not in nav,
+# since the current custom generator builds a superset of sidebar entries.
+# PR 2 will decide whether to surface them or keep the curated subset.
+strict: false
+
+theme:
+  name: material
+  language: en
+  palette:
+    # Dark default mirrors the current Pulp site (#1a1a2e / #e94560 accent).
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+  features:
+    - navigation.instant
+    - navigation.instant.progress
+    - navigation.tracking
+    - navigation.sections
+    - navigation.top
+    - navigation.footer
+    - search.suggest
+    - search.highlight
+    - search.share
+    - content.code.copy
+    - content.code.annotate
+    - content.action.edit
+    - toc.follow
+  font:
+    text: Inter
+    code: JetBrains Mono
+  icon:
+    repo: fontawesome/brands/github
+
+extra_css:
+  - assets/pulp-theme.css
+
+plugins:
+  - search
+  - awesome-pages
+  - git-revision-date-localized:
+      type: iso_date
+      fallback_to_build_date: true
+      enable_creation_date: false
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+      toc_depth: 3
+  - pymdownx.details
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+
+# Sidebar navigation mirrors tools/build-docs.py NAV_SECTIONS (2026-04-22).
+# Pages outside this list still build (strict: false) but don't appear in the
+# sidebar — matches the current custom-generator behaviour.
+nav:
+  - Home: index.md
+  - About:
+      - Vision: concepts/vision.md
+      - Overview: concepts/overview.md
+      - Architecture: concepts/architecture.md
+  - Getting Started:
+      - Getting Started: guides/getting-started.md
+      - Building: guides/build.md
+      - Testing: guides/testing.md
+      - Docs Maintenance: guides/docs-maintenance.md
+  - Support:
+      - Capabilities: reference/capabilities.md
+  - Modules:
+      - Module Reference: reference/modules.md
+  - Examples:
+      - Example Gallery: examples/index.md
+      - Example Walkthroughs: guides/examples.md
+      - PulpGain: examples/pulp-gain.md
+      - PulpTone: examples/pulp-tone.md
+      - PulpEffect: examples/pulp-effect.md
+      - PulpCompressor: examples/pulp-compressor.md
+      - PulpSynth: examples/pulp-synth.md
+      - PulpDrums: examples/pulp-drums.md
+      - PulpSampler: examples/pulp-sampler.md
+      - PulpPluck: examples/pulp-pluck.md
+      - UI Preview: examples/ui-preview.md
+  - CLI & CMake:
+      - CLI Reference: reference/cli.md
+      - CMake Reference: reference/cmake.md
+  - Guides:
+      - Web Plugins: guides/web-plugins.md
+      - GPU Validation: guides/gpu-validation-checklist.md
+  - Policies:
+      - Code Style: policies/code-style.md
+      - Agent Rules: policies/agent-contribution-rules.md
+      - Licensing & Acknowledgements: reference/licensing.md
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/danielraffel/pulp
+  generator: false

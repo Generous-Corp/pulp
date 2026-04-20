@@ -439,6 +439,18 @@ Keep hostnames and VM names local. Shared repo docs and skills should describe h
 Full setup guide: `docs/guides/local-ci.md`
 SSH key setup for Windows/Linux VMs: `docs/guides/local-ci.md` § "Set up SSH keys"
 
+**Docs-site CI workflows:**
+
+- `.github/workflows/docs-deploy.yml` — builds + deploys the current
+  custom-generator site (`tools/build-docs.py` → Pagefind → GitHub Pages).
+  Deploys on push to `main` when `docs/**`, the builder script, or
+  install scripts change.
+- `.github/workflows/docs-material.yml` — parallel MkDocs Material build
+  added under #577 PR 1. Uploads `build/site-material/` as a 14-day
+  artifact for visual inspection. **No deploy.** Runs on `pull_request`
+  and `push` when `docs/**`, `mkdocs.yml`, or `requirements-docs.txt`
+  change. Switchover to make Material primary happens in #577 PR 3.
+
 ## Required-check ruleset (issue #462)
 
 The branch-protection ruleset for `main` is checked into the repo at
