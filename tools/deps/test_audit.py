@@ -90,6 +90,191 @@ class ParserTests(unittest.TestCase):
         )
 
 
+class ManifestSourceScannerTests(unittest.TestCase):
+    """Completeness gate (added 2026-04-22 under #582 follow-up).
+
+    The audit now scans real dependency manifests — ``requirements-docs.txt``,
+    ``mkdocs.yml``, CMake ``FetchContent_Declare`` blocks, and ``external/``
+    subdirectories — and flags anything declared there that isn't
+    represented by a manifest.json entry.
+
+    This class of check was missing before, which is how the MkDocs
+    Material docs lane (#582) landed without updating any of the four
+    attribution files.
+    """
+
+    def test_requirements_docs_parser_extracts_packages(self) -> None:
+        sample = textwrap.dedent(
+            """\
+            # a comment
+            mkdocs-material>=9.5,<10
+            some-pkg==1.0
+              spaced-pkg  # trailing comment
+            """
+        )
+        tmp = ROOT / "tools" / "deps" / "_test_requirements.txt"
+        tmp.write_text(sample)
+        try:
+            original = audit.REQUIREMENTS_DOCS
+            audit.REQUIREMENTS_DOCS = tmp
+            declared = audit.parse_requirements_docs()
+        finally:
+            audit.REQUIREMENTS_DOCS = original
+            tmp.unlink()
+        names = {d.name for d in declared}
+        self.assertIn("mkdocs-material", names)
+        self.assertIn("some-pkg", names)
+        self.assertIn("spaced-pkg", names)
+
+    def test_mkdocs_yml_parser_extracts_theme_and_plugins(self) -> None:
+        sample = textwrap.dedent(
+            """\
+            site_name: Demo
+            theme:
+              name: material
+              features:
+                - navigation.instant
+            plugins:
+              - search
+              - awesome-pages
+              - git-revision-date-localized:
+                  type: iso_date
+            markdown_extensions:
+              - admonition
+              - pymdownx.details
+              - pymdownx.superfences
+            """
+        )
+        tmp = ROOT / "tools" / "deps" / "_test_mkdocs.yml"
+        tmp.write_text(sample)
+        try:
+            original = audit.MKDOCS_YML
+            audit.MKDOCS_YML = tmp
+            declared = audit.parse_mkdocs_yml()
+        finally:
+            audit.MKDOCS_YML = original
+            tmp.unlink()
+        names = {d.name for d in declared}
+        self.assertIn("material", names)
+        self.assertIn("awesome-pages", names)
+        self.assertIn("git-revision-date-localized", names)
+        self.assertIn("pymdown-extensions", names)
+
+    def test_fetchcontent_parser_extracts_target_names(self) -> None:
+        sample = textwrap.dedent(
+            """\
+            include(FetchContent)
+            FetchContent_Declare(
+                choc
+                GIT_REPOSITORY https://example.com/choc.git
+            )
+            FetchContent_Declare( webgpu
+                GIT_REPOSITORY https://example.com/webgpu.git
+            )
+            """
+        )
+        tmp = ROOT / "tools" / "deps" / "_test_cmake.txt"
+        tmp.write_text(sample)
+        try:
+            declared = audit.parse_fetchcontent(tmp)
+        finally:
+            tmp.unlink()
+        names = {d.name for d in declared}
+        self.assertEqual(names, {"choc", "webgpu"})
+
+    def test_uncovered_detection_catches_missing_pip_dep(self) -> None:
+        """The key regression test — reproduces the class of miss that
+        #582 shipped. A synthetic ``requirements-docs.txt`` declares a
+        package that has no manifest entry; the audit must flag it.
+        """
+        synthetic_requirements = textwrap.dedent(
+            """\
+            # Synthetic fixture — stuff-that-does-not-exist is the bug
+            # we're testing. If the completeness gate regresses, this
+            # test will silently pass and we'll be back to the #582 state.
+            stuff-that-does-not-exist>=1.0,<2
+            mkdocs-material>=9.5,<10
+            """
+        )
+        synthetic_mkdocs = "site_name: Demo\n"
+        synthetic_cmake = "# empty\n"
+
+        tmp_req = ROOT / "tools" / "deps" / "_test_req_missing.txt"
+        tmp_mk = ROOT / "tools" / "deps" / "_test_mk_missing.yml"
+        tmp_cm = ROOT / "tools" / "deps" / "_test_cm_missing.txt"
+        tmp_req.write_text(synthetic_requirements)
+        tmp_mk.write_text(synthetic_mkdocs)
+        tmp_cm.write_text(synthetic_cmake)
+
+        # Load the REAL manifest to compare against — we want to verify
+        # the synthetic bogus pip package isn't accidentally covered by
+        # some alias elsewhere.
+        manifest = audit.load_manifest()
+
+        try:
+            declared = audit.collect_declared(
+                extra_requirements=tmp_req,
+                extra_mkdocs=tmp_mk,
+                extra_cmake=[tmp_cm],
+            )
+        finally:
+            tmp_req.unlink()
+            tmp_mk.unlink()
+            tmp_cm.unlink()
+
+        uncovered = audit.find_uncovered_declarations(manifest, declared)
+        uncovered_names = {d.name for d in uncovered}
+        self.assertIn(
+            "stuff-that-does-not-exist",
+            uncovered_names,
+            msg="completeness gate must flag pip packages with no manifest entry",
+        )
+        # Real package that IS in manifest.json should NOT be flagged.
+        self.assertNotIn("mkdocs-material", uncovered_names)
+
+    def test_audit_strict_fails_on_synthetic_missing_dep(self) -> None:
+        """End-to-end: the ``--strict`` exit status must be non-zero when
+        a manifest source declares a dep that ``manifest.json`` doesn't
+        cover. Shells out to the real audit binary so we catch wiring
+        regressions between ``collect_declared`` and ``main``."""
+        synthetic = ROOT / "tools" / "deps" / "_test_req_e2e.txt"
+        synthetic.write_text("completely-bogus-attribution-miss==0.0.1\n")
+        harness = ROOT / "tools" / "deps" / "_run_synthetic_audit.py"
+        harness.write_text(textwrap.dedent("""\
+            import sys
+            from pathlib import Path
+            sys.path.insert(0, str(Path(__file__).parent))
+            import audit
+            audit.REQUIREMENTS_DOCS = Path(__file__).parent / "_test_req_e2e.txt"
+            sys.exit(audit.main())
+        """))
+        try:
+            result = subprocess.run(
+                [sys.executable, str(harness), "--strict"],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        finally:
+            synthetic.unlink()
+            harness.unlink()
+        self.assertNotEqual(
+            result.returncode,
+            0,
+            msg=(
+                "audit.py --strict should fail when a manifest source "
+                "declares a dep that manifest.json does not cover.\n"
+                f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+            ),
+        )
+        self.assertIn(
+            "completely-bogus-attribution-miss",
+            result.stdout,
+            msg="uncovered dep should appear in the audit output",
+        )
+
+
 class StrictAuditTests(unittest.TestCase):
     """Running the real audit script with --strict against origin/main
     inventory should succeed. If this fails, something is missing from

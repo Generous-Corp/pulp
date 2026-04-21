@@ -85,3 +85,29 @@ Read these to answer questions about specific packages.
 ## License Policy
 
 Only MIT/BSD/Apache/ISC/zlib/BSL/public-domain packages are allowed. The registry enforces this. If a user asks about a GPL library, explain the incompatibility and suggest the MIT-licensed alternative from the registry.
+
+## Attribution Audit (2026-04-22)
+
+`tools/deps/audit.py` now runs **two** invariants under `--strict`:
+
+1. **Consistency** — every `manifest.json` entry must appear in
+   `DEPENDENCIES.md`, `NOTICE.md`, and `docs/reference/licensing.md`.
+2. **Completeness** — every dep declared in a real manifest source
+   (`requirements-docs.txt`, `mkdocs.yml`, root + `bindings/python`
+   `FetchContent_Declare`, `external/<dir>/`) must be represented in
+   `manifest.json` via name or `external_names` alias.
+
+The completeness check closes the #582 class of miss where MkDocs
+Material landed with zero attribution coverage because the audit only
+verified cross-file consistency, not that declared deps were present.
+
+When adding a dep, always touch all four attribution files (manifest,
+DEPENDENCIES, NOTICE, licensing) plus — if the CMake / pip / vendored
+alias differs from the canonical name — add the alias to
+`DEFAULT_ALIASES` in `tools/deps/audit.py` or the `external_names`
+list on the manifest entry.
+
+Synthetic missing-dep test: `tools/deps/test_audit.py::
+ManifestSourceScannerTests::test_uncovered_detection_catches_missing_pip_dep`
+— don't delete it. If the completeness gate regresses, this is the
+regression test that catches it.
