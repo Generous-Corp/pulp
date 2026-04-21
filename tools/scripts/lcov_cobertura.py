@@ -149,7 +149,16 @@ class LcovCobertura():
             if input_type == 'SF':
                 # Get file name
                 file_name = line_parts[-1].strip()
-                relative_file_name = os.path.relpath(file_name, self.base_dir)
+                # Pulp patch: os.path.relpath raises ValueError on Windows
+                # when file_name and base_dir live on different drives
+                # (e.g. runner workspace on D: but FetchContent cache on
+                # C:, which is the default for GitHub-hosted windows-latest).
+                # Fall back to the absolute path so the converter still
+                # emits the file — Codecov reads absolute paths fine.
+                try:
+                    relative_file_name = os.path.relpath(file_name, self.base_dir)
+                except ValueError:
+                    relative_file_name = file_name
                 package = '.'.join(relative_file_name.split(os.path.sep)[0:-1])
                 class_name = '.'.join(relative_file_name.split(os.path.sep))
                 if package not in coverage_data['packages']:
