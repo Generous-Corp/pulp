@@ -274,6 +274,11 @@ docs:
     summary: Component showcase — every widget type in one screenshot-testable JS file
 
   # Reference
+  - slug: api-reference
+    path: api-reference.md
+    kind: reference
+    summary: Stub page that redirects to the Doxygen-generated C++ API reference at /api/
+
   - slug: cli
     path: reference/cli.md
     kind: reference

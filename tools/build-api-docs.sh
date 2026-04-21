@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
-# build-api-docs.sh — Generate API reference from public headers using Doxygen
+# build-api-docs.sh — Generate API reference from public headers using Doxygen.
 # Output: build/api-docs/html/
+#
+# Injects the current SDK version from CMakeLists.txt (`project(Pulp VERSION x.y.z)`)
+# as Doxygen's PROJECT_NUMBER so `/api/` always shows the right version instead
+# of the stale literal baked into docs/doxygen/Doxyfile. (#577 PR 4.)
 
 set -euo pipefail
 
@@ -19,12 +23,31 @@ if [ ! -f "$DOXYFILE" ]; then
     exit 1
 fi
 
-echo "Generating API reference..."
+# Extract `project(Pulp VERSION x.y.z)` from the root CMakeLists.txt. Uses
+# grep/sed so this works under both BSD and GNU userland (macOS + Linux).
+# Falls back to the Doxyfile literal if the regex misses — Doxygen still
+# produces output, just with the old version.
+SDK_VERSION="$(grep -oE 'VERSION[[:space:]]+[0-9]+\.[0-9]+\.[0-9]+' "$ROOT/CMakeLists.txt" 2>/dev/null \
+    | head -1 \
+    | sed -E 's/VERSION[[:space:]]+//' || true)"
+
+if [ -z "$SDK_VERSION" ]; then
+    echo "Warning: could not parse SDK VERSION from CMakeLists.txt; using Doxyfile literal"
+fi
+
+echo "Generating API reference (Pulp ${SDK_VERSION:-unknown})..."
 mkdir -p "$OUTPUT"
 
-# Run Doxygen from the docs/doxygen directory so relative paths resolve
+# Run Doxygen from the docs/doxygen directory so relative paths resolve.
+# Stream the Doxyfile through stdin with an appended PROJECT_NUMBER override —
+# Doxygen treats later assignments as wins, so the Doxyfile stays untouched.
 cd "$ROOT/docs/doxygen"
-doxygen Doxyfile 2>&1 | grep -E "^(Generating|Warning|Error)" || true
+if [ -n "$SDK_VERSION" ]; then
+    { cat "$DOXYFILE"; echo "PROJECT_NUMBER = $SDK_VERSION"; } | \
+        doxygen - 2>&1 | grep -E "^(Generating|Warning|Error)" || true
+else
+    doxygen Doxyfile 2>&1 | grep -E "^(Generating|Warning|Error)" || true
+fi
 
 # Count documented entities
 if [ -d "$OUTPUT/html" ]; then

@@ -473,13 +473,14 @@ SSH key setup for Windows/Linux VMs: `docs/guides/local-ci.md` § "Set up SSH ke
 **Docs-site CI workflows:**
 
 - `.github/workflows/docs-deploy.yml` — builds + deploys the Pulp docs
-  site to GitHub Pages. PR 3 of #577 flipped the default renderer from
-  the custom `tools/build-docs.py` generator to **MkDocs Material**.
-  The legacy generator stays in-tree as an emergency fallback: trigger
-  `workflow_dispatch` with `use_legacy_generator=true` to re-render
-  with `tools/build-docs.py` (Pagefind is wired in only on that lane —
-  Material ships its own built-in search). Material is the default for
-  every push to `main`. PR 4 of #577 removes the fallback after soak.
+  site to GitHub Pages. As of #577 PR 4 this is **MkDocs Material only**:
+  the legacy `tools/build-docs.py` generator and the
+  `use_legacy_generator` workflow_dispatch fallback have both been
+  deleted. Rollback, if ever needed, is via `git revert` of the
+  deletion commit, not a runtime toggle. Pagefind is gone (Material
+  ships its own built-in search). The workflow also invokes
+  `tools/build-api-docs.sh`, which pulls the current SDK version from
+  `CMakeLists.txt` and injects it into Doxygen's `PROJECT_NUMBER`.
 - `.github/workflows/docs-material.yml` — parallel MkDocs Material build
   (PR-only preview) added under #577 PR 1 and extended in PR 2 to build
   Doxygen + merge `api/` into the artifact and run the

@@ -1,11 +1,12 @@
-/* Pulp brand overrides for MkDocs Material (#577 PR 1).
+/* Pulp brand overrides for MkDocs Material.
  *
- * Mirrors the color palette used by tools/build-docs.py so the parallel
- * Material preview is visually comparable to the current custom-generator
- * output. Only primary/accent hues are overridden; typography, spacing,
- * and component shapes are Material defaults.
+ * Pulp dark palette — deep navy background, pink primary, purple accent,
+ * blue links. Only primary/accent hues are overridden; typography,
+ * spacing, and component shapes are Material defaults.
  *
- * Source reference: tools/build-docs.py :root block, 2026-04-22.
+ * Palette originates from the legacy custom renderer retired in
+ * #577 PR 4; kept identical so the switchover was a byte-compatible
+ * brand change.
  */
 
 :root > * {

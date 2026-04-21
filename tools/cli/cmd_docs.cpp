@@ -595,16 +595,19 @@ int cmd_docs(const std::vector<std::string>& args) {
     std::string sub = args[0];
 
     if (sub == "build-site") {
-        auto script = root / "tools" / "build-docs.py";
-        if (!fs::exists(script)) {
-            std::cerr << "Error: build script not found at " << script.string() << "\n";
-            return 1;
-        }
-        std::string cmd = "python3 \"" + script.string() + "\"";
+        // #577 PR 4 retired tools/build-docs.py in favour of MkDocs Material.
+        // Delegate to `mkdocs build`. Extra args are forwarded so callers can
+        // pass `--site-dir`, `--strict`, etc.
+        std::string cmd = "mkdocs build";
         for (size_t i = 1; i < args.size(); ++i) {
             cmd += " " + args[i];
         }
-        return run(cmd);
+        int rc = run(cmd);
+        if (rc != 0) {
+            std::cerr << "Hint: install docs deps with "
+                         "`pip install -r requirements-docs.txt`\n";
+        }
+        return rc;
     }
 
     if (sub == "build-api") {

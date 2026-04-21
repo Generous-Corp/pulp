@@ -81,13 +81,13 @@ The CI check also validates that README.md's claimed test count matches the actu
 
 The docs site at `generouscorp.com/pulp/` is generated from the same `docs/` files:
 
-- **Build locally**: `pulp docs build-site` or `python3 tools/build-docs.py`
+- **Build locally**: `pulp docs build-site` (delegates to `mkdocs build`) or `mkdocs build --site-dir build/site` directly
+- **Hot-reload dev server**: `mkdocs serve` watches `docs/` and refreshes on save
 - **Deploy**: the `docs-deploy.yml` GitHub Actions workflow builds and deploys on push to `main`
 - **Source**: GitHub Pages configured with "GitHub Actions" as the source
 - **Base URL**: `/pulp/` (served under the user-level custom domain)
-- **Branch badge**: the site header shows which branch the docs were built from
 
-The site generator (`tools/build-docs.py`) is stdlib-only Python — no pip dependencies. It reads `docs-index.yaml` for navigation and converts Markdown to HTML.
+The site is rendered by [MkDocs Material](https://squidfunk.github.io/mkdocs-material/) (see `mkdocs.yml`). Install the docs deps with `pip install -r requirements-docs.txt`. Pre-build drift checks (`docs_generate.py check` and `check-docs-consistency.py`) run automatically via `tools/mkdocs_hooks.py`.
 
 ## Adding a New Doc
 

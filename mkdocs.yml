@@ -1,17 +1,16 @@
-# MkDocs Material configuration — added under issue #577 alongside the existing
-# tools/build-docs.py generator. This file is consumed by the parallel
-# `docs-material` CI workflow, which uploads an artifact for visual inspection.
-# It does NOT replace tools/build-docs.py yet — that switchover is PR 3 of #577.
+# MkDocs Material configuration — primary docs renderer for Pulp as of
+# #577 PR 4 (the legacy `tools/build-docs.py` generator was deleted in that
+# PR). The `docs-material` workflow continues to build a PR-only preview
+# artifact; the live site at generouscorp.com/pulp/ is produced by
+# `.github/workflows/docs-deploy.yml` running `mkdocs build`.
 #
-# URL scheme note (PR 2):
-#   The custom generator emits flat URLs `/pulp/<slug>.html` from nested
-#   source files (e.g. `docs/reference/modules.md` → `/pulp/modules.html`).
-#   Material mirrors the source tree by default, so the
-#   `tools/mkdocs_hooks.py` `on_files` hook rewrites each File's `url` /
-#   `dest_uri` to the flat slug from `docs/status/docs-index.yaml` — giving
-#   Material the same URLs the custom generator produces. Pages not listed
-#   in docs-index.yaml keep their nested MkDocs default URL (the custom
-#   generator doesn't publish those either, so no external contract exists).
+# URL scheme:
+#   Flat `/pulp/<slug>.html` URLs preserved from the legacy generator era
+#   (e.g. `docs/reference/modules.md` → `/pulp/modules.html`) via the
+#   `tools/mkdocs_hooks.py` `on_files` hook, which rewrites each File's
+#   `url` / `dest_uri` to the slug from `docs/status/docs-index.yaml`.
+#   Pages not listed in docs-index.yaml keep their nested MkDocs default
+#   URL (the legacy generator didn't publish those either).
 
 site_name: Pulp
 site_description: Cross-platform audio plugin and application framework. MIT-licensed.
@@ -150,6 +149,7 @@ nav:
   - CLI & CMake:
       - CLI Reference: reference/cli.md
       - CMake Reference: reference/cmake.md
+      - API Reference: api-reference.md
   - Guides:
       - Web Plugins: guides/web-plugins.md
       - GPU Validation: guides/gpu-validation-checklist.md
