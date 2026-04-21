@@ -1,0 +1,55 @@
+# Per-tier coverage targets for Pulp's diff-coverage gate.
+#
+# The existing `coverage-diff-gate` in `.github/workflows/coverage.yml`
+# enforces a single global floor (75%) on PR diff coverage. This file
+# adds per-tier floors on top of that — audio-critical code has a
+# higher bar than infrastructure glue, and the gate enforces the right
+# bar for each file the PR changes.
+#
+# Structure:
+#   version: schema version (bump if fields change incompatibly).
+#   tiers: list of named tiers, each with:
+#     name          — human-readable identifier, shown in the PR comment
+#     line_target   — minimum line-coverage percentage (0-100) for the
+#                     diff portion touching this tier's paths
+#     paths         — list of glob-style path patterns (fnmatch semantics)
+#                     that classify a file into this tier; first-match
+#                     wins in order, so put narrower tiers first
+#
+# Fallback behavior: files that don't match any tier fall back to the
+# global 75% floor from the existing diff-cover gate. New subsystems
+# inherit a sane default without requiring an immediate tier assignment.
+#
+# Consumed by `tools/scripts/coverage_tier_check.py`, invoked from the
+# `coverage-diff-gate` job alongside the existing diff-cover invocation.
+
+version: 1
+
+tiers:
+  - name: audio-critical
+    line_target: 80
+    paths:
+      - core/audio/**
+      - core/format/**
+      - core/host/**
+      - core/midi/**
+      - core/signal/**
+      - core/platform/**
+
+  - name: user-facing
+    line_target: 70
+    paths:
+      - core/view/**
+      - core/render/**
+      - tools/cli/**
+
+  - name: infrastructure
+    line_target: 50
+    paths:
+      - core/events/**
+      - core/runtime/**
+      - core/state/**
+      - core/canvas/**
+      - core/osc/**
+      - ship/**
+      - tools/**
