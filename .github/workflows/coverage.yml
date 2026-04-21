@@ -199,7 +199,14 @@ jobs:
         # which Codecov (PR 2) and diff-cover (PR 3) consume.
         # Pin >=8.2 for the --llvm-profdata-executable path used by
         # scripts/run_coverage.sh.
-        run: python3 -m pip install --user 'gcovr>=8.2'
+        #
+        # --break-system-packages bypasses PEP 668's
+        # "externally-managed-environment" block that macos-latest's
+        # Homebrew Python applies by default. The runner is a throwaway
+        # VM so the system-packages split is irrelevant here; this
+        # matches how actions/setup-python's `--user` install would
+        # behave in an isolated tooling venv, minus the extra venv step.
+        run: python3 -m pip install --user --break-system-packages 'gcovr>=8.2'
         shell: bash
 
       - name: run_coverage.sh fixture tests (#569 / #570)
@@ -224,9 +231,19 @@ jobs:
         # with `strategy.fail-fast: false` above means a flake on any
         # one OS doesn't cancel the others, so the Codecov dashboard
         # still gets partial multi-OS coverage data.
+        #
+        # On Windows, pin CMAKE_GENERATOR=Ninja so cmake doesn't fall
+        # back to the default "Visual Studio 17 2022" generator, which
+        # ignores -DCMAKE_CXX_COMPILER=clang++ and picks MSVC cl.exe
+        # instead. Pulp's coverage build requires Clang source-based
+        # instrumentation (PulpInstrumentation.cmake rejects MSVC),
+        # so the VS-generator path fails silently with no profraw
+        # emitted. Ninja honours CMAKE_C/CXX_COMPILER cleanly.
         continue-on-error: true
-        run: scripts/run_coverage.sh
         shell: bash
+        env:
+          CMAKE_GENERATOR: ${{ matrix.os == 'windows' && 'Ninja' || '' }}
+        run: scripts/run_coverage.sh
 
       - name: Upload HTML report
         if: always()
@@ -281,13 +298,20 @@ jobs:
           if-no-files-found: error
 
       - name: Upload coverage to Codecov
-        # #566 Phase 1 PR 2 wired Codecov with 20 flags (13 subsystems
-        # + 4 platforms + 3 surfaces). Phase 1 PR 4 adds a per-OS flag
-        # on each matrix leg (`os-linux`, `os-macos`, `os-windows`) so
-        # Codecov can cross-filter coverage by OS (e.g. `host AND
-        # os-windows`). Cross-OS unions of the same file happen at the
-        # Codecov flag layer — NOT via llvm-profdata merge, which is
-        # not architecture-portable (see planning decision doc §7).
+        # #566 Phase 1 PR 4 adds a per-OS flag on each matrix leg
+        # (`os-linux`, `os-macos`, `os-windows`) so Codecov can
+        # cross-filter coverage by OS. Cross-OS unions of the same
+        # file happen at the Codecov flag layer — NOT via
+        # llvm-profdata merge, which is not architecture-portable
+        # (see planning decision doc §7).
+        #
+        # Subsystem / platform / surface breakdown comes from the
+        # `component_management` block in codecov.yml, which slices
+        # each upload by path (#603 made this switch on main after
+        # Codecov rejected the 20-flag-per-upload pattern with
+        # "Multiple flags detected. Please ensure one flag per
+        # upload."). A single per-OS flag per upload is the
+        # supported shape.
         #
         # fail_ci_if_error: false — coverage is still advisory in
         # Phase 1. Phase 3 adds a diff-cover gate for per-PR
@@ -296,7 +320,7 @@ jobs:
         uses: codecov/codecov-action@v5
         with:
           files: build-coverage/coverage.cobertura.xml
-          flags: audio,canvas,events,format,host,midi,osc,platform,render,runtime,signal,state,view,android,apple,linux,windows,cli,ship,tools,${{ matrix.flag }}
+          flags: ${{ matrix.flag }}
           # Token makes upload more reliable (avoids tokenless rate limits);
           # action silently falls back to tokenless if the secret is unset
           # (e.g. in forked-PR context where secrets aren't exposed).
