@@ -26,22 +26,31 @@ REPORT_DIR="${BUILD_DIR}/coverage"
 JOBS=$(command -v nproc >/dev/null 2>&1 && nproc || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 TESTS_REGEX=""
 
-# Canonical source-filter regex used by both llvm-cov and gcovr.
-# Matches paths we explicitly DO NOT want in the coverage report:
-#   _deps/          — FetchContent build trees (incl. Catch2)
-#   external/       — vendored dependencies
-#   test/           — test code itself (we measure coverage OF code under test)
-#   catch2/Catch2/  — Catch2 headers/src anywhere; papers over the
-#                     `build-coverage/_deps/catch2-build/src/src/` mapping
-#                     that produces "No such file or directory" stderr spam
-#                     on every llvm-cov show invocation (issue #569).
-#   build-coverage/ — this build tree itself.
-#   build/          — any other build tree.
+# Canonical source-filter regex used by llvm-cov and by the
+# LCOV→Cobertura converter. Matches paths we explicitly DO NOT want in
+# the coverage report:
+#   _deps/               — FetchContent build trees (incl. Catch2)
+#   external/            — vendored dependencies
+#   test/                — test code itself (we measure coverage OF code under test)
+#   catch2/Catch2/       — Catch2 headers/src anywhere; papers over the
+#                          `build-coverage/_deps/catch2-build/src/src/` mapping
+#                          that produces "No such file or directory" stderr spam
+#                          on every llvm-cov show invocation (issue #569).
+#   build-coverage/      — this build tree itself.
+#   build/               — any other build tree.
+#   examples/            — example projects, tracked separately if at all.
+#   fetchcontent-src/    — the FetchContent source cache under
+#                          Library/Caches/Pulp/; CMake places downloaded
+#                          deps there and llvm-cov reports them with
+#                          absolute paths that don't hit the _deps/
+#                          pattern above. Caught Codex-sweep 2026-04-21
+#                          when the direct llvm-cov export pipeline
+#                          surfaced 69k lines of FetchContent noise.
 #
 # Each alternative uses `(^|/)` as the leading anchor so relative and
-# absolute paths are both matched. Keep in sync with `gcovr --exclude`
-# flags below and with planning/coverage-tooling-decision-2026-04-21.md §4.
-COVERAGE_IGNORE_REGEX='(^|/)(_deps|external|test|[Cc]atch2|build|build-coverage)/'
+# absolute paths are both matched. Keep in sync with codecov.yml's
+# `ignore:` list and with planning/coverage-tooling-decision-2026-04-21.md §4.
+COVERAGE_IGNORE_REGEX='(^|/)(_deps|external|test|[Cc]atch2|build|build-coverage|examples|fetchcontent-src)/'
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -144,8 +153,26 @@ PROFDATA="${REPORT_DIR}/pulp.profdata"
 find "${PROFRAW_DIR}" -name '*.profraw' -print0 \
     | xargs -0 llvm-profdata merge -sparse -o "${PROFDATA}"
 
-# Gather every test binary for llvm-cov's -object multi-arg form.
+# Gather binaries for llvm-cov's -object multi-arg form.
+#
+# #566 follow-up: historically we only passed test executables, which meant
+# llvm-cov only saw translation units LINKED INTO a test binary. Production
+# code in first-party libraries that no test transitively depends on was
+# invisible to llvm-cov -> gcovr -> Codecov, tracking only ~0.6% of the
+# codebase and silently false-negative-ing the diff-cover gate on any PR
+# that touched code outside the test-linked set.
+#
+# Fix per Codex Q5: expose the full first-party surface by also passing
+# every libpulp-*.a static archive plus any non-test executables
+# (tools/cli/pulp, standalone hosts, inspect tools). LLVM docs confirm
+# llvm-cov -object accepts .a archives directly:
+#   https://llvm.org/docs/CommandGuide/llvm-cov.html
+#
+# External SDK archives (libausdk.a, libvst3-sdk.a) are excluded because
+# they're built from third-party sources not instrumented by our flags.
 BINARIES=()
+
+# Test executables — first, these drive the actual coverage hits.
 while IFS= read -r f; do BINARIES+=("-object" "$f"); done < <(
     find "${BUILD_DIR}/test" -maxdepth 2 -type f -perm -u+x \
          ! -name '*.cmake' ! -name '*.txt' 2>/dev/null || true
@@ -153,6 +180,55 @@ while IFS= read -r f; do BINARIES+=("-object" "$f"); done < <(
 
 if [[ ${#BINARIES[@]} -eq 0 ]]; then
     echo "run_coverage.sh: no test binaries found under ${BUILD_DIR}/test" >&2
+    exit 1
+fi
+
+# First-party static libraries — expose every instrumented TU regardless
+# of whether a test links it. Pattern is `libpulp-*.a`; deliberately does
+# not pick up libausdk.a / libvst3-sdk.a (external SDKs, not our code).
+while IFS= read -r f; do BINARIES+=("-object" "$f"); done < <(
+    find "${BUILD_DIR}" -type f -name 'libpulp-*.a' 2>/dev/null || true
+)
+
+# First-party non-test executables — CLI, standalone host, inspector.
+# Test binaries under build/test/ are already included above; exclude
+# anything under /_deps/ or /external/ to avoid third-party objects.
+while IFS= read -r f; do BINARIES+=("-object" "$f"); done < <(
+    find "${BUILD_DIR}/tools" "${BUILD_DIR}/inspect" \
+         -maxdepth 3 -type f -perm -u+x \
+         ! -name '*.cmake' ! -name '*.txt' ! -name '*.o' \
+         2>/dev/null || true
+)
+
+# ── Pre-flight: drop objects llvm-cov can't load ───────────────────────────
+# `llvm-cov report` refuses the entire run if any single -object produces
+# "malformed coverage data" (e.g. a Linux static archive with a bogus
+# coverage-mapping header — seen on CI with `libpulp-ship.a`). Probe each
+# binary individually with a minimal `llvm-cov report` against the merged
+# profdata; drop any that fail, log a warning. One bad archive should not
+# blackhole the whole pipeline.
+echo "=== Pre-flight: probing ${#BINARIES[@]} -object entries ==="
+PROBED=()
+SKIPPED=()
+prev=""
+for tok in "${BINARIES[@]}"; do
+    if [[ "${prev}" == "-object" ]]; then
+        if llvm-cov report -object="${tok}" -instr-profile="${PROFDATA}" \
+                >/dev/null 2>&1; then
+            PROBED+=("-object" "${tok}")
+        else
+            SKIPPED+=("${tok}")
+            echo "  ✗ skipping (malformed coverage data): ${tok}" >&2
+        fi
+    fi
+    prev="${tok}"
+done
+BINARIES=("${PROBED[@]}")
+if [[ ${#SKIPPED[@]} -gt 0 ]]; then
+    echo "=== Pre-flight: dropped ${#SKIPPED[@]} bad object(s); using ${#PROBED[@]} entries ==="
+fi
+if [[ ${#BINARIES[@]} -eq 0 ]]; then
+    echo "run_coverage.sh: pre-flight left zero loadable -object entries" >&2
     exit 1
 fi
 
@@ -171,50 +247,49 @@ llvm-cov show \
     -format=html \
     -output-dir="${REPORT_DIR}"
 
-# Issue #569 Phase 1 PR 1: also emit Cobertura XML alongside the HTML
-# report. Codecov + diff-cover both consume Cobertura; llvm-cov does
-# NOT produce Cobertura natively, so gcovr bridges llvm-cov JSON →
-# Cobertura XML. If gcovr isn't installed (local developer machine
-# without the optional dep), skip with a hint rather than fail — the
-# CI workflow explicitly installs gcovr, so CI coverage always has XML.
+# Emit Cobertura XML for Codecov + diff-cover via
+#   llvm-cov export --format=lcov  →  lcov_cobertura.py  →  Cobertura XML
+#
+# Why not gcovr? We tried gcovr 8.6 in LLVM mode (--llvm-cov-binary
+# per test binary). When we expanded the `-object` set from just the
+# test executables to also include every `libpulp-*.a` archive and
+# non-test executable, `llvm-cov report` correctly reported ~110k
+# tracked lines across 577 source files, but gcovr emitted a Cobertura
+# XML with 150 lines across 4 files — silently dropping ~99.9% of the
+# coverage data. The direct `llvm-cov export --format=lcov` pipeline
+# produces complete output (same 577 files, 106k lines after
+# fetchcontent-src filtering) and the lcov_cobertura.py converter is a
+# single-file script we cache alongside this build script.
+#
+# Codex confirmed (2026-04-21 consult): `llvm-cov -object` accepts
+# static `.a` archives directly. LLVM docs:
+#   https://llvm.org/docs/CommandGuide/llvm-cov.html
+#
+# The converter script lives at tools/scripts/lcov_cobertura.py and is
+# a vendored copy of https://github.com/eriwen/lcov-to-cobertura-xml
+# (Apache 2.0, MIT-compatible).
 COBERTURA_XML="${BUILD_DIR}/coverage.cobertura.xml"
-if command -v gcovr >/dev/null 2>&1; then
-    echo "=== gcovr (Cobertura XML for Codecov + diff-cover) ==="
-    # gcovr consumes the raw profdata + instrumented binaries and
-    # produces Cobertura XML. Pass the same filter set as llvm-cov
-    # (filters are anchored at repo root; excludes are regexes).
-    GCOVR_LLVM_BINS=()
-    for obj in "${BINARIES[@]}"; do
-        if [[ "${obj}" != "-object" ]]; then
-            GCOVR_LLVM_BINS+=("--llvm-cov-binary" "${obj}")
-        fi
-    done
-    # Pulp #605: positive `--filter core/` and `--filter tools/cli/` were
-    # silently filtering out ALL coverage data on CI (gcovr's unanchored-regex
-    # semantics vs the absolute paths llvm-cov reports didn't line up),
-    # producing a well-formed but empty Cobertura XML that Codecov then
-    # rejected as "Unusable report." Dropping the positive filters — we rely
-    # on the `--exclude` set below, which mirrors codecov.yml's `ignore:`
-    # list. Anything not excluded is coverage-bearing by definition.
-    gcovr \
-        --root "${REPO_ROOT}" \
-        --llvm-profdata-executable llvm-profdata \
-        "${GCOVR_LLVM_BINS[@]}" \
-        --exclude '.*/external/' \
-        --exclude '.*/test/' \
-        --exclude '.*/_deps/' \
-        --exclude '.*/[Cc]atch2/' \
-        --exclude '.*/build-coverage/' \
-        --exclude '.*/build/' \
-        --exclude '.*/examples/' \
-        --cobertura "${COBERTURA_XML}" \
-        "${PROFRAW_DIR}" \
-        || echo "gcovr exited non-zero — Cobertura XML may be partial (non-fatal)."
-    echo "Cobertura:  ${COBERTURA_XML}"
-else
-    echo "=== gcovr not found on PATH — skipping Cobertura XML ==="
-    echo "    (Codecov + diff-cover need this in CI; install: pip install gcovr)"
+LCOV_FILE="${REPORT_DIR}/coverage.lcov"
+LCOV_COBERTURA="${REPO_ROOT}/tools/scripts/lcov_cobertura.py"
+
+if [[ ! -f "${LCOV_COBERTURA}" ]]; then
+    echo "run_coverage.sh: missing ${LCOV_COBERTURA}" >&2
+    echo "    (expected the vendored lcov→cobertura converter)" >&2
+    exit 1
 fi
+
+echo "=== llvm-cov export → LCOV ==="
+llvm-cov export --format=lcov \
+    "${BINARIES[@]}" \
+    -instr-profile="${PROFDATA}" \
+    -ignore-filename-regex="${COVERAGE_IGNORE_REGEX}" \
+    > "${LCOV_FILE}"
+
+echo "=== LCOV → Cobertura XML ==="
+python3 "${LCOV_COBERTURA}" "${LCOV_FILE}" \
+    --output "${COBERTURA_XML}" \
+    --base-dir "${REPO_ROOT}"
+echo "Cobertura:  ${COBERTURA_XML}"
 
 echo ""
 echo "HTML report: ${REPORT_DIR}/index.html"

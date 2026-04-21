@@ -26,6 +26,7 @@ Entries are sorted alphabetically (case-insensitive) by name.
 | Highway | 1.2.0 | Apache-2.0 | Portable SIMD abstraction (SSE/NEON/AVX) | pulp-runtime | 2026-04-06 |
 | Inter | vendored-snapshot | SIL OFL 1.1 | Embedded UI font (Inter-Regular.ttf) | pulp-view | 2026-04-21 |
 | JetBrains Mono | vendored-snapshot | SIL OFL 1.1 | Embedded monospace font (JetBrainsMono-Regular.ttf) | pulp-view | 2026-04-21 |
+| lcov_cobertura | 2.1.2 | Apache-2.0 | LCOV→Cobertura converter; vendored as `tools/scripts/lcov_cobertura.py` for the coverage pipeline (single-file Python script, no pip dependency in CI) | tooling | 2026-04-21 |
 | LV2 | 1.18.10 | ISC | LV2 plugin format headers | pulp-format | 2026-03-30 |
 | Material Design Icons | bundled-with-mkdocs-material | Apache-2.0 | Icon set bundled inside mkdocs-material and redistributed as SVG assets in the generated docs site | docs | 2026-04-22 |
 | Mbed TLS | 3.6.2 | Apache-2.0 | Cryptographic primitives (SHA-256, RSA, AES) | pulp-runtime | 2026-04-21 |

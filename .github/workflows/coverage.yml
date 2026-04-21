@@ -194,37 +194,13 @@ jobs:
           Add-Content $env:GITHUB_PATH $llvmBin
           Write-Host "Added $llvmBin to PATH"
 
-      - name: Install coverage reporting tools (gcovr)
-        # gcovr bridges Clang source-based coverage → Cobertura XML,
-        # which Codecov (PR 2) and diff-cover (PR 3) consume.
-        # Pin >=8.2 for the --llvm-profdata-executable path used by
-        # scripts/run_coverage.sh.
-        #
-        # --break-system-packages bypasses PEP 668's
-        # "externally-managed-environment" block that macos-latest's
-        # Homebrew Python applies by default. The runner is a throwaway
-        # VM so the system-packages split is irrelevant here; this
-        # matches how actions/setup-python's `--user` install would
-        # behave in an isolated tooling venv, minus the extra venv step.
-        # pip --user on macOS installs to $(python3 -m site --user-base)/bin
-        # (e.g. /Users/runner/Library/Python/3.13/bin) which is NOT on PATH
-        # by default on macos-latest runners. Add it after install so
-        # scripts/run_coverage.sh can find `gcovr` later. Linux runners also
-        # benefit (user-base bin is off PATH there too on some distros);
-        # Windows gcovr lands in %APPDATA%\Python\Scripts which we handle
-        # via the separate `shell: bash` that adds python's Scripts dir below.
-        shell: bash
-        run: |
-          python3 -m pip install --user --break-system-packages 'gcovr>=8.2'
-          user_base=$(python3 -m site --user-base)
-          echo "${user_base}/bin" >> "$GITHUB_PATH"
-          # Windows pip --user uses %APPDATA%\Python\PythonXY\Scripts which
-          # `python3 -m site --user-base` doesn't expose — append the Scripts
-          # dir directly from sysconfig on that runner only.
-          if [ "${RUNNER_OS:-}" = "Windows" ]; then
-            scripts=$(python3 -c 'import sysconfig; print(sysconfig.get_path("scripts", f"{sysconfig.get_default_scheme()}_user"))')
-            echo "${scripts}" >> "$GITHUB_PATH"
-          fi
+      # gcovr is no longer needed — scripts/run_coverage.sh now drives
+      # the LLVM → Cobertura conversion via `llvm-cov export --format=lcov`
+      # plus the vendored `tools/scripts/lcov_cobertura.py` converter. The
+      # old gcovr flow (via `--llvm-cov-binary` per test binary) silently
+      # dropped ~99.9% of the coverage data once the `-object` set widened
+      # to include `libpulp-*.a` archives. Kept as a marker so the soak
+      # delete is easy to find if gcovr resurfaces for another reason.
 
       - name: run_coverage.sh fixture tests (#569 / #570)
         # Assert the canonical ignore-regex excludes _deps/catch2-build
@@ -300,15 +276,15 @@ jobs:
           size=$(wc -c < "$xml")
           echo "coverage.cobertura.xml size: ${size} bytes"
           # Pulp #605 — file-non-empty is necessary but not sufficient.
-          # gcovr writes a well-formed but structurally EMPTY XML when its
-          # filter expressions exclude every file it can see. Codecov v5
-          # rejects such reports as "Unusable report" and the dashboard
-          # stays empty despite green CI and a successful upload. Assert
-          # the XML actually contains coverage data before we ship it.
+          # A well-formed but structurally EMPTY XML (lines-valid=0)
+          # will be rejected by Codecov v5 as "Unusable report" and the
+          # dashboard stays empty despite green CI and a successful
+          # upload. Assert the XML actually contains coverage data
+          # before we ship it.
           lines_valid=$(python3 -c "import xml.etree.ElementTree as E; print(E.parse('$xml').getroot().attrib.get('lines-valid', '0'))")
           if [ "${lines_valid}" = "0" ]; then
             echo "::error::coverage.cobertura.xml is structurally empty (lines-valid=0)."
-            echo "::error::gcovr filtered out every source file — check scripts/run_coverage.sh's --filter / --exclude regexes against the actual profraw source paths."
+            echo "::error::llvm-cov / lcov_cobertura filtered out every source file — check scripts/run_coverage.sh's COVERAGE_IGNORE_REGEX and -object list against the actual profraw source paths."
             exit 1
           fi
           echo "coverage.cobertura.xml has lines-valid=${lines_valid}"
