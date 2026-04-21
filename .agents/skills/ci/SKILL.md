@@ -148,6 +148,83 @@ shipyard run --targets windows --resume-from test   # ~2 min vs 15 min
 shipyard run --resume-from build
 ```
 
+### Iterating on a single-platform failure
+
+When CI goes red on exactly one of Pulp's platforms — e.g. only the
+Windows Coverage leg of the #566 matrix, only the macOS AddressSanitizer
+leg, only Linux Namespace — **do not default to pushing a fix and
+waiting for the full matrix**. That re-validates `mac`, `ubuntu`, and
+`windows` on every iteration when only one of them actually failed,
+burning ~25 minutes of wall time and GitHub Actions runner minutes on
+legs that were already green.
+
+Use `shipyard run` with target selection against Pulp's real lanes:
+
+```bash
+# Iterate on the Windows lane only
+shipyard run --skip-target mac --skip-target ubuntu --json
+
+# Inclusive form (equivalent)
+shipyard run --targets windows --json
+
+# Chain with --resume-from when the build is already green and you're
+# only iterating on test failures on that platform:
+shipyard run --targets windows --resume-from test --json
+```
+
+This validates locally via Pulp's configured backend for the target
+(`local` on mac, `ssh` on ubuntu, `ssh-windows` on windows) — see
+`shipyard targets list` for the live mapping. Real result in ~5–10
+min per target, zero GitHub Actions spend, no re-validation of lanes
+you didn't touch. Once the local lane goes green, push + let CI
+confirm across the full matrix; only then run `shipyard pr` for the
+final merge gate.
+
+**When this loop doesn't fit — keep using the full path:**
+
+- **Final pre-merge gate.** `shipyard pr` is still the only thing that
+  produces a merge-eligible evidence record across all three lanes.
+  Local iteration gets you to green; `shipyard pr` lands it.
+- **Failure specific to a GitHub-hosted lane.** The build matrix on
+  main has a `macOS (ARM64) [github-hosted]` leg and `[namespace]`
+  Linux/Windows legs. If a failure is specific to the github-hosted
+  macOS environment, `shipyard run --targets mac` hits the local mac
+  backend which is close but not identical. `shipyard cloud run build
+  <branch>` dispatches to the same Namespace runners CI uses without
+  re-running everything — the middle ground when you need the exact
+  cloud environment.
+- **Cross-target behavior you're actually testing.** If the bug only
+  manifests when two targets interact (rare — e.g. shared FetchContent
+  cache corruption), the single-target loop hides it. Full matrix
+  only in that case.
+
+**When `shipyard run` fails for reasons that don't match your change:**
+
+Pulp's `ssh` (ubuntu) and `ssh-windows` (`win` alias) backends
+accumulate per-run state — `.shipyard-stage-build-*`,
+`.shipyard-stage-configure-*`, a stale worktree branch checkout from
+an interrupted earlier run. If `shipyard run --targets windows` errors
+with messages that look unrelated to the code you changed (CMake
+complaining about files you didn't touch, configure steps timing out
+on line one, paths pointing at an earlier branch), the host state is
+suspect — your code change probably isn't wrong. Diagnose before
+iterating:
+
+```bash
+# ssh to the Pulp validate checkout; mac is local so only ubuntu/windows apply
+ssh win                                          # or ssh ubuntu
+cd C:\Users\danielraffel\pulp-validate           # Windows path; Linux is ~/pulp-validate
+git log -1 --oneline && git status --short       # expected SHA? clean worktree?
+ls -la .shipyard-stage-*                         # leftover stage dirs?
+rm -rf .shipyard-stage-*                         # safe — shipyard re-stages from scratch
+```
+
+On a genuinely stale host (validate worktree stuck on a several-weeks-old
+commit with 20+ `.shipyard-stage-*` artefacts), `git fetch origin &&
+git reset --hard origin/main` on the validate checkout + the `rm -rf`
+above bring it back to a clean state. Re-run `shipyard run --targets
+<host>` after cleanup.
+
 ### Incremental bundles (automatic)
 
 SSH validation now sends only the git delta between the remote HEAD
