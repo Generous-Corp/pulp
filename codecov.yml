@@ -58,17 +58,19 @@ comment:
   behavior: default
   require_changes: true        # only post when coverage data is present
 
-# Flags carve up the codebase along the three axes we care about:
-# subsystem, platform, and surface. Defined per the canonical table
-# in issue #566. Cross-filter from the dashboard: e.g. `audio AND
-# linux` answers "what's audio coverage on Linux specifically?" —
-# useful when an ALSA-only regression would otherwise hide inside a
-# healthy multi-platform subsystem number.
+# Flag definitions are retained for Phase 1 PR 4 (per-OS upload jobs)
+# and for future workflows that genuinely upload one file per flag.
+# The main coverage.yml upload does NOT attach any flags — Codecov
+# rejects single-upload multi-flag submissions with "Multiple flags
+# detected. Please ensure one flag per upload." The per-subsystem /
+# per-platform / per-surface breakdown comes from `component_management`
+# below, which slices the single upload by path. Component IDs mirror
+# these flag names 1:1 so cross-referencing stays consistent.
 #
-# 13 core subsystems + 4 platforms + 3 surfaces = 20 flags (Phase 1
-# baseline). Adding a new subsystem adds a new flag + tier entry
-# here + a row in docs/reference/modules.md (Phase 4's doc-sync
-# gate will keep those three honest).
+# 13 core subsystems + 4 platforms + 3 surfaces = 20 flag/component
+# pairs. Adding a new subsystem means: new flag entry here, matching
+# component entry below, and a row in docs/reference/modules.md
+# (Phase 4's doc-sync gate keeps those three honest).
 flags:
   # Core subsystems (13) — one flag per top-level core/** directory.
   audio:
