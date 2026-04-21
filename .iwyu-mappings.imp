@@ -1,0 +1,47 @@
+// Pulp-specific IWYU mappings (issue #594 Phase 2).
+//
+// IWYU (include-what-you-use) runs as an advisory CI gate on the
+// Linux Clang lane to catch transitive-include bugs at compile time
+// instead of on a cross-platform CI run. Some of Pulp's vendored
+// single-header libraries and internal style conventions need
+// explicit mappings so IWYU doesn't suggest rewriting the world.
+//
+// Format:  { include: ["<private header>", <public-or-private>, "<public header>", <public-or-private>] }
+// Format:  { symbol:  ["<symbol>", <public-or-private>, "<public header>", <public-or-private>] }
+//
+// See https://github.com/include-what-you-use/include-what-you-use/blob/master/docs/IWYUMappings.md
+//
+// Keep this list minimal and intentional — every mapping papers over
+// an IWYU analysis that would otherwise be correct. Prefer fixing the
+// code (adding the include) over adding a mapping.
+
+[
+    # ── CHOC single-header redirects ────────────────────────────────────
+    # CHOC ships as amalgamated headers; IWYU's "private/public" model
+    # only has one choice here — the canonical include IS the amalgam.
+    { include: ["<choc/audio/choc_AudioFileFormat_WAV.h>",   "private", "<choc/audio/choc_AudioFileFormat_WAV.h>",   "public"] },
+    { include: ["<choc/audio/choc_AudioFileFormat_FLAC.h>",  "private", "<choc/audio/choc_AudioFileFormat_FLAC.h>",  "public"] },
+    { include: ["<choc/audio/choc_AudioFileFormat_Ogg.h>",   "private", "<choc/audio/choc_AudioFileFormat_Ogg.h>",   "public"] },
+    { include: ["<choc/audio/choc_AudioFileFormat.h>",       "private", "<choc/audio/choc_AudioFileFormat.h>",       "public"] },
+    { include: ["<choc/audio/choc_SampleBuffers.h>",         "private", "<choc/audio/choc_SampleBuffers.h>",         "public"] },
+    { include: ["<choc/containers/choc_Value.h>",            "private", "<choc/containers/choc_Value.h>",            "public"] },
+    { include: ["<choc/containers/choc_SingleReaderSingleWriterFIFO.h>", "private", "<choc/containers/choc_SingleReaderSingleWriterFIFO.h>", "public"] },
+    { include: ["<choc/javascript/choc_javascript_QuickJS.h>", "private", "<choc/javascript/choc_javascript_QuickJS.h>", "public"] },
+    { include: ["<choc/text/choc_JSON.h>",                   "private", "<choc/text/choc_JSON.h>",                   "public"] },
+    { include: ["<choc/text/choc_StringUtilities.h>",        "private", "<choc/text/choc_StringUtilities.h>",        "public"] },
+
+    # ── libstdc++ internal → public ─────────────────────────────────────
+    # IWYU frequently suggests the libstdc++ detail headers; redirect
+    # to the canonical public header instead.
+    { include: ["<bits/std_abs.h>",                 "private", "<cstdlib>",  "public"] },
+    { include: ["<bits/std_function.h>",            "private", "<functional>", "public"] },
+    { include: ["<bits/chrono.h>",                  "private", "<chrono>",   "public"] },
+    { include: ["<bits/shared_ptr.h>",              "private", "<memory>",   "public"] },
+    { include: ["<bits/unique_ptr.h>",              "private", "<memory>",   "public"] },
+    { include: ["<bits/stl_algo.h>",                "private", "<algorithm>", "public"] },
+    { include: ["<bits/stl_algobase.h>",            "private", "<algorithm>", "public"] },
+    { include: ["<bits/atomic_base.h>",             "private", "<atomic>",   "public"] },
+
+    # ── Catch2 is test-only; never suggest trimming its includes ───────
+    { include: ["@<catch2/.*>",                     "private", "<catch2/catch_test_macros.hpp>", "public"] },
+]

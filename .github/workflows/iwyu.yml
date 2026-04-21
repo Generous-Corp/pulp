@@ -1,0 +1,234 @@
+name: IWYU advisory
+
+# include-what-you-use advisory gate for issue #594 Phase 2.
+#
+# Transitive-include bugs (code that uses std::X but only picks up
+# X's header transitively) keep reaching main because Apple Clang's
+# libc++ tolerates the miss while Linux Clang + MSVC reject. Three
+# incidents on 2026-04-21 (#540, Slice 4 <atomic>, #593) triggered
+# this gate. Phase 1 (#593) tightened the coverage-build gate so the
+# bugs can't hide silently. This workflow catches them earlier — at
+# IWYU-analysis time — before they reach the cross-platform matrix.
+#
+# Advisory until 2026-05-05: continue-on-error is true, PR diff
+# gets inline annotations, merge is not blocked. After the FP rate
+# settles (Phase 3 of #594), this flips to blocking.
+#
+# Scope:
+#   - PR events  → analyze only files changed vs origin/<base>
+#   - Push main → full repo scan, artifact uploaded for FP tracking
+#
+# Platform:
+#   - Linux Clang only. macOS libc++ hides the bug class (false
+#     negatives); MSVC is not Clang.
+#
+# Local equivalent (developers can validate before pushing):
+#   sudo apt-get install iwyu   # or build from source if stale
+#   cmake -S . -B build -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+#   iwyu_tool.py -p build path/to/file.cpp \
+#       | python3 tools/scripts/iwyu_annotate.py
+
+on:
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'core/**'
+      - 'examples/**'
+      - 'tools/cli/**'
+      - 'test/**'
+      - 'CMakeLists.txt'
+      - 'tools/cmake/**'
+      - '.github/workflows/iwyu.yml'
+      - '.iwyu-mappings.imp'
+      - 'tools/scripts/iwyu_annotate.py'
+      - 'tools/scripts/test_iwyu_annotate.py'
+  push:
+    branches: [main]
+    paths:
+      - 'core/**'
+      - 'examples/**'
+      - 'tools/cli/**'
+      - 'test/**'
+      - 'CMakeLists.txt'
+      - 'tools/cmake/**'
+      - '.github/workflows/iwyu.yml'
+      - '.iwyu-mappings.imp'
+      - 'tools/scripts/iwyu_annotate.py'
+  workflow_dispatch:
+
+concurrency:
+  group: iwyu-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  iwyu:
+    name: IWYU (Linux, Clang) — advisory
+    runs-on: ubuntu-24.04
+    # Phase 2 advisory period — do NOT block PR merges.
+    # Flip to false on 2026-05-05 after FP rate < 5% per #594.
+    continue-on-error: true
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # Need base branch history to compute changed files on PR.
+          fetch-depth: 0
+          submodules: false
+          lfs: false
+
+      - name: Run iwyu_annotate.py fixture tests
+        # Same pattern as coverage.yml / docs-check: test the helper
+        # before we depend on it in a live step, so a regression fails
+        # fast without burning the build.
+        run: python3 tools/scripts/test_iwyu_annotate.py
+        shell: bash
+
+      - name: Install IWYU + Clang + Linux dev headers
+        # ubuntu-24.04 ships an `iwyu` apt package that links against
+        # system Clang. Package version tracks the distro Clang (18
+        # on 24.04), which is new enough for our C++20 use. If the
+        # distro version lags we can switch to building from source —
+        # flagged here for future maintainers.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            iwyu clang llvm lld \
+            libasound2-dev libdbus-1-dev libdrm-dev libegl1-mesa-dev \
+            libgbm-dev libgl1-mesa-dev libx11-dev libxext-dev libxfixes-dev \
+            libxi-dev libxinerama-dev libxkbcommon-dev libxrandr-dev \
+            libxrender-dev libxss-dev libxtst-dev libwayland-dev wayland-protocols
+          include-what-you-use --version || true
+          which iwyu_tool.py || which iwyu_tool || true
+
+      - name: Bootstrap dependencies
+        run: ./setup.sh --ci --deps-only
+        shell: bash
+
+      - name: Configure with compile_commands.json
+        # IWYU reads compile_commands.json to match a file's actual
+        # compiler flags. PULP_BUILD_TESTS/EXAMPLES OFF keeps the
+        # compile DB scoped to the core subsystems — IWYU on a
+        # 2,000-TU test tree blows past the job timeout.
+        run: |
+          cmake -S . -B build-iwyu \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+            -DCMAKE_C_COMPILER=clang \
+            -DCMAKE_CXX_COMPILER=clang++ \
+            -DPULP_BUILD_TESTS=ON \
+            -DPULP_BUILD_EXAMPLES=OFF \
+            -DPULP_ENABLE_GPU=OFF
+          test -s build-iwyu/compile_commands.json
+
+      - name: Compute changed files (PR) or full scan (push)
+        id: files
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
+            base_ref="origin/${{ github.base_ref }}"
+            git fetch --no-tags origin "${{ github.base_ref }}:refs/remotes/${base_ref}" || true
+            # Changed files: C/C++ sources and headers only, skip deleted
+            # entries (no file to lint) and generated/external trees.
+            git diff --name-only --diff-filter=d "${base_ref}...HEAD" \
+              | grep -E '\.(cpp|cc|cxx|hpp|h|hh|hxx|mm|m)$' \
+              | grep -Ev '^(external/|build/|build-iwyu/|_deps/)' \
+              > changed-files.txt || true
+            echo "scope=pr" >> "$GITHUB_OUTPUT"
+            count=$(wc -l < changed-files.txt | tr -d ' ')
+            echo "changed_count=${count}" >> "$GITHUB_OUTPUT"
+            echo "Changed C/C++ files: ${count}"
+            cat changed-files.txt || true
+          else
+            # Full repo scan on push-to-main.
+            : > changed-files.txt
+            echo "scope=full" >> "$GITHUB_OUTPUT"
+            echo "changed_count=0" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run IWYU (advisory)
+        # iwyu_tool.py reads compile_commands.json and invokes IWYU
+        # per-TU. On PR events we pass only the changed paths; on
+        # push-to-main we let it scan the full compile DB. Any IWYU
+        # exit code is non-fatal here — the script below classifies
+        # the findings.
+        id: iwyu
+        shell: bash
+        run: |
+          set +e
+          # Locate the iwyu_tool wrapper (name varies across packagings).
+          iwyu_tool=""
+          for candidate in iwyu_tool.py iwyu_tool iwyu-tool; do
+            if command -v "$candidate" >/dev/null 2>&1; then
+              iwyu_tool="$candidate"
+              break
+            fi
+          done
+          if [ -z "$iwyu_tool" ]; then
+            echo "::warning::iwyu_tool not found; skipping IWYU run."
+            : > iwyu-raw.txt
+            exit 0
+          fi
+          echo "Using ${iwyu_tool}"
+
+          iwyu_args=(
+            -p build-iwyu
+            --
+            -Xiwyu --mapping_file="$(pwd)/.iwyu-mappings.imp"
+            -Xiwyu --no_fwd_decls
+            -Xiwyu --quoted_includes_first
+          )
+
+          if [ "${{ steps.files.outputs.scope }}" = "pr" ] && [ -s changed-files.txt ]; then
+            xargs -a changed-files.txt "$iwyu_tool" "${iwyu_args[@]}" > iwyu-raw.txt 2>&1 || true
+          elif [ "${{ steps.files.outputs.scope }}" = "pr" ]; then
+            echo "No C/C++ files changed in PR; skipping IWYU scan."
+            : > iwyu-raw.txt
+          else
+            "$iwyu_tool" "${iwyu_args[@]}" > iwyu-raw.txt 2>&1 || true
+          fi
+          wc -l iwyu-raw.txt || true
+
+      - name: Emit GitHub annotations + summary
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ steps.files.outputs.scope }}" = "pr" ]; then
+            python3 tools/scripts/iwyu_annotate.py \
+              --input iwyu-raw.txt \
+              --changed-files-from changed-files.txt \
+              --flip-date 2026-05-05 \
+              --advisory \
+              --summary-file "$GITHUB_STEP_SUMMARY"
+          else
+            python3 tools/scripts/iwyu_annotate.py \
+              --input iwyu-raw.txt \
+              --flip-date 2026-05-05 \
+              --advisory \
+              --summary-file "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload full IWYU report (push-to-main scan)
+        # On push-to-main we retain the full scan output so we can
+        # track the FP rate over the 2-week advisory window and
+        # decide when to flip to blocking (Phase 3 of #594).
+        if: always() && steps.files.outputs.scope == 'full'
+        uses: actions/upload-artifact@v6
+        with:
+          name: iwyu-full-scan-${{ github.sha }}
+          path: iwyu-raw.txt
+          retention-days: 30
+          if-no-files-found: warn
+
+      - name: Upload changed-files report (PR scan)
+        if: always() && steps.files.outputs.scope == 'pr'
+        uses: actions/upload-artifact@v6
+        with:
+          name: iwyu-pr-report-${{ github.sha }}
+          path: |
+            iwyu-raw.txt
+            changed-files.txt
+          retention-days: 14
+          if-no-files-found: warn
