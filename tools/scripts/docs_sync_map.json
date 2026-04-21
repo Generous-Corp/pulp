@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "_comment": "Docs-sync map — #566 Phase 4 / #567. Mirrors skill_path_map.json's shape but for docs. When a PR's diff touches any glob under a given doc's `paths`, the doc MUST be updated in the same diff OR a `Docs-Update: skip doc=<name> reason=\"...\"` trailer must appear on the tip commit. Paired with tools/scripts/docs_sync_check.py.\n\nKeep the initial surface small and high-value: places where docs have drifted from code in real session experience (today's `coverage.md` drift after the 20-flag table became stale; yesterday's CLI docs lagging behind cmd_* changes). Add entries as new drift patterns surface.\n\nDoc names must refer to a single file under docs/ (or repo-root README/CHANGELOG). `paths` are fnmatch globs applied to repo-relative paths (same semantics as skill_path_map.json).",
+  "docs": {
+    "coverage.md": {
+      "path": "docs/guides/coverage.md",
+      "paths": [
+        "codecov.yml",
+        "ci/coverage-targets.yaml",
+        "scripts/run_coverage.sh",
+        "tools/cmake/PulpInstrumentation.cmake",
+        "tools/scripts/coverage_tier_check.py",
+        "tools/scripts/coverage_diff_comment.py",
+        ".github/workflows/coverage.yml"
+      ]
+    },
+    "cli.md": {
+      "path": "docs/reference/cli.md",
+      "paths": [
+        "tools/cli/pulp_cli.cpp",
+        "tools/cli/cmd_*.cpp",
+        "tools/cli/cmd_*.hpp"
+      ]
+    },
+    "versioning.md": {
+      "path": "docs/guides/versioning.md",
+      "paths": [
+        "tools/scripts/version_bump_check.py",
+        "tools/scripts/versioning.json",
+        ".github/workflows/version-skill-check.yml",
+        ".github/workflows/auto-release.yml"
+      ]
+    },
+    "iwyu.md": {
+      "path": "docs/guides/iwyu.md",
+      "paths": [
+        ".iwyu-mappings.imp",
+        ".github/workflows/iwyu.yml",
+        "tools/scripts/iwyu_annotate.py"
+      ]
+    }
+  }
+}

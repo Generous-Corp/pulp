@@ -65,6 +65,21 @@ jobs:
               --config tools/scripts/versioning.json \
               --mode=report
 
+      - name: Docs-sync check (#566 Phase 4 / #567)
+        # Advisory-only during bring-up — the initial docs_sync_map.json
+        # covers 4 high-value docs (coverage, cli, versioning, iwyu) and
+        # the map is expected to grow as new drift patterns surface.
+        # continue-on-error: true keeps a missing-doc from blocking PRs
+        # while we calibrate the map. Flip to hard-fail (drop this line)
+        # once the map is stable and false-positive-free for a couple of
+        # PR cycles.
+        continue-on-error: true
+        run: |
+          python3 tools/scripts/docs_sync_check.py \
+              --base "${{ steps.base.outputs.ref }}" \
+              --config tools/scripts/docs_sync_map.json \
+              --mode=report
+
       - name: Version-bump check
         run: |
           python3 tools/scripts/version_bump_check.py \
@@ -75,3 +90,4 @@ jobs:
       - name: Gate-script fixture tests
         run: |
           python3 tools/scripts/test_gates.py
+          python3 tools/scripts/test_docs_sync_check.py
