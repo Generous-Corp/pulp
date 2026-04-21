@@ -2,7 +2,7 @@
 
 Pulp is an MIT-licensed, cross-platform framework for building audio plugins and applications. C++20 at the core, GPU-rendered UIs via Dawn and Skia, JavaScript scripting with hot-reload, and tooling built for modern development workflows.
 
-See [VISION.md](../../VISION.md) for the full architecture and design decisions. See [Capabilities Reference](../reference/capabilities.md) for detailed per-feature status.
+See [the Vision doc](vision.md) for the full architecture and design decisions. See [Capabilities Reference](../reference/capabilities.md) for detailed per-feature status.
 
 ## What It Does
 

@@ -1,3 +1,10 @@
+# Docs deploy — primary pipeline for generouscorp.com/pulp.
+#
+# PR 3 of #577 flipped this workflow from the in-tree tools/build-docs.py
+# generator to MkDocs Material. The legacy generator stays in-tree through
+# the #577 PR 3 → PR 4 window and can be re-activated via
+# `workflow_dispatch` with `use_legacy_generator=true` as an emergency
+# fallback. PR 4 removes that fallback after a successful soak.
 name: Deploy Docs
 
 on:
@@ -5,14 +12,22 @@ on:
     branches: [main]
     paths:
       - 'docs/**'
-      - 'core/**/include/**'
+      - 'mkdocs.yml'
+      - 'requirements-docs.txt'
+      - 'tools/mkdocs_hooks.py'
       - 'tools/build-docs.py'
       - 'tools/build-api-docs.sh'
       - 'tools/install/install.sh'
       - 'tools/install/install.ps1'
       - 'docs/doxygen/**'
+      - 'core/**/include/**'
       - '.github/workflows/docs-deploy.yml'
   workflow_dispatch:
+    inputs:
+      use_legacy_generator:
+        description: 'Emergency fallback: render with tools/build-docs.py instead of MkDocs Material'
+        type: boolean
+        default: false
 
 permissions:
   actions: read
@@ -27,24 +42,43 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      USE_LEGACY: ${{ inputs.use_legacy_generator && 'true' || 'false' }}
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0  # git-revision-date plugin walks history
 
       - name: Set up Python
         uses: actions/setup-python@v6
         with:
           python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements-docs.txt
 
       - name: Install Doxygen
         run: sudo apt-get install -y doxygen
 
-      - name: Build docs site
+      # ── Material path (default) ────────────────────────────────────────
+      - name: Install MkDocs Material
+        if: env.USE_LEGACY != 'true'
+        run: pip install -r requirements-docs.txt
+
+      - name: Build Material site
+        if: env.USE_LEGACY != 'true'
+        run: mkdocs build --site-dir build/site
+
+      # ── Legacy path (emergency fallback via workflow_dispatch) ─────────
+      - name: Build legacy site (custom generator)
+        if: env.USE_LEGACY == 'true'
         run: |
+          echo "::warning::Building with legacy tools/build-docs.py — see #577 PR 3 notes."
           python3 tools/build-docs.py \
             --output build/site \
             --base-url /pulp/ \
             --branch main
 
+      # ── Shared: API reference (both paths) ─────────────────────────────
       - name: Build API reference
         run: |
           chmod +x tools/build-api-docs.sh
@@ -52,26 +86,29 @@ jobs:
 
       - name: Merge site and API docs
         run: |
-          # API docs go under /pulp/api/
           if [ -d build/api-docs/html ]; then
-            cp -r build/api-docs/html build/site/api
+            mkdir -p build/site/api
+            cp -r build/api-docs/html/. build/site/api/
             echo "API docs merged into site at /api/"
+          else
+            echo "::error::No API docs produced — aborting deploy" >&2
+            exit 1
           fi
 
+      # ── Pagefind (legacy only — Material ships its own search) ─────────
       - name: Set up Node.js
+        if: env.USE_LEGACY == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
-      - name: Build Pagefind search index
-        # Pagefind crawls build/site and writes `pagefind/` into it —
-        # the client-side search widget wired into tools/build-docs.py
-        # loads pagefind-ui.{css,js} from `{base_url}pagefind/`.
+      - name: Build Pagefind search index (legacy only)
+        if: env.USE_LEGACY == 'true'
         run: npx --yes pagefind --site build/site
 
+      # ── Shared: install scripts at site root ───────────────────────────
       - name: Copy install scripts
         run: |
-          # Install scripts accessible at www.generouscorp.com/pulp/install.sh
           cp tools/install/install.sh build/site/install.sh
           cp tools/install/install.ps1 build/site/install.ps1
           echo "Install scripts copied to site root"

@@ -10,7 +10,7 @@ Pulp versions three surfaces independently:
 - **Shipyard pinned binary** — `tools/install-shipyard.sh` +
   `tools/deps/manifest.json`. This is an upstream release we
   consume, not a surface we ship; see [Dependency Update
-  Workflow](../../CLAUDE.md#dependency-update-workflow) for pin bumps.
+  Workflow](https://github.com/danielraffel/pulp/blob/main/CLAUDE.md#dependency-update-workflow) for pin bumps.
 
 The first two are **enforced**: PRs that change code in a surface's
 trigger paths without bumping its version are rejected before merge.
@@ -226,4 +226,4 @@ python3 tools/deps/audit.py --strict --check-upstream --format markdown
 python3 tools/deps/validate_hosts.py
 ```
 
-See [CLAUDE.md § Dependency Update Workflow](../../CLAUDE.md#dependency-update-workflow) for the full procedure. The `ci` skill's path map catches the file change and demands a SKILL.md review.
+See [CLAUDE.md § Dependency Update Workflow](https://github.com/danielraffel/pulp/blob/main/CLAUDE.md#dependency-update-workflow) for the full procedure. The `ci` skill's path map catches the file change and demands a SKILL.md review.

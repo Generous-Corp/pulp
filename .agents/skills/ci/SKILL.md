@@ -472,20 +472,23 @@ SSH key setup for Windows/Linux VMs: `docs/guides/local-ci.md` § "Set up SSH ke
 
 **Docs-site CI workflows:**
 
-- `.github/workflows/docs-deploy.yml` — builds + deploys the current
-  custom-generator site (`tools/build-docs.py` → Pagefind → GitHub Pages).
-  Deploys on push to `main` when `docs/**`, the builder script, or
-  install scripts change.
+- `.github/workflows/docs-deploy.yml` — builds + deploys the Pulp docs
+  site to GitHub Pages. PR 3 of #577 flipped the default renderer from
+  the custom `tools/build-docs.py` generator to **MkDocs Material**.
+  The legacy generator stays in-tree as an emergency fallback: trigger
+  `workflow_dispatch` with `use_legacy_generator=true` to re-render
+  with `tools/build-docs.py` (Pagefind is wired in only on that lane —
+  Material ships its own built-in search). Material is the default for
+  every push to `main`. PR 4 of #577 removes the fallback after soak.
 - `.github/workflows/docs-material.yml` — parallel MkDocs Material build
-  added under #577 PR 1, extended in PR 2 to build Doxygen + merge
-  `api/` into the artifact and to run the `tools/mkdocs_hooks.py`
-  pre-build drift checks (`docs_generate.py check` +
-  `check-docs-consistency.py`) plus the URL-flatten hook. Uploads
-  `build/site-material/` as a 14-day artifact. **No deploy.** Runs on
-  `pull_request` and `push` when `docs/**`, `mkdocs.yml`,
-  `requirements-docs.txt`, `tools/mkdocs_hooks.py`,
-  `tools/build-api-docs.sh`, or `core/**/include/**` change. Switchover
-  to make Material primary happens in #577 PR 3.
+  (PR-only preview) added under #577 PR 1 and extended in PR 2 to build
+  Doxygen + merge `api/` into the artifact and run the
+  `tools/mkdocs_hooks.py` pre-build drift checks (`docs_generate.py
+  check` + `check-docs-consistency.py`) plus the URL-flatten hook. Runs
+  on `pull_request` and `push` when the same docs paths change.
+  **No deploy** — uploads `build/site-material/` as a 14-day artifact
+  for visual review. Kept as a PR-lane preview after PR 3 so reviewers
+  see rendered output before it hits production.
 
 ## Required-check ruleset (issue #462)
 
