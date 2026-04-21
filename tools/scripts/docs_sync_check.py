@@ -64,19 +64,27 @@ def repo_root() -> Path:
 
 
 def diff_files(base_ref: str) -> list[str]:
-    try:
-        out = subprocess.check_output(
-            ["git", "diff", "--name-only", f"{base_ref}...HEAD"], text=True
-        )
-    except subprocess.CalledProcessError:
-        return []
+    # Let CalledProcessError propagate — a missing/unfetched base ref
+    # (common failure mode locally) must fail loud, not silently exit 0
+    # and claim "nothing to verify." Codex #613 P2.
+    out = subprocess.check_output(
+        ["git", "diff", "--name-only", f"{base_ref}...HEAD"], text=True
+    )
     return [line.strip() for line in out.splitlines() if line.strip()]
 
 
-def tip_commit_message() -> str:
+def range_commit_messages(base_ref: str) -> str:
+    """Concatenate every commit message in base..HEAD.
+
+    CI pull_request events check out a synthetic merge commit as HEAD,
+    so a `Docs-Update: skip` trailer on the branch tip wouldn't be
+    visible via `git log -1`. Walk the whole range so trailers on any
+    commit in the PR count as bypasses. Mirrors the
+    `git_range_trailers` pattern in skill_sync_check.py. Codex #613 P1.
+    """
     try:
         return subprocess.check_output(
-            ["git", "log", "-1", "--format=%B"], text=True
+            ["git", "log", "--format=%B", f"{base_ref}..HEAD"], text=True
         )
     except subprocess.CalledProcessError:
         return ""
@@ -187,8 +195,15 @@ def main(argv: list[str] | None = None) -> int:
 
     os.chdir(repo_root())
     docs = load_map(args.config)
-    diff = diff_files(args.base)
-    message = tip_commit_message()
+    try:
+        diff = diff_files(args.base)
+    except subprocess.CalledProcessError as exc:
+        print(f"docs-sync: git diff against '{args.base}' failed: {exc}",
+              file=sys.stderr)
+        print("  Fetch the base ref (e.g. `git fetch origin main`) and retry.",
+              file=sys.stderr)
+        return 2
+    message = range_commit_messages(args.base)
     findings = evaluate(docs, diff, message)
     report, all_good = render(findings)
     print(report)

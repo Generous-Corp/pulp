@@ -508,6 +508,12 @@ jobs:
               --markdown-report coverage-tier.md
 
       - name: Render PR comment body
+        # Required-gate failures (diff_cover exit_code != 0) used to skip
+        # this step under the default `if: success()` rule, meaning
+        # contributors got a red check with no comment explaining which
+        # lines were uncovered. Codex #611 P2 — render + upsert on failure
+        # too so the PR comment always reflects the real result.
+        if: always()
         run: |
           # Phase 3 landed: gate is required. --no-advisory flips the
           # banner to the required-gate form; the --flip-date argument
@@ -549,7 +555,9 @@ jobs:
         #
         # Skip fork PRs where GITHUB_TOKEN is read-only — posting would
         # hard-fail with a 403 even though this whole job is advisory.
-        if: github.event.pull_request.head.repo.full_name == github.repository
+        # `always() && …` so required-gate failures still upsert the
+        # explanatory comment (Codex #611 P2); the fork guard stays.
+        if: always() && github.event.pull_request.head.repo.full_name == github.repository
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

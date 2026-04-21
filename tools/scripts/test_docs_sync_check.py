@@ -71,6 +71,21 @@ class TrailerTests(unittest.TestCase):
     def test_no_trailer(self) -> None:
         self.assertEqual(dsc.parse_bypass_trailers("fix: nothing\n"), {})
 
+    def test_trailer_on_branch_tip_not_merge_commit(self) -> None:
+        # Codex #613 P1: CI checks out a synthetic merge commit, so a
+        # trailer on the branch-tip commit must still be found when we
+        # concatenate messages across base..HEAD.
+        multi_commit_bodies = (
+            "fix: work in progress\n\n"
+            "---\n"
+            "fix: final commit on branch tip\n\n"
+            'Docs-Update: skip doc=coverage.md reason="tier tweak only"\n'
+        )
+        self.assertEqual(
+            dsc.parse_bypass_trailers(multi_commit_bodies),
+            {"coverage.md": "tier tweak only"},
+        )
+
 
 class EvaluateTests(unittest.TestCase):
 

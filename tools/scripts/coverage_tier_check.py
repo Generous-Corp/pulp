@@ -191,6 +191,29 @@ def parse_cobertura(xml_path: pathlib.Path) -> dict[str, FileCoverage]:
     return out
 
 
+# ── Source filtering ───────────────────────────────────────────────────────
+
+
+# Extensions that the Clang source-based coverage pipeline actually
+# instruments. Scripts, CMake modules, YAML, shell, Python etc. in the
+# tier map (ship/**, tools/**) can't produce Cobertura entries, so the
+# old "missing file = fully uncovered" path would fail the infrastructure
+# tier for any PR that only touched those files. Codex #612 P1.
+_INSTRUMENTED_EXTS = frozenset({
+    ".c", ".cc", ".cpp", ".cxx", ".c++",
+    ".h", ".hh", ".hpp", ".hxx", ".h++",
+    ".m", ".mm",
+})
+
+
+def is_instrumented_source(relpath: str) -> bool:
+    """True iff the path has an extension the coverage pipeline instruments."""
+    dot = relpath.rfind(".")
+    if dot < 0:
+        return False
+    return relpath[dot:].lower() in _INSTRUMENTED_EXTS
+
+
 # ── Per-tier aggregation ───────────────────────────────────────────────────
 
 
@@ -231,6 +254,11 @@ def aggregate(
     for relpath in changed_files:
         tier = classify_file(relpath, tiers)
         if tier is None:
+            continue
+        # Non-instrumented files (CMake, shell, Python, YAML, …) can't
+        # produce coverage rows — don't count them as "uncovered" and
+        # tank the tier. Codex #612 P1.
+        if not is_instrumented_source(relpath):
             continue
         fc = coverage.get(relpath)
         if fc is None:

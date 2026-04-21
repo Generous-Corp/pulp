@@ -135,6 +135,35 @@ class AggregateTests(unittest.TestCase):
         self.assertFalse(audio.passed)  # 75% < 80% floor
 
 
+class InstrumentedSourceTests(unittest.TestCase):
+
+    def test_cpp_sources_are_instrumented(self) -> None:
+        for p in ("core/audio/src/a.cpp", "core/midi/include/x.hpp",
+                  "platform/mac/foo.mm", "tools/cli/cmd_pr.cpp"):
+            self.assertTrue(ctc.is_instrumented_source(p), msg=p)
+
+    def test_non_cpp_is_not_instrumented(self) -> None:
+        for p in ("tools/cmake/PulpUtils.cmake", "tools/build-skia.sh",
+                  "tools/scripts/coverage_tier_check.py",
+                  "ship/templates/appcast.xml.in", "README.md"):
+            self.assertFalse(ctc.is_instrumented_source(p), msg=p)
+
+    def test_aggregate_skips_non_instrumented_files(self) -> None:
+        # Codex #612 P1: a PR that only touches CMake/Python under
+        # `tools/**` must NOT fail the infrastructure tier because
+        # those files never produce Cobertura entries. Without the
+        # skip, all their changed lines would be counted as uncovered.
+        results = ctc.aggregate(
+            TIERS,
+            ["tools/cmake/PulpUtils.cmake", "tools/build-skia.sh"],
+            {},
+            lines_getter=lambda _p: {1, 2, 3, 4, 5, 6, 7, 8, 9, 10},
+        )
+        infra = next(r for r in results if r.tier.name == "infrastructure")
+        self.assertEqual(infra.touched_lines, 0)
+        self.assertTrue(infra.passed)
+
+
 class RenderTests(unittest.TestCase):
 
     def test_all_pass_banner(self) -> None:
