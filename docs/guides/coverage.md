@@ -45,12 +45,16 @@ Output:
   in a browser).
 - `build-coverage/coverage/summary.txt` — text summary matching the CI
   artifact.
-- `build-coverage/coverage.cobertura.xml` — Cobertura XML (only if
-  `gcovr` is on PATH; `pip install gcovr` if not).
+- `build-coverage/coverage/coverage.lcov` — LCOV produced by
+  `llvm-cov export`.
+- `build-coverage/coverage.cobertura.xml` — Cobertura XML converted
+  from the LCOV via the vendored `tools/scripts/lcov_cobertura.py`.
 
 The script requires Clang (not gcc) because we use Clang source-based
 coverage, not gcov. See `tools/cmake/PulpInstrumentation.cmake` for the
-flag configuration.
+flag configuration. `llvm-profdata` and `llvm-cov` must be on PATH —
+on macOS, export the Xcode toolchain:
+`export PATH="$(xcrun -f llvm-cov | xargs dirname):$PATH"`.
 
 Optional flags:
 
@@ -105,9 +109,11 @@ Source → Clang -fprofile-instr-generate -fcoverage-mapping
          ↓ (llvm-profdata merge)
        pulp.profdata
          ↓                               ↓
-    llvm-cov report/show           gcovr --cobertura
-    (human-readable HTML          (Cobertura XML for
-     + text summary)                Codecov + diff-cover)
+    llvm-cov report/show        llvm-cov export --format=lcov
+    (human-readable HTML                 ↓
+     + text summary)             lcov_cobertura.py
+                                         ↓
+                                Cobertura XML (Codecov + diff-cover)
 ```
 
 - **Instrumentation**: enabled via `-DPULP_ENABLE_COVERAGE=ON` at
@@ -119,12 +125,45 @@ Source → Clang -fprofile-instr-generate -fcoverage-mapping
   test writes its own profraw shard.
 - **Merge**: `llvm-profdata merge -sparse` unions them into a single
   profdata.
-- **Report**: `llvm-cov show` produces the HTML locally; `gcovr`
-  emits Cobertura XML for Codecov + diff-cover.
+- **Report**: `llvm-cov show` produces the HTML locally;
+  `llvm-cov export --format=lcov` plus the vendored
+  `tools/scripts/lcov_cobertura.py` converter emit Cobertura XML for
+  Codecov + diff-cover.
+- **`-object` list**: llvm-cov only reports translation units linked
+  into the binaries given via `-object`. The script passes every test
+  executable **plus** every first-party static archive (`libpulp-*.a`)
+  **plus** first-party non-test executables (CLI, standalone, inspect).
+  Passing only test binaries — as the original implementation did —
+  hides any subsystem no test transitively links, so a PR touching
+  that subsystem slides past the diff-cover gate with no rows to
+  score. Codex sanity-check + LLVM docs confirm `.a` archives are
+  accepted as `-object` inputs:
+  <https://llvm.org/docs/CommandGuide/llvm-cov.html>.
 - **Exclusions**: a canonical regex in `scripts/run_coverage.sh`
-  excludes `_deps/`, `external/`, `test/`, `catch2/`, `build/`, and
-  `build-coverage/`. Codecov's `ignore` list in `codecov.yml`
-  mirrors this set.
+  excludes `_deps/`, `external/`, `test/`, `catch2/`, `build/`,
+  `build-coverage/`, `examples/`, and `fetchcontent-src/`. Codecov's
+  `ignore` list in `codecov.yml` mirrors this set.
+
+### Why not gcovr?
+
+The initial pipeline used `gcovr --llvm-cov-binary <each_bin>` to
+bridge llvm-cov → Cobertura. Once the `-object` set widened from "just
+test binaries" to "every first-party library + executable," `llvm-cov
+report` correctly saw ~110k tracked lines across ~580 files but gcovr
+8.6 emitted a Cobertura XML with ~150 lines across 4 files — silently
+dropping ~99% of the data. The direct
+`llvm-cov export --format=lcov` + `lcov_cobertura.py` pipeline
+preserves the full surface. gcovr is no longer installed in CI.
+
+### Language coverage
+
+`PULP_ENABLE_COVERAGE` flips the **Clang C/C++** source-based
+instrumentation flags only. Swift code under `apple/` is built by
+SPM/Xcode and has a separate coverage pipeline
+(`swift test --enable-code-coverage`). It is not wired into the
+`scripts/run_coverage.sh` flow yet — tracked as issue #615. Until that
+lands, `apple/` will show as 0% on the dashboard; treat "Swift not yet
+instrumented" as the reason, not the test suite's fault.
 
 ## Cross-platform matrix
 

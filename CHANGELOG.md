@@ -9,6 +9,8 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
 <a id="v0330"></a>
+## [0.10.0]
+
 ## [0.33.0] - 2026-04-20
 
 - Ship feature/pulp-pr-shipyard-version-guard ([#606](https://github.com/danielraffel/pulp/pull/606))
