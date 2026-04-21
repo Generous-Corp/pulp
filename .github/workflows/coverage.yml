@@ -109,11 +109,17 @@ jobs:
 
       - name: Upload coverage to Codecov
         # #566 Phase 1 PR 2: Codecov measurement baseline. The repo
-        # is public so tokenless upload is supported. 20 flags (13
-        # core subsystems + 4 platforms + 3 surfaces) per codecov.yml
-        # — Codecov splits coverage per flag using the `paths:`
-        # mappings in codecov.yml, so we list them all here to tell
-        # Codecov which flag buckets to populate for this upload.
+        # is public so tokenless upload is supported.
+        #
+        # Subsystem / platform / surface slicing comes from the
+        # `component_management` block in codecov.yml — components
+        # split a single upload by path, which is Codecov's
+        # canonical mechanism for that breakdown and avoids the
+        # "Multiple flags detected. Please ensure one flag per
+        # upload." rejection we hit on 2026-04-20 when this step
+        # still attached all 20 flags to a single cobertura file.
+        # codecov.yml's component paths mirror the old flag paths
+        # 1:1, so the dashboard surface is unchanged.
         #
         # fail_ci_if_error: false — coverage is still advisory in
         # Phase 1. Phase 3 adds a diff-cover gate for per-PR
@@ -122,7 +128,6 @@ jobs:
         uses: codecov/codecov-action@v5
         with:
           files: build-coverage/coverage.cobertura.xml
-          flags: audio,canvas,events,format,host,midi,osc,platform,render,runtime,signal,state,view,android,apple,linux,windows,cli,ship,tools
           # Token makes upload more reliable (avoids tokenless rate limits);
           # action silently falls back to tokenless if the secret is unset
           # (e.g. in forked-PR context where secrets aren't exposed).
