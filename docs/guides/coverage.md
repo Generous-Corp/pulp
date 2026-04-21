@@ -86,18 +86,15 @@ finishes. The comment layout is `reach, diff, flags, tree`:
 - **tree** — per-file drilldown. Click through to see exactly which
   lines are uncovered.
 
-Coverage is advisory in the current phase — nothing fails a PR on
-coverage numbers alone.
+Project-level and patch-level coverage numbers are informational — they
+surface on every PR but don't block merges on their own.
 
-> **Diff-cover advisory window (2026-04-21 → 2026-05-04).** Every PR
-> also receives a "Diff coverage (Phase 1 advisory)" comment from the
-> `coverage-diff-gate` job. It answers "of the lines this PR adds or
-> modifies, how many are covered?" at a **75%** floor. During the
-> 2-week advisory window the percentage is informational only — even
-> 0% will not block a merge. **On 2026-05-04 the gate flips to
-> required**; after that date a PR whose diff coverage falls below
-> 75% will hard-fail this check and block the merge. File an issue
-> if the flip date needs to slip.
+**Diff-coverage gate (required).** Every PR also receives a "Diff
+coverage (required)" comment from the `coverage-diff-gate` job. It
+answers "of the lines this PR adds or modifies, how many are covered?"
+at a **75%** floor. Sub-threshold diff coverage hard-fails this check
+and blocks the merge — adding untested code means either adding tests
+or splitting the untested portion into its own PR.
 
 ## How the collection works
 

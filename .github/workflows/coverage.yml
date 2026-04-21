@@ -359,11 +359,10 @@ jobs:
     # this PR adds, how many are covered?" is meaningless on a direct
     # push to main where there is no diff to compute against.
     #
-    # Advisory-only for the first 2 weeks per the Phase 1 plan:
-    # `continue-on-error: true` means a sub-threshold diff does not
-    # block the PR. The job still posts a summary comment so
-    # contributors see the number. Phase 3 flips the gate to required.
-    name: Diff coverage advisory (${{ needs.coverage.result == 'success' && '75%' || 'coverage job failed' }})
+    # #566 Phase 3 (landed): the gate is REQUIRED — sub-threshold diff
+    # coverage now hard-fails the PR. The job still posts a summary
+    # comment so contributors see the number alongside the failing check.
+    name: Diff coverage required (${{ needs.coverage.result == 'success' && '75%' || 'coverage job failed' }})
     runs-on: ubuntu-24.04
     needs: coverage
     if: always() && github.event_name == 'pull_request'
@@ -416,13 +415,12 @@ jobs:
         run: python3 tools/scripts/test_coverage_diff_comment.py
         shell: bash
 
-      - name: Run diff-cover (advisory)
+      - name: Run diff-cover (required)
         id: diff_cover
-        # continue-on-error: true — Phase 1 is advisory. A sub-threshold
-        # result still marks the step red in the logs so contributors
-        # can see it at a glance, but does not fail the job and does
-        # not block the PR. Phase 3 removes continue-on-error here.
-        continue-on-error: true
+        # Phase 3: sub-threshold diff coverage hard-fails this job.
+        # The job still posts a summary comment via the downstream
+        # "Render PR comment body" step so contributors see the
+        # number alongside the failed check.
         shell: bash
         run: |
           set +e
@@ -447,20 +445,21 @@ jobs:
             cat coverage-diff.md
             echo "----- end coverage-diff.md -----"
           fi
-          # Propagate the real diff-cover exit code so sub-threshold
-          # coverage shows up as a failed step in the Actions UI. The
-          # overall job is still non-blocking because of
-          # `continue-on-error: true` on this step (advisory window
-          # until the 2026-05-04 flip; #580 Codex P2 / wave-4 sweep).
+          # Phase 3 (landed): propagate the diff-cover exit code so
+          # sub-threshold coverage fails the step AND the job, hard-blocking
+          # the PR. continue-on-error was removed at the step level above.
           exit "$rc"
 
       - name: Render PR comment body
         run: |
+          # Phase 3 landed: gate is required. --no-advisory flips the
+          # banner to the required-gate form; the --flip-date argument
+          # is no longer needed (no upcoming flip to announce).
           python3 tools/scripts/coverage_diff_comment.py \
               --report coverage-diff.md \
               --flip-date 2026-05-04 \
               --threshold 75 \
-              --advisory \
+              --no-advisory \
               --out coverage-diff-comment.md
           echo "----- coverage-diff-comment.md -----"
           cat coverage-diff-comment.md

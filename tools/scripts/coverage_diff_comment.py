@@ -79,7 +79,12 @@ def render(
     parts: list[str] = []
     parts.append(COMMENT_MARKER)
     parts.append("")
-    parts.append("## Diff coverage (Phase 1 advisory)")
+    header = (
+        "## Diff coverage (Phase 1 advisory)"
+        if advisory
+        else "## Diff coverage (required)"
+    )
+    parts.append(header)
     parts.append("")
 
     if advisory:
@@ -90,7 +95,7 @@ def render(
         )
     else:
         parts.append(
-            f"Diff coverage threshold: **{threshold}%** (required, issue #566 Phase 3)."
+            f"Diff coverage threshold: **{threshold}%** (required)."
         )
     parts.append("")
 
