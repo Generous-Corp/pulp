@@ -291,12 +291,27 @@ jobs:
         # `<` as a reserved redirection operator and errors out).
         shell: bash
         run: |
-          test -s build-coverage/coverage.cobertura.xml || {
+          xml=build-coverage/coverage.cobertura.xml
+          test -s "$xml" || {
             echo "::error::coverage.cobertura.xml is missing or empty."
             echo "::error::Coverage build likely failed — check the 'Run coverage suite' step above."
             exit 1
           }
-          echo "coverage.cobertura.xml size: $(wc -c < build-coverage/coverage.cobertura.xml) bytes"
+          size=$(wc -c < "$xml")
+          echo "coverage.cobertura.xml size: ${size} bytes"
+          # Pulp #605 — file-non-empty is necessary but not sufficient.
+          # gcovr writes a well-formed but structurally EMPTY XML when its
+          # filter expressions exclude every file it can see. Codecov v5
+          # rejects such reports as "Unusable report" and the dashboard
+          # stays empty despite green CI and a successful upload. Assert
+          # the XML actually contains coverage data before we ship it.
+          lines_valid=$(python3 -c "import xml.etree.ElementTree as E; print(E.parse('$xml').getroot().attrib.get('lines-valid', '0'))")
+          if [ "${lines_valid}" = "0" ]; then
+            echo "::error::coverage.cobertura.xml is structurally empty (lines-valid=0)."
+            echo "::error::gcovr filtered out every source file — check scripts/run_coverage.sh's --filter / --exclude regexes against the actual profraw source paths."
+            exit 1
+          fi
+          echo "coverage.cobertura.xml has lines-valid=${lines_valid}"
 
       - name: Upload Cobertura XML
         # Linux XML keeps the historical name `coverage-cobertura-${sha}`

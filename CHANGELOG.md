@@ -15,8 +15,6 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - chore(deps): bump pinned Shipyard v0.21.0 → v0.21.1 ([#604](https://github.com/danielraffel/pulp/pull/604))
 
 <a id="v0320"></a>
-## [0.9.0]
-
 ## [0.32.0] - 2026-04-20
 
 - cli: release-discovery Slice 7 pulp project bump + undo (#564) ([#599](https://github.com/danielraffel/pulp/pull/599))

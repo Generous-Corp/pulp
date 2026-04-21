@@ -574,6 +574,18 @@ TEST_CASE("pulp docs build-site resolves mkdocs.yml from project root",
     fs::path subdir = repo_root / "tools";
     REQUIRE(fs::exists(subdir));
 
+    // Pulp #597: pulp_binary() resolves from current_path() / "../tools/cli/pulp"
+    // — that assumes the test is run from <build>/test. When we change
+    // cwd below to <repo>/tools, the relative resolution points at
+    // <repo>/tools/cli/pulp (source, not built), which doesn't exist,
+    // and run_pulp silently returns exit_code=-1 without launching the
+    // CLI — making the regression test vacuous. Resolve the absolute
+    // binary path BEFORE the cwd change and pipe it through PULP_CLI_PATH,
+    // which pulp_binary() honors as an explicit override.
+    fs::path absolute_pulp_bin = fs::absolute(pulp_binary());
+    REQUIRE(fs::exists(absolute_pulp_bin));
+    setenv("PULP_CLI_PATH", absolute_pulp_bin.c_str(), 1);
+
     fs::path saved_cwd = fs::current_path();
     std::error_code ec;
     fs::current_path(subdir, ec);
@@ -587,6 +599,7 @@ TEST_CASE("pulp docs build-site resolves mkdocs.yml from project root",
                      60000);
 
     fs::current_path(saved_cwd, ec);  // always restore
+    unsetenv("PULP_CLI_PATH");
 
     REQUIRE_FALSE(r.timed_out);
     // Permit mkdocs-missing ("command not found" path, rc != 0 with

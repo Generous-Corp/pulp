@@ -2,8 +2,8 @@
 
 Coverage is measured per-subsystem, per-platform, and per-surface on
 macOS, Linux, and Windows, and uploaded to Codecov on every push.
-It's measurement-only today; per-PR gates land in a later phase
-(see [#566](https://github.com/danielraffel/pulp/issues/566)).
+[#566](https://github.com/danielraffel/pulp/issues/566) tracks the
+broader coverage initiative.
 
 ## Where the numbers live
 
@@ -165,17 +165,6 @@ The per-OS runs-on labels resolve through the shared
 `sanitizers.yml`). Set `PULP_COVERAGE_<OS>_RUNS_ON_JSON` as a repo
 variable to route any one leg to Namespace or a self-hosted runner
 without a workflow edit.
-
-## Phase roadmap (#566)
-
-- **Phase 0** — spike & stack decision. Landed.
-- **Phase 1** — measurement baseline (Codecov upload, diff-cover
-  advisory gate, cross-platform matrix). Landed.
-- **Phase 2** — per-tier coverage targets encoded in
-  `ci/coverage-targets.yaml`.
-- **Phase 3** — diff-cover flipped from advisory to required.
-- **Phase 4** — docs cleanup + generalized doc-sync enforcement
-  (tracked in #567).
 
 ## Related reading
 

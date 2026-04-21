@@ -79,8 +79,16 @@ BumpOptions parse_bump_options(const std::vector<std::string>& args,
         if (a == "--allow-downgrade")  { opts.allow_downgrade = true; continue; }
         if (a == "--verify-builds")    { opts.verify_builds = true; continue; }
         if (a == "--to") {
-            if (i + 1 < args.size()) opts.to_version = args[++i];
+            if (i + 1 >= args.size() || args[i + 1].empty()) {
+                std::cerr << "pulp project bump: --to requires a version argument\n";
+                std::exit(2);
+            }
+            opts.to_version = args[++i];
             continue;
+        }
+        if (a == "--to=" || (a.rfind("--to=", 0) == 0 && a.size() == 5)) {
+            std::cerr << "pulp project bump: --to= requires a version value (got empty)\n";
+            std::exit(2);
         }
         if (auto v = strip_eq_value(a, "--to"); !v.empty()) {
             opts.to_version = v;
@@ -322,12 +330,22 @@ pb::UndoEntry bump_one(const fs::path& project_path,
         // `build/` stays untouched. The CLI doesn't try to honor a
         // user-specified build dir here — that's a follow-up.
         auto verify_build = project_path / "build-bump-verify";
+        // Silence redirection — POSIX uses `/dev/null`, Windows cmd.exe
+        // uses `NUL`. Without branching on the host, a bare `>/dev/null`
+        // makes cmd.exe create a literal file named `dev\null` (or fail
+        // to parse) and the advertised `--verify-builds` flag rolls the
+        // pin back even on healthy projects. See codex-sweep(#599).
+#if defined(_WIN32)
+        const char* silence = " >NUL 2>&1";
+#else
+        const char* silence = " >/dev/null 2>&1";
+#endif
         std::string cfg = "cmake -S " + shell_quote(project_path) +
                           " -B " + shell_quote(verify_build) +
-                          " -DCMAKE_BUILD_TYPE=Debug >/dev/null 2>&1";
+                          " -DCMAKE_BUILD_TYPE=Debug" + silence;
         int rc = run(cfg);
         if (rc == 0) {
-            std::string bld = "cmake --build " + shell_quote(verify_build) + " >/dev/null 2>&1";
+            std::string bld = "cmake --build " + shell_quote(verify_build) + silence;
             rc = run(bld);
         }
         if (rc != 0) {

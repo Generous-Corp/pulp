@@ -189,18 +189,24 @@ if command -v gcovr >/dev/null 2>&1; then
             GCOVR_LLVM_BINS+=("--llvm-cov-binary" "${obj}")
         fi
     done
+    # Pulp #605: positive `--filter core/` and `--filter tools/cli/` were
+    # silently filtering out ALL coverage data on CI (gcovr's unanchored-regex
+    # semantics vs the absolute paths llvm-cov reports didn't line up),
+    # producing a well-formed but empty Cobertura XML that Codecov then
+    # rejected as "Unusable report." Dropping the positive filters — we rely
+    # on the `--exclude` set below, which mirrors codecov.yml's `ignore:`
+    # list. Anything not excluded is coverage-bearing by definition.
     gcovr \
         --root "${REPO_ROOT}" \
         --llvm-profdata-executable llvm-profdata \
         "${GCOVR_LLVM_BINS[@]}" \
-        --filter 'core/' \
-        --filter 'tools/cli/' \
         --exclude '.*/external/' \
         --exclude '.*/test/' \
         --exclude '.*/_deps/' \
         --exclude '.*/[Cc]atch2/' \
         --exclude '.*/build-coverage/' \
         --exclude '.*/build/' \
+        --exclude '.*/examples/' \
         --cobertura "${COBERTURA_XML}" \
         "${PROFRAW_DIR}" \
         || echo "gcovr exited non-zero — Cobertura XML may be partial (non-fatal)."

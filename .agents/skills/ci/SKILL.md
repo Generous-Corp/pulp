@@ -210,20 +210,41 @@ on line one, paths pointing at an earlier branch), the host state is
 suspect — your code change probably isn't wrong. Diagnose before
 iterating:
 
+On Linux (ssh ubuntu), the checkout is at `~/pulp-validate`; diagnose
+with standard POSIX commands:
+
 ```bash
-# ssh to the Pulp validate checkout; mac is local so only ubuntu/windows apply
-ssh win                                          # or ssh ubuntu
-cd C:\Users\danielraffel\pulp-validate           # Windows path; Linux is ~/pulp-validate
+ssh ubuntu
+cd ~/pulp-validate
 git log -1 --oneline && git status --short       # expected SHA? clean worktree?
-ls -la .shipyard-stage-*                         # leftover stage dirs?
+ls -la .shipyard-stage-* 2>/dev/null             # leftover stage dirs?
 rm -rf .shipyard-stage-*                         # safe — shipyard re-stages from scratch
 ```
 
+On Windows (ssh win), the checkout is at `C:\Users\danielraffel\pulp-validate`.
+OpenSSH on Windows runs commands through `cmd.exe` by default, so use
+cmd-native syntax — do NOT paste Windows-style backslash paths into a
+`bash` block (backslashes get interpreted as escapes):
+
+```bat
+:: Via ssh from your Mac; each command is a separate ssh call so cmd.exe parses cleanly
+ssh win "cd /d C:\Users\danielraffel\pulp-validate && git log -1 --oneline"
+ssh win "cd /d C:\Users\danielraffel\pulp-validate && git status --short"
+ssh win "cd /d C:\Users\danielraffel\pulp-validate && dir /b .shipyard-stage-*"
+```
+
+PowerShell is reliable for the removal step (the `for /d` cmd idiom is
+fragile when shipped through ssh argv quoting):
+
+```bash
+ssh win 'powershell -NoProfile -Command "cd C:\Users\danielraffel\pulp-validate; Get-ChildItem -Directory -Filter .shipyard-stage-* | Remove-Item -Recurse -Force"'
+```
+
 On a genuinely stale host (validate worktree stuck on a several-weeks-old
-commit with 20+ `.shipyard-stage-*` artefacts), `git fetch origin &&
-git reset --hard origin/main` on the validate checkout + the `rm -rf`
-above bring it back to a clean state. Re-run `shipyard run --targets
-<host>` after cleanup.
+commit with 20+ `.shipyard-stage-*` artefacts), combine `git fetch origin &&
+git reset --hard origin/main` on the validate checkout with the stage
+directory cleanup above. Re-run `shipyard run --targets <host>` after
+cleanup.
 
 ### Incremental bundles (automatic)
 
