@@ -200,6 +200,38 @@ while IFS= read -r f; do BINARIES+=("-object" "$f"); done < <(
          2>/dev/null || true
 )
 
+# ── Pre-flight: drop objects llvm-cov can't load ───────────────────────────
+# `llvm-cov report` refuses the entire run if any single -object produces
+# "malformed coverage data" (e.g. a Linux static archive with a bogus
+# coverage-mapping header — seen on CI with `libpulp-ship.a`). Probe each
+# binary individually with a minimal `llvm-cov report` against the merged
+# profdata; drop any that fail, log a warning. One bad archive should not
+# blackhole the whole pipeline.
+echo "=== Pre-flight: probing ${#BINARIES[@]} -object entries ==="
+PROBED=()
+SKIPPED=()
+prev=""
+for tok in "${BINARIES[@]}"; do
+    if [[ "${prev}" == "-object" ]]; then
+        if llvm-cov report -object="${tok}" -instr-profile="${PROFDATA}" \
+                >/dev/null 2>&1; then
+            PROBED+=("-object" "${tok}")
+        else
+            SKIPPED+=("${tok}")
+            echo "  ✗ skipping (malformed coverage data): ${tok}" >&2
+        fi
+    fi
+    prev="${tok}"
+done
+BINARIES=("${PROBED[@]}")
+if [[ ${#SKIPPED[@]} -gt 0 ]]; then
+    echo "=== Pre-flight: dropped ${#SKIPPED[@]} bad object(s); using ${#PROBED[@]} entries ==="
+fi
+if [[ ${#BINARIES[@]} -eq 0 ]]; then
+    echo "run_coverage.sh: pre-flight left zero loadable -object entries" >&2
+    exit 1
+fi
+
 echo "=== llvm-cov report (top-level summary) ==="
 llvm-cov report \
     "${BINARIES[@]}" \
