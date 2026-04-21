@@ -14,6 +14,7 @@
 /// buffer with the source event's `sample_offset` attached.
 
 #include <pulp/midi/mpe_voice_tracker.hpp>
+#include <algorithm>
 #include <cstdint>
 #include <vector>
 
