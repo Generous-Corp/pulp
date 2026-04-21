@@ -34,6 +34,7 @@
 
 #include "cli_common.hpp"
 
+#include <cctype>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
@@ -315,6 +316,88 @@ int exec_shipyard_pr(const std::string& shipyard_bin,
     return run_passthrough(cmd.str());
 }
 
+// ── Version guard ──────────────────────────────────────────────────────
+// Read the pinned `version = "vX.Y.Z"` line from tools/shipyard.toml.
+// Returns the bare "vX.Y.Z" (keeps the leading v so it compares
+// apples-to-apples with `shipyard --version` output we normalise below).
+// Returns empty on any failure — caller treats that as "can't verify,
+// proceed" so a missing pin file doesn't wedge offline work.
+std::string read_pinned_shipyard_version(const fs::path& root) {
+    std::ifstream f(root / "tools" / "shipyard.toml");
+    if (!f) return {};
+    std::string line;
+    while (std::getline(f, line)) {
+        auto t = trim(line);
+        if (t.rfind("version", 0) != 0) continue;
+        auto eq = t.find('=');
+        if (eq == std::string::npos) continue;
+        auto rhs = trim(t.substr(eq + 1));
+        if (rhs.size() >= 2 && rhs.front() == '"' && rhs.back() == '"') {
+            return rhs.substr(1, rhs.size() - 2);
+        }
+        return rhs;
+    }
+    return {};
+}
+
+// Parse `shipyard --version` output — shipyard prints:
+//     shipyard, version 0.21.1
+// Return the bare semver with a leading v so it matches the pin format.
+std::string capture_shipyard_version(const std::string& shipyard_bin) {
+    auto r = run_capture("'" + shipyard_bin + "' --version 2>&1");
+    if (r.exit_code != 0) return {};
+    auto out = trim(r.stdout_text);
+    auto pos = out.find("version");
+    if (pos == std::string::npos) return {};
+    auto after = trim(out.substr(pos + 7));
+    // Strip trailing punctuation/whitespace the parser might keep.
+    while (!after.empty() && (after.back() == ')' || after.back() == ',' || std::isspace(static_cast<unsigned char>(after.back())))) {
+        after.pop_back();
+    }
+    if (after.empty()) return {};
+    return after.front() == 'v' ? after : ("v" + after);
+}
+
+// Exact-equality guard. Returns 0 (pass) or 2 (fail + printed error).
+// Skipped entirely when PULP_PR_SKIP_VERSION_GUARD=1 is set.
+int enforce_shipyard_version_pin(const fs::path& root,
+                                 const std::string& shipyard_bin) {
+    if (const char* skip = std::getenv("PULP_PR_SKIP_VERSION_GUARD");
+        skip && std::string(skip) == "1") {
+        std::cerr << color::yellow()
+                  << "pulp pr: PULP_PR_SKIP_VERSION_GUARD=1 — bypassing "
+                     "shipyard version pin check.\n"
+                  << color::reset();
+        return 0;
+    }
+    auto pinned = read_pinned_shipyard_version(root);
+    if (pinned.empty()) return 0;  // can't verify → proceed
+    auto actual = capture_shipyard_version(shipyard_bin);
+    if (actual.empty()) return 0;  // can't verify → proceed
+    if (actual == pinned) return 0;
+
+    std::cerr << color::red() << "pulp pr: shipyard version pin mismatch.\n"
+              << color::reset()
+              << "\n"
+              << "  pinned in tools/shipyard.toml : " << pinned << "\n"
+              << "  shipyard --version            : " << actual << "\n"
+              << "  resolved from                 : " << shipyard_bin << "\n"
+              << "\n"
+              << "Fix one of:\n"
+              << "  (a) Reinstall the pinned binary to $HOME/.pulp/bin and\n"
+              << "      guarantee it's first on PATH:\n"
+              << "          ./tools/install-shipyard.sh\n"
+              << "  (b) Remove the stale binary at the path above:\n"
+              << "          rm " << shipyard_bin << "\n"
+              << "      (If it was installed via `uv tool install shipyard`,\n"
+              << "      also run `uv tool uninstall shipyard`.)\n"
+              << "\n"
+              << "Run `shipyard doctor` for the full picture.\n"
+              << "Bypass for intentional off-pin testing:\n"
+              << "  PULP_PR_SKIP_VERSION_GUARD=1 pulp pr\n";
+    return 2;
+}
+
 }  // namespace
 
 int cmd_pr(const std::vector<std::string>& args) {
@@ -342,6 +425,11 @@ int cmd_pr(const std::vector<std::string>& args) {
         }
         auto shipyard = locate_shipyard();
         if (!shipyard.empty()) {
+            if (auto root = find_project_root(); !root.empty()) {
+                if (int rc = enforce_shipyard_version_pin(root, shipyard); rc != 0) {
+                    return rc;
+                }
+            }
             return exec_shipyard_pr(shipyard, forward);
         }
         print_install_shipyard_hint();
