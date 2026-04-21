@@ -180,6 +180,50 @@ commands:
             description: Project directory to forget
     docs: reference/cli.md#projects
 
+  - name: project
+    status: usable
+    summary: Per-project SDK pin management — bump pinned Pulp version in CMakeLists.txt (FetchContent_Declare GIT_TAG / pulp_add_project VERSION / project VERSION) and undo the last batch. (#564)
+    subcommands:
+      - name: bump
+        summary: Bump the pinned Pulp SDK version (CWD by default; `--all` iterates the registry)
+        args:
+          - name: version
+            kind: positional
+            required: false
+            description: Target semver (alias for --to). Defaults to the CLI's own version.
+          - name: --to
+            kind: value
+            required: false
+            description: Target semver (e.g. 0.32.0). Rejects pre-release suffixes.
+          - name: --all
+            kind: flag
+            required: false
+            description: Iterate ~/.pulp/projects.json instead of the current directory
+          - name: --dry-run
+            kind: flag
+            required: false
+            description: Show plan without writing; never mutates anything
+          - name: --force-dirty
+            kind: flag
+            required: false
+            description: Skip the git-clean check on CMakeLists.txt
+          - name: --allow-downgrade
+            kind: flag
+            required: false
+            description: Permit target older than current pin
+          - name: --verify-builds
+            kind: flag
+            required: false
+            description: Build each project after bump; roll back the pin on failure
+      - name: undo
+        summary: Revert the newest `pulp project bump` batch (or a specific one by timestamp)
+        args:
+          - name: timestamp
+            kind: positional
+            required: false
+            description: ISO-8601 UTC stamp (as in the bump-undo-<timestamp>.json filename). Defaults to newest.
+    docs: reference/cli.md#project
+
   - name: docs
     status: usable
     summary: Browse local documentation and status manifests.

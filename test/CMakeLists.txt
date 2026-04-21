@@ -136,6 +136,40 @@ target_link_libraries(pulp-test-cli-projects-registry PRIVATE
     Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-cli-projects-registry)
 
+# CLI project bump (#499 Slice 7 / #564): pure-logic tests for the
+# CMakeLists pin parser, rewriter, refuse-dynamic-pin gate, semver /
+# downgrade guard, and the undo-batch JSON round-trip. project_bump.cpp
+# is deliberately free of cli_common link deps so the tests link it
+# standalone (same pattern as projects_registry / update_check /
+# update_mode).
+add_executable(pulp-test-cli-project-bump
+    test_cli_project_bump.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/project_bump.cpp
+)
+target_include_directories(pulp-test-cli-project-bump PRIVATE
+    ${CMAKE_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/tools/cli)
+target_link_libraries(pulp-test-cli-project-bump PRIVATE
+    Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-cli-project-bump)
+
+# CLI project bump --all (#499 Slice 7 / #564): batch-level
+# invariants — partial failure isolation, missing-project reporting,
+# undo round-trip across mixed-status batches, and the --allow-downgrade
+# gate. Links both project_bump.cpp and projects_registry.cpp so the
+# batch simulation can drive a real ~/.pulp/projects.json roundtrip.
+add_executable(pulp-test-cli-project-bump-all
+    test_cli_project_bump_all.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/project_bump.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/projects_registry.cpp
+)
+target_include_directories(pulp-test-cli-project-bump-all PRIVATE
+    ${CMAKE_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/tools/cli)
+target_link_libraries(pulp-test-cli-project-bump-all PRIVATE
+    Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-cli-project-bump-all)
+
 # CLI update-check (#499 Slice 2 / #547): pure-logic tests for the
 # ~/.pulp/update-cache.json round-trip, is_cache_stale boundary,
 # semver comparison, banner composition, TOML writer, and the

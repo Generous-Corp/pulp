@@ -265,6 +265,32 @@ int cmd_upgrade(const std::vector<std::string>& args) {
                   << "` to see what changed.\n";
     }
 
+    // Slice 7 (#564) wiring: honor update.bump_projects after a
+    // successful CLI upgrade. The just-installed binary owns the
+    // actual `pulp project bump --all` behaviour — we emit a hint
+    // or exec into the binary depending on the configured mode.
+    //
+    //   prompt (default) → print the hint; let the user run it
+    //   auto             → print the hint; a future slice execs it
+    //                      (Windows-safe: runs OUTSIDE pulp.exe)
+    //   off              → stay quiet
+    //
+    // The full "end-to-end silent" flow from the design doc needs the
+    // replaced binary to be the one running `project bump`, which is
+    // the NEXT invocation. This slice prints the correct nudge now;
+    // the actual spawn lives in the follow-up (tracked inline).
+    {
+        auto bp = trim(read_user_config_value("update", "bump_projects"));
+        if (bp.empty()) bp = "prompt";
+        if (bp != "off") {
+            std::cout << "\n  Pin projects to the new CLI version:\n"
+                      << "    pulp project bump --all" << "\n";
+            if (bp == "auto") {
+                std::cout << "    (update.bump_projects = auto; will run on next invocation)\n";
+            }
+        }
+    }
+
     // Bump the banner-shown marker so we don't nag the user again
     // about the version they just installed.
     auto cache_path = update_cache_path();

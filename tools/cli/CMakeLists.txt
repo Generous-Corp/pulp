@@ -66,6 +66,8 @@ add_executable(pulp-cli
     version_diag.cpp
     projects_registry.cpp
     cmd_projects.cpp
+    project_bump.cpp
+    cmd_project.cpp
     update_check.cpp
     update_mode.cpp
     migration_runtime.cpp

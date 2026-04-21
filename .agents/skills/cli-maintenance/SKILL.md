@@ -43,7 +43,7 @@ requires:
 - It's a subcommand of something already covered
 
 **Commands that intentionally don't have slash commands:**
-audio, cache, clean, export-tokens, ci-local, design-debug, help, projects
+audio, cache, clean, export-tokens, ci-local, design-debug, help, projects, project
 
 **Commands that DO have slash commands** (list for cross-reference, not exhaustive — `ls .claude/commands/` is authoritative):
 build, test, run, validate, ship, version, doctor, create, docs, status, design, import-design, inspect, pr, ci, upgrade
@@ -255,6 +255,54 @@ Gotchas:
 - **`--scan-parents` reads `CMakeLists.txt` with a simple regex**
   (`\bpulp_add_[A-Za-z0-9_]+\s*\(`). Matches any `pulp_add_*` macro
   the SDK introduces without requiring a new entry here.
+
+## `pulp project bump` / `pulp project undo` (#499 / #564 Slice 7)
+
+`pulp project bump` and `pulp project undo` live in
+`tools/cli/cmd_project.cpp` and delegate to the pure-logic core in
+`tools/cli/project_bump.{hpp,cpp}`. Behavior summary:
+
+- Bump reads `CMakeLists.txt`, locates the first Pulp pin (FetchContent
+  GIT_TAG, `pulp_add_project(VERSION ...)`, or `project(NAME VERSION
+  ...)`), rewrites it atomically, records an undo batch, and prints
+  Slice 3 (#548) migration notes for the hop.
+- `--all` iterates `~/.pulp/projects.json` (Slice 1b #552).
+- Undo reads `bump-undo-<timestamp>.json` and reverts `bumped` entries.
+
+Gotchas:
+
+- **Singular `project` command, not `projects`.** Registry commands
+  (`pulp projects list/add/remove`) are plural; per-project pin
+  management is singular. Both exist side-by-side in the dispatch
+  table — keep them separate in help text and docs.
+- **Undo filenames replace `:` with `-`.** ISO-8601 stamps contain
+  colons which are illegal on Windows. `undo_batch_path()` maps
+  `2026-04-21T14:30:00Z` → `bump-undo-2026-04-21T14-30-00Z.json`.
+  Tests pin this; don't "fix" it on POSIX without updating Windows.
+- **Dynamic pins (branches, SHAs) are skipped, not failed.**
+  `refuse_dynamic_pin()` returns true for anything that isn't
+  semver-after-optional-`v`. Status ends up as `"skipped"` with a
+  human-readable reason in `failure_reason`. Do not rewrite these.
+- **`project_bump` is decoupled from `cli_common`.** Same rule as
+  `projects_registry` / `update_mode` — the unit test binaries link
+  just the module + Catch2. Don't reach into `cli_common.hpp` from
+  `project_bump.cpp`.
+- **Catch2 test names can't contain `--flag`.** The Catch2 runner
+  parses `--foo` as a CLI flag even inside a string argument, so
+  ctest's Catch2 invocation fails with "unrecognised token". Rename
+  bump-all test cases to "bump all ..." instead of "--all ...".
+- **Post-upgrade hook respects `update.bump_projects`.**
+  `cmd_upgrade.cpp` reads the key (default `prompt`) and either
+  prints the `pulp project bump --all` hint or stays quiet on
+  `off`. The actual exec-into-new-binary lands in a follow-up; this
+  slice just wires the nudge.
+- **Git-clean gate uses `git -C <proj> status --porcelain`.** If
+  git isn't on PATH, `cmake_is_dirty()` returns false — we refuse
+  to block on a missing tool. `--force-dirty` is the explicit
+  override for users who WANT to bump alongside other edits.
+- **Migration notes print once per bump batch, using the minimum
+  old pin as `from`.** That captures the widest set of applicable
+  notes when different projects were on different versions.
 
 ## `pulp doctor --versions` — version diagnostics (#499 Slice 1)
 

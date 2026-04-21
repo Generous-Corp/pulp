@@ -431,6 +431,59 @@ TEST_CASE("pulp with update.mode=manual prints the manual notice",
     REQUIRE(r.stderr_output.find("99.99.99") != std::string::npos);
 }
 
+// Issue #564 Slice 7: `pulp project bump --help` must be wired at the
+// dispatch level. Any future regression where the `project` command
+// falls out of the dispatch table fails loudly here — same class of
+// silent-failure bug that motivated the rest of this file.
+TEST_CASE("pulp project is a recognized command with bump + undo subcommands",
+          "[cli][shellout][issue-564]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    auto help = run_pulp({"project", "--help"}, 10000);
+    REQUIRE_FALSE(help.timed_out);
+    REQUIRE(help.exit_code == 0);
+    REQUIRE(help.stdout_output.find("project bump") != std::string::npos);
+    REQUIRE(help.stdout_output.find("project undo") != std::string::npos);
+
+    auto bump_help = run_pulp({"project", "bump", "--help"}, 10000);
+    REQUIRE_FALSE(bump_help.timed_out);
+    REQUIRE(bump_help.exit_code == 0);
+    REQUIRE(bump_help.stdout_output.find("--all") != std::string::npos);
+    REQUIRE(bump_help.stdout_output.find("--dry-run") != std::string::npos);
+    REQUIRE(bump_help.stdout_output.find("--force-dirty") != std::string::npos);
+    REQUIRE(bump_help.stdout_output.find("--allow-downgrade") != std::string::npos);
+    REQUIRE(bump_help.stdout_output.find("--verify-builds") != std::string::npos);
+
+    auto undo_help = run_pulp({"project", "undo", "--help"}, 10000);
+    REQUIRE_FALSE(undo_help.timed_out);
+    REQUIRE(undo_help.exit_code == 0);
+    REQUIRE(undo_help.stdout_output.find("Revert") != std::string::npos);
+
+    auto bogus = run_pulp({"project", "potato"}, 10000);
+    REQUIRE_FALSE(bogus.timed_out);
+    REQUIRE(bogus.exit_code != 0);
+    REQUIRE(bogus.stderr_output.find("unknown subcommand") != std::string::npos);
+}
+
+// Issue #564 Slice 7: `pulp project bump --dry-run` rejects an
+// invalid --to value with a diagnostic. No writes happen.
+TEST_CASE("pulp project bump rejects non-semver --to",
+          "[cli][shellout][issue-564]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    const auto bin = fs::absolute(pulp_binary());
+    // Run from /tmp so there's no CMakeLists.txt — but we expect the
+    // semver validation to fire BEFORE any filesystem touch anyway.
+    auto cwd_saver = fs::current_path();
+    fs::current_path(fs::temp_directory_path());
+    auto r = exec(bin.string(), {"project", "bump", "--to=not-a-version", "--dry-run"}, 10000);
+    fs::current_path(cwd_saver);
+
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code != 0);
+    REQUIRE(r.stderr_output.find("invalid target version") != std::string::npos);
+}
+
 TEST_CASE("pulp upgrade --notes with no hop prints the empty-notes line",
           "[cli][shellout][upgrade][issue-548]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }

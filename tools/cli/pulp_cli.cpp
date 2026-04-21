@@ -50,6 +50,7 @@ static const Command commands[] = {
     {"host",     "Load a plug-in and run a synthetic audio block through it", cmd_host},
     {"pr",       "One-shot push-a-PR: gates + bump + ship",   cmd_pr},
     {"projects", "Manage the ~/.pulp/projects.json registry", cmd_projects},
+    {"project",  "Per-project SDK pin: bump, undo", cmd_project},
     // Regression fix 2026-04-21 (Codex post-merge sweep wave 2): the
     // #562 PR added `{"config", ..., cmd_config}` to this dispatch
     // table, but the #563 merge dropped the line, leaving `pulp config`

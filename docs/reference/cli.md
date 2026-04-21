@@ -319,6 +319,44 @@ location is `$PULP_HOME/projects.json` (defaulting to
 `~/.pulp/projects.json`). A missing registry file is treated as an
 empty list — no first-run setup is required.
 
+### project
+
+**Status**: usable
+
+Per-project SDK pin management. Updates the pinned Pulp version in
+a project's `CMakeLists.txt` — recognizing `FetchContent_Declare(pulp
+... GIT_TAG vX.Y.Z)`, `pulp_add_project(NAME VERSION X.Y.Z ...)`, and
+`project(NAME VERSION X.Y.Z ...)` — and records an undo batch at
+`~/.pulp/bump-undo-<timestamp>.json` so mistakes are one command
+away from recovery.
+
+```bash
+pulp project bump                     # bump CWD project to CLI's own version
+pulp project bump 0.32.0              # bump to explicit version (positional)
+pulp project bump --to=0.32.0         # bump to explicit version (named)
+pulp project bump --all               # iterate ~/.pulp/projects.json
+pulp project bump --all --dry-run     # show plan without writing
+pulp project bump --force-dirty       # skip the git-clean check
+pulp project bump --allow-downgrade   # target older than current pin
+pulp project bump --verify-builds     # build after bump; roll back on failure
+
+pulp project undo                     # revert the newest batch
+pulp project undo <timestamp>         # revert a specific batch
+```
+
+**Safety rails:** branch pins (`GIT_TAG main`) and SHA pins are
+skipped with a diagnostic; dirty `CMakeLists.txt` is gated behind
+`--force-dirty`; target older than current is gated behind
+`--allow-downgrade`; `--all` isolates per-project failures so one
+broken project doesn't abort the rest.
+
+**Migration notes** from Slice 3 (`#548`) print after a successful
+bump so users see any API changes the hop introduced.
+
+**Post-upgrade hook:** the `update.bump_projects` config key (prompt
+| auto | off; default prompt) controls whether `pulp upgrade` prints
+a `pulp project bump --all` hint after a successful CLI upgrade.
+
 ### ci-local
 
 **Status**: legacy (prefer [Shipyard](https://github.com/danielraffel/Shipyard))
