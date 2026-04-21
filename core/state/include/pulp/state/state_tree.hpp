@@ -4,16 +4,17 @@
 // A tree of named properties with typed access, change listeners, and undo integration.
 // Alternative to flat StateStore for complex nested state (presets, UI layout, etc.)
 
+#include <algorithm>
+#include <cstdint>
+#include <functional>
+#include <map>
+#include <memory>
+#include <mutex>
+#include <optional>
 #include <string>
 #include <string_view>
-#include <vector>
-#include <map>
 #include <variant>
-#include <functional>
-#include <memory>
-#include <optional>
-#include <mutex>
-#include <cstdint>
+#include <vector>
 
 namespace pulp::state {
 

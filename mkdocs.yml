@@ -153,6 +153,7 @@ nav:
   - Guides:
       - Web Plugins: guides/web-plugins.md
       - GPU Validation: guides/gpu-validation-checklist.md
+      - Test Coverage: guides/coverage.md
   - Policies:
       - Code Style: policies/code-style.md
       - Agent Rules: policies/agent-contribution-rules.md

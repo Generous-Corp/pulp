@@ -80,6 +80,21 @@ jobs:
           path: build-coverage/coverage/summary.txt
           retention-days: 90
 
+      - name: Verify Cobertura XML exists
+        # Fail loudly if the coverage build didn't produce a cobertura file.
+        # Without this check, a silent build failure (e.g. a missing transitive
+        # include that breaks under Clang strict mode) produces zero profraw
+        # → no cobertura → Codecov upload "succeeds" with no files → dashboard
+        # stays empty. We had exactly this class of silent failure until
+        # state_tree.hpp missing <algorithm> was caught on 2026-04-21.
+        run: |
+          test -s build-coverage/coverage.cobertura.xml || {
+            echo "::error::coverage.cobertura.xml is missing or empty."
+            echo "::error::Coverage build likely failed — check the 'Run coverage suite' step above."
+            exit 1
+          }
+          echo "coverage.cobertura.xml size: $(wc -c < build-coverage/coverage.cobertura.xml) bytes"
+
       - name: Upload Cobertura XML
         # PR 1 lands the XML artifact, PR 2 wires it into Codecov below,
         # and PR 3 wires it into diff-cover. Keep the retention short —
@@ -90,7 +105,7 @@ jobs:
           name: coverage-cobertura-${{ github.sha }}
           path: build-coverage/coverage.cobertura.xml
           retention-days: 14
-          if-no-files-found: warn
+          if-no-files-found: error
 
       - name: Upload coverage to Codecov
         # #566 Phase 1 PR 2: Codecov measurement baseline. The repo
