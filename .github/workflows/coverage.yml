@@ -450,6 +450,48 @@ jobs:
           # the PR. continue-on-error was removed at the step level above.
           exit "$rc"
 
+      - name: coverage_tier_check.py fixture tests (#566 Phase 2)
+        # Guard the per-tier gate script the same way we guard
+        # coverage_diff_comment.py — unit tests run before the live
+        # invocation so a regression in classify_file / aggregate /
+        # render fails fast without requiring a full coverage run.
+        run: python3 tools/scripts/test_coverage_tier_check.py
+        shell: bash
+
+      - name: Install PyYAML (#566 Phase 2)
+        # Only this step needs it; installing here keeps the earlier
+        # steps unaffected if PyYAML isn't available elsewhere.
+        run: python3 -m pip install --user 'pyyaml>=6'
+        shell: bash
+
+      - name: Run per-tier coverage gate (#566 Phase 2)
+        # Runs alongside the existing diff-cover gate. diff-cover
+        # enforces a single global 75% floor; this step layers the
+        # per-tier floors from `ci/coverage-targets.yaml` on top
+        # (audio-critical 80%, user-facing 70%, infrastructure 50%).
+        # Files that don't match any tier fall back to the global
+        # diff-cover floor — no double gate, no gap.
+        #
+        # continue-on-error: true during the Phase 2 bring-up. The
+        # tier-check fails loudly in logs but doesn't block merges
+        # until we've observed a couple of cycles and confirmed the
+        # tier definitions classify files correctly. Phase 2 flip
+        # to required is a one-line removal of this continue-on-error.
+        continue-on-error: true
+        shell: bash
+        run: |
+          xml="coverage-artifact/coverage.cobertura.xml"
+          if [ ! -f "$xml" ]; then
+            : > coverage-tier.md
+            echo "tier-gate: no Cobertura XML from upstream — skipped." >&2
+            exit 0
+          fi
+          python3 tools/scripts/coverage_tier_check.py \
+              --cobertura "$xml" \
+              --targets ci/coverage-targets.yaml \
+              --compare-branch "origin/${{ github.base_ref }}" \
+              --markdown-report coverage-tier.md
+
       - name: Render PR comment body
         run: |
           # Phase 3 landed: gate is required. --no-advisory flips the
@@ -461,6 +503,12 @@ jobs:
               --threshold 75 \
               --no-advisory \
               --out coverage-diff-comment.md
+          # Append the per-tier section (#566 Phase 2) if the tier
+          # check produced a report.
+          if [ -s coverage-tier.md ]; then
+            printf '\n\n' >> coverage-diff-comment.md
+            cat coverage-tier.md >> coverage-diff-comment.md
+          fi
           echo "----- coverage-diff-comment.md -----"
           cat coverage-diff-comment.md
           echo "----- end comment -----"
@@ -474,6 +522,7 @@ jobs:
           path: |
             coverage-diff.md
             coverage-diff-comment.md
+            coverage-tier.md
           retention-days: 14
           if-no-files-found: warn
 
