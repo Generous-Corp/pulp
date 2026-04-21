@@ -212,6 +212,58 @@ TEST_CASE("pending-upgrade file round-trips through write/read/clear",
     fs::remove_all(dir);
 }
 
+// #590 Codex P2 / wave-4 sweep: the auto-mode banner in pulp_cli.cpp
+// must gate its "downloaded / will complete next invocation" notice
+// on write_pending_upgrade succeeding. Exercise the underlying failure
+// mode (non-existent file as the parent path) so a regression in the
+// return-value contract surfaces immediately.
+TEST_CASE("write_pending_upgrade returns false when the parent cannot be created",
+          "[cli][update-mode][issue-590]") {
+    auto dir = make_tmpdir("pending-upgrade-badparent");
+    // Create a plain file at what would otherwise be a directory —
+    // fs::create_directories refuses to stomp on a regular file, so
+    // the atomic writer's ofstream then fails to open the .tmp file.
+    auto blocker = dir / "blocker";
+    { std::ofstream(blocker) << "not-a-dir"; }
+    auto marker = blocker / "pending-upgrade";  // parent is a regular file
+
+    um::PendingUpgrade p;
+    p.version = "0.99.0";
+    p.staged_at_epoch_sec = 42;
+
+    REQUIRE_FALSE(um::write_pending_upgrade(marker, p));
+    REQUIRE_FALSE(fs::exists(marker));
+
+    fs::remove_all(dir);
+}
+
+// #590 Codex P2 / wave-4 sweep: the opportunistic tombstone sweep in
+// maybe_complete_pending_upgrade() runs even when no pending marker
+// exists (covers direct `pulp upgrade` flows on Windows). This test
+// asserts the contract of the piece that sweep relies on:
+// cleanup_tombstone must be safe to call unconditionally, regardless
+// of marker state. The two cases already covered above (present /
+// absent) are what the unconditional call in pulp_cli.cpp depends on.
+TEST_CASE("cleanup_tombstone is safe to call after a no-marker fast path",
+          "[cli][update-mode][issue-590]") {
+    auto dir = make_tmpdir("tombstone-no-marker");
+    auto exe = dir / "pulp";
+    std::ofstream(exe) << "live";
+    auto tomb = um::tombstone_path_for(exe);
+    std::ofstream(tomb) << "old-bytes";
+
+    // Simulate the "no pending marker" path: the caller must still
+    // sweep the tombstone. Calling twice in succession (as would
+    // happen if cleanup ran once for a completion event and once for
+    // the unconditional sweep) must also be a no-op success.
+    REQUIRE(um::cleanup_tombstone(exe));
+    REQUIRE_FALSE(fs::exists(tomb));
+    REQUIRE(um::cleanup_tombstone(exe));
+    REQUIRE(fs::exists(exe));
+
+    fs::remove_all(dir);
+}
+
 // ── Tombstone (Windows swap pattern) ────────────────────────────────────────
 
 TEST_CASE("tombstone_path_for appends the .pulp.old suffix",

@@ -19,6 +19,11 @@ on:
       - 'tools/install/install.ps1'
       - 'docs/doxygen/**'
       - 'core/**/include/**'
+      # `tools/build-api-docs.sh` reads `project(Pulp VERSION …)` from
+      # the root CMakeLists.txt to set Doxygen's `PROJECT_NUMBER`, so a
+      # version-only bump should re-deploy `/api/` with the new number
+      # (#591 Codex P2 / wave-4 sweep).
+      - 'CMakeLists.txt'
       - '.github/workflows/docs-deploy.yml'
   workflow_dispatch:
 

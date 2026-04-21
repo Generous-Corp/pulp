@@ -15,6 +15,8 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - chore(deps): bump pinned Shipyard v0.21.0 → v0.21.1 ([#604](https://github.com/danielraffel/pulp/pull/604))
 
 <a id="v0320"></a>
+## [0.9.0]
+
 ## [0.32.0] - 2026-04-20
 
 - cli: release-discovery Slice 7 pulp project bump + undo (#564) ([#599](https://github.com/danielraffel/pulp/pull/599))
@@ -23,12 +25,10 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - ci(iwyu): advisory include-what-you-use gate (#594 Phase 2) ([#600](https://github.com/danielraffel/pulp/pull/600))
 
 <a id="v0311"></a>
-## [0.31.1] - 2026-04-20
+## [0.31.1]
 
-- cli: release-discovery Slice 6 plugin ↔ CLI skew detection (#551) ([#598](https://github.com/danielraffel/pulp/pull/598))
-- docs+deps: attribute MkDocs Material deps + extend audit completeness gate ([#592](https://github.com/danielraffel/pulp/pull/592))
+## [0.8.0]
 
-<a id="v0310"></a>
 ## [0.31.0] - 2026-04-20
 
 - cli: release-discovery Slice 5 auto/prompt/manual/off enforcement (#550) ([#590](https://github.com/danielraffel/pulp/pull/590))

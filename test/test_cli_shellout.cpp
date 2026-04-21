@@ -539,3 +539,63 @@ TEST_CASE("pulp upgrade --notes --json is slash-command-parseable",
     REQUIRE(noop.stdout_output.find("\"to\":")      != std::string::npos);
     REQUIRE(noop.stdout_output.find("\"entries\":") != std::string::npos);
 }
+
+// #591 Codex P2 / wave-4 sweep: `pulp docs build-site` must resolve
+// `mkdocs.yml` from the project root, not the caller's CWD. This test
+// invokes the CLI from inside a subdirectory (`tools/`) and asserts
+// that the composed mkdocs command references the repo-root config —
+// the previous bare `mkdocs build` would have failed with a
+// "Config file 'mkdocs.yml' does not exist" error here.
+//
+// We don't require mkdocs to be installed: if it's missing, run exits
+// non-zero with a "pip install -r requirements-docs.txt" hint on
+// stderr, which is still a valid pass for this regression because the
+// failure mode is "mkdocs not found", not "config file not found".
+// What we must NOT see is a "Config file 'mkdocs.yml' does not exist"
+// error, because that would mean `-f <root>/mkdocs.yml` wasn't passed.
+TEST_CASE("pulp docs build-site resolves mkdocs.yml from project root",
+          "[cli][shellout][docs][issue-591]") {
+    if (!binary_exists()) {
+        SUCCEED("pulp binary not built for this test run; skipping");
+        return;
+    }
+
+    // Walk up from the test CWD (<build>/test) to the repo root, then
+    // drop into tools/ — a real subdirectory that exists in every
+    // Pulp checkout. This mirrors the "user runs `pulp docs
+    // build-site` from inside tools/" scenario Codex flagged.
+    fs::path repo_root = fs::current_path() / ".." / "..";
+    repo_root = fs::weakly_canonical(repo_root);
+    if (!fs::exists(repo_root / "mkdocs.yml")) {
+        SUCCEED("mkdocs.yml not at expected repo root — likely non-standard "
+                "build layout; skipping");
+        return;
+    }
+    fs::path subdir = repo_root / "tools";
+    REQUIRE(fs::exists(subdir));
+
+    fs::path saved_cwd = fs::current_path();
+    std::error_code ec;
+    fs::current_path(subdir, ec);
+    REQUIRE_FALSE(ec);
+
+    // --strict is safe: if mkdocs runs at all, the build either
+    // succeeds or surfaces a warnings-as-errors exit; neither produces
+    // the "Config file 'mkdocs.yml' does not exist" string.
+    auto r = run_pulp({"docs", "build-site", "--site-dir",
+                      (repo_root / "build" / "site-shellout-test").string()},
+                     60000);
+
+    fs::current_path(saved_cwd, ec);  // always restore
+
+    REQUIRE_FALSE(r.timed_out);
+    // Permit mkdocs-missing ("command not found" path, rc != 0 with
+    // install hint on stderr) but NOT "Config file 'mkdocs.yml' does
+    // not exist" — that would mean the `-f <root>/mkdocs.yml` fix
+    // regressed.
+    const std::string combined = r.stdout_output + r.stderr_output;
+    REQUIRE(combined.find("Config file 'mkdocs.yml' does not exist")
+            == std::string::npos);
+    REQUIRE(combined.find("does not exist; use --config-file")
+            == std::string::npos);
+}

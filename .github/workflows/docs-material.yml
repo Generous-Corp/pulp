@@ -23,6 +23,10 @@ on:
       - 'tools/mkdocs_hooks.py'
       - 'tools/build-api-docs.sh'
       - 'core/**/include/**'
+      # `build-api-docs.sh` reads the version from CMakeLists.txt
+      # (#591 Codex P2 / wave-4 sweep) — keep the preview lane in sync
+      # with docs-deploy.yml.
+      - 'CMakeLists.txt'
       - '.github/workflows/docs-material.yml'
   pull_request:
     paths:
@@ -32,6 +36,7 @@ on:
       - 'tools/mkdocs_hooks.py'
       - 'tools/build-api-docs.sh'
       - 'core/**/include/**'
+      - 'CMakeLists.txt'
       - '.github/workflows/docs-material.yml'
   workflow_dispatch:
 

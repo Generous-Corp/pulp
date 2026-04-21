@@ -304,9 +304,15 @@ void kick_background_refresh(const fs::path& cache_path) {
 // `pulp upgrade`) to perform the swap. This preserves the Section G
 // non-goal "no binary is ever replaced without the user's session
 // touching `pulp` again".
-void kick_auto_stage(const fs::path& marker_path,
+//
+// Returns true if the marker was successfully written; false otherwise
+// (empty args, unwritable PULP_HOME, etc.). The auto-mode banner
+// suppresses its "downloaded / will complete next invocation" notice
+// on false so the user isn't promised a completion that can't happen
+// (#590 Codex P2 / wave-4 sweep).
+bool kick_auto_stage(const fs::path& marker_path,
                      const std::string& staged_version) {
-    if (marker_path.empty() || staged_version.empty()) return;
+    if (marker_path.empty() || staged_version.empty()) return false;
     um::PendingUpgrade p;
     p.version = staged_version;
     p.staged_at_epoch_sec = uc::now_epoch_sec();
@@ -315,7 +321,7 @@ void kick_auto_stage(const fs::path& marker_path,
     // to signal intent; the binary path field is reserved for a
     // future slice where the background download lands a file.
     p.staged_binary_path = "";
-    (void)um::write_pending_upgrade(marker_path, p);
+    return um::write_pending_upgrade(marker_path, p);
 }
 
 // Step 1 of the dispatch hook: if a pending-upgrade marker exists and
@@ -327,25 +333,31 @@ void kick_auto_stage(const fs::path& marker_path,
 // marker alone — the actual swap hasn't happened yet.
 void maybe_complete_pending_upgrade() {
     auto marker = pending_upgrade_path();
-    if (marker.empty()) return;
-    auto pending = um::read_pending_upgrade(marker);
-    if (!pending) return;
-    if (pending->version == std::string(PULP_SDK_VERSION)) {
-        std::cerr << um::compose_auto_completed_notice(pending->version) << "\n";
-        (void)um::clear_pending_upgrade(marker);
-        // Tombstone cleanup after marker removal — in this order so a
-        // crash between the two leaves the tombstone but no marker,
-        // which is recoverable (the next invocation still tidies up).
-        std::error_code ec;
-        auto self = fs::path(current_executable_path());
-        if (!self.empty()) {
-            (void)um::cleanup_tombstone(self);
+    // Note: we intentionally do NOT early-return when the marker is
+    // missing or unreadable. The opportunistic tombstone sweep at the
+    // bottom of this function must also run for the common "no marker"
+    // path so `*.pulp.old` files left behind by direct `pulp upgrade`
+    // flows get cleaned up (#590 Codex P2 / wave-4 sweep).
+    if (!marker.empty()) {
+        if (auto pending = um::read_pending_upgrade(marker)) {
+            if (pending->version == std::string(PULP_SDK_VERSION)) {
+                std::cerr << um::compose_auto_completed_notice(pending->version) << "\n";
+                (void)um::clear_pending_upgrade(marker);
+                // Tombstone cleanup after marker removal — in this order so a
+                // crash between the two leaves the tombstone but no marker,
+                // which is recoverable (the next invocation still tidies up).
+                auto self_post = fs::path(current_executable_path());
+                if (!self_post.empty()) {
+                    (void)um::cleanup_tombstone(self_post);
+                }
+            }
         }
     }
     // Always opportunistically sweep the tombstone — covers the case
-    // where a user ran `pulp upgrade` directly (no marker) but left a
-    // `.pulp.old` behind from the swap.
-    std::error_code ec;
+    // where a user ran `pulp upgrade` directly (no marker), the marker
+    // was malformed, or `PULP_HOME` was unreadable. Running this
+    // unconditionally is safe: cleanup_tombstone() is a no-op when no
+    // `*.pulp.old` sibling exists.
     auto self = fs::path(current_executable_path());
     if (!self.empty()) {
         (void)um::cleanup_tombstone(self);
@@ -432,10 +444,17 @@ void maybe_emit_update_banner_and_refresh(const std::string& command) {
                                 ? std::optional<um::PendingUpgrade>{}
                                 : um::read_pending_upgrade(marker);
             if (um::should_stage_auto_download(mode, installed, latest, existing)) {
-                kick_auto_stage(marker, latest);
-                std::cerr << um::compose_auto_staged_notice(latest) << "\n";
-                cache.banner_shown_for_version = latest;
-                uc::write_cache_file(cache_path, cache);
+                // Only print the "downloaded / will complete next
+                // invocation" banner and record it in the cache if the
+                // marker actually landed. If PULP_HOME is read-only,
+                // full, or otherwise unwritable, suppress the notice
+                // so users aren't promised a completion that cannot
+                // happen (#590 Codex P2 / wave-4 sweep).
+                if (kick_auto_stage(marker, latest)) {
+                    std::cerr << um::compose_auto_staged_notice(latest) << "\n";
+                    cache.banner_shown_for_version = latest;
+                    uc::write_cache_file(cache_path, cache);
+                }
             }
         }
 

@@ -41,23 +41,38 @@ Parse the JSON to extract:
 - `findings[]`              — advisory skew messages
 
 Derive the **latest available CLI** from the cache without hitting the
-network twice:
+network twice, and CAPTURE the value into a shell variable so step 3
+can reuse it:
 
 ```bash
-pulp upgrade --check-only 2>/dev/null | awk -F'v' '/^Latest:/ {print $2}' | tr -d '[:space:]'
+LATEST="$(pulp upgrade --check-only 2>/dev/null | awk -F'v' '/^Latest:/ {print $2}' | tr -d '[:space:]')"
 ```
 
-If the cache is empty, `--check-only` will query GitHub — that's fine,
-the result is cached for subsequent runs.
+If the cache is empty, `--check-only` will query GitHub. Note:
+`--check-only` does NOT persist its fetched result into the update
+cache (see `tools/cli/cmd_upgrade.cpp`), so you MUST capture `$LATEST`
+from its stdout and forward it to step 3 explicitly. Relying on the
+`--notes` default cache lookup would resolve `to == from` on first-run
+/ empty-cache machines and silently hide real migration hops.
 
 ## 3. Pull applicable migration notes
 
+Pass `--to "$LATEST"` (captured in step 2) explicitly so the notes
+surface sees the real hop even when the background cache refresh has
+not yet landed (#583 Codex P1 / wave-4 sweep):
+
 ```bash
-pulp upgrade --notes --json > /tmp/pulp-upgrade-notes.json 2>/dev/null
+if [ -n "$LATEST" ]; then
+  pulp upgrade --notes --json --to "$LATEST" > /tmp/pulp-upgrade-notes.json 2>/dev/null
+else
+  pulp upgrade --notes --json > /tmp/pulp-upgrade-notes.json 2>/dev/null
+fi
 ```
 
-Defaults: `from = installed CLI`, `to = cached latest`. Override if the
-user asked about a specific hop:
+Defaults when no `--to` is supplied: `from = installed CLI`,
+`to = cached latest` (falls back to `from` on empty cache — which is
+why step 2 captures `$LATEST` and this step forwards it). Override if
+the user asked about a specific hop:
 
 ```bash
 pulp upgrade --notes --json --from 0.27.0 --to 0.30.0

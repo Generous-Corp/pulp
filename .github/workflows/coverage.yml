@@ -228,7 +228,12 @@ jobs:
             cat coverage-diff.md
             echo "----- end coverage-diff.md -----"
           fi
-          exit 0
+          # Propagate the real diff-cover exit code so sub-threshold
+          # coverage shows up as a failed step in the Actions UI. The
+          # overall job is still non-blocking because of
+          # `continue-on-error: true` on this step (advisory window
+          # until the 2026-05-04 flip; #580 Codex P2 / wave-4 sweep).
+          exit "$rc"
 
       - name: Render PR comment body
         run: |

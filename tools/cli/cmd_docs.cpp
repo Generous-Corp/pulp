@@ -598,7 +598,14 @@ int cmd_docs(const std::vector<std::string>& args) {
         // #577 PR 4 retired tools/build-docs.py in favour of MkDocs Material.
         // Delegate to `mkdocs build`. Extra args are forwarded so callers can
         // pass `--site-dir`, `--strict`, etc.
-        std::string cmd = "mkdocs build";
+        //
+        // Resolve `mkdocs.yml` from the project root so `pulp docs
+        // build-site` works regardless of the caller's current
+        // directory — the previous `tools/build-docs.py` path behaved
+        // this way because it resolved paths from the script location
+        // (#591 Codex P2 / wave-4 sweep).
+        auto mkdocs_yml = root / "mkdocs.yml";
+        std::string cmd = "mkdocs build -f \"" + mkdocs_yml.string() + "\"";
         for (size_t i = 1; i < args.size(); ++i) {
             cmd += " " + args[i];
         }

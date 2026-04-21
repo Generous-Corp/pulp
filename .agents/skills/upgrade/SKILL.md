@@ -96,10 +96,20 @@ source of truth.
    `plugin`, `project_sdk`, and `findings[]` — surface those in a
    compact table.
 
-3. **Fetch applicable migration notes** for the current hop:
+3. **Fetch applicable migration notes** for the current hop.
+
+   **Important:** `pulp upgrade --check-only` does NOT persist its
+   fetched result into the update cache (see
+   `tools/cli/cmd_upgrade.cpp`). On a first-run / empty-cache machine,
+   `pulp upgrade --notes --json` without an explicit `--to` therefore
+   falls back to `to == from` and reports "no migration notes" even
+   when a real upgrade hop (including breaking notes) exists. The
+   slash command must capture the `Latest:` value from `--check-only`
+   and forward it as `--to "$LATEST"` (#583 Codex P1 / wave-4 sweep).
 
    ```bash
    pulp upgrade --notes --json                  # defaults: from = installed CLI, to = cached latest
+   pulp upgrade --notes --json --to "$LATEST"   # recommended — use value captured from --check-only
    pulp upgrade --notes --json --from X --to Y  # explicit hop
    ```
 
