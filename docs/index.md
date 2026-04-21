@@ -14,7 +14,7 @@ MIT-licensed. No royalties. No copyleft.
 - **GPU rendering**: Dawn (Metal/D3D12/Vulkan) + Skia Graphite on all platforms
 - **View system**: TextEditor, ComboBox, TabPanel, ListBox, TreeView, and more — flex layout, JS scripting, hot-reload
 - **Plugin hosting**: PluginScanner, PluginSlot, SignalGraph for DAW-like apps
-- **Testing**: 1622+ automated tests across 13 subsystems
+- **Testing**: coverage tracked per-subsystem, per-platform, and per-surface on macOS, Linux, and Windows — see [Test Coverage](guides/coverage.md)
 - **Shipping**: codesign, notarization, DMG/PKG (macOS), NSIS (Windows), .deb (Linux), appcast
 
 ## Where to start

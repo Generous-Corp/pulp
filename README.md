@@ -16,7 +16,7 @@ A cross-platform audio plugin and application framework. MIT licensed, C++20 cor
 **Create & Build**
 - `pulp create` scaffolds a full plugin project with all format targets
 - `pulp build` builds all formats in one pass
-- `pulp test` runs 1,622+ automated tests
+- `pulp test` runs the suite across macOS, Linux, and Windows; coverage is tracked at [codecov.io/gh/danielraffel/pulp](https://app.codecov.io/gh/danielraffel/pulp)
 - `pulp run` launches standalone for quick iteration
 - `pulp doctor` checks your environment and reports missing dependencies
 

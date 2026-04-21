@@ -46,14 +46,16 @@ The helper prints the current iteration, exports it as
 debugging flaky concurrency, timing, path, and validator issues without inventing a
 new one-off loop every time.
 
-## Test Count
+## Test Surface
 
-The current branch has 1622+ registered tests covering:
+What the suite exercises:
 
 - Unit tests for subsystems (runtime, state, audio, midi, signal, format, events, canvas, render, view, osc)
 - Golden-file audio comparison tests
 - Plugin format validation (CLAP dlopen, VST3 pluginval, AU auval, optional local AAX validation)
 - Example plugin processing tests
+
+For coverage numbers and per-subsystem / per-platform / per-surface breakdowns, see [Test Coverage](coverage.md).
 
 ## Test Layers
 

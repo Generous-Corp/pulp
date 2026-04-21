@@ -1,52 +1,37 @@
 # Coverage
 
-Pulp tracks test coverage per-subsystem, per-platform, and per-surface as
-a first-class metric alongside sanitizers and CI matrix results. The goal
-is to tell at any moment whether any subsystem's test surface is tracking
-its quality bar as the codebase grows — not to chase a vanity "100%"
-number.
-
-This guide covers the Phase 1 measurement baseline. Phase 2 adds per-tier
-targets, Phase 3 adds a per-PR diff-coverage gate, Phase 4 adds doc-sync
-enforcement. See issue #566 for the full initiative.
+Coverage is measured per-subsystem, per-platform, and per-surface on
+macOS, Linux, and Windows, and uploaded to Codecov on every push.
+It's measurement-only today; per-PR gates land in a later phase
+(see [#566](https://github.com/danielraffel/pulp/issues/566)).
 
 ## Where the numbers live
 
-All coverage is reported to [Codecov](https://app.codecov.io/gh/danielraffel/pulp).
-The repo is public, so the dashboard is public and tokenless. No login
-required. Three views worth knowing:
+Coverage is reported to [Codecov](https://app.codecov.io/gh/danielraffel/pulp).
+The repo is public, so the dashboard is public and tokenless — no login
+required.
 
 - **Overall**: <https://app.codecov.io/gh/danielraffel/pulp>
-- **Per-flag breakdown**: <https://app.codecov.io/gh/danielraffel/pulp/flags>
+- **Per-subsystem / per-platform / per-surface breakdown**:
+  <https://app.codecov.io/gh/danielraffel/pulp/components/main>
+- **Per-OS breakdown**:
+  <https://app.codecov.io/gh/danielraffel/pulp/flags/main>
 - **REST API for agents**:
   `https://api.codecov.io/api/v2/github/danielraffel/repos/pulp/totals/`
 
-The dashboard also supports per-file drilldown (click any file in the
-tree view) and historical trend graphs.
+The dashboard supports per-file drilldown (click any file in the tree
+view) and historical trend graphs.
 
-## The 20 flags
+## Axes
 
-Codecov splits coverage into 20 flags along three independent axes so you
-can cross-filter:
-
-| Axis | Flags | What it tells you |
-|------|-------|-------------------|
-| Core subsystem (13) | `audio`, `canvas`, `events`, `format`, `host`, `midi`, `osc`, `platform`, `render`, `runtime`, `signal`, `state`, `view` | Subsystem quality |
-| Platform (4)        | `android`, `apple`, `linux`, `windows` | Per-platform shim coverage |
-| Surface (3)         | `cli`, `ship`, `tools` | Non-core first-party code |
-
-Examples of useful cross-filters:
-
-- `audio AND linux` — "what's audio coverage on Linux?" Catches ALSA-only
-  regressions that a single aggregate `audio` number would hide.
-- `host AND windows` — "how well-tested is the Windows host layer?"
-- `format` alone — "is the VST3/AU/CLAP adapter layer covered uniformly?"
-
-The flag definitions are in `codecov.yml` at the repo root. Adding a new
-subsystem means adding a flag there, a row in
-`docs/reference/modules.md`, and (in Phase 2) a target row in
-`ci/coverage-targets.yaml`. The Phase 4 doc-sync gate will keep those in
-lockstep; until then treat it as checklist discipline.
+Codecov splits each upload along three axes so you can cross-filter —
+for example, "how's one subsystem covered on one OS." The current list
+of axes and the mechanism that populates them lives in `codecov.yml`
+at the repo root; the dashboard is the source of truth for the current
+set of names. Subsystem / platform / surface slicing happens via the
+`component_management` block (path-globbed from a single upload).
+Per-OS slicing happens via upload flags — one upload per operating
+system in the matrix.
 
 ## How to run coverage locally
 
@@ -56,8 +41,8 @@ scripts/run_coverage.sh
 
 Output:
 
-- `build-coverage/coverage/index.html` — per-file HTML drilldown (open in
-  a browser).
+- `build-coverage/coverage/index.html` — per-file HTML drilldown (open
+  in a browser).
 - `build-coverage/coverage/summary.txt` — text summary matching the CI
   artifact.
 - `build-coverage/coverage.cobertura.xml` — Cobertura XML (only if
@@ -79,10 +64,9 @@ scripts/run_coverage.sh --tests '^pulp-test-audio' # regex filter
 If `scripts/run_coverage.sh` fails with
 `ERROR: PULP_ENABLE_COVERAGE=ON did not stick in the CMake cache`, the
 `build-coverage/` directory was previously configured without coverage.
-The fix is in the error message: `rm -rf build-coverage/` and re-run. This
-guard exists because the silent version of this failure produced empty
-profdata that looked like a test/instrumentation bug. Issue #570 has the
-details.
+Fix: `rm -rf build-coverage/` and re-run. This guard exists because the
+silent version of this failure produced empty profdata that looked like
+a test/instrumentation bug. Issue #570 has the details.
 
 If you see `_deps/catch2-build/src/src/catch2/...: No such file or
 directory` spam on stderr, you're on an older checkout — the canonical
@@ -97,30 +81,23 @@ finishes. The comment layout is `reach, diff, flags, tree`:
 - **reach** — lines this PR's tests exercised.
 - **diff** — of the N lines this PR adds/modifies, K are covered by
   tests. This is the number to focus on — adding untested code is the
-  most common way to regress a subsystem's coverage.
-- **flags** — per-flag coverage (both total and delta). If you touched
-  `core/audio/` and the `audio` flag shows −2%, something in your PR
-  dropped the subsystem's coverage; check the tree view to see which
-  file.
+  most common way to regress coverage.
+- **flags** — per-OS coverage (total and delta).
 - **tree** — per-file drilldown. Click through to see exactly which
   lines are uncovered.
 
-In Phase 1 all of this is advisory — nothing fails a PR on coverage.
+Coverage is advisory in the current phase — nothing fails a PR on
+coverage numbers alone.
 
-> **Diff-cover advisory window (2026-04-21 → 2026-05-04).** Every PR now
-> receives an additional "Diff coverage (Phase 1 advisory)" comment
-> rendered by `.github/workflows/coverage.yml` (`coverage-diff-gate`
-> job). It answers the single question "of the lines this PR adds or
+> **Diff-cover advisory window (2026-04-21 → 2026-05-04).** Every PR
+> also receives a "Diff coverage (Phase 1 advisory)" comment from the
+> `coverage-diff-gate` job. It answers "of the lines this PR adds or
 > modifies, how many are covered?" at a **75%** floor. During the
-> 2-week advisory window the percentage is **informational only** —
-> even 0% will not block a merge. **On 2026-05-04 the gate flips to
-> required**; after that date a PR whose diff coverage falls below 75%
-> will hard-fail this check and block the merge. File an issue if the
-> flip date needs to slip.
-
-Phase 2 narrows the gate further, moving from a flat 75% to the
-tier-based targets tracked in `ci/coverage-targets.yaml` (audio-critical
-80% / user-facing 70% / infra 50%).
+> 2-week advisory window the percentage is informational only — even
+> 0% will not block a merge. **On 2026-05-04 the gate flips to
+> required**; after that date a PR whose diff coverage falls below
+> 75% will hard-fail this check and block the merge. File an issue
+> if the flip date needs to slip.
 
 ## How the collection works
 
@@ -141,54 +118,44 @@ Source → Clang -fprofile-instr-generate -fcoverage-mapping
   enabled when Clang is the compiler — gcov/gcc output shapes are
   incompatible with our llvm-cov pipeline.
 - **Collection**: `scripts/run_coverage.sh` runs the test suite with
-  `LLVM_PROFILE_FILE` pointing at a per-test-binary template. Each test
-  writes its own profraw shard.
+  `LLVM_PROFILE_FILE` pointing at a per-test-binary template. Each
+  test writes its own profraw shard.
 - **Merge**: `llvm-profdata merge -sparse` unions them into a single
   profdata.
-- **Report**: `llvm-cov show` produces the HTML locally; `gcovr` emits
-  Cobertura XML for Codecov + diff-cover.
+- **Report**: `llvm-cov show` produces the HTML locally; `gcovr`
+  emits Cobertura XML for Codecov + diff-cover.
 - **Exclusions**: a canonical regex in `scripts/run_coverage.sh`
   excludes `_deps/`, `external/`, `test/`, `catch2/`, `build/`, and
-  `build-coverage/`. Codecov's `ignore` list in `codecov.yml` mirrors
-  this set.
+  `build-coverage/`. Codecov's `ignore` list in `codecov.yml`
+  mirrors this set.
 
-## Multi-OS coverage
+## Cross-platform matrix
 
 The coverage workflow runs on
 `{ubuntu-latest, macos-latest, windows-latest}`. Each OS produces its
 own `coverage.cobertura.xml` and uploads to Codecov with an OS-tag
-flag (`os-linux`, `os-macos`, `os-windows`). Codecov unions same-file
-coverage across OSes using the flag mechanism — we do NOT try to merge
-profdata across architectures (llvm-profdata merge is not
-architecture-portable, see
-`planning/coverage-tooling-decision-2026-04-21.md` §7).
+flag. We do NOT merge profdata across architectures —
+`llvm-profdata merge` is not architecture-portable
+(`planning/coverage-tooling-decision-2026-04-21.md` §7); Codecov does
+the cross-OS union at the flag layer.
 
-Cross-filter useful combinations on the dashboard:
-
-- `host AND os-windows` — how much of `core/host` is exercised when
-  the test binary runs on Windows? Different from `host AND windows`,
-  which reads "how much of the files under `core/host/**/windows/`
-  are covered at all."
-- `audio AND os-macos` — how much of `core/audio` is exercised on
-  macOS specifically? Catches Apple-only regressions (CoreAudio
-  paths, AudioUnit adapter) that a single aggregate `audio` number
-  would hide.
-- `os-linux` alone — what's our Linux-lane coverage floor? Useful as
-  a reference when you flip a test over to Windows and want to
-  sanity-check the delta.
+Per-OS flags let the dashboard answer "what's covered on a specific
+OS." Per-subsystem components answer "how's a specific piece of the
+codebase covered." Cross-filter the two on the dashboard when a
+question needs both axes.
 
 Each OS uses Clang source-based coverage — MSVC is rejected by
 `tools/cmake/PulpInstrumentation.cmake` because MSVC's
 `/fsanitize-coverage` and llvm-cov emit incompatible profile shapes.
-On Windows runners that means clang++ from the bundled LLVM
+On Windows runners that means `clang-cl` from the bundled LLVM
 (`C:\Program Files\LLVM\bin`), not `cl.exe`. macOS uses Apple Clang
 from the active Xcode toolchain (resolved via `xcrun` when the bin
 is not already on PATH).
 
 The per-OS legs do NOT fail-fast: a flake on one OS does not cancel
 the others, so the Codecov dashboard still gets partial cross-OS
-coverage even when (say) Windows hits a transient toolchain issue.
-The `coverage-diff-gate` job downstream stays pinned to the Linux
+coverage when one leg hits a transient toolchain issue. The
+`coverage-diff-gate` job downstream stays pinned to the Linux
 Cobertura XML — diff-cover is a single-XML tool and running it
 against three XMLs would produce three PR comments with
 slightly-different numbers for the same metric.
@@ -201,27 +168,20 @@ without a workflow edit.
 
 ## Phase roadmap (#566)
 
-- **Phase 0** — spike & stack decision (done, see planning doc above).
-- **Phase 1** (this phase) — measurement baseline
-  - PR 1: infra fixes (#569, #570 — landed)
-  - PR 2: Codecov integration (landed)
-  - PR 3: diff-cover advisory gate (landed — advisory until
-    2026-05-04)
-  - PR 4: cross-platform matrix (landed)
-- **Phase 2** — per-tier targets encoded in
-  `ci/coverage-targets.yaml`. Audio-critical subsystems (`audio`,
-  `format`, `host`, `midi`, `signal`, `platform`) ≥ 80% line / 70%
-  branch; user-facing (`view`, `render`, `cli`) ≥ 70% line;
-  infrastructure (`tools`, `ship`, `events`, `runtime`, `state`,
-  `canvas`, `osc`) ≥ 50% line.
+- **Phase 0** — spike & stack decision. Landed.
+- **Phase 1** — measurement baseline (Codecov upload, diff-cover
+  advisory gate, cross-platform matrix). Landed.
+- **Phase 2** — per-tier coverage targets encoded in
+  `ci/coverage-targets.yaml`.
 - **Phase 3** — diff-cover flipped from advisory to required.
-- **Phase 4** — docs cleanup + doc-sync enforcement (#567).
+- **Phase 4** — docs cleanup + generalized doc-sync enforcement
+  (tracked in #567).
 
 ## Related reading
 
 - Issue #566 — umbrella initiative
 - Issue #290 — coverage hardening (test surface growth)
 - `planning/coverage-tooling-decision-2026-04-21.md` — Phase 0 spike
-  findings, stack rationale, perf numbers.
+  findings, stack rationale, perf numbers
 - `planning/coverage-sanitizers-spec-2026-04-16.md` — the earlier
-  spec that landed `PULP_ENABLE_COVERAGE`.
+  spec that landed `PULP_ENABLE_COVERAGE`

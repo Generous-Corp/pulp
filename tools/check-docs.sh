@@ -132,35 +132,25 @@ while IFS= read -r line; do
     fi
 done < "$STATUS/modules.yaml"
 
-# ── 8. README test count accuracy ─────────────────────────────────────────────
-echo "Checking README accuracy..."
+# ── 8. No hardcoded test-count statements ────────────────────────────────────
+# Historically this section validated that README/index/testing kept a
+# specific test count ("1,622+ automated tests") in sync with ctest -N.
+# That pattern kept the wrong metric fresh — the number churned every PR
+# and stated nothing meaningful about quality. We now describe testing
+# in terms of coverage (which is tracked dynamically at codecov.io) and
+# don't hardcode counts in docs. This check flips the invariant: reject
+# any reintroduction of "NNN automated tests" / "NNN registered tests"
+# phrasing so we don't drift back into count-chasing.
+echo "Checking for reintroduced test-count statements..."
 
-actual_count=""
-readme_count=""
-
-if [ -d "$ROOT/build" ]; then
-    actual_count=$(ctest --test-dir "$ROOT/build" -N 2>/dev/null | grep "Total Tests:" | grep -oE '[0-9]+')
-fi
-
-if [ -f "$ROOT/README.md" ]; then
-    readme_count=$(grep -oE '[0-9]+ automated tests' "$ROOT/README.md" 2>/dev/null | grep -oE '[0-9]+')
-    if [ -n "$readme_count" ] && [ -n "$actual_count" ] && [ "$readme_count" != "$actual_count" ]; then
-        warn "README.md says '$readme_count automated tests' but build has $actual_count tests"
+for doc in "$ROOT/README.md" "$DOCS/index.md" "$DOCS/concepts/overview.md" "$DOCS/guides/testing.md"; do
+    if [ -f "$doc" ] && grep -qE '[0-9,]+\+?[[:space:]]+(automated|registered)[[:space:]]+tests' "$doc" 2>/dev/null; then
+        rel="${doc#$ROOT/}"
+        error "$rel contains a hardcoded test count (\"NNN automated/registered tests\"). \
+Describe testing via coverage and link to docs/guides/coverage.md instead — \
+the count goes stale on every PR, the coverage link stays accurate."
     fi
-fi
-
-# Check test count consistency across docs
-if [ -n "$readme_count" ]; then
-    for doc in "$DOCS/concepts/overview.md" "$DOCS/guides/testing.md"; do
-        if [ -f "$doc" ]; then
-            doc_count=$(grep -oE '[0-9]+ (automated|registered) tests' "$doc" 2>/dev/null | grep -oE '[0-9]+' | head -1)
-            if [ -n "$doc_count" ] && [ "$doc_count" != "$readme_count" ]; then
-                rel="${doc#$ROOT/}"
-                warn "Test count mismatch: README says $readme_count, $rel says $doc_count"
-            fi
-        fi
-    done
-fi
+done
 
 # ── VISION.md status accuracy ─────────────────────────────────────────────────
 echo "Checking VISION.md status claims..."
