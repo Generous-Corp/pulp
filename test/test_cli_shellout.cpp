@@ -604,7 +604,11 @@ TEST_CASE("pulp docs build-site resolves mkdocs.yml from project root",
     // which pulp_binary() honors as an explicit override.
     fs::path absolute_pulp_bin = fs::absolute(pulp_binary());
     REQUIRE(fs::exists(absolute_pulp_bin));
-    pulp_setenv("PULP_CLI_PATH", absolute_pulp_bin.c_str(), 1);
+    // fs::path::c_str() returns const wchar_t* on Windows, so stringify
+    // explicitly so the pulp_setenv(const char*, const char*, int) overload
+    // resolves on every platform.
+    const std::string absolute_pulp_bin_str = absolute_pulp_bin.string();
+    pulp_setenv("PULP_CLI_PATH", absolute_pulp_bin_str.c_str(), 1);
 
     fs::path saved_cwd = fs::current_path();
     std::error_code ec;
