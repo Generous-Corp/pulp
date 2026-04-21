@@ -48,7 +48,7 @@
 # v0.2.0 surface still present in v0.8.0:
 #   - Incremental bundles, `--resume-from` SSH, targets/config, cloud
 #     polling timeout, ssh upload, stale queue recovery.
-version = "v0.21.0"
+version = "v0.21.1"
 
 # Public release source. The bootstrap script downloads from
 # https://github.com/{repo}/releases/download/{version}/{asset}
