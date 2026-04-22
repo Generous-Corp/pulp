@@ -17,6 +17,16 @@ if(APPLE AND NOT PULP_IOS)
         TIMEOUT 900)
 endif()
 
+# AU v2 component-type selection smoke — hardens the aufx→aumf flip
+# for descriptor.accepts_midi=true. Runs under `cmake -P` so it works
+# on every platform without building the Pulp tree.
+add_test(NAME cmake-au-v2-type-selection
+    COMMAND ${CMAKE_COMMAND} -P
+        ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_au_v2_type_selection.cmake)
+set_tests_properties(cmake-au-v2-type-selection PROPERTIES
+    LABELS "cmake;au;au-v2;midi"
+    TIMEOUT 30)
+
 # retry_git_clone unit test (setup.sh helper). Guards the #425 P1
 # Codex fix — a partial clone target is scrubbed between retries so
 # attempt 2+ can actually re-run the network fetch.
@@ -327,6 +337,21 @@ catch_discover_tests(pulp-test-license)
 add_executable(pulp-test-midi-ci test_midi_ci.cpp)
 target_link_libraries(pulp-test-midi-ci PRIVATE pulp::midi Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-midi-ci)
+
+# AU v2 effect adapter MIDI-input tests — guards the 2026-04-22 fix that
+# wired HandleMIDIEvent / HandleSysEx into `PulpAUEffect` and flipped the
+# component type from aufx to aumf for descriptor.accepts_midi=true.
+# Apple-only because the adapter header pulls in AudioUnitSDK (which is
+# not linked on non-Apple lanes).
+if(APPLE AND NOT PULP_IOS AND PULP_HAS_AUSDK)
+    add_executable(pulp-test-au-v2-effect test_au_v2_effect.cpp)
+    target_link_libraries(pulp-test-au-v2-effect PRIVATE
+        pulp::format pulp::midi Catch2::Catch2WithMain)
+    # pulp::format on Apple compiles at C++23 (AudioUnitSDK 1.4 requires
+    # std::expected). Match it here so the adapter header parses.
+    set_target_properties(pulp-test-au-v2-effect PROPERTIES CXX_STANDARD 23)
+    catch_discover_tests(pulp-test-au-v2-effect)
+endif()
 
 # iOS AVAudioSession bridge (workstream 05 slice 5.2)
 add_executable(pulp-test-ios-audio-session test_ios_audio_session.cpp)

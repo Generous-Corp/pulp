@@ -33,6 +33,20 @@
         "docs/guides/platforms/android.md"
       ]
     },
+    "auv2": {
+      "paths": [
+        "core/format/src/au_v2_adapter.cpp",
+        "core/format/src/au_v2_instrument.cpp",
+        "core/format/src/au_v2_entry.*",
+        "core/format/include/pulp/format/au_v2_adapter.hpp",
+        "core/format/include/pulp/format/au_v2_instrument.hpp",
+        "core/format/include/pulp/format/au_v2_entry.hpp",
+        "core/format/include/pulp/format/au_v2_instrument_entry.hpp",
+        "tools/cmake/PulpInfoPlist.au.in",
+        "test/test_au_v2_*",
+        "test/cmake/test_au_v2_*"
+      ]
+    },
     "ci": {
       "paths": [
         ".github/workflows/**",
@@ -192,8 +206,6 @@
         "core/format/include/pulp/format/clap_entry.hpp",
         "core/format/src/standalone.cpp",
         "core/format/src/au_v2_cocoa_view.mm",
-        "core/format/src/au_v2_adapter.cpp",
-        "core/format/include/pulp/format/au_v2_adapter.hpp",
         "core/format/src/au_adapter.mm",
         "core/format/src/au_view_controller_ios.mm",
         "examples/view-bridge-demo/**"

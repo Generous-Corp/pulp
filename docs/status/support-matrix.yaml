@@ -28,6 +28,10 @@ formats:
     macos: usable
     windows: unsupported
     linux: unsupported
+    notes: >
+      MIDI-accepting effects package as kAudioUnitType_MusicEffect (aumf)
+      so AU hosts route inbound MIDI — set ACCEPTS_MIDI on pulp_add_plugin()
+      when descriptor.accepts_midi=true. Audio-only effects stay on aufx.
   clap:
     macos: usable
     windows: partial
@@ -75,7 +79,7 @@ format_limitations:
   vst3:
     - "Dynamic bus arrangements limited; setBusArrangements only renegotiates the primary stereo bus today (workstream 01)."
   au_v2:
-    - "Outbound parameter changes are not emitted to the host — automation read on AU v2 effects only flows host → plugin (workstream 01)."
+    - "Outbound MIDI from AU v2 effects is not wired yet — HandleMIDIEvent / HandleSysEx feed the adapter's MidiBuffer, but effects that set produces_midi=true have no render-notify path to emit MIDI back to the host (#626)."
   clap:
     - "Only the first input bus and first output bus are routed; declared sidechain or additional buses are ignored (workstream 01)."
     - "Processor::set_sidechain is never called from the CLAP adapter — sidechain inputs land on the primary bus (workstream 01)."
