@@ -483,21 +483,24 @@ jobs:
 
   coverage-diff-gate:
     # #566 Phase 1 PR 3: per-PR diff coverage advisory gate.
-    # #566 Phase 1 PR 4: still pinned to the Linux Cobertura XML.
-    # diff-cover is a single-XML tool; "of the lines this PR adds,
-    # how many are covered?" is answered cleanly by one comparison.
-    # Cross-OS unions happen at the Codecov dashboard layer via the
-    # os-* flags. Running diff-cover against three XMLs would produce
-    # three PR comments for the same metric with slightly different
-    # numbers — more noise than signal for an advisory gate.
+    # #566 Phase 1 PR 4: pinned to the Linux Cobertura XML at first.
+    # #566 Phase 3 (landed): the gate is REQUIRED — sub-threshold
+    # diff coverage now hard-fails the PR. The job still posts a
+    # summary comment so contributors see the number alongside the
+    # failing check.
+    # #635 (this PR): consume a MERGED XML covering all three OSes
+    # via tools/scripts/merge_cobertura.py. Earlier the Linux-only
+    # pin silently skipped Apple-only / Windows-only source files
+    # (the files weren't in the Linux artifact, so diff-cover never
+    # saw them and the 75% gate was bypassed for any platform-
+    # specific change). Merging takes max(hits) per (filename, line)
+    # across the per-OS artifacts — a line covered on any OS counts
+    # — so diff-cover stays a single-XML tool and still emits one
+    # PR comment, but the silent-skip is closed.
     #
     # Runs only on pull_request events — the gate question "of the lines
     # this PR adds, how many are covered?" is meaningless on a direct
     # push to main where there is no diff to compute against.
-    #
-    # #566 Phase 3 (landed): the gate is REQUIRED — sub-threshold diff
-    # coverage now hard-fails the PR. The job still posts a summary
-    # comment so contributors see the number alongside the failing check.
     name: Diff coverage required (${{ needs.coverage.result == 'success' && '75%' || 'coverage job failed' }})
     runs-on: ubuntu-24.04
     needs: coverage
@@ -525,16 +528,31 @@ jobs:
         shell: bash
 
       - name: Download Cobertura XML from coverage job (Linux)
-        # Downloads the Linux artifact produced by the matrix `coverage`
-        # job above. Linux keeps the historical name
-        # `coverage-cobertura-${sha}` so this step needs no matrix
-        # awareness. If the coverage job failed or was skipped the
-        # artifact may be missing; the next step handles that case by
-        # rendering a graceful fallback comment instead of hard-failing.
+        # Linux artifact uses the historical name
+        # `coverage-cobertura-${sha}`. macOS and Windows use OS-suffixed
+        # names (see the matrix `coverage` job's upload step). All three
+        # are downloaded; missing artifacts are tolerated — the merge
+        # step skips them and writes a partial XML, and if every input
+        # is missing the merge refuses to write and the next step
+        # renders the graceful "no XML" fallback.
         uses: actions/download-artifact@v6
         with:
           name: coverage-cobertura-${{ github.sha }}
-          path: coverage-artifact/
+          path: coverage-artifact-linux/
+        continue-on-error: true
+
+      - name: Download Cobertura XML from coverage job (macOS)
+        uses: actions/download-artifact@v6
+        with:
+          name: coverage-cobertura-macos-${{ github.sha }}
+          path: coverage-artifact-macos/
+        continue-on-error: true
+
+      - name: Download Cobertura XML from coverage job (Windows)
+        uses: actions/download-artifact@v6
+        with:
+          name: coverage-cobertura-windows-${{ github.sha }}
+          path: coverage-artifact-windows/
         continue-on-error: true
 
       - name: Install diff-cover
@@ -551,18 +569,46 @@ jobs:
         run: python3 tools/scripts/test_coverage_diff_comment.py
         shell: bash
 
+      - name: merge_cobertura.py fixture tests (#635)
+        # Same guard pattern: validate the merge tool before we
+        # depend on its output in the live diff-cover step. A
+        # regression in merge_cobertura would otherwise show up as
+        # a confusing diff-cover number drift before anyone realised
+        # the merge was the cause.
+        run: python3 tools/scripts/test_merge_cobertura.py
+        shell: bash
+
+      - name: Merge per-OS Cobertura XMLs into one (#635)
+        # Closes the silent-skip identified in pulp#635. Without this
+        # step diff-cover only sees the Linux artifact and reports
+        # 100% coverage on Apple-only or Windows-only files because
+        # they aren't in the report at all. The merge takes max(hits)
+        # per (filename, line) across the inputs so a line counted
+        # as covered on any OS is treated as covered overall.
+        # Missing inputs are skipped (next step handles "all missing").
+        shell: bash
+        run: |
+          mkdir -p coverage-artifact
+          python3 tools/scripts/merge_cobertura.py \
+              --out coverage-artifact/coverage.cobertura.xml \
+              coverage-artifact-linux/coverage.cobertura.xml \
+              coverage-artifact-macos/coverage.cobertura.xml \
+              coverage-artifact-windows/coverage.cobertura.xml \
+              || echo "merge_cobertura: every input missing — diff-cover step will render fallback."
+
       - name: Run diff-cover (required)
         id: diff_cover
         # Phase 3: sub-threshold diff coverage hard-fails this job.
         # The job still posts a summary comment via the downstream
         # "Render PR comment body" step so contributors see the
         # number alongside the failed check.
+        # Reads the MERGED XML produced by the previous step (#635).
         shell: bash
         run: |
           set +e
           xml="coverage-artifact/coverage.cobertura.xml"
           if [ ! -f "$xml" ]; then
-            echo "No Cobertura XML from upstream job — writing empty diff report."
+            echo "No Cobertura XML from upstream jobs — writing empty diff report."
             : > coverage-diff.md
             echo "exit_code=skip" >> "$GITHUB_OUTPUT"
             exit 0

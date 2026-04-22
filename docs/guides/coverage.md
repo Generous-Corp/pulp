@@ -317,10 +317,23 @@ is not already on PATH).
 The per-OS legs do NOT fail-fast: a flake on one OS does not cancel
 the others, so the Codecov dashboard still gets partial cross-OS
 coverage when one leg hits a transient toolchain issue. The
-`coverage-diff-gate` job downstream stays pinned to the Linux
-Cobertura XML — diff-cover is a single-XML tool and running it
-against three XMLs would produce three PR comments with
-slightly-different numbers for the same metric.
+`coverage-diff-gate` job downstream consumes a **merged Cobertura
+XML** built from all three OS artifacts via
+`tools/scripts/merge_cobertura.py` (#635). Earlier the gate was
+pinned to the Linux artifact only, which silently skipped Apple-only
+(`au_adapter.mm`, `au_v2_*`) and Windows-only files — diff-cover
+never saw them and the 75% gate was bypassed for any platform-
+specific change. Merging takes `max(hits)` per `(filename, line)`
+across the inputs, so a line covered on any OS counts as covered
+overall. diff-cover stays a single-XML tool (one PR comment, one
+number) but the silent-skip is closed.
+
+**Local equivalent caveat.** `scripts/run_coverage.sh` produces only
+the host-OS Cobertura XML. A local `diff-cover` invocation against
+that single XML still has the silent-skip behaviour for files not
+compiled on the host. Use it as a fast sanity check; the
+authoritative cross-platform coverage gate is the merged XML
+produced by CI's `coverage-diff-gate` job.
 
 The per-OS runs-on labels resolve through the shared
 `tools/scripts/resolve_runs_on.py` helper (same pattern as
