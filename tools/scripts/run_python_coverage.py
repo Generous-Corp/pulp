@@ -21,6 +21,7 @@ import re
 import shutil
 import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
 try:
@@ -36,7 +37,20 @@ SUMMARY_FILE = OUTPUT_DIR / "summary.txt"
 XML_FILE = OUTPUT_DIR / "coverage.python.xml"
 DATA_FILE = OUTPUT_DIR / ".coverage"
 RCFILE = OUTPUT_DIR / ".coveragerc"
-TEST_GLOB = "tools/scripts/test_*.py"
+
+
+@dataclass(frozen=True)
+class CoverageSurface:
+    source_root: str
+    test_glob: str
+
+
+COVERAGE_SURFACES = (
+    CoverageSurface("tools/scripts", "tools/scripts/test_*.py"),
+    CoverageSurface("tools/deps", "tools/deps/test_*.py"),
+    CoverageSurface("tools/local-ci", "tools/local-ci/test_*.py"),
+)
+DEFAULT_TEST_GLOBS = [surface.test_glob for surface in COVERAGE_SURFACES]
 
 
 def _require_supported_coverage() -> None:
@@ -57,40 +71,75 @@ def _require_supported_coverage() -> None:
         )
 
 
-def _discover_tests(pattern: str) -> list[Path]:
-    tests = sorted(REPO_ROOT.glob(pattern))
-    return [p for p in tests if p.is_file()]
+def _discover_tests(patterns: list[str]) -> list[Path]:
+    seen: set[Path] = set()
+    tests: list[Path] = []
+    for pattern in patterns:
+        for path in sorted(REPO_ROOT.glob(pattern)):
+            if not path.is_file() or path in seen:
+                continue
+            seen.add(path)
+            tests.append(path)
+    return tests
 
 
-def _write_coveragerc() -> None:
+def _selected_surfaces(tests: list[Path]) -> list[CoverageSurface]:
+    selected: list[CoverageSurface] = []
+    for surface in COVERAGE_SURFACES:
+        prefix = f"{surface.source_root}/"
+        if any(test.relative_to(REPO_ROOT).as_posix().startswith(prefix) for test in tests):
+            selected.append(surface)
+    return selected
+
+
+def _write_coveragerc(surfaces: list[CoverageSurface]) -> None:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    source_roots = [surface.source_root for surface in surfaces]
+    omit_globs: list[str] = []
+    for surface in surfaces:
+        omit_globs.append(surface.test_glob)
+        omit_globs.append(f"{surface.source_root}/_*.py")
+    if not source_roots:
+        raise ValueError("run_python_coverage.py: no coverage surfaces selected")
+
+    lines = [
+        "[run]",
+        "branch = True",
+        "parallel = True",
+        "relative_files = True",
+        "source =",
+    ]
+    lines.extend(f"    {source_root}" for source_root in source_roots)
+    lines.extend(
+        [
+            "omit =",
+        ]
+    )
+    lines.extend(f"    {omit_glob}" for omit_glob in omit_globs)
+    lines.extend(
+        [
+            "patch =",
+            "    subprocess",
+            "",
+            "[report]",
+            "show_missing = True",
+            "omit =",
+        ]
+    )
+    lines.extend(f"    {omit_glob}" for omit_glob in omit_globs)
+    lines.extend(
+        [
+            "",
+            "[html]",
+            f"directory = {HTML_DIR.as_posix()}",
+            "",
+            "[xml]",
+            f"output = {XML_FILE.as_posix()}",
+            "",
+        ]
+    )
     RCFILE.write_text(
-        "\n".join(
-            [
-                "[run]",
-                "branch = True",
-                "parallel = True",
-                "relative_files = True",
-                "source =",
-                "    tools/scripts",
-                "omit =",
-                "    tools/scripts/test_*.py",
-                "patch =",
-                "    subprocess",
-                "",
-                "[report]",
-                "show_missing = True",
-                "omit =",
-                "    tools/scripts/test_*.py",
-                "",
-                f"[html]",
-                f"directory = {HTML_DIR.as_posix()}",
-                "",
-                "[xml]",
-                f"output = {XML_FILE.as_posix()}",
-                "",
-            ]
-        )
+        "\n".join(lines)
         + "\n",
         encoding="utf-8",
     )
@@ -132,20 +181,34 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--pattern",
-        default=TEST_GLOB,
-        help=f"Glob for test discovery (default: {TEST_GLOB})",
+        action="append",
+        default=None,
+        help=(
+            "Repeatable glob for test discovery. Defaults to the configured "
+            "Python coverage surfaces."
+        ),
     )
     args = parser.parse_args(argv)
 
     _require_supported_coverage()
 
-    tests = _discover_tests(args.pattern)
+    patterns = args.pattern or DEFAULT_TEST_GLOBS
+    tests = _discover_tests(patterns)
     if not tests:
-        print(f"run_python_coverage.py: no tests matched {args.pattern!r}", file=sys.stderr)
+        print(f"run_python_coverage.py: no tests matched {patterns!r}", file=sys.stderr)
+        return 1
+
+    surfaces = _selected_surfaces(tests)
+    if not surfaces:
+        print(
+            "run_python_coverage.py: matched tests are outside the configured "
+            "Python coverage surfaces",
+            file=sys.stderr,
+        )
         return 1
 
     shutil.rmtree(OUTPUT_DIR, ignore_errors=True)
-    _write_coveragerc()
+    _write_coveragerc(surfaces)
 
     env = os.environ.copy()
     env["COVERAGE_PROCESS_START"] = str(RCFILE)
