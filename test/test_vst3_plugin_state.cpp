@@ -62,6 +62,10 @@ std::unique_ptr<pulp::format::Processor> create_test_processor() {
     return std::make_unique<TestVst3Processor>();
 }
 
+std::unique_ptr<pulp::format::Processor> create_null_processor() {
+    return {};
+}
+
 class HostApp final : public Steinberg::Vst::IHostApplication {
 public:
     Steinberg::tresult PLUGIN_API getName(Steinberg::Vst::String128 name) override {
@@ -211,4 +215,51 @@ TEST_CASE("VST3 getState/setState round-trip includes plugin-owned payload",
 
     REQUIRE(loader.terminate() == Steinberg::kResultOk);
     REQUIRE(saver.terminate() == Steinberg::kResultOk);
+}
+
+TEST_CASE("VST3 setState rejects invalid plugin payload",
+          "[vst3][state]") {
+    HostApp host_app;
+
+    pulp::format::vst3::PulpVst3Processor loader(create_test_processor);
+    REQUIRE(loader.initialize(&host_app) == Steinberg::kResultOk);
+    auto* processor = TestVst3Processor::g_last_processor;
+    REQUIRE(processor != nullptr);
+    processor->state().set_value(1, 7.0f);
+    processor->plugin_state = "keep";
+
+    VectorStream bad_stream(std::vector<uint8_t>{'N', 'O', 'P', 'E'});
+    REQUIRE(loader.setState(&bad_stream) == Steinberg::kResultFalse);
+    REQUIRE_THAT(processor->state().get_value(1), WithinAbs(7.0, 0.01));
+    REQUIRE(processor->plugin_state == "keep");
+
+    REQUIRE(loader.terminate() == Steinberg::kResultOk);
+}
+
+TEST_CASE("VST3 getState/setState fail cleanly without a live processor",
+          "[vst3][state]") {
+    HostApp host_app;
+
+    SECTION("after terminate") {
+        pulp::format::vst3::PulpVst3Processor processor(create_test_processor);
+        REQUIRE(processor.initialize(&host_app) == Steinberg::kResultOk);
+        REQUIRE(processor.terminate() == Steinberg::kResultOk);
+
+        VectorStream out_stream;
+        REQUIRE(processor.getState(&out_stream) == Steinberg::kResultFalse);
+
+        VectorStream in_stream(std::vector<uint8_t>{'N', 'O', 'P', 'E'});
+        REQUIRE(processor.setState(&in_stream) == Steinberg::kResultFalse);
+    }
+
+    SECTION("null factory") {
+        pulp::format::vst3::PulpVst3Processor processor(create_null_processor);
+        REQUIRE(processor.initialize(&host_app) == Steinberg::kInternalError);
+
+        VectorStream out_stream;
+        REQUIRE(processor.getState(&out_stream) == Steinberg::kResultFalse);
+
+        VectorStream in_stream(std::vector<uint8_t>{'N', 'O', 'P', 'E'});
+        REQUIRE(processor.setState(&in_stream) == Steinberg::kResultFalse);
+    }
 }

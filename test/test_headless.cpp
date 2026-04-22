@@ -69,6 +69,10 @@ std::unique_ptr<pulp::format::Processor> create_test_gain() {
     return std::make_unique<TestGainProcessor>();
 }
 
+std::unique_ptr<pulp::format::Processor> create_null_processor() {
+    return {};
+}
+
 } // anonymous namespace
 
 using Catch::Matchers::WithinAbs;
@@ -177,4 +181,12 @@ TEST_CASE("HeadlessHost state round-trip includes plugin-owned payload", "[headl
     REQUIRE(host2.load_state(saved));
     REQUIRE_THAT(host2.state().get_value(1), WithinAbs(-18.0, 0.01));
     REQUIRE(restored_processor->plugin_state == "bands=56;view=40-18000");
+}
+
+TEST_CASE("HeadlessHost save/load fail cleanly without a processor", "[headless]") {
+    pulp::format::HeadlessHost host(create_null_processor);
+    REQUIRE(host.save_state().empty());
+
+    const std::vector<uint8_t> bad_state = {'N', 'O', 'P', 'E'};
+    REQUIRE_FALSE(host.load_state(bad_state));
 }

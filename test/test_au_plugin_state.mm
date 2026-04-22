@@ -130,11 +130,24 @@ void require_plst_blob(const uint8_t* bytes, std::size_t size) {
     REQUIRE(bytes[3] == 'T');
 }
 
+struct ScopedFactoryRegistration {
+    explicit ScopedFactoryRegistration(pulp::format::ProcessorFactory factory)
+        : previous(pulp::format::registered_factory()) {
+        pulp::format::register_plugin(factory);
+    }
+
+    ~ScopedFactoryRegistration() {
+        pulp::format::register_plugin(previous);
+    }
+
+    pulp::format::ProcessorFactory previous;
+};
+
 } // namespace
 
 TEST_CASE("AU v2 effect SaveState/RestoreState round-trips plugin-owned payload",
           "[au][auv2][state]") {
-    pulp::format::register_plugin(create_effect_processor);
+    ScopedFactoryRegistration registration(create_effect_processor);
 
     pulp::format::au::PulpAUEffect saver(nullptr);
     auto* saver_processor = g_last_effect_processor;
@@ -153,7 +166,6 @@ TEST_CASE("AU v2 effect SaveState/RestoreState round-trips plugin-owned payload"
     require_plst_blob(CFDataGetBytePtr(payload),
                       static_cast<std::size_t>(CFDataGetLength(payload)));
 
-    pulp::format::register_plugin(create_effect_processor);
     pulp::format::au::PulpAUEffect loader(nullptr);
     auto* loader_processor = g_last_effect_processor;
     REQUIRE(loader_processor != nullptr);
@@ -169,7 +181,7 @@ TEST_CASE("AU v2 effect SaveState/RestoreState round-trips plugin-owned payload"
 
 TEST_CASE("AU v2 instrument SaveState/RestoreState round-trips plugin-owned payload",
           "[au][auv2][instrument][state]") {
-    pulp::format::register_plugin(create_instrument_processor);
+    ScopedFactoryRegistration registration(create_instrument_processor);
 
     pulp::format::au::PulpAUInstrument saver(nullptr);
     auto* saver_processor = g_last_instrument_processor;
@@ -188,7 +200,6 @@ TEST_CASE("AU v2 instrument SaveState/RestoreState round-trips plugin-owned payl
     require_plst_blob(CFDataGetBytePtr(payload),
                       static_cast<std::size_t>(CFDataGetLength(payload)));
 
-    pulp::format::register_plugin(create_instrument_processor);
     pulp::format::au::PulpAUInstrument loader(nullptr);
     auto* loader_processor = g_last_instrument_processor;
     REQUIRE(loader_processor != nullptr);
@@ -210,7 +221,7 @@ TEST_CASE("AU v3 fullState round-trips plugin-owned payload",
         desc.componentSubType = 'TstE';
         desc.componentManufacturer = 'Plup';
 
-        pulp::format::register_plugin(create_effect_processor);
+        ScopedFactoryRegistration registration(create_effect_processor);
 
         NSError* saver_error = nil;
         PulpAudioUnit* saver =
@@ -230,8 +241,6 @@ TEST_CASE("AU v3 fullState round-trips plugin-owned payload",
         REQUIRE(payload != nil);
         require_plst_blob(static_cast<const uint8_t*>(payload.bytes), payload.length);
 
-        pulp::format::register_plugin(create_effect_processor);
-
         NSError* loader_error = nil;
         PulpAudioUnit* loader =
             [[PulpAudioUnit alloc] initWithComponentDescription:desc
@@ -250,5 +259,173 @@ TEST_CASE("AU v3 fullState round-trips plugin-owned payload",
 
         [loader release];
         [saver release];
+    }
+}
+
+TEST_CASE("AU v2 SaveState accepts pre-existing property lists",
+          "[au][auv2][state]") {
+    SECTION("effect") {
+        ScopedFactoryRegistration registration(create_effect_processor);
+        pulp::format::au::PulpAUEffect saver(nullptr);
+        auto* processor = g_last_effect_processor;
+        REQUIRE(processor != nullptr);
+        processor->plugin_state = "layout=48";
+
+        CFPropertyListRef saved = CFRetain(CFSTR("stale"));
+
+        REQUIRE(saver.SaveState(&saved) == noErr);
+        REQUIRE(saved != nullptr);
+        auto saved_dict = static_cast<CFDictionaryRef>(saved);
+        auto payload = static_cast<CFDataRef>(
+            CFDictionaryGetValue(saved_dict, CFSTR("pulp-state")));
+        REQUIRE(payload != nullptr);
+        require_plst_blob(CFDataGetBytePtr(payload),
+                          static_cast<std::size_t>(CFDataGetLength(payload)));
+        CFRelease(saved);
+    }
+
+    SECTION("instrument") {
+        ScopedFactoryRegistration registration(create_instrument_processor);
+        pulp::format::au::PulpAUInstrument saver(nullptr);
+        auto* processor = g_last_instrument_processor;
+        REQUIRE(processor != nullptr);
+        processor->plugin_state = "snapshot=B";
+
+        CFPropertyListRef saved = CFRetain(CFSTR("stale"));
+
+        REQUIRE(saver.SaveState(&saved) == noErr);
+        REQUIRE(saved != nullptr);
+        auto saved_dict = static_cast<CFDictionaryRef>(saved);
+        auto payload = static_cast<CFDataRef>(
+            CFDictionaryGetValue(saved_dict, CFSTR("pulp-state")));
+        REQUIRE(payload != nullptr);
+        require_plst_blob(CFDataGetBytePtr(payload),
+                          static_cast<std::size_t>(CFDataGetLength(payload)));
+        CFRelease(saved);
+    }
+}
+
+TEST_CASE("AU v2 state persistence rejects invalid payloads and uninitialized processors",
+          "[au][auv2][state]") {
+    SECTION("effect rejects invalid payload") {
+        ScopedFactoryRegistration registration(create_effect_processor);
+        pulp::format::au::PulpAUEffect effect(nullptr);
+        auto* processor = g_last_effect_processor;
+        REQUIRE(processor != nullptr);
+        processor->state().set_value(1, 2.0f);
+        processor->plugin_state = "keep";
+
+        const uint8_t bad_bytes[] = {'N', 'O', 'P', 'E'};
+        CFDataRef payload = CFDataCreate(kCFAllocatorDefault, bad_bytes, 4);
+        CFMutableDictionaryRef state = CFDictionaryCreateMutable(
+            kCFAllocatorDefault, 0,
+            &kCFTypeDictionaryKeyCallBacks,
+            &kCFTypeDictionaryValueCallBacks);
+        CFDictionarySetValue(state, CFSTR("pulp-state"), payload);
+
+        REQUIRE(effect.RestoreState(state) == kAudioUnitErr_InvalidPropertyValue);
+        REQUIRE_THAT(processor->state().get_value(1), WithinAbs(2.0, 0.01));
+        REQUIRE(processor->plugin_state == "keep");
+
+        CFRelease(state);
+        CFRelease(payload);
+    }
+
+    SECTION("instrument rejects invalid payload") {
+        ScopedFactoryRegistration registration(create_instrument_processor);
+        pulp::format::au::PulpAUInstrument instrument(nullptr);
+        auto* processor = g_last_instrument_processor;
+        REQUIRE(processor != nullptr);
+        processor->state().set_value(1, 330.0f);
+        processor->plugin_state = "keep";
+
+        const uint8_t bad_bytes[] = {'N', 'O', 'P', 'E'};
+        CFDataRef payload = CFDataCreate(kCFAllocatorDefault, bad_bytes, 4);
+        CFMutableDictionaryRef state = CFDictionaryCreateMutable(
+            kCFAllocatorDefault, 0,
+            &kCFTypeDictionaryKeyCallBacks,
+            &kCFTypeDictionaryValueCallBacks);
+        CFDictionarySetValue(state, CFSTR("pulp-state"), payload);
+
+        REQUIRE(instrument.RestoreState(state) == kAudioUnitErr_InvalidPropertyValue);
+        REQUIRE_THAT(processor->state().get_value(1), WithinAbs(330.0, 0.01));
+        REQUIRE(processor->plugin_state == "keep");
+
+        CFRelease(state);
+        CFRelease(payload);
+    }
+
+    SECTION("effect reports uninitialized when no factory is registered") {
+        CFPropertyListRef saved = nullptr;
+        {
+            ScopedFactoryRegistration registration(create_effect_processor);
+            pulp::format::au::PulpAUEffect saver(nullptr);
+            REQUIRE(saver.SaveState(&saved) == noErr);
+            REQUIRE(saved != nullptr);
+        }
+
+        ScopedFactoryRegistration registration(nullptr);
+        pulp::format::au::PulpAUEffect effect(nullptr);
+
+        CFPropertyListRef empty = nullptr;
+        REQUIRE(effect.SaveState(&empty) == kAudioUnitErr_Uninitialized);
+        if (empty) CFRelease(empty);
+
+        REQUIRE(effect.RestoreState(saved) == kAudioUnitErr_Uninitialized);
+        CFRelease(saved);
+    }
+
+    SECTION("instrument reports uninitialized when no factory is registered") {
+        CFPropertyListRef saved = nullptr;
+        {
+            ScopedFactoryRegistration registration(create_instrument_processor);
+            pulp::format::au::PulpAUInstrument saver(nullptr);
+            REQUIRE(saver.SaveState(&saved) == noErr);
+            REQUIRE(saved != nullptr);
+        }
+
+        ScopedFactoryRegistration registration(nullptr);
+        pulp::format::au::PulpAUInstrument instrument(nullptr);
+
+        CFPropertyListRef empty = nullptr;
+        REQUIRE(instrument.SaveState(&empty) == kAudioUnitErr_Uninitialized);
+        if (empty) CFRelease(empty);
+
+        REQUIRE(instrument.RestoreState(saved) == kAudioUnitErr_Uninitialized);
+        CFRelease(saved);
+    }
+}
+
+TEST_CASE("AU v3 setFullState ignores invalid plugin payload",
+          "[au][auv3][state]") {
+    @autoreleasepool {
+        AudioComponentDescription desc{};
+        desc.componentType = kAudioUnitType_Effect;
+        desc.componentSubType = 'TstE';
+        desc.componentManufacturer = 'Plup';
+
+        ScopedFactoryRegistration registration(create_effect_processor);
+
+        NSError* error = nil;
+        PulpAudioUnit* unit =
+            [[PulpAudioUnit alloc] initWithComponentDescription:desc
+                                                       options:0
+                                                         error:&error];
+        REQUIRE(unit != nil);
+        REQUIRE(error == nil);
+
+        auto* processor = g_last_effect_processor;
+        REQUIRE(processor != nullptr);
+        processor->state().set_value(1, 5.0f);
+        processor->plugin_state = "keep";
+
+        NSData* payload = [NSData dataWithBytes:"NOPE" length:4];
+        NSDictionary<NSString*, id>* saved = @{@"pulpState": payload};
+        [unit setFullState:saved];
+
+        REQUIRE_THAT(processor->state().get_value(1), WithinAbs(5.0, 0.01));
+        REQUIRE(processor->plugin_state == "keep");
+
+        [unit release];
     }
 }
