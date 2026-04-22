@@ -8,13 +8,32 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v0340"></a>
+## [0.34.0] - 2026-04-22
+
+- feat: persist processor-owned plugin state in adapter blobs ([#628](https://github.com/danielraffel/pulp/pull/628))
+- coverage: add Python tools/scripts uploads to Codecov ([#631](https://github.com/danielraffel/pulp/pull/631))
+- docs(ci-skill): note v0.24.0/v0.25.0 behavior changes at new pin ([#629](https://github.com/danielraffel/pulp/pull/629))
+- chore: bump Shipyard pin v0.22.8 → v0.22.9 (auto-PR title+body quality) ([#623](https://github.com/danielraffel/pulp/pull/623))
+- Codex sweep wave 6: installer + coverage follow-ups (#617, #616) ([#622](https://github.com/danielraffel/pulp/pull/622))
+- chore: bump Shipyard pin v0.22.7 → v0.22.8 (periodic reconcile loop) ([#621](https://github.com/danielraffel/pulp/pull/621))
+- chore: bump Shipyard pin v0.22.5 → v0.22.7 (reconcile evidence-snapshot fix) ([#620](https://github.com/danielraffel/pulp/pull/620))
+- chore: bump Shipyard pin v0.22.4 → v0.22.5 (daemon status IPC fix) ([#619](https://github.com/danielraffel/pulp/pull/619))
+- Ship fix/coverage-lcov-pipeline-full-surface ([#616](https://github.com/danielraffel/pulp/pull/616))
+- chore: bump Shipyard pin v0.22.3 → v0.22.4 (daemon idna codec fix) ([#618](https://github.com/danielraffel/pulp/pull/618))
+- chore: installer wrapper for shipyard v0.22.3 + hooks.json schema fix ([#617](https://github.com/danielraffel/pulp/pull/617))
+- ci(coverage,docs-sync): Codex sweep #611/#612/#613 P1+P2 follow-ups ([#614](https://github.com/danielraffel/pulp/pull/614))
+- ci(docs): generalized docs-sync enforcement (#566 Phase 4 / #567) ([#613](https://github.com/danielraffel/pulp/pull/613))
+- Ship fix/codex-sweep-2026-04-21-wave-5 ([#610](https://github.com/danielraffel/pulp/pull/610))
+- ci(coverage): per-tier diff-coverage floors (#566 Phase 2) ([#612](https://github.com/danielraffel/pulp/pull/612))
+- ci(coverage): flip diff-cover from advisory to required (#566 Phase 3) ([#611](https://github.com/danielraffel/pulp/pull/611))
+- docs: replace test counts with coverage references; retire count enforcement ([#609](https://github.com/danielraffel/pulp/pull/609))
+- ci(coverage): cross-platform matrix on linux/macos/windows (#566 Phase 1 PR 4) ([#595](https://github.com/danielraffel/pulp/pull/595))
+- chore(deps,ci): bump Shipyard v0.21.2 → v0.22.0 + iterate-locally skill guidance ([#608](https://github.com/danielraffel/pulp/pull/608))
+- chore(deps): bump pinned Shipyard v0.21.1 → v0.21.2 ([#607](https://github.com/danielraffel/pulp/pull/607))
+- fix: Codex post-merge sweep (2026-04-21 wave 4) ([#597](https://github.com/danielraffel/pulp/pull/597))
+
 <a id="v0330"></a>
-## [0.34.0]
-
-## [0.11.0]
-
-## [0.10.0]
-
 ## [0.33.0] - 2026-04-20
 
 - Ship feature/pulp-pr-shipyard-version-guard ([#606](https://github.com/danielraffel/pulp/pull/606))
@@ -29,10 +48,12 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - ci(iwyu): advisory include-what-you-use gate (#594 Phase 2) ([#600](https://github.com/danielraffel/pulp/pull/600))
 
 <a id="v0311"></a>
-## [0.31.1]
+## [0.31.1] - 2026-04-20
 
-## [0.8.0]
+- cli: release-discovery Slice 6 plugin ↔ CLI skew detection (#551) ([#598](https://github.com/danielraffel/pulp/pull/598))
+- docs+deps: attribute MkDocs Material deps + extend audit completeness gate ([#592](https://github.com/danielraffel/pulp/pull/592))
 
+<a id="v0310"></a>
 ## [0.31.0] - 2026-04-20
 
 - cli: release-discovery Slice 5 auto/prompt/manual/off enforcement (#550) ([#590](https://github.com/danielraffel/pulp/pull/590))
@@ -527,6 +548,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.34.0]: https://github.com/danielraffel/pulp/releases/tag/v0.34.0
 [0.33.0]: https://github.com/danielraffel/pulp/releases/tag/v0.33.0
 [0.32.0]: https://github.com/danielraffel/pulp/releases/tag/v0.32.0
 [0.31.1]: https://github.com/danielraffel/pulp/releases/tag/v0.31.1
