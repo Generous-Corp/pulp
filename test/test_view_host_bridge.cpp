@@ -30,6 +30,33 @@ TEST_CASE("View host bridges: registration APIs are safe on all platforms",
 
 #if !defined(__APPLE__)
 
+namespace {
+
+class StubWindowHost final : public WindowHost {
+public:
+    void show() override {}
+    void hide() override {}
+    bool is_visible() const override { return false; }
+    void repaint() override {}
+    void set_close_callback(std::function<void()>) override {}
+    void run_event_loop() override {}
+};
+
+class StubPluginViewHost final : public PluginViewHost {
+public:
+    NativeViewHandle native_handle() override { return nullptr; }
+    void attach_to_parent(NativeViewHandle) override {}
+    void detach() override {}
+    void repaint() override {}
+    void set_size(uint32_t width, uint32_t height) override { size_ = {width, height}; }
+    Size get_size() const override { return size_; }
+
+private:
+    Size size_{};
+};
+
+} // namespace
+
 TEST_CASE("Non-Apple screenshot: no provider → empty bytes + false file",
           "[view][hosts][issue-299]") {
     clear_screenshot_provider();
@@ -75,6 +102,36 @@ TEST_CASE("Non-Apple PluginViewHost::create: no factory → nullptr",
     REQUIRE(PluginViewHost::create(root, size) == nullptr);
     PluginViewHost::Options opts;
     REQUIRE(PluginViewHost::create(root, opts) == nullptr);
+}
+
+TEST_CASE("Non-Apple host factories propagate root host references",
+          "[view][hosts][issue-651]") {
+    WindowHost::clear_factory();
+    PluginViewHost::clear_factory();
+
+    View window_root;
+    WindowHost::set_factory([](View&, const WindowOptions&) {
+        return std::make_unique<StubWindowHost>();
+    });
+    auto window_host = WindowHost::create(window_root, WindowOptions{});
+    REQUIRE(window_host != nullptr);
+    REQUIRE(window_root.window_host() == window_host.get());
+
+    View plugin_root;
+    PluginViewHost::set_factory([](View&, const PluginViewHost::Options&) {
+        return std::make_unique<StubPluginViewHost>();
+    });
+    auto plugin_host = PluginViewHost::create(plugin_root, PluginViewHost::Size{640, 360});
+    REQUIRE(plugin_host != nullptr);
+    REQUIRE(plugin_root.plugin_view_host() == plugin_host.get());
+
+    auto child = reinterpret_cast<NativeViewHandle>(0x1);
+    REQUIRE_FALSE(plugin_host->attach_native_child_view(child, 1.0f, 2.0f, 3.0f, 4.0f));
+    REQUIRE_FALSE(plugin_host->set_native_child_view_bounds(child, 5.0f, 6.0f, 7.0f, 8.0f));
+    plugin_host->detach_native_child_view(child);
+
+    PluginViewHost::clear_factory();
+    WindowHost::clear_factory();
 }
 
 // #313 Codex P2: providers must be invoked OUTSIDE the registration
