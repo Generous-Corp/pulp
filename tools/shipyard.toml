@@ -30,7 +30,7 @@
 # bumps this pin.
 
 [shipyard]
-# v0.22.7 — seven patch releases on the v0.22.x line:
+# v0.22.8 — eight patch releases on the v0.22.x line:
 #
 #   v0.22.1 — `install.sh` grew `SHIPYARD_VERSION` and
 #             `SHIPYARD_INSTALL_DIR` env-var support so downstreams
@@ -66,6 +66,18 @@
 #             kept the old "failed" pill. 0.22.7 mirrors terminal
 #             statuses into evidence_snapshot so both layers heal
 #             together.
+#   v0.22.8 — periodic 30s reconcile loop inside the daemon: every
+#             active ship-state is re-fetched against GitHub's
+#             `statusCheckRollup` and healed if drift is detected.
+#             Permanent fix for the "stale failed pill after a
+#             re-run" class of bugs. 0.22.6 added a manual command
+#             + startup-only auto-reconcile (closed the daemon-
+#             outage gap but not re-runs); 0.22.7 taught reconcile
+#             to heal the evidence_snapshot layer the GUI actually
+#             reads; 0.22.8 runs that reconcile continuously so
+#             drift from GitHub-side re-runs self-heals within 30s.
+#             Cost: ~120 REST calls/hr per active PR — marginal vs
+#             the 5000/hr budget even at 10+ tracked PRs.
 #
 # Cumulative additions from earlier releases still in effect:
 #   v0.4–v0.8 — release-bot helpers, `shipyard doctor release-chain`,
@@ -80,7 +92,7 @@
 # in `tools/install-shipyard.sh` (v0.22.1+ `SHIPYARD_VERSION` support).
 # The older `~/.pulp/bin/shipyard` path is cleaned up on install to
 # prevent shadow-on-PATH bugs.
-version = "v0.22.7"
+version = "v0.22.8"
 
 # Public release source. The bootstrap script downloads from
 # https://github.com/{repo}/releases/download/{version}/{asset}
