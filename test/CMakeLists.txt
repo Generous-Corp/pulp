@@ -740,9 +740,17 @@ if(PULP_HAS_CLAP)
     # CLAP inbound/outbound MIDI event coverage — pins the CLAP_EVENT_MIDI,
     # CLAP_EVENT_NOTE_EXPRESSION, CLAP_EVENT_NOTE_CHOKE, CLAP_EVENT_MIDI2
     # handlers added alongside feature/clap-midi-cc-coverage.
-    add_executable(pulp-test-clap-midi-events test_clap_midi_events.cpp
-        ${CMAKE_SOURCE_DIR}/core/format/src/clap_adapter.cpp
-    )
+    #
+    # Unlike `pulp-test-clap-entry` above, this test DOES NOT re-compile
+    # clap_adapter.cpp into its own TU. The test drives the adapter via
+    # its public header surface (clap_init / clap_activate / clap_process
+    # — see core/format/include/pulp/format/clap_adapter.hpp), so linking
+    # against pulp::format is sufficient. Keeping the direct compilation
+    # out means the coverage artifact reports exactly one TU for
+    # clap_adapter.cpp (the library's), which is what CI's diff-cover
+    # gate reads — avoids the split-TU problem that produced "96% local
+    # / 62% CI" reports on PR #627.
+    add_executable(pulp-test-clap-midi-events test_clap_midi_events.cpp)
     target_link_libraries(pulp-test-clap-midi-events PRIVATE pulp::format clap Catch2::Catch2WithMain)
     catch_discover_tests(pulp-test-clap-midi-events)
 endif()
