@@ -846,7 +846,7 @@ endfunction()
 #   ${NAME}_AUv3  — AUv3 app-extension bundle (.appex)
 function(pulp_add_ios_auv3)
     cmake_parse_arguments(AUV3
-        ""
+        "ACCEPTS_MIDI"
         "NAME;BUNDLE_ID;MANUFACTURER;MANUFACTURER_CODE;SUBTYPE_CODE;AU_TYPE;VERSION"
         "SOURCES"
         ${ARGN}
@@ -911,6 +911,19 @@ function(pulp_add_ios_auv3)
     endif()
     set(PULP_${target}_CORE_OBJECTS "" CACHE INTERNAL "")
 
+    # Mirror pulp_add_plugin: resolve the ACCEPTS_MIDI flag into the
+    # TRUE/FALSE string that _pulp_add_auv3 expects as its 9th arg. Added
+    # to _pulp_add_auv3's signature alongside the aufx→aumf fix; without
+    # it cmake_parse_arguments leaves AUV3_ACCEPTS_MIDI unset on iOS
+    # callers and _pulp_add_auv3 is invoked with 8 args (seen on CI as
+    # "_pulp_add_auv3 Function invoked with incorrect arguments" at
+    # examples/ios-auv3-synth/CMakeLists.txt:17).
+    if(AUV3_ACCEPTS_MIDI)
+        set(_auv3_accepts_midi "TRUE")
+    else()
+        set(_auv3_accepts_midi "FALSE")
+    endif()
+
     _pulp_add_auv3(${target}
         "${AUV3_NAME}"
         "${AUV3_BUNDLE_ID}"
@@ -919,6 +932,7 @@ function(pulp_add_ios_auv3)
         "${_category}"
         "${AUV3_SUBTYPE_CODE}"
         "${AUV3_MANUFACTURER_CODE}"
+        "${_auv3_accepts_midi}"
     )
 
     if(TARGET ${target}_AUv3)
