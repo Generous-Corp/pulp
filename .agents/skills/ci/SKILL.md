@@ -35,8 +35,8 @@ When the user says any of: **"push to main"**, **"ship this"**, **"ship it"**,
 **"we're done"**, **"merge this"**, **"push it"**, **"run CI"**, **"push a PR"** —
 run `shipyard pr` (not `gh pr create` + `shipyard ship` separately).
 
-`shipyard pr` is the single orchestrator (Shipyard v0.19.1+; pinned as v0.21.0
-in `tools/shipyard.toml`). It:
+`shipyard pr` is the single orchestrator (Shipyard v0.19.1+; pinned at
+v0.25.0 in `tools/shipyard.toml`). It:
 
 1. Calls `tools/scripts/skill_sync_check.py` (resolved via Shipyard's
    `[validation]` path-discovery, explicit in `.shipyard/config.toml`) and
@@ -61,6 +61,28 @@ valid, agents should prefer `shipyard pr` for directness.
 Backward compatibility: raw `shipyard ship` / `shipyard run` still work for
 diagnostics, experimental branches, or when `shipyard pr` itself is being
 debugged. Do not use them as the primary ship path.
+
+### Behaviour notes at the current pin (v0.25.0)
+
+- **Auto-PR titles and bodies use the feature commit** (Shipyard v0.24.0 /
+  Shipyard #151). The orchestrator walks past the mechanical
+  `chore: bump versions` commit when composing the title/body, and scrubs
+  the `Automated by shipyard pr.` tool-branding text. Pulp PR #624 was the
+  canonical repro before the fix. Previously the auto-PR pointed at the
+  bump commit — generic and uninformative. Shipped PRs now read as
+  first-party.
+- **`Version-Bump:` trailers are authoritative, not ceiling-raising**
+  (Shipyard v0.25.0 / Shipyard #152). An author-declared
+  `Version-Bump: <surface>=patch reason="..."` is no longer silently
+  raised to `minor` when the conventional-commit heuristic on other
+  subjects classifies the diff as `minor`. This matches the pulp-side
+  behaviour in `tools/scripts/version_bump_check.py` at this pin.
+- **`shipyard ship-state list` is served from the daemon via IPC** when
+  `shipyard daemon` is running (Shipyard v0.25.0 / Shipyard #154). The
+  PyInstaller cold-start (~5-6s) is bypassed. Callers that tight-loop
+  over ship-state — the macOS GUI polls every 7s; `pulp pr` preflight
+  calls it indirectly — see a meaningful CPU saving. Nothing to do at
+  the pulp side; it's transparent.
 
 ### SSH preflight (v0.20.0+ / Shipyard #106)
 
