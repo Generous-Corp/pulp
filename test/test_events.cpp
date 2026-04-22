@@ -24,6 +24,14 @@ bool wait_until(Predicate&& predicate, std::chrono::milliseconds timeout) {
     return predicate();
 }
 
+struct RecordingMultiTimer : MultiTimer {
+    void timer_callback(int timer_id) override {
+        callbacks.push_back(timer_id);
+    }
+
+    std::vector<int> callbacks;
+};
+
 } // namespace
 
 TEST_CASE("EventLoop dispatch", "[events][event_loop]") {
@@ -330,4 +338,77 @@ TEST_CASE("AsyncUpdater process_pending with no trigger is a no-op",
     u.process_pending();
     u.process_pending();
     REQUIRE(handles.load() == 0);
+}
+
+TEST_CASE("MultiTimer tracks timer lifecycle by id",
+          "[events][async_updater][multi_timer]") {
+    RecordingMultiTimer timers;
+
+    REQUIRE_FALSE(timers.is_timer_running(1));
+
+    timers.start_timer(1, 20);
+    REQUIRE(timers.is_timer_running(1));
+
+    timers.start_timer(1, 5);
+    REQUIRE(timers.is_timer_running(1));
+
+    timers.start_timer(2, 10);
+    REQUIRE(timers.is_timer_running(2));
+
+    timers.stop_timer(1);
+    REQUIRE_FALSE(timers.is_timer_running(1));
+    REQUIRE(timers.is_timer_running(2));
+
+    timers.stop_timer(99);
+    REQUIRE_FALSE(timers.is_timer_running(99));
+}
+
+TEST_CASE("MultiTimer stop_all_timers clears every active timer",
+          "[events][async_updater][multi_timer]") {
+    RecordingMultiTimer timers;
+
+    timers.start_timer(1, 20);
+    timers.start_timer(2, 10);
+    timers.start_timer(3, 5);
+    REQUIRE(timers.is_timer_running(1));
+    REQUIRE(timers.is_timer_running(2));
+    REQUIRE(timers.is_timer_running(3));
+
+    timers.stop_all_timers();
+    REQUIRE_FALSE(timers.is_timer_running(1));
+    REQUIRE_FALSE(timers.is_timer_running(2));
+    REQUIRE_FALSE(timers.is_timer_running(3));
+}
+
+TEST_CASE("ActionBroadcaster adds, removes, and notifies listeners",
+          "[events][async_updater][action_broadcaster]") {
+    ActionBroadcaster broadcaster;
+    std::vector<std::string> seen;
+
+    auto first = broadcaster.add_listener(
+        [&](std::string_view action) { seen.emplace_back(action); });
+    auto second = broadcaster.add_listener(
+        [&](std::string_view action) { seen.emplace_back("second:" + std::string(action)); });
+
+    broadcaster.send_action("refresh");
+    REQUIRE(seen == std::vector<std::string>{"refresh", "second:refresh"});
+
+    broadcaster.remove_listener(first);
+    broadcaster.send_action("rebuild");
+    REQUIRE(seen == std::vector<std::string>{
+        "refresh", "second:refresh", "second:rebuild"});
+
+    broadcaster.remove_listener(second);
+    broadcaster.send_action("ignored");
+    REQUIRE(seen.size() == 3);
+}
+
+TEST_CASE("ScopedLowPowerModeDisabler is constructible as an RAII guard",
+          "[events][async_updater][power]") {
+    {
+        ScopedLowPowerModeDisabler guard;
+        SUCCEED("construction completed");
+    }
+
+    SUCCEED("destruction completed");
 }
