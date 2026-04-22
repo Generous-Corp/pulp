@@ -777,3 +777,10 @@ Gotchas surfaced while landing the four-phase SignalGraph follow-up:
   `python3 tools/scripts/version_bump_check.py --mode=apply` to update
   `CMakeLists.txt` + `CHANGELOG.md`. The gate reports "SDK X.Y.Z ✓
   bumped" when satisfied.
+- **Android/Kotlin coverage lives in `android.yml`, not `coverage.yml`.**
+  The dedicated `android-kotlin-coverage` job provisions Java + the
+  Android SDK/NDK, runs `:app:testDebugUnitTest` plus
+  `:app:jacocoDebugUnitTestReport`, uploads the JaCoCo artifacts, and
+  sends the XML to Codecov. Keep it separate from the Clang-based
+  `coverage.yml` matrix — Android coverage is a Gradle/SDK lane, not a
+  native profraw lane.
