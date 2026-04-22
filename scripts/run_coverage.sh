@@ -184,10 +184,19 @@ if [[ ${#BINARIES[@]} -eq 0 ]]; then
 fi
 
 # First-party static libraries — expose every instrumented TU regardless
-# of whether a test links it. Pattern is `libpulp-*.a`; deliberately does
-# not pick up libausdk.a / libvst3-sdk.a (external SDKs, not our code).
+# of whether a test links it. Pattern is `libpulp-*.a` on macOS/Linux
+# and `pulp-*.lib` on Windows (clang-cl's MSVC-style driver emits `.lib`
+# archives, not `.a`). Without the `.lib` branch the Windows coverage
+# matrix leg silently skips the full-surface expansion, so the Windows
+# Codecov upload has only test-linked TUs — same narrow view this fix
+# was meant to close everywhere. Deliberately does not pick up
+# libausdk.a / libvst3-sdk.a (external SDKs, not our code); the
+# `pulp-*.lib` prefix is narrow enough to skip third-party .lib files
+# that also appear under the build tree.
 while IFS= read -r f; do BINARIES+=("-object" "$f"); done < <(
-    find "${BUILD_DIR}" -type f -name 'libpulp-*.a' 2>/dev/null || true
+    find "${BUILD_DIR}" -type f \
+         \( -name 'libpulp-*.a' -o -name 'pulp-*.lib' \) \
+         2>/dev/null || true
 )
 
 # First-party non-test executables — CLI, standalone host, inspector.

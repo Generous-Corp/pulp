@@ -10,6 +10,11 @@
 # (e.g. the v0.22.x install.sh family) without re-implementing them
 # here.
 #
+# Installer source is pinned to the same Shipyard release as the
+# binary itself (`tags/<pinned-version>/install.sh`), so a given
+# Pulp commit always runs the same installer code — the same
+# supply-chain story as any other pinned dep.
+#
 # Usage:
 #   ./tools/install-shipyard.sh           # install pinned version
 #   ./tools/install-shipyard.sh --status  # show installed vs pinned
@@ -23,7 +28,6 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PIN_FILE="$SCRIPT_DIR/shipyard.toml"
-UPSTREAM_INSTALLER="https://raw.githubusercontent.com/danielraffel/Shipyard/main/install.sh"
 
 # ── Argument parsing ────────────────────────────────────────────────────────
 
@@ -32,7 +36,7 @@ for arg in "$@"; do
     case "$arg" in
         --status)  MODE=status ;;
         -h|--help)
-            sed -n '2,22p' "$0" | sed 's/^# \?//'
+            sed -n '2,26p' "$0" | sed 's/^# \?//'
             exit 0
             ;;
         *)
@@ -60,6 +64,13 @@ if [ -z "$VERSION" ]; then
     exit 1
 fi
 
+# Supply-chain: pin the installer script to the same Shipyard release
+# tag as the binary it installs. Downloading `install.sh` from `main`
+# means the same Pulp commit can run different installer code over
+# time; pinning to `refs/tags/<VERSION>` makes the installer
+# reproducible alongside everything else in this repo.
+UPSTREAM_INSTALLER="https://raw.githubusercontent.com/danielraffel/Shipyard/refs/tags/${VERSION}/install.sh"
+
 # ── Status mode: report and exit ────────────────────────────────────────────
 
 if [ "$MODE" = "status" ]; then
@@ -75,13 +86,51 @@ if [ "$MODE" = "status" ]; then
     exit 0
 fi
 
-# ── Legacy cleanup ──────────────────────────────────────────────────────────
+# ── Queue-file truncation recovery (#528) ───────────────────────────────────
+# A crash between open(O_TRUNC) and the subsequent write() in Shipyard
+# can leave the machine-global job queue at zero bytes. Any subsequent
+# Shipyard invocation then dies with JSONDecodeError, which blocks
+# autonomous ship cycles. Re-running `./tools/install-shipyard.sh` is
+# the documented recovery path; defensively re-initialize the queue
+# file when we see it truncated. Carried over from the pre-wrapper
+# script — the regression test `test_install_shipyard.py` still
+# covers this path.
+repair_truncated_queue_file() {
+    local state_dir=""
+    case "$(uname -s)" in
+        Darwin)     state_dir="$HOME/Library/Application Support/shipyard" ;;
+        Linux)      state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/shipyard" ;;
+        MINGW*|MSYS*|CYGWIN*) state_dir="$HOME/AppData/Local/shipyard" ;;
+        *)          return 0 ;;
+    esac
+
+    local queue_file="$state_dir/queue/queue.json"
+    if [ -f "$queue_file" ] && [ ! -s "$queue_file" ]; then
+        echo "→ Shipyard queue file is empty — reinitializing (#528)"
+        mkdir -p "$(dirname "$queue_file")"
+        echo '{"jobs": []}' > "$queue_file"
+    fi
+}
+
+repair_truncated_queue_file
+
+# ── Delegate to upstream installer ──────────────────────────────────────────
+
+echo "→ Installing Shipyard $VERSION via upstream install.sh"
+echo "    source: $UPSTREAM_INSTALLER"
+
+SHIPYARD_VERSION="$VERSION" bash <(curl -fsSL "$UPSTREAM_INSTALLER")
+
+# ── Legacy cleanup (post-success only) ──────────────────────────────────────
 # Earlier versions of this script installed to ~/.pulp/shipyard/<v>/
 # with a symlink at ~/.pulp/bin/shipyard. When that bin dir comes
 # first on PATH, the stale symlink shadows the canonical
 # ~/.local/bin/shipyard and users silently run an old binary.
-# Remove the stale artifacts so the upstream installer's PATH entry
-# (~/.local/bin) takes over cleanly.
+#
+# Only clean up AFTER the upstream installer succeeded — otherwise a
+# network failure would delete the user's only working binary and
+# leave them with no shipyard on PATH. Running the wrapper is an
+# idempotent operation; cleanup on the NEXT successful run is fine.
 
 if [ -L "$HOME/.pulp/bin/shipyard" ]; then
     echo "→ Removing legacy symlink $HOME/.pulp/bin/shipyard"
@@ -91,13 +140,6 @@ if [ -d "$HOME/.pulp/shipyard" ]; then
     echo "→ Removing legacy install tree $HOME/.pulp/shipyard"
     rm -rf "$HOME/.pulp/shipyard"
 fi
-
-# ── Delegate to upstream installer ──────────────────────────────────────────
-
-echo "→ Installing Shipyard $VERSION via upstream install.sh"
-echo "    source: $UPSTREAM_INSTALLER"
-
-SHIPYARD_VERSION="$VERSION" bash <(curl -fsSL "$UPSTREAM_INSTALLER")
 
 # ── Final report ────────────────────────────────────────────────────────────
 
