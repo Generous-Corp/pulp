@@ -146,6 +146,25 @@ target_link_libraries(pulp-test-cli-projects-registry PRIVATE
     Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-cli-projects-registry)
 
+# CLI package commands (#643): local-only tests for target/search/list/
+# update/suggest/audit/add/remove behavior against staged project files
+# and registry fixtures. Stays off remote fetch / archive extraction /
+# install branches; links package_commands.cpp + package_registry.cpp
+# directly so the command surface can be exercised without shelling out
+# to the built binary.
+add_executable(pulp-test-cli-package-commands
+    test_cli_package_commands.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/package_commands.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/package_registry.cpp
+)
+target_include_directories(pulp-test-cli-package-commands PRIVATE
+    ${CMAKE_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/tools/cli)
+target_link_libraries(pulp-test-cli-package-commands PRIVATE
+    pulp::platform
+    Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-cli-package-commands)
+
 # CLI project bump (#499 Slice 7 / #564): pure-logic tests for the
 # CMakeLists pin parser, rewriter, refuse-dynamic-pin gate, semver /
 # downgrade guard, and the undo-batch JSON round-trip. project_bump.cpp

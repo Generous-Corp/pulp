@@ -1,0 +1,422 @@
+// test_cli_package_commands.cpp — local-only command tests for
+// `tools/cli/package_commands.cpp`.
+//
+// Coverage tranche for issue #643. These tests exercise the command
+// surface against a staged project root, local registry JSON, and local
+// lock/config files. They intentionally avoid remote registry fetch,
+// archive extraction, or SDK/setup side effects.
+
+#include <catch2/catch_test_macros.hpp>
+
+#include "../tools/cli/package_commands.hpp"
+#include "../tools/cli/package_registry.hpp"
+
+#include <atomic>
+#include <cstdint>
+#include <filesystem>
+#include <fstream>
+#include <iostream>
+#include <sstream>
+#include <string>
+#include <vector>
+
+namespace fs = std::filesystem;
+using namespace pulp::cli::pkg;
+
+namespace {
+
+struct TempDir {
+    fs::path path;
+    TempDir() {
+        auto base = fs::temp_directory_path();
+        static std::atomic<int> seq{0};
+        const int n = seq.fetch_add(1);
+        path = base / ("pulp-cli-package-commands-test-" +
+                       std::to_string(reinterpret_cast<std::uintptr_t>(this)) +
+                       "-" + std::to_string(n));
+        fs::create_directories(path);
+        std::error_code ec;
+        auto canon = fs::weakly_canonical(path, ec);
+        if (!ec) path = canon;
+    }
+    ~TempDir() {
+        std::error_code ec;
+        fs::remove_all(path, ec);
+    }
+};
+
+struct ScopedCurrentPath {
+    fs::path previous;
+    explicit ScopedCurrentPath(const fs::path& next) : previous(fs::current_path()) {
+        fs::current_path(next);
+    }
+    ~ScopedCurrentPath() {
+        std::error_code ec;
+        fs::current_path(previous, ec);
+    }
+};
+
+struct StreamCapture {
+    std::ostringstream out;
+    std::ostringstream err;
+    std::streambuf* old_out = nullptr;
+    std::streambuf* old_err = nullptr;
+
+    StreamCapture() {
+        old_out = std::cout.rdbuf(out.rdbuf());
+        old_err = std::cerr.rdbuf(err.rdbuf());
+    }
+
+    ~StreamCapture() {
+        std::cout.rdbuf(old_out);
+        std::cerr.rdbuf(old_err);
+    }
+};
+
+struct CommandResult {
+    int exit_code = 0;
+    std::string stdout_text;
+    std::string stderr_text;
+};
+
+void write_file(const fs::path& path, const std::string& body) {
+    fs::create_directories(path.parent_path());
+    std::ofstream f(path);
+    f << body;
+}
+
+std::string read_file(const fs::path& path) {
+    std::ifstream f(path);
+    std::ostringstream out;
+    out << f.rdbuf();
+    return out.str();
+}
+
+void write_registry_fixture(const fs::path& root,
+                            const std::string& signalsmith_version = "1.2.0") {
+    write_file(root / "tools" / "packages" / "registry.json", R"({
+  "registry_version": 1,
+  "packages": {
+    "signalsmith-dsp": {
+      "name": "Signalsmith DSP",
+      "version": ")" + signalsmith_version + R"(",
+      "description": "Fast DSP helpers for filters and resampling",
+      "license": "MIT",
+      "category": "DSP",
+      "url": "https://example.com/signalsmith",
+      "fetch": {
+        "method": "header-only",
+        "git_repository": "https://example.com/signalsmith.git",
+        "git_tag": "v)" + signalsmith_version + R"("
+      },
+      "cmake": {
+        "targets": ["signalsmith::dsp"],
+        "header_only": true,
+        "include_dir": "include"
+      },
+      "platforms": {
+        "macOS": {"architectures": ["arm64", "x64"]},
+        "Windows": {"architectures": ["x64"]},
+        "Linux": {"architectures": ["x64"]}
+      },
+      "rt_safe": true,
+      "tags": ["signalsmith", "filter", "dsp"],
+      "provides": ["filter", "resampler"],
+      "overlaps_with_builtin": {
+        "pulp/filter.hpp": "basic filter blocks"
+      },
+      "unique_value": "specialized DSP utilities",
+      "verification": {
+        "last_verified": "2026-04-22",
+        "verified_version": ")" + signalsmith_version + R"(",
+        "build_status": {
+          "macOS": "pass",
+          "Windows": "pass",
+          "Linux": "pass"
+        }
+      }
+    },
+    "gpl-filter": {
+      "name": "GPL Filter",
+      "version": "3.0.0",
+      "description": "Copyleft filter implementation",
+      "license": "GPL-3.0",
+      "category": "DSP",
+      "url": "https://example.com/gpl-filter",
+      "fetch": {
+        "method": "header-only",
+        "git_repository": "https://example.com/gpl-filter.git",
+        "git_tag": "v3.0.0"
+      },
+      "cmake": {
+        "targets": ["gpl::filter"],
+        "header_only": true,
+        "include_dir": "include"
+      },
+      "platforms": {
+        "macOS": {"architectures": ["arm64"]},
+        "Windows": {"architectures": ["x64"]}
+      },
+      "tags": ["filter", "gpl"],
+      "provides": ["filter"],
+      "alternatives": ["signalsmith-dsp"],
+      "verification": {
+        "last_verified": "2026-04-20",
+        "verified_version": "3.0.0",
+        "build_status": {
+          "macOS": "pass"
+        }
+      }
+    },
+    "mpl-analyzer": {
+      "name": "MPL Analyzer",
+      "version": "0.9.0",
+      "description": "Spectral analysis helper",
+      "license": "MPL-2.0",
+      "category": "Analysis",
+      "url": "https://example.com/mpl-analyzer",
+      "fetch": {
+        "method": "header-only",
+        "git_repository": "https://example.com/mpl-analyzer.git",
+        "git_tag": "v0.9.0"
+      },
+      "cmake": {
+        "targets": ["mpl::analyzer"],
+        "header_only": true,
+        "include_dir": "include"
+      },
+      "platforms": {
+        "macOS": {"architectures": ["arm64"]},
+        "Windows": {"architectures": ["x64"]}
+      },
+      "tags": ["analysis", "fft"],
+      "provides": ["analysis"],
+      "verification": {
+        "last_verified": "2026-04-21",
+        "verified_version": "0.9.0",
+        "build_status": {
+          "macOS": "pass",
+          "Windows": "pass"
+        }
+      }
+    }
+  }
+}
+)");
+}
+
+void write_project_scaffold(const fs::path& root) {
+    fs::create_directories(root / "cmake");
+    write_file(root / "CMakeLists.txt", "cmake_minimum_required(VERSION 3.22)\nproject(TestPlugin)\n");
+    write_file(root / "DEPENDENCIES.md",
+               "| Name | Version | License | Source | Notes | Checked |\n"
+               "|---|---|---|---|---|---|\n");
+    write_file(root / "NOTICE.md", "# Notice\n");
+}
+
+CommandResult run_in_project(const fs::path& root, auto&& fn) {
+    ScopedCurrentPath cwd(root);
+    StreamCapture capture;
+    const int rc = fn();
+    return {rc, capture.out.str(), capture.err.str()};
+}
+
+LockFile make_lock(std::initializer_list<std::pair<const std::string, LockedPackage>> pkgs) {
+    LockFile lock;
+    lock.version = 1;
+    for (const auto& [id, pkg] : pkgs) {
+        lock.packages[id] = pkg;
+    }
+    return lock;
+}
+
+std::vector<std::string> target_strings(const fs::path& root) {
+    std::vector<std::string> out;
+    for (const auto& t : read_project_targets(root)) out.push_back(t.to_string());
+    return out;
+}
+
+}  // namespace
+
+TEST_CASE("cmd_target manages project targets from local pulp.toml",
+          "[cli][package-commands][target][issue-643]") {
+    TempDir tmp;
+    write_project_scaffold(tmp.path);
+    write_registry_fixture(tmp.path);
+    REQUIRE(write_project_targets(
+        tmp.path,
+        {PlatformTarget{"macOS", "arm64"}, PlatformTarget{"Windows", "x64"}}));
+
+    auto help = run_in_project(tmp.path, [&] { return cmd_target({}); });
+    REQUIRE(help.exit_code == 0);
+    REQUIRE(help.stdout_text.find("Usage: pulp target") != std::string::npos);
+
+    auto listed = run_in_project(tmp.path, [&] { return cmd_target({"list"}); });
+    REQUIRE(listed.exit_code == 0);
+    REQUIRE(listed.stdout_text.find("macOS-arm64") != std::string::npos);
+    REQUIRE(listed.stdout_text.find("Windows-x64") != std::string::npos);
+
+    auto add_linux = run_in_project(tmp.path, [&] { return cmd_target({"add", "Linux-x64"}); });
+    REQUIRE(add_linux.exit_code == 0);
+    REQUIRE(add_linux.stdout_text.find("Added target: Linux-x64") != std::string::npos);
+    const std::vector<std::string> expected_targets = {
+        "macOS-arm64", "Windows-x64", "Linux-x64"
+    };
+    REQUIRE(target_strings(tmp.path) == expected_targets);
+
+    auto duplicate = run_in_project(tmp.path, [&] { return cmd_target({"add", "Linux-x64"}); });
+    REQUIRE(duplicate.exit_code == 0);
+    REQUIRE(duplicate.stdout_text.find("already configured") != std::string::npos);
+
+    auto invalid = run_in_project(tmp.path, [&] { return cmd_target({"add", "Mars-x64"}); });
+    REQUIRE(invalid.exit_code == 1);
+    REQUIRE(invalid.stderr_text.find("Invalid target: Mars-x64") != std::string::npos);
+
+    auto remove_linux = run_in_project(tmp.path, [&] { return cmd_target({"remove", "Linux-x64"}); });
+    REQUIRE(remove_linux.exit_code == 0);
+    REQUIRE(remove_linux.stdout_text.find("Removed target: Linux-x64") != std::string::npos);
+
+    auto remove_missing = run_in_project(tmp.path, [&] { return cmd_target({"remove", "Linux-x64"}); });
+    REQUIRE(remove_missing.exit_code == 1);
+    REQUIRE(remove_missing.stderr_text.find("is not configured") != std::string::npos);
+
+    REQUIRE(write_project_targets(tmp.path, {PlatformTarget{"macOS", "arm64"}}));
+    auto remove_last = run_in_project(tmp.path, [&] { return cmd_target({"remove", "macOS-arm64"}); });
+    REQUIRE(remove_last.exit_code == 1);
+    REQUIRE(remove_last.stderr_text.find("Cannot remove the last target") != std::string::npos);
+}
+
+TEST_CASE("search, list, suggest, and audit commands use staged local data",
+          "[cli][package-commands][registry][issue-643]") {
+    TempDir tmp;
+    write_project_scaffold(tmp.path);
+    write_registry_fixture(tmp.path);
+    REQUIRE(write_project_targets(
+        tmp.path,
+        {PlatformTarget{"macOS", "arm64"}, PlatformTarget{"Windows", "x64"}, PlatformTarget{"Linux", "x64"}}));
+    REQUIRE(save_lock_file(tmp.path / "packages.lock.json", make_lock({
+        {"signalsmith-dsp", {"1.2.0", "https://example.com/signalsmith.git", "", "v1.2.0"}},
+        {"mpl-analyzer", {"0.9.0", "https://example.com/mpl-analyzer.git", "", "v0.9.0"}},
+        {"missing-pkg", {"0.1.0", "https://example.com/missing.git", "", "deadbeef"}},
+    })));
+    write_file(tmp.path / "demo.cpp", "#include <signalsmith/filter.hpp>\n");
+
+    auto search_text = run_in_project(tmp.path, [&] { return cmd_search({"filter"}); });
+    REQUIRE(search_text.exit_code == 0);
+    REQUIRE(search_text.stdout_text.find("signalsmith-dsp") != std::string::npos);
+    REQUIRE(search_text.stdout_text.find("gpl-filter") != std::string::npos);
+
+    auto search_json = run_in_project(tmp.path, [&] { return cmd_search({"signalsmith", "--format", "json"}); });
+    REQUIRE(search_json.exit_code == 0);
+    REQUIRE(search_json.stdout_text.find("\"id\": \"signalsmith-dsp\"") != std::string::npos);
+
+    auto listed = run_in_project(tmp.path, [&] { return cmd_list({}); });
+    REQUIRE(listed.exit_code == 0);
+    REQUIRE(listed.stdout_text.find("Installed packages (3)") != std::string::npos);
+    REQUIRE(listed.stdout_text.find("Signalsmith DSP") != std::string::npos);
+
+    auto list_json = run_in_project(tmp.path, [&] { return cmd_list({"--json"}); });
+    REQUIRE(list_json.exit_code == 0);
+    REQUIRE(list_json.stdout_text.find("\"signalsmith-dsp\"") != std::string::npos);
+    REQUIRE(list_json.stdout_text.find("\"missing-pkg\"") != std::string::npos);
+
+    auto suggest_description = run_in_project(tmp.path, [&] {
+        return cmd_suggest({"--description", "filter"});
+    });
+    REQUIRE(suggest_description.exit_code == 0);
+    REQUIRE(suggest_description.stdout_text.find("Suggested packages for") != std::string::npos);
+    REQUIRE(suggest_description.stdout_text.find("signalsmith-dsp") != std::string::npos);
+
+    auto suggest_analyze = run_in_project(tmp.path, [&] {
+        return cmd_suggest({"--analyze", "demo.cpp"});
+    });
+    REQUIRE(suggest_analyze.exit_code == 0);
+    REQUIRE(suggest_analyze.stdout_text.find("Based on includes in demo.cpp") != std::string::npos);
+    REQUIRE(suggest_analyze.stdout_text.find("signalsmith-dsp") != std::string::npos);
+
+    auto suggest_alternative = run_in_project(tmp.path, [&] {
+        return cmd_suggest({"--alternative", "gpl-filter"});
+    });
+    REQUIRE(suggest_alternative.exit_code == 0);
+    REQUIRE(suggest_alternative.stdout_text.find("Alternatives to GPL Filter") != std::string::npos);
+    REQUIRE(suggest_alternative.stdout_text.find("signalsmith-dsp") != std::string::npos);
+
+    auto audit_pkgs = run_in_project(tmp.path, [&] { return audit_packages(tmp.path); });
+    REQUIRE(audit_pkgs.exit_code == 1);
+    REQUIRE(audit_pkgs.stdout_text.find("NOT IN REGISTRY") != std::string::npos);
+
+    auto audit_platforms_result = run_in_project(tmp.path, [&] { return audit_platforms(tmp.path); });
+    REQUIRE(audit_platforms_result.exit_code == 1);
+    REQUIRE(audit_platforms_result.stdout_text.find("platform gap(s) found") != std::string::npos);
+    REQUIRE(audit_platforms_result.stdout_text.find("Linux-x64") != std::string::npos);
+
+    auto audit_licenses_result = run_in_project(tmp.path, [&] { return audit_licenses(tmp.path); });
+    REQUIRE(audit_licenses_result.exit_code == 1);
+    REQUIRE(audit_licenses_result.stdout_text.find("MPL-2.0 REVIEW") != std::string::npos);
+}
+
+TEST_CASE("cmd_update updates only local lock and generated cmake",
+          "[cli][package-commands][update][issue-643]") {
+    TempDir tmp;
+    write_project_scaffold(tmp.path);
+    write_registry_fixture(tmp.path, "1.2.0");
+    REQUIRE(write_project_targets(
+        tmp.path,
+        {PlatformTarget{"macOS", "arm64"}, PlatformTarget{"Windows", "x64"}}));
+    REQUIRE(save_lock_file(tmp.path / "packages.lock.json", make_lock({
+        {"signalsmith-dsp", {"1.0.0", "https://example.com/signalsmith.git", "", "v1.0.0"}},
+    })));
+
+    auto dry_run = run_in_project(tmp.path, [&] { return cmd_update({}); });
+    REQUIRE(dry_run.exit_code == 0);
+    REQUIRE(dry_run.stdout_text.find("Signalsmith DSP") != std::string::npos);
+    REQUIRE(dry_run.stdout_text.find("Run 'pulp update --apply'") != std::string::npos);
+    REQUIRE(load_lock_file(tmp.path / "packages.lock.json").packages["signalsmith-dsp"].version == "1.0.0");
+
+    auto apply = run_in_project(tmp.path, [&] { return cmd_update({"--apply"}); });
+    REQUIRE(apply.exit_code == 0);
+    REQUIRE(apply.stdout_text.find("Updated packages") != std::string::npos);
+    REQUIRE(load_lock_file(tmp.path / "packages.lock.json").packages["signalsmith-dsp"].version == "1.2.0");
+    REQUIRE(read_file(tmp.path / "cmake" / "pulp-packages.cmake").find("signalsmith-dsp") != std::string::npos);
+}
+
+TEST_CASE("cmd_add and cmd_remove stay local on failure and success paths",
+          "[cli][package-commands][add-remove][issue-643]") {
+    TempDir tmp;
+    write_project_scaffold(tmp.path);
+    write_registry_fixture(tmp.path);
+    REQUIRE(write_project_targets(
+        tmp.path,
+        {PlatformTarget{"macOS", "arm64"}, PlatformTarget{"Windows", "x64"}}));
+    REQUIRE(save_lock_file(tmp.path / "packages.lock.json", make_lock({})));
+
+    auto no_package = run_in_project(tmp.path, [&] { return cmd_add({}); });
+    REQUIRE(no_package.exit_code == 0);
+    REQUIRE(no_package.stdout_text.find("Usage: pulp add") != std::string::npos);
+
+    auto missing = run_in_project(tmp.path, [&] { return cmd_add({"signalsmith"}); });
+    REQUIRE(missing.exit_code == 1);
+    REQUIRE(missing.stderr_text.find("not found in registry") != std::string::npos);
+    REQUIRE(missing.stdout_text.find("Did you mean") != std::string::npos);
+
+    auto rejected = run_in_project(tmp.path, [&] { return cmd_add({"gpl-filter"}); });
+    REQUIRE(rejected.exit_code == 1);
+    REQUIRE(rejected.stderr_text.find("GPL-3.0 licensed") != std::string::npos);
+    REQUIRE(rejected.stdout_text.find("--accept-license GPL-3.0") != std::string::npos);
+
+    auto add_ok = run_in_project(tmp.path, [&] { return cmd_add({"signalsmith-dsp", "--no-cmake"}); });
+    REQUIRE(add_ok.exit_code == 0);
+    REQUIRE(add_ok.stdout_text.find("Added Signalsmith DSP v1.2.0") != std::string::npos);
+    REQUIRE(load_lock_file(tmp.path / "packages.lock.json").packages.count("signalsmith-dsp") == 1);
+    REQUIRE(read_file(tmp.path / "DEPENDENCIES.md").find("Signalsmith DSP") != std::string::npos);
+    REQUIRE(read_file(tmp.path / "NOTICE.md").find("## Signalsmith DSP") != std::string::npos);
+
+    auto remove_missing = run_in_project(tmp.path, [&] { return cmd_remove({"missing-pkg"}); });
+    REQUIRE(remove_missing.exit_code == 1);
+    REQUIRE(remove_missing.stderr_text.find("is not installed") != std::string::npos);
+
+    auto remove_ok = run_in_project(tmp.path, [&] { return cmd_remove({"signalsmith-dsp"}); });
+    REQUIRE(remove_ok.exit_code == 0);
+    REQUIRE(remove_ok.stdout_text.find("Removed Signalsmith DSP") != std::string::npos);
+    REQUIRE(load_lock_file(tmp.path / "packages.lock.json").packages.empty());
+}
