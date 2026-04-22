@@ -11,6 +11,7 @@ target_sources(pulp-format PRIVATE
     src/format.cpp
     src/registry.cpp
     src/headless.cpp
+    src/plugin_state_io.cpp
     src/validation_harness.cpp
     src/aax_model.cpp
     src/host_type.cpp

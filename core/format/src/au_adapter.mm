@@ -5,6 +5,7 @@
 #import <AudioToolbox/AudioToolbox.h>
 #import <AVFoundation/AVFoundation.h>
 #include <pulp/format/processor.hpp>
+#include <pulp/format/plugin_state_io.hpp>
 #include <pulp/format/registry.hpp>
 #include <pulp/format/ara.hpp>
 #include <pulp/runtime/log.hpp>
@@ -222,16 +223,16 @@ struct AUBridge {
     AUParameterTree *tree = [AUParameterTree createTreeWithChildren:auParams];
 
     // Wire parameter changes from host to StateStore
-    __weak typeof(self) weakSelf = self;
+    __unsafe_unretained PulpAudioUnit* weakSelf = self;
     tree.implementorValueObserver = ^(AUParameter *param, AUValue value) {
-        __strong typeof(weakSelf) strongSelf = weakSelf;
+        PulpAudioUnit* strongSelf = weakSelf;
         if (!strongSelf) return;
         strongSelf->_bridge.store.set_value(
             static_cast<pulp::state::ParamID>(param.address), value);
     };
 
     tree.implementorValueProvider = ^AUValue(AUParameter *param) {
-        __strong typeof(weakSelf) strongSelf = weakSelf;
+        PulpAudioUnit* strongSelf = weakSelf;
         if (!strongSelf) return 0.0f;
         return strongSelf->_bridge.store.get_value(
             static_cast<pulp::state::ParamID>(param.address));
@@ -239,7 +240,7 @@ struct AUBridge {
 
     tree.implementorStringFromValueCallback = ^NSString *(AUParameter *param, const AUValue *value) {
         AUValue v = value ? *value : param.value;
-        __strong typeof(weakSelf) strongSelf = weakSelf;
+        PulpAudioUnit* strongSelf = weakSelf;
         if (strongSelf) {
             auto* info = strongSelf->_bridge.store.info(
                 static_cast<pulp::state::ParamID>(param.address));
@@ -342,7 +343,7 @@ struct AUBridge {
         int scChans = bridge->sidechain_channels;
         if (pullInputBlock && scChans > 0) {
             UInt32 scBufs = std::min(static_cast<UInt32>(scChans),
-                                     static_cast<UInt32>(kMaxChannels));
+                                     static_cast<UInt32>(pulp::format::au::kMaxChannels));
             // Size sidechain_storage for this block if needed (rare —
             // max_frames should cover; guard anyway).
             std::size_t needed = static_cast<std::size_t>(scBufs) * frameCount;
@@ -556,7 +557,8 @@ struct AUBridge {
 // ── State persistence ──────────────────────────────────────────────────────
 
 - (NSDictionary<NSString *, id> *)fullState {
-    auto data = _bridge.store.serialize();
+    if (!_bridge.processor) return [super fullState];
+    auto data = pulp::format::plugin_state_io::serialize(_bridge.store, *_bridge.processor);
     NSData *nsData = [NSData dataWithBytes:data.data() length:data.size()];
     NSMutableDictionary *state = [[super fullState] mutableCopy] ?: [NSMutableDictionary new];
     state[@"pulpState"] = nsData;
@@ -566,9 +568,13 @@ struct AUBridge {
 - (void)setFullState:(NSDictionary<NSString *, id> *)fullState {
     [super setFullState:fullState];
     NSData *nsData = fullState[@"pulpState"];
-    if (nsData) {
+    if (nsData && _bridge.processor) {
         auto* bytes = static_cast<const uint8_t*>(nsData.bytes);
-        _bridge.store.deserialize({bytes, nsData.length});
+        if (!pulp::format::plugin_state_io::deserialize({bytes, nsData.length},
+                                                        _bridge.store,
+                                                        *_bridge.processor)) {
+            pulp::runtime::log_warn("AU: failed to restore plugin state");
+        }
     }
 }
 

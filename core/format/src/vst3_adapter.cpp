@@ -4,6 +4,7 @@
 // with the Pulp StateStore during processing
 
 #include <pulp/format/vst3_adapter.hpp>
+#include <pulp/format/plugin_state_io.hpp>
 #include <pulp/format/vst3_plug_view.hpp>
 #include <pulp/format/ara.hpp>
 #include <pulp/runtime/log.hpp>
@@ -442,7 +443,8 @@ tresult PLUGIN_API PulpVst3Processor::process(ProcessData& data) {
 }
 
 tresult PLUGIN_API PulpVst3Processor::getState(IBStream* stream) {
-    auto data = store_.serialize();
+    if (!processor_) return kResultFalse;
+    auto data = plugin_state_io::serialize(store_, *processor_);
     int32 written;
     return stream->write(data.data(), static_cast<int32>(data.size()), &written);
 }
@@ -455,7 +457,8 @@ tresult PLUGIN_API PulpVst3Processor::setState(IBStream* stream) {
     while (stream->read(buf, sizeof(buf), &read_count) == kResultOk && read_count > 0) {
         data.insert(data.end(), buf, buf + read_count);
     }
-    if (!store_.deserialize(data)) return kResultFalse;
+    if (!processor_) return kResultFalse;
+    if (!plugin_state_io::deserialize(data, store_, *processor_)) return kResultFalse;
 
     // Sync restored values back to VST3 parameter system
     for (const auto& param : store_.all_params()) {

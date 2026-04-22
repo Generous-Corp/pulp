@@ -6,6 +6,7 @@
 #include <AudioToolbox/AudioUnitUtilities.h>
 
 #include <pulp/format/au_v2_adapter.hpp>
+#include <pulp/format/plugin_state_io.hpp>
 #include <pulp/format/registry.hpp>
 #include <pulp/runtime/log.hpp>
 
@@ -287,16 +288,29 @@ OSStatus PulpAUEffect::SaveState(CFPropertyListRef* outData)
     auto result = AUEffectBase::SaveState(outData);
     if (result != noErr) return result;
 
-    auto data = store_.serialize();
+    if (!processor_) return kAudioUnitErr_Uninitialized;
+    auto data = plugin_state_io::serialize(store_, *processor_);
     CFDataRef cfData = CFDataCreate(kCFAllocatorDefault,
                                     data.data(),
                                     static_cast<CFIndex>(data.size()));
-    if (cfData && *outData) {
-        CFMutableDictionaryRef dict = CFDictionaryCreateMutableCopy(
-            kCFAllocatorDefault, 0,
-            static_cast<CFDictionaryRef>(*outData));
+    if (cfData) {
+        CFMutableDictionaryRef dict = nullptr;
+        if (*outData && CFGetTypeID(*outData) == CFDictionaryGetTypeID()) {
+            dict = CFDictionaryCreateMutableCopy(
+                kCFAllocatorDefault, 0,
+                static_cast<CFDictionaryRef>(*outData));
+        } else {
+            dict = CFDictionaryCreateMutable(kCFAllocatorDefault,
+                                             0,
+                                             &kCFTypeDictionaryKeyCallBacks,
+                                             &kCFTypeDictionaryValueCallBacks);
+        }
+
+        if (*outData) {
+            CFRelease(*outData);
+        }
+
         CFDictionarySetValue(dict, CFSTR("pulp-state"), cfData);
-        CFRelease(*outData);
         *outData = dict;
         CFRelease(cfData);
     }
@@ -315,7 +329,11 @@ OSStatus PulpAUEffect::RestoreState(CFPropertyListRef plist)
         if (cfData && CFGetTypeID(cfData) == CFDataGetTypeID()) {
             auto* bytes = CFDataGetBytePtr(cfData);
             auto length = CFDataGetLength(cfData);
-            store_.deserialize({bytes, static_cast<size_t>(length)});
+            if (!processor_) return kAudioUnitErr_Uninitialized;
+            if (!plugin_state_io::deserialize({bytes, static_cast<size_t>(length)},
+                                              store_, *processor_)) {
+                return kAudioUnitErr_InvalidPropertyValue;
+            }
 
             for (const auto& param : store_.all_params()) {
                 Globals()->SetParameter(

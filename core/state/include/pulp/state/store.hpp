@@ -108,10 +108,16 @@ public:
     void add_listener(ParamChangeCallback callback);
 
     /// Serialize all parameter values to a binary blob for preset/state save.
+    ///
+    /// This is the parameter-only payload. Format adapters may wrap it in a
+    /// higher-level host blob alongside Processor::serialize_plugin_state().
     /// @return Byte vector suitable for storage or transmission.
     std::vector<uint8_t> serialize() const;
 
-    /// Restore parameter values from a binary blob.
+    /// Restore parameter values from a parameter-only binary blob.
+    ///
+    /// Format adapters may decode a higher-level host blob first, then pass
+    /// only the embedded StateStore payload here.
     /// @return True if deserialization succeeded.
     bool deserialize(std::span<const uint8_t> data);
 

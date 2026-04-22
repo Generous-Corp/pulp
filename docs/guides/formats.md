@@ -60,8 +60,14 @@ Note port declaration is driven by `descriptor().accepts_midi` and `descriptor()
 
 ### State Save/Load
 
-- **Save:** `store.serialize()` returns a `std::vector<uint8_t>`. The adapter writes it to the CLAP `clap_ostream_t`.
-- **Load:** The adapter reads all bytes from `clap_istream_t` into a buffer (4 KB chunks), then calls `store.deserialize()`.
+- **Save:** The adapter writes a host-facing blob containing `StateStore` plus
+  any non-empty `Processor::serialize_plugin_state()` payload. When the
+  processor-owned payload is empty, the adapter preserves the legacy raw
+  `StateStore` blob for backward compatibility.
+- **Load:** The adapter reads all bytes from `clap_istream_t` into a buffer
+  (4 KB chunks), restores `StateStore`, then calls
+  `deserialize_plugin_state()`. Older blobs without a processor-owned payload
+  call `deserialize_plugin_state()` with empty bytes.
 
 ### Multi-Bus / Sidechain
 
@@ -139,8 +145,13 @@ VST3 note events (`Event::kNoteOnEvent`, `Event::kNoteOffEvent`) are converted t
 
 ### State Save/Load
 
-- **Save (`getState`):** `store_.serialize()` writes the binary blob to `IBStream`.
-- **Load (`setState`):** Reads the stream in 4 KB chunks, calls `store_.deserialize()`, then syncs all restored values back to the VST3 parameter system via `setParamNormalized()`.
+- **Save (`getState`):** Writes a combined host-facing blob containing the
+  `StateStore` payload plus any non-empty
+  `Processor::serialize_plugin_state()` bytes.
+- **Load (`setState`):** Reads the stream in 4 KB chunks, restores both layers,
+  then syncs restored parameter values back to the VST3 parameter system via
+  `setParamNormalized()`. Older blobs without a processor-owned payload still
+  load and call `deserialize_plugin_state()` with empty bytes.
 
 ### Multi-Bus / Sidechain
 
@@ -239,8 +250,15 @@ Stepped parameters with a `to_string` function get value string arrays via `GetP
 
 The AU adapter stores Pulp state alongside the standard AU state dictionary:
 
-- **Save:** Calls `AUEffectBase::SaveState()` (or `MusicDeviceBase::SaveState()`), then appends a `CFData` blob under the key `"pulp-state"` containing `store_.serialize()`.
-- **Load:** Calls the base `RestoreState()`, then looks for the `"pulp-state"` key. If found, calls `store_.deserialize()` and syncs all values back to the AU parameter system via `Globals()->SetParameter()`.
+- **Save:** Calls `AUEffectBase::SaveState()` (or `MusicDeviceBase::SaveState()`),
+  then appends a `CFData` blob under the key `"pulp-state"`. That blob contains
+  the parameter-only `StateStore` payload plus any non-empty
+  `Processor::serialize_plugin_state()` bytes.
+- **Load:** Calls the base `RestoreState()`, then looks for the `"pulp-state"`
+  key. If found, restores both layers and syncs all parameter values back to
+  the AU parameter system via `Globals()->SetParameter()`. Older blobs with only
+  raw `StateStore` data still load and call `deserialize_plugin_state()` with
+  empty bytes.
 
 ### Tail and Latency
 
@@ -286,6 +304,17 @@ Status: `experimental` on macOS and iOS per
 today but hasn't yet passed the host-compatibility bar (auval v2 validation,
 Logic Pro + GarageBand + AUM cross-check) that would justify promotion to
 `usable`; see the status manifest for the current promotion criteria.
+
+### State Save/Load
+
+AU v3 mirrors the AU v2 state contract through `AUAudioUnit.fullState`:
+
+- **Save:** `fullState` writes a `NSData` payload under the key `"pulpState"`.
+  That payload contains the parameter-only `StateStore` bytes plus any
+  non-empty `Processor::serialize_plugin_state()` blob.
+- **Load:** `setFullState:` reads `"pulpState"` and restores both layers.
+  Older blobs that contain only raw `StateStore` data still load and call
+  `deserialize_plugin_state()` with empty bytes.
 
 ---
 
@@ -521,8 +550,8 @@ Key methods:
 | `process(output, input, midi_in, midi_out)` | Process audio with MIDI |
 | `release()` | Release processing resources |
 | `state()` | Access the `StateStore` for parameter reads/writes |
-| `save_state()` | Serialize current parameter state to bytes |
-| `load_state(data)` | Restore parameter state from bytes |
+| `save_state()` | Serialize current plugin state to bytes |
+| `load_state(data)` | Restore parameter and plugin-owned state from bytes |
 | `descriptor()` | Read the plugin's `PluginDescriptor` |
 
 Input and output views may alias for in-place processing.
