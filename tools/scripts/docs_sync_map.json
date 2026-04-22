@@ -8,6 +8,7 @@
         "codecov.yml",
         "ci/coverage-targets.yaml",
         "scripts/run_coverage.sh",
+        "tools/scripts/run_python_coverage.py",
         "tools/cmake/PulpInstrumentation.cmake",
         "tools/scripts/coverage_tier_check.py",
         "tools/scripts/coverage_diff_comment.py",

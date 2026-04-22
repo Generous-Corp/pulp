@@ -238,6 +238,24 @@ jobs:
           CMAKE_GENERATOR: ${{ matrix.os == 'windows' && 'Ninja' || '' }}
         run: scripts/run_coverage.sh
 
+      - name: Install Python coverage tooling
+        # tools/scripts/** is a blind spot in the current dashboard:
+        # the repo already has Python unit tests for the gate and
+        # automation scripts, but their coverage never reaches
+        # Codecov. Keep the first expansion intentionally narrow:
+        # Linux-only, tools/scripts-only, same workflow.
+        if: matrix.os == 'linux'
+        shell: bash
+        run: python3 -m pip install --user 'coverage>=7.10' PyYAML
+
+      - name: Run Python tools coverage
+        # Mirror scripts/run_coverage.sh semantics: keep going even if a
+        # test fails so we can still emit partial coverage for review.
+        if: matrix.os == 'linux'
+        continue-on-error: true
+        shell: bash
+        run: python3 tools/scripts/run_python_coverage.py
+
       - name: Upload HTML report
         if: always()
         uses: actions/upload-artifact@v6
@@ -253,6 +271,24 @@ jobs:
           name: coverage-summary-${{ matrix.os }}-${{ github.sha }}
           path: build-coverage/coverage/summary.txt
           retention-days: 90
+
+      - name: Upload Python HTML report
+        if: always() && matrix.os == 'linux'
+        uses: actions/upload-artifact@v6
+        with:
+          name: coverage-python-report-${{ github.sha }}
+          path: build-coverage/python/html/
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Upload Python summary
+        if: always() && matrix.os == 'linux'
+        uses: actions/upload-artifact@v6
+        with:
+          name: coverage-python-summary-${{ github.sha }}
+          path: build-coverage/python/summary.txt
+          retention-days: 90
+          if-no-files-found: error
 
       - name: Verify Cobertura XML exists
         # Fail loudly if the coverage build didn't produce a cobertura file.
@@ -289,6 +325,29 @@ jobs:
           fi
           echo "coverage.cobertura.xml has lines-valid=${lines_valid}"
 
+      - name: Verify Python Cobertura XML exists
+        # coverage.py emits Cobertura XML too. Keep the same
+        # file-non-empty + lines-valid assertions we use for the native
+        # report so a broken Python lane doesn't silently upload nothing.
+        if: always() && matrix.os == 'linux'
+        shell: bash
+        run: |
+          xml=build-coverage/python/coverage.python.xml
+          test -s "$xml" || {
+            echo "::error::coverage.python.xml is missing or empty."
+            echo "::error::Python tools coverage likely failed — check the 'Run Python tools coverage' step above."
+            exit 1
+          }
+          size=$(wc -c < "$xml")
+          echo "coverage.python.xml size: ${size} bytes"
+          lines_valid=$(python3 -c "import xml.etree.ElementTree as E; print(E.parse('$xml').getroot().attrib.get('lines-valid', '0'))")
+          if [ "${lines_valid}" = "0" ]; then
+            echo "::error::coverage.python.xml is structurally empty (lines-valid=0)."
+            echo "::error::coverage.py did not record any executable tools/scripts lines."
+            exit 1
+          fi
+          echo "coverage.python.xml has lines-valid=${lines_valid}"
+
       - name: Upload Cobertura XML
         # Linux XML keeps the historical name `coverage-cobertura-${sha}`
         # so the downstream `coverage-diff-gate` job continues to
@@ -304,6 +363,26 @@ jobs:
           path: build-coverage/coverage.cobertura.xml
           retention-days: 14
           if-no-files-found: error
+
+      - name: Upload Python Cobertura XML
+        if: always() && matrix.os == 'linux'
+        uses: actions/upload-artifact@v6
+        with:
+          name: coverage-python-${{ github.sha }}
+          path: build-coverage/python/coverage.python.xml
+          retention-days: 14
+          if-no-files-found: error
+
+      - name: Compute Codecov upload file list
+        id: codecov_files
+        if: always()
+        shell: bash
+        run: |
+          files="build-coverage/coverage.cobertura.xml"
+          if [ "${{ matrix.os }}" = "linux" ] && [ -f build-coverage/python/coverage.python.xml ]; then
+            files="${files},build-coverage/python/coverage.python.xml"
+          fi
+          echo "files=${files}" >> "${GITHUB_OUTPUT}"
 
       - name: Upload coverage to Codecov
         # #566 Phase 1 PR 4 adds a per-OS flag on each matrix leg
@@ -327,7 +406,7 @@ jobs:
         if: always()
         uses: codecov/codecov-action@v5
         with:
-          files: build-coverage/coverage.cobertura.xml
+          files: ${{ steps.codecov_files.outputs.files }}
           flags: ${{ matrix.flag }}
           # Token makes upload more reliable (avoids tokenless rate limits);
           # action silently falls back to tokenless if the secret is unset

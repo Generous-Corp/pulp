@@ -1,7 +1,9 @@
 # Coverage
 
 Coverage is measured per-subsystem, per-platform, and per-surface on
-macOS, Linux, and Windows, and uploaded to Codecov on every push.
+macOS, Linux, and Windows for the native C/C++ lane, with an additional
+Python tooling lane for `tools/scripts/**` on Linux. All reports are
+uploaded to Codecov on every push.
 [#566](https://github.com/danielraffel/pulp/issues/566) tracks the
 broader coverage initiative.
 
@@ -35,8 +37,17 @@ system in the matrix.
 
 ## How to run coverage locally
 
+Native C/C++ coverage:
+
 ```bash
 scripts/run_coverage.sh
+```
+
+Python tooling coverage (`tools/scripts/**`):
+
+```bash
+python3 -m pip install 'coverage>=7.10' PyYAML
+python3 tools/scripts/run_python_coverage.py
 ```
 
 Output:
@@ -49,18 +60,33 @@ Output:
   `llvm-cov export`.
 - `build-coverage/coverage.cobertura.xml` — Cobertura XML converted
   from the LCOV via the vendored `tools/scripts/lcov_cobertura.py`.
+- `build-coverage/python/html/index.html` — HTML drilldown for
+  `tools/scripts/**`.
+- `build-coverage/python/summary.txt` — text summary for the Python
+  tooling lane.
+- `build-coverage/python/coverage.python.xml` — Cobertura XML emitted
+  by coverage.py for the Python tooling lane.
 
-The script requires Clang (not gcc) because we use Clang source-based
-coverage, not gcov. See `tools/cmake/PulpInstrumentation.cmake` for the
-flag configuration. `llvm-profdata` and `llvm-cov` must be on PATH —
-on macOS, export the Xcode toolchain:
+The native script requires Clang (not gcc) because we use Clang
+source-based coverage, not gcov. See
+`tools/cmake/PulpInstrumentation.cmake` for the flag configuration.
+`llvm-profdata` and `llvm-cov` must be on PATH — on macOS, export the
+Xcode toolchain:
 `export PATH="$(xcrun -f llvm-cov | xargs dirname):$PATH"`.
+
+The Python tooling lane requires `coverage.py >= 7.10` because
+subprocess coverage support (`[run] patch = subprocess`) is what lets
+tests like `test_resolve_runs_on.py` and `test_gates.py` measure the
+actual script they spawn, not just the test harness. `PyYAML` is also
+required because `tools/scripts/test_codecov_config.py` parses
+`codecov.yml` as part of the lane.
 
 Optional flags:
 
 ```bash
 scripts/run_coverage.sh --jobs 16                 # parallelism
 scripts/run_coverage.sh --tests '^pulp-test-audio' # regex filter
+python3 tools/scripts/run_python_coverage.py --pattern 'tools/scripts/test_resolve_runs_on.py'
 ```
 
 ### Troubleshooting
@@ -103,6 +129,7 @@ or splitting the untested portion into its own PR.
 ## How the collection works
 
 ```
+Native:
 Source → Clang -fprofile-instr-generate -fcoverage-mapping
          ↓ (at runtime, LLVM_PROFILE_FILE=...)
        .profraw  × N test binaries
@@ -114,6 +141,17 @@ Source → Clang -fprofile-instr-generate -fcoverage-mapping
      + text summary)             lcov_cobertura.py
                                          ↓
                                 Cobertura XML (Codecov + diff-cover)
+
+Python tooling:
+Source → coverage.py run (with subprocess patch)
+         ↓
+     .coverage.* shards
+         ↓ (coverage combine)
+       .coverage
+         ↓                ↓
+    coverage report/html  coverage xml
+         ↓                ↓
+      summary + HTML   Cobertura XML (Codecov)
 ```
 
 - **Instrumentation**: enabled via `-DPULP_ENABLE_COVERAGE=ON` at
@@ -157,20 +195,30 @@ preserves the full surface. gcovr is no longer installed in CI.
 
 ### Language coverage
 
-`PULP_ENABLE_COVERAGE` flips the **Clang C/C++** source-based
-instrumentation flags only. Swift code under `apple/` is built by
-SPM/Xcode and has a separate coverage pipeline
-(`swift test --enable-code-coverage`). It is not wired into the
-`scripts/run_coverage.sh` flow yet — tracked as issue #615. Until that
-lands, `apple/` will show as 0% on the dashboard; treat "Swift not yet
-instrumented" as the reason, not the test suite's fault.
+Today the live dashboard includes:
+
+- **Clang C/C++** coverage from the native build graph on macOS, Linux,
+  and Windows.
+- **Python** coverage for `tools/scripts/**` on Linux via
+  `tools/scripts/run_python_coverage.py`.
+
+Still out of scope today:
+
+- Swift code under `apple/` — separate SPM/Xcode lane, tracked in
+  issue #615.
+- Python outside `tools/scripts/**` (`tools/deps/**`,
+  `tools/local-ci/**`, repo-root `scripts/**`) — follow-up after the
+  `tools/scripts` lane stabilizes.
+- Kotlin/Android coverage.
 
 ## Cross-platform matrix
 
 The coverage workflow runs on
-`{ubuntu-latest, macos-latest, windows-latest}`. Each OS produces its
-own `coverage.cobertura.xml` and uploads to Codecov with an OS-tag
-flag. We do NOT merge profdata across architectures —
+`{ubuntu-latest, macos-latest, windows-latest}` for the native lane.
+Each OS produces its own `coverage.cobertura.xml` and uploads to
+Codecov with an OS-tag flag. The Linux leg also uploads the Python
+tools XML for `tools/scripts/**`. We do NOT merge profdata across
+architectures —
 `llvm-profdata merge` is not architecture-portable
 (`planning/coverage-tooling-decision-2026-04-21.md` §7); Codecov does
 the cross-OS union at the flag layer.
