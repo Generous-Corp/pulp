@@ -47,6 +47,7 @@ ignore:
   - "examples/**"
   - "build/**"
   - "build-coverage/**"
+  - "fetchcontent-src/**"
   - "**/Catch2/**"
   - "**/catch2/**"
 

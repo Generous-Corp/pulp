@@ -32,9 +32,9 @@ CODECOV = REPO_ROOT / "codecov.yml"
 
 
 # Canonical 13 core subsystems + 4 platforms + 3 surfaces = 20.
-# Kept in lockstep with codecov.yml `flags:` and `component_management:
+# Kept in lockstep with codecov.yml `component_management:
 # individual_components` blocks; drift here is a real bug.
-EXPECTED_IDS = {
+EXPECTED_COMPONENT_IDS = {
     # subsystems (13)
     "audio", "canvas", "events", "format", "host", "midi", "osc",
     "platform", "render", "runtime", "signal", "state", "view",
@@ -42,6 +42,15 @@ EXPECTED_IDS = {
     "android", "apple", "linux", "windows",
     # surfaces (3)
     "cli", "ship", "tools",
+}
+
+# Upload-axis flags are intentionally not components: they describe
+# which CI leg uploaded the report, not which repo path the file lives
+# under. Path slicing remains the job of component_management above.
+EXPECTED_UPLOAD_ONLY_FLAGS = {
+    "os-linux",
+    "os-macos",
+    "os-windows",
 }
 
 
@@ -74,6 +83,7 @@ class CodecovYamlStructure(unittest.TestCase):
             "examples/**",
             "build/**",
             "build-coverage/**",
+            "fetchcontent-src/**",
             "**/Catch2/**",
             "**/catch2/**",
         }
@@ -98,14 +108,15 @@ class CodecovYamlStructure(unittest.TestCase):
         }
         self.assertEqual(
             ids,
-            EXPECTED_IDS,
-            f"component set drifted from canonical 20 (missing={EXPECTED_IDS - ids}, "
-            f"extra={ids - EXPECTED_IDS})",
+            EXPECTED_COMPONENT_IDS,
+            "component set drifted from canonical 20 "
+            f"(missing={EXPECTED_COMPONENT_IDS - ids}, "
+            f"extra={ids - EXPECTED_COMPONENT_IDS})",
         )
 
-    def test_flags_and_components_stay_aligned(self):
-        # Flag names must match component ids so dashboard filters
-        # read consistently regardless of which dimension is selected.
+    def test_flags_stay_aligned_with_components_and_upload_axes(self):
+        # Path-based flags must match component ids 1:1, with only the
+        # explicit upload-axis os-* flags allowed as extras.
         flag_names = set(self.doc.get("flags", {}).keys())
         comp_ids = {
             c["component_id"]
@@ -113,9 +124,9 @@ class CodecovYamlStructure(unittest.TestCase):
         }
         self.assertEqual(
             flag_names,
-            comp_ids,
-            "flags and component_ids drifted — cross-filter queries on the "
-            "Codecov dashboard will be inconsistent.",
+            comp_ids | EXPECTED_UPLOAD_ONLY_FLAGS,
+            "flags drifted from the expected component ids plus upload-only "
+            "os-* flags — Codecov dashboard filters will be inconsistent.",
         )
 
 
