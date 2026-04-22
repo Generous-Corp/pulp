@@ -15,8 +15,12 @@
 
 namespace {
 
+static class TestGainProcessor* last_processor = nullptr;
+
 class TestGainProcessor : public pulp::format::Processor {
 public:
+    TestGainProcessor() { last_processor = this; }
+
     pulp::format::PluginDescriptor descriptor() const override {
         return {
             .name = "HarnessTestGain",
@@ -68,7 +72,17 @@ public:
         }
     }
 
+    std::vector<uint8_t> serialize_plugin_state() const override {
+        return std::vector<uint8_t>(plugin_state.begin(), plugin_state.end());
+    }
+
+    bool deserialize_plugin_state(std::span<const uint8_t> data) override {
+        plugin_state.assign(data.begin(), data.end());
+        return true;
+    }
+
     int note_on_count_ = 0;
+    std::string plugin_state;
 };
 
 std::unique_ptr<pulp::format::Processor> create_test_gain() {
@@ -166,6 +180,26 @@ TEST_CASE("ValidationHarness state round-trip", "[harness][phase2]") {
     REQUIRE(h2.load_state(saved));
     REQUIRE_THAT(h2.get_param(1), WithinAbs(-12.5, 0.01));
     REQUIRE_THAT(h2.get_param(2), WithinAbs(0.75, 0.01));
+}
+
+TEST_CASE("ValidationHarness state round-trip includes plugin-owned payload", "[harness][phase2]") {
+    pulp::format::ValidationHarness h1(create_test_gain);
+    h1.configure({});
+    REQUIRE(last_processor != nullptr);
+    last_processor->plugin_state = "snapshots=A|B";
+    h1.set_param(1, -9.0f);
+
+    auto saved = h1.save_state();
+
+    pulp::format::ValidationHarness h2(create_test_gain);
+    h2.configure({});
+    auto* restored_processor = last_processor;
+    REQUIRE(restored_processor != nullptr);
+    restored_processor->plugin_state = "stale";
+
+    REQUIRE(h2.load_state(saved));
+    REQUIRE_THAT(h2.get_param(1), WithinAbs(-9.0, 0.01));
+    REQUIRE(restored_processor->plugin_state == "snapshots=A|B");
 }
 
 // ── Report generation ───────────────────────────────────────────────────────

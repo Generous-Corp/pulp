@@ -74,12 +74,15 @@ public:
     /// The plugin's static descriptor (name, vendor, bus layout, etc.).
     const PluginDescriptor& descriptor() const { return descriptor_; }
 
-    /// Serialize the current parameter state to a binary blob.
-    std::vector<uint8_t> save_state() const { return store_.serialize(); }
+    /// Serialize the current plugin state to a binary blob.
+    ///
+    /// Includes StateStore plus any processor-owned plugin state exposed via
+    /// Processor::serialize_plugin_state().
+    std::vector<uint8_t> save_state() const;
 
-    /// Restore parameter state from a binary blob.
+    /// Restore plugin state from a binary blob.
     /// @return True on success.
-    bool load_state(std::span<const uint8_t> data) { return store_.deserialize(data); }
+    bool load_state(std::span<const uint8_t> data);
 
 private:
     std::unique_ptr<Processor> processor_;

@@ -10,6 +10,7 @@
 //   PULP_CLAP_PLUGIN(my_namespace::create_my_processor)
 
 #include <pulp/format/processor.hpp>
+#include <pulp/format/plugin_state_io.hpp>
 #include <pulp/format/registry.hpp>
 #include <pulp/format/clap_adapter.hpp>
 #ifdef PULP_CLAP_GUI
@@ -96,12 +97,14 @@ inline const clap_plugin_audio_ports_t audio_ports_ext = {
 // ── State extension ────────────────────────────────────────────────────
 inline bool state_save(const clap_plugin_t* plugin, const clap_ostream_t* stream) {
     auto* self = static_cast<clap_adapter::PulpClapPlugin*>(plugin->plugin_data);
-    auto data = self->store.serialize();
+    if (!self || !self->processor) return false;
+    auto data = plugin_state_io::serialize(self->store, *self->processor);
     return stream->write(stream, data.data(), data.size()) == static_cast<int64_t>(data.size());
 }
 
 inline bool state_load(const clap_plugin_t* plugin, const clap_istream_t* stream) {
     auto* self = static_cast<clap_adapter::PulpClapPlugin*>(plugin->plugin_data);
+    if (!self || !self->processor) return false;
     std::vector<uint8_t> data;
     uint8_t buf[4096];
     while (true) {
@@ -109,7 +112,7 @@ inline bool state_load(const clap_plugin_t* plugin, const clap_istream_t* stream
         if (read <= 0) break;
         data.insert(data.end(), buf, buf + read);
     }
-    return self->store.deserialize(data);
+    return plugin_state_io::deserialize(data, self->store, *self->processor);
 }
 
 inline const clap_plugin_state_t state_ext = { .save = state_save, .load = state_load };

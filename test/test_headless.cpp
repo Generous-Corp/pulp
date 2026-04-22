@@ -7,9 +7,12 @@
 namespace {
 
 static pulp::format::ProcessContext last_context{};
+static class TestGainProcessor* last_processor = nullptr;
 
 class TestGainProcessor : public pulp::format::Processor {
 public:
+    TestGainProcessor() { last_processor = this; }
+
     pulp::format::PluginDescriptor descriptor() const override {
         return {
             .name = "TestGain",
@@ -49,6 +52,17 @@ public:
                 out[i] = in[i] * gain;
         }
     }
+
+    std::vector<uint8_t> serialize_plugin_state() const override {
+        return std::vector<uint8_t>(plugin_state.begin(), plugin_state.end());
+    }
+
+    bool deserialize_plugin_state(std::span<const uint8_t> data) override {
+        plugin_state.assign(data.begin(), data.end());
+        return true;
+    }
+
+    std::string plugin_state;
 };
 
 std::unique_ptr<pulp::format::Processor> create_test_gain() {
@@ -145,4 +159,22 @@ TEST_CASE("HeadlessHost state round-trip", "[headless]") {
     pulp::format::HeadlessHost host2(create_test_gain);
     REQUIRE(host2.load_state(saved));
     REQUIRE_THAT(host2.state().get_value(1), WithinAbs(-12.5, 0.01));
+}
+
+TEST_CASE("HeadlessHost state round-trip includes plugin-owned payload", "[headless]") {
+    pulp::format::HeadlessHost host1(create_test_gain);
+    REQUIRE(last_processor != nullptr);
+    last_processor->plugin_state = "bands=56;view=40-18000";
+    host1.state().set_value(1, -18.0f);
+
+    auto saved = host1.save_state();
+
+    pulp::format::HeadlessHost host2(create_test_gain);
+    auto* restored_processor = last_processor;
+    REQUIRE(restored_processor != nullptr);
+    restored_processor->plugin_state = "stale";
+
+    REQUIRE(host2.load_state(saved));
+    REQUIRE_THAT(host2.state().get_value(1), WithinAbs(-18.0, 0.01));
+    REQUIRE(restored_processor->plugin_state == "bands=56;view=40-18000");
 }

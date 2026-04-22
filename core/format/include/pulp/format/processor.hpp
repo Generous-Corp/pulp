@@ -6,8 +6,9 @@
 #include <pulp/midi/ump_buffer.hpp>
 #include <pulp/state/store.hpp>
 #include <pulp/view/view.hpp>
-#include <string>
 #include <memory>
+#include <span>
+#include <string>
 #include <vector>
 
 namespace pulp::format {
@@ -206,6 +207,28 @@ public:
 
     /// Release resources. Called on the host thread with audio stopped.
     virtual void release() {}
+
+    /// Serialize plugin-owned state that is not part of StateStore.
+    ///
+    /// Use this for opaque state that must survive host/session recall but
+    /// should not be exposed as flat automatable parameters. The returned
+    /// bytes travel alongside StateStore through the format adapters'
+    /// save/load paths.
+    ///
+    /// Called on a host/main thread, never from process().
+    virtual std::vector<uint8_t> serialize_plugin_state() const { return {}; }
+
+    /// Restore plugin-owned state previously returned by
+    /// serialize_plugin_state().
+    ///
+    /// An empty span means the host blob carried no plugin-owned payload
+    /// (legacy state or a processor that saved only StateStore data). Plugins
+    /// that override this hook should treat empty input as "reset persisted
+    /// plugin-owned state to defaults". Return false to reject malformed or
+    /// incompatible payloads.
+    ///
+    /// Called on a host/main thread with the audio thread stopped.
+    virtual bool deserialize_plugin_state(std::span<const uint8_t>) { return true; }
 
     /// Memory-pressure levels a host can surface to a plugin. Mirrors the
     /// broad shape of iOS didReceiveMemoryWarning + Windows low-memory

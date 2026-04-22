@@ -205,6 +205,32 @@ The format includes a version number and CRC32 checksum:
 
 Use `set_state_version()` for forward compatibility when adding parameters in new plugin versions.
 
+## Processor-Owned Plugin State
+
+`StateStore` is intentionally limited to flat, automatable parameters. Anything
+that should survive host/session recall but should not appear in the host's
+automation lane belongs in `Processor`'s plugin-owned state hooks instead:
+
+```cpp
+std::vector<uint8_t> serialize_plugin_state() const override;
+bool deserialize_plugin_state(std::span<const uint8_t> data) override;
+```
+
+Typical examples:
+
+- snapshot banks or scene slots
+- variable layouts that change what the parameters mean
+- editor/model state stored as `StateTree` JSON or a custom binary payload
+
+Format adapters, `HeadlessHost`, and `ValidationHarness` save an outer
+host-facing blob. The inner `StateStore` payload remains the same parameter-only
+binary format shown above. If `serialize_plugin_state()` returns an empty blob,
+Pulp preserves the legacy raw `StateStore` format for backward compatibility.
+
+`deserialize_plugin_state()` receives an empty span when loading an older blob
+that contains only `StateStore` data. Override implementations should treat
+empty input as "reset persisted plugin-owned state to defaults".
+
 ## Thread Model
 
 | Thread | Can Read | Can Write | Mechanism |
@@ -223,3 +249,8 @@ Format adapters sync parameters bidirectionally:
 - **Plugin → Host**: adapters snapshot values before `process()`, then emit output events for any changes after
 - **UI → Host**: `Binding::begin_gesture()` / `end_gesture()` forward to host undo system
 - **CLAP modulation**: adapter handles `CLAP_EVENT_PARAM_MOD` and calls `set_mod_offset()` / `add_mod_offset()`
+
+Host/project save-load uses both layers:
+
+- **Automatable state**: `StateStore::serialize()` / `deserialize()`
+- **Opaque plugin-owned state**: `Processor::serialize_plugin_state()` / `deserialize_plugin_state()`

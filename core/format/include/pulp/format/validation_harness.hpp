@@ -114,10 +114,10 @@ public:
     std::vector<float> process_buffer(const std::vector<float>& interleaved_input,
                                        int num_channels, int num_samples);
 
-    /// Save current state to binary blob.
+    /// Save current plugin state to a binary blob.
     std::vector<uint8_t> save_state() const;
 
-    /// Load state from binary blob.
+    /// Load plugin state from a binary blob.
     bool load_state(std::span<const uint8_t> data);
 
     // ── Capture ─────────────────────────────────────────────────────────

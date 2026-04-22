@@ -2,6 +2,7 @@
 // Simplest possible host — no threading, no UI, no device I/O
 
 #include <pulp/format/headless.hpp>
+#include <pulp/format/plugin_state_io.hpp>
 
 namespace pulp::format {
 
@@ -64,6 +65,16 @@ void HeadlessHost::process(audio::BufferView<float>& output,
 
 void HeadlessHost::release() {
     if (processor_) processor_->release();
+}
+
+std::vector<uint8_t> HeadlessHost::save_state() const {
+    if (!processor_) return {};
+    return plugin_state_io::serialize(store_, *processor_);
+}
+
+bool HeadlessHost::load_state(std::span<const uint8_t> data) {
+    if (!processor_) return false;
+    return plugin_state_io::deserialize(data, store_, *processor_);
 }
 
 } // namespace pulp::format

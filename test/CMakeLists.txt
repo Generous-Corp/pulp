@@ -289,6 +289,10 @@ add_executable(pulp-test-validation-harness test_validation_harness.cpp)
 target_link_libraries(pulp-test-validation-harness PRIVATE pulp::format Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-validation-harness)
 
+add_executable(pulp-test-plugin-state-io test_plugin_state_io.cpp)
+target_link_libraries(pulp-test-plugin-state-io PRIVATE pulp::format Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-plugin-state-io)
+
 # AAX metadata/model tests
 add_executable(pulp-test-aax-model test_aax_model.cpp)
 target_link_libraries(pulp-test-aax-model PRIVATE pulp::format Catch2::Catch2WithMain)
@@ -736,6 +740,38 @@ if(PULP_HAS_CLAP)
     )
     target_link_libraries(pulp-test-clap-entry PRIVATE pulp::format clap Catch2::Catch2WithMain)
     catch_discover_tests(pulp-test-clap-entry)
+endif()
+
+if(PULP_HAS_VST3)
+    add_executable(pulp-test-vst3-plugin-state
+        test_vst3_plugin_state.cpp
+        ${CMAKE_SOURCE_DIR}/core/format/src/vst3_plug_view.cpp
+    )
+    target_link_libraries(pulp-test-vst3-plugin-state PRIVATE pulp::format Catch2::Catch2WithMain)
+    target_compile_definitions(pulp-test-vst3-plugin-state PRIVATE
+        PULP_VST3=1
+        PULP_VST3_GUI=1
+    )
+    catch_discover_tests(pulp-test-vst3-plugin-state)
+endif()
+
+if(APPLE AND PULP_HAS_AUSDK)
+    add_executable(pulp-test-au-plugin-state
+        test_au_plugin_state.mm
+        ${CMAKE_SOURCE_DIR}/core/format/src/au_adapter.mm
+    )
+    target_link_libraries(pulp-test-au-plugin-state PRIVATE
+        pulp::format
+        Catch2::Catch2WithMain
+        "-framework AudioToolbox"
+        "-framework AVFoundation"
+        "-framework Foundation"
+    )
+    set_target_properties(pulp-test-au-plugin-state PROPERTIES
+        CXX_STANDARD 23
+        OBJCXX_STANDARD 23
+    )
+    catch_discover_tests(pulp-test-au-plugin-state)
 endif()
 
 # LV2 adapter tests
