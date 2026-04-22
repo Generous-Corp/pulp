@@ -97,6 +97,9 @@ endfunction()
 #       CATEGORY        Effect           # Effect | Instrument | MidiEffect
 #       PLUGIN_CODE     "PGan"           # 4-char code for AU
 #       MANUFACTURER_CODE "Pulp"         # 4-char code for AU
+#       ACCEPTS_MIDI                     # set if descriptor.accepts_midi is true;
+#                                        # flips AU component type from aufx to aumf
+#                                        # so hosts route inbound MIDI to the plug-in
 #       SOURCES         pulp_gain.hpp main.cpp
 #       PROCESSOR_FACTORY create_pulp_gain  # Function that returns unique_ptr<Processor>
 #   )
@@ -110,7 +113,7 @@ endfunction()
 #
 function(pulp_add_plugin target)
     cmake_parse_arguments(PLUGIN
-        ""
+        "ACCEPTS_MIDI;PRODUCES_MIDI"
         "PLUGIN_NAME;BUNDLE_ID;VERSION;MANUFACTURER;CATEGORY;PLUGIN_CODE;MANUFACTURER_CODE;AAX_PRODUCT_CODE;AAX_NATIVE_CODE;PROCESSOR_FACTORY;UI_SCRIPT"
         "FORMATS;SOURCES"
         ${ARGN}
@@ -128,6 +131,20 @@ function(pulp_add_plugin target)
     endif()
     if(NOT PLUGIN_CATEGORY)
         set(PLUGIN_CATEGORY "Effect")
+    endif()
+
+    # ACCEPTS_MIDI mirrors ``PluginDescriptor::accepts_midi`` to CMake so
+    # we can pick the correct AU component type (``aumf`` vs ``aufx``).
+    # Hosts only route MIDI to AU v2 effects packaged as
+    # ``kAudioUnitType_MusicEffect`` (``aumf``); ``aufx``-typed plug-ins
+    # never see ``HandleMIDIEvent`` regardless of what the adapter wires.
+    # Plug-ins that set ``accepts_midi = true`` in their descriptor MUST
+    # also pass ACCEPTS_MIDI to ``pulp_add_plugin`` so the emitted
+    # ``.component`` bundle's ``type`` matches.
+    if(PLUGIN_ACCEPTS_MIDI)
+        set(_plugin_accepts_midi "1")
+    else()
+        set(_plugin_accepts_midi "0")
     endif()
 
     _pulp_normalize_ui_script_path(_PULP_UI_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}" "${PLUGIN_UI_SCRIPT}")
@@ -183,7 +200,8 @@ function(pulp_add_plugin target)
         else()
             _pulp_add_au(${target} "${PLUGIN_PLUGIN_NAME}" "${PLUGIN_BUNDLE_ID}"
                           "${PLUGIN_VERSION}" "${PLUGIN_MANUFACTURER}"
-                          "${PLUGIN_CATEGORY}" "${PLUGIN_PLUGIN_CODE}" "${PLUGIN_MANUFACTURER_CODE}")
+                          "${PLUGIN_CATEGORY}" "${PLUGIN_PLUGIN_CODE}" "${PLUGIN_MANUFACTURER_CODE}"
+                          "${_plugin_accepts_midi}")
         endif()
     endif()
 
@@ -220,7 +238,8 @@ function(pulp_add_plugin target)
         else()
             _pulp_add_auv3(${target} "${PLUGIN_PLUGIN_NAME}" "${PLUGIN_BUNDLE_ID}"
                            "${PLUGIN_VERSION}" "${PLUGIN_MANUFACTURER}"
-                           "${PLUGIN_CATEGORY}" "${PLUGIN_PLUGIN_CODE}" "${PLUGIN_MANUFACTURER_CODE}")
+                           "${PLUGIN_CATEGORY}" "${PLUGIN_PLUGIN_CODE}" "${PLUGIN_MANUFACTURER_CODE}"
+                           "${_plugin_accepts_midi}")
         endif()
     endif()
 
@@ -551,7 +570,7 @@ function(_pulp_add_aax target name bundle_id version manufacturer category manuf
 endfunction()
 
 # ── Internal: AU v2 target ──────────────────────────────────────────────
-function(_pulp_add_au target name bundle_id version manufacturer category plugin_code manufacturer_code)
+function(_pulp_add_au target name bundle_id version manufacturer category plugin_code manufacturer_code accepts_midi)
     if(NOT _PULP_AUSDK_TARGET)
         message(FATAL_ERROR "pulp_add_plugin(${target}): AU requested but AudioUnitSDK is unavailable")
     endif()
@@ -620,11 +639,26 @@ function(_pulp_add_au target name bundle_id version manufacturer category plugin
         set(PULP_MANUFACTURER "${manufacturer}")
         set(PULP_MANUFACTURER_CODE "${manufacturer_code}")
         set(PULP_PLUGIN_CODE "${plugin_code}")
-        # Determine AU type from category
+        # Determine AU component type from category + accepts_midi flag.
+        #   aumu — kAudioUnitType_MusicDevice   (instrument that accepts MIDI)
+        #   aumf — kAudioUnitType_MusicEffect   (effect that accepts MIDI;
+        #                                       hosts only route MIDI here)
+        #   aumi — kAudioUnitType_MIDIProcessor (MIDI in, MIDI out, no audio)
+        #   aufx — kAudioUnitType_Effect        (audio-only effect)
+        #
+        # AU hosts (Logic, MainStage, GarageBand, etc.) never deliver MIDI
+        # to an aufx-typed plug-in. When a descriptor declares
+        # ``accepts_midi = true`` but we still emitted aufx, the adapter
+        # would silently never receive HandleMIDIEvent callbacks — a
+        # packaging bug, not a code bug. Flip to aumf so the host wires
+        # the MIDI lane. See the auv2 skill for the full rationale and
+        # the user-facing DAW cache note.
         if("${category}" STREQUAL "Instrument")
             set(PULP_AU_TYPE "aumu")
         elseif("${category}" STREQUAL "MidiEffect")
             set(PULP_AU_TYPE "aumi")
+        elseif(accepts_midi)
+            set(PULP_AU_TYPE "aumf")
         else()
             set(PULP_AU_TYPE "aufx")
         endif()
@@ -666,18 +700,23 @@ function(_pulp_add_au target name bundle_id version manufacturer category plugin
 endfunction()
 
 # ── Internal: AUv3 app extension target ────────────────────────────────
-function(_pulp_add_auv3 target name bundle_id version manufacturer category plugin_code manufacturer_code)
+function(_pulp_add_auv3 target name bundle_id version manufacturer category plugin_code manufacturer_code accepts_midi)
     if(NOT APPLE)
         return()
     endif()
 
-    # Map category to AU type and tag
+    # Map category + accepts_midi to AU type and tag. Same routing logic
+    # as _pulp_add_au — AU v3 hosts also require aumf for effects that
+    # want MIDI input.
     if(category STREQUAL "Instrument")
         set(au_type "aumu")
         set(au_tag "Synthesizer")
     elseif(category STREQUAL "MidiEffect")
         set(au_type "aumi")
         set(au_tag "MIDI")
+    elseif(accepts_midi)
+        set(au_type "aumf")
+        set(au_tag "Effects")
     else()
         set(au_type "aufx")
         set(au_tag "Effects")
@@ -796,7 +835,8 @@ endfunction()
 #       MANUFACTURER       Pulp
 #       MANUFACTURER_CODE  Pulp        # exactly 4 characters
 #       SUBTYPE_CODE       PsSn        # exactly 4 characters
-#       AU_TYPE            aumu        # aumu (instrument) | aufx (effect) | aumi (MIDI effect)
+#       AU_TYPE            aumu        # aumu (instrument) | aufx (audio-only effect) |
+#                                      # aumf (effect that accepts MIDI) | aumi (MIDI processor)
 #       VERSION            0.1.0
 #       SOURCES            src/sine_synth.cpp src/sine_synth.hpp
 #   )

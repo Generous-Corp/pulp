@@ -18,8 +18,31 @@ namespace pulp::format::au {
 // Parameter IDs for the AU system map 1:1 from Pulp ParamIDs
 // AU uses AudioUnitParameterID (UInt32) which matches our state::ParamID
 
+midi::MidiEvent decode_midi_event(uint8_t inStatus,
+                                  uint8_t inChannel,
+                                  uint8_t inData1,
+                                  uint8_t inData2) noexcept
+{
+    // AUMIDIBase::MIDIEvent splits the channel out of the status byte and
+    // passes the top nibble in ``inStatus``. Re-combine for channel-voice
+    // messages so the ``choc::midi::ShortMessage`` below matches the
+    // on-the-wire status byte. System messages (0xF0-0xFF) ignore the
+    // channel nibble.
+    const uint8_t top = static_cast<uint8_t>(inStatus & 0xF0);
+    const bool is_system = top == 0xF0;
+    const uint8_t status_byte = is_system
+        ? inStatus
+        : static_cast<uint8_t>(top | (inChannel & 0x0F));
+    midi::MidiEvent ev{
+        choc::midi::ShortMessage(status_byte, inData1, inData2),
+        /*sample_offset=*/0,
+        /*timestamp=*/0.0,
+    };
+    return ev;
+}
+
 PulpAUEffect::PulpAUEffect(AudioComponentInstance ci)
-    : AUEffectBase(ci, /*inProcessesInPlace=*/true)
+    : AUMIDIEffectBase(ci, /*inProcessesInPlace=*/true)
 {
     auto factory = registered_factory();
     if (factory) {
@@ -158,7 +181,7 @@ OSStatus PulpAUEffect::GetPropertyInfo(AudioUnitPropertyID inID, AudioUnitScope 
         outWritable = false;
         return noErr;
     }
-    return AUEffectBase::GetPropertyInfo(inID, inScope, inElement, outDataSize, outWritable);
+    return AUMIDIEffectBase::GetPropertyInfo(inID, inScope, inElement, outDataSize, outWritable);
 }
 
 OSStatus PulpAUEffect::GetProperty(AudioUnitPropertyID inID, AudioUnitScope inScope,
@@ -173,7 +196,7 @@ OSStatus PulpAUEffect::GetProperty(AudioUnitPropertyID inID, AudioUnitScope inSc
         ctx->store = &store_;
         return noErr;
     }
-    return AUEffectBase::GetProperty(inID, inScope, inElement, outData);
+    return AUMIDIEffectBase::GetProperty(inID, inScope, inElement, outData);
 }
 
 OSStatus PulpAUEffect::Initialize()
@@ -205,6 +228,32 @@ void PulpAUEffect::Cleanup()
 {
     if (processor_) processor_->release();
     AUEffectBase::Cleanup();
+}
+
+OSStatus PulpAUEffect::HandleMIDIEvent(UInt8 inStatus, UInt8 inChannel,
+                                       UInt8 inData1, UInt8 inData2,
+                                       UInt32 inStartFrame)
+{
+    auto ev = decode_midi_event(static_cast<uint8_t>(inStatus),
+                                static_cast<uint8_t>(inChannel),
+                                static_cast<uint8_t>(inData1),
+                                static_cast<uint8_t>(inData2));
+    ev.sample_offset = static_cast<int32_t>(inStartFrame);
+    std::lock_guard lock(midi_mutex_);
+    pending_midi_.add(ev);
+    return noErr;
+}
+
+OSStatus PulpAUEffect::HandleSysEx(const UInt8* inData, UInt32 inLength)
+{
+    if (!inData || inLength == 0) return noErr;
+    std::vector<uint8_t> bytes(inData, inData + inLength);
+    std::lock_guard lock(midi_mutex_);
+    // AU v2 SysEx doesn't surface a per-event sample offset at this SDK
+    // layer; deliver at block start so plugins see it on the leading edge
+    // of the current process() block.
+    pending_midi_.add_sysex(std::move(bytes), /*sample_offset=*/0);
+    return noErr;
 }
 
 OSStatus PulpAUEffect::ProcessBufferLists(AudioUnitRenderActionFlags& ioActionFlags,
@@ -251,6 +300,18 @@ OSStatus PulpAUEffect::ProcessBufferLists(AudioUnitRenderActionFlags& ioActionFl
         output_ptrs_.data(), out_channels, inFramesToProcess);
 
     midi::MidiBuffer midi_in, midi_out;
+    // Drain MIDI events queued by HandleMIDIEvent/HandleSysEx on the host's
+    // MIDI delivery thread. Mirrors the AU v2 instrument adapter's pattern
+    // (``core/format/src/au_v2_instrument.cpp``) so ``aumf``-typed effects
+    // can actually receive inbound MIDI. ``aufx``-typed effects still get
+    // here, but the host never routes MIDI to them — pending_midi_ will
+    // simply stay empty.
+    {
+        std::lock_guard lock(midi_mutex_);
+        midi_in = std::move(pending_midi_);
+        pending_midi_ = midi::MidiBuffer{};
+    }
+    midi_in.sort();
 
     ProcessContext ctx;
     ctx.sample_rate = GetSampleRate();

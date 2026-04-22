@@ -17,6 +17,10 @@ pulp_add_plugin(PulpDrums
     CATEGORY        Effect
     PLUGIN_CODE     "PDrm"
     MANUFACTURER_CODE "Pulp"
+    # Descriptor declares accepts_midi=true. If AU is ever added to
+    # FORMATS, this flag flips the emitted component type from aufx
+    # to aumf so AU hosts route inbound MIDI to the adapter.
+    ACCEPTS_MIDI
 )
 
 if(PULP_HAS_CLAP AND APPLE)
