@@ -28,8 +28,8 @@ public final class PulpParameter: ObservableObject, Identifiable {
 
     init(info: PulpParamInfo) {
         self.id = info.id
-        self.name = String(cString: info.name)
-        self.unit = String(cString: info.unit)
+        self.name = String(cString: info.name ?? pulpEmptyCString)
+        self.unit = String(cString: info.unit ?? pulpEmptyCString)
         self.minValue = info.min_value
         self.maxValue = info.max_value
         self.defaultValue = info.default_value

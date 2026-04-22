@@ -3,8 +3,9 @@
 Coverage is measured per-subsystem, per-platform, and per-surface on
 macOS, Linux, and Windows for the native C/C++ lane, with an additional
 Python tooling lane on Linux covering `tools/scripts/**`,
-`tools/deps/**`, and `tools/local-ci/**`. All reports are uploaded to
-Codecov on every push.
+`tools/deps/**`, and `tools/local-ci/**`, plus a Swift package lane on
+macOS covering the Apple Swift sources that compile in `apple/`.
+All reports are uploaded to Codecov on every push.
 [#566](https://github.com/danielraffel/pulp/issues/566) tracks the
 broader coverage initiative.
 
@@ -52,6 +53,12 @@ python3 -m pip install 'coverage>=7.10' PyYAML
 python3 tools/scripts/run_python_coverage.py
 ```
 
+Apple Swift coverage (macOS only):
+
+```bash
+python3 tools/scripts/run_swift_coverage.py
+```
+
 Output:
 
 - `build-coverage/coverage/index.html` — per-file HTML drilldown (open
@@ -68,6 +75,10 @@ Output:
   tooling lane.
 - `build-coverage/python/coverage.python.xml` — Cobertura XML emitted
   by coverage.py for the Python tooling lane.
+- `build-coverage/apple/summary.txt` — text summary for the Apple
+  Swift source files under `apple/Sources/`.
+- `build-coverage/apple/coverage.apple.json` — Xcode/SwiftPM Codecov
+  JSON emitted by `swift test --enable-code-coverage`.
 
 The native script requires Clang (not gcc) because we use Clang
 source-based coverage, not gcov. See
@@ -84,6 +95,13 @@ just the test harness. `PyYAML` is also required because
 `tools/scripts/test_codecov_config.py` parses `codecov.yml` as part of
 the lane.
 
+The Apple Swift lane currently runs on macOS only because it uses
+SwiftPM's native coverage support (`swift test --enable-code-coverage`)
+inside `apple/`. The staged Codecov JSON is source-only by policy:
+`apple/Tests/**` and generated `.build/**` files are ignored in
+`codecov.yml` so the Apple component reflects package sources, not the
+test harness.
+
 Optional flags:
 
 ```bash
@@ -93,6 +111,7 @@ python3 tools/scripts/run_python_coverage.py --pattern 'tools/scripts/test_resol
 python3 tools/scripts/run_python_coverage.py \
   --pattern 'tools/scripts/test_resolve_runs_on.py' \
   --pattern 'tools/deps/test_audit.py'
+python3 tools/scripts/run_swift_coverage.py
 ```
 
 ### Troubleshooting
@@ -158,6 +177,15 @@ Source → coverage.py run (with subprocess patch)
     coverage report/html  coverage xml
          ↓                ↓
       summary + HTML   Cobertura XML (Codecov)
+
+Apple Swift:
+Source → swift test --enable-code-coverage
+         ↓
+  .build/.../codecov/PulpSwift.json
+         ↓
+  run_swift_coverage.py
+         ↓
+  summary + staged Codecov JSON (Codecov)
 ```
 
 - **Instrumentation**: enabled via `-DPULP_ENABLE_COVERAGE=ON` at
@@ -208,11 +236,14 @@ Today the live dashboard includes:
 - **Python** coverage for `tools/scripts/**`, `tools/deps/**`, and
   `tools/local-ci/**` on Linux via
   `tools/scripts/run_python_coverage.py`.
+- **Swift** coverage for the Apple Swift package sources under
+  `apple/Sources/PulpSwift/**` on macOS via
+  `tools/scripts/run_swift_coverage.py`.
 
 Still out of scope today:
 
-- Swift code under `apple/` — separate SPM/Xcode lane, tracked in
-  issue #615.
+- iOS-only Apple code that does not compile in the macOS SwiftPM lane
+  yet (for example `apple/Sources/PulpSwift/PulpAudioSession.swift`).
 - Python outside the current Linux lane (for example top-level
   `tools/*.py`, `tools/packages/**`, and any future repo-root Python
   scripts) — follow-up after the current tooling surfaces stabilize.
@@ -225,7 +256,9 @@ The coverage workflow runs on
 Each OS produces its own `coverage.cobertura.xml` and uploads to
 Codecov with an OS-tag flag. The Linux leg also uploads the Python
 tools XML for `tools/scripts/**`, `tools/deps/**`, and
-`tools/local-ci/**`. We do NOT merge profdata across
+`tools/local-ci/**`, and the macOS leg also uploads the staged Apple
+Swift Codecov JSON from `build-coverage/apple/coverage.apple.json`.
+We do NOT merge profdata across
 architectures —
 `llvm-profdata merge` is not architecture-portable
 (`planning/coverage-tooling-decision-2026-04-21.md` §7); Codecov does
@@ -261,6 +294,7 @@ without a workflow edit.
 ## Related reading
 
 - Issue #566 — umbrella initiative
+- Issue #615 — Apple Swift coverage lane
 - Issue #290 — coverage hardening (test surface growth)
 - `planning/coverage-tooling-decision-2026-04-21.md` — Phase 0 spike
   findings, stack rationale, perf numbers

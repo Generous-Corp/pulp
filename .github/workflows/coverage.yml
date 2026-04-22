@@ -256,6 +256,17 @@ jobs:
         shell: bash
         run: python3 tools/scripts/run_python_coverage.py
 
+      - name: Run Swift apple coverage
+        # SwiftPM has its own coverage pipeline (`swift test
+        # --enable-code-coverage`) distinct from the native Clang lane.
+        # Keep it on the macOS leg where the Apple package actually
+        # builds, and stage the emitted Codecov JSON next to the other
+        # coverage artifacts for upload + local inspection.
+        if: matrix.os == 'macos'
+        continue-on-error: true
+        shell: bash
+        run: python3 tools/scripts/run_swift_coverage.py
+
       - name: Upload HTML report
         if: always()
         uses: actions/upload-artifact@v6
@@ -287,6 +298,15 @@ jobs:
         with:
           name: coverage-python-summary-${{ github.sha }}
           path: build-coverage/python/summary.txt
+          retention-days: 90
+          if-no-files-found: error
+
+      - name: Upload Apple summary
+        if: always() && matrix.os == 'macos'
+        uses: actions/upload-artifact@v6
+        with:
+          name: coverage-apple-summary-${{ github.sha }}
+          path: build-coverage/apple/summary.txt
           retention-days: 90
           if-no-files-found: error
 
@@ -348,6 +368,40 @@ jobs:
           fi
           echo "coverage.python.xml has lines-valid=${lines_valid}"
 
+      - name: Verify Apple Codecov JSON exists
+        # SwiftPM emits a Codecov/Xcode JSON report instead of
+        # Cobertura. Assert we staged a non-empty JSON and that it
+        # contains at least one apple/Sources/ file so the macOS lane
+        # can't silently regress back to "tests ran but no Apple source
+        # coverage reached Codecov".
+        if: always() && matrix.os == 'macos'
+        shell: bash
+        run: |
+          json=build-coverage/apple/coverage.apple.json
+          test -s "$json" || {
+            echo "::error::coverage.apple.json is missing or empty."
+            echo "::error::Swift apple coverage likely failed — check the 'Run Swift apple coverage' step above."
+            exit 1
+          }
+          python3 - <<'PY'
+          import json
+          import pathlib
+          import sys
+
+          path = pathlib.Path("build-coverage/apple/coverage.apple.json")
+          report = json.loads(path.read_text(encoding="utf-8"))
+          files = report.get("data", [{}])[0].get("files", [])
+          source_files = []
+          for entry in files:
+            filename = str(entry.get("filename", "")).replace("\\", "/")
+            if "/apple/Sources/" in filename:
+              source_files.append(filename)
+          if not source_files:
+            print("::error::coverage.apple.json contains no apple/Sources entries.")
+            sys.exit(1)
+          print(f"coverage.apple.json has {len(source_files)} apple/Sources entries")
+          PY
+
       - name: Upload Cobertura XML
         # Linux XML keeps the historical name `coverage-cobertura-${sha}`
         # so the downstream `coverage-diff-gate` job continues to
@@ -373,6 +427,15 @@ jobs:
           retention-days: 14
           if-no-files-found: error
 
+      - name: Upload Apple Codecov JSON
+        if: always() && matrix.os == 'macos'
+        uses: actions/upload-artifact@v6
+        with:
+          name: coverage-apple-${{ github.sha }}
+          path: build-coverage/apple/coverage.apple.json
+          retention-days: 14
+          if-no-files-found: error
+
       - name: Compute Codecov upload file list
         id: codecov_files
         if: always()
@@ -381,6 +444,9 @@ jobs:
           files="build-coverage/coverage.cobertura.xml"
           if [ "${{ matrix.os }}" = "linux" ] && [ -f build-coverage/python/coverage.python.xml ]; then
             files="${files},build-coverage/python/coverage.python.xml"
+          fi
+          if [ "${{ matrix.os }}" = "macos" ] && [ -f build-coverage/apple/coverage.apple.json ]; then
+            files="${files},build-coverage/apple/coverage.apple.json"
           fi
           echo "files=${files}" >> "${GITHUB_OUTPUT}"
 

@@ -44,6 +44,8 @@ ignore:
   - "external/**"
   - "_deps/**"
   - "test/**"
+  - "apple/Tests/**"
+  - "apple/.build/**"
   - "examples/**"
   - "build/**"
   - "build-coverage/**"

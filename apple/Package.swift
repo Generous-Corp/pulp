@@ -17,18 +17,23 @@ let package = Package(
         .target(
             name: "PulpSwift",
             path: "Sources/PulpSwift",
-            sources: ["PulpParameter.swift", "PulpViews.swift", "PulpAudioSession.swift"],
-            publicHeadersPath: ".",
-            cxxSettings: [
-                .headerSearchPath("../../core/state/include"),
-                .headerSearchPath("../../core/format/include"),
-                .headerSearchPath("../../core/audio/include"),
-                .headerSearchPath("../../core/midi/include"),
-                .headerSearchPath("../../core/runtime/include"),
-                .headerSearchPath("../../core/platform/include"),
+            exclude: [
+                "PulpBridge.cpp",
+                "PulpBridge.h",
+            ],
+            sources: [
+                "PulpBridge.swift",
+                "PulpParameter.swift",
+                "PulpViews.swift",
+                "PulpAudioSession.swift",
             ]
         ),
+        .testTarget(
+            name: "PulpSwiftTests",
+            dependencies: ["PulpSwift"],
+            path: "Tests/PulpSwiftTests"
+        ),
     ],
-    swiftLanguageModes: [.v5],
+    swiftLanguageVersions: [.v5],
     cxxLanguageStandard: .cxx20
 )
