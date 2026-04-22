@@ -30,7 +30,7 @@
 # bumps this pin.
 
 [shipyard]
-# v0.22.5 — five patch releases on the v0.22.x line:
+# v0.22.7 — seven patch releases on the v0.22.x line:
 #
 #   v0.22.1 — `install.sh` grew `SHIPYARD_VERSION` and
 #             `SHIPYARD_INSTALL_DIR` env-var support so downstreams
@@ -53,6 +53,19 @@
 #             smoke test for the PyInstaller bundle so future
 #             frozen-binary-only regressions (like 0.22.4's idna
 #             codec omission) are caught pre-release.
+#   v0.22.6 — `shipyard ship-state reconcile`: heals stale ship-state
+#             entries by re-polling dispatched GitHub Actions runs
+#             and mirroring their terminal status into the cached
+#             shipyard queue. Closes the "PR merged upstream but
+#             shipyard still thinks it's running" failure mode.
+#   v0.22.7 — reconcile evidence-snapshot fix: 0.22.6 healed the
+#             `dispatched_runs` layer but left `evidence_snapshot`
+#             stale. The macOS GUI's ShipStatePoller applies
+#             evidence_snapshot AFTER dispatched_runs and overwrote
+#             the rendered status — so reconcile ran but PR cards
+#             kept the old "failed" pill. 0.22.7 mirrors terminal
+#             statuses into evidence_snapshot so both layers heal
+#             together.
 #
 # Cumulative additions from earlier releases still in effect:
 #   v0.4–v0.8 — release-bot helpers, `shipyard doctor release-chain`,
@@ -67,7 +80,7 @@
 # in `tools/install-shipyard.sh` (v0.22.1+ `SHIPYARD_VERSION` support).
 # The older `~/.pulp/bin/shipyard` path is cleaned up on install to
 # prevent shadow-on-PATH bugs.
-version = "v0.22.5"
+version = "v0.22.7"
 
 # Public release source. The bootstrap script downloads from
 # https://github.com/{repo}/releases/download/{version}/{asset}
