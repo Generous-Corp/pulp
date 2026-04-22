@@ -9,6 +9,10 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
 <a id="v0350"></a>
+## [0.12.0]
+
+## [0.36.0]
+
 ## [0.35.0] - 2026-04-22
 
 - au: wire AU v2 effect MIDI input + aufx→aumf for accepts_midi ([#638](https://github.com/danielraffel/pulp/pull/638))
