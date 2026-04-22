@@ -670,17 +670,37 @@ When updating existing skills, preserve backward compatibility — don't remove 
 
 ### Current Skills
 
-| Skill | Location | Purpose |
-|-------|----------|---------|
-| `android` | `.agents/skills/android/` | Android NDK build, deploy, debug, and platform gotchas |
-| `aax` | `.agents/skills/aax/` | Optional AAX setup, validation, and workflow |
-| `ci` | `.agents/skills/ci/` | PR creation, local/cloud CI, merge workflow |
-| `cmajor-external` | `.agents/skills/cmajor-external/` | Cmajor external toolchain codegen |
-| `engine` | `.agents/skills/engine/` | Query, recommend, switch JS engine backend |
-| `import-design` | `.agents/skills/import-design/` | Import from Figma/Stitch/v0/Pencil |
-| `jsfx` | `.agents/skills/jsfx/` | Bounded JSFX subset support |
-| `cli-maintenance` | `.agents/skills/cli-maintenance/` | CLI add/modify/remove checklist and sync |
-| `webview-ui` | `.agents/skills/webview-ui/` | Build WebView UIs with native bridge |
+Alphabetical. One line of purpose per skill. Each directory at `.agents/skills/<name>/SKILL.md` carries the authoritative, full description. `tools/scripts/skill_path_map.json` owns the source-path → skill mapping used by `skill_sync_check.py` to enforce SKILL.md updates on mapped edits.
+
+| Skill | Purpose |
+|-------|---------|
+| `aax` | Optional AAX format: developer-supplied Avid SDK, CMake enablement, DigiShell/AAX Validator workflows |
+| `android` | Android NDK builds, Oboe audio, Dawn/Skia GPU, JNI bridge, emulator smoke, platform gotchas |
+| `ara` | Optional ARA support: developer-supplied SDK, companion APIs, adapter wiring, validation |
+| `auv2` | AU v2 adapter: aufx/aumf/aumi/aumu component types, MIDI input wiring, DAW cache gotchas |
+| `auv3` | AU v3 adapter: AUAudioUnit render block, parameter tree, UMP / sysex, sidechain, iOS extension |
+| `ci` | Local + cloud CI: validate branches, `shipyard pr` ship flow, merge on green, PR triage |
+| `clap` | CLAP adapter: param / mod / sidechain routing, MIDI 1.0 + UMP + sysex + note-expression, ARA hook |
+| `cli-maintenance` | CLI command add/modify/remove checklist — keeps source, slash commands, docs, skills in sync |
+| `cmajor-external` | MIT-safe Cmajor lane: source-owned patches, external `cmaj` toolchain, generated-artifact flow |
+| `engine` | JS engine backend selection (QuickJS / JavaScriptCore / V8) with recommendations per workload |
+| `faust` | FAUST DSP plugins: offline codegen, pre-generated C++ headers, FaustProcessor wrapper |
+| `hosting` | Load + run + test VST3 / AU / CLAP / LV2 plugins from Pulp (scanner, plugin_slot, signal_graph) |
+| `import-design` | Import designs from Figma / Stitch / v0 / Pencil into Pulp web-compat JS with visual validation |
+| `ios` | iOS platform: AUv3 app extensions, Simulator builds, UIKit host, CoreAudio, touch + Pencil input |
+| `jsfx-subset` | Bounded JSFX subset — source-only examples, explicit exclusions (no `@gfx`), subset validation |
+| `mpe` | Build MPE-aware synths: descriptor opt-in, `MpeBuffer` consumption, `MpeVoiceAllocator` routing |
+| `packages` | Third-party audio package search, suggest, add, browse |
+| `sdf-text` | SDF / MSDF / PSDF glyph atlases: building, sampling via SkSL, shared text-layout helpers |
+| `ship` | Sign / notarize / package / distribute Pulp plugins and apps across macOS / Windows / Android |
+| `streams` | `pulp::runtime::AsyncStream` selection, async-callback wiring without deadlock, backpressure |
+| `threejs-bridge` | Native Dawn-backed Three.js: three.webgpu.js renderer, bridge tests, native demo capture |
+| `upgrade` | `pulp upgrade` guidance: release discovery, migration notes, breaking-change fixes |
+| `view-bridge` | Editor lifecycle and multi-view attach — `Processor::create_view()`, open/notify/resize/close protocol |
+| `vst3` | VST3 adapter: SingleComponentEffect, bus arrangement, param/MIDI routing, state, Steinberg SDK traps |
+| `webview-ui` | WebView UI: native bridge, embedded assets, directory-backed dev resources, WebView validation |
+
+24 skills as of 2026-04-22. When adding a new skill, append its row here and register the subsystem in `tools/scripts/skill_path_map.json`.
 
 ### Claude Code Plugin
 

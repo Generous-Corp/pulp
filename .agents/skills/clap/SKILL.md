@@ -68,8 +68,12 @@ struct. It owns:
   so the host can record automation.
 - `mpe_tracker` + `mpe_buffer` + `mpe_enabled` — MPE sidecar populated
   only if `PluginDescriptor::supports_mpe` is true.
-- `ump_buffer` + `ump_enabled` — UMP sidecar synthesised from MIDI 1.0
-  events (CLAP has no `CLAP_EVENT_MIDI2` today; see Gotchas below).
+- `ump_buffer` + `ump_enabled` — UMP sidecar. Filled from the host's
+  native `CLAP_EVENT_MIDI2` packets when they arrive, otherwise
+  synthesised from the MIDI 1.0 stream via `midi1_to_ump`. A
+  `host_delivered_ump` flag tracks whether any native UMP was pushed
+  during the block — the synthesis path is skipped in that case to
+  avoid double-encoding. See Gotchas.
 - `ara_controller` — lazily created on the first host query for the
   ARA companion-factory extension.
 - `bridge` + `editor_host` + `editor_visible` — gated on
@@ -117,26 +121,47 @@ Processor API exposes a single sidechain slot. Secondary **output**
 buses are zero-filled so multi-out instruments don't surface
 uninitialised memory to hosts.
 
-### MIDI: short messages, sysex, MPE, UMP
+### MIDI: short messages, sysex, note-expression, UMP
 
-Note events are converted from CLAP's channel/key/velocity form into
-`midi::MidiEvent`:
+Inbound event decode in `clap_process()` (as of PR #627):
 
 ```
 CLAP_EVENT_NOTE_ON / _NOTE_OFF → MidiEvent::note_on / note_off
+CLAP_EVENT_MIDI                → MidiEvent::from_bytes(data[0..2])
+                                 — CC, pitch bend, channel AT,
+                                   poly AT, program change
 CLAP_EVENT_MIDI_SYSEX          → midi_in.add_sysex(bytes, time, 0.0)
+CLAP_EVENT_NOTE_EXPRESSION     → synthesised MIDI 1.0 (see table)
+CLAP_EVENT_NOTE_CHOKE          → note_off(channel, key, velocity=0)
+CLAP_EVENT_MIDI2               → self->ump_buffer.add(packet)
+                                 (guarded by CLAP_VERSION_GE(1,1,0) —
+                                  the event is an enumerator, NOT a
+                                  preprocessor macro; see Gotchas)
 ```
 
-CLAP's per-note events (`CLAP_EVENT_NOTE_EXPRESSION`) are **not**
-currently decoded by the adapter directly; MPE is delivered by
-running the inbound `midi_in` through `MpeVoiceTracker` and publishing
-the resulting `MpeBuffer` via `processor->set_mpe_input(&buf)`. See the
-`mpe` skill for per-note expression details.
+**Note-expression → MIDI 1.0 mapping.** `MpeVoiceTracker` only ingests
+MIDI 1.0, so per-note expressions are synthesised to channel-wide
+equivalents and narrowed back per-voice by the tracker:
 
-The UMP sidecar is synthesised from the MIDI 1.0 stream via
-`midi1_to_ump` because CLAP has not shipped `CLAP_EVENT_MIDI2` yet.
-When it does, flip the adapter to consume the native stream; the
-existing `UmpBuffer` shape is already the public contract.
+| CLAP expression id | Synthesised MIDI 1.0 |
+|---|---|
+| `PRESSURE` | channel aftertouch `0xDn` |
+| `TUNING` | 14-bit pitch bend (normalised to ±48st member range) |
+| `BRIGHTNESS` | CC 74 |
+| `VOLUME` | CC 7 (0..4 → 0..127 log-domain scale) |
+| `PAN` | CC 10 |
+| `VIBRATO`, `EXPRESSION` | dropped — no unambiguous MIDI 1.0 equivalent; UMP-aware plug-ins should consume via the `CLAP_EVENT_MIDI2` path |
+
+Non-MPE descriptors drop note-expression events with a one-time
+debug log. See the `mpe` skill for tracker details.
+
+**Outbound MIDI** (the processor's `midi_out` — previously dropped):
+short messages emit as `CLAP_EVENT_MIDI`, sysex entries as
+`CLAP_EVENT_MIDI_SYSEX`, both via `out_events->try_push`.
+`sample_offset` carries through to `header.time`. The sysex
+`clap_event_midi_sysex_t.buffer` field is non-owning — the backing
+vector is alive for the duration of `clap_process()`, which is all
+CLAP's push contract requires (the host copies before returning).
 
 ### State save / restore
 
@@ -234,14 +259,35 @@ controller at extension-query time triggers the
 `create_ara_document_controller()` virtual before the Processor is
 alive.
 
-### UMP sidecar is **synthesised**, not delivered by the host
+### UMP sidecar: native when available, synthesised otherwise
 
-`midi1_to_ump` conversion runs inside `clap_process()` every block
-that the Processor declares `supports_ump`. There is no
-`CLAP_EVENT_MIDI2` event type in CLAP 1.2. When CLAP adds native UMP
-delivery, flip the synth path off for hosts that advertise support —
-do not keep both running or you'll double-deliver per-note messages.
-See `#141` / `#139` for the UMP buffer shape.
+As of PR #627 the adapter handles both CLAP 1.1+ hosts that deliver
+native `CLAP_EVENT_MIDI2` packets and older / MIDI-1.0-only hosts:
+
+1. At the top of every `clap_process()` block, `ump_buffer.clear()`
+   runs when `ump_enabled`. This is load-bearing — if you refactor
+   the event loop, keep the clear up-front or the "skip synthesis
+   when host delivered native UMP" invariant breaks.
+2. During event decode, `CLAP_EVENT_MIDI2` packets are appended
+   directly to `self->ump_buffer` and set `host_delivered_ump = true`.
+3. After the decode loop, `midi1_to_ump(midi_in, self->ump_buffer)`
+   runs **only** when `!host_delivered_ump`. CLAP spec forbids a host
+   from encoding the same note as both `CLAP_EVENT_NOTE_*` and
+   `CLAP_EVENT_MIDI2`, so the two code paths never double-encode.
+
+See `#141` / `#139` for the UMP buffer shape, and PR #627 for the
+native-path wiring.
+
+### CLAP event types are enumerators, not preprocessor macros
+
+When gating on a new CLAP event type, **do not** write
+`#ifdef CLAP_EVENT_MIDI2` — `CLAP_EVENT_MIDI2` is a C enumerator value,
+and `#ifdef` on an enum always evaluates false. Use
+`#if defined(CLAP_VERSION_GE) && CLAP_VERSION_GE(1, 1, 0)` (or the
+release that introduced the event) instead. Same trap applies to any
+future `CLAP_EVENT_*` additions — the CLAP header does not define
+them as macros. See PR #627's `clap_adapter.cpp` for the canonical
+guard shape.
 
 ### GUI is gated on `PULP_CLAP_GUI`
 

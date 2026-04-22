@@ -195,6 +195,26 @@ extension's loaded `AUAudioUnit` once KVO fires on
 `NSExtensionMain`-style Info.plist — see `docs/guides/ios-auv3-guidance.md`
 and the `ios` skill for the extension target wiring.
 
+### Two CMake entry points: keep signatures in lockstep
+
+`pulp_add_plugin(...)` (the general entry) and `pulp_add_ios_auv3(...)`
+(the iOS-extension wrapper) both end up calling the internal
+`_pulp_add_auv3(target name bundle_id version manufacturer category
+plugin_code manufacturer_code accepts_midi)` helper with positional
+arguments. When you add or remove an arg on `_pulp_add_auv3`, you
+must update BOTH wrappers — a missed update on the iOS wrapper
+surfaces as:
+
+```
+CMake Error at tools/cmake/PulpUtils.cmake:<line> (_pulp_add_auv3):
+  _pulp_add_auv3 Function invoked with incorrect arguments
+```
+
+only on the iOS toolchain configure, because the other leg
+(`pulp_add_plugin`) never exercises the wrapper. Caught on CI's
+Coverage-macOS leg in PR #638 when `ACCEPTS_MIDI` was added to
+`_pulp_add_auv3` but not threaded through `pulp_add_ios_auv3`.
+
 ## Gotchas
 
 ### `AURenderEventMIDIEventList` = UMP — not short MIDI, not raw sysex

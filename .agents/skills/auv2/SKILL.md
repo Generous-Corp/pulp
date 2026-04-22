@@ -125,6 +125,16 @@ With `AUMIDIEffectBase`, fall-through calls should go to `AUMIDIEffectBase::GetP
 
 The `std::mutex` guarding `pending_midi_` is contended only on the MIDI-delivery thread (where the host calls `HandleMIDIEvent`) and the audio thread (once per block, to drain). It is NOT the right primitive for per-event audio-thread publication. Do not extend this pattern to any new path that runs multiple times per block — switch to `choc::fifo::SingleReaderSingleWriterFIFO` if you need lock-free MIDI delivery inside a single block.
 
+### `AUSDK_RTSAFE` position with `override` — Xcode 16.4 incompat
+
+`AUSDK_RTSAFE` expands to `[[clang::nonblocking]]`. AudioUnitSDK's own base-class declarations use `... AUSDK_RTSAFE;` (no `override`), but placing the attribute between a function declarator and the `override` virt-specifier in a derived class compiles under older Xcode and fails on Xcode 16.4 / Clang 17+ with:
+
+```
+error: expected ';' at end of declaration list
+```
+
+The attribute is a static-analysis hint only — dropping it from derived-class `override` declarations has no runtime effect. `PulpAUInstrument::HandleNoteOn/Off` (the reference pattern for AU v2) doesn't carry `AUSDK_RTSAFE` either. When writing a new AU v2 override that matches an `AUSDK_RTSAFE` base declaration, omit the attribute. Caught on CI's Coverage-macOS leg in PR #638 after the AU v2 effect MIDI fix landed without it.
+
 ## Reference pointers
 
 - Adapter source: `core/format/src/au_v2_adapter.cpp`, `core/format/include/pulp/format/au_v2_adapter.hpp`
