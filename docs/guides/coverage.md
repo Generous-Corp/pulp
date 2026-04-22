@@ -4,8 +4,9 @@ Coverage is measured per-subsystem, per-platform, and per-surface on
 macOS, Linux, and Windows for the native C/C++ lane, with an additional
 Python tooling lane on Linux covering `tools/scripts/**`,
 `tools/deps/**`, and `tools/local-ci/**`, plus a Swift package lane on
-macOS covering the Apple Swift sources that compile in `apple/`.
-All reports are uploaded to Codecov on every push.
+macOS covering the Apple Swift sources that compile in `apple/`, and a
+Kotlin/Android lane driven by the dedicated Android workflow. All
+reports are uploaded to Codecov on every push.
 [#566](https://github.com/danielraffel/pulp/issues/566) tracks the
 broader coverage initiative.
 
@@ -59,6 +60,15 @@ Apple Swift coverage (macOS only):
 python3 tools/scripts/run_swift_coverage.py
 ```
 
+Android Kotlin coverage (requires Java 17 + Android SDK/NDK):
+
+```bash
+export ANDROID_HOME="$HOME/Library/Android/sdk"
+export ANDROID_SDK_ROOT="$ANDROID_HOME"
+cd android
+./gradlew :app:testDebugUnitTest :app:jacocoDebugUnitTestReport
+```
+
 Output:
 
 - `build-coverage/coverage/index.html` — per-file HTML drilldown (open
@@ -79,6 +89,10 @@ Output:
   Swift source files under `apple/Sources/`.
 - `build-coverage/apple/coverage.apple.json` — Xcode/SwiftPM Codecov
   JSON emitted by `swift test --enable-code-coverage`.
+- `android/app/build/reports/jacoco/jacocoDebugUnitTestReport/` —
+  HTML + XML output for the Android Kotlin lane.
+- `android/app/build/reports/jacoco/jacocoDebugUnitTestReport/jacocoDebugUnitTestReport.xml`
+  — JaCoCo XML uploaded to Codecov from the Android workflow.
 
 The native script requires Clang (not gcc) because we use Clang
 source-based coverage, not gcov. See
@@ -101,6 +115,12 @@ inside `apple/`. The staged Codecov JSON is source-only by policy:
 `apple/Tests/**` and generated `.build/**` files are ignored in
 `codecov.yml` so the Apple component reflects package sources, not the
 test harness.
+
+The Android Kotlin lane runs through Gradle/JaCoCo rather than
+`coverage.yml`. The dedicated Android workflow provisions Java + the
+Android SDK/NDK, runs `:app:testDebugUnitTest` plus
+`:app:jacocoDebugUnitTestReport`, and uploads the resulting JaCoCo XML
+to Codecov.
 
 Optional flags:
 
@@ -186,6 +206,15 @@ Source → swift test --enable-code-coverage
   run_swift_coverage.py
          ↓
   summary + staged Codecov JSON (Codecov)
+
+Android Kotlin:
+Source → Gradle `testDebugUnitTest`
+         ↓
+     JaCoCo execution data
+         ↓
+  `jacocoDebugUnitTestReport`
+         ↓
+   JaCoCo XML + HTML (Codecov)
 ```
 
 - **Instrumentation**: enabled via `-DPULP_ENABLE_COVERAGE=ON` at
@@ -239,6 +268,8 @@ Today the live dashboard includes:
 - **Swift** coverage for the Apple Swift package sources under
   `apple/Sources/PulpSwift/**` on macOS via
   `tools/scripts/run_swift_coverage.py`.
+- **Kotlin/Android** coverage for `android/app/src/main/kotlin/**`
+  via the dedicated Android workflow's JaCoCo upload.
 
 Still out of scope today:
 
@@ -247,7 +278,7 @@ Still out of scope today:
 - Python outside the current Linux lane (for example top-level
   `tools/*.py`, `tools/packages/**`, and any future repo-root Python
   scripts) — follow-up after the current tooling surfaces stabilize.
-- Kotlin/Android coverage.
+- Android emulator / device instrumentation coverage.
 
 ## Cross-platform matrix
 
@@ -263,6 +294,12 @@ architectures —
 `llvm-profdata merge` is not architecture-portable
 (`planning/coverage-tooling-decision-2026-04-21.md` §7); Codecov does
 the cross-OS union at the flag layer.
+
+Android/Kotlin coverage is separate from that matrix. It runs in
+`.github/workflows/android.yml` on macOS, emits JaCoCo XML from
+Gradle, and uploads that XML directly to Codecov so the `android`
+component sees JVM-only Kotlin coverage even though the native coverage
+matrix is Clang-specific.
 
 Per-OS flags let the dashboard answer "what's covered on a specific
 OS." Per-subsystem components answer "how's a specific piece of the
@@ -296,6 +333,7 @@ without a workflow edit.
 - Issue #566 — umbrella initiative
 - Issue #615 — Apple Swift coverage lane
 - Issue #290 — coverage hardening (test surface growth)
+- Issue #633 — Android/Kotlin JaCoCo coverage lane
 - `planning/coverage-tooling-decision-2026-04-21.md` — Phase 0 spike
   findings, stack rationale, perf numbers
 - `planning/coverage-sanitizers-spec-2026-04-16.md` — the earlier

@@ -434,6 +434,13 @@ Silicon) the arm64-v8a emulator hits `HV_UNSUPPORTED` — keep the gate
 OFF until Linux arm64 + KVM or x86\_64 APK lanes land (see #487).
 Run the smoke locally in the meantime.
 
+The same workflow now also has an `android-kotlin-coverage` job on
+`macos-latest`. It runs `./gradlew :app:testDebugUnitTest
+:app:jacocoDebugUnitTestReport`, uploads the JaCoCo HTML/XML artifacts,
+and sends `android/app/build/reports/jacoco/jacocoDebugUnitTestReport/jacocoDebugUnitTestReport.xml`
+to Codecov. This is a JVM-only lane for `android/app/src/main/kotlin/**`
+and does not replace emulator/device coverage.
+
 ## Critical Gotchas
 
 These are hard-won lessons from the bringup. Violating any of these will cause crashes or subtle bugs.
