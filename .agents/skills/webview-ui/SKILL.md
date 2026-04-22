@@ -116,6 +116,16 @@ For palette / inspector style UI:
 - resize with `set_native_child_view_bounds(...)`
 - detach on close
 
+For plugin-editor embedding:
+- use `View::plugin_view_host()` instead of creating a separate `WindowHost`
+- attach the `WebViewPanel` native handle through
+  `PluginViewHost::attach_native_child_view(...)`
+- resize from `on_view_resized()` via
+  `PluginViewHost::set_native_child_view_bounds(...)`
+- detach in `on_view_closed()` or the owning view destructor
+- see `examples/webview-plugin/` for the minimal Processor-backed example
+  that hosts a `WebViewPanel` directly inside a plugin editor subtree
+
 ## Validation Loop
 
 For focused local proof:

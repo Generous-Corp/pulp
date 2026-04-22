@@ -210,6 +210,20 @@ xcodebuild test -project ... -scheme AUv3Tests -sdk iphonesimulator
 - **Multi-touch** — each `UITouch*` gets a stable `pointer_id` via
   `stableIdForTouch:` so widgets that use `set_pointer_capture()` work correctly.
 
+### Plugin Editor Child Views
+
+- **`PluginViewHost` now mirrors `WindowHost` for native child views** —
+  `plugin_view_host_ios.mm` supports `attach_native_child_view(...)`,
+  `set_native_child_view_bounds(...)`, and `detach_native_child_view(...)`
+  for `UIView` children embedded inside AUv3/plugin editors.
+- **Subview trees inherit `plugin_view_host()` recursively before
+  `Processor::on_view_opened(...)` fires** — if a `View` creates a
+  `WebViewPanel` or other native-backed child in a plugin editor, wire it
+  through `View::plugin_view_host()`, not a standalone `WindowHost`.
+- **Detach on close** — plugin-editor child views must be explicitly detached
+  in `on_view_closed()`/destructors just like standalone window-hosted child
+  views; the host clears propagated references when subtrees are removed.
+
 ### Accessibility
 
 - `UIAccessibility` is the iOS equivalent of NSAccessibility. `accessibility_ios.mm`

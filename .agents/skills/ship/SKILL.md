@@ -187,6 +187,20 @@ artifact on a *clean* runner that did not build it, catching the bug
 class before tagging. If you change rpath logic, run the smoke job
 locally first or it will fail in CI for everyone else.
 
+### Shipyard pin drift between local tooling and release workflows
+
+Pulp's release automation depends on the pinned Shipyard CLI in two places:
+
+- `tools/shipyard.toml` is the source-of-truth pin for local installs and
+  `shipyard pr`.
+- `.github/workflows/release-cli.yml` and `.github/workflows/post-tag-sync.yml`
+  carry a `SHIPYARD_VERSION` env used by the release-side workflows.
+
+If you bump the Shipyard pin, update both workflows in the same PR and keep the
+existing string format in each file (`v0.26.0` vs `0.26.0`). Otherwise local
+shipping and tag-time release jobs quietly diverge onto different Shipyard
+versions, which is how release-only behavior changes get missed.
+
 ## Doctor Checks
 
 `pulp doctor` validates Android toolchain:
