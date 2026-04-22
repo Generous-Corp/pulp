@@ -247,7 +247,7 @@ docs:
   - slug: coverage
     path: guides/coverage.md
     kind: guide
-    summary: Test coverage — Codecov dashboard, 20 flags, local runs, per-PR interpretation, phase roadmap
+    summary: Test coverage — Codecov dashboard, subsystem/platform/surface slices, local runs, per-PR interpretation, phase roadmap
 
   - slug: design-tokens
     path: guides/design-tokens.md
@@ -341,6 +341,11 @@ docs:
     summary: Licensing, dependencies, acknowledgements, and policy
 
   # Reports
+  - slug: coverage-compliance-status
+    path: reports/coverage-compliance-status.md
+    kind: report
+    summary: Durable tracker for the Codecov baseline, compliance tranche plan, issue trail, and control-plane invariants
+
   - slug: webgpu-compute-feasibility
     path: reports/webgpu-compute-feasibility.md
     kind: report

@@ -29,6 +29,10 @@ TEST_CASE("check_codesign on nonexistent path", "[ship][codesign]") {
     REQUIRE_FALSE(info.is_valid);
 }
 
+TEST_CASE("check_notarization on nonexistent path is false", "[ship][codesign]") {
+    REQUIRE_FALSE(check_notarization("/nonexistent/binary"));
+}
+
 TEST_CASE("list_signing_identities does not crash", "[ship][codesign]") {
     auto ids = list_signing_identities();
     // May be empty on CI, but should not crash

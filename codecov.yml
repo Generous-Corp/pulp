@@ -70,12 +70,12 @@ comment:
 # below, which slices the single upload by path. Component IDs mirror
 # these flag names 1:1 so cross-referencing stays consistent.
 #
-# 13 core subsystems + 4 platforms + 3 surfaces = 20 flag/component
-# pairs. Adding a new subsystem means: new flag entry here, matching
-# component entry below, and a row in docs/reference/modules.md
-# (Phase 4's doc-sync gate keeps those three honest).
+# Every top-level `core/*` directory plus the platform/surface slices
+# below gets a matching flag/component pair. Adding a new subsystem
+# means updating both blocks in this file; `tools/scripts/test_codecov_config.py`
+# checks them against the live `core/*` tree so drift fails fast.
 flags:
-  # Core subsystems (13) — one flag per top-level core/** directory.
+  # Core subsystems — one flag per top-level core/** directory.
   audio:
     paths:
       - core/audio/
@@ -83,6 +83,10 @@ flags:
   canvas:
     paths:
       - core/canvas/
+    carryforward: true
+  dsl:
+    paths:
+      - core/dsl/
     carryforward: true
   events:
     paths:
@@ -154,6 +158,7 @@ flags:
     carryforward: true
   windows:
     paths:
+      - core/**/win/
       - core/**/windows/
       - core/**/wasapi/
     carryforward: true
@@ -207,7 +212,7 @@ flags:
 # surface breakdown today from the single-upload Cobertura XML without
 # relying on Codecov's flag-with-paths behaviour (which is documented
 # but has historically been less reliable for trend analysis across
-# 20 flags attached to one upload).
+# many flags attached to one upload).
 #
 # Keep component_id values aligned with the flag names above so the
 # dashboard reads consistently whichever dimension you filter by.
@@ -219,13 +224,16 @@ component_management:
         threshold: 1%
         informational: true
   individual_components:
-    # Core subsystems (13)
+    # Core subsystems — mirror every top-level core/** directory.
     - component_id: audio
       name: audio
       paths: ["core/audio/**"]
     - component_id: canvas
       name: canvas
       paths: ["core/canvas/**"]
+    - component_id: dsl
+      name: dsl
+      paths: ["core/dsl/**"]
     - component_id: events
       name: events
       paths: ["core/events/**"]
@@ -282,6 +290,7 @@ component_management:
     - component_id: windows
       name: windows
       paths:
+        - "core/**/win/**"
         - "core/**/windows/**"
         - "core/**/wasapi/**"
     # Surface (3)
