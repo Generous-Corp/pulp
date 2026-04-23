@@ -11,16 +11,32 @@ namespace {
 
 class StubWindowHost final : public WindowHost {
 public:
+    ContentSize content_size_{640, 360};
     std::function<void()> idle_callback_;
+    ResizeCallback resize_callback_;
     int repaint_calls_ = 0;
 
     void show() override {}
     void hide() override {}
     bool is_visible() const override { return false; }
     void repaint() override { ++repaint_calls_; }
+    ContentSize get_content_size() const override { return content_size_; }
     void set_idle_callback(std::function<void()> cb) override {
         idle_callback_ = std::move(cb);
     }
+    void set_resize_callback(ResizeCallback cb) override {
+        resize_callback_ = std::move(cb);
+    }
+    void set_close_callback(std::function<void()>) override {}
+    void run_event_loop() override {}
+};
+
+class DefaultWindowHost final : public WindowHost {
+public:
+    void show() override {}
+    void hide() override {}
+    bool is_visible() const override { return false; }
+    void repaint() override {}
     void set_close_callback(std::function<void()>) override {}
     void run_event_loop() override {}
 };
@@ -38,6 +54,14 @@ struct StubScriptedUi {
 struct StubSettingsPoller {
     int poll_calls_ = 0;
     void poll() { ++poll_calls_; }
+};
+
+struct StubBridge {
+    std::vector<WindowHost::ContentSize> resize_calls_;
+
+    void resize(uint32_t width, uint32_t height) {
+        resize_calls_.push_back({width, height});
+    }
 };
 
 } // namespace
@@ -185,6 +209,114 @@ TEST_CASE("Standalone pointer idle helper polls scripted UI and settings",
     window.idle_callback_();
     REQUIRE(scripted_ui.poll_calls_ == 1);
     REQUIRE(settings.poll_calls_ == 1);
+}
+
+TEST_CASE("Standalone editor content size subtracts chrome height",
+          "[standalone][chrome]") {
+    auto editor_root = std::make_unique<View>();
+    auto tabs = make_standalone_editor_chrome(
+        std::move(editor_root), StandaloneConfig{}, nullptr, nullptr, nullptr, {});
+
+    auto size = standalone_editor_content_size({640, 392}, tabs);
+    REQUIRE(size.width == 640);
+    REQUIRE(size.height == 360);
+
+    auto editor_only = make_standalone_editor_chrome(
+        std::make_unique<View>(),
+        StandaloneConfig{.show_settings_tab = false},
+        nullptr,
+        nullptr,
+        nullptr,
+        {});
+    size = standalone_editor_content_size({640, 360}, editor_only);
+    REQUIRE(size.width == 640);
+    REQUIRE(size.height == 360);
+}
+
+TEST_CASE("WindowHost default content-size and resize callback are no-ops",
+          "[standalone][chrome]") {
+    DefaultWindowHost window;
+
+    const auto size = window.get_content_size();
+    REQUIRE(size.width == 0);
+    REQUIRE(size.height == 0);
+
+    bool resize_fired = false;
+    window.set_resize_callback([&](uint32_t, uint32_t) {
+        resize_fired = true;
+    });
+    REQUIRE_FALSE(resize_fired);
+}
+
+TEST_CASE("Standalone host sync installs a resize callback and applies initial size",
+          "[standalone][chrome]") {
+    StubWindowHost window;
+    window.content_size_ = {800, 432};
+    auto chrome = make_standalone_editor_chrome(
+        std::make_unique<View>(), StandaloneConfig{}, nullptr, nullptr, nullptr, {});
+
+    std::vector<WindowHost::ContentSize> seen_sizes;
+    sync_standalone_editor_host(
+        window,
+        chrome,
+        [&](uint32_t width, uint32_t height) {
+            seen_sizes.push_back({width, height});
+        });
+
+    REQUIRE(window.resize_callback_ != nullptr);
+    REQUIRE(seen_sizes.size() == 1);
+    REQUIRE(seen_sizes[0].width == 800);
+    REQUIRE(seen_sizes[0].height == 400);
+
+    window.resize_callback_(900, 532);
+    REQUIRE(seen_sizes.size() == 2);
+    REQUIRE(seen_sizes[1].width == 900);
+    REQUIRE(seen_sizes[1].height == 500);
+}
+
+TEST_CASE("Standalone host sync skips zero-sized initial host content",
+          "[standalone][chrome]") {
+    StubWindowHost window;
+    window.content_size_ = {0, 0};
+    auto chrome = make_standalone_editor_chrome(
+        std::make_unique<View>(), StandaloneConfig{}, nullptr, nullptr, nullptr, {});
+
+    std::vector<WindowHost::ContentSize> seen_sizes;
+    sync_standalone_editor_host(
+        window,
+        chrome,
+        [&](uint32_t width, uint32_t height) {
+            seen_sizes.push_back({width, height});
+        });
+
+    REQUIRE(window.resize_callback_ != nullptr);
+    REQUIRE(seen_sizes.empty());
+
+    window.resize_callback_(900, 532);
+    REQUIRE(seen_sizes.size() == 1);
+    REQUIRE(seen_sizes[0].width == 900);
+    REQUIRE(seen_sizes[0].height == 500);
+}
+
+TEST_CASE("Standalone bridge attach forwards host sizing through bridge resize",
+          "[standalone][chrome]") {
+    StubWindowHost window;
+    window.content_size_ = {840, 452};
+    auto chrome = make_standalone_editor_chrome(
+        std::make_unique<View>(), StandaloneConfig{}, nullptr, nullptr, nullptr, {});
+    StubBridge bridge;
+
+    attach_standalone_editor_bridge(window, chrome, bridge);
+
+    REQUIRE(window.resize_callback_ != nullptr);
+    REQUIRE(bridge.resize_calls_.size() == 1);
+    REQUIRE(bridge.resize_calls_[0].width == 840);
+    REQUIRE(bridge.resize_calls_[0].height == 420);
+
+    window.resize_callback_(900, 500);
+    REQUIRE(bridge.resize_calls_.size() == 2);
+    REQUIRE(bridge.resize_calls_[1].width == 900);
+    REQUIRE(bridge.resize_calls_[1].height == 468);
 }
 
 TEST_CASE("Standalone log helper formats the chrome mode",

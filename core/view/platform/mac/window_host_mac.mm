@@ -1150,6 +1150,13 @@ public:
             [window_ setContentView:view_];
 
             delegate_ = [[PulpWindowDelegate alloc] init];
+            delegate_.onResize = ^(float w, float h) {
+                if (resize_callback_) {
+                    resize_callback_(
+                        static_cast<uint32_t>(std::max(0.0f, w)),
+                        static_cast<uint32_t>(std::max(0.0f, h)));
+                }
+            };
             [window_ setDelegate:delegate_];
         }
     }
@@ -1194,6 +1201,13 @@ public:
 
     void* native_window_handle() const override { return (__bridge void*) window_; }
     void* native_content_view_handle() const override { return (__bridge void*) view_; }
+    ContentSize get_content_size() const override {
+        NSSize size = view_ ? view_.bounds.size : NSZeroSize;
+        return {
+            static_cast<uint32_t>(std::max<CGFloat>(0.0, size.width)),
+            static_cast<uint32_t>(std::max<CGFloat>(0.0, size.height)),
+        };
+    }
     bool attach_native_child_view(void* child_view,
                                   float x,
                                   float y,
@@ -1233,6 +1247,10 @@ public:
         }
     }
 
+    void set_resize_callback(ResizeCallback cb) override {
+        resize_callback_ = std::move(cb);
+    }
+
     void run_event_loop() override {
         @autoreleasepool {
             [NSApplication sharedApplication];
@@ -1253,6 +1271,7 @@ private:
     NSTimer* idle_timer_ = nil;
     std::function<void()> close_callback_;
     std::function<void()> idle_callback_;
+    ResizeCallback resize_callback_;
 };
 
 // ── MacGpuWindowHost (Dawn/Skia Graphite) ────────────────────────────────────
@@ -1344,6 +1363,12 @@ public:
 
     void* native_window_handle() const override { return (__bridge void*) window_; }
     void* native_content_view_handle() const override { return (__bridge void*) metal_view_; }
+    ContentSize get_content_size() const override {
+        return {
+            static_cast<uint32_t>(std::max(0.0f, width_)),
+            static_cast<uint32_t>(std::max(0.0f, height_)),
+        };
+    }
     void* dawn_device_handle() const override {
         return gpu_surface_ ? gpu_surface_->dawn_device_handle() : nullptr;
     }
@@ -1416,6 +1441,10 @@ public:
     void set_close_callback(std::function<void()> cb) override {
         close_callback_ = std::move(cb);
         delegate_.onClose = ^{ if (close_callback_) close_callback_(); };
+    }
+
+    void set_resize_callback(ResizeCallback cb) override {
+        resize_callback_ = std::move(cb);
     }
 
     void run_event_loop() override {
@@ -1513,6 +1542,7 @@ private:
     int frame_fail_count_ = 0;
     int frame_ok_count_ = 0;
     float width_ = 0, height_ = 0;
+    ResizeCallback resize_callback_;
 
     static bool view_needs_continuous_frames(View* view) {
         if (!view) return false;
@@ -1600,6 +1630,11 @@ private:
             skia_surface_->resize(static_cast<uint32_t>(width),
                                    static_cast<uint32_t>(height),
                                    static_cast<float>(scale));
+        }
+        if (resize_callback_) {
+            resize_callback_(
+                static_cast<uint32_t>(std::max(0.0f, width)),
+                static_cast<uint32_t>(std::max(0.0f, height)));
         }
         needs_repaint_ = true;
     }

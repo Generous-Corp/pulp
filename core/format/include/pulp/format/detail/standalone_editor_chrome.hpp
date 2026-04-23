@@ -117,6 +117,58 @@ inline StandaloneEditorChrome make_standalone_editor_chrome(
     return chrome;
 }
 
+inline view::WindowHost::ContentSize standalone_editor_content_size(
+    view::WindowHost::ContentSize host_content_size,
+    const StandaloneEditorChrome& chrome) {
+    const auto extra_height = static_cast<uint32_t>(
+        chrome.extra_window_height() > 0.0f ? chrome.extra_window_height() : 0.0f);
+    return {
+        host_content_size.width,
+        host_content_size.height > extra_height
+            ? host_content_size.height - extra_height
+            : 0u,
+    };
+}
+
+template <typename ResizeFn>
+inline view::WindowHost::ResizeCallback make_standalone_editor_resize_callback(
+    const StandaloneEditorChrome& chrome,
+    ResizeFn&& resize) {
+    const auto extra_height = static_cast<uint32_t>(
+        chrome.extra_window_height() > 0.0f ? chrome.extra_window_height() : 0.0f);
+    return [extra_height, resize = std::forward<ResizeFn>(resize)](
+               uint32_t width, uint32_t height) mutable {
+        resize(width, height > extra_height ? height - extra_height : 0u);
+    };
+}
+
+template <typename ResizeFn>
+inline void sync_standalone_editor_host(
+    view::WindowHost& window,
+    const StandaloneEditorChrome& chrome,
+    ResizeFn&& resize) {
+    auto callback = make_standalone_editor_resize_callback(
+        chrome, std::forward<ResizeFn>(resize));
+    const auto host_content_size = window.get_content_size();
+    window.set_resize_callback(callback);
+    if (host_content_size.width > 0 && host_content_size.height > 0) {
+        callback(host_content_size.width, host_content_size.height);
+    }
+}
+
+template <typename Bridge>
+inline void attach_standalone_editor_bridge(
+    view::WindowHost& window,
+    const StandaloneEditorChrome& chrome,
+    Bridge& bridge) {
+    sync_standalone_editor_host(
+        window,
+        chrome,
+        [&bridge](uint32_t width, uint32_t height) {
+            bridge.resize(width, height);
+        });
+}
+
 inline void install_standalone_idle_callback(
     view::WindowHost& window,
     std::function<void()> poll_scripted_ui,

@@ -55,6 +55,15 @@ int main() {
     return 1;
   }
 
+  auto apply_native_bounds = [window = window.get(), panel = panel.get()] {
+    const auto size = window->get_content_size();
+    if (size.width == 0 || size.height == 0) {
+      return;
+    }
+    window->set_native_child_view_bounds(
+        panel->native_handle(), 0, 0, static_cast<float>(size.width), static_cast<float>(size.height));
+  };
+
   panel->set_message_handler([](const WebViewMessage& message) -> std::string {
     std::cout << "[webview-monaco] " << message.type << " " << message.payload_json << "\n";
 
@@ -69,14 +78,23 @@ int main() {
     return R"({"message":"ok"})";
   });
 
+  const auto initial_size = window->get_content_size();
+  const float initial_width = initial_size.width > 0 ? static_cast<float>(initial_size.width)
+                                                     : static_cast<float>(kWindowWidth);
+  const float initial_height = initial_size.height > 0 ? static_cast<float>(initial_size.height)
+                                                       : static_cast<float>(kWindowHeight);
   if (!window->attach_native_child_view(
-          panel->native_handle(), 0, 0, kWindowWidth, kWindowHeight)) {
+          panel->native_handle(), 0, 0, initial_width, initial_height)) {
     std::cerr << "Failed to attach Monaco WebView\n";
     return 1;
   }
 
-  panel->set_ready_handler([panel = panel.get(), window = window.get()] {
-    window->set_native_child_view_bounds(panel->native_handle(), 0, 0, kWindowWidth, kWindowHeight);
+  window->set_resize_callback([apply_native_bounds](uint32_t, uint32_t) {
+    apply_native_bounds();
+  });
+
+  panel->set_ready_handler([panel = panel.get(), apply_native_bounds] {
+    apply_native_bounds();
     panel->navigate("pulp://monaco");
   });
 

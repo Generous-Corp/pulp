@@ -247,6 +247,9 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
     // Window host is live — fire Processor::on_view_opened now.
     bridge->notify_attached();
 
+    auto* bridge_raw = bridge.get();
+    detail::attach_standalone_editor_bridge(*window, chrome, *bridge);
+
     auto* scripted_ui_ptr = bridge->scripted_ui();
     detail::install_scripted_ui_repaint_callback(scripted_ui_ptr, *window);
 
@@ -254,7 +257,6 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
     // `bridge->close()` dispatches Processor::on_view_closed(*view),
     // which reads the host-side Processor; if `stop()` had already
     // reset processor_, the callback would fire on freed memory.
-    auto* bridge_raw = bridge.get();
     window->set_close_callback([this, bridge_raw]() {
         if (bridge_raw) bridge_raw->close();
         stop();

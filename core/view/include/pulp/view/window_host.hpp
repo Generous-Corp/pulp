@@ -44,6 +44,13 @@ struct WindowOptions {
 //     has_factory() rather than a silent null.
 class WindowHost {
 public:
+    struct ContentSize {
+        uint32_t width = 0;
+        uint32_t height = 0;
+    };
+
+    using ResizeCallback = std::function<void(uint32_t width, uint32_t height)>;
+
     // Create a window hosting the given view tree
     static std::unique_ptr<WindowHost> create(View& root, const WindowOptions& options);
 
@@ -79,6 +86,7 @@ public:
     virtual void* dawn_queue_handle() const { return nullptr; }
     virtual void* dawn_instance_handle() const { return nullptr; }
     virtual render::GpuSurface* gpu_surface() const { return nullptr; }
+    virtual ContentSize get_content_size() const;
 
     // Attach/detach a platform-native child view inside this host. Coordinates
     // use Pulp's top-left origin convention.
@@ -120,6 +128,7 @@ public:
     // Called periodically while the host event loop is running.
     // Used for editor-side polling such as hot reload.
     virtual void set_idle_callback(std::function<void()> cb) { (void)cb; }
+    virtual void set_resize_callback(ResizeCallback cb);
 
     // Set a callback for when the window is closed
     virtual void set_close_callback(std::function<void()> cb) = 0;

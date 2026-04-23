@@ -23,6 +23,7 @@ NSArray<UIAccessibilityElement *>* create_accessibility_elements(View& root, UIV
     NSArray<UIAccessibilityElement *>* _cachedAccessibilityElements;
 }
 @property (nonatomic, assign) pulp::view::View* rootView;
+@property (nonatomic, copy) void (^onResize)(float, float);
 @end
 
 @implementation PulpRootView
@@ -93,6 +94,15 @@ NSArray<UIAccessibilityElement *>* create_accessibility_elements(View& root, UIV
 - (void)safeAreaInsetsDidChange {
     [super safeAreaInsetsDidChange];
     [self setNeedsDisplay];
+}
+
+- (void)layoutSubviews {
+    [super layoutSubviews];
+    if (self.onResize) {
+        CGRect bounds = self.bounds;
+        self.onResize(static_cast<float>(bounds.size.width),
+                      static_cast<float>(bounds.size.height));
+    }
 }
 
 // ── Touch events ────────────────────────────────────────────────────────────
@@ -245,8 +255,29 @@ public:
         }
     }
 
+    ContentSize get_content_size() const override {
+        CGRect bounds = root_view_ ? root_view_.bounds : UIScreen.mainScreen.bounds;
+        return {
+            static_cast<uint32_t>(bounds.size.width > 0 ? bounds.size.width : 0),
+            static_cast<uint32_t>(bounds.size.height > 0 ? bounds.size.height : 0),
+        };
+    }
+
     void set_close_callback(std::function<void()> cb) override {
         close_callback_ = std::move(cb);
+    }
+
+    void set_resize_callback(ResizeCallback cb) override {
+        resize_callback_ = std::move(cb);
+        if (root_view_) {
+            root_view_.onResize = ^(float w, float h) {
+                if (resize_callback_) {
+                    resize_callback_(
+                        static_cast<uint32_t>(w > 0 ? w : 0),
+                        static_cast<uint32_t>(h > 0 ? h : 0));
+                }
+            };
+        }
     }
 
     void run_event_loop() override {
@@ -269,6 +300,13 @@ public:
             root_view_ = [[PulpRootView alloc] initWithFrame:window_.bounds];
             root_view_.rootView = &root_;
             root_view_.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
+            root_view_.onResize = ^(float w, float h) {
+                if (resize_callback_) {
+                    resize_callback_(
+                        static_cast<uint32_t>(w > 0 ? w : 0),
+                        static_cast<uint32_t>(h > 0 ? h : 0));
+                }
+            };
 
             UIViewController *vc = [[UIViewController alloc] init];
             vc.view = root_view_;
@@ -286,6 +324,7 @@ private:
     UIWindow* window_ = nil;
     PulpRootView* root_view_ = nil;
     std::function<void()> close_callback_;
+    ResizeCallback resize_callback_;
 };
 
 // ── IOSGpuWindowHost (GPU rendering via Dawn/Skia Graphite) ─────────────
@@ -302,11 +341,20 @@ class IOSGpuWindowHost;
 // Metal-backed UIView — file-local class so we don't depend on the
 // private PulpMetalView in metal_surface_ios.mm.
 @interface PulpMetalWindowView : UIView
+@property (nonatomic, copy) void (^onResize)(float, float);
 @end
 
 @implementation PulpMetalWindowView
 + (Class)layerClass { return [CAMetalLayer class]; }
 - (CAMetalLayer *)metalLayer { return (CAMetalLayer *)self.layer; }
+- (void)layoutSubviews {
+    [super layoutSubviews];
+    if (self.onResize) {
+        CGRect bounds = self.bounds;
+        self.onResize(static_cast<float>(bounds.size.width),
+                      static_cast<float>(bounds.size.height));
+    }
+}
 @end
 
 // CADisplayLink target — relays the vsync tick to the C++ host.
@@ -335,6 +383,13 @@ public:
     void hide() override {}
     bool is_visible() const override { return window_ != nil && !window_.isHidden; }
     render::GpuSurface* gpu_surface() const override { return gpu_surface_.get(); }
+    ContentSize get_content_size() const override {
+        CGRect bounds = metal_view_ ? metal_view_.bounds : UIScreen.mainScreen.bounds;
+        return {
+            static_cast<uint32_t>(bounds.size.width > 0 ? bounds.size.width : 0),
+            static_cast<uint32_t>(bounds.size.height > 0 ? bounds.size.height : 0),
+        };
+    }
 
     void repaint() override {
         needs_repaint_.store(true, std::memory_order_relaxed);
@@ -348,6 +403,15 @@ public:
 
     void set_close_callback(std::function<void()> cb) override {
         close_callback_ = std::move(cb);
+    }
+
+    void set_resize_callback(ResizeCallback cb) override {
+        resize_callback_ = std::move(cb);
+        if (metal_view_) {
+            metal_view_.onResize = ^(float w, float h) {
+                handle_resize(w, h);
+            };
+        }
     }
 
     void run_event_loop() override {
@@ -370,6 +434,9 @@ public:
             metal_view_ = [[PulpMetalWindowView alloc] initWithFrame:window_.bounds];
             metal_view_.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
             metal_view_.multipleTouchEnabled = YES;
+            metal_view_.onResize = ^(float w, float h) {
+                handle_resize(w, h);
+            };
 
             CGFloat scale = UIScreen.mainScreen.scale;
             CGSize bounds = window_.bounds.size;
@@ -425,6 +492,7 @@ private:
     std::atomic<bool> needs_repaint_{false};
     CADisplayLink* display_link_ = nil;
     PulpIOSDisplayLinkTarget* display_link_target_ = nil;
+    ResizeCallback resize_callback_;
 
     void start_display_link() {
         if (display_link_) return;
@@ -474,6 +542,25 @@ private:
 
         skia_surface_->end_frame();
         gpu_surface_->end_frame();
+    }
+
+    void handle_resize(float width, float height) {
+        const CGFloat scale = UIScreen.mainScreen.scale;
+        const uint32_t logical_w = static_cast<uint32_t>(width > 0 ? width : 0);
+        const uint32_t logical_h = static_cast<uint32_t>(height > 0 ? height : 0);
+        const uint32_t phys_w = static_cast<uint32_t>((width > 0 ? width : 0) * scale);
+        const uint32_t phys_h = static_cast<uint32_t>((height > 0 ? height : 0) * scale);
+
+        if (gpu_surface_) {
+            gpu_surface_->resize(phys_w, phys_h);
+        }
+        if (skia_surface_) {
+            skia_surface_->resize(logical_w, logical_h, static_cast<float>(scale));
+        }
+        if (resize_callback_) {
+            resize_callback_(logical_w, logical_h);
+        }
+        needs_repaint_.store(true, std::memory_order_relaxed);
     }
 };
 

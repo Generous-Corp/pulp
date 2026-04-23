@@ -74,6 +74,14 @@ wrapping it in the outer `Editor/Settings` `TabPanel`. The same
 ownership rule still applies: close the bridge before the released
 root view is destroyed.
 
+Standalone now also keeps the bridge's size in sync with the real host
+content area. `run_with_editor()` reads `WindowHost::get_content_size()`
+immediately after `notify_attached()`, subtracts any standalone chrome
+height, dispatches `ViewBridge::resize(...)`, and re-dispatches on each
+`WindowHost::set_resize_callback(...)` event. If you embed a native child
+or rely on `Processor::on_view_resized(...)`, do not assume
+`editor_size()` is the last word after attach.
+
 ## AU v2 dual-Processor gotcha (fixed)
 
 Pre-ViewBridge, the AU v2 Cocoa view factory called

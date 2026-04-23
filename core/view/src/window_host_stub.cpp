@@ -37,6 +37,14 @@ bool WindowHost::has_factory() {
     return g_factory_installed;
 }
 
+WindowHost::ContentSize WindowHost::get_content_size() const {
+    return {};
+}
+
+void WindowHost::set_resize_callback(ResizeCallback cb) {
+    (void) cb;
+}
+
 #if !defined(__APPLE__)
 
 std::unique_ptr<WindowHost> WindowHost::create(View& root,
