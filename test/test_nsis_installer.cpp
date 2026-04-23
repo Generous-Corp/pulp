@@ -2,8 +2,13 @@
 #include <catch2/matchers/catch_matchers_string.hpp>
 #include <pulp/ship/installer.hpp>
 
+#include <chrono>
+#include <filesystem>
+#include <fstream>
+
 using namespace pulp::ship;
 using Catch::Matchers::ContainsSubstring;
+namespace fs = std::filesystem;
 
 static InstallerConfig make_test_config() {
     InstallerConfig config;
@@ -17,6 +22,21 @@ static InstallerConfig make_test_config() {
     };
     return config;
 }
+
+struct ScopedTempDir {
+    fs::path path;
+
+    ScopedTempDir() {
+        path = fs::temp_directory_path() / ("pulp-nsis-test-"
+            + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+        fs::create_directories(path);
+    }
+
+    ~ScopedTempDir() {
+        std::error_code ec;
+        fs::remove_all(path, ec);
+    }
+};
 
 TEST_CASE("NSIS script contains product metadata", "[ship][installer]") {
     auto config = make_test_config();
@@ -107,4 +127,33 @@ TEST_CASE("NSIS script includes publisher URL when set", "[ship][installer]") {
 
     REQUIRE_THAT(script, ContainsSubstring("PRODUCT_WEB_SITE"));
     REQUIRE_THAT(script, ContainsSubstring("https://testcorp.com"));
+}
+
+TEST_CASE("NSIS script recurses into directory bundles", "[ship][installer]") {
+    ScopedTempDir temp;
+    auto bundle = temp.path / "TestPlugin.vst3";
+    fs::create_directories(bundle);
+    std::ofstream(bundle / "Contents.txt") << "bundle";
+
+    auto config = make_test_config();
+    config.plugins = {{bundle.string(), "", "vst3"}};
+    auto script = generate_nsis_script(config);
+
+    REQUIRE_THAT(script, ContainsSubstring("File /r \"" + bundle.string() + "\""));
+    REQUIRE_THAT(script, ContainsSubstring("RMDir /r \"$COMMONFILES\\VST3\\TestPlugin.vst3\""));
+}
+
+TEST_CASE("NSIS script maps standalone and unknown formats to INSTDIR", "[ship][installer]") {
+    auto config = make_test_config();
+    config.plugins = {
+        {"C:/build/TestPlugin.exe", "", "standalone"},
+        {"C:/build/TestPlugin.lv2", "", "lv2"},
+    };
+    auto script = generate_nsis_script(config);
+
+    REQUIRE_THAT(script, ContainsSubstring("Section \"TestPlugin (Standalone)\""));
+    REQUIRE_THAT(script, ContainsSubstring("Section \"TestPlugin (lv2)\""));
+    REQUIRE_THAT(script, ContainsSubstring("SetOutPath \"$INSTDIR\""));
+    REQUIRE_THAT(script, ContainsSubstring("RMDir /r \"$INSTDIR\\TestPlugin.exe\""));
+    REQUIRE_THAT(script, ContainsSubstring("RMDir /r \"$INSTDIR\\TestPlugin.lv2\""));
 }
