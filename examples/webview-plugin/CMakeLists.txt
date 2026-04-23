@@ -1,6 +1,6 @@
 if(PULP_BUILD_WEBVIEW)
     pulp_add_plugin(PulpWebViewPlugin
-        FORMATS             VST3 AU CLAP
+        FORMATS             VST3 AU CLAP Standalone
         PLUGIN_NAME         "PulpWebViewPlugin"
         BUNDLE_ID           "com.pulp.webview-plugin"
         MANUFACTURER        "Pulp"
