@@ -175,16 +175,22 @@ inline void params_flush(const clap_plugin_t* plugin, const clap_input_events_t*
     uint32_t count = in->size(in);
     for (uint32_t i = 0; i < count; ++i) {
         auto* hdr = in->get(in, i);
+        // memcpy into a stack local to avoid UBSan "misaligned address"
+        // when hdr isn't aligned to the struct's alignof (e.g. 8 for
+        // clap_event_param_value_t's `double value`). #688.
         if (hdr->type == CLAP_EVENT_PARAM_VALUE) {
-            auto* ev = reinterpret_cast<const clap_event_param_value_t*>(hdr);
-            self->store.set_value(static_cast<state::ParamID>(ev->param_id),
-                                  static_cast<float>(ev->value));
+            clap_event_param_value_t ev;
+            std::memcpy(&ev, hdr, sizeof(ev));
+            self->store.set_value(static_cast<state::ParamID>(ev.param_id),
+                                  static_cast<float>(ev.value));
         } else if (hdr->type == CLAP_EVENT_PARAM_GESTURE_BEGIN) {
-            auto* ev = reinterpret_cast<const clap_event_param_gesture_t*>(hdr);
-            self->store.begin_gesture(static_cast<state::ParamID>(ev->param_id));
+            clap_event_param_gesture_t ev;
+            std::memcpy(&ev, hdr, sizeof(ev));
+            self->store.begin_gesture(static_cast<state::ParamID>(ev.param_id));
         } else if (hdr->type == CLAP_EVENT_PARAM_GESTURE_END) {
-            auto* ev = reinterpret_cast<const clap_event_param_gesture_t*>(hdr);
-            self->store.end_gesture(static_cast<state::ParamID>(ev->param_id));
+            clap_event_param_gesture_t ev;
+            std::memcpy(&ev, hdr, sizeof(ev));
+            self->store.end_gesture(static_cast<state::ParamID>(ev.param_id));
         }
     }
 }

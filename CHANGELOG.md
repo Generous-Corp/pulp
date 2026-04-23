@@ -9,6 +9,8 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
 <a id="v0380"></a>
+## [0.39.0]
+
 ## [0.38.0] - 2026-04-22
 
 - fix(view): drop explicit bridge close from AU editor dealloc paths ([#667](https://github.com/danielraffel/pulp/pull/667))

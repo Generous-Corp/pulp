@@ -234,10 +234,14 @@ public:
             // host UI; we drop them for now.
             if (ev->space_id == CLAP_CORE_EVENT_SPACE_ID
                 && ev->type == CLAP_EVENT_MIDI && self->out_midi_sink_) {
-                auto* m = reinterpret_cast<const clap_event_midi_t*>(ev);
+                // memcpy into a stack local to avoid UBSan "misaligned
+                // address" when ev isn't aligned to alignof(clap_event_midi_t).
+                // #688.
+                clap_event_midi_t m;
+                std::memcpy(&m, ev, sizeof(m));
                 pulp::midi::MidiEvent e;
                 e.sample_offset = (int32_t)ev->time;
-                e.message = choc::midi::ShortMessage(m->data[0], m->data[1], m->data[2]);
+                e.message = choc::midi::ShortMessage(m.data[0], m.data[1], m.data[2]);
                 self->out_midi_sink_->add(e);
             }
             return true;

@@ -1,9 +1,9 @@
 #pragma once
 
 #include <pulp/events/event_loop.hpp>
-#include <functional>
 #include <atomic>
-#include <memory>
+#include <cstdint>
+#include <functional>
 
 namespace pulp::events {
 
@@ -26,14 +26,19 @@ public:
     Duration interval() const { return interval_; }
 
 private:
-    void schedule_next();
+    void schedule_next(std::uint64_t gen);
 
     EventLoop& loop_;
     Duration interval_;
     Callback callback_;
     bool repeating_;
     std::atomic<bool> active_{false};
-    std::shared_ptr<std::atomic<bool>> alive_; // prevent use-after-free on stop
+    // Cycle generation — incremented by stop() so that stale dispatch
+    // lambdas scheduled before stop() return early when they fire. Cheap
+    // replacement for the previous shared_ptr<atomic<bool>> sentinel,
+    // which raced on the shared_ptr slot between start() (main thread)
+    // and schedule_next() (event-loop thread). See #687 / #414.
+    std::atomic<std::uint64_t> generation_{0};
 };
 
 } // namespace pulp::events

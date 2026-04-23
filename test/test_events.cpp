@@ -169,6 +169,32 @@ TEST_CASE("Timer basic operation", "[events][timer]") {
     }
 }
 
+// #687 — stop()/start() pairs repeatedly on the owner thread while the
+// event-loop thread is running timer dispatches. Pre-fix, start()'s
+// `alive_ = make_shared<>(...)` raced with schedule_next()'s
+// `auto alive = alive_;` read on the loop thread. Post-fix, alive_ is
+// gone — stop() bumps generation_ (atomic) so stale dispatches early
+// return. Under TSan this loop reliably surfaced the old race within
+// a couple of iterations; 50 iterations is a comfortable margin.
+TEST_CASE("Timer stop+start hammer (TSan-clean, #687)",
+          "[events][timer][tsan][issue-687]") {
+    EventLoop loop;
+    std::atomic<int> count{0};
+    Timer timer(loop, 1ms, [&] { count.fetch_add(1); }, true);
+    for (int i = 0; i < 50; ++i) {
+        timer.start();
+        // Let the loop run at least one dispatch before stopping.
+        std::this_thread::sleep_for(3ms);
+        timer.stop();
+        // Sleep long enough that any in-flight dispatch from this
+        // cycle fires (and hits the generation/active checks) before
+        // we hand start() a fresh cycle.
+        std::this_thread::sleep_for(2ms);
+    }
+    // No functional claim about count — this test exists for TSan.
+    SUCCEED("stop+start hammer completed without races");
+}
+
 // ── EventLoop lifecycle edges ───────────────────────────────────────────
 
 TEST_CASE("EventLoop destructor tolerates pending dispatches",

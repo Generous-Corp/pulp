@@ -17,6 +17,21 @@ static PulpClapPlugin* get_self(const clap_plugin_t* plugin) {
     return static_cast<PulpClapPlugin*>(plugin->plugin_data);
 }
 
+// Read a CLAP event by value from the (possibly-misaligned) header
+// pointer handed out by `clap_input_events.get()`. Hosts may pack
+// variable-size events back-to-back without padding to the strictest
+// member alignment, so `reinterpret_cast<const Foo*>(hdr)` can yield a
+// pointer that violates alignof(Foo) — access to any 8-byte member
+// (e.g. `double velocity` in `clap_event_note_t`) is then UB. UBSan
+// caught this at clap_adapter.cpp:200 via test_clap_midi_events.cpp:772.
+// See #688. memcpy into a stack local guarantees proper alignment.
+template <typename T>
+static T load_event(const clap_event_header_t* hdr) {
+    T out;
+    std::memcpy(&out, hdr, sizeof(T));
+    return out;
+}
+
 bool clap_init(const clap_plugin_t* plugin) {
     auto* self = get_self(plugin);
     self->processor = self->factory();
@@ -93,21 +108,21 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
         for (uint32_t i = 0; i < event_count; ++i) {
             auto* hdr = in_events->get(in_events, i);
             if (hdr->type == CLAP_EVENT_PARAM_VALUE) {
-                auto* ev = reinterpret_cast<const clap_event_param_value_t*>(hdr);
+                const auto ev = load_event<clap_event_param_value_t>(hdr);
                 self->store.set_value(
-                    static_cast<state::ParamID>(ev->param_id),
-                    static_cast<float>(ev->value));
+                    static_cast<state::ParamID>(ev.param_id),
+                    static_cast<float>(ev.value));
             } else if (hdr->type == CLAP_EVENT_PARAM_MOD) {
-                auto* ev = reinterpret_cast<const clap_event_param_mod_t*>(hdr);
+                const auto ev = load_event<clap_event_param_mod_t>(hdr);
                 self->store.set_mod_offset(
-                    static_cast<state::ParamID>(ev->param_id),
-                    static_cast<float>(ev->amount));
+                    static_cast<state::ParamID>(ev.param_id),
+                    static_cast<float>(ev.amount));
             } else if (hdr->type == CLAP_EVENT_PARAM_GESTURE_BEGIN) {
-                auto* ev = reinterpret_cast<const clap_event_param_gesture_t*>(hdr);
-                self->store.begin_gesture(static_cast<state::ParamID>(ev->param_id));
+                const auto ev = load_event<clap_event_param_gesture_t>(hdr);
+                self->store.begin_gesture(static_cast<state::ParamID>(ev.param_id));
             } else if (hdr->type == CLAP_EVENT_PARAM_GESTURE_END) {
-                auto* ev = reinterpret_cast<const clap_event_param_gesture_t*>(hdr);
-                self->store.end_gesture(static_cast<state::ParamID>(ev->param_id));
+                const auto ev = load_event<clap_event_param_gesture_t>(hdr);
+                self->store.end_gesture(static_cast<state::ParamID>(ev.param_id));
             }
         }
     }
@@ -195,19 +210,19 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
         for (uint32_t i = 0; i < event_count; ++i) {
             auto* hdr = in_events->get(in_events, i);
             if (hdr->type == CLAP_EVENT_NOTE_ON) {
-                auto* ev = reinterpret_cast<const clap_event_note_t*>(hdr);
+                const auto ev = load_event<clap_event_note_t>(hdr);
                 auto me = midi::MidiEvent::note_on(
-                    static_cast<uint8_t>(ev->channel),
-                    static_cast<uint8_t>(ev->key),
-                    static_cast<uint8_t>(ev->velocity * 127.0));
+                    static_cast<uint8_t>(ev.channel),
+                    static_cast<uint8_t>(ev.key),
+                    static_cast<uint8_t>(ev.velocity * 127.0));
                 me.sample_offset = static_cast<int32_t>(hdr->time);
                 midi_in.add(me);
             } else if (hdr->type == CLAP_EVENT_NOTE_OFF) {
-                auto* ev = reinterpret_cast<const clap_event_note_t*>(hdr);
+                const auto ev = load_event<clap_event_note_t>(hdr);
                 auto me = midi::MidiEvent::note_off(
-                    static_cast<uint8_t>(ev->channel),
-                    static_cast<uint8_t>(ev->key),
-                    static_cast<uint8_t>(ev->velocity * 127.0));
+                    static_cast<uint8_t>(ev.channel),
+                    static_cast<uint8_t>(ev.key),
+                    static_cast<uint8_t>(ev.velocity * 127.0));
                 me.sample_offset = static_cast<int32_t>(hdr->time);
                 midi_in.add(me);
             } else if (hdr->type == CLAP_EVENT_NOTE_CHOKE) {
@@ -217,10 +232,10 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
                 // a zero-velocity note-off on the same (channel, key).
                 // See clap/events.h around CLAP_EVENT_NOTE_CHOKE — the
                 // velocity field is spec-ignored.
-                auto* ev = reinterpret_cast<const clap_event_note_t*>(hdr);
+                const auto ev = load_event<clap_event_note_t>(hdr);
                 auto me = midi::MidiEvent::note_off(
-                    static_cast<uint8_t>(ev->channel),
-                    static_cast<uint8_t>(ev->key),
+                    static_cast<uint8_t>(ev.channel),
+                    static_cast<uint8_t>(ev.key),
                     0);
                 me.sample_offset = static_cast<int32_t>(hdr->time);
                 midi_in.add(me);
@@ -235,7 +250,7 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
                 // the channel). Plugins that consume UMP can access
                 // per-note expressions natively via the UMP sidecar;
                 // future work can extend that path.
-                auto* ev = reinterpret_cast<const clap_event_note_expression_t*>(hdr);
+                const auto ev = load_event<clap_event_note_expression_t>(hdr);
                 if (!self->mpe_enabled) {
                     if (!note_expression_drop_logged) {
                         runtime::log_debug(
@@ -245,8 +260,8 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
                     }
                 } else {
                     const auto channel = static_cast<uint8_t>(
-                        ev->channel < 0 ? 0 : ev->channel & 0x0F);
-                    // NOTE: ev->key selects the target note for per-note
+                        ev.channel < 0 ? 0 : ev.channel & 0x0F);
+                    // NOTE: ev.key selects the target note for per-note
                     // routing. The MIDI 1.0 synthesis path below emits
                     // channel-wide messages (channel AT, pitch bend,
                     // CCs); the MpeVoiceTracker narrows them back to the
@@ -256,10 +271,10 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
                     const auto t = static_cast<int32_t>(hdr->time);
                     midi::MidiEvent me{};
                     bool emitted = false;
-                    switch (ev->expression_id) {
+                    switch (ev.expression_id) {
                         case CLAP_NOTE_EXPRESSION_PRESSURE: {
                             // 0..1 → channel aftertouch (7-bit).
-                            const double v = std::clamp(ev->value, 0.0, 1.0);
+                            const double v = std::clamp(ev.value, 0.0, 1.0);
                             const uint8_t v7 = static_cast<uint8_t>(v * 127.0 + 0.5);
                             me = {choc::midi::ShortMessage(
                                 static_cast<uint8_t>(0xD0 | (channel & 0x0F)),
@@ -274,7 +289,7 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
                             // member-bend default so the MpeVoiceTracker
                             // expands it back correctly.
                             const double norm = std::clamp(
-                                ev->value / static_cast<double>(
+                                ev.value / static_cast<double>(
                                     midi::MpeVoiceTracker::kDefaultMemberBendSemitones),
                                 -1.0, 1.0);
                             const int bend14 = static_cast<int>(
@@ -288,7 +303,7 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
                         }
                         case CLAP_NOTE_EXPRESSION_BRIGHTNESS: {
                             // Brightness / timbre → CC 74.
-                            const double v = std::clamp(ev->value, 0.0, 1.0);
+                            const double v = std::clamp(ev.value, 0.0, 1.0);
                             const auto v7 = static_cast<uint8_t>(v * 127.0 + 0.5);
                             me = midi::MidiEvent::cc(channel, 74, v7);
                             me.sample_offset = t;
@@ -297,7 +312,7 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
                         }
                         case CLAP_NOTE_EXPRESSION_VOLUME: {
                             // Volume (log domain in CLAP spec) → CC 7.
-                            const double v = std::clamp(ev->value, 0.0, 4.0);
+                            const double v = std::clamp(ev.value, 0.0, 4.0);
                             const auto v7 = static_cast<uint8_t>(
                                 (v / 4.0) * 127.0 + 0.5);
                             me = midi::MidiEvent::cc(channel, 7, v7);
@@ -307,7 +322,7 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
                         }
                         case CLAP_NOTE_EXPRESSION_PAN: {
                             // 0..1 → CC 10.
-                            const double v = std::clamp(ev->value, 0.0, 1.0);
+                            const double v = std::clamp(ev.value, 0.0, 1.0);
                             const auto v7 = static_cast<uint8_t>(v * 127.0 + 0.5);
                             me = midi::MidiEvent::cc(channel, 10, v7);
                             me.sample_offset = t;
@@ -332,19 +347,19 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
                 // CC, pitch bend, channel aftertouch, poly aftertouch,
                 // and program change. `port_index` is informational for
                 // multi-port plugins; single-port plugins accept all.
-                auto* ev = reinterpret_cast<const clap_event_midi_t*>(hdr);
+                const auto ev = load_event<clap_event_midi_t>(hdr);
                 midi::MidiEvent me{
-                    choc::midi::ShortMessage(ev->data[0], ev->data[1], ev->data[2]),
+                    choc::midi::ShortMessage(ev.data[0], ev.data[1], ev.data[2]),
                     static_cast<int32_t>(hdr->time),
                     0.0};
                 midi_in.add(me);
             } else if (hdr->type == CLAP_EVENT_MIDI_SYSEX) {
                 // Workstream 01 — route CLAP sysex into MidiBuffer's
                 // variable-length sidecar (issue #239).
-                auto* ev = reinterpret_cast<const clap_event_midi_sysex_t*>(hdr);
-                if (ev->buffer && ev->size > 0) {
+                const auto ev = load_event<clap_event_midi_sysex_t>(hdr);
+                if (ev.buffer && ev.size > 0) {
                     midi_in.add_sysex(
-                        std::vector<uint8_t>(ev->buffer, ev->buffer + ev->size),
+                        std::vector<uint8_t>(ev.buffer, ev.buffer + ev.size),
                         static_cast<int32_t>(hdr->time),
                         0.0);
                 }
@@ -358,12 +373,12 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
                 // #define), so we gate on CLAP_VERSION_GE(1,1,0), which
                 // is the release that introduced it.
                 if (self->ump_enabled) {
-                    auto* ev = reinterpret_cast<const clap_event_midi2_t*>(hdr);
+                    const auto ev = load_event<clap_event_midi2_t>(hdr);
                     midi::UmpPacket p{};
-                    p.words[0] = ev->data[0];
-                    p.words[1] = ev->data[1];
-                    p.words[2] = ev->data[2];
-                    p.words[3] = ev->data[3];
+                    p.words[0] = ev.data[0];
+                    p.words[1] = ev.data[1];
+                    p.words[2] = ev.data[2];
+                    p.words[3] = ev.data[3];
                     p.word_count = midi::UmpPacket::size_for_type(p.message_type());
                     self->ump_buffer.add(p, static_cast<int32_t>(hdr->time));
                     host_delivered_ump = true;
