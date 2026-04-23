@@ -424,14 +424,21 @@ FetchResult GitHubReleasesFetcher::fetch_latest_release(const std::string& owner
     // stays constant across releases (helps their abuse-detection
     // heuristics treat us as one client, not N).
     std::string url = "https://api.github.com/repos/" + owner_repo + "/releases/latest";
+    // Timeouts matter: without them, a slow or black-holed network stalls
+    // the background refresh thread indefinitely. `cmd_upgrade` also calls
+    // this synchronously and would block the user's shell. 5s to connect +
+    // 15s wall ceiling is plenty for a single GitHub API GET and matches
+    // other CLI install scripts in the repo (#682).
 #ifdef _WIN32
     // PowerShell path — curl is present on Win10+, but Invoke-WebRequest
     // is the native fallback. Keep the stderr redirect so background
     // output stays quiet.
-    std::string cmd = "curl -fsSL -A \"pulp-cli\" -H \"Accept: application/vnd.github+json\" \"" +
+    std::string cmd = "curl -fsSL --connect-timeout 5 --max-time 15 "
+                      "-A \"pulp-cli\" -H \"Accept: application/vnd.github+json\" \"" +
                       url + "\" 2>NUL";
 #else
-    std::string cmd = "curl -fsSL -A 'pulp-cli' -H 'Accept: application/vnd.github+json' '" +
+    std::string cmd = "curl -fsSL --connect-timeout 5 --max-time 15 "
+                      "-A 'pulp-cli' -H 'Accept: application/vnd.github+json' '" +
                       url + "' 2>/dev/null";
 #endif
     auto body = run_capture(cmd);

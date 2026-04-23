@@ -89,6 +89,25 @@ void print_warn(const std::string& msg) {
     std::cout << "  " << color::yellow() << "\xe2\x9a\xa0" << color::reset() << " " << msg << "\n";
 }
 
+// Timestamped phase marker for the `PULP_DEBUG=1` env. Silent by default.
+// Use at the top of any user-entrypoint phase that could plausibly hang,
+// so the next "`pulp` at 0% CPU with no output" report (#682) pins itself:
+// the user re-runs with PULP_DEBUG=1, and the last line printed before the
+// hang is the phase we blocked in.
+void pulp_debug(const char* phase) {
+    static const bool enabled = []() {
+        auto v = pulp::runtime::get_env("PULP_DEBUG");
+        return v && !v->empty() && *v != "0" && *v != "false";
+    }();
+    if (!enabled) return;
+    using clock = std::chrono::steady_clock;
+    static const auto start = clock::now();
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        clock::now() - start).count();
+    std::cerr << "[pulp-debug " << std::setw(7) << ms << "ms] " << phase << "\n"
+              << std::flush;
+}
+
 // ── Shell Execution ───��─────────────────────────────────────────────────────
 
 int run(const std::string& cmd) {
