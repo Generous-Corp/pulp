@@ -744,8 +744,41 @@ TEST_CASE("SignalGraph hot-reload swaps a plugin slot without stale pointers",
 // ── Concurrent hot-reload: audio thread + UI thread race with explicit
 //    handshake (no wall-clock sleeps in expectations).
 
+// Race-condition regression — see pulp#669 for the open investigation.
+//
+// Status (2026-04-22): the test is FLAKY on Namespace runners (Linux + Windows)
+// and CANNOT be reproduced locally on macOS even with all-core CPU saturation.
+// The snapshot-publish path in `SignalGraph::prepare` uses acquire/release
+// atomics on `live_`, and `compile_()` builds a fresh CompiledGraph with its
+// own per-node runtime buffers and shared_ptr<PluginSlot> entries, so the
+// classical "audio thread sees half-built cg" footgun should not apply.
+//
+// Working theories (to verify with the CTest stress target gated by
+// PULP_STRESS_FLAKY_TESTS=1 added in test/CMakeLists.txt — repeats this case
+// 100x per ctest run):
+//
+//   1. Namespace's shared-tenant ARM hardware exposes a memory-ordering
+//      window the test's invariant `out ∈ {0, 1.0}` is sensitive to but
+//      Apple Silicon doesn't observably hit. ARMv8 is weaker than x86 on
+//      acquire/release semantics across cores; a missed release store on
+//      a transitive plugin field could leak through.
+//   2. `MockStatefulPlugin::process` reads `gain_` with `memory_order_relaxed`.
+//      Combined with the slot's destructor running on the main thread while
+//      the audio thread holds an OLD cg's shared_ptr<PluginSlot>, a torn
+//      relaxed read after destructor begins would produce indeterminate
+//      gain. shared_ptr's atomic refcount blocks destruction during the
+//      audio thread's call, so this should be impossible — but the test
+//      stresses it hard enough that any subtle violation surfaces.
+//   3. Latent compiler / TSan reordering of the `nodes_` mutation vs the
+//      `invalidate_live_()` release barrier on the main thread. We invalidate
+//      AFTER each mutator finishes touching nodes_/connections_, but the
+//      reordering window between the two is wider than it needs to be.
+//
+// First diagnostic step before fix: run `PULP_STRESS_FLAKY_TESTS=1 ctest -R
+// pulp-test-signal-graph-hot-reload-stress` on a Namespace runner with TSan
+// enabled and inspect whatever first race-report fires.
 TEST_CASE("SignalGraph hot-reload mid-audio is race-free via snapshot publish",
-          "[host][graph][hot-reload][race][regression][issue-52]") {
+          "[host][graph][hot-reload][race][regression][issue-669]") {
     SignalGraph graph;
     auto in  = graph.add_input_node(1, "in");
     auto slot = std::make_unique<MockStatefulPlugin>();
