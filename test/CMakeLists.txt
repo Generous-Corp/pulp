@@ -357,6 +357,14 @@ endif()
 add_executable(pulp-test-ios-audio-session test_ios_audio_session.cpp)
 target_link_libraries(pulp-test-ios-audio-session PRIVATE pulp::format Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-ios-audio-session)
+if(NOT PULP_IOS)
+    add_executable(pulp-test-pulp-bridge test_pulp_bridge.cpp)
+    target_link_libraries(pulp-test-pulp-bridge PRIVATE
+        pulp::format
+        Catch2::Catch2WithMain
+    )
+    catch_discover_tests(pulp-test-pulp-bridge)
+endif()
 # ARA scaffolding (workstream 06 slice 6.1)
 add_executable(pulp-test-ara test_ara.cpp)
 target_link_libraries(pulp-test-ara PRIVATE pulp::format Catch2::Catch2WithMain)
