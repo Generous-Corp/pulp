@@ -59,14 +59,14 @@ std::vector<mig::MigrationEntry> make_fixture() {
 
 // ── applies_if evaluator ────────────────────────────────────────────────────
 
-TEST_CASE("applies_if — empty expression always matches",
+TEST_CASE("applies_if - empty expression always matches",
           "[cli][migration][issue-548]") {
     mig::EvalContext ctx{"0.25.0", "0.26.0"};
     REQUIRE(mig::evaluate_applies_if("", ctx));
     REQUIRE(mig::evaluate_applies_if("   ", ctx));
 }
 
-TEST_CASE("applies_if — all six comparison ops work on both vars",
+TEST_CASE("applies_if - all six comparison ops work on both vars",
           "[cli][migration][issue-548]") {
     mig::EvalContext ctx{"0.26.0", "0.28.0"};
 
@@ -82,7 +82,7 @@ TEST_CASE("applies_if — all six comparison ops work on both vars",
     REQUIRE_FALSE(mig::evaluate_applies_if("cli_version_to   == 0.99.0", ctx));
 }
 
-TEST_CASE("applies_if — && / || / parens compose correctly",
+TEST_CASE("applies_if - && / || / parens compose correctly",
           "[cli][migration][issue-548]") {
     mig::EvalContext ctx{"0.26.0", "0.28.0"};
 
@@ -101,13 +101,13 @@ TEST_CASE("applies_if — && / || / parens compose correctly",
         "|| cli_version_to == 0.28.0", ctx));
 }
 
-TEST_CASE("applies_if — accepts 'v' prefix on version literals",
+TEST_CASE("applies_if - accepts 'v' prefix on version literals",
           "[cli][migration][issue-548]") {
     mig::EvalContext ctx{"v0.26.0", "v0.28.0"};
     REQUIRE(mig::evaluate_applies_if("cli_version_from < v0.27.0", ctx));
 }
 
-TEST_CASE("applies_if — malformed expressions fail closed",
+TEST_CASE("applies_if - malformed expressions fail closed",
           "[cli][migration][issue-548]") {
     mig::EvalContext ctx{"0.26.0", "0.28.0"};
 
@@ -119,7 +119,7 @@ TEST_CASE("applies_if — malformed expressions fail closed",
     REQUIRE_FALSE(mig::evaluate_applies_if("cli_version_from < 0.1.0 &&", ctx));
 }
 
-TEST_CASE("applies_if — non-parseable context fails closed",
+TEST_CASE("applies_if - non-parseable context fails closed",
           "[cli][migration][issue-548]") {
     mig::EvalContext ctx{"garbage", "0.28.0"};
     // cli_version_from cannot be parsed — the comparison returns false.
@@ -133,7 +133,7 @@ TEST_CASE("applies_if — non-parseable context fails closed",
 // the global (the renderers take an explicit vector), so we build one
 // from our fixture table directly.
 
-TEST_CASE("render_notes_text — empty result prints the 'no notes' line",
+TEST_CASE("render_notes_text - empty result prints the 'no notes' line",
           "[cli][migration][issue-548]") {
     std::vector<const mig::MigrationEntry*> empty;
     auto out = mig::render_notes_text(empty, "0.27.0", "0.29.0");
@@ -141,7 +141,7 @@ TEST_CASE("render_notes_text — empty result prints the 'no notes' line",
     REQUIRE(out.find("No migration notes apply") != std::string::npos);
 }
 
-TEST_CASE("render_notes_text — includes version, summary, body, breaking tag",
+TEST_CASE("render_notes_text - includes version, summary, body, breaking tag",
           "[cli][migration][issue-548]") {
     auto fixture = make_fixture();
     std::vector<const mig::MigrationEntry*> entries = {
@@ -154,7 +154,7 @@ TEST_CASE("render_notes_text — includes version, summary, body, breaking tag",
     REQUIRE(out.find("v27 body") != std::string::npos);
 }
 
-TEST_CASE("render_notes_json — stable-shape keys present for agent consumers",
+TEST_CASE("render_notes_json - stable-shape keys present for agent consumers",
           "[cli][migration][issue-548]") {
     auto fixture = make_fixture();
     std::vector<const mig::MigrationEntry*> entries = {
@@ -179,7 +179,7 @@ TEST_CASE("render_notes_json — stable-shape keys present for agent consumers",
     REQUIRE(out.find("v27 body\\n") != std::string::npos);
 }
 
-TEST_CASE("render_notes_json — empty entries emits valid JSON with empty array",
+TEST_CASE("render_notes_json - empty entries emits valid JSON with empty array",
           "[cli][migration][issue-548]") {
     std::vector<const mig::MigrationEntry*> empty;
     auto out = mig::render_notes_json(empty, "0.29.0", "0.29.0");
@@ -197,7 +197,7 @@ TEST_CASE("render_notes_json — empty entries emits valid JSON with empty array
 // or renaming a frontmatter key. We deliberately don't try to compile
 // the output in-process; that's covered by the CMake build.
 
-TEST_CASE("build_migration_index.py — frontmatter -> embedded C++ round-trip",
+TEST_CASE("build_migration_index.py - frontmatter -> embedded C++ round-trip",
           "[cli][migration][issue-548][shellout]") {
     const char* src_root = std::getenv("PULP_SOURCE_DIR");
     REQUIRE(src_root != nullptr);  // Set by CMake.

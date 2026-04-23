@@ -211,7 +211,7 @@ TEST_CASE("FaustProcessor ctor extracts metadata, bus layout, and dsl_params",
 
 // ── FaustProcessor::descriptor() ────────────────────────────────────────
 
-TEST_CASE("FaustProcessor descriptor: 0 inputs → Instrument category",
+TEST_CASE("FaustProcessor descriptor: 0 inputs -> Instrument category",
           "[dsl][faust-processor][descriptor]") {
     pulp::dsl::FaustProcessor<MockSynthDsp> proc;
     auto desc = proc.descriptor();
@@ -221,7 +221,7 @@ TEST_CASE("FaustProcessor descriptor: 0 inputs → Instrument category",
     REQUIRE(desc.output_buses[0].default_channels == 2);
 }
 
-TEST_CASE("FaustProcessor descriptor: >0 inputs → Effect category",
+TEST_CASE("FaustProcessor descriptor: >0 inputs -> Effect category",
           "[dsl][faust-processor][descriptor]") {
     pulp::dsl::FaustProcessor<MockFxDsp> proc;
     auto desc = proc.descriptor();

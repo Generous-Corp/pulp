@@ -249,11 +249,12 @@ TEST_CASE("pulp doctor android|ios are recognized subcommands",
 
     // Doctor walks xcode-select / xcrun / simctl on macOS and the Android
     // SDK probe on non-macOS; under CI load (github-hosted ARM64 runners
-    // especially) these routinely run 30-45s. 90s is a real-regression
-    // signal, not routine variance. Previous 30s ceiling tripped on
-    // healthy runs in #466 and #458.
-    auto android = exec(bin.string(), {"doctor", "android"}, 90000);
-    auto ios     = exec(bin.string(), {"doctor", "ios"},     90000);
+    // especially) these can stretch well past a minute. This test only
+    // validates subcommand recognition, so allow extra headroom and let
+    // exit-code assertions catch real parser regressions.
+    constexpr int doctor_timeout_ms = 180000;
+    auto android = exec(bin.string(), {"doctor", "android"}, doctor_timeout_ms);
+    auto ios     = exec(bin.string(), {"doctor", "ios"},     doctor_timeout_ms);
     auto bogus   = exec(bin.string(), {"doctor", "potato"},  10000);
 
     REQUIRE_FALSE(android.timed_out);

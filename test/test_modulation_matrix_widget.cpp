@@ -38,7 +38,7 @@ TEST_CASE("Clicking a source sets the pending index", "[widget][modmatrix]") {
     REQUIRE(w.pending_source() == 0);
 }
 
-TEST_CASE("Source → destination click pair adds a route", "[widget][modmatrix]") {
+TEST_CASE("Source -> destination click pair adds a route", "[widget][modmatrix]") {
     ModulationMatrix m;
     ModulationMatrixWidget w;
     configure_widget(w, m);

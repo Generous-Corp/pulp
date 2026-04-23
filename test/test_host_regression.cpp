@@ -551,7 +551,7 @@ TEST_CASE("PluginSlot lifecycle: prepare toggles prepared, release flips it back
 
 // ── State round-trip: save → restore → bit-identical output ───────────────
 
-TEST_CASE("MockStatefulPlugin save_state → restore_state yields bit-identical output",
+TEST_CASE("MockStatefulPlugin save_state -> restore_state yields bit-identical output",
           "[host][slot][state][regression][issue-52]") {
     // Plugin A: set gain to 0.375, run one block, capture output.
     auto a = std::make_unique<MockStatefulPlugin>();
@@ -601,7 +601,7 @@ TEST_CASE("MockStatefulPlugin save_state → restore_state yields bit-identical 
 
 // ── Graph lifecycle: scan-style identity round-trip into a live graph ─────
 
-TEST_CASE("SignalGraph end-to-end: prepare → process → release with mock slot",
+TEST_CASE("SignalGraph end-to-end: prepare -> process -> release with mock slot",
           "[host][graph][lifecycle][regression][issue-52]") {
     SignalGraph graph;
     auto in  = graph.add_input_node(1, "in");
@@ -845,7 +845,7 @@ TEST_CASE("SignalGraph hot-reload mid-audio is race-free via snapshot publish",
 // ── Scanner → loader integration on a real CLAP plugin, when built ────────
 
 #ifdef PULP_TEST_CLAP_PATH
-TEST_CASE("Scanner → load → process → unload round-trip on real CLAP plugin",
+TEST_CASE("Scanner -> load -> process -> unload round-trip on real CLAP plugin",
           "[host][scanner][clap][integration][regression][issue-52]") {
     const fs::path clap_path = PULP_TEST_CLAP_PATH;
     if (!fs::exists(clap_path)) {
@@ -948,4 +948,3 @@ TEST_CASE("PluginScanner::scan honors only_extra_paths",
     // installed plugins would be picked up.
     REQUIRE(plugins.empty());
 }
-

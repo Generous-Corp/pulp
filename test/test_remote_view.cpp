@@ -45,7 +45,7 @@ bool wait_for(Pred pred, int ms = 500) {
 
 } // namespace
 
-TEST_CASE("RemoteViewSession — handshake sends view.hello + view.metadata", "[remote_view]") {
+TEST_CASE("RemoteViewSession - handshake sends view.hello + view.metadata", "[remote_view]") {
     StubProcessor p;
     state::StateStore store;
     p.set_state_store(&store);
@@ -81,7 +81,7 @@ TEST_CASE("RemoteViewSession — handshake sends view.hello + view.metadata", "[
     bridge.detach_remote(session);
 }
 
-TEST_CASE("RemoteViewSession — remote sets param, host StateStore reflects it", "[remote_view]") {
+TEST_CASE("RemoteViewSession - remote sets param, host StateStore reflects it", "[remote_view]") {
     StubProcessor p;
     state::StateStore store;
     p.set_state_store(&store);
@@ -106,7 +106,7 @@ TEST_CASE("RemoteViewSession — remote sets param, host StateStore reflects it"
     bridge.detach_remote(session);
 }
 
-TEST_CASE("RemoteViewSession — host set_parameter notifies remote", "[remote_view]") {
+TEST_CASE("RemoteViewSession - host set_parameter notifies remote", "[remote_view]") {
     StubProcessor p;
     state::StateStore store;
     p.set_state_store(&store);
@@ -138,7 +138,7 @@ TEST_CASE("RemoteViewSession — host set_parameter notifies remote", "[remote_v
     bridge.detach_remote(session);
 }
 
-TEST_CASE("RemoteViewSession — close detaches and closes underlying channel", "[remote_view]") {
+TEST_CASE("RemoteViewSession - close detaches and closes underlying channel", "[remote_view]") {
     StubProcessor p;
     state::StateStore store;
     p.set_state_store(&store);

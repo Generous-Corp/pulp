@@ -295,7 +295,7 @@ TEST_CASE("ClapSlot::set_parameter round-trip via get_parameter",
 // system install folders for any .vst3 plugin and gracefully skips when
 // none exists. The controller-mirror half is observable independently:
 // set → get returns the written value.
-TEST_CASE("VST3 set_parameter → get_parameter controller-mirror round-trip",
+TEST_CASE("VST3 set_parameter -> get_parameter controller-mirror round-trip",
           "[host][slot][vst3][issue-297]") {
     namespace fs = std::filesystem;
     std::vector<fs::path> search_roots = {
@@ -457,7 +457,7 @@ TEST_CASE("SignalGraph MIDI nodes", "[host][graph]") {
     REQUIRE(graph.connect(midi_in, 0, midi_out, 0));
 }
 
-TEST_CASE("SignalGraph routes input → gain → output", "[host][graph][routing]") {
+TEST_CASE("SignalGraph routes input -> gain -> output", "[host][graph][routing]") {
     // Validates the Phase 2 graph execution path: per-node scratch buffers,
     // inbound connection summing, gain application, and output accumulation.
     SignalGraph graph;

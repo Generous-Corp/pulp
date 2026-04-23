@@ -378,7 +378,7 @@ TEST_CASE("ValidationHarness inspector passes with provider",
     REQUIRE_THAT(entry.payload_json, ContainsSubstring("\"children\""));
 }
 
-TEST_CASE("ValidationHarness compare_screenshots identical files → pass",
+TEST_CASE("ValidationHarness compare_screenshots identical files -> pass",
           "[harness][phase2][issue-298]") {
     pulp::format::ValidationHarness harness(create_test_gain);
     harness.configure({});
@@ -395,7 +395,7 @@ TEST_CASE("ValidationHarness compare_screenshots identical files → pass",
     std::filesystem::remove(b);
 }
 
-TEST_CASE("ValidationHarness compare_screenshots differing files → fail",
+TEST_CASE("ValidationHarness compare_screenshots differing files -> fail",
           "[harness][phase2][issue-298]") {
     pulp::format::ValidationHarness harness(create_test_gain);
     harness.configure({});
@@ -416,7 +416,7 @@ TEST_CASE("ValidationHarness compare_screenshots differing files → fail",
 // when a caller passes a directory or other non-regular path. It must
 // return a ValidationStatus::error entry so the harness's report-
 // first behavior is preserved under bad input.
-TEST_CASE("ValidationHarness compare_screenshots directory input → error, not throw",
+TEST_CASE("ValidationHarness compare_screenshots directory input -> error, not throw",
           "[harness][phase2][issue-308]") {
     pulp::format::ValidationHarness harness(create_test_gain);
     harness.configure({});

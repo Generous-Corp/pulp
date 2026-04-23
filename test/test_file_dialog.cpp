@@ -41,7 +41,7 @@ TEST_CASE("FileDialog has_backend reflects native vs host-registered availabilit
 // installed, calls reach the backend and its return value is passed
 // back to the caller.
 
-TEST_CASE("FileDialog non-Apple: no backend → explicit no-selection",
+TEST_CASE("FileDialog non-Apple: no backend -> explicit no-selection",
           "[platform][file-dialog][issue-301]") {
     FileDialog::clear_backend();
 

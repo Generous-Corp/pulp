@@ -39,7 +39,7 @@ TEST_CASE("Clipboard text round-trip or honest unsupported", "[platform][clipboa
     REQUIRE(text.value() == "pulp test clipboard");
 }
 
-TEST_CASE("Clipboard binary data — mac/win supported, others explicit unsupported",
+TEST_CASE("Clipboard binary data - mac/win supported, others explicit unsupported",
           "[platform][clipboard]") {
     std::vector<uint8_t> data = {0x50, 0x55, 0x4C, 0x50}; // "PULP"
     const bool ok = Clipboard::set_data("com.pulp.test", data);
@@ -65,7 +65,7 @@ TEST_CASE("Clipboard missing data returns nullopt", "[platform][clipboard]") {
     REQUIRE_FALSE(result.has_value());
 }
 
-TEST_CASE("Clipboard empty-string text is honest — round-trip or unsupported",
+TEST_CASE("Clipboard empty-string text is honest - round-trip or unsupported",
           "[platform][clipboard][edge]") {
     // An explicit empty string is a legitimate value. The set call
     // must either (a) accept it and round-trip an empty string, or

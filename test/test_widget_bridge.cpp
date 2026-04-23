@@ -694,7 +694,7 @@ TEST_CASE("WidgetBridge text editor escape dispatches JS handler", "[view][bridg
 
 // ── clear() lifecycle + snapshot/restore across hot reload ──────────────
 
-TEST_CASE("WidgetBridge::clear drops widgets — subsequent lookups return nullptr",
+TEST_CASE("WidgetBridge::clear drops widgets - subsequent lookups return nullptr",
           "[view][bridge][lifetime][clear]") {
     // clear() is the hot-reload entry point — it must actually purge
     // registered widgets so a fresh script build can start from an

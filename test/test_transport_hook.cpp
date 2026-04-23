@@ -95,7 +95,7 @@ TEST_CASE("on_host_transport_changed tolerates extreme and exotic positions",
     REQUIRE(p.calls == 3);
 }
 
-TEST_CASE("transport hook doesn't swallow play→stop→play transition",
+TEST_CASE("transport hook doesn't swallow play->stop->play transition",
           "[processor][transport][state]") {
     TransportAwareProcessor p;
     p.on_host_transport_changed(true, 0.0);

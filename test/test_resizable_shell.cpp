@@ -40,7 +40,7 @@ TEST_CASE("aspect lock shrinks the overgrown dimension",
     REQUIRE(got.width == 889);
 }
 
-TEST_CASE("aspect lock with shrunk height — width governs",
+TEST_CASE("aspect lock with shrunk height - width governs",
           "[ui][resizable-shell]") {
     ResizableShell s({.aspect_ratio = 2.0});
     // Tall narrow rectangle — height too large, must shrink.

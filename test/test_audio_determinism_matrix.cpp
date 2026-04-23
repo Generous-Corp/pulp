@@ -99,7 +99,7 @@ std::vector<float> process_blocked(pulp::format::HeadlessHost& host,
 
 // ── PulpGain: unity-gain pass-through is bit-exact at every cell ──────
 
-TEST_CASE("Audio matrix: PulpGain unity gain bit-exact across SR×block",
+TEST_CASE("Audio matrix: PulpGain unity gain bit-exact across SR x block",
           "[audio][matrix][determinism][issue-356]") {
     for (double sr : kSampleRates) {
         for (int block : kBlockSizes) {
@@ -132,7 +132,7 @@ TEST_CASE("Audio matrix: PulpGain unity gain bit-exact across SR×block",
 
 // ── PulpGain: silent input stays silent at every cell ────────────────
 
-TEST_CASE("Audio matrix: PulpGain silent-in → silent-out across SR×block",
+TEST_CASE("Audio matrix: PulpGain silent-in -> silent-out across SR x block",
           "[audio][matrix][silence][issue-356]") {
     for (double sr : kSampleRates) {
         for (int block : kBlockSizes) {
@@ -212,7 +212,7 @@ TEST_CASE("Audio matrix: PulpGain re-prepare at a new SR does not leak state",
 
 // ── PulpTone instrument: no MIDI ⇒ silent at every cell ─────────────
 
-TEST_CASE("Audio matrix: PulpTone silence invariant across SR×block",
+TEST_CASE("Audio matrix: PulpTone silence invariant across SR x block",
           "[audio][matrix][instrument][silence][issue-356]") {
     for (double sr : kSampleRates) {
         for (int block : kBlockSizes) {

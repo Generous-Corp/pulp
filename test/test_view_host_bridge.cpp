@@ -57,7 +57,7 @@ private:
 
 } // namespace
 
-TEST_CASE("Non-Apple screenshot: no provider → empty bytes + false file",
+TEST_CASE("Non-Apple screenshot: no provider -> empty bytes + false file",
           "[view][hosts][issue-299]") {
     clear_screenshot_provider();
     View root;
@@ -85,7 +85,7 @@ TEST_CASE("Non-Apple screenshot: provider routes through and carries data",
     REQUIRE(render_to_png(root, 10, 10).empty());
 }
 
-TEST_CASE("Non-Apple WindowHost::create: no factory → nullptr",
+TEST_CASE("Non-Apple WindowHost::create: no factory -> nullptr",
           "[view][hosts][issue-299]") {
     WindowHost::clear_factory();
     View root;
@@ -94,7 +94,7 @@ TEST_CASE("Non-Apple WindowHost::create: no factory → nullptr",
     REQUIRE(win == nullptr);
 }
 
-TEST_CASE("Non-Apple PluginViewHost::create: no factory → nullptr",
+TEST_CASE("Non-Apple PluginViewHost::create: no factory -> nullptr",
           "[view][hosts][issue-299]") {
     PluginViewHost::clear_factory();
     View root;

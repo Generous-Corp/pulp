@@ -426,7 +426,7 @@ TEST_CASE("CLAP_EVENT_NOTE_CHOKE synthesises a zero-velocity note-off",
 
 // ── Inbound: CLAP_EVENT_NOTE_EXPRESSION ─────────────────────────────────
 
-TEST_CASE("CLAP_EVENT_NOTE_EXPRESSION pressure → channel-AT when MPE opted in",
+TEST_CASE("CLAP_EVENT_NOTE_EXPRESSION pressure -> channel-AT when MPE opted in",
           "[clap][midi][issue-pending]") {
     g_pending_opts_mpe = true;
     g_pending_opts_ump = false;
@@ -509,7 +509,7 @@ const midi::MidiEvent* find_status(const midi::MidiBuffer& captured,
 }
 } // namespace
 
-TEST_CASE("CLAP_EVENT_NOTE_EXPRESSION tuning → pitch bend when MPE opted in",
+TEST_CASE("CLAP_EVENT_NOTE_EXPRESSION tuning -> pitch bend when MPE opted in",
           "[clap][midi][issue-pending]") {
     g_pending_opts_mpe = true;
     g_pending_opts_ump = false;
@@ -557,7 +557,7 @@ TEST_CASE("CLAP_EVENT_NOTE_EXPRESSION tuning clamps huge positive value to +max"
     REQUIRE(pb->data()[2] == 0x7F);
 }
 
-TEST_CASE("CLAP_EVENT_NOTE_EXPRESSION brightness → CC 74 when MPE opted in",
+TEST_CASE("CLAP_EVENT_NOTE_EXPRESSION brightness -> CC 74 when MPE opted in",
           "[clap][midi][issue-pending]") {
     g_pending_opts_mpe = true;
     g_pending_opts_ump = false;
@@ -597,7 +597,7 @@ TEST_CASE("CLAP_EVENT_NOTE_EXPRESSION brightness clamps negative to 0",
     REQUIRE(cc->cc_value() == 0);
 }
 
-TEST_CASE("CLAP_EVENT_NOTE_EXPRESSION volume → CC 7 with 0..4 → 0..127 scaling",
+TEST_CASE("CLAP_EVENT_NOTE_EXPRESSION volume -> CC 7 with 0..4 -> 0..127 scaling",
           "[clap][midi][issue-pending]") {
     g_pending_opts_mpe = true;
     g_pending_opts_ump = false;
@@ -632,7 +632,7 @@ TEST_CASE("CLAP_EVENT_NOTE_EXPRESSION volume → CC 7 with 0..4 → 0..127 scali
     REQUIRE(cc7[2]->cc_value() == 127);  // clamped
 }
 
-TEST_CASE("CLAP_EVENT_NOTE_EXPRESSION pan → CC 10 with 0..1 → 0..127 scaling",
+TEST_CASE("CLAP_EVENT_NOTE_EXPRESSION pan -> CC 10 with 0..1 -> 0..127 scaling",
           "[clap][midi][issue-pending]") {
     g_pending_opts_mpe = true;
     g_pending_opts_ump = false;

@@ -55,7 +55,7 @@ TEST_CASE("sort_by uses numeric key when provided", "[ui][table-model]") {
     REQUIRE(m.cell(3, 2).text == "10");
 }
 
-TEST_CASE("toggle_sort cycles ascending → descending → none",
+TEST_CASE("toggle_sort cycles ascending -> descending -> none",
           "[ui][table-model]") {
     auto m = make_preset_table();
     m.toggle_sort(0);  REQUIRE(m.sort_order() == TableSortOrder::Ascending);

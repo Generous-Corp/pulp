@@ -53,7 +53,7 @@ bool wait_until(Pred pred, std::chrono::milliseconds budget = 3s) {
 
 }  // namespace
 
-TEST_CASE("WebSocket accept_key follows RFC 6455 §4.2.2", "[websocket]") {
+TEST_CASE("WebSocket accept_key follows RFC 6455 section 4.2.2", "[websocket]") {
     // Canonical example from the RFC:
     //   client key = "dGhlIHNhbXBsZSBub25jZQ=="
     //   accept     = "s3pPLMBiTxaQ9kYGzzhZRbK+xOo="

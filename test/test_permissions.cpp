@@ -116,7 +116,7 @@ TEST_CASE("PermissionsOverride unwinds state when guard leaves scope",
     }
 }
 
-TEST_CASE("PermissionsOverride guards nest — outer state restores after inner exits",
+TEST_CASE("PermissionsOverride guards nest - outer state restores after inner exits",
           "[platform][permissions][override]") {
     PermissionsOverride outer;
     outer.set(Permission::Microphone, PermissionState::Denied);
