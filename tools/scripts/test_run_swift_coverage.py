@@ -72,5 +72,40 @@ class SummaryFormattingTests(unittest.TestCase):
             rsc._format_summary([])
 
 
+class LcovRewritingTests(unittest.TestCase):
+    def test_rewrite_lcov_keeps_only_repo_swift_sources(self) -> None:
+        lcov = "\n".join(
+            [
+                f"SF:{rsc.REPO_ROOT / 'apple/Sources/PulpSwift/PulpBridge.swift'}",
+                "DA:1,1",
+                "end_of_record",
+                f"SF:{rsc.REPO_ROOT / 'apple/Tests/PulpSwiftTests/PulpParameterTests.swift'}",
+                "DA:1,1",
+                "end_of_record",
+                f"SF:{rsc.REPO_ROOT / 'apple/.build/debug/runner.swift'}",
+                "DA:1,1",
+                "end_of_record",
+            ]
+        )
+
+        rewritten = rsc._rewrite_lcov(lcov)
+
+        self.assertIn("SF:apple/Sources/PulpSwift/PulpBridge.swift", rewritten)
+        self.assertNotIn("apple/Tests/PulpSwiftTests/PulpParameterTests.swift", rewritten)
+        self.assertNotIn("apple/.build/debug/runner.swift", rewritten)
+
+    def test_rewrite_lcov_rejects_reports_without_swift_sources(self) -> None:
+        lcov = "\n".join(
+            [
+                f"SF:{rsc.REPO_ROOT / 'apple/Tests/PulpSwiftTests/PulpParameterTests.swift'}",
+                "DA:1,1",
+                "end_of_record",
+            ]
+        )
+
+        with self.assertRaises(ValueError):
+            rsc._rewrite_lcov(lcov)
+
+
 if __name__ == "__main__":
     unittest.main()

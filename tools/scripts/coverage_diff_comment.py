@@ -97,6 +97,11 @@ def render(
         parts.append(
             f"Diff coverage threshold: **{threshold}%** (required)."
         )
+    parts.append(
+        "This percentage applies only to the coverage surfaces currently "
+        "represented on Codecov; see `docs/guides/coverage.md` for the "
+        "current perimeter."
+    )
     parts.append("")
 
     if not report_text or not report_text.strip():
@@ -122,7 +127,8 @@ def render(
     parts.append("")
     parts.append(
         "See [coverage.md](https://github.com/danielraffel/pulp/blob/main/docs/guides/coverage.md) "
-        "for how to interpret this number and the full Phase 1 → Phase 3 roadmap."
+        "for the current represented surface, how to interpret this number, "
+        "and the full Phase 1 → Phase 3 roadmap."
     )
     parts.append("")
     return "\n".join(parts).rstrip() + "\n"

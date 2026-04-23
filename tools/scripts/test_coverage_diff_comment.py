@@ -58,6 +58,7 @@ class RenderTests(unittest.TestCase):
         self.assertIn("2026-05-05", body)
         self.assertIn("75%", body)
         self.assertIn("informational", body.lower())
+        self.assertIn("currently represented", body)
 
     def test_required_banner_drops_advisory_language(self) -> None:
         # When Phase 3 flips the gate from advisory to required we want
@@ -71,6 +72,7 @@ class RenderTests(unittest.TestCase):
         )
         self.assertIn("required", body.lower())
         self.assertNotIn("informational", body.lower())
+        self.assertIn("currently represented", body)
 
     def test_strips_duplicate_top_level_heading(self) -> None:
         # diff-cover emits "# Diff Coverage" at the top; the PR comment

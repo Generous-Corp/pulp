@@ -5,10 +5,27 @@ macOS, Linux, and Windows for the native C/C++ lane, with an additional
 Python tooling lane on Linux covering `tools/scripts/**`,
 `tools/deps/**`, and `tools/local-ci/**`, plus a Swift package lane on
 macOS covering the Apple Swift sources that compile in `apple/`, and a
-Kotlin/Android lane driven by the dedicated Android workflow. All
-reports are uploaded to Codecov on every push.
+Kotlin/Android lane for JVM-unit-testable Android sources. Coverage
+percentages are only actionable after the represented local-source
+surface is trustworthy on Codecov; path/classification drift and
+language-lane ingestion bugs come before ordinary test-gap work.
 [#566](https://github.com/danielraffel/pulp/issues/566) tracks the
 broader coverage initiative.
+
+## Representation comes first
+
+For Pulp, a coverage number only means what it looks like after two
+questions are answered in order:
+
+1. Is this first-party source surface represented on Codecov at all?
+2. If it is, how much of that represented surface is covered?
+
+The control plane in `codecov.yml`, `.github/workflows/coverage.yml`,
+`.github/workflows/android.yml`, and the helper scripts under
+`tools/scripts/` defines what currently counts. The target tiers in
+`ci/coverage-targets.yaml` come after that. A low percentage on a
+correctly represented surface is a test-gap problem; a missing or `null`
+surface is a Codecov-truth problem.
 
 ## Where the numbers live
 
@@ -87,12 +104,14 @@ Output:
   by coverage.py for the Python tooling lane.
 - `build-coverage/apple/summary.txt` — text summary for the Apple
   Swift source files under `apple/Sources/`.
-- `build-coverage/apple/coverage.apple.json` — Xcode/SwiftPM Codecov
-  JSON emitted by `swift test --enable-code-coverage`.
+- `build-coverage/apple/coverage.apple.json` — SwiftPM LLVM coverage
+  JSON kept for local summary/debugging.
+- `build-coverage/apple/coverage.apple.lcov` — repo-relative LCOV
+  exported from SwiftPM coverage data for Codecov upload.
 - `android/app/build/reports/jacoco/jacocoDebugUnitTestReport/` —
   HTML + XML output for the Android Kotlin lane.
 - `android/app/build/reports/jacoco/jacocoDebugUnitTestReport/jacocoDebugUnitTestReport.xml`
-  — JaCoCo XML uploaded to Codecov from the Android workflow.
+  — JaCoCo XML uploaded to Codecov from the Coverage workflow.
 
 The native script requires Clang (not gcc) because we use Clang
 source-based coverage, not gcov. See
@@ -111,16 +130,20 @@ the lane.
 
 The Apple Swift lane currently runs on macOS only because it uses
 SwiftPM's native coverage support (`swift test --enable-code-coverage`)
-inside `apple/`. The staged Codecov JSON is source-only by policy:
-`apple/Tests/**` and generated `.build/**` files are ignored in
-`codecov.yml` so the Apple component reflects package sources, not the
-test harness.
+inside `apple/`. The workflow keeps SwiftPM's LLVM JSON for the
+human-readable summary, then exports repo-relative LCOV so Codecov can
+attribute `apple/Sources/**` files against the git tree instead of
+runner-local absolute paths. `apple/Tests/**` and generated `.build/**`
+are still ignored in `codecov.yml` so the Apple component reflects
+package sources, not the test harness.
 
 The Android Kotlin lane runs through Gradle/JaCoCo rather than
-`coverage.yml`. The dedicated Android workflow provisions Java + the
-Android SDK/NDK, runs `:app:testDebugUnitTest` plus
+the native Clang matrix. The always-on Coverage workflow provisions
+Java + the Android SDK/NDK, runs `:app:testDebugUnitTest` plus
 `:app:jacocoDebugUnitTestReport`, and uploads the resulting JaCoCo XML
-to Codecov.
+to Codecov so unrelated `main` commits do not silently drop the Android
+surface back to `null`. The dedicated Android workflow still owns APK
+builds and emulator/device smoke.
 
 Optional flags:
 
@@ -205,7 +228,7 @@ Source → swift test --enable-code-coverage
          ↓
   run_swift_coverage.py
          ↓
-  summary + staged Codecov JSON (Codecov)
+  summary + repo-relative LCOV (Codecov)
 
 Android Kotlin:
 Source → Gradle `testDebugUnitTest`
@@ -258,7 +281,7 @@ preserves the full surface. gcovr is no longer installed in CI.
 
 ### Language coverage
 
-Today the live dashboard includes:
+Today the intended represented surface is:
 
 - **Clang C/C++** coverage from the native build graph on macOS, Linux,
   and Windows.
@@ -269,16 +292,28 @@ Today the live dashboard includes:
   `apple/Sources/PulpSwift/**` on macOS via
   `tools/scripts/run_swift_coverage.py`.
 - **Kotlin/Android** coverage for `android/app/src/main/kotlin/**`
-  via the dedicated Android workflow's JaCoCo upload.
+  via the Coverage workflow's JaCoCo upload.
 
 Still out of scope today:
 
 - iOS-only Apple code that does not compile in the macOS SwiftPM lane
   yet (for example `apple/Sources/PulpSwift/PulpAudioSession.swift`).
 - Python outside the current Linux lane (for example top-level
-  `tools/*.py`, `tools/packages/**`, and any future repo-root Python
-  scripts) — follow-up after the current tooling surfaces stabilize.
-- Android emulator / device instrumentation coverage.
+  `tools/*.py`, `tools/packages/**`, and
+  `core/view/js/embed_js.py`) — follow-up after the current tooling
+  surfaces stabilize.
+- Swift outside the `apple/` package lane (for example
+  `tools/local-ci/macos_window_probe.swift`).
+- Authored JavaScript assets (for example `core/view/js/**`,
+  `android/app/src/main/assets/*.js`,
+  `core/format/src/wasm/wam-plugin.js`, and
+  `tools/browser-host/plugins/*.js`).
+- Android emulator / device instrumentation coverage and any Android
+  runtime behavior not hit by JVM unit tests.
+- Optional bindings under `bindings/python/**` and `bindings/nodejs/**`
+  unless a dedicated opt-in coverage lane enables them.
+- Shell and PowerShell scripts; they are tested indirectly today but do
+  not surface as first-class Codecov lines.
 
 ## Cross-platform matrix
 
@@ -288,18 +323,18 @@ Each OS produces its own `coverage.cobertura.xml` and uploads to
 Codecov with an OS-tag flag. The Linux leg also uploads the Python
 tools XML for `tools/scripts/**`, `tools/deps/**`, and
 `tools/local-ci/**`, and the macOS leg also uploads the staged Apple
-Swift Codecov JSON from `build-coverage/apple/coverage.apple.json`.
+Swift LCOV from `build-coverage/apple/coverage.apple.lcov`.
 We do NOT merge profdata across
 architectures —
 `llvm-profdata merge` is not architecture-portable
 (`planning/coverage-tooling-decision-2026-04-21.md` §7); Codecov does
 the cross-OS union at the flag layer.
 
-Android/Kotlin coverage is separate from that matrix. It runs in
-`.github/workflows/android.yml` on macOS, emits JaCoCo XML from
-Gradle, and uploads that XML directly to Codecov so the `android`
-component sees JVM-only Kotlin coverage even though the native coverage
-matrix is Clang-specific.
+Android/Kotlin coverage runs alongside that matrix in the same Coverage
+workflow. It emits JaCoCo XML from Gradle and uploads that XML directly
+to Codecov so the `android` component sees JVM-only Kotlin coverage
+even though the native coverage matrix is Clang-specific. APK builds
+and emulator smoke stay in `.github/workflows/android.yml`.
 
 Per-OS flags let the dashboard answer "what's covered on a specific
 OS." Per-subsystem components answer "how's a specific piece of the
