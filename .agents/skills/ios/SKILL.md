@@ -223,6 +223,11 @@ xcodebuild test -project ... -scheme AUv3Tests -sdk iphonesimulator
 - **Detach on close** — plugin-editor child views must be explicitly detached
   in `on_view_closed()`/destructors just like standalone window-hosted child
   views; the host clears propagated references when subtrees are removed.
+- **Standalone `WindowHost` now reports live content bounds on iOS** —
+  `window_host_ios.mm` exposes `WindowHost::get_content_size()` and
+  `set_resize_callback(...)` on both the CPU and Metal hosts, driven from
+  `layoutSubviews`. For native child embeds, size from the host's reported
+  content bounds instead of hard-coding `UIScreen.mainScreen.bounds`.
 
 ### Accessibility
 

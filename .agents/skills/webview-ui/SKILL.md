@@ -123,6 +123,12 @@ For palette / inspector style UI:
 - resize with `set_native_child_view_bounds(...)`
 - detach on close
 
+For standalone native-child embeds, do not size from startup constants once
+the host is live. Read `WindowHost::get_content_size()` for the current
+content bounds, attach the child with that size, and keep it in sync via
+`WindowHost::set_resize_callback(...)`. `examples/webview-monaco/main.cpp`
+is the current reference pattern.
+
 For plugin-editor embedding:
 - use `View::plugin_view_host()` instead of creating a separate `WindowHost`
 - attach the `WebViewPanel` native handle through
