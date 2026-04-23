@@ -12,6 +12,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
+#include <future>
 #include <iomanip>
 #include <iostream>
 #include <limits>
@@ -1932,10 +1933,28 @@ std::vector<DoctorCheck> run_doctor_ios_checks() {
     checks.push_back(c);
     return checks;
 #else
+    // Fan out the four independent probes concurrently. xcodebuild -showsdks
+    // and `xcrun simctl list devices available` each take ~20-40s on cold
+    // github-hosted ARM64 runners under CI load; serially that crossed the
+    // test harness's 90s ceiling (#684). They share no data, so running
+    // them in parallel collapses total wall time to max() of the slowest.
+    auto xc_path_fut = std::async(std::launch::async, [] {
+        return first_line(exec_output("xcode-select -p 2>/dev/null"));
+    });
+    auto xcrun_ver_fut = std::async(std::launch::async, [] {
+        return first_line(exec_output("xcrun --version 2>&1"));
+    });
+    auto sdks_fut = std::async(std::launch::async, [] {
+        return exec_output("xcodebuild -showsdks 2>/dev/null");
+    });
+    auto sims_fut = std::async(std::launch::async, [] {
+        return exec_output("xcrun simctl list devices available 2>/dev/null");
+    });
+
     {
         DoctorCheck c{"Xcode", false, {}, {}};
-        auto xc_path = first_line(exec_output("xcode-select -p 2>/dev/null"));
-        auto xcrun_ver = first_line(exec_output("xcrun --version 2>&1"));
+        auto xc_path = xc_path_fut.get();
+        auto xcrun_ver = xcrun_ver_fut.get();
         if (!xc_path.empty()) {
             c.passed = true;
             c.detail = xc_path
@@ -1950,7 +1969,7 @@ std::vector<DoctorCheck> run_doctor_ios_checks() {
 
     {
         DoctorCheck c{"iOS SDK installed", false, {}, {}};
-        auto sdks = exec_output("xcodebuild -showsdks 2>/dev/null");
+        auto sdks = sdks_fut.get();
         if (sdks.find("iphoneos") != std::string::npos
          || sdks.find("iphonesimulator") != std::string::npos) {
             c.passed = true;
@@ -1964,8 +1983,7 @@ std::vector<DoctorCheck> run_doctor_ios_checks() {
     {
         DoctorCheck c{"iOS Simulator runtime + at least one device",
                       false, {}, {}};
-        auto sims = exec_output(
-            "xcrun simctl list devices available 2>/dev/null");
+        auto sims = sims_fut.get();
         if (sims.find("iPhone") != std::string::npos
          || sims.find("iPad") != std::string::npos) {
             c.passed = true;
