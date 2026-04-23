@@ -197,9 +197,11 @@ Pulp's release automation depends on the pinned Shipyard CLI in two places:
   carry a `SHIPYARD_VERSION` env used by the release-side workflows.
 
 If you bump the Shipyard pin, update both workflows in the same PR and keep the
-existing string format in each file (`v0.26.0` vs `0.26.0`). Otherwise local
-shipping and tag-time release jobs quietly diverge onto different Shipyard
-versions, which is how release-only behavior changes get missed.
+existing string format in each file (`v0.29.0` in `tools/shipyard.toml`,
+`0.29.0` in the workflow envs — the `v` prefix is intentional only on the
+toml). Otherwise local shipping and tag-time release jobs quietly diverge
+onto different Shipyard versions, which is how release-only behavior
+changes get missed.
 
 ## Doctor Checks
 

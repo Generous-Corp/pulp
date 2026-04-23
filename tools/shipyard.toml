@@ -125,6 +125,45 @@
 #             advertises the daemon's own `shipyard_version` in
 #             hello/status frames, and teaches `shipyard doctor`
 #             to flag daemon-vs-CLI version drift.
+#   v0.27.0 — daemon tunnel supervisor: a Tailscale Funnel transient
+#             (the funnel process drops momentarily, common on
+#             flaky networks) no longer kills the daemon. The
+#             supervisor restarts the funnel on backoff and keeps
+#             webhook delivery alive. Also adds a periodic
+#             reconcile loop that closes the daemon-vs-GitHub
+#             state-drift gap independently of the per-PR poll.
+#   v0.27.1 — `shipyard ship` preflights the SSH targets BEFORE
+#             `gh pr create` runs. Earlier the PR was opened first
+#             and ship aborted on unreachable SSH backend, leaving
+#             stranded PRs with no validation. Now an unreachable
+#             target fails fast and the PR is never opened.
+#             Directly addresses the pulp-side "PR opened but ship
+#             never finished" pattern that left #627 / #629 / #638
+#             stuck mid-flight on Apr 22.
+#   v0.27.2 — worktree-local `.shipyard.local/` falls back to the
+#             primary checkout's `.shipyard.local/` when the
+#             worktree's copy is missing. Pulp uses worktrees
+#             heavily for parallel agent work; without this every
+#             new worktree had to manually `cp ../primary/.shipyard.local/config.toml`
+#             before `shipyard pr` could see the SSH host config.
+#             v0.27.2 inherits it automatically.
+#   v0.28.0 — `shipyard run` / `shipyard pr` now print the
+#             underlying backend error (bundle upload failure,
+#             remote `cmake` apply failure, SSH transport error,
+#             ssh-keygen mismatch, etc.) below the summary table
+#             instead of the bare `ubuntu     error     ssh    12s`
+#             row. Lands the diagnosis blind spot called out by
+#             pulp #665 (no signal from a 17-second SSH error).
+#             Symbol-level fix: error rows now carry the captured
+#             stderr tail in the rendered output.
+#   v0.29.0 — macOS binary is Developer-ID-signed and Apple-
+#             notarized. macOS 26.3+ XProtect skips deep scan for
+#             notarized binaries — cold-start on `shipyard pr`
+#             drops ~4-5x (from ~5-6s to ~1-1.5s). Also adds a
+#             heartbeat status line during long validation phases
+#             so a 20-minute lane shows progress instead of a dead
+#             terminal, and the bundled Python is bumped to 3.13
+#             with lazy-imported rich for further startup wins.
 #
 # Cumulative additions from earlier releases still in effect:
 #   v0.4–v0.8 — release-bot helpers, `shipyard doctor release-chain`,
@@ -139,7 +178,7 @@
 # in `tools/install-shipyard.sh` (v0.22.1+ `SHIPYARD_VERSION` support).
 # The older `~/.pulp/bin/shipyard` path is cleaned up on install to
 # prevent shadow-on-PATH bugs.
-version = "v0.26.0"
+version = "v0.29.0"
 
 # Public release source. The bootstrap script downloads from
 # https://github.com/{repo}/releases/download/{version}/{asset}
