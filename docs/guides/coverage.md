@@ -9,8 +9,10 @@ Kotlin/Android lane for JVM-unit-testable Android sources. Coverage
 percentages are only actionable after the represented local-source
 surface is trustworthy on Codecov; path/classification drift and
 language-lane ingestion bugs come before ordinary test-gap work.
-[#566](https://github.com/danielraffel/pulp/issues/566) tracks the
-broader coverage initiative.
+[#641](https://github.com/danielraffel/pulp/issues/641) is the
+authoritative tracker for the current three-phase program: first get
+the intended source surface onto Codecov, then rank the real measured
+gaps, then close them tranche by tranche.
 
 ## Representation comes first
 
@@ -26,6 +28,12 @@ The control plane in `codecov.yml`, `.github/workflows/coverage.yml`,
 `ci/coverage-targets.yaml` come after that. A low percentage on a
 correctly represented surface is a test-gap problem; a missing or `null`
 surface is a Codecov-truth problem.
+
+The repo is still in Phase 1 until the remaining perimeter-expansion
+bucket is either represented on Codecov or explicitly accepted as out
+of scope in `#641` and the coverage status tracker. Do not treat the
+ordinary tranche issues as active ranking work until that finish line is
+met.
 
 ## Where the numbers live
 
@@ -297,23 +305,23 @@ Today the intended represented surface is:
 Still out of scope today:
 
 - iOS-only Apple code that does not compile in the macOS SwiftPM lane
-  yet (for example `apple/Sources/PulpSwift/PulpAudioSession.swift`).
+  yet (for example `apple/Sources/PulpSwift/PulpAudioSession.swift`) —
+  `#656`.
 - Python outside the current Linux lane (for example top-level
   `tools/*.py`, `tools/packages/**`, and
-  `core/view/js/embed_js.py`) — follow-up after the current tooling
-  surfaces stabilize.
+  `core/view/js/embed_js.py`) — `#658`.
 - Swift outside the `apple/` package lane (for example
-  `tools/local-ci/macos_window_probe.swift`).
+  `tools/local-ci/macos_window_probe.swift`) — `#656`.
 - Authored JavaScript assets (for example `core/view/js/**`,
   `android/app/src/main/assets/*.js`,
   `core/format/src/wasm/wam-plugin.js`, and
-  `tools/browser-host/plugins/*.js`).
+  `tools/browser-host/plugins/*.js`) — `#659`.
 - Android emulator / device instrumentation coverage and any Android
-  runtime behavior not hit by JVM unit tests.
+  runtime behavior not hit by JVM unit tests — `#77`.
 - Optional bindings under `bindings/python/**` and `bindings/nodejs/**`
-  unless a dedicated opt-in coverage lane enables them.
+  unless a dedicated opt-in coverage lane enables them — `#657`.
 - Shell and PowerShell scripts; they are tested indirectly today but do
-  not surface as first-class Codecov lines.
+  not surface as first-class Codecov lines — `#657`.
 
 ## Cross-platform matrix
 
@@ -378,7 +386,8 @@ without a workflow edit.
 
 ## Related reading
 
-- Issue #566 — umbrella initiative
+- Issue #641 — authoritative coverage-compliance tracker
+- Issue #568 — historical multi-language expansion umbrella
 - Issue #615 — Apple Swift coverage lane
 - Issue #290 — coverage hardening (test surface growth)
 - Issue #633 — Android/Kotlin JaCoCo coverage lane

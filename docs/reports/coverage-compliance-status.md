@@ -1,154 +1,174 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-22
+Last reviewed: 2026-04-23
 
-This is the durable tracker for the repo-wide coverage compliance push.
-It records the live Codecov baseline, the represented local-source
-perimeter, the issue trail, and the control-plane invariants that keep
-the dashboard trustworthy across sessions.
+This is the durable tracker for the repo-wide coverage compliance
+program under `#641`. The repo is still in the "get the intended source
+surface onto Codecov" phase; ordinary test-gap ranking and closure stay
+parked until that represented surface is stable on `main`.
 
 ## Goal
 
-Make Codecov trustworthy for the declared local-source perimeter first,
-then use that corrected baseline to drive the ordinary coverage-lift
-tranches in `ci/coverage-targets.yaml` without weakening the gates:
+Get Codecov as close as practical to the intended first-party local
+source surface, then use that corrected baseline to plan and close the
+real measured test gaps.
+
+Target tiers remain unchanged in `ci/coverage-targets.yaml`:
 
 - `80%`: `audio`, `format`, `host`, `midi`, `signal`, `platform`
 - `70%`: `render`, `view`, `cli`
 - `50%`: `events`, `runtime`, `state`, `canvas`, `osc`, `ship`, `tools`
 
-## Representation baseline
+## Three-phase program
 
-Source of truth: public Codecov API on `main` at commit
-`5291810fb57ec89fae8595d3c0d10b4cc7c2a62a` on 2026-04-22.
+### Phase 1 — Representation / Codecov truth
 
-- Overall tracked coverage on the current head: `56.74%` over `56,822`
-  lines.
-- Current blocking truth gaps on `main`:
-  - `windows` is `null` because `main` still lacks the
-    `core/**/win/**` mapping now queued on this branch.
-  - `dsl` exists under `core/dsl/` but is still absent from the live
-    component taxonomy on `main`.
-  - The Swift lane uploads successfully, but the current LLVM JSON
-    artifact is not materializing `apple/Sources/**` files into Codecov
-    repo totals.
-  - The Android JaCoCo lane works only on commits that trigger
-    `android.yml`; unrelated `main` pushes currently fall back to
-    `android = null` at the branch head.
+Finish line:
 
-## Declared local-source perimeter after this branch
+- `windows` is not `null` on `main`
+- `dsl` is a real component on `main`
+- `apple/Sources/**` materializes on Codecov
+- `android/app/src/main/kotlin/**` materializes on Codecov
+- the clearly known remaining "still not on Codecov" bucket is
+  explicitly listed and tracked
+- this status document is rebaselined from the corrected `main` surface
 
-The intended represented surface after this control-plane tranche lands:
+### Phase 2 — Gap planning
 
-- native Clang coverage from the first-party C/C++ build graph on
-  macOS, Linux, and Windows
-- Python under `tools/scripts/**`, `tools/deps/**`, and
+Finish line:
+
+- counted components are ranked from the corrected `main` baseline
+- major low-coverage files and components are grouped into tranche issues
+- remaining out-of-scope surfaces are either accepted for now or have
+  explicit expansion issues
+- the repo has an actionable issue / PR roadmap for closing measured
+  gaps
+
+### Phase 3 — Gap closure
+
+Finish line:
+
+- planned coverage tranches are implemented and merged
+- target components move materially toward or to their configured
+  thresholds
+- deferred or exceptional surfaces stay documented explicitly instead of
+  silently omitted
+
+## Current state
+
+- `#647` merged to `main` at `773c2be332995483248fe82d497b832080c320df`
+  on 2026-04-23.
+- GitHub Actions for `#647` were green across the required hosted build
+  and coverage checks.
+- Shipyard validation for the same SHA passed on `mac` and `ubuntu`.
+  The `windows` Shipyard target failed before validation started because
+  `C:\\Users\\danielraffel\\shipyard.bundle` was present but locked on the
+  remote host. That is tracked separately in `#671` as CI infra, not as
+  a verdict on `#647`.
+- Public Codecov `main` has now moved to `773c2be3`.
+  Current observed `main` snapshot:
+  - overall tracked coverage: `56.77%` over `57,503` lines
+  - `dsl`: `86.88%`
+  - `windows`: `20.54%`
+  - `android`: `14.17%`
+  - `linux`: `25.58%`
+  - `apple`: `33.41%`
+- `android/app/src/main/kotlin/**` is now visible on Codecov `main`.
+- `windows` is no longer `null` on `main`.
+- `dsl` is now a real component on `main`.
+- `apple/Sources/PulpSwift/**` is still not visible on Codecov `main`
+  even though the merged PR branch did materialize
+  `PulpBridge.swift`, `PulpParameter.swift`, and `PulpViews.swift`.
+  Phase 1 therefore remains open on Apple ingestion fidelity.
+
+## Clearly known still not on Codecov
+
+Raw LOC counts here are approximate and are only used to size the
+remaining Phase 1 work. They are not exact Codecov denominators.
+
+- broader authored JavaScript: about `23.9k` raw lines — `#659`
+- broader Python outside the current tooling lane: about `5.2k` raw
+  lines — `#658`
+- shell and PowerShell scripts: about `2.5k` raw lines — `#657`
+- optional bindings under `bindings/**`: about `0.6k` raw lines — `#657`
+- Swift / Apple-adjacent roots still outside the surfaced package
+  subset:
+  - `apple/Sources/PulpSwift/PulpAudioSession.swift`
+  - `apple/Sources/PulpSwift/PulpBridge.cpp`
+  - `apple/Sources/PulpSwift/PulpBridge.h`
+  - `tools/local-ci/macos_window_probe.swift`
+  tracked by `#656`
+- mobile runtime coverage outside the current source-only lanes:
+  - Android emulator / device instrumentation coverage
+  - iOS simulator / runtime app coverage where we decide it belongs in
+    the represented surface
+  tracked by `#77`
+
+The rough remainder beyond this list is mostly metric mismatch between
+raw local LOC and Codecov executable-line accounting, not a clean
+backlog bucket.
+
+## Active Phase 1 issue map
+
+### Control plane and verification
+
+- `#641` authoritative umbrella and phase tracker
+- `#639` Codecov control plane and dashboard truth follow-up
+- `#647` merged representation tranche
+- `#671` Windows Shipyard bundle-lock infra failure during post-merge
+  validation
+
+### Perimeter-expansion work
+
+- `#656` expand Swift / Apple perimeter beyond the current package lane
+- `#658` expand Python perimeter beyond the current tooling lane
+- `#659` add a JavaScript source lane for authored repo assets
+- `#657` classify optional bindings and shell / PowerShell surfaces in
+  the true-source baseline
+- `#77` decide and, if in-scope, add mobile runtime coverage from
+  Android instrumentation and iOS simulator / runtime app paths
+
+### Supporting infrastructure
+
+- `#655` provision Android SDK / NDK on `ssh ubuntu` and `ssh windows`
+  validation hosts. This is useful supporting infra but not a blocker
+  for hosted Codecov truth on `main`.
+- `#568` historical multi-language expansion umbrella. Active execution
+  now rolls up through `#641`.
+- `#632` first Python widening to `tools/deps/**` and
   `tools/local-ci/**`
-- Swift package sources under `apple/Sources/**`
-- Android JVM-unit-testable Kotlin under
-  `android/app/src/main/kotlin/**`
-- subsystem/platform/surface slicing from `codecov.yml`, including
-  `dsl` and the live `win/` path convention
 
-Still explicitly outside the represented perimeter after this branch:
+## Parked until Phase 1 completes
 
-- iOS-only Swift that does not compile in the macOS SwiftPM lane yet
-  (for example `apple/Sources/PulpSwift/PulpAudioSession.swift`)
-- Python outside the current Linux tooling lane, including top-level
-  `tools/*.py`, `tools/packages/**`, and `core/view/js/embed_js.py`
-- Swift outside the `apple/` package lane, including
-  `tools/local-ci/macos_window_probe.swift`
-- authored JavaScript assets
-- Android emulator/device instrumentation coverage
-- optional bindings under `bindings/python/**` and `bindings/nodejs/**`
-- shell and PowerShell scripts
+Do not start ordinary tranche ranking or closure work from the stale
+pre-`#647` main snapshot.
 
-## Coverage baseline after representation
+### Phase 2 / Phase 3 issues
 
-These numbers stay useful, but only after the representation checklist
-above is green.
-
-## Below-target components on `main`
-
-| Component | Coverage | Target | Tracking |
-| --- | ---: | ---: | --- |
-| `audio` | `39.08%` | `80%` | #640 |
-| `platform` | `56.39%` | `80%` | #640 |
-| `host` | `55.35%` | `80%` | #493 |
-| `format` | `58.03%` | `80%` | #493 |
-| `midi` | `63.24%` | `80%` | #645 |
-| `signal` | `75.53%` | `80%` | #645 |
-| `render` | `59.71%` | `70%` | #646 |
-| `view` | `60.92%` | `70%` | #493 |
-| `cli` | `44.43%` | `70%` | #643 |
-| `tools` | `44.50%` | `50%` | #643 |
-| `events` | `46.65%` | `50%` | #642 |
-| `ship` | `47.74%` | `50%` | #644 |
-
-## Issue map
-
-- `#641` umbrella: repo-wide program and tranche sequencing
-- `#639` control plane: path slicing, language-lane ingestion, status doc
-- `#640` audio/platform tranche
+- `#640` audio / platform tranche
 - `#642` events tranche
-- `#643` CLI/tools tranche
+- `#643` CLI / tools tranche
 - `#644` ship tranche
-- `#645` midi/signal tranche
+- `#645` midi / signal tranche
 - `#646` render tranche
-- `#493` existing high-leverage host/format/view coverage work
+- `#493` host / format / view and related hardening gaps
 
-## Open PR status
+### Parked draft PRs
 
-- `#647` `feature/coverage-compliance`: keep and finish first. This is
-  the control-plane branch and now owns the representation fixes for
-  `dsl`, `windows`, Swift ingestion, and always-on Android Kotlin
-  coverage on the main Coverage workflow.
-- `#648` `feature/events-coverage-642`: keep open as a parked draft.
-  It is a real low-risk `events` tranche, but it should land only after
-  Codecov truth is fixed.
-- `#649` `feature/cli-coverage-643`: keep open as a parked draft. It is
-  a real `CLI/tools` tranche, but it is no longer on the critical path
-  ahead of representation fidelity.
+- `#648` draft events tranche
+- `#649` draft CLI / tools tranche
+- `#666` draft state / ship hardening split from `#647`
 
-## In progress on `feature/coverage-compliance`
+## Rebaseline checklist after `#647`
 
-Representation work:
-
-- add the missing `dsl` subsystem slice to `codecov.yml`
-- fix the `windows` platform slice to match the live `core/**/win/**`
-  path convention
-- tighten `tools/scripts/test_codecov_config.py` so new `core/*`
-  subsystems and platform-path regressions fail locally
-- export Swift coverage as repo-relative LCOV so `apple/Sources/**`
-  materializes on Codecov
-- move the Android Kotlin upload onto the always-on Coverage workflow
-  so `main` does not lose Android files on unrelated commits
-- publish this status document and index it in docs
-
-Coverage-lift work that remains bundled here after representation:
-
-- keep the low-risk coverage tests in the current tranche:
-  - `test/test_state_tree.cpp`
-  - `test/test_appcast.cpp`
-  - `test/test_nsis_installer.cpp`
-  - `test/test_codesign.cpp`
-
-## Next sequence
-
-1. Land the current control-plane tranche and verify that `main` shows:
-   - non-null `windows`
-   - real `dsl` coverage
-   - `apple/Sources/**` files in Codecov totals
-   - non-null Android coverage on the branch head
-2. Rebaseline this status doc from that corrected surface.
-3. Drive the queued area issues in this order unless CI or review changes
-   the risk picture:
-   - `#642` events
-   - `#643` CLI/tools
-   - `#640` audio/platform
-   - `#645` midi/signal
-   - `#646` render
-   - existing `#493` host/format/view
+1. Keep the corrected `main` snapshot above as the current baseline for
+   everything that already landed.
+2. Investigate why `apple/Sources/PulpSwift/**` materialized on the PR
+   branch but not on merged `main`.
+3. Do not start Phase 2 ranking until Apple package sources are either
+   visible on `main` or explicitly accepted as still out of scope.
+4. Once Apple is resolved, refresh the final corrected `main` baseline
+   and only then begin measured gap planning.
 
 ## Control-plane invariants
 
@@ -163,20 +183,21 @@ Coverage-lift work that remains bundled here after representation:
 - Upload-only flags stay `os-linux`, `os-macos`, and `os-windows`.
 - `codecov.yml` `ignore:` must stay aligned with
   `scripts/run_coverage.sh` `COVERAGE_IGNORE_REGEX`.
-- Keep the control-plane validation narrow for this slice:
-  `python3 tools/scripts/test_codecov_config.py`
-  `python3 tools/scripts/test_run_swift_coverage.py`
-  `python3 tools/scripts/test_coverage_diff_comment.py`
-  and `tools/check-docs.sh`.
+- The authoritative program tracker is `#641`, not the older language
+  umbrella `#568`.
+
+## Validation commands for this slice
+
+- `python3 tools/scripts/test_codecov_config.py`
+- `python3 tools/scripts/test_run_swift_coverage.py`
+- `python3 tools/scripts/test_coverage_diff_comment.py`
+- `tools/check-docs.sh`
 
 ## Follow-ups not solved by this doc
 
 - If another top-level `core/*` subsystem is added, update `codecov.yml`
-  in the same change; the structural test should fail immediately if that
+  in the same change; the structural test should fail immediately if the
   mapping is missed.
-- The next perimeter expansions after this branch are broader Python,
-  iOS-only Swift, JS assets, Android instrumentation, optional
-  bindings, and shell/PowerShell coverage.
 - `docs/reference/modules.md` still lacks a `#dsl` section even though
   `docs/status/modules.yaml` points at one. That is real docs drift, but
   it is outside this coverage-compliance slice.
