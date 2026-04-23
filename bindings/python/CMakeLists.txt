@@ -34,3 +34,13 @@ install(TARGETS pulp_python
 set_target_properties(pulp_python PROPERTIES
     OUTPUT_NAME "pulp"
 )
+
+if(PULP_BUILD_TESTS)
+    add_test(NAME python-bindings-smoke
+        COMMAND "${Python3_EXECUTABLE}"
+                "${CMAKE_SOURCE_DIR}/test/test_python_bindings.py"
+                "$<TARGET_FILE:pulp_python>")
+    set_tests_properties(python-bindings-smoke PROPERTIES
+        LABELS "python;bindings"
+        TIMEOUT 30)
+endif()
