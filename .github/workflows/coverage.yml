@@ -246,7 +246,16 @@ jobs:
         # Linux-only, tools/scripts-only, same workflow.
         if: matrix.os == 'linux'
         shell: bash
-        run: python3 -m pip install --user 'coverage>=7.10' PyYAML
+        # `--break-system-packages` is the PEP 668 "yes I know what
+        # I'm doing" escape. The github-hosted ubuntu-latest image
+        # tolerates `--user` without it; Namespace's runner image
+        # is PEP-668-strict and rejects this with
+        # `error: externally-managed-environment`. Pulp routes
+        # Coverage Linux through Namespace via
+        # `PULP_COVERAGE_LINUX_RUNS_ON_JSON`, so the flag is
+        # required to keep this step (and the cascade-skipped
+        # downstream Python coverage steps) green.
+        run: python3 -m pip install --user --break-system-packages 'coverage>=7.10' PyYAML
 
       - name: Run Python tools coverage
         # Mirror scripts/run_coverage.sh semantics: keep going even if a
