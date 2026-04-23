@@ -99,6 +99,40 @@ The CI workflow (`sign-and-release.yml`) automates this on tag pushes.
 
 ## Step 5: Package
 
+### App Icons
+
+Standalone targets and app targets can attach an icon source directly from
+CMake:
+
+```cmake
+pulp_app_icon(MyPlugin_Standalone
+    SOURCE assets/app-icon.png
+)
+```
+
+If you never call `pulp_app_icon(...)`, the target builds with its default icon
+behavior. Removing the call cleanly removes the custom-icon pipeline again.
+
+Current behavior:
+- macOS bundles a generated `AppIcon.icns`
+- Windows links a generated `.ico`
+- Android scaffolds generated launcher PNGs under `android/app/src/main/res-generated/`
+- iOS records the selected source for downstream packaging and warns that
+  asset-catalog emission is not implemented yet
+
+The source image must be a PNG that is at least 1024×1024.
+
+Per-platform overrides and debug/release variants are optional:
+
+```cmake
+pulp_app_icon(MyPlugin_Standalone
+    SOURCE       assets/app-icon.png
+    WINDOWS      assets/app-icon-win.png
+    DEBUG_ICON   assets/app-icon-dev.png
+    RELEASE_ICON assets/app-icon.png
+)
+```
+
 ### PKG Installer
 
 ```bash

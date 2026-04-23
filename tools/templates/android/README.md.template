@@ -16,6 +16,10 @@ cd android
 
 The resulting APK will be at `android/app/build/outputs/apk/debug/app-debug.apk`.
 
+If your root `CMakeLists.txt` calls `pulp_app_icon(...)`, the helper writes
+launcher PNGs under `android/app/src/main/res-generated/`, and this Gradle
+template already includes that directory in the app's resource search path.
+
 ## Status
 
 This Android scaffold is **experimental**. It wires the plugin's native

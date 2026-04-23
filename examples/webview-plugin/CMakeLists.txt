@@ -9,4 +9,10 @@ if(PULP_BUILD_WEBVIEW)
         PLUGIN_CODE         "PWvp"
         MANUFACTURER_CODE   "Pulp"
     )
+
+    if(TARGET PulpWebViewPlugin_Standalone)
+        pulp_app_icon(PulpWebViewPlugin_Standalone
+            SOURCE assets/app-icon.png
+        )
+    endif()
 endif()

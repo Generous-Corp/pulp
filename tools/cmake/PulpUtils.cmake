@@ -3,6 +3,9 @@
 # Provides:
 #   pulp_add_plugin()  — Create a plugin target with format adapters
 #   pulp_add_app()     — Create a standalone application target
+#   pulp_app_icon()    — Attach a generated app icon to a target
+
+include("${CMAKE_CURRENT_LIST_DIR}/PulpAppIcon.cmake")
 
 function(_pulp_pick_target out_var)
     foreach(_candidate IN LISTS ARGN)
@@ -1003,7 +1006,11 @@ function(pulp_add_app target)
         ${ARGN}
     )
 
-    add_executable(${target})
+    if(APPLE)
+        add_executable(${target} MACOSX_BUNDLE)
+    else()
+        add_executable(${target})
+    endif()
 
     if(APP_APP_NAME)
         target_compile_definitions(${target} PRIVATE

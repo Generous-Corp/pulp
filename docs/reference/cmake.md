@@ -114,6 +114,70 @@ pulp_add_app(<target>
 
 Creates a basic executable target with compile definitions for the app name and bundle ID. Minimal functionality compared to `pulp_add_plugin()`.
 
+On Apple platforms the target is created as a bundle-capable executable so it
+can accept `pulp_app_icon(...)`.
+
+## pulp_app_icon
+
+**Status**: usable
+
+Attach an icon source to an application or standalone target.
+
+Targets build normally if you never call `pulp_app_icon(...)`. The helper is an
+optional overlay, so removing the call cleanly removes the custom-icon
+behavior.
+
+```cmake
+pulp_app_icon(<target>
+    SOURCE       assets/app-icon.png
+    MACOS        assets/app-icon-mac.png
+    WINDOWS      assets/app-icon-win.png
+    IOS          assets/app-icon-ios.png
+    ANDROID      assets/app-icon-android.png
+    LINUX        assets/app-icon-linux.png
+    DEBUG_ICON   assets/app-icon-debug.png
+    RELEASE_ICON assets/app-icon-release.png
+)
+```
+
+### Parameters
+
+| Parameter | Required | Default | Description |
+|-----------|----------|---------|-------------|
+| `SOURCE` | Yes, unless a platform override is present | -- | Default PNG used when a platform-specific override is absent; must be at least 1024×1024 |
+| `MACOS` | No | `SOURCE` | macOS override |
+| `WINDOWS` | No | `SOURCE` | Windows override |
+| `IOS` | No | `SOURCE` | iOS override, recorded for downstream packaging |
+| `ANDROID` | No | `SOURCE` | Android override |
+| `LINUX` | No | `SOURCE` | Linux override |
+| `DEBUG_ICON` | No | -- | Debug-build variant, used when the active configure/build type is Debug |
+| `RELEASE_ICON` | No | -- | Release-build variant |
+
+### Current Platform Outputs
+
+- macOS: generates `AppIcon.icns` and bundles it into the app
+- Windows: generates an `.ico` plus `.rc` and links it into the executable
+- Android: writes launcher PNGs under `android/app/src/main/res-generated/`
+- Linux: records the selected PNG as the target's canonical app-icon asset via the `PULP_LINUX_APP_ICON` target property
+- iOS: records the selected PNG as `PULP_IOS_APP_ICON` and warns that asset-catalog emission is not implemented yet
+
+The selected source must be a PNG that is at least 1024×1024. Smaller inputs
+fail at configure time so a release doesn’t silently ship blurry assets.
+
+Example:
+
+```cmake
+pulp_add_plugin(MyPlugin
+    FORMATS Standalone
+    PLUGIN_NAME "MyPlugin"
+    BUNDLE_ID "com.example.myplugin"
+)
+
+pulp_app_icon(MyPlugin_Standalone
+    SOURCE assets/app-icon.png
+)
+```
+
 ## pulp_add_binary_data
 
 **Status**: usable
