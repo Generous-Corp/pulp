@@ -68,12 +68,16 @@ struct. It owns:
   so the host can record automation.
 - `mpe_tracker` + `mpe_buffer` + `mpe_enabled` — MPE sidecar populated
   only if `PluginDescriptor::supports_mpe` is true.
-- `ump_buffer` + `ump_enabled` — UMP sidecar. Filled from the host's
-  native `CLAP_EVENT_MIDI2` packets when they arrive, otherwise
-  synthesised from the MIDI 1.0 stream via `midi1_to_ump`. A
-  `host_delivered_ump` flag tracks whether any native UMP was pushed
-  during the block — the synthesis path is skipped in that case to
-  avoid double-encoding. See Gotchas.
+- `ump_buffer` + `ump_enabled` — UMP sidecar. Cleared at the top of
+  every block, then filled from BOTH sources every block: native
+  `CLAP_EVENT_MIDI2` packets append directly during the event loop,
+  and after decode `midi1_to_ump(midi_in, ump_buffer)` always runs
+  (synthesises UMP from the MIDI 1.0 stream). Both paths run
+  unconditionally because real hosts mix transports — notes via
+  `CLAP_EVENT_NOTE_*` and CCs via `CLAP_EVENT_MIDI2` is common, and
+  skipping the synthesis when MIDI2 is present silently drops the
+  note half from the UMP buffer (Codex P1 review on PR #627). See
+  Gotchas.
 - `ara_controller` — lazily created on the first host query for the
   ARA companion-factory extension.
 - `bridge` + `editor_host` + `editor_visible` — gated on
@@ -259,24 +263,27 @@ controller at extension-query time triggers the
 `create_ara_document_controller()` virtual before the Processor is
 alive.
 
-### UMP sidecar: native when available, synthesised otherwise
+### UMP sidecar: native + synthesised, both always run
 
-As of PR #627 the adapter handles both CLAP 1.1+ hosts that deliver
-native `CLAP_EVENT_MIDI2` packets and older / MIDI-1.0-only hosts:
+The adapter handles every host shape: pure MIDI 1.0 (`CLAP_EVENT_NOTE_*`
++ `CLAP_EVENT_MIDI`), pure MIDI 2.0 (`CLAP_EVENT_MIDI2`), and mixed
+(notes via NOTE_*, CCs via MIDI2 — common in real DAWs).
 
 1. At the top of every `clap_process()` block, `ump_buffer.clear()`
-   runs when `ump_enabled`. This is load-bearing — if you refactor
-   the event loop, keep the clear up-front or the "skip synthesis
-   when host delivered native UMP" invariant breaks.
+   runs when `ump_enabled`. This is load-bearing — keep the clear
+   up-front so the buffer reflects only the current block.
 2. During event decode, `CLAP_EVENT_MIDI2` packets are appended
-   directly to `self->ump_buffer` and set `host_delivered_ump = true`.
+   directly to `self->ump_buffer` (sets `host_delivered_ump = true`
+   as a hint, no longer used for gating).
 3. After the decode loop, `midi1_to_ump(midi_in, self->ump_buffer)`
-   runs **only** when `!host_delivered_ump`. CLAP spec forbids a host
-   from encoding the same note as both `CLAP_EVENT_NOTE_*` and
-   `CLAP_EVENT_MIDI2`, so the two code paths never double-encode.
+   ALWAYS runs when `ump_enabled`. The earlier "skip when host
+   delivered any MIDI2" branch (PR #627 v1) silently dropped the
+   note half of mixed streams from the UMP buffer — Codex P1 review
+   on PR #627 caught this. CLAP guarantees a spec-conformant host
+   won't redundantly encode the same logical event in two
+   transports, so unconditional synthesis doesn't double-deliver.
 
-See `#141` / `#139` for the UMP buffer shape, and PR #627 for the
-native-path wiring.
+See `#141` / `#139` for the UMP buffer shape.
 
 ### CLAP event types are enumerators, not preprocessor macros
 

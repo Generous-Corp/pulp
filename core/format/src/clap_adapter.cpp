@@ -411,25 +411,31 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
         self->processor->set_mpe_input(nullptr);
     }
 
-    // UMP sidecar. Two paths, depending on what the host delivers:
-    //   1. Native: the host sent at least one CLAP_EVENT_MIDI2 this
-    //      block. Those packets were appended to self->ump_buffer during
-    //      the event loop above, so the buffer already holds the
-    //      host's authoritative UMP stream. Do NOT run the MIDI 1.0
-    //      synthesis — CLAP forbids sending the same note event as both
-    //      NOTE_* and MIDI2 (events.h note), so the NOTE_* events we
-    //      kept in midi_in for MPE/MIDI1 consumers are the
-    //      complementary half of the stream, not duplicates of UMP.
-    //   2. Fallback: the host speaks MIDI 1.0 only. Convert the
-    //      inbound CLAP_EVENT_NOTE_* / CLAP_EVENT_MIDI stream to MIDI
-    //      2.0 Channel Voice packets so supports_ump plugins see a
-    //      full-resolution view.
+    // UMP sidecar. The host can deliver three event streams in the same
+    // block:
+    //   * CLAP_EVENT_NOTE_ON / _OFF — collected into midi_in.
+    //   * CLAP_EVENT_MIDI (raw MIDI 1.0 channel-voice + CC/PB/AT) —
+    //     also collected into midi_in.
+    //   * CLAP_EVENT_MIDI2 — appended directly to self->ump_buffer
+    //     during the event loop above (sets host_delivered_ump=true).
+    //
+    // CLAP does not require hosts to consolidate notes-vs-CCs into a
+    // single transport. A real host may emit notes via CLAP_EVENT_NOTE_*
+    // and CCs via CLAP_EVENT_MIDI2, expecting both halves to reach a
+    // supports_ump processor. The earlier "skip midi1_to_ump when any
+    // MIDI2 was delivered" branch silently dropped the note half of
+    // those mixed streams from the UMP buffer (Codex review on PR #627).
+    //
+    // Convert midi_in → UMP unconditionally so a supports_ump processor
+    // sees the union. The CLAP spec guarantees the host won't redundantly
+    // encode the same logical event in two transports, so duplicates
+    // don't arise from a spec-conformant host. host_delivered_ump is
+    // retained as a hint for future MIDI2-aware filtering (e.g. only
+    // synthesize event types not present in the native stream) but no
+    // longer gates the synthesis itself.
     if (self->ump_enabled) {
-        if (!host_delivered_ump) {
-            // Buffer was cleared up-front; populate from the MIDI 1.0
-            // stream only when the host didn't deliver native UMP.
-            midi::midi1_to_ump(midi_in, self->ump_buffer);
-        }
+        midi::midi1_to_ump(midi_in, self->ump_buffer);
+        (void)host_delivered_ump;
         self->processor->set_ump_input(&self->ump_buffer);
     } else {
         self->processor->set_ump_input(nullptr);
@@ -463,17 +469,39 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
         }
 
         // Bridge processor-emitted MIDI (midi_out) back to the host.
-        // Before this loop, plugins that produced CC, pitch bend, channel
+        // Before this code, plugins that produced CC, pitch bend, channel
         // aftertouch, program change, etc. had those events silently
-        // dropped by the CLAP adapter. Sort first so the host sees
-        // sample-ordered events (required by CLAP out-events contract).
+        // dropped by the CLAP adapter.
+        //
+        // CLAP's out_events contract requires events to be pushed in
+        // ascending sample-offset order across ALL event types in the
+        // block. The earlier two-pass shape (all shorts, then all sysex)
+        // sorted shorts internally but emitted the entire sysex tail
+        // afterward, which violated the contract whenever a sysex
+        // scheduled at offset N preceded a short scheduled at offset
+        // N+1 (Codex P2 review on PR #627). Hosts that strictly enforce
+        // the ordering reject out-of-order events; lenient hosts get
+        // wrong timing.
+        //
+        // Merge the two streams in (sample_offset, kind) order and
+        // push as we go. midi_out's short and sysex vectors are each
+        // already sorted (sort() runs below for shorts; sysex entries
+        // are appended in source-sample order by the processor); we
+        // walk them with a two-cursor merge.
         midi_out.sort();
-        for (const auto& me : midi_out) {
+        const auto& shorts = midi_out;
+        const auto& sysexes = midi_out.sysex();
+        std::size_t si = 0;        // short cursor
+        std::size_t xi = 0;        // sysex cursor
+        const std::size_t s_end = shorts.size();
+        const std::size_t x_end = sysexes.size();
+        auto sample_at = [](int32_t off) -> int32_t { return off < 0 ? 0 : off; };
+
+        auto emit_short = [&](const midi::MidiEvent& me) {
             clap_event_midi_t ev{};
             ev.header.size = sizeof(ev);
             ev.header.type = CLAP_EVENT_MIDI;
-            ev.header.time = static_cast<uint32_t>(
-                me.sample_offset < 0 ? 0 : me.sample_offset);
+            ev.header.time = static_cast<uint32_t>(sample_at(me.sample_offset));
             ev.header.space_id = CLAP_CORE_EVENT_SPACE_ID;
             ev.header.flags = 0;
             ev.port_index = 0;
@@ -481,20 +509,34 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
             ev.data[1] = me.size() > 1 ? me.data()[1] : uint8_t{0};
             ev.data[2] = me.size() > 2 ? me.data()[2] : uint8_t{0};
             out_events->try_push(out_events, &ev.header);
-        }
-        for (const auto& se : midi_out.sysex()) {
-            if (se.data.empty()) continue;
+        };
+
+        auto emit_sysex = [&](const auto& se) {
+            if (se.data.empty()) return;
             clap_event_midi_sysex_t ev{};
             ev.header.size = sizeof(ev);
             ev.header.type = CLAP_EVENT_MIDI_SYSEX;
-            ev.header.time = static_cast<uint32_t>(
-                se.sample_offset < 0 ? 0 : se.sample_offset);
+            ev.header.time = static_cast<uint32_t>(sample_at(se.sample_offset));
             ev.header.space_id = CLAP_CORE_EVENT_SPACE_ID;
             ev.header.flags = 0;
             ev.port_index = 0;
             ev.buffer = se.data.data();
             ev.size = static_cast<uint32_t>(se.data.size());
             out_events->try_push(out_events, &ev.header);
+        };
+
+        while (si < s_end || xi < x_end) {
+            const bool take_short =
+                xi >= x_end ||
+                (si < s_end && sample_at(shorts.begin()[si].sample_offset) <=
+                                 sample_at(sysexes[xi].sample_offset));
+            if (take_short) {
+                emit_short(shorts.begin()[si]);
+                ++si;
+            } else {
+                emit_sysex(sysexes[xi]);
+                ++xi;
+            }
         }
     }
 

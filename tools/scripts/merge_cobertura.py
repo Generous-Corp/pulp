@@ -50,9 +50,39 @@ diff-cover, which reads only line-hit data.
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
+
+# Mirrors COVERAGE_IGNORE_REGEX in scripts/run_coverage.sh — paths the
+# Pulp coverage pipeline treats as not-coverage-bearing (third-party
+# vendored code, test code itself, build trees, etc.). Centralised
+# here so the merge step honours the same exclude set as the per-OS
+# cobertura generation. The Windows leg was leaking test/ files into
+# the cobertura because its IGNORE_REGEX matched on `/test/` only and
+# the Windows path separator is `\` — after this script normalises
+# backslashes to forward slashes (above), the same regex applies
+# cleanly. Codex P1 follow-up on PR #660.
+_IGNORE_RE = re.compile(
+    r"(^|/)(_deps|external|test|[Cc]atch2|build|build-coverage|examples|fetchcontent-src)/"
+)
+
+
+def _is_ignored(path: str) -> bool:
+    return bool(_IGNORE_RE.search(path))
+
+
+class CorruptCoberturaError(Exception):
+    """Raised when an input XML exists but cannot be parsed.
+
+    Distinguished from "missing or empty" so the workflow can hard-fail
+    on malformed coverage uploads rather than silently falling through
+    to the diff-cover empty-XML path. Codex review on PR #660 caught
+    that the previous shape (any exit 1 → tolerated) let
+    ``ParseError`` corrupt-artifact failures bypass the required 75%
+    diff-coverage gate.
+    """
 
 
 def parse_xml(path: Path) -> dict[str, dict[int, int]]:
@@ -63,15 +93,44 @@ def parse_xml(path: Path) -> dict[str, dict[int, int]]:
     ``<class>`` entries for the same filename (possible when a single
     source is compiled into multiple TUs) are accumulated via
     ``max()`` so we never regress a hit to 0.
+
+    Raises ``CorruptCoberturaError`` when the file exists but cannot
+    be parsed as XML. The caller is expected to surface this as a
+    distinct exit code so CI can fail the gate rather than treating
+    a parse failure as a benign "missing input".
     """
     if not path.is_file():
         return {}
-    tree = ET.parse(str(path))
+    try:
+        tree = ET.parse(str(path))
+    except ET.ParseError as exc:
+        raise CorruptCoberturaError(f"{path}: {exc}") from exc
     root = tree.getroot()
     out: dict[str, dict[int, int]] = {}
     for cls in root.iter("class"):
         filename = cls.get("filename")
         if not filename:
+            continue
+        # Normalise Windows backslash separators to forward slashes so
+        # the same logical source file from different OSes hashes to a
+        # single key in the merge. Without this, the Windows artifact
+        # produces e.g. "core\format\src\clap_adapter.cpp" and the
+        # Linux/macOS artifacts produce "core/format/src/clap_adapter.cpp"
+        # — diff-cover then matches the backslash variant against the
+        # PR diff, finds it has 0 hits (the test ran on Linux, not
+        # Windows), and silently reports 0% coverage. Real production
+        # code shipped through PR #660 hit this; reverting the merge
+        # to the Linux-only XML masks it but reintroduces issue #635.
+        # See Codex P1 follow-up on PR #660.
+        filename = filename.replace("\\", "/")
+        # Drop paths the coverage pipeline doesn't consider source-code-
+        # under-test (test/, _deps/, external/, etc.). The per-OS
+        # cobertura generation already filters these via
+        # COVERAGE_IGNORE_REGEX in run_coverage.sh, but the Windows
+        # leg historically leaked `test\*` entries because its regex
+        # matched on `/test/` only — backslash paths slipped past. Now
+        # filtered uniformly here after slash normalisation.
+        if _is_ignored(filename):
             continue
         per_line = out.setdefault(filename, {})
         lines_el = cls.find("lines")
@@ -173,6 +232,16 @@ def render(merged: dict[str, dict[int, int]]) -> ET.ElementTree:
     return ET.ElementTree(coverage)
 
 
+#: Exit code returned ONLY when every input XML is missing or empty.
+#: The CI workflow branches on this exact code to render the diff-cover
+#: empty-report fallback. Real failures (parse errors, IO errors,
+#: programming bugs) deliberately use exit code 1 (uncaught exceptions
+#: + the default Python behaviour) so they fail the required gate.
+#: Codex P1 review on PR #660 — see the docstring of the
+#: `CorruptCoberturaError` class.
+EXIT_ALL_INPUTS_MISSING = 2
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0] if __doc__ else "")
     ap.add_argument("--out", required=True, help="Output merged XML path.")
@@ -181,9 +250,17 @@ def main(argv: list[str] | None = None) -> int:
 
     parsed: list[dict[str, dict[int, int]]] = []
     missing: list[str] = []
+    corrupt: list[str] = []
     for p in args.inputs:
         path = Path(p)
-        data = parse_xml(path)
+        try:
+            data = parse_xml(path)
+        except CorruptCoberturaError as exc:
+            # Don't add to `missing` — a corrupt file is NOT the same as
+            # a missing one. We collect them, then exit 1 below so the
+            # CI gate fails loudly. See Codex P1 on PR #660.
+            corrupt.append(str(exc))
+            continue
         if not data:
             missing.append(p)
             continue
@@ -193,9 +270,20 @@ def main(argv: list[str] | None = None) -> int:
         for p in missing:
             print(f"merge_cobertura: skipped (missing or empty): {p}", file=sys.stderr)
 
-    if not parsed:
-        print("merge_cobertura: no valid input XMLs — refusing to write empty merge.", file=sys.stderr)
+    if corrupt:
+        for msg in corrupt:
+            print(f"merge_cobertura: ERROR — corrupt input XML: {msg}", file=sys.stderr)
+        # Exit 1 (the conventional "real error" code) so the workflow's
+        # `if rc -eq EXIT_ALL_INPUTS_MISSING` branch does NOT match and
+        # the gate hard-fails.
         return 1
+
+    if not parsed:
+        print(
+            "merge_cobertura: no valid input XMLs — every input was missing or empty.",
+            file=sys.stderr,
+        )
+        return EXIT_ALL_INPUTS_MISSING
 
     merged = merge(parsed)
     tree = render(merged)

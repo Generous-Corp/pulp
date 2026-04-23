@@ -125,6 +125,17 @@ With `AUMIDIEffectBase`, fall-through calls should go to `AUMIDIEffectBase::GetP
 
 The `std::mutex` guarding `pending_midi_` is contended only on the MIDI-delivery thread (where the host calls `HandleMIDIEvent`) and the audio thread (once per block, to drain). It is NOT the right primitive for per-event audio-thread publication. Do not extend this pattern to any new path that runs multiple times per block — switch to `choc::fifo::SingleReaderSingleWriterFIFO` if you need lock-free MIDI delivery inside a single block.
 
+### `AUMIDIBase` splits the status byte for EVERY message
+
+`AUMIDIBase::MIDIEvent` (AudioUnitSDK 1.4 `AUMIDIBase.h`) unconditionally splits the wire-format status byte before dispatching:
+
+```
+strippedStatus = inStatus & 0xF0   // -> HandleMIDIEvent's inStatus
+channel        = inStatus & 0x0F   // -> HandleMIDIEvent's inChannel
+```
+
+The split happens for system messages (0xF0-0xFF) the same way as for channel-voice (0x80-0xEF). For 0xF8 (timing clock) the SDK calls `HandleMIDIEvent(inStatus=0xF0, inChannel=0x08, ...)`. The decoder MUST reassemble `(inStatus & 0xF0) | (inChannel & 0x0F)` regardless of the top nibble — special-casing system messages and returning `inStatus` unchanged turns every clock / start / stop / song-position into 0xF0 (sysex start). Codex review on PR #638 caught the buggy special case; the unit test in `test/test_au_v2_effect.cpp` now feeds the post-split shape (status=0xF0, channel=0x08) so the regression cannot reappear without flipping a test red.
+
 ### `AUSDK_RTSAFE` position with `override` — Xcode 16.4 incompat
 
 `AUSDK_RTSAFE` expands to `[[clang::nonblocking]]`. AudioUnitSDK's own base-class declarations use `... AUSDK_RTSAFE;` (no `override`), but placing the attribute between a function declarator and the `override` virt-specifier in a derived class compiles under older Xcode and fails on Xcode 16.4 / Clang 17+ with:

@@ -23,16 +23,27 @@ midi::MidiEvent decode_midi_event(uint8_t inStatus,
                                   uint8_t inData1,
                                   uint8_t inData2) noexcept
 {
-    // AUMIDIBase::MIDIEvent splits the channel out of the status byte and
-    // passes the top nibble in ``inStatus``. Re-combine for channel-voice
-    // messages so the ``choc::midi::ShortMessage`` below matches the
-    // on-the-wire status byte. System messages (0xF0-0xFF) ignore the
-    // channel nibble.
-    const uint8_t top = static_cast<uint8_t>(inStatus & 0xF0);
-    const bool is_system = top == 0xF0;
-    const uint8_t status_byte = is_system
-        ? inStatus
-        : static_cast<uint8_t>(top | (inChannel & 0x0F));
+    // AUMIDIBase::MIDIEvent (AudioUnitSDK 1.4 AUMIDIBase.h) splits the
+    // wire-format status byte unconditionally:
+    //
+    //     strippedStatus = inStatus & 0xF0   // top nibble  -> our inStatus
+    //     channel        = inStatus & 0x0F   // low nibble  -> our inChannel
+    //     HandleMIDIEvent(strippedStatus, channel, ...)
+    //
+    // The split is the SAME for every status byte the host delivers to
+    // this callback — channel-voice (0x80-0xEF) AND system (0xF0-0xFF).
+    // For system common (0xF1-0xF7) and system realtime (0xF8-0xFF), the
+    // low nibble carries the system-message subtype rather than a channel,
+    // but the bit-layout reassembly is identical: status = top | low.
+    //
+    // The previous "is_system → return inStatus unchanged" special case
+    // turned every system message into 0xF0 (sysex start), so MIDI clock
+    // / start / stop / continue / song-position / quarter-frame all
+    // arrived at the Processor with the wrong status byte. Codex review
+    // on PR #638 caught this; the unit test in test_au_v2_effect.cpp now
+    // mirrors the SDK splitting so the regression cannot reappear.
+    const uint8_t status_byte =
+        static_cast<uint8_t>((inStatus & 0xF0) | (inChannel & 0x0F));
     midi::MidiEvent ev{
         choc::midi::ShortMessage(status_byte, inData1, inData2),
         /*sample_offset=*/0,

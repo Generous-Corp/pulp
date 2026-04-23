@@ -171,7 +171,12 @@ class MainCliTests(unittest.TestCase):
             reparsed = mc.parse_xml(out)
             self.assertEqual(reparsed, {"core/foo.cpp": {1: 1}})
 
-    def test_all_missing_inputs_fails(self) -> None:
+    def test_all_missing_inputs_returns_dedicated_sentinel(self) -> None:
+        """Codex P1 review on PR #660: the all-missing case must use a
+        DEDICATED exit code (2), not the catch-all "uncaught exception"
+        code 1, so the CI workflow can distinguish a benign
+        "no artifacts uploaded" from a real failure (parse error,
+        script bug). Pin the contract here."""
         with tempfile.TemporaryDirectory() as td:
             tmp = Path(td)
             out = tmp / "merged.xml"
@@ -183,8 +188,90 @@ class MainCliTests(unittest.TestCase):
                     str(tmp / "b.xml"),
                 ]
             )
-            self.assertEqual(rc, 1)
+            self.assertEqual(rc, mc.EXIT_ALL_INPUTS_MISSING)
+            self.assertEqual(rc, 2, "exit code 2 is the workflow contract; do not change without updating coverage.yml")
             self.assertFalse(out.exists(), "should not write merged XML when every input is missing")
+
+    def test_corrupt_xml_input_exits_with_real_error_code(self) -> None:
+        """Codex P1 review on PR #660: a malformed Cobertura artifact
+        (e.g. truncated upload causing ParseError) must NOT take the
+        all-missing fallback path — that would silently bypass the
+        required diff-coverage gate. Exit code 1 (real-error) ensures
+        the workflow's `rc -eq 2` branch does not match."""
+        with tempfile.TemporaryDirectory() as td:
+            tmp = Path(td)
+            corrupt = tmp / "corrupt.xml"
+            corrupt.write_text("<<<this is not valid XML>>>")
+            out = tmp / "merged.xml"
+            rc = mc.main(["--out", str(out), str(corrupt)])
+            self.assertEqual(rc, 1, "corrupt-input failure must use the real-error exit code, not the all-missing sentinel (2)")
+            self.assertNotEqual(rc, mc.EXIT_ALL_INPUTS_MISSING)
+
+    def test_windows_backslash_paths_normalise_to_forward_slash(self) -> None:
+        """Windows Cobertura artifacts emit filenames with backslash
+        separators (`core\\format\\src\\clap_adapter.cpp`). Linux and
+        macOS use forward slashes. Without normalisation the merge
+        treats them as TWO files; diff-cover then matches the backslash
+        variant against the PR diff (which uses forward slashes from
+        git), finds 0 hits, and silently reports 0% coverage on
+        cross-platform code that was actually exercised on Linux. PR
+        #660 hit this bug.
+
+        Pin the contract: backslash filenames in the input collapse to
+        forward-slash keys in the merged map, with hit counts unioned
+        across both spellings.
+        """
+        with tempfile.TemporaryDirectory() as td:
+            tmp = Path(td)
+            linux = _write_xml(tmp, "linux.xml", {"core/format/src/clap_adapter.cpp": {100: 5}})
+            # Hand-build a Windows XML with backslashes — _write_xml
+            # uses path-string-as-given, so backslashes survive.
+            windows = _write_xml(tmp, "win.xml", {"core\\format\\src\\clap_adapter.cpp": {100: 0, 101: 3}})
+            merged = mc.merge([mc.parse_xml(linux), mc.parse_xml(windows)])
+            self.assertIn("core/format/src/clap_adapter.cpp", merged)
+            self.assertNotIn("core\\format\\src\\clap_adapter.cpp", merged)
+            # Linux's hit on line 100 must survive (max(5, 0) = 5);
+            # Windows's hit on line 101 must also survive (max(_, 3) = 3).
+            self.assertEqual(merged["core/format/src/clap_adapter.cpp"], {100: 5, 101: 3})
+
+    def test_excludes_test_and_external_paths(self) -> None:
+        """Mirror of `COVERAGE_IGNORE_REGEX` in scripts/run_coverage.sh:
+        test/, _deps/, external/, build/, examples/, Catch2/,
+        fetchcontent-src/ are not coverage-bearing. The Windows
+        cobertura leg historically leaked `test\\*` because its
+        backslash paths slipped past the OS-side regex; this script's
+        normalisation + filter catches them uniformly. Pin both ends
+        of the contract."""
+        with tempfile.TemporaryDirectory() as td:
+            tmp = Path(td)
+            xml = _write_xml(
+                tmp,
+                "mixed.xml",
+                {
+                    "core/format/src/clap_adapter.cpp": {1: 5},
+                    "test/test_clap.cpp": {10: 2},
+                    "test\\test_winonly.cpp": {1: 1},  # backslash variant
+                    "external/AAX-SDK/Foo.cpp": {1: 1},
+                    "_deps/catch2-src/catch.cpp": {1: 1},
+                    "examples/foo/bar.cpp": {1: 1},
+                },
+            )
+            parsed = mc.parse_xml(xml)
+            self.assertEqual(set(parsed.keys()), {"core/format/src/clap_adapter.cpp"})
+
+    def test_corrupt_xml_with_other_valid_inputs_still_fails(self) -> None:
+        """Even when a usable input is present alongside a corrupt one,
+        the corrupt input fails the merge — partial coverage from the
+        good legs would otherwise hide the corruption and silently
+        downgrade the gate's strictness."""
+        with tempfile.TemporaryDirectory() as td:
+            tmp = Path(td)
+            good = _write_xml(tmp, "good.xml", {"core/foo.cpp": {1: 5}})
+            corrupt = tmp / "corrupt.xml"
+            corrupt.write_text("<coverage><not-closed>")
+            out = tmp / "merged.xml"
+            rc = mc.main(["--out", str(out), str(good), str(corrupt)])
+            self.assertEqual(rc, 1)
 
 
 if __name__ == "__main__":

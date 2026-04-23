@@ -501,12 +501,24 @@ def surface_trailer_override(
     trailer_key: str,
     surface_name: str,
 ) -> str | None:
-    """Parse `Version-Bump: <surface>=<level> reason="..."` from trailers."""
+    """Parse `Version-Bump: <surface>=<level> reason="..."` from trailers.
+
+    The documented trailer grammar accepts `patch`, `minor`, `major`, and
+    `skip`. The internal `LEVELS` tuple includes the sentinel `"none"`
+    so the heuristic pipeline can compare ranks, but `none` is NOT a
+    valid trailer value — accepting it would let
+    `Version-Bump: <surface>=none` silently downgrade a real `minor` /
+    `major` heuristic to "no bump needed", bypassing the gate. Codex
+    review on PR #629 caught this. Reject `none` here as defense-in-
+    depth; the call site at `assess_surfaces` also filters it out.
+    """
     for v in trailers.get(trailer_key.lower(), []):
         m = re.search(rf"{re.escape(surface_name)}\s*=\s*([A-Za-z]+)", v)
         if not m:
             continue
         level = m.group(1).lower()
+        if level == "none":
+            continue
         if level in LEVELS or level == "skip":
             return level
     return None
@@ -598,7 +610,14 @@ def assess_surfaces(
         override = surface_trailer_override(trailers, cfg.trailer_version_bump, s.name)
         final = heur
         skip_requested = (override == "skip")
-        explicit_level = override in LEVELS
+        # `LEVELS` includes the sentinel "none" so the heuristic
+        # pipeline can compare ranks; the trailer grammar does NOT
+        # accept "none" as an explicit override (only `patch`,
+        # `minor`, `major`, `skip`). Including "none" here would let
+        # `Version-Bump: <surface>=none` silently downgrade a real
+        # `minor` / `major` heuristic verdict to "no bump needed",
+        # bypassing the gate. See Codex review on PR #629.
+        explicit_level = override in LEVELS and override != "none"
 
         if skip_requested:
             final = "none"

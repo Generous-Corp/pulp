@@ -108,17 +108,42 @@ TEST_CASE("AU v2 effect: Program Change decode preserves program number",
     REQUIRE(ev.data()[1] == 42);
 }
 
-TEST_CASE("AU v2 effect: System message status byte is not rewritten",
+TEST_CASE("AU v2 effect: System message status byte reassembles SDK split",
           "[au][midi][au-v2][issue-pending]")
 {
-    // System common / real-time messages (0xF1-0xFF) ignore the channel
-    // nibble. The decoder must preserve the full status byte verbatim
-    // rather than OR-ing in `inChannel`.
-    const auto ev = decode_midi_event(/*inStatus=*/0xF8, // timing clock
-                                      /*inChannel=*/0x0A,
-                                      /*inData1=*/0,
-                                      /*inData2=*/0);
-    REQUIRE(ev.data()[0] == 0xF8);
+    // AUMIDIBase::MIDIEvent splits the wire-format status byte into a
+    // top-nibble `inStatus` and a low-nibble `inChannel` BEFORE calling
+    // HandleMIDIEvent — for system messages the same way as for
+    // channel-voice. So a host-delivered 0xF8 (timing clock) reaches the
+    // decoder as inStatus=0xF0, inChannel=0x08; the decoder must
+    // reassemble (top | low) = 0xF8.
+    //
+    // The previous fixture passed `inStatus=0xF8` directly (the wire-
+    // format byte, NOT the post-split top nibble), so the buggy "is_system
+    // → return inStatus unchanged" branch ALSO returned 0xF8 and the
+    // test passed by coincidence. Codex review on PR #638 caught that the
+    // fixture didn't model the SDK contract; this version does.
+    SECTION("0xF8 — timing clock") {
+        const auto ev = decode_midi_event(/*inStatus=*/0xF0,
+                                          /*inChannel=*/0x08,
+                                          /*inData1=*/0,
+                                          /*inData2=*/0);
+        REQUIRE(ev.data()[0] == 0xF8);
+    }
+    SECTION("0xFA — start") {
+        const auto ev = decode_midi_event(0xF0, 0x0A, 0, 0);
+        REQUIRE(ev.data()[0] == 0xFA);
+    }
+    SECTION("0xFC — stop") {
+        const auto ev = decode_midi_event(0xF0, 0x0C, 0, 0);
+        REQUIRE(ev.data()[0] == 0xFC);
+    }
+    SECTION("0xF2 — song position pointer (system common)") {
+        const auto ev = decode_midi_event(0xF0, 0x02, 0x42, 0x10);
+        REQUIRE(ev.data()[0] == 0xF2);
+        REQUIRE(ev.data()[1] == 0x42);
+        REQUIRE(ev.data()[2] == 0x10);
+    }
 }
 
 TEST_CASE("AU v2 effect: sysex routing lands in MidiBuffer's sysex sidecar",

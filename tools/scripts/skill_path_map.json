@@ -26,6 +26,9 @@
         "core/format/src/au_entry.mm",
         "core/format/src/au_audio_unit.h",
         "core/format/src/au_view_controller_ios.mm",
+        "core/format/src/ios_audio_session.cpp",
+        "core/format/include/pulp/format/ios_audio_session.h",
+        "core/format/include/pulp/format/ios_audio_session.hpp",
         "tools/cmake/PulpInfoPlist.au.in"
       ]
     },
@@ -70,7 +73,9 @@
     },
     "clap": {
       "paths": [
-        "core/format/src/clap_adapter.cpp"
+        "core/format/src/clap_adapter.cpp",
+        "core/format/include/pulp/format/clap_adapter.hpp",
+        "core/format/include/pulp/format/clap_entry.hpp"
       ]
     },
     "cli-maintenance": {

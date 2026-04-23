@@ -585,16 +585,38 @@ jobs:
         # they aren't in the report at all. The merge takes max(hits)
         # per (filename, line) across the inputs so a line counted
         # as covered on any OS is treated as covered overall.
-        # Missing inputs are skipped (next step handles "all missing").
+        #
+        # Exit-code policy (Codex P1 reviews on PR #654 + PR #660):
+        # The script uses a DEDICATED exit code (2) for the
+        # intentionally-tolerated "every input XML missing/empty" case;
+        # the diff-cover step then renders the "no XML" fallback.
+        # Exit 1 is the conventional Python "real error" code (uncaught
+        # exception, ParseError on a malformed Cobertura artifact, etc.)
+        # and MUST fail the gate — otherwise a corrupted upload silently
+        # bypasses the required 75% coverage check.
+        # Earlier the workflow tolerated any rc==1 which collapsed both
+        # cases into one bypass surface; PR #660's Codex review caught
+        # that. Don't merge the cases back together; if you change the
+        # script's exit codes, update both ends in lockstep.
         shell: bash
         run: |
-          mkdir -p coverage-artifact
+          set +e
           python3 tools/scripts/merge_cobertura.py \
               --out coverage-artifact/coverage.cobertura.xml \
               coverage-artifact-linux/coverage.cobertura.xml \
               coverage-artifact-macos/coverage.cobertura.xml \
-              coverage-artifact-windows/coverage.cobertura.xml \
-              || echo "merge_cobertura: every input missing — diff-cover step will render fallback."
+              coverage-artifact-windows/coverage.cobertura.xml
+          rc=$?
+          if [ "$rc" -eq 0 ]; then
+            exit 0
+          elif [ "$rc" -eq 2 ]; then
+            echo "::warning::merge_cobertura: every input missing — diff-cover step will render the fallback report."
+            mkdir -p coverage-artifact
+            exit 0
+          else
+            echo "::error::merge_cobertura failed with exit ${rc} (corrupt artifact, parse error, or script bug — NOT the all-missing sentinel which is exit 2). Failing the required diff-coverage gate; investigate the per-OS coverage artifacts."
+            exit "$rc"
+          fi
 
       - name: Run diff-cover (required)
         id: diff_cover

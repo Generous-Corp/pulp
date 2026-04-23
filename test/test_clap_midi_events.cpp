@@ -768,22 +768,32 @@ TEST_CASE("CLAP_EVENT_MIDI2 routed straight to UMP sidecar when opted in",
     REQUIRE(got.packet.velocity_16() == 0xFFFF);
 }
 
-TEST_CASE("CLAP_EVENT_MIDI2 skips MIDI 1.0 → UMP synthesis when host is native",
+TEST_CASE("Mixed CLAP_EVENT_MIDI2 + NOTE_ON: both reach UMP sidecar",
           "[clap][midi][issue-pending]") {
-    // If the host delivers even one CLAP_EVENT_MIDI2, the adapter must
-    // NOT also run midi1_to_ump over the NOTE_ON stream. Otherwise the
-    // plugin would see two UMP packets for a single voice event. The
-    // native MIDI2 packet is the authoritative source, and any NOTE_*
-    // events co-delivered by the host are complementary (for MIDI 1.0
-    // consumers), not duplicates.
+    // Real CLAP hosts mix transports: notes flow through CLAP_EVENT_NOTE_*
+    // while CCs / pitch bend / aftertouch flow through CLAP_EVENT_MIDI2.
+    // A `supports_ump` processor reads `ump_input` as its primary stream
+    // and would lose every note if midi1_to_ump synthesis were skipped
+    // when MIDI2 is present.
+    //
+    // This test models that mixed shape: one native MIDI2 note-on packet
+    // (representing what would in practice be a CC/PB/AT — using a note
+    // here only because the harness already has a UMP note helper) AND
+    // a separate co-delivered CLAP_EVENT_NOTE_ON on a different note.
+    // Both must appear in the UMP sidecar after process() returns. The
+    // earlier shape of this test (PR #627 v1) asserted the synthesis
+    // was skipped, but Codex P1 review on PR #627 showed that
+    // assumption silently dropped real-world note streams. Inverted to
+    // pin the corrected behaviour.
     g_pending_opts_mpe = false;
     g_pending_opts_ump = true;
     Harness h(make_capturing);
 
     InputEventList events;
-    // One native MIDI2 note-on packet.
+    // One native MIDI2 packet (note 60, here standing in for any
+    // non-NOTE_* event the host might deliver natively as MIDI2).
     auto packet = midi::UmpPacket::note_on_2(/*group*/0, /*channel*/0,
-                                              /*note*/72, /*vel16*/0x8000);
+                                              /*note*/60, /*vel16*/0x4000);
     clap_event_midi2_t e2{};
     e2.header = make_header(sizeof(e2), CLAP_EVENT_MIDI2, 1);
     e2.port_index = 0;
@@ -792,9 +802,10 @@ TEST_CASE("CLAP_EVENT_MIDI2 skips MIDI 1.0 → UMP synthesis when host is native
     e2.data[2] = 0;
     e2.data[3] = 0;
     events.push(e2);
-    // Plus a co-delivered CLAP_EVENT_NOTE_ON (MIDI 1.0 path).
+    // A separate CLAP_EVENT_NOTE_ON on a different note — this is the
+    // case that previously got dropped from the UMP buffer.
     clap_event_note_t en{};
-    en.header = make_header(sizeof(en), CLAP_EVENT_NOTE_ON, 1);
+    en.header = make_header(sizeof(en), CLAP_EVENT_NOTE_ON, 2);
     en.note_id = -1;
     en.port_index = 0;
     en.channel = 0;
@@ -803,12 +814,22 @@ TEST_CASE("CLAP_EVENT_MIDI2 skips MIDI 1.0 → UMP synthesis when host is native
     events.push(en);
 
     REQUIRE(h.run(events) == CLAP_PROCESS_CONTINUE);
-    // UMP sidecar must contain EXACTLY the native packet — not two
-    // copies (native + synthesised from the MIDI 1.0 NOTE_ON).
+    // UMP sidecar contains BOTH: the native MIDI2 packet (note 60) AND
+    // a synthesised packet from the NOTE_ON (note 72). The earlier
+    // (buggy) behaviour produced size() == 1 here.
     REQUIRE(g_capturing->had_ump_input);
-    REQUIRE(g_capturing->captured_ump.size() == 1);
-    REQUIRE(g_capturing->captured_ump[0].sample_offset == 1);
-    REQUIRE(g_capturing->captured_ump[0].packet.velocity_16() == 0x8000);
+    REQUIRE(g_capturing->captured_ump.size() == 2);
+    // Spec doesn't pin ordering between native and synthesised entries
+    // beyond preserving sample_offset within each path; assert presence
+    // by note rather than position.
+    bool saw_60 = false;
+    bool saw_72 = false;
+    for (const auto& entry : g_capturing->captured_ump) {
+        if (entry.packet.note_number() == 60) saw_60 = true;
+        if (entry.packet.note_number() == 72) saw_72 = true;
+    }
+    REQUIRE(saw_60);
+    REQUIRE(saw_72);
     // The NOTE_ON still reaches midi_in for MIDI 1.0 consumers / MPE.
     REQUIRE(g_capturing->captured_midi.size() == 1);
     REQUIRE(g_capturing->captured_midi[0].is_note_on());
@@ -982,4 +1003,45 @@ TEST_CASE("midi_out empty sysex payload is skipped on CLAP out_events",
     REQUIRE(sysexes.size() == 1);
     REQUIRE(sysexes[0]->size == 3);
     REQUIRE(sysexes[0]->header.time == 4);
+}
+
+TEST_CASE("midi_out shorts + sysex interleave by sample_offset on out_events",
+          "[clap][midi][issue-pending]") {
+    // Covers the two-cursor merge added by the Codex P2 sweep on PR #627.
+    // CLAP's out_events contract requires events pushed in ascending
+    // sample-time order across event types; the earlier two-pass shape
+    // (all shorts, then all sysex) violated it whenever a sysex
+    // scheduled at offset N preceded a short at offset N+1. This test
+    // enqueues a short at offset 5, a sysex at offset 3, and another
+    // short at offset 10 — the merged emission must arrive on
+    // out_events as (sysex@3, short@5, short@10), not (short@5,
+    // short@10, sysex@3).
+    g_pending_emit.clear();
+    g_pending_sysex.clear();
+    auto cc1 = midi::MidiEvent::cc(/*ch*/0, /*controller*/74, /*value*/64);
+    cc1.sample_offset = 5;
+    auto cc2 = midi::MidiEvent::cc(/*ch*/0, /*controller*/74, /*value*/96);
+    cc2.sample_offset = 10;
+    g_pending_emit = {cc1, cc2};
+    midi::MidiBuffer::SysexEvent se;
+    se.data = {0xF0, 0x7D, 0x99, 0xF7};
+    se.sample_offset = 3;
+    g_pending_sysex = {se};
+
+    Harness h(make_emitting);
+    InputEventList in;
+    OutputEventList out;
+    REQUIRE(h.run(in, &out) == CLAP_PROCESS_CONTINUE);
+
+    // Walk the captured out_events in push order and assert their
+    // headers are non-decreasing in time, with the sysex landing
+    // between the two CCs. by_type discards ordering, so use the
+    // raw at() accessor on the push log instead.
+    REQUIRE(out.size() == 3);
+    REQUIRE(out.at(0)->time == 3);
+    REQUIRE(out.at(0)->type == CLAP_EVENT_MIDI_SYSEX);
+    REQUIRE(out.at(1)->time == 5);
+    REQUIRE(out.at(1)->type == CLAP_EVENT_MIDI);
+    REQUIRE(out.at(2)->time == 10);
+    REQUIRE(out.at(2)->type == CLAP_EVENT_MIDI);
 }
