@@ -369,11 +369,13 @@ void maybe_complete_pending_upgrade() {
 // fail the real command.
 void maybe_emit_update_banner_and_refresh(const std::string& command) {
     try {
+        pulp_debug("update-banner: maybe_complete_pending_upgrade enter");
         // Pending-upgrade completion runs even for banner-blocked
         // commands so the user sees "upgrade complete" after the
         // swap — but only as a one-liner on stderr, which doesn't
         // corrupt machine-parseable stdout.
         maybe_complete_pending_upgrade();
+        pulp_debug("update-banner: maybe_complete_pending_upgrade exit");
 
         if (banner_blocked(command)) return;
 
@@ -382,12 +384,14 @@ void maybe_emit_update_banner_and_refresh(const std::string& command) {
         // Matches design Section G: "zero network calls".
         if (pulp::runtime::get_env("PULP_UPDATE_CHECK_DISABLED")) return;
 
+        pulp_debug("update-banner: read_update_mode");
         auto mode = read_update_mode();
         if (mode == um::Mode::Off) return;
 
         auto cache_path = banner_cache_path();
         if (cache_path.empty()) return;
 
+        pulp_debug("update-banner: read_cache_file");
         auto cache_opt = uc::read_cache_file(cache_path);
         uc::CacheEntry cache = cache_opt.value_or(uc::CacheEntry{});
 
@@ -460,8 +464,10 @@ void maybe_emit_update_banner_and_refresh(const std::string& command) {
 
         auto interval = read_check_interval_hours();
         if (uc::is_cache_stale(cache, now, interval)) {
+            pulp_debug("update-banner: kick_background_refresh (detached)");
             kick_background_refresh(cache_path);
         }
+        pulp_debug("update-banner: exit");
     } catch (...) {
         // Never let a banner bug break a user's actual command.
     }
@@ -491,7 +497,9 @@ int main(int argc, char* argv[]) {
         args.push_back(argv[i]);
     }
 
+    pulp_debug("main: update-banner enter");
     maybe_emit_update_banner_and_refresh(command);
+    pulp_debug("main: dispatch");
 
     // Lookup in command table
     for (int i = 0; i < command_count; ++i) {

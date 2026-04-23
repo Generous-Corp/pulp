@@ -5,12 +5,14 @@
 #include <iostream>
 
 int cmd_build(const std::vector<std::string>& args) {
+    pulp_debug("cmd_build: enter");
     bool standalone_mode = false;
     auto project_root = resolve_active_project_root(&standalone_mode);
     if (project_root.empty()) {
         std::cerr << "Error: not in a Pulp project directory\n";
         return 1;
     }
+    pulp_debug("cmd_build: project root resolved");
 
     auto build_dir = project_root / "build";
     bool needs_configure = !fs::exists(build_dir / "CMakeCache.txt");
@@ -65,14 +67,17 @@ int cmd_build(const std::vector<std::string>& args) {
 
         // Standalone projects need CMAKE_PREFIX_PATH to find the SDK
         if (standalone_mode) {
+            pulp_debug("cmd_build: resolve SDK (standalone)");
             auto version = read_sdk_version(project_root);
             auto sdk_dir = read_sdk_path_hint(project_root);
             auto checkout_hint = read_sdk_checkout_hint(project_root);
             auto config = sdk_dir / "lib" / "cmake" / "Pulp" / "PulpConfig.cmake";
             if (sdk_dir.empty() || !fs::exists(config)) {
                 if (!checkout_hint.empty() && fs::exists(checkout_hint)) {
+                    pulp_debug("cmd_build: ensure_checkout_sdk");
                     sdk_dir = ensure_checkout_sdk(checkout_hint, version);
                 } else {
+                    pulp_debug("cmd_build: ensure_sdk (may download)");
                     sdk_dir = ensure_sdk(version);
                 }
             }
@@ -81,6 +86,7 @@ int cmd_build(const std::vector<std::string>& args) {
                 return 1;
             }
             configure_cmd += " -DCMAKE_PREFIX_PATH=" + sdk_dir.string();
+            pulp_debug("cmd_build: SDK resolved");
         }
 
         // JS engine selection
@@ -88,8 +94,10 @@ int cmd_build(const std::vector<std::string>& args) {
             configure_cmd += " -DPULP_JS_ENGINE=" + js_engine;
         }
 
+        pulp_debug("cmd_build: run configure (cmake)");
         int rc = run_with_spinner(configure_cmd, "Configuring");
         if (rc != 0) return rc;
+        pulp_debug("cmd_build: configure complete");
     }
 
     std::string build_cmd = "cmake --build " + build_dir.string();
@@ -99,6 +107,7 @@ int cmd_build(const std::vector<std::string>& args) {
         build_cmd += " " + arg;
     }
 
+    pulp_debug("cmd_build: run build (cmake --build)");
     int rc = run_with_spinner(build_cmd, "Building");
     if (rc != 0 || !watch_mode) return rc;
 

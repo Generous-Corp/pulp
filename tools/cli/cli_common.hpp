@@ -38,6 +38,11 @@ void print_ok(const std::string& msg);
 void print_fail(const std::string& msg);
 void print_warn(const std::string& msg);
 
+// Phase-marker for `PULP_DEBUG=1` (stderr, timestamped). Silent otherwise.
+// Sprinkle at user-entrypoint phases that could plausibly hang so the next
+// hang report pins itself. See #682.
+void pulp_debug(const char* phase);
+
 // ── Shell Execution ─────────────────────────────────────────────────────────
 
 int run(const std::string& cmd);

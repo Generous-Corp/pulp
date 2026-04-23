@@ -636,3 +636,43 @@ TEST_CASE("pulp docs build-site resolves mkdocs.yml from project root",
     REQUIRE(combined.find("does not exist; use --config-file")
             == std::string::npos);
 }
+
+// #682 — PULP_DEBUG=1 must emit timestamped phase markers to stderr so
+// future "pulp hung at 0% CPU" reports pin themselves. Unset by default
+// it must stay silent so scripts that parse stderr aren't affected.
+TEST_CASE("PULP_DEBUG=1 surfaces phase markers to stderr (#682)",
+          "[cli][shellout][issue-682]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    // Disable the update-check network path so the test stays offline
+    // and deterministic — we're testing the instrumentation hook, not
+    // the network dependency.
+    pulp_setenv("PULP_UPDATE_CHECK_DISABLED", "1", 1);
+
+    SECTION("unset: stderr stays free of phase markers") {
+        pulp_unsetenv("PULP_DEBUG");
+        auto r = run_pulp({"version"});
+        REQUIRE(r.exit_code == 0);
+        REQUIRE(r.stderr_output.find("[pulp-debug") == std::string::npos);
+    }
+
+    SECTION("PULP_DEBUG=1: emits markers on stderr, not stdout") {
+        pulp_setenv("PULP_DEBUG", "1", 1);
+        auto r = run_pulp({"version"});
+        REQUIRE(r.exit_code == 0);
+        REQUIRE(r.stderr_output.find("[pulp-debug") != std::string::npos);
+        REQUIRE(r.stderr_output.find("update-banner") != std::string::npos);
+        REQUIRE(r.stdout_output.find("[pulp-debug") == std::string::npos);
+        pulp_unsetenv("PULP_DEBUG");
+    }
+
+    SECTION("PULP_DEBUG=0: treated as off, no markers") {
+        pulp_setenv("PULP_DEBUG", "0", 1);
+        auto r = run_pulp({"version"});
+        REQUIRE(r.exit_code == 0);
+        REQUIRE(r.stderr_output.find("[pulp-debug") == std::string::npos);
+        pulp_unsetenv("PULP_DEBUG");
+    }
+
+    pulp_unsetenv("PULP_UPDATE_CHECK_DISABLED");
+}
