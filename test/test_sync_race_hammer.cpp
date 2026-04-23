@@ -43,6 +43,15 @@ struct Snapshot {
 
 constexpr auto kHammerDuration = 500ms;
 
+bool wait_for_start_count(std::atomic<int>& started, int expected) {
+    auto deadline = std::chrono::steady_clock::now() + 2s;
+    while (started.load(std::memory_order_acquire) < expected &&
+           std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::yield();
+    }
+    return started.load(std::memory_order_acquire) == expected;
+}
+
 }  // namespace
 
 TEST_CASE("TripleBuffer hammer: writer + reader for 500ms", "[concurrent][race][triple_buffer]") {
@@ -50,8 +59,10 @@ TEST_CASE("TripleBuffer hammer: writer + reader for 500ms", "[concurrent][race][
     std::atomic<bool> stop{false};
     std::atomic<int>  read_count{0};
     std::atomic<int>  write_count{0};
+    std::atomic<int>  started{0};
 
     std::thread writer([&] {
+        started.fetch_add(1, std::memory_order_release);
         int v = 0;
         while (!stop.load(std::memory_order_acquire)) {
             buf.write(++v);
@@ -60,12 +71,15 @@ TEST_CASE("TripleBuffer hammer: writer + reader for 500ms", "[concurrent][race][
     });
 
     std::thread reader([&] {
+        started.fetch_add(1, std::memory_order_release);
         while (!stop.load(std::memory_order_acquire)) {
             (void) buf.read();
             read_count.fetch_add(1, std::memory_order_relaxed);
         }
     });
 
+    INFO("started=" << started.load(std::memory_order_acquire));
+    REQUIRE(wait_for_start_count(started, 2));
     std::this_thread::sleep_for(kHammerDuration);
     stop.store(true, std::memory_order_release);
     writer.join();
@@ -81,8 +95,10 @@ TEST_CASE("SeqLock hammer: 1 writer + 2 readers for 500ms", "[concurrent][race][
     std::atomic<bool> stop{false};
     std::atomic<int>  read_count{0};
     std::atomic<int>  write_count{0};
+    std::atomic<int>  started{0};
 
     std::thread writer([&] {
+        started.fetch_add(1, std::memory_order_release);
         double tempo = 120.0;
         while (!stop.load(std::memory_order_acquire)) {
             lock.write(Snapshot{tempo, tempo * 0.125, 4});
@@ -99,6 +115,7 @@ TEST_CASE("SeqLock hammer: 1 writer + 2 readers for 500ms", "[concurrent][race][
     // `position == tempo * k` relation subject to rounding drift that
     // isn't a race but would flake the assertion.)
     auto read_worker = [&] {
+        started.fetch_add(1, std::memory_order_release);
         while (!stop.load(std::memory_order_acquire)) {
             Snapshot snap = lock.read();
             (void) snap;
@@ -109,6 +126,8 @@ TEST_CASE("SeqLock hammer: 1 writer + 2 readers for 500ms", "[concurrent][race][
     std::thread reader_a(read_worker);
     std::thread reader_b(read_worker);
 
+    INFO("started=" << started.load(std::memory_order_acquire));
+    REQUIRE(wait_for_start_count(started, 3));
     std::this_thread::sleep_for(kHammerDuration);
     stop.store(true, std::memory_order_release);
     writer.join();
@@ -125,8 +144,10 @@ TEST_CASE("SpscQueue hammer: producer + consumer for 500ms", "[concurrent][race]
     std::atomic<bool> stop{false};
     std::atomic<int>  produced{0};
     std::atomic<int>  consumed{0};
+    std::atomic<int>  started{0};
 
     std::thread producer([&] {
+        started.fetch_add(1, std::memory_order_release);
         int v = 0;
         while (!stop.load(std::memory_order_acquire)) {
             if (q.try_push(++v)) {
@@ -144,6 +165,7 @@ TEST_CASE("SpscQueue hammer: producer + consumer for 500ms", "[concurrent][race]
     std::atomic<bool> producer_done{false};
 
     std::thread consumer([&] {
+        started.fetch_add(1, std::memory_order_release);
         // Main hammer loop — drain concurrently while producer is pushing.
         while (!stop.load(std::memory_order_acquire)) {
             if (auto item = q.try_pop()) {
@@ -174,6 +196,8 @@ TEST_CASE("SpscQueue hammer: producer + consumer for 500ms", "[concurrent][race]
         }
     });
 
+    INFO("started=" << started.load(std::memory_order_acquire));
+    REQUIRE(wait_for_start_count(started, 2));
     std::this_thread::sleep_for(kHammerDuration);
     stop.store(true, std::memory_order_release);
     producer.join();
