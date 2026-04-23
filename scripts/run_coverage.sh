@@ -99,12 +99,18 @@ else
     CLANG_CXX=clang++
 fi
 
-cmake -S "${REPO_ROOT}" -B "${BUILD_DIR}" \
-    -DCMAKE_BUILD_TYPE=Debug \
-    -DPULP_ENABLE_COVERAGE=ON \
-    -DCMAKE_C_COMPILER="${CLANG_C}" \
-    -DCMAKE_CXX_COMPILER="${CLANG_CXX}" \
-    "${EXTRA_CMAKE_ARGS[@]}"
+cmake_args=(
+    -S "${REPO_ROOT}"
+    -B "${BUILD_DIR}"
+    -DCMAKE_BUILD_TYPE=Debug
+    -DPULP_ENABLE_COVERAGE=ON
+    -DCMAKE_C_COMPILER="${CLANG_C}"
+    -DCMAKE_CXX_COMPILER="${CLANG_CXX}"
+)
+if [[ ${#EXTRA_CMAKE_ARGS[@]} -gt 0 ]]; then
+    cmake_args+=("${EXTRA_CMAKE_ARGS[@]}")
+fi
+cmake "${cmake_args[@]}"
 
 # Issue #570: if build-coverage/CMakeCache.txt was previously populated
 # with PULP_ENABLE_COVERAGE:BOOL=OFF (e.g. from a non-coverage run
