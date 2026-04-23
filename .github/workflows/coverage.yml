@@ -244,18 +244,17 @@ jobs:
         # automation scripts, but their coverage never reaches
         # Codecov. Keep the first expansion intentionally narrow:
         # Linux-only, tools/scripts-only, same workflow.
+        #
+        # Use a dedicated venv rather than mutating the system
+        # interpreter. That keeps the step working on Namespace's
+        # PEP-668-strict runner image without relying on
+        # `--break-system-packages`.
         if: matrix.os == 'linux'
         shell: bash
-        # `--break-system-packages` is the PEP 668 "yes I know what
-        # I'm doing" escape. The github-hosted ubuntu-latest image
-        # tolerates `--user` without it; Namespace's runner image
-        # is PEP-668-strict and rejects this with
-        # `error: externally-managed-environment`. Pulp routes
-        # Coverage Linux through Namespace via
-        # `PULP_COVERAGE_LINUX_RUNS_ON_JSON`, so the flag is
-        # required to keep this step (and the cascade-skipped
-        # downstream Python coverage steps) green.
-        run: python3 -m pip install --user --break-system-packages 'coverage>=7.10' PyYAML
+        run: |
+          python3 -m venv build-coverage/python-venv
+          build-coverage/python-venv/bin/python -m pip install --upgrade pip
+          build-coverage/python-venv/bin/python -m pip install 'coverage>=7.10' PyYAML
 
       - name: Run Python tools coverage
         # Mirror scripts/run_coverage.sh semantics: keep going even if a
@@ -263,7 +262,7 @@ jobs:
         if: matrix.os == 'linux'
         continue-on-error: true
         shell: bash
-        run: python3 tools/scripts/run_python_coverage.py
+        run: build-coverage/python-venv/bin/python tools/scripts/run_python_coverage.py
 
       - name: Run Swift apple coverage
         # SwiftPM has its own coverage pipeline (`swift test
