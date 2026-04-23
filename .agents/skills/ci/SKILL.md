@@ -36,7 +36,7 @@ When the user says any of: **"push to main"**, **"ship this"**, **"ship it"**,
 run `shipyard pr` (not `gh pr create` + `shipyard ship` separately).
 
 `shipyard pr` is the single orchestrator (Shipyard v0.19.1+; pinned at
-v0.26.0 in `tools/shipyard.toml`). It:
+v0.29.0 in `tools/shipyard.toml`). It:
 
 1. Calls `tools/scripts/skill_sync_check.py` (resolved via Shipyard's
    `[validation]` path-discovery, explicit in `.shipyard/config.toml`) and
@@ -62,8 +62,36 @@ Backward compatibility: raw `shipyard ship` / `shipyard run` still work for
 diagnostics, experimental branches, or when `shipyard pr` itself is being
 debugged. Do not use them as the primary ship path.
 
-### Behaviour notes at the current pin (v0.26.0)
+### Behaviour notes at the current pin (v0.29.0)
 
+- **macOS binary is signed + notarized** (Shipyard v0.29.0). On
+  macOS 26.3+ XProtect skips the deep scan for notarized binaries,
+  cutting `shipyard pr` cold-start ~4-5x (from ~5-6s to ~1-1.5s).
+  No pulp-side action; transparent.
+- **Heartbeat line during long validation** (Shipyard v0.29.0). A
+  20-minute lane now prints periodic progress instead of leaving a
+  silent terminal. Helpful when watching `shipyard ship` interactively.
+- **Backend errors are surfaced under the summary table** (Shipyard
+  v0.28.0). A bare `ubuntu     error     ssh    12s` row used to
+  give zero diagnostic signal — the captured stderr tail (bundle
+  upload failure, remote `cmake` apply failure, SSH transport
+  error, etc.) now prints below the table. Closes pulp #665's
+  diagnosis-blind-spot complaint.
+- **Worktree-local `.shipyard.local/` falls back to the primary
+  checkout** (Shipyard v0.27.2). Pulp uses worktrees heavily for
+  parallel agent work; without this every new worktree had to
+  manually `cp .shipyard.local/config.toml` from the primary repo
+  before `shipyard pr` could see the SSH host config. Now it
+  inherits automatically.
+- **Ship preflight runs BEFORE `gh pr create`** (Shipyard v0.27.1).
+  Earlier the PR was opened first and ship aborted on unreachable
+  SSH backend, leaving stranded PRs with no validation (the
+  Apr 22 pattern that left several pulp PRs mid-flight). Now an
+  unreachable target fails fast and the PR is never opened.
+- **Daemon tunnel supervisor** (Shipyard v0.27.0). Tailscale Funnel
+  transients no longer kill the daemon — the supervisor restarts
+  the funnel on backoff. Periodic reconcile loop runs independently
+  of per-PR polls. Both apply to the macOS GUI's webhook delivery.
 - **Long-running daemons keep accepting fresh subscribers** (Shipyard
   v0.26.0). The subscribe-replay path now uses blocking `put()`
   instead of `put_nowait()`, so once the replay ring grows past 64
