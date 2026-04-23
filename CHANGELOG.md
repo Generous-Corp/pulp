@@ -9,6 +9,10 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
 <a id="v0370"></a>
+## [0.13.0]
+
+## [0.38.0]
+
 ## [0.37.0] - 2026-04-22
 
 - codex/issue 663 standalone editor only ([#665](https://github.com/danielraffel/pulp/pull/665))
