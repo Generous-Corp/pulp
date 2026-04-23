@@ -1004,3 +1004,44 @@ TEST_CASE("midi_out empty sysex payload is skipped on CLAP out_events",
     REQUIRE(sysexes[0]->size == 3);
     REQUIRE(sysexes[0]->header.time == 4);
 }
+
+TEST_CASE("midi_out shorts + sysex interleave by sample_offset on out_events",
+          "[clap][midi][issue-pending]") {
+    // Covers the two-cursor merge added by the Codex P2 sweep on PR #627.
+    // CLAP's out_events contract requires events pushed in ascending
+    // sample-time order across event types; the earlier two-pass shape
+    // (all shorts, then all sysex) violated it whenever a sysex
+    // scheduled at offset N preceded a short at offset N+1. This test
+    // enqueues a short at offset 5, a sysex at offset 3, and another
+    // short at offset 10 — the merged emission must arrive on
+    // out_events as (sysex@3, short@5, short@10), not (short@5,
+    // short@10, sysex@3).
+    g_pending_emit.clear();
+    g_pending_sysex.clear();
+    auto cc1 = midi::MidiEvent::cc(/*ch*/0, /*controller*/74, /*value*/64);
+    cc1.sample_offset = 5;
+    auto cc2 = midi::MidiEvent::cc(/*ch*/0, /*controller*/74, /*value*/96);
+    cc2.sample_offset = 10;
+    g_pending_emit = {cc1, cc2};
+    midi::MidiBuffer::SysexEvent se;
+    se.data = {0xF0, 0x7D, 0x99, 0xF7};
+    se.sample_offset = 3;
+    g_pending_sysex = {se};
+
+    Harness h(make_emitting);
+    InputEventList in;
+    OutputEventList out;
+    REQUIRE(h.run(in, &out) == CLAP_PROCESS_CONTINUE);
+
+    // Walk the captured out_events in push order and assert their
+    // headers are non-decreasing in time, with the sysex landing
+    // between the two CCs. by_type discards ordering, so use the
+    // raw at() accessor on the push log instead.
+    REQUIRE(out.size() == 3);
+    REQUIRE(out.at(0)->time == 3);
+    REQUIRE(out.at(0)->type == CLAP_EVENT_MIDI_SYSEX);
+    REQUIRE(out.at(1)->time == 5);
+    REQUIRE(out.at(1)->type == CLAP_EVENT_MIDI);
+    REQUIRE(out.at(2)->time == 10);
+    REQUIRE(out.at(2)->type == CLAP_EVENT_MIDI);
+}
