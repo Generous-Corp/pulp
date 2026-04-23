@@ -126,6 +126,12 @@ For plugin-editor embedding:
 - see `examples/webview-plugin/` for the minimal Processor-backed example
   that hosts a `WebViewPanel` directly inside a plugin editor subtree
 
+For a standalone app that should behave like a single-pane WebView shell:
+- use `pulp::format::StandaloneApp::run_with_editor(...)`
+- set `StandaloneConfig::show_settings_tab = false` to skip the outer
+  standalone `Editor/Settings` chrome entirely
+- `examples/webview-plugin/main.cpp` is the current kiosk-style proof
+
 ## Validation Loop
 
 For focused local proof:

@@ -67,6 +67,13 @@ dispatch `Processor::on_view_*` on the same view instance.
 adapter handles this by calling `bridge.close()` explicitly after
 `run_event_loop()` returns, before the `TabPanel` falls out of scope.
 
+Standalone also has an editor-only path now: set
+`StandaloneConfig::show_settings_tab = false` and `run_with_editor()`
+will host the released editor root directly in `WindowHost` instead of
+wrapping it in the outer `Editor/Settings` `TabPanel`. The same
+ownership rule still applies: close the bridge before the released
+root view is destroyed.
+
 ## AU v2 dual-Processor gotcha (fixed)
 
 Pre-ViewBridge, the AU v2 Cocoa view factory called
