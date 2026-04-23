@@ -1379,6 +1379,34 @@ if(TARGET PulpGain_CLAP)
 endif()
 catch_discover_tests(pulp-test-host-regression)
 
+# Stress test for the SignalGraph hot-reload race (pulp#669). Runs the
+# specific Catch2 case 100 times in a row via a shell wrapper, exiting
+# at the first failure. Gated behind PULP_STRESS_FLAKY_TESTS so per-PR
+# CI doesn't pay the ~5s cost; nightly cron / on-demand runs flip the
+# flag on. Repeated failures under stress would prove the race is real
+# (vs once-in-50-runs Namespace timing-noise) and unblock a
+# deterministic-repro fix.
+#
+# Why a wrapper instead of CTest's REPEAT property: REPEAT only takes
+# effect when ctest is invoked with `--repeat until-fail:N` on the
+# command line — a property alone is silently a no-op. A shell loop
+# inside the test command guarantees repetition without depending on
+# how the caller invokes ctest.
+if(DEFINED ENV{PULP_STRESS_FLAKY_TESTS} AND NOT "$ENV{PULP_STRESS_FLAKY_TESTS}" STREQUAL "")
+    if(WIN32)
+        add_test(NAME pulp-test-signal-graph-hot-reload-stress
+            COMMAND powershell -Command
+                "for ($i = 1; $i -le 100; $i++) { & '$<TARGET_FILE:pulp-test-host-regression>' 'SignalGraph hot-reload mid-audio is race-free via snapshot publish' --rng-seed=time; if ($LASTEXITCODE -ne 0) { Write-Host \"stress failed on iteration $i\"; exit 1 } } Write-Host 'stress ok (100/100)'")
+    else()
+        add_test(NAME pulp-test-signal-graph-hot-reload-stress
+            COMMAND bash -c
+                "set -e; for i in $(seq 1 100); do '$<TARGET_FILE:pulp-test-host-regression>' 'SignalGraph hot-reload mid-audio is race-free via snapshot publish' --rng-seed=time >/dev/null || { echo \"stress failed on iteration $i\"; exit 1; }; done; echo 'stress ok (100/100)'")
+    endif()
+    set_tests_properties(pulp-test-signal-graph-hot-reload-stress PROPERTIES
+        LABELS "host;graph;hot-reload;race;stress;issue-669"
+        TIMEOUT 600)
+endif()
+
 # GraphSerializer round-trip tests
 add_executable(pulp-test-graph-serializer test_graph_serializer.cpp)
 target_link_libraries(pulp-test-graph-serializer PRIVATE pulp::host Catch2::Catch2WithMain)
