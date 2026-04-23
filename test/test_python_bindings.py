@@ -36,16 +36,23 @@ def main() -> int:
     info.name = "Gain"
     info.unit = "dB"
     info.range = param_range
+    info.group_id = 7
     assert info.id == 101
     assert info.name == "Gain"
     assert info.unit == "dB"
+    assert info.group_id == 7
     assert math.isclose(info.range.default_value, 0.5)
 
     midi = pulp.MidiBuffer()
     assert midi.empty()
-    midi.add(pulp.MidiEvent.note_on(1, 60, 100))
-    assert midi.size() == 1
+    note_on = pulp.MidiEvent.note_on(1, 60, 100)
+    note_on.sample_offset = 3
+    midi.add(note_on)
+    midi.add(pulp.MidiEvent.note_off(1, 60))
+    assert midi.size() == 2
     assert not midi.empty()
+    midi.clear()
+    assert midi.empty()
 
     return 0
 
