@@ -104,7 +104,33 @@
 }
 
 - (void)dealloc {
-    if (_bridge) _bridge->close();
+    // Destruction-order contract (Codex P1 review on PR #653):
+    //
+    // PulpAUViewController declares its ivars in order:
+    //     _bridge       (ViewBridge — owns the View tree)
+    //     _viewHost     (PluginViewHost — holds `View& root_`)
+    //     _fallbackView (only used when bridge fails)
+    //
+    // After [super dealloc] the runtime destroys C++-typed ivars in
+    // REVERSE declaration order: _fallbackView, then _viewHost, then
+    // _bridge. That ordering is load-bearing:
+    //   1. ~_fallbackView runs (no-op when bridge succeeded).
+    //   2. ~unique_ptr<PluginViewHost> runs. Its destructor calls
+    //      `root_.set_plugin_view_host(nullptr)` — the View that
+    //      `root_` references is still alive (still owned by
+    //      `_bridge->view_`), so the call is safe and clears the
+    //      back-pointer.
+    //   3. ~unique_ptr<ViewBridge> runs. Its destructor calls
+    //      `close()` which fires `Processor::on_view_closed`,
+    //      releases the scripted UI, and resets the View. The
+    //      back-pointer was already cleared in step 2, so the
+    //      View's own teardown can't reach a dead host.
+    //
+    // Calling `_bridge->close()` HERE explicitly (before [super
+    // dealloc]) reverses that order — the View dies first, then
+    // ~PluginViewHost dereferences a dangling `root_` reference and
+    // crashes AUv3 editor close. Don't reintroduce the explicit
+    // close in this dealloc path.
     [super dealloc];
 }
 

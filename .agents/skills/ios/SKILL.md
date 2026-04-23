@@ -286,6 +286,12 @@ Builds the `.appex` only. The App Store container host-app target is authored se
 - Device-target code signing is documented but not scripted.
 - Visual regression for iOS UIs not wired up yet (see #330, #249).
 
+## Gotchas
+
+### `PulpAUViewController::dealloc` — never call `_bridge->close()` explicitly
+
+Touched here because `core/format/src/au_view_controller_ios.mm` is dual-owned by `ios` + `auv3` + `view-bridge`. The view controller's ivars `_bridge`, `_viewHost`, `_fallbackView` are destroyed in REVERSE declaration order by the runtime; the resulting sequence (host destroyed before bridge) is what makes the `root_.set_plugin_view_host(nullptr)` call in `~PluginViewHost` safe. Calling `_bridge->close()` explicitly in `dealloc` reverses that order, frees the View first, and the host's destructor then dereferences a dangling reference — crashes AUv3 editor close. Codex P1 review on PR #653. Full rationale lives in the `auv3` skill under "PulpAUViewController::dealloc — never call `_bridge->close()` explicitly".
+
 ## See Also
 
 - `android` skill — parallel structure for Android NDK.

@@ -338,6 +338,29 @@ AUv3 iOS extensions use `NSExtensionPrincipalClass` =
 AUM), check the Info.plist before the Obj-C — a typo in the principal
 class name fails silently.
 
+### `PulpAUViewController::dealloc` — never call `_bridge->close()` explicitly
+
+The view controller declares its ivars `_bridge` (ViewBridge), then
+`_viewHost` (PluginViewHost), then `_fallbackView`. When `[super
+dealloc]` runs, the runtime destroys C++-typed ivars in REVERSE
+declaration order: `_fallbackView`, `_viewHost`, `_bridge`. That
+ordering is load-bearing:
+
+1. `~PluginViewHost` runs second. It calls
+   `root_.set_plugin_view_host(nullptr)` — the View `root_`
+   references is still alive (still owned by `_bridge->view_`), so
+   the call is safe and clears the back-pointer.
+2. `~ViewBridge` runs last. Its destructor calls `close()` →
+   `Processor::on_view_closed` → `view_.reset()` destroys the View.
+   The back-pointer was already cleared in step 1, so the View's
+   own teardown can't reach a dead host.
+
+Calling `_bridge->close()` HERE explicitly (before `[super dealloc]`)
+reverses that order: the View dies first, then `~PluginViewHost`
+dereferences a dangling `root_` reference and crashes AUv3 editor
+close. Codex P1 review on PR #653 caught this — the fix is to remove
+the explicit close, NOT to add it.
+
 ## Validation recipes
 
 Build and validate via the Pulp CLI:

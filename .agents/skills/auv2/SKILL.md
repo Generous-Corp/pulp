@@ -146,6 +146,15 @@ error: expected ';' at end of declaration list
 
 The attribute is a static-analysis hint only — dropping it from derived-class `override` declarations has no runtime effect. `PulpAUInstrument::HandleNoteOn/Off` (the reference pattern for AU v2) doesn't carry `AUSDK_RTSAFE` either. When writing a new AU v2 override that matches an `AUSDK_RTSAFE` base declaration, omit the attribute. Caught on CI's Coverage-macOS leg in PR #638 after the AU v2 effect MIDI fix landed without it.
 
+### Editor `dealloc` ordering — never call `bridge->close()` explicitly
+
+`PulpAUEditorOwnership` (in `core/format/src/au_v2_cocoa_view.mm`) declares its members as `unique_ptr<ViewBridge> bridge` then `unique_ptr<PluginViewHost> host`. C++ destroys members in REVERSE declaration order, so when `delete _ownership` runs in `PulpAUEditorOwner::dealloc`:
+
+1. `~PluginViewHost` runs first. The host calls `root_.set_plugin_view_host(nullptr)` to clear the View → host back-pointer. The View it references is still alive (still owned by `bridge->view_`), so the call is safe.
+2. `~ViewBridge` runs second. Its destructor calls `close()` → `Processor::on_view_closed(*view_raw_)` fires → `view_.reset()` destroys the View. The back-pointer was already cleared in step 1, so the View's own teardown can't reach a dead host.
+
+Calling `_ownership->bridge->close()` HERE explicitly (BEFORE `delete _ownership`) reverses that order: the View dies first, then `~PluginViewHost` dereferences a dangling `root_` reference and crashes the AU v2 editor close path. Codex P1 review on PR #653 caught this — the fix is to remove the explicit close, NOT to add it. Same rule applies to any future Cocoa-View ownership wrapper that mixes a `ViewBridge` and a `PluginViewHost` in the same C++ scope.
+
 ## Reference pointers
 
 - Adapter source: `core/format/src/au_v2_adapter.cpp`, `core/format/include/pulp/format/au_v2_adapter.hpp`

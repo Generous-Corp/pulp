@@ -48,7 +48,26 @@ struct PulpAUEditorOwnership {
 }
 - (void)dealloc {
     if (_ownership) {
-        if (_ownership->bridge) _ownership->bridge->close();
+        // Destruction-order contract (Codex P1 review on PR #653):
+        //
+        // PulpAUEditorOwnership declares `bridge` first, then `host`.
+        // C++ destroys members in REVERSE declaration order, so:
+        //   1. ~unique_ptr<PluginViewHost> runs first. Its destructor
+        //      calls `root_.set_plugin_view_host(nullptr)` — the View
+        //      that `root_` references is still alive at this point
+        //      (still owned by `bridge->view_`), so the call is safe
+        //      and clears the back-pointer.
+        //   2. ~unique_ptr<ViewBridge> runs second. Its destructor
+        //      calls `close()` which fires `Processor::on_view_closed`,
+        //      releases the scripted UI, and resets the View. The
+        //      back-pointer was already cleared in step 1, so the
+        //      View's own teardown can't reach a dead host.
+        //
+        // Calling `bridge->close()` HERE explicitly (before `delete`)
+        // reverses that ordering — the View dies BEFORE the host, and
+        // the host's destructor then dereferences a dangling `root_`
+        // reference, crashing AU v2 editor close. Don't reintroduce
+        // the explicit close in this dealloc path.
         delete _ownership;
     }
     [super dealloc];
