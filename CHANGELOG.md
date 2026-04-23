@@ -9,6 +9,8 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
 <a id="v0360"></a>
+## [0.37.0]
+
 ## [0.36.0] - 2026-04-22
 
 - feat(view): finish plugin-host editor embedding rollout ([#653](https://github.com/danielraffel/pulp/pull/653))
