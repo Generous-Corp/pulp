@@ -8,9 +8,13 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
-<a id="v0360"></a>
-## [0.37.0]
+<a id="v0370"></a>
+## [0.37.0] - 2026-04-22
 
+- codex/issue 663 standalone editor only ([#665](https://github.com/danielraffel/pulp/pull/665))
+- fix: Codex post-merge sweep — 4 P1s + 4 P2s across PRs 627/629/638/654/650 ([#660](https://github.com/danielraffel/pulp/pull/660))
+
+<a id="v0360"></a>
 ## [0.36.0] - 2026-04-22
 
 - feat(view): finish plugin-host editor embedding rollout ([#653](https://github.com/danielraffel/pulp/pull/653))
@@ -567,6 +571,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.37.0]: https://github.com/danielraffel/pulp/releases/tag/v0.37.0
 [0.36.0]: https://github.com/danielraffel/pulp/releases/tag/v0.36.0
 [0.35.0]: https://github.com/danielraffel/pulp/releases/tag/v0.35.0
 [0.34.0]: https://github.com/danielraffel/pulp/releases/tag/v0.34.0
