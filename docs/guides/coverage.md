@@ -3,12 +3,14 @@
 Coverage is measured per-subsystem, per-platform, and per-surface on
 macOS, Linux, and Windows for the native C/C++ lane, with an additional
 Python tooling lane on Linux covering `tools/scripts/**`,
-`tools/deps/**`, and `tools/local-ci/**`, plus a Swift package lane on
-macOS covering the Apple Swift sources that compile in `apple/`, and a
-Kotlin/Android lane for JVM-unit-testable Android sources. Coverage
-percentages are only actionable after the represented local-source
-surface is trustworthy on Codecov; path/classification drift and
-language-lane ingestion bugs come before ordinary test-gap work.
+`tools/deps/**`, `tools/local-ci/**`, top-level `tools/*.py`,
+`tools/packages/**`, and `core/view/js/embed_js.py`, plus a Swift
+package lane on macOS covering the Apple Swift sources that compile in
+`apple/`, and a Kotlin/Android lane for JVM-unit-testable Android
+sources. Coverage percentages are only actionable after the represented
+local-source surface is trustworthy on Codecov; path/classification
+drift and language-lane ingestion bugs come before ordinary test-gap
+work.
 [#641](https://github.com/danielraffel/pulp/issues/641) is the
 authoritative tracker for the current three-phase program: first get
 the intended source surface onto Codecov, then rank the real measured
@@ -72,7 +74,8 @@ scripts/run_coverage.sh
 ```
 
 Python tooling coverage
-(`tools/scripts/**`, `tools/deps/**`, `tools/local-ci/**`):
+(`tools/scripts/**`, `tools/deps/**`, `tools/local-ci/**`, top-level
+`tools/*.py`, `tools/packages/**`, and `core/view/js/embed_js.py`):
 
 ```bash
 python3 -m pip install 'coverage>=7.10' PyYAML
@@ -134,7 +137,9 @@ tests like `test_resolve_runs_on.py`, `test_audit.py`, and
 `test_local_ci.py` measure the actual script they spawn or import, not
 just the test harness. `PyYAML` is also required because
 `tools/scripts/test_codecov_config.py` parses `codecov.yml` as part of
-the lane.
+the lane. The generated coverage config also omits Python test modules
+from the reported source set so the lane reflects first-party tooling
+code rather than the test harness.
 
 The Apple Swift lane currently runs on macOS only because it uses
 SwiftPM's native coverage support (`swift test --enable-code-coverage`)
@@ -293,8 +298,9 @@ Today the intended represented surface is:
 
 - **Clang C/C++** coverage from the native build graph on macOS, Linux,
   and Windows.
-- **Python** coverage for `tools/scripts/**`, `tools/deps/**`, and
-  `tools/local-ci/**` on Linux via
+- **Python** coverage for `tools/scripts/**`, `tools/deps/**`,
+  `tools/local-ci/**`, top-level `tools/*.py`, `tools/packages/**`,
+  and `core/view/js/embed_js.py` on Linux via
   `tools/scripts/run_python_coverage.py`.
 - **Swift** coverage for the Apple Swift package sources under
   `apple/Sources/PulpSwift/**` on macOS via
@@ -307,9 +313,6 @@ Still out of scope today:
 - iOS-only Apple code that does not compile in the macOS SwiftPM lane
   yet (for example `apple/Sources/PulpSwift/PulpAudioSession.swift`) —
   `#656`.
-- Python outside the current Linux lane (for example top-level
-  `tools/*.py`, `tools/packages/**`, and
-  `core/view/js/embed_js.py`) — `#658`.
 - Swift outside the `apple/` package lane (for example
   `tools/local-ci/macos_window_probe.swift`) — `#656`.
 - Authored JavaScript assets (for example `core/view/js/**`,
@@ -329,9 +332,10 @@ The coverage workflow runs on
 `{ubuntu-latest, macos-latest, windows-latest}` for the native lane.
 Each OS produces its own `coverage.cobertura.xml` and uploads to
 Codecov with an OS-tag flag. The Linux leg also uploads the Python
-tools XML for `tools/scripts/**`, `tools/deps/**`, and
-`tools/local-ci/**`, and the macOS leg also uploads the staged Apple
-Swift LCOV from `build-coverage/apple/coverage.apple.lcov`.
+tools XML for `tools/scripts/**`, `tools/deps/**`,
+`tools/local-ci/**`, top-level `tools/*.py`, `tools/packages/**`, and
+`core/view/js/embed_js.py`, and the macOS leg also uploads the staged
+Apple Swift LCOV from `build-coverage/apple/coverage.apple.lcov`.
 We do NOT merge profdata across
 architectures —
 `llvm-profdata merge` is not architecture-portable
