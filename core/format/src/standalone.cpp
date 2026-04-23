@@ -248,12 +248,7 @@ bool StandaloneApp::run_with_editor(bool use_gpu) {
     bridge->notify_attached();
 
     auto* bridge_raw = bridge.get();
-    detail::sync_standalone_editor_host(
-        *window, chrome, [bridge_raw](uint32_t width, uint32_t height) {
-            if (bridge_raw) {
-                bridge_raw->resize(width, height);
-            }
-        });
+    detail::attach_standalone_editor_bridge(*window, chrome, *bridge);
 
     auto* scripted_ui_ptr = bridge->scripted_ui();
     detail::install_scripted_ui_repaint_callback(scripted_ui_ptr, *window);

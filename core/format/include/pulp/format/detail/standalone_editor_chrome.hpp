@@ -154,6 +154,19 @@ inline void sync_standalone_editor_host(
     callback(host_content_size.width, host_content_size.height);
 }
 
+template <typename Bridge>
+inline void attach_standalone_editor_bridge(
+    view::WindowHost& window,
+    const StandaloneEditorChrome& chrome,
+    Bridge& bridge) {
+    sync_standalone_editor_host(
+        window,
+        chrome,
+        [&bridge](uint32_t width, uint32_t height) {
+            bridge.resize(width, height);
+        });
+}
+
 inline void install_standalone_idle_callback(
     view::WindowHost& window,
     std::function<void()> poll_scripted_ui,

@@ -56,6 +56,14 @@ struct StubSettingsPoller {
     void poll() { ++poll_calls_; }
 };
 
+struct StubBridge {
+    std::vector<WindowHost::ContentSize> resize_calls_;
+
+    void resize(uint32_t width, uint32_t height) {
+        resize_calls_.push_back({width, height});
+    }
+};
+
 } // namespace
 
 TEST_CASE("Standalone settings callbacks rebind after successful apply",
@@ -264,6 +272,27 @@ TEST_CASE("Standalone host sync installs a resize callback and applies initial s
     REQUIRE(seen_sizes.size() == 2);
     REQUIRE(seen_sizes[1].width == 900);
     REQUIRE(seen_sizes[1].height == 500);
+}
+
+TEST_CASE("Standalone bridge attach forwards host sizing through bridge resize",
+          "[standalone][chrome]") {
+    StubWindowHost window;
+    window.content_size_ = {840, 452};
+    auto chrome = make_standalone_editor_chrome(
+        std::make_unique<View>(), StandaloneConfig{}, nullptr, nullptr, nullptr, {});
+    StubBridge bridge;
+
+    attach_standalone_editor_bridge(window, chrome, bridge);
+
+    REQUIRE(window.resize_callback_ != nullptr);
+    REQUIRE(bridge.resize_calls_.size() == 1);
+    REQUIRE(bridge.resize_calls_[0].width == 840);
+    REQUIRE(bridge.resize_calls_[0].height == 420);
+
+    window.resize_callback_(900, 500);
+    REQUIRE(bridge.resize_calls_.size() == 2);
+    REQUIRE(bridge.resize_calls_[1].width == 900);
+    REQUIRE(bridge.resize_calls_[1].height == 468);
 }
 
 TEST_CASE("Standalone log helper formats the chrome mode",
