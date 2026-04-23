@@ -92,11 +92,17 @@ jobs:
             EXPLICIT_MACOS_RUNNER_SELECTOR_JSON \
             MACOS_RUNS_ON_JSON \
             macos-latest)
-          windows=$(resolve \
-            "Coverage (Windows)" \
-            EXPLICIT_WINDOWS_RUNNER_SELECTOR_JSON \
-            WINDOWS_RUNS_ON_JSON \
-            windows-latest)
+          if [ "${GITHUB_EVENT_NAME}" = "pull_request" ]; then
+            # Keep PR Windows coverage on GitHub-hosted runners until the
+            # Namespace Windows queue is reliably assigning jobs again.
+            windows='"windows-latest"'
+          else
+            windows=$(resolve \
+              "Coverage (Windows)" \
+              EXPLICIT_WINDOWS_RUNNER_SELECTOR_JSON \
+              WINDOWS_RUNS_ON_JSON \
+              windows-latest)
+          fi
           {
             echo "linux_runs_on=${linux}"
             echo "macos_runs_on=${macos}"
