@@ -136,7 +136,7 @@ TEST_CASE("PulpSynth golden: master gain at -60 dB effectively silences note",
 // Three simultaneous notes must produce more output energy than one.
 // Polyphony regression guard — catches a future voice-allocator change
 // that silently clamps to a single voice.
-TEST_CASE("PulpSynth golden: polyphony — 3 notes louder than 1 note",
+TEST_CASE("PulpSynth golden: polyphony - 3 notes louder than 1 note",
           "[examples][synth][golden][issue-356]") {
     HeadlessHost mono(create_pulp_synth);
     mono.prepare(48000, 2048, 0, 2);
@@ -160,7 +160,7 @@ TEST_CASE("PulpSynth golden: polyphony — 3 notes louder than 1 note",
 
 // Identical MIDI + identical state ⇒ bit-identical output. This is
 // the determinism contract the entire test matrix depends on.
-TEST_CASE("PulpSynth golden: same MIDI + state ⇒ bit-identical output",
+TEST_CASE("PulpSynth golden: same MIDI + state -> bit-identical output",
           "[examples][synth][golden][issue-356]") {
     HeadlessHost h1(create_pulp_synth);
     h1.prepare(48000, 1024, 0, 2);
