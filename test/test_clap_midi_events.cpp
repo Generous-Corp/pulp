@@ -33,6 +33,7 @@
 #include <pulp/midi/buffer.hpp>
 #include <pulp/midi/message.hpp>
 
+#include <cstddef>
 #include <cstring>
 #include <memory>
 #include <vector>
@@ -51,9 +52,13 @@ class InputEventList {
 public:
     template <typename Event>
     void push(const Event& e) {
-        const auto offset = storage_.size();
-        storage_.resize(offset + sizeof(Event));
-        std::memcpy(storage_.data() + offset, &e, sizeof(Event));
+        const auto align = alignof(Event);
+        const auto offset = (bytes_used_ + (align - 1)) & ~(align - 1);
+        const auto end = offset + sizeof(Event);
+        storage_.resize((end + sizeof(std::max_align_t) - 1) / sizeof(std::max_align_t));
+        auto* bytes = reinterpret_cast<std::uint8_t*>(storage_.data());
+        std::memcpy(bytes + offset, &e, sizeof(Event));
+        bytes_used_ = end;
         offsets_.push_back(offset);
     }
 
@@ -66,14 +71,18 @@ public:
         vtable_.get = [](const clap_input_events_t* list, uint32_t idx)
             -> const clap_event_header_t* {
             auto* self = static_cast<InputEventList*>(list->ctx);
+            auto* bytes = reinterpret_cast<const std::uint8_t*>(self->storage_.data());
             return reinterpret_cast<const clap_event_header_t*>(
-                self->storage_.data() + self->offsets_[idx]);
+                bytes + self->offsets_[idx]);
         };
         return vtable_;
     }
 
 private:
-    std::vector<std::uint8_t> storage_;
+    // Back the byte stream with max_align_t storage so the CLAP event
+    // structs we memcpy into it keep their natural alignment under UBSan.
+    std::vector<std::max_align_t> storage_;
+    std::size_t bytes_used_ = 0;
     std::vector<std::size_t> offsets_;
     clap_input_events_t vtable_{};
 };
