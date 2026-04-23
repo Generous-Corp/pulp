@@ -92,10 +92,50 @@ constexpr const char* kWebViewEditorHtml = R"HTML(
 </html>
 )HTML";
 
+constexpr const char* kWebViewLoadingHtml = R"HTML(
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: "Inter", "Helvetica Neue", sans-serif;
+      }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        background:
+          radial-gradient(circle at top, rgba(89, 196, 255, 0.28), transparent 45%),
+          linear-gradient(160deg, #111827, #0f172a 48%, #0b1120);
+        color: rgba(226, 232, 240, 0.88);
+      }
+      .loading {
+        padding: 14px 18px;
+        border-radius: 999px;
+        border: 1px solid rgba(148, 163, 184, 0.18);
+        background: rgba(15, 23, 42, 0.72);
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        font-size: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="loading">Loading editor...</div>
+  </body>
+</html>
+)HTML";
+
 class WebViewEditorPane final : public view::View {
 public:
     WebViewEditorPane() {
         view::WebViewOptions options;
+        options.transparent_background = true;
+        options.initial_html = kWebViewLoadingHtml;
         panel_ = view::WebViewPanel::create(options);
         if (!panel_) {
             return;

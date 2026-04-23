@@ -15,6 +15,10 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - coverage: start compliance tranche 1 ([#647](https://github.com/danielraffel/pulp/pull/647))
 
 <a id="v0370"></a>
+## [0.13.0]
+
+## [0.38.0]
+
 ## [0.37.0] - 2026-04-22
 
 - codex/issue 663 standalone editor only ([#665](https://github.com/danielraffel/pulp/pull/665))

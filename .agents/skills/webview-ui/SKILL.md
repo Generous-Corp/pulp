@@ -57,6 +57,13 @@ Keep claims narrow:
 - append `make_webview_bridge_bootstrap_script()`
 - good for the smallest lifecycle/message tests
 
+1.5. Placeholder first paint
+- set `WebViewOptions::initial_html` when the final page is dark-themed and the
+  platform WebView would otherwise flash white before the real content loads
+- keep it lightweight and self-contained so it paints immediately
+- combine with `transparent_background = true` when the final page also wants a
+  transparent/native host background
+
 2. Embedded bundled assets
 - use `pulp_add_binary_data(...)`
 - register generated arrays with `AssetManager`
@@ -131,6 +138,8 @@ For a standalone app that should behave like a single-pane WebView shell:
 - set `StandaloneConfig::show_settings_tab = false` to skip the outer
   standalone `Editor/Settings` chrome entirely
 - `examples/webview-plugin/main.cpp` is the current kiosk-style proof
+- if the page is dark on first launch, seed `WebViewOptions::initial_html`
+  with a dark placeholder so the host opens into the final visual family
 
 ## Validation Loop
 

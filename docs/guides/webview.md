@@ -130,6 +130,23 @@ panel->set_ready_handler([panel = panel.get()] {
 });
 ```
 
+For dark-themed editors that would otherwise flash white before the real page
+loads, provide a lightweight placeholder page up front:
+
+```cpp
+WebViewOptions options;
+options.initial_html =
+    "<!doctype html><html><body style=\"margin:0;background:#0f172a;\"></body></html>";
+
+auto panel = WebViewPanel::create(options);
+panel->set_ready_handler([panel = panel.get()] {
+    panel->set_html(real_editor_html);
+});
+```
+
+`initial_html` is opt-in and backward-compatible: callers that leave it empty
+keep the previous white-first-paint behavior.
+
 ## Offline Bundled Assets
 
 Pulp already ships a CMake helper for embedded web assets:

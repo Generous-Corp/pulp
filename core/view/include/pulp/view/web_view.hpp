@@ -34,6 +34,7 @@ struct WebViewOptions {
     bool enable_debug_inspector = false; ///< Request a separate inspector window when supported
     bool transparent_background = false;
     bool accept_first_click = true;    ///< macOS: first click on unfocused view is input
+    std::string initial_html;          ///< Optional placeholder HTML shown before navigate()/set_html()
     std::string custom_user_agent;     ///< Override User-Agent string
     FetchResource fetch_resource;      ///< Optional custom resource server
     std::string custom_scheme_uri;     ///< Optional home URI for fetch_resource, e.g. pulp://app

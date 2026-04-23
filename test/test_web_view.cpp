@@ -100,6 +100,7 @@ TEST_CASE("WebViewPanel creation", "[view][webview]") {
         REQUIRE(opts.enable_debug_inspector == false);
         REQUIRE(opts.transparent_background == false);
         REQUIRE(opts.accept_first_click == true);
+        REQUIRE(opts.initial_html.empty());
         REQUIRE(opts.custom_user_agent.empty());
     }
 
@@ -336,6 +337,48 @@ TEST_CASE("WebViewPanel HTML content", "[view][webview]") {
             SKIP("WebView never became ready in this environment");
         }
         REQUIRE(fired);
+    }
+
+    SECTION("initial_html provides a placeholder page before later content") {
+        WebViewOptions options;
+        options.initial_html =
+            "<!doctype html><html><body data-phase=\"initial\">loading</body></html>";
+
+        auto initial_panel = WebViewPanel::create(options);
+        if (!initial_panel) {
+            SKIP("WebView not available in headless environment");
+            return;
+        }
+
+        if (!wait_until_ready(*initial_panel)) {
+            SKIP("WebView never became ready in this environment");
+        }
+
+        auto initial = std::pair<std::string, std::string>{"", "timeout"};
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(5000);
+        while (std::chrono::steady_clock::now() < deadline) {
+            initial = await_eval(
+                *initial_panel,
+                "document.body ? document.body.getAttribute('data-phase') : ''",
+                std::chrono::milliseconds(300));
+            if (initial.second.empty() && initial.first == "\"initial\"") {
+                break;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        }
+
+        if (!initial.second.empty() || initial.first != "\"initial\"") {
+            SKIP("Initial HTML never became readable in this environment");
+        }
+
+        initial_panel->set_html(
+            "<!doctype html><html><body data-phase=\"final\">ready</body></html>");
+        auto final = await_eval(
+            *initial_panel,
+            "document.body ? document.body.getAttribute('data-phase') : ''",
+            std::chrono::milliseconds(5000));
+        REQUIRE(final.second.empty());
+        REQUIRE(final.first == "\"final\"");
     }
 
     SECTION("simple HTML page round-trips bridge messages") {

@@ -480,6 +480,9 @@ public:
         webview_ = std::make_unique<choc::ui::WebView>(choc_opts);
         if (webview_) {
             webview_->addInitScript(make_webview_bridge_bootstrap_script());
+            if (!options.initial_html.empty()) {
+                webview_->setHTML(options.initial_html);
+            }
         }
         install_internal_bindings();
     }
