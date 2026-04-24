@@ -91,6 +91,30 @@ int64_t stream_read(const clap_istream_t* stream, void* buffer, uint64_t size) {
     return static_cast<int64_t>(to_copy);
 }
 
+struct CappedStream {
+    std::vector<uint8_t> bytes;
+    uint64_t cap = 23;  // mirrors clap-validator's state-reproducibility-flush cap
+};
+
+int64_t stream_write_capped(const clap_ostream_t* stream, const void* buffer, uint64_t size) {
+    auto* sink = static_cast<CappedStream*>(stream->ctx);
+    const auto n = size < sink->cap ? size : sink->cap;
+    const auto* bytes = static_cast<const uint8_t*>(buffer);
+    sink->bytes.insert(sink->bytes.end(), bytes, bytes + n);
+    return static_cast<int64_t>(n);
+}
+
+// Minimal fake clap_input_events that walks a std::vector<const clap_event_header_t*>.
+struct EventList {
+    std::vector<const clap_event_header_t*> events;
+};
+uint32_t events_size(const clap_input_events_t* in) {
+    return static_cast<uint32_t>(static_cast<const EventList*>(in->ctx)->events.size());
+}
+const clap_event_header_t* events_get(const clap_input_events_t* in, uint32_t i) {
+    return static_cast<const EventList*>(in->ctx)->events[i];
+}
+
 } // namespace
 
 // Generate the CLAP entry
@@ -163,5 +187,83 @@ TEST_CASE("CLAP state extension round-trips plugin-owned payload", "[clap][entry
 
     plugin1->destroy(plugin1);
     plugin2->destroy(plugin2);
+    clap_entry.deinit();
+}
+
+TEST_CASE("CLAP state_save loops on short writes [issue-743]",
+          "[clap][entry][state][short-write]") {
+    // clap-validator's `state-reproducibility-flush` caps stream writes at
+    // 23 bytes/call. Before the fix, state_save() treated a short write as
+    // failure and returned false — which the validator saw as a plugin bug.
+    REQUIRE(clap_entry.init("test"));
+
+    auto* factory = static_cast<const clap_plugin_factory_t*>(
+        clap_entry.get_factory(CLAP_PLUGIN_FACTORY_ID));
+    auto* desc = factory->get_plugin_descriptor(factory, 0);
+    const clap_plugin_t* plugin = factory->create_plugin(factory, nullptr, desc->id);
+    REQUIRE(plugin != nullptr);
+    REQUIRE(plugin->init(plugin));
+
+    auto* proc = test_clap::g_last_processor;
+    proc->plugin_state = std::string(300, 'x');  // > any reasonable single-write cap
+
+    auto* state = static_cast<const clap_plugin_state_t*>(
+        plugin->get_extension(plugin, CLAP_EXT_STATE));
+    REQUIRE(state != nullptr);
+
+    CappedStream sink;
+    clap_ostream_t out_stream{.ctx = &sink, .write = stream_write_capped};
+    REQUIRE(state->save(plugin, &out_stream));
+    REQUIRE(sink.bytes.size() >= 300);  // the full payload, loop-written
+
+    plugin->destroy(plugin);
+    clap_entry.deinit();
+}
+
+TEST_CASE("CLAP params_flush ignores events outside the core namespace [issue-743]",
+          "[clap][entry][params][namespace]") {
+    // clap-validator's `param-set-wrong-namespace` sends PARAM_VALUE events
+    // with space_id = 0xb33f (not CLAP_CORE_EVENT_SPACE_ID). A plugin that
+    // doesn't filter by space_id will apply those as real param writes.
+    REQUIRE(clap_entry.init("test"));
+
+    auto* factory = static_cast<const clap_plugin_factory_t*>(
+        clap_entry.get_factory(CLAP_PLUGIN_FACTORY_ID));
+    auto* desc = factory->get_plugin_descriptor(factory, 0);
+    const clap_plugin_t* plugin = factory->create_plugin(factory, nullptr, desc->id);
+    REQUIRE(plugin != nullptr);
+    REQUIRE(plugin->init(plugin));
+    auto* proc = test_clap::g_last_processor;
+    proc->state().set_value(1, 0.0f);  // baseline
+
+    auto* params = static_cast<const clap_plugin_params_t*>(
+        plugin->get_extension(plugin, CLAP_EXT_PARAMS));
+    REQUIRE(params != nullptr);
+
+    // Construct one PARAM_VALUE event with a non-core namespace. Should be
+    // dropped by the flush path.
+    clap_event_param_value_t ev{};
+    ev.header.size = sizeof(ev);
+    ev.header.type = CLAP_EVENT_PARAM_VALUE;
+    ev.header.space_id = 0xb33f;  // non-core — must be ignored
+    ev.header.flags = 0;
+    ev.header.time = 0;
+    ev.param_id = 1;
+    ev.value = 42.0;
+
+    EventList list{.events = {&ev.header}};
+    clap_input_events_t in{.ctx = &list, .size = events_size, .get = events_get};
+    params->flush(plugin, &in, nullptr);
+
+    REQUIRE_THAT(proc->state().get_value(1), WithinAbs(0.0, 0.01));  // untouched
+
+    // Sanity: the same event with space_id=CLAP_CORE_EVENT_SPACE_ID should
+    // apply — confirms our guard isn't blocking well-formed core events.
+    ev.header.space_id = CLAP_CORE_EVENT_SPACE_ID;
+    ev.value = -6.0;
+    params->flush(plugin, &in, nullptr);
+    REQUIRE_THAT(proc->state().get_value(1), WithinAbs(-6.0, 0.01));
+
+    plugin->destroy(plugin);
     clap_entry.deinit();
 }

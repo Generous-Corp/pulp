@@ -98,8 +98,21 @@ inline const clap_plugin_audio_ports_t audio_ports_ext = {
 inline bool state_save(const clap_plugin_t* plugin, const clap_ostream_t* stream) {
     auto* self = static_cast<clap_adapter::PulpClapPlugin*>(plugin->plugin_data);
     if (!self || !self->processor) return false;
-    auto data = plugin_state_io::serialize(self->store, *self->processor);
-    return stream->write(stream, data.data(), data.size()) == static_cast<int64_t>(data.size());
+    const auto data = plugin_state_io::serialize(self->store, *self->processor);
+    // CLAP's stream->write() is spec'd to return a short-write count on
+    // success — callers MUST loop. Hosts (and clap-validator's
+    // `state-reproducibility-flush` with a 23-byte write cap) exercise
+    // this path. A single write() returning less than data.size() is
+    // NOT an error; only negative or zero returns are.
+    std::size_t written = 0;
+    while (written < data.size()) {
+        const auto n = stream->write(stream,
+                                     data.data() + written,
+                                     data.size() - written);
+        if (n <= 0) return false;
+        written += static_cast<std::size_t>(n);
+    }
+    return true;
 }
 
 inline bool state_load(const clap_plugin_t* plugin, const clap_istream_t* stream) {
@@ -175,6 +188,10 @@ inline void params_flush(const clap_plugin_t* plugin, const clap_input_events_t*
     uint32_t count = in->size(in);
     for (uint32_t i = 0; i < count; ++i) {
         auto* hdr = in->get(in, i);
+        // CLAP event-space gate: skip third-party-extension namespaces
+        // so their type IDs can't alias core PARAM_VALUE. Mirrors the
+        // guard in clap_adapter.cpp's process() dispatch loops.
+        if (hdr->space_id != CLAP_CORE_EVENT_SPACE_ID) continue;
         // memcpy into a stack local to avoid UBSan "misaligned address"
         // when hdr isn't aligned to the struct's alignof (e.g. 8 for
         // clap_event_param_value_t's `double value`). #688.

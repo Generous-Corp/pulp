@@ -325,6 +325,39 @@ change the CLAP sysex accumulator, the AAX adapter
 (`core/format/src/aax_runtime.cpp`) and the VST3 / AU halves need to
 stay in sync — see the memory note on AAX-parity.
 
+### Filter in-events by `space_id` in every dispatch loop
+
+Every `clap_input_events` dispatch loop in the adapter MUST check
+`hdr->space_id == CLAP_CORE_EVENT_SPACE_ID` at the top and `continue`
+on mismatch. Non-zero namespaces belong to third-party extensions
+Pulp doesn't implement, and their type IDs may alias core type IDs
+(e.g. a fictional extension's event type `5` could be mistaken for
+`CLAP_EVENT_PARAM_VALUE` and mutate the param store). clap-validator
+`param-set-wrong-namespace` exercises this with `space_id = 0xb33f`.
+
+Covered sites today:
+
+- `clap_adapter.cpp` process() param/gesture loop
+- `clap_adapter.cpp` process() note/MIDI loop
+- `clap_entry.hpp` `params_flush()` path
+
+If you add a third in-events dispatch (e.g. a transport-event loop,
+or a new extension's callback), add the same guard. Test pattern:
+`test_clap_entry.cpp` → "CLAP params_flush ignores events outside
+the core namespace [issue-743]".
+
+### `clap_ostream::write` may short-write — loop state_save
+
+`state_save` (in `clap_entry.hpp`) MUST loop on `stream->write()`
+until the full payload is delivered. Per CLAP spec, a single `write`
+call may return fewer bytes than requested even on success; only
+negative or zero returns are errors. clap-validator's
+`state-reproducibility-flush` exercises this by capping every write
+at 23 bytes.
+
+Symmetric note: `state_load`'s `stream->read` loop was already
+correct; the bug was only on the write side.
+
 ## Validation recipes
 
 Build and smoke a CLAP bundle with the Pulp CLI:
