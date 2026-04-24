@@ -709,11 +709,20 @@ pub fn run(cwd: &Path, args: &CreateArgs, out: &mut impl Write) -> Result<i32> {
         ));
     }
     if !args.ci_mode {
-        return Err(CliError::BadUsage(
-            "pulp-rs create requires --ci / --no-interactive (Phase 6d ports only the \
-            non-interactive path). Use the C++ binary for the interactive wizard."
-                .to_owned(),
-        ));
+        // Phase 7: interactive wizard needs a TUI (dialoguer or
+        // similar). Delegate to pulp-cpp when available; fall back
+        // to the "use --ci" stub when not.
+        let cpp_argv = crate::fallthrough::current_argv_tail();
+        match crate::fallthrough::delegate(&cpp_argv)? {
+            crate::fallthrough::Outcome::Delegated(rc) => return Ok(rc),
+            crate::fallthrough::Outcome::Disabled | crate::fallthrough::Outcome::NotFound => {
+                return Err(CliError::BadUsage(
+                    "pulp-rs create requires --ci / --no-interactive (interactive wizard \
+                     not ported). Install pulp-cpp or pass --ci."
+                        .to_owned(),
+                ));
+            }
+        }
     }
 
     // Use project::resolve to find the checkout; None when standalone.

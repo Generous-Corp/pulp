@@ -149,6 +149,18 @@ pub fn run<S: Spawner>(
         return Ok(0);
     }
 
+    // Phase 7: `pulp dev` is intrinsically a watch-loop command.
+    // The Rust port runs a single build+test+launch pass; the real
+    // watch semantics live on the C++ side. Delegate the whole
+    // invocation to pulp-cpp when it's on PATH so users get the
+    // real experience. Fall back to the Rust one-shot when the
+    // legacy binary is unavailable (unit tests land here because
+    // pulp-cpp isn't installed in the CI sandbox).
+    let cpp_argv = crate::fallthrough::current_argv_tail();
+    if let crate::fallthrough::Outcome::Delegated(rc) = crate::fallthrough::delegate(&cpp_argv)? {
+        return Ok(rc);
+    }
+
     let Some(proj) = project::resolve(cwd) else {
         return Err(CliError::Other(
             "Error: not in a Pulp project directory".to_owned(),
