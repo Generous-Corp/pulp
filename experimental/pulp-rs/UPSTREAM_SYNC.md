@@ -49,6 +49,61 @@ tools/cli/cmd_design.cpp         # deferred — design_binding.cpp dependency
 
 As more commands are ported, add their C++ sources here.
 
+## Classification matrix (2026-04-24 audit)
+
+Run the post-implementation audit checklist (below) after every phase. The table below is the snapshot as of commit `362b1fdb` on `explore/rust-cli-prototype`.
+
+| C++ entrypoint | Classification | Notes |
+|---|---|---|
+| `test` | **Ported** | Auto-build + `ctest --output-on-failure` + passthrough |
+| `clean` | **Ported** | `build/` deletion |
+| `projects` | **Ported** | `list` + `add` + `remove` + Rust-extra `prune` + `--json` |
+| `--help` / `-h` | **Ported** | Clap auto-generated |
+| `build` | **Ported-partial** | Missing `--watch`, `--test-filter=...`, real `--validate`; simpler configure logic |
+| `run` | **Ported-partial** | Missing macOS `.app` fallback |
+| `status` | **Ported-partial** | Only short summary; missing git branch/commit, SDK detail, format counts |
+| `doctor` | **Ported-partial** | Only `--versions --json`; default doctor + `android` + `ios` + `--fix` + `--ci` + `--dry-run` + `--scan-parents` missing |
+| `cache` | **Ported-partial** | `status` + `clean` real; `fetch` stubbed |
+| `sdk` | **Ported-partial** | `status` + `clean` real; `install` stubbed |
+| `upgrade` | **Ported-partial** | Check/notes ported; install stubbed; positional version missing; default action differs |
+| `version` | **Ported-partial** | Show only; missing `bump` + `check` subcommands |
+| `pr` | **Ported-partial** | Shipyard delegation real; `--native` fallback missing; version-pin enforcement weakened to advisory |
+| `config` | **Ported-partial** | `get/set/list` real; empty-invocation differs; `update.mode` snooze-clear side effect may be missing |
+| `create` | **Deferred** | 712 LOC — template tree + CMake-list injection + random VST3 UID |
+| `design` | **Deferred** | Depends on `design_binding.cpp` |
+| `docs` | **Deferred** | 699 LOC — YAML walker + mkdocs subprocess |
+| `dev` | **Deferred** | Depends on `watch_loop` (multi-platform FS-watcher) |
+| `validate` | **Stays in C++** | Uses `pulp::view::render_to_file` + `pulp::format` directly |
+| `ship` | **Stays in C++** | Uses `pulp::ship::*` APIs directly |
+| `audio` | **Stays in C++** | Uses `pulp::tools::audio::*` directly |
+| `host` | **Stays in C++** | Uses `pulp::host::{PluginScanner, PluginSlot}` directly |
+| `scan` | **Deferred** | Previously missed — depends on plugin-scanner via `pulp::host`; could port the non-host parts but value is low without the scan result |
+| `project` (singular) | **Deferred** | Previously missed — per-project SDK pin `bump`/`undo`; worth porting in Phase 6b alongside `projects` |
+| `tool` | **Deferred** | Previously missed — lives in `pulp::cli::tools::` namespace with registry lookup |
+| `help` (bare) | **Deferred** | Previously missed — top-level `pulp help` prints usage; `pulp-rs help` is disabled |
+| `add` / `remove` / `list` / `search` / `update` / `suggest` / `target` / `audit` | **Deferred** | Previously missed — entire package-manager subsystem in `pulp::cli::pkg::` namespace. 8 commands. Big enough to deserve its own phase (6c / 9) |
+| `ci-local` / `add-component` | **Already-delegate** | Python-script shims — unchanged |
+| `design-debug` / `inspect` / `import-design` / `export-tokens` | **Already-delegate** | Built-binary shims — unchanged |
+| `install` (legacy) | **Already-delegate** | Alias for `cache fetch skia` |
+
+**Revised completion:** ~25% feature-complete (5 Ported + 10 Ported-partial at their core paths) against ~30 distinct user-visible commands. Phase 8 (swap) is NOT ready — flipping today would push 12 commands onto the `pulp-cpp` fallthrough path, not 5 as the Phase 7 design implied.
+
+## Deferred list (needs porting in future phases)
+
+Explicitly classified as deferred with scope reasons — NOT swept under the rug:
+
+- `dev` — multi-platform FS-watcher; multi-day
+- `create` — 712 LOC template-tree + CMake generator
+- `docs` — 699 LOC mkdocs + YAML walker
+- `design` — design-tool binary resolution
+- `tool` (`pulp::cli::tools::`) — registry lookup + install/uninstall/path/run/doctor subcommands
+- `scan` — plugin scanner (uses `pulp::host`; may split ports into Rust/C++ portions)
+- `project` (singular) — per-project SDK pin bump/undo
+- `help` (top-level) — bare-invocation + `pulp help` usage dump
+- Package-manager subsystem (8 commands: `add / remove / list / search / update / suggest / target / audit`)
+
+Phase 6b / 7 / 8 scope decisions should pick subsets of this list based on swap-day cost-benefit. `help` + `project` + `scan` are cheap; the package-manager subsystem is a meaningful chunk; `dev` + `create` + `docs` + `design` + `tool` are expensive.
+
 ## How to check for drift
 
 From the explore branch worktree:
@@ -86,6 +141,83 @@ If the output is non-empty, inspect each commit:
 - **Bug fix** → port if the same bug exists in Rust; often we'll have avoided it via different semantics.
 
 After porting everything that needs porting, bump `last_synced_sha` at the top of this file to the new `origin/main` tip.
+
+## Post-implementation audit checklist
+
+**Run this after EVERY phase.** Manual "which commands did we port" audits are error-prone — on 2026-04-24 I missed 10 commands (the entire package-manager subsystem + scan + project + tool + help) because I only enumerated `cmd_*.cpp` files without checking `pulp_cli.cpp`'s inline `if (command == ...)` ladder. The checklist below is the fix.
+
+### A. Rebuild the C++ inventory from `pulp_cli.cpp`
+
+1. Open `tools/cli/pulp_cli.cpp`. Enumerate, in order:
+   - Every `commands[]` entry (main dispatch table)
+   - Every `script_commands[]` entry (Python-script delegates)
+   - Every `binary_commands[]` entry (built-binary delegates)
+   - Every inline `if (command == "...")` ladder entry (package-manager + tool + audit + aliases)
+   - Every legacy alias (`add-component`, `install`, etc.)
+   - Help tokens (`help`, `--help`, `-h`)
+2. Record the total count.
+
+### B. Rebuild the Rust inventory from `src/main.rs`
+
+3. Open `experimental/pulp-rs/src/main.rs`.
+4. Enumerate every `enum Command` variant.
+5. Record global clap behavior:
+   - No-arg invocation (exit code + output)
+   - `help` subcommand handling
+   - `--help` / `-h` handling
+   - Unknown-command message + exit code
+
+### C. Diff command-by-command
+
+6. For every overlapping top-level command, open the C++ implementation file (`cmd_<name>.cpp` or the package-manager/tool namespace) AND the Rust equivalent in `src/cmd/<name>.rs`.
+7. Compare:
+   - Subcommand names
+   - Accepted flags (short + long, required + optional)
+   - Positional arguments
+   - Default behavior when invoked with no subcommand
+   - Explicitly-stubbed / rejected branches
+   - Meaningful side effects: cache writes, mode changes, marker files, env-var clears
+
+### D. Classify every missing item honestly
+
+8. For each C++ command not present in Rust, ask in order:
+   - Is it explicitly listed in this file's "Deferred" section? → **Deferred** (OK)
+   - Is it policy-bound to C++ (linked to `pulp::host/view/ship/tool-audio`)? → **Stays in C++** (OK)
+   - Is it already a delegate/wrapper in C++ (e.g. `inspect` delegates to the inspect binary)? → **Already-delegate** (OK)
+   - Is it a legacy alias for another command? → **Alias** (OK)
+   - Otherwise → **Missing (undocumented gap)** (NOT OK — either port it or add to the deferred list with a scope reason in this file)
+
+### E. Check cross-cutting UX parity
+
+9. Verify:
+   - Bare invocation: `pulp` vs `pulp-rs` with no args — exit code + output shape should match
+   - `help` subcommand + `--help` + `-h`
+   - Unknown-command message (C++ has fuzzy "Did you mean..." logic)
+   - Alias behavior
+   - Dispatch-order collisions (e.g. a package-manager command shadowed by a `commands[]` entry)
+
+### F. Refresh proof artifacts
+
+10. Add/update parity fixtures for every newly ported subcommand path.
+11. Refresh JSON/human-lane snapshot tests via `cargo insta review`.
+12. Update this file:
+    - `last_synced_sha`, `last_synced_date`, `last_synced_phase`
+    - Watched files list (add every C++ file the phase touched)
+    - Deferred list (any new items, with scope rationale)
+
+### G. Publish the refreshed classification matrix
+
+13. Output a table with columns: `C++ entrypoint`, `C++ surface`, `Rust reality`, `classification`, `audit note`.
+14. Compare totals against the previous phase's audit — highlight any shift in category counts.
+15. Link the table from the migration plan doc (`planning/rust-cli-migration-plan.md`) so the plan state stays honest.
+
+### Tooling
+
+Use RepoPrompt's `context_builder` with a `response_type=question` prompt that selects `pulp_cli.cpp` + all `cmd_*.cpp` + `package_commands.cpp` + `tool_registry.cpp` + the Rust `src/main.rs` + `src/cmd/*.rs`, and ask for the classification. Manual enumeration is error-prone on a surface this wide — let the tool read every entrypoint simultaneously.
+
+Example query:
+
+> Enumerate every dispatch path in `tools/cli/pulp_cli.cpp` (commands[], script_commands[], binary_commands[], inline if-ladder, aliases, help tokens). For each, check `src/main.rs`'s `enum Command` and per-command `src/cmd/<name>.rs` to classify as `Ported / Ported-partial / Deferred / Stays in C++ / Already-delegate / Missing (undocumented gap)`. Produce a table.
 
 ## How to regenerate parity fixtures
 
