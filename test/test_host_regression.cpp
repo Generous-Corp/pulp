@@ -794,6 +794,8 @@ TEST_CASE("SignalGraph hot-reload mid-audio is race-free via snapshot publish",
 
     std::promise<void> audio_started;
     auto started = audio_started.get_future();
+    std::promise<void> first_block_processed;
+    auto first_block = first_block_processed.get_future();
 
     std::thread audio([&] {
         std::vector<float> in_buf(16, 1.0f), out_buf(16, 0.f);
@@ -802,6 +804,7 @@ TEST_CASE("SignalGraph hot-reload mid-audio is race-free via snapshot publish",
         pulp::audio::BufferView<const float> iv(in_ptrs, 1, 16);
         pulp::audio::BufferView<float>       ov(out_ptrs, 1, 16);
         audio_started.set_value();
+        bool first_block_signalled = false;
         while (!stop.load(std::memory_order_relaxed)) {
             graph.process(ov, iv, 16);
             // Valid outputs: 0 (invalidated snapshot) OR 1.0 (unity gain).
@@ -812,12 +815,18 @@ TEST_CASE("SignalGraph hot-reload mid-audio is race-free via snapshot publish",
                 }
             }
             blocks.fetch_add(1, std::memory_order_relaxed);
+            if (!first_block_signalled) {
+                first_block_processed.set_value();
+                first_block_signalled = true;
+            }
         }
     });
 
     // Deterministic handshake: wait for the audio thread to start before
-    // we begin mutating. This avoids wall-clock sleeps in expectations.
+    // we begin mutating, then wait for one block to complete so the test
+    // cannot pass or fail without exercising graph.process at least once.
     started.wait();
+    first_block.wait();
 
     // Hammer the graph with remove → add → prepare cycles. Each iteration
     // drops the live snapshot and republishes a fresh one; the audio
