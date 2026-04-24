@@ -16,6 +16,33 @@ Manage the JavaScript engine backend used by Pulp's scripting layer. Three engin
 | **JavaScriptCore** | Apple only | System framework, good JIT, zero-dep on macOS/iOS | LGPL-2.1 (system use OK) |
 | **V8** | Desktop | Best JIT, ideal for heavy JS (Three.js), largest footprint | BSD-3-Clause |
 
+## Web-compat preludes shipped with every engine
+
+Every engine boots with the same set of `web-compat-*.js` preludes embedded
+into `web_compat_preludes_gen.hpp` and evaluated in order by
+`WidgetBridge`. The current set covers everything React 18 dev (and most
+similar frameworks) feature-detect on construction:
+
+| Surface | Where | Why |
+|---------|-------|-----|
+| `Element.nodeType` (=1) / `nodeName` (=tagName) | `web-compat-element.js` | React reconciler walks every node; bails before first commit without these (pulp #468) |
+| `Element.ELEMENT_NODE` / `TEXT_NODE` / `COMMENT_NODE` constants | `web-compat-element.js` | `node.ELEMENT_NODE === 1` fast-paths in React |
+| `createTextNode` → nodeType=3 + nodeName='#text' + `data`/`nodeValue` mirrors | `web-compat-document.js` | DOM Level 1 text-node spec; React's text-update path |
+| `createComment` → nodeType=8, `createDocumentFragment` → nodeType=11 | `web-compat-document.js` | React portal sentinels + batched commits |
+| `MutationObserver` / `IntersectionObserver` / `ResizeObserver` / `PerformanceObserver` no-ops | `web-compat-observers.js` | `typeof X === 'function'` feature-detects pass; React skips because no events ever fire |
+| `XMLHttpRequest` no-op + spec readyState constants | `web-compat-observers.js` | React dev-mode error-stack lookup probes XHR |
+| `Element.scrollTop`/`scrollLeft`/`scrollWidth`/`scrollHeight` (returns 0) | `web-compat-observers.js` | React dev focus warnings |
+| `queueMicrotask` (Promise-based shim) | `web-compat-scheduler.js` | React 18 concurrent scheduler |
+| `MessageChannel` + `MessagePort` (microtask-deferred postMessage) | `web-compat-scheduler.js` | React 18 scheduler prefers MC; falls back to setTimeout if missing (perf cliff, not a blocker) |
+| `URLSearchParams` polyfill | `web-compat-scheduler.js` | React error-source URL parsing |
+
+When adding new framework support, check the gap matrix in pulp #468
+before assuming a polyfill is missing — the entry above is exhaustive
+for React 18 dev. Add new files to `core/view/CMakeLists.txt`'s
+`PULP_JS_PRELUDES` list AND to the `eval_or_throw` block in
+`core/view/src/widget_bridge.cpp` (`embed_js.cmake` only embeds the
+constants; the bridge constructor evaluates them).
+
 ## Commands
 
 ### `status` — Show current engine configuration

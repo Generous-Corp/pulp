@@ -614,6 +614,11 @@ WidgetBridge::WidgetBridge(ScriptEngine& engine, View& root, state::StateStore& 
     eval_or_throw(engine_, "web_compat_style_decl", preludes::web_compat_style_decl);
     eval_or_throw(engine_, "web_compat_document", preludes::web_compat_document);
     eval_or_throw(engine_, "web_compat_gpu_buffered", preludes::web_compat_gpu_buffered);
+    // pulp #468 — observer no-ops + scheduler shims so React 18 (and any
+    // other framework that feature-detects MutationObserver / MessageChannel
+    // / queueMicrotask) finds the constructors it expects on the global.
+    eval_or_throw(engine_, "web_compat_observers", preludes::web_compat_observers);
+    eval_or_throw(engine_, "web_compat_scheduler", preludes::web_compat_scheduler);
 }
 
 WidgetBridge::~WidgetBridge() {

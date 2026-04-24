@@ -112,6 +112,39 @@ Element.prototype._ensureNative = function() {
     }
 };
 
+// ── nodeType / nodeName (DOM Level 1 reconciler hooks) ──────────────────────
+//
+// React 18's reconciler reads `node.nodeType` (~55 call sites in
+// react-dom.development.js) and `node.nodeName` (~15 sites) on every DOM
+// mutation. Without these, the reconciler bails out before its first
+// commit. See pulp #468 (gap matrix).
+//
+// Constants per the DOM Level 1 spec:
+//   ELEMENT_NODE = 1, TEXT_NODE = 3, COMMENT_NODE = 8.
+// We omit the rarely-used node types (DOCUMENT_NODE = 9 etc.) — react-dom
+// only checks 1/3/8 in its hot paths.
+
+Object.defineProperty(Element.prototype, "nodeType", {
+    get: function() { return 1; }, // ELEMENT_NODE
+    configurable: true
+});
+
+Object.defineProperty(Element.prototype, "nodeName", {
+    // DOM spec: nodeName for Element is the upper-case tag name.
+    // tagName is already upper-cased in the Element constructor.
+    get: function() { return this.tagName; },
+    configurable: true
+});
+
+// Attach the same numeric constants to the Element constructor so
+// `node.ELEMENT_NODE === 1` style checks (also used by React) succeed.
+Element.ELEMENT_NODE = 1;
+Element.TEXT_NODE = 3;
+Element.COMMENT_NODE = 8;
+Element.prototype.ELEMENT_NODE = 1;
+Element.prototype.TEXT_NODE = 3;
+Element.prototype.COMMENT_NODE = 8;
+
 // ── ID property ──────────────────────────────────────────────────────────────
 
 Object.defineProperty(Element.prototype, "id", {
