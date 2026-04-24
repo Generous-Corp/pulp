@@ -208,6 +208,26 @@
 #             With this in place, Pulp's own build.yml `chcp 65001`
 #             workaround (PR #697) can be reverted — shipyard now
 #             owns the fix for every consumer.
+#   v0.39.0 — ssh-windows bundle-apply path fix: upload + apply
+#             paths now agree on how to resolve the remote bundle
+#             destination. Pre-fix, uploads of `C:/Users/<user>/
+#             shipyard.bundle` ended up at a different on-disk
+#             location than what `apply` tried to open, surfacing
+#             as `error: could not open 'C:/Users/.../shipyard.bundle'`.
+#             Lands Pulp-side issue Shipyard #210 (I filed 4/24
+#             with forensics from Shipyard #201's <log>.bundle-
+#             apply-stderr artifact).
+#   v0.40.0 — extends the #210 fix to cover two additional path
+#             shapes Codex P1 (Shipyard #213) flagged: `/`-prefixed
+#             paths like `/tmp/shipyard.bundle` (POSIX-shaped
+#             configs) and UNC paths (`\\server\share\...`). With
+#             this pin, the upload-side `is_rooted` predicate in
+#             `bundle/git_bundle.py` matches the apply-side
+#             `_is_windows_absolute_path` in `executor/ssh_windows.py`
+#             for every shape — no more split-brain between the two
+#             layers regardless of `remote_bundle_path` config.
+#             After this pin, Pulp `shipyard pr` should validate
+#             Windows cleanly without admin-merge.
 #
 # Cumulative additions from earlier releases still in effect:
 #   v0.4–v0.8 — release-bot helpers, `shipyard doctor release-chain`,
@@ -222,7 +242,7 @@
 # in `tools/install-shipyard.sh` (v0.22.1+ `SHIPYARD_VERSION` support).
 # The older `~/.pulp/bin/shipyard` path is cleaned up on install to
 # prevent shadow-on-PATH bugs.
-version = "v0.38.0"
+version = "v0.40.0"
 
 # Public release source. The bootstrap script downloads from
 # https://github.com/{repo}/releases/download/{version}/{asset}
