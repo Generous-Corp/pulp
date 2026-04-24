@@ -193,6 +193,19 @@ while IFS= read -r f; do BINARIES+=("-object" "$f"); done < <(
          ! -name '*.cmake' ! -name '*.txt' 2>/dev/null || true
 )
 
+# Coverage helper tests that live outside test/ still need their own
+# binaries in the llvm-cov object set. The embedded Python bindings
+# smoke target is built under bindings/python/, not build/test/, so
+# without this pass its profile data never contributes to report/show.
+while IFS= read -r f; do BINARIES+=("-object" "$f"); done < <(
+    find "${BUILD_DIR}" -type f -perm -u+x -name 'pulp-test-*' \
+         ! -path "${BUILD_DIR}/test/*" \
+         ! -path '*/_deps/*' \
+         ! -path '*/external/*' \
+         ! -name '*.cmake' ! -name '*.txt' ! -name '*.o' \
+         2>/dev/null || true
+)
+
 if [[ ${#BINARIES[@]} -eq 0 ]]; then
     echo "run_coverage.sh: no test binaries found under ${BUILD_DIR}/test" >&2
     exit 1
