@@ -638,9 +638,24 @@ fn clap_exit_code(err: &clap::error::Error) -> ExitCode {
     use clap::error::ErrorKind;
     match err.kind() {
         ErrorKind::InvalidSubcommand | ErrorKind::UnknownArgument => {
-            // Match the C++ CLI's fuzzy suggester: print "Unknown
-            // command: …\nDid you mean: pulp-rs <closest>?" so a user
-            // who typed `buld` gets pointed at `build`. Falls back to
+            // Phase 7 fix (Phase 8 gate): commands the Rust dispatch
+            // doesn't declare (`ship`, `validate`, `host`, `audio`,
+            // `inspect`, `import-design`, `export-tokens`,
+            // `design-debug`, plus any future C++-only
+            // subcommand) must still work for users and the Pulp
+            // Claude plugin. Route them through pulp-cpp when
+            // available before falling back to the fuzzy suggester.
+            let argv: Vec<String> = std::env::args().skip(1).collect();
+            if let Ok(pulp_rs::fallthrough::Outcome::Delegated(rc)) =
+                pulp_rs::fallthrough::delegate(&argv)
+            {
+                return ExitCode::from(u8::try_from(rc & 0xff).unwrap_or(1));
+            }
+
+            // No pulp-cpp on PATH (or fallthrough disabled). Match
+            // the C++ CLI's fuzzy suggester: print "Unknown command:
+            // …\nDid you mean: pulp-rs <closest>?" so a user who
+            // typed `buld` gets pointed at `build`. Falls back to
             // `Run `pulp-rs help` for usage` when no candidate is
             // within the distance-3 threshold (C++ uses the same
             // inclusive bound in `pulp_cli.cpp`).

@@ -108,6 +108,53 @@ fn pulp_use_cpp_with_resolvable_stub_forwards_argv() {
     );
 }
 
+/// `pulp ship sign` (and friends) aren't declared as Rust `Command`
+/// variants — `ship`, `validate`, `host`, `audio`, `inspect`,
+/// `import-design`, `export-tokens`, `design-debug` all stay in the
+/// C++ binary per the `pulp::view` / `pulp::ship` / `pulp::host` /
+/// `pulp::tool-audio` link surface. This test locks in the contract
+/// that clap's "invalid subcommand" path falls through to pulp-cpp
+/// before the fuzzy suggester fires.
+#[test]
+fn unknown_subcommand_falls_through_to_pulp_cpp_when_on_path() {
+    let td = tempfile::tempdir().expect("tempdir");
+    let stub_path = td.path().join(stub_binary_name());
+    fs::write(&stub_path, stub_script_body()).expect("write stub");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(&stub_path).unwrap().permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&stub_path, perms).unwrap();
+    }
+
+    let cur_path = std::env::var_os("PATH").unwrap_or_default();
+    let mut search_paths: Vec<PathBuf> = std::env::split_paths(&cur_path).collect();
+    search_paths.insert(0, td.path().to_path_buf());
+    let joined = std::env::join_paths(search_paths).expect("paths");
+
+    let output = Command::cargo_bin(BIN_NAME)
+        .expect("binary")
+        .arg("ship")
+        .arg("sign")
+        .arg("--identity")
+        .arg("Developer ID Application")
+        .env("PATH", joined)
+        .env_remove("PULP_USE_CPP")
+        .env_remove("PULP_RS_CPP_BINARY")
+        .env_remove("PULP_RS_FALLTHROUGH")
+        .output()
+        .expect("run");
+
+    let code = output.status.code().expect("exit code");
+    assert_eq!(code, 42, "expected stub exit 42 (delegation), got {code}");
+    let stdout = String::from_utf8(output.stdout).expect("utf8");
+    assert!(
+        stdout.contains("ship") && stdout.contains("sign") && stdout.contains("--identity"),
+        "stub should echo forwarded argv; got: {stdout:?}"
+    );
+}
+
 #[cfg(unix)]
 fn stub_binary_name() -> &'static str {
     "pulp-cpp"
