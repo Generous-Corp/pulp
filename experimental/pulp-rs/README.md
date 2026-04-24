@@ -1,104 +1,239 @@
 # pulp-rs (experimental)
 
-Rust prototype built to evaluate whether the Pulp CLI (`tools/cli/*.cpp`)
-should be rewritten in Rust. **Not shipping. Not user-facing. Not
-wired into any Pulp build.**
+Rust prototype built to evaluate whether the Pulp CLI
+(`tools/cli/*.cpp`) should be rewritten in Rust. **Not shipping. Not
+user-facing. Not wired into any Pulp build.** See GitHub issue
+[#686](https://github.com/danielraffel/pulp/issues/686) for the full
+evaluation framework and decision criteria.
 
-See GitHub issue [#686](https://github.com/danielraffel/pulp/issues/686)
-for the full evaluation framework and decision criteria.
+This crate lives on `explore/rust-cli-prototype` and will never merge
+to `main`. It exists so reviewers can clone one branch, run a handful
+of commands, and form an opinion about whether a phased C++ → Rust
+CLI migration is worth the investment.
+
+---
+
+## Architecture
+
+```text
+  ┌─────────────────────────────────────────────────────────┐
+  │  bin/pulp-rs  (src/main.rs)                              │
+  │  ─ clap parser + subcommand dispatch, ~130 LOC           │
+  └─────────────────┬───────────────────────────────────────┘
+                    │ calls
+                    ▼
+  ┌─────────────────────────────────────────────────────────┐
+  │  cmd/  (orchestrators — one module per subcommand)      │
+  │  ├─ doctor.rs    → pulp doctor --versions [--json]       │
+  │  └─ projects.rs  → pulp projects list [--json]           │
+  └─────────────────┬───────────────────────────────────────┘
+                    │ composes
+                    ▼
+  ┌─────────────────────────────────────────────────────────┐
+  │  diag::   VersionDiag snapshot + findings rules + emitter│
+  │  parse::  cmake, plugin.json, pulp.toml, SemverCompat    │
+  │  registry::  ~/.pulp/projects.json reader                │
+  │  color::  TTY / NO_COLOR-aware terminal attributes       │
+  │  error::  typed domain errors (thiserror)                │
+  └─────────────────────────────────────────────────────────┘
+```
+
+**Library + binary split.** `main.rs` is a thin clap wrapper over
+`pulp_rs::cmd::*`. Integration tests link directly against the
+library; benchmarks drive `diag::` and `parse::` APIs without
+shelling out.
+
+**Invariants the tests pin:**
+
+- Byte-for-byte parity with the C++ writer for the doctor JSON
+  lane. Captured `expected.json` fixtures are the oracle.
+- Zero production coupling: no CMake discovery, no Pulp C++
+  libraries, no FFI. Pure-Rust deps only.
+- Graceful degradation: malformed input files → empty version →
+  diagnostic continues. Mirrors the C++ "registry is best-effort"
+  rule.
+
+---
 
 ## Build and run
 
 ```bash
 cd experimental/pulp-rs
-cargo build --release
+
+# Fast dev cycle
+cargo build
 cargo run -- doctor --versions --json
+cargo run -- projects list
+cargo run -- projects list --json
+
+# Release build (LTO, strip, panic=abort → ~1.9 MB mac binary)
+cargo build --release
+./target/release/pulp-rs doctor --versions --json
 ```
+
+---
 
 ## Test
 
 ```bash
-cd experimental/pulp-rs
-cargo test                                    # unit + integration + parity tests
-cargo test --test parity_test                 # parity only (vs captured expected.json)
+cargo test                                    # unit + integration + parity + snapshots
+cargo test --test parity_test                 # doctor JSON parity only
+cargo test --test projects_parity_test        # projects list parity only
+cargo test --test snapshot_test               # insta snapshots
+
+# Update snapshots after a deliberate shape change
+cargo insta review                            # interactive
+cargo insta accept                            # non-interactive
 
 # Live parity against a built C++ CLI (optional):
-PULP_CLI_PATH=/Users/you/Code/pulp/build/tools/cli/pulp \
+PULP_CLI_PATH=/path/to/pulp/build/tools/cli/pulp \
   cargo test --test parity_test
 ```
 
-## Phase 2 — what's ported
+| Lane                | What it exercises                                    |
+|---------------------|------------------------------------------------------|
+| unit tests          | Every pure-function module; proptest on parsers.     |
+| doctor parity test  | Rust JSON vs captured C++ `expected.json` fixtures.  |
+| projects parity     | Rust human vs captured C++ `expected_human.txt`; JSON vs `expected.json`. |
+| snapshot tests      | insta snapshots of the JSON shape for regression.    |
+| smoke tests         | Spawn the binary, assert top-level JSON shape.       |
 
-The `doctor --versions --json` command is now functional and parity-
-tested against the C++ implementation:
+---
 
-| Behavior                                                | Status |
-|---------------------------------------------------------|--------|
-| Read `CMakeLists.txt` `project(... VERSION X.Y.Z)`      | Yes    |
-| Read `pulp.toml` `sdk_version` / `cli_min_version`      | Yes    |
-| Read `.claude-plugin/plugin.json` version + min_cli     | Yes    |
-| Walk `~/.pulp/projects.json` registered projects        | Yes    |
-| Compose `findings[]` (rules 1, 1b, 2a, 2b, 3)           | Yes    |
-| JSON shape byte-compatible with C++ `render_report_json`| Yes    |
-| Human-readable output (`--versions` without `--json`)   | Stub   |
-| `--scan-parents` ancestor walk                          | No     |
+## What's ported
 
-Rules 1 (`cli_min_version` check added in PR #691) and 1b (plugin
-`min_cli_version`, PR #551) are both implemented. The parity test
-compares against captured `expected.json` fixtures sourced from the
-live C++ `pulp` binary.
+| C++ command                                  | Rust status          | Notes                                     |
+|----------------------------------------------|----------------------|-------------------------------------------|
+| `pulp doctor --versions --json`              | Parity-tested        | Phase 2. Rules 1 / 1b / 2a / 2b / 3.      |
+| `pulp doctor --versions` (human)             | Stub                 | Future phase.                             |
+| `pulp doctor --scan-parents`                 | Not ported           | Future phase.                             |
+| `pulp doctor --fix`                          | Not ported           | Future phase.                             |
+| `pulp projects list`                         | Parity-tested        | Phase 4. Human + `--json` lane.           |
+| `pulp projects list --json`                  | **Added by Rust**    | Phase 4. C++ has no `--json` flag today.  |
+| `pulp projects add / remove`                 | Not ported           | Future phase.                             |
+| everything else                              | Not ported           | Use the C++ binary.                       |
 
-## Fixtures
+Five doctor fixtures and four projects fixtures drive the parity
+tests. `expected_human.txt` was captured from the live C++ CLI and
+normalised (the registry path is replaced with `<REGISTRY>` so diffs
+are portable across machines).
 
-Five fixture projects under `tests/fixtures/` drive the parity test:
+---
 
-- `ok_plain/` — stock standalone project, triggers the Info finding
-- `sdk_ahead/` — project SDK newer than CLI → rule 2a warn
-- `cli_min_ahead/` — cli_min_version ahead → rule 1 warn + rule 2a warn
-- `plugin_newer/` — plugin.json `min_cli_version` ahead → rule 1b
-- `registered_projects/` — stale `~/.pulp/projects.json` entries
+## Decisions
 
-Each has an `expected.json` captured from the live C++ CLI at
-`CLI=0.37.0`. The parity test pins `PULP_RS_CLI_VERSION=0.37.0` so
-both lanes render on the same CLI reference.
+- **`toml` crate over hand-rolling.** The C++ side walks `pulp.toml`
+  line-by-line to keep its test-binary link surface small. We don't
+  share that constraint — the `toml` crate handles quote/escape/key-
+  boundary edge cases for free.
+- **`thiserror` for domain errors, `anyhow` only at the `main`
+  boundary.** Library functions return typed `CliError`; the binary
+  flattens into `anyhow` for display. Reviewers can pattern-match on
+  variants in tests instead of grepping strings.
+- **`serde_json` `preserve_order` feature.** Required to reproduce
+  C++ key ordering byte-for-byte without hand-writing a JSON encoder.
+- **Library + binary split.** `main.rs` stays at ~130 LOC; every
+  other surface is testable without subprocess spawn.
+- **No FFI into the Pulp C++ library.** Criterion #4 of #686
+  (zero production coupling) is a hard constraint: the prototype
+  either matches C++ behaviour using Rust-only code, or it isn't a
+  fair evaluation.
+- **Inject overrides instead of mutating env in tests.** `diag::CollectOpts`
+  and `projects::run_with_registry` exist so parallel-test runs don't
+  race on `PULP_HOME` / `PULP_RS_CLI_VERSION`.
 
-## Evaluation snapshot (criterion-by-criterion)
+### Rejected alternatives
 
-| # | Criterion                  | Phase 2 reading |
-|---|----------------------------|-----------------|
-| 1 | Parity                     | Matches C++ byte-for-byte on 5/5 fixtures for `--versions --json`. Other `doctor` flags (`android`, `ios`, `--fix`, `--scan-parents`) not ported yet. |
-| 2 | Lower complexity           | ~600 production LOC in Rust vs ~940 LOC in C++ (`version_diag.cpp` + `projects_registry.cpp` + the doctor slice of `cmd_doctor.cpp` + helpers in `cli_common.cpp`). **Rust is roughly 35% shorter**, plus you get enum-exhaustive match, Result-based error propagation, and a real TOML parser for free. |
-| 3 | Better test ergonomics     | Three test lanes (`cargo test`) run unit + smoke + parity in under 1s cold, 50ms warm. Fixture-driven JSON diffing against captured C++ output was trivial to set up; the equivalent in the C++ Catch2 harness involves CMake test-binary wiring, shellout helpers, and a build for any fixture change. **Clear win**. |
-| 4 | No production coupling     | Crate is under `experimental/pulp-rs/` only. Nothing else in the repo references it. Runs entirely via cargo. CMake never discovers it. No FFI, no vendored C++ deps — just stdlib + serde + regex + toml + clap. |
-| 5 | Cross-platform CI          | Workflow added at `.github/workflows/pulp-rs-experiment.yml` with macos-latest / ubuntu-latest / windows-latest matrix. Gated to `branches: [explore/rust-cli-prototype]` so it only runs on this branch; never merges to main. Locally green on macOS. |
-| 6 | Clear migration boundary   | Not yet demonstrated — Phase 2 ports ONE command. The boundary question is about landing a whole cutover, which Phases 3–N would need to explore. At today's scope, the boundary is "everything except `doctor --versions --json` still runs in C++." |
+- **`fat` LTO for the release profile** — 3× compile time for ~2%
+  binary-size gain. Not worth it for a prototype; `thin` LTO is the
+  sweet spot.
+- **`termcolor` / `owo-colors` dependencies** — four attributes
+  (`reset`, `dim`, `yellow`, `green`) don't justify a dependency.
+  Hand-rolled `color.rs` with `is-terminal` + `NO_COLOR` detection is
+  ~50 LOC.
+- **Re-implementing `Project` registry writes in Rust** — C++ still
+  owns `add` / `remove`. Writing schema-compatible JSON from two
+  places is a maintenance hazard; Phase 4 is read-only by design.
 
-### What the numbers say so far
+---
 
-- **Parity**: works on the ported surface. Confidence high that the
-  rest of `doctor` would port cleanly — the hardest bits (path
-  normalisation, TOML line-based reading, regex for CMakeLists, JSON
-  shape) are already solved.
-- **LOC**: 600 prod / 281 tests / 978 including inline `#[cfg(test)]`.
-  Slightly under the 800-line prod budget, slightly over if you
-  count inline tests as "Rust code" — but those inline tests replace
-  some of the Catch2 test surface that lives in the C++ side's
-  `test/test_cli_version_diag.cpp`, so the comparison is roughly apples-
-  to-apples.
-- **Build time**: 15s clean cargo build, <2s incremental. C++ CMake
-  configure + build of `pulp` alone is 60s+ clean.
-- **Cross-platform**: not yet proven in CI. The workflow runs locally-
-  green but needs a push to show green on Linux / Windows. Nothing in
-  the code uses platform-specific APIs beyond the `HOME`/`USERPROFILE`
-  split which is cfg-gated.
+## Benchmarks
 
-## Phase 3 (suggested)
+`cargo bench --bench hot_paths` drives Criterion over the four hot
+paths that matter in a doctor run:
 
-- Write up the evaluation verdict for issue #686 against all six
-  criteria. If the Go path wins: scope Phases 4–N as a port of the
-  remaining `doctor` modes, then the other top-N commands.
-- If Stop/Defer: archive this crate and capture the LOC / ergonomics
-  learnings in the issue closeout.
+| Benchmark                       | Measurement (Apple M1 Pro, macOS 15.3) |
+|---------------------------------|----------------------------------------|
+| `parse_pulp_toml_1kb`           | ~3.65 µs                               |
+| `parse_semver_clean_triple`     | ~108 ns                                |
+| `parse_semver_prerelease`       | ~83 ns                                 |
+| `compose_findings_100_projects` | ~5.25 µs                               |
+| `emit_json_empty_diag`          | ~2.55 µs                               |
+
+**Cold-start** of `target/release/pulp-rs doctor --versions --json`
+on a realistic fixture: **4–5 ms** median across 20 runs. Target was
+<100 ms on mac; we have two orders of magnitude of headroom.
+
+**Binary size** (release, `strip=true`, `lto=thin`,
+`codegen-units=1`, `panic=abort`): **~1.9 MB** on aarch64 mac.
+
+Raw Criterion HTML reports land in
+`target/criterion/<bench>/report/index.html`.
+
+---
+
+## How to extend — porting another C++ command in 4 steps
+
+1. **Read the C++ source.** Identify the orchestrator (`cmd_X.cpp`)
+   and the data-layer modules it depends on (`X_registry.cpp`,
+   parsers under `cli_common.cpp`). Note every flag, exit code, and
+   error message.
+2. **Port the data layer first.** Add or extend a module under
+   `src/parse/` or `src/registry.rs`. Keep every function returning
+   `CliError`; add proptest fuzzers over parser inputs.
+3. **Write the orchestrator** under `src/cmd/<command>.rs` with a
+   `run(args, out: &mut impl Write)` signature. Take an explicit
+   output sink so tests don't shell out.
+4. **Lock behaviour down with fixtures.** Capture the C++ output for
+   each interesting state into `tests/fixtures/<command>/<case>/`,
+   normalise machine-specific bits, then add a test under
+   `tests/<command>_parity_test.rs` that diffs Rust output against
+   the captured reference. Snapshot-test any Rust-introduced shape
+   with `insta`.
+
+`src/cmd/projects.rs` is a complete worked example of the pattern.
+
+---
+
+## Quality gates
+
+Every commit must pass, at minimum:
+
+```bash
+cargo fmt --check
+cargo clippy --all-targets --all-features -- -D warnings -W clippy::pedantic -W clippy::nursery
+cargo test
+cargo bench --no-run
+cargo doc --no-deps
+```
+
+CI on `.github/workflows/pulp-rs-experiment.yml` runs the same gates
+on macOS / Ubuntu / Windows.
+
+---
+
+## Evaluation snapshot (six criteria, post-Phase-4)
+
+| # | Criterion                  | Reading |
+|---|----------------------------|---------|
+| 1 | Parity                     | Doctor JSON: 5/5 fixtures byte-equal to C++. Projects human: 4/4 fixtures byte-equal after `<REGISTRY>` normalisation. |
+| 2 | Lower complexity           | ~1000 production LOC Rust vs ~1100 LOC C++ across `version_diag.cpp + projects_registry.cpp + cmd_projects.cpp + cmd_doctor.cpp` slices. Not shorter by much, but every non-trivial function has a test, and the error surface is typed. |
+| 3 | Test ergonomics            | 50+ tests run in <1s. Catch2 parity needs CMake test-binary wiring; Rust gets insta snapshots + proptest + `assert_cmd` out of the box. |
+| 4 | No production coupling     | Crate sits under `experimental/pulp-rs/`. No FFI, no CMake discovery, no Pulp dep. Cold-clone + `cargo test` works. |
+| 5 | Cross-platform CI          | Matrix workflow green locally on macOS. Linux + Windows runs pending first CI push. |
+| 6 | Clear migration boundary   | Two commands ported cleanly using the same pattern. The boundary is "two commands; a larger cutover would repeat the pattern N times." |
+
+---
 
 ## Why this directory isn't in CMake
 

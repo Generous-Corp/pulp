@@ -5,16 +5,18 @@
 # is an exploration per CLAUDE.md's "Exploration → Validation → Landing"
 # flow, so `main` will never see this file.
 #
-# The workflow does cargo build + cargo test on all three platforms.
-# Nothing here interacts with the main Pulp CMake build. Nothing here
-# touches the Shipyard cross-platform validation matrix — those gates
-# remain owned by `build.yml` and Shipyard's own ship flow.
+# Gates enforced:
+#   - cargo fmt --check                    (style)
+#   - cargo clippy -D warnings -W pedantic (lint, build on all platforms)
+#   - cargo test                           (unit + integration + parity + snapshots + doctests)
+#   - cargo bench --no-run                 (benches still compile)
+#   - cargo doc --no-deps                  (rustdoc links resolve)
 #
 # Evaluation lens (issue #686):
-#   - Cross-platform CI      — does cargo build green on mac/ubuntu/win?
+#   - Cross-platform CI      — does cargo build/test green on mac/ubuntu/win?
 #   - Test ergonomics        — do parity tests run quickly and in CI?
 #
-# Not in scope here: parity against the C++ CLI in CI. The C++ CLI
+# Not in scope here: parity against a live C++ CLI in CI. The C++ CLI
 # isn't built in this job (that would couple the prototype to the main
 # build, violating the "no production coupling" criterion). Parity is
 # validated locally with `PULP_CLI_PATH=<built pulp>` against the
@@ -35,7 +37,8 @@ permissions:
   contents: read
 
 jobs:
-  build-and-test:
+  quality:
+    name: quality (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
@@ -47,20 +50,48 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install stable Rust
+      - name: Install stable Rust (with rustfmt + clippy)
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
 
       - name: Cache cargo registry and build
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: experimental/pulp-rs
 
+      # Style and lint first — fastest-failing checks go at the top so
+      # a busted commit wastes as little CI time as possible.
+      - name: cargo fmt --check
+        run: cargo fmt --check
+
+      - name: cargo clippy -D warnings -W pedantic
+        run: >-
+          cargo clippy --all-targets --all-features --
+          -D warnings
+          -W clippy::pedantic
+          -W clippy::nursery
+
+      # Build before test so test failures aren't confounded by a
+      # missing binary.
       - name: cargo build --release
         run: cargo build --release
 
       # Parity tests compare against captured expected.json, which
-      # reference the path the fixtures were captured on. The parity
-      # test normalises project_root before comparison so this is
-      # portable — no C++ CLI needed in CI.
-      - name: cargo test
+      # references the path the fixtures were captured on. Each parity
+      # test normalises machine-specific fields before comparison so
+      # this runs portably in CI — no C++ CLI needed.
+      - name: cargo test --release
         run: cargo test --release
+
+      # Benches must still compile even though we don't run them in CI
+      # (noisy on shared runners). A `--no-run` check catches drift
+      # between the benchmark code and the library API.
+      - name: cargo bench --no-run
+        run: cargo bench --no-run
+
+      # Catch broken intra-doc links and missing `# Errors` sections.
+      - name: cargo doc --no-deps
+        run: cargo doc --no-deps
+        env:
+          RUSTDOCFLAGS: "-D warnings"
