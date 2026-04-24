@@ -9,6 +9,10 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
 <a id="v0411"></a>
+## [0.15.0]
+
+## [0.42.0]
+
 ## [0.41.1] - 2026-04-24
 
 - fix(release): skip validation tests in sign-and-release ctest (#720) ([#721](https://github.com/danielraffel/pulp/pull/721))
