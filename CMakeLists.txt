@@ -69,7 +69,16 @@ set(PULP_ARA_SDK_DIR "" CACHE PATH "Path to a developer-supplied Celemony ARA SD
 
 # ── Compiler Warnings ──────────────────────────────────────────────────────
 if(MSVC)
-    add_compile_options(/W4 /wd4100)
+    # /utf-8 makes MSVC treat source files AND narrow string literals as
+    # UTF-8, and makes argv decode via UTF-8 regardless of the system
+    # ANSI code page (CP_ACP). Without this, test names like
+    # "applies_if — empty expression" get mangled to "G??" when ctest
+    # spawns the test binary on Namespace Windows runners — 46+
+    # spurious filter-no-match failures per PR. `chcp 65001` in the
+    # workflow changes the console CP but NOT CP_ACP, which is what
+    # the CRT uses to narrow argv. `/utf-8` sidesteps CP_ACP entirely.
+    # See #707.
+    add_compile_options(/utf-8 /W4 /wd4100)
 else()
     add_compile_options(-Wall -Wextra -Wpedantic -Wno-unused-parameter)
 endif()
