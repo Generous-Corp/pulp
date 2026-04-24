@@ -241,8 +241,20 @@ jobs:
 
       - name: Test
         working-directory: build
-        run: ctest --output-on-failure -C Release -LE validation -j4 --exclude-regex "STFT|VisualizationBridge|Clipboard|Toolbar add items"
         shell: bash
+        run: |
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            # Force UTF-8 console code page on Windows so ctest's child
+            # processes receive filter args (test names containing em-dashes
+            # like "applies_if — empty expression") without CP-1252 mangling.
+            # GitHub-hosted Windows defaults to 65001; Namespace Windows
+            # defaults to CP-1252 → mangled "—" to "G??" → 46 spurious
+            # test-filter-no-match failures (#676 debugging, 2026-04-23).
+            # Applies to the current console session; child processes inherit.
+            chcp.com 65001 >/dev/null || true
+            export PYTHONIOENCODING=utf-8
+          fi
+          ctest --output-on-failure -C Release -LE validation -j4 --exclude-regex "STFT|VisualizationBridge|Clipboard|Toolbar add items"
 
       - name: Upload plugin bundles (macOS)
         if: success() && runner.os == 'macOS'
