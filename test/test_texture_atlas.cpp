@@ -83,3 +83,182 @@ TEST_CASE("BufferPool acquire and release", "[render][atlas]") {
     REQUIRE(v2.empty());  // but cleared
     REQUIRE(pool.pool_size() == 0);
 }
+
+// ── Additional coverage — issue-646 ─────────────────────────────────────
+
+TEST_CASE("AtlasPacker starts new shelf when current is full — issue-646",
+          "[render][atlas][issue-646]") {
+    // 100-wide packer: first 60 fit on shelf 0, second 60 won't fit next to them,
+    // so the allocator rolls to a new shelf and returns x=0 at y=shelf_h.
+    AtlasPacker p(100, 200);
+    AtlasPacker::Region a{};
+    AtlasPacker::Region b{};
+    REQUIRE(p.allocate(60, 40, a));
+    REQUIRE(a.x == 0);
+    REQUIRE(a.y == 0);
+
+    // Does not fit next to `a` (60 + 60 > 100); should roll to next shelf.
+    REQUIRE(p.allocate(60, 30, b));
+    REQUIRE(b.x == 0);
+    REQUIRE(b.y == 40);   // shelf advanced by previous shelf height
+    REQUIRE(p.width() == 100);
+    REQUIRE(p.height() == 200);
+}
+
+TEST_CASE("AtlasPacker returns false when atlas is full — issue-646",
+          "[render][atlas][issue-646]") {
+    AtlasPacker p(64, 64);
+    AtlasPacker::Region r{};
+    REQUIRE(p.allocate(64, 50, r));   // occupies most of the height
+    // Next allocation needs more height than remains and cannot fit on the
+    // current shelf horizontally (64 wide), so the packer rejects it.
+    REQUIRE_FALSE(p.allocate(64, 20, r));
+}
+
+TEST_CASE("AtlasPacker reset lets us pack again from origin — issue-646",
+          "[render][atlas][issue-646]") {
+    AtlasPacker p(64, 64);
+    AtlasPacker::Region r{};
+    REQUIRE(p.allocate(64, 64, r));
+    REQUIRE_FALSE(p.allocate(8, 8, r));  // full
+
+    p.reset();
+    REQUIRE(p.allocate(8, 8, r));
+    REQUIRE(r.x == 0);
+    REQUIRE(r.y == 0);
+}
+
+TEST_CASE("ImageAtlas mark_used keeps live entry from eviction — issue-646",
+          "[render][atlas][issue-646]") {
+    ImageAtlas atlas(256);
+    AtlasPacker::Region r{};
+    REQUIRE(atlas.allocate(7, 16, 16, r));
+    atlas.release(7);                   // ref_count -> 0, eligible for stale eviction
+    atlas.mark_used(7, /*frame=*/100);
+
+    // current_frame - last_used = 10 <= max_age (50) → NOT evicted.
+    REQUIRE(atlas.evict_stale(110, /*max_age=*/50) == 0);
+    REQUIRE(atlas.entry_count() == 1);
+
+    // Now push age past the threshold; entry goes away.
+    REQUIRE(atlas.evict_stale(200, /*max_age=*/50) == 1);
+    REQUIRE(atlas.entry_count() == 0);
+}
+
+TEST_CASE("ImageAtlas release of unknown key is a no-op — issue-646",
+          "[render][atlas][issue-646]") {
+    ImageAtlas atlas(128);
+    atlas.release(999);                 // no entry, must not crash or mutate
+    REQUIRE(atlas.entry_count() == 0);
+    atlas.mark_used(999, 1);            // mark_used on missing key also no-op
+    REQUIRE(atlas.entry_count() == 0);
+}
+
+TEST_CASE("ImageAtlas skips eviction while ref_count is non-zero — issue-646",
+          "[render][atlas][issue-646]") {
+    ImageAtlas atlas(128);
+    AtlasPacker::Region r{};
+    REQUIRE(atlas.allocate(5, 8, 8, r));
+    // No release() → ref_count stays at 1; even very old entries survive.
+    REQUIRE(atlas.evict_stale(/*current=*/10'000, /*max_age=*/1) == 0);
+    REQUIRE(atlas.entry_count() == 1);
+}
+
+TEST_CASE("GradientAtlas has() reflects allocation and mark_used no-ops — issue-646",
+          "[render][atlas][issue-646]") {
+    GradientAtlas ga;
+    REQUIRE_FALSE(ga.has(42));
+    int row = -1;
+    REQUIRE(ga.allocate(42, row));
+    REQUIRE(ga.has(42));
+    REQUIRE(ga.entry_count() == 1);
+
+    // mark_used on unknown key should silently do nothing.
+    ga.mark_used(999, 100);
+    REQUIRE(ga.entry_count() == 1);
+}
+
+TEST_CASE("GlyphAtlas allocate reuses same key, evicts by age — issue-646",
+          "[render][atlas][issue-646]") {
+    GlyphAtlas atlas(256);
+    AtlasPacker::Region r1{};
+    AtlasPacker::Region r2{};
+
+    REQUIRE(atlas.allocate(/*glyph=*/11, 12, 16, r1));
+    REQUIRE(atlas.entry_count() == 1);
+
+    // Same key returns the same region without re-packing.
+    REQUIRE(atlas.allocate(11, 12, 16, r2));
+    REQUIRE(r2.x == r1.x);
+    REQUIRE(r2.y == r1.y);
+    REQUIRE(atlas.entry_count() == 1);
+
+    atlas.mark_used(11, 50);
+    // Age still within max_age: not evicted.
+    REQUIRE(atlas.evict_stale(100, /*max_age=*/100) == 0);
+    // Age exceeds max_age: evicted.
+    REQUIRE(atlas.evict_stale(1000, /*max_age=*/100) == 1);
+    REQUIRE(atlas.entry_count() == 0);
+
+    // mark_used after eviction is a no-op.
+    atlas.mark_used(11, 2000);
+    REQUIRE(atlas.entry_count() == 0);
+}
+
+TEST_CASE("GlyphAtlas rejects oversized glyph — issue-646",
+          "[render][atlas][issue-646]") {
+    GlyphAtlas atlas(32);
+    AtlasPacker::Region r{};
+    REQUIRE_FALSE(atlas.allocate(1, /*w=*/64, /*h=*/64, r));
+    REQUIRE(atlas.entry_count() == 0);
+}
+
+TEST_CASE("PathAtlas allocate, cache hit, and eviction — issue-646",
+          "[render][atlas][issue-646]") {
+    PathAtlas atlas(256);
+    AtlasPacker::Region r1{};
+    AtlasPacker::Region r2{};
+
+    REQUIRE(atlas.allocate(/*hash=*/0xABCD, 40, 40, r1));
+    REQUIRE(atlas.entry_count() == 1);
+
+    // Cache hit on same hash returns same region without advancing packer.
+    REQUIRE(atlas.allocate(0xABCD, 40, 40, r2));
+    REQUIRE(r2.x == r1.x);
+    REQUIRE(r2.y == r1.y);
+    REQUIRE(atlas.entry_count() == 1);
+
+    atlas.mark_used(0xABCD, 500);
+    REQUIRE(atlas.evict_stale(600, /*max_age=*/200) == 0);   // still fresh
+    REQUIRE(atlas.evict_stale(2000, /*max_age=*/200) == 1);  // stale
+    REQUIRE(atlas.entry_count() == 0);
+}
+
+TEST_CASE("PathAtlas rejects oversized path bitmap — issue-646",
+          "[render][atlas][issue-646]") {
+    PathAtlas atlas(64);
+    AtlasPacker::Region r{};
+    REQUIRE_FALSE(atlas.allocate(1, /*w=*/128, /*h=*/128, r));
+    REQUIRE(atlas.entry_count() == 0);
+}
+
+TEST_CASE("BufferPool caps retained buffers at max_pool_size — issue-646",
+          "[render][atlas][issue-646]") {
+    BufferPool<int> pool;
+    // max_pool_size_ defaults to 32 (see texture_atlas.hpp); release many more
+    // and verify the pool does not grow unbounded.
+    for (int i = 0; i < 100; ++i) {
+        std::vector<int> v;
+        v.reserve(4);
+        pool.release(std::move(v));
+    }
+    REQUIRE(pool.pool_size() == 32);
+
+    // Draining returns cached buffers, not more than we stored.
+    std::size_t drained = 0;
+    while (pool.pool_size() > 0) {
+        (void)pool.acquire();
+        ++drained;
+    }
+    REQUIRE(drained == 32);
+}

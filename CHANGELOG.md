@@ -8,6 +8,12 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v0402"></a>
+## [0.40.2] - 2026-04-23
+
+- fix/release vst3 tag drift ([#701](https://github.com/danielraffel/pulp/pull/701))
+- test(render): extend atlas/gpu-graph/render-loop coverage (#646) ([#700](https://github.com/danielraffel/pulp/pull/700))
+
 <a id="v0401"></a>
 ## [0.40.1] - 2026-04-23
 
@@ -605,6 +611,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.40.2]: https://github.com/danielraffel/pulp/releases/tag/v0.40.2
 [0.40.1]: https://github.com/danielraffel/pulp/releases/tag/v0.40.1
 [0.40.0]: https://github.com/danielraffel/pulp/releases/tag/v0.40.0
 [0.39.0]: https://github.com/danielraffel/pulp/releases/tag/v0.39.0
