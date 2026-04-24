@@ -239,24 +239,29 @@ jobs:
         run: ccache --show-stats
         shell: bash
 
-      - name: Test
+      - name: Test (non-Windows)
+        if: runner.os != 'Windows'
         working-directory: build
         shell: bash
+        run: ctest --output-on-failure -C Release -LE validation -j4 --exclude-regex "STFT|VisualizationBridge|Clipboard|Toolbar add items"
+
+      - name: Test (Windows — UTF-8 code page wrapped)
+        # Windows needs a UTF-8 console code page so ctest's child
+        # processes receive filter args (test names with em-dashes
+        # like "applies_if — empty expression") without CP-1252
+        # mangling. Wrapping ctest inside `cmd /c "chcp 65001 & ctest"`
+        # ensures the code page applies to the cmd subshell that
+        # spawns test binaries — a plain bash `chcp.com 65001` ran
+        # at the outer shell level but didn't propagate to ctest's
+        # children on Namespace Windows (observed on #702).
+        # Shipyard v0.38.0's UTF-8 prelude only covers commands
+        # Shipyard dispatches via ssh-windows; GH Actions ctest
+        # calls don't go through that path.
+        if: runner.os == 'Windows'
+        working-directory: build
+        shell: cmd
         run: |
-          if [[ "$RUNNER_OS" == "Windows" ]]; then
-            # Force UTF-8 console code page on Windows. ctest's child
-            # processes receive filter args (test names containing em-
-            # dashes like "applies_if — empty expression") which get
-            # mangled to "G??" on Namespace Windows's CP-1252 default,
-            # causing 46+ spurious test-filter-no-match failures.
-            # Shipyard v0.38.0's UTF-8 prelude covers commands shipyard
-            # dispatches over ssh-windows, but GitHub Actions runs
-            # ctest directly through the runner — that path still
-            # needs this step. Previous revert in #699 was wrong.
-            # See #683/#702.
-            chcp.com 65001 >/dev/null || true
-            export PYTHONIOENCODING=utf-8
-          fi
+          chcp 65001
           ctest --output-on-failure -C Release -LE validation -j4 --exclude-regex "STFT|VisualizationBridge|Clipboard|Toolbar add items"
 
       - name: Upload plugin bundles (macOS)
