@@ -87,6 +87,17 @@ jobs:
           print(f"structural parse OK across {sum(1 for _ in pathlib.Path('.github/workflows').rglob('*.y*ml'))} files")
           PY
 
+      - name: Release-pipeline regression tests (#720)
+        # Regression coverage for the silent sign-and-release breakage
+        # tracked in #720: assert that release-side ctest invocations
+        # keep skipping the `validation` label so auval failures on
+        # hosted GitHub macOS runners cannot silently break the
+        # sign / notarize / publish pipeline.
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/scripts/test_release_workflow_test_step.py
+
       - name: actionlint
         # Disable shellcheck + pyflakes — the Pulp repo has accumulated
         # ~30 pre-existing shellcheck findings across auto-release.yml,
