@@ -176,3 +176,73 @@ TEST_CASE("MpeVoiceTracker reset clears per-channel expression caches", "[midi][
     REQUIRE(n->pressure == Approx(0.0f).margin(1e-6f));
     REQUIRE(n->timbre == Approx(0.0f).margin(1e-6f));
 }
+
+TEST_CASE("MpeVoiceTracker dispatches MIDI 1.0 UMP packets through MPE zones", "[midi][mpe][ump]") {
+    MpeVoiceTracker tracker{MpeConfig::standard_lower(15)};
+
+    REQUIRE(tracker.process(UmpPacket::midi1_note_on(0, 1, 60, 100)));
+
+    const auto* n = tracker.find(1, 60);
+    REQUIRE(n != nullptr);
+    REQUIRE(n->velocity == 100);
+    REQUIRE(tracker.active_count() == 1);
+}
+
+TEST_CASE("MpeVoiceTracker applies MIDI 2.0 per-note expression to the matching note", "[midi][mpe][ump]") {
+    MpeVoiceTracker tracker{MpeConfig::standard_lower(15)};
+    tracker.set_member_bend_range(48.0f);
+
+    REQUIRE(tracker.process(UmpPacket::note_on_2(0, 1, 60, 0x8000)));
+    REQUIRE(tracker.process(UmpPacket::note_on_2(0, 2, 64, 0x8000)));
+
+    REQUIRE(tracker.process(UmpPacket::per_note_pitch_bend(0, 1, 60, 0xC0000000)));
+    REQUIRE(tracker.process(UmpPacket::registered_per_note_cc(0, 1, 60, 74, 0xFFFFFFFF)));
+
+    const auto* bent = tracker.find(1, 60);
+    const auto* untouched = tracker.find(2, 64);
+    REQUIRE(bent != nullptr);
+    REQUIRE(untouched != nullptr);
+    REQUIRE(bent->pitch_bend_semitones == Approx(24.0f).margin(0.01f));
+    REQUIRE(bent->timbre == Approx(1.0f).margin(1e-6f));
+    REQUIRE(untouched->pitch_bend_semitones == Approx(0.0f).margin(1e-6f));
+    REQUIRE(untouched->timbre == Approx(0.0f).margin(1e-6f));
+}
+
+TEST_CASE("MpeVoiceTracker handles MIDI 2.0 manager state and note release variants", "[midi][mpe][ump]") {
+    MpeVoiceTracker tracker{MpeConfig::standard_lower(15)};
+    tracker.set_manager_bend_range(2.0f);
+
+    REQUIRE(tracker.process(UmpPacket::pitch_bend_2(0, 0, 0x00000000)));
+    REQUIRE(tracker.lower_zone_state().pitch_bend_semitones == Approx(-2.0f).margin(0.01f));
+
+    REQUIRE(tracker.process(UmpPacket::cc_2(0, 0, 74, 0x80000000)));
+    REQUIRE(tracker.lower_zone_state().timbre == Approx(0.5f).margin(0.001f));
+
+    UmpPacket pressure;
+    pressure.word_count = 2;
+    pressure.words[0] = (0x4u << 28) | (uint32_t(0xD0) << 16);
+    pressure.words[1] = 0x80000000u;
+    REQUIRE(tracker.process(pressure));
+    REQUIRE(tracker.lower_zone_state().pressure == Approx(0.5f).margin(0.001f));
+
+    REQUIRE(tracker.process(UmpPacket::note_on_2(0, 3, 67, 0xFFFF)));
+    REQUIRE(tracker.active_count() == 1);
+    REQUIRE(tracker.process(UmpPacket::note_on_2(0, 3, 67, 0)));
+    REQUIRE(tracker.active_count() == 0);
+
+    REQUIRE(tracker.process(UmpPacket::note_on_2(0, 3, 67, 0xFFFF)));
+    REQUIRE(tracker.process(UmpPacket::note_off_2(0, 3, 67)));
+    REQUIRE(tracker.active_count() == 0);
+}
+
+TEST_CASE("MpeVoiceTracker ignores non-channel and out-of-zone UMP packets", "[midi][mpe][ump]") {
+    MpeVoiceTracker tracker{MpeConfig::standard_lower(4)};
+
+    UmpPacket utility;
+    utility.word_count = 1;
+    utility.words[0] = 0;
+
+    REQUIRE_FALSE(tracker.process(utility));
+    REQUIRE_FALSE(tracker.process(UmpPacket::note_on_2(0, 5, 60, 0xFFFF)));
+    REQUIRE(tracker.active_count() == 0);
+}

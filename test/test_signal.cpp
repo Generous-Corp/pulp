@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/signal/signal.hpp>
+#include <array>
 #include <cmath>
 #include <vector>
 
@@ -269,6 +270,34 @@ TEST_CASE("Biquad reset clears state", "[signal][biquad]") {
     // After reset, should behave as if freshly initialized
     float out = filter.process(0.0f);
     REQUIRE_THAT(out, WithinAbs(0.0, 0.001));
+}
+
+TEST_CASE("Biquad coefficient variants process finite impulse buffers", "[signal][biquad]") {
+    struct Case {
+        Biquad::Type type;
+        float gain_db;
+    };
+
+    const std::array<Case, 6> cases{{
+        {Biquad::Type::bandpass, 0.0f},
+        {Biquad::Type::notch, 0.0f},
+        {Biquad::Type::allpass, 0.0f},
+        {Biquad::Type::peaking, 6.0f},
+        {Biquad::Type::low_shelf, 6.0f},
+        {Biquad::Type::high_shelf, -6.0f},
+    }};
+
+    for (const auto& c : cases) {
+        Biquad filter;
+        filter.set_coefficients(c.type, 1200.0f, 0.707f, 48000.0f, c.gain_db);
+
+        float impulse[] = {1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f};
+        filter.process(impulse, 8);
+
+        for (float sample : impulse) {
+            REQUIRE(std::isfinite(sample));
+        }
+    }
 }
 
 // ── Oscillator ───────────────────────────────────────────────────────────────
@@ -734,4 +763,97 @@ TEST_CASE("Convolver with simple delay IR", "[signal][convolver]") {
     }
     REQUIRE(peak > 0.9f); // Should find the delayed impulse
     REQUIRE(peak_pos >= 4); // At least 4 samples delayed
+}
+
+// ── MultiChannelMeter ────────────────────────────────────────────────────────
+
+TEST_CASE("MultiChannelMeter emits peak RMS clipping and stereo correlation", "[signal][meter]") {
+    MultiChannelMeter meter;
+    meter.prepare(44100.0f, 2);
+
+    std::vector<float> left(441, 0.5f);
+    std::vector<float> right(441, 0.5f);
+    left[10] = 1.2f;
+
+    const float* channels[] = {left.data(), right.data()};
+    meter.process(channels, 2, static_cast<int>(left.size()));
+
+    const auto& snap = meter.snapshot();
+    REQUIRE(snap.num_channels == 2);
+    REQUIRE_THAT(snap.channels[0].peak, WithinAbs(1.2f, 0.001f));
+    REQUIRE(snap.channels[0].clipped);
+    REQUIRE_THAT(snap.channels[1].peak, WithinAbs(0.5f, 0.001f));
+    REQUIRE_THAT(snap.channels[1].rms, WithinAbs(0.5f, 0.001f));
+    REQUIRE_THAT(snap.correlation, WithinAbs(1.0f, 0.005f));
+    REQUIRE(std::isfinite(snap.channels[0].lufs_momentary));
+}
+
+TEST_CASE("MultiChannelMeter tracks negative correlation and integrated loudness", "[signal][meter]") {
+    MultiChannelMeter meter;
+    meter.prepare(1000.0f, 2);
+
+    std::vector<float> left(10, 0.25f);
+    std::vector<float> right(10, -0.25f);
+    const float* channels[] = {left.data(), right.data()};
+
+    for (int i = 0; i < 40; ++i) {
+        meter.process(channels, 2, static_cast<int>(left.size()));
+    }
+
+    const auto& snap = meter.snapshot();
+    REQUIRE(snap.num_channels == 2);
+    REQUIRE_THAT(snap.correlation, WithinAbs(-1.0f, 0.001f));
+    REQUIRE(std::isfinite(snap.lufs_integrated));
+    REQUIRE_THAT(snap.lufs_integrated, WithinAbs(-12.73f, 0.1f));
+}
+
+TEST_CASE("MultiChannelMeter prepare clears stale clip flags", "[signal][meter]") {
+    MultiChannelMeter meter;
+    meter.prepare(1000.0f, 1);
+
+    std::vector<float> clipped(10, 1.2f);
+    const float* clipped_channels[] = {clipped.data()};
+    meter.process(clipped_channels, 1, static_cast<int>(clipped.size()));
+    REQUIRE(meter.snapshot().channels[0].clipped);
+
+    meter.prepare(1000.0f, 1);
+
+    std::vector<float> clean(10, 0.25f);
+    const float* clean_channels[] = {clean.data()};
+    meter.process(clean_channels, 1, static_cast<int>(clean.size()));
+    REQUIRE_FALSE(meter.snapshot().channels[0].clipped);
+}
+
+TEST_CASE("MultiChannelBallistics holds peaks and clip indicators", "[signal][meter]") {
+    MultiChannelBallistics ballistics;
+
+    MultiChannelMeterData data;
+    data.num_channels = 1;
+    data.channels[0].peak = 1.0f;
+    data.channels[0].rms = 0.5f;
+    data.channels[0].clipped = true;
+
+    ballistics.update(data, 0.016f);
+    REQUIRE(ballistics.num_channels == 1);
+    REQUIRE(ballistics.channels[0].display_peak > 0.9f);
+    REQUIRE(ballistics.channels[0].display_rms > 0.45f);
+    REQUIRE_THAT(ballistics.channels[0].held_peak, WithinAbs(1.0f, 0.001f));
+    REQUIRE(ballistics.channels[0].clip_indicator);
+
+    data.channels[0].peak = 0.0f;
+    data.channels[0].rms = 0.0f;
+    data.channels[0].clipped = false;
+
+    ballistics.update(data, 0.5f);
+    REQUIRE(ballistics.channels[0].clip_indicator);
+    REQUIRE_THAT(ballistics.channels[0].held_peak, WithinAbs(1.0f, 0.001f));
+
+    ballistics.update(data, 3.0f);
+    REQUIRE_FALSE(ballistics.channels[0].clip_indicator);
+
+    data.channels[0].clipped = true;
+    ballistics.update(data, 0.016f);
+    REQUIRE(ballistics.channels[0].clip_indicator);
+    ballistics.clear_clips();
+    REQUIRE_FALSE(ballistics.channels[0].clip_indicator);
 }

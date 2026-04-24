@@ -127,6 +127,7 @@ public:
         for (int ch = 0; ch < kMaxMeterChannels; ++ch) {
             block_peak_[ch] = 0.0f;
             block_sum_sq_[ch] = 0.0f;
+            block_clipped_[ch] = false;
             lufs_sum_sq_[ch] = 0.0f;
         }
         block_samples_ = 0;
