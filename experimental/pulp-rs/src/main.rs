@@ -383,7 +383,15 @@ fn real_main() -> Result<(), ExitCode> {
                     ExitCode::from(2)
                 }
             })?;
-            cmd::config::run(sub, &mut out).map_err(|e| map_err(&e))
+            // `Sub::Help` needs no config-path resolution. Route it
+            // directly so `pulp-rs config` works even in a CI
+            // sandbox where `$HOME` is unset.
+            if matches!(sub, cmd::config::Sub::Help) {
+                cmd::config::run_with_path(sub, std::path::Path::new(""), &mut out)
+                    .map_err(|e| map_err(&e))
+            } else {
+                cmd::config::run(sub, &mut out).map_err(|e| map_err(&e))
+            }
         }
         Command::Upgrade(args) => {
             let mut ua = cmd::upgrade::UpgradeArgs {

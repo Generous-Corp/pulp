@@ -52,6 +52,9 @@ use crate::error::{CliError, Result};
 /// Subcommands under `pulp-rs config`.
 #[derive(Debug, Clone)]
 pub enum Sub {
+    /// Print the usage banner. Fires on bare `pulp-rs config` or on
+    /// explicit `help` / `--help` / `-h`.
+    Help,
     /// Dump every known key with the effective value.
     List {
         /// Emit JSON instead of the human-readable table.
@@ -79,10 +82,15 @@ pub enum Sub {
 /// [`CliError::BadUsage`] for a missing positional arg.
 pub fn parse_sub(args: &[String]) -> Result<Sub> {
     let Some(head) = args.first() else {
-        return Err(CliError::UnknownSubcommand);
+        // Bare `pulp-rs config` matches C++'s `args.empty()` branch:
+        // print usage + exit 0. #562 Codex P2 kept the NON-empty
+        // unknown-subcommand path at exit 2, which is preserved
+        // below.
+        return Ok(Sub::Help);
     };
     let tail = &args[1..];
     match head.as_str() {
+        "help" | "--help" | "-h" => Ok(Sub::Help),
         "list" => {
             let json = tail.iter().any(|s| s == "--json");
             Ok(Sub::List { json })
@@ -134,10 +142,42 @@ pub fn run(sub: Sub, out: &mut impl Write) -> Result<()> {
 /// See [`run`].
 pub fn run_with_path(sub: Sub, path: &Path, out: &mut impl Write) -> Result<()> {
     match sub {
+        Sub::Help => do_help(out),
         Sub::List { json } => do_list(path, json, out),
         Sub::Get { key } => do_get(path, &key, out),
         Sub::Set { key, value } => do_set(path, &key, &value, out),
     }
+}
+
+fn do_help(out: &mut impl Write) -> Result<()> {
+    let lines: &[&str] = &[
+        "pulp config — read/write ~/.pulp/config.toml",
+        "",
+        "Usage: pulp config <command>",
+        "",
+        "Commands:",
+        "  get <section.key>           Print the value (empty if unset)",
+        "  set <section.key> <value>   Write the value atomically",
+        "  list [--json]               Dump current update.* settings",
+        "",
+        "Supported keys (update section):",
+        "  update.mode                   auto | prompt | manual | off  (default: prompt)",
+        "  update.check_interval_hours   default: 24",
+        "  update.channel                stable | beta                 (default: stable)",
+        "  update.bump_projects          prompt | auto | off           (default: prompt)",
+        "",
+        "Examples:",
+        "  pulp config set update.mode manual",
+        "  pulp config get update.mode",
+        "",
+        "Notes:",
+        "  Changing update.mode clears the 24h snooze at ~/.pulp/update-snooze",
+        "  so the new mode takes effect on the next invocation.",
+    ];
+    for line in lines {
+        writeln!(out, "{line}").map_err(|e| CliError::io("<stdout>", e))?;
+    }
+    Ok(())
 }
 
 fn do_list(path: &Path, json: bool, out: &mut impl Write) -> Result<()> {
@@ -203,6 +243,27 @@ fn do_set(path: &Path, dotted: &str, new_value: &str, out: &mut impl Write) -> R
 
     writeln!(out, "Set {section}.{key} = {new_value}").map_err(|e| CliError::io("<stdout>", e))?;
     writeln!(out, "    {}", path.display()).map_err(|e| CliError::io("<stdout>", e))?;
+
+    // Slice 5 (#550): a mode change means the user has re-engaged
+    // with update management. Clear the 24h snooze so the new mode
+    // takes effect on the next invocation. Without this, a user who
+    // dismissed a banner yesterday and switches to `auto` today would
+    // still wait 24h for the first auto-download attempt.
+    //
+    // The snooze file sits next to config.toml (matching the C++
+    // `pulp_home() / "update-snooze"` layout); we resolve it via the
+    // parent dir of the resolved config path so tests can point both
+    // at a shared tempdir.
+    if section == "update" && key == "mode" {
+        if let Some(parent) = path.parent() {
+            let snooze = parent.join("update-snooze");
+            // Best-effort — matches the C++ `(void)clear_snooze(...)`
+            // semantics: if the file can't be removed for any reason
+            // (missing, permission denied, locked on Windows), the
+            // mode change itself still succeeded.
+            let _ = std::fs::remove_file(&snooze);
+        }
+    }
     Ok(())
 }
 
@@ -255,6 +316,84 @@ mod tests {
             parse_sub(&["wat".to_owned()]),
             Err(CliError::UnknownSubcommand)
         ));
+    }
+
+    #[test]
+    fn parse_sub_empty_returns_help() {
+        assert!(matches!(parse_sub(&[]).unwrap(), Sub::Help));
+    }
+
+    #[test]
+    fn parse_sub_explicit_help_variants() {
+        for v in ["help", "--help", "-h"] {
+            assert!(matches!(parse_sub(&[v.to_owned()]).unwrap(), Sub::Help));
+        }
+    }
+
+    #[test]
+    fn help_lane_lists_supported_keys() {
+        let mut buf = Vec::new();
+        run_with_path(Sub::Help, Path::new(""), &mut buf).unwrap();
+        let s = String::from_utf8(buf).unwrap();
+        assert!(s.contains("update.mode"));
+        assert!(s.contains("update.check_interval_hours"));
+        assert!(s.contains("update.channel"));
+        assert!(s.contains("update.bump_projects"));
+        assert!(s.contains("Clears the 24h snooze") || s.contains("clears the 24h snooze"));
+    }
+
+    #[test]
+    fn setting_update_mode_clears_snooze_file() {
+        let (_td, path) = tmp_path();
+        let snooze = path.parent().unwrap().join("update-snooze");
+        std::fs::write(&snooze, "dismissed-at: 2026-04-24T10:00:00Z\n").unwrap();
+        assert!(snooze.exists());
+        let mut buf = Vec::new();
+        run_with_path(
+            Sub::Set {
+                key: "update.mode".to_owned(),
+                value: "auto".to_owned(),
+            },
+            &path,
+            &mut buf,
+        )
+        .unwrap();
+        assert!(!snooze.exists(), "snooze file should be cleared");
+    }
+
+    #[test]
+    fn setting_non_mode_key_leaves_snooze_alone() {
+        let (_td, path) = tmp_path();
+        let snooze = path.parent().unwrap().join("update-snooze");
+        std::fs::write(&snooze, "dismissed-at: 2026-04-24T10:00:00Z\n").unwrap();
+        let mut buf = Vec::new();
+        run_with_path(
+            Sub::Set {
+                key: "update.channel".to_owned(),
+                value: "beta".to_owned(),
+            },
+            &path,
+            &mut buf,
+        )
+        .unwrap();
+        assert!(snooze.exists(), "only mode changes should clear the snooze");
+    }
+
+    #[test]
+    fn setting_update_mode_without_snooze_file_is_not_an_error() {
+        let (_td, path) = tmp_path();
+        let mut buf = Vec::new();
+        run_with_path(
+            Sub::Set {
+                key: "update.mode".to_owned(),
+                value: "off".to_owned(),
+            },
+            &path,
+            &mut buf,
+        )
+        .unwrap();
+        let body = std::fs::read_to_string(&path).unwrap();
+        assert!(body.contains("mode = \"off\""));
     }
 
     #[test]
