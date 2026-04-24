@@ -689,7 +689,8 @@ catch_discover_tests(pulp-test-visualization)
 # Clipboard tests
 add_executable(pulp-test-clipboard test_clipboard.cpp)
 target_link_libraries(pulp-test-clipboard PRIVATE pulp::platform Catch2::Catch2WithMain)
-catch_discover_tests(pulp-test-clipboard)
+catch_discover_tests(pulp-test-clipboard
+    PROPERTIES RESOURCE_LOCK system-clipboard)
 
 # FileDialog backend-registration tests (#301)
 add_executable(pulp-test-file-dialog test_file_dialog.cpp)
