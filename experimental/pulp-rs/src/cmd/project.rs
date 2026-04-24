@@ -645,6 +645,23 @@ pub(crate) fn bump_one(
         entry.failure_reason = "already at target version".to_owned();
         return entry;
     }
+    // pulp#740 Slice B — redundant-pin probe. If the origin/main tip
+    // already pins the SDK to target-or-newer, refuse the bump with
+    // a pointer at `--allow-redundant`. Fail-open: any probe error
+    // (network failure, no remote, no git in PATH, missing file) is
+    // treated as "no main-side pin visible" and the bump proceeds.
+    if !opts.allow_redundant {
+        if let Some(main_pin) = probe_origin_main_pin(project_path) {
+            if !bump::is_downgrade(&main_pin, target_version) {
+                entry.status = "skipped".to_owned();
+                entry.failure_reason = format!(
+                    "origin/main already pins SDK {main_pin} >= target {target_version} \
+                     (rebase first or use --allow-redundant)"
+                );
+                return entry;
+            }
+        }
+    }
 
     let Some(new_source) =
         bump::rewrite_pin(&source, &site, target_version, entry.old_pin_style_has_v)
@@ -704,6 +721,106 @@ fn run_verify_build(project_path: &Path) -> Result<()> {
     } else {
         Err(CliError::Other("cmake --build failed".to_owned()))
     }
+}
+
+/// Try to read the SDK pin on the project's `origin/main` tip so the
+/// bump can refuse a redundant pin (target ≤ main's pin). The probe
+/// is fail-open: any error returns `None` and the bump proceeds as
+/// if no main-side pin were visible.
+///
+/// This mirrors `main_pinned_version_at_origin` in
+/// `tools/cli/cmd_project.cpp` (pulp#740 / #244 spec). See commit
+/// `7fbd7db1 feat: harden project SDK bump flow`.
+///
+/// Probe sequence:
+/// 1. `git -C <project> fetch --quiet origin main` — best-effort; a
+///    failure (offline, no remote, no git binary) short-circuits to
+///    `None` without raising.
+/// 2. Try standalone-mode pin first: `git show origin/main:pulp.toml`
+///    and look for `sdk_version = "X.Y.Z"`.
+/// 3. Fall back to source-tree pin: `git show origin/main:CMakeLists.txt`
+///    and walk the recognised CMake pin-site shapes.
+/// 4. Normalise to a clean `X.Y.Z` triple; anything else → `None`.
+#[must_use]
+pub(crate) fn probe_origin_main_pin(project_path: &Path) -> Option<String> {
+    if !project_path.join(".git").exists() {
+        return None;
+    }
+    // Fail-open fetch. We don't care about the output — the subsequent
+    // `git show` reads whatever refs the local git state has.
+    let _ = Command::new("git")
+        .arg("-C")
+        .arg(project_path)
+        .args(["fetch", "--quiet", "origin", "main"])
+        .output();
+
+    // Standalone path first.
+    if let Some(toml_body) = git_show(project_path, "origin/main:pulp.toml") {
+        if let Some(pin) = parse_toml_string_value(&toml_body, "sdk_version") {
+            let norm = bump::normalize_pin(&pin);
+            if !norm.is_empty() {
+                return Some(norm);
+            }
+        }
+    }
+    // Source-tree fallback.
+    if let Some(cmake_body) = git_show(project_path, "origin/main:CMakeLists.txt") {
+        let site = bump::find_pin_site(&cmake_body);
+        if site.kind != bump::PinKind::Unknown {
+            let norm = bump::normalize_pin(&site.current_pin);
+            if !norm.is_empty() {
+                return Some(norm);
+            }
+        }
+    }
+    None
+}
+
+/// Capture-stdout wrapper around `git -C <project> show <spec>`.
+/// Returns `None` when the spec doesn't resolve (deleted file, missing
+/// ref) or when git itself isn't on PATH — all fail-open.
+fn git_show(project_path: &Path, spec: &str) -> Option<String> {
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(project_path)
+        .args(["show", spec])
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    String::from_utf8(out.stdout).ok()
+}
+
+/// Pull a quoted string value out of a TOML-ish source without
+/// requiring a full parse. Matches the C++ `find_toml_string_value`
+/// behaviour: line-scan for `<key> = "VALUE"` at top level, return
+/// `VALUE` verbatim (with the `v` prefix stripped). `None` on any
+/// missing / malformed case so the caller treats it as "no pin".
+#[must_use]
+fn parse_toml_string_value(body: &str, key: &str) -> Option<String> {
+    for raw_line in body.lines() {
+        let line = raw_line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let Some(rest) = line.strip_prefix(key) else {
+            continue;
+        };
+        let rest = rest.trim_start();
+        let Some(rest) = rest.strip_prefix('=') else {
+            continue;
+        };
+        let rest = rest.trim_start();
+        let Some(rest) = rest.strip_prefix('"') else {
+            continue;
+        };
+        let Some(end) = rest.find('"') else {
+            continue;
+        };
+        return Some(rest[..end].to_owned());
+    }
+    None
 }
 
 /// True when `dir` looks like the Pulp framework source checkout
@@ -1375,6 +1492,189 @@ mod tests {
         // proceeds normally on a FetchContent pin site).
         let rc = do_bump(&args, &env, &mut buf).unwrap();
         assert_eq!(rc, 0, "with --allow-cli-skew, bump should proceed");
+    }
+
+    #[test]
+    fn probe_origin_main_pin_fails_open_without_git_repo() {
+        let td = tempfile::tempdir().unwrap();
+        let root = td.path();
+        // No .git → probe short-circuits to None (fail-open). No
+        // subprocess fires.
+        assert!(super::probe_origin_main_pin(root).is_none());
+    }
+
+    #[test]
+    fn parse_toml_string_value_extracts_sdk_version_line() {
+        let body = "# header\nsdk_version = \"0.42.0\"\nname = \"foo\"\n";
+        assert_eq!(
+            super::parse_toml_string_value(body, "sdk_version").as_deref(),
+            Some("0.42.0")
+        );
+    }
+
+    #[test]
+    fn parse_toml_string_value_returns_none_when_key_absent() {
+        let body = "name = \"foo\"\nother = \"0.40.0\"\n";
+        assert!(super::parse_toml_string_value(body, "sdk_version").is_none());
+    }
+
+    #[test]
+    fn parse_toml_string_value_skips_commented_line() {
+        let body = "# sdk_version = \"0.40.0\"\nsdk_version = \"0.41.0\"\n";
+        assert_eq!(
+            super::parse_toml_string_value(body, "sdk_version").as_deref(),
+            Some("0.41.0")
+        );
+    }
+
+    #[test]
+    fn parse_toml_string_value_accepts_v_prefix_verbatim() {
+        // normalize_pin strips the `v` downstream; the raw value
+        // comes through with the `v` intact so the caller can
+        // distinguish style.
+        let body = "sdk_version = \"v0.40.0\"\n";
+        assert_eq!(
+            super::parse_toml_string_value(body, "sdk_version").as_deref(),
+            Some("v0.40.0")
+        );
+    }
+
+    #[test]
+    fn bump_one_refuses_when_origin_main_already_at_target() {
+        // Set up a git repo where origin/main already pins v0.45.0
+        // and try to bump the working tree from v0.40.0 → v0.45.0.
+        // The redundant-pin probe must refuse.
+        let td = tempfile::tempdir().unwrap();
+        let root = td.path();
+
+        // Init + first commit on `main` pinning 0.45.0.
+        std::process::Command::new("git")
+            .arg("-C")
+            .arg(root)
+            .arg("init")
+            .arg("--initial-branch=main")
+            .output()
+            .expect("git init");
+        std::process::Command::new("git")
+            .arg("-C")
+            .arg(root)
+            .args(["config", "user.email", "bump@example.com"])
+            .output()
+            .unwrap();
+        std::process::Command::new("git")
+            .arg("-C")
+            .arg(root)
+            .args(["config", "user.name", "Bump Test"])
+            .output()
+            .unwrap();
+        write(
+            &root.join("CMakeLists.txt"),
+            "FetchContent_Declare(pulp GIT_TAG v0.45.0)\n",
+        );
+        std::process::Command::new("git")
+            .arg("-C")
+            .arg(root)
+            .args(["add", "CMakeLists.txt"])
+            .output()
+            .unwrap();
+        std::process::Command::new("git")
+            .arg("-C")
+            .arg(root)
+            .args(["commit", "-m", "main @ 0.45.0"])
+            .output()
+            .unwrap();
+
+        // Point `origin` at ourselves so `show origin/main:...` resolves.
+        std::process::Command::new("git")
+            .arg("-C")
+            .arg(root)
+            .args(["remote", "add", "origin", "."])
+            .output()
+            .unwrap();
+        std::process::Command::new("git")
+            .arg("-C")
+            .arg(root)
+            .args(["update-ref", "refs/remotes/origin/main", "main"])
+            .output()
+            .unwrap();
+
+        // Now overwrite the working tree to look like 0.40.0 and
+        // try to bump to 0.45.0.
+        write(
+            &root.join("CMakeLists.txt"),
+            "FetchContent_Declare(pulp GIT_TAG v0.40.0)\n",
+        );
+        let args = BumpArgs {
+            force_dirty: true, // our working-tree edit is dirty by design
+            ..BumpArgs::default()
+        };
+        let e = bump_one(root, "proj", "0.45.0", &args, noop_verify);
+        assert_eq!(e.status, "skipped", "entry: {e:?}");
+        assert!(
+            e.failure_reason.contains("origin/main already pins"),
+            "got: {}",
+            e.failure_reason
+        );
+    }
+
+    #[test]
+    fn bump_one_allows_redundant_with_flag() {
+        // Same setup as above but with --allow-redundant → bump
+        // proceeds.
+        let td = tempfile::tempdir().unwrap();
+        let root = td.path();
+        for cmd in [
+            &["init", "--initial-branch=main"][..],
+            &["config", "user.email", "bump@example.com"],
+            &["config", "user.name", "Bump Test"],
+        ] {
+            std::process::Command::new("git")
+                .arg("-C")
+                .arg(root)
+                .args(cmd.iter().copied())
+                .output()
+                .unwrap();
+        }
+        write(
+            &root.join("CMakeLists.txt"),
+            "FetchContent_Declare(pulp GIT_TAG v0.45.0)\n",
+        );
+        std::process::Command::new("git")
+            .arg("-C")
+            .arg(root)
+            .args(["add", "CMakeLists.txt"])
+            .output()
+            .unwrap();
+        std::process::Command::new("git")
+            .arg("-C")
+            .arg(root)
+            .args(["commit", "-m", "main @ 0.45.0"])
+            .output()
+            .unwrap();
+        std::process::Command::new("git")
+            .arg("-C")
+            .arg(root)
+            .args(["remote", "add", "origin", "."])
+            .output()
+            .unwrap();
+        std::process::Command::new("git")
+            .arg("-C")
+            .arg(root)
+            .args(["update-ref", "refs/remotes/origin/main", "main"])
+            .output()
+            .unwrap();
+
+        write(
+            &root.join("CMakeLists.txt"),
+            "FetchContent_Declare(pulp GIT_TAG v0.40.0)\n",
+        );
+        let args = BumpArgs {
+            force_dirty: true,
+            allow_redundant: true, // opt-in
+            ..BumpArgs::default()
+        };
+        let e = bump_one(root, "proj", "0.45.0", &args, noop_verify);
+        assert_eq!(e.status, "bumped", "entry: {e:?}");
     }
 
     #[test]
