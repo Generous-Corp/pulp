@@ -150,6 +150,13 @@ DesignIR parse_pencil_json(const std::string& json);
 /// SKILL guidance) can route on it.
 DesignIR parse_claude_html(const std::string& html);
 
+/// Build the starter `bridge_handlers.cpp` text the CLI emits next to
+/// the generated JS view when `--from claude` runs. Pure string-builder;
+/// no I/O. The output references `pulp::view::EditorBridge` and shows
+/// add_handler() registrations + an attach_webview() call so users have
+/// a runnable shape to fill in (pulp #709 acceptance criterion).
+std::string render_claude_bridge_scaffold(const std::string& generated_js_path);
+
 /// Detect audio widget type from a node name.
 AudioWidgetType detect_audio_widget(const std::string& name);
 
