@@ -43,4 +43,24 @@ if(PULP_BUILD_TESTS)
     set_tests_properties(python-bindings-smoke PROPERTIES
         LABELS "python;bindings"
         TIMEOUT 30)
+
+    # Run the bindings init path inside a normal executable so llvm-cov
+    # records bindings.cpp hits even when shared-module profiling is
+    # flaky on a given platform/toolchain.
+    add_executable(pulp-test-python-bindings-embedded
+        ${CMAKE_SOURCE_DIR}/test/test_python_bindings_embedded.cpp
+        bindings.cpp)
+    target_link_libraries(pulp-test-python-bindings-embedded PRIVATE
+        Python3::Python
+        pybind11::headers
+        pulp::format
+        pulp::audio
+        pulp::midi
+        pulp::state
+        pulp::signal)
+    add_test(NAME python-bindings-embedded-smoke
+        COMMAND pulp-test-python-bindings-embedded)
+    set_tests_properties(python-bindings-embedded-smoke PROPERTIES
+        LABELS "python;bindings"
+        TIMEOUT 30)
 endif()
