@@ -69,15 +69,34 @@ jobs:
         run: ./setup.sh --ci --deps-only
         shell: bash
 
-      - name: Configure
+      # On Linux, building with PULP_BUILD_WEBVIEW=ON pulls webkit2gtk
+      # → libjavascriptcoregtk-4.1 into the static pulp-view archive.
+      # When the CLI binary links pulp-view (a STATIC library), CMake
+      # propagates those PRIVATE deps to the final link line, so the
+      # CLI ends up dynamically linked against libjavascriptcoregtk-4.1
+      # which is not installed on the smoke runner (or on most user
+      # machines) — the binary fails immediately with
+      #   "error while loading shared libraries:
+      #    libjavascriptcoregtk-4.1.so.0: cannot open shared object file"
+      # Pulp's documented JS engine policy (CLAUDE.md) is QuickJS on
+      # Linux, so the CLI must not link JSC-GTK at all. Issue #720.
+      #
+      # Build the CLI binary WITHOUT WebView; the SDK build below
+      # reconfigures with WebView=ON so plugin authors still get the
+      # WebView code in the SDK tarball.
+      - name: Configure (CLI, no WebView on Linux)
         run: |
           cmake -S . -B build \
             -DCMAKE_BUILD_TYPE=Release \
             -DPULP_BUILD_TESTS=OFF \
-            -DPULP_BUILD_WEBVIEW=ON
+            ${{ runner.os == 'Linux' && '-DPULP_BUILD_WEBVIEW=OFF' || '-DPULP_BUILD_WEBVIEW=ON' }}
         shell: bash
 
       - name: Build
+        # Build everything (CLI binary + all libs needed for the SDK tarball).
+        # On Linux this is built WITHOUT WebView so the CLI binary stays
+        # portable; the SDK reconfigure step below adds WebView back so the
+        # SDK tarball still ships WebViewPanel symbols.
         run: cmake --build build --config Release
         shell: bash
 
@@ -115,10 +134,43 @@ jobs:
             --out pulp-${{ matrix.platform }}.zip
         shell: pwsh
 
+      # On Linux the CLI was built with PULP_BUILD_WEBVIEW=OFF (issue
+      # #720). For the SDK tarball, do a SEPARATE configure+build into
+      # `build-sdk/` with WebView=ON so plugin authors who consume the
+      # SDK still get WebViewPanel + make_webview_embedded_resource_fetcher
+      # symbols in libpulp-view.a. Using a separate build directory
+      # avoids re-linking the already-built CLI binary against
+      # libwebkit2gtk during the reconfigure (which would defeat the
+      # purpose of the split).
+      #
+      # On macOS/Windows the CLI configure already used WebView=ON, so
+      # we just symlink the SDK build dir to the existing build dir.
+      - name: Prepare SDK build dir (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          cmake -S . -B build-sdk \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DPULP_BUILD_TESTS=OFF \
+            -DPULP_BUILD_WEBVIEW=ON
+          # Build everything the SDK install step needs. This is a full
+          # second build on Linux, but it's required to keep the CLI
+          # binary (built in `build/` with WebView=OFF) portable.
+          cmake --build build-sdk --config Release
+        shell: bash
+
+      - name: Prepare SDK build dir (macOS)
+        if: runner.os == 'macOS'
+        run: ln -snf build build-sdk
+        shell: bash
+
       - name: Build SDK tarball (Unix)
         if: runner.os != 'Windows'
         run: |
-          cmake --install build --prefix sdk-staging --config Release
+          # build-sdk on Linux is the WebView=ON build (separate dir to
+          # avoid re-linking the CLI binary against libwebkit2gtk).
+          # build-sdk on macOS is a symlink to build (CLI was built with
+          # WebView=ON there).
+          cmake --install build-sdk --prefix sdk-staging --config Release
           test -f sdk-staging/lib/libpulp-view.a
           python3 - <<'PY'
           from pathlib import Path
