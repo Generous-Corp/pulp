@@ -234,6 +234,37 @@ The shortened `v3.7.12` ref does not exist on Steinberg's repo and causes the
 tag-triggered macOS release job to fail immediately at `Clone VST3 SDK`, before
 configure, build, or signing begin.
 
+### Never run `validation` ctest tests in `sign-and-release.yml` (#720)
+
+The `Test` step in `.github/workflows/sign-and-release.yml` MUST pass
+`-LE validation` to ctest. Without that flag, the suite includes
+`auval-Pulp*` tests that copy a freshly-built `.component` to
+`$HOME/Library/Audio/Plug-Ins/Components/` and immediately invoke
+`auval -v aufx <code> Pulp`. On hosted GitHub macOS runners the
+`AudioComponentRegistrar` does not pick up the new bundle reliably, so
+auval emits:
+
+```
+ERROR: Cannot get Component's Name strings
+ERROR: Error from retrieving Component Version: -50
+FATAL ERROR: didn't find the component
+```
+
+The Test step then exits non-zero and the entire sign / notarize /
+publish pipeline silently fails. This is the failure mode that lost
+~30 consecutive sign-and-release runs across v0.20.x → v0.41.0 (see
+issue #720 for the full backlog).
+
+The validation gates already run in `.github/workflows/validate.yml`
+on PR with the documented codesigning caveat. Re-running them in the
+release workflow on a runner that cannot satisfy the prereqs adds zero
+protection and only adds a silent-failure surface.
+
+`tools/scripts/test_release_workflow_test_step.py` is the regression
+test that asserts `-LE validation` stays in the workflow; it is wired
+into `.github/workflows/workflow-lint.yml` so any future PR touching
+`.github/workflows/**` runs it automatically.
+
 ## Doctor Checks
 
 `pulp doctor` validates Android toolchain:

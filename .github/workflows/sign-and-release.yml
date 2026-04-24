@@ -44,7 +44,14 @@ jobs:
         run: cmake --build build --config ${{ env.BUILD_TYPE }} -j$(sysctl -n hw.ncpu)
 
       - name: Test
-        run: ctest --test-dir build --output-on-failure
+        # Skip the `validation` label suite (auval / pluginval / clap-validator).
+        # Those gates are owned by .github/workflows/validate.yml on PR; on a
+        # hosted GitHub macOS runner the freshly-installed .component bundle is
+        # not picked up by the AudioComponentRegistrar consistently, so auval
+        # returns "Cannot get Component's Name strings / Error -50" and breaks
+        # the sign-and-release pipeline silently. See issue #720 for the
+        # 30+ run failure backlog this fixes.
+        run: ctest --test-dir build --output-on-failure -LE validation
 
       - name: Import signing certificate
         if: env.MACOS_CERTIFICATE != ''
