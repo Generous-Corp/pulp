@@ -472,8 +472,22 @@ function on(id, eventName, fn) {
 )";
 
 static const char* kDomOpsInit =
+    // DocumentFragment handling (pulp #468 Codex P1):
+    // A DocumentFragment must flatten on insert — the fragment's
+    // children move into the parent, the fragment node itself is not
+    // inserted. Without this, React 18's reconciler (which stages
+    // commits in fragments) produces phantom wrapper divs in the
+    // materialized tree. appendChild / insertBefore / replaceChild
+    // all check the flag at the top and recurse over the fragment's
+    // children when they see it.
     "Element.prototype.appendChild = function(child) {"
     "  if (!(child instanceof Element)) return child;"
+    "  if (child._isDocumentFragment) {"
+    "    var kids = child._children.slice(0);"
+    "    child._children.length = 0;"
+    "    for (var i = 0; i < kids.length; i++) this.appendChild(kids[i]);"
+    "    return child;"
+    "  }"
     "  if (child._parentElement) child._parentElement.removeChild(child);"
     "  child._parentElement = this;"
     "  this._children.push(child);"
@@ -499,6 +513,12 @@ static const char* kDomOpsInit =
     "};"
     "Element.prototype.insertBefore = function(newChild, refChild) {"
     "  if (!refChild) return this.appendChild(newChild);"
+    "  if (newChild._isDocumentFragment) {"
+    "    var kids = newChild._children.slice(0);"
+    "    newChild._children.length = 0;"
+    "    for (var i = 0; i < kids.length; i++) this.insertBefore(kids[i], refChild);"
+    "    return newChild;"
+    "  }"
     "  var idx = this._children.indexOf(refChild);"
     "  if (idx < 0) return this.appendChild(newChild);"
     "  if (newChild._parentElement) newChild._parentElement.removeChild(newChild);"
@@ -516,7 +536,7 @@ static const char* kDomOpsInit =
     "  var idx = this._children.indexOf(oldChild);"
     "  if (idx < 0) return oldChild;"
     "  this.removeChild(oldChild);"
-    "  this.appendChild(newChild);"
+    "  this.appendChild(newChild);"  // fragment-aware via appendChild above
     "  return oldChild;"
     "};";
 
@@ -614,6 +634,11 @@ WidgetBridge::WidgetBridge(ScriptEngine& engine, View& root, state::StateStore& 
     eval_or_throw(engine_, "web_compat_style_decl", preludes::web_compat_style_decl);
     eval_or_throw(engine_, "web_compat_document", preludes::web_compat_document);
     eval_or_throw(engine_, "web_compat_gpu_buffered", preludes::web_compat_gpu_buffered);
+    // pulp #468 — observer no-ops + scheduler shims so React 18 (and any
+    // other framework that feature-detects MutationObserver / MessageChannel
+    // / queueMicrotask) finds the constructors it expects on the global.
+    eval_or_throw(engine_, "web_compat_observers", preludes::web_compat_observers);
+    eval_or_throw(engine_, "web_compat_scheduler", preludes::web_compat_scheduler);
 }
 
 WidgetBridge::~WidgetBridge() {

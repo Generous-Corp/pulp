@@ -13,6 +13,8 @@ set(PULP_JS_PRELUDES
     ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-document.js
     ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-dom-ops.js
     ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-gpu-buffered.js
+    ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-observers.js
+    ${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-scheduler.js
 )
 set(PULP_JS_EMBEDDED_HEADER ${CMAKE_CURRENT_BINARY_DIR}/web_compat_preludes_gen.hpp)
 
@@ -28,6 +30,8 @@ add_custom_command(
         -DFILE6=${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-document.js
         -DFILE7=${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-dom-ops.js
         -DFILE8=${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-gpu-buffered.js
+        -DFILE9=${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-observers.js
+        -DFILE10=${CMAKE_CURRENT_SOURCE_DIR}/js/web-compat-scheduler.js
         -P ${CMAKE_CURRENT_SOURCE_DIR}/js/embed_js.cmake
     DEPENDS
         ${PULP_JS_PRELUDES}

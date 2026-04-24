@@ -1168,6 +1168,13 @@ add_executable(pulp-test-design-import test_design_import.cpp)
 target_link_libraries(pulp-test-design-import PRIVATE pulp::view Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-design-import)
 
+# pulp #468 — web-compat preludes shipped for bundled-React imports
+# (nodeType / nodeName, observer no-ops, scheduler shims). Uses
+# WidgetBridge to evaluate the same prelude stack the runtime ships.
+add_executable(pulp-test-web-compat-react-shims test_web_compat_react_shims.cpp)
+target_link_libraries(pulp-test-web-compat-react-shims PRIVATE pulp::view Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-web-compat-react-shims)
+
 # Screenshot comparison tests (visual diff for design import validation)
 if(APPLE)
     add_executable(pulp-test-screenshot-compare test_screenshot_compare.cpp)

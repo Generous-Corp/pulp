@@ -16,6 +16,10 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - coverage: lift events async updater support ([#648](https://github.com/danielraffel/pulp/pull/648))
 
 <a id="v0420"></a>
+## [0.16.0]
+
+## [0.43.0]
+
 ## [0.42.0] - 2026-04-24
 
 - feat(view): add EditorBridge detach_webview ([#728](https://github.com/danielraffel/pulp/pull/728))

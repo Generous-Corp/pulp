@@ -286,8 +286,70 @@ var document = {
     },
 
     createTextNode: function(text) {
+        // Backed by an Element (`<span>`) so renderers handle text uniformly,
+        // but flagged as a DOM-spec text node so reconcilers (React 18, etc.)
+        // see `node.nodeType === 3` and `node.nodeName === "#text"`. Per
+        // pulp #468 — React's reconciler reads both on every node it walks.
         var el = new Element("span");
         el._textContent = text;
+        el._isTextNode = true;
+        Object.defineProperty(el, "nodeType", { value: 3, configurable: true });
+        Object.defineProperty(el, "nodeName", { value: "#text", configurable: true });
+        // Spec: a Text node's `data` and `nodeValue` mirror its content.
+        Object.defineProperty(el, "data", {
+            get: function() { return this._textContent; },
+            set: function(v) {
+                this._textContent = v == null ? "" : String(v);
+                if (this._nativeCreated) setText(this._id, this._textContent);
+            },
+            configurable: true
+        });
+        Object.defineProperty(el, "nodeValue", {
+            get: function() { return this._textContent; },
+            set: function(v) {
+                this._textContent = v == null ? "" : String(v);
+                if (this._nativeCreated) setText(this._id, this._textContent);
+            },
+            configurable: true
+        });
+        __elements__[el._id] = el;
+        return el;
+    },
+
+    createComment: function(text) {
+        // Comment nodes are invisible scaffolding for renderers (e.g. React's
+        // hydration markers and ReactDOM's portal sentinels). Backed by a
+        // hidden Element so DOM tree ops still work.
+        var el = new Element("span");
+        el._textContent = "";
+        el._isCommentNode = true;
+        el._hidden = true;
+        Object.defineProperty(el, "nodeType", { value: 8, configurable: true });
+        Object.defineProperty(el, "nodeName", { value: "#comment", configurable: true });
+        Object.defineProperty(el, "data", {
+            get: function() { return this._commentText || ""; },
+            set: function(v) { this._commentText = v == null ? "" : String(v); },
+            configurable: true
+        });
+        Object.defineProperty(el, "nodeValue", {
+            get: function() { return this._commentText || ""; },
+            set: function(v) { this._commentText = v == null ? "" : String(v); },
+            configurable: true
+        });
+        if (text != null) el.data = text;
+        __elements__[el._id] = el;
+        return el;
+    },
+
+    createDocumentFragment: function() {
+        // A DocumentFragment is a lightweight container that vanishes when
+        // appended to a real parent (its children move, the fragment itself
+        // doesn't). For our needs (React batching commits) it's sufficient
+        // to model it as an Element that flattens on appendChild.
+        var el = new Element("div");
+        el._isDocumentFragment = true;
+        Object.defineProperty(el, "nodeType", { value: 11, configurable: true });
+        Object.defineProperty(el, "nodeName", { value: "#document-fragment", configurable: true });
         __elements__[el._id] = el;
         return el;
     }

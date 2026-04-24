@@ -100,6 +100,7 @@
         "core/view/src/js_bridge*",
         "core/view/include/**/js_bridge*",
         "core/view/src/engine*",
+        "core/view/js/web-compat-*.js",
         "external/quickjs*/**",
         "tools/cmake/PulpJsEngine.cmake"
       ]
