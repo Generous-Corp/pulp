@@ -150,6 +150,40 @@ DesignIR parse_pencil_json(const std::string& json);
 /// SKILL guidance) can route on it.
 DesignIR parse_claude_html(const std::string& html);
 
+// ── Claude Design bundle envelope (pulp #468) ───────────────────────────
+//
+// Claude Design's "standalone HTML" export is a small loader shell
+// wrapping a JSON envelope of base64-gzip-compressed assets. The loader
+// JS unpacks the envelope at runtime and replaces `document.documentElement.innerHTML`
+// with the unwrapped template HTML, then injects the bundled scripts.
+//
+// For the native-runtime import lane (`--execute-bundle`), Pulp needs to
+// reproduce that unpack step in C++ before handing the result to the JS
+// engine. This function performs only the unpack — running the result is
+// `parse_claude_html_with_runtime`'s job.
+
+/// One asset entry from a Claude Design bundle.
+struct ClaudeBundleAsset {
+    std::string uuid;          ///< envelope key (also referenced as <script src="<uuid>">)
+    std::string mime;          ///< e.g. "text/javascript", "font/woff2"
+    std::vector<uint8_t> data; ///< already base64-decoded + gunzipped if compressed
+};
+
+/// Result of unpacking a Claude Design bundle's `<script type="__bundler/manifest">`
+/// + `<script type="__bundler/template">` pair.
+struct ClaudeBundle {
+    std::vector<ClaudeBundleAsset> assets;  ///< all assets (JS, fonts, etc.) in manifest order
+    std::vector<size_t> javascript_indices; ///< indices into assets[] of MIME `text/javascript`,
+                                            ///< in the order the template's <script src> tags reference them
+    std::string template_html;              ///< the unwrapped HTML template (with `<div id="root">` etc.)
+};
+
+/// Decode the bundler envelope from a Claude Design standalone HTML file.
+/// Returns nullopt if the bundler tags are missing or the envelope is malformed.
+/// Bundle parsing failures degrade gracefully: callers fall back to
+/// `parse_claude_html` for the static-HTML pipeline.
+std::optional<ClaudeBundle> parse_claude_bundle(const std::string& html);
+
 /// Build the starter `bridge_handlers.cpp` text the CLI emits next to
 /// the generated JS view when `--from claude` runs. Pure string-builder;
 /// no I/O. The output references `pulp::view::EditorBridge` and shows

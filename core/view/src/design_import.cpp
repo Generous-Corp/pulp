@@ -1,4 +1,6 @@
 #include <pulp/view/design_import.hpp>
+#include <pulp/runtime/base64.hpp>
+#include <pulp/runtime/zip.hpp>
 #include <choc/text/choc_JSON.h>
 #include <sstream>
 #include <algorithm>
@@ -40,6 +42,205 @@ DesignIR parse_claude_html(const std::string& html) {
     auto ir = parse_stitch_html(html);
     ir.source = DesignSource::claude;
     return ir;
+}
+
+// ── Claude Design bundle envelope (pulp #468) ───────────────────────────
+
+namespace {
+
+// Strip the gzip header (RFC 1952) from `data`, leaving only the raw
+// deflate payload that miniz's `deflate_decompress` can handle.
+//
+// Header layout:
+//   1f 8b   - magic
+//   08      - compression method (always deflate)
+//   FLG     - flags byte (FTEXT / FHCRC / FEXTRA / FNAME / FCOMMENT)
+//   MTIME   - 4 bytes
+//   XFL     - 1 byte
+//   OS      - 1 byte
+//   [FEXTRA: 2-byte len + data]
+//   [FNAME: NUL-terminated]
+//   [FCOMMENT: NUL-terminated]
+//   [FHCRC: 2-byte CRC]
+//
+// `pulp::runtime::gzip_decompress` is misnamed (it actually does zlib)
+// so we can't reuse it for real RFC 1952 streams. This shim handles the
+// envelope's compressed payloads (which always start with 1f 8b) without
+// having to touch the runtime layer.
+std::optional<std::vector<uint8_t>> claude_bundle_inflate(const uint8_t* data, size_t size) {
+    if (size < 18) return std::nullopt;       // header + min trailer
+    if (data[0] != 0x1f || data[1] != 0x8b) return std::nullopt; // magic
+    if (data[2] != 0x08) return std::nullopt; // compression method
+    const uint8_t flg = data[3];
+    size_t off = 10;                          // fixed header
+
+    auto read_u16 = [&](size_t at) -> uint16_t {
+        return static_cast<uint16_t>(data[at]) |
+               (static_cast<uint16_t>(data[at + 1]) << 8);
+    };
+
+    if (flg & 0x04) { // FEXTRA
+        if (off + 2 > size) return std::nullopt;
+        uint16_t xlen = read_u16(off);
+        off += 2 + xlen;
+    }
+    if (flg & 0x08) { // FNAME (NUL-terminated)
+        while (off < size && data[off] != 0) ++off;
+        if (off >= size) return std::nullopt;
+        ++off;
+    }
+    if (flg & 0x10) { // FCOMMENT
+        while (off < size && data[off] != 0) ++off;
+        if (off >= size) return std::nullopt;
+        ++off;
+    }
+    if (flg & 0x02) { // FHCRC
+        off += 2;
+    }
+
+    // 8-byte trailer: CRC32 + ISIZE.
+    if (off + 8 > size) return std::nullopt;
+    const size_t deflate_len = size - off - 8;
+    return pulp::runtime::deflate_decompress(data + off, deflate_len);
+}
+
+} // namespace
+
+namespace {
+
+// Find a `<script type="__bundler/{manifest|template}">...</script>` tag
+// and return its inner text. The bundler shape is fixed: opening
+// `<script ...>` tag with the `type` attribute, content (which is JSON
+// — base64 + alphanumerics for manifest, JSON-encoded HTML with
+// `</script>` for template), then `</script>`.
+//
+// IMPORTANT: a real Claude Design export contains the inline bundler
+// boot code that itself references `'__bundler/manifest'` and
+// `'__bundler/template'` as string literals. A naive substring search
+// matches those first. We anchor instead on the literal sequence
+// `<script` that opens an HTML tag, then on the type attribute, so the
+// boot-code references can't masquerade as the real bundler tags.
+std::optional<std::string> extract_bundler_tag_content(const std::string& html,
+                                                       const std::string& tag_type) {
+    const std::string opener_dq = "<script type=\"" + tag_type + "\"";
+    const std::string opener_sq = "<script type='" + tag_type + "'";
+    size_t tag_start = html.find(opener_dq);
+    size_t header_len = opener_dq.size();
+    if (tag_start == std::string::npos) {
+        tag_start = html.find(opener_sq);
+        header_len = opener_sq.size();
+        if (tag_start == std::string::npos) return std::nullopt;
+    }
+    // Find the '>' that closes the opening <script ...> tag (must be
+    // beyond the type attribute we just matched).
+    size_t open_end = html.find('>', tag_start + header_len);
+    if (open_end == std::string::npos) return std::nullopt;
+    // Find the closing </script>.
+    size_t close = html.find("</script>", open_end + 1);
+    if (close == std::string::npos) return std::nullopt;
+    return html.substr(open_end + 1, close - (open_end + 1));
+}
+
+// Pull every <script src="..."> uuid out of the template HTML, in order.
+// The template is JSON-encoded HTML — `<` characters are literal, not
+// escaped — so a regex over the raw string is fine.
+std::vector<std::string> extract_template_script_srcs(const std::string& template_html) {
+    std::vector<std::string> srcs;
+    // C++ ECMAScript regex: explicit alternation handles single-quote
+    // and double-quote attribute values. The character classes inside
+    // a raw string literal would be brittle (`["']` reads as four chars
+    // `"`, `'` rather than the intended class) — alternation keeps
+    // the parse unambiguous.
+    static const std::regex re(
+        R"RX(<script\b[^>]*\bsrc=(?:"([^"]+)"|'([^']+)'))RX",
+        std::regex::icase);
+    auto begin = std::sregex_iterator(template_html.begin(), template_html.end(), re);
+    auto end = std::sregex_iterator();
+    for (auto it = begin; it != end; ++it) {
+        if ((*it)[1].matched) srcs.push_back((*it)[1].str());
+        else if ((*it)[2].matched) srcs.push_back((*it)[2].str());
+    }
+    return srcs;
+}
+
+} // namespace
+
+std::optional<ClaudeBundle> parse_claude_bundle(const std::string& html) {
+    auto manifest_text = extract_bundler_tag_content(html, "__bundler/manifest");
+    auto template_text = extract_bundler_tag_content(html, "__bundler/template");
+    if (!manifest_text || !template_text) return std::nullopt;
+
+    // The template tag's content is itself a JSON-encoded string (so the
+    // literal HTML inside doesn't have to escape `<`). Decode to get the
+    // real HTML. Use parseValue() because a bare JSON string at the top
+    // level isn't accepted by the strict parse() entry point.
+    std::string template_html;
+    try {
+        auto tval = choc::json::parseValue(*template_text);
+        if (!tval.isString()) return std::nullopt;
+        template_html = std::string(tval.getString());
+    } catch (...) { return std::nullopt; }
+
+    // Parse the manifest JSON into a {uuid: {mime, compressed, data}} map.
+    choc::value::Value mval;
+    try { mval = choc::json::parse(*manifest_text); }
+    catch (...) { return std::nullopt; }
+    if (!mval.isObject()) return std::nullopt;
+
+    ClaudeBundle bundle;
+    bundle.template_html = std::move(template_html);
+
+    // Walk the object, decode each entry into a ClaudeBundleAsset.
+    // choc::value::Value::size() + getObjectMemberAt drives the
+    // iteration; member name lookup gives us the uuid key.
+    for (uint32_t i = 0; i < mval.size(); ++i) {
+        auto member = mval.getObjectMemberAt(i);
+        std::string uuid(member.name);
+        const auto& entry = member.value;
+        if (!entry.isObject()) continue;
+        ClaudeBundleAsset asset;
+        asset.uuid = std::move(uuid);
+        if (entry.hasObjectMember("mime")) {
+            auto mime = entry["mime"];
+            if (mime.isString()) asset.mime = std::string(mime.getString());
+        }
+        if (!entry.hasObjectMember("data")) continue;
+        auto data_val = entry["data"];
+        if (!data_val.isString()) continue;
+
+        auto decoded = pulp::runtime::base64_decode(data_val.getString());
+        if (!decoded) continue;
+
+        bool compressed = false;
+        if (entry.hasObjectMember("compressed")) {
+            auto cval = entry["compressed"];
+            if (cval.isBool()) compressed = cval.getBool();
+        }
+        if (compressed) {
+            auto inflated = claude_bundle_inflate(decoded->data(), decoded->size());
+            if (!inflated) continue;
+            asset.data = std::move(*inflated);
+        } else {
+            asset.data = std::move(*decoded);
+        }
+        bundle.assets.push_back(std::move(asset));
+    }
+
+    if (bundle.assets.empty()) return std::nullopt;
+
+    // Compute javascript_indices: walk the template's <script src> uuids
+    // in order, look each one up in assets[] (must be MIME javascript).
+    auto srcs = extract_template_script_srcs(bundle.template_html);
+    for (const auto& src : srcs) {
+        for (size_t k = 0; k < bundle.assets.size(); ++k) {
+            if (bundle.assets[k].uuid == src && bundle.assets[k].mime == "text/javascript") {
+                bundle.javascript_indices.push_back(k);
+                break;
+            }
+        }
+    }
+
+    return bundle;
 }
 
 std::string render_claude_bridge_scaffold(const std::string& generated_js_path) {

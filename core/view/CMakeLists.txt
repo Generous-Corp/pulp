@@ -244,6 +244,9 @@ target_include_directories(pulp-view PUBLIC
 add_dependencies(pulp-view pulp-view-js-preludes)
 
 target_link_libraries(pulp-view PUBLIC pulp::canvas pulp::events pulp::state pulp::signal pulp::platform pulp::host)
+# pulp #468 — design_import.cpp uses pulp::runtime::base64_decode +
+# gzip_decompress to unpack Claude Design's base64-gzip envelope.
+target_link_libraries(pulp-view PRIVATE pulp::runtime)
 
 # JavaScriptCore framework for JSC backend (Apple only)
 if(APPLE)
