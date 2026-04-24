@@ -8,11 +8,11 @@ on:
       runner_provider:
         description: "Runner provider to use for Linux and Windows build legs"
         required: false
-        default: github-hosted
+        default: namespace
         type: choice
         options:
-          - github-hosted
           - namespace
+          - github-hosted
       linux_runner_selector_json:
         description: "Optional JSON string/array for Linux runs-on when routing through Namespace"
         required: false
@@ -52,7 +52,7 @@ jobs:
           lfs: false
       - id: resolve
         env:
-          REQUESTED_PROVIDER: ${{ inputs.runner_provider || vars.PULP_DEFAULT_RUNNER_PROVIDER || 'github-hosted' }}
+          REQUESTED_PROVIDER: ${{ inputs.runner_provider || vars.PULP_DEFAULT_RUNNER_PROVIDER || 'namespace' }}
           EXPLICIT_LINUX_RUNNER_SELECTOR_JSON: ${{ inputs.linux_runner_selector_json || '' }}
           EXPLICIT_WINDOWS_RUNNER_SELECTOR_JSON: ${{ inputs.windows_runner_selector_json || '' }}
           EXPLICIT_MACOS_RUNNER_SELECTOR_JSON: ${{ inputs.macos_runner_selector_json || '' }}
@@ -98,22 +98,23 @@ jobs:
               "--namespace-env", "NAMESPACE_LINUX_RUNS_ON_JSON",
               "--namespace-setting-name", "PULP_NAMESPACE_BUILD_LINUX_RUNS_ON_JSON",
           ])
-          # Namespace Windows capacity has been intermittently unavailable.
-          # Keep PR validation on GitHub-hosted Windows so a queued Namespace
-          # lane does not block mergeability while the capacity issue is open.
-          if EVENT_NAME == "pull_request":
-              windows_runs_on = json.dumps("windows-latest")
-              windows_provider = "github-hosted"
-          else:
-              windows_runs_on = run([
-                  "--target-name", "Windows (x64)",
-                  "--mode", "provider",
-                  "--github-hosted-label", "windows-latest",
-                  "--explicit-env", "EXPLICIT_WINDOWS_RUNNER_SELECTOR_JSON",
-                  "--namespace-env", "NAMESPACE_WINDOWS_RUNS_ON_JSON",
-                  "--namespace-setting-name", "PULP_NAMESPACE_BUILD_WINDOWS_RUNS_ON_JSON",
-              ])
-              windows_provider = REQUESTED
+          # Windows routes through the same provider-resolver as Linux.
+          # Historical note: an earlier hardcoded override forced Windows to
+          # github-hosted on PR events because Namespace Windows capacity
+          # was intermittently unavailable. That override was removed on
+          # 2026-04-24 — Namespace is now the default for all three legs.
+          # If Namespace Windows capacity regresses and PRs start blocking,
+          # re-add the override here (track it via a temporary PR rather
+          # than leaving it in-tree) and revert once capacity is restored.
+          windows_runs_on = run([
+              "--target-name", "Windows (x64)",
+              "--mode", "provider",
+              "--github-hosted-label", "windows-latest",
+              "--explicit-env", "EXPLICIT_WINDOWS_RUNNER_SELECTOR_JSON",
+              "--namespace-env", "NAMESPACE_WINDOWS_RUNS_ON_JSON",
+              "--namespace-setting-name", "PULP_NAMESPACE_BUILD_WINDOWS_RUNS_ON_JSON",
+          ])
+          windows_provider = REQUESTED
           macos_runs_on = run([
               "--target-name", "macOS (ARM64)",
               "--mode", "optional-namespace",

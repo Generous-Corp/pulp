@@ -387,24 +387,47 @@ Then proceed with the `ship` workflow below.
 
 ## Runner Priority (hard rule)
 
-**Always use Namespace runners for Ubuntu and Windows CI. Never use GitHub-hosted runners as the primary path.**
+**Namespace is the default runner provider** for all three platform legs
+(Linux, Windows, macOS) as of 2026-04-24. Every PR-triggered or manually
+dispatched `build.yml` run routes to Namespace unless explicitly overridden.
+GitHub-hosted is the explicit opt-out for the rare case where a specific
+lane needs to be validated on GHA infrastructure.
+
+The default chain (`.github/workflows/build.yml` `resolve-provider` job):
+
+```yaml
+REQUESTED_PROVIDER:
+  ${{ inputs.runner_provider             # explicit workflow_dispatch input
+   || vars.PULP_DEFAULT_RUNNER_PROVIDER  # repo-level override
+   || 'namespace' }}                     # hardcoded fallback
+```
 
 Priority order:
-1. **Namespace** — dispatch with `gh workflow run build.yml --ref <branch> -f runner_provider=namespace`
-2. **Local VMs** — fallback if Namespace is unavailable (`ssh ubuntu`, `ssh win`)
-3. **GitHub-hosted** — last resort only if both Namespace and local VMs are down
+1. **Namespace (default)** — no action required; PR opens or pushes use it automatically.
+2. **Local SSH VMs** — used by `shipyard ship` directly (`ssh ubuntu`, `ssh-windows`). Useful for fast feedback when Namespace is slow or for reproducing bugs interactively.
+3. **GitHub-hosted** — last resort; explicitly request with `-f runner_provider=github-hosted` if you need to compare behaviour against GHA-specific environment quirks.
 
-macOS runs locally in parallel with Namespace Ubuntu/Windows.
+**No more cancel-and-redispatch ritual.** Before 2026-04-24 agents had to
+cancel the auto-triggered github-hosted run and re-dispatch with
+`-f runner_provider=namespace`. That muscle memory is now obsolete — the
+first PR-triggered run is already Namespace-backed.
 
-**Common mistake:** Pushing a branch and waiting for the auto-triggered GitHub Actions PR checks. Those use GitHub-hosted runners and are slow. Instead: cancel the auto-triggered run and dispatch on Namespace.
+**Historical override (removed on 2026-04-24)**: The `resolve-provider`
+job previously hardcoded Windows to `github-hosted` on `pull_request`
+events because Namespace Windows capacity was intermittently
+unavailable. That override is gone. If Namespace Windows capacity
+regresses and PRs start blocking, re-introduce the override via a
+short-lived PR rather than leaving it in-tree; revert once capacity is
+restored.
 
-```bash
-# Cancel auto-triggered GitHub-hosted run
-gh run cancel <run_id> --repo danielraffel/pulp
+### Overrides when you need them
 
-# Dispatch on Namespace
-gh workflow run build.yml --repo danielraffel/pulp --ref <branch> -f runner_provider=namespace
-```
+- **Dispatch a specific run on github-hosted** (comparing behaviour, reproducing a GHA-specific bug):
+  ```bash
+  gh workflow run build.yml --repo danielraffel/pulp --ref <branch> -f runner_provider=github-hosted
+  ```
+- **Pin to a specific Namespace runner selector** (larger instance, arm64, etc.): pass the per-OS `linux_runner_selector_json` / `windows_runner_selector_json` / `macos_runner_selector_json` workflow_dispatch inputs.
+- **Via `shipyard cloud run`**: same dispatch path. `shipyard cloud run build <branch>` picks up `[cloud] provider = namespace` from `.shipyard/config.toml` and fires the workflow with the matching provider input.
 
 ## Commands
 
