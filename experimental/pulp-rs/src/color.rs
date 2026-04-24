@@ -76,3 +76,41 @@ pub fn green() -> &'static str {
         ""
     }
 }
+
+/// `\x1b[31m` (red) or empty string.
+///
+/// Added in Phase 6b so the `project bump` / `project undo` failure
+/// paths can colour "failed" the same red as the C++ CLI.
+#[must_use]
+pub fn red() -> &'static str {
+    if enabled() {
+        "\x1b[31m"
+    } else {
+        ""
+    }
+}
+
+/// `\x1b[36m` (cyan) or empty string.
+///
+/// Added in Phase 6b for `project bump --dry-run` "would bump"
+/// markers — matches the C++ report colour.
+#[must_use]
+pub fn cyan() -> &'static str {
+    if enabled() {
+        "\x1b[36m"
+    } else {
+        ""
+    }
+}
+
+/// `\x1b[1m` (bold) or empty string.
+///
+/// Added in Phase 6b for the `pulp project bump` report header.
+#[must_use]
+pub fn bold() -> &'static str {
+    if enabled() {
+        "\x1b[1m"
+    } else {
+        ""
+    }
+}

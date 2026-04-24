@@ -75,11 +75,13 @@
 // in idiomatic error-composition code. Allowed per-site, not globally,
 // to avoid suppressing real issues.
 
+pub mod bump;
 pub mod cmd;
 pub mod color;
 pub mod config;
 pub mod diag;
 pub mod error;
+pub mod help;
 pub mod parse;
 pub mod proc;
 pub mod project;
