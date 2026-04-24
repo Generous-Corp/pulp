@@ -232,5 +232,84 @@ class SignAndReleaseContentsWriteTest(unittest.TestCase):
         )
 
 
+class BuildYmlNamespaceDefaultTest(unittest.TestCase):
+    """#714: build.yml must default to Namespace runners on every event.
+
+    Three load-bearing flips, all in `.github/workflows/build.yml`:
+
+    1. The `runner_provider` workflow_dispatch input default → `namespace`
+       (not `github-hosted`). Manual workflow_dispatch picks up Namespace
+       without an explicit override.
+    2. The `REQUESTED_PROVIDER` env-var fallback → `'namespace'` (not
+       `'github-hosted'`). Defense-in-depth if the repo variable
+       `PULP_DEFAULT_RUNNER_PROVIDER` is unset.
+    3. NO `EVENT_NAME == "pull_request"` Windows hardcoded github-hosted
+       branch. The prior version pinned Windows to GitHub-hosted on PR
+       events because Namespace Windows capacity was intermittent;
+       today's data (24+ green Namespace Windows lanes across PRs
+       #711, #719, #725, #730, #733, #749) shows capacity is reliable.
+       Removing the safety belt unblocks the slowest lane on every PR.
+
+    These are the three changes pulp #714 ships. The regression test
+    exists so a future PR can't silently flip back to github-hosted.
+    """
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        root = Path(__file__).resolve().parent.parent.parent
+        cls.workflow_path = root / ".github" / "workflows" / "build.yml"
+        cls.text = cls.workflow_path.read_text(encoding="utf-8")
+
+    def test_runner_provider_input_defaults_to_namespace(self) -> None:
+        """workflow_dispatch input `runner_provider` default == namespace."""
+        self.assertRegex(
+            self.text,
+            r"runner_provider:\s*\n[\s\S]{1,300}?default:\s*namespace",
+            "build.yml `runner_provider` workflow_dispatch input must "
+            "default to `namespace` (issue #714).",
+        )
+
+    def test_requested_provider_env_fallback_is_namespace(self) -> None:
+        """REQUESTED_PROVIDER env-var fallback string is 'namespace'."""
+        self.assertIn(
+            "PULP_DEFAULT_RUNNER_PROVIDER || 'namespace'",
+            self.text,
+            "build.yml REQUESTED_PROVIDER env fallback must be "
+            "'namespace' (issue #714) so the workflow defaults to "
+            "Namespace even if vars.PULP_DEFAULT_RUNNER_PROVIDER is unset.",
+        )
+        # Same for the inline Python REQUESTED string fallback.
+        self.assertIn(
+            'REQUESTED = (os.environ.get("REQUESTED_PROVIDER") or "namespace").strip()',
+            self.text,
+            "build.yml inline-Python REQUESTED fallback must be "
+            "\"namespace\" (issue #714).",
+        )
+
+    def test_no_pr_event_windows_safety_belt(self) -> None:
+        """The pull_request → github-hosted Windows hardcode must NOT exist.
+
+        Prior version pinned Windows to github-hosted on PR events for
+        capacity reasons. Removing the belt is the whole point of #714.
+        If a future regression in Namespace Windows surfaces, restore
+        the belt or use `shipyard cloud retarget --provider github-hosted`
+        mid-flight (pulp-release-bot has actions:write per #713).
+        """
+        # The exact load-bearing pattern the prior version had.
+        forbidden_patterns = [
+            r'EVENT_NAME\s*==\s*"pull_request"[\s\S]{1,200}?windows_provider\s*=\s*"github-hosted"',
+            r'windows_runs_on\s*=\s*json\.dumps\("windows-latest"\)',
+        ]
+        for pat in forbidden_patterns:
+            self.assertNotRegex(
+                self.text,
+                pat,
+                f"build.yml must not contain the Windows PR-event "
+                f"github-hosted safety belt (issue #714). Pattern "
+                f"`{pat}` matched. Restoring the belt regresses every "
+                f"PR's slowest lane back to ~25 min.",
+            )
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

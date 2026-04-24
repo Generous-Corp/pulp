@@ -387,24 +387,40 @@ Then proceed with the `ship` workflow below.
 
 ## Runner Priority (hard rule)
 
-**Always use Namespace runners for Ubuntu and Windows CI. Never use GitHub-hosted runners as the primary path.**
+**Always use Namespace runners for Ubuntu and Windows CI. Never use GitHub-hosted runners as the primary path. Never wait for local SSH validation when Namespace is available.**
+
+As of pulp #714 (PR #751), `.github/workflows/build.yml` defaults to Namespace on every event (push, pull_request, workflow_dispatch). The repo variable `PULP_DEFAULT_RUNNER_PROVIDER=namespace` is set. The pull_request → github-hosted Windows hardcode is removed. **You should rarely have to think about runner provider in 2026-04-24+ pulp PRs** — the auto-triggered workflow already picks Namespace.
 
 Priority order:
-1. **Namespace** — dispatch with `gh workflow run build.yml --ref <branch> -f runner_provider=namespace`
-2. **Local VMs** — fallback if Namespace is unavailable (`ssh ubuntu`, `ssh win`)
-3. **GitHub-hosted** — last resort only if both Namespace and local VMs are down
+1. **Namespace** (default) — dispatched automatically by build.yml on every event; can also be fired explicitly via `shipyard cloud run build <branch> --provider namespace --require-sha <sha>` for a fresh parallel cycle
+2. **Local VMs** — fallback only if Namespace is unavailable (`ssh ubuntu`, `ssh win`); rare since pulp #714
+3. **GitHub-hosted** — explicit opt-in only (e.g. cross-validating that a Namespace failure isn't a Namespace-specific bug)
 
-macOS runs locally in parallel with Namespace Ubuntu/Windows.
+macOS runs on Namespace too via `PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON` repo variable (`namespace-profile-generouscorp-macos`); falls back to GH-hosted `macos-15` only if the variable is unset.
 
-**Common mistake:** Pushing a branch and waiting for the auto-triggered GitHub Actions PR checks. Those use GitHub-hosted runners and are slow. Instead: cancel the auto-triggered run and dispatch on Namespace.
+### Operational rule for agents — fire Namespace immediately after every push
+
+The auto-triggered workflow takes a few seconds to register. To accelerate, **immediately after `git push` on a branch with an open or about-to-open PR, dispatch a parallel Namespace cycle**:
 
 ```bash
-# Cancel auto-triggered GitHub-hosted run
-gh run cancel <run_id> --repo danielraffel/pulp
-
-# Dispatch on Namespace
-gh workflow run build.yml --repo danielraffel/pulp --ref <branch> -f runner_provider=namespace
+FULL_SHA=$(git rev-parse HEAD)
+BRANCH=$(git rev-parse --abbrev-ref HEAD)
+shipyard cloud run build "$BRANCH" --provider namespace --require-sha "$FULL_SHA"
 ```
+
+The `--require-sha` guard (always pass the full 40-char SHA, not `HEAD` — `HEAD` resolves from the cwd which may differ from the branch) prevents stale dispatches. The dispatched run shows up on the PR's check rollup alongside the auto-triggered run; whichever lane reports first satisfies its check name.
+
+**Why even though build.yml defaults to namespace now**: the explicit dispatch is instant — no waiting for the auto-trigger to wake up. On a typical PR push that's 30-60 seconds saved per cycle, which compounds across rebases/force-pushes.
+
+### When a slow lane is blocking a merge
+
+If a GH-hosted lane is somehow still blocking (someone passed `runner_provider=github-hosted` explicitly, or a workflow other than build.yml hasn't been flipped), retarget mid-flight:
+
+```bash
+shipyard cloud retarget --pr <NNN> --target "Windows (x64) [github-hosted]" --provider namespace --apply
+```
+
+This requires `actions:write` on the gh token (granted to `pulp-release-bot` per pulp #713). If retarget reports a scope error, fall back to: `gh workflow run build.yml --ref <branch> -f runner_provider=namespace` for a fresh dispatch + let the slow lane finish in parallel.
 
 ## Commands
 
