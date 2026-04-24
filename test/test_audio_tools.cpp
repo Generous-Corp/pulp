@@ -5,23 +5,42 @@
 #include <pulp/tools/audio/model_store.hpp>
 #include <pulp/tools/audio/service.hpp>
 
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <string_view>
 
+#ifdef _WIN32
+#include <process.h>
+#else
+#include <unistd.h>
+#endif
+
 namespace fs = std::filesystem;
 using namespace pulp::tools::audio;
 
 namespace {
 
+uint64_t current_process_id() {
+#ifdef _WIN32
+    return static_cast<uint64_t>(_getpid());
+#else
+    return static_cast<uint64_t>(getpid());
+#endif
+}
+
 struct TempDir {
     fs::path path;
 
     TempDir() {
+        static std::atomic<uint64_t> next_id{0};
         auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
-        path = fs::temp_directory_path() / ("pulp-audio-tools-" + std::to_string(stamp));
+        auto unique_id = next_id.fetch_add(1, std::memory_order_relaxed);
+        path = fs::temp_directory_path()
+             / ("pulp-audio-tools-" + std::to_string(current_process_id()) + "-"
+                + std::to_string(stamp) + "-" + std::to_string(unique_id));
         fs::create_directories(path);
     }
 

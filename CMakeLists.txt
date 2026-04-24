@@ -490,6 +490,9 @@ if(PULP_BUILD_TESTS AND NOT ANDROID)
     FetchContent_MakeAvailable(Catch2)
     list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/extras)
     include(Catch)
+    set(_CATCH_DISCOVER_TESTS_SCRIPT
+        "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpCatchAddTests.cmake"
+        CACHE INTERNAL "Pulp path to CatchAddTests.cmake helper file" FORCE)
     add_subdirectory(test)
 endif()
 

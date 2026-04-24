@@ -74,6 +74,7 @@ jobs:
           from pathlib import Path
 
           REQUESTED = (os.environ.get("REQUESTED_PROVIDER") or "github-hosted").strip()
+          EVENT_NAME = (os.environ.get("GITHUB_EVENT_NAME") or "").strip()
           RESOLVER = ["python3", "tools/scripts/resolve_runs_on.py"]
 
           def run(args):
@@ -97,14 +98,22 @@ jobs:
               "--namespace-env", "NAMESPACE_LINUX_RUNS_ON_JSON",
               "--namespace-setting-name", "PULP_NAMESPACE_BUILD_LINUX_RUNS_ON_JSON",
           ])
-          windows_runs_on = run([
-              "--target-name", "Windows (x64)",
-              "--mode", "provider",
-              "--github-hosted-label", "windows-latest",
-              "--explicit-env", "EXPLICIT_WINDOWS_RUNNER_SELECTOR_JSON",
-              "--namespace-env", "NAMESPACE_WINDOWS_RUNS_ON_JSON",
-              "--namespace-setting-name", "PULP_NAMESPACE_BUILD_WINDOWS_RUNS_ON_JSON",
-          ])
+          # Namespace Windows capacity has been intermittently unavailable.
+          # Keep PR validation on GitHub-hosted Windows so a queued Namespace
+          # lane does not block mergeability while the capacity issue is open.
+          if EVENT_NAME == "pull_request":
+              windows_runs_on = json.dumps("windows-latest")
+              windows_provider = "github-hosted"
+          else:
+              windows_runs_on = run([
+                  "--target-name", "Windows (x64)",
+                  "--mode", "provider",
+                  "--github-hosted-label", "windows-latest",
+                  "--explicit-env", "EXPLICIT_WINDOWS_RUNNER_SELECTOR_JSON",
+                  "--namespace-env", "NAMESPACE_WINDOWS_RUNS_ON_JSON",
+                  "--namespace-setting-name", "PULP_NAMESPACE_BUILD_WINDOWS_RUNS_ON_JSON",
+              ])
+              windows_provider = REQUESTED
           macos_runs_on = run([
               "--target-name", "macOS (ARM64)",
               "--mode", "optional-namespace",
@@ -126,7 +135,7 @@ jobs:
                   "key": "windows",
                   "name": "Windows (x64)",
                   "runs_on_json": windows_runs_on,
-                  "provider": REQUESTED,
+                  "provider": windows_provider,
               },
               {
                   "key": "linux",

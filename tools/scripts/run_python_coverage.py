@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
-"""Run coverage.py over the tools/scripts Python test surface.
+"""Run coverage.py over the first-party Python tooling test surface.
 
 This is the Python-tooling analogue of scripts/run_coverage.sh:
 
-- discovers `tools/scripts/test_*.py`
+- discovers the configured first-party Python tooling tests
 - runs each test file under coverage.py
 - enables subprocess coverage so tests that shell out to the target
   script still measure the code under test
+- reports the intended first-party Python tooling roots while omitting
+  test modules from the source set
 - writes text, HTML, and Cobertura XML outputs for CI + local use
 
 Run:
@@ -16,6 +18,7 @@ Run:
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import os
 import re
 import shutil
@@ -41,16 +44,42 @@ RCFILE = OUTPUT_DIR / ".coveragerc"
 
 @dataclass(frozen=True)
 class CoverageSurface:
-    source_root: str
-    test_glob: str
+    source_roots: tuple[str, ...]
+    test_globs: tuple[str, ...]
+    omit_globs: tuple[str, ...] = ()
+    always_include: bool = False
+
+    def resolved_omit_globs(self) -> tuple[str, ...]:
+        omit_globs = self.omit_globs or self.test_globs
+        return omit_globs + tuple(f"{source_root}/_*.py" for source_root in self.source_roots)
 
 
 COVERAGE_SURFACES = (
-    CoverageSurface("tools/scripts", "tools/scripts/test_*.py"),
-    CoverageSurface("tools/deps", "tools/deps/test_*.py"),
-    CoverageSurface("tools/local-ci", "tools/local-ci/test_*.py"),
+    CoverageSurface(("tools/scripts",), ("tools/scripts/test_*.py",)),
+    CoverageSurface(("tools/deps",), ("tools/deps/test_*.py",)),
+    CoverageSurface(("tools/local-ci",), ("tools/local-ci/test_*.py",)),
+    # Keep the broader first-party tooling roots represented while the
+    # executed test set stays on the established tooling test roots.
+    CoverageSurface(
+        ("tools", "core/view/js"),
+        (),
+        (
+            "tools/test_*.py",
+            "tools/scripts/test_*.py",
+            "tools/deps/test_*.py",
+            "tools/local-ci/test_*.py",
+            "tools/packages/test_*.py",
+            "tools/scripts/_*.py",
+            "tools/deps/_*.py",
+            "tools/local-ci/_*.py",
+            "tools/packages/_*.py",
+        ),
+        always_include=True,
+    ),
 )
-DEFAULT_TEST_GLOBS = [surface.test_glob for surface in COVERAGE_SURFACES]
+DEFAULT_TEST_GLOBS = list(
+    dict.fromkeys(pattern for surface in COVERAGE_SURFACES for pattern in surface.test_globs)
+)
 
 
 def _require_supported_coverage() -> None:
@@ -83,22 +112,71 @@ def _discover_tests(patterns: list[str]) -> list[Path]:
     return tests
 
 
+def _dedupe(items: list[str]) -> list[str]:
+    seen: set[str] = set()
+    deduped: list[str] = []
+    for item in items:
+        if item in seen:
+            continue
+        seen.add(item)
+        deduped.append(item)
+    return deduped
+
+
 def _selected_surfaces(tests: list[Path]) -> list[CoverageSurface]:
+    rel_paths = [test.relative_to(REPO_ROOT).as_posix() for test in tests]
     selected: list[CoverageSurface] = []
     for surface in COVERAGE_SURFACES:
-        prefix = f"{surface.source_root}/"
-        if any(test.relative_to(REPO_ROOT).as_posix().startswith(prefix) for test in tests):
+        if surface.test_globs and any(
+            fnmatch.fnmatch(rel_path, pattern)
+            for rel_path in rel_paths
+            for pattern in surface.test_globs
+        ):
+            selected.append(surface)
+    for surface in COVERAGE_SURFACES:
+        if surface.always_include:
             selected.append(surface)
     return selected
 
 
+def _has_selected_test_surface(tests: list[Path]) -> bool:
+    rel_paths = [test.relative_to(REPO_ROOT).as_posix() for test in tests]
+    return any(
+        surface.test_globs and any(
+            fnmatch.fnmatch(rel_path, pattern)
+            for rel_path in rel_paths
+            for pattern in surface.test_globs
+        )
+        for surface in COVERAGE_SURFACES
+    )
+
+
+def _normalized_source_roots(surfaces: list[CoverageSurface]) -> list[str]:
+    roots = _dedupe(
+        [source_root for surface in surfaces for source_root in surface.source_roots]
+    )
+    normalized: list[str] = []
+    for root in sorted(roots, key=lambda value: (value.count("/"), value)):
+        if any(root.startswith(f"{existing}/") for existing in normalized):
+            continue
+        normalized.append(root)
+    return normalized
+
+
+def _resolved_omit_globs(surfaces: list[CoverageSurface]) -> list[str]:
+    return _dedupe(
+        [
+            omit_glob
+            for surface in surfaces
+            for omit_glob in surface.resolved_omit_globs()
+        ]
+    )
+
+
 def _write_coveragerc(surfaces: list[CoverageSurface]) -> None:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    source_roots = [surface.source_root for surface in surfaces]
-    omit_globs: list[str] = []
-    for surface in surfaces:
-        omit_globs.append(surface.test_glob)
-        omit_globs.append(f"{surface.source_root}/_*.py")
+    source_roots = _normalized_source_roots(surfaces)
+    omit_globs = _resolved_omit_globs(surfaces)
     if not source_roots:
         raise ValueError("run_python_coverage.py: no coverage surfaces selected")
 
@@ -198,14 +276,14 @@ def main(argv: list[str] | None = None) -> int:
         print(f"run_python_coverage.py: no tests matched {patterns!r}", file=sys.stderr)
         return 1
 
-    surfaces = _selected_surfaces(tests)
-    if not surfaces:
+    if not _has_selected_test_surface(tests):
         print(
             "run_python_coverage.py: matched tests are outside the configured "
             "Python coverage surfaces",
             file=sys.stderr,
         )
         return 1
+    surfaces = _selected_surfaces(tests)
 
     shutil.rmtree(OUTPUT_DIR, ignore_errors=True)
     _write_coveragerc(surfaces)

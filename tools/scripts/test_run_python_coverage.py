@@ -45,9 +45,21 @@ class CoveragercTests(unittest.TestCase):
             xml = output / "coverage.python.xml"
             rcfile = output / ".coveragerc"
             surfaces = [
-                rpc.CoverageSurface("tools/scripts", "tools/scripts/test_*.py"),
-                rpc.CoverageSurface("tools/deps", "tools/deps/test_*.py"),
-                rpc.CoverageSurface("tools/local-ci", "tools/local-ci/test_*.py"),
+                rpc.CoverageSurface(("tools/scripts",), ("tools/scripts/test_*.py",)),
+                rpc.CoverageSurface(("tools/deps",), ("tools/deps/test_*.py",)),
+                rpc.CoverageSurface(("tools/local-ci",), ("tools/local-ci/test_*.py",)),
+                rpc.CoverageSurface(
+                    ("tools", "core/view/js"),
+                    (),
+                    (
+                        "tools/test_*.py",
+                        "tools/scripts/test_*.py",
+                        "tools/deps/test_*.py",
+                        "tools/local-ci/test_*.py",
+                        "tools/packages/test_*.py",
+                    ),
+                    always_include=True,
+                ),
             ]
             with mock.patch.object(rpc, "OUTPUT_DIR", output), \
                  mock.patch.object(rpc, "HTML_DIR", html), \
@@ -59,11 +71,14 @@ class CoveragercTests(unittest.TestCase):
             self.assertIn("subprocess", text)
             self.assertIn(html.as_posix(), text)
             self.assertIn(xml.as_posix(), text)
-            self.assertIn("tools/scripts", text)
-            self.assertIn("tools/deps", text)
-            self.assertIn("tools/local-ci", text)
+            self.assertIn("\n    tools\n", text)
+            self.assertIn("core/view/js", text)
+            self.assertIn("tools/test_*.py", text)
+            self.assertIn("tools/scripts/test_*.py", text)
             self.assertIn("tools/local-ci/test_*.py", text)
             self.assertIn("tools/deps/_*.py", text)
+            self.assertIn("tools/packages/test_*.py", text)
+            self.assertIn("core/view/js/_*.py", text)
 
     def test_selected_surfaces_follow_discovered_tests(self) -> None:
         tests = [
@@ -72,9 +87,22 @@ class CoveragercTests(unittest.TestCase):
         ]
         surfaces = rpc._selected_surfaces(tests)
         self.assertEqual(
-            [surface.source_root for surface in surfaces],
-            ["tools/scripts", "tools/local-ci"],
+            [surface.source_roots[0] for surface in surfaces],
+            ["tools/scripts", "tools/local-ci", "tools"],
         )
+
+    def test_default_test_globs_keep_top_level_tools_tests_out_of_default_run(self) -> None:
+        self.assertNotIn("tools/test_*.py", rpc.DEFAULT_TEST_GLOBS)
+
+    def test_normalized_source_roots_drop_nested_tools_paths(self) -> None:
+        surfaces = rpc._selected_surfaces(
+            [
+                rpc.REPO_ROOT / "tools/scripts/test_alpha.py",
+                rpc.REPO_ROOT / "tools/deps/test_audit.py",
+                rpc.REPO_ROOT / "tools/local-ci/test_local_ci.py",
+            ]
+        )
+        self.assertEqual(rpc._normalized_source_roots(surfaces), ["tools", "core/view/js"])
 
 
 class MainFlowTests(unittest.TestCase):
@@ -115,8 +143,8 @@ class MainFlowTests(unittest.TestCase):
             self.assertEqual(env["COVERAGE_FILE"], str(rpc.DATA_FILE))
         surfaces = write_coveragerc.call_args.args[0]
         self.assertEqual(
-            [surface.source_root for surface in surfaces],
-            ["tools/scripts", "tools/deps", "tools/local-ci"],
+            [surface.source_roots[0] for surface in surfaces],
+            ["tools/scripts", "tools/deps", "tools/local-ci", "tools"],
         )
 
     def test_returns_one_when_report_builder_has_no_data(self) -> None:
@@ -142,7 +170,7 @@ class MainFlowTests(unittest.TestCase):
              mock.patch.object(
                  rpc,
                  "_discover_tests",
-                 return_value=[rpc.REPO_ROOT / "tools/test_check_docs_consistency.py"],
+                 return_value=[rpc.REPO_ROOT / "scripts/test_smoke.py"],
              ), \
              mock.patch.object(rpc.shutil, "rmtree"), \
              mock.patch.object(rpc, "_build_reports"):
@@ -159,7 +187,35 @@ class MainFlowTests(unittest.TestCase):
             rc = rpc.main([])
         self.assertEqual(rc, 0)
         surfaces = write_coveragerc.call_args.args[0]
-        self.assertEqual([surface.source_root for surface in surfaces], ["tools/scripts"])
+        self.assertEqual(
+            [surface.source_roots[0] for surface in surfaces],
+            ["tools/scripts", "tools"],
+        )
+
+    def test_broader_slice_is_selected_even_without_top_level_tools_tests(self) -> None:
+        tests = [rpc.REPO_ROOT / "tools/scripts/test_alpha.py"]
+        surfaces = rpc._selected_surfaces(tests)
+        self.assertEqual(
+            [surface.source_roots for surface in surfaces],
+            [("tools/scripts",), ("tools", "core/view/js")],
+        )
+
+    def test_main_includes_broader_slice_for_default_tooling_tests(self) -> None:
+        tests = [rpc.REPO_ROOT / "tools/scripts/test_alpha.py"]
+        with mock.patch.object(rpc, "_require_supported_coverage"), \
+             mock.patch.object(rpc, "_discover_tests", return_value=tests), \
+             mock.patch.object(rpc, "_write_coveragerc") as write_coveragerc, \
+             mock.patch.object(rpc.shutil, "rmtree"), \
+             mock.patch.object(rpc, "_run_test", return_value=0), \
+             mock.patch.object(rpc, "_build_reports"):
+            rc = rpc.main([])
+
+        self.assertEqual(rc, 0)
+        surfaces = write_coveragerc.call_args.args[0]
+        self.assertEqual(
+            [surface.source_roots for surface in surfaces],
+            [("tools/scripts",), ("tools", "core/view/js")],
+        )
 
 
 if __name__ == "__main__":
