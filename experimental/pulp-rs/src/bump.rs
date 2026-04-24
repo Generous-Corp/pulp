@@ -80,9 +80,26 @@ fn project_re() -> &'static Regex {
     RE.get_or_init(|| Regex::new(r"\bproject\s*\(").unwrap())
 }
 
-/// Which CMake shape produced the pin site we're rewriting.
+/// Which CMake/TOML shape produced the pin site we're rewriting.
+///
+/// The first three variants are standalone-project pins (pulp#740 /
+/// #244 spec): `pulp.toml` is the source of truth for the SDK pin,
+/// and `find_package(Pulp X.Y.Z ...)` mirrors it when present. The
+/// remaining variants describe the Pulp source checkout's internal
+/// pin sites, where `project(... VERSION ...)` is the framework
+/// release version rather than a consumer SDK pin.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PinKind {
+    /// `sdk_version = "X.Y.Z"` inside `pulp.toml`. Source of truth
+    /// for standalone consumer projects.
+    PulpTomlSdkVersion,
+    /// `sdk_path = ".../X.Y.Z"` inside `pulp.toml`. Rewritten only
+    /// when it points at a managed-cache path for the old version;
+    /// custom paths are preserved.
+    PulpTomlSdkPath,
+    /// `find_package(Pulp X.Y.Z REQUIRED)` inside a standalone project's
+    /// CMakeLists. Mirrors `sdk_version` when present.
+    CMakeFindPackagePulpVersion,
     /// `FetchContent_Declare(pulp … GIT_TAG vX.Y.Z)`
     FetchContentGitTag,
     /// `pulp_add_project(NAME VERSION X.Y.Z …)`
@@ -99,6 +116,9 @@ impl PinKind {
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
+            Self::PulpTomlSdkVersion => "PulpTomlSdkVersion",
+            Self::PulpTomlSdkPath => "PulpTomlSdkPath",
+            Self::CMakeFindPackagePulpVersion => "CMakeFindPackagePulpVersion",
             Self::FetchContentGitTag => "FetchContentGitTag",
             Self::PulpAddProject => "PulpAddProject",
             Self::ProjectVersion => "ProjectVersion",
@@ -111,6 +131,9 @@ impl PinKind {
     #[must_use]
     pub fn parse(name: &str) -> Self {
         match name {
+            "PulpTomlSdkVersion" => Self::PulpTomlSdkVersion,
+            "PulpTomlSdkPath" => Self::PulpTomlSdkPath,
+            "CMakeFindPackagePulpVersion" => Self::CMakeFindPackagePulpVersion,
             "FetchContentGitTag" => Self::FetchContentGitTag,
             "PulpAddProject" => Self::PulpAddProject,
             "ProjectVersion" => Self::ProjectVersion,
@@ -391,7 +414,48 @@ fn find_literal_after(
 
 // ── Undo batch JSON ───────────────────────────────────────────────────
 
+/// One precise edit recorded during a bump, so undo can restore the
+/// exact file state byte-for-byte — including the user's original
+/// `v` / no-`v` pin-style preference.
+///
+/// Added per pulp#740 / #244 spec:
+/// > Undo files now record explicit edits: path, pin kind, old value,
+/// > new value, and old formatting style.
+///
+/// Undo applies each edit by checking that the current file content
+/// still matches `new_value` at the recorded site; if it doesn't, the
+/// edit is skipped rather than clobbering whatever the user (or
+/// another tool) wrote since the bump.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UndoEdit {
+    /// Absolute path to the file that was edited.
+    pub path: PathBuf,
+    /// Which pin shape this edit targeted — reject-mismatch guard
+    /// on undo, and sanity check against schema drift.
+    #[serde(default)]
+    pub kind: PinKind,
+    /// Pre-bump value as it appeared in the file.
+    pub old_value: String,
+    /// Post-bump value the bump wrote. Undo matches this before
+    /// restoring `old_value`; a mismatch means the file was edited
+    /// after the bump and we refuse to clobber.
+    pub new_value: String,
+    /// Whether the pre-bump value carried a leading `v` / `V`. Kept
+    /// so undo restores the exact spelling the user had (not just
+    /// a canonicalised triple).
+    #[serde(default)]
+    pub old_value_style_has_v: bool,
+}
+
 /// One per-project entry in an undo batch.
+///
+/// # Backward-compatibility
+///
+/// Legacy single-edit entries written before pulp#740 landed are
+/// still readable: `edits` and `notes` default to empty, so the
+/// deserialiser accepts older batches without the fields. Undo
+/// callers fall back to the top-level `old_pin` + `pin_kind` when
+/// `edits` is empty.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UndoEntry {
     /// Absolute project path.
@@ -413,6 +477,16 @@ pub struct UndoEntry {
     /// Human-readable failure explanation when `status == "failed"`.
     #[serde(default)]
     pub failure_reason: String,
+    /// Transient report notes — surfaced to the user in the bump
+    /// output, NOT required for undo correctness. Defaults to empty
+    /// for legacy entries (pre-pulp#740) that predate the field.
+    #[serde(default)]
+    pub notes: Vec<String>,
+    /// Precise per-file edits made by this bump, in apply order.
+    /// Empty for legacy entries; callers fall back to the `old_pin`
+    /// / `pin_kind` pair when this field is missing.
+    #[serde(default)]
+    pub edits: Vec<UndoEdit>,
 }
 
 /// One batch — all projects touched by a single `pulp project bump`.
@@ -663,6 +737,7 @@ mod tests {
                 pin_kind: PinKind::FetchContentGitTag,
                 status: "bumped".to_owned(),
                 failure_reason: String::new(),
+                ..Default::default()
             }],
         };
         write_undo_batch(&p, &batch).unwrap();
@@ -671,6 +746,124 @@ mod tests {
         assert_eq!(read.entries.len(), 1);
         assert_eq!(read.entries[0].pin_kind, PinKind::FetchContentGitTag);
         assert!(read.entries[0].old_pin_style_has_v);
+    }
+
+    #[test]
+    fn undo_batch_legacy_file_without_edits_or_notes_reads_cleanly() {
+        // Backward-compat check for pulp#740: undo files written before
+        // the `edits` / `notes` fields existed must still deserialize
+        // with empty defaults, so users with old bump-undo-*.json files
+        // don't lose their undo history on a pulp upgrade.
+        let td = tempfile::tempdir().unwrap();
+        let p = td.path().join("bump-undo-legacy.json");
+        let legacy_json = r#"{
+            "timestamp": "2026-04-01T00-00-00Z",
+            "target_version": "0.40.0",
+            "entries": [{
+                "project_path": "/tmp/proj",
+                "project_name": "LegacyProj",
+                "old_pin": "v0.30.0",
+                "old_pin_style_has_v": true,
+                "pin_kind": "FetchContentGitTag",
+                "status": "bumped",
+                "failure_reason": ""
+            }]
+        }"#;
+        std::fs::write(&p, legacy_json).unwrap();
+        let read = read_undo_batch(&p).expect("legacy batch reads clean");
+        assert_eq!(read.entries.len(), 1);
+        assert_eq!(read.entries[0].old_pin, "v0.30.0");
+        assert!(read.entries[0].notes.is_empty(), "notes defaults empty");
+        assert!(read.entries[0].edits.is_empty(), "edits defaults empty");
+    }
+
+    #[test]
+    fn undo_entry_with_edits_round_trips() {
+        let td = tempfile::tempdir().unwrap();
+        let p = td.path().join("bump-undo-edits.json");
+        let batch = UndoBatch {
+            timestamp: "2026-04-24T21-00-00Z".to_owned(),
+            target_version: "0.41.0".to_owned(),
+            entries: vec![UndoEntry {
+                project_path: PathBuf::from("/tmp/standalone"),
+                project_name: "MyPlugin".to_owned(),
+                old_pin: "0.40.0".to_owned(),
+                old_pin_style_has_v: false,
+                pin_kind: PinKind::PulpTomlSdkVersion,
+                status: "bumped".to_owned(),
+                failure_reason: String::new(),
+                notes: vec!["mirrored find_package".to_owned()],
+                edits: vec![
+                    UndoEdit {
+                        path: PathBuf::from("/tmp/standalone/pulp.toml"),
+                        kind: PinKind::PulpTomlSdkVersion,
+                        old_value: "0.40.0".to_owned(),
+                        new_value: "0.41.0".to_owned(),
+                        old_value_style_has_v: false,
+                    },
+                    UndoEdit {
+                        path: PathBuf::from("/tmp/standalone/CMakeLists.txt"),
+                        kind: PinKind::CMakeFindPackagePulpVersion,
+                        old_value: "0.40.0".to_owned(),
+                        new_value: "0.41.0".to_owned(),
+                        old_value_style_has_v: false,
+                    },
+                ],
+            }],
+        };
+        write_undo_batch(&p, &batch).unwrap();
+        let read = read_undo_batch(&p).unwrap();
+        assert_eq!(read.entries[0].edits.len(), 2);
+        assert_eq!(read.entries[0].edits[0].kind, PinKind::PulpTomlSdkVersion);
+        assert_eq!(
+            read.entries[0].edits[1].kind,
+            PinKind::CMakeFindPackagePulpVersion
+        );
+        assert_eq!(read.entries[0].edits[0].new_value, "0.41.0");
+        assert_eq!(read.entries[0].notes, vec!["mirrored find_package"]);
+    }
+
+    #[test]
+    fn pin_kind_round_trip_covers_every_variant() {
+        // Any PinKind variant we can write must parse back to itself.
+        // Prevents a rename / delete from silently turning into
+        // PinKind::Unknown and losing undo fidelity.
+        for kind in [
+            PinKind::PulpTomlSdkVersion,
+            PinKind::PulpTomlSdkPath,
+            PinKind::CMakeFindPackagePulpVersion,
+            PinKind::FetchContentGitTag,
+            PinKind::PulpAddProject,
+            PinKind::ProjectVersion,
+            PinKind::Unknown,
+        ] {
+            assert_eq!(PinKind::parse(kind.as_str()), kind);
+        }
+    }
+
+    #[test]
+    fn pin_kind_parse_unknown_string_maps_to_unknown_variant() {
+        assert_eq!(PinKind::parse(""), PinKind::Unknown);
+        assert_eq!(PinKind::parse("NotARealKind"), PinKind::Unknown);
+    }
+
+    #[test]
+    fn undo_edit_serializes_every_field() {
+        // Guard against a future #[serde(skip)] that silently drops a
+        // field during write and breaks undo restore.
+        let edit = UndoEdit {
+            path: PathBuf::from("/x/pulp.toml"),
+            kind: PinKind::PulpTomlSdkPath,
+            old_value: "/old/path/0.40.0".to_owned(),
+            new_value: "/old/path/0.41.0".to_owned(),
+            old_value_style_has_v: false,
+        };
+        let json = serde_json::to_value(&edit).unwrap();
+        assert!(json.get("path").is_some());
+        assert!(json.get("kind").is_some());
+        assert!(json.get("old_value").is_some());
+        assert!(json.get("new_value").is_some());
+        assert!(json.get("old_value_style_has_v").is_some());
     }
 
     #[test]
