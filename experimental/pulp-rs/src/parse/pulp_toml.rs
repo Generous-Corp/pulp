@@ -51,6 +51,20 @@ pub struct PulpToml {
     #[serde(default)]
     pub cli_min_version: Option<String>,
 
+    /// `sdk_path` hint — an absolute path to a prebuilt SDK directory
+    /// (the one `pulp cache fetch` downloads into, or a local override
+    /// the user points at). Checked by `pulp status` on standalone
+    /// projects.
+    #[serde(default)]
+    pub sdk_path: Option<String>,
+
+    /// `sdk_checkout` hint — absolute path to a local SDK source
+    /// checkout. Same purpose as `sdk_path` but for when the user is
+    /// iterating on the SDK itself rather than consuming a release
+    /// build.
+    #[serde(default)]
+    pub sdk_checkout: Option<String>,
+
     /// `[pulp]` section overrides (secondary layout).
     #[serde(default)]
     pub pulp: Option<PulpSection>,
@@ -65,6 +79,12 @@ pub struct PulpSection {
     /// See [`PulpToml::cli_min_version`].
     #[serde(default)]
     pub cli_min_version: Option<String>,
+    /// See [`PulpToml::sdk_path`].
+    #[serde(default)]
+    pub sdk_path: Option<String>,
+    /// See [`PulpToml::sdk_checkout`].
+    #[serde(default)]
+    pub sdk_checkout: Option<String>,
 }
 
 impl PulpToml {
@@ -125,6 +145,23 @@ impl PulpToml {
                 .as_ref()
                 .and_then(|p| p.cli_min_version.as_deref())
         })
+    }
+
+    /// Top-level `sdk_path` wins; fall back to `[pulp].sdk_path`.
+    #[must_use]
+    pub fn sdk_path(&self) -> Option<&str> {
+        self.sdk_path
+            .as_deref()
+            .or_else(|| self.pulp.as_ref().and_then(|p| p.sdk_path.as_deref()))
+    }
+
+    /// Top-level `sdk_checkout` wins; fall back to
+    /// `[pulp].sdk_checkout`.
+    #[must_use]
+    pub fn sdk_checkout(&self) -> Option<&str> {
+        self.sdk_checkout
+            .as_deref()
+            .or_else(|| self.pulp.as_ref().and_then(|p| p.sdk_checkout.as_deref()))
     }
 }
 

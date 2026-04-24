@@ -422,22 +422,78 @@ pub fn clean(cwd: &Path, out: &mut impl Write) -> Result<()> {
 
 // ── status ───────────────────────────────────────────────────────────
 
-/// Print a short project-status summary. Human-only; the JSON lane
-/// stays on the C++ side because it also shells to `git` to report
-/// branch + commit which isn't part of this phase.
+/// Print a full project-status summary: mode, git branch/commit,
+/// build state, SDK detail (standalone) or source-tree file counts
+/// + format availability.
+///
+/// The `git` branch/commit lines shell out through a test-friendly
+/// captor so tests can pin deterministic output.
 ///
 /// # Errors
 ///
 /// [`CliError::Other`] when no project root is found.
 pub fn status(cwd: &Path, out: &mut impl Write) -> Result<()> {
+    status_with(cwd, &SystemGitProbe, out)
+}
+
+/// Read branch + last commit line. Returns `None` when the probe
+/// fails (e.g. not inside a git working tree).
+pub trait GitProbe {
+    /// Result of a git probe: branch name + one-line commit summary,
+    /// each optional.
+    fn probe(&self, cwd: &Path) -> (Option<String>, Option<String>);
+}
+
+/// Default probe — shells to `git` via `std::process::Command`.
+pub struct SystemGitProbe;
+
+impl GitProbe for SystemGitProbe {
+    fn probe(&self, cwd: &Path) -> (Option<String>, Option<String>) {
+        let branch = run_git(cwd, &["branch", "--show-current"]);
+        let commit = run_git(cwd, &["log", "--oneline", "-1"]);
+        (branch, commit)
+    }
+}
+
+fn run_git(cwd: &Path, args: &[&str]) -> Option<String> {
+    use std::process::{Command, Stdio};
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(cwd)
+        .args(args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let s = String::from_utf8(out.stdout).ok()?;
+    let trimmed = s.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_owned())
+    }
+}
+
+/// Status with an explicit git probe — the entry point used by tests
+/// so the subprocess doesn't leak into unit coverage.
+///
+/// # Errors
+///
+/// [`CliError::Other`] when no project root is found.
+pub fn status_with<G: GitProbe>(cwd: &Path, git: &G, out: &mut impl Write) -> Result<()> {
     let Some(proj) = project::resolve(cwd) else {
         return Err(CliError::Other(
             "not in a Pulp project directory".to_owned(),
         ));
     };
+
     writeln!(out, "Pulp Project Status").map_err(io_err)?;
     writeln!(out, "====================").map_err(io_err)?;
     writeln!(out, "Root: {}", proj.root.display()).map_err(io_err)?;
+
     if proj.standalone {
         writeln!(out, "Mode: sdk mode").map_err(io_err)?;
         writeln!(
@@ -453,6 +509,15 @@ pub fn status(cwd: &Path, out: &mut impl Write) -> Result<()> {
         )
         .map_err(io_err)?;
     }
+
+    let (branch, commit) = git.probe(&proj.root);
+    if let Some(b) = branch.as_deref() {
+        writeln!(out, "Branch: {b}").map_err(io_err)?;
+    }
+    if let Some(c) = commit.as_deref() {
+        writeln!(out, "Commit: {c}").map_err(io_err)?;
+    }
+
     writeln!(
         out,
         "Build: {}",
@@ -463,7 +528,173 @@ pub fn status(cwd: &Path, out: &mut impl Write) -> Result<()> {
         }
     )
     .map_err(io_err)?;
+
+    if proj.standalone {
+        write_standalone_sdk_detail(&proj, out)?;
+    } else {
+        write_source_tree_counts(&proj, out)?;
+        write_plugin_format_availability(&proj, out)?;
+    }
     Ok(())
+}
+
+fn write_standalone_sdk_detail(proj: &ActiveProject, out: &mut impl Write) -> Result<()> {
+    let toml = crate::parse::PulpToml::read(&proj.root);
+    let version = toml.as_ref().and_then(|t| t.sdk_version()).map_or_else(
+        || crate::version_info::collect(&proj.root).cli.raw,
+        str::to_owned,
+    );
+    writeln!(out, "SDK version: {version}").map_err(io_err)?;
+
+    let sdk_path = toml.as_ref().and_then(|t| t.sdk_path()).unwrap_or("");
+    if !sdk_path.is_empty() {
+        let ready = std::path::Path::new(sdk_path)
+            .join("lib/cmake/Pulp/PulpConfig.cmake")
+            .exists();
+        writeln!(
+            out,
+            "SDK path: {} ({})",
+            sdk_path,
+            if ready { "ready" } else { "missing" }
+        )
+        .map_err(io_err)?;
+    } else if let Some(home) = crate::config::pulp_home() {
+        let local = home.join("sdk-local").join(&version);
+        let downloaded = home.join("sdk").join(&version);
+        if local.exists() {
+            writeln!(out, "SDK local cache: {}", local.display()).map_err(io_err)?;
+        } else if downloaded.exists() {
+            writeln!(out, "SDK download cache: {}", downloaded.display()).map_err(io_err)?;
+        }
+    }
+
+    let checkout = toml.as_ref().and_then(|t| t.sdk_checkout()).unwrap_or("");
+    if !checkout.is_empty() {
+        let ready = std::path::Path::new(checkout).join("setup.sh").exists();
+        writeln!(
+            out,
+            "SDK checkout: {} ({})",
+            checkout,
+            if ready { "ready" } else { "missing" }
+        )
+        .map_err(io_err)?;
+    }
+    Ok(())
+}
+
+fn write_source_tree_counts(proj: &ActiveProject, out: &mut impl Write) -> Result<()> {
+    let core_dir = proj.root.join("core");
+    let (cpp, hpp) = count_sources(&core_dir);
+    let tests = count_tests(&proj.root.join("test"));
+    writeln!(out, "Source files: {cpp} impl, {hpp} headers").map_err(io_err)?;
+    writeln!(out, "Test files: {tests}").map_err(io_err)?;
+
+    let examples_dir = proj.root.join("examples");
+    let mut example_count = 0;
+    if examples_dir.exists() {
+        if let Ok(rd) = std::fs::read_dir(&examples_dir) {
+            for entry in rd.flatten() {
+                if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                    example_count += 1;
+                }
+            }
+        }
+    }
+    writeln!(out, "Examples: {example_count}").map_err(io_err)?;
+    Ok(())
+}
+
+fn count_sources(root: &Path) -> (u32, u32) {
+    let mut cpp = 0;
+    let mut hpp = 0;
+    walk_extensions(root, &mut |ext| match ext {
+        "cpp" | "mm" => cpp += 1,
+        "hpp" | "h" => hpp += 1,
+        _ => {}
+    });
+    (cpp, hpp)
+}
+
+fn count_tests(test_dir: &Path) -> u32 {
+    let Ok(rd) = std::fs::read_dir(test_dir) else {
+        return 0;
+    };
+    let mut n = 0;
+    for entry in rd.flatten() {
+        if entry
+            .path()
+            .extension()
+            .and_then(|e| e.to_str())
+            .is_some_and(|e| e == "cpp")
+        {
+            n += 1;
+        }
+    }
+    n
+}
+
+fn walk_extensions(root: &Path, visit: &mut impl FnMut(&str)) {
+    let Ok(rd) = std::fs::read_dir(root) else {
+        return;
+    };
+    for entry in rd.flatten() {
+        let Ok(ft) = entry.file_type() else { continue };
+        let path = entry.path();
+        if ft.is_dir() {
+            walk_extensions(&path, visit);
+        } else if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+            visit(ext);
+        }
+    }
+}
+
+fn write_plugin_format_availability(proj: &ActiveProject, out: &mut impl Write) -> Result<()> {
+    writeln!(out, "\nPlugin Formats:").map_err(io_err)?;
+    let vst3 = proj.root.join("external/vst3sdk").exists();
+    writeln!(
+        out,
+        "  VST3: {}",
+        if vst3 { "available" } else { "SDK not found" }
+    )
+    .map_err(io_err)?;
+    let au = proj.root.join("external/AudioUnitSDK").exists();
+    writeln!(
+        out,
+        "  AU:   {}",
+        if au { "available" } else { "SDK not found" }
+    )
+    .map_err(io_err)?;
+    writeln!(out, "  CLAP: available (fetched via CMake)").map_err(io_err)?;
+    if aax_supported_on_host() {
+        match std::env::var_os("PULP_AAX_SDK_DIR")
+            .filter(|v| !v.is_empty() && std::path::Path::new(v).exists())
+        {
+            Some(v) => writeln!(
+                out,
+                "  AAX:  optional SDK found at {}",
+                std::path::Path::new(&v).display()
+            )
+            .map_err(io_err)?,
+            None => writeln!(
+                out,
+                "  AAX:  optional (set PULP_AAX_SDK_DIR after downloading the Avid SDK from https://developer.avid.com/aax/)"
+            )
+            .map_err(io_err)?,
+        }
+    } else {
+        writeln!(out, "  AAX:  unsupported on Linux/Ubuntu").map_err(io_err)?;
+    }
+    Ok(())
+}
+
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+fn aax_supported_on_host() -> bool {
+    true
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+fn aax_supported_on_host() -> bool {
+    false
 }
 
 // ── cache ────────────────────────────────────────────────────────────
@@ -851,15 +1082,78 @@ mod tests {
         assert!(!td.path().join("build").exists());
     }
 
+    struct StubGitProbe {
+        branch: Option<String>,
+        commit: Option<String>,
+    }
+
+    impl GitProbe for StubGitProbe {
+        fn probe(&self, _cwd: &Path) -> (Option<String>, Option<String>) {
+            (self.branch.clone(), self.commit.clone())
+        }
+    }
+
     #[test]
-    fn status_reports_standalone_mode() {
+    fn status_reports_standalone_mode_with_git_probe() {
         let td = tempfile::tempdir().unwrap();
-        std::fs::write(td.path().join("pulp.toml"), "").unwrap();
+        std::fs::write(td.path().join("pulp.toml"), "sdk_version = \"9.9.9\"\n").unwrap();
+        let probe = StubGitProbe {
+            branch: Some("feature/demo".to_owned()),
+            commit: Some("abc1234 hello world".to_owned()),
+        };
         let mut out = Vec::new();
-        status(td.path(), &mut out).unwrap();
+        status_with(td.path(), &probe, &mut out).unwrap();
         let s = String::from_utf8(out).unwrap();
         assert!(s.contains("Mode: sdk mode"));
+        assert!(s.contains("Branch: feature/demo"));
+        assert!(s.contains("Commit: abc1234 hello world"));
+        assert!(s.contains("SDK version: 9.9.9"));
         assert!(s.contains("Build: not configured"));
+    }
+
+    #[test]
+    fn status_source_tree_reports_counts_and_formats() {
+        let td = tempfile::tempdir().unwrap();
+        // Source-tree fixture: has `core/` + `CMakeLists.txt`.
+        std::fs::create_dir_all(td.path().join("core/runtime")).unwrap();
+        std::fs::write(td.path().join("CMakeLists.txt"), "project(Pulp)\n").unwrap();
+        std::fs::write(td.path().join("core/runtime/foo.cpp"), "").unwrap();
+        std::fs::write(td.path().join("core/runtime/foo.hpp"), "").unwrap();
+        std::fs::write(td.path().join("core/runtime/bar.h"), "").unwrap();
+        std::fs::create_dir_all(td.path().join("test")).unwrap();
+        std::fs::write(td.path().join("test/test_foo.cpp"), "").unwrap();
+        std::fs::write(td.path().join("test/test_bar.cpp"), "").unwrap();
+        std::fs::create_dir_all(td.path().join("examples/a")).unwrap();
+        std::fs::create_dir_all(td.path().join("examples/b")).unwrap();
+        let probe = StubGitProbe {
+            branch: None,
+            commit: None,
+        };
+        let mut out = Vec::new();
+        status_with(td.path(), &probe, &mut out).unwrap();
+        let s = String::from_utf8(out).unwrap();
+        assert!(s.contains("Mode: source-tree mode"));
+        assert!(s.contains("Source files: 1 impl, 2 headers"));
+        assert!(s.contains("Test files: 2"));
+        assert!(s.contains("Examples: 2"));
+        assert!(s.contains("Plugin Formats:"));
+        assert!(s.contains("VST3: SDK not found"));
+        assert!(s.contains("CLAP: available"));
+    }
+
+    #[test]
+    fn status_omits_branch_line_when_git_probe_misses() {
+        let td = tempfile::tempdir().unwrap();
+        std::fs::write(td.path().join("pulp.toml"), "").unwrap();
+        let probe = StubGitProbe {
+            branch: None,
+            commit: None,
+        };
+        let mut out = Vec::new();
+        status_with(td.path(), &probe, &mut out).unwrap();
+        let s = String::from_utf8(out).unwrap();
+        assert!(!s.contains("Branch:"));
+        assert!(!s.contains("Commit:"));
     }
 
     #[test]
