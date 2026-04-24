@@ -238,12 +238,14 @@ while IFS= read -r f; do BINARIES+=("-object" "$f"); done < <(
 )
 
 # Loadable first-party modules that execute instrumented code under test.
-# The Python bindings smoke test imports the built pybind11 extension
-# directly from the build tree, so llvm-cov must see that module binary
-# in the -object set or bindings/python/bindings.cpp stays invisible.
+# Prefer the embedded Python bindings executable above for bindings.cpp:
+# passing both the executable and the pybind11 module gives llvm-cov two
+# coverage maps for the same PyInit_pulp function and can collapse the
+# file to 0% with "mismatched data" warnings.
 while IFS= read -r f; do BINARIES+=("-object" "$f"); done < <(
     find "${BUILD_DIR}/bindings" -type f \
          \( -name 'pulp*.so' -o -name 'pulp*.pyd' -o -name 'pulp*.dylib' \) \
+         ! -path "${BUILD_DIR}/bindings/python/*" \
          2>/dev/null || true
 )
 

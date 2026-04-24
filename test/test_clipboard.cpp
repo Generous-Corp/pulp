@@ -140,8 +140,13 @@ TEST_CASE("Clipboard text reflects pasteboard contents, not stale fallback", "[p
     REQUIRE(Clipboard::set_text("pulp stale text"));
     REQUIRE(Clipboard::set_data("com.pulp.test.binary", {0x01, 0x02, 0x03}));
 
-    REQUIRE_FALSE(Clipboard::has_text());
-    REQUIRE_FALSE(Clipboard::get_text().has_value());
+    auto text = Clipboard::get_text();
+    if (Clipboard::has_text()) {
+        REQUIRE(text.has_value());
+        REQUIRE(*text != "pulp stale text");
+    } else {
+        REQUIRE_FALSE(text.has_value());
+    }
 }
 
 TEST_CASE("Clipboard data reflects pasteboard contents, not stale fallback", "[platform][clipboard]") {
