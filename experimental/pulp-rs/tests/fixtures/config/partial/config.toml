@@ -1,0 +1,4 @@
+# Pulp config — partial fixture (only mode overridden).
+[update]
+# Selected by the user, everything else falls back to defaults.
+mode = "manual"

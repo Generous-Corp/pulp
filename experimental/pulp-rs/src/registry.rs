@@ -170,6 +170,10 @@ mod tests {
 
     #[test]
     fn registry_path_prefers_pulp_home() {
+        use crate::test_support::ENV_LOCK;
+        let _guard = ENV_LOCK
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let prev = std::env::var_os("PULP_HOME");
         std::env::set_var("PULP_HOME", "/tmp/registry-test-home");
         let p = registry_path().expect("registry path");

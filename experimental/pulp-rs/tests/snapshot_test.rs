@@ -82,3 +82,52 @@ fn projects_list_json_snapshot_multiple_with_stale() {
     let v = normalise_registry_field(run(&["projects", "list", "--json"], home.path()));
     insta::assert_json_snapshot!("projects_list_multiple_with_stale", v);
 }
+
+// ── Phase 5: config + upgrade snapshot coverage ─────────────────────────────
+
+fn normalise_config_path_field(mut v: Value) -> Value {
+    if let Some(obj) = v.as_object_mut() {
+        if obj.contains_key("config_path") {
+            obj.insert(
+                "config_path".to_owned(),
+                Value::String("<CONFIG_PATH>".to_owned()),
+            );
+        }
+    }
+    v
+}
+
+#[test]
+fn config_list_json_snapshot_empty() {
+    let home = tempfile::tempdir().unwrap();
+    let v = normalise_config_path_field(run(&["config", "list", "--json"], home.path()));
+    insta::assert_json_snapshot!("config_list_empty", v);
+}
+
+#[test]
+fn config_list_json_snapshot_populated() {
+    let home = tempfile::tempdir().unwrap();
+    let src = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join("config")
+        .join("populated")
+        .join("config.toml");
+    std::fs::copy(&src, home.path().join("config.toml")).unwrap();
+    let v = normalise_config_path_field(run(&["config", "list", "--json"], home.path()));
+    insta::assert_json_snapshot!("config_list_populated", v);
+}
+
+#[test]
+fn upgrade_check_only_json_snapshot_disabled() {
+    let home = tempfile::tempdir().unwrap();
+    let mut cmd = assert_cmd::Command::cargo_bin("pulp-rs").unwrap();
+    cmd.args(["upgrade", "--check-only", "--json"]);
+    cmd.env("PULP_HOME", home.path())
+        .env("PULP_RS_CLI_VERSION", "0.37.0")
+        .env("PULP_UPDATE_CHECK_DISABLED", "1");
+    let output = cmd.output().expect("run pulp-rs");
+    assert!(output.status.success());
+    let v: Value = serde_json::from_slice(&output.stdout).unwrap();
+    insta::assert_json_snapshot!("upgrade_check_disabled", v);
+}

@@ -1,0 +1,7 @@
+# Pulp config — fully populated fixture.
+# Exercises every known key so the writer round-trip preserves comments.
+[update]
+mode = "auto"
+check_interval_hours = "48"
+channel = "beta"
+bump_projects = "off"
