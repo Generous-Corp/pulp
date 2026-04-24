@@ -142,6 +142,13 @@ public:
     ///   });
     void attach_webview(WebViewPanel& panel);
 
+    /// Clear the message handler installed by attach_webview(). Safe
+    /// to call even when no WebView handler is currently installed.
+    /// Consumers that own both the bridge and panel can use this to
+    /// make teardown order explicit before the panel or native child
+    /// view is detached.
+    void detach_webview(WebViewPanel& panel);
+
     /// Hook this bridge up to a native JS runtime's postMessage source.
     /// `handler_name` is the symbol the runtime exposes that calls back
     /// into C++ (the equivalent of `__pulpPostMessage` in WebView).

@@ -108,6 +108,10 @@ void EditorBridge::attach_webview(WebViewPanel& panel) {
     });
 }
 
+void EditorBridge::detach_webview(WebViewPanel& panel) {
+    panel.set_message_handler({});
+}
+
 void EditorBridge::attach_native_runtime(JsRuntime& /*runtime*/,
                                          std::string_view /*handler_name*/) {
     // Stub for pulp #468 (Claude Design import lane). The full wiring

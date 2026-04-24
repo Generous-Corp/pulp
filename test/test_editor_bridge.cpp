@@ -389,6 +389,10 @@ public:
         return handler_(message);
     }
 
+    bool has_message_handler() const noexcept {
+        return static_cast<bool>(handler_);
+    }
+
     // ── Pure virtuals from WebViewPanel ─────────────────────────────
     bool is_ready() const override { return true; }
     void set_ready_handler(ReadyHandler) override {}
@@ -437,6 +441,36 @@ TEST_CASE("EditorBridge::attach_webview routes WebViewPanel messages through dis
     msg.payload_json = "null";
     const auto resp2 = panel.deliver(msg);
     CHECK(response_has_error(resp2, "unknown message type"));
+}
+
+TEST_CASE("EditorBridge::detach_webview clears the WebViewPanel message handler",
+          "[editor_bridge][issue-726]")
+{
+    EditorBridge bridge;
+    int calls = 0;
+    bridge.add_handler("set_value", [&](const auto&) {
+        ++calls;
+        return EditorBridge::ok_response();
+    });
+
+    StubWebViewPanel panel;
+    CHECK_FALSE(panel.has_message_handler());
+
+    // No-op when nothing was attached yet.
+    bridge.detach_webview(panel);
+    CHECK_FALSE(panel.has_message_handler());
+
+    bridge.attach_webview(panel);
+    REQUIRE(panel.has_message_handler());
+
+    pulp::view::WebViewMessage msg;
+    msg.type = "set_value";
+    msg.payload_json = "{}";
+    CHECK(response_ok(panel.deliver(msg)));
+    CHECK(calls == 1);
+
+    bridge.detach_webview(panel);
+    CHECK_FALSE(panel.has_message_handler());
 }
 
 TEST_CASE("EditorBridge::attach_native_runtime is a no-op stub for #468",

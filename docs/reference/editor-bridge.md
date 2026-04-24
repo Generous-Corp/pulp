@@ -92,6 +92,7 @@ public:
 
     // Renderer attach helpers.
     void attach_webview        (WebViewPanel& panel);
+    void detach_webview        (WebViewPanel& panel);
     void attach_native_runtime (JsRuntime& runtime, std::string_view handler_name);
 
     // Static value-coercion helpers (never throw).
@@ -122,6 +123,20 @@ panel.set_message_handler([this](const WebViewMessage& m) {
 `dispatch_webview_message` treats a `payload_json` of `"null"` (the
 WebView default for "no payload") as an empty object so handlers see
 the same shape regardless of whether the JS side passed a payload.
+
+### `detach_webview`
+
+Clears the message handler installed by `attach_webview`. Call this
+before tearing down a panel or detaching its native child view when the
+bridge and panel are owned side-by-side and you want explicit teardown
+ordering:
+
+```cpp
+bridge.detach_webview(panel);
+```
+
+Calling `detach_webview` before an attach is safe; it is a no-op from
+the caller's perspective.
 
 ### `attach_native_runtime`
 

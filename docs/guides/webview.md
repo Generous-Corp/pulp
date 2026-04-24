@@ -343,6 +343,9 @@ class MyEditor {
         });
         bridge_.attach_webview(panel);
     }
+    void unwire(pulp::view::WebViewPanel& panel) {
+        bridge_.detach_webview(panel);
+    }
     pulp::view::EditorBridge bridge_;
 };
 ```

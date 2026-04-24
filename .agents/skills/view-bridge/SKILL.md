@@ -225,6 +225,9 @@ class MyEditor : public pulp::view::View {
         });
         bridge_.attach_webview(panel);          // routes WebView postMessage → handlers
     }
+    void unwire(pulp::view::WebViewPanel& panel) {
+        bridge_.detach_webview(panel);          // clears the installed callback before teardown
+    }
 private:
     pulp::view::EditorBridge bridge_;
 };
@@ -235,6 +238,11 @@ Key invariants:
 - **Renderer-agnostic.** `attach_webview(WebViewPanel&)` today;
   `attach_native_runtime(JsRuntime&, "<handler_name>")` for the pulp
   #468 native-JS-runtime import lane. Same handler registrations.
+- **Explicit WebView teardown.** `detach_webview(WebViewPanel&)`
+  clears the callback installed by `attach_webview`. Use it when the
+  bridge and `WebViewPanel` are side-by-side members and you want to
+  sever queued WebView messages before native detach or panel
+  destruction (#726).
 - **noexcept dispatch.** `dispatch_json(...)` and `dispatch(...)` are
   `noexcept` and always return a well-formed JSON response envelope —
   handler exceptions become `{"ok":false,"error":"internal error"}`.
