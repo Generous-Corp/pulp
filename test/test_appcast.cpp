@@ -57,6 +57,86 @@ TEST_CASE("Appcast XML round-trip", "[ship][appcast]") {
     REQUIRE(parsed->items[0].file_size == 9999);
 }
 
+TEST_CASE("Appcast XML escapes metadata and omits empty optional item fields", "[ship][appcast]") {
+    Appcast feed;
+    feed.title = R"(Pulp & "Friends" <Beta>)";
+    feed.link = R"(https://example.com/appcast.xml?channel="stable"&x=1)";
+    feed.description = R"(Ships <fast> & "safe")";
+
+    AppcastItem item;
+    item.version = "3.4.5";
+    item.title = R"(Release & "Notes" <Here>)";
+    item.pub_date = "Wed, 02 Apr 2026 12:00:00 +0000";
+    item.download_url = R"(https://example.com/PulpGain.pkg?sig="abc"&v=1)";
+    feed.items.push_back(item);
+
+    auto xml = feed.to_xml();
+
+    REQUIRE(xml.find("<title>Pulp &amp; &quot;Friends&quot; &lt;Beta&gt;</title>") != std::string::npos);
+    REQUIRE(xml.find("<link>https://example.com/appcast.xml?channel=&quot;stable&quot;&amp;x=1</link>") != std::string::npos);
+    REQUIRE(xml.find("<description>Ships &lt;fast&gt; &amp; &quot;safe&quot;</description>") != std::string::npos);
+    REQUIRE(xml.find("<title>Release &amp; &quot;Notes&quot; &lt;Here&gt;</title>") != std::string::npos);
+    REQUIRE(xml.find("<sparkle:version>3.4.5</sparkle:version>") != std::string::npos);
+    REQUIRE(xml.find("url=\"https://example.com/PulpGain.pkg?sig=&quot;abc&quot;&amp;v=1\"") != std::string::npos);
+    REQUIRE(xml.find("<![CDATA[") == std::string::npos);
+    REQUIRE(xml.find("sparkle:minimumSystemVersion") == std::string::npos);
+    REQUIRE(xml.find("sparkle:edSignature=") == std::string::npos);
+}
+
+TEST_CASE("Appcast from_xml parses optional fields across multiple items", "[ship][appcast]") {
+    auto parsed = Appcast::from_xml(R"(<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+  <channel>
+    <title>Ship Feed</title>
+    <link>https://example.com/feed.xml</link>
+    <description>Stable releases</description>
+    <item>
+      <title>Version 3.1.0</title>
+      <description><![CDATA[<p>Signed update</p>]]></description>
+      <pubDate>Thu, 03 Apr 2026 12:00:00 +0000</pubDate>
+      <sparkle:version>3100</sparkle:version>
+      <sparkle:shortVersionString>3.1.0</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://example.com/Pulp-3.1.0.pkg"
+                 length="321"
+                 type="application/octet-stream"
+                 sparkle:edSignature="abc123" />
+    </item>
+    <item>
+      <title>Version 3.0.9</title>
+      <pubDate>Wed, 02 Apr 2026 12:00:00 +0000</pubDate>
+      <sparkle:shortVersionString>3.0.9</sparkle:shortVersionString>
+      <enclosure url="https://example.com/Pulp-3.0.9.pkg"
+                 type="application/octet-stream" />
+    </item>
+  </channel>
+</rss>)");
+
+    REQUIRE(parsed.has_value());
+    REQUIRE(parsed->title == "Ship Feed");
+    REQUIRE(parsed->link == "https://example.com/feed.xml");
+    REQUIRE(parsed->description == "Stable releases");
+    REQUIRE(parsed->items.size() == 2);
+
+    REQUIRE(parsed->items[0].title == "Version 3.1.0");
+    REQUIRE(parsed->items[0].description == "<p>Signed update</p>");
+    REQUIRE(parsed->items[0].build_number == "3100");
+    REQUIRE(parsed->items[0].version == "3.1.0");
+    REQUIRE(parsed->items[0].minimum_os == "13.0");
+    REQUIRE(parsed->items[0].download_url == "https://example.com/Pulp-3.1.0.pkg");
+    REQUIRE(parsed->items[0].ed_signature == "abc123");
+    REQUIRE(parsed->items[0].file_size == 321);
+
+    REQUIRE(parsed->items[1].title == "Version 3.0.9");
+    REQUIRE(parsed->items[1].description.empty());
+    REQUIRE(parsed->items[1].build_number.empty());
+    REQUIRE(parsed->items[1].version == "3.0.9");
+    REQUIRE(parsed->items[1].minimum_os.empty());
+    REQUIRE(parsed->items[1].download_url == "https://example.com/Pulp-3.0.9.pkg");
+    REQUIRE(parsed->items[1].ed_signature.empty());
+    REQUIRE(parsed->items[1].file_size == 0);
+}
+
 TEST_CASE("Appcast from_xml invalid", "[ship][appcast]") {
     auto result = Appcast::from_xml("not xml");
     REQUIRE_FALSE(result.has_value());
@@ -69,6 +149,12 @@ TEST_CASE("Version comparison", "[ship][version]") {
     REQUIRE(compare_versions("2.0.0", "1.9.9") == 1);
     REQUIRE(compare_versions("1.0", "1.0.0") == 0);
     REQUIRE(compare_versions("1.0.0.1", "1.0.0") == 1);
+}
+
+TEST_CASE("Version comparison tolerates non-numeric segments", "[ship][version]") {
+    REQUIRE(compare_versions("01.002.0003", "1.2.3") == 0);
+    REQUIRE(compare_versions("1.beta.5", "1.0.7") == -1);
+    REQUIRE(compare_versions("1..5", "1.0.4") == 1);
 }
 
 // #295 P0 regression: sign_file_ed25519 MUST NOT silently return an
