@@ -1,6 +1,6 @@
 // MP3 writer — lossy audio encoding via LAME.
 // Conditionally compiled: only when LAME is installed (pulp add lame --accept-license LGPL-2.0).
-// Auto-registers Mp3Writer in FormatRegistry via static initializer.
+// Registered explicitly by FormatRegistry when PULP_HAS_LAME is enabled.
 
 #ifdef PULP_HAS_LAME
 
@@ -77,13 +77,8 @@ public:
     std::string format_name() const override { return "MP3"; }
 };
 
-namespace {
-    struct Mp3WriterRegistrar {
-        Mp3WriterRegistrar() {
-            FormatRegistry::instance().register_writer(std::make_unique<Mp3Writer>());
-        }
-    };
-    static Mp3WriterRegistrar mp3_writer_registrar;
+std::unique_ptr<FormatWriter> create_mp3_writer() {
+    return std::make_unique<Mp3Writer>();
 }
 
 }  // namespace pulp::audio

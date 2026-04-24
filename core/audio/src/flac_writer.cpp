@@ -1,6 +1,6 @@
 // FLAC writer — lossless audio encoding via libflac.
 // Conditionally compiled: only when libflac is installed (pulp add libflac).
-// Auto-registers FlacWriter in FormatRegistry via static initializer.
+// Registered explicitly by FormatRegistry when PULP_HAS_LIBFLAC is enabled.
 
 #ifdef PULP_HAS_LIBFLAC
 
@@ -69,13 +69,8 @@ public:
     std::string format_name() const override { return "FLAC"; }
 };
 
-namespace {
-    struct FlacWriterRegistrar {
-        FlacWriterRegistrar() {
-            FormatRegistry::instance().register_writer(std::make_unique<FlacWriter>());
-        }
-    };
-    static FlacWriterRegistrar flac_writer_registrar;
+std::unique_ptr<FormatWriter> create_flac_writer() {
+    return std::make_unique<FlacWriter>();
 }
 
 }  // namespace pulp::audio

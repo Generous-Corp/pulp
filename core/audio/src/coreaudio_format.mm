@@ -128,14 +128,8 @@ public:
     std::string format_name() const override { return "CoreAudio"; }
 };
 
-// Auto-register on macOS
-namespace {
-    struct CoreAudioRegistrar {
-        CoreAudioRegistrar() {
-            FormatRegistry::instance().register_reader(std::make_unique<CoreAudioReader>());
-        }
-    };
-    static CoreAudioRegistrar coreaudio_registrar;
+std::unique_ptr<FormatReader> create_coreaudio_reader() {
+    return std::make_unique<CoreAudioReader>();
 }
 
 }  // namespace pulp::audio
