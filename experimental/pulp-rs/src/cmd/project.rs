@@ -86,6 +86,7 @@ pub enum Sub {
 ///
 /// All flags are optional; an empty [`BumpArgs`] means "bump the
 /// current directory to the CLI's own version".
+#[allow(clippy::struct_excessive_bools)] // mirrors C++ CLI flags 1:1
 #[derive(Debug, Default, Clone)]
 pub struct BumpArgs {
     /// Target semver. Empty means "use the CLI version".
@@ -98,6 +99,15 @@ pub struct BumpArgs {
     pub force_dirty: bool,
     /// `--allow-downgrade` — permit target older than current pin.
     pub allow_downgrade: bool,
+    /// `--allow-cli-skew` — permit target SDK newer than the installed
+    /// CLI version (pulp#740 safety rail). Without this, bumping to a
+    /// version the CLI doesn't know about gets refused with a pointer
+    /// to `pulp upgrade` first.
+    pub allow_cli_skew: bool,
+    /// `--allow-redundant` — permit a bump whose target is already
+    /// pinned-or-newer on `origin/main` (pulp#740 safety rail).
+    /// Without this, the redundant-pin probe refuses the bump.
+    pub allow_redundant: bool,
     /// `--verify-builds` — run configure+build after each bump.
     pub verify_builds: bool,
     /// `--help` / `help` — print the bump help and exit 0.
@@ -143,6 +153,8 @@ fn parse_bump(args: &[String]) -> Result<BumpArgs> {
             "--dry-run" => out.dry_run = true,
             "--force-dirty" => out.force_dirty = true,
             "--allow-downgrade" => out.allow_downgrade = true,
+            "--allow-cli-skew" => out.allow_cli_skew = true,
+            "--allow-redundant" => out.allow_redundant = true,
             "--verify-builds" => out.verify_builds = true,
             "--to" => {
                 i += 1;
@@ -219,6 +231,11 @@ pub fn write_project_help(out: &mut impl Write) -> Result<()> {
         "                    [--force-dirty] [--allow-downgrade]"
     )
     .map_err(io)?;
+    writeln!(
+        out,
+        "                    [--allow-cli-skew] [--allow-redundant]"
+    )
+    .map_err(io)?;
     writeln!(out, "                    [--verify-builds]").map_err(io)?;
     writeln!(out, "  pulp project undo [<timestamp>]\n").map_err(io)?;
     writeln!(
@@ -273,6 +290,16 @@ fn write_bump_help(out: &mut impl Write) -> Result<()> {
     writeln!(
         out,
         "  --allow-downgrade    Permit target older than current pin"
+    )
+    .map_err(io)?;
+    writeln!(
+        out,
+        "  --allow-cli-skew     Permit target newer than this pulp CLI"
+    )
+    .map_err(io)?;
+    writeln!(
+        out,
+        "  --allow-redundant    Permit bump already pinned-or-newer on origin/main"
     )
     .map_err(io)?;
     writeln!(
@@ -406,6 +433,41 @@ fn do_bump(args: &BumpArgs, env: &Env, out: &mut impl Write) -> Result<i32> {
         return Err(CliError::BadUsage(format!(
             "pulp project bump: invalid target version '{target}' (expected X.Y.Z)"
         )));
+    }
+
+    // pulp#740 / #244 safety rail: refuse `pulp project bump` inside
+    // the Pulp source checkout. Consumer-project bumps are for
+    // standalone SDK-mode projects; the Pulp framework itself uses
+    // `pulp version bump` + the release workflow.
+    //
+    // Checked against `env.cwd` (and not the `--all` registry lane)
+    // because the registry never lists the Pulp source tree as a
+    // consumer project — if it does, the user has explicitly opted
+    // in via `pulp projects add`.
+    if !args.all && is_pulp_source_checkout(&env.cwd) {
+        return Err(CliError::Other(
+            "pulp project bump: refusing to run inside the Pulp source checkout. \
+             This command bumps consumer project SDK pins; use `pulp version bump` \
+             and the release workflow for Pulp itself."
+                .to_owned(),
+        ));
+    }
+
+    // pulp#740 / #244 safety rail: refuse a target SDK newer than the
+    // installed CLI version unless the user explicitly opts in with
+    // `--allow-cli-skew`. Without this, a bump to a release the CLI
+    // doesn't know about can silently corrupt pulp.toml when the
+    // installed pulp-cpp can't configure against it.
+    if !args.allow_cli_skew && !env.cli_version.is_empty() {
+        let cli_triple = bump::parse_semver_strict(&env.cli_version);
+        if cli_triple.ok && bump::compare_semver(triple, cli_triple) == std::cmp::Ordering::Greater
+        {
+            return Err(CliError::Other(format!(
+                "pulp project bump: target SDK v{target} is newer than this pulp CLI v{cli}. \
+                 Run `pulp upgrade {target}` first, or pass --allow-cli-skew to proceed anyway.",
+                cli = env.cli_version,
+            )));
+        }
     }
 
     let (targets, names) = if args.all {
@@ -642,6 +704,25 @@ fn run_verify_build(project_path: &Path) -> Result<()> {
     } else {
         Err(CliError::Other("cmake --build failed".to_owned()))
     }
+}
+
+/// True when `dir` looks like the Pulp framework source checkout
+/// (not a consumer project that happens to have a CMakeLists.txt).
+///
+/// Detection mirrors `is_pulp_source_root` in `tools/cli/cmd_project.cpp`
+/// from the pulp#740 / #244 spec: the Pulp source tree always carries
+/// all four markers together, and no consumer project will have them
+/// all (`tools/shipyard.toml` in particular is Pulp-repo-only).
+///
+/// Used by `pulp project bump` to refuse a bump inside the source
+/// tree — consumer-project pins are meaningless there, and the user
+/// almost certainly meant `pulp version bump` + the release workflow.
+#[must_use]
+pub(crate) fn is_pulp_source_checkout(dir: &Path) -> bool {
+    dir.join("CMakeLists.txt").is_file()
+        && dir.join("core").is_dir()
+        && dir.join("tools").join("cli").is_dir()
+        && dir.join("tools").join("shipyard.toml").is_file()
 }
 
 fn cmake_is_dirty(project_path: &Path) -> bool {
@@ -1159,5 +1240,160 @@ mod tests {
             .filter(|e| e.file_name().to_string_lossy().starts_with("bump-undo-"))
             .collect();
         assert_eq!(undo_files.len(), 1);
+    }
+
+    // ── pulp#740 Slice A: safety rails ────────────────────────────────
+
+    #[test]
+    fn is_pulp_source_checkout_matches_framework_tree() {
+        let td = tempfile::tempdir().unwrap();
+        let root = td.path();
+        // All four markers present → detected.
+        write(&root.join("CMakeLists.txt"), "project(Pulp)\n");
+        std::fs::create_dir_all(root.join("core")).unwrap();
+        std::fs::create_dir_all(root.join("tools/cli")).unwrap();
+        std::fs::write(root.join("tools/shipyard.toml"), "version = 0\n").unwrap();
+        assert!(super::is_pulp_source_checkout(root));
+    }
+
+    #[test]
+    fn is_pulp_source_checkout_rejects_consumer_project() {
+        let td = tempfile::tempdir().unwrap();
+        let root = td.path();
+        // Consumer projects have pulp.toml + CMakeLists but no core/ +
+        // tools/shipyard.toml. The detection must NOT fire here.
+        write(
+            &root.join("CMakeLists.txt"),
+            "project(MyPlugin VERSION 0.1.0)\nfind_package(Pulp 0.40.0 REQUIRED)\n",
+        );
+        std::fs::write(root.join("pulp.toml"), "sdk_version = \"0.40.0\"\n").unwrap();
+        assert!(!super::is_pulp_source_checkout(root));
+    }
+
+    #[test]
+    fn is_pulp_source_checkout_rejects_partial_markers() {
+        let td = tempfile::tempdir().unwrap();
+        let root = td.path();
+        // Three out of four markers → not enough. Guards against
+        // false-positives on weird sibling trees.
+        write(&root.join("CMakeLists.txt"), "project(Other)\n");
+        std::fs::create_dir_all(root.join("core")).unwrap();
+        std::fs::create_dir_all(root.join("tools/cli")).unwrap();
+        // Deliberately omit tools/shipyard.toml.
+        assert!(!super::is_pulp_source_checkout(root));
+    }
+
+    #[test]
+    fn do_bump_refuses_inside_pulp_source_checkout() {
+        // Build a fake Pulp source tree at the cwd, point the Env at
+        // it, and assert do_bump errors with the source-checkout
+        // message.
+        let td = tempfile::tempdir().unwrap();
+        let src = td.path().join("fake-pulp-source");
+        std::fs::create_dir_all(src.join("core")).unwrap();
+        std::fs::create_dir_all(src.join("tools/cli")).unwrap();
+        std::fs::write(src.join("CMakeLists.txt"), "project(Pulp)\n").unwrap();
+        std::fs::write(src.join("tools/shipyard.toml"), "version = 0\n").unwrap();
+
+        let home = td.path().join("home");
+        std::fs::create_dir_all(&home).unwrap();
+        let env = Env {
+            cwd: src,
+            registry_path: home.join("projects.json"),
+            pulp_home: Some(home),
+            cli_version: "0.40.0".to_owned(),
+        };
+        let args = BumpArgs {
+            to_version: "0.40.0".to_owned(),
+            ..BumpArgs::default()
+        };
+        let mut buf = Vec::new();
+        let err = do_bump(&args, &env, &mut buf).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("source checkout"),
+            "expected source-checkout refusal, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn do_bump_refuses_target_newer_than_cli_without_skew_flag() {
+        let td = tempfile::tempdir().unwrap();
+        let cwd = td.path().join("consumer");
+        std::fs::create_dir_all(&cwd).unwrap();
+        std::fs::write(
+            cwd.join("CMakeLists.txt"),
+            "FetchContent_Declare(pulp GIT_TAG v0.30.0)\n",
+        )
+        .unwrap();
+        let home = td.path().join("home");
+        std::fs::create_dir_all(&home).unwrap();
+        let env = Env {
+            cwd,
+            registry_path: home.join("projects.json"),
+            pulp_home: Some(home),
+            cli_version: "0.40.0".to_owned(),
+        };
+        let args = BumpArgs {
+            to_version: "0.41.0".to_owned(), // NEWER than CLI
+            ..BumpArgs::default()
+        };
+        let mut buf = Vec::new();
+        let err = do_bump(&args, &env, &mut buf).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("--allow-cli-skew") || msg.contains("newer than this pulp CLI"),
+            "expected CLI-skew refusal, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn do_bump_allows_target_newer_than_cli_with_skew_flag() {
+        let td = tempfile::tempdir().unwrap();
+        let cwd = td.path().join("consumer");
+        std::fs::create_dir_all(&cwd).unwrap();
+        std::fs::write(
+            cwd.join("CMakeLists.txt"),
+            "FetchContent_Declare(pulp GIT_TAG v0.30.0)\n",
+        )
+        .unwrap();
+        let home = td.path().join("home");
+        std::fs::create_dir_all(&home).unwrap();
+        let env = Env {
+            cwd,
+            registry_path: home.join("projects.json"),
+            pulp_home: Some(home),
+            cli_version: "0.40.0".to_owned(),
+        };
+        let args = BumpArgs {
+            to_version: "0.41.0".to_owned(),
+            allow_cli_skew: true, // opt-in
+            ..BumpArgs::default()
+        };
+        let mut buf = Vec::new();
+        // Should succeed past the skew gate (the rest of the bump
+        // proceeds normally on a FetchContent pin site).
+        let rc = do_bump(&args, &env, &mut buf).unwrap();
+        assert_eq!(rc, 0, "with --allow-cli-skew, bump should proceed");
+    }
+
+    #[test]
+    fn parse_bump_captures_new_safety_flags() {
+        let args: Vec<String> = [
+            "--force-dirty",
+            "--allow-downgrade",
+            "--allow-cli-skew",
+            "--allow-redundant",
+            "--verify-builds",
+        ]
+        .iter()
+        .map(|s| (*s).to_owned())
+        .collect();
+        let b = parse_bump(&args).unwrap();
+        assert!(b.force_dirty);
+        assert!(b.allow_downgrade);
+        assert!(b.allow_cli_skew);
+        assert!(b.allow_redundant);
+        assert!(b.verify_builds);
     }
 }
