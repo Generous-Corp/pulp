@@ -119,6 +119,7 @@ TEST_CASE("AudioFocusRegistry: multiple subscribers all receive the signal",
 TEST_CASE("AudioFocusRegistry: current() is lock-free / audio-thread safe",
           "[audio][focus][issue-334]") {
     AudioFocusRegistry::instance().reset_for_test();
+    std::atomic<bool> reader_started{false};
     std::atomic<bool> stop{false};
     std::atomic<int> samples{0};
 
@@ -126,12 +127,19 @@ TEST_CASE("AudioFocusRegistry: current() is lock-free / audio-thread safe",
     // while a publisher thread thrashes the state. This would hang or
     // tear if current() weren't an atomic snapshot.
     std::thread reader([&] {
+        auto s = AudioFocusRegistry::instance().current();
+        (void)s;
+        samples.fetch_add(1, std::memory_order_relaxed);
+        reader_started.store(true, std::memory_order_release);
         while (!stop.load(std::memory_order_acquire)) {
-            auto s = AudioFocusRegistry::instance().current();
-            (void)s;
+            auto current = AudioFocusRegistry::instance().current();
+            (void)current;
             samples.fetch_add(1, std::memory_order_relaxed);
         }
     });
+    while (!reader_started.load(std::memory_order_acquire)) {
+        std::this_thread::yield();
+    }
     std::thread writer([&] {
         for (int i = 0; i < 10'000; ++i) {
             AudioFocusRegistry::instance().publish(
