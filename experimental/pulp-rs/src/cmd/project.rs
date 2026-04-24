@@ -596,6 +596,19 @@ pub(crate) fn bump_one(
         return entry;
     }
 
+    // pulp#740 Slice C — standalone-mode dispatch. Standalone consumer
+    // projects pin Pulp via `pulp.toml sdk_version` (the source of
+    // truth) and optionally mirror to `find_package(Pulp X.Y.Z)`. The
+    // `project(... VERSION ...)` line in those projects is the
+    // app/plugin product version, NOT the SDK pin, and must stay
+    // untouched. Defer to `bump_one_standalone` for that path; the
+    // existing source-tree logic below handles the in-tree pin shapes
+    // (FetchContent / pulp_add_project / project VERSION).
+    let standalone = is_standalone_project(project_path);
+    if standalone {
+        return bump_one_standalone(project_path, &mut entry, target_version, opts);
+    }
+
     if !opts.force_dirty && cmake_is_dirty(project_path) {
         entry.status = "skipped".to_owned();
         entry.failure_reason =
@@ -821,6 +834,212 @@ fn parse_toml_string_value(body: &str, key: &str) -> Option<String> {
         return Some(rest[..end].to_owned());
     }
     None
+}
+
+/// True when `dir` looks like a standalone consumer project — pinned
+/// via `pulp.toml`, NOT a copy of the Pulp framework source tree.
+///
+/// Detection mirrors `is_standalone_project` in
+/// `tools/cli/cmd_project.cpp` (pulp#740 / #244 spec): the file
+/// `pulp.toml` exists AND there's no `core/` directory. The absence
+/// of `core/` is what distinguishes a consumer project from someone
+/// running `pulp project bump` from inside the Pulp checkout itself.
+#[must_use]
+pub(crate) fn is_standalone_project(dir: &Path) -> bool {
+    dir.join("pulp.toml").is_file() && !dir.join("core").is_dir()
+}
+
+/// Standalone-mode bump. Rewrites `pulp.toml sdk_version` (source of
+/// truth) and, if present, the matching `find_package(Pulp X.Y.Z)`
+/// line in CMakeLists.txt (mirror). Leaves `project(... VERSION ...)`
+/// alone — that's the product version.
+///
+/// Both edits are staged before any write happens so a partial
+/// failure leaves the project untouched. The `UndoEntry.edits`
+/// vector records each edit with `{path, kind, old_value, new_value,
+/// old_value_style_has_v}` so `pulp project undo` can replay them
+/// in reverse.
+///
+/// # Slice-C scope (pulp#740)
+///
+/// This first-pass port covers the two highest-leverage edits:
+/// `sdk_version` rewrite + `find_package` mirror. The conservative
+/// `sdk_path` managed-cache rewrite is intentionally deferred to a
+/// follow-up — it depends on shared standalone-SDK resolution helpers
+/// from `cli_common.cpp` that aren't ported yet (Slice C2 / E).
+fn bump_one_standalone(
+    project_path: &Path,
+    entry: &mut crate::bump::UndoEntry,
+    target_version: &str,
+    opts: &BumpArgs,
+) -> crate::bump::UndoEntry {
+    use crate::bump::{
+        find_find_package_pulp_version, find_toml_pin_site, is_downgrade, normalize_pin,
+        pin_has_v_prefix, rewrite_pin, PinKind, UndoEdit,
+    };
+
+    // Git-clean gate covers BOTH pulp.toml and CMakeLists.txt in
+    // standalone mode (the C++ side widens `pin_files_are_dirty` for
+    // standalone projects to include pulp.toml).
+    if !opts.force_dirty && pin_files_are_dirty_standalone(project_path) {
+        entry.status = "skipped".to_owned();
+        entry.failure_reason = "CMakeLists.txt or pulp.toml has uncommitted changes \
+                                (use --force-dirty or commit/stash first)"
+            .to_owned();
+        return entry.clone();
+    }
+
+    let toml_path = project_path.join("pulp.toml");
+    let toml_source = std::fs::read_to_string(&toml_path).unwrap_or_default();
+    if toml_source.is_empty() {
+        entry.status = "failed".to_owned();
+        entry.failure_reason = "pulp.toml is empty or unreadable".to_owned();
+        return entry.clone();
+    }
+
+    let sdk_site = find_toml_pin_site(&toml_source, "sdk_version", PinKind::PulpTomlSdkVersion);
+    if sdk_site.kind == PinKind::Unknown {
+        entry.status = "skipped".to_owned();
+        entry.failure_reason = "pulp.toml has no sdk_version key".to_owned();
+        return entry.clone();
+    }
+
+    let current = normalize_pin(&sdk_site.current_pin);
+    if current.is_empty() {
+        entry.status = "skipped".to_owned();
+        entry.failure_reason = "pulp.toml sdk_version doesn't parse as semver".to_owned();
+        return entry.clone();
+    }
+
+    // Surface the canonical "old pin" + style on the entry so reports
+    // and undo can show + restore the original value.
+    entry.pin_kind = PinKind::PulpTomlSdkVersion;
+    entry.old_pin = sdk_site.current_pin.clone();
+    entry.old_pin_style_has_v = pin_has_v_prefix(&sdk_site.current_pin);
+
+    // Same downgrade / equal / redundant gates as source-tree mode.
+    if !opts.allow_downgrade && is_downgrade(&current, target_version) {
+        entry.status = "skipped".to_owned();
+        entry.failure_reason =
+            "target version older than current pin (use --allow-downgrade to override)".to_owned();
+        return entry.clone();
+    }
+    if current == target_version {
+        entry.status = "skipped".to_owned();
+        entry.failure_reason = "already at target version".to_owned();
+        return entry.clone();
+    }
+    if !opts.allow_redundant {
+        if let Some(main_pin) = probe_origin_main_pin(project_path) {
+            if !is_downgrade(&main_pin, target_version) {
+                entry.status = "skipped".to_owned();
+                entry.failure_reason = format!(
+                    "origin/main already pins SDK {main_pin} >= target {target_version} \
+                     (rebase first or use --allow-redundant)"
+                );
+                return entry.clone();
+            }
+        }
+    }
+
+    // Stage the pulp.toml sdk_version rewrite.
+    let toml_old_has_v = pin_has_v_prefix(&sdk_site.current_pin);
+    let Some(new_toml) = rewrite_pin(&toml_source, &sdk_site, target_version, toml_old_has_v)
+    else {
+        entry.status = "failed".to_owned();
+        entry.failure_reason = "could not stage pulp.toml sdk_version rewrite".to_owned();
+        return entry.clone();
+    };
+    entry.edits.push(UndoEdit {
+        path: toml_path.clone(),
+        kind: PinKind::PulpTomlSdkVersion,
+        old_value: sdk_site.current_pin.clone(),
+        new_value: target_version.to_owned(),
+        old_value_style_has_v: toml_old_has_v,
+    });
+
+    // Mirror into find_package(Pulp X.Y.Z) when present.
+    let cmake_path = project_path.join("CMakeLists.txt");
+    let cmake_source = std::fs::read_to_string(&cmake_path).unwrap_or_default();
+    let new_cmake = if cmake_source.is_empty() {
+        // No CMakeLists.txt is fine for a TOML-only project, just
+        // skip the mirror — it's optional.
+        None
+    } else {
+        let fp_site = find_find_package_pulp_version(&cmake_source);
+        if fp_site.kind == PinKind::Unknown {
+            None
+        } else {
+            let fp_old_has_v = pin_has_v_prefix(&fp_site.current_pin);
+            let Some(rewritten) =
+                rewrite_pin(&cmake_source, &fp_site, target_version, fp_old_has_v)
+            else {
+                entry.status = "failed".to_owned();
+                entry.failure_reason =
+                    "could not stage find_package(Pulp …) mirror rewrite".to_owned();
+                return entry.clone();
+            };
+            entry.edits.push(UndoEdit {
+                path: cmake_path.clone(),
+                kind: PinKind::CMakeFindPackagePulpVersion,
+                old_value: fp_site.current_pin.clone(),
+                new_value: target_version.to_owned(),
+                old_value_style_has_v: fp_old_has_v,
+            });
+            entry.notes.push(format!(
+                "mirrored find_package(Pulp …) {} -> {}",
+                fp_site.current_pin, target_version
+            ));
+            Some(rewritten)
+        }
+    };
+
+    if opts.dry_run {
+        entry.status = "dry_run".to_owned();
+        return entry.clone();
+    }
+
+    // Apply staged edits. Write pulp.toml first; on failure of the
+    // CMakeLists mirror, roll the toml back so the project doesn't
+    // end up half-bumped.
+    if let Err(e) = write_text_atomic(&toml_path, &new_toml) {
+        entry.status = "failed".to_owned();
+        entry.failure_reason = format!("could not write pulp.toml: {e}");
+        return entry.clone();
+    }
+    if let Some(new_cmake_body) = new_cmake {
+        if let Err(e) = write_text_atomic(&cmake_path, &new_cmake_body) {
+            // Roll back pulp.toml.
+            let _ = write_text_atomic(&toml_path, &toml_source);
+            entry.status = "failed".to_owned();
+            entry.failure_reason = format!("could not write CMakeLists.txt mirror: {e}");
+            return entry.clone();
+        }
+    }
+    entry.status = "bumped".to_owned();
+    entry.clone()
+}
+
+/// Same shape as [`cmake_is_dirty`] but covers BOTH `CMakeLists.txt`
+/// and `pulp.toml` for standalone projects. Mirrors the C++ widening
+/// in `pin_files_are_dirty(project_path, standalone=true)`.
+fn pin_files_are_dirty_standalone(project_path: &Path) -> bool {
+    if !project_path.join(".git").exists() {
+        return false;
+    }
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(project_path)
+        .arg("status")
+        .arg("--porcelain")
+        .arg("--")
+        .arg("CMakeLists.txt")
+        .arg("pulp.toml")
+        .output();
+    match output {
+        Ok(o) => !o.stdout.is_empty(),
+        Err(_) => false,
+    }
 }
 
 /// True when `dir` looks like the Pulp framework source checkout
@@ -1675,6 +1894,179 @@ mod tests {
         };
         let e = bump_one(root, "proj", "0.45.0", &args, noop_verify);
         assert_eq!(e.status, "bumped", "entry: {e:?}");
+    }
+
+    // ── pulp#740 Slice C: standalone-mode bump ───────────────────────
+
+    #[test]
+    fn is_standalone_project_detects_pulp_toml_only() {
+        let td = tempfile::tempdir().unwrap();
+        let root = td.path();
+        write(&root.join("pulp.toml"), "sdk_version = \"0.40.0\"\n");
+        // No core/ → standalone.
+        assert!(super::is_standalone_project(root));
+    }
+
+    #[test]
+    fn is_standalone_project_rejects_pulp_source_tree() {
+        let td = tempfile::tempdir().unwrap();
+        let root = td.path();
+        write(&root.join("pulp.toml"), "sdk_version = \"0.40.0\"\n");
+        // pulp.toml + core/ → looks like running inside the Pulp repo
+        // (e.g. someone ran `pulp project bump` from the source root).
+        // is_standalone must return false so the source-tree refusal
+        // gate fires instead.
+        std::fs::create_dir_all(root.join("core")).unwrap();
+        assert!(!super::is_standalone_project(root));
+    }
+
+    #[test]
+    fn is_standalone_project_rejects_no_pulp_toml() {
+        let td = tempfile::tempdir().unwrap();
+        let root = td.path();
+        // No pulp.toml at all → not standalone (might be a
+        // FetchContent-based consumer; that path uses source-tree
+        // bump_one).
+        std::fs::write(root.join("CMakeLists.txt"), "project(X)\n").unwrap();
+        assert!(!super::is_standalone_project(root));
+    }
+
+    #[test]
+    fn bump_one_standalone_rewrites_sdk_version_only() {
+        // Standalone fixture: pulp.toml + CMakeLists.txt. CMake has
+        // a project(VERSION) line which MUST be left alone, and a
+        // find_package(Pulp X.Y.Z) line which MUST be mirrored.
+        let td = tempfile::tempdir().unwrap();
+        let root = td.path();
+        write(&root.join("pulp.toml"), "sdk_version = \"0.40.0\"\n");
+        write(
+            &root.join("CMakeLists.txt"),
+            "find_package(Pulp 0.40.0 REQUIRED)\nproject(MyPlugin VERSION 0.1.0)\n",
+        );
+        let args = BumpArgs::default();
+        let e = bump_one(root, "stdalone", "0.41.0", &args, noop_verify);
+        assert_eq!(e.status, "bumped", "entry: {e:?}");
+
+        // pulp.toml must be rewritten.
+        let toml = std::fs::read_to_string(root.join("pulp.toml")).unwrap();
+        assert!(
+            toml.contains("sdk_version = \"0.41.0\""),
+            "pulp.toml not rewritten: {toml:?}"
+        );
+
+        // CMakeLists must mirror — find_package bumped, project()
+        // VERSION untouched.
+        let cmake = std::fs::read_to_string(root.join("CMakeLists.txt")).unwrap();
+        assert!(
+            cmake.contains("find_package(Pulp 0.41.0 REQUIRED)"),
+            "find_package not mirrored: {cmake:?}"
+        );
+        assert!(
+            cmake.contains("project(MyPlugin VERSION 0.1.0)"),
+            "product version was clobbered: {cmake:?}"
+        );
+
+        // UndoEdit list captures both rewrites.
+        assert_eq!(e.edits.len(), 2, "expected 2 edits, got: {:?}", e.edits);
+        assert!(e.edits.iter().any(
+            |edit| edit.path.file_name().is_some_and(|n| n == "pulp.toml")
+                && edit.kind == bump::PinKind::PulpTomlSdkVersion
+        ));
+        assert!(e.edits.iter().any(|edit| edit
+            .path
+            .file_name()
+            .is_some_and(|n| n == "CMakeLists.txt")
+            && edit.kind == bump::PinKind::CMakeFindPackagePulpVersion));
+    }
+
+    #[test]
+    fn bump_one_standalone_skips_when_no_find_package_mirror() {
+        // pulp.toml only, no find_package line in CMakeLists. Should
+        // bump pulp.toml and produce a single-edit UndoEntry.
+        let td = tempfile::tempdir().unwrap();
+        let root = td.path();
+        write(&root.join("pulp.toml"), "sdk_version = \"0.40.0\"\n");
+        write(
+            &root.join("CMakeLists.txt"),
+            "project(MyPlugin VERSION 0.1.0)\n",
+        );
+        let args = BumpArgs::default();
+        let e = bump_one(root, "stdalone", "0.41.0", &args, noop_verify);
+        assert_eq!(e.status, "bumped");
+        let toml = std::fs::read_to_string(root.join("pulp.toml")).unwrap();
+        assert!(toml.contains("sdk_version = \"0.41.0\""));
+        // CMakeLists untouched (no find_package to mirror).
+        let cmake = std::fs::read_to_string(root.join("CMakeLists.txt")).unwrap();
+        assert!(cmake.contains("project(MyPlugin VERSION 0.1.0)"));
+        assert_eq!(e.edits.len(), 1);
+        assert_eq!(e.edits[0].kind, bump::PinKind::PulpTomlSdkVersion);
+    }
+
+    #[test]
+    fn bump_one_standalone_dry_run_writes_nothing() {
+        let td = tempfile::tempdir().unwrap();
+        let root = td.path();
+        let toml_orig = "sdk_version = \"0.40.0\"\n";
+        let cmake_orig = "find_package(Pulp 0.40.0 REQUIRED)\nproject(P VERSION 0.1.0)\n";
+        write(&root.join("pulp.toml"), toml_orig);
+        write(&root.join("CMakeLists.txt"), cmake_orig);
+        let args = BumpArgs {
+            dry_run: true,
+            ..BumpArgs::default()
+        };
+        let e = bump_one(root, "stdalone", "0.41.0", &args, noop_verify);
+        assert_eq!(e.status, "dry_run");
+        // Files unchanged.
+        assert_eq!(
+            std::fs::read_to_string(root.join("pulp.toml")).unwrap(),
+            toml_orig
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.join("CMakeLists.txt")).unwrap(),
+            cmake_orig
+        );
+        // Edits still recorded for the report.
+        assert_eq!(e.edits.len(), 2);
+    }
+
+    #[test]
+    fn bump_one_standalone_skips_when_already_at_target() {
+        let td = tempfile::tempdir().unwrap();
+        let root = td.path();
+        write(&root.join("pulp.toml"), "sdk_version = \"0.41.0\"\n");
+        write(
+            &root.join("CMakeLists.txt"),
+            "find_package(Pulp 0.41.0 REQUIRED)\n",
+        );
+        let args = BumpArgs::default();
+        let e = bump_one(root, "stdalone", "0.41.0", &args, noop_verify);
+        assert_eq!(e.status, "skipped");
+        assert!(e.failure_reason.contains("already at target"));
+        assert!(e.edits.is_empty());
+    }
+
+    #[test]
+    fn bump_one_standalone_refuses_downgrade_by_default() {
+        let td = tempfile::tempdir().unwrap();
+        let root = td.path();
+        write(&root.join("pulp.toml"), "sdk_version = \"0.45.0\"\n");
+        let args = BumpArgs::default();
+        let e = bump_one(root, "stdalone", "0.40.0", &args, noop_verify);
+        assert_eq!(e.status, "skipped");
+        assert!(e.failure_reason.contains("--allow-downgrade"));
+    }
+
+    #[test]
+    fn bump_one_standalone_allows_downgrade_with_flag() {
+        let td = tempfile::tempdir().unwrap();
+        let root = td.path();
+        write(&root.join("pulp.toml"), "sdk_version = \"0.45.0\"\n");
+        let args = BumpArgs {
+            allow_downgrade: true,
+            ..BumpArgs::default()
+        };
+        let e = bump_one(root, "stdalone", "0.40.0", &args, noop_verify);
+        assert_eq!(e.status, "bumped");
     }
 
     #[test]

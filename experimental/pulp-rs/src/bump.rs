@@ -281,6 +281,104 @@ pub fn find_pin_site(source: &str) -> PinSite {
     PinSite::default()
 }
 
+/// Find a `find_package(Pulp X.Y.Z [REQUIRED])` line in a CMakeLists
+/// source and return its pin-version literal as a [`PinSite`] of kind
+/// [`PinKind::CMakeFindPackagePulpVersion`].
+///
+/// Standalone consumer projects mirror their `pulp.toml sdk_version`
+/// into this site so the CMake configure step uses the same version
+/// the toolchain expects. The bump rewrites the literal in place.
+///
+/// Returns [`PinSite::default`] (kind [`PinKind::Unknown`]) when no
+/// matching call exists or the version literal isn't a clean triple.
+///
+/// # Panics
+///
+/// Panics only if the compile-time regex literal fails to compile,
+/// which would be a bug in the regex source — not reachable on any
+/// supported platform.
+#[must_use]
+pub fn find_find_package_pulp_version(source: &str) -> PinSite {
+    static RE: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
+    let re = RE.get_or_init(|| {
+        // Match `find_package(Pulp X.Y.Z ...)` — Pulp is the package
+        // name; the version literal sits where CMake expects it.
+        Regex::new(r"(?i)find_package\s*\(\s*Pulp\s+(\d+\.\d+\.\d+)").expect("valid regex")
+    });
+    let Some(caps) = re.captures(source) else {
+        return PinSite::default();
+    };
+    let Some(m) = caps.get(1) else {
+        return PinSite::default();
+    };
+    PinSite {
+        kind: PinKind::CMakeFindPackagePulpVersion,
+        current_pin: m.as_str().to_owned(),
+        start: m.start(),
+        end: m.end(),
+    }
+}
+
+/// Find a `key = "VALUE"` line at top level of a TOML source and
+/// return the VALUE position as a [`PinSite`] of the supplied kind
+/// (typically [`PinKind::PulpTomlSdkVersion`] or
+/// [`PinKind::PulpTomlSdkPath`]).
+///
+/// Mirrors C++ `pb::find_toml_string_value` — line-scan, no full
+/// TOML parse. Skips comment lines and blank lines. The byte
+/// offsets cover the contents of the quoted string only (excluding
+/// the quotes themselves), so [`rewrite_pin`] can swap the value
+/// without disturbing the surrounding `key = "..."` shape.
+///
+/// Returns [`PinSite::default`] when the key is missing, the value
+/// isn't quoted, or the closing quote is missing.
+#[must_use]
+pub fn find_toml_pin_site(source: &str, key: &str, kind: PinKind) -> PinSite {
+    let mut byte_offset = 0usize;
+    for raw_line in source.split_inclusive('\n') {
+        let line_start = byte_offset;
+        byte_offset += raw_line.len();
+        let line = raw_line.trim_end_matches('\n').trim_end_matches('\r');
+        let trimmed = line.trim_start();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        let Some(rest) = trimmed.strip_prefix(key) else {
+            continue;
+        };
+        // Need word-boundary after the key so `sdk_version` doesn't
+        // match `sdk_version_alt`.
+        if let Some(c) = rest.chars().next() {
+            if c == '_' || c.is_alphanumeric() {
+                continue;
+            }
+        }
+        let rest = rest.trim_start();
+        let Some(rest) = rest.strip_prefix('=') else {
+            continue;
+        };
+        let after_eq_offset = line_start + (line.len() - rest.len());
+        // Re-anchor: find the opening quote relative to the original
+        // source. We don't trim further here — `find('"')` handles
+        // any whitespace between `=` and the quoted value.
+        let Some(quote_rel) = source[after_eq_offset..].find('"') else {
+            continue;
+        };
+        let value_start = after_eq_offset + quote_rel + 1;
+        let Some(close_rel) = source[value_start..].find('"') else {
+            continue;
+        };
+        let value_end = value_start + close_rel;
+        return PinSite {
+            kind,
+            current_pin: source[value_start..value_end].to_owned(),
+            start: value_start,
+            end: value_end,
+        };
+    }
+    PinSite::default()
+}
+
 /// Rewrite the pin literal at [`PinSite`] to `new_pin`. Preserves the
 /// `v` prefix preference via `new_pin_style_has_v`.
 ///
@@ -864,6 +962,89 @@ mod tests {
         assert!(json.get("old_value").is_some());
         assert!(json.get("new_value").is_some());
         assert!(json.get("old_value_style_has_v").is_some());
+    }
+
+    // ── pulp#740 Slice C: standalone helpers ──────────────────────────
+
+    #[test]
+    fn find_find_package_pulp_version_locates_required_call() {
+        let src = "find_package(Pulp 0.42.0 REQUIRED)\nproject(MyApp VERSION 0.1.0)\n";
+        let site = find_find_package_pulp_version(src);
+        assert_eq!(site.kind, PinKind::CMakeFindPackagePulpVersion);
+        assert_eq!(site.current_pin, "0.42.0");
+        // Round-trip: rewrite_pin should return the source with the
+        // pin literal swapped.
+        let rewritten = rewrite_pin(src, &site, "0.43.0", false).expect("rewrite");
+        assert!(rewritten.contains("find_package(Pulp 0.43.0 REQUIRED)"));
+        // project() VERSION must be untouched — it's the product version.
+        assert!(rewritten.contains("project(MyApp VERSION 0.1.0)"));
+    }
+
+    #[test]
+    fn find_find_package_pulp_version_misses_when_no_call() {
+        let src = "project(MyApp VERSION 0.1.0)\n";
+        let site = find_find_package_pulp_version(src);
+        assert_eq!(site.kind, PinKind::Unknown);
+    }
+
+    #[test]
+    fn find_find_package_pulp_version_misses_on_non_semver() {
+        // `find_package(Pulp REQUIRED)` (no version) must NOT match —
+        // the bump only mirrors versioned find_package lines.
+        let src = "find_package(Pulp REQUIRED)\n";
+        let site = find_find_package_pulp_version(src);
+        assert_eq!(site.kind, PinKind::Unknown);
+    }
+
+    #[test]
+    fn find_toml_pin_site_returns_value_offsets() {
+        let src = "name = \"foo\"\nsdk_version = \"0.42.0\"\nother = \"x\"\n";
+        let site = find_toml_pin_site(src, "sdk_version", PinKind::PulpTomlSdkVersion);
+        assert_eq!(site.kind, PinKind::PulpTomlSdkVersion);
+        assert_eq!(site.current_pin, "0.42.0");
+        // The byte offsets cover ONLY the value, not the surrounding
+        // `key = "..."` shape.
+        assert_eq!(&src[site.start..site.end], "0.42.0");
+    }
+
+    #[test]
+    fn find_toml_pin_site_round_trips_through_rewrite_pin() {
+        let src = "sdk_version = \"0.40.0\"\n";
+        let site = find_toml_pin_site(src, "sdk_version", PinKind::PulpTomlSdkVersion);
+        let rewritten = rewrite_pin(src, &site, "0.41.0", false).expect("rewrite");
+        assert_eq!(rewritten, "sdk_version = \"0.41.0\"\n");
+    }
+
+    #[test]
+    fn find_toml_pin_site_skips_commented_line() {
+        let src = "# sdk_version = \"0.40.0\"\nsdk_version = \"0.42.0\"\n";
+        let site = find_toml_pin_site(src, "sdk_version", PinKind::PulpTomlSdkVersion);
+        assert_eq!(site.current_pin, "0.42.0");
+    }
+
+    #[test]
+    fn find_toml_pin_site_word_boundary_rejects_prefix_match() {
+        // `sdk_version_alt` must NOT match `sdk_version`.
+        let src = "sdk_version_alt = \"0.40.0\"\nsdk_version = \"0.42.0\"\n";
+        let site = find_toml_pin_site(src, "sdk_version", PinKind::PulpTomlSdkVersion);
+        assert_eq!(site.current_pin, "0.42.0");
+    }
+
+    #[test]
+    fn find_toml_pin_site_returns_unknown_when_key_absent() {
+        let src = "name = \"foo\"\n";
+        let site = find_toml_pin_site(src, "sdk_version", PinKind::PulpTomlSdkVersion);
+        assert_eq!(site.kind, PinKind::Unknown);
+    }
+
+    #[test]
+    fn find_toml_pin_site_handles_sdk_path_kind() {
+        // The same scanner also extracts sdk_path for the conservative
+        // managed-cache rewrite path.
+        let src = "sdk_path = \"/Users/x/.pulp/sdk-cache/0.40.0\"\n";
+        let site = find_toml_pin_site(src, "sdk_path", PinKind::PulpTomlSdkPath);
+        assert_eq!(site.kind, PinKind::PulpTomlSdkPath);
+        assert_eq!(site.current_pin, "/Users/x/.pulp/sdk-cache/0.40.0");
     }
 
     #[test]
