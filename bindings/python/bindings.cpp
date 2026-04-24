@@ -40,7 +40,7 @@ PYBIND11_MODULE(pulp, m) {
         .def_readwrite("name", &state::ParamInfo::name)
         .def_readwrite("unit", &state::ParamInfo::unit)
         .def_readwrite("range", &state::ParamInfo::range)
-        .def_readwrite("flags", &state::ParamInfo::flags);
+        .def_readwrite("group_id", &state::ParamInfo::group_id);
 
     // ── StateStore ───────────────────────────────────────────────────────
     py::class_<state::StateStore>(m, "StateStore")
@@ -87,7 +87,9 @@ PYBIND11_MODULE(pulp, m) {
     // ── MidiBuffer ───────────────────────────────────────────────────────
     py::class_<midi::MidiBuffer>(m, "MidiBuffer")
         .def(py::init<>())
-        .def("add", &midi::MidiBuffer::add)
+        .def("add", [](midi::MidiBuffer& buffer, const midi::MidiEvent& event) {
+            buffer.add(event);
+        })
         .def("clear", &midi::MidiBuffer::clear)
         .def("size", &midi::MidiBuffer::size)
         .def("empty", &midi::MidiBuffer::empty);

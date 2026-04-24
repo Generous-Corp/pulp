@@ -242,6 +242,7 @@ jobs:
         shell: bash
         env:
           CMAKE_GENERATOR: ${{ matrix.os == 'windows' && 'Ninja' || '' }}
+          PULP_COVERAGE_CMAKE_ARGS: ${{ matrix.os == 'linux' && '-DPULP_BUILD_PYTHON=ON' || '' }}
         run: scripts/run_coverage.sh
 
       - name: Install Python coverage tooling

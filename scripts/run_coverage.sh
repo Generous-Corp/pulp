@@ -25,6 +25,7 @@ PROFRAW_DIR="${BUILD_DIR}/profraw"
 REPORT_DIR="${BUILD_DIR}/coverage"
 JOBS=$(command -v nproc >/dev/null 2>&1 && nproc || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 TESTS_REGEX=""
+EXTRA_CMAKE_ARGS=()
 
 # Canonical source-filter regex used by llvm-cov and by the
 # LCOV→Cobertura converter. Matches paths we explicitly DO NOT want in
@@ -60,6 +61,13 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+if [[ -n "${PULP_COVERAGE_CMAKE_ARGS:-}" ]]; then
+    # Coverage-only toggles (for example -DPULP_BUILD_PYTHON=ON on the
+    # Linux lane) belong in the workflow, not hard-coded here. Split on
+    # shell words so simple space-delimited CMake args pass through.
+    read -r -a EXTRA_CMAKE_ARGS <<< "${PULP_COVERAGE_CMAKE_ARGS}"
+fi
+
 # Require Clang — llvm-cov reads Clang-specific .profdata format.
 if ! command -v clang >/dev/null 2>&1; then
     echo "run_coverage.sh: clang not found on PATH" >&2
@@ -91,11 +99,18 @@ else
     CLANG_CXX=clang++
 fi
 
-cmake -S "${REPO_ROOT}" -B "${BUILD_DIR}" \
-    -DCMAKE_BUILD_TYPE=Debug \
-    -DPULP_ENABLE_COVERAGE=ON \
-    -DCMAKE_C_COMPILER="${CLANG_C}" \
+cmake_args=(
+    -S "${REPO_ROOT}"
+    -B "${BUILD_DIR}"
+    -DCMAKE_BUILD_TYPE=Debug
+    -DPULP_ENABLE_COVERAGE=ON
+    -DCMAKE_C_COMPILER="${CLANG_C}"
     -DCMAKE_CXX_COMPILER="${CLANG_CXX}"
+)
+if [[ ${#EXTRA_CMAKE_ARGS[@]} -gt 0 ]]; then
+    cmake_args+=("${EXTRA_CMAKE_ARGS[@]}")
+fi
+cmake "${cmake_args[@]}"
 
 # Issue #570: if build-coverage/CMakeCache.txt was previously populated
 # with PULP_ENABLE_COVERAGE:BOOL=OFF (e.g. from a non-coverage run
@@ -178,6 +193,19 @@ while IFS= read -r f; do BINARIES+=("-object" "$f"); done < <(
          ! -name '*.cmake' ! -name '*.txt' 2>/dev/null || true
 )
 
+# Coverage helper tests that live outside test/ still need their own
+# binaries in the llvm-cov object set. The embedded Python bindings
+# smoke target is built under bindings/python/, not build/test/, so
+# without this pass its profile data never contributes to report/show.
+while IFS= read -r f; do BINARIES+=("-object" "$f"); done < <(
+    find "${BUILD_DIR}" -type f -perm -u+x -name 'pulp-test-*' \
+         ! -path "${BUILD_DIR}/test/*" \
+         ! -path '*/_deps/*' \
+         ! -path '*/external/*' \
+         ! -name '*.cmake' ! -name '*.txt' ! -name '*.o' \
+         2>/dev/null || true
+)
+
 if [[ ${#BINARIES[@]} -eq 0 ]]; then
     echo "run_coverage.sh: no test binaries found under ${BUILD_DIR}/test" >&2
     exit 1
@@ -206,6 +234,18 @@ while IFS= read -r f; do BINARIES+=("-object" "$f"); done < <(
     find "${BUILD_DIR}/tools" "${BUILD_DIR}/inspect" \
          -maxdepth 3 -type f -perm -u+x \
          ! -name '*.cmake' ! -name '*.txt' ! -name '*.o' \
+         2>/dev/null || true
+)
+
+# Loadable first-party modules that execute instrumented code under test.
+# Prefer the embedded Python bindings executable above for bindings.cpp:
+# passing both the executable and the pybind11 module gives llvm-cov two
+# coverage maps for the same PyInit_pulp function and can collapse the
+# file to 0% with "mismatched data" warnings.
+while IFS= read -r f; do BINARIES+=("-object" "$f"); done < <(
+    find "${BUILD_DIR}/bindings" -type f \
+         \( -name 'pulp*.so' -o -name 'pulp*.pyd' -o -name 'pulp*.dylib' \) \
+         ! -path "${BUILD_DIR}/bindings/python/*" \
          2>/dev/null || true
 )
 
