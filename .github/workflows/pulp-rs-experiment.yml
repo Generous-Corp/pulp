@@ -95,3 +95,33 @@ jobs:
         run: cargo doc --no-deps
         env:
           RUSTDOCFLAGS: "-D warnings"
+
+      # Rust coverage — measured on Linux only (Codecov pipeline is
+      # Linux-native and mac/windows coverage would just duplicate
+      # signal). cargo-llvm-cov wraps cargo test with llvm-cov's
+      # instrumentation so we can emit Cobertura XML compatible with
+      # Pulp's existing coverage tooling. Flagged as `rust-prototype`
+      # so it's visible alongside the C++ / Python / Swift / Kotlin
+      # lanes but clearly distinguishable.
+      #
+      # When the Rust CLI swap lands (Phase 8 per
+      # planning/rust-cli-migration-plan.md), flip this flag to
+      # `cli-rust` + add a tier entry to ci/coverage-targets.yaml.
+      - name: Install cargo-llvm-cov
+        if: matrix.os == 'ubuntu-latest'
+        uses: taiki-e/install-action@cargo-llvm-cov
+
+      - name: cargo llvm-cov (cobertura)
+        if: matrix.os == 'ubuntu-latest'
+        run: cargo llvm-cov --all-features --workspace --cobertura --output-path cobertura.xml
+
+      - name: Upload coverage to Codecov (rust-prototype flag)
+        if: matrix.os == 'ubuntu-latest'
+        uses: codecov/codecov-action@v4
+        with:
+          files: experimental/pulp-rs/cobertura.xml
+          flags: rust-prototype
+          name: pulp-rs
+          fail_ci_if_error: false
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}

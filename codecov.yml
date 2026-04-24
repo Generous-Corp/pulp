@@ -181,6 +181,17 @@ flags:
       - tools/
     carryforward: true
 
+  # Rust prototype flag — only uploaded on the explore/rust-cli-prototype
+  # branch (via .github/workflows/pulp-rs-experiment.yml). Visible on the
+  # Codecov dashboard alongside the C++ / Python / Swift / Kotlin lanes
+  # but clearly distinguishable as an exploration, not production.
+  # On Phase 8 swap (per planning/rust-cli-migration-plan.md), this flag
+  # is renamed to `cli-rust` and becomes part of the main coverage matrix.
+  rust-prototype:
+    paths:
+      - experimental/pulp-rs/
+    carryforward: true
+
   # OS flags (3) — Phase 1 PR 4 cross-platform coverage matrix. These
   # are NOT path-scoped; every file measured on a given matrix leg is
   # tagged with that OS's flag at upload time via the corresponding
@@ -303,3 +314,8 @@ component_management:
     - component_id: tools
       name: tools
       paths: ["tools/**"]
+    # Rust prototype — exploration on explore/rust-cli-prototype, NEVER
+    # on main. See planning/rust-cli-migration-plan.md for the swap plan.
+    - component_id: rust-prototype
+      name: rust-prototype
+      paths: ["experimental/pulp-rs/**"]
