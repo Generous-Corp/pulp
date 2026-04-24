@@ -9,6 +9,9 @@
 
 #include <array>
 #include <cstring>
+#include <memory>
+#include <tuple>
+#include <vector>
 
 using namespace pulp;
 using namespace pulp::format;
@@ -188,7 +191,251 @@ struct LV2SequenceBuffer {
         as_seq()->atom.type = 0;
     }
 };
+
+constexpr state::ParamID kLv2ProbeGainParam = 7;
+
+struct Lv2ProbeCapture {
+    int prepare_calls = 0;
+    int process_calls = 0;
+    int release_calls = 0;
+    int last_num_samples = 0;
+    double last_sample_rate = 0.0;
+    std::size_t last_midi_count = 0;
+    uint8_t first_status = 0;
+    uint8_t first_note = 0;
+
+    void reset() { *this = {}; }
+};
+
+Lv2ProbeCapture g_lv2_probe;
+
+class Lv2EntryProbeProcessor final : public Processor {
+public:
+    PluginDescriptor descriptor() const override {
+        PluginDescriptor desc;
+        desc.name = "Lv2EntryProbe";
+        desc.manufacturer = "PulpTest";
+        desc.bundle_id = "com.pulp.test.lv2-entry-probe";
+        desc.version = "1.0.0";
+        desc.category = PluginCategory::MidiEffect;
+        desc.input_buses = {{"Input", 1}};
+        desc.output_buses = {{"Output", 1}};
+        desc.accepts_midi = true;
+        desc.produces_midi = true;
+        return desc;
+    }
+
+    void define_parameters(state::StateStore& store) override {
+        store.add_parameter({
+            .id = kLv2ProbeGainParam,
+            .name = "Gain",
+            .unit = "",
+            .range = {0.0f, 2.0f, 1.0f},
+        });
+    }
+
+    void prepare(const PrepareContext& context) override {
+        ++g_lv2_probe.prepare_calls;
+        g_lv2_probe.last_sample_rate = context.sample_rate;
+    }
+
+    void release() override { ++g_lv2_probe.release_calls; }
+
+    void process(audio::BufferView<float>& audio_output,
+                 const audio::BufferView<const float>& audio_input,
+                 midi::MidiBuffer& midi_in,
+                 midi::MidiBuffer& midi_out,
+                 const ProcessContext& context) override {
+        ++g_lv2_probe.process_calls;
+        g_lv2_probe.last_num_samples = context.num_samples;
+        g_lv2_probe.last_sample_rate = context.sample_rate;
+        g_lv2_probe.last_midi_count = midi_in.size();
+        for (const auto& ev : midi_in) {
+            g_lv2_probe.first_status = ev.data()[0];
+            g_lv2_probe.first_note = ev.size() > 1 ? ev.data()[1] : 0;
+            break;
+        }
+
+        for (size_t c = 0; c < audio_output.num_channels(); ++c) {
+            auto* dst = audio_output.channel_ptr(c);
+            const auto* src = c < audio_input.num_channels()
+                ? audio_input.channel_ptr(c)
+                : nullptr;
+            for (int i = 0; i < context.num_samples; ++i) {
+                dst[i] = (src ? src[i] : 0.0f) * 2.0f;
+            }
+        }
+
+        auto out = midi::MidiEvent::note_on(0, 65, 110);
+        out.sample_offset = 7;
+        midi_out.add(out);
+    }
+};
+
+std::unique_ptr<Processor> make_lv2_entry_probe() {
+    return std::make_unique<Lv2EntryProbeProcessor>();
+}
+
+struct Lv2FactoryGuard {
+    ProcessorFactory previous_factory = lv2_generic::g_factory;
+    const char* previous_uri = lv2_generic::g_uri;
+    const char* previous_descriptor_uri = lv2_generic::g_lv2_descriptor.URI;
+
+    explicit Lv2FactoryGuard(ProcessorFactory factory) {
+        g_lv2_probe.reset();
+        lv2_generic::g_factory = factory;
+        lv2_generic::g_uri = "http://pulp.audio/test/lv2-entry-probe";
+        lv2_generic::g_lv2_descriptor.URI = lv2_generic::g_uri;
+    }
+
+    ~Lv2FactoryGuard() {
+        lv2_generic::g_factory = previous_factory;
+        lv2_generic::g_uri = previous_uri;
+        lv2_generic::g_lv2_descriptor.URI = previous_descriptor_uri;
+    }
+};
+
+struct Lv2HandleGuard {
+    LV2_Handle handle = nullptr;
+
+    ~Lv2HandleGuard() {
+        if (handle) lv2_generic::cleanup(handle);
+    }
+};
+
+struct Lv2FeatureBundle {
+    std::vector<std::string> table;
+    LV2_URID_Map map{&table, &fake_map};
+    LV2_Feature map_feature{LV2_URID__map, &map};
+    const LV2_Feature* features[2] = {&map_feature, nullptr};
+};
+
+uint32_t prepare_sequence(LV2SequenceBuffer& buf, LV2_URID atom_sequence_urid) {
+    buf.prepare_as_output_port();
+    auto* seq = buf.as_seq();
+    const uint32_t capacity = seq->atom.size;
+    seq->atom.type = atom_sequence_urid;
+    seq->body.unit = 0;
+    seq->body.pad = 0;
+    lv2_atom_sequence_clear(seq);
+    return capacity;
+}
+
+void append_midi_event(LV2_Atom_Sequence* seq,
+                       uint32_t capacity,
+                       LV2_URID midi_event_urid,
+                       int64_t frame,
+                       uint8_t status,
+                       uint8_t data1,
+                       uint8_t data2) {
+    struct alignas(8) {
+        LV2_Atom_Event hdr;
+        uint8_t payload[3];
+    } pkt{};
+    pkt.hdr.time.frames = frame;
+    pkt.hdr.body.type = midi_event_urid;
+    pkt.hdr.body.size = 3;
+    pkt.payload[0] = status;
+    pkt.payload[1] = data1;
+    pkt.payload[2] = data2;
+    REQUIRE(lv2_atom_sequence_append_event(seq, capacity, &pkt.hdr));
+}
 } // namespace
+
+TEST_CASE("LV2 generic entry refuses instantiation without URID map",
+          "[format][lv2][issue-493]") {
+    Lv2FactoryGuard factory(&make_lv2_entry_probe);
+    const LV2_Feature* empty_features[] = {nullptr};
+
+    REQUIRE(lv2_generic::instantiate(&lv2_generic::g_lv2_descriptor,
+                                     48000.0,
+                                     "",
+                                     nullptr) == nullptr);
+    REQUIRE(lv2_generic::instantiate(&lv2_generic::g_lv2_descriptor,
+                                     48000.0,
+                                     "",
+                                     empty_features) == nullptr);
+}
+
+TEST_CASE("LV2 generic entry wires ports, audio, control values, and MIDI",
+          "[format][lv2][issue-493]") {
+    Lv2FactoryGuard factory(&make_lv2_entry_probe);
+    Lv2FeatureBundle features;
+
+    Lv2HandleGuard handle{
+        lv2_generic::instantiate(&lv2_generic::g_lv2_descriptor,
+                                 44100.0,
+                                 "",
+                                 features.features)
+    };
+    REQUIRE(handle.handle != nullptr);
+
+    auto* inst = static_cast<PulpLv2Instance*>(handle.handle);
+    REQUIRE(inst->processor != nullptr);
+    REQUIRE(inst->sample_rate == 44100.0);
+    REQUIRE(inst->num_audio_inputs == 1);
+    REQUIRE(inst->num_audio_outputs == 1);
+    REQUIRE(inst->num_params == 1);
+    REQUIRE(inst->param_ids.size() == 1);
+    REQUIRE(inst->param_ids[0] == kLv2ProbeGainParam);
+    REQUIRE(inst->accepts_midi);
+    REQUIRE(inst->produces_midi);
+    REQUIRE(inst->urid_midi_event != 0);
+    REQUIRE(inst->urid_atom_sequence != 0);
+    REQUIRE(inst->urid_atom_chunk != 0);
+    REQUIRE(g_lv2_probe.prepare_calls == 1);
+
+    float input[4] = {0.25f, -0.5f, 1.0f, 0.0f};
+    float output[4] = {};
+    float gain = 0.5f;
+
+    LV2SequenceBuffer midi_in;
+    const uint32_t midi_in_capacity =
+        prepare_sequence(midi_in, inst->urid_atom_sequence);
+    append_midi_event(midi_in.as_seq(), midi_in_capacity,
+                      inst->urid_midi_event, 3, 0x90, 60, 100);
+
+    LV2SequenceBuffer midi_out;
+    midi_out.prepare_as_output_port();
+
+    lv2_generic::connect_port(handle.handle, 0, input);
+    lv2_generic::connect_port(handle.handle, 1, output);
+    lv2_generic::connect_port(handle.handle, 2, &gain);
+    lv2_generic::connect_port(handle.handle, 3, midi_in.as_seq());
+    lv2_generic::connect_port(handle.handle, 4, midi_out.as_seq());
+    lv2_generic::connect_port(handle.handle, 999, &gain);
+    lv2_generic::activate(handle.handle);
+
+    lv2_generic::run(handle.handle, 4);
+    lv2_generic::deactivate(handle.handle);
+
+    REQUIRE(inst->store.get_value(kLv2ProbeGainParam) == 0.5f);
+    REQUIRE(g_lv2_probe.process_calls == 1);
+    REQUIRE(g_lv2_probe.last_num_samples == 4);
+    REQUIRE(g_lv2_probe.last_sample_rate == 44100.0);
+    REQUIRE(g_lv2_probe.last_midi_count == 1);
+    REQUIRE(g_lv2_probe.first_status == 0x90);
+    REQUIRE(g_lv2_probe.first_note == 60);
+
+    REQUIRE(output[0] == 0.5f);
+    REQUIRE(output[1] == -1.0f);
+    REQUIRE(output[2] == 2.0f);
+    REQUIRE(output[3] == 0.0f);
+
+    std::vector<std::tuple<int64_t, LV2_URID, uint32_t, uint8_t, uint8_t, uint8_t>> seen;
+    LV2_ATOM_SEQUENCE_FOREACH(midi_out.as_seq(), ev) {
+        const auto* data = reinterpret_cast<const uint8_t*>(ev + 1);
+        seen.emplace_back(ev->time.frames, ev->body.type, ev->body.size,
+                          data[0], data[1], data[2]);
+    }
+    REQUIRE(seen.size() == 1);
+    REQUIRE(std::get<0>(seen[0]) == 7);
+    REQUIRE(std::get<1>(seen[0]) == inst->urid_midi_event);
+    REQUIRE(std::get<2>(seen[0]) == 3);
+    REQUIRE(std::get<3>(seen[0]) == 0x90);
+    REQUIRE(std::get<4>(seen[0]) == 65);
+    REQUIRE(std::get<5>(seen[0]) == 110);
+}
 
 TEST_CASE("write_midi_out_to_sequence emits MIDI events in order",
           "[format][lv2][issue-491]") {

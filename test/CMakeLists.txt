@@ -859,6 +859,15 @@ if(PULP_HAS_LV2)
     )
     target_link_libraries(pulp-test-lv2-adapter PRIVATE pulp::format lv2-headers Catch2::Catch2WithMain)
     catch_discover_tests(pulp-test-lv2-adapter)
+
+    add_executable(pulp-test-lv2-host-discovery test_lv2_host_discovery.cpp)
+    target_include_directories(pulp-test-lv2-host-discovery PRIVATE
+        ${CMAKE_SOURCE_DIR}/core/host/src)
+    target_link_libraries(pulp-test-lv2-host-discovery PRIVATE
+        pulp::host
+        lv2-headers
+        Catch2::Catch2WithMain)
+    catch_discover_tests(pulp-test-lv2-host-discovery)
 endif()
 
 # NSIS installer script generation tests (cross-platform — pure string output)

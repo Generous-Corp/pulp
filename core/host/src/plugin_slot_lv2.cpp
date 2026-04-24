@@ -23,6 +23,7 @@
 #include <lv2/core/lv2.h>
 
 #include <pulp/host/dl_shim.hpp>
+#include "lv2_discovery.hpp"
 #include <algorithm>
 #include <atomic>
 #include <cstring>
@@ -34,21 +35,10 @@
 #include <vector>
 
 namespace pulp::host {
-namespace {
 
 namespace fs = std::filesystem;
 
-struct PortRole {
-    int index = -1;
-    bool is_audio = false;
-    bool is_control = false;
-    bool is_input = false;
-    // Control-port metadata (only meaningful when is_control == true).
-    std::string name;
-    float min_value = 0.0f;
-    float max_value = 1.0f;
-    float default_value = 0.0f;
-};
+namespace detail {
 
 // Scan every .ttl file in the bundle, concatenate content, and extract audio
 // port roles. We look for port stanzas containing:
@@ -57,8 +47,8 @@ struct PortRole {
 // This matches the conventional LV2 style. TTL blank-node syntax varies —
 // we only support the common "[ a lv2:…Port, lv2:…Port ; lv2:index N ; … ]"
 // pattern here.
-std::vector<PortRole> discover_audio_ports(const std::string& bundle_dir) {
-    std::vector<PortRole> out;
+std::vector<Lv2PortRole> discover_lv2_ports(const std::string& bundle_dir) {
+    std::vector<Lv2PortRole> out;
     std::string all;
     std::error_code ec;
     for (auto& entry : fs::directory_iterator(bundle_dir, ec)) {
@@ -90,7 +80,7 @@ std::vector<PortRole> discover_audio_ports(const std::string& bundle_dir) {
         if (!is_audio && !is_control) continue;
         std::smatch idx_m;
         if (!std::regex_search(body, idx_m, idx_re)) continue;
-        PortRole role;
+        Lv2PortRole role;
         role.index = std::stoi(idx_m[1]);
         role.is_audio   = is_audio;
         role.is_control = is_control;
@@ -118,10 +108,14 @@ std::string resolve_lv2_binary(const std::string& bundle_dir) {
     return {};
 }
 
+} // namespace detail
+
+namespace {
+
 class Lv2Slot final : public PluginSlot {
 public:
     Lv2Slot(PluginInfo info, void* handle, const LV2_Descriptor* desc,
-            std::vector<PortRole> port_roles)
+            std::vector<detail::Lv2PortRole> port_roles)
         : info_(std::move(info)),
           handle_(handle),
           desc_(desc),
@@ -298,7 +292,7 @@ private:
     void* handle_ = nullptr;
     const LV2_Descriptor* desc_ = nullptr;
     LV2_Handle instance_ = nullptr;
-    std::vector<PortRole> port_roles_;
+    std::vector<detail::Lv2PortRole> port_roles_;
     int num_audio_inputs_ = 0;
     int num_audio_outputs_ = 0;
     int max_block_size_ = 0;
@@ -321,7 +315,7 @@ std::unique_ptr<PluginSlot> load_lv2_plugin(const PluginInfo& info) {
         runtime::log_error("LV2 load: path is not a bundle directory: '{}'", info.path);
         return nullptr;
     }
-    std::string bin = resolve_lv2_binary(info.path);
+    std::string bin = detail::resolve_lv2_binary(info.path);
     if (bin.empty()) {
         runtime::log_error("LV2 load: no .so/.dylib found in bundle '{}'", info.path);
         return nullptr;
@@ -354,7 +348,7 @@ std::unique_ptr<PluginSlot> load_lv2_plugin(const PluginInfo& info) {
         return nullptr;
     }
 
-    auto roles = discover_audio_ports(info.path);
+    auto roles = detail::discover_lv2_ports(info.path);
     if (roles.empty()) {
         runtime::log_warn("LV2 load: no audio ports found in bundle TTLs for '{}'; "
                           "plugin will load but process() will be a pass-through", info.path);
