@@ -97,22 +97,66 @@ pub fn run_with_home(sub: Sub, home: &Path, json: bool, out: &mut impl Write) ->
         Sub::Help => print_help(out),
         Sub::Status => do_status(home, json, out),
         Sub::Clean => do_clean(home, json, out),
-        Sub::Install => {
+        // `install` isn't Rust-native yet — download + tar-extract +
+        // optional `--local` build-from-checkout flow is ~400 LOC of
+        // new code + fixtures. Phase 7 delegates to `pulp-cpp`
+        // transparently so users see no difference; if the legacy
+        // binary isn't on PATH, we fall back to the pre-Phase-7
+        // "not ported" message and exit 2.
+        Sub::Install => install_via_fallthrough(out),
+    }
+}
+
+fn install_via_fallthrough(out: &mut impl Write) -> Result<()> {
+    // Reconstruct the argv the user typed. clap gave us a `Sub::Install`
+    // enum, so we don't have the raw flags at this layer — the wrapper
+    // at `main.rs` holds the original `std::env::args()` vector and
+    // passes it to the fallthrough path.
+    //
+    // For defence-in-depth (a test calling this module directly with
+    // no fallthrough env) we synthesise the minimum argv — `pulp-cpp`
+    // understands `sdk install` without flags and will prompt for
+    // version detection.
+    let argv = collect_argv_tail();
+    match crate::fallthrough::delegate(&argv)? {
+        crate::fallthrough::Outcome::Delegated(rc) => {
+            if rc == 0 {
+                Ok(())
+            } else {
+                Err(CliError::Other(format!(
+                    "pulp-cpp sdk install exited with code {rc}"
+                )))
+            }
+        }
+        crate::fallthrough::Outcome::Disabled | crate::fallthrough::Outcome::NotFound => {
             writeln!(
                 out,
-                "pulp-rs sdk install: not ported (download + extract + platform detect)"
+                "pulp-rs sdk install: not ported (needs curl + tar + platform detect)."
             )
             .map_err(io_err)?;
             writeln!(
                 out,
-                "  Use the C++ `pulp sdk install` for now — the Rust port ships the"
+                "  Install the C++ `pulp-cpp` binary and retry, or unset \
+                 PULP_RS_NO_FALLTHROUGH if you set it."
             )
             .map_err(io_err)?;
-            writeln!(out, "  network-free subcommands (status, clean) only.").map_err(io_err)?;
             Err(CliError::BadUsage(
-                "pulp-rs sdk install is not ported in Phase 6".to_owned(),
+                "pulp-rs sdk install not ported; fallthrough unavailable".to_owned(),
             ))
         }
+    }
+}
+
+/// Harvest `std::env::args()` tail (everything after the binary
+/// name) so the fallthrough can pass the user's exact invocation
+/// to `pulp-cpp`. In tests this returns a minimal `sdk install`
+/// vector so the `RecordingSpawner` path works.
+fn collect_argv_tail() -> Vec<String> {
+    let all: Vec<String> = std::env::args().skip(1).collect();
+    if all.is_empty() {
+        vec!["sdk".to_owned(), "install".to_owned()]
+    } else {
+        all
     }
 }
 

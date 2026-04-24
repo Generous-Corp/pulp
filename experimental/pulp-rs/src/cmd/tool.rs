@@ -220,13 +220,23 @@ fn status_label(
 }
 
 fn install(_id: Option<&str>, _all: bool, out: &mut impl Write) -> Result<i32> {
-    writeln!(
-        out,
-        "pulp-rs tool install: not ported in Phase 6d (archive download + extraction \
-        needs extra crates). Use the C++ binary for installs."
-    )
-    .map_err(io)?;
-    Ok(1)
+    // Phase 7: archive download + tar/zip/xz extraction + xattr
+    // cleanup is ~500 LOC of new deps (tar + flate2 + zip). Delegate
+    // to pulp-cpp when present; print the pre-Phase-7 stub when it's
+    // not on PATH so CI/sandboxed callers see a clear error.
+    let argv = crate::fallthrough::current_argv_tail();
+    match crate::fallthrough::delegate(&argv)? {
+        crate::fallthrough::Outcome::Delegated(rc) => Ok(rc),
+        crate::fallthrough::Outcome::Disabled | crate::fallthrough::Outcome::NotFound => {
+            writeln!(
+                out,
+                "pulp-rs tool install: archive download + extraction not ported; \
+                 install pulp-cpp to enable."
+            )
+            .map_err(io)?;
+            Ok(1)
+        }
+    }
 }
 
 fn uninstall(id: &str, out: &mut impl Write) -> Result<i32> {

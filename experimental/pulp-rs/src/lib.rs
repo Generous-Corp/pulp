@@ -81,6 +81,7 @@ pub mod color;
 pub mod config;
 pub mod diag;
 pub mod error;
+pub mod fallthrough;
 pub mod help;
 pub mod parse;
 pub mod pkg;
@@ -91,8 +92,12 @@ pub mod tool_registry;
 pub mod update;
 pub mod version_info;
 
+// `test_support` is compiled for `cfg(test)` in the lib and is also
+// referenced by `src/fallthrough.rs` unit tests; keep it public
+// within the crate so cross-module test helpers can share the
+// `ENV_LOCK` without duplicating state.
 #[cfg(test)]
-mod test_support;
+pub(crate) mod test_support;
 
 // Small, stable surface exposed for tests, benches, and main.
 pub use diag::{collect, emit_json, resolve_active_project_root, VersionDiag};

@@ -259,12 +259,21 @@ pub fn run<S: Spawner>(
     };
 
     if args.watch {
-        writeln!(
-            out,
-            "\npulp-rs design --watch: watch loop is not yet ported (use the C++ binary for \
-            live-reload). Running a one-shot launch instead."
-        )
-        .map_err(io)?;
+        // Phase 7: watch loop needs `notify` + debounced rebuild.
+        // Delegate to pulp-cpp when available; otherwise fall back
+        // to the pre-Phase-7 behaviour (warning + one-shot launch).
+        let cpp_argv = crate::fallthrough::current_argv_tail();
+        match crate::fallthrough::delegate(&cpp_argv)? {
+            crate::fallthrough::Outcome::Delegated(rc) => return Ok(rc),
+            crate::fallthrough::Outcome::Disabled | crate::fallthrough::Outcome::NotFound => {
+                writeln!(
+                    out,
+                    "\npulp-rs design --watch: watch loop not ported; install pulp-cpp to \
+                     enable live-reload. Running a one-shot launch instead."
+                )
+                .map_err(io)?;
+            }
+        }
     }
 
     let mut inv = Invocation::new(bin.to_string_lossy().into_owned())

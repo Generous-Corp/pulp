@@ -92,14 +92,14 @@ pub fn run_with<S: Spawner>(
     out: &mut impl Write,
 ) -> Result<i32> {
     if args.native {
-        writeln!(
-            out,
-            "pulp-rs pr: --native fallback is not ported. Re-run on the C++ binary for that path."
-        )
-        .map_err(|e| CliError::io("<stdout>", e))?;
-        return Err(CliError::BadUsage(
-            "--native fallback is not available in pulp-rs".to_owned(),
-        ));
+        // Phase 7: the native fallback orchestrates skill-sync +
+        // version-bump + `gh pr create` + `shipyard ship` in one
+        // sequence — non-trivial to port. Delegate to pulp-cpp if
+        // available; stub otherwise.
+        let cpp_argv = crate::fallthrough::current_argv_tail();
+        let stub = "pulp-rs pr --native: fallback not ported; install pulp-cpp to enable.";
+        let rc = crate::fallthrough::delegate_or_stub(&cpp_argv, stub)?;
+        return Ok(rc);
     }
 
     // Locate `shipyard` without shelling out to `which`.
@@ -223,6 +223,11 @@ mod tests {
 
     #[test]
     fn native_flag_errors_out() {
+        // Phase 7: `--native` delegates to pulp-cpp when present.
+        // In the test environment pulp-cpp isn't on PATH, so we
+        // expect the "fallthrough unavailable" stub exit path —
+        // stderr gets the user-facing "install pulp-cpp" hint, and
+        // the error is `BadUsage("fallthrough unavailable")`.
         let args = PrArgs {
             native: true,
             forward: vec![],
@@ -231,7 +236,10 @@ mod tests {
         let mut buf = Vec::new();
         let err = run_with(&args, None, &spawner, &mut buf).unwrap_err();
         match err {
-            CliError::BadUsage(msg) => assert!(msg.contains("--native")),
+            CliError::BadUsage(msg) => assert!(
+                msg.contains("fallthrough unavailable"),
+                "unexpected msg: {msg}"
+            ),
             other => panic!("expected BadUsage, got {other:?}"),
         }
         assert!(spawner.calls.borrow().is_empty());

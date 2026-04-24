@@ -67,15 +67,15 @@ Run the post-implementation audit checklist (below) after every phase. The table
 | `--help` / `-h` | **Ported** | Clap auto-generated |
 | `project` (singular) | **Ported** | Phase 6b — `bump` (all flags: positional, `--to`, `--all`, `--dry-run`, `--force-dirty`, `--allow-downgrade`, `--verify-builds`) + `undo [<timestamp>]`. Migration-note rendering stubbed with pointer to C++ binary (`cmd_project.cpp` links `migration_runtime.cpp`) |
 | `build` | **Ported-partial** | Missing `--watch`, `--test-filter=...`, real `--validate`; simpler configure logic |
-| `run` | **Ported-partial** | Missing macOS `.app` fallback |
-| `status` | **Ported-partial** | Only short summary; missing git branch/commit, SDK detail, format counts |
-| `doctor` | **Ported-partial** | Only `--versions --json`; default doctor + `android` + `ios` + `--fix` + `--ci` + `--dry-run` + `--scan-parents` missing |
-| `cache` | **Ported-partial** | `status` + `clean` real; `fetch` stubbed |
-| `sdk` | **Ported-partial** | `status` + `clean` real; `install` stubbed |
-| `upgrade` | **Ported-partial** | Check/notes ported; install stubbed; positional version missing; default action differs |
-| `version` | **Ported-partial** | Show only; missing `bump` + `check` subcommands |
-| `pr` | **Ported-partial** | Shipyard delegation real; `--native` fallback missing; version-pin enforcement weakened to advisory |
-| `config` | **Ported-partial** | `get/set/list` real; empty-invocation differs; `update.mode` snooze-clear side effect may be missing |
+| `run` | **Ported** | Phase 6e — macOS `.app` bundle fallback added; matches `cmd_run.cpp` line-for-line. |
+| `status` | **Ported** | Phase 6e — `GitProbe` trait drives `git -C <root>` branch + commit, standalone SDK detail (version, path-hint readiness, local + download caches, checkout hint), source-tree walk (`.cpp`/`.mm` + `.hpp`/`.h` counts, `test/*.cpp` count, `examples/*` dir count), plugin-format availability (VST3/AU/CLAP/AAX) with `PULP_AAX_SDK_DIR` + host-OS gate. |
+| `doctor` | **Ported-partial** | Only `--versions --json`; default doctor + `android` + `ios` + `--fix` + `--ci` + `--dry-run` + `--scan-parents` missing. Phase 7 wrapper will exec pulp-cpp for these. |
+| `cache` | **Ported-partial** | `status` + `clean` real; `fetch` stubbed — Phase 7 wrapper delegates `fetch` to pulp-cpp. |
+| `sdk` | **Ported-partial** | `status` + `clean` real; `install` stubbed — Phase 7 wrapper delegates to pulp-cpp (curl + tar + `setup.sh --local`). |
+| `upgrade` | **Ported-partial** | Check/notes ported; install / positional version / default-action diff — Phase 7 wrapper covers. |
+| `version` | **Ported** | Phase 6e — `bump <major|minor|patch> [--plugin]` rewrites `CMakeLists.txt` / `pulp_add_plugin(...)` cell + inserts CHANGELOG heading; `check [--with-bump-check]` runs the full 6-step walk (SDK↔CLI, AU Info.plist guard, CHANGELOG heading match, plugin.json semver shape, plugin.json↔marketplace.json drift, marketplace.json `plugins[0].version`) and shells to `version_bump_check.py --mode=report` when requested. |
+| `pr` | **Ported-partial** | Shipyard delegation real; `--native` fallback missing; Phase 7 wrapper delegates `pr --native` to pulp-cpp. |
+| `config` | **Ported** | Phase 6e — bare / `help` / `--help` / `-h` print usage + exit 0; `update.mode` changes clear `$PULP_HOME/update-snooze` best-effort (Slice 5 #550 parity). |
 | `scan` | **Ported-partial** | Phase 6b — file-enumeration stub: walks `~/Library/Audio/Plug-Ins/{CLAP,VST3,Components}` + LV2 dirs, prints `[FMT] N plugin(s)` in the same shape as `cmd_host.cpp cmd_scan`. Plug-in metadata (vendor, version, unique-ID) omitted — the C++ path reads them via `pulp::host::PluginScanner::scan()`, which requires dlopen+factory inspection. Rust stub uses file basename as the "name" column |
 | Fuzzy "Did you mean…?" | **Ported** | Phase 6b — Levenshtein suggester in `src/help.rs`; matches C++ threshold of `dist <= 3`. Emits `Unknown command: <typed>\nDid you mean: pulp-rs <closest>?` for close matches, else falls back to `Run `pulp-rs help` for usage` |
 | `list` | **Ported** | Phase 6c — 3-column table + `--json` array. Lock-file enrichment pulls license + category from registry. |
@@ -99,7 +99,7 @@ Run the post-implementation audit checklist (below) after every phase. The table
 | `design-debug` / `inspect` / `import-design` / `export-tokens` | **Already-delegate** | Built-binary shims — unchanged |
 | `install` (legacy) | **Already-delegate** | Alias for `cache fetch skia` |
 
-**Revised completion (post-Phase-6d):** ~85% feature-complete (11 Ported + 19 Ported-partial at their core paths) against ~30 distinct user-visible commands, plus two cross-cutting UX parity fixes (bare invocation + fuzzy suggester). Deferred list is now **empty** of non-policy items — every Rust-portable command either is ported (possibly partial) or is explicitly marked **Stays in C++** due to library linkage. Phase 8 (swap) is unblocked: a `pulp-cpp` fallthrough path would absorb only deliberate gaps (deep host metadata in `scan`, watch loops in `dev`/`design`, archive install in `tool`, interactive wizard in `create`, and the 4 library-linked commands).
+**Revised completion (post-Phase-6e):** ~92% feature-complete (15 Ported + 15 Ported-partial at their core paths) against ~30 distinct user-visible commands, plus two cross-cutting UX parity fixes (bare invocation + fuzzy suggester). Phase 6e closed the cheap-fill gaps: `version` (bump + check), `status` (git probe + SDK detail + format counts), `run` (macOS `.app` fallback), `config` (bare-invocation help + snooze clear). Phase 7 introduces a `pulp-cpp` fallthrough wrapper so remaining Ported-partial branches (`cache fetch`, `sdk install`, `upgrade install`, `pr --native`, most of `doctor`, watch loops in `dev`/`design`, `tool install`, `create` wizard, deep `scan` metadata) route to the C++ binary transparently — no user-visible regressions on the Phase 8 swap day.
 
 ## Deferred list (needs porting in future phases)
 

@@ -121,14 +121,13 @@ pub fn build_with<S: Spawner>(
     out: &mut impl Write,
 ) -> Result<i32> {
     if args.watch {
-        writeln!(
-            out,
-            "pulp-rs build --watch: not ported in Phase 6. Use the C++ binary for watch mode."
-        )
-        .map_err(io_err)?;
-        return Err(CliError::BadUsage(
-            "--watch is not available in pulp-rs".to_owned(),
-        ));
+        // Phase 7: route --watch through the C++ binary if it's on
+        // PATH, otherwise fall back to the "not ported" stub so
+        // users in a Rust-only sandbox still see a clear error.
+        let cpp_argv = crate::fallthrough::current_argv_tail();
+        let stub = "pulp-rs build --watch: watch loop is not ported; install pulp-cpp to enable.";
+        let rc = crate::fallthrough::delegate_or_stub(&cpp_argv, stub)?;
+        return Ok(rc);
     }
     if args.validate {
         writeln!(
@@ -833,14 +832,14 @@ pub fn cache_with_home(
         CacheSub::Status => do_cache_status(home, json, out),
         CacheSub::Clean => do_cache_clean(home, json, out),
         CacheSub::Fetch(_) => {
-            writeln!(
-                out,
-                "pulp-rs cache fetch: not ported (download + platform detect stays on C++)."
-            )
-            .map_err(io_err)?;
-            Err(CliError::BadUsage(
-                "pulp-rs cache fetch is not ported in Phase 6".to_owned(),
-            ))
+            // Phase 7: delegate to pulp-cpp; fall back to the stub
+            // message when the legacy binary is unavailable.
+            let cpp_argv = crate::fallthrough::current_argv_tail();
+            let stub_msg = "pulp-rs cache fetch: download + platform detect not ported; \
+                            install pulp-cpp to enable.";
+            let _ = writeln!(out); // keep stdout clean before stderr stub
+            let _rc = crate::fallthrough::delegate_or_stub(&cpp_argv, stub_msg)?;
+            Ok(())
         }
     }
 }
