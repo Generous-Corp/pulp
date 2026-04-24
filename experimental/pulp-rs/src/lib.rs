@@ -77,10 +77,16 @@
 
 pub mod cmd;
 pub mod color;
+pub mod config;
 pub mod diag;
 pub mod error;
 pub mod parse;
 pub mod registry;
+pub mod update;
+pub mod version_info;
+
+#[cfg(test)]
+mod test_support;
 
 // Small, stable surface exposed for tests, benches, and main.
 pub use diag::{collect, emit_json, resolve_active_project_root, VersionDiag};

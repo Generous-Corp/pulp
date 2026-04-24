@@ -38,6 +38,17 @@ serde      = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 thiserror  = "1"
 toml       = "0.8"
+# `toml_edit` is the comment- and whitespace-preserving writer for
+# `config.toml` — a plain `toml` round-trip would drop inline comments
+# and blank-line layout, which users notice. See `src/config.rs`.
+toml_edit  = "0.22"
+# `ureq` is the blocking HTTP client backing `pulp upgrade`'s GitHub
+# Releases query. Chosen over `reqwest` because the CLI's story is
+# strictly blocking — no async runtime to haul in, much smaller link
+# surface, and `rustls` by default so cross-compile to musl/Windows is
+# painless. See `src/update.rs` for the trait that keeps tests off the
+# network.
+ureq       = { version = "2", default-features = false, features = ["tls", "json"] }
 
 [dev-dependencies]
 assert_cmd = "2"
