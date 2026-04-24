@@ -271,7 +271,12 @@ void json_children_to_ir(const choc::value::ValueView& children, IRNode& parent)
         if (!child_view.isObject()) continue;
         IRNode child = json_to_ir_node(child_view);
         // Skip empty text/comment markers entirely.
-        if (child.type == "#text" && child.text_content.empty()) continue;
+        // Codex P2 on PR #731: json_to_ir_node maps DOM "#text" → IR
+        // "text" (line ~294), so filter against the IR vocabulary, not
+        // the wire format. Otherwise empty whitespace text nodes pad
+        // the materialized tree count and inflate the >9 success-floor
+        // check the integration test asserts on.
+        if (child.type == "text" && child.text_content.empty()) continue;
         if (child.type == "#error") continue;
         parent.children.push_back(std::move(child));
     }
@@ -495,8 +500,14 @@ DesignIR parse_claude_html_with_runtime(const std::string& html, ClaudeRuntimeOp
     // The WidgetBridge is what wires up the web-compat preludes, including
     // `__pulpImportRuntime__`. We don't render anything — the View is a
     // sink for the materialized native widgets.
+    //
+    // Honor opts.engine_override when present (Codex P2 on PR #731).
+    // Useful for: deterministic tests, working around QuickJS parser
+    // stack limits on larger Claude bundles by forcing JSC, etc.
     try {
-        ScriptEngine engine;
+        ScriptEngine engine = opts.engine_override.has_value()
+            ? ScriptEngine(static_cast<JsEngineType>(*opts.engine_override))
+            : ScriptEngine();
         View root;
         state::StateStore store;
         std::unique_ptr<WidgetBridge> bridge_ptr;
