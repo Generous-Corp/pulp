@@ -140,6 +140,26 @@ class CoveragercTests(unittest.TestCase):
                 ],
             )
 
+    def test_report_source_files_accepts_file_roots_and_dedupes(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td)
+            source = root / "tools/audit.py"
+            source.parent.mkdir(parents=True, exist_ok=True)
+            source.write_text("print('source')\n", encoding="utf-8")
+            not_python = root / "tools/README.txt"
+            not_python.write_text("not python\n", encoding="utf-8")
+
+            with mock.patch.object(rpc, "REPO_ROOT", root):
+                files = rpc._report_source_files(
+                    ["tools/audit.py", "tools", "tools/README.txt"],
+                    [],
+                )
+
+            self.assertEqual(
+                [path.relative_to(root).as_posix() for path in files],
+                ["tools/audit.py"],
+            )
+
     def test_touch_report_source_files_marks_unexecuted_sources_measured(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = pathlib.Path(td)
@@ -163,6 +183,39 @@ class CoveragercTests(unittest.TestCase):
                 )
 
             self.assertEqual(touched, ["tools/packages/freshness_check.py"])
+
+    def test_repo_relative_xml_filename_handles_all_resolution_modes(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td)
+            source = root / "tools/audit.py"
+            source.parent.mkdir(parents=True, exist_ok=True)
+            source.write_text("print('source')\n", encoding="utf-8")
+
+            outside = pathlib.Path(td).parent / "outside_coverage_source.py"
+            outside.write_text("print('outside')\n", encoding="utf-8")
+            self.addCleanup(lambda: outside.unlink(missing_ok=True))
+
+            with mock.patch.object(rpc, "REPO_ROOT", root):
+                self.assertEqual(
+                    rpc._repo_relative_xml_filename(str(source), []),
+                    "tools/audit.py",
+                )
+                self.assertEqual(
+                    rpc._repo_relative_xml_filename(str(outside), []),
+                    str(outside),
+                )
+                self.assertEqual(
+                    rpc._repo_relative_xml_filename("tools/audit.py", []),
+                    "tools/audit.py",
+                )
+                self.assertEqual(
+                    rpc._repo_relative_xml_filename("audit.py", [str(root / "tools")]),
+                    "tools/audit.py",
+                )
+                self.assertEqual(
+                    rpc._repo_relative_xml_filename("missing.py", [str(outside.parent)]),
+                    "missing.py",
+                )
 
     def test_rewrite_cobertura_filenames_uses_repo_relative_paths(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -214,6 +267,38 @@ class CoveragercTests(unittest.TestCase):
                     "core/view/js/embed_js.py",
                 ],
             )
+
+    def test_rewrite_cobertura_filenames_handles_missing_sources_and_filenames(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td)
+            xml = root / "coverage.xml"
+            xml.write_text(
+                """<?xml version="1.0" ?>
+<coverage>
+  <packages>
+    <package name="">
+      <classes>
+        <class name="without-filename" />
+        <class name="unknown.py" filename="unknown.py" />
+      </classes>
+    </package>
+  </packages>
+</coverage>
+""",
+                encoding="utf-8",
+            )
+
+            with mock.patch.object(rpc, "REPO_ROOT", root):
+                rpc._rewrite_cobertura_filenames(xml)
+
+            tree = ET.parse(xml)
+            classes = tree.findall(".//class")
+            self.assertIsNone(classes[0].get("filename"))
+            self.assertEqual(classes[1].get("filename"), "unknown.py")
+
+    def test_write_coveragerc_rejects_empty_surface_selection(self) -> None:
+        with self.assertRaisesRegex(ValueError, "no coverage surfaces selected"):
+            rpc._write_coveragerc([])
 
 
 class MainFlowTests(unittest.TestCase):
@@ -310,6 +395,69 @@ class MainFlowTests(unittest.TestCase):
             [surface.source_roots for surface in surfaces],
             [("tools/scripts",), ("tools", "core/view/js")],
         )
+
+    def test_run_test_invokes_coverage_cli(self) -> None:
+        fake_proc = mock.Mock(returncode=7)
+        with mock.patch.object(rpc.subprocess, "run", return_value=fake_proc) as run:
+            rc = rpc._run_test(
+                rpc.REPO_ROOT / "tools/scripts/test_alpha.py",
+                {"COVERAGE_FILE": "data"},
+            )
+
+        self.assertEqual(rc, 7)
+        self.assertEqual(run.call_args.kwargs["cwd"], rpc.REPO_ROOT)
+        self.assertEqual(run.call_args.kwargs["env"], {"COVERAGE_FILE": "data"})
+        self.assertEqual(
+            run.call_args.args[0],
+            [
+                sys.executable,
+                "-m",
+                "coverage",
+                "run",
+                "--rcfile",
+                str(rpc.RCFILE),
+                "--parallel-mode",
+                "tools/scripts/test_alpha.py",
+            ],
+        )
+
+    def test_build_reports_combines_touches_and_rewrites_outputs(self) -> None:
+        fake_cov = mock.Mock()
+        fake_coverage = mock.Mock()
+        fake_coverage.Coverage.return_value = fake_cov
+
+        def fake_report(file, show_missing: bool) -> None:
+            self.assertTrue(show_missing)
+            file.write("summary\n")
+
+        fake_cov.report.side_effect = fake_report
+        surfaces = [rpc.CoverageSurface(("tools",), ("tools/test_*.py",))]
+
+        with tempfile.TemporaryDirectory() as td:
+            output = pathlib.Path(td)
+            summary = output / "summary.txt"
+            xml = output / "coverage.xml"
+            html = output / "html"
+
+            with mock.patch.object(rpc, "OUTPUT_DIR", output), \
+                 mock.patch.object(rpc, "SUMMARY_FILE", summary), \
+                 mock.patch.object(rpc, "XML_FILE", xml), \
+                 mock.patch.object(rpc, "HTML_DIR", html), \
+                 mock.patch.object(rpc, "coverage", fake_coverage), \
+                 mock.patch.object(rpc, "_touch_report_source_files") as touch, \
+                 mock.patch.object(rpc, "_rewrite_cobertura_filenames") as rewrite:
+                rpc._build_reports(surfaces)
+
+        fake_coverage.Coverage.assert_called_once_with(
+            config_file=str(rpc.RCFILE),
+            data_file=str(rpc.DATA_FILE),
+        )
+        fake_cov.combine.assert_called_once_with(data_paths=[str(output)], strict=True)
+        fake_cov.save.assert_called_once_with()
+        fake_cov.html_report.assert_called_once_with(directory=str(html))
+        fake_cov.xml_report.assert_called_once_with(outfile=str(xml))
+        touch.assert_called_once_with(fake_cov, ["tools"], ["tools/test_*.py", "tools/_*.py"])
+        rewrite.assert_called_once_with(xml)
 
     def test_main_includes_broader_slice_for_default_tooling_tests(self) -> None:
         tests = [rpc.REPO_ROOT / "tools/scripts/test_alpha.py"]
