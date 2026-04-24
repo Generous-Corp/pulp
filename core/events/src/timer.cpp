@@ -2,55 +2,83 @@
 
 namespace pulp::events {
 
+struct Timer::Impl {
+    EventLoop& loop;
+    Duration interval;
+    Callback callback;
+    bool repeating;
+    std::atomic<bool> active{false};
+    // Cycle generation — incremented by stop() so that stale dispatch
+    // lambdas scheduled before stop() return early when they fire. Cheap
+    // replacement for the previous shared_ptr<atomic<bool>> sentinel
+    // which raced on the shared_ptr slot between start() (main thread)
+    // and schedule_next() (event-loop thread). See #687 / #414.
+    std::atomic<std::uint64_t> generation{0};
+
+    Impl(EventLoop& l, Duration i, Callback cb, bool rep)
+        : loop(l), interval(i), callback(std::move(cb)), repeating(rep) {}
+};
+
 Timer::Timer(EventLoop& loop, Duration interval, Callback callback, bool repeating)
-    : loop_(loop)
-    , interval_(interval)
-    , callback_(std::move(callback))
-    , repeating_(repeating)
+    : impl_(std::make_shared<Impl>(loop, interval, std::move(callback), repeating))
 {
 }
 
 Timer::~Timer() {
+    // Flip active + bump generation so any already-queued dispatch lambda
+    // short-circuits. The lambdas hold their own shared_ptr<Impl> copies,
+    // so Impl stays alive until they finish even though *our* impl_ is
+    // about to drop its reference — no UAF. See #716.
     stop();
 }
 
 void Timer::start() {
     // Idempotent when already running. See #438 P1 Codex review on #428.
-    if (active_.load(std::memory_order_acquire)) {
+    if (impl_->active.load(std::memory_order_acquire)) {
         return;
     }
-    active_.store(true, std::memory_order_release);
-    schedule_next(generation_.load(std::memory_order_acquire));
+    impl_->active.store(true, std::memory_order_release);
+    schedule_next(impl_, impl_->generation.load(std::memory_order_acquire));
 }
 
 void Timer::stop() {
-    active_.store(false, std::memory_order_release);
-    // Bump the generation so any in-flight dispatch lambda whose captured
-    // generation no longer matches returns early before calling the
-    // callback or rescheduling. Atomic RMW — safe to race with start()
-    // and schedule_next().
-    generation_.fetch_add(1, std::memory_order_acq_rel);
+    impl_->active.store(false, std::memory_order_release);
+    // Atomic RMW — safe to race with start() and schedule_next().
+    impl_->generation.fetch_add(1, std::memory_order_acq_rel);
+}
+
+bool Timer::is_active() const {
+    return impl_->active.load(std::memory_order_acquire);
 }
 
 void Timer::set_interval(Duration interval) {
-    interval_ = interval;
+    impl_->interval = interval;
 }
 
-void Timer::schedule_next(std::uint64_t gen) {
-    auto* self = this;
-    loop_.dispatch_after(interval_, [self, gen]() {
-        if (!self->active_.load(std::memory_order_acquire))
+Duration Timer::interval() const {
+    return impl_->interval;
+}
+
+void Timer::schedule_next(std::shared_ptr<Impl> impl, std::uint64_t gen) {
+    auto& loop = impl->loop;
+    auto interval = impl->interval;
+    // Capture the shared_ptr by value. If the owning Timer is destroyed
+    // before this lambda fires, `impl` keeps the state alive until we
+    // finish — the atomics return "inactive + generation moved on" and
+    // we exit without touching freed memory. #716 fix.
+    loop.dispatch_after(interval, [impl, gen]() {
+        if (!impl->active.load(std::memory_order_acquire))
             return;
-        if (self->generation_.load(std::memory_order_acquire) != gen)
+        if (impl->generation.load(std::memory_order_acquire) != gen)
             return;
-        self->callback_();
-        if (!self->repeating_)
+        impl->callback();
+        if (!impl->repeating)
             return;
-        if (!self->active_.load(std::memory_order_acquire))
+        if (!impl->active.load(std::memory_order_acquire))
             return;
-        if (self->generation_.load(std::memory_order_acquire) != gen)
+        if (impl->generation.load(std::memory_order_acquire) != gen)
             return;
-        self->schedule_next(gen);
+        schedule_next(impl, gen);
     });
 }
 

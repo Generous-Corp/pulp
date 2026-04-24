@@ -195,6 +195,38 @@ TEST_CASE("Timer stop+start hammer (TSan-clean, #687)",
     SUCCEED("stop+start hammer completed without races");
 }
 
+// #716 — Timer destroyed while its EventLoop still has a queued dispatch.
+// Pre-fix, schedule_next captured a raw `self` pointer; if the user-visible
+// Timer dropped before the lambda fired, the lambda read `self->active_` /
+// `self->generation_` from freed memory. ASan + TSan would have caught it
+// eventually but neither test targeted the destroy-mid-dispatch window
+// specifically. Post-fix, dispatch lambdas hold a shared_ptr<Impl> that
+// keeps state alive past Timer destruction.
+TEST_CASE("Timer destroy-while-dispatched is UAF-free (#716)",
+          "[events][timer][asan][issue-716]") {
+    EventLoop loop;
+    auto count = std::make_shared<std::atomic<int>>(0);
+
+    // 50 iterations so timing-window regressions surface under any of
+    // ASan, TSan, or UBSan. Each iteration: start a 1ms timer, let it
+    // dispatch once, then destroy it while the NEXT dispatch may still
+    // be queued. Without the shared_ptr<Impl> fix this would UAF.
+    for (int i = 0; i < 50; ++i) {
+        {
+            Timer t(loop, 1ms, [count] { count->fetch_add(1); }, true);
+            t.start();
+            std::this_thread::sleep_for(3ms);
+            // t.~Timer() runs here; any already-dispatched lambdas still
+            // pending in loop_ must finish safely.
+        }
+        // Give the loop thread a chance to fire the queued lambda after
+        // Timer destruction. With the fix, it no-ops via generation
+        // check; without the fix, it'd be a UAF.
+        std::this_thread::sleep_for(3ms);
+    }
+    SUCCEED("destroy-while-dispatched completed without UAF");
+}
+
 // ── EventLoop lifecycle edges ───────────────────────────────────────────
 
 TEST_CASE("EventLoop destructor tolerates pending dispatches",
