@@ -266,9 +266,48 @@ struct CacheArgs {
 }
 
 fn main() -> ExitCode {
+    // Phase 8 rollback lever. When `$PULP_USE_CPP=1` is set, skip the
+    // Rust dispatch entirely and exec the C++ binary with the user's
+    // full argv unchanged. Lets anyone who gets burned by a Rust-side
+    // regression post-swap revert to the pre-swap behaviour with a
+    // single `export`, no reinstall required.
+    //
+    // Dormant pre-swap: `PULP_USE_CPP=1` with no `pulp-cpp` binary on
+    // PATH prints a clear "install pulp-cpp to enable rollback"
+    // message and exits 2. Post-swap the installer lands both
+    // binaries side-by-side, so this path just works.
+    if std::env::var_os("PULP_USE_CPP").is_some_and(|v| !v.is_empty()) {
+        return force_cpp_fallthrough();
+    }
     match real_main() {
         Ok(()) => ExitCode::SUCCESS,
         Err(code) => code,
+    }
+}
+
+/// Honour `$PULP_USE_CPP=1` by exec'ing `pulp-cpp` with the user's
+/// full argv (`std::env::args().skip(1)`). Returns a tool-use exit
+/// code if the legacy binary isn't resolvable — the user needs a
+/// clear "installation issue" message, not a silent no-op.
+fn force_cpp_fallthrough() -> ExitCode {
+    let argv: Vec<String> = std::env::args().skip(1).collect();
+    let resolver = pulp_rs::fallthrough::SystemResolver;
+    let spawner = pulp_rs::proc::SystemSpawner;
+    match pulp_rs::fallthrough::delegate_with(&argv, &resolver, &spawner) {
+        Ok(pulp_rs::fallthrough::Outcome::Delegated(rc)) => {
+            ExitCode::from(u8::try_from(rc & 0xff).unwrap_or(1))
+        }
+        Ok(pulp_rs::fallthrough::Outcome::Disabled | pulp_rs::fallthrough::Outcome::NotFound) => {
+            eprintln!(
+                "pulp: PULP_USE_CPP=1 was set but pulp-cpp is not on PATH. \
+                 Install the C++ binary or unset PULP_USE_CPP."
+            );
+            ExitCode::from(2)
+        }
+        Err(e) => {
+            eprintln!("pulp: PULP_USE_CPP rollback failed: {e}");
+            ExitCode::from(1)
+        }
     }
 }
 
