@@ -120,8 +120,12 @@ jobs:
         run: |
           cmake --install build --prefix sdk-staging --config Release
           test -f sdk-staging/lib/libpulp-view.a
-          nm -g sdk-staging/lib/libpulp-view.a | grep -q WebViewPanel
-          nm -g sdk-staging/lib/libpulp-view.a | grep -q make_webview_embedded_resource_fetcher
+          python3 - <<'PY'
+          from pathlib import Path
+          data = Path("sdk-staging/lib/libpulp-view.a").read_bytes()
+          assert b"WebViewPanel" in data
+          assert b"make_webview_embedded_resource_fetcher" in data
+          PY
           mv sdk-staging pulp-sdk
           tar czf pulp-sdk-${{ matrix.platform }}.tar.gz pulp-sdk
           rm -rf pulp-sdk
@@ -134,9 +138,7 @@ jobs:
           if (!(Test-Path sdk-staging/lib/pulp-view.lib)) {
             throw "sdk-staging/lib/pulp-view.lib missing"
           }
-          dumpbin /SYMBOLS sdk-staging/lib/pulp-view.lib > sdk-webview-symbols.txt
-          Select-String -Path sdk-webview-symbols.txt -Pattern "WebViewPanel" | Out-Null
-          Select-String -Path sdk-webview-symbols.txt -Pattern "make_webview_embedded_resource_fetcher" | Out-Null
+          python -c "from pathlib import Path; data = Path(r'sdk-staging/lib/pulp-view.lib').read_bytes(); assert b'WebViewPanel' in data; assert b'make_webview_embedded_resource_fetcher' in data"
           Rename-Item sdk-staging pulp-sdk
           Compress-Archive -Path pulp-sdk -DestinationPath pulp-sdk-${{ matrix.platform }}.tar.gz
           Remove-Item -Recurse pulp-sdk

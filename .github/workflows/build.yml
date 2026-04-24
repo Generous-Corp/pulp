@@ -322,9 +322,7 @@ jobs:
           if (!(Test-Path sdk-staging/lib/pulp-view.lib)) {
             throw "sdk-staging/lib/pulp-view.lib missing"
           }
-          dumpbin /SYMBOLS sdk-staging/lib/pulp-view.lib > sdk-webview-symbols.txt
-          Select-String -Path sdk-webview-symbols.txt -Pattern "WebViewPanel" | Out-Null
-          Select-String -Path sdk-webview-symbols.txt -Pattern "make_webview_embedded_resource_fetcher" | Out-Null
+          python -c "from pathlib import Path; data = Path(r'sdk-staging/lib/pulp-view.lib').read_bytes(); assert b'WebViewPanel' in data; assert b'make_webview_embedded_resource_fetcher' in data"
 
   # ── Stable-name status aliases for branch protection ──────────────────────
   # Branch-protection on `main` requires contexts literally named

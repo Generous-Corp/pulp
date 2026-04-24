@@ -54,8 +54,13 @@ SDK_STAGING="$DIST_DIR/pulp-sdk-staging"
 rm -rf "$SDK_STAGING"
 cmake --install "$MAC_BUILD_DIR" --prefix "$SDK_STAGING" --config Release 2>&1 | tail -5
 if [ -f "$SDK_STAGING/version.txt" ]; then
-    nm -g "$SDK_STAGING/lib/libpulp-view.a" | grep -q WebViewPanel
-    nm -g "$SDK_STAGING/lib/libpulp-view.a" | grep -q make_webview_embedded_resource_fetcher
+    SDK_WEBVIEW_LIB="$SDK_STAGING/lib/libpulp-view.a" python3 - <<'PY'
+from pathlib import Path
+import os
+data = Path(os.environ["SDK_WEBVIEW_LIB"]).read_bytes()
+assert b"WebViewPanel" in data
+assert b"make_webview_embedded_resource_fetcher" in data
+PY
     (cd "$DIST_DIR" && mv pulp-sdk-staging pulp-sdk && tar czf "pulp-sdk-darwin-arm64.tar.gz" pulp-sdk && rm -rf pulp-sdk)
     info "pulp-sdk-darwin-arm64.tar.gz ($(du -h "$DIST_DIR/pulp-sdk-darwin-arm64.tar.gz" | cut -f1))"
 else
