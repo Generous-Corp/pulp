@@ -1,7 +1,34 @@
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_approx.hpp>
 #include <pulp/midi/midi.hpp>
+#include <pulp/midi/midi_file.hpp>
+#include <chrono>
+#include <filesystem>
+#include <fstream>
 
 using namespace pulp::midi;
+using Catch::Approx;
+
+namespace {
+
+namespace fs = std::filesystem;
+
+struct TempDir {
+    fs::path path;
+
+    TempDir() {
+        const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
+        path = fs::temp_directory_path() / ("pulp-midi-test-" + std::to_string(stamp));
+        fs::create_directories(path);
+    }
+
+    ~TempDir() {
+        std::error_code ec;
+        fs::remove_all(path, ec);
+    }
+};
+
+} // namespace
 
 TEST_CASE("MidiEvent factory methods", "[midi][message]") {
     SECTION("Note on") {
@@ -94,6 +121,60 @@ TEST_CASE("MidiBuffer operations", "[midi][buffer]") {
         buf.clear();
         REQUIRE(buf.empty());
     }
+}
+
+TEST_CASE("MidiFileData summarizes tracks", "[midi][file]") {
+    MidiFileData data;
+    MidiTrack first;
+    first.events.push_back({0.25, MidiEvent::note_on(0, 60, 100)});
+    first.events.push_back({1.50, MidiEvent::note_off(0, 60)});
+
+    MidiTrack second;
+    second.events.push_back({0.75, MidiEvent::cc(1, 74, 64)});
+
+    data.tracks.push_back(std::move(first));
+    data.tracks.push_back(std::move(second));
+
+    REQUIRE(data.total_events() == 3);
+    REQUIRE(data.duration_seconds() == Approx(1.50).margin(1e-6));
+}
+
+TEST_CASE("MidiFile read/write round-trips short messages", "[midi][file]") {
+    TempDir tmp;
+    const auto path = tmp.path / "roundtrip.mid";
+
+    MidiFileData data;
+    data.ticks_per_quarter = 960;
+
+    MidiTrack track;
+    track.events.push_back({0.00, MidiEvent::note_on(0, 60, 100)});
+    track.events.push_back({0.50, MidiEvent::cc(0, 74, 127)});
+    track.events.push_back({1.00, MidiEvent::note_off(0, 60)});
+    data.tracks.push_back(std::move(track));
+
+    REQUIRE(write_midi_file(path.string(), data));
+
+    auto read = read_midi_file(path.string());
+    REQUIRE(read.has_value());
+    REQUIRE(read->ticks_per_quarter == 960);
+    REQUIRE(read->total_events() == 3);
+    REQUIRE(read->duration_seconds() == Approx(1.0).margin(0.05));
+}
+
+TEST_CASE("MidiFile helpers report missing, corrupt, and unwritable files", "[midi][file]") {
+    TempDir tmp;
+
+    REQUIRE_FALSE(read_midi_file((tmp.path / "missing.mid").string()).has_value());
+
+    const auto corrupt = tmp.path / "corrupt.mid";
+    {
+        std::ofstream out(corrupt, std::ios::binary);
+        out << "not a midi file";
+    }
+    REQUIRE_FALSE(read_midi_file(corrupt.string()).has_value());
+
+    MidiFileData empty;
+    REQUIRE_FALSE(write_midi_file((tmp.path / "missing-parent" / "out.mid").string(), empty));
 }
 
 #if defined(__APPLE__) && !TARGET_OS_IPHONE
