@@ -241,8 +241,23 @@ jobs:
 
       - name: Test
         working-directory: build
-        run: ctest --output-on-failure -C Release -LE validation -j4 --exclude-regex "STFT|VisualizationBridge|Clipboard|Toolbar add items"
         shell: bash
+        run: |
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            # Force UTF-8 console code page on Windows. ctest's child
+            # processes receive filter args (test names containing em-
+            # dashes like "applies_if — empty expression") which get
+            # mangled to "G??" on Namespace Windows's CP-1252 default,
+            # causing 46+ spurious test-filter-no-match failures.
+            # Shipyard v0.38.0's UTF-8 prelude covers commands shipyard
+            # dispatches over ssh-windows, but GitHub Actions runs
+            # ctest directly through the runner — that path still
+            # needs this step. Previous revert in #699 was wrong.
+            # See #683/#702.
+            chcp.com 65001 >/dev/null || true
+            export PYTHONIOENCODING=utf-8
+          fi
+          ctest --output-on-failure -C Release -LE validation -j4 --exclude-regex "STFT|VisualizationBridge|Clipboard|Toolbar add items"
 
       - name: Upload plugin bundles (macOS)
         if: success() && runner.os == 'macOS'
