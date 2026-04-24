@@ -10,8 +10,12 @@
 #include <pulp/view/theme.hpp>
 #include <pulp/state/edit_history.hpp>
 #include <pulp/render/render_pass.hpp>
+#include <pulp/render/render_loop.hpp>
 #include <pulp/render/draco_decoder.hpp>
 #include <pulp/render/ktx2_decoder.hpp>
+#include <atomic>
+#include <chrono>
+#include <thread>
 
 using namespace pulp;
 
@@ -317,4 +321,74 @@ TEST_CASE("KTX2 availability check", "[render][ktx2]") {
     // With libktx, should return true
     auto avail = render::ktx2_available();
     (void)avail;  // Just verify it doesn't crash
+}
+
+// ── RenderLoop lifecycle — issue-646 ────────────────────────────────────
+//
+// These tests drive the platform render loop (CVDisplayLink on macOS,
+// TimerRenderLoop elsewhere) through the full start / request_frame /
+// stop cycle. They exercise the factory + public lifecycle surface
+// without requiring a real GPU surface or window handle.
+
+TEST_CASE("RenderLoop factory returns a loop that starts and stops - issue-646",
+          "[render][loop][issue-646]") {
+    auto loop = render::RenderLoop::create();
+    REQUIRE(loop != nullptr);
+    REQUIRE_FALSE(loop->is_running());
+
+    std::atomic<int> frames{0};
+    loop->start([&]() { frames.fetch_add(1, std::memory_order_relaxed); });
+    REQUIRE(loop->is_running());
+
+    // Request a frame; the callback may fire asynchronously on the
+    // backend's pacing (main queue on macOS, worker thread elsewhere).
+    // We don't assert it fires because the macOS path dispatches onto
+    // the main queue and this unit test doesn't pump the run loop —
+    // that's an integration concern. We only assert the loop accepts
+    // the request without error.
+    loop->request_frame();
+
+    loop->stop();
+    REQUIRE_FALSE(loop->is_running());
+}
+
+TEST_CASE("RenderLoop stop is idempotent - issue-646",
+          "[render][loop][issue-646]") {
+    auto loop = render::RenderLoop::create();
+    REQUIRE(loop != nullptr);
+
+    loop->start([]() {});
+    loop->stop();
+    REQUIRE_FALSE(loop->is_running());
+
+    // Calling stop() a second time must be safe (no hang, no crash).
+    loop->stop();
+    REQUIRE_FALSE(loop->is_running());
+}
+
+TEST_CASE("RenderLoop destructor stops a running loop - issue-646",
+          "[render][loop][issue-646]") {
+    std::atomic<int> frames{0};
+    {
+        auto loop = render::RenderLoop::create();
+        REQUIRE(loop != nullptr);
+        loop->start([&]() { frames.fetch_add(1, std::memory_order_relaxed); });
+        REQUIRE(loop->is_running());
+        loop->request_frame();
+        // Let the worker (on non-macOS) pick up the frame request before teardown.
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        // Falls out of scope → destructor calls stop() → join worker thread.
+    }
+    // If the destructor didn't stop cleanly, this test would hang / crash
+    // under ASan. Reaching this point is the assertion.
+    SUCCEED("RenderLoop destructor joined cleanly");
+}
+
+TEST_CASE("RenderLoop request_frame before start is a safe no-op - issue-646",
+          "[render][loop][issue-646]") {
+    auto loop = render::RenderLoop::create();
+    REQUIRE(loop != nullptr);
+    // Must not crash when called on a never-started loop.
+    loop->request_frame();
+    REQUIRE_FALSE(loop->is_running());
 }

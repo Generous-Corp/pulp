@@ -22,7 +22,7 @@ env:
   # Pin shipyard to the same version post-tag-sync.yml uses so
   # `shipyard changelog regenerate --release-notes` produces the
   # same output as the hook that writes CHANGELOG.md.
-  SHIPYARD_VERSION: "0.38.0"
+  SHIPYARD_VERSION: "0.40.0"
 
 jobs:
   build-cli:

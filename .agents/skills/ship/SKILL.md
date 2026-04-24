@@ -225,6 +225,15 @@ toml). Otherwise local shipping and tag-time release jobs quietly diverge
 onto different Shipyard versions, which is how release-only behavior
 changes get missed.
 
+### VST3 SDK tag drift in `sign-and-release.yml`
+
+Pulp's notarized macOS release workflow clones the Steinberg VST3 SDK directly
+inside `.github/workflows/sign-and-release.yml`. Keep that workflow pinned to
+the same upstream tag used everywhere else in the repo: `v3.7.12_build_20`.
+The shortened `v3.7.12` ref does not exist on Steinberg's repo and causes the
+tag-triggered macOS release job to fail immediately at `Clone VST3 SDK`, before
+configure, build, or signing begin.
+
 ## Doctor Checks
 
 `pulp doctor` validates Android toolchain:
