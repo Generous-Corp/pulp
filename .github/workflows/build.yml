@@ -250,8 +250,15 @@ jobs:
 
       - name: Test
         working-directory: build
-        run: ctest --output-on-failure -C Release -LE validation -j4 --exclude-regex "STFT|VisualizationBridge|Clipboard|Toolbar add items"
         shell: bash
+        run: |
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            # Force UTF-8 console code page so ctest passes Unicode test
+            # filters through to Catch2 unchanged on Windows runners.
+            chcp.com 65001 >/dev/null || true
+            export PYTHONIOENCODING=utf-8
+          fi
+          ctest --output-on-failure -C Release -LE validation -j4 --exclude-regex "STFT|VisualizationBridge|Clipboard|Toolbar add items"
 
       - name: Upload plugin bundles (macOS)
         if: success() && runner.os == 'macOS'
