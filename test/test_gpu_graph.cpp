@@ -49,7 +49,7 @@ TEST_CASE("GpuBarRenderer stores bar data", "[render][gpu-graph]") {
 
 // ── Additional coverage — issue-646 ─────────────────────────────────────
 
-TEST_CASE("GpuGraphRenderer raw-pointer set_data overload — issue-646",
+TEST_CASE("GpuGraphRenderer raw-pointer set_data overload - issue-646",
           "[render][gpu-graph][issue-646]") {
     GpuGraphRenderer g;
     float data[] = {-1.0f, -0.25f, 0.25f, 1.0f};
@@ -65,7 +65,7 @@ TEST_CASE("GpuGraphRenderer raw-pointer set_data overload — issue-646",
     REQUIRE(g.count() == 0);
 }
 
-TEST_CASE("GpuGraphRenderer defaults match documented values — issue-646",
+TEST_CASE("GpuGraphRenderer defaults match documented values - issue-646",
           "[render][gpu-graph][issue-646]") {
     GpuGraphRenderer g;
     REQUIRE(g.line_thickness() == Catch::Approx(1.5f));
@@ -73,7 +73,7 @@ TEST_CASE("GpuGraphRenderer defaults match documented values — issue-646",
     REQUIRE(g.fill_center() == Catch::Approx(0.5f));
 }
 
-TEST_CASE("GpuHeatMapRenderer range set/get — issue-646",
+TEST_CASE("GpuHeatMapRenderer range set/get - issue-646",
           "[render][gpu-graph][issue-646]") {
     GpuHeatMapRenderer h;
     // Defaults.
@@ -92,7 +92,7 @@ TEST_CASE("GpuHeatMapRenderer range set/get — issue-646",
     REQUIRE(h.height() == 0);
 }
 
-TEST_CASE("GpuBarRenderer gap + data accessors — issue-646",
+TEST_CASE("GpuBarRenderer gap + data accessors - issue-646",
           "[render][gpu-graph][issue-646]") {
     GpuBarRenderer b;
     // Defaults.

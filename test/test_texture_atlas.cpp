@@ -86,7 +86,7 @@ TEST_CASE("BufferPool acquire and release", "[render][atlas]") {
 
 // ── Additional coverage — issue-646 ─────────────────────────────────────
 
-TEST_CASE("AtlasPacker starts new shelf when current is full — issue-646",
+TEST_CASE("AtlasPacker starts new shelf when current is full - issue-646",
           "[render][atlas][issue-646]") {
     // 100-wide packer: first 60 fit on shelf 0, second 60 won't fit next to them,
     // so the allocator rolls to a new shelf and returns x=0 at y=shelf_h.
@@ -105,7 +105,7 @@ TEST_CASE("AtlasPacker starts new shelf when current is full — issue-646",
     REQUIRE(p.height() == 200);
 }
 
-TEST_CASE("AtlasPacker returns false when atlas is full — issue-646",
+TEST_CASE("AtlasPacker returns false when atlas is full - issue-646",
           "[render][atlas][issue-646]") {
     AtlasPacker p(64, 64);
     AtlasPacker::Region r{};
@@ -115,7 +115,7 @@ TEST_CASE("AtlasPacker returns false when atlas is full — issue-646",
     REQUIRE_FALSE(p.allocate(64, 20, r));
 }
 
-TEST_CASE("AtlasPacker reset lets us pack again from origin — issue-646",
+TEST_CASE("AtlasPacker reset lets us pack again from origin - issue-646",
           "[render][atlas][issue-646]") {
     AtlasPacker p(64, 64);
     AtlasPacker::Region r{};
@@ -128,7 +128,7 @@ TEST_CASE("AtlasPacker reset lets us pack again from origin — issue-646",
     REQUIRE(r.y == 0);
 }
 
-TEST_CASE("ImageAtlas mark_used keeps live entry from eviction — issue-646",
+TEST_CASE("ImageAtlas mark_used keeps live entry from eviction - issue-646",
           "[render][atlas][issue-646]") {
     ImageAtlas atlas(256);
     AtlasPacker::Region r{};
@@ -145,7 +145,7 @@ TEST_CASE("ImageAtlas mark_used keeps live entry from eviction — issue-646",
     REQUIRE(atlas.entry_count() == 0);
 }
 
-TEST_CASE("ImageAtlas release of unknown key is a no-op — issue-646",
+TEST_CASE("ImageAtlas release of unknown key is a no-op - issue-646",
           "[render][atlas][issue-646]") {
     ImageAtlas atlas(128);
     atlas.release(999);                 // no entry, must not crash or mutate
@@ -154,7 +154,7 @@ TEST_CASE("ImageAtlas release of unknown key is a no-op — issue-646",
     REQUIRE(atlas.entry_count() == 0);
 }
 
-TEST_CASE("ImageAtlas skips eviction while ref_count is non-zero — issue-646",
+TEST_CASE("ImageAtlas skips eviction while ref_count is non-zero - issue-646",
           "[render][atlas][issue-646]") {
     ImageAtlas atlas(128);
     AtlasPacker::Region r{};
@@ -164,7 +164,7 @@ TEST_CASE("ImageAtlas skips eviction while ref_count is non-zero — issue-646",
     REQUIRE(atlas.entry_count() == 1);
 }
 
-TEST_CASE("GradientAtlas has() reflects allocation and mark_used no-ops — issue-646",
+TEST_CASE("GradientAtlas has() reflects allocation and mark_used no-ops - issue-646",
           "[render][atlas][issue-646]") {
     GradientAtlas ga;
     REQUIRE_FALSE(ga.has(42));
@@ -178,7 +178,7 @@ TEST_CASE("GradientAtlas has() reflects allocation and mark_used no-ops — issu
     REQUIRE(ga.entry_count() == 1);
 }
 
-TEST_CASE("GlyphAtlas allocate reuses same key, evicts by age — issue-646",
+TEST_CASE("GlyphAtlas allocate reuses same key, evicts by age - issue-646",
           "[render][atlas][issue-646]") {
     GlyphAtlas atlas(256);
     AtlasPacker::Region r1{};
@@ -205,7 +205,7 @@ TEST_CASE("GlyphAtlas allocate reuses same key, evicts by age — issue-646",
     REQUIRE(atlas.entry_count() == 0);
 }
 
-TEST_CASE("GlyphAtlas rejects oversized glyph — issue-646",
+TEST_CASE("GlyphAtlas rejects oversized glyph - issue-646",
           "[render][atlas][issue-646]") {
     GlyphAtlas atlas(32);
     AtlasPacker::Region r{};
@@ -213,7 +213,7 @@ TEST_CASE("GlyphAtlas rejects oversized glyph — issue-646",
     REQUIRE(atlas.entry_count() == 0);
 }
 
-TEST_CASE("PathAtlas allocate, cache hit, and eviction — issue-646",
+TEST_CASE("PathAtlas allocate, cache hit, and eviction - issue-646",
           "[render][atlas][issue-646]") {
     PathAtlas atlas(256);
     AtlasPacker::Region r1{};
@@ -234,7 +234,7 @@ TEST_CASE("PathAtlas allocate, cache hit, and eviction — issue-646",
     REQUIRE(atlas.entry_count() == 0);
 }
 
-TEST_CASE("PathAtlas rejects oversized path bitmap — issue-646",
+TEST_CASE("PathAtlas rejects oversized path bitmap - issue-646",
           "[render][atlas][issue-646]") {
     PathAtlas atlas(64);
     AtlasPacker::Region r{};
@@ -242,7 +242,7 @@ TEST_CASE("PathAtlas rejects oversized path bitmap — issue-646",
     REQUIRE(atlas.entry_count() == 0);
 }
 
-TEST_CASE("BufferPool caps retained buffers at max_pool_size — issue-646",
+TEST_CASE("BufferPool caps retained buffers at max_pool_size - issue-646",
           "[render][atlas][issue-646]") {
     BufferPool<int> pool;
     // max_pool_size_ defaults to 32 (see texture_atlas.hpp); release many more
