@@ -140,6 +140,10 @@ on top of Phase 0 contracts:
   (lv2:ControlPort + name/default/min/max), per-port float scratch in
   `control_values_`, `connect_port` wired at process() block start,
   param_events apply last-write-wins.
+- LV2 bundle discovery has a private test seam in
+  `core/host/src/lv2_discovery.hpp`; keep TTL port/binary parsing tests in
+  `test/test_lv2_host_discovery.cpp` rather than reaching through real
+  plug-in binaries for deterministic coverage.
 
 Param domain: **plain values** at the PluginSlot boundary (not
 normalized). Loaders convert internally if they natively normalize
