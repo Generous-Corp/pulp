@@ -51,7 +51,7 @@ EXTRA_CMAKE_ARGS=()
 # Each alternative uses `(^|/)` as the leading anchor so relative and
 # absolute paths are both matched. Keep in sync with codecov.yml's
 # `ignore:` list and with planning/coverage-tooling-decision-2026-04-21.md §4.
-COVERAGE_IGNORE_REGEX='(^|/)(_deps|external|test|[Cc]atch2|build|build-coverage|examples|fetchcontent-src)/'
+COVERAGE_IGNORE_REGEX='(^|/)(_deps|external|test|[Cc]atch2|build|build-coverage|examples|fetchcontent-src|sandbox-e2e)/'
 
 while [[ $# -gt 0 ]]; do
     case "$1" in

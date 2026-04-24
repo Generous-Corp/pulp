@@ -52,6 +52,13 @@ ignore:
   - "fetchcontent-src/**"
   - "**/Catch2/**"
   - "**/catch2/**"
+  # tools/sandbox-e2e/ is end-to-end CLI test harness (pulp#732).
+  # It's invoked by a dedicated pytest lane against real binaries; the
+  # harness itself is test code, not product code, so exclude from the
+  # project/patch status the same way we exclude test/**. Keep in sync
+  # with scripts/run_coverage.sh IGNORE and
+  # tools/scripts/run_python_coverage.py omit_globs.
+  - "tools/sandbox-e2e/**"
 
 # PR comment. Focused on reach + diff + flags + tree so contributors
 # see "how many lines of THIS PR are covered by THIS PR's tests"

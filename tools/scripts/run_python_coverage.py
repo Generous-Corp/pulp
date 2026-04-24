@@ -74,6 +74,13 @@ COVERAGE_SURFACES = (
             "tools/deps/_*.py",
             "tools/local-ci/_*.py",
             "tools/packages/_*.py",
+            # tools/sandbox-e2e/ is end-to-end CLI test harness
+            # (pulp#732). It's invoked by .github/workflows/sandbox-e2e.yml
+            # against real binaries and doesn't participate in this
+            # Python-tooling coverage lane. Mirror codecov.yml's
+            # ignore entry for tools/sandbox-e2e/**.
+            "tools/sandbox-e2e/*.py",
+            "tools/sandbox-e2e/**/*.py",
         ),
         always_include=True,
     ),
