@@ -1,0 +1,135 @@
+# Sandbox E2E — isolated end-to-end tests for the Pulp CLI + Claude
+# plugin. See tools/sandbox-e2e/README.md for what this covers and why.
+# Tracked in pulp#732.
+
+name: sandbox-e2e
+
+on:
+  pull_request:
+    paths:
+      - "tools/cli/**"
+      - "experimental/pulp-rs/**"
+      - ".claude/commands/**"
+      - ".claude-plugin/**"
+      - "tools/sandbox-e2e/**"
+      - ".github/workflows/sandbox-e2e.yml"
+  push:
+    branches: [main]
+    paths:
+      - "tools/cli/**"
+      - "experimental/pulp-rs/**"
+      - ".claude/commands/**"
+      - ".claude-plugin/**"
+      - "tools/sandbox-e2e/**"
+      - ".github/workflows/sandbox-e2e.yml"
+  # Let release workflows call this as a pre-publish gate.
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  sandbox-e2e:
+    name: sandbox-e2e (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install pytest
+        run: python -m pip install --upgrade pip pytest
+
+      - name: Build C++ CLI (minimum targets)
+        # Only build `pulp-cli`; full pulp build takes too long and
+        # isn't needed — the sandbox only invokes the CLI binary.
+        run: |
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DPULP_BUILD_TESTS=OFF \
+            -DPULP_BUILD_EXAMPLES=OFF
+          cmake --build build --target pulp-cli --parallel
+
+      - name: Resolve built C++ binary path
+        id: cpp
+        run: |
+          path="$PWD/build/tools/cli/pulp"
+          if [[ ! -x "$path" ]]; then
+            echo "::error ::C++ CLI was not built at $path"
+            ls -la build/tools/cli/ || true
+            exit 1
+          fi
+          echo "bin=$path" >> "$GITHUB_OUTPUT"
+
+      - name: Build Rust CLI
+        working-directory: experimental/pulp-rs
+        run: cargo build --release --bin pulp-rs
+
+      - name: Resolve built Rust binary path
+        id: rs
+        run: |
+          path="$PWD/experimental/pulp-rs/target/release/pulp-rs"
+          if [[ ! -x "$path" ]]; then
+            echo "::error ::Rust CLI was not built at $path"
+            ls -la experimental/pulp-rs/target/release/ || true
+            exit 1
+          fi
+          echo "bin=$path" >> "$GITHUB_OUTPUT"
+
+      - name: Run sandbox E2E suite
+        env:
+          PULP_CPP_BINARY_FOR_TEST: ${{ steps.cpp.outputs.bin }}
+          PULP_RS_BINARY_FOR_TEST: ${{ steps.rs.outputs.bin }}
+        run: |
+          pytest tools/sandbox-e2e/ -v --tb=short
+
+      - name: Regression probe — 4ba25715 (release tag only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        working-directory: experimental/pulp-rs
+        env:
+          PULP_CPP_BINARY_FOR_TEST: ${{ steps.cpp.outputs.bin }}
+        run: |
+          # Sanity gate for release tags: temporarily revert the
+          # Phase 8 "unknown subcommand falls through" fix and
+          # confirm the harness fails loudly. Restore immediately.
+          set -euo pipefail
+          echo "Reverting 4ba25715 in-place for the probe..."
+          git fetch --depth=1 origin 4ba25715 || true
+          git checkout 4ba25715^ -- src/main.rs 2>/dev/null || {
+              echo "::warning ::couldn't revert 4ba25715^; skipping probe";
+              exit 0
+          }
+          cargo build --release --bin pulp-rs --quiet
+          export PULP_RS_BINARY_FOR_TEST="$PWD/target/release/pulp-rs"
+
+          cd ../..
+          if pytest tools/sandbox-e2e/test_swap.py \
+              -k test_library_linked_command_falls_through_to_pulp_cpp \
+              --tb=no -q; then
+              echo "::error ::harness should have FAILED with 4ba25715 reverted — the regression probe is broken"
+              exit 1
+          else
+              echo "regression probe: harness correctly flagged the reversion"
+          fi
+
+      - name: Upload contamination-audit report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sandbox-e2e-${{ matrix.os }}-logs
+          path: |
+            /tmp/pulp-sandbox-e2e.*/**
+          if-no-files-found: ignore
+          retention-days: 7
