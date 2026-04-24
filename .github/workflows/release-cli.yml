@@ -62,7 +62,8 @@ jobs:
             libasound2-dev libdbus-1-dev libdrm-dev libegl1-mesa-dev \
             libgbm-dev libgl1-mesa-dev libx11-dev libxext-dev libxfixes-dev \
             libxi-dev libxinerama-dev libxkbcommon-dev libxrandr-dev \
-            libxrender-dev libxss-dev libxtst-dev libwayland-dev wayland-protocols
+            libxrender-dev libxss-dev libxtst-dev libwayland-dev \
+            libgtk-3-dev libwebkit2gtk-4.1-dev wayland-protocols
 
       - name: Bootstrap dependencies
         run: ./setup.sh --ci --deps-only
@@ -72,7 +73,8 @@ jobs:
         run: |
           cmake -S . -B build \
             -DCMAKE_BUILD_TYPE=Release \
-            -DPULP_BUILD_TESTS=OFF
+            -DPULP_BUILD_TESTS=OFF \
+            -DPULP_BUILD_WEBVIEW=ON
         shell: bash
 
       - name: Build
@@ -117,6 +119,9 @@ jobs:
         if: runner.os != 'Windows'
         run: |
           cmake --install build --prefix sdk-staging --config Release
+          test -f sdk-staging/lib/libpulp-view.a
+          nm -g sdk-staging/lib/libpulp-view.a | grep -q WebViewPanel
+          nm -g sdk-staging/lib/libpulp-view.a | grep -q make_webview_embedded_resource_fetcher
           mv sdk-staging pulp-sdk
           tar czf pulp-sdk-${{ matrix.platform }}.tar.gz pulp-sdk
           rm -rf pulp-sdk
@@ -126,6 +131,12 @@ jobs:
         if: runner.os == 'Windows'
         run: |
           cmake --install build --prefix sdk-staging --config Release
+          if (!(Test-Path sdk-staging/lib/pulp-view.lib)) {
+            throw "sdk-staging/lib/pulp-view.lib missing"
+          }
+          dumpbin /SYMBOLS sdk-staging/lib/pulp-view.lib > sdk-webview-symbols.txt
+          Select-String -Path sdk-webview-symbols.txt -Pattern "WebViewPanel" | Out-Null
+          Select-String -Path sdk-webview-symbols.txt -Pattern "make_webview_embedded_resource_fetcher" | Out-Null
           Rename-Item sdk-staging pulp-sdk
           Compress-Archive -Path pulp-sdk -DestinationPath pulp-sdk-${{ matrix.platform }}.tar.gz
           Remove-Item -Recurse pulp-sdk

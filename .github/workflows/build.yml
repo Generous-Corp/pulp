@@ -307,12 +307,24 @@ jobs:
         run: |
           cmake -S . -B build `
             -DCMAKE_BUILD_TYPE=Release `
-            -DPULP_BUILD_TESTS=OFF
+            -DPULP_BUILD_TESTS=OFF `
+            -DPULP_BUILD_WEBVIEW=ON
         shell: pwsh
 
       - name: Build
         run: cmake --build build --config Release
         shell: pwsh
+
+      - name: Verify installed SDK keeps WebView symbols
+        shell: pwsh
+        run: |
+          cmake --install build --prefix sdk-staging --config Release
+          if (!(Test-Path sdk-staging/lib/pulp-view.lib)) {
+            throw "sdk-staging/lib/pulp-view.lib missing"
+          }
+          dumpbin /SYMBOLS sdk-staging/lib/pulp-view.lib > sdk-webview-symbols.txt
+          Select-String -Path sdk-webview-symbols.txt -Pattern "WebViewPanel" | Out-Null
+          Select-String -Path sdk-webview-symbols.txt -Pattern "make_webview_embedded_resource_fetcher" | Out-Null
 
   # ── Stable-name status aliases for branch protection ──────────────────────
   # Branch-protection on `main` requires contexts literally named

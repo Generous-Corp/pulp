@@ -19,6 +19,7 @@ VERSION_NUM="${VERSION#v}"  # strip leading v
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 DIST_DIR="$REPO_ROOT/dist"
+MAC_BUILD_DIR="$REPO_ROOT/build-release-cli"
 rm -rf "$DIST_DIR"
 mkdir -p "$DIST_DIR"
 
@@ -30,13 +31,17 @@ step() { echo ""; echo "── $* ──"; }
 
 step "Building macOS arm64"
 
-cmake --build "$REPO_ROOT/build" --target pulp-cli --config Release 2>&1 | tail -3
-if [ ! -f "$REPO_ROOT/build/tools/cli/pulp" ]; then
+cmake -S "$REPO_ROOT" -B "$MAC_BUILD_DIR" \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DPULP_BUILD_TESTS=OFF \
+    -DPULP_BUILD_WEBVIEW=ON 2>&1 | tail -5
+cmake --build "$MAC_BUILD_DIR" --target pulp-cli --config Release 2>&1 | tail -3
+if [ ! -f "$MAC_BUILD_DIR/tools/cli/pulp" ]; then
     fail "macOS build failed"
     exit 1
 fi
 
-cp "$REPO_ROOT/build/tools/cli/pulp" "$DIST_DIR/pulp"
+cp "$MAC_BUILD_DIR/tools/cli/pulp" "$DIST_DIR/pulp"
 strip "$DIST_DIR/pulp"
 (cd "$DIST_DIR" && tar czf "pulp-darwin-arm64.tar.gz" pulp && rm pulp)
 info "pulp-darwin-arm64.tar.gz ($(du -h "$DIST_DIR/pulp-darwin-arm64.tar.gz" | cut -f1))"
@@ -47,8 +52,10 @@ step "Building macOS arm64 SDK"
 
 SDK_STAGING="$DIST_DIR/pulp-sdk-staging"
 rm -rf "$SDK_STAGING"
-cmake --install "$REPO_ROOT/build" --prefix "$SDK_STAGING" --config Release 2>&1 | tail -5
+cmake --install "$MAC_BUILD_DIR" --prefix "$SDK_STAGING" --config Release 2>&1 | tail -5
 if [ -f "$SDK_STAGING/version.txt" ]; then
+    nm -g "$SDK_STAGING/lib/libpulp-view.a" | grep -q WebViewPanel
+    nm -g "$SDK_STAGING/lib/libpulp-view.a" | grep -q make_webview_embedded_resource_fetcher
     (cd "$DIST_DIR" && mv pulp-sdk-staging pulp-sdk && tar czf "pulp-sdk-darwin-arm64.tar.gz" pulp-sdk && rm -rf pulp-sdk)
     info "pulp-sdk-darwin-arm64.tar.gz ($(du -h "$DIST_DIR/pulp-sdk-darwin-arm64.tar.gz" | cut -f1))"
 else
@@ -66,12 +73,12 @@ if ssh -o ConnectTimeout=5 -o BatchMode=yes ubuntu "echo ok" &>/dev/null; then
         --exclude='dist' --exclude='planning' --exclude='node_modules' \
         "$REPO_ROOT/" ubuntu:~/pulp/
 
-    # Configure if needed
+    # Configure release build fresh enough to keep SDK contents aligned
+    # with the GitHub release workflow.
     ssh ubuntu "cd ~/pulp && \
-        if [ ! -f build-cli/CMakeCache.txt ]; then \
-            cmake -S . -B build-cli -DCMAKE_BUILD_TYPE=Release \
-                -DPULP_BUILD_TESTS=OFF -DPULP_ENABLE_GPU=OFF; \
-        fi" 2>&1 | tail -5
+        cmake -S . -B build-cli -DCMAKE_BUILD_TYPE=Release \
+            -DPULP_BUILD_TESTS=OFF -DPULP_ENABLE_GPU=OFF \
+            -DPULP_BUILD_WEBVIEW=ON" 2>&1 | tail -5
 
     # Build
     ssh ubuntu "cd ~/pulp && cmake --build build-cli --target pulp-cli 2>&1 | tail -5"
@@ -101,7 +108,7 @@ if ssh -o ConnectTimeout=5 -o BatchMode=yes win2 "echo ok" &>/dev/null; then
             --exclude='dist' --exclude='planning' \
             "$REPO_ROOT/" win2:~/pulp/
 
-        ssh win2 "cd ~/pulp && cmake -S . -B build-cli -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_TESTS=OFF -DPULP_ENABLE_GPU=OFF 2>&1 | tail -5"
+        ssh win2 "cd ~/pulp && cmake -S . -B build-cli -DCMAKE_BUILD_TYPE=Release -DPULP_BUILD_TESTS=OFF -DPULP_ENABLE_GPU=OFF -DPULP_BUILD_WEBVIEW=ON 2>&1 | tail -5"
         ssh win2 "cd ~/pulp && cmake --build build-cli --target pulp-cli --config Release 2>&1 | tail -5"
 
         if ssh win2 "if exist ~/pulp/build-cli/tools/cli/Release/pulp.exe (echo ok)" | grep -q ok; then
