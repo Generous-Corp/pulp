@@ -330,7 +330,7 @@ TEST_CASE("KTX2 availability check", "[render][ktx2]") {
 // stop cycle. They exercise the factory + public lifecycle surface
 // without requiring a real GPU surface or window handle.
 
-TEST_CASE("RenderLoop factory returns a loop that starts and stops — issue-646",
+TEST_CASE("RenderLoop factory returns a loop that starts and stops - issue-646",
           "[render][loop][issue-646]") {
     auto loop = render::RenderLoop::create();
     REQUIRE(loop != nullptr);
@@ -352,7 +352,7 @@ TEST_CASE("RenderLoop factory returns a loop that starts and stops — issue-646
     REQUIRE_FALSE(loop->is_running());
 }
 
-TEST_CASE("RenderLoop stop is idempotent — issue-646",
+TEST_CASE("RenderLoop stop is idempotent - issue-646",
           "[render][loop][issue-646]") {
     auto loop = render::RenderLoop::create();
     REQUIRE(loop != nullptr);
@@ -366,7 +366,7 @@ TEST_CASE("RenderLoop stop is idempotent — issue-646",
     REQUIRE_FALSE(loop->is_running());
 }
 
-TEST_CASE("RenderLoop destructor stops a running loop — issue-646",
+TEST_CASE("RenderLoop destructor stops a running loop - issue-646",
           "[render][loop][issue-646]") {
     std::atomic<int> frames{0};
     {
@@ -384,7 +384,7 @@ TEST_CASE("RenderLoop destructor stops a running loop — issue-646",
     SUCCEED("RenderLoop destructor joined cleanly");
 }
 
-TEST_CASE("RenderLoop request_frame before start is a safe no-op — issue-646",
+TEST_CASE("RenderLoop request_frame before start is a safe no-op - issue-646",
           "[render][loop][issue-646]") {
     auto loop = render::RenderLoop::create();
     REQUIRE(loop != nullptr);
