@@ -1,0 +1,6 @@
+{
+  "projects": [
+    {"path": "/nonexistent/stale-project-a", "name": "StaleA", "registered_at": "2026-04-01T00:00:00Z"},
+    {"path": "/nonexistent/stale-project-b", "name": "StaleB", "registered_at": "2026-04-02T00:00:00Z"}
+  ]
+}

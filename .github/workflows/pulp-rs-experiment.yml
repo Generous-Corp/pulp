@@ -1,0 +1,66 @@
+# pulp-rs-experiment.yml — Evaluation-only CI for the Rust prototype.
+#
+# Scope: runs *only* on the `explore/rust-cli-prototype` branch. This
+# workflow is intentionally never merged to `main` — the branch itself
+# is an exploration per CLAUDE.md's "Exploration → Validation → Landing"
+# flow, so `main` will never see this file.
+#
+# The workflow does cargo build + cargo test on all three platforms.
+# Nothing here interacts with the main Pulp CMake build. Nothing here
+# touches the Shipyard cross-platform validation matrix — those gates
+# remain owned by `build.yml` and Shipyard's own ship flow.
+#
+# Evaluation lens (issue #686):
+#   - Cross-platform CI      — does cargo build green on mac/ubuntu/win?
+#   - Test ergonomics        — do parity tests run quickly and in CI?
+#
+# Not in scope here: parity against the C++ CLI in CI. The C++ CLI
+# isn't built in this job (that would couple the prototype to the main
+# build, violating the "no production coupling" criterion). Parity is
+# validated locally with `PULP_CLI_PATH=<built pulp>` against the
+# captured `expected.json` files.
+
+name: pulp-rs experiment
+
+on:
+  push:
+    branches:
+      - explore/rust-cli-prototype
+    paths:
+      - 'experimental/pulp-rs/**'
+      - '.github/workflows/pulp-rs-experiment.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: experimental/pulp-rs
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install stable Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry and build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: experimental/pulp-rs
+
+      - name: cargo build --release
+        run: cargo build --release
+
+      # Parity tests compare against captured expected.json, which
+      # reference the path the fixtures were captured on. The parity
+      # test normalises project_root before comparison so this is
+      # portable — no C++ CLI needed in CI.
+      - name: cargo test
+        run: cargo test --release

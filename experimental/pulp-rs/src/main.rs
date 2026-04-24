@@ -7,7 +7,13 @@ use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
 
+mod cmake_version;
 mod doctor;
+mod findings;
+mod plugin_json;
+mod projects_registry;
+mod pulp_toml;
+mod semver_compat;
 
 const VERSION_STRING: &str = "pulp-rs v0.0.1-experimental";
 

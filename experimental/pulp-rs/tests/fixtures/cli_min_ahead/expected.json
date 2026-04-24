@@ -1,0 +1,14 @@
+{
+  "cli": {"raw": "0.37.0", "comparable": true, "major": 0, "minor": 37, "patch": 0},
+  "plugin": {"raw": "", "comparable": false},
+  "plugin_min_cli": {"raw": "", "comparable": false},
+  "plugin_json_path": "",
+  "project_root": "/Users/danielraffel/Code/pulp-rs-proto/experimental/pulp-rs/tests/fixtures/cli_min_ahead",
+  "project_sdk": {"raw": "0.40.0", "comparable": true, "major": 0, "minor": 40, "patch": 0},
+  "project_cli_min": {"raw": "0.40.0", "comparable": true, "major": 0, "minor": 40, "patch": 0},
+  "projects": [],
+  "findings": [
+    {"severity": "warn", "message": "Project requires CLI >= v0.40.0 but installed CLI is v0.37.0 — run `pulp upgrade`"},
+    {"severity": "warn", "message": "Project SDK is v0.40.0 but installed CLI is v0.37.0 — consider `pulp upgrade`"}
+  ]
+}

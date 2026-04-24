@@ -1,0 +1,18 @@
+{
+  "cli": {"raw": "0.37.0", "comparable": true, "major": 0, "minor": 37, "patch": 0},
+  "plugin": {"raw": "", "comparable": false},
+  "plugin_min_cli": {"raw": "", "comparable": false},
+  "plugin_json_path": "",
+  "project_root": "/Users/danielraffel/Code/pulp-rs-proto/experimental/pulp-rs/tests/fixtures/registered_projects",
+  "project_sdk": {"raw": "0.38.0", "comparable": true, "major": 0, "minor": 38, "patch": 0},
+  "project_cli_min": {"raw": "", "comparable": false},
+  "projects": [
+    {"path": "/nonexistent/stale-project-a", "name": "StaleA", "sdk": {"raw": "", "comparable": false}, "cli_min": {"raw": "", "comparable": false}, "missing_on_disk": true, "scanned": false},
+    {"path": "/nonexistent/stale-project-b", "name": "StaleB", "sdk": {"raw": "", "comparable": false}, "cli_min": {"raw": "", "comparable": false}, "missing_on_disk": true, "scanned": false}
+  ],
+  "findings": [
+    {"severity": "warn", "message": "Project SDK is v0.38.0 but installed CLI is v0.37.0 — consider `pulp upgrade`"},
+    {"severity": "warn", "message": "Registered project 'StaleA' at /nonexistent/stale-project-a no longer exists — run `pulp projects remove /nonexistent/stale-project-a` to forget it"},
+    {"severity": "warn", "message": "Registered project 'StaleB' at /nonexistent/stale-project-b no longer exists — run `pulp projects remove /nonexistent/stale-project-b` to forget it"}
+  ]
+}

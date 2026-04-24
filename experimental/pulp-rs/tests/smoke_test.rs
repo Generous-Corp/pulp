@@ -1,9 +1,13 @@
-// smoke_test.rs — minimal Phase 1 integration test.
+// smoke_test.rs — integration smoke test.
 //
-// Shells out to the built `pulp-rs` binary and asserts that
-// `doctor --versions --json` emits valid JSON containing all
-// 9 top-level keys that Phase 2 will populate with real data.
+// Two checks:
+//   1. `doctor --versions --json` from the prototype's own cwd emits
+//      valid JSON with all 9 required top-level keys.
+//   2. The same command, run from the `ok_plain` fixture with an
+//      isolated PULP_HOME, populates the `project_sdk` field — i.e.
+//      the pulp.toml reader actually runs end-to-end.
 
+use std::path::PathBuf;
 use std::process::Command;
 
 use serde_json::Value;
@@ -20,10 +24,15 @@ const REQUIRED_KEYS: &[&str] = &[
     "findings",
 ];
 
+fn fixture_dir(name: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join(name)
+}
+
 #[test]
 fn doctor_versions_json_has_required_shape() {
-    // Cargo sets CARGO_BIN_EXE_<name> for integration tests and rebuilds
-    // the binary on demand, so we don't need to invoke `cargo build` here.
     let bin = env!("CARGO_BIN_EXE_pulp-rs");
 
     let output = Command::new(bin)
@@ -52,4 +61,28 @@ fn doctor_versions_json_has_required_shape() {
             obj.keys().collect::<Vec<_>>(),
         );
     }
+}
+
+#[test]
+fn doctor_populates_project_sdk_from_fixture() {
+    let bin = env!("CARGO_BIN_EXE_pulp-rs");
+    let dir = fixture_dir("ok_plain");
+    let tmp_home = tempfile::tempdir().expect("tempdir");
+
+    let output = Command::new(bin)
+        .args(["doctor", "--versions", "--json"])
+        .current_dir(&dir)
+        .env("PULP_RS_CLI_VERSION", "0.38.0")
+        .env("PULP_HOME", tmp_home.path())
+        .output()
+        .expect("failed to run pulp-rs binary");
+
+    assert!(output.status.success());
+    let v: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(v["project_sdk"]["raw"], "0.38.0");
+    assert_eq!(v["project_sdk"]["comparable"], true);
+    assert_eq!(v["cli"]["raw"], "0.38.0");
+    // Findings should include a single Info about compatibility.
+    let findings = v["findings"].as_array().unwrap();
+    assert!(findings.iter().any(|f| f["severity"] == "info"));
 }

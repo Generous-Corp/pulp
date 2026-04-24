@@ -1,0 +1,13 @@
+{
+  "cli": {"raw": "0.37.0", "comparable": true, "major": 0, "minor": 37, "patch": 0},
+  "plugin": {"raw": "", "comparable": false},
+  "plugin_min_cli": {"raw": "", "comparable": false},
+  "plugin_json_path": "",
+  "project_root": "/Users/danielraffel/Code/pulp-rs-proto/experimental/pulp-rs/tests/fixtures/ok_plain",
+  "project_sdk": {"raw": "0.38.0", "comparable": true, "major": 0, "minor": 38, "patch": 0},
+  "project_cli_min": {"raw": "", "comparable": false},
+  "projects": [],
+  "findings": [
+    {"severity": "warn", "message": "Project SDK is v0.38.0 but installed CLI is v0.37.0 — consider `pulp upgrade`"}
+  ]
+}
