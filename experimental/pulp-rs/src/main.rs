@@ -39,6 +39,30 @@ enum Command {
 
     /// Check / stage a CLI upgrade. Phase 5.
     Upgrade(UpgradeArgs),
+
+    /// Delegate to `shipyard pr`. Phase 6.
+    Pr(PrArgs),
+
+    /// Manage the Pulp SDK cache (`status`, `clean`). Phase 6.
+    Sdk(SdkArgs),
+
+    /// Configure + build via `cmake`. Phase 6 (no `--watch`).
+    Build(BuildArgs),
+
+    /// Run `ctest --output-on-failure`. Phase 6.
+    Test(TestArgs),
+
+    /// Launch a standalone binary from the build tree. Phase 6.
+    Run(RunArgs),
+
+    /// Remove the `build/` directory. Phase 6.
+    Clean,
+
+    /// Print a short project-status summary. Phase 6.
+    Status,
+
+    /// Manage the `$PULP_HOME/cache/` directory. Phase 6.
+    Cache(CacheArgs),
 }
 
 #[derive(clap::Args, Debug)]
@@ -61,9 +85,11 @@ struct DoctorArgs {
 
 #[derive(clap::Args, Debug)]
 struct ProjectsArgs {
-    /// `list` (or `ls`). Other subcommands (`add`, `remove`) are not
-    /// ported yet — use the C++ CLI for those.
-    subcommand: Option<String>,
+    /// The subcommand word (`list`, `add`, `remove`, `prune`) plus
+    /// any positional tail — e.g. `add /abs/path` or `remove
+    /// /abs/path`.
+    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+    tail: Vec<String>,
 
     /// Emit JSON instead of the human-readable table.
     #[arg(long)]
@@ -110,6 +136,55 @@ struct UpgradeArgs {
     to: Option<String>,
 }
 
+#[derive(clap::Args, Debug)]
+struct PrArgs {
+    /// Forwarded verbatim to `shipyard pr`. `--native` is consumed
+    /// here and errors out (fallback isn't ported).
+    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+    tail: Vec<String>,
+}
+
+#[derive(clap::Args, Debug)]
+struct SdkArgs {
+    /// Subcommand: `status`, `clean`, `install`, or empty for help.
+    subcommand: Option<String>,
+    /// Emit JSON output instead of human text where supported.
+    #[arg(long)]
+    json: bool,
+}
+
+#[derive(clap::Args, Debug)]
+struct BuildArgs {
+    /// Flags forwarded to cmake / captured by `pulp build`'s parser.
+    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+    tail: Vec<String>,
+}
+
+#[derive(clap::Args, Debug)]
+struct TestArgs {
+    /// Extra flags forwarded to `ctest`.
+    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+    tail: Vec<String>,
+}
+
+#[derive(clap::Args, Debug)]
+struct RunArgs {
+    /// Target name + optional `-- args...` tail.
+    #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+    tail: Vec<String>,
+}
+
+#[derive(clap::Args, Debug)]
+struct CacheArgs {
+    /// Subcommand: `status`, `clean`, `fetch`, or empty for help.
+    subcommand: Option<String>,
+    /// Optional argument to the subcommand (e.g. fetch asset name).
+    arg: Option<String>,
+    /// Emit JSON output where supported.
+    #[arg(long)]
+    json: bool,
+}
+
 fn main() -> ExitCode {
     match real_main() {
         Ok(()) => ExitCode::SUCCESS,
@@ -117,6 +192,10 @@ fn main() -> ExitCode {
     }
 }
 
+// The subcommand dispatch match is naturally linear — each arm is
+// five to eight lines of clap-to-library shim. Splitting into
+// per-command helpers would double the file with no readability win.
+#[allow(clippy::too_many_lines)]
 fn real_main() -> Result<(), ExitCode> {
     let cli = match Cli::try_parse() {
         Ok(cli) => cli,
@@ -137,14 +216,39 @@ fn real_main() -> Result<(), ExitCode> {
             cmd::doctor::run(args.versions, args.json, &mut out).map_err(|e| map_err(&e))
         }
         Command::Projects(args) => {
+            // With `trailing_var_arg`, clap's own `--json` flag is
+            // only recognised BEFORE the first positional. Sweep it
+            // out of the tail so users can type it in either spot.
+            let mut json = args.json;
+            let tail: Vec<String> = args
+                .tail
+                .into_iter()
+                .filter(|a| {
+                    if a == "--json" {
+                        json = true;
+                        false
+                    } else {
+                        true
+                    }
+                })
+                .collect();
             // Treat `pulp-rs projects` with no subcommand as `list`.
-            let args_vec = args.subcommand.clone().map(|s| vec![s]).unwrap_or_default();
-            let sub = cmd::projects::parse_sub(&args_vec).map_err(|_| {
-                eprintln!("pulp-rs projects: unknown subcommand");
-                eprintln!("  only `list` / `ls` is ported; use the C++ CLI for add/remove");
+            let list_fallback = vec!["list".to_owned()];
+            let effective: &[String] = if tail.is_empty() {
+                &list_fallback
+            } else {
+                &tail
+            };
+            let sub = cmd::projects::parse_sub(effective).map_err(|e| {
+                if let CliError::BadUsage(msg) = e {
+                    eprintln!("{msg}");
+                } else {
+                    eprintln!("pulp-rs projects: unknown subcommand");
+                    eprintln!("  supported: list, add, remove, prune (ls/rm aliases accepted)");
+                }
                 ExitCode::from(2)
             })?;
-            cmd::projects::run(sub, args.json, &mut out).map_err(|e| map_err(&e))
+            cmd::projects::run(sub, json, &mut out).map_err(|e| map_err(&e))
         }
         Command::Config(args) => {
             let sub = cmd::config::parse_sub(&args.tail).map_err(|e| match e {
@@ -176,6 +280,78 @@ fn real_main() -> Result<(), ExitCode> {
             }
             cmd::upgrade::run(&ua, &mut out).map_err(|e| map_err(&e))
         }
+        Command::Pr(args) => {
+            let parsed = cmd::pr::parse_args(&args.tail);
+            let cwd = std::env::current_dir().ok();
+            let root = cwd
+                .as_deref()
+                .and_then(pulp_rs::project::resolve)
+                .map(|p| p.root);
+            map_exit(cmd::pr::run(&parsed, root.as_deref(), &mut out))
+        }
+        Command::Sdk(args) => {
+            let slice: Vec<String> = args.subcommand.clone().into_iter().collect();
+            let sub = cmd::sdk::parse_sub(&slice).map_err(|_| {
+                eprintln!("pulp-rs sdk: unknown subcommand");
+                ExitCode::from(2)
+            })?;
+            cmd::sdk::run(sub, args.json, &mut out).map_err(|e| map_err(&e))
+        }
+        Command::Build(args) => {
+            let parsed = cmd::orchestrate::parse_build_args(&args.tail);
+            let cwd = read_cwd()?;
+            let spawner = pulp_rs::proc::SystemSpawner;
+            map_exit(cmd::orchestrate::build(&cwd, &parsed, &spawner, &mut out))
+        }
+        Command::Test(args) => {
+            let cwd = read_cwd()?;
+            let spawner = pulp_rs::proc::SystemSpawner;
+            map_exit(cmd::orchestrate::test(&cwd, &args.tail, &spawner, &mut out))
+        }
+        Command::Run(args) => {
+            let parsed = cmd::orchestrate::parse_run_args(&args.tail);
+            let cwd = read_cwd()?;
+            let spawner = pulp_rs::proc::SystemSpawner;
+            map_exit(cmd::orchestrate::run_cmd(&cwd, &parsed, &spawner, &mut out))
+        }
+        Command::Clean => {
+            let cwd = read_cwd()?;
+            cmd::orchestrate::clean(&cwd, &mut out).map_err(|e| map_err(&e))
+        }
+        Command::Status => {
+            let cwd = read_cwd()?;
+            cmd::orchestrate::status(&cwd, &mut out).map_err(|e| map_err(&e))
+        }
+        Command::Cache(args) => {
+            let mut slice: Vec<String> = args.subcommand.clone().into_iter().collect();
+            if let Some(ref a) = args.arg {
+                slice.push(a.clone());
+            }
+            let sub = cmd::orchestrate::parse_cache_sub(&slice).map_err(|_| {
+                eprintln!("pulp-rs cache: unknown subcommand");
+                ExitCode::from(2)
+            })?;
+            cmd::orchestrate::cache(&sub, args.json, &mut out).map_err(|e| map_err(&e))
+        }
+    }
+}
+
+/// Read the current working directory, mapping errors to exit code 1.
+fn read_cwd() -> Result<std::path::PathBuf, ExitCode> {
+    std::env::current_dir().map_err(|e| {
+        eprintln!("pulp-rs: could not read cwd: {e}");
+        ExitCode::from(1)
+    })
+}
+
+/// Map a `pulp_rs::Result<i32>` return (child exit code + error) to a
+/// `Result<(), ExitCode>`. Child exit 0 is success; non-zero is
+/// surfaced as the matching `ExitCode`.
+fn map_exit(res: pulp_rs::error::Result<i32>) -> Result<(), ExitCode> {
+    match res {
+        Ok(0) => Ok(()),
+        Ok(code) => Err(ExitCode::from(u8::try_from(code).unwrap_or(1))),
+        Err(e) => Err(map_err(&e)),
     }
 }
 
