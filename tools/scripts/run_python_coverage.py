@@ -24,6 +24,7 @@ import re
 import shutil
 import subprocess
 import sys
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -173,6 +174,87 @@ def _resolved_omit_globs(surfaces: list[CoverageSurface]) -> list[str]:
     )
 
 
+def _matches_any_glob(rel_path: str, patterns: list[str]) -> bool:
+    return any(fnmatch.fnmatch(rel_path, pattern) for pattern in patterns)
+
+
+def _report_source_files(source_roots: list[str], omit_globs: list[str]) -> list[Path]:
+    files: list[Path] = []
+    seen: set[Path] = set()
+    for source_root in source_roots:
+        root = REPO_ROOT / source_root
+        candidates = [root] if root.is_file() else sorted(root.rglob("*.py"))
+        for path in candidates:
+            if not path.is_file() or path.suffix != ".py":
+                continue
+            rel_path = path.relative_to(REPO_ROOT).as_posix()
+            if _matches_any_glob(rel_path, omit_globs):
+                continue
+            if path in seen:
+                continue
+            seen.add(path)
+            files.append(path)
+    return files
+
+
+def _touch_report_source_files(
+    cov: coverage.Coverage,
+    source_roots: list[str],
+    omit_globs: list[str],
+) -> None:
+    data = cov.get_data()
+    for path in _report_source_files(source_roots, omit_globs):
+        data.touch_file(path.relative_to(REPO_ROOT).as_posix())
+
+
+def _repo_relative_xml_filename(filename: str, sources: list[str]) -> str:
+    normalized = filename.replace("\\", "/")
+    candidate = Path(normalized)
+    if candidate.is_absolute():
+        try:
+            return candidate.resolve().relative_to(REPO_ROOT.resolve()).as_posix()
+        except ValueError:
+            return normalized
+
+    if (REPO_ROOT / normalized).exists():
+        return normalized
+
+    for source in sources:
+        source_path = Path(source or ".")
+        if source_path.is_absolute():
+            full_path = source_path / normalized
+            try:
+                return full_path.resolve().relative_to(REPO_ROOT.resolve()).as_posix()
+            except ValueError:
+                continue
+        rel_path = (source_path / normalized).as_posix()
+        if (REPO_ROOT / rel_path).exists():
+            return rel_path
+
+    return normalized
+
+
+def _rewrite_cobertura_filenames(xml_file: Path) -> None:
+    tree = ET.parse(xml_file)
+    root = tree.getroot()
+    sources_element = root.find("sources")
+    sources = [
+        source.text or "."
+        for source in root.findall("./sources/source")
+    ]
+    for class_element in root.findall(".//class"):
+        filename = class_element.get("filename")
+        if not filename:
+            continue
+        class_element.set("filename", _repo_relative_xml_filename(filename, sources))
+
+    if sources_element is not None:
+        sources_element.clear()
+        ET.SubElement(sources_element, "source").text = "."
+
+    tree.write(xml_file, encoding="utf-8", xml_declaration=True)
+
+
 def _write_coveragerc(surfaces: list[CoverageSurface]) -> None:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     source_roots = _normalized_source_roots(surfaces)
@@ -243,9 +325,12 @@ def _run_test(test_path: Path, env: dict[str, str]) -> int:
     return proc.returncode
 
 
-def _build_reports() -> None:
+def _build_reports(surfaces: list[CoverageSurface]) -> None:
+    source_roots = _normalized_source_roots(surfaces)
+    omit_globs = _resolved_omit_globs(surfaces)
     cov = coverage.Coverage(config_file=str(RCFILE), data_file=str(DATA_FILE))
     cov.combine(data_paths=[str(OUTPUT_DIR)], strict=True)
+    _touch_report_source_files(cov, source_roots, omit_globs)
     cov.save()
 
     with SUMMARY_FILE.open("w", encoding="utf-8") as fh:
@@ -253,6 +338,7 @@ def _build_reports() -> None:
     print(SUMMARY_FILE.read_text(encoding="utf-8"), end="")
     cov.html_report(directory=str(HTML_DIR))
     cov.xml_report(outfile=str(XML_FILE))
+    _rewrite_cobertura_filenames(XML_FILE)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -299,7 +385,7 @@ def main(argv: list[str] | None = None) -> int:
             failures.append(f"{test_path.relative_to(REPO_ROOT)} (exit {rc})")
 
     try:
-        _build_reports()
+        _build_reports(surfaces)
     except coverage.exceptions.NoDataError:
         print("run_python_coverage.py: coverage.py produced no data", file=sys.stderr)
         return 1

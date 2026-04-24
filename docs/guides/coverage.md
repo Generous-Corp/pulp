@@ -112,7 +112,7 @@ Output:
 - `build-coverage/python/summary.txt` — text summary for the Python
   tooling lane.
 - `build-coverage/python/coverage.python.xml` — Cobertura XML emitted
-  by coverage.py for the Python tooling lane.
+  by coverage.py and normalized by the Python tooling lane.
 - `build-coverage/apple/summary.txt` — text summary for the Apple
   Swift source files under `apple/Sources/`.
 - `build-coverage/apple/coverage.apple.json` — SwiftPM LLVM coverage
@@ -140,6 +140,16 @@ just the test harness. `PyYAML` is also required because
 the lane. The generated coverage config also omits Python test modules
 from the reported source set so the lane reflects first-party tooling
 code rather than the test harness.
+
+After `coverage combine`, `tools/scripts/run_python_coverage.py`
+explicitly inventories the configured non-test `.py` source roots and
+marks unexecuted files as measured before report generation. This keeps
+zero-hit files visible as 0% rows instead of letting coverage.py's
+package discovery hide non-package helper directories such as
+`tools/packages/`. The generated Cobertura XML is also normalized to
+repo-relative filenames with `<source>.</source>` so Codecov attributes
+entries like `tools/audit.py`, `tools/deps/audit.py`, and
+`core/view/js/embed_js.py` unambiguously.
 
 The Apple Swift lane currently runs on macOS only because it uses
 SwiftPM's native coverage support (`swift test --enable-code-coverage`)
