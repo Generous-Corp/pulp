@@ -20,7 +20,8 @@ enum class DesignSource {
     figma,
     stitch,
     v0,
-    pencil
+    pencil,
+    claude   // Anthropic Claude Design — manual HTML/zip export, no Anthropic API
 };
 
 /// Convert string to DesignSource, returns nullopt for unknown sources.
@@ -141,6 +142,20 @@ DesignIR parse_v0_tsx(const std::string& tsx);
 
 /// Parse Pencil node tree JSON into a DesignIR.
 DesignIR parse_pencil_json(const std::string& json);
+
+/// Parse a Claude Design standalone HTML export into a DesignIR.
+/// Claude Design exports the same HTML+CSS shape as other web tools,
+/// so the parse path delegates to the Stitch HTML parser. Source-tagged
+/// as DesignSource::claude so downstream code (CLI bridge scaffold,
+/// SKILL guidance) can route on it.
+DesignIR parse_claude_html(const std::string& html);
+
+/// Build the starter `bridge_handlers.cpp` text the CLI emits next to
+/// the generated JS view when `--from claude` runs. Pure string-builder;
+/// no I/O. The output references `pulp::view::EditorBridge` and shows
+/// add_handler() registrations + an attach_webview() call so users have
+/// a runnable shape to fill in (pulp #709 acceptance criterion).
+std::string render_claude_bridge_scaffold(const std::string& generated_js_path);
 
 /// Detect audio widget type from a node name.
 AudioWidgetType detect_audio_widget(const std::string& name);

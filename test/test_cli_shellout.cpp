@@ -176,6 +176,87 @@ TEST_CASE("pulp version check exits 0 on a clean tree and mentions SDK/plugin/ma
              combined.find("CMakeLists.txt") != std::string::npos));
 }
 
+// pulp #709 / #468 — `pulp import-design --from claude` ingests a
+// manually-exported Claude Design HTML file AND scaffolds a
+// bridge_handlers.cpp next to the generated JS. This is the CLI
+// surface that pulp#468's manual-export framing depends on.
+TEST_CASE("pulp import-design --from claude writes JS + bridge handler scaffold",
+          "[cli][shellout][import-design][issue-709][issue-468]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    auto tmp = fs::temp_directory_path() / "pulp-claude-smoke";
+    fs::create_directories(tmp);
+    auto html_path    = tmp / "claude-export.html";
+    auto js_path      = tmp / "claude-ui.js";
+    auto tokens_path  = tmp / "claude-tokens.json";
+    auto bridge_path  = tmp / "claude-bridge.cpp";
+    {
+        std::ofstream f(html_path);
+        f << "<!DOCTYPE html><html><body><div class=\"container\">"
+             "<h1>Hello Claude</h1><button>Click</button></div></body></html>";
+    }
+    // Clean stale artifacts from prior runs.
+    fs::remove(js_path);
+    fs::remove(tokens_path);
+    fs::remove(bridge_path);
+
+    auto r = run_pulp({"import-design",
+                       "--from", "claude",
+                       "--file",   html_path.string(),
+                       "--output", js_path.string(),
+                       "--tokens", tokens_path.string(),
+                       "--bridge-output", bridge_path.string()},
+                       30000);
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(fs::exists(js_path));
+    REQUIRE(fs::exists(bridge_path));
+
+    // Scaffold must reference the framework surface by full name so
+    // future readers can trace the generated file back to its
+    // framework host even after they've edited the handlers.
+    std::ifstream b(bridge_path);
+    std::string bridge_contents((std::istreambuf_iterator<char>(b)),
+                                 std::istreambuf_iterator<char>());
+    REQUIRE(bridge_contents.find("pulp::view::EditorBridge") != std::string::npos);
+    REQUIRE(bridge_contents.find("add_handler") != std::string::npos);
+    REQUIRE(bridge_contents.find("attach_webview") != std::string::npos);
+
+    // Stdout reports both outputs (the JS view AND the scaffold).
+    const auto combined = r.stdout_output + r.stderr_output;
+    REQUIRE(combined.find("bridge handler scaffold") != std::string::npos);
+}
+
+// Paired with the above: `--no-bridge-scaffold` suppresses the
+// scaffold emission while keeping the HTML → JS path intact.
+TEST_CASE("pulp import-design --from claude --no-bridge-scaffold writes only the JS",
+          "[cli][shellout][import-design][issue-709]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    auto tmp = fs::temp_directory_path() / "pulp-claude-smoke-no-scaffold";
+    fs::create_directories(tmp);
+    auto html_path   = tmp / "claude-export.html";
+    auto js_path     = tmp / "claude-ui.js";
+    auto bridge_path = tmp / "bridge_handlers.cpp";
+    {
+        std::ofstream f(html_path);
+        f << "<!DOCTYPE html><html><body><p>hi</p></body></html>";
+    }
+    fs::remove(js_path);
+    fs::remove(bridge_path);
+
+    auto r = run_pulp({"import-design",
+                       "--from", "claude",
+                       "--file", html_path.string(),
+                       "--output", js_path.string(),
+                       "--no-bridge-scaffold"},
+                      30000);
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(fs::exists(js_path));
+    REQUIRE_FALSE(fs::exists(bridge_path));
+}
+
 TEST_CASE("pulp help output lists the top-level subcommands",
           "[cli][shellout][help]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }

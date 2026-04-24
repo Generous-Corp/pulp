@@ -1,19 +1,20 @@
-Import a design from an external tool (Figma, Stitch, v0, Pencil) into this Pulp project.
+Import a design from an external tool (Figma, Stitch, v0, Pencil, Claude Design) into this Pulp project.
 
 Detect which design source the user wants by checking:
 1. If a Figma MCP server is available (com.figma.mcp), offer to read the current file/selection
 2. If Stitch MCP is available (mcp__stitch__*), offer to list projects and get screens
 3. If Pencil MCP is available (mcp__pencil__*), offer to read the current editor state
-4. If the user provides a file path or URL, use that directly
-5. If none of the above, ask the user for a source and file
+4. If the user mentions Claude Design or hands over a manually-exported HTML/zip from Anthropic Labs' Claude Design tool, treat as `--from claude` (no MCP — manual export only, see pulp #468)
+5. If the user provides a file path or URL, use that directly
+6. If none of the above, ask the user for a source and file
 
 ## Workflow
 
 ### Step 1: Identify source and input
 
 Ask the user or detect from context:
-- **Source**: figma, stitch, v0, or pencil
-- **Input**: file path, URL, or MCP live data
+- **Source**: figma, stitch, v0, pencil, or claude
+- **Input**: file path, URL, or MCP live data (manual file only for claude)
 
 ### Step 2: Read the design data
 
@@ -36,6 +37,11 @@ Ask the user or detect from context:
 - If URL provided, fetch the v0 generation
 - If TSX file, read directly
 - Extract JSX tree, Tailwind classes, shadcn/ui components
+
+**Claude Design (manual HTML export)**:
+- Anthropic Labs has no MCP / public API; the user manually exports the design (Standalone HTML / Send to Local Coding Agent) and hands you the file
+- Run `pulp import-design --from claude --file <path>` — parser delegates to the Stitch HTML pipeline and tags the IR as Claude
+- The CLI also writes a `bridge_handlers.cpp` scaffold next to the generated JS (see pulp #709). Open it, fill in the `add_handler()` registrations for the messages your editor will postMessage from JS, then `bridge_.attach_webview(*panel_)` (or `attach_native_runtime(...)` if hosting in a JS runtime instead of a WebView)
 
 **File-based fallback**:
 - Read the file and parse based on --from source type
@@ -152,9 +158,19 @@ pulp import-design --from figma --file design.json
 pulp import-design --from stitch --file screen.html
 pulp import-design --from v0 --file component.tsx
 pulp import-design --from pencil --file design.json
+pulp import-design --from claude --file design.html   # writes ui.js + bridge_handlers.cpp scaffold
 
 # With validation
 pulp import-design --from pencil --file design.json --validate --reference source.png --diff diff.png
+
+# Skip the bridge scaffold (claude only)
+pulp import-design --from claude --file design.html --no-bridge-scaffold
 ```
 
 Use `--dry-run` to preview without writing files.
+
+## Bridge Handler Scaffold (Claude Design)
+
+When `--from claude` runs, the CLI also writes `bridge_handlers.cpp` (override path with `--bridge-output`). The scaffold demonstrates how to wire `pulp::view::EditorBridge` so editor JS can `postMessage` into the C++ processor. Replace the `MyPluginEditor` placeholder with your editor class, register one `add_handler("type", ...)` per message kind, and call `bridge_.attach_webview(*panel_)`.
+
+See `docs/reference/editor-bridge.md` for the full API and the standard error vocabulary (`malformed_json`, `unknown_type`, `missing_field`, `wrong_type`, `internal_error`).

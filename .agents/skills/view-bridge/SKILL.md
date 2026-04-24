@@ -209,6 +209,51 @@ crash; the fix was to remove the explicit close (PR #667 / pulp
 rationale lives in the `auv2`, `auv3`, and `ios` skills since those
 files are dual-/triple-mapped.
 
+## EditorBridge — JSON message dispatch over the editor lifecycle (pulp #709)
+
+`pulp::format::ViewBridge` (this skill) handles **when** the editor
+exists. `pulp::view::EditorBridge` handles **what messages flow
+between it and the processor** while it does. Use both:
+
+```cpp
+class MyEditor : public pulp::view::View {
+    void wire(pulp::view::WebViewPanel& panel) {
+        bridge_.add_handler("set_value", [this](const auto& payload) {
+            const auto v = pulp::view::EditorBridge::get_float(payload, "value", 0.0f);
+            // ... apply to processor ...
+            return pulp::view::EditorBridge::ok_response();
+        });
+        bridge_.attach_webview(panel);          // routes WebView postMessage → handlers
+    }
+private:
+    pulp::view::EditorBridge bridge_;
+};
+```
+
+Key invariants:
+
+- **Renderer-agnostic.** `attach_webview(WebViewPanel&)` today;
+  `attach_native_runtime(JsRuntime&, "<handler_name>")` for the pulp
+  #468 native-JS-runtime import lane. Same handler registrations.
+- **noexcept dispatch.** `dispatch_json(...)` and `dispatch(...)` are
+  `noexcept` and always return a well-formed JSON response envelope —
+  handler exceptions become `{"ok":false,"error":"internal error"}`.
+- **Standard envelope error vocabulary** (substring-compatible with
+  Spectr's existing test suite — that compatibility is load-bearing
+  for the Spectr cutover acceptance criterion in #709):
+  - `malformed_json` — JSON parse failed / root not object
+  - `unknown_type` — no handler registered
+  - `missing_field` — envelope missing/empty/non-string `type`
+  - `wrong_type` — handler-emitted via `err_response("...")`
+  - `internal_error` — handler threw
+- **Plugin-specific drag/edit state stays in the handler closure** —
+  the framework explicitly does NOT carry `EditorBridgeState`-style
+  per-session state. Capture it on `[this]` instead.
+
+When you change `core/view/src/editor_bridge.cpp` or its header, the
+skill-sync gate requires updates to either *this* skill or the
+`import-design` skill (or both). The path map maps both to the file.
+
 ## References
 
 - `core/format/include/pulp/format/view_bridge.hpp` — public API
@@ -216,8 +261,12 @@ files are dual-/triple-mapped.
 - `core/format/include/pulp/format/processor.hpp` — `create_view`,
   `view_size`, `on_view_*`
 - `core/format/include/pulp/format/remote_view_session.hpp` — Phase 4
+- `core/view/include/pulp/view/editor_bridge.hpp` — EditorBridge API (#709)
+- `core/view/src/editor_bridge.cpp` — EditorBridge implementation
 - `docs/guides/view-bridge.md` — user-facing guide
+- `docs/reference/editor-bridge.md` — EditorBridge reference (#709)
 - `docs/reference/remote-view-protocol.md` — Phase 4 wire format
 - `examples/view-bridge-demo/main.cpp` — runnable headless demo
 - `test/test_remote_view.cpp` — loopback tests for the remote protocol
+- `test/test_editor_bridge.cpp` — EditorBridge unit tests (#709)
 - `planning/next-features-plan.md` § Feature 1 — phase tracking

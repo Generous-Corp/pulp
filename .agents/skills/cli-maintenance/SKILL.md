@@ -72,6 +72,32 @@ Same as above, focus on steps 2, 4, 5, 6, 7. Key risks:
 - Changed behavior not reflected in slash command `.md`
 - Skills calling the old invocation syntax
 
+### Adding a new value to an enum-like flag (e.g., `--from <source>`)
+
+When extending a flag that takes one of a fixed set of values
+(`pulp import-design --from {figma,stitch,v0,pencil,claude,...}`,
+`pulp validate --target {auval,clap-validator,pluginval,...}`, etc.),
+all four surfaces have to land in the same PR or the skill-sync gate
+trips:
+
+1. The CLI source switch (`tools/import-design/pulp_import_design.cpp`,
+   etc.) — accept the new value in the parser **and** the dispatch.
+2. The slash command file under `.claude/commands/` — usage block,
+   examples, and any "when to detect this" notes.
+3. The matching topical `.agents/skills/*/SKILL.md` — same prose,
+   kept in sync so the agent's pre-context matches what the slash
+   command says.
+4. The path map (`tools/scripts/skill_path_map.json`) — add the new
+   header/source paths if the new source brings new C++ files.
+
+Reason this gets called out: editing `.claude/commands/<name>.md` maps
+to the **`cli-maintenance`** skill (because the path map owns
+`.claude/commands/**`), not to the topical skill. So a diff that
+updates the slash command + the topical skill but leaves
+cli-maintenance untouched still trips skill-sync. Keep this section
+present so the gate stays satisfiable by the topical edit alone.
+pulp #709 / `--from claude` is the worked example.
+
 ## Removing a CLI Command
 
 - [ ] Remove from `cmd_*.cpp` and command table in `pulp_cli.cpp`

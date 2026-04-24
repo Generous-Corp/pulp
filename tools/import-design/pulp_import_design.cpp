@@ -25,7 +25,8 @@ static void print_usage() {
     std::cout << "  figma    Figma export JSON or MCP data\n";
     std::cout << "  stitch   Google Stitch screen HTML or MCP data\n";
     std::cout << "  v0       v0.dev TSX/Tailwind output\n";
-    std::cout << "  pencil   Pencil/OpenPencil node JSON or .pen export\n\n";
+    std::cout << "  pencil   Pencil/OpenPencil node JSON or .pen export\n";
+    std::cout << "  claude   Anthropic Claude Design — manually-exported standalone HTML\n\n";
     std::cout << "Options:\n";
     std::cout << "  --from <source>   Design source (required)\n";
     std::cout << "  --file <path>     Input file path\n";
@@ -42,6 +43,9 @@ static void print_usage() {
     std::cout << "  --reference <png> Compare render against a reference screenshot\n";
     std::cout << "  --diff <png>      Save visual diff image\n";
     std::cout << "  --render-size WxH Render dimensions (default: 340x280)\n";
+    std::cout << "  --bridge-output <path>  Path to write bridge handler scaffold (default: bridge_handlers.cpp,\n";
+    std::cout << "                          only emitted for --from claude)\n";
+    std::cout << "  --no-bridge-scaffold    Skip bridge handler scaffold (claude only)\n";
     std::cout << "  --help            Show this help\n\n";
     std::cout << "Examples:\n";
     std::cout << "  pulp import-design --from figma --file design.json\n";
@@ -50,7 +54,14 @@ static void print_usage() {
     std::cout << "  pulp import-design --from v0 --url 'https://v0.dev/t/abc123' --output my-ui.js\n";
     std::cout << "  pulp import-design --from pencil --file design.json --dry-run\n";
     std::cout << "  pulp import-design --from pencil --file design.json --validate --reference source.png\n";
+    std::cout << "  pulp import-design --from claude --file design.html\n";
 }
+
+// Bridge-handler scaffold body lives in core/view/src/design_import.cpp
+// (`render_claude_bridge_scaffold`) so it can be unit-tested directly
+// from the design_import test target — coverage doesn't follow CLI
+// subprocess invocations, so keeping the body here would leave it
+// uncovered. The CLI only calls into the library function below.
 
 static std::string read_file(const std::string& path) {
     std::ifstream f(path);
@@ -99,6 +110,8 @@ int main(int argc, char* argv[]) {
     std::string debug_output;        // --debug-output: path for JSON report
     int render_width = 340;
     int render_height = 280;
+    std::string bridge_output = "bridge_handlers.cpp";  // claude scaffold output
+    bool emit_bridge_scaffold = true;                    // default on for --from claude
 
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--from") == 0 && i + 1 < argc) {
@@ -149,6 +162,10 @@ int main(int argc, char* argv[]) {
         } else if (std::strcmp(argv[i], "--debug-output") == 0 && i + 1 < argc) {
             debug_output = argv[++i];
             debug_json = true;
+        } else if (std::strcmp(argv[i], "--bridge-output") == 0 && i + 1 < argc) {
+            bridge_output = argv[++i];
+        } else if (std::strcmp(argv[i], "--no-bridge-scaffold") == 0) {
+            emit_bridge_scaffold = false;
         } else if (std::strcmp(argv[i], "--help") == 0 || std::strcmp(argv[i], "-h") == 0) {
             print_usage();
             return 0;
@@ -231,6 +248,7 @@ int main(int argc, char* argv[]) {
             case DesignSource::stitch: ir = parse_stitch_html(content); break;
             case DesignSource::v0:     ir = parse_v0_tsx(content); break;
             case DesignSource::pencil: ir = parse_pencil_json(content); break;
+            case DesignSource::claude: ir = parse_claude_html(content); break;
         }
     } catch (const std::exception& e) {
         std::cerr << "Error parsing " << design_source_name(*source) << " input: " << e.what() << "\n";
@@ -300,6 +318,17 @@ int main(int argc, char* argv[]) {
     }
 
     std::cout << ")\n";
+
+    // Bridge handler scaffold for Claude Design imports (pulp #709).
+    // Only emitted for --from claude; other sources keep their existing
+    // output shape unchanged.
+    if (*source == DesignSource::claude && emit_bridge_scaffold) {
+        const auto scaffold = render_claude_bridge_scaffold(output_file);
+        if (write_file(bridge_output, scaffold)) {
+            std::cout << "Wrote " << bridge_output
+                      << " (bridge handler scaffold — edit add_handler() entries to wire your editor's messages)\n";
+        }
+    }
 
     // Screenshot naming convention: {design-name}-{source}-render.png
     auto design_name = fs::path(output_file).stem().string();

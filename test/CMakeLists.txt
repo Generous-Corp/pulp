@@ -1084,6 +1084,11 @@ add_executable(pulp-test-widget-bridge test_widget_bridge.cpp)
 target_link_libraries(pulp-test-widget-bridge PRIVATE pulp::view Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-widget-bridge)
 
+# Editor bridge tests (pulp #709 — renderer-agnostic envelope/dispatcher)
+add_executable(pulp-test-editor-bridge test_editor_bridge.cpp)
+target_link_libraries(pulp-test-editor-bridge PRIVATE pulp::view Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-editor-bridge)
+
 # Input events tests
 add_executable(pulp-test-input-events test_input_events.cpp)
 target_link_libraries(pulp-test-input-events PRIVATE pulp::view Catch2::Catch2WithMain)

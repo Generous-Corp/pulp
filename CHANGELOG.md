@@ -9,6 +9,10 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
 <a id="v0402"></a>
+## [0.14.0]
+
+## [0.41.0]
+
 ## [0.40.2] - 2026-04-23
 
 - fix/release vst3 tag drift ([#701](https://github.com/danielraffel/pulp/pull/701))

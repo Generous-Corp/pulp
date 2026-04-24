@@ -320,3 +320,34 @@ useful pieces pulled forward from the iPlug2 audit are:
 - resource-loading and bundling guidance
 - bridge/messaging guidance
 - devtools and hot-reload workflow guidance
+
+## Host Bridge Dispatch (`pulp::view::EditorBridge`)
+
+When the editor is a WebView, plugins do not write `set_message_handler`
+by hand and parse `WebViewMessage::payload_json` per call. Use
+`pulp::view::EditorBridge` ([reference](../reference/editor-bridge.md))
+to register one handler per JSON message `type` and have the framework
+own envelope parsing, response building, and the standard error
+vocabulary (`malformed_json`, `unknown_type`, `missing_field`,
+`wrong_type`, `internal_error`):
+
+```cpp
+#include <pulp/view/editor_bridge.hpp>
+
+class MyEditor {
+    void wire(pulp::view::WebViewPanel& panel) {
+        bridge_.add_handler("set_value", [this](const auto& payload) {
+            const auto v = pulp::view::EditorBridge::get_float(payload, "value", 0.0f);
+            // ... apply to processor ...
+            return pulp::view::EditorBridge::ok_response();
+        });
+        bridge_.attach_webview(panel);
+    }
+    pulp::view::EditorBridge bridge_;
+};
+```
+
+The same `EditorBridge` is also the integration seam for the [pulp #468](https://github.com/danielraffel/pulp/issues/468)
+Claude Design import lane, where the editor runs in a native JS runtime
+instead of a WebView. Plugins built around either renderer stay
+drop-in compatible because both attach paths feed the same dispatcher.

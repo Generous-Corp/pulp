@@ -10,12 +10,74 @@ TEST_CASE("parse_design_source recognizes valid sources", "[view][import]") {
     REQUIRE(parse_design_source("stitch") == DesignSource::stitch);
     REQUIRE(parse_design_source("v0") == DesignSource::v0);
     REQUIRE(parse_design_source("pencil") == DesignSource::pencil);
+    REQUIRE(parse_design_source("claude") == DesignSource::claude);
     REQUIRE_FALSE(parse_design_source("unknown").has_value());
 }
 
 TEST_CASE("design_source_name returns display names", "[view][import]") {
     REQUIRE(std::string(design_source_name(DesignSource::figma)) == "Figma");
     REQUIRE(std::string(design_source_name(DesignSource::v0)) == "v0");
+    REQUIRE(std::string(design_source_name(DesignSource::claude)) == "Claude Design");
+}
+
+// pulp #709 / #468 — Claude Design imports are manually-exported HTML
+// parsed via the Stitch HTML pipeline and re-tagged as Claude.
+TEST_CASE("parse_claude_html delegates to Stitch pipeline and tags source",
+          "[view][import][issue-709][issue-468]") {
+    const auto html = std::string{
+        R"(<!DOCTYPE html><html><body>
+              <div class="container">
+                <h1>Hello Claude</h1>
+                <button>Click me</button>
+              </div>
+           </body></html>)"};
+
+    const auto ir = parse_claude_html(html);
+    REQUIRE(ir.source == DesignSource::claude);
+    // Same HTML fed directly to parse_stitch_html should produce a
+    // tree of the same shape; delegation is the contract, not a new
+    // parser implementation.
+    const auto stitch_ir = parse_stitch_html(html);
+    REQUIRE(ir.root.children.size() == stitch_ir.root.children.size());
+}
+
+// pulp #709 — render_claude_bridge_scaffold is the library form of the
+// CLI's `pulp import-design --from claude` scaffold output. Lives in
+// the library (not in the CLI source) so coverage can be asserted
+// without needing the spawned-subprocess instrumentation that codecov
+// can't see through.
+TEST_CASE("render_claude_bridge_scaffold emits a buildable EditorBridge starter",
+          "[view][import][issue-709][issue-468]") {
+    const auto scaffold = render_claude_bridge_scaffold("ui.js");
+
+    // Threads the path through the file header so users can trace the
+    // generated handlers back to the imported view.
+    REQUIRE(scaffold.find("ui.js") != std::string::npos);
+
+    // The framework surface MUST be referenced by full name — that's
+    // the whole point of the scaffold (#709 acceptance criterion).
+    REQUIRE(scaffold.find("pulp::view::EditorBridge") != std::string::npos);
+    REQUIRE(scaffold.find("#include <pulp/view/editor_bridge.hpp>") != std::string::npos);
+    REQUIRE(scaffold.find("#include <pulp/view/web_view.hpp>") != std::string::npos);
+
+    // Demonstrates each of the patterns plugin authors will copy:
+    //   - one no-payload handler
+    //   - one typed-payload handler using EditorBridge::get_float
+    //   - the WebView attach call
+    //   - the comment pointer to attach_native_runtime for #468
+    REQUIRE(scaffold.find(R"(add_handler("hello")") != std::string::npos);
+    REQUIRE(scaffold.find(R"(add_handler("set_value")") != std::string::npos);
+    REQUIRE(scaffold.find("EditorBridge::get_float") != std::string::npos);
+    REQUIRE(scaffold.find("EditorBridge::ok_response()") != std::string::npos);
+    REQUIRE(scaffold.find("attach_webview(panel)") != std::string::npos);
+    REQUIRE(scaffold.find("attach_native_runtime") != std::string::npos);
+    REQUIRE(scaffold.find("MyPluginEditor") != std::string::npos);
+
+    // Path is interpolated, not hard-coded — feed a different path and
+    // confirm the new value lands in the header.
+    const auto other = render_claude_bridge_scaffold("editor/imported.js");
+    REQUIRE(other.find("editor/imported.js") != std::string::npos);
+    REQUIRE(other.find("ui.js") == std::string::npos);
 }
 
 // ── Audio widget detection ──────────────────────────────────────────────
