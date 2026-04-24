@@ -107,6 +107,11 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
         uint32_t event_count = in_events->size(in_events);
         for (uint32_t i = 0; i < event_count; ++i) {
             auto* hdr = in_events->get(in_events, i);
+            // CLAP event-space gate: non-zero namespace IDs belong to
+            // third-party extensions we don't implement. Per spec, those
+            // must be ignored — including their types, which may alias
+            // core type IDs. clap-validator `param-set-wrong-namespace`.
+            if (hdr->space_id != CLAP_CORE_EVENT_SPACE_ID) continue;
             if (hdr->type == CLAP_EVENT_PARAM_VALUE) {
                 const auto ev = load_event<clap_event_param_value_t>(hdr);
                 self->store.set_value(
@@ -209,6 +214,8 @@ clap_process_status clap_process(const clap_plugin_t* plugin, const clap_process
         uint32_t event_count = in_events->size(in_events);
         for (uint32_t i = 0; i < event_count; ++i) {
             auto* hdr = in_events->get(in_events, i);
+            // Same CLAP event-space gate as the param/gesture loop above.
+            if (hdr->space_id != CLAP_CORE_EVENT_SPACE_ID) continue;
             if (hdr->type == CLAP_EVENT_NOTE_ON) {
                 const auto ev = load_event<clap_event_note_t>(hdr);
                 auto me = midi::MidiEvent::note_on(
