@@ -1,6 +1,6 @@
 // AAC writer — lossy audio encoding via Fraunhofer FDK AAC.
 // Conditionally compiled: only when fdk-aac is installed (pulp add fdk-aac --accept-license FDK-AAC).
-// Auto-registers AacWriter in FormatRegistry via static initializer.
+// Registered explicitly by FormatRegistry when PULP_HAS_FDK_AAC is enabled.
 
 #ifdef PULP_HAS_FDK_AAC
 
@@ -106,13 +106,8 @@ public:
     std::string format_name() const override { return "AAC"; }
 };
 
-namespace {
-    struct AacWriterRegistrar {
-        AacWriterRegistrar() {
-            FormatRegistry::instance().register_writer(std::make_unique<AacWriter>());
-        }
-    };
-    static AacWriterRegistrar aac_writer_registrar;
+std::unique_ptr<FormatWriter> create_aac_writer() {
+    return std::make_unique<AacWriter>();
 }
 
 }  // namespace pulp::audio

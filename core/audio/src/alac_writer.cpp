@@ -1,6 +1,6 @@
 // ALAC writer — Apple Lossless Audio Codec encoding.
 // Conditionally compiled: only when Apple ALAC is installed (pulp add alac).
-// Auto-registers AlacWriter in FormatRegistry via static initializer.
+// Registered explicitly by FormatRegistry when PULP_HAS_ALAC is enabled.
 //
 // Note: On macOS, CoreAudioFormat can also write ALAC via ExtAudioFile.
 // This implementation provides cross-platform ALAC write using Apple's
@@ -83,13 +83,8 @@ public:
     std::string format_name() const override { return "ALAC"; }
 };
 
-namespace {
-    struct AlacWriterRegistrar {
-        AlacWriterRegistrar() {
-            FormatRegistry::instance().register_writer(std::make_unique<AlacWriter>());
-        }
-    };
-    static AlacWriterRegistrar alac_writer_registrar;
+std::unique_ptr<FormatWriter> create_alac_writer() {
+    return std::make_unique<AlacWriter>();
 }
 
 }  // namespace pulp::audio

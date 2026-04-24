@@ -83,7 +83,6 @@ public:
         AudioFileInfo info;
         info.format = is_aifc ? "AIFF-C" : "AIFF";
 
-        // Parse chunks
         while (file.good()) {
             uint8_t chunk_header[8];
             file.read(reinterpret_cast<char*>(chunk_header), 8);
@@ -92,21 +91,27 @@ public:
             uint32_t chunk_size = read_be32(chunk_header + 4);
 
             if (std::memcmp(chunk_header, "COMM", 4) == 0) {
-                uint8_t comm[26];
-                file.read(reinterpret_cast<char*>(comm), std::min(chunk_size, 26u));
+                if (chunk_size < 18) return std::nullopt;
+
+                uint8_t comm[18] = {};
+                file.read(reinterpret_cast<char*>(comm), 18);
+                if (file.gcount() != 18) return std::nullopt;
+
                 info.num_channels = read_be16(comm);
                 info.num_frames = read_be32(comm + 2);
                 info.bits_per_sample = read_be16(comm + 6);
                 info.sample_rate = static_cast<uint32_t>(extended_to_double(comm + 8));
+                if (info.sample_rate == 0 || info.num_channels == 0)
+                    return std::nullopt;
                 info.duration_seconds = static_cast<double>(info.num_frames) / info.sample_rate;
-                break;
+                return info;
             }
 
             // Skip chunk (pad to even)
             file.seekg(chunk_size + (chunk_size & 1), std::ios::cur);
         }
 
-        return info;
+        return std::nullopt;
     }
 
     std::optional<AudioFileData> read(const std::string& path) override {
@@ -115,6 +120,7 @@ public:
 
         uint8_t header[12];
         file.read(reinterpret_cast<char*>(header), 12);
+        if (file.gcount() != 12) return std::nullopt;
         if (std::memcmp(header, "FORM", 4) != 0) return std::nullopt;
         if (std::memcmp(header + 8, "AIFF", 4) != 0 &&
             std::memcmp(header + 8, "AIFC", 4) != 0) return std::nullopt;
@@ -131,9 +137,13 @@ public:
             uint32_t chunk_size = read_be32(chunk_header + 4);
 
             if (std::memcmp(chunk_header, "COMM", 4) == 0) {
+                if (chunk_size < 18) return std::nullopt;
+
                 uint32_t bytes_to_read = std::min(chunk_size, 26u);
                 uint8_t comm[26] = {};
                 file.read(reinterpret_cast<char*>(comm), bytes_to_read);
+                if (file.gcount() != static_cast<std::streamsize>(bytes_to_read))
+                    return std::nullopt;
                 num_channels = read_be16(comm);
                 num_frames = read_be32(comm + 2);
                 bits_per_sample = read_be16(comm + 6);
@@ -151,15 +161,19 @@ public:
                 }
                 uint8_t ssnd_header[8];
                 file.read(reinterpret_cast<char*>(ssnd_header), 8);
+                if (file.gcount() != 8) return std::nullopt;
                 size_t data_size = chunk_size - 8;
                 ssnd_data.resize(data_size);
                 file.read(reinterpret_cast<char*>(ssnd_data.data()), static_cast<std::streamsize>(data_size));
+                if (file.gcount() != static_cast<std::streamsize>(data_size))
+                    return std::nullopt;
+                if (chunk_size & 1) file.seekg(1, std::ios::cur);
             } else {
                 file.seekg(chunk_size + (chunk_size & 1), std::ios::cur);
             }
         }
 
-        if (num_channels == 0 || num_frames == 0 || ssnd_data.empty())
+        if (num_channels == 0 || num_frames == 0 || sample_rate <= 0.0 || ssnd_data.empty())
             return std::nullopt;
 
         AudioFileData data;
@@ -170,6 +184,11 @@ public:
 
         int bytes_per_sample = static_cast<int>(bits_per_sample) / 8;
         int frame_size = bytes_per_sample * static_cast<int>(num_channels);
+        if ((bits_per_sample != 8 && bits_per_sample != 16 &&
+             bits_per_sample != 24 && bits_per_sample != 32) ||
+            ssnd_data.size() < static_cast<size_t>(frame_size) * num_frames) {
+            return std::nullopt;
+        }
 
         for (uint32_t f = 0; f < num_frames; ++f) {
             for (uint32_t c = 0; c < num_channels; ++c) {
@@ -274,15 +293,12 @@ public:
     std::string format_name() const override { return "AIFF"; }
 };
 
-// Register AIFF reader/writer during static initialization
-namespace {
-    struct AiffRegistrar {
-        AiffRegistrar() {
-            FormatRegistry::instance().register_reader(std::make_unique<AiffReader>());
-            FormatRegistry::instance().register_writer(std::make_unique<AiffWriter>());
-        }
-    };
-    static AiffRegistrar aiff_registrar;
+std::unique_ptr<FormatReader> create_aiff_reader() {
+    return std::make_unique<AiffReader>();
+}
+
+std::unique_ptr<FormatWriter> create_aiff_writer() {
+    return std::make_unique<AiffWriter>();
 }
 
 }  // namespace pulp::audio

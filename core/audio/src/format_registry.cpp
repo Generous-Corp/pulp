@@ -1,7 +1,9 @@
 #include <pulp/audio/format_registry.hpp>
 #include <filesystem>
 #include <algorithm>
+#include <array>
 #include <cctype>
+#include <utility>
 
 // dr_libs for FLAC and MP3 — implementation compiled in codecs.c
 #include <dr_flac.h>
@@ -11,12 +13,62 @@ namespace pulp::audio {
 
 // ── Helper ──────────────────────────────────────────────────────────────
 
-static std::string get_extension(const std::string& path) {
-    auto ext = std::filesystem::path(path).extension().string();
+static std::string normalize_extension(std::string_view extension) {
+    std::string ext(extension);
     std::transform(ext.begin(), ext.end(), ext.begin(),
                    [](unsigned char c) { return std::tolower(c); });
+    if (!ext.empty() && ext.front() != '.')
+        ext.insert(ext.begin(), '.');
     return ext;
 }
+
+static std::string get_extension(const std::string& path) {
+    return normalize_extension(std::filesystem::path(path).extension().string());
+}
+
+static constexpr std::array<std::string_view, 13> kKnownExtensions = {
+    ".wav", ".wave", ".flac", ".mp3", ".ogg", ".oga", ".aiff", ".aif",
+    ".aac", ".m4a", ".alac", ".caf", ".aifc"
+};
+
+template <typename HandlerList>
+static std::vector<std::string> collect_supported_extensions(const HandlerList& handlers) {
+    std::vector<std::string> exts;
+    for (auto& handler : handlers) {
+        for (auto ext : kKnownExtensions) {
+            std::string ext_string(ext);
+            if (handler->supports_extension(ext) &&
+                std::find(exts.begin(), exts.end(), ext_string) == exts.end()) {
+                exts.push_back(std::move(ext_string));
+            }
+        }
+    }
+    return exts;
+}
+
+std::unique_ptr<FormatReader> create_ogg_reader();
+std::unique_ptr<FormatReader> create_aiff_reader();
+std::unique_ptr<FormatWriter> create_aiff_writer();
+
+#ifdef __APPLE__
+std::unique_ptr<FormatReader> create_coreaudio_reader();
+#endif
+
+#ifdef PULP_HAS_LIBFLAC
+std::unique_ptr<FormatWriter> create_flac_writer();
+#endif
+
+#ifdef PULP_HAS_LAME
+std::unique_ptr<FormatWriter> create_mp3_writer();
+#endif
+
+#ifdef PULP_HAS_FDK_AAC
+std::unique_ptr<FormatWriter> create_aac_writer();
+#endif
+
+#ifdef PULP_HAS_ALAC
+std::unique_ptr<FormatWriter> create_alac_writer();
+#endif
 
 // ── WAV Reader/Writer (via CHOC) ────────────────────────────────────────
 
@@ -167,6 +219,29 @@ FormatRegistry::FormatRegistry() {
     register_writer(std::make_unique<WavWriter>());
     register_reader(std::make_unique<FlacReader>());
     register_reader(std::make_unique<Mp3Reader>());
+    register_reader(create_ogg_reader());
+    register_reader(create_aiff_reader());
+    register_writer(create_aiff_writer());
+
+#ifdef __APPLE__
+    register_reader(create_coreaudio_reader());
+#endif
+
+#ifdef PULP_HAS_LIBFLAC
+    register_writer(create_flac_writer());
+#endif
+
+#ifdef PULP_HAS_LAME
+    register_writer(create_mp3_writer());
+#endif
+
+#ifdef PULP_HAS_FDK_AAC
+    register_writer(create_aac_writer());
+#endif
+
+#ifdef PULP_HAS_ALAC
+    register_writer(create_alac_writer());
+#endif
 }
 
 void FormatRegistry::register_reader(std::unique_ptr<FormatReader> reader) {
@@ -178,15 +253,17 @@ void FormatRegistry::register_writer(std::unique_ptr<FormatWriter> writer) {
 }
 
 FormatReader* FormatRegistry::find_reader(std::string_view extension) const {
+    auto ext = normalize_extension(extension);
     for (auto& r : readers_)
-        if (r->supports_extension(extension))
+        if (r->supports_extension(ext))
             return r.get();
     return nullptr;
 }
 
 FormatWriter* FormatRegistry::find_writer(std::string_view extension) const {
+    auto ext = normalize_extension(extension);
     for (auto& w : writers_)
-        if (w->supports_extension(extension))
+        if (w->supports_extension(ext))
             return w.get();
     return nullptr;
 }
@@ -213,25 +290,11 @@ bool FormatRegistry::write(const std::string& path, const AudioFileData& data) c
 }
 
 std::vector<std::string> FormatRegistry::supported_read_extensions() const {
-    std::vector<std::string> exts;
-    for (auto& r : readers_) {
-        for (auto& ext : {".wav", ".wave", ".flac", ".mp3", ".ogg"}) {
-            if (r->supports_extension(ext))
-                exts.push_back(ext);
-        }
-    }
-    return exts;
+    return collect_supported_extensions(readers_);
 }
 
 std::vector<std::string> FormatRegistry::supported_write_extensions() const {
-    std::vector<std::string> exts;
-    for (auto& w : writers_) {
-        for (auto& ext : {".wav", ".wave", ".flac", ".mp3", ".ogg"}) {
-            if (w->supports_extension(ext))
-                exts.push_back(ext);
-        }
-    }
-    return exts;
+    return collect_supported_extensions(writers_);
 }
 
 }  // namespace pulp::audio

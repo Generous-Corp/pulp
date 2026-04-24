@@ -64,14 +64,8 @@ public:
     std::string format_name() const override { return "OGG Vorbis"; }
 };
 
-// Register OGG reader during static initialization
-namespace {
-    struct OggRegistrar {
-        OggRegistrar() {
-            FormatRegistry::instance().register_reader(std::make_unique<OggReader>());
-        }
-    };
-    static OggRegistrar ogg_registrar;
+std::unique_ptr<FormatReader> create_ogg_reader() {
+    return std::make_unique<OggReader>();
 }
 
 }  // namespace pulp::audio
