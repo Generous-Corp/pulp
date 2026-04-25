@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-25 18:43 EDT
+Last reviewed: 2026-04-25 19:08 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -94,6 +94,10 @@ Latest complete Codecov `main` report observed while updating this doc:
   - `ship`: `36.48%`
   - `tools`: `39.89%`
 
+`main` has since advanced to `e61dce8d907c29888fd7dd97ae7f49e3bc219662`
+after `#789` merged. The next complete Codecov `main` report for that
+commit had not landed at the time of this update.
+
 Merged after the Phase 1 closeout / `#723` baseline:
 
 - `#649` CLI/tools tranche 1 -> `8449b6e8`
@@ -110,17 +114,20 @@ Merged after the Phase 1 closeout / `#723` baseline:
 - `#777` real CLAP `PluginSlot` coverage -> `478f489c`
 - `#782` VST3 adapter process-path coverage -> `648c2d27`
 - `#786` render DirtyTracker / RenderLoop edge coverage -> `26dd396d`
+- `#789` Android ship/package helper coverage -> `e61dce8d`
 
 Open Phase 3 PRs:
 
 - `#788` events socket-IPC coverage, branch
-  `feature/events-ipc-coverage-642`, head `4cb33f4e`. This tranche
+  `feature/events-ipc-coverage-642`, head `2ac5b09e`. This tranche
   extends `test/test_ipc.cpp` with malformed socket endpoint rejection,
   non-throwing socket endpoint parsing in
   `core/events/src/interprocess_connection.cpp`, and a deterministic
   localhost client/server framed-message exchange. After `#771` merged, this
   branch was rebased onto `origin/main` and duplicate shared CLI support
-  commits were skipped, leaving only the events tranche. Local validation is
+  commits were skipped, leaving only the events tranche. After `#789` merged,
+  the branch was rebased again onto `origin/main` at
+  `e61dce8d907c29888fd7dd97ae7f49e3bc219662`. Local validation is
   green: `pulp-test-ipc` (`34` assertions / `9` test
   cases), focused CTest `IPC` (`9/9`), and
   whitespace. A direct multi-filter Catch2 invocation was intentionally not
@@ -129,49 +136,15 @@ Open Phase 3 PRs:
   `codecov`. The earlier Linux Namespace and Linux coverage failures did not
   expose usable logs through `gh`. A rerun of Build/Test `24929736674` and
   Coverage `24929736678` then sat in progress for roughly 90 minutes with no
-  logs and no timestamp movement, so both runs were canceled and rerun from
-  the same head `4cb33f4e`. GitHub reran the full Build/Test and Coverage
-  workflows, not only the Linux jobs; the current polling window shows no
-  failures while those fresh checks drain.
-- `#789` Android ship/package helper coverage, branch
-  `feature/android-package-coverage-644`, head `23ea43e2`. This tranche
-  adds a deterministic host-side fake Android SDK/toolchain harness for
-  `ship/platform/android/package_android.cpp` without requiring a real SDK,
-  device, keystore, Gradle install, bundletool, or network access. Scope:
-  SDK/build-tools/NDK discovery, fake `zipalign`, fake `apksigner` signing and
-  APK verification parsing, fake `jarsigner` AAB signing/verification, fake
-  Gradle APK/AAB artifact collection, missing-wrapper/missing-artifact errors,
-  and fake bundletool conversion with optional signing config. After `#786`
-  merged, this branch was rebased onto `origin/main`, pushed, opened as a PR,
-  and labeled `codecov`. The first GitHub Actions pass exposed a Windows
-  Namespace-only failure in batch-backed Android tool invocation. The first
-  follow-up fixed the skill-sync gap but still failed the same three Windows
-  Android tests. The second follow-up preserved quoted batch executable paths
-  for `cmd.exe /c` but still failed the same Windows tests. The current head
-  additionally fixed the fake Windows `apksigner.bat` fixture's unescaped
-  parenthesized echo text and quotes whole Gradle / bundletool `name=value`
-  arguments instead of only quoted values; that narrowed the Windows Namespace
-  failure to only the fake Gradle artifact-collection case. The current head
-  runs Gradle through `ChildProcess::run` with `ProcessOptions::working_directory`
-  set to the Gradle project directory instead of relying on inline
-  `cd ... && gradlew` shell parsing; the `ship` skill documents these Windows
-  batch gotchas. Local validation is green:
-  `cmake --build build --target pulp-test-android-package -j4`, direct
-  `pulp-test-android-package` (`64` assertions / `7` test cases), focused
-  Android package CTest (`7/7`), adjacent ship CTest slice for
-  Android/appcast/codesign/notarization/DMG (`20/20`), and whitespace.
-  `a3f124a1` cleared the platform/test lanes but failed required diff
-  coverage at `74.6%` because Windows-only helper branch lines were not marked
-  hit in the merged coverage artifact. The current head simplifies those
-  helpers without behavior changes to reduce the uncovered diff surface; the
-  current polling window shows no failures while fresh checks run on
-  `23ea43e2`.
+  logs and no timestamp movement, so both stuck runs were canceled. The branch
+  was then rebased after `#789`; the current polling window shows no failures
+  while the fresh `2ac5b09e` checks drain.
 
 Local Phase 3 draft not yet opened as a PR:
 - `#643` package-registry CLI/tools draft, worktree
   `/Users/danielraffel/Code/pulp-package-registry-coverage-643`, branch
   `feature/package-registry-coverage-643`, local commit `b1443bb9`. This draft is local-only and
-  should not be opened until `#788` / `#789` resolve. Current scope adds
+  should not be opened until `#788` resolves. Current scope adds
   `pulp-test-cli-package-registry` for pure local registry parsing,
   lock-file round trips, target TOML parsing/writing, semver, quality
   scoring, unsupported-target detection, and search ranking. Local validation
@@ -189,30 +162,24 @@ Open supporting PR:
 - `#774` refreshes this durable handoff/status document, branch
   `docs/coverage-status-2026-04-25`. The branch is updated as this
   tracker changes; use the PR head SHA in GitHub as the live value.
-  The branch has been rebased onto `origin/main` after `#786` merged and
+  The branch has been rebased onto `origin/main` after `#789` merged and
   remains docs-only.
 
 Next recovery actions:
 
-1. Poll `#788` and `#789`; merge manually when green because auto-merge is
-   disabled.
-2. Let `#788`'s fresh full Build/Test and Coverage workflow reruns drain.
-3. Let `#789`'s post-Windows-batch-fix GitHub Actions checks drain; pull the
-   exact failing job log first if anything turns red.
-4. Keep `#774` docs-only and let its post-`#786` rebase checks drain.
-5. After the active code PRs merge, refresh this section with the next
+1. Poll `#788`; merge manually when green because auto-merge is disabled.
+2. Let `#788`'s fresh full Build/Test and Coverage workflows on `2ac5b09e`
+   drain.
+3. Keep `#774` docs-only and let its post-`#789` rebase checks drain.
+4. After `#788` merges, refresh this section with the next
    complete Codecov `main` report.
-6. If `#789` Windows Namespace fails again, pull the fresh completed-run log
-   first and search for `test_android_package.cpp`, `Android signing helpers`,
-   `Android Gradle packaging`, and `Android bundletool`; do not patch further
-   without the new log.
-7. If `#788` Linux Namespace or Linux coverage fails again, pull the fresh log
+5. If `#788` Linux Namespace or Linux coverage fails again, pull the fresh log
    first; the current branch already has local IPC validation green.
-8. If a PR is green but GitHub reports it behind `main`, rebase that
+6. If a PR is green but GitHub reports it behind `main`, rebase that
    branch onto `origin/main`, push with lease, and let checks rerun.
-9. After `#788` and `#789` resolve, push/open the local `#643` draft
+7. After `#788` resolves, push/open the local `#643` draft
    (`b1443bb9`) as the next CLI/tools tranche PR.
-10. Continue Phase 3 from the tranche issues below, prioritizing
+8. Continue Phase 3 from the tranche issues below, prioritizing
    represented high-miss files over adding new perimeter lanes.
 
 ## Phase 1 corrected baseline
