@@ -149,7 +149,7 @@ Open Phase 3 PRs:
   active coverage branches. GitHub Actions is rerunning at `f9be330c`; no
   completed failures were visible at the last poll.
 - `#782` VST3 adapter process-path coverage, branch
-  `feature/vst3-adapter-coverage-493`, head `dcad28de`. This tranche adds
+  `feature/vst3-adapter-coverage-493`, head `0fd5f83c`. This tranche adds
   focused VST3 adapter coverage for parameter metadata, setup/release lifecycle,
   bus/event/process routing, sidechain visibility, secondary output zeroing,
   host input automation, plugin-to-host output automation, MIDI output, and
@@ -173,8 +173,12 @@ Open Phase 3 PRs:
   green. The `f09adb04` rerun failed the required diff-coverage gate because
   the shared `cmd_project.cpp` support commit left Windows helper returns,
   non-standalone `origin/main` fallback, and `--verify-builds` lines uncovered;
-  `dcad28de` adds direct coverage for those lines. GitHub Actions is rerunning
-  at `dcad28de`; no completed failures were visible at the last poll.
+  `dcad28de` adds direct coverage for those lines. A later automated review
+  correctly noted that the process-context test set a tempo value without
+  setting VST3's `kTempoValid` bit; `0fd5f83c` fixes that test validity flag,
+  with local `pulp-test-vst3-plugin-state` still green (`118` assertions / `5`
+  test cases). GitHub Actions is rerunning at `0fd5f83c`; no completed failures
+  were visible at the last poll.
 - `#786` render DirtyTracker / RenderLoop edge coverage, branch
   `feature/render-coverage-646-next`, head `54d209d5`. This tranche extends
   the still-open `#646` render component follow-up after the earlier merged
