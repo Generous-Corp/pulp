@@ -377,3 +377,62 @@ TEST_CASE("resolve_standalone_sdk handles custom sdk_path and checkout local cac
     REQUIRE(installed_checkout->passed);
     REQUIRE(installed_checkout->detail.find("(local cache)") != std::string::npos);
 }
+
+// Cover the platform-conditional silence helpers introduced for #780.
+// Both branches exist at compile time, so the assertion shape is the
+// same on every OS — only the *value* varies. The "leading space, then
+// 2> / >, then NUL on Windows or /dev/null elsewhere" contract is what
+// callers (cmd_project and any future shellouts) depend on.
+TEST_CASE("silence_stderr / silence_all return platform-correct redirects",
+          "[project-command][issue-780]") {
+    std::string stderr_redir = silence_stderr();
+    std::string all_redir    = silence_all();
+
+    REQUIRE_FALSE(stderr_redir.empty());
+    REQUIRE_FALSE(all_redir.empty());
+    REQUIRE(stderr_redir.front() == ' ');
+    REQUIRE(all_redir.front() == ' ');
+    REQUIRE(stderr_redir.find("2>") != std::string::npos);
+    REQUIRE(all_redir.find(">") != std::string::npos);
+    REQUIRE(all_redir.find("2>&1") != std::string::npos);
+
+#if defined(_WIN32)
+    REQUIRE(stderr_redir == " 2>NUL");
+    REQUIRE(all_redir == " >NUL 2>&1");
+#else
+    REQUIRE(stderr_redir == " 2>/dev/null");
+    REQUIRE(all_redir == " >/dev/null 2>&1");
+#endif
+}
+
+// Cover the source-tree fallback in main_pinned_version_at_origin.
+// The standalone path (test #138 above) exercises the toml-first
+// branch; this case has no pulp.toml on origin/main, so the function
+// must fall back to scanning CMakeLists.txt for a pulp pin and
+// returning it.
+TEST_CASE("main_pinned_version_at_origin reads source-tree CMakeLists when pulp.toml absent",
+          "[project-command][issue-780]") {
+    TempDir tmp;
+    auto origin = tmp.path / "origin.git";
+    auto seed = tmp.path / "seed";
+    auto feature = tmp.path / "feature";
+
+    require_run_ok("git init --bare -q " + quote(origin));
+
+    fs::create_directories(seed);
+    require_run_ok("git init -q " + quote(seed));
+    configure_git_identity(seed);
+    require_run_ok("git -C " + quote(seed) + " checkout -q -b main");
+    make_fetchcontent_project(seed, "0.5.0");
+    require_run_ok("git -C " + quote(seed) + " add CMakeLists.txt");
+    require_run_ok("git -C " + quote(seed) + " commit -q -m \"main pin\"");
+    require_run_ok("git -C " + quote(seed) + " remote add origin " + quote(origin));
+    require_run_ok("git -C " + quote(seed) + " push -q -u origin main");
+
+    require_run_ok("git clone -q " + quote(origin) + " " + quote(feature));
+    configure_git_identity(feature);
+
+    auto pinned = main_pinned_version_at_origin(feature, /*standalone=*/false);
+    REQUIRE(pinned.has_value());
+    REQUIRE(*pinned == "0.5.0");
+}
