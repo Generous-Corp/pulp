@@ -5,6 +5,50 @@
 
 namespace pulp::view {
 
+namespace {
+
+int clamp_position(const std::string& text, int position) {
+    return std::clamp(position, 0, static_cast<int>(text.size()));
+}
+
+int line_start_for_position(const std::string& text, int position) {
+    position = clamp_position(text, position);
+    while (position > 0 && text[static_cast<size_t>(position - 1)] != '\n') {
+        --position;
+    }
+    return position;
+}
+
+int line_end_for_position(const std::string& text, int position) {
+    position = clamp_position(text, position);
+    const int len = static_cast<int>(text.size());
+    while (position < len && text[static_cast<size_t>(position)] != '\n') {
+        ++position;
+    }
+    return position;
+}
+
+int vertical_line_position(const std::string& text, int caret, int direction) {
+    caret = clamp_position(text, caret);
+    const int current_start = line_start_for_position(text, caret);
+    const int current_end = line_end_for_position(text, caret);
+    const int column = caret - current_start;
+
+    if (direction < 0) {
+        if (current_start == 0) return caret;
+        const int previous_end = current_start - 1;
+        const int previous_start = line_start_for_position(text, previous_end);
+        return previous_start + std::min(column, previous_end - previous_start);
+    }
+
+    if (current_end >= static_cast<int>(text.size())) return caret;
+    const int next_start = current_end + 1;
+    const int next_end = line_end_for_position(text, next_start);
+    return next_start + std::min(column, next_end - next_start);
+}
+
+} // namespace
+
 void TextEditor::set_text(const std::string& t) {
     push_undo();
     text_ = t;
@@ -167,14 +211,13 @@ void TextEditor::move_word(int direction, bool extend) {
 }
 
 void TextEditor::move_to_line_start(bool extend) {
-    // For single-line, start = 0
-    caret_position_ = 0;
-    if (extend) selection_end_ = 0;
-    else selection_start_ = selection_end_ = 0;
+    caret_position_ = line_start_for_position(text_, caret_position_);
+    if (extend) selection_end_ = caret_position_;
+    else selection_start_ = selection_end_ = caret_position_;
 }
 
 void TextEditor::move_to_line_end(bool extend) {
-    caret_position_ = static_cast<int>(text_.size());
+    caret_position_ = line_end_for_position(text_, caret_position_);
     if (extend) selection_end_ = caret_position_;
     else selection_start_ = selection_end_ = caret_position_;
 }
@@ -242,12 +285,16 @@ bool TextEditor::on_key_event(const KeyEvent& event) {
 
         case KeyCode::up:
             if (!multi_line) { move_to_start(shift); return true; }
-            // TODO: multi-line up movement
+            caret_position_ = vertical_line_position(text_, caret_position_, -1);
+            if (shift) selection_end_ = caret_position_;
+            else selection_start_ = selection_end_ = caret_position_;
             return true;
 
         case KeyCode::down:
             if (!multi_line) { move_to_end(shift); return true; }
-            // TODO: multi-line down movement
+            caret_position_ = vertical_line_position(text_, caret_position_, 1);
+            if (shift) selection_end_ = caret_position_;
+            else selection_start_ = selection_end_ = caret_position_;
             return true;
 
         case KeyCode::home:

@@ -5,6 +5,18 @@
 using namespace pulp::view;
 using namespace pulp::canvas;
 
+namespace {
+
+KeyEvent key_event(KeyCode key, uint16_t modifiers = 0) {
+    KeyEvent event;
+    event.key = key;
+    event.modifiers = modifiers;
+    event.is_down = true;
+    return event;
+}
+
+} // namespace
+
 TEST_CASE("TextEditor set and get text", "[view][text_editor]") {
     TextEditor editor;
     REQUIRE(editor.is_empty());
@@ -156,6 +168,73 @@ TEST_CASE("TextEditor key event: Up goes to start in single-line", "[view][text_
     e.is_down = true;
     REQUIRE(editor.on_key_event(e));
     // Up in single-line moves to start — verify by typing
+}
+
+TEST_CASE("TextEditor multi-line up and down preserve the visual column", "[view][text_editor]") {
+    TextEditor editor;
+    editor.multi_line = true;
+    editor.on_focus_changed(true);
+    editor.set_text("abc\nde\nfghi");
+
+    REQUIRE(editor.caret_pos() == 11);
+
+    REQUIRE(editor.on_key_event(key_event(KeyCode::up)));
+    REQUIRE(editor.caret_pos() == 6);
+
+    REQUIRE(editor.on_key_event(key_event(KeyCode::up)));
+    REQUIRE(editor.caret_pos() == 2);
+
+    REQUIRE(editor.on_key_event(key_event(KeyCode::down)));
+    REQUIRE(editor.caret_pos() == 6);
+
+    REQUIRE(editor.on_key_event(key_event(KeyCode::down)));
+    REQUIRE(editor.caret_pos() == 9);
+}
+
+TEST_CASE("TextEditor multi-line home and end move within the current line", "[view][text_editor]") {
+    TextEditor editor;
+    editor.multi_line = true;
+    editor.on_focus_changed(true);
+    editor.set_text("abc\ndefg\nhi");
+
+    REQUIRE(editor.on_key_event(key_event(KeyCode::up)));
+    REQUIRE(editor.caret_pos() == 6);
+
+    REQUIRE(editor.on_key_event(key_event(KeyCode::home)));
+    REQUIRE(editor.caret_pos() == 4);
+
+    REQUIRE(editor.on_key_event(key_event(KeyCode::end_)));
+    REQUIRE(editor.caret_pos() == 8);
+}
+
+TEST_CASE("TextEditor shift-up extends multi-line selection", "[view][text_editor]") {
+    TextEditor editor;
+    editor.multi_line = true;
+    editor.on_focus_changed(true);
+    editor.set_text("abcd\nef\nghij");
+
+    REQUIRE(editor.on_key_event(key_event(KeyCode::up, kModShift)));
+    REQUIRE(editor.caret_pos() == 7);
+    REQUIRE(editor.has_selection());
+    REQUIRE(editor.selected_text() == "\nghij");
+
+    REQUIRE(editor.on_key_event(key_event(KeyCode::up, kModShift)));
+    REQUIRE(editor.caret_pos() == 2);
+    REQUIRE(editor.selected_text() == "cd\nef\nghij");
+}
+
+TEST_CASE("TextEditor multi-line Enter inserts a newline instead of returning", "[view][text_editor]") {
+    TextEditor editor;
+    editor.multi_line = true;
+    editor.on_focus_changed(true);
+    editor.set_text("alpha");
+
+    bool returned = false;
+    editor.on_return = [&](const std::string&) { returned = true; };
+
+    REQUIRE(editor.on_key_event(key_event(KeyCode::enter)));
+    REQUIRE(editor.text() == "alpha\n");
+    REQUIRE_FALSE(returned);
 }
 
 TEST_CASE("TextEditor paint produces draw commands", "[view][text_editor]") {
