@@ -9,6 +9,8 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
 <a id="v0450"></a>
+## [0.19.0]
+
 ## [0.45.0] - 2026-04-24
 
 - feat(doctor): pulp doctor --caches + build/test preflight (#744) ([#753](https://github.com/danielraffel/pulp/pull/753))
