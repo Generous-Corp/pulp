@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-25 18:11 EDT
+Last reviewed: 2026-04-25 18:17 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -131,7 +131,7 @@ Open Phase 3 PRs:
   the current polling window shows no failures while Linux Namespace plus
   Linux coverage drain.
 - `#789` Android ship/package helper coverage, branch
-  `feature/android-package-coverage-644`, head `3c3a1ea4`. This tranche
+  `feature/android-package-coverage-644`, head `a3f124a1`. This tranche
   adds a deterministic host-side fake Android SDK/toolchain harness for
   `ship/platform/android/package_android.cpp` without requiring a real SDK,
   device, keystore, Gradle install, bundletool, or network access. Scope:
@@ -145,16 +145,20 @@ Open Phase 3 PRs:
   follow-up fixed the skill-sync gap but still failed the same three Windows
   Android tests. The second follow-up preserved quoted batch executable paths
   for `cmd.exe /c` but still failed the same Windows tests. The current head
-  additionally fixes the fake Windows `apksigner.bat` fixture's unescaped
+  additionally fixed the fake Windows `apksigner.bat` fixture's unescaped
   parenthesized echo text and quotes whole Gradle / bundletool `name=value`
-  arguments instead of only quoted values; the `ship` skill documents both
-  Windows batch gotchas. Local validation is green:
+  arguments instead of only quoted values; that narrowed the Windows Namespace
+  failure to only the fake Gradle artifact-collection case. The current head
+  runs Gradle through `ChildProcess::run` with `ProcessOptions::working_directory`
+  set to the Gradle project directory instead of relying on inline
+  `cd ... && gradlew` shell parsing; the `ship` skill documents these Windows
+  batch gotchas. Local validation is green:
   `cmake --build build --target pulp-test-android-package -j4`, direct
   `pulp-test-android-package` (`64` assertions / `7` test cases), focused
   Android package CTest (`7/7`), adjacent ship CTest slice for
   Android/appcast/codesign/notarization/DMG (`20/20`), and whitespace. The
   current polling window shows no failures while fresh checks run on
-  `3c3a1ea4`.
+  `a3f124a1`.
 
 Local Phase 3 draft not yet opened as a PR:
 - `#643` package-registry CLI/tools draft, worktree
