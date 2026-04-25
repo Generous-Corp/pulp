@@ -1,11 +1,11 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-24
+Last reviewed: 2026-04-25
 
 This is the durable tracker for the repo-wide coverage compliance
-program under `#641`. The Phase 1 representation stack has now landed
-on `main`; this document records the corrected Codecov baseline that
-Phase 2 planning should use.
+program under `#641`. Phase 1 representation is complete, Phase 2 gap
+planning has been seeded from the corrected Codecov baseline, and Phase
+3 gap closure is active through small, reviewable PR tranches.
 
 ## Goal
 
@@ -23,8 +23,7 @@ Target tiers remain unchanged in `ci/coverage-targets.yaml`:
 
 ### Phase 1 - Representation / Codecov truth
 
-Status: code and workflow slices are merged; this rebaseline is the
-closeout artifact.
+Status: complete.
 
 Finish line state:
 
@@ -40,7 +39,8 @@ Finish line state:
 
 ### Phase 2 - Gap planning
 
-Status: next.
+Status: complete enough to execute, with the roadmap tracked in `#641`
+and the tranche issues listed below.
 
 Finish line:
 
@@ -53,7 +53,7 @@ Finish line:
 
 ### Phase 3 - Gap closure
 
-Status: parked until Phase 2 produces the tranche plan.
+Status: active.
 
 Finish line:
 
@@ -63,7 +63,55 @@ Finish line:
 - deferred or exceptional surfaces stay documented explicitly instead of
   silently omitted
 
-## Corrected main baseline
+## Current live state
+
+Latest complete Codecov `main` report observed while updating this doc:
+
+- commit: `b4edebe046fdf2886891016fff4158a195ee7fbd`
+- workflow: Coverage run `24925413069`, completed successfully
+- overall tracked coverage: `43.28%` over `70,175` lines in `556` files
+- covered lines: `30,372`
+- note: `origin/main` is currently `95e917cf40026e29035f05c9eca1307ba68fa177`;
+  that commit is a changelog-only `[skip ci]` commit, so Codecov's latest
+  complete coverage report is from the previous executable-code commit.
+
+Merged after the Phase 1 closeout / `#723` baseline:
+
+- `#649` CLI/tools tranche 1 -> `8449b6e8`
+- `#648` events tranche 1 -> `357eded1`
+- `#666` ship/state deterministic hardening -> `75439c89`
+- `#734` audio/platform tranche 1 -> `2224d11d`
+- `#741` midi/signal tranche 1 -> `63fd5ad5`
+- `#757` scan-worker CLI coverage -> `9053e0b`
+- `#755` LV2 host/entry coverage -> `aed8acb`
+- `#756` validation harness edge coverage -> `22d1e69`
+- `#765` TextEditor multiline navigation coverage -> `7257a154`
+
+Open Phase 3 PRs:
+
+- `#766` OSC UDP sender/receiver edge coverage, branch
+  `feature/osc-udp-coverage-493`, head `0cecfa51`. The macOS UBSan
+  abort was reproduced locally and fixed by replacing the legacy
+  `gethostbyname`/`hostent` hostname fallback with `getaddrinfo`.
+  Local normal and UBSan OSC tests are green; GitHub Actions is still
+  draining required lanes.
+- `#771` WidgetBridge extended-controls coverage, branch
+  `feature/widget-bridge-coverage-493`, head `172bfb71`. Local
+  `pulp-test-widget-bridge`, focused CTest, skill sync, version report,
+  and whitespace checks are green; GitHub Actions has started.
+
+Next recovery actions:
+
+1. Poll `#766` and `#771`; merge green PRs manually because auto-merge
+   is disabled.
+2. If a PR is green but GitHub reports it behind `main`, rebase that
+   branch onto `origin/main`, push with lease, and let checks rerun.
+3. After active PRs merge, refresh this section with the next complete
+   Codecov `main` report.
+4. Continue Phase 3 from the tranche issues below, prioritizing
+   represented high-miss files over adding new perimeter lanes.
+
+## Phase 1 corrected baseline
 
 Source:
 
@@ -72,7 +120,8 @@ Source:
 - GitHub Actions Coverage run `24886403280`, completed successfully
   across Android/Kotlin, Linux/Clang, Windows/Clang, and macOS/Clang
 
-Current observed `main` snapshot:
+This snapshot is the corrected Phase 1 component baseline used to seed
+Phase 2 planning:
 
 - overall tracked coverage: `39.28%` over `68,001` lines in `551` files
 - `audio`: `20.95%`
@@ -185,19 +234,20 @@ represented surface.
 - `#568` historical multi-language expansion umbrella. Active execution
   now rolls up through `#641`.
 
-## Phase 2 starting point
+## Phase 2 / Phase 3 working queue
 
-Phase 2 should start from the component snapshot above, not from older
-pre-`#715` numbers. The first planning pass should:
+Phase 2 started from the component snapshot above, not from older
+pre-`#715` numbers. The current execution rule is:
 
 1. Rank below-target counted components against `ci/coverage-targets.yaml`.
-2. Separate "represented but zero/low coverage" files from intentionally
+2. Separate represented but zero/low coverage files from intentionally
    unrepresented surfaces.
-3. Refresh or close the parked tranche issues based on the corrected
-   numbers.
-4. Post the final Phase 1 closeout and Phase 2 entry note on `#641`.
+3. Land small, focused PRs that improve represented files and keep diff
+   coverage above the required 75% floor.
+4. Refresh this doc and `#641` after each batch of merges or after a
+   meaningful Codecov `main` rebaseline.
 
-### Phase 2 / Phase 3 issues to re-evaluate
+### Phase 2 / Phase 3 tranche issues
 
 - `#640` audio / platform tranche
 - `#642` events tranche
@@ -206,12 +256,15 @@ pre-`#715` numbers. The first planning pass should:
 - `#645` midi / signal tranche
 - `#646` render tranche
 - `#493` host / format / view and related hardening gaps
+- `#737` optional native surfaces not compiled by the default coverage
+  configuration
 
-### Parked draft PRs to re-evaluate
+### Deferred perimeter follow-ups
 
-- `#648` draft events tranche
-- `#649` draft CLI / tools tranche
-- `#666` draft state / ship hardening split from `#647`
+- `#659` authored JavaScript source lane
+- `#657` Node bindings plus shell / PowerShell classification, closed as
+  explicitly out of scope for now
+- `#77` mobile runtime / iOS simulator coverage
 
 ## Control-plane invariants
 
