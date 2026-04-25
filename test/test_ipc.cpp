@@ -50,9 +50,16 @@ TEST_CASE("IPC connect to nonexistent fails", "[events][ipc]") {
     REQUIRE(conn.state() == IpcState::Error);
 }
 
-TEST_CASE("IPC socket connect rejects endpoints without a port", "[events][ipc]") {
+TEST_CASE("IPC socket connect rejects malformed endpoints", "[events][ipc]") {
     InterprocessConnection conn;
     REQUIRE_FALSE(conn.connect("127.0.0.1", IpcTransport::Socket));
+    REQUIRE(conn.state() == IpcState::Error);
+
+    REQUIRE_FALSE(conn.connect("127.0.0.1:not-a-port", IpcTransport::Socket));
+    REQUIRE(conn.state() == IpcState::Error);
+
+    REQUIRE_FALSE(conn.connect("127.0.0.1:70000", IpcTransport::Socket));
+    REQUIRE(conn.state() == IpcState::Error);
     REQUIRE_FALSE(conn.is_connected());
 }
 
@@ -79,6 +86,20 @@ TEST_CASE("IPC lambda callbacks settable", "[events][ipc]") {
 TEST_CASE("IPC server initial state", "[events][ipc]") {
     InterprocessConnectionServer server;
     REQUIRE_FALSE(server.is_running());
+}
+
+TEST_CASE("IPC socket server rejects malformed listen endpoints",
+          "[events][ipc][socket]") {
+    InterprocessConnectionServer server;
+    REQUIRE_FALSE(server.start("127.0.0.1:not-a-port", IpcTransport::Socket));
+    REQUIRE_FALSE(server.is_running());
+
+    REQUIRE_FALSE(server.start("70000", IpcTransport::Socket));
+    REQUIRE_FALSE(server.is_running());
+
+    InterprocessConnection conn;
+    REQUIRE_FALSE(conn.create_server("127.0.0.1:not-a-port", IpcTransport::Socket));
+    REQUIRE(conn.state() == IpcState::Error);
 }
 
 TEST_CASE("IPC socket server accepts client and exchanges framed messages",
