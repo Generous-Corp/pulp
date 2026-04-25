@@ -2050,6 +2050,14 @@ mod tests {
         let td = tempfile::tempdir().unwrap();
         let root = td.path();
         write(&root.join("pulp.toml"), "sdk_version = \"0.45.0\"\n");
+        // bump_one() guards on `cmake_path.exists()` BEFORE the standalone
+        // dispatch (matching the C++ side: a real consumer always carries
+        // a CMakeLists.txt with a `find_package(Pulp ...)` mirror). The
+        // fixture mirrors that shape so the standalone path is reachable.
+        write(
+            &root.join("CMakeLists.txt"),
+            "find_package(Pulp 0.45.0 REQUIRED)\n",
+        );
         let args = BumpArgs::default();
         let e = bump_one(root, "stdalone", "0.40.0", &args, noop_verify);
         assert_eq!(e.status, "skipped");
@@ -2061,6 +2069,10 @@ mod tests {
         let td = tempfile::tempdir().unwrap();
         let root = td.path();
         write(&root.join("pulp.toml"), "sdk_version = \"0.45.0\"\n");
+        write(
+            &root.join("CMakeLists.txt"),
+            "find_package(Pulp 0.45.0 REQUIRED)\n",
+        );
         let args = BumpArgs {
             allow_downgrade: true,
             ..BumpArgs::default()
