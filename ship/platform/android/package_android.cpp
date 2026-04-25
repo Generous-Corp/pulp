@@ -74,6 +74,28 @@ static std::string shell_quote(const std::string& s) {
 #endif
 }
 
+static std::string shell_quote_path(const fs::path& path) {
+    return "\"" + path.string() + "\"";
+}
+
+static std::string shell_invoke_path(const fs::path& path) {
+#ifdef _WIN32
+    // Batch-backed SDK tools need `call` under cmd.exe so quoted paths and
+    // arguments survive `/c` parsing consistently.
+    return "call " + shell_quote_path(path);
+#else
+    return shell_quote(path.string());
+#endif
+}
+
+static std::string shell_invoke_command(const std::string& command) {
+#ifdef _WIN32
+    return "call " + shell_quote(command);
+#else
+    return shell_quote(command);
+#endif
+}
+
 // Platform-aware command execution
 static std::string run_cmd(const std::string& cmd, int timeout_ms = 120000) {
 #ifdef _WIN32
@@ -224,8 +246,8 @@ bool zipalign_apk(const fs::path& input_apk, const fs::path& output_apk) {
     auto tool = find_android_build_tool("zipalign");
     if (tool.empty()) return false;
 
-    std::string cmd = "\"" + tool.string() + "\" -f 4 \""
-        + input_apk.string() + "\" \"" + output_apk.string() + "\"";
+    std::string cmd = shell_invoke_path(tool) + " -f 4 "
+        + shell_quote_path(input_apk) + " " + shell_quote_path(output_apk);
     return run_status(cmd) == 0;
 }
 
@@ -237,14 +259,14 @@ bool sign_apk(const fs::path& apk_path, const AndroidKeystoreConfig& keystore) {
     auto key_pass = resolve_password(
         keystore.key_password.empty() ? keystore.store_password : keystore.key_password);
 
-    std::string cmd = "\"" + tool.string() + "\" sign"
-        " --ks \"" + keystore.keystore_path.string() + "\""
-        " --ks-key-alias \"" + keystore.key_alias + "\""
+    std::string cmd = shell_invoke_path(tool) + " sign"
+        " --ks " + shell_quote_path(keystore.keystore_path) +
+        " --ks-key-alias " + shell_quote(keystore.key_alias) +
         " --ks-pass pass:" + shell_quote(store_pass) +
         " --key-pass pass:" + shell_quote(key_pass) +
         " --v2-signing-enabled true"
         " --v3-signing-enabled true"
-        " \"" + apk_path.string() + "\"";
+        " " + shell_quote_path(apk_path);
     return run_status(cmd) == 0;
 }
 
@@ -283,8 +305,9 @@ AndroidSigningInfo check_android_signing(const fs::path& path) {
         return info;
     }
 
-    auto output = run_cmd("\"" + tool.string() + "\" verify --print-certs --verbose \""
-                          + path.string() + "\" 2>&1");
+    auto output = run_cmd(shell_invoke_path(tool)
+                          + " verify --print-certs --verbose "
+                          + shell_quote_path(path) + " 2>&1");
 
     info.is_signed = output.find("Verified using") != std::string::npos;
     info.v2_signed = output.find("Verified using v2 scheme") != std::string::npos
@@ -336,8 +359,8 @@ AndroidPackageResult build_android_package(
     }
 
     // Build command
-    std::string cmd = "cd \"" + gradle_project_dir.string() + "\" && \""
-        + gradlew.string() + "\"" + tasks;
+    std::string cmd = "cd " + shell_quote_path(gradle_project_dir)
+        + " && " + shell_invoke_path(gradlew) + tasks;
 
     if (!abi_filter.empty())
         cmd += " -Pandroid.injected.build.abi=" + abi_filter;
@@ -347,7 +370,7 @@ AndroidPackageResult build_android_package(
         auto store_pass = resolve_password(keystore->store_password);
         auto key_pass = resolve_password(
             keystore->key_password.empty() ? keystore->store_password : keystore->key_password);
-        cmd += " -Pandroid.injected.signing.store.file=\"" + keystore->keystore_path.string() + "\"";
+        cmd += " -Pandroid.injected.signing.store.file=" + shell_quote_path(keystore->keystore_path);
         cmd += " -Pandroid.injected.signing.store.password=" + shell_quote(store_pass);
         cmd += " -Pandroid.injected.signing.key.alias=" + keystore->key_alias;
         cmd += " -Pandroid.injected.signing.key.password=" + shell_quote(key_pass);
@@ -405,16 +428,16 @@ bool aab_to_apks(const fs::path& aab_path,
     if (auto env = get_env("BUNDLETOOL"))
         bundletool = *env;
 
-    std::string cmd = bundletool + " build-apks"
-        " --bundle=\"" + aab_path.string() + "\""
-        " --output=\"" + output_apks.string() + "\""
+    std::string cmd = shell_invoke_command(bundletool) + " build-apks"
+        " --bundle=" + shell_quote_path(aab_path) +
+        " --output=" + shell_quote_path(output_apks) +
         " --overwrite";
 
     if (keystore) {
         auto store_pass = resolve_password(keystore->store_password);
         auto key_pass = resolve_password(
             keystore->key_password.empty() ? keystore->store_password : keystore->key_password);
-        cmd += " --ks=\"" + keystore->keystore_path.string() + "\"";
+        cmd += " --ks=" + shell_quote_path(keystore->keystore_path);
         cmd += " --ks-key-alias=" + keystore->key_alias;
         cmd += " --ks-pass=pass:" + shell_quote(store_pass);
         cmd += " --key-pass=pass:" + shell_quote(key_pass);
