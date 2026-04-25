@@ -1,6 +1,5 @@
 #include <pulp/osc/osc.hpp>
 
-#include <cstring>
 #include <thread>
 #include <atomic>
 #include <cerrno>
@@ -106,14 +105,40 @@ bool Sender::connect(const std::string& host, uint16_t port) {
     impl_->dest.sin_port = htons(port);
 
     if (inet_pton(AF_INET, host.c_str(), &impl_->dest.sin_addr) <= 0) {
-        // Try hostname resolution
-        auto* he = gethostbyname(host.c_str());
-        if (!he) {
+        addrinfo hints{};
+        hints.ai_family = AF_INET;
+        hints.ai_socktype = SOCK_DGRAM;
+
+        addrinfo* results = nullptr;
+        const std::string port_string = std::to_string(port);
+        if (getaddrinfo(host.c_str(), port_string.c_str(), &hints, &results) != 0
+            || results == nullptr) {
             close_socket(impl_->sock);
             impl_->sock = kInvalidSocket;
             return false;
         }
-        std::memcpy(&impl_->dest.sin_addr, he->h_addr_list[0], he->h_length);
+
+        bool resolved = false;
+        for (auto* result = results; result != nullptr; result = result->ai_next) {
+            if (result->ai_addr == nullptr
+                || result->ai_family != AF_INET
+                || static_cast<size_t>(result->ai_addrlen) < sizeof(sockaddr_in)) {
+                continue;
+            }
+
+            const auto* addr = reinterpret_cast<const sockaddr_in*>(result->ai_addr);
+            impl_->dest.sin_addr = addr->sin_addr;
+            resolved = true;
+            break;
+        }
+
+        freeaddrinfo(results);
+
+        if (!resolved) {
+            close_socket(impl_->sock);
+            impl_->sock = kInvalidSocket;
+            return false;
+        }
     }
 
     impl_->connected = true;
