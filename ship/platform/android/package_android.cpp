@@ -80,6 +80,14 @@ static std::string shell_quote_path(const fs::path& path) {
     return "\"" + path.string() + "\"";
 }
 
+static std::string shell_quote_arg(const std::string& arg) {
+    return shell_quote(arg);
+}
+
+static std::string shell_quote_path_arg(const std::string& prefix, const fs::path& path) {
+    return shell_quote(prefix + path.string());
+}
+
 #ifdef _WIN32
 static std::string wrap_for_cmd_c(const std::string& cmd) {
     // `cmd.exe /c` strips the first and last quote when the command begins
@@ -275,8 +283,8 @@ bool sign_apk(const fs::path& apk_path, const AndroidKeystoreConfig& keystore) {
     std::string cmd = shell_invoke_path(tool) + " sign"
         " --ks " + shell_quote_path(keystore.keystore_path) +
         " --ks-key-alias " + shell_quote(keystore.key_alias) +
-        " --ks-pass pass:" + shell_quote(store_pass) +
-        " --key-pass pass:" + shell_quote(key_pass) +
+        " --ks-pass " + shell_quote_arg("pass:" + store_pass) +
+        " --key-pass " + shell_quote_arg("pass:" + key_pass) +
         " --v2-signing-enabled true"
         " --v3-signing-enabled true"
         " " + shell_quote_path(apk_path);
@@ -383,10 +391,11 @@ AndroidPackageResult build_android_package(
         auto store_pass = resolve_password(keystore->store_password);
         auto key_pass = resolve_password(
             keystore->key_password.empty() ? keystore->store_password : keystore->key_password);
-        cmd += " -Pandroid.injected.signing.store.file=" + shell_quote_path(keystore->keystore_path);
-        cmd += " -Pandroid.injected.signing.store.password=" + shell_quote(store_pass);
-        cmd += " -Pandroid.injected.signing.key.alias=" + keystore->key_alias;
-        cmd += " -Pandroid.injected.signing.key.password=" + shell_quote(key_pass);
+        cmd += " " + shell_quote_path_arg("-Pandroid.injected.signing.store.file=",
+                                           keystore->keystore_path);
+        cmd += " " + shell_quote_arg("-Pandroid.injected.signing.store.password=" + store_pass);
+        cmd += " " + shell_quote_arg("-Pandroid.injected.signing.key.alias=" + keystore->key_alias);
+        cmd += " " + shell_quote_arg("-Pandroid.injected.signing.key.password=" + key_pass);
     }
 
     // Run Gradle (can take minutes for a full build)
@@ -442,18 +451,18 @@ bool aab_to_apks(const fs::path& aab_path,
         bundletool = *env;
 
     std::string cmd = shell_invoke_command(bundletool) + " build-apks"
-        " --bundle=" + shell_quote_path(aab_path) +
-        " --output=" + shell_quote_path(output_apks) +
+        " " + shell_quote_path_arg("--bundle=", aab_path) +
+        " " + shell_quote_path_arg("--output=", output_apks) +
         " --overwrite";
 
     if (keystore) {
         auto store_pass = resolve_password(keystore->store_password);
         auto key_pass = resolve_password(
             keystore->key_password.empty() ? keystore->store_password : keystore->key_password);
-        cmd += " --ks=" + shell_quote_path(keystore->keystore_path);
-        cmd += " --ks-key-alias=" + keystore->key_alias;
-        cmd += " --ks-pass=pass:" + shell_quote(store_pass);
-        cmd += " --key-pass=pass:" + shell_quote(key_pass);
+        cmd += " " + shell_quote_path_arg("--ks=", keystore->keystore_path);
+        cmd += " " + shell_quote_arg("--ks-key-alias=" + keystore->key_alias);
+        cmd += " " + shell_quote_arg("--ks-pass=pass:" + store_pass);
+        cmd += " " + shell_quote_arg("--key-pass=pass:" + key_pass);
     }
 
     return run_status(cmd) == 0;

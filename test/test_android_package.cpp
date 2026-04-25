@@ -149,8 +149,8 @@ void write_fake_apksigner(const fs::path& build_tools, const fs::path& log_path)
     write_tool(tool_path(build_tools, "apksigner"),
         "echo %*>>\"" + log_path.string() + "\"\r\n"
         "if \"%1\"==\"verify\" (\r\n"
-        "  echo Verified using v2 scheme (APK Signature Scheme v2): true\r\n"
-        "  echo Verified using v3 scheme (APK Signature Scheme v3): true\r\n"
+        "  echo Verified using v2 scheme ^(APK Signature Scheme v2^): true\r\n"
+        "  echo Verified using v3 scheme ^(APK Signature Scheme v3^): true\r\n"
         "  echo Signer #1 certificate DN: CN=Pulp Android Test,O=Pulp\r\n"
         ")\r\n"
         "exit /b 0\r\n");
@@ -366,6 +366,7 @@ TEST_CASE("Android Gradle packaging collects APK and AAB artifacts", "[ship][and
         true,
         true);
 
+    INFO(result.error);
     REQUIRE(result.success);
     REQUIRE(result.error.empty());
     REQUIRE(result.apk_path.filename() == "app-release.apk");
@@ -417,7 +418,9 @@ TEST_CASE("Android bundletool conversion passes optional signing config", "[ship
     auto apks = temp.path / "app-release.apks";
     std::ofstream(aab) << "aab";
 
-    REQUIRE(aab_to_apks(aab, apks, &keystore));
+    auto converted = aab_to_apks(aab, apks, &keystore);
+    INFO("bundletool log: " << read_text(bundletool_log));
+    REQUIRE(converted);
     REQUIRE(fs::exists(apks));
 
     auto args = read_text(bundletool_log);
