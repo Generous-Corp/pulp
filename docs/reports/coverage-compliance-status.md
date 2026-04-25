@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-25 19:08 EDT
+Last reviewed: 2026-04-25 19:11 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -143,13 +143,14 @@ Open Phase 3 PRs:
 Local Phase 3 draft not yet opened as a PR:
 - `#643` package-registry CLI/tools draft, worktree
   `/Users/danielraffel/Code/pulp-package-registry-coverage-643`, branch
-  `feature/package-registry-coverage-643`, local commit `b1443bb9`. This draft is local-only and
+  `feature/package-registry-coverage-643`, local commit `16bbe5bb`. This draft is local-only and
   should not be opened until `#788` resolves. Current scope adds
   `pulp-test-cli-package-registry` for pure local registry parsing,
   lock-file round trips, target TOML parsing/writing, semver, quality
   scoring, unsupported-target detection, and search ranking. Local validation
-  is green in a no-GPU/no-examples build directory using the completed local
-  `mbedtls` source tree: configure
+  is green after rebasing onto `origin/main` at
+  `e61dce8d907c29888fd7dd97ae7f49e3bc219662`, in a no-GPU/no-examples build
+  directory using the completed local `mbedtls` source tree: configure
   `cmake -S . -B build-package-registry-localdeps -DCMAKE_BUILD_TYPE=Debug
   -DPULP_ENABLE_GPU=OFF -DPULP_BUILD_EXAMPLES=OFF
   -DFETCHCONTENT_SOURCE_DIR_MBEDTLS=$PWD/build/_deps/mbedtls-src`, build
