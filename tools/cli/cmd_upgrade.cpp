@@ -124,6 +124,10 @@ int cmd_upgrade(const std::vector<std::string>& args) {
         if (cache && !cache->latest_version.empty()) {
             latest = cache->latest_version;
             url = cache->release_notes_url;
+        } else if (pulp::runtime::get_env("PULP_UPDATE_CHECK_DISABLED")) {
+            std::cout << "Installed:  v" << installed << "\n";
+            std::cout << "Latest:     update check disabled; not queried\n";
+            return 0;
         } else {
             std::cout << "Cache empty; querying GitHub Releases...\n";
             uc::GitHubReleasesFetcher fetcher;

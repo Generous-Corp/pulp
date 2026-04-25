@@ -161,6 +161,15 @@ Gotchas:
   run *before* `pulp pr` if you want to see what the gate will say. Same
   script, `--mode=report`.
 
+## `pulp upgrade --check-only`
+
+The sandbox E2E harness runs this command with
+`PULP_UPDATE_CHECK_DISABLED=1` and expects a non-silent, network-free result.
+If the update cache is empty in that mode, print the installed CLI version
+and an explicit disabled/not-queried latest-version line instead of probing
+GitHub Releases. Otherwise PR sandbox lanes can fail spuriously when GitHub
+release fetches are blocked or rate-limited.
+
 ## `pulp validate` — plugin-format validators
 
 Runs `clap-validator` / `pluginval` / `auval` / optional AAX validator
