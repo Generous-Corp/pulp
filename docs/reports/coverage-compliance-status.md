@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-25 19:44 EDT
+Last reviewed: 2026-04-25 19:52 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -167,6 +167,14 @@ Open supporting PR:
   tracker changes; use the PR head SHA in GitHub as the live value.
   The branch has been rebased onto `origin/main` after `#789` merged and
   remains docs-only.
+
+Local environment note:
+
+- Pulp's Shipyard source pin is `v0.46.0` in `tools/shipyard.toml`
+  and the release workflows. On 2026-04-25, PATH had drifted to
+  `shipyard, version 0.50.0`; rerunning `./tools/install-shipyard.sh`
+  restored the pinned binary, and `shipyard --version` prints
+  `shipyard, version 0.46.0`.
 
 Next recovery actions:
 
