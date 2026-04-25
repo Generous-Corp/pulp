@@ -117,6 +117,11 @@ source of truth.
    slash command must capture the `Latest:` value from `--check-only`
    and forward it as `--to "$LATEST"` (#583 Codex P1 / wave-4 sweep).
 
+   In CI / sandbox lanes, `PULP_UPDATE_CHECK_DISABLED=1` makes
+   `--check-only` network-free. If the cache is empty in that mode, the
+   command reports the installed CLI version plus an explicit
+   disabled/not-queried latest line instead of querying GitHub Releases.
+
    ```bash
    pulp upgrade --notes --json                  # defaults: from = installed CLI, to = cached latest
    pulp upgrade --notes --json --to "$LATEST"   # recommended — use value captured from --check-only
