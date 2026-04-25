@@ -67,14 +67,32 @@ Finish line:
 
 Latest complete Codecov `main` report observed while updating this doc:
 
-- commit: `b4edebe046fdf2886891016fff4158a195ee7fbd`
-- workflow: Coverage run `24925413069`, completed successfully
-- overall tracked coverage: `43.28%` over `70,175` lines in `556` files
-- covered lines: `30,372`
-- note: `origin/main` is currently `a80929c42ff61b88cd366383baad2ee817558b57`.
-  Coverage and sanitizer workflows for that head are still in progress, so
-  Codecov's latest complete `main` report is still the older executable-code
-  baseline above until the new `main` Coverage run completes.
+- commit: `a80929c42ff61b88cd366383baad2ee817558b57`
+- workflow: Coverage run `24926536334`, completed successfully
+- overall tracked coverage: `43.27%` over `70,197` lines in `556` files
+- covered lines: `30,376`
+- current component coverage from the Codecov API:
+  - `audio`: `25.57%`
+  - `canvas`: `66.77%`
+  - `dsl`: `63.38%`
+  - `events`: `30.24%`
+  - `format`: `47.92%`
+  - `host`: `37.43%`
+  - `midi`: `50.14%`
+  - `osc`: `62.22%`
+  - `platform`: `52.06%`
+  - `render`: `56.68%`
+  - `runtime`: `51.69%`
+  - `signal`: `66.03%`
+  - `state`: `65.70%`
+  - `view`: `43.71%`
+  - `android`: `13.83%`
+  - `apple`: `25.36%`
+  - `linux`: `7.07%`
+  - `windows`: `10.67%`
+  - `cli`: `32.10%`
+  - `ship`: `34.44%`
+  - `tools`: `39.46%`
 
 Merged after the Phase 1 closeout / `#723` baseline:
 
