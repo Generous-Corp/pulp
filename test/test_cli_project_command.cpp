@@ -368,6 +368,67 @@ TEST_CASE("bump_one verify-builds succeeds with a cached standalone SDK",
             != std::string::npos);
 }
 
+TEST_CASE("bump_one skips standalone no-op managed sdk_path rewrites at target",
+          "[project-command][issue-244]") {
+    TempDir tmp;
+    auto home = tmp.path / "home";
+    auto project = tmp.path / "Clock";
+    ScopedEnv pulp_home("PULP_HOME", home.string());
+
+    auto current_sdk = local_sdk_cache_path("0.2.0");
+    make_standalone_project(project, "0.2.0", current_sdk.generic_string());
+
+    BumpOptions opts;
+    auto skipped = bump_one(project, "0.2.0", opts, "Clock");
+    REQUIRE(skipped.status == "skipped");
+    REQUIRE(skipped.failure_reason == "already at target version");
+    REQUIRE(skipped.edits.empty());
+
+    auto toml = read_file_text(project / "pulp.toml");
+    REQUIRE(toml.find("sdk_path = \"" + current_sdk.generic_string() + "\"")
+            != std::string::npos);
+}
+
+TEST_CASE("bump_one repairs standalone lockstep drift even when origin main already pins target",
+          "[project-command][issue-244]") {
+    TempDir tmp;
+    auto origin = tmp.path / "origin.git";
+    auto seed = tmp.path / "seed";
+    auto feature = tmp.path / "feature";
+
+    require_run_ok("git init --bare -q " + quote(origin));
+
+    fs::create_directories(seed);
+    require_run_ok("git init -q " + quote(seed));
+    configure_git_identity(seed);
+    require_run_ok("git -C " + quote(seed) + " checkout -q -b main");
+    make_standalone_project(seed, "0.2.0");
+    require_run_ok("git -C " + quote(seed) + " add CMakeLists.txt pulp.toml");
+    require_run_ok("git -C " + quote(seed) + " commit -q -m \"main pin\"");
+    require_run_ok("git -C " + quote(seed) + " remote add origin " + quote(origin));
+    require_run_ok("git -C " + quote(seed) + " push -q -u origin main");
+
+    require_run_ok("git clone -q " + quote(origin) + " " + quote(feature));
+    configure_git_identity(feature);
+    require_run_ok("git -C " + quote(feature) + " checkout -q -b feature");
+    make_standalone_project(feature, "0.2.0");
+    write_file(feature / "CMakeLists.txt",
+               "cmake_minimum_required(VERSION 3.20)\n"
+               "project(Clock VERSION 1.0.0 LANGUAGES CXX)\n"
+               "find_package(Pulp 0.1.0 REQUIRED)\n");
+    require_run_ok("git -C " + quote(feature) + " add CMakeLists.txt pulp.toml");
+    require_run_ok("git -C " + quote(feature) + " commit -q -m \"stale cmake pin\"");
+
+    BumpOptions opts;
+    auto bumped = bump_one(feature, "0.2.0", opts, "Clock");
+    REQUIRE(bumped.status == "bumped");
+    REQUIRE(bumped.edits.size() == 1);
+    REQUIRE(bumped.edits.front().kind == pb::PinKind::CMakeFindPackagePulpVersion);
+    REQUIRE(read_file_text(feature / "CMakeLists.txt")
+                .find("find_package(Pulp 0.2.0 REQUIRED)")
+            != std::string::npos);
+}
+
 TEST_CASE("resolve_standalone_sdk falls back from mismatched sdk_path to caches",
           "[project-command][issue-244]") {
     TempDir tmp;

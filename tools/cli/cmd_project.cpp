@@ -470,7 +470,7 @@ pb::UndoEntry bump_one(const fs::path& project_path,
             return entry;
         }
 
-        if (!opts.allow_redundant) {
+        if (current != target_version && !opts.allow_redundant) {
             if (auto main_pin = main_pinned_version_at_origin(project_path, true);
                 main_pin && !pb::is_downgrade(*main_pin, target_version)) {
                 entry.status = "skipped";
@@ -513,7 +513,7 @@ pb::UndoEntry bump_one(const fs::path& project_path,
             auto replacement = managed_sdk_path_replacement(fs::path(path_site.current_pin),
                                                             current,
                                                             target_version);
-            if (replacement) {
+            if (replacement && *replacement != path_site.current_pin) {
                 if (!add_edit(toml_path, pb::PinKind::PulpTomlSdkPath,
                               path_site.current_pin, false, *replacement)) {
                     entry.status = "failed";

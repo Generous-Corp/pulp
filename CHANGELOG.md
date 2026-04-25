@@ -8,6 +8,11 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v0471"></a>
+## [0.47.1] - 2026-04-25
+
+- fix(project): close standalone project bump edge cases ([#770](https://github.com/danielraffel/pulp/pull/770))
+
 <a id="v0470"></a>
 ## [0.47.0] - 2026-04-25
 

@@ -397,7 +397,16 @@ Gotchas:
 - **`--allow-redundant` bypasses the origin/main guard.** `pulp project
   bump` fetches `origin main` best-effort and refuses by default when
   main already pins the target-or-newer SDK. Fetch failures fail open
-  so offline users aren't blocked by stale refs.
+  so offline users aren't blocked by stale refs. In standalone
+  projects, still compare local `pulp.toml` / `find_package(Pulp ...)`
+  lockstep before firing the guard: if `sdk_version` already matches
+  the target but `find_package` is stale, the command should repair the
+  local drift instead of forcing `--allow-redundant`.
+- **Managed `sdk_path` rewrites are only real edits when the path
+  changes.** If a standalone project already targets the requested SDK
+  and `sdk_path` already points at that managed cache, the command must
+  return "already at target version" rather than staging a no-op
+  rewrite just because the path is managed.
 - **`project_bump` is decoupled from `cli_common`.** Same rule as
   `projects_registry` / `update_mode` — the unit test binaries link
   just the module + Catch2. Don't reach into `cli_common.hpp` from

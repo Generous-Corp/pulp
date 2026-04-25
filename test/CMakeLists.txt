@@ -238,7 +238,8 @@ catch_discover_tests(pulp-test-cli-project-bump-all)
 # cli_common.cpp. The test includes cmd_project.cpp directly so the
 # anonymous-namespace helpers can be exercised without shelling out.
 # The desktop CLI subdirectory is skipped for PULP_ENABLE_GPU=OFF, but
-# this test still compiles cli_common.cpp in sanitizer/IWYU configurations.
+# this test still compiles cli_common.cpp in sanitizer/IWYU configurations,
+# so generate the shared version header here too.
 file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/tools/cli")
 configure_file(
     "${CMAKE_SOURCE_DIR}/tools/cli/pulp_version_gen.h.in"
