@@ -400,6 +400,143 @@ TEST_CASE("DOMContentLoaded dispatch runs the queued handler when document suppo
     REQUIRE(saw_after_dcl);
 }
 
+TEST_CASE("inline scripts with single-quoted and unrecognized types "
+          "are classified correctly",
+          "[view][import][issue-758]") {
+    // Three additional inline-script attribute forms exercised here:
+    //   1. type='text/javascript' (single-quoted) — kind='javascript'
+    //   2. type=text/javascript   (unquoted)      — kind='javascript'
+    //   3. type="text/template"   (unrecognized)  — kind='other', skipped
+    //
+    // The "other" path proves that exotic script types (vendor MIME
+    // types, x-shader, x-template, etc.) are silently ignored rather
+    // than blown up — important because real Claude bundles can carry
+    // template stamps the harness shouldn't touch.
+    const std::string lib_js = R"JS( globalThis.__pulp_lib__ = 1; )JS";
+    std::ostringstream manifest;
+    manifest << "{" << manifest_entry("u-lib", "text/javascript", lib_js, true) << "}";
+
+    std::string body;
+    body += R"(<div id="root"></div>)";
+    body += R"(<script src="u-lib"></script>)";
+    body += R"(<script type='text/javascript'>
+        var root = document.getElementById('root');
+        for (var i = 0; i < 4; i++) {
+            var d = document.createElement('div');
+            d.id = 'sq-' + i;
+            d.setAttribute('data-pulp-role', 'single-quoted');
+            root.appendChild(d);
+        }
+    </script>)";
+    body += R"(<script type=text/javascript>
+        var r = document.getElementById('root');
+        for (var i = 0; i < 4; i++) {
+            var d = document.createElement('div');
+            d.id = 'uq-' + i;
+            d.setAttribute('data-pulp-role', 'unquoted');
+            r.appendChild(d);
+        }
+    </script>)";
+    body += R"(<script type="text/template" id="ignored-template">
+        // This must not execute — type=text/template is not in the
+        // executable kinds set. The presence of arbitrary content here
+        // (including raw HTML) must NOT crash the harness.
+        <div>{{ would.crash.if.evaluated }}</div>
+    </script>)";
+
+    std::string err;
+    ClaudeRuntimeOptions opts;
+    opts.error_out = &err;
+    auto ir = parse_claude_html_with_runtime(
+        build_envelope(manifest.str(), body), opts);
+
+    INFO("runtime error_out: " << err);
+    REQUIRE(ir.source == DesignSource::claude);
+
+    bool saw_sq = false, saw_uq = false;
+    std::function<void(const IRNode&)> walk = [&](const IRNode& n) {
+        auto it = n.attributes.find("data-pulp-role");
+        if (it != n.attributes.end()) {
+            if (it->second == "single-quoted") saw_sq = true;
+            if (it->second == "unquoted") saw_uq = true;
+        }
+        for (const auto& c : n.children) walk(c);
+    };
+    walk(ir.root);
+    REQUIRE(saw_sq);
+    REQUIRE(saw_uq);
+}
+
+TEST_CASE("babel-side transform errors are surfaced and the script is skipped",
+          "[view][import][issue-758]") {
+    // Babel shim that THROWS when called — simulates a malformed JSX
+    // payload. The harness should catch it (via the babel-side
+    // try/catch wrapped around Babel.transform), set
+    // __pulpBabelErr__ to a non-empty string, surface it via
+    // error_out, and continue without evaluating an empty `code`.
+    const std::string babel_throwing_shim = R"JS(
+        globalThis.Babel = {
+            transform: function(src, opts) {
+                throw new Error('synthetic SyntaxError in babel-throwing shim');
+            }
+        };
+    )JS";
+    std::ostringstream manifest;
+    manifest << "{" << manifest_entry("u-babel", "text/javascript", babel_throwing_shim, true) << "}";
+
+    std::string body;
+    body += R"(<div id="root"></div>)";
+    body += R"(<script src="u-babel"></script>)";
+    // 12 cells from inline JS so the materialized DOM clears the >9
+    // floor and the harness doesn't fall back to the static parser
+    // (which would overwrite our babel-error diagnostic in error_out).
+    body += R"(<script type="text/javascript">
+        var root = document.getElementById('root');
+        for (var i = 0; i < 12; i++) {
+            var d = document.createElement('div');
+            d.id = 'cell-' + i;
+            d.setAttribute('data-pulp-role', 'cell');
+            root.appendChild(d);
+        }
+    </script>)";
+    body += R"(<script type="text/babel">
+        // Should not execute — Babel.transform throws.
+        var d = document.createElement('div');
+        d.id = 'should-not-appear';
+        d.setAttribute('data-pulp-role', 'babel-leaked');
+        document.getElementById('root').appendChild(d);
+    </script>)";
+
+    std::string err;
+    ClaudeRuntimeOptions opts;
+    opts.error_out = &err;
+    auto ir = parse_claude_html_with_runtime(
+        build_envelope(manifest.str(), body), opts);
+
+    INFO("runtime error_out: " << err);
+    REQUIRE(ir.source == DesignSource::claude);
+
+    // Materialized IR should NOT contain the role marker that the
+    // failing babel block tried to inject — the harness must have
+    // surfaced the babel-side error and skipped the eval. (We can't
+    // assert err.find("babel error") because error_out is the
+    // fallback reason, cleared on a successful harness run; the
+    // behavioral assertion below is the contract.)
+    bool saw_leaked = false;
+    bool saw_cell = false;
+    std::function<void(const IRNode&)> walk = [&](const IRNode& n) {
+        auto it = n.attributes.find("data-pulp-role");
+        if (it != n.attributes.end()) {
+            if (it->second == "babel-leaked") saw_leaked = true;
+            if (it->second == "cell")         saw_cell = true;
+        }
+        for (const auto& c : n.children) walk(c);
+    };
+    walk(ir.root);
+    REQUIRE(saw_cell);                 // proves the inline JS ran (sanity)
+    REQUIRE_FALSE(saw_leaked);         // proves the babel block was skipped
+}
+
 TEST_CASE("real Spectr Claude bundle materialises widgets when "
           "PULP_CLAUDE_BUNDLE_FIXTURE is set",
           "[view][import][issue-758][.fixture]") {

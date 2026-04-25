@@ -209,13 +209,16 @@ std::vector<InlineScript> extract_inline_template_scripts(const std::string& tem
         // javascript_indices.
         if (std::regex_search(attrs, src_attr_re)) continue;
 
-        // Read the type attribute, lower-case it for matching.
+        // Read the type attribute, lower-case it for matching. Each of
+        // the three regex sub-groups represents one valid attribute
+        // form (double-quoted, single-quoted, unquoted) — pick whichever
+        // matched.
         std::string type_lc;
         std::smatch tm;
         if (std::regex_search(attrs, tm, type_attr_re)) {
-            if (tm[1].matched) type_lc = tm[1].str();
-            else if (tm[2].matched) type_lc = tm[2].str();
-            else if (tm[3].matched) type_lc = tm[3].str();
+            for (size_t g = 1; g <= 3; ++g) {
+                if (tm[g].matched) { type_lc = tm[g].str(); break; }
+            }
         }
         std::transform(type_lc.begin(), type_lc.end(), type_lc.begin(),
             [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
@@ -223,7 +226,9 @@ std::vector<InlineScript> extract_inline_template_scripts(const std::string& tem
         // Skip the bundler envelope tags — those are not executable JS.
         if (type_lc.rfind("__bundler/", 0) == 0) continue;
 
-        std::string kind;
+        // Classify the kind. Anything that isn't recognized as JS, Babel,
+        // or JSON is classified as "other" and the harness ignores it.
+        std::string kind = "other";
         if (type_lc.empty() ||
             type_lc == "text/javascript" ||
             type_lc == "application/javascript" ||
@@ -234,8 +239,6 @@ std::vector<InlineScript> extract_inline_template_scripts(const std::string& tem
         } else if (type_lc.size() >= 5 &&
                    type_lc.compare(type_lc.size() - 5, 5, "/json") == 0) {
             kind = "json";
-        } else {
-            kind = "other";
         }
 
         out.push_back({std::move(kind), std::move(body)});
@@ -682,21 +685,24 @@ DesignIR parse_claude_html_with_runtime(const std::string& html, ClaudeRuntimeOp
         // Step 1: inline `text/javascript` (and untyped `<script>`) blocks
         // in document order. Soft-fail per script — match the existing
         // payload-eval pattern at lines ~580-595.
+        auto soft_eval = [&](const std::string& kind_label, size_t i,
+                             const std::string& source_with_void) {
+            try {
+                engine.evaluate(source_with_void);
+            } catch (const std::exception& e) {
+                std::string msg = "inline " + kind_label + " script "
+                    + std::to_string(i) + " threw: " + e.what();
+                set_runtime_error(opts, msg);
+            } catch (...) {
+                std::string msg = "inline " + kind_label + " script "
+                    + std::to_string(i) + " threw: unknown exception";
+                set_runtime_error(opts, msg);
+            }
+        };
         for (size_t i = 0; i < inline_scripts.size(); ++i) {
             const auto& s = inline_scripts[i];
             if (s.kind != "javascript") continue;
-            std::string source = s.source + "\n;void 0";
-            try {
-                engine.evaluate(source);
-            } catch (const std::exception& e) {
-                std::string msg = std::string("inline JS script ") + std::to_string(i)
-                    + " threw: " + e.what();
-                set_runtime_error(opts, msg);
-            } catch (...) {
-                std::string msg = std::string("inline JS script ") + std::to_string(i)
-                    + " threw: unknown exception";
-                set_runtime_error(opts, msg);
-            }
+            soft_eval("JS", i, s.source + "\n;void 0");
         }
 
         // Step 2: inline `text/babel` (and `text/jsx`) blocks. Verify
@@ -711,13 +717,18 @@ DesignIR parse_claude_html_with_runtime(const std::string& html, ClaudeRuntimeOp
         if (has_any_babel) {
             bool babel_loaded = false;
             try {
+                // QuickJS / JSC may report the boolean expression as
+                // bool, int32, or float64 depending on which path the
+                // engine took to coerce — accept any numeric-or-bool
+                // truthy value.
                 auto v = engine.evaluate(
-                    "(typeof globalThis.Babel !== 'undefined' && "
-                    " typeof globalThis.Babel.transform === 'function') ? 1 : 0");
-                if (v.isInt32()) babel_loaded = (v.getInt32() != 0);
-                else if (v.isInt64()) babel_loaded = (v.getInt64() != 0);
-                else if (v.isFloat32() || v.isFloat64()) babel_loaded = (v.getFloat64() != 0.0);
-                else if (v.isBool()) babel_loaded = v.getBool();
+                    "!!(typeof globalThis.Babel !== 'undefined' && "
+                    "   typeof globalThis.Babel.transform === 'function')");
+                if (v.isBool())          babel_loaded = v.getBool();
+                else if (v.isInt32())    babel_loaded = (v.getInt32() != 0);
+                else if (v.isInt64())    babel_loaded = (v.getInt64() != 0);
+                else if (v.isFloat32() || v.isFloat64())
+                    babel_loaded = (v.getFloat64() != 0.0);
             } catch (...) {
                 babel_loaded = false;
             }
@@ -731,35 +742,37 @@ DesignIR parse_claude_html_with_runtime(const std::string& html, ClaudeRuntimeOp
                 // source for embedding in a JS string literal — JSX
                 // happily contains characters that would break a
                 // hand-rolled escape (template literals, comments, etc.).
+                auto soft_step = [&](size_t i, const char* phase,
+                                     const std::string& src) -> bool {
+                    try {
+                        engine.evaluate(src);
+                        return true;
+                    } catch (const std::exception& e) {
+                        std::string msg = "inline babel script "
+                            + std::to_string(i) + " " + phase
+                            + " failed: " + e.what();
+                        set_runtime_error(opts, msg);
+                        return false;
+                    } catch (...) {
+                        std::string msg = "inline babel script "
+                            + std::to_string(i) + " " + phase
+                            + " failed: unknown exception";
+                        set_runtime_error(opts, msg);
+                        return false;
+                    }
+                };
+
                 for (size_t i = 0; i < inline_scripts.size(); ++i) {
                     const auto& s = inline_scripts[i];
                     if (s.kind != "babel") continue;
 
-                    // Push the raw JSX source into a global slot via a
-                    // properly-escaped JS string literal.
-                    {
-                        std::string set_src = "globalThis.__pulpBabelSrc__ = ";
-                        set_src += json_string_literal(s.source);
-                        set_src += ";void 0";
-                        try {
-                            engine.evaluate(set_src);
-                        } catch (const std::exception& e) {
-                            std::string msg = std::string("inline babel script ")
-                                + std::to_string(i) + " stash failed: " + e.what();
-                            set_runtime_error(opts, msg);
-                            continue;
-                        } catch (...) {
-                            std::string msg = std::string("inline babel script ")
-                                + std::to_string(i) + " stash failed: unknown exception";
-                            set_runtime_error(opts, msg);
-                            continue;
-                        }
-                    }
+                    // Stash → transform → check babel-side error → eval.
+                    std::string set_src = "globalThis.__pulpBabelSrc__ = ";
+                    set_src += json_string_literal(s.source);
+                    set_src += ";void 0";
+                    if (!soft_step(i, "stash", set_src)) continue;
 
-                    // Run Babel.transform inside the engine and stash
-                    // the resulting code into a second global slot.
-                    try {
-                        engine.evaluate(
+                    if (!soft_step(i, "transform",
                             "(function(){"
                             "  try {"
                             "    var out = globalThis.Babel.transform("
@@ -771,20 +784,9 @@ DesignIR parse_claude_html_with_runtime(const std::string& html, ClaudeRuntimeOp
                             "    globalThis.__pulpBabelOut__ = '';"
                             "    globalThis.__pulpBabelErr__ = String(e && e.message ? e.message : e);"
                             "  }"
-                            "})();void 0");
-                    } catch (const std::exception& e) {
-                        std::string msg = std::string("inline babel script ")
-                            + std::to_string(i) + " transform failed: " + e.what();
-                        set_runtime_error(opts, msg);
-                        continue;
-                    } catch (...) {
-                        std::string msg = std::string("inline babel script ")
-                            + std::to_string(i) + " transform failed: unknown exception";
-                        set_runtime_error(opts, msg);
-                        continue;
-                    }
+                            "})();void 0")) continue;
 
-                    // Probe Babel error first — surface and skip if so.
+                    // Probe the babel-side error string and surface if non-empty.
                     try {
                         auto err_v = engine.evaluate(
                             "globalThis.__pulpBabelErr__ || ''");
@@ -799,22 +801,8 @@ DesignIR parse_claude_html_with_runtime(const std::string& html, ClaudeRuntimeOp
                         }
                     } catch (...) { /* ignore probe failure */ }
 
-                    // Evaluate the transformed JS via the engine. Walk
-                    // through a global so we don't have to ferry the
-                    // (potentially large) compiled output back to C++
-                    // and then re-stringify it for engine.evaluate().
-                    try {
-                        engine.evaluate(
-                            "(0, eval)(globalThis.__pulpBabelOut__);void 0");
-                    } catch (const std::exception& e) {
-                        std::string msg = std::string("inline babel script ")
-                            + std::to_string(i) + " eval failed: " + e.what();
-                        set_runtime_error(opts, msg);
-                    } catch (...) {
-                        std::string msg = std::string("inline babel script ")
-                            + std::to_string(i) + " eval failed: unknown exception";
-                        set_runtime_error(opts, msg);
-                    }
+                    soft_step(i, "eval",
+                        "(0, eval)(globalThis.__pulpBabelOut__);void 0");
                 }
 
                 // Tidy up the staging slots so they don't leak into the
