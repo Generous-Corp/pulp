@@ -17,6 +17,9 @@ plugin_version=$(jq -r .version .claude-plugin/plugin.json 2>/dev/null)
 
 ### 2. Pulp SDK / CLI version
 Canonical source is `project(Pulp VERSION X.Y.Z)` in the repo's `CMakeLists.txt`. Prefer the running CLI when available, fall back to parsing:
+
+Canonical command surface for this slash-command: `pulp version`
+
 ```bash
 if command -v pulp >/dev/null 2>&1; then
     sdk_version=$(pulp version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)

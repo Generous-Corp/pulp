@@ -117,6 +117,21 @@ std::string read_pulp_toml_value(const fs::path& project_root, const std::string
 std::string read_sdk_version(const fs::path& project_root);
 fs::path read_sdk_path_hint(const fs::path& project_root);
 fs::path read_sdk_checkout_hint(const fs::path& project_root);
+struct StandaloneSdkResolution {
+    std::string requested_version;
+    fs::path sdk_path_hint;
+    fs::path sdk_checkout_hint;
+    fs::path resolved_sdk_dir;
+    std::string sdk_path_version;
+    bool sdk_path_config_ready = false;
+    bool sdk_path_version_known = false;
+    bool sdk_path_version_matches = false;
+    bool sdk_path_custom_unverifiable = false;
+    bool used_sdk_path_hint = false;
+    std::string warning;
+};
+StandaloneSdkResolution resolve_standalone_sdk(const fs::path& project_root,
+                                               bool materialize);
 bool enforce_project_cli_compatibility(const fs::path& project_root,
                                        const std::string& command_name,
                                        bool allow_unsupported_sdk);

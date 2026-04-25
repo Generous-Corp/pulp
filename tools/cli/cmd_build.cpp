@@ -91,24 +91,16 @@ int cmd_build(const std::vector<std::string>& args) {
         // Standalone projects need CMAKE_PREFIX_PATH to find the SDK
         if (standalone_mode) {
             pulp_debug("cmd_build: resolve SDK (standalone)");
-            auto version = read_sdk_version(project_root);
-            auto sdk_dir = read_sdk_path_hint(project_root);
-            auto checkout_hint = read_sdk_checkout_hint(project_root);
-            auto config = sdk_dir / "lib" / "cmake" / "Pulp" / "PulpConfig.cmake";
-            if (sdk_dir.empty() || !fs::exists(config)) {
-                if (!checkout_hint.empty() && fs::exists(checkout_hint)) {
-                    pulp_debug("cmd_build: ensure_checkout_sdk");
-                    sdk_dir = ensure_checkout_sdk(checkout_hint, version);
-                } else {
-                    pulp_debug("cmd_build: ensure_sdk (may download)");
-                    sdk_dir = ensure_sdk(version);
-                }
+            auto sdk = resolve_standalone_sdk(project_root, true);
+            if (!sdk.warning.empty()) {
+                print_warn(sdk.warning);
             }
-            if (sdk_dir.empty()) {
-                std::cerr << "Error: could not obtain Pulp SDK v" << version << "\n";
+            if (sdk.resolved_sdk_dir.empty()) {
+                std::cerr << "Error: could not obtain Pulp SDK v"
+                          << sdk.requested_version << "\n";
                 return 1;
             }
-            configure_cmd += " -DCMAKE_PREFIX_PATH=" + sdk_dir.string();
+            configure_cmd += " -DCMAKE_PREFIX_PATH=" + shell_quote(sdk.resolved_sdk_dir);
             pulp_debug("cmd_build: SDK resolved");
         }
 

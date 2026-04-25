@@ -52,6 +52,9 @@ namespace fs = std::filesystem;
 // ── Pin site ────────────────────────────────────────────────────────────────
 
 enum class PinKind {
+    PulpTomlSdkVersion,  // sdk_version = "0.23.0" inside pulp.toml
+    PulpTomlSdkPath,     // sdk_path = ".../0.23.0" inside pulp.toml
+    CMakeFindPackagePulpVersion, // find_package(Pulp 0.23.0 REQUIRED)
     FetchContentGitTag,   // GIT_TAG v0.23.0 inside FetchContent_Declare(pulp ...)
     PulpAddProject,       // pulp_add_project(NAME VERSION 0.23.0 ...)
     ProjectVersion,       // project(NAME VERSION 0.23.0 ...)
@@ -77,6 +80,16 @@ struct PinSite {
 //
 // Returns `PinKind::Unknown` with empty fields when nothing is found.
 PinSite find_pin_site(const std::string& cmake_source);
+
+// Standalone SDK-mode projects pin Pulp through `pulp.toml` and an
+// optional versioned `find_package(Pulp X.Y.Z REQUIRED)` CMake line.
+// `project(... VERSION ...)` in those projects is the product version,
+// not the Pulp SDK pin, so callers use these dedicated helpers instead
+// of `find_pin_site()`.
+PinSite find_find_package_pulp_version(const std::string& cmake_source);
+PinSite find_toml_string_value(const std::string& toml_source,
+                               const std::string& key,
+                               PinKind kind);
 
 // True when the found pin cannot be safely rewritten:
 //   - empty pin text
@@ -165,6 +178,14 @@ bool is_downgrade(const std::string& from, const std::string& to);
 // are carried so the report surfaced to the user matches what the
 // undo file shows.
 
+struct UndoEdit {
+    fs::path path;
+    PinKind kind = PinKind::Unknown;
+    std::string old_value;
+    std::string new_value;
+    bool old_value_style_has_v = false;
+};
+
 struct UndoEntry {
     fs::path project_path;
     std::string project_name;
@@ -173,6 +194,8 @@ struct UndoEntry {
     PinKind pin_kind = PinKind::Unknown;
     std::string status;              // bumped | dry_run | skipped | failed
     std::string failure_reason;      // only set when status == "failed"
+    std::vector<std::string> notes;   // transient report notes, not required for undo
+    std::vector<UndoEdit> edits;      // precise file edits to restore on undo
 };
 
 struct UndoBatch {

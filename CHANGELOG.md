@@ -9,6 +9,10 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
 <a id="v0460"></a>
+## [0.21.0]
+
+## [0.47.0]
+
 ## [0.46.0] - 2026-04-24
 
 - feat(doctor): validator discovery + auto-heal broken-signature pluginval/clap-validator/auval (#743) ([#749](https://github.com/danielraffel/pulp/pull/749))

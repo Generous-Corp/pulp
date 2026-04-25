@@ -426,12 +426,23 @@ empty list — no first-run setup is required.
 
 **Status**: usable
 
-Per-project SDK pin management. Updates the pinned Pulp version in
-a project's `CMakeLists.txt` — recognizing `FetchContent_Declare(pulp
-... GIT_TAG vX.Y.Z)`, `pulp_add_project(NAME VERSION X.Y.Z ...)`, and
-`project(NAME VERSION X.Y.Z ...)` — and records an undo batch at
-`~/.pulp/bump-undo-<timestamp>.json` so mistakes are one command
-away from recovery.
+Per-project SDK pin management. Updates a consumer project's pinned
+Pulp SDK version and records an undo batch at
+`~/.pulp/bump-undo-<timestamp>.json` so mistakes are one command away
+from recovery.
+
+In standalone SDK-mode projects (`pulp.toml` present), the SDK pin is
+`pulp.toml` `sdk_version`. `pulp project bump` updates that field and
+the versioned `find_package(Pulp X.Y.Z ...)` line together. It does
+not rewrite `project(NAME VERSION ...)`; that remains the app/plugin
+product version. If `sdk_path` points at a managed Pulp SDK cache for
+the old version, it is moved to the matching new cache path. Custom
+`sdk_path` values are left alone and verified later by `pulp build`.
+
+In legacy source-embedded projects, the command recognizes
+`FetchContent_Declare(pulp ... GIT_TAG vX.Y.Z)`,
+`pulp_add_project(NAME VERSION X.Y.Z ...)`, and
+`project(NAME VERSION X.Y.Z ...)`.
 
 ```bash
 pulp project bump                     # bump CWD project to CLI's own version
@@ -441,6 +452,8 @@ pulp project bump --all               # iterate ~/.pulp/projects.json
 pulp project bump --all --dry-run     # show plan without writing
 pulp project bump --force-dirty       # skip the git-clean check
 pulp project bump --allow-downgrade   # target older than current pin
+pulp project bump --allow-cli-skew    # target newer than installed CLI
+pulp project bump --allow-redundant   # ignore origin/main already-newer guard
 pulp project bump --verify-builds     # build after bump; roll back on failure
 
 pulp project undo                     # revert the newest batch
@@ -448,13 +461,24 @@ pulp project undo <timestamp>         # revert a specific batch
 ```
 
 **Safety rails:** branch pins (`GIT_TAG main`) and SHA pins are
-skipped with a diagnostic; dirty `CMakeLists.txt` is gated behind
+skipped with a diagnostic; dirty pin-bearing files are gated behind
 `--force-dirty`; target older than current is gated behind
-`--allow-downgrade`; `--all` isolates per-project failures so one
-broken project doesn't abort the rest.
+`--allow-downgrade`; target newer than the installed CLI is gated
+behind `--allow-cli-skew`; worktrees where `origin/main` already pins
+the target-or-newer SDK are skipped unless `--allow-redundant` is set;
+and `--all` isolates per-project failures so one broken project
+doesn't abort the rest. Running inside the Pulp source checkout is
+refused because that is a framework release/version operation, not a
+consumer project SDK bump.
 
 **Migration notes** from Slice 3 (`#548`) print after a successful
 bump so users see any API changes the hop introduced.
+
+**When to use `pulp upgrade` vs `pulp project bump`:** use
+`pulp upgrade` to replace the installed Pulp CLI/SDK toolchain. Use
+`pulp project bump` after that when the current project should move to
+that SDK. The Claude `/upgrade` flow exposes this as "upgrade the
+tool" vs "upgrade the tool and bump this project's SDK pin".
 
 **Post-upgrade hook:** the `update.bump_projects` config key (prompt
 | auto | off; default prompt) controls whether `pulp upgrade` prints
@@ -779,6 +803,18 @@ Remaining limitation:
 - `skia` and `coregraphics` still validate headless render paths, not the live app.
   Use `live-gpu` when you need proof from the actual design-tool renderer.
 
+### inspect
+
+**Status**: experimental
+
+Launch the built component inspector binary with its demo surface.
+
+```bash
+pulp inspect
+```
+
+This command delegates to `tools/screenshot/pulp-screenshot` in the active build tree. Build the repo first if the binary is missing.
+
 ### import-design
 
 **Status**: experimental
@@ -991,7 +1027,7 @@ Supported keys (all under `[update]`):
   Changing `update.mode` clears `~/.pulp/update-snooze` so the new mode takes effect on the next invocation.
 - `update.check_interval_hours` — integer hours between background checks (default `24`). The 24h default stays under the 60/hour anonymous GitHub API rate limit by a wide margin.
 - `update.channel` — `stable | beta` (default `stable`). Reserved for a future slice; ignored today.
-- `update.bump_projects` — `prompt | auto | off` (default `prompt`). Reserved for Slice 7 (#564); accepted now for forward compatibility but behaviorally a no-op in Slice 5.
+- `update.bump_projects` — `prompt | auto | off` (default `prompt`). Controls whether a successful `pulp upgrade` nudges the user toward `pulp project bump --all`.
 
 ### clean
 

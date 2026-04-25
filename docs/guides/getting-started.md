@@ -35,6 +35,12 @@ Pulp has two explicit creation/build modes:
 - **SDK mode**: the default for external projects. The generated project builds against a pinned installed SDK artifact and records that expectation in `pulp.toml`.
 - **Source-tree mode**: used for the Pulp repo itself and in-repo examples. These builds use the live checkout directly.
 
+When a newer Pulp release is available, use `pulp upgrade` to update
+the installed CLI/SDK tool. Then, from an SDK-mode project, use
+`pulp project bump` to move that project's `pulp.toml` `sdk_version`
+and `find_package(Pulp ...)` pin together. This does not change the
+project's own `project(... VERSION ...)` product version.
+
 If you run `pulp create my-plugin` from inside a Pulp source checkout, Pulp still creates an SDK-mode product project by default. Unless you override it, that project is created next to the repo root rather than under `examples/`. In that case, Pulp reuses the pinned SDK dependencies from the checkout and caches a local SDK install instead of assuming a public SDK download is available.
 
 What `pulp create` proves by default:

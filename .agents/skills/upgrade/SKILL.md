@@ -26,19 +26,24 @@ requires:
 
 This skill does NOT cover:
 
-- Bumping the **project's** pinned SDK version — that's the `cli-maintenance`
-  skill + `pulp version bump`.
+- Bumping the **project's** pinned SDK version — that's the
+  `cli-maintenance` skill + `pulp project bump`.
+- Bumping the Pulp framework/source checkout version — that's
+  `pulp version bump` plus the release workflow.
 - Shipping a PR from a dev branch — that's the `ci` skill via `pulp pr`.
 - Updating the Shipyard pin — that's the Dependency Update Workflow in
   `CLAUDE.md` (runs through `tools/deps/audit.py`).
 
 ## Mental model
 
-Three independently-versioned surfaces, two of which this skill acts on:
+Four independently-versioned surfaces, two of which this skill acts on
+directly and one of which it may hand off to `pulp project bump`:
 
 | Surface | Source of truth | How to upgrade |
 |---------|----------------|----------------|
 | Pulp CLI / SDK | `~/.pulp/bin/pulp` (installed binary) | `pulp upgrade` |
+| Consumer project SDK pin | project `pulp.toml` `sdk_version` + `find_package(Pulp X.Y.Z ...)` | `pulp project bump` |
+| Pulp source checkout version | Pulp repo `CMakeLists.txt` / release metadata | `pulp version bump` + release workflow |
 | Claude plugin | `.claude-plugin/plugin.json` | `/plugin install pulp` in Claude Code |
 | Shipyard pin | `tools/install-shipyard.sh` | Dependency Update Workflow (out of scope) |
 
@@ -47,6 +52,11 @@ one. `pulp upgrade --notes` prints migration notes for the hop without
 downloading anything. `pulp upgrade --notes --json` emits the same data
 as a stable-shape JSON document for agent consumption (the `/upgrade`
 slash command is the primary consumer).
+
+Use `pulp project bump` only after deciding a consumer project should
+move its SDK pin. It operates on the active project or the registry
+(`--all`); it does not upgrade the global CLI and it refuses to treat
+the Pulp source checkout as a consumer project.
 
 ## Discovery workflow (`pulp` on PATH is assumed)
 
@@ -261,9 +271,9 @@ present table:  CLI   vX.Y.Z → vA.B.C    (<hop>)
 list applicable notes (inline, breaking flagged)
 
 ask via AskUserQuestion:
-  - "Upgrade CLI + bump projects" → `pulp upgrade` + `pulp version bump patch` in each project
+  - "Upgrade CLI + bump project SDK" → `pulp upgrade` + `pulp project bump` in the active project
   - "Upgrade CLI only"            → `pulp upgrade`
-  - "Bump projects only"          → `pulp version bump patch` in each project
+  - "Bump project SDK only"       → `pulp project bump` in the active project or `--all` when explicitly requested
   - "Dismiss"                     → no action, remind user they can re-run `/upgrade`
 ```
 

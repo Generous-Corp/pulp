@@ -33,7 +33,7 @@ def find_repo_root():
 
 
 def extract_command_table_names(root):
-    """Parse command names from the command table in pulp_cli.cpp."""
+    """Parse user-visible command names from pulp_cli.cpp."""
     cli_path = root / "tools" / "cli" / "pulp_cli.cpp"
     if not cli_path.exists():
         return set()
@@ -41,9 +41,29 @@ def extract_command_table_names(root):
     content = cli_path.read_text()
     names = set()
 
-    # Match Command table entries: {"name", "summary", handler}
-    for m in re.finditer(r'\{"(\w[\w-]*)"', content):
-        names.add(m.group(1))
+    def extract_table(table_name):
+        table = re.search(
+            rf'static const \w+ {table_name}\[\] = \{{(?P<body>.*?)\n\}};',
+            content,
+            re.DOTALL,
+        )
+        if not table:
+            return
+        for m in re.finditer(r'^\s*\{"(\w[\w-]*)"', table.group("body"), re.MULTILINE):
+            names.add(m.group(1))
+
+    # Structured command tables drive the main help output.
+    for table_name in ("commands", "script_commands", "binary_commands"):
+        extract_table(table_name)
+
+    # A few legacy/package-manager commands are manually dispatched below
+    # the tables. Count the real top-level commands, but skip hidden
+    # compatibility aliases that are not advertised or documented.
+    hidden_aliases = {"add-component", "install"}
+    for m in re.finditer(r'if\s*\(\s*command\s*==\s*"(\w[\w-]*)"\s*\)', content):
+        command = m.group(1)
+        if command not in hidden_aliases:
+            names.add(command)
 
     return names
 

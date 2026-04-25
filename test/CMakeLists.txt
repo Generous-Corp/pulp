@@ -232,6 +232,39 @@ target_link_libraries(pulp-test-cli-project-bump-all PRIVATE
     Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-cli-project-bump-all)
 
+# CLI project command (#244): direct command-level coverage for
+# cmd_project.cpp's standalone worktree/root/dirty/redundant guards
+# plus the shared standalone SDK resolution/doctor helpers in
+# cli_common.cpp. The test includes cmd_project.cpp directly so the
+# anonymous-namespace helpers can be exercised without shelling out.
+add_executable(pulp-test-cli-project-command
+    test_cli_project_command.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/cli_common.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/fetchcontent_cache.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/project_bump.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/projects_registry.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/package_registry.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/migration_runtime.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/update_check.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/version_diag.cpp
+)
+target_include_directories(pulp-test-cli-project-command PRIVATE
+    ${CMAKE_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/tools/cli
+    ${CMAKE_BINARY_DIR}/tools/cli)
+target_compile_definitions(pulp-test-cli-project-command PRIVATE
+    PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_link_libraries(pulp-test-cli-project-command PRIVATE
+    pulp::runtime
+    pulp::tool-audio
+    pulp::ship
+    pulp::view
+    pulp::format
+    pulp::inspect
+    pulp::host
+    Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-cli-project-command)
+
 # CLI update-check (#499 Slice 2 / #547): pure-logic tests for the
 # ~/.pulp/update-cache.json round-trip, is_cache_stale boundary,
 # semver comparison, banner composition, TOML writer, and the

@@ -315,6 +315,58 @@ static bool find_version_in_call(const std::string& src,
     return false;
 }
 
+static std::size_t find_balanced_call_end(const std::string& src, std::size_t p) {
+    std::size_t call_end = std::string::npos;
+    int depth = 1;
+    for (std::size_t q = p; q < src.size(); ++q) {
+        if (src[q] == '(') ++depth;
+        else if (src[q] == ')') {
+            --depth;
+            if (depth == 0) { call_end = q; break; }
+        }
+    }
+    return call_end;
+}
+
+PinSite find_find_package_pulp_version(const std::string& cmake_source) {
+    PinSite site;
+    std::regex re(R"(\bfind_package\s*\(\s*Pulp\b)",
+                  std::regex_constants::ECMAScript);
+    auto begin = std::sregex_iterator(cmake_source.begin(), cmake_source.end(), re);
+    auto end = std::sregex_iterator();
+    for (auto it = begin; it != end; ++it) {
+        std::size_t p = static_cast<std::size_t>(it->position()) + it->length();
+        auto call_end = find_balanced_call_end(cmake_source, p);
+        if (call_end == std::string::npos) continue;
+
+        std::string literal;
+        std::size_t ls = 0, le = 0;
+        if (!find_literal_after(cmake_source, p, call_end, literal, ls, le)) continue;
+        if (normalize_pin(literal).empty()) continue;
+        site.kind = PinKind::CMakeFindPackagePulpVersion;
+        site.current_pin = literal;
+        site.start = ls;
+        site.end = le;
+        return site;
+    }
+    return site;
+}
+
+PinSite find_toml_string_value(const std::string& toml_source,
+                               const std::string& key,
+                               PinKind kind) {
+    PinSite site;
+    std::regex re("(^|[\\r\\n])[ \\t]*" + key + "[ \\t]*=[ \\t]*\"([^\"]*)(\")",
+                  std::regex_constants::ECMAScript);
+    std::smatch m;
+    if (!std::regex_search(toml_source, m, re)) return site;
+    site.kind = kind;
+    site.current_pin = m[2].str();
+    site.start = static_cast<std::size_t>(m.position(2));
+    site.end = site.start + site.current_pin.size();
+    return site;
+}
+
 PinSite find_pin_site(const std::string& cmake_source) {
     PinSite site;
     // 1. FetchContent_Declare(pulp ... GIT_TAG vX.Y.Z)
@@ -374,6 +426,9 @@ std::optional<std::string> rewrite_pin(const std::string& cmake_source,
 
 const char* pin_kind_name(PinKind k) {
     switch (k) {
+        case PinKind::PulpTomlSdkVersion: return "PulpTomlSdkVersion";
+        case PinKind::PulpTomlSdkPath:    return "PulpTomlSdkPath";
+        case PinKind::CMakeFindPackagePulpVersion: return "CMakeFindPackagePulpVersion";
         case PinKind::FetchContentGitTag: return "FetchContentGitTag";
         case PinKind::PulpAddProject:     return "PulpAddProject";
         case PinKind::ProjectVersion:     return "ProjectVersion";
@@ -383,6 +438,9 @@ const char* pin_kind_name(PinKind k) {
 }
 
 PinKind parse_pin_kind(const std::string& name) {
+    if (name == "PulpTomlSdkVersion") return PinKind::PulpTomlSdkVersion;
+    if (name == "PulpTomlSdkPath")    return PinKind::PulpTomlSdkPath;
+    if (name == "CMakeFindPackagePulpVersion") return PinKind::CMakeFindPackagePulpVersion;
     if (name == "FetchContentGitTag") return PinKind::FetchContentGitTag;
     if (name == "PulpAddProject")     return PinKind::PulpAddProject;
     if (name == "ProjectVersion")     return PinKind::ProjectVersion;
@@ -406,7 +464,22 @@ std::string serialize_undo_batch(const UndoBatch& batch) {
            << "\"old_pin_style_has_v\": " << (e.old_pin_style_has_v ? "true" : "false") << ", "
            << "\"pin_kind\": \""     << pin_kind_name(e.pin_kind)                     << "\", "
            << "\"status\": \""       << json_escape(e.status)                         << "\", "
-           << "\"failure_reason\": \"" << json_escape(e.failure_reason)               << "\""
+           << "\"failure_reason\": \"" << json_escape(e.failure_reason)               << "\", "
+           << "\"edits\": [";
+        bool first_edit = true;
+        for (const auto& edit : e.edits) {
+            if (!first_edit) os << ", ";
+            first_edit = false;
+            os << "{"
+               << "\"path\": \"" << json_escape(edit.path.generic_string()) << "\", "
+               << "\"kind\": \"" << pin_kind_name(edit.kind) << "\", "
+               << "\"old_value\": \"" << json_escape(edit.old_value) << "\", "
+               << "\"new_value\": \"" << json_escape(edit.new_value) << "\", "
+               << "\"old_value_style_has_v\": "
+               << (edit.old_value_style_has_v ? "true" : "false")
+               << "}";
+        }
+        os << "]"
            << "}";
     }
     os << "\n  ]\n}\n";
@@ -442,11 +515,48 @@ std::optional<UndoBatch> parse_undo_batch(const std::string& json) {
                     if (j.match('}')) break;
                     auto field = j.read_string();
                     j.skip_ws();
-                    if (!j.match(':')) break;
-                    j.skip_ws();
-                    if (j.pos < j.src.size() && j.src[j.pos] == '"') {
-                        auto val = j.read_string();
-                        if      (field == "project_path")    e.project_path = fs::path(val);
+	                    if (!j.match(':')) break;
+	                    j.skip_ws();
+	                    if (field == "edits" && j.pos < j.src.size() && j.src[j.pos] == '[') {
+	                        if (!j.match('[')) { j.skip_value(); }
+	                        while (true) {
+	                            j.skip_ws();
+	                            if (j.match(']')) break;
+	                            if (!j.match('{')) { j.skip_value(); continue; }
+	                            UndoEdit edit;
+	                            while (true) {
+	                                j.skip_ws();
+	                                if (j.match('}')) break;
+	                                auto edit_field = j.read_string();
+	                                j.skip_ws();
+	                                if (!j.match(':')) break;
+	                                j.skip_ws();
+	                                if (j.pos < j.src.size() && j.src[j.pos] == '"') {
+	                                    auto val = j.read_string();
+                                    if      (edit_field == "path")      edit.path = fs::path(val);
+                                    else if (edit_field == "kind")      edit.kind = parse_pin_kind(val);
+                                    else if (edit_field == "old_value") edit.old_value = val;
+                                    else if (edit_field == "new_value") edit.new_value = val;
+	                                } else {
+	                                    auto prim = j.read_primitive();
+	                                    if (edit_field == "old_value_style_has_v") {
+	                                        edit.old_value_style_has_v = (prim == "true");
+	                                    }
+	                                }
+	                                j.skip_ws();
+	                                if (j.match(',')) continue;
+	                            }
+	                            e.edits.push_back(std::move(edit));
+	                            j.skip_ws();
+	                            if (j.match(',')) continue;
+	                        }
+	                        j.skip_ws();
+	                        if (j.match(',')) continue;
+	                        continue;
+	                    }
+	                    if (j.pos < j.src.size() && j.src[j.pos] == '"') {
+	                        auto val = j.read_string();
+	                        if      (field == "project_path")    e.project_path = fs::path(val);
                         else if (field == "project_name")    e.project_name = val;
                         else if (field == "old_pin")         e.old_pin = val;
                         else if (field == "pin_kind")        e.pin_kind = parse_pin_kind(val);
@@ -459,10 +569,19 @@ std::optional<UndoBatch> parse_undo_batch(const std::string& json) {
                             e.old_pin_style_has_v = (prim == "true");
                         }
                     }
-                    j.skip_ws();
-                    if (j.match(',')) continue;
-                }
-                batch.entries.push_back(std::move(e));
+	                    j.skip_ws();
+	                    if (j.match(',')) continue;
+	                }
+	                if (e.edits.empty() && !e.old_pin.empty()) {
+	                    e.edits.push_back(UndoEdit{
+	                        e.project_path / "CMakeLists.txt",
+	                        e.pin_kind,
+	                        e.old_pin,
+	                        batch.target_version,
+	                        e.old_pin_style_has_v,
+	                    });
+	                }
+	                batch.entries.push_back(std::move(e));
                 j.skip_ws();
                 if (j.match(',')) continue;
             }

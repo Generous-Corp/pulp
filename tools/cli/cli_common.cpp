@@ -778,6 +778,82 @@ fs::path read_sdk_checkout_hint(const fs::path& project_root) {
     return value.empty() ? fs::path{} : fs::path(value);
 }
 
+static bool sdk_config_exists(const fs::path& sdk_dir) {
+    if (sdk_dir.empty()) return false;
+    return fs::exists(sdk_dir / "lib" / "cmake" / "Pulp" / "PulpConfig.cmake");
+}
+
+static std::string read_sdk_dir_version(const fs::path& sdk_dir) {
+    auto version_file = sdk_dir / "version.txt";
+    if (!fs::exists(version_file)) return {};
+    std::ifstream f(version_file);
+    if (!f.is_open()) return {};
+    std::string line;
+    std::getline(f, line);
+    return trim(line);
+}
+
+StandaloneSdkResolution resolve_standalone_sdk(const fs::path& project_root,
+                                               bool materialize) {
+    StandaloneSdkResolution out;
+    out.requested_version = read_sdk_version(project_root);
+    out.sdk_path_hint = read_sdk_path_hint(project_root);
+    out.sdk_checkout_hint = read_sdk_checkout_hint(project_root);
+
+    if (!out.sdk_path_hint.empty()) {
+        out.sdk_path_config_ready = sdk_config_exists(out.sdk_path_hint);
+        if (out.sdk_path_config_ready) {
+            out.sdk_path_version = read_sdk_dir_version(out.sdk_path_hint);
+            out.sdk_path_version_known = !out.sdk_path_version.empty();
+            if (out.sdk_path_version_known) {
+                auto actual = out.sdk_path_version;
+                if (!actual.empty() && (actual.front() == 'v' || actual.front() == 'V')) {
+                    actual.erase(0, 1);
+                }
+                out.sdk_path_version_matches = actual == out.requested_version;
+                if (out.sdk_path_version_matches) {
+                    out.resolved_sdk_dir = out.sdk_path_hint;
+                    out.used_sdk_path_hint = true;
+                    return out;
+                }
+                out.warning = "sdk_path points at SDK v" + actual +
+                              " but pulp.toml requests v" +
+                              out.requested_version + "; ignoring sdk_path";
+            } else {
+                out.sdk_path_custom_unverifiable = true;
+                out.resolved_sdk_dir = out.sdk_path_hint;
+                out.used_sdk_path_hint = true;
+                return out;
+            }
+        }
+    }
+
+    if (!out.sdk_checkout_hint.empty() && fs::exists(out.sdk_checkout_hint)) {
+        if (materialize) {
+            out.resolved_sdk_dir = ensure_checkout_sdk(out.sdk_checkout_hint,
+                                                       out.requested_version);
+            if (!out.resolved_sdk_dir.empty()) return out;
+        } else {
+            auto local = local_sdk_cache_path(out.requested_version);
+            if (sdk_config_exists(local)) {
+                out.resolved_sdk_dir = local;
+                return out;
+            }
+        }
+    }
+
+    auto downloaded = sdk_cache_path(out.requested_version);
+    if (sdk_config_exists(downloaded)) {
+        out.resolved_sdk_dir = downloaded;
+        return out;
+    }
+
+    if (materialize) {
+        out.resolved_sdk_dir = ensure_sdk(out.requested_version);
+    }
+    return out;
+}
+
 bool enforce_project_cli_compatibility(const fs::path& project_root,
                                        const std::string& command_name,
                                        bool allow_unsupported_sdk) {
@@ -1440,20 +1516,35 @@ std::vector<DoctorCheck> run_doctor_checks(const fs::path& active_root, bool sta
         }
         checks.push_back(c);
 
-        auto version = read_sdk_version(active_root);
-        auto sdk_hint = read_sdk_path_hint(active_root);
-        auto checkout_hint = read_sdk_checkout_hint(active_root);
+        auto sdk_resolution = resolve_standalone_sdk(active_root, false);
+        auto version = sdk_resolution.requested_version;
+        auto sdk_hint = sdk_resolution.sdk_path_hint;
+        auto checkout_hint = sdk_resolution.sdk_checkout_hint;
 
         DoctorCheck sdk{"Installed SDK", false, {}, {}};
-        if (!sdk_hint.empty() && sdk_config_ready(sdk_hint)) {
+        if (!sdk_hint.empty() &&
+            sdk_resolution.sdk_path_version_known &&
+            !sdk_resolution.sdk_path_version_matches) {
+            sdk.detail = sdk_resolution.warning;
+            sdk.fix = "pulp build";
+        } else if (sdk_resolution.used_sdk_path_hint &&
+                   sdk_resolution.sdk_path_custom_unverifiable) {
+            sdk.passed = true;
+            sdk.detail = sdk_hint.string() + " (custom sdk_path; version unverifiable)";
+        } else if (sdk_resolution.used_sdk_path_hint) {
             sdk.passed = true;
             sdk.detail = sdk_hint.string();
-        } else if (auto local_sdk = local_sdk_cache_path(version); sdk_config_ready(local_sdk)) {
+        } else if (!sdk_resolution.resolved_sdk_dir.empty()) {
             sdk.passed = true;
-            sdk.detail = local_sdk.string() + " (local cache)";
-        } else if (auto downloaded_sdk = sdk_cache_path(version); sdk_config_ready(downloaded_sdk)) {
-            sdk.passed = true;
-            sdk.detail = downloaded_sdk.string() + " (download cache)";
+            auto local_sdk = local_sdk_cache_path(version);
+            auto downloaded_sdk = sdk_cache_path(version);
+            if (sdk_resolution.resolved_sdk_dir == local_sdk) {
+                sdk.detail = sdk_resolution.resolved_sdk_dir.string() + " (local cache)";
+            } else if (sdk_resolution.resolved_sdk_dir == downloaded_sdk) {
+                sdk.detail = sdk_resolution.resolved_sdk_dir.string() + " (download cache)";
+            } else {
+                sdk.detail = sdk_resolution.resolved_sdk_dir.string();
+            }
         } else if (!sdk_hint.empty()) {
             sdk.detail = sdk_hint.string() + " missing PulpConfig.cmake";
             sdk.fix = "pulp build";

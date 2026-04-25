@@ -332,12 +332,21 @@ Gotchas:
 `tools/cli/cmd_project.cpp` and delegate to the pure-logic core in
 `tools/cli/project_bump.{hpp,cpp}`. Behavior summary:
 
-- Bump reads `CMakeLists.txt`, locates the first Pulp pin (FetchContent
-  GIT_TAG, `pulp_add_project(VERSION ...)`, or `project(NAME VERSION
-  ...)`), rewrites it atomically, records an undo batch, and prints
-  Slice 3 (#548) migration notes for the hop.
+- In standalone SDK-mode projects (`pulp.toml` without Pulp's `core/`
+  source tree), bump treats `pulp.toml` `sdk_version` as the SDK pin,
+  rewrites it together with the versioned `find_package(Pulp X.Y.Z ...)`
+  call, and leaves `project(NAME VERSION ...)` alone as the app/plugin
+  product version.
+- In legacy source-embedded projects, bump reads `CMakeLists.txt`,
+  locates the first Pulp pin (FetchContent GIT_TAG,
+  `pulp_add_project(VERSION ...)`, or `project(NAME VERSION ...)`),
+  rewrites it atomically, records an undo batch, and prints Slice 3
+  (#548) migration notes for the hop.
 - `--all` iterates `~/.pulp/projects.json` (Slice 1b #552).
-- Undo reads `bump-undo-<timestamp>.json` and reverts `bumped` entries.
+- Undo reads `bump-undo-<timestamp>.json` and reverts each bumped
+  entry's recorded edits. New undo files may contain multiple edits
+  across `pulp.toml` and `CMakeLists.txt`; legacy one-edit files are
+  still parsed.
 
 Gotchas:
 
@@ -353,6 +362,23 @@ Gotchas:
   `refuse_dynamic_pin()` returns true for anything that isn't
   semver-after-optional-`v`. Status ends up as `"skipped"` with a
   human-readable reason in `failure_reason`. Do not rewrite these.
+- **Do not bump the Pulp source checkout with this command.**
+  `pulp project bump` is for consumer projects. From the Pulp source
+  tree, use `pulp version bump` and the normal release/PR workflow.
+- **Standalone mode's source of truth is `pulp.toml` `sdk_version`.**
+  If a standalone project has `project(NAME VERSION ...)`, that is the
+  app/plugin version and must not be interpreted as the SDK version.
+  Keep `pulp.toml` and `find_package(Pulp X.Y.Z ...)` in lockstep.
+- **`sdk_path` is rewritten only when it points at a managed Pulp cache.**
+  Custom paths are preserved and reported; `pulp build` verifies
+  whether they satisfy the requested `sdk_version`.
+- **`--allow-cli-skew` is the explicit escape hatch.** By default,
+  target SDK versions newer than the installed CLI fail fast and tell
+  the user to run `pulp upgrade` first.
+- **`--allow-redundant` bypasses the origin/main guard.** `pulp project
+  bump` fetches `origin main` best-effort and refuses by default when
+  main already pins the target-or-newer SDK. Fetch failures fail open
+  so offline users aren't blocked by stale refs.
 - **`project_bump` is decoupled from `cli_common`.** Same rule as
   `projects_registry` / `update_mode` — the unit test binaries link
   just the module + Catch2. Don't reach into `cli_common.hpp` from

@@ -23,8 +23,6 @@
 
 #include <atomic>
 #include <filesystem>
-#include <fstream>
-#include <sstream>
 #include <string>
 
 namespace fs = std::filesystem;
@@ -51,20 +49,6 @@ struct TempDir {
         fs::remove_all(path, ec);
     }
 };
-
-std::string read_text(const fs::path& p) {
-    std::ifstream f(p);
-    if (!f.is_open()) return {};
-    std::ostringstream os;
-    os << f.rdbuf();
-    return os.str();
-}
-
-void write_text(const fs::path& p, const std::string& body) {
-    fs::create_directories(p.parent_path());
-    std::ofstream f(p);
-    f << body;
-}
 
 }  // namespace
 
@@ -131,6 +115,68 @@ TEST_CASE("FetchContent wins over project() when both present",
     auto site = pb::find_pin_site(src);
     REQUIRE(site.kind == pb::PinKind::FetchContentGitTag);
     REQUIRE(site.current_pin == "v0.23.0");
+}
+
+TEST_CASE("standalone projects detect versioned find_package(Pulp)",
+          "[project-bump][issue-244]") {
+    std::string src =
+        "cmake_minimum_required(VERSION 3.20)\n"
+        "project(Clock VERSION 1.2.3 LANGUAGES CXX)\n"
+        "find_package(Pulp 0.40.0 REQUIRED)\n";
+    auto site = pb::find_find_package_pulp_version(src);
+    REQUIRE(site.kind == pb::PinKind::CMakeFindPackagePulpVersion);
+    REQUIRE(site.current_pin == "0.40.0");
+
+    auto rewritten = pb::rewrite_pin(src, site, "0.41.0", false);
+    REQUIRE(rewritten);
+    REQUIRE(rewritten->find("project(Clock VERSION 1.2.3") != std::string::npos);
+    REQUIRE(rewritten->find("find_package(Pulp 0.41.0 REQUIRED)") != std::string::npos);
+}
+
+TEST_CASE("standalone find_package detector ignores unversioned calls",
+          "[project-bump][issue-244]") {
+    std::string src =
+        "find_package(Pulp REQUIRED CONFIG)\n";
+    auto site = pb::find_find_package_pulp_version(src);
+    REQUIRE(site.kind == pb::PinKind::Unknown);
+}
+
+TEST_CASE("pulp.toml scalar detector rewrites sdk_version and sdk_path",
+          "[project-bump][issue-244]") {
+    std::string toml =
+        "[pulp]\n"
+        "sdk_version = \"0.40.0\"\n"
+        "sdk_path = \"/Users/example/.pulp/sdk/local/0.40.0\"\n";
+
+    auto version = pb::find_toml_string_value(toml, "sdk_version",
+                                              pb::PinKind::PulpTomlSdkVersion);
+    REQUIRE(version.kind == pb::PinKind::PulpTomlSdkVersion);
+    REQUIRE(version.current_pin == "0.40.0");
+    auto bumped = pb::rewrite_pin(toml, version, "0.41.0", false);
+    REQUIRE(bumped);
+    REQUIRE(bumped->find("sdk_version = \"0.41.0\"") != std::string::npos);
+
+    auto path = pb::find_toml_string_value(*bumped, "sdk_path",
+                                           pb::PinKind::PulpTomlSdkPath);
+    REQUIRE(path.kind == pb::PinKind::PulpTomlSdkPath);
+    REQUIRE(path.current_pin == "/Users/example/.pulp/sdk/local/0.40.0");
+}
+
+TEST_CASE("pulp.toml scalar detector handles CRLF line endings",
+          "[project-bump][issue-244]") {
+    std::string toml =
+        "[pulp]\r\n"
+        "sdk_version = \"0.40.0\"\r\n"
+        "sdk_path = \"C:/Users/example/.pulp/sdk/0.40.0\"\r\n";
+
+    auto version = pb::find_toml_string_value(toml, "sdk_version",
+                                              pb::PinKind::PulpTomlSdkVersion);
+    REQUIRE(version.kind == pb::PinKind::PulpTomlSdkVersion);
+    REQUIRE(version.current_pin == "0.40.0");
+
+    auto rewritten = pb::rewrite_pin(toml, version, "0.41.0", false);
+    REQUIRE(rewritten);
+    REQUIRE(rewritten->find("sdk_version = \"0.41.0\"") != std::string::npos);
 }
 
 // ── Dynamic pin refusal ────────────────────────────────────────────────────
@@ -249,6 +295,13 @@ TEST_CASE("undo batch serialize -> parse round-trip",
     e1.old_pin_style_has_v = true;
     e1.pin_kind = pb::PinKind::FetchContentGitTag;
     e1.status = "bumped";
+    e1.edits.push_back(pb::UndoEdit{
+        fs::path("/tmp/p1/CMakeLists.txt"),
+        pb::PinKind::FetchContentGitTag,
+        "v0.23.0",
+        "v0.32.0",
+        true,
+    });
     b.entries.push_back(e1);
 
     pb::UndoEntry e2;
@@ -270,8 +323,34 @@ TEST_CASE("undo batch serialize -> parse round-trip",
     REQUIRE(parsed->entries[0].old_pin_style_has_v == true);
     REQUIRE(parsed->entries[0].pin_kind == pb::PinKind::FetchContentGitTag);
     REQUIRE(parsed->entries[0].status == "bumped");
+    REQUIRE(parsed->entries[0].edits.size() == 1);
+    REQUIRE(parsed->entries[0].edits[0].path == fs::path("/tmp/p1/CMakeLists.txt"));
+    REQUIRE(parsed->entries[0].edits[0].old_value == "v0.23.0");
+    REQUIRE(parsed->entries[0].edits[0].new_value == "v0.32.0");
     REQUIRE(parsed->entries[1].status == "failed");
     REQUIRE(parsed->entries[1].failure_reason == "no CMakeLists.txt");
+}
+
+TEST_CASE("legacy undo batch synthesizes a CMake edit",
+          "[project-bump][issue-244]") {
+    auto parsed = pb::parse_undo_batch(
+        "{\n"
+        "  \"timestamp\": \"2026-04-21T14:30:00Z\",\n"
+        "  \"target_version\": \"0.32.0\",\n"
+        "  \"entries\": [\n"
+        "    {\"project_path\": \"/tmp/p1\", \"project_name\": \"P1\", "
+        "\"old_pin\": \"0.23.0\", \"old_pin_style_has_v\": false, "
+        "\"pin_kind\": \"PulpAddProject\", \"status\": \"bumped\", "
+        "\"failure_reason\": \"\"}\n"
+        "  ]\n"
+        "}\n");
+    REQUIRE(parsed);
+    REQUIRE(parsed->entries.size() == 1);
+    REQUIRE(parsed->entries[0].edits.size() == 1);
+    REQUIRE(parsed->entries[0].edits[0].path == fs::path("/tmp/p1/CMakeLists.txt"));
+    REQUIRE(parsed->entries[0].edits[0].kind == pb::PinKind::PulpAddProject);
+    REQUIRE(parsed->entries[0].edits[0].old_value == "0.23.0");
+    REQUIRE(parsed->entries[0].edits[0].new_value == "0.32.0");
 }
 
 TEST_CASE("write_undo_batch / read_undo_batch round-trip on disk",
@@ -357,6 +436,9 @@ TEST_CASE("pin_kind_name round-trips for all variants",
     for (auto k : {pb::PinKind::FetchContentGitTag,
                    pb::PinKind::PulpAddProject,
                    pb::PinKind::ProjectVersion,
+                   pb::PinKind::PulpTomlSdkVersion,
+                   pb::PinKind::PulpTomlSdkPath,
+                   pb::PinKind::CMakeFindPackagePulpVersion,
                    pb::PinKind::Unknown}) {
         auto name = pb::pin_kind_name(k);
         REQUIRE(pb::parse_pin_kind(name) == k);

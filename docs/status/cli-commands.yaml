@@ -185,7 +185,7 @@ commands:
 
   - name: project
     status: usable
-    summary: Per-project SDK pin management — bump pinned Pulp version in CMakeLists.txt (FetchContent_Declare GIT_TAG / pulp_add_project VERSION / project VERSION) and undo the last batch. (#564)
+    summary: Per-project SDK pin management — bump standalone `pulp.toml` sdk_version + find_package(Pulp ...) pins, or legacy CMake pins, and undo the last batch. (#564/#244)
     subcommands:
       - name: bump
         summary: Bump the pinned Pulp SDK version (CWD by default; `--all` iterates the registry)
@@ -209,11 +209,19 @@ commands:
           - name: --force-dirty
             kind: flag
             required: false
-            description: Skip the git-clean check on CMakeLists.txt
+            description: Skip the git-clean check on pin-bearing files
           - name: --allow-downgrade
             kind: flag
             required: false
             description: Permit target older than current pin
+          - name: --allow-cli-skew
+            kind: flag
+            required: false
+            description: Permit target newer than the installed Pulp CLI
+          - name: --allow-redundant
+            kind: flag
+            required: false
+            description: Permit bump when origin/main already pins target-or-newer
           - name: --verify-builds
             kind: flag
             required: false
@@ -327,6 +335,16 @@ commands:
         kind: option
         description: Override the `to` version for `--notes` (default is the cached latest).
     docs: reference/cli.md#upgrade
+
+  - name: version
+    status: usable
+    summary: Show, bump, or check version consistency across Pulp framework and plugin version surfaces.
+    subcommands:
+      - name: bump
+        summary: Increment the framework version, or plugin version when --plugin is set
+      - name: check
+        summary: Verify version consistency across CMake, generated SDK constants, changelog, and AU metadata
+    docs: reference/cli.md#version
 
   - name: config
     status: usable
@@ -489,6 +507,11 @@ commands:
         required: false
         description: Delay before post-apply capture in live-gpu mode
     docs: reference/cli.md#design-debug
+
+  - name: inspect
+    status: experimental
+    summary: Launch the component inspector binary from the active build tree.
+    docs: reference/cli.md#inspect
 
   - name: import-design
     status: experimental
@@ -847,6 +870,21 @@ commands:
       - name: doctor
         summary: Health check — which tools are installed, missing, or unavailable on this platform
     docs: reference/cli.md#tool
+
+  - name: audit
+    status: usable
+    summary: Run license and clean-room audit checks; package flags are handled natively.
+    args:
+      - name: --packages
+        kind: flag
+        description: Verify package lock-file integrity
+      - name: --platforms
+        kind: flag
+        description: Check package/platform coverage
+      - name: --licenses
+        kind: flag
+        description: Verify package license compatibility
+    docs: reference/cli.md#audit-package-extensions
 
   - name: help
     status: usable

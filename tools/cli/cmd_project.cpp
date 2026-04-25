@@ -35,7 +35,9 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <map>
 #include <mutex>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -54,6 +56,8 @@ struct BumpOptions {
     bool dry_run = false;
     bool force_dirty = false;
     bool allow_downgrade = false;
+    bool allow_cli_skew = false;
+    bool allow_redundant = false;
     bool verify_builds = false;      // opt-in, also honors update.verify_builds
     std::vector<std::string> positional;
 };
@@ -77,6 +81,8 @@ BumpOptions parse_bump_options(const std::vector<std::string>& args,
         if (a == "--dry-run")          { opts.dry_run = true; continue; }
         if (a == "--force-dirty")      { opts.force_dirty = true; continue; }
         if (a == "--allow-downgrade")  { opts.allow_downgrade = true; continue; }
+        if (a == "--allow-cli-skew")   { opts.allow_cli_skew = true; continue; }
+        if (a == "--allow-redundant")  { opts.allow_redundant = true; continue; }
         if (a == "--verify-builds")    { opts.verify_builds = true; continue; }
         if (a == "--to") {
             if (i + 1 >= args.size() || args[i + 1].empty()) {
@@ -114,6 +120,7 @@ void print_project_help() {
         "Usage:\n"
         "  pulp project bump [<version>] [--to=X] [--all] [--dry-run]\n"
         "                    [--force-dirty] [--allow-downgrade]\n"
+        "                    [--allow-cli-skew] [--allow-redundant]\n"
         "                    [--verify-builds]\n"
         "  pulp project undo [<timestamp>]\n"
         "\n"
@@ -135,8 +142,13 @@ void print_bump_help() {
         "  --dry-run            Show the plan without rewriting anything\n"
         "  --force-dirty        Skip the git-clean gate (risky — changes mingle)\n"
         "  --allow-downgrade    Permit target older than current pin\n"
+        "  --allow-cli-skew     Permit target newer than this pulp CLI\n"
+        "  --allow-redundant    Permit bump already present on origin/main\n"
         "  --verify-builds      Build each project post-bump; roll back on failure\n"
         "\n"
+        "Standalone SDK-mode projects update pulp.toml sdk_version plus a\n"
+        "versioned find_package(Pulp ...) line. `project(... VERSION ...)`\n"
+        "remains the plugin/app version and is not treated as the SDK pin.\n\n"
         "Every successful bump writes ~/.pulp/bump-undo-<timestamp>.json so\n"
         "`pulp project undo` can revert. Migration notes from Slice 3 (#548)\n"
         "print after the report.\n";
@@ -188,11 +200,23 @@ bool write_text_atomic(const fs::path& path, const std::string& body) {
     return true;
 }
 
-// Check if CMakeLists.txt inside `project_path` has uncommitted
-// changes according to `git status --porcelain`. Returns true when
-// the file is modified, false when clean OR when git is not available
+bool is_standalone_project(const fs::path& project_path) {
+    return fs::exists(project_path / "pulp.toml") &&
+           !fs::exists(project_path / "core");
+}
+
+bool is_pulp_source_root(const fs::path& project_path) {
+    return fs::exists(project_path / "CMakeLists.txt") &&
+           fs::exists(project_path / "core") &&
+           fs::exists(project_path / "tools" / "cli") &&
+           fs::exists(project_path / "tools" / "shipyard.toml");
+}
+
+// Check if pin-bearing files inside `project_path` have uncommitted
+// changes according to `git status --porcelain`. Returns true when a
+// pin file is modified, false when clean OR when git is not available
 // (we refuse to block the user on a missing-tool false negative).
-bool cmake_is_dirty(const fs::path& project_path) {
+bool pin_files_are_dirty(const fs::path& project_path, bool standalone) {
     std::error_code ec;
     if (!fs::is_directory(project_path / ".git", ec) &&
         !fs::exists(project_path / ".git", ec)) {
@@ -202,9 +226,123 @@ bool cmake_is_dirty(const fs::path& project_path) {
     // Quote the project path for the shell. Use "-C <path>" so we
     // don't have to cd.
     std::string cmd = "git -C " + shell_quote(project_path) +
-                      " status --porcelain -- CMakeLists.txt 2>/dev/null";
+                      " status --porcelain -- CMakeLists.txt";
+    if (standalone) cmd += " pulp.toml";
+    cmd += " 2>/dev/null";
     auto out = trim(exec_output(cmd));
     return !out.empty();
+}
+
+pb::PinSite site_for_kind(const std::string& source, pb::PinKind kind) {
+    switch (kind) {
+        case pb::PinKind::PulpTomlSdkVersion:
+            return pb::find_toml_string_value(source, "sdk_version", kind);
+        case pb::PinKind::PulpTomlSdkPath:
+            return pb::find_toml_string_value(source, "sdk_path", kind);
+        case pb::PinKind::CMakeFindPackagePulpVersion:
+            return pb::find_find_package_pulp_version(source);
+        case pb::PinKind::FetchContentGitTag:
+        case pb::PinKind::PulpAddProject:
+        case pb::PinKind::ProjectVersion: {
+            auto site = pb::find_pin_site(source);
+            return site.kind == kind ? site : pb::PinSite{};
+        }
+        case pb::PinKind::Unknown:
+            return {};
+    }
+    return {};
+}
+
+bool stage_edit(std::map<fs::path, std::string>& staged,
+                const pb::UndoEdit& edit,
+                const std::string& new_value) {
+    auto it = staged.find(edit.path);
+    if (it == staged.end()) {
+        auto source = read_text(edit.path);
+        if (source.empty()) return false;
+        it = staged.emplace(edit.path, std::move(source)).first;
+    }
+    auto site = site_for_kind(it->second, edit.kind);
+    if (site.kind != edit.kind) return false;
+    if (site.current_pin != edit.old_value) return false;
+    auto rewritten = pb::rewrite_pin(it->second, site, new_value,
+                                     edit.old_value_style_has_v);
+    if (!rewritten) return false;
+    it->second = *rewritten;
+    return true;
+}
+
+bool same_path_text(const fs::path& a, const fs::path& b) {
+    return a.lexically_normal().generic_string() ==
+           b.lexically_normal().generic_string();
+}
+
+std::optional<std::string> managed_sdk_path_replacement(const fs::path& raw_path,
+                                                        const std::string& current,
+                                                        const std::string& target) {
+    if (raw_path.empty()) return std::nullopt;
+    if (same_path_text(raw_path, sdk_cache_path(current))) {
+        return sdk_cache_path(target).generic_string();
+    }
+    if (same_path_text(raw_path, local_sdk_cache_path(current))) {
+        return local_sdk_cache_path(target).generic_string();
+    }
+    return std::nullopt;
+}
+
+std::optional<std::string> main_pinned_version_at_origin(const fs::path& project_path,
+                                                         bool standalone) {
+    std::string fetch = "git -C " + shell_quote(project_path) +
+                        " fetch --quiet origin main >/dev/null 2>&1";
+    if (run(fetch) != 0) return std::nullopt;
+
+    if (standalone) {
+        std::string toml_cmd = "git -C " + shell_quote(project_path) +
+                               " show origin/main:pulp.toml 2>/dev/null";
+        auto toml = exec_output(toml_cmd);
+        if (!toml.empty()) {
+            auto site = pb::find_toml_string_value(toml, "sdk_version",
+                                                   pb::PinKind::PulpTomlSdkVersion);
+            auto normalized = pb::normalize_pin(site.current_pin);
+            if (!normalized.empty()) return normalized;
+        }
+    }
+
+    std::string cmake_cmd = "git -C " + shell_quote(project_path) +
+                            " show origin/main:CMakeLists.txt 2>/dev/null";
+    auto cmake = exec_output(cmake_cmd);
+    if (cmake.empty()) return std::nullopt;
+    auto site = standalone ? pb::find_find_package_pulp_version(cmake)
+                           : pb::find_pin_site(cmake);
+    auto normalized = pb::normalize_pin(site.current_pin);
+    if (normalized.empty()) return std::nullopt;
+    return normalized;
+}
+
+fs::path find_bumpable_project_root_from(fs::path dir, bool* is_pulp_source) {
+    if (fs::is_regular_file(dir)) dir = dir.parent_path();
+    if (dir.empty()) dir = fs::current_path();
+
+    auto standalone = find_standalone_root();
+    if (!standalone.empty()) return standalone;
+
+    while (!dir.empty()) {
+        if (is_pulp_source_root(dir)) {
+            if (is_pulp_source) *is_pulp_source = true;
+            return dir;
+        }
+        auto cmake = dir / "CMakeLists.txt";
+        if (fs::exists(cmake)) {
+            auto source = read_text(cmake);
+            if (pb::find_pin_site(source).kind != pb::PinKind::Unknown) {
+                return dir;
+            }
+        }
+        auto parent = dir.parent_path();
+        if (parent == dir) break;
+        dir = parent;
+    }
+    return {};
 }
 
 // Pretty-print a pin with optional `v` prefix preserved. `raw` may
@@ -244,6 +382,13 @@ pb::UndoEntry bump_one(const fs::path& project_path,
         return entry;
     }
 
+    if (is_pulp_source_root(project_path)) {
+        entry.status = "skipped";
+        entry.failure_reason = "this is the Pulp source checkout; use Pulp's release/version workflow, not `pulp project bump`";
+        return entry;
+    }
+
+    const bool standalone = is_standalone_project(project_path);
     auto cmake_path = project_path / "CMakeLists.txt";
     if (!fs::exists(cmake_path)) {
         entry.status = "failed";
@@ -252,60 +397,179 @@ pb::UndoEntry bump_one(const fs::path& project_path,
     }
 
     // Git-clean gate.
-    if (!opts.force_dirty && cmake_is_dirty(project_path)) {
+    if (!opts.force_dirty && pin_files_are_dirty(project_path, standalone)) {
         entry.status = "skipped";
-        entry.failure_reason = "CMakeLists.txt has uncommitted changes (use --force-dirty or commit/stash first)";
+        entry.failure_reason = standalone
+            ? "CMakeLists.txt or pulp.toml has uncommitted changes (use --force-dirty or commit/stash first)"
+            : "CMakeLists.txt has uncommitted changes (use --force-dirty or commit/stash first)";
         return entry;
     }
 
-    auto source = read_text(cmake_path);
-    if (source.empty()) {
-        entry.status = "failed";
-        entry.failure_reason = "CMakeLists.txt is empty or unreadable";
-        return entry;
+    std::map<fs::path, std::string> staged;
+    std::map<fs::path, std::string> originals;
+
+    auto add_edit = [&](const fs::path& path,
+                        pb::PinKind kind,
+                        const std::string& old_value,
+                        bool old_has_v,
+                        const std::string& new_value) -> bool {
+        pb::UndoEdit edit;
+        edit.path = path;
+        edit.kind = kind;
+        edit.old_value = old_value;
+        edit.new_value = new_value;
+        edit.old_value_style_has_v = old_has_v;
+        if (!stage_edit(staged, edit, new_value)) return false;
+        entry.edits.push_back(std::move(edit));
+        return true;
+    };
+
+    std::string current;
+
+    if (standalone) {
+        auto toml_path = project_path / "pulp.toml";
+        auto toml = read_text(toml_path);
+        if (toml.empty()) {
+            entry.status = "failed";
+            entry.failure_reason = "pulp.toml is empty or unreadable";
+            return entry;
+        }
+
+        auto sdk_site = pb::find_toml_string_value(toml, "sdk_version",
+                                                   pb::PinKind::PulpTomlSdkVersion);
+        entry.pin_kind = sdk_site.kind;
+        entry.old_pin = sdk_site.current_pin;
+        entry.old_pin_style_has_v = false;
+
+        current = pb::normalize_pin(sdk_site.current_pin);
+        if (current.empty()) {
+            entry.status = "skipped";
+            entry.failure_reason = "pulp.toml sdk_version doesn't parse as semver";
+            return entry;
+        }
+
+        if (!opts.allow_downgrade && pb::is_downgrade(current, target_version)) {
+            entry.status = "skipped";
+            entry.failure_reason = "target version older than current SDK pin (use --allow-downgrade to override)";
+            return entry;
+        }
+
+        if (!opts.allow_redundant) {
+            if (auto main_pin = main_pinned_version_at_origin(project_path, true);
+                main_pin && !pb::is_downgrade(*main_pin, target_version)) {
+                entry.status = "skipped";
+                entry.failure_reason = "origin/main already pins SDK " + *main_pin +
+                    " >= target " + target_version +
+                    " (rebase first or use --allow-redundant)";
+                return entry;
+            }
+        }
+
+        if (current != target_version) {
+            if (!add_edit(toml_path, pb::PinKind::PulpTomlSdkVersion,
+                          sdk_site.current_pin, false, target_version)) {
+                entry.status = "failed";
+                entry.failure_reason = "could not stage pulp.toml sdk_version rewrite";
+                return entry;
+            }
+        }
+
+        auto cmake = read_text(cmake_path);
+        if (cmake.empty()) {
+            entry.status = "failed";
+            entry.failure_reason = "CMakeLists.txt is empty or unreadable";
+            return entry;
+        }
+        auto find_site = pb::find_find_package_pulp_version(cmake);
+        auto find_current = pb::normalize_pin(find_site.current_pin);
+        if (!find_current.empty() && find_current != target_version) {
+            if (!add_edit(cmake_path, pb::PinKind::CMakeFindPackagePulpVersion,
+                          find_site.current_pin, false, target_version)) {
+                entry.status = "failed";
+                entry.failure_reason = "could not stage find_package(Pulp ...) rewrite";
+                return entry;
+            }
+        }
+
+        auto path_site = pb::find_toml_string_value(toml, "sdk_path",
+                                                    pb::PinKind::PulpTomlSdkPath);
+        if (!path_site.current_pin.empty()) {
+            auto replacement = managed_sdk_path_replacement(fs::path(path_site.current_pin),
+                                                            current,
+                                                            target_version);
+            if (replacement) {
+                if (!add_edit(toml_path, pb::PinKind::PulpTomlSdkPath,
+                              path_site.current_pin, false, *replacement)) {
+                    entry.status = "failed";
+                    entry.failure_reason = "could not stage managed sdk_path rewrite";
+                    return entry;
+                }
+            } else if (current != target_version) {
+                entry.notes.push_back("custom sdk_path left unchanged; `pulp build` will verify it");
+            }
+        }
+    } else {
+        auto source = read_text(cmake_path);
+        if (source.empty()) {
+            entry.status = "failed";
+            entry.failure_reason = "CMakeLists.txt is empty or unreadable";
+            return entry;
+        }
+
+        auto site = pb::find_pin_site(source);
+        entry.pin_kind = site.kind;
+        entry.old_pin = site.current_pin;
+        entry.old_pin_style_has_v = pb::pin_has_v_prefix(site.current_pin);
+
+        if (site.kind == pb::PinKind::Unknown) {
+            entry.status = "skipped";
+            entry.failure_reason = "no recognizable Pulp pin (FetchContent_Declare / pulp_add_project / project VERSION)";
+            return entry;
+        }
+
+        if (pb::refuse_dynamic_pin(site)) {
+            entry.status = "skipped";
+            entry.failure_reason = "dynamic pin (branch / SHA) — leave alone";
+            return entry;
+        }
+
+        current = pb::normalize_pin(site.current_pin);
+        if (current.empty()) {
+            entry.status = "skipped";
+            entry.failure_reason = "current pin doesn't parse as semver";
+            return entry;
+        }
+
+        if (!opts.allow_downgrade && pb::is_downgrade(current, target_version)) {
+            entry.status = "skipped";
+            entry.failure_reason = "target version older than current pin (use --allow-downgrade to override)";
+            return entry;
+        }
+
+        if (!opts.allow_redundant) {
+            if (auto main_pin = main_pinned_version_at_origin(project_path, false);
+                main_pin && !pb::is_downgrade(*main_pin, target_version)) {
+                entry.status = "skipped";
+                entry.failure_reason = "origin/main already pins SDK " + *main_pin +
+                    " >= target " + target_version +
+                    " (rebase first or use --allow-redundant)";
+                return entry;
+            }
+        }
+
+        if (current != target_version) {
+            if (!add_edit(cmake_path, site.kind, site.current_pin,
+                          entry.old_pin_style_has_v, target_version)) {
+                entry.status = "failed";
+                entry.failure_reason = "pin rewrite failed (source drifted between scan and write)";
+                return entry;
+            }
+        }
     }
 
-    auto site = pb::find_pin_site(source);
-    entry.pin_kind = site.kind;
-    entry.old_pin = site.current_pin;
-    entry.old_pin_style_has_v = pb::pin_has_v_prefix(site.current_pin);
-
-    if (site.kind == pb::PinKind::Unknown) {
-        entry.status = "skipped";
-        entry.failure_reason = "no recognizable Pulp pin (FetchContent_Declare / pulp_add_project / project VERSION)";
-        return entry;
-    }
-
-    if (pb::refuse_dynamic_pin(site)) {
-        entry.status = "skipped";
-        entry.failure_reason = "dynamic pin (branch / SHA) — leave alone";
-        return entry;
-    }
-
-    auto current = pb::normalize_pin(site.current_pin);
-    if (current.empty()) {
-        entry.status = "skipped";
-        entry.failure_reason = "current pin doesn't parse as semver";
-        return entry;
-    }
-
-    if (!opts.allow_downgrade && pb::is_downgrade(current, target_version)) {
-        entry.status = "skipped";
-        entry.failure_reason = "target version older than current pin (use --allow-downgrade to override)";
-        return entry;
-    }
-
-    if (current == target_version) {
+    if (entry.edits.empty()) {
         entry.status = "skipped";
         entry.failure_reason = "already at target version";
-        return entry;
-    }
-
-    auto new_source = pb::rewrite_pin(source, site, target_version,
-                                       entry.old_pin_style_has_v);
-    if (!new_source) {
-        entry.status = "failed";
-        entry.failure_reason = "pin rewrite failed (source drifted between scan and write)";
         return entry;
     }
 
@@ -314,10 +578,21 @@ pb::UndoEntry bump_one(const fs::path& project_path,
         return entry;
     }
 
-    if (!write_text_atomic(cmake_path, *new_source)) {
-        entry.status = "failed";
-        entry.failure_reason = "could not write CMakeLists.txt (permissions?)";
-        return entry;
+    for (const auto& [path, body] : staged) {
+        originals[path] = read_text(path);
+    }
+
+    std::vector<fs::path> written;
+    for (const auto& [path, body] : staged) {
+        if (!write_text_atomic(path, body)) {
+            for (const auto& wrote : written) {
+                (void)write_text_atomic(wrote, originals[wrote]);
+            }
+            entry.status = "failed";
+            entry.failure_reason = "could not write pin file (permissions?)";
+            return entry;
+        }
+        written.push_back(path);
     }
 
     entry.status = "bumped";
@@ -342,7 +617,20 @@ pb::UndoEntry bump_one(const fs::path& project_path,
 #endif
         std::string cfg = "cmake -S " + shell_quote(project_path) +
                           " -B " + shell_quote(verify_build) +
-                          " -DCMAKE_BUILD_TYPE=Debug" + silence;
+                          " -DCMAKE_BUILD_TYPE=Debug";
+        if (standalone) {
+            auto sdk = resolve_standalone_sdk(project_path, true);
+            if (sdk.resolved_sdk_dir.empty()) {
+                for (const auto& [path, body] : originals) {
+                    (void)write_text_atomic(path, body);
+                }
+                entry.status = "failed";
+                entry.failure_reason = "build verification failed — could not obtain target SDK, pin rolled back";
+                return entry;
+            }
+            cfg += " -DCMAKE_PREFIX_PATH=" + shell_quote(sdk.resolved_sdk_dir);
+        }
+        cfg += silence;
         int rc = run(cfg);
         if (rc == 0) {
             std::string bld = "cmake --build " + shell_quote(verify_build) + silence;
@@ -350,7 +638,9 @@ pb::UndoEntry bump_one(const fs::path& project_path,
         }
         if (rc != 0) {
             // Roll back.
-            (void)write_text_atomic(cmake_path, source);
+            for (const auto& [path, body] : originals) {
+                (void)write_text_atomic(path, body);
+            }
             std::error_code ec;
             fs::remove_all(verify_build, ec);
             entry.status = "failed";
@@ -407,6 +697,9 @@ void print_report(const pb::UndoBatch& batch, bool dry_run) {
         }
         if (!e.failure_reason.empty()) {
             std::cout << "\n      " << color::dim() << e.failure_reason << color::reset();
+        }
+        for (const auto& note : e.notes) {
+            std::cout << "\n      " << color::dim() << note << color::reset();
         }
         std::cout << "\n      " << color::dim() << e.project_path.string() << color::reset() << "\n";
     }
@@ -470,6 +763,20 @@ int do_bump(const std::vector<std::string>& args) {
                   << opts.to_version << "' (expected X.Y.Z)\n";
         return 1;
     }
+    opts.to_version = std::to_string(triple.major) + "." +
+                      std::to_string(triple.minor) + "." +
+                      std::to_string(triple.patch);
+
+    auto cli_triple = pb::parse_semver_strict(PULP_SDK_VERSION);
+    if (!opts.allow_cli_skew &&
+        cli_triple.ok &&
+        pb::compare_semver(triple, cli_triple) > 0) {
+        std::cerr << "pulp project bump: target SDK v" << opts.to_version
+                  << " is newer than this pulp CLI v" << PULP_SDK_VERSION
+                  << ". Run `pulp upgrade " << opts.to_version
+                  << "` first, or pass --allow-cli-skew for an unsupported bump.\n";
+        return 1;
+    }
 
     // Resolve the list of projects we're operating on.
     std::vector<fs::path> targets;
@@ -487,9 +794,21 @@ int do_bump(const std::vector<std::string>& args) {
             names.push_back(p.name.empty() ? p.path.filename().string() : p.name);
         }
     } else {
-        auto cwd = fs::current_path();
-        targets.push_back(cwd);
-        names.push_back(cwd.filename().string());
+        bool found_pulp_source = false;
+        auto target = find_bumpable_project_root_from(fs::current_path(), &found_pulp_source);
+        if (found_pulp_source) {
+            std::cerr << "pulp project bump: refusing to run inside the Pulp source checkout.\n"
+                      << "This command bumps consumer project SDK pins; use `pulp version bump` "
+                      << "and the release workflow for Pulp itself.\n";
+            return 1;
+        }
+        if (target.empty()) {
+            std::cerr << "pulp project bump: not inside a bumpable Pulp project "
+                      << "(expected pulp.toml or a CMakeLists.txt with a Pulp pin)\n";
+            return 1;
+        }
+        targets.push_back(target);
+        names.push_back(target.filename().string());
     }
 
     // Run each.
@@ -581,40 +900,106 @@ int do_undo(const std::vector<std::string>& args) {
             ++skipped;
             continue;
         }
-        auto cmake_path = e.project_path / "CMakeLists.txt";
-        if (!fs::exists(cmake_path)) {
-            std::cerr << "  " << color::yellow() << "missing" << color::reset()
-                      << " " << e.project_name << "  (" << cmake_path.string() << ")\n";
-            ++failed;
-            continue;
-        }
-        auto source = read_text(cmake_path);
-        auto site = pb::find_pin_site(source);
-        if (site.kind != e.pin_kind) {
+
+        if (e.edits.empty()) {
             std::cerr << "  " << color::yellow() << "skipped" << color::reset()
-                      << " " << e.project_name
-                      << "  (pin kind changed since bump)\n";
+                      << " " << e.project_name << "  (undo batch has no edits)\n";
             ++skipped;
             continue;
         }
-        auto current = pb::normalize_pin(site.current_pin);
-        if (current != batch->target_version) {
-            std::cerr << "  " << color::yellow() << "skipped" << color::reset()
-                      << " " << e.project_name
-                      << "  (current pin " << current
-                      << " is not the target " << batch->target_version << ")\n";
-            ++skipped;
-            continue;
+
+        std::map<fs::path, std::string> staged;
+        std::map<fs::path, std::string> originals;
+        std::string skip_reason;
+        std::string failure_reason;
+
+        for (const auto& edit : e.edits) {
+            if (edit.path.empty() || !fs::exists(edit.path)) {
+                failure_reason = "missing " + edit.path.string();
+                break;
+            }
+
+            auto it = staged.find(edit.path);
+            if (it == staged.end()) {
+                auto source = read_text(edit.path);
+                if (source.empty()) {
+                    failure_reason = "could not read " + edit.path.string();
+                    break;
+                }
+                it = staged.emplace(edit.path, std::move(source)).first;
+            }
+
+            auto site = site_for_kind(it->second, edit.kind);
+            if (site.kind != edit.kind) {
+                skip_reason = "pin kind changed since bump";
+                break;
+            }
+
+            bool current_matches = false;
+            if (!edit.new_value.empty()) {
+                if (site.current_pin == edit.new_value) {
+                    current_matches = true;
+                } else {
+                    auto have = pb::normalize_pin(site.current_pin);
+                    auto want = pb::normalize_pin(edit.new_value);
+                    current_matches = !have.empty() && have == want;
+                }
+            } else if (edit.kind != pb::PinKind::PulpTomlSdkPath) {
+                current_matches = pb::normalize_pin(site.current_pin) ==
+                                  batch->target_version;
+            }
+            if (!current_matches) {
+                skip_reason = "current value no longer matches bumped value";
+                break;
+            }
+
+            auto restored_value = edit.old_value;
+            auto normalized_old = pb::normalize_pin(edit.old_value);
+            if (!normalized_old.empty()) restored_value = normalized_old;
+            auto restored = pb::rewrite_pin(it->second, site,
+                                            restored_value,
+                                            edit.old_value_style_has_v);
+            if (!restored) {
+                failure_reason = "rewrite failed";
+                break;
+            }
+            it->second = *restored;
         }
-        auto restored = pb::rewrite_pin(source, site,
-                                         pb::normalize_pin(e.old_pin),
-                                         e.old_pin_style_has_v);
-        if (!restored || !write_text_atomic(cmake_path, *restored)) {
+
+        if (!failure_reason.empty()) {
             std::cerr << "  " << color::red() << "failed" << color::reset()
-                      << " " << e.project_name << "  (rewrite or write failed)\n";
+                      << " " << e.project_name << "  (" << failure_reason << ")\n";
             ++failed;
             continue;
         }
+        if (!skip_reason.empty()) {
+            std::cerr << "  " << color::yellow() << "skipped" << color::reset()
+                      << " " << e.project_name << "  (" << skip_reason << ")\n";
+            ++skipped;
+            continue;
+        }
+
+        for (const auto& [path, body] : staged) {
+            originals[path] = read_text(path);
+        }
+        std::vector<fs::path> written;
+        for (const auto& [path, body] : staged) {
+            if (!write_text_atomic(path, body)) {
+                for (const auto& wrote : written) {
+                    (void)write_text_atomic(wrote, originals[wrote]);
+                }
+                failure_reason = "write failed";
+                break;
+            }
+            written.push_back(path);
+        }
+        if (!failure_reason.empty()) {
+            std::cerr << "  " << color::red() << "failed" << color::reset()
+                      << " " << e.project_name << "  (" << failure_reason << ")\n";
+            ++failed;
+            continue;
+        }
+
         std::cout << "  " << color::green() << "reverted" << color::reset()
                   << " " << e.project_name
                   << "  " << batch->target_version

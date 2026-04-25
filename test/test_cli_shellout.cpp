@@ -71,6 +71,13 @@ ProcessResult run_pulp(const std::vector<std::string>& args,
 
 bool binary_exists() { return fs::exists(pulp_binary()); }
 
+std::string read_file(const fs::path& path) {
+    std::ifstream f(path);
+    if (!f.is_open()) return {};
+    return std::string(std::istreambuf_iterator<char>(f),
+                       std::istreambuf_iterator<char>());
+}
+
 }  // namespace
 
 TEST_CASE("pulp help exits 0 with a usage banner on stdout",
@@ -676,7 +683,10 @@ TEST_CASE("pulp project is a recognized command with bump + undo subcommands",
     REQUIRE(bump_help.stdout_output.find("--dry-run") != std::string::npos);
     REQUIRE(bump_help.stdout_output.find("--force-dirty") != std::string::npos);
     REQUIRE(bump_help.stdout_output.find("--allow-downgrade") != std::string::npos);
+    REQUIRE(bump_help.stdout_output.find("--allow-cli-skew") != std::string::npos);
+    REQUIRE(bump_help.stdout_output.find("--allow-redundant") != std::string::npos);
     REQUIRE(bump_help.stdout_output.find("--verify-builds") != std::string::npos);
+    REQUIRE(bump_help.stdout_output.find("pulp.toml sdk_version") != std::string::npos);
 
     auto undo_help = run_pulp({"project", "undo", "--help"}, 10000);
     REQUIRE_FALSE(undo_help.timed_out);
@@ -706,6 +716,73 @@ TEST_CASE("pulp project bump rejects non-semver --to",
     REQUIRE_FALSE(r.timed_out);
     REQUIRE(r.exit_code != 0);
     REQUIRE(r.stderr_output.find("invalid target version") != std::string::npos);
+}
+
+TEST_CASE("pulp project bump updates standalone SDK pins and undo reverts them",
+          "[cli][shellout][project-bump][issue-244]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    auto base = fs::temp_directory_path() /
+                ("pulp-shellout-project-bump-" +
+                 std::to_string(std::chrono::steady_clock::now()
+                                    .time_since_epoch().count()));
+    auto project = base / "Clock";
+    auto home = base / "home";
+    fs::create_directories(project);
+    fs::create_directories(home);
+    {
+        std::ofstream cfg(home / "config.toml");
+        cfg << "[update]\nmode = \"off\"\n";
+    }
+    {
+        std::ofstream cmake(project / "CMakeLists.txt");
+        cmake << "cmake_minimum_required(VERSION 3.20)\n"
+              << "project(Clock VERSION 1.0.0 LANGUAGES CXX)\n"
+              << "find_package(Pulp 0.1.0 REQUIRED)\n";
+    }
+    {
+        std::ofstream toml(project / "pulp.toml");
+        toml << "[pulp]\n"
+             << "sdk_version = \"0.1.0\"\n"
+             << "sdk_path = \"/custom/sdk\"\n";
+    }
+
+    const auto bin = fs::absolute(pulp_binary());
+    const auto saved_cwd = fs::current_path();
+    pulp_setenv("PULP_HOME", home.string().c_str(), 1);
+    fs::current_path(project);
+
+    auto bump = exec(bin.string(), {"project", "bump", "--to=0.2.0"}, 10000);
+    std::string cmake_after;
+    std::string toml_after;
+    ProcessResult undo;
+    if (!bump.timed_out && bump.exit_code == 0) {
+        cmake_after = read_file(project / "CMakeLists.txt");
+        toml_after = read_file(project / "pulp.toml");
+        undo = exec(bin.string(), {"project", "undo"}, 10000);
+    }
+    fs::current_path(saved_cwd);
+    pulp_unsetenv("PULP_HOME");
+
+    REQUIRE_FALSE(bump.timed_out);
+    REQUIRE(bump.exit_code == 0);
+    REQUIRE(bump.stdout_output.find("bumped") != std::string::npos);
+    REQUIRE(bump.stdout_output.find("custom sdk_path left unchanged") != std::string::npos);
+
+    REQUIRE(cmake_after.find("project(Clock VERSION 1.0.0") != std::string::npos);
+    REQUIRE(cmake_after.find("find_package(Pulp 0.2.0 REQUIRED)") != std::string::npos);
+    REQUIRE(toml_after.find("sdk_version = \"0.2.0\"") != std::string::npos);
+    REQUIRE(toml_after.find("sdk_path = \"/custom/sdk\"") != std::string::npos);
+
+    REQUIRE_FALSE(undo.timed_out);
+    REQUIRE(undo.exit_code == 0);
+    REQUIRE(undo.stdout_output.find("reverted") != std::string::npos);
+    REQUIRE(read_file(project / "CMakeLists.txt").find("find_package(Pulp 0.1.0 REQUIRED)")
+            != std::string::npos);
+    REQUIRE(read_file(project / "pulp.toml").find("sdk_version = \"0.1.0\"")
+            != std::string::npos);
+
+    fs::remove_all(base);
 }
 
 TEST_CASE("pulp upgrade --notes with no hop prints the empty-notes line",

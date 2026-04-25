@@ -127,20 +127,22 @@ this upgrade." Do not manufacture reassurance beyond what the CLI told you.
 
 ## 5. Offer an action menu via AskUserQuestion
 
-Use AskUserQuestion with the following options (present all four even
-if some are no-ops for the current state — it teaches the user the
-full surface):
+Use AskUserQuestion with the relevant options below. Prefer the first
+three when an active project is present; offer the registry-wide option
+only when the user asked for all projects.
 
-- **"Upgrade CLI + bump projects"** — runs `pulp upgrade`, then inside
-  every registered project (`~/.pulp/projects.json` via
-  `pulp projects list`) suggests `pulp version bump patch` via
-  a follow-up chat turn. Do NOT auto-bump — project version changes
-  are a per-project editorial decision.
+- **"Upgrade CLI + bump this project SDK"** — runs `pulp upgrade`,
+  then proposes `pulp project bump` in the active project resolved by
+  `doctor --versions`. This changes the project's pinned Pulp SDK,
+  not the app/plugin product version.
 - **"Upgrade CLI only"** — runs `pulp upgrade` only. No project changes.
-- **"Bump projects only"** — skips `pulp upgrade`; offers
-  `pulp version bump patch` inside the active project (if one is
-  resolved from `doctor --versions`). Useful when the CLI is already
-  current but `project_sdk.raw` is behind.
+- **"Bump this project SDK only"** — skips `pulp upgrade`; proposes
+  `pulp project bump` inside the active project. Useful when the CLI is
+  already current but `project_sdk.raw` is behind.
+- **"Bump all registered project SDKs"** — only offer this when the
+  user explicitly wants registry-wide changes; propose
+  `pulp project bump --all --dry-run` first, then a real
+  `pulp project bump --all` after review.
 - **"Dismiss"** — no action. Remind the user they can re-run `/upgrade`
   or `pulp doctor --versions` at any time.
 
@@ -158,15 +160,20 @@ error, the CLI restores the pre-upgrade binary from `<path>.bak` — if
 the swap step failed partway, tell the user to check for a stale
 `.bak` file.
 
-For "Bump projects" paths, do not execute the bump — propose the
-command and let the user approve the exact version-bump shape:
+For "Bump project SDK" paths, do not execute the bump until the user
+has seen the target project and target SDK version. Start with a dry
+run unless the user already gave explicit permission:
 
 ```bash
-pulp version bump patch   # or minor/major
+pulp project bump --dry-run
+pulp project bump
 ```
 
-Remind them that version bumps require `pulp pr` to ship (the existing
-version-bump / skill-sync gates run there).
+If the user wants the global CLI and the active project SDK moved in
+one flow, run `pulp upgrade` first, then re-run `pulp doctor --versions`
+and propose `pulp project bump --to <post-upgrade-cli-version>`. If
+they are inside the Pulp source checkout, do not run `pulp project
+bump`; that checkout uses the release/version workflow.
 
 ## 7. After-upgrade follow-up
 
