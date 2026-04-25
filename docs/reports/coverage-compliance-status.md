@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-25 19:11 EDT
+Last reviewed: 2026-04-25 19:16 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -67,36 +67,32 @@ Finish line:
 
 Latest complete Codecov `main` report observed while updating this doc:
 
-- commit: `26dd396da53e5ceab340eac5681f1b10d75ed56b`
-- workflow: Coverage run `24930675870`, completed successfully
-- overall tracked coverage: `44.35%` over `70,205` lines in `556` files
-- covered lines: `31,140`
+- commit: `e61dce8d907c29888fd7dd97ae7f49e3bc219662`
+- workflow: Coverage run `24942795469`, completed successfully
+- overall tracked coverage: `44.85%` over `70,229` lines in `556` files
+- covered lines: `31,498`
 - current component coverage from the Codecov API:
-  - `audio`: `24.8%`
-  - `canvas`: `67.83%`
-  - `dsl`: `77.04%`
-  - `events`: `29.47%`
-  - `format`: `52.61%`
-  - `host`: `43.23%`
-  - `midi`: `50.96%`
-  - `osc`: `72.52%`
-  - `platform`: `46.92%`
-  - `render`: `61.35%`
-  - `runtime`: `48.56%`
-  - `signal`: `67.25%`
-  - `state`: `67.26%`
-  - `view`: `45.04%`
+  - `audio`: `25.45%`
+  - `canvas`: `67.14%`
+  - `dsl`: `68.3%`
+  - `events`: `33.48%`
+  - `format`: `52.89%`
+  - `host`: `45.92%`
+  - `midi`: `48.44%`
+  - `osc`: `66.26%`
+  - `platform`: `50.65%`
+  - `render`: `62.31%`
+  - `runtime`: `50.2%`
+  - `signal`: `66.89%`
+  - `state`: `63.32%`
+  - `view`: `44.81%`
   - `android`: `13.83%`
-  - `apple`: `25.72%`
-  - `linux`: `0.0%`
-  - `windows`: `16.83%`
-  - `cli`: `32.96%`
-  - `ship`: `36.48%`
-  - `tools`: `39.89%`
-
-`main` has since advanced to `e61dce8d907c29888fd7dd97ae7f49e3bc219662`
-after `#789` merged. The next complete Codecov `main` report for that
-commit had not landed at the time of this update.
+  - `apple`: `25.36%`
+  - `linux`: `3.98%`
+  - `windows`: `15.02%`
+  - `cli`: `33.15%`
+  - `ship`: `57.66%`
+  - `tools`: `40.17%`
 
 Merged after the Phase 1 closeout / `#723` baseline:
 
