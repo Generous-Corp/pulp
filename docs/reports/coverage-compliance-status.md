@@ -92,39 +92,34 @@ Merged after the Phase 1 closeout / `#723` baseline:
 Open Phase 3 PRs:
 
 - `#771` WidgetBridge extended-controls coverage, branch
-  `feature/widget-bridge-coverage-493`, head `429b8941`. Local
-  `pulp-test-widget-bridge`, focused CTest, skill sync, version report,
-  and whitespace checks are green. The follow-up CMake fix removes the
-  GPU-only `pulp::inspect` link from `pulp-test-cli-project-command` and
-  generates the CLI version header when `tools/cli` is skipped in
-  `PULP_ENABLE_GPU=OFF` sanitizer/IWYU configurations. Local GPU-off
-  configure/build plus `pulp-test-cli-project-command` are green. GitHub
-  Actions at `429b8941` has passed Codecov patch, IWYU, Linux/macOS/Windows
-  coverage, Linux Namespace, Windows MSVC, docs, audit, Android, and version
-  checks, but Windows Namespace failed while the overall run was still in
-  progress and logs were not yet available through `gh run view`. The next
-  action is to pull that failed job log when the run completes, then either
-  rerun if it is an infra flake or patch the branch if it is reproducible.
+  `feature/widget-bridge-coverage-493`, head `c7e5de1d`. Local
+  `pulp-test-widget-bridge`, focused CTest, GPU-off configure/build of
+  `pulp-test-cli-project-command`, skill sync, version report, and
+  whitespace checks are green. The branch now carries three shared CI
+  unblockers discovered while validating this tranche: the GPU-off
+  `pulp-test-cli-project-command` CMake fix, Windows-safe CLI redirection
+  for `pulp project bump` probes, and a GPU/`pulp::inspect` guard around
+  `examples/ui-preview`. GitHub Actions at `c7e5de1d` has passed Codecov
+  patch, Android coverage, docs, audit, version/skill sync, and provider
+  resolution; IWYU, sandbox-e2e, Namespace, coverage, Windows MSVC, and
+  sanitizer lanes are still draining.
 - `#777` real CLAP `PluginSlot` coverage, branch
-  `feature/clap-slot-coverage-493`, head `5363bbe0`. This tranche wires
+  `feature/clap-slot-coverage-493`, head `ceb8c5db`. This tranche wires
   the built PulpGain CLAP bundle into host tests after examples are
   registered, adds metadata/defaults, bypass/release, and restore-state
   coverage, and fixes CLAP state restore so restored plugin state
-  supersedes stale cached host edits. Local configure, build,
-  `pulp-test-host`, generated `ClapSlot` CTest entries, whitespace,
-  CI-configured skill-sync, and version checks are green. GitHub Actions
-  has passed Codecov patch, Linux coverage, Android, docs, audit, version,
-  and Windows MSVC checks, but IWYU failed for the same GPU-off
-  `pulp-test-cli-project-command` / `pulp::inspect` CMake issue that `#771`
-  fixes. The preferred path is to merge or repair `#771`, then rebase `#777`
-  and rerun; if `#771` stays blocked, carrying the minimal CMake fix in
-  `#777` is the fallback.
-
-Active local Phase 3 branch not yet in PR:
-
-- `feature/vst3-adapter-coverage-493`, worktree
-  `/Users/danielraffel/Code/pulp-vst3-adapter-coverage-493`, adds focused
-  VST3 adapter coverage for parameter metadata, setup/release lifecycle,
+  supersedes stale cached host edits. The branch has been rebased onto
+  `origin/main` and now carries the same GPU-off CMake and `ui-preview`
+  guard fixes needed before `#771` lands. Local configure/build,
+  `pulp-test-host "[host][slot][clap]"` (`139` assertions / `4` test
+  cases), generated `ClapSlot` CTest entries, whitespace, CI-configured
+  skill-sync, and version checks are green. GitHub Actions is rerunning at
+  `ceb8c5db`; early docs, audit, version/skill sync, and provider checks
+  are green while IWYU, Namespace, coverage, Windows MSVC, Android, and
+  sanitizer lanes drain.
+- `#782` VST3 adapter process-path coverage, branch
+  `feature/vst3-adapter-coverage-493`, head `f2947827`. This tranche adds
+  focused VST3 adapter coverage for parameter metadata, setup/release lifecycle,
   bus/event/process routing, sidechain visibility, secondary output zeroing,
   host input automation, plugin-to-host output automation, MIDI output, and
   transport context mapping. Local `pulp-test-vst3-plugin-state` passed
@@ -133,7 +128,14 @@ Active local Phase 3 branch not yet in PR:
   `pluginval-*` bundle validation tests and those failed locally because
   pluginval found zero plugin types in the built VST3 bundles; that is being
   treated separately from the unit coverage tranche unless it reproduces in
-  CI.
+  CI. The PR is labeled `codecov`. Shipyard local/SSH validation at
+  `bc23956d` passed mac and ubuntu, then hit a Windows SSH bundle-upload
+  timeout during banner exchange. The branch now carries the same shared
+  GPU-off CMake, Windows-safe redirection, skill-doc, and `ui-preview`
+  guard fixes as `#771`; local GPU-off configure/build of
+  `pulp-test-cli-project-command`, focused `pulp-test-vst3-plugin-state`
+  (`118` assertions / `5` test cases), whitespace, skill-sync, and version
+  checks are green. GitHub Actions is rerunning at `f2947827`.
 
 Open supporting PR:
 
@@ -146,18 +148,17 @@ Open supporting PR:
 
 Next recovery actions:
 
-1. Poll `#771`, `#774`, and `#777`; merge green PRs manually because
+1. Poll `#771`, `#774`, `#777`, and `#782`; merge green PRs manually because
    auto-merge is disabled.
-2. Diagnose `#771`'s Windows Namespace failure once logs are available.
-3. Rebase or patch `#777` after the `#771` CMake fix lands, because its
-   current IWYU failure is the same GPU-off CMake issue.
-4. Finish local validation for `feature/vst3-adapter-coverage-493`, open a
-   PR, and keep it separate from the CLAP/WidgetBridge branches.
-5. If a PR is green but GitHub reports it behind `main`, rebase that
+2. Let the current `#771` and `#777` reruns drain after the shared CI
+   unblockers were pushed.
+3. Let the current `#782` rerun drain after the shared CI unblockers were
+   pushed at `f2947827`.
+4. If a PR is green but GitHub reports it behind `main`, rebase that
    branch onto `origin/main`, push with lease, and let checks rerun.
-6. After active PRs merge, refresh this section with the next complete
+5. After active PRs merge, refresh this section with the next complete
    Codecov `main` report.
-7. Continue Phase 3 from the tranche issues below, prioritizing
+6. Continue Phase 3 from the tranche issues below, prioritizing
    represented high-miss files over adding new perimeter lanes.
 
 ## Phase 1 corrected baseline
