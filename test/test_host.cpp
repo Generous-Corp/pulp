@@ -1027,6 +1027,54 @@ TEST_CASE("GraphSerializer round-trips topology + connections + layout",
 #include <vector>
 
 #ifdef PULP_TEST_CLAP_PATH
+namespace {
+
+constexpr uint32_t kPulpGainInputGain = 1;
+constexpr uint32_t kPulpGainOutputGain = 2;
+constexpr uint32_t kPulpGainBypass = 3;
+
+std::unique_ptr<PluginSlot> load_pulpgain_clap_slot() {
+    namespace fs = std::filesystem;
+    const std::string path = PULP_TEST_CLAP_PATH;
+    if (!fs::exists(path)) {
+        WARN("CLAP test plugin not built at " << path << " - skipping");
+        return nullptr;
+    }
+
+    PluginInfo info;
+    info.name = "PulpGain";
+    info.path = path;
+    info.format = PluginFormat::CLAP;
+
+    auto slot = PluginSlot::load(info);
+    REQUIRE(slot != nullptr);
+    REQUIRE(slot->is_loaded());
+    return slot;
+}
+
+const HostParamInfo* find_param(const std::vector<HostParamInfo>& params,
+                                uint32_t id) {
+    auto it = std::find_if(params.begin(), params.end(),
+                           [id](const HostParamInfo& p) { return p.id == id; });
+    return it == params.end() ? nullptr : &*it;
+}
+
+float process_first_sample(PluginSlot& slot, float input_sample) {
+    constexpr int kFrames = 32;
+    std::vector<float> in_l(kFrames, input_sample), in_r(kFrames, input_sample);
+    std::vector<float> out_l(kFrames, 0.0f), out_r(kFrames, 0.0f);
+    const float* in_ptrs[2] = {in_l.data(), in_r.data()};
+    float* out_ptrs[2] = {out_l.data(), out_r.data()};
+    pulp::audio::BufferView<const float> in(in_ptrs, 2, kFrames);
+    pulp::audio::BufferView<float> out(out_ptrs, 2, kFrames);
+    pulp::midi::MidiBuffer mi, mo;
+    pulp::host::ParameterEventQueue pe;
+    slot.process(out, in, mi, mo, pe, kFrames);
+    return out_l[0];
+}
+
+} // namespace
+
 TEST_CASE("PluginSlot loads and processes a real CLAP plugin", "[host][clap][integration]") {
     namespace fs = std::filesystem;
     const std::string path = PULP_TEST_CLAP_PATH;
@@ -1063,6 +1111,112 @@ TEST_CASE("PluginSlot loads and processes a real CLAP plugin", "[host][clap][int
     for (int i = 0; i < 256; ++i) sum += std::abs(out_l[i]) + std::abs(out_r[i]);
     REQUIRE(sum > 0.0f);
 
+    slot->release();
+}
+
+TEST_CASE("ClapSlot exposes PulpGain parameter metadata and host defaults",
+          "[host][slot][clap][coverage][issue-493]") {
+    auto slot = load_pulpgain_clap_slot();
+    if (!slot) return;
+
+    const auto& loaded_info = slot->info();
+    REQUIRE(loaded_info.name == "PulpGain");
+    REQUIRE(loaded_info.manufacturer == "Pulp");
+    REQUIRE(loaded_info.version == "1.0.0");
+    REQUIRE(loaded_info.unique_id == "com.pulp.gain");
+
+    auto params = slot->parameters();
+    REQUIRE(params.size() == 3);
+
+    const auto* input = find_param(params, kPulpGainInputGain);
+    REQUIRE(input != nullptr);
+    REQUIRE(input->name == "Input Gain");
+    REQUIRE_THAT(input->min_value, WithinAbs(-60.0f, 1e-6f));
+    REQUIRE_THAT(input->max_value, WithinAbs(24.0f, 1e-6f));
+    REQUIRE_THAT(input->default_value, WithinAbs(0.0f, 1e-6f));
+    REQUIRE(input->flags.automatable);
+    REQUIRE_FALSE(input->flags.stepped);
+    REQUIRE(input->flags.rampable);
+    REQUIRE_FALSE(input->flags.modulatable);
+
+    const auto* bypass = find_param(params, kPulpGainBypass);
+    REQUIRE(bypass != nullptr);
+    REQUIRE(bypass->name == "Bypass");
+    REQUIRE(bypass->flags.automatable);
+    REQUIRE(bypass->flags.stepped);
+    REQUIRE_FALSE(bypass->flags.rampable);
+
+    REQUIRE_FALSE(slot->is_bypassed());
+    REQUIRE(slot->latency_samples() == 0);
+    REQUIRE(slot->tail_samples() == 0);
+    REQUIRE_FALSE(slot->has_editor());
+    REQUIRE(slot->create_editor_view() == nullptr);
+    REQUIRE(slot->create_hosted_editor(nullptr) == nullptr);
+}
+
+TEST_CASE("ClapSlot bypass and release paths copy input and zero extra outputs",
+          "[host][slot][clap][coverage][issue-493]") {
+    auto slot = load_pulpgain_clap_slot();
+    if (!slot) return;
+
+    REQUIRE(slot->prepare(48000.0, 64));
+    REQUIRE(slot->prepare(44100.0, 64)); // preparing while active releases first
+
+    constexpr int kFrames = 16;
+    std::vector<float> in_l(kFrames, 0.25f), in_r(kFrames, -0.5f);
+    std::vector<float> out_l(kFrames, 9.0f), out_r(kFrames, 9.0f), out_extra(kFrames, 9.0f);
+    const float* in_ptrs[2] = {in_l.data(), in_r.data()};
+    float* out_ptrs[3] = {out_l.data(), out_r.data(), out_extra.data()};
+    pulp::audio::BufferView<const float> in(in_ptrs, 2, kFrames);
+    pulp::audio::BufferView<float> out(out_ptrs, 3, kFrames);
+    pulp::midi::MidiBuffer mi, mo;
+    pulp::host::ParameterEventQueue pe;
+
+    slot->set_bypass(true);
+    REQUIRE(slot->is_bypassed());
+    slot->process(out, in, mi, mo, pe, kFrames);
+
+    for (int i = 0; i < kFrames; ++i) {
+        REQUIRE_THAT(out_l[i], WithinAbs(in_l[i], 1e-6f));
+        REQUIRE_THAT(out_r[i], WithinAbs(in_r[i], 1e-6f));
+        REQUIRE_THAT(out_extra[i], WithinAbs(0.0f, 1e-6f));
+    }
+
+    std::fill(out_l.begin(), out_l.end(), 8.0f);
+    std::fill(out_r.begin(), out_r.end(), 8.0f);
+    std::fill(out_extra.begin(), out_extra.end(), 8.0f);
+    slot->release();
+    REQUIRE(slot->is_bypassed()); // bypass flag survives release
+    slot->process(out, in, mi, mo, pe, kFrames);
+
+    for (int i = 0; i < kFrames; ++i) {
+        REQUIRE_THAT(out_l[i], WithinAbs(in_l[i], 1e-6f));
+        REQUIRE_THAT(out_r[i], WithinAbs(in_r[i], 1e-6f));
+        REQUIRE_THAT(out_extra[i], WithinAbs(0.0f, 1e-6f));
+    }
+}
+
+TEST_CASE("ClapSlot restore_state supersedes cached host edits",
+          "[host][slot][clap][state][coverage][issue-493]") {
+    auto slot = load_pulpgain_clap_slot();
+    if (!slot) return;
+
+    REQUIRE(slot->prepare(48000.0, 64));
+
+    slot->set_parameter(kPulpGainOutputGain, 6.0f);
+    (void)process_first_sample(*slot, 0.5f); // drain the queued host edit
+    auto saved = slot->save_state();
+    REQUIRE_FALSE(saved.empty());
+
+    slot->set_parameter(kPulpGainOutputGain, -60.0f);
+    REQUIRE_THAT(process_first_sample(*slot, 0.5f), WithinAbs(0.0005f, 1e-4f));
+    REQUIRE_THAT(slot->get_parameter(kPulpGainOutputGain), WithinAbs(-60.0f, 1e-6f));
+
+    REQUIRE(slot->restore_state(saved));
+    REQUIRE_THAT(slot->get_parameter(kPulpGainOutputGain), WithinAbs(6.0f, 1e-6f));
+
+    const float expected = 0.5f * std::pow(10.0f, 6.0f / 20.0f);
+    REQUIRE_THAT(process_first_sample(*slot, 0.5f), WithinAbs(expected, 1e-3f));
     slot->release();
 }
 #endif

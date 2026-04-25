@@ -367,7 +367,13 @@ public:
             c->pos += (size_t)n;
             return (int64_t)n;
         };
-        return ext->load(plugin_, &is);
+        const bool restored = ext->load(plugin_, &is);
+        if (restored) {
+            std::lock_guard<std::mutex> lock(pending_edits_mu_);
+            pending_edits_.clear();
+            cached_values_.clear();
+        }
+        return restored;
     }
 
     bool has_editor() const override { return false; }

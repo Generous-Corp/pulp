@@ -548,6 +548,16 @@ if(PULP_BUILD_EXAMPLES AND NOT ANDROID)
     add_subdirectory(examples)
 endif()
 
+if(PULP_BUILD_TESTS AND NOT ANDROID AND TARGET PulpGain_CLAP)
+    foreach(_pulp_clap_host_test IN ITEMS pulp-test-host pulp-test-host-regression)
+        if(TARGET ${_pulp_clap_host_test})
+            target_compile_definitions(${_pulp_clap_host_test} PRIVATE
+                PULP_TEST_CLAP_PATH="${CMAKE_BINARY_DIR}/CLAP/PulpGain.clap")
+            add_dependencies(${_pulp_clap_host_test} PulpGain_CLAP)
+        endif()
+    endforeach()
+endif()
+
 # ── Android Shared Library ─────────────────────────────────────────────────
 # Android apps load native code via System.loadLibrary("pulp") which expects
 # a single libpulp.so shared library. This thin .so links all Pulp static
