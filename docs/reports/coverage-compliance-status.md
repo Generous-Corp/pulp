@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-25 18:17 EDT
+Last reviewed: 2026-04-25 18:28 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -127,9 +127,12 @@ Open Phase 3 PRs:
   used as validation because Catch2 treats multiple quoted filters as an AND
   expression; CTest was used for the focused multi-test slice. PR is labeled
   `codecov`. The earlier Linux Namespace and Linux coverage failures did not
-  expose usable logs through `gh`; both failed workflows have been rerun and
-  the current polling window shows no failures while Linux Namespace plus
-  Linux coverage drain.
+  expose usable logs through `gh`. A rerun of Build/Test `24929736674` and
+  Coverage `24929736678` then sat in progress for roughly 90 minutes with no
+  logs and no timestamp movement, so both runs were canceled and rerun from
+  the same head `4cb33f4e`. GitHub reran the full Build/Test and Coverage
+  workflows, not only the Linux jobs; the current polling window shows no
+  failures while those fresh checks drain.
 - `#789` Android ship/package helper coverage, branch
   `feature/android-package-coverage-644`, head `a3f124a1`. This tranche
   adds a deterministic host-side fake Android SDK/toolchain harness for
@@ -189,7 +192,7 @@ Next recovery actions:
 
 1. Poll `#788` and `#789`; merge manually when green because auto-merge is
    disabled.
-2. Let `#788`'s rerun Linux Namespace and Linux coverage checks drain.
+2. Let `#788`'s fresh full Build/Test and Coverage workflow reruns drain.
 3. Let `#789`'s post-Windows-batch-fix GitHub Actions checks drain; pull the
    exact failing job log first if anything turns red.
 4. Keep `#774` docs-only and let its post-`#786` rebase checks drain.
