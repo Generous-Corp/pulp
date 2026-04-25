@@ -9,6 +9,10 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
 <a id="v0451"></a>
+## [0.20.0]
+
+## [0.46.0]
+
 ## [0.45.1] - 2026-04-24
 
 - feat(import-design): execute inline template scripts (Babel-standalone) (#758) ([#759](https://github.com/danielraffel/pulp/pull/759))
