@@ -426,6 +426,7 @@ TEST_CASE("VST3 adapter process path maps host events, buses, and outputs",
 
     Steinberg::Vst::ProcessContext process_context{};
     process_context.state = Steinberg::Vst::ProcessContext::kPlaying |
+                            Steinberg::Vst::ProcessContext::kTempoValid |
                             Steinberg::Vst::ProcessContext::kTimeSigValid;
     process_context.tempo = 137.5;
     process_context.projectTimeSamples = 12345;
