@@ -9,6 +9,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <future>
 #include <string>
 #include <thread>
 #include <vector>
@@ -1075,7 +1076,7 @@ TEST_CASE("PluginSlot loads and processes a real CLAP plugin", "[host][clap][int
 // every sample in the audio thread's output buffer is either silence (post-
 // invalidate, pre-reprepare) or a valid sample in [-1, 1].
 
-TEST_CASE("SignalGraph snapshot publish is race-clean", "[host][graph][race]") {
+TEST_CASE("SignalGraph snapshot publish is race-clean", "[host][graph][race][issue-669]") {
     SignalGraph graph;
     auto in  = graph.add_input_node(1, "in");
     auto g   = graph.add_gain_node("g");
@@ -1092,6 +1093,20 @@ TEST_CASE("SignalGraph snapshot publish is race-clean", "[host][graph][race]") {
                                        // violations and assert on the main
                                        // thread after join.
 
+    // Deterministic handshake mirroring the regression-suite copy of this
+    // test (test_host_regression.cpp, the [issue-669] case): without an
+    // explicit "audio thread reached graph.process() at least once" promise,
+    // a slow shared-tenant Windows runner can complete all 200 mutation
+    // cycles + the 5ms tail sleep before the just-spawned audio thread is
+    // ever scheduled, leaving `blocks == 0` and tripping
+    // `REQUIRE(blocks.load() > 0)`. Captured in run #24910085528 (Windows
+    // github-hosted, 2026-04-24) — see issue #669. The two-promise barrier
+    // closes the window without any wall-clock sleep.
+    std::promise<void> audio_started;
+    auto started = audio_started.get_future();
+    std::promise<void> first_block_processed;
+    auto first_block = first_block_processed.get_future();
+
     std::thread audio([&] {
         std::vector<float> in_l(64, 0.25f);
         std::vector<float> out_l(64, 0.0f);
@@ -1099,6 +1114,8 @@ TEST_CASE("SignalGraph snapshot publish is race-clean", "[host][graph][race]") {
         float*       out_ptrs[1] = {out_l.data()};
         pulp::audio::BufferView<const float> iv(in_ptrs, 1, 64);
         pulp::audio::BufferView<float>       ov(out_ptrs, 1, 64);
+        audio_started.set_value();
+        bool first_block_signalled = false;
         while (!stop.load(std::memory_order_relaxed)) {
             graph.process(ov, iv, 64);
             for (int i = 0; i < 64; ++i) {
@@ -1110,8 +1127,19 @@ TEST_CASE("SignalGraph snapshot publish is race-clean", "[host][graph][race]") {
                 }
             }
             blocks.fetch_add(1, std::memory_order_relaxed);
+            if (!first_block_signalled) {
+                first_block_processed.set_value();
+                first_block_signalled = true;
+            }
         }
     });
+
+    // Wait for the audio thread to launch AND prove it has executed
+    // graph.process() at least once. Both barriers run before mutation so
+    // the test cannot pass or fail without exercising the snapshot-publish
+    // path under contention.
+    started.wait();
+    first_block.wait();
 
     // Hammer the graph with mutation cycles from the "UI" thread.
     const int cycles = 200;
