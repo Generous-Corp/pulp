@@ -1208,6 +1208,18 @@ target_link_libraries(pulp-test-design-import-claude-runtime
     PRIVATE pulp::view pulp::runtime Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-design-import-claude-runtime)
 
+# pulp #758 — inline `<script>` evaluation in the `--execute-bundle`
+# harness. Asserts that inline `text/javascript`, inline `text/babel`
+# (via a Babel-standalone shim), DOMContentLoaded dispatch, and the
+# layered async drain all fire. The optional [.fixture] case runs
+# against PULP_CLAUDE_BUNDLE_FIXTURE if set (canonical Spectr
+# editor.html — should now produce >20 nodes, not the 11-element
+# loader shell that pulp #758 was filed to fix).
+add_executable(pulp-test-design-import-inline-babel test_design_import_inline_babel.cpp)
+target_link_libraries(pulp-test-design-import-inline-babel
+    PRIVATE pulp::view pulp::runtime Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-design-import-inline-babel)
+
 # Screenshot comparison tests (visual diff for design import validation)
 if(APPLE)
     add_executable(pulp-test-screenshot-compare test_screenshot_compare.cpp)

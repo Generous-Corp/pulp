@@ -169,6 +169,80 @@ std::vector<std::string> extract_template_script_srcs(const std::string& templat
     return srcs;
 }
 
+// One inline `<script>` tag pulled out of the template HTML.
+// `kind` is normalized to one of:
+//   "javascript" — `type` missing, empty, or text/javascript / application/javascript
+//   "babel"      — type="text/babel" or type="text/jsx"
+//   "json"       — type ends with /json (used for inline config blobs the
+//                  walker should skip — we keep them so callers see the
+//                  full document order, but the harness ignores them)
+//   "other"      — anything else (templates, x-shader, vendor-specific)
+struct InlineScript {
+    std::string kind;
+    std::string source;
+};
+
+// Walk the template HTML and pull every inline `<script>...</script>` block
+// in document order. Tags that carry a `src=` attribute are skipped — those
+// are evaluated separately via the `javascript_indices` path. Bundler-only
+// `<script type="__bundler/...">` tags are also skipped (those carry the
+// envelope, not executable JS).
+std::vector<InlineScript> extract_inline_template_scripts(const std::string& template_html) {
+    std::vector<InlineScript> out;
+    static const std::regex tag_re(
+        R"RX(<script\b([^>]*)>([\s\S]*?)</script>)RX",
+        std::regex::icase);
+    static const std::regex src_attr_re(
+        R"RX(\bsrc\s*=\s*(?:"[^"]*"|'[^']*'|\S+))RX",
+        std::regex::icase);
+    static const std::regex type_attr_re(
+        R"RX(\btype\s*=\s*(?:"([^"]*)"|'([^']*)'|(\S+)))RX",
+        std::regex::icase);
+
+    auto begin = std::sregex_iterator(template_html.begin(), template_html.end(), tag_re);
+    auto end = std::sregex_iterator();
+    for (auto it = begin; it != end; ++it) {
+        std::string attrs = (*it)[1].str();
+        std::string body  = (*it)[2].str();
+
+        // Skip `<script src="...">` — the harness handles those via
+        // javascript_indices.
+        if (std::regex_search(attrs, src_attr_re)) continue;
+
+        // Read the type attribute, lower-case it for matching.
+        std::string type_lc;
+        std::smatch tm;
+        if (std::regex_search(attrs, tm, type_attr_re)) {
+            if (tm[1].matched) type_lc = tm[1].str();
+            else if (tm[2].matched) type_lc = tm[2].str();
+            else if (tm[3].matched) type_lc = tm[3].str();
+        }
+        std::transform(type_lc.begin(), type_lc.end(), type_lc.begin(),
+            [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+
+        // Skip the bundler envelope tags — those are not executable JS.
+        if (type_lc.rfind("__bundler/", 0) == 0) continue;
+
+        std::string kind;
+        if (type_lc.empty() ||
+            type_lc == "text/javascript" ||
+            type_lc == "application/javascript" ||
+            type_lc == "module") {
+            kind = "javascript";
+        } else if (type_lc == "text/babel" || type_lc == "text/jsx") {
+            kind = "babel";
+        } else if (type_lc.size() >= 5 &&
+                   type_lc.compare(type_lc.size() - 5, 5, "/json") == 0) {
+            kind = "json";
+        } else {
+            kind = "other";
+        }
+
+        out.push_back({std::move(kind), std::move(body)});
+    }
+    return out;
+}
+
 } // namespace
 
 std::optional<ClaudeBundle> parse_claude_bundle(const std::string& html) {
@@ -595,9 +669,223 @@ DesignIR parse_claude_html_with_runtime(const std::string& html, ClaudeRuntimeOp
             }
         }
 
-        // Drain any pending microtasks / animation frames the bundle
-        // queued during its synchronous boot.
+        // ── pulp #758: evaluate inline `<script>` blocks from the template ──
+        //
+        // The src-loaded payloads above bring in libraries (React,
+        // ReactDOM, Babel-standalone). The actual app code in a Claude
+        // bundled-React export usually lives in inline `<script
+        // type="text/babel">` blocks — and a few inline `text/javascript`
+        // blocks for plain-JS data declarations. Without this loop the
+        // walker only sees the empty `<div id="root"></div>` shell.
+        auto inline_scripts = extract_inline_template_scripts(bundle->template_html);
+
+        // Step 1: inline `text/javascript` (and untyped `<script>`) blocks
+        // in document order. Soft-fail per script — match the existing
+        // payload-eval pattern at lines ~580-595.
+        for (size_t i = 0; i < inline_scripts.size(); ++i) {
+            const auto& s = inline_scripts[i];
+            if (s.kind != "javascript") continue;
+            std::string source = s.source + "\n;void 0";
+            try {
+                engine.evaluate(source);
+            } catch (const std::exception& e) {
+                std::string msg = std::string("inline JS script ") + std::to_string(i)
+                    + " threw: " + e.what();
+                set_runtime_error(opts, msg);
+            } catch (...) {
+                std::string msg = std::string("inline JS script ") + std::to_string(i)
+                    + " threw: unknown exception";
+                set_runtime_error(opts, msg);
+            }
+        }
+
+        // Step 2: inline `text/babel` (and `text/jsx`) blocks. Verify
+        // Babel-standalone is in scope (the src-loaded library payloads
+        // above should have installed `globalThis.Babel`), then transform
+        // each block via `Babel.transform(src, {presets: ['react']}).code`
+        // before evaluating. Soft-fail per script.
+        bool has_any_babel = false;
+        for (const auto& s : inline_scripts) {
+            if (s.kind == "babel") { has_any_babel = true; break; }
+        }
+        if (has_any_babel) {
+            bool babel_loaded = false;
+            try {
+                auto v = engine.evaluate(
+                    "(typeof globalThis.Babel !== 'undefined' && "
+                    " typeof globalThis.Babel.transform === 'function') ? 1 : 0");
+                if (v.isInt32()) babel_loaded = (v.getInt32() != 0);
+                else if (v.isInt64()) babel_loaded = (v.getInt64() != 0);
+                else if (v.isFloat32() || v.isFloat64()) babel_loaded = (v.getFloat64() != 0.0);
+                else if (v.isBool()) babel_loaded = v.getBool();
+            } catch (...) {
+                babel_loaded = false;
+            }
+            if (!babel_loaded) {
+                set_runtime_error(opts,
+                    "babel-standalone not loaded; skipping inline text/babel scripts");
+            } else {
+                // Stash each Babel source as a JS string, transform it via
+                // the engine, then evaluate the transformed code. Using a
+                // global staging slot keeps us from having to escape JSX
+                // source for embedding in a JS string literal — JSX
+                // happily contains characters that would break a
+                // hand-rolled escape (template literals, comments, etc.).
+                for (size_t i = 0; i < inline_scripts.size(); ++i) {
+                    const auto& s = inline_scripts[i];
+                    if (s.kind != "babel") continue;
+
+                    // Push the raw JSX source into a global slot via a
+                    // properly-escaped JS string literal.
+                    {
+                        std::string set_src = "globalThis.__pulpBabelSrc__ = ";
+                        set_src += json_string_literal(s.source);
+                        set_src += ";void 0";
+                        try {
+                            engine.evaluate(set_src);
+                        } catch (const std::exception& e) {
+                            std::string msg = std::string("inline babel script ")
+                                + std::to_string(i) + " stash failed: " + e.what();
+                            set_runtime_error(opts, msg);
+                            continue;
+                        } catch (...) {
+                            std::string msg = std::string("inline babel script ")
+                                + std::to_string(i) + " stash failed: unknown exception";
+                            set_runtime_error(opts, msg);
+                            continue;
+                        }
+                    }
+
+                    // Run Babel.transform inside the engine and stash
+                    // the resulting code into a second global slot.
+                    try {
+                        engine.evaluate(
+                            "(function(){"
+                            "  try {"
+                            "    var out = globalThis.Babel.transform("
+                            "      globalThis.__pulpBabelSrc__,"
+                            "      { presets: ['react'] });"
+                            "    globalThis.__pulpBabelOut__ = (out && out.code) ? out.code : '';"
+                            "    globalThis.__pulpBabelErr__ = '';"
+                            "  } catch (e) {"
+                            "    globalThis.__pulpBabelOut__ = '';"
+                            "    globalThis.__pulpBabelErr__ = String(e && e.message ? e.message : e);"
+                            "  }"
+                            "})();void 0");
+                    } catch (const std::exception& e) {
+                        std::string msg = std::string("inline babel script ")
+                            + std::to_string(i) + " transform failed: " + e.what();
+                        set_runtime_error(opts, msg);
+                        continue;
+                    } catch (...) {
+                        std::string msg = std::string("inline babel script ")
+                            + std::to_string(i) + " transform failed: unknown exception";
+                        set_runtime_error(opts, msg);
+                        continue;
+                    }
+
+                    // Probe Babel error first — surface and skip if so.
+                    try {
+                        auto err_v = engine.evaluate(
+                            "globalThis.__pulpBabelErr__ || ''");
+                        if (err_v.isString()) {
+                            std::string err_msg(err_v.getString());
+                            if (!err_msg.empty()) {
+                                std::string msg = std::string("inline babel script ")
+                                    + std::to_string(i) + " babel error: " + err_msg;
+                                set_runtime_error(opts, msg);
+                                continue;
+                            }
+                        }
+                    } catch (...) { /* ignore probe failure */ }
+
+                    // Evaluate the transformed JS via the engine. Walk
+                    // through a global so we don't have to ferry the
+                    // (potentially large) compiled output back to C++
+                    // and then re-stringify it for engine.evaluate().
+                    try {
+                        engine.evaluate(
+                            "(0, eval)(globalThis.__pulpBabelOut__);void 0");
+                    } catch (const std::exception& e) {
+                        std::string msg = std::string("inline babel script ")
+                            + std::to_string(i) + " eval failed: " + e.what();
+                        set_runtime_error(opts, msg);
+                    } catch (...) {
+                        std::string msg = std::string("inline babel script ")
+                            + std::to_string(i) + " eval failed: unknown exception";
+                        set_runtime_error(opts, msg);
+                    }
+                }
+
+                // Tidy up the staging slots so they don't leak into the
+                // walker's view of globals.
+                try {
+                    engine.evaluate(
+                        "delete globalThis.__pulpBabelSrc__;"
+                        "delete globalThis.__pulpBabelOut__;"
+                        "delete globalThis.__pulpBabelErr__;void 0");
+                } catch (...) { /* nothing to do — best-effort */ }
+            }
+        }
+
+        // Step 3: dispatch DOMContentLoaded so bundles that defer their
+        // boot to the document-ready signal actually fire. Mirrors the
+        // browser sequence: readystatechange → DOMContentLoaded → load.
+        //
+        // We construct the event objects defensively: if `Event` is a
+        // valid constructor in scope we use it, otherwise we fall back
+        // to a plain `{type:..., target:..., bubbles:false}` literal so
+        // dispatch still runs against listeners that just key on `type`.
+        // The trailing `;void 0` avoids the QuickJS toChocValue
+        // circular-ref recursion documented in the project memory.
         try {
+            engine.evaluate(
+                "(function(){"
+                "  if (typeof document === 'undefined') return;"
+                "  function _mkEvent(t, target){"
+                "    if (typeof Event === 'function') {"
+                "      try { return new Event(t); } catch (e) {}"
+                "    }"
+                "    return { type: t, target: target, currentTarget: target,"
+                "             bubbles: false, cancelable: false,"
+                "             defaultPrevented: false,"
+                "             preventDefault: function(){ this.defaultPrevented = true; },"
+                "             stopPropagation: function(){},"
+                "             stopImmediatePropagation: function(){} };"
+                "  }"
+                "  function _dispatch(target, type){"
+                "    if (!target) return;"
+                "    if (typeof target.dispatchEvent === 'function') {"
+                "      try { target.dispatchEvent(_mkEvent(type, target)); } catch (e) {}"
+                "    }"
+                "  }"
+                "  try { document.readyState = 'interactive'; } catch (e) {}"
+                "  _dispatch(document, 'readystatechange');"
+                "  _dispatch(document, 'DOMContentLoaded');"
+                "  try { document.readyState = 'complete'; } catch (e) {}"
+                "  _dispatch(document, 'readystatechange');"
+                "  if (typeof window !== 'undefined') _dispatch(window, 'load');"
+                "})();void 0");
+        } catch (const std::exception& e) {
+            // Soft-fail: if the engine's event surface is missing some of
+            // these globals, the bundle just won't get its lifecycle
+            // events. Don't block the walker.
+            set_runtime_error(opts,
+                std::string("DOMContentLoaded dispatch threw: ") + e.what());
+        } catch (...) {
+            set_runtime_error(opts,
+                "DOMContentLoaded dispatch threw: unknown exception");
+        }
+
+        // Step 4: layered async drain. The original two-pump cycle stays;
+        // we then run two more pump+frame-callback cycles so async chains
+        // (Babel's transform queue, React 18 concurrent commits, fetch
+        // microtasks) have a chance to settle.
+        try {
+            engine.pump_message_loop();
+            bridge.service_frame_callbacks();
+            engine.pump_message_loop();
+            bridge.service_frame_callbacks();
             engine.pump_message_loop();
             bridge.service_frame_callbacks();
             engine.pump_message_loop();
