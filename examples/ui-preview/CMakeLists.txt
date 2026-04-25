@@ -1,6 +1,6 @@
 # UI Preview — standalone app for validating the rendering pipeline.
-# Desktop-only: depends on pulp::inspect which needs Dawn/Skia GPU.
-if(APPLE AND NOT PULP_IOS)
+# Desktop-only: depends on pulp::inspect which needs the GPU stack.
+if(APPLE AND NOT PULP_IOS AND PULP_ENABLE_GPU AND TARGET pulp::inspect)
     add_executable(pulp-ui-preview main.cpp)
     target_link_libraries(pulp-ui-preview PRIVATE
         pulp::view
