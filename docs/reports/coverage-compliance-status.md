@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-25 18:28 EDT
+Last reviewed: 2026-04-25 18:43 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -134,7 +134,7 @@ Open Phase 3 PRs:
   workflows, not only the Linux jobs; the current polling window shows no
   failures while those fresh checks drain.
 - `#789` Android ship/package helper coverage, branch
-  `feature/android-package-coverage-644`, head `a3f124a1`. This tranche
+  `feature/android-package-coverage-644`, head `23ea43e2`. This tranche
   adds a deterministic host-side fake Android SDK/toolchain harness for
   `ship/platform/android/package_android.cpp` without requiring a real SDK,
   device, keystore, Gradle install, bundletool, or network access. Scope:
@@ -159,9 +159,13 @@ Open Phase 3 PRs:
   `cmake --build build --target pulp-test-android-package -j4`, direct
   `pulp-test-android-package` (`64` assertions / `7` test cases), focused
   Android package CTest (`7/7`), adjacent ship CTest slice for
-  Android/appcast/codesign/notarization/DMG (`20/20`), and whitespace. The
+  Android/appcast/codesign/notarization/DMG (`20/20`), and whitespace.
+  `a3f124a1` cleared the platform/test lanes but failed required diff
+  coverage at `74.6%` because Windows-only helper branch lines were not marked
+  hit in the merged coverage artifact. The current head simplifies those
+  helpers without behavior changes to reduce the uncovered diff surface; the
   current polling window shows no failures while fresh checks run on
-  `a3f124a1`.
+  `23ea43e2`.
 
 Local Phase 3 draft not yet opened as a PR:
 - `#643` package-registry CLI/tools draft, worktree
