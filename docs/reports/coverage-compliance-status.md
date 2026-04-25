@@ -159,8 +159,10 @@ Open Phase 3 PRs:
   correctly noted that the process-context test set a tempo value without
   setting VST3's `kTempoValid` bit; `c182ee21` includes that test validity
   flag, with local `pulp-test-vst3-plugin-state` still green (`118`
-  assertions / `5` test cases). GitHub Actions is rerunning at `c182ee21`; no
-  completed failures were visible at the last poll.
+  assertions / `5` test cases). GitHub Actions is rerunning at `c182ee21`.
+  The TSan job failed before tests due a Git checkout partial-pack/RPC
+  disconnect (`curl 18` / bad pack header); rerun failed sanitizer jobs once
+  the sanitizer workflow reaches a terminal state.
 - `#786` render DirtyTracker / RenderLoop edge coverage, branch
   `feature/render-coverage-646-next`, head `49983137`. This tranche extends
   the still-open `#646` render component follow-up after the earlier merged
@@ -181,23 +183,22 @@ Open Phase 3 PRs:
   as `#782`; that shared coverage is now on `main` via `#771`. GitHub Actions
   is rerunning at `49983137`; no completed failures were visible at the last
   poll.
-
-Local Phase 3 draft not yet opened as a PR:
-
-- `#642` events socket-IPC tranche, worktree
-  `/Users/danielraffel/Code/pulp-events-ipc-coverage-642`, branch
-  `feature/events-ipc-coverage-642`, local commit `4cb33f4e`. This draft
+- `#788` events socket-IPC coverage, branch
+  `feature/events-ipc-coverage-642`, head `4cb33f4e`. This tranche
   extends `test/test_ipc.cpp` with malformed socket endpoint rejection,
   non-throwing socket endpoint parsing in
   `core/events/src/interprocess_connection.cpp`, and a deterministic
   localhost client/server framed-message exchange. After `#771` merged, this
   branch was rebased onto `origin/main` and duplicate shared CLI support
-  commits were skipped, leaving only the events tranche.
-  Local validation is green: `pulp-test-ipc` (`34` assertions / `9` test
-  cases), focused CTest `IPC` plus project-bump probe edges (`12/12`), and
+  commits were skipped, leaving only the events tranche. Local validation is
+  green: `pulp-test-ipc` (`34` assertions / `9` test
+  cases), focused CTest `IPC` (`9/9`), and
   whitespace. A direct multi-filter Catch2 invocation was intentionally not
   used as validation because Catch2 treats multiple quoted filters as an AND
-  expression; CTest was used for the focused multi-test slice.
+  expression; CTest was used for the focused multi-test slice. PR is labeled
+  `codecov` and GitHub Actions is starting.
+
+Local Phase 3 draft not yet opened as a PR:
 - `#644` Android ship/package helper tranche, worktree
   `/Users/danielraffel/Code/pulp-android-package-coverage-644`, branch
   `feature/android-package-coverage-644`, local commit `1de9b8e6`. This
@@ -230,20 +231,23 @@ Next recovery actions:
 1. Poll `#777`, `#782`, and `#786`; merge green PRs manually
    because auto-merge is disabled.
 2. Let the rebased `#777`, `#782`, and `#786` checks drain at their new heads.
-3. Open either rebased local draft `#642` or `#644` as the next Phase 3 PR
-   and link it from its issue.
+3. Keep `#644` as the next rebased local draft; open it after the current
+   active PR queue has room or if `ship` becomes the next priority.
 4. Keep `#774` docs-only and let its post-`#771` rebase checks drain.
 5. After `#777`, `#782`, and `#786` merge, refresh this section with the next
    complete Codecov `main` report.
 6. If any Windows Namespace lane fails again, pull the fresh completed-run
    log first and search for `pulp-test-cli-project-command`; the known
    failing tests were the dirty-gate and redundant-origin project-bump cases.
-7. If sandbox-e2e fails again, pull the fresh log first; the expected
+7. If `#782` still shows TSan failed after the sanitizer workflow completes,
+   rerun failed jobs for run `24929565716`; the observed failure was checkout
+   infrastructure before tests, not a sanitizer report.
+8. If sandbox-e2e fails again, pull the fresh log first; the expected
    failure fixed here was `pulp upgrade --check-only` ignoring
    `PULP_UPDATE_CHECK_DISABLED=1` on an empty cache.
-8. If a PR is green but GitHub reports it behind `main`, rebase that
+9. If a PR is green but GitHub reports it behind `main`, rebase that
    branch onto `origin/main`, push with lease, and let checks rerun.
-9. Continue Phase 3 from the tranche issues below, prioritizing
+10. Continue Phase 3 from the tranche issues below, prioritizing
    represented high-miss files over adding new perimeter lanes.
 
 ## Phase 1 corrected baseline
