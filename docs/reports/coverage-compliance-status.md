@@ -145,7 +145,7 @@ Open Phase 3 PRs:
   whitespace, skill-sync, and version checks are green. GitHub Actions is
   rerunning at `8e9caaa7`.
 - `#786` render DirtyTracker / RenderLoop edge coverage, branch
-  `feature/render-coverage-646-next`, head `330e373d`. This tranche extends
+  `feature/render-coverage-646-next`, head `a9f4526a`. This tranche extends
   the still-open `#646` render component follow-up after the earlier merged
   `#700` slice. Scope is intentionally pure and hostable: DirtyTracker
   negative/empty rects, debug overlay state, threshold accumulation,
@@ -154,8 +154,14 @@ Open Phase 3 PRs:
   validation is green: configure, focused target build,
   `pulp-test-dirty-tracker` (`52` assertions / `18` cases),
   `pulp-test-rendering-integration` (`71` assertions / `40` cases),
-  focused CTest (`19/19`), skill/version checks, and whitespace. GitHub
-  Actions is draining at `330e373d` with no completed failures observed.
+  focused CTest (`19/19`), GPU-off configure/build of
+  `pulp-test-cli-project-command`, `pulp-cli` build, direct
+  disabled-upgrade smoke, skill/version checks, and whitespace. The branch
+  now carries the same shared GPU-off CMake, Windows-safe redirection,
+  `ui-preview` guard, and disabled-update-check fixes as the other active
+  Phase 3 tranches because IWYU exposed the GPU-off target-link failure
+  before any of those shared fixes had merged. GitHub Actions is draining
+  at `a9f4526a`.
 
 Open supporting PR:
 
@@ -172,7 +178,7 @@ Next recovery actions:
    because auto-merge is disabled.
 2. Let the current `#771`, `#777`, and `#782` reruns drain after the
    shared CI and sandbox-e2e unblockers were pushed.
-3. Let the new `#786` render coverage tranche drain at `330e373d`.
+3. Let the new `#786` render coverage tranche drain at `a9f4526a`.
 4. If sandbox-e2e fails again, pull the fresh log first; the expected
    failure fixed here was `pulp upgrade --check-only` ignoring
    `PULP_UPDATE_CHECK_DISABLED=1` on an empty cache.
