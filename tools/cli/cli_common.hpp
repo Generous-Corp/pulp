@@ -52,6 +52,15 @@ std::string shell_quote(const std::string& s);
 std::string shell_quote(const fs::path& p);
 fs::path platform_executable(fs::path p);
 
+// Platform-aware shell-redirection fragments for muting subprocess
+// chatter inside command strings passed to run/exec_output. cmd.exe
+// rejects `/dev/null` outright (treats it as a literal path that
+// can't be opened, and on some configs that aborts the whole
+// command — see #780). Use `silence_stderr()` for `2>NUL`/`2>/dev/null`
+// and `silence_all()` for `>NUL 2>&1`/`>/dev/null 2>&1`.
+const char* silence_stderr();
+const char* silence_all();
+
 // ── String Utilities ────────────────────────────────────────────────────────
 
 std::string trim(const std::string& s);

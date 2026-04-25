@@ -228,7 +228,7 @@ bool pin_files_are_dirty(const fs::path& project_path, bool standalone) {
     std::string cmd = "git -C " + shell_quote(project_path) +
                       " status --porcelain -- CMakeLists.txt";
     if (standalone) cmd += " pulp.toml";
-    cmd += " 2>/dev/null";
+    cmd += silence_stderr();
     auto out = trim(exec_output(cmd));
     return !out.empty();
 }
@@ -293,12 +293,14 @@ std::optional<std::string> managed_sdk_path_replacement(const fs::path& raw_path
 std::optional<std::string> main_pinned_version_at_origin(const fs::path& project_path,
                                                          bool standalone) {
     std::string fetch = "git -C " + shell_quote(project_path) +
-                        " fetch --quiet origin main >/dev/null 2>&1";
+                        " fetch --quiet origin main";
+    fetch += silence_all();
     if (run(fetch) != 0) return std::nullopt;
 
     if (standalone) {
         std::string toml_cmd = "git -C " + shell_quote(project_path) +
-                               " show origin/main:pulp.toml 2>/dev/null";
+                               " show origin/main:pulp.toml";
+        toml_cmd += silence_stderr();
         auto toml = exec_output(toml_cmd);
         if (!toml.empty()) {
             auto site = pb::find_toml_string_value(toml, "sdk_version",
@@ -309,7 +311,8 @@ std::optional<std::string> main_pinned_version_at_origin(const fs::path& project
     }
 
     std::string cmake_cmd = "git -C " + shell_quote(project_path) +
-                            " show origin/main:CMakeLists.txt 2>/dev/null";
+                            " show origin/main:CMakeLists.txt";
+    cmake_cmd += silence_stderr();
     auto cmake = exec_output(cmake_cmd);
     if (cmake.empty()) return std::nullopt;
     auto site = standalone ? pb::find_find_package_pulp_version(cmake)
@@ -605,16 +608,7 @@ pb::UndoEntry bump_one(const fs::path& project_path,
         // `build/` stays untouched. The CLI doesn't try to honor a
         // user-specified build dir here — that's a follow-up.
         auto verify_build = project_path / "build-bump-verify";
-        // Silence redirection — POSIX uses `/dev/null`, Windows cmd.exe
-        // uses `NUL`. Without branching on the host, a bare `>/dev/null`
-        // makes cmd.exe create a literal file named `dev\null` (or fail
-        // to parse) and the advertised `--verify-builds` flag rolls the
-        // pin back even on healthy projects. See codex-sweep(#599).
-#if defined(_WIN32)
-        const char* silence = " >NUL 2>&1";
-#else
-        const char* silence = " >/dev/null 2>&1";
-#endif
+        const char* silence = silence_all();
         std::string cfg = "cmake -S " + shell_quote(project_path) +
                           " -B " + shell_quote(verify_build) +
                           " -DCMAKE_BUILD_TYPE=Debug";

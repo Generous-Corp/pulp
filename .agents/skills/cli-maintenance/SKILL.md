@@ -396,6 +396,17 @@ Gotchas:
   git isn't on PATH, `cmake_is_dirty()` returns false — we refuse
   to block on a missing tool. `--force-dirty` is the explicit
   override for users who WANT to bump alongside other edits.
+- **Use `silence_stderr()` / `silence_all()` on shelled-out
+  redirects, never literal `2>/dev/null`.** cmd.exe treats
+  `/dev/null` as a relative file path (it tries `dev\null` under
+  the cwd) and the redirection failure can abort the whole
+  pipeline. The two `pin_files_are_dirty` and
+  `main_pinned_version_at_origin` paths fell over this way on
+  the Windows lane (#780): `git status` and `git fetch origin
+  main` never ran, the dirty/redundant gates returned false, and
+  the bump_one tests asserting `"skipped"` failed. The helpers
+  live in `cli_common.{hpp,cpp}` and resolve to `2>NUL`/`>NUL
+  2>&1` on Windows, `2>/dev/null`/`>/dev/null 2>&1` elsewhere.
 - **Migration notes print once per bump batch, using the minimum
   old pin as `from`.** That captures the widest set of applicable
   notes when different projects were on different versions.

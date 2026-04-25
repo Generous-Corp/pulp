@@ -138,6 +138,29 @@ fs::path platform_executable(fs::path p) {
     return p;
 }
 
+// cmd.exe interprets `/dev/null` as a relative file path and refuses
+// to open it; on some configurations the whole pipeline aborts when
+// the redirection target can't be opened, which is how #780 fell
+// over (`git status` never ran inside the dirty gate, the gate
+// silently returned clean, and the test that asserted "skipped"
+// failed). The leading space lets these helpers be appended directly
+// to a command string.
+const char* silence_stderr() {
+#ifdef _WIN32
+    return " 2>NUL";
+#else
+    return " 2>/dev/null";
+#endif
+}
+
+const char* silence_all() {
+#ifdef _WIN32
+    return " >NUL 2>&1";
+#else
+    return " >/dev/null 2>&1";
+#endif
+}
+
 static bool parse_uint64_arg(const std::string& text, const char* flag, uint64_t& out) {
     if (text.empty()) {
         std::cerr << "Error: invalid value for " << flag << ": " << text << "\n";
