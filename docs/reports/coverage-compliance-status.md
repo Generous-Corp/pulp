@@ -67,35 +67,32 @@ Finish line:
 
 Latest complete Codecov `main` report observed while updating this doc:
 
-- commit: `a80929c42ff61b88cd366383baad2ee817558b57`
-- workflow: Coverage run `24926536334`, completed successfully
-- note: this is the latest complete `main` Codecov report observed before
-  the `#771`, `#777`, `#782`, and `#786` merges; refresh after the next
-  complete `main` coverage run reaches a terminal state.
-- overall tracked coverage: `43.27%` over `70,197` lines in `556` files
-- covered lines: `30,376`
+- commit: `26dd396da53e5ceab340eac5681f1b10d75ed56b`
+- workflow: Coverage run `24930675870`, completed successfully
+- overall tracked coverage: `44.35%` over `70,205` lines in `556` files
+- covered lines: `31,140`
 - current component coverage from the Codecov API:
-  - `audio`: `25.57%`
-  - `canvas`: `66.77%`
-  - `dsl`: `63.38%`
-  - `events`: `30.24%`
-  - `format`: `47.92%`
-  - `host`: `37.43%`
-  - `midi`: `50.14%`
-  - `osc`: `62.22%`
-  - `platform`: `52.06%`
-  - `render`: `56.68%`
-  - `runtime`: `51.69%`
-  - `signal`: `66.03%`
-  - `state`: `65.70%`
-  - `view`: `43.71%`
+  - `audio`: `24.8%`
+  - `canvas`: `67.83%`
+  - `dsl`: `77.04%`
+  - `events`: `29.47%`
+  - `format`: `52.61%`
+  - `host`: `43.23%`
+  - `midi`: `50.96%`
+  - `osc`: `72.52%`
+  - `platform`: `46.92%`
+  - `render`: `61.35%`
+  - `runtime`: `48.56%`
+  - `signal`: `67.25%`
+  - `state`: `67.26%`
+  - `view`: `45.04%`
   - `android`: `13.83%`
-  - `apple`: `25.36%`
-  - `linux`: `7.07%`
-  - `windows`: `10.67%`
-  - `cli`: `32.10%`
-  - `ship`: `34.44%`
-  - `tools`: `39.46%`
+  - `apple`: `25.72%`
+  - `linux`: `0.0%`
+  - `windows`: `16.83%`
+  - `cli`: `32.96%`
+  - `ship`: `36.48%`
+  - `tools`: `39.89%`
 
 Merged after the Phase 1 closeout / `#723` baseline:
 
