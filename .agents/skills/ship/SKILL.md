@@ -164,10 +164,10 @@ export ANDROID_HOME=~/Library/Android/sdk  # macOS
 
 Pulp executes Android package helpers through `cmd.exe /c` on Windows. Android
 SDK tools and Gradle wrappers may resolve to `.bat` files there, so command
-strings that invoke a quoted batch path must prefix it with `call`; otherwise
-`cmd.exe` can consume the quoted executable path incorrectly and the helper
-silently reports packaging, signing, or bundletool failure. Keep this in mind
-when touching `ship/platform/android/package_android.cpp`.
+strings that begin with a quoted batch path need an outer command quote so
+`cmd.exe` does not strip the executable quote while preserving the remaining
+quoted arguments. Keep this in mind when touching
+`ship/platform/android/package_android.cpp`.
 
 ### Released CLI tarball crashes on user machines
 

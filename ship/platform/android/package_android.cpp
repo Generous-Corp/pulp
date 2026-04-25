@@ -38,15 +38,17 @@ static int exec_status(const std::string& cmd, int timeout_ms = 120000) {
 }
 
 #ifdef _WIN32
+static std::string wrap_for_cmd_c(const std::string& cmd);
+
 static std::string exec_cmd_win(const std::string& cmd, int timeout_ms = 120000) {
-    auto r = pulp::platform::exec("cmd.exe", {"/c", cmd}, timeout_ms);
+    auto r = pulp::platform::exec("cmd.exe", {"/c", wrap_for_cmd_c(cmd)}, timeout_ms);
     auto result = r.stdout_output;
     while (!result.empty() && (result.back() == '\n' || result.back() == '\r'))
         result.pop_back();
     return result;
 }
 static int exec_status_win(const std::string& cmd, int timeout_ms = 120000) {
-    auto r = pulp::platform::exec("cmd.exe", {"/c", cmd}, timeout_ms);
+    auto r = pulp::platform::exec("cmd.exe", {"/c", wrap_for_cmd_c(cmd)}, timeout_ms);
     return r.exit_code;
 }
 #endif
@@ -78,11 +80,20 @@ static std::string shell_quote_path(const fs::path& path) {
     return "\"" + path.string() + "\"";
 }
 
+#ifdef _WIN32
+static std::string wrap_for_cmd_c(const std::string& cmd) {
+    // `cmd.exe /c` strips the first and last quote when the command begins
+    // with a quoted executable. Add an outer pair so the executable's quotes
+    // survive and the remaining quoted arguments are parsed normally.
+    if (!cmd.empty() && cmd.front() == '"')
+        return "\"" + cmd + "\"";
+    return cmd;
+}
+#endif
+
 static std::string shell_invoke_path(const fs::path& path) {
 #ifdef _WIN32
-    // Batch-backed SDK tools need `call` under cmd.exe so quoted paths and
-    // arguments survive `/c` parsing consistently.
-    return "call " + shell_quote_path(path);
+    return shell_quote_path(path);
 #else
     return shell_quote(path.string());
 #endif
@@ -90,7 +101,9 @@ static std::string shell_invoke_path(const fs::path& path) {
 
 static std::string shell_invoke_command(const std::string& command) {
 #ifdef _WIN32
-    return "call " + shell_quote(command);
+    if (command.find_first_of(" \t\\/") != std::string::npos)
+        return shell_quote(command);
+    return command;
 #else
     return shell_quote(command);
 #endif
