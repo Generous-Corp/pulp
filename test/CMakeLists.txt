@@ -404,6 +404,11 @@ add_executable(pulp-test-appcast test_appcast.cpp)
 target_link_libraries(pulp-test-appcast PRIVATE pulp::ship Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-appcast)
 
+# Android package/signing tests (host-side fake SDK/toolchain only)
+add_executable(pulp-test-android-package test_android_package.cpp)
+target_link_libraries(pulp-test-android-package PRIVATE pulp::ship Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-android-package)
+
 # V3 gaps tests (Bias, MidiSequence, SubsectionReader, HostType, Primes, Expression)
 add_executable(pulp-test-v3-gaps test_v3_gaps.cpp)
 target_link_libraries(pulp-test-v3-gaps PRIVATE pulp::signal pulp::midi pulp::audio pulp::format pulp::runtime Catch2::Catch2WithMain)
