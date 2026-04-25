@@ -80,9 +80,26 @@ fn project_re() -> &'static Regex {
     RE.get_or_init(|| Regex::new(r"\bproject\s*\(").unwrap())
 }
 
-/// Which CMake shape produced the pin site we're rewriting.
+/// Which CMake/TOML shape produced the pin site we're rewriting.
+///
+/// The first three variants are standalone-project pins (pulp#740 /
+/// #244 spec): `pulp.toml` is the source of truth for the SDK pin,
+/// and `find_package(Pulp X.Y.Z ...)` mirrors it when present. The
+/// remaining variants describe the Pulp source checkout's internal
+/// pin sites, where `project(... VERSION ...)` is the framework
+/// release version rather than a consumer SDK pin.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PinKind {
+    /// `sdk_version = "X.Y.Z"` inside `pulp.toml`. Source of truth
+    /// for standalone consumer projects.
+    PulpTomlSdkVersion,
+    /// `sdk_path = ".../X.Y.Z"` inside `pulp.toml`. Rewritten only
+    /// when it points at a managed-cache path for the old version;
+    /// custom paths are preserved.
+    PulpTomlSdkPath,
+    /// `find_package(Pulp X.Y.Z REQUIRED)` inside a standalone project's
+    /// CMakeLists. Mirrors `sdk_version` when present.
+    CMakeFindPackagePulpVersion,
     /// `FetchContent_Declare(pulp … GIT_TAG vX.Y.Z)`
     FetchContentGitTag,
     /// `pulp_add_project(NAME VERSION X.Y.Z …)`
@@ -99,6 +116,9 @@ impl PinKind {
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
+            Self::PulpTomlSdkVersion => "PulpTomlSdkVersion",
+            Self::PulpTomlSdkPath => "PulpTomlSdkPath",
+            Self::CMakeFindPackagePulpVersion => "CMakeFindPackagePulpVersion",
             Self::FetchContentGitTag => "FetchContentGitTag",
             Self::PulpAddProject => "PulpAddProject",
             Self::ProjectVersion => "ProjectVersion",
@@ -111,6 +131,9 @@ impl PinKind {
     #[must_use]
     pub fn parse(name: &str) -> Self {
         match name {
+            "PulpTomlSdkVersion" => Self::PulpTomlSdkVersion,
+            "PulpTomlSdkPath" => Self::PulpTomlSdkPath,
+            "CMakeFindPackagePulpVersion" => Self::CMakeFindPackagePulpVersion,
             "FetchContentGitTag" => Self::FetchContentGitTag,
             "PulpAddProject" => Self::PulpAddProject,
             "ProjectVersion" => Self::ProjectVersion,
@@ -258,6 +281,104 @@ pub fn find_pin_site(source: &str) -> PinSite {
     PinSite::default()
 }
 
+/// Find a `find_package(Pulp X.Y.Z [REQUIRED])` line in a CMakeLists
+/// source and return its pin-version literal as a [`PinSite`] of kind
+/// [`PinKind::CMakeFindPackagePulpVersion`].
+///
+/// Standalone consumer projects mirror their `pulp.toml sdk_version`
+/// into this site so the CMake configure step uses the same version
+/// the toolchain expects. The bump rewrites the literal in place.
+///
+/// Returns [`PinSite::default`] (kind [`PinKind::Unknown`]) when no
+/// matching call exists or the version literal isn't a clean triple.
+///
+/// # Panics
+///
+/// Panics only if the compile-time regex literal fails to compile,
+/// which would be a bug in the regex source — not reachable on any
+/// supported platform.
+#[must_use]
+pub fn find_find_package_pulp_version(source: &str) -> PinSite {
+    static RE: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
+    let re = RE.get_or_init(|| {
+        // Match `find_package(Pulp X.Y.Z ...)` — Pulp is the package
+        // name; the version literal sits where CMake expects it.
+        Regex::new(r"(?i)find_package\s*\(\s*Pulp\s+(\d+\.\d+\.\d+)").expect("valid regex")
+    });
+    let Some(caps) = re.captures(source) else {
+        return PinSite::default();
+    };
+    let Some(m) = caps.get(1) else {
+        return PinSite::default();
+    };
+    PinSite {
+        kind: PinKind::CMakeFindPackagePulpVersion,
+        current_pin: m.as_str().to_owned(),
+        start: m.start(),
+        end: m.end(),
+    }
+}
+
+/// Find a `key = "VALUE"` line at top level of a TOML source and
+/// return the VALUE position as a [`PinSite`] of the supplied kind
+/// (typically [`PinKind::PulpTomlSdkVersion`] or
+/// [`PinKind::PulpTomlSdkPath`]).
+///
+/// Mirrors C++ `pb::find_toml_string_value` — line-scan, no full
+/// TOML parse. Skips comment lines and blank lines. The byte
+/// offsets cover the contents of the quoted string only (excluding
+/// the quotes themselves), so [`rewrite_pin`] can swap the value
+/// without disturbing the surrounding `key = "..."` shape.
+///
+/// Returns [`PinSite::default`] when the key is missing, the value
+/// isn't quoted, or the closing quote is missing.
+#[must_use]
+pub fn find_toml_pin_site(source: &str, key: &str, kind: PinKind) -> PinSite {
+    let mut byte_offset = 0usize;
+    for raw_line in source.split_inclusive('\n') {
+        let line_start = byte_offset;
+        byte_offset += raw_line.len();
+        let line = raw_line.trim_end_matches('\n').trim_end_matches('\r');
+        let trimmed = line.trim_start();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        let Some(rest) = trimmed.strip_prefix(key) else {
+            continue;
+        };
+        // Need word-boundary after the key so `sdk_version` doesn't
+        // match `sdk_version_alt`.
+        if let Some(c) = rest.chars().next() {
+            if c == '_' || c.is_alphanumeric() {
+                continue;
+            }
+        }
+        let rest = rest.trim_start();
+        let Some(rest) = rest.strip_prefix('=') else {
+            continue;
+        };
+        let after_eq_offset = line_start + (line.len() - rest.len());
+        // Re-anchor: find the opening quote relative to the original
+        // source. We don't trim further here — `find('"')` handles
+        // any whitespace between `=` and the quoted value.
+        let Some(quote_rel) = source[after_eq_offset..].find('"') else {
+            continue;
+        };
+        let value_start = after_eq_offset + quote_rel + 1;
+        let Some(close_rel) = source[value_start..].find('"') else {
+            continue;
+        };
+        let value_end = value_start + close_rel;
+        return PinSite {
+            kind,
+            current_pin: source[value_start..value_end].to_owned(),
+            start: value_start,
+            end: value_end,
+        };
+    }
+    PinSite::default()
+}
+
 /// Rewrite the pin literal at [`PinSite`] to `new_pin`. Preserves the
 /// `v` prefix preference via `new_pin_style_has_v`.
 ///
@@ -391,7 +512,48 @@ fn find_literal_after(
 
 // ── Undo batch JSON ───────────────────────────────────────────────────
 
+/// One precise edit recorded during a bump, so undo can restore the
+/// exact file state byte-for-byte — including the user's original
+/// `v` / no-`v` pin-style preference.
+///
+/// Added per pulp#740 / #244 spec:
+/// > Undo files now record explicit edits: path, pin kind, old value,
+/// > new value, and old formatting style.
+///
+/// Undo applies each edit by checking that the current file content
+/// still matches `new_value` at the recorded site; if it doesn't, the
+/// edit is skipped rather than clobbering whatever the user (or
+/// another tool) wrote since the bump.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UndoEdit {
+    /// Absolute path to the file that was edited.
+    pub path: PathBuf,
+    /// Which pin shape this edit targeted — reject-mismatch guard
+    /// on undo, and sanity check against schema drift.
+    #[serde(default)]
+    pub kind: PinKind,
+    /// Pre-bump value as it appeared in the file.
+    pub old_value: String,
+    /// Post-bump value the bump wrote. Undo matches this before
+    /// restoring `old_value`; a mismatch means the file was edited
+    /// after the bump and we refuse to clobber.
+    pub new_value: String,
+    /// Whether the pre-bump value carried a leading `v` / `V`. Kept
+    /// so undo restores the exact spelling the user had (not just
+    /// a canonicalised triple).
+    #[serde(default)]
+    pub old_value_style_has_v: bool,
+}
+
 /// One per-project entry in an undo batch.
+///
+/// # Backward-compatibility
+///
+/// Legacy single-edit entries written before pulp#740 landed are
+/// still readable: `edits` and `notes` default to empty, so the
+/// deserialiser accepts older batches without the fields. Undo
+/// callers fall back to the top-level `old_pin` + `pin_kind` when
+/// `edits` is empty.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UndoEntry {
     /// Absolute project path.
@@ -413,6 +575,16 @@ pub struct UndoEntry {
     /// Human-readable failure explanation when `status == "failed"`.
     #[serde(default)]
     pub failure_reason: String,
+    /// Transient report notes — surfaced to the user in the bump
+    /// output, NOT required for undo correctness. Defaults to empty
+    /// for legacy entries (pre-pulp#740) that predate the field.
+    #[serde(default)]
+    pub notes: Vec<String>,
+    /// Precise per-file edits made by this bump, in apply order.
+    /// Empty for legacy entries; callers fall back to the `old_pin`
+    /// / `pin_kind` pair when this field is missing.
+    #[serde(default)]
+    pub edits: Vec<UndoEdit>,
 }
 
 /// One batch — all projects touched by a single `pulp project bump`.
@@ -663,6 +835,7 @@ mod tests {
                 pin_kind: PinKind::FetchContentGitTag,
                 status: "bumped".to_owned(),
                 failure_reason: String::new(),
+                ..Default::default()
             }],
         };
         write_undo_batch(&p, &batch).unwrap();
@@ -671,6 +844,207 @@ mod tests {
         assert_eq!(read.entries.len(), 1);
         assert_eq!(read.entries[0].pin_kind, PinKind::FetchContentGitTag);
         assert!(read.entries[0].old_pin_style_has_v);
+    }
+
+    #[test]
+    fn undo_batch_legacy_file_without_edits_or_notes_reads_cleanly() {
+        // Backward-compat check for pulp#740: undo files written before
+        // the `edits` / `notes` fields existed must still deserialize
+        // with empty defaults, so users with old bump-undo-*.json files
+        // don't lose their undo history on a pulp upgrade.
+        let td = tempfile::tempdir().unwrap();
+        let p = td.path().join("bump-undo-legacy.json");
+        let legacy_json = r#"{
+            "timestamp": "2026-04-01T00-00-00Z",
+            "target_version": "0.40.0",
+            "entries": [{
+                "project_path": "/tmp/proj",
+                "project_name": "LegacyProj",
+                "old_pin": "v0.30.0",
+                "old_pin_style_has_v": true,
+                "pin_kind": "FetchContentGitTag",
+                "status": "bumped",
+                "failure_reason": ""
+            }]
+        }"#;
+        std::fs::write(&p, legacy_json).unwrap();
+        let read = read_undo_batch(&p).expect("legacy batch reads clean");
+        assert_eq!(read.entries.len(), 1);
+        assert_eq!(read.entries[0].old_pin, "v0.30.0");
+        assert!(read.entries[0].notes.is_empty(), "notes defaults empty");
+        assert!(read.entries[0].edits.is_empty(), "edits defaults empty");
+    }
+
+    #[test]
+    fn undo_entry_with_edits_round_trips() {
+        let td = tempfile::tempdir().unwrap();
+        let p = td.path().join("bump-undo-edits.json");
+        let batch = UndoBatch {
+            timestamp: "2026-04-24T21-00-00Z".to_owned(),
+            target_version: "0.41.0".to_owned(),
+            entries: vec![UndoEntry {
+                project_path: PathBuf::from("/tmp/standalone"),
+                project_name: "MyPlugin".to_owned(),
+                old_pin: "0.40.0".to_owned(),
+                old_pin_style_has_v: false,
+                pin_kind: PinKind::PulpTomlSdkVersion,
+                status: "bumped".to_owned(),
+                failure_reason: String::new(),
+                notes: vec!["mirrored find_package".to_owned()],
+                edits: vec![
+                    UndoEdit {
+                        path: PathBuf::from("/tmp/standalone/pulp.toml"),
+                        kind: PinKind::PulpTomlSdkVersion,
+                        old_value: "0.40.0".to_owned(),
+                        new_value: "0.41.0".to_owned(),
+                        old_value_style_has_v: false,
+                    },
+                    UndoEdit {
+                        path: PathBuf::from("/tmp/standalone/CMakeLists.txt"),
+                        kind: PinKind::CMakeFindPackagePulpVersion,
+                        old_value: "0.40.0".to_owned(),
+                        new_value: "0.41.0".to_owned(),
+                        old_value_style_has_v: false,
+                    },
+                ],
+            }],
+        };
+        write_undo_batch(&p, &batch).unwrap();
+        let read = read_undo_batch(&p).unwrap();
+        assert_eq!(read.entries[0].edits.len(), 2);
+        assert_eq!(read.entries[0].edits[0].kind, PinKind::PulpTomlSdkVersion);
+        assert_eq!(
+            read.entries[0].edits[1].kind,
+            PinKind::CMakeFindPackagePulpVersion
+        );
+        assert_eq!(read.entries[0].edits[0].new_value, "0.41.0");
+        assert_eq!(read.entries[0].notes, vec!["mirrored find_package"]);
+    }
+
+    #[test]
+    fn pin_kind_round_trip_covers_every_variant() {
+        // Any PinKind variant we can write must parse back to itself.
+        // Prevents a rename / delete from silently turning into
+        // PinKind::Unknown and losing undo fidelity.
+        for kind in [
+            PinKind::PulpTomlSdkVersion,
+            PinKind::PulpTomlSdkPath,
+            PinKind::CMakeFindPackagePulpVersion,
+            PinKind::FetchContentGitTag,
+            PinKind::PulpAddProject,
+            PinKind::ProjectVersion,
+            PinKind::Unknown,
+        ] {
+            assert_eq!(PinKind::parse(kind.as_str()), kind);
+        }
+    }
+
+    #[test]
+    fn pin_kind_parse_unknown_string_maps_to_unknown_variant() {
+        assert_eq!(PinKind::parse(""), PinKind::Unknown);
+        assert_eq!(PinKind::parse("NotARealKind"), PinKind::Unknown);
+    }
+
+    #[test]
+    fn undo_edit_serializes_every_field() {
+        // Guard against a future #[serde(skip)] that silently drops a
+        // field during write and breaks undo restore.
+        let edit = UndoEdit {
+            path: PathBuf::from("/x/pulp.toml"),
+            kind: PinKind::PulpTomlSdkPath,
+            old_value: "/old/path/0.40.0".to_owned(),
+            new_value: "/old/path/0.41.0".to_owned(),
+            old_value_style_has_v: false,
+        };
+        let json = serde_json::to_value(&edit).unwrap();
+        assert!(json.get("path").is_some());
+        assert!(json.get("kind").is_some());
+        assert!(json.get("old_value").is_some());
+        assert!(json.get("new_value").is_some());
+        assert!(json.get("old_value_style_has_v").is_some());
+    }
+
+    // ── pulp#740 Slice C: standalone helpers ──────────────────────────
+
+    #[test]
+    fn find_find_package_pulp_version_locates_required_call() {
+        let src = "find_package(Pulp 0.42.0 REQUIRED)\nproject(MyApp VERSION 0.1.0)\n";
+        let site = find_find_package_pulp_version(src);
+        assert_eq!(site.kind, PinKind::CMakeFindPackagePulpVersion);
+        assert_eq!(site.current_pin, "0.42.0");
+        // Round-trip: rewrite_pin should return the source with the
+        // pin literal swapped.
+        let rewritten = rewrite_pin(src, &site, "0.43.0", false).expect("rewrite");
+        assert!(rewritten.contains("find_package(Pulp 0.43.0 REQUIRED)"));
+        // project() VERSION must be untouched — it's the product version.
+        assert!(rewritten.contains("project(MyApp VERSION 0.1.0)"));
+    }
+
+    #[test]
+    fn find_find_package_pulp_version_misses_when_no_call() {
+        let src = "project(MyApp VERSION 0.1.0)\n";
+        let site = find_find_package_pulp_version(src);
+        assert_eq!(site.kind, PinKind::Unknown);
+    }
+
+    #[test]
+    fn find_find_package_pulp_version_misses_on_non_semver() {
+        // `find_package(Pulp REQUIRED)` (no version) must NOT match —
+        // the bump only mirrors versioned find_package lines.
+        let src = "find_package(Pulp REQUIRED)\n";
+        let site = find_find_package_pulp_version(src);
+        assert_eq!(site.kind, PinKind::Unknown);
+    }
+
+    #[test]
+    fn find_toml_pin_site_returns_value_offsets() {
+        let src = "name = \"foo\"\nsdk_version = \"0.42.0\"\nother = \"x\"\n";
+        let site = find_toml_pin_site(src, "sdk_version", PinKind::PulpTomlSdkVersion);
+        assert_eq!(site.kind, PinKind::PulpTomlSdkVersion);
+        assert_eq!(site.current_pin, "0.42.0");
+        // The byte offsets cover ONLY the value, not the surrounding
+        // `key = "..."` shape.
+        assert_eq!(&src[site.start..site.end], "0.42.0");
+    }
+
+    #[test]
+    fn find_toml_pin_site_round_trips_through_rewrite_pin() {
+        let src = "sdk_version = \"0.40.0\"\n";
+        let site = find_toml_pin_site(src, "sdk_version", PinKind::PulpTomlSdkVersion);
+        let rewritten = rewrite_pin(src, &site, "0.41.0", false).expect("rewrite");
+        assert_eq!(rewritten, "sdk_version = \"0.41.0\"\n");
+    }
+
+    #[test]
+    fn find_toml_pin_site_skips_commented_line() {
+        let src = "# sdk_version = \"0.40.0\"\nsdk_version = \"0.42.0\"\n";
+        let site = find_toml_pin_site(src, "sdk_version", PinKind::PulpTomlSdkVersion);
+        assert_eq!(site.current_pin, "0.42.0");
+    }
+
+    #[test]
+    fn find_toml_pin_site_word_boundary_rejects_prefix_match() {
+        // `sdk_version_alt` must NOT match `sdk_version`.
+        let src = "sdk_version_alt = \"0.40.0\"\nsdk_version = \"0.42.0\"\n";
+        let site = find_toml_pin_site(src, "sdk_version", PinKind::PulpTomlSdkVersion);
+        assert_eq!(site.current_pin, "0.42.0");
+    }
+
+    #[test]
+    fn find_toml_pin_site_returns_unknown_when_key_absent() {
+        let src = "name = \"foo\"\n";
+        let site = find_toml_pin_site(src, "sdk_version", PinKind::PulpTomlSdkVersion);
+        assert_eq!(site.kind, PinKind::Unknown);
+    }
+
+    #[test]
+    fn find_toml_pin_site_handles_sdk_path_kind() {
+        // The same scanner also extracts sdk_path for the conservative
+        // managed-cache rewrite path.
+        let src = "sdk_path = \"/Users/x/.pulp/sdk-cache/0.40.0\"\n";
+        let site = find_toml_pin_site(src, "sdk_path", PinKind::PulpTomlSdkPath);
+        assert_eq!(site.kind, PinKind::PulpTomlSdkPath);
+        assert_eq!(site.current_pin, "/Users/x/.pulp/sdk-cache/0.40.0");
     }
 
     #[test]
