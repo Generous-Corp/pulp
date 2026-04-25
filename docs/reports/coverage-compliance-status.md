@@ -93,12 +93,27 @@ Open Phase 3 PRs:
   `feature/osc-udp-coverage-493`, head `0cecfa51`. The macOS UBSan
   abort was reproduced locally and fixed by replacing the legacy
   `gethostbyname`/`hostent` hostname fallback with `getaddrinfo`.
-  Local normal and UBSan OSC tests are green; GitHub Actions is still
-  draining required lanes.
+  Local normal and UBSan OSC tests are green; GitHub Actions has passed
+  Linux/Windows/macOS Namespace, Linux/Windows coverage, Codecov patch,
+  IWYU, docs, Android, version, and audit lanes. It is still draining
+  macOS coverage and macOS sanitizer lanes.
 - `#771` WidgetBridge extended-controls coverage, branch
-  `feature/widget-bridge-coverage-493`, head `172bfb71`. Local
+  `feature/widget-bridge-coverage-493`, head `429b8941`. Local
   `pulp-test-widget-bridge`, focused CTest, skill sync, version report,
-  and whitespace checks are green; GitHub Actions has started.
+  and whitespace checks are green. The follow-up CMake fix removes the
+  GPU-only `pulp::inspect` link from `pulp-test-cli-project-command` and
+  generates the CLI version header when `tools/cli` is skipped in
+  `PULP_ENABLE_GPU=OFF` sanitizer/IWYU configurations. Local GPU-off
+  configure/build plus `pulp-test-cli-project-command` are green; GitHub
+  Actions reran at `429b8941` and is draining.
+
+Open supporting PR:
+
+- `#774` refreshes this durable handoff/status document, branch
+  `docs/coverage-status-2026-04-25`, head `7f9ae827`. Docs preview,
+  docs consistency, audit, version, Android coverage, Linux coverage,
+  and Codecov patch are green; Namespace/remaining coverage lanes are
+  still draining.
 
 Next recovery actions:
 
