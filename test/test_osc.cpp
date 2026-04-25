@@ -12,6 +12,14 @@
 using namespace pulp::osc;
 using Catch::Matchers::WithinAbs;
 
+namespace {
+
+constexpr uint16_t kOscHostnameTestPort = 29876;
+constexpr uint16_t kOscInvalidPacketPort = 29877;
+constexpr uint16_t kOscStopIdempotentPort = 29878;
+
+} // namespace
+
 // ── Message ──────────────────────────────────────────────────────────────────
 
 TEST_CASE("OSC Message construction", "[osc][message]") {
@@ -157,6 +165,62 @@ TEST_CASE("OSC sender/receiver loopback", "[osc][udp]") {
     tx.disconnect();
     rx.stop();
     REQUIRE_FALSE(tx.is_connected());
+    REQUIRE_FALSE(rx.is_listening());
+}
+
+TEST_CASE("OSC Sender resolves localhost hostnames", "[osc][udp][sender]") {
+    Sender tx;
+    REQUIRE(tx.connect("localhost", kOscHostnameTestPort));
+    REQUIRE(tx.is_connected());
+
+    uint8_t byte = 0;
+    REQUIRE_FALSE(tx.send_raw(nullptr, 1));
+    REQUIRE_FALSE(tx.send_raw(&byte, 0));
+
+    tx.disconnect();
+    REQUIRE_FALSE(tx.is_connected());
+}
+
+TEST_CASE("OSC Sender rejects invalid hostnames", "[osc][udp][sender]") {
+    Sender tx;
+    REQUIRE_FALSE(tx.connect("999.999.999.999", kOscHostnameTestPort));
+    REQUIRE_FALSE(tx.is_connected());
+    tx.disconnect();
+    REQUIRE_FALSE(tx.is_connected());
+}
+
+TEST_CASE("OSC Receiver drops invalid datagrams without invoking handler", "[osc][udp][receiver]") {
+    std::atomic<int> handled{0};
+
+    Receiver rx;
+    REQUIRE(rx.listen(kOscInvalidPacketPort, [&](const Message&) {
+        handled.fetch_add(1, std::memory_order_relaxed);
+    }));
+
+    Sender tx;
+    REQUIRE(tx.connect("127.0.0.1", kOscInvalidPacketPort));
+
+    uint8_t invalid[] = {0x00, 0x01, 0x02};
+    REQUIRE(tx.send_raw(invalid, sizeof(invalid)));
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(150));
+    rx.stop();
+    tx.disconnect();
+
+    REQUIRE(handled.load(std::memory_order_relaxed) == 0);
+    REQUIRE_FALSE(rx.is_listening());
+}
+
+TEST_CASE("OSC Receiver stop is idempotent", "[osc][udp][receiver]") {
+    Receiver never_started;
+    never_started.stop();
+    REQUIRE_FALSE(never_started.is_listening());
+
+    Receiver rx;
+    REQUIRE(rx.listen(kOscStopIdempotentPort, [](const Message&) {}));
+    REQUIRE(rx.is_listening());
+    rx.stop();
+    rx.stop();
     REQUIRE_FALSE(rx.is_listening());
 }
 
