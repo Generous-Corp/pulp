@@ -4,6 +4,7 @@
 #include <pulp/view/modal.hpp>
 #include <pulp/view/text_editor.hpp>
 #include <pulp/view/widget_bridge.hpp>
+#include <pulp/view/widgets.hpp>
 #include <pulp/view/theme.hpp>
 #include <pulp/view/ui_components.hpp>
 #include <chrono>
@@ -292,6 +293,118 @@ TEST_CASE("WidgetBridge complete UI script", "[view][bridge]") {
     auto* gain_knob = dynamic_cast<Knob*>(bridge.widget("Gain"));
     REQUIRE(gain_knob != nullptr);
     REQUIRE_THAT(gain_knob->value(), WithinAbs(0.5, 0.01));
+}
+
+TEST_CASE("WidgetBridge extended controls and visualization APIs round-trip JS to native state",
+          "[view][bridge][controls]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        var checkbox_change = -1;
+        var toggle_change = -1;
+        var list_select = -1;
+        var list_activate = -1;
+
+        createIcon('send-icon', 'send', '');
+        createImage('preview', '');
+        setImageSource('preview', '/tmp/pulp-preview.png');
+
+        createCheckbox('armed', '');
+        on('armed', 'change', function(value) { checkbox_change = value; });
+        setValue('armed', 1);
+
+        createToggleButton('latched', '');
+        on('latched', 'toggle', function(value) { toggle_change = value; });
+        setLabel('latched', 'Latch');
+        setValue('latched', 1);
+
+        createMeter('meter', 'horizontal', '');
+        setMeterLevel('meter', 0.25, 0.75);
+        setWidgetStyle('meter', 'minimal');
+
+        createXYPad('xy', '');
+        setXY('xy', 1.2, -0.2);
+
+        createWaveform('wave', '');
+        setWaveformData('wave', [-1, 0, 1]);
+
+        createSpectrum('spectrum', '');
+        setSpectrumData('spectrum', [-60, -12, 0, -6]);
+
+        createProgress('progress', '');
+        setProgress('progress', 0.66);
+
+        createListBox('list', '');
+        on('list', 'select', function(index) { list_select = index; });
+        on('list', 'activate', function(index) { list_activate = index; });
+        setListItems('list', ['A', 'B', 'C']);
+        setListRowHeight('list', 31);
+        setListSelected('list', 2);
+    )");
+
+    auto* icon = dynamic_cast<Icon*>(bridge.widget("send-icon"));
+    REQUIRE(icon != nullptr);
+    REQUIRE(icon->type() == Icon::Type::send);
+
+    auto* image = dynamic_cast<ImageView*>(bridge.widget("preview"));
+    REQUIRE(image != nullptr);
+    REQUIRE(image->image_path() == "file:///tmp/pulp-preview.png");
+
+    auto* checkbox = dynamic_cast<Checkbox*>(bridge.widget("armed"));
+    REQUIRE(checkbox != nullptr);
+    REQUIRE(checkbox->is_checked());
+    checkbox->on_mouse_down({});
+    REQUIRE_FALSE(checkbox->is_checked());
+    REQUIRE(engine.evaluate("checkbox_change").getWithDefault<int>(-1) == 0);
+
+    auto* toggle = dynamic_cast<ToggleButton*>(bridge.widget("latched"));
+    REQUIRE(toggle != nullptr);
+    REQUIRE(toggle->is_on());
+    REQUIRE(toggle->label() == "Latch");
+    toggle->on_mouse_down({});
+    REQUIRE_FALSE(toggle->is_on());
+    REQUIRE(engine.evaluate("toggle_change").getWithDefault<int>(-1) == 0);
+
+    auto* meter = dynamic_cast<Meter*>(bridge.widget("meter"));
+    REQUIRE(meter != nullptr);
+    REQUIRE(meter->orientation() == Meter::Orientation::horizontal);
+    REQUIRE(meter->render_style() == WidgetRenderStyle::minimal);
+    REQUIRE_THAT(meter->display_rms(), WithinAbs(0.25f, 0.001f));
+    REQUIRE_THAT(meter->display_peak(), WithinAbs(0.75f, 0.001f));
+
+    auto* xy = dynamic_cast<XYPad*>(bridge.widget("xy"));
+    REQUIRE(xy != nullptr);
+    REQUIRE_THAT(xy->x_value(), WithinAbs(1.0f, 0.001f));
+    REQUIRE_THAT(xy->y_value(), WithinAbs(0.0f, 0.001f));
+
+    auto* wave = dynamic_cast<WaveformView*>(bridge.widget("wave"));
+    REQUIRE(wave != nullptr);
+    REQUIRE(wave->sample_count() == 3);
+
+    auto* spectrum = dynamic_cast<SpectrumView*>(bridge.widget("spectrum"));
+    REQUIRE(spectrum != nullptr);
+    REQUIRE(spectrum->bin_count() == 4);
+
+    auto* progress = dynamic_cast<ProgressBar*>(bridge.widget("progress"));
+    REQUIRE(progress != nullptr);
+    REQUIRE_THAT(progress->progress(), WithinAbs(0.66f, 0.001f));
+
+    auto* list = dynamic_cast<ListBox*>(bridge.widget("list"));
+    REQUIRE(list != nullptr);
+    REQUIRE(list->items().size() == 3);
+    REQUIRE(list->selected() == 2);
+    REQUIRE_THAT(list->row_height(), WithinAbs(31.0f, 0.001f));
+    REQUIRE(engine.evaluate("list_select").getWithDefault<int>(-1) == 2);
+
+    KeyEvent enter{};
+    enter.is_down = true;
+    enter.key = KeyCode::enter;
+    REQUIRE(list->on_key_event(enter));
+    REQUIRE(engine.evaluate("list_activate").getWithDefault<int>(-1) == 2);
 }
 
 // ── Bridge animation API tests ──────────────────────────────────────────────
