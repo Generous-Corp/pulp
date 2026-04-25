@@ -11,7 +11,13 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 <a id="v0471"></a>
 ## [0.47.1] - 2026-04-25
 
-- fix(project): close standalone project bump edge cases ([#770](https://github.com/danielraffel/pulp/pull/770))
+- fix(project): close standalone bump edge cases ([#770](https://github.com/danielraffel/pulp/pull/770))
+- test(render): cover dirty tracker and render loop edges ([#786](https://github.com/danielraffel/pulp/pull/786))
+- test(format): cover VST3 adapter process path ([#782](https://github.com/danielraffel/pulp/pull/782))
+- test(host): cover real clap slot paths ([#777](https://github.com/danielraffel/pulp/pull/777))
+- test(view): cover widget bridge extended controls ([#771](https://github.com/danielraffel/pulp/pull/771))
+- fix(view): consolidate web-compat-dom-ops single source of truth (#745) ([#773](https://github.com/danielraffel/pulp/pull/773))
+- fix(view): drain QuickJS microtasks in pump_message_loop (#746) ([#769](https://github.com/danielraffel/pulp/pull/769))
 
 <a id="v0470"></a>
 ## [0.47.0] - 2026-04-25
@@ -681,6 +687,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.47.1]: https://github.com/danielraffel/pulp/releases/tag/v0.47.1
 [0.47.0]: https://github.com/danielraffel/pulp/releases/tag/v0.47.0
 [0.46.0]: https://github.com/danielraffel/pulp/releases/tag/v0.46.0
 [0.45.1]: https://github.com/danielraffel/pulp/releases/tag/v0.45.1
