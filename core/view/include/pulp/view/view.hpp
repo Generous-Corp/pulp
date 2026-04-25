@@ -49,6 +49,10 @@ public:
     // ── Child management ─────────────────────────────────────────────────
 
     void add_child(std::unique_ptr<View> child);
+    /// Insert a child at a specific index. If `index >= child_count()`,
+    /// behaves as `add_child` (append). Required for React keyed reorder
+    /// via the @pulp/react reconciler — see pulp #772.
+    void insert_child(std::unique_ptr<View> child, std::size_t index);
     std::unique_ptr<View> remove_child(View* child);
     size_t child_count() const { return children_.size(); }
     View* child_at(size_t index) { return children_[index].get(); }

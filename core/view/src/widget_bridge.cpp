@@ -1437,6 +1437,51 @@ void WidgetBridge::register_api() {
         return choc::value::Value();
     });
 
+    // moveWidget(id, new_parent_id, index) — non-DOM-coupled move primitive.
+    // Used by the @pulp/react reconciler (pulp #772) to handle React's
+    // keyed reorder via insertBefore. Mirrors the existing __domAppend
+    // reparent behavior but without the DOM-shim semantics that would
+    // couple a clean React renderer to the web-compat layer.
+    engine_.register_function("moveWidget", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto new_pid = args.get<std::string>(1, "");
+        auto idx = static_cast<std::size_t>(args.get<double>(2, -1.0));
+        auto* w = widget(id);
+        auto* new_parent = resolve_parent(new_pid);
+        if (!w || !new_parent) return choc::value::Value();
+        View* old_parent = w->parent();
+        if (old_parent == new_parent) return choc::value::Value();
+        auto owned = old_parent ? old_parent->remove_child(w) : nullptr;
+        if (!owned) return choc::value::Value();
+        if (idx == static_cast<std::size_t>(-1) || idx >= new_parent->child_count()) {
+            new_parent->add_child(std::move(owned));
+        } else {
+            new_parent->insert_child(std::move(owned), idx);
+        }
+        return choc::value::Value();
+    });
+
+    // insertChild(parent_id, child_id, index) — required for React's
+    // keyed reorder when the child already exists under the same parent
+    // (insertBefore on a moved sibling). pulp #772.
+    engine_.register_function("insertChild", [this](choc::javascript::ArgumentList args) {
+        auto pid = args.get<std::string>(0, "");
+        auto cid = args.get<std::string>(1, "");
+        auto idx = static_cast<std::size_t>(args.get<double>(2, -1.0));
+        auto* parent = widget(pid);
+        auto* child = widget(cid);
+        if (!parent || !child) return choc::value::Value();
+        if (child->parent() != parent) return choc::value::Value();
+        auto owned = parent->remove_child(child);
+        if (!owned) return choc::value::Value();
+        if (idx == static_cast<std::size_t>(-1) || idx >= parent->child_count()) {
+            parent->add_child(std::move(owned));
+        } else {
+            parent->insert_child(std::move(owned), idx);
+        }
+        return choc::value::Value();
+    });
+
     // ═══════════════════════════════════════════════════════════════
     // Extended API: containers, layout, all widgets, themes, canvas
     // ═══════════════════════════════════════════════════════════════

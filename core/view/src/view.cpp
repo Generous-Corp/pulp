@@ -244,6 +244,19 @@ void View::add_child(std::unique_ptr<View> child) {
     children_.back()->on_attached();
 }
 
+void View::insert_child(std::unique_ptr<View> child, std::size_t index) {
+    if (index >= children_.size()) {
+        add_child(std::move(child));
+        return;
+    }
+    child->parent_ = this;
+    child->set_window_host(window_host_);
+    child->set_plugin_view_host(plugin_view_host_);
+    auto it = children_.insert(children_.begin() + static_cast<std::ptrdiff_t>(index),
+                               std::move(child));
+    (*it)->on_attached();
+}
+
 std::unique_ptr<View> View::remove_child(View* child) {
     auto it = std::find_if(children_.begin(), children_.end(),
         [child](const auto& p) { return p.get() == child; });
