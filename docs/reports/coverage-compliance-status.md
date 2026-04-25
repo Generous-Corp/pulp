@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-25 19:16 EDT
+Last reviewed: 2026-04-25 19:44 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -115,11 +115,14 @@ Merged after the Phase 1 closeout / `#723` baseline:
 Open Phase 3 PRs:
 
 - `#788` events socket-IPC coverage, branch
-  `feature/events-ipc-coverage-642`, head `2ac5b09e`. This tranche
+  `feature/events-ipc-coverage-642`, head `9e73a084`. This tranche
   extends `test/test_ipc.cpp` with malformed socket endpoint rejection,
   non-throwing socket endpoint parsing in
   `core/events/src/interprocess_connection.cpp`, and a deterministic
-  localhost client/server framed-message exchange. After `#771` merged, this
+  localhost client/server framed-message exchange. It also hardens
+  `pulp::runtime::Socket::close()` to call TCP `shutdown()` before closing,
+  so Linux threads blocked in `accept()` / `recv()` wake during cleanup.
+  After `#771` merged, this
   branch was rebased onto `origin/main` and duplicate shared CLI support
   commits were skipped, leaving only the events tranche. After `#789` merged,
   the branch was rebased again onto `origin/main` at
@@ -133,8 +136,11 @@ Open Phase 3 PRs:
   expose usable logs through `gh`. A rerun of Build/Test `24929736674` and
   Coverage `24929736678` then sat in progress for roughly 90 minutes with no
   logs and no timestamp movement, so both stuck runs were canceled. The branch
-  was then rebased after `#789`; the current polling window shows no failures
-  while the fresh `2ac5b09e` checks drain.
+  was then rebased after `#789`. The `2ac5b09e` run got through all other
+  required lanes but Linux Build/Test and Linux Coverage remained in their
+  long test/coverage steps, matching a likely blocking-`accept()` cleanup hang.
+  The targeted `9e73a084` fix was pushed after local IPC validation stayed
+  green, and fresh checks are now running on that head.
 
 Local Phase 3 draft not yet opened as a PR:
 - `#643` package-registry CLI/tools draft, worktree
@@ -165,7 +171,7 @@ Open supporting PR:
 Next recovery actions:
 
 1. Poll `#788`; merge manually when green because auto-merge is disabled.
-2. Let `#788`'s fresh full Build/Test and Coverage workflows on `2ac5b09e`
+2. Let `#788`'s fresh full Build/Test and Coverage workflows on `9e73a084`
    drain.
 3. Keep `#774` docs-only and let its post-`#789` rebase checks drain.
 4. After `#788` merges, refresh this section with the next
@@ -175,7 +181,7 @@ Next recovery actions:
 6. If a PR is green but GitHub reports it behind `main`, rebase that
    branch onto `origin/main`, push with lease, and let checks rerun.
 7. After `#788` resolves, push/open the local `#643` draft
-   (`b1443bb9`) as the next CLI/tools tranche PR.
+   (`16bbe5bb`) as the next CLI/tools tranche PR.
 8. Continue Phase 3 from the tranche issues below, prioritizing
    represented high-miss files over adding new perimeter lanes.
 
