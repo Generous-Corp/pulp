@@ -548,6 +548,32 @@ TEST_CASE("pulp upgrade --notes --json emits stable-shape JSON keys",
     REQUIRE(r.stdout_output.find("\"body\":")       != std::string::npos);
 }
 
+TEST_CASE("pulp upgrade --check-only honors disabled update checks with an empty cache",
+          "[cli][shellout][upgrade][codecov]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    auto tmp = fs::temp_directory_path() /
+               ("pulp-shellout-upgrade-disabled-" +
+                std::to_string(std::chrono::steady_clock::now()
+                                   .time_since_epoch().count()));
+    fs::create_directories(tmp);
+
+    pulp_setenv("PULP_HOME", tmp.string().c_str(), 1);
+    pulp_setenv("PULP_UPDATE_CHECK_DISABLED", "1", 1);
+    auto r = run_pulp({"upgrade", "--check-only"}, 10000);
+    pulp_unsetenv("PULP_UPDATE_CHECK_DISABLED");
+    pulp_unsetenv("PULP_HOME");
+    fs::remove_all(tmp);
+
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(r.stdout_output.find("Installed:  v") != std::string::npos);
+    REQUIRE(r.stdout_output.find("Latest:     update check disabled; not queried")
+            != std::string::npos);
+    REQUIRE(r.stdout_output.find("Cache empty; querying GitHub Releases")
+            == std::string::npos);
+}
+
 // Issue #550 Slice 5: `update.mode = off` must produce zero network
 // traffic and zero banner output. We can't directly observe the
 // network inside ctest, but we CAN verify that (a) the command
