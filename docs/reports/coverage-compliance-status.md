@@ -107,13 +107,14 @@ Open Phase 3 PRs:
   configure/build plus `pulp-test-cli-project-command` are green; GitHub
   Actions reran at `429b8941` and is draining.
 - `#777` real CLAP `PluginSlot` coverage, branch
-  `feature/clap-slot-coverage-493`, head `9a2a1d90`. This tranche wires
+  `feature/clap-slot-coverage-493`, head `5363bbe0`. This tranche wires
   the built PulpGain CLAP bundle into host tests after examples are
   registered, adds metadata/defaults, bypass/release, and restore-state
   coverage, and fixes CLAP state restore so restored plugin state
   supersedes stale cached host edits. Local configure, build,
   `pulp-test-host`, generated `ClapSlot` CTest entries, whitespace,
-  skill-sync, and version checks are green; GitHub Actions is draining.
+  CI-configured skill-sync, and version checks are green; GitHub Actions
+  is draining.
 
 Open supporting PR:
 
