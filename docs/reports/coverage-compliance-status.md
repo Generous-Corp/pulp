@@ -196,6 +196,22 @@ Local Phase 3 draft not yet opened as a PR:
   whitespace. A direct multi-filter Catch2 invocation was intentionally not
   used as validation because Catch2 treats multiple quoted filters as an AND
   expression; CTest was used for the focused multi-test slice.
+- `#644` Android ship/package helper tranche, worktree
+  `/Users/danielraffel/Code/pulp-android-package-coverage-644`, branch
+  `feature/android-package-coverage-644`, local commit `3fe64e02`. This
+  draft adds a deterministic host-side fake Android SDK/toolchain harness for
+  `ship/platform/android/package_android.cpp` without requiring a real SDK,
+  device, keystore, Gradle install, bundletool, or network access. Scope:
+  SDK/build-tools/NDK discovery, fake `zipalign`, fake `apksigner` signing and
+  APK verification parsing, fake `jarsigner` AAB signing/verification, fake
+  Gradle APK/AAB artifact collection, missing-wrapper/missing-artifact errors,
+  and fake bundletool conversion with optional signing config. Local validation
+  is green: configure in the fresh worktree, `cmake --build build --target
+  pulp-test-android-package -j4`, direct `pulp-test-android-package` (`64`
+  assertions / `7` test cases), focused Android package CTest (`7/7`), adjacent
+  ship CTest slice for Android/appcast/codesign/NSIS (`21/21`), and whitespace.
+  Keep this local until the shared Windows-safe project-bump fix lands on
+  `main`, or explicitly carry the same shared support commits before opening.
 
 Open supporting PR:
 
@@ -224,17 +240,20 @@ Next recovery actions:
    CI-unblocker commits are on `main`; then rebase it, open a PR, and
    link it from `#642`. If opening before then, keep the local shared commits
    in place.
-5. If any Windows Namespace lane fails again, pull the fresh completed-run
+5. Keep the local `#644` Android package draft paused for the same reason;
+   after the shared Windows-safe project-bump fix lands, rebase the draft,
+   open a PR, and link it from `#644`.
+6. If any Windows Namespace lane fails again, pull the fresh completed-run
    log first and search for `pulp-test-cli-project-command`; the known
    failing tests were the dirty-gate and redundant-origin project-bump cases.
-6. If sandbox-e2e fails again, pull the fresh log first; the expected
+7. If sandbox-e2e fails again, pull the fresh log first; the expected
    failure fixed here was `pulp upgrade --check-only` ignoring
    `PULP_UPDATE_CHECK_DISABLED=1` on an empty cache.
-7. If a PR is green but GitHub reports it behind `main`, rebase that
+8. If a PR is green but GitHub reports it behind `main`, rebase that
    branch onto `origin/main`, push with lease, and let checks rerun.
-8. After active PRs merge, refresh this section with the next complete
+9. After active PRs merge, refresh this section with the next complete
    Codecov `main` report.
-9. Continue Phase 3 from the tranche issues below, prioritizing
+10. Continue Phase 3 from the tranche issues below, prioritizing
    represented high-miss files over adding new perimeter lanes.
 
 ## Phase 1 corrected baseline
