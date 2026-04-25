@@ -106,35 +106,18 @@ Merged after the Phase 1 closeout / `#723` baseline:
 - `#756` validation harness edge coverage -> `22d1e69`
 - `#765` TextEditor multiline navigation coverage -> `7257a154`
 - `#766` OSC UDP sender/receiver edge coverage -> `31aa80e1`
+- `#771` WidgetBridge extended-controls coverage -> `3d03c0fe`
 
 Open Phase 3 PRs:
 
-- `#771` WidgetBridge extended-controls coverage, branch
-  `feature/widget-bridge-coverage-493`, head `45a146d5`. Local
-  `pulp-test-widget-bridge`, focused CTest, GPU-off configure/build of
-  `pulp-test-cli-project-command`, skill sync, version report, and
-  whitespace checks are green. The branch now carries three shared CI
-  unblockers discovered while validating this tranche: the GPU-off
-  `pulp-test-cli-project-command` CMake fix, Windows-safe CLI redirection
-  for `pulp project bump` probes, and a GPU/`pulp::inspect` guard around
-  `examples/ui-preview`. The branch also carries the sandbox-e2e
-  unblocker that makes `pulp upgrade --check-only` honor
-  `PULP_UPDATE_CHECK_DISABLED=1` without hitting GitHub Releases when the
-  update cache is empty, plus the shellout test covering that path so the
-  diff-coverage gate sees those lines. After `#782`/`#786` exposed shared
-  `cmd_project.cpp` diff-coverage misses, the branch also carries focused
-  project-bump probe tests for platform null redirection, non-standalone
-  `origin/main` fallback, and `--verify-builds`. GitHub Actions is rerunning
-  at `45a146d5`; no completed failures were visible at the last poll.
 - `#777` real CLAP `PluginSlot` coverage, branch
-  `feature/clap-slot-coverage-493`, head `f9be330c`. This tranche wires
+  `feature/clap-slot-coverage-493`, head `f5f6f47a`. This tranche wires
   the built PulpGain CLAP bundle into host tests after examples are
   registered, adds metadata/defaults, bypass/release, and restore-state
   coverage, and fixes CLAP state restore so restored plugin state
-  supersedes stale cached host edits. The branch has been rebased onto
-  `origin/main` and now carries the same GPU-off CMake, Windows-safe CLI
-  redirection, `ui-preview` guard, and disabled-update-check fixes needed
-  before `#771` lands. Local configure/build,
+  supersedes stale cached host edits. After `#771` merged, this branch was
+  rebased onto `origin/main` and duplicate shared support commits were
+  skipped. Local configure/build,
   `pulp-test-host "[host][slot][clap]"` (`139` assertions / `4` test
   cases), generated `ClapSlot` CTest entries, whitespace, CI-configured
   skill-sync, direct disabled-upgrade smoke, focused CLI shellout coverage
@@ -146,10 +129,10 @@ Open Phase 3 PRs:
   and adds tests for the affected paths. The previous diff-coverage failure
   at `753bcccf` (`63%`) was the shared disabled-update branch in
   `cmd_upgrade.cpp`; that is covered by the shellout test now present on all
-  active coverage branches. GitHub Actions is rerunning at `f9be330c`; no
+  active coverage branches. GitHub Actions is rerunning at `f5f6f47a`; no
   completed failures were visible at the last poll.
 - `#782` VST3 adapter process-path coverage, branch
-  `feature/vst3-adapter-coverage-493`, head `0fd5f83c`. This tranche adds
+  `feature/vst3-adapter-coverage-493`, head `c182ee21`. This tranche adds
   focused VST3 adapter coverage for parameter metadata, setup/release lifecycle,
   bus/event/process routing, sidechain visibility, secondary output zeroing,
   host input automation, plugin-to-host output automation, MIDI output, and
@@ -161,10 +144,9 @@ Open Phase 3 PRs:
   treated separately from the unit coverage tranche unless it reproduces in
   CI. The PR is labeled `codecov`. Shipyard local/SSH validation at
   `bc23956d` passed mac and ubuntu, then hit a Windows SSH bundle-upload
-  timeout during banner exchange. The branch now carries the same shared
-  GPU-off CMake, Windows-safe redirection, skill-doc, and `ui-preview`
-  guard fixes as `#771`, plus the disabled-update-check sandbox-e2e
-  unblocker. Local GPU-off configure/build of
+  timeout during banner exchange. After `#771` merged, this branch was rebased
+  onto `origin/main` and duplicate shared support commits were skipped. Local
+  GPU-off configure/build of
   `pulp-test-cli-project-command`, focused `pulp-test-vst3-plugin-state`
   (`118` assertions / `5` test cases), direct disabled-upgrade smoke,
   focused CLI shellout coverage for `PULP_UPDATE_CHECK_DISABLED`,
@@ -173,14 +155,14 @@ Open Phase 3 PRs:
   green. The `f09adb04` rerun failed the required diff-coverage gate because
   the shared `cmd_project.cpp` support commit left Windows helper returns,
   non-standalone `origin/main` fallback, and `--verify-builds` lines uncovered;
-  `dcad28de` adds direct coverage for those lines. A later automated review
+  that shared coverage is now on `main` via `#771`. A later automated review
   correctly noted that the process-context test set a tempo value without
-  setting VST3's `kTempoValid` bit; `0fd5f83c` fixes that test validity flag,
-  with local `pulp-test-vst3-plugin-state` still green (`118` assertions / `5`
-  test cases). GitHub Actions is rerunning at `0fd5f83c`; no completed failures
-  were visible at the last poll.
+  setting VST3's `kTempoValid` bit; `c182ee21` includes that test validity
+  flag, with local `pulp-test-vst3-plugin-state` still green (`118`
+  assertions / `5` test cases). GitHub Actions is rerunning at `c182ee21`; no
+  completed failures were visible at the last poll.
 - `#786` render DirtyTracker / RenderLoop edge coverage, branch
-  `feature/render-coverage-646-next`, head `54d209d5`. This tranche extends
+  `feature/render-coverage-646-next`, head `49983137`. This tranche extends
   the still-open `#646` render component follow-up after the earlier merged
   `#700` slice. Scope is intentionally pure and hostable: DirtyTracker
   negative/empty rects, debug overlay state, threshold accumulation,
@@ -192,27 +174,25 @@ Open Phase 3 PRs:
   focused CTest (`19/19`), GPU-off configure/build of
   `pulp-test-cli-project-command`, `pulp-cli` build, direct
   disabled-upgrade smoke, focused CLI shellout coverage for
-  `PULP_UPDATE_CHECK_DISABLED`, skill/version checks, and whitespace. The
-  branch now carries the same shared GPU-off CMake, Windows-safe
-  redirection, `ui-preview` guard, disabled-update-check fix, and CLI
-  coverage test as the other active Phase 3 tranches because IWYU exposed
-  the GPU-off target-link failure before any of those shared fixes had
-  merged. The `f7da209d` rerun failed the required diff-coverage gate on the
-  same shared `cmd_project.cpp` probe edges as `#782`; `54d209d5` carries the
-  same focused CLI project-command coverage fix. GitHub Actions is rerunning
-  at `54d209d5`; no completed failures were visible at the last poll.
+  `PULP_UPDATE_CHECK_DISABLED`, skill/version checks, and whitespace. After
+  `#771` merged, this branch was rebased onto `origin/main` and duplicate
+  shared support commits were skipped. The `f7da209d` rerun failed the
+  required diff-coverage gate on the same shared `cmd_project.cpp` probe edges
+  as `#782`; that shared coverage is now on `main` via `#771`. GitHub Actions
+  is rerunning at `49983137`; no completed failures were visible at the last
+  poll.
 
 Local Phase 3 draft not yet opened as a PR:
 
 - `#642` events socket-IPC tranche, worktree
   `/Users/danielraffel/Code/pulp-events-ipc-coverage-642`, branch
-  `feature/events-ipc-coverage-642`, local commit `f3b9807c`. This draft
+  `feature/events-ipc-coverage-642`, local commit `4cb33f4e`. This draft
   extends `test/test_ipc.cpp` with malformed socket endpoint rejection,
   non-throwing socket endpoint parsing in
   `core/events/src/interprocess_connection.cpp`, and a deterministic
-  localhost client/server framed-message exchange. It also carries the same
-  shared CLI support commits as the open coverage PRs so it can be opened
-  safely if the session is interrupted before those fixes reach `main`.
+  localhost client/server framed-message exchange. After `#771` merged, this
+  branch was rebased onto `origin/main` and duplicate shared CLI support
+  commits were skipped, leaving only the events tranche.
   Local validation is green: `pulp-test-ipc` (`34` assertions / `9` test
   cases), focused CTest `IPC` plus project-bump probe edges (`12/12`), and
   whitespace. A direct multi-filter Catch2 invocation was intentionally not
@@ -220,7 +200,7 @@ Local Phase 3 draft not yet opened as a PR:
   expression; CTest was used for the focused multi-test slice.
 - `#644` Android ship/package helper tranche, worktree
   `/Users/danielraffel/Code/pulp-android-package-coverage-644`, branch
-  `feature/android-package-coverage-644`, local commit `3fe64e02`. This
+  `feature/android-package-coverage-644`, local commit `1de9b8e6`. This
   draft adds a deterministic host-side fake Android SDK/toolchain harness for
   `ship/platform/android/package_android.cpp` without requiring a real SDK,
   device, keystore, Gradle install, bundletool, or network access. Scope:
@@ -232,8 +212,8 @@ Local Phase 3 draft not yet opened as a PR:
   pulp-test-android-package -j4`, direct `pulp-test-android-package` (`64`
   assertions / `7` test cases), focused Android package CTest (`7/7`), adjacent
   ship CTest slice for Android/appcast/codesign/NSIS (`21/21`), and whitespace.
-  Keep this local until the shared Windows-safe project-bump fix lands on
-  `main`, or explicitly carry the same shared support commits before opening.
+  After `#771` merged, this branch was rebased onto `origin/main`; direct
+  `pulp-test-android-package` still passes (`64` assertions / `7` test cases).
 
 Open supporting PR:
 
@@ -241,30 +221,20 @@ Open supporting PR:
   `docs/coverage-status-2026-04-25`. The branch is updated as this
   tracker changes; use the PR head SHA in GitHub as the live value.
   The previous head `3f1df148` failed Windows Namespace for the same
-  `pulp project bump` Windows redirection bug now fixed on the active code
-  PRs. Keep this PR docs-only; once one code PR carrying the shared
-  Windows-safe probe fix merges, rebase `#774` onto `origin/main` and the
-  inherited Windows failure should clear. Docs preview, docs consistency,
-  audit, version, Android coverage, Linux coverage, Windows coverage, and
-  Codecov patch were green on that previous run.
+  `pulp project bump` Windows redirection bug now fixed on `main` via `#771`.
+  This branch has been rebased onto `origin/main` after that merge and should
+  rerun without carrying code changes.
 
 Next recovery actions:
 
-1. Poll `#771`, `#777`, `#782`, and `#786`; merge green PRs manually
+1. Poll `#777`, `#782`, and `#786`; merge green PRs manually
    because auto-merge is disabled.
-2. Let the current `#771`, `#777`, `#782`, and `#786` reruns drain after
-   the shared CI, sandbox-e2e, Windows-safe project-bump, and CLI
-   diff-coverage unblockers were pushed.
-3. After the first code PR carrying the shared Windows-safe
-   `cmd_project.cpp` probe fix merges, rebase `#774` onto `origin/main` and
-   push a doc refresh so its inherited Windows Namespace failure clears.
-4. Keep the local `#642` events IPC draft paused until the shared
-   CI-unblocker commits are on `main`; then rebase it, open a PR, and
-   link it from `#642`. If opening before then, keep the local shared commits
-   in place.
-5. Keep the local `#644` Android package draft paused for the same reason;
-   after the shared Windows-safe project-bump fix lands, rebase the draft,
-   open a PR, and link it from `#644`.
+2. Let the rebased `#777`, `#782`, and `#786` checks drain at their new heads.
+3. Open either rebased local draft `#642` or `#644` as the next Phase 3 PR
+   and link it from its issue.
+4. Keep `#774` docs-only and let its post-`#771` rebase checks drain.
+5. After `#777`, `#782`, and `#786` merge, refresh this section with the next
+   complete Codecov `main` report.
 6. If any Windows Namespace lane fails again, pull the fresh completed-run
    log first and search for `pulp-test-cli-project-command`; the known
    failing tests were the dirty-gate and redundant-origin project-bump cases.
@@ -273,9 +243,7 @@ Next recovery actions:
    `PULP_UPDATE_CHECK_DISABLED=1` on an empty cache.
 8. If a PR is green but GitHub reports it behind `main`, rebase that
    branch onto `origin/main`, push with lease, and let checks rerun.
-9. After active PRs merge, refresh this section with the next complete
-   Codecov `main` report.
-10. Continue Phase 3 from the tranche issues below, prioritizing
+9. Continue Phase 3 from the tranche issues below, prioritizing
    represented high-miss files over adding new perimeter lanes.
 
 ## Phase 1 corrected baseline
