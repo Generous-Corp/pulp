@@ -106,19 +106,28 @@ Open Phase 3 PRs:
   `PULP_ENABLE_GPU=OFF` sanitizer/IWYU configurations. Local GPU-off
   configure/build plus `pulp-test-cli-project-command` are green; GitHub
   Actions reran at `429b8941` and is draining.
+- `#777` real CLAP `PluginSlot` coverage, branch
+  `feature/clap-slot-coverage-493`, head `9a2a1d90`. This tranche wires
+  the built PulpGain CLAP bundle into host tests after examples are
+  registered, adds metadata/defaults, bypass/release, and restore-state
+  coverage, and fixes CLAP state restore so restored plugin state
+  supersedes stale cached host edits. Local configure, build,
+  `pulp-test-host`, generated `ClapSlot` CTest entries, whitespace,
+  skill-sync, and version checks are green; GitHub Actions is draining.
 
 Open supporting PR:
 
 - `#774` refreshes this durable handoff/status document, branch
-  `docs/coverage-status-2026-04-25`, head `7f9ae827`. Docs preview,
-  docs consistency, audit, version, Android coverage, Linux coverage,
-  and Codecov patch are green; Namespace/remaining coverage lanes are
-  still draining.
+  `docs/coverage-status-2026-04-25`. The branch is updated as this
+  tracker changes; use the PR head SHA in GitHub as the live value.
+  Docs preview, docs consistency, audit, version, Android coverage,
+  Linux coverage, and Codecov patch were green on the previous run;
+  Namespace/remaining coverage lanes are draining on each refresh.
 
 Next recovery actions:
 
-1. Poll `#766` and `#771`; merge green PRs manually because auto-merge
-   is disabled.
+1. Poll `#766`, `#771`, `#774`, and `#777`; merge green PRs manually
+   because auto-merge is disabled.
 2. If a PR is green but GitHub reports it behind `main`, rebase that
    branch onto `origin/main`, push with lease, and let checks rerun.
 3. After active PRs merge, refresh this section with the next complete
