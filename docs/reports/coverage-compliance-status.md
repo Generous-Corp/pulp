@@ -92,33 +92,39 @@ Merged after the Phase 1 closeout / `#723` baseline:
 Open Phase 3 PRs:
 
 - `#771` WidgetBridge extended-controls coverage, branch
-  `feature/widget-bridge-coverage-493`, head `c7e5de1d`. Local
+  `feature/widget-bridge-coverage-493`, head `b51a48b5`. Local
   `pulp-test-widget-bridge`, focused CTest, GPU-off configure/build of
   `pulp-test-cli-project-command`, skill sync, version report, and
   whitespace checks are green. The branch now carries three shared CI
   unblockers discovered while validating this tranche: the GPU-off
   `pulp-test-cli-project-command` CMake fix, Windows-safe CLI redirection
   for `pulp project bump` probes, and a GPU/`pulp::inspect` guard around
-  `examples/ui-preview`. GitHub Actions at `c7e5de1d` has passed Codecov
-  patch, Android coverage, docs, audit, version/skill sync, and provider
-  resolution; IWYU, sandbox-e2e, Namespace, coverage, Windows MSVC, and
-  sanitizer lanes are still draining.
+  `examples/ui-preview`. The branch also carries the sandbox-e2e
+  unblocker that makes `pulp upgrade --check-only` honor
+  `PULP_UPDATE_CHECK_DISABLED=1` without hitting GitHub Releases when the
+  update cache is empty. GitHub Actions at `b51a48b5` is draining; early
+  docs, audit, version/skill sync, provider resolution, Android coverage,
+  Linux Namespace, and Codecov patch checks are green, while sandbox-e2e,
+  remaining Namespace/coverage, Windows MSVC, IWYU, and sanitizer lanes
+  continue.
 - `#777` real CLAP `PluginSlot` coverage, branch
-  `feature/clap-slot-coverage-493`, head `ceb8c5db`. This tranche wires
+  `feature/clap-slot-coverage-493`, head `753bcccf`. This tranche wires
   the built PulpGain CLAP bundle into host tests after examples are
   registered, adds metadata/defaults, bypass/release, and restore-state
   coverage, and fixes CLAP state restore so restored plugin state
   supersedes stale cached host edits. The branch has been rebased onto
-  `origin/main` and now carries the same GPU-off CMake and `ui-preview`
-  guard fixes needed before `#771` lands. Local configure/build,
+  `origin/main` and now carries the same GPU-off CMake, Windows-safe CLI
+  redirection, `ui-preview` guard, and disabled-update-check fixes needed
+  before `#771` lands. Local configure/build,
   `pulp-test-host "[host][slot][clap]"` (`139` assertions / `4` test
   cases), generated `ClapSlot` CTest entries, whitespace, CI-configured
-  skill-sync, and version checks are green. GitHub Actions is rerunning at
-  `ceb8c5db`; early docs, audit, version/skill sync, and provider checks
-  are green while IWYU, Namespace, coverage, Windows MSVC, Android, and
-  sanitizer lanes drain.
+  skill-sync, direct disabled-upgrade smoke, and version checks are green.
+  GitHub Actions is rerunning at `753bcccf`; early docs, audit,
+  version/skill sync, provider checks, Android coverage, and docs preview
+  are green while sandbox-e2e, IWYU, Namespace, coverage, Windows MSVC,
+  Android build, and sanitizer lanes drain.
 - `#782` VST3 adapter process-path coverage, branch
-  `feature/vst3-adapter-coverage-493`, head `f2947827`. This tranche adds
+  `feature/vst3-adapter-coverage-493`, head `8e9caaa7`. This tranche adds
   focused VST3 adapter coverage for parameter metadata, setup/release lifecycle,
   bus/event/process routing, sidechain visibility, secondary output zeroing,
   host input automation, plugin-to-host output automation, MIDI output, and
@@ -132,10 +138,12 @@ Open Phase 3 PRs:
   `bc23956d` passed mac and ubuntu, then hit a Windows SSH bundle-upload
   timeout during banner exchange. The branch now carries the same shared
   GPU-off CMake, Windows-safe redirection, skill-doc, and `ui-preview`
-  guard fixes as `#771`; local GPU-off configure/build of
+  guard fixes as `#771`, plus the disabled-update-check sandbox-e2e
+  unblocker. Local GPU-off configure/build of
   `pulp-test-cli-project-command`, focused `pulp-test-vst3-plugin-state`
-  (`118` assertions / `5` test cases), whitespace, skill-sync, and version
-  checks are green. GitHub Actions is rerunning at `f2947827`.
+  (`118` assertions / `5` test cases), direct disabled-upgrade smoke,
+  whitespace, skill-sync, and version checks are green. GitHub Actions is
+  rerunning at `8e9caaa7`.
 
 Open supporting PR:
 
@@ -150,10 +158,11 @@ Next recovery actions:
 
 1. Poll `#771`, `#774`, `#777`, and `#782`; merge green PRs manually because
    auto-merge is disabled.
-2. Let the current `#771` and `#777` reruns drain after the shared CI
-   unblockers were pushed.
-3. Let the current `#782` rerun drain after the shared CI unblockers were
-   pushed at `f2947827`.
+2. Let the current `#771`, `#777`, and `#782` reruns drain after the
+   shared CI and sandbox-e2e unblockers were pushed.
+3. If sandbox-e2e fails again, pull the fresh log first; the expected
+   failure fixed here was `pulp upgrade --check-only` ignoring
+   `PULP_UPDATE_CHECK_DISABLED=1` on an empty cache.
 4. If a PR is green but GitHub reports it behind `main`, rebase that
    branch onto `origin/main`, push with lease, and let checks rerun.
 5. After active PRs merge, refresh this section with the next complete
