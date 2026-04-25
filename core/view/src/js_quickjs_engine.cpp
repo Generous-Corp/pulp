@@ -31,6 +31,32 @@ static void set_quickjs_stack_size(choc::javascript::Context& ctx, size_t size) 
         JS_SetMaxStackSize(qjctx->runtime, size);
 }
 
+// CHOC's QuickJS backend declares pumpMessageLoop() with an empty body
+// (see external choc_javascript_QuickJS.h). That makes
+// queueMicrotask / Promise.then / async-await never drain when callers
+// invoke pump_message_loop() — see pulp #746. We work around it the
+// same way set_quickjs_stack_size does: reach into the pimpl, grab the
+// JSContext*, and call JS_ExecutePendingJob until the queue is empty.
+// JS_ExecutePendingJob returns 1 when it ran a job, 0 when the queue is
+// empty, and a negative value on a JS exception inside the job — we
+// stop on either terminal state. A safety cap prevents a microtask that
+// re-schedules itself indefinitely from looping forever; 4096 matches
+// the order of magnitude React's scheduler uses for its own bail-out.
+static void pump_quickjs_jobs(choc::javascript::Context& ctx) {
+    struct ContextLayout {
+        std::unique_ptr<choc::javascript::Context::Pimpl> pimpl;
+    };
+    auto& layout = reinterpret_cast<ContextLayout&>(ctx);
+    auto* qjctx = static_cast<choc::javascript::quickjs::QuickJSContext*>(layout.pimpl.get());
+    if (!qjctx || !qjctx->runtime) return;
+    constexpr int kMaxJobsPerPump = 4096;
+    choc::javascript::quickjs::JSContext* pctx = nullptr;
+    for (int i = 0; i < kMaxJobsPerPump; ++i) {
+        int rc = JS_ExecutePendingJob(qjctx->runtime, &pctx);
+        if (rc <= 0) return;  // 0 = empty queue, <0 = JS exception inside job
+    }
+}
+
 static std::string_view logging_level_name(choc::javascript::LoggingLevel level) {
     switch (level) {
         case choc::javascript::LoggingLevel::log:   return "log";
@@ -120,7 +146,10 @@ public:
     }
 
     void pump_message_loop() override {
-        context_.pumpMessageLoop();
+        // CHOC's pumpMessageLoop is a no-op for QuickJS (#746); drive the
+        // pending-job queue ourselves so queueMicrotask / Promise.then /
+        // async-await actually drain when callers ask.
+        pump_quickjs_jobs(context_);
     }
 
     bool supports_host_objects() const override { return true; }

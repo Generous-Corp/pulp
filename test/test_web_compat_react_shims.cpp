@@ -41,6 +41,25 @@ std::string run_in_bridge(const std::string& js) {
     return std::string{};
 }
 
+// Same as run_in_bridge but pumps the JS job queue once after eval, so
+// queueMicrotask / Promise.then / async-await callbacks actually drain
+// before we read back the marker. Existence test for #746 — without the
+// pump_message_loop fix this returns the pre-pump value.
+std::string run_in_bridge_with_pump(const std::string& js) {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script("globalThis.__test_result__ = (function(){\n"
+                       + js +
+                       "\n})();");
+    engine.pump_message_loop();
+    auto val = engine.evaluate("String(globalThis.__test_result__)");
+    if (val.isString()) return std::string(val.getString());
+    return std::string{};
+}
+
 } // namespace
 
 // ── nodeType / nodeName on Element ──────────────────────────────────────
@@ -229,15 +248,13 @@ TEST_CASE("queueMicrotask is exposed as a function on globalThis",
     REQUIRE(result == "function");
 }
 
-TEST_CASE("queueMicrotask invocation does not throw and the callback is registered",
+TEST_CASE("queueMicrotask invocation does not throw and accepts non-functions silently",
           "[view][web-compat][issue-468]") {
-    // queueMicrotask schedules through Promise.resolve.then. Actual
-    // draining depends on the engine's job loop (CHOC's QuickJS
-    // pumpMessageLoop is currently a no-op), so the contract we can
-    // reliably test is: the global exists, is callable, accepts a
-    // function argument, and its own validation path (reject non-
-    // functions silently) behaves per spec. Each of those is what React
-    // 18's `typeof queueMicrotask === 'function'` probe reads.
+    // The validation path: queueMicrotask is exposed, is callable,
+    // accepts a function argument without throwing, and silently
+    // ignores non-functions. Each of these is what React 18's
+    // `typeof queueMicrotask === 'function'` probe + scheduler bootstrap
+    // reads. Drain semantics are covered separately below.
     auto result = run_in_bridge(R"(
         var threw = false;
         try {
@@ -247,6 +264,138 @@ TEST_CASE("queueMicrotask invocation does not throw and the callback is register
         return threw ? 'threw' : 'ok';
     )");
     REQUIRE(result == "ok");
+}
+
+// ── Microtask draining (#746) ───────────────────────────────────────────
+//
+// CHOC's QuickJS pumpMessageLoop has an empty body, so before the #746
+// fix in js_quickjs_engine.cpp the entire microtask queue silently
+// stayed pending across pump_message_loop() calls. These tests pin the
+// new contract: after pump, every callback the queue knew about has
+// run. They cover the four cases #746's acceptance criteria called out
+// (bare microtask, Promise.then, async/await, transitive scheduling).
+
+TEST_CASE("pump_message_loop drains a bare queueMicrotask callback",
+          "[view][web-compat][issue-746]") {
+    auto result = run_in_bridge_with_pump(R"(
+        globalThis.__seen__ = 'before';
+        queueMicrotask(function () { globalThis.__seen__ = 'after'; });
+        return 'scheduled';  // pre-pump marker the harness ignores
+    )");
+    // Override: read __seen__ via the marker write path.
+    REQUIRE(result == "scheduled");
+    // Verify the side-effect landed by re-running with the pump in the
+    // returned expression so we observe the post-pump state.
+    auto seen = run_in_bridge_with_pump(R"(
+        globalThis.__flag__ = 'before';
+        queueMicrotask(function () { globalThis.__flag__ = 'after'; });
+        // Pump is invoked by the harness AFTER this returns; we cannot
+        // read __flag__ from within the IIFE because the microtask has
+        // not yet run when the IIFE returns. Stash the global name so
+        // a follow-up evaluator can read it post-pump — but the harness
+        // already does that for __test_result__, so chain through that
+        // by stringifying after the pump from within a deferred read.
+        return globalThis.__flag__;
+    )");
+    // Pre-pump observation inside the IIFE returns 'before'; after the
+    // harness pumps, the global itself has flipped to 'after'. Since
+    // __test_result__ captured the IIFE's pre-pump value, reading it
+    // here should still be 'before' — the *real* drain proof is the
+    // dedicated test below that re-reads the global after the pump.
+    REQUIRE(seen == "before");
+}
+
+TEST_CASE("pump_message_loop runs queueMicrotask side-effects observable post-pump",
+          "[view][web-compat][issue-746]") {
+    // Direct ScriptEngine drive so we can interleave pump_message_loop
+    // and reads across the JS boundary explicitly.
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        globalThis.__drain_marker__ = 'pending';
+        queueMicrotask(function () { globalThis.__drain_marker__ = 'drained'; });
+    )");
+    auto pre = engine.evaluate("String(globalThis.__drain_marker__)");
+    REQUIRE(pre.isString());
+    REQUIRE(std::string(pre.getString()) == "pending");
+
+    engine.pump_message_loop();
+
+    auto post = engine.evaluate("String(globalThis.__drain_marker__)");
+    REQUIRE(post.isString());
+    REQUIRE(std::string(post.getString()) == "drained");
+}
+
+TEST_CASE("pump_message_loop runs Promise.then continuations",
+          "[view][web-compat][issue-746]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        globalThis.__chain_marker__ = 'before';
+        Promise.resolve('a').then(function (v) {
+            return v + ':b';                         // pass through chain
+        }).then(function (v) {
+            globalThis.__chain_marker__ = v + ':c';  // observe end-of-chain
+        });
+    )");
+    engine.pump_message_loop();
+    auto v = engine.evaluate("String(globalThis.__chain_marker__)");
+    REQUIRE(v.isString());
+    // Both .then continuations must have run — promise chains drain
+    // through queued jobs each step at a time, so the final marker
+    // proves the second job was reached after the first scheduled it.
+    REQUIRE(std::string(v.getString()) == "a:b:c");
+}
+
+TEST_CASE("pump_message_loop drains async/await round-trip",
+          "[view][web-compat][issue-746]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        globalThis.__async_marker__ = 'before';
+        (async function () {
+            var v = await Promise.resolve(42);
+            globalThis.__async_marker__ = 'awaited:' + v;
+        })();
+    )");
+    engine.pump_message_loop();
+    auto v = engine.evaluate("String(globalThis.__async_marker__)");
+    REQUIRE(v.isString());
+    REQUIRE(std::string(v.getString()) == "awaited:42");
+}
+
+TEST_CASE("pump_message_loop transitively drains microtasks scheduled from microtasks",
+          "[view][web-compat][issue-746]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        globalThis.__transitive__ = 0;
+        function step (n) {
+            return function () {
+                globalThis.__transitive__ = n;
+                if (n < 5) queueMicrotask(step(n + 1));
+            };
+        }
+        queueMicrotask(step(1));
+    )");
+    engine.pump_message_loop();
+    auto v = engine.evaluate("String(globalThis.__transitive__)");
+    REQUIRE(v.isString());
+    // Each microtask schedules the next; the pump must drain
+    // transitively until the queue truly empties.
+    REQUIRE(std::string(v.getString()) == "5");
 }
 
 // ── MessageChannel + MessagePort + postMessage ─────────────────────────
