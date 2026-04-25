@@ -107,62 +107,11 @@ Merged after the Phase 1 closeout / `#723` baseline:
 - `#765` TextEditor multiline navigation coverage -> `7257a154`
 - `#766` OSC UDP sender/receiver edge coverage -> `31aa80e1`
 - `#771` WidgetBridge extended-controls coverage -> `3d03c0fe`
+- `#777` real CLAP `PluginSlot` coverage -> `478f489c`
+- `#782` VST3 adapter process-path coverage -> `648c2d27`
 
 Open Phase 3 PRs:
 
-- `#777` real CLAP `PluginSlot` coverage, branch
-  `feature/clap-slot-coverage-493`, head `f5f6f47a`. This tranche wires
-  the built PulpGain CLAP bundle into host tests after examples are
-  registered, adds metadata/defaults, bypass/release, and restore-state
-  coverage, and fixes CLAP state restore so restored plugin state
-  supersedes stale cached host edits. After `#771` merged, this branch was
-  rebased onto `origin/main` and duplicate shared support commits were
-  skipped. Local configure/build,
-  `pulp-test-host "[host][slot][clap]"` (`139` assertions / `4` test
-  cases), generated `ClapSlot` CTest entries, whitespace, CI-configured
-  skill-sync, direct disabled-upgrade smoke, focused CLI shellout coverage
-  for `PULP_UPDATE_CHECK_DISABLED`, focused project-bump probe tests
-  (`pulp-test-cli-project-command` now `150` assertions / `10` cases), and
-  version checks are green. The previous Windows Namespace failure was traced
-  to POSIX `/dev/null` redirection inside `pulp project bump` git probes on
-  Windows; the branch now uses Windows-safe `NUL` redirection for those probes
-  and adds tests for the affected paths. The previous diff-coverage failure
-  at `753bcccf` (`63%`) was the shared disabled-update branch in
-  `cmd_upgrade.cpp`; that is covered by the shellout test now present on all
-  active coverage branches. GitHub Actions is rerunning at `f5f6f47a`; no
-  completed failures were visible at the last poll.
-- `#782` VST3 adapter process-path coverage, branch
-  `feature/vst3-adapter-coverage-493`, head `c182ee21`. This tranche adds
-  focused VST3 adapter coverage for parameter metadata, setup/release lifecycle,
-  bus/event/process routing, sidechain visibility, secondary output zeroing,
-  host input automation, plugin-to-host output automation, MIDI output, and
-  transport context mapping. Local `pulp-test-vst3-plugin-state` passed
-  `118` assertions / `5` test cases, and the focused CTest subset passed
-  `5/5`. A broad local `ctest -R "VST3|vst3"` also ran, but it includes
-  `pluginval-*` bundle validation tests and those failed locally because
-  pluginval found zero plugin types in the built VST3 bundles; that is being
-  treated separately from the unit coverage tranche unless it reproduces in
-  CI. The PR is labeled `codecov`. Shipyard local/SSH validation at
-  `bc23956d` passed mac and ubuntu, then hit a Windows SSH bundle-upload
-  timeout during banner exchange. After `#771` merged, this branch was rebased
-  onto `origin/main` and duplicate shared support commits were skipped. Local
-  GPU-off configure/build of
-  `pulp-test-cli-project-command`, focused `pulp-test-vst3-plugin-state`
-  (`118` assertions / `5` test cases), direct disabled-upgrade smoke,
-  focused CLI shellout coverage for `PULP_UPDATE_CHECK_DISABLED`,
-  focused project-bump probe tests (`pulp-test-cli-project-command` now `150`
-  assertions / `10` cases), whitespace, skill-sync, and version checks are
-  green. The `f09adb04` rerun failed the required diff-coverage gate because
-  the shared `cmd_project.cpp` support commit left Windows helper returns,
-  non-standalone `origin/main` fallback, and `--verify-builds` lines uncovered;
-  that shared coverage is now on `main` via `#771`. A later automated review
-  correctly noted that the process-context test set a tempo value without
-  setting VST3's `kTempoValid` bit; `c182ee21` includes that test validity
-  flag, with local `pulp-test-vst3-plugin-state` still green (`118`
-  assertions / `5` test cases). GitHub Actions is rerunning at `c182ee21`.
-  The TSan job failed before tests due a Git checkout partial-pack/RPC
-  disconnect (`curl 18` / bad pack header); rerun failed sanitizer jobs once
-  the sanitizer workflow reaches a terminal state.
 - `#786` render DirtyTracker / RenderLoop edge coverage, branch
   `feature/render-coverage-646-next`, head `49983137`. This tranche extends
   the still-open `#646` render component follow-up after the earlier merged
@@ -230,29 +179,26 @@ Open supporting PR:
 
 Next recovery actions:
 
-1. Poll `#777`, `#782`, and `#786`; merge green PRs manually
+1. Poll `#786` and `#788`; merge green PRs manually
    because auto-merge is disabled.
-2. Let the rebased `#777`, `#782`, and `#786` checks drain at their new heads.
+2. Let `#786`'s macOS Namespace rerun and `#788`'s initial checks drain.
 3. Keep `#644` as the next rebased local draft; open it after the current
    active PR queue has room or if `ship` becomes the next priority.
 4. Keep `#774` docs-only and let its post-`#771` rebase checks drain.
-5. After `#777`, `#782`, and `#786` merge, refresh this section with the next
+5. After `#786` and `#788` merge, refresh this section with the next
    complete Codecov `main` report.
 6. If any Windows Namespace lane fails again, pull the fresh completed-run
    log first and search for `pulp-test-cli-project-command`; the known
    failing tests were the dirty-gate and redundant-origin project-bump cases.
-7. If `#782` still shows TSan failed after the sanitizer workflow completes,
-   rerun failed jobs for run `24929565716`; the observed failure was checkout
-   infrastructure before tests, not a sanitizer report.
-8. If `#786` still shows macOS Namespace failed after the Build and Test
+7. If `#786` still shows macOS Namespace failed after the Build and Test
    workflow completes, rerun failed jobs for run `24929553366`; the observed
    failure was a transient `wgpu-native` download HTTP 502 before tests.
-9. If sandbox-e2e fails again, pull the fresh log first; the expected
+8. If sandbox-e2e fails again, pull the fresh log first; the expected
    failure fixed here was `pulp upgrade --check-only` ignoring
    `PULP_UPDATE_CHECK_DISABLED=1` on an empty cache.
-10. If a PR is green but GitHub reports it behind `main`, rebase that
+9. If a PR is green but GitHub reports it behind `main`, rebase that
    branch onto `origin/main`, push with lease, and let checks rerun.
-11. Continue Phase 3 from the tranche issues below, prioritizing
+10. Continue Phase 3 from the tranche issues below, prioritizing
    represented high-miss files over adding new perimeter lanes.
 
 ## Phase 1 corrected baseline
