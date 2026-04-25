@@ -92,7 +92,7 @@ Merged after the Phase 1 closeout / `#723` baseline:
 Open Phase 3 PRs:
 
 - `#771` WidgetBridge extended-controls coverage, branch
-  `feature/widget-bridge-coverage-493`, head `b51a48b5`. Local
+  `feature/widget-bridge-coverage-493`, head `13f1be94`. Local
   `pulp-test-widget-bridge`, focused CTest, GPU-off configure/build of
   `pulp-test-cli-project-command`, skill sync, version report, and
   whitespace checks are green. The branch now carries three shared CI
@@ -102,13 +102,11 @@ Open Phase 3 PRs:
   `examples/ui-preview`. The branch also carries the sandbox-e2e
   unblocker that makes `pulp upgrade --check-only` honor
   `PULP_UPDATE_CHECK_DISABLED=1` without hitting GitHub Releases when the
-  update cache is empty. GitHub Actions at `b51a48b5` is draining; early
-  docs, audit, version/skill sync, provider resolution, Android coverage,
-  Linux Namespace, and Codecov patch checks are green, while sandbox-e2e,
-  remaining Namespace/coverage, Windows MSVC, IWYU, and sanitizer lanes
-  continue.
+  update cache is empty, plus the shellout test covering that path so the
+  diff-coverage gate sees those lines. GitHub Actions is rerunning at
+  `13f1be94`.
 - `#777` real CLAP `PluginSlot` coverage, branch
-  `feature/clap-slot-coverage-493`, head `753bcccf`. This tranche wires
+  `feature/clap-slot-coverage-493`, head `83e9f9be`. This tranche wires
   the built PulpGain CLAP bundle into host tests after examples are
   registered, adds metadata/defaults, bypass/release, and restore-state
   coverage, and fixes CLAP state restore so restored plugin state
@@ -118,13 +116,16 @@ Open Phase 3 PRs:
   before `#771` lands. Local configure/build,
   `pulp-test-host "[host][slot][clap]"` (`139` assertions / `4` test
   cases), generated `ClapSlot` CTest entries, whitespace, CI-configured
-  skill-sync, direct disabled-upgrade smoke, and version checks are green.
-  GitHub Actions is rerunning at `753bcccf`; early docs, audit,
-  version/skill sync, provider checks, Android coverage, and docs preview
-  are green while sandbox-e2e, IWYU, Namespace, coverage, Windows MSVC,
-  Android build, and sanitizer lanes drain.
+  skill-sync, direct disabled-upgrade smoke, focused CLI shellout coverage
+  for `PULP_UPDATE_CHECK_DISABLED`, and version checks are green. The
+  previous `753bcccf` rerun exposed two blockers: Windows Namespace failed
+  but logs were still unavailable while the run continued, and the required
+  diff-coverage gate reported `63%` because the shared
+  `cmd_upgrade.cpp` disabled-update branch was uncovered. The new head
+  adds the shellout coverage test for that path and is rerunning at
+  `83e9f9be`.
 - `#782` VST3 adapter process-path coverage, branch
-  `feature/vst3-adapter-coverage-493`, head `8e9caaa7`. This tranche adds
+  `feature/vst3-adapter-coverage-493`, head `f09adb04`. This tranche adds
   focused VST3 adapter coverage for parameter metadata, setup/release lifecycle,
   bus/event/process routing, sidechain visibility, secondary output zeroing,
   host input automation, plugin-to-host output automation, MIDI output, and
@@ -142,10 +143,11 @@ Open Phase 3 PRs:
   unblocker. Local GPU-off configure/build of
   `pulp-test-cli-project-command`, focused `pulp-test-vst3-plugin-state`
   (`118` assertions / `5` test cases), direct disabled-upgrade smoke,
+  focused CLI shellout coverage for `PULP_UPDATE_CHECK_DISABLED`,
   whitespace, skill-sync, and version checks are green. GitHub Actions is
-  rerunning at `8e9caaa7`.
+  rerunning at `f09adb04`.
 - `#786` render DirtyTracker / RenderLoop edge coverage, branch
-  `feature/render-coverage-646-next`, head `a9f4526a`. This tranche extends
+  `feature/render-coverage-646-next`, head `f7da209d`. This tranche extends
   the still-open `#646` render component follow-up after the earlier merged
   `#700` slice. Scope is intentionally pure and hostable: DirtyTracker
   negative/empty rects, debug overlay state, threshold accumulation,
@@ -156,12 +158,13 @@ Open Phase 3 PRs:
   `pulp-test-rendering-integration` (`71` assertions / `40` cases),
   focused CTest (`19/19`), GPU-off configure/build of
   `pulp-test-cli-project-command`, `pulp-cli` build, direct
-  disabled-upgrade smoke, skill/version checks, and whitespace. The branch
-  now carries the same shared GPU-off CMake, Windows-safe redirection,
-  `ui-preview` guard, and disabled-update-check fixes as the other active
-  Phase 3 tranches because IWYU exposed the GPU-off target-link failure
-  before any of those shared fixes had merged. GitHub Actions is draining
-  at `a9f4526a`.
+  disabled-upgrade smoke, focused CLI shellout coverage for
+  `PULP_UPDATE_CHECK_DISABLED`, skill/version checks, and whitespace. The
+  branch now carries the same shared GPU-off CMake, Windows-safe
+  redirection, `ui-preview` guard, disabled-update-check fix, and CLI
+  coverage test as the other active Phase 3 tranches because IWYU exposed
+  the GPU-off target-link failure before any of those shared fixes had
+  merged. GitHub Actions is rerunning at `f7da209d`.
 
 Open supporting PR:
 
@@ -176,9 +179,12 @@ Next recovery actions:
 
 1. Poll `#771`, `#774`, `#777`, `#782`, and `#786`; merge green PRs manually
    because auto-merge is disabled.
-2. Let the current `#771`, `#777`, and `#782` reruns drain after the
-   shared CI and sandbox-e2e unblockers were pushed.
-3. Let the new `#786` render coverage tranche drain at `a9f4526a`.
+2. Let the current `#771`, `#777`, `#782`, and `#786` reruns drain after
+   the shared CI, sandbox-e2e, and CLI diff-coverage unblockers were
+   pushed.
+3. If `#777` Windows Namespace fails again, pull the fresh completed-run
+   log first; the previous failed job's log was unavailable while the
+   overall run was still in progress.
 4. If sandbox-e2e fails again, pull the fresh log first; the expected
    failure fixed here was `pulp upgrade --check-only` ignoring
    `PULP_UPDATE_CHECK_DISABLED=1` on an empty cache.
