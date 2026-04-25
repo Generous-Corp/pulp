@@ -71,9 +71,10 @@ Latest complete Codecov `main` report observed while updating this doc:
 - workflow: Coverage run `24925413069`, completed successfully
 - overall tracked coverage: `43.28%` over `70,175` lines in `556` files
 - covered lines: `30,372`
-- note: `origin/main` is currently `95e917cf40026e29035f05c9eca1307ba68fa177`;
-  that commit is a changelog-only `[skip ci]` commit, so Codecov's latest
-  complete coverage report is from the previous executable-code commit.
+- note: `origin/main` is currently `a80929c42ff61b88cd366383baad2ee817558b57`.
+  Coverage and sanitizer workflows for that head are still in progress, so
+  Codecov's latest complete `main` report is still the older executable-code
+  baseline above until the new `main` Coverage run completes.
 
 Merged after the Phase 1 closeout / `#723` baseline:
 
@@ -86,17 +87,10 @@ Merged after the Phase 1 closeout / `#723` baseline:
 - `#755` LV2 host/entry coverage -> `aed8acb`
 - `#756` validation harness edge coverage -> `22d1e69`
 - `#765` TextEditor multiline navigation coverage -> `7257a154`
+- `#766` OSC UDP sender/receiver edge coverage -> `31aa80e1`
 
 Open Phase 3 PRs:
 
-- `#766` OSC UDP sender/receiver edge coverage, branch
-  `feature/osc-udp-coverage-493`, head `0cecfa51`. The macOS UBSan
-  abort was reproduced locally and fixed by replacing the legacy
-  `gethostbyname`/`hostent` hostname fallback with `getaddrinfo`.
-  Local normal and UBSan OSC tests are green; GitHub Actions has passed
-  Linux/Windows/macOS Namespace, Linux/Windows coverage, Codecov patch,
-  IWYU, docs, Android, version, and audit lanes. It is still draining
-  macOS coverage and macOS sanitizer lanes.
 - `#771` WidgetBridge extended-controls coverage, branch
   `feature/widget-bridge-coverage-493`, head `429b8941`. Local
   `pulp-test-widget-bridge`, focused CTest, skill sync, version report,
@@ -104,8 +98,13 @@ Open Phase 3 PRs:
   GPU-only `pulp::inspect` link from `pulp-test-cli-project-command` and
   generates the CLI version header when `tools/cli` is skipped in
   `PULP_ENABLE_GPU=OFF` sanitizer/IWYU configurations. Local GPU-off
-  configure/build plus `pulp-test-cli-project-command` are green; GitHub
-  Actions reran at `429b8941` and is draining.
+  configure/build plus `pulp-test-cli-project-command` are green. GitHub
+  Actions at `429b8941` has passed Codecov patch, IWYU, Linux/macOS/Windows
+  coverage, Linux Namespace, Windows MSVC, docs, audit, Android, and version
+  checks, but Windows Namespace failed while the overall run was still in
+  progress and logs were not yet available through `gh run view`. The next
+  action is to pull that failed job log when the run completes, then either
+  rerun if it is an infra flake or patch the branch if it is reproducible.
 - `#777` real CLAP `PluginSlot` coverage, branch
   `feature/clap-slot-coverage-493`, head `5363bbe0`. This tranche wires
   the built PulpGain CLAP bundle into host tests after examples are
@@ -113,8 +112,28 @@ Open Phase 3 PRs:
   coverage, and fixes CLAP state restore so restored plugin state
   supersedes stale cached host edits. Local configure, build,
   `pulp-test-host`, generated `ClapSlot` CTest entries, whitespace,
-  CI-configured skill-sync, and version checks are green; GitHub Actions
-  is draining.
+  CI-configured skill-sync, and version checks are green. GitHub Actions
+  has passed Codecov patch, Linux coverage, Android, docs, audit, version,
+  and Windows MSVC checks, but IWYU failed for the same GPU-off
+  `pulp-test-cli-project-command` / `pulp::inspect` CMake issue that `#771`
+  fixes. The preferred path is to merge or repair `#771`, then rebase `#777`
+  and rerun; if `#771` stays blocked, carrying the minimal CMake fix in
+  `#777` is the fallback.
+
+Active local Phase 3 branch not yet in PR:
+
+- `feature/vst3-adapter-coverage-493`, worktree
+  `/Users/danielraffel/Code/pulp-vst3-adapter-coverage-493`, adds focused
+  VST3 adapter coverage for parameter metadata, setup/release lifecycle,
+  bus/event/process routing, sidechain visibility, secondary output zeroing,
+  host input automation, plugin-to-host output automation, MIDI output, and
+  transport context mapping. Local `pulp-test-vst3-plugin-state` passed
+  `118` assertions / `5` test cases, and the focused CTest subset passed
+  `5/5`. A broad local `ctest -R "VST3|vst3"` also ran, but it includes
+  `pluginval-*` bundle validation tests and those failed locally because
+  pluginval found zero plugin types in the built VST3 bundles; that is being
+  treated separately from the unit coverage tranche unless it reproduces in
+  CI.
 
 Open supporting PR:
 
@@ -127,13 +146,18 @@ Open supporting PR:
 
 Next recovery actions:
 
-1. Poll `#766`, `#771`, `#774`, and `#777`; merge green PRs manually
-   because auto-merge is disabled.
-2. If a PR is green but GitHub reports it behind `main`, rebase that
+1. Poll `#771`, `#774`, and `#777`; merge green PRs manually because
+   auto-merge is disabled.
+2. Diagnose `#771`'s Windows Namespace failure once logs are available.
+3. Rebase or patch `#777` after the `#771` CMake fix lands, because its
+   current IWYU failure is the same GPU-off CMake issue.
+4. Finish local validation for `feature/vst3-adapter-coverage-493`, open a
+   PR, and keep it separate from the CLAP/WidgetBridge branches.
+5. If a PR is green but GitHub reports it behind `main`, rebase that
    branch onto `origin/main`, push with lease, and let checks rerun.
-3. After active PRs merge, refresh this section with the next complete
+6. After active PRs merge, refresh this section with the next complete
    Codecov `main` report.
-4. Continue Phase 3 from the tranche issues below, prioritizing
+7. Continue Phase 3 from the tranche issues below, prioritizing
    represented high-miss files over adding new perimeter lanes.
 
 ## Phase 1 corrected baseline
