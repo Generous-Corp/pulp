@@ -93,9 +93,7 @@ static std::string wrap_for_cmd_c(const std::string& cmd) {
     // `cmd.exe /c` strips the first and last quote when the command begins
     // with a quoted executable. Add an outer pair so the executable's quotes
     // survive and the remaining quoted arguments are parsed normally.
-    if (!cmd.empty() && cmd.front() == '"')
-        return "\"" + cmd + "\"";
-    return cmd;
+    return (!cmd.empty() && cmd.front() == '"') ? "\"" + cmd + "\"" : cmd;
 }
 #endif
 
@@ -109,9 +107,7 @@ static std::string shell_invoke_path(const fs::path& path) {
 
 static std::string shell_invoke_command(const std::string& command) {
 #ifdef _WIN32
-    if (command.find_first_of(" \t\\/") != std::string::npos)
-        return shell_quote(command);
-    return command;
+    return command.find_first_of(" \t\\/") != std::string::npos ? shell_quote(command) : command;
 #else
     return shell_quote(command);
 #endif
@@ -141,10 +137,7 @@ static int run_status_in_directory(const fs::path& directory,
     options.timeout_ms = timeout_ms;
     options.working_directory = directory.string();
 #ifdef _WIN32
-    auto r = pulp::platform::ChildProcess::run(
-        "cmd.exe",
-        {"/c", wrap_for_cmd_c(cmd)},
-        options);
+    auto r = pulp::platform::ChildProcess::run("cmd.exe", {"/c", wrap_for_cmd_c(cmd)}, options);
 #else
     auto r = pulp::platform::ChildProcess::run(
         "/bin/sh",
