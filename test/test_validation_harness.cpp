@@ -62,6 +62,8 @@ public:
         // Count MIDI events for testing
         for (const auto& ev : midi_in) {
             if (ev.is_note_on()) ++note_on_count_;
+            else if (ev.is_note_off()) ++note_off_count_;
+            else if (ev.is_cc()) ++cc_count_;
         }
 
         for (std::size_t ch = 0; ch < output.num_channels() && ch < input.num_channels(); ++ch) {
@@ -82,6 +84,8 @@ public:
     }
 
     int note_on_count_ = 0;
+    int note_off_count_ = 0;
+    int cc_count_ = 0;
     std::string plugin_state;
 };
 
@@ -164,6 +168,25 @@ TEST_CASE("ValidationHarness MIDI note-on queuing", "[harness][phase2]") {
     // MIDI was consumed (no crash, no assertion failure)
     // The processor counts note-ons internally
     SUCCEED("MIDI events processed without error");
+}
+
+TEST_CASE("ValidationHarness MIDI note-off and CC helpers reach process_buffer",
+          "[harness][phase2]") {
+    pulp::format::ValidationHarness harness(create_test_gain);
+    harness.configure({.buffer_size = 4, .input_channels = 2, .output_channels = 2});
+    harness.prepare();
+    REQUIRE(last_processor != nullptr);
+
+    harness.send_midi_note_on(0, 60, 100);
+    harness.send_midi_note_off(0, 60);
+    harness.send_midi_cc(0, 74, 64);
+
+    std::vector<float> input(8, 0.0f);
+    auto output = harness.process_buffer(input, 2, 4);
+    REQUIRE(output.size() == 8);
+    REQUIRE(last_processor->note_on_count_ == 1);
+    REQUIRE(last_processor->note_off_count_ == 1);
+    REQUIRE(last_processor->cc_count_ == 1);
 }
 
 TEST_CASE("ValidationHarness state round-trip", "[harness][phase2]") {
@@ -339,6 +362,36 @@ TEST_CASE("ValidationHarness screenshot passes when provider returns true",
     std::filesystem::remove("/tmp/test-provided.png");
 }
 
+TEST_CASE("ValidationHarness screenshot passes configured capture options to provider",
+          "[harness][phase2][issue-298]") {
+    pulp::format::ValidationHarness harness(create_test_gain);
+    harness.configure({
+        .screenshot_width = 320,
+        .screenshot_height = 180,
+        .screenshot_scale = 1.5f,
+        .screenshot_backend = "software-test",
+    });
+
+    float captured_scale = 0.0f;
+    std::string captured_backend;
+    harness.set_capture_screenshot_provider(
+        [&](const std::filesystem::path&, uint32_t w, uint32_t h,
+            float scale, const std::string& backend) {
+            REQUIRE(w == 320);
+            REQUIRE(h == 180);
+            captured_scale = scale;
+            captured_backend = backend;
+            return true;
+        });
+
+    auto entry = harness.capture_screenshot("/tmp/test-options.png");
+    REQUIRE(entry.status == pulp::format::ValidationStatus::pass);
+    REQUIRE_THAT(static_cast<double>(captured_scale), WithinAbs(1.5, 0.001));
+    REQUIRE(captured_backend == "software-test");
+    REQUIRE_THAT(entry.payload_json, ContainsSubstring("\"width\": 320"));
+    REQUIRE_THAT(entry.payload_json, ContainsSubstring("\"backend\": \"software-test\""));
+}
+
 TEST_CASE("ValidationHarness screenshot fails when provider returns false",
           "[harness][phase2][issue-298]") {
     pulp::format::ValidationHarness harness(create_test_gain);
@@ -378,6 +431,40 @@ TEST_CASE("ValidationHarness inspector passes with provider",
     REQUIRE_THAT(entry.payload_json, ContainsSubstring("\"children\""));
 }
 
+TEST_CASE("ValidationHarness inspector fails when provider returns empty tree",
+          "[harness][phase2][issue-298]") {
+    pulp::format::ValidationHarness harness(create_test_gain);
+    harness.configure({});
+
+    harness.set_capture_inspector_provider([]() { return std::string{}; });
+
+    auto entry = harness.capture_inspector();
+    REQUIRE(entry.status == pulp::format::ValidationStatus::fail);
+    REQUIRE_THAT(entry.error_message, ContainsSubstring("empty tree"));
+    REQUIRE_THAT(entry.payload_json, ContainsSubstring("\"view_count\": 0"));
+}
+
+TEST_CASE("ValidationHarness compare_screenshots missing inputs -> error",
+          "[harness][phase2][issue-298]") {
+    pulp::format::ValidationHarness harness(create_test_gain);
+    harness.configure({});
+
+    auto existing = make_temp_path("pulp-harness-existing");
+    std::ofstream(existing) << "content";
+    auto missing_ref = make_temp_path("pulp-harness-missing-ref");
+    auto missing_rendered = make_temp_path("pulp-harness-missing-rendered");
+
+    auto entry = harness.compare_screenshots(missing_ref, existing);
+    REQUIRE(entry.status == pulp::format::ValidationStatus::error);
+    REQUIRE_THAT(entry.error_message, ContainsSubstring("Reference file not found"));
+
+    entry = harness.compare_screenshots(existing, missing_rendered);
+    REQUIRE(entry.status == pulp::format::ValidationStatus::error);
+    REQUIRE_THAT(entry.error_message, ContainsSubstring("Rendered file not found"));
+
+    std::filesystem::remove(existing);
+}
+
 TEST_CASE("ValidationHarness compare_screenshots identical files -> pass",
           "[harness][phase2][issue-298]") {
     pulp::format::ValidationHarness harness(create_test_gain);
@@ -391,6 +478,24 @@ TEST_CASE("ValidationHarness compare_screenshots identical files -> pass",
     auto entry = harness.compare_screenshots(a, b);
     REQUIRE(entry.status == pulp::format::ValidationStatus::pass);
     REQUIRE_THAT(entry.payload_json, ContainsSubstring("\"similarity\": 1"));
+    std::filesystem::remove(a);
+    std::filesystem::remove(b);
+}
+
+TEST_CASE("ValidationHarness compare_screenshots different sizes -> fail",
+          "[harness][phase2][issue-298]") {
+    pulp::format::ValidationHarness harness(create_test_gain);
+    harness.configure({});
+
+    auto a = std::filesystem::temp_directory_path() / "harness-ref-size.bin";
+    auto b = std::filesystem::temp_directory_path() / "harness-ren-size.bin";
+    std::ofstream(a) << "short";
+    std::ofstream(b) << "longer-content";
+
+    auto entry = harness.compare_screenshots(a, b);
+    REQUIRE(entry.status == pulp::format::ValidationStatus::fail);
+    REQUIRE_THAT(entry.error_message, ContainsSubstring("differ"));
+    REQUIRE_THAT(entry.payload_json, ContainsSubstring("\"similarity\": 0"));
     std::filesystem::remove(a);
     std::filesystem::remove(b);
 }
