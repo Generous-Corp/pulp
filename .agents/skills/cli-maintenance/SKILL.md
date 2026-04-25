@@ -110,6 +110,16 @@ pulp #709 / `--from claude` is the worked example.
 - [ ] Search CLAUDE.md
 - [ ] Run sync check
 
+## `pulp project bump` shell helpers
+
+`tools/cli/cmd_project.cpp` shells out to `git` / `cmake` from unit-tested
+helper paths, including Windows CI. Keep output redirection platform-aware:
+POSIX uses `/dev/null`, but Windows `cmd.exe` needs `NUL`. Do not add raw
+`2>/dev/null` or `>/dev/null 2>&1` in this file; route new call sites through
+the local null-redirection helpers instead. Otherwise Windows Namespace can
+misreport clean/dirty git state or fail origin-main probes even though the
+same tests pass on macOS/Linux.
+
 ## `pulp pr` — shim over `shipyard pr`
 
 By default `pulp pr` now delegates to `shipyard pr` (on PATH), forwarding
