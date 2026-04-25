@@ -170,6 +170,26 @@ TEST_CASE("TextEditor key event: Up goes to start in single-line", "[view][text_
     // Up in single-line moves to start — verify by typing
 }
 
+TEST_CASE("TextEditor single-line navigation treats embedded newlines as plain text", "[view][text_editor]") {
+    TextEditor editor;
+    editor.on_focus_changed(true);
+    editor.set_text("aa\nbb\ncc");
+
+    REQUIRE(editor.caret_pos() == 8);
+
+    REQUIRE(editor.on_key_event(key_event(KeyCode::up)));
+    REQUIRE(editor.caret_pos() == 0);
+
+    REQUIRE(editor.on_key_event(key_event(KeyCode::down)));
+    REQUIRE(editor.caret_pos() == 8);
+
+    REQUIRE(editor.on_key_event(key_event(KeyCode::home)));
+    REQUIRE(editor.caret_pos() == 0);
+
+    REQUIRE(editor.on_key_event(key_event(KeyCode::end_)));
+    REQUIRE(editor.caret_pos() == 8);
+}
+
 TEST_CASE("TextEditor multi-line up and down preserve the visual column", "[view][text_editor]") {
     TextEditor editor;
     editor.multi_line = true;

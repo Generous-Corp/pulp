@@ -222,8 +222,17 @@ void TextEditor::move_to_line_end(bool extend) {
     else selection_start_ = selection_end_ = caret_position_;
 }
 
-void TextEditor::move_to_start(bool extend) { move_to_line_start(extend); }
-void TextEditor::move_to_end(bool extend) { move_to_line_end(extend); }
+void TextEditor::move_to_start(bool extend) {
+    caret_position_ = 0;
+    if (extend) selection_end_ = caret_position_;
+    else selection_start_ = selection_end_ = caret_position_;
+}
+
+void TextEditor::move_to_end(bool extend) {
+    caret_position_ = static_cast<int>(text_.size());
+    if (extend) selection_end_ = caret_position_;
+    else selection_start_ = selection_end_ = caret_position_;
+}
 
 bool TextEditor::is_word_char(char c) const {
     return std::isalnum(static_cast<unsigned char>(c)) || c == '_';
@@ -298,11 +307,13 @@ bool TextEditor::on_key_event(const KeyEvent& event) {
             return true;
 
         case KeyCode::home:
-            move_to_start(shift);
+            if (multi_line) move_to_line_start(shift);
+            else move_to_start(shift);
             return true;
 
         case KeyCode::end_:
-            move_to_end(shift);
+            if (multi_line) move_to_line_end(shift);
+            else move_to_end(shift);
             return true;
 
         case KeyCode::backspace:
