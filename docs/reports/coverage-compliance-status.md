@@ -69,6 +69,9 @@ Latest complete Codecov `main` report observed while updating this doc:
 
 - commit: `a80929c42ff61b88cd366383baad2ee817558b57`
 - workflow: Coverage run `24926536334`, completed successfully
+- note: this is the latest complete `main` Codecov report observed before
+  the `#771`, `#777`, `#782`, and `#786` merges; refresh after the next
+  complete `main` coverage run reaches a terminal state.
 - overall tracked coverage: `43.27%` over `70,197` lines in `556` files
 - covered lines: `30,376`
 - current component coverage from the Codecov API:
@@ -109,31 +112,10 @@ Merged after the Phase 1 closeout / `#723` baseline:
 - `#771` WidgetBridge extended-controls coverage -> `3d03c0fe`
 - `#777` real CLAP `PluginSlot` coverage -> `478f489c`
 - `#782` VST3 adapter process-path coverage -> `648c2d27`
+- `#786` render DirtyTracker / RenderLoop edge coverage -> `26dd396d`
 
 Open Phase 3 PRs:
 
-- `#786` render DirtyTracker / RenderLoop edge coverage, branch
-  `feature/render-coverage-646-next`, head `49983137`. This tranche extends
-  the still-open `#646` render component follow-up after the earlier merged
-  `#700` slice. Scope is intentionally pure and hostable: DirtyTracker
-  negative/empty rects, debug overlay state, threshold accumulation,
-  no-viewport behavior, nearby non-overlap coalescing, Rect merge/touching
-  edges, and non-Apple TimerRenderLoop callback/restart behavior. Local
-  validation is green: configure, focused target build,
-  `pulp-test-dirty-tracker` (`52` assertions / `18` cases),
-  `pulp-test-rendering-integration` (`71` assertions / `40` cases),
-  focused CTest (`19/19`), GPU-off configure/build of
-  `pulp-test-cli-project-command`, `pulp-cli` build, direct
-  disabled-upgrade smoke, focused CLI shellout coverage for
-  `PULP_UPDATE_CHECK_DISABLED`, skill/version checks, and whitespace. After
-  `#771` merged, this branch was rebased onto `origin/main` and duplicate
-  shared support commits were skipped. The `f7da209d` rerun failed the
-  required diff-coverage gate on the same shared `cmd_project.cpp` probe edges
-  as `#782`; that shared coverage is now on `main` via `#771`. GitHub Actions
-  is rerunning at `49983137`. The macOS Namespace job failed during setup on a
-  transient `curl` HTTP 502 while downloading the shared `wgpu-native` runtime,
-  before configure/tests; rerun failed jobs once the Build and Test workflow
-  reaches a terminal state.
 - `#788` events socket-IPC coverage, branch
   `feature/events-ipc-coverage-642`, head `4cb33f4e`. This tranche
   extends `test/test_ipc.cpp` with malformed socket endpoint rejection,
@@ -147,7 +129,8 @@ Open Phase 3 PRs:
   whitespace. A direct multi-filter Catch2 invocation was intentionally not
   used as validation because Catch2 treats multiple quoted filters as an AND
   expression; CTest was used for the focused multi-test slice. PR is labeled
-  `codecov` and GitHub Actions is starting.
+  `codecov`; GitHub Actions has no failures observed in the current polling
+  window and is waiting on Linux Namespace plus Linux coverage to finish.
 
 Local Phase 3 draft not yet opened as a PR:
 - `#644` Android ship/package helper tranche, worktree
@@ -172,33 +155,27 @@ Open supporting PR:
 - `#774` refreshes this durable handoff/status document, branch
   `docs/coverage-status-2026-04-25`. The branch is updated as this
   tracker changes; use the PR head SHA in GitHub as the live value.
-  The previous head `3f1df148` failed Windows Namespace for the same
-  `pulp project bump` Windows redirection bug now fixed on `main` via `#771`.
-  This branch has been rebased onto `origin/main` after that merge and should
-  rerun without carrying code changes.
+  The branch has been rebased onto `origin/main` after `#786` merged and
+  remains docs-only.
 
 Next recovery actions:
 
-1. Poll `#786` and `#788`; merge green PRs manually
-   because auto-merge is disabled.
-2. Let `#786`'s macOS Namespace rerun and `#788`'s initial checks drain.
+1. Poll `#788`; merge manually when green because auto-merge is disabled.
+2. Let `#788`'s Linux Namespace and Linux coverage checks drain.
 3. Keep `#644` as the next rebased local draft; open it after the current
    active PR queue has room or if `ship` becomes the next priority.
-4. Keep `#774` docs-only and let its post-`#771` rebase checks drain.
-5. After `#786` and `#788` merge, refresh this section with the next
+4. Keep `#774` docs-only and let its post-`#786` rebase checks drain.
+5. After `#788` merges, refresh this section with the next
    complete Codecov `main` report.
 6. If any Windows Namespace lane fails again, pull the fresh completed-run
    log first and search for `pulp-test-cli-project-command`; the known
    failing tests were the dirty-gate and redundant-origin project-bump cases.
-7. If `#786` still shows macOS Namespace failed after the Build and Test
-   workflow completes, rerun failed jobs for run `24929553366`; the observed
-   failure was a transient `wgpu-native` download HTTP 502 before tests.
-8. If sandbox-e2e fails again, pull the fresh log first; the expected
+7. If sandbox-e2e fails again, pull the fresh log first; the expected
    failure fixed here was `pulp upgrade --check-only` ignoring
    `PULP_UPDATE_CHECK_DISABLED=1` on an empty cache.
-9. If a PR is green but GitHub reports it behind `main`, rebase that
+8. If a PR is green but GitHub reports it behind `main`, rebase that
    branch onto `origin/main`, push with lease, and let checks rerun.
-10. Continue Phase 3 from the tranche issues below, prioritizing
+9. Continue Phase 3 from the tranche issues below, prioritizing
    represented high-miss files over adding new perimeter lanes.
 
 ## Phase 1 corrected baseline
