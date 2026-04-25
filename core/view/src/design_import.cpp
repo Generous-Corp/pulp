@@ -300,7 +300,24 @@ std::optional<ClaudeBundle> parse_claude_bundle(const std::string& html) {
             if (cval.isBool()) compressed = cval.getBool();
         }
         if (compressed) {
-            auto inflated = claude_bundle_inflate(decoded->data(), decoded->size());
+            // Prefer the runtime gzip_decompress entry point — it handles
+            // real RFC 1952 streams of any size. The inline
+            // `claude_bundle_inflate` shim's `deflate_decompress`-via-
+            // `inflate_raw` path was silently failing on assets > ~900 KB
+            // inflated (the heuristic initial buffer is `compressed_size *
+            // 4` and the buffer-doubling retry loop on MZ_BUF_ERROR doesn't
+            // recover for some inputs miniz produces partial output for).
+            // On canonical Spectr Claude exports that meant ReactDOM
+            // (1.08 MB) and Babel-standalone (3.14 MB) were silently
+            // dropped during parsing, leaving only the React payload —
+            // and inline `text/babel` scripts (the actual app code) had
+            // no Babel.transform to compile against. Fall back to the
+            // inline shim if the runtime path returns nullopt — preserves
+            // back-compat for any exotic stream shape we haven't seen yet.
+            auto inflated = pulp::runtime::gzip_decompress(decoded->data(), decoded->size());
+            if (!inflated) {
+                inflated = claude_bundle_inflate(decoded->data(), decoded->size());
+            }
             if (!inflated) continue;
             asset.data = std::move(*inflated);
         } else {
