@@ -131,24 +131,24 @@ Open Phase 3 PRs:
   expression; CTest was used for the focused multi-test slice. PR is labeled
   `codecov`; GitHub Actions has no failures observed in the current polling
   window and is waiting on Linux Namespace plus Linux coverage to finish.
-
-Local Phase 3 draft not yet opened as a PR:
-- `#644` Android ship/package helper tranche, worktree
-  `/Users/danielraffel/Code/pulp-android-package-coverage-644`, branch
-  `feature/android-package-coverage-644`, local commit `1de9b8e6`. This
-  draft adds a deterministic host-side fake Android SDK/toolchain harness for
+- `#789` Android ship/package helper coverage, branch
+  `feature/android-package-coverage-644`, head `9f14204e`. This tranche
+  adds a deterministic host-side fake Android SDK/toolchain harness for
   `ship/platform/android/package_android.cpp` without requiring a real SDK,
   device, keystore, Gradle install, bundletool, or network access. Scope:
   SDK/build-tools/NDK discovery, fake `zipalign`, fake `apksigner` signing and
   APK verification parsing, fake `jarsigner` AAB signing/verification, fake
   Gradle APK/AAB artifact collection, missing-wrapper/missing-artifact errors,
-  and fake bundletool conversion with optional signing config. Local validation
-  is green: configure in the fresh worktree, `cmake --build build --target
-  pulp-test-android-package -j4`, direct `pulp-test-android-package` (`64`
-  assertions / `7` test cases), focused Android package CTest (`7/7`), adjacent
-  ship CTest slice for Android/appcast/codesign/NSIS (`21/21`), and whitespace.
-  After `#771` merged, this branch was rebased onto `origin/main`; direct
-  `pulp-test-android-package` still passes (`64` assertions / `7` test cases).
+  and fake bundletool conversion with optional signing config. After `#786`
+  merged, this branch was rebased onto `origin/main`, pushed, opened as a PR,
+  and labeled `codecov`. Local validation is green:
+  `cmake --build build --target pulp-test-android-package -j4`, direct
+  `pulp-test-android-package` (`64` assertions / `7` test cases), focused
+  Android package CTest (`7/7`), adjacent ship CTest slice for
+  Android/appcast/codesign/notarization/DMG (`20/20`), and whitespace.
+
+Local Phase 3 draft not yet opened as a PR:
+- none at this update. The former `#644` draft is now open as `#789`.
 
 Open supporting PR:
 
@@ -160,12 +160,13 @@ Open supporting PR:
 
 Next recovery actions:
 
-1. Poll `#788`; merge manually when green because auto-merge is disabled.
+1. Poll `#788` and `#789`; merge manually when green because auto-merge is
+   disabled.
 2. Let `#788`'s Linux Namespace and Linux coverage checks drain.
-3. Keep `#644` as the next rebased local draft; open it after the current
-   active PR queue has room or if `ship` becomes the next priority.
+3. Let `#789`'s initial GitHub Actions checks drain; pull the exact failing
+   job log first if anything turns red.
 4. Keep `#774` docs-only and let its post-`#786` rebase checks drain.
-5. After `#788` merges, refresh this section with the next
+5. After the active code PRs merge, refresh this section with the next
    complete Codecov `main` report.
 6. If any Windows Namespace lane fails again, pull the fresh completed-run
    log first and search for `pulp-test-cli-project-command`; the known
