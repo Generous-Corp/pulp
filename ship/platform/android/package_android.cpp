@@ -134,6 +134,26 @@ static int run_status(const std::string& cmd, int timeout_ms = 120000) {
 #endif
 }
 
+static int run_status_in_directory(const fs::path& directory,
+                                   const std::string& cmd,
+                                   int timeout_ms = 120000) {
+    pulp::platform::ProcessOptions options;
+    options.timeout_ms = timeout_ms;
+    options.working_directory = directory.string();
+#ifdef _WIN32
+    auto r = pulp::platform::ChildProcess::run(
+        "cmd.exe",
+        {"/c", wrap_for_cmd_c(cmd)},
+        options);
+#else
+    auto r = pulp::platform::ChildProcess::run(
+        "/bin/sh",
+        {"-c", cmd},
+        options);
+#endif
+    return r.exit_code;
+}
+
 static std::string resolve_password(const std::string& password) {
     // Support @env:VAR_NAME syntax
     if (password.size() > 5 && password.substr(0, 5) == "@env:") {
@@ -380,8 +400,7 @@ AndroidPackageResult build_android_package(
     }
 
     // Build command
-    std::string cmd = "cd " + shell_quote_path(gradle_project_dir)
-        + " && " + shell_invoke_path(gradlew) + tasks;
+    std::string cmd = shell_invoke_path(gradlew) + tasks;
 
     if (!abi_filter.empty())
         cmd += " -Pandroid.injected.build.abi=" + abi_filter;
@@ -399,7 +418,7 @@ AndroidPackageResult build_android_package(
     }
 
     // Run Gradle (can take minutes for a full build)
-    int rc = run_status(cmd, 600000);
+    int rc = run_status_in_directory(gradle_project_dir, cmd, 600000);
     if (rc != 0) {
         result.error = "Gradle build failed (exit code " + std::to_string(rc) + ")";
         return result;

@@ -367,6 +367,7 @@ TEST_CASE("Android Gradle packaging collects APK and AAB artifacts", "[ship][and
         true);
 
     INFO(result.error);
+    INFO("gradle args: " << read_text(gradle_log));
     REQUIRE(result.success);
     REQUIRE(result.error.empty());
     REQUIRE(result.apk_path.filename() == "app-release.apk");

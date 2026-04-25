@@ -170,7 +170,10 @@ quoted arguments. For Gradle and bundletool `name=value` parameters that
 contain paths or passwords, quote the whole `name=value` token rather than only
 the value (`"--output=C:\path\file.apks"`, not `--output="C:\path\file.apks"`),
 because Windows batch `%~1`/`shift` parsing does not normalize embedded quotes
-the same way POSIX shells do. Keep this in mind when touching
+the same way POSIX shells do. Gradle wrapper invocations should use the
+ChildProcess `working_directory` option instead of inlining `cd ... && gradlew`
+into the shell string, so fake wrappers and real Gradle builds write artifacts
+relative to the project root consistently. Keep this in mind when touching
 `ship/platform/android/package_android.cpp`.
 
 ### Released CLI tarball crashes on user machines
