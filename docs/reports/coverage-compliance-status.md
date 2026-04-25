@@ -181,8 +181,10 @@ Open Phase 3 PRs:
   shared support commits were skipped. The `f7da209d` rerun failed the
   required diff-coverage gate on the same shared `cmd_project.cpp` probe edges
   as `#782`; that shared coverage is now on `main` via `#771`. GitHub Actions
-  is rerunning at `49983137`; no completed failures were visible at the last
-  poll.
+  is rerunning at `49983137`. The macOS Namespace job failed during setup on a
+  transient `curl` HTTP 502 while downloading the shared `wgpu-native` runtime,
+  before configure/tests; rerun failed jobs once the Build and Test workflow
+  reaches a terminal state.
 - `#788` events socket-IPC coverage, branch
   `feature/events-ipc-coverage-642`, head `4cb33f4e`. This tranche
   extends `test/test_ipc.cpp` with malformed socket endpoint rejection,
@@ -242,12 +244,15 @@ Next recovery actions:
 7. If `#782` still shows TSan failed after the sanitizer workflow completes,
    rerun failed jobs for run `24929565716`; the observed failure was checkout
    infrastructure before tests, not a sanitizer report.
-8. If sandbox-e2e fails again, pull the fresh log first; the expected
+8. If `#786` still shows macOS Namespace failed after the Build and Test
+   workflow completes, rerun failed jobs for run `24929553366`; the observed
+   failure was a transient `wgpu-native` download HTTP 502 before tests.
+9. If sandbox-e2e fails again, pull the fresh log first; the expected
    failure fixed here was `pulp upgrade --check-only` ignoring
    `PULP_UPDATE_CHECK_DISABLED=1` on an empty cache.
-9. If a PR is green but GitHub reports it behind `main`, rebase that
+10. If a PR is green but GitHub reports it behind `main`, rebase that
    branch onto `origin/main`, push with lease, and let checks rerun.
-10. Continue Phase 3 from the tranche issues below, prioritizing
+11. Continue Phase 3 from the tranche issues below, prioritizing
    represented high-miss files over adding new perimeter lanes.
 
 ## Phase 1 corrected baseline
