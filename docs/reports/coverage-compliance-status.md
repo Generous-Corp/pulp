@@ -144,6 +144,18 @@ Open Phase 3 PRs:
   (`118` assertions / `5` test cases), direct disabled-upgrade smoke,
   whitespace, skill-sync, and version checks are green. GitHub Actions is
   rerunning at `8e9caaa7`.
+- `#786` render DirtyTracker / RenderLoop edge coverage, branch
+  `feature/render-coverage-646-next`, head `330e373d`. This tranche extends
+  the still-open `#646` render component follow-up after the earlier merged
+  `#700` slice. Scope is intentionally pure and hostable: DirtyTracker
+  negative/empty rects, debug overlay state, threshold accumulation,
+  no-viewport behavior, nearby non-overlap coalescing, Rect merge/touching
+  edges, and non-Apple TimerRenderLoop callback/restart behavior. Local
+  validation is green: configure, focused target build,
+  `pulp-test-dirty-tracker` (`52` assertions / `18` cases),
+  `pulp-test-rendering-integration` (`71` assertions / `40` cases),
+  focused CTest (`19/19`), skill/version checks, and whitespace. GitHub
+  Actions is draining at `330e373d` with no completed failures observed.
 
 Open supporting PR:
 
@@ -156,18 +168,19 @@ Open supporting PR:
 
 Next recovery actions:
 
-1. Poll `#771`, `#774`, `#777`, and `#782`; merge green PRs manually because
-   auto-merge is disabled.
+1. Poll `#771`, `#774`, `#777`, `#782`, and `#786`; merge green PRs manually
+   because auto-merge is disabled.
 2. Let the current `#771`, `#777`, and `#782` reruns drain after the
    shared CI and sandbox-e2e unblockers were pushed.
-3. If sandbox-e2e fails again, pull the fresh log first; the expected
+3. Let the new `#786` render coverage tranche drain at `330e373d`.
+4. If sandbox-e2e fails again, pull the fresh log first; the expected
    failure fixed here was `pulp upgrade --check-only` ignoring
    `PULP_UPDATE_CHECK_DISABLED=1` on an empty cache.
-4. If a PR is green but GitHub reports it behind `main`, rebase that
+5. If a PR is green but GitHub reports it behind `main`, rebase that
    branch onto `origin/main`, push with lease, and let checks rerun.
-5. After active PRs merge, refresh this section with the next complete
+6. After active PRs merge, refresh this section with the next complete
    Codecov `main` report.
-6. Continue Phase 3 from the tranche issues below, prioritizing
+7. Continue Phase 3 from the tranche issues below, prioritizing
    represented high-miss files over adding new perimeter lanes.
 
 ## Phase 1 corrected baseline
