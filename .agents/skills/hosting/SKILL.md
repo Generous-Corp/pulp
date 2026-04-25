@@ -47,18 +47,29 @@ Everything else — tests, scanner, graph wiring — is format-agnostic.
   name / vendor / version / id fields from the descriptor.
 - The slot must own the `clap_host_t` it exposes to the plug-in; the
   plug-in stores the pointer and will deref it later.
+- After a successful `CLAP_EXT_STATE` restore, clear any cached host
+  parameter edits in the slot. Otherwise `get_parameter()` can report a
+  stale host-side value even though the plug-in restored its own state.
 
 ## Testing against a real plug-in
 
 Integration tests gate on a compile-time path macro:
 
 ```cmake
-if(TARGET PulpGain_CLAP)
-    target_compile_definitions(pulp-test-host PRIVATE
-        PULP_TEST_CLAP_PATH="${CMAKE_BINARY_DIR}/CLAP/PulpGain.clap")
-    add_dependencies(pulp-test-host PulpGain_CLAP)
+if(PULP_BUILD_TESTS AND NOT ANDROID AND TARGET PulpGain_CLAP)
+    foreach(_pulp_clap_host_test IN ITEMS pulp-test-host pulp-test-host-regression)
+        if(TARGET ${_pulp_clap_host_test})
+            target_compile_definitions(${_pulp_clap_host_test} PRIVATE
+                PULP_TEST_CLAP_PATH="${CMAKE_BINARY_DIR}/CLAP/PulpGain.clap")
+            add_dependencies(${_pulp_clap_host_test} PulpGain_CLAP)
+        endif()
+    endforeach()
 endif()
 ```
+
+Keep this wiring after `add_subdirectory(examples)`: the top-level build
+registers `test/` before `examples/`, so `test/CMakeLists.txt` cannot
+reliably see `PulpGain_CLAP` at configure time.
 
 Tests check `fs::exists(PULP_TEST_CLAP_PATH)` and `WARN` + return if the
 plug-in isn't built, so the suite still passes on configurations that
