@@ -166,6 +166,19 @@ Open Phase 3 PRs:
   the GPU-off target-link failure before any of those shared fixes had
   merged. GitHub Actions is rerunning at `f7da209d`.
 
+Local Phase 3 draft not yet opened as a PR:
+
+- `#642` events socket-IPC tranche, worktree
+  `/Users/danielraffel/Code/pulp-events-ipc-coverage-642`, branch
+  `feature/events-ipc-coverage-642`, local commit `aea1dfa7`. This draft
+  extends `test/test_ipc.cpp` with socket endpoint rejection coverage and
+  a deterministic localhost client/server framed-message exchange. Local
+  validation is green: configure, `cmake --build build --target
+  pulp-test-ipc -j4`, direct `pulp-test-ipc` (`23` assertions / `8` test
+  cases), focused CTest `IPC` (`8/8`), and whitespace. Keep this local
+  until one of the shared CI-unblocker PRs merges, or cherry-pick the same
+  shared GPU-off/sandbox/diff-coverage unblockers before opening it.
+
 Open supporting PR:
 
 - `#774` refreshes this durable handoff/status document, branch
@@ -185,14 +198,17 @@ Next recovery actions:
 3. If `#777` Windows Namespace fails again, pull the fresh completed-run
    log first; the previous failed job's log was unavailable while the
    overall run was still in progress.
-4. If sandbox-e2e fails again, pull the fresh log first; the expected
+4. Keep the local `#642` events IPC draft paused until the shared
+   CI-unblocker commits are on `main`; then rebase it, open a PR, and
+   link it from `#642`.
+5. If sandbox-e2e fails again, pull the fresh log first; the expected
    failure fixed here was `pulp upgrade --check-only` ignoring
    `PULP_UPDATE_CHECK_DISABLED=1` on an empty cache.
-5. If a PR is green but GitHub reports it behind `main`, rebase that
+6. If a PR is green but GitHub reports it behind `main`, rebase that
    branch onto `origin/main`, push with lease, and let checks rerun.
-6. After active PRs merge, refresh this section with the next complete
+7. After active PRs merge, refresh this section with the next complete
    Codecov `main` report.
-7. Continue Phase 3 from the tranche issues below, prioritizing
+8. Continue Phase 3 from the tranche issues below, prioritizing
    represented high-miss files over adding new perimeter lanes.
 
 ## Phase 1 corrected baseline
