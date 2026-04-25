@@ -1,0 +1,4 @@
+Registry: <REGISTRY>
+  1 project:
+  - alpha-plugin
+      /tmp/pulp-rs-fixture/alpha-plugin  registered 2026-04-23T10:00:00Z

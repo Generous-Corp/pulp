@@ -1,0 +1,78 @@
+# pulp-rs
+#
+# EXPERIMENTAL Rust prototype of the Pulp CLI.
+#
+# This crate is NOT production code and is NOT shipped.
+# It exists to evaluate whether rewriting `tools/cli/*.cpp` in Rust
+# is worthwhile. See GitHub issue #686 for the decision framework.
+#
+# This crate is intentionally NOT wired into CMake. It runs only via cargo.
+
+[package]
+name        = "pulp-rs"
+version     = "0.0.1"
+edition     = "2021"
+rust-version = "1.79"
+description = "Experimental Rust prototype of the Pulp CLI (not for production)"
+license     = "MIT"
+publish     = false
+
+# The library crate is the surface that tests, benches, and the binary
+# all depend on. Keeping `main.rs` a thin wrapper means integration
+# tests can link directly against `pulp_rs::*` without subprocess spawn.
+[lib]
+name = "pulp_rs"
+path = "src/lib.rs"
+
+[[bin]]
+name = "pulp-rs"
+path = "src/main.rs"
+
+[dependencies]
+anyhow     = "1"
+clap       = { version = "4", features = ["derive"] }
+is-terminal = "0.4"
+regex      = "1"
+semver     = "1"
+serde      = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+thiserror  = "1"
+toml       = "0.8"
+# `rand` drives `pulp-rs create`'s VST3 UID generator (4 random u32s
+# per project). The C++ side uses `std::random_device` + `std::mt19937`;
+# `rand = "0.8"` gives us a portable `thread_rng` with the same
+# cryptographically-weak "just make it unique" guarantee. No other
+# command uses it today.
+rand       = { version = "0.8", default-features = false, features = ["std", "std_rng"] }
+# `toml_edit` is the comment- and whitespace-preserving writer for
+# `config.toml` — a plain `toml` round-trip would drop inline comments
+# and blank-line layout, which users notice. See `src/config.rs`.
+toml_edit  = "0.22"
+# `ureq` is the blocking HTTP client backing `pulp upgrade`'s GitHub
+# Releases query. Chosen over `reqwest` because the CLI's story is
+# strictly blocking — no async runtime to haul in, much smaller link
+# surface, and `rustls` by default so cross-compile to musl/Windows is
+# painless. See `src/update.rs` for the trait that keeps tests off the
+# network.
+ureq       = { version = "2", default-features = false, features = ["tls", "json"] }
+
+[dev-dependencies]
+assert_cmd = "2"
+criterion  = { version = "0.5", features = ["html_reports"] }
+insta      = { version = "1", features = ["json"] }
+predicates = "3"
+proptest   = "1"
+tempfile   = "3"
+
+[[bench]]
+name    = "hot_paths"
+harness = false
+
+# Release profile tuned for a fast, small CLI binary.
+# These settings matter most when benchmarking cold-start time — we want
+# the binary the user would ship, not a debug build.
+[profile.release]
+codegen-units = 1
+lto           = "thin"     # "fat" LTO regresses compile time 3x for ~2% binary-size gain
+panic         = "abort"
+strip         = "symbols"

@@ -1,0 +1,7 @@
+{
+  "installed": "0.37.0",
+  "latest": "0.40.0",
+  "is_newer": true,
+  "release_notes_url": "https://github.com/danielraffel/pulp/releases/tag/v0.40.0",
+  "source": "cache"
+}

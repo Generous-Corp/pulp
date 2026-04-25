@@ -1,0 +1,11 @@
+{
+  "lockfile_version": 1,
+  "packages": {
+    "alac": {
+      "version": "1.0",
+      "resolved": "https://github.com/macosforge/alac.git",
+      "integrity": "",
+      "commit": "master"
+    }
+  }
+}

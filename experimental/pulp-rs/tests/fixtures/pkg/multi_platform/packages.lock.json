@@ -1,0 +1,11 @@
+{
+  "lockfile_version": 1,
+  "packages": {
+    "mac-only": {
+      "version": "0.1",
+      "resolved": "https://example.com/mac-only.git",
+      "integrity": "",
+      "commit": "v0.1"
+    }
+  }
+}

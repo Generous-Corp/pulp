@@ -1,0 +1,22 @@
+{
+  "registry_version": 2,
+  "packages": {
+    "mac-only": {
+      "name": "MacOnly",
+      "version": "0.1",
+      "description": "macOS-only codec",
+      "license": "MIT",
+      "category": "dsp",
+      "fetch": {
+        "method": "FetchContent",
+        "git_repository": "https://example.com/mac-only.git",
+        "git_tag": "v0.1"
+      },
+      "cmake": {"targets": ["mac_only"]},
+      "platforms": {
+        "macOS": {"architectures": ["arm64", "x86_64"]}
+      },
+      "tags": ["dsp"]
+    }
+  }
+}

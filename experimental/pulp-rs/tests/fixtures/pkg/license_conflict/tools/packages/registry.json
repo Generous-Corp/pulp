@@ -1,0 +1,22 @@
+{
+  "registry_version": 2,
+  "packages": {
+    "aubio": {
+      "name": "Aubio",
+      "version": "0.4.9",
+      "description": "Audio labeling - pitch, onset, beat, tempo",
+      "license": "GPL-3.0",
+      "category": "dsp",
+      "fetch": {
+        "method": "FetchContent",
+        "git_repository": "https://example.com/aubio.git",
+        "git_tag": "0.4.9"
+      },
+      "cmake": {"targets": ["aubio"]},
+      "platforms": {
+        "Linux": {"architectures": ["x64"]}
+      },
+      "tags": ["pitch", "onset"]
+    }
+  }
+}

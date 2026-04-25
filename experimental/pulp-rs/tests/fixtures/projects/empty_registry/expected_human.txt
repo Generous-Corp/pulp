@@ -1,0 +1,5 @@
+Registry: <REGISTRY>
+  (no projects registered)
+  Run `pulp projects add` in a project directory to register it,
+  or use `pulp doctor --versions --scan-parents` to surface
+  ancestors without modifying the registry.

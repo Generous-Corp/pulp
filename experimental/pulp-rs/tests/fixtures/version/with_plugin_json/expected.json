@@ -1,0 +1,24 @@
+{
+  "cli": {
+    "raw": "0.37.0",
+    "comparable": true,
+    "major": 0,
+    "minor": 37,
+    "patch": 0
+  },
+  "plugin": {
+    "raw": "0.12.0",
+    "comparable": true,
+    "major": 0,
+    "minor": 12,
+    "patch": 0
+  },
+  "plugin_min_cli": {
+    "raw": "0.35.0",
+    "comparable": true,
+    "major": 0,
+    "minor": 35,
+    "patch": 0
+  },
+  "plugin_json_path": "/Users/danielraffel/Code/pulp-rs-proto/experimental/pulp-rs/tests/fixtures/version/with_plugin_json/.claude-plugin/plugin.json"
+}

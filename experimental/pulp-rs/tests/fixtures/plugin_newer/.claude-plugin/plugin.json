@@ -1,0 +1,5 @@
+{
+  "name": "pulp",
+  "version": "0.12.0",
+  "min_cli_version": "0.99.0"
+}

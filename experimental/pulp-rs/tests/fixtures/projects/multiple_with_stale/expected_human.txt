@@ -1,0 +1,10 @@
+Registry: <REGISTRY>
+  4 projects:
+  - active-plugin
+      /tmp/pulp-rs-fixture/active-plugin  registered 2026-04-23T10:00:00Z
+  - StaleA (missing)
+      /nonexistent/stale-project-a  registered 2026-04-01T00:00:00Z
+  - StaleB (missing)
+      /nonexistent/stale-project-b  registered 2026-04-02T00:00:00Z
+  - also-active
+      /tmp/pulp-rs-fixture/also-active  registered 2026-04-22T00:00:00Z

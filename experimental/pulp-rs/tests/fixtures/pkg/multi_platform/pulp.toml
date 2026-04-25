@@ -1,0 +1,7 @@
+[project]
+name = "MultiPlatformDemo"
+targets = [
+  "macOS-arm64",
+  "Windows-x64",
+  "Linux-x64"
+]

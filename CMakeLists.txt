@@ -510,6 +510,20 @@ if(NOT ANDROID AND NOT IOS AND PULP_ENABLE_GPU)
     add_subdirectory(tools/cli)
 endif()
 
+# ── Rust CLI (Phase 8 binary swap, issues #686 / #767) ────────────────────
+# Bridges `cargo build` for the experimental Rust CLI port into the
+# CMake build graph. Coexists with pulp-cli (the C++ binary) — both
+# install side-by-side under `${CMAKE_INSTALL_BINDIR}`. PR #2 of the
+# swap pair flips the user-facing default; this file is the no-op
+# build-graph scaffolding (PR #1).
+#
+# Same desktop guard as tools/cli — Rust crate links nothing native
+# but skipping on Android/iOS keeps mobile build matrices fast.
+if(NOT ANDROID AND NOT IOS
+   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/experimental/pulp-rs/CMakeLists.txt")
+    add_subdirectory(experimental/pulp-rs)
+endif()
+
 # ── MCP Server (desktop only) ─────────────────────────────────────────────
 if(NOT ANDROID AND NOT IOS)
     add_subdirectory(tools/mcp)

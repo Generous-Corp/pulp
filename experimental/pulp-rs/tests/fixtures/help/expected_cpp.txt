@@ -1,0 +1,47 @@
+pulp — Pulp audio plugin framework CLI
+
+Usage: pulp <command> [options]
+
+Commands:
+  build          Configure and build the project
+  run            Launch a standalone Pulp application
+  test           Run the test suite
+  status         Show project status and info
+  create         Scaffold a new plugin project
+  validate       Run plugin format validators
+  doctor         Diagnose environment issues
+  ship           Sign, package, and distribute
+  design         Launch the AI design tool
+  docs           Browse local documentation
+  clean          Remove build directory
+  cache          Manage SDK and asset cache
+  audio          Repo-level audio model and bundle tooling
+  sdk            Manage the Pulp SDK installation
+  upgrade        Update the CLI to the latest version
+  version        Show, bump, or check version info
+  dev            Unified dev loop: watch, build, test, run
+  scan           Scan system paths for VST3 / AU / CLAP / LV2 plug-ins
+  host           Load a plug-in and run a synthetic audio block through it
+  pr             One-shot push-a-PR: gates + bump + ship
+  projects       Manage the ~/.pulp/projects.json registry
+  project        Per-project SDK pin: bump, undo
+  config         Read or write ~/.pulp/config.toml settings
+
+  ci-local       Local-first CI across configured hosts
+  design-debug   Headless design debug runner
+  inspect        Launch the component inspector
+  import-design  Import designs from Figma/Stitch/v0/Pencil
+  export-tokens  Export theme as W3C Design Tokens
+  audit          License and clean-room audit
+  add            Add a component to the project
+  help           Show this help
+
+Examples:
+  pulp create MyPlugin              # Create a new effect plugin
+  pulp create MySynth --type instrument  # Create an instrument
+  pulp doctor             # Check environment for issues
+  pulp build              # Build all targets
+  pulp test               # Run all tests
+  pulp validate           # Validate built plugins
+  pulp docs index         # List available docs
+  pulp status             # Show project info

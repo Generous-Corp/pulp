@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "tools": {
+    "uv": {
+      "display_name": "UV",
+      "category": "binary",
+      "description": "Fast Python package manager",
+      "license": "MIT",
+      "install_method": "binary_download",
+      "pinned_version": "0.4.27",
+      "managed_by_pulp": true,
+      "binary_sources": {
+        "macOS-arm64": {
+          "url_template": "https://example.com/${version}/uv.tar.gz",
+          "archive_format": "tar.gz",
+          "binary_name": "uv"
+        },
+        "macOS-x64": {
+          "url_template": "https://example.com/${version}/uv.tar.gz",
+          "archive_format": "tar.gz",
+          "binary_name": "uv"
+        },
+        "Linux-x64": {
+          "url_template": "https://example.com/${version}/uv.tar.gz",
+          "archive_format": "tar.gz",
+          "binary_name": "uv"
+        },
+        "Linux-arm64": {
+          "url_template": "https://example.com/${version}/uv.tar.gz",
+          "archive_format": "tar.gz",
+          "binary_name": "uv"
+        },
+        "Windows-x64": {
+          "url_template": "https://example.com/${version}/uv.zip",
+          "archive_format": "zip",
+          "binary_name": "uv.exe"
+        }
+      }
+    },
+    "clap-validator": {
+      "display_name": "CLAP Validator",
+      "category": "binary",
+      "description": "Validate CLAP plugins",
+      "license": "ISC",
+      "install_method": "binary_download",
+      "pinned_version": "0.3.0",
+      "managed_by_pulp": true,
+      "binary_sources": {
+        "macOS-arm64": {
+          "url_template": "https://example.com/${version}/clap-validator.tar.gz",
+          "archive_format": "tar.gz",
+          "binary_name": "clap-validator"
+        }
+      }
+    }
+  }
+}

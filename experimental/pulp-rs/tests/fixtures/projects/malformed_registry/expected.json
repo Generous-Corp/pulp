@@ -1,0 +1,17 @@
+{
+  "registry": "<REGISTRY>",
+  "projects": [
+    {
+      "path": "/tmp/pulp-rs-fixture/forward-compat",
+      "name": "ForwardCompat",
+      "registered_at": "2026-04-21T10:00:00Z",
+      "missing_on_disk": false
+    },
+    {
+      "path": "/nonexistent/missing-entry",
+      "name": "MissingEntry",
+      "registered_at": "2026-04-22T00:00:00Z",
+      "missing_on_disk": true
+    }
+  ]
+}
