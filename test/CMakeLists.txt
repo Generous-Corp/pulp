@@ -237,6 +237,13 @@ catch_discover_tests(pulp-test-cli-project-bump-all)
 # plus the shared standalone SDK resolution/doctor helpers in
 # cli_common.cpp. The test includes cmd_project.cpp directly so the
 # anonymous-namespace helpers can be exercised without shelling out.
+# The desktop CLI subdirectory is skipped for PULP_ENABLE_GPU=OFF, but
+# this test still compiles cli_common.cpp in sanitizer/IWYU configurations.
+file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/tools/cli")
+configure_file(
+    "${CMAKE_SOURCE_DIR}/tools/cli/pulp_version_gen.h.in"
+    "${CMAKE_BINARY_DIR}/tools/cli/pulp_version_gen.h"
+    @ONLY)
 add_executable(pulp-test-cli-project-command
     test_cli_project_command.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/cli_common.cpp
@@ -260,7 +267,6 @@ target_link_libraries(pulp-test-cli-project-command PRIVATE
     pulp::ship
     pulp::view
     pulp::format
-    pulp::inspect
     pulp::host
     Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-cli-project-command)
