@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-25 17:00 EDT
+Last reviewed: 2026-04-25 17:27 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -131,7 +131,7 @@ Open Phase 3 PRs:
   the current polling window shows no failures while Linux Namespace plus
   Linux coverage drain.
 - `#789` Android ship/package helper coverage, branch
-  `feature/android-package-coverage-644`, head `5070182c`. This tranche
+  `feature/android-package-coverage-644`, head `3c1a49c0`. This tranche
   adds a deterministic host-side fake Android SDK/toolchain harness for
   `ship/platform/android/package_android.cpp` without requiring a real SDK,
   device, keystore, Gradle install, bundletool, or network access. Scope:
@@ -141,18 +141,28 @@ Open Phase 3 PRs:
   and fake bundletool conversion with optional signing config. After `#786`
   merged, this branch was rebased onto `origin/main`, pushed, opened as a PR,
   and labeled `codecov`. The first GitHub Actions pass exposed a Windows
-  Namespace-only failure in batch-backed Android tool invocation; the branch
-  now invokes quoted `.bat` SDK/Gradle/bundletool commands through `call` and
+  Namespace-only failure in batch-backed Android tool invocation. The first
+  follow-up fixed the skill-sync gap but still failed the same three Windows
+  Android tests. The branch now preserves quoted batch executable paths for
+  `cmd.exe /c` by wrapping commands that begin with a quoted tool path, and
   documents that gotcha in the `ship` skill. Local validation is green:
   `cmake --build build --target pulp-test-android-package -j4`, direct
   `pulp-test-android-package` (`64` assertions / `7` test cases), focused
   Android package CTest (`7/7`), adjacent ship CTest slice for
   Android/appcast/codesign/notarization/DMG (`20/20`), and whitespace. The
   current polling window shows no failures while fresh checks run on
-  `5070182c`.
+  `3c1a49c0`.
 
 Local Phase 3 draft not yet opened as a PR:
-- none at this update. The former `#644` draft is now open as `#789`.
+- `#643` package-registry CLI/tools draft, worktree
+  `/Users/danielraffel/Code/pulp-package-registry-coverage-643`, branch
+  `feature/package-registry-coverage-643`. This draft is local-only and
+  should not be opened until `#788` / `#789` resolve. Current scope adds
+  `pulp-test-cli-package-registry` for pure local registry parsing,
+  lock-file round trips, target TOML parsing/writing, semver, quality
+  scoring, unsupported-target detection, and search ranking. Local configure
+  was interrupted while fetching `mbedtls` because `#789` required immediate
+  Windows triage; resume with a clean configure/build in that worktree.
 
 Open supporting PR:
 
