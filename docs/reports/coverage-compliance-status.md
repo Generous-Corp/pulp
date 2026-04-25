@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-25
+Last reviewed: 2026-04-25 17:00 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -126,10 +126,12 @@ Open Phase 3 PRs:
   whitespace. A direct multi-filter Catch2 invocation was intentionally not
   used as validation because Catch2 treats multiple quoted filters as an AND
   expression; CTest was used for the focused multi-test slice. PR is labeled
-  `codecov`; GitHub Actions has no failures observed in the current polling
-  window and is waiting on Linux Namespace plus Linux coverage to finish.
+  `codecov`. The earlier Linux Namespace and Linux coverage failures did not
+  expose usable logs through `gh`; both failed workflows have been rerun and
+  the current polling window shows no failures while Linux Namespace plus
+  Linux coverage drain.
 - `#789` Android ship/package helper coverage, branch
-  `feature/android-package-coverage-644`, head `9f14204e`. This tranche
+  `feature/android-package-coverage-644`, head `5070182c`. This tranche
   adds a deterministic host-side fake Android SDK/toolchain harness for
   `ship/platform/android/package_android.cpp` without requiring a real SDK,
   device, keystore, Gradle install, bundletool, or network access. Scope:
@@ -138,11 +140,16 @@ Open Phase 3 PRs:
   Gradle APK/AAB artifact collection, missing-wrapper/missing-artifact errors,
   and fake bundletool conversion with optional signing config. After `#786`
   merged, this branch was rebased onto `origin/main`, pushed, opened as a PR,
-  and labeled `codecov`. Local validation is green:
+  and labeled `codecov`. The first GitHub Actions pass exposed a Windows
+  Namespace-only failure in batch-backed Android tool invocation; the branch
+  now invokes quoted `.bat` SDK/Gradle/bundletool commands through `call` and
+  documents that gotcha in the `ship` skill. Local validation is green:
   `cmake --build build --target pulp-test-android-package -j4`, direct
   `pulp-test-android-package` (`64` assertions / `7` test cases), focused
   Android package CTest (`7/7`), adjacent ship CTest slice for
-  Android/appcast/codesign/notarization/DMG (`20/20`), and whitespace.
+  Android/appcast/codesign/notarization/DMG (`20/20`), and whitespace. The
+  current polling window shows no failures while fresh checks run on
+  `5070182c`.
 
 Local Phase 3 draft not yet opened as a PR:
 - none at this update. The former `#644` draft is now open as `#789`.
@@ -159,9 +166,9 @@ Next recovery actions:
 
 1. Poll `#788` and `#789`; merge manually when green because auto-merge is
    disabled.
-2. Let `#788`'s Linux Namespace and Linux coverage checks drain.
-3. Let `#789`'s initial GitHub Actions checks drain; pull the exact failing
-   job log first if anything turns red.
+2. Let `#788`'s rerun Linux Namespace and Linux coverage checks drain.
+3. Let `#789`'s post-Windows-fix GitHub Actions checks drain; pull the
+   exact failing job log first if anything turns red.
 4. Keep `#774` docs-only and let its post-`#786` rebase checks drain.
 5. After the active code PRs merge, refresh this section with the next
    complete Codecov `main` report.
