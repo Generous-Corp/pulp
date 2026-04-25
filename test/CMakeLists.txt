@@ -198,6 +198,22 @@ target_link_libraries(pulp-test-cli-package-commands PRIVATE
     Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-cli-package-commands)
 
+# CLI package registry (#643): pure local tests for registry parsing,
+# lock-file round trips, target TOML parsing/writing, semver, quality
+# scoring, unsupported-target detection, and search ranking. This stays
+# off remote refresh and install/archive flows.
+add_executable(pulp-test-cli-package-registry
+    test_cli_package_registry.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/package_registry.cpp
+)
+target_include_directories(pulp-test-cli-package-registry PRIVATE
+    ${CMAKE_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/tools/cli)
+target_link_libraries(pulp-test-cli-package-registry PRIVATE
+    pulp::platform
+    Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-cli-package-registry)
+
 # CLI project bump (#499 Slice 7 / #564): pure-logic tests for the
 # CMakeLists pin parser, rewriter, refuse-dynamic-pin gate, semver /
 # downgrade guard, and the undo-batch JSON round-trip. project_bump.cpp
