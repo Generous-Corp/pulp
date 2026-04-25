@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-25 17:55 EDT
+Last reviewed: 2026-04-25 18:11 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -159,15 +159,19 @@ Open Phase 3 PRs:
 Local Phase 3 draft not yet opened as a PR:
 - `#643` package-registry CLI/tools draft, worktree
   `/Users/danielraffel/Code/pulp-package-registry-coverage-643`, branch
-  `feature/package-registry-coverage-643`. This draft is local-only and
+  `feature/package-registry-coverage-643`, local commit `b1443bb9`. This draft is local-only and
   should not be opened until `#788` / `#789` resolve. Current scope adds
   `pulp-test-cli-package-registry` for pure local registry parsing,
   lock-file round trips, target TOML parsing/writing, semver, quality
-  scoring, unsupported-target detection, and search ranking. Local configure
-  has been resumed and is currently working through mandatory `mbedtls`
-  FetchContent population; once it completes, build
-  `pulp-test-cli-package-registry` and fix any compile/test issues before
-  opening a PR.
+  scoring, unsupported-target detection, and search ranking. Local validation
+  is green in a no-GPU/no-examples build directory using the completed local
+  `mbedtls` source tree: configure
+  `cmake -S . -B build-package-registry-localdeps -DCMAKE_BUILD_TYPE=Debug
+  -DPULP_ENABLE_GPU=OFF -DPULP_BUILD_EXAMPLES=OFF
+  -DFETCHCONTENT_SOURCE_DIR_MBEDTLS=$PWD/build/_deps/mbedtls-src`, build
+  `cmake --build build-package-registry-localdeps --target
+  pulp-test-cli-package-registry -j4`, direct binary (`88` assertions / `5`
+  test cases), focused CTest (`5/5`), and whitespace.
 
 Open supporting PR:
 
@@ -195,7 +199,9 @@ Next recovery actions:
    first; the current branch already has local IPC validation green.
 8. If a PR is green but GitHub reports it behind `main`, rebase that
    branch onto `origin/main`, push with lease, and let checks rerun.
-9. Continue Phase 3 from the tranche issues below, prioritizing
+9. After `#788` and `#789` resolve, push/open the local `#643` draft
+   (`b1443bb9`) as the next CLI/tools tranche PR.
+10. Continue Phase 3 from the tranche issues below, prioritizing
    represented high-miss files over adding new perimeter lanes.
 
 ## Phase 1 corrected baseline
