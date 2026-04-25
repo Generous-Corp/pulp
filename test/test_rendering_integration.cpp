@@ -330,6 +330,20 @@ TEST_CASE("KTX2 availability check", "[render][ktx2]") {
 // stop cycle. They exercise the factory + public lifecycle surface
 // without requiring a real GPU surface or window handle.
 
+#if !defined(__APPLE__)
+namespace {
+bool wait_for_frames(std::atomic<int>& frames, int target) {
+    for (int i = 0; i < 200; ++i) {
+        if (frames.load(std::memory_order_relaxed) >= target) {
+            return true;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    return frames.load(std::memory_order_relaxed) >= target;
+}
+} // namespace
+#endif
+
 TEST_CASE("RenderLoop factory returns a loop that starts and stops - issue-646",
           "[render][loop][issue-646]") {
     auto loop = render::RenderLoop::create();
@@ -392,3 +406,41 @@ TEST_CASE("RenderLoop request_frame before start is a safe no-op - issue-646",
     loop->request_frame();
     REQUIRE_FALSE(loop->is_running());
 }
+
+#if !defined(__APPLE__)
+TEST_CASE("RenderLoop timer backend invokes requested frames - issue-646",
+          "[render][loop][issue-646]") {
+    auto loop = render::RenderLoop::create();
+    REQUIRE(loop != nullptr);
+
+    std::atomic<int> frames{0};
+    loop->start([&]() { frames.fetch_add(1, std::memory_order_relaxed); });
+    REQUIRE(loop->is_running());
+
+    REQUIRE(wait_for_frames(frames, 1));
+    const auto before_request = frames.load(std::memory_order_relaxed);
+    loop->request_frame();
+    REQUIRE(wait_for_frames(frames, before_request + 1));
+
+    loop->stop();
+    REQUIRE_FALSE(loop->is_running());
+}
+
+TEST_CASE("RenderLoop timer backend restarts after stop - issue-646",
+          "[render][loop][issue-646]") {
+    auto loop = render::RenderLoop::create();
+    REQUIRE(loop != nullptr);
+
+    std::atomic<int> frames{0};
+    loop->start([&]() { frames.fetch_add(1, std::memory_order_relaxed); });
+    REQUIRE(wait_for_frames(frames, 1));
+    loop->stop();
+    REQUIRE_FALSE(loop->is_running());
+
+    loop->start([&]() { frames.fetch_add(1, std::memory_order_relaxed); });
+    REQUIRE(loop->is_running());
+    REQUIRE(wait_for_frames(frames, 2));
+    loop->stop();
+    REQUIRE_FALSE(loop->is_running());
+}
+#endif
