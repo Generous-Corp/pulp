@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-25 17:27 EDT
+Last reviewed: 2026-04-25 17:55 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -131,7 +131,7 @@ Open Phase 3 PRs:
   the current polling window shows no failures while Linux Namespace plus
   Linux coverage drain.
 - `#789` Android ship/package helper coverage, branch
-  `feature/android-package-coverage-644`, head `3c1a49c0`. This tranche
+  `feature/android-package-coverage-644`, head `3c3a1ea4`. This tranche
   adds a deterministic host-side fake Android SDK/toolchain harness for
   `ship/platform/android/package_android.cpp` without requiring a real SDK,
   device, keystore, Gradle install, bundletool, or network access. Scope:
@@ -143,15 +143,18 @@ Open Phase 3 PRs:
   and labeled `codecov`. The first GitHub Actions pass exposed a Windows
   Namespace-only failure in batch-backed Android tool invocation. The first
   follow-up fixed the skill-sync gap but still failed the same three Windows
-  Android tests. The branch now preserves quoted batch executable paths for
-  `cmd.exe /c` by wrapping commands that begin with a quoted tool path, and
-  documents that gotcha in the `ship` skill. Local validation is green:
+  Android tests. The second follow-up preserved quoted batch executable paths
+  for `cmd.exe /c` but still failed the same Windows tests. The current head
+  additionally fixes the fake Windows `apksigner.bat` fixture's unescaped
+  parenthesized echo text and quotes whole Gradle / bundletool `name=value`
+  arguments instead of only quoted values; the `ship` skill documents both
+  Windows batch gotchas. Local validation is green:
   `cmake --build build --target pulp-test-android-package -j4`, direct
   `pulp-test-android-package` (`64` assertions / `7` test cases), focused
   Android package CTest (`7/7`), adjacent ship CTest slice for
   Android/appcast/codesign/notarization/DMG (`20/20`), and whitespace. The
   current polling window shows no failures while fresh checks run on
-  `3c1a49c0`.
+  `3c3a1ea4`.
 
 Local Phase 3 draft not yet opened as a PR:
 - `#643` package-registry CLI/tools draft, worktree
@@ -161,8 +164,10 @@ Local Phase 3 draft not yet opened as a PR:
   `pulp-test-cli-package-registry` for pure local registry parsing,
   lock-file round trips, target TOML parsing/writing, semver, quality
   scoring, unsupported-target detection, and search ranking. Local configure
-  was interrupted while fetching `mbedtls` because `#789` required immediate
-  Windows triage; resume with a clean configure/build in that worktree.
+  has been resumed and is currently working through mandatory `mbedtls`
+  FetchContent population; once it completes, build
+  `pulp-test-cli-package-registry` and fix any compile/test issues before
+  opening a PR.
 
 Open supporting PR:
 
@@ -177,17 +182,17 @@ Next recovery actions:
 1. Poll `#788` and `#789`; merge manually when green because auto-merge is
    disabled.
 2. Let `#788`'s rerun Linux Namespace and Linux coverage checks drain.
-3. Let `#789`'s post-Windows-fix GitHub Actions checks drain; pull the
+3. Let `#789`'s post-Windows-batch-fix GitHub Actions checks drain; pull the
    exact failing job log first if anything turns red.
 4. Keep `#774` docs-only and let its post-`#786` rebase checks drain.
 5. After the active code PRs merge, refresh this section with the next
    complete Codecov `main` report.
-6. If any Windows Namespace lane fails again, pull the fresh completed-run
-   log first and search for `pulp-test-cli-project-command`; the known
-   failing tests were the dirty-gate and redundant-origin project-bump cases.
-7. If sandbox-e2e fails again, pull the fresh log first; the expected
-   failure fixed here was `pulp upgrade --check-only` ignoring
-   `PULP_UPDATE_CHECK_DISABLED=1` on an empty cache.
+6. If `#789` Windows Namespace fails again, pull the fresh completed-run log
+   first and search for `test_android_package.cpp`, `Android signing helpers`,
+   `Android Gradle packaging`, and `Android bundletool`; do not patch further
+   without the new log.
+7. If `#788` Linux Namespace or Linux coverage fails again, pull the fresh log
+   first; the current branch already has local IPC validation green.
 8. If a PR is green but GitHub reports it behind `main`, rebase that
    branch onto `origin/main`, push with lease, and let checks rerun.
 9. Continue Phase 3 from the tranche issues below, prioritizing
