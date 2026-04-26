@@ -1,12 +1,35 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/audio/buffering_reader.hpp>
+#include <algorithm>
 #include <cmath>
 #include <thread>
 #include <chrono>
+#include <vector>
 
 using namespace pulp::audio;
 using Catch::Matchers::WithinAbs;
+
+namespace {
+
+bool wait_for_frames(BufferingReader& reader, int min_frames) {
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (reader.frames_available() < min_frames && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    return reader.frames_available() >= min_frames;
+}
+
+bool wait_until_finished_with_frames(BufferingReader& reader, int min_frames) {
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while ((!reader.is_finished() || reader.frames_available() < min_frames) &&
+           std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    return reader.is_finished() && reader.frames_available() >= min_frames;
+}
+
+} // namespace
 
 TEST_CASE("BufferingReader reads from callback", "[audio][buffering]") {
     BufferingReader reader;
@@ -35,6 +58,69 @@ TEST_CASE("BufferingReader reads from callback", "[audio][buffering]") {
 
     // First sample should be 0.0f (sequential counter)
     REQUIRE_THAT(buf[0], WithinAbs(0.0, 0.001));
+
+    reader.stop();
+}
+
+TEST_CASE("BufferingReader partial read zero-fills after source ends",
+          "[audio][buffering][issue-640]") {
+    BufferingReader reader;
+
+    int emitted = 0;
+    reader.set_read_callback([&](float* dest, int frames, int channels) {
+        int frames_to_emit = std::min(frames, 3 - emitted);
+        for (int frame = 0; frame < frames_to_emit; ++frame) {
+            for (int ch = 0; ch < channels; ++ch) {
+                dest[frame * channels + ch] = static_cast<float>(emitted + frame + 1);
+            }
+        }
+        emitted += frames_to_emit;
+        return frames_to_emit;
+    });
+
+    reader.start(1, 2048);
+    REQUIRE(wait_until_finished_with_frames(reader, 3));
+
+    float buf[5] = {-1.0f, -1.0f, -1.0f, -1.0f, -1.0f};
+    int got = reader.read(buf, 5, 1);
+    REQUIRE(got == 3);
+    REQUIRE(buf[0] == 1.0f);
+    REQUIRE(buf[1] == 2.0f);
+    REQUIRE(buf[2] == 3.0f);
+    REQUIRE(buf[3] == 0.0f);
+    REQUIRE(buf[4] == 0.0f);
+
+    reader.stop();
+}
+
+TEST_CASE("BufferingReader preserves sample order across ring wrap",
+          "[audio][buffering][issue-640]") {
+    BufferingReader reader;
+
+    int next_sample = 0;
+    reader.set_read_callback([&](float* dest, int frames, int channels) {
+        (void)channels;
+        for (int frame = 0; frame < frames; ++frame) {
+            dest[frame] = static_cast<float>(next_sample++);
+        }
+        return frames;
+    });
+
+    reader.start(1, 1100);
+    REQUIRE(wait_for_frames(reader, 1000));
+
+    std::vector<float> first(700, -1.0f);
+    REQUIRE(reader.read(first.data(), static_cast<int>(first.size()), 1) == 700);
+    REQUIRE(first.front() == 0.0f);
+    REQUIRE(first.back() == 699.0f);
+
+    REQUIRE(wait_for_frames(reader, 1000));
+
+    std::vector<float> second(800, -1.0f);
+    REQUIRE(reader.read(second.data(), static_cast<int>(second.size()), 1) == 800);
+    for (int i = 0; i < static_cast<int>(second.size()); ++i) {
+        REQUIRE(second[static_cast<size_t>(i)] == static_cast<float>(700 + i));
+    }
 
     reader.stop();
 }
