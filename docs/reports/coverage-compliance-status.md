@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-26 02:34 EDT
+Last reviewed: 2026-04-26 02:50 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -130,7 +130,7 @@ Merged after the Phase 1 closeout / `#723` baseline:
 Open Phase 3 PRs:
 
 - `#801` `fix(render): harden texture atlas edge cases`, branch
-  `feature/render-texture-atlas-coverage-646`, commit `50012c04`,
+  `feature/render-texture-atlas-coverage-646`, commit `325485bc`,
   worktree `/Users/danielraffel/Code/pulp-render-texture-atlas-coverage-646`.
   Scope: reject non-positive `AtlasPacker` allocation dimensions, clamp
   repeated `ImageAtlas::release()` calls so refcounts cannot underflow,
@@ -145,9 +145,17 @@ Open Phase 3 PRs:
   passed `20/20`, `git diff --check` clean, skill sync clean, and version
   report clean with explicit `Version-Bump: sdk=patch` for the
   header-only behavior fix. The branch was rebased onto `origin/main`
-  after `#795` merged, pushed with lease as `50012c04`, and the focused
-  local validation above passed again. The PR is labeled `codecov` and is
-  using the direct GitHub/Namespace path.
+  after `#795` merged, then updated as `325485bc` after Codecov reported
+  a false diff-coverage miss for covered `texture_atlas.hpp` lines. The
+  follow-up fixes `tools/scripts/lcov_cobertura.py` so duplicate LCOV
+  source-file records merge instead of overwriting covered header hits,
+  and adds a regression test in `tools/scripts/test_run_coverage.py`.
+  Local validation for the follow-up: `test_run_coverage.py` passed,
+  direct `pulp-test-texture-atlas` passed, focused texture/atlas CTest
+  passed `20/20`, a local LLVM coverage-to-Cobertura reproduction showed
+  the changed atlas lines covered, `git diff --check` clean, skill sync
+  clean, and version report still clean. The PR is labeled `codecov` and
+  is using the direct GitHub/Namespace path.
 - `#802` `test(cli): cover create shellout scaffolding`, branch
   `feature/cli-create-coverage-643`, commit `222d0f88`, worktree
   `/Users/danielraffel/Code/pulp-cli-create-coverage-643`.
@@ -236,6 +244,18 @@ Open Phase 3 PRs:
   clean, skill sync clean, and version bump report says no bump
   needed. The PR is labeled `codecov` and is using the direct
   GitHub/Namespace path.
+- `#808` `test(midi): cover file edge round trips`, branch
+  `feature/midi-file-coverage-645`, commit `d02e853e`, worktree
+  `/Users/danielraffel/Code/pulp-midi-file-coverage-645`.
+  Scope: test-only MIDI file coverage for empty-track and zero-event
+  round-trips, plus multi-track program-change, pitch-bend, and note-on
+  readback. Local validation: no-GPU configure,
+  `pulp-test-midi` target build, direct Catch2 tag
+  `[midi][file][issue-645]` passed with `19` assertions in `2` test
+  cases, focused CTest `MidiFile` passed `5/5`, `git diff --check`
+  clean, skill sync clean, and version bump report says no bump needed.
+  The PR is labeled `codecov` and is using the direct GitHub/Namespace
+  path.
 
 Local Phase 3 draft worktrees:
 
@@ -276,7 +296,7 @@ Local Phase 3 draft worktrees:
 - `#646` texture-atlas render worktree
   `/Users/danielraffel/Code/pulp-render-texture-atlas-coverage-646`,
   branch `feature/render-texture-atlas-coverage-646`, commit
-  `50012c04`; open as PR `#801`.
+  `325485bc`; open as PR `#801`.
 - `#643` CLI-create shellout worktree
   `/Users/danielraffel/Code/pulp-cli-create-coverage-643`, branch
   `feature/cli-create-coverage-643`, commit `222d0f88`; open as PR
@@ -301,6 +321,10 @@ Local Phase 3 draft worktrees:
   `/Users/danielraffel/Code/pulp-audio-channel-set-coverage-640`,
   branch `feature/audio-channel-set-coverage-640`, commit `89b969c9`;
   open as PR `#807`.
+- `#645` MIDI file edge round-trip worktree
+  `/Users/danielraffel/Code/pulp-midi-file-coverage-645`, branch
+  `feature/midi-file-coverage-645`, commit `d02e853e`; open as PR
+  `#808`.
 
 Open supporting PR:
 
@@ -321,11 +345,11 @@ Local environment note:
 Next recovery actions:
 
 1. Keep `#774` docs-only and let its latest status-update checks drain.
-2. Monitor `#801`, `#802`, `#803`, `#804`, `#805`, `#806`, and `#807`
+2. Monitor `#801`, `#802`, `#803`, `#804`, `#805`, `#806`, `#807`, and `#808`
    and address any Codecov, build, sanitizer, or Namespace feedback.
-3. If `#801`, `#802`, `#803`, `#804`, `#805`, `#806`, or `#807` is green
-   but GitHub reports it behind `main`, rebase that branch onto
-   `origin/main`, push with lease, and let checks rerun.
+3. If any open Phase 3 PR is green but GitHub reports it behind `main`,
+   rebase that branch onto `origin/main`, push with lease, and let
+   checks rerun.
 4. Continue Phase 3 from the tranche issues below, prioritizing
    represented high-miss files over adding new perimeter lanes.
 
