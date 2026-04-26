@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-26 17:08 EDT
+Last reviewed: 2026-04-26 17:28 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -145,16 +145,10 @@ Merged after the Phase 1 closeout / `#723` baseline:
 - `#815` MPE tracker edge-path coverage -> `019130bd`
 - `#816` MIDI running-status parser edge coverage -> `c9620a65`
 - `#818` MPE synth voice / allocator coverage -> `3d4560d1`
+- `#817` UMP conversion edge coverage -> `a38216fd`
 
 Open Phase 3 PRs:
 
-- `#817` UMP conversion edge coverage for `#645`, branch
-  `feature/midi-ump-conversion-coverage-645`, head `31a53432`; opened
-  from `main` at `957a0735`, then updated with scan-cache temp-file
-  isolation after macOS ASan exposed a parallel CTest collision. `shipyard
-  pr` was attempted first but stopped before PR creation because the SSH
-  `windows` backend timed out, so this tranche is using the
-  GitHub/Namespace path instead of skipping that lane.
 - `#819` MIDI keyboard/sequence edge coverage for `#645`, branch
   `feature/midi-keyboard-sequence-coverage-645`, head `60676709`;
   opened from `main` at `019130bd`. This tranche also uses the
@@ -171,10 +165,16 @@ Open Phase 3 PRs:
   GitHub/Namespace path while the SSH `windows` target remains
   unreachable.
 - `#822` audio file helper edge coverage for `#640`, branch
-  `feature/audio-file-helper-coverage-640`, head `f4e59d2b`; opened
-  from `main` at `c9620a65`. This tranche also uses the
+  `feature/audio-file-helper-coverage-640`, head `8aa7a78d`; opened
+  from `main` at `c9620a65` and updated after the first macOS UBSan run
+  exposed a real `float_to_int32` endpoint conversion overflow. This
+  tranche also uses the
   GitHub/Namespace path while the SSH `windows` target remains
   unreachable.
+- `#823` platform helper edge coverage for `#640`, branch
+  `feature/platform-helper-coverage-640`, head `6ec4ff2e`; opened from
+  `main` at `3d4560d1`. This tranche also uses the GitHub/Namespace path
+  while the SSH `windows` target remains unreachable.
 
 Local Phase 3 draft worktrees:
 
@@ -329,7 +329,8 @@ Local Phase 3 draft worktrees:
 - `#645` MIDI UMP conversion worktree
   `/Users/danielraffel/Code/pulp-midi-ump-conversion-coverage-645`,
   branch `feature/midi-ump-conversion-coverage-645`, commit `31a53432`;
-  open as PR `#817`.
+  merged via PR `#817` as `a38216fd`. The remote branch was deleted
+  after merge.
   Scope: test-only coverage for velocity-zero note-on aliasing,
   program-change fallback packets, group masking, sample-offset
   preservation, MIDI 2 edge-value down-conversion, skipped packets
@@ -410,21 +411,42 @@ Local Phase 3 draft worktrees:
   and version-bump report.
 - `#640` audio file helper worktree
   `/Users/danielraffel/Code/pulp-audio-file-helper-coverage-640`,
-  branch `feature/audio-file-helper-coverage-640`, commit `f4e59d2b`;
+  branch `feature/audio-file-helper-coverage-640`, commit `8aa7a78d`;
   open as PR `#822`.
-  Scope: test-only coverage for packed int24 conversion, int32 full-scale
+  Scope: coverage for packed int24 conversion, int32 full-scale
   conversion, float-to-int32 clamping, zero-count conversion no-ops, CHOC
   WAV helper output via RIFF chunk parsing, malformed WAV rejection,
   invalid OGG registry dispatch, `Buffer` resize/view ownership, and
-  `AudioProcessLoadMeasurer` smoothing/zero-available-time guards. Local
-  validation: no-GPU/no-examples configure, `pulp-test-audio-file`,
-  `pulp-test-audio`, and `pulp-test-load-measurer` build, direct
-  `[issue-640]` audio-file run passed `217` assertions in `11` cases,
-  full audio-file binary passed `450` assertions in `26` cases, full
-  audio binary passed `586` assertions in `8` cases, full load-measurer
-  binary passed `20` assertions in `6` cases, focused CTest passed
-  `11/11`, `git diff --check`, skill-sync report, and version-bump
+  `AudioProcessLoadMeasurer` smoothing/zero-available-time guards.
+  Follow-up `8aa7a78d` fixes a production `float_to_int32` UBSan issue
+  by handling `+/-1` endpoints explicitly and using double precision for
+  the midrange cast. Local validation: no-GPU/no-examples configure,
+  `pulp-test-audio-file`, `pulp-test-audio`, and
+  `pulp-test-load-measurer` build, direct `[issue-640]` audio-file run
+  passed `217` assertions in `11` cases, full audio-file binary passed
+  `450` assertions in `26` cases, full audio binary passed `586`
+  assertions in `8` cases, full load-measurer binary passed `20`
+  assertions in `6` cases, focused CTest passed `11/11`, local UBSan
+  focused CTest for `sample conversion handles packed 24-bit and 32-bit
+  edges` passed, `git diff --check`, skill-sync report, and version-bump
   report.
+- `#640` platform helper worktree
+  `/Users/danielraffel/Code/pulp-platform-helper-coverage-640`, branch
+  `feature/platform-helper-coverage-640`, commit `6ec4ff2e`; open as PR
+  `#823`.
+  Scope: test-only coverage for file-dialog no-handler backend failure
+  paths, popup-menu item metadata and non-Apple stub behavior, audio
+  excerpt value/default helpers, and non-Apple `AudioWorkgroup` fallback
+  idempotency. Local validation: no-GPU/no-examples configure,
+  `pulp-test-file-dialog`, `pulp-test-audio-excerpt`, and
+  `pulp-test-workgroup` build, direct `[issue-640]` file-dialog run
+  passed `13` assertions in `1` case, direct
+  `[audio][excerpt][issue-640]` audio-excerpt run passed `14`
+  assertions in `1` case, full workgroup binary passed `4` assertions in
+  `5` cases, full file-dialog binary passed `15` assertions in `3`
+  cases, full audio-excerpt binary passed `33` assertions in `5` cases,
+  focused CTest passed `9/9`, `git diff --check`, skill-sync report, and
+  version-bump report.
 
 Open supporting PR:
 
@@ -433,7 +455,8 @@ Open supporting PR:
   tracker changes; use the PR head SHA in GitHub as the live value.
   The branch has been rebased onto `origin/main` after `#813` merged,
   updated after `#816` merged, `#817` was repaired, `#820` opened,
-  `#821` opened, `#822` opened, and `#818` merged, and remains docs-only.
+  `#821` opened, `#822` opened, `#818` merged, `#823` opened, `#817`
+  merged, and `#822` was repaired, and remains docs-only.
 
 Local environment note:
 
@@ -452,21 +475,21 @@ Local environment note:
 Next recovery actions:
 
 1. Keep `#774` docs-only and let its latest status-update checks drain.
-2. Monitor `#817` cloud checks; if a required lane fails, debug in
-   `/Users/danielraffel/Code/pulp-midi-ump-conversion-coverage-645`,
-   patch, validate locally, and push with lease.
-3. Monitor `#819` cloud checks; if a required lane fails, debug in
+2. Monitor `#819` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-midi-keyboard-sequence-coverage-645`,
    patch, validate locally, and push with lease.
-4. Monitor `#820` cloud checks; if a required lane fails, debug in
+3. Monitor `#820` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-signal-spectrogram-coverage-645`,
    patch, validate locally, and push with lease.
-5. Monitor `#821` cloud checks; if a required lane fails, debug in
+4. Monitor `#821` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-audio-reader-helpers-coverage-640`,
    patch, validate locally, and push with lease.
-6. Monitor `#822` cloud checks; if a required lane fails, debug in
+5. Monitor `#822` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-audio-file-helper-coverage-640`,
    patch, validate locally, and push with lease.
+6. Monitor `#823` cloud checks; if a required lane fails, debug in
+   `/Users/danielraffel/Code/pulp-platform-helper-coverage-640`, patch,
+   validate locally, and push with lease.
 7. If any open Phase 3 PR is green but GitHub reports it behind `main`,
    rebase that branch onto `origin/main`, push with lease, and let
    checks rerun.
