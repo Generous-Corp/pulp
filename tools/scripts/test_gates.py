@@ -214,6 +214,12 @@ class GateFixtureTests(unittest.TestCase):
     def tearDown(self) -> None:
         shutil.rmtree(self.tmp, ignore_errors=True)
 
+    def _import_gate_module(self, name: str):
+        scripts = str(REPO_ROOT / "tools" / "scripts")
+        if scripts not in sys.path:
+            sys.path.insert(0, scripts)
+        return __import__(name)
+
     # ── version_bump_check fixtures ────────────────────────────────────
 
     def test_new_public_header_flags_minor(self) -> None:
@@ -528,6 +534,161 @@ class GateFixtureTests(unittest.TestCase):
         # override must not conjure a bump for it.
         self.assertIn("[sdk]", out)
         self.assertIn("no bump needed", out)
+
+    def test_version_file_helpers_cover_supported_kinds(self) -> None:
+        """Direct coverage for the version-file readers/writers that
+        integration fixtures only hit through the CMake + JSON paths."""
+        vbc = self._import_gate_module("version_bump_check")
+
+        cases = [
+            (
+                "package.json",
+                '{"name": "demo", "version": "1.2.3"}\n',
+                vbc.VersionFile("package.json", "json_field", "version"),
+                "1.2.3",
+                "2.0.0",
+                '"version": "2.0.0"',
+            ),
+            (
+                "pyproject.toml",
+                '[project]\nname = "demo"\nversion = "0.4.0"\n',
+                vbc.VersionFile("pyproject.toml", "pyproject_version"),
+                "0.4.0",
+                "0.5.0",
+                'version = "0.5.0"',
+            ),
+            (
+                "pkg/__init__.py",
+                '__version__ = "3.2.1"\n',
+                vbc.VersionFile("pkg/__init__.py", "python_dunder_version"),
+                "3.2.1",
+                "3.2.2",
+                '__version__ = "3.2.2"',
+            ),
+            (
+                "VERSION.txt",
+                "tool_version = 7.8.9\n",
+                vbc.VersionFile("VERSION.txt", "regex",
+                                pattern=r"tool_version\s*=\s*(\d+\.\d+\.\d+)"),
+                "7.8.9",
+                "8.0.0",
+                "tool_version = 8.0.0",
+            ),
+        ]
+
+        for rel, text, vf, old, new, expected in cases:
+            self.f.write(rel, text)
+            self.assertEqual(vbc.read_version(self.tmp, vf), old)
+            self.assertTrue(vbc.write_version(self.tmp, vf, new))
+            written = (self.tmp / rel).read_text()
+            self.assertIn(expected, written)
+
+        self.f.write("bad.json", "{not json}\n")
+        self.assertIsNone(
+            vbc.read_version(self.tmp, vbc.VersionFile("bad.json", "json_field", "version"))
+        )
+        self.assertFalse(
+            vbc.write_version(
+                self.tmp,
+                vbc.VersionFile("missing.toml", "pyproject_version"),
+                "1.0.0",
+            )
+        )
+
+    def test_version_arithmetic_conventional_and_trailer_helpers(self) -> None:
+        vbc = self._import_gate_module("version_bump_check")
+
+        self.assertEqual(vbc.bump_version("1.2.3", "major"), "2.0.0")
+        self.assertEqual(vbc.bump_version("1.2.3", "minor"), "1.3.0")
+        self.assertEqual(vbc.bump_version("1.2.3", "patch"), "1.2.4")
+        self.assertEqual(vbc.bump_version("1.2.3", "none"), "1.2.3")
+        self.assertEqual(vbc.bump_version("not-semver", "major"), "not-semver")
+
+        subjects = {
+            "feat(cli): add command": "minor",
+            "fix(runtime): repair edge case": "patch",
+            "perf(audio): avoid copy": "patch",
+            "feat!: remove old API": "major",
+            "BREAKING: change API": "major",
+            "docs: refresh guide": "none",
+            "release train": "none",
+        }
+        for subject, level in subjects.items():
+            self.assertEqual(vbc.classify_conventional(subject), level)
+
+        trailers = {"version-bump": [
+            'sdk=none reason="invalid and ignored"',
+            'plugin=skip reason="not shipping plugin"',
+            'sdk=minor reason="public API"',
+        ]}
+        self.assertEqual(
+            vbc.surface_trailer_override(trailers, "Version-Bump", "sdk"),
+            "minor",
+        )
+        self.assertEqual(
+            vbc.surface_trailer_override(trailers, "Version-Bump", "plugin"),
+            "skip",
+        )
+        self.assertIsNone(
+            vbc.surface_trailer_override(
+                {"version-bump": ['sdk=none reason="invalid"']},
+                "Version-Bump",
+                "sdk",
+            )
+        )
+
+    def test_skill_sync_helper_paths_trailers_and_self_check(self) -> None:
+        ssc = self._import_gate_module("skill_sync_check")
+
+        trailers = {"skill-update": [
+            'skip skill=ci reason="workflow-only change"',
+            "skip skill=cli-maintenance reason=mechanical",
+            'note skill=hosting reason="not a skip"',
+            "skip",
+        ]}
+        self.assertEqual(
+            ssc.parse_skill_update_trailer(trailers, "Skill-Update"),
+            {
+                "ci": "workflow-only change",
+                "cli-maintenance": "mechanical",
+            },
+        )
+
+        self.assertEqual(
+            ssc.filter_generated(
+                ["build/foo.cpp", "src/foo.cpp", "sub/foo.generated.cpp"],
+                ["build/**", "**/*.generated.*"],
+            ),
+            ["src/foo.cpp"],
+        )
+
+        errors = ssc.self_check(
+            ssc.SkillMap({"ci": [], "missing": []}),
+            self.tmp / ".agents" / "skills",
+        )
+        self.assertTrue(any("cli-maintenance" in e for e in errors), msg=errors)
+        self.assertTrue(any("missing" in e for e in errors), msg=errors)
+
+        findings = ssc.compute_findings(
+            changed=["ci/build.yml", ".agents/skills/ci/nested/SKILL.md"],
+            skill_map=ssc.SkillMap({"ci": ["ci/**"]}),
+            skills_dir=self.tmp / ".agents" / "skills",
+            repo=self.tmp,
+            bypasses={},
+        )
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0].skill, "ci")
+        self.assertTrue(findings[0].skill_md_modified)
+
+        bypassed = ssc.compute_findings(
+            changed=["tools/cli/cmd_foo.cpp"],
+            skill_map=ssc.SkillMap({"cli-maintenance": ["tools/cli/**"]}),
+            skills_dir=self.tmp / ".agents" / "skills",
+            repo=self.tmp,
+            bypasses={"cli-maintenance": "generated rename"},
+        )
+        self.assertEqual(len(bypassed), 1)
+        self.assertEqual(bypassed[0].bypass_reason, "generated rename")
 
 
 # ── Entry ──────────────────────────────────────────────────────────────
