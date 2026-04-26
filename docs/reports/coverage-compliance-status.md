@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-26 15:53 EDT
+Last reviewed: 2026-04-26 16:04 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -164,6 +164,11 @@ Open Phase 3 PRs:
   stopped before PR creation because the SSH `windows` backend timed
   out, so this tranche is using the GitHub/Namespace path instead of
   skipping that lane.
+- `#818` MPE synth voice / allocator edge coverage for `#645`, branch
+  `feature/midi-mpe-synth-voice-coverage-645`, head `21eb74e1`; opened
+  from `main` at `957a0735`. This tranche is also using the
+  GitHub/Namespace path while the SSH `windows` target remains
+  unreachable.
 
 Local Phase 3 draft worktrees:
 
@@ -329,6 +334,19 @@ Local Phase 3 draft worktrees:
   broader CTest regex was intentionally not used for the final summary
   because the lite build exposes `*_NOT_BUILT_*` placeholder tests that
   match generic `ump` patterns.
+- `#645` MPE synth voice worktree
+  `/Users/danielraffel/Code/pulp-midi-mpe-synth-voice-coverage-645`,
+  branch `feature/midi-mpe-synth-voice-coverage-645`, commit
+  `21eb74e1`; open as PR `#818`.
+  Scope: test-only coverage for `MpeSynthVoice` smoothing clamp,
+  reset/release state, timbre routing, all non-oldest `MpeVoiceAllocator`
+  steal policies, unknown expression events, `reset_all`, and
+  zero-polyphony dispatch tolerance. Local validation: no-GPU/no-examples
+  configure, `pulp-test-mpe-synth-voice` build, direct
+  `[midi][mpe][issue-645]` passed `51` assertions in `4` cases, full
+  binary passed `75` assertions in `12` cases, focused CTest passed
+  `12/12`, `git diff --check`, skill-sync report, and version-bump
+  report.
 
 Open supporting PR:
 
@@ -369,10 +387,13 @@ Next recovery actions:
 5. Monitor `#817` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-midi-ump-conversion-coverage-645`,
    patch, validate locally, and push with lease.
-6. If any open Phase 3 PR is green but GitHub reports it behind `main`,
+6. Monitor `#818` cloud checks; if a required lane fails, debug in
+   `/Users/danielraffel/Code/pulp-midi-mpe-synth-voice-coverage-645`,
+   patch, validate locally, and push with lease.
+7. If any open Phase 3 PR is green but GitHub reports it behind `main`,
    rebase that branch onto `origin/main`, push with lease, and let
    checks rerun.
-7. Continue Phase 3 from the tranche issues below, prioritizing
+8. Continue Phase 3 from the tranche issues below, prioritizing
    represented high-miss files over adding new perimeter lanes.
 
 ## Phase 1 corrected baseline
