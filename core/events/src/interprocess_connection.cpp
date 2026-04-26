@@ -2,9 +2,11 @@
 #include <pulp/runtime/named_pipe.hpp>
 #include <pulp/runtime/socket.hpp>
 #include <charconv>
+#include <chrono>
 #include <cstring>
 #include <mutex>
 #include <optional>
+#include <thread>
 
 namespace pulp::events {
 
@@ -280,6 +282,7 @@ bool InterprocessConnectionServer::start(std::string_view name, IpcTransport tra
         server_impl_->listen_socket.create(SocketType::TCP);
         if (!server_impl_->listen_socket.bind(host, *port)) return false;
         if (!server_impl_->listen_socket.listen(5)) return false;
+        if (!server_impl_->listen_socket.set_non_blocking(true)) return false;
     }
 
     running_.store(true);
@@ -287,7 +290,11 @@ bool InterprocessConnectionServer::start(std::string_view name, IpcTransport tra
         while (running_.load()) {
             if (server_impl_->transport == IpcTransport::Socket) {
                 auto client_sock = server_impl_->listen_socket.accept();
-                if (!client_sock) continue;
+                if (!client_sock) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+                    continue;
+                }
+                (void)client_sock->set_non_blocking(false);
 
                 auto conn = std::make_unique<InterprocessConnection>();
                 // Inject the accepted socket via friend access

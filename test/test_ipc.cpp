@@ -102,6 +102,17 @@ TEST_CASE("IPC socket server rejects malformed listen endpoints",
     REQUIRE(conn.state() == IpcState::Error);
 }
 
+TEST_CASE("IPC socket server stops while waiting for a client",
+          "[events][ipc][socket]") {
+    InterprocessConnectionServer server;
+    auto port = start_socket_server_on_loopback(server);
+    REQUIRE(port.has_value());
+    REQUIRE(server.is_running());
+
+    server.stop();
+    REQUIRE_FALSE(server.is_running());
+}
+
 TEST_CASE("IPC socket server accepts client and exchanges framed messages",
           "[events][ipc][socket]") {
     InterprocessConnectionServer server;
