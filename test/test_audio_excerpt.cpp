@@ -71,3 +71,36 @@ TEST_CASE("excerpt windows report seconds from sample rate", "[audio][excerpt]")
     REQUIRE_THAT(result.windows[1].start_seconds(), WithinAbs(0.5, 0.0001));
     REQUIRE_THAT(result.windows[1].duration_seconds(), WithinAbs(0.5, 0.0001));
 }
+
+TEST_CASE("excerpt value types expose zero-rate and summary defaults",
+          "[audio][excerpt][issue-640]") {
+    ExcerptWindow window;
+    window.source_path = "loop.wav";
+    window.start_frame = 480;
+    window.frame_count = 120;
+
+    REQUIRE(window.end_frame() == 600);
+    REQUIRE_THAT(window.start_seconds(), WithinAbs(0.0, 0.0001));
+    REQUIRE_THAT(window.duration_seconds(), WithinAbs(0.0, 0.0001));
+
+    window.sample_rate = 24000;
+    REQUIRE_THAT(window.start_seconds(), WithinAbs(0.02, 0.0001));
+    REQUIRE_THAT(window.duration_seconds(), WithinAbs(0.005, 0.0001));
+
+    ExcerptCandidate candidate;
+    candidate.window = window;
+    candidate.score = 0.75;
+    candidate.backend = "deterministic";
+    candidate.model_id = "hash-v1";
+    REQUIRE(candidate.window.source_path == "loop.wav");
+    REQUIRE(candidate.score == 0.75);
+    REQUIRE(candidate.backend == "deterministic");
+    REQUIRE(candidate.model_id == "hash-v1");
+
+    ExcerptSearchSummary summary;
+    REQUIRE(summary.query_text.empty());
+    REQUIRE(summary.input_file_count == 0);
+    REQUIRE(summary.total_frames_scanned == 0);
+    REQUIRE(summary.enumerated_window_count == 0);
+    REQUIRE(summary.ranked_candidate_count == 0);
+}

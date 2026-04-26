@@ -37,3 +37,19 @@ TEST_CASE("AudioWorkgroup join without workgroup uses fallback", "[audio][workgr
         REQUIRE_FALSE(wg.is_joined());
     }
 }
+
+#if !defined(__APPLE__)
+TEST_CASE("AudioWorkgroup non-Apple fallback join is idempotent",
+          "[audio][workgroup][issue-640]") {
+    AudioWorkgroup wg;
+    REQUIRE(wg.join_from_audio_thread());
+    REQUIRE(wg.is_joined());
+    REQUIRE(wg.join_from_audio_thread());
+    REQUIRE(wg.is_joined());
+
+    wg.leave();
+    REQUIRE_FALSE(wg.is_joined());
+    wg.leave();
+    REQUIRE_FALSE(wg.is_joined());
+}
+#endif
