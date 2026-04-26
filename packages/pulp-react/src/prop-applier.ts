@@ -110,6 +110,14 @@ function applyOne(id: string, type: string, key: string, value: unknown): void {
         case 'opacity':      return call('setOpacity', id, value as number);
         case 'visible':      return call('setVisible', id, value as boolean);
 
+        // CSS-style positioning (pulp #779 follow-up; matches setPosition
+        // + setTop/setLeft/setRight/setBottom on the bridge).
+        case 'position':     return call('setPosition', id, value as string);
+        case 'top':          return call('setTop', id, value as number);
+        case 'left':         return call('setLeft', id, value as number);
+        case 'right':        return call('setRight', id, value as number);
+        case 'bottom':       return call('setBottom', id, value as number);
+
         // Text
         case 'text':       return call('setText', id, String(value));
         case 'textColor':  return call('setTextColor', id, value as string);
