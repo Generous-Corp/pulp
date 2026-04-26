@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-26 17:54 EDT
+Last reviewed: 2026-04-26 18:03 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -173,6 +173,10 @@ Open Phase 3 PRs:
   from `main` at `7a646f33`. This tranche also uses the
   GitHub/Namespace path while the SSH `windows` target remains
   unreachable.
+- `#826` OGG reader edge coverage for `#640`, branch
+  `feature/audio-ogg-reader-coverage-640`, head `6b721c22`; opened from
+  `main` at `1a1b7f07`. This tranche also uses the GitHub/Namespace path
+  while the SSH `windows` target remains unreachable.
 
 Local Phase 3 draft worktrees:
 
@@ -483,6 +487,19 @@ Local Phase 3 draft worktrees:
   full binaries passed `2927` assertions in `23` cases and `75`
   assertions in `34` cases, focused CTest passed `7/7`,
   `git diff --check`, skill-sync report, and version-bump report.
+- `#640` OGG reader worktree
+  `/Users/danielraffel/Code/pulp-audio-ogg-reader-coverage-640`,
+  branch `feature/audio-ogg-reader-coverage-640`, commit `6b721c22`;
+  open as PR `#826`.
+  Scope: dedicated `pulp-test-ogg-reader` target covering direct OGG
+  reader factory construction, `.ogg` / `.oga` extension support,
+  unsupported extension behavior, format-name reporting, and
+  missing/malformed input failure paths. This intentionally avoids
+  `test_audio_file.cpp` while `#822` is open. Local validation:
+  no-GPU/no-examples configure, `pulp-test-ogg-reader` build, direct
+  `[audio][ogg][issue-640]` run passed `12` assertions in `2` cases,
+  full binary passed `12` assertions in `2` cases, focused CTest passed
+  `2/2`, `git diff --check`, skill-sync report, and version-bump report.
 
 Open supporting PR:
 
@@ -493,7 +510,8 @@ Open supporting PR:
   updated after `#816` merged, `#817` was repaired, `#820` opened,
   `#821` opened, `#822` opened, `#818` merged, `#823` opened, `#817`
   merged, `#822` was repaired, `#824` opened, `#821` merged, and `#819`
-  merged, `#825` opened, and `#820` merged, and remains docs-only.
+  merged, `#825` opened, `#820` merged, and `#826` opened, and remains
+  docs-only.
 
 Local environment note:
 
@@ -524,10 +542,13 @@ Next recovery actions:
 5. Monitor `#825` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-signal-dsp-helper-coverage-645`,
    patch, validate locally, and push with lease.
-6. If any open Phase 3 PR is green but GitHub reports it behind `main`,
+6. Monitor `#826` cloud checks; if a required lane fails, debug in
+   `/Users/danielraffel/Code/pulp-audio-ogg-reader-coverage-640`,
+   patch, validate locally, and push with lease.
+7. If any open Phase 3 PR is green but GitHub reports it behind `main`,
    rebase that branch onto `origin/main`, push with lease, and let
    checks rerun.
-7. Continue Phase 3 from the tranche issues below, prioritizing
+8. Continue Phase 3 from the tranche issues below, prioritizing
    represented high-miss files over adding new perimeter lanes.
 
 ## Phase 1 corrected baseline
