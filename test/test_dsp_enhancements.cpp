@@ -146,6 +146,62 @@ TEST_CASE("Matrix4 translation", "[dsp][matrix]") {
     REQUIRE_THAT(result.z, WithinAbs(3.0f, 1e-5));
 }
 
+TEST_CASE("Matrix zero, scalar multiply, and add compose element-wise",
+          "[dsp][matrix][issue-645]") {
+    auto zero = Matrix3::zero();
+    REQUIRE(zero == Matrix3{});
+
+    auto a = Matrix3::identity();
+    a(0, 1) = 2.0f;
+    a(2, 0) = -1.0f;
+
+    auto doubled = a * 2.0f;
+    REQUIRE_THAT(doubled(0, 0), WithinAbs(2.0f, 1e-5));
+    REQUIRE_THAT(doubled(0, 1), WithinAbs(4.0f, 1e-5));
+    REQUIRE_THAT(doubled(2, 0), WithinAbs(-2.0f, 1e-5));
+
+    auto sum = a + doubled;
+    REQUIRE_THAT(sum(0, 0), WithinAbs(3.0f, 1e-5));
+    REQUIRE_THAT(sum(0, 1), WithinAbs(6.0f, 1e-5));
+    REQUIRE_THAT(sum(2, 0), WithinAbs(-3.0f, 1e-5));
+    REQUIRE_FALSE(sum == doubled);
+}
+
+TEST_CASE("Matrix3 determinant covers non-triangular matrices",
+          "[dsp][matrix][issue-645]") {
+    Matrix3 m;
+    m(0, 0) = 6.0f;  m(0, 1) = 1.0f;  m(0, 2) = 1.0f;
+    m(1, 0) = 4.0f;  m(1, 1) = -2.0f; m(1, 2) = 5.0f;
+    m(2, 0) = 2.0f;  m(2, 1) = 8.0f;  m(2, 2) = 7.0f;
+
+    REQUIRE_THAT(determinant(m), WithinAbs(-306.0f, 1e-5));
+}
+
+TEST_CASE("Matrix4 scale and rotations transform vectors",
+          "[dsp][matrix][issue-645]") {
+    constexpr float half_pi = 1.57079632679f;
+
+    auto scaled = transform(scale_matrix(2.0f, 3.0f, 4.0f), Vec3{1.0f, -2.0f, 0.5f});
+    REQUIRE_THAT(scaled.x, WithinAbs(2.0f, 1e-5));
+    REQUIRE_THAT(scaled.y, WithinAbs(-6.0f, 1e-5));
+    REQUIRE_THAT(scaled.z, WithinAbs(2.0f, 1e-5));
+
+    auto around_x = transform(rotation_x(half_pi), Vec3{0.0f, 1.0f, 0.0f});
+    REQUIRE_THAT(around_x.x, WithinAbs(0.0f, 1e-5));
+    REQUIRE_THAT(around_x.y, WithinAbs(0.0f, 1e-5));
+    REQUIRE_THAT(around_x.z, WithinAbs(1.0f, 1e-5));
+
+    auto around_y = transform(rotation_y(half_pi), Vec3{0.0f, 0.0f, 1.0f});
+    REQUIRE_THAT(around_y.x, WithinAbs(1.0f, 1e-5));
+    REQUIRE_THAT(around_y.y, WithinAbs(0.0f, 1e-5));
+    REQUIRE_THAT(around_y.z, WithinAbs(0.0f, 1e-5));
+
+    auto around_z = transform(rotation_z(half_pi), Vec3{1.0f, 0.0f, 0.0f});
+    REQUIRE_THAT(around_z.x, WithinAbs(0.0f, 1e-5));
+    REQUIRE_THAT(around_z.y, WithinAbs(1.0f, 1e-5));
+    REQUIRE_THAT(around_z.z, WithinAbs(0.0f, 1e-5));
+}
+
 // ── SpecialFunctions ────────────────────────────────────────────────────
 
 TEST_CASE("sinc function", "[dsp][special]") {
