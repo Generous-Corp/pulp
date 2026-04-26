@@ -281,6 +281,101 @@ TEST_CASE("pulp help output lists the top-level subcommands",
     }
 }
 
+TEST_CASE("pulp create scaffolds a no-build app project with Android files",
+          "[cli][shellout][create][issue-643]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    auto base = fs::temp_directory_path() /
+                ("pulp-shellout-create-app-" +
+                 std::to_string(std::chrono::steady_clock::now()
+                                    .time_since_epoch().count()));
+    auto home = base / "home";
+    auto project = base / "out" / "neon-drum";
+    fs::create_directories(home);
+    fs::create_directories(project.parent_path());
+    {
+        std::ofstream cfg(home / "config.toml");
+        cfg << "[update]\nmode = \"off\"\n";
+    }
+
+    pulp_setenv("PULP_HOME", home.string().c_str(), 1);
+    pulp_setenv("PULP_UPDATE_CHECK_DISABLED", "1", 1);
+    auto r = run_pulp({"create", "Neon Drum", "--type", "app",
+                       "--targets", "android,standalone",
+                       "--output", project.string(), "--no-build", "--ci"},
+                      30000);
+    pulp_unsetenv("PULP_UPDATE_CHECK_DISABLED");
+    pulp_unsetenv("PULP_HOME");
+
+    const bool has_header = fs::exists(project / "neon_drum.hpp");
+    const bool has_main = fs::exists(project / "main.cpp");
+    const bool has_test = fs::exists(project / "test_neon_drum.cpp");
+    const bool has_cmake = fs::exists(project / "CMakeLists.txt");
+    const bool has_toml = fs::exists(project / "pulp.toml");
+    const bool has_android_settings = fs::exists(project / "android" / "settings.gradle.kts");
+    const bool has_android_activity =
+        fs::exists(project / "android" / "app" / "src" / "main" / "java" /
+                   "neon_drum" / "MainActivity.kt");
+    const auto header = read_file(project / "neon_drum.hpp");
+    const auto main_cpp = read_file(project / "main.cpp");
+    const auto cmake = read_file(project / "CMakeLists.txt");
+    const auto toml = read_file(project / "pulp.toml");
+    const auto registry = read_file(home / "projects.json");
+
+    fs::remove_all(base);
+
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(has_header);
+    REQUIRE(has_main);
+    REQUIRE(has_test);
+    REQUIRE(has_cmake);
+    REQUIRE(has_toml);
+    REQUIRE(has_android_settings);
+    REQUIRE(has_android_activity);
+    REQUIRE(header.find("class NeonDrum") != std::string::npos);
+    REQUIRE(header.find("namespace neon_drum") != std::string::npos);
+    REQUIRE(header.find("com.pulp.neon_drum") != std::string::npos);
+    REQUIRE(main_cpp.find("neon_drum::create_neon_drum") != std::string::npos);
+    REQUIRE(cmake.find("pulp_add_app(NeonDrum") != std::string::npos);
+    REQUIRE(toml.find("sdk_checkout") != std::string::npos);
+    REQUIRE(registry.find("Neon Drum") != std::string::npos);
+    REQUIRE(registry.find("neon-drum") != std::string::npos);
+}
+
+TEST_CASE("pulp create rejects invalid type before scaffolding",
+          "[cli][shellout][create][issue-643]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    auto base = fs::temp_directory_path() /
+                ("pulp-shellout-create-invalid-" +
+                 std::to_string(std::chrono::steady_clock::now()
+                                    .time_since_epoch().count()));
+    auto home = base / "home";
+    auto project = base / "out" / "bad-type";
+    fs::create_directories(home);
+    {
+        std::ofstream cfg(home / "config.toml");
+        cfg << "[update]\nmode = \"off\"\n";
+    }
+
+    pulp_setenv("PULP_HOME", home.string().c_str(), 1);
+    pulp_setenv("PULP_UPDATE_CHECK_DISABLED", "1", 1);
+    auto r = run_pulp({"create", "Bad Type", "--type", "potato",
+                       "--output", project.string(), "--no-build", "--ci"},
+                      10000);
+    pulp_unsetenv("PULP_UPDATE_CHECK_DISABLED");
+    pulp_unsetenv("PULP_HOME");
+
+    const bool project_exists = fs::exists(project);
+    fs::remove_all(base);
+
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 1);
+    REQUIRE_FALSE(project_exists);
+    REQUIRE(r.stderr_output.find("--type must be") != std::string::npos);
+}
+
 // #51 / #356: `pulp validate --strict` is supposed to upgrade
 // skipped-because-missing-tool into a hard failure.
 //
