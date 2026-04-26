@@ -258,6 +258,22 @@ TEST_CASE("Android SDK discovery honors environment roots and latest tools", "[s
     REQUIRE(find_android_build_tool("missing-tool").empty());
 }
 
+TEST_CASE("Android SDK discovery compares tool revisions numerically", "[ship][android]") {
+    TempDir temp;
+    auto sdk = temp.path / "sdk";
+    fs::create_directories(sdk / "build-tools" / "9.0.0");
+    fs::create_directories(sdk / "build-tools" / "10.0.0");
+    fs::create_directories(sdk / "ndk" / "9.0.0" / "toolchains");
+    fs::create_directories(sdk / "ndk" / "10.0.0" / "toolchains");
+
+    ScopedEnvVar android_home("ANDROID_HOME", sdk.string());
+    ScopedUnsetEnvVar android_sdk_root("ANDROID_SDK_ROOT");
+    ScopedUnsetEnvVar android_ndk_home("ANDROID_NDK_HOME");
+
+    REQUIRE(android_build_tools_version() == "10.0.0");
+    REQUIRE(find_android_ndk() == sdk / "ndk" / "10.0.0");
+}
+
 TEST_CASE("Android SDK discovery falls back to SDK root and dedicated NDK home", "[ship][android]") {
     TempDir temp;
     auto sdk = make_fake_sdk(temp.path);

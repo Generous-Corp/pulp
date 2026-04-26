@@ -7,11 +7,16 @@
 #include <pulp/platform/child_process.hpp>
 
 #include <algorithm>
+#include <cctype>
+#include <cstdint>
 #include <cstdlib>
 #include <filesystem>
+#include <limits>
 #include <optional>
 #include <regex>
 #include <sstream>
+#include <string_view>
+#include <vector>
 
 namespace pulp::ship {
 namespace fs = std::filesystem;
@@ -78,6 +83,51 @@ static std::string shell_quote(const std::string& s) {
 
 static std::string shell_quote_path(const fs::path& path) {
     return "\"" + path.string() + "\"";
+}
+
+static std::uint64_t parse_android_revision_part(std::string_view part) {
+    if (part.empty()) return 0;
+
+    std::uint64_t value = 0;
+    for (unsigned char c : part) {
+        if (!std::isdigit(c)) return 0;
+        auto digit = static_cast<std::uint64_t>(c - '0');
+        if (value > (std::numeric_limits<std::uint64_t>::max() - digit) / 10)
+            return std::numeric_limits<std::uint64_t>::max();
+        value = value * 10 + digit;
+    }
+    return value;
+}
+
+static std::vector<std::uint64_t> android_revision_key(const fs::path& path) {
+    auto name = path.filename().string();
+    std::vector<std::uint64_t> key;
+
+    std::size_t start = 0;
+    while (start <= name.size()) {
+        auto end = name.find('.', start);
+        auto view = std::string_view(name);
+        auto part = end == std::string::npos
+            ? view.substr(start)
+            : view.substr(start, end - start);
+        key.push_back(parse_android_revision_part(part));
+        if (end == std::string::npos) break;
+        start = end + 1;
+    }
+
+    return key;
+}
+
+static bool android_revision_less(const fs::path& lhs, const fs::path& rhs) {
+    auto left = android_revision_key(lhs);
+    auto right = android_revision_key(rhs);
+    auto count = std::max(left.size(), right.size());
+    for (std::size_t i = 0; i < count; ++i) {
+        auto a = i < left.size() ? left[i] : 0;
+        auto b = i < right.size() ? right[i] : 0;
+        if (a != b) return a < b;
+    }
+    return lhs.filename().string() < rhs.filename().string();
 }
 
 static std::string shell_quote_arg(const std::string& arg) {
@@ -201,7 +251,7 @@ static fs::path find_latest_build_tools(const fs::path& sdk) {
     }
     if (versions.empty()) return {};
 
-    std::sort(versions.begin(), versions.end());
+    std::sort(versions.begin(), versions.end(), android_revision_less);
     return versions.back();
 }
 
@@ -225,7 +275,7 @@ fs::path find_android_ndk() {
             versions.push_back(entry.path());
     }
     if (versions.empty()) return {};
-    std::sort(versions.begin(), versions.end());
+    std::sort(versions.begin(), versions.end(), android_revision_less);
     return versions.back();
 }
 
