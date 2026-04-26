@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-26 13:37 EDT
+Last reviewed: 2026-04-26 13:54 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -232,6 +232,20 @@ Local Phase 3 draft worktrees:
   `/Users/danielraffel/Code/pulp-signal-fft-coverage-645`, branch
   `feature/signal-fft-coverage-645`, commit `11c83082`; merged via PR
   `#809` as `453bcec8`. The remote branch was deleted after merge.
+- `#643` CLI project-command dispatch worktree
+  `/Users/danielraffel/Code/pulp-cli-project-coverage-643`, branch
+  `feature/cli-project-coverage-643`, commit `3a2820bb`; local-only
+  draft, not opened as a PR yet while `#810` and `#774` drain. Scope:
+  direct `cmd_project.cpp` coverage for top-level help/no-arg/unknown
+  dispatch, bump option parsing, `--all` empty-registry handling,
+  registry-backed `--all --dry-run` reporting without undo files, a
+  single-project bump plus newest-batch undo round-trip, and undo
+  no-batch/missing-batch/malformed-batch diagnostics. Local validation:
+  no-GPU/no-examples configure, `pulp-test-cli-project-command` build,
+  `[cli][project-command][issue-643]` passed `75` assertions in `6`
+  cases, full binary passed `318` assertions in `22` cases, focused
+  CTest `cmd_project` passed `8/8`, `git diff --check`, skill-sync
+  report, and version-bump report.
 
 Open supporting PR:
 
