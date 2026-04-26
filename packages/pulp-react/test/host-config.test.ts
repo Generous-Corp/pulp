@@ -219,3 +219,39 @@ describe('HostConfig — event handlers', () => {
         unmount(root);
     });
 });
+
+import { useState as useStateHook, useEffect as useEffectHook } from 'react';
+
+describe('HostConfig — function components with hooks', () => {
+    it('renders a function component that uses useState', () => {
+        const root = createRoot('root');
+        function Counter() {
+            const [n] = useStateHook(42);
+            return createElement(Label, {}, String(n));
+        }
+        // Should not throw. If the dispatcher isn't being pushed by the
+        // reconciler before the component runs, useState's
+        // U.current.useState(...) deref will throw "cannot read property
+        // 'useState' of null" — exactly the spectr#28 standalone error.
+        expect(() => render(createElement(Counter, {}), root)).not.toThrow();
+        const labelCalls = bridge.calls.filter(c => c.fn === 'createLabel');
+        expect(labelCalls.length).toBeGreaterThan(0);
+        // The text "42" should be on the first createLabel call.
+        expect(labelCalls[0]?.args[1]).toBe('42');
+        unmount(root);
+    });
+
+    it('renders a function component using useState + useEffect', () => {
+        const root = createRoot('root');
+        let effectFired = false;
+        function App() {
+            const [text] = useStateHook('hello');
+            useEffectHook(() => { effectFired = true; }, []);
+            return createElement(Label, {}, text);
+        }
+        expect(() => render(createElement(App, {}), root)).not.toThrow();
+        // useEffect should fire synchronously in legacy/sync mode.
+        expect(effectFired).toBe(true);
+        unmount(root);
+    });
+});
