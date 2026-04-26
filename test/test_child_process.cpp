@@ -192,9 +192,8 @@ TEST_CASE("output capture respects max byte limits",
     opts.max_output_bytes = 3;
 
 #ifdef _WIN32
-    auto r = ChildProcess::run("powershell",
-        {"-NoProfile", "-Command",
-         "[Console]::Out.Write('abcdef'); [Console]::Error.Write('123456')"},
+    auto r = ChildProcess::run("cmd",
+        {"/c", "echo abcdef& echo 123456 1>&2"},
         opts);
 #else
     auto r = ChildProcess::run("/bin/sh",
@@ -235,8 +234,8 @@ TEST_CASE("stderr line callback fires independently",
     REQUIRE(stderr_lines.size() >= 2);
     REQUIRE(stdout_lines[0] == "out1");
     REQUIRE(stdout_lines[1] == "out2");
-    REQUIRE(stderr_lines[0] == "err1");
-    REQUIRE(stderr_lines[1] == "err2");
+    REQUIRE(trim_copy(stderr_lines[0]) == "err1");
+    REQUIRE(trim_copy(stderr_lines[1]) == "err2");
 }
 
 TEST_CASE("wait preserves output after is_running observes fast exit",
