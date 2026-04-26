@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-26 15:28 EDT
+Last reviewed: 2026-04-26 15:39 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -145,11 +145,18 @@ Merged after the Phase 1 closeout / `#723` baseline:
 Open Phase 3 PRs:
 
 - `#814` CLI `pulp pr` shellout coverage for `#643`, branch
-  `feature/cli-pr-coverage-643`, head `22ba6162`; opened after rebasing
-  onto `main` at `957a0735`. Cloud checks are the active gate.
+  `feature/cli-pr-coverage-643`, head `615bd756`; opened after rebasing
+  onto `main` at `957a0735`. The Linux Namespace cwd-sensitive shellout
+  failure was patched by resolving the CLI binary before the test changes
+  cwd; cloud checks are rerunning from the new head.
 - `#815` MPE tracker edge-path coverage for `#645`, branch
   `feature/mpe-tracker-coverage-645`, head `b7c72711`; opened from
-  `main` at `957a0735`. Cloud checks are the active gate.
+  `main` at `957a0735`. Windows coverage failed during dependency
+  bootstrap on a `wgpu-native` 502; rerun the failed coverage job after
+  the still-queued macOS coverage job lets the workflow finish.
+- `#816` MIDI running-status parser edge coverage for `#645`, branch
+  `feature/midi-running-status-coverage-645`, head `94b93a6e`; opened
+  from `main` at `957a0735`. Cloud checks are the active gate.
 
 Local Phase 3 draft worktrees:
 
@@ -263,14 +270,17 @@ Local Phase 3 draft worktrees:
   skill-sync report, and version-bump report.
 - `#643` CLI `pulp pr` shellout worktree
   `/Users/danielraffel/Code/pulp-cli-pr-coverage-643`, branch
-  `feature/cli-pr-coverage-643`, commit `22ba6162`; open as PR `#814`.
+  `feature/cli-pr-coverage-643`, commit `615bd756`; open as PR `#814`.
   Scope: shellout coverage for missing-Shipyard install guidance,
   native fallback help, outside-project refusal, and POSIX delegation to
-  a fake `shipyard pr` executable without invoking real Shipyard. Local
-  validation: no-GPU/no-examples configure, `pulp-test-cli-shellout`
-  build, direct `[cli][shellout][pr][issue-643]` passed `18` assertions
-  in `4` cases, focused CTest `pulp pr` passed `7/7`,
-  `git diff --check`, skill-sync report, and version-bump report.
+  a fake `shipyard pr` executable without invoking real Shipyard. Follow-
+  up `615bd756` fixed Linux Namespace by resolving the CLI binary before
+  changing cwd in the native outside-project test. Local validation:
+  no-GPU/no-examples configure, `pulp-test-cli-shellout` build, direct
+  `[cli][shellout][pr][issue-643]` passed `18` assertions in `4` cases,
+  single failed cloud case passed `3` assertions in `1` case after the
+  fix, focused CTest `pulp pr` passed `7/7`, `git diff --check`,
+  skill-sync report, and version-bump report.
 - `#645` MPE tracker worktree
   `/Users/danielraffel/Code/pulp-mpe-tracker-coverage-645`, branch
   `feature/mpe-tracker-coverage-645`, commit `b7c72711`; open as PR
@@ -283,6 +293,19 @@ Local Phase 3 draft worktrees:
   full binary passed `239` assertions in `23` cases, and focused CTest
   `MpeVoiceTracker` passed `23/23`, `git diff --check`, skill-sync
   report, and version-bump report.
+- `#645` MIDI running-status parser worktree
+  `/Users/danielraffel/Code/pulp-midi-running-status-coverage-645`,
+  branch `feature/midi-running-status-coverage-645`, commit `94b93a6e`;
+  open as PR `#816`.
+  Scope: test-only coverage for one-byte and two-byte channel running
+  status, system-common data lengths, real-time bytes inside sysex,
+  status restart inside sysex, empty sysex / unknown status ignore
+  behavior, and null sink / empty feed inputs. Local validation:
+  no-GPU/no-examples configure, `pulp-test-running-status` build, direct
+  `[midi][running-status][issue-645]` passed `29` assertions in `6`
+  cases, full binary passed `56` assertions in `14` cases, focused CTest
+  selection passed `5/5`, `git diff --check`, skill-sync report, and
+  version-bump report.
 
 Open supporting PR:
 
@@ -303,16 +326,21 @@ Local environment note:
 Next recovery actions:
 
 1. Keep `#774` docs-only and let its latest status-update checks drain.
-2. Monitor `#814` cloud checks; if a required lane fails, debug in
-   `/Users/danielraffel/Code/pulp-cli-pr-coverage-643`, patch,
-   validate locally, and push with lease.
+2. Monitor `#814` cloud checks from head `615bd756`; if a required lane
+   fails, debug in `/Users/danielraffel/Code/pulp-cli-pr-coverage-643`,
+   patch, validate locally, and push with lease.
 3. Monitor `#815` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-mpe-tracker-coverage-645`, patch,
-   validate locally, and push with lease.
-4. If any open Phase 3 PR is green but GitHub reports it behind `main`,
+   validate locally, and push with lease. For the current Windows
+   coverage 502 failure, prefer rerunning failed jobs after run
+   `24965100026` completes before changing code.
+4. Monitor `#816` cloud checks; if a required lane fails, debug in
+   `/Users/danielraffel/Code/pulp-midi-running-status-coverage-645`,
+   patch, validate locally, and push with lease.
+5. If any open Phase 3 PR is green but GitHub reports it behind `main`,
    rebase that branch onto `origin/main`, push with lease, and let
    checks rerun.
-5. Continue Phase 3 from the tranche issues below, prioritizing
+6. Continue Phase 3 from the tranche issues below, prioritizing
    represented high-miss files over adding new perimeter lanes.
 
 ## Phase 1 corrected baseline
