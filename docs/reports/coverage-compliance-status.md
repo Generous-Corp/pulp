@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-26 01:42 EDT
+Last reviewed: 2026-04-26 01:53 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -172,6 +172,21 @@ Open Phase 3 PRs:
   report clean with explicit `Version-Bump: sdk=patch` for the
   header-only behavior fix. The PR is labeled `codecov` and is using the
   direct GitHub/Namespace path.
+- `#802` `test(cli): cover create shellout scaffolding`, branch
+  `feature/cli-create-coverage-643`, commit `f5e4a05f`, worktree
+  `/Users/danielraffel/Code/pulp-cli-create-coverage-643`.
+  Scope: deterministic `pulp create` shellout coverage for no-build app
+  scaffolding with Android target output, generated header/main/CMake/
+  `pulp.toml`/projects registry substitutions, and invalid `--type`
+  rejection before scaffolding. Local validation: no-GPU/no-examples
+  configure, `pulp-test-cli-shellout` target build, focused Catch2 tag
+  run passed with `21` assertions in `2` test cases, focused CTest
+  `pulp create` passed `2/2`, `git diff --check` clean, skill sync
+  clean, and version bump report says no bump needed. Local shellout
+  validation used `PULP_CLI_PATH=/Users/danielraffel/Code/pulp/build/tools/cli/pulp`
+  because the GPU-off configure intentionally does not build `pulp-cli`;
+  CI builds the normal CLI path. The PR is labeled `codecov` and is
+  using the direct GitHub/Namespace path.
 
 Local Phase 3 draft worktrees:
 
@@ -213,13 +228,17 @@ Local Phase 3 draft worktrees:
   `/Users/danielraffel/Code/pulp-render-texture-atlas-coverage-646`,
   branch `feature/render-texture-atlas-coverage-646`, commit
   `a2201dbb`; open as PR `#801`.
+- `#643` CLI-create shellout worktree
+  `/Users/danielraffel/Code/pulp-cli-create-coverage-643`, branch
+  `feature/cli-create-coverage-643`, commit `f5e4a05f`; open as PR
+  `#802`.
 
 Open supporting PR:
 
 - `#774` refreshes this durable handoff/status document, branch
   `docs/coverage-status-2026-04-25`. The branch is updated as this
   tracker changes; use the PR head SHA in GitHub as the live value.
-  The branch has been rebased onto `origin/main` after `#799` merged and
+  The branch has been rebased onto `origin/main` after `#800` merged and
   remains docs-only.
 
 Local environment note:
@@ -233,9 +252,9 @@ Local environment note:
 Next recovery actions:
 
 1. Keep `#774` docs-only and let its latest status-update checks drain.
-2. Monitor `#795` and `#801` and address any Codecov, build,
+2. Monitor `#795`, `#801`, and `#802` and address any Codecov, build,
    sanitizer, or Namespace feedback.
-3. If `#795` or `#801` is green but GitHub reports it behind
+3. If `#795`, `#801`, or `#802` is green but GitHub reports it behind
    `main`, rebase that branch onto `origin/main`, push with lease, and
    let checks rerun.
 4. Continue Phase 3 from the tranche issues below, prioritizing
