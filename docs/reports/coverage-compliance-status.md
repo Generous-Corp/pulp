@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-26 14:32 EDT
+Last reviewed: 2026-04-26 14:42 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -136,12 +136,13 @@ Merged after the Phase 1 closeout / `#723` baseline:
 - `#808` MIDI file edge round-trip coverage -> `aae5d5d0`
 - `#809` signal FFT/convolver helper coverage -> `453bcec8`
 - `#810` platform Environment diff-edge coverage -> `f712702a`
+- `#811` CLI project-command dispatch coverage -> `810743d4`
 
 Open Phase 3 PRs:
 
-- `#811` CLI project-command dispatch coverage for `#643`, branch
-  `feature/cli-project-coverage-643`, head `46dca652`; opened after
-  rebasing onto `main` at `f712702a`. Cloud checks are the active gate.
+- None currently open after `#811` merged. The next ready Phase 3
+  candidate is the local-only `#645` signal dynamics helper draft at
+  `a43a305b`, recorded below.
 
 Local Phase 3 draft worktrees:
 
@@ -225,8 +226,8 @@ Local Phase 3 draft worktrees:
   `#809` as `453bcec8`. The remote branch was deleted after merge.
 - `#643` CLI project-command dispatch worktree
   `/Users/danielraffel/Code/pulp-cli-project-coverage-643`, branch
-  `feature/cli-project-coverage-643`, commit `46dca652`; open as PR
-  `#811`. Scope:
+  `feature/cli-project-coverage-643`, commit `46dca652`; merged via PR
+  `#811` as `810743d4`. The remote branch was deleted after merge. Scope:
   direct `cmd_project.cpp` coverage for top-level help/no-arg/unknown
   dispatch, bump option parsing, `--all` empty-registry handling,
   registry-backed `--all --dry-run` reporting without undo files, a
@@ -240,8 +241,8 @@ Local Phase 3 draft worktrees:
 - `#645` signal dynamics helper worktree
   `/Users/danielraffel/Code/pulp-signal-dynamics-coverage-645`, branch
   `feature/signal-dynamics-coverage-645`, commit `a43a305b`;
-  local-only draft, not opened as a PR yet while `#811` and `#774`
-  drain. Scope: test-only coverage for `DryWetMixer` mix
+  local-only draft, not opened as a PR yet while `#774` drains. Scope:
+  test-only coverage for `DryWetMixer` mix
   clamping/equal-power/latency/reset paths, `Compressor`
   hard-knee/soft-knee/buffer/reset paths, `Limiter` buffer/reset paths,
   `WindowFunction` hamming/flat-top/kaiser branches, and
@@ -259,9 +260,9 @@ Open supporting PR:
 - `#774` refreshes this durable handoff/status document, branch
   `docs/coverage-status-2026-04-25`. The branch is updated as this
   tracker changes; use the PR head SHA in GitHub as the live value.
-  The branch has been rebased onto `origin/main` after `#810` merged,
-  updated after `#811` opened and after the local `#645` signal dynamics
-  draft was prepared, and remains docs-only.
+  The branch has been rebased onto `origin/main` after `#811` merged,
+  updated after the local `#645` signal dynamics draft was prepared, and
+  remains docs-only.
 
 Local environment note:
 
@@ -274,11 +275,9 @@ Local environment note:
 Next recovery actions:
 
 1. Keep `#774` docs-only and let its latest status-update checks drain.
-2. Monitor `#811` cloud checks; if a required lane fails, debug in
-   `/Users/danielraffel/Code/pulp-cli-project-coverage-643`, patch,
-   validate locally, and push with lease.
-3. After `#811` is merged or otherwise no longer blocking the active
-   implementation slot, rebase/push/open the local `#645`
+2. Let the `main` Coverage run for `810743d4` complete, then refresh the
+   Codecov baseline if it changes the execution order materially.
+3. Rebase/push/open the local `#645`
    `feature/signal-dynamics-coverage-645` draft from
    `/Users/danielraffel/Code/pulp-signal-dynamics-coverage-645`.
 4. If any open Phase 3 PR is green but GitHub reports it behind `main`,
