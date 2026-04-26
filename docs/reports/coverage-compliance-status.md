@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-26 03:01 EDT
+Last reviewed: 2026-04-26 03:04 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -240,6 +240,21 @@ Open Phase 3 PRs:
   clean, skill sync clean, and version bump report says no bump needed.
   The PR is labeled `codecov` and is using the direct GitHub/Namespace
   path.
+- `#809` `test(signal): cover fft helper edges`, branch
+  `feature/signal-fft-coverage-645`, commit `11c83082`, worktree
+  `/Users/danielraffel/Code/pulp-signal-fft-coverage-645`.
+  Scope: test-only FFT helper coverage for move construction and move
+  assignment, linear and dB magnitude edge cases including silence
+  clamping, exact-bin real FFT conjugate symmetry, and `Convolver::reset`
+  clearing buffered overlap. Local validation: no-GPU configure,
+  `pulp-test-signal` target build, direct Catch2 selector
+  `[signal][fft],[signal][convolver][issue-645]` passed with `582`
+  assertions in `8` test cases, focused CTest `FFT|Convolver` passed
+  `10/10`, `git diff --check` clean, skill sync clean, and version bump
+  report says no bump needed. The local build still reports the existing
+  unused-variable warning elsewhere in `test/test_signal.cpp`; this
+  tranche does not introduce it. The PR is labeled `codecov` and is using
+  the direct GitHub/Namespace path.
 
 Local Phase 3 draft worktrees:
 
@@ -309,6 +324,10 @@ Local Phase 3 draft worktrees:
   `/Users/danielraffel/Code/pulp-midi-file-coverage-645`, branch
   `feature/midi-file-coverage-645`, commit `d02e853e`; open as PR
   `#808`.
+- `#645` signal FFT/convolver helper worktree
+  `/Users/danielraffel/Code/pulp-signal-fft-coverage-645`, branch
+  `feature/signal-fft-coverage-645`, commit `11c83082`; open as PR
+  `#809`.
 
 Open supporting PR:
 
@@ -329,7 +348,7 @@ Local environment note:
 Next recovery actions:
 
 1. Keep `#774` docs-only and let its latest status-update checks drain.
-2. Monitor `#801`, `#803`, `#804`, `#805`, `#806`, `#807`, and `#808`
+2. Monitor `#801`, `#803`, `#804`, `#805`, `#806`, `#807`, `#808`, and `#809`
    and address any Codecov, build, sanitizer, or Namespace feedback.
 3. If any open Phase 3 PR is green but GitHub reports it behind `main`,
    rebase that branch onto `origin/main`, push with lease, and let
