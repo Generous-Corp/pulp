@@ -36,11 +36,14 @@ import sys
 import tempfile
 import textwrap
 import unittest
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 SCRIPT = REPO_ROOT / "scripts" / "run_coverage.sh"
+sys.path.insert(0, str(REPO_ROOT / "tools" / "scripts"))
+from lcov_cobertura import LcovCobertura  # noqa: E402
 
 
 def _read_ignore_regex() -> str:
@@ -220,6 +223,49 @@ class StaleCacheTests(unittest.TestCase):
         self.assertIn("PULP_ENABLE_COVERAGE", combined)
         self.assertIn("rm -rf", combined)
         self.assertIn("#570", combined)
+
+
+class LcovCoberturaTests(unittest.TestCase):
+    """Regression tests for Pulp's vendored LCOV -> Cobertura converter."""
+
+    def _convert(self, lcov: str) -> ET.Element:
+        xml = LcovCobertura(lcov, base_dir=str(REPO_ROOT)).convert()
+        return ET.fromstring(xml)
+
+    def _line(self, root: ET.Element, filename: str, number: int) -> ET.Element:
+        for class_el in root.findall(".//class"):
+            if class_el.attrib.get("filename") == filename:
+                line = class_el.find(f"./lines/line[@number='{number}']")
+                if line is not None:
+                    return line
+        self.fail(f"missing line {number} for {filename}")
+
+    def test_duplicate_source_records_preserve_covered_header_lines(self) -> None:
+        header = REPO_ROOT / "core/render/include/pulp/render/texture_atlas.hpp"
+        lcov = textwrap.dedent(
+            f"""
+            SF:{header}
+            DA:23,7
+            BRDA:23,0,0,7
+            BRDA:23,0,1,0
+            end_of_record
+            SF:{header}
+            DA:23,0
+            BRDA:23,0,0,0
+            BRDA:23,0,1,0
+            end_of_record
+            """
+        )
+
+        root = self._convert(lcov)
+        line = self._line(
+            root, "core/render/include/pulp/render/texture_atlas.hpp", 23)
+
+        self.assertEqual(line.attrib["hits"], "7")
+        self.assertEqual(line.attrib["branch"], "true")
+        self.assertEqual(line.attrib["condition-coverage"], "50% (1/2)")
+        self.assertEqual(root.attrib["lines-valid"], "1")
+        self.assertEqual(root.attrib["lines-covered"], "1")
 
 
 if __name__ == "__main__":

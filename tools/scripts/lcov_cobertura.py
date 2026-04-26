@@ -123,25 +123,50 @@ class LcovCobertura():
         file_branches_total = 0
         file_branches_covered = 0
 
+        def _to_int(value):
+            try:
+                return int(value)
+            except (TypeError, ValueError):
+                return 0
+
+        def _merge_current_file():
+            nonlocal current_file
+
+            if current_file is None:
+                return
+
+            package_dict = coverage_data['packages'][package]
+            file_dict = package_dict['classes'][current_file]
+
+            for line_number, line_data in file_lines.items():
+                existing = file_dict['lines'].setdefault(line_number, {
+                    'branch': 'false', 'branches-total': 0,
+                    'branches-covered': 0, 'hits': '0'
+                })
+                existing['hits'] = str(_to_int(existing.get('hits', 0)) + _to_int(line_data.get('hits', 0)))
+                existing['branch'] = (
+                    'true' if existing.get('branch') == 'true' or line_data.get('branch') == 'true'
+                    else 'false'
+                )
+                # Multiple llvm-cov LCOV records for the same header carry the
+                # same branch sites per object. Keep the widest per-line branch
+                # shape instead of double-counting duplicate object records.
+                existing['branches-total'] = max(
+                    _to_int(existing.get('branches-total', 0)),
+                    _to_int(line_data.get('branches-total', 0)))
+                existing['branches-covered'] = max(
+                    _to_int(existing.get('branches-covered', 0)),
+                    _to_int(line_data.get('branches-covered', 0)))
+
+            for method_name, (line_number, hits) in file_methods.items():
+                existing = file_dict['methods'].setdefault(method_name, [line_number, '0'])
+                existing[0] = line_number
+                existing[1] = str(_to_int(existing[-1]) + _to_int(hits))
+
         for line in self.lcov_data.split('\n'):
             if line.strip() == 'end_of_record':
-                if current_file is not None:
-                    package_dict = coverage_data['packages'][package]
-                    package_dict['lines-total'] += file_lines_total
-                    package_dict['lines-covered'] += file_lines_covered
-                    package_dict['branches-total'] += file_branches_total
-                    package_dict['branches-covered'] += file_branches_covered
-                    file_dict = package_dict['classes'][current_file]
-                    file_dict['lines-total'] = file_lines_total
-                    file_dict['lines-covered'] = file_lines_covered
-                    file_dict['lines'] = dict(file_lines)
-                    file_dict['methods'] = dict(file_methods)
-                    file_dict['branches-total'] = file_branches_total
-                    file_dict['branches-covered'] = file_branches_covered
-                    coverage_data['summary']['lines-total'] += file_lines_total
-                    coverage_data['summary']['lines-covered'] += file_lines_covered
-                    coverage_data['summary']['branches-total'] += file_branches_total
-                    coverage_data['summary']['branches-covered'] += file_branches_covered
+                _merge_current_file()
+                current_file = None
 
             line_parts = line.split(':', 1)
             input_type = line_parts[0]
@@ -166,12 +191,12 @@ class LcovCobertura():
                         'classes': {}, 'lines-total': 0, 'lines-covered': 0,
                         'branches-total': 0, 'branches-covered': 0
                     }
-                coverage_data['packages'][package]['classes'][
-                    relative_file_name] = {
+                coverage_data['packages'][package]['classes'].setdefault(
+                    relative_file_name, {
                         'name': class_name, 'lines': {}, 'lines-total': 0,
                         'lines-covered': 0, 'branches-total': 0,
-                        'branches-covered': 0
-                }
+                        'branches-covered': 0, 'methods': {}
+                    })
                 package = package
                 current_file = relative_file_name
                 file_lines_total = 0
@@ -227,11 +252,46 @@ class LcovCobertura():
                     file_methods[function_name] = ['0', '0']
                 file_methods[function_name][-1] = function_hits
 
+        _merge_current_file()
+
         # Exclude packages
         excluded = [x for x in coverage_data['packages'] for e in self.excludes
                     if re.match(e, x)]
         for package in excluded:
             del coverage_data['packages'][package]
+
+        # Recompute summaries after duplicate source-file records have been
+        # merged. llvm-cov emits repeated SF records for header-heavy C++
+        # builds; counting records instead of merged files can both overstate
+        # totals and, worse, leave the final class entry with a zero-hit copy.
+        coverage_data['summary'] = {
+            'lines-total': 0, 'lines-covered': 0,
+            'branches-total': 0, 'branches-covered': 0
+        }
+        for package_data in list(coverage_data['packages'].values()):
+            package_data['lines-total'] = 0
+            package_data['lines-covered'] = 0
+            package_data['branches-total'] = 0
+            package_data['branches-covered'] = 0
+            for class_data in package_data['classes'].values():
+                class_data['lines-total'] = len(class_data['lines'])
+                class_data['lines-covered'] = sum(
+                    1 for line_data in class_data['lines'].values()
+                    if _to_int(line_data.get('hits', 0)) > 0)
+                class_data['branches-total'] = sum(
+                    _to_int(line_data.get('branches-total', 0))
+                    for line_data in class_data['lines'].values())
+                class_data['branches-covered'] = sum(
+                    _to_int(line_data.get('branches-covered', 0))
+                    for line_data in class_data['lines'].values())
+                package_data['lines-total'] += class_data['lines-total']
+                package_data['lines-covered'] += class_data['lines-covered']
+                package_data['branches-total'] += class_data['branches-total']
+                package_data['branches-covered'] += class_data['branches-covered']
+            coverage_data['summary']['lines-total'] += package_data['lines-total']
+            coverage_data['summary']['lines-covered'] += package_data['lines-covered']
+            coverage_data['summary']['branches-total'] += package_data['branches-total']
+            coverage_data['summary']['branches-covered'] += package_data['branches-covered']
 
         # Compute line coverage rates
         for package_data in list(coverage_data['packages'].values()):
