@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-26 17:05 EDT
+Last reviewed: 2026-04-26 17:08 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -144,6 +144,7 @@ Merged after the Phase 1 closeout / `#723` baseline:
 - `#814` CLI `pulp pr` shellout coverage -> `8bd4a3e9`
 - `#815` MPE tracker edge-path coverage -> `019130bd`
 - `#816` MIDI running-status parser edge coverage -> `c9620a65`
+- `#818` MPE synth voice / allocator coverage -> `3d4560d1`
 
 Open Phase 3 PRs:
 
@@ -154,11 +155,6 @@ Open Phase 3 PRs:
   pr` was attempted first but stopped before PR creation because the SSH
   `windows` backend timed out, so this tranche is using the
   GitHub/Namespace path instead of skipping that lane.
-- `#818` MPE synth voice / allocator edge coverage for `#645`, branch
-  `feature/midi-mpe-synth-voice-coverage-645`, head `21eb74e1`; opened
-  from `main` at `957a0735`. This tranche is also using the
-  GitHub/Namespace path while the SSH `windows` target remains
-  unreachable.
 - `#819` MIDI keyboard/sequence edge coverage for `#645`, branch
   `feature/midi-keyboard-sequence-coverage-645`, head `60676709`;
   opened from `main` at `019130bd`. This tranche also uses the
@@ -355,7 +351,8 @@ Local Phase 3 draft worktrees:
 - `#645` MPE synth voice worktree
   `/Users/danielraffel/Code/pulp-midi-mpe-synth-voice-coverage-645`,
   branch `feature/midi-mpe-synth-voice-coverage-645`, commit
-  `21eb74e1`; open as PR `#818`.
+  `21eb74e1`; merged via PR `#818` as `3d4560d1`. The remote branch was
+  deleted after merge.
   Scope: test-only coverage for `MpeSynthVoice` smoothing clamp,
   reset/release state, timbre routing, all non-oldest `MpeVoiceAllocator`
   steal policies, unknown expression events, `reset_all`, and
@@ -436,7 +433,7 @@ Open supporting PR:
   tracker changes; use the PR head SHA in GitHub as the live value.
   The branch has been rebased onto `origin/main` after `#813` merged,
   updated after `#816` merged, `#817` was repaired, `#820` opened,
-  `#821` opened, and `#822` opened, and remains docs-only.
+  `#821` opened, `#822` opened, and `#818` merged, and remains docs-only.
 
 Local environment note:
 
@@ -458,25 +455,22 @@ Next recovery actions:
 2. Monitor `#817` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-midi-ump-conversion-coverage-645`,
    patch, validate locally, and push with lease.
-3. Monitor `#818` cloud checks; if a required lane fails, debug in
-   `/Users/danielraffel/Code/pulp-midi-mpe-synth-voice-coverage-645`,
-   patch, validate locally, and push with lease.
-4. Monitor `#819` cloud checks; if a required lane fails, debug in
+3. Monitor `#819` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-midi-keyboard-sequence-coverage-645`,
    patch, validate locally, and push with lease.
-5. Monitor `#820` cloud checks; if a required lane fails, debug in
+4. Monitor `#820` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-signal-spectrogram-coverage-645`,
    patch, validate locally, and push with lease.
-6. Monitor `#821` cloud checks; if a required lane fails, debug in
+5. Monitor `#821` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-audio-reader-helpers-coverage-640`,
    patch, validate locally, and push with lease.
-7. Monitor `#822` cloud checks; if a required lane fails, debug in
+6. Monitor `#822` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-audio-file-helper-coverage-640`,
    patch, validate locally, and push with lease.
-8. If any open Phase 3 PR is green but GitHub reports it behind `main`,
+7. If any open Phase 3 PR is green but GitHub reports it behind `main`,
    rebase that branch onto `origin/main`, push with lease, and let
    checks rerun.
-9. Continue Phase 3 from the tranche issues below, prioritizing
+8. Continue Phase 3 from the tranche issues below, prioritizing
    represented high-miss files over adding new perimeter lanes.
 
 ## Phase 1 corrected baseline
