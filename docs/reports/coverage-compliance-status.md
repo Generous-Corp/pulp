@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-25 22:14 EDT
+Last reviewed: 2026-04-25 22:36 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -116,15 +116,22 @@ Merged after the Phase 1 closeout / `#723` baseline:
 
 Open Phase 3 PRs:
 
-- None at this checkpoint. `#793` was merged manually after GitHub
-  required checks were clean. Shipyard validation did not merge it because
-  mac passed, ubuntu failed in a full examples-enabled build when linker
-  processes were killed near the end of the build, and windows failed before
-  validation with a bundle-apply infra error
-  (`could not open C:/Users/danielraffel/shipyard.bundle`).
+- `#794` `test(audio): cover AIFF reader edge paths`, branch
+  `feature/audio-aiff-coverage-640`, commit `f3414ae9`, worktree
+  `/Users/danielraffel/Code/pulp-audio-aiff-coverage-640`.
+  Scope: deterministic `test/test_audio_file.cpp` coverage for AIFC
+  metadata, odd unknown-chunk padding, 8/24/32-bit AIFF PCM decode,
+  malformed SSND skip, and truncated payload rejection. Local validation:
+  `pulp-test-audio-file` passed with `231` assertions in `15` test cases;
+  focused CTest `AIFF|audio.*file|FormatRegistry` passed `8/8`;
+  `git diff --check` clean; version bump report says no bump needed.
+  `shipyard pr` opened the PR and validation is in progress.
 
 Local Phase 3 draft worktrees:
 
+- `#640` AIFF reader edge-path worktree
+  `/Users/danielraffel/Code/pulp-audio-aiff-coverage-640`, branch
+  `feature/audio-aiff-coverage-640`, commit `f3414ae9`; open as PR `#794`.
 - `#643` package-registry CLI/tools worktree
   `/Users/danielraffel/Code/pulp-package-registry-coverage-643`, branch
   `feature/package-registry-coverage-643`, commit `75a529ef`; merged via
@@ -148,10 +155,11 @@ Local environment note:
 
 Next recovery actions:
 
-1. Keep `#774` docs-only and let its post-`#793` status-update checks drain.
-2. If a new PR is green but GitHub reports it behind `main`, rebase that
+1. Keep `#774` docs-only and let its latest status-update checks drain.
+2. Monitor `#794` and address any Codecov, build, or Shipyard feedback.
+3. If a new PR is green but GitHub reports it behind `main`, rebase that
    branch onto `origin/main`, push with lease, and let checks rerun.
-3. Continue Phase 3 from the tranche issues below, prioritizing
+4. Continue Phase 3 from the tranche issues below, prioritizing
    represented high-miss files over adding new perimeter lanes.
 
 ## Phase 1 corrected baseline
