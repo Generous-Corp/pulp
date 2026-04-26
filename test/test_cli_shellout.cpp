@@ -17,6 +17,7 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <system_error>
 #include <vector>
 
 using namespace pulp::platform;
@@ -41,6 +42,39 @@ inline int pulp_unsetenv(const char* name) {
 #else
     return ::unsetenv(name);
 #endif
+}
+
+class ScopedEnvVar {
+public:
+    explicit ScopedEnvVar(const char* name)
+        : name_(name) {
+        if (const char* value = std::getenv(name)) {
+            had_value_ = true;
+            old_value_ = value;
+        }
+    }
+
+    ~ScopedEnvVar() {
+        if (had_value_) {
+            pulp_setenv(name_.c_str(), old_value_.c_str(), 1);
+        } else {
+            pulp_unsetenv(name_.c_str());
+        }
+    }
+
+    void set(const std::string& value) {
+        pulp_setenv(name_.c_str(), value.c_str(), 1);
+    }
+
+private:
+    std::string name_;
+    bool had_value_ = false;
+    std::string old_value_;
+};
+
+fs::path unique_temp_dir(const std::string& prefix) {
+    auto tick = std::chrono::steady_clock::now().time_since_epoch().count();
+    return fs::temp_directory_path() / (prefix + "-" + std::to_string(tick));
 }
 
 
@@ -838,6 +872,97 @@ TEST_CASE("pulp project bump rejects non-semver --to",
     REQUIRE(r.exit_code != 0);
     REQUIRE(r.stderr_output.find("invalid target version") != std::string::npos);
 }
+
+TEST_CASE("pulp pr without shipyard prints install guidance",
+          "[cli][shellout][pr][issue-643]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    ScopedEnvVar path("PATH");
+    path.set("");
+
+    auto r = run_pulp({"pr"});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 2);
+
+    auto combined = r.stdout_output + r.stderr_output;
+    REQUIRE(combined.find("shipyard is not on PATH") != std::string::npos);
+    REQUIRE(combined.find("./tools/install-shipyard.sh") != std::string::npos);
+    REQUIRE(combined.find("pulp pr --native") != std::string::npos);
+}
+
+TEST_CASE("pulp pr native help stays available without shipyard",
+          "[cli][shellout][pr][issue-643]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    ScopedEnvVar path("PATH");
+    path.set("");
+
+    auto r = run_pulp({"pr", "--native", "--help"});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(r.stdout_output.find("Usage: pulp pr [options]") != std::string::npos);
+    REQUIRE(r.stdout_output.find("--no-ship") != std::string::npos);
+    REQUIRE(r.stdout_output.find("--dry-run") != std::string::npos);
+}
+
+TEST_CASE("pulp pr native mode refuses to run outside a project",
+          "[cli][shellout][pr][issue-643]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    ScopedEnvVar path("PATH");
+    path.set("");
+
+    auto cwd_saver = fs::current_path();
+    fs::current_path(fs::temp_directory_path());
+    auto r = run_pulp({"pr", "--native", "--no-push"});
+    fs::current_path(cwd_saver);
+
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 2);
+    REQUIRE(r.stderr_output.find("not inside a pulp project") != std::string::npos);
+}
+
+#if !defined(_WIN32)
+TEST_CASE("pulp pr delegates to shipyard with forwarded arguments",
+          "[cli][shellout][pr][issue-643]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    auto fake_dir = unique_temp_dir("pulp-pr-fake-shipyard");
+    fs::create_directories(fake_dir);
+    auto fake_shipyard = fake_dir / "shipyard";
+    {
+        std::ofstream f(fake_shipyard);
+        f << "#!/bin/sh\n"
+             "if [ \"$1\" = \"--version\" ]; then\n"
+             "  echo \"shipyard, version 0.46.0\"\n"
+             "  exit 0\n"
+             "fi\n"
+             "printf 'fake shipyard args:'\n"
+             "for arg in \"$@\"; do printf ' [%s]' \"$arg\"; done\n"
+             "printf '\\n'\n"
+             "exit 17\n";
+    }
+    std::error_code ec;
+    fs::permissions(fake_shipyard,
+                    fs::perms::owner_read | fs::perms::owner_exec |
+                    fs::perms::group_read | fs::perms::group_exec,
+                    fs::perm_options::add,
+                    ec);
+    REQUIRE_FALSE(ec);
+
+    ScopedEnvVar path("PATH");
+    path.set(fake_dir.string());
+
+    auto r = run_pulp({"pr", "--help", "--no-ship"});
+    fs::remove_all(fake_dir);
+
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 17);
+    REQUIRE(r.stdout_output.find("Usage: pulp pr [--native]") != std::string::npos);
+    REQUIRE(r.stdout_output.find("fake shipyard args: [pr] [--help] [--no-ship]")
+            != std::string::npos);
+}
+#endif
 
 TEST_CASE("pulp project bump updates standalone SDK pins and undo reverts them",
           "[cli][shellout][project-bump][issue-244]") {
