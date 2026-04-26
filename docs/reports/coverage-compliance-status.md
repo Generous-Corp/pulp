@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-26 00:19 EDT
+Last reviewed: 2026-04-26 00:50 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -126,7 +126,7 @@ Merged after the Phase 1 closeout / `#723` baseline:
 Open Phase 3 PRs:
 
 - `#795` `test(events): cover volume detector lifecycle edges`, branch
-  `feature/events-volume-coverage-642`, commit `ab941cd9`, worktree
+  `feature/events-volume-coverage-642`, commit `2d684f4b`, worktree
   `/Users/danielraffel/Code/pulp-events-volume-coverage-642`.
   Scope: deterministic `test/test_network_service_discovery.cpp`
   coverage for `NetworkServiceDiscovery` backend removal, cached-service
@@ -134,20 +134,20 @@ Open Phase 3 PRs:
   `MountedVolumeListChangeDetector` mounted-volume snapshot plus
   start/restart/stop lifecycle paths, and
   `LockingAsyncUpdater::trigger_and_wait()`. Local validation:
+  after rebasing onto current `origin/main`,
   `pulp-test-network-service-discovery` passed with `43` assertions in
-  `10` test cases; focused CTest
-  `NSD|MountedVolume|LockingAsyncUpdater|service-discovery|volume`
-  passed `10/10`; `git diff --check` clean. After the first CI pass, the
-  Windows Namespace lane exposed an unavailable-drive exception from
-  `std::filesystem::exists("E:\\")`; the latest fix keeps the guard on a
-  coverage-visible source line via `PULP_VOLUME_EXISTS(drive)`. A local
-  replay of the failed CI merged Cobertura artifact now reports `85.7%`
-  diff coverage for `core/events/src/volume_detector.cpp`, above the
-  required `75%` gate. GitHub checks were rerunning on `ab941cd9` with no
-  failures at the last poll. The PR is labeled `codecov` and is using the
-  direct GitHub/Namespace path instead of `shipyard pr` because `#794`
-  exposed a local Shipyard mac configure stall after GitHub/Namespace was
-  already clean.
+  `10` test cases; focused CTest `NSD|MountedVolume|LockingAsyncUpdater`
+  passed `10/10`; `git diff --check` clean; skill sync found no mapped
+  paths; version bump report says no bump needed. The earlier
+  `core/events/src/volume_detector.cpp` Windows guard was removed from the
+  final PR diff because the Windows coverage XML reports that translation
+  unit at `0%` even though the CTest cases run and pass there. The final
+  PR diff is test-only, and the mounted-volume enumeration tests skip on
+  Windows while retaining POSIX coverage. GitHub checks were rerunning on
+  `2d684f4b` with no failures at the last poll. The PR is labeled
+  `codecov` and is using the direct GitHub/Namespace path instead of
+  `shipyard pr` because `#794` exposed a local Shipyard mac configure
+  stall after GitHub/Namespace was already clean.
 - `#798` `test(audio): cover format registry dispatch paths`, branch
   `feature/audio-format-registry-coverage-640`, commit `0b35bb83`,
   worktree
@@ -163,6 +163,19 @@ Open Phase 3 PRs:
   report says no bump needed.
   The PR is labeled `codecov` and is using the same direct
   GitHub/Namespace path as `#795`.
+- `#799` `test(cli): cover docs shellout reader paths`, branch
+  `feature/cli-docs-coverage-643`, commit `4877cb1b`, worktree
+  `/Users/danielraffel/Code/pulp-cli-docs-coverage-643`.
+  Scope: deterministic `test/test_cli_shellout.cpp` coverage for
+  `pulp docs` local reader usage, index, open, search, support/command/
+  CMake/style `show` paths, and error diagnostics. Local validation:
+  `pulp-cli` and `pulp-test-cli-shellout` built successfully; direct
+  Catch2 tag run `[cli][shellout][docs][issue-643]` passed with `38`
+  assertions in `1` test case; focused CTest
+  `pulp docs covers local reader` passed `1/1`; `git diff --check`
+  clean; skill sync found no mapped paths; version bump report says no
+  bump needed. The PR is labeled `codecov` and is using the direct
+  GitHub/Namespace path.
 
 Local Phase 3 draft worktrees:
 
@@ -191,6 +204,10 @@ Local Phase 3 draft worktrees:
   `/Users/danielraffel/Code/pulp-audio-system-volume-coverage-640`,
   branch `feature/audio-format-registry-coverage-640`, commit
   `0b35bb83`; open as PR `#798`.
+- `#643` docs-reader CLI/tools worktree
+  `/Users/danielraffel/Code/pulp-cli-docs-coverage-643`, branch
+  `feature/cli-docs-coverage-643`, commit `4877cb1b`; open as PR
+  `#799`.
 
 Open supporting PR:
 
@@ -211,9 +228,9 @@ Local environment note:
 Next recovery actions:
 
 1. Keep `#774` docs-only and let its latest status-update checks drain.
-2. Monitor `#795` and `#798` and address any Codecov, build,
+2. Monitor `#795`, `#798`, and `#799` and address any Codecov, build,
    sanitizer, or Namespace feedback.
-3. If `#795` or `#798` is green but GitHub reports it behind `main`,
+3. If `#795`, `#798`, or `#799` is green but GitHub reports it behind `main`,
    rebase that branch onto `origin/main`, push with lease, and let
    checks rerun.
 4. Continue Phase 3 from the tranche issues below, prioritizing
