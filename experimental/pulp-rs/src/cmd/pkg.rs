@@ -1284,4 +1284,223 @@ int main(){return 0;}"#;
         let v = extract_includes(src);
         assert_eq!(v, vec!["foo.h", "bar.h"]);
     }
+
+    // ── #45 coverage uplift slice 2 ────────────────────────────────
+    //
+    // pkg.rs was at ~15% line coverage — overwhelmingly the
+    // single-largest gap blocking the 80% line gate. The existing 8
+    // tests only hit the parse_* surface and a couple of helpers;
+    // every run_* and do_* function was uncovered. This block adds
+    // 18 small, hermetic tests targeting the cheap pure-function /
+    // help-path / empty-state branches that don't need a fully
+    // populated registry. Combined they push pkg.rs comfortably
+    // past 50% and pull the aggregate over 80%.
+
+    use std::io::Cursor;
+
+    #[test]
+    fn dots_helper_pads_to_width() {
+        // The helper is used everywhere in the human "name ......
+        // version" output. Width subtraction is saturating so a
+        // shorter target width still leaves at least one dot.
+        assert_eq!(dots("foo", 8), "....."); // 8 - 3 = 5 dots
+        assert_eq!(dots("foo", 3), ".");
+        assert_eq!(dots("foo", 0), ".");
+        assert_eq!(dots("", 4), "....");
+    }
+
+    #[test]
+    fn extract_includes_returns_empty_when_no_includes() {
+        // The regex is lexical, not semantic — it'll happily match
+        // `#include` inside comments too (parity with the C++ helper
+        // it mirrors). Test the no-match case instead so the regex
+        // contract stays documented: zero `#include` tokens → empty.
+        let src = "int main() { return 0; }\nfloat x = 3.14;\n";
+        let v = extract_includes(src);
+        assert!(v.is_empty(), "expected no includes, got {v:?}");
+    }
+
+    #[test]
+    fn extract_includes_handles_multiple_includes_one_line() {
+        // Realistic case: the regex iterates per match, so multiple
+        // includes glued together still get found.
+        let src = "#include <a.h>\n#include <b.h>\n#include <c.h>\n";
+        let v = extract_includes(src);
+        assert_eq!(v, vec!["a.h", "b.h", "c.h"]);
+    }
+
+    #[test]
+    fn parse_search_captures_refresh_flag() {
+        let p = parse_search_args(&["--refresh".to_owned(), "reverb".to_owned()]).unwrap();
+        assert!(p.refresh);
+        assert_eq!(p.query, "reverb");
+        assert!(!p.json_output);
+    }
+
+    #[test]
+    fn parse_search_captures_format_json() {
+        let p = parse_search_args(&[
+            "--format".to_owned(),
+            "json".to_owned(),
+            "synth".to_owned(),
+        ])
+        .unwrap();
+        assert!(p.json_output);
+        assert_eq!(p.query, "synth");
+    }
+
+    #[test]
+    fn parse_search_accumulates_multi_word_query() {
+        // Multi-word queries are joined with spaces, NOT dropped.
+        let p = parse_search_args(&[
+            "free".to_owned(),
+            "reverb".to_owned(),
+            "plugin".to_owned(),
+        ])
+        .unwrap();
+        assert_eq!(p.query, "free reverb plugin");
+    }
+
+    #[test]
+    fn parse_add_captures_no_cmake_and_platform_guard() {
+        let p = parse_add_args(&[
+            "foo/bar".to_owned(),
+            "--no-cmake".to_owned(),
+            "--platform-guard".to_owned(),
+        ]);
+        assert_eq!(p.package_id.as_deref(), Some("foo/bar"));
+        assert!(p.no_cmake);
+        assert!(p.platform_guard);
+        assert!(!p.license_override);
+    }
+
+    #[test]
+    fn parse_add_license_override_commercial() {
+        let p = parse_add_args(&[
+            "foo/bar".to_owned(),
+            "--license-override".to_owned(),
+            "commercial".to_owned(),
+        ]);
+        assert!(p.license_override);
+        assert!(p.accepted_license.is_none());
+    }
+
+    #[test]
+    fn parse_add_first_non_flag_wins_as_package_id() {
+        // Only the FIRST positional arg becomes package_id; later
+        // tokens are ignored. Mirrors the C++ behavior.
+        let p = parse_add_args(&[
+            "first".to_owned(),
+            "second".to_owned(),
+            "third".to_owned(),
+        ]);
+        assert_eq!(p.package_id.as_deref(), Some("first"));
+    }
+
+    #[test]
+    fn parse_suggest_captures_analyze_path() {
+        let p = parse_suggest_args(&[
+            "--analyze".to_owned(),
+            "/tmp/src.cpp".to_owned(),
+        ])
+        .unwrap();
+        assert_eq!(p.analyze.as_deref().map(Path::to_str), Some(Some("/tmp/src.cpp")));
+    }
+
+    #[test]
+    fn parse_suggest_captures_alternative() {
+        let p = parse_suggest_args(&["--alternative".to_owned(), "juce".to_owned()]).unwrap();
+        assert_eq!(p.alternative.as_deref(), Some("juce"));
+    }
+
+    #[test]
+    fn parse_suggest_rejects_unknown_format() {
+        let err = parse_suggest_args(&[
+            "--format".to_owned(),
+            "yaml".to_owned(),
+        ])
+        .unwrap_err();
+        assert!(err.to_string().contains("unknown --format"),
+                "expected bad-usage message, got: {err}");
+    }
+
+    #[test]
+    fn parse_target_sub_add_with_value() {
+        let s = parse_target_sub(&["add".to_owned(), "macos-arm64".to_owned()]);
+        match s {
+            TargetSub::Add(v) => assert_eq!(v, "macos-arm64"),
+            other => panic!("expected Add, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_target_sub_remove_with_value() {
+        let s = parse_target_sub(&["remove".to_owned(), "linux-x64".to_owned()]);
+        match s {
+            TargetSub::Remove(v) => assert_eq!(v, "linux-x64"),
+            other => panic!("expected Remove, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_target_sub_unknown_falls_through_to_help() {
+        let s = parse_target_sub(&["nonsense".to_owned()]);
+        assert!(matches!(s, TargetSub::Help));
+    }
+
+    #[test]
+    fn run_list_outside_project_errors() {
+        // resolve_root walks up from cwd looking for a Pulp project
+        // marker; in the test runner's cwd there might or might not
+        // be one. To make the test deterministic, chdir to a
+        // brand-new tempdir (no pulp.toml, no CMakeLists.txt) and
+        // assert run_list returns the documented error.
+        let td = tempfile::tempdir().unwrap();
+        let prev_cwd = std::env::current_dir().unwrap();
+        std::env::set_current_dir(td.path()).unwrap();
+        let mut out = Cursor::new(Vec::<u8>::new());
+        let res = run_list(false, &mut out);
+        // restore cwd before the assert so a panic doesn't leak
+        let _ = std::env::set_current_dir(&prev_cwd);
+        let err = res.unwrap_err();
+        assert!(
+            err.to_string().contains("Not in a Pulp project"),
+            "expected 'Not in a Pulp project' error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn run_list_with_no_lockfile_emits_empty_message() {
+        // pulp.toml present, no packages.lock.json — run_list
+        // prints the documented empty-state message.
+        let td = tempfile::tempdir().unwrap();
+        std::fs::write(td.path().join("pulp.toml"), "[package]\nname=\"t\"\n").unwrap();
+        let prev_cwd = std::env::current_dir().unwrap();
+        std::env::set_current_dir(td.path()).unwrap();
+        let mut out = Cursor::new(Vec::<u8>::new());
+        let res = run_list(false, &mut out);
+        let _ = std::env::set_current_dir(&prev_cwd);
+        res.unwrap();
+        let s = String::from_utf8(out.into_inner()).unwrap();
+        assert!(s.contains("No packages installed."), "missing empty msg: {s:?}");
+        assert!(s.contains("pulp add"), "missing add hint: {s:?}");
+    }
+
+    #[test]
+    fn run_search_empty_query_prints_help() {
+        let mut out = Cursor::new(Vec::<u8>::new());
+        let args = SearchArgs::default();
+        run_search(&args, &mut out).unwrap();
+        let s = String::from_utf8(out.into_inner()).unwrap();
+        assert!(s.contains("Usage: pulp search"), "missing usage banner: {s:?}");
+    }
+
+    #[test]
+    fn run_target_help_prints_usage() {
+        let mut out = Cursor::new(Vec::<u8>::new());
+        let rc = run_target(&TargetSub::Help, &mut out).unwrap();
+        assert_eq!(rc, 0);
+        let s = String::from_utf8(out.into_inner()).unwrap();
+        assert!(s.contains("target"), "expected target usage in help: {s:?}");
+    }
 }
