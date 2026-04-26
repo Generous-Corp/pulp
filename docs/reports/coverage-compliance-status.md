@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-25 21:23 EDT
+Last reviewed: 2026-04-25 22:02 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -94,6 +94,13 @@ Latest complete Codecov `main` report observed while updating this doc:
   - `ship`: `59.15%`
   - `tools`: `39.5%`
 
+Newer `main` state:
+
+- `#793` merged after the latest complete Codecov report above. The new
+  `main` head is `e2af9c4db73c6b404553eb41cbd8dd3fc5a3b4db`.
+- Main Coverage run `24945821780` is in progress for `e2af9c4d`; refresh
+  this baseline from Codecov after it completes.
+
 Merged after the Phase 1 closeout / `#723` baseline:
 
 - `#649` CLI/tools tranche 1 -> `8449b6e8`
@@ -112,35 +119,30 @@ Merged after the Phase 1 closeout / `#723` baseline:
 - `#786` render DirtyTracker / RenderLoop edge coverage -> `26dd396d`
 - `#789` Android ship/package helper coverage -> `e61dce8d`
 - `#788` events socket-IPC coverage -> `23d3ed1d`
+- `#793` package-registry CLI/tools coverage -> `e2af9c4d`
 
 Open Phase 3 PRs:
 
-- `#793` package-registry CLI/tools coverage, branch
-  `feature/package-registry-coverage-643`, head `75a529ef`. This is the
-  `#643` tranche opened by `shipyard pr` after `#788` merged. Scope:
-  `pulp-test-cli-package-registry` for pure local registry parsing,
-  lock-file round trips, target TOML parsing/writing, semver, quality
-  scoring, unsupported-target detection, and search ranking. Local
-  validation after rebasing onto `origin/main` at `23d3ed1d` is green:
-  build `pulp-test-cli-package-registry`, direct binary (`88`
-  assertions / `5` test cases), focused CTest (`5/5`), whitespace, and
-  `version_bump_check.py --mode=report`. Shipyard validation and GitHub
-  checks are running.
+- None at this checkpoint. `#793` was merged manually after GitHub
+  required checks were clean. Shipyard validation did not merge it because
+  mac passed, ubuntu failed in a full examples-enabled build when linker
+  processes were killed near the end of the build, and windows failed before
+  validation with a bundle-apply infra error
+  (`could not open C:/Users/danielraffel/shipyard.bundle`).
 
 Local Phase 3 draft worktrees:
 
 - `#643` package-registry CLI/tools worktree
   `/Users/danielraffel/Code/pulp-package-registry-coverage-643`, branch
-  `feature/package-registry-coverage-643`, commit `75a529ef`; now backs
-  open PR `#793`. Do not edit this worktree while `shipyard pr` is still
-  validating it.
+  `feature/package-registry-coverage-643`, commit `75a529ef`; merged via
+  PR `#793`.
 
 Open supporting PR:
 
 - `#774` refreshes this durable handoff/status document, branch
   `docs/coverage-status-2026-04-25`. The branch is updated as this
   tracker changes; use the PR head SHA in GitHub as the live value.
-  The branch has been rebased onto `origin/main` after `#788` merged and
+  The branch has been rebased onto `origin/main` after `#793` merged and
   remains docs-only.
 
 Local environment note:
@@ -154,8 +156,8 @@ Local environment note:
 Next recovery actions:
 
 1. Keep `#774` docs-only and let its post-`#793` status-update checks drain.
-2. Monitor `#793`; Shipyard is validating the PR and GitHub workflows are
-   running.
+2. Let main Coverage run `24945821780` for `e2af9c4d` drain, then refresh
+   this section with the next complete Codecov `main` report.
 3. If a new PR is green but GitHub reports it behind `main`, rebase that
    branch onto `origin/main`, push with lease, and let checks rerun.
 4. Continue Phase 3 from the tranche issues below, prioritizing
