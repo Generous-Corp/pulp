@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-26 02:29 EDT
+Last reviewed: 2026-04-26 02:34 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -224,6 +224,18 @@ Open Phase 3 PRs:
   noting the SDK patch suggestion from the defensive production guard.
   The PR is labeled `codecov` and is using the direct GitHub/Namespace
   path.
+- `#807` `test(audio): cover channel set helpers`, branch
+  `feature/audio-channel-set-coverage-640`, commit `89b969c9`,
+  worktree `/Users/danielraffel/Code/pulp-audio-channel-set-coverage-640`.
+  Scope: test-only `ChannelSet` coverage for standard layouts by count
+  and name, discrete fallbacks, speaker-name mappings including the
+  unknown-enum fallback, and equality semantics. Local validation:
+  no-GPU configure, `pulp-test-audio` target build, direct Catch2 tag
+  `[audio][channel-set][issue-640]` passed with `38` assertions in `2`
+  test cases, focused CTest `ChannelSet` passed `2/2`, diff check
+  clean, skill sync clean, and version bump report says no bump
+  needed. The PR is labeled `codecov` and is using the direct
+  GitHub/Namespace path.
 
 Local Phase 3 draft worktrees:
 
@@ -285,6 +297,10 @@ Local Phase 3 draft worktrees:
   `/Users/danielraffel/Code/pulp-audio-reader-coverage-640`, branch
   `feature/audio-reader-coverage-640`, commit `c1d61e3a`; open as PR
   `#806`.
+- `#640` ChannelSet audio worktree
+  `/Users/danielraffel/Code/pulp-audio-channel-set-coverage-640`,
+  branch `feature/audio-channel-set-coverage-640`, commit `89b969c9`;
+  open as PR `#807`.
 
 Open supporting PR:
 
@@ -305,10 +321,10 @@ Local environment note:
 Next recovery actions:
 
 1. Keep `#774` docs-only and let its latest status-update checks drain.
-2. Monitor `#801`, `#802`, `#803`, `#804`, `#805`, and `#806` and
-   address any Codecov, build, sanitizer, or Namespace feedback.
-3. If `#801`, `#802`, `#803`, `#804`, `#805`, or `#806` is green but
-   GitHub reports it behind `main`, rebase that branch onto
+2. Monitor `#801`, `#802`, `#803`, `#804`, `#805`, `#806`, and `#807`
+   and address any Codecov, build, sanitizer, or Namespace feedback.
+3. If `#801`, `#802`, `#803`, `#804`, `#805`, `#806`, or `#807` is green
+   but GitHub reports it behind `main`, rebase that branch onto
    `origin/main`, push with lease, and let checks rerun.
 4. Continue Phase 3 from the tranche issues below, prioritizing
    represented high-miss files over adding new perimeter lanes.
