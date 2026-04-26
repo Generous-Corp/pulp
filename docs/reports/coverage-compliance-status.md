@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-26 00:50 EDT
+Last reviewed: 2026-04-26 00:57 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -176,6 +176,22 @@ Open Phase 3 PRs:
   clean; skill sync found no mapped paths; version bump report says no
   bump needed. The PR is labeled `codecov` and is using the direct
   GitHub/Namespace path.
+- `#800` `test(tools): cover version and skill gate helpers`, branch
+  `feature/python-tooling-coverage-643`, commit `acadc5af`, worktree
+  `/Users/danielraffel/Code/pulp-python-tooling-coverage-643`.
+  Scope: deterministic `tools/scripts/test_gates.py` coverage for
+  `version_bump_check.py` version-file readers/writers, semver
+  arithmetic, conventional-commit classification, and `Version-Bump`
+  trailer parsing; plus `skill_sync_check.py` trailer parsing,
+  generated-file filtering, path-map self-check failures, nested
+  `SKILL.md` recognition, and bypass propagation. Local validation:
+  `python3 tools/scripts/test_gates.py` passed with `22` tests;
+  `git diff --check` clean; skill sync found no mapped paths; version
+  bump report says no bump needed. Local `run_python_coverage.py` was not
+  run because this local Python lacks `coverage.py`; the CI coverage
+  workflow installs `coverage>=7.10` before running the Python tooling
+  coverage lane. The PR is labeled `codecov` and is using the direct
+  GitHub/Namespace path.
 
 Local Phase 3 draft worktrees:
 
@@ -208,6 +224,10 @@ Local Phase 3 draft worktrees:
   `/Users/danielraffel/Code/pulp-cli-docs-coverage-643`, branch
   `feature/cli-docs-coverage-643`, commit `4877cb1b`; open as PR
   `#799`.
+- `#643` Python gate-helper tooling worktree
+  `/Users/danielraffel/Code/pulp-python-tooling-coverage-643`, branch
+  `feature/python-tooling-coverage-643`, commit `acadc5af`; open as PR
+  `#800`.
 
 Open supporting PR:
 
@@ -228,11 +248,11 @@ Local environment note:
 Next recovery actions:
 
 1. Keep `#774` docs-only and let its latest status-update checks drain.
-2. Monitor `#795`, `#798`, and `#799` and address any Codecov, build,
-   sanitizer, or Namespace feedback.
-3. If `#795`, `#798`, or `#799` is green but GitHub reports it behind `main`,
-   rebase that branch onto `origin/main`, push with lease, and let
-   checks rerun.
+2. Monitor `#795`, `#798`, `#799`, and `#800` and address any Codecov,
+   build, sanitizer, or Namespace feedback.
+3. If `#795`, `#798`, `#799`, or `#800` is green but GitHub reports it
+   behind `main`, rebase that branch onto `origin/main`, push with lease,
+   and let checks rerun.
 4. Continue Phase 3 from the tranche issues below, prioritizing
    represented high-miss files over adding new perimeter lanes.
 
