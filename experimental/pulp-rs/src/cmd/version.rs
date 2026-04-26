@@ -822,4 +822,125 @@ mod tests {
         let rc = check(td.path(), true, &spawner, &mut out).unwrap();
         assert_eq!(rc, 1);
     }
+
+    // ── #45 coverage uplift slice 5 — version.rs helpers ──────────
+    //
+    // The pure helpers below the dispatch surface (read_plugin_version,
+    // rewrite_plugin_version, rewrite_first_occurrence,
+    // changelog_latest_version, is_semver_triple, read_json_version_field,
+    // read_marketplace_plugin_entry_version) drove most of version.rs's
+    // 123 missing lines but had no direct unit coverage — only the
+    // bump end-to-end tests indirectly hit some of them. Add small
+    // hermetic tests so the regex + JSON-extract paths can't regress
+    // silently.
+
+    #[test]
+    fn read_plugin_version_extracts_pulp_add_plugin() {
+        let src = r#"pulp_add_plugin(MyPlugin
+            VERSION "1.2.3"
+            COMPANY "Acme")
+"#;
+        assert_eq!(read_plugin_version(src), Some("1.2.3".to_owned()));
+    }
+
+    #[test]
+    fn read_plugin_version_returns_none_when_no_call() {
+        assert_eq!(read_plugin_version("project(Foo VERSION 1.2.3)\n"), None);
+        assert_eq!(read_plugin_version(""), None);
+    }
+
+    #[test]
+    fn rewrite_first_occurrence_replaces_only_first() {
+        let src = "abc xyz abc";
+        let out = rewrite_first_occurrence(src, "abc", "ZZZ").unwrap();
+        assert_eq!(out, "ZZZ xyz abc");
+    }
+
+    #[test]
+    fn rewrite_first_occurrence_returns_none_when_not_found() {
+        assert!(rewrite_first_occurrence("hello world", "missing", "x").is_none());
+    }
+
+    #[test]
+    fn rewrite_plugin_version_swaps_only_inside_call() {
+        let src = r#"# header
+pulp_add_plugin(MyPlugin
+    VERSION "1.2.3"
+    COMPANY "Acme")
+project(Other VERSION 1.2.3)
+"#;
+        let out = rewrite_plugin_version(src, "1.2.3", "1.2.4").unwrap();
+        // The `pulp_add_plugin` literal swaps but the bare
+        // `project(...VERSION 1.2.3)` stays untouched — that's the
+        // whole point of the regex.
+        assert!(out.contains(r#"VERSION "1.2.4""#));
+        assert!(out.contains("project(Other VERSION 1.2.3)"));
+    }
+
+    #[test]
+    fn rewrite_plugin_version_returns_none_on_old_mismatch() {
+        let src = r#"pulp_add_plugin(P VERSION "1.2.3")"#;
+        assert!(rewrite_plugin_version(src, "9.9.9", "1.2.4").is_none());
+    }
+
+    #[test]
+    fn changelog_latest_version_picks_first_h2_semver() {
+        let body = "# Changelog\n\n## [0.47.0] — today\n\n## [0.46.0] — yesterday\n";
+        assert_eq!(changelog_latest_version(body), Some("0.47.0".to_owned()));
+    }
+
+    #[test]
+    fn changelog_latest_version_returns_none_on_no_h2() {
+        assert_eq!(changelog_latest_version("just text"), None);
+    }
+
+    #[test]
+    fn is_semver_triple_accepts_and_rejects() {
+        assert!(is_semver_triple("0.1.2"));
+        assert!(is_semver_triple("99.0.0"));
+        assert!(!is_semver_triple("v1.2.3"));     // SemVer::parse rejects v-prefix
+        assert!(!is_semver_triple("1.2"));
+        assert!(!is_semver_triple("not-semver"));
+    }
+
+    #[test]
+    fn read_json_version_field_returns_value() {
+        let td = tempfile::tempdir().unwrap();
+        let path = td.path().join("plugin.json");
+        std::fs::write(&path, r#"{"name":"x","version":"1.2.3"}"#).unwrap();
+        assert_eq!(read_json_version_field(&path), "1.2.3");
+    }
+
+    #[test]
+    fn read_json_version_field_returns_empty_on_missing_or_malformed() {
+        let td = tempfile::tempdir().unwrap();
+        let missing = td.path().join("nope.json");
+        assert_eq!(read_json_version_field(&missing), "");
+        let malformed = td.path().join("bad.json");
+        std::fs::write(&malformed, "not-json").unwrap();
+        assert_eq!(read_json_version_field(&malformed), "");
+        let no_version = td.path().join("nover.json");
+        std::fs::write(&no_version, r#"{"name":"x"}"#).unwrap();
+        assert_eq!(read_json_version_field(&no_version), "");
+    }
+
+    #[test]
+    fn read_marketplace_plugin_entry_version_picks_first_plugins_entry() {
+        let td = tempfile::tempdir().unwrap();
+        let path = td.path().join("marketplace.json");
+        std::fs::write(
+            &path,
+            r#"{"plugins":[{"id":"a","version":"3.4.5"},{"id":"b","version":"9.9.9"}]}"#,
+        )
+        .unwrap();
+        assert_eq!(read_marketplace_plugin_entry_version(&path), "3.4.5");
+    }
+
+    #[test]
+    fn read_marketplace_plugin_entry_version_returns_empty_on_no_array() {
+        let td = tempfile::tempdir().unwrap();
+        let path = td.path().join("nope.json");
+        std::fs::write(&path, r#"{"plugins":"not-an-array"}"#).unwrap();
+        assert_eq!(read_marketplace_plugin_entry_version(&path), "");
+    }
 }

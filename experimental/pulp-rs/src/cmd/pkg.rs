@@ -1448,43 +1448,11 @@ int main(){return 0;}"#;
         assert!(matches!(s, TargetSub::Help));
     }
 
-    #[test]
-    fn run_list_outside_project_errors() {
-        // resolve_root walks up from cwd looking for a Pulp project
-        // marker; in the test runner's cwd there might or might not
-        // be one. To make the test deterministic, chdir to a
-        // brand-new tempdir (no pulp.toml, no CMakeLists.txt) and
-        // assert run_list returns the documented error.
-        let td = tempfile::tempdir().unwrap();
-        let prev_cwd = std::env::current_dir().unwrap();
-        std::env::set_current_dir(td.path()).unwrap();
-        let mut out = Cursor::new(Vec::<u8>::new());
-        let res = run_list(false, &mut out);
-        // restore cwd before the assert so a panic doesn't leak
-        let _ = std::env::set_current_dir(&prev_cwd);
-        let err = res.unwrap_err();
-        assert!(
-            err.to_string().contains("Not in a Pulp project"),
-            "expected 'Not in a Pulp project' error, got: {err}"
-        );
-    }
-
-    #[test]
-    fn run_list_with_no_lockfile_emits_empty_message() {
-        // pulp.toml present, no packages.lock.json — run_list
-        // prints the documented empty-state message.
-        let td = tempfile::tempdir().unwrap();
-        std::fs::write(td.path().join("pulp.toml"), "[package]\nname=\"t\"\n").unwrap();
-        let prev_cwd = std::env::current_dir().unwrap();
-        std::env::set_current_dir(td.path()).unwrap();
-        let mut out = Cursor::new(Vec::<u8>::new());
-        let res = run_list(false, &mut out);
-        let _ = std::env::set_current_dir(&prev_cwd);
-        res.unwrap();
-        let s = String::from_utf8(out.into_inner()).unwrap();
-        assert!(s.contains("No packages installed."), "missing empty msg: {s:?}");
-        assert!(s.contains("pulp add"), "missing add hint: {s:?}");
-    }
+    // NOTE: these two tests pre-date the `with_cwd` mutex helper
+    // below — they use an inline cwd save/restore which races
+    // against parallel cwd-touching tests in the slice 4 batch.
+    // They're moved later in the file (after the helper) so they
+    // can use the same locked path.
 
     #[test]
     fn run_search_empty_query_prints_help() {
@@ -1502,5 +1470,204 @@ int main(){return 0;}"#;
         assert_eq!(rc, 0);
         let s = String::from_utf8(out.into_inner()).unwrap();
         assert!(s.contains("target"), "expected target usage in help: {s:?}");
+    }
+
+    // ── #45 coverage uplift slice 4 — run_* error/empty paths ──────
+    //
+    // pkg.rs's biggest remaining gap is the run_add / run_remove /
+    // run_update / run_suggest error and empty-input paths. Each one
+    // bails early on a missing argument or missing-project-marker
+    // condition, so they're testable with the same chdir-to-tempdir
+    // shape used above. Grouped together because they all share the
+    // `prev_cwd` save/restore boilerplate.
+
+    // `set_current_dir` is process-global, so cwd-touching tests in
+    // the same module would race when cargo test runs them in
+    // parallel. Serialize them through a static mutex. Same pattern
+    // is used by the existing `run_list_*` tests above (which
+    // happened to work in isolation because no other test was
+    // chdir-ing concurrently), but the new `run_remove_*` /
+    // `run_update_*` / `run_add_*` / `run_target_*_outside_project_*`
+    // tests all share the same race surface — the mutex keeps them
+    // deterministic regardless of how cargo schedules them.
+    static CWD_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn with_cwd<R>(dir: &Path, f: impl FnOnce() -> R) -> R {
+        // poison-tolerant lock: a panicking test inside the closure
+        // poisons the mutex but we still want the next test to
+        // recover (the cwd is restored regardless).
+        let _guard = CWD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let prev = std::env::current_dir().unwrap();
+        std::env::set_current_dir(dir).unwrap();
+        let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(f));
+        let _ = std::env::set_current_dir(prev);
+        match res {
+            Ok(v) => v,
+            Err(p) => std::panic::resume_unwind(p),
+        }
+    }
+
+    fn td_with_pulp_toml() -> tempfile::TempDir {
+        let td = tempfile::tempdir().unwrap();
+        std::fs::write(td.path().join("pulp.toml"), "[package]\nname=\"t\"\n").unwrap();
+        td
+    }
+
+    #[test]
+    fn run_add_with_no_package_id_prints_help() {
+        let mut out = Cursor::new(Vec::<u8>::new());
+        let args = AddArgs::default();
+        let rc = run_add(&args, &mut out).unwrap();
+        assert_eq!(rc, 0);
+        let s = String::from_utf8(out.into_inner()).unwrap();
+        assert!(s.contains("Usage:") || s.contains("pulp add"),
+                "expected add help banner: {s:?}");
+    }
+
+    #[test]
+    fn run_remove_with_no_args_prints_usage() {
+        let mut out = Cursor::new(Vec::<u8>::new());
+        let rc = run_remove(&[], &mut out).unwrap();
+        assert_eq!(rc, 0);
+        let s = String::from_utf8(out.into_inner()).unwrap();
+        assert!(s.contains("Usage: pulp remove"), "missing usage: {s:?}");
+    }
+
+    #[test]
+    fn run_remove_outside_project_errors() {
+        let td = tempfile::tempdir().unwrap();
+        let res = with_cwd(td.path(), || {
+            let mut out = Cursor::new(Vec::<u8>::new());
+            run_remove(&["foo/bar".to_owned()], &mut out)
+        });
+        let err = res.unwrap_err();
+        assert!(err.to_string().contains("Not in a Pulp project"),
+                "expected not-in-project, got: {err}");
+    }
+
+    #[test]
+    fn run_remove_not_installed_returns_one_with_message() {
+        // pulp.toml present but no packages.lock.json → load_lock
+        // returns empty Lock; the requested id isn't in it.
+        let td = td_with_pulp_toml();
+        let res = with_cwd(td.path(), || {
+            let mut out = Cursor::new(Vec::<u8>::new());
+            let rc = run_remove(&["never/installed".to_owned()], &mut out).unwrap();
+            (rc, String::from_utf8(out.into_inner()).unwrap())
+        });
+        assert_eq!(res.0, 1);
+        assert!(res.1.contains("not installed"),
+                "missing not-installed text: {:?}", res.1);
+    }
+
+    #[test]
+    fn run_update_with_no_lockfile_emits_empty_message() {
+        let td = td_with_pulp_toml();
+        let res = with_cwd(td.path(), || {
+            let mut out = Cursor::new(Vec::<u8>::new());
+            let rc = run_update(&[], &mut out).unwrap();
+            (rc, String::from_utf8(out.into_inner()).unwrap())
+        });
+        assert_eq!(res.0, 0);
+        assert!(res.1.contains("No packages installed."),
+                "missing empty-state message: {:?}", res.1);
+    }
+
+    #[test]
+    fn run_update_outside_project_errors() {
+        let td = tempfile::tempdir().unwrap();
+        let res = with_cwd(td.path(), || {
+            let mut out = Cursor::new(Vec::<u8>::new());
+            run_update(&[], &mut out)
+        });
+        let err = res.unwrap_err();
+        assert!(err.to_string().contains("Not in a Pulp project"),
+                "expected not-in-project, got: {err}");
+    }
+
+    #[test]
+    fn run_suggest_with_no_args_prints_help() {
+        let mut out = Cursor::new(Vec::<u8>::new());
+        let args = SuggestArgs::default();
+        let rc = run_suggest(&args, &mut out).unwrap();
+        assert_eq!(rc, 0);
+        let s = String::from_utf8(out.into_inner()).unwrap();
+        assert!(s.contains("Usage: pulp suggest"), "missing usage: {s:?}");
+    }
+
+    #[test]
+    fn run_target_list_outside_project_errors() {
+        let td = tempfile::tempdir().unwrap();
+        let res = with_cwd(td.path(), || {
+            let mut out = Cursor::new(Vec::<u8>::new());
+            run_target(&TargetSub::List, &mut out)
+        });
+        let err = res.unwrap_err();
+        assert!(err.to_string().contains("Not in a Pulp project"),
+                "expected not-in-project, got: {err}");
+    }
+
+    #[test]
+    fn run_target_add_with_empty_string_errors_or_helps() {
+        // parse_target_sub turns "add" with no arg into Add("");
+        // run_target should refuse with a clear message rather than
+        // writing an empty PlatformTarget.
+        let td = td_with_pulp_toml();
+        let res = with_cwd(td.path(), || {
+            let mut out = Cursor::new(Vec::<u8>::new());
+            run_target(&TargetSub::Add(String::new()), &mut out)
+                .map(|rc| (rc, String::from_utf8(out.into_inner()).unwrap()))
+        });
+        // Either returns non-zero or prints something — what we
+        // care about is "doesn't silently succeed corrupting pulp.toml".
+        match res {
+            Ok((rc, s)) => {
+                assert!(rc != 0 || !s.is_empty(),
+                        "empty platform-target accepted silently: rc={rc} out={s:?}");
+            }
+            Err(_) => { /* error is also a fine outcome */ }
+        }
+    }
+
+    #[test]
+    fn run_add_outside_project_errors() {
+        let td = tempfile::tempdir().unwrap();
+        let res = with_cwd(td.path(), || {
+            let mut out = Cursor::new(Vec::<u8>::new());
+            let args = AddArgs {
+                package_id: Some("foo/bar".to_owned()),
+                ..AddArgs::default()
+            };
+            run_add(&args, &mut out)
+        });
+        let err = res.unwrap_err();
+        assert!(err.to_string().contains("Not in a Pulp project"),
+                "expected not-in-project, got: {err}");
+    }
+
+    #[test]
+    fn run_list_outside_project_errors() {
+        let td = tempfile::tempdir().unwrap();
+        let res = with_cwd(td.path(), || {
+            let mut out = Cursor::new(Vec::<u8>::new());
+            run_list(false, &mut out)
+        });
+        let err = res.unwrap_err();
+        assert!(err.to_string().contains("Not in a Pulp project"),
+                "expected 'Not in a Pulp project' error, got: {err}");
+    }
+
+    #[test]
+    fn run_list_with_no_lockfile_emits_empty_message() {
+        let td = td_with_pulp_toml();
+        let res = with_cwd(td.path(), || {
+            let mut out = Cursor::new(Vec::<u8>::new());
+            let r = run_list(false, &mut out);
+            (r, String::from_utf8(out.into_inner()).unwrap())
+        });
+        res.0.unwrap();
+        assert!(res.1.contains("No packages installed."),
+                "missing empty msg: {:?}", res.1);
+        assert!(res.1.contains("pulp add"), "missing add hint: {:?}", res.1);
     }
 }
