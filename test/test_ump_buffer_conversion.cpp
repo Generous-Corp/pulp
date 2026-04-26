@@ -40,8 +40,35 @@ TEST_CASE("scale_16_to_7 inverts scale_7_to_16 for common values", "[midi][ump]"
 }
 
 TEST_CASE("scale_14_to_32 / scale_32_to_14 preserve centre", "[midi][ump]") {
+    REQUIRE(scale_14_to_32(0) == 0);
     REQUIRE(scale_14_to_32(0x2000) == 0x80000000u);
+    REQUIRE(scale_14_to_32(0x3FFF) == 0xFFFFFFFFu);
+    REQUIRE(scale_32_to_14(0) == 0);
     REQUIRE(scale_32_to_14(0x80000000u) == 0x2000);
+    REQUIRE(scale_32_to_14(0xFFFFFFFFu) == 0x3FFF);
+}
+
+TEST_CASE("midi1_event_to_ump2 handles note-off aliases and raw fallbacks",
+          "[midi][ump][issue-645]") {
+    auto velocity_zero_note_on = midi1_event_to_ump2(MidiEvent::note_on(2, 64, 0), 3);
+    REQUIRE(velocity_zero_note_on.message_type() == UmpMessageType::Midi2ChannelVoice);
+    REQUIRE(velocity_zero_note_on.group() == 3);
+    REQUIRE(velocity_zero_note_on.status() == 0x82);
+    REQUIRE(velocity_zero_note_on.note_number() == 64);
+    REQUIRE(velocity_zero_note_on.velocity_16() == 0);
+
+    auto program = MidiEvent::program_change(5, 12);
+    auto fallback = midi1_event_to_ump2(program, 0x1F);
+    REQUIRE(fallback.message_type() == UmpMessageType::Midi1ChannelVoice);
+    REQUIRE(fallback.word_count == 1);
+    REQUIRE(fallback.group() == 0x0F);
+    REQUIRE(fallback.status() == 0xC5);
+
+    MidiEvent out{};
+    REQUIRE(ump_to_midi1_event(fallback, out));
+    REQUIRE(out.is_program_change());
+    REQUIRE(out.channel() == 5);
+    REQUIRE(out.data()[1] == 12);
 }
 
 TEST_CASE("midi1_to_ump round-trip via ump_to_midi1", "[midi][ump]") {
@@ -83,6 +110,83 @@ TEST_CASE("midi1_to_ump round-trip via ump_to_midi1", "[midi][ump]") {
     // Tiny velocity clamped to 1 (not zero, which would be a note-off).
     REQUIRE(out[4].is_note_on());
     REQUIRE(out[4].velocity() >= 1);
+}
+
+TEST_CASE("midi1_to_ump preserves sample offsets and group metadata",
+          "[midi][ump][issue-645]") {
+    MidiBuffer in;
+    auto note = MidiEvent::note_on(0, 60, 100);
+    note.sample_offset = 128;
+    auto cc = MidiEvent::cc(1, 74, 127);
+    cc.sample_offset = 256;
+    in.add(note);
+    in.add(cc);
+
+    UmpBuffer out;
+    midi1_to_ump(in, out, 7);
+    REQUIRE(out.size() == 2);
+    REQUIRE(out[0].sample_offset == 128);
+    REQUIRE(out[0].packet.group() == 7);
+    REQUIRE(out[1].sample_offset == 256);
+    REQUIRE(out[1].packet.group() == 7);
+    REQUIRE(out[1].packet.data_32() == 0xFE000000u);
+}
+
+TEST_CASE("ump_to_midi1_event converts MIDI2 edge values",
+          "[midi][ump][issue-645]") {
+    auto pitch_bend_value = [](const MidiEvent& ev) {
+        return static_cast<uint16_t>(ev.data()[1] |
+                                     (static_cast<uint16_t>(ev.data()[2]) << 7));
+    };
+
+    MidiEvent out{};
+    REQUIRE(ump_to_midi1_event(UmpPacket::note_on_2(0, 9, 61, 1), out));
+    REQUIRE(out.is_note_on());
+    REQUIRE(out.channel() == 9);
+    REQUIRE(out.note() == 61);
+    REQUIRE(out.velocity() == 1);
+
+    REQUIRE(ump_to_midi1_event(UmpPacket::note_off_2(0, 10, 62, 0xFFFF), out));
+    REQUIRE(out.is_note_off());
+    REQUIRE(out.channel() == 10);
+    REQUIRE(out.note() == 62);
+    REQUIRE(out.velocity() == 127);
+
+    REQUIRE(ump_to_midi1_event(UmpPacket::cc_2(0, 3, 11, 0xFFFFFFFFu), out));
+    REQUIRE(out.is_cc());
+    REQUIRE(out.channel() == 3);
+    REQUIRE(out.cc_number() == 11);
+    REQUIRE(out.cc_value() == 127);
+
+    REQUIRE(ump_to_midi1_event(UmpPacket::pitch_bend_2(0, 4, 0x80000000u), out));
+    REQUIRE(out.is_pitch_bend());
+    REQUIRE(out.channel() == 4);
+    REQUIRE(pitch_bend_value(out) == 0x2000);
+}
+
+TEST_CASE("ump_to_midi1 skips packets with no MIDI1 equivalent",
+          "[midi][ump][issue-645]") {
+    MidiEvent out{};
+    UmpPacket utility{};
+    utility.word_count = 1;
+    utility.words[0] = 0;
+    REQUIRE_FALSE(ump_to_midi1_event(utility, out));
+    REQUIRE_FALSE(ump_to_midi1_event(
+        UmpPacket::per_note_pitch_bend(0, 1, 60, 0x80000000u), out));
+
+    UmpBuffer in;
+    in.add(UmpPacket::note_on_2(0, 1, 60, 0x8000), 17);
+    in.add(UmpPacket::per_note_pitch_bend(0, 1, 60, 0x90000000u), 23);
+    in.add(UmpPacket::midi1_note_on(0, 2, 67, 100), 31);
+
+    MidiBuffer flattened;
+    ump_to_midi1(in, flattened);
+    REQUIRE(flattened.size() == 2);
+    REQUIRE(flattened[0].is_note_on());
+    REQUIRE(flattened[0].sample_offset == 17);
+    REQUIRE(flattened[1].is_note_on());
+    REQUIRE(flattened[1].channel() == 2);
+    REQUIRE(flattened[1].sample_offset == 31);
 }
 
 TEST_CASE("MpeVoiceTracker ingests UMP MIDI 2.0 note-on", "[midi][ump][mpe]") {
