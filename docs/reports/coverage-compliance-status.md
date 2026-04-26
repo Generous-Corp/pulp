@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-26 18:53 EDT
+Last reviewed: 2026-04-26 19:06 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -180,6 +180,10 @@ Open Phase 3 PRs:
 - `#829` MIDI-CI edge coverage for `#645`, branch
   `feature/midi-ci-coverage-645`, head `f0ef6b0f`; opened from `main`
   at `94e3ef2a`. This tranche also uses the GitHub/Namespace path while
+  the SSH `windows` target remains unreachable.
+- `#830` RPN parser edge coverage for `#645`, branch
+  `feature/midi-rpn-coverage-645`, head `d1edf1e1`; opened from `main`
+  at `d0262a1b`. This tranche also uses the GitHub/Namespace path while
   the SSH `windows` target remains unreachable.
 
 Local Phase 3 draft worktrees:
@@ -553,6 +557,17 @@ Local Phase 3 draft worktrees:
   assertions in `6` cases, full binary passed `65` assertions in `15`
   cases, focused CTest passed `6/6`, `git diff --check`, skill-sync
   report, and version-bump report.
+- `#645` RPN parser worktree
+  `/Users/danielraffel/Code/pulp-midi-rpn-coverage-645`, branch
+  `feature/midi-rpn-coverage-645`, commit `d1edf1e1`; open as PR `#830`.
+  Scope: test-only coverage for incomplete selections, unrelated CCs,
+  omitted callbacks on otherwise complete RPN/NRPN sequences, and NRPN
+  increment/decrement metadata. Local validation: no-GPU/no-examples
+  configure, `pulp-test-midi-expansion` build, direct
+  `[midi][rpn][issue-645]` run passed `6` assertions in `3` cases, full
+  binary passed `57` assertions in `23` cases, focused CTest passed
+  `3/3`, `git diff --check`, skill-sync report, and version-bump
+  report.
 
 Open supporting PR:
 
@@ -565,8 +580,8 @@ Open supporting PR:
   merged, `#822` was repaired, `#824` opened, `#821` merged, and `#819`
   merged, `#825` opened, `#820` merged, `#826` opened, `#822` was
   repaired again for Android SDK discovery, `#827` opened, `#823`
-  merged, `#824` merged, `#828` opened, `#829` opened, and `#825`
-  merged, and remains docs-only.
+  merged, `#824` merged, `#828` opened, `#829` opened, `#825` merged,
+  and `#830` opened, and remains docs-only.
 
 Local environment note:
 
@@ -600,10 +615,13 @@ Next recovery actions:
 6. Monitor `#829` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-midi-ci-coverage-645`, patch,
    validate locally, and push with lease.
-7. If any open Phase 3 PR is green but GitHub reports it behind `main`,
+7. Monitor `#830` cloud checks; if a required lane fails, debug in
+   `/Users/danielraffel/Code/pulp-midi-rpn-coverage-645`, patch,
+   validate locally, and push with lease.
+8. If any open Phase 3 PR is green but GitHub reports it behind `main`,
    rebase that branch onto `origin/main`, push with lease, and let
    checks rerun.
-8. Continue Phase 3 from the tranche issues below, prioritizing
+9. Continue Phase 3 from the tranche issues below, prioritizing
    represented high-miss files over adding new perimeter lanes.
 
 ## Phase 1 corrected baseline
