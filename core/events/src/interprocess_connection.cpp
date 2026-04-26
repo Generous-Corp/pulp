@@ -1,12 +1,31 @@
 #include <pulp/events/interprocess_connection.hpp>
 #include <pulp/runtime/named_pipe.hpp>
 #include <pulp/runtime/socket.hpp>
+#include <charconv>
 #include <cstring>
 #include <mutex>
+#include <optional>
 
 namespace pulp::events {
 
 using namespace pulp::runtime;
+
+namespace {
+
+std::optional<uint16_t> parse_port(std::string_view text) {
+    if (text.empty()) return std::nullopt;
+
+    uint32_t value = 0;
+    const char* begin = text.data();
+    const char* end = begin + text.size();
+    auto [ptr, ec] = std::from_chars(begin, end, value);
+    if (ec != std::errc{} || ptr != end || value > 65535) {
+        return std::nullopt;
+    }
+    return static_cast<uint16_t>(value);
+}
+
+}  // namespace
 
 // ── Impl ────────────────────────────────────────────────────────────────
 
@@ -56,11 +75,18 @@ bool InterprocessConnection::connect(std::string_view name, IpcTransport transpo
     } else {
         // Parse host:port
         auto colon = name.find(':');
-        if (colon == std::string_view::npos) return false;
+        if (colon == std::string_view::npos) {
+            state_.store(IpcState::Error);
+            return false;
+        }
         std::string host(name.substr(0, colon));
-        uint16_t port = static_cast<uint16_t>(std::stoi(std::string(name.substr(colon + 1))));
+        auto port = parse_port(name.substr(colon + 1));
+        if (!port) {
+            state_.store(IpcState::Error);
+            return false;
+        }
         impl_->socket.create(SocketType::TCP);
-        ok = impl_->socket.connect(host, port);
+        ok = impl_->socket.connect(host, *port);
     }
 
     if (ok) {
@@ -85,16 +111,20 @@ bool InterprocessConnection::create_server(std::string_view name, IpcTransport t
         ok = impl_->pipe.create_server(name);
     } else {
         auto colon = name.find(':');
-        uint16_t port = 0;
+        std::optional<uint16_t> port;
         std::string host = "0.0.0.0";
         if (colon != std::string_view::npos) {
             host = std::string(name.substr(0, colon));
-            port = static_cast<uint16_t>(std::stoi(std::string(name.substr(colon + 1))));
+            port = parse_port(name.substr(colon + 1));
         } else {
-            port = static_cast<uint16_t>(std::stoi(std::string(name)));
+            port = parse_port(name);
+        }
+        if (!port) {
+            state_.store(IpcState::Error);
+            return false;
         }
         impl_->socket.create(SocketType::TCP);
-        if (impl_->socket.bind(host, port) && impl_->socket.listen(1)) {
+        if (impl_->socket.bind(host, *port) && impl_->socket.listen(1)) {
             auto client = impl_->socket.accept();
             if (client) {
                 impl_->socket = std::move(*client);
@@ -238,16 +268,17 @@ bool InterprocessConnectionServer::start(std::string_view name, IpcTransport tra
     if (transport == IpcTransport::Socket) {
         auto colon = name.find(':');
         std::string host = "0.0.0.0";
-        uint16_t port = 0;
+        std::optional<uint16_t> port;
         if (colon != std::string_view::npos) {
             host = std::string(name.substr(0, colon));
-            port = static_cast<uint16_t>(std::stoi(std::string(name.substr(colon + 1))));
+            port = parse_port(name.substr(colon + 1));
         } else {
-            port = static_cast<uint16_t>(std::stoi(std::string(name)));
+            port = parse_port(name);
         }
+        if (!port) return false;
 
         server_impl_->listen_socket.create(SocketType::TCP);
-        if (!server_impl_->listen_socket.bind(host, port)) return false;
+        if (!server_impl_->listen_socket.bind(host, *port)) return false;
         if (!server_impl_->listen_socket.listen(5)) return false;
     }
 
@@ -257,6 +288,10 @@ bool InterprocessConnectionServer::start(std::string_view name, IpcTransport tra
             if (server_impl_->transport == IpcTransport::Socket) {
                 auto client_sock = server_impl_->listen_socket.accept();
                 if (!client_sock) continue;
+                if (!running_.load()) {
+                    client_sock->close();
+                    break;
+                }
 
                 auto conn = std::make_unique<InterprocessConnection>();
                 // Inject the accepted socket via friend access
@@ -286,7 +321,27 @@ bool InterprocessConnectionServer::start(std::string_view name, IpcTransport tra
 }
 
 void InterprocessConnectionServer::stop() {
-    running_.store(false);
+    const bool was_running = running_.exchange(false);
+    if (was_running && server_impl_->transport == IpcTransport::Socket &&
+        server_impl_->listen_socket.is_open()) {
+        std::string host = "127.0.0.1";
+        std::optional<uint16_t> port;
+        std::string_view name(server_impl_->name);
+        auto colon = name.find(':');
+        if (colon != std::string_view::npos) {
+            host = std::string(name.substr(0, colon));
+            port = parse_port(name.substr(colon + 1));
+        } else {
+            port = parse_port(name);
+        }
+        if (host.empty() || host == "0.0.0.0") host = "127.0.0.1";
+        if (port) {
+            Socket wake;
+            if (wake.create(SocketType::TCP)) {
+                (void)wake.connect(host, *port);
+            }
+        }
+    }
     server_impl_->listen_socket.close();
     if (accept_thread_.joinable()) accept_thread_.join();
     clients_.clear();

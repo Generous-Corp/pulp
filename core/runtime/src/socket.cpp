@@ -27,9 +27,11 @@ static bool winsock_init() {
     return initialized;
 }
 #define SOCKET_CLOSE closesocket
+#define SOCKET_SHUTDOWN(fd) ::shutdown((fd), SD_BOTH)
 #define SOCKET_INVALID INVALID_SOCKET
 #else
 #define SOCKET_CLOSE ::close
+#define SOCKET_SHUTDOWN(fd) ::shutdown((fd), SHUT_RDWR)
 #define SOCKET_INVALID (-1)
 #endif
 
@@ -167,6 +169,9 @@ int Socket::receive_from(uint8_t* buffer, size_t buffer_size,
 
 void Socket::close() {
     if (fd_ != SOCKET_INVALID) {
+        if (type_ == SocketType::TCP) {
+            (void)SOCKET_SHUTDOWN(fd_);
+        }
         SOCKET_CLOSE(fd_);
         fd_ = -1;
     }
