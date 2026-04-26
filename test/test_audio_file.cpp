@@ -9,6 +9,7 @@
 #include <fstream>
 #include <iterator>
 #include <cmath>
+#include <memory>
 #include <string>
 #include <vector>
 #include <utility>
@@ -77,6 +78,84 @@ static void require_wav_header(const std::vector<uint8_t>& bytes,
     REQUIRE(std::string(reinterpret_cast<const char*>(bytes.data() + 36), 4) == "data");
     REQUIRE(read_le32(bytes, 40) == data_size);
 }
+
+namespace {
+
+struct RegistryProbeState {
+    int info_calls = 0;
+    int read_calls = 0;
+    int write_calls = 0;
+    std::string last_info_path;
+    std::string last_read_path;
+    std::string last_write_path;
+    size_t last_written_channels = 0;
+};
+
+class RegistryProbeReader : public FormatReader {
+public:
+    explicit RegistryProbeReader(std::shared_ptr<RegistryProbeState> state)
+        : state_(std::move(state)) {}
+
+    std::optional<AudioFileInfo> read_info(const std::string& path) override {
+        state_->info_calls++;
+        state_->last_info_path = path;
+
+        AudioFileInfo info;
+        info.sample_rate = 22050;
+        info.num_channels = 2;
+        info.num_frames = 3;
+        info.bits_per_sample = 24;
+        info.duration_seconds = 3.0 / 22050.0;
+        info.format = "Probe";
+        return info;
+    }
+
+    std::optional<AudioFileData> read(const std::string& path) override {
+        state_->read_calls++;
+        state_->last_read_path = path;
+
+        AudioFileData data;
+        data.sample_rate = 22050;
+        data.channels = {
+            {0.0f, 0.25f, 0.5f},
+            {-0.5f, -0.25f, 1.0f},
+        };
+        return data;
+    }
+
+    bool supports_extension(std::string_view ext) const override {
+        return ext == ".aifc";
+    }
+
+    std::string format_name() const override { return "Probe"; }
+
+private:
+    std::shared_ptr<RegistryProbeState> state_;
+};
+
+class RegistryProbeWriter : public FormatWriter {
+public:
+    explicit RegistryProbeWriter(std::shared_ptr<RegistryProbeState> state)
+        : state_(std::move(state)) {}
+
+    bool write(const std::string& path, const AudioFileData& data) override {
+        state_->write_calls++;
+        state_->last_write_path = path;
+        state_->last_written_channels = data.num_channels();
+        return !data.empty();
+    }
+
+    bool supports_extension(std::string_view ext) const override {
+        return ext == ".aifc";
+    }
+
+    std::string format_name() const override { return "Probe"; }
+
+private:
+    std::shared_ptr<RegistryProbeState> state_;
+};
+
+}  // namespace
 
 static void append_be16(std::vector<unsigned char>& bytes, uint16_t value) {
     bytes.push_back(static_cast<unsigned char>((value >> 8) & 0xFF));
@@ -392,6 +471,8 @@ TEST_CASE("FormatRegistry exposes built-in audio codecs", "[audio][file][registr
     REQUIRE(registry.find_writer("AIF") != nullptr);
     REQUIRE(registry.find_reader(".not-a-format") == nullptr);
     REQUIRE(registry.find_writer(".not-a-format") == nullptr);
+    REQUIRE_FALSE(registry.read_info("pulp_test_audio.not-a-format").has_value());
+    REQUIRE_FALSE(registry.read("pulp_test_audio.not-a-format").has_value());
 
     auto read_extensions = registry.supported_read_extensions();
     REQUIRE(contains_extension(read_extensions, ".wav"));
@@ -408,6 +489,55 @@ TEST_CASE("FormatRegistry exposes built-in audio codecs", "[audio][file][registr
     REQUIRE(contains_extension(write_extensions, ".wave"));
     REQUIRE(contains_extension(write_extensions, ".aiff"));
     REQUIRE(contains_extension(write_extensions, ".aif"));
+}
+
+TEST_CASE("FormatRegistry dispatches custom readers and writers through normalized paths",
+          "[audio][file][registry][issue-640]") {
+    auto& registry = FormatRegistry::instance();
+    auto state = std::make_shared<RegistryProbeState>();
+
+    registry.register_reader(std::make_unique<RegistryProbeReader>(state));
+    registry.register_writer(std::make_unique<RegistryProbeWriter>(state));
+
+    REQUIRE(registry.find_reader("AIFC") != nullptr);
+    REQUIRE(registry.find_writer(".AIFC") != nullptr);
+
+    auto info_path = (std::filesystem::temp_directory_path() / "pulp_probe_info.AIFC").string();
+    auto info = registry.read_info(info_path);
+    REQUIRE(info.has_value());
+    REQUIRE(info->format == "Probe");
+    REQUIRE(info->sample_rate == 22050);
+    REQUIRE(info->num_channels == 2);
+    REQUIRE(info->num_frames == 3);
+    REQUIRE(info->bits_per_sample == 24);
+    REQUIRE(state->info_calls == 1);
+    REQUIRE(state->last_info_path == info_path);
+
+    auto read_path = (std::filesystem::temp_directory_path() / "pulp_probe_read.aifc").string();
+    auto data = registry.read(read_path);
+    REQUIRE(data.has_value());
+    REQUIRE(data->sample_rate == 22050);
+    REQUIRE(data->num_channels() == 2);
+    REQUIRE(data->num_frames() == 3);
+    REQUIRE_THAT(data->channels[1][2], WithinAbs(1.0f, 0.001f));
+    REQUIRE(state->read_calls == 1);
+    REQUIRE(state->last_read_path == read_path);
+
+    AudioFileData out;
+    out.sample_rate = 48000;
+    out.channels = {{0.0f, 0.5f}};
+    auto write_path = (std::filesystem::temp_directory_path() / "pulp_probe_write.AIFC").string();
+    REQUIRE(registry.write(write_path, out));
+    REQUIRE(state->write_calls == 1);
+    REQUIRE(state->last_write_path == write_path);
+    REQUIRE(state->last_written_channels == 1);
+    REQUIRE_FALSE(registry.write(write_path, AudioFileData{}));
+    REQUIRE(state->write_calls == 2);
+
+    auto read_extensions = registry.supported_read_extensions();
+    REQUIRE(contains_extension(read_extensions, ".aifc"));
+    auto write_extensions = registry.supported_write_extensions();
+    REQUIRE(contains_extension(write_extensions, ".aifc"));
 }
 
 TEST_CASE("FormatRegistry writes and reads AIFF files", "[audio][file][registry][aiff]") {
