@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <mutex>
 #include <condition_variable>
-#include <cstdlib>
 
 namespace pulp::events {
 
@@ -41,36 +40,33 @@ std::vector<std::string> MountedVolumeListChangeDetector::get_mounted_volumes() 
 #ifdef __APPLE__
     // macOS: /Volumes/*
     std::error_code ec;
-    for (auto& entry : std::filesystem::directory_iterator("/Volumes", ec)) {
-        std::error_code entry_ec;
-        if (entry.is_directory(entry_ec))
+    for (auto& entry : std::filesystem::directory_iterator("/Volumes", ec))
+        if (entry.is_directory())
             volumes.push_back(entry.path().string());
-    }
 #elif defined(__linux__)
     // Linux: /media/$USER/* and /mnt/*
     std::error_code ec;
-    for (auto& entry : std::filesystem::directory_iterator("/mnt", ec)) {
-        std::error_code entry_ec;
-        if (entry.is_directory(entry_ec))
+    for (auto& entry : std::filesystem::directory_iterator("/mnt", ec))
+        if (entry.is_directory())
             volumes.push_back(entry.path().string());
-    }
 
     const char* user = std::getenv("USER");
     if (user) {
         std::string media_path = "/media/" + std::string(user);
-        for (auto& entry : std::filesystem::directory_iterator(media_path, ec)) {
-            std::error_code entry_ec;
-            if (entry.is_directory(entry_ec))
+        for (auto& entry : std::filesystem::directory_iterator(media_path, ec))
+            if (entry.is_directory())
                 volumes.push_back(entry.path().string());
-        }
     }
 #elif defined(_WIN32)
     // Windows: drive letters
     for (char c = 'A'; c <= 'Z'; ++c) {
         std::string drive = std::string(1, c) + ":\\";
-        std::error_code ec;
-        if (std::filesystem::exists(drive, ec))
-            volumes.push_back(drive);
+        try {
+            if (std::filesystem::exists(drive))
+                volumes.push_back(drive);
+        } catch (const std::filesystem::filesystem_error&) {
+            // Some removable Windows drives report present-but-not-ready.
+        }
     }
 #endif
 
