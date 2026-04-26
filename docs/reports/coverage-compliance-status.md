@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-26 16:20 EDT
+Last reviewed: 2026-04-26 16:23 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -143,12 +143,10 @@ Merged after the Phase 1 closeout / `#723` baseline:
 - `#813` signal dynamics helper coverage -> `957a0735`
 - `#814` CLI `pulp pr` shellout coverage -> `8bd4a3e9`
 - `#815` MPE tracker edge-path coverage -> `019130bd`
+- `#816` MIDI running-status parser edge coverage -> `c9620a65`
 
 Open Phase 3 PRs:
 
-- `#816` MIDI running-status parser edge coverage for `#645`, branch
-  `feature/midi-running-status-coverage-645`, head `94b93a6e`; opened
-  from `main` at `957a0735`. Cloud checks are the active gate.
 - `#817` UMP conversion edge coverage for `#645`, branch
   `feature/midi-ump-conversion-coverage-645`, head `c4420370`; opened
   from `main` at `957a0735`. `shipyard pr` was attempted first but
@@ -305,7 +303,8 @@ Local Phase 3 draft worktrees:
 - `#645` MIDI running-status parser worktree
   `/Users/danielraffel/Code/pulp-midi-running-status-coverage-645`,
   branch `feature/midi-running-status-coverage-645`, commit `94b93a6e`;
-  open as PR `#816`.
+  merged via PR `#816` as `c9620a65`. The remote branch was deleted
+  after merge.
   Scope: test-only coverage for one-byte and two-byte channel running
   status, system-common data lengths, real-time bytes inside sysex,
   status restart inside sysex, empty sysex / unknown status ignore
@@ -368,7 +367,7 @@ Open supporting PR:
   `docs/coverage-status-2026-04-25`. The branch is updated as this
   tracker changes; use the PR head SHA in GitHub as the live value.
   The branch has been rebased onto `origin/main` after `#813` merged,
-  updated after `#815` merged and `#819` opened, and remains docs-only.
+  updated after `#816` merged and `#819` opened, and remains docs-only.
 
 Local environment note:
 
@@ -387,22 +386,19 @@ Local environment note:
 Next recovery actions:
 
 1. Keep `#774` docs-only and let its latest status-update checks drain.
-2. Monitor `#816` cloud checks; if a required lane fails, debug in
-   `/Users/danielraffel/Code/pulp-midi-running-status-coverage-645`,
-   patch, validate locally, and push with lease.
-3. Monitor `#817` cloud checks; if a required lane fails, debug in
+2. Monitor `#817` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-midi-ump-conversion-coverage-645`,
    patch, validate locally, and push with lease.
-4. Monitor `#818` cloud checks; if a required lane fails, debug in
+3. Monitor `#818` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-midi-mpe-synth-voice-coverage-645`,
    patch, validate locally, and push with lease.
-5. Monitor `#819` cloud checks; if a required lane fails, debug in
+4. Monitor `#819` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-midi-keyboard-sequence-coverage-645`,
    patch, validate locally, and push with lease.
-6. If any open Phase 3 PR is green but GitHub reports it behind `main`,
+5. If any open Phase 3 PR is green but GitHub reports it behind `main`,
    rebase that branch onto `origin/main`, push with lease, and let
    checks rerun.
-7. Continue Phase 3 from the tranche issues below, prioritizing
+6. Continue Phase 3 from the tranche issues below, prioritizing
    represented high-miss files over adding new perimeter lanes.
 
 ## Phase 1 corrected baseline
