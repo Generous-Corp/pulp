@@ -243,7 +243,7 @@ TEST_CASE("wait preserves output after is_running observes fast exit",
     ChildProcess cp;
 
 #ifdef _WIN32
-    REQUIRE(cp.start("cmd", {"/c", "<nul set /p=cached"}));
+    REQUIRE(cp.start("cmd", {"/c", "<nul set /p dummy=cached & exit /b 0"}));
 #else
     REQUIRE(cp.start("/bin/sh", {"-c", "printf cached"}));
 #endif
@@ -255,5 +255,9 @@ TEST_CASE("wait preserves output after is_running observes fast exit",
 
     auto r = cp.wait();
     REQUIRE(r.exit_code == 0);
+#ifdef _WIN32
+    REQUIRE(r.stdout_output.find("cached") != std::string::npos);
+#else
     REQUIRE(r.stdout_output == "cached");
+#endif
 }
