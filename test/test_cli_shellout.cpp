@@ -912,9 +912,10 @@ TEST_CASE("pulp pr native mode refuses to run outside a project",
     ScopedEnvVar path("PATH");
     path.set("");
 
+    const auto bin = fs::absolute(pulp_binary());
     auto cwd_saver = fs::current_path();
     fs::current_path(fs::temp_directory_path());
-    auto r = run_pulp({"pr", "--native", "--no-push"});
+    auto r = exec(bin.string(), {"pr", "--native", "--no-push"}, 10000);
     fs::current_path(cwd_saver);
 
     REQUIRE_FALSE(r.timed_out);
