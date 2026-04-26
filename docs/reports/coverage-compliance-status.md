@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-26 02:13 EDT
+Last reviewed: 2026-04-26 02:22 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -195,6 +195,19 @@ Open Phase 3 PRs:
   local build still reports an existing unused-variable warning elsewhere
   in `test/test_signal.cpp`; it is not introduced by this tranche. The PR
   is labeled `codecov` and is using the direct GitHub/Namespace path.
+- `#805` `test(cli): cover common helper edges`, branch
+  `feature/cli-common-coverage-643`, commit `17b42f0f`, worktree
+  `/Users/danielraffel/Code/pulp-cli-common-coverage-643`.
+  Scope: test-only CLI common helper coverage for numeric parsing,
+  string normalization, root/path containment helpers, `PULP_HOME` and
+  config overrides, create-format defaults, AAX helper labels, shell
+  quoting, and fuzzy scoring. Local validation: no-GPU configure,
+  `pulp-test-cli-project-command` target build, direct Catch2 tag
+  `[cli][common][issue-643]` passed with `54` assertions in `4` test
+  cases, focused CTest `cli common` passed `4/4`, `git diff --check`
+  clean, skill sync clean, and version bump report says no bump needed.
+  The PR is labeled `codecov` and is using the direct GitHub/Namespace
+  path.
 
 Local Phase 3 draft worktrees:
 
@@ -248,6 +261,10 @@ Local Phase 3 draft worktrees:
   `/Users/danielraffel/Code/pulp-signal-oversampling-coverage-645`,
   branch `feature/signal-oversampling-coverage-645`, commit `bccaec0f`;
   open as PR `#804`.
+- `#643` CLI common helper worktree
+  `/Users/danielraffel/Code/pulp-cli-common-coverage-643`, branch
+  `feature/cli-common-coverage-643`, commit `17b42f0f`; open as PR
+  `#805`.
 
 Open supporting PR:
 
@@ -268,11 +285,11 @@ Local environment note:
 Next recovery actions:
 
 1. Keep `#774` docs-only and let its latest status-update checks drain.
-2. Monitor `#801`, `#802`, `#803`, and `#804` and address any Codecov,
-   build, sanitizer, or Namespace feedback.
-3. If `#801`, `#802`, `#803`, or `#804` is green but GitHub reports it
-   behind `main`, rebase that branch onto `origin/main`, push with lease,
-   and let checks rerun.
+2. Monitor `#801`, `#802`, `#803`, `#804`, and `#805` and address any
+   Codecov, build, sanitizer, or Namespace feedback.
+3. If `#801`, `#802`, `#803`, `#804`, or `#805` is green but GitHub
+   reports it behind `main`, rebase that branch onto `origin/main`, push
+   with lease, and let checks rerun.
 4. Continue Phase 3 from the tranche issues below, prioritizing
    represented high-miss files over adding new perimeter lanes.
 
