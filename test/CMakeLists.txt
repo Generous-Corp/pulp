@@ -783,6 +783,11 @@ add_executable(pulp-test-signal test_signal.cpp)
 target_link_libraries(pulp-test-signal PRIVATE pulp::signal Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-signal)
 
+# Multi-channel meter edge tests (#645)
+add_executable(pulp-test-multi-channel-meter test_multi_channel_meter.cpp)
+target_link_libraries(pulp-test-multi-channel-meter PRIVATE pulp::signal Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-multi-channel-meter)
+
 # DSL processor contract tests (FaustProcessor + PulpFaustUI + PulpFaustMeta)
 add_executable(pulp-test-dsl-processor test_dsl_processor.cpp)
 target_link_libraries(pulp-test-dsl-processor PRIVATE
