@@ -2,6 +2,8 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/audio/audio_file.hpp>
 #include <pulp/audio/format_registry.hpp>
+#include <pulp/audio/mmap_reader.hpp>
+#include <pulp/audio/offline_processor.hpp>
 #include <pulp/audio/streaming_writer.hpp>
 #include <algorithm>
 #include <cstdint>
@@ -335,6 +337,142 @@ TEST_CASE("Read nonexistent file returns nullopt", "[audio][file]") {
 
     auto info = read_audio_file_info("/nonexistent/path.wav");
     REQUIRE_FALSE(info.has_value());
+}
+
+TEST_CASE("MemoryMappedAudioReader opens WAV files and reads frame ranges",
+          "[audio][file][mmap][issue-640]") {
+    auto path = unique_temp_audio_path("_mmap.wav");
+    std::filesystem::remove(path);
+
+    AudioFileData data;
+    data.sample_rate = 48000;
+    data.channels = {
+        {0.0f, 0.25f, 0.5f, 0.75f},
+        {-0.75f, -0.5f, -0.25f, 0.0f},
+    };
+    REQUIRE(write_wav_file(path.string(), data));
+
+    MemoryMappedAudioReader reader;
+    REQUIRE_FALSE(reader.is_open());
+    REQUIRE_FALSE(reader.read_all().has_value());
+
+    REQUIRE(reader.open(path.string()));
+    REQUIRE(reader.is_open());
+    REQUIRE(reader.data() != nullptr);
+    REQUIRE(reader.size() > 44);
+    REQUIRE(reader.info().sample_rate == 48000);
+    REQUIRE(reader.info().num_channels == 2);
+    REQUIRE(reader.info().num_frames == 4);
+
+    float left[2] = {};
+    float right[2] = {};
+    float* channels[] = {left, right};
+    REQUIRE(reader.read_frames(channels, 2, 1, 2));
+    REQUIRE_THAT(left[0], WithinAbs(0.25f, 0.001f));
+    REQUIRE_THAT(left[1], WithinAbs(0.5f, 0.001f));
+    REQUIRE_THAT(right[0], WithinAbs(-0.5f, 0.001f));
+    REQUIRE_THAT(right[1], WithinAbs(-0.25f, 0.001f));
+
+    float mono[2] = {-9.0f, -9.0f};
+    float* mono_channel[] = {mono};
+    REQUIRE(reader.read_frames(mono_channel, 1, 3, 8));
+    REQUIRE_THAT(mono[0], WithinAbs(0.75f, 0.001f));
+    REQUIRE_THAT(mono[1], WithinAbs(-9.0f, 0.001f));
+
+    auto all = reader.read_all();
+    REQUIRE(all.has_value());
+    REQUIRE(all->sample_rate == 48000);
+    REQUIRE(all->num_channels() == 2);
+    REQUIRE(all->num_frames() == 4);
+
+    reader.close();
+    REQUIRE_FALSE(reader.is_open());
+    REQUIRE(reader.info().num_frames == 0);
+    REQUIRE_FALSE(reader.read_frames(channels, 2, 0, 1));
+    REQUIRE_FALSE(reader.open((path.string() + ".missing")));
+
+    std::filesystem::remove(path);
+}
+
+TEST_CASE("offline processing handles guards, block tails, and file dispatch",
+          "[audio][file][offline][issue-640]") {
+    AudioFileData input;
+    input.sample_rate = 44100;
+    input.channels = {
+        {0.1f, 0.2f, 0.3f, 0.4f, 0.5f},
+        {-0.1f, -0.2f, -0.3f, -0.4f, -0.5f},
+    };
+
+    REQUIRE_FALSE(offline_process(AudioFileData{}, [](const float*, float*, int, int, double) {}).has_value());
+    REQUIRE_FALSE(offline_process(input, {}, 2).has_value());
+    REQUIRE_FALSE(offline_process(input, [](const float*, float*, int, int, double) {}, 0).has_value());
+    REQUIRE_FALSE(offline_process(input, [](const float*, float*, int, int, double) {}, -8).has_value());
+
+    std::vector<int> block_frames;
+    auto output = offline_process(
+        input,
+        [&](const float* in, float* out, int channels, int frames, double sample_rate) {
+            REQUIRE(channels == 2);
+            REQUIRE(sample_rate == 44100.0);
+            block_frames.push_back(frames);
+            for (int frame = 0; frame < frames; ++frame) {
+                out[frame * channels] = in[frame * channels] * 2.0f;
+                out[frame * channels + 1] = in[frame * channels + 1] * -3.0f;
+            }
+        },
+        3);
+
+    REQUIRE(output.has_value());
+    REQUIRE(block_frames == std::vector<int>{3, 2});
+    REQUIRE(output->sample_rate == 44100);
+    REQUIRE(output->num_channels() == 2);
+    REQUIRE(output->num_frames() == 5);
+    REQUIRE_THAT(output->channels[0][4], WithinAbs(1.0f, 0.001f));
+    REQUIRE_THAT(output->channels[1][4], WithinAbs(1.5f, 0.001f));
+
+    auto gained = apply_gain(input, 0.5f);
+    REQUIRE(gained.sample_rate == 44100);
+    REQUIRE_THAT(gained.channels[0][2], WithinAbs(0.15f, 0.001f));
+    REQUIRE_THAT(gained.channels[1][2], WithinAbs(-0.15f, 0.001f));
+
+    auto in_path = unique_temp_audio_path("_offline_in.wav");
+    auto out_path = unique_temp_audio_path("_offline_out.wav");
+    std::filesystem::remove(in_path);
+    std::filesystem::remove(out_path);
+
+    REQUIRE(write_wav_file(in_path.string(), input));
+    REQUIRE(offline_process_file(
+        in_path.string(),
+        out_path.string(),
+        [](const float* in, float* out, int channels, int frames, double) {
+            for (int i = 0; i < channels * frames; ++i) {
+                out[i] = -in[i];
+            }
+        },
+        4));
+
+    auto from_file = read_audio_file(out_path.string());
+    REQUIRE(from_file.has_value());
+    REQUIRE(from_file->num_channels() == 2);
+    REQUIRE(from_file->num_frames() == 5);
+    REQUIRE_THAT(from_file->channels[0][1], WithinAbs(-0.2f, 0.001f));
+    REQUIRE_THAT(from_file->channels[1][1], WithinAbs(0.2f, 0.001f));
+
+    REQUIRE_FALSE(offline_process_file(
+        (in_path.string() + ".missing"),
+        out_path.string(),
+        [](const float*, float*, int, int, double) {},
+        4));
+    REQUIRE_FALSE(offline_process_file(
+        in_path.string(),
+        (out_path.string() + ".unsupported"),
+        [](const float* in, float* out, int channels, int frames, double) {
+            std::copy(in, in + channels * frames, out);
+        },
+        4));
+
+    std::filesystem::remove(in_path);
+    std::filesystem::remove(out_path);
 }
 
 // ── Streaming WAV writer ────────────────────────────────────────────────────
