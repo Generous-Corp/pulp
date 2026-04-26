@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-26 17:41 EDT
+Last reviewed: 2026-04-26 17:43 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -146,21 +146,13 @@ Merged after the Phase 1 closeout / `#723` baseline:
 - `#816` MIDI running-status parser edge coverage -> `c9620a65`
 - `#818` MPE synth voice / allocator coverage -> `3d4560d1`
 - `#817` UMP conversion edge coverage -> `a38216fd`
+- `#821` audio reader helper edge coverage -> `7aff17f9`
+- `#819` MIDI keyboard/sequence edge coverage -> `7a646f33`
 
 Open Phase 3 PRs:
 
-- `#819` MIDI keyboard/sequence edge coverage for `#645`, branch
-  `feature/midi-keyboard-sequence-coverage-645`, head `60676709`;
-  opened from `main` at `019130bd`. This tranche also uses the
-  GitHub/Namespace path while the SSH `windows` target remains
-  unreachable.
 - `#820` signal spectrogram edge coverage for `#645`, branch
   `feature/signal-spectrogram-coverage-645`, head `0fd8aa5a`; opened
-  from `main` at `c9620a65`. This tranche also uses the
-  GitHub/Namespace path while the SSH `windows` target remains
-  unreachable.
-- `#821` audio reader helper edge coverage for `#640`, branch
-  `feature/audio-reader-helpers-coverage-640`, head `be7d604f`; opened
   from `main` at `c9620a65`. This tranche also uses the
   GitHub/Namespace path while the SSH `windows` target remains
   unreachable.
@@ -371,7 +363,8 @@ Local Phase 3 draft worktrees:
 - `#645` MIDI keyboard/sequence worktree
   `/Users/danielraffel/Code/pulp-midi-keyboard-sequence-coverage-645`,
   branch `feature/midi-keyboard-sequence-coverage-645`, commit
-  `60676709`; open as PR `#819`.
+  `60676709`; merged via PR `#819` as `7a646f33`. The remote branch was
+  deleted after merge.
   Scope: test-only coverage for `MidiKeyboardState` invalid queries,
   ignored non-note events, release callbacks, and retrigger velocity
   updates; plus `MidiMessageSequence` helper field masking,
@@ -402,7 +395,8 @@ Local Phase 3 draft worktrees:
 - `#640` audio reader helper worktree
   `/Users/danielraffel/Code/pulp-audio-reader-helpers-coverage-640`,
   branch `feature/audio-reader-helpers-coverage-640`, commit
-  `be7d604f`; open as PR `#821`.
+  `be7d604f`; merged via PR `#821` as `7aff17f9`. The remote branch was
+  deleted after merge.
   Scope: test-only coverage for `BufferingReader` source-exhaustion
   zero-fill and ring-wrap ordering, plus `AudioSubsectionReader` invalid
   reader, clamped-read, and start-past-end empty-view paths. Local
@@ -481,8 +475,8 @@ Open supporting PR:
   The branch has been rebased onto `origin/main` after `#813` merged,
   updated after `#816` merged, `#817` was repaired, `#820` opened,
   `#821` opened, `#822` opened, `#818` merged, `#823` opened, `#817`
-  merged, `#822` was repaired, and `#824` opened, and remains
-  docs-only.
+  merged, `#822` was repaired, `#824` opened, `#821` merged, and `#819`
+  merged, and remains docs-only.
 
 Local environment note:
 
@@ -501,28 +495,22 @@ Local environment note:
 Next recovery actions:
 
 1. Keep `#774` docs-only and let its latest status-update checks drain.
-2. Monitor `#819` cloud checks; if a required lane fails, debug in
-   `/Users/danielraffel/Code/pulp-midi-keyboard-sequence-coverage-645`,
-   patch, validate locally, and push with lease.
-3. Monitor `#820` cloud checks; if a required lane fails, debug in
+2. Monitor `#820` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-signal-spectrogram-coverage-645`,
    patch, validate locally, and push with lease.
-4. Monitor `#821` cloud checks; if a required lane fails, debug in
-   `/Users/danielraffel/Code/pulp-audio-reader-helpers-coverage-640`,
-   patch, validate locally, and push with lease.
-5. Monitor `#822` cloud checks; if a required lane fails, debug in
+3. Monitor `#822` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-audio-file-helper-coverage-640`,
    patch, validate locally, and push with lease.
-6. Monitor `#823` cloud checks; if a required lane fails, debug in
+4. Monitor `#823` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-platform-helper-coverage-640`, patch,
    validate locally, and push with lease.
-7. Monitor `#824` cloud checks; if a required lane fails, debug in
+5. Monitor `#824` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-signal-math-helper-coverage-645`,
    patch, validate locally, and push with lease.
-8. If any open Phase 3 PR is green but GitHub reports it behind `main`,
+6. If any open Phase 3 PR is green but GitHub reports it behind `main`,
    rebase that branch onto `origin/main`, push with lease, and let
    checks rerun.
-9. Continue Phase 3 from the tranche issues below, prioritizing
+7. Continue Phase 3 from the tranche issues below, prioritizing
    represented high-miss files over adding new perimeter lanes.
 
 ## Phase 1 corrected baseline
