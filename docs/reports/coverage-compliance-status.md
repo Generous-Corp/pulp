@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-26 19:28 EDT
+Last reviewed: 2026-04-26 19:30 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -152,6 +152,7 @@ Merged after the Phase 1 closeout / `#723` baseline:
 - `#823` platform helper edge coverage -> `f69338eb`
 - `#824` signal math helper coverage and Mat3 fix -> `94e3ef2a`
 - `#825` signal DSP helper edge coverage -> `d0262a1b`
+- `#826` OGG reader edge coverage -> `6ae4d487`
 - `#827` signal multi-channel meter edge coverage -> `d5efea57`
 
 Open Phase 3 PRs:
@@ -165,10 +166,6 @@ Open Phase 3 PRs:
   branch now compares Android build-tools and NDK revisions numerically.
   This tranche also uses the GitHub/Namespace path while the SSH
   `windows` target remains unreachable.
-- `#826` OGG reader edge coverage for `#640`, branch
-  `feature/audio-ogg-reader-coverage-640`, head `6b721c22`; opened from
-  `main` at `1a1b7f07`. This tranche also uses the GitHub/Namespace path
-  while the SSH `windows` target remains unreachable.
 - `#828` raw MIDI parser edge coverage and malformed-data hardening for
   `#645`, branch `feature/midi-raw-parser-coverage-645`, head
   `4e2e6092`; opened from `main` at `94e3ef2a`. This tranche also uses
@@ -512,7 +509,8 @@ Local Phase 3 draft worktrees:
 - `#640` OGG reader worktree
   `/Users/danielraffel/Code/pulp-audio-ogg-reader-coverage-640`,
   branch `feature/audio-ogg-reader-coverage-640`, commit `6b721c22`;
-  open as PR `#826`.
+  merged via PR `#826` as `6ae4d487`. The remote branch was deleted
+  after merge.
   Scope: dedicated `pulp-test-ogg-reader` target covering direct OGG
   reader factory construction, `.ogg` / `.oga` extension support,
   unsupported extension behavior, format-name reporting, and
@@ -616,8 +614,8 @@ Open supporting PR:
   merged, `#825` opened, `#820` merged, `#826` opened, `#822` was
   repaired again for Android SDK discovery, `#827` opened, `#823`
   merged, `#824` merged, `#828` opened, `#829` opened, `#825` merged,
-  `#830` opened, `#831` opened, `#827` merged, and `#832` opened, and
-  remains docs-only.
+  `#830` opened, `#831` opened, `#827` merged, `#832` opened, and
+  `#826` merged, and remains docs-only.
 
 Local environment note:
 
@@ -639,28 +637,25 @@ Next recovery actions:
 2. Monitor `#822` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-audio-file-helper-coverage-640`,
    patch, validate locally, and push with lease.
-3. Monitor `#826` cloud checks; if a required lane fails, debug in
-   `/Users/danielraffel/Code/pulp-audio-ogg-reader-coverage-640`,
-   patch, validate locally, and push with lease.
-4. Monitor `#828` cloud checks; if a required lane fails, debug in
+3. Monitor `#828` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-midi-raw-parser-coverage-645`, patch,
    validate locally, and push with lease.
-5. Monitor `#829` cloud checks; if a required lane fails, debug in
+4. Monitor `#829` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-midi-ci-coverage-645`, patch,
    validate locally, and push with lease.
-6. Monitor `#830` cloud checks; if a required lane fails, debug in
+5. Monitor `#830` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-midi-rpn-coverage-645`, patch,
    validate locally, and push with lease.
-7. Monitor `#831` cloud checks; if a required lane fails, debug in
+6. Monitor `#831` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-signal-utility-coverage-645`, patch,
    validate locally, and push with lease.
-8. Monitor `#832` cloud checks; if a required lane fails, debug in
+7. Monitor `#832` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-platform-child-process-coverage-640`,
    patch, validate locally, and push with lease.
-9. If any open Phase 3 PR is green but GitHub reports it behind `main`,
+8. If any open Phase 3 PR is green but GitHub reports it behind `main`,
    rebase that branch onto `origin/main`, push with lease, and let
    checks rerun.
-10. Continue Phase 3 from the tranche issues below, prioritizing
+9. Continue Phase 3 from the tranche issues below, prioritizing
    represented high-miss files over adding new perimeter lanes.
 
 ## Phase 1 corrected baseline
