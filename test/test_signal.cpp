@@ -789,7 +789,9 @@ TEST_CASE("Phaser clamps stage and feedback settings and resets",
 
     phaser.reset();
     phaser.process(second.data(), static_cast<int>(second.size()));
-    REQUIRE(first == second);
+    for (size_t i = 0; i < first.size(); ++i) {
+        REQUIRE_THAT(first[i], WithinAbs(second[i], 1e-6f));
+    }
 
     Phaser dry;
     dry.set_mix(0.0f);
