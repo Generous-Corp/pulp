@@ -2,6 +2,7 @@
 #include <cmath>
 #include <algorithm>
 #include <filesystem>
+#include <limits>
 
 // CHOC audio file support
 #include <choc/audio/choc_AudioFileFormat_WAV.h>
@@ -43,7 +44,13 @@ void float_to_int16(const float* src, int16_t* dst, size_t count) {
 void float_to_int32(const float* src, int32_t* dst, size_t count) {
     for (size_t i = 0; i < count; ++i) {
         float clamped = std::clamp(src[i], -1.0f, 1.0f);
-        dst[i] = static_cast<int32_t>(clamped * 2147483647.0f);
+        if (clamped >= 1.0f) {
+            dst[i] = std::numeric_limits<int32_t>::max();
+        } else if (clamped <= -1.0f) {
+            dst[i] = std::numeric_limits<int32_t>::min();
+        } else {
+            dst[i] = static_cast<int32_t>(static_cast<double>(clamped) * 2147483647.0);
+        }
     }
 }
 
