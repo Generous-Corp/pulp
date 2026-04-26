@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-26 14:42 EDT
+Last reviewed: 2026-04-26 14:44 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -140,9 +140,9 @@ Merged after the Phase 1 closeout / `#723` baseline:
 
 Open Phase 3 PRs:
 
-- None currently open after `#811` merged. The next ready Phase 3
-  candidate is the local-only `#645` signal dynamics helper draft at
-  `a43a305b`, recorded below.
+- `#813` signal dynamics helper coverage for `#645`, branch
+  `feature/signal-dynamics-coverage-645`, head `fb0505f7`; opened after
+  rebasing onto `main` at `810743d4`. Cloud checks are the active gate.
 
 Local Phase 3 draft worktrees:
 
@@ -240,9 +240,8 @@ Local Phase 3 draft worktrees:
   report, and version-bump report.
 - `#645` signal dynamics helper worktree
   `/Users/danielraffel/Code/pulp-signal-dynamics-coverage-645`, branch
-  `feature/signal-dynamics-coverage-645`, commit `a43a305b`;
-  local-only draft, not opened as a PR yet while `#774` drains. Scope:
-  test-only coverage for `DryWetMixer` mix
+  `feature/signal-dynamics-coverage-645`, commit `fb0505f7`; open as PR
+  `#813`. Scope: test-only coverage for `DryWetMixer` mix
   clamping/equal-power/latency/reset paths, `Compressor`
   hard-knee/soft-knee/buffer/reset paths, `Limiter` buffer/reset paths,
   `WindowFunction` hamming/flat-top/kaiser branches, and
@@ -261,8 +260,7 @@ Open supporting PR:
   `docs/coverage-status-2026-04-25`. The branch is updated as this
   tracker changes; use the PR head SHA in GitHub as the live value.
   The branch has been rebased onto `origin/main` after `#811` merged,
-  updated after the local `#645` signal dynamics draft was prepared, and
-  remains docs-only.
+  updated after `#813` opened, and remains docs-only.
 
 Local environment note:
 
@@ -277,9 +275,9 @@ Next recovery actions:
 1. Keep `#774` docs-only and let its latest status-update checks drain.
 2. Let the `main` Coverage run for `810743d4` complete, then refresh the
    Codecov baseline if it changes the execution order materially.
-3. Rebase/push/open the local `#645`
-   `feature/signal-dynamics-coverage-645` draft from
-   `/Users/danielraffel/Code/pulp-signal-dynamics-coverage-645`.
+3. Monitor `#813` cloud checks; if a required lane fails, debug in
+   `/Users/danielraffel/Code/pulp-signal-dynamics-coverage-645`, patch,
+   validate locally, and push with lease.
 4. If any open Phase 3 PR is green but GitHub reports it behind `main`,
    rebase that branch onto `origin/main`, push with lease, and let
    checks rerun.
