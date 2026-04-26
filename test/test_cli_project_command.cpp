@@ -8,6 +8,7 @@
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <vector>
 
 namespace fs = std::filesystem;
 
@@ -189,6 +190,194 @@ void init_clean_git_repo(const fs::path& repo) {
 }
 
 }  // namespace
+
+TEST_CASE("cmd_project reports help and unknown subcommands deterministically",
+          "[cli][project-command][issue-643]") {
+    {
+        CapturedStreams capture;
+        REQUIRE(cmd_project({}) == 1);
+        REQUIRE(capture.out.str().find("pulp project") != std::string::npos);
+        REQUIRE(capture.out.str().find("Usage:") != std::string::npos);
+    }
+
+    {
+        CapturedStreams capture;
+        REQUIRE(cmd_project({"help"}) == 0);
+        REQUIRE(capture.out.str().find("pulp project") != std::string::npos);
+    }
+
+    {
+        CapturedStreams capture;
+        REQUIRE(cmd_project({"bump", "--help"}) == 0);
+        REQUIRE(capture.out.str().find("pulp project bump") != std::string::npos);
+        REQUIRE(capture.out.str().find("--verify-builds") != std::string::npos);
+    }
+
+    {
+        CapturedStreams capture;
+        REQUIRE(cmd_project({"undo", "--help"}) == 0);
+        REQUIRE(capture.out.str().find("pulp project undo") != std::string::npos);
+    }
+
+    {
+        CapturedStreams capture;
+        REQUIRE(cmd_project({"not-a-command"}) == 2);
+        REQUIRE(capture.err.str().find("unknown subcommand 'not-a-command'")
+                != std::string::npos);
+        REQUIRE(capture.out.str().find("Run `pulp project bump --help`")
+                != std::string::npos);
+    }
+}
+
+TEST_CASE("cmd_project bump option parser accepts flags and reports ignored arguments",
+          "[cli][project-command][issue-643]") {
+    bool help = false;
+    CapturedStreams capture;
+    auto opts = parse_bump_options({
+        "--all",
+        "--dry-run",
+        "--force-dirty",
+        "--allow-downgrade",
+        "--allow-cli-skew",
+        "--allow-redundant",
+        "--verify-builds",
+        "--to=1.2.3",
+        "legacy-positional",
+        "--surprise",
+    }, help);
+
+    REQUIRE_FALSE(help);
+    REQUIRE(opts.all);
+    REQUIRE(opts.dry_run);
+    REQUIRE(opts.force_dirty);
+    REQUIRE(opts.allow_downgrade);
+    REQUIRE(opts.allow_cli_skew);
+    REQUIRE(opts.allow_redundant);
+    REQUIRE(opts.verify_builds);
+    REQUIRE(opts.to_version == "1.2.3");
+    REQUIRE(opts.positional == std::vector<std::string>{"legacy-positional"});
+    REQUIRE(capture.err.str().find("ignoring unknown argument '--surprise'")
+            != std::string::npos);
+}
+
+TEST_CASE("cmd_project bump --all reports empty registries without touching projects",
+          "[cli][project-command][issue-643]") {
+    TempDir tmp;
+    ScopedEnv pulp_home("PULP_HOME", (tmp.path / "home").string());
+    CapturedStreams capture;
+
+    REQUIRE(cmd_project({"bump", "--all", "--to", "0.2.0"}) == 1);
+    REQUIRE(capture.err.str().find("registry is empty") != std::string::npos);
+    REQUIRE_FALSE(fs::exists(tmp.path / "home" / "projects.json"));
+}
+
+TEST_CASE("cmd_project bump --all dry-run uses registry names and avoids undo files",
+          "[cli][project-command][issue-643]") {
+    TempDir tmp;
+    auto home = tmp.path / "home";
+    auto standalone = tmp.path / "Clock";
+    auto fetch = tmp.path / "FetchClock";
+    ScopedEnv pulp_home("PULP_HOME", home.string());
+
+    make_standalone_project(standalone, "0.1.0");
+    make_fetchcontent_project(fetch, "0.1.0");
+    REQUIRE(prjreg::write_registry(prjreg::registry_path(), {
+        prjreg::Project{standalone, "Clock Display", "2026-04-26T00:00:00Z"},
+        prjreg::Project{fetch, "", "2026-04-26T00:00:01Z"},
+    }));
+
+    CapturedStreams capture;
+    REQUIRE(cmd_project({
+        "bump",
+        "--all",
+        "--to=0.2.0",
+        "--dry-run",
+        "--allow-cli-skew",
+        "--allow-redundant",
+    }) == 0);
+
+    auto out = capture.out.str();
+    REQUIRE(out.find("pulp project bump (dry run) target=0.2.0") != std::string::npos);
+    REQUIRE(out.find("would bump") != std::string::npos);
+    REQUIRE(out.find("Clock Display") != std::string::npos);
+    REQUIRE(out.find("FetchClock") != std::string::npos);
+    REQUIRE(out.find("Summary: 0 bumped, 2 would-bump, 0 skipped, 0 failed")
+            != std::string::npos);
+    REQUIRE(out.find("No migration notes apply for 0.1.0 -> 0.2.0")
+            != std::string::npos);
+
+    REQUIRE(read_file_text(standalone / "pulp.toml").find("sdk_version = \"0.1.0\"")
+            != std::string::npos);
+    REQUIRE(read_file_text(fetch / "CMakeLists.txt").find("GIT_TAG v0.1.0")
+            != std::string::npos);
+    REQUIRE(pb::list_undo_batches(home).empty());
+}
+
+TEST_CASE("cmd_project bump writes an undo batch and undo reverts the newest batch",
+          "[cli][project-command][issue-643]") {
+    TempDir tmp;
+    auto home = tmp.path / "home";
+    auto project = tmp.path / "Clock";
+    ScopedEnv pulp_home("PULP_HOME", home.string());
+    make_standalone_project(project, "0.1.0");
+
+    {
+        ScopedCwd cwd(project);
+        CapturedStreams capture;
+        REQUIRE(cmd_project({"bump", "0.2.0", "--allow-redundant"}) == 0);
+        REQUIRE(capture.out.str().find("Summary: 1 bumped, 0 would-bump, 0 skipped, 0 failed")
+                != std::string::npos);
+        REQUIRE(capture.out.str().find("Undo file:") != std::string::npos);
+    }
+
+    auto batches = pb::list_undo_batches(home);
+    REQUIRE(batches.size() == 1);
+    REQUIRE(read_file_text(project / "pulp.toml").find("sdk_version = \"0.2.0\"")
+            != std::string::npos);
+    REQUIRE(read_file_text(project / "CMakeLists.txt").find("find_package(Pulp 0.2.0 REQUIRED)")
+            != std::string::npos);
+
+    {
+        CapturedStreams capture;
+        REQUIRE(cmd_project({"undo"}) == 0);
+        REQUIRE(capture.out.str().find("Reverting bump batch") != std::string::npos);
+        REQUIRE(capture.out.str().find("Summary: 1 reverted, 0 skipped, 0 failed")
+                != std::string::npos);
+        REQUIRE(capture.out.str().find("Removed undo file") != std::string::npos);
+    }
+
+    REQUIRE(read_file_text(project / "pulp.toml").find("sdk_version = \"0.1.0\"")
+            != std::string::npos);
+    REQUIRE(read_file_text(project / "CMakeLists.txt").find("find_package(Pulp 0.1.0 REQUIRED)")
+            != std::string::npos);
+    REQUIRE(pb::list_undo_batches(home).empty());
+}
+
+TEST_CASE("cmd_project undo reports missing and malformed batches",
+          "[cli][project-command][issue-643]") {
+    TempDir tmp;
+    auto home = tmp.path / "home";
+    ScopedEnv pulp_home("PULP_HOME", home.string());
+
+    {
+        CapturedStreams capture;
+        REQUIRE(cmd_project({"undo"}) == 1);
+        REQUIRE(capture.err.str().find("no bump batches on disk") != std::string::npos);
+    }
+
+    {
+        CapturedStreams capture;
+        REQUIRE(cmd_project({"undo", "missing"}) == 1);
+        REQUIRE(capture.err.str().find("no batch at") != std::string::npos);
+    }
+
+    write_file(pb::undo_batch_path(home, "bad"), "{not json\n");
+    {
+        CapturedStreams capture;
+        REQUIRE(cmd_project({"undo", "bad"}) == 1);
+        REQUIRE(capture.err.str().find("could not parse") != std::string::npos);
+    }
+}
 
 TEST_CASE("cmd_project bump rejects source checkout and non-project directories",
           "[project-command][issue-244]") {
