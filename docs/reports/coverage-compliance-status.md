@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-26 14:29 EDT
+Last reviewed: 2026-04-26 14:32 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -67,34 +67,34 @@ Finish line:
 
 Latest complete Codecov `main` report observed while updating this doc:
 
-- commit: `c4e6ad0930a7871046225b84fcfb130263ff98aa`
-- workflow: Coverage run `24946798292`, completed successfully
-- overall tracked coverage: `44.77%` over `70,284` lines in `556` files
-- covered lines: `31,470`
-- missed lines: `37,442`
-- partial lines: `1,372`
+- commit: `f712702afff325b35785eb56b88f1b85df0226a8`
+- workflow: Coverage run `24963571323`, completed successfully
+- overall tracked coverage: `45.58%` over `70,381` lines in `556` files
+- covered lines: `32,086`
+- missed lines: `37,163`
+- partial lines: `1,132`
 - current component coverage from the Codecov API:
-  - `audio`: `26.86%`
-  - `canvas`: `65.12%`
-  - `dsl`: `78.68%`
-  - `events`: `50.64%`
-  - `format`: `51.64%`
-  - `host`: `46.6%`
-  - `midi`: `49.12%`
-  - `osc`: `68.88%`
-  - `platform`: `39.25%`
-  - `render`: `61.03%`
-  - `runtime`: `52.21%`
-  - `signal`: `66.89%`
-  - `state`: `65.21%`
-  - `view`: `44.38%`
+  - `audio`: `35.3%`
+  - `canvas`: `64.59%`
+  - `dsl`: `63.38%`
+  - `events`: `49.49%`
+  - `format`: `51.43%`
+  - `host`: `43.48%`
+  - `midi`: `47.81%`
+  - `osc`: `61.61%`
+  - `platform`: `39.05%`
+  - `render`: `57.66%`
+  - `runtime`: `49.7%`
+  - `signal`: `65.95%`
+  - `state`: `61.26%`
+  - `view`: `43.12%`
   - `android`: `13.83%`
   - `apple`: `25.36%`
-  - `linux`: `7.96%`
-  - `windows`: `0.63%`
-  - `cli`: `33.15%`
-  - `ship`: `53.77%`
-  - `tools`: `39.98%`
+  - `linux`: `3.31%`
+  - `windows`: `0.0%`
+  - `cli`: `38.28%`
+  - `ship`: `53.66%`
+  - `tools`: `43.99%`
 
 Post-`#794` file-level proof point: `core/audio/src/aiff_reader.cpp`
 is now `72.01%` covered with `61` misses, up from `64.22%` with `78`
