@@ -137,7 +137,7 @@ struct Mat3 {
     static Mat3 identity() { return {{{1,0,0}, {0,1,0}, {0,0,1}}}; }
 
     Mat3 operator*(const Mat3& b) const {
-        Mat3 r{};
+        Mat3 r{{{0,0,0}, {0,0,0}, {0,0,0}}};
         for (int i = 0; i < 3; ++i)
             for (int j = 0; j < 3; ++j)
                 for (int k = 0; k < 3; ++k)

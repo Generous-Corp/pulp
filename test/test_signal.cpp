@@ -73,6 +73,19 @@ TEST_CASE("Gain processor", "[signal][gain]") {
     REQUIRE(out < 0.51f);
 }
 
+TEST_CASE("Gain linear setter and buffer processing", "[signal][gain][issue-645]") {
+    Gain g;
+    g.set_gain_linear(0.25f);
+    REQUIRE_THAT(g.gain_linear(), WithinAbs(0.25f, 1e-6f));
+    REQUIRE_THAT(g.gain_db(), WithinAbs(-12.0412f, 0.01f));
+
+    float buffer[] = {1.0f, -2.0f, 0.5f};
+    g.process(buffer, 3);
+    REQUIRE_THAT(buffer[0], WithinAbs(0.25f, 1e-6f));
+    REQUIRE_THAT(buffer[1], WithinAbs(-0.5f, 1e-6f));
+    REQUIRE_THAT(buffer[2], WithinAbs(0.125f, 1e-6f));
+}
+
 TEST_CASE("SimpleMixer", "[signal][mix]") {
     SimpleMixer mixer;
 
@@ -84,6 +97,25 @@ TEST_CASE("SimpleMixer", "[signal][mix]") {
 
     mixer.set_mix(0.5f); // 50/50
     REQUIRE_THAT(mixer.process(1.0f, 0.0f), WithinAbs(0.5, 0.001));
+}
+
+TEST_CASE("SimpleMixer clamps mix and processes buffers",
+          "[signal][mix][issue-645]") {
+    SimpleMixer mixer;
+    mixer.set_mix(-1.0f);
+    REQUIRE_THAT(mixer.mix(), WithinAbs(0.0f, 1e-6f));
+    mixer.set_mix(2.0f);
+    REQUIRE_THAT(mixer.mix(), WithinAbs(1.0f, 1e-6f));
+
+    mixer.set_mix(0.25f);
+    const float dry[] = {1.0f, 0.0f, -1.0f};
+    const float wet[] = {0.0f, 1.0f, 1.0f};
+    float output[] = {9.0f, 9.0f, 9.0f};
+
+    mixer.process(dry, wet, output, 3);
+    REQUIRE_THAT(output[0], WithinAbs(0.75f, 1e-6f));
+    REQUIRE_THAT(output[1], WithinAbs(0.25f, 1e-6f));
+    REQUIRE_THAT(output[2], WithinAbs(-0.5f, 1e-6f));
 }
 
 // ── Compressor ───────────────────────────────────────────────────────────────

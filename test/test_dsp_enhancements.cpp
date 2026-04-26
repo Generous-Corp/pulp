@@ -279,6 +279,21 @@ TEST_CASE("MIDI/frequency conversions", "[dsp][special]") {
     REQUIRE_THAT(midi_to_freq(60.0f), WithinAbs(261.63f, 0.1f));
 }
 
+TEST_CASE("Special functions cover kernels and statistical wrappers",
+          "[dsp][special][issue-645]") {
+    REQUIRE_THAT(gamma_fn(5.0f), WithinAbs(24.0f, 0.001f));
+    REQUIRE_THAT(erf_fn(0.0f), WithinAbs(0.0f, 0.001f));
+    REQUIRE_THAT(erfc_fn(0.0f), WithinAbs(1.0f, 0.001f));
+    REQUIRE_THAT(erf_fn(1.0f) + erfc_fn(1.0f), WithinAbs(1.0f, 0.001f));
+
+    REQUIRE_THAT(lanczos(0.0f, 3), WithinAbs(1.0f, 0.001f));
+    REQUIRE_THAT(lanczos(3.0f, 3), WithinAbs(0.0f, 0.001f));
+    REQUIRE_THAT(lanczos(-3.0f, 3), WithinAbs(0.0f, 0.001f));
+    REQUIRE_THAT(lanczos(0.5f, 3), WithinAbs(0.6079f, 0.001f));
+
+    REQUIRE_THAT(linear_to_db(0.0f), WithinAbs(-200.0f, 0.001f));
+}
+
 // ── Limiter (already exists in compressor.hpp) ──────────────────────────
 
 TEST_CASE("Limiter clamps signal", "[dsp][limiter]") {

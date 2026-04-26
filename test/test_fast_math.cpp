@@ -23,6 +23,16 @@ TEST_CASE("FastMath sin approximation", "[signal][fast_math]") {
     REQUIRE_THAT(FastMath::sin(-1.5707963f), WithinAbs(-1.0, 0.01));
 }
 
+TEST_CASE("FastMath trigonometry wraps large phases",
+          "[signal][fast_math][issue-645]") {
+    constexpr float pi = 3.14159265f;
+    constexpr float two_pi = 6.28318530f;
+
+    REQUIRE_THAT(FastMath::sin(two_pi + pi * 0.5f), WithinAbs(1.0f, 0.01f));
+    REQUIRE_THAT(FastMath::sin(-two_pi - pi * 0.5f), WithinAbs(-1.0f, 0.01f));
+    REQUIRE_THAT(FastMath::cos(-two_pi), WithinAbs(1.0f, 0.01f));
+}
+
 TEST_CASE("FastMath cos approximation", "[signal][fast_math]") {
     REQUIRE_THAT(FastMath::cos(0.0f), WithinAbs(1.0, 0.01));
     REQUIRE_THAT(FastMath::cos(1.5707963f), WithinAbs(0.0, 0.02)); // pi/2
@@ -50,6 +60,16 @@ TEST_CASE("FastMath pow approximation", "[signal][fast_math]") {
     REQUIRE_THAT(FastMath::pow(0.5f, 2.0f), WithinAbs(0.25, 0.01));
 }
 
+TEST_CASE("FastMath pow and reciprocal guard edge inputs",
+          "[signal][fast_math][issue-645]") {
+    REQUIRE_THAT(FastMath::pow(0.0f, 2.0f), WithinAbs(0.0f, 0.001f));
+    REQUIRE_THAT(FastMath::pow(-2.0f, 3.0f), WithinAbs(0.0f, 0.001f));
+    REQUIRE_THAT(FastMath::pow(4.0f, 0.5f), WithinAbs(2.0f, 0.05f));
+
+    REQUIRE_THAT(FastMath::rcp(4.0f), WithinAbs(0.25f, 0.001f));
+    REQUIRE_THAT(FastMath::rcp(-2.0f), WithinAbs(-0.5f, 0.001f));
+}
+
 TEST_CASE("FastMath db_to_gain", "[signal][fast_math]") {
     REQUIRE_THAT(FastMath::db_to_gain(0.0f), WithinAbs(1.0, 0.01));
     REQUIRE_THAT(FastMath::db_to_gain(6.0f), WithinAbs(std::pow(10.0f, 6.0f / 20.0f), 0.05));
@@ -62,6 +82,13 @@ TEST_CASE("FastMath gain_to_db", "[signal][fast_math]") {
     REQUIRE_THAT(FastMath::gain_to_db(2.0f), WithinAbs(6.02, 0.1));
     REQUIRE_THAT(FastMath::gain_to_db(0.5f), WithinAbs(-6.02, 0.1));
     REQUIRE(FastMath::gain_to_db(0.0f) < -100.0f);
+}
+
+TEST_CASE("FastMath gain conversion handles negative silence floor",
+          "[signal][fast_math][issue-645]") {
+    REQUIRE_THAT(FastMath::gain_to_db(-1.0f), WithinAbs(-200.0f, 0.001f));
+    REQUIRE(FastMath::db_to_gain(-120.0f) > 0.0f);
+    REQUIRE(FastMath::db_to_gain(-120.0f) < 0.00001f);
 }
 
 TEST_CASE("FastMath rsqrt approximation", "[signal][fast_math]") {

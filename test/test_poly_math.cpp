@@ -69,6 +69,39 @@ TEST_CASE("Polynomial scale", "[signal][poly]") {
     REQUIRE_THAT(s[2], WithinAbs(6.0, 0.001));
 }
 
+TEST_CASE("Polynomial helpers handle empty and constant inputs",
+          "[signal][poly][issue-645]") {
+    REQUIRE_THAT(Polynomial::eval({}, 3.0f), WithinAbs(0.0f, 0.001f));
+
+    auto complex_zero = Polynomial::eval_complex({}, {1.0f, 2.0f});
+    REQUIRE_THAT(complex_zero.real(), WithinAbs(0.0f, 0.001f));
+    REQUIRE_THAT(complex_zero.imag(), WithinAbs(0.0f, 0.001f));
+
+    REQUIRE(Polynomial::multiply({}, {1.0f, 2.0f}).empty());
+    REQUIRE(Polynomial::multiply({1.0f}, {}).empty());
+    REQUIRE(Polynomial::scale({}, 2.0f).empty());
+
+    auto constant_derivative = Polynomial::derivative({7.0f});
+    REQUIRE(constant_derivative.size() == 1);
+    REQUIRE_THAT(constant_derivative[0], WithinAbs(0.0f, 0.001f));
+
+    auto empty_derivative = Polynomial::derivative({});
+    REQUIRE(empty_derivative.size() == 1);
+    REQUIRE_THAT(empty_derivative[0], WithinAbs(0.0f, 0.001f));
+}
+
+TEST_CASE("Polynomial add handles empty operands", "[signal][poly][issue-645]") {
+    auto left_empty = Polynomial::add({}, {3.0f, -2.0f});
+    REQUIRE(left_empty.size() == 2);
+    REQUIRE_THAT(left_empty[0], WithinAbs(3.0f, 0.001f));
+    REQUIRE_THAT(left_empty[1], WithinAbs(-2.0f, 0.001f));
+
+    auto right_empty = Polynomial::add({1.0f, 2.0f}, {});
+    REQUIRE(right_empty.size() == 2);
+    REQUIRE_THAT(right_empty[0], WithinAbs(1.0f, 0.001f));
+    REQUIRE_THAT(right_empty[1], WithinAbs(2.0f, 0.001f));
+}
+
 TEST_CASE("Mat2 identity and multiply", "[signal][matrix]") {
     auto id = Mat2::identity();
     Mat2 a{{{2, 3}, {1, 4}}};
@@ -92,9 +125,38 @@ TEST_CASE("Mat2 inverse", "[signal][matrix]") {
     REQUIRE_THAT(product.m[1][1], WithinAbs(1.0, 0.001));
 }
 
+TEST_CASE("Mat2 inverse returns identity for singular matrices",
+          "[signal][matrix][issue-645]") {
+    Mat2 singular{{{1.0f, 2.0f}, {2.0f, 4.0f}}};
+    REQUIRE_THAT(singular.determinant(), WithinAbs(0.0f, 0.001f));
+
+    auto inv = singular.inverse();
+    REQUIRE_THAT(inv.m[0][0], WithinAbs(1.0f, 0.001f));
+    REQUIRE_THAT(inv.m[0][1], WithinAbs(0.0f, 0.001f));
+    REQUIRE_THAT(inv.m[1][0], WithinAbs(0.0f, 0.001f));
+    REQUIRE_THAT(inv.m[1][1], WithinAbs(1.0f, 0.001f));
+}
+
 TEST_CASE("Mat3 determinant", "[signal][matrix]") {
     auto id = Mat3::identity();
     REQUIRE_THAT(id.determinant(), WithinAbs(1.0, 0.001));
+}
+
+TEST_CASE("Mat3 multiply composes non-identity matrices",
+          "[signal][matrix][issue-645]") {
+    Mat3 a{{{1.0f, 2.0f, 3.0f}, {0.0f, 1.0f, 4.0f}, {5.0f, 6.0f, 0.0f}}};
+    Mat3 b{{{-2.0f, 1.0f, 0.0f}, {3.0f, 0.0f, 1.0f}, {4.0f, -1.0f, 2.0f}}};
+
+    auto r = a * b;
+    REQUIRE_THAT(r.m[0][0], WithinAbs(16.0f, 0.001f));
+    REQUIRE_THAT(r.m[0][1], WithinAbs(-2.0f, 0.001f));
+    REQUIRE_THAT(r.m[0][2], WithinAbs(8.0f, 0.001f));
+    REQUIRE_THAT(r.m[1][0], WithinAbs(19.0f, 0.001f));
+    REQUIRE_THAT(r.m[1][1], WithinAbs(-4.0f, 0.001f));
+    REQUIRE_THAT(r.m[1][2], WithinAbs(9.0f, 0.001f));
+    REQUIRE_THAT(r.m[2][0], WithinAbs(8.0f, 0.001f));
+    REQUIRE_THAT(r.m[2][1], WithinAbs(5.0f, 0.001f));
+    REQUIRE_THAT(r.m[2][2], WithinAbs(6.0f, 0.001f));
 }
 
 TEST_CASE("Polynomial eval_complex", "[signal][poly]") {
