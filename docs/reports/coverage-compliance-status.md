@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-26 00:59 EDT
+Last reviewed: 2026-04-26 01:13 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -178,6 +178,23 @@ Open Phase 3 PRs:
   workflow installs `coverage>=7.10` before running the Python tooling
   coverage lane. The PR is labeled `codecov` and is using the direct
   GitHub/Namespace path.
+- `#801` `fix(render): harden texture atlas edge cases`, branch
+  `feature/render-texture-atlas-coverage-646`, commit `332c1a95`,
+  worktree `/Users/danielraffel/Code/pulp-render-texture-atlas-coverage-646`.
+  Scope: reject non-positive `AtlasPacker` allocation dimensions, clamp
+  repeated `ImageAtlas::release()` calls so refcounts cannot underflow,
+  avoid unsigned frame-age underflow for Image/Gradient/Glyph/Path atlas
+  eviction when `last_used` is ahead of `current_frame`, cover
+  full-atlas allocation failure and `GradientAtlas` capacity exhaustion,
+  and move `pulp-test-texture-atlas` out of the GPU-only CMake block
+  because the helpers are header-only. Local validation: GPU-off
+  configure with `PULP_BUILD_EXAMPLES=OFF` and `PULP_ENABLE_GPU=OFF`,
+  `pulp-test-texture-atlas` target build, direct binary passed with
+  `1139` assertions in `22` test cases, focused texture/atlas CTest
+  passed `20/20`, `git diff --check` clean, skill sync clean, and version
+  report clean with explicit `Version-Bump: sdk=patch` for the
+  header-only behavior fix. The PR is labeled `codecov` and is using the
+  direct GitHub/Namespace path.
 
 Local Phase 3 draft worktrees:
 
@@ -215,6 +232,10 @@ Local Phase 3 draft worktrees:
   `/Users/danielraffel/Code/pulp-python-tooling-coverage-643`, branch
   `feature/python-tooling-coverage-643`, commit `acadc5af`; open as PR
   `#800`.
+- `#646` texture-atlas render worktree
+  `/Users/danielraffel/Code/pulp-render-texture-atlas-coverage-646`,
+  branch `feature/render-texture-atlas-coverage-646`, commit
+  `332c1a95`; open as PR `#801`.
 
 Open supporting PR:
 
@@ -235,11 +256,11 @@ Local environment note:
 Next recovery actions:
 
 1. Keep `#774` docs-only and let its latest status-update checks drain.
-2. Monitor `#795`, `#799`, and `#800` and address any Codecov, build,
-   sanitizer, or Namespace feedback.
-3. If `#795`, `#799`, or `#800` is green but GitHub reports it behind
-   `main`, rebase that branch onto `origin/main`, push with lease, and
-   let checks rerun.
+2. Monitor `#795`, `#799`, `#800`, and `#801` and address any Codecov,
+   build, sanitizer, or Namespace feedback.
+3. If `#795`, `#799`, `#800`, or `#801` is green but GitHub reports it
+   behind `main`, rebase that branch onto `origin/main`, push with lease,
+   and let checks rerun.
 4. Continue Phase 3 from the tranche issues below, prioritizing
    represented high-miss files over adding new perimeter lanes.
 
