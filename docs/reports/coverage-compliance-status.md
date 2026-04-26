@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-26 19:42 EDT
+Last reviewed: 2026-04-26 19:49 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -164,9 +164,11 @@ Open Phase 3 PRs:
   the GitHub/Namespace path while the SSH `windows` target remains
   unreachable.
 - `#829` MIDI-CI edge coverage for `#645`, branch
-  `feature/midi-ci-coverage-645`, head `f0ef6b0f`; opened from `main`
-  at `94e3ef2a`. This tranche also uses the GitHub/Namespace path while
-  the SSH `windows` target remains unreachable.
+  `feature/midi-ci-coverage-645`, head `1d3cd1ce`; opened from `main`
+  at `94e3ef2a` and rebased onto `87ef6d90` after the first ASan run
+  exposed the already-fixed Android SDK discovery regression from the
+  stale base. This tranche also uses the GitHub/Namespace path while the
+  SSH `windows` target remains unreachable.
 - `#830` RPN parser edge coverage for `#645`, branch
   `feature/midi-rpn-coverage-645`, head `d1edf1e1`; opened from `main`
   at `d0262a1b`. This tranche also uses the GitHub/Namespace path while
@@ -551,7 +553,7 @@ Local Phase 3 draft worktrees:
   transport helper despite living under `include`.
 - `#645` MIDI-CI worktree
   `/Users/danielraffel/Code/pulp-midi-ci-coverage-645`, branch
-  `feature/midi-ci-coverage-645`, commit `f0ef6b0f`; open as PR `#829`.
+  `feature/midi-ci-coverage-645`, commit `1d3cd1ce`; open as PR `#829`.
   Scope: test-only coverage for profile inquiry destination encoding,
   malformed and unhandled CI messages, discovery inquiry destination
   filtering, discovery reply storage plus callback dispatch, unknown
@@ -560,7 +562,11 @@ Local Phase 3 draft worktrees:
   `pulp-test-midi-ci` build, direct `[issue-645]` run passed `38`
   assertions in `6` cases, full binary passed `65` assertions in `15`
   cases, focused CTest passed `6/6`, `git diff --check`, skill-sync
-  report, and version-bump report.
+  report, and version-bump report. Rebase recovery validation on
+  2026-04-26 after `#822` merged also passed the build, direct/full
+  binary runs, diff whitespace checks, skill-sync report, and
+  version-bump report; the focused CTest pattern found no local tests in
+  that incremental build but exited cleanly.
 - `#645` RPN parser worktree
   `/Users/danielraffel/Code/pulp-midi-rpn-coverage-645`, branch
   `feature/midi-rpn-coverage-645`, commit `d1edf1e1`; open as PR `#830`.
@@ -634,7 +640,8 @@ Open supporting PR:
   `#830` opened, `#831` opened, `#827` merged, `#832` opened, `#826`
   merged, and `#832` was repaired for Windows cmd portability, and
   `#831` was repaired for Windows float tolerance, and `#822` merged,
-  and `#833` opened, and remains docs-only.
+  and `#833` opened, and `#829` was rebased onto `87ef6d90` to pick up
+  the merged Android SDK discovery fix, and remains docs-only.
 
 Local environment note:
 
