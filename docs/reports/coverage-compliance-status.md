@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-26 01:53 EDT
+Last reviewed: 2026-04-26 02:02 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -187,6 +187,21 @@ Open Phase 3 PRs:
   because the GPU-off configure intentionally does not build `pulp-cli`;
   CI builds the normal CLI path. The PR is labeled `codecov` and is
   using the direct GitHub/Namespace path.
+- `#803` `test(signal): cover matrix helper edges`, branch
+  `feature/signal-matrix-coverage-645`, commit `e18f5f27`, worktree
+  `/Users/danielraffel/Code/pulp-signal-matrix-coverage-645`.
+  Scope: test-only signal matrix helper coverage for element-wise
+  arithmetic, non-triangular `Matrix3` determinant, `Matrix4` scale
+  transforms, and X/Y/Z axis rotations. Local validation: GPU-off
+  configure with `PULP_BUILD_EXAMPLES=OFF` and `PULP_ENABLE_GPU=OFF`,
+  `pulp-test-dsp-enhancements` target build, direct Catch2 tag
+  `[dsp][matrix]` passed with `31` assertions in `8` test cases,
+  focused CTest for the three new cases passed `3/3`, `git diff --check`
+  clean, skill sync clean, and version bump report says no bump needed.
+  The broad `ctest -R "Matrix|matrix"` regex intentionally was not used
+  as final evidence because it overmatches unrelated `*_NOT_BUILT`
+  placeholder tests in the focused no-GPU build. The PR is labeled
+  `codecov` and is using the direct GitHub/Namespace path.
 
 Local Phase 3 draft worktrees:
 
@@ -232,6 +247,10 @@ Local Phase 3 draft worktrees:
   `/Users/danielraffel/Code/pulp-cli-create-coverage-643`, branch
   `feature/cli-create-coverage-643`, commit `f5e4a05f`; open as PR
   `#802`.
+- `#645` signal matrix helper worktree
+  `/Users/danielraffel/Code/pulp-signal-matrix-coverage-645`, branch
+  `feature/signal-matrix-coverage-645`, commit `e18f5f27`; open as PR
+  `#803`.
 
 Open supporting PR:
 
@@ -252,11 +271,11 @@ Local environment note:
 Next recovery actions:
 
 1. Keep `#774` docs-only and let its latest status-update checks drain.
-2. Monitor `#795`, `#801`, and `#802` and address any Codecov, build,
-   sanitizer, or Namespace feedback.
-3. If `#795`, `#801`, or `#802` is green but GitHub reports it behind
-   `main`, rebase that branch onto `origin/main`, push with lease, and
-   let checks rerun.
+2. Monitor `#795`, `#801`, `#802`, and `#803` and address any Codecov,
+   build, sanitizer, or Namespace feedback.
+3. If `#795`, `#801`, `#802`, or `#803` is green but GitHub reports it
+   behind `main`, rebase that branch onto `origin/main`, push with lease,
+   and let checks rerun.
 4. Continue Phase 3 from the tranche issues below, prioritizing
    represented high-miss files over adding new perimeter lanes.
 
