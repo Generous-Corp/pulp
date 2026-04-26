@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-26 19:25 EDT
+Last reviewed: 2026-04-26 19:28 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -186,6 +186,11 @@ Open Phase 3 PRs:
   `feature/signal-utility-coverage-645`, head `d021a35c`; opened from
   `main` at `d0262a1b`. This tranche also uses the GitHub/Namespace path
   while the SSH `windows` target remains unreachable.
+- `#832` platform child-process edge coverage for `#640`, branch
+  `feature/platform-child-process-coverage-640`, head `3018c8d5`;
+  opened from `main` at `d5efea57`. This tranche also uses the
+  GitHub/Namespace path while the SSH `windows` target remains
+  unreachable.
 
 Local Phase 3 draft worktrees:
 
@@ -585,6 +590,19 @@ Local Phase 3 draft worktrees:
   `74` cases, full v3 gaps binary passed `131` assertions in `27` cases,
   focused CTest passed `6/6`, `git diff --check`, skill-sync report, and
   version-bump report.
+- `#640` platform child-process worktree
+  `/Users/danielraffel/Code/pulp-platform-child-process-coverage-640`,
+  branch `feature/platform-child-process-coverage-640`, commit
+  `3018c8d5`; open as PR `#832`.
+  Scope: test-only coverage for pre-start wait/read defaults,
+  working-directory launch, stdout/stderr max-output byte caps,
+  stderr-line callbacks, and fast-exit output preservation after
+  `is_running()` observes process completion. Local validation:
+  no-GPU/no-examples configure, `pulp-test-child-process` build, direct
+  `[issue-640]` run passed `25` assertions in `5` cases, full binary
+  passed `46` assertions in `17` cases, focused CTest passed `5/5`,
+  `git diff --check HEAD~1..HEAD`, `git diff --check`, skill-sync
+  report, and version-bump report.
 
 Open supporting PR:
 
@@ -598,8 +616,8 @@ Open supporting PR:
   merged, `#825` opened, `#820` merged, `#826` opened, `#822` was
   repaired again for Android SDK discovery, `#827` opened, `#823`
   merged, `#824` merged, `#828` opened, `#829` opened, `#825` merged,
-  `#830` opened, `#831` opened, and `#827` merged, and remains
-  docs-only.
+  `#830` opened, `#831` opened, `#827` merged, and `#832` opened, and
+  remains docs-only.
 
 Local environment note:
 
@@ -636,10 +654,13 @@ Next recovery actions:
 7. Monitor `#831` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-signal-utility-coverage-645`, patch,
    validate locally, and push with lease.
-8. If any open Phase 3 PR is green but GitHub reports it behind `main`,
+8. Monitor `#832` cloud checks; if a required lane fails, debug in
+   `/Users/danielraffel/Code/pulp-platform-child-process-coverage-640`,
+   patch, validate locally, and push with lease.
+9. If any open Phase 3 PR is green but GitHub reports it behind `main`,
    rebase that branch onto `origin/main`, push with lease, and let
    checks rerun.
-9. Continue Phase 3 from the tranche issues below, prioritizing
+10. Continue Phase 3 from the tranche issues below, prioritizing
    represented high-miss files over adding new perimeter lanes.
 
 ## Phase 1 corrected baseline
