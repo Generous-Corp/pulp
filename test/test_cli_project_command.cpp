@@ -233,6 +233,103 @@ TEST_CASE("project command shell redirection helpers use platform null devices",
 #endif
 }
 
+TEST_CASE("cli common parses numeric arguments and normalizes strings",
+          "[cli][common][issue-643]") {
+    std::size_t size = 0;
+    REQUIRE(parse_size_arg("42", "--top", size));
+    REQUIRE(size == 42);
+    REQUIRE_FALSE(parse_size_arg("", "--top", size));
+    REQUIRE_FALSE(parse_size_arg("12x", "--top", size));
+
+    double value = 0.0;
+    REQUIRE(parse_double_arg("0.125", "--min-score", value));
+    REQUIRE(value == 0.125);
+    REQUIRE_FALSE(parse_double_arg("", "--min-score", value));
+    REQUIRE_FALSE(parse_double_arg("nan", "--min-score", value));
+    REQUIRE_FALSE(parse_double_arg("inf", "--min-score", value));
+    REQUIRE_FALSE(parse_double_arg("3.5x", "--min-score", value));
+
+    REQUIRE(trim(" \t hello \n") == "hello");
+    REQUIRE(strip_quotes("\"quoted\"") == "quoted");
+    REQUIRE(strip_quotes("'quoted'") == "quoted");
+    REQUIRE(strip_quotes("unquoted") == "unquoted");
+    REQUIRE(replace_all_str("one two one", "one", "1") == "1 two 1");
+    REQUIRE(icontains("Signalsmith DSP", "smith"));
+    REQUIRE(icontains("Signalsmith DSP", "SIGNAL"));
+    REQUIRE_FALSE(icontains("Signalsmith DSP", "delay"));
+    REQUIRE(yaml_value("  target: plugin  # comment", "target") == "plugin  # comment");
+    REQUIRE(sanitize_process_output(std::string("a\0b", 3)) == "ab");
+    REQUIRE(truncate_message("abcdef", 4) == "abcd...");
+    REQUIRE(truncate_message("abc", 4) == "abc");
+}
+
+TEST_CASE("cli common path helpers find roots and constrain containment",
+          "[cli][common][issue-643]") {
+    TempDir tmp;
+    auto repo = tmp.path / "repo";
+    auto child = repo / "examples" / "demo";
+    fs::create_directories(child);
+    fs::create_directories(repo / "core");
+    write_file(repo / "CMakeLists.txt", "cmake_minimum_required(VERSION 3.20)\n");
+
+    auto standalone = tmp.path / "standalone" / "nested";
+    fs::create_directories(standalone);
+    write_file(tmp.path / "standalone" / "pulp.toml", "[pulp]\nsdk_version = \"1.2.3\"\n");
+
+    REQUIRE(find_project_root_from(child) == repo);
+    REQUIRE(find_project_root_from(tmp.path / "missing") == fs::path{});
+    REQUIRE(path_is_within(child, repo));
+    REQUIRE(path_is_within(repo, repo));
+    REQUIRE_FALSE(path_is_within(tmp.path, repo));
+
+    bool is_standalone = false;
+    {
+        ScopedCwd cwd(standalone);
+        REQUIRE(find_standalone_root() == tmp.path / "standalone");
+        REQUIRE(resolve_active_project_root(&is_standalone) == tmp.path / "standalone");
+        REQUIRE(is_standalone);
+    }
+}
+
+TEST_CASE("cli common config helpers honor PULP_HOME and project-dir overrides",
+          "[cli][common][issue-643]") {
+    TempDir tmp;
+    ScopedEnv pulp_home_env("PULP_HOME", (tmp.path / "home").string());
+    ScopedEnv projects_dir("PULP_PROJECTS_DIR", (tmp.path / "projects").string());
+
+    REQUIRE(pulp_home() == tmp.path / "home");
+    REQUIRE(read_user_config_value("create", "projects_dir").empty());
+    REQUIRE(write_user_config_value("create", "projects_dir", "~/Pulp Projects"));
+    REQUIRE(read_user_config_value("create", "projects_dir") == "~/Pulp Projects");
+    REQUIRE(write_user_config_value("updates", "mode", "manual"));
+    REQUIRE(read_user_config_value("updates", "mode") == "manual");
+    REQUIRE(read_user_config_value("create", "projects_dir") == "~/Pulp Projects");
+
+    auto repo = tmp.path / "repo";
+    fs::create_directories(repo);
+    REQUIRE(resolve_create_projects_base_dir(repo) == tmp.path / "projects");
+}
+
+TEST_CASE("cli common format, AAX, quoting, and fuzzy helpers stay deterministic",
+          "[cli][common][issue-643]") {
+    REQUIRE(shell_quote(std::string("a b\"c\\d")) == "\"a b\\\"c\\\\d\"");
+    REQUIRE(platform_executable("tool").filename().string().find("tool") == 0);
+
+    REQUIRE(default_create_formats({}, "app") == "Standalone");
+    REQUIRE(default_create_formats({}, "bare") == "Standalone");
+    auto plugin_formats = default_create_formats({}, "plugin");
+    REQUIRE(plugin_formats.find("CLAP") != std::string::npos);
+    REQUIRE(plugin_formats.find("Standalone") != std::string::npos);
+
+    REQUIRE(aax_download_url().find("avid.com") != std::string::npos);
+    REQUIRE(aax_sdk_download_label().find("AAX") != std::string::npos);
+    REQUIRE(aax_validator_download_label().find("Validator") != std::string::npos);
+
+    REQUIRE(fuzzy_score("package registry", "pgr") > 0);
+    REQUIRE(fuzzy_score("package", "package") > fuzzy_score("package", "pkg"));
+    REQUIRE(fuzzy_score("package", "zzz") == 0);
+}
+
 TEST_CASE("bump_one enforces the dirty gate and rewrites managed standalone sdk_path",
           "[project-command][issue-244]") {
     TempDir tmp;
