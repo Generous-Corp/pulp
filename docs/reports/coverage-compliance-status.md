@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-26 13:54 EDT
+Last reviewed: 2026-04-26 14:13 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -135,23 +135,13 @@ Merged after the Phase 1 closeout / `#723` baseline:
 - `#807` audio ChannelSet helper coverage -> `46e0fdeb`
 - `#808` MIDI file edge round-trip coverage -> `aae5d5d0`
 - `#809` signal FFT/convolver helper coverage -> `453bcec8`
+- `#810` platform Environment diff-edge coverage -> `f712702a`
 
 Open Phase 3 PRs:
 
-- `#810` `test(platform): cover environment diff edges`, branch
-  `feature/platform-environment-coverage-640`, commit `bc1e96af`,
-  worktree `/Users/danielraffel/Code/pulp-platform-environment-coverage-640`.
-  Scope: test-only platform `Environment` coverage for inert empty
-  listener subscriptions, token move-assignment replacement, keyboard
-  animation-duration diffs, left/right safe-area diffs, display
-  physical/name/refresh metadata diffs, and isolated orientation/lifecycle
-  changes. Local validation after rebasing onto `main` at `453bcec8`:
-  `pulp-test-environment` target build, direct Catch2 selector
-  `[environment][issue-640]` passed with `32` assertions in `5` test
-  cases, focused CTest `Environment` passed `16/16`, `git diff --check`
-  clean, skill sync clean, and version bump report says no bump needed.
-  The PR is labeled `codecov` and is using the direct GitHub/Namespace
-  path.
+- None currently open after `#810` merged. The next ready Phase 3
+  candidate is the local-only `#643` CLI project-command draft at
+  `3a2820bb`, recorded below.
 
 Local Phase 3 draft worktrees:
 
@@ -223,7 +213,8 @@ Local Phase 3 draft worktrees:
 - `#640` platform Environment diff-edge worktree
   `/Users/danielraffel/Code/pulp-platform-environment-coverage-640`,
   branch `feature/platform-environment-coverage-640`, commit
-  `bc1e96af`; open as PR `#810`.
+  `bc1e96af`; merged via PR `#810` as `f712702a`. The remote branch was
+  deleted after merge.
 - `#645` MIDI file edge round-trip worktree
   `/Users/danielraffel/Code/pulp-midi-file-coverage-645`, branch
   `feature/midi-file-coverage-645`, commit `d02e853e`; merged via PR
@@ -235,7 +226,7 @@ Local Phase 3 draft worktrees:
 - `#643` CLI project-command dispatch worktree
   `/Users/danielraffel/Code/pulp-cli-project-coverage-643`, branch
   `feature/cli-project-coverage-643`, commit `3a2820bb`; local-only
-  draft, not opened as a PR yet while `#810` and `#774` drain. Scope:
+  draft, not opened as a PR yet while `#774` drains. Scope:
   direct `cmd_project.cpp` coverage for top-level help/no-arg/unknown
   dispatch, bump option parsing, `--all` empty-registry handling,
   registry-backed `--all --dry-run` reporting without undo files, a
@@ -252,7 +243,7 @@ Open supporting PR:
 - `#774` refreshes this durable handoff/status document, branch
   `docs/coverage-status-2026-04-25`. The branch is updated as this
   tracker changes; use the PR head SHA in GitHub as the live value.
-  The branch has been rebased onto `origin/main` after `#809` merged and
+  The branch has been rebased onto `origin/main` after `#810` merged and
   remains docs-only.
 
 Local environment note:
@@ -266,8 +257,9 @@ Local environment note:
 Next recovery actions:
 
 1. Keep `#774` docs-only and let its latest status-update checks drain.
-2. Monitor `#810`
-   and address any Codecov, build, sanitizer, or Namespace feedback.
+2. When ready to add the next active code tranche, push/open local
+   `#643` branch `feature/cli-project-coverage-643` from
+   `/Users/danielraffel/Code/pulp-cli-project-coverage-643`.
 3. If any open Phase 3 PR is green but GitHub reports it behind `main`,
    rebase that branch onto `origin/main`, push with lease, and let
    checks rerun.
