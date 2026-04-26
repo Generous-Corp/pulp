@@ -7,11 +7,17 @@
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/events/volume_detector.hpp>
 
+#include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <memory>
 #include <string>
 #include <vector>
 
+using pulp::events::LockingAsyncUpdater;
+using pulp::events::MountedVolumeListChangeDetector;
 using pulp::events::NetworkServiceDiscovery;
+using namespace std::chrono_literals;
 
 TEST_CASE("NSD without backend is honest no-op, not fake-success",
           "[events][service-discovery][issue-302]") {
@@ -57,6 +63,15 @@ public:
         return true;
     }
     void unregister_service() override { log->unregistered++; }
+};
+
+class RecordingLockingUpdater : public LockingAsyncUpdater {
+public:
+    void handle_async_update() override {
+        handles.fetch_add(1);
+    }
+
+    std::atomic<int> handles{0};
 };
 
 } // namespace
@@ -206,4 +221,70 @@ TEST_CASE("NSD install_backend: on_service_lost re-entry sees the new backend",
     // should observe the new backend already installed.
     nsd.install_backend(std::make_unique<FakeBackend>());
     REQUIRE(had_backend_during_lost);
+}
+
+TEST_CASE("NSD removing backend stops old backend and evicts discoveries",
+          "[events][service-discovery][lifecycle]") {
+    NetworkServiceDiscovery nsd;
+    auto backend = std::make_unique<FakeBackend>();
+    auto log = backend->log;
+
+    nsd.install_backend(std::move(backend));
+    NetworkServiceDiscovery::Service s;
+    s.name = "alpha";
+    s.type = "_pulp._tcp";
+    s.port = 1;
+    nsd.notify_service_found(s);
+    REQUIRE(nsd.discovered().size() == 1);
+
+    std::vector<std::string> lost;
+    nsd.on_service_lost = [&](const NetworkServiceDiscovery::Service& svc) {
+        lost.push_back(svc.name);
+    };
+
+    nsd.install_backend(nullptr);
+    REQUIRE_FALSE(nsd.has_backend());
+    REQUIRE(nsd.discovered().empty());
+    REQUIRE(lost == std::vector<std::string>{"alpha"});
+    REQUIRE(log->stopped == 1);
+    REQUIRE_FALSE(nsd.register_service("svc", "_pulp._tcp", 1234));
+}
+
+TEST_CASE("MountedVolumeListChangeDetector returns a sorted platform snapshot",
+          "[events][volume][lifecycle]") {
+    auto volumes = MountedVolumeListChangeDetector::get_mounted_volumes();
+    REQUIRE(std::is_sorted(volumes.begin(), volumes.end()));
+}
+
+TEST_CASE("MountedVolumeListChangeDetector start and stop are idempotent",
+          "[events][volume][lifecycle]") {
+    MountedVolumeListChangeDetector detector;
+    std::atomic<int> callbacks{0};
+    detector.on_change = [&](const std::vector<std::string>& volumes) {
+        REQUIRE(std::is_sorted(volumes.begin(), volumes.end()));
+        callbacks.fetch_add(1);
+    };
+
+    detector.start(1ms);
+    REQUIRE(detector.is_running());
+
+    detector.start(1ms);
+    REQUIRE(detector.is_running());
+
+    detector.stop();
+    REQUIRE_FALSE(detector.is_running());
+
+    detector.stop();
+    REQUIRE_FALSE(detector.is_running());
+}
+
+TEST_CASE("LockingAsyncUpdater trigger_and_wait handles synchronously",
+          "[events][async_updater][locking]") {
+    RecordingLockingUpdater updater;
+
+    updater.trigger_and_wait();
+    REQUIRE(updater.handles.load() == 1);
+
+    updater.trigger_and_wait();
+    REQUIRE(updater.handles.load() == 2);
 }
