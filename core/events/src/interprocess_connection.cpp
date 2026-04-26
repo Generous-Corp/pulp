@@ -2,11 +2,9 @@
 #include <pulp/runtime/named_pipe.hpp>
 #include <pulp/runtime/socket.hpp>
 #include <charconv>
-#include <chrono>
 #include <cstring>
 #include <mutex>
 #include <optional>
-#include <thread>
 
 namespace pulp::events {
 
@@ -282,7 +280,6 @@ bool InterprocessConnectionServer::start(std::string_view name, IpcTransport tra
         server_impl_->listen_socket.create(SocketType::TCP);
         if (!server_impl_->listen_socket.bind(host, *port)) return false;
         if (!server_impl_->listen_socket.listen(5)) return false;
-        if (!server_impl_->listen_socket.set_non_blocking(true)) return false;
     }
 
     running_.store(true);
@@ -290,11 +287,11 @@ bool InterprocessConnectionServer::start(std::string_view name, IpcTransport tra
         while (running_.load()) {
             if (server_impl_->transport == IpcTransport::Socket) {
                 auto client_sock = server_impl_->listen_socket.accept();
-                if (!client_sock) {
-                    std::this_thread::sleep_for(std::chrono::milliseconds(5));
-                    continue;
+                if (!client_sock) continue;
+                if (!running_.load()) {
+                    client_sock->close();
+                    break;
                 }
-                (void)client_sock->set_non_blocking(false);
 
                 auto conn = std::make_unique<InterprocessConnection>();
                 // Inject the accepted socket via friend access
@@ -324,7 +321,27 @@ bool InterprocessConnectionServer::start(std::string_view name, IpcTransport tra
 }
 
 void InterprocessConnectionServer::stop() {
-    running_.store(false);
+    const bool was_running = running_.exchange(false);
+    if (was_running && server_impl_->transport == IpcTransport::Socket &&
+        server_impl_->listen_socket.is_open()) {
+        std::string host = "127.0.0.1";
+        std::optional<uint16_t> port;
+        std::string_view name(server_impl_->name);
+        auto colon = name.find(':');
+        if (colon != std::string_view::npos) {
+            host = std::string(name.substr(0, colon));
+            port = parse_port(name.substr(colon + 1));
+        } else {
+            port = parse_port(name);
+        }
+        if (host.empty() || host == "0.0.0.0") host = "127.0.0.1";
+        if (port) {
+            Socket wake;
+            if (wake.create(SocketType::TCP)) {
+                (void)wake.connect(host, *port);
+            }
+        }
+    }
     server_impl_->listen_socket.close();
     if (accept_thread_.joinable()) accept_thread_.join();
     clients_.clear();

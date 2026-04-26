@@ -29,9 +29,6 @@ public:
     /// Accept an incoming connection (TCP only). Returns a new Socket.
     std::optional<Socket> accept();
 
-    /// Toggle blocking mode for operations such as accept/receive.
-    bool set_non_blocking(bool non_blocking);
-
     /// Connect to a remote address (TCP).
     bool connect(std::string_view address, uint16_t port);
 

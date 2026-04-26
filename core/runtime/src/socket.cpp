@@ -104,23 +104,6 @@ std::optional<Socket> Socket::accept() {
     return client;
 }
 
-bool Socket::set_non_blocking(bool non_blocking) {
-    if (fd_ == SOCKET_INVALID) return false;
-
-#ifdef _WIN32
-    u_long mode = non_blocking ? 1UL : 0UL;
-    return ::ioctlsocket(fd_, FIONBIO, &mode) == 0;
-#else
-    int flags = ::fcntl(fd_, F_GETFL, 0);
-    if (flags == -1) return false;
-    if (non_blocking)
-        flags |= O_NONBLOCK;
-    else
-        flags &= ~O_NONBLOCK;
-    return ::fcntl(fd_, F_SETFL, flags) == 0;
-#endif
-}
-
 bool Socket::connect(std::string_view address, uint16_t port) {
     if (fd_ == SOCKET_INVALID) return false;
 
