@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-26 18:26 EDT
+Last reviewed: 2026-04-26 18:28 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -149,6 +149,7 @@ Merged after the Phase 1 closeout / `#723` baseline:
 - `#821` audio reader helper edge coverage -> `7aff17f9`
 - `#819` MIDI keyboard/sequence edge coverage -> `7a646f33`
 - `#820` signal spectrogram edge coverage -> `1a1b7f07`
+- `#823` platform helper edge coverage -> `f69338eb`
 
 Open Phase 3 PRs:
 
@@ -161,10 +162,6 @@ Open Phase 3 PRs:
   branch now compares Android build-tools and NDK revisions numerically.
   This tranche also uses the GitHub/Namespace path while the SSH
   `windows` target remains unreachable.
-- `#823` platform helper edge coverage for `#640`, branch
-  `feature/platform-helper-coverage-640`, head `6ec4ff2e`; opened from
-  `main` at `3d4560d1`. This tranche also uses the GitHub/Namespace path
-  while the SSH `windows` target remains unreachable.
 - `#824` signal math helper coverage and Mat3 multiplication fix for
   `#645`, branch `feature/signal-math-helper-coverage-645`, head
   `1b7f1cfd`; opened from `main` at `a38216fd`. This tranche also uses
@@ -449,8 +446,8 @@ Local Phase 3 draft worktrees:
   version-bump report classified the SDK change as `patch`.
 - `#640` platform helper worktree
   `/Users/danielraffel/Code/pulp-platform-helper-coverage-640`, branch
-  `feature/platform-helper-coverage-640`, commit `6ec4ff2e`; open as PR
-  `#823`.
+  `feature/platform-helper-coverage-640`, commit `6ec4ff2e`; merged via
+  PR `#823` as `f69338eb`. The remote branch was deleted after merge.
   Scope: test-only coverage for file-dialog no-handler backend failure
   paths, popup-menu item metadata and non-Apple stub behavior, audio
   excerpt value/default helpers, and non-Apple `AudioWorkgroup` fallback
@@ -537,8 +534,8 @@ Open supporting PR:
   `#821` opened, `#822` opened, `#818` merged, `#823` opened, `#817`
   merged, `#822` was repaired, `#824` opened, `#821` merged, and `#819`
   merged, `#825` opened, `#820` merged, `#826` opened, `#822` was
-  repaired again for Android SDK discovery, and `#827` opened, and
-  remains docs-only.
+  repaired again for Android SDK discovery, `#827` opened, and `#823`
+  merged, and remains docs-only.
 
 Local environment note:
 
@@ -560,25 +557,22 @@ Next recovery actions:
 2. Monitor `#822` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-audio-file-helper-coverage-640`,
    patch, validate locally, and push with lease.
-3. Monitor `#823` cloud checks; if a required lane fails, debug in
-   `/Users/danielraffel/Code/pulp-platform-helper-coverage-640`, patch,
-   validate locally, and push with lease.
-4. Monitor `#824` cloud checks; if a required lane fails, debug in
+3. Monitor `#824` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-signal-math-helper-coverage-645`,
    patch, validate locally, and push with lease.
-5. Monitor `#825` cloud checks; if a required lane fails, debug in
+4. Monitor `#825` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-signal-dsp-helper-coverage-645`,
    patch, validate locally, and push with lease.
-6. Monitor `#826` cloud checks; if a required lane fails, debug in
+5. Monitor `#826` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-audio-ogg-reader-coverage-640`,
    patch, validate locally, and push with lease.
-7. Monitor `#827` cloud checks; if a required lane fails, debug in
+6. Monitor `#827` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-signal-meter-coverage-645`, patch,
    validate locally, and push with lease.
-8. If any open Phase 3 PR is green but GitHub reports it behind `main`,
+7. If any open Phase 3 PR is green but GitHub reports it behind `main`,
    rebase that branch onto `origin/main`, push with lease, and let
    checks rerun.
-9. Continue Phase 3 from the tranche issues below, prioritizing
+8. Continue Phase 3 from the tranche issues below, prioritizing
    represented high-miss files over adding new perimeter lanes.
 
 ## Phase 1 corrected baseline
