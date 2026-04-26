@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-26 16:08 EDT
+Last reviewed: 2026-04-26 16:15 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -142,15 +142,10 @@ Merged after the Phase 1 closeout / `#723` baseline:
 - `#811` CLI project-command dispatch coverage -> `810743d4`
 - `#813` signal dynamics helper coverage -> `957a0735`
 - `#814` CLI `pulp pr` shellout coverage -> `8bd4a3e9`
+- `#815` MPE tracker edge-path coverage -> `019130bd`
 
 Open Phase 3 PRs:
 
-- `#815` MPE tracker edge-path coverage for `#645`, branch
-  `feature/mpe-tracker-coverage-645`, head `b7c72711`; opened from
-  `main` at `957a0735`. Windows coverage failed during dependency
-  bootstrap on a `wgpu-native` 502; the failed coverage jobs were rerun,
-  and the rerun passed dependency bootstrap and is now in the Windows
-  coverage suite.
 - `#816` MIDI running-status parser edge coverage for `#645`, branch
   `feature/midi-running-status-coverage-645`, head `94b93a6e`; opened
   from `main` at `957a0735`. Cloud checks are the active gate.
@@ -292,8 +287,8 @@ Local Phase 3 draft worktrees:
   skill-sync report, and version-bump report.
 - `#645` MPE tracker worktree
   `/Users/danielraffel/Code/pulp-mpe-tracker-coverage-645`, branch
-  `feature/mpe-tracker-coverage-645`, commit `b7c72711`; open as PR
-  `#815`.
+  `feature/mpe-tracker-coverage-645`, commit `b7c72711`; merged via PR
+  `#815` as `019130bd`. The remote branch was deleted after merge.
   Scope: test-only coverage for `MpeVoiceTracker` bend-range rejection,
   config reset, manager pressure/timbre state, cached member expression,
   bounded snapshots, and full-table overflow behavior. Local validation:
@@ -370,24 +365,19 @@ Local environment note:
 Next recovery actions:
 
 1. Keep `#774` docs-only and let its latest status-update checks drain.
-2. Monitor `#815` cloud checks; if a required lane fails, debug in
-   `/Users/danielraffel/Code/pulp-mpe-tracker-coverage-645`, patch,
-   validate locally, and push with lease. The current Windows coverage
-   failure was rerun in run `24965100026`; wait for that rerun result
-   before changing code.
-3. Monitor `#816` cloud checks; if a required lane fails, debug in
+2. Monitor `#816` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-midi-running-status-coverage-645`,
    patch, validate locally, and push with lease.
-4. Monitor `#817` cloud checks; if a required lane fails, debug in
+3. Monitor `#817` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-midi-ump-conversion-coverage-645`,
    patch, validate locally, and push with lease.
-5. Monitor `#818` cloud checks; if a required lane fails, debug in
+4. Monitor `#818` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-midi-mpe-synth-voice-coverage-645`,
    patch, validate locally, and push with lease.
-6. If any open Phase 3 PR is green but GitHub reports it behind `main`,
+5. If any open Phase 3 PR is green but GitHub reports it behind `main`,
    rebase that branch onto `origin/main`, push with lease, and let
    checks rerun.
-7. Continue Phase 3 from the tranche issues below, prioritizing
+6. Continue Phase 3 from the tranche issues below, prioritizing
    represented high-miss files over adding new perimeter lanes.
 
 ## Phase 1 corrected baseline
