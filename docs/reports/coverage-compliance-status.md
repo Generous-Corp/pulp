@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-26 19:33 EDT
+Last reviewed: 2026-04-26 19:34 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -180,9 +180,11 @@ Open Phase 3 PRs:
   at `d0262a1b`. This tranche also uses the GitHub/Namespace path while
   the SSH `windows` target remains unreachable.
 - `#831` signal utility helper edge coverage for `#645`, branch
-  `feature/signal-utility-coverage-645`, head `d021a35c`; opened from
-  `main` at `d0262a1b`. This tranche also uses the GitHub/Namespace path
-  while the SSH `windows` target remains unreachable.
+  `feature/signal-utility-coverage-645`, head `1b8169aa`; opened from
+  `main` at `d0262a1b` and updated after the first Windows Namespace run
+  exposed an exact float-array equality assertion in the Phaser reset
+  test. This tranche also uses the GitHub/Namespace path while the SSH
+  `windows` target remains unreachable.
 - `#832` platform child-process edge coverage for `#640`, branch
   `feature/platform-child-process-coverage-640`, head `a361c8b9`;
   opened from `main` at `d5efea57` and updated after the first Windows
@@ -575,20 +577,22 @@ Local Phase 3 draft worktrees:
   report.
 - `#645` signal utility helper worktree
   `/Users/danielraffel/Code/pulp-signal-utility-coverage-645`, branch
-  `feature/signal-utility-coverage-645`, commit `d021a35c`; open as PR
-  `#831`.
+  `feature/signal-utility-coverage-645`, commits `d021a35c` and
+  `1b8169aa`; open as PR `#831`.
   Scope: test-only coverage for `DelayLine` empty/wraparound/reset
   paths, `SmoothedValue` one-sample clamp and partial skip paths, `Svf`
   bandpass/notch/buffer/reset paths, `Panner` clamp plus in-place stereo
   processing, `Phaser` stage/feedback clamp safety plus buffer/reset/dry
-  paths, and `Bias` getter plus separate input/output buffer paths. Local
+  paths, and `Bias` getter plus separate input/output buffer paths. The
+  follow-up commit compares Phaser reset output with tolerance instead
+  of exact float-array equality for MSVC/math-library variance. Local
   validation: no-GPU/no-examples configure, `pulp-test-signal` and
   `pulp-test-v3-gaps` builds, direct signal `[issue-645]` run passed
-  `163` assertions in `21` cases, direct bias issue run passed `5`
-  assertions in `1` case, full signal binary passed `930` assertions in
-  `74` cases, full v3 gaps binary passed `131` assertions in `27` cases,
-  focused CTest passed `6/6`, `git diff --check`, skill-sync report, and
-  version-bump report.
+  `167` assertions in `21` cases, direct v3-gaps `[issue-645]` run
+  passed `44` assertions in `4` cases, full signal binary passed `934`
+  assertions in `74` cases, full v3 gaps binary passed `131` assertions
+  in `27` cases, focused CTest passed `6/6`, `git diff --check`, skill-sync
+  report, and version-bump report.
 - `#640` platform child-process worktree
   `/Users/danielraffel/Code/pulp-platform-child-process-coverage-640`,
   branch `feature/platform-child-process-coverage-640`, commits
@@ -619,7 +623,8 @@ Open supporting PR:
   merged, `#824` merged, `#828` opened, `#829` opened, `#825` merged,
   `#830` opened, `#831` opened, `#827` merged, `#832` opened, `#826`
   merged, and `#832` was repaired for Windows cmd portability, and
-  remains docs-only.
+  `#831` was repaired for Windows float tolerance, and remains
+  docs-only.
 
 Local environment note:
 
