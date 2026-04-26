@@ -3,10 +3,26 @@
 #include <pulp/platform/child_process.hpp>
 
 #include <algorithm>
+#include <chrono>
+#include <filesystem>
 #include <string>
+#include <system_error>
+#include <thread>
 #include <vector>
 
 using namespace pulp::platform;
+
+namespace {
+
+std::string trim_copy(std::string s) {
+    while (!s.empty() && (s.back() == '\n' || s.back() == '\r' || s.back() == ' '))
+        s.pop_back();
+    while (!s.empty() && (s.front() == '\n' || s.front() == '\r' || s.front() == ' '))
+        s.erase(s.begin());
+    return s;
+}
+
+}  // namespace
 
 TEST_CASE("exec captures stdout", "[child_process]") {
 #ifdef _WIN32
@@ -128,4 +144,117 @@ TEST_CASE("stderr is captured separately", "[child_process]") {
 #endif
     REQUIRE(r.exit_code == 0);
     REQUIRE(r.stderr_output.find("error_output") != std::string::npos);
+}
+
+TEST_CASE("wait and read before start return default results",
+          "[child_process][edge][issue-640]") {
+    ChildProcess cp;
+
+    REQUIRE_FALSE(cp.is_running());
+    REQUIRE(cp.read_available_output().empty());
+
+    auto r = cp.wait();
+    REQUIRE(r.exit_code == -1);
+    REQUIRE(r.stdout_output.empty());
+    REQUIRE(r.stderr_output.empty());
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE_FALSE(r.was_cancelled);
+}
+
+TEST_CASE("run honors working directory",
+          "[child_process][edge][issue-640]") {
+    auto dir = std::filesystem::temp_directory_path()
+        / "pulp-child-process-working-dir";
+    std::filesystem::create_directories(dir);
+
+    ProcessOptions opts;
+    opts.timeout_ms = 5000;
+    opts.working_directory = dir.string();
+
+#ifdef _WIN32
+    auto r = ChildProcess::run("cmd", {"/c", "cd"}, opts);
+#else
+    auto r = ChildProcess::run("/bin/pwd", {}, opts);
+#endif
+
+    REQUIRE(r.exit_code == 0);
+    std::error_code ec;
+    auto observed = std::filesystem::weakly_canonical(trim_copy(r.stdout_output), ec);
+    REQUIRE_FALSE(ec);
+    REQUIRE(std::filesystem::equivalent(observed, dir, ec));
+    REQUIRE_FALSE(ec);
+}
+
+TEST_CASE("output capture respects max byte limits",
+          "[child_process][edge][issue-640]") {
+    ProcessOptions opts;
+    opts.timeout_ms = 5000;
+    opts.max_output_bytes = 3;
+
+#ifdef _WIN32
+    auto r = ChildProcess::run("powershell",
+        {"-NoProfile", "-Command",
+         "[Console]::Out.Write('abcdef'); [Console]::Error.Write('123456')"},
+        opts);
+#else
+    auto r = ChildProcess::run("/bin/sh",
+        {"-c", "printf abcdef; printf 123456 >&2"}, opts);
+#endif
+
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(r.stdout_output == "abc");
+    REQUIRE(r.stderr_output == "123");
+}
+
+TEST_CASE("stderr line callback fires independently",
+          "[child_process][edge][issue-640]") {
+    std::vector<std::string> stdout_lines;
+    std::vector<std::string> stderr_lines;
+
+    ProcessOptions opts;
+    opts.timeout_ms = 5000;
+    opts.on_stdout_line = [&](std::string_view line) {
+        stdout_lines.emplace_back(line);
+    };
+    opts.on_stderr_line = [&](std::string_view line) {
+        stderr_lines.emplace_back(line);
+    };
+
+#ifdef _WIN32
+    auto r = ChildProcess::run("cmd",
+        {"/c", "echo out1& echo out2& echo err1 1>&2& echo err2 1>&2"},
+        opts);
+#else
+    auto r = ChildProcess::run("/bin/sh",
+        {"-c", "printf 'out1\\nout2\\n'; printf 'err1\\nerr2\\n' >&2"},
+        opts);
+#endif
+
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(stdout_lines.size() >= 2);
+    REQUIRE(stderr_lines.size() >= 2);
+    REQUIRE(stdout_lines[0] == "out1");
+    REQUIRE(stdout_lines[1] == "out2");
+    REQUIRE(stderr_lines[0] == "err1");
+    REQUIRE(stderr_lines[1] == "err2");
+}
+
+TEST_CASE("wait preserves output after is_running observes fast exit",
+          "[child_process][edge][issue-640]") {
+    ChildProcess cp;
+
+#ifdef _WIN32
+    REQUIRE(cp.start("cmd", {"/c", "<nul set /p=cached"}));
+#else
+    REQUIRE(cp.start("/bin/sh", {"-c", "printf cached"}));
+#endif
+
+    for (int i = 0; i < 100 && cp.is_running(); ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    REQUIRE_FALSE(cp.is_running());
+
+    auto r = cp.wait();
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(r.stdout_output == "cached");
 }
