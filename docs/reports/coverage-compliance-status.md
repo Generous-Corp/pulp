@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-25 23:05 EDT
+Last reviewed: 2026-04-25 23:17 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -67,37 +67,38 @@ Finish line:
 
 Latest complete Codecov `main` report observed while updating this doc:
 
-- commit: `e2af9c4db73c6b404553eb41cbd8dd3fc5a3b4db`
-- workflow: Coverage run `24945821780`, completed successfully
-- overall tracked coverage: `44.84%` over `70,312` lines in `556` files
-- covered lines: `31,532`
+- commit: `c4e6ad0930a7871046225b84fcfb130263ff98aa`
+- workflow: Coverage run `24946798292`, completed successfully
+- overall tracked coverage: `44.77%` over `70,284` lines in `556` files
+- covered lines: `31,470`
+- missed lines: `37,442`
+- partial lines: `1,372`
 - current component coverage from the Codecov API:
-  - `audio`: `25.69%`
-  - `canvas`: `68.09%`
-  - `dsl`: `72.13%`
-  - `events`: `47.76%`
-  - `format`: `52.55%`
-  - `host`: `43.48%`
-  - `midi`: `49.95%`
-  - `osc`: `70.9%`
-  - `platform`: `37.53%`
-  - `render`: `61.51%`
-  - `runtime`: `52.48%`
-  - `signal`: `66.16%`
-  - `state`: `65.13%`
-  - `view`: `44.63%`
+  - `audio`: `26.86%`
+  - `canvas`: `65.12%`
+  - `dsl`: `78.68%`
+  - `events`: `50.64%`
+  - `format`: `51.64%`
+  - `host`: `46.6%`
+  - `midi`: `49.12%`
+  - `osc`: `68.88%`
+  - `platform`: `39.25%`
+  - `render`: `61.03%`
+  - `runtime`: `52.21%`
+  - `signal`: `66.89%`
+  - `state`: `65.21%`
+  - `view`: `44.38%`
   - `android`: `13.83%`
   - `apple`: `25.36%`
-  - `linux`: `0.44%`
-  - `windows`: `1.62%`
-  - `cli`: `33.43%`
-  - `ship`: `54.34%`
-  - `tools`: `40.22%`
+  - `linux`: `7.96%`
+  - `windows`: `0.63%`
+  - `cli`: `33.15%`
+  - `ship`: `53.77%`
+  - `tools`: `39.98%`
 
-`#794` has merged after this baseline. The post-merge `main` Coverage
-workflow for `c4e6ad0930a7871046225b84fcfb130263ff98aa` is queued as
-run `24946798292`; do not treat the `c4e6ad09` totals as rebaselined
-until that run completes and Codecov reflects the new uploads.
+Post-`#794` file-level proof point: `core/audio/src/aiff_reader.cpp`
+is now `72.01%` covered with `61` misses, up from `64.22%` with `78`
+misses at the prior `e2af9c4d` baseline.
 
 Merged after the Phase 1 closeout / `#723` baseline:
 
@@ -139,6 +140,18 @@ Open Phase 3 PRs:
   GitHub/Namespace path instead of `shipyard pr` because `#794` exposed a
   local Shipyard mac configure stall after GitHub/Namespace was already
   clean.
+- `#796` `test(cli): cover tool registry local paths`, branch
+  `feature/cli-tool-registry-coverage-643`, commit `cdfbbcec`,
+  worktree `/Users/danielraffel/Code/pulp-cli-tool-registry-coverage-643`.
+  Scope: deterministic `tools/cli/tool_registry.cpp` coverage for
+  registry parsing, managed binary lookup, Python wrapper lookup,
+  uninstall, local install early exits, and `pulp tool`
+  list/path/doctor/uninstall/run/error dispatch branches against a
+  staged local registry. Local validation: lightweight configure
+  completed; `pulp-test-cli-tool-registry` built and passed with `78`
+  assertions in `5` test cases; focused CTest passed `5/5`;
+  `git diff --check` clean; version bump report says no bump needed.
+  The PR is using the same direct GitHub/Namespace path as `#795`.
 
 Local Phase 3 draft worktrees:
 
@@ -154,6 +167,10 @@ Local Phase 3 draft worktrees:
   `/Users/danielraffel/Code/pulp-package-registry-coverage-643`, branch
   `feature/package-registry-coverage-643`, commit `75a529ef`; merged via
   PR `#793`.
+- `#643` tool-registry CLI/tools worktree
+  `/Users/danielraffel/Code/pulp-cli-tool-registry-coverage-643`, branch
+  `feature/cli-tool-registry-coverage-643`, commit `cdfbbcec`; open as
+  PR `#796`.
 
 Open supporting PR:
 
@@ -174,13 +191,12 @@ Local environment note:
 Next recovery actions:
 
 1. Keep `#774` docs-only and let its latest status-update checks drain.
-2. Monitor `#795` and address any Codecov, build, sanitizer, or
-   Namespace feedback.
-3. When the `c4e6ad09` `main` Coverage run `24946798292` completes,
-   refresh the current live Codecov baseline from the API.
-4. If a new PR is green but GitHub reports it behind `main`, rebase that
-   branch onto `origin/main`, push with lease, and let checks rerun.
-5. Continue Phase 3 from the tranche issues below, prioritizing
+2. Monitor `#795` and `#796` and address any Codecov, build,
+   sanitizer, or Namespace feedback.
+3. If `#795` or `#796` is green but GitHub reports it behind `main`,
+   rebase that branch onto `origin/main`, push with lease, and let
+   checks rerun.
+4. Continue Phase 3 from the tranche issues below, prioritizing
    represented high-miss files over adding new perimeter lanes.
 
 ## Phase 1 corrected baseline
