@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-26 00:57 EDT
+Last reviewed: 2026-04-26 00:59 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -122,6 +122,7 @@ Merged after the Phase 1 closeout / `#723` baseline:
 - `#794` AIFF reader edge-path coverage -> `c4e6ad09`
 - `#796` tool-registry CLI/tools coverage -> `11c10a7e`
 - `#797` StreamingWriter audio edge coverage -> `64ba65e3`
+- `#798` FormatRegistry audio dispatch coverage -> `443ca260`
 
 Open Phase 3 PRs:
 
@@ -148,21 +149,6 @@ Open Phase 3 PRs:
   `codecov` and is using the direct GitHub/Namespace path instead of
   `shipyard pr` because `#794` exposed a local Shipyard mac configure
   stall after GitHub/Namespace was already clean.
-- `#798` `test(audio): cover format registry dispatch paths`, branch
-  `feature/audio-format-registry-coverage-640`, commit `0b35bb83`,
-  worktree
-  `/Users/danielraffel/Code/pulp-audio-system-volume-coverage-640`.
-  Scope: deterministic `FormatRegistry` unsupported read/read_info
-  dispatch, custom reader/writer registration, normalized extension lookup,
-  read_info/read/write dispatch through registered handlers, and supported
-  extension collection for `.aifc`. Local validation:
-  after rebasing across `#797`, `pulp-test-audio-file` passed with `339`
-  assertions in `20` test cases; focused CTest
-  `FormatRegistry|audio.*file|StreamingWriter` passed `7/7`;
-  `git diff --check` clean; skill sync found no mapped paths; version bump
-  report says no bump needed.
-  The PR is labeled `codecov` and is using the same direct
-  GitHub/Namespace path as `#795`.
 - `#799` `test(cli): cover docs shellout reader paths`, branch
   `feature/cli-docs-coverage-643`, commit `4877cb1b`, worktree
   `/Users/danielraffel/Code/pulp-cli-docs-coverage-643`.
@@ -201,7 +187,7 @@ Local Phase 3 draft worktrees:
   `c4e6ad09`. The remote branch was deleted after merge.
 - `#642` events volume/service-discovery worktree
   `/Users/danielraffel/Code/pulp-events-volume-coverage-642`, branch
-  `feature/events-volume-coverage-642`, commit `ab941cd9`; open as PR
+  `feature/events-volume-coverage-642`, commit `2d684f4b`; open as PR
   `#795`.
 - `#643` package-registry CLI/tools worktree
   `/Users/danielraffel/Code/pulp-package-registry-coverage-643`, branch
@@ -219,7 +205,8 @@ Local Phase 3 draft worktrees:
 - `#640` format-registry audio/platform worktree
   `/Users/danielraffel/Code/pulp-audio-system-volume-coverage-640`,
   branch `feature/audio-format-registry-coverage-640`, commit
-  `0b35bb83`; open as PR `#798`.
+  `0b35bb83`; merged via PR `#798` as `443ca260`. The remote branch was
+  deleted after merge.
 - `#643` docs-reader CLI/tools worktree
   `/Users/danielraffel/Code/pulp-cli-docs-coverage-643`, branch
   `feature/cli-docs-coverage-643`, commit `4877cb1b`; open as PR
@@ -234,7 +221,7 @@ Open supporting PR:
 - `#774` refreshes this durable handoff/status document, branch
   `docs/coverage-status-2026-04-25`. The branch is updated as this
   tracker changes; use the PR head SHA in GitHub as the live value.
-  The branch has been rebased onto `origin/main` after `#796` merged and
+  The branch has been rebased onto `origin/main` after `#798` merged and
   remains docs-only.
 
 Local environment note:
@@ -248,11 +235,11 @@ Local environment note:
 Next recovery actions:
 
 1. Keep `#774` docs-only and let its latest status-update checks drain.
-2. Monitor `#795`, `#798`, `#799`, and `#800` and address any Codecov,
-   build, sanitizer, or Namespace feedback.
-3. If `#795`, `#798`, `#799`, or `#800` is green but GitHub reports it
-   behind `main`, rebase that branch onto `origin/main`, push with lease,
-   and let checks rerun.
+2. Monitor `#795`, `#799`, and `#800` and address any Codecov, build,
+   sanitizer, or Namespace feedback.
+3. If `#795`, `#799`, or `#800` is green but GitHub reports it behind
+   `main`, rebase that branch onto `origin/main`, push with lease, and
+   let checks rerun.
 4. Continue Phase 3 from the tranche issues below, prioritizing
    represented high-miss files over adding new perimeter lanes.
 
