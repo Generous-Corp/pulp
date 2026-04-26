@@ -347,6 +347,111 @@ TEST_CASE("SpectrogramBuffer push and read", "[signal][spectrogram]") {
     REQUIRE(px[0].r < 160);
 }
 
+TEST_CASE("ColorMapper ramp switching and control points", "[signal][spectrogram][issue-645]") {
+    ColorMapper mapper(ColorRamp::heat);
+    REQUIRE(mapper.ramp() == ColorRamp::heat);
+
+    auto heat_mid = mapper.map(0.33f);
+    REQUIRE(heat_mid.r == 180);
+    REQUIRE(heat_mid.g == 0);
+    REQUIRE(heat_mid.b == 0);
+    REQUIRE(heat_mid.a == 255);
+
+    mapper.set_ramp(ColorRamp::viridis);
+    REQUIRE(mapper.ramp() == ColorRamp::viridis);
+    auto viridis_quarter = mapper.map(0.25f);
+    REQUIRE(viridis_quarter.r == 59);
+    REQUIRE(viridis_quarter.g == 82);
+    REQUIRE(viridis_quarter.b == 139);
+    REQUIRE(viridis_quarter.a == 255);
+
+    mapper.set_ramp(ColorRamp::grayscale);
+    auto gray_mid = mapper.map(0.5f);
+    REQUIRE(gray_mid.r == 127);
+    REQUIRE(gray_mid.g == 127);
+    REQUIRE(gray_mid.b == 127);
+    REQUIRE(gray_mid.a == 255);
+}
+
+TEST_CASE("FrequencyAxis clamps display and bin conversions", "[signal][spectrogram][issue-645]") {
+    FrequencyAxis axis;
+    axis.configure(8, 8000.0f, FrequencyScale::linear);
+
+    REQUIRE(axis.num_bins() == 5);
+    REQUIRE(axis.nyquist() == 4000.0f);
+    REQUIRE(axis.scale() == FrequencyScale::linear);
+    REQUIRE(axis.hz_to_bin(-100.0f) == 0);
+    REQUIRE(axis.hz_to_bin(100000.0f) == 4);
+    REQUIRE(axis.display_to_bin(-1.0f) == 0);
+    REQUIRE(axis.display_to_bin(2.0f) == 4);
+    REQUIRE_THAT(axis.bin_to_display(4), WithinAbs(1.0, 1e-5));
+    REQUIRE_THAT(axis.hz_to_display(0.0f), WithinAbs(1.0 / 4000.0, 1e-6));
+    REQUIRE_THAT(axis.display_to_hz(-1.0f), WithinAbs(0.0, 1e-5));
+    REQUIRE_THAT(axis.display_to_hz(2.0f), WithinAbs(4000.0, 1e-5));
+
+    axis.configure(1024, 48000.0f, FrequencyScale::logarithmic);
+    REQUIRE_THAT(axis.display_to_hz(0.0f), WithinAbs(1.0, 1e-5));
+    REQUIRE_THAT(axis.display_to_hz(1.0f), WithinAbs(24000.0, 1.0));
+    REQUIRE(axis.display_to_bin(1.0f) == axis.num_bins() - 1);
+
+    axis.configure(1024, 48000.0f, FrequencyScale::mel);
+    REQUIRE_THAT(axis.display_to_hz(0.0f), WithinAbs(0.0, 1e-4));
+    REQUIRE_THAT(axis.display_to_hz(1.0f), WithinAbs(24000.0, 1.0));
+    REQUIRE(axis.display_to_bin(1.0f) == axis.num_bins() - 1);
+}
+
+TEST_CASE("SpectrogramBuffer wraps columns and maps rows to bins", "[signal][spectrogram][issue-645]") {
+    SpectrogramBuffer buf;
+    ColorMapper mapper(ColorRamp::grayscale);
+    buf.configure(3, 4);
+
+    const std::vector<float> quiet = {-80.0f, -80.0f, -80.0f, -80.0f};
+    const std::vector<float> loud = {0.0f, 0.0f, 0.0f, 0.0f};
+    const std::vector<float> mid = {-40.0f, -40.0f, -40.0f, -40.0f};
+    const std::vector<float> sloped = {-80.0f, -40.0f, -20.0f, 0.0f};
+
+    buf.push_column(quiet.data(), static_cast<int>(quiet.size()), mapper, -80.0f, 0.0f);
+    REQUIRE(buf.write_column() == 1);
+    buf.push_column(loud.data(), static_cast<int>(loud.size()), mapper, -80.0f, 0.0f);
+    REQUIRE(buf.write_column() == 2);
+    buf.push_column(mid.data(), static_cast<int>(mid.size()), mapper, -80.0f, 0.0f);
+    REQUIRE(buf.write_column() == 0);
+    buf.push_column(sloped.data(), static_cast<int>(sloped.size()), mapper, -80.0f, 0.0f);
+
+    REQUIRE(buf.frames_written() == 4);
+    REQUIRE(buf.write_column() == 1);
+
+    const auto* px = buf.pixels();
+    REQUIRE(px[0 * buf.width() + 0].r == 0);
+    REQUIRE(px[1 * buf.width() + 0].r == 127);
+    REQUIRE(px[2 * buf.width() + 0].r == 191);
+    REQUIRE(px[3 * buf.width() + 0].r == 255);
+    REQUIRE(px[0 * buf.width() + 1].r == 255);
+    REQUIRE(px[0 * buf.width() + 2].r == 127);
+}
+
+TEST_CASE("SpectrogramBuffer handles degenerate dB range and empty rows", "[signal][spectrogram][issue-645]") {
+    SpectrogramBuffer buf;
+    ColorMapper mapper(ColorRamp::grayscale);
+    buf.configure(2, 2);
+
+    const std::vector<float> mags = {-100.0f, 0.0f};
+    buf.push_column(mags.data(), static_cast<int>(mags.size()), mapper, -80.0f, -80.0f);
+
+    const auto* px = buf.pixels();
+    REQUIRE(px[0].r == 0);
+    REQUIRE(px[2].r == 255);
+    REQUIRE(buf.frames_written() == 1);
+    REQUIRE(buf.write_column() == 1);
+
+    SpectrogramBuffer empty_rows;
+    empty_rows.configure(4, 0);
+    empty_rows.push_column(mags.data(), static_cast<int>(mags.size()), mapper, -80.0f, 0.0f);
+    REQUIRE(empty_rows.frames_written() == 1);
+    REQUIRE(empty_rows.write_column() == 1);
+    REQUIRE(empty_rows.height() == 0);
+}
+
 // ── Multi-Channel Meter Tests ───────────────────────────────────────────────
 
 TEST_CASE("MultiChannelMeter stereo peak and RMS", "[signal][meter]") {
