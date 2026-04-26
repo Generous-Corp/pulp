@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-26 14:44 EDT
+Last reviewed: 2026-04-26 14:51 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -28,7 +28,7 @@ Status: complete.
 Finish line state:
 
 - `windows` is non-null on `main` (`0.0%` at the current baseline).
-- `dsl` is a real component on `main` (`63.38%`).
+- `dsl` is a real component on `main` (`68.3%`).
 - `apple/Sources/**` materializes on Codecov for the macOS Swift package
   lane and the native `PulpBridge.cpp` lane.
 - `android/app/src/main/kotlin/**` materializes on Codecov.
@@ -67,34 +67,34 @@ Finish line:
 
 Latest complete Codecov `main` report observed while updating this doc:
 
-- commit: `f712702afff325b35785eb56b88f1b85df0226a8`
-- workflow: Coverage run `24963571323`, completed successfully
-- overall tracked coverage: `45.58%` over `70,381` lines in `556` files
-- covered lines: `32,086`
-- missed lines: `37,163`
-- partial lines: `1,132`
+- commit: `810743d49f588385aab50ced672344e098710403`
+- workflow: Coverage run `24964141128`, completed successfully
+- overall tracked coverage: `45.43%` over `70,380` lines in `556` files
+- covered lines: `31,974`
+- missed lines: `37,398`
+- partial lines: `1,008`
 - current component coverage from the Codecov API:
-  - `audio`: `35.3%`
-  - `canvas`: `64.59%`
-  - `dsl`: `63.38%`
-  - `events`: `49.49%`
-  - `format`: `51.43%`
-  - `host`: `43.48%`
-  - `midi`: `47.81%`
-  - `osc`: `61.61%`
-  - `platform`: `39.05%`
-  - `render`: `57.66%`
-  - `runtime`: `49.7%`
-  - `signal`: `65.95%`
-  - `state`: `61.26%`
-  - `view`: `43.12%`
+  - `audio`: `34.78%`
+  - `canvas`: `64.22%`
+  - `dsl`: `68.3%`
+  - `events`: `50.5%`
+  - `format`: `51.04%`
+  - `host`: `43.39%`
+  - `midi`: `47.62%`
+  - `osc`: `65.65%`
+  - `platform`: `36.93%`
+  - `render`: `60.38%`
+  - `runtime`: `47.51%`
+  - `signal`: `66.13%`
+  - `state`: `60.77%`
+  - `view`: `42.93%`
   - `android`: `13.83%`
   - `apple`: `25.36%`
-  - `linux`: `3.31%`
+  - `linux`: `0.0%`
   - `windows`: `0.0%`
-  - `cli`: `38.28%`
-  - `ship`: `53.66%`
-  - `tools`: `43.99%`
+  - `cli`: `38.94%`
+  - `ship`: `54.46%`
+  - `tools`: `44.33%`
 
 Post-`#794` file-level proof point: `core/audio/src/aiff_reader.cpp`
 is now `72.01%` covered with `61` misses, up from `64.22%` with `78`
