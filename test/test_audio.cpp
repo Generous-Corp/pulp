@@ -80,6 +80,44 @@ TEST_CASE("BufferView non-owning", "[audio][buffer]") {
     REQUIRE(ch0[0] == 99.0f);
 }
 
+TEST_CASE("Buffer resize and views expose contiguous channel storage",
+          "[audio][buffer][issue-640]") {
+    Buffer<float> empty;
+    REQUIRE(empty.num_channels() == 0);
+    REQUIRE(empty.num_samples() == 0);
+    REQUIRE(empty.view().empty());
+
+    Buffer<float> buf(1, 3);
+    REQUIRE_FALSE(buf.view().empty());
+    buf.channel(0)[0] = 1.0f;
+    buf.channel(0)[1] = 2.0f;
+    buf.channel(0)[2] = 3.0f;
+
+    buf.resize(2, 4);
+    REQUIRE(buf.num_channels() == 2);
+    REQUIRE(buf.num_samples() == 4);
+    auto view = buf.view();
+    REQUIRE(view.num_channels() == 2);
+    REQUIRE(view.num_samples() == 4);
+    REQUIRE(view.channel_ptr(0) == buf.channel(0).data());
+    REQUIRE(view.channel_ptr(1) == buf.channel(1).data());
+
+    view.channel(0)[0] = 0.25f;
+    view.channel(1)[3] = -0.75f;
+    REQUIRE(buf.channel(0)[0] == 0.25f);
+    REQUIRE(buf.channel(1)[3] == -0.75f);
+
+    buf.clear();
+    for (std::size_t ch = 0; ch < buf.num_channels(); ++ch) {
+        for (auto sample : buf.channel(ch)) {
+            REQUIRE(sample == 0.0f);
+        }
+    }
+
+    buf.resize(2, 0);
+    REQUIRE(buf.view().empty());
+}
+
 TEST_CASE("ChannelSet maps standard layouts by count and name",
           "[audio][channel-set][issue-640]") {
     REQUIRE(ChannelSet::from_channel_count(0).name == "Discrete 0");

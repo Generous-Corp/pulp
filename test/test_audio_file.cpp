@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <limits>
 #include <cmath>
 #include <memory>
 #include <string>
@@ -58,6 +59,27 @@ static int32_t read_le24_signed(const std::vector<uint8_t>& bytes, size_t offset
 
 static int32_t read_le32_signed(const std::vector<uint8_t>& bytes, size_t offset) {
     return static_cast<int32_t>(read_le32(bytes, offset));
+}
+
+static size_t require_riff_chunk_data_offset(const std::vector<uint8_t>& bytes,
+                                             std::string_view chunk_id) {
+    REQUIRE(chunk_id.size() == 4);
+    REQUIRE(bytes.size() >= 12);
+
+    size_t offset = 12;
+    while (offset + 8 <= bytes.size()) {
+        auto id = std::string_view(reinterpret_cast<const char*>(bytes.data() + offset), 4);
+        auto size = read_le32(bytes, offset + 4);
+        auto data_offset = offset + 8;
+        REQUIRE(data_offset + size <= bytes.size());
+        if (id == chunk_id) {
+            return data_offset;
+        }
+        offset = data_offset + size + (size & 1u);
+    }
+
+    FAIL("RIFF chunk not found: " << chunk_id);
+    return 0;
 }
 
 static void require_wav_header(const std::vector<uint8_t>& bytes,
@@ -290,6 +312,70 @@ TEST_CASE("int16 round-trip preserves values", "[audio][convert]") {
     }
 }
 
+TEST_CASE("sample conversion handles packed 24-bit and 32-bit edges",
+          "[audio][convert][issue-640]") {
+    const uint8_t packed24[] = {
+        0x00, 0x00, 0x00,
+        0xFF, 0xFF, 0x7F,
+        0x00, 0x00, 0x80,
+        0xFF, 0xFF, 0xFF,
+    };
+    float from24[4] = {};
+    int24_to_float(packed24, from24, 4);
+    REQUIRE_THAT(from24[0], WithinAbs(0.0f, 0.000001f));
+    REQUIRE_THAT(from24[1], WithinAbs(8388607.0f / 8388608.0f, 0.000001f));
+    REQUIRE_THAT(from24[2], WithinAbs(-1.0f, 0.000001f));
+    REQUIRE_THAT(from24[3], WithinAbs(-1.0f / 8388608.0f, 0.000001f));
+
+    const int32_t int32_samples[] = {
+        0,
+        1073741824,
+        -1073741824,
+        std::numeric_limits<int32_t>::max(),
+        std::numeric_limits<int32_t>::min(),
+    };
+    float from32[5] = {};
+    int32_to_float(int32_samples, from32, 5);
+    REQUIRE_THAT(from32[0], WithinAbs(0.0f, 0.000001f));
+    REQUIRE_THAT(from32[1], WithinAbs(0.5f, 0.000001f));
+    REQUIRE_THAT(from32[2], WithinAbs(-0.5f, 0.000001f));
+    REQUIRE_THAT(from32[3], WithinAbs(1.0f, 0.000001f));
+    REQUIRE_THAT(from32[4], WithinAbs(-1.0f, 0.000001f));
+
+    const float floats[] = {-2.0f, -1.0f, 0.0f, 0.5f, 1.0f, 2.0f};
+    int32_t to32[6] = {};
+    float_to_int32(floats, to32, 6);
+    REQUIRE(to32[0] == std::numeric_limits<int32_t>::min());
+    REQUIRE(to32[1] == std::numeric_limits<int32_t>::min());
+    REQUIRE(to32[2] == 0);
+    REQUIRE(std::abs(to32[3] - 1073741823) < 2);
+    REQUIRE(to32[4] == std::numeric_limits<int32_t>::max());
+    REQUIRE(to32[5] == std::numeric_limits<int32_t>::max());
+}
+
+TEST_CASE("sample conversion no-ops leave sentinel outputs untouched",
+          "[audio][convert][issue-640]") {
+    int16_t int16_src[] = {123};
+    uint8_t int24_src[] = {1, 2, 3};
+    int32_t int32_src[] = {456};
+    float float_src[] = {0.5f};
+
+    float float_out = 9.0f;
+    int16_t int16_out = 17;
+    int32_t int32_out = 23;
+
+    int16_to_float(int16_src, &float_out, 0);
+    REQUIRE(float_out == 9.0f);
+    int24_to_float(int24_src, &float_out, 0);
+    REQUIRE(float_out == 9.0f);
+    int32_to_float(int32_src, &float_out, 0);
+    REQUIRE(float_out == 9.0f);
+    float_to_int16(float_src, &int16_out, 0);
+    REQUIRE(int16_out == 17);
+    float_to_int32(float_src, &int32_out, 0);
+    REQUIRE(int32_out == 23);
+}
+
 // ── WAV file I/O ─────────────────────────────────────────────────────────────
 
 TEST_CASE("Write and read WAV file", "[audio][file]") {
@@ -337,6 +423,79 @@ TEST_CASE("Read nonexistent file returns nullopt", "[audio][file]") {
 
     auto info = read_audio_file_info("/nonexistent/path.wav");
     REQUIRE_FALSE(info.has_value());
+}
+
+TEST_CASE("WAV helpers write deinterleaved channel data and reject malformed input",
+          "[audio][file][issue-640]") {
+    auto path = unique_temp_audio_path("_helper_edges.wav");
+    std::filesystem::remove(path);
+
+    AudioFileData data;
+    data.sample_rate = 22050;
+    data.channels = {
+        {-1.0f, 0.0f, 1.0f},
+        {0.5f, -0.5f, 0.25f},
+    };
+
+    REQUIRE(write_wav_file(path.string(), data));
+    auto bytes = read_binary_file(path);
+    REQUIRE(bytes.size() >= 56);
+    REQUIRE(std::string(reinterpret_cast<const char*>(bytes.data()), 4) == "RIFF");
+    REQUIRE(std::string(reinterpret_cast<const char*>(bytes.data() + 8), 4) == "WAVE");
+    auto fmt_offset = require_riff_chunk_data_offset(bytes, "fmt ");
+    auto format_tag = read_le16(bytes, fmt_offset);
+    REQUIRE((format_tag == 1 || format_tag == 0xFFFE));
+    REQUIRE(read_le16(bytes, fmt_offset + 2) == 2);
+    REQUIRE(read_le32(bytes, fmt_offset + 4) == 22050);
+    REQUIRE(read_le16(bytes, fmt_offset + 14) == 16);
+
+    auto data_offset = require_riff_chunk_data_offset(bytes, "data");
+    REQUIRE(read_le32(bytes, data_offset - 4) == 12);
+    REQUIRE(static_cast<int16_t>(read_le16(bytes, data_offset)) == -32767);
+    REQUIRE(static_cast<int16_t>(read_le16(bytes, data_offset + 2)) == 16383);
+    REQUIRE(static_cast<int16_t>(read_le16(bytes, data_offset + 4)) == 0);
+    REQUIRE(static_cast<int16_t>(read_le16(bytes, data_offset + 6)) == -16383);
+    REQUIRE(static_cast<int16_t>(read_le16(bytes, data_offset + 8)) == 32767);
+    REQUIRE(static_cast<int16_t>(read_le16(bytes, data_offset + 10)) == 8191);
+
+    auto read_data = read_audio_file(path.string());
+    REQUIRE(read_data.has_value());
+    REQUIRE(read_data->sample_rate == 22050);
+    REQUIRE(read_data->num_channels() == 2);
+    REQUIRE(read_data->num_frames() == 3);
+    REQUIRE_THAT(read_data->channels[0][2], WithinAbs(1.0f, 0.001f));
+    REQUIRE_THAT(read_data->channels[1][1], WithinAbs(-0.5f, 0.001f));
+
+    auto malformed = unique_temp_audio_path("_malformed.wav");
+    {
+        std::ofstream f(malformed, std::ios::binary);
+        f << "not a wav";
+    }
+    REQUIRE_FALSE(read_audio_file_info(malformed.string()).has_value());
+    REQUIRE_FALSE(read_audio_file(malformed.string()).has_value());
+
+    std::filesystem::remove(path);
+    std::filesystem::remove(malformed);
+}
+
+TEST_CASE("OGG registry reader rejects invalid files deterministically",
+          "[audio][file][ogg][issue-640]") {
+    auto path = unique_temp_audio_path("_invalid.ogg");
+    {
+        std::ofstream f(path, std::ios::binary);
+        f << "not an ogg stream";
+    }
+
+    auto& registry = FormatRegistry::instance();
+    auto* reader = registry.find_reader(".oga");
+    REQUIRE(reader != nullptr);
+    REQUIRE(reader->format_name() == "OGG Vorbis");
+    REQUIRE_FALSE(reader->read_info(path.string()).has_value());
+    REQUIRE_FALSE(reader->read(path.string()).has_value());
+    REQUIRE_FALSE(registry.read_info(path.string()).has_value());
+    REQUIRE_FALSE(registry.read(path.string()).has_value());
+
+    std::filesystem::remove(path);
 }
 
 TEST_CASE("MemoryMappedAudioReader opens WAV files and reads frame ranges",

@@ -94,3 +94,25 @@ TEST_CASE("AudioProcessLoadMeasurer reset_peak", "[audio][load]") {
     // load() should still be nonzero
     REQUIRE(m.load() > 0);
 }
+
+TEST_CASE("AudioProcessLoadMeasurer clamps smoothing and ignores zero available time",
+          "[audio][load][issue-640]") {
+    AudioProcessLoadMeasurer m;
+
+    m.end();
+    REQUIRE_THAT(m.load(), WithinAbs(0.0f, 0.001f));
+    REQUIRE_THAT(m.peak_load(), WithinAbs(0.0f, 0.001f));
+
+    m.set_smoothing(-1.0f);
+    m.begin(512, 44100.0f);
+    busy_wait_for(std::chrono::microseconds(1200));
+    m.end();
+    REQUIRE_THAT(m.load(), WithinAbs(0.0f, 0.001f));
+    REQUIRE(m.peak_load() > 0.0f);
+
+    m.reset();
+    m.set_smoothing(2.0f);
+    auto raw_load = measure_load(m, std::chrono::microseconds(1200));
+    REQUIRE(raw_load > 0.0f);
+    REQUIRE_THAT(m.peak_load(), WithinAbs(raw_load, 0.001f));
+}
