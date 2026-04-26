@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-26 01:13 EDT
+Last reviewed: 2026-04-26 01:19 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -123,11 +123,12 @@ Merged after the Phase 1 closeout / `#723` baseline:
 - `#796` tool-registry CLI/tools coverage -> `11c10a7e`
 - `#797` StreamingWriter audio edge coverage -> `64ba65e3`
 - `#798` FormatRegistry audio dispatch coverage -> `443ca260`
+- `#799` docs-reader CLI shellout coverage -> `22438468`
 
 Open Phase 3 PRs:
 
 - `#795` `test(events): cover volume detector lifecycle edges`, branch
-  `feature/events-volume-coverage-642`, commit `2d684f4b`, worktree
+  `feature/events-volume-coverage-642`, commit `2f109744`, worktree
   `/Users/danielraffel/Code/pulp-events-volume-coverage-642`.
   Scope: deterministic `test/test_network_service_discovery.cpp`
   coverage for `NetworkServiceDiscovery` backend removal, cached-service
@@ -144,24 +145,15 @@ Open Phase 3 PRs:
   final PR diff because the Windows coverage XML reports that translation
   unit at `0%` even though the CTest cases run and pass there. The final
   PR diff is test-only, and the mounted-volume enumeration tests skip on
-  Windows while retaining POSIX coverage. GitHub checks were rerunning on
-  `2d684f4b` with no failures at the last poll. The PR is labeled
+  Windows while retaining POSIX coverage. The prior Linux coverage failure
+  on `2d684f4b` was not from the events tests; the failed job showed the
+  #795 events tests passed and unrelated CLI/Python coverage tests failed
+  on the stale base. The branch was rebased onto `origin/main` after
+  `#798` and `#799` merged, local validation passed again, and fresh CI is
+  running on `2f109744`. The PR is labeled
   `codecov` and is using the direct GitHub/Namespace path instead of
   `shipyard pr` because `#794` exposed a local Shipyard mac configure
   stall after GitHub/Namespace was already clean.
-- `#799` `test(cli): cover docs shellout reader paths`, branch
-  `feature/cli-docs-coverage-643`, commit `4877cb1b`, worktree
-  `/Users/danielraffel/Code/pulp-cli-docs-coverage-643`.
-  Scope: deterministic `test/test_cli_shellout.cpp` coverage for
-  `pulp docs` local reader usage, index, open, search, support/command/
-  CMake/style `show` paths, and error diagnostics. Local validation:
-  `pulp-cli` and `pulp-test-cli-shellout` built successfully; direct
-  Catch2 tag run `[cli][shellout][docs][issue-643]` passed with `38`
-  assertions in `1` test case; focused CTest
-  `pulp docs covers local reader` passed `1/1`; `git diff --check`
-  clean; skill sync found no mapped paths; version bump report says no
-  bump needed. The PR is labeled `codecov` and is using the direct
-  GitHub/Namespace path.
 - `#800` `test(tools): cover version and skill gate helpers`, branch
   `feature/python-tooling-coverage-643`, commit `acadc5af`, worktree
   `/Users/danielraffel/Code/pulp-python-tooling-coverage-643`.
@@ -204,7 +196,7 @@ Local Phase 3 draft worktrees:
   `c4e6ad09`. The remote branch was deleted after merge.
 - `#642` events volume/service-discovery worktree
   `/Users/danielraffel/Code/pulp-events-volume-coverage-642`, branch
-  `feature/events-volume-coverage-642`, commit `2d684f4b`; open as PR
+  `feature/events-volume-coverage-642`, commit `2f109744`; open as PR
   `#795`.
 - `#643` package-registry CLI/tools worktree
   `/Users/danielraffel/Code/pulp-package-registry-coverage-643`, branch
@@ -226,8 +218,8 @@ Local Phase 3 draft worktrees:
   deleted after merge.
 - `#643` docs-reader CLI/tools worktree
   `/Users/danielraffel/Code/pulp-cli-docs-coverage-643`, branch
-  `feature/cli-docs-coverage-643`, commit `4877cb1b`; open as PR
-  `#799`.
+  `feature/cli-docs-coverage-643`, commit `4877cb1b`; merged via PR
+  `#799` as `22438468`. The remote branch was deleted after merge.
 - `#643` Python gate-helper tooling worktree
   `/Users/danielraffel/Code/pulp-python-tooling-coverage-643`, branch
   `feature/python-tooling-coverage-643`, commit `acadc5af`; open as PR
@@ -242,7 +234,7 @@ Open supporting PR:
 - `#774` refreshes this durable handoff/status document, branch
   `docs/coverage-status-2026-04-25`. The branch is updated as this
   tracker changes; use the PR head SHA in GitHub as the live value.
-  The branch has been rebased onto `origin/main` after `#798` merged and
+  The branch has been rebased onto `origin/main` after `#799` merged and
   remains docs-only.
 
 Local environment note:
@@ -256,11 +248,11 @@ Local environment note:
 Next recovery actions:
 
 1. Keep `#774` docs-only and let its latest status-update checks drain.
-2. Monitor `#795`, `#799`, `#800`, and `#801` and address any Codecov,
-   build, sanitizer, or Namespace feedback.
-3. If `#795`, `#799`, `#800`, or `#801` is green but GitHub reports it
-   behind `main`, rebase that branch onto `origin/main`, push with lease,
-   and let checks rerun.
+2. Monitor `#795`, `#800`, and `#801` and address any Codecov, build,
+   sanitizer, or Namespace feedback.
+3. If `#795`, `#800`, or `#801` is green but GitHub reports it behind
+   `main`, rebase that branch onto `origin/main`, push with lease, and
+   let checks rerun.
 4. Continue Phase 3 from the tranche issues below, prioritizing
    represented high-miss files over adding new perimeter lanes.
 
