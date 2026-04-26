@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-26 17:53 EDT
+Last reviewed: 2026-04-26 17:54 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -148,14 +148,10 @@ Merged after the Phase 1 closeout / `#723` baseline:
 - `#817` UMP conversion edge coverage -> `a38216fd`
 - `#821` audio reader helper edge coverage -> `7aff17f9`
 - `#819` MIDI keyboard/sequence edge coverage -> `7a646f33`
+- `#820` signal spectrogram edge coverage -> `1a1b7f07`
 
 Open Phase 3 PRs:
 
-- `#820` signal spectrogram edge coverage for `#645`, branch
-  `feature/signal-spectrogram-coverage-645`, head `0fd8aa5a`; opened
-  from `main` at `c9620a65`. This tranche also uses the
-  GitHub/Namespace path while the SSH `windows` target remains
-  unreachable.
 - `#822` audio file helper edge coverage for `#640`, branch
   `feature/audio-file-helper-coverage-640`, head `8aa7a78d`; opened
   from `main` at `c9620a65` and updated after the first macOS UBSan run
@@ -386,7 +382,8 @@ Local Phase 3 draft worktrees:
 - `#645` signal spectrogram worktree
   `/Users/danielraffel/Code/pulp-signal-spectrogram-coverage-645`,
   branch `feature/signal-spectrogram-coverage-645`, commit `0fd8aa5a`;
-  open as PR `#820`.
+  merged via PR `#820` as `1a1b7f07`. The remote branch was deleted
+  after merge.
   Scope: test-only coverage for `ColorMapper` ramp switching/control
   points, `FrequencyAxis` clamping and bin/display conversions,
   `SpectrogramBuffer` column wraparound, row-to-bin mapping,
@@ -496,7 +493,7 @@ Open supporting PR:
   updated after `#816` merged, `#817` was repaired, `#820` opened,
   `#821` opened, `#822` opened, `#818` merged, `#823` opened, `#817`
   merged, `#822` was repaired, `#824` opened, `#821` merged, and `#819`
-  merged, and `#825` opened, and remains docs-only.
+  merged, `#825` opened, and `#820` merged, and remains docs-only.
 
 Local environment note:
 
@@ -515,25 +512,22 @@ Local environment note:
 Next recovery actions:
 
 1. Keep `#774` docs-only and let its latest status-update checks drain.
-2. Monitor `#820` cloud checks; if a required lane fails, debug in
-   `/Users/danielraffel/Code/pulp-signal-spectrogram-coverage-645`,
-   patch, validate locally, and push with lease.
-3. Monitor `#822` cloud checks; if a required lane fails, debug in
+2. Monitor `#822` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-audio-file-helper-coverage-640`,
    patch, validate locally, and push with lease.
-4. Monitor `#823` cloud checks; if a required lane fails, debug in
+3. Monitor `#823` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-platform-helper-coverage-640`, patch,
    validate locally, and push with lease.
-5. Monitor `#824` cloud checks; if a required lane fails, debug in
+4. Monitor `#824` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-signal-math-helper-coverage-645`,
    patch, validate locally, and push with lease.
-6. Monitor `#825` cloud checks; if a required lane fails, debug in
+5. Monitor `#825` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-signal-dsp-helper-coverage-645`,
    patch, validate locally, and push with lease.
-7. If any open Phase 3 PR is green but GitHub reports it behind `main`,
+6. If any open Phase 3 PR is green but GitHub reports it behind `main`,
    rebase that branch onto `origin/main`, push with lease, and let
    checks rerun.
-8. Continue Phase 3 from the tranche issues below, prioritizing
+7. Continue Phase 3 from the tranche issues below, prioritizing
    represented high-miss files over adding new perimeter lanes.
 
 ## Phase 1 corrected baseline
