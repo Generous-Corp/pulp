@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-26 18:17 EDT
+Last reviewed: 2026-04-26 18:26 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -177,6 +177,10 @@ Open Phase 3 PRs:
   unreachable.
 - `#826` OGG reader edge coverage for `#640`, branch
   `feature/audio-ogg-reader-coverage-640`, head `6b721c22`; opened from
+  `main` at `1a1b7f07`. This tranche also uses the GitHub/Namespace path
+  while the SSH `windows` target remains unreachable.
+- `#827` signal multi-channel meter edge coverage for `#645`, branch
+  `feature/signal-meter-coverage-645`, head `ed51248f`; opened from
   `main` at `1a1b7f07`. This tranche also uses the GitHub/Namespace path
   while the SSH `windows` target remains unreachable.
 
@@ -508,6 +512,20 @@ Local Phase 3 draft worktrees:
   `[audio][ogg][issue-640]` run passed `12` assertions in `2` cases,
   full binary passed `12` assertions in `2` cases, focused CTest passed
   `2/2`, `git diff --check`, skill-sync report, and version-bump report.
+- `#645` signal multi-channel meter worktree
+  `/Users/danielraffel/Code/pulp-signal-meter-coverage-645`, branch
+  `feature/signal-meter-coverage-645`, commit `ed51248f`; open as PR
+  `#827`.
+  Scope: dedicated `pulp-test-multi-channel-meter` target covering
+  prepared-channel clamping, empty process blocks, correlation window
+  replacement after reset, integrated LUFS running-average behavior,
+  ballistics release/noise-floor clamping, and held-peak refresh paths.
+  This intentionally avoids `test_signal.cpp` while `#824` is open.
+  Local validation: no-GPU/no-examples configure,
+  `pulp-test-multi-channel-meter` build, direct `[issue-645]` run
+  passed `20` assertions in `6` cases, full binary passed `20`
+  assertions in `6` cases, focused CTest passed `6/6`,
+  `git diff --check`, skill-sync report, and version-bump report.
 
 Open supporting PR:
 
@@ -518,8 +536,9 @@ Open supporting PR:
   updated after `#816` merged, `#817` was repaired, `#820` opened,
   `#821` opened, `#822` opened, `#818` merged, `#823` opened, `#817`
   merged, `#822` was repaired, `#824` opened, `#821` merged, and `#819`
-  merged, `#825` opened, `#820` merged, `#826` opened, and `#822` was
-  repaired again for Android SDK discovery, and remains docs-only.
+  merged, `#825` opened, `#820` merged, `#826` opened, `#822` was
+  repaired again for Android SDK discovery, and `#827` opened, and
+  remains docs-only.
 
 Local environment note:
 
@@ -553,10 +572,13 @@ Next recovery actions:
 6. Monitor `#826` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-audio-ogg-reader-coverage-640`,
    patch, validate locally, and push with lease.
-7. If any open Phase 3 PR is green but GitHub reports it behind `main`,
+7. Monitor `#827` cloud checks; if a required lane fails, debug in
+   `/Users/danielraffel/Code/pulp-signal-meter-coverage-645`, patch,
+   validate locally, and push with lease.
+8. If any open Phase 3 PR is green but GitHub reports it behind `main`,
    rebase that branch onto `origin/main`, push with lease, and let
    checks rerun.
-8. Continue Phase 3 from the tranche issues below, prioritizing
+9. Continue Phase 3 from the tranche issues below, prioritizing
    represented high-miss files over adding new perimeter lanes.
 
 ## Phase 1 corrected baseline
