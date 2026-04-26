@@ -2,10 +2,15 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/audio/audio_file.hpp>
 #include <pulp/audio/format_registry.hpp>
+#include <pulp/audio/streaming_writer.hpp>
 #include <algorithm>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <cmath>
+#include <string>
+#include <vector>
 #include <utility>
 
 using namespace pulp::audio;
@@ -14,6 +19,63 @@ using Catch::Matchers::WithinAbs;
 static bool contains_extension(const std::vector<std::string>& extensions,
                                std::string_view extension) {
     return std::find(extensions.begin(), extensions.end(), extension) != extensions.end();
+}
+
+static std::filesystem::path unique_temp_audio_path(std::string_view suffix) {
+    static int counter = 0;
+    auto name = "pulp_test_audio_" + std::to_string(reinterpret_cast<std::uintptr_t>(&counter))
+              + "_" + std::to_string(counter++) + std::string(suffix);
+    return std::filesystem::temp_directory_path() / name;
+}
+
+static std::vector<uint8_t> read_binary_file(const std::filesystem::path& path) {
+    std::ifstream f(path, std::ios::binary);
+    return {std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>()};
+}
+
+static uint16_t read_le16(const std::vector<uint8_t>& bytes, size_t offset) {
+    return static_cast<uint16_t>(bytes[offset])
+         | static_cast<uint16_t>(bytes[offset + 1] << 8);
+}
+
+static uint32_t read_le32(const std::vector<uint8_t>& bytes, size_t offset) {
+    return static_cast<uint32_t>(bytes[offset])
+         | (static_cast<uint32_t>(bytes[offset + 1]) << 8)
+         | (static_cast<uint32_t>(bytes[offset + 2]) << 16)
+         | (static_cast<uint32_t>(bytes[offset + 3]) << 24);
+}
+
+static int32_t read_le24_signed(const std::vector<uint8_t>& bytes, size_t offset) {
+    int32_t value = static_cast<int32_t>(bytes[offset])
+                  | (static_cast<int32_t>(bytes[offset + 1]) << 8)
+                  | (static_cast<int32_t>(bytes[offset + 2]) << 16);
+    if (value & 0x800000) value |= static_cast<int32_t>(0xFF000000u);
+    return value;
+}
+
+static int32_t read_le32_signed(const std::vector<uint8_t>& bytes, size_t offset) {
+    return static_cast<int32_t>(read_le32(bytes, offset));
+}
+
+static void require_wav_header(const std::vector<uint8_t>& bytes,
+                               uint16_t channels,
+                               uint32_t sample_rate,
+                               uint16_t bits_per_sample,
+                               uint32_t data_size) {
+    REQUIRE(bytes.size() == 44u + data_size);
+    REQUIRE(std::string(reinterpret_cast<const char*>(bytes.data()), 4) == "RIFF");
+    REQUIRE(read_le32(bytes, 4) == 36u + data_size);
+    REQUIRE(std::string(reinterpret_cast<const char*>(bytes.data() + 8), 4) == "WAVE");
+    REQUIRE(std::string(reinterpret_cast<const char*>(bytes.data() + 12), 4) == "fmt ");
+    REQUIRE(read_le32(bytes, 16) == 16);
+    REQUIRE(read_le16(bytes, 20) == 1);
+    REQUIRE(read_le16(bytes, 22) == channels);
+    REQUIRE(read_le32(bytes, 24) == sample_rate);
+    REQUIRE(read_le32(bytes, 28) == sample_rate * channels * (bits_per_sample / 8));
+    REQUIRE(read_le16(bytes, 32) == channels * (bits_per_sample / 8));
+    REQUIRE(read_le16(bytes, 34) == bits_per_sample);
+    REQUIRE(std::string(reinterpret_cast<const char*>(bytes.data() + 36), 4) == "data");
+    REQUIRE(read_le32(bytes, 40) == data_size);
 }
 
 static void append_be16(std::vector<unsigned char>& bytes, uint16_t value) {
@@ -194,6 +256,122 @@ TEST_CASE("Read nonexistent file returns nullopt", "[audio][file]") {
 
     auto info = read_audio_file_info("/nonexistent/path.wav");
     REQUIRE_FALSE(info.has_value());
+}
+
+// ── Streaming WAV writer ────────────────────────────────────────────────────
+
+TEST_CASE("StreamingWriter rejects invalid opens and closed writes",
+          "[audio][file][streaming][issue-640]") {
+    StreamingWriter writer;
+    float sample = 0.0f;
+    REQUIRE(writer.write_frames(&sample, 1) == 0);
+    REQUIRE_FALSE(writer.is_open());
+
+    auto path = unique_temp_audio_path("_stream_invalid.wav");
+    std::filesystem::remove(path);
+
+    REQUIRE_FALSE(writer.open(path.string(), 44100, 2, 12));
+    REQUIRE_FALSE(writer.open(path.string(), 0, 2, 16));
+    REQUIRE_FALSE(writer.open(path.string(), 44100, 0, 16));
+    REQUIRE_FALSE(writer.is_open());
+
+    REQUIRE(writer.open(path.string(), 44100, 2, 16));
+    REQUIRE(writer.write_frames(static_cast<const float*>(nullptr), 1) == 0);
+    REQUIRE(writer.write_frames(&sample, 0) == 0);
+    REQUIRE(writer.write_frames(&sample, -1) == 0);
+
+    const float* invalid_channels[] = {&sample, nullptr};
+    REQUIRE(writer.write_frames(static_cast<const float* const*>(nullptr), 2, 1) == 0);
+    REQUIRE(writer.write_frames(invalid_channels, 2, 1) == 0);
+    REQUIRE(writer.write_frames(invalid_channels, 2, 0) == 0);
+    REQUIRE(writer.write_frames(invalid_channels, 2, -1) == 0);
+    REQUIRE(writer.frames_written() == 0);
+
+    writer.close();
+    writer.close();
+    std::filesystem::remove(path);
+}
+
+TEST_CASE("StreamingWriter writes finalized 16-bit interleaved WAV data",
+          "[audio][file][streaming][issue-640]") {
+    auto path = unique_temp_audio_path("_stream_16.wav");
+    std::filesystem::remove(path);
+
+    StreamingWriter writer;
+    REQUIRE(writer.open(path.string(), 48000, 2, 16));
+    REQUIRE(writer.is_open());
+
+    const float frames[] = {
+        -2.0f, -1.0f,
+         0.0f,  0.5f,
+         1.0f,  2.0f,
+    };
+    REQUIRE(writer.write_frames(frames, 3) == 3);
+    REQUIRE(writer.frames_written() == 3);
+
+    writer.close();
+    REQUIRE_FALSE(writer.is_open());
+    writer.close();
+
+    auto bytes = read_binary_file(path);
+    require_wav_header(bytes, 2, 48000, 16, 12);
+
+    REQUIRE(static_cast<int16_t>(read_le16(bytes, 44)) == -32767);
+    REQUIRE(static_cast<int16_t>(read_le16(bytes, 46)) == -32767);
+    REQUIRE(static_cast<int16_t>(read_le16(bytes, 48)) == 0);
+    REQUIRE(static_cast<int16_t>(read_le16(bytes, 50)) == 16383);
+    REQUIRE(static_cast<int16_t>(read_le16(bytes, 52)) == 32767);
+    REQUIRE(static_cast<int16_t>(read_le16(bytes, 54)) == 32767);
+
+    std::filesystem::remove(path);
+}
+
+TEST_CASE("StreamingWriter interleaves deinterleaved 24-bit channel data",
+          "[audio][file][streaming][issue-640]") {
+    auto path = unique_temp_audio_path("_stream_24.wav");
+    std::filesystem::remove(path);
+
+    StreamingWriter writer;
+    REQUIRE(writer.open(path.string(), 44100, 2, 24));
+
+    const float left[] = {1.0f, -1.0f};
+    const float right[] = {0.25f, -0.25f};
+    const float* channels[] = {left, right};
+    REQUIRE(writer.write_frames(channels, 1, 2) == 0);
+    REQUIRE(writer.write_frames(channels, 2, 2) == 2);
+    REQUIRE(writer.frames_written() == 2);
+    writer.close();
+
+    auto bytes = read_binary_file(path);
+    require_wav_header(bytes, 2, 44100, 24, 12);
+
+    REQUIRE(read_le24_signed(bytes, 44) == 8388607);
+    REQUIRE(read_le24_signed(bytes, 47) == 2097151);
+    REQUIRE(read_le24_signed(bytes, 50) == -8388607);
+    REQUIRE(read_le24_signed(bytes, 53) == -2097151);
+
+    std::filesystem::remove(path);
+}
+
+TEST_CASE("StreamingWriter writes 32-bit PCM and destructor finalizes header",
+          "[audio][file][streaming][issue-640]") {
+    auto path = unique_temp_audio_path("_stream_32.wav");
+    std::filesystem::remove(path);
+
+    {
+        StreamingWriter writer;
+        REQUIRE(writer.open(path.string(), 32000, 1, 32));
+        const float frames[] = {-0.5f, 0.5f};
+        REQUIRE(writer.write_frames(frames, 2) == 2);
+        REQUIRE(writer.frames_written() == 2);
+    }
+
+    auto bytes = read_binary_file(path);
+    require_wav_header(bytes, 1, 32000, 32, 8);
+    REQUIRE(read_le32_signed(bytes, 44) == -1073741824);
+    REQUIRE(read_le32_signed(bytes, 48) == 1073741824);
+
+    std::filesystem::remove(path);
 }
 
 // ── Format registry dispatch ─────────────────────────────────────────────────

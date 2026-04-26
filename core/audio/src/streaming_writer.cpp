@@ -66,9 +66,8 @@ bool StreamingWriter::open(std::string_view path, uint32_t sample_rate,
 }
 
 int StreamingWriter::write_frames(const float* interleaved_data, int num_frames) {
-    if (!file_) return 0;
+    if (!file_.is_open() || interleaved_data == nullptr || num_frames <= 0) return 0;
 
-    int bytes_per_sample = static_cast<int>(bits_per_sample_) / 8;
     int total_samples = num_frames * static_cast<int>(num_channels_);
 
     for (int i = 0; i < total_samples; ++i) {
@@ -96,7 +95,10 @@ int StreamingWriter::write_frames(const float* interleaved_data, int num_frames)
 }
 
 int StreamingWriter::write_frames(const float* const* channels, int num_channels, int num_frames) {
-    if (!file_ || num_channels != static_cast<int>(num_channels_)) return 0;
+    if (!file_.is_open() || channels == nullptr
+        || num_channels != static_cast<int>(num_channels_) || num_frames <= 0) return 0;
+    for (int c = 0; c < num_channels; ++c)
+        if (channels[c] == nullptr) return 0;
 
     // Interleave and write
     std::vector<float> interleaved(static_cast<size_t>(num_frames * num_channels));
