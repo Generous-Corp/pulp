@@ -70,6 +70,89 @@ TEST_CASE("MidiMessageSequence CC events", "[midi][sequence]") {
     REQUIRE(seq[0].data2 == 64);
 }
 
+TEST_CASE("MidiMessageSequence classifies aliases and masks helper fields", "[midi][sequence][issue-645]") {
+    pulp::midi::MidiMessageSequence seq;
+    seq.add_note_on(1.0, 31, 130, 255);
+    seq.add_note_off(2.0, 17, 130);
+    seq.add_cc(0.5, 31, 200, 255);
+
+    REQUIRE(seq.size() == 3);
+    REQUIRE(seq[0].is_cc());
+    REQUIRE(seq[0].status == 0xBF);
+    REQUIRE(seq[0].data1 == 72);
+    REQUIRE(seq[0].data2 == 127);
+
+    REQUIRE(seq[1].is_note_on());
+    REQUIRE(seq[1].channel() == 15);
+    REQUIRE(seq[1].note() == 2);
+    REQUIRE(seq[1].velocity() == 127);
+
+    REQUIRE(seq[2].is_note_off());
+    REQUIRE(seq[2].channel() == 1);
+    REQUIRE(seq[2].note() == 2);
+
+    pulp::midi::TimestampedMidiEvent zero_velocity_note_on{0.0, 0x92, 60, 0, {}};
+    REQUIRE_FALSE(zero_velocity_note_on.is_note_on());
+    REQUIRE(zero_velocity_note_on.is_note_off());
+    REQUIRE(zero_velocity_note_on.channel() == 2);
+
+    pulp::midi::TimestampedMidiEvent sysex;
+    sysex.status = 0xF0;
+    sysex.sysex = {0xF0, 0x7D, 0x01, 0xF7};
+    REQUIRE(sysex.is_sysex());
+}
+
+TEST_CASE("MidiMessageSequence note-off lookup handles invalid and channel-specific cases", "[midi][sequence][issue-645]") {
+    pulp::midi::MidiMessageSequence seq;
+    REQUIRE_FALSE(seq.find_note_off(-1).has_value());
+    REQUIRE_FALSE(seq.find_note_off(0).has_value());
+
+    seq.add_note_on(0.0, 0, 60, 100);
+    seq.add_note_off(0.25, 1, 60);
+    seq.add_note_on(0.5, 0, 64, 0);
+    seq.add_note_off(1.0, 0, 60);
+    seq.add_note_on(2.0, 0, 70, 100);
+
+    auto off = seq.find_note_off(0);
+    REQUIRE(off.has_value());
+    REQUIRE(*off == 3);
+    REQUIRE_FALSE(seq.find_note_off(1).has_value());
+    REQUIRE_FALSE(seq.find_note_off(2).has_value());
+    REQUIRE_FALSE(seq.find_note_off(4).has_value());
+    REQUIRE_FALSE(seq.find_note_off(99).has_value());
+}
+
+TEST_CASE("MidiMessageSequence ranges offsets duration and clear", "[midi][sequence][issue-645]") {
+    pulp::midi::MidiMessageSequence seq;
+    REQUIRE(seq.duration() == 0.0);
+    REQUIRE(seq.events().empty());
+    REQUIRE(seq.begin() == seq.end());
+
+    seq.add_note_on(0.25, 0, 60, 100);
+    seq.add_note_on(0.75, 0, 64, 100);
+    seq.add_note_off(1.25, 0, 60);
+    seq.offset_timestamps(-0.25);
+
+    REQUIRE(seq.duration() == 1.0);
+    auto events = seq.events_in_range(0.0, 0.5);
+    REQUIRE(events.size() == 1);
+    REQUIRE(events[0]->note() == 60);
+    REQUIRE(seq.events_in_range(0.5, 1.0).size() == 1);
+    REQUIRE(seq.events_in_range(1.0, 2.0).size() == 1);
+
+    int iterated = 0;
+    for (const auto& event : seq) {
+        REQUIRE(event.timestamp >= 0.0);
+        ++iterated;
+    }
+    REQUIRE(iterated == seq.size());
+
+    seq.clear();
+    REQUIRE(seq.size() == 0);
+    REQUIRE(seq.duration() == 0.0);
+    REQUIRE(seq.events().empty());
+}
+
 // ── AudioSubsectionReader ───────────────────────────────────────────────
 
 TEST_CASE("AudioSubsectionReader basic", "[audio][subsection]") {

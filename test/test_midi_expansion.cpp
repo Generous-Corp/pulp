@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/midi/rpn_parser.hpp>
 #include <pulp/midi/keyboard_state.hpp>
+#include <vector>
 
 using namespace pulp::midi;
 
@@ -217,4 +218,64 @@ TEST_CASE("MidiKeyboardState reset without callbacks", "[midi][keyboard]") {
     keys.reset(); // should NOT fire callbacks
     REQUIRE(off_count == 0);
     REQUIRE_FALSE(keys.any_notes_held());
+}
+
+TEST_CASE("MidiKeyboardState ignores non-note events and invalid queries", "[midi][keyboard][issue-645]") {
+    MidiKeyboardState keys;
+    int on_count = 0;
+    int off_count = 0;
+    keys.on_note_on = [&](uint8_t, uint8_t, uint8_t) { ++on_count; };
+    keys.on_note_off = [&](uint8_t, uint8_t) { ++off_count; };
+
+    keys.process(MidiEvent::cc(0, 64, 127));
+    keys.process(MidiEvent::pitch_bend(1, 8192));
+    keys.process(MidiEvent::program_change(2, 10));
+
+    REQUIRE_FALSE(keys.any_notes_held());
+    REQUIRE(on_count == 0);
+    REQUIRE(off_count == 0);
+    REQUIRE_FALSE(keys.is_note_on(16, 60));
+    REQUIRE(keys.velocity(16, 60) == 0);
+    REQUIRE(keys.velocity(0, 128) == 0);
+    REQUIRE(keys.notes_held(16) == 0);
+    REQUIRE(keys.lowest_note(16) == -1);
+    REQUIRE(keys.highest_note(16) == -1);
+
+    keys.all_notes_off(16);
+    REQUIRE(off_count == 0);
+}
+
+TEST_CASE("MidiKeyboardState reports released keys when clearing", "[midi][keyboard][issue-645]") {
+    MidiKeyboardState keys;
+    std::vector<int> released;
+    keys.on_note_off = [&](uint8_t channel, uint8_t note) {
+        released.push_back(static_cast<int>(channel) * 128 + static_cast<int>(note));
+    };
+
+    keys.process(MidiEvent::note_on(1, 60, 100));
+    keys.process(MidiEvent::note_on(1, 62, 90));
+    keys.process(MidiEvent::note_on(2, 65, 80));
+
+    keys.all_notes_off(1);
+    REQUIRE(keys.notes_held(1) == 0);
+    REQUIRE(keys.notes_held(2) == 1);
+    REQUIRE(released == std::vector<int>{188, 190});
+
+    keys.all_notes_off();
+    REQUIRE_FALSE(keys.any_notes_held());
+    REQUIRE(released == std::vector<int>{188, 190, 321});
+}
+
+TEST_CASE("MidiKeyboardState retrigger updates velocity without duplicating held count", "[midi][keyboard][issue-645]") {
+    MidiKeyboardState keys;
+    int on_count = 0;
+    keys.on_note_on = [&](uint8_t, uint8_t, uint8_t) { ++on_count; };
+
+    keys.process(MidiEvent::note_on(0, 60, 40));
+    keys.process(MidiEvent::note_on(0, 60, 120));
+
+    REQUIRE(keys.notes_held(0) == 1);
+    REQUIRE(keys.total_notes_held() == 1);
+    REQUIRE(keys.velocity(0, 60) == 120);
+    REQUIRE(on_count == 2);
 }
