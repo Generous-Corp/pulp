@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-26 00:15 EDT
+Last reviewed: 2026-04-26 00:19 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -149,16 +149,18 @@ Open Phase 3 PRs:
   exposed a local Shipyard mac configure stall after GitHub/Namespace was
   already clean.
 - `#798` `test(audio): cover format registry dispatch paths`, branch
-  `feature/audio-format-registry-coverage-640`, commit `43739ac1`,
+  `feature/audio-format-registry-coverage-640`, commit `0b35bb83`,
   worktree
   `/Users/danielraffel/Code/pulp-audio-system-volume-coverage-640`.
   Scope: deterministic `FormatRegistry` unsupported read/read_info
   dispatch, custom reader/writer registration, normalized extension lookup,
   read_info/read/write dispatch through registered handlers, and supported
   extension collection for `.aifc`. Local validation:
-  `pulp-test-audio-file` passed with `258` assertions in `16` test cases;
-  focused CTest `FormatRegistry|audio.*file` passed `3/3`;
-  `git diff --check` clean; version bump report says no bump needed.
+  after rebasing across `#797`, `pulp-test-audio-file` passed with `339`
+  assertions in `20` test cases; focused CTest
+  `FormatRegistry|audio.*file|StreamingWriter` passed `7/7`;
+  `git diff --check` clean; skill sync found no mapped paths; version bump
+  report says no bump needed.
   The PR is labeled `codecov` and is using the same direct
   GitHub/Namespace path as `#795`.
 
@@ -188,7 +190,7 @@ Local Phase 3 draft worktrees:
 - `#640` format-registry audio/platform worktree
   `/Users/danielraffel/Code/pulp-audio-system-volume-coverage-640`,
   branch `feature/audio-format-registry-coverage-640`, commit
-  `43739ac1`; open as PR `#798`.
+  `0b35bb83`; open as PR `#798`.
 
 Open supporting PR:
 
