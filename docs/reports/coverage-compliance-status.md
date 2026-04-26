@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-26 02:22 EDT
+Last reviewed: 2026-04-26 02:29 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -208,6 +208,22 @@ Open Phase 3 PRs:
   clean, skill sync clean, and version bump report says no bump needed.
   The PR is labeled `codecov` and is using the direct GitHub/Namespace
   path.
+- `#806` `test(audio): cover mapped reader and offline processing`,
+  branch `feature/audio-reader-coverage-640`, commit `c1d61e3a`,
+  worktree `/Users/danielraffel/Code/pulp-audio-reader-coverage-640`.
+  Scope: deterministic `MemoryMappedAudioReader` coverage for
+  open/read-range/read-all/close/missing-file paths, offline processing
+  coverage for guard paths, non-divisible block tails, `apply_gain`, and
+  `offline_process_file` registry dispatch, plus a defensive production
+  guard so `block_size <= 0` returns `nullopt` instead of hanging. Local
+  validation: no-GPU configure, `pulp-test-audio-file` target build,
+  direct Catch2 tag `[issue-640]` passed with `159` assertions in `7`
+  test cases, full `pulp-test-audio-file` passed with `392` assertions in
+  `22` test cases, focused CTest passed `15/15`, `git diff --check`
+  clean, skill sync clean, and version bump report exits clean while
+  noting the SDK patch suggestion from the defensive production guard.
+  The PR is labeled `codecov` and is using the direct GitHub/Namespace
+  path.
 
 Local Phase 3 draft worktrees:
 
@@ -265,6 +281,10 @@ Local Phase 3 draft worktrees:
   `/Users/danielraffel/Code/pulp-cli-common-coverage-643`, branch
   `feature/cli-common-coverage-643`, commit `17b42f0f`; open as PR
   `#805`.
+- `#640` mapped-reader/offline audio worktree
+  `/Users/danielraffel/Code/pulp-audio-reader-coverage-640`, branch
+  `feature/audio-reader-coverage-640`, commit `c1d61e3a`; open as PR
+  `#806`.
 
 Open supporting PR:
 
@@ -285,11 +305,11 @@ Local environment note:
 Next recovery actions:
 
 1. Keep `#774` docs-only and let its latest status-update checks drain.
-2. Monitor `#801`, `#802`, `#803`, `#804`, and `#805` and address any
-   Codecov, build, sanitizer, or Namespace feedback.
-3. If `#801`, `#802`, `#803`, `#804`, or `#805` is green but GitHub
-   reports it behind `main`, rebase that branch onto `origin/main`, push
-   with lease, and let checks rerun.
+2. Monitor `#801`, `#802`, `#803`, `#804`, `#805`, and `#806` and
+   address any Codecov, build, sanitizer, or Namespace feedback.
+3. If `#801`, `#802`, `#803`, `#804`, `#805`, or `#806` is green but
+   GitHub reports it behind `main`, rebase that branch onto
+   `origin/main`, push with lease, and let checks rerun.
 4. Continue Phase 3 from the tranche issues below, prioritizing
    represented high-miss files over adding new perimeter lanes.
 
