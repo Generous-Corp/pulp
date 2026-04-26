@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-25 21:08 EDT
+Last reviewed: 2026-04-25 21:14 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -122,27 +122,25 @@ Merged after the Phase 1 closeout / `#723` baseline:
 
 Open Phase 3 PRs:
 
-- None at this checkpoint. The next planned Phase 3 PR is the local
-  `#643` package-registry CLI/tools draft below.
-
-Local Phase 3 draft not yet opened as a PR:
-- `#643` package-registry CLI/tools draft, worktree
-  `/Users/danielraffel/Code/pulp-package-registry-coverage-643`, branch
-  `feature/package-registry-coverage-643`, local commit `75a529ef`.
-  This draft was rebased onto `origin/main` at
-  `23d3ed1d9dca9b39e3e7f3a851698eb93c717ae6` after `#788` merged.
-  Current scope adds
+- `#793` package-registry CLI/tools coverage, branch
+  `feature/package-registry-coverage-643`, head `75a529ef`. This is the
+  `#643` tranche opened by `shipyard pr` after `#788` merged. Scope:
   `pulp-test-cli-package-registry` for pure local registry parsing,
   lock-file round trips, target TOML parsing/writing, semver, quality
-  scoring, unsupported-target detection, and search ranking. Local validation
-  is green after the latest rebase: configure
-  `cmake -S . -B build-package-registry-localdeps -DCMAKE_BUILD_TYPE=Debug
-  -DPULP_ENABLE_GPU=OFF -DPULP_BUILD_EXAMPLES=OFF
-  -DFETCHCONTENT_SOURCE_DIR_MBEDTLS=$PWD/build/_deps/mbedtls-src`, build
-  `cmake --build build-package-registry-localdeps --target
-  pulp-test-cli-package-registry -j4`, direct binary (`88` assertions / `5`
-  test cases), focused CTest (`5/5`), whitespace, and
-  `version_bump_check.py --mode=report`.
+  scoring, unsupported-target detection, and search ranking. Local
+  validation after rebasing onto `origin/main` at `23d3ed1d` is green:
+  build `pulp-test-cli-package-registry`, direct binary (`88`
+  assertions / `5` test cases), focused CTest (`5/5`), whitespace, and
+  `version_bump_check.py --mode=report`. Shipyard validation and GitHub
+  checks are running.
+
+Local Phase 3 draft worktrees:
+
+- `#643` package-registry CLI/tools worktree
+  `/Users/danielraffel/Code/pulp-package-registry-coverage-643`, branch
+  `feature/package-registry-coverage-643`, commit `75a529ef`; now backs
+  open PR `#793`. Do not edit this worktree while `shipyard pr` is still
+  validating it.
 
 Open supporting PR:
 
@@ -165,8 +163,8 @@ Next recovery actions:
 1. Let main Coverage run `24944888062` for `23d3ed1d` drain, then refresh
    this section with the next complete Codecov `main` report.
 2. Keep `#774` docs-only and let its post-`#788` rebase checks drain.
-3. Push/open the rebased and locally validated `#643` draft (`75a529ef`)
-   as the next CLI/tools tranche PR.
+3. Monitor `#793`; Shipyard is validating the PR and GitHub workflows are
+   running.
 4. If a new PR is green but GitHub reports it behind `main`, rebase that
    branch onto `origin/main`, push with lease, and let checks rerun.
 5. Continue Phase 3 from the tranche issues below, prioritizing
