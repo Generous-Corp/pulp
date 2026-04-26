@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-26 01:40 EDT
+Last reviewed: 2026-04-26 01:42 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -129,7 +129,7 @@ Merged after the Phase 1 closeout / `#723` baseline:
 Open Phase 3 PRs:
 
 - `#795` `test(events): cover volume detector lifecycle edges`, branch
-  `feature/events-volume-coverage-642`, commit `2f109744`, worktree
+  `feature/events-volume-coverage-642`, commit `357fc429`, worktree
   `/Users/danielraffel/Code/pulp-events-volume-coverage-642`.
   Scope: deterministic `test/test_network_service_discovery.cpp`
   coverage for `NetworkServiceDiscovery` backend removal, cached-service
@@ -150,13 +150,13 @@ Open Phase 3 PRs:
   on `2d684f4b` was not from the events tests; the failed job showed the
   #795 events tests passed and unrelated CLI/Python coverage tests failed
   on the stale base. The branch was rebased onto `origin/main` after
-  `#798` and `#799` merged, local validation passed again, and fresh CI is
-  running on `2f109744`. The PR is labeled
+  `#800` merged, local validation passed again, and fresh CI is running
+  on `357fc429`. The PR is labeled
   `codecov` and is using the direct GitHub/Namespace path instead of
   `shipyard pr` because `#794` exposed a local Shipyard mac configure
   stall after GitHub/Namespace was already clean.
 - `#801` `fix(render): harden texture atlas edge cases`, branch
-  `feature/render-texture-atlas-coverage-646`, commit `332c1a95`,
+  `feature/render-texture-atlas-coverage-646`, commit `a2201dbb`,
   worktree `/Users/danielraffel/Code/pulp-render-texture-atlas-coverage-646`.
   Scope: reject non-positive `AtlasPacker` allocation dimensions, clamp
   repeated `ImageAtlas::release()` calls so refcounts cannot underflow,
@@ -181,7 +181,7 @@ Local Phase 3 draft worktrees:
   `c4e6ad09`. The remote branch was deleted after merge.
 - `#642` events volume/service-discovery worktree
   `/Users/danielraffel/Code/pulp-events-volume-coverage-642`, branch
-  `feature/events-volume-coverage-642`, commit `2f109744`; open as PR
+  `feature/events-volume-coverage-642`, commit `357fc429`; open as PR
   `#795`.
 - `#643` package-registry CLI/tools worktree
   `/Users/danielraffel/Code/pulp-package-registry-coverage-643`, branch
@@ -212,7 +212,7 @@ Local Phase 3 draft worktrees:
 - `#646` texture-atlas render worktree
   `/Users/danielraffel/Code/pulp-render-texture-atlas-coverage-646`,
   branch `feature/render-texture-atlas-coverage-646`, commit
-  `332c1a95`; open as PR `#801`.
+  `a2201dbb`; open as PR `#801`.
 
 Open supporting PR:
 
