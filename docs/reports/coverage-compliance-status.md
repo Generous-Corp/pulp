@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-26 01:19 EDT
+Last reviewed: 2026-04-26 01:40 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -124,6 +124,7 @@ Merged after the Phase 1 closeout / `#723` baseline:
 - `#797` StreamingWriter audio edge coverage -> `64ba65e3`
 - `#798` FormatRegistry audio dispatch coverage -> `443ca260`
 - `#799` docs-reader CLI shellout coverage -> `22438468`
+- `#800` Python gate-helper tooling coverage -> `55b6dfab`
 
 Open Phase 3 PRs:
 
@@ -154,22 +155,6 @@ Open Phase 3 PRs:
   `codecov` and is using the direct GitHub/Namespace path instead of
   `shipyard pr` because `#794` exposed a local Shipyard mac configure
   stall after GitHub/Namespace was already clean.
-- `#800` `test(tools): cover version and skill gate helpers`, branch
-  `feature/python-tooling-coverage-643`, commit `acadc5af`, worktree
-  `/Users/danielraffel/Code/pulp-python-tooling-coverage-643`.
-  Scope: deterministic `tools/scripts/test_gates.py` coverage for
-  `version_bump_check.py` version-file readers/writers, semver
-  arithmetic, conventional-commit classification, and `Version-Bump`
-  trailer parsing; plus `skill_sync_check.py` trailer parsing,
-  generated-file filtering, path-map self-check failures, nested
-  `SKILL.md` recognition, and bypass propagation. Local validation:
-  `python3 tools/scripts/test_gates.py` passed with `22` tests;
-  `git diff --check` clean; skill sync found no mapped paths; version
-  bump report says no bump needed. Local `run_python_coverage.py` was not
-  run because this local Python lacks `coverage.py`; the CI coverage
-  workflow installs `coverage>=7.10` before running the Python tooling
-  coverage lane. The PR is labeled `codecov` and is using the direct
-  GitHub/Namespace path.
 - `#801` `fix(render): harden texture atlas edge cases`, branch
   `feature/render-texture-atlas-coverage-646`, commit `332c1a95`,
   worktree `/Users/danielraffel/Code/pulp-render-texture-atlas-coverage-646`.
@@ -222,8 +207,8 @@ Local Phase 3 draft worktrees:
   `#799` as `22438468`. The remote branch was deleted after merge.
 - `#643` Python gate-helper tooling worktree
   `/Users/danielraffel/Code/pulp-python-tooling-coverage-643`, branch
-  `feature/python-tooling-coverage-643`, commit `acadc5af`; open as PR
-  `#800`.
+  `feature/python-tooling-coverage-643`, commit `acadc5af`; merged via PR
+  `#800` as `55b6dfab`. The remote branch was deleted after merge.
 - `#646` texture-atlas render worktree
   `/Users/danielraffel/Code/pulp-render-texture-atlas-coverage-646`,
   branch `feature/render-texture-atlas-coverage-646`, commit
@@ -248,9 +233,9 @@ Local environment note:
 Next recovery actions:
 
 1. Keep `#774` docs-only and let its latest status-update checks drain.
-2. Monitor `#795`, `#800`, and `#801` and address any Codecov, build,
+2. Monitor `#795` and `#801` and address any Codecov, build,
    sanitizer, or Namespace feedback.
-3. If `#795`, `#800`, or `#801` is green but GitHub reports it behind
+3. If `#795` or `#801` is green but GitHub reports it behind
    `main`, rebase that branch onto `origin/main`, push with lease, and
    let checks rerun.
 4. Continue Phase 3 from the tranche issues below, prioritizing
