@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-26 03:04 EDT
+Last reviewed: 2026-04-26 03:13 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -320,6 +320,19 @@ Local Phase 3 draft worktrees:
   `/Users/danielraffel/Code/pulp-audio-channel-set-coverage-640`,
   branch `feature/audio-channel-set-coverage-640`, commit `89b969c9`;
   open as PR `#807`.
+- `#640` platform Environment diff-edge worktree
+  `/Users/danielraffel/Code/pulp-platform-environment-coverage-640`,
+  branch `feature/platform-environment-coverage-640`, commit
+  `b298c7a2`; local-only draft, not opened as a PR yet. Scope: empty
+  listener subscription, token move-assignment replacement, keyboard
+  animation-duration diffs, left/right safe-area diffs, display
+  physical/name/refresh metadata diffs, and isolated orientation/
+  lifecycle changes. Local validation: no-GPU configure,
+  `pulp-test-environment` target build, direct Catch2 selector
+  `[environment][issue-640]` passed with `32` assertions in `5` test
+  cases, focused CTest `Environment` passed `16/16`, `git diff --check`
+  clean, skill sync clean, and version bump report says no bump needed.
+  Hold local until the active CI queue has a merge slot.
 - `#645` MIDI file edge round-trip worktree
   `/Users/danielraffel/Code/pulp-midi-file-coverage-645`, branch
   `feature/midi-file-coverage-645`, commit `d02e853e`; open as PR
@@ -353,7 +366,10 @@ Next recovery actions:
 3. If any open Phase 3 PR is green but GitHub reports it behind `main`,
    rebase that branch onto `origin/main`, push with lease, and let
    checks rerun.
-4. Continue Phase 3 from the tranche issues below, prioritizing
+4. When the queue has a merge slot, push/open the local #640 platform
+   Environment draft from
+   `/Users/danielraffel/Code/pulp-platform-environment-coverage-640`.
+5. Continue Phase 3 from the tranche issues below, prioritizing
    represented high-miss files over adding new perimeter lanes.
 
 ## Phase 1 corrected baseline
