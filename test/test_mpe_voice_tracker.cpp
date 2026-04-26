@@ -177,6 +177,107 @@ TEST_CASE("MpeVoiceTracker reset clears per-channel expression caches", "[midi][
     REQUIRE(n->timbre == Approx(0.0f).margin(1e-6f));
 }
 
+TEST_CASE("MpeVoiceTracker bend range setters reject invalid values",
+          "[midi][mpe][issue-645]") {
+    MpeVoiceTracker tracker{MpeConfig::standard_lower(4)};
+
+    tracker.set_member_bend_range(12.0f);
+    tracker.set_manager_bend_range(3.0f);
+    tracker.set_member_bend_range(0.0f);
+    tracker.set_manager_bend_range(-4.0f);
+
+    REQUIRE(tracker.member_bend_range() == Approx(12.0f));
+    REQUIRE(tracker.manager_bend_range() == Approx(3.0f));
+}
+
+TEST_CASE("MpeVoiceTracker set_config resets notes and adopts new zones",
+          "[midi][mpe][issue-645]") {
+    MpeVoiceTracker tracker{MpeConfig::standard_lower(4)};
+    tracker.process(MidiEvent::note_on(1, 60, 100));
+    REQUIRE(tracker.active_count() == 1);
+
+    tracker.set_config(MpeConfig::dual(/*lower=*/2, /*upper=*/3));
+
+    REQUIRE(tracker.active_count() == 0);
+    REQUIRE(tracker.config().lower_zone.member_channels == 2);
+    REQUIRE(tracker.config().upper_zone.member_channels == 3);
+    REQUIRE_FALSE(tracker.process(MidiEvent::note_on(4, 60, 100)));
+    REQUIRE(tracker.process(MidiEvent::note_on(13, 72, 100)));
+    REQUIRE(tracker.find(13, 72)->is_upper_zone);
+}
+
+TEST_CASE("MpeVoiceTracker manager pressure and timbre update both zone states",
+          "[midi][mpe][issue-645]") {
+    MpeVoiceTracker tracker{MpeConfig::dual(/*lower=*/3, /*upper=*/3)};
+
+    REQUIRE(tracker.process(channel_pressure(0, 64)));
+    REQUIRE(tracker.process(MidiEvent::cc(0, 74, 32)));
+    REQUIRE(tracker.process(channel_pressure(15, 127)));
+    REQUIRE(tracker.process(MidiEvent::cc(15, 74, 100)));
+
+    REQUIRE(tracker.active_count() == 0);
+    REQUIRE(tracker.lower_zone_state().pressure == Approx(64.0f / 127.0f).margin(1e-6f));
+    REQUIRE(tracker.lower_zone_state().timbre == Approx(32.0f / 127.0f).margin(1e-6f));
+    REQUIRE(tracker.upper_zone_state().pressure == Approx(1.0f).margin(1e-6f));
+    REQUIRE(tracker.upper_zone_state().timbre == Approx(100.0f / 127.0f).margin(1e-6f));
+}
+
+TEST_CASE("MpeVoiceTracker member expression cache seeds later notes",
+          "[midi][mpe][issue-645]") {
+    MpeVoiceTracker tracker{MpeConfig::standard_lower(15)};
+    tracker.set_member_bend_range(24.0f);
+
+    REQUIRE(tracker.process(MidiEvent::pitch_bend(6, 0)));
+    REQUIRE(tracker.process(channel_pressure(6, 96)));
+    REQUIRE(tracker.process(MidiEvent::cc(6, 74, 80)));
+    REQUIRE(tracker.process(MidiEvent::cc(6, 1, 127)));  // belongs to zone, not MPE timbre
+    REQUIRE(tracker.process(MidiEvent::note_on(6, 70, 90)));
+
+    const auto* n = tracker.find(6, 70);
+    REQUIRE(n != nullptr);
+    REQUIRE(n->pitch_bend_semitones == Approx(-24.0f).margin(0.01f));
+    REQUIRE(n->pressure == Approx(96.0f / 127.0f).margin(1e-6f));
+    REQUIRE(n->timbre == Approx(80.0f / 127.0f).margin(1e-6f));
+}
+
+TEST_CASE("MpeVoiceTracker snapshot reports full count with bounded output",
+          "[midi][mpe][issue-645]") {
+    MpeVoiceTracker tracker{MpeConfig::standard_lower(15)};
+    tracker.process(MidiEvent::note_on(1, 60, 100));
+    tracker.process(MidiEvent::note_on(2, 64, 101));
+    tracker.process(MidiEvent::note_on(3, 67, 102));
+
+    MpeNoteState out[2]{};
+    REQUIRE(tracker.snapshot(out, 2) == 3);
+    REQUIRE(out[0].active);
+    REQUIRE(out[0].note == 60);
+    REQUIRE(out[1].active);
+    REQUIRE(out[1].note == 64);
+
+    std::size_t active_slots = 0;
+    for (const auto& slot : tracker.slots()) {
+        if (slot.active) ++active_slots;
+    }
+    REQUIRE(active_slots == 3);
+}
+
+TEST_CASE("MpeVoiceTracker full table drops extra notes without callback",
+          "[midi][mpe][issue-645]") {
+    MpeVoiceTracker tracker{MpeConfig::standard_lower(15)};
+    for (int note = 0; note < static_cast<int>(MpeVoiceTracker::kMaxNotes); ++note) {
+        REQUIRE(tracker.process(MidiEvent::note_on(1, static_cast<uint8_t>(note), 64)));
+    }
+    REQUIRE(tracker.active_count() == MpeVoiceTracker::kMaxNotes);
+
+    int callbacks = 0;
+    tracker.on_note_on = [&](const MpeNoteState&) { ++callbacks; };
+    REQUIRE(tracker.process(MidiEvent::note_on(2, 0, 100)));
+
+    REQUIRE(tracker.active_count() == MpeVoiceTracker::kMaxNotes);
+    REQUIRE(tracker.find(2, 0) == nullptr);
+    REQUIRE(callbacks == 0);
+}
+
 TEST_CASE("MpeVoiceTracker dispatches MIDI 1.0 UMP packets through MPE zones", "[midi][mpe][ump]") {
     MpeVoiceTracker tracker{MpeConfig::standard_lower(15)};
 
