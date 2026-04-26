@@ -98,6 +98,71 @@ TEST_CASE("AudioSubsectionReader extract", "[audio][subsection]") {
     REQUIRE(extracted.channels[1][2] == 13.0f);
 }
 
+TEST_CASE("AudioSubsectionReader handles invalid and clamped reads",
+          "[audio][subsection][issue-640]") {
+    pulp::audio::AudioSubsectionReader invalid;
+    REQUIRE_FALSE(invalid.is_valid());
+    REQUIRE(invalid.num_frames() == 0);
+    REQUIRE(invalid.num_channels() == 0);
+    REQUIRE(invalid.sample_rate() == 0);
+    REQUIRE(invalid.sample(0, 0) == 0.0f);
+    REQUIRE(invalid.duration_seconds() == 0.0);
+
+    float untouched[2] = {42.0f, 43.0f};
+    invalid.read_frames(untouched, 0, 0, 2);
+    REQUIRE(untouched[0] == 42.0f);
+    REQUIRE(untouched[1] == 43.0f);
+    REQUIRE(invalid.extract().channels.empty());
+
+    pulp::audio::AudioFileData data;
+    data.sample_rate = 48000;
+    data.channels.resize(2);
+    data.channels[0] = {0, 1, 2, 3, 4, 5};
+    data.channels[1] = {10, 11, 12, 13, 14, 15};
+
+    pulp::audio::AudioSubsectionReader reader(data, 4, 99);
+    REQUIRE(reader.is_valid());
+    REQUIRE(reader.num_frames() == 2);
+    REQUIRE(reader.num_channels() == 2);
+    REQUIRE(reader.sample_rate() == 48000);
+    REQUIRE_THAT(reader.duration_seconds(), WithinAbs(2.0 / 48000.0, 1e-12));
+    REQUIRE(reader.sample(0, 0) == 4.0f);
+    REQUIRE(reader.sample(1, 1) == 15.0f);
+    REQUIRE(reader.sample(2, 0) == 0.0f);
+    REQUIRE(reader.sample(0, 2) == 0.0f);
+
+    float copied[4] = {-1.0f, -1.0f, -1.0f, -1.0f};
+    reader.read_frames(copied, 1, 1, 3);
+    REQUIRE(copied[0] == 15.0f);
+    REQUIRE(copied[1] == -1.0f);
+    REQUIRE(copied[2] == -1.0f);
+    REQUIRE(copied[3] == -1.0f);
+
+    reader.read_frames(copied, 9, 0, 2);
+    REQUIRE(copied[0] == 15.0f);
+    REQUIRE(copied[1] == -1.0f);
+}
+
+TEST_CASE("AudioSubsectionReader start past end is an empty source view",
+          "[audio][subsection][issue-640]") {
+    pulp::audio::AudioFileData data;
+    data.sample_rate = 44100;
+    data.channels.resize(1);
+    data.channels[0] = {1, 2, 3};
+
+    pulp::audio::AudioSubsectionReader reader(data, 99, 4);
+    REQUIRE_FALSE(reader.is_valid());
+    REQUIRE(reader.num_frames() == 0);
+    REQUIRE(reader.num_channels() == 1);
+    REQUIRE(reader.sample_rate() == 44100);
+    REQUIRE(reader.sample(0, 0) == 0.0f);
+
+    auto extracted = reader.extract();
+    REQUIRE(extracted.sample_rate == 44100);
+    REQUIRE(extracted.channels.size() == 1);
+    REQUIRE(extracted.channels[0].empty());
+}
+
 // ── PluginHostType ──────────────────────────────────────────────────────
 
 TEST_CASE("HostType detect returns something", "[format][host]") {
