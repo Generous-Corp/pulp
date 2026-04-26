@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-26 15:39 EDT
+Last reviewed: 2026-04-26 15:53 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -152,11 +152,18 @@ Open Phase 3 PRs:
 - `#815` MPE tracker edge-path coverage for `#645`, branch
   `feature/mpe-tracker-coverage-645`, head `b7c72711`; opened from
   `main` at `957a0735`. Windows coverage failed during dependency
-  bootstrap on a `wgpu-native` 502; rerun the failed coverage job after
-  the still-queued macOS coverage job lets the workflow finish.
+  bootstrap on a `wgpu-native` 502; the failed coverage jobs were rerun,
+  and the rerun passed dependency bootstrap and is now in the Windows
+  coverage suite.
 - `#816` MIDI running-status parser edge coverage for `#645`, branch
   `feature/midi-running-status-coverage-645`, head `94b93a6e`; opened
   from `main` at `957a0735`. Cloud checks are the active gate.
+- `#817` UMP conversion edge coverage for `#645`, branch
+  `feature/midi-ump-conversion-coverage-645`, head `c4420370`; opened
+  from `main` at `957a0735`. `shipyard pr` was attempted first but
+  stopped before PR creation because the SSH `windows` backend timed
+  out, so this tranche is using the GitHub/Namespace path instead of
+  skipping that lane.
 
 Local Phase 3 draft worktrees:
 
@@ -306,6 +313,22 @@ Local Phase 3 draft worktrees:
   cases, full binary passed `56` assertions in `14` cases, focused CTest
   selection passed `5/5`, `git diff --check`, skill-sync report, and
   version-bump report.
+- `#645` MIDI UMP conversion worktree
+  `/Users/danielraffel/Code/pulp-midi-ump-conversion-coverage-645`,
+  branch `feature/midi-ump-conversion-coverage-645`, commit `c4420370`;
+  open as PR `#817`.
+  Scope: test-only coverage for velocity-zero note-on aliasing,
+  program-change fallback packets, group masking, sample-offset
+  preservation, MIDI 2 edge-value down-conversion, skipped packets
+  without MIDI 1 equivalents, and scale endpoint preservation. Local
+  validation: no-GPU/no-examples configure, `pulp-test-ump-buffer-
+  conversion` build, direct `[midi][ump][issue-645]` passed `46`
+  assertions in `4` cases, full binary passed `97` assertions in `15`
+  cases, focused CTest conversion selection passed `6/6`,
+  `git diff --check`, skill-sync report, and version-bump report. A
+  broader CTest regex was intentionally not used for the final summary
+  because the lite build exposes `*_NOT_BUILT_*` placeholder tests that
+  match generic `ump` patterns.
 
 Open supporting PR:
 
@@ -322,6 +345,12 @@ Local environment note:
   `shipyard, version 0.50.0`; rerunning `./tools/install-shipyard.sh`
   restored the pinned binary, and `shipyard --version` prints
   `shipyard, version 0.46.0`.
+- On 2026-04-26, `shipyard pr` for the UMP conversion tranche failed
+  pre-PR with exit code `3` because the SSH `windows` target timed out
+  (`100.92.174.43:22`). For this Codecov batch, continue using the
+  GitHub Actions / Namespace checks rather than spending time on the
+  unreachable SSH backend, unless the user explicitly asks to repair the
+  SSH target.
 
 Next recovery actions:
 
@@ -331,16 +360,19 @@ Next recovery actions:
    patch, validate locally, and push with lease.
 3. Monitor `#815` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-mpe-tracker-coverage-645`, patch,
-   validate locally, and push with lease. For the current Windows
-   coverage 502 failure, prefer rerunning failed jobs after run
-   `24965100026` completes before changing code.
+   validate locally, and push with lease. The current Windows coverage
+   failure was rerun in run `24965100026`; wait for that rerun result
+   before changing code.
 4. Monitor `#816` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-midi-running-status-coverage-645`,
    patch, validate locally, and push with lease.
-5. If any open Phase 3 PR is green but GitHub reports it behind `main`,
+5. Monitor `#817` cloud checks; if a required lane fails, debug in
+   `/Users/danielraffel/Code/pulp-midi-ump-conversion-coverage-645`,
+   patch, validate locally, and push with lease.
+6. If any open Phase 3 PR is green but GitHub reports it behind `main`,
    rebase that branch onto `origin/main`, push with lease, and let
    checks rerun.
-6. Continue Phase 3 from the tranche issues below, prioritizing
+7. Continue Phase 3 from the tranche issues below, prioritizing
    represented high-miss files over adding new perimeter lanes.
 
 ## Phase 1 corrected baseline
