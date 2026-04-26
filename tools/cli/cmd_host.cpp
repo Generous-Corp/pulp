@@ -48,6 +48,23 @@ const char* format_name(pulp::host::PluginFormat f) {
 int cmd_scan(const std::vector<std::string>& args) {
     using namespace pulp::host;
 
+    // Honor --help / -h BEFORE doing any plugin enumeration. Without
+    // this gate `pulp scan --help` walks the system plug-in paths and
+    // dlopens every CLAP/VST3 bundle it finds — slow, noisy with
+    // objc duplicate-class warnings, and fatal on any installed
+    // plugin whose init code throws (caught by the cross-binary
+    // parity probe; tracked as #812 for the deeper dlopen-time
+    // crash). A printed usage line is what every other `pulp <cmd>
+    // --help` does and what users expect.
+    for (const auto& a : args) {
+        if (a == "--help" || a == "-h") {
+            std::printf("Usage: pulp scan [--format clap|vst3|au|auv3|lv2]\n");
+            std::printf("\nWalks the system plug-in paths and prints discovered\n");
+            std::printf("plugins. Without --format, all formats are scanned.\n");
+            return 0;
+        }
+    }
+
     PluginFormat requested = PluginFormat::CLAP;
     bool all_formats = true;
     for (std::size_t i = 0; i < args.size(); ++i) {
