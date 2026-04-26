@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-26 02:10 EDT
+Last reviewed: 2026-04-26 02:13 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -182,6 +182,19 @@ Open Phase 3 PRs:
   onto `origin/main` after `#795` merged, pushed with lease as
   `b1f5a125`, and the focused local validation above passed again. The PR
   is labeled `codecov` and is using the direct GitHub/Namespace path.
+- `#804` `test(signal): cover oversampling helper edges`, branch
+  `feature/signal-oversampling-coverage-645`, commit `bccaec0f`,
+  worktree `/Users/danielraffel/Code/pulp-signal-oversampling-coverage-645`.
+  Scope: test-only signal `Oversampler` coverage for x2/x4 callback
+  dispatch, configured anti-alias filter paths, and reset determinism.
+  Local validation: no-GPU configure,
+  `pulp-test-signal` target build, direct Catch2 tag
+  `[signal][oversampling]` passed with `16` assertions in `2` test cases,
+  focused CTest `Oversampler` passed `2/2`, `git diff --check` clean,
+  skill sync clean, and version bump report says no bump needed. The
+  local build still reports an existing unused-variable warning elsewhere
+  in `test/test_signal.cpp`; it is not introduced by this tranche. The PR
+  is labeled `codecov` and is using the direct GitHub/Namespace path.
 
 Local Phase 3 draft worktrees:
 
@@ -234,15 +247,7 @@ Local Phase 3 draft worktrees:
 - `#645` signal oversampling helper worktree
   `/Users/danielraffel/Code/pulp-signal-oversampling-coverage-645`,
   branch `feature/signal-oversampling-coverage-645`, commit `bccaec0f`;
-  local draft, not pushed/opened yet. Scope: test-only oversampling
-  coverage for x2/x4 callback dispatch, configured anti-alias filter
-  paths, and reset determinism. Local validation: no-GPU configure,
-  `pulp-test-signal` target build, direct Catch2 tag
-  `[signal][oversampling]` passed with `16` assertions in `2` test cases,
-  focused CTest `Oversampler` passed `2/2`, `git diff --check` clean,
-  skill sync clean, and version bump report says no bump needed. The
-  local build still reports an existing unused-variable warning elsewhere
-  in `test/test_signal.cpp`; it is not introduced by this tranche.
+  open as PR `#804`.
 
 Open supporting PR:
 
@@ -263,14 +268,13 @@ Local environment note:
 Next recovery actions:
 
 1. Keep `#774` docs-only and let its latest status-update checks drain.
-2. Monitor `#801`, `#802`, and `#803` and address any Codecov, build,
-   sanitizer, or Namespace feedback.
-3. If `#801`, `#802`, or `#803` is green but GitHub reports it behind
-   `main`, rebase that branch onto `origin/main`, push with lease, and
-   let checks rerun.
-4. Open the local `#645` oversampling draft as the next small signal
-   tranche once the active PR queue has capacity, or keep it local if the
-   queue is still saturated.
+2. Monitor `#801`, `#802`, `#803`, and `#804` and address any Codecov,
+   build, sanitizer, or Namespace feedback.
+3. If `#801`, `#802`, `#803`, or `#804` is green but GitHub reports it
+   behind `main`, rebase that branch onto `origin/main`, push with lease,
+   and let checks rerun.
+4. Continue Phase 3 from the tranche issues below, prioritizing
+   represented high-miss files over adding new perimeter lanes.
 
 ## Phase 1 corrected baseline
 
