@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-26 14:17 EDT
+Last reviewed: 2026-04-26 14:29 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -237,6 +237,22 @@ Local Phase 3 draft worktrees:
   cases, full binary passed `318` assertions in `22` cases, focused
   CTest `cmd_project` passed `8/8`, `git diff --check`, skill-sync
   report, and version-bump report.
+- `#645` signal dynamics helper worktree
+  `/Users/danielraffel/Code/pulp-signal-dynamics-coverage-645`, branch
+  `feature/signal-dynamics-coverage-645`, commit `a43a305b`;
+  local-only draft, not opened as a PR yet while `#811` and `#774`
+  drain. Scope: test-only coverage for `DryWetMixer` mix
+  clamping/equal-power/latency/reset paths, `Compressor`
+  hard-knee/soft-knee/buffer/reset paths, `Limiter` buffer/reset paths,
+  `WindowFunction` hamming/flat-top/kaiser branches, and
+  `MultiChannelMeter` channel clamping/reset/silent-correlation/block
+  threshold edges. Local validation: no-GPU/no-examples configure,
+  `pulp-test-dsp-enhancements` and `pulp-test-signal` builds, targeted
+  issue tags passed `9` assertions in `2` DSP cases and `35`
+  assertions in `8` signal cases, full DSP binary passed `62`
+  assertions in `20` cases, full signal binary passed `885` assertions
+  in `67` cases, focused CTest passed `23/23`, `git diff --check`,
+  skill-sync report, and version-bump report.
 
 Open supporting PR:
 
@@ -244,7 +260,8 @@ Open supporting PR:
   `docs/coverage-status-2026-04-25`. The branch is updated as this
   tracker changes; use the PR head SHA in GitHub as the live value.
   The branch has been rebased onto `origin/main` after `#810` merged,
-  updated after `#811` opened, and remains docs-only.
+  updated after `#811` opened and after the local `#645` signal dynamics
+  draft was prepared, and remains docs-only.
 
 Local environment note:
 
@@ -260,10 +277,14 @@ Next recovery actions:
 2. Monitor `#811` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-cli-project-coverage-643`, patch,
    validate locally, and push with lease.
-3. If any open Phase 3 PR is green but GitHub reports it behind `main`,
+3. After `#811` is merged or otherwise no longer blocking the active
+   implementation slot, rebase/push/open the local `#645`
+   `feature/signal-dynamics-coverage-645` draft from
+   `/Users/danielraffel/Code/pulp-signal-dynamics-coverage-645`.
+4. If any open Phase 3 PR is green but GitHub reports it behind `main`,
    rebase that branch onto `origin/main`, push with lease, and let
    checks rerun.
-4. Continue Phase 3 from the tranche issues below, prioritizing
+5. Continue Phase 3 from the tranche issues below, prioritizing
    represented high-miss files over adding new perimeter lanes.
 
 ## Phase 1 corrected baseline
