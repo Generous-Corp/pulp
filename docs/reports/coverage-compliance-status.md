@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-26 02:02 EDT
+Last reviewed: 2026-04-26 02:10 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -125,38 +125,12 @@ Merged after the Phase 1 closeout / `#723` baseline:
 - `#798` FormatRegistry audio dispatch coverage -> `443ca260`
 - `#799` docs-reader CLI shellout coverage -> `22438468`
 - `#800` Python gate-helper tooling coverage -> `55b6dfab`
+- `#795` events volume/service-discovery coverage -> `f1a5aa84`
 
 Open Phase 3 PRs:
 
-- `#795` `test(events): cover volume detector lifecycle edges`, branch
-  `feature/events-volume-coverage-642`, commit `357fc429`, worktree
-  `/Users/danielraffel/Code/pulp-events-volume-coverage-642`.
-  Scope: deterministic `test/test_network_service_discovery.cpp`
-  coverage for `NetworkServiceDiscovery` backend removal, cached-service
-  eviction, no-backend registration behavior,
-  `MountedVolumeListChangeDetector` mounted-volume snapshot plus
-  start/restart/stop lifecycle paths, and
-  `LockingAsyncUpdater::trigger_and_wait()`. Local validation:
-  after rebasing onto current `origin/main`,
-  `pulp-test-network-service-discovery` passed with `43` assertions in
-  `10` test cases; focused CTest `NSD|MountedVolume|LockingAsyncUpdater`
-  passed `10/10`; `git diff --check` clean; skill sync found no mapped
-  paths; version bump report says no bump needed. The earlier
-  `core/events/src/volume_detector.cpp` Windows guard was removed from the
-  final PR diff because the Windows coverage XML reports that translation
-  unit at `0%` even though the CTest cases run and pass there. The final
-  PR diff is test-only, and the mounted-volume enumeration tests skip on
-  Windows while retaining POSIX coverage. The prior Linux coverage failure
-  on `2d684f4b` was not from the events tests; the failed job showed the
-  #795 events tests passed and unrelated CLI/Python coverage tests failed
-  on the stale base. The branch was rebased onto `origin/main` after
-  `#800` merged, local validation passed again, and fresh CI is running
-  on `357fc429`. The PR is labeled
-  `codecov` and is using the direct GitHub/Namespace path instead of
-  `shipyard pr` because `#794` exposed a local Shipyard mac configure
-  stall after GitHub/Namespace was already clean.
 - `#801` `fix(render): harden texture atlas edge cases`, branch
-  `feature/render-texture-atlas-coverage-646`, commit `a2201dbb`,
+  `feature/render-texture-atlas-coverage-646`, commit `50012c04`,
   worktree `/Users/danielraffel/Code/pulp-render-texture-atlas-coverage-646`.
   Scope: reject non-positive `AtlasPacker` allocation dimensions, clamp
   repeated `ImageAtlas::release()` calls so refcounts cannot underflow,
@@ -170,10 +144,12 @@ Open Phase 3 PRs:
   `1139` assertions in `22` test cases, focused texture/atlas CTest
   passed `20/20`, `git diff --check` clean, skill sync clean, and version
   report clean with explicit `Version-Bump: sdk=patch` for the
-  header-only behavior fix. The PR is labeled `codecov` and is using the
-  direct GitHub/Namespace path.
+  header-only behavior fix. The branch was rebased onto `origin/main`
+  after `#795` merged, pushed with lease as `50012c04`, and the focused
+  local validation above passed again. The PR is labeled `codecov` and is
+  using the direct GitHub/Namespace path.
 - `#802` `test(cli): cover create shellout scaffolding`, branch
-  `feature/cli-create-coverage-643`, commit `f5e4a05f`, worktree
+  `feature/cli-create-coverage-643`, commit `222d0f88`, worktree
   `/Users/danielraffel/Code/pulp-cli-create-coverage-643`.
   Scope: deterministic `pulp create` shellout coverage for no-build app
   scaffolding with Android target output, generated header/main/CMake/
@@ -185,10 +161,12 @@ Open Phase 3 PRs:
   clean, and version bump report says no bump needed. Local shellout
   validation used `PULP_CLI_PATH=/Users/danielraffel/Code/pulp/build/tools/cli/pulp`
   because the GPU-off configure intentionally does not build `pulp-cli`;
-  CI builds the normal CLI path. The PR is labeled `codecov` and is
-  using the direct GitHub/Namespace path.
+  CI builds the normal CLI path. The branch was rebased onto
+  `origin/main` after `#795` merged, pushed with lease as `222d0f88`, and
+  the focused local validation above passed again. The PR is labeled
+  `codecov` and is using the direct GitHub/Namespace path.
 - `#803` `test(signal): cover matrix helper edges`, branch
-  `feature/signal-matrix-coverage-645`, commit `e18f5f27`, worktree
+  `feature/signal-matrix-coverage-645`, commit `b1f5a125`, worktree
   `/Users/danielraffel/Code/pulp-signal-matrix-coverage-645`.
   Scope: test-only signal matrix helper coverage for element-wise
   arithmetic, non-triangular `Matrix3` determinant, `Matrix4` scale
@@ -200,8 +178,10 @@ Open Phase 3 PRs:
   clean, skill sync clean, and version bump report says no bump needed.
   The broad `ctest -R "Matrix|matrix"` regex intentionally was not used
   as final evidence because it overmatches unrelated `*_NOT_BUILT`
-  placeholder tests in the focused no-GPU build. The PR is labeled
-  `codecov` and is using the direct GitHub/Namespace path.
+  placeholder tests in the focused no-GPU build. The branch was rebased
+  onto `origin/main` after `#795` merged, pushed with lease as
+  `b1f5a125`, and the focused local validation above passed again. The PR
+  is labeled `codecov` and is using the direct GitHub/Namespace path.
 
 Local Phase 3 draft worktrees:
 
@@ -211,8 +191,8 @@ Local Phase 3 draft worktrees:
   `c4e6ad09`. The remote branch was deleted after merge.
 - `#642` events volume/service-discovery worktree
   `/Users/danielraffel/Code/pulp-events-volume-coverage-642`, branch
-  `feature/events-volume-coverage-642`, commit `357fc429`; open as PR
-  `#795`.
+  `feature/events-volume-coverage-642`, commit `357fc429`; merged via PR
+  `#795` as `f1a5aa84`. The remote branch was deleted after merge.
 - `#643` package-registry CLI/tools worktree
   `/Users/danielraffel/Code/pulp-package-registry-coverage-643`, branch
   `feature/package-registry-coverage-643`, commit `75a529ef`; merged via
@@ -242,22 +222,34 @@ Local Phase 3 draft worktrees:
 - `#646` texture-atlas render worktree
   `/Users/danielraffel/Code/pulp-render-texture-atlas-coverage-646`,
   branch `feature/render-texture-atlas-coverage-646`, commit
-  `a2201dbb`; open as PR `#801`.
+  `50012c04`; open as PR `#801`.
 - `#643` CLI-create shellout worktree
   `/Users/danielraffel/Code/pulp-cli-create-coverage-643`, branch
-  `feature/cli-create-coverage-643`, commit `f5e4a05f`; open as PR
+  `feature/cli-create-coverage-643`, commit `222d0f88`; open as PR
   `#802`.
 - `#645` signal matrix helper worktree
   `/Users/danielraffel/Code/pulp-signal-matrix-coverage-645`, branch
-  `feature/signal-matrix-coverage-645`, commit `e18f5f27`; open as PR
+  `feature/signal-matrix-coverage-645`, commit `b1f5a125`; open as PR
   `#803`.
+- `#645` signal oversampling helper worktree
+  `/Users/danielraffel/Code/pulp-signal-oversampling-coverage-645`,
+  branch `feature/signal-oversampling-coverage-645`, commit `bccaec0f`;
+  local draft, not pushed/opened yet. Scope: test-only oversampling
+  coverage for x2/x4 callback dispatch, configured anti-alias filter
+  paths, and reset determinism. Local validation: no-GPU configure,
+  `pulp-test-signal` target build, direct Catch2 tag
+  `[signal][oversampling]` passed with `16` assertions in `2` test cases,
+  focused CTest `Oversampler` passed `2/2`, `git diff --check` clean,
+  skill sync clean, and version bump report says no bump needed. The
+  local build still reports an existing unused-variable warning elsewhere
+  in `test/test_signal.cpp`; it is not introduced by this tranche.
 
 Open supporting PR:
 
 - `#774` refreshes this durable handoff/status document, branch
   `docs/coverage-status-2026-04-25`. The branch is updated as this
   tracker changes; use the PR head SHA in GitHub as the live value.
-  The branch has been rebased onto `origin/main` after `#800` merged and
+  The branch has been rebased onto `origin/main` after `#795` merged and
   remains docs-only.
 
 Local environment note:
@@ -271,13 +263,14 @@ Local environment note:
 Next recovery actions:
 
 1. Keep `#774` docs-only and let its latest status-update checks drain.
-2. Monitor `#795`, `#801`, `#802`, and `#803` and address any Codecov,
-   build, sanitizer, or Namespace feedback.
-3. If `#795`, `#801`, `#802`, or `#803` is green but GitHub reports it
-   behind `main`, rebase that branch onto `origin/main`, push with lease,
-   and let checks rerun.
-4. Continue Phase 3 from the tranche issues below, prioritizing
-   represented high-miss files over adding new perimeter lanes.
+2. Monitor `#801`, `#802`, and `#803` and address any Codecov, build,
+   sanitizer, or Namespace feedback.
+3. If `#801`, `#802`, or `#803` is green but GitHub reports it behind
+   `main`, rebase that branch onto `origin/main`, push with lease, and
+   let checks rerun.
+4. Open the local `#645` oversampling draft as the next small signal
+   tranche once the active PR queue has capacity, or keep it local if the
+   queue is still saturated.
 
 ## Phase 1 corrected baseline
 
