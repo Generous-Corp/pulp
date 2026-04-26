@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-26 18:31 EDT
+Last reviewed: 2026-04-26 18:42 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -176,6 +176,11 @@ Open Phase 3 PRs:
   `feature/signal-meter-coverage-645`, head `ed51248f`; opened from
   `main` at `1a1b7f07`. This tranche also uses the GitHub/Namespace path
   while the SSH `windows` target remains unreachable.
+- `#828` raw MIDI parser edge coverage and malformed-data hardening for
+  `#645`, branch `feature/midi-raw-parser-coverage-645`, head
+  `4e2e6092`; opened from `main` at `94e3ef2a`. This tranche also uses
+  the GitHub/Namespace path while the SSH `windows` target remains
+  unreachable.
 
 Local Phase 3 draft worktrees:
 
@@ -520,6 +525,21 @@ Local Phase 3 draft worktrees:
   passed `20` assertions in `6` cases, full binary passed `20`
   assertions in `6` cases, focused CTest passed `6/6`,
   `git diff --check`, skill-sync report, and version-bump report.
+- `#645` raw MIDI parser worktree
+  `/Users/danielraffel/Code/pulp-midi-raw-parser-coverage-645`, branch
+  `feature/midi-raw-parser-coverage-645`, commit `4e2e6092`; open as PR
+  `#828`.
+  Scope: fixes `parse_raw_midi_bytes` so malformed short messages do not
+  emit status bytes as data, then adds coverage for remaining
+  short-message forms, stray data plus incomplete short messages,
+  omitted callbacks, and recovery after the runaway sysex cap resets the
+  accumulator. Local validation: no-GPU/no-examples configure,
+  `pulp-test-raw-midi-parser` build, direct `[issue-645]` run passed
+  `16` assertions in `3` cases, full binary passed `53` assertions in
+  `9` cases, focused CTest passed `4/4`, `git diff --check`,
+  skill-sync report, and version-bump report with
+  `Version-Bump: sdk=patch` because the inline header is an internal
+  transport helper despite living under `include`.
 
 Open supporting PR:
 
@@ -532,7 +552,7 @@ Open supporting PR:
   merged, `#822` was repaired, `#824` opened, `#821` merged, and `#819`
   merged, `#825` opened, `#820` merged, `#826` opened, `#822` was
   repaired again for Android SDK discovery, `#827` opened, `#823`
-  merged, and `#824` merged, and remains docs-only.
+  merged, `#824` merged, and `#828` opened, and remains docs-only.
 
 Local environment note:
 
@@ -563,10 +583,13 @@ Next recovery actions:
 5. Monitor `#827` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-signal-meter-coverage-645`, patch,
    validate locally, and push with lease.
-6. If any open Phase 3 PR is green but GitHub reports it behind `main`,
+6. Monitor `#828` cloud checks; if a required lane fails, debug in
+   `/Users/danielraffel/Code/pulp-midi-raw-parser-coverage-645`, patch,
+   validate locally, and push with lease.
+7. If any open Phase 3 PR is green but GitHub reports it behind `main`,
    rebase that branch onto `origin/main`, push with lease, and let
    checks rerun.
-7. Continue Phase 3 from the tranche issues below, prioritizing
+8. Continue Phase 3 from the tranche issues below, prioritizing
    represented high-miss files over adding new perimeter lanes.
 
 ## Phase 1 corrected baseline
