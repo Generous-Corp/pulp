@@ -869,6 +869,10 @@ add_executable(pulp-test-audio-file test_audio_file.cpp)
 target_link_libraries(pulp-test-audio-file PRIVATE pulp::audio Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-audio-file)
 
+add_executable(pulp-test-ogg-reader test_ogg_reader.cpp)
+target_link_libraries(pulp-test-ogg-reader PRIVATE pulp::audio Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-ogg-reader)
+
 # Audio tests
 add_executable(pulp-test-audio test_audio.cpp)
 target_link_libraries(pulp-test-audio PRIVATE pulp::audio Catch2::Catch2WithMain)
