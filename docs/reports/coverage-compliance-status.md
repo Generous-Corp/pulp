@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-26 16:15 EDT
+Last reviewed: 2026-04-26 16:20 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -158,6 +158,11 @@ Open Phase 3 PRs:
 - `#818` MPE synth voice / allocator edge coverage for `#645`, branch
   `feature/midi-mpe-synth-voice-coverage-645`, head `21eb74e1`; opened
   from `main` at `957a0735`. This tranche is also using the
+  GitHub/Namespace path while the SSH `windows` target remains
+  unreachable.
+- `#819` MIDI keyboard/sequence edge coverage for `#645`, branch
+  `feature/midi-keyboard-sequence-coverage-645`, head `60676709`;
+  opened from `main` at `019130bd`. This tranche also uses the
   GitHub/Namespace path while the SSH `windows` target remains
   unreachable.
 
@@ -339,6 +344,23 @@ Local Phase 3 draft worktrees:
   binary passed `75` assertions in `12` cases, focused CTest passed
   `12/12`, `git diff --check`, skill-sync report, and version-bump
   report.
+- `#645` MIDI keyboard/sequence worktree
+  `/Users/danielraffel/Code/pulp-midi-keyboard-sequence-coverage-645`,
+  branch `feature/midi-keyboard-sequence-coverage-645`, commit
+  `60676709`; open as PR `#819`.
+  Scope: test-only coverage for `MidiKeyboardState` invalid queries,
+  ignored non-note events, release callbacks, and retrigger velocity
+  updates; plus `MidiMessageSequence` helper field masking,
+  classifier aliases, zero-velocity note-on note-off behavior,
+  channel-specific note-off lookup, range boundaries, timestamp offsets,
+  iteration, duration, and clear behavior. Local validation:
+  no-GPU/no-examples configure, `pulp-test-midi-expansion` and
+  `pulp-test-v3-gaps` build, direct `[midi][keyboard][issue-645]`
+  passed `19` assertions in `3` cases, direct
+  `[midi][sequence][issue-645]` passed `39` assertions in `3` cases,
+  full binaries passed `51` assertions in `20` cases and `94`
+  assertions in `24` cases, focused CTest passed `20/20`,
+  `git diff --check`, skill-sync report, and version-bump report.
 
 Open supporting PR:
 
@@ -346,7 +368,7 @@ Open supporting PR:
   `docs/coverage-status-2026-04-25`. The branch is updated as this
   tracker changes; use the PR head SHA in GitHub as the live value.
   The branch has been rebased onto `origin/main` after `#813` merged,
-  updated after `#814` merged, and remains docs-only.
+  updated after `#815` merged and `#819` opened, and remains docs-only.
 
 Local environment note:
 
@@ -374,10 +396,13 @@ Next recovery actions:
 4. Monitor `#818` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-midi-mpe-synth-voice-coverage-645`,
    patch, validate locally, and push with lease.
-5. If any open Phase 3 PR is green but GitHub reports it behind `main`,
+5. Monitor `#819` cloud checks; if a required lane fails, debug in
+   `/Users/danielraffel/Code/pulp-midi-keyboard-sequence-coverage-645`,
+   patch, validate locally, and push with lease.
+6. If any open Phase 3 PR is green but GitHub reports it behind `main`,
    rebase that branch onto `origin/main`, push with lease, and let
    checks rerun.
-6. Continue Phase 3 from the tranche issues below, prioritizing
+7. Continue Phase 3 from the tranche issues below, prioritizing
    represented high-miss files over adding new perimeter lanes.
 
 ## Phase 1 corrected baseline
