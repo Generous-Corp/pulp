@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-26 17:43 EDT
+Last reviewed: 2026-04-26 17:53 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -171,6 +171,11 @@ Open Phase 3 PRs:
   `#645`, branch `feature/signal-math-helper-coverage-645`, head
   `1b7f1cfd`; opened from `main` at `a38216fd`. This tranche also uses
   the GitHub/Namespace path while the SSH `windows` target remains
+  unreachable.
+- `#825` signal DSP helper edge coverage for `#645`, branch
+  `feature/signal-dsp-helper-coverage-645`, head `da05acaf`; opened
+  from `main` at `7a646f33`. This tranche also uses the
+  GitHub/Namespace path while the SSH `windows` target remains
   unreachable.
 
 Local Phase 3 draft worktrees:
@@ -466,6 +471,21 @@ Local Phase 3 draft worktrees:
   passed `62`, `55`, `895`, and `71` assertions respectively, focused
   CTest passed `11/11`, `git diff --check`, skill-sync report, and
   version-bump report.
+- `#645` signal DSP helper worktree
+  `/Users/danielraffel/Code/pulp-signal-dsp-helper-coverage-645`,
+  branch `feature/signal-dsp-helper-coverage-645`, commit `da05acaf`;
+  open as PR `#825`.
+  Scope: test-only coverage for `AlignedBuffer` move assignment,
+  same-size resize, empty clear, and copy truncation paths;
+  `BallisticsFilter` time-constant clamp and buffer processing paths;
+  `LogRampedValue` non-positive endpoint jump paths; and all
+  `WaveShaper` curve branches plus in-place buffer processing. Local
+  validation: no-GPU/no-examples configure, `pulp-test-simd` and
+  `pulp-test-dsp-expansion` builds, direct issue-645 slices passed `12`
+  assertions in `3` SIMD cases and `22` assertions in `4` DSP cases,
+  full binaries passed `2927` assertions in `23` cases and `75`
+  assertions in `34` cases, focused CTest passed `7/7`,
+  `git diff --check`, skill-sync report, and version-bump report.
 
 Open supporting PR:
 
@@ -476,7 +496,7 @@ Open supporting PR:
   updated after `#816` merged, `#817` was repaired, `#820` opened,
   `#821` opened, `#822` opened, `#818` merged, `#823` opened, `#817`
   merged, `#822` was repaired, `#824` opened, `#821` merged, and `#819`
-  merged, and remains docs-only.
+  merged, and `#825` opened, and remains docs-only.
 
 Local environment note:
 
@@ -507,10 +527,13 @@ Next recovery actions:
 5. Monitor `#824` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-signal-math-helper-coverage-645`,
    patch, validate locally, and push with lease.
-6. If any open Phase 3 PR is green but GitHub reports it behind `main`,
+6. Monitor `#825` cloud checks; if a required lane fails, debug in
+   `/Users/danielraffel/Code/pulp-signal-dsp-helper-coverage-645`,
+   patch, validate locally, and push with lease.
+7. If any open Phase 3 PR is green but GitHub reports it behind `main`,
    rebase that branch onto `origin/main`, push with lease, and let
    checks rerun.
-7. Continue Phase 3 from the tranche issues below, prioritizing
+8. Continue Phase 3 from the tranche issues below, prioritizing
    represented high-miss files over adding new perimeter lanes.
 
 ## Phase 1 corrected baseline
