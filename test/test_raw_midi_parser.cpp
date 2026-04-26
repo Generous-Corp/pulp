@@ -59,6 +59,37 @@ TEST_CASE("raw_midi_parser emits short messages cleanly",
     REQUIRE(c.sysex.empty());
 }
 
+TEST_CASE("raw_midi_parser emits remaining short-message forms",
+          "[midi][raw_midi_parser][issue-645]") {
+    auto c = parse({0xD0, 0x45, // Channel Pressure
+                    0xF3, 0x09, // Song Select
+                    0xF6,       // Tune Request
+                    0xF7});      // Stray End-of-Exclusive
+
+    REQUIRE(c.shorts.size() == 4);
+    REQUIRE(c.shorts[0].status == 0xD0);
+    REQUIRE(c.shorts[0].d1 == 0x45);
+    REQUIRE(c.shorts[0].d2 == 0x00);
+    REQUIRE(c.shorts[1].status == 0xF3);
+    REQUIRE(c.shorts[1].d1 == 0x09);
+    REQUIRE(c.shorts[1].d2 == 0x00);
+    REQUIRE(c.shorts[2].status == 0xF6);
+    REQUIRE(c.shorts[2].d1 == 0x00);
+    REQUIRE(c.shorts[2].d2 == 0x00);
+    REQUIRE(c.shorts[3].status == 0xF7);
+    REQUIRE(c.sysex.empty());
+}
+
+TEST_CASE("raw_midi_parser drops stray data and incomplete short messages",
+          "[midi][raw_midi_parser][issue-645]") {
+    auto c = parse({0x00, 0x7F,       // stray data bytes
+                    0x90, 0x40,       // incomplete Note On
+                    0x80});           // incomplete Note Off
+
+    REQUIRE(c.shorts.empty());
+    REQUIRE(c.sysex.empty());
+}
+
 TEST_CASE("raw_midi_parser accumulates sysex across calls",
           "[midi][raw_midi_parser][issue-406]") {
     RawMidiParserState state;
@@ -92,6 +123,20 @@ TEST_CASE("raw_midi_parser emits realtime inside sysex without terminating",
     REQUIRE(c.sysex[0] == std::vector<uint8_t>{0xF0, 0x7E, 0x05, 0xF7});
     REQUIRE(c.shorts.size() == 1);
     REQUIRE(c.shorts[0].status == 0xF8); // MIDI Clock
+}
+
+TEST_CASE("raw_midi_parser tolerates omitted callbacks",
+          "[midi][raw_midi_parser][issue-645]") {
+    RawMidiParserState state;
+    uint8_t bytes[] = {0xF0, 0x7E, 0xF8, 0x01, 0xF7,
+                       0x90, 0x40, 0x7F};
+
+    parse_raw_midi_bytes(bytes, sizeof(bytes), state,
+                         RawMidiShortCallback{},
+                         RawMidiSysexCallback{});
+
+    REQUIRE_FALSE(state.sysex_in_progress);
+    REQUIRE(state.sysex_buffer.empty());
 }
 
 TEST_CASE("raw_midi_parser recovers from aborted sysex (#406 codex P2)",
@@ -149,4 +194,9 @@ TEST_CASE("raw_midi_parser caps runaway sysex at kRawMidiSysexLimit",
     REQUIRE(c.sysex.empty());
     REQUIRE_FALSE(state.sysex_in_progress);
     REQUIRE(state.sysex_buffer.empty());
+
+    uint8_t clean[] = {0xF0, 0x01, 0xF7};
+    parse_raw_midi_bytes(clean, sizeof(clean), state, on_short, on_sysex);
+    REQUIRE(c.sysex.size() == 1);
+    REQUIRE(c.sysex[0] == std::vector<uint8_t>{0xF0, 0x01, 0xF7});
 }

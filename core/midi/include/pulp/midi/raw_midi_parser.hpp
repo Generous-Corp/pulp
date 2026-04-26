@@ -119,6 +119,16 @@ inline void parse_raw_midi_bytes(const uint8_t* buf,
         }
 
         if (i + msg_len <= n) {
+            bool has_valid_data = true;
+            for (std::size_t data_index = 1; data_index < msg_len; ++data_index) {
+                if ((buf[i + data_index] & 0x80) != 0) {
+                    has_valid_data = false;
+                    break;
+                }
+            }
+
+            if (!has_valid_data) continue;
+
             if (on_short) {
                 on_short(b,
                          msg_len > 1 ? buf[i + 1] : 0,
