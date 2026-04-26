@@ -6,18 +6,37 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <atomic>
 #include <thread>
+
+#if defined(_WIN32)
+#include <process.h>
+#else
+#include <unistd.h>
+#endif
 
 using namespace pulp::host;
 namespace fs = std::filesystem;
 
 namespace {
 
+int current_process_id() {
+#if defined(_WIN32)
+    return _getpid();
+#else
+    return getpid();
+#endif
+}
+
 struct TempFile {
     fs::path path;
     TempFile() {
-        auto stem = "pulp-scan-cache-" + std::to_string(
-            std::chrono::steady_clock::now().time_since_epoch().count());
+        static std::atomic<uint64_t> next_id{0};
+        auto stem = "pulp-scan-cache-" + std::to_string(current_process_id()) + "-" +
+                    std::to_string(std::chrono::steady_clock::now()
+                                       .time_since_epoch()
+                                       .count()) +
+                    "-" + std::to_string(next_id.fetch_add(1));
         path = fs::temp_directory_path() / stem;
     }
     ~TempFile() { std::error_code ec; fs::remove_all(path, ec); }
