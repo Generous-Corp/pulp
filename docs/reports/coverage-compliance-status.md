@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-26 18:42 EDT
+Last reviewed: 2026-04-26 18:53 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -151,6 +151,7 @@ Merged after the Phase 1 closeout / `#723` baseline:
 - `#820` signal spectrogram edge coverage -> `1a1b7f07`
 - `#823` platform helper edge coverage -> `f69338eb`
 - `#824` signal math helper coverage and Mat3 fix -> `94e3ef2a`
+- `#825` signal DSP helper edge coverage -> `d0262a1b`
 
 Open Phase 3 PRs:
 
@@ -163,11 +164,6 @@ Open Phase 3 PRs:
   branch now compares Android build-tools and NDK revisions numerically.
   This tranche also uses the GitHub/Namespace path while the SSH
   `windows` target remains unreachable.
-- `#825` signal DSP helper edge coverage for `#645`, branch
-  `feature/signal-dsp-helper-coverage-645`, head `da05acaf`; opened
-  from `main` at `7a646f33`. This tranche also uses the
-  GitHub/Namespace path while the SSH `windows` target remains
-  unreachable.
 - `#826` OGG reader edge coverage for `#640`, branch
   `feature/audio-ogg-reader-coverage-640`, head `6b721c22`; opened from
   `main` at `1a1b7f07`. This tranche also uses the GitHub/Namespace path
@@ -181,6 +177,10 @@ Open Phase 3 PRs:
   `4e2e6092`; opened from `main` at `94e3ef2a`. This tranche also uses
   the GitHub/Namespace path while the SSH `windows` target remains
   unreachable.
+- `#829` MIDI-CI edge coverage for `#645`, branch
+  `feature/midi-ci-coverage-645`, head `f0ef6b0f`; opened from `main`
+  at `94e3ef2a`. This tranche also uses the GitHub/Namespace path while
+  the SSH `windows` target remains unreachable.
 
 Local Phase 3 draft worktrees:
 
@@ -486,7 +486,8 @@ Local Phase 3 draft worktrees:
 - `#645` signal DSP helper worktree
   `/Users/danielraffel/Code/pulp-signal-dsp-helper-coverage-645`,
   branch `feature/signal-dsp-helper-coverage-645`, commit `da05acaf`;
-  open as PR `#825`.
+  merged via PR `#825` as `d0262a1b`. The remote branch was deleted
+  after merge.
   Scope: test-only coverage for `AlignedBuffer` move assignment,
   same-size resize, empty clear, and copy truncation paths;
   `BallisticsFilter` time-constant clamp and buffer processing paths;
@@ -540,6 +541,18 @@ Local Phase 3 draft worktrees:
   skill-sync report, and version-bump report with
   `Version-Bump: sdk=patch` because the inline header is an internal
   transport helper despite living under `include`.
+- `#645` MIDI-CI worktree
+  `/Users/danielraffel/Code/pulp-midi-ci-coverage-645`, branch
+  `feature/midi-ci-coverage-645`, commit `f0ef6b0f`; open as PR `#829`.
+  Scope: test-only coverage for profile inquiry destination encoding,
+  malformed and unhandled CI messages, discovery inquiry destination
+  filtering, discovery reply storage plus callback dispatch, unknown
+  profile enable/disable no-op paths, and enabled/disabled profile reply
+  payload layout. Local validation: no-GPU/no-examples configure,
+  `pulp-test-midi-ci` build, direct `[issue-645]` run passed `38`
+  assertions in `6` cases, full binary passed `65` assertions in `15`
+  cases, focused CTest passed `6/6`, `git diff --check`, skill-sync
+  report, and version-bump report.
 
 Open supporting PR:
 
@@ -552,7 +565,8 @@ Open supporting PR:
   merged, `#822` was repaired, `#824` opened, `#821` merged, and `#819`
   merged, `#825` opened, `#820` merged, `#826` opened, `#822` was
   repaired again for Android SDK discovery, `#827` opened, `#823`
-  merged, `#824` merged, and `#828` opened, and remains docs-only.
+  merged, `#824` merged, `#828` opened, `#829` opened, and `#825`
+  merged, and remains docs-only.
 
 Local environment note:
 
@@ -574,17 +588,17 @@ Next recovery actions:
 2. Monitor `#822` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-audio-file-helper-coverage-640`,
    patch, validate locally, and push with lease.
-3. Monitor `#825` cloud checks; if a required lane fails, debug in
-   `/Users/danielraffel/Code/pulp-signal-dsp-helper-coverage-645`,
-   patch, validate locally, and push with lease.
-4. Monitor `#826` cloud checks; if a required lane fails, debug in
+3. Monitor `#826` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-audio-ogg-reader-coverage-640`,
    patch, validate locally, and push with lease.
-5. Monitor `#827` cloud checks; if a required lane fails, debug in
+4. Monitor `#827` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-signal-meter-coverage-645`, patch,
    validate locally, and push with lease.
-6. Monitor `#828` cloud checks; if a required lane fails, debug in
+5. Monitor `#828` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-midi-raw-parser-coverage-645`, patch,
+   validate locally, and push with lease.
+6. Monitor `#829` cloud checks; if a required lane fails, debug in
+   `/Users/danielraffel/Code/pulp-midi-ci-coverage-645`, patch,
    validate locally, and push with lease.
 7. If any open Phase 3 PR is green but GitHub reports it behind `main`,
    rebase that branch onto `origin/main`, push with lease, and let
