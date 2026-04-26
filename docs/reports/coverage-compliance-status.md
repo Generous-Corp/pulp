@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-26 16:39 EDT
+Last reviewed: 2026-04-26 16:52 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -166,6 +166,11 @@ Open Phase 3 PRs:
   unreachable.
 - `#820` signal spectrogram edge coverage for `#645`, branch
   `feature/signal-spectrogram-coverage-645`, head `0fd8aa5a`; opened
+  from `main` at `c9620a65`. This tranche also uses the
+  GitHub/Namespace path while the SSH `windows` target remains
+  unreachable.
+- `#821` audio reader helper edge coverage for `#640`, branch
+  `feature/audio-reader-helpers-coverage-640`, head `be7d604f`; opened
   from `main` at `c9620a65`. This tranche also uses the
   GitHub/Namespace path while the SSH `windows` target remains
   unreachable.
@@ -386,6 +391,21 @@ Local Phase 3 draft worktrees:
   cases, full binary passed `390` assertions in `30` cases, focused
   CTest selection passed `12/12`, `git diff --check`, skill-sync
   report, and version-bump report.
+- `#640` audio reader helper worktree
+  `/Users/danielraffel/Code/pulp-audio-reader-helpers-coverage-640`,
+  branch `feature/audio-reader-helpers-coverage-640`, commit
+  `be7d604f`; open as PR `#821`.
+  Scope: test-only coverage for `BufferingReader` source-exhaustion
+  zero-fill and ring-wrap ordering, plus `AudioSubsectionReader` invalid
+  reader, clamped-read, and start-past-end empty-view paths. Local
+  validation: no-GPU/no-examples configure, `pulp-test-buffering-reader`
+  and `pulp-test-v3-gaps` build, direct
+  `[audio][buffering][issue-640]` passed `813` assertions in `2` cases,
+  direct `[audio][subsection][issue-640]` passed `32` assertions in `2`
+  cases, full buffering-reader binary passed `823` assertions in `8`
+  cases, full v3-gaps binary passed `87` assertions in `23` cases,
+  focused CTest passed `12/12`, `git diff --check`, skill-sync report,
+  and version-bump report.
 
 Open supporting PR:
 
@@ -393,8 +413,8 @@ Open supporting PR:
   `docs/coverage-status-2026-04-25`. The branch is updated as this
   tracker changes; use the PR head SHA in GitHub as the live value.
   The branch has been rebased onto `origin/main` after `#813` merged,
-  updated after `#816` merged, `#817` was repaired, and `#820` opened,
-  and remains docs-only.
+  updated after `#816` merged, `#817` was repaired, `#820` opened, and
+  `#821` opened, and remains docs-only.
 
 Local environment note:
 
@@ -425,10 +445,13 @@ Next recovery actions:
 5. Monitor `#820` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-signal-spectrogram-coverage-645`,
    patch, validate locally, and push with lease.
-6. If any open Phase 3 PR is green but GitHub reports it behind `main`,
+6. Monitor `#821` cloud checks; if a required lane fails, debug in
+   `/Users/danielraffel/Code/pulp-audio-reader-helpers-coverage-640`,
+   patch, validate locally, and push with lease.
+7. If any open Phase 3 PR is green but GitHub reports it behind `main`,
    rebase that branch onto `origin/main`, push with lease, and let
    checks rerun.
-7. Continue Phase 3 from the tranche issues below, prioritizing
+8. Continue Phase 3 from the tranche issues below, prioritizing
    represented high-miss files over adding new perimeter lanes.
 
 ## Phase 1 corrected baseline
