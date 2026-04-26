@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-26 16:23 EDT
+Last reviewed: 2026-04-26 16:39 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -148,11 +148,12 @@ Merged after the Phase 1 closeout / `#723` baseline:
 Open Phase 3 PRs:
 
 - `#817` UMP conversion edge coverage for `#645`, branch
-  `feature/midi-ump-conversion-coverage-645`, head `c4420370`; opened
-  from `main` at `957a0735`. `shipyard pr` was attempted first but
-  stopped before PR creation because the SSH `windows` backend timed
-  out, so this tranche is using the GitHub/Namespace path instead of
-  skipping that lane.
+  `feature/midi-ump-conversion-coverage-645`, head `31a53432`; opened
+  from `main` at `957a0735`, then updated with scan-cache temp-file
+  isolation after macOS ASan exposed a parallel CTest collision. `shipyard
+  pr` was attempted first but stopped before PR creation because the SSH
+  `windows` backend timed out, so this tranche is using the
+  GitHub/Namespace path instead of skipping that lane.
 - `#818` MPE synth voice / allocator edge coverage for `#645`, branch
   `feature/midi-mpe-synth-voice-coverage-645`, head `21eb74e1`; opened
   from `main` at `957a0735`. This tranche is also using the
@@ -161,6 +162,11 @@ Open Phase 3 PRs:
 - `#819` MIDI keyboard/sequence edge coverage for `#645`, branch
   `feature/midi-keyboard-sequence-coverage-645`, head `60676709`;
   opened from `main` at `019130bd`. This tranche also uses the
+  GitHub/Namespace path while the SSH `windows` target remains
+  unreachable.
+- `#820` signal spectrogram edge coverage for `#645`, branch
+  `feature/signal-spectrogram-coverage-645`, head `0fd8aa5a`; opened
+  from `main` at `c9620a65`. This tranche also uses the
   GitHub/Namespace path while the SSH `windows` target remains
   unreachable.
 
@@ -316,20 +322,26 @@ Local Phase 3 draft worktrees:
   version-bump report.
 - `#645` MIDI UMP conversion worktree
   `/Users/danielraffel/Code/pulp-midi-ump-conversion-coverage-645`,
-  branch `feature/midi-ump-conversion-coverage-645`, commit `c4420370`;
+  branch `feature/midi-ump-conversion-coverage-645`, commit `31a53432`;
   open as PR `#817`.
   Scope: test-only coverage for velocity-zero note-on aliasing,
   program-change fallback packets, group masking, sample-offset
   preservation, MIDI 2 edge-value down-conversion, skipped packets
-  without MIDI 1 equivalents, and scale endpoint preservation. Local
+  without MIDI 1 equivalents, and scale endpoint preservation. Follow-up
+  `31a53432` isolates scan-cache test temp files with process id plus a
+  per-process counter after macOS ASan showed the previous
+  steady-clock-only stem could collide under parallel CTest. Local
   validation: no-GPU/no-examples configure, `pulp-test-ump-buffer-
   conversion` build, direct `[midi][ump][issue-645]` passed `46`
   assertions in `4` cases, full binary passed `97` assertions in `15`
-  cases, focused CTest conversion selection passed `6/6`,
-  `git diff --check`, skill-sync report, and version-bump report. A
-  broader CTest regex was intentionally not used for the final summary
-  because the lite build exposes `*_NOT_BUILT_*` placeholder tests that
-  match generic `ump` patterns.
+  cases, focused CTest conversion selection passed `6/6`, normal
+  `pulp-test-scan-cache` `[scan_cache]` passed, normal and ASan CTest
+  repeats for `put + get round-trip on an existing file` and `get
+  invalidates when file changes` passed `10/10`, `git diff --check`,
+  skill-sync report, and version-bump report. A broader CTest regex was
+  intentionally not used for the final summary because the lite build
+  exposes `*_NOT_BUILT_*` placeholder tests that match generic `ump`
+  patterns.
 - `#645` MPE synth voice worktree
   `/Users/danielraffel/Code/pulp-midi-mpe-synth-voice-coverage-645`,
   branch `feature/midi-mpe-synth-voice-coverage-645`, commit
@@ -360,6 +372,20 @@ Local Phase 3 draft worktrees:
   full binaries passed `51` assertions in `20` cases and `94`
   assertions in `24` cases, focused CTest passed `20/20`,
   `git diff --check`, skill-sync report, and version-bump report.
+- `#645` signal spectrogram worktree
+  `/Users/danielraffel/Code/pulp-signal-spectrogram-coverage-645`,
+  branch `feature/signal-spectrogram-coverage-645`, commit `0fd8aa5a`;
+  open as PR `#820`.
+  Scope: test-only coverage for `ColorMapper` ramp switching/control
+  points, `FrequencyAxis` clamping and bin/display conversions,
+  `SpectrogramBuffer` column wraparound, row-to-bin mapping,
+  degenerate dB ranges, and empty-row buffers. Local validation:
+  no-GPU/no-examples configure, `pulp-test-stft` build, direct
+  `[signal][spectrogram][issue-645]` passed `49` assertions in `4`
+  cases, direct `[signal][spectrogram]` passed `79` assertions in `12`
+  cases, full binary passed `390` assertions in `30` cases, focused
+  CTest selection passed `12/12`, `git diff --check`, skill-sync
+  report, and version-bump report.
 
 Open supporting PR:
 
@@ -367,7 +393,8 @@ Open supporting PR:
   `docs/coverage-status-2026-04-25`. The branch is updated as this
   tracker changes; use the PR head SHA in GitHub as the live value.
   The branch has been rebased onto `origin/main` after `#813` merged,
-  updated after `#816` merged and `#819` opened, and remains docs-only.
+  updated after `#816` merged, `#817` was repaired, and `#820` opened,
+  and remains docs-only.
 
 Local environment note:
 
@@ -395,10 +422,13 @@ Next recovery actions:
 4. Monitor `#819` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-midi-keyboard-sequence-coverage-645`,
    patch, validate locally, and push with lease.
-5. If any open Phase 3 PR is green but GitHub reports it behind `main`,
+5. Monitor `#820` cloud checks; if a required lane fails, debug in
+   `/Users/danielraffel/Code/pulp-signal-spectrogram-coverage-645`,
+   patch, validate locally, and push with lease.
+6. If any open Phase 3 PR is green but GitHub reports it behind `main`,
    rebase that branch onto `origin/main`, push with lease, and let
    checks rerun.
-6. Continue Phase 3 from the tranche issues below, prioritizing
+7. Continue Phase 3 from the tranche issues below, prioritizing
    represented high-miss files over adding new perimeter lanes.
 
 ## Phase 1 corrected baseline
