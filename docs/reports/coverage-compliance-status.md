@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-25 20:16 EDT
+Last reviewed: 2026-04-25 20:43 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -115,13 +115,21 @@ Merged after the Phase 1 closeout / `#723` baseline:
 Open Phase 3 PRs:
 
 - `#788` events socket-IPC coverage, branch
-  `feature/events-ipc-coverage-642`, head `9e73a084`. This tranche
+  `feature/events-ipc-coverage-642`, head `931627b0`. This tranche
   extends `test/test_ipc.cpp` with malformed socket endpoint rejection,
   non-throwing socket endpoint parsing in
   `core/events/src/interprocess_connection.cpp`, and a deterministic
   localhost client/server framed-message exchange. It also hardens
   `pulp::runtime::Socket::close()` to call TCP `shutdown()` before closing,
   so Linux threads blocked in `accept()` / `recv()` wake during cleanup.
+  After `9e73a084`, Linux coverage remained in `Run coverage suite` for
+  roughly an hour while every other required lane was green. The current
+  `931627b0` head adds a more direct server cleanup fix:
+  `InterprocessConnectionServer::stop()` self-connects to the listening
+  socket before closing it, so a thread blocked in `accept()` wakes without
+  relying on cross-thread `close()` / `shutdown()` behavior. The new
+  regression test covers stopping a socket server while no client is
+  connected.
   After `#771` merged, this
   branch was rebased onto `origin/main` and duplicate shared CLI support
   commits were skipped, leaving only the events tranche. After `#789` merged,
@@ -140,11 +148,14 @@ Open Phase 3 PRs:
   required lanes but Linux Build/Test and Linux Coverage remained in their
   long test/coverage steps, matching a likely blocking-`accept()` cleanup hang.
   The targeted `9e73a084` fix was pushed after local IPC validation stayed
-  green. As of 2026-04-25 20:16 EDT, Build/Test is green on Linux,
-  macOS, and Windows; sanitizer lanes are green or skipped as expected;
-  Android build, IWYU, macOS coverage, and Windows coverage are green.
-  The only remaining required check is Linux coverage, still in the
-  `Run coverage suite` step after roughly 31 minutes.
+  green. That head got Build/Test green on Linux, macOS, and Windows;
+  sanitizer lanes green or skipped as expected; Android build, IWYU,
+  macOS coverage, and Windows coverage green; but Linux coverage stayed
+  in `Run coverage suite` with no logs. The current `931627b0` head has
+  local IPC validation green: `pulp-test-ipc` (`37` assertions / `10`
+  test cases), focused CTest `IPC` (`10/10`), `git diff --check`, and
+  `version_bump_check.py --mode=report` (patch suggestion only). Fresh
+  GitHub checks are now running on that head.
 
 Local Phase 3 draft not yet opened as a PR:
 - `#643` package-registry CLI/tools draft, worktree
@@ -183,7 +194,7 @@ Local environment note:
 Next recovery actions:
 
 1. Poll `#788`; merge manually when green because auto-merge is disabled.
-2. Let `#788`'s final Linux coverage job on `9e73a084` drain.
+2. Let `#788`'s fresh checks on `931627b0` drain.
 3. Keep `#774` docs-only and let its post-`#789` rebase checks drain.
 4. After `#788` merges, refresh this section with the next
    complete Codecov `main` report.
