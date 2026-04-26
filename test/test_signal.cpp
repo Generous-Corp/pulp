@@ -1,8 +1,11 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/signal/signal.hpp>
+#include <algorithm>
 #include <array>
 #include <cmath>
+#include <complex>
+#include <utility>
 #include <vector>
 
 using namespace pulp::signal;
@@ -713,6 +716,83 @@ TEST_CASE("FFT forward_real", "[signal][fft]") {
     }
 }
 
+TEST_CASE("FFT move preserves transform state", "[signal][fft][issue-645]") {
+    Fft original(8);
+    Fft moved(std::move(original));
+
+    REQUIRE(original.size() == 0);
+    REQUIRE(moved.size() == 8);
+
+    std::vector<std::complex<float>> data(8, {1.0f, 0.0f});
+    moved.forward(data.data());
+
+    REQUIRE_THAT(data[0].real(), WithinAbs(8.0f, 1e-4f));
+    REQUIRE_THAT(data[0].imag(), WithinAbs(0.0f, 1e-4f));
+    for (int i = 1; i < 8; ++i) {
+        REQUIRE(std::abs(data[i]) < 1e-4f);
+    }
+
+    Fft assigned;
+    assigned = std::move(moved);
+    REQUIRE(moved.size() == 0);
+    REQUIRE(assigned.size() == 8);
+
+    assigned.inverse(data.data());
+    for (const auto& sample : data) {
+        REQUIRE_THAT(sample.real(), WithinAbs(1.0f, 1e-4f));
+        REQUIRE_THAT(sample.imag(), WithinAbs(0.0f, 1e-4f));
+    }
+}
+
+TEST_CASE("FFT magnitude helpers handle silence and complex bins", "[signal][fft][issue-645]") {
+    Fft fft(8);
+    std::vector<std::complex<float>> freq = {
+        {0.0f, 0.0f},
+        {3.0f, 4.0f},
+        {-0.5f, 0.0f},
+        {0.0f, -2.0f},
+        {0.0f, 0.0f},
+        {0.0f, 0.0f},
+        {0.0f, 0.0f},
+        {0.0f, 0.0f},
+    };
+    std::vector<float> linear(4, 0.0f);
+    std::vector<float> db(4, 0.0f);
+
+    fft.magnitude(freq.data(), linear.data(), 4);
+    fft.magnitude_db(freq.data(), db.data(), 4);
+
+    REQUIRE_THAT(linear[0], WithinAbs(0.0f, 1e-6f));
+    REQUIRE_THAT(linear[1], WithinAbs(5.0f, 1e-6f));
+    REQUIRE_THAT(linear[2], WithinAbs(0.5f, 1e-6f));
+    REQUIRE_THAT(linear[3], WithinAbs(2.0f, 1e-6f));
+    REQUIRE_THAT(db[0], WithinAbs(-200.0f, 0.01f));
+    REQUIRE_THAT(db[1], WithinAbs(13.9794f, 0.01f));
+    REQUIRE_THAT(db[2], WithinAbs(-6.0206f, 0.01f));
+    REQUIRE_THAT(db[3], WithinAbs(6.0206f, 0.01f));
+}
+
+TEST_CASE("FFT forward_real preserves exact-bin conjugate symmetry", "[signal][fft][issue-645]") {
+    constexpr int N = 64;
+    constexpr int bin = 5;
+    Fft fft(N);
+    std::vector<float> input(N);
+    for (int i = 0; i < N; ++i) {
+        input[i] = std::sin(2.0f * 3.14159265358979323846f * bin * i / N);
+    }
+
+    std::vector<std::complex<float>> output(N);
+    std::vector<float> magnitude(N, 0.0f);
+    fft.forward_real(input.data(), output.data());
+    fft.magnitude(output.data(), magnitude.data(), N);
+
+    REQUIRE_THAT(magnitude[0], WithinAbs(0.0f, 1e-4f));
+    REQUIRE_THAT(magnitude[bin], WithinAbs(static_cast<float>(N) / 2.0f, 1e-3f));
+    REQUIRE_THAT(magnitude[N - bin], WithinAbs(static_cast<float>(N) / 2.0f, 1e-3f));
+    REQUIRE_THAT(output[bin].real(), WithinAbs(output[N - bin].real(), 1e-4f));
+    REQUIRE_THAT(output[bin].imag(), WithinAbs(-output[N - bin].imag(), 1e-4f));
+}
+
 // ── Convolver ────────────────────────────────────────────────────────────────
 
 TEST_CASE("Convolver with identity IR", "[signal][convolver]") {
@@ -763,6 +843,32 @@ TEST_CASE("Convolver with simple delay IR", "[signal][convolver]") {
     }
     REQUIRE(peak > 0.9f); // Should find the delayed impulse
     REQUIRE(peak_pos >= 4); // At least 4 samples delayed
+}
+
+TEST_CASE("Convolver reset clears buffered overlap", "[signal][convolver][issue-645]") {
+    Convolver conv;
+    float ir[] = {0.0f, 1.0f, 0.5f};
+    conv.load_ir(ir, 3, 8);
+
+    std::vector<float> impulse(24, 0.0f);
+    std::vector<float> output(24, 0.0f);
+    impulse[0] = 1.0f;
+    conv.process(impulse.data(), output.data(), static_cast<int>(output.size()));
+
+    bool produced_tail = false;
+    for (float sample : output) {
+        produced_tail = produced_tail || std::abs(sample) > 1e-4f;
+    }
+    REQUIRE(produced_tail);
+
+    conv.reset();
+    std::fill(output.begin(), output.end(), 99.0f);
+    std::fill(impulse.begin(), impulse.end(), 0.0f);
+    conv.process(impulse.data(), output.data(), static_cast<int>(output.size()));
+
+    for (float sample : output) {
+        REQUIRE_THAT(sample, WithinAbs(0.0f, 1e-4f));
+    }
 }
 
 // ── MultiChannelMeter ────────────────────────────────────────────────────────
