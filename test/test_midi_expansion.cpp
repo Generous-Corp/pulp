@@ -112,6 +112,70 @@ TEST_CASE("RpnParser per-channel isolation", "[midi][rpn]") {
     REQUIRE(received_ch == 3);
 }
 
+TEST_CASE("RpnParser ignores incomplete selections and unrelated CCs",
+          "[midi][rpn][issue-645]") {
+    RpnParser rpn;
+    int calls = 0;
+    rpn.on_rpn = [&](uint8_t, uint16_t, uint16_t) { ++calls; };
+
+    rpn.process(MidiEvent::cc(0, 6, 2));
+    rpn.process(MidiEvent::cc(0, 38, 0));
+    rpn.process(MidiEvent::cc(0, 101, 1));
+    rpn.process(MidiEvent::cc(0, 6, 3));
+    rpn.process(MidiEvent::cc(0, 38, 4));
+    rpn.process(MidiEvent::cc(0, 7, 100));
+    rpn.process(MidiEvent::cc(0, 96, 0));
+    rpn.process(MidiEvent::cc(0, 97, 0));
+
+    REQUIRE(calls == 0);
+}
+
+TEST_CASE("RpnParser tolerates omitted callbacks",
+          "[midi][rpn][issue-645]") {
+    RpnParser rpn;
+
+    REQUIRE_NOTHROW([&] {
+        rpn.process(MidiEvent::cc(0, 101, 0));
+        rpn.process(MidiEvent::cc(0, 100, 1));
+        rpn.process(MidiEvent::cc(0, 6, 2));
+        rpn.process(MidiEvent::cc(0, 38, 3));
+        rpn.process(MidiEvent::cc(0, 96, 0));
+        rpn.process(MidiEvent::cc(0, 97, 0));
+
+        rpn.process(MidiEvent::cc(0, 99, 4));
+        rpn.process(MidiEvent::cc(0, 98, 5));
+        rpn.process(MidiEvent::cc(0, 6, 6));
+        rpn.process(MidiEvent::cc(0, 38, 7));
+    }());
+}
+
+TEST_CASE("RpnParser reports NRPN increment and decrement metadata",
+          "[midi][rpn][issue-645]") {
+    RpnParser rpn;
+    std::vector<uint16_t> params;
+    std::vector<bool> is_rpn_flags;
+
+    rpn.on_increment = [&](uint8_t ch, uint16_t param, bool is_rpn) {
+        REQUIRE(ch == 2);
+        params.push_back(param);
+        is_rpn_flags.push_back(is_rpn);
+    };
+    rpn.on_decrement = [&](uint8_t ch, uint16_t param, bool is_rpn) {
+        REQUIRE(ch == 2);
+        params.push_back(param);
+        is_rpn_flags.push_back(is_rpn);
+    };
+
+    rpn.process(MidiEvent::cc(2, 99, 3));
+    rpn.process(MidiEvent::cc(2, 98, 9));
+    rpn.process(MidiEvent::cc(2, 96, 0));
+    rpn.process(MidiEvent::cc(2, 97, 0));
+
+    REQUIRE(params == std::vector<uint16_t>{static_cast<uint16_t>((3 << 7) | 9),
+                                            static_cast<uint16_t>((3 << 7) | 9)});
+    REQUIRE(is_rpn_flags == std::vector<bool>{false, false});
+}
+
 // ── MidiKeyboardState ────────────────────────────────────────────────────
 
 TEST_CASE("MidiKeyboardState tracks note on/off", "[midi][keyboard]") {
