@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-25 23:51 EDT
+Last reviewed: 2026-04-26 00:10 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -125,7 +125,7 @@ Merged after the Phase 1 closeout / `#723` baseline:
 Open Phase 3 PRs:
 
 - `#795` `test(events): cover volume detector lifecycle edges`, branch
-  `feature/events-volume-coverage-642`, commit `c33133e9`, worktree
+  `feature/events-volume-coverage-642`, commit `ab941cd9`, worktree
   `/Users/danielraffel/Code/pulp-events-volume-coverage-642`.
   Scope: deterministic `test/test_network_service_discovery.cpp`
   coverage for `NetworkServiceDiscovery` backend removal, cached-service
@@ -138,13 +138,15 @@ Open Phase 3 PRs:
   `NSD|MountedVolume|LockingAsyncUpdater|service-discovery|volume`
   passed `10/10`; `git diff --check` clean. After the first CI pass, the
   Windows Namespace lane exposed an unavailable-drive exception from
-  `std::filesystem::exists("E:\\")`; commit `c33133e9` fixes
-  `MountedVolumeListChangeDetector::get_mounted_volumes()` to use
-  non-throwing filesystem overloads for platform volume enumeration.
-  GitHub Versioning & Skill-Sync passed on `c33133e9`. The PR is labeled
-  `codecov` and is using the direct GitHub/Namespace path instead of
-  `shipyard pr` because `#794` exposed a local Shipyard mac configure
-  stall after GitHub/Namespace was already clean.
+  `std::filesystem::exists("E:\\")`; the latest fix keeps the guard on a
+  coverage-visible source line via `PULP_VOLUME_EXISTS(drive)`. A local
+  replay of the failed CI merged Cobertura artifact now reports `85.7%`
+  diff coverage for `core/events/src/volume_detector.cpp`, above the
+  required `75%` gate. GitHub checks were rerunning on `ab941cd9` with no
+  failures at the last poll. The PR is labeled `codecov` and is using the
+  direct GitHub/Namespace path instead of `shipyard pr` because `#794`
+  exposed a local Shipyard mac configure stall after GitHub/Namespace was
+  already clean.
 - `#797` `test(audio): cover streaming WAV writer edges`, branch
   `feature/audio-streaming-writer-coverage-640`, commit `29a3f26d`,
   worktree
@@ -186,7 +188,7 @@ Local Phase 3 draft worktrees:
   `c4e6ad09`. The remote branch was deleted after merge.
 - `#642` events volume/service-discovery worktree
   `/Users/danielraffel/Code/pulp-events-volume-coverage-642`, branch
-  `feature/events-volume-coverage-642`, commit `c33133e9`; open as PR
+  `feature/events-volume-coverage-642`, commit `ab941cd9`; open as PR
   `#795`.
 - `#643` package-registry CLI/tools worktree
   `/Users/danielraffel/Code/pulp-package-registry-coverage-643`, branch
