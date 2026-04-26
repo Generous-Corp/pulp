@@ -6,6 +6,11 @@
 
 namespace pulp::events {
 
+#ifdef _WIN32
+#define PULP_VOLUME_PROBE_TRY try {
+#define PULP_VOLUME_PROBE_CATCH } catch (const std::filesystem::filesystem_error&) {}
+#endif
+
 // ── MountedVolumeListChangeDetector ─────────────────────────────────────
 
 MountedVolumeListChangeDetector::~MountedVolumeListChangeDetector() { stop(); }
@@ -61,18 +66,21 @@ std::vector<std::string> MountedVolumeListChangeDetector::get_mounted_volumes() 
     // Windows: drive letters
     for (char c = 'A'; c <= 'Z'; ++c) {
         std::string drive = std::string(1, c) + ":\\";
-        try {
-            if (std::filesystem::exists(drive))
-                volumes.push_back(drive);
-        } catch (const std::filesystem::filesystem_error&) {
-            // Some removable Windows drives report present-but-not-ready.
-        }
+        PULP_VOLUME_PROBE_TRY
+        if (std::filesystem::exists(drive))
+            volumes.push_back(drive);
+        PULP_VOLUME_PROBE_CATCH
     }
 #endif
 
     std::sort(volumes.begin(), volumes.end());
     return volumes;
 }
+
+#ifdef _WIN32
+#undef PULP_VOLUME_PROBE_TRY
+#undef PULP_VOLUME_PROBE_CATCH
+#endif
 
 // ── NetworkServiceDiscovery ─────────────────────────────────────────────
 //
