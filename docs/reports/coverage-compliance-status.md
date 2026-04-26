@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-25 19:52 EDT
+Last reviewed: 2026-04-25 20:16 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -140,7 +140,11 @@ Open Phase 3 PRs:
   required lanes but Linux Build/Test and Linux Coverage remained in their
   long test/coverage steps, matching a likely blocking-`accept()` cleanup hang.
   The targeted `9e73a084` fix was pushed after local IPC validation stayed
-  green, and fresh checks are now running on that head.
+  green. As of 2026-04-25 20:16 EDT, Build/Test is green on Linux,
+  macOS, and Windows; sanitizer lanes are green or skipped as expected;
+  Android build, IWYU, macOS coverage, and Windows coverage are green.
+  The only remaining required check is Linux coverage, still in the
+  `Run coverage suite` step after roughly 31 minutes.
 
 Local Phase 3 draft not yet opened as a PR:
 - `#643` package-registry CLI/tools draft, worktree
@@ -179,8 +183,7 @@ Local environment note:
 Next recovery actions:
 
 1. Poll `#788`; merge manually when green because auto-merge is disabled.
-2. Let `#788`'s fresh full Build/Test and Coverage workflows on `9e73a084`
-   drain.
+2. Let `#788`'s final Linux coverage job on `9e73a084` drain.
 3. Keep `#774` docs-only and let its post-`#789` rebase checks drain.
 4. After `#788` merges, refresh this section with the next
    complete Codecov `main` report.
