@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-25 23:37 EDT
+Last reviewed: 2026-04-25 23:51 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -120,6 +120,7 @@ Merged after the Phase 1 closeout / `#723` baseline:
 - `#788` events socket-IPC coverage -> `23d3ed1d`
 - `#793` package-registry CLI/tools coverage -> `e2af9c4d`
 - `#794` AIFF reader edge-path coverage -> `c4e6ad09`
+- `#796` tool-registry CLI/tools coverage -> `11c10a7e`
 
 Open Phase 3 PRs:
 
@@ -144,18 +145,6 @@ Open Phase 3 PRs:
   `codecov` and is using the direct GitHub/Namespace path instead of
   `shipyard pr` because `#794` exposed a local Shipyard mac configure
   stall after GitHub/Namespace was already clean.
-- `#796` `test(cli): cover tool registry local paths`, branch
-  `feature/cli-tool-registry-coverage-643`, commit `cdfbbcec`,
-  worktree `/Users/danielraffel/Code/pulp-cli-tool-registry-coverage-643`.
-  Scope: deterministic `tools/cli/tool_registry.cpp` coverage for
-  registry parsing, managed binary lookup, Python wrapper lookup,
-  uninstall, local install early exits, and `pulp tool`
-  list/path/doctor/uninstall/run/error dispatch branches against a
-  staged local registry. Local validation: lightweight configure
-  completed; `pulp-test-cli-tool-registry` built and passed with `78`
-  assertions in `5` test cases; focused CTest passed `5/5`;
-  `git diff --check` clean; version bump report says no bump needed.
-  The PR is using the same direct GitHub/Namespace path as `#795`.
 - `#797` `test(audio): cover streaming WAV writer edges`, branch
   `feature/audio-streaming-writer-coverage-640`, commit `29a3f26d`,
   worktree
@@ -171,6 +160,22 @@ Open Phase 3 PRs:
   `StreamingWriter|audio.*file|FormatRegistry` passed `6/6`;
   `git diff --check` clean; version bump report says no bump needed.
   The PR is labeled `codecov` and is using the same direct
+  GitHub/Namespace path as `#795`. Codecov's complete commit report shows
+  `core/audio/src/streaming_writer.cpp` represented at `60.67%` coverage;
+  the early Codecov PR comment reporting `0%` patch coverage appears stale
+  relative to the green `codecov/patch` check and line-level API data.
+- `#798` `test(audio): cover format registry dispatch paths`, branch
+  `feature/audio-format-registry-coverage-640`, commit `43739ac1`,
+  worktree
+  `/Users/danielraffel/Code/pulp-audio-system-volume-coverage-640`.
+  Scope: deterministic `FormatRegistry` unsupported read/read_info
+  dispatch, custom reader/writer registration, normalized extension lookup,
+  read_info/read/write dispatch through registered handlers, and supported
+  extension collection for `.aifc`. Local validation:
+  `pulp-test-audio-file` passed with `258` assertions in `16` test cases;
+  focused CTest `FormatRegistry|audio.*file` passed `3/3`;
+  `git diff --check` clean; version bump report says no bump needed.
+  The PR is labeled `codecov` and is using the same direct
   GitHub/Namespace path as `#795`.
 
 Local Phase 3 draft worktrees:
@@ -181,7 +186,7 @@ Local Phase 3 draft worktrees:
   `c4e6ad09`. The remote branch was deleted after merge.
 - `#642` events volume/service-discovery worktree
   `/Users/danielraffel/Code/pulp-events-volume-coverage-642`, branch
-  `feature/events-volume-coverage-642`, commit `a193f617`; open as PR
+  `feature/events-volume-coverage-642`, commit `c33133e9`; open as PR
   `#795`.
 - `#643` package-registry CLI/tools worktree
   `/Users/danielraffel/Code/pulp-package-registry-coverage-643`, branch
@@ -189,19 +194,23 @@ Local Phase 3 draft worktrees:
   PR `#793`.
 - `#643` tool-registry CLI/tools worktree
   `/Users/danielraffel/Code/pulp-cli-tool-registry-coverage-643`, branch
-  `feature/cli-tool-registry-coverage-643`, commit `cdfbbcec`; open as
-  PR `#796`.
+  `feature/cli-tool-registry-coverage-643`, commit `cdfbbcec`; merged via
+  PR `#796` as `11c10a7e`. The remote branch was deleted after merge.
 - `#640` streaming-writer audio/platform worktree
   `/Users/danielraffel/Code/pulp-audio-streaming-writer-coverage-640`,
   branch `feature/audio-streaming-writer-coverage-640`, commit
   `29a3f26d`; open as PR `#797`.
+- `#640` format-registry audio/platform worktree
+  `/Users/danielraffel/Code/pulp-audio-system-volume-coverage-640`,
+  branch `feature/audio-format-registry-coverage-640`, commit
+  `43739ac1`; open as PR `#798`.
 
 Open supporting PR:
 
 - `#774` refreshes this durable handoff/status document, branch
   `docs/coverage-status-2026-04-25`. The branch is updated as this
   tracker changes; use the PR head SHA in GitHub as the live value.
-  The branch has been rebased onto `origin/main` after `#793` merged and
+  The branch has been rebased onto `origin/main` after `#796` merged and
   remains docs-only.
 
 Local environment note:
@@ -215,9 +224,9 @@ Local environment note:
 Next recovery actions:
 
 1. Keep `#774` docs-only and let its latest status-update checks drain.
-2. Monitor `#795`, `#796`, and `#797` and address any Codecov, build,
+2. Monitor `#795`, `#797`, and `#798` and address any Codecov, build,
    sanitizer, or Namespace feedback.
-3. If `#795`, `#796`, or `#797` is green but GitHub reports it behind `main`,
+3. If `#795`, `#797`, or `#798` is green but GitHub reports it behind `main`,
    rebase that branch onto `origin/main`, push with lease, and let
    checks rerun.
 4. Continue Phase 3 from the tranche issues below, prioritizing
