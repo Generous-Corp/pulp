@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-26 15:13 EDT
+Last reviewed: 2026-04-26 15:28 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -67,43 +67,41 @@ Finish line:
 
 Latest complete Codecov `main` report observed while updating this doc:
 
-- commit: `810743d49f588385aab50ced672344e098710403`
-- workflow: Coverage run `24964141128`, completed successfully
-- overall tracked coverage: `45.43%` over `70,380` lines in `556` files
-- covered lines: `31,974`
-- missed lines: `37,398`
-- partial lines: `1,008`
+- commit: `957a073523e3aabcd7b11972acaf98065909bf67`
+- workflow: Coverage run `24964746369`, completed successfully
+- overall tracked coverage: `45.96%` over `70,376` lines in `556` files
+- covered lines: `32,349`
+- missed lines: `36,895`
+- partial lines: `1,132`
 - current component coverage from the Codecov API:
-  - `audio`: `34.78%`
-  - `canvas`: `64.22%`
-  - `dsl`: `68.3%`
-  - `events`: `50.5%`
-  - `format`: `51.04%`
-  - `host`: `43.39%`
-  - `midi`: `47.62%`
-  - `osc`: `65.65%`
-  - `platform`: `36.93%`
-  - `render`: `60.38%`
-  - `runtime`: `47.51%`
-  - `signal`: `66.13%`
-  - `state`: `60.77%`
-  - `view`: `42.93%`
+  - `audio`: `34.45%`
+  - `canvas`: `63.96%`
+  - `dsl`: `63.38%`
+  - `events`: `49.49%`
+  - `format`: `51.03%`
+  - `host`: `43.61%`
+  - `midi`: `47.77%`
+  - `osc`: `62.22%`
+  - `platform`: `43.18%`
+  - `render`: `59.74%`
+  - `runtime`: `50.48%`
+  - `signal`: `69.4%`
+  - `state`: `62.99%`
+  - `view`: `43.72%`
   - `android`: `13.83%`
   - `apple`: `25.36%`
-  - `linux`: `0.0%`
-  - `windows`: `0.0%`
-  - `cli`: `38.94%`
-  - `ship`: `54.46%`
-  - `tools`: `44.33%`
-
-Newer `main` coverage is running for `#813`'s merge commit
-`957a073523e3aabcd7b11972acaf98065909bf67` as Coverage run
-`24964746369`; keep the `810743d4` numbers above as the latest complete
-baseline until that run finishes.
+  - `linux`: `0.22%`
+  - `windows`: `6.42%`
+  - `cli`: `38.92%`
+  - `ship`: `53.77%`
+  - `tools`: `44.36%`
 
 Post-`#794` file-level proof point: `core/audio/src/aiff_reader.cpp`
 is now `72.01%` covered with `61` misses, up from `64.22%` with `78`
 misses at the prior `e2af9c4d` baseline.
+
+Post-`#813` proof point: the `signal` component is now `69.4%` covered,
+up from `66.13%` at the prior `810743d4` baseline.
 
 Merged after the Phase 1 closeout / `#723` baseline:
 
@@ -149,6 +147,9 @@ Open Phase 3 PRs:
 - `#814` CLI `pulp pr` shellout coverage for `#643`, branch
   `feature/cli-pr-coverage-643`, head `22ba6162`; opened after rebasing
   onto `main` at `957a0735`. Cloud checks are the active gate.
+- `#815` MPE tracker edge-path coverage for `#645`, branch
+  `feature/mpe-tracker-coverage-645`, head `b7c72711`; opened from
+  `main` at `957a0735`. Cloud checks are the active gate.
 
 Local Phase 3 draft worktrees:
 
@@ -270,6 +271,18 @@ Local Phase 3 draft worktrees:
   build, direct `[cli][shellout][pr][issue-643]` passed `18` assertions
   in `4` cases, focused CTest `pulp pr` passed `7/7`,
   `git diff --check`, skill-sync report, and version-bump report.
+- `#645` MPE tracker worktree
+  `/Users/danielraffel/Code/pulp-mpe-tracker-coverage-645`, branch
+  `feature/mpe-tracker-coverage-645`, commit `b7c72711`; open as PR
+  `#815`.
+  Scope: test-only coverage for `MpeVoiceTracker` bend-range rejection,
+  config reset, manager pressure/timbre state, cached member expression,
+  bounded snapshots, and full-table overflow behavior. Local validation:
+  no-GPU/no-examples configure, `pulp-test-mpe-voice-tracker` build,
+  direct `[midi][mpe][issue-645]` passed `166` assertions in `6` cases,
+  full binary passed `239` assertions in `23` cases, and focused CTest
+  `MpeVoiceTracker` passed `23/23`, `git diff --check`, skill-sync
+  report, and version-bump report.
 
 Open supporting PR:
 
@@ -290,10 +303,11 @@ Local environment note:
 Next recovery actions:
 
 1. Keep `#774` docs-only and let its latest status-update checks drain.
-2. Let the `main` Coverage run for `957a0735` complete, then refresh the
-   Codecov baseline if it changes the execution order materially.
-3. Monitor `#814` cloud checks; if a required lane fails, debug in
+2. Monitor `#814` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-cli-pr-coverage-643`, patch,
+   validate locally, and push with lease.
+3. Monitor `#815` cloud checks; if a required lane fails, debug in
+   `/Users/danielraffel/Code/pulp-mpe-tracker-coverage-645`, patch,
    validate locally, and push with lease.
 4. If any open Phase 3 PR is green but GitHub reports it behind `main`,
    rebase that branch onto `origin/main`, push with lease, and let
