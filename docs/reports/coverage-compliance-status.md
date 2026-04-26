@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-26 19:30 EDT
+Last reviewed: 2026-04-26 19:33 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -184,10 +184,11 @@ Open Phase 3 PRs:
   `main` at `d0262a1b`. This tranche also uses the GitHub/Namespace path
   while the SSH `windows` target remains unreachable.
 - `#832` platform child-process edge coverage for `#640`, branch
-  `feature/platform-child-process-coverage-640`, head `3018c8d5`;
-  opened from `main` at `d5efea57`. This tranche also uses the
-  GitHub/Namespace path while the SSH `windows` target remains
-  unreachable.
+  `feature/platform-child-process-coverage-640`, head `a361c8b9`;
+  opened from `main` at `d5efea57` and updated after the first Windows
+  Namespace run exposed a cmd/PowerShell portability issue in the test
+  commands. This tranche also uses the GitHub/Namespace path while the
+  SSH `windows` target remains unreachable.
 
 Local Phase 3 draft worktrees:
 
@@ -590,17 +591,19 @@ Local Phase 3 draft worktrees:
   version-bump report.
 - `#640` platform child-process worktree
   `/Users/danielraffel/Code/pulp-platform-child-process-coverage-640`,
-  branch `feature/platform-child-process-coverage-640`, commit
-  `3018c8d5`; open as PR `#832`.
+  branch `feature/platform-child-process-coverage-640`, commits
+  `3018c8d5` and `a361c8b9`; open as PR `#832`.
   Scope: test-only coverage for pre-start wait/read defaults,
   working-directory launch, stdout/stderr max-output byte caps,
   stderr-line callbacks, and fast-exit output preservation after
-  `is_running()` observes process completion. Local validation:
-  no-GPU/no-examples configure, `pulp-test-child-process` build, direct
-  `[issue-640]` run passed `25` assertions in `5` cases, full binary
-  passed `46` assertions in `17` cases, focused CTest passed `5/5`,
-  `git diff --check HEAD~1..HEAD`, `git diff --check`, skill-sync
-  report, and version-bump report.
+  `is_running()` observes process completion. The follow-up commit
+  removed a PowerShell dependency and trims stderr callback comparisons
+  so the test is resilient to `cmd` redirection spacing on Windows.
+  Local validation: no-GPU/no-examples configure,
+  `pulp-test-child-process` build, direct `[issue-640]` run passed `25`
+  assertions in `5` cases, full binary passed `46` assertions in `17`
+  cases, focused CTest passed `5/5`, `git diff --check HEAD~1..HEAD`,
+  `git diff --check`, skill-sync report, and version-bump report.
 
 Open supporting PR:
 
@@ -614,8 +617,9 @@ Open supporting PR:
   merged, `#825` opened, `#820` merged, `#826` opened, `#822` was
   repaired again for Android SDK discovery, `#827` opened, `#823`
   merged, `#824` merged, `#828` opened, `#829` opened, `#825` merged,
-  `#830` opened, `#831` opened, `#827` merged, `#832` opened, and
-  `#826` merged, and remains docs-only.
+  `#830` opened, `#831` opened, `#827` merged, `#832` opened, `#826`
+  merged, and `#832` was repaired for Windows cmd portability, and
+  remains docs-only.
 
 Local environment note:
 
