@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-26 16:04 EDT
+Last reviewed: 2026-04-26 16:08 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -141,14 +141,10 @@ Merged after the Phase 1 closeout / `#723` baseline:
 - `#810` platform Environment diff-edge coverage -> `f712702a`
 - `#811` CLI project-command dispatch coverage -> `810743d4`
 - `#813` signal dynamics helper coverage -> `957a0735`
+- `#814` CLI `pulp pr` shellout coverage -> `8bd4a3e9`
 
 Open Phase 3 PRs:
 
-- `#814` CLI `pulp pr` shellout coverage for `#643`, branch
-  `feature/cli-pr-coverage-643`, head `615bd756`; opened after rebasing
-  onto `main` at `957a0735`. The Linux Namespace cwd-sensitive shellout
-  failure was patched by resolving the CLI binary before the test changes
-  cwd; cloud checks are rerunning from the new head.
 - `#815` MPE tracker edge-path coverage for `#645`, branch
   `feature/mpe-tracker-coverage-645`, head `b7c72711`; opened from
   `main` at `957a0735`. Windows coverage failed during dependency
@@ -282,7 +278,8 @@ Local Phase 3 draft worktrees:
   skill-sync report, and version-bump report.
 - `#643` CLI `pulp pr` shellout worktree
   `/Users/danielraffel/Code/pulp-cli-pr-coverage-643`, branch
-  `feature/cli-pr-coverage-643`, commit `615bd756`; open as PR `#814`.
+  `feature/cli-pr-coverage-643`, commit `615bd756`; merged via PR
+  `#814` as `8bd4a3e9`. The remote branch was deleted after merge.
   Scope: shellout coverage for missing-Shipyard install guidance,
   native fallback help, outside-project refusal, and POSIX delegation to
   a fake `shipyard pr` executable without invoking real Shipyard. Follow-
@@ -354,7 +351,7 @@ Open supporting PR:
   `docs/coverage-status-2026-04-25`. The branch is updated as this
   tracker changes; use the PR head SHA in GitHub as the live value.
   The branch has been rebased onto `origin/main` after `#813` merged,
-  updated after `#814` opened, and remains docs-only.
+  updated after `#814` merged, and remains docs-only.
 
 Local environment note:
 
@@ -373,27 +370,24 @@ Local environment note:
 Next recovery actions:
 
 1. Keep `#774` docs-only and let its latest status-update checks drain.
-2. Monitor `#814` cloud checks from head `615bd756`; if a required lane
-   fails, debug in `/Users/danielraffel/Code/pulp-cli-pr-coverage-643`,
-   patch, validate locally, and push with lease.
-3. Monitor `#815` cloud checks; if a required lane fails, debug in
+2. Monitor `#815` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-mpe-tracker-coverage-645`, patch,
    validate locally, and push with lease. The current Windows coverage
    failure was rerun in run `24965100026`; wait for that rerun result
    before changing code.
-4. Monitor `#816` cloud checks; if a required lane fails, debug in
+3. Monitor `#816` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-midi-running-status-coverage-645`,
    patch, validate locally, and push with lease.
-5. Monitor `#817` cloud checks; if a required lane fails, debug in
+4. Monitor `#817` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-midi-ump-conversion-coverage-645`,
    patch, validate locally, and push with lease.
-6. Monitor `#818` cloud checks; if a required lane fails, debug in
+5. Monitor `#818` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-midi-mpe-synth-voice-coverage-645`,
    patch, validate locally, and push with lease.
-7. If any open Phase 3 PR is green but GitHub reports it behind `main`,
+6. If any open Phase 3 PR is green but GitHub reports it behind `main`,
    rebase that branch onto `origin/main`, push with lease, and let
    checks rerun.
-8. Continue Phase 3 from the tranche issues below, prioritizing
+7. Continue Phase 3 from the tranche issues below, prioritizing
    represented high-miss files over adding new perimeter lanes.
 
 ## Phase 1 corrected baseline
