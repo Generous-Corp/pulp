@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-25 22:36 EDT
+Last reviewed: 2026-04-25 22:50 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -132,6 +132,17 @@ Local Phase 3 draft worktrees:
 - `#640` AIFF reader edge-path worktree
   `/Users/danielraffel/Code/pulp-audio-aiff-coverage-640`, branch
   `feature/audio-aiff-coverage-640`, commit `f3414ae9`; open as PR `#794`.
+- `#642` events volume/service-discovery worktree
+  `/Users/danielraffel/Code/pulp-events-volume-coverage-642`, branch
+  `feature/events-volume-coverage-642`, commit `6e56d62b`; local draft is
+  ready but not opened yet to avoid overlapping local Shipyard runs while
+  `#794` is still validating. Scope: deterministic
+  `test/test_network_service_discovery.cpp` coverage for
+  `NetworkServiceDiscovery` backend removal, mounted-volume snapshot and
+  start/stop lifecycle, and `LockingAsyncUpdater::trigger_and_wait()`.
+  Validation: `pulp-test-network-service-discovery` passed with `43`
+  assertions in `10` test cases; focused CTest passed `10/10`;
+  `git diff --check` clean; version bump report says no bump needed.
 - `#643` package-registry CLI/tools worktree
   `/Users/danielraffel/Code/pulp-package-registry-coverage-643`, branch
   `feature/package-registry-coverage-643`, commit `75a529ef`; merged via
@@ -157,9 +168,12 @@ Next recovery actions:
 
 1. Keep `#774` docs-only and let its latest status-update checks drain.
 2. Monitor `#794` and address any Codecov, build, or Shipyard feedback.
-3. If a new PR is green but GitHub reports it behind `main`, rebase that
+3. Once `#794` is resolved or no longer consuming the local Shipyard mac
+   lane, open the ready `#642` draft from
+   `/Users/danielraffel/Code/pulp-events-volume-coverage-642`.
+4. If a new PR is green but GitHub reports it behind `main`, rebase that
    branch onto `origin/main`, push with lease, and let checks rerun.
-4. Continue Phase 3 from the tranche issues below, prioritizing
+5. Continue Phase 3 from the tranche issues below, prioritizing
    represented high-miss files over adding new perimeter lanes.
 
 ## Phase 1 corrected baseline
