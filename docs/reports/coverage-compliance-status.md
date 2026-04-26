@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-26 19:49 EDT
+Last reviewed: 2026-04-26 19:58 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -180,13 +180,19 @@ Open Phase 3 PRs:
   test. This tranche also uses the GitHub/Namespace path while the SSH
   `windows` target remains unreachable.
 - `#832` platform child-process edge coverage for `#640`, branch
-  `feature/platform-child-process-coverage-640`, head `a361c8b9`;
-  opened from `main` at `d5efea57` and updated after the first Windows
+  `feature/platform-child-process-coverage-640`, head `c07dd268`;
+  opened from `main` at `d5efea57`, updated after the first Windows
   Namespace run exposed a cmd/PowerShell portability issue in the test
-  commands. This tranche also uses the GitHub/Namespace path while the
-  SSH `windows` target remains unreachable.
+  commands, then rebased onto `87ef6d90` and updated after Windows
+  exposed the fast-exit no-newline `cmd` probe returning nonzero. This
+  tranche also uses the GitHub/Namespace path while the SSH `windows`
+  target remains unreachable.
 - `#833` signal filter-design edge coverage for `#645`, branch
   `feature/signal-biquad-coverage-645`, head `740bdc9c`; opened from
+  `main` at `87ef6d90`. This tranche also uses the GitHub/Namespace
+  path while the SSH `windows` target remains unreachable.
+- `#834` events event-loop lifecycle edge coverage for `#642`, branch
+  `feature/events-loop-coverage-642`, head `ee3894cb`; opened from
   `main` at `87ef6d90`. This tranche also uses the GitHub/Namespace
   path while the SSH `windows` target remains unreachable.
 
@@ -200,6 +206,18 @@ Local Phase 3 draft worktrees:
   `/Users/danielraffel/Code/pulp-events-volume-coverage-642`, branch
   `feature/events-volume-coverage-642`, commit `357fc429`; merged via PR
   `#795` as `f1a5aa84`. The remote branch was deleted after merge.
+- `#642` events event-loop lifecycle worktree
+  `/Users/danielraffel/Code/pulp-events-loop-coverage-642`, branch
+  `feature/events-loop-coverage-642`, commit `ee3894cb`; open as PR
+  `#834`.
+  Scope: test-only coverage for `EventLoop` thread identity, explicit
+  stop and idempotent stop state, delayed work dropped after stop,
+  multiple delayed tasks, plus `Timer` interval getter/setter and
+  idempotent stop-state behavior. Local validation: no-GPU/no-examples
+  configure, `pulp-test-events` build, direct `[issue-642]` run passed
+  `14` assertions in `4` cases, full binary passed `74` assertions in
+  `20` cases, precise CTest selector passed `18/18`, `git diff --check`,
+  skill-sync report, and version-bump report.
 - `#643` package-registry CLI/tools worktree
   `/Users/danielraffel/Code/pulp-package-registry-coverage-643`, branch
   `feature/package-registry-coverage-643`, commit `75a529ef`; merged via
@@ -599,18 +617,21 @@ Local Phase 3 draft worktrees:
 - `#640` platform child-process worktree
   `/Users/danielraffel/Code/pulp-platform-child-process-coverage-640`,
   branch `feature/platform-child-process-coverage-640`, commits
-  `3018c8d5` and `a361c8b9`; open as PR `#832`.
+  `3018c8d5`, `a361c8b9`, and `c07dd268`; open as PR `#832`.
   Scope: test-only coverage for pre-start wait/read defaults,
   working-directory launch, stdout/stderr max-output byte caps,
   stderr-line callbacks, and fast-exit output preservation after
   `is_running()` observes process completion. The follow-up commit
   removed a PowerShell dependency and trims stderr callback comparisons
-  so the test is resilient to `cmd` redirection spacing on Windows.
+  so the test is resilient to `cmd` redirection spacing on Windows; the
+  second follow-up forces the fast-exit Windows `cmd` probe to exit zero
+  while still proving no-newline cached output is preserved.
   Local validation: no-GPU/no-examples configure,
   `pulp-test-child-process` build, direct `[issue-640]` run passed `25`
   assertions in `5` cases, full binary passed `46` assertions in `17`
-  cases, focused CTest passed `5/5`, `git diff --check HEAD~1..HEAD`,
-  `git diff --check`, skill-sync report, and version-bump report.
+  cases, focused CTest passed for the fast-exit case,
+  `git diff --check HEAD~1..HEAD`, `git diff --check`, skill-sync
+  report, and version-bump report after rebasing onto `87ef6d90`.
 - `#645` signal filter-design worktree
   `/Users/danielraffel/Code/pulp-signal-biquad-coverage-645`, branch
   `feature/signal-biquad-coverage-645`, commit `740bdc9c`; open as PR
@@ -641,7 +662,9 @@ Open supporting PR:
   merged, and `#832` was repaired for Windows cmd portability, and
   `#831` was repaired for Windows float tolerance, and `#822` merged,
   and `#833` opened, and `#829` was rebased onto `87ef6d90` to pick up
-  the merged Android SDK discovery fix, and remains docs-only.
+  the merged Android SDK discovery fix, and `#832` was rebased/repaired
+  for the Windows fast-exit command, and `#834` opened, and remains
+  docs-only.
 
 Local environment note:
 
@@ -678,10 +701,13 @@ Next recovery actions:
 7. Monitor `#833` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-signal-biquad-coverage-645`, patch,
    validate locally, and push with lease.
-8. If any open Phase 3 PR is green but GitHub reports it behind `main`,
+8. Monitor `#834` cloud checks; if a required lane fails, debug in
+   `/Users/danielraffel/Code/pulp-events-loop-coverage-642`, patch,
+   validate locally, and push with lease.
+9. If any open Phase 3 PR is green but GitHub reports it behind `main`,
    rebase that branch onto `origin/main`, push with lease, and let
    checks rerun.
-9. Continue Phase 3 from the tranche issues below, prioritizing
+10. Continue Phase 3 from the tranche issues below, prioritizing
    represented high-miss files over adding new perimeter lanes.
 
 ## Phase 1 corrected baseline
