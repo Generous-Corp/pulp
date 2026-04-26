@@ -7,6 +7,8 @@
 #include <pulp/platform/environment.hpp>
 
 #include <atomic>
+#include <memory>
+#include <utility>
 
 using namespace pulp::platform;
 
@@ -37,6 +39,19 @@ TEST_CASE("Environment: singleton state defaults are sentinel-safe", "[environme
     REQUIRE(s.memory_pressure == MemoryPressure::normal);
     REQUIRE(s.safe_area.is_zero());
     REQUIRE(s.keyboard.bottom == 0.0f);
+}
+
+TEST_CASE("Environment: empty listener subscription is inert",
+          "[environment][issue-640]") {
+    Environment::reset_for_test();
+
+    auto token = Environment::instance().subscribe({});
+    REQUIRE_FALSE(token.valid());
+    token.reset();
+
+    Environment::inject_for_test(make_state(ColorScheme::dark));
+    auto s = Environment::instance().snapshot();
+    REQUIRE(s.color_scheme == ColorScheme::dark);
 }
 
 TEST_CASE("Environment: subscribe receives publish + correct change mask",
@@ -99,6 +114,31 @@ TEST_CASE("Environment: token move transfers ownership", "[environment]") {
     REQUIRE(calls == 1);
 }
 
+TEST_CASE("Environment: token move assignment replaces prior subscription",
+          "[environment][issue-640]") {
+    Environment::reset_for_test();
+    int first_calls = 0;
+    int second_calls = 0;
+
+    auto token = Environment::instance().subscribe(
+        [&](const EnvironmentState&, EnvironmentChange) { ++first_calls; });
+    auto replacement = Environment::instance().subscribe(
+        [&](const EnvironmentState&, EnvironmentChange) { ++second_calls; });
+
+    token = std::move(replacement);
+    REQUIRE(token.valid());
+    REQUIRE_FALSE(replacement.valid());
+
+    Environment::inject_for_test(make_state(ColorScheme::dark));
+    REQUIRE(first_calls == 0);
+    REQUIRE(second_calls == 1);
+
+    token.reset();
+    Environment::inject_for_test(make_state(ColorScheme::light));
+    REQUIRE(first_calls == 0);
+    REQUIRE(second_calls == 1);
+}
+
 TEST_CASE("Environment: keyboard inset change propagates separately",
           "[environment]") {
     Environment::reset_for_test();
@@ -111,6 +151,31 @@ TEST_CASE("Environment: keyboard inset change propagates separately",
     REQUIRE(last.keyboard);
     REQUIRE_FALSE(last.color_scheme);
     REQUIRE_FALSE(last.display);
+}
+
+TEST_CASE("Environment: keyboard animation duration diffs separately",
+          "[environment][issue-640]") {
+    Environment::reset_for_test();
+    EnvironmentChange last;
+    EnvironmentState last_state;
+    auto token = Environment::instance().subscribe(
+        [&](const EnvironmentState& s, EnvironmentChange c) {
+            last = c;
+            last_state = s;
+        });
+
+    auto base = make_state(ColorScheme::dark, 2.0f, 128.0f);
+    base.keyboard.animation_duration = 0.1f;
+    Environment::inject_for_test(base);
+
+    auto animated = base;
+    animated.keyboard.animation_duration = 0.25f;
+    Environment::inject_for_test(animated);
+    REQUIRE(last.keyboard);
+    REQUIRE_FALSE(last.display);
+    REQUIRE_FALSE(last.color_scheme);
+    REQUIRE(last_state.keyboard.bottom == 128.0f);
+    REQUIRE(last_state.keyboard.animation_duration == 0.25f);
 }
 
 TEST_CASE("Environment: safe-area diff detection across all four edges",
@@ -134,6 +199,83 @@ TEST_CASE("Environment: safe-area diff detection across all four edges",
     Environment::inject_for_test(bottom);
     REQUIRE(last.safe_area);
     REQUIRE_FALSE(last.color_scheme);
+
+    auto left = bottom;
+    left.safe_area.left = 12.0f;
+    Environment::inject_for_test(left);
+    REQUIRE(last.safe_area);
+    REQUIRE_FALSE(last.display);
+
+    auto right = left;
+    right.safe_area.right = 18.0f;
+    Environment::inject_for_test(right);
+    REQUIRE(last.safe_area);
+    REQUIRE_FALSE(last.keyboard);
+}
+
+TEST_CASE("Environment: display metadata changes are display-only",
+          "[environment][issue-640]") {
+    Environment::reset_for_test();
+    EnvironmentChange last;
+    EnvironmentState last_state;
+    auto token = Environment::instance().subscribe(
+        [&](const EnvironmentState& s, EnvironmentChange c) {
+            last = c;
+            last_state = s;
+        });
+
+    auto base = make_state(ColorScheme::dark);
+    Environment::inject_for_test(base);
+
+    auto next = base;
+    next.display.physical_width = 3024;
+    next.display.physical_height = 1964;
+    next.display.refresh_hz = 120.0f;
+    next.display.name = "Built-in Display";
+    Environment::inject_for_test(next);
+
+    REQUIRE(last.display);
+    REQUIRE_FALSE(last.safe_area);
+    REQUIRE_FALSE(last.keyboard);
+    REQUIRE_FALSE(last.orientation);
+    REQUIRE_FALSE(last.color_scheme);
+    REQUIRE_FALSE(last.lifecycle);
+    REQUIRE_FALSE(last.memory_pressure);
+    REQUIRE(last_state.display.physical_width == 3024);
+    REQUIRE(last_state.display.physical_height == 1964);
+    REQUIRE(last_state.display.refresh_hz == 120.0f);
+    REQUIRE(last_state.display.name == "Built-in Display");
+}
+
+TEST_CASE("Environment: orientation and lifecycle emit isolated diffs",
+          "[environment][issue-640]") {
+    Environment::reset_for_test();
+    EnvironmentChange last;
+    EnvironmentState last_state;
+    auto token = Environment::instance().subscribe(
+        [&](const EnvironmentState& s, EnvironmentChange c) {
+            last = c;
+            last_state = s;
+        });
+
+    auto base = make_state(ColorScheme::dark);
+    Environment::inject_for_test(base);
+
+    auto rotated = base;
+    rotated.orientation = Orientation::landscape_right;
+    Environment::inject_for_test(rotated);
+    REQUIRE(last.orientation);
+    REQUIRE_FALSE(last.display);
+    REQUIRE_FALSE(last.lifecycle);
+    REQUIRE(last_state.orientation == Orientation::landscape_right);
+
+    auto inactive = rotated;
+    inactive.lifecycle = LifecycleState::inactive;
+    Environment::inject_for_test(inactive);
+    REQUIRE(last.lifecycle);
+    REQUIRE_FALSE(last.display);
+    REQUIRE_FALSE(last.orientation);
+    REQUIRE(last_state.lifecycle == LifecycleState::inactive);
 }
 
 TEST_CASE("Environment: memory pressure transitions", "[environment]") {
