@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-25 20:43 EDT
+Last reviewed: 2026-04-25 21:08 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -94,6 +94,13 @@ Latest complete Codecov `main` report observed while updating this doc:
   - `ship`: `57.66%`
   - `tools`: `40.17%`
 
+Newer `main` state:
+
+- `#788` merged after the latest complete Codecov report above. The new
+  `main` head is `23d3ed1d9dca9b39e3e7f3a851698eb93c717ae6`.
+- Main Coverage run `24944888062` is in progress for `23d3ed1d`; refresh
+  this baseline from Codecov after it completes.
+
 Merged after the Phase 1 closeout / `#723` baseline:
 
 - `#649` CLI/tools tranche 1 -> `8449b6e8`
@@ -111,76 +118,38 @@ Merged after the Phase 1 closeout / `#723` baseline:
 - `#782` VST3 adapter process-path coverage -> `648c2d27`
 - `#786` render DirtyTracker / RenderLoop edge coverage -> `26dd396d`
 - `#789` Android ship/package helper coverage -> `e61dce8d`
+- `#788` events socket-IPC coverage -> `23d3ed1d`
 
 Open Phase 3 PRs:
 
-- `#788` events socket-IPC coverage, branch
-  `feature/events-ipc-coverage-642`, head `931627b0`. This tranche
-  extends `test/test_ipc.cpp` with malformed socket endpoint rejection,
-  non-throwing socket endpoint parsing in
-  `core/events/src/interprocess_connection.cpp`, and a deterministic
-  localhost client/server framed-message exchange. It also hardens
-  `pulp::runtime::Socket::close()` to call TCP `shutdown()` before closing,
-  so Linux threads blocked in `accept()` / `recv()` wake during cleanup.
-  After `9e73a084`, Linux coverage remained in `Run coverage suite` for
-  roughly an hour while every other required lane was green. The current
-  `931627b0` head adds a more direct server cleanup fix:
-  `InterprocessConnectionServer::stop()` self-connects to the listening
-  socket before closing it, so a thread blocked in `accept()` wakes without
-  relying on cross-thread `close()` / `shutdown()` behavior. The new
-  regression test covers stopping a socket server while no client is
-  connected.
-  After `#771` merged, this
-  branch was rebased onto `origin/main` and duplicate shared CLI support
-  commits were skipped, leaving only the events tranche. After `#789` merged,
-  the branch was rebased again onto `origin/main` at
-  `e61dce8d907c29888fd7dd97ae7f49e3bc219662`. Local validation is
-  green: `pulp-test-ipc` (`34` assertions / `9` test
-  cases), focused CTest `IPC` (`9/9`), and
-  whitespace. A direct multi-filter Catch2 invocation was intentionally not
-  used as validation because Catch2 treats multiple quoted filters as an AND
-  expression; CTest was used for the focused multi-test slice. PR is labeled
-  `codecov`. The earlier Linux Namespace and Linux coverage failures did not
-  expose usable logs through `gh`. A rerun of Build/Test `24929736674` and
-  Coverage `24929736678` then sat in progress for roughly 90 minutes with no
-  logs and no timestamp movement, so both stuck runs were canceled. The branch
-  was then rebased after `#789`. The `2ac5b09e` run got through all other
-  required lanes but Linux Build/Test and Linux Coverage remained in their
-  long test/coverage steps, matching a likely blocking-`accept()` cleanup hang.
-  The targeted `9e73a084` fix was pushed after local IPC validation stayed
-  green. That head got Build/Test green on Linux, macOS, and Windows;
-  sanitizer lanes green or skipped as expected; Android build, IWYU,
-  macOS coverage, and Windows coverage green; but Linux coverage stayed
-  in `Run coverage suite` with no logs. The current `931627b0` head has
-  local IPC validation green: `pulp-test-ipc` (`37` assertions / `10`
-  test cases), focused CTest `IPC` (`10/10`), `git diff --check`, and
-  `version_bump_check.py --mode=report` (patch suggestion only). Fresh
-  GitHub checks are now running on that head.
+- None at this checkpoint. The next planned Phase 3 PR is the local
+  `#643` package-registry CLI/tools draft below.
 
 Local Phase 3 draft not yet opened as a PR:
 - `#643` package-registry CLI/tools draft, worktree
   `/Users/danielraffel/Code/pulp-package-registry-coverage-643`, branch
-  `feature/package-registry-coverage-643`, local commit `16bbe5bb`. This draft is local-only and
-  should not be opened until `#788` resolves. Current scope adds
+  `feature/package-registry-coverage-643`, local commit `75a529ef`.
+  This draft was rebased onto `origin/main` at
+  `23d3ed1d9dca9b39e3e7f3a851698eb93c717ae6` after `#788` merged.
+  Current scope adds
   `pulp-test-cli-package-registry` for pure local registry parsing,
   lock-file round trips, target TOML parsing/writing, semver, quality
   scoring, unsupported-target detection, and search ranking. Local validation
-  is green after rebasing onto `origin/main` at
-  `e61dce8d907c29888fd7dd97ae7f49e3bc219662`, in a no-GPU/no-examples build
-  directory using the completed local `mbedtls` source tree: configure
+  is green after the latest rebase: configure
   `cmake -S . -B build-package-registry-localdeps -DCMAKE_BUILD_TYPE=Debug
   -DPULP_ENABLE_GPU=OFF -DPULP_BUILD_EXAMPLES=OFF
   -DFETCHCONTENT_SOURCE_DIR_MBEDTLS=$PWD/build/_deps/mbedtls-src`, build
   `cmake --build build-package-registry-localdeps --target
   pulp-test-cli-package-registry -j4`, direct binary (`88` assertions / `5`
-  test cases), focused CTest (`5/5`), and whitespace.
+  test cases), focused CTest (`5/5`), whitespace, and
+  `version_bump_check.py --mode=report`.
 
 Open supporting PR:
 
 - `#774` refreshes this durable handoff/status document, branch
   `docs/coverage-status-2026-04-25`. The branch is updated as this
   tracker changes; use the PR head SHA in GitHub as the live value.
-  The branch has been rebased onto `origin/main` after `#789` merged and
+  The branch has been rebased onto `origin/main` after `#788` merged and
   remains docs-only.
 
 Local environment note:
@@ -193,18 +162,14 @@ Local environment note:
 
 Next recovery actions:
 
-1. Poll `#788`; merge manually when green because auto-merge is disabled.
-2. Let `#788`'s fresh checks on `931627b0` drain.
-3. Keep `#774` docs-only and let its post-`#789` rebase checks drain.
-4. After `#788` merges, refresh this section with the next
-   complete Codecov `main` report.
-5. If `#788` Linux Namespace or Linux coverage fails again, pull the fresh log
-   first; the current branch already has local IPC validation green.
-6. If a PR is green but GitHub reports it behind `main`, rebase that
+1. Let main Coverage run `24944888062` for `23d3ed1d` drain, then refresh
+   this section with the next complete Codecov `main` report.
+2. Keep `#774` docs-only and let its post-`#788` rebase checks drain.
+3. Push/open the rebased and locally validated `#643` draft (`75a529ef`)
+   as the next CLI/tools tranche PR.
+4. If a new PR is green but GitHub reports it behind `main`, rebase that
    branch onto `origin/main`, push with lease, and let checks rerun.
-7. After `#788` resolves, push/open the local `#643` draft
-   (`16bbe5bb`) as the next CLI/tools tranche PR.
-8. Continue Phase 3 from the tranche issues below, prioritizing
+5. Continue Phase 3 from the tranche issues below, prioritizing
    represented high-miss files over adding new perimeter lanes.
 
 ## Phase 1 corrected baseline
