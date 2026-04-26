@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-26 14:51 EDT
+Last reviewed: 2026-04-26 15:13 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -96,6 +96,11 @@ Latest complete Codecov `main` report observed while updating this doc:
   - `ship`: `54.46%`
   - `tools`: `44.33%`
 
+Newer `main` coverage is running for `#813`'s merge commit
+`957a073523e3aabcd7b11972acaf98065909bf67` as Coverage run
+`24964746369`; keep the `810743d4` numbers above as the latest complete
+baseline until that run finishes.
+
 Post-`#794` file-level proof point: `core/audio/src/aiff_reader.cpp`
 is now `72.01%` covered with `61` misses, up from `64.22%` with `78`
 misses at the prior `e2af9c4d` baseline.
@@ -137,12 +142,13 @@ Merged after the Phase 1 closeout / `#723` baseline:
 - `#809` signal FFT/convolver helper coverage -> `453bcec8`
 - `#810` platform Environment diff-edge coverage -> `f712702a`
 - `#811` CLI project-command dispatch coverage -> `810743d4`
+- `#813` signal dynamics helper coverage -> `957a0735`
 
 Open Phase 3 PRs:
 
-- `#813` signal dynamics helper coverage for `#645`, branch
-  `feature/signal-dynamics-coverage-645`, head `fb0505f7`; opened after
-  rebasing onto `main` at `810743d4`. Cloud checks are the active gate.
+- `#814` CLI `pulp pr` shellout coverage for `#643`, branch
+  `feature/cli-pr-coverage-643`, head `22ba6162`; opened after rebasing
+  onto `main` at `957a0735`. Cloud checks are the active gate.
 
 Local Phase 3 draft worktrees:
 
@@ -240,8 +246,9 @@ Local Phase 3 draft worktrees:
   report, and version-bump report.
 - `#645` signal dynamics helper worktree
   `/Users/danielraffel/Code/pulp-signal-dynamics-coverage-645`, branch
-  `feature/signal-dynamics-coverage-645`, commit `fb0505f7`; open as PR
-  `#813`. Scope: test-only coverage for `DryWetMixer` mix
+  `feature/signal-dynamics-coverage-645`, commit `fb0505f7`; merged via
+  PR `#813` as `957a0735`. The remote branch was deleted after merge.
+  Scope: test-only coverage for `DryWetMixer` mix
   clamping/equal-power/latency/reset paths, `Compressor`
   hard-knee/soft-knee/buffer/reset paths, `Limiter` buffer/reset paths,
   `WindowFunction` hamming/flat-top/kaiser branches, and
@@ -253,14 +260,24 @@ Local Phase 3 draft worktrees:
   assertions in `20` cases, full signal binary passed `885` assertions
   in `67` cases, focused CTest passed `23/23`, `git diff --check`,
   skill-sync report, and version-bump report.
+- `#643` CLI `pulp pr` shellout worktree
+  `/Users/danielraffel/Code/pulp-cli-pr-coverage-643`, branch
+  `feature/cli-pr-coverage-643`, commit `22ba6162`; open as PR `#814`.
+  Scope: shellout coverage for missing-Shipyard install guidance,
+  native fallback help, outside-project refusal, and POSIX delegation to
+  a fake `shipyard pr` executable without invoking real Shipyard. Local
+  validation: no-GPU/no-examples configure, `pulp-test-cli-shellout`
+  build, direct `[cli][shellout][pr][issue-643]` passed `18` assertions
+  in `4` cases, focused CTest `pulp pr` passed `7/7`,
+  `git diff --check`, skill-sync report, and version-bump report.
 
 Open supporting PR:
 
 - `#774` refreshes this durable handoff/status document, branch
   `docs/coverage-status-2026-04-25`. The branch is updated as this
   tracker changes; use the PR head SHA in GitHub as the live value.
-  The branch has been rebased onto `origin/main` after `#811` merged,
-  updated after `#813` opened, and remains docs-only.
+  The branch has been rebased onto `origin/main` after `#813` merged,
+  updated after `#814` opened, and remains docs-only.
 
 Local environment note:
 
@@ -273,10 +290,10 @@ Local environment note:
 Next recovery actions:
 
 1. Keep `#774` docs-only and let its latest status-update checks drain.
-2. Let the `main` Coverage run for `810743d4` complete, then refresh the
+2. Let the `main` Coverage run for `957a0735` complete, then refresh the
    Codecov baseline if it changes the execution order materially.
-3. Monitor `#813` cloud checks; if a required lane fails, debug in
-   `/Users/danielraffel/Code/pulp-signal-dynamics-coverage-645`, patch,
+3. Monitor `#814` cloud checks; if a required lane fails, debug in
+   `/Users/danielraffel/Code/pulp-cli-pr-coverage-643`, patch,
    validate locally, and push with lease.
 4. If any open Phase 3 PR is green but GitHub reports it behind `main`,
    rebase that branch onto `origin/main`, push with lease, and let
