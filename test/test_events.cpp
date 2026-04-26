@@ -108,6 +108,48 @@ TEST_CASE("EventLoop is non-singleton", "[events][event_loop]") {
     REQUIRE(wait_until([&] { return v1.load() == 1 && v2.load() == 2; }, 2000ms));
 }
 
+TEST_CASE("EventLoop reports thread identity and stop state",
+          "[events][event_loop][issue-642]") {
+    EventLoop loop;
+
+    REQUIRE(loop.running());
+    REQUIRE_FALSE(loop.is_current_thread());
+
+    std::atomic<bool> ran_on_loop{false};
+    loop.dispatch([&] { ran_on_loop.store(loop.is_current_thread()); });
+    REQUIRE(wait_until([&] { return ran_on_loop.load(); }, 2000ms));
+
+    loop.stop();
+    REQUIRE_FALSE(loop.running());
+    loop.stop();
+    REQUIRE_FALSE(loop.running());
+}
+
+TEST_CASE("EventLoop stop drops future delayed work",
+          "[events][event_loop][issue-642]") {
+    std::atomic<int> calls{0};
+    {
+        EventLoop loop;
+        loop.dispatch_after(250ms, [&] { calls.fetch_add(1); });
+        loop.stop();
+    }
+
+    std::this_thread::sleep_for(300ms);
+    REQUIRE(calls.load() == 0);
+}
+
+TEST_CASE("EventLoop dispatch_after handles multiple ready tasks",
+          "[events][event_loop][issue-642]") {
+    EventLoop loop;
+    std::atomic<int> calls{0};
+
+    loop.dispatch_after(1ms, [&] { calls.fetch_add(1); });
+    loop.dispatch_after(5ms, [&] { calls.fetch_add(1); });
+    loop.dispatch_after(10ms, [&] { calls.fetch_add(1); });
+
+    REQUIRE(wait_until([&] { return calls.load() == 3; }, 2000ms));
+}
+
 TEST_CASE("Timer basic operation", "[events][timer]") {
     EventLoop loop;
 
@@ -175,6 +217,28 @@ TEST_CASE("Timer basic operation", "[events][timer]") {
         // Still stopped after the double-start + single-stop pair:
         REQUIRE(count.load() == captured);
     }
+}
+
+TEST_CASE("Timer exposes interval and idempotent stop state",
+          "[events][timer][issue-642]") {
+    EventLoop loop;
+    std::atomic<int> count{0};
+    Timer timer(loop, 40ms, [&] { count.fetch_add(1); }, true);
+
+    REQUIRE_FALSE(timer.is_active());
+    REQUIRE(timer.interval() == 40ms);
+
+    timer.set_interval(10ms);
+    REQUIRE(timer.interval() == 10ms);
+
+    timer.start();
+    REQUIRE(timer.is_active());
+    REQUIRE(wait_until([&] { return count.load() >= 1; }, 500ms));
+
+    timer.stop();
+    REQUIRE_FALSE(timer.is_active());
+    timer.stop();
+    REQUIRE_FALSE(timer.is_active());
 }
 
 // #687 — stop()/start() pairs repeatedly on the owner thread while the
