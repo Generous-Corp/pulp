@@ -300,6 +300,67 @@ TEST_CASE("Biquad coefficient variants process finite impulse buffers", "[signal
     }
 }
 
+// ── Oversampler ──────────────────────────────────────────────────────────────
+
+TEST_CASE("Oversampler dispatches x2 and x4 callback phases",
+          "[signal][oversampling][issue-645]") {
+    Oversampler os;
+    std::vector<float> callback_inputs;
+
+    float x2 = os.process(0.25f, [&](float sample) {
+        callback_inputs.push_back(sample);
+        return sample + 1.0f;
+    });
+
+    REQUIRE(callback_inputs.size() == 2);
+    REQUIRE_THAT(callback_inputs[0], WithinAbs(0.5f, 1e-5));
+    REQUIRE_THAT(callback_inputs[1], WithinAbs(0.0f, 1e-5));
+    REQUIRE_THAT(x2, WithinAbs(1.5f, 1e-5));
+
+    os.set_factor(Oversampler::Factor::x4);
+    callback_inputs.clear();
+
+    float x4 = os.process(0.25f, [&](float sample) {
+        callback_inputs.push_back(sample);
+        return sample * 2.0f;
+    });
+
+    REQUIRE(callback_inputs.size() == 4);
+    REQUIRE_THAT(callback_inputs[0], WithinAbs(1.0f, 1e-5));
+    REQUIRE_THAT(callback_inputs[1], WithinAbs(0.0f, 1e-5));
+    REQUIRE_THAT(callback_inputs[2], WithinAbs(0.0f, 1e-5));
+    REQUIRE_THAT(callback_inputs[3], WithinAbs(0.0f, 1e-5));
+    REQUIRE_THAT(x4, WithinAbs(2.0f, 1e-5));
+}
+
+TEST_CASE("Oversampler configured filters reset deterministically",
+          "[signal][oversampling][issue-645]") {
+    Oversampler os;
+    os.set_factor(Oversampler::Factor::x4);
+    os.set_sample_rate(48000.0f);
+
+    int callback_count = 0;
+    auto passthrough = [&](float sample) {
+        ++callback_count;
+        return sample;
+    };
+
+    float first = os.process(1.0f, passthrough);
+    float tail = os.process(0.0f, passthrough);
+
+    REQUIRE(callback_count == 8);
+    REQUIRE(std::isfinite(first));
+    REQUIRE(std::isfinite(tail));
+    REQUIRE(first > 0.0f);
+
+    os.reset();
+    callback_count = 0;
+    float after_reset = os.process(1.0f, passthrough);
+
+    REQUIRE(callback_count == 4);
+    REQUIRE_THAT(after_reset, WithinAbs(first, 1e-6));
+}
+
 // ── Oscillator ───────────────────────────────────────────────────────────────
 
 TEST_CASE("Oscillator sine generates correct frequency", "[signal][osc]") {
