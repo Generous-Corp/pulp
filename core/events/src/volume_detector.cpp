@@ -7,8 +7,14 @@
 namespace pulp::events {
 
 #ifdef _WIN32
-#define PULP_VOLUME_PROBE_TRY try {
-#define PULP_VOLUME_PROBE_CATCH } catch (const std::filesystem::filesystem_error&) {}
+#define PULP_VOLUME_EXISTS(path) \
+    ([&]() { \
+        try { \
+            return std::filesystem::exists(path); \
+        } catch (const std::filesystem::filesystem_error&) { \
+            return false; \
+        } \
+    }())
 #endif
 
 // ── MountedVolumeListChangeDetector ─────────────────────────────────────
@@ -66,10 +72,8 @@ std::vector<std::string> MountedVolumeListChangeDetector::get_mounted_volumes() 
     // Windows: drive letters
     for (char c = 'A'; c <= 'Z'; ++c) {
         std::string drive = std::string(1, c) + ":\\";
-        PULP_VOLUME_PROBE_TRY
-        if (std::filesystem::exists(drive))
+        if (PULP_VOLUME_EXISTS(drive))
             volumes.push_back(drive);
-        PULP_VOLUME_PROBE_CATCH
     }
 #endif
 
@@ -78,8 +82,7 @@ std::vector<std::string> MountedVolumeListChangeDetector::get_mounted_volumes() 
 }
 
 #ifdef _WIN32
-#undef PULP_VOLUME_PROBE_TRY
-#undef PULP_VOLUME_PROBE_CATCH
+#undef PULP_VOLUME_EXISTS
 #endif
 
 // ── NetworkServiceDiscovery ─────────────────────────────────────────────
