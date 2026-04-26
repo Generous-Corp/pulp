@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-26 18:03 EDT
+Last reviewed: 2026-04-26 18:17 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -153,12 +153,14 @@ Merged after the Phase 1 closeout / `#723` baseline:
 Open Phase 3 PRs:
 
 - `#822` audio file helper edge coverage for `#640`, branch
-  `feature/audio-file-helper-coverage-640`, head `8aa7a78d`; opened
+  `feature/audio-file-helper-coverage-640`, head `2db6be4a`; opened
   from `main` at `c9620a65` and updated after the first macOS UBSan run
   exposed a real `float_to_int32` endpoint conversion overflow. This
-  tranche also uses the
-  GitHub/Namespace path while the SSH `windows` target remains
-  unreachable.
+  branch was updated again after macOS Namespace full-suite test `392`
+  exposed Android SDK discovery choosing an older fake NDK revision; the
+  branch now compares Android build-tools and NDK revisions numerically.
+  This tranche also uses the GitHub/Namespace path while the SSH
+  `windows` target remains unreachable.
 - `#823` platform helper edge coverage for `#640`, branch
   `feature/platform-helper-coverage-640`, head `6ec4ff2e`; opened from
   `main` at `3d4560d1`. This tranche also uses the GitHub/Namespace path
@@ -416,7 +418,7 @@ Local Phase 3 draft worktrees:
   and version-bump report.
 - `#640` audio file helper worktree
   `/Users/danielraffel/Code/pulp-audio-file-helper-coverage-640`,
-  branch `feature/audio-file-helper-coverage-640`, commit `8aa7a78d`;
+  branch `feature/audio-file-helper-coverage-640`, head `2db6be4a`;
   open as PR `#822`.
   Scope: coverage for packed int24 conversion, int32 full-scale
   conversion, float-to-int32 clamping, zero-count conversion no-ops, CHOC
@@ -425,16 +427,22 @@ Local Phase 3 draft worktrees:
   `AudioProcessLoadMeasurer` smoothing/zero-available-time guards.
   Follow-up `8aa7a78d` fixes a production `float_to_int32` UBSan issue
   by handling `+/-1` endpoints explicitly and using double precision for
-  the midrange cast. Local validation: no-GPU/no-examples configure,
+  the midrange cast. Follow-up `fc7a1364` fixes a macOS Namespace
+  full-suite blocker by comparing Android build-tools and NDK revisions
+  numerically, with `2db6be4a` carrying the required skill/version
+  metadata trailers. Local validation: no-GPU/no-examples configure,
   `pulp-test-audio-file`, `pulp-test-audio`, and
-  `pulp-test-load-measurer` build, direct `[issue-640]` audio-file run
-  passed `217` assertions in `11` cases, full audio-file binary passed
-  `450` assertions in `26` cases, full audio binary passed `586`
-  assertions in `8` cases, full load-measurer binary passed `20`
-  assertions in `6` cases, focused CTest passed `11/11`, local UBSan
-  focused CTest for `sample conversion handles packed 24-bit and 32-bit
-  edges` passed, `git diff --check`, skill-sync report, and version-bump
-  report.
+  `pulp-test-load-measurer` build, later `pulp-test-android-package`
+  build, direct `[issue-640]` audio-file run passed `217` assertions in
+  `11` cases, full audio-file binary passed `450` assertions in `26`
+  cases, full audio binary passed `586` assertions in `8` cases, full
+  load-measurer binary passed `20` assertions in `6` cases, full Android
+  package binary passed `69` assertions in `8` cases, focused CTest
+  passed `11/11` before the Android fix and `9/9` for the Android/load
+  measurer rerun after the fix, local UBSan focused CTest for `sample
+  conversion handles packed 24-bit and 32-bit edges` passed,
+  skill-sync report passed with the `ship` bypass trailer, and
+  version-bump report classified the SDK change as `patch`.
 - `#640` platform helper worktree
   `/Users/danielraffel/Code/pulp-platform-helper-coverage-640`, branch
   `feature/platform-helper-coverage-640`, commit `6ec4ff2e`; open as PR
@@ -510,8 +518,8 @@ Open supporting PR:
   updated after `#816` merged, `#817` was repaired, `#820` opened,
   `#821` opened, `#822` opened, `#818` merged, `#823` opened, `#817`
   merged, `#822` was repaired, `#824` opened, `#821` merged, and `#819`
-  merged, `#825` opened, `#820` merged, and `#826` opened, and remains
-  docs-only.
+  merged, `#825` opened, `#820` merged, `#826` opened, and `#822` was
+  repaired again for Android SDK discovery, and remains docs-only.
 
 Local environment note:
 
