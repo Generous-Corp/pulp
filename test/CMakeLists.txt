@@ -214,6 +214,22 @@ target_link_libraries(pulp-test-cli-package-registry PRIVATE
     Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-cli-package-registry)
 
+# CLI tool registry (#643): local-only coverage for registry parsing,
+# managed binary / Python wrapper discovery, deterministic install exits,
+# uninstall, and command dispatch branches. Avoids downloads, archive
+# extraction, Python package installs, and executing registry tools.
+add_executable(pulp-test-cli-tool-registry
+    test_cli_tool_registry.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/tool_registry.cpp
+)
+target_include_directories(pulp-test-cli-tool-registry PRIVATE
+    ${CMAKE_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/tools/cli)
+target_link_libraries(pulp-test-cli-tool-registry PRIVATE
+    pulp::platform
+    Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-cli-tool-registry)
+
 # CLI project bump (#499 Slice 7 / #564): pure-logic tests for the
 # CMakeLists pin parser, rewriter, refuse-dynamic-pin gate, semver /
 # downgrade guard, and the undo-batch JSON round-trip. project_bump.cpp
