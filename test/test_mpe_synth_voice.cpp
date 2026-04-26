@@ -19,6 +19,7 @@ struct TestVoice : public MpeSynthVoice {
     void on_note_off() override {
         MpeSynthVoice::on_note_off(); ++off_count;
     }
+    void finish_now() { finish_release(); }
     void render(float* out, int num_samples) override {
         ++render_count;
         for (int i = 0; i < num_samples; ++i) {
@@ -32,8 +33,8 @@ MpeExpressionEvent note_on_event(uint8_t ch, uint8_t note, uint8_t vel, uint32_t
     MpeNoteState s; s.active = true; s.channel = ch; s.note = note; s.velocity = vel; s.note_id = id;
     return {0, Kind::NoteOn, s};
 }
-MpeExpressionEvent note_off_event(uint32_t id) {
-    MpeNoteState s; s.active = false; s.note_id = id;
+MpeExpressionEvent note_off_event(uint32_t id, uint8_t ch = 0) {
+    MpeNoteState s; s.active = false; s.channel = ch; s.note_id = id;
     return {0, Kind::NoteOff, s};
 }
 MpeExpressionEvent pitch_bend_event(uint32_t id, float semi) {
@@ -43,6 +44,18 @@ MpeExpressionEvent pitch_bend_event(uint32_t id, float semi) {
 MpeExpressionEvent pressure_event(uint32_t id, float p) {
     MpeNoteState s; s.active = true; s.note_id = id; s.pressure = p;
     return {0, Kind::Pressure, s};
+}
+MpeExpressionEvent timbre_event(uint32_t id, float t) {
+    MpeNoteState s; s.active = true; s.note_id = id; s.timbre = t;
+    return {0, Kind::Timbre, s};
+}
+
+template<typename Alloc>
+bool has_note_id(const Alloc& alloc, uint32_t note_id) {
+    for (std::size_t i = 0; i < alloc.polyphony(); ++i) {
+        if (alloc.voice(i).active() && alloc.voice(i).note_id() == note_id) return true;
+    }
+    return false;
 }
 
 } // namespace
@@ -58,6 +71,58 @@ TEST_CASE("MpeSynthVoice smoothing ramps pressure toward target", "[midi][mpe]")
     REQUIRE(v.pressure() == Approx(1.0f).margin(0.05f));
 }
 
+TEST_CASE("MpeSynthVoice clamps smoothing and resets expression state",
+          "[midi][mpe][issue-645]") {
+    TestVoice v;
+    MpeNoteState s;
+    s.note_id = 42;
+    s.channel = 4;
+    s.note = 62;
+    s.velocity = 111;
+    s.pitch_bend_semitones = 3.0f;
+    s.pressure = 0.25f;
+    s.timbre = 0.5f;
+    v.on_note_on(s);
+
+    REQUIRE(v.active());
+    REQUIRE_FALSE(v.releasing());
+    REQUIRE(v.channel() == 4);
+    REQUIRE(v.note_number() == 62);
+    REQUIRE(v.velocity() == 111);
+
+    v.set_smoothing(-1.0f);
+    v.set_pitch_bend(-2.0f);
+    v.set_pressure(0.75f);
+    v.set_timbre(0.25f);
+    v.advance_smoothers();
+    REQUIRE(v.pitch_bend() == Approx(-2.0f));
+    REQUIRE(v.pressure() == Approx(0.75f));
+    REQUIRE(v.timbre() == Approx(0.25f));
+
+    v.set_smoothing(2.0f);
+    v.set_pressure(1.0f);
+    v.advance_smoothers();
+    REQUIRE(v.pressure() > 0.75f);
+    REQUIRE(v.pressure() < 0.751f);
+
+    v.on_note_off();
+    REQUIRE(v.releasing());
+    v.finish_now();
+    REQUIRE_FALSE(v.active());
+    REQUIRE_FALSE(v.releasing());
+
+    v.reset();
+    REQUIRE_FALSE(v.active());
+    REQUIRE_FALSE(v.releasing());
+    REQUIRE(v.note_id() == 0);
+    REQUIRE(v.channel() == 0);
+    REQUIRE(v.note_number() == 0);
+    REQUIRE(v.velocity() == 0);
+    REQUIRE(v.pitch_bend() == Approx(0.0f));
+    REQUIRE(v.pressure() == Approx(0.0f));
+    REQUIRE(v.timbre() == Approx(0.0f));
+}
+
 TEST_CASE("MpeVoiceAllocator routes events to voices by note_id", "[midi][mpe]") {
     MpeVoiceAllocator<TestVoice> alloc{4};
 
@@ -66,6 +131,7 @@ TEST_CASE("MpeVoiceAllocator routes events to voices by note_id", "[midi][mpe]")
 
     alloc.dispatch(pitch_bend_event(7, 2.0f));
     alloc.dispatch(pressure_event(7, 0.75f));
+    alloc.dispatch(timbre_event(7, 0.5f));
 
     bool found = false;
     for (std::size_t i = 0; i < alloc.polyphony(); ++i) {
@@ -76,6 +142,7 @@ TEST_CASE("MpeVoiceAllocator routes events to voices by note_id", "[midi][mpe]")
             v.advance_smoothers();
             REQUIRE(v.note_number() == 60);
             REQUIRE(v.velocity() == 100);
+            REQUIRE(v.timbre() > 0.0f);
             found = true;
         }
     }
@@ -116,6 +183,39 @@ TEST_CASE("MpeVoiceAllocator steals oldest when full", "[midi][mpe]") {
     REQUIRE_FALSE(has_1);
 }
 
+TEST_CASE("MpeVoiceAllocator honors velocity and pitch steal policies",
+          "[midi][mpe][issue-645]") {
+    MpeVoiceAllocator<TestVoice> by_velocity{2};
+    by_velocity.set_steal_mode(MpeVoiceStealMode::LowestVelocity);
+    REQUIRE(by_velocity.steal_mode() == MpeVoiceStealMode::LowestVelocity);
+    by_velocity.dispatch(note_on_event(1, 60, 20, 1));
+    by_velocity.dispatch(note_on_event(2, 64, 100, 2));
+    by_velocity.dispatch(note_on_event(3, 67, 80, 3));
+    REQUIRE_FALSE(has_note_id(by_velocity, 1));
+    REQUIRE(has_note_id(by_velocity, 2));
+    REQUIRE(has_note_id(by_velocity, 3));
+
+    MpeVoiceAllocator<TestVoice> by_low_pitch{2};
+    by_low_pitch.set_steal_mode(MpeVoiceStealMode::LowestPitch);
+    REQUIRE(by_low_pitch.steal_mode() == MpeVoiceStealMode::LowestPitch);
+    by_low_pitch.dispatch(note_on_event(1, 48, 100, 11));
+    by_low_pitch.dispatch(note_on_event(2, 72, 100, 12));
+    by_low_pitch.dispatch(note_on_event(3, 60, 100, 13));
+    REQUIRE_FALSE(has_note_id(by_low_pitch, 11));
+    REQUIRE(has_note_id(by_low_pitch, 12));
+    REQUIRE(has_note_id(by_low_pitch, 13));
+
+    MpeVoiceAllocator<TestVoice> by_high_pitch{2};
+    by_high_pitch.set_steal_mode(MpeVoiceStealMode::HighestPitch);
+    REQUIRE(by_high_pitch.steal_mode() == MpeVoiceStealMode::HighestPitch);
+    by_high_pitch.dispatch(note_on_event(1, 48, 100, 21));
+    by_high_pitch.dispatch(note_on_event(2, 72, 100, 22));
+    by_high_pitch.dispatch(note_on_event(3, 60, 100, 23));
+    REQUIRE(has_note_id(by_high_pitch, 21));
+    REQUIRE_FALSE(has_note_id(by_high_pitch, 22));
+    REQUIRE(has_note_id(by_high_pitch, 23));
+}
+
 TEST_CASE("MpeVoiceAllocator dispatches an entire MpeBuffer in order", "[midi][mpe]") {
     MpeVoiceAllocator<TestVoice> alloc{4};
     MpeBuffer buf;
@@ -124,6 +224,50 @@ TEST_CASE("MpeVoiceAllocator dispatches an entire MpeBuffer in order", "[midi][m
     buf.add(note_on_event(2, 64, 90, 12));
     alloc.dispatch_all(buf);
     REQUIRE(alloc.active_count() == 2);
+}
+
+TEST_CASE("MpeVoiceAllocator ignores unknown expressions and reset_all clears glide",
+          "[midi][mpe][issue-645]") {
+    MpeVoiceAllocator<TestVoice> alloc{2};
+    alloc.dispatch(pitch_bend_event(999, 12.0f));
+    alloc.dispatch(pressure_event(999, 1.0f));
+    alloc.dispatch(timbre_event(999, 1.0f));
+    alloc.dispatch(note_off_event(999, 1));
+    REQUIRE(alloc.active_count() == 0);
+
+    alloc.dispatch(note_on_event(1, 60, 100, 1));
+    alloc.dispatch(note_on_event(1, 62, 100, 2));
+    REQUIRE(alloc.last_was_glide());
+    REQUIRE(alloc.active_count() == 2);
+
+    alloc.reset_all();
+    REQUIRE(alloc.active_count() == 0);
+    REQUIRE_FALSE(alloc.last_was_glide());
+    for (std::size_t i = 0; i < alloc.polyphony(); ++i) {
+        REQUIRE_FALSE(alloc.voice(i).active());
+        REQUIRE_FALSE(alloc.voice(i).releasing());
+    }
+
+    alloc.dispatch(note_on_event(1, 64, 100, 3));
+    REQUIRE_FALSE(alloc.last_was_glide());
+    REQUIRE(alloc.active_count() == 1);
+}
+
+TEST_CASE("MpeVoiceAllocator tolerates zero polyphony",
+          "[midi][mpe][issue-645]") {
+    MpeVoiceAllocator<TestVoice> alloc{0};
+    REQUIRE(alloc.polyphony() == 0);
+    REQUIRE(alloc.active_count() == 0);
+
+    alloc.dispatch(note_on_event(1, 60, 100, 1));
+    alloc.dispatch(pressure_event(1, 0.5f));
+    alloc.dispatch(note_off_event(1, 1));
+    REQUIRE(alloc.active_count() == 0);
+    REQUIRE_FALSE(alloc.last_was_glide());
+
+    alloc.reset_all();
+    REQUIRE(alloc.active_count() == 0);
+    REQUIRE_FALSE(alloc.last_was_glide());
 }
 
 TEST_CASE("MpeGlideDetector flags overlap on same channel", "[midi][mpe]") {
