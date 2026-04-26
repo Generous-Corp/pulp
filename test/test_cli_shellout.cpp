@@ -944,6 +944,89 @@ TEST_CASE("pulp docs build-site resolves mkdocs.yml from project root",
             == std::string::npos);
 }
 
+TEST_CASE("pulp docs covers local reader index, search, open, and show paths",
+          "[cli][shellout][docs][issue-643]") {
+    if (!binary_exists()) {
+        SUCCEED("pulp binary not built for this test run; skipping");
+        return;
+    }
+
+    pulp_setenv("PULP_UPDATE_CHECK_DISABLED", "1", 1);
+
+    SECTION("usage lists the local docs reader subcommands") {
+        auto r = run_pulp({"docs"});
+        REQUIRE(r.exit_code == 0);
+        REQUIRE_FALSE(r.timed_out);
+        REQUIRE(r.stdout_output.find("pulp docs") != std::string::npos);
+        REQUIRE(r.stdout_output.find("show command") != std::string::npos);
+        REQUIRE(r.stdout_output.find("build-site") != std::string::npos);
+    }
+
+    SECTION("index and open resolve docs-index slugs") {
+        auto index = run_pulp({"docs", "index"});
+        REQUIRE(index.exit_code == 0);
+        REQUIRE_FALSE(index.timed_out);
+        REQUIRE(index.stdout_output.find("Available Documentation") != std::string::npos);
+        REQUIRE(index.stdout_output.find("getting-started") != std::string::npos);
+        REQUIRE(index.stdout_output.find("docs/guides/getting-started.md") != std::string::npos);
+
+        auto opened = run_pulp({"docs", "open", "getting-started"});
+        REQUIRE(opened.exit_code == 0);
+        REQUIRE_FALSE(opened.timed_out);
+        REQUIRE(opened.stdout_output.find("Getting Started") != std::string::npos);
+    }
+
+    SECTION("search reports exact doc matches") {
+        auto r = run_pulp({"docs", "search", "WebView"});
+        REQUIRE(r.exit_code == 0);
+        REQUIRE_FALSE(r.timed_out);
+        REQUIRE((r.stdout_output.find("match(es) found") != std::string::npos ||
+                 r.stdout_output.find("docs/") != std::string::npos));
+    }
+
+    SECTION("show reads support, command, cmake, and style manifests") {
+        auto support = run_pulp({"docs", "show", "support", "vst3"});
+        REQUIRE(support.exit_code == 0);
+        REQUIRE_FALSE(support.timed_out);
+        REQUIRE(support.stdout_output.find("Support info") != std::string::npos);
+        REQUIRE(support.stdout_output.find("vst3") != std::string::npos);
+
+        auto command = run_pulp({"docs", "show", "command", "ship"});
+        REQUIRE(command.exit_code == 0);
+        REQUIRE_FALSE(command.timed_out);
+        REQUIRE(command.stdout_output.find("Command: ship") != std::string::npos);
+        REQUIRE(command.stdout_output.find("Subcommands") != std::string::npos);
+        REQUIRE(command.stdout_output.find("package") != std::string::npos);
+
+        auto cmake = run_pulp({"docs", "show", "cmake", "pulp_add_plugin"});
+        REQUIRE(cmake.exit_code == 0);
+        REQUIRE_FALSE(cmake.timed_out);
+        REQUIRE(cmake.stdout_output.find("CMake function: pulp_add_plugin") != std::string::npos);
+
+        auto style = run_pulp({"docs", "show", "style"});
+        REQUIRE(style.exit_code == 0);
+        REQUIRE_FALSE(style.timed_out);
+        REQUIRE(style.stdout_output.find("Style Rules") != std::string::npos);
+        REQUIRE(style.stdout_output.find("public_headers_only") != std::string::npos);
+    }
+
+    SECTION("reader errors include actionable diagnostics") {
+        auto search_usage = run_pulp({"docs", "search"});
+        REQUIRE(search_usage.exit_code != 0);
+        REQUIRE(search_usage.stderr_output.find("Usage: pulp docs search") != std::string::npos);
+
+        auto missing_slug = run_pulp({"docs", "open", "not-a-real-doc"});
+        REQUIRE(missing_slug.exit_code != 0);
+        REQUIRE(missing_slug.stderr_output.find("no doc found") != std::string::npos);
+
+        auto unknown_show = run_pulp({"docs", "show", "widget"});
+        REQUIRE(unknown_show.exit_code != 0);
+        REQUIRE(unknown_show.stderr_output.find("Unknown show topic") != std::string::npos);
+    }
+
+    pulp_unsetenv("PULP_UPDATE_CHECK_DISABLED");
+}
+
 // #682 — PULP_DEBUG=1 must emit timestamped phase markers to stderr so
 // future "pulp hung at 0% CPU" reports pin themselves. Unset by default
 // it must stay silent so scripts that parse stderr aren't affected.
