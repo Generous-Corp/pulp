@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-26 19:34 EDT
+Last reviewed: 2026-04-26 19:39 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -147,6 +147,7 @@ Merged after the Phase 1 closeout / `#723` baseline:
 - `#818` MPE synth voice / allocator coverage -> `3d4560d1`
 - `#817` UMP conversion edge coverage -> `a38216fd`
 - `#821` audio reader helper edge coverage -> `7aff17f9`
+- `#822` audio file helper edge coverage -> `87ef6d90`
 - `#819` MIDI keyboard/sequence edge coverage -> `7a646f33`
 - `#820` signal spectrogram edge coverage -> `1a1b7f07`
 - `#823` platform helper edge coverage -> `f69338eb`
@@ -157,15 +158,6 @@ Merged after the Phase 1 closeout / `#723` baseline:
 
 Open Phase 3 PRs:
 
-- `#822` audio file helper edge coverage for `#640`, branch
-  `feature/audio-file-helper-coverage-640`, head `2db6be4a`; opened
-  from `main` at `c9620a65` and updated after the first macOS UBSan run
-  exposed a real `float_to_int32` endpoint conversion overflow. This
-  branch was updated again after macOS Namespace full-suite test `392`
-  exposed Android SDK discovery choosing an older fake NDK revision; the
-  branch now compares Android build-tools and NDK revisions numerically.
-  This tranche also uses the GitHub/Namespace path while the SSH
-  `windows` target remains unreachable.
 - `#828` raw MIDI parser edge coverage and malformed-data hardening for
   `#645`, branch `feature/midi-raw-parser-coverage-645`, head
   `4e2e6092`; opened from `main` at `94e3ef2a`. This tranche also uses
@@ -431,7 +423,8 @@ Local Phase 3 draft worktrees:
 - `#640` audio file helper worktree
   `/Users/danielraffel/Code/pulp-audio-file-helper-coverage-640`,
   branch `feature/audio-file-helper-coverage-640`, head `2db6be4a`;
-  open as PR `#822`.
+  merged via PR `#822` as `87ef6d90`. The remote branch was deleted
+  after merge.
   Scope: coverage for packed int24 conversion, int32 full-scale
   conversion, float-to-int32 clamping, zero-count conversion no-ops, CHOC
   WAV helper output via RIFF chunk parsing, malformed WAV rejection,
@@ -623,8 +616,8 @@ Open supporting PR:
   merged, `#824` merged, `#828` opened, `#829` opened, `#825` merged,
   `#830` opened, `#831` opened, `#827` merged, `#832` opened, `#826`
   merged, and `#832` was repaired for Windows cmd portability, and
-  `#831` was repaired for Windows float tolerance, and remains
-  docs-only.
+  `#831` was repaired for Windows float tolerance, and `#822` merged,
+  and remains docs-only.
 
 Local environment note:
 
@@ -643,28 +636,25 @@ Local environment note:
 Next recovery actions:
 
 1. Keep `#774` docs-only and let its latest status-update checks drain.
-2. Monitor `#822` cloud checks; if a required lane fails, debug in
-   `/Users/danielraffel/Code/pulp-audio-file-helper-coverage-640`,
-   patch, validate locally, and push with lease.
-3. Monitor `#828` cloud checks; if a required lane fails, debug in
+2. Monitor `#828` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-midi-raw-parser-coverage-645`, patch,
    validate locally, and push with lease.
-4. Monitor `#829` cloud checks; if a required lane fails, debug in
+3. Monitor `#829` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-midi-ci-coverage-645`, patch,
    validate locally, and push with lease.
-5. Monitor `#830` cloud checks; if a required lane fails, debug in
+4. Monitor `#830` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-midi-rpn-coverage-645`, patch,
    validate locally, and push with lease.
-6. Monitor `#831` cloud checks; if a required lane fails, debug in
+5. Monitor `#831` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-signal-utility-coverage-645`, patch,
    validate locally, and push with lease.
-7. Monitor `#832` cloud checks; if a required lane fails, debug in
+6. Monitor `#832` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-platform-child-process-coverage-640`,
    patch, validate locally, and push with lease.
-8. If any open Phase 3 PR is green but GitHub reports it behind `main`,
+7. If any open Phase 3 PR is green but GitHub reports it behind `main`,
    rebase that branch onto `origin/main`, push with lease, and let
    checks rerun.
-9. Continue Phase 3 from the tranche issues below, prioritizing
+8. Continue Phase 3 from the tranche issues below, prioritizing
    represented high-miss files over adding new perimeter lanes.
 
 ## Phase 1 corrected baseline
