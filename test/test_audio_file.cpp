@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <fstream>
 #include <cmath>
+#include <utility>
 
 using namespace pulp::audio;
 using Catch::Matchers::WithinAbs;
@@ -13,6 +14,79 @@ using Catch::Matchers::WithinAbs;
 static bool contains_extension(const std::vector<std::string>& extensions,
                                std::string_view extension) {
     return std::find(extensions.begin(), extensions.end(), extension) != extensions.end();
+}
+
+static void append_be16(std::vector<unsigned char>& bytes, uint16_t value) {
+    bytes.push_back(static_cast<unsigned char>((value >> 8) & 0xFF));
+    bytes.push_back(static_cast<unsigned char>(value & 0xFF));
+}
+
+static void append_be32(std::vector<unsigned char>& bytes, uint32_t value) {
+    bytes.push_back(static_cast<unsigned char>((value >> 24) & 0xFF));
+    bytes.push_back(static_cast<unsigned char>((value >> 16) & 0xFF));
+    bytes.push_back(static_cast<unsigned char>((value >> 8) & 0xFF));
+    bytes.push_back(static_cast<unsigned char>(value & 0xFF));
+}
+
+static std::vector<unsigned char> extended_sample_rate_44100() {
+    return {0x40, 0x0E, 0xAC, 0x44, 0, 0, 0, 0, 0, 0};
+}
+
+static void append_aiff_chunk(std::vector<unsigned char>& bytes,
+                              std::string_view id,
+                              const std::vector<unsigned char>& payload) {
+    REQUIRE(id.size() == 4);
+    bytes.insert(bytes.end(), id.begin(), id.end());
+    append_be32(bytes, static_cast<uint32_t>(payload.size()));
+    bytes.insert(bytes.end(), payload.begin(), payload.end());
+    if (payload.size() & 1) {
+        bytes.push_back(0);
+    }
+}
+
+static std::vector<unsigned char> make_comm_chunk(uint16_t channels,
+                                                  uint32_t frames,
+                                                  uint16_t bits_per_sample,
+                                                  bool aifc = false) {
+    std::vector<unsigned char> comm;
+    append_be16(comm, channels);
+    append_be32(comm, frames);
+    append_be16(comm, bits_per_sample);
+    auto sample_rate = extended_sample_rate_44100();
+    comm.insert(comm.end(), sample_rate.begin(), sample_rate.end());
+    if (aifc) {
+        comm.insert(comm.end(), {'N', 'O', 'N', 'E'});
+    }
+    return comm;
+}
+
+static std::vector<unsigned char> make_ssnd_chunk(const std::vector<unsigned char>& sample_bytes) {
+    std::vector<unsigned char> ssnd;
+    append_be32(ssnd, 0);
+    append_be32(ssnd, 0);
+    ssnd.insert(ssnd.end(), sample_bytes.begin(), sample_bytes.end());
+    return ssnd;
+}
+
+static void write_aiff_fixture(const std::filesystem::path& path,
+                               std::string_view form_type,
+                               const std::vector<std::pair<std::string_view, std::vector<unsigned char>>>& chunks) {
+    REQUIRE(form_type.size() == 4);
+
+    std::vector<unsigned char> body;
+    body.insert(body.end(), form_type.begin(), form_type.end());
+    for (const auto& [id, payload] : chunks) {
+        append_aiff_chunk(body, id, payload);
+    }
+
+    std::vector<unsigned char> file_bytes = {'F', 'O', 'R', 'M'};
+    append_be32(file_bytes, static_cast<uint32_t>(body.size()));
+    file_bytes.insert(file_bytes.end(), body.begin(), body.end());
+
+    std::ofstream file(path, std::ios::binary);
+    file.write(reinterpret_cast<const char*>(file_bytes.data()),
+               static_cast<std::streamsize>(file_bytes.size()));
+    REQUIRE(file.good());
 }
 
 // ── Sample format conversion ─────────────────────────────────────────────────
@@ -217,6 +291,120 @@ TEST_CASE("AIFF reader rejects malformed files", "[audio][file][registry][aiff]"
 
     auto& registry = FormatRegistry::instance();
     REQUIRE_FALSE(registry.read_info(tmp_path.string()).has_value());
+    REQUIRE_FALSE(registry.read(tmp_path.string()).has_value());
+
+    std::filesystem::remove(tmp_path);
+}
+
+TEST_CASE("AIFF reader handles AIFC metadata and odd chunk padding", "[audio][file][registry][aiff]") {
+    auto tmp_path = std::filesystem::temp_directory_path() / "pulp_test_audio_aifc_8bit.aif";
+    std::filesystem::remove(tmp_path);
+
+    write_aiff_fixture(tmp_path,
+                       "AIFC",
+                       {
+                           {"JUNK", {'o', 'd', 'd'}},
+                           {"COMM", make_comm_chunk(1, 2, 8, true)},
+                           {"SSND", make_ssnd_chunk({0x80, 0x40})},
+                       });
+
+    auto& registry = FormatRegistry::instance();
+    auto info = registry.read_info(tmp_path.string());
+    REQUIRE(info.has_value());
+    REQUIRE(info->format == "AIFF-C");
+    REQUIRE(info->sample_rate == 44100);
+    REQUIRE(info->num_channels == 1);
+    REQUIRE(info->num_frames == 2);
+    REQUIRE(info->bits_per_sample == 8);
+
+    auto data = registry.read(tmp_path.string());
+    REQUIRE(data.has_value());
+    REQUIRE(data->sample_rate == 44100);
+    REQUIRE(data->num_channels() == 1);
+    REQUIRE(data->num_frames() == 2);
+    REQUIRE_THAT(data->channels[0][0], WithinAbs(-1.0f, 0.001f));
+    REQUIRE_THAT(data->channels[0][1], WithinAbs(0.5f, 0.001f));
+
+    std::filesystem::remove(tmp_path);
+}
+
+TEST_CASE("AIFF reader decodes 24-bit PCM samples", "[audio][file][registry][aiff]") {
+    auto tmp_path = std::filesystem::temp_directory_path() / "pulp_test_audio_24bit.aiff";
+    std::filesystem::remove(tmp_path);
+
+    write_aiff_fixture(tmp_path,
+                       "AIFF",
+                       {
+                           {"COMM", make_comm_chunk(1, 2, 24)},
+                           {"SSND", make_ssnd_chunk({0x00, 0x00, 0x00, 0x40, 0x00, 0x00})},
+                       });
+
+    auto data = FormatRegistry::instance().read(tmp_path.string());
+    REQUIRE(data.has_value());
+    REQUIRE(data->num_channels() == 1);
+    REQUIRE(data->num_frames() == 2);
+    REQUIRE_THAT(data->channels[0][0], WithinAbs(0.0f, 0.001f));
+    REQUIRE_THAT(data->channels[0][1], WithinAbs(0.5f, 0.001f));
+
+    std::filesystem::remove(tmp_path);
+}
+
+TEST_CASE("AIFF reader decodes 32-bit PCM samples", "[audio][file][registry][aiff]") {
+    auto tmp_path = std::filesystem::temp_directory_path() / "pulp_test_audio_32bit.aiff";
+    std::filesystem::remove(tmp_path);
+
+    write_aiff_fixture(tmp_path,
+                       "AIFF",
+                       {
+                           {"COMM", make_comm_chunk(1, 2, 32)},
+                           {"SSND", make_ssnd_chunk({0x00, 0x00, 0x00, 0x00,
+                                                      0x40, 0x00, 0x00, 0x00})},
+                       });
+
+    auto data = FormatRegistry::instance().read(tmp_path.string());
+    REQUIRE(data.has_value());
+    REQUIRE(data->num_channels() == 1);
+    REQUIRE(data->num_frames() == 2);
+    REQUIRE_THAT(data->channels[0][0], WithinAbs(0.0f, 0.001f));
+    REQUIRE_THAT(data->channels[0][1], WithinAbs(0.5f, 0.001f));
+
+    std::filesystem::remove(tmp_path);
+}
+
+TEST_CASE("AIFF reader skips malformed SSND chunks before valid data", "[audio][file][registry][aiff]") {
+    auto tmp_path = std::filesystem::temp_directory_path() / "pulp_test_audio_ssnd_skip.aiff";
+    std::filesystem::remove(tmp_path);
+
+    write_aiff_fixture(tmp_path,
+                       "AIFF",
+                       {
+                           {"COMM", make_comm_chunk(1, 1, 16)},
+                           {"SSND", {0x00, 0x00, 0x00, 0x00}},
+                           {"SSND", make_ssnd_chunk({0x40, 0x00})},
+                       });
+
+    auto data = FormatRegistry::instance().read(tmp_path.string());
+    REQUIRE(data.has_value());
+    REQUIRE(data->num_channels() == 1);
+    REQUIRE(data->num_frames() == 1);
+    REQUIRE_THAT(data->channels[0][0], WithinAbs(0.5f, 0.001f));
+
+    std::filesystem::remove(tmp_path);
+}
+
+TEST_CASE("AIFF reader rejects truncated PCM payloads", "[audio][file][registry][aiff]") {
+    auto tmp_path = std::filesystem::temp_directory_path() / "pulp_test_audio_truncated_payload.aiff";
+    std::filesystem::remove(tmp_path);
+
+    write_aiff_fixture(tmp_path,
+                       "AIFF",
+                       {
+                           {"COMM", make_comm_chunk(1, 2, 16)},
+                           {"SSND", make_ssnd_chunk({0x40, 0x00})},
+                       });
+
+    auto& registry = FormatRegistry::instance();
+    REQUIRE(registry.read_info(tmp_path.string()).has_value());
     REQUIRE_FALSE(registry.read(tmp_path.string()).has_value());
 
     std::filesystem::remove(tmp_path);
