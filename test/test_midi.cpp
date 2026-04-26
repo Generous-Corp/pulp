@@ -139,6 +139,27 @@ TEST_CASE("MidiFileData summarizes tracks", "[midi][file]") {
     REQUIRE(data.duration_seconds() == Approx(1.50).margin(1e-6));
 }
 
+TEST_CASE("MidiFileData handles empty tracks and empty file round-trips",
+          "[midi][file][issue-645]") {
+    TempDir tmp;
+    const auto path = tmp.path / "empty.mid";
+
+    MidiFileData data;
+    data.ticks_per_quarter = 240;
+    data.tracks.push_back(MidiTrack{});
+
+    REQUIRE(data.total_events() == 0);
+    REQUIRE(data.duration_seconds() == Approx(0.0).margin(1e-9));
+    REQUIRE(write_midi_file(path.string(), data));
+
+    auto read = read_midi_file(path.string());
+    REQUIRE(read.has_value());
+    REQUIRE(read->ticks_per_quarter == 240);
+    REQUIRE(read->total_events() == 0);
+    REQUIRE(read->duration_seconds() == Approx(0.0).margin(1e-9));
+    REQUIRE(read->tracks.size() == 1);
+}
+
 TEST_CASE("MidiFile read/write round-trips short messages", "[midi][file]") {
     TempDir tmp;
     const auto path = tmp.path / "roundtrip.mid";
@@ -159,6 +180,51 @@ TEST_CASE("MidiFile read/write round-trips short messages", "[midi][file]") {
     REQUIRE(read->ticks_per_quarter == 960);
     REQUIRE(read->total_events() == 3);
     REQUIRE(read->duration_seconds() == Approx(1.0).margin(0.05));
+}
+
+TEST_CASE("MidiFile round-trips multi-track program change and pitch bend",
+          "[midi][file][issue-645]") {
+    TempDir tmp;
+    const auto path = tmp.path / "multi-track.mid";
+
+    MidiFileData data;
+    data.ticks_per_quarter = 480;
+
+    MidiTrack first;
+    first.name = "programs";
+    first.events.push_back({0.00, MidiEvent::program_change(2, 42)});
+
+    MidiTrack second;
+    second.name = "notes";
+    second.events.push_back({0.25, MidiEvent::pitch_bend(2, 16383)});
+    second.events.push_back({0.50, MidiEvent::note_on(2, 65, 100)});
+
+    data.tracks.push_back(std::move(first));
+    data.tracks.push_back(std::move(second));
+
+    REQUIRE(write_midi_file(path.string(), data));
+
+    auto read = read_midi_file(path.string());
+    REQUIRE(read.has_value());
+    REQUIRE(read->ticks_per_quarter == 480);
+    REQUIRE(read->total_events() == 3);
+    REQUIRE(read->duration_seconds() > 0.0);
+
+    bool saw_program = false;
+    bool saw_bend = false;
+    bool saw_note = false;
+    for (const auto& track : read->tracks) {
+        for (const auto& event : track.events) {
+            saw_program = saw_program || event.event.is_program_change();
+            saw_bend = saw_bend || event.event.is_pitch_bend();
+            saw_note = saw_note || event.event.is_note_on();
+            REQUIRE(event.event.timestamp == Approx(event.time_seconds).margin(1e-9));
+        }
+    }
+
+    REQUIRE(saw_program);
+    REQUIRE(saw_bend);
+    REQUIRE(saw_note);
 }
 
 TEST_CASE("MidiFile helpers report missing, corrupt, and unwritable files", "[midi][file]") {
