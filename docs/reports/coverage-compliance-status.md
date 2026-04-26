@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-25 22:50 EDT
+Last reviewed: 2026-04-25 23:05 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -94,6 +94,11 @@ Latest complete Codecov `main` report observed while updating this doc:
   - `ship`: `54.34%`
   - `tools`: `40.22%`
 
+`#794` has merged after this baseline. The post-merge `main` Coverage
+workflow for `c4e6ad0930a7871046225b84fcfb130263ff98aa` is queued as
+run `24946798292`; do not treat the `c4e6ad09` totals as rebaselined
+until that run completes and Codecov reflects the new uploads.
+
 Merged after the Phase 1 closeout / `#723` baseline:
 
 - `#649` CLI/tools tranche 1 -> `8449b6e8`
@@ -113,36 +118,38 @@ Merged after the Phase 1 closeout / `#723` baseline:
 - `#789` Android ship/package helper coverage -> `e61dce8d`
 - `#788` events socket-IPC coverage -> `23d3ed1d`
 - `#793` package-registry CLI/tools coverage -> `e2af9c4d`
+- `#794` AIFF reader edge-path coverage -> `c4e6ad09`
 
 Open Phase 3 PRs:
 
-- `#794` `test(audio): cover AIFF reader edge paths`, branch
-  `feature/audio-aiff-coverage-640`, commit `f3414ae9`, worktree
-  `/Users/danielraffel/Code/pulp-audio-aiff-coverage-640`.
-  Scope: deterministic `test/test_audio_file.cpp` coverage for AIFC
-  metadata, odd unknown-chunk padding, 8/24/32-bit AIFF PCM decode,
-  malformed SSND skip, and truncated payload rejection. Local validation:
-  `pulp-test-audio-file` passed with `231` assertions in `15` test cases;
-  focused CTest `AIFF|audio.*file|FormatRegistry` passed `8/8`;
-  `git diff --check` clean; version bump report says no bump needed.
-  `shipyard pr` opened the PR and validation is in progress.
+- `#795` `test(events): cover volume detector lifecycle edges`, branch
+  `feature/events-volume-coverage-642`, commit `a193f617`, worktree
+  `/Users/danielraffel/Code/pulp-events-volume-coverage-642`.
+  Scope: deterministic `test/test_network_service_discovery.cpp`
+  coverage for `NetworkServiceDiscovery` backend removal, cached-service
+  eviction, no-backend registration behavior,
+  `MountedVolumeListChangeDetector` mounted-volume snapshot plus
+  start/restart/stop lifecycle paths, and
+  `LockingAsyncUpdater::trigger_and_wait()`. Local validation:
+  `pulp-test-network-service-discovery` passed with `43` assertions in
+  `10` test cases; focused CTest
+  `NSD|MountedVolume|LockingAsyncUpdater|service-discovery|volume`
+  passed `10/10`; `git diff --check` clean; version bump report says no
+  bump needed. The PR is labeled `codecov` and is using the direct
+  GitHub/Namespace path instead of `shipyard pr` because `#794` exposed a
+  local Shipyard mac configure stall after GitHub/Namespace was already
+  clean.
 
 Local Phase 3 draft worktrees:
 
 - `#640` AIFF reader edge-path worktree
   `/Users/danielraffel/Code/pulp-audio-aiff-coverage-640`, branch
-  `feature/audio-aiff-coverage-640`, commit `f3414ae9`; open as PR `#794`.
+  `feature/audio-aiff-coverage-640`; merged via PR `#794` as
+  `c4e6ad09`. The remote branch was deleted after merge.
 - `#642` events volume/service-discovery worktree
   `/Users/danielraffel/Code/pulp-events-volume-coverage-642`, branch
-  `feature/events-volume-coverage-642`, commit `6e56d62b`; local draft is
-  ready but not opened yet to avoid overlapping local Shipyard runs while
-  `#794` is still validating. Scope: deterministic
-  `test/test_network_service_discovery.cpp` coverage for
-  `NetworkServiceDiscovery` backend removal, mounted-volume snapshot and
-  start/stop lifecycle, and `LockingAsyncUpdater::trigger_and_wait()`.
-  Validation: `pulp-test-network-service-discovery` passed with `43`
-  assertions in `10` test cases; focused CTest passed `10/10`;
-  `git diff --check` clean; version bump report says no bump needed.
+  `feature/events-volume-coverage-642`, commit `a193f617`; open as PR
+  `#795`.
 - `#643` package-registry CLI/tools worktree
   `/Users/danielraffel/Code/pulp-package-registry-coverage-643`, branch
   `feature/package-registry-coverage-643`, commit `75a529ef`; merged via
@@ -167,10 +174,10 @@ Local environment note:
 Next recovery actions:
 
 1. Keep `#774` docs-only and let its latest status-update checks drain.
-2. Monitor `#794` and address any Codecov, build, or Shipyard feedback.
-3. Once `#794` is resolved or no longer consuming the local Shipyard mac
-   lane, open the ready `#642` draft from
-   `/Users/danielraffel/Code/pulp-events-volume-coverage-642`.
+2. Monitor `#795` and address any Codecov, build, sanitizer, or
+   Namespace feedback.
+3. When the `c4e6ad09` `main` Coverage run `24946798292` completes,
+   refresh the current live Codecov baseline from the API.
 4. If a new PR is green but GitHub reports it behind `main`, rebase that
    branch onto `origin/main`, push with lease, and let checks rerun.
 5. Continue Phase 3 from the tranche issues below, prioritizing
