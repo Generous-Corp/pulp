@@ -1174,11 +1174,15 @@ if(PULP_ENABLE_GPU)
     target_link_libraries(pulp-test-gpu-graph PRIVATE pulp::render Catch2::Catch2WithMain)
     catch_discover_tests(pulp-test-gpu-graph)
 
-    # Texture atlas tests
-    add_executable(pulp-test-texture-atlas test_texture_atlas.cpp)
-    target_link_libraries(pulp-test-texture-atlas PRIVATE pulp::render Catch2::Catch2WithMain)
-    catch_discover_tests(pulp-test-texture-atlas)
 endif()
+
+# Texture atlas helpers are header-only; keep this pure test available in
+# GPU-off builds so sanitizer and local coverage lanes do not fetch GPU assets.
+add_executable(pulp-test-texture-atlas test_texture_atlas.cpp)
+target_include_directories(pulp-test-texture-atlas PRIVATE
+    ${CMAKE_SOURCE_DIR}/core/render/include)
+target_link_libraries(pulp-test-texture-atlas PRIVATE Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-texture-atlas)
 
 # Sprite strip tests
 add_executable(pulp-test-sprite-strip test_sprite_strip.cpp)

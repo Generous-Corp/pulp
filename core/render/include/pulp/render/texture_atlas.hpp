@@ -20,7 +20,7 @@ public:
 
     /// Try to allocate a region of the given size. Returns false if full.
     bool allocate(int w, int h, Region& out) {
-        if (w > width_ || h > height_) return false;
+        if (w <= 0 || h <= 0 || w > width_ || h > height_) return false;
 
         // Try current shelf
         if (shelf_x_ + w <= width_ && shelf_y_ + std::max(h, shelf_h_) <= height_) {
@@ -81,8 +81,8 @@ public:
 
     void release(uint64_t key) {
         auto it = entries_.find(key);
-        if (it != entries_.end() && --it->second.ref_count == 0) {
-            // Mark for stale eviction (don't remove immediately)
+        if (it != entries_.end() && it->second.ref_count > 0) {
+            --it->second.ref_count;
         }
     }
 
@@ -91,6 +91,7 @@ public:
         size_t evicted = 0;
         for (auto it = entries_.begin(); it != entries_.end(); ) {
             if (it->second.ref_count == 0 &&
+                current_frame > it->second.last_used_frame &&
                 current_frame - it->second.last_used_frame > max_age) {
                 it = entries_.erase(it);
                 ++evicted;
@@ -144,7 +145,8 @@ public:
     size_t evict_stale(uint64_t current_frame, uint64_t max_age = 120) {
         size_t evicted = 0;
         for (auto it = entries_.begin(); it != entries_.end(); ) {
-            if (current_frame - it->second.last_used > max_age) {
+            if (current_frame > it->second.last_used &&
+                current_frame - it->second.last_used > max_age) {
                 it = entries_.erase(it);
                 ++evicted;
             } else {
@@ -190,7 +192,8 @@ public:
     size_t evict_stale(uint64_t current_frame, uint64_t max_age = 300) {
         size_t evicted = 0;
         for (auto it = entries_.begin(); it != entries_.end(); ) {
-            if (current_frame - it->second.last_used > max_age) {
+            if (current_frame > it->second.last_used &&
+                current_frame - it->second.last_used > max_age) {
                 it = entries_.erase(it); ++evicted;
             } else { ++it; }
         }
@@ -231,7 +234,8 @@ public:
     size_t evict_stale(uint64_t current_frame, uint64_t max_age = 600) {
         size_t evicted = 0;
         for (auto it = entries_.begin(); it != entries_.end(); ) {
-            if (current_frame - it->second.last_used > max_age) {
+            if (current_frame > it->second.last_used &&
+                current_frame - it->second.last_used > max_age) {
                 it = entries_.erase(it); ++evicted;
             } else { ++it; }
         }

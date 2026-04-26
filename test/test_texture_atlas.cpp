@@ -128,6 +128,21 @@ TEST_CASE("AtlasPacker reset lets us pack again from origin - issue-646",
     REQUIRE(r.y == 0);
 }
 
+TEST_CASE("AtlasPacker rejects non-positive dimensions - issue-646",
+          "[render][atlas][issue-646]") {
+    AtlasPacker p(64, 64);
+    AtlasPacker::Region r{};
+
+    REQUIRE_FALSE(p.allocate(0, 8, r));
+    REQUIRE_FALSE(p.allocate(8, 0, r));
+    REQUIRE_FALSE(p.allocate(-1, 8, r));
+    REQUIRE_FALSE(p.allocate(8, -1, r));
+
+    REQUIRE(p.allocate(8, 8, r));
+    REQUIRE(r.x == 0);
+    REQUIRE(r.y == 0);
+}
+
 TEST_CASE("ImageAtlas mark_used keeps live entry from eviction - issue-646",
           "[render][atlas][issue-646]") {
     ImageAtlas atlas(256);
@@ -164,6 +179,20 @@ TEST_CASE("ImageAtlas skips eviction while ref_count is non-zero - issue-646",
     REQUIRE(atlas.entry_count() == 1);
 }
 
+TEST_CASE("ImageAtlas rejects full atlas allocations and clamps release - issue-646",
+          "[render][atlas][issue-646]") {
+    ImageAtlas atlas(16);
+    AtlasPacker::Region r{};
+    REQUIRE(atlas.allocate(1, 16, 16, r));
+    REQUIRE_FALSE(atlas.allocate(2, 1, 1, r));
+    REQUIRE(atlas.entry_count() == 1);
+
+    atlas.release(1);
+    atlas.release(1);  // extra release must not underflow ref_count
+    REQUIRE(atlas.evict_stale(100, /*max_age=*/1) == 1);
+    REQUIRE(atlas.entry_count() == 0);
+}
+
 TEST_CASE("GradientAtlas has() reflects allocation and mark_used no-ops - issue-646",
           "[render][atlas][issue-646]") {
     GradientAtlas ga;
@@ -176,6 +205,19 @@ TEST_CASE("GradientAtlas has() reflects allocation and mark_used no-ops - issue-
     // mark_used on unknown key should silently do nothing.
     ga.mark_used(999, 100);
     REQUIRE(ga.entry_count() == 1);
+}
+
+TEST_CASE("GradientAtlas reports capacity exhaustion - issue-646",
+          "[render][atlas][issue-646]") {
+    GradientAtlas ga;
+    int row = -1;
+    for (int i = 0; i < 512; ++i) {
+        REQUIRE(ga.allocate(static_cast<uint64_t>(i), row));
+        REQUIRE(row == i);
+    }
+
+    REQUIRE_FALSE(ga.allocate(9999, row));
+    REQUIRE(ga.entry_count() == 512);
 }
 
 TEST_CASE("GlyphAtlas allocate reuses same key, evicts by age - issue-646",
@@ -240,6 +282,41 @@ TEST_CASE("PathAtlas rejects oversized path bitmap - issue-646",
     AtlasPacker::Region r{};
     REQUIRE_FALSE(atlas.allocate(1, /*w=*/128, /*h=*/128, r));
     REQUIRE(atlas.entry_count() == 0);
+}
+
+TEST_CASE("Atlas eviction treats future last-used frames as fresh - issue-646",
+          "[render][atlas][issue-646]") {
+    AtlasPacker::Region r{};
+
+    ImageAtlas image(64);
+    REQUIRE(image.allocate(1, 8, 8, r));
+    image.release(1);
+    image.mark_used(1, 100);
+    REQUIRE(image.evict_stale(50, /*max_age=*/0) == 0);
+    REQUIRE(image.entry_count() == 1);
+    REQUIRE(image.evict_stale(101, /*max_age=*/0) == 1);
+
+    GradientAtlas gradient;
+    int row = -1;
+    REQUIRE(gradient.allocate(1, row));
+    gradient.mark_used(1, 100);
+    REQUIRE(gradient.evict_stale(50, /*max_age=*/0) == 0);
+    REQUIRE(gradient.entry_count() == 1);
+    REQUIRE(gradient.evict_stale(101, /*max_age=*/0) == 1);
+
+    GlyphAtlas glyph(64);
+    REQUIRE(glyph.allocate(1, 8, 8, r));
+    glyph.mark_used(1, 100);
+    REQUIRE(glyph.evict_stale(50, /*max_age=*/0) == 0);
+    REQUIRE(glyph.entry_count() == 1);
+    REQUIRE(glyph.evict_stale(101, /*max_age=*/0) == 1);
+
+    PathAtlas path(64);
+    REQUIRE(path.allocate(1, 8, 8, r));
+    path.mark_used(1, 100);
+    REQUIRE(path.evict_stale(50, /*max_age=*/0) == 0);
+    REQUIRE(path.entry_count() == 1);
+    REQUIRE(path.evict_stale(101, /*max_age=*/0) == 1);
 }
 
 TEST_CASE("BufferPool caps retained buffers at max_pool_size - issue-646",
