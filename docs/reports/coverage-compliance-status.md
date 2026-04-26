@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-26 17:28 EDT
+Last reviewed: 2026-04-26 17:41 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -175,6 +175,11 @@ Open Phase 3 PRs:
   `feature/platform-helper-coverage-640`, head `6ec4ff2e`; opened from
   `main` at `3d4560d1`. This tranche also uses the GitHub/Namespace path
   while the SSH `windows` target remains unreachable.
+- `#824` signal math helper coverage and Mat3 multiplication fix for
+  `#645`, branch `feature/signal-math-helper-coverage-645`, head
+  `1b7f1cfd`; opened from `main` at `a38216fd`. This tranche also uses
+  the GitHub/Namespace path while the SSH `windows` target remains
+  unreachable.
 
 Local Phase 3 draft worktrees:
 
@@ -447,6 +452,26 @@ Local Phase 3 draft worktrees:
   cases, full audio-excerpt binary passed `33` assertions in `5` cases,
   focused CTest passed `9/9`, `git diff --check`, skill-sync report, and
   version-bump report.
+- `#645` signal math helper worktree
+  `/Users/danielraffel/Code/pulp-signal-math-helper-coverage-645`,
+  branch `feature/signal-math-helper-coverage-645`, commits `b304e0f4`
+  and metadata tip `1b7f1cfd`; open as PR `#824`.
+  Scope: fixes `Mat3::operator*` so multiplication accumulates into a
+  zero matrix instead of adding the product onto the identity default,
+  and adds coverage for polynomial empty/constant helpers, empty
+  polynomial add, singular `Mat2` inverse, non-identity `Mat3`
+  multiplication, FastMath large-phase wrapping and guard inputs,
+  Gain linear buffer processing, SimpleMixer clamp/buffer paths, and
+  special-function wrappers. The metadata tip records
+  `Version-Bump: sdk=patch` because this is an inline public-header bug
+  fix without an SDK API signature change. Local validation:
+  no-GPU/no-examples configure, `pulp-test-poly-math`,
+  `pulp-test-fast-math`, `pulp-test-signal`, and
+  `pulp-test-dsp-enhancements` builds, direct issue-645 slices passed
+  `30`, `11`, `128`, and `39` assertions respectively, full binaries
+  passed `62`, `55`, `895`, and `71` assertions respectively, focused
+  CTest passed `11/11`, `git diff --check`, skill-sync report, and
+  version-bump report.
 
 Open supporting PR:
 
@@ -456,7 +481,8 @@ Open supporting PR:
   The branch has been rebased onto `origin/main` after `#813` merged,
   updated after `#816` merged, `#817` was repaired, `#820` opened,
   `#821` opened, `#822` opened, `#818` merged, `#823` opened, `#817`
-  merged, and `#822` was repaired, and remains docs-only.
+  merged, `#822` was repaired, and `#824` opened, and remains
+  docs-only.
 
 Local environment note:
 
@@ -490,10 +516,13 @@ Next recovery actions:
 6. Monitor `#823` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-platform-helper-coverage-640`, patch,
    validate locally, and push with lease.
-7. If any open Phase 3 PR is green but GitHub reports it behind `main`,
+7. Monitor `#824` cloud checks; if a required lane fails, debug in
+   `/Users/danielraffel/Code/pulp-signal-math-helper-coverage-645`,
+   patch, validate locally, and push with lease.
+8. If any open Phase 3 PR is green but GitHub reports it behind `main`,
    rebase that branch onto `origin/main`, push with lease, and let
    checks rerun.
-8. Continue Phase 3 from the tranche issues below, prioritizing
+9. Continue Phase 3 from the tranche issues below, prioritizing
    represented high-miss files over adding new perimeter lanes.
 
 ## Phase 1 corrected baseline
