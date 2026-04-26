@@ -199,6 +199,25 @@ TEST_CASE("AlignedBuffer move semantics", "[simd][aligned_buffer]") {
     REQUIRE(b[0] == 42.0f);
 }
 
+TEST_CASE("AlignedBuffer move assignment releases prior storage",
+          "[simd][aligned_buffer][issue-645]") {
+    AlignedBuffer source(3);
+    source[0] = 1.0f;
+    source[1] = 2.0f;
+    source[2] = 3.0f;
+
+    AlignedBuffer dest(2);
+    dest[0] = -1.0f;
+    dest = std::move(source);
+
+    REQUIRE(source.data() == nullptr);
+    REQUIRE(source.empty());
+    REQUIRE(dest.size() == 3);
+    REQUIRE_THAT(dest[0], WithinAbs(1.0f, 1e-6f));
+    REQUIRE_THAT(dest[1], WithinAbs(2.0f, 1e-6f));
+    REQUIRE_THAT(dest[2], WithinAbs(3.0f, 1e-6f));
+}
+
 TEST_CASE("AlignedBuffer resize", "[simd][aligned_buffer]") {
     AlignedBuffer buf(50);
     buf[0] = 1.0f;
@@ -210,6 +229,21 @@ TEST_CASE("AlignedBuffer resize", "[simd][aligned_buffer]") {
     // Data not preserved after resize
     buf.resize(0);
     REQUIRE(buf.empty());
+}
+
+TEST_CASE("AlignedBuffer resize same size and empty clear are no-ops",
+          "[simd][aligned_buffer][issue-645]") {
+    AlignedBuffer empty;
+    empty.clear();
+    empty.resize(0);
+    REQUIRE(empty.empty());
+
+    AlignedBuffer buf(4);
+    auto* original = buf.data();
+    buf[0] = 9.0f;
+    buf.resize(4);
+    REQUIRE(buf.data() == original);
+    REQUIRE_THAT(buf[0], WithinAbs(9.0f, 1e-6f));
 }
 
 TEST_CASE("AlignedBuffer clear", "[simd][aligned_buffer]") {
@@ -230,6 +264,19 @@ TEST_CASE("AlignedBuffer copy_from", "[simd][aligned_buffer]") {
 
     for (size_t i = 0; i < 5; ++i)
         REQUIRE(buf[i] == src[i]);
+}
+
+TEST_CASE("AlignedBuffer copy_from truncates to destination size",
+          "[simd][aligned_buffer][issue-645]") {
+    const float src[] = {10.0f, 20.0f, 30.0f, 40.0f};
+    AlignedBuffer buf(2);
+    buf.copy_from(src, 4);
+
+    REQUIRE_THAT(buf[0], WithinAbs(10.0f, 1e-6f));
+    REQUIRE_THAT(buf[1], WithinAbs(20.0f, 1e-6f));
+
+    const AlignedBuffer& const_buf = buf;
+    REQUIRE(const_buf.begin() + 2 == const_buf.end());
 }
 
 TEST_CASE("AlignedBuffer works with simd operations", "[simd][aligned_buffer]") {

@@ -7,6 +7,7 @@
 #include <pulp/signal/lookup_table.hpp>
 #include <pulp/signal/tpt_filter.hpp>
 #include <pulp/signal/gain.hpp>
+#include <pulp/signal/waveshaper.hpp>
 #include <cmath>
 #include <vector>
 
@@ -127,6 +128,27 @@ TEST_CASE("BallisticsFilter reset returns to zero", "[signal][ballistics]") {
     REQUIRE_THAT(env.current(), WithinAbs(0.0, 0.001));
 }
 
+TEST_CASE("BallisticsFilter clamps time constants and processes buffers",
+          "[signal][ballistics][issue-645]") {
+    BallisticsFilter env;
+    env.prepare(48000.0f);
+    env.set_attack_ms(-5.0f);
+    env.set_release_ms(0.0f);
+
+    REQUIRE_THAT(env.process(-0.5f), WithinAbs(0.5f, 1e-6f));
+    REQUIRE_THAT(env.process(0.0f), WithinAbs(0.0f, 1e-6f));
+
+    env.set_mode(BallisticsFilter::Mode::rms);
+    const float input[] = {-0.25f, 0.5f, -0.75f};
+    float output[] = {0.0f, 0.0f, 0.0f};
+    env.process(input, output, 3);
+
+    REQUIRE_THAT(output[0], WithinAbs(0.25f, 1e-6f));
+    REQUIRE_THAT(output[1], WithinAbs(0.5f, 1e-6f));
+    REQUIRE_THAT(output[2], WithinAbs(0.75f, 1e-6f));
+    REQUIRE_THAT(env.current(), WithinAbs(0.75f, 1e-6f));
+}
+
 // ── LogRampedValue ───────────────────────────────────────────────────────
 
 TEST_CASE("LogRampedValue reaches target", "[signal][log_ramp]") {
@@ -166,6 +188,62 @@ TEST_CASE("LogRampedValue skip advances correctly", "[signal][log_ramp]") {
     v.skip(4400);
     float remaining = v.next();
     REQUIRE(remaining > 900.0f);
+}
+
+TEST_CASE("LogRampedValue jumps for non-positive endpoints",
+          "[signal][log_ramp][issue-645]") {
+    LogRampedValue zero_start;
+    zero_start.set_ramp_time(1.0f, 48000.0f);
+    zero_start.skip(32);
+    zero_start.set_target(440.0f);
+    REQUIRE_FALSE(zero_start.is_smoothing());
+    REQUIRE_THAT(zero_start.current_value(), WithinAbs(440.0f, 1e-6f));
+    REQUIRE_THAT(zero_start.target_value(), WithinAbs(440.0f, 1e-6f));
+
+    LogRampedValue positive(220.0f);
+    positive.set_ramp_time(1.0f, 48000.0f);
+    positive.set_target(0.0f);
+    REQUIRE_FALSE(positive.is_smoothing());
+    REQUIRE_THAT(positive.next(), WithinAbs(0.0f, 1e-6f));
+}
+
+// ── WaveShaper ───────────────────────────────────────────────────────────
+
+TEST_CASE("WaveShaper covers all curve branches", "[signal][waveshaper][issue-645]") {
+    WaveShaper shaper;
+    shaper.set_drive(2.0f);
+
+    shaper.set_curve(WaveShaper::Curve::soft_clip);
+    REQUIRE_THAT(shaper.process(1.0f), WithinAbs(2.0f / 3.0f, 1e-6f));
+
+    shaper.set_curve(WaveShaper::Curve::hard_clip);
+    REQUIRE_THAT(shaper.process(0.75f), WithinAbs(1.0f, 1e-6f));
+    REQUIRE_THAT(shaper.process(-0.75f), WithinAbs(-1.0f, 1e-6f));
+
+    shaper.set_curve(WaveShaper::Curve::tanh_clip);
+    REQUIRE_THAT(shaper.process(-0.5f), WithinAbs(std::tanh(-1.0f), 1e-6f));
+
+    shaper.set_curve(WaveShaper::Curve::fold);
+    REQUIRE_THAT(shaper.process(0.75f), WithinAbs(0.5f, 1e-6f));
+    REQUIRE_THAT(shaper.process(-0.75f), WithinAbs(-0.5f, 1e-6f));
+
+    shaper.set_drive(1.0f);
+    shaper.set_curve(WaveShaper::Curve::sine_fold);
+    REQUIRE_THAT(shaper.process(1.0f), WithinAbs(1.0f, 1e-6f));
+}
+
+TEST_CASE("WaveShaper processes buffers in-place", "[signal][waveshaper][issue-645]") {
+    WaveShaper shaper;
+    shaper.set_curve(WaveShaper::Curve::hard_clip);
+    shaper.set_drive(3.0f);
+
+    float buffer[] = {-0.5f, 0.0f, 0.25f, 0.5f};
+    shaper.process(buffer, 4);
+
+    REQUIRE_THAT(buffer[0], WithinAbs(-1.0f, 1e-6f));
+    REQUIRE_THAT(buffer[1], WithinAbs(0.0f, 1e-6f));
+    REQUIRE_THAT(buffer[2], WithinAbs(0.75f, 1e-6f));
+    REQUIRE_THAT(buffer[3], WithinAbs(1.0f, 1e-6f));
 }
 
 // ── ProcessorChain ───────────────────────────────────────────────────────
