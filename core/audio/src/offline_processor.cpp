@@ -11,7 +11,7 @@ std::optional<AudioFileData> offline_process(
     OfflineProcessCallback process_fn,
     int block_size)
 {
-    if (input.empty() || !process_fn) return std::nullopt;
+    if (input.empty() || !process_fn || block_size <= 0) return std::nullopt;
 
     uint32_t channels = input.num_channels();
     uint64_t total_frames = input.num_frames();
