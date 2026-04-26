@@ -27,6 +27,26 @@ TEST_CASE("Bias processes buffer", "[signal][bias]") {
     REQUIRE_THAT(buf[2], WithinAbs(0.5f, 1e-5));
 }
 
+TEST_CASE("Bias reports state and processes separate buffers",
+          "[signal][bias][issue-645]") {
+    pulp::signal::Bias bias;
+    bias.set_sample_rate(48000.0f);
+    bias.set_bias(-0.25f);
+
+    REQUIRE_THAT(bias.bias(), WithinAbs(-0.25f, 1e-6f));
+
+    const float input[] = {0.25f, -0.25f, 1.0f};
+    float output[] = {9.0f, 9.0f, 9.0f};
+    bias.process(input, output, 3);
+
+    REQUIRE_THAT(output[0], WithinAbs(0.0f, 1e-6f));
+    REQUIRE_THAT(output[1], WithinAbs(-0.5f, 1e-6f));
+    REQUIRE_THAT(output[2], WithinAbs(0.75f, 1e-6f));
+
+    bias.reset();
+    REQUIRE_THAT(bias.process(0.5f), WithinAbs(0.25f, 1e-6f));
+}
+
 // ── MidiMessageSequence ─────────────────────────────────────────────────
 
 TEST_CASE("MidiMessageSequence maintains order", "[midi][sequence]") {

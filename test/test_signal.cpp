@@ -53,6 +53,29 @@ TEST_CASE("DelayLine process", "[signal][delay]") {
     REQUIRE_THAT(out, WithinAbs(1.0, 0.01));
 }
 
+TEST_CASE("DelayLine handles empty, wraparound, and reset edges",
+          "[signal][delay][issue-645]") {
+    DelayLine dl;
+    REQUIRE_THAT(dl.read(0), WithinAbs(0.0f, 1e-6f));
+    REQUIRE_THAT(dl.read(0.5f), WithinAbs(0.0f, 1e-6f));
+    REQUIRE(dl.max_delay() == -1);
+
+    dl.prepare(2);
+    REQUIRE(dl.max_delay() == 2);
+
+    dl.push(1.0f);
+    dl.push(2.0f);
+    dl.push(3.0f);
+
+    REQUIRE_THAT(dl.read(0), WithinAbs(3.0f, 1e-6f));
+    REQUIRE_THAT(dl.read(1), WithinAbs(2.0f, 1e-6f));
+    REQUIRE_THAT(dl.read(1.5f), WithinAbs(1.5f, 1e-6f));
+
+    dl.reset();
+    REQUIRE_THAT(dl.read(0), WithinAbs(0.0f, 1e-6f));
+    REQUIRE_THAT(dl.process(4.0f, 0.0f), WithinAbs(4.0f, 1e-6f));
+}
+
 // ── Gain ─────────────────────────────────────────────────────────────────────
 
 TEST_CASE("Gain dB conversion", "[signal][gain]") {
@@ -239,6 +262,29 @@ TEST_CASE("SmoothedValue skip", "[signal][smooth]") {
     sv.skip(100);
     REQUIRE_THAT(sv.current(), WithinAbs(1.0, 0.001));
     REQUIRE_FALSE(sv.is_smoothing());
+}
+
+TEST_CASE("SmoothedValue clamps one-sample ramps and partially skips",
+          "[signal][smooth][issue-645]") {
+    SmoothedValue<float> immediate(0.0f);
+    immediate.set_ramp_time(0.0f, 48000.0f);
+    immediate.set_target(2.0f);
+
+    REQUIRE_THAT(immediate.current(), WithinAbs(2.0f, 1e-6f));
+    REQUIRE_THAT(immediate.target(), WithinAbs(2.0f, 1e-6f));
+    REQUIRE_FALSE(immediate.is_smoothing());
+    immediate.skip(4);
+    REQUIRE_THAT(immediate.next(), WithinAbs(2.0f, 1e-6f));
+
+    SmoothedValue<float> partial(0.0f);
+    partial.set_ramp_time(0.01f, 1000.0f);
+    partial.set_target(10.0f);
+    partial.skip(3);
+
+    REQUIRE(partial.is_smoothing());
+    REQUIRE_THAT(partial.current(), WithinAbs(3.0f, 1e-6f));
+    REQUIRE_THAT(partial.next(), WithinAbs(4.0f, 1e-6f));
+    REQUIRE_THAT(partial.target(), WithinAbs(10.0f, 1e-6f));
 }
 
 // ── ADSR ─────────────────────────────────────────────────────────────────────
@@ -548,6 +594,33 @@ TEST_CASE("SVF highpass passes high frequencies", "[signal][svf]") {
     REQUIRE(rms > 0.5f);
 }
 
+TEST_CASE("SVF covers bandpass notch buffer and reset paths",
+          "[signal][svf][issue-645]") {
+    Svf filter;
+    filter.set_sample_rate(48000.0f);
+    filter.set_frequency(1000.0f);
+    filter.set_resonance(0.9f);
+
+    filter.set_mode(Svf::Mode::bandpass);
+    float band = filter.process(1.0f);
+    REQUIRE(std::isfinite(band));
+
+    filter.set_mode(Svf::Mode::notch);
+    float notched = filter.process(1.0f);
+    REQUIRE(std::isfinite(notched));
+
+    float buffer[] = {1.0f, 0.5f, 0.0f, -0.5f};
+    filter.process(buffer, 4);
+    for (float sample : buffer) {
+        REQUIRE(std::isfinite(sample));
+    }
+
+    filter.reset();
+    filter.set_mode(Svf::Mode::lowpass);
+    float after_reset = filter.process(0.0f);
+    REQUIRE_THAT(after_reset, WithinAbs(0.0f, 1e-6f));
+}
+
 // ── WaveShaper ───────────────────────────────────────────────────────────────
 
 TEST_CASE("WaveShaper tanh clips", "[signal][waveshaper]") {
@@ -636,6 +709,23 @@ TEST_CASE("Panner hard right", "[signal][panner]") {
     REQUIRE_THAT(result.right, WithinAbs(1.0, 0.01));
 }
 
+TEST_CASE("Panner clamps and processes stereo in place",
+          "[signal][panner][issue-645]") {
+    Panner pan;
+    pan.set_pan(-2.0f);
+    REQUIRE_THAT(pan.pan(), WithinAbs(-1.0f, 1e-6f));
+    pan.set_pan(2.0f);
+    REQUIRE_THAT(pan.pan(), WithinAbs(1.0f, 1e-6f));
+
+    pan.set_pan(0.0f);
+    float left = 2.0f;
+    float right = -2.0f;
+    pan.process(left, right);
+
+    REQUIRE_THAT(left, WithinAbs(std::sqrt(2.0f), 1e-5f));
+    REQUIRE_THAT(right, WithinAbs(-std::sqrt(2.0f), 1e-5f));
+}
+
 // ── Chorus ───────────────────────────────────────────────────────────────────
 
 TEST_CASE("Chorus produces stereo output", "[signal][chorus]") {
@@ -677,6 +767,33 @@ TEST_CASE("Phaser modifies signal", "[signal][phaser]") {
     // Output should differ from input (phase cancellation effects)
     REQUIRE(sum_in > 0.0f);
     REQUIRE(sum_diff > 0.01f);
+}
+
+TEST_CASE("Phaser clamps stage and feedback settings and resets",
+          "[signal][phaser][issue-645]") {
+    Phaser phaser;
+    phaser.set_sample_rate(48000.0f);
+    phaser.set_rate(2.0f);
+    phaser.set_depth(1.0f);
+    phaser.set_feedback(4.0f);
+    phaser.set_stages(99);
+    phaser.set_mix(0.75f);
+
+    std::array<float, 5> first{{1.0f, 0.25f, -0.5f, 0.0f, 0.125f}};
+    auto second = first;
+
+    phaser.process(first.data(), static_cast<int>(first.size()));
+    for (float sample : first) {
+        REQUIRE(std::isfinite(sample));
+    }
+
+    phaser.reset();
+    phaser.process(second.data(), static_cast<int>(second.size()));
+    REQUIRE(first == second);
+
+    Phaser dry;
+    dry.set_mix(0.0f);
+    REQUIRE_THAT(dry.process(-0.5f), WithinAbs(-0.5f, 1e-6f));
 }
 
 // ── Reverb ───────────────────────────────────────────────────────────────────
