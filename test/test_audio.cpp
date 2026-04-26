@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/audio/audio.hpp>
+#include <pulp/audio/channel_set.hpp>
 #include <cmath>
 #include <numbers>
 #include <thread>
@@ -77,6 +78,57 @@ TEST_CASE("BufferView non-owning", "[audio][buffer]") {
     // Modifications go through to original memory
     view.channel(0)[0] = 99.0f;
     REQUIRE(ch0[0] == 99.0f);
+}
+
+TEST_CASE("ChannelSet maps standard layouts by count and name",
+          "[audio][channel-set][issue-640]") {
+    REQUIRE(ChannelSet::from_channel_count(0).name == "Discrete 0");
+    REQUIRE(ChannelSet::from_channel_count(1) == ChannelSet::mono());
+    REQUIRE(ChannelSet::from_channel_count(2) == ChannelSet::stereo());
+    REQUIRE(ChannelSet::from_channel_count(3) == ChannelSet::lrc());
+    REQUIRE(ChannelSet::from_channel_count(4) == ChannelSet::quad());
+    REQUIRE(ChannelSet::from_channel_count(5) == ChannelSet::surround_5_0());
+    REQUIRE(ChannelSet::from_channel_count(6) == ChannelSet::surround_5_1());
+    REQUIRE(ChannelSet::from_channel_count(8) == ChannelSet::surround_7_1());
+    REQUIRE(ChannelSet::from_channel_count(12) == ChannelSet::surround_7_1_4());
+    REQUIRE(ChannelSet::from_channel_count(9).name == "Discrete 9");
+    REQUIRE(ChannelSet::from_channel_count(9).size() == 9);
+
+    REQUIRE(ChannelSet::from_name("Mono") == ChannelSet::mono());
+    REQUIRE(ChannelSet::from_name("Stereo") == ChannelSet::stereo());
+    REQUIRE(ChannelSet::from_name("LRC") == ChannelSet::lrc());
+    REQUIRE(ChannelSet::from_name("Quad") == ChannelSet::quad());
+    REQUIRE(ChannelSet::from_name("5.0") == ChannelSet::surround_5_0());
+    REQUIRE(ChannelSet::from_name("5.1") == ChannelSet::surround_5_1());
+    REQUIRE(ChannelSet::from_name("7.1") == ChannelSet::surround_7_1());
+    REQUIRE(ChannelSet::from_name("7.1.4") == ChannelSet::surround_7_1_4());
+    REQUIRE(ChannelSet::from_name("7.1.4 (Atmos bed)") == ChannelSet::surround_7_1_4());
+    REQUIRE(ChannelSet::from_name("not-a-layout") == ChannelSet::discrete(2));
+}
+
+TEST_CASE("ChannelSet speaker names and equality are deterministic",
+          "[audio][channel-set][issue-640]") {
+    REQUIRE(speaker_name(Speaker::FrontLeft) == "Front Left");
+    REQUIRE(speaker_name(Speaker::FrontRight) == "Front Right");
+    REQUIRE(speaker_name(Speaker::FrontCenter) == "Front Center");
+    REQUIRE(speaker_name(Speaker::LFE) == "LFE");
+    REQUIRE(speaker_name(Speaker::BackLeft) == "Back Left");
+    REQUIRE(speaker_name(Speaker::BackRight) == "Back Right");
+    REQUIRE(speaker_name(Speaker::SideLeft) == "Side Left");
+    REQUIRE(speaker_name(Speaker::SideRight) == "Side Right");
+    REQUIRE(speaker_name(Speaker::TopFrontLeft) == "Top Front Left");
+    REQUIRE(speaker_name(Speaker::TopFrontRight) == "Top Front Right");
+    REQUIRE(speaker_name(Speaker::TopBackLeft) == "Top Back Left");
+    REQUIRE(speaker_name(Speaker::TopBackRight) == "Top Back Right");
+    REQUIRE(speaker_name(Speaker::TopCenter) == "Top Center");
+    REQUIRE(speaker_name(Speaker::Discrete) == "Discrete");
+    REQUIRE(speaker_name(static_cast<Speaker>(255)) == "Unknown");
+
+    ChannelSet renamed_stereo;
+    renamed_stereo.name = "Renamed";
+    renamed_stereo.speakers = {Speaker::FrontLeft, Speaker::FrontRight};
+    REQUIRE(renamed_stereo == ChannelSet::stereo());
+    REQUIRE_FALSE(ChannelSet::stereo() == ChannelSet::quad());
 }
 
 #if defined(__APPLE__) && !TARGET_OS_IPHONE
