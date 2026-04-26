@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-26 19:39 EDT
+Last reviewed: 2026-04-26 19:42 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -183,6 +183,10 @@ Open Phase 3 PRs:
   Namespace run exposed a cmd/PowerShell portability issue in the test
   commands. This tranche also uses the GitHub/Namespace path while the
   SSH `windows` target remains unreachable.
+- `#833` signal filter-design edge coverage for `#645`, branch
+  `feature/signal-biquad-coverage-645`, head `740bdc9c`; opened from
+  `main` at `87ef6d90`. This tranche also uses the GitHub/Namespace
+  path while the SSH `windows` target remains unreachable.
 
 Local Phase 3 draft worktrees:
 
@@ -601,6 +605,19 @@ Local Phase 3 draft worktrees:
   assertions in `5` cases, full binary passed `46` assertions in `17`
   cases, focused CTest passed `5/5`, `git diff --check HEAD~1..HEAD`,
   `git diff --check`, skill-sync report, and version-bump report.
+- `#645` signal filter-design worktree
+  `/Users/danielraffel/Code/pulp-signal-biquad-coverage-645`, branch
+  `feature/signal-biquad-coverage-645`, commit `740bdc9c`; open as PR
+  `#833`.
+  Scope: test-only coverage for peaking boost/cut coefficients, low/high
+  shelf cut paths, shelf slope variants, and Butterworth empty/high-order
+  section behavior. This intentionally touches only
+  `test_filter_design.cpp` to avoid overlap with open `test_signal.cpp`
+  tranches. Local validation: no-GPU/no-examples configure,
+  `pulp-test-filter-design` build, direct `[issue-645]` run passed `100`
+  assertions in `3` cases, full binary passed `116` assertions in `14`
+  cases, focused CTest passed `14/14`, `git diff --check HEAD~1..HEAD`,
+  `git diff --check`, skill-sync report, and version-bump report.
 
 Open supporting PR:
 
@@ -617,7 +634,7 @@ Open supporting PR:
   `#830` opened, `#831` opened, `#827` merged, `#832` opened, `#826`
   merged, and `#832` was repaired for Windows cmd portability, and
   `#831` was repaired for Windows float tolerance, and `#822` merged,
-  and remains docs-only.
+  and `#833` opened, and remains docs-only.
 
 Local environment note:
 
@@ -651,10 +668,13 @@ Next recovery actions:
 6. Monitor `#832` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-platform-child-process-coverage-640`,
    patch, validate locally, and push with lease.
-7. If any open Phase 3 PR is green but GitHub reports it behind `main`,
+7. Monitor `#833` cloud checks; if a required lane fails, debug in
+   `/Users/danielraffel/Code/pulp-signal-biquad-coverage-645`, patch,
+   validate locally, and push with lease.
+8. If any open Phase 3 PR is green but GitHub reports it behind `main`,
    rebase that branch onto `origin/main`, push with lease, and let
    checks rerun.
-8. Continue Phase 3 from the tranche issues below, prioritizing
+9. Continue Phase 3 from the tranche issues below, prioritizing
    represented high-miss files over adding new perimeter lanes.
 
 ## Phase 1 corrected baseline
