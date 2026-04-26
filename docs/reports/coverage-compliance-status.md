@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-26 03:15 EDT
+Last reviewed: 2026-04-26 13:37 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -128,117 +128,30 @@ Merged after the Phase 1 closeout / `#723` baseline:
 - `#795` events volume/service-discovery coverage -> `f1a5aa84`
 - `#802` CLI-create shellout coverage -> `2de79ff3`
 - `#803` signal matrix helper coverage -> `57285797`
+- `#801` render texture-atlas coverage and LCOV converter fix -> `ae4fdab8`
+- `#804` signal Oversampler helper coverage -> `c6600f9`
+- `#805` CLI common helper coverage -> `5844c6ac`
+- `#806` audio mapped-reader/offline processing coverage -> `1bcb23e3`
+- `#807` audio ChannelSet helper coverage -> `46e0fdeb`
+- `#808` MIDI file edge round-trip coverage -> `aae5d5d0`
+- `#809` signal FFT/convolver helper coverage -> `453bcec8`
 
 Open Phase 3 PRs:
 
-- `#801` `fix(render): harden texture atlas edge cases`, branch
-  `feature/render-texture-atlas-coverage-646`, commit `325485bc`,
-  worktree `/Users/danielraffel/Code/pulp-render-texture-atlas-coverage-646`.
-  Scope: reject non-positive `AtlasPacker` allocation dimensions, clamp
-  repeated `ImageAtlas::release()` calls so refcounts cannot underflow,
-  avoid unsigned frame-age underflow for Image/Gradient/Glyph/Path atlas
-  eviction when `last_used` is ahead of `current_frame`, cover
-  full-atlas allocation failure and `GradientAtlas` capacity exhaustion,
-  and move `pulp-test-texture-atlas` out of the GPU-only CMake block
-  because the helpers are header-only. Local validation: GPU-off
-  configure with `PULP_BUILD_EXAMPLES=OFF` and `PULP_ENABLE_GPU=OFF`,
-  `pulp-test-texture-atlas` target build, direct binary passed with
-  `1139` assertions in `22` test cases, focused texture/atlas CTest
-  passed `20/20`, `git diff --check` clean, skill sync clean, and version
-  report clean with explicit `Version-Bump: sdk=patch` for the
-  header-only behavior fix. The branch was rebased onto `origin/main`
-  after `#795` merged, then updated as `325485bc` after Codecov reported
-  a false diff-coverage miss for covered `texture_atlas.hpp` lines. The
-  follow-up fixes `tools/scripts/lcov_cobertura.py` so duplicate LCOV
-  source-file records merge instead of overwriting covered header hits,
-  and adds a regression test in `tools/scripts/test_run_coverage.py`.
-  Local validation for the follow-up: `test_run_coverage.py` passed,
-  direct `pulp-test-texture-atlas` passed, focused texture/atlas CTest
-  passed `20/20`, a local LLVM coverage-to-Cobertura reproduction showed
-  the changed atlas lines covered, `git diff --check` clean, skill sync
-  clean, and version report still clean. The PR is labeled `codecov` and
-  is using the direct GitHub/Namespace path.
-- `#804` `test(signal): cover oversampling helper edges`, branch
-  `feature/signal-oversampling-coverage-645`, commit `bccaec0f`,
-  worktree `/Users/danielraffel/Code/pulp-signal-oversampling-coverage-645`.
-  Scope: test-only signal `Oversampler` coverage for x2/x4 callback
-  dispatch, configured anti-alias filter paths, and reset determinism.
-  Local validation: no-GPU configure,
-  `pulp-test-signal` target build, direct Catch2 tag
-  `[signal][oversampling]` passed with `16` assertions in `2` test cases,
-  focused CTest `Oversampler` passed `2/2`, `git diff --check` clean,
-  skill sync clean, and version bump report says no bump needed. The
-  local build still reports an existing unused-variable warning elsewhere
-  in `test/test_signal.cpp`; it is not introduced by this tranche. The PR
-  is labeled `codecov` and is using the direct GitHub/Namespace path.
-- `#805` `test(cli): cover common helper edges`, branch
-  `feature/cli-common-coverage-643`, commit `17b42f0f`, worktree
-  `/Users/danielraffel/Code/pulp-cli-common-coverage-643`.
-  Scope: test-only CLI common helper coverage for numeric parsing,
-  string normalization, root/path containment helpers, `PULP_HOME` and
-  config overrides, create-format defaults, AAX helper labels, shell
-  quoting, and fuzzy scoring. Local validation: no-GPU configure,
-  `pulp-test-cli-project-command` target build, direct Catch2 tag
-  `[cli][common][issue-643]` passed with `54` assertions in `4` test
-  cases, focused CTest `cli common` passed `4/4`, `git diff --check`
+- `#810` `test(platform): cover environment diff edges`, branch
+  `feature/platform-environment-coverage-640`, commit `bc1e96af`,
+  worktree `/Users/danielraffel/Code/pulp-platform-environment-coverage-640`.
+  Scope: test-only platform `Environment` coverage for inert empty
+  listener subscriptions, token move-assignment replacement, keyboard
+  animation-duration diffs, left/right safe-area diffs, display
+  physical/name/refresh metadata diffs, and isolated orientation/lifecycle
+  changes. Local validation after rebasing onto `main` at `453bcec8`:
+  `pulp-test-environment` target build, direct Catch2 selector
+  `[environment][issue-640]` passed with `32` assertions in `5` test
+  cases, focused CTest `Environment` passed `16/16`, `git diff --check`
   clean, skill sync clean, and version bump report says no bump needed.
   The PR is labeled `codecov` and is using the direct GitHub/Namespace
   path.
-- `#806` `test(audio): cover mapped reader and offline processing`,
-  branch `feature/audio-reader-coverage-640`, commit `c1d61e3a`,
-  worktree `/Users/danielraffel/Code/pulp-audio-reader-coverage-640`.
-  Scope: deterministic `MemoryMappedAudioReader` coverage for
-  open/read-range/read-all/close/missing-file paths, offline processing
-  coverage for guard paths, non-divisible block tails, `apply_gain`, and
-  `offline_process_file` registry dispatch, plus a defensive production
-  guard so `block_size <= 0` returns `nullopt` instead of hanging. Local
-  validation: no-GPU configure, `pulp-test-audio-file` target build,
-  direct Catch2 tag `[issue-640]` passed with `159` assertions in `7`
-  test cases, full `pulp-test-audio-file` passed with `392` assertions in
-  `22` test cases, focused CTest passed `15/15`, `git diff --check`
-  clean, skill sync clean, and version bump report exits clean while
-  noting the SDK patch suggestion from the defensive production guard.
-  The PR is labeled `codecov` and is using the direct GitHub/Namespace
-  path.
-- `#807` `test(audio): cover channel set helpers`, branch
-  `feature/audio-channel-set-coverage-640`, commit `89b969c9`,
-  worktree `/Users/danielraffel/Code/pulp-audio-channel-set-coverage-640`.
-  Scope: test-only `ChannelSet` coverage for standard layouts by count
-  and name, discrete fallbacks, speaker-name mappings including the
-  unknown-enum fallback, and equality semantics. Local validation:
-  no-GPU configure, `pulp-test-audio` target build, direct Catch2 tag
-  `[audio][channel-set][issue-640]` passed with `38` assertions in `2`
-  test cases, focused CTest `ChannelSet` passed `2/2`, diff check
-  clean, skill sync clean, and version bump report says no bump
-  needed. The PR is labeled `codecov` and is using the direct
-  GitHub/Namespace path.
-- `#808` `test(midi): cover file edge round trips`, branch
-  `feature/midi-file-coverage-645`, commit `d02e853e`, worktree
-  `/Users/danielraffel/Code/pulp-midi-file-coverage-645`.
-  Scope: test-only MIDI file coverage for empty-track and zero-event
-  round-trips, plus multi-track program-change, pitch-bend, and note-on
-  readback. Local validation: no-GPU configure,
-  `pulp-test-midi` target build, direct Catch2 tag
-  `[midi][file][issue-645]` passed with `19` assertions in `2` test
-  cases, focused CTest `MidiFile` passed `5/5`, `git diff --check`
-  clean, skill sync clean, and version bump report says no bump needed.
-  The PR is labeled `codecov` and is using the direct GitHub/Namespace
-  path.
-- `#809` `test(signal): cover fft helper edges`, branch
-  `feature/signal-fft-coverage-645`, commit `11c83082`, worktree
-  `/Users/danielraffel/Code/pulp-signal-fft-coverage-645`.
-  Scope: test-only FFT helper coverage for move construction and move
-  assignment, linear and dB magnitude edge cases including silence
-  clamping, exact-bin real FFT conjugate symmetry, and `Convolver::reset`
-  clearing buffered overlap. Local validation: no-GPU configure,
-  `pulp-test-signal` target build, direct Catch2 selector
-  `[signal][fft],[signal][convolver][issue-645]` passed with `582`
-  assertions in `8` test cases, focused CTest `FFT|Convolver` passed
-  `10/10`, `git diff --check` clean, skill sync clean, and version bump
-  report says no bump needed. The local build still reports the existing
-  unused-variable warning elsewhere in `test/test_signal.cpp`; this
-  tranche does not introduce it. The PR is labeled `codecov` and is using
-  the direct GitHub/Namespace path.
 
 Local Phase 3 draft worktrees:
 
@@ -283,7 +196,8 @@ Local Phase 3 draft worktrees:
 - `#646` texture-atlas render worktree
   `/Users/danielraffel/Code/pulp-render-texture-atlas-coverage-646`,
   branch `feature/render-texture-atlas-coverage-646`, commit
-  `325485bc`; open as PR `#801`.
+  `325485bc`; merged via PR `#801` as `ae4fdab8`. The remote branch was
+  deleted after merge.
 - `#645` signal matrix helper worktree
   `/Users/danielraffel/Code/pulp-signal-matrix-coverage-645`, branch
   `feature/signal-matrix-coverage-645`, commit `b1f5a125`; merged via PR
@@ -291,47 +205,40 @@ Local Phase 3 draft worktrees:
 - `#645` signal oversampling helper worktree
   `/Users/danielraffel/Code/pulp-signal-oversampling-coverage-645`,
   branch `feature/signal-oversampling-coverage-645`, commit `bccaec0f`;
-  open as PR `#804`.
+  merged via PR `#804` as `c6600f9`. The remote branch was deleted after
+  merge.
 - `#643` CLI common helper worktree
   `/Users/danielraffel/Code/pulp-cli-common-coverage-643`, branch
-  `feature/cli-common-coverage-643`, commit `17b42f0f`; open as PR
-  `#805`.
+  `feature/cli-common-coverage-643`, commit `17b42f0f`; merged via PR
+  `#805` as `5844c6ac`. The remote branch was deleted after merge.
 - `#640` mapped-reader/offline audio worktree
   `/Users/danielraffel/Code/pulp-audio-reader-coverage-640`, branch
-  `feature/audio-reader-coverage-640`, commit `c1d61e3a`; open as PR
-  `#806`.
+  `feature/audio-reader-coverage-640`, commit `c1d61e3a`; merged via PR
+  `#806` as `1bcb23e3`. The remote branch was deleted after merge.
 - `#640` ChannelSet audio worktree
   `/Users/danielraffel/Code/pulp-audio-channel-set-coverage-640`,
   branch `feature/audio-channel-set-coverage-640`, commit `89b969c9`;
-  open as PR `#807`.
+  merged via PR `#807` as `46e0fdeb`. The remote branch was deleted after
+  merge.
 - `#640` platform Environment diff-edge worktree
   `/Users/danielraffel/Code/pulp-platform-environment-coverage-640`,
   branch `feature/platform-environment-coverage-640`, commit
-  `b298c7a2`; local-only draft, not opened as a PR yet. Scope: empty
-  listener subscription, token move-assignment replacement, keyboard
-  animation-duration diffs, left/right safe-area diffs, display
-  physical/name/refresh metadata diffs, and isolated orientation/
-  lifecycle changes. Local validation: no-GPU configure,
-  `pulp-test-environment` target build, direct Catch2 selector
-  `[environment][issue-640]` passed with `32` assertions in `5` test
-  cases, focused CTest `Environment` passed `16/16`, `git diff --check`
-  clean, skill sync clean, and version bump report says no bump needed.
-  Hold local until the active CI queue has a merge slot.
+  `bc1e96af`; open as PR `#810`.
 - `#645` MIDI file edge round-trip worktree
   `/Users/danielraffel/Code/pulp-midi-file-coverage-645`, branch
-  `feature/midi-file-coverage-645`, commit `d02e853e`; open as PR
-  `#808`.
+  `feature/midi-file-coverage-645`, commit `d02e853e`; merged via PR
+  `#808` as `aae5d5d0`. The remote branch was deleted after merge.
 - `#645` signal FFT/convolver helper worktree
   `/Users/danielraffel/Code/pulp-signal-fft-coverage-645`, branch
-  `feature/signal-fft-coverage-645`, commit `11c83082`; open as PR
-  `#809`.
+  `feature/signal-fft-coverage-645`, commit `11c83082`; merged via PR
+  `#809` as `453bcec8`. The remote branch was deleted after merge.
 
 Open supporting PR:
 
 - `#774` refreshes this durable handoff/status document, branch
   `docs/coverage-status-2026-04-25`. The branch is updated as this
   tracker changes; use the PR head SHA in GitHub as the live value.
-  The branch has been rebased onto `origin/main` after `#803` merged and
+  The branch has been rebased onto `origin/main` after `#809` merged and
   remains docs-only.
 
 Local environment note:
@@ -345,15 +252,12 @@ Local environment note:
 Next recovery actions:
 
 1. Keep `#774` docs-only and let its latest status-update checks drain.
-2. Monitor `#801`, `#804`, `#805`, `#806`, `#807`, `#808`, and `#809`
+2. Monitor `#810`
    and address any Codecov, build, sanitizer, or Namespace feedback.
 3. If any open Phase 3 PR is green but GitHub reports it behind `main`,
    rebase that branch onto `origin/main`, push with lease, and let
    checks rerun.
-4. When the queue has a merge slot, push/open the local #640 platform
-   Environment draft from
-   `/Users/danielraffel/Code/pulp-platform-environment-coverage-640`.
-5. Continue Phase 3 from the tranche issues below, prioritizing
+4. Continue Phase 3 from the tranche issues below, prioritizing
    represented high-miss files over adding new perimeter lanes.
 
 ## Phase 1 corrected baseline
