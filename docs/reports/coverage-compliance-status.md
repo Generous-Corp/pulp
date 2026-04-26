@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-25 21:14 EDT
+Last reviewed: 2026-04-25 21:23 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -67,39 +67,32 @@ Finish line:
 
 Latest complete Codecov `main` report observed while updating this doc:
 
-- commit: `e61dce8d907c29888fd7dd97ae7f49e3bc219662`
-- workflow: Coverage run `24942795469`, completed successfully
-- overall tracked coverage: `44.85%` over `70,229` lines in `556` files
-- covered lines: `31,498`
+- commit: `23d3ed1d9dca9b39e3e7f3a851698eb93c717ae6`
+- workflow: Coverage run `24944888062`, completed successfully
+- overall tracked coverage: `44.73%` over `70,325` lines in `556` files
+- covered lines: `31,458`
 - current component coverage from the Codecov API:
-  - `audio`: `25.45%`
-  - `canvas`: `67.14%`
-  - `dsl`: `68.3%`
-  - `events`: `33.48%`
-  - `format`: `52.89%`
-  - `host`: `45.92%`
-  - `midi`: `48.44%`
-  - `osc`: `66.26%`
-  - `platform`: `50.65%`
+  - `audio`: `25.53%`
+  - `canvas`: `65.87%`
+  - `dsl`: `68.85%`
+  - `events`: `49.64%`
+  - `format`: `52.64%`
+  - `host`: `44.32%`
+  - `midi`: `49.95%`
+  - `osc`: `67.47%`
+  - `platform`: `48.83%`
   - `render`: `62.31%`
-  - `runtime`: `50.2%`
-  - `signal`: `66.89%`
-  - `state`: `63.32%`
-  - `view`: `44.81%`
+  - `runtime`: `53.89%`
+  - `signal`: `63.96%`
+  - `state`: `66.69%`
+  - `view`: `44.6%`
   - `android`: `13.83%`
-  - `apple`: `25.36%`
-  - `linux`: `3.98%`
-  - `windows`: `15.02%`
-  - `cli`: `33.15%`
-  - `ship`: `57.66%`
-  - `tools`: `40.17%`
-
-Newer `main` state:
-
-- `#788` merged after the latest complete Codecov report above. The new
-  `main` head is `23d3ed1d9dca9b39e3e7f3a851698eb93c717ae6`.
-- Main Coverage run `24944888062` is in progress for `23d3ed1d`; refresh
-  this baseline from Codecov after it completes.
+  - `apple`: `25.72%`
+  - `linux`: `0.0%`
+  - `windows`: `10.13%`
+  - `cli`: `32.21%`
+  - `ship`: `59.15%`
+  - `tools`: `39.5%`
 
 Merged after the Phase 1 closeout / `#723` baseline:
 
@@ -160,14 +153,12 @@ Local environment note:
 
 Next recovery actions:
 
-1. Let main Coverage run `24944888062` for `23d3ed1d` drain, then refresh
-   this section with the next complete Codecov `main` report.
-2. Keep `#774` docs-only and let its post-`#788` rebase checks drain.
-3. Monitor `#793`; Shipyard is validating the PR and GitHub workflows are
+1. Keep `#774` docs-only and let its post-`#793` status-update checks drain.
+2. Monitor `#793`; Shipyard is validating the PR and GitHub workflows are
    running.
-4. If a new PR is green but GitHub reports it behind `main`, rebase that
+3. If a new PR is green but GitHub reports it behind `main`, rebase that
    branch onto `origin/main`, push with lease, and let checks rerun.
-5. Continue Phase 3 from the tranche issues below, prioritizing
+4. Continue Phase 3 from the tranche issues below, prioritizing
    represented high-miss files over adding new perimeter lanes.
 
 ## Phase 1 corrected baseline
