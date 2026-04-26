@@ -112,6 +112,39 @@ TEST_CASE("Compressor passes quiet signals", "[signal][comp]") {
     REQUIRE_THAT(out, WithinAbs(quiet, 0.001));
 }
 
+TEST_CASE("Compressor hard knee uses instant attack release and reset", "[signal][comp][issue-645]") {
+    Compressor comp;
+    comp.set_sample_rate(1000.0f);
+    comp.set_params({-20.0f, 2.0f, 0.0f, 0.0f, 0.0f, 0.0f});
+
+    REQUIRE_THAT(comp.process(0.1f), WithinAbs(0.1f, 1e-5f));
+    REQUIRE_THAT(comp.process(1.0f), WithinAbs(0.316228f, 1e-4f));
+    REQUIRE(comp.gain_reduction_db() < -9.9f);
+
+    REQUIRE_THAT(comp.process(0.01f), WithinAbs(0.01f, 1e-5f));
+    REQUIRE_THAT(comp.gain_reduction_db(), WithinAbs(0.0f, 1e-5f));
+
+    comp.process(1.0f);
+    comp.reset();
+    REQUIRE_THAT(comp.gain_reduction_db(), WithinAbs(0.0f, 1e-6f));
+}
+
+TEST_CASE("Compressor soft knee and buffer processing are deterministic", "[signal][comp][issue-645]") {
+    Compressor comp;
+    comp.set_sample_rate(1000.0f);
+    comp.set_params({-20.0f, 4.0f, 0.0f, 0.0f, 10.0f, 0.0f});
+
+    float knee_sample = comp.process(0.1f);
+    REQUIRE(knee_sample < 0.1f);
+    REQUIRE(knee_sample > 0.085f);
+
+    float buffer[] = {0.01f, 0.1f, 1.0f};
+    comp.process(buffer, 3);
+    REQUIRE_THAT(buffer[0], WithinAbs(0.01f, 1e-5f));
+    REQUIRE(buffer[1] < 0.1f);
+    REQUIRE(buffer[2] < 0.2f);
+}
+
 // ── Limiter ──────────────────────────────────────────────────────────────────
 
 TEST_CASE("Limiter caps at threshold", "[signal][limiter]") {
@@ -124,6 +157,21 @@ TEST_CASE("Limiter caps at threshold", "[signal][limiter]") {
         float out = lim.process(1.0f);
         REQUIRE(std::abs(out) <= 0.55f); // Should be limited near 0.5
     }
+}
+
+TEST_CASE("Limiter buffer processing and reset restore clean state", "[signal][limiter][issue-645]") {
+    Limiter lim;
+    lim.set_sample_rate(1000.0f);
+    lim.set_threshold_db(-6.0f);
+    lim.set_release_ms(1.0f);
+
+    float buffer[] = {2.0f, 0.25f, -2.0f};
+    lim.process(buffer, 3);
+    REQUIRE(std::abs(buffer[0]) <= 0.51f);
+    REQUIRE(std::abs(buffer[2]) <= 0.51f);
+
+    lim.reset();
+    REQUIRE_THAT(lim.process(0.25f), WithinAbs(0.25f, 1e-5f));
 }
 
 // ── SmoothedValue ────────────────────────────────────────────────────────────
@@ -595,6 +643,7 @@ TEST_CASE("Phaser modifies signal", "[signal][phaser]") {
         sum_diff += (output - input) * (output - input);
     }
     // Output should differ from input (phase cancellation effects)
+    REQUIRE(sum_in > 0.0f);
     REQUIRE(sum_diff > 0.01f);
 }
 
@@ -694,6 +743,28 @@ TEST_CASE("WindowFunction apply", "[signal][window]") {
     // Rectangular window should not change values
     REQUIRE_THAT(buf[0], WithinAbs(1.0, 0.001));
     REQUIRE_THAT(buf[3], WithinAbs(4.0, 0.001));
+}
+
+TEST_CASE("WindowFunction covers hamming flat-top and kaiser branches", "[signal][window][issue-645]") {
+    auto hamming = WindowFunction::generate(5, WindowFunction::Type::hamming);
+    REQUIRE_THAT(hamming.front(), WithinAbs(0.08f, 1e-5f));
+    REQUIRE_THAT(hamming.back(), WithinAbs(0.08f, 1e-5f));
+    REQUIRE_THAT(hamming[2], WithinAbs(1.0f, 1e-5f));
+
+    auto flat_top = WindowFunction::generate(9, WindowFunction::Type::flat_top);
+    REQUIRE(flat_top[4] > 0.99f);
+    REQUIRE(std::abs(flat_top.front()) < 0.001f);
+
+    auto kaiser_default = WindowFunction::generate(5, WindowFunction::Type::kaiser);
+    auto kaiser_custom = WindowFunction::generate(5, WindowFunction::Type::kaiser, 6.0f);
+    REQUIRE_THAT(kaiser_default.front(), WithinAbs(kaiser_default.back(), 1e-6f));
+    REQUIRE(kaiser_default[2] > kaiser_default.front());
+    REQUIRE(kaiser_custom.front() < kaiser_default.front());
+
+    float shaped[] = {1.0f, 1.0f, 1.0f, 1.0f, 1.0f};
+    WindowFunction::apply(shaped, hamming);
+    REQUIRE_THAT(shaped[0], WithinAbs(0.08f, 1e-5f));
+    REQUIRE_THAT(shaped[2], WithinAbs(1.0f, 1e-5f));
 }
 
 // ── FFT ──────────────────────────────────────────────────────────────────────
@@ -989,6 +1060,66 @@ TEST_CASE("MultiChannelMeter prepare clears stale clip flags", "[signal][meter]"
     const float* clean_channels[] = {clean.data()};
     meter.process(clean_channels, 1, static_cast<int>(clean.size()));
     REQUIRE_FALSE(meter.snapshot().channels[0].clipped);
+}
+
+TEST_CASE("MultiChannelMeter clamps channels and reset clears snapshot", "[signal][meter][issue-645]") {
+    MultiChannelMeter meter;
+    meter.prepare(100.0f, kMaxMeterChannels + 4);
+    REQUIRE(meter.snapshot().num_channels == kMaxMeterChannels);
+
+    std::array<std::array<float, 1>, kMaxMeterChannels> samples{};
+    std::array<const float*, kMaxMeterChannels> channels{};
+    for (int ch = 0; ch < kMaxMeterChannels; ++ch) {
+        samples[ch][0] = static_cast<float>(ch + 1) / 20.0f;
+        channels[ch] = samples[ch].data();
+    }
+
+    meter.process(channels.data(), kMaxMeterChannels, 1);
+    REQUIRE(meter.snapshot().num_channels == kMaxMeterChannels);
+    REQUIRE_THAT(meter.snapshot().channels[15].peak, WithinAbs(0.8f, 1e-6f));
+
+    meter.reset();
+    REQUIRE(meter.snapshot().num_channels == 0);
+}
+
+TEST_CASE("MultiChannelMeter silent stereo emits finite zero correlation", "[signal][meter][issue-645]") {
+    MultiChannelMeter meter;
+    meter.prepare(10.0f, 2);
+
+    std::vector<float> left(4, 0.0f);
+    std::vector<float> right(4, 0.0f);
+    const float* channels[] = {left.data(), right.data()};
+    meter.process(channels, 2, static_cast<int>(left.size()));
+
+    const auto& snap = meter.snapshot();
+    REQUIRE(snap.num_channels == 2);
+    REQUIRE_THAT(snap.correlation, WithinAbs(0.0f, 1e-6f));
+    REQUIRE(std::isinf(snap.channels[0].lufs_momentary));
+    REQUIRE(std::isinf(snap.lufs_integrated));
+}
+
+TEST_CASE("MultiChannelMeter waits for block threshold before emitting", "[signal][meter][issue-645]") {
+    MultiChannelMeter meter;
+    meter.prepare(1000.0f, 1);
+
+    std::vector<float> samples(5, 0.75f);
+    const float* channels[] = {samples.data()};
+    meter.process(channels, 1, static_cast<int>(samples.size()));
+
+    REQUIRE(meter.snapshot().num_channels == 1);
+    REQUIRE_THAT(meter.snapshot().channels[0].peak, WithinAbs(0.0f, 1e-6f));
+}
+
+TEST_CASE("MultiChannelMeter resets correlation accumulation window", "[signal][meter][issue-645]") {
+    MultiChannelMeter meter;
+    meter.prepare(10.0f, 2);
+
+    float left[] = {0.5f};
+    float right[] = {0.5f};
+    const float* channels[] = {left, right};
+    meter.process(channels, 2, 1);
+
+    REQUIRE_THAT(meter.snapshot().correlation, WithinAbs(1.0f, 1e-6f));
 }
 
 TEST_CASE("MultiChannelBallistics holds peaks and clip indicators", "[signal][meter]") {

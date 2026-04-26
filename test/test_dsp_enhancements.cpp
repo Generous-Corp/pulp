@@ -64,6 +64,59 @@ TEST_CASE("DryWetMixer 50/50 linear", "[dsp][dry_wet]") {
     REQUIRE_THAT(wet[0], WithinAbs(0.5f, 1e-5));
 }
 
+TEST_CASE("DryWetMixer clamps mix and applies equal-power curve", "[dsp][dry_wet][issue-645]") {
+    DryWetMixer mixer;
+    mixer.set_mix(-0.5f);
+    REQUIRE_THAT(mixer.mix(), WithinAbs(0.0f, 1e-6f));
+    mixer.set_mix(2.0f);
+    REQUIRE_THAT(mixer.mix(), WithinAbs(1.0f, 1e-6f));
+
+    mixer.set_mix(0.5f);
+    mixer.set_curve(MixCurve::EqualPower);
+    mixer.prepare(1, 16);
+
+    float dry[] = {1.0f};
+    float wet[] = {0.0f};
+    const float* dry_ptrs[] = {dry};
+    float* wet_ptrs[] = {wet};
+
+    mixer.push_dry(dry_ptrs, 1, 1);
+    mixer.mix_wet(wet_ptrs, 1, 1);
+
+    REQUIRE_THAT(wet[0], WithinAbs(0.7071068f, 1e-4f));
+}
+
+TEST_CASE("DryWetMixer latency delays dry path and reset clears history", "[dsp][dry_wet][issue-645]") {
+    DryWetMixer mixer;
+    mixer.set_mix(0.0f);
+    mixer.set_wet_latency(2);
+    mixer.prepare(2, 8);
+
+    float dry_l[] = {1.0f, 2.0f, 3.0f};
+    float dry_r[] = {10.0f, 20.0f, 30.0f};
+    float wet_l[] = {100.0f, 100.0f, 100.0f};
+    float wet_r[] = {200.0f, 200.0f, 200.0f};
+    const float* dry_ptrs[] = {dry_l, dry_r};
+    float* wet_ptrs[] = {wet_l, wet_r};
+
+    mixer.push_dry(dry_ptrs, 2, 3);
+    mixer.mix_wet(wet_ptrs, 2, 3);
+
+    REQUIRE_THAT(wet_l[0], WithinAbs(0.0f, 1e-6f));
+    REQUIRE_THAT(wet_l[1], WithinAbs(0.0f, 1e-6f));
+    REQUIRE_THAT(wet_l[2], WithinAbs(1.0f, 1e-6f));
+    REQUIRE_THAT(wet_r[2], WithinAbs(10.0f, 1e-6f));
+
+    mixer.reset();
+    float wet_after_reset[] = {7.0f, 7.0f};
+    float* reset_ptrs[] = {wet_after_reset};
+    mixer.push_dry(dry_ptrs, 1, 2);
+    mixer.mix_wet(reset_ptrs, 1, 2);
+
+    REQUIRE_THAT(wet_after_reset[0], WithinAbs(0.0f, 1e-6f));
+    REQUIRE_THAT(wet_after_reset[1], WithinAbs(0.0f, 1e-6f));
+}
+
 // ── ProcessorDuplicator ─────────────────────────────────────────────────
 
 // Simple gain processor for testing
