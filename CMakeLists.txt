@@ -517,9 +517,15 @@ endif()
 # swap pair flips the user-facing default; this file is the no-op
 # build-graph scaffolding (PR #1).
 #
-# Same desktop guard as tools/cli — Rust crate links nothing native
-# but skipping on Android/iOS keeps mobile build matrices fast.
-if(NOT ANDROID AND NOT IOS
+# Mirror the EXACT desktop guard used for tools/cli above — both the
+# `NOT ANDROID AND NOT IOS` mobile-skip AND the `PULP_ENABLE_GPU`
+# desktop-CLI-lane guard. Without the GPU guard, sanitizer-style
+# GPU-off jobs still pull cargo into the default `all` build whenever
+# cargo happens to be on PATH, introducing unrelated Rust-toolchain
+# / network failures (and minutes of cargo build time) in lanes that
+# intentionally disable the CLI/GPU paths. Codex review on PR #778
+# (CMakeLists:523) flagged the missing guard as a P2.
+if(NOT ANDROID AND NOT IOS AND PULP_ENABLE_GPU
    AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/experimental/pulp-rs/CMakeLists.txt")
     add_subdirectory(experimental/pulp-rs)
 endif()

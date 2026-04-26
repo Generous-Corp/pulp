@@ -117,7 +117,14 @@ if(NOT _pulp_rs_install_bindir)
     set(_pulp_rs_install_bindir "bin")
 endif()
 
+# OPTIONAL because the staged binary only exists after the
+# `pulp-rust-cli` target has been built. Target-specific flows
+# (`cmake --build ... --target pulp-cli && cmake --install ...`)
+# never trigger the cargo step, and would otherwise fail the
+# install step trying to copy a file that was never produced.
+# Codex review on PR #778 (CMakeLists:122) flagged this as a P2.
 install(PROGRAMS "${_pulp_rs_dest_bin}"
-        DESTINATION "${_pulp_rs_install_bindir}")
+        DESTINATION "${_pulp_rs_install_bindir}"
+        OPTIONAL)
 
 message(STATUS "pulp-rs: enabled (cargo=${CARGO_EXECUTABLE}, profile=${PULP_RUST_CLI_PROFILE})")
