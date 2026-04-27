@@ -3354,16 +3354,89 @@ void WidgetBridge::register_api() {
         return choc::value::Value();
     });
 
-    // P3: Canvas globalCompositeOperation (blend mode)
-    engine_.register_function("canvasSetBlendMode", [this](choc::javascript::ArgumentList args) {
+    // CSS globalCompositeOperation → Canvas::BlendMode index. Returns -1
+    // for unknown strings so callers can no-op gracefully (issue-896).
+    auto cssCompositeOpToBlendModeIndex = [](const std::string& mode) -> int {
+        // Indices below MUST match Canvas::BlendMode in core/canvas/include/pulp/canvas/canvas.hpp.
+        if (mode == "source-over")      return 16; // also accepted at index 0 (normal)
+        if (mode == "destination-over") return 17;
+        if (mode == "source-in")        return 18;
+        if (mode == "destination-in")   return 19;
+        if (mode == "source-out")       return 20;
+        if (mode == "destination-out")  return 21;
+        if (mode == "source-atop")      return 22;
+        if (mode == "destination-atop") return 23;
+        if (mode == "xor")              return 24;
+        if (mode == "copy")             return 25;
+        if (mode == "lighter")          return 26;
+        // W3C advanced blend modes (indices match enum order)
+        if (mode == "multiply")     return 1;
+        if (mode == "screen")       return 2;
+        if (mode == "overlay")      return 3;
+        if (mode == "darken")       return 4;
+        if (mode == "lighten")      return 5;
+        if (mode == "color-dodge")  return 6;
+        if (mode == "color-burn")   return 7;
+        if (mode == "hard-light")   return 8;
+        if (mode == "soft-light")   return 9;
+        if (mode == "difference")   return 10;
+        if (mode == "exclusion")    return 11;
+        if (mode == "hue")          return 12;
+        if (mode == "saturation")   return 13;
+        if (mode == "color")        return 14;
+        if (mode == "luminosity")   return 15;
+        return -1; // unknown — caller treats as no-op
+    };
+
+    // P3: Canvas globalCompositeOperation (blend mode) — back-compat alias
+    engine_.register_function("canvasSetBlendMode", [this, cssCompositeOpToBlendModeIndex](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
-            CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::set_blend_mode;
             auto mode = args.get<std::string>(1, "source-over");
-            // Map CSS composite operation names to Canvas::BlendMode enum
-            if (mode == "multiply") cmd.int_val = 1;
-            else if (mode == "screen") cmd.int_val = 2;
-            else if (mode == "overlay") cmd.int_val = 3;
-            else cmd.int_val = 0; // source_over
+            int idx = cssCompositeOpToBlendModeIndex(mode);
+            if (idx < 0) return choc::value::Value(); // unknown string → no-op
+            CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::set_blend_mode;
+            cmd.int_val = idx;
+            c->add_command(cmd);
+        }
+        return choc::value::Value();
+    });
+
+    // canvasGlobalCompositeOperation — full CanvasRenderingContext2D
+    // globalCompositeOperation surface (issue-896). Accepts every standard
+    // CSS string and falls back to no-op on unknown values.
+    engine_.register_function("canvasGlobalCompositeOperation", [this, cssCompositeOpToBlendModeIndex](choc::javascript::ArgumentList args) {
+        if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
+            auto mode = args.get<std::string>(1, "source-over");
+            int idx = cssCompositeOpToBlendModeIndex(mode);
+            if (idx < 0) return choc::value::Value(); // unknown — graceful no-op
+            CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::set_blend_mode;
+            cmd.int_val = idx;
+            c->add_command(cmd);
+        }
+        return choc::value::Value();
+    });
+
+    // canvasSetTransform(id, a, b, c, d, e, f) — replace current transform
+    // with the affine matrix (issue-896). Used for devicePixelRatio scaling
+    // (ctx.setTransform(scale, 0, 0, scale, 0, 0)) and Spectr FilterBank.
+    engine_.register_function("canvasSetTransform", [this](choc::javascript::ArgumentList args) {
+        if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
+            CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::set_transform;
+            cmd.x  = (float)args.get<double>(1, 1.0); // a (scaleX)
+            cmd.y  = (float)args.get<double>(2, 0.0); // b (skewY)
+            cmd.w  = (float)args.get<double>(3, 0.0); // c (skewX)
+            cmd.h  = (float)args.get<double>(4, 1.0); // d (scaleY)
+            cmd.x2 = (float)args.get<double>(5, 0.0); // e (translateX)
+            cmd.y2 = (float)args.get<double>(6, 0.0); // f (translateY)
+            c->add_command(cmd);
+        }
+        return choc::value::Value();
+    });
+
+    // canvasClip(id) — intersect clip region with current path (issue-896).
+    engine_.register_function("canvasClip", [this](choc::javascript::ArgumentList args) {
+        if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
+            CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::clip;
             c->add_command(cmd);
         }
         return choc::value::Value();

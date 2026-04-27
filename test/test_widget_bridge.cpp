@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
+#include <pulp/canvas/canvas.hpp>
 #include <pulp/view/canvas_widget.hpp>
 #include <pulp/view/modal.hpp>
 #include <pulp/view/text_editor.hpp>
@@ -982,4 +983,154 @@ TEST_CASE("WidgetBridge __gpuComputeDispatchImpl tolerates malformed bufferDataB
             }
         }));
     )"));
+}
+
+// ── canvasSetTransform / canvasClip / canvasGlobalCompositeOperation (issue-896) ──
+//
+// These three CanvasRenderingContext2D bridge functions are exercised end-to-end:
+// the JS bridge records a CanvasDrawCmd, and CanvasWidget::paint() replays each
+// command on a pulp::canvas::RecordingCanvas, which lets us assert on the
+// resulting Canvas-API call sequence.
+namespace {
+static pulp::view::CanvasWidget* canvasFromBridge(pulp::view::WidgetBridge& bridge,
+                                                  pulp::view::ScriptEngine& engine,
+                                                  const std::string& id) {
+    auto value = engine.evaluate("document.getElementById('" + id + "')._id");
+    auto nativeId = std::string(value.getWithDefault<std::string_view>(""));
+    return dynamic_cast<pulp::view::CanvasWidget*>(bridge.widget(nativeId));
+}
+} // namespace
+
+TEST_CASE("WidgetBridge canvasSetTransform records affine matrix and replays via setMatrix",
+          "[view][bridge][canvas][issue-896]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        var c = document.createElement('canvas');
+        c.id = 'xform-canvas';
+        c.width = 200; c.height = 100;
+        document.body.appendChild(c);
+        var ctx = c.getContext('2d');
+        // Bypass the prelude — the bridge function is the unit under test.
+        canvasSetTransform(c._id, 2.0, 0.0, 0.0, 3.0, 17.0, 23.0);
+    )");
+    root.layout_children();
+
+    auto* canvas = canvasFromBridge(bridge, engine, "xform-canvas");
+    REQUIRE(canvas != nullptr);
+    REQUIRE(canvas->command_count() >= 1);
+
+    pulp::canvas::RecordingCanvas rec;
+    canvas->paint(rec);
+
+    bool sawSetTransform = false;
+    for (auto& cmd : rec.commands()) {
+        if (cmd.type == pulp::canvas::DrawCommand::Type::set_transform) {
+            REQUIRE_THAT(cmd.f[0], WithinAbs(2.0f, 1e-5f));
+            REQUIRE_THAT(cmd.f[1], WithinAbs(0.0f, 1e-5f));
+            REQUIRE_THAT(cmd.f[2], WithinAbs(0.0f, 1e-5f));
+            REQUIRE_THAT(cmd.f[3], WithinAbs(3.0f, 1e-5f));
+            REQUIRE_THAT(cmd.f[4], WithinAbs(17.0f, 1e-5f));
+            REQUIRE_THAT(cmd.f[5], WithinAbs(23.0f, 1e-5f));
+            sawSetTransform = true;
+        }
+    }
+    REQUIRE(sawSetTransform);
+}
+
+TEST_CASE("WidgetBridge canvasClip records clip command and replays Canvas::clip()",
+          "[view][bridge][canvas][issue-896]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        var c = document.createElement('canvas');
+        c.id = 'clip-canvas';
+        c.width = 200; c.height = 100;
+        document.body.appendChild(c);
+        canvasBeginPath(c._id);
+        canvasMoveTo(c._id, 10, 10);
+        canvasLineTo(c._id, 80, 10);
+        canvasLineTo(c._id, 80, 60);
+        canvasLineTo(c._id, 10, 60);
+        canvasClosePath(c._id);
+        canvasClip(c._id);
+        canvasRect(c._id, 0, 0, 200, 100, '#ff0000');
+    )");
+    root.layout_children();
+
+    auto* canvas = canvasFromBridge(bridge, engine, "clip-canvas");
+    REQUIRE(canvas != nullptr);
+
+    pulp::canvas::RecordingCanvas rec;
+    canvas->paint(rec);
+
+    int clipIndex = -1;
+    int fillRectAfterClip = -1;
+    int idx = 0;
+    for (auto& cmd : rec.commands()) {
+        if (cmd.type == pulp::canvas::DrawCommand::Type::clip) clipIndex = idx;
+        if (cmd.type == pulp::canvas::DrawCommand::Type::fill_rect && clipIndex >= 0
+            && fillRectAfterClip < 0) {
+            fillRectAfterClip = idx;
+        }
+        ++idx;
+    }
+    REQUIRE(clipIndex >= 0);                  // canvasClip dispatched Canvas::clip()
+    REQUIRE(fillRectAfterClip > clipIndex);   // subsequent draws are still issued (clip applies, doesn't drop)
+}
+
+TEST_CASE("WidgetBridge canvasGlobalCompositeOperation maps CSS strings to BlendMode",
+          "[view][bridge][canvas][issue-896]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        var c = document.createElement('canvas');
+        c.id = 'comp-canvas';
+        c.width = 200; c.height = 100;
+        document.body.appendChild(c);
+        canvasGlobalCompositeOperation(c._id, 'destination-out');
+        canvasGlobalCompositeOperation(c._id, 'multiply');
+        canvasGlobalCompositeOperation(c._id, 'lighter');
+        // Invalid string — must be a graceful no-op (no command emitted).
+        canvasGlobalCompositeOperation(c._id, 'not-a-real-blend-mode');
+        canvasGlobalCompositeOperation(c._id, 'source-over');
+    )");
+    root.layout_children();
+
+    auto* canvas = canvasFromBridge(bridge, engine, "comp-canvas");
+    REQUIRE(canvas != nullptr);
+
+    pulp::canvas::RecordingCanvas rec;
+    canvas->paint(rec);
+
+    std::vector<int> blendIndices;
+    for (auto& cmd : rec.commands()) {
+        if (cmd.type == pulp::canvas::DrawCommand::Type::set_blend_mode) {
+            blendIndices.push_back(static_cast<int>(cmd.f[0]));
+        }
+    }
+
+    // 4 valid strings → 4 set_blend_mode commands; the bogus mode string
+    // emits nothing.
+    REQUIRE(blendIndices.size() == 4);
+    using BM = pulp::canvas::Canvas::BlendMode;
+    REQUIRE(blendIndices[0] == static_cast<int>(BM::destination_out));
+    REQUIRE(blendIndices[1] == static_cast<int>(BM::multiply));
+    REQUIRE(blendIndices[2] == static_cast<int>(BM::lighter));
+    REQUIRE(blendIndices[3] == static_cast<int>(BM::source_over));
 }

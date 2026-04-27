@@ -140,6 +140,15 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
             // Clip to current path (fill_current_path sets the clip)
             canvas.clip_rect(cmd.x, cmd.y, cmd.w, cmd.h); // fallback
             break;
+        case CanvasDrawCmd::Type::set_transform:
+            // Affine matrix laid out as cmd.x = a, cmd.y = b, cmd.w = c,
+            // cmd.h = d, cmd.x2 = e, cmd.y2 = f (issue-896).
+            canvas.set_transform(cmd.x, cmd.y, cmd.w, cmd.h, cmd.x2, cmd.y2);
+            break;
+        case CanvasDrawCmd::Type::clip:
+            // Intersect clip with current path (issue-896).
+            canvas.clip();
+            break;
 
         // Arc
         case CanvasDrawCmd::Type::stroke_arc:
