@@ -333,7 +333,9 @@ export PATH="$HOME/.pulp/bin:$PATH"   # add ~/.pulp/bin to PATH (one-time)
 After install, every Pulp checkout that has `~/.pulp/bin` on PATH gets
 the same pinned Shipyard version automatically. The pin lives in
 `tools/shipyard.toml` and is bumped via PR after each Shipyard release
-that passes Pulp's CI matrix.
+that passes Pulp's CI matrix. Use `shipyard pin bump --to vX.Y.Z`
+instead of hand-editing `tools/shipyard.toml`; the helper owns the pin
+edit and worktree-safety checks.
 
 The two tools cover the same target matrix (mac local + Linux SSH +
 Windows SSH + Namespace cloud) and accept the same `--base` flag for
