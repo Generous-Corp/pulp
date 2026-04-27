@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-27 00:16 EDT
+Last reviewed: 2026-04-27 00:20 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -168,6 +168,7 @@ Merged after the Phase 1 closeout / `#723` baseline:
 - `#839` GPU graph render helper hardening/coverage -> `62ad9870`
 - `#832` platform child-process edge coverage -> `3f92f066`
 - `#842` inspect Codecov classification -> `51be8860`
+- `#835` CLI ship command validation coverage -> `93d3656e`
 
 Open Phase 3 PRs:
 
@@ -175,15 +176,6 @@ As of this review, the open `codecov` PR queue has no failing checks.
 The oldest PRs are blocked by still-queued macOS / sanitizer / Namespace
 jobs rather than code failures.
 
-- `#835` CLI ship command validation coverage for `#643`, branch
-  `feature/cli-ship-coverage-643`, head `b8f22af9`; opened from
-  `main` at `5b8e4529`, then rebased onto `b5e7a463` and updated after
-  Linux Namespace exposed that the Android validation test created
-  `artifacts/` before asserting the missing-artifacts check path. It was
-  updated again to isolate Android signing config via a scratch
-  `PULP_HOME` and cleared password env vars. This tranche also uses the
-  GitHub/Namespace path while the SSH `windows` target remains
-  unreachable.
 - `#840` events child-process manager coverage for `#642`, branch
   `feature/events-child-process-coverage-642`, head `410a0371`; opened
   from `main` at `455c0a9d`, then rebased onto `eaf991b0` after `#829`
