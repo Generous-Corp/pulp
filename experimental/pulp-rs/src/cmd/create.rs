@@ -981,4 +981,170 @@ mod tests {
         .unwrap_err();
         assert!(err.to_string().contains("--ci"));
     }
+
+    // ── #45 coverage uplift slice 14 — create.rs cushion ───────────
+
+    #[test]
+    fn parse_help_no_args_does_not_set_help() {
+        // No args → Default (NOT Help). Help only fires on explicit
+        // --help / -h. Name is empty; kind takes the CreateArgs::default()
+        // value (which the C++ side sets to "effect").
+        let p = parse_args(&[]);
+        assert!(!p.wants_help);
+        assert!(p.name.is_empty());
+    }
+
+    #[test]
+    fn parse_args_short_h_sets_help() {
+        let p = parse_args(&["-h".to_owned()]);
+        assert!(p.wants_help);
+    }
+
+    #[test]
+    fn parse_args_captures_type_and_name() {
+        let p = parse_args(&[
+            "MyPlug".to_owned(),
+            "--type".to_owned(),
+            "instrument".to_owned(),
+        ]);
+        assert_eq!(p.name, "MyPlug");
+        assert_eq!(p.kind, "instrument");
+    }
+
+    #[test]
+    fn parse_args_captures_mpe_and_template_and_manufacturer() {
+        let p = parse_args(&[
+            "Foo".to_owned(),
+            "--mpe".to_owned(),
+            "--template".to_owned(),
+            "gain".to_owned(),
+            "--manufacturer".to_owned(),
+            "Acme".to_owned(),
+        ]);
+        assert_eq!(p.name, "Foo");
+        assert!(p.mpe);
+        assert_eq!(p.template.as_deref(), Some("gain"));
+        assert_eq!(p.manufacturer, "Acme");
+    }
+
+    #[test]
+    fn parse_args_captures_output_path_and_targets() {
+        let p = parse_args(&[
+            "Foo".to_owned(),
+            "--output".to_owned(),
+            "/tmp/out".to_owned(),
+            "--targets".to_owned(),
+            "android,ios".to_owned(),
+        ]);
+        assert_eq!(p.output.as_deref().map(Path::to_str), Some(Some("/tmp/out")));
+        assert_eq!(p.targets, vec!["android", "ios"]);
+    }
+
+    #[test]
+    fn parse_args_in_tree_aliases_and_no_build_and_ci_aliases() {
+        for tok in &["--in-tree", "--example"] {
+            let p = parse_args(&["x".to_owned(), (*tok).to_owned()]);
+            assert!(p.in_tree, "{tok} did not set in_tree");
+        }
+        let p1 = parse_args(&["x".to_owned(), "--no-build".to_owned()]);
+        assert!(p1.no_build);
+        for tok in &["--no-interactive", "--ci"] {
+            let p = parse_args(&["x".to_owned(), (*tok).to_owned()]);
+            assert!(p.ci_mode, "{tok} did not set ci_mode");
+        }
+    }
+
+    #[test]
+    fn parse_args_first_non_flag_wins_as_name() {
+        let p = parse_args(&[
+            "first".to_owned(),
+            "second".to_owned(),
+            "third".to_owned(),
+        ]);
+        assert_eq!(p.name, "first");
+    }
+
+    #[test]
+    fn parse_args_ignores_unknown_flags_permissively() {
+        let p = parse_args(&[
+            "Foo".to_owned(),
+            "--unknown-flag".to_owned(),
+            "--another-unknown".to_owned(),
+        ]);
+        assert_eq!(p.name, "Foo");
+        // Unknowns silently dropped; no panic.
+    }
+
+    #[test]
+    fn split_targets_handles_comma_space_and_mixed() {
+        assert_eq!(split_targets("a,b,c"), vec!["a", "b", "c"]);
+        assert_eq!(split_targets("a b c"), vec!["a", "b", "c"]);
+        assert_eq!(split_targets("a, b , c"), vec!["a", "b", "c"]);
+        assert!(split_targets("").is_empty());
+    }
+
+    #[test]
+    fn default_formats_picks_per_kind() {
+        // "effect" / unknown kind → full plugin matrix.
+        let s = default_formats("effect");
+        assert!(s.contains("VST3"));
+        assert!(s.contains("CLAP"));
+        // app / bare → Standalone only.
+        assert_eq!(default_formats("app"), "Standalone");
+        assert_eq!(default_formats("bare"), "Standalone");
+    }
+
+    #[test]
+    fn make_mfr_code_returns_four_char_string() {
+        // Matches the AAX manufacturer-ID convention: a stable 4-char
+        // identifier per manufacturer. Don't assert specific shape
+        // (uppercase / digits) because the helper preserves raw input
+        // beyond the simplest cases — just lock the length contract.
+        let s = make_mfr_code("Acme");
+        assert_eq!(s.len(), 4);
+        let s2 = make_mfr_code("");
+        assert_eq!(s2.len(), 4);
+    }
+
+    #[test]
+    fn print_help_mentions_all_options() {
+        let mut buf = Vec::new();
+        print_help(&mut buf).unwrap();
+        let s = String::from_utf8(buf).unwrap();
+        for opt in [
+            "--type", "--mpe", "--template", "--manufacturer", "--output",
+            "--targets", "--in-tree", "--no-build", "--ci",
+        ] {
+            assert!(s.contains(opt), "missing option in help: {opt}");
+        }
+    }
+
+    #[test]
+    fn resolve_out_dir_uses_explicit_output_when_absolute() {
+        let td = tempfile::tempdir().unwrap();
+        let abs = td.path().join("nested/out");
+        let args = CreateArgs {
+            name: "Foo".to_owned(),
+            output: Some(abs.clone()),
+            ci_mode: true,
+            ..CreateArgs::default()
+        };
+        // Absolute --output wins regardless of root/cwd.
+        let cwd = std::env::temp_dir();
+        let resolved = resolve_out_dir(&args, None, &cwd).unwrap();
+        assert_eq!(resolved, abs);
+    }
+
+    #[test]
+    fn resolve_out_dir_resolves_relative_output_against_cwd() {
+        let td = tempfile::tempdir().unwrap();
+        let args = CreateArgs {
+            name: "Foo".to_owned(),
+            output: Some(PathBuf::from("relout")),
+            ci_mode: true,
+            ..CreateArgs::default()
+        };
+        let resolved = resolve_out_dir(&args, None, td.path()).unwrap();
+        assert_eq!(resolved, td.path().join("relout"));
+    }
 }
