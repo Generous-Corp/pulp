@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-26 19:58 EDT
+Last reviewed: 2026-04-26 20:04 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -155,14 +155,10 @@ Merged after the Phase 1 closeout / `#723` baseline:
 - `#825` signal DSP helper edge coverage -> `d0262a1b`
 - `#826` OGG reader edge coverage -> `6ae4d487`
 - `#827` signal multi-channel meter edge coverage -> `d5efea57`
+- `#828` raw MIDI parser edge coverage and malformed-data hardening -> `5b8e4529`
 
 Open Phase 3 PRs:
 
-- `#828` raw MIDI parser edge coverage and malformed-data hardening for
-  `#645`, branch `feature/midi-raw-parser-coverage-645`, head
-  `4e2e6092`; opened from `main` at `94e3ef2a`. This tranche also uses
-  the GitHub/Namespace path while the SSH `windows` target remains
-  unreachable.
 - `#829` MIDI-CI edge coverage for `#645`, branch
   `feature/midi-ci-coverage-645`, head `1d3cd1ce`; opened from `main`
   at `94e3ef2a` and rebased onto `87ef6d90` after the first ASan run
@@ -556,8 +552,8 @@ Local Phase 3 draft worktrees:
   `git diff --check`, skill-sync report, and version-bump report.
 - `#645` raw MIDI parser worktree
   `/Users/danielraffel/Code/pulp-midi-raw-parser-coverage-645`, branch
-  `feature/midi-raw-parser-coverage-645`, commit `4e2e6092`; open as PR
-  `#828`.
+  `feature/midi-raw-parser-coverage-645`, commit `4e2e6092`; merged via
+  PR `#828` as `5b8e4529`. The remote branch was deleted after merge.
   Scope: fixes `parse_raw_midi_bytes` so malformed short messages do not
   emit status bytes as data, then adds coverage for remaining
   short-message forms, stray data plus incomplete short messages,
@@ -663,8 +659,8 @@ Open supporting PR:
   `#831` was repaired for Windows float tolerance, and `#822` merged,
   and `#833` opened, and `#829` was rebased onto `87ef6d90` to pick up
   the merged Android SDK discovery fix, and `#832` was rebased/repaired
-  for the Windows fast-exit command, and `#834` opened, and remains
-  docs-only.
+  for the Windows fast-exit command, and `#834` opened, and `#828`
+  merged, and remains docs-only.
 
 Local environment note:
 
@@ -683,31 +679,28 @@ Local environment note:
 Next recovery actions:
 
 1. Keep `#774` docs-only and let its latest status-update checks drain.
-2. Monitor `#828` cloud checks; if a required lane fails, debug in
-   `/Users/danielraffel/Code/pulp-midi-raw-parser-coverage-645`, patch,
-   validate locally, and push with lease.
-3. Monitor `#829` cloud checks; if a required lane fails, debug in
+2. Monitor `#829` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-midi-ci-coverage-645`, patch,
    validate locally, and push with lease.
-4. Monitor `#830` cloud checks; if a required lane fails, debug in
+3. Monitor `#830` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-midi-rpn-coverage-645`, patch,
    validate locally, and push with lease.
-5. Monitor `#831` cloud checks; if a required lane fails, debug in
+4. Monitor `#831` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-signal-utility-coverage-645`, patch,
    validate locally, and push with lease.
-6. Monitor `#832` cloud checks; if a required lane fails, debug in
+5. Monitor `#832` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-platform-child-process-coverage-640`,
    patch, validate locally, and push with lease.
-7. Monitor `#833` cloud checks; if a required lane fails, debug in
+6. Monitor `#833` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-signal-biquad-coverage-645`, patch,
    validate locally, and push with lease.
-8. Monitor `#834` cloud checks; if a required lane fails, debug in
+7. Monitor `#834` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-events-loop-coverage-642`, patch,
    validate locally, and push with lease.
-9. If any open Phase 3 PR is green but GitHub reports it behind `main`,
+8. If any open Phase 3 PR is green but GitHub reports it behind `main`,
    rebase that branch onto `origin/main`, push with lease, and let
    checks rerun.
-10. Continue Phase 3 from the tranche issues below, prioritizing
+9. Continue Phase 3 from the tranche issues below, prioritizing
    represented high-miss files over adding new perimeter lanes.
 
 ## Phase 1 corrected baseline
