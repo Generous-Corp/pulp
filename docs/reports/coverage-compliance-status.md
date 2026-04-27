@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-26 22:32 EDT
+Last reviewed: 2026-04-26 22:43 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -248,6 +248,24 @@ Open Phase 3 PRs:
   `feature/signal-meter-coverage-645-next`, head `ad9c3d81`; hardens
   negative/invalid `MultiChannelMeter` and `MultiChannelBallistics`
   channel counts and carries a patch-level SDK metadata trailer.
+- `#852` canvas rectangle-list helper coverage for parent `#641`,
+  branch `feature/runtime-helper-coverage-641-next2`, head `05c85d55`;
+  consolidates overlapping rectangle-list worker output into one
+  test-only PR covering empty-rectangle filtering, intersection
+  semantics, subtract no-op/full-cover, bounding-box/area, and clipped
+  intersections.
+- `#853` audio frame-fill invalid-dimension coverage for `#640`,
+  branch `feature/audio-helper-coverage-640-next2`, head `53bc6020`;
+  covers `zero_fill_short_read` negative channel-count and negative
+  total-frame no-op guards.
+- `#854` ViewBridge helper coverage for `#493`, branch
+  `feature/host-view-helper-coverage-493-next2`, head `5c9eeeba`;
+  covers idempotent open/release behavior, secondary-view null/bounds
+  cleanup, and null remote-channel diagnostics.
+- `#855` signal convolver edge coverage for `#645`, branch
+  `feature/midi-signal-helper-coverage-645-next2`, head `2d8b0bc3`;
+  covers rounded/zero block-size setup, empty IR pass-through, and
+  wrong-block-size pass-through behavior.
 
 Local Phase 3 draft worktrees:
 
@@ -908,6 +926,48 @@ Local Phase 3 draft worktrees:
   target build, direct `[signal][meter][issue-645]` run, full signal
   binary, focused CTest, diff check, skill-sync report, and
   version-bump report with an SDK patch trailer.
+- `#641` canvas rectangle-list helper worktree
+  `/Users/danielraffel/Code/pulp-runtime-helper-coverage-641-next2`,
+  branch `feature/runtime-helper-coverage-641-next2`, commits
+  `3e1cfd51` and `05c85d55`; open as PR `#852`. Scope: test-only
+  coverage for `RectangleList` empty-rectangle filtering, area-overlap
+  intersection semantics, subtract no-op/full-cover behavior,
+  bounding-box/area helpers, and clipped intersections. Local validation
+  passed the no-GPU/no-text-shaping configure, affected target build,
+  direct `[issue-641]` run with `25` assertions in `5` cases, full
+  binary with `52` assertions in `14` cases, focused CTest `14/14`, and
+  diff check. The overlapping `/Users/danielraffel/Code/pulp-render-helper-coverage-646-next`
+  branch also touched `test/test_rectangle_list.cpp`; its unique
+  subtract case was folded into `#852` and that duplicate branch should
+  not be opened as-is.
+- `#640` audio frame-fill helper worktree
+  `/Users/danielraffel/Code/pulp-audio-helper-coverage-640-next2`,
+  branch `feature/audio-helper-coverage-640-next2`, commit `53bc6020`;
+  open as PR `#853`. Scope: test-only coverage for
+  `zero_fill_short_read` negative channel-count and negative total-frame
+  guards. Local validation passed diff check, no-GPU/no-examples
+  configure, affected target build, focused CTest `11/11`, and full
+  frame-fill binary with `81` assertions in `11` cases.
+- `#493` ViewBridge helper worktree
+  `/Users/danielraffel/Code/pulp-host-view-helper-coverage-493-next2`,
+  branch `feature/host-view-helper-coverage-493-next2`, commit
+  `5c9eeeba`; open as PR `#854`. Scope: test-only coverage for
+  idempotent `open()`, primary role helpers, repeated `release_view()`,
+  secondary view null/bounds cleanup, and null remote-channel diagnostics
+  followed by successful open. Local validation passed diff check,
+  no-GPU configure, affected target build, and focused ViewBridge CTest
+  `10/10`.
+- `#645` signal convolver worktree
+  `/Users/danielraffel/Code/pulp-midi-signal-helper-coverage-645-next2`,
+  branch `feature/midi-signal-helper-coverage-645-next2`, commit
+  `2d8b0bc3`; open as PR `#855`. Scope: test-only coverage for
+  `PartitionedConvolver` rounded/zero block-size setup, empty IR
+  pass-through, and wrong-block-size process pass-through behavior.
+  Local validation passed diff check, skill-sync report, version-bump
+  report, no-GPU/no-examples configure, affected target build, full
+  convolver binary with `91` assertions in `6` cases, direct
+  `[issue-645]` run with `19` assertions in `2` cases, and focused CTest
+  `6/6`.
 
 Open supporting PR:
 
@@ -942,7 +1002,8 @@ Open supporting PR:
   `#843` opened for MPE tracker UMP edge-path coverage, and `#845`,
   `#846`, `#847`, `#848`, `#849`, `#850`, and `#851` opened from the
   parallel worker batch, and `#833` merged as `8fc5dd2d`, and `#840`
-  was repaired for diff coverage with `410a0371`,
+  was repaired for diff coverage with `410a0371`, and `#852`, `#853`,
+  `#854`, and `#855` opened from the next worker batch,
   and remains docs-only.
 
 Local environment note:
@@ -986,7 +1047,7 @@ Next recovery actions:
    fails, debug in
    `/Users/danielraffel/Code/pulp-midi-mpe-tracker-extra-coverage-645-next`,
    patch, validate locally, and push with lease.
-9. Monitor `#845` through `#851`; if a required lane fails, debug in
+9. Monitor `#845` through `#855`; if a required lane fails, debug in
    the worktree named in the open-PR list above, patch, validate
    locally, and push with lease. Pay particular attention to `#848` and
    `#851` because they include patch-level production hardening.
