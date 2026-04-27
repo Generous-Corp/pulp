@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-26 20:50 EDT
+Last reviewed: 2026-04-26 20:53 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -172,13 +172,15 @@ Open Phase 3 PRs:
   at `d0262a1b`. This tranche also uses the GitHub/Namespace path while
   the SSH `windows` target remains unreachable.
 - `#832` platform child-process edge coverage for `#640`, branch
-  `feature/platform-child-process-coverage-640`, head `c07dd268`;
+  `feature/platform-child-process-coverage-640`, head `7496ba0a`;
   opened from `main` at `d5efea57`, updated after the first Windows
   Namespace run exposed a cmd/PowerShell portability issue in the test
   commands, then rebased onto `87ef6d90` and updated after Windows
-  exposed the fast-exit no-newline `cmd` probe returning nonzero. This
-  tranche also uses the GitHub/Namespace path while the SSH `windows`
-  target remains unreachable.
+  exposed the fast-exit no-newline `cmd` probe returning nonzero, then
+  rebased onto `b5e7a463` and updated after review flagged a fixed
+  100ms fast-exit deadline. This tranche also uses the
+  GitHub/Namespace path while the SSH `windows` target remains
+  unreachable.
 - `#833` signal filter-design edge coverage for `#645`, branch
   `feature/signal-biquad-coverage-645`, head `740bdc9c`; opened from
   `main` at `87ef6d90`. This tranche also uses the GitHub/Namespace
@@ -702,7 +704,8 @@ Local Phase 3 draft worktrees:
 - `#640` platform child-process worktree
   `/Users/danielraffel/Code/pulp-platform-child-process-coverage-640`,
   branch `feature/platform-child-process-coverage-640`, commits
-  `3018c8d5`, `a361c8b9`, and `c07dd268`; open as PR `#832`.
+  `3018c8d5`, `a361c8b9`, `c07dd268`, and `7496ba0a`; open as PR
+  `#832`.
   Scope: test-only coverage for pre-start wait/read defaults,
   working-directory launch, stdout/stderr max-output byte caps,
   stderr-line callbacks, and fast-exit output preservation after
@@ -710,13 +713,22 @@ Local Phase 3 draft worktrees:
   removed a PowerShell dependency and trims stderr callback comparisons
   so the test is resilient to `cmd` redirection spacing on Windows; the
   second follow-up forces the fast-exit Windows `cmd` probe to exit zero
-  while still proving no-newline cached output is preserved.
+  while still proving no-newline cached output is preserved. The third
+  follow-up replaces the fixed 100ms fast-exit polling loop with a 5s
+  deadline so loaded/virtualized runners do not fail before normal
+  process launch/teardown completes.
   Local validation: no-GPU/no-examples configure,
   `pulp-test-child-process` build, direct `[issue-640]` run passed `25`
   assertions in `5` cases, full binary passed `46` assertions in `17`
   cases, focused CTest passed for the fast-exit case,
   `git diff --check HEAD~1..HEAD`, `git diff --check`, skill-sync
   report, and version-bump report after rebasing onto `87ef6d90`.
+  Follow-up validation after rebasing onto `b5e7a463` passed the focused
+  fast-exit test with `4` assertions, the `[issue-640]` slice with `25`
+  assertions in `5` cases, the full child-process binary with `46`
+  assertions in `17` cases, diff check, skill-sync report, version-bump
+  report, and pre-push gates. The Codex review thread on the fast-exit
+  deadline was resolved.
 - `#645` signal filter-design worktree
   `/Users/danielraffel/Code/pulp-signal-biquad-coverage-645`, branch
   `feature/signal-biquad-coverage-645`, commit `740bdc9c`; open as PR
@@ -751,8 +763,8 @@ Open supporting PR:
   for the Windows fast-exit command, and `#834` opened, and `#828`
   merged, and `#835` opened, and `#836` opened, and `#837` opened, and
   `#831` merged, and `#838` opened, and `#835` was repaired for Linux
-  Android-validation ordering plus config isolation, and remains
-  docs-only.
+  Android-validation ordering plus config isolation, and `#832` was
+  repaired for the fast-exit deadline review, and remains docs-only.
 
 Local environment note:
 
