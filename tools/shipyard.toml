@@ -11,11 +11,11 @@
 #   ./tools/install-shipyard.sh --status
 #
 # To bump the pin (after verifying a new Shipyard release works on
-# Pulp's CI matrix):
-#   1. Edit `version` below.
-#   2. Run `./tools/install-shipyard.sh` to download the new binary.
-#   3. Run `shipyard run` on a feature branch to verify.
-#   4. Open a PR with this file change and your verification notes.
+# Pulp's CI matrix), use:
+#   shipyard pin bump --to vX.Y.Z
+#
+# That flow owns the pin edit and worktree-safety checks; keep the
+# lockstep doc skim below as part of the bump PR.
 #
 # Lockstep docs:
 # When bumping the pin, also re-check that the following docs still
