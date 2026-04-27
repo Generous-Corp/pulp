@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-26 22:21 EDT
+Last reviewed: 2026-04-26 22:32 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -66,7 +66,7 @@ Finish line:
 ## Current live state
 
 Latest complete Codecov `main` report observed while updating this doc
-(`main` head `eaf991b0` has a newer Coverage run queued):
+(`main` head `8fc5dd2d` has a newer Coverage run queued):
 
 - commit: `5b8e4529cfc553fd98b65f265ed1e9c0487b3d66`
 - workflow: Coverage run `24970413173`, completed successfully
@@ -163,6 +163,7 @@ Merged after the Phase 1 closeout / `#723` baseline:
 - `#830` RPN parser edge coverage -> `d02c9ec9`
 - `#834` events event-loop lifecycle edge coverage -> `455c0a9d`
 - `#829` MIDI-CI edge coverage -> `eaf991b0`
+- `#833` signal filter-design edge coverage -> `8fc5dd2d`
 
 Open Phase 3 PRs:
 
@@ -176,12 +177,6 @@ Open Phase 3 PRs:
   100ms fast-exit deadline. This tranche also uses the
   GitHub/Namespace path while the SSH `windows` target remains
   unreachable.
-- `#833` signal filter-design edge coverage for `#645`, branch
-  `feature/signal-biquad-coverage-645`, head `e3795fca`; opened from
-  `main` at `87ef6d90`, then rebased onto `b5e7a463` after the ASan
-  lane failed in the already-fixed Android SDK discovery regression
-  from the stale base. This tranche also uses the GitHub/Namespace path
-  while the SSH `windows` target remains unreachable.
 - `#835` CLI ship command validation coverage for `#643`, branch
   `feature/cli-ship-coverage-643`, head `b8f22af9`; opened from
   `main` at `5b8e4529`, then rebased onto `b5e7a463` and updated after
@@ -204,13 +199,16 @@ Open Phase 3 PRs:
   merged. This tranche also uses the GitHub/Namespace path while the
   SSH `windows` target remains unreachable.
 - `#840` events child-process manager coverage for `#642`, branch
-  `feature/events-child-process-coverage-642`, head `47e38795`; opened
+  `feature/events-child-process-coverage-642`, head `410a0371`; opened
   from `main` at `455c0a9d`, then rebased onto `eaf991b0` after `#829`
   merged. The first Linux Namespace and Linux coverage failures were
   dependency-bootstrap failures before configure/tests because a cold
-  FetchContent cache hit a GitHub 403 cloning `Tracktion/choc.git`. This
-  tranche also uses the GitHub/Namespace path while the SSH `windows`
-  target remains unreachable.
+  FetchContent cache hit a GitHub 403 cloning `Tracktion/choc.git`. The
+  first diff-coverage failure was fixed by pushing `410a0371`, which
+  keeps the production change focused on the covered invalid-PID guard
+  and removes unrelated POSIX `waitpid` hardening from this tranche.
+  This tranche also uses the GitHub/Namespace path while the SSH
+  `windows` target remains unreachable.
 - `#842` inspect Codecov classification for `#841` / parent `#641`,
   branch `feature/inspect-codecov-component-841`, head `0541fd69`;
   promotes `inspect/**` to a first-class Codecov flag/component and
@@ -829,8 +827,8 @@ Local Phase 3 draft worktrees:
   deadline was resolved.
 - `#645` signal filter-design worktree
   `/Users/danielraffel/Code/pulp-signal-biquad-coverage-645`, branch
-  `feature/signal-biquad-coverage-645`, commit `e3795fca`; open as PR
-  `#833`.
+  `feature/signal-biquad-coverage-645`, commit `e3795fca`; merged via
+  PR `#833` as `8fc5dd2d`. The remote branch was deleted after merge.
   Scope: test-only coverage for peaking boost/cut coefficients, low/high
   shelf cut paths, shelf slope variants, and Butterworth empty/high-order
   section behavior. This intentionally touches only
@@ -943,7 +941,8 @@ Open supporting PR:
   promote `inspect/**` to a first-class Codecov component/tier, and
   `#843` opened for MPE tracker UMP edge-path coverage, and `#845`,
   `#846`, `#847`, `#848`, `#849`, `#850`, and `#851` opened from the
-  parallel worker batch,
+  parallel worker batch, and `#833` merged as `8fc5dd2d`, and `#840`
+  was repaired for diff coverage with `410a0371`,
   and remains docs-only.
 
 Local environment note:
@@ -966,38 +965,35 @@ Next recovery actions:
 2. Monitor `#832` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-platform-child-process-coverage-640`,
    patch, validate locally, and push with lease.
-3. Monitor `#833` cloud checks; if a required lane fails, debug in
-   `/Users/danielraffel/Code/pulp-signal-biquad-coverage-645`, patch,
-   validate locally, and push with lease.
-4. Monitor `#835` cloud checks; if a required lane fails, debug in
+3. Monitor `#835` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-cli-ship-coverage-643`, patch,
    validate locally, and push with lease.
-5. Monitor `#838` cloud checks on head `09666f46`; if a required lane fails, debug in
+4. Monitor `#838` cloud checks on head `09666f46`; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-package-cli-coverage-643`, patch,
    validate locally, and push with lease.
-6. Monitor `#839` cloud checks; if a required lane fails, debug in
+5. Monitor `#839` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-render-gpu-graph-coverage-646`,
    patch, validate locally, and push with lease.
-7. Monitor `#840` cloud checks on head `47e38795`; if a required lane
+6. Monitor `#840` cloud checks on head `410a0371`; if a required lane
    fails after dependency bootstrap succeeds, debug in
    `/Users/danielraffel/Code/pulp-events-child-process-coverage-642`,
    patch, validate locally, and push with lease.
-8. Monitor `#842` cloud checks on head `0541fd69`; if a required lane
+7. Monitor `#842` cloud checks on head `0541fd69`; if a required lane
    fails, debug in
    `/Users/danielraffel/Code/pulp-inspect-codecov-component-841`,
    patch, validate locally, and push with lease.
-9. Monitor `#843` cloud checks on head `fcdbd278`; if a required lane
+8. Monitor `#843` cloud checks on head `fcdbd278`; if a required lane
    fails, debug in
    `/Users/danielraffel/Code/pulp-midi-mpe-tracker-extra-coverage-645-next`,
    patch, validate locally, and push with lease.
-10. Monitor `#845` through `#851`; if a required lane fails, debug in
+9. Monitor `#845` through `#851`; if a required lane fails, debug in
    the worktree named in the open-PR list above, patch, validate
    locally, and push with lease. Pay particular attention to `#848` and
    `#851` because they include patch-level production hardening.
-11. If any open Phase 3 PR is green but GitHub reports it behind `main`,
+10. If any open Phase 3 PR is green but GitHub reports it behind `main`,
    rebase that branch onto `origin/main`, push with lease, and let
    checks rerun.
-12. Continue Phase 3 from the tranche issues below, prioritizing
+11. Continue Phase 3 from the tranche issues below, prioritizing
    represented high-miss files over adding new perimeter lanes.
 
 ## Phase 1 corrected baseline
