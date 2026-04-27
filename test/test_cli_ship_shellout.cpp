@@ -8,14 +8,67 @@
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/platform/child_process.hpp>
 
+#include <chrono>
+#include <cstdlib>
 #include <filesystem>
+#include <fstream>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 using namespace pulp::platform;
 namespace fs = std::filesystem;
 
 namespace {
+
+inline int pulp_setenv(const char* name, const char* value) {
+#ifdef _WIN32
+    return _putenv_s(name, value);
+#else
+    return ::setenv(name, value, 1);
+#endif
+}
+
+inline int pulp_unsetenv(const char* name) {
+#ifdef _WIN32
+    return _putenv_s(name, "");
+#else
+    return ::unsetenv(name);
+#endif
+}
+
+class ScopedEnvVar {
+public:
+    explicit ScopedEnvVar(const char* name) : name_(name) {
+        if (const char* old = std::getenv(name)) {
+            old_value_ = old;
+        }
+        pulp_unsetenv(name_.c_str());
+    }
+
+    ScopedEnvVar(const char* name, const std::string& value) : name_(name) {
+        if (const char* old = std::getenv(name)) {
+            old_value_ = old;
+        }
+        pulp_setenv(name_.c_str(), value.c_str());
+    }
+
+    ~ScopedEnvVar() {
+        if (old_value_) {
+            pulp_setenv(name_.c_str(), old_value_->c_str());
+        } else {
+            pulp_unsetenv(name_.c_str());
+        }
+    }
+
+    ScopedEnvVar(const ScopedEnvVar&) = delete;
+    ScopedEnvVar& operator=(const ScopedEnvVar&) = delete;
+
+private:
+    std::string name_;
+    std::optional<std::string> old_value_;
+};
 
 fs::path pulp_binary() {
     if (const char* env = std::getenv("PULP_CLI_PATH"); env && *env) {
@@ -38,6 +91,28 @@ ProcessResult run_pulp_in(const fs::path& cwd,
 
 bool contains(const std::string& haystack, const std::string& needle) {
     return haystack.find(needle) != std::string::npos;
+}
+
+fs::path make_fake_project(std::string_view name, bool with_build_cache) {
+    auto unique = std::chrono::steady_clock::now().time_since_epoch().count();
+    auto root = fs::temp_directory_path()
+        / ("pulp-ship-" + std::string(name) + "-" + std::to_string(unique));
+    fs::remove_all(root);
+    fs::create_directories(root / "core");
+
+    {
+        std::ofstream cmake(root / "CMakeLists.txt");
+        cmake << "cmake_minimum_required(VERSION 3.22)\n"
+              << "project(FakeShipPlugin VERSION 2.3.4)\n";
+    }
+
+    if (with_build_cache) {
+        fs::create_directories(root / "build");
+        std::ofstream cache(root / "build" / "CMakeCache.txt");
+        cache << "CMAKE_HOME_DIRECTORY:INTERNAL=" << root.string() << "\n";
+    }
+
+    return root;
 }
 
 }  // namespace
@@ -125,4 +200,93 @@ TEST_CASE("pulp ship help (or default) enumerates every subcommand",
     } else {
         REQUIRE(contains(combined, "Pulp project"));
     }
+}
+
+TEST_CASE("pulp ship inside project without build cache reports build guidance",
+          "[cli][shellout][ship][issue-643]") {
+    if (!binary_exists()) { SUCCEED("pulp binary not built"); return; }
+    auto root = make_fake_project("missing-build", false);
+
+    auto r = run_pulp_in(root, {"ship", "check"});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code != 0);
+
+    auto combined = r.stdout_output + r.stderr_output;
+    REQUIRE(contains(combined, "Build directory not found"));
+    REQUIRE(contains(combined, "pulp build"));
+
+    fs::remove_all(root);
+}
+
+TEST_CASE("pulp ship Android validation paths fail before external tooling",
+          "[cli][shellout][ship][android][issue-643]") {
+    if (!binary_exists()) { SUCCEED("pulp binary not built"); return; }
+    auto root = make_fake_project("android-validation", true);
+    fs::create_directories(root / "pulp-home");
+
+    ScopedEnvVar pulp_home("PULP_HOME", (root / "pulp-home").string());
+    ScopedEnvVar store_pass("ANDROID_STORE_PASS");
+    ScopedEnvVar key_pass("ANDROID_KEY_PASS");
+
+    auto sign = run_pulp_in(root, {"ship", "sign", "--target", "android"});
+    REQUIRE_FALSE(sign.timed_out);
+    REQUIRE(sign.exit_code != 0);
+    REQUIRE(contains(sign.stdout_output + sign.stderr_output, "No Android keystore"));
+
+    auto check = run_pulp_in(root, {"ship", "check", "--target", "android"});
+    REQUIRE_FALSE(check.timed_out);
+    REQUIRE(check.exit_code != 0);
+    REQUIRE(contains(check.stdout_output + check.stderr_output, "No artifacts/ directory"));
+
+    auto conflicting = run_pulp_in(root,
+        {"ship", "package", "--target", "android", "--apk-only", "--aab-only"});
+    REQUIRE_FALSE(conflicting.timed_out);
+    REQUIRE(conflicting.exit_code != 0);
+    REQUIRE(contains(conflicting.stdout_output + conflicting.stderr_output,
+                     "mutually exclusive"));
+
+    auto missing_android = run_pulp_in(root, {"ship", "package", "--target", "android"});
+    REQUIRE_FALSE(missing_android.timed_out);
+    REQUIRE(missing_android.exit_code != 0);
+    REQUIRE(contains(missing_android.stdout_output + missing_android.stderr_output,
+                     "No android/ project found"));
+
+    fs::remove_all(root);
+}
+
+TEST_CASE("pulp ship appcast writes local feed and rejects remote signing",
+          "[cli][shellout][ship][appcast][issue-643]") {
+    if (!binary_exists()) { SUCCEED("pulp binary not built"); return; }
+    auto root = make_fake_project("appcast", true);
+    auto feed = root / "artifacts" / "updates.xml";
+
+    auto write = run_pulp_in(root,
+        {"ship", "appcast",
+         "--url", "https://example.com/FakeShipPlugin-2.3.4.pkg",
+         "--version", "2.3.4",
+         "--notes", "coverage tranche",
+         "--title", "Fake Ship Updates",
+         "--output", feed.string()});
+    REQUIRE_FALSE(write.timed_out);
+    REQUIRE(write.exit_code == 0);
+    REQUIRE(fs::exists(feed));
+
+    std::ifstream in(feed);
+    std::string xml((std::istreambuf_iterator<char>(in)),
+                    std::istreambuf_iterator<char>());
+    REQUIRE(contains(xml, "Fake Ship Updates"));
+    REQUIRE(contains(xml, "2.3.4"));
+    REQUIRE(contains(xml, "https://example.com/FakeShipPlugin-2.3.4.pkg"));
+
+    auto remote_sign = run_pulp_in(root,
+        {"ship", "appcast",
+         "--url", "https://example.com/FakeShipPlugin-2.3.5.pkg",
+         "--version", "2.3.5",
+         "--sign-key", "not-a-real-key"});
+    REQUIRE_FALSE(remote_sign.timed_out);
+    REQUIRE(remote_sign.exit_code != 0);
+    REQUIRE(contains(remote_sign.stdout_output + remote_sign.stderr_output,
+                     "--sign-key requires a local file path"));
+
+    fs::remove_all(root);
 }
