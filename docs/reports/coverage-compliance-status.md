@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-26 23:42 EDT
+Last reviewed: 2026-04-27 00:04 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -171,6 +171,10 @@ Merged after the Phase 1 closeout / `#723` baseline:
 
 Open Phase 3 PRs:
 
+As of this review, the open `codecov` PR queue has no failing checks.
+The oldest PRs are blocked by still-queued macOS / sanitizer / Namespace
+jobs rather than code failures.
+
 - `#835` CLI ship command validation coverage for `#643`, branch
   `feature/cli-ship-coverage-643`, head `b8f22af9`; opened from
   `main` at `5b8e4529`, then rebased onto `b5e7a463` and updated after
@@ -220,9 +224,13 @@ Open Phase 3 PRs:
   `feature/cli-tools-coverage-643-next2`, head `b8e7b22a`; covers
   optional Namespace fallback plus provider/default argument validation.
 - `#851` signal meter channel-count guards for `#645`, branch
-  `feature/signal-meter-coverage-645-next`, head `ad9c3d81`; hardens
+  `feature/signal-meter-coverage-645-next`, head `a3aec442`; hardens
   negative/invalid `MultiChannelMeter` and `MultiChannelBallistics`
-  channel counts and carries a patch-level SDK metadata trailer.
+  channel counts and carries a patch-level SDK metadata trailer. After
+  the first coverage run reported diff coverage `66%` because
+  `multi_channel_meter.hpp:151` was uncovered, follow-up `118dbce4`
+  added process-channel clamp coverage and `a3aec442` refreshed the
+  tip-level version / skill metadata.
 - `#852` canvas rectangle-list helper coverage for parent `#641`,
   branch `feature/runtime-helper-coverage-641-next2`, head `05c85d55`;
   consolidates overlapping rectangle-list worker output into one
@@ -316,6 +324,42 @@ Open Phase 3 PRs:
   `feature/ship-coverage-641-next`, head `752ae0bb`; covers
   Add/Remove Programs registry metadata and HKLM/HKCU uninstall key
   deletion paths.
+- `#876` OSC malformed codec guard coverage for parent `#641`, branch
+  `feature/osc-coverage-641-next`, head `8a3b0135`; covers truncated
+  float payload fallback and negative blob-size fallback.
+- `#877` runtime scope/string helper coverage for parent `#641`, branch
+  `feature/runtime-coverage-641-next4`, head `5f61635d`; covers
+  `ScopeGuard` move ownership and `copy_c_string` degenerate buffer
+  paths.
+- `#878` inspect Audio domain coverage for `#841` / parent `#641`,
+  branch `feature/inspect-coverage-641-next`, head `821244bc`; covers
+  `AudioInspector` metering gates and `DomainHandler` Audio config,
+  metering, MIDI log, unknown-method, and missing-inspector paths.
+- `#879` tools limitations helper coverage for `#643`, branch
+  `feature/tools-helper-coverage-643-next6`, head `c56acc8a`; covers
+  `tools/list_limitations.py` extraction, capability-path validation,
+  markdown rendering, and unresolved-path diagnostics.
+- `#880` audio model missing-checkpoint coverage for `#640`, branch
+  `feature/audio-tools-coverage-640-next5`, head `bfe7d578`; covers
+  installed audio-model metadata with a missing resolved checkpoint and
+  activation rejection for that state.
+- `#881` runtime XML/gzip helper coverage for parent `#641`, branch
+  `feature/runtime-xmlzip-coverage-641-next`, head `597b0a3a`; covers
+  XML XPath attribute / invalid-expression paths, XML text escaping, and
+  gzip optional-header / reserved-flag decode edges.
+- `#882` platform Environment helper coverage for `#640`, branch
+  `feature/platform-env-coverage-640-next`, head `63aa707a`; covers
+  `EnvironmentChange::any()` flag reporting and `Environment::reset_for_test()`
+  listener clearing while tokens are still live.
+- `#883` runtime Stream / AsyncStream helper coverage for parent `#641`,
+  branch `feature/runtime-stream-coverage-641-next`, head `a74e0bf4`;
+  covers `MemoryStream` zero-size / rewind / clear paths, `FileStream`
+  append and move ownership, `AsyncStream` zero-byte completion dispatch,
+  and `CancellationToken` sharing / idempotent cancel behavior.
+- `#884` web-compat selector helper coverage for parent `#641`, branch
+  `feature/web-compat-coverage-641-next`, head `393e841f`; covers
+  compound selector matching, child vs descendant combinators, and nested
+  `querySelector` / `querySelectorAll` traversal.
 
 Local-only queued work:
 
@@ -332,6 +376,26 @@ Local-only queued work:
   test-only target `pulp-test-ipc-endpoints` for deterministic IPC
   socket endpoint parse failures. Review CMake overlap with open `#857`
   before opening a PR.
+- Active worker: state/properties helper coverage worktree
+  `/Users/danielraffel/Code/pulp-state-properties-coverage-641-next`,
+  branch `feature/state-properties-coverage-641-next`; no commit reported
+  yet.
+- Active worker: iOS/mobile runtime helper coverage worktree
+  `/Users/danielraffel/Code/pulp-ios-runtime-coverage-641-next`, branch
+  `feature/ios-runtime-coverage-641-next`; no commit reported yet.
+- Active worker: ship helper coverage worktree
+  `/Users/danielraffel/Code/pulp-ship-helper-coverage-641-next2`, branch
+  `feature/ship-helper-coverage-641-next2`; no commit reported yet.
+- Active worker: MIDI / OSC helper coverage worktree
+  `/Users/danielraffel/Code/pulp-midi-osc-helper-coverage-641-next`,
+  branch `feature/midi-osc-helper-coverage-641-next`; no commit reported
+  yet.
+- Active worker: render image-helper coverage worktree, branch
+  `feature/render-image-coverage-646-next4`; spawned after this review,
+  no commit reported yet.
+- Active worker: view/accessibility helper coverage worktree, branch
+  `feature/view-accessibility-coverage-493-next4`; spawned after this
+  review, no commit reported yet.
 
 Local Phase 3 draft worktrees:
 
