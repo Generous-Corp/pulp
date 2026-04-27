@@ -28,6 +28,15 @@ TEST_CASE("PropertiesFile get missing key returns nullopt", "[state][properties]
     REQUIRE_FALSE(props.get_bool("nonexistent").has_value());
 }
 
+TEST_CASE("PropertiesFile numeric getters reject invalid stored strings", "[state][properties]") {
+    PropertiesFile props;
+    props.set_string("count", "not-an-int");
+    props.set_string("gain", "not-a-double");
+
+    REQUIRE_FALSE(props.get_int("count").has_value());
+    REQUIRE_FALSE(props.get_double("gain").has_value());
+}
+
 TEST_CASE("PropertiesFile set and get int", "[state][properties]") {
     PropertiesFile props;
     props.set_int("buffer_size", 512);
@@ -146,6 +155,27 @@ TEST_CASE("PropertiesFile load invalid JSON returns false", "[state][properties]
 
     PropertiesFile props;
     REQUIRE_FALSE(props.load(tmp.path_string()));
+}
+
+TEST_CASE("PropertiesFile load empty file clears existing values", "[state][properties]") {
+    TemporaryFile tmp(".json");
+    {
+        std::ofstream f(tmp.path());
+    }
+
+    PropertiesFile props;
+    props.set_string("stale", "value");
+
+    REQUIRE(props.load(tmp.path_string()));
+    REQUIRE_FALSE(props.contains("stale"));
+    REQUIRE(props.size() == 0);
+}
+
+TEST_CASE("PropertiesFile save without path returns false", "[state][properties]") {
+    PropertiesFile props;
+    props.set_string("key", "value");
+
+    REQUIRE_FALSE(props.save());
 }
 
 TEST_CASE("PropertiesFile save creates parent directories", "[state][properties]") {
