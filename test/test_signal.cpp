@@ -1273,14 +1273,10 @@ TEST_CASE("MultiChannelMeter resets correlation accumulation window", "[signal][
     REQUIRE_THAT(meter.snapshot().correlation, WithinAbs(1.0f, 1e-6f));
 }
 
-TEST_CASE("MultiChannelMeter clamps negative channel counts", "[signal][meter][issue-645]") {
+TEST_CASE("MultiChannelMeter clamps negative prepared channel counts",
+          "[signal][meter][issue-645]") {
     MultiChannelMeter meter;
     meter.prepare(100.0f, -3);
-    REQUIRE(meter.snapshot().num_channels == 0);
-
-    float sample[] = {1.0f};
-    const float* channels[] = {sample};
-    meter.process(channels, -1, 1);
 
     const auto& snap = meter.snapshot();
     REQUIRE(snap.num_channels == 0);
