@@ -82,9 +82,23 @@ TEST_CASE("zero_fill_short_read: zero channels is a no-op",
     for (float v : buf) REQUIRE(v == 0.5f);
 }
 
+TEST_CASE("zero_fill_short_read: negative channels is a no-op",
+          "[audio][frame-fill][issue-640]") {
+    auto buf = make_poisoned(4, 1);
+    zero_fill_short_read(buf.data(), 2, 4, /*ch=*/-1);
+    for (float v : buf) REQUIRE(v == 0.5f);
+}
+
 TEST_CASE("zero_fill_short_read: zero total_frames is a no-op",
           "[audio][frame-fill][issue-244]") {
     float buf[4] = {0.5f, 0.5f, 0.5f, 0.5f};
     zero_fill_short_read(buf, 0, /*total=*/0, 2);
+    for (float v : buf) REQUIRE(v == 0.5f);
+}
+
+TEST_CASE("zero_fill_short_read: negative total_frames is a no-op",
+          "[audio][frame-fill][issue-640]") {
+    float buf[4] = {0.5f, 0.5f, 0.5f, 0.5f};
+    zero_fill_short_read(buf, 0, /*total=*/-1, 2);
     for (float v : buf) REQUIRE(v == 0.5f);
 }
