@@ -27,6 +27,19 @@ set_tests_properties(cmake-au-v2-type-selection PROPERTIES
     LABELS "cmake;au;au-v2;midi"
     TIMEOUT 30)
 
+# pulp_add_binary_data Python encoder smoke — guards the issue #898 fix
+# (legacy CMake hex loop was O(n²) and pinned cmake configure for 10–22
+# minutes on a 1 MB asset). Verifies the encoder's output ABI, mtime
+# advance on every run (required for `add_custom_command` build-system
+# correctness), and regeneration on input change. Runs under `cmake -P`
+# so it works on every platform without building the Pulp tree.
+add_test(NAME cmake-pulp-add-binary-data-encoder
+    COMMAND ${CMAKE_COMMAND} -P
+        ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_pulp_add_binary_data_encoder.cmake)
+set_tests_properties(cmake-pulp-add-binary-data-encoder PROPERTIES
+    LABELS "cmake;binary-data;issue-898"
+    TIMEOUT 60)
+
 # retry_git_clone unit test (setup.sh helper). Guards the #425 P1
 # Codex fix — a partial clone target is scrubbed between retries so
 # attempt 2+ can actually re-run the network fetch.

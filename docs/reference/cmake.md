@@ -195,7 +195,7 @@ Generates a static library with:
 ```cpp
 namespace myresources {
     extern const unsigned char logo_png[];
-    extern const size_t logo_png_size;
+    extern const std::size_t logo_png_size;
 }
 ```
 
@@ -205,3 +205,19 @@ namespace myresources {
 |-----------|----------|---------|-------------|
 | `SOURCES` | Yes | -- | Files to embed |
 | `NAMESPACE` | No | `<target>` | C++ namespace for the generated symbols |
+
+### Implementation notes
+
+The function delegates the byte-to-C-array encoding to the
+`tools/cmake/scripts/encode_binary_data.py` helper through
+`add_custom_command(OUTPUT … DEPENDS …)`. As a result:
+
+- Encoding runs at **build time**, not configure time. Editing a source
+  asset and re-running `cmake --build` regenerates the embedded `.cpp`
+  automatically — no `cmake -S/-B` reconfigure required.
+- Encoding is fast: a 1 MB asset finishes in well under a second. The
+  legacy in-CMake hex loop was effectively O(n²) and could pin a single
+  reconfigure at 100 % CPU for 10–22 minutes (issue #898).
+- Python (`find_package(Python3 COMPONENTS Interpreter REQUIRED)`) is the
+  only added build-time dependency; Python is already required elsewhere
+  in the Pulp build.
