@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-26 20:53 EDT
+Last reviewed: 2026-04-26 21:01 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -182,9 +182,11 @@ Open Phase 3 PRs:
   GitHub/Namespace path while the SSH `windows` target remains
   unreachable.
 - `#833` signal filter-design edge coverage for `#645`, branch
-  `feature/signal-biquad-coverage-645`, head `740bdc9c`; opened from
-  `main` at `87ef6d90`. This tranche also uses the GitHub/Namespace
-  path while the SSH `windows` target remains unreachable.
+  `feature/signal-biquad-coverage-645`, head `e3795fca`; opened from
+  `main` at `87ef6d90`, then rebased onto `b5e7a463` after the ASan
+  lane failed in the already-fixed Android SDK discovery regression
+  from the stale base. This tranche also uses the GitHub/Namespace path
+  while the SSH `windows` target remains unreachable.
 - `#834` events event-loop lifecycle edge coverage for `#642`, branch
   `feature/events-loop-coverage-642`, head `ee3894cb`; opened from
   `main` at `87ef6d90`. This tranche also uses the GitHub/Namespace
@@ -731,7 +733,7 @@ Local Phase 3 draft worktrees:
   deadline was resolved.
 - `#645` signal filter-design worktree
   `/Users/danielraffel/Code/pulp-signal-biquad-coverage-645`, branch
-  `feature/signal-biquad-coverage-645`, commit `740bdc9c`; open as PR
+  `feature/signal-biquad-coverage-645`, commit `e3795fca`; open as PR
   `#833`.
   Scope: test-only coverage for peaking boost/cut coefficients, low/high
   shelf cut paths, shelf slope variants, and Butterworth empty/high-order
@@ -742,6 +744,12 @@ Local Phase 3 draft worktrees:
   assertions in `3` cases, full binary passed `116` assertions in `14`
   cases, focused CTest passed `14/14`, `git diff --check HEAD~1..HEAD`,
   `git diff --check`, skill-sync report, and version-bump report.
+  Follow-up validation after rebasing onto `b5e7a463` passed the same
+  focused filter-design build/direct/CTest checks, built
+  `pulp-test-android-package`, passed the direct `Android SDK discovery
+  compares tool revisions numerically` selector with `5` assertions in
+  `1` case, passed the matching CTest selector, passed
+  `git diff --check origin/main...HEAD`, and cleared pre-push gates.
 
 Open supporting PR:
 
@@ -764,7 +772,9 @@ Open supporting PR:
   merged, and `#835` opened, and `#836` opened, and `#837` opened, and
   `#831` merged, and `#838` opened, and `#835` was repaired for Linux
   Android-validation ordering plus config isolation, and `#832` was
-  repaired for the fast-exit deadline review, and remains docs-only.
+  repaired for the fast-exit deadline review, and `#833` was rebased
+  onto `b5e7a463` to clear the stale Android SDK discovery ASan failure,
+  and remains docs-only.
 
 Local environment note:
 
