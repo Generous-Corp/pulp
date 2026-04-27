@@ -101,6 +101,37 @@ TEST_CASE("NSD dispatches browse/register/unregister to installed backend",
     REQUIRE(log->stopped == 1);
 }
 
+TEST_CASE("NSD browse backend can publish through the dispatcher",
+          "[events][service-discovery][issue-642]") {
+    NetworkServiceDiscovery nsd;
+    auto backend = std::make_unique<FakeBackend>();
+    auto log = backend->log;
+    FakeBackend* raw_backend = backend.get();
+
+    nsd.install_backend(std::move(backend));
+
+    std::vector<std::string> found;
+    nsd.on_service_found = [&](const NetworkServiceDiscovery::Service& s) {
+        found.push_back(s.name + "@" + s.hostname);
+    };
+
+    nsd.browse("_pulp._tcp");
+    REQUIRE(raw_backend->owner == &nsd);
+    REQUIRE(log->browse_types == std::vector<std::string>{"_pulp._tcp"});
+
+    NetworkServiceDiscovery::Service s;
+    s.name = "pulpd";
+    s.type = "_pulp._tcp";
+    s.hostname = "pulpd.local";
+    s.address = "127.0.0.1";
+    s.port = 4321;
+    raw_backend->owner->notify_service_found(s);
+
+    REQUIRE(found == std::vector<std::string>{"pulpd@pulpd.local"});
+    REQUIRE(nsd.discovered().size() == 1);
+    REQUIRE(nsd.discovered().front().hostname == "pulpd.local");
+}
+
 TEST_CASE("NSD forwards discovered services via on_service_found",
           "[events][service-discovery][issue-302]") {
     NetworkServiceDiscovery nsd;
@@ -248,6 +279,43 @@ TEST_CASE("NSD removing backend stops old backend and evicts discoveries",
     REQUIRE(lost == std::vector<std::string>{"alpha"});
     REQUIRE(log->stopped == 1);
     REQUIRE_FALSE(nsd.register_service("svc", "_pulp._tcp", 1234));
+}
+
+TEST_CASE("NSD keys discoveries and loss by service name plus type",
+          "[events][service-discovery][issue-642]") {
+    NetworkServiceDiscovery nsd;
+    nsd.install_backend(std::make_unique<FakeBackend>());
+
+    NetworkServiceDiscovery::Service http;
+    http.name = "shared";
+    http.type = "_http._tcp";
+    http.hostname = "http.local";
+    http.port = 80;
+
+    NetworkServiceDiscovery::Service pulp = http;
+    pulp.type = "_pulp._tcp";
+    pulp.hostname = "pulp.local";
+    pulp.port = 4321;
+
+    nsd.notify_service_found(http);
+    nsd.notify_service_found(pulp);
+    REQUIRE(nsd.discovered().size() == 2);
+
+    std::vector<std::string> lost;
+    nsd.on_service_lost = [&](const NetworkServiceDiscovery::Service& svc) {
+        lost.push_back(svc.name + "/" + svc.type);
+    };
+
+    NetworkServiceDiscovery::Service wrong_type = http;
+    wrong_type.type = "_ssh._tcp";
+    nsd.notify_service_lost(wrong_type);
+    REQUIRE(lost.empty());
+    REQUIRE(nsd.discovered().size() == 2);
+
+    nsd.notify_service_lost(http);
+    REQUIRE(lost == std::vector<std::string>{"shared/_http._tcp"});
+    REQUIRE(nsd.discovered().size() == 1);
+    REQUIRE(nsd.discovered().front().type == "_pulp._tcp");
 }
 
 TEST_CASE("MountedVolumeListChangeDetector returns a sorted platform snapshot",

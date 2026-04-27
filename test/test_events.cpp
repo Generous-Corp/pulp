@@ -404,6 +404,17 @@ TEST_CASE("AsyncUpdater process_pending with no trigger is a no-op",
     REQUIRE(handles.load() == 0);
 }
 
+TEST_CASE("LambdaAsyncUpdater tolerates an empty callback",
+          "[events][async_updater][issue-642]") {
+    LambdaAsyncUpdater u(nullptr);
+
+    u.trigger_async_update();
+    REQUIRE(u.is_update_pending());
+
+    u.process_pending();
+    REQUIRE_FALSE(u.is_update_pending());
+}
+
 TEST_CASE("MultiTimer tracks timer lifecycle by id",
           "[events][async_updater][multi_timer]") {
     RecordingMultiTimer timers;
