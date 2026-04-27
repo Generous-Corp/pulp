@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-26 20:42 EDT
+Last reviewed: 2026-04-26 20:47 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -188,9 +188,12 @@ Open Phase 3 PRs:
   `main` at `87ef6d90`. This tranche also uses the GitHub/Namespace
   path while the SSH `windows` target remains unreachable.
 - `#835` CLI ship command validation coverage for `#643`, branch
-  `feature/cli-ship-coverage-643`, head `6c1e5a4b`; opened from
-  `main` at `5b8e4529`. This tranche also uses the GitHub/Namespace
-  path while the SSH `windows` target remains unreachable.
+  `feature/cli-ship-coverage-643`, head `5ef39944`; opened from
+  `main` at `5b8e4529`, then rebased onto `b5e7a463` and updated after
+  Linux Namespace exposed that the Android validation test created
+  `artifacts/` before asserting the missing-artifacts check path. This
+  tranche also uses the GitHub/Namespace path while the SSH `windows`
+  target remains unreachable.
 - `#836` CLI sync checker coverage for `#643`, branch
   `feature/cli-sync-coverage-643`, head `86048a3f`; opened from
   `main` at `5b8e4529`. This tranche also uses the GitHub/Namespace
@@ -343,19 +346,26 @@ Local Phase 3 draft worktrees:
   skill-sync report, and version-bump report.
 - `#643` CLI ship command validation worktree
   `/Users/danielraffel/Code/pulp-cli-ship-coverage-643`, branch
-  `feature/cli-ship-coverage-643`, commit `6c1e5a4b`; open as PR
+  `feature/cli-ship-coverage-643`, commit `5ef39944`; open as PR
   `#835`.
   Scope: test-only `pulp ship` shellout coverage for fake project roots
   with missing build-cache guidance, Android signing/package/check
   validation before external tools run, appcast feed generation, and
-  remote `--sign-key` rejection without real signing material. Local
-  validation after rebasing onto `5b8e4529`: no-GPU/no-examples
+  remote `--sign-key` rejection without real signing material. The
+  follow-up commit moves the Android `ship check --target android`
+  missing-artifacts assertion before package probes create `artifacts/`
+  as part of their validation path. Local validation after rebasing onto
+  `5b8e4529`: no-GPU/no-examples
   configure, `pulp-test-cli-ship-shellout` build, direct `[issue-643]`
   run passed `3` assertions in `3` cases, full binary passed `10`
   assertions in `10` cases, focused CTest `pulp ship` passed `10/10`,
   `git diff --check HEAD~1..HEAD`, `git diff --check`, skill-sync
   report, and version-bump report with `Version-Bump: sdk=skip` for
-  the test-only coverage tranche.
+  the test-only coverage tranche. Follow-up validation after rebasing
+  onto `b5e7a463` used a real built CLI path and passed the focused
+  Android validation test with `12` assertions, the `[issue-643]` slice
+  with `25` assertions in `3` cases, the full binary with `45`
+  assertions in `10` cases, diff check, and pre-push gates.
 - `#643` CLI sync checker worktree
   `/Users/danielraffel/Code/pulp-cli-sync-coverage-643`, branch
   `feature/cli-sync-coverage-643`, commit `86048a3f`; open as PR
@@ -733,7 +743,8 @@ Open supporting PR:
   the merged Android SDK discovery fix, and `#832` was rebased/repaired
   for the Windows fast-exit command, and `#834` opened, and `#828`
   merged, and `#835` opened, and `#836` opened, and `#837` opened, and
-  `#831` merged, and `#838` opened, and remains docs-only.
+  `#831` merged, and `#838` opened, and `#835` was repaired for Linux
+  Android-validation ordering, and remains docs-only.
 
 Local environment note:
 
