@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-26 22:43 EDT
+Last reviewed: 2026-04-26 22:49 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -66,7 +66,7 @@ Finish line:
 ## Current live state
 
 Latest complete Codecov `main` report observed while updating this doc
-(`main` head `8fc5dd2d` has a newer Coverage run queued):
+(`main` head `62ad9870` has a newer Coverage run queued):
 
 - commit: `5b8e4529cfc553fd98b65f265ed1e9c0487b3d66`
 - workflow: Coverage run `24970413173`, completed successfully
@@ -164,6 +164,8 @@ Merged after the Phase 1 closeout / `#723` baseline:
 - `#834` events event-loop lifecycle edge coverage -> `455c0a9d`
 - `#829` MIDI-CI edge coverage -> `eaf991b0`
 - `#833` signal filter-design edge coverage -> `8fc5dd2d`
+- `#838` CLI release packager coverage -> `3d47dbd2`
+- `#839` GPU graph render helper hardening/coverage -> `62ad9870`
 
 Open Phase 3 PRs:
 
@@ -186,18 +188,6 @@ Open Phase 3 PRs:
   `PULP_HOME` and cleared password env vars. This tranche also uses the
   GitHub/Namespace path while the SSH `windows` target remains
   unreachable.
-- `#838` CLI release packager coverage for `#643`, branch
-  `feature/package-cli-coverage-643`, head `09666f46`; opened from
-  `main` at `b5e7a463`, then rebased onto `d02c9ec9` and repaired after
-  macOS Namespace exposed a parallel CTest temp-dir collision in
-  `test/test_android_package.cpp`. This tranche also uses the
-  GitHub/Namespace path while the SSH `windows` target remains
-  unreachable.
-- `#839` GPU graph render helper hardening/coverage for `#646`, branch
-  `feature/render-gpu-graph-coverage-646`, head `fa3deb3b`; opened
-  from `main` at `bdc406cc`, then rebased onto `d02c9ec9` after `#830`
-  merged. This tranche also uses the GitHub/Namespace path while the
-  SSH `windows` target remains unreachable.
 - `#840` events child-process manager coverage for `#642`, branch
   `feature/events-child-process-coverage-642`, head `410a0371`; opened
   from `main` at `455c0a9d`, then rebased onto `eaf991b0` after `#829`
@@ -266,6 +256,15 @@ Open Phase 3 PRs:
   `feature/midi-signal-helper-coverage-645-next2`, head `2d8b0bc3`;
   covers rounded/zero block-size setup, empty IR pass-through, and
   wrong-block-size pass-through behavior.
+- `#856` CLI/tools LCOV/Cobertura helper coverage for `#643`, branch
+  `feature/cli-tools-coverage-643-next3`, head `96d20a3a`; covers
+  package exclusions before summary-rate calculation, duplicate
+  source-record function-hit merging, and relpath fallback paths.
+- `#857` events async-helper coverage for `#642`, branch
+  `feature/events-helper-coverage-642-next2`, head `4cbfd67c`; adds a
+  focused async-helper target covering reentrant `AsyncUpdater`,
+  `LambdaAsyncUpdater` empty-callback handling, `ActionBroadcaster`
+  missing-removal behavior, and `MultiTimer` stop-all/restart behavior.
 
 Local Phase 3 draft worktrees:
 
@@ -481,7 +480,8 @@ Local Phase 3 draft worktrees:
 - `#646` GPU graph render helper worktree
   `/Users/danielraffel/Code/pulp-render-gpu-graph-coverage-646`,
   branch `feature/render-gpu-graph-coverage-646`, commit `fa3deb3b`;
-  open as PR `#839`.
+  merged via PR `#839` as `62ad9870`. The remote branch was deleted
+  after merge.
   Scope: hardens `GpuGraphRenderer`, `GpuHeatMapRenderer`, and
   `GpuBarRenderer` raw-pointer `set_data()` paths for null, zero-sized,
   and overflowing inputs; adds focused `test_gpu_graph.cpp` edge
@@ -497,8 +497,8 @@ Local Phase 3 draft worktrees:
   report with an SDK patch trailer, and pre-push gates.
 - `#643` CLI release packager worktree
   `/Users/danielraffel/Code/pulp-package-cli-coverage-643`, branch
-  `feature/package-cli-coverage-643`, commit `09666f46`; open as PR
-  `#838`.
+  `feature/package-cli-coverage-643`, commit `09666f46`; merged via PR
+  `#838` as `3d47dbd2`. The remote branch was deleted after merge.
   Scope: test-only Python coverage for `tools/scripts/package_cli.py`
   wgpu library discovery, macOS/Linux rpath command selection,
   tar/zip archive writer layout, missing-binary and missing-library
@@ -968,6 +968,30 @@ Local Phase 3 draft worktrees:
   convolver binary with `91` assertions in `6` cases, direct
   `[issue-645]` run with `19` assertions in `2` cases, and focused CTest
   `6/6`.
+- `#643` LCOV/Cobertura helper worktree
+  `/Users/danielraffel/Code/pulp-cli-tools-coverage-643-next3`,
+  branch `feature/cli-tools-coverage-643-next3`, commit `96d20a3a`;
+  open as PR `#856`. Scope: test-only coverage for
+  `tools/scripts/test_run_coverage.py` package exclusions before
+  summary-rate calculation, duplicate source-record function-hit
+  merging, and relpath `ValueError` fallback paths. Local validation
+  passed `python3 tools/scripts/test_run_coverage.py`,
+  `python3 tools/scripts/test_merge_cobertura.py`,
+  `python3 tools/scripts/test_run_python_coverage.py`, and diff check;
+  local `coverage.py >= 7.10` is not installed, so hosted CI remains the
+  coverage proof.
+- `#642` events async-helper worktree
+  `/Users/danielraffel/Code/pulp-events-helper-coverage-642-next2`,
+  branch `feature/events-helper-coverage-642-next2`, commits `7b6f653e`
+  and metadata tip `4cbfd67c`; open as PR `#857`. Scope: new focused
+  test-only target for reentrant `AsyncUpdater`, `LambdaAsyncUpdater`
+  empty-callback handling, `ActionBroadcaster` missing-removal behavior,
+  and `MultiTimer` stop-all/restart behavior. Local validation after
+  rebasing onto `origin/main` passed the no-GPU/no-examples configure,
+  affected target build, direct `pulp-test-events-async-helpers` run
+  with `16` assertions in `4` cases, focused CTest `12/12`, diff check,
+  and pre-push gates with a `Version-Bump: sdk=skip` trailer for the
+  test-only target registration.
 
 Open supporting PR:
 
@@ -1003,7 +1027,9 @@ Open supporting PR:
   `#846`, `#847`, `#848`, `#849`, `#850`, and `#851` opened from the
   parallel worker batch, and `#833` merged as `8fc5dd2d`, and `#840`
   was repaired for diff coverage with `410a0371`, and `#852`, `#853`,
-  `#854`, and `#855` opened from the next worker batch,
+  `#854`, and `#855` opened from the next worker batch, and `#838`
+  merged as `3d47dbd2`, and `#839` merged as `62ad9870`, and `#856`
+  and `#857` opened from the latest worker batch,
   and remains docs-only.
 
 Local environment note:
@@ -1029,32 +1055,26 @@ Next recovery actions:
 3. Monitor `#835` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-cli-ship-coverage-643`, patch,
    validate locally, and push with lease.
-4. Monitor `#838` cloud checks on head `09666f46`; if a required lane fails, debug in
-   `/Users/danielraffel/Code/pulp-package-cli-coverage-643`, patch,
-   validate locally, and push with lease.
-5. Monitor `#839` cloud checks; if a required lane fails, debug in
-   `/Users/danielraffel/Code/pulp-render-gpu-graph-coverage-646`,
-   patch, validate locally, and push with lease.
-6. Monitor `#840` cloud checks on head `410a0371`; if a required lane
+4. Monitor `#840` cloud checks on head `410a0371`; if a required lane
    fails after dependency bootstrap succeeds, debug in
    `/Users/danielraffel/Code/pulp-events-child-process-coverage-642`,
    patch, validate locally, and push with lease.
-7. Monitor `#842` cloud checks on head `0541fd69`; if a required lane
+5. Monitor `#842` cloud checks on head `0541fd69`; if a required lane
    fails, debug in
    `/Users/danielraffel/Code/pulp-inspect-codecov-component-841`,
    patch, validate locally, and push with lease.
-8. Monitor `#843` cloud checks on head `fcdbd278`; if a required lane
+6. Monitor `#843` cloud checks on head `fcdbd278`; if a required lane
    fails, debug in
    `/Users/danielraffel/Code/pulp-midi-mpe-tracker-extra-coverage-645-next`,
    patch, validate locally, and push with lease.
-9. Monitor `#845` through `#855`; if a required lane fails, debug in
+7. Monitor `#845` through `#857`; if a required lane fails, debug in
    the worktree named in the open-PR list above, patch, validate
    locally, and push with lease. Pay particular attention to `#848` and
    `#851` because they include patch-level production hardening.
-10. If any open Phase 3 PR is green but GitHub reports it behind `main`,
+8. If any open Phase 3 PR is green but GitHub reports it behind `main`,
    rebase that branch onto `origin/main`, push with lease, and let
    checks rerun.
-11. Continue Phase 3 from the tranche issues below, prioritizing
+9. Continue Phase 3 from the tranche issues below, prioritizing
    represented high-miss files over adding new perimeter lanes.
 
 ## Phase 1 corrected baseline
