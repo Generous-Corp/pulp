@@ -470,14 +470,20 @@ TEST_CASE("ActionBroadcaster adds, removes, and notifies listeners",
     broadcaster.send_action("refresh");
     REQUIRE(seen == std::vector<std::string>{"refresh", "second:refresh"});
 
+    broadcaster.remove_listener(999);
+    broadcaster.send_action("noop-remove");
+    REQUIRE(seen == std::vector<std::string>{
+        "refresh", "second:refresh", "noop-remove", "second:noop-remove"});
+
     broadcaster.remove_listener(first);
     broadcaster.send_action("rebuild");
     REQUIRE(seen == std::vector<std::string>{
-        "refresh", "second:refresh", "second:rebuild"});
+        "refresh", "second:refresh", "noop-remove", "second:noop-remove",
+        "second:rebuild"});
 
     broadcaster.remove_listener(second);
     broadcaster.send_action("ignored");
-    REQUIRE(seen.size() == 3);
+    REQUIRE(seen.size() == 5);
 }
 
 TEST_CASE("ScopedLowPowerModeDisabler is constructible as an RAII guard",
