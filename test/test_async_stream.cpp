@@ -200,6 +200,59 @@ TEST_CASE("AsyncStream cancel drains queue even before worker starts", "[async_s
     REQUIRE(stream.pending_write_bytes() == 0);
 }
 
+TEST_CASE("AsyncStream zero-byte write dispatches completion without worker", "[async_stream]") {
+    auto backing = std::make_unique<TestStream>();
+
+    std::mutex m;
+    std::vector<std::function<void()>> queued;
+    AsyncStream::Options opts;
+    opts.auto_read = false;
+    opts.executor = [&](std::function<void()> fn) {
+        std::lock_guard<std::mutex> lock(m);
+        queued.push_back(std::move(fn));
+    };
+    AsyncStream stream(std::move(backing), opts);
+
+    std::atomic<bool> done{false};
+    std::atomic<std::size_t> bytes{99};
+    std::atomic<StreamError> error{StreamError::Closed};
+    REQUIRE(stream.write_async(nullptr, 0, [&](std::size_t n, StreamError err) {
+        bytes.store(n);
+        error.store(err);
+        done.store(true);
+    }));
+    REQUIRE(stream.pending_write_bytes() == 0);
+    REQUIRE_FALSE(done.load());
+
+    std::vector<std::function<void()>> to_run;
+    {
+        std::lock_guard<std::mutex> lock(m);
+        REQUIRE(queued.size() == 1);
+        to_run.swap(queued);
+    }
+    to_run.front()();
+
+    REQUIRE(done.load());
+    REQUIRE(bytes.load() == 0);
+    REQUIRE(error.load() == StreamError::Ok);
+}
+
+TEST_CASE("CancellationToken sharing and idempotent cancel", "[async_stream]") {
+    CancellationToken token;
+    CancellationToken copy = token;
+    CancellationToken other;
+
+    REQUIRE(token.shares(copy));
+    REQUIRE_FALSE(token.shares(other));
+    REQUIRE_FALSE(copy.is_cancelled());
+
+    token.cancel();
+    token.cancel();
+    REQUIRE(token.is_cancelled());
+    REQUIRE(copy.is_cancelled());
+    REQUIRE_FALSE(other.is_cancelled());
+}
+
 TEST_CASE("AsyncStream executor routes callbacks off worker", "[async_stream]") {
     auto backing = std::make_unique<TestStream>();
     auto* raw = backing.get();
