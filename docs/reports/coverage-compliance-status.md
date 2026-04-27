@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-26 21:50 EDT
+Last reviewed: 2026-04-26 22:21 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -211,6 +211,45 @@ Open Phase 3 PRs:
   FetchContent cache hit a GitHub 403 cloning `Tracktion/choc.git`. This
   tranche also uses the GitHub/Namespace path while the SSH `windows`
   target remains unreachable.
+- `#842` inspect Codecov classification for `#841` / parent `#641`,
+  branch `feature/inspect-codecov-component-841`, head `0541fd69`;
+  promotes `inspect/**` to a first-class Codecov flag/component and
+  classifies it in the existing user-facing coverage tier. Local
+  validation passed the Codecov config test, coverage-tier check,
+  docs-sync report, diff check, skill-sync report, and version-bump
+  report.
+- `#843` MPE tracker UMP edge-path coverage for `#645`, branch
+  `feature/midi-mpe-tracker-extra-coverage-645-next`, head `fcdbd278`;
+  opened from `main` at `eaf991b0`. This test-only tranche covers
+  unmatched MIDI 2.0 per-note expression packets, MIDI 2.0 member
+  expression fan-out across active channel notes, and supported-zone UMP
+  packets that should be consumed without mapped side effects.
+- `#845` host automation queue coverage for `#493`, branch
+  `feature/format-host-coverage-493-next`, head `c3c5cfce`; covers
+  `ParameterEventQueue` sample-offset sorting and clear/reuse lifecycle.
+- `#846` audio focus coverage for `#640`, branch
+  `feature/audio-platform-coverage-640-next`, head `97568e27`; covers
+  `AudioFocusRegistry` token move-assignment, default-token reset, and
+  publish-without-subscribers state behavior.
+- `#847` events NSD / async helper coverage for `#642`, branch
+  `feature/events-volume-coverage-642-next`, head `8365c969`; covers
+  `LambdaAsyncUpdater` empty-callback processing plus
+  `NetworkServiceDiscovery` dispatcher and service-keying behavior.
+- `#848` runtime Base64 padding validation for parent `#641`, branch
+  `feature/runtime-coverage-641-next`, head `36aa5c71`; hardens
+  `base64_decode` terminal-padding validation and carries a patch-level
+  SDK metadata trailer.
+- `#849` view label paint coverage for `#493`, branch
+  `feature/view-widget-coverage-493-next`, head `7f6deaf6`; covers
+  label text transforms, multiline/decorations, and vertical text
+  direction transform wrapping.
+- `#850` CLI/tools runner resolver coverage for `#643`, branch
+  `feature/cli-tools-coverage-643-next2`, head `b8e7b22a`; covers
+  optional Namespace fallback plus provider/default argument validation.
+- `#851` signal meter channel-count guards for `#645`, branch
+  `feature/signal-meter-coverage-645-next`, head `ad9c3d81`; hardens
+  negative/invalid `MultiChannelMeter` and `MultiChannelBallistics`
+  channel counts and carries a patch-level SDK metadata trailer.
 
 Local Phase 3 draft worktrees:
 
@@ -716,6 +755,19 @@ Local Phase 3 draft worktrees:
   binary runs, diff whitespace checks, skill-sync report, and
   version-bump report; the focused CTest pattern found no local tests in
   that incremental build but exited cleanly.
+- `#645` MPE tracker UMP edge-path worktree
+  `/Users/danielraffel/Code/pulp-midi-mpe-tracker-extra-coverage-645-next`,
+  branch `feature/midi-mpe-tracker-extra-coverage-645-next`, commit
+  `fcdbd278`; open as PR `#843`.
+  Scope: test-only coverage for unmatched MIDI 2.0 per-note expression
+  handling without seeding channel state, MIDI 2.0 member expression
+  fan-out across active channel notes, and supported-zone UMP packets
+  that are consumed without mapped side effects. Local validation:
+  no-GPU/no-examples configure, `pulp-test-mpe-voice-tracker` build,
+  direct `[issue-645]` run passed `195` assertions in `9` cases, full
+  binary passed `268` assertions in `26` cases, focused CTest
+  `MpeVoiceTracker` passed `26/26`, `git diff --check`, skill-sync
+  report, and version-bump report.
 - `#645` RPN parser worktree
   `/Users/danielraffel/Code/pulp-midi-rpn-coverage-645`, branch
   `feature/midi-rpn-coverage-645`, commit `d1edf1e1`; merged via PR
@@ -794,6 +846,70 @@ Local Phase 3 draft worktrees:
   compares tool revisions numerically` selector with `5` assertions in
   `1` case, passed the matching CTest selector, passed
   `git diff --check origin/main...HEAD`, and cleared pre-push gates.
+- `#493` host automation queue worktree
+  `/Users/danielraffel/Code/pulp-format-host-coverage-493-next`,
+  branch `feature/format-host-coverage-493-next`, commit `c3c5cfce`;
+  open as PR `#845`. Scope: test-only coverage for
+  `ParameterEventQueue` sample-offset sorting and clear/reuse lifecycle.
+  Local validation passed the no-GPU/no-examples configure, affected
+  target build, direct `[issue-493]` run, full host-regression binary,
+  focused CTest selector, diff check, skill-sync report, and
+  version-bump report.
+- `#640` audio focus worktree
+  `/Users/danielraffel/Code/pulp-audio-platform-coverage-640-next`,
+  branch `feature/audio-platform-coverage-640-next`, commit
+  `97568e27`; open as PR `#846`. Scope: test-only coverage for
+  `AudioFocusRegistry` token move-assignment replacement, default token
+  reset no-op behavior, and publish-without-subscribers state updates.
+  Local validation passed the no-GPU/no-examples configure, affected
+  target build, direct `[issue-640]` run, full binary, focused CTest,
+  diff checks, skill-sync report, and version-bump report.
+- `#642` events NSD / async helper worktree
+  `/Users/danielraffel/Code/pulp-events-volume-coverage-642-next`,
+  branch `feature/events-volume-coverage-642-next`, commit `8365c969`;
+  open as PR `#847`. Scope: test-only coverage for
+  `LambdaAsyncUpdater` empty-callback processing and
+  `NetworkServiceDiscovery` backend dispatcher / service-name-plus-type
+  keying behavior. Local validation passed the no-GPU/no-examples
+  configure, affected target builds, direct `[issue-642]` runs for
+  events and NSD, full binaries, focused CTest, diff check, skill-sync
+  report, and version-bump report.
+- `#641` runtime Base64 validation worktree
+  `/Users/danielraffel/Code/pulp-runtime-coverage-641-next`, branch
+  `feature/runtime-coverage-641-next`, commits `20626508` and metadata
+  tip `36aa5c71`; open as PR `#848`. Scope: hardens
+  `base64_decode` to reject malformed terminal padding and adds focused
+  runtime coverage for malformed / whitespace-padded input. Local
+  validation passed the no-GPU/no-examples configure, affected target
+  build, direct `[issue-641]` run, full runtime-utils binary, focused
+  CTest, diff check, skill-sync report, and version-bump report with an
+  SDK patch trailer.
+- `#493` view label worktree
+  `/Users/danielraffel/Code/pulp-view-widget-coverage-493-next`, branch
+  `feature/view-widget-coverage-493-next`, commit `7f6deaf6`; open as
+  PR `#849`. Scope: test-only coverage for label text transforms,
+  multiline/decorations, and vertical text-direction transform wrapping.
+  Local validation passed the no-GPU/no-examples configure, widgets
+  target build, full widgets binary, focused selectors, diff check,
+  skill-sync report, and version-bump report.
+- `#643` runner resolver worktree
+  `/Users/danielraffel/Code/pulp-cli-tools-coverage-643-next2`, branch
+  `feature/cli-tools-coverage-643-next2`, commit `b8e7b22a`; open as
+  PR `#850`. Scope: test-only Python coverage for
+  `resolve_runs_on.py` optional Namespace fallback and
+  argument/provider validation branches. Local validation passed the
+  direct Python test suite, compileall, and diff check; local
+  `coverage.py` is not installed in this interpreter.
+- `#645` signal meter guard worktree
+  `/Users/danielraffel/Code/pulp-signal-meter-coverage-645-next`,
+  branch `feature/signal-meter-coverage-645-next`, commits `e53b5152`
+  and metadata tip `ad9c3d81`; open as PR `#851`. Scope: hardens
+  negative/invalid channel-count handling in `MultiChannelMeter` and
+  `MultiChannelBallistics` and adds focused signal meter coverage.
+  Local validation passed the no-GPU/no-examples configure, affected
+  target build, direct `[signal][meter][issue-645]` run, full signal
+  binary, focused CTest, diff check, skill-sync report, and
+  version-bump report with an SDK patch trailer.
 
 Open supporting PR:
 
@@ -823,7 +939,11 @@ Open supporting PR:
   for the Android package parallel temp-dir collision, and `#834` merged,
   and `#840` opened, and `#841` was opened to classify the represented
   but currently uncomponentized `inspect/` Codecov bucket, and `#829`
-  merged, and `#840` was rebased onto `eaf991b0`,
+  merged, and `#840` was rebased onto `eaf991b0`, and `#842` opened to
+  promote `inspect/**` to a first-class Codecov component/tier, and
+  `#843` opened for MPE tracker UMP edge-path coverage, and `#845`,
+  `#846`, `#847`, `#848`, `#849`, `#850`, and `#851` opened from the
+  parallel worker batch,
   and remains docs-only.
 
 Local environment note:
@@ -862,10 +982,22 @@ Next recovery actions:
    fails after dependency bootstrap succeeds, debug in
    `/Users/danielraffel/Code/pulp-events-child-process-coverage-642`,
    patch, validate locally, and push with lease.
-8. If any open Phase 3 PR is green but GitHub reports it behind `main`,
+8. Monitor `#842` cloud checks on head `0541fd69`; if a required lane
+   fails, debug in
+   `/Users/danielraffel/Code/pulp-inspect-codecov-component-841`,
+   patch, validate locally, and push with lease.
+9. Monitor `#843` cloud checks on head `fcdbd278`; if a required lane
+   fails, debug in
+   `/Users/danielraffel/Code/pulp-midi-mpe-tracker-extra-coverage-645-next`,
+   patch, validate locally, and push with lease.
+10. Monitor `#845` through `#851`; if a required lane fails, debug in
+   the worktree named in the open-PR list above, patch, validate
+   locally, and push with lease. Pay particular attention to `#848` and
+   `#851` because they include patch-level production hardening.
+11. If any open Phase 3 PR is green but GitHub reports it behind `main`,
    rebase that branch onto `origin/main`, push with lease, and let
    checks rerun.
-9. Continue Phase 3 from the tranche issues below, prioritizing
+12. Continue Phase 3 from the tranche issues below, prioritizing
    represented high-miss files over adding new perimeter lanes.
 
 ## Phase 1 corrected baseline
@@ -951,14 +1083,13 @@ represented surface.
   shims, and Web/WASM-specific sources, remain outside the measured
   graph unless Phase 2 decides to add focused follow-up issues.
 
-## Represented but not yet componentized
+## Represented inspect surface
 
 - `inspect/` is represented on the Codecov website as a first-party
   top-level bucket (`1,505` lines, `10.10%` in the user-observed
-  snapshot), but it is not currently a named component in `codecov.yml`
-  or a target tier in `ci/coverage-targets.yaml`. This is now tracked by
-  `#841`: either promote `inspect/**` to a first-class component/tier or
-  document it explicitly as represented-but-uncategorized for now.
+  snapshot). It is tracked by `#841`, and PR `#842` promotes
+  `inspect/**` to a first-class Codecov flag/component and assigns it to
+  the existing user-facing coverage tier in `ci/coverage-targets.yaml`.
 
 ## Phase 1 issue map
 
@@ -989,8 +1120,8 @@ represented surface.
   dedicated future lanes
 - `#77` decide and, if in scope, add mobile runtime coverage from
   Android instrumentation and iOS simulator / runtime app paths
-- `#841` classify represented `inspect/**` as either a first-class
-  Codecov component/tier or explicitly represented-but-uncategorized
+- `#841` classify represented `inspect/**` as a first-class Codecov
+  component/tier; implemented by open PR `#842`
 
 ### Supporting infrastructure
 
