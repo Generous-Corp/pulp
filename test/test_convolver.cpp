@@ -80,3 +80,56 @@ TEST_CASE("Convolver: multi-partition IR", "[signal][convolver]") {
     REQUIRE(conv.num_partitions() == 3);
     REQUIRE(conv.latency() == 0);
 }
+
+TEST_CASE("Convolver: block size is rounded to a processable power of two",
+          "[signal][convolver][issue-645]") {
+    const std::vector<float> ir = {1.0f};
+
+    PartitionedConvolver rounded;
+    rounded.load_ir(ir.data(), ir.size(), 3);
+    REQUIRE(rounded.is_loaded());
+    REQUIRE(rounded.num_partitions() == 1);
+
+    const float input[] = {1.0f, -0.5f, 0.25f, 0.75f};
+    float output[] = {0.0f, 0.0f, 0.0f, 0.0f};
+    rounded.process(input, output, 4);
+
+    for (size_t i = 0; i < 4; ++i)
+        REQUIRE_THAT(output[i], WithinAbs(input[i], 1e-5f));
+
+    PartitionedConvolver zero_block;
+    zero_block.load_ir(ir.data(), ir.size(), 0);
+    REQUIRE(zero_block.is_loaded());
+
+    const float single_input[] = {0.625f};
+    float single_output[] = {0.0f};
+    zero_block.process(single_input, single_output, 1);
+    REQUIRE_THAT(single_output[0], WithinAbs(single_input[0], 1e-5f));
+}
+
+TEST_CASE("Convolver: empty IR and wrong block size pass input through",
+          "[signal][convolver][issue-645]") {
+    float dummy_ir = 0.0f;
+    PartitionedConvolver empty_ir;
+    empty_ir.load_ir(&dummy_ir, 0, 8);
+    REQUIRE_FALSE(empty_ir.is_loaded());
+    REQUIRE(empty_ir.num_partitions() == 0);
+
+    const float input[] = {0.0f, 1.0f, 2.0f, 3.0f};
+    float output[] = {-1.0f, -1.0f, -1.0f, -1.0f};
+    empty_ir.process(input, output, 4);
+
+    for (size_t i = 0; i < 4; ++i)
+        REQUIRE_THAT(output[i], WithinAbs(input[i], 1e-6f));
+
+    const std::vector<float> identity_ir = {1.0f};
+    PartitionedConvolver loaded;
+    loaded.load_ir(identity_ir.data(), identity_ir.size(), 8);
+    REQUIRE(loaded.is_loaded());
+
+    std::fill(std::begin(output), std::end(output), -1.0f);
+    loaded.process(input, output, 4);
+
+    for (size_t i = 0; i < 4; ++i)
+        REQUIRE_THAT(output[i], WithinAbs(input[i], 1e-6f));
+}
