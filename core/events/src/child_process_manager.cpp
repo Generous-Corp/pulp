@@ -1,4 +1,5 @@
 #include <pulp/events/child_process_manager.hpp>
+#include <algorithm>
 #include <random>
 #include <sstream>
 #include <chrono>
@@ -101,6 +102,8 @@ void ConnectedChildProcess::kill() {
 }
 
 int ConnectedChildProcess::wait_for_exit(int timeout_ms) {
+    if (pid_ < 0) return -1;
+
     auto start = std::chrono::steady_clock::now();
     while (running_.load()) {
         if (timeout_ms > 0) {
@@ -112,9 +115,9 @@ int ConnectedChildProcess::wait_for_exit(int timeout_ms) {
     }
 
 #ifndef _WIN32
-    int status;
-    waitpid(static_cast<pid_t>(pid_), &status, WNOHANG);
-    return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+    int status = 0;
+    auto waited = waitpid(static_cast<pid_t>(pid_), &status, WNOHANG);
+    return waited == static_cast<pid_t>(pid_) && WIFEXITED(status) ? WEXITSTATUS(status) : -1;
 #else
     return 0;
 #endif
