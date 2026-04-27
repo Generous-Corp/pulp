@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-26 20:36 EDT
+Last reviewed: 2026-04-26 20:40 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -66,26 +66,26 @@ Finish line:
 ## Current live state
 
 Latest complete Codecov `main` report observed while updating this doc
-(`main` head `5b8e4529` has a newer Coverage run in progress):
+(`main` head `b5e7a463` has a newer Coverage run queued):
 
-- commit: `87ef6d90e54a1aa940278aab15b6e444d5c1c30d`
-- workflow: Coverage run `24969958550`, completed successfully
+- commit: `5b8e4529cfc553fd98b65f265ed1e9c0487b3d66`
+- workflow: Coverage run `24970413173`, completed successfully
 - overall tracked coverage: `46.83%` over `70,453` lines in `556` files
-- covered lines: `32,994`
-- missed lines: `36,163`
-- partial lines: `1,296`
+- covered lines: `32,996`
+- missed lines: `36,165`
+- partial lines: `1,292`
 - current component coverage from the Codecov API:
   - `audio`: `37.36%`
   - `canvas`: `64.74%`
   - `dsl`: `68.3%`
-  - `events`: `50.5%`
+  - `events`: `49.78%`
   - `format`: `51.72%`
   - `host`: `43.07%`
-  - `midi`: `54.18%`
+  - `midi`: `54.56%`
   - `osc`: `66.26%`
   - `platform`: `40.16%`
   - `render`: `62.77%`
-  - `runtime`: `49.14%`
+  - `runtime`: `49.11%`
   - `signal`: `73.87%`
   - `state`: `63.56%`
   - `view`: `44.0%`
@@ -157,6 +157,7 @@ Merged after the Phase 1 closeout / `#723` baseline:
 - `#826` OGG reader edge coverage -> `6ae4d487`
 - `#827` signal multi-channel meter edge coverage -> `d5efea57`
 - `#828` raw MIDI parser edge coverage and malformed-data hardening -> `5b8e4529`
+- `#831` signal utility helper edge coverage -> `b5e7a463`
 
 Open Phase 3 PRs:
 
@@ -170,12 +171,6 @@ Open Phase 3 PRs:
   `feature/midi-rpn-coverage-645`, head `d1edf1e1`; opened from `main`
   at `d0262a1b`. This tranche also uses the GitHub/Namespace path while
   the SSH `windows` target remains unreachable.
-- `#831` signal utility helper edge coverage for `#645`, branch
-  `feature/signal-utility-coverage-645`, head `1b8169aa`; opened from
-  `main` at `d0262a1b` and updated after the first Windows Namespace run
-  exposed an exact float-array equality assertion in the Phaser reset
-  test. This tranche also uses the GitHub/Namespace path while the SSH
-  `windows` target remains unreachable.
 - `#832` platform child-process edge coverage for `#640`, branch
   `feature/platform-child-process-coverage-640`, head `c07dd268`;
   opened from `main` at `d5efea57`, updated after the first Windows
@@ -653,7 +648,8 @@ Local Phase 3 draft worktrees:
 - `#645` signal utility helper worktree
   `/Users/danielraffel/Code/pulp-signal-utility-coverage-645`, branch
   `feature/signal-utility-coverage-645`, commits `d021a35c` and
-  `1b8169aa`; open as PR `#831`.
+  `1b8169aa`; merged via PR `#831` as `b5e7a463`. The remote branch was
+  deleted after merge.
   Scope: test-only coverage for `DelayLine` empty/wraparound/reset
   paths, `SmoothedValue` one-sample clamp and partial skip paths, `Svf`
   bandpass/notch/buffer/reset paths, `Panner` clamp plus in-place stereo
@@ -667,7 +663,7 @@ Local Phase 3 draft worktrees:
   passed `44` assertions in `4` cases, full signal binary passed `934`
   assertions in `74` cases, full v3 gaps binary passed `131` assertions
   in `27` cases, focused CTest passed `6/6`, `git diff --check`, skill-sync
-  report, and version-bump report.
+  report, and version-bump report. Cloud checks were clean before merge.
 - `#640` platform child-process worktree
   `/Users/danielraffel/Code/pulp-platform-child-process-coverage-640`,
   branch `feature/platform-child-process-coverage-640`, commits
@@ -719,7 +715,7 @@ Open supporting PR:
   the merged Android SDK discovery fix, and `#832` was rebased/repaired
   for the Windows fast-exit command, and `#834` opened, and `#828`
   merged, and `#835` opened, and `#836` opened, and `#837` opened, and
-  remains docs-only.
+  `#831` merged, and remains docs-only.
 
 Local environment note:
 
@@ -744,31 +740,28 @@ Next recovery actions:
 3. Monitor `#830` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-midi-rpn-coverage-645`, patch,
    validate locally, and push with lease.
-4. Monitor `#831` cloud checks; if a required lane fails, debug in
-   `/Users/danielraffel/Code/pulp-signal-utility-coverage-645`, patch,
-   validate locally, and push with lease.
-5. Monitor `#832` cloud checks; if a required lane fails, debug in
+4. Monitor `#832` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-platform-child-process-coverage-640`,
    patch, validate locally, and push with lease.
-6. Monitor `#833` cloud checks; if a required lane fails, debug in
+5. Monitor `#833` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-signal-biquad-coverage-645`, patch,
    validate locally, and push with lease.
-7. Monitor `#834` cloud checks; if a required lane fails, debug in
+6. Monitor `#834` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-events-loop-coverage-642`, patch,
    validate locally, and push with lease.
-8. Monitor `#835` cloud checks; if a required lane fails, debug in
+7. Monitor `#835` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-cli-ship-coverage-643`, patch,
    validate locally, and push with lease.
-9. Monitor `#836` cloud checks; if a required lane fails, debug in
+8. Monitor `#836` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-cli-sync-coverage-643`, patch,
    validate locally, and push with lease.
-10. Monitor `#837` cloud checks; if a required lane fails, debug in
+9. Monitor `#837` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-package-validator-coverage-643`,
    patch, validate locally, and push with lease.
-11. If any open Phase 3 PR is green but GitHub reports it behind `main`,
+10. If any open Phase 3 PR is green but GitHub reports it behind `main`,
    rebase that branch onto `origin/main`, push with lease, and let
    checks rerun.
-12. Continue Phase 3 from the tranche issues below, prioritizing
+11. Continue Phase 3 from the tranche issues below, prioritizing
    represented high-miss files over adding new perimeter lanes.
 
 ## Phase 1 corrected baseline
