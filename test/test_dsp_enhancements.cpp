@@ -127,6 +127,16 @@ struct TestGain {
     void reset() {}
 };
 
+struct StatefulGain {
+    float gain = 1.0f;
+    float sample_rate = 0.0f;
+    bool reset_called = false;
+
+    void set_sample_rate(float sr) { sample_rate = sr; }
+    float process(float x) { return x * gain; }
+    void reset() { reset_called = true; }
+};
+
 TEST_CASE("ProcessorDuplicator applies to all channels", "[dsp][duplicator]") {
     ProcessorDuplicator<TestGain> dup;
     dup.prepare(2, 44100.0f);
@@ -156,6 +166,40 @@ TEST_CASE("ProcessorDuplicator per-channel params", "[dsp][duplicator]") {
 
     REQUIRE_THAT(ch0[0], WithinAbs(2.0f, 1e-5));
     REQUIRE_THAT(ch1[0], WithinAbs(0.5f, 1e-5));
+}
+
+TEST_CASE("ProcessorDuplicator bounds channels and exposes channel state",
+          "[dsp][duplicator][issue-645]") {
+    ProcessorDuplicator<StatefulGain> dup;
+    dup.prepare(1, 48000.0f);
+    dup[0].gain = 3.0f;
+
+    float ch0[] = {1.0f, -2.0f};
+    float ch1[] = {10.0f, 20.0f};
+    float* channels[] = {ch0, ch1};
+
+    dup.process(channels, 2, 2);
+
+    REQUIRE(dup.num_channels() == 1);
+    REQUIRE_THAT(ch0[0], WithinAbs(3.0f, 1e-5));
+    REQUIRE_THAT(ch0[1], WithinAbs(-6.0f, 1e-5));
+    REQUIRE_THAT(ch1[0], WithinAbs(10.0f, 1e-5));
+    REQUIRE_THAT(ch1[1], WithinAbs(20.0f, 1e-5));
+
+    dup.process_channel(ch1, -1, 2);
+    dup.process_channel(ch1, 1, 2);
+    REQUIRE_THAT(ch1[0], WithinAbs(10.0f, 1e-5));
+    REQUIRE_THAT(ch1[1], WithinAbs(20.0f, 1e-5));
+
+    dup.process_channel(ch1, 0, 2);
+    REQUIRE_THAT(ch1[0], WithinAbs(30.0f, 1e-5));
+    REQUIRE_THAT(ch1[1], WithinAbs(60.0f, 1e-5));
+
+    const auto& const_dup = dup;
+    REQUIRE_THAT(const_dup[0].sample_rate, WithinAbs(48000.0f, 1e-5));
+
+    dup.reset();
+    REQUIRE(dup[0].reset_called);
 }
 
 // ── Matrix ──────────────────────────────────────────────────────────────
