@@ -63,6 +63,24 @@ TEST_CASE("non-reverse-DNS bundle_id produces a warning only",
     REQUIRE(descriptor_is_valid(issues));   // warnings don't fail the check
 }
 
+TEST_CASE("malformed reverse-DNS bundle_id segments warn only",
+          "[format][descriptor-validation][coverage][issue-493]") {
+    for (const auto* bundle_id : {
+             ".example.plugin",
+             "com..plugin",
+             "com.example.",
+             "com. .plugin",
+         }) {
+        auto d = well_formed_effect();
+        d.bundle_id = bundle_id;
+
+        CAPTURE(bundle_id);
+        auto issues = validate_descriptor(d);
+        REQUIRE(has_warning_on(issues, "bundle_id"));
+        REQUIRE(descriptor_is_valid(issues));
+    }
+}
+
 TEST_CASE("missing output bus is an error",
           "[format][descriptor-validation]") {
     auto d = well_formed_effect();
@@ -89,6 +107,39 @@ TEST_CASE("instrument with non-optional stereo input warns",
     REQUIRE(descriptor_is_valid(issues));
 }
 
+TEST_CASE("instrument optional or zero-channel inputs do not warn",
+          "[format][descriptor-validation][coverage][issue-493]") {
+    SECTION("optional stereo input") {
+        auto d = well_formed_effect();
+        d.category = PluginCategory::Instrument;
+        d.input_buses = {{"Optional In", 2, true}};
+
+        auto issues = validate_descriptor(d);
+        REQUIRE_FALSE(has_warning_on(issues, "input_buses"));
+        REQUIRE(descriptor_is_valid(issues));
+    }
+
+    SECTION("zero-channel main input") {
+        auto d = well_formed_effect();
+        d.category = PluginCategory::Instrument;
+        d.input_buses = {{"No Audio In", 0, false}};
+
+        auto issues = validate_descriptor(d);
+        REQUIRE_FALSE(has_warning_on(issues, "input_buses"));
+        REQUIRE(descriptor_is_valid(issues));
+    }
+
+    SECTION("no input bus") {
+        auto d = well_formed_effect();
+        d.category = PluginCategory::Instrument;
+        d.input_buses.clear();
+
+        auto issues = validate_descriptor(d);
+        REQUIRE_FALSE(has_warning_on(issues, "input_buses"));
+        REQUIRE(descriptor_is_valid(issues));
+    }
+}
+
 TEST_CASE("MidiEffect without accepts_midi warns",
           "[format][descriptor-validation]") {
     auto d = well_formed_effect();
@@ -105,6 +156,29 @@ TEST_CASE("supports_mpe without accepts_midi warns",
     d.accepts_midi = false;
     auto issues = validate_descriptor(d);
     REQUIRE(has_warning_on(issues, "accepts_midi"));
+}
+
+TEST_CASE("supports_ump follows the accepts_midi sidecar warning contract",
+          "[format][descriptor-validation][coverage][issue-493]") {
+    SECTION("UMP without MIDI input warns") {
+        auto d = well_formed_effect();
+        d.supports_ump = true;
+        d.accepts_midi = false;
+
+        auto issues = validate_descriptor(d);
+        REQUIRE(has_warning_on(issues, "accepts_midi"));
+        REQUIRE(descriptor_is_valid(issues));
+    }
+
+    SECTION("accepts_midi suppresses the sidecar warning") {
+        auto d = well_formed_effect();
+        d.supports_ump = true;
+        d.accepts_midi = true;
+
+        auto issues = validate_descriptor(d);
+        REQUIRE_FALSE(has_warning_on(issues, "accepts_midi"));
+        REQUIRE(descriptor_is_valid(issues));
+    }
 }
 
 TEST_CASE("MidiEffect without audio output is valid",
