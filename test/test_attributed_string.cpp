@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/canvas/attributed_string.hpp>
+#include <pulp/canvas/text_layout.hpp>
 
 using namespace pulp::canvas;
 using Catch::Matchers::WithinAbs;
@@ -125,4 +126,31 @@ TEST_CASE("TextLayout multiple spans", "[canvas][layout]") {
 
     // Two spans become two layout lines (each span on its own line in current impl)
     REQUIRE(layout.lines.size() == 2);
+}
+
+TEST_CASE("GlyphArrangement hit testing and cursor positions", "[canvas][layout]") {
+    FontSpec font;
+    font.size = 10.0f;
+    font.letter_spacing = 1.0f;
+
+    auto layout = layout_paragraph("abcd", font, 15.0f);
+
+    REQUIRE(layout.line_count() == 2);
+    REQUIRE(layout.lines()[0].glyphs.size() == 2);
+    REQUIRE(layout.lines()[1].glyphs.size() == 2);
+    REQUIRE_THAT(layout.lines()[0].width, WithinAbs(14.0f, 1e-5f));
+    REQUIRE_THAT(layout.lines()[1].width, WithinAbs(14.0f, 1e-5f));
+
+    REQUIRE(layout.hit_test(0.0f, 0.0f) == 0);
+    REQUIRE(layout.hit_test(4.0f, 0.0f) == 1);
+    REQUIRE(layout.hit_test(0.0f, 12.0f) == 2);
+    REQUIRE(layout.hit_test(100.0f, 12.0f) == 4);
+
+    REQUIRE_THAT(layout.position_for_index(1), WithinAbs(7.0f, 1e-5f));
+    REQUIRE_THAT(layout.position_for_index(99), WithinAbs(14.0f, 1e-5f));
+
+    layout.clear();
+    REQUIRE(layout.line_count() == 0);
+    REQUIRE(layout.hit_test(0.0f, 0.0f) == 0);
+    REQUIRE_THAT(layout.position_for_index(0), WithinAbs(0.0f, 1e-5f));
 }
