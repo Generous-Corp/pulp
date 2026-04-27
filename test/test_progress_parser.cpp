@@ -38,6 +38,30 @@ TEST_CASE("ProgressParser handles type-only (no payload)", "[progress_parser]") 
     REQUIRE(events[0].payload.empty());
 }
 
+TEST_CASE("ProgressParser handles empty callbacks for matching lines",
+          "[progress_parser][edge][issue-640]") {
+    ProgressParser parser(nullptr);
+
+    REQUIRE_NOTHROW(parser.feed_line("PROGRESS:START:payload"));
+    REQUIRE_NOTHROW(parser.feed_line("PROGRESS:DONE"));
+    REQUIRE_NOTHROW(parser.feed_line("regular output"));
+}
+
+TEST_CASE("ProgressParser preserves empty type and payload boundaries",
+          "[progress_parser][edge][issue-640]") {
+    std::vector<ProgressEvent> events;
+    ProgressParser parser([&](const ProgressEvent& e) { events.push_back(e); });
+
+    parser.feed_line("PROGRESS::payload");
+    parser.feed_line("PROGRESS:EMPTY_PAYLOAD:");
+
+    REQUIRE(events.size() == 2);
+    REQUIRE(events[0].type.empty());
+    REQUIRE(events[0].payload == "payload");
+    REQUIRE(events[1].type == "EMPTY_PAYLOAD");
+    REQUIRE(events[1].payload.empty());
+}
+
 TEST_CASE("ProgressParser handles multiple events", "[progress_parser]") {
     std::vector<ProgressEvent> events;
     ProgressParser parser([&](const ProgressEvent& e) { events.push_back(e); });
