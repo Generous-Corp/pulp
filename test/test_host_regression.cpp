@@ -637,6 +637,51 @@ TEST_CASE("SignalGraph end-to-end: prepare -> process -> release with mock slot"
 
 // ── Automation: host → plugin param-event delivery in process() ───────────
 
+TEST_CASE("ParameterEventQueue sorts automation events by sample offset",
+          "[host][automation][issue-493]") {
+    pulp::host::ParameterEventQueue queue;
+    queue.push({MockStatefulPlugin::kGainParamId, 24, 0.75f});
+    queue.push({MockStatefulPlugin::kGainParamId, 0, 0.25f});
+    queue.push({0x202, 12, 0.50f});
+
+    REQUIRE_FALSE(queue.empty());
+    REQUIRE(queue.size() == 3);
+
+    queue.sort();
+
+    auto it = queue.begin();
+    REQUIRE(it->sample_offset == 0);
+    REQUIRE(it->param_id == MockStatefulPlugin::kGainParamId);
+    REQUIRE_THAT(it->value, WithinAbs(0.25f, 1e-6f));
+
+    ++it;
+    REQUIRE(it->sample_offset == 12);
+    REQUIRE(it->param_id == 0x202);
+    REQUIRE_THAT(it->value, WithinAbs(0.50f, 1e-6f));
+
+    ++it;
+    REQUIRE(it->sample_offset == 24);
+    REQUIRE(it->param_id == MockStatefulPlugin::kGainParamId);
+    REQUIRE_THAT(it->value, WithinAbs(0.75f, 1e-6f));
+}
+
+TEST_CASE("ParameterEventQueue clear makes the queue reusable",
+          "[host][automation][issue-493]") {
+    pulp::host::ParameterEventQueue queue;
+    queue.push({MockStatefulPlugin::kGainParamId, 8, 0.5f});
+    REQUIRE(queue.size() == 1);
+
+    queue.clear();
+    REQUIRE(queue.empty());
+    REQUIRE(queue.events().empty());
+
+    queue.push({0x303, 4, 1.0f});
+    REQUIRE(queue.size() == 1);
+    REQUIRE(queue.begin()->param_id == 0x303);
+    REQUIRE(queue.begin()->sample_offset == 4);
+    REQUIRE_THAT(queue.begin()->value, WithinAbs(1.0f, 1e-6f));
+}
+
 TEST_CASE("SignalGraph delivers set_parameter via ParameterEventQueue",
           "[host][graph][automation][regression][issue-52]") {
     SignalGraph graph;
