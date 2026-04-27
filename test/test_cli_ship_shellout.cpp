@@ -178,6 +178,11 @@ TEST_CASE("pulp ship Android validation paths fail before external tooling",
     REQUIRE(sign.exit_code != 0);
     REQUIRE(contains(sign.stdout_output + sign.stderr_output, "No Android keystore"));
 
+    auto check = run_pulp_in(root, {"ship", "check", "--target", "android"});
+    REQUIRE_FALSE(check.timed_out);
+    REQUIRE(check.exit_code != 0);
+    REQUIRE(contains(check.stdout_output + check.stderr_output, "No artifacts/ directory"));
+
     auto conflicting = run_pulp_in(root,
         {"ship", "package", "--target", "android", "--apk-only", "--aab-only"});
     REQUIRE_FALSE(conflicting.timed_out);
@@ -190,11 +195,6 @@ TEST_CASE("pulp ship Android validation paths fail before external tooling",
     REQUIRE(missing_android.exit_code != 0);
     REQUIRE(contains(missing_android.stdout_output + missing_android.stderr_output,
                      "No android/ project found"));
-
-    auto check = run_pulp_in(root, {"ship", "check", "--target", "android"});
-    REQUIRE_FALSE(check.timed_out);
-    REQUIRE(check.exit_code != 0);
-    REQUIRE(contains(check.stdout_output + check.stderr_output, "No artifacts/ directory"));
 
     fs::remove_all(root);
 }
