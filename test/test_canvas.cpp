@@ -3,6 +3,15 @@
 #include <pulp/canvas/canvas.hpp>
 #include <pulp/canvas/sdf_atlas.hpp>
 
+#ifdef PULP_HAS_SKIA
+#include <pulp/canvas/skia_canvas.hpp>
+#include "include/core/SkCanvas.h"
+#include "include/core/SkColorSpace.h"
+#include "include/core/SkImageInfo.h"
+#include "include/core/SkMatrix.h"
+#include "include/core/SkSurface.h"
+#endif
+
 using namespace pulp::canvas;
 
 TEST_CASE("RecordingCanvas captures commands", "[canvas]") {
@@ -277,3 +286,69 @@ TEST_CASE("SDF shapes render via RecordingCanvas fallback", "[canvas][sdf]") {
         REQUIRE(rc.command_count() > 0);
     }
 }
+
+#ifdef PULP_HAS_SKIA
+// Issue-897 P1 follow-up: ctx.setTransform must compose onto the parent
+// View's transform, not overwrite it. Without this, a CanvasWidget at
+// non-zero offset would have its translation wiped the moment JS calls
+// ctx.setTransform(scale, 0, 0, scale, 0, 0) for devicePixelRatio scaling.
+TEST_CASE("SkiaCanvas::set_transform composes onto captured paint baseline",
+          "[canvas][skia][issue-897]") {
+    SkImageInfo info = SkImageInfo::Make(200, 200, kN32_SkColorType,
+                                         kPremul_SkAlphaType,
+                                         SkColorSpace::MakeSRGB());
+    auto surface = SkSurfaces::Raster(info);
+    REQUIRE(surface != nullptr);
+    auto* sk_canvas = surface->getCanvas();
+    REQUIRE(sk_canvas != nullptr);
+
+    // Simulate the parent View::paint_all step: translate the SkCanvas to
+    // the widget's on-screen origin BEFORE handing it to CanvasWidget.
+    sk_canvas->translate(50.0f, 30.0f);
+
+    SkiaCanvas canvas(sk_canvas);
+    // CanvasWidget::paint() invokes this at entry — call it directly here
+    // to model the same lifecycle.
+    canvas.capture_paint_baseline_transform();
+
+    // JS-driven scale-by-2 (e.g. devicePixelRatio): ctx.setTransform(2, 0, 0, 2, 0, 0).
+    canvas.set_transform(2.0f, 0.0f, 0.0f, 2.0f, 0.0f, 0.0f);
+
+    SkMatrix m = sk_canvas->getTotalMatrix();
+    // Expected composition: translate(50, 30) * scale(2, 2)
+    //   sx = 2, sy = 2, tx = 50, ty = 30, no skew.
+    REQUIRE(m.getScaleX() == Catch::Approx(2.0f));
+    REQUIRE(m.getScaleY() == Catch::Approx(2.0f));
+    REQUIRE(m.getTranslateX() == Catch::Approx(50.0f));
+    REQUIRE(m.getTranslateY() == Catch::Approx(30.0f));
+    REQUIRE(m.getSkewX() == Catch::Approx(0.0f));
+    REQUIRE(m.getSkewY() == Catch::Approx(0.0f));
+}
+
+TEST_CASE("SkiaCanvas::set_transform is spec-literal without baseline capture",
+          "[canvas][skia][issue-897]") {
+    // Direct SkiaCanvas users (e.g. screenshot host) that do NOT go through
+    // CanvasWidget never call capture_paint_baseline_transform — for them
+    // the baseline stays at identity and setTransform behaves per the
+    // CanvasRenderingContext2D spec literally.
+    SkImageInfo info = SkImageInfo::Make(100, 100, kN32_SkColorType,
+                                         kPremul_SkAlphaType,
+                                         SkColorSpace::MakeSRGB());
+    auto surface = SkSurfaces::Raster(info);
+    REQUIRE(surface != nullptr);
+    auto* sk_canvas = surface->getCanvas();
+
+    // Apply some transform we expect setTransform to wipe.
+    sk_canvas->translate(99.0f, 99.0f);
+
+    SkiaCanvas canvas(sk_canvas);
+    // No capture_paint_baseline_transform() call — baseline stays identity.
+    canvas.set_transform(2.0f, 0.0f, 0.0f, 2.0f, 10.0f, 20.0f);
+
+    SkMatrix m = sk_canvas->getTotalMatrix();
+    REQUIRE(m.getScaleX() == Catch::Approx(2.0f));
+    REQUIRE(m.getScaleY() == Catch::Approx(2.0f));
+    REQUIRE(m.getTranslateX() == Catch::Approx(10.0f));
+    REQUIRE(m.getTranslateY() == Catch::Approx(20.0f));
+}
+#endif

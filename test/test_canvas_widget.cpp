@@ -84,3 +84,43 @@ TEST_CASE("CanvasWidget: clear command fills background", "[canvas_widget]") {
     cw.paint(rc);
     REQUIRE(rc.commands().size() > 0);
 }
+
+// Issue-897 P1 follow-up: CanvasWidget::paint() must snapshot the inbound
+// device matrix at entry so JS-driven setTransform() composes onto the
+// parent View transform instead of overwriting it. Without this baseline
+// the SkiaCanvas backend's setTransform would wipe the parent translation
+// applied by View::paint_all.
+TEST_CASE("CanvasWidget::paint captures paint baseline transform at entry",
+          "[canvas_widget][issue-897]") {
+    RecordingCanvas rc;
+    CanvasWidget cw;
+    cw.set_bounds({0, 0, 100, 100});
+
+    REQUIRE(rc.baseline_capture_count() == 0);
+    cw.paint(rc);
+    REQUIRE(rc.baseline_capture_count() == 1);
+
+    cw.paint(rc);
+    REQUIRE(rc.baseline_capture_count() == 2);
+}
+
+TEST_CASE("CanvasWidget::paint baseline capture is idempotent and ordered",
+          "[canvas_widget][issue-897]") {
+    // The baseline must be snapshot before any draw work — otherwise an
+    // intervening transform command would corrupt it.
+    RecordingCanvas rc;
+    CanvasWidget cw;
+    cw.set_bounds({0, 0, 100, 100});
+
+    CanvasDrawCmd r;
+    r.type = CanvasDrawCmd::Type::fill_rect;
+    r.x = 0; r.y = 0; r.w = 50; r.h = 50;
+    r.color = {255, 0, 0, 255};
+    cw.add_command(r);
+
+    REQUIRE(rc.commands().empty());
+    REQUIRE(rc.baseline_capture_count() == 0);
+    cw.paint(rc);
+    REQUIRE(rc.baseline_capture_count() == 1);
+    REQUIRE_FALSE(rc.commands().empty());
+}

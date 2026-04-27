@@ -15,6 +15,7 @@ class SkPathBuilder;
 // These need full definitions for member variables
 #include "include/core/SkRefCnt.h"
 #include "include/core/SkBlendMode.h"
+#include "include/core/SkMatrix.h"
 class SkShader;
 
 namespace skgpu::graphite {
@@ -41,6 +42,7 @@ public:
     void rotate(float radians) override;
     void set_transform(float a, float b, float c,
                        float d, float e, float f) override;
+    void capture_paint_baseline_transform() override;
 
     // ── Clipping ─────────────────────────────────────────────────────────
     void clip_rect(float x, float y, float w, float h) override;
@@ -154,6 +156,13 @@ private:
 
     // Blend mode
     SkBlendMode blend_mode_ = SkBlendMode::kSrcOver;
+
+    // Paint-baseline matrix — captured at CanvasWidget::paint() entry so that
+    // JS-driven setTransform() composes onto the inbound View transform
+    // instead of overwriting it. Defaults to identity for callers (e.g.
+    // screenshot host) that drive SkiaCanvas directly without going through
+    // CanvasWidget — there setTransform behaves per the HTML spec literally.
+    SkMatrix paint_baseline_ = SkMatrix::I();
 };
 
 } // namespace pulp::canvas

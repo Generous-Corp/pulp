@@ -43,6 +43,10 @@ void RecordingCanvas::set_transform(float a, float b, float c,
     commands_.push_back(cmd);
 }
 
+void RecordingCanvas::capture_paint_baseline_transform() {
+    ++baseline_capture_count_;
+}
+
 void RecordingCanvas::clip_rect(float x, float y, float w, float h) {
     DrawCommand cmd{DrawCommand::Type::clip_rect};
     cmd.f[0] = x; cmd.f[1] = y; cmd.f[2] = w; cmd.f[3] = h;

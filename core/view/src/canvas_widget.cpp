@@ -7,6 +7,10 @@
 namespace pulp::view {
 
 void CanvasWidget::paint(canvas::Canvas& canvas) {
+    // Snapshot the inbound device matrix so JS-driven setTransform() composes
+    // onto the parent View transform rather than overwriting it (issue-897
+    // P1 follow-up to issue-896).
+    canvas.capture_paint_baseline_transform();
     last_native_gpu_texture_draw_succeeded_ = false;
 #ifdef PULP_HAS_SKIA
     if (native_gpu_texture_provider_) {

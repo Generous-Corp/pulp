@@ -181,9 +181,17 @@ void SkiaCanvas::set_transform(float a, float b, float c,
     //   [b d f] = [skewX  scaleY translateY]
     //   [0 0 1]
     // SkMatrix::MakeAll takes row-major (sx, kx, tx, ky, sy, ty, p0, p1, p2).
-    canvas_->setMatrix(SkMatrix::MakeAll(a, c, e,
-                                          b, d, f,
-                                          0.0f, 0.0f, 1.0f));
+    // Compose onto paint_baseline_ so a CanvasWidget at non-zero offset
+    // keeps its inbound View transform when JS calls ctx.setTransform.
+    SkMatrix user = SkMatrix::MakeAll(a, c, e,
+                                       b, d, f,
+                                       0.0f, 0.0f, 1.0f);
+    canvas_->setMatrix(SkMatrix::Concat(paint_baseline_, user));
+}
+
+void SkiaCanvas::capture_paint_baseline_transform() {
+    GUARD_CANVAS;
+    paint_baseline_ = canvas_->getTotalMatrix();
 }
 
 void SkiaCanvas::clip_rect(float x, float y, float w, float h) {

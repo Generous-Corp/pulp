@@ -197,11 +197,18 @@ public:
     /// [ 0 0 1 ]
     /// Mirrors CanvasRenderingContext2D.setTransform(a, b, c, d, e, f).
     /// Default implementation is a no-op so non-GPU backends still compile;
-    /// SkiaCanvas overrides with a full SkMatrix replace.
+    /// SkiaCanvas overrides to compose the supplied matrix onto the paint
+    /// baseline captured via capture_paint_baseline_transform().
     virtual void set_transform(float a, float b, float c,
                                float d, float e, float f) {
         (void)a; (void)b; (void)c; (void)d; (void)e; (void)f;
     }
+
+    /// Snapshot the current device matrix as the baseline for subsequent
+    /// set_transform() calls. CanvasWidget::paint() calls this at entry so
+    /// JS-supplied setTransform() composes onto the parent View transform
+    /// rather than wiping it. Default no-op for non-Skia backends.
+    virtual void capture_paint_baseline_transform() {}
 
     // ── Clipping ─────────────────────────────────────────────────────────
     virtual void clip_rect(float x, float y, float w, float h) = 0;
@@ -581,6 +588,11 @@ public:
     // Count commands of a specific type
     size_t count(DrawCommand::Type type) const;
 
+    // Number of times capture_paint_baseline_transform() was called — useful
+    // for asserting CanvasWidget::paint() snapshots the inbound device matrix
+    // exactly once at entry (issue-897).
+    size_t baseline_capture_count() const { return baseline_capture_count_; }
+
     void save() override;
     void restore() override;
     void translate(float x, float y) override;
@@ -588,6 +600,7 @@ public:
     void rotate(float radians) override;
     void set_transform(float a, float b, float c,
                        float d, float e, float f) override;
+    void capture_paint_baseline_transform() override;
     void clip_rect(float x, float y, float w, float h) override;
     void clip() override;
     void set_blend_mode(BlendMode mode) override;
@@ -612,6 +625,7 @@ public:
 
 private:
     std::vector<DrawCommand> commands_;
+    size_t baseline_capture_count_ = 0;
 };
 
 } // namespace pulp::canvas
