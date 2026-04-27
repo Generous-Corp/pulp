@@ -41,6 +41,7 @@ tiers:
     paths:
       - core/view/**
       - core/render/**
+      - inspect/**
       - tools/cli/**
 
   - name: infrastructure
