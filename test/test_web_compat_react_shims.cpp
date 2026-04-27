@@ -465,6 +465,33 @@ TEST_CASE("pump_message_loop transitively drains microtasks scheduled from micro
     REQUIRE(std::string(v.getString()) == "5");
 }
 
+// Codex P2 on PR #769: an earlier 4096-job hard cap silently returned
+// after 4096 iterations, leaving a larger Promise/microtask chain
+// half-drained. The cap is gone — pump now drains to empty (rc == 0).
+// Verify by scheduling 5000 microtasks (≥ the old cap) in one chain
+// and asserting every one of them executed before the pump returns.
+TEST_CASE("pump_message_loop drains a long chain past the old 4096-job cutoff",
+          "[view][web-compat][issue-746][issue-769]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        globalThis.__count__ = 0;
+        var TARGET = 5000;
+        function step () {
+            globalThis.__count__++;
+            if (globalThis.__count__ < TARGET) queueMicrotask(step);
+        }
+        queueMicrotask(step);
+    )");
+    engine.pump_message_loop();
+    auto v = engine.evaluate("String(globalThis.__count__)");
+    REQUIRE(v.isString());
+    REQUIRE(std::string(v.getString()) == "5000");
+}
+
 // ── MessageChannel + MessagePort + postMessage ─────────────────────────
 
 TEST_CASE("MessageChannel constructs, exposes port1/port2, and postMessage doesn't throw",

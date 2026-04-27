@@ -39,9 +39,16 @@ static void set_quickjs_stack_size(choc::javascript::Context& ctx, size_t size) 
 // JSContext*, and call JS_ExecutePendingJob until the queue is empty.
 // JS_ExecutePendingJob returns 1 when it ran a job, 0 when the queue is
 // empty, and a negative value on a JS exception inside the job — we
-// stop on either terminal state. A safety cap prevents a microtask that
-// re-schedules itself indefinitely from looping forever; 4096 matches
-// the order of magnitude React's scheduler uses for its own bail-out.
+// stop on either terminal state.
+//
+// Per Codex P2 on PR #769: the previous implementation capped at 4096
+// jobs and returned silently, which meant a Promise/microtask chain
+// larger than the cap (rare but possible with bundled frameworks)
+// would be silently half-drained. Browsers and Node don't cap; the JS
+// spec says microtasks drain to completion before returning to the
+// macrotask loop. A genuine runaway microtask self-loop is a JS bug
+// the test will surface as a timeout, which is correct. Drain to empty
+// and trust callers to fix any test that legitimately can't terminate.
 static void pump_quickjs_jobs(choc::javascript::Context& ctx) {
     struct ContextLayout {
         std::unique_ptr<choc::javascript::Context::Pimpl> pimpl;
@@ -49,9 +56,8 @@ static void pump_quickjs_jobs(choc::javascript::Context& ctx) {
     auto& layout = reinterpret_cast<ContextLayout&>(ctx);
     auto* qjctx = static_cast<choc::javascript::quickjs::QuickJSContext*>(layout.pimpl.get());
     if (!qjctx || !qjctx->runtime) return;
-    constexpr int kMaxJobsPerPump = 4096;
     choc::javascript::quickjs::JSContext* pctx = nullptr;
-    for (int i = 0; i < kMaxJobsPerPump; ++i) {
+    for (;;) {
         int rc = JS_ExecutePendingJob(qjctx->runtime, &pctx);
         if (rc <= 0) return;  // 0 = empty queue, <0 = JS exception inside job
     }
