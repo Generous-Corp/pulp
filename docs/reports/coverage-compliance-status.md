@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-26 21:01 EDT
+Last reviewed: 2026-04-26 21:15 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -66,7 +66,7 @@ Finish line:
 ## Current live state
 
 Latest complete Codecov `main` report observed while updating this doc
-(`main` head `b5e7a463` has a newer Coverage run queued):
+(`main` head `bdc406cc` has a newer Coverage run queued):
 
 - commit: `5b8e4529cfc553fd98b65f265ed1e9c0487b3d66`
 - workflow: Coverage run `24970413173`, completed successfully
@@ -158,6 +158,8 @@ Merged after the Phase 1 closeout / `#723` baseline:
 - `#827` signal multi-channel meter edge coverage -> `d5efea57`
 - `#828` raw MIDI parser edge coverage and malformed-data hardening -> `5b8e4529`
 - `#831` signal utility helper edge coverage -> `b5e7a463`
+- `#836` CLI sync checker Python tooling coverage -> `6ef8ca8b`
+- `#837` package registry validation tools coverage -> `bdc406cc`
 
 Open Phase 3 PRs:
 
@@ -200,19 +202,15 @@ Open Phase 3 PRs:
   `PULP_HOME` and cleared password env vars. This tranche also uses the
   GitHub/Namespace path while the SSH `windows` target remains
   unreachable.
-- `#836` CLI sync checker coverage for `#643`, branch
-  `feature/cli-sync-coverage-643`, head `86048a3f`; opened from
-  `main` at `5b8e4529`. This tranche also uses the GitHub/Namespace
-  path while the SSH `windows` target remains unreachable.
-- `#837` package registry validation tools coverage for `#643`, branch
-  `feature/package-validator-coverage-643`, head `8a2edbe9`; opened
-  from `main` at `5b8e4529`. This tranche also uses the
-  GitHub/Namespace path while the SSH `windows` target remains
-  unreachable.
 - `#838` CLI release packager coverage for `#643`, branch
   `feature/package-cli-coverage-643`, head `7e76a1b7`; opened from
   `main` at `b5e7a463`. This tranche also uses the GitHub/Namespace
   path while the SSH `windows` target remains unreachable.
+- `#839` GPU graph render helper hardening/coverage for `#646`, branch
+  `feature/render-gpu-graph-coverage-646`, head `c4261740`; opened
+  from `main` at `bdc406cc`. This tranche also uses the
+  GitHub/Namespace path while the SSH `windows` target remains
+  unreachable.
 
 Local Phase 3 draft worktrees:
 
@@ -379,8 +377,8 @@ Local Phase 3 draft worktrees:
   issues were resolved.
 - `#643` CLI sync checker worktree
   `/Users/danielraffel/Code/pulp-cli-sync-coverage-643`, branch
-  `feature/cli-sync-coverage-643`, commit `86048a3f`; open as PR
-  `#836`.
+  `feature/cli-sync-coverage-643`, commit `86048a3f`; merged via PR
+  `#836` as `6ef8ca8b`. The remote branch was deleted after merge.
   Scope: test-only Python coverage for `tools/scripts/cli_sync_check.py`
   repo-root discovery, command-table/YAML/slash-command/skill-reference
   extraction, strict JSON mismatch exits, warning-only success behavior,
@@ -393,7 +391,8 @@ Local Phase 3 draft worktrees:
 - `#643` package registry validation tools worktree
   `/Users/danielraffel/Code/pulp-package-validator-coverage-643`,
   branch `feature/package-validator-coverage-643`, commit `8a2edbe9`;
-  open as PR `#837`.
+  merged via PR `#837` as `bdc406cc`. The remote branch was deleted
+  after merge.
   Scope: test-only Python coverage for
   `tools/packages/validate_registry.py` JSON load/error paths,
   structural and license classification, and CLI success output, plus
@@ -406,6 +405,23 @@ Local Phase 3 draft worktrees:
   local Python coverage runner could not run because this interpreter
   lacks `coverage.py >= 7.10`; hosted CI remains the coverage proof for
   this tranche.
+- `#646` GPU graph render helper worktree
+  `/Users/danielraffel/Code/pulp-render-gpu-graph-coverage-646`,
+  branch `feature/render-gpu-graph-coverage-646`, commit `c4261740`;
+  open as PR `#839`.
+  Scope: hardens `GpuGraphRenderer`, `GpuHeatMapRenderer`, and
+  `GpuBarRenderer` raw-pointer `set_data()` paths for null, zero-sized,
+  and overflowing inputs; adds focused `test_gpu_graph.cpp` edge
+  coverage; and moves the header-only dirty-tracker and GPU-graph tests
+  out of the GPU-only CMake block so GPU-off sanitizer/local coverage
+  builds can exercise them without linking `pulp::render`. Local
+  validation after rebasing onto `bdc406cc`: GPU-off configure,
+  `pulp-test-gpu-graph` and `pulp-test-dirty-tracker` builds, direct
+  `[issue-646]` run passed `39` assertions in `7` cases, full
+  gpu-graph binary passed `52` assertions in `11` cases, full
+  dirty-tracker binary passed `52` assertions in `18` cases, focused
+  CTest passed `29/29`, diff check, skill-sync report, version-bump
+  report with an SDK patch trailer, and pre-push gates.
 - `#643` CLI release packager worktree
   `/Users/danielraffel/Code/pulp-package-cli-coverage-643`, branch
   `feature/package-cli-coverage-643`, commit `7e76a1b7`; open as PR
@@ -774,6 +790,7 @@ Open supporting PR:
   Android-validation ordering plus config isolation, and `#832` was
   repaired for the fast-exit deadline review, and `#833` was rebased
   onto `b5e7a463` to clear the stale Android SDK discovery ASan failure,
+  and `#836` merged, and `#837` merged, and `#839` opened,
   and remains docs-only.
 
 Local environment note:
@@ -811,19 +828,16 @@ Next recovery actions:
 7. Monitor `#835` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-cli-ship-coverage-643`, patch,
    validate locally, and push with lease.
-8. Monitor `#836` cloud checks; if a required lane fails, debug in
-   `/Users/danielraffel/Code/pulp-cli-sync-coverage-643`, patch,
-   validate locally, and push with lease.
-9. Monitor `#837` cloud checks; if a required lane fails, debug in
-   `/Users/danielraffel/Code/pulp-package-validator-coverage-643`,
-   patch, validate locally, and push with lease.
-10. Monitor `#838` cloud checks; if a required lane fails, debug in
+8. Monitor `#838` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-package-cli-coverage-643`, patch,
    validate locally, and push with lease.
-11. If any open Phase 3 PR is green but GitHub reports it behind `main`,
+9. Monitor `#839` cloud checks; if a required lane fails, debug in
+   `/Users/danielraffel/Code/pulp-render-gpu-graph-coverage-646`,
+   patch, validate locally, and push with lease.
+10. If any open Phase 3 PR is green but GitHub reports it behind `main`,
    rebase that branch onto `origin/main`, push with lease, and let
    checks rerun.
-12. Continue Phase 3 from the tranche issues below, prioritizing
+11. Continue Phase 3 from the tranche issues below, prioritizing
    represented high-miss files over adding new perimeter lanes.
 
 ## Phase 1 corrected baseline
