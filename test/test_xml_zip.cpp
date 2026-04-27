@@ -46,6 +46,24 @@ TEST_CASE("XmlDocument XPath", "[runtime][xml]") {
     REQUIRE(*first == "one");
 }
 
+TEST_CASE("XmlDocument XPath handles attributes and invalid expressions", "[runtime][xml]") {
+    XmlDocument doc;
+    REQUIRE(doc.parse(R"(
+        <root>
+            <plugin id="alpha" enabled="true">Synth</plugin>
+            <plugin id="beta" enabled="false">Delay</plugin>
+        </root>
+    )"));
+
+    auto ids = doc.xpath_strings("//plugin/@id");
+    REQUIRE(ids.size() == 2);
+    REQUIRE(ids[0] == "alpha");
+    REQUIRE(ids[1] == "beta");
+
+    REQUIRE_FALSE(doc.xpath_string("//plugin[@id='missing']").has_value());
+    REQUIRE(doc.xpath_strings("//*[broken").empty());
+}
+
 TEST_CASE("XmlDocument walk", "[runtime][xml]") {
     XmlDocument doc;
     doc.parse("<root><a>1</a><b>2</b></root>");
@@ -104,6 +122,20 @@ TEST_CASE("xml_generate creates document", "[runtime][xml]") {
     auto name = doc.xpath_string("//name");
     REQUIRE(name.has_value());
     REQUIRE(*name == "Default");
+}
+
+TEST_CASE("xml_generate escapes text content", "[runtime][xml]") {
+    auto xml = xml_generate("preset", {
+        {"name", "A&B <Default>"},
+        {"quote", "\"quoted\""}
+    });
+
+    XmlDocument doc;
+    REQUIRE(doc.parse(xml));
+    auto name = doc.xpath_string("//name");
+    REQUIRE(name.has_value());
+    REQUIRE(*name == "A&B <Default>");
+    REQUIRE(xml.find("A&amp;B &lt;Default&gt;") != std::string::npos);
 }
 
 // ── ZIP/GZIP compression ────────────────────────────────────────────────
@@ -228,6 +260,39 @@ TEST_CASE("gzip_decompress still accepts legacy zlib input (back-compat)", "[run
 TEST_CASE("gzip_decompress rejects truncated header", "[runtime][zip][issue-468]") {
     static constexpr uint8_t kPartial[] = {0x1f, 0x8b, 0x08};  // missing rest of fixed header
     auto out = gzip_decompress(kPartial, sizeof(kPartial));
+    REQUIRE_FALSE(out.has_value());
+}
+
+TEST_CASE("gzip_decompress accepts optional RFC 1952 header fields", "[runtime][zip]") {
+    const std::string original = "payload with optional gzip header metadata";
+    auto compressed = gzip_compress(original);
+    REQUIRE(compressed.has_value());
+    REQUIRE(compressed->size() > 18);
+
+    std::vector<uint8_t> with_metadata = {
+        0x1f, 0x8b, 0x08, 0x1e,  // FEXTRA | FNAME | FCOMMENT | FHCRC
+        0x00, 0x00, 0x00, 0x00,  // MTIME
+        0x00, 0xff,              // XFL, OS
+        0x02, 0x00,              // XLEN
+        0xca, 0xfe,              // FEXTRA bytes
+        'p', 'r', 'e', 's', 'e', 't', 0x00,
+        'r', 'o', 'u', 'n', 'd', 't', 'r', 'i', 'p', 0x00,
+        0x00, 0x00,              // FHCRC placeholder; decoder skips it
+    };
+    with_metadata.insert(with_metadata.end(), compressed->begin() + 10, compressed->end());
+
+    auto out = gzip_decompress_string(with_metadata.data(), with_metadata.size());
+    REQUIRE(out.has_value());
+    REQUIRE(*out == original);
+}
+
+TEST_CASE("gzip_decompress rejects reserved RFC 1952 flag bits", "[runtime][zip]") {
+    auto compressed = gzip_compress(std::string{"reserved flag check"});
+    REQUIRE(compressed.has_value());
+    REQUIRE(compressed->size() >= 10);
+
+    (*compressed)[3] = 0x20;
+    auto out = gzip_decompress(compressed->data(), compressed->size());
     REQUIRE_FALSE(out.has_value());
 }
 
