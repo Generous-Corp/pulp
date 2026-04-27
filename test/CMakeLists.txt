@@ -83,6 +83,30 @@ if(TARGET pulp-cli)
 endif()
 catch_discover_tests(pulp-test-cli-shellout)
 
+# pulp #776 — pin shell_quote's per-platform contract so it can't
+# silently regress to the pre-fix shape that broke `git fetch origin`
+# on Windows by writing doubled backslashes into clone URLs.
+add_executable(pulp-test-cli-shell-quote
+    test_cli_shell_quote.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/cli_common.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/update_check.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/version_diag.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/package_registry.cpp
+)
+file(MAKE_DIRECTORY "${CMAKE_BINARY_DIR}/tools/cli")
+configure_file(
+    "${CMAKE_SOURCE_DIR}/tools/cli/pulp_version_gen.h.in"
+    "${CMAKE_BINARY_DIR}/tools/cli/pulp_version_gen.h"
+    @ONLY)
+target_include_directories(pulp-test-cli-shell-quote PRIVATE
+    ${CMAKE_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/tools/cli
+    ${CMAKE_BINARY_DIR}/tools/cli)
+target_link_libraries(pulp-test-cli-shell-quote PRIVATE
+    pulp::runtime
+    Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-cli-shell-quote)
+
 # Plugin ↔ CLI skew banner helper (#551 Slice 6): shells out to bash
 # with a staged `pulp` shim and asserts the banner copy + once-per-
 # session semantics of `.agents/skills/_common/cli_version_check.sh`.
