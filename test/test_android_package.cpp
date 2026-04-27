@@ -2,7 +2,9 @@
 #include <catch2/matchers/catch_matchers_string.hpp>
 #include <pulp/ship/android.hpp>
 
+#include <atomic>
 #include <chrono>
+#include <cstdint>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -13,6 +15,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #else
+#include <process.h>
 #include <stdlib.h>
 #endif
 
@@ -21,6 +24,16 @@ using Catch::Matchers::ContainsSubstring;
 namespace fs = std::filesystem;
 
 namespace {
+
+std::uint64_t process_id() {
+#ifdef _WIN32
+    return static_cast<std::uint64_t>(_getpid());
+#else
+    return static_cast<std::uint64_t>(::getpid());
+#endif
+}
+
+std::atomic_uint64_t temp_dir_counter{0};
 
 int set_env_var(const char* name, const std::string& value) {
 #ifdef _WIN32
@@ -91,7 +104,10 @@ struct TempDir {
 
     TempDir() {
         auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
-        path = fs::temp_directory_path() / ("pulp-android-package-test-" + std::to_string(stamp));
+        auto counter = temp_dir_counter.fetch_add(1, std::memory_order_relaxed);
+        path = fs::temp_directory_path() / (
+            "pulp-android-package-test-" + std::to_string(process_id()) +
+            "-" + std::to_string(stamp) + "-" + std::to_string(counter));
         fs::remove_all(path);
         fs::create_directories(path);
     }
