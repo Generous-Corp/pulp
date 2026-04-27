@@ -9,8 +9,10 @@
 #include <pulp/platform/child_process.hpp>
 
 #include <chrono>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -19,6 +21,54 @@ using namespace pulp::platform;
 namespace fs = std::filesystem;
 
 namespace {
+
+inline int pulp_setenv(const char* name, const char* value) {
+#ifdef _WIN32
+    return _putenv_s(name, value);
+#else
+    return ::setenv(name, value, 1);
+#endif
+}
+
+inline int pulp_unsetenv(const char* name) {
+#ifdef _WIN32
+    return _putenv_s(name, "");
+#else
+    return ::unsetenv(name);
+#endif
+}
+
+class ScopedEnvVar {
+public:
+    explicit ScopedEnvVar(const char* name) : name_(name) {
+        if (const char* old = std::getenv(name)) {
+            old_value_ = old;
+        }
+        pulp_unsetenv(name_.c_str());
+    }
+
+    ScopedEnvVar(const char* name, const std::string& value) : name_(name) {
+        if (const char* old = std::getenv(name)) {
+            old_value_ = old;
+        }
+        pulp_setenv(name_.c_str(), value.c_str());
+    }
+
+    ~ScopedEnvVar() {
+        if (old_value_) {
+            pulp_setenv(name_.c_str(), old_value_->c_str());
+        } else {
+            pulp_unsetenv(name_.c_str());
+        }
+    }
+
+    ScopedEnvVar(const ScopedEnvVar&) = delete;
+    ScopedEnvVar& operator=(const ScopedEnvVar&) = delete;
+
+private:
+    std::string name_;
+    std::optional<std::string> old_value_;
+};
 
 fs::path pulp_binary() {
     if (const char* env = std::getenv("PULP_CLI_PATH"); env && *env) {
@@ -172,6 +222,11 @@ TEST_CASE("pulp ship Android validation paths fail before external tooling",
           "[cli][shellout][ship][android][issue-643]") {
     if (!binary_exists()) { SUCCEED("pulp binary not built"); return; }
     auto root = make_fake_project("android-validation", true);
+    fs::create_directories(root / "pulp-home");
+
+    ScopedEnvVar pulp_home("PULP_HOME", (root / "pulp-home").string());
+    ScopedEnvVar store_pass("ANDROID_STORE_PASS");
+    ScopedEnvVar key_pass("ANDROID_KEY_PASS");
 
     auto sign = run_pulp_in(root, {"ship", "sign", "--target", "android"});
     REQUIRE_FALSE(sign.timed_out);
