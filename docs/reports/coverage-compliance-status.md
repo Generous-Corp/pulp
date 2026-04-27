@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-26 21:17 EDT
+Last reviewed: 2026-04-26 21:20 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -204,10 +204,10 @@ Open Phase 3 PRs:
   `main` at `b5e7a463`. This tranche also uses the GitHub/Namespace
   path while the SSH `windows` target remains unreachable.
 - `#839` GPU graph render helper hardening/coverage for `#646`, branch
-  `feature/render-gpu-graph-coverage-646`, head `c4261740`; opened
-  from `main` at `bdc406cc`. This tranche also uses the
-  GitHub/Namespace path while the SSH `windows` target remains
-  unreachable.
+  `feature/render-gpu-graph-coverage-646`, head `fa3deb3b`; opened
+  from `main` at `bdc406cc`, then rebased onto `d02c9ec9` after `#830`
+  merged. This tranche also uses the GitHub/Namespace path while the
+  SSH `windows` target remains unreachable.
 
 Local Phase 3 draft worktrees:
 
@@ -404,7 +404,7 @@ Local Phase 3 draft worktrees:
   this tranche.
 - `#646` GPU graph render helper worktree
   `/Users/danielraffel/Code/pulp-render-gpu-graph-coverage-646`,
-  branch `feature/render-gpu-graph-coverage-646`, commit `c4261740`;
+  branch `feature/render-gpu-graph-coverage-646`, commit `fa3deb3b`;
   open as PR `#839`.
   Scope: hardens `GpuGraphRenderer`, `GpuHeatMapRenderer`, and
   `GpuBarRenderer` raw-pointer `set_data()` paths for null, zero-sized,
