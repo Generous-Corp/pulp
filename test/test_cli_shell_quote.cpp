@@ -17,16 +17,14 @@
 
 #include "../tools/cli/cli_common.hpp"
 
-using pulp::cli::shell_quote;
-
 #ifdef _WIN32
 
 TEST_CASE("shell_quote leaves Windows path backslashes literal", "[cli][shell-quote][issue-776]") {
-    REQUIRE(shell_quote(std::string{"C:\\Users\\foo"}) == "\"C:\\Users\\foo\"");
+    REQUIRE(shell_quote(std::string("C:\\Users\\foo")) == "\"C:\\Users\\foo\"");
 }
 
 TEST_CASE("shell_quote handles Windows paths with spaces", "[cli][shell-quote][issue-776]") {
-    REQUIRE(shell_quote(std::string{"C:\\Program Files\\git\\cmd"}) ==
+    REQUIRE(shell_quote(std::string("C:\\Program Files\\git\\cmd")) ==
             "\"C:\\Program Files\\git\\cmd\"");
 }
 
@@ -34,38 +32,47 @@ TEST_CASE("shell_quote escapes embedded quote per MSVCRT rules", "[cli][shell-qu
     // A literal " inside the argument needs one extra backslash so the
     // parser doesn't end the quoted region. Existing backslashes in the
     // run before the " are NOT doubled when there are none.
-    REQUIRE(shell_quote(std::string{R"(say "hi")"}) == R"("say \"hi\"")");
+    //
+    // Input:  say "hi"
+    // Output: "say \"hi\""
+    REQUIRE(shell_quote(std::string("say \"hi\"")) == "\"say \\\"hi\\\"\"");
 }
 
 TEST_CASE("shell_quote doubles backslashes that immediately precede an embedded quote",
           "[cli][shell-quote][issue-776]") {
     // For a run of N backslashes followed by ", the algorithm emits
-    // (2N + 1) backslashes then the quote. Two `\` + `"` -> `\\\\\"`.
-    REQUIRE(shell_quote(std::string{"foo\\\\\"bar"}) == "\"foo\\\\\\\\\\\"bar\"");
+    // (2N + 1) backslashes then the quote.
+    //
+    // Input:  foo\\"bar     (chars: f o o \ \ " b a r)
+    // Output: "foo\\\\\\"bar"   (chars: " f o o \ \ \ \ \ " b a r ")
+    REQUIRE(shell_quote(std::string("foo\\\\\"bar")) == "\"foo\\\\\\\\\\\"bar\"");
 }
 
 TEST_CASE("shell_quote doubles trailing backslashes so they don't escape the closing quote",
           "[cli][shell-quote][issue-776]") {
-    // `C:\foo\` -> `"C:\foo\\"` so that the closing `"` is genuinely
-    // the close, not an escape produced by the trailing `\`.
-    REQUIRE(shell_quote(std::string{"C:\\foo\\"}) == "\"C:\\foo\\\\\"");
+    // Input:  C:\foo\        (chars: C : \ f o o \)
+    // Output: "C:\foo\\"     (the trailing run is doubled to 2 backslashes
+    //                        before the closing ")
+    REQUIRE(shell_quote(std::string("C:\\foo\\")) == "\"C:\\foo\\\\\"");
 }
 
 TEST_CASE("shell_quote leaves cmd.exe metacharacters inert inside quotes",
           "[cli][shell-quote][issue-776]") {
     // `&`, `|`, `<`, `>`, `%`, `!`, `^` are inert inside `"..."` to
     // cmd.exe — wrapping is enough; we don't need to ^-escape them.
-    REQUIRE(shell_quote(std::string{"a&b|c<d>e"}) == "\"a&b|c<d>e\"");
+    REQUIRE(shell_quote(std::string("a&b|c<d>e")) == "\"a&b|c<d>e\"");
 }
 
 #else  // POSIX
 
 TEST_CASE("shell_quote escapes backslash and quote on POSIX", "[cli][shell-quote][issue-776]") {
-    REQUIRE(shell_quote(std::string{"/usr/bin/git"}) == "\"/usr/bin/git\"");
-    REQUIRE(shell_quote(std::string{"/path with spaces/git"}) ==
+    REQUIRE(shell_quote(std::string("/usr/bin/git")) == "\"/usr/bin/git\"");
+    REQUIRE(shell_quote(std::string("/path with spaces/git")) ==
             "\"/path with spaces/git\"");
-    REQUIRE(shell_quote(std::string{"a\\b"}) == "\"a\\\\b\"");
-    REQUIRE(shell_quote(std::string{R"(say "hi")"}) == R"("say \"hi\"")");
+    REQUIRE(shell_quote(std::string("a\\b")) == "\"a\\\\b\"");
+    // Input:  say "hi"
+    // Output: "say \"hi\""
+    REQUIRE(shell_quote(std::string("say \"hi\"")) == "\"say \\\"hi\\\"\"");
 }
 
 #endif
