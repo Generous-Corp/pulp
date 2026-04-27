@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/runtime/crypto.hpp>
 #include <cstring>
+#include <vector>
 
 using namespace pulp::runtime;
 
@@ -20,6 +21,18 @@ TEST_CASE("SHA-256 known value", "[crypto][sha256]") {
 TEST_CASE("SHA-256 binary data", "[crypto][sha256]") {
     auto digest = sha256("test data");
     REQUIRE(digest.size() == 32);
+}
+
+// ── SHA-1 ───────────────────────────────────────────────────────────────
+
+TEST_CASE("SHA-1 known value", "[crypto][sha1]") {
+    auto digest = sha1("hello");
+    const std::vector<uint8_t> expected = {
+        0xaa, 0xf4, 0xc6, 0x1d, 0xdc, 0xc5, 0xe8, 0xa2, 0xda, 0xbe,
+        0xde, 0x0f, 0x3b, 0x48, 0x2c, 0xd9, 0xae, 0xa9, 0x43, 0x4d,
+    };
+
+    REQUIRE(digest == expected);
 }
 
 // ── MD5 ─────────────────────────────────────────────────────────────────
@@ -82,6 +95,15 @@ TEST_CASE("AES decrypt invalid data", "[crypto][aes]") {
     // but padding check should catch invalid data
     auto result = aes_decrypt(garbage, 16, key, iv);
     // May or may not succeed — depends on whether last byte happens to be valid padding
+}
+
+TEST_CASE("AES decrypt rejects non-block-aligned ciphertext", "[crypto][aes]") {
+    uint8_t key[32] = {};
+    uint8_t iv[16] = {};
+    uint8_t ciphertext[15] = {};
+
+    auto result = aes_decrypt(ciphertext, sizeof(ciphertext), key, iv);
+    REQUIRE_FALSE(result.has_value());
 }
 
 // ── Machine ID ──────────────────────────────────────────────────────────
