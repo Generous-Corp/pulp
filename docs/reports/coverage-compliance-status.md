@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-26 23:29 EDT
+Last reviewed: 2026-04-26 23:34 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -303,6 +303,11 @@ Open Phase 3 PRs:
   `feature/host-format-view-coverage-493-next3`, head `c42e0603`;
   covers `host_type_name()` enum mappings, invalid enum fallback, and
   resize/sidechain policy exceptions.
+- `#871` JSFX subset validation coverage for `#643`, branch
+  `feature/cli-tools-coverage-643-next5`, head `ad536fb5`; covers JSFX
+  doctor rejection for out-of-range sliders and duplicate sections. The
+  commit carries `Skill-Update: skip` because this is test-only coverage
+  for a skill-mapped path.
 
 Local-only queued work:
 
@@ -1080,7 +1085,8 @@ Open supporting PR:
   and `#857` opened from the latest worker batch, and `#832` merged as
   `3f92f066`, and `#842` merged as `51be8860`, and `#858` through
   `#864` opened from the parallel worker queue, and `#865` through
-  `#870` opened from the next completed local worker queue,
+  `#870` opened from the next completed local worker queue, and `#871`
+  opened for JSFX subset validation coverage,
   and remains docs-only.
 
 Local environment note:
@@ -1111,7 +1117,7 @@ Next recovery actions:
    fails, debug in
    `/Users/danielraffel/Code/pulp-midi-mpe-tracker-extra-coverage-645-next`,
    patch, validate locally, and push with lease.
-5. Monitor `#845` through `#870`; if a required lane fails, debug in
+5. Monitor `#845` through `#871`; if a required lane fails, debug in
    the worktree named in the open-PR list above, patch, validate
    locally, and push with lease. Pay particular attention to `#848` and
    `#851` because they include patch-level production hardening.
