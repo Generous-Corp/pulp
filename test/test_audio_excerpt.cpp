@@ -62,6 +62,34 @@ TEST_CASE("enumerate_excerpt_windows uses deterministic overlap and tail coverag
     REQUIRE(result.windows.back().end_frame() == 11);
 }
 
+TEST_CASE("enumerate_excerpt_windows avoids duplicate tails on exact coverage",
+          "[audio][excerpt][issue-640]") {
+    SECTION("hop lands exactly on final valid start") {
+        auto audio = make_audio(48000, 10);
+        auto result = enumerate_excerpt_windows("loop.wav", audio, {.text = "snare", .window_frames = 4, .hop_frames = 3});
+
+        REQUIRE(result.status == WindowEnumerationStatus::ok);
+        REQUIRE(result.windows.size() == 3);
+        REQUIRE(result.windows[0].start_frame == 0);
+        REQUIRE(result.windows[1].start_frame == 3);
+        REQUIRE(result.windows[2].start_frame == 6);
+        REQUIRE(result.windows.back().end_frame() == 10);
+    }
+
+    SECTION("single window covers the whole file") {
+        auto audio = make_audio(44100, 4);
+        auto result = enumerate_excerpt_windows("hit.wav", audio, {.text = "kick", .window_frames = 4, .hop_frames = 2});
+
+        REQUIRE(result.status == WindowEnumerationStatus::ok);
+        REQUIRE(result.source_frames == 4);
+        REQUIRE(result.windows.size() == 1);
+        REQUIRE(result.windows[0].source_path == "hit.wav");
+        REQUIRE(result.windows[0].sample_rate == 44100);
+        REQUIRE(result.windows[0].start_frame == 0);
+        REQUIRE(result.windows[0].frame_count == 4);
+    }
+}
+
 TEST_CASE("excerpt windows report seconds from sample rate", "[audio][excerpt]") {
     auto audio = make_audio(48000, 96000);
     auto result = enumerate_excerpt_windows("loop.wav", audio, {.text = "pad", .window_frames = 24000, .hop_frames = 24000});
