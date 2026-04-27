@@ -3,6 +3,7 @@
 #include <cstdlib>
 #include <ctime>
 #include <thread>
+#include <utility>
 
 using namespace pulp::runtime;
 
@@ -94,6 +95,16 @@ TEST_CASE("ScopeGuard dismiss prevents execution", "[runtime][scope_guard]") {
     REQUIRE(x == 0);
 }
 
+TEST_CASE("ScopeGuard move transfers cleanup ownership", "[runtime][scope_guard]") {
+    int calls = 0;
+    {
+        auto guard = make_scope_guard([&] { ++calls; });
+        auto moved = std::move(guard);
+        static_cast<void>(moved);
+    }
+    REQUIRE(calls == 1);
+}
+
 TEST_CASE("Logging does not crash", "[runtime][log]") {
     // Just verify these don't crash — output goes to stderr
     REQUIRE_NOTHROW(log_info("test message: {}", 42));
@@ -127,4 +138,16 @@ TEST_CASE("Runtime C string copy truncates safely", "[runtime][system]") {
     char buffer[5]{};
     copy_c_string(buffer, "abcdef");
     REQUIRE(std::string(buffer) == "abcd");
+}
+
+TEST_CASE("Runtime C string copy handles degenerate buffers", "[runtime][system]") {
+    char one_byte[1]{'x'};
+    copy_c_string(one_byte, sizeof(one_byte), "abc");
+    REQUIRE(one_byte[0] == '\0');
+
+    char untouched = 'x';
+    copy_c_string(&untouched, 0, "abc");
+    REQUIRE(untouched == 'x');
+
+    REQUIRE_NOTHROW(copy_c_string(nullptr, 4, "abc"));
 }
