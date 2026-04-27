@@ -90,6 +90,35 @@ class JsfxSubsetScriptTests(unittest.TestCase):
         self.assertEqual(result.returncode, 2)
         self.assertIn("duplicate slider1", result.stderr)
 
+    def test_doctor_rejects_out_of_range_slider(self) -> None:
+        path = self.write_temp_jsfx(
+            """
+            desc:Out Of Range Slider Example
+            slider65:1<0,2,0.01>Gain
+            @sample
+              spl0 *= slider65;
+              spl1 *= slider65;
+            """
+        )
+        result = self.run_script("doctor", "--file", str(path))
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("slider index out of range", result.stderr)
+        self.assertIn("slider65", result.stderr)
+
+    def test_doctor_rejects_duplicate_section(self) -> None:
+        path = self.write_temp_jsfx(
+            """
+            desc:Duplicate Section Example
+            @sample
+              spl0 *= 0.5;
+            @sample
+              spl1 *= 0.5;
+            """
+        )
+        result = self.run_script("doctor", "--file", str(path))
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("duplicate @sample section", result.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()
