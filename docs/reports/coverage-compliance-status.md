@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-26 22:49 EDT
+Last reviewed: 2026-04-26 23:14 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -66,7 +66,7 @@ Finish line:
 ## Current live state
 
 Latest complete Codecov `main` report observed while updating this doc
-(`main` head `62ad9870` has a newer Coverage run queued):
+(`main` head `51be8860` has a newer Coverage run queued):
 
 - commit: `5b8e4529cfc553fd98b65f265ed1e9c0487b3d66`
 - workflow: Coverage run `24970413173`, completed successfully
@@ -166,19 +166,11 @@ Merged after the Phase 1 closeout / `#723` baseline:
 - `#833` signal filter-design edge coverage -> `8fc5dd2d`
 - `#838` CLI release packager coverage -> `3d47dbd2`
 - `#839` GPU graph render helper hardening/coverage -> `62ad9870`
+- `#832` platform child-process edge coverage -> `3f92f066`
+- `#842` inspect Codecov classification -> `51be8860`
 
 Open Phase 3 PRs:
 
-- `#832` platform child-process edge coverage for `#640`, branch
-  `feature/platform-child-process-coverage-640`, head `7496ba0a`;
-  opened from `main` at `d5efea57`, updated after the first Windows
-  Namespace run exposed a cmd/PowerShell portability issue in the test
-  commands, then rebased onto `87ef6d90` and updated after Windows
-  exposed the fast-exit no-newline `cmd` probe returning nonzero, then
-  rebased onto `b5e7a463` and updated after review flagged a fixed
-  100ms fast-exit deadline. This tranche also uses the
-  GitHub/Namespace path while the SSH `windows` target remains
-  unreachable.
 - `#835` CLI ship command validation coverage for `#643`, branch
   `feature/cli-ship-coverage-643`, head `b8f22af9`; opened from
   `main` at `5b8e4529`, then rebased onto `b5e7a463` and updated after
@@ -199,13 +191,6 @@ Open Phase 3 PRs:
   and removes unrelated POSIX `waitpid` hardening from this tranche.
   This tranche also uses the GitHub/Namespace path while the SSH
   `windows` target remains unreachable.
-- `#842` inspect Codecov classification for `#841` / parent `#641`,
-  branch `feature/inspect-codecov-component-841`, head `0541fd69`;
-  promotes `inspect/**` to a first-class Codecov flag/component and
-  classifies it in the existing user-facing coverage tier. Local
-  validation passed the Codecov config test, coverage-tier check,
-  docs-sync report, diff check, skill-sync report, and version-bump
-  report.
 - `#843` MPE tracker UMP edge-path coverage for `#645`, branch
   `feature/midi-mpe-tracker-extra-coverage-645-next`, head `fcdbd278`;
   opened from `main` at `eaf991b0`. This test-only tranche covers
@@ -265,6 +250,34 @@ Open Phase 3 PRs:
   focused async-helper target covering reentrant `AsyncUpdater`,
   `LambdaAsyncUpdater` empty-callback handling, `ActionBroadcaster`
   missing-removal behavior, and `MultiTimer` stop-all/restart behavior.
+- `#858` render DrawBatcher edge coverage for `#646`, branch
+  `feature/render-only-coverage-646-next2`, head `d055cc7d`; covers
+  chained same-key merges, post-end records, and edge-touching blockers,
+  and moves the DrawBatcher test target into the GPU-off-safe lane.
+- `#859` platform ProgressParser edge coverage for `#640`, branch
+  `feature/audio-helper-coverage-640-next3`, head `176f1b12`; covers
+  null callbacks on matching progress lines plus empty event-type and
+  empty-payload parsing boundaries.
+- `#860` MIDI SysEx accumulator coverage for `#645`, branch
+  `feature/midi-signal-coverage-645-next3`, head `0ede5297`; covers
+  fresh `F0` abort/restart behavior, single-byte abort ownership, and
+  idle `F7` passthrough.
+- `#861` descriptor-validation edge coverage for `#493`, branch
+  `feature/format-view-coverage-493-next3`, head `75acf512`; covers
+  warning-only malformed reverse-DNS bundle IDs, instrument input-bus
+  exceptions, and UMP/MIDI sidecar warning behavior.
+- `#862` LCOV-to-Cobertura utility coverage for `#643`, branch
+  `feature/cli-tools-coverage-643-next4`, head `191785c6`; covers
+  relpath fallback, package exclusion summary recalculation, and CLI XML
+  output for the vendored converter.
+- `#863` StateStore helper coverage for parent `#641`, branch
+  `feature/runtime-state-coverage-641-next3`, head `c9b98058`; covers
+  modulation offsets, unknown parameter getters, default resets,
+  registration spans, and gesture callback dispatch.
+- `#864` Apple Swift bridge-parameter coverage for parent `#641`,
+  branch `feature/apple-swift-coverage-641-next`, head `3ff82a4e`;
+  covers parameter reload replacement after backend changes, invalid
+  `pulp_param_info` requests, and C string field population.
 
 Local Phase 3 draft worktrees:
 
@@ -1029,7 +1042,9 @@ Open supporting PR:
   was repaired for diff coverage with `410a0371`, and `#852`, `#853`,
   `#854`, and `#855` opened from the next worker batch, and `#838`
   merged as `3d47dbd2`, and `#839` merged as `62ad9870`, and `#856`
-  and `#857` opened from the latest worker batch,
+  and `#857` opened from the latest worker batch, and `#832` merged as
+  `3f92f066`, and `#842` merged as `51be8860`, and `#858` through
+  `#864` opened from the parallel worker queue,
   and remains docs-only.
 
 Local environment note:
@@ -1049,32 +1064,25 @@ Local environment note:
 Next recovery actions:
 
 1. Keep `#774` docs-only and let its latest status-update checks drain.
-2. Monitor `#832` cloud checks; if a required lane fails, debug in
-   `/Users/danielraffel/Code/pulp-platform-child-process-coverage-640`,
-   patch, validate locally, and push with lease.
-3. Monitor `#835` cloud checks; if a required lane fails, debug in
+2. Monitor `#835` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-cli-ship-coverage-643`, patch,
    validate locally, and push with lease.
-4. Monitor `#840` cloud checks on head `410a0371`; if a required lane
+3. Monitor `#840` cloud checks on head `410a0371`; if a required lane
    fails after dependency bootstrap succeeds, debug in
    `/Users/danielraffel/Code/pulp-events-child-process-coverage-642`,
    patch, validate locally, and push with lease.
-5. Monitor `#842` cloud checks on head `0541fd69`; if a required lane
-   fails, debug in
-   `/Users/danielraffel/Code/pulp-inspect-codecov-component-841`,
-   patch, validate locally, and push with lease.
-6. Monitor `#843` cloud checks on head `fcdbd278`; if a required lane
+4. Monitor `#843` cloud checks on head `fcdbd278`; if a required lane
    fails, debug in
    `/Users/danielraffel/Code/pulp-midi-mpe-tracker-extra-coverage-645-next`,
    patch, validate locally, and push with lease.
-7. Monitor `#845` through `#857`; if a required lane fails, debug in
+5. Monitor `#845` through `#864`; if a required lane fails, debug in
    the worktree named in the open-PR list above, patch, validate
    locally, and push with lease. Pay particular attention to `#848` and
    `#851` because they include patch-level production hardening.
-8. If any open Phase 3 PR is green but GitHub reports it behind `main`,
+6. If any open Phase 3 PR is green but GitHub reports it behind `main`,
    rebase that branch onto `origin/main`, push with lease, and let
    checks rerun.
-9. Continue Phase 3 from the tranche issues below, prioritizing
+7. Continue Phase 3 from the tranche issues below, prioritizing
    represented high-miss files over adding new perimeter lanes.
 
 ## Phase 1 corrected baseline
@@ -1164,7 +1172,7 @@ represented surface.
 
 - `inspect/` is represented on the Codecov website as a first-party
   top-level bucket (`1,505` lines, `10.10%` in the user-observed
-  snapshot). It is tracked by `#841`, and PR `#842` promotes
+  snapshot). It was tracked by `#841`, and merged PR `#842` promotes
   `inspect/**` to a first-class Codecov flag/component and assigns it to
   the existing user-facing coverage tier in `ci/coverage-targets.yaml`.
 
@@ -1198,7 +1206,7 @@ represented surface.
 - `#77` decide and, if in scope, add mobile runtime coverage from
   Android instrumentation and iOS simulator / runtime app paths
 - `#841` classify represented `inspect/**` as a first-class Codecov
-  component/tier; implemented by open PR `#842`
+  component/tier; implemented by merged PR `#842`
 
 ### Supporting infrastructure
 
