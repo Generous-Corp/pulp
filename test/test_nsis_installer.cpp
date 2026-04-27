@@ -66,6 +66,21 @@ TEST_CASE("NSIS script includes uninstaller", "[ship][installer]") {
     REQUIRE_THAT(script, ContainsSubstring("UninstallString"));
 }
 
+TEST_CASE("NSIS script registers uninstall metadata", "[ship][installer]") {
+    auto config = make_test_config();
+    auto script = generate_nsis_script(config);
+
+    const auto uninstall_key =
+        "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\TestPlugin";
+
+    REQUIRE_THAT(script, ContainsSubstring(
+        std::string("WriteRegStr HKLM \"") + uninstall_key + "\" \"DisplayName\" \"TestPlugin\""));
+    REQUIRE_THAT(script, ContainsSubstring(
+        std::string("WriteRegStr HKLM \"") + uninstall_key + "\" \"DisplayVersion\" \"1.2.3\""));
+    REQUIRE_THAT(script, ContainsSubstring(
+        std::string("WriteRegStr HKLM \"") + uninstall_key + "\" \"Publisher\" \"TestCorp\""));
+}
+
 TEST_CASE("NSIS script per-user install uses LOCALAPPDATA", "[ship][installer]") {
     auto config = make_test_config();
     config.per_user_install = true;
@@ -93,6 +108,27 @@ TEST_CASE("NSIS script per-user install uses HKCU registry", "[ship][installer]"
 
     REQUIRE_THAT(script, ContainsSubstring("InstallDirRegKey HKCU"));
     REQUIRE_THAT(script, ContainsSubstring("WriteRegStr HKCU"));
+}
+
+TEST_CASE("NSIS script deletes uninstall registry keys from selected hive", "[ship][installer]") {
+    const auto uninstall_key =
+        "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\TestPlugin";
+
+    auto admin = make_test_config();
+    admin.per_user_install = false;
+    auto admin_script = generate_nsis_script(admin);
+
+    REQUIRE_THAT(admin_script, ContainsSubstring("DeleteRegKey HKLM \"Software\\TestCorp\\TestPlugin\""));
+    REQUIRE_THAT(admin_script, ContainsSubstring(
+        std::string("DeleteRegKey HKLM \"") + uninstall_key + "\""));
+
+    auto user = make_test_config();
+    user.per_user_install = true;
+    auto user_script = generate_nsis_script(user);
+
+    REQUIRE_THAT(user_script, ContainsSubstring("DeleteRegKey HKCU \"Software\\TestCorp\\TestPlugin\""));
+    REQUIRE_THAT(user_script, ContainsSubstring(
+        std::string("DeleteRegKey HKCU \"") + uninstall_key + "\""));
 }
 
 TEST_CASE("NSIS script includes directory selection page", "[ship][installer]") {
