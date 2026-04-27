@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-26 21:31 EDT
+Last reviewed: 2026-04-26 21:50 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -66,7 +66,7 @@ Finish line:
 ## Current live state
 
 Latest complete Codecov `main` report observed while updating this doc
-(`main` head `455c0a9d` has a newer Coverage run queued):
+(`main` head `eaf991b0` has a newer Coverage run queued):
 
 - commit: `5b8e4529cfc553fd98b65f265ed1e9c0487b3d66`
 - workflow: Coverage run `24970413173`, completed successfully
@@ -162,15 +162,10 @@ Merged after the Phase 1 closeout / `#723` baseline:
 - `#837` package registry validation tools coverage -> `bdc406cc`
 - `#830` RPN parser edge coverage -> `d02c9ec9`
 - `#834` events event-loop lifecycle edge coverage -> `455c0a9d`
+- `#829` MIDI-CI edge coverage -> `eaf991b0`
 
 Open Phase 3 PRs:
 
-- `#829` MIDI-CI edge coverage for `#645`, branch
-  `feature/midi-ci-coverage-645`, head `1d3cd1ce`; opened from `main`
-  at `94e3ef2a` and rebased onto `87ef6d90` after the first ASan run
-  exposed the already-fixed Android SDK discovery regression from the
-  stale base. This tranche also uses the GitHub/Namespace path while the
-  SSH `windows` target remains unreachable.
 - `#832` platform child-process edge coverage for `#640`, branch
   `feature/platform-child-process-coverage-640`, head `7496ba0a`;
   opened from `main` at `d5efea57`, updated after the first Windows
@@ -208,6 +203,14 @@ Open Phase 3 PRs:
   from `main` at `bdc406cc`, then rebased onto `d02c9ec9` after `#830`
   merged. This tranche also uses the GitHub/Namespace path while the
   SSH `windows` target remains unreachable.
+- `#840` events child-process manager coverage for `#642`, branch
+  `feature/events-child-process-coverage-642`, head `47e38795`; opened
+  from `main` at `455c0a9d`, then rebased onto `eaf991b0` after `#829`
+  merged. The first Linux Namespace and Linux coverage failures were
+  dependency-bootstrap failures before configure/tests because a cold
+  FetchContent cache hit a GitHub 403 cloning `Tracktion/choc.git`. This
+  tranche also uses the GitHub/Namespace path while the SSH `windows`
+  target remains unreachable.
 
 Local Phase 3 draft worktrees:
 
@@ -231,6 +234,24 @@ Local Phase 3 draft worktrees:
   `14` assertions in `4` cases, full binary passed `74` assertions in
   `20` cases, precise CTest selector passed `18/18`, `git diff --check`,
   skill-sync report, and version-bump report.
+- `#642` events child-process manager worktree
+  `/Users/danielraffel/Code/pulp-events-child-process-coverage-642`,
+  branch `feature/events-child-process-coverage-642`, commit
+  `47e38795`; open as PR `#840`.
+  Scope: covers unlaunched `ConnectedChildProcess` default state,
+  disconnected send, idempotent kill, and `wait_for_exit()` return
+  behavior; covers empty `ChildProcessManager` active-count, wait, kill,
+  and cleanup no-op lifecycle; and hardens
+  `ConnectedChildProcess::wait_for_exit()` so unlaunched/invalid PID
+  state returns `-1` instead of probing an invalid process id. Local
+  validation before opening: no-GPU/no-examples configure,
+  `pulp-test-ipc` build, direct `[issue-642]` run passed `7`
+  assertions in `2` cases, full IPC binary passed `44` assertions in
+  `12` cases, focused CTest `ConnectedChildProcess|ChildProcessManager|IPC`
+  passed `12/12`, diff check, skill-sync report, and version-bump
+  report. Follow-up validation after rebasing onto `eaf991b0` passed the
+  direct issue selector, focused CTest, diff check, skill-sync report,
+  version-bump report, and pre-push gates.
 - `#643` package-registry CLI/tools worktree
   `/Users/danielraffel/Code/pulp-package-registry-coverage-643`, branch
   `feature/package-registry-coverage-643`, commit `75a529ef`; merged via
@@ -680,7 +701,8 @@ Local Phase 3 draft worktrees:
   transport helper despite living under `include`.
 - `#645` MIDI-CI worktree
   `/Users/danielraffel/Code/pulp-midi-ci-coverage-645`, branch
-  `feature/midi-ci-coverage-645`, commit `1d3cd1ce`; open as PR `#829`.
+  `feature/midi-ci-coverage-645`, commit `1d3cd1ce`; merged via PR
+  `#829` as `eaf991b0`. The remote branch was deleted after merge.
   Scope: test-only coverage for profile inquiry destination encoding,
   malformed and unhandled CI messages, discovery inquiry destination
   filtering, discovery reply storage plus callback dispatch, unknown
@@ -799,6 +821,9 @@ Open supporting PR:
   and `#836` merged, and `#837` merged, and `#839` opened,
   and `#830` merged, and `#838` was rebased onto `d02c9ec9` and repaired
   for the Android package parallel temp-dir collision, and `#834` merged,
+  and `#840` opened, and `#841` was opened to classify the represented
+  but currently uncomponentized `inspect/` Codecov bucket, and `#829`
+  merged, and `#840` was rebased onto `eaf991b0`,
   and remains docs-only.
 
 Local environment note:
@@ -818,23 +843,24 @@ Local environment note:
 Next recovery actions:
 
 1. Keep `#774` docs-only and let its latest status-update checks drain.
-2. Monitor `#829` cloud checks; if a required lane fails, debug in
-   `/Users/danielraffel/Code/pulp-midi-ci-coverage-645`, patch,
-   validate locally, and push with lease.
-3. Monitor `#832` cloud checks; if a required lane fails, debug in
+2. Monitor `#832` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-platform-child-process-coverage-640`,
    patch, validate locally, and push with lease.
-4. Monitor `#833` cloud checks; if a required lane fails, debug in
+3. Monitor `#833` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-signal-biquad-coverage-645`, patch,
    validate locally, and push with lease.
-5. Monitor `#835` cloud checks; if a required lane fails, debug in
+4. Monitor `#835` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-cli-ship-coverage-643`, patch,
    validate locally, and push with lease.
-6. Monitor `#838` cloud checks on head `09666f46`; if a required lane fails, debug in
+5. Monitor `#838` cloud checks on head `09666f46`; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-package-cli-coverage-643`, patch,
    validate locally, and push with lease.
-7. Monitor `#839` cloud checks; if a required lane fails, debug in
+6. Monitor `#839` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-render-gpu-graph-coverage-646`,
+   patch, validate locally, and push with lease.
+7. Monitor `#840` cloud checks on head `47e38795`; if a required lane
+   fails after dependency bootstrap succeeds, debug in
+   `/Users/danielraffel/Code/pulp-events-child-process-coverage-642`,
    patch, validate locally, and push with lease.
 8. If any open Phase 3 PR is green but GitHub reports it behind `main`,
    rebase that branch onto `origin/main`, push with lease, and let
@@ -925,6 +951,15 @@ represented surface.
   shims, and Web/WASM-specific sources, remain outside the measured
   graph unless Phase 2 decides to add focused follow-up issues.
 
+## Represented but not yet componentized
+
+- `inspect/` is represented on the Codecov website as a first-party
+  top-level bucket (`1,505` lines, `10.10%` in the user-observed
+  snapshot), but it is not currently a named component in `codecov.yml`
+  or a target tier in `ci/coverage-targets.yaml`. This is now tracked by
+  `#841`: either promote `inspect/**` to a first-class component/tier or
+  document it explicitly as represented-but-uncategorized for now.
+
 ## Phase 1 issue map
 
 ### Control plane and verification
@@ -954,6 +989,8 @@ represented surface.
   dedicated future lanes
 - `#77` decide and, if in scope, add mobile runtime coverage from
   Android instrumentation and iOS simulator / runtime app paths
+- `#841` classify represented `inspect/**` as either a first-class
+  Codecov component/tier or explicitly represented-but-uncategorized
 
 ### Supporting infrastructure
 
@@ -989,6 +1026,7 @@ pre-`#715` numbers. The current execution rule is:
 - `#493` host / format / view and related hardening gaps
 - `#737` optional native surfaces not compiled by the default coverage
   configuration
+- `#841` inspect component / tier classification
 
 ### Deferred perimeter follow-ups
 
@@ -996,6 +1034,7 @@ pre-`#715` numbers. The current execution rule is:
 - `#657` Node bindings plus shell / PowerShell classification, closed as
   explicitly out of scope for now
 - `#77` mobile runtime / iOS simulator coverage
+- `#841` represented `inspect/**` classification
 
 ## Control-plane invariants
 
