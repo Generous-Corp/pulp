@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-26 20:22 EDT
+Last reviewed: 2026-04-26 20:30 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -65,36 +65,37 @@ Finish line:
 
 ## Current live state
 
-Latest complete Codecov `main` report observed while updating this doc:
+Latest complete Codecov `main` report observed while updating this doc
+(`main` head `5b8e4529` has a newer Coverage run in progress):
 
-- commit: `957a073523e3aabcd7b11972acaf98065909bf67`
-- workflow: Coverage run `24964746369`, completed successfully
-- overall tracked coverage: `45.96%` over `70,376` lines in `556` files
-- covered lines: `32,349`
-- missed lines: `36,895`
-- partial lines: `1,132`
+- commit: `87ef6d90e54a1aa940278aab15b6e444d5c1c30d`
+- workflow: Coverage run `24969958550`, completed successfully
+- overall tracked coverage: `46.83%` over `70,453` lines in `556` files
+- covered lines: `32,994`
+- missed lines: `36,163`
+- partial lines: `1,296`
 - current component coverage from the Codecov API:
-  - `audio`: `34.45%`
-  - `canvas`: `63.96%`
-  - `dsl`: `63.38%`
-  - `events`: `49.49%`
-  - `format`: `51.03%`
-  - `host`: `43.61%`
-  - `midi`: `47.77%`
-  - `osc`: `62.22%`
-  - `platform`: `43.18%`
-  - `render`: `59.74%`
-  - `runtime`: `50.48%`
-  - `signal`: `69.4%`
-  - `state`: `62.99%`
-  - `view`: `43.72%`
+  - `audio`: `37.36%`
+  - `canvas`: `64.74%`
+  - `dsl`: `68.3%`
+  - `events`: `50.5%`
+  - `format`: `51.72%`
+  - `host`: `43.07%`
+  - `midi`: `54.18%`
+  - `osc`: `66.26%`
+  - `platform`: `40.16%`
+  - `render`: `62.77%`
+  - `runtime`: `49.14%`
+  - `signal`: `73.87%`
+  - `state`: `63.56%`
+  - `view`: `44.0%`
   - `android`: `13.83%`
   - `apple`: `25.36%`
-  - `linux`: `0.22%`
-  - `windows`: `6.42%`
-  - `cli`: `38.92%`
-  - `ship`: `53.77%`
-  - `tools`: `44.36%`
+  - `linux`: `3.31%`
+  - `windows`: `0.0%`
+  - `cli`: `40.86%`
+  - `ship`: `53.99%`
+  - `tools`: `45.32%`
 
 Post-`#794` file-level proof point: `core/audio/src/aiff_reader.cpp`
 is now `72.01%` covered with `61` misses, up from `64.22%` with `78`
@@ -193,6 +194,10 @@ Open Phase 3 PRs:
   path while the SSH `windows` target remains unreachable.
 - `#835` CLI ship command validation coverage for `#643`, branch
   `feature/cli-ship-coverage-643`, head `6c1e5a4b`; opened from
+  `main` at `5b8e4529`. This tranche also uses the GitHub/Namespace
+  path while the SSH `windows` target remains unreachable.
+- `#836` CLI sync checker coverage for `#643`, branch
+  `feature/cli-sync-coverage-643`, head `86048a3f`; opened from
   `main` at `5b8e4529`. This tranche also uses the GitHub/Namespace
   path while the SSH `windows` target remains unreachable.
 
@@ -347,6 +352,19 @@ Local Phase 3 draft worktrees:
   `git diff --check HEAD~1..HEAD`, `git diff --check`, skill-sync
   report, and version-bump report with `Version-Bump: sdk=skip` for
   the test-only coverage tranche.
+- `#643` CLI sync checker worktree
+  `/Users/danielraffel/Code/pulp-cli-sync-coverage-643`, branch
+  `feature/cli-sync-coverage-643`, commit `86048a3f`; open as PR
+  `#836`.
+  Scope: test-only Python coverage for `tools/scripts/cli_sync_check.py`
+  repo-root discovery, command-table/YAML/slash-command/skill-reference
+  extraction, strict JSON mismatch exits, warning-only success behavior,
+  and non-repo diagnostics. Local validation: direct
+  `python3 tools/scripts/test_cli_sync_check.py` passed `7` cases,
+  `git diff --check`, skill-sync report, and version-bump report. The
+  local Python coverage runner could not run because this interpreter
+  lacks `coverage.py >= 7.10`; hosted CI remains the coverage proof for
+  this tranche.
 - `#645` MPE tracker worktree
   `/Users/danielraffel/Code/pulp-mpe-tracker-coverage-645`, branch
   `feature/mpe-tracker-coverage-645`, commit `b7c72711`; merged via PR
@@ -679,7 +697,7 @@ Open supporting PR:
   and `#833` opened, and `#829` was rebased onto `87ef6d90` to pick up
   the merged Android SDK discovery fix, and `#832` was rebased/repaired
   for the Windows fast-exit command, and `#834` opened, and `#828`
-  merged, and `#835` opened, and remains docs-only.
+  merged, and `#835` opened, and `#836` opened, and remains docs-only.
 
 Local environment note:
 
@@ -719,10 +737,13 @@ Next recovery actions:
 8. Monitor `#835` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-cli-ship-coverage-643`, patch,
    validate locally, and push with lease.
-9. If any open Phase 3 PR is green but GitHub reports it behind `main`,
+9. Monitor `#836` cloud checks; if a required lane fails, debug in
+   `/Users/danielraffel/Code/pulp-cli-sync-coverage-643`, patch,
+   validate locally, and push with lease.
+10. If any open Phase 3 PR is green but GitHub reports it behind `main`,
    rebase that branch onto `origin/main`, push with lease, and let
    checks rerun.
-10. Continue Phase 3 from the tranche issues below, prioritizing
+11. Continue Phase 3 from the tranche issues below, prioritizing
    represented high-miss files over adding new perimeter lanes.
 
 ## Phase 1 corrected baseline
