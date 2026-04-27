@@ -173,9 +173,30 @@ void SkiaCanvas::rotate(float radians) {
     canvas_->rotate(radians * 180.0f / 3.14159265f);
 }
 
+void SkiaCanvas::set_transform(float a, float b, float c,
+                               float d, float e, float f) {
+    GUARD_CANVAS;
+    // CanvasRenderingContext2D.setTransform uses the column-major form
+    //   [a c e]   [scaleX skewY translateX]
+    //   [b d f] = [skewX  scaleY translateY]
+    //   [0 0 1]
+    // SkMatrix::MakeAll takes row-major (sx, kx, tx, ky, sy, ty, p0, p1, p2).
+    canvas_->setMatrix(SkMatrix::MakeAll(a, c, e,
+                                          b, d, f,
+                                          0.0f, 0.0f, 1.0f));
+}
+
 void SkiaCanvas::clip_rect(float x, float y, float w, float h) {
     GUARD_CANVAS;
     canvas_->clipRect(SkRect::MakeXYWH(x, y, w, h));
+}
+
+void SkiaCanvas::clip() {
+    GUARD_CANVAS;
+    if (!path_builder_) return;
+    // Snapshot the path (don't detach — Canvas2D allows continued use of
+    // the same path after clip()) and intersect with the current clip.
+    canvas_->clipPath(path_builder_->snapshot(), /*doAntiAlias=*/true);
 }
 
 void SkiaCanvas::set_fill_color(Color c) { fill_color_ = c; }
@@ -529,15 +550,36 @@ void SkiaCanvas::clear_fill_gradient() {
 // ── Blend modes ─────────────────────────────────────────────────────────────
 
 void SkiaCanvas::set_blend_mode(BlendMode mode) {
+    // Indices 0..15 — advanced/W3C blend modes (must stay in sync with
+    // canvas.hpp BlendMode enum).
+    // Indices 16..26 — Porter-Duff compositing modes (issue-896).
     static const SkBlendMode map[] = {
         SkBlendMode::kSrcOver, SkBlendMode::kMultiply, SkBlendMode::kScreen,
         SkBlendMode::kOverlay, SkBlendMode::kDarken, SkBlendMode::kLighten,
         SkBlendMode::kColorDodge, SkBlendMode::kColorBurn, SkBlendMode::kHardLight,
         SkBlendMode::kSoftLight, SkBlendMode::kDifference, SkBlendMode::kExclusion,
         SkBlendMode::kHue, SkBlendMode::kSaturation, SkBlendMode::kColor,
-        SkBlendMode::kLuminosity
+        SkBlendMode::kLuminosity,
+        // Porter-Duff
+        SkBlendMode::kSrcOver,    // 16 source_over (CSS default alias)
+        SkBlendMode::kDstOver,    // 17 destination_over
+        SkBlendMode::kSrcIn,      // 18 source_in
+        SkBlendMode::kDstIn,      // 19 destination_in
+        SkBlendMode::kSrcOut,     // 20 source_out
+        SkBlendMode::kDstOut,     // 21 destination_out
+        SkBlendMode::kSrcATop,    // 22 source_atop
+        SkBlendMode::kDstATop,    // 23 destination_atop
+        SkBlendMode::kXor,        // 24 xor
+        SkBlendMode::kSrc,        // 25 copy
+        SkBlendMode::kPlus        // 26 lighter
     };
-    blend_mode_ = map[static_cast<int>(mode)];
+    int idx = static_cast<int>(mode);
+    constexpr int count = static_cast<int>(sizeof(map) / sizeof(map[0]));
+    if (idx < 0 || idx >= count) {
+        blend_mode_ = SkBlendMode::kSrcOver;
+        return;
+    }
+    blend_mode_ = map[idx];
 }
 
 // ── Path building ───────────────────────────────────────────────────────────

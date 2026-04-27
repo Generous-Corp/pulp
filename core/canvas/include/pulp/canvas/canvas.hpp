@@ -191,8 +191,25 @@ public:
     virtual void scale(float sx, float sy) = 0;
     virtual void rotate(float radians) = 0;
 
+    /// Replace the current transform with the affine matrix
+    /// [ a c e ]
+    /// [ b d f ]
+    /// [ 0 0 1 ]
+    /// Mirrors CanvasRenderingContext2D.setTransform(a, b, c, d, e, f).
+    /// Default implementation is a no-op so non-GPU backends still compile;
+    /// SkiaCanvas overrides with a full SkMatrix replace.
+    virtual void set_transform(float a, float b, float c,
+                               float d, float e, float f) {
+        (void)a; (void)b; (void)c; (void)d; (void)e; (void)f;
+    }
+
     // ── Clipping ─────────────────────────────────────────────────────────
     virtual void clip_rect(float x, float y, float w, float h) = 0;
+
+    /// Intersect the current clip region with the current path.
+    /// Mirrors CanvasRenderingContext2D.clip(). Default no-op so
+    /// backends without a path builder remain unaffected.
+    virtual void clip() {}
 
     // ── Fill and stroke style ────────────────────────────────────────────
     virtual void set_fill_color(Color c) = 0;
@@ -227,10 +244,29 @@ public:
     virtual void clear_fill_gradient() {}
 
     // ── Blend modes ─────────────────────────────────────────────────────
+    /// Indices 0..15 match the existing W3C "advanced" composite ops and
+    /// must stay stable — set_blend_mode in the JS bridge currently
+    /// passes int_val 1/2/3 = multiply/screen/overlay. Indices 16+ are
+    /// Porter-Duff and "extra" CSS composite ops added so the JS bridge
+    /// can support the full CanvasRenderingContext2D.globalCompositeOperation
+    /// surface (issue-896).
     enum class BlendMode {
-        normal, multiply, screen, overlay, darken, lighten,
+        // Advanced (separable & non-separable W3C blend modes)
+        normal = 0, multiply, screen, overlay, darken, lighten,
         color_dodge, color_burn, hard_light, soft_light,
-        difference, exclusion, hue, saturation, color, luminosity
+        difference, exclusion, hue, saturation, color, luminosity,
+        // Porter-Duff compositing modes (issue-896)
+        source_over,        // 16 — alias for normal/source-over (CSS default)
+        destination_over,   // 17
+        source_in,          // 18
+        destination_in,     // 19
+        source_out,         // 20
+        destination_out,    // 21
+        source_atop,        // 22
+        destination_atop,   // 23
+        xor_mode,           // 24 — "xor" CSS string
+        copy,               // 25
+        lighter             // 26 — additive ("plus" / SVG kPlus)
     };
 
     /// Set the compositing blend mode for subsequent draw operations.
@@ -521,6 +557,7 @@ struct DrawCommand {
     enum class Type {
         save, restore,
         translate, scale, rotate, clip_rect,
+        set_transform, clip, set_blend_mode,    // issue-896
         set_fill_color, set_stroke_color, set_line_width,
         set_line_cap, set_line_join,
         fill_rect, stroke_rect, fill_rounded_rect, stroke_rounded_rect,
@@ -549,7 +586,11 @@ public:
     void translate(float x, float y) override;
     void scale(float sx, float sy) override;
     void rotate(float radians) override;
+    void set_transform(float a, float b, float c,
+                       float d, float e, float f) override;
     void clip_rect(float x, float y, float w, float h) override;
+    void clip() override;
+    void set_blend_mode(BlendMode mode) override;
     void set_fill_color(Color c) override;
     void set_stroke_color(Color c) override;
     void set_line_width(float w) override;

@@ -9,6 +9,8 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
 <a id="v0471"></a>
+## [0.48.0]
+
 ## [0.47.1] - 2026-04-25
 
 - fix(project): close standalone bump edge cases ([#770](https://github.com/danielraffel/pulp/pull/770))

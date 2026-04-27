@@ -39,9 +39,12 @@ public:
     void translate(float x, float y) override;
     void scale(float sx, float sy) override;
     void rotate(float radians) override;
+    void set_transform(float a, float b, float c,
+                       float d, float e, float f) override;
 
     // ── Clipping ─────────────────────────────────────────────────────────
     void clip_rect(float x, float y, float w, float h) override;
+    void clip() override;
 
     // ── Fill and stroke ──────────────────────────────────────────────────
     void set_fill_color(Color c) override;

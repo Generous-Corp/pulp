@@ -35,6 +35,8 @@ struct CanvasDrawCmd {
         save, restore,
         // Transform
         translate, scale, rotate, clip_rect,
+        set_transform,             // issue-896: replace transform with affine matrix
+        clip,                      // issue-896: intersect clip with current path
         // Image
         draw_image,
         // Clear
