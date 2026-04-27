@@ -3,9 +3,26 @@
 #include <pulp/view/widgets.hpp>
 #include <pulp/canvas/canvas.hpp>
 
+#include <vector>
+
 using namespace pulp::view;
 using namespace pulp::canvas;
 using Catch::Matchers::WithinAbs;
+
+namespace {
+
+std::vector<DrawCommand> commands_of(const RecordingCanvas& canvas,
+                                     DrawCommand::Type type) {
+    std::vector<DrawCommand> matches;
+    for (const auto& command : canvas.commands()) {
+        if (command.type == type) {
+            matches.push_back(command);
+        }
+    }
+    return matches;
+}
+
+}  // namespace
 
 TEST_CASE("Label renders text", "[view][widget]") {
     Label label("Gain");
@@ -218,6 +235,61 @@ TEST_CASE("Label letter_spacing counts glyphs not UTF-8 bytes",
                     - cjk_no_spacing.intrinsic_width();
     REQUIRE(cjk_delta >= 5.0f);
     REQUIRE(cjk_delta <= 7.0f);
+}
+
+TEST_CASE("Label applies text transforms when painting", "[view][widget]") {
+    Label label("gain stage");
+    label.set_bounds({0, 0, 120, 24});
+
+    RecordingCanvas canvas;
+    label.set_text_transform(Label::TextTransform::uppercase);
+    label.paint(canvas);
+    REQUIRE(commands_of(canvas, DrawCommand::Type::fill_text).front().text == "GAIN STAGE");
+
+    canvas.clear();
+    label.set_text("GAIN STAGE");
+    label.set_text_transform(Label::TextTransform::lowercase);
+    label.paint(canvas);
+    REQUIRE(commands_of(canvas, DrawCommand::Type::fill_text).front().text == "gain stage");
+
+    canvas.clear();
+    label.set_text("gain stage");
+    label.set_text_transform(Label::TextTransform::capitalize);
+    label.paint(canvas);
+    REQUIRE(commands_of(canvas, DrawCommand::Type::fill_text).front().text == "Gain Stage");
+}
+
+TEST_CASE("Label paints explicit lines and decorations", "[view][widget]") {
+    Label label("gain\ntrim");
+    label.set_bounds({0, 0, 120, 60});
+    label.set_multi_line(true);
+    label.set_line_height(18.0f);
+    label.set_text_decoration(Label::TextDecoration::underline);
+
+    RecordingCanvas canvas;
+    label.paint(canvas);
+
+    auto text = commands_of(canvas, DrawCommand::Type::fill_text);
+    REQUIRE(text.size() == 2);
+    REQUIRE(text[0].text == "gain");
+    REQUIRE(text[1].text == "trim");
+    REQUIRE_THAT(text[1].f[1] - text[0].f[1], WithinAbs(18.0, 0.001));
+    REQUIRE(canvas.count(DrawCommand::Type::stroke_line) == 1);
+}
+
+TEST_CASE("Label vertical text direction wraps paint in transforms", "[view][widget]") {
+    Label label("Gain");
+    label.set_bounds({0, 0, 32, 80});
+    label.set_text_direction(TextDirection::top_to_bottom);
+
+    RecordingCanvas canvas;
+    label.paint(canvas);
+
+    REQUIRE(canvas.count(DrawCommand::Type::save) == 1);
+    REQUIRE(canvas.count(DrawCommand::Type::translate) == 1);
+    REQUIRE(canvas.count(DrawCommand::Type::rotate) == 1);
+    REQUIRE(canvas.count(DrawCommand::Type::restore) == 1);
+    REQUIRE(commands_of(canvas, DrawCommand::Type::fill_text).front().text == "Gain");
 }
 
 TEST_CASE("Knob value clamping", "[view][widget]") {
