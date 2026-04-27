@@ -83,6 +83,28 @@ TEST_CASE("Appcast XML escapes metadata and omits empty optional item fields", "
     REQUIRE(xml.find("sparkle:edSignature=") == std::string::npos);
 }
 
+TEST_CASE("Appcast XML emits Sparkle signature when present", "[ship][appcast]") {
+    Appcast feed;
+    feed.title = "Signed Feed";
+    feed.link = "https://example.com/appcast.xml";
+    feed.description = "Signed releases";
+
+    AppcastItem item;
+    item.version = "4.0.0";
+    item.build_number = "400";
+    item.title = "Version 4.0.0";
+    item.pub_date = "Fri, 04 Apr 2026 12:00:00 +0000";
+    item.download_url = "https://example.com/Pulp-4.0.0.pkg";
+    item.file_size = 4096;
+    item.ed_signature = "base64-signature";
+    feed.items.push_back(item);
+
+    auto xml = feed.to_xml();
+
+    REQUIRE(xml.find("<sparkle:version>400</sparkle:version>") != std::string::npos);
+    REQUIRE(xml.find("sparkle:edSignature=\"base64-signature\"") != std::string::npos);
+}
+
 TEST_CASE("Appcast from_xml parses optional fields across multiple items", "[ship][appcast]") {
     auto parsed = Appcast::from_xml(R"(<?xml version="1.0" encoding="utf-8"?>
 <rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
@@ -140,6 +162,22 @@ TEST_CASE("Appcast from_xml parses optional fields across multiple items", "[shi
 TEST_CASE("Appcast from_xml invalid", "[ship][appcast]") {
     auto result = Appcast::from_xml("not xml");
     REQUIRE_FALSE(result.has_value());
+}
+
+TEST_CASE("Appcast from_xml stops before malformed item", "[ship][appcast]") {
+    auto parsed = Appcast::from_xml(R"(<rss version="2.0">
+  <channel>
+    <title>Broken Feed</title>
+    <link>https://example.com/appcast.xml</link>
+    <description>Malformed item feed</description>
+    <item>
+      <title>Version 4.0.0</title>
+  </channel>
+</rss>)");
+
+    REQUIRE(parsed.has_value());
+    REQUIRE(parsed->title == "Broken Feed");
+    REQUIRE(parsed->items.empty());
 }
 
 TEST_CASE("Version comparison", "[ship][version]") {
