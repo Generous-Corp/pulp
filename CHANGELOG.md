@@ -8,9 +8,13 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
-<a id="v0480"></a>
-## [0.49.0]
+<a id="v0490"></a>
+## [0.49.0] - 2026-04-27
 
+- fix(canvas): compose canvasSetTransform onto parent View transform (Codex P1 on #897) ([#906](https://github.com/danielraffel/pulp/pull/906))
+- perf(cmake): rewrite pulp_add_binary_data with Python encoder + add_custom_command (#898) ([#905](https://github.com/danielraffel/pulp/pull/905))
+
+<a id="v0480"></a>
 ## [0.48.0] - 2026-04-27
 
 - feat(view): add canvasSetTransform / canvasClip / canvasGlobalCompositeOperation (#896) ([#897](https://github.com/danielraffel/pulp/pull/897))
@@ -746,6 +750,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.49.0]: https://github.com/danielraffel/pulp/releases/tag/v0.49.0
 [0.48.0]: https://github.com/danielraffel/pulp/releases/tag/v0.48.0
 [0.47.1]: https://github.com/danielraffel/pulp/releases/tag/v0.47.1
 [0.47.0]: https://github.com/danielraffel/pulp/releases/tag/v0.47.0
