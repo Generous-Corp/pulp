@@ -38,6 +38,7 @@ import textwrap
 import unittest
 import xml.etree.ElementTree as ET
 from pathlib import Path
+from unittest import mock
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -264,6 +265,93 @@ class LcovCoberturaTests(unittest.TestCase):
         self.assertEqual(line.attrib["hits"], "7")
         self.assertEqual(line.attrib["branch"], "true")
         self.assertEqual(line.attrib["condition-coverage"], "50% (1/2)")
+        self.assertEqual(root.attrib["lines-valid"], "1")
+        self.assertEqual(root.attrib["lines-covered"], "1")
+
+    def test_excluded_packages_are_removed_before_summary_rates(self) -> None:
+        kept = REPO_ROOT / "core/audio/src/kept.cpp"
+        ignored = REPO_ROOT / "external/noise/ignored.cpp"
+        lcov = textwrap.dedent(
+            f"""
+            SF:{kept}
+            DA:10,1
+            DA:11,0
+            end_of_record
+            SF:{ignored}
+            DA:20,0
+            DA:21,0
+            end_of_record
+            """
+        )
+
+        xml = LcovCobertura(
+            lcov,
+            base_dir=str(REPO_ROOT),
+            excludes=[r"external\.noise"],
+        ).convert()
+        root = ET.fromstring(xml)
+        class_names = {
+            class_el.attrib["filename"]
+            for class_el in root.findall(".//class")
+        }
+
+        self.assertEqual(class_names, {"core/audio/src/kept.cpp"})
+        self.assertEqual(root.attrib["lines-valid"], "2")
+        self.assertEqual(root.attrib["lines-covered"], "1")
+        self.assertEqual(root.attrib["line-rate"], "0.5")
+
+    def test_duplicate_source_records_merge_function_hits(self) -> None:
+        source = REPO_ROOT / "core/runtime/src/widget.cpp"
+        lcov = textwrap.dedent(
+            f"""
+            SF:{source}
+            FN:7,_ZN4pulp6Widget3runEv
+            FNDA:2,_ZN4pulp6Widget3runEv
+            DA:7,2
+            end_of_record
+            SF:{source}
+            FN:7,_ZN4pulp6Widget3runEv
+            FNDA:3,_ZN4pulp6Widget3runEv
+            DA:7,3
+            end_of_record
+            """
+        )
+
+        root = self._convert(lcov)
+        method = root.find(".//method[@name='_ZN4pulp6Widget3runEv']")
+        self.assertIsNotNone(method)
+        assert method is not None
+        method_line = method.find("./lines/line")
+        self.assertIsNotNone(method_line)
+        assert method_line is not None
+
+        self.assertEqual(method.attrib["line-rate"], "1.0")
+        self.assertEqual(method_line.attrib["number"], "7")
+        self.assertEqual(method_line.attrib["hits"], "5")
+        self.assertEqual(root.attrib["lines-covered"], "1")
+
+    def test_relpath_value_error_falls_back_to_original_filename(self) -> None:
+        lcov = textwrap.dedent(
+            """
+            SF:D:\\workspace\\pulp\\core\\runtime\\foreign_drive.cpp
+            DA:3,1
+            end_of_record
+            """
+        )
+
+        with mock.patch(
+            "lcov_cobertura.os.path.relpath",
+            side_effect=ValueError("path is on mount 'D:', start on mount 'C:'"),
+        ):
+            root = self._convert(lcov)
+
+        class_el = root.find(".//class")
+        self.assertIsNotNone(class_el)
+        assert class_el is not None
+        self.assertEqual(
+            class_el.attrib["filename"],
+            "D:\\workspace\\pulp\\core\\runtime\\foreign_drive.cpp",
+        )
         self.assertEqual(root.attrib["lines-valid"], "1")
         self.assertEqual(root.attrib["lines-covered"], "1")
 
