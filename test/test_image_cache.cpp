@@ -47,6 +47,25 @@ TEST_CASE("no-decoder returns nullptr", "[view][image-cache]") {
     REQUIRE(c.stats().misses == 1);
 }
 
+TEST_CASE("decode failure is not cached", "[view][image-cache]") {
+    ImageCache c;
+    std::atomic<int> calls{0};
+    c.set_decoder([&](const std::string&) -> std::optional<DecodedImage> {
+        ++calls;
+        return std::nullopt;
+    });
+
+    REQUIRE(c.get("missing") == nullptr);
+    REQUIRE(c.get("missing") == nullptr);
+
+    auto s = c.stats();
+    REQUIRE(calls.load() == 2);
+    REQUIRE(s.misses == 2);
+    REQUIRE(s.hits == 0);
+    REQUIRE(s.entry_count == 0);
+    REQUIRE(s.total_bytes == 0);
+}
+
 TEST_CASE("LRU eviction honours byte budget", "[view][image-cache]") {
     ImageCache c;
     std::atomic<int> calls{0};
@@ -67,6 +86,25 @@ TEST_CASE("LRU eviction honours byte budget", "[view][image-cache]") {
     REQUIRE(calls.load() == 0);   // hit
     c.get("a");
     REQUIRE(calls.load() == 1);   // miss → re-decoded
+}
+
+TEST_CASE("entry larger than byte budget is discarded", "[view][image-cache]") {
+    ImageCache c;
+    std::atomic<int> calls{0};
+    std::atomic<int> released{0};
+    c.set_decoder(make_fake_decoder(calls));
+    c.set_releaser([&](DecodedImage&) { ++released; });
+    c.set_byte_budget(63);  // fake images are 64 bytes each
+
+    REQUIRE(c.get("too-large") == nullptr);
+
+    auto s = c.stats();
+    REQUIRE(calls.load() == 1);
+    REQUIRE(released.load() == 1);
+    REQUIRE(s.misses == 1);
+    REQUIRE(s.entry_count == 0);
+    REQUIRE(s.total_bytes == 0);
+    REQUIRE(s.evictions == 1);
 }
 
 TEST_CASE("clear invokes releaser for every entry",
