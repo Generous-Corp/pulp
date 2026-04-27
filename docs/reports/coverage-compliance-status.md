@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-27 00:04 EDT
+Last reviewed: 2026-04-27 00:16 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -360,6 +360,40 @@ jobs rather than code failures.
   `feature/web-compat-coverage-641-next`, head `393e841f`; covers
   compound selector matching, child vs descendant combinators, and nested
   `querySelector` / `querySelectorAll` traversal.
+- `#885` state `PropertiesFile` helper coverage for parent `#641`,
+  branch `feature/state-properties-coverage-641-next`, head `dcf00b53`;
+  covers invalid numeric conversion, loading an empty file over stale
+  values, and save-without-path failure.
+- `#886` iOS audio-session label coverage for parent `#641`, branch
+  `feature/ios-runtime-coverage-641-next`, head `5f266fd5`; covers
+  secondary-audio silence event labels and unknown event fallback in
+  `to_string()`.
+- `#887` ship appcast helper coverage for parent `#641`, branch
+  `feature/ship-helper-coverage-641-next2`, head `fb9cee78`; covers
+  Sparkle signature XML emission and malformed-item parse behavior.
+- `#888` tools skill-sync helper coverage for `#643`, branch
+  `feature/tools-helper-coverage-643-next7`, head `e13c227b`; covers
+  `skill_sync_check.py` config loading, skill-map parsing, SKILL.md
+  enforcement, and report / hint rendering modes.
+- `#889` MIDI UMP packet helper coverage for parent `#641`, branch
+  `feature/midi-osc-helper-coverage-641-next`, head `d29cc79b`; covers
+  UMP packet factory masking for groups, channels, notes, and data
+  fields.
+- `#890` view accessibility-tree range coverage for `#493`, branch
+  `feature/view-accessibility-coverage-493-next4`, head `b2dc5c38`;
+  covers nested accessibility snapshot traversal plus
+  `AccessibilityValueInterface` range metadata and value-string capture.
+- `#891` Android accessibility delegate coverage for parent `#641`,
+  branch `feature/android-helper-coverage-641-next2`, head `2312fdfd`;
+  covers accessibility event class-name initialization and action
+  fallback when the native bridge is unavailable. Local Gradle execution
+  was blocked by a missing Java runtime, so hosted Android JVM CI is the
+  first executable validation for this tranche; pre-push gates are clean
+  and the branch carries `Skill-Update: skip skill=android`.
+- `#892` image-cache failure-edge coverage for `#646` / parent `#641`,
+  branch `feature/render-image-coverage-646-next4`, head `248f6cfc`;
+  covers decode failures not being cached and oversized decoded entries
+  being released / discarded when over the byte budget.
 
 Local-only queued work:
 
@@ -376,26 +410,21 @@ Local-only queued work:
   test-only target `pulp-test-ipc-endpoints` for deterministic IPC
   socket endpoint parse failures. Review CMake overlap with open `#857`
   before opening a PR.
-- Active worker: state/properties helper coverage worktree
-  `/Users/danielraffel/Code/pulp-state-properties-coverage-641-next`,
-  branch `feature/state-properties-coverage-641-next`; no commit reported
+- Active worker: audio edge/helper coverage worktree
+  `/Users/danielraffel/Code/pulp-audio-edge-coverage-640-next6`, branch
+  `feature/audio-edge-coverage-640-next6`; no commit reported yet.
+- Active worker: runtime crypto / i18n helper coverage worktree
+  `/Users/danielraffel/Code/pulp-runtime-helper-coverage-641-next5`,
+  branch `feature/runtime-helper-coverage-641-next5`; no commit reported
   yet.
-- Active worker: iOS/mobile runtime helper coverage worktree
-  `/Users/danielraffel/Code/pulp-ios-runtime-coverage-641-next`, branch
-  `feature/ios-runtime-coverage-641-next`; no commit reported yet.
-- Active worker: ship helper coverage worktree
-  `/Users/danielraffel/Code/pulp-ship-helper-coverage-641-next2`, branch
-  `feature/ship-helper-coverage-641-next2`; no commit reported yet.
-- Active worker: MIDI / OSC helper coverage worktree
-  `/Users/danielraffel/Code/pulp-midi-osc-helper-coverage-641-next`,
-  branch `feature/midi-osc-helper-coverage-641-next`; no commit reported
+- Active worker: host / format helper coverage worktree
+  `/Users/danielraffel/Code/pulp-host-format-helper-coverage-493-next4`,
+  branch `feature/host-format-helper-coverage-493-next4`; no commit
+  reported yet.
+- Active worker: canvas helper coverage worktree
+  `/Users/danielraffel/Code/pulp-canvas-helper-coverage-641-next2`,
+  branch `feature/canvas-helper-coverage-641-next2`; no commit reported
   yet.
-- Active worker: render image-helper coverage worktree, branch
-  `feature/render-image-coverage-646-next4`; spawned after this review,
-  no commit reported yet.
-- Active worker: view/accessibility helper coverage worktree, branch
-  `feature/view-accessibility-coverage-493-next4`; spawned after this
-  review, no commit reported yet.
 
 Local Phase 3 draft worktrees:
 
