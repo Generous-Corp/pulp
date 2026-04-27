@@ -89,6 +89,8 @@ catch_discover_tests(pulp-test-cli-shellout)
 add_executable(pulp-test-cli-shell-quote
     test_cli_shell_quote.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/cli_common.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/fetchcontent_cache.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/projects_registry.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/update_check.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/version_diag.cpp
     ${CMAKE_SOURCE_DIR}/tools/cli/package_registry.cpp
