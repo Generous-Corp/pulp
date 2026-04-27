@@ -60,6 +60,19 @@ TEST_CASE("RectangleList subtract", "[canvas][rect]") {
     REQUIRE(rl.contains(2, 2));  // corner still exists
 }
 
+TEST_CASE("RectangleList subtract handles no-op and full-cover cases",
+          "[canvas][rect][issue-641]") {
+    RectangleList rl;
+    rl.add({0, 0, 10, 10});
+
+    rl.subtract({20, 20, 5, 5});
+    REQUIRE(rl.size() == 1);
+    REQUIRE(rl[0] == Rect{0, 0, 10, 10});
+
+    rl.subtract({-1, -1, 12, 12});
+    REQUIRE(rl.empty());
+}
+
 TEST_CASE("RectangleList clear", "[canvas][rect]") {
     RectangleList rl;
     rl.add({0, 0, 10, 10});
