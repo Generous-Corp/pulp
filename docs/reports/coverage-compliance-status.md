@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-26 20:30 EDT
+Last reviewed: 2026-04-26 20:36 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -200,6 +200,11 @@ Open Phase 3 PRs:
   `feature/cli-sync-coverage-643`, head `86048a3f`; opened from
   `main` at `5b8e4529`. This tranche also uses the GitHub/Namespace
   path while the SSH `windows` target remains unreachable.
+- `#837` package registry validation tools coverage for `#643`, branch
+  `feature/package-validator-coverage-643`, head `8a2edbe9`; opened
+  from `main` at `5b8e4529`. This tranche also uses the
+  GitHub/Namespace path while the SSH `windows` target remains
+  unreachable.
 
 Local Phase 3 draft worktrees:
 
@@ -362,6 +367,22 @@ Local Phase 3 draft worktrees:
   and non-repo diagnostics. Local validation: direct
   `python3 tools/scripts/test_cli_sync_check.py` passed `7` cases,
   `git diff --check`, skill-sync report, and version-bump report. The
+  local Python coverage runner could not run because this interpreter
+  lacks `coverage.py >= 7.10`; hosted CI remains the coverage proof for
+  this tranche.
+- `#643` package registry validation tools worktree
+  `/Users/danielraffel/Code/pulp-package-validator-coverage-643`,
+  branch `feature/package-validator-coverage-643`, commit `8a2edbe9`;
+  open as PR `#837`.
+  Scope: test-only Python coverage for
+  `tools/packages/validate_registry.py` JSON load/error paths,
+  structural and license classification, and CLI success output, plus
+  `tools/packages/freshness_check.py` GitHub URL parsing, `gh api`
+  failure handling, issue aggregation, and package-filtered JSON output.
+  Local validation: direct
+  `python3 tools/packages/test_package_validation_tools.py` passed `9`
+  cases, `git diff --check HEAD~1..HEAD`, skill-sync report with
+  `Skill-Update: skip skill=packages`, and version-bump report. The
   local Python coverage runner could not run because this interpreter
   lacks `coverage.py >= 7.10`; hosted CI remains the coverage proof for
   this tranche.
@@ -697,7 +718,8 @@ Open supporting PR:
   and `#833` opened, and `#829` was rebased onto `87ef6d90` to pick up
   the merged Android SDK discovery fix, and `#832` was rebased/repaired
   for the Windows fast-exit command, and `#834` opened, and `#828`
-  merged, and `#835` opened, and `#836` opened, and remains docs-only.
+  merged, and `#835` opened, and `#836` opened, and `#837` opened, and
+  remains docs-only.
 
 Local environment note:
 
@@ -740,10 +762,13 @@ Next recovery actions:
 9. Monitor `#836` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-cli-sync-coverage-643`, patch,
    validate locally, and push with lease.
-10. If any open Phase 3 PR is green but GitHub reports it behind `main`,
+10. Monitor `#837` cloud checks; if a required lane fails, debug in
+   `/Users/danielraffel/Code/pulp-package-validator-coverage-643`,
+   patch, validate locally, and push with lease.
+11. If any open Phase 3 PR is green but GitHub reports it behind `main`,
    rebase that branch onto `origin/main`, push with lease, and let
    checks rerun.
-11. Continue Phase 3 from the tranche issues below, prioritizing
+12. Continue Phase 3 from the tranche issues below, prioritizing
    represented high-miss files over adding new perimeter lanes.
 
 ## Phase 1 corrected baseline
