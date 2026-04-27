@@ -145,6 +145,28 @@ TEST_CASE("BufferingReader signals finished when source ends", "[audio][bufferin
     reader.stop();
 }
 
+TEST_CASE("BufferingReader without callback finishes and zero-fills reads",
+          "[audio][buffering][edge]") {
+    BufferingReader reader;
+
+    reader.start(2, 1024);
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+    while (!reader.is_finished() && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+
+    REQUIRE(reader.is_finished());
+
+    float buf[8];
+    std::fill(std::begin(buf), std::end(buf), -1.0f);
+    REQUIRE(reader.read(buf, 4, 2) == 0);
+    for (float sample : buf) {
+        REQUIRE(sample == 0.0f);
+    }
+
+    reader.stop();
+}
+
 TEST_CASE("BufferingReader stereo interleaved", "[audio][buffering]") {
     BufferingReader reader;
 
