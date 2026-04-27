@@ -9,6 +9,8 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
 <a id="v0480"></a>
+## [0.49.0]
+
 ## [0.48.0] - 2026-04-27
 
 - feat(view): add canvasSetTransform / canvasClip / canvasGlobalCompositeOperation (#896) ([#897](https://github.com/danielraffel/pulp/pull/897))
