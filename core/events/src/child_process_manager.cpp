@@ -115,9 +115,9 @@ int ConnectedChildProcess::wait_for_exit(int timeout_ms) {
     }
 
 #ifndef _WIN32
-    int status = 0;
-    auto waited = waitpid(static_cast<pid_t>(pid_), &status, WNOHANG);
-    return waited == static_cast<pid_t>(pid_) && WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+    int status;
+    waitpid(static_cast<pid_t>(pid_), &status, WNOHANG);
+    return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
 #else
     return 0;
 #endif
