@@ -3,6 +3,7 @@
 // role/label/value metadata without needing a platform screen reader.
 
 #include <catch2/catch_test_macros.hpp>
+#include <pulp/view/accessibility.hpp>
 #include <pulp/view/accessibility_tree.hpp>
 #include <pulp/view/view.hpp>
 
@@ -11,6 +12,19 @@ using namespace pulp::view;
 namespace {
 
 class Probe : public View {};
+
+class RangeProbe : public View, public AccessibilityValueInterface {
+public:
+    explicit RangeProbe(double current) : current_(current) {}
+
+    double get_current_value() const override { return current_; }
+    void set_current_value(double value) override { current_ = value; }
+    double get_minimum_value() const override { return -12.0; }
+    double get_maximum_value() const override { return 12.0; }
+
+private:
+    double current_ = 0.0;
+};
 
 } // namespace
 
@@ -73,4 +87,36 @@ TEST_CASE("find_by_role_and_label returns nullptr when absent",
             == nullptr);
     REQUIRE(find_by_role_and_label(root, View::AccessRole::meter, "Gain")
             == nullptr);
+}
+
+TEST_CASE("snapshot captures nested range metadata", "[a11y][harness]") {
+    Probe root;
+
+    auto group = std::make_unique<Probe>();
+    group->set_access_role(View::AccessRole::group);
+    group->set_access_label("Channel Strip");
+
+    auto gain = std::make_unique<RangeProbe>(6.0);
+    gain->set_access_role(View::AccessRole::slider);
+    gain->set_access_label("Gain");
+    group->add_child(std::move(gain));
+
+    root.add_child(std::move(group));
+
+    auto nodes = snapshot_accessibility_tree(root);
+    REQUIRE(nodes.size() == 2);
+
+    REQUIRE(nodes[0].role == View::AccessRole::group);
+    REQUIRE(nodes[0].label == "Channel Strip");
+    REQUIRE(nodes[0].depth == 0);
+    REQUIRE_FALSE(nodes[0].has_value);
+
+    REQUIRE(nodes[1].role == View::AccessRole::slider);
+    REQUIRE(nodes[1].label == "Gain");
+    REQUIRE(nodes[1].depth == 1);
+    REQUIRE(nodes[1].has_value);
+    REQUIRE(nodes[1].min_value == -12.0);
+    REQUIRE(nodes[1].max_value == 12.0);
+    REQUIRE(nodes[1].current_value == 6.0);
+    REQUIRE(nodes[1].value_string == "75%");
 }
