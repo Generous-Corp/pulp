@@ -77,3 +77,66 @@ TEST_CASE("DrawBatcher not active before begin", "[render][batcher]") {
     REQUIRE_FALSE(b.is_active());
     REQUIRE(b.entries().size() == 1);
 }
+
+TEST_CASE("DrawBatcher merges chained same-key draws into one bounding box",
+          "[render][batcher][issue-646]") {
+    DrawBatcher b;
+
+    b.begin();
+    b.record({10, 5, 20, 10}, 7);
+    b.record({-5, 1, 3, 3}, 7);
+    b.record({40, 30, 5, 5}, 7);
+    const auto stats = b.end();
+
+    REQUIRE(stats.draws_before == 3);
+    REQUIRE(stats.draws_after == 1);
+    REQUIRE(stats.batches_merged == 2);
+
+    REQUIRE(b.entries().size() == 1);
+    const auto& bounds = b.entries().front().bounds;
+    REQUIRE(bounds.x == -5.0f);
+    REQUIRE(bounds.y == 1.0f);
+    REQUIRE(bounds.w == 50.0f);
+    REQUIRE(bounds.h == 34.0f);
+}
+
+TEST_CASE("DrawBatcher ignores records after end until the next begin",
+          "[render][batcher][issue-646]") {
+    DrawBatcher b;
+
+    b.begin();
+    b.record({0, 0, 10, 10}, 11);
+    REQUIRE(b.end().draws_after == 1);
+
+    b.record({20, 0, 10, 10}, 11);
+    REQUIRE(b.entries().size() == 1);
+
+    b.begin();
+    REQUIRE(b.entries().empty());
+    b.record({20, 0, 10, 10}, 11);
+    REQUIRE(b.end().draws_after == 1);
+    REQUIRE(b.entries().front().bounds.x == 20.0f);
+}
+
+TEST_CASE("DrawBatcher edge-touching blockers do not prevent same-key merge",
+          "[render][batcher][issue-646]") {
+    DrawBatcher b;
+
+    b.begin();
+    b.record({0, 0, 10, 10}, 3);
+    b.record({12, 10, 5, 5}, 99);
+    b.record({20, 0, 10, 10}, 3);
+    const auto stats = b.end();
+
+    REQUIRE(stats.draws_before == 3);
+    REQUIRE(stats.draws_after == 2);
+    REQUIRE(stats.batches_merged == 1);
+
+    REQUIRE(b.entries().size() == 2);
+    REQUIRE(b.entries()[0].state_key == 3);
+    REQUIRE(b.entries()[0].bounds.x == 0.0f);
+    REQUIRE(b.entries()[0].bounds.y == 0.0f);
+    REQUIRE(b.entries()[0].bounds.w == 30.0f);
+    REQUIRE(b.entries()[0].bounds.h == 10.0f);
+    REQUIRE(b.entries()[1].state_key == 99);
+}
