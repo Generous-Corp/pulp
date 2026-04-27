@@ -54,7 +54,7 @@ struct MultiChannelBallistics {
 
     /// Update ballistics from new meter data. Call once per UI frame.
     void update(const MultiChannelMeterData& data, float dt) {
-        num_channels = data.num_channels;
+        num_channels = std::clamp(data.num_channels, 0, kMaxMeterChannels);
 
         float attack_coeff = 1.0f - std::exp(-dt / attack_time);
         float release_coeff = 1.0f - std::exp(-dt / release_time);
@@ -118,7 +118,7 @@ class MultiChannelMeter {
 public:
     void prepare(float sample_rate, int num_channels) {
         sample_rate_ = sample_rate;
-        num_channels_ = (std::min)(num_channels, kMaxMeterChannels);
+        num_channels_ = std::clamp(num_channels, 0, kMaxMeterChannels);
 
         // LUFS momentary window: 400ms
         lufs_window_samples_ = static_cast<int>(sample_rate * 0.4f);
@@ -148,7 +148,7 @@ public:
     /// Process a block of interleaved or deinterleaved audio.
     /// channels: array of channel pointers. num_samples: samples per channel.
     void process(const float* const* channels, int num_channels, int num_samples) {
-        num_channels = (std::min)(num_channels, num_channels_);
+        num_channels = std::clamp(num_channels, 0, num_channels_);
 
         for (int i = 0; i < num_samples; ++i) {
             for (int ch = 0; ch < num_channels; ++ch) {

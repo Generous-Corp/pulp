@@ -1273,6 +1273,20 @@ TEST_CASE("MultiChannelMeter resets correlation accumulation window", "[signal][
     REQUIRE_THAT(meter.snapshot().correlation, WithinAbs(1.0f, 1e-6f));
 }
 
+TEST_CASE("MultiChannelMeter clamps negative channel counts", "[signal][meter][issue-645]") {
+    MultiChannelMeter meter;
+    meter.prepare(100.0f, -3);
+    REQUIRE(meter.snapshot().num_channels == 0);
+
+    float sample[] = {1.0f};
+    const float* channels[] = {sample};
+    meter.process(channels, -1, 1);
+
+    const auto& snap = meter.snapshot();
+    REQUIRE(snap.num_channels == 0);
+    REQUIRE_THAT(snap.channels[0].peak, WithinAbs(0.0f, 1e-6f));
+}
+
 TEST_CASE("MultiChannelBallistics holds peaks and clip indicators", "[signal][meter]") {
     MultiChannelBallistics ballistics;
 
@@ -1305,4 +1319,24 @@ TEST_CASE("MultiChannelBallistics holds peaks and clip indicators", "[signal][me
     REQUIRE(ballistics.channels[0].clip_indicator);
     ballistics.clear_clips();
     REQUIRE_FALSE(ballistics.channels[0].clip_indicator);
+}
+
+TEST_CASE("MultiChannelBallistics clamps invalid snapshot channel counts",
+          "[signal][meter][issue-645]") {
+    MultiChannelBallistics ballistics;
+
+    MultiChannelMeterData data;
+    data.num_channels = -2;
+    ballistics.update(data, 0.01f);
+    REQUIRE(ballistics.num_channels == 0);
+
+    data.num_channels = kMaxMeterChannels + 3;
+    for (int ch = 0; ch < kMaxMeterChannels; ++ch) {
+        data.channels[ch].peak = static_cast<float>(ch + 1) / 20.0f;
+    }
+
+    ballistics.update(data, 0.01f);
+    REQUIRE(ballistics.num_channels == kMaxMeterChannels);
+    REQUIRE(ballistics.channels[0].display_peak > 0.0f);
+    REQUIRE(ballistics.channels[kMaxMeterChannels - 1].display_peak > 0.0f);
 }
