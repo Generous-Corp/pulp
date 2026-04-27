@@ -84,6 +84,35 @@ TEST_CASE("AudioFocusRegistry: token move transfers ownership",
     REQUIRE(count == 1);  // outer now dropped → no more callbacks
 }
 
+TEST_CASE("AudioFocusRegistry: move assignment replaces an existing subscription",
+          "[audio][focus][issue-640]") {
+    AudioFocusRegistry::instance().reset_for_test();
+    int first_count = 0;
+    int second_count = 0;
+
+    auto first = AudioFocusRegistry::instance().subscribe(
+        [&](AudioFocusState) { ++first_count; });
+    auto second = AudioFocusRegistry::instance().subscribe(
+        [&](AudioFocusState) { ++second_count; });
+
+    first = std::move(second);
+    AudioFocusRegistry::instance().publish(AudioFocusState::duck);
+
+    REQUIRE(first.id() != 0);
+    REQUIRE(second.id() == 0);
+    REQUIRE(first_count == 0);
+    REQUIRE(second_count == 1);
+}
+
+TEST_CASE("AudioFocusRegistry: default token reset is a no-op",
+          "[audio][focus][issue-640]") {
+    AudioFocusRegistry::Token token;
+
+    REQUIRE(token.id() == 0);
+    token.reset();
+    REQUIRE(token.id() == 0);
+}
+
 TEST_CASE("AudioFocusRegistry: callback that drops its own token does not deadlock",
           "[audio][focus][issue-334]") {
     AudioFocusRegistry::instance().reset_for_test();
@@ -185,4 +214,14 @@ TEST_CASE("AudioFocusRegistry: reset_for_test clears subscribers and state",
     // so unsubscribe can't find its id); just don't crash.
     token.reset();
     SUCCEED("no crash on stale token reset");
+}
+
+TEST_CASE("AudioFocusRegistry: publish with no subscribers still updates state",
+          "[audio][focus][issue-640]") {
+    AudioFocusRegistry::instance().reset_for_test();
+
+    AudioFocusRegistry::instance().publish(AudioFocusState::lost_transient);
+
+    REQUIRE(AudioFocusRegistry::instance().current()
+            == AudioFocusState::lost_transient);
 }
