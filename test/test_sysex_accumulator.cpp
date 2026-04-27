@@ -88,6 +88,53 @@ TEST_CASE("SysexAccumulator: aborted by new status byte",
     REQUIRE(e.complete.empty());
 }
 
+TEST_CASE("SysexAccumulator: fresh F0 aborts and restarts sysex",
+          "[midi][sysex][issue-645]") {
+    SysexAccumulator acc;
+    Emit e;
+    auto cb = make_callback(e);
+
+    // A transport may drop an EOX and immediately deliver the next F0.
+    // The range feed should emit the partial payload as aborted, then
+    // reclassify the same F0 as the start of a fresh SysEx message.
+    std::uint8_t stream[] = {
+        0xF0, 0x41, 0x10,
+        0xF0, 0x7E, 0x7F, 0x06, 0x01, 0xF7
+    };
+
+    acc.feed(stream, sizeof(stream), cb);
+
+    REQUIRE(e.aborted.size() == 1);
+    REQUIRE((e.aborted[0] == std::vector<std::uint8_t>{0xF0, 0x41, 0x10}));
+    REQUIRE(e.complete.size() == 1);
+    REQUIRE((e.complete[0] ==
+             std::vector<std::uint8_t>{0xF0, 0x7E, 0x7F, 0x06, 0x01, 0xF7}));
+    REQUIRE_FALSE(acc.in_progress());
+    REQUIRE(acc.partial_size() == 0);
+}
+
+TEST_CASE("SysexAccumulator: single-byte abort leaves aborter unconsumed",
+          "[midi][sysex][issue-645]") {
+    SysexAccumulator acc;
+    Emit e;
+    auto cb = make_callback(e);
+
+    REQUIRE(acc.feed(0xF0, cb) == Classification::in_sysex);
+    REQUIRE(acc.feed(0x41, cb) == Classification::in_sysex);
+    REQUIRE(acc.feed(0x90, cb) == Classification::aborted);
+
+    REQUIRE(e.aborted.size() == 1);
+    REQUIRE((e.aborted[0] == std::vector<std::uint8_t>{0xF0, 0x41}));
+    REQUIRE(e.complete.empty());
+    REQUIRE_FALSE(acc.in_progress());
+    REQUIRE(acc.partial_size() == 0);
+
+    // The caller owns routing the aborting status after single-byte feed().
+    REQUIRE(acc.feed(0x90, cb) == Classification::passthrough);
+    REQUIRE(acc.feed(0x3C, cb) == Classification::passthrough);
+    REQUIRE(acc.feed(0x7F, cb) == Classification::passthrough);
+}
+
 TEST_CASE("SysexAccumulator: realtime bytes pass through mid-sysex",
           "[midi][sysex][issue-86]") {
     SysexAccumulator acc;
@@ -120,6 +167,19 @@ TEST_CASE("SysexAccumulator: short messages pass through when idle",
     REQUIRE(acc.feed(0x90, cb) == Classification::passthrough);
     REQUIRE(acc.feed(0x3C, cb) == Classification::passthrough);
     REQUIRE(acc.feed(0x7F, cb) == Classification::passthrough);
+    REQUIRE(e.complete.empty());
+    REQUIRE(e.aborted.empty());
+}
+
+TEST_CASE("SysexAccumulator: EOX passes through when idle",
+          "[midi][sysex][issue-645]") {
+    SysexAccumulator acc;
+    Emit e;
+    auto cb = make_callback(e);
+
+    REQUIRE(acc.feed(0xF7, cb) == Classification::passthrough);
+    REQUIRE_FALSE(acc.in_progress());
+    REQUIRE(acc.partial_size() == 0);
     REQUIRE(e.complete.empty());
     REQUIRE(e.aborted.empty());
 }
