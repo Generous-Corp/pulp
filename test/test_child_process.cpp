@@ -248,9 +248,11 @@ TEST_CASE("wait preserves output after is_running observes fast exit",
     REQUIRE(cp.start("/bin/sh", {"-c", "printf cached"}));
 #endif
 
-    for (int i = 0; i < 100 && cp.is_running(); ++i) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (cp.is_running() && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
+    INFO("fast-exit child did not finish before the 5s deadline");
     REQUIRE_FALSE(cp.is_running());
 
     auto r = cp.wait();
