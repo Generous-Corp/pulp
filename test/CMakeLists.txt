@@ -781,6 +781,10 @@ add_executable(pulp-test-ipc test_ipc.cpp)
 target_link_libraries(pulp-test-ipc PRIVATE pulp::events pulp::runtime Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-ipc)
 
+add_executable(pulp-test-ipc-endpoints test_ipc_endpoints.cpp)
+target_link_libraries(pulp-test-ipc-endpoints PRIVATE pulp::events pulp::runtime Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-ipc-endpoints)
+
 # AttributedString and TextLayout tests
 add_executable(pulp-test-attributed-string test_attributed_string.cpp)
 target_link_libraries(pulp-test-attributed-string PRIVATE pulp::canvas Catch2::Catch2WithMain)
