@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-26 21:20 EDT
+Last reviewed: 2026-04-26 21:29 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -200,9 +200,12 @@ Open Phase 3 PRs:
   GitHub/Namespace path while the SSH `windows` target remains
   unreachable.
 - `#838` CLI release packager coverage for `#643`, branch
-  `feature/package-cli-coverage-643`, head `7e76a1b7`; opened from
-  `main` at `b5e7a463`. This tranche also uses the GitHub/Namespace
-  path while the SSH `windows` target remains unreachable.
+  `feature/package-cli-coverage-643`, head `09666f46`; opened from
+  `main` at `b5e7a463`, then rebased onto `d02c9ec9` and repaired after
+  macOS Namespace exposed a parallel CTest temp-dir collision in
+  `test/test_android_package.cpp`. This tranche also uses the
+  GitHub/Namespace path while the SSH `windows` target remains
+  unreachable.
 - `#839` GPU graph render helper hardening/coverage for `#646`, branch
   `feature/render-gpu-graph-coverage-646`, head `fa3deb3b`; opened
   from `main` at `bdc406cc`, then rebased onto `d02c9ec9` after `#830`
@@ -412,7 +415,7 @@ Local Phase 3 draft worktrees:
   coverage; and moves the header-only dirty-tracker and GPU-graph tests
   out of the GPU-only CMake block so GPU-off sanitizer/local coverage
   builds can exercise them without linking `pulp::render`. Local
-  validation after rebasing onto `bdc406cc`: GPU-off configure,
+  validation after rebasing onto `d02c9ec9`: GPU-off configure,
   `pulp-test-gpu-graph` and `pulp-test-dirty-tracker` builds, direct
   `[issue-646]` run passed `39` assertions in `7` cases, full
   gpu-graph binary passed `52` assertions in `11` cases, full
@@ -421,18 +424,26 @@ Local Phase 3 draft worktrees:
   report with an SDK patch trailer, and pre-push gates.
 - `#643` CLI release packager worktree
   `/Users/danielraffel/Code/pulp-package-cli-coverage-643`, branch
-  `feature/package-cli-coverage-643`, commit `7e76a1b7`; open as PR
+  `feature/package-cli-coverage-643`, commit `09666f46`; open as PR
   `#838`.
   Scope: test-only Python coverage for `tools/scripts/package_cli.py`
   wgpu library discovery, macOS/Linux rpath command selection,
   tar/zip archive writer layout, missing-binary and missing-library
   exits, and successful Linux/Windows package staging with external
-  tools mocked. Local validation after rebasing onto `origin/main` with
-  `#831` merged: direct `python3 tools/scripts/test_package_cli.py`
-  passed `10` cases, `git diff --check HEAD~1..HEAD`, skill-sync
-  report, and version-bump report. The local Python coverage runner
-  could not run because this interpreter lacks `coverage.py >= 7.10`;
-  hosted CI remains the coverage proof for this tranche.
+  tools mocked. Follow-up repair after rebasing onto `d02c9ec9` isolates
+  Android package test temp dirs with process id plus an atomic
+  per-process counter, fixing the macOS Namespace failure where
+  concurrently discovered Catch2 test processes could read a neighboring
+  fake SDK and report `35.0.1` instead of `10.0.0`. Local validation:
+  direct `python3 tools/scripts/test_package_cli.py` passed `10` cases,
+  no-GPU/no-examples configure, `pulp-test-android-package` build, direct
+  `Android SDK discovery compares tool revisions numerically` run passed
+  `5` assertions in `1` case, matching CTest passed, parallel CTest
+  `Android SDK discovery` passed `3/3`, broader parallel CTest `Android`
+  passed `8/8`, `git diff --check origin/main...HEAD`, skill-sync report,
+  and version-bump report. The local Python coverage runner could not
+  run because this interpreter lacks `coverage.py >= 7.10`; hosted CI
+  remains the coverage proof for this tranche.
 - `#645` MPE tracker worktree
   `/Users/danielraffel/Code/pulp-mpe-tracker-coverage-645`, branch
   `feature/mpe-tracker-coverage-645`, commit `b7c72711`; merged via PR
@@ -789,7 +800,8 @@ Open supporting PR:
   repaired for the fast-exit deadline review, and `#833` was rebased
   onto `b5e7a463` to clear the stale Android SDK discovery ASan failure,
   and `#836` merged, and `#837` merged, and `#839` opened,
-  and `#830` merged,
+  and `#830` merged, and `#838` was rebased onto `d02c9ec9` and repaired
+  for the Android package parallel temp-dir collision,
   and remains docs-only.
 
 Local environment note:
@@ -824,7 +836,7 @@ Next recovery actions:
 6. Monitor `#835` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-cli-ship-coverage-643`, patch,
    validate locally, and push with lease.
-7. Monitor `#838` cloud checks; if a required lane fails, debug in
+7. Monitor `#838` cloud checks on head `09666f46`; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-package-cli-coverage-643`, patch,
    validate locally, and push with lease.
 8. Monitor `#839` cloud checks; if a required lane fails, debug in
