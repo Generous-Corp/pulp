@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-26 20:40 EDT
+Last reviewed: 2026-04-26 20:42 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -200,6 +200,10 @@ Open Phase 3 PRs:
   from `main` at `5b8e4529`. This tranche also uses the
   GitHub/Namespace path while the SSH `windows` target remains
   unreachable.
+- `#838` CLI release packager coverage for `#643`, branch
+  `feature/package-cli-coverage-643`, head `7e76a1b7`; opened from
+  `main` at `b5e7a463`. This tranche also uses the GitHub/Namespace
+  path while the SSH `windows` target remains unreachable.
 
 Local Phase 3 draft worktrees:
 
@@ -381,6 +385,20 @@ Local Phase 3 draft worktrees:
   local Python coverage runner could not run because this interpreter
   lacks `coverage.py >= 7.10`; hosted CI remains the coverage proof for
   this tranche.
+- `#643` CLI release packager worktree
+  `/Users/danielraffel/Code/pulp-package-cli-coverage-643`, branch
+  `feature/package-cli-coverage-643`, commit `7e76a1b7`; open as PR
+  `#838`.
+  Scope: test-only Python coverage for `tools/scripts/package_cli.py`
+  wgpu library discovery, macOS/Linux rpath command selection,
+  tar/zip archive writer layout, missing-binary and missing-library
+  exits, and successful Linux/Windows package staging with external
+  tools mocked. Local validation after rebasing onto `origin/main` with
+  `#831` merged: direct `python3 tools/scripts/test_package_cli.py`
+  passed `10` cases, `git diff --check HEAD~1..HEAD`, skill-sync
+  report, and version-bump report. The local Python coverage runner
+  could not run because this interpreter lacks `coverage.py >= 7.10`;
+  hosted CI remains the coverage proof for this tranche.
 - `#645` MPE tracker worktree
   `/Users/danielraffel/Code/pulp-mpe-tracker-coverage-645`, branch
   `feature/mpe-tracker-coverage-645`, commit `b7c72711`; merged via PR
@@ -715,7 +733,7 @@ Open supporting PR:
   the merged Android SDK discovery fix, and `#832` was rebased/repaired
   for the Windows fast-exit command, and `#834` opened, and `#828`
   merged, and `#835` opened, and `#836` opened, and `#837` opened, and
-  `#831` merged, and remains docs-only.
+  `#831` merged, and `#838` opened, and remains docs-only.
 
 Local environment note:
 
@@ -758,10 +776,13 @@ Next recovery actions:
 9. Monitor `#837` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-package-validator-coverage-643`,
    patch, validate locally, and push with lease.
-10. If any open Phase 3 PR is green but GitHub reports it behind `main`,
+10. Monitor `#838` cloud checks; if a required lane fails, debug in
+   `/Users/danielraffel/Code/pulp-package-cli-coverage-643`, patch,
+   validate locally, and push with lease.
+11. If any open Phase 3 PR is green but GitHub reports it behind `main`,
    rebase that branch onto `origin/main`, push with lease, and let
    checks rerun.
-11. Continue Phase 3 from the tranche issues below, prioritizing
+12. Continue Phase 3 from the tranche issues below, prioritizing
    represented high-miss files over adding new perimeter lanes.
 
 ## Phase 1 corrected baseline
