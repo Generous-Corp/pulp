@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-26 23:14 EDT
+Last reviewed: 2026-04-26 23:29 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -278,6 +278,41 @@ Open Phase 3 PRs:
   branch `feature/apple-swift-coverage-641-next`, head `3ff82a4e`;
   covers parameter reload replacement after backend changes, invalid
   `pulp_param_info` requests, and C string field population.
+- `#865` Android/Kotlin audio-engine fallback coverage for parent
+  `#641`, branch `feature/android-kotlin-coverage-641-next`, head
+  `08368a1e`; covers default audio config fallbacks when Android audio
+  properties are malformed or unavailable.
+- `#866` audio excerpt-window exact-tail coverage for `#640`, branch
+  `feature/platform-audio-coverage-640-next4`, head `bf10fa20`; covers
+  exact final-window coverage without duplicate tails and single-window
+  full-file metadata preservation.
+- `#867` Python bindings embedded-state coverage for parent `#641`,
+  branch `feature/python-bindings-coverage-641-next`, head `d572fb04`;
+  covers Python-facing `StateStore` access, serialization,
+  deserialization, parameter info, and `HeadlessHost` descriptor/state
+  save/load paths.
+- `#868` signal `ProcessorDuplicator` edge coverage for `#645`, branch
+  `feature/midi-signal-coverage-645-next4`, head `6fe50d38`; covers
+  bounded channel processing, invalid `process_channel` indices, const
+  channel access, and reset forwarding.
+- `#869` render KTX2 decoder header-edge coverage for `#646`, branch
+  `feature/render-coverage-646-next3`, head `f48a931b`; covers
+  null/short/incomplete headers plus minimal valid header parsing and
+  level-count normalization.
+- `#870` host-type policy coverage for `#493`, branch
+  `feature/host-format-view-coverage-493-next3`, head `c42e0603`;
+  covers `host_type_name()` enum mappings, invalid enum fallback, and
+  resize/sidechain policy exceptions.
+
+Local-only queued work:
+
+- `#642` events timer one-shot behavior worktree
+  `/Users/danielraffel/Code/pulp-events-helper-coverage-642-next3`,
+  branch `feature/events-helper-coverage-642-next3`, commit
+  `51f9aeda`; fixes one-shot timers so `is_active()` becomes false
+  after firing and adds a restart regression. Because this is a
+  production behavior fix, review it before opening a PR and add the
+  appropriate SDK patch metadata trailer.
 
 Local Phase 3 draft worktrees:
 
@@ -1044,7 +1079,8 @@ Open supporting PR:
   merged as `3d47dbd2`, and `#839` merged as `62ad9870`, and `#856`
   and `#857` opened from the latest worker batch, and `#832` merged as
   `3f92f066`, and `#842` merged as `51be8860`, and `#858` through
-  `#864` opened from the parallel worker queue,
+  `#864` opened from the parallel worker queue, and `#865` through
+  `#870` opened from the next completed local worker queue,
   and remains docs-only.
 
 Local environment note:
@@ -1075,14 +1111,18 @@ Next recovery actions:
    fails, debug in
    `/Users/danielraffel/Code/pulp-midi-mpe-tracker-extra-coverage-645-next`,
    patch, validate locally, and push with lease.
-5. Monitor `#845` through `#864`; if a required lane fails, debug in
+5. Monitor `#845` through `#870`; if a required lane fails, debug in
    the worktree named in the open-PR list above, patch, validate
    locally, and push with lease. Pay particular attention to `#848` and
    `#851` because they include patch-level production hardening.
-6. If any open Phase 3 PR is green but GitHub reports it behind `main`,
+6. Review the local-only timer one-shot worktree listed above. If the
+   production behavior change is accepted, add SDK patch metadata,
+   rerun focused events validation, open a `codecov` PR, and update this
+   doc plus `#642` / `#641`.
+7. If any open Phase 3 PR is green but GitHub reports it behind `main`,
    rebase that branch onto `origin/main`, push with lease, and let
    checks rerun.
-7. Continue Phase 3 from the tranche issues below, prioritizing
+8. Continue Phase 3 from the tranche issues below, prioritizing
    represented high-miss files over adding new perimeter lanes.
 
 ## Phase 1 corrected baseline
