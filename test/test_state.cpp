@@ -1,9 +1,19 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/state/state.hpp>
+#include <vector>
 
 using namespace pulp::state;
 using Catch::Matchers::WithinAbs;
+
+static ParamInfo make_param_info(ParamID id, const char* name, const char* unit, ParamRange range) {
+    ParamInfo info;
+    info.id = id;
+    info.name = name;
+    info.unit = unit;
+    info.range = range;
+    return info;
+}
 
 TEST_CASE("ParamRange normalization", "[state][range]") {
     ParamRange range{0.0f, 100.0f, 50.0f, 0.0f};
@@ -93,8 +103,8 @@ TEST_CASE("StateStore basic operations", "[state][store]") {
 TEST_CASE("StateStore serialization", "[state][serialize]") {
     StateStore store;
 
-    ParamInfo p1{1, "A", "", {0.0f, 1.0f, 0.5f}};
-    ParamInfo p2{2, "B", "", {-1.0f, 1.0f, 0.0f}};
+    ParamInfo p1 = make_param_info(1, "A", "", {0.0f, 1.0f, 0.5f});
+    ParamInfo p2 = make_param_info(2, "B", "", {-1.0f, 1.0f, 0.0f});
     store.add_parameter(p1);
     store.add_parameter(p2);
 
@@ -152,7 +162,7 @@ TEST_CASE("StateStore serialization", "[state][serialize]") {
 
 TEST_CASE("StateStore change listener", "[state][listener]") {
     StateStore store;
-    store.add_parameter({1, "X", "", {0.0f, 1.0f, 0.5f}});
+    store.add_parameter(make_param_info(1, "X", "", {0.0f, 1.0f, 0.5f}));
 
     ParamID changed_id = 0;
     float changed_value = 0.0f;
@@ -164,4 +174,70 @@ TEST_CASE("StateStore change listener", "[state][listener]") {
     store.set_value(1, 0.8f);
     REQUIRE(changed_id == 1);
     REQUIRE_THAT(changed_value, WithinAbs(0.8, 0.001));
+}
+
+TEST_CASE("StateStore modulation offsets and default resets", "[state][store]") {
+    StateStore store;
+    store.add_parameter(make_param_info(1, "Cutoff", "Hz", {20.0f, 20000.0f, 1000.0f}));
+    store.add_parameter(make_param_info(2, "Resonance", "", {0.1f, 10.0f, 1.0f}));
+
+    REQUIRE(store.get_modulated(999) == 0.0f);
+    REQUIRE(store.get_normalized(999) == 0.0f);
+    REQUIRE(store.get_default(999) == 0.0f);
+
+    store.set_value(1, 2000.0f);
+    store.set_mod_offset(1, 150.0f);
+    REQUIRE_THAT(store.get_modulated(1), WithinAbs(2150.0, 0.001));
+
+    store.add_mod_offset(1, -25.0f);
+    REQUIRE_THAT(store.get_modulated(1), WithinAbs(2125.0, 0.001));
+
+    store.set_mod_offset(2, 0.75f);
+    store.set_mod_offset(999, 123.0f);
+    store.add_mod_offset(999, 456.0f);
+
+    store.reset_all_mod();
+    REQUIRE_THAT(store.get_modulated(1), WithinAbs(2000.0, 0.001));
+    REQUIRE_THAT(store.get_modulated(2), WithinAbs(1.0, 0.001));
+
+    store.set_value(1, 4000.0f);
+    store.set_value(2, 4.0f);
+    store.reset_all_to_defaults();
+    REQUIRE_THAT(store.get_value(1), WithinAbs(1000.0, 0.001));
+    REQUIRE_THAT(store.get_value(2), WithinAbs(1.0, 0.001));
+}
+
+TEST_CASE("StateStore exposes registration spans and gesture callbacks", "[state][store]") {
+    StateStore store;
+
+    store.begin_gesture(1);
+    store.end_gesture(1);
+
+    store.add_group({10, "Main", 0});
+    store.add_group({20, "Oscillator", 10});
+    store.add_parameter(make_param_info(1, "Gain", "dB", {-60.0f, 12.0f, 0.0f}));
+    store.add_parameter(make_param_info(2, "Mix", "%", {0.0f, 100.0f, 50.0f}));
+
+    auto params = store.all_params();
+    REQUIRE(params.size() == 2);
+    REQUIRE(params[0].id == 1);
+    REQUIRE(params[0].name == "Gain");
+    REQUIRE(params[1].unit == "%");
+
+    auto groups = store.all_groups();
+    REQUIRE(groups.size() == 2);
+    REQUIRE(groups[0].name == "Main");
+    REQUIRE(groups[1].parent_id == 10);
+
+    std::vector<ParamID> began;
+    std::vector<ParamID> ended;
+    store.set_gesture_callbacks(
+        [&](ParamID id) { began.push_back(id); },
+        [&](ParamID id) { ended.push_back(id); });
+
+    store.begin_gesture(2);
+    store.end_gesture(2);
+
+    REQUIRE(began == std::vector<ParamID>{2});
+    REQUIRE(ended == std::vector<ParamID>{2});
 }
