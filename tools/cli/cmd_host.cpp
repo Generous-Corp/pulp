@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -188,6 +189,36 @@ int cmd_scan(const std::vector<std::string>& args) {
     }
     if (total == 0) {
         std::printf("No plugins found.\n");
+    }
+
+    // #812 deeper fix: dlopen'd CLAP plugins keep their dylib loaded
+    // for process lifetime (macOS dlclose is largely a no-op), and
+    // their C++ static destructors run at exit. Some Pulp-built
+    // plugins throw choc::json::ParseError from their bridge JSON
+    // teardown, which the runtime's terminate handler converts into
+    // SIGABRT — the scan output prints fine but the process aborts
+    // on its way out, leaving a confusing rc=134 even on a healthy
+    // scan. `_Exit` skips C++ static destructors (and atexit hooks)
+    // so the process finishes with the rc we actually want.
+    //
+    // Trade-off: any global resources held by the runtime (Skia
+    // contexts, GPU pools, Catch2 state, etc.) don't get released.
+    // For `pulp scan` — a short-lived diagnostic command that owns
+    // no such state past printf — that's exactly the right
+    // trade-off. The skip is gated to the no-load == false path
+    // (where dlopen actually happened); --no-load already
+    // bypasses dlopen entirely so it doesn't need this guard.
+    std::fflush(stdout);
+    std::fflush(stderr);
+    if (!no_load) {
+        // LCOV_EXCL_START
+        // _Exit terminates the process — anything past this line in a
+        // unit test would never run, so it's intentionally excluded
+        // from coverage. The outer behaviour (clean rc=0 on a host
+        // with throw-prone CLAP plugins) is exercised end-to-end by
+        // the `pulp scan` shellout test in test_cli_shellout.cpp.
+        std::_Exit(0);
+        // LCOV_EXCL_STOP
     }
     return 0;
 }

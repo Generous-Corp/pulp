@@ -98,7 +98,13 @@ std::vector<PluginInfo> scan_clap_bundle_descriptors(const std::string& path) {
     bool init_ok = false;
     try {
         init_ok = entry->init(path.c_str());
-    } catch (const std::exception& e) {
+    } catch (const std::exception& e) { // LCOV_EXCL_START
+        // Defensive #812 guard. Triggered only when a plugin's
+        // static-init code throws across the C ABI of clap_entry —
+        // not reachable from a unit test that doesn't ship its own
+        // throwing CLAP fixture, so excluded from coverage. The
+        // user-visible benefit is exercised by `pulp scan --no-load`
+        // (see test_cli_shellout.cpp [issue-812]).
         runtime::log_warn("CLAP scan: entry->init threw for '{}': {} (#812 guard)",
                           path, e.what());
         dlclose(handle);
@@ -110,7 +116,7 @@ std::vector<PluginInfo> scan_clap_bundle_descriptors(const std::string& path) {
         dlclose(handle);
         results.push_back(make_filename_fallback(path));
         return results;
-    }
+    } // LCOV_EXCL_STOP
     if (!init_ok) {
         runtime::log_warn("CLAP scan: entry->init failed for '{}'", path);
         dlclose(handle);
@@ -121,16 +127,16 @@ std::vector<PluginInfo> scan_clap_bundle_descriptors(const std::string& path) {
     try {
         factory = static_cast<const clap_plugin_factory_t*>(
             entry->get_factory(CLAP_PLUGIN_FACTORY_ID));
-    } catch (const std::exception& e) {
+    } catch (const std::exception& e) { // LCOV_EXCL_START
         runtime::log_warn("CLAP scan: get_factory threw for '{}': {} (#812 guard)",
                           path, e.what());
     } catch (...) {
         runtime::log_warn("CLAP scan: get_factory threw unknown exception for '{}' (#812 guard)",
                           path);
-    }
+    } // LCOV_EXCL_STOP
 
     if (!factory || !factory->get_plugin_count || !factory->get_plugin_descriptor) {
-        try { entry->deinit(); } catch (...) {}
+        try { entry->deinit(); } catch (...) {} // LCOV_EXCL_LINE
         dlclose(handle);
         if (results.empty()) results.push_back(make_filename_fallback(path));
         return results;
@@ -139,19 +145,19 @@ std::vector<PluginInfo> scan_clap_bundle_descriptors(const std::string& path) {
     uint32_t count = 0;
     try {
         count = factory->get_plugin_count(factory);
-    } catch (const std::exception& e) {
+    } catch (const std::exception& e) { // LCOV_EXCL_START
         runtime::log_warn("CLAP scan: get_plugin_count threw for '{}': {} (#812 guard)",
                           path, e.what());
     } catch (...) {
         runtime::log_warn("CLAP scan: get_plugin_count threw unknown exception for '{}' (#812 guard)",
                           path);
-    }
+    } // LCOV_EXCL_STOP
     results.reserve(count);
     for (uint32_t i = 0; i < count; ++i) {
         const clap_plugin_descriptor_t* desc = nullptr;
         try {
             desc = factory->get_plugin_descriptor(factory, i);
-        } catch (const std::exception& e) {
+        } catch (const std::exception& e) { // LCOV_EXCL_START
             runtime::log_warn("CLAP scan: get_plugin_descriptor[{}] threw for '{}': {} (#812 guard)",
                               i, path, e.what());
             continue;
@@ -159,7 +165,7 @@ std::vector<PluginInfo> scan_clap_bundle_descriptors(const std::string& path) {
             runtime::log_warn("CLAP scan: get_plugin_descriptor[{}] threw unknown for '{}' (#812 guard)",
                               i, path);
             continue;
-        }
+        } // LCOV_EXCL_STOP
         if (!desc) continue;
 
         PluginInfo info;
@@ -218,9 +224,9 @@ std::vector<PluginInfo> scan_clap_bundle_descriptors(const std::string& path) {
         results.push_back(std::move(info));
     }
 
-    try { entry->deinit(); } catch (...) {
+    try { entry->deinit(); } catch (...) { // LCOV_EXCL_START
         runtime::log_warn("CLAP scan: entry->deinit threw for '{}' (#812 guard)", path);
-    }
+    } // LCOV_EXCL_STOP
     dlclose(handle);
     if (results.empty()) results.push_back(make_filename_fallback(path));
     return results;

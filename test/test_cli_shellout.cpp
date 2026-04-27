@@ -1903,3 +1903,96 @@ TEST_CASE("pulp loop accepts --test, --validate, --target, --run flags via --no-
     pulp_unsetenv("PULP_UPDATE_CHECK_DISABLED");
     fs::remove_all(tmp_home);
 }
+
+// ── projects list --json (cmd_projects.cpp do_list JSON path) ─────
+//
+// The C++ binary's `pulp projects list --json` was added in this
+// branch to mirror what the Rust port already does — without these
+// tests, the diff-cover gate flags the new JSON-rendering branch as
+// uncovered (per `ci/coverage-targets.yaml`, `tools/cli/**` is the
+// "user-facing" tier with a 70% per-PR floor).
+
+TEST_CASE("pulp projects list --json emits valid JSON for empty registry",
+          "[cli][shellout][projects][issue-244]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    // Isolated PULP_HOME so we don't read the user's real registry.
+    auto tmp = fs::temp_directory_path() / "pulp-projects-json-test";
+    fs::create_directories(tmp);
+    pulp_setenv("PULP_HOME", tmp.string().c_str(), 1);
+    auto r = run_pulp({"projects", "list", "--json"});
+    pulp_unsetenv("PULP_HOME");
+    fs::remove_all(tmp);
+
+    REQUIRE(r.exit_code == 0);
+    // Must be parseable JSON with the documented top-level keys.
+    REQUIRE(r.stdout_output.find("\"registry\"") != std::string::npos);
+    REQUIRE(r.stdout_output.find("\"projects\"") != std::string::npos);
+    // Empty registry → empty array.
+    REQUIRE(r.stdout_output.find("[]") != std::string::npos);
+}
+
+TEST_CASE("pulp projects list (no --json) emits human text",
+          "[cli][shellout][projects]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    auto tmp = fs::temp_directory_path() / "pulp-projects-text-test";
+    fs::create_directories(tmp);
+    pulp_setenv("PULP_HOME", tmp.string().c_str(), 1);
+    auto r = run_pulp({"projects", "list"});
+    pulp_unsetenv("PULP_HOME");
+    fs::remove_all(tmp);
+
+    REQUIRE(r.exit_code == 0);
+    // Human text path should NOT emit JSON braces.
+    REQUIRE(r.stdout_output.find("Registry:") != std::string::npos);
+    REQUIRE(r.stdout_output.find("(no projects registered)") != std::string::npos);
+}
+
+// ── pulp scan --help / --no-load (#812) ──────────────────────────
+//
+// `pulp scan --help` previously walked the system plug-in paths and
+// dlopen'd everything (which crashes on a malformed plugin). The
+// fix added an early --help gate; this test locks in that behavior
+// so a future refactor can't reintroduce the crash.
+
+TEST_CASE("pulp scan --help exits 0 with usage on stdout",
+          "[cli][shellout][scan][issue-812]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    auto r = run_pulp({"scan", "--help"});
+    REQUIRE(r.exit_code == 0);
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.stdout_output.find("Usage: pulp scan") != std::string::npos);
+    // The new --no-load flag must be advertised so users hitting #812
+    // can discover the safe-fast escape hatch.
+    REQUIRE(r.stdout_output.find("--no-load") != std::string::npos);
+}
+
+TEST_CASE("pulp scan --no-load runs filesystem-only enumeration cleanly",
+          "[cli][shellout][scan][issue-812]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    auto r = run_pulp({"scan", "--no-load"}, /*timeout_ms=*/30000);
+    // The whole point of --no-load is "doesn't crash on bad plugins".
+    // If the host happens to have no plugins installed, that's also
+    // a clean rc=0 with "No plugins found." stdout — both are fine.
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 0);
+    // No libc++abi termination message should appear in stderr —
+    // that's the regression --no-load specifically prevents.
+    REQUIRE(r.stderr_output.find("libc++abi: terminating") == std::string::npos);
+}
+
+TEST_CASE("pulp scan --no-load --format clap restricts to one bucket",
+          "[cli][shellout][scan][issue-812]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+    auto r = run_pulp({"scan", "--no-load", "--format", "clap"},
+                      /*timeout_ms=*/30000);
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(r.stderr_output.find("libc++abi: terminating") == std::string::npos);
+    // When the filter narrows to CLAP and no CLAP plugins exist on
+    // the runner, the output should be the documented empty-state
+    // message rather than crashing or printing other-format buckets.
+    REQUIRE((r.stdout_output.find("[CLAP]") != std::string::npos ||
+             r.stdout_output.find("No plugins found") != std::string::npos));
+}

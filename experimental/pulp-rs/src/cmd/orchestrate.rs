@@ -1281,4 +1281,141 @@ mod tests {
         .unwrap_err();
         assert!(matches!(err, CliError::BadUsage(_)));
     }
+
+    // ── #45 coverage uplift slice 12 — orchestrate parse + run_cmd ─
+
+    #[test]
+    fn parse_run_args_handles_no_args_returns_default() {
+        let r = parse_run_args(&[]);
+        assert!(r.target.is_none());
+        assert!(r.passthrough.is_empty());
+    }
+
+    #[test]
+    fn parse_run_args_drops_flag_tokens_before_dash_dash() {
+        // Tokens that look like flags BEFORE `--` are dropped silently
+        // (matches C++ permissive parse). Only the first non-flag
+        // positional becomes the target; everything after `--` is
+        // passthrough.
+        let r = parse_run_args(&[
+            "--build-dir".to_owned(),
+            "build".to_owned(),
+            "--".to_owned(),
+            "--user-flag".to_owned(),
+            "argv".to_owned(),
+        ]);
+        // First non-flag positional → target.
+        assert_eq!(r.target.as_deref(), Some("build"));
+        // Everything after `--` → passthrough verbatim.
+        assert_eq!(r.passthrough, vec!["--user-flag", "argv"]);
+    }
+
+    #[test]
+    fn parse_run_args_first_positional_wins() {
+        let r = parse_run_args(&[
+            "first".to_owned(),
+            "second".to_owned(),
+            "third".to_owned(),
+        ]);
+        // C++ behavior: first positional wins; the rest are dropped
+        // unless after `--`.
+        assert_eq!(r.target.as_deref(), Some("first"));
+        assert!(r.passthrough.is_empty());
+    }
+
+    #[test]
+    fn parse_cache_sub_no_args_returns_help() {
+        assert!(matches!(parse_cache_sub(&[]).unwrap(), CacheSub::Help));
+    }
+
+    #[test]
+    fn parse_cache_sub_help_aliases() {
+        for h in &["help", "--help", "-h"] {
+            assert!(matches!(
+                parse_cache_sub(&[(*h).to_owned()]).unwrap(),
+                CacheSub::Help
+            ));
+        }
+    }
+
+    #[test]
+    fn parse_cache_sub_status_clean() {
+        assert!(matches!(
+            parse_cache_sub(&["status".to_owned()]).unwrap(),
+            CacheSub::Status
+        ));
+        assert!(matches!(
+            parse_cache_sub(&["clean".to_owned()]).unwrap(),
+            CacheSub::Clean
+        ));
+    }
+
+    #[test]
+    fn parse_cache_sub_fetch_with_and_without_asset() {
+        match parse_cache_sub(&["fetch".to_owned(), "skia".to_owned()]).unwrap() {
+            CacheSub::Fetch(a) => assert_eq!(a, "skia"),
+            other => panic!("expected Fetch, got {other:?}"),
+        }
+        match parse_cache_sub(&["fetch".to_owned()]).unwrap() {
+            CacheSub::Fetch(a) => assert!(a.is_empty()),
+            other => panic!("expected Fetch with empty asset, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_cache_sub_unknown_errors() {
+        let err = parse_cache_sub(&["nonsense".to_owned()]).unwrap_err();
+        assert!(matches!(err, CliError::UnknownSubcommand));
+    }
+
+    #[test]
+    fn parse_build_args_default_is_empty() {
+        let p = parse_build_args(&[]);
+        assert!(!p.test);
+        assert!(!p.watch);
+        assert!(p.passthrough.is_empty());
+    }
+
+    #[test]
+    fn count_sources_returns_zero_for_empty_root() {
+        let td = tempfile::tempdir().unwrap();
+        let (cpp, hpp) = count_sources(td.path());
+        assert_eq!(cpp, 0);
+        assert_eq!(hpp, 0);
+    }
+
+    #[test]
+    fn count_sources_finds_cpp_and_hpp_files() {
+        let td = tempfile::tempdir().unwrap();
+        std::fs::write(td.path().join("a.cpp"), "").unwrap();
+        std::fs::write(td.path().join("b.cc"), "").unwrap();
+        std::fs::write(td.path().join("c.h"), "").unwrap();
+        std::fs::write(td.path().join("d.hpp"), "").unwrap();
+        std::fs::write(td.path().join("ignored.txt"), "").unwrap();
+        let (cpp, hpp) = count_sources(td.path());
+        // Both .cpp + .cc should count toward "cpp"; .h + .hpp toward
+        // "hpp". The exact split isn't part of the contract — what
+        // matters is that the function returns positive counts and
+        // doesn't include unrelated extensions.
+        assert!(cpp >= 1);
+        assert!(hpp >= 1);
+        assert!(cpp + hpp <= 4, "should have ignored .txt");
+    }
+
+    #[test]
+    fn count_tests_returns_zero_for_empty_dir() {
+        let td = tempfile::tempdir().unwrap();
+        assert_eq!(count_tests(td.path()), 0);
+    }
+
+    #[test]
+    fn count_tests_counts_test_prefixed_files() {
+        let td = tempfile::tempdir().unwrap();
+        std::fs::write(td.path().join("test_one.cpp"), "").unwrap();
+        std::fs::write(td.path().join("test_two.cpp"), "").unwrap();
+        std::fs::write(td.path().join("not_a_test.cpp"), "").unwrap();
+        // Only files matching the `test_*` convention should count.
+        let n = count_tests(td.path());
+        assert!(n >= 2, "expected at least 2 test_* files, got {n}");
+    }
 }
