@@ -1157,17 +1157,26 @@ add_executable(pulp-test-view test_view.cpp)
 target_link_libraries(pulp-test-view PRIVATE pulp::view Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-view)
 
+# DirtyTracker and GpuGraphRenderer are header-only helpers; keep their pure
+# tests available in GPU-off sanitizer and local coverage builds.
+add_executable(pulp-test-dirty-tracker test_dirty_tracker.cpp)
+target_include_directories(pulp-test-dirty-tracker PRIVATE
+    ${CMAKE_SOURCE_DIR}/core/render/include)
+target_link_libraries(pulp-test-dirty-tracker PRIVATE Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-dirty-tracker)
+
+add_executable(pulp-test-gpu-graph test_gpu_graph.cpp)
+target_include_directories(pulp-test-gpu-graph PRIVATE
+    ${CMAKE_SOURCE_DIR}/core/render/include)
+target_link_libraries(pulp-test-gpu-graph PRIVATE Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-gpu-graph)
+
 # GPU-stack tests — pulp::render only exists when PULP_ENABLE_GPU=ON.
 # The sanitizer matrix builds with GPU off; without the guard configure
 # fails with "Target ... links to: pulp::render but the target was not
 # found". The earlier GPU-test block (test_gpu_surface, test_skia_surface,
 # test_gpu_compute) already gates on the same condition.
 if(PULP_ENABLE_GPU)
-    # Dirty region tracker tests
-    add_executable(pulp-test-dirty-tracker test_dirty_tracker.cpp)
-    target_link_libraries(pulp-test-dirty-tracker PRIVATE pulp::render Catch2::Catch2WithMain)
-    catch_discover_tests(pulp-test-dirty-tracker)
-
     # Rendering integration tests (effects, dimensions, text direction, render passes)
     add_executable(pulp-test-rendering-integration test_rendering_integration.cpp)
     target_link_libraries(pulp-test-rendering-integration PRIVATE pulp::view pulp::render pulp::state Catch2::Catch2WithMain)
@@ -1177,11 +1186,6 @@ if(PULP_ENABLE_GPU)
     add_executable(pulp-test-draw-batcher test_draw_batcher.cpp)
     target_link_libraries(pulp-test-draw-batcher PRIVATE pulp::render Catch2::Catch2WithMain)
     catch_discover_tests(pulp-test-draw-batcher)
-
-    # GPU graph renderer tests
-    add_executable(pulp-test-gpu-graph test_gpu_graph.cpp)
-    target_link_libraries(pulp-test-gpu-graph PRIVATE pulp::render Catch2::Catch2WithMain)
-    catch_discover_tests(pulp-test-gpu-graph)
 
 endif()
 

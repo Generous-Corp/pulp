@@ -1,7 +1,8 @@
 #pragma once
 
-#include <vector>
 #include <cstddef>
+#include <limits>
+#include <vector>
 
 namespace pulp::render {
 
@@ -12,6 +13,10 @@ class GpuGraphRenderer {
 public:
     /// Update the data buffer. Thread-safe when used with TripleBuffer.
     void set_data(const float* data, size_t count) {
+        if (data == nullptr || count == 0) {
+            data_.clear();
+            return;
+        }
         data_.assign(data, data + count);
     }
 
@@ -48,6 +53,13 @@ class GpuHeatMapRenderer {
 public:
     /// Set the data grid (row-major, width x height).
     void set_data(const float* data, size_t width, size_t height) {
+        if (data == nullptr || width == 0 || height == 0 ||
+            height > std::numeric_limits<size_t>::max() / width) {
+            width_ = 0;
+            height_ = 0;
+            data_.clear();
+            return;
+        }
         width_ = width;
         height_ = height;
         data_.assign(data, data + width * height);
@@ -78,6 +90,10 @@ private:
 class GpuBarRenderer {
 public:
     void set_data(const float* data, size_t count) {
+        if (data == nullptr || count == 0) {
+            data_.clear();
+            return;
+        }
         data_.assign(data, data + count);
     }
 

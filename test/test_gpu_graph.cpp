@@ -2,6 +2,8 @@
 #include <catch2/catch_approx.hpp>
 #include <pulp/render/gpu_graph.hpp>
 
+#include <limits>
+
 using namespace pulp::render;
 
 TEST_CASE("GpuGraphRenderer basic usage", "[render][gpu-graph]") {
@@ -65,6 +67,18 @@ TEST_CASE("GpuGraphRenderer raw-pointer set_data overload - issue-646",
     REQUIRE(g.count() == 0);
 }
 
+TEST_CASE("GpuGraphRenderer null data clears without pointer arithmetic - issue-646",
+          "[render][gpu-graph][issue-646]") {
+    GpuGraphRenderer g;
+    float data[] = {0.25f, 0.5f};
+    g.set_data(data, 2);
+    REQUIRE_FALSE(g.empty());
+
+    g.set_data(nullptr, 8);
+    REQUIRE(g.empty());
+    REQUIRE(g.count() == 0);
+}
+
 TEST_CASE("GpuGraphRenderer defaults match documented values - issue-646",
           "[render][gpu-graph][issue-646]") {
     GpuGraphRenderer g;
@@ -92,6 +106,26 @@ TEST_CASE("GpuHeatMapRenderer range set/get - issue-646",
     REQUIRE(h.height() == 0);
 }
 
+TEST_CASE("GpuHeatMapRenderer rejects null and overflowing grids - issue-646",
+          "[render][gpu-graph][issue-646]") {
+    GpuHeatMapRenderer h;
+    float data[] = {0.1f, 0.2f, 0.3f, 0.4f};
+    h.set_data(data, 2, 2);
+    REQUIRE_FALSE(h.empty());
+    REQUIRE(h.width() == 2);
+    REQUIRE(h.height() == 2);
+
+    h.set_data(nullptr, 2, 2);
+    REQUIRE(h.empty());
+    REQUIRE(h.width() == 0);
+    REQUIRE(h.height() == 0);
+
+    h.set_data(data, std::numeric_limits<size_t>::max(), 2);
+    REQUIRE(h.empty());
+    REQUIRE(h.width() == 0);
+    REQUIRE(h.height() == 0);
+}
+
 TEST_CASE("GpuBarRenderer gap + data accessors - issue-646",
           "[render][gpu-graph][issue-646]") {
     GpuBarRenderer b;
@@ -106,4 +140,22 @@ TEST_CASE("GpuBarRenderer gap + data accessors - issue-646",
     b.set_data(data, 2);
     REQUIRE(b.data().size() == 2);
     REQUIRE(b.data()[1] == Catch::Approx(0.9f));
+}
+
+TEST_CASE("GpuBarRenderer null and zero data clear existing bars - issue-646",
+          "[render][gpu-graph][issue-646]") {
+    GpuBarRenderer b;
+    float data[] = {0.2f, 0.4f, 0.8f};
+    b.set_data(data, 3);
+    REQUIRE(b.count() == 3);
+
+    b.set_data(nullptr, 3);
+    REQUIRE(b.count() == 0);
+    REQUIRE(b.data().empty());
+
+    b.set_data(data, 3);
+    REQUIRE(b.count() == 3);
+    b.set_data(data, 0);
+    REQUIRE(b.count() == 0);
+    REQUIRE(b.data().empty());
 }
