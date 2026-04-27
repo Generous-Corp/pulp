@@ -170,10 +170,14 @@ flags:
       - core/**/wasapi/
     carryforward: true
 
-  # Surface flags (3) — non-core but first-party:
+  # Surface flags (4) — non-core but first-party:
   cli:
     paths:
       - tools/cli/
+    carryforward: true
+  inspect:
+    paths:
+      - inspect/
     carryforward: true
   ship:
     paths:
@@ -300,10 +304,13 @@ component_management:
         - "core/**/win/**"
         - "core/**/windows/**"
         - "core/**/wasapi/**"
-    # Surface (3)
+    # Surface (4)
     - component_id: cli
       name: cli
       paths: ["tools/cli/**"]
+    - component_id: inspect
+      name: inspect
+      paths: ["inspect/**"]
     - component_id: ship
       name: ship
       paths: ["ship/**"]

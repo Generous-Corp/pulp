@@ -64,7 +64,9 @@ at the repo root; the dashboard is the source of truth for the current
 set of names. Subsystem / platform / surface slicing happens via the
 `component_management` block (path-globbed from a single upload).
 Per-OS slicing happens via upload flags — one upload per operating
-system in the matrix.
+system in the matrix. First-party non-core surfaces are represented as
+their own components too; for example, `inspect/**` appears under the
+`inspect` surface rather than falling through as uncategorized code.
 
 ## How to run coverage locally
 

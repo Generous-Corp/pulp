@@ -7,9 +7,13 @@ of classify_file / aggregate / render so a regression fails fast.
 
 from __future__ import annotations
 
+import pathlib
 import unittest
 
 import coverage_tier_check as ctc
+
+REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
+TARGETS = REPO_ROOT / "ci" / "coverage-targets.yaml"
 
 
 TIERS = [
@@ -48,6 +52,12 @@ class ClassifyTests(unittest.TestCase):
         # the global 75% gate applies instead of a per-tier rule.
         self.assertIsNone(ctc.classify_file("docs/guides/coverage.md", TIERS))
         self.assertIsNone(ctc.classify_file("README.md", TIERS))
+
+    def test_live_targets_classify_inspect_as_user_facing(self) -> None:
+        tiers = ctc.load_targets(TARGETS)
+        tier = ctc.classify_file("inspect/src/inspector_server.cpp", tiers)
+        self.assertIsNotNone(tier)
+        self.assertEqual(tier.name, "user-facing")
 
 
 class AggregateTests(unittest.TestCase):

@@ -37,7 +37,7 @@ EXPECTED_NON_CORE_COMPONENT_IDS = {
     # platforms
     "android", "apple", "linux", "windows",
     # surfaces
-    "cli", "ship", "tools",
+    "cli", "inspect", "ship", "tools",
 }
 
 # Upload-axis flags are intentionally not components: they describe
@@ -178,6 +178,19 @@ class CodecovYamlStructure(unittest.TestCase):
             any("/android/" in path for path in android_paths),
             "android platform axis must cover Android source paths",
         )
+
+    def test_inspect_surface_is_first_class(self):
+        # inspect/ is a first-party C++ surface and is included in the
+        # native coverage object list, so it must not fall through as an
+        # uncategorized Codecov path.
+        flags = self.doc["flags"]
+        components = {
+            entry["component_id"]: set(entry.get("paths", []))
+            for entry in self.doc["component_management"]["individual_components"]
+        }
+
+        self.assertEqual(set(flags["inspect"]["paths"]), {"inspect/"})
+        self.assertEqual(components["inspect"], {"inspect/**"})
 
 
 if __name__ == "__main__":
