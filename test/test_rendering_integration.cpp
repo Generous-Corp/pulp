@@ -311,6 +311,52 @@ TEST_CASE("KTX2 decoder validates magic bytes", "[render][ktx2]") {
     REQUIRE_FALSE(result.success);
 }
 
+TEST_CASE("KTX2 decoder rejects incomplete headers - issue-646",
+          "[render][ktx2][issue-646]") {
+    REQUIRE_FALSE(render::decode_ktx2(nullptr, 0).success);
+
+    uint8_t short_input[] = {0xAB, 0x4B, 0x54, 0x58};
+    auto short_result = render::decode_ktx2(short_input, sizeof(short_input));
+    REQUIRE_FALSE(short_result.success);
+
+    uint8_t magic_only[] = {
+        0xAB, 0x4B, 0x54, 0x58, 0x20, 0x32, 0x30, 0xBB,
+        0x0D, 0x0A, 0x1A, 0x0A
+    };
+    auto magic_result = render::decode_ktx2(magic_only, sizeof(magic_only));
+    REQUIRE_FALSE(magic_result.success);
+    REQUIRE(magic_result.width == 0);
+    REQUIRE(magic_result.height == 0);
+}
+
+TEST_CASE("KTX2 decoder parses a minimal header - issue-646",
+          "[render][ktx2][issue-646]") {
+    uint8_t header[80] = {
+        0xAB, 0x4B, 0x54, 0x58, 0x20, 0x32, 0x30, 0xBB,
+        0x0D, 0x0A, 0x1A, 0x0A
+    };
+
+    auto write_u32 = [&](size_t offset, uint32_t value) {
+        header[offset] = static_cast<uint8_t>(value & 0xFFu);
+        header[offset + 1] = static_cast<uint8_t>((value >> 8) & 0xFFu);
+        header[offset + 2] = static_cast<uint8_t>((value >> 16) & 0xFFu);
+        header[offset + 3] = static_cast<uint8_t>((value >> 24) & 0xFFu);
+    };
+
+    write_u32(20, 64);  // pixelWidth
+    write_u32(24, 32);  // pixelHeight
+    write_u32(32, 0);   // levelCount clamps to one mip level
+
+    auto result = render::decode_ktx2(header, sizeof(header));
+    REQUIRE(result.success);
+    REQUIRE(result.width == 64);
+    REQUIRE(result.height == 32);
+    REQUIRE(result.mip_levels == 1);
+    REQUIRE_FALSE(result.format.empty());
+    REQUIRE(result.pixels.empty());
+    REQUIRE_FALSE(result.compressed);
+}
+
 TEST_CASE("KTX2 optimal_gpu_format returns non-empty", "[render][ktx2]") {
     auto fmt = render::optimal_gpu_format();
     REQUIRE_FALSE(fmt.empty());
