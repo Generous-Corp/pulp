@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-26 20:04 EDT
+Last reviewed: 2026-04-26 20:22 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -191,6 +191,10 @@ Open Phase 3 PRs:
   `feature/events-loop-coverage-642`, head `ee3894cb`; opened from
   `main` at `87ef6d90`. This tranche also uses the GitHub/Namespace
   path while the SSH `windows` target remains unreachable.
+- `#835` CLI ship command validation coverage for `#643`, branch
+  `feature/cli-ship-coverage-643`, head `6c1e5a4b`; opened from
+  `main` at `5b8e4529`. This tranche also uses the GitHub/Namespace
+  path while the SSH `windows` target remains unreachable.
 
 Local Phase 3 draft worktrees:
 
@@ -328,6 +332,21 @@ Local Phase 3 draft worktrees:
   single failed cloud case passed `3` assertions in `1` case after the
   fix, focused CTest `pulp pr` passed `7/7`, `git diff --check`,
   skill-sync report, and version-bump report.
+- `#643` CLI ship command validation worktree
+  `/Users/danielraffel/Code/pulp-cli-ship-coverage-643`, branch
+  `feature/cli-ship-coverage-643`, commit `6c1e5a4b`; open as PR
+  `#835`.
+  Scope: test-only `pulp ship` shellout coverage for fake project roots
+  with missing build-cache guidance, Android signing/package/check
+  validation before external tools run, appcast feed generation, and
+  remote `--sign-key` rejection without real signing material. Local
+  validation after rebasing onto `5b8e4529`: no-GPU/no-examples
+  configure, `pulp-test-cli-ship-shellout` build, direct `[issue-643]`
+  run passed `3` assertions in `3` cases, full binary passed `10`
+  assertions in `10` cases, focused CTest `pulp ship` passed `10/10`,
+  `git diff --check HEAD~1..HEAD`, `git diff --check`, skill-sync
+  report, and version-bump report with `Version-Bump: sdk=skip` for
+  the test-only coverage tranche.
 - `#645` MPE tracker worktree
   `/Users/danielraffel/Code/pulp-mpe-tracker-coverage-645`, branch
   `feature/mpe-tracker-coverage-645`, commit `b7c72711`; merged via PR
@@ -660,7 +679,7 @@ Open supporting PR:
   and `#833` opened, and `#829` was rebased onto `87ef6d90` to pick up
   the merged Android SDK discovery fix, and `#832` was rebased/repaired
   for the Windows fast-exit command, and `#834` opened, and `#828`
-  merged, and remains docs-only.
+  merged, and `#835` opened, and remains docs-only.
 
 Local environment note:
 
@@ -697,10 +716,13 @@ Next recovery actions:
 7. Monitor `#834` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-events-loop-coverage-642`, patch,
    validate locally, and push with lease.
-8. If any open Phase 3 PR is green but GitHub reports it behind `main`,
+8. Monitor `#835` cloud checks; if a required lane fails, debug in
+   `/Users/danielraffel/Code/pulp-cli-ship-coverage-643`, patch,
+   validate locally, and push with lease.
+9. If any open Phase 3 PR is green but GitHub reports it behind `main`,
    rebase that branch onto `origin/main`, push with lease, and let
    checks rerun.
-9. Continue Phase 3 from the tranche issues below, prioritizing
+10. Continue Phase 3 from the tranche issues below, prioritizing
    represented high-miss files over adding new perimeter lanes.
 
 ## Phase 1 corrected baseline
