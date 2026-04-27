@@ -176,6 +176,28 @@ TEST_CASE("audio model activate rejects unknown or uninstalled models", "[audio]
     REQUIRE(missing.error.find("not installed") != std::string::npos);
 }
 
+TEST_CASE("audio model activate rejects installed metadata with missing checkpoint", "[audio][tools]") {
+    TempDir temp;
+    auto checkpoint = temp.path / "models" / "missing-clap.pt";
+    write_text(temp.path / "audio" / "models" / "clap_music_audioset_v1.json", R"JSON({
+  "model_id": "clap_music_audioset_v1",
+  "backend": "clap",
+  "checkpoint_ref": "hf://lukewys/laion_clap/music.pt",
+  "resolved_checkpoint_path": ")JSON" + checkpoint.generic_string() + R"JSON("
+}
+)JSON");
+
+    auto list = list_models(temp.path);
+    REQUIRE(list.error.empty());
+    REQUIRE(list.models.size() == 1);
+    REQUIRE(list.models[0].status == "missing_checkpoint");
+    REQUIRE_FALSE(list.models[0].resolved_checkpoint_path.empty());
+
+    auto activation = activate_model("clap_music_audioset_v1", temp.path);
+    REQUIRE_FALSE(activation.ok);
+    REQUIRE(activation.error.find("checkpoint does not exist") != std::string::npos);
+}
+
 TEST_CASE("excerpt bundle reader summarizes manifest and ranked results", "[audio][tools]") {
     TempDir temp;
     auto bundle = temp.path / "bundle";
