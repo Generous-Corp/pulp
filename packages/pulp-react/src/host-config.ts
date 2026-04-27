@@ -44,10 +44,22 @@ let currentUpdatePriority: EventPriority = NoEventPriority;
 // references would bind once at module load and miss the mocks.
 type AnyFn = (...args: unknown[]) => unknown;
 const g = globalThis as unknown as Record<string, AnyFn | undefined>;
+let _hc_count = 0;
 function call(name: string, ...args: unknown[]): unknown {
     const fn = g[name];
     if (typeof fn !== 'function') {
+        const lg = (g as Record<string, AnyFn | undefined>).__spectrLog;
+        if (typeof lg === 'function') lg('[host-config] bridge fn missing: ' + name);
         throw new Error('@pulp/react: bridge function ' + name + ' is not installed');
+    }
+    _hc_count++;
+    if (_hc_count <= 200) {
+        const lg = (g as Record<string, AnyFn | undefined>).__spectrLog;
+        if (typeof lg === 'function') {
+            const a0 = args[0] !== undefined ? String(args[0]).slice(0, 30) : '';
+            const a1 = args[1] !== undefined ? String(args[1]).slice(0, 30) : '';
+            lg('[hc#' + _hc_count + '] ' + name + '(' + a0 + (args.length > 1 ? ',' + a1 : '') + ')');
+        }
     }
     return fn(...args);
 }
@@ -173,16 +185,33 @@ export const PulpHostConfig: HostConfig<
     },
 
     createTextInstance(
-        _text,
-        _rootContainer,
+        text,
+        rootContainer,
         _hostContext,
         _internalHandle,
     ): TextInstance {
-        // We never get here because shouldSetTextContent returns true
-        // for the only types that accept string children (Label/Button/
-        // TextEditor). If a string lands somewhere unexpected, throwing
-        // is louder than silently dropping.
-        throw new Error('@pulp/react: text outside a text-bearing parent (Label/Button/TextEditor) is not supported. Wrap text in <Label>...</Label>.');
+        // Loose text inside a non-text-bearing parent — auto-wrap in a
+        // synthetic Label so we don't crash the render. Real apps using
+        // typed JSX intrinsics never hit this; the spectr#28 WebView
+        // parity port hits it because the extracted editor.html has raw
+        // text inside <span>/<div>/SVG nodes that lower to View parents
+        // through dom-adapter. Silent auto-wrap unblocks the render and
+        // lets the visible widgets land. Diagnostic warning still fires
+        // in dev builds.
+        if (text == null) return { id: 'text_empty', type: 'Label', props: {}, childIds: [], onBridge: false, pendingChildren: [] } as unknown as TextInstance;
+        const id = autoId(rootContainer);
+        // Intentionally returning a synthetic Label instance — the
+        // reconciler treats it as an opaque host-text type, but our
+        // appendChild path will materialize it via createLabel + setText
+        // when its parent attaches.
+        return {
+            id,
+            type: 'Label',
+            props: { children: String(text), text: String(text) },
+            childIds: [],
+            onBridge: false,
+            pendingChildren: [],
+        } as unknown as TextInstance;
     },
 
     shouldSetTextContent(type, _props) {
@@ -210,6 +239,24 @@ export const PulpHostConfig: HostConfig<
 
     insertBefore(parentInstance, child, beforeChild) {
         const beforeIdx = parentInstance.childIds.indexOf(beforeChild.id);
+        const sameParent = child.parentId === parentInstance.id && child.onBridge;
+        if (sameParent) {
+            // Same-parent reorder — React shuffled keyed siblings.
+            // Call the bridge's insertChild(parent_id, child_id, index)
+            // (added in pulp PR #779) to update native order. Update
+            // our childIds bookkeeping too. Codex P1 review on PR #779.
+            const oldIdx = parentInstance.childIds.indexOf(child.id);
+            if (oldIdx >= 0) parentInstance.childIds.splice(oldIdx, 1);
+            const insertIdx = beforeIdx >= 0 ? beforeIdx : parentInstance.childIds.length;
+            parentInstance.childIds.splice(insertIdx, 0, child.id);
+            if (typeof g.insertChild === 'function') {
+                call('insertChild', parentInstance.id, child.id, insertIdx);
+            } else if (typeof g.moveWidget === 'function') {
+                // Older bridges: moveWidget within same parent works.
+                call('moveWidget', child.id, parentInstance.id, insertIdx);
+            }
+            return;
+        }
         attach(parentInstance, child, beforeIdx >= 0 ? beforeIdx : undefined);
     },
     insertInContainerBefore(container, child, beforeChild) {

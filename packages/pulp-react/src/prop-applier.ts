@@ -15,10 +15,32 @@ import type { PulpInstance } from './types.js';
 // matching pattern.
 type AnyFn = (...args: unknown[]) => unknown;
 const g = globalThis as unknown as Record<string, AnyFn | undefined>;
+let _pa_count = 0;
 function call(name: string, ...args: unknown[]): void {
     const fn = g[name];
     if (typeof fn !== 'function') return; // optional bridge fns are fine to skip
+    _pa_count++;
+    if (_pa_count <= 100) {
+        const lg = (g as Record<string, AnyFn | undefined>).__spectrLog;
+        if (typeof lg === 'function') {
+            const a0 = args[0] !== undefined ? String(args[0]).slice(0, 25) : '';
+            const a1 = args[1] !== undefined ? String(args[1]).slice(0, 25) : '';
+            const a2 = args[2] !== undefined ? String(args[2]).slice(0, 25) : '';
+            lg('[pa#' + _pa_count + '] ' + name + '(' + a0 + ',' + a1 + (args.length > 2 ? ',' + a2 : '') + ')');
+        }
+    }
     fn(...args);
+}
+
+let _aap_count = 0;
+function logApply(stage: string, id: string, type: string, propCount: number): void {
+    _aap_count++;
+    if (_aap_count <= 60) {
+        const lg = (g as Record<string, AnyFn | undefined>).__spectrLog;
+        if (typeof lg === 'function') {
+            lg('[applyAll#' + _aap_count + '] ' + stage + ' ' + type + '/' + id + ' props=' + propCount);
+        }
+    }
 }
 
 /// Returns true if the prop is purely React-internal (not a bridge setter).
@@ -117,6 +139,7 @@ function applyOne(id: string, type: string, key: string, value: unknown): void {
         case 'left':         return call('setLeft', id, value as number);
         case 'right':        return call('setRight', id, value as number);
         case 'bottom':       return call('setBottom', id, value as number);
+        case 'zIndex':       return call('setZIndex', id, value as number);
 
         // Text
         case 'text':       return call('setText', id, String(value));
@@ -131,7 +154,15 @@ function applyOne(id: string, type: string, key: string, value: unknown): void {
             if (type === 'Waveform') return call('setWaveformData', id, value as number[] | Float32Array);
             return;
         case 'level':    return call('setMeterLevel', id, value as number);
-        case 'value':    return call('setValue', id, value as number);
+        case 'value':
+            // Type-aware routing — bridge has separate setters per
+            // widget type. Codex P2 review on PR #779: setValue only
+            // handles knob/fader/toggle/checkbox; Progress wants
+            // setProgress, Spectrum/Waveform want setSpectrumData /
+            // setWaveformData (handled via 'data' prop already).
+            if (type === 'Progress')   return call('setProgress', id, value as number);
+            if (type === 'Meter')      return call('setMeterLevel', id, value as number);
+            return call('setValue', id, value as number);
 
         default:
             // Unknown prop — silently ignore. We could warn here in DEV
@@ -145,6 +176,7 @@ function applyOne(id: string, type: string, key: string, value: unknown): void {
 /// appendChild after the instance lands on the bridge.
 export function applyAllProps(instance: PulpInstance): void {
     const { id, type, props } = instance;
+    logApply('applyAll', id, type, Object.keys(props).length);
     for (const key of Object.keys(props)) {
         if (isReactInternal(key)) continue;
         if (key === 'children') continue;  // text children handled by caller
