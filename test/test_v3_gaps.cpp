@@ -277,8 +277,36 @@ TEST_CASE("HostType detect returns something", "[format][host]") {
 
 TEST_CASE("HostType names", "[format][host]") {
     REQUIRE(pulp::format::host_type_name(pulp::format::HostType::LogicPro) == "Logic Pro");
+    REQUIRE(pulp::format::host_type_name(pulp::format::HostType::GarageBand) == "GarageBand");
+    REQUIRE(pulp::format::host_type_name(pulp::format::HostType::AbletonLive) == "Ableton Live");
     REQUIRE(pulp::format::host_type_name(pulp::format::HostType::Reaper) == "REAPER");
+    REQUIRE(pulp::format::host_type_name(pulp::format::HostType::ProTools) == "Pro Tools");
+    REQUIRE(pulp::format::host_type_name(pulp::format::HostType::Cubase) == "Cubase");
+    REQUIRE(pulp::format::host_type_name(pulp::format::HostType::Nuendo) == "Nuendo");
+    REQUIRE(pulp::format::host_type_name(pulp::format::HostType::StudioOne) == "Studio One");
+    REQUIRE(pulp::format::host_type_name(pulp::format::HostType::FLStudio) == "FL Studio");
+    REQUIRE(pulp::format::host_type_name(pulp::format::HostType::Bitwig) == "Bitwig Studio");
+    REQUIRE(pulp::format::host_type_name(pulp::format::HostType::Maschine) == "Maschine");
+    REQUIRE(pulp::format::host_type_name(pulp::format::HostType::AudacityTenacity) == "Audacity/Tenacity");
+    REQUIRE(pulp::format::host_type_name(pulp::format::HostType::Ardour) == "Ardour");
+    REQUIRE(pulp::format::host_type_name(pulp::format::HostType::Standalone) == "Pulp Standalone");
+    REQUIRE(pulp::format::host_type_name(pulp::format::HostType::Other) == "Other");
     REQUIRE(pulp::format::host_type_name(pulp::format::HostType::Unknown) == "Unknown");
+    REQUIRE(pulp::format::host_type_name(static_cast<pulp::format::HostType>(999)) == "Unknown");
+}
+
+TEST_CASE("HostType capability policy exceptions", "[format][host]") {
+    using pulp::format::HostType;
+
+    REQUIRE_FALSE(pulp::format::host_supports_resize(HostType::GarageBand));
+    REQUIRE_FALSE(pulp::format::host_supports_resize(HostType::ProTools));
+    REQUIRE(pulp::format::host_supports_resize(HostType::LogicPro));
+    REQUIRE(pulp::format::host_supports_resize(HostType::Unknown));
+
+    REQUIRE_FALSE(pulp::format::host_supports_sidechain(HostType::GarageBand));
+    REQUIRE_FALSE(pulp::format::host_supports_sidechain(HostType::AudacityTenacity));
+    REQUIRE(pulp::format::host_supports_sidechain(HostType::ProTools));
+    REQUIRE(pulp::format::host_supports_sidechain(HostType::Unknown));
 }
 
 // ── Primes ──────────────────────────────────────────────────────────────
