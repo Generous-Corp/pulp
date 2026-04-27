@@ -501,7 +501,16 @@ TEST_CASE("cli common config helpers honor PULP_HOME and project-dir overrides",
 
 TEST_CASE("cli common format, AAX, quoting, and fuzzy helpers stay deterministic",
           "[cli][common][issue-643]") {
+    // shell_quote is platform-divergent (#776): POSIX escapes both `\`
+    // and `"`; Windows uses MSVCRT-correct escaping (backslashes are
+    // literal unless they precede `"`). Input chars: `a b"c\d`.
+#ifdef _WIN32
+    // Windows: `\` is literal, only `"` is escaped (with one preceding `\`).
+    REQUIRE(shell_quote(std::string("a b\"c\\d")) == "\"a b\\\"c\\d\"");
+#else
+    // POSIX: both `\` and `"` are backslash-escaped.
     REQUIRE(shell_quote(std::string("a b\"c\\d")) == "\"a b\\\"c\\\\d\"");
+#endif
     REQUIRE(platform_executable("tool").filename().string().find("tool") == 0);
 
     REQUIRE(default_create_formats({}, "app") == "Standalone");
