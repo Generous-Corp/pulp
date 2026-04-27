@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-26 21:15 EDT
+Last reviewed: 2026-04-26 21:17 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -66,7 +66,7 @@ Finish line:
 ## Current live state
 
 Latest complete Codecov `main` report observed while updating this doc
-(`main` head `bdc406cc` has a newer Coverage run queued):
+(`main` head `d02c9ec9` has a newer Coverage run queued):
 
 - commit: `5b8e4529cfc553fd98b65f265ed1e9c0487b3d66`
 - workflow: Coverage run `24970413173`, completed successfully
@@ -160,6 +160,7 @@ Merged after the Phase 1 closeout / `#723` baseline:
 - `#831` signal utility helper edge coverage -> `b5e7a463`
 - `#836` CLI sync checker Python tooling coverage -> `6ef8ca8b`
 - `#837` package registry validation tools coverage -> `bdc406cc`
+- `#830` RPN parser edge coverage -> `d02c9ec9`
 
 Open Phase 3 PRs:
 
@@ -169,10 +170,6 @@ Open Phase 3 PRs:
   exposed the already-fixed Android SDK discovery regression from the
   stale base. This tranche also uses the GitHub/Namespace path while the
   SSH `windows` target remains unreachable.
-- `#830` RPN parser edge coverage for `#645`, branch
-  `feature/midi-rpn-coverage-645`, head `d1edf1e1`; opened from `main`
-  at `d0262a1b`. This tranche also uses the GitHub/Namespace path while
-  the SSH `windows` target remains unreachable.
 - `#832` platform child-process edge coverage for `#640`, branch
   `feature/platform-child-process-coverage-640`, head `7496ba0a`;
   opened from `main` at `d5efea57`, updated after the first Windows
@@ -691,7 +688,8 @@ Local Phase 3 draft worktrees:
   that incremental build but exited cleanly.
 - `#645` RPN parser worktree
   `/Users/danielraffel/Code/pulp-midi-rpn-coverage-645`, branch
-  `feature/midi-rpn-coverage-645`, commit `d1edf1e1`; open as PR `#830`.
+  `feature/midi-rpn-coverage-645`, commit `d1edf1e1`; merged via PR
+  `#830` as `d02c9ec9`. The remote branch was deleted after merge.
   Scope: test-only coverage for incomplete selections, unrelated CCs,
   omitted callbacks on otherwise complete RPN/NRPN sequences, and NRPN
   increment/decrement metadata. Local validation: no-GPU/no-examples
@@ -791,6 +789,7 @@ Open supporting PR:
   repaired for the fast-exit deadline review, and `#833` was rebased
   onto `b5e7a463` to clear the stale Android SDK discovery ASan failure,
   and `#836` merged, and `#837` merged, and `#839` opened,
+  and `#830` merged,
   and remains docs-only.
 
 Local environment note:
@@ -813,31 +812,28 @@ Next recovery actions:
 2. Monitor `#829` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-midi-ci-coverage-645`, patch,
    validate locally, and push with lease.
-3. Monitor `#830` cloud checks; if a required lane fails, debug in
-   `/Users/danielraffel/Code/pulp-midi-rpn-coverage-645`, patch,
-   validate locally, and push with lease.
-4. Monitor `#832` cloud checks; if a required lane fails, debug in
+3. Monitor `#832` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-platform-child-process-coverage-640`,
    patch, validate locally, and push with lease.
-5. Monitor `#833` cloud checks; if a required lane fails, debug in
+4. Monitor `#833` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-signal-biquad-coverage-645`, patch,
    validate locally, and push with lease.
-6. Monitor `#834` cloud checks; if a required lane fails, debug in
+5. Monitor `#834` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-events-loop-coverage-642`, patch,
    validate locally, and push with lease.
-7. Monitor `#835` cloud checks; if a required lane fails, debug in
+6. Monitor `#835` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-cli-ship-coverage-643`, patch,
    validate locally, and push with lease.
-8. Monitor `#838` cloud checks; if a required lane fails, debug in
+7. Monitor `#838` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-package-cli-coverage-643`, patch,
    validate locally, and push with lease.
-9. Monitor `#839` cloud checks; if a required lane fails, debug in
+8. Monitor `#839` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-render-gpu-graph-coverage-646`,
    patch, validate locally, and push with lease.
-10. If any open Phase 3 PR is green but GitHub reports it behind `main`,
+9. If any open Phase 3 PR is green but GitHub reports it behind `main`,
    rebase that branch onto `origin/main`, push with lease, and let
    checks rerun.
-11. Continue Phase 3 from the tranche issues below, prioritizing
+10. Continue Phase 3 from the tranche issues below, prioritizing
    represented high-miss files over adding new perimeter lanes.
 
 ## Phase 1 corrected baseline
