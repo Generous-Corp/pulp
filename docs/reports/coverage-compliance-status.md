@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-26 23:34 EDT
+Last reviewed: 2026-04-26 23:42 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -308,6 +308,14 @@ Open Phase 3 PRs:
   doctor rejection for out-of-range sliders and duplicate sections. The
   commit carries `Skill-Update: skip` because this is test-only coverage
   for a skill-mapped path.
+- `#873` canvas text-layout cursor coverage for parent `#641`, branch
+  `feature/canvas-coverage-641-next`, head `6adc7a4b`; covers wrapped
+  `GlyphArrangement` hit testing, cursor positions, and clear-state
+  behavior.
+- `#875` ship NSIS uninstall metadata coverage for parent `#641`, branch
+  `feature/ship-coverage-641-next`, head `752ae0bb`; covers
+  Add/Remove Programs registry metadata and HKLM/HKCU uninstall key
+  deletion paths.
 
 Local-only queued work:
 
@@ -318,6 +326,12 @@ Local-only queued work:
   after firing and adds a restart regression. Because this is a
   production behavior fix, review it before opening a PR and add the
   appropriate SDK patch metadata trailer.
+- `#642` events IPC endpoint parse worktree
+  `/Users/danielraffel/Code/pulp-events-coverage-642-next4`, branch
+  `feature/events-coverage-642-next4`, commit `3701a940`; adds new
+  test-only target `pulp-test-ipc-endpoints` for deterministic IPC
+  socket endpoint parse failures. Review CMake overlap with open `#857`
+  before opening a PR.
 
 Local Phase 3 draft worktrees:
 
@@ -1086,7 +1100,8 @@ Open supporting PR:
   `3f92f066`, and `#842` merged as `51be8860`, and `#858` through
   `#864` opened from the parallel worker queue, and `#865` through
   `#870` opened from the next completed local worker queue, and `#871`
-  opened for JSFX subset validation coverage,
+  opened for JSFX subset validation coverage, and `#873` and `#875`
+  opened for canvas and ship coverage,
   and remains docs-only.
 
 Local environment note:
@@ -1117,7 +1132,7 @@ Next recovery actions:
    fails, debug in
    `/Users/danielraffel/Code/pulp-midi-mpe-tracker-extra-coverage-645-next`,
    patch, validate locally, and push with lease.
-5. Monitor `#845` through `#871`; if a required lane fails, debug in
+5. Monitor `#845` through `#875`; if a required lane fails, debug in
    the worktree named in the open-PR list above, patch, validate
    locally, and push with lease. Pay particular attention to `#848` and
    `#851` because they include patch-level production hardening.
