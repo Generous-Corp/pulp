@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-26 21:29 EDT
+Last reviewed: 2026-04-26 21:31 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`. Phase 1 representation is complete, Phase 2 gap
@@ -66,7 +66,7 @@ Finish line:
 ## Current live state
 
 Latest complete Codecov `main` report observed while updating this doc
-(`main` head `d02c9ec9` has a newer Coverage run queued):
+(`main` head `455c0a9d` has a newer Coverage run queued):
 
 - commit: `5b8e4529cfc553fd98b65f265ed1e9c0487b3d66`
 - workflow: Coverage run `24970413173`, completed successfully
@@ -161,6 +161,7 @@ Merged after the Phase 1 closeout / `#723` baseline:
 - `#836` CLI sync checker Python tooling coverage -> `6ef8ca8b`
 - `#837` package registry validation tools coverage -> `bdc406cc`
 - `#830` RPN parser edge coverage -> `d02c9ec9`
+- `#834` events event-loop lifecycle edge coverage -> `455c0a9d`
 
 Open Phase 3 PRs:
 
@@ -186,10 +187,6 @@ Open Phase 3 PRs:
   lane failed in the already-fixed Android SDK discovery regression
   from the stale base. This tranche also uses the GitHub/Namespace path
   while the SSH `windows` target remains unreachable.
-- `#834` events event-loop lifecycle edge coverage for `#642`, branch
-  `feature/events-loop-coverage-642`, head `ee3894cb`; opened from
-  `main` at `87ef6d90`. This tranche also uses the GitHub/Namespace
-  path while the SSH `windows` target remains unreachable.
 - `#835` CLI ship command validation coverage for `#643`, branch
   `feature/cli-ship-coverage-643`, head `b8f22af9`; opened from
   `main` at `5b8e4529`, then rebased onto `b5e7a463` and updated after
@@ -224,8 +221,8 @@ Local Phase 3 draft worktrees:
   `#795` as `f1a5aa84`. The remote branch was deleted after merge.
 - `#642` events event-loop lifecycle worktree
   `/Users/danielraffel/Code/pulp-events-loop-coverage-642`, branch
-  `feature/events-loop-coverage-642`, commit `ee3894cb`; open as PR
-  `#834`.
+  `feature/events-loop-coverage-642`, commit `ee3894cb`; merged via PR
+  `#834` as `455c0a9d`. The remote branch was deleted after merge.
   Scope: test-only coverage for `EventLoop` thread identity, explicit
   stop and idempotent stop state, delayed work dropped after stop,
   multiple delayed tasks, plus `Timer` interval getter/setter and
@@ -801,7 +798,7 @@ Open supporting PR:
   onto `b5e7a463` to clear the stale Android SDK discovery ASan failure,
   and `#836` merged, and `#837` merged, and `#839` opened,
   and `#830` merged, and `#838` was rebased onto `d02c9ec9` and repaired
-  for the Android package parallel temp-dir collision,
+  for the Android package parallel temp-dir collision, and `#834` merged,
   and remains docs-only.
 
 Local environment note:
@@ -830,22 +827,19 @@ Next recovery actions:
 4. Monitor `#833` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-signal-biquad-coverage-645`, patch,
    validate locally, and push with lease.
-5. Monitor `#834` cloud checks; if a required lane fails, debug in
-   `/Users/danielraffel/Code/pulp-events-loop-coverage-642`, patch,
-   validate locally, and push with lease.
-6. Monitor `#835` cloud checks; if a required lane fails, debug in
+5. Monitor `#835` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-cli-ship-coverage-643`, patch,
    validate locally, and push with lease.
-7. Monitor `#838` cloud checks on head `09666f46`; if a required lane fails, debug in
+6. Monitor `#838` cloud checks on head `09666f46`; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-package-cli-coverage-643`, patch,
    validate locally, and push with lease.
-8. Monitor `#839` cloud checks; if a required lane fails, debug in
+7. Monitor `#839` cloud checks; if a required lane fails, debug in
    `/Users/danielraffel/Code/pulp-render-gpu-graph-coverage-646`,
    patch, validate locally, and push with lease.
-9. If any open Phase 3 PR is green but GitHub reports it behind `main`,
+8. If any open Phase 3 PR is green but GitHub reports it behind `main`,
    rebase that branch onto `origin/main`, push with lease, and let
    checks rerun.
-10. Continue Phase 3 from the tranche issues below, prioritizing
+9. Continue Phase 3 from the tranche issues below, prioritizing
    represented high-miss files over adding new perimeter lanes.
 
 ## Phase 1 corrected baseline
