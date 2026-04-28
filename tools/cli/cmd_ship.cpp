@@ -156,9 +156,6 @@ int cmd_ship(const std::vector<std::string>& args) {
 
     // ── package ─────────────────────────────────────────────────────────────
     if (sub == "package") {
-        auto artifacts = root / "artifacts";
-        fs::create_directories(artifacts);
-
         std::string version, target, keystore_path, key_alias, store_pass, key_pass, abi_arg;
         bool per_user = false, apk_only = false, aab_only = false;
 
@@ -184,6 +181,13 @@ int cmd_ship(const std::vector<std::string>& args) {
             return 1;
         }
 
+        // Defer artifacts/ creation until after argument validation so
+        // failed invocations (e.g. mutually-exclusive flags) don't leave
+        // behind an empty directory that masks the missing-artifacts
+        // branch in `pulp ship check` (issue #904).
+        auto artifacts = root / "artifacts";
+        fs::create_directories(artifacts);
+
         if (target == "android") {
             auto android_dir = root / "android";
             if (!fs::exists(android_dir / "build.gradle.kts")
@@ -191,6 +195,7 @@ int cmd_ship(const std::vector<std::string>& args) {
                 std::cerr << "No android/ project found. Run `pulp create --targets android` first.\n";
                 return 1;
             }
+
 
             std::vector<std::string> abis;
             if (abi_arg == "all") abis = {"arm64-v8a", "x86_64", "armeabi-v7a"};

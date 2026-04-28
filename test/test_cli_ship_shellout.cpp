@@ -254,6 +254,55 @@ TEST_CASE("pulp ship Android validation paths fail before external tooling",
     fs::remove_all(root);
 }
 
+TEST_CASE("pulp ship package failures do not leave artifacts/ behind",
+          "[cli][shellout][ship][android][issue-904]") {
+    // Regression for issue #904: cmd_ship() previously created
+    // `artifacts/` unconditionally at the start of the package branch,
+    // which masked the `No artifacts/ directory` branch in
+    // `pulp ship check --target android`. This test invokes the failing
+    // package paths first, then asserts the missing-artifacts check
+    // still fires — proving the directory creation is now deferred
+    // until validation succeeds.
+    if (!binary_exists()) { SUCCEED("pulp binary not built"); return; }
+    auto root = make_fake_project("android-package-no-side-effect", true);
+    fs::create_directories(root / "pulp-home");
+
+    ScopedEnvVar pulp_home("PULP_HOME", (root / "pulp-home").string());
+    ScopedEnvVar store_pass("ANDROID_STORE_PASS");
+    ScopedEnvVar key_pass("ANDROID_KEY_PASS");
+
+    auto artifacts = root / "artifacts";
+    REQUIRE_FALSE(fs::exists(artifacts));
+
+    // Mutually-exclusive flags — must NOT create artifacts/.
+    auto conflicting = run_pulp_in(root,
+        {"ship", "package", "--target", "android", "--apk-only", "--aab-only"});
+    REQUIRE_FALSE(conflicting.timed_out);
+    REQUIRE(conflicting.exit_code != 0);
+    REQUIRE(contains(conflicting.stdout_output + conflicting.stderr_output,
+                     "mutually exclusive"));
+    REQUIRE_FALSE(fs::exists(artifacts));
+
+    // Missing android/ project — must NOT create artifacts/ either.
+    auto missing_android = run_pulp_in(root, {"ship", "package", "--target", "android"});
+    REQUIRE_FALSE(missing_android.timed_out);
+    REQUIRE(missing_android.exit_code != 0);
+    REQUIRE(contains(missing_android.stdout_output + missing_android.stderr_output,
+                     "No android/ project found"));
+    REQUIRE_FALSE(fs::exists(artifacts));
+
+    // The missing-artifacts branch in `ship check` must still fire
+    // after the failed package invocations above. Before #904 it
+    // didn't, because the directory was created as a side-effect.
+    auto check = run_pulp_in(root, {"ship", "check", "--target", "android"});
+    REQUIRE_FALSE(check.timed_out);
+    REQUIRE(check.exit_code != 0);
+    REQUIRE(contains(check.stdout_output + check.stderr_output,
+                     "No artifacts/ directory"));
+
+    fs::remove_all(root);
+}
+
 TEST_CASE("pulp ship appcast writes local feed and rejects remote signing",
           "[cli][shellout][ship][appcast][issue-643]") {
     if (!binary_exists()) { SUCCEED("pulp binary not built"); return; }
