@@ -82,7 +82,17 @@ public:
     // the host frame loop.
     void service_frame_callbacks();
 
-    // Request a repaint after JS-driven UI or style changes.
+    // Override the repaint invalidator used after JS-driven UI / style
+    // changes and to drain `requestAnimationFrame` callbacks.
+    //
+    // By default the bridge's constructor wires this to call
+    // `root.request_repaint()`, which walks up to the host's `repaint()`.
+    // Override only when the bridge is part of a larger composite UI whose
+    // top-level invalidator is not the same as the root view passed in
+    // (e.g. the standalone window's editor uses the WindowHost directly).
+    //
+    // Without a wired callback, JS `requestAnimationFrame` callbacks queue
+    // but never schedule a second paint — see pulp #899.
     void set_repaint_callback(std::function<void()> cb);
 
     // Override the AI CLI command used by the design tool chat.
@@ -150,6 +160,11 @@ private:
     // Install on_change/on_toggle callbacks that dispatch to JS
     void wire_callbacks(const std::string& id, View* w);
 
+    // Called by the JS `__requestFrame__` / async-result chain whenever
+    // pending work needs the surface to repaint. Routes through
+    // `repaint_callback_`, which is wired in the constructor to
+    // `root.request_repaint()` by default and may be replaced via
+    // `set_repaint_callback`.
     void request_repaint();
 
     void register_api();

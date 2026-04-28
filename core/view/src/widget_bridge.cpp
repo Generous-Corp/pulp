@@ -563,6 +563,17 @@ WidgetBridge::WidgetBridge(ScriptEngine& engine, View& root, state::StateStore& 
     if (widget_bridge_gpu_info(gpu_surface_).native_bridge) {
         native_gpu_bridge_state_ = std::make_unique<NativeGpuBridgeState>();
     }
+    // Default repaint wiring: route to the root view's host invalidator.
+    // Without this, JS `requestAnimationFrame` callbacks queue but never
+    // schedule a second paint, because the only way out of `request_repaint()`
+    // is `repaint_callback_`. Hosts that need a custom invalidator (the
+    // standalone window's top-level editor) replace this via
+    // `set_repaint_callback`. See pulp #899.
+    //
+    // Capture-by-reference is sound: the bridge already holds `View& root_`
+    // as a member and cannot outlive `root` without UB. The lambda lives at
+    // most as long as the bridge.
+    repaint_callback_ = [&root] { root.request_repaint(); };
     register_api();
     eval_or_throw(engine_, "kJSPreamble", kJSPreamble);
     eval_or_throw(engine_, "css_colors", preludes::css_colors);

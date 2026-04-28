@@ -8,6 +8,7 @@
 #include <pulp/view/widgets.hpp>
 #include <pulp/view/theme.hpp>
 #include <pulp/view/ui_components.hpp>
+#include <pulp/view/window_host.hpp>
 #include <chrono>
 #include <thread>
 
@@ -1133,4 +1134,139 @@ TEST_CASE("WidgetBridge canvasGlobalCompositeOperation maps CSS strings to Blend
     REQUIRE(blendIndices[1] == static_cast<int>(BM::multiply));
     REQUIRE(blendIndices[2] == static_cast<int>(BM::lighter));
     REQUIRE(blendIndices[3] == static_cast<int>(BM::source_over));
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// pulp #899 — WidgetBridge auto-wires repaint_callback_ to the root view's
+// host invalidator so JS-driven UI changes (and rAF callbacks) actually
+// schedule a paint when the View owns its own bridge.
+// ───────────────────────────────────────────────────────────────────────────
+
+namespace {
+
+class CountingWindowHost final : public WindowHost {
+public:
+    int repaint_calls = 0;
+
+    void show() override {}
+    void hide() override {}
+    bool is_visible() const override { return true; }
+    void repaint() override { ++repaint_calls; }
+    void set_close_callback(std::function<void()>) override {}
+    void run_event_loop() override {}
+};
+
+} // namespace
+
+TEST_CASE("WidgetBridge default repaint_callback routes to root host (issue 899)",
+          "[view][bridge][issue-899]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+
+    CountingWindowHost host;
+    root.set_window_host(&host);
+
+    WidgetBridge bridge(engine, root, store);
+
+    REQUIRE(host.repaint_calls == 0);
+
+    // layout() always calls request_repaint() inside the bridge; with the
+    // auto-wired default that must reach the host. Without the fix this
+    // stays at 0 because repaint_callback_ is null.
+    bridge.load_script("layout()");
+
+    REQUIRE(host.repaint_calls >= 1);
+}
+
+TEST_CASE("WidgetBridge default repaint reaches host through child view (issue 899)",
+          "[view][bridge][issue-899]") {
+    // The Spectr NativeEditorView case: a child View owns its own
+    // WidgetBridge. The bridge's root is the child, not the top-level
+    // host root, so request_repaint() must walk up through the parent
+    // chain to find the host.
+    ScriptEngine engine;
+    View top_root;
+    top_root.set_bounds({0, 0, 800, 600});
+
+    CountingWindowHost host;
+    top_root.set_window_host(&host);
+
+    auto child_owned = std::make_unique<View>();
+    auto* child = child_owned.get();
+    top_root.add_child(std::move(child_owned));
+    child->set_bounds({0, 0, 400, 300});
+
+    StateStore store;
+    WidgetBridge bridge(engine, *child, store);
+
+    REQUIRE(host.repaint_calls == 0);
+
+    bridge.load_script("layout()");
+
+    REQUIRE(host.repaint_calls >= 1);
+}
+
+TEST_CASE("WidgetBridge set_repaint_callback overrides the default (issue 899)",
+          "[view][bridge][issue-899]") {
+    // Hosts (e.g. the standalone window) must still be able to replace the
+    // default invalidator with a window-level repaint callback.
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+
+    CountingWindowHost host;
+    root.set_window_host(&host);
+
+    WidgetBridge bridge(engine, root, store);
+
+    int override_calls = 0;
+    bridge.set_repaint_callback([&] { ++override_calls; });
+
+    bridge.load_script("layout()");
+
+    REQUIRE(override_calls >= 1);
+    // The override must displace the default — not run alongside it.
+    REQUIRE(host.repaint_calls == 0);
+}
+
+TEST_CASE("WidgetBridge default repaint is a no-op when no host attached (issue 899)",
+          "[view][bridge][issue-899]") {
+    // Before the fix, repaint_callback_ was null. After the fix it routes
+    // through View::request_repaint(), which itself silently no-ops when
+    // no host is wired up. Verify that constructing/using the bridge in a
+    // host-less test setup still works (lots of existing tests rely on
+    // this).
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    REQUIRE_NOTHROW(bridge.load_script("layout()"));
+}
+
+TEST_CASE("View::request_repaint walks up to host (issue 899)",
+          "[view][issue-899]") {
+    View root;
+    CountingWindowHost host;
+    root.set_window_host(&host);
+
+    auto child_owned = std::make_unique<View>();
+    auto* child = child_owned.get();
+    root.add_child(std::move(child_owned));
+
+    auto grand_owned = std::make_unique<View>();
+    auto* grand = grand_owned.get();
+    child->add_child(std::move(grand_owned));
+
+    REQUIRE(host.repaint_calls == 0);
+    grand->request_repaint();
+    REQUIRE(host.repaint_calls == 1);
+
+    // Detached view: silently no-ops, no crash.
+    View orphan;
+    REQUIRE_NOTHROW(orphan.request_repaint());
 }
