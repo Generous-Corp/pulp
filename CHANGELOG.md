@@ -9,11 +9,15 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
 <a id="v0580"></a>
+## [0.59.0]
+
 ## [0.58.0] - 2026-04-28
 
 - feat(cli): pulp loop — leveraged-prototype focus mode (Slice 1 of #940) ([#950](https://github.com/danielraffel/pulp/pull/950))
 
 <a id="v0570"></a>
+## [0.58.0]
+
 ## [0.57.0] - 2026-04-28
 
 - fix(view): canvas widget transparent by default + real clearRect (#929) ([#934](https://github.com/danielraffel/pulp/pull/934))
