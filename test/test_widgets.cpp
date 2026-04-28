@@ -101,6 +101,125 @@ TEST_CASE("Label intrinsic_width yields zero for multi-line", "[view][widget][is
     REQUIRE(ml.intrinsic_width() == 0);
 }
 
+TEST_CASE("Label intrinsic_width is sane for typical chrome strings",
+          "[view][widget][issue-945]") {
+    // pulp #945 regression: after PR #935 enabled Label auto-grow,
+    // certain fresh-build states reported tiny intrinsic widths
+    // (e.g. 5–20 px for a 20-character string) because the global
+    // TextShaper used SkFontMgr::RefEmpty() and silently produced
+    // ~0 advance widths. Yoga then collapsed the Label and the
+    // painter truncated the chrome ("SF · ZOOMA · LIVE · IIR · F").
+    //
+    // Lower-bound the reported width against a conservative
+    // estimate (40% of font_size per character) — well below any
+    // real shaped/estimated width, but well above the broken
+    // ~zero-advance regression. If this test ever drops below the
+    // bound, the platform font manager has stopped resolving
+    // typefaces in the shaper path.
+    Label chrome("SPECTR ZOOMABLE FILTER BANK");
+    chrome.set_font_size(14.0f);
+
+    float w = chrome.intrinsic_width();
+    float min_expected = chrome.text().size() * 14.0f * 0.40f;
+    REQUIRE(w > min_expected);
+}
+
+TEST_CASE("Label intrinsic_width matches text after rebuild / re-measure",
+          "[view][widget][issue-945]") {
+    // pulp #945: A label whose text is changed after construction must
+    // re-measure cleanly. The first capture in the field showed correct
+    // labels; subsequent rebuilds collapsed widths because the shaper
+    // cached zero-advance segments under (font, size). With the
+    // platform font manager wired up, repeated prepare() calls always
+    // return positive width and the cached entries are sane.
+    Label l("SF");
+    l.set_font_size(14.0f);
+    float short_w = l.intrinsic_width();
+
+    l.set_text("SPECTR ZOOMABLE FILTER BANK");
+    float long_w = l.intrinsic_width();
+
+    REQUIRE(short_w > 0);
+    REQUIRE(long_w > 0);
+    // The longer string must report a substantially wider footprint.
+    // Field-observed regression collapsed long_w to ~short_w.
+    REQUIRE(long_w > short_w * 5.0f);
+
+    // Reverting back to the short text must give back the short width
+    // (within a small rounding margin) — proves measurement is a pure
+    // function of the current text, not stuck on a stale value.
+    l.set_text("SF");
+    float short_again = l.intrinsic_width();
+    REQUIRE(short_again > 0);
+    REQUIRE(short_again < long_w * 0.5f);
+}
+
+TEST_CASE("Label intrinsic_width handles vertical text direction",
+          "[view][widget][issue-945][issue-943]") {
+    // pulp #943 P2 (#935 finding 1): when text_direction_ is vertical,
+    // paint() rotates the canvas 90° so the horizontal footprint is the
+    // line height, not the shaped string advance. Reporting the advance
+    // here would make Yoga reserve enormous width for a vertical label
+    // and starve sibling columns.
+    Label vertical("VERTICAL LABEL TEXT");
+    vertical.set_font_size(14.0f);
+    vertical.set_text_direction(TextDirection::top_to_bottom);
+
+    Label horizontal("VERTICAL LABEL TEXT");
+    horizontal.set_font_size(14.0f);
+
+    float v = vertical.intrinsic_width();
+    float h = horizontal.intrinsic_width();
+
+    REQUIRE(v > 0);
+    REQUIRE(h > 0);
+    // Vertical width is one line tall — must be much smaller than the
+    // full horizontal advance of the same string.
+    REQUIRE(v < h * 0.25f);
+
+    // Bottom-to-top gets the same treatment.
+    Label vertical2("VERTICAL LABEL TEXT");
+    vertical2.set_font_size(14.0f);
+    vertical2.set_text_direction(TextDirection::bottom_to_top);
+    REQUIRE(vertical2.intrinsic_width() == v);
+}
+
+TEST_CASE("Label letter_spacing counts glyphs not UTF-8 bytes",
+          "[view][widget][issue-945][issue-943]") {
+    // pulp #943 P2 (#935 finding 2): letter_spacing was multiplied by
+    // (display_text.size() - 1), counting raw UTF-8 bytes instead of
+    // code points. A 4-character CJK string takes 12 bytes in UTF-8,
+    // so spacing was over-applied 3x and the label inflated.
+    //
+    // ASCII baseline — both strings are 4 ASCII chars, so byte count
+    // and glyph count match. This anchors the comparison.
+    Label ascii_no_spacing("ABCD");
+    ascii_no_spacing.set_font_size(14.0f);
+    Label ascii_with_spacing("ABCD");
+    ascii_with_spacing.set_font_size(14.0f);
+    ascii_with_spacing.set_letter_spacing(2.0f);
+
+    float ascii_delta = ascii_with_spacing.intrinsic_width()
+                      - ascii_no_spacing.intrinsic_width();
+    // 4 glyphs → 3 gaps → 6.0 px extra (subject to ceil rounding).
+    REQUIRE(ascii_delta >= 5.0f);
+    REQUIRE(ascii_delta <= 7.0f);
+
+    // Multibyte path: 4 CJK characters in UTF-8 are 12 bytes. With the
+    // old byte-count math the spacing delta would be ~22 px (11 gaps);
+    // with the glyph-count math it's the same ~6 px as the ASCII case.
+    Label cjk_no_spacing("\xE6\x97\xA5\xE6\x9C\xAC\xE8\xAA\x9E\xE6\x96\x87"); // 日本語文
+    cjk_no_spacing.set_font_size(14.0f);
+    Label cjk_with_spacing("\xE6\x97\xA5\xE6\x9C\xAC\xE8\xAA\x9E\xE6\x96\x87");
+    cjk_with_spacing.set_font_size(14.0f);
+    cjk_with_spacing.set_letter_spacing(2.0f);
+
+    float cjk_delta = cjk_with_spacing.intrinsic_width()
+                    - cjk_no_spacing.intrinsic_width();
+    REQUIRE(cjk_delta >= 5.0f);
+    REQUIRE(cjk_delta <= 7.0f);
+}
+
 TEST_CASE("Knob value clamping", "[view][widget]") {
     Knob knob;
     knob.set_value(0.5f);

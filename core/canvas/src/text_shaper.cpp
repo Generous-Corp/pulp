@@ -19,6 +19,24 @@
 #include "modules/skparagraph/include/FontCollection.h"
 #include "modules/skshaper/include/SkShaper.h"
 #include "include/core/SkFontMgr.h"
+
+// Platform font managers — must mirror what SkiaCanvas uses, otherwise
+// `mgr->matchFamilyStyle("Inter", ...)` returns null and SkFont falls
+// back to a typeface-less default whose `measureText()` advance is
+// effectively zero. That collapses Label::intrinsic_width() and Yoga
+// reserves no horizontal space for the label, which paints into the
+// (now-tiny) box and clips. See pulp #945 (regression of #935 / #928).
+#if defined(__APPLE__)
+#include "include/ports/SkFontMgr_mac_ct.h"
+#elif defined(_WIN32)
+#include "include/ports/SkTypeface_win.h"
+#elif defined(__ANDROID__)
+#include "include/ports/SkFontMgr_android.h"
+#include "include/ports/SkFontScanner_FreeType.h"
+#elif defined(__linux__)
+#include "include/ports/SkFontMgr_fontconfig.h"
+#include "include/ports/SkFontScanner_FreeType.h"
+#endif
 #endif
 
 namespace pulp::canvas {
@@ -136,12 +154,35 @@ struct TextShaper::Impl {
     bool has_real_shaping = false;
 
 #ifdef PULP_HAS_TEXT_SHAPING
+    sk_sp<SkFontMgr> font_mgr;
     sk_sp<skia::textlayout::FontCollection> font_collection;
 
+    // Lazily create a platform-appropriate font manager — mirrors the
+    // helper in skia_canvas.cpp. Without this, SkFontMgr::RefEmpty()
+    // returns no typefaces and `font.measureText()` reports near-zero
+    // advance, collapsing Label::intrinsic_width() (pulp #945).
+    static sk_sp<SkFontMgr> make_platform_font_mgr() {
+#if defined(__APPLE__)
+        return SkFontMgr_New_CoreText(nullptr);
+#elif defined(_WIN32)
+        return SkFontMgr_New_DirectWrite();
+#elif defined(__ANDROID__)
+        return SkFontMgr_New_Android(nullptr, SkFontScanner_Make_FreeType());
+#elif defined(__linux__)
+        return SkFontMgr_New_FontConfig(nullptr, SkFontScanner_Make_FreeType());
+#else
+        return nullptr;
+#endif
+    }
+
     Impl() {
+        font_mgr = make_platform_font_mgr();
+        if (!font_mgr) {
+            font_mgr = SkFontMgr::RefEmpty();
+        }
         font_collection = sk_sp<skia::textlayout::FontCollection>(
             new skia::textlayout::FontCollection());
-        font_collection->setDefaultFontManager(SkFontMgr::RefEmpty());
+        font_collection->setDefaultFontManager(font_mgr);
         has_real_shaping = true;
     }
 #else
@@ -181,20 +222,40 @@ struct TextShaper::Impl {
         float width = 0;
 
 #ifdef PULP_HAS_TEXT_SHAPING
-        // Real measurement via SkFont
+        // Real measurement via SkFont. Use the platform font manager
+        // (CoreText/DirectWrite/fontconfig/Android) — RefEmpty() returns
+        // no typefaces and silently produces ~0 advance widths, which
+        // is what regressed Label measurement in pulp #945.
         SkFont font;
-        auto mgr = SkFontMgr::RefEmpty();
-        if (mgr) {
-            auto typeface = mgr->matchFamilyStyle(font_family.c_str(), SkFontStyle::Normal());
-            if (typeface) font.setTypeface(std::move(typeface));
+        sk_sp<SkTypeface> typeface;
+        if (font_mgr && font_mgr->countFamilies() > 0) {
+            typeface = font_mgr->matchFamilyStyle(font_family.c_str(),
+                                                  SkFontStyle::Normal());
+            if (!typeface) {
+                // Family wasn't found (e.g. "Inter" not installed) —
+                // fall back to the platform default face so we still
+                // get a real measurement instead of a phantom typeface.
+                typeface = font_mgr->matchFamilyStyle(nullptr,
+                                                      SkFontStyle::Normal());
+            }
         }
+        if (typeface) font.setTypeface(std::move(typeface));
         font.setSize(font_size);
         font.setEdging(SkFont::Edging::kSubpixelAntiAlias);
 
-        // Use the advance width (return value), not bounds.width().
-        // Advance includes whitespace and proper glyph spacing;
-        // bounds.width() can exclude trailing spaces and differ for overhangs.
-        width = font.measureText(text.c_str(), text.size(), SkTextEncoding::kUTF8, nullptr);
+        if (font.getTypeface()) {
+            // Use the advance width (return value), not bounds.width().
+            // Advance includes whitespace and proper glyph spacing;
+            // bounds.width() can exclude trailing spaces and differ for
+            // overhangs.
+            width = font.measureText(text.c_str(), text.size(),
+                                     SkTextEncoding::kUTF8, nullptr);
+        } else {
+            // No platform font manager (or all matchers failed) — fall
+            // back to the same character-width estimator the non-Skia
+            // build uses, so callers still get a sane positive width.
+            width = static_cast<float>(text.size()) * font_size * 0.6f;
+        }
 #else
         // Fallback: character-width estimation
         width = static_cast<float>(text.size()) * font_size * 0.6f;

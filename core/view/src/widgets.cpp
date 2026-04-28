@@ -253,6 +253,16 @@ float Label::intrinsic_width() const {
     // single-line text width.
     if (text_.empty() || multi_line_) return 0;
 
+    // pulp #943 P2 / #945: when paint() rotates the text 90° the
+    // horizontal footprint is just the line height, not the shaped
+    // string advance. Reporting the advance here makes Yoga reserve
+    // far too much width for vertical labels and starves siblings.
+    bool vertical = (text_direction_ == canvas::TextDirection::top_to_bottom ||
+                     text_direction_ == canvas::TextDirection::bottom_to_top);
+    if (vertical) {
+        return std::ceil(line_height_ > 0 ? line_height_ : font_size_ * 1.4f);
+    }
+
     // Mirror paint()'s text-transform — measurement must match what's
     // drawn or a row of uppercase chars will wrap unexpectedly.
     std::string display_text = text_;
@@ -282,9 +292,20 @@ float Label::intrinsic_width() const {
     float width = prepared.total_width();
 
     // Letter-spacing adds extra advance per glyph break that isn't
-    // captured by HarfBuzz shaping.
-    if (letter_spacing_ != 0 && display_text.size() > 1) {
-        width += letter_spacing_ * static_cast<float>(display_text.size() - 1);
+    // captured by HarfBuzz shaping. Count UTF-8 *code points*, not
+    // bytes — using `size()` over-applies spacing on multibyte input
+    // (CJK, accented Latin, emoji) and inflates intrinsic width
+    // (pulp #943 P2 #935 finding 2).
+    if (letter_spacing_ != 0 && !display_text.empty()) {
+        std::size_t glyph_count = 0;
+        for (unsigned char c : display_text) {
+            // Count any byte that is not a UTF-8 continuation byte
+            // (0b10xxxxxx) — that's one glyph per code point.
+            if ((c & 0xC0) != 0x80) ++glyph_count;
+        }
+        if (glyph_count > 1) {
+            width += letter_spacing_ * static_cast<float>(glyph_count - 1);
+        }
     }
 
     // Sub-pixel-safe ceil so layout never clips on rounding.
