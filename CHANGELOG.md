@@ -9,6 +9,8 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
 <a id="v0590"></a>
+## [0.60.0]
+
 ## [0.59.0] - 2026-04-28
 
 - feat(canvas): register external/fonts/*.ttf with SkFontMgr at startup (#932) ([#956](https://github.com/danielraffel/pulp/pull/956))
