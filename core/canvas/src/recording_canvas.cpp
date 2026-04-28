@@ -47,6 +47,14 @@ void RecordingCanvas::capture_paint_baseline_transform() {
     ++baseline_capture_count_;
 }
 
+void RecordingCanvas::concat_transform(float a, float b, float c,
+                                       float d, float e, float f) {
+    DrawCommand cmd{DrawCommand::Type::concat_transform};
+    cmd.f[0] = a; cmd.f[1] = b; cmd.f[2] = c;
+    cmd.f[3] = d; cmd.f[4] = e; cmd.f[5] = f;
+    commands_.push_back(cmd);
+}
+
 void RecordingCanvas::clip_rect(float x, float y, float w, float h) {
     DrawCommand cmd{DrawCommand::Type::clip_rect};
     cmd.f[0] = x; cmd.f[1] = y; cmd.f[2] = w; cmd.f[3] = h;
@@ -157,6 +165,27 @@ void RecordingCanvas::set_font(const std::string& family, float size) {
     cmd.text = family;
     cmd.f[0] = size;
     commands_.push_back(cmd);
+}
+
+void RecordingCanvas::set_font_full(const std::string& family, float size,
+                                    int weight, int slant, float letter_spacing) {
+    font_size_ = size;
+    // Record both the legacy set_font (for back-compat with existing tests
+    // that count fonts) and the rich set_font_full so callers can assert
+    // on the propagated weight / slant / letter_spacing. pulp #927.
+    {
+        DrawCommand cmd{DrawCommand::Type::set_font};
+        cmd.text = family;
+        cmd.f[0] = size;
+        commands_.push_back(cmd);
+    }
+    DrawCommand full{DrawCommand::Type::set_font_full};
+    full.text = family;
+    full.f[0] = size;
+    full.f[1] = static_cast<float>(weight);
+    full.f[2] = static_cast<float>(slant);
+    full.f[3] = letter_spacing;
+    commands_.push_back(full);
 }
 
 void RecordingCanvas::set_text_align(TextAlign align) {

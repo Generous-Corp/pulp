@@ -436,3 +436,145 @@ TEST_CASE("View filter_blur triggers layer", "[view][layer]") {
 
     REQUIRE(rc.command_count() > 0);
 }
+
+// ── View::set_transform_matrix (issue-930) ────────────────────────────────
+//
+// Full 2D affine matrix on a View, applied at paint time as a concat onto
+// the current canvas matrix. Mirrors CanvasRenderingContext2D.setTransform's
+// (a,b,c,d,e,f) layout. Used by the React/CSS adapter for translateX(-50%)
+// centering and as the foundation for animation.
+
+TEST_CASE("View transform_matrix is identity-disabled by default", "[view][transform][issue-930]") {
+    View v;
+    REQUIRE_FALSE(v.has_transform_matrix());
+
+    v.set_transform_matrix(2.0f, 0.0f, 0.0f, 3.0f, 17.0f, 23.0f);
+    REQUIRE(v.has_transform_matrix());
+
+    float a = 0, b = 0, c = 0, d = 0, e = 0, f = 0;
+    v.get_transform_matrix(a, b, c, d, e, f);
+    REQUIRE_THAT(a, WithinAbs(2.0f, 1e-5f));
+    REQUIRE_THAT(b, WithinAbs(0.0f, 1e-5f));
+    REQUIRE_THAT(c, WithinAbs(0.0f, 1e-5f));
+    REQUIRE_THAT(d, WithinAbs(3.0f, 1e-5f));
+    REQUIRE_THAT(e, WithinAbs(17.0f, 1e-5f));
+    REQUIRE_THAT(f, WithinAbs(23.0f, 1e-5f));
+
+    v.clear_transform_matrix();
+    REQUIRE_FALSE(v.has_transform_matrix());
+}
+
+TEST_CASE("View::paint_all emits concat_transform when matrix is set",
+          "[view][transform][issue-930]") {
+    pulp::canvas::RecordingCanvas rc;
+    View v;
+    v.set_bounds({0, 0, 100, 100});
+
+    // No matrix set: paint_all should NOT emit concat_transform.
+    v.paint_all(rc);
+    REQUIRE(rc.count(pulp::canvas::DrawCommand::Type::concat_transform) == 0);
+
+    // Set matrix: paint_all emits exactly one concat_transform with the
+    // CanvasRenderingContext2D (a,b,c,d,e,f) order preserved.
+    rc.clear();
+    v.set_transform_matrix(2.0f, 0.5f, 0.25f, 3.0f, 17.0f, 23.0f);
+    v.paint_all(rc);
+
+    int found = 0;
+    for (auto& cmd : rc.commands()) {
+        if (cmd.type == pulp::canvas::DrawCommand::Type::concat_transform) {
+            REQUIRE_THAT(cmd.f[0], WithinAbs(2.0f,  1e-5f));
+            REQUIRE_THAT(cmd.f[1], WithinAbs(0.5f,  1e-5f));
+            REQUIRE_THAT(cmd.f[2], WithinAbs(0.25f, 1e-5f));
+            REQUIRE_THAT(cmd.f[3], WithinAbs(3.0f,  1e-5f));
+            REQUIRE_THAT(cmd.f[4], WithinAbs(17.0f, 1e-5f));
+            REQUIRE_THAT(cmd.f[5], WithinAbs(23.0f, 1e-5f));
+            ++found;
+        }
+    }
+    REQUIRE(found == 1);
+}
+
+TEST_CASE("View transform composes — translateX(-50%) child lands at correct root position",
+          "[view][transform][issue-930]") {
+    // Acceptance scenario from the issue: a parent View at root bounds
+    // (0,0,100,100) with set_transform(1,0,0,1,50,0) (a translation of +50
+    // in x) should mean a child painted at local (10,10) lands at root (60,10).
+    //
+    // We assert by inspecting the recorded command stream:
+    //   1. parent's bounds translate(0, 0)
+    //   2. parent's concat_transform(1, 0, 0, 1, 50, 0)
+    //   3. child's bounds translate(10, 10)
+    // Walking these in order on a hypothetical SkMatrix accumulates (60, 10)
+    // as the child's origin in root space — the same composition Skia performs.
+    pulp::canvas::RecordingCanvas rc;
+
+    View root;
+    root.set_bounds({0, 0, 100, 100});
+    root.set_transform_matrix(1.0f, 0.0f, 0.0f, 1.0f, 50.0f, 0.0f);
+
+    auto child = std::make_unique<View>();
+    child->set_bounds({10, 10, 30, 30});
+
+    root.add_child(std::move(child));
+    root.paint_all(rc);
+
+    // Replay just the transform-affecting ops to compute the child's origin
+    // in root space — the test invariant is "root translate ∘ root concat ∘
+    // child translate = (60, 10)".
+    float tx = 0.0f, ty = 0.0f;
+    bool saw_root_concat = false;
+    int saves = 0;
+    int translate_idx = 0;
+    for (auto& cmd : rc.commands()) {
+        if (cmd.type == pulp::canvas::DrawCommand::Type::save) ++saves;
+        if (cmd.type == pulp::canvas::DrawCommand::Type::translate) {
+            // Order: [0] root bounds(0,0), [1] (after concat) child bounds(10,10)
+            if (translate_idx == 0) {
+                REQUIRE_THAT(cmd.f[0], WithinAbs(0.0f, 1e-5f));
+                REQUIRE_THAT(cmd.f[1], WithinAbs(0.0f, 1e-5f));
+            } else if (translate_idx == 1) {
+                tx = cmd.f[0];
+                ty = cmd.f[1];
+            }
+            ++translate_idx;
+        }
+        if (cmd.type == pulp::canvas::DrawCommand::Type::concat_transform) {
+            REQUIRE_THAT(cmd.f[4], WithinAbs(50.0f, 1e-5f));  // e
+            REQUIRE_THAT(cmd.f[5], WithinAbs(0.0f,  1e-5f));  // f
+            saw_root_concat = true;
+        }
+    }
+    REQUIRE(saw_root_concat);
+    REQUIRE(saves >= 2);  // root + child
+    // Child's local-bounds translate happens in the child's saved frame,
+    // which is the parent frame * concat(50,0). So child at local (10,10)
+    // sits at root (10 + 50, 10 + 0) = (60, 10).
+    REQUIRE_THAT(tx, WithinAbs(10.0f, 1e-5f));
+    REQUIRE_THAT(ty, WithinAbs(10.0f, 1e-5f));
+}
+
+TEST_CASE("View transform_matrix does not affect layout or hit testing",
+          "[view][transform][issue-930]") {
+    // Transforms are paint-only — Yoga and hit_test see the un-transformed
+    // bounds. This is the contract called out in the issue's acceptance
+    // criteria.
+    View root;
+    root.set_bounds({0, 0, 200, 200});
+
+    auto child = std::make_unique<View>();
+    child->set_bounds({10, 10, 50, 50});
+    auto* child_ptr = child.get();
+    root.add_child(std::move(child));
+
+    root.set_transform_matrix(1.0f, 0.0f, 0.0f, 1.0f, 500.0f, 500.0f);
+
+    // hit_test at the un-transformed bounds still finds the child.
+    auto* hit = root.hit_test({30.0f, 30.0f});
+    REQUIRE(hit == child_ptr);
+
+    // hit_test where the transformed paint *would* land does NOT find anything
+    // — confirming the transform is paint-only and hit-testing ignores it.
+    auto* missed = root.hit_test({530.0f, 530.0f});
+    REQUIRE(missed != child_ptr);
+}

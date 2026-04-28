@@ -191,6 +191,8 @@ Key differences:
 | `transform: scale(1.5)` | `setScale(id, 1.5, 1.5)` |
 | `transform: rotate(45deg)` | `setRotation(id, 45)` |
 | `transform-origin: center` | `setTransformOrigin(id, 0.5, 0.5)` |
+| `transform: matrix(a,b,c,d,e,f)` | `setTransform(id, a, b, c, d, e, f)` |
+| `transform: translateX(-50%)` (50px-wide modal) | `setTransform(id, 1, 0, 0, 1, -25, 0)` |
 
 ### Transitions & Animation
 

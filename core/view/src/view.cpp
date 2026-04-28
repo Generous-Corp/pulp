@@ -43,6 +43,16 @@ void View::paint_all(canvas::Canvas& canvas) {
         canvas.translate(-ox, -oy);
     }
 
+    // Full 2D affine transform matrix (issue-930). Composed onto the current
+    // canvas matrix via concat_transform so parent transforms still apply
+    // and children inherit. Used by setTransform(id,a,b,c,d,e,f) from JS,
+    // primarily for translateX(-50%) centering and future animation.
+    if (has_transform_matrix_) {
+        canvas.concat_transform(transform_matrix_a_, transform_matrix_b_,
+                                transform_matrix_c_, transform_matrix_d_,
+                                transform_matrix_e_, transform_matrix_f_);
+    }
+
     // Clip only if overflow is hidden (default)
     if (overflow_ == Overflow::hidden)
         canvas.clip_rect(0, 0, bounds_.width, bounds_.height);

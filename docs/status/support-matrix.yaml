@@ -203,7 +203,8 @@ css_parity:
     notes: >
       CSS Transforms Level 1: translate(x,y), rotate(deg), scale(s), skew(x,y).
       Transform origin (normalized 0–1). Composited in paint_all. JS bridge:
-      setTranslate, setRotation, setScale, setTransformOrigin.
+      setTranslate, setRotation, setScale, setTransformOrigin, setTransform
+      (full 2D affine matrix), clearTransform.
   animations:
     status: usable
     notes: >

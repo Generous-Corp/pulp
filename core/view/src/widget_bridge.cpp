@@ -1829,6 +1829,17 @@ void WidgetBridge::register_api() {
     });
 
     // Typography properties
+    // pulp #927 — `setFontFamily(id, family)` was called from web-compat JS
+    // but had no C++ binding, so the call became a silent no-op. Now wires
+    // through to Label::set_font_family() and Label::paint() honors it via
+    // canvas.set_font_full().
+    engine_.register_function("setFontFamily", [this](choc::javascript::ArgumentList args) {
+        auto* v = widget(args.get<std::string>(0, ""));
+        auto family = args.get<std::string>(1, "");
+        if (auto* l = dynamic_cast<Label*>(v)) l->set_font_family(std::move(family));
+        return choc::value::Value();
+    });
+
     engine_.register_function("setFontWeight", [this](choc::javascript::ArgumentList args) {
         auto* v = widget(args.get<std::string>(0, ""));
         int w = static_cast<int>(args.get<double>(1, 400));
@@ -2611,6 +2622,35 @@ void WidgetBridge::register_api() {
         auto deg = static_cast<float>(args.get<double>(1, 0));
         auto* v = id.empty() ? &root_ : widget(id);
         if (v) v->set_rotation(deg);
+        return choc::value::Value();
+    });
+
+    // setTransform(id, a, b, c, d, e, f) — CSS transform: matrix(a,b,c,d,e,f)
+    // Applied at View paint time as a concat onto the current canvas matrix
+    // so it composes with parent transforms and child Views inherit it.
+    // Layout (Yoga + hit-test) sees the un-transformed bounds — paint-only.
+    // Issue-930. Companion to canvasSetTransform from PR #897 (issue-896),
+    // but applied to the View's painting frame rather than a Canvas2D context.
+    engine_.register_function("setTransform", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto a = static_cast<float>(args.get<double>(1, 1.0));
+        auto b = static_cast<float>(args.get<double>(2, 0.0));
+        auto c = static_cast<float>(args.get<double>(3, 0.0));
+        auto d = static_cast<float>(args.get<double>(4, 1.0));
+        auto e = static_cast<float>(args.get<double>(5, 0.0));
+        auto f = static_cast<float>(args.get<double>(6, 0.0));
+        auto* v = id.empty() ? &root_ : widget(id);
+        if (v) v->set_transform_matrix(a, b, c, d, e, f);
+        return choc::value::Value();
+    });
+
+    // clearTransform(id) — drop the affine matrix; the View reverts to its
+    // CSS-transform scalars (translate/rotate/scale) only. Mirrors removing
+    // the inline `transform` property in CSS. Issue-930.
+    engine_.register_function("clearTransform", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto* v = id.empty() ? &root_ : widget(id);
+        if (v) v->clear_transform_matrix();
         return choc::value::Value();
     });
 

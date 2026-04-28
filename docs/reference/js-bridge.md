@@ -179,6 +179,8 @@ setTranslate(id, x, y)          // Translate in pixels
 setScale(id, sx, sy)            // Scale factor (1.0 = normal)
 setRotation(id, degrees)        // Rotation in degrees
 setTransformOrigin(id, x, y)   // Origin (0-1 normalized, 0.5 = center)
+setTransform(id, a, b, c, d, e, f) // Full 2D affine matrix; composes with parent
+clearTransform(id)              // Drop the affine, fall back to scalar transforms
 setPosition(id, "absolute")    // "static" | "relative" | "absolute" | "fixed" | "sticky"
 setTop(id, px)                  // CSS top offset
 setRight(id, px)                // CSS right offset

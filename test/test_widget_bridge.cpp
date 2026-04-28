@@ -1617,3 +1617,50 @@ TEST_CASE("WidgetBridge canvasGetImageData returns a TextMetrics-like object "
     // 4*4*4 == 64 bytes for the RGBA array.
     REQUIRE(length.getWithDefault<double>(-1.0) == 64);
 }
+
+// ── setTransform on a View (issue-930) ────────────────────────────────────
+//
+// The View-level companion to canvasSetTransform from PR #897. Used 1× today
+// by the CSS adapter for translateX(-50%) modal centering and is foundational
+// for future widget animation. Apply an affine matrix to a View; paint_all()
+// concats it onto the canvas matrix so parent transforms compose and child
+// Views inherit it. Layout is paint-only — hit-test and Yoga ignore it.
+TEST_CASE("WidgetBridge setTransform stores affine matrix on the target View",
+          "[view][bridge][transform][issue-930]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        var d = document.createElement('div');
+        d.id = 'xform-view';
+        document.body.appendChild(d);
+        // translateX(-50%) on a 100px-wide centered modal becomes
+        // setTransform(1, 0, 0, 1, -50, 0).
+        setTransform(d._id, 1.0, 0.0, 0.0, 1.0, -50.0, 0.0);
+    )");
+
+    // The bridge resolves d._id -> a native widget id; look it up the same
+    // way the canvas tests do.
+    auto value = engine.evaluate("document.getElementById('xform-view')._id");
+    auto nativeId = std::string(value.getWithDefault<std::string_view>(""));
+    auto* v = bridge.widget(nativeId);
+    REQUIRE(v != nullptr);
+
+    REQUIRE(v->has_transform_matrix());
+    float a = 0, b = 0, c = 0, d = 0, e = 0, f = 0;
+    v->get_transform_matrix(a, b, c, d, e, f);
+    REQUIRE_THAT(a, WithinAbs(1.0f,   1e-5f));
+    REQUIRE_THAT(b, WithinAbs(0.0f,   1e-5f));
+    REQUIRE_THAT(c, WithinAbs(0.0f,   1e-5f));
+    REQUIRE_THAT(d, WithinAbs(1.0f,   1e-5f));
+    REQUIRE_THAT(e, WithinAbs(-50.0f, 1e-5f));
+    REQUIRE_THAT(f, WithinAbs(0.0f,   1e-5f));
+
+    // clearTransform drops the affine.
+    engine.evaluate("clearTransform(document.getElementById('xform-view')._id)");
+    REQUIRE_FALSE(v->has_transform_matrix());
+}

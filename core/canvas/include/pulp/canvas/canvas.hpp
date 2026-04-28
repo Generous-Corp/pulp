@@ -210,6 +210,22 @@ public:
     /// rather than wiping it. Default no-op for non-Skia backends.
     virtual void capture_paint_baseline_transform() {}
 
+    /// Concat (multiply) the supplied affine matrix onto the current
+    /// transform — does NOT replace it. Used by View::paint_all() when a
+    /// JS-supplied setTransform(id,a,b,c,d,e,f) is active on a View, so the
+    /// View's transform composes with parent transforms (translate to bounds,
+    /// outer transforms, etc.) rather than wiping them. Mirrors SkCanvas::concat.
+    /// Matrix layout matches CanvasRenderingContext2D.setTransform:
+    ///   [ a c e ]
+    ///   [ b d f ]
+    ///   [ 0 0 1 ]
+    /// Default no-op so non-Skia backends compile; Skia overrides to call
+    /// SkCanvas::concat, RecordingCanvas overrides to capture the command.
+    virtual void concat_transform(float a, float b, float c,
+                                  float d, float e, float f) {
+        (void)a; (void)b; (void)c; (void)d; (void)e; (void)f;
+    }
+
     // ── Clipping ─────────────────────────────────────────────────────────
     virtual void clip_rect(float x, float y, float w, float h) = 0;
 
@@ -393,6 +409,20 @@ public:
     virtual void set_text_align(TextAlign align) = 0;
     virtual void fill_text(const std::string& text, float x, float y) = 0;
     virtual float measure_text(const std::string& text) = 0;
+
+    /// Richer font setter that propagates CSS font-weight (100..900),
+    /// font-slant (0=upright, 1=italic), and letter-spacing (px between
+    /// glyphs) through to the backend. Default implementation forwards to
+    /// the legacy `set_font(family, size)` so non-Label callers keep
+    /// working unchanged. Backends that honor these properties (Skia,
+    /// CoreText, RecordingCanvas) override this to capture or apply them.
+    /// pulp #927 — Label widget honors setFontFamily / setFontWeight /
+    /// setLetterSpacing from JS.
+    virtual void set_font_full(const std::string& family, float size,
+                                int weight, int slant, float letter_spacing) {
+        (void)weight; (void)slant; (void)letter_spacing;
+        set_font(family, size);
+    }
 
     /// Full text metrics for layout and intrinsic sizing.
     /// Mirrors HTML5 TextMetrics — fields beyond width/ascent/descent are
@@ -635,11 +665,17 @@ struct DrawCommand {
         save, restore,
         translate, scale, rotate, clip_rect,
         set_transform, clip, set_blend_mode,    // issue-896
+        concat_transform,                       // issue-930
         set_fill_color, set_stroke_color, set_line_width,
         set_line_cap, set_line_join,
         fill_rect, stroke_rect, fill_rounded_rect, stroke_rounded_rect,
         fill_circle, stroke_circle, stroke_arc, stroke_line,
         set_font, set_text_align, fill_text,
+        // pulp #927 — full font setter: family in `text`, size/weight/slant/
+        // letter_spacing in f[0..3]. Emitted alongside (in addition to) the
+        // legacy set_font command so existing tests that count set_font
+        // continue to pass.
+        set_font_full,
         // ── issue-916: Canvas2D API gaps ──────────────────────────────
         set_line_dash,      ///< intervals stored in `floats`, phase in f[0]
         draw_image,         ///< source path/url in `text`, dst rect in f[0..3]
@@ -682,6 +718,8 @@ public:
     void set_transform(float a, float b, float c,
                        float d, float e, float f) override;
     void capture_paint_baseline_transform() override;
+    void concat_transform(float a, float b, float c,
+                          float d, float e, float f) override;
     void clip_rect(float x, float y, float w, float h) override;
     void clip() override;
     void set_blend_mode(BlendMode mode) override;
@@ -701,6 +739,8 @@ public:
                    float start_angle, float end_angle) override;
     void stroke_line(float x0, float y0, float x1, float y1) override;
     void set_font(const std::string& family, float size) override;
+    void set_font_full(const std::string& family, float size,
+                       int weight, int slant, float letter_spacing) override;
     void set_text_align(TextAlign align) override;
     void fill_text(const std::string& text, float x, float y) override;
     float measure_text(const std::string& text) override;

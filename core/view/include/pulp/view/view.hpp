@@ -356,6 +356,37 @@ public:
     float transform_origin_x() const { return origin_x_; }
     float transform_origin_y() const { return origin_y_; }
 
+    /// Full 2D affine transform matrix on the View (issue-930). Mirrors the
+    /// CanvasRenderingContext2D.setTransform contract:
+    ///   [ a c e ]
+    ///   [ b d f ]
+    ///   [ 0 0 1 ]
+    /// Applied in paint_all() after positioning the canvas at bounds_.{x,y}
+    /// but before painting any background, border, or children — so the
+    /// matrix multiplies onto the current canvas transform rather than
+    /// replacing it (parent transforms still compose). Layout is unaffected:
+    /// transforms are paint-only, hit-testing and Yoga still see un-transformed
+    /// bounds.
+    void set_transform_matrix(float a, float b, float c,
+                              float d, float e, float f) {
+        transform_matrix_a_ = a;
+        transform_matrix_b_ = b;
+        transform_matrix_c_ = c;
+        transform_matrix_d_ = d;
+        transform_matrix_e_ = e;
+        transform_matrix_f_ = f;
+        has_transform_matrix_ = true;
+    }
+    void clear_transform_matrix() { has_transform_matrix_ = false; }
+    bool has_transform_matrix() const { return has_transform_matrix_; }
+    /// Returns the six affine components in (a,b,c,d,e,f) order; meaningful
+    /// only when has_transform_matrix() is true.
+    void get_transform_matrix(float& a, float& b, float& c,
+                              float& d, float& e, float& f) const {
+        a = transform_matrix_a_; b = transform_matrix_b_; c = transform_matrix_c_;
+        d = transform_matrix_d_; e = transform_matrix_e_; f = transform_matrix_f_;
+    }
+
     /// CSS filter: blur(px) — per-element blur
     void set_filter_blur(float radius) { filter_blur_ = radius; }
     float filter_blur() const { return filter_blur_; }
@@ -459,6 +490,13 @@ private:
     float rotation_deg_ = 0;
     float skew_x_ = 0, skew_y_ = 0;
     float origin_x_ = 0.5f, origin_y_ = 0.5f;  // transform-origin (normalized)
+    // Full 2D affine matrix (issue-930). Identity by default; only applied
+    // when has_transform_matrix_ is true. Stored in CanvasRenderingContext2D
+    // (a,b,c,d,e,f) order:  [a c e / b d f / 0 0 1].
+    float transform_matrix_a_ = 1.0f, transform_matrix_b_ = 0.0f,
+          transform_matrix_c_ = 0.0f, transform_matrix_d_ = 1.0f,
+          transform_matrix_e_ = 0.0f, transform_matrix_f_ = 0.0f;
+    bool has_transform_matrix_ = false;
     float filter_blur_ = 0;
     bool needs_layer_ = false;
     WindowHost* window_host_ = nullptr;
