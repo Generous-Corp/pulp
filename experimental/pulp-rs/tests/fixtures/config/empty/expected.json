@@ -1,0 +1,25 @@
+{
+  "config_path": "<CONFIG_PATH>",
+  "entries": [
+    {
+      "key": "update.mode",
+      "value": "prompt",
+      "default": true
+    },
+    {
+      "key": "update.check_interval_hours",
+      "value": "24",
+      "default": true
+    },
+    {
+      "key": "update.channel",
+      "value": "stable",
+      "default": true
+    },
+    {
+      "key": "update.bump_projects",
+      "value": "prompt",
+      "default": true
+    }
+  ]
+}

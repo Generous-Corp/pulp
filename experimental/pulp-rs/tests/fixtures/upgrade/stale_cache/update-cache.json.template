@@ -1,0 +1,7 @@
+{
+  "schema": 1,
+  "last_check_epoch_sec": 100,
+  "latest_version": "0.39.0",
+  "release_notes_url": "https://github.com/danielraffel/pulp/releases/tag/v0.39.0",
+  "banner_shown_for_version": ""
+}

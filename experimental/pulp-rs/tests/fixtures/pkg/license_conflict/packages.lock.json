@@ -1,0 +1,11 @@
+{
+  "lockfile_version": 1,
+  "packages": {
+    "aubio": {
+      "version": "0.4.9",
+      "resolved": "https://example.com/aubio.git",
+      "integrity": "",
+      "commit": "0.4.9"
+    }
+  }
+}

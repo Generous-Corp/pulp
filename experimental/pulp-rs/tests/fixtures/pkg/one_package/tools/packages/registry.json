@@ -1,0 +1,29 @@
+{
+  "registry_version": 2,
+  "packages": {
+    "alac": {
+      "name": "ALAC",
+      "version": "1.0",
+      "description": "Apple Lossless Audio Codec",
+      "license": "Apache-2.0",
+      "category": "audio-io",
+      "url": "https://github.com/macosforge/alac",
+      "fetch": {
+        "method": "FetchContent",
+        "git_repository": "https://github.com/macosforge/alac.git",
+        "git_tag": "master"
+      },
+      "cmake": {
+        "targets": ["alac"],
+        "header_only": false
+      },
+      "platforms": {
+        "macOS": {"architectures": ["arm64", "x86_64"]},
+        "Windows": {"architectures": ["x64"]},
+        "Linux": {"architectures": ["x64"]}
+      },
+      "tags": ["alac", "codec", "lossless"],
+      "provides": ["alac-encode", "alac-decode"]
+    }
+  }
+}

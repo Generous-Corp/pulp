@@ -1,0 +1,6 @@
+- slug: overview
+  path: reference/overview.md
+  kind: reference
+- slug: cli
+  path: reference/cli.md
+  kind: reference

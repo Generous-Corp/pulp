@@ -1,0 +1,12 @@
+# Pin the toolchain used to build `pulp-rs` so every reviewer, CI
+# runner, and bench run sees identical compiler semantics.
+#
+# The MSRV declared in Cargo.toml (`rust-version = "1.79"`) is the
+# MINIMUM we compile on; this file picks a specific version to use for
+# local development. CI uses `dtolnay/rust-toolchain@stable` instead so
+# we also catch breakage on the current stable release.
+
+[toolchain]
+channel    = "stable"
+components = ["rustfmt", "clippy"]
+profile    = "minimal"

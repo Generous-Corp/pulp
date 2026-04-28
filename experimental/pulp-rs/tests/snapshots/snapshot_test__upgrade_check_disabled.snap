@@ -1,0 +1,11 @@
+---
+source: tests/snapshot_test.rs
+expression: v
+---
+{
+  "installed": "0.37.0",
+  "latest": "",
+  "is_newer": false,
+  "release_notes_url": "",
+  "source": "disabled"
+}

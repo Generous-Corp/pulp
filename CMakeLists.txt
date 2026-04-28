@@ -510,6 +510,26 @@ if(NOT ANDROID AND NOT IOS AND PULP_ENABLE_GPU)
     add_subdirectory(tools/cli)
 endif()
 
+# ── Rust CLI (Phase 8 binary swap, issues #686 / #767) ────────────────────
+# Bridges `cargo build` for the experimental Rust CLI port into the
+# CMake build graph. Coexists with pulp-cli (the C++ binary) — both
+# install side-by-side under `${CMAKE_INSTALL_BINDIR}`. PR #2 of the
+# swap pair flips the user-facing default; this file is the no-op
+# build-graph scaffolding (PR #1).
+#
+# Mirror the EXACT desktop guard used for tools/cli above — both the
+# `NOT ANDROID AND NOT IOS` mobile-skip AND the `PULP_ENABLE_GPU`
+# desktop-CLI-lane guard. Without the GPU guard, sanitizer-style
+# GPU-off jobs still pull cargo into the default `all` build whenever
+# cargo happens to be on PATH, introducing unrelated Rust-toolchain
+# / network failures (and minutes of cargo build time) in lanes that
+# intentionally disable the CLI/GPU paths. Codex review on PR #778
+# (CMakeLists:523) flagged the missing guard as a P2.
+if(NOT ANDROID AND NOT IOS AND PULP_ENABLE_GPU
+   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/experimental/pulp-rs/CMakeLists.txt")
+    add_subdirectory(experimental/pulp-rs)
+endif()
+
 # ── MCP Server (desktop only) ─────────────────────────────────────────────
 if(NOT ANDROID AND NOT IOS)
     add_subdirectory(tools/mcp)

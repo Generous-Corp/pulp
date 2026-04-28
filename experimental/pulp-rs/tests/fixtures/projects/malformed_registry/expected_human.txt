@@ -1,0 +1,6 @@
+Registry: <REGISTRY>
+  2 projects:
+  - ForwardCompat
+      /tmp/pulp-rs-fixture/forward-compat  registered 2026-04-21T10:00:00Z
+  - MissingEntry (missing)
+      /nonexistent/missing-entry  registered 2026-04-22T00:00:00Z

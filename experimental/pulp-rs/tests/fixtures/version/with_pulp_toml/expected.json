@@ -1,0 +1,18 @@
+{
+  "cli": {
+    "raw": "0.37.0",
+    "comparable": true,
+    "major": 0,
+    "minor": 37,
+    "patch": 0
+  },
+  "plugin": {
+    "raw": "",
+    "comparable": false
+  },
+  "plugin_min_cli": {
+    "raw": "",
+    "comparable": false
+  },
+  "plugin_json_path": ""
+}

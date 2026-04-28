@@ -1,0 +1,16 @@
+{
+  "projects": [
+    {
+      "path": "/tmp/pulp-rs-fixture/forward-compat",
+      "name": "ForwardCompat",
+      "registered_at": "2026-04-21T10:00:00Z",
+      "meta": {"schema_rev": 2, "tags": ["alpha", "beta"]},
+      "pinned": true
+    },
+    {
+      "path": "/nonexistent/missing-entry",
+      "name": "MissingEntry",
+      "registered_at": "2026-04-22T00:00:00Z"
+    }
+  ]
+}

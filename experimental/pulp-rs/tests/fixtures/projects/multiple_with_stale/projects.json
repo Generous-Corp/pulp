@@ -1,0 +1,8 @@
+{
+  "projects": [
+    {"path": "/tmp/pulp-rs-fixture/active-plugin", "name": "active-plugin", "registered_at": "2026-04-23T10:00:00Z"},
+    {"path": "/nonexistent/stale-project-a", "name": "StaleA", "registered_at": "2026-04-01T00:00:00Z"},
+    {"path": "/nonexistent/stale-project-b", "name": "StaleB", "registered_at": "2026-04-02T00:00:00Z"},
+    {"path": "/tmp/pulp-rs-fixture/also-active", "name": "also-active", "registered_at": "2026-04-22T00:00:00Z"}
+  ]
+}

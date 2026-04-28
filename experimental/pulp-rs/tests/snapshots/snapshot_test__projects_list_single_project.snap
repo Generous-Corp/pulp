@@ -1,0 +1,15 @@
+---
+source: tests/snapshot_test.rs
+expression: v
+---
+{
+  "registry": "<REGISTRY>",
+  "projects": [
+    {
+      "path": "/tmp/pulp-rs-fixture/alpha-plugin",
+      "name": "alpha-plugin",
+      "registered_at": "2026-04-23T10:00:00Z",
+      "missing_on_disk": false
+    }
+  ]
+}

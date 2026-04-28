@@ -1,0 +1,29 @@
+---
+source: tests/snapshot_test.rs
+expression: v
+---
+{
+  "config_path": "<CONFIG_PATH>",
+  "entries": [
+    {
+      "key": "update.mode",
+      "value": "auto",
+      "default": false
+    },
+    {
+      "key": "update.check_interval_hours",
+      "value": "48",
+      "default": false
+    },
+    {
+      "key": "update.channel",
+      "value": "beta",
+      "default": false
+    },
+    {
+      "key": "update.bump_projects",
+      "value": "off",
+      "default": false
+    }
+  ]
+}
