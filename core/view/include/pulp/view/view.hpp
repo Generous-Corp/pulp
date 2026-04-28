@@ -391,6 +391,12 @@ public:
     void set_filter_blur(float radius) { filter_blur_ = radius; }
     float filter_blur() const { return filter_blur_; }
 
+    /// CSS backdrop-filter: blur(px) — frosted-glass blur applied to whatever
+    /// is behind this View when it paints (issue-926). Zero == no backdrop
+    /// filter. Skia maps to `saveLayer(SaveLayerRec{ .fBackdrop = Blur })`.
+    void set_backdrop_blur(float radius) { backdrop_blur_ = radius; }
+    float backdrop_blur() const { return backdrop_blur_; }
+
     /// Force this View's subtree to render into a compositing layer.
     /// Useful for caching, post-effects, or explicit layer isolation.
     void set_needs_layer(bool v) { needs_layer_ = v; }
@@ -498,6 +504,7 @@ private:
           transform_matrix_e_ = 0.0f, transform_matrix_f_ = 0.0f;
     bool has_transform_matrix_ = false;
     float filter_blur_ = 0;
+    float backdrop_blur_ = 0;
     bool needs_layer_ = false;
     WindowHost* window_host_ = nullptr;
     PluginViewHost* plugin_view_host_ = nullptr;

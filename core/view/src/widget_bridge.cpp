@@ -2732,6 +2732,19 @@ void WidgetBridge::register_api() {
         return choc::value::Value();
     });
 
+    // setBackdropFilter(id, blur_px) — CSS `backdrop-filter: blur(Npx)` for
+    // frosted-glass overlays / modal backgrounds (issue-926). Numeric
+    // overload to keep the bridge cheap; string-form CSS parsing stays in
+    // setFilter.
+    engine_.register_function("setBackdropFilter",
+        [this](choc::javascript::ArgumentList args) {
+            auto id = args.get<std::string>(0, "");
+            auto blur_px = args.get<double>(1, 0.0);
+            auto* v = id.empty() ? &root_ : widget(id);
+            if (v) v->set_backdrop_blur(static_cast<float>(blur_px));
+            return choc::value::Value();
+        });
+
     // setBackgroundGradient(id, "linear-gradient(to right, #ff0000, #0000ff)")
     engine_.register_function("setBackgroundGradient", [this, parseColor](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");

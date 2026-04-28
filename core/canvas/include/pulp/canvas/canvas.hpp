@@ -576,6 +576,20 @@ public:
         fill_rounded_rect(x, y, w, h, corner_radius);
     }
 
+    /// CSS `backdrop-filter: blur(Npx)` — push a compositing layer whose
+    /// initial contents are the parent surface filtered through a Gaussian
+    /// blur of `blur_radius`. Subsequent draws into this layer composite
+    /// over the blurred backdrop. Must be paired with restore() (issue-926).
+    ///
+    /// Skia maps to `SkCanvas::saveLayer(SaveLayerRec{ .fBackdrop = Blur })`.
+    /// CPU/recording fallback is a plain save() so the matching restore()
+    /// stays balanced — visual fidelity downgrades to an unblurred overlay.
+    virtual void save_backdrop_filter(float x, float y, float w, float h,
+                                      float blur_radius) {
+        (void)x; (void)y; (void)w; (void)h; (void)blur_radius;
+        save();
+    }
+
     // ── Waveform (GPU-accelerated) ─────────────────────────────────────
     /// Draw a waveform using GPU shader (SDF anti-aliased line + fill).
     /// Samples are normalized -1 to 1. Default implementation falls back to polyline.
@@ -663,7 +677,9 @@ struct DrawCommand {
         // ── issue-916: Canvas2D API gaps ──────────────────────────────
         set_line_dash,      ///< intervals stored in `floats`, phase in f[0]
         draw_image,         ///< source path/url in `text`, dst rect in f[0..3]
-        write_pixels        ///< RGBA bytes in `text` (binary), w/h in f[0..1], dst in f[2..3]
+        write_pixels,       ///< RGBA bytes in `text` (binary), w/h in f[0..1], dst in f[2..3]
+        // ── issue-926: backdrop-filter ────────────────────────────────
+        save_backdrop_filter ///< x,y,w,h in f[0..3], blur radius in f[4]
     };
 
     Type type;
@@ -736,6 +752,8 @@ public:
                               float x, float y, float w, float h) override;
     bool write_pixels(const uint8_t* data, int width, int height,
                       int dx, int dy) override;
+    void save_backdrop_filter(float x, float y, float w, float h,
+                              float blur_radius) override;
 
 private:
     std::vector<DrawCommand> commands_;

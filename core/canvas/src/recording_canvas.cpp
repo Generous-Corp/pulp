@@ -242,6 +242,14 @@ bool RecordingCanvas::write_pixels(const uint8_t* data, int width, int height,
     return true;
 }
 
+void RecordingCanvas::save_backdrop_filter(float x, float y, float w, float h,
+                                            float blur_radius) {
+    DrawCommand cmd{DrawCommand::Type::save_backdrop_filter};
+    cmd.f[0] = x; cmd.f[1] = y; cmd.f[2] = w; cmd.f[3] = h;
+    cmd.f[4] = blur_radius;
+    commands_.push_back(cmd);
+}
+
 // ── compile_sksl fallback for non-Skia builds ────────────────────────────────
 #ifndef PULP_HAS_SKIA
 std::string Canvas::compile_sksl(const std::string& sksl) {
