@@ -130,6 +130,13 @@ public:
     void save_backdrop_filter(float x, float y, float w, float h,
                               float blur_radius) override;
 
+    // Box shadow (issue-925) — uses SkImageFilters::DropShadowOnly for
+    // outset shadows; inset shadows clip to the box and stroke with a
+    // blurred mask.
+    void draw_box_shadow(float x, float y, float w, float h,
+                         float dx, float dy, float blur, float spread,
+                         Color color, bool inset, float corner_radius) override;
+
     // Custom SkSL shader rendering (GPU-accelerated)
     bool draw_with_sksl(const std::string& sksl,
                         float x, float y, float w, float h,
