@@ -86,6 +86,16 @@ void CoreGraphicsCanvas::fill_rect(float x, float y, float w, float h) {
     CGContextFillRect(ctx_, CGRectMake(x, y, w, h));
 }
 
+// pulp #929 — clearRect must replace destination pixels with transparent
+// black, not SrcOver-blend a transparent fill (which CoreGraphics would
+// treat as a no-op the same way Skia does). CGContextClearRect zeroes
+// the alpha channel of the destination region directly, mirroring the
+// CanvasRenderingContext2D.clearRect spec for the CoreGraphics-backed
+// macOS / iOS render paths.
+void CoreGraphicsCanvas::clear_rect(float x, float y, float w, float h) {
+    CGContextClearRect(ctx_, CGRectMake(x, y, w, h));
+}
+
 void CoreGraphicsCanvas::stroke_rect(float x, float y, float w, float h) {
     apply_stroke_color();
     CGContextStrokeRect(ctx_, CGRectMake(x, y, w, h));
