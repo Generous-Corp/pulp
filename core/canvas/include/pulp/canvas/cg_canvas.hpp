@@ -21,6 +21,8 @@ public:
     void translate(float x, float y) override;
     void scale(float sx, float sy) override;
     void rotate(float radians) override;
+    void concat_transform(float a, float b, float c,
+                          float d, float e, float f) override;
     void clip_rect(float x, float y, float w, float h) override;
 
     void set_fill_color(Color c) override;

@@ -38,6 +38,26 @@ void CoreGraphicsCanvas::rotate(float radians) {
     CGContextRotateCTM(ctx_, radians);
 }
 
+// pulp #943 (#933 P1) — concat the supplied affine onto the current CTM, do
+// NOT replace it. View::paint_all() routes JS-supplied setTransform(id, ...)
+// through Canvas::concat_transform so the View's transform composes with the
+// parent View's transform (the bounds translate, outer transforms, etc.)
+// rather than wiping it. Mirrors SkCanvas::concat / SkiaCanvas::concat_transform.
+//
+// CanvasRenderingContext2D affine matrix layout:
+//   [ a c e ]
+//   [ b d f ]
+//   [ 0 0 1 ]
+// CGAffineTransformMake takes (a, b, c, d, tx, ty) in the same column-major
+// convention used by CanvasRenderingContext2D.setTransform / DOMMatrix, so the
+// six floats map 1:1 with no transposition needed.
+// CGContextConcatCTM right-multiplies the supplied transform onto the CTM,
+// matching SkCanvas::concat semantics.
+void CoreGraphicsCanvas::concat_transform(float a, float b, float c,
+                                          float d, float e, float f) {
+    CGContextConcatCTM(ctx_, CGAffineTransformMake(a, b, c, d, e, f));
+}
+
 void CoreGraphicsCanvas::clip_rect(float x, float y, float w, float h) {
     CGContextClipToRect(ctx_, CGRectMake(x, y, w, h));
 }

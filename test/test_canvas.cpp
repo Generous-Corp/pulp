@@ -755,4 +755,132 @@ TEST_CASE("CoreGraphicsCanvas::clear_rect zeroes destination pixels",
         REQUIRE(pixels[i] == 0);
     }
 }
+
+// pulp #943 (#933 P1) — CoreGraphicsCanvas::concat_transform must compose the
+// supplied affine onto the current CTM rather than no-op (the default in the
+// base Canvas virtual). Without the override, View::paint_all() routes
+// JS-supplied setTransform(...) through Canvas::concat_transform and the
+// transform silently disappears on Apple CPU paint paths.
+//
+// Strategy: render a marker rectangle with two equivalent code paths and
+// require the bitmaps come out byte-identical:
+//   (a) no concat_transform, draw at (50 + dx, dy)
+//   (b) concat_transform(1, 0, 0, 1, 50, 0), draw at (dx, dy)
+// If concat_transform is a no-op (the bug), path (b) draws at (dx, dy) and
+// the bitmaps differ. With the override calling CGContextConcatCTM, both
+// paths land at the same destination pixels.
+TEST_CASE("CoreGraphicsCanvas::concat_transform translates draw position",
+          "[canvas][cg][issue-943-933]") {
+    constexpr int W = 64;
+    constexpr int H = 32;
+    auto build_ctx = [&](std::vector<uint8_t>& pixels) -> CGContextRef {
+        pixels.assign(static_cast<size_t>(W) * H * 4u, 0u);
+        auto cs = CGColorSpaceCreateDeviceRGB();
+        REQUIRE(cs != nullptr);
+        const uint32_t bitmap_info =
+            static_cast<uint32_t>(kCGImageAlphaPremultipliedLast) |
+            static_cast<uint32_t>(kCGBitmapByteOrder32Big);
+        CGContextRef ctx = CGBitmapContextCreate(
+            pixels.data(), W, H, 8, W * 4u, cs, bitmap_info);
+        CGColorSpaceRelease(cs);
+        REQUIRE(ctx != nullptr);
+        return ctx;
+    };
+
+    // (a) Reference render — draw a 4x4 red rect at canvas (60, 10) directly.
+    std::vector<uint8_t> reference(static_cast<size_t>(W) * H * 4u, 0u);
+    {
+        CGContextRef ctx = build_ctx(reference);
+        {
+            CoreGraphicsCanvas canvas(ctx, static_cast<float>(W),
+                                      static_cast<float>(H));
+            canvas.set_fill_color(Color::rgba(1.0f, 0.0f, 0.0f, 1.0f));
+            canvas.fill_rect(60.0f, 10.0f, 4.0f, 4.0f);
+        }
+        CGContextRelease(ctx);
+    }
+
+    // (b) Through concat_transform — translate +50 in x, then draw at (10, 10).
+    // With the override in place this must produce the same final pixels.
+    std::vector<uint8_t> via_concat(static_cast<size_t>(W) * H * 4u, 0u);
+    {
+        CGContextRef ctx = build_ctx(via_concat);
+        {
+            CoreGraphicsCanvas canvas(ctx, static_cast<float>(W),
+                                      static_cast<float>(H));
+            // Pure translation: a=1, b=0, c=0, d=1, e=50, f=0.
+            canvas.concat_transform(1.0f, 0.0f, 0.0f, 1.0f, 50.0f, 0.0f);
+            canvas.set_fill_color(Color::rgba(1.0f, 0.0f, 0.0f, 1.0f));
+            canvas.fill_rect(10.0f, 10.0f, 4.0f, 4.0f);
+        }
+        CGContextRelease(ctx);
+    }
+
+    REQUIRE(reference.size() == via_concat.size());
+    REQUIRE(reference == via_concat);
+
+    // Sanity: there must be a non-trivial number of red pixels — guards
+    // against a regression that no-ops both paths and produces empty bitmaps.
+    int red_pixels = 0;
+    for (size_t i = 0; i + 3 < reference.size(); i += 4) {
+        if (reference[i] == 255 && reference[i + 1] == 0 &&
+            reference[i + 2] == 0 && reference[i + 3] == 255) {
+            ++red_pixels;
+        }
+    }
+    REQUIRE(red_pixels >= 16);  // at least the 4x4 footprint
+}
+
+// pulp #943 (#933 P1) — verify a non-translation affine (scale + translate)
+// composes correctly, not just pure translations. This catches a regression
+// where someone implements concat_transform as CGContextTranslateCTM(e, f)
+// and ignores a/b/c/d.
+TEST_CASE("CoreGraphicsCanvas::concat_transform scales + translates",
+          "[canvas][cg][issue-943-933]") {
+    constexpr int W = 64;
+    constexpr int H = 32;
+    auto build_ctx = [&](std::vector<uint8_t>& pixels) -> CGContextRef {
+        pixels.assign(static_cast<size_t>(W) * H * 4u, 0u);
+        auto cs = CGColorSpaceCreateDeviceRGB();
+        const uint32_t bitmap_info =
+            static_cast<uint32_t>(kCGImageAlphaPremultipliedLast) |
+            static_cast<uint32_t>(kCGBitmapByteOrder32Big);
+        CGContextRef ctx = CGBitmapContextCreate(
+            pixels.data(), W, H, 8, W * 4u, cs, bitmap_info);
+        CGColorSpaceRelease(cs);
+        REQUIRE(ctx != nullptr);
+        return ctx;
+    };
+
+    // Reference: scale 2x in x, then draw a 4x4 rect at (10, 10) — should
+    // cover canvas-space (20, 10)..(28, 14).
+    std::vector<uint8_t> reference(static_cast<size_t>(W) * H * 4u, 0u);
+    {
+        CGContextRef ctx = build_ctx(reference);
+        {
+            CoreGraphicsCanvas canvas(ctx, static_cast<float>(W),
+                                      static_cast<float>(H));
+            canvas.scale(2.0f, 1.0f);
+            canvas.set_fill_color(Color::rgba(0.0f, 1.0f, 0.0f, 1.0f));
+            canvas.fill_rect(10.0f, 10.0f, 4.0f, 4.0f);
+        }
+        CGContextRelease(ctx);
+    }
+
+    // Via concat_transform with sx=2, sy=1, tx=ty=0.
+    std::vector<uint8_t> via_concat(static_cast<size_t>(W) * H * 4u, 0u);
+    {
+        CGContextRef ctx = build_ctx(via_concat);
+        {
+            CoreGraphicsCanvas canvas(ctx, static_cast<float>(W),
+                                      static_cast<float>(H));
+            canvas.concat_transform(2.0f, 0.0f, 0.0f, 1.0f, 0.0f, 0.0f);
+            canvas.set_fill_color(Color::rgba(0.0f, 1.0f, 0.0f, 1.0f));
+            canvas.fill_rect(10.0f, 10.0f, 4.0f, 4.0f);
+        }
+        CGContextRelease(ctx);
+    }
+
+    REQUIRE(reference == via_concat);
+}
 #endif  // __APPLE__
