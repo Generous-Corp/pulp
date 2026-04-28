@@ -1829,6 +1829,17 @@ void WidgetBridge::register_api() {
     });
 
     // Typography properties
+    // pulp #927 — `setFontFamily(id, family)` was called from web-compat JS
+    // but had no C++ binding, so the call became a silent no-op. Now wires
+    // through to Label::set_font_family() and Label::paint() honors it via
+    // canvas.set_font_full().
+    engine_.register_function("setFontFamily", [this](choc::javascript::ArgumentList args) {
+        auto* v = widget(args.get<std::string>(0, ""));
+        auto family = args.get<std::string>(1, "");
+        if (auto* l = dynamic_cast<Label*>(v)) l->set_font_family(std::move(family));
+        return choc::value::Value();
+    });
+
     engine_.register_function("setFontWeight", [this](choc::javascript::ArgumentList args) {
         auto* v = widget(args.get<std::string>(0, ""));
         int w = static_cast<int>(args.get<double>(1, 400));

@@ -387,3 +387,99 @@ TEST_CASE("View paint_all paints children", "[view][widget]") {
     REQUIRE(canvas.count(DrawCommand::Type::save) == 3);
     REQUIRE(canvas.count(DrawCommand::Type::restore) == 3);
 }
+
+// ── pulp #927 — Label honors setFontFamily / setFontWeight / setLetterSpacing ──
+//
+// Before #927, Label::paint() called canvas.set_font("Inter", size) with no
+// weight / family / spacing — so JS calls into setFontWeight, setFontFamily,
+// and setLetterSpacing landed on Label members but were dropped on the floor
+// at render time. These tests assert the propagation through the
+// RecordingCanvas, which captures the rich state via DrawCommand::set_font_full.
+
+TEST_CASE("Label propagates font_family to canvas", "[view][widget][issue-927]") {
+    Label label("Hello");
+    label.set_bounds({0, 0, 200, 24});
+    label.set_font_family("JetBrains Mono");
+
+    RecordingCanvas canvas;
+    label.paint(canvas);
+
+    REQUIRE(canvas.count(DrawCommand::Type::set_font_full) == 1);
+    // Locate the rich set_font_full command and assert family is forwarded.
+    bool found_family = false;
+    for (const auto& cmd : canvas.commands()) {
+        if (cmd.type == DrawCommand::Type::set_font_full) {
+            REQUIRE(cmd.text == "JetBrains Mono");
+            found_family = true;
+        }
+    }
+    REQUIRE(found_family);
+}
+
+TEST_CASE("Label propagates font_weight to canvas", "[view][widget][issue-927]") {
+    Label label("BOLD");
+    label.set_bounds({0, 0, 200, 24});
+    label.set_font_weight(700);
+
+    RecordingCanvas canvas;
+    label.paint(canvas);
+
+    REQUIRE(canvas.count(DrawCommand::Type::set_font_full) == 1);
+    bool found_weight = false;
+    for (const auto& cmd : canvas.commands()) {
+        if (cmd.type == DrawCommand::Type::set_font_full) {
+            // f[1] carries CSS font-weight (100..900).
+            REQUIRE(static_cast<int>(cmd.f[1]) == 700);
+            found_weight = true;
+        }
+    }
+    REQUIRE(found_weight);
+}
+
+TEST_CASE("Label propagates letter_spacing to canvas", "[view][widget][issue-927]") {
+    Label label("SPECTR");
+    label.set_bounds({0, 0, 200, 24});
+    label.set_letter_spacing(1.5f);
+
+    RecordingCanvas canvas;
+    label.paint(canvas);
+
+    REQUIRE(canvas.count(DrawCommand::Type::set_font_full) == 1);
+    bool found_spacing = false;
+    for (const auto& cmd : canvas.commands()) {
+        if (cmd.type == DrawCommand::Type::set_font_full) {
+            // f[3] carries CSS letter-spacing in px.
+            REQUIRE_THAT(cmd.f[3], WithinAbs(1.5, 0.001));
+            found_spacing = true;
+        }
+    }
+    REQUIRE(found_spacing);
+}
+
+TEST_CASE("Label set_font_full carries default weight when no setter called",
+          "[view][widget][issue-927]") {
+    // Verifies that the rich command goes out even for the default
+    // (font_weight_=400, no family) path. Important: we do NOT want a
+    // regression where set_font_full only fires for "non-default" labels.
+    Label label("plain");
+    label.set_bounds({0, 0, 100, 20});
+
+    RecordingCanvas canvas;
+    label.paint(canvas);
+
+    REQUIRE(canvas.count(DrawCommand::Type::set_font_full) == 1);
+    for (const auto& cmd : canvas.commands()) {
+        if (cmd.type == DrawCommand::Type::set_font_full) {
+            REQUIRE(cmd.text == "Inter");          // default theme family
+            REQUIRE(static_cast<int>(cmd.f[1]) == 400);
+            REQUIRE_THAT(cmd.f[3], WithinAbs(0.0, 0.001));
+        }
+    }
+}
+
+TEST_CASE("Label getters round-trip font_family", "[view][widget][issue-927]") {
+    Label label("x");
+    REQUIRE(label.font_family().empty());          // default == theme fallback
+    label.set_font_family("Inter Display");
+    REQUIRE(label.font_family() == "Inter Display");
+}

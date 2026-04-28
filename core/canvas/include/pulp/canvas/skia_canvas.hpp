@@ -76,6 +76,8 @@ public:
 
     // ── Text ─────────────────────────────────────────────────────────────
     void set_font(const std::string& family, float size) override;
+    void set_font_full(const std::string& family, float size,
+                       int weight, int slant, float letter_spacing) override;
     void set_text_align(TextAlign align) override;
     void fill_text(const std::string& text, float x, float y) override;
     void fill_text_sdf(const std::string& text, float x, float y,
@@ -163,6 +165,9 @@ private:
     LineCap line_cap_ = LineCap::butt;
     LineJoin line_join_ = LineJoin::miter;
     std::string font_family_ = "sans-serif";
+    int font_weight_ = 400;             ///< CSS weight 100..900 (pulp #927)
+    int font_slant_ = 0;                ///< 0=upright, 1=italic (pulp #927)
+    float letter_spacing_ = 0.0f;       ///< Extra advance per glyph in px (pulp #927)
     TextAlign text_align_ = TextAlign::left;
 
     // Gradient state

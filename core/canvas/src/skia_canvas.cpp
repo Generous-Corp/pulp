@@ -99,19 +99,46 @@ static SkPaint make_stroke_paint(Color c, float width) {
 }
 
 // Cached typeface loaded directly from a known path — bypasses family name
-// matching for deterministic metrics (Visage-style approach).
-static sk_sp<SkTypeface> get_cached_typeface(const std::string& family) {
-    static std::unordered_map<std::string, sk_sp<SkTypeface>> cache;
-    auto it = cache.find(family);
+// matching for deterministic metrics (Visage-style approach). Cache key
+// includes weight + slant so setFontWeight(700) actually returns a bold
+// typeface rather than the same Regular blob (pulp #927).
+static sk_sp<SkTypeface> get_cached_typeface(const std::string& family,
+                                             int weight, int slant) {
+    struct Key { std::string family; int weight; int slant; };
+    struct KeyHash {
+        size_t operator()(const Key& k) const noexcept {
+            return std::hash<std::string>{}(k.family)
+                ^ (static_cast<size_t>(k.weight) * 31u)
+                ^ (static_cast<size_t>(k.slant) * 1297u);
+        }
+    };
+    struct KeyEq {
+        bool operator()(const Key& a, const Key& b) const noexcept {
+            return a.weight == b.weight && a.slant == b.slant && a.family == b.family;
+        }
+    };
+    static std::unordered_map<Key, sk_sp<SkTypeface>, KeyHash, KeyEq> cache;
+
+    Key key{family, weight, slant};
+    auto it = cache.find(key);
     if (it != cache.end()) return it->second;
+
+    SkFontStyle sk_style{
+        weight,
+        SkFontStyle::kNormal_Width,
+        slant ? SkFontStyle::kItalic_Slant : SkFontStyle::kUpright_Slant
+    };
 
     sk_sp<SkTypeface> typeface;
 
 #if defined(__ANDROID__)
     // Load Roboto directly from filesystem for deterministic rendering.
     // This avoids the font manager's family matching which can return
-    // different fonts depending on the device/API level.
-    if (family == "sans-serif" || family == "Roboto" || family.empty()) {
+    // different fonts depending on the device/API level. Only the
+    // Regular/Upright path has a baked-in file; bold/italic still go
+    // through the family matcher below.
+    if (weight == 400 && slant == 0 &&
+        (family == "sans-serif" || family == "Roboto" || family.empty())) {
         auto mgr = get_font_manager();
         if (mgr) {
             typeface = mgr->makeFromFile("/system/fonts/Roboto-Regular.ttf");
@@ -123,17 +150,25 @@ static sk_sp<SkTypeface> get_cached_typeface(const std::string& family) {
     if (!typeface) {
         auto mgr = get_font_manager();
         if (mgr && mgr->countFamilies() > 0) {
-            typeface = mgr->matchFamilyStyle(family.c_str(), SkFontStyle::Normal());
+            typeface = mgr->matchFamilyStyle(family.c_str(), sk_style);
             if (!typeface)
-                typeface = mgr->matchFamilyStyle(nullptr, SkFontStyle::Normal());
+                typeface = mgr->matchFamilyStyle(nullptr, sk_style);
         }
     }
 
-    cache[family] = typeface;
+    cache[key] = typeface;
     return typeface;
 }
 
-static SkFont make_font(const std::string& family, float size) {
+// Legacy single-arg overload — preserves the old "Normal" behaviour for
+// callers that haven't migrated to the weight/slant-aware path.
+static sk_sp<SkTypeface> get_cached_typeface(const std::string& family) {
+    return get_cached_typeface(family, SkFontStyle::kNormal_Weight, 0);
+}
+
+static SkFont make_font(const std::string& family, float size,
+                        int weight = SkFontStyle::kNormal_Weight,
+                        int slant = 0) {
     SkFont font;
     font.setSize(size);
     font.setSubpixel(true);                               // Subpixel glyph positioning
@@ -141,7 +176,7 @@ static SkFont make_font(const std::string& family, float size) {
     font.setHinting(SkFontHinting::kSlight);               // Light hinting preserves glyph shapes
     font.setLinearMetrics(true);                           // Linear scaling for consistent metrics
 
-    auto typeface = get_cached_typeface(family);
+    auto typeface = get_cached_typeface(family, weight, slant);
     if (typeface) font.setTypeface(std::move(typeface));
 
     return font;
@@ -314,6 +349,20 @@ void SkiaCanvas::set_line_dash(const float* intervals, int count, float phase) {
 void SkiaCanvas::set_font(const std::string& family, float size) {
     font_family_ = family;
     font_size_ = size;
+    // Reset rich state so a legacy set_font() call doesn't carry a previous
+    // weight/slant/spacing forward unexpectedly.
+    font_weight_ = SkFontStyle::kNormal_Weight;
+    font_slant_ = 0;
+    letter_spacing_ = 0.0f;
+}
+
+void SkiaCanvas::set_font_full(const std::string& family, float size,
+                               int weight, int slant, float letter_spacing) {
+    font_family_ = family;
+    font_size_ = size;
+    font_weight_ = weight;
+    font_slant_ = slant;
+    letter_spacing_ = letter_spacing;
 }
 
 void SkiaCanvas::set_text_align(TextAlign align) {
@@ -324,7 +373,7 @@ void SkiaCanvas::fill_text(const std::string& text, float x, float y) {
     GUARD_CANVAS;
     if (text.empty()) return;
 
-    SkFont font = make_font(font_family_, font_size_);
+    SkFont font = make_font(font_family_, font_size_, font_weight_, font_slant_);
     if (!font.getTypeface()) return;
 
     auto paint = make_fill_paint(fill_color_);
@@ -339,29 +388,38 @@ void SkiaCanvas::fill_text(const std::string& text, float x, float y) {
     // positions are offset twice — once inside the blob and once by the
     // draw call — producing a ghost/double image that worsens with each
     // nesting level in the widget paint pipeline.
-    auto shaper = SkShaper::Make();
-    if (shaper) {
-        // Shape at origin {0,0}, then read the total shaped advance
-        // from endPoint() for accurate text alignment.
-        SkTextBlobBuilderRunHandler handler(text.c_str(), {0, 0});
-        shaper->shape(text.c_str(), text.size(), font,
-                      /*leftToRight=*/true, SK_ScalarInfinity, &handler);
-        float total_w = handler.endPoint().x();
+    //
+    // pulp #927: when letter_spacing_ != 0 we cannot use the shaped blob
+    // verbatim — the shaper packs glyph positions ignorant of CSS
+    // letter-spacing. Fall through to the per-glyph builder below so the
+    // extra advance lands on the rendered output.
+    if (letter_spacing_ == 0.0f) {
+        auto shaper = SkShaper::Make();
+        if (shaper) {
+            // Shape at origin {0,0}, then read the total shaped advance
+            // from endPoint() for accurate text alignment.
+            SkTextBlobBuilderRunHandler handler(text.c_str(), {0, 0});
+            shaper->shape(text.c_str(), text.size(), font,
+                          /*leftToRight=*/true, SK_ScalarInfinity, &handler);
+            float total_w = handler.endPoint().x();
 
-        float draw_x = x;
-        if (text_align_ == TextAlign::center) draw_x -= total_w * 0.5f;
-        else if (text_align_ == TextAlign::right) draw_x -= total_w;
+            float draw_x = x;
+            if (text_align_ == TextAlign::center) draw_x -= total_w * 0.5f;
+            else if (text_align_ == TextAlign::right) draw_x -= total_w;
 
-        auto blob = handler.makeBlob();
-        if (blob) {
-            canvas_->drawTextBlob(blob, draw_x, y, paint);
-            return;
+            auto blob = handler.makeBlob();
+            if (blob) {
+                canvas_->drawTextBlob(blob, draw_x, y, paint);
+                return;
+            }
         }
     }
 #endif
 
     // Fallback: per-glyph SkTextBlob without kerning/ligatures.
-    // Used when text shaping is disabled or SkShaper::Make() fails.
+    // Used when text shaping is disabled, SkShaper::Make() fails, or
+    // letter_spacing_ != 0 (pulp #927 — the shaped blob can't carry CSS
+    // letter-spacing so we lay glyphs out manually).
     int glyph_count = static_cast<int>(font.countText(text.c_str(), text.size(), SkTextEncoding::kUTF8));
     if (glyph_count <= 0) return;
 
@@ -375,6 +433,8 @@ void SkiaCanvas::fill_text(const std::string& text, float x, float y) {
 
     float total_w = 0;
     for (int i = 0; i < glyph_count; ++i) total_w += widths[i];
+    // CSS letter-spacing: extra advance between every pair of glyphs.
+    if (glyph_count > 1) total_w += letter_spacing_ * static_cast<float>(glyph_count - 1);
 
     float draw_x = x;
     if (text_align_ == TextAlign::center) draw_x -= total_w * 0.5f;
@@ -387,6 +447,7 @@ void SkiaCanvas::fill_text(const std::string& text, float x, float y) {
         run.glyphs[i] = glyphs[i];
         run.pos[i] = cursor;
         cursor += widths[i];
+        if (i + 1 < glyph_count) cursor += letter_spacing_;
     }
 
     canvas_->drawTextBlob(builder.make(), 0, 0, paint);
@@ -473,7 +534,7 @@ void SkiaCanvas::fill_text_sdf(const std::string& text, float x, float y,
 }
 
 float SkiaCanvas::measure_text(const std::string& text) {
-    SkFont font = make_font(font_family_, font_size_);
+    SkFont font = make_font(font_family_, font_size_, font_weight_, font_slant_);
     if (!font.getTypeface()) return font_size_ * text.size() * 0.5f;
 
 #ifdef PULP_HAS_TEXT_SHAPING
@@ -481,12 +542,18 @@ float SkiaCanvas::measure_text(const std::string& text) {
     // enabled — matches what fill_text() actually renders. Without
     // this, measure_text returns unshaped widths that mismatch drawn
     // text for kerning/ligature strings (e.g., "AV", "ffi").
-    auto shaper = SkShaper::Make();
-    if (shaper) {
-        SkTextBlobBuilderRunHandler handler(text.c_str(), {0, 0});
-        shaper->shape(text.c_str(), text.size(), font,
-                      /*leftToRight=*/true, SK_ScalarInfinity, &handler);
-        return handler.endPoint().x();
+    //
+    // pulp #927: if letter_spacing_ != 0 we bypass the shaper because
+    // fill_text() also bypasses it in that case — measuring via the
+    // shaper would diverge from what's actually drawn.
+    if (letter_spacing_ == 0.0f) {
+        auto shaper = SkShaper::Make();
+        if (shaper) {
+            SkTextBlobBuilderRunHandler handler(text.c_str(), {0, 0});
+            shaper->shape(text.c_str(), text.size(), font,
+                          /*leftToRight=*/true, SK_ScalarInfinity, &handler);
+            return handler.endPoint().x();
+        }
     }
 #endif
 
@@ -504,11 +571,15 @@ float SkiaCanvas::measure_text(const std::string& text) {
 
     float total = 0;
     for (int i = 0; i < glyph_count; ++i) total += widths[i];
+    // pulp #927: include CSS letter-spacing in measurement so layout code
+    // (e.g. ellipsis truncation in Label::paint) reasons over the same
+    // total advance the renderer will draw.
+    if (glyph_count > 1) total += letter_spacing_ * static_cast<float>(glyph_count - 1);
     return total;
 }
 
 Canvas::TextMetrics SkiaCanvas::measure_text_full(const std::string& text) {
-    SkFont font = make_font(font_family_, font_size_);
+    SkFont font = make_font(font_family_, font_size_, font_weight_, font_slant_);
     if (!font.getTypeface()) {
         // Fallback estimates — keep all fields populated so JS callers can
         // still e.g. center text against actual_bounding_box_left/right.

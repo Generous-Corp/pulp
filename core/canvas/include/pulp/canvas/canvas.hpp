@@ -394,6 +394,20 @@ public:
     virtual void fill_text(const std::string& text, float x, float y) = 0;
     virtual float measure_text(const std::string& text) = 0;
 
+    /// Richer font setter that propagates CSS font-weight (100..900),
+    /// font-slant (0=upright, 1=italic), and letter-spacing (px between
+    /// glyphs) through to the backend. Default implementation forwards to
+    /// the legacy `set_font(family, size)` so non-Label callers keep
+    /// working unchanged. Backends that honor these properties (Skia,
+    /// CoreText, RecordingCanvas) override this to capture or apply them.
+    /// pulp #927 — Label widget honors setFontFamily / setFontWeight /
+    /// setLetterSpacing from JS.
+    virtual void set_font_full(const std::string& family, float size,
+                                int weight, int slant, float letter_spacing) {
+        (void)weight; (void)slant; (void)letter_spacing;
+        set_font(family, size);
+    }
+
     /// Full text metrics for layout and intrinsic sizing.
     /// Mirrors HTML5 TextMetrics — fields beyond width/ascent/descent are
     /// the bounding-box-only metrics required by CanvasRenderingContext2D
@@ -641,6 +655,11 @@ struct DrawCommand {
         fill_rect, stroke_rect, fill_rounded_rect, stroke_rounded_rect,
         fill_circle, stroke_circle, stroke_arc, stroke_line,
         set_font, set_text_align, fill_text,
+        // pulp #927 — full font setter: family in `text`, size/weight/slant/
+        // letter_spacing in f[0..3]. Emitted alongside (in addition to) the
+        // legacy set_font command so existing tests that count set_font
+        // continue to pass.
+        set_font_full,
         // ── issue-916: Canvas2D API gaps ──────────────────────────────
         set_line_dash,      ///< intervals stored in `floats`, phase in f[0]
         draw_image,         ///< source path/url in `text`, dst rect in f[0..3]
@@ -701,6 +720,8 @@ public:
                    float start_angle, float end_angle) override;
     void stroke_line(float x0, float y0, float x1, float y1) override;
     void set_font(const std::string& family, float size) override;
+    void set_font_full(const std::string& family, float size,
+                       int weight, int slant, float letter_spacing) override;
     void set_text_align(TextAlign align) override;
     void fill_text(const std::string& text, float x, float y) override;
     float measure_text(const std::string& text) override;

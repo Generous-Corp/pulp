@@ -245,7 +245,11 @@ void Label::paint(canvas::Canvas& canvas) {
 
     auto text_color = resolve_color("text.primary", canvas::Color::rgba8(200, 200, 200));
     canvas.set_fill_color({text_color.r, text_color.g, text_color.b, text_color.a});
-    canvas.set_font("Inter", font_size_);
+    // pulp #927 — propagate setFontFamily / setFontWeight / setLetterSpacing
+    // through to the canvas backend so JS calls actually change rasterised
+    // glyphs. Empty font_family_ falls back to the default theme face.
+    const std::string& family = font_family_.empty() ? std::string("Inter") : font_family_;
+    canvas.set_font_full(family, font_size_, font_weight_, font_style_, letter_spacing_);
 
     // Apply text-transform
     std::string display_text = text_;

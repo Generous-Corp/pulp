@@ -35,6 +35,11 @@ public:
     void set_font_size(float size) { font_size_ = size; }
     float font_size() const { return font_size_; }
 
+    /// CSS font-family string (e.g. "Inter", "JetBrains Mono"). Empty means
+    /// the widget falls back to the default theme family ("Inter").
+    void set_font_family(std::string family) { font_family_ = std::move(family); }
+    const std::string& font_family() const { return font_family_; }
+
     void set_font_weight(int weight) { font_weight_ = weight; }  // 100-900, 400=normal, 700=bold
     int font_weight() const { return font_weight_; }
 
@@ -72,6 +77,7 @@ public:
 
 private:
     std::string text_;
+    std::string font_family_;     ///< Empty == widget default ("Inter")
     float font_size_ = 14.0f;
     int font_weight_ = 400;       ///< 400=normal, 700=bold
     int font_style_ = 0;          ///< 0=normal, 1=italic
