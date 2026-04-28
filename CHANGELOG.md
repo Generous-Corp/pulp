@@ -9,6 +9,8 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
 <a id="v0540"></a>
+## [0.55.0]
+
 ## [0.54.0] - 2026-04-28
 
 - feat(view): setTransform(id, a, b, c, d, e, f) on View — full 2D affine matrix (#930) ([#933](https://github.com/danielraffel/pulp/pull/933))
