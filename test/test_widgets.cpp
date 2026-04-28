@@ -67,6 +67,28 @@ TEST_CASE("Label intrinsic_width respects text-transform", "[view][widget][issue
     // Uppercase characters typically advance wider than lowercase, so
     // the transformed label must measure at least as wide.
     REQUIRE(upper.intrinsic_width() >= lower.intrinsic_width());
+
+    // Lowercase transform path — exercises the std::tolower branch in
+    // intrinsic_width() so estimator and shaper agree on the post-
+    // transform character count.
+    Label lc("ZOOMABLE Filter Bank");
+    lc.set_text_transform(Label::TextTransform::lowercase);
+    REQUIRE(lc.intrinsic_width() > 0);
+
+    // Capitalize transform path — exercises the per-word leading-cap
+    // loop. Same character count as the source string, so width is at
+    // least as wide as the all-lowercase variant.
+    Label cap("zoomable filter bank");
+    cap.set_text_transform(Label::TextTransform::capitalize);
+    REQUIRE(cap.intrinsic_width() > 0);
+    REQUIRE(cap.intrinsic_width() >= lower.intrinsic_width());
+
+    // Letter-spacing branch — adds extra advance per glyph break that
+    // HarfBuzz / the estimator don't include natively.
+    Label spaced("ZOOMABLE FILTER BANK");
+    spaced.set_letter_spacing(2.0f);
+    Label tight("ZOOMABLE FILTER BANK");
+    REQUIRE(spaced.intrinsic_width() > tight.intrinsic_width());
 }
 
 TEST_CASE("Label intrinsic_width yields zero for multi-line", "[view][widget][issue-928]") {
