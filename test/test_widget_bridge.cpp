@@ -1308,6 +1308,90 @@ TEST_CASE("View::request_repaint reaches host through propagated descendants (is
     REQUIRE_NOTHROW(orphan.request_repaint());
 }
 
+// ───────────────────────────────────────────────────────────────────────────
+// pulp #921 — __requestFrame__ must call request_repaint() so that
+// requestAnimationFrame() actually drives the host paint loop. Without
+// this wiring, JS-side rAF callbacks accumulate in pending_frame_ids_
+// but the host never schedules the paint that drains them — Spectr's
+// FilterBank canvas stays blank.
+// ───────────────────────────────────────────────────────────────────────────
+
+TEST_CASE("WidgetBridge requestAnimationFrame triggers a host repaint (issue 921)",
+          "[view][bridge][issue-921]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+
+    CountingWindowHost host;
+    root.set_window_host(&host);
+
+    WidgetBridge bridge(engine, root, store);
+
+    // Snapshot — bridge construction may itself touch the host (it does
+    // not today, but pin behaviour to a delta around the rAF call).
+    int repaint_baseline = host.repaint_calls;
+
+    bridge.load_script("var __raf_id = window.requestAnimationFrame(function () {});");
+
+    // The fix wires __requestFrame__ → request_repaint() → repaint_callback_
+    // → root.request_repaint() → host.repaint(). Without it, repaint_calls
+    // would not advance until something else (mouse, resize, layout) ran.
+    REQUIRE(host.repaint_calls > repaint_baseline);
+
+    // The id round-trip from JS proves the queue path itself still works
+    // — the fix only adds the repaint signal, it must not break the queue.
+    auto id_value = engine.evaluate("__raf_id");
+    REQUIRE(id_value.getWithDefault<int>(-1) >= 1);
+}
+
+TEST_CASE("WidgetBridge requestAnimationFrame chain keeps requesting paints (issue 921)",
+          "[view][bridge][issue-921]") {
+    // The Spectr FilterBank pattern: a draw() callback re-arms itself via
+    // requestAnimationFrame. Each rAF must request a paint so the host
+    // actually services the next frame. Three queued rAFs across a poll
+    // cycle therefore produce at least three host repaint signals.
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+
+    CountingWindowHost host;
+    root.set_window_host(&host);
+
+    WidgetBridge bridge(engine, root, store);
+
+    int repaint_baseline = host.repaint_calls;
+
+    bridge.load_script(R"(
+        var rafs_requested = 0;
+        function tick() {
+            rafs_requested++;
+            if (rafs_requested < 3) window.requestAnimationFrame(tick);
+        }
+        window.requestAnimationFrame(tick);
+    )");
+
+    // First rAF was synchronous in the script and must already have hit
+    // the host once.
+    REQUIRE(host.repaint_calls > repaint_baseline);
+
+    // Drain queued rAFs so each tick re-arms and lands another rAF /
+    // host repaint. Bound the loop — production hosts coalesce, but the
+    // test only needs to see the rAF→repaint signal continuing.
+    for (int i = 0; i < 10; ++i) {
+        bridge.poll_async_results();
+        if (engine.evaluate("rafs_requested").getWithDefault<int>(-1) >= 3)
+            break;
+    }
+
+    REQUIRE(engine.evaluate("rafs_requested").getWithDefault<int>(-1) == 3);
+    // Each of the three rAFs requested a repaint (one synchronous + two
+    // re-armed inside tick()). The host counter is monotonic; we want
+    // strictly more than the first-rAF post-condition above.
+    REQUIRE(host.repaint_calls >= repaint_baseline + 3);
+}
+
 // ── canvasMeasureText / canvasSetLineDash / canvasDrawImage / canvasGetImageData / canvasPutImageData (issue-916) ──
 //
 // These five CanvasRenderingContext2D bridge functions close the gap

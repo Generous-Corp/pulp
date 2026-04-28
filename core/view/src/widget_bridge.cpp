@@ -3173,7 +3173,14 @@ void WidgetBridge::register_api() {
 
     engine_.register_function("__requestFrame__", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<int>(0, 0);
-        if (id > 0) pending_frame_ids_.push_back(id);
+        if (id > 0) {
+            pending_frame_ids_.push_back(id);
+            // pulp #921 — signal the host so the next paint runs and
+            // service_frame_callbacks() drains the queue. Without this,
+            // requestAnimationFrame queues a callback but never asks the
+            // host for a frame, so the canvas never repaints.
+            request_repaint();
+        }
         return choc::value::createInt32(id);
     });
 
