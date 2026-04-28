@@ -1165,6 +1165,27 @@ void SkiaCanvas::save_layer(float x, float y, float w, float h,
     canvas_->saveLayer(&bounds, &layer_paint);
 }
 
+void SkiaCanvas::save_backdrop_filter(float x, float y, float w, float h,
+                                       float blur_radius) {
+    // CSS `backdrop-filter: blur(N)` (issue-926). Push a layer whose initial
+    // contents are the parent surface filtered through a Gaussian blur, so
+    // subsequent draws into this layer composite over the blurred backdrop.
+    if (!canvas_) { save(); return; }
+    if (blur_radius <= 0.0f) {
+        // Degenerate: behave like a plain save() so the matching restore()
+        // stays balanced and the View::paint_all bookkeeping is unaffected.
+        canvas_->save();
+        return;
+    }
+
+    SkRect bounds = SkRect::MakeXYWH(x, y, w, h);
+    auto backdrop = SkImageFilters::Blur(blur_radius, blur_radius,
+                                         SkTileMode::kClamp, nullptr);
+
+    SkCanvas::SaveLayerRec rec(&bounds, /*paint=*/nullptr, backdrop.get(), 0);
+    canvas_->saveLayer(rec);
+}
+
 // ── GPU Waveform (SkRuntimeEffect shader-driven) ────────────────────────────
 
 // SkSL shader: samples waveform from a 1D texture, computes SDF distance

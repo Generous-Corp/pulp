@@ -125,6 +125,8 @@ public:
     void draw_blurred_backdrop(float x, float y, float w, float h,
                                float blur_radius, float corner_radius,
                                Color tint) override;
+    void save_backdrop_filter(float x, float y, float w, float h,
+                              float blur_radius) override;
 
     // Custom SkSL shader rendering (GPU-accelerated)
     bool draw_with_sksl(const std::string& sksl,

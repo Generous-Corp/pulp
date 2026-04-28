@@ -57,6 +57,17 @@ void View::paint_all(canvas::Canvas& canvas) {
     if (overflow_ == Overflow::hidden)
         canvas.clip_rect(0, 0, bounds_.width, bounds_.height);
 
+    // CSS `backdrop-filter: blur(N)` (issue-926). A separate compositing layer
+    // whose initial content is the parent surface blurred — sits BELOW the
+    // widget's own opacity/filter layer so background, border, and children
+    // composite over the frosted backdrop. Paired with the matching restore()
+    // at the end of paint_all.
+    bool needs_backdrop_layer = (backdrop_blur_ > 0.0f);
+    if (needs_backdrop_layer) {
+        canvas.save_backdrop_filter(0, 0, bounds_.width, bounds_.height,
+                                    backdrop_blur_);
+    }
+
     // Compositing layer for opacity, blur, or post-effects
     bool needs_layer = (opacity_ < 1.0f) || (filter_blur_ > 0.0f) || needs_layer_
                        || (effect_ && effect_->needs_layer());
@@ -141,6 +152,11 @@ void View::paint_all(canvas::Canvas& canvas) {
 
     // End compositing layer (restore pops the saveLayer, compositing the subtree)
     if (needs_layer)
+        canvas.restore();
+
+    // End backdrop-filter layer (issue-926). Composites the widget's own
+    // opacity layer over the blurred parent backdrop.
+    if (needs_backdrop_layer)
         canvas.restore();
 
     canvas.restore();

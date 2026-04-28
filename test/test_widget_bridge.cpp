@@ -1664,3 +1664,85 @@ TEST_CASE("WidgetBridge setTransform stores affine matrix on the target View",
     engine.evaluate("clearTransform(document.getElementById('xform-view')._id)");
     REQUIRE_FALSE(v->has_transform_matrix());
 }
+
+// ── issue-926: setBackdropFilter ─────────────────────────────────────────────
+
+TEST_CASE("WidgetBridge setBackdropFilter sets backdrop_blur on the View",
+          "[view][bridge][issue-926]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script("createKnob('panel', 10, 10, 200, 100)");
+    auto* panel = bridge.widget("panel");
+    REQUIRE(panel != nullptr);
+    REQUIRE(panel->backdrop_blur() == 0.0f);
+
+    bridge.load_script("setBackdropFilter('panel', 12)");
+    REQUIRE_THAT(panel->backdrop_blur(), WithinAbs(12.0, 1e-4));
+
+    // Zero clears the filter.
+    bridge.load_script("setBackdropFilter('panel', 0)");
+    REQUIRE(panel->backdrop_blur() == 0.0f);
+}
+
+TEST_CASE("View::paint_all emits save_backdrop_filter when backdrop_blur is set",
+          "[view][canvas][issue-926]") {
+    using namespace pulp::canvas;
+
+    View root;
+    root.set_bounds({0, 0, 200, 120});
+    root.set_backdrop_blur(8.0f);
+
+    RecordingCanvas canvas;
+    root.paint_all(canvas);
+
+    REQUIRE(canvas.count(DrawCommand::Type::save_backdrop_filter) == 1);
+
+    // Verify the recorded payload — bounds match the View's local rect, blur
+    // radius matches the value passed to set_backdrop_blur().
+    bool found = false;
+    for (auto& cmd : canvas.commands()) {
+        if (cmd.type == DrawCommand::Type::save_backdrop_filter) {
+            REQUIRE(cmd.f[0] == 0.0f);
+            REQUIRE(cmd.f[1] == 0.0f);
+            REQUIRE_THAT(cmd.f[2], WithinAbs(200.0, 1e-4));
+            REQUIRE_THAT(cmd.f[3], WithinAbs(120.0, 1e-4));
+            REQUIRE_THAT(cmd.f[4], WithinAbs(8.0, 1e-4));
+            found = true;
+            break;
+        }
+    }
+    REQUIRE(found);
+}
+
+TEST_CASE("View::paint_all skips backdrop layer when backdrop_blur is zero",
+          "[view][canvas][issue-926]") {
+    using namespace pulp::canvas;
+
+    View root;
+    root.set_bounds({0, 0, 100, 50});
+
+    RecordingCanvas canvas;
+    root.paint_all(canvas);
+
+    REQUIRE(canvas.count(DrawCommand::Type::save_backdrop_filter) == 0);
+}
+
+TEST_CASE("Canvas::save_backdrop_filter base default falls back to save()",
+          "[canvas][issue-926]") {
+    using namespace pulp::canvas;
+    RecordingCanvas canvas;
+
+    // RecordingCanvas overrides — emits the dedicated command.
+    canvas.save_backdrop_filter(0, 0, 64, 64, 4.0f);
+    REQUIRE(canvas.count(DrawCommand::Type::save_backdrop_filter) == 1);
+
+    // The matching restore() must balance correctly so View::paint_all
+    // bookkeeping (save → save_backdrop_filter → ... → restore → restore)
+    // never leaves the canvas state stack imbalanced.
+    canvas.restore();
+    REQUIRE(canvas.count(DrawCommand::Type::restore) == 1);
+}
