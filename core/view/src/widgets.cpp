@@ -5,7 +5,9 @@
 #include <pulp/view/frame_clock.hpp>
 #include <pulp/view/image_cache.hpp>
 #include <pulp/view/window_host.hpp>
+#include <pulp/canvas/text_shaper.hpp>
 #include <choc/text/choc_JSON.h>
+#include <cctype>
 #include <cmath>
 #include <string>
 
@@ -239,6 +241,55 @@ void Toggle::advance_animations(float dt) {
 }
 
 // ── Label ────────────────────────────────────────────────────────────────────
+
+float Label::intrinsic_width() const {
+    // issue-928: report the natural shaped-text width so Yoga reserves
+    // enough horizontal space for the full label content. Without this,
+    // long labels in flex-row containers (e.g. Spectr's "ZOOMABLE FILTER
+    // BANK" header) inherit a small parent width and clip mid-word.
+    //
+    // For multi-line labels we deliberately return 0 so the parent
+    // container's available width drives line wrapping instead of the
+    // single-line text width.
+    if (text_.empty() || multi_line_) return 0;
+
+    // Mirror paint()'s text-transform — measurement must match what's
+    // drawn or a row of uppercase chars will wrap unexpectedly.
+    std::string display_text = text_;
+    if (text_transform_ == TextTransform::uppercase) {
+        for (auto& ch : display_text)
+            ch = static_cast<char>(std::toupper(static_cast<unsigned char>(ch)));
+    } else if (text_transform_ == TextTransform::lowercase) {
+        for (auto& ch : display_text)
+            ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+    } else if (text_transform_ == TextTransform::capitalize) {
+        bool cap_next = true;
+        for (auto& ch : display_text) {
+            if (cap_next && std::isalpha(static_cast<unsigned char>(ch))) {
+                ch = static_cast<char>(std::toupper(static_cast<unsigned char>(ch)));
+                cap_next = false;
+            }
+            if (ch == ' ') cap_next = true;
+        }
+    }
+
+    // Shape with the same font + size the painter will use. TextShaper
+    // uses the global Skia/HarfBuzz path when available and falls back
+    // to a character-width estimator otherwise — same fallback that
+    // Canvas::measure_text() uses on the recording / non-Skia backends.
+    auto& shaper = canvas::global_text_shaper();
+    auto prepared = shaper.prepare(display_text, "Inter", font_size_);
+    float width = prepared.total_width();
+
+    // Letter-spacing adds extra advance per glyph break that isn't
+    // captured by HarfBuzz shaping.
+    if (letter_spacing_ != 0 && display_text.size() > 1) {
+        width += letter_spacing_ * static_cast<float>(display_text.size() - 1);
+    }
+
+    // Sub-pixel-safe ceil so layout never clips on rounding.
+    return std::ceil(width);
+}
 
 void Label::paint(canvas::Canvas& canvas) {
     if (text_.empty()) return;
