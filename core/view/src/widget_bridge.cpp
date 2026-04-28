@@ -2787,7 +2787,9 @@ void WidgetBridge::register_api() {
         return choc::value::Value();
     });
 
-    // setBoxShadow(id, offsetX, offsetY, blur, spread, color)
+    // setBoxShadow(id, offsetX, offsetY, blur, spread, color, inset)
+    //   inset is optional; truthy values (true / "inset" / 1) flip the
+    //   shadow to render inside the box. Issue-925.
     engine_.register_function("setBoxShadow", [this, parseHexColor](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto ox = static_cast<float>(args.get<double>(1, 0));
@@ -2795,8 +2797,29 @@ void WidgetBridge::register_api() {
         auto blur = static_cast<float>(args.get<double>(3, 4));
         auto spread = static_cast<float>(args.get<double>(4, 0));
         auto hex = args.get<std::string>(5, "#00000050");
+        bool inset = false;
+        if (args.numArgs > 6 && args[6] != nullptr) {
+            const auto& v6 = *args[6];
+            if (v6.isBool()) inset = v6.getBool();
+            else if (v6.isInt32() || v6.isInt64()) inset = v6.getInt64() != 0;
+            else if (v6.isFloat32() || v6.isFloat64()) inset = v6.getFloat64() != 0.0;
+            else if (v6.isString()) {
+                auto s = std::string(v6.getString());
+                inset = (s == "inset" || s == "true" || s == "1");
+            }
+        }
         auto* v = id.empty() ? &root_ : widget(id);
-        if (v) v->set_box_shadow(ox, oy, blur, spread, parseHexColor(hex));
+        if (v) v->set_box_shadow(ox, oy, blur, spread, parseHexColor(hex), inset);
+        return choc::value::Value();
+    });
+
+    // clearBoxShadow(id) — companion of setBoxShadow; lets React's diff
+    // reconciler remove a shadow when the prop is dropped without having
+    // to recreate the widget. Issue-925.
+    engine_.register_function("clearBoxShadow", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto* v = id.empty() ? &root_ : widget(id);
+        if (v) v->clear_box_shadow();
         return choc::value::Value();
     });
 

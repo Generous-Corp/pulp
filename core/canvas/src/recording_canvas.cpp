@@ -250,6 +250,66 @@ void RecordingCanvas::save_backdrop_filter(float x, float y, float w, float h,
     commands_.push_back(cmd);
 }
 
+// ── issue-925: box-shadow primitive ─────────────────────────────────────────
+
+void Canvas::draw_box_shadow(float x, float y, float w, float h,
+                              float dx, float dy, float blur, float spread,
+                              Color color, bool inset, float corner_radius) {
+    if (color.a <= 0.0f || (w <= 0.0f && h <= 0.0f)) return;
+    const int steps = std::max(1, static_cast<int>(std::ceil(blur / 2.0f)));
+    const float base_alpha = color.a;
+    if (!inset) {
+        // Outset: stacked rounded rects expanding outward, fading at edges.
+        for (int i = steps; i >= 0; --i) {
+            float t = static_cast<float>(i) / static_cast<float>(steps);
+            float expand = spread + blur * t;
+            float alpha = base_alpha * (1.0f - t) * (1.0f - t);
+            set_fill_color(Color::rgba(color.r, color.g, color.b, alpha));
+            fill_rounded_rect(x + dx - expand,
+                              y + dy - expand,
+                              w + expand * 2.0f,
+                              h + expand * 2.0f,
+                              corner_radius + expand * 0.5f);
+        }
+    } else {
+        // Inset: stack inset rects shrinking inward, clipped to the box.
+        save();
+        clip_rect(x, y, w, h);
+        for (int i = steps; i >= 0; --i) {
+            float t = static_cast<float>(i) / static_cast<float>(steps);
+            float inset_amount = spread + blur * t;
+            float alpha = base_alpha * (1.0f - t) * (1.0f - t);
+            set_fill_color(Color::rgba(color.r, color.g, color.b, alpha));
+            // Top band
+            fill_rect(x, y + dy - inset_amount,
+                      w, std::max(1.0f, inset_amount));
+            // Bottom band
+            fill_rect(x, y + h + dy + inset_amount - std::max(1.0f, inset_amount),
+                      w, std::max(1.0f, inset_amount));
+            // Left band
+            fill_rect(x + dx - inset_amount, y,
+                      std::max(1.0f, inset_amount), h);
+            // Right band
+            fill_rect(x + w + dx + inset_amount - std::max(1.0f, inset_amount),
+                      y, std::max(1.0f, inset_amount), h);
+        }
+        restore();
+    }
+}
+
+void RecordingCanvas::draw_box_shadow(float x, float y, float w, float h,
+                                       float dx, float dy, float blur, float spread,
+                                       Color color, bool inset, float corner_radius) {
+    DrawCommand cmd{DrawCommand::Type::draw_box_shadow};
+    cmd.f[0] = x; cmd.f[1] = y; cmd.f[2] = w; cmd.f[3] = h;
+    cmd.f[4] = inset ? 1.0f : 0.0f;
+    cmd.f[5] = corner_radius;
+    // dx, dy, blur, spread go in `floats` so we don't need 10+ float slots.
+    cmd.floats = {dx, dy, blur, spread};
+    cmd.color = color;
+    commands_.push_back(std::move(cmd));
+}
+
 // ── compile_sksl fallback for non-Skia builds ────────────────────────────────
 #ifndef PULP_HAS_SKIA
 std::string Canvas::compile_sksl(const std::string& sksl) {

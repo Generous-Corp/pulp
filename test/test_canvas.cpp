@@ -100,6 +100,58 @@ TEST_CASE("Canvas text in nested clip contexts -- no duplication (#75)",
     REQUIRE(canvas.count(DrawCommand::Type::clip_rect) == 3);
 }
 
+TEST_CASE("RecordingCanvas captures draw_box_shadow with full payload",
+          "[canvas][issue-925]") {
+    RecordingCanvas canvas;
+    canvas.draw_box_shadow(/*x=*/10, /*y=*/20, /*w=*/100, /*h=*/50,
+                            /*dx=*/0, /*dy=*/14, /*blur=*/40, /*spread=*/2,
+                            Color::rgba8(0, 0, 0, 160), /*inset=*/false,
+                            /*corner_radius=*/8);
+
+    REQUIRE(canvas.count(DrawCommand::Type::draw_box_shadow) == 1);
+    const auto& cmd = canvas.commands().back();
+    REQUIRE(cmd.type == DrawCommand::Type::draw_box_shadow);
+    REQUIRE(cmd.f[0] == Catch::Approx(10.0f));
+    REQUIRE(cmd.f[1] == Catch::Approx(20.0f));
+    REQUIRE(cmd.f[2] == Catch::Approx(100.0f));
+    REQUIRE(cmd.f[3] == Catch::Approx(50.0f));
+    REQUIRE(cmd.f[4] == Catch::Approx(0.0f));   // inset = false
+    REQUIRE(cmd.f[5] == Catch::Approx(8.0f));   // corner_radius
+    REQUIRE(cmd.floats.size() == 4);
+    REQUIRE(cmd.floats[0] == Catch::Approx(0.0f));
+    REQUIRE(cmd.floats[1] == Catch::Approx(14.0f));
+    REQUIRE(cmd.floats[2] == Catch::Approx(40.0f));
+    REQUIRE(cmd.floats[3] == Catch::Approx(2.0f));
+    REQUIRE(cmd.color.a == Catch::Approx(160.0f / 255.0f).margin(0.01f));
+}
+
+TEST_CASE("Canvas::draw_box_shadow CPU fallback emits stacked rounded rects",
+          "[canvas][issue-925]") {
+    RecordingCanvas canvas;
+    // RecordingCanvas overrides draw_box_shadow, so call the base class
+    // implementation explicitly to exercise the CPU fallback path used
+    // by every non-Skia backend (CG, software, image-export).
+    canvas.Canvas::draw_box_shadow(0, 0, 100, 50,
+                                    0, 14, 20, 0,
+                                    Color::rgba8(0, 0, 0, 128),
+                                    /*inset=*/false, /*corner_radius=*/4);
+    REQUIRE(canvas.count(DrawCommand::Type::fill_rounded_rect) >= 5);
+}
+
+TEST_CASE("Canvas::draw_box_shadow inset CPU fallback clips to box",
+          "[canvas][issue-925]") {
+    RecordingCanvas canvas;
+    canvas.Canvas::draw_box_shadow(0, 0, 100, 50,
+                                    0, 4, 12, 0,
+                                    Color::rgba8(0, 0, 0, 96),
+                                    /*inset=*/true, /*corner_radius=*/0);
+    // Inset path uses save+clip_rect+stacked rects+restore.
+    REQUIRE(canvas.count(DrawCommand::Type::clip_rect) >= 1);
+    REQUIRE(canvas.count(DrawCommand::Type::save) >= 1);
+    REQUIRE(canvas.count(DrawCommand::Type::restore) >= 1);
+    REQUIRE(canvas.count(DrawCommand::Type::fill_rect) >= 4);
+}
+
 TEST_CASE("fill_text_sdf falls back to fill_text on RecordingCanvas", "[canvas][sdf]") {
     RecordingCanvas canvas;
     canvas.set_font("Inter", 14.0f);

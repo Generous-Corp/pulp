@@ -53,6 +53,17 @@ void View::paint_all(canvas::Canvas& canvas) {
                                 transform_matrix_e_, transform_matrix_f_);
     }
 
+    // Outset drop shadows must paint *before* the overflow clip so the
+    // blurred halo can extend past the box bounds (CSS spec). Inset
+    // shadows still paint after the clip — they live inside the box.
+    if (has_shadow_ && !shadow_.inset) {
+        canvas.draw_box_shadow(0, 0, bounds_.width, bounds_.height,
+                               shadow_.offset_x, shadow_.offset_y,
+                               shadow_.blur, shadow_.spread,
+                               shadow_.color, /*inset=*/false,
+                               corner_radius_);
+    }
+
     // Clip only if overflow is hidden (default)
     if (overflow_ == Overflow::hidden)
         canvas.clip_rect(0, 0, bounds_.width, bounds_.height);
@@ -76,27 +87,6 @@ void View::paint_all(canvas::Canvas& canvas) {
             effect_->configure_layer(canvas, 0, 0, bounds_.width, bounds_.height);
         else
             canvas.save_layer(0, 0, bounds_.width, bounds_.height, opacity_, filter_blur_);
-    }
-
-    // Paint box shadow (before background, extends outside bounds)
-    if (has_shadow_) {
-        float sx = shadow_.offset_x;
-        float sy = shadow_.offset_y;
-        float blur = shadow_.blur;
-        float spread = shadow_.spread;
-        // Approximate blur with multiple translucent rects at increasing offsets
-        int steps = std::max(1, static_cast<int>(blur / 2));
-        float base_alpha = shadow_.color.a;
-        for (int i = steps; i >= 0; --i) {
-            float t = static_cast<float>(i) / static_cast<float>(steps);
-            float expand = spread + blur * t;
-            float alpha = base_alpha * (1.0f - t) * (1.0f - t);
-            canvas.set_fill_color(Color::rgba(shadow_.color.r, shadow_.color.g, shadow_.color.b, alpha));
-            canvas.fill_rounded_rect(-expand + sx, -expand + sy,
-                                     bounds_.width + expand * 2,
-                                     bounds_.height + expand * 2,
-                                     corner_radius_ + expand * 0.5f);
-        }
     }
 
     // Paint background gradient if set (CSS background: linear-gradient)
@@ -138,6 +128,18 @@ void View::paint_all(canvas::Canvas& canvas) {
     // Paint children
     for (auto& child : children_) {
         child->paint_all(canvas);
+    }
+
+    // Inset box shadows paint over the content so the inner darkening
+    // shows through children (CSS spec: inset shadows are above the
+    // background but below the border-image, here approximated as above
+    // children too).
+    if (has_shadow_ && shadow_.inset) {
+        canvas.draw_box_shadow(0, 0, bounds_.width, bounds_.height,
+                               shadow_.offset_x, shadow_.offset_y,
+                               shadow_.blur, shadow_.spread,
+                               shadow_.color, /*inset=*/true,
+                               corner_radius_);
     }
 
     // Focus ring — only show on text input widgets, not sliders/toggles/meters

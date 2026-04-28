@@ -9,6 +9,8 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
 <a id="v0550"></a>
+## [0.56.0]
+
 ## [0.55.0] - 2026-04-28
 
 - feat(view): Label honors setFontFamily / setFontWeight / setLetterSpacing (#927) ([#938](https://github.com/danielraffel/pulp/pull/938))
