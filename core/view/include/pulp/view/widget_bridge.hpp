@@ -15,6 +15,7 @@
 #include <pulp/view/input_events.hpp>
 #include <pulp/view/theme.hpp>
 #include <pulp/state/store.hpp>
+#include <chrono>
 #include <string>
 #include <vector>
 #include <unordered_map>
@@ -148,6 +149,20 @@ private:
         std::make_shared<std::vector<AsyncExecResult>>();
     std::vector<int> pending_frame_ids_;
     bool frame_preamble_loaded_ = false;
+
+    // pulp #915 — native-side timer queue for setTimeout / setInterval.
+    // Callbacks themselves live in JS (`__timerCallbacks__`); native
+    // tracks (id, deadline, repeat, interval) so service_frame_callbacks()
+    // can fire expired timers regardless of which JS-side scheduler the
+    // consumer wants to feature-detect against.
+    struct PendingTimer {
+        int id;
+        std::chrono::steady_clock::time_point deadline;
+        std::chrono::milliseconds interval;
+        bool repeating;
+    };
+    std::vector<PendingTimer> pending_timers_;
+
     std::function<void()> repaint_callback_;
 
 #ifdef PULP_BENCHMARK

@@ -9,6 +9,8 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
 <a id="v0500"></a>
+## [0.51.0]
+
 ## [0.50.0] - 2026-04-28
 
 - fix(view): auto-wire WidgetBridge repaint callback to root.request_repaint() (#899) ([#913](https://github.com/danielraffel/pulp/pull/913))
@@ -19,6 +21,10 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - fix(cmake): install binary-data encoder alongside PulpUtils.cmake (Codex P1 on #905) ([#908](https://github.com/danielraffel/pulp/pull/908))
 
 <a id="v0490"></a>
+## [0.22.0]
+
+## [0.50.0]
+
 ## [0.49.0] - 2026-04-27
 
 - fix(canvas): compose canvasSetTransform onto parent View transform (Codex P1 on #897) ([#906](https://github.com/danielraffel/pulp/pull/906))

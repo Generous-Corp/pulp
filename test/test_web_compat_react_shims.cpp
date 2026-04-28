@@ -19,6 +19,7 @@
 
 #include <chrono>
 #include <string>
+#include <thread>
 
 using namespace pulp::view;
 using namespace pulp::state;
@@ -614,4 +615,248 @@ TEST_CASE("URLSearchParams accepts a record-style object init",
     )");
     // Object iteration order isn't guaranteed across engines; accept either.
     REQUIRE((result == "a=1&b=two" || result == "b=two&a=1"));
+}
+
+// ── Native web-API globals (pulp #915) ─────────────────────────────────
+//
+// Pulp #915 — `requestAnimationFrame`, `cancelAnimationFrame`,
+// `setTimeout`, `clearTimeout`, `setInterval`, `clearInterval`, and
+// `MessageChannel` are now installed by WidgetBridge::register_api +
+// the web-compat-scheduler.js prelude as standard global names. Spectr
+// (and any other consumer of `@pulp/react`) used to ship a ~80-line
+// `shim.js` that re-aliased the underscored `__requestFrame__` / etc.
+// these tests pin the contract that no JS-side shim is needed: every
+// global exists on `globalThis` immediately after bridge construction.
+
+TEST_CASE("setTimeout / clearTimeout / setInterval / clearInterval are functions on globalThis",
+          "[view][web-compat][issue-915]") {
+    auto result = run_in_bridge(R"(
+        return [
+            typeof globalThis.setTimeout,
+            typeof globalThis.clearTimeout,
+            typeof globalThis.setInterval,
+            typeof globalThis.clearInterval
+        ].join(',');
+    )");
+    REQUIRE(result == "function,function,function,function");
+}
+
+TEST_CASE("requestAnimationFrame / cancelAnimationFrame are functions on globalThis",
+          "[view][web-compat][issue-915]") {
+    auto result = run_in_bridge(R"(
+        return [
+            typeof globalThis.requestAnimationFrame,
+            typeof globalThis.cancelAnimationFrame
+        ].join(',');
+    )");
+    REQUIRE(result == "function,function");
+}
+
+TEST_CASE("performance.now is callable and returns a finite number",
+          "[view][web-compat][issue-915]") {
+    auto result = run_in_bridge(R"(
+        var v = performance.now();
+        return [
+            typeof globalThis.performance,
+            typeof globalThis.performance.now,
+            typeof v,
+            isFinite(v) ? 'finite' : 'inf'
+        ].join(',');
+    )");
+    REQUIRE(result == "object,function,number,finite");
+}
+
+TEST_CASE("setTimeout returns a numeric id and fires on next pump_message_loop for ms=0",
+          "[view][web-compat][issue-915]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        globalThis.__t_marker__ = 'before';
+        globalThis.__t_id__ = setTimeout(function () {
+            globalThis.__t_marker__ = 'after';
+        }, 0);
+    )");
+
+    auto id = engine.evaluate("typeof globalThis.__t_id__ + ':' + globalThis.__t_id__");
+    REQUIRE(id.isString());
+    auto id_str = std::string(id.getString());
+    REQUIRE(id_str.find("number:") == 0);
+
+    auto pre = engine.evaluate("String(globalThis.__t_marker__)");
+    REQUIRE(std::string(pre.getString()) == "before");
+
+    engine.pump_message_loop();
+
+    auto post = engine.evaluate("String(globalThis.__t_marker__)");
+    REQUIRE(std::string(post.getString()) == "after");
+}
+
+TEST_CASE("clearTimeout cancels a pending zero-delay timer before pump",
+          "[view][web-compat][issue-915]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        globalThis.__t_marker__ = 'before';
+        var id = setTimeout(function () {
+            globalThis.__t_marker__ = 'fired';
+        }, 0);
+        clearTimeout(id);
+    )");
+    engine.pump_message_loop();
+    auto v = engine.evaluate("String(globalThis.__t_marker__)");
+    REQUIRE(std::string(v.getString()) == "before");
+}
+
+TEST_CASE("setTimeout with positive delay fires after service_frame_callbacks",
+          "[view][web-compat][issue-915]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        globalThis.__pos_marker__ = 'pre';
+        setTimeout(function () { globalThis.__pos_marker__ = 'post'; }, 5);
+    )");
+    // 50ms is well above the 5ms delay and well below the test timeout.
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    bridge.service_frame_callbacks();
+    auto v = engine.evaluate("String(globalThis.__pos_marker__)");
+    REQUIRE(std::string(v.getString()) == "post");
+}
+
+TEST_CASE("setInterval rearms across multiple service_frame_callbacks calls",
+          "[view][web-compat][issue-915]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        globalThis.__iv_count__ = 0;
+        globalThis.__iv_id__ = setInterval(function () {
+            globalThis.__iv_count__++;
+        }, 5);
+    )");
+    // Three frame ticks at >5ms apart → at least three invocations.
+    for (int i = 0; i < 3; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        bridge.service_frame_callbacks();
+    }
+    auto v = engine.evaluate("String(globalThis.__iv_count__)");
+    REQUIRE(v.isString());
+    long long count = std::stoll(std::string(v.getString()));
+    REQUIRE(count >= 3);
+
+    // clearInterval stops the rearm cycle.
+    engine.evaluate("clearInterval(globalThis.__iv_id__);void 0");
+    long long before_clear = count;
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    bridge.service_frame_callbacks();
+    auto after = engine.evaluate("String(globalThis.__iv_count__)");
+    long long after_count = std::stoll(std::string(after.getString()));
+    REQUIRE(after_count == before_clear);
+}
+
+TEST_CASE("clearInterval is the same function as clearTimeout",
+          "[view][web-compat][issue-915]") {
+    auto result = run_in_bridge(R"(
+        return clearTimeout === clearInterval ? 'same' : 'distinct';
+    )");
+    REQUIRE(result == "same");
+}
+
+TEST_CASE("requestAnimationFrame registers a frame callback that fires via service_frame_callbacks",
+          "[view][web-compat][issue-915]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        globalThis.__raf_marker__ = 'before';
+        globalThis.__raf_id__ = requestAnimationFrame(function () {
+            globalThis.__raf_marker__ = 'fired';
+        });
+    )");
+    auto id = engine.evaluate("typeof globalThis.__raf_id__");
+    REQUIRE(std::string(id.getString()) == "number");
+
+    bridge.service_frame_callbacks();
+
+    auto post = engine.evaluate("String(globalThis.__raf_marker__)");
+    REQUIRE(std::string(post.getString()) == "fired");
+}
+
+TEST_CASE("cancelAnimationFrame removes a pending frame callback",
+          "[view][web-compat][issue-915]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        globalThis.__cancel_marker__ = 'before';
+        var id = requestAnimationFrame(function () {
+            globalThis.__cancel_marker__ = 'fired';
+        });
+        cancelAnimationFrame(id);
+    )");
+    bridge.service_frame_callbacks();
+    auto v = engine.evaluate("String(globalThis.__cancel_marker__)");
+    REQUIRE(std::string(v.getString()) == "before");
+}
+
+TEST_CASE("MessageChannel.port2.onmessage fires after port1.postMessage on next microtask drain",
+          "[view][web-compat][issue-915]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        globalThis.__mc_received__ = null;
+        var c = new MessageChannel();
+        c.port2.onmessage = function (ev) { globalThis.__mc_received__ = ev.data; };
+        c.port1.postMessage({hello: 'world', n: 42});
+    )");
+    // postMessage queues a microtask; pump_message_loop drains it.
+    auto pre = engine.evaluate("String(globalThis.__mc_received__)");
+    REQUIRE(std::string(pre.getString()) == "null");
+
+    engine.pump_message_loop();
+
+    auto post = engine.evaluate(
+        "globalThis.__mc_received__ && globalThis.__mc_received__.hello + ':' + "
+        "globalThis.__mc_received__.n");
+    REQUIRE(post.isString());
+    REQUIRE(std::string(post.getString()) == "world:42");
+}
+
+TEST_CASE("Native web-API globals are mirrored onto window so React's scheduler probe passes",
+          "[view][web-compat][issue-915]") {
+    auto result = run_in_bridge(R"(
+        // React 18's scheduler reads `window.setTimeout` (not just
+        // `globalThis.setTimeout`). The mirror is the contract.
+        return [
+            'rAF=' + (window.requestAnimationFrame === globalThis.requestAnimationFrame),
+            'cAF=' + (window.cancelAnimationFrame === globalThis.cancelAnimationFrame),
+            'sT=' + (window.setTimeout === globalThis.setTimeout),
+            'cT=' + (window.clearTimeout === globalThis.clearTimeout),
+            'sI=' + (window.setInterval === globalThis.setInterval),
+            'cI=' + (window.clearInterval === globalThis.clearInterval),
+            'MC=' + (window.MessageChannel === globalThis.MessageChannel),
+            'qM=' + (window.queueMicrotask === globalThis.queueMicrotask),
+            'pf=' + (window.performance === globalThis.performance)
+        ].join('|');
+    )");
+    REQUIRE(result ==
+            "rAF=true|cAF=true|sT=true|cT=true|sI=true|cI=true|"
+            "MC=true|qM=true|pf=true");
 }

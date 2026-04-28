@@ -1,4 +1,5 @@
-// web-compat-scheduler.js — Microtask + MessageChannel + URLSearchParams shims.
+// web-compat-scheduler.js — Microtask + timers + animation-frame +
+// MessageChannel + URLSearchParams native registration.
 //
 // React 18's concurrent-mode scheduler (`scheduler/src/forks/Scheduler.js`)
 // prefers `MessageChannel` for cross-task fan-out so it can yield back to
@@ -8,18 +9,19 @@
 // only the constructor plus port wiring so React's feature-detect resolves
 // to its preferred path.
 //
+// pulp #915 — animation-frame and timer globals are now registered here
+// (driven by the underscored `__requestFrame__` / `__scheduleTimer__`
+// natives that WidgetBridge::register_api installs) so consumer bundles
+// don't need a JS shim that re-aliases `__requestFrame__` ⇄
+// `requestAnimationFrame`. The deletion of spectr's ~80-line shim.js
+// hangs off this slot.
+//
 // This shim is intentionally thin: the message queue is drained on the
 // next microtask via `Promise.resolve().then`. That keeps the scheduling
 // order deterministic for synchronous test harnesses and avoids leaking a
 // timer-driven event loop that the QuickJS embedding would never pump.
 
 (function () {
-    function defineGlobalIfMissing(name, value) {
-        if (typeof globalThis[name] === "undefined") {
-            globalThis[name] = value;
-        }
-    }
-
     // ── queueMicrotask ───────────────────────────────────────────────────
     if (typeof globalThis.queueMicrotask !== "function") {
         globalThis.queueMicrotask = function (fn) {
@@ -38,6 +40,79 @@
             } else if (typeof setTimeout === "function") {
                 setTimeout(fn, 0);
             }
+        };
+    }
+
+    // ── requestAnimationFrame / cancelAnimationFrame (pulp #915) ─────────
+    // Wraps the native __requestFrame__ id-allocator + __frameCallbacks__
+    // table that WidgetBridge installs in its preamble. Standard names go
+    // on globalThis directly so consumers don't need a shim.
+    if (typeof globalThis.requestAnimationFrame !== "function"
+            && typeof __requestFrame__ === "function") {
+        globalThis.requestAnimationFrame = function (fn) {
+            if (typeof fn !== "function") return 0;
+            var id = __frameNextId__++;
+            __frameCallbacks__[id] = fn;
+            return __requestFrame__(id);
+        };
+        globalThis.cancelAnimationFrame = function (id) {
+            if (typeof id !== "number") return;
+            delete __frameCallbacks__[id];
+            if (typeof __cancelFrame__ === "function") __cancelFrame__(id);
+        };
+    }
+
+    // ── setTimeout / clearTimeout / setInterval / clearInterval (#915) ───
+    // Driven by the native deadline tracker (__scheduleTimer__) so the
+    // frame loop fires positive-delay timers without the consumer having
+    // to chain rAF ticks. setTimeout(fn, 0) bypasses native scheduling
+    // entirely and routes through the microtask queue, so it fires
+    // deterministically on the next pump_message_loop() — which is the
+    // contract React's scheduler relies on for its yield path.
+    if (typeof globalThis.setTimeout !== "function"
+            && typeof __scheduleTimer__ === "function") {
+        function __make_timer(fn, ms, repeat) {
+            if (typeof fn !== "function") return 0;
+            var id = __timerNextId__++;
+            __timerCallbacks__[id] = { fn: fn, repeat: !!repeat };
+            var delay = (typeof ms === "number" && ms > 0) ? ms : 0;
+            if (delay <= 0 && !repeat) {
+                // Fast-path setTimeout(fn, 0): drain on the next microtask
+                // so a single pump_message_loop() call fires it. Still
+                // honours clearTimeout — the wrapper checks the registry.
+                Promise.resolve().then(function () {
+                    if (__timerCallbacks__[id]) __invokeTimer__(id);
+                });
+                return id;
+            }
+            __scheduleTimer__(id, delay, !!repeat);
+            return id;
+        }
+        globalThis.setTimeout = function (fn, ms) {
+            return __make_timer(fn, ms, false);
+        };
+        globalThis.setInterval = function (fn, ms) {
+            // Spec: setInterval clamps to a 4ms minimum, which avoids a
+            // native flush firing the same interval every pump.
+            var clamped = (typeof ms === "number" && ms >= 4) ? ms : 4;
+            return __make_timer(fn, clamped, true);
+        };
+        globalThis.clearTimeout = function (id) {
+            if (typeof id !== "number") return;
+            delete __timerCallbacks__[id];
+            if (typeof __cancelTimer__ === "function") __cancelTimer__(id);
+        };
+        globalThis.clearInterval = globalThis.clearTimeout;
+    }
+
+    // ── performance.now() (pulp #915) ────────────────────────────────────
+    // Bundled-React frameworks read `performance.now` at module-eval
+    // time; without it the bundle ReferenceErrors before the bridge has
+    // a chance to install the legacy window.performance shim.
+    if (typeof globalThis.performance === "undefined"
+            && typeof __performanceNow__ === "function") {
+        globalThis.performance = {
+            now: function () { return __performanceNow__(); }
         };
     }
 
@@ -239,5 +314,25 @@
         };
 
         globalThis.URLSearchParams = URLSearchParams;
+    }
+
+    // ── Mirror standard names onto `window` (pulp #915) ──────────────────
+    // web-compat-document.js installs a `window` object before this file
+    // runs and pre-populates it with its own requestAnimationFrame /
+    // cancelAnimationFrame closures. React's scheduler reads
+    // `window.setTimeout` / `window.requestAnimationFrame` specifically
+    // (not just globalThis), so collapse the two onto a single shared
+    // implementation now that the natively-driven ones exist.
+    if (typeof globalThis.window === "object" && globalThis.window !== null) {
+        var w = globalThis.window;
+        var mirror = ["requestAnimationFrame", "cancelAnimationFrame",
+                      "setTimeout", "clearTimeout",
+                      "setInterval", "clearInterval",
+                      "queueMicrotask", "performance",
+                      "MessageChannel", "MessagePort"];
+        for (var i = 0; i < mirror.length; i++) {
+            var n = mirror[i];
+            if (typeof globalThis[n] !== "undefined") w[n] = globalThis[n];
+        }
     }
 })();

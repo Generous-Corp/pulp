@@ -848,6 +848,12 @@ void WidgetBridge::poll_async_results() {
 
 void WidgetBridge::service_frame_callbacks() {
     engine_.pump_message_loop();
+    // pulp #915 — drain any expired native-tracked setTimeout/setInterval
+    // timers so consumers don't need a JS shim wrapping our frame loop.
+    if (!pending_timers_.empty()) {
+        engine_.evaluate("if (typeof __flushTimers__ === 'function') __flushTimers__();void 0");
+        engine_.pump_message_loop();
+    }
     if (!pending_frame_ids_.empty()) {
         engine_.evaluate("if (typeof __flushFrames__ === 'function') __flushFrames__();void 0");
         engine_.pump_message_loop();
@@ -3146,6 +3152,21 @@ void WidgetBridge::register_api() {
             "  var fn = __frameCallbacks__[id];"
             "  if (fn) { delete __frameCallbacks__[id]; fn(); }"
             "}"
+            // pulp #915 — timer registry for native setTimeout / setInterval.
+            // Callbacks live in JS (CHOC's NativeFunction can't carry JSValue
+            // arguments); native side tracks deadlines + repeat semantics
+            // and pings these helpers when a timer expires.
+            "var __timerCallbacks__ = Object.create(null);"
+            "var __timerNextId__ = 1;"
+            "function __invokeTimer__(id) {"
+            "  var entry = __timerCallbacks__[id];"
+            "  if (!entry) return;"
+            "  if (!entry.repeat) delete __timerCallbacks__[id];"
+            "  try { entry.fn(); } catch (e) {"
+            "    if (typeof console !== 'undefined' && console.error)"
+            "      console.error('timer:', e);"
+            "  }"
+            "}"
         );
     }
 
@@ -3172,6 +3193,80 @@ void WidgetBridge::register_api() {
         batch.reserve(ids.size() * 24);
         for (auto id : ids) {
             batch += "__invokeFrame__(";
+            batch += std::to_string(id);
+            batch += ");";
+        }
+        engine_.evaluate(batch + "void 0;");
+        return choc::value::Value();
+    });
+
+    // pulp #915 — native setTimeout / setInterval scheduling. JS-side
+    // setTimeout/setInterval generate the id and stash the callback in
+    // __timerCallbacks__; native tracks (id, deadline, repeat, interval)
+    // so service_frame_callbacks() can fire expired timers without a
+    // consumer-side shim.
+    engine_.register_function("__scheduleTimer__", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<int>(0, 0);
+        auto delay = args.get<double>(1, 0.0);
+        auto repeat = args.get<bool>(2, false);
+        if (id <= 0) return choc::value::createInt32(0);
+        if (delay < 0.0) delay = 0.0;
+        auto delay_ms = std::chrono::milliseconds(static_cast<long long>(delay));
+        PendingTimer t;
+        t.id = id;
+        t.deadline = std::chrono::steady_clock::now() + delay_ms;
+        t.interval = delay_ms;
+        t.repeating = repeat;
+        // Replace any prior schedule for this id (shouldn't happen, but
+        // setInterval/setTimeout share the JS-side id allocator and a
+        // misbehaving consumer might double-schedule).
+        auto it = std::find_if(pending_timers_.begin(), pending_timers_.end(),
+            [id](const PendingTimer& p){ return p.id == id; });
+        if (it != pending_timers_.end()) *it = t;
+        else pending_timers_.push_back(t);
+        return choc::value::createInt32(id);
+    });
+
+    engine_.register_function("__cancelTimer__", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<int>(0, 0);
+        auto it = std::remove_if(pending_timers_.begin(), pending_timers_.end(),
+            [id](const PendingTimer& p){ return p.id == id; });
+        pending_timers_.erase(it, pending_timers_.end());
+        return choc::value::Value();
+    });
+
+    engine_.register_function("__flushTimers__", [this](choc::javascript::ArgumentList) {
+        if (pending_timers_.empty()) return choc::value::Value();
+        auto now = std::chrono::steady_clock::now();
+        std::vector<int> to_fire;
+        // Two-phase: first collect ids whose deadline has passed, then
+        // fire them. Mutating pending_timers_ while iterating would lose
+        // re-arms from setInterval (which reschedules its own deadline).
+        for (auto& t : pending_timers_) {
+            if (t.deadline <= now) to_fire.push_back(t.id);
+        }
+        if (to_fire.empty()) return choc::value::Value();
+        // Re-arm intervals before invocation so the JS callback can call
+        // clearInterval(id) and have it actually take effect (which the
+        // __cancelTimer__ binding it calls into respects).
+        for (auto& t : pending_timers_) {
+            if (t.deadline <= now && t.repeating) {
+                // Catch-up by interval — never schedule into the past.
+                while (t.deadline <= now) t.deadline += t.interval;
+            }
+        }
+        // Drop expired non-repeating timers from the queue. (Repeating
+        // ones already had their deadline advanced above.)
+        pending_timers_.erase(
+            std::remove_if(pending_timers_.begin(), pending_timers_.end(),
+                [now](const PendingTimer& p){
+                    return !p.repeating && p.deadline <= now;
+                }),
+            pending_timers_.end());
+        std::string batch;
+        batch.reserve(to_fire.size() * 24);
+        for (auto id : to_fire) {
+            batch += "__invokeTimer__(";
             batch += std::to_string(id);
             batch += ");";
         }

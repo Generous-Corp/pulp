@@ -35,6 +35,10 @@ similar frameworks) feature-detect on construction:
 | `queueMicrotask` (Promise-based shim) | `web-compat-scheduler.js` | React 18 concurrent scheduler |
 | `MessageChannel` + `MessagePort` (microtask-deferred postMessage) | `web-compat-scheduler.js` | React 18 scheduler prefers MC; falls back to setTimeout if missing (perf cliff, not a blocker) |
 | `URLSearchParams` polyfill | `web-compat-scheduler.js` | React error-source URL parsing |
+| `requestAnimationFrame` / `cancelAnimationFrame` (driven by native `__requestFrame__`) | `web-compat-scheduler.js` | Bundled-React frameworks reference the standard names; without this each consumer ships a ~80-line `shim.js` (pulp #915) |
+| `setTimeout` / `clearTimeout` / `setInterval` / `clearInterval` (driven by native `__scheduleTimer__` deadline tracker) | `web-compat-scheduler.js` | React's scheduler yield path + plugin code; setTimeout(fn, 0) drains via microtask, positive delays drain in `service_frame_callbacks()` (pulp #915) |
+| `performance.now()` (driven by native `__performanceNow__`) | `web-compat-scheduler.js` | Bundled-React modules read `performance.now` at module-eval time before the legacy `window.performance` shim is reachable (pulp #915) |
+| Mirror block onto `window` (rAF/cAF/sT/cT/sI/cI/MC/qM/perf) | `web-compat-scheduler.js` | React 18's scheduler reads `window.setTimeout` / `window.requestAnimationFrame` specifically; the global must be reachable through both names (pulp #915) |
 
 When adding new framework support, check the gap matrix in pulp #468
 before assuming a polyfill is missing — the entry above is exhaustive
@@ -112,3 +116,19 @@ Use `recommend` logic above, but **never auto-switch** — always confirm first.
 - `v8`: V8 on desktop. Requires V8 headers/libs. Build fails without them.
 
 The engine choice is a **build-time** CMake option. Changing it requires reconfigure + rebuild. The abstraction ensures all JS bridge code works identically across engines — the switch is invisible to UI scripts.
+
+## Gotchas
+
+### Web-API global registration is hybrid native+JS by design (#915)
+
+CHOC's `NativeFunction` signature can only carry `choc::value::Value` arguments — JS function values don't round-trip through it. So even though `requestAnimationFrame` / `setTimeout` / `setInterval` look like they "should" be C++-only bindings, the callbacks themselves have to live in a JS-side registry (`__frameCallbacks__`, `__timerCallbacks__`).
+
+What is C++-side: id allocation in `WidgetBridge::__scheduleTimer__`, deadline tracking in `pending_timers_`, and the flush driver invoked from `service_frame_callbacks()`. What is JS-side: the registry table and the `setTimeout` / `requestAnimationFrame` global wrappers (in `web-compat-scheduler.js`) that allocate ids, stash callbacks, and call into the natives.
+
+Don't refactor this into a "pure native" shape — there's no way to do it without copying the entire JS engine's value type into Pulp's bridge layer.
+
+### setTimeout(fn, 0) takes the microtask path, not the timer queue (#915)
+
+`setTimeout(fn, 0)` deliberately bypasses `__scheduleTimer__` and routes through `Promise.resolve().then(...)` so it drains on the next `pump_message_loop()` call. This matches React's scheduler expectations and makes tests deterministic (no host frame loop needed). Positive-delay timeouts go through the native deadline tracker and only fire when `service_frame_callbacks()` runs.
+
+If a consumer reports "my setTimeout(fn, 1) never fires", check that the host is actually calling `service_frame_callbacks()` from its frame loop — that's the drain hook for non-zero delays.
