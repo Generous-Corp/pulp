@@ -8,9 +8,15 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
-<a id="v0590"></a>
-## [0.60.0]
+<a id="v0600"></a>
+## [0.60.0] - 2026-04-28
 
+- fix(canvas): CoreGraphicsCanvas::concat_transform composes onto CTM (Codex P1 on #933) ([#961](https://github.com/danielraffel/pulp/pull/961))
+- fix(coverage): include non-test binaries in local diff-cover object set ([#959](https://github.com/danielraffel/pulp/pull/959))
+- fix(view): wire platform font manager into TextShaper (pulp #945) ([#957](https://github.com/danielraffel/pulp/pull/957))
+- fix(view): land outset shadow + overflow clip inside the view's saveLayer (#936 P1 / #949) ([#955](https://github.com/danielraffel/pulp/pull/955))
+
+<a id="v0590"></a>
 ## [0.59.0] - 2026-04-28
 
 - feat(canvas): register external/fonts/*.ttf with SkFontMgr at startup (#932) ([#956](https://github.com/danielraffel/pulp/pull/956))
@@ -812,6 +818,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.60.0]: https://github.com/danielraffel/pulp/releases/tag/v0.60.0
 [0.59.0]: https://github.com/danielraffel/pulp/releases/tag/v0.59.0
 [0.58.0]: https://github.com/danielraffel/pulp/releases/tag/v0.58.0
 [0.57.0]: https://github.com/danielraffel/pulp/releases/tag/v0.57.0
