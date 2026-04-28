@@ -748,18 +748,20 @@ jobs:
           # the PR. continue-on-error was removed at the step level above.
           exit "$rc"
 
+      - name: Install PyYAML (#566 Phase 2)
+        # Installed before the fixture tests because
+        # test_coverage_tier_check.py exercises ctc.load_targets() which
+        # imports yaml (issue #900). Also required by the per-tier gate
+        # step below.
+        run: python3 -m pip install --user 'pyyaml>=6'
+        shell: bash
+
       - name: coverage_tier_check.py fixture tests (#566 Phase 2)
         # Guard the per-tier gate script the same way we guard
         # coverage_diff_comment.py — unit tests run before the live
         # invocation so a regression in classify_file / aggregate /
         # render fails fast without requiring a full coverage run.
         run: python3 tools/scripts/test_coverage_tier_check.py
-        shell: bash
-
-      - name: Install PyYAML (#566 Phase 2)
-        # Only this step needs it; installing here keeps the earlier
-        # steps unaffected if PyYAML isn't available elsewhere.
-        run: python3 -m pip install --user 'pyyaml>=6'
         shell: bash
 
       - name: Run per-tier coverage gate (#566 Phase 2)
