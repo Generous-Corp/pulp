@@ -389,24 +389,16 @@ FrameClock* View::frame_clock() const {
 }
 
 void View::request_repaint() {
-    // Walk up the parent chain looking for an attached host. Either of
-    // window_host_ or plugin_view_host_ is propagated to children by
-    // set_window_host / set_plugin_view_host on add_child, so the root
-    // typically has them set and children inherit.
+    // set_window_host / set_plugin_view_host propagate to children on
+    // add_child, so any attached view sees its own host pointer and we
+    // never need to walk the parent chain. No host attached: silent
+    // no-op — paint is already on the way for the initial mount, or
+    // there's no surface to paint to yet.
     if (window_host_) {
         window_host_->repaint();
-        return;
-    }
-    if (plugin_view_host_) {
+    } else if (plugin_view_host_) {
         plugin_view_host_->repaint();
-        return;
     }
-    if (parent_) {
-        parent_->request_repaint();
-    }
-    // No host attached yet: silently no-op. This matches the previous
-    // behaviour of an unset repaint_callback_ in WidgetBridge — paint is
-    // already on the way (initial mount) or there is no surface to paint to.
 }
 
 void View::simulate_hover(Point root_pos) {

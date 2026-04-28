@@ -183,8 +183,9 @@ public:
     void clear_layout_dirty() { layout_dirty_ = false; }
 
     /// Request that this view's host invalidate and schedule a repaint.
-    /// Walks up the parent chain looking for the attached `WindowHost` or
-    /// `PluginViewHost` and calls its `repaint()`. If the view tree has not
+    /// Calls `repaint()` on the attached `WindowHost` or `PluginViewHost`.
+    /// Hosts are propagated to children on `add_child`, so any attached
+    /// descendant sees its own host pointer; if the view tree has not
     /// been attached to a host yet, this is a no-op.
     ///
     /// This is the idiomatic wiring point for sub-bridges (e.g. a `View`

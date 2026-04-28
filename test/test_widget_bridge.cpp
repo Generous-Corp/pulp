@@ -9,6 +9,7 @@
 #include <pulp/view/theme.hpp>
 #include <pulp/view/ui_components.hpp>
 #include <pulp/view/window_host.hpp>
+#include <pulp/view/plugin_view_host.hpp>
 #include <chrono>
 #include <thread>
 
@@ -1156,6 +1157,19 @@ public:
     void run_event_loop() override {}
 };
 
+class CountingPluginViewHost final : public pulp::view::PluginViewHost {
+public:
+    int repaint_calls = 0;
+    Size size = {400, 300};
+
+    pulp::view::NativeViewHandle native_handle() override { return {}; }
+    void attach_to_parent(pulp::view::NativeViewHandle) override {}
+    void detach() override {}
+    void repaint() override { ++repaint_calls; }
+    void set_size(uint32_t w, uint32_t h) override { size = {w, h}; }
+    Size get_size() const override { return size; }
+};
+
 } // namespace
 
 TEST_CASE("WidgetBridge default repaint_callback routes to root host (issue 899)",
@@ -1183,9 +1197,9 @@ TEST_CASE("WidgetBridge default repaint_callback routes to root host (issue 899)
 TEST_CASE("WidgetBridge default repaint reaches host through child view (issue 899)",
           "[view][bridge][issue-899]") {
     // The Spectr NativeEditorView case: a child View owns its own
-    // WidgetBridge. The bridge's root is the child, not the top-level
-    // host root, so request_repaint() must walk up through the parent
-    // chain to find the host.
+    // WidgetBridge. set_window_host propagates the host to children on
+    // add_child, so the child's own request_repaint() reaches the host
+    // directly without parent walking.
     ScriptEngine engine;
     View top_root;
     top_root.set_bounds({0, 0, 800, 600});
@@ -1206,6 +1220,25 @@ TEST_CASE("WidgetBridge default repaint reaches host through child view (issue 8
     bridge.load_script("layout()");
 
     REQUIRE(host.repaint_calls >= 1);
+}
+
+TEST_CASE("WidgetBridge default repaint routes to plugin_view_host (issue 899)",
+          "[view][bridge][issue-899]") {
+    // DAW plugin context: when a View has a PluginViewHost set instead of
+    // a WindowHost, the bridge's auto-wired repaint must still reach it.
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+
+    CountingPluginViewHost plugin_host;
+    root.set_plugin_view_host(&plugin_host);
+
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    REQUIRE(plugin_host.repaint_calls == 0);
+    bridge.load_script("layout()");
+    REQUIRE(plugin_host.repaint_calls >= 1);
 }
 
 TEST_CASE("WidgetBridge set_repaint_callback overrides the default (issue 899)",
@@ -1248,8 +1281,12 @@ TEST_CASE("WidgetBridge default repaint is a no-op when no host attached (issue 
     REQUIRE_NOTHROW(bridge.load_script("layout()"));
 }
 
-TEST_CASE("View::request_repaint walks up to host (issue 899)",
+TEST_CASE("View::request_repaint reaches host through propagated descendants (issue 899)",
           "[view][issue-899]") {
+    // set_window_host propagates the host pointer to every existing and
+    // subsequently-added child. A grandchild's own window_host_ is
+    // therefore set; calling request_repaint() reaches the host directly
+    // without parent walking.
     View root;
     CountingWindowHost host;
     root.set_window_host(&host);
