@@ -1348,7 +1348,12 @@ catch_discover_tests(pulp-test-design-import)
 # WidgetBridge to evaluate the same prelude stack the runtime ships.
 add_executable(pulp-test-web-compat-react-shims test_web_compat_react_shims.cpp)
 target_link_libraries(pulp-test-web-compat-react-shims PRIVATE pulp::view Catch2::Catch2WithMain)
-catch_discover_tests(pulp-test-web-compat-react-shims)
+# issue #902 bound-pump test runs the 1M-job cap; budget headroom for slow
+# CI runners and sanitizer builds. Default discover timeout is too tight
+# when a regression of the bound would hang indefinitely.
+catch_discover_tests(pulp-test-web-compat-react-shims
+    PROPERTIES TIMEOUT 180
+)
 
 # pulp #468 — Claude Design bundle envelope parser (base64+gzip JSON
 # envelope unpacking, template script-order resolution).

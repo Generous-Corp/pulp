@@ -17,10 +17,8 @@
 #include <pulp/view/view.hpp>
 #include <pulp/view/widget_bridge.hpp>
 
-#include <atomic>
 #include <chrono>
 #include <string>
-#include <thread>
 
 using namespace pulp::view;
 using namespace pulp::state;
@@ -501,11 +499,23 @@ TEST_CASE("pump_message_loop drains a long chain past the old 4096-job cutoff",
 // by #874 hard-freezes the UI thread when JS schedules a self-rearming
 // microtask. The fix re-introduces a bound (1M jobs) and logs a warning
 // when it fires. This test pins that bound: a microtask that always
-// re-queues itself must NOT hang `pump_message_loop()`. We use a
-// std::thread + condition_variable timeout so a regression manifests
-// as a test failure, not a wedged CI run. We also assert the JS-side
-// counter reached the expected cap, which proves the pump actually
-// executed up to the bound (rather than returning early on rc==0).
+// re-queues itself must NOT hang `pump_message_loop()`.
+//
+// We can't drive the pump from a worker thread — QuickJS's JSContext
+// is single-threaded and cross-thread access is undefined (Linux CI
+// surfaced this as count==0 because the foreign-thread call returned
+// rc<0 immediately). So we drive the pump synchronously on the
+// calling thread and rely on two complementary checks:
+//
+//   1. A wall-clock budget around the call. If the pump returns
+//      within a generous limit it is by definition bounded; a
+//      regression of the bound would hang the test process and trip
+//      the CTest TIMEOUT, surfacing as a Failed test instead of
+//      silent success.
+//   2. A counter on the JS side bumped every microtask. After the
+//      pump returns we assert it reached well past the 5K of the
+//      prior issue-769 test, proving the cap (not an early-empty
+//      return) is what stopped us.
 TEST_CASE("pump_message_loop is bounded against a self-rearming microtask",
           "[view][web-compat][issue-902]") {
     ScriptEngine engine;
@@ -522,38 +532,22 @@ TEST_CASE("pump_message_loop is bounded against a self-rearming microtask",
         queueMicrotask(loop);
     )");
 
-    // Run the pump on a worker thread and wait with a generous timeout.
-    // 1M JS_ExecutePendingJob calls of a 2-statement microtask should
-    // finish well under 30s on every supported host. If pump hangs the
-    // join times out and we fail loudly instead of wedging CI.
-    std::atomic<bool> done{false};
-    std::thread pumper([&] {
-        engine.pump_message_loop();
-        done.store(true, std::memory_order_release);
-    });
+    // 1M JS_ExecutePendingJob calls of a 2-statement microtask finish
+    // in a few seconds on every supported host. A wedged regression
+    // would hang and trip CTest's TIMEOUT line, which is the loud
+    // signal we want.
+    auto t0 = std::chrono::steady_clock::now();
+    engine.pump_message_loop();
+    auto elapsed = std::chrono::steady_clock::now() - t0;
 
-    // Bounded wait — poll done every 50ms up to a hard ceiling. We use
-    // detach-on-timeout so the test reports failure cleanly even if
-    // pump_message_loop hung. (The leaked thread is fine: the process
-    // is a one-shot Catch2 binary.)
+    // Generous upper bound — sanitizer builds and slow CI runners are
+    // real. The point is to catch a multi-minute hang, not benchmark.
     using namespace std::chrono_literals;
-    auto deadline = std::chrono::steady_clock::now() + 60s;
-    while (!done.load(std::memory_order_acquire)
-           && std::chrono::steady_clock::now() < deadline) {
-        std::this_thread::sleep_for(50ms);
-    }
+    REQUIRE(elapsed < 120s);
 
-    if (!done.load(std::memory_order_acquire)) {
-        pumper.detach();
-        FAIL("pump_message_loop did not return within 60s on a "
-             "self-rearming microtask — bound regression (issue #902)");
-    }
-    pumper.join();
-
-    // The cap-fire path should have executed at least one full sweep of
-    // the bound. We don't pin the exact value (other engines / JIT may
-    // pick up extras), but it must be >> the 5000 used by the prior
-    // test, proving we did not exit early.
+    // Prove we actually exercised the cap (not just returned early on
+    // rc==0). The JS-side counter must be well past the 5K used by
+    // the prior issue-769 test.
     auto v = engine.evaluate("String(globalThis.__runaway__)");
     REQUIRE(v.isString());
     long long count = std::stoll(std::string(v.getString()));
