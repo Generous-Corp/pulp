@@ -30,6 +30,7 @@ import unittest
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 SCRIPT = REPO_ROOT / "tools" / "scripts" / "local_diff_cover.sh"
 CONFIG = REPO_ROOT / "tools" / "scripts" / "coverage_config.json"
+CI_SCRIPT = REPO_ROOT / "scripts" / "run_coverage.sh"
 
 
 class ConfigTests(unittest.TestCase):
@@ -131,6 +132,52 @@ class WorkflowSourceOfTruthTests(unittest.TestCase):
             f"workflow has hardcoded --fail-under literal(s): {literals}; "
             "remove and read from coverage_config.json instead",
         )
+
+
+class ObjectDiscoveryParityTests(unittest.TestCase):
+    """local_diff_cover.sh must mirror run_coverage.sh's object-set passes.
+
+    Anti-drift guard for #919: the local mirror previously only added
+    build/test/* binaries to llvm-cov, so coverage data from CLI
+    shell-out tests (cmd_coverage.cpp, cmd_loop.cpp, anything reached
+    via pulp-cli / pulp-standalone / pulp-inspect) never propagated.
+    The fix lifts run_coverage.sh's wider find passes; this test fails
+    if either side drops one.
+    """
+
+    REQUIRED_FIND_ROOTS = [
+        # (substring that must appear in the script, human description)
+        ('"${BUILD_DIR}/test"', "test executables"),
+        ("libpulp-*.a", "first-party static archives (Unix)"),
+        ("pulp-*.lib", "first-party static archives (Windows)"),
+        ('"${BUILD_DIR}/tools"', "non-test executables (CLI / standalone)"),
+        ('"${BUILD_DIR}/inspect"', "non-test executables (inspector)"),
+        ('"${BUILD_DIR}/bindings"', "loadable first-party modules"),
+    ]
+
+    def test_local_script_includes_all_object_roots(self) -> None:
+        text = SCRIPT.read_text()
+        for needle, desc in self.REQUIRED_FIND_ROOTS:
+            self.assertIn(
+                needle, text,
+                f"local_diff_cover.sh missing object-discovery for {desc} "
+                f"({needle!r}); without it llvm-cov drops coverage from "
+                f"that surface — see #919.",
+            )
+
+    def test_ci_script_still_includes_all_object_roots(self) -> None:
+        # If the CI script ever drops one of these, the local mirror is
+        # the wrong place to keep it — fix CI first, then update both.
+        if not CI_SCRIPT.exists():
+            self.skipTest(f"CI script not present: {CI_SCRIPT}")
+        text = CI_SCRIPT.read_text()
+        for needle, desc in self.REQUIRED_FIND_ROOTS:
+            self.assertIn(
+                needle, text,
+                f"scripts/run_coverage.sh missing object-discovery for "
+                f"{desc} ({needle!r}); local_diff_cover.sh mirrors this "
+                f"surface set, so dropping it here desyncs both lanes.",
+            )
 
 
 if __name__ == "__main__":

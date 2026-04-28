@@ -185,21 +185,50 @@ find "${PROFRAW_DIR}" -name '*.profraw' -print0 \
 
 # ── Gather binaries for llvm-cov -object ────────────────────────────────────
 # Mirror scripts/run_coverage.sh's binary discovery so we cover the same
-# surface CI does. Test binaries first, then libpulp-*.a archives, then
-# non-test executables.
+# surface CI does. Without the non-test executable / loadable-module
+# passes below, llvm-cov sees only test binaries — coverage data from
+# CLI shell-out tests (cmd_coverage.cpp, cmd_loop.cpp, etc.) never
+# propagates, and any first-party file exercised end-to-end through
+# pulp-cli / pulp-standalone / pulp-inspect is silently dropped from
+# the diff-cover gate. See issue #919 (Codex review on PR #919).
 BINARIES=()
+
+# 1. Test executables — primary coverage drivers.
 while IFS= read -r f; do BINARIES+=("-object" "$f"); done < <(
     find "${BUILD_DIR}/test" -maxdepth 2 -type f -perm -u+x \
         ! -name '*.cmake' ! -name '*.txt' 2>/dev/null || true
 )
+
+# 2. First-party static archives — expose every instrumented TU even
+#    when no test transitively links it. `pulp-*.lib` covers Windows
+#    where clang-cl emits MSVC-style archives.
 while IFS= read -r f; do BINARIES+=("-object" "$f"); done < <(
     find "${BUILD_DIR}" -type f \
         \( -name 'libpulp-*.a' -o -name 'pulp-*.lib' \) \
         2>/dev/null || true
 )
 
+# 3. First-party non-test executables — CLI, standalone host, inspector.
+#    These are the targets shell-out tests actually invoke; without them
+#    cmd_coverage.cpp et al. never accumulate coverage.
+while IFS= read -r f; do BINARIES+=("-object" "$f"); done < <(
+    find "${BUILD_DIR}/tools" "${BUILD_DIR}/inspect" \
+        -maxdepth 3 -type f -perm -u+x \
+        ! -name '*.cmake' ! -name '*.txt' ! -name '*.o' \
+        2>/dev/null || true
+)
+
+# 4. Loadable first-party modules under bindings/ that execute
+#    instrumented code under test (Python smoke target etc.).
+while IFS= read -r f; do BINARIES+=("-object" "$f"); done < <(
+    find "${BUILD_DIR}/bindings" -type f \
+        \( -name 'pulp*.so' -o -name 'pulp*.pyd' -o -name 'pulp*.dylib' \) \
+        ! -path "${BUILD_DIR}/bindings/python/*" \
+        2>/dev/null || true
+)
+
 if [ "${#BINARIES[@]}" -eq 0 ]; then
-    echo "[local_diff_cover] no test binaries found under ${BUILD_DIR}/test" >&2
+    echo "[local_diff_cover] no binaries found under ${BUILD_DIR}" >&2
     exit 1
 fi
 
