@@ -587,6 +587,37 @@ For risky build-system or packaging work, "tests pass" also includes a clean det
 
 When in doubt, validate in the branch/worktree first and merge to `main` second. The burden of proof should be on landing safely, not on fixing `main` after the fact.
 
+### Local Diff-Coverage Check
+
+Before pushing a PR, run a local diff-coverage check to catch the same
+`Diff coverage required (75%)` gate that CI runs. Saves a 20-min CI
+roundtrip on coverage-only failures.
+
+```bash
+# Whole-tree (slow, matches CI)
+tools/scripts/local_diff_cover.sh
+
+# Targeted (fast — build only the named test targets)
+tools/scripts/local_diff_cover.sh pulp-test-widget-bridge
+
+# Skip (e.g. workflow-only or doc-only PRs)
+PULP_SKIP_DIFF_COVER=1 tools/scripts/local_diff_cover.sh
+
+# Same flow via the CLI
+pulp coverage diff
+pulp coverage diff pulp-test-widget-bridge
+```
+
+The threshold + surface filters live in
+`tools/scripts/coverage_config.json` — edit there once and CI
+(`.github/workflows/coverage.yml`) plus this local script stay in
+sync. The pre-push hook runs this check advisory-by-default;
+`PULP_ENFORCE_PREPUSH_DIFF_COVER=1` upgrades it to a hard block.
+
+The Claude Code slash command `/coverage-diff` invokes the same
+script with the same args, so all four invocation surfaces share
+one implementation.
+
 ---
 
 ## RepoPrompt Usage

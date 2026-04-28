@@ -19,6 +19,11 @@ SKIP_SLASH_COMMANDS = {
     # skill. Adding a slash command for pure plumbing would clutter
     # the slash-command surface for agents. #552
     "projects",
+    # `pulp coverage` is the parent CLI command; the user-facing slash
+    # command is the more descriptive `/coverage-diff`, which invokes
+    # the same underlying script (tools/scripts/local_diff_cover.sh).
+    # Both surfaces are documented in the cli-maintenance and ci skills.
+    "coverage",
 }
 
 

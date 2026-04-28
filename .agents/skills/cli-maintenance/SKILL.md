@@ -336,6 +336,21 @@ file). When changing scanner.scan() signatures, update cmd_host.cpp's
 ScanOptions construction in lockstep — the cross-format loop builds an
 options struct per iteration.
 
+### `pulp coverage diff` — local diff-coverage gate
+
+`pulp coverage diff` (in `tools/cli/cmd_coverage.cpp`) is a thin
+shell-out to `tools/scripts/local_diff_cover.sh`. The script is the
+single implementation; the CLI subcommand, the
+`.claude/commands/coverage-diff.md` slash command, and the pre-push
+hook all delegate there. Threshold + filters live in
+`tools/scripts/coverage_config.json` — that JSON is the single source
+of truth; `.github/workflows/coverage.yml` reads it via `jq` so the
+CI gate stays in lockstep. When changing the threshold, edit the JSON
+once and don't touch any of the four invocation surfaces. Anti-drift
+test: `tools/scripts/test_local_diff_cover.py::WorkflowSourceOfTruthTests`
+fails if a future edit hardcodes `--fail-under=NN` back into the
+workflow.
+
 ## Phase 0 host-contracts touchpoints
 
 `tools/cli/cmd_host.cpp` calls `PluginSlot::process()` which now takes

@@ -9,6 +9,8 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
 <a id="v0520"></a>
+## [0.53.0]
+
 ## [0.52.0] - 2026-04-28
 
 - feat(canvas2d): close API gaps — measureText, drawImage, setLineDash, getImageData, putImageData ([#920](https://github.com/danielraffel/pulp/pull/920))
@@ -30,6 +32,10 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - fix(cmake): install binary-data encoder alongside PulpUtils.cmake (Codex P1 on #905) ([#908](https://github.com/danielraffel/pulp/pull/908))
 
 <a id="v0490"></a>
+## [0.23.0]
+
+## [0.52.0]
+
 ## [0.49.0] - 2026-04-27
 
 - fix(canvas): compose canvasSetTransform onto parent View transform (Codex P1 on #897) ([#906](https://github.com/danielraffel/pulp/pull/906))

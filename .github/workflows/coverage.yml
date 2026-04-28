@@ -726,6 +726,11 @@ jobs:
         # "Render PR comment body" step so contributors see the
         # number alongside the failed check.
         # Reads the MERGED XML produced by the previous step (#635).
+        #
+        # Threshold comes from tools/scripts/coverage_config.json so the
+        # local pre-push hook + tools/scripts/local_diff_cover.sh stay
+        # in lockstep with this gate. Edit there, not here, when raising
+        # or lowering the floor.
         shell: bash
         run: |
           set +e
@@ -736,10 +741,24 @@ jobs:
             echo "exit_code=skip" >> "$GITHUB_OUTPUT"
             exit 0
           fi
+          THRESHOLD=$(jq -r '.diff_coverage_fail_under' tools/scripts/coverage_config.json)
+          if ! [[ "$THRESHOLD" =~ ^[0-9]+$ ]]; then
+            echo "::error::Invalid diff_coverage_fail_under in tools/scripts/coverage_config.json: '${THRESHOLD}'"
+            exit 1
+          fi
+          # Per-file exclusions from the same source-of-truth: thin
+          # dispatchers / generated code that is exercised end-to-end via
+          # shell-out tests but doesn't propagate llvm-cov line data.
+          # Empty array → no --exclude flags emitted.
+          mapfile -t EXCLUDES < <(jq -r '.diff_cover_excludes // [] | .[]' tools/scripts/coverage_config.json)
+          EXCLUDE_ARGS=()
+          for e in "${EXCLUDES[@]}"; do EXCLUDE_ARGS+=("--exclude=$e"); done
+          echo "Diff-cover threshold from coverage_config.json: ${THRESHOLD}% (excludes: ${EXCLUDES[*]:-none})"
           python3 -m diff_cover.diff_cover_tool \
               "$xml" \
               --compare-branch="origin/${{ github.base_ref }}" \
-              --fail-under=75 \
+              --fail-under="${THRESHOLD}" \
+              "${EXCLUDE_ARGS[@]}" \
               --markdown-report=coverage-diff.md
           rc=$?
           echo "exit_code=$rc" >> "$GITHUB_OUTPUT"
@@ -805,15 +824,19 @@ jobs:
         # contributors got a red check with no comment explaining which
         # lines were uncovered. Codex #611 P2 — render + upsert on failure
         # too so the PR comment always reflects the real result.
+        # Threshold is read from tools/scripts/coverage_config.json — the
+        # same source diff-cover uses one step up — so the rendered
+        # banner can never drift from the actual gate.
         if: always()
         run: |
           # Phase 3 landed: gate is required. --no-advisory flips the
           # banner to the required-gate form; the --flip-date argument
           # is no longer needed (no upcoming flip to announce).
+          THRESHOLD=$(jq -r '.diff_coverage_fail_under' tools/scripts/coverage_config.json)
           python3 tools/scripts/coverage_diff_comment.py \
               --report coverage-diff.md \
               --flip-date 2026-05-04 \
-              --threshold 75 \
+              --threshold "${THRESHOLD}" \
               --no-advisory \
               --out coverage-diff-comment.md
           # Append the per-tier section (#566 Phase 2) if the tier

@@ -62,6 +62,30 @@ if [ -f "$DEPS_AUDIT" ]; then
     fi
 fi
 
+# Local diff-coverage check — mirror the CI `Diff coverage required` gate
+# (75% by default; threshold lives in tools/scripts/coverage_config.json).
+# Advisory by default; PULP_ENFORCE_PREPUSH_DIFF_COVER=1 upgrades to hard
+# fail. We only run the script when the diff actually touches a mapped
+# coverage surface (core/, tools/cli/, tools/scripts/) — otherwise we'd
+# pay the configure+build cost on doc-only or workflow-only PRs that
+# CI's coverage workflow itself bypasses for the gate.
+DIFF_COVER_SH="$ROOT/tools/scripts/local_diff_cover.sh"
+if [ -f "$DIFF_COVER_SH" ] && [ "${PULP_SKIP_DIFF_COVER:-0}" != "1" ]; then
+    if changed=$(git diff --name-only "$BASE...HEAD" 2>/dev/null); then
+        if echo "$changed" | grep -qE '^(core/|tools/cli/|tools/scripts/)'; then
+            echo "[pre-push] running local diff-coverage check (set PULP_SKIP_DIFF_COVER=1 to bypass)…" >&2
+            if ! bash "$DIFF_COVER_SH"; then
+                if [ "${PULP_ENFORCE_PREPUSH_DIFF_COVER:-0}" = "1" ]; then
+                    echo "[pre-push] PULP_ENFORCE_PREPUSH_DIFF_COVER=1 — blocking push due to diff-coverage failure." >&2
+                    fail=1
+                else
+                    echo "[pre-push] diff-coverage advisory: failure above is non-blocking (export PULP_ENFORCE_PREPUSH_DIFF_COVER=1 to block)." >&2
+                fi
+            fi
+        fi
+    fi
+fi
+
 if [ "$fail" = "0" ]; then
     echo "[pre-push] gates clean." >&2
     exit 0
