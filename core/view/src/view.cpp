@@ -53,21 +53,6 @@ void View::paint_all(canvas::Canvas& canvas) {
                                 transform_matrix_e_, transform_matrix_f_);
     }
 
-    // Outset drop shadows must paint *before* the overflow clip so the
-    // blurred halo can extend past the box bounds (CSS spec). Inset
-    // shadows still paint after the clip — they live inside the box.
-    if (has_shadow_ && !shadow_.inset) {
-        canvas.draw_box_shadow(0, 0, bounds_.width, bounds_.height,
-                               shadow_.offset_x, shadow_.offset_y,
-                               shadow_.blur, shadow_.spread,
-                               shadow_.color, /*inset=*/false,
-                               corner_radius_);
-    }
-
-    // Clip only if overflow is hidden (default)
-    if (overflow_ == Overflow::hidden)
-        canvas.clip_rect(0, 0, bounds_.width, bounds_.height);
-
     // CSS `backdrop-filter: blur(N)` (issue-926). A separate compositing layer
     // whose initial content is the parent surface blurred — sits BELOW the
     // widget's own opacity/filter layer so background, border, and children
@@ -79,7 +64,13 @@ void View::paint_all(canvas::Canvas& canvas) {
                                     backdrop_blur_);
     }
 
-    // Compositing layer for opacity, blur, or post-effects
+    // Compositing layer for opacity, blur, or post-effects.
+    // pulp #936 P1 / #949 — both the outset box-shadow and the overflow
+    // clip must be pushed AFTER this saveLayer so that the view's
+    // own opacity / filter layer contains them. Pre-fix, the outset
+    // shadow was painted onto the parent's compositing context (before
+    // saveLayer) which broke CSS opacity stacking and could mask
+    // subsequent child-layer content on certain Skia paths.
     bool needs_layer = (opacity_ < 1.0f) || (filter_blur_ > 0.0f) || needs_layer_
                        || (effect_ && effect_->needs_layer());
     if (needs_layer) {
@@ -88,6 +79,25 @@ void View::paint_all(canvas::Canvas& canvas) {
         else
             canvas.save_layer(0, 0, bounds_.width, bounds_.height, opacity_, filter_blur_);
     }
+
+    // Outset drop shadows paint inside the compositing layer so the view's
+    // opacity / filter / backdrop applies to them (CSS spec — shadows are
+    // part of the element's stacking context). The shadow blur halo can
+    // still extend past the box bounds when overflow is visible; when
+    // overflow is hidden, the clip below limits the halo to the bounds
+    // — same behavior browsers exhibit for clipped boxes. Inset shadows
+    // paint later, on top of the content, see below.
+    if (has_shadow_ && !shadow_.inset) {
+        canvas.draw_box_shadow(0, 0, bounds_.width, bounds_.height,
+                               shadow_.offset_x, shadow_.offset_y,
+                               shadow_.blur, shadow_.spread,
+                               shadow_.color, /*inset=*/false,
+                               corner_radius_);
+    }
+
+    // Clip only if overflow is hidden (default)
+    if (overflow_ == Overflow::hidden)
+        canvas.clip_rect(0, 0, bounds_.width, bounds_.height);
 
     // Paint background gradient if set (CSS background: linear-gradient)
     if (bg_gradient_type_ > 0 && !bg_gradient_colors_.empty()) {

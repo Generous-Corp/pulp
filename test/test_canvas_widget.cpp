@@ -205,6 +205,73 @@ TEST_CASE("CanvasWidget::paint translates clearRect into a real clear_rect comma
     }
 }
 
+// pulp #949 — backend-independent guard for the FilterBank regression. A
+// parent View with a background paints its bg, then a CanvasWidget child
+// with a clearRect+fillRect pair runs. The recorded command sequence must
+// be:
+//   1. parent's bg fill_rect (covering parent's local bounds)
+//   2. parent translates to child origin
+//   3. (optional clip / no save_layer for default opacity == 1)
+//   4. child's clear_rect (in the child's local coordinate space)
+//   5. child's fill_rect (in the child's local coordinate space)
+//
+// What we are guarding against is the regression Spectr saw at v0.57.0
+// where the canvas-widget commands fired (≥1600 per frame) but appeared
+// to have no visible effect. If the child's clear_rect lands BEFORE the
+// parent's bg fill, or if the child's fill_rect is missing, the bug
+// is reproduced at the recorded-command level.
+TEST_CASE("CanvasWidget::paint_all under parent View emits correct command order",
+          "[canvas_widget][issue-949]") {
+    RecordingCanvas rc;
+
+    View parent;
+    parent.set_bounds({0, 0, 64, 64});
+    parent.set_background_color(pulp::canvas::Color::rgba8(8, 12, 24, 255));
+
+    auto cw = std::make_unique<CanvasWidget>();
+    cw->set_bounds({0, 0, 64, 64});
+    {
+        CanvasDrawCmd c;
+        c.type = CanvasDrawCmd::Type::clear_rect;
+        c.x = 0; c.y = 0; c.w = 64; c.h = 64;
+        cw->add_command(c);
+    }
+    {
+        CanvasDrawCmd r;
+        r.type = CanvasDrawCmd::Type::fill_rect;
+        r.x = 0; r.y = 0; r.w = 64; r.h = 64;
+        r.color = pulp::canvas::Color::rgba8(255, 0, 255, 255);
+        cw->add_command(r);
+    }
+    parent.add_child(std::move(cw));
+    parent.paint_all(rc);
+
+    // Walk the recorded commands and verify ordering.
+    int parent_bg_idx = -1;
+    int child_clear_idx = -1;
+    int child_fill_idx = -1;
+    int idx = 0;
+    for (const auto& cmd : rc.commands()) {
+        if (cmd.type == DrawCommand::Type::fill_rect && parent_bg_idx < 0 &&
+            cmd.f[0] == 0.0f && cmd.f[1] == 0.0f &&
+            cmd.f[2] == 64.0f && cmd.f[3] == 64.0f) {
+            parent_bg_idx = idx;
+        } else if (cmd.type == DrawCommand::Type::clear_rect) {
+            child_clear_idx = idx;
+        } else if (cmd.type == DrawCommand::Type::fill_rect && parent_bg_idx >= 0) {
+            child_fill_idx = idx;
+        }
+        ++idx;
+    }
+
+    INFO("parent_bg_idx=" << parent_bg_idx
+         << " child_clear_idx=" << child_clear_idx
+         << " child_fill_idx=" << child_fill_idx);
+    REQUIRE(parent_bg_idx >= 0);
+    REQUIRE(child_clear_idx > parent_bg_idx);
+    REQUIRE(child_fill_idx > child_clear_idx);
+}
+
 #ifdef PULP_HAS_SKIA
 
 namespace {
@@ -316,6 +383,124 @@ TEST_CASE("CanvasWidget clearRect actually clears Skia pixels",
     REQUIRE(px.r == 0);
     REQUIRE(px.g == 0);
     REQUIRE(px.b == 0);
+}
+
+// pulp #949 — FilterBank-style repro: a parent View paints a dark navy
+// background, then a CanvasWidget child paints into the same surface using
+// the v0.57.0 sequence (clearRect → fillStyle = gradient → fillRect →
+// path-based fillPath). The regression Spectr saw was that the canvas
+// content never appeared on top of the parent's bg even though 1600+
+// canvas calls were firing per frame.
+//
+// Acceptance: after parent.paint_all(canvas), the canvas widget's center
+// pixel is NOT the parent's dark navy — it has been replaced by the
+// content the canvas widget drew.
+TEST_CASE("CanvasWidget content paints over parent View bg via paint_all",
+          "[canvas_widget][skia][issue-949]") {
+    SkImageInfo info = SkImageInfo::Make(64, 64, kRGBA_8888_SkColorType,
+                                         kPremul_SkAlphaType,
+                                         SkColorSpace::MakeSRGB());
+    auto surface = SkSurfaces::Raster(info);
+    REQUIRE(surface != nullptr);
+    pulp::canvas::SkiaCanvas canvas(surface->getCanvas());
+
+    // Parent View paints a dark-navy background — the colour Spectr's
+    // FilterBank container shows when the canvas widget's content fails
+    // to render.
+    View parent;
+    parent.set_bounds({0, 0, 64, 64});
+    parent.set_background_color(pulp::canvas::Color::rgba8(8, 12, 24, 255));
+
+    auto cw = std::make_unique<CanvasWidget>();
+    cw->set_bounds({0, 0, 64, 64});
+
+    // Mimic the FilterBank render: clear, then fill_rect across the bounds.
+    // The fill_rect carries an opaque magenta colour so we can tell the
+    // canvas widget's paint actually landed on top of the parent's navy.
+    {
+        CanvasDrawCmd c;
+        c.type = CanvasDrawCmd::Type::clear_rect;
+        c.x = 0; c.y = 0; c.w = 64; c.h = 64;
+        cw->add_command(c);
+    }
+    {
+        CanvasDrawCmd r;
+        r.type = CanvasDrawCmd::Type::fill_rect;
+        r.x = 0; r.y = 0; r.w = 64; r.h = 64;
+        r.color = pulp::canvas::Color::rgba8(255, 0, 255, 255);   // magenta
+        cw->add_command(r);
+    }
+
+    parent.add_child(std::move(cw));
+    parent.paint_all(canvas);
+
+    // Center pixel: must be the canvas-widget's magenta, not the parent's
+    // navy. If the v0.57.0 regression is present, this samples (8,12,24)
+    // (parent navy) or (0,0,0,0) (kClear leaked outside a layer).
+    auto px = sample_pixel(surface.get(), 32, 32);
+    INFO("Centre pixel rgba=("
+         << int(px.r) << "," << int(px.g) << ","
+         << int(px.b) << "," << int(px.a) << ")");
+    REQUIRE(px.a == 255);
+    REQUIRE(px.r == 255);
+    REQUIRE(px.g == 0);
+    REQUIRE(px.b == 255);
+}
+
+// pulp #949 — same scenario but the parent has overflow:visible and an
+// additional sibling. Verifies the canvas widget's draws still land on
+// top, and the parent's bg outside the child's bounds is preserved.
+TEST_CASE("CanvasWidget draws on top of sibling-painted parent surface",
+          "[canvas_widget][skia][issue-949]") {
+    SkImageInfo info = SkImageInfo::Make(80, 60, kRGBA_8888_SkColorType,
+                                         kPremul_SkAlphaType,
+                                         SkColorSpace::MakeSRGB());
+    auto surface = SkSurfaces::Raster(info);
+    REQUIRE(surface != nullptr);
+    pulp::canvas::SkiaCanvas canvas(surface->getCanvas());
+
+    View parent;
+    parent.set_bounds({0, 0, 80, 60});
+    parent.set_background_color(pulp::canvas::Color::rgba8(8, 12, 24, 255));  // dark navy
+
+    // CanvasWidget covers only the inner 60x40 region centred at (40, 30).
+    auto cw = std::make_unique<CanvasWidget>();
+    cw->set_bounds({10, 10, 60, 40});
+    {
+        CanvasDrawCmd c;
+        c.type = CanvasDrawCmd::Type::clear_rect;
+        c.x = 0; c.y = 0; c.w = 60; c.h = 40;
+        cw->add_command(c);
+    }
+    {
+        CanvasDrawCmd r;
+        r.type = CanvasDrawCmd::Type::fill_rect;
+        r.x = 0; r.y = 0; r.w = 60; r.h = 40;
+        r.color = pulp::canvas::Color::rgba8(0, 200, 100, 255);   // bright green
+        cw->add_command(r);
+    }
+    parent.add_child(std::move(cw));
+    parent.paint_all(canvas);
+
+    // Inside the canvas widget: bright green.
+    auto inside = sample_pixel(surface.get(), 40, 30);
+    INFO("Inside child rgba=(" << int(inside.r) << "," << int(inside.g) << ","
+         << int(inside.b) << "," << int(inside.a) << ")");
+    REQUIRE(inside.a == 255);
+    REQUIRE(inside.r == 0);
+    REQUIRE(inside.g == 200);
+    REQUIRE(inside.b == 100);
+
+    // Outside the canvas widget but inside the parent: dark navy preserved.
+    // The kClear in the canvas widget's clearRect must not have escaped
+    // the child's bounds.
+    auto outside = sample_pixel(surface.get(), 4, 4);
+    INFO("Outside child rgba=(" << int(outside.r) << "," << int(outside.g) << ","
+         << int(outside.b) << "," << int(outside.a) << ")");
+    REQUIRE(outside.a == 255);
+    REQUIRE(outside.r == 8);
+    REQUIRE(outside.g == 12);
+    REQUIRE(outside.b == 24);
 }
 
 #endif  // PULP_HAS_SKIA
