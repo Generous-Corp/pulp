@@ -8,9 +8,13 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
-<a id="v0530"></a>
-## [0.54.0]
+<a id="v0540"></a>
+## [0.54.0] - 2026-04-28
 
+- feat(view): setTransform(id, a, b, c, d, e, f) on View — full 2D affine matrix (#930) ([#933](https://github.com/danielraffel/pulp/pull/933))
+- fix(view): __requestFrame__ calls request_repaint() to drive the paint loop (#921) ([#923](https://github.com/danielraffel/pulp/pull/923))
+
+<a id="v0530"></a>
 ## [0.53.0] - 2026-04-28
 
 - feat(coverage): local diff-coverage check mirroring CI's gate ([#919](https://github.com/danielraffel/pulp/pull/919))
@@ -778,6 +782,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.54.0]: https://github.com/danielraffel/pulp/releases/tag/v0.54.0
 [0.53.0]: https://github.com/danielraffel/pulp/releases/tag/v0.53.0
 [0.52.0]: https://github.com/danielraffel/pulp/releases/tag/v0.52.0
 [0.51.0]: https://github.com/danielraffel/pulp/releases/tag/v0.51.0
