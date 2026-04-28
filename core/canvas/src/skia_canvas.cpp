@@ -19,10 +19,12 @@
 #include "include/core/SkColorSpace.h"
 #include "include/core/SkImage.h"
 #include "include/core/SkPixmap.h"
+#include "include/core/SkBitmap.h"
 #include "include/core/SkData.h"
 #include "include/core/SkSamplingOptions.h"
 #include "include/effects/SkRuntimeEffect.h"
 #include "include/effects/SkGradientShader.h"
+#include "include/effects/SkDashPathEffect.h"
 #include "runtime_effect_cache.hpp"
 #include "include/core/SkPathBuilder.h"
 #include "include/core/SkBlendMode.h"
@@ -223,8 +225,22 @@ void SkiaCanvas::fill_rect(float x, float y, float w, float h) {
     GUARD_CANVAS; canvas_->drawRect(SkRect::MakeXYWH(x, y, w, h), make_fill_paint(fill_color_));
 }
 
+// Apply the active line-dash pattern to a stroke paint (issue-916).
+// Skia's SkDashPathEffect requires an even-length pattern with
+// nonnegative entries; the JS bridge ensures both, so we treat any
+// validation failure as "no dash" rather than silently dropping it.
+static void apply_line_dash(SkPaint& paint,
+                             const std::vector<float>& intervals,
+                             float phase) {
+    if (intervals.size() < 2 || (intervals.size() % 2) != 0) return;
+    paint.setPathEffect(SkDashPathEffect::Make(
+        SkSpan<const SkScalar>(intervals.data(), intervals.size()),
+        phase));
+}
+
 void SkiaCanvas::stroke_rect(float x, float y, float w, float h) {
     GUARD_CANVAS; auto paint = make_stroke_paint(stroke_color_, line_width_);
+    apply_line_dash(paint, line_dash_, line_dash_phase_);
     canvas_->drawRect(SkRect::MakeXYWH(x, y, w, h), paint);
 }
 
@@ -237,7 +253,9 @@ void SkiaCanvas::fill_rounded_rect(float x, float y, float w, float h, float rad
 void SkiaCanvas::stroke_rounded_rect(float x, float y, float w, float h, float radius) {
     GUARD_CANVAS; SkRRect rrect;
     rrect.setRectXY(SkRect::MakeXYWH(x, y, w, h), radius, radius);
-    canvas_->drawRRect(rrect, make_stroke_paint(stroke_color_, line_width_));
+    auto paint = make_stroke_paint(stroke_color_, line_width_);
+    apply_line_dash(paint, line_dash_, line_dash_phase_);
+    canvas_->drawRRect(rrect, paint);
 }
 
 void SkiaCanvas::fill_circle(float cx, float cy, float radius) {
@@ -245,7 +263,10 @@ void SkiaCanvas::fill_circle(float cx, float cy, float radius) {
 }
 
 void SkiaCanvas::stroke_circle(float cx, float cy, float radius) {
-    GUARD_CANVAS; canvas_->drawCircle(cx, cy, radius, make_stroke_paint(stroke_color_, line_width_));
+    GUARD_CANVAS;
+    auto paint = make_stroke_paint(stroke_color_, line_width_);
+    apply_line_dash(paint, line_dash_, line_dash_phase_);
+    canvas_->drawCircle(cx, cy, radius, paint);
 }
 
 void SkiaCanvas::stroke_arc(float cx, float cy, float radius,
@@ -254,11 +275,23 @@ void SkiaCanvas::stroke_arc(float cx, float cy, float radius,
     float sweep_deg = (end_angle - start_angle) * 180.0f / 3.14159265f;
     SkRect oval = SkRect::MakeXYWH(cx - radius, cy - radius, radius * 2, radius * 2);
     SkPath path = SkPathBuilder().addArc(oval, start_deg, sweep_deg).detach();
-    if (canvas_) canvas_->drawPath(path, make_stroke_paint(stroke_color_, line_width_));
+    if (canvas_) {
+        auto paint = make_stroke_paint(stroke_color_, line_width_);
+        apply_line_dash(paint, line_dash_, line_dash_phase_);
+        canvas_->drawPath(path, paint);
+    }
 }
 
 void SkiaCanvas::stroke_line(float x0, float y0, float x1, float y1) {
-    GUARD_CANVAS; canvas_->drawLine(x0, y0, x1, y1, make_stroke_paint(stroke_color_, line_width_));
+    GUARD_CANVAS;
+    auto paint = make_stroke_paint(stroke_color_, line_width_);
+    apply_line_dash(paint, line_dash_, line_dash_phase_);
+    canvas_->drawLine(x0, y0, x1, y1, paint);
+}
+
+void SkiaCanvas::set_line_dash(const float* intervals, int count, float phase) {
+    line_dash_.assign(intervals, intervals + (count > 0 ? count : 0));
+    line_dash_phase_ = phase;
 }
 
 void SkiaCanvas::set_font(const std::string& family, float size) {
@@ -459,20 +492,116 @@ float SkiaCanvas::measure_text(const std::string& text) {
 
 Canvas::TextMetrics SkiaCanvas::measure_text_full(const std::string& text) {
     SkFont font = make_font(font_family_, font_size_);
-    if (!font.getTypeface()) return {font_size_ * text.size() * 0.5f, font_size_, 0, font_size_ * 0.8f};
+    if (!font.getTypeface()) {
+        // Fallback estimates — keep all fields populated so JS callers can
+        // still e.g. center text against actual_bounding_box_left/right.
+        TextMetrics fallback;
+        fallback.width = font_size_ * text.size() * 0.5f;
+        fallback.ascent = font_size_;
+        fallback.descent = font_size_ * 0.25f;
+        fallback.line_height = font_size_ * 1.2f;
+        fallback.actual_bounding_box_ascent = fallback.ascent;
+        fallback.actual_bounding_box_descent = fallback.descent;
+        fallback.actual_bounding_box_left = 0;
+        fallback.actual_bounding_box_right = fallback.width;
+        return fallback;
+    }
 
     SkFontMetrics sk_metrics;
     font.getMetrics(&sk_metrics);
 
     SkRect bounds;
-    font.measureText(text.c_str(), text.size(), SkTextEncoding::kUTF8, &bounds);
+    // SkFont::measureText returns the advance width and stores the
+    // tight rendering bbox in `bounds`. The advance is what
+    // CanvasRenderingContext2D.measureText.width returns; the bbox
+    // gives us the actualBoundingBoxLeft/Right/Ascent/Descent fields
+    // (issue-916).
+    SkScalar advance = font.measureText(
+        text.c_str(), text.size(), SkTextEncoding::kUTF8, &bounds);
 
     TextMetrics m;
-    m.width = bounds.width();
+    m.width = advance;
     m.ascent = -sk_metrics.fAscent;   // Skia ascent is negative, we return positive
     m.descent = sk_metrics.fDescent;  // Skia descent is positive
     m.line_height = -sk_metrics.fAscent + sk_metrics.fDescent + sk_metrics.fLeading;
+
+    // HTML5 TextMetrics — bounds is in glyph-local coordinates with the
+    // text origin at (0, 0). Negate fLeft so positive values mean
+    // "extends left of origin" per the spec.
+    m.actual_bounding_box_left = -bounds.fLeft;
+    m.actual_bounding_box_right = bounds.fRight;
+    m.actual_bounding_box_ascent = -bounds.fTop;
+    m.actual_bounding_box_descent = bounds.fBottom;
     return m;
+}
+
+Canvas::TextMetrics SkiaCanvas::measure_text_with_font(
+    const std::string& family, float size, const std::string& text) {
+    SkFont font = make_font(family, size);
+    Canvas::TextMetrics m;
+    if (!font.getTypeface()) {
+        m.width = static_cast<float>(text.size()) * size * 0.5f;
+        m.ascent = size;
+        m.descent = size * 0.25f;
+        m.line_height = size * 1.2f;
+        m.actual_bounding_box_left = 0;
+        m.actual_bounding_box_right = m.width;
+        m.actual_bounding_box_ascent = m.ascent;
+        m.actual_bounding_box_descent = m.descent;
+        return m;
+    }
+    SkFontMetrics fm;
+    font.getMetrics(&fm);
+    SkRect bounds;
+    SkScalar advance = font.measureText(
+        text.c_str(), text.size(), SkTextEncoding::kUTF8, &bounds);
+    m.width = advance;
+    m.ascent = -fm.fAscent;
+    m.descent = fm.fDescent;
+    m.line_height = -fm.fAscent + fm.fDescent + fm.fLeading;
+    m.actual_bounding_box_left = -bounds.fLeft;
+    m.actual_bounding_box_right = bounds.fRight;
+    m.actual_bounding_box_ascent = -bounds.fTop;
+    m.actual_bounding_box_descent = bounds.fBottom;
+    return m;
+}
+
+bool SkiaCanvas::read_pixels(int x, int y, int width, int height, uint8_t* out) {
+    if (!canvas_ || !out || width <= 0 || height <= 0) return false;
+
+    auto* surface = canvas_->getSurface();
+    if (!surface) return false;
+
+    // Read in unpremultiplied RGBA — matches HTML5 ImageData.data layout.
+    SkImageInfo info = SkImageInfo::Make(
+        width, height, kRGBA_8888_SkColorType, kUnpremul_SkAlphaType);
+    return surface->readPixels(info, out,
+                               static_cast<size_t>(width) * 4u,
+                               x, y);
+}
+
+bool SkiaCanvas::write_pixels(const uint8_t* data, int width, int height,
+                               int dx, int dy) {
+    if (!canvas_ || !data || width <= 0 || height <= 0) return false;
+
+    SkImageInfo info = SkImageInfo::Make(
+        width, height, kRGBA_8888_SkColorType, kUnpremul_SkAlphaType);
+    SkBitmap bitmap;
+    if (!bitmap.installPixels(info, const_cast<uint8_t*>(data),
+                              static_cast<size_t>(width) * 4u)) {
+        return false;
+    }
+    auto image = bitmap.asImage();
+    if (!image) return false;
+
+    // CanvasRenderingContext2D.putImageData ignores the current transform
+    // and global compositing — bypass them by saving/restoring around
+    // a copy-mode draw.
+    SkPaint paint;
+    paint.setBlendMode(SkBlendMode::kSrc);
+    canvas_->drawImage(image, static_cast<SkScalar>(dx), static_cast<SkScalar>(dy),
+                       SkSamplingOptions(), &paint);
+    return true;
 }
 
 // ── Images ──────────────────────────────────────────────────────────────────
@@ -637,6 +766,7 @@ void SkiaCanvas::stroke_current_path() {
     paint.setColor4f(to_sk_color4f(stroke_color_));
     paint.setStrokeWidth(line_width_);
     paint.setBlendMode(blend_mode_);
+    apply_line_dash(paint, line_dash_, line_dash_phase_);
     canvas_->drawPath(path_builder_->detach(), paint);
 }
 

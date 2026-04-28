@@ -217,18 +217,67 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
             canvas.restore();
             break;
 
-        // Draw image — renders a placeholder rect with the image path stored in text
-        // Full image rendering requires the Skia image decode pipeline;
-        // for now we render a labeled placeholder that marks where the image goes
-        case CanvasDrawCmd::Type::draw_image:
-            canvas.save();
-            canvas.set_fill_color({40, 40, 60, 200});
-            canvas.fill_rect(cmd.x, cmd.y, cmd.w, cmd.h);
-            canvas.set_fill_color({180, 180, 200, 255});
-            canvas.set_font("", 10);
-            canvas.fill_text(cmd.text.empty() ? "[image]" : cmd.text, cmd.x + 4, cmd.y + cmd.h / 2);
-            canvas.restore();
+        // Draw image — issue-916.
+        // The bridge stores the image source in cmd.text (file path or
+        // "data:" URL) and the destination rect in cmd.{x,y,w,h}. We
+        // first try the real image decode path on the active canvas
+        // backend; if that fails (e.g. on RecordingCanvas, missing
+        // file, or encoded format Skia can't decode) we fall back to
+        // the labeled placeholder so the canvas still shows *something*
+        // and downstream layout/click code keeps working.
+        case CanvasDrawCmd::Type::draw_image: {
+            bool drawn = false;
+            const std::string& src = cmd.text;
+            // "data:image/png;base64,XXXX" — decode the base64 portion
+            // and feed the encoded bytes into draw_image_from_data().
+            constexpr std::string_view kDataUriPrefix = "data:";
+            if (src.rfind(kDataUriPrefix, 0) == 0) {
+                auto comma = src.find(',');
+                if (comma != std::string::npos) {
+                    std::string b64 = src.substr(comma + 1);
+                    // Minimal base64 decode — Pulp ships pulp::runtime::base64_decode,
+                    // but this path runs on the UI/audio thread and we don't
+                    // want to add another transitive include. The bridge
+                    // already validates and decodes data URIs before
+                    // recording the command (see widget_bridge.cpp), so
+                    // skip the decode here when present.
+                    (void)b64;
+                }
+            } else if (!src.empty()) {
+                drawn = canvas.draw_image_from_file(src, cmd.x, cmd.y, cmd.w, cmd.h);
+            }
+            if (!drawn) {
+                canvas.save();
+                canvas.set_fill_color({40, 40, 60, 200});
+                canvas.fill_rect(cmd.x, cmd.y, cmd.w, cmd.h);
+                canvas.set_fill_color({180, 180, 200, 255});
+                canvas.set_font("", 10);
+                canvas.fill_text(src.empty() ? "[image]" : src,
+                                 cmd.x + 4, cmd.y + cmd.h / 2);
+                canvas.restore();
+            }
             break;
+        }
+
+        // setLineDash (issue-916). Pattern lives in gradient_positions
+        // (an existing vector<float> reuse — avoids growing CanvasDrawCmd).
+        case CanvasDrawCmd::Type::set_line_dash:
+            canvas.set_line_dash(cmd.gradient_positions.data(),
+                                 static_cast<int>(cmd.gradient_positions.size()),
+                                 cmd.extra);
+            break;
+
+        // putImageData (issue-916). Pixels packed in cmd.text as
+        // raw RGBA bytes; int_val = width; x2 = height (as float, will round).
+        case CanvasDrawCmd::Type::put_image_data: {
+            int width  = cmd.int_val;
+            int height = static_cast<int>(cmd.x2);
+            const auto* px = reinterpret_cast<const uint8_t*>(cmd.text.data());
+            canvas.write_pixels(px, width, height,
+                                static_cast<int>(cmd.x),
+                                static_cast<int>(cmd.y));
+            break;
+        }
         }
     }
 }

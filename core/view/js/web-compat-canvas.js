@@ -60,6 +60,144 @@ CanvasRenderingContext2D.prototype.stroke = function() {
     if (typeof canvasStrokePath === "function") canvasStrokePath(this._id);
 };
 
+// ── Canvas2D API gap closures (issue-916) ────────────────────────────
+// measureText returns an HTML5 TextMetrics object — width plus the
+// actualBoundingBox{Left,Right,Ascent,Descent} and
+// fontBoundingBox{Ascent,Descent} fields callers need for proper text
+// alignment. Falls back to a zero-filled object if the bridge function
+// isn't available (older host).
+CanvasRenderingContext2D.prototype.measureText = function(text) {
+    if (typeof canvasMeasureText !== "function") {
+        // Coarse estimate — avoids returning undefined/null which would
+        // break callers that destructure the result.
+        var px = parseFloat(this.font) || 14;
+        var w = String(text == null ? "" : text).length * px * 0.6;
+        return {
+            width: w,
+            actualBoundingBoxLeft: 0,
+            actualBoundingBoxRight: w,
+            actualBoundingBoxAscent: px * 0.75,
+            actualBoundingBoxDescent: px * 0.25,
+            fontBoundingBoxAscent: px * 0.75,
+            fontBoundingBoxDescent: px * 0.25
+        };
+    }
+    // Parse "<size>px <family>" font strings — the spec allows much
+    // more, but the typical Pulp usage is the simple form.
+    var fontStr = this.font || "14px Inter";
+    var sizeMatch = fontStr.match(/(\d+(?:\.\d+)?)px/);
+    var size = sizeMatch ? parseFloat(sizeMatch[1]) : 14;
+    var familyMatch = fontStr.match(/px\s+(.+)$/);
+    var family = familyMatch ? familyMatch[1].trim() : "Inter";
+    return canvasMeasureText(this._id, String(text == null ? "" : text), family, size);
+};
+
+// drawImage(img, dx, dy) / drawImage(img, dx, dy, dw, dh) /
+// drawImage(img, sx, sy, sw, sh, dx, dy, dw, dh) — only the first two
+// signatures are wired through the bridge today (issue-916). The 9-arg
+// source-rect form is recorded as the destination-only form and the
+// source rect is currently ignored — file a follow-up if a Pulp plugin
+// needs sprite-sheet slicing.
+CanvasRenderingContext2D.prototype.drawImage = function(img, a, b, c, d, e, f, g, h) {
+    if (typeof canvasDrawImage !== "function") return;
+    var src = "";
+    if (typeof img === "string") src = img;
+    else if (img && typeof img.src === "string") src = img.src;
+    else if (img && typeof img._src === "string") src = img._src;
+    var dx, dy, dw, dh;
+    if (arguments.length <= 3) {
+        // drawImage(img, dx, dy) — use intrinsic size if known.
+        dx = a; dy = b;
+        dw = (img && img.width)  ? img.width  : 0;
+        dh = (img && img.height) ? img.height : 0;
+    } else if (arguments.length <= 5) {
+        // drawImage(img, dx, dy, dw, dh)
+        dx = a; dy = b; dw = c; dh = d;
+    } else {
+        // drawImage(img, sx, sy, sw, sh, dx, dy, dw, dh)
+        // — record dst rect; source-rect slicing not yet wired.
+        dx = e; dy = f; dw = g; dh = h;
+    }
+    canvasDrawImage(this._id, src, dx, dy, dw, dh);
+};
+
+// setLineDash([5, 3, 2, ...]) — even-length arrays are taken verbatim;
+// the bridge duplicates odd-length arrays per spec. lineDashOffset is
+// recorded as the dash phase via a getter/setter pair below.
+CanvasRenderingContext2D.prototype.setLineDash = function(pattern) {
+    if (typeof canvasSetLineDash !== "function") return;
+    if (!Array.isArray(pattern)) pattern = [];
+    this._lineDash = pattern.slice();
+    canvasSetLineDash(this._id, pattern, this.lineDashOffset || 0);
+};
+
+CanvasRenderingContext2D.prototype.getLineDash = function() {
+    // HTML5: returns a copy of the current pattern (spec disallows
+    // returning the same array).
+    return this._lineDash ? this._lineDash.slice() : [];
+};
+
+// getImageData(x, y, w, h) → { data: Uint8ClampedArray, width, height }
+// The bridge returns a base64-encoded RGBA blob; we decode it to a
+// Uint8ClampedArray so consumers see the standard layout. Returns a
+// zero-filled buffer if the bridge isn't available or the canvas
+// hasn't been rasterized yet (RecordingCanvas / not-yet-painted).
+CanvasRenderingContext2D.prototype.getImageData = function(x, y, w, h) {
+    var width  = w | 0;
+    var height = h | 0;
+    var byteCount = width * height * 4;
+    var buf = (typeof Uint8ClampedArray !== "undefined")
+        ? new Uint8ClampedArray(byteCount)
+        : new Array(byteCount);
+    if (typeof canvasGetImageData === "function") {
+        var raw = canvasGetImageData(this._id, x | 0, y | 0, width, height);
+        if (raw && raw.data && typeof raw.data === "string") {
+            // base64 → bytes — minimal decoder, ignores whitespace.
+            var alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+            var lookup = {};
+            for (var i = 0; i < alphabet.length; ++i) lookup[alphabet.charAt(i)] = i;
+            var s = raw.data, oi = 0;
+            for (var bi = 0; bi < s.length; bi += 4) {
+                var a = lookup[s.charAt(bi)]     || 0;
+                var bb = lookup[s.charAt(bi+1)]  || 0;
+                var cc = (s.charAt(bi+2) === "=") ? 0 : (lookup[s.charAt(bi+2)] || 0);
+                var dd = (s.charAt(bi+3) === "=") ? 0 : (lookup[s.charAt(bi+3)] || 0);
+                if (oi < byteCount) buf[oi++] = (a << 2) | (bb >> 4);
+                if (s.charAt(bi+2) !== "=" && oi < byteCount) buf[oi++] = ((bb & 0xF) << 4) | (cc >> 2);
+                if (s.charAt(bi+3) !== "=" && oi < byteCount) buf[oi++] = ((cc & 0x3) << 6) | dd;
+            }
+        }
+    }
+    return { data: buf, width: width, height: height };
+};
+
+// putImageData(imageData, dx, dy) — encodes the Uint8ClampedArray as
+// base64 and hands it to the bridge for rasterization on the next
+// paint. Source-rect form (putImageData(img, dx, dy, dirtyX, dirtyY,
+// dirtyW, dirtyH)) is treated as the no-rect form for now — file a
+// follow-up if sub-rect updates become a hot path.
+CanvasRenderingContext2D.prototype.putImageData = function(imageData, dx, dy) {
+    if (!imageData || typeof canvasPutImageData !== "function") return;
+    var data = imageData.data || [];
+    var width  = imageData.width  | 0;
+    var height = imageData.height | 0;
+    if (width <= 0 || height <= 0) return;
+    var alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    var n = width * height * 4;
+    var out = "";
+    for (var i = 0; i < n; i += 3) {
+        var a = data[i]     | 0;
+        var bb = (i+1 < n) ? (data[i+1] | 0) : 0;
+        var cc = (i+2 < n) ? (data[i+2] | 0) : 0;
+        var nbits = (a << 16) | (bb << 8) | cc;
+        out += alphabet.charAt((nbits >> 18) & 0x3F);
+        out += alphabet.charAt((nbits >> 12) & 0x3F);
+        out += (i+1 < n) ? alphabet.charAt((nbits >> 6) & 0x3F) : "=";
+        out += (i+2 < n) ? alphabet.charAt(nbits & 0x3F) : "=";
+    }
+    canvasPutImageData(this._id, out, width, height, dx | 0, dy | 0);
+};
+
 function __ensurePulpGpuHelpers() {
     if (typeof window === "undefined" || !window.pulp || !window.pulp.gpu) return;
     if (window.pulp.gpu._nativeHelpersInstalled) return;

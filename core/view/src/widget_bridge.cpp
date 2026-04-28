@@ -36,6 +36,7 @@
 #include "include/core/SkPixmap.h"
 #include "include/core/SkImageInfo.h"
 #include "include/gpu/graphite/Image.h"
+#include <pulp/canvas/skia_canvas.hpp>
 #endif
 
 #ifdef PULP_BENCHMARK
@@ -3612,6 +3613,176 @@ void WidgetBridge::register_api() {
             cmd.y = (float)args.get<double>(3, 0);
             cmd.w = (float)args.get<double>(4, 0);
             cmd.h = (float)args.get<double>(5, 0);
+            c->add_command(cmd);
+        }
+        return choc::value::Value();
+    });
+
+    // ═══════════════════════════════════════════════════════════════════
+    // Canvas2D API gap closures (issue-916)
+    // ═══════════════════════════════════════════════════════════════════
+
+    // canvasMeasureText(id, text, fontFamily, fontSize) →
+    //   { width, actualBoundingBoxLeft, actualBoundingBoxRight,
+    //     actualBoundingBoxAscent, actualBoundingBoxDescent,
+    //     fontBoundingBoxAscent, fontBoundingBoxDescent }
+    //
+    // Per-canvas measureText routes through the canvas's font state — this
+    // matters because each canvas can carry its own font setting via
+    // canvasSetFont. When a Skia surface isn't available (RecordingCanvas,
+    // CG fallback) we return font-size estimates so JS callers always get
+    // a populated TextMetrics object with non-zero width for non-empty
+    // text. (HTML5 spec — TextMetrics never has missing fields.)
+    engine_.register_function("canvasMeasureText", [this](choc::javascript::ArgumentList args) {
+        auto text = args.get<std::string>(1, "");
+        auto family = args.get<std::string>(2, "Inter");
+        float size = static_cast<float>(args.get<double>(3, 14.0));
+
+        canvas::Canvas::TextMetrics m;
+#if defined(PULP_HAS_SKIA)
+        // Skia-backed accurate metrics — uses SkFont::measureText() which
+        // is what fill_text() ultimately renders against, so the returned
+        // bbox matches the drawn text. No surface required.
+        m = canvas::SkiaCanvas::measure_text_with_font(family, size, text);
+#else
+        // CPU fallback — keep all fields populated so JS centring works
+        // (HTML5 spec: TextMetrics never has missing fields).
+        m.width = static_cast<float>(text.size()) * size * 0.6f;
+        m.ascent = size * 0.75f;
+        m.descent = size * 0.25f;
+        m.line_height = size * 1.2f;
+        m.actual_bounding_box_left = 0;
+        m.actual_bounding_box_right = m.width;
+        m.actual_bounding_box_ascent = m.ascent;
+        m.actual_bounding_box_descent = m.descent;
+#endif
+
+        // (void)c — measureText doesn't need to mutate the canvas. Calling
+        // with a missing id still returns a valid metrics object so callers
+        // can pre-measure before getContext('2d').
+        (void)widget(args.get<std::string>(0, ""));
+
+        auto result = choc::value::createObject("");
+        result.addMember("width", choc::value::createFloat64(m.width));
+        result.addMember("actualBoundingBoxLeft",
+                          choc::value::createFloat64(m.actual_bounding_box_left));
+        result.addMember("actualBoundingBoxRight",
+                          choc::value::createFloat64(m.actual_bounding_box_right));
+        result.addMember("actualBoundingBoxAscent",
+                          choc::value::createFloat64(m.actual_bounding_box_ascent));
+        result.addMember("actualBoundingBoxDescent",
+                          choc::value::createFloat64(m.actual_bounding_box_descent));
+        result.addMember("fontBoundingBoxAscent",
+                          choc::value::createFloat64(m.ascent));
+        result.addMember("fontBoundingBoxDescent",
+                          choc::value::createFloat64(m.descent));
+        return result;
+    });
+
+    // canvasSetLineDash(id, [a, b, c, ...], phase = 0)
+    // Pattern is an HTML5-style array; an odd-length array is
+    // duplicated to even per the spec — the JS prelude handles that
+    // before calling here.
+    engine_.register_function("canvasSetLineDash", [this](choc::javascript::ArgumentList args) {
+        if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
+            CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::set_line_dash;
+            cmd.extra = static_cast<float>(args.get<double>(2, 0.0)); // phase
+            // Pattern: pulled from arg[1] — choc passes JS arrays as
+            // ValueView. Reuse cmd.gradient_positions to avoid expanding
+            // CanvasDrawCmd footprint.
+            if (args.numArgs > 1 && args[1]) {
+                auto& pattern = *args[1];
+                if (pattern.isArray()) {
+                    cmd.gradient_positions.reserve(pattern.size());
+                    for (uint32_t i = 0; i < pattern.size(); ++i) {
+                        cmd.gradient_positions.push_back(
+                            static_cast<float>(pattern[i].getWithDefault<double>(0.0)));
+                    }
+                    // HTML5: drop the entire pattern if any value is negative
+                    // or non-finite — spec says behavior is implementation-
+                    // defined; we choose graceful "solid stroke".
+                    bool valid = true;
+                    for (float v : cmd.gradient_positions) {
+                        if (!(v >= 0.0f) || !std::isfinite(v)) { valid = false; break; }
+                    }
+                    if (!valid) cmd.gradient_positions.clear();
+                    // HTML5 spec: odd-length patterns are duplicated.
+                    if (cmd.gradient_positions.size() % 2 == 1) {
+                        auto orig = cmd.gradient_positions;
+                        cmd.gradient_positions.insert(cmd.gradient_positions.end(),
+                                                      orig.begin(), orig.end());
+                    }
+                }
+            }
+            c->add_command(cmd);
+        }
+        return choc::value::Value();
+    });
+
+    // canvasGetImageData(id, x, y, w, h) →
+    //   { width, height, data: <base64 string of RGBA bytes> }
+    //
+    // Returns the pixel data of the canvas's currently rasterized
+    // surface. On non-Skia / non-rasterized backends this returns an
+    // empty buffer of the requested size; callers should treat that as
+    // "not available" and fall back to whatever they'd do with a stub
+    // 1×1 placeholder. The base64 wrapping keeps the result usable
+    // across QuickJS / JSC / V8 without a Uint8ClampedArray bridge.
+    engine_.register_function("canvasGetImageData", [this](choc::javascript::ArgumentList args) {
+        int x = static_cast<int>(args.get<double>(1, 0.0));
+        int y = static_cast<int>(args.get<double>(2, 0.0));
+        int w = static_cast<int>(args.get<double>(3, 0.0));
+        int h = static_cast<int>(args.get<double>(4, 0.0));
+        if (w < 0) w = 0;
+        if (h < 0) h = 0;
+
+        std::vector<uint8_t> pixels(static_cast<size_t>(w) *
+                                     static_cast<size_t>(h) * 4u, 0u);
+
+        // The bridge has no direct access to the live render surface
+        // (CanvasWidget paints into whatever canvas the host provides
+        // each frame), so getImageData over a JS-recorded command list
+        // can only return zeros until a render-host integration lands.
+        // We still validate the canvas id so JS sees a well-formed
+        // result with the right dimensions (matching HTML5 spec for
+        // out-of-bounds reads).
+        (void)widget(args.get<std::string>(0, ""));
+
+        auto result = choc::value::createObject("");
+        result.addMember("width",  choc::value::createInt32(w));
+        result.addMember("height", choc::value::createInt32(h));
+        result.addMember("data",   choc::value::createString(
+            bridge_base64_encode(pixels)));
+        return result;
+    });
+
+    // canvasPutImageData(id, base64Pixels, width, height, dx, dy)
+    //
+    // Decodes `base64Pixels` (expected width*height*4 RGBA bytes) and
+    // records a put_image_data command. The widget's paint() pass
+    // applies it via Canvas::write_pixels() — currently only Skia
+    // implements that end-to-end; other backends are a no-op.
+    engine_.register_function("canvasPutImageData", [this](choc::javascript::ArgumentList args) {
+        if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
+            auto b64 = args.get<std::string>(1, "");
+            int width  = static_cast<int>(args.get<double>(2, 0.0));
+            int height = static_cast<int>(args.get<double>(3, 0.0));
+            int dx     = static_cast<int>(args.get<double>(4, 0.0));
+            int dy     = static_cast<int>(args.get<double>(5, 0.0));
+            if (width <= 0 || height <= 0) return choc::value::Value();
+
+            auto bytes = runtime::base64_decode(b64);
+            if (!bytes) return choc::value::Value();
+            const size_t expected = static_cast<size_t>(width) *
+                                     static_cast<size_t>(height) * 4u;
+            if (bytes->size() < expected) return choc::value::Value();
+
+            CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::put_image_data;
+            cmd.int_val = width;
+            cmd.x2      = static_cast<float>(height);
+            cmd.x       = static_cast<float>(dx);
+            cmd.y       = static_cast<float>(dy);
+            cmd.text.assign(reinterpret_cast<const char*>(bytes->data()), expected);
             c->add_command(cmd);
         }
         return choc::value::Value();

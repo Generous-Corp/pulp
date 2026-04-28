@@ -1307,3 +1307,229 @@ TEST_CASE("View::request_repaint reaches host through propagated descendants (is
     View orphan;
     REQUIRE_NOTHROW(orphan.request_repaint());
 }
+
+// ── canvasMeasureText / canvasSetLineDash / canvasDrawImage / canvasGetImageData / canvasPutImageData (issue-916) ──
+//
+// These five CanvasRenderingContext2D bridge functions close the gap
+// list in issue-916. The first three are the user-priority items
+// (Spectr FilterBank text alignment + footer icon rendering); the last
+// two are P2 follow-ups but ship together to land the surface in one
+// pass.
+
+TEST_CASE("WidgetBridge canvasMeasureText returns full TextMetrics object",
+          "[view][bridge][canvas][issue-916]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        var c = document.createElement('canvas');
+        c.id = 'measure-canvas';
+        c.width = 200; c.height = 100;
+        document.body.appendChild(c);
+        var ctx = c.getContext('2d');
+        ctx.font = '20px Inter';
+        var m1 = ctx.measureText('Hello');
+        var m2 = ctx.measureText('Hello, world!');
+        // Expose results for the C++ side to read back.
+        window.__metrics_short = m1;
+        window.__metrics_long  = m2;
+    )");
+
+    auto width_short = engine.evaluate("window.__metrics_short.width");
+    auto width_long  = engine.evaluate("window.__metrics_long.width");
+    REQUIRE(width_short.getWithDefault<double>(-1.0) > 0.0);
+    REQUIRE(width_long.getWithDefault<double>(-1.0)
+            > width_short.getWithDefault<double>(0.0));
+
+    // Ascent/descent must be populated and non-zero — Spectr text
+    // centring relies on these.
+    auto ascent  = engine.evaluate("window.__metrics_short.fontBoundingBoxAscent");
+    auto descent = engine.evaluate("window.__metrics_short.fontBoundingBoxDescent");
+    REQUIRE(ascent.getWithDefault<double>(0.0)  > 0.0);
+    REQUIRE(descent.getWithDefault<double>(0.0) > 0.0);
+
+    // actualBoundingBox{Left,Right} fields exist (HTML5 spec — never
+    // missing, even when the bounding box collapses to width).
+    auto left  = engine.evaluate("typeof window.__metrics_short.actualBoundingBoxLeft  === 'number'");
+    auto right = engine.evaluate("typeof window.__metrics_short.actualBoundingBoxRight === 'number'");
+    REQUIRE(left.getWithDefault<bool>(false));
+    REQUIRE(right.getWithDefault<bool>(false));
+}
+
+TEST_CASE("WidgetBridge canvasSetLineDash records pattern + phase, "
+          "and an odd-length pattern is duplicated per HTML5 spec",
+          "[view][bridge][canvas][issue-916]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        var c = document.createElement('canvas');
+        c.id = 'dash-canvas';
+        c.width = 200; c.height = 100;
+        document.body.appendChild(c);
+        var ctx = c.getContext('2d');
+        ctx.lineDashOffset = 0;
+        ctx.setLineDash([5, 3, 2]);   // odd → duplicates to [5,3,2,5,3,2]
+        ctx.strokeRect(10, 10, 80, 40);
+    )");
+    root.layout_children();
+
+    auto* canvas = canvasFromBridge(bridge, engine, "dash-canvas");
+    REQUIRE(canvas != nullptr);
+
+    pulp::canvas::RecordingCanvas rec;
+    canvas->paint(rec);
+
+    int dashIndex = -1;
+    int idx = 0;
+    for (auto& cmd : rec.commands()) {
+        if (cmd.type == pulp::canvas::DrawCommand::Type::set_line_dash) {
+            dashIndex = idx;
+            REQUIRE(cmd.floats.size() == 6); // 3 → 6 (duplicated)
+            REQUIRE_THAT(cmd.floats[0], WithinAbs(5.0f, 1e-5f));
+            REQUIRE_THAT(cmd.floats[1], WithinAbs(3.0f, 1e-5f));
+            REQUIRE_THAT(cmd.floats[2], WithinAbs(2.0f, 1e-5f));
+            REQUIRE_THAT(cmd.floats[3], WithinAbs(5.0f, 1e-5f));
+        }
+        ++idx;
+    }
+    REQUIRE(dashIndex >= 0);
+}
+
+TEST_CASE("WidgetBridge canvasDrawImage records draw_image with src + dst rect",
+          "[view][bridge][canvas][issue-916]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        var c = document.createElement('canvas');
+        c.id = 'img-canvas';
+        c.width = 200; c.height = 100;
+        document.body.appendChild(c);
+        var ctx = c.getContext('2d');
+        // 5-arg form — most common for plugin icons.
+        ctx.drawImage({ src: '/path/to/icon.png', width: 16, height: 16 },
+                      10, 20, 64, 32);
+    )");
+    root.layout_children();
+
+    auto* canvas = canvasFromBridge(bridge, engine, "img-canvas");
+    REQUIRE(canvas != nullptr);
+
+    pulp::canvas::RecordingCanvas rec;
+    canvas->paint(rec);
+
+    int drawIndex = -1;
+    int idx = 0;
+    for (auto& cmd : rec.commands()) {
+        if (cmd.type == pulp::canvas::DrawCommand::Type::draw_image) {
+            drawIndex = idx;
+            REQUIRE(cmd.text == "/path/to/icon.png");
+            REQUIRE_THAT(cmd.f[0], WithinAbs(10.0f, 1e-5f));
+            REQUIRE_THAT(cmd.f[1], WithinAbs(20.0f, 1e-5f));
+            REQUIRE_THAT(cmd.f[2], WithinAbs(64.0f, 1e-5f));
+            REQUIRE_THAT(cmd.f[3], WithinAbs(32.0f, 1e-5f));
+        }
+        ++idx;
+    }
+    REQUIRE(drawIndex >= 0);
+}
+
+TEST_CASE("WidgetBridge canvasPutImageData records pixel buffer for paint replay",
+          "[view][bridge][canvas][issue-916]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    // 2x2 RGBA — bright red, green, blue, white. Round-trip through
+    // putImageData → bridge base64 decode → write_pixels command.
+    bridge.load_script(R"(
+        var c = document.createElement('canvas');
+        c.id = 'put-canvas';
+        c.width = 4; c.height = 4;
+        document.body.appendChild(c);
+        var ctx = c.getContext('2d');
+        var img = {
+            width: 2, height: 2,
+            data: new Uint8ClampedArray([
+                255,   0,   0, 255,
+                  0, 255,   0, 255,
+                  0,   0, 255, 255,
+                255, 255, 255, 255
+            ])
+        };
+        ctx.putImageData(img, 1, 1);
+    )");
+    root.layout_children();
+
+    auto* canvas = canvasFromBridge(bridge, engine, "put-canvas");
+    REQUIRE(canvas != nullptr);
+
+    pulp::canvas::RecordingCanvas rec;
+    canvas->paint(rec);
+
+    int writeIndex = -1;
+    int idx = 0;
+    for (auto& cmd : rec.commands()) {
+        if (cmd.type == pulp::canvas::DrawCommand::Type::write_pixels) {
+            writeIndex = idx;
+            REQUIRE(static_cast<int>(cmd.f[0]) == 2); // width
+            REQUIRE(static_cast<int>(cmd.f[1]) == 2); // height
+            REQUIRE(static_cast<int>(cmd.f[2]) == 1); // dx
+            REQUIRE(static_cast<int>(cmd.f[3]) == 1); // dy
+            REQUIRE(cmd.text.size() == 16);            // 2*2*4 RGBA bytes
+            // First pixel — opaque red.
+            REQUIRE(static_cast<unsigned char>(cmd.text[0]) == 255);
+            REQUIRE(static_cast<unsigned char>(cmd.text[1]) == 0);
+            REQUIRE(static_cast<unsigned char>(cmd.text[2]) == 0);
+            REQUIRE(static_cast<unsigned char>(cmd.text[3]) == 255);
+        }
+        ++idx;
+    }
+    REQUIRE(writeIndex >= 0);
+}
+
+TEST_CASE("WidgetBridge canvasGetImageData returns a TextMetrics-like object "
+          "with width/height/data even when no surface is rasterized",
+          "[view][bridge][canvas][issue-916]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        var c = document.createElement('canvas');
+        c.id = 'get-canvas';
+        c.width = 64; c.height = 64;
+        document.body.appendChild(c);
+        var ctx = c.getContext('2d');
+        var img = ctx.getImageData(0, 0, 4, 4);
+        window.__got = img;
+    )");
+
+    auto width  = engine.evaluate("window.__got.width");
+    auto height = engine.evaluate("window.__got.height");
+    auto length = engine.evaluate("window.__got.data.length");
+
+    REQUIRE(width.getWithDefault<double>(-1.0)  == 4);
+    REQUIRE(height.getWithDefault<double>(-1.0) == 4);
+    // 4*4*4 == 64 bytes for the RGBA array.
+    REQUIRE(length.getWithDefault<double>(-1.0) == 64);
+}

@@ -6,9 +6,12 @@
 #ifdef PULP_HAS_SKIA
 #include <pulp/canvas/skia_canvas.hpp>
 #include "include/core/SkCanvas.h"
+#include "include/core/SkColor.h"
 #include "include/core/SkColorSpace.h"
+#include "include/core/SkImage.h"
 #include "include/core/SkImageInfo.h"
 #include "include/core/SkMatrix.h"
+#include "include/core/SkPixmap.h"
 #include "include/core/SkSurface.h"
 #endif
 
@@ -350,5 +353,97 @@ TEST_CASE("SkiaCanvas::set_transform is spec-literal without baseline capture",
     REQUIRE(m.getScaleY() == Catch::Approx(2.0f));
     REQUIRE(m.getTranslateX() == Catch::Approx(10.0f));
     REQUIRE(m.getTranslateY() == Catch::Approx(20.0f));
+}
+
+// ── Issue-916 — Canvas2D API gap closures (Skia raster tests) ─────────────
+
+TEST_CASE("SkiaCanvas::measure_text_with_font returns positive width "
+          "and bounding-box-ascent/descent for non-empty text",
+          "[canvas][skia][issue-916]") {
+    auto m = SkiaCanvas::measure_text_with_font("Inter", 20.0f, "Hello");
+    REQUIRE(m.width > 0.0f);
+    // Font metrics are populated regardless of bbox — these are the
+    // values Spectr's FilterBank reads for vertical centring.
+    REQUIRE(m.ascent > 0.0f);
+    REQUIRE(m.descent > 0.0f);
+    // Bounding box ascent should be positive for an alphabetic glyph.
+    REQUIRE(m.actual_bounding_box_ascent > 0.0f);
+
+    // Longer text → wider advance.
+    auto wide = SkiaCanvas::measure_text_with_font("Inter", 20.0f, "Hello, world!");
+    REQUIRE(wide.width > m.width);
+}
+
+TEST_CASE("SkiaCanvas::write_pixels round-trips RGBA through the surface",
+          "[canvas][skia][issue-916]") {
+    SkImageInfo info = SkImageInfo::Make(8, 8, kRGBA_8888_SkColorType,
+                                         kUnpremul_SkAlphaType,
+                                         SkColorSpace::MakeSRGB());
+    auto surface = SkSurfaces::Raster(info);
+    REQUIRE(surface != nullptr);
+    auto* sk_canvas = surface->getCanvas();
+    REQUIRE(sk_canvas != nullptr);
+
+    // Clear to opaque black so we can detect the put.
+    sk_canvas->clear(SK_ColorBLACK);
+
+    SkiaCanvas canvas(sk_canvas);
+
+    // Build a 2x2 RGBA tile — bright red, green, blue, white.
+    uint8_t tile[16] = {
+        255,   0,   0, 255,
+          0, 255,   0, 255,
+          0,   0, 255, 255,
+        255, 255, 255, 255
+    };
+    REQUIRE(canvas.write_pixels(tile, 2, 2, 1, 1));
+
+    // Read back the 2x2 region we just wrote.
+    uint8_t out[16] = {};
+    REQUIRE(canvas.read_pixels(1, 1, 2, 2, out));
+    REQUIRE(out[0]  == 255); // red
+    REQUIRE(out[5]  == 255); // green
+    REQUIRE(out[10] == 255); // blue
+    REQUIRE(out[12] == 255); // white R
+    REQUIRE(out[13] == 255); // white G
+    REQUIRE(out[14] == 255); // white B
+}
+
+TEST_CASE("SkiaCanvas::set_line_dash applies an SkDashPathEffect on stroke",
+          "[canvas][skia][issue-916]") {
+    SkImageInfo info = SkImageInfo::Make(64, 16, kN32_SkColorType,
+                                         kPremul_SkAlphaType,
+                                         SkColorSpace::MakeSRGB());
+    auto surface = SkSurfaces::Raster(info);
+    REQUIRE(surface != nullptr);
+    auto* sk_canvas = surface->getCanvas();
+    sk_canvas->clear(SK_ColorWHITE);
+
+    SkiaCanvas canvas(sk_canvas);
+    canvas.set_stroke_color(Color::rgba(0.0f, 0.0f, 0.0f, 1.0f));
+    canvas.set_line_width(2.0f);
+
+    // Apply a 4-on/4-off pattern and stroke a horizontal line at y=8.
+    float pattern[] = {4.0f, 4.0f};
+    canvas.set_line_dash(pattern, 2, 0.0f);
+    canvas.stroke_line(0, 8, 64, 8);
+
+    auto image = surface->makeImageSnapshot();
+    SkPixmap pix;
+    REQUIRE(image->peekPixels(&pix));
+
+    int dark = 0, light = 0;
+    for (int x = 0; x < 64; ++x) {
+        SkColor c = pix.getColor(x, 8);
+        // Threshold for "ink": red channel < 128 means the dash drew here.
+        if (SkColorGetR(c) < 128) ++dark;
+        else ++light;
+    }
+    // A 4-on/4-off dash paints roughly half ink, half white. Validate
+    // both sides are non-trivial — that proves the dash effect
+    // activated. (A solid stroke would show dark ~ 64; a fully-dropped
+    // stroke would show light == 64.)
+    REQUIRE(dark  > 8);
+    REQUIRE(light > 8);
 }
 #endif

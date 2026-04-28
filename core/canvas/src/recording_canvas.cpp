@@ -169,6 +169,50 @@ float RecordingCanvas::measure_text(const std::string& text) {
     return static_cast<float>(text.size()) * 7.0f;
 }
 
+// ── issue-916: Canvas2D API gap closures ────────────────────────────────────
+
+void RecordingCanvas::set_line_dash(const float* intervals, int count, float phase) {
+    DrawCommand cmd{DrawCommand::Type::set_line_dash};
+    cmd.f[0] = phase;
+    cmd.floats.assign(intervals, intervals + (count > 0 ? count : 0));
+    commands_.push_back(std::move(cmd));
+}
+
+bool RecordingCanvas::draw_image_from_data(const uint8_t* data, size_t size,
+                                            float x, float y, float w, float h) {
+    DrawCommand cmd{DrawCommand::Type::draw_image};
+    cmd.f[0] = x; cmd.f[1] = y; cmd.f[2] = w; cmd.f[3] = h;
+    cmd.text.assign(reinterpret_cast<const char*>(data), size);
+    commands_.push_back(std::move(cmd));
+    // Recording backend doesn't actually rasterize anything but we
+    // succeeded at capturing the intent.
+    return true;
+}
+
+bool RecordingCanvas::draw_image_from_file(const std::string& path,
+                                            float x, float y, float w, float h) {
+    DrawCommand cmd{DrawCommand::Type::draw_image};
+    cmd.f[0] = x; cmd.f[1] = y; cmd.f[2] = w; cmd.f[3] = h;
+    cmd.text = path;
+    commands_.push_back(std::move(cmd));
+    return true;
+}
+
+bool RecordingCanvas::write_pixels(const uint8_t* data, int width, int height,
+                                    int dx, int dy) {
+    DrawCommand cmd{DrawCommand::Type::write_pixels};
+    cmd.f[0] = static_cast<float>(width);
+    cmd.f[1] = static_cast<float>(height);
+    cmd.f[2] = static_cast<float>(dx);
+    cmd.f[3] = static_cast<float>(dy);
+    if (data && width > 0 && height > 0) {
+        const size_t n = static_cast<size_t>(width) * static_cast<size_t>(height) * 4;
+        cmd.text.assign(reinterpret_cast<const char*>(data), n);
+    }
+    commands_.push_back(std::move(cmd));
+    return true;
+}
+
 // ── compile_sksl fallback for non-Skia builds ────────────────────────────────
 #ifndef PULP_HAS_SKIA
 std::string Canvas::compile_sksl(const std::string& sksl) {

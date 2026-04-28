@@ -39,6 +39,9 @@ struct CanvasDrawCmd {
         clip,                      // issue-896: intersect clip with current path
         // Image
         draw_image,
+        // issue-916: Canvas2D API gap closures
+        set_line_dash,             ///< pattern in `gradient_positions`, phase in `extra`
+        put_image_data,            ///< RGBA pixels in `text` (binary), int_val=width, x2=height (as int)
         // Clear
         clear, clear_rect
     };

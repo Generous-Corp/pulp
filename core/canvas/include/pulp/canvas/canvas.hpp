@@ -379,11 +379,26 @@ public:
     virtual float measure_text(const std::string& text) = 0;
 
     /// Full text metrics for layout and intrinsic sizing.
+    /// Mirrors HTML5 TextMetrics — fields beyond width/ascent/descent are
+    /// the bounding-box-only metrics required by CanvasRenderingContext2D
+    /// (issue-916). All values are positive and in pixels at the current
+    /// font size.
     struct TextMetrics {
         float width = 0;        ///< Advance width of the text
-        float ascent = 0;       ///< Distance above baseline (positive value)
-        float descent = 0;      ///< Distance below baseline (positive value)
+        float ascent = 0;       ///< Distance above baseline (positive value, ==fontBoundingBoxAscent)
+        float descent = 0;      ///< Distance below baseline (positive value, ==fontBoundingBoxDescent)
         float line_height = 0;  ///< Recommended line spacing (ascent + descent + leading)
+
+        // ── HTML5 TextMetrics extensions (issue-916) ────────────────
+        /// Distance from text origin to the left edge of the rendering bounding box.
+        /// Positive when the bounding box extends left of the origin.
+        float actual_bounding_box_left = 0;
+        /// Distance from text origin to the right edge of the rendering bounding box.
+        float actual_bounding_box_right = 0;
+        /// Distance from baseline to top of the rendering bounding box.
+        float actual_bounding_box_ascent = 0;
+        /// Distance from baseline to bottom of the rendering bounding box.
+        float actual_bounding_box_descent = 0;
     };
 
     // ── SDF Text (GPU-accelerated, resolution-independent) ────────────
@@ -422,7 +437,46 @@ public:
         m.ascent = font_size_ * 0.75f;   // approximate
         m.descent = font_size_ * 0.25f;
         m.line_height = font_size_ * 1.2f;
+        // HTML5 TextMetrics fields (issue-916) — fall back to font-metric
+        // estimates when no shaped bounding box is available.
+        m.actual_bounding_box_left = 0;
+        m.actual_bounding_box_right = m.width;
+        m.actual_bounding_box_ascent = m.ascent;
+        m.actual_bounding_box_descent = m.descent;
         return m;
+    }
+
+    // ── Line Dash (issue-916) ──────────────────────────────────────────
+    /// Set the line dash pattern for stroke operations.
+    /// Mirrors CanvasRenderingContext2D.setLineDash().
+    /// `intervals` alternate "on" / "off" lengths in pixels. An empty
+    /// pattern (count == 0) clears the dash and reverts to solid strokes.
+    /// HTML5 spec: an odd-length pattern is duplicated to even length;
+    /// callers that want spec compliance must duplicate before invoking
+    /// this method (the JS bridge does so). Default no-op for backends
+    /// without dash support.
+    virtual void set_line_dash(const float* intervals, int count, float phase = 0.0f) {
+        (void)intervals; (void)count; (void)phase;
+    }
+
+    // ── Pixel manipulation (issue-916) ─────────────────────────────────
+    /// Read RGBA pixels from the current surface into `out` (size must be
+    /// at least width*height*4). Returns true on success. Default returns
+    /// false (RecordingCanvas, CG fallback) — only Skia raster surfaces
+    /// implement this end-to-end.
+    /// Mirrors CanvasRenderingContext2D.getImageData().
+    virtual bool read_pixels(int x, int y, int width, int height, uint8_t* out) {
+        (void)x; (void)y; (void)width; (void)height; (void)out;
+        return false;
+    }
+
+    /// Write RGBA pixels (`data` size = width*height*4) to the current
+    /// surface at destination (`dx`, `dy`). Returns true on success.
+    /// Mirrors CanvasRenderingContext2D.putImageData().
+    virtual bool write_pixels(const uint8_t* data, int width, int height,
+                              int dx, int dy) {
+        (void)data; (void)width; (void)height; (void)dx; (void)dy;
+        return false;
     }
 
     // ── SDF Shape Primitives (GPU-accelerated) ─────────────────────────
@@ -569,7 +623,11 @@ struct DrawCommand {
         set_line_cap, set_line_join,
         fill_rect, stroke_rect, fill_rounded_rect, stroke_rounded_rect,
         fill_circle, stroke_circle, stroke_arc, stroke_line,
-        set_font, set_text_align, fill_text
+        set_font, set_text_align, fill_text,
+        // ── issue-916: Canvas2D API gaps ──────────────────────────────
+        set_line_dash,      ///< intervals stored in `floats`, phase in f[0]
+        draw_image,         ///< source path/url in `text`, dst rect in f[0..3]
+        write_pixels        ///< RGBA bytes in `text` (binary), w/h in f[0..1], dst in f[2..3]
     };
 
     Type type;
@@ -577,6 +635,11 @@ struct DrawCommand {
     float f[6] = {};
     Color color{};
     std::string text;
+    // Optional variable-length payload — used by set_line_dash and
+    // write_pixels (which store raw bytes packed as floats / characters
+    // respectively). Kept off the default cmd to avoid bloating the
+    // happy path.
+    std::vector<float> floats;
 };
 
 class RecordingCanvas : public Canvas {
@@ -622,6 +685,17 @@ public:
     void set_text_align(TextAlign align) override;
     void fill_text(const std::string& text, float x, float y) override;
     float measure_text(const std::string& text) override;
+
+    // issue-916 — capture the new commands so JS-driven tests can assert
+    // on them via DrawCommand::Type::set_line_dash / draw_image /
+    // write_pixels. Source path is stored in DrawCommand::text.
+    void set_line_dash(const float* intervals, int count, float phase) override;
+    bool draw_image_from_data(const uint8_t* data, size_t size,
+                              float x, float y, float w, float h) override;
+    bool draw_image_from_file(const std::string& path,
+                              float x, float y, float w, float h) override;
+    bool write_pixels(const uint8_t* data, int width, int height,
+                      int dx, int dy) override;
 
 private:
     std::vector<DrawCommand> commands_;

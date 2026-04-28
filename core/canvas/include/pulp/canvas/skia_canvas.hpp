@@ -16,7 +16,9 @@ class SkPathBuilder;
 #include "include/core/SkRefCnt.h"
 #include "include/core/SkBlendMode.h"
 #include "include/core/SkMatrix.h"
+#include <vector>
 class SkShader;
+class SkPathEffect;
 
 namespace skgpu::graphite {
 class Recorder;
@@ -84,6 +86,12 @@ public:
                               float x, float y, float w, float h) override;
     bool draw_image_from_file(const std::string& path,
                                float x, float y, float w, float h) override;
+
+    // ── Line dash / pixel manipulation (issue-916) ─────────────────────
+    void set_line_dash(const float* intervals, int count, float phase) override;
+    bool read_pixels(int x, int y, int width, int height, uint8_t* out) override;
+    bool write_pixels(const uint8_t* data, int width, int height,
+                      int dx, int dy) override;
     void draw_waveform(const float* samples, size_t count,
                        float x, float y, float width, float height,
                        const WaveformStyle& style) override;
@@ -131,6 +139,14 @@ public:
                                   float w,
                                   float h);
 
+    // Standalone text measurement (issue-916). Returns full HTML5
+    // TextMetrics for `text` rendered with `family` at `size` pixels —
+    // no canvas instance required. Used by the JS bridge's
+    // canvasMeasureText so JS callers can pre-measure text for layout
+    // without needing an active draw surface.
+    static Canvas::TextMetrics measure_text_with_font(
+        const std::string& family, float size, const std::string& text);
+
     // Opacity & compositing layers
     void set_opacity(float alpha) override;
     void save_layer(float x, float y, float w, float h,
@@ -163,6 +179,12 @@ private:
     // screenshot host) that drive SkiaCanvas directly without going through
     // CanvasWidget — there setTransform behaves per the HTML spec literally.
     SkMatrix paint_baseline_ = SkMatrix::I();
+
+    // Line-dash pattern (issue-916). Empty == solid stroke (no dashing).
+    // Held as floats so the stroke-paint helper can rebuild the SkDashPathEffect
+    // each time stroke_color/line_width change.
+    std::vector<float> line_dash_;
+    float line_dash_phase_ = 0.0f;
 };
 
 } // namespace pulp::canvas
