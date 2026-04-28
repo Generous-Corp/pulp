@@ -5,6 +5,7 @@
 #include <choc/javascript/choc_javascript_QuickJS.h>
 #include <choc/javascript/choc_javascript_Console.h>
 
+#include <pulp/runtime/log.hpp>
 #include <pulp/view/js_engine.hpp>
 #include <stdexcept>
 
@@ -44,11 +45,27 @@ static void set_quickjs_stack_size(choc::javascript::Context& ctx, size_t size) 
 // Per Codex P2 on PR #769: the previous implementation capped at 4096
 // jobs and returned silently, which meant a Promise/microtask chain
 // larger than the cap (rare but possible with bundled frameworks)
-// would be silently half-drained. Browsers and Node don't cap; the JS
-// spec says microtasks drain to completion before returning to the
-// macrotask loop. A genuine runaway microtask self-loop is a JS bug
-// the test will surface as a timeout, which is correct. Drain to empty
-// and trust callers to fix any test that legitimately can't terminate.
+// would be silently half-drained. PR #874 removed the cap entirely
+// (`for (;;)`) so finite chains drain to completion as the JS spec
+// requires.
+//
+// Per Codex P1 on PR #874 (issue #902): an unbounded `for (;;)` will
+// hard-freeze the UI thread if JS schedules a self-rearming microtask
+// (e.g. `queueMicrotask(step)` inside `step`). Production callers
+// (`WidgetBridge::service_frame_callbacks`, design-import drain) call
+// this synchronously on the UI thread and assume it returns. We
+// therefore cap at 1,000,000 jobs — well past any legitimate framework
+// boot chain (5K observed for React 18 + Babel + bundled prelude in
+// the existing test_web_compat_react_shims case) but low enough to
+// surface a runaway self-loop in seconds rather than freezing the host
+// indefinitely. When the cap fires we log a warning so the bug is
+// visible instead of silent. The signature stays `void` so existing
+// callers (and the `JsEngine` virtual override on V8 / JSC) need no
+// changes.
+namespace {
+constexpr int kQuickJsPumpJobCap = 1'000'000;
+}
+
 static void pump_quickjs_jobs(choc::javascript::Context& ctx) {
     struct ContextLayout {
         std::unique_ptr<choc::javascript::Context::Pimpl> pimpl;
@@ -57,10 +74,15 @@ static void pump_quickjs_jobs(choc::javascript::Context& ctx) {
     auto* qjctx = static_cast<choc::javascript::quickjs::QuickJSContext*>(layout.pimpl.get());
     if (!qjctx || !qjctx->runtime) return;
     choc::javascript::quickjs::JSContext* pctx = nullptr;
-    for (;;) {
+    for (int executed = 0; executed < kQuickJsPumpJobCap; ++executed) {
         int rc = JS_ExecutePendingJob(qjctx->runtime, &pctx);
         if (rc <= 0) return;  // 0 = empty queue, <0 = JS exception inside job
     }
+    pulp::runtime::log_warn(
+        "QuickJS pump_message_loop hit the {}-job safety cap — likely a "
+        "self-rearming microtask (queueMicrotask/Promise.then loop) in JS. "
+        "Returning to avoid hanging the UI thread; the runaway queue is "
+        "left pending.", kQuickJsPumpJobCap);
 }
 
 static std::string_view logging_level_name(choc::javascript::LoggingLevel level) {
