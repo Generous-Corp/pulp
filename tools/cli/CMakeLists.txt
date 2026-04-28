@@ -48,6 +48,7 @@ add_executable(pulp-cli
     cmd_docs.cpp
     cmd_misc.cpp
     cmd_run.cpp
+    cmd_run_parse.cpp
     cmd_ship.cpp
     cmd_upgrade.cpp
     cmd_validate.cpp

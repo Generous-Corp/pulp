@@ -190,14 +190,37 @@ Prints a summary with pass/fail/skip counts.
 Launch a standalone Pulp application from the build directory.
 
 ```bash
-pulp run                    # find and launch first standalone binary
-pulp run PulpGain           # launch a specific target
-pulp run MyApp -- --arg1    # pass arguments to the launched binary
+pulp run                                            # find and launch first standalone binary
+pulp run PulpGain                                   # launch a specific target
+pulp run MyApp -- --arg1                            # pass arguments to the launched binary
+pulp run --headless --screenshot ui.png             # CI: render offscreen, save PNG
+pulp run --headless --screenshot ui.png --frames 60 # render N frames before capture
+pulp run --watch                                    # re-launch on source-file changes
 ```
 
 Searches the active project's build output:
 - standalone projects: `build/bin/`
 - in-repo examples: `build/examples/`
+
+#### Headless / screenshot flags (#914)
+
+- `--headless` — run without a window. The CLI forwards `--headless`
+  to the launched binary and also sets `PULP_HEADLESS=1`, so binaries
+  that read either source pick up the headless mode.
+- `--screenshot <file>` — save a PNG to `<file>`. Implies `--headless`.
+  Forwarded as `--screenshot <file>` and via `PULP_SCREENSHOT=<file>`.
+  If `--headless` is given without an explicit screenshot path, the
+  CLI defaults to `build/<target>.png`.
+- `--frames <n>` — number of frames to render before capture. Default
+  1. Forwarded as `--frames <n>` and via `PULP_FRAMES=<n>`.
+- `--watch` — re-launch the binary whenever a source file changes.
+  Composes with `--headless` / `--screenshot` so the dev loop can
+  re-render PNGs on every save.
+
+These flags are intended for CI auto-validation: any plugin standalone
+that respects `PULP_HEADLESS` / `PULP_SCREENSHOT` / `PULP_FRAMES` (or
+the matching argv flags) can be exercised end-to-end on every PR
+without a real window or virtual display.
 
 ### cache
 

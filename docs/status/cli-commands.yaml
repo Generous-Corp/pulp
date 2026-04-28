@@ -303,12 +303,24 @@ commands:
 
   - name: run
     status: usable
-    summary: Launch a standalone Pulp application from the build directory.
+    summary: Launch a standalone Pulp application from the build directory. Supports headless / screenshot / frames / watch modes for CI auto-validation (#914).
     args:
       - name: target
         kind: positional
         required: false
         description: "Target name (default: first standalone binary found)"
+      - name: --headless
+        kind: flag
+        description: Run without a window; render offscreen. Forwarded as --headless and PULP_HEADLESS=1 env var (#914).
+      - name: --screenshot
+        kind: option
+        description: Save a PNG screenshot to <file>; implies --headless. Forwarded as --screenshot <file> and PULP_SCREENSHOT=<file> env var (#914).
+      - name: --frames
+        kind: option
+        description: Number of frames to render before screenshot. Default 1. Forwarded as --frames <n> and PULP_FRAMES=<n> env var (#914).
+      - name: --watch
+        kind: flag
+        description: Re-launch the binary on source-file changes. Composes with --headless / --screenshot (#914).
     docs: reference/cli.md#run
 
   - name: upgrade

@@ -170,6 +170,46 @@ and an explicit disabled/not-queried latest-version line instead of probing
 GitHub Releases. Otherwise PR sandbox lanes can fail spuriously when GitHub
 release fetches are blocked or rate-limited.
 
+## `pulp run --headless / --screenshot / --frames / --watch` (#914)
+
+`tools/cli/cmd_run.cpp` plus the shared parser in
+`tools/cli/cmd_run_parse.cpp` (`parse_run_options` / `assemble_launch_args`)
+expose four CI-friendly flags on top of the basic launch path:
+
+- `--headless` — run the standalone offscreen (no window). Forwarded
+  as `--headless` and as the `PULP_HEADLESS=1` env var so binaries
+  that read either source pick it up.
+- `--screenshot <path>` — save a PNG to `<path>` after rendering.
+  Implies `--headless`. Forwarded as `--screenshot <path>` AND
+  `PULP_SCREENSHOT=<path>`. If `--headless` is set without an
+  explicit screenshot path, the CLI writes
+  `build/<target>.png` so simple invocations still produce an
+  artifact.
+- `--frames <n>` — number of frames to render before capturing
+  (default 1). Forwarded as `--frames <n>` AND `PULP_FRAMES=<n>`.
+- `--watch` — re-launch the binary on file changes via the existing
+  `watch_loop` plumbing. Composes with the headless flags so dev
+  loops can render PNGs on every save.
+
+The CLI parser is unit-tested in `test/test_cli_run_options.cpp`
+(parse + forwarding contract) and end-to-end shell-out coverage lives
+in `test/test_cli_shellout.cpp` (`[issue-914]` tag), which exercises
+the discover-binary → launch-with-flags → PNG-on-disk path against the
+fixture binary in `test/fixtures/cli_run_fixture.cpp`.
+
+Gotchas:
+
+- `--screenshot` without a path argument exits 2 with a diagnostic.
+  Bad `--frames` (non-integer / <= 0) exits 2 too. Both are caught
+  before project resolution so they fail fast in `--help`-adjacent
+  contexts.
+- Both argv AND env vars are set on every invocation. Do not remove
+  the env-var fallback — older standalone binaries (and the
+  `pulp-screenshot` flow) read env first.
+- `--watch` is consumed by the CLI; it is NOT forwarded to the
+  launched binary. The launched binary just sees the headless
+  flags.
+
 ## `pulp validate` — plugin-format validators
 
 Runs `clap-validator` / `pluginval` / `auval` / optional AAX validator

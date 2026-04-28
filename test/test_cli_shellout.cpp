@@ -1248,6 +1248,152 @@ TEST_CASE("pulp docs covers local reader index, search, open, and show paths",
     pulp_unsetenv("PULP_UPDATE_CHECK_DISABLED");
 }
 
+// pulp #914 — `pulp run --help` must advertise the four new flags so
+// users (and the docs generator) can discover them. This is the help
+// surface contract; the parser is exercised in test_cli_run_options.cpp.
+TEST_CASE("pulp run --help advertises the headless/screenshot/frames/watch flags",
+          "[cli][shellout][run][issue-914]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    auto r = run_pulp({"run", "--help"});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(r.stdout_output.find("--headless")   != std::string::npos);
+    REQUIRE(r.stdout_output.find("--screenshot") != std::string::npos);
+    REQUIRE(r.stdout_output.find("--frames")     != std::string::npos);
+    REQUIRE(r.stdout_output.find("--watch")      != std::string::npos);
+    // Make sure the existing "active project build" line stays — the
+    // root CMakeLists.txt regex test depends on it.
+    REQUIRE(r.stdout_output.find("active project build") != std::string::npos);
+}
+
+// pulp #914 — bad `--frames` is caught before the run path tries to
+// resolve a project, so we get a clean exit-2 with a diagnostic.
+TEST_CASE("pulp run --frames rejects non-positive / non-integer values",
+          "[cli][shellout][run][issue-914]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    auto bad_int = run_pulp({"run", "--frames", "notanumber"});
+    REQUIRE_FALSE(bad_int.timed_out);
+    REQUIRE(bad_int.exit_code == 2);
+    REQUIRE(bad_int.stderr_output.find("--frames") != std::string::npos);
+
+    auto zero = run_pulp({"run", "--frames", "0"});
+    REQUIRE_FALSE(zero.timed_out);
+    REQUIRE(zero.exit_code == 2);
+    REQUIRE(zero.stderr_output.find("--frames") != std::string::npos);
+
+    auto missing_path = run_pulp({"run", "--screenshot"});
+    REQUIRE_FALSE(missing_path.timed_out);
+    REQUIRE(missing_path.exit_code == 2);
+    REQUIRE(missing_path.stderr_output.find("--screenshot") != std::string::npos);
+}
+
+// pulp #914 — end-to-end CI-validation contract: `pulp run --headless
+// --screenshot <path> --frames 1 <target>` against a fake project that
+// contains the test fixture binary under build/examples/<dir>/<exe>
+// must (a) discover the binary, (b) launch it with the flags forwarded
+// AND env vars set, and (c) leave a non-empty PNG file at <path>.
+TEST_CASE("pulp run --headless --screenshot --frames writes a PNG",
+          "[cli][shellout][run][issue-914]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    // The fixture binary lives next to the test binary in the build
+    // tree (test/pulp-cli-run-fixture). The test runner's cwd is
+    // <build>/test, so a relative resolve to the fixture works.
+    fs::path fixture_src = fs::current_path() /
+#if defined(_WIN32)
+        "pulp-cli-run-fixture.exe";
+#else
+        "pulp-cli-run-fixture";
+#endif
+    if (!fs::exists(fixture_src)) {
+        SUCCEED("fixture binary not built at " + fixture_src.string()
+                + "; skipping");
+        return;
+    }
+
+    // Build a fake project tree that cmd_run can navigate.
+    auto base = fs::temp_directory_path() /
+                ("pulp-shellout-run-headless-" +
+                 std::to_string(std::chrono::steady_clock::now()
+                                    .time_since_epoch().count()));
+    auto build_dir = base / "build";
+    auto bin_dir = build_dir / "bin";
+    fs::create_directories(bin_dir);
+    // pulp.toml at the root marks this as a standalone project (no
+    // `core/` sibling needed) — find_standalone_root() picks it up.
+    {
+        std::ofstream toml(base / "pulp.toml");
+        toml << "[pulp]\nsdk_version = \"99.0.0\"\n";
+    }
+    // Stub CMakeCache.txt — cmd_run only checks for existence.
+    { std::ofstream c(build_dir / "CMakeCache.txt"); c << "# stub\n"; }
+
+    // Copy the fixture in as the discovered binary. In standalone mode
+    // cmd_run scans build/bin for a single executable file with no
+    // extension. Use a name without dots and without "test" so the
+    // selector picks it up.
+    auto target = bin_dir /
+#if defined(_WIN32)
+        "pulpcliruntarget.exe";
+#else
+        "pulpcliruntarget";
+#endif
+    std::error_code copy_ec;
+    fs::copy_file(fixture_src, target,
+                   fs::copy_options::overwrite_existing, copy_ec);
+    REQUIRE_FALSE(copy_ec);
+#if !defined(_WIN32)
+    fs::permissions(target,
+                    fs::perms::owner_all | fs::perms::group_read |
+                    fs::perms::group_exec | fs::perms::others_read |
+                    fs::perms::others_exec,
+                    fs::perm_options::add);
+#endif
+
+    auto screenshot = base / "shot.png";
+    fs::remove(screenshot);
+
+    const auto bin = fs::absolute(pulp_binary());
+    auto cwd_saver = fs::current_path();
+    fs::current_path(base);
+    // Pass the explicit target name so cmd_run's standalone-mode lookup
+    // path is taken (it matches by name without the "no dot in fname"
+    // filter the unnamed search applies — that filter blocks the
+    // Windows .exe extension).
+    auto r = exec(bin.string(),
+                  {"run", "pulpcliruntarget",
+                   "--headless", "--screenshot", screenshot.string(),
+                   "--frames", "1"},
+                  20000);
+    fs::current_path(cwd_saver);
+
+    REQUIRE_FALSE(r.timed_out);
+    INFO("stdout: " << r.stdout_output);
+    INFO("stderr: " << r.stderr_output);
+    REQUIRE(r.exit_code == 0);
+
+    // Fixture echoes its resolved options — verify the CLI forwarded
+    // both the args (preferred) AND the env vars (fallback).
+    REQUIRE(r.stdout_output.find("fixture: headless=1") != std::string::npos);
+    REQUIRE(r.stdout_output.find(screenshot.string())   != std::string::npos);
+
+    // The PNG itself must exist and start with the standard signature.
+    REQUIRE(fs::exists(screenshot));
+    auto size = fs::file_size(screenshot);
+    REQUIRE(size > 0);
+    std::ifstream png(screenshot, std::ios::binary);
+    unsigned char hdr[8] = {0};
+    png.read(reinterpret_cast<char*>(hdr), 8);
+    REQUIRE(hdr[0] == 0x89);
+    REQUIRE(hdr[1] == 'P');
+    REQUIRE(hdr[2] == 'N');
+    REQUIRE(hdr[3] == 'G');
+
+    fs::remove_all(base);
+}
+
 // #682 — PULP_DEBUG=1 must emit timestamped phase markers to stderr so
 // future "pulp hung at 0% CPU" reports pin themselves. Unset by default
 // it must stay silent so scripts that parse stderr aren't affected.

@@ -101,12 +101,37 @@ target_include_directories(pulp-test-cli-create-targets PRIVATE ${CMAKE_SOURCE_D
 target_link_libraries(pulp-test-cli-create-targets PRIVATE Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-cli-create-targets)
 
+# pulp #914 — `pulp run` flag parser unit tests. Pure parser, no I/O,
+# no project resolution. The shell-out CLI behaviour for the same
+# flags lives in test_cli_shellout.cpp.
+add_executable(pulp-test-cli-run-options
+    test_cli_run_options.cpp
+    ${CMAKE_SOURCE_DIR}/tools/cli/cmd_run_parse.cpp
+)
+target_include_directories(pulp-test-cli-run-options PRIVATE ${CMAKE_SOURCE_DIR})
+target_link_libraries(pulp-test-cli-run-options PRIVATE Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-cli-run-options)
+
+# pulp #914 — fixture binary for the `pulp run --headless --screenshot`
+# shell-out test. Stands in for a plugin standalone: writes a tiny valid
+# PNG when given --screenshot <path> (or PULP_SCREENSHOT=<path>) so the
+# end-to-end CI-validation contract has a deterministic, dependency-free
+# target.
+add_executable(pulp-test-cli-run-fixture fixtures/cli_run_fixture.cpp)
+set_target_properties(pulp-test-cli-run-fixture PROPERTIES
+    OUTPUT_NAME "pulp-cli-run-fixture")
+
 # CLI shell-out behaviour tests — launches the built `pulp` binary.
 # Depends on pulp-cli so the binary exists at test time.
 add_executable(pulp-test-cli-shellout test_cli_shellout.cpp)
 target_link_libraries(pulp-test-cli-shellout PRIVATE pulp::platform Catch2::Catch2WithMain)
 if(TARGET pulp-cli)
     add_dependencies(pulp-test-cli-shellout pulp-cli)
+endif()
+# pulp #914 — depend on the fixture binary so the headless/screenshot
+# end-to-end test has its target ready in the build tree.
+if(TARGET pulp-test-cli-run-fixture)
+    add_dependencies(pulp-test-cli-shellout pulp-test-cli-run-fixture)
 endif()
 catch_discover_tests(pulp-test-cli-shellout)
 
