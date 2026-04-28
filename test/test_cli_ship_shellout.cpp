@@ -4,6 +4,16 @@
 // from the CLI ship path never being exercised end-to-end. This file
 // shells to the built binary for the non-destructive ship branches
 // that are safe to run in CI without real signing material.
+//
+// Issue #901: every test in this file goes through `cmd_ship`, which
+// resolves signing config via CLI flag → env var → `~/.pulp/config.toml`
+// (`tools/cli/cmd_ship.cpp:20-30`). On developer machines with
+// `signing.android.keystore`, `signing.apple.identity`, or related
+// env vars set, the ship code takes a different branch and the
+// asserted error wording (e.g. "No Android keystore") never appears.
+// The `ShipShelloutFixture` below isolates every test from user state
+// by pointing `PULP_HOME` at a per-test empty directory and clearing
+// the ship-related env vars; it restores prior values on teardown.
 
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/platform/child_process.hpp>
@@ -115,10 +125,58 @@ fs::path make_fake_project(std::string_view name, bool with_build_cache) {
     return root;
 }
 
+// Issue #901: isolate every shell-out from the developer's `~/.pulp/config.toml`
+// and from any ship-related env vars they may have exported. `cmd_ship.cpp`
+// reads `signing.android.*`, `signing.apple.*`, `PULP_SIGN_IDENTITY`,
+// `PULP_APPLE_ID`, `PULP_TEAM_ID`, `ANDROID_STORE_PASS`, `ANDROID_KEY_PASS`
+// — any of these will silently flip a test onto a different code path
+// and break the asserted error wording.
+//
+// The fixture points `PULP_HOME` at a per-test empty directory (so
+// `read_user_config_value()` finds no `config.toml`) and clears the env
+// vars `cmd_ship` consults directly. `ScopedEnvVar`'s destructor
+// restores prior values, leaving the developer's environment untouched.
+fs::path make_isolated_pulp_home() {
+    auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
+    auto dir = fs::temp_directory_path()
+        / ("pulp-ship-home-" + std::to_string(stamp));
+    fs::remove_all(dir);
+    fs::create_directories(dir);
+    return dir;
+}
+
+struct ShipShelloutFixture {
+    fs::path home_dir;
+    ScopedEnvVar pulp_home;
+    ScopedEnvVar android_store_pass;
+    ScopedEnvVar android_key_pass;
+    ScopedEnvVar pulp_sign_identity;
+    ScopedEnvVar pulp_apple_id;
+    ScopedEnvVar pulp_team_id;
+
+    ShipShelloutFixture()
+        : home_dir(make_isolated_pulp_home()),
+          pulp_home("PULP_HOME", home_dir.string()),
+          android_store_pass("ANDROID_STORE_PASS"),
+          android_key_pass("ANDROID_KEY_PASS"),
+          pulp_sign_identity("PULP_SIGN_IDENTITY"),
+          pulp_apple_id("PULP_APPLE_ID"),
+          pulp_team_id("PULP_TEAM_ID") {}
+
+    ~ShipShelloutFixture() {
+        std::error_code ec;
+        fs::remove_all(home_dir, ec);
+    }
+
+    ShipShelloutFixture(const ShipShelloutFixture&) = delete;
+    ShipShelloutFixture& operator=(const ShipShelloutFixture&) = delete;
+};
+
 }  // namespace
 
-TEST_CASE("pulp ship outside a project directory errors out",
-          "[cli][shellout][ship]") {
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship outside a project directory errors out",
+                 "[cli][shellout][ship]") {
     if (!binary_exists()) { SUCCEED("pulp binary not built"); return; }
     auto r = run_pulp_in(fs::temp_directory_path(), {"ship"});
     REQUIRE_FALSE(r.timed_out);
@@ -129,8 +187,9 @@ TEST_CASE("pulp ship outside a project directory errors out",
     REQUIRE(contains(combined, "Pulp project"));
 }
 
-TEST_CASE("pulp ship sign outside a project directory errors cleanly",
-          "[cli][shellout][ship]") {
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship sign outside a project directory errors cleanly",
+                 "[cli][shellout][ship]") {
     if (!binary_exists()) { SUCCEED("pulp binary not built"); return; }
     auto r = run_pulp_in(fs::temp_directory_path(),
                          {"ship", "sign", "--identity", "fake-id"});
@@ -142,8 +201,9 @@ TEST_CASE("pulp ship sign outside a project directory errors cleanly",
     REQUIRE(contains(combined, "Pulp project"));
 }
 
-TEST_CASE("pulp ship appcast outside a project errors cleanly",
-          "[cli][shellout][ship]") {
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship appcast outside a project errors cleanly",
+                 "[cli][shellout][ship]") {
     if (!binary_exists()) { SUCCEED("pulp binary not built"); return; }
     auto r = run_pulp_in(fs::temp_directory_path(),
                          {"ship", "appcast"});
@@ -151,24 +211,27 @@ TEST_CASE("pulp ship appcast outside a project errors cleanly",
     REQUIRE(r.exit_code != 0);
 }
 
-TEST_CASE("pulp ship notarize outside a project errors cleanly",
-          "[cli][shellout][ship]") {
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship notarize outside a project errors cleanly",
+                 "[cli][shellout][ship]") {
     if (!binary_exists()) { SUCCEED("pulp binary not built"); return; }
     auto r = run_pulp_in(fs::temp_directory_path(), {"ship", "notarize"});
     REQUIRE_FALSE(r.timed_out);
     REQUIRE(r.exit_code != 0);
 }
 
-TEST_CASE("pulp ship check outside a project errors cleanly",
-          "[cli][shellout][ship]") {
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship check outside a project errors cleanly",
+                 "[cli][shellout][ship]") {
     if (!binary_exists()) { SUCCEED("pulp binary not built"); return; }
     auto r = run_pulp_in(fs::temp_directory_path(), {"ship", "check"});
     REQUIRE_FALSE(r.timed_out);
     REQUIRE(r.exit_code != 0);
 }
 
-TEST_CASE("pulp ship package outside a project errors cleanly",
-          "[cli][shellout][ship]") {
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship package outside a project errors cleanly",
+                 "[cli][shellout][ship]") {
     if (!binary_exists()) { SUCCEED("pulp binary not built"); return; }
     auto r = run_pulp_in(fs::temp_directory_path(),
                          {"ship", "package", "--version", "1.0.0"});
@@ -176,8 +239,9 @@ TEST_CASE("pulp ship package outside a project errors cleanly",
     REQUIRE(r.exit_code != 0);
 }
 
-TEST_CASE("pulp ship help (or default) enumerates every subcommand",
-          "[cli][shellout][ship][help]") {
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship help (or default) enumerates every subcommand",
+                 "[cli][shellout][ship][help]") {
     // Run from the build tree — find_project_root() walks up to the
     // worktree root, and build/CMakeCache.txt exists since the test
     // harness itself was built. That puts us in the fallthrough help
@@ -202,8 +266,9 @@ TEST_CASE("pulp ship help (or default) enumerates every subcommand",
     }
 }
 
-TEST_CASE("pulp ship inside project without build cache reports build guidance",
-          "[cli][shellout][ship][issue-643]") {
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship inside project without build cache reports build guidance",
+                 "[cli][shellout][ship][issue-643]") {
     if (!binary_exists()) { SUCCEED("pulp binary not built"); return; }
     auto root = make_fake_project("missing-build", false);
 
@@ -218,15 +283,13 @@ TEST_CASE("pulp ship inside project without build cache reports build guidance",
     fs::remove_all(root);
 }
 
-TEST_CASE("pulp ship Android validation paths fail before external tooling",
-          "[cli][shellout][ship][android][issue-643]") {
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship Android validation paths fail before external tooling",
+                 "[cli][shellout][ship][android][issue-643][issue-901]") {
     if (!binary_exists()) { SUCCEED("pulp binary not built"); return; }
     auto root = make_fake_project("android-validation", true);
-    fs::create_directories(root / "pulp-home");
-
-    ScopedEnvVar pulp_home("PULP_HOME", (root / "pulp-home").string());
-    ScopedEnvVar store_pass("ANDROID_STORE_PASS");
-    ScopedEnvVar key_pass("ANDROID_KEY_PASS");
+    // PULP_HOME / ANDROID_STORE_PASS / ANDROID_KEY_PASS isolation now
+    // lives on the fixture (#901) — no need to scope them locally.
 
     auto sign = run_pulp_in(root, {"ship", "sign", "--target", "android"});
     REQUIRE_FALSE(sign.timed_out);
@@ -254,8 +317,9 @@ TEST_CASE("pulp ship Android validation paths fail before external tooling",
     fs::remove_all(root);
 }
 
-TEST_CASE("pulp ship appcast writes local feed and rejects remote signing",
-          "[cli][shellout][ship][appcast][issue-643]") {
+TEST_CASE_METHOD(ShipShelloutFixture,
+                 "pulp ship appcast writes local feed and rejects remote signing",
+                 "[cli][shellout][ship][appcast][issue-643]") {
     if (!binary_exists()) { SUCCEED("pulp binary not built"); return; }
     auto root = make_fake_project("appcast", true);
     auto feed = root / "artifacts" / "updates.xml";
