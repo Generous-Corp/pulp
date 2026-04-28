@@ -49,7 +49,35 @@ target_link_libraries(pulp-canvas PUBLIC pulp::runtime)
 if(PULP_HAS_SKIA)
     target_sources(pulp-canvas PRIVATE
         src/skia_canvas.cpp
+        src/bundled_fonts.cpp
     )
+
+    # Embed external/fonts/*.ttf into a static lib that pulp-canvas links
+    # privately. The Skia prebuilt does not export SkFontMgr_New_Custom_Data
+    # (FreeType is not linked in), so we materialise these into SkTypefaces
+    # via the platform font manager at runtime — see bundled_fonts.cpp.
+    # Keep the SOURCES list aligned with the bundled_blobs() table in
+    # bundled_fonts.cpp; the C++ side names the symbols directly. Issue #932.
+    #
+    # PulpEmbedData provides pulp_add_binary_data() in isolation from the
+    # rest of PulpUtils.cmake (which fails fast unless format/view targets
+    # already exist). Pulled in directly so the canvas subdir doesn't have
+    # to wait for the parent to inject the helper.
+    include("${CMAKE_SOURCE_DIR}/tools/cmake/PulpEmbedData.cmake")
+    pulp_add_binary_data(pulp-bundled-fonts
+        SOURCES
+            ${CMAKE_SOURCE_DIR}/external/fonts/Inter-Regular.ttf
+            ${CMAKE_SOURCE_DIR}/external/fonts/JetBrainsMono-Regular.ttf
+        NAMESPACE pulp_bundled_fonts
+    )
+    target_link_libraries(pulp-canvas PRIVATE pulp-bundled-fonts)
+    # Mark for the parent CMakeLists.txt install() loop. pulp-canvas exports
+    # through PulpTargets and CMake refuses to export a target that links
+    # PRIVATEly to a static lib outside the export set, so the parent has
+    # to add pulp-bundled-fonts to PULP_SDK_TARGETS for installs.
+    set_target_properties(pulp-bundled-fonts PROPERTIES
+        EXPORT_NAME bundled-fonts)
+
     target_link_libraries(pulp-canvas PUBLIC skia::skia)
     if(TARGET skia::dawn)
         target_link_libraries(pulp-canvas PUBLIC skia::dawn)
