@@ -326,6 +326,13 @@ fn do_install<F: Fetcher>(
 
     let plan = crate::install::InstallPlan::from_version(&target)?;
 
+    // Pre-flight: refuse to install if the running binary lives under
+    // cargo's `target/` directory. Fail fast so an accidental
+    // `cargo test` invocation doesn't waste a network round-trip
+    // downloading a release tarball just to refuse the swap. Set
+    // `PULP_UPGRADE_INSTALL_LIVE=1` to override.
+    crate::install::check_build_artifact_guard(&plan)?;
+
     // Test seam: when set, treat the directory as a pre-extracted
     // archive. Skips download + tar — used by the sandbox-e2e dual-
     // binary swap test so we can validate the replacement logic

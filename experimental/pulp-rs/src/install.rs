@@ -271,23 +271,22 @@ fn backup_path(p: &Path) -> PathBuf {
 /// `PULP_UPGRADE_INSTALL_LIVE=1` to override (e.g. for sandbox-e2e
 /// runs that explicitly want to test the real swap path on a fake
 /// install layout).
-fn looks_like_build_artifact(p: &Path) -> bool {
+#[must_use]
+pub fn looks_like_build_artifact(p: &Path) -> bool {
     p.components().any(|c| c.as_os_str() == "target")
 }
 
-/// Apply the planned replacement: overwrite `plan.self_path` with the
-/// new pulp from the archive, and (when the archive ships pulp-cpp)
-/// overwrite or install the sibling `pulp-cpp`.
-///
-/// Returns a summary of what changed so callers can print it.
+/// Pre-flight: refuse to install if the running binary lives under a
+/// cargo `target/` directory. Call this BEFORE any download or
+/// extraction so an accidental cargo-test invocation fails fast
+/// without burning a network round-trip (or worse, half-completing
+/// an install).
 ///
 /// # Errors
 ///
-/// [`CliError::Other`] if `plan.self_path` looks like a cargo build
-/// artifact (and `PULP_UPGRADE_INSTALL_LIVE=1` is not set);
-/// otherwise surface from [`replace_binary_atomic`] /
-/// [`install_new_binary`].
-pub fn install_extracted(plan: &InstallPlan, archive: &ExtractedArchive) -> Result<InstallReport> {
+/// [`CliError::Other`] when `plan.self_path` is under `target/` and
+/// `PULP_UPGRADE_INSTALL_LIVE=1` is not set.
+pub fn check_build_artifact_guard(plan: &InstallPlan) -> Result<()> {
     if looks_like_build_artifact(&plan.self_path)
         && std::env::var("PULP_UPGRADE_INSTALL_LIVE").ok().as_deref() != Some("1")
     {
@@ -299,6 +298,28 @@ pub fn install_extracted(plan: &InstallPlan, archive: &ExtractedArchive) -> Resu
             plan.self_path.display()
         )));
     }
+    Ok(())
+}
+
+/// Apply the planned replacement: overwrite `plan.self_path` with the
+/// new pulp from the archive, and (when the archive ships pulp-cpp)
+/// overwrite or install the sibling `pulp-cpp`.
+///
+/// Callers should invoke [`check_build_artifact_guard`] BEFORE the
+/// download step, but this function also re-checks defensively so a
+/// caller that forgets the pre-flight still can't clobber a build
+/// binary.
+///
+/// # Errors
+///
+/// [`CliError::Other`] if `plan.self_path` looks like a cargo build
+/// artifact (and `PULP_UPGRADE_INSTALL_LIVE=1` is not set);
+/// otherwise surface from [`replace_binary_atomic`] /
+/// [`install_new_binary`].
+pub fn install_extracted(plan: &InstallPlan, archive: &ExtractedArchive) -> Result<InstallReport> {
+    // Defense-in-depth: do the same check the orchestrator should
+    // already have run pre-flight. Cheap, no I/O.
+    check_build_artifact_guard(plan)?;
     replace_binary_atomic(&plan.self_path, &archive.new_pulp)?;
     let mut report = InstallReport {
         pulp_replaced: true,
