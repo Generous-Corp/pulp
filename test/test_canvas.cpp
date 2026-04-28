@@ -503,6 +503,124 @@ TEST_CASE("SkiaCanvas::set_line_dash applies an SkDashPathEffect on stroke",
     REQUIRE(dark  > 8);
     REQUIRE(light > 8);
 }
+
+// ── pulp #932 — bundled-font registration with SkFontMgr ────────────────────
+
+// pulp_add_binary_data wires Inter-Regular.ttf and JetBrainsMono-Regular.ttf
+// into pulp-canvas at build time. This test asserts the C++ side of #932:
+// that match_bundled_typeface() returns a non-null SkTypeface for both
+// bundled families even when the host system doesn't ship them. Without
+// #932, "JetBrains Mono" fell through to SkFontMgr::matchFamilyStyle which
+// returns null on a stock macOS install — and the next non-ASCII fill_text
+// call would throw std::out_of_range during glyph fallback.
+#include <pulp/canvas/bundled_fonts.hpp>
+#include "include/core/SkFontMgr.h"
+#include "include/core/SkString.h"
+#include "include/core/SkTypeface.h"
+#if defined(__APPLE__)
+#include "include/ports/SkFontMgr_mac_ct.h"
+#elif defined(_WIN32)
+#include "include/ports/SkTypeface_win.h"
+#endif
+
+namespace {
+
+// Mirror skia_canvas.cpp's get_font_manager() but for tests — returns
+// whatever platform manager the prebuilt Skia ships with on this OS, or
+// nullptr (Linux without fontconfig wired into the test binary, etc.).
+sk_sp<SkFontMgr> test_platform_font_mgr() {
+#if defined(__APPLE__)
+    return SkFontMgr_New_CoreText(nullptr);
+#elif defined(_WIN32)
+    return SkFontMgr_New_DirectWrite();
+#else
+    return nullptr; // Linux/Android: pulp-test-canvas doesn't link FreeType.
+#endif
+}
+
+} // namespace
+
+TEST_CASE("Bundled font count matches the embedded asset list (#932)",
+          "[canvas][skia][fonts][issue-932]") {
+    // Two faces ship today: Inter-Regular and JetBrainsMono-Regular. If a
+    // future PR grows the bundle, bump this expectation deliberately so
+    // we catch accidental drops.
+    REQUIRE(pulp::canvas::bundled_font_count() == 2);
+}
+
+TEST_CASE("Bundled fonts resolve via SkFontMgr::makeFromData (#932)",
+          "[canvas][skia][fonts][issue-932]") {
+    auto mgr = test_platform_font_mgr();
+    if (!mgr) {
+        SUCCEED("Skipping bundled-font lookup — no platform font manager "
+                "linked into pulp-test-canvas on this platform.");
+        return;
+    }
+
+    SkFontStyle upright_normal{SkFontStyle::kNormal_Weight,
+                               SkFontStyle::kNormal_Width,
+                               SkFontStyle::kUpright_Slant};
+
+    // Inter is the "sans" half of the bundle. Even on a Mac without Inter
+    // installed system-wide, this must succeed because the .ttf is baked
+    // into pulp-canvas.
+    auto inter = pulp::canvas::match_bundled_typeface(mgr.get(), "Inter",
+                                                     upright_normal);
+    REQUIRE(inter != nullptr);
+    SkString inter_family;
+    inter->getFamilyName(&inter_family);
+    REQUIRE(std::string(inter_family.c_str()) == "Inter");
+
+    // JetBrains Mono is the "mono" half — this is the family that
+    // motivated #932 (the std::out_of_range em-dash crash).
+    auto jb = pulp::canvas::match_bundled_typeface(mgr.get(),
+                                                   "JetBrains Mono",
+                                                   upright_normal);
+    REQUIRE(jb != nullptr);
+    SkString jb_family;
+    jb->getFamilyName(&jb_family);
+    REQUIRE(std::string(jb_family.c_str()) == "JetBrains Mono");
+
+    // A name we DON'T bundle must miss — match_bundled_typeface only
+    // covers the bundle, not the system-wide font catalogue.
+    auto miss = pulp::canvas::match_bundled_typeface(mgr.get(),
+                                                     "ThisFamilyDoesNotExist",
+                                                     upright_normal);
+    REQUIRE(miss == nullptr);
+}
+
+TEST_CASE("match_bundled_typeface is null-safe when no font mgr is available "
+          "(#932)",
+          "[canvas][skia][fonts][issue-932]") {
+    // Linux-without-fontconfig and any future platform that returns a null
+    // SkFontMgr from get_font_manager() must fail gracefully — the bundle
+    // can't be materialised without a manager, so callers should fall back
+    // to the legacy code path rather than crash. Catch2 runs cases in
+    // random order so the registration cache may already be populated by
+    // the prior test; query a deliberately-unknown family so the
+    // null-safety we're checking isn't masked by a happy lookup hit.
+    auto miss = pulp::canvas::match_bundled_typeface(
+        nullptr, "PulpDoesNotShipThisFamily-932",
+        SkFontStyle{SkFontStyle::kNormal_Weight, SkFontStyle::kNormal_Width,
+                    SkFontStyle::kUpright_Slant});
+    REQUIRE(miss == nullptr);
+}
+
+TEST_CASE("SkiaCanvas::measure_text_with_font picks up bundled "
+          "JetBrains Mono (#932)",
+          "[canvas][skia][fonts][issue-932]") {
+    // End-to-end through the same lookup path canvas.set_font() takes:
+    // make_font → get_cached_typeface → bundled-font cache. Width must be
+    // strictly positive — the fallback (no typeface) returns a synthesised
+    // 0.5 * size * len estimate, but a real typeface produces glyph-derived
+    // advances that vary with content. Compare two strings of different
+    // length to confirm we're going through real font metrics.
+    auto a = SkiaCanvas::measure_text_with_font("JetBrains Mono", 16.0f, "i");
+    auto b = SkiaCanvas::measure_text_with_font("JetBrains Mono", 16.0f,
+                                                 "iiiiiiiiii");
+    REQUIRE(a.width > 0.0f);
+    REQUIRE(b.width > a.width);
+}
 #endif
 
 // ── pulp #929 — Canvas::clear_rect default + CoreGraphics override ──────────

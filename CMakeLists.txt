@@ -670,6 +670,13 @@ if(TARGET pulp-inspect)
     list(APPEND PULP_SDK_TARGETS pulp-inspect)
 endif()
 
+# pulp-canvas links pulp-bundled-fonts privately when Skia is on (#932).
+# CMake exports the canvas target through PulpTargets, and refuses unless
+# every PRIVATE-linked dependency is also in the export set.
+if(TARGET pulp-bundled-fonts)
+    list(APPEND PULP_SDK_TARGETS pulp-bundled-fonts)
+endif()
+
 foreach(_sdk_target IN LISTS PULP_SDK_TARGETS)
     string(REPLACE "pulp-" "" _sdk_export_name "${_sdk_target}")
     set_target_properties(${_sdk_target} PROPERTIES EXPORT_NAME "${_sdk_export_name}")
@@ -798,6 +805,7 @@ install(FILES
     "${CMAKE_BINARY_DIR}/PulpConfigVersion.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpAAX.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpAppIcon.cmake"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpEmbedData.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpGenerateMacIcns.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpGenerateWindowsIcon.ps1"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpUtils.cmake"

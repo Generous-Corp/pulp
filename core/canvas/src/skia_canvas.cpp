@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <unordered_map>
 #include <pulp/canvas/skia_canvas.hpp>
+#include <pulp/canvas/bundled_fonts.hpp>
 
 #ifdef PULP_HAS_SKIA
 
@@ -21,6 +22,12 @@
 #include "include/core/SkPixmap.h"
 #include "include/core/SkBitmap.h"
 #include "include/core/SkData.h"
+// SkSurface is forward-declared in skia_canvas.hpp; the implementation
+// here calls members on it (e.g. surface->readPixels). Older Skia
+// pulled the full definition transitively via SkImage.h, but the
+// chrome/m144 prebuilt trimmed that include — the .cpp now needs an
+// explicit SkSurface.h to compile.
+#include "include/core/SkSurface.h"
 #include "include/core/SkSamplingOptions.h"
 #include "include/effects/SkRuntimeEffect.h"
 #include "include/effects/SkGradientShader.h"
@@ -145,6 +152,19 @@ static sk_sp<SkTypeface> get_cached_typeface(const std::string& family,
         }
     }
 #endif
+
+    // Bundled fonts take precedence over the system font manager so plugin
+    // UIs render the same on a stock machine as on a developer's machine
+    // with the same families installed (#932). Without this, calling
+    // canvas.set_font("JetBrains Mono", ...) on macOS-without-JetBrainsMono
+    // resolves to a null typeface and crashes the first time a non-ASCII
+    // glyph triggers SkFontMgr-driven fallback.
+    if (!typeface && !family.empty()) {
+        auto mgr = get_font_manager();
+        if (mgr) {
+            typeface = match_bundled_typeface(mgr.get(), family, sk_style);
+        }
+    }
 
     // Fall back to family name matching
     if (!typeface) {
