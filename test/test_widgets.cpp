@@ -26,6 +26,81 @@ TEST_CASE("Label text can be changed", "[view][widget]") {
     REQUIRE(label.text() == "Changed");
 }
 
+TEST_CASE("Label intrinsic_width fits long text", "[view][widget][issue-928]") {
+    // Regression: previously Label reported 0 intrinsic width and
+    // inherited a small parent width in flex-row containers, causing
+    // Spectr's "ZOOMABLE FILTER BANK" header to clip to "ZOOMABLE FII".
+    Label long_label("ZOOMABLE FILTER BANK");
+    Label short_label("BANK");
+
+    float long_w = long_label.intrinsic_width();
+    float short_w = short_label.intrinsic_width();
+
+    // Both must report a positive, non-zero natural width.
+    REQUIRE(long_w > 0);
+    REQUIRE(short_w > 0);
+
+    // The long label must report a width comfortably larger than the
+    // short label — proving width scales with content length.
+    REQUIRE(long_w > short_w * 2.0f);
+
+    // Empty labels report no intrinsic width (parent decides).
+    Label empty;
+    REQUIRE(empty.intrinsic_width() == 0);
+}
+
+TEST_CASE("Label intrinsic_width scales with font size", "[view][widget][issue-928]") {
+    Label small("Hello world");
+    small.set_font_size(12.0f);
+
+    Label large("Hello world");
+    large.set_font_size(36.0f);
+
+    REQUIRE(large.intrinsic_width() > small.intrinsic_width());
+}
+
+TEST_CASE("Label intrinsic_width respects text-transform", "[view][widget][issue-928]") {
+    Label lower("zoomable filter bank");
+    Label upper("zoomable filter bank");
+    upper.set_text_transform(Label::TextTransform::uppercase);
+
+    // Uppercase characters typically advance wider than lowercase, so
+    // the transformed label must measure at least as wide.
+    REQUIRE(upper.intrinsic_width() >= lower.intrinsic_width());
+
+    // Lowercase transform path — exercises the std::tolower branch in
+    // intrinsic_width() so estimator and shaper agree on the post-
+    // transform character count.
+    Label lc("ZOOMABLE Filter Bank");
+    lc.set_text_transform(Label::TextTransform::lowercase);
+    REQUIRE(lc.intrinsic_width() > 0);
+
+    // Capitalize transform path — exercises the per-word leading-cap
+    // loop. Same character count as the source string, so width is at
+    // least as wide as the all-lowercase variant.
+    Label cap("zoomable filter bank");
+    cap.set_text_transform(Label::TextTransform::capitalize);
+    REQUIRE(cap.intrinsic_width() > 0);
+    REQUIRE(cap.intrinsic_width() >= lower.intrinsic_width());
+
+    // Letter-spacing branch — adds extra advance per glyph break that
+    // HarfBuzz / the estimator don't include natively.
+    Label spaced("ZOOMABLE FILTER BANK");
+    spaced.set_letter_spacing(2.0f);
+    Label tight("ZOOMABLE FILTER BANK");
+    REQUIRE(spaced.intrinsic_width() > tight.intrinsic_width());
+}
+
+TEST_CASE("Label intrinsic_width yields zero for multi-line", "[view][widget][issue-928]") {
+    // Multi-line labels defer to the parent's available width for
+    // wrapping; reporting a single-line natural width here would force
+    // a flex-row container to grow when the user explicitly opted into
+    // wrapping.
+    Label ml("ZOOMABLE FILTER BANK\nWITH SUBTITLE");
+    ml.set_multi_line(true);
+    REQUIRE(ml.intrinsic_width() == 0);
+}
+
 TEST_CASE("Knob value clamping", "[view][widget]") {
     Knob knob;
     knob.set_value(0.5f);

@@ -70,6 +70,15 @@ public:
 
     void paint(canvas::Canvas& canvas) override;
 
+    /// Intrinsic width — measured text width (issue-928).
+    /// Uses TextShaper (HarfBuzz/SkParagraph) when available, otherwise
+    /// falls back to the same character-width estimate the base Canvas
+    /// uses. This lets Yoga reserve enough horizontal space for the full
+    /// label content instead of clipping to a parent-inherited width.
+    /// Applies the same text-transform as paint() so measurement matches
+    /// what is actually drawn.
+    float intrinsic_width() const override;
+
     /// Intrinsic height based on font size and line height.
     float intrinsic_height() const override {
         return line_height_ > 0 ? line_height_ : font_size_ * 1.4f;
