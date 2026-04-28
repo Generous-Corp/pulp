@@ -9,6 +9,10 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
 <a id="v0570"></a>
+## [0.58.0]
+
+## [0.24.0]
+
 ## [0.57.0] - 2026-04-28
 
 - fix(view): canvas widget transparent by default + real clearRect (#929) ([#934](https://github.com/danielraffel/pulp/pull/934))

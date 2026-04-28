@@ -169,6 +169,13 @@
         "tools/deps/manifest.json"
       ]
     },
+    "prototype-loop": {
+      "paths": [
+        "tools/cli/cmd_loop.cpp",
+        "docs/guides/focus-mode.md",
+        ".claude/commands/prototype-loop.md"
+      ]
+    },
     "sdf-text": {
       "paths": [
         "core/canvas/src/*sdf*",

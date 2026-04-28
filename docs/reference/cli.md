@@ -943,6 +943,44 @@ Flags:
 
 `pulp dev` runs the same active-project compatibility preflight as `pulp build`. If the project pins an SDK or `cli_min_version` newer than the installed CLI, the command stops before SDK resolution/build and points at `pulp upgrade`.
 
+### loop
+
+**Status**: experimental
+
+Leveraged-prototype focus mode (issue [#940](https://github.com/danielraffel/pulp/issues/940)). `pulp loop` is the explicit "I'm in single-platform iteration mode" switch. It records the focus platform in `~/.pulp/config.toml` under `[loop]` so the user can leave the mode and return to cross-platform iteration deliberately, and drives the same watch + rebuild + screencap loop as `pulp dev` — but pinned to one platform's toolchain so the slow cross-platform configure paths (Skia/Dawn/threejs FetchContent) can be skipped when other platforms add unrelated cost.
+
+```bash
+pulp loop                           # Enter focus mode on the auto-detected host
+pulp loop --platform=macos          # Pin to macOS explicitly
+pulp loop --platform=linux --test   # Pin + run tests on every save
+pulp loop --status                  # Print the current focus state
+pulp loop --off                     # Restore cross-platform mode
+pulp loop --watch-issues 924,927    # (Slice 3, deferred — issue #947)
+pulp loop --ar-swap-from feat/x     # (Slice 2, deferred — issue #946)
+```
+
+Flags:
+
+| Flag | Description |
+|------|-------------|
+| `--platform=<macos\|linux\|windows>` | Override the auto-detected host platform |
+| `--off` | Restore cross-platform mode by clearing the focus marker |
+| `--status` | Print the current focus state and exit |
+| `--no-watch` | Persist focus state and exit without entering the watch loop |
+| `--watch-issues N1,N2,...` | (Slice 3, deferred — [#947](https://github.com/danielraffel/pulp/issues/947)) Poll `gh pr list` for state flips |
+| `--ar-swap-from <ref>` | (Slice 2, deferred — [#946](https://github.com/danielraffel/pulp/issues/946)) ABI-checked `.o` swap |
+| `--test`, `-t` | Run tests after each successful build |
+| `--test-filter=PATTERN` | Run only tests matching PATTERN (implies `--test`) |
+| `--validate` | Run quick plugin dlopen validation after build |
+| `--run TARGET` | Launch TARGET from build dir, relaunch on rebuild |
+| `--target T` | Pass `--target T` to `cmake --build` |
+| `--allow-unsupported-sdk` | Bypass the CLI-vs-project SDK compatibility guard |
+| `-- args...` | Arguments passed to the launched app |
+
+The CLI persists `[loop] focus_platform = "..."` in `~/.pulp/config.toml`. Run `pulp loop --off` (or pair with `shipyard pr` / `pulp pr`) before landing the consumer-side PR — the ship path validates cross-platform regardless, but exiting focus mode explicitly keeps subsequent local iteration honest.
+
+See [docs/guides/focus-mode.md](../guides/focus-mode.md) for the full playbook (when to use, when not to, and how to file framework issues from a focus-mode session).
+
 ### scan
 
 **Status**: usable
