@@ -1446,7 +1446,7 @@ TEST_CASE("WidgetBridge canvasMeasureText returns full TextMetrics object",
 
 TEST_CASE("WidgetBridge canvasSetLineDash records pattern + phase, "
           "and an odd-length pattern is duplicated per HTML5 spec",
-          "[view][bridge][canvas][issue-916]") {
+          "[view][bridge][canvas][issue-916][issue-952]") {
     ScriptEngine engine;
     View root;
     root.set_bounds({0, 0, 400, 300});
@@ -1486,6 +1486,63 @@ TEST_CASE("WidgetBridge canvasSetLineDash records pattern + phase, "
         ++idx;
     }
     REQUIRE(dashIndex >= 0);
+}
+
+// Spectr's bundle calls setLineDash with [4,4], [2,3], [2,2], [1,3] for the
+// 0dB baseline, ruler grid, and meter markers, plus an empty array to reset
+// to a solid stroke. Each call must produce a `set_line_dash` command whose
+// `floats` payload equals the requested pattern verbatim — even-length
+// arrays are not duplicated, and the empty pattern records a zero-length
+// `floats` (HTML5 "solid line" reset).
+TEST_CASE("WidgetBridge canvasSetLineDash carries spectr-style patterns "
+          "and solid-line reset through to the recording stream",
+          "[view][bridge][canvas][issue-952]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        var c = document.createElement('canvas');
+        c.id = 'spectr-dash';
+        c.width = 400; c.height = 200;
+        document.body.appendChild(c);
+        var ctx = c.getContext('2d');
+        ctx.setLineDash([4, 4]);   // 0dB baseline
+        ctx.strokeRect(0, 100, 400, 0);
+        ctx.setLineDash([2, 3]);   // ruler grid
+        ctx.strokeRect(0, 0, 400, 0);
+        ctx.setLineDash([2, 2]);   // meter markers
+        ctx.strokeRect(0, 50, 400, 0);
+        ctx.setLineDash([1, 3]);   // band-grid dashes
+        ctx.strokeRect(0, 150, 400, 0);
+        ctx.setLineDash([]);       // solid-line reset
+        ctx.strokeRect(0, 175, 400, 0);
+    )");
+    root.layout_children();
+
+    auto* canvas = canvasFromBridge(bridge, engine, "spectr-dash");
+    REQUIRE(canvas != nullptr);
+
+    pulp::canvas::RecordingCanvas rec;
+    canvas->paint(rec);
+
+    // Collect every set_line_dash command, in order.
+    std::vector<std::vector<float>> dashes;
+    for (auto& cmd : rec.commands()) {
+        if (cmd.type == pulp::canvas::DrawCommand::Type::set_line_dash) {
+            dashes.emplace_back(cmd.floats.begin(), cmd.floats.end());
+        }
+    }
+
+    REQUIRE(dashes.size() == 5);
+    REQUIRE(dashes[0] == std::vector<float>{4.0f, 4.0f});
+    REQUIRE(dashes[1] == std::vector<float>{2.0f, 3.0f});
+    REQUIRE(dashes[2] == std::vector<float>{2.0f, 2.0f});
+    REQUIRE(dashes[3] == std::vector<float>{1.0f, 3.0f});
+    REQUIRE(dashes[4].empty()); // solid-line pass-through
 }
 
 TEST_CASE("WidgetBridge canvasDrawImage records draw_image with src + dst rect",
