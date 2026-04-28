@@ -8,9 +8,13 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
-<a id="v0510"></a>
-## [0.52.0]
+<a id="v0520"></a>
+## [0.52.0] - 2026-04-28
 
+- feat(canvas2d): close API gaps — measureText, drawImage, setLineDash, getImageData, putImageData ([#920](https://github.com/danielraffel/pulp/pull/920))
+- feat(cli): plumb --headless / --screenshot / --frames / --watch on `pulp run` (#914) ([#917](https://github.com/danielraffel/pulp/pull/917))
+
+<a id="v0510"></a>
 ## [0.51.0] - 2026-04-28
 
 - feat(view): register web-API globals natively (#915) ([#918](https://github.com/danielraffel/pulp/pull/918))
@@ -26,12 +30,6 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - fix(cmake): install binary-data encoder alongside PulpUtils.cmake (Codex P1 on #905) ([#908](https://github.com/danielraffel/pulp/pull/908))
 
 <a id="v0490"></a>
-## [0.51.0]
-
-## [0.22.0]
-
-## [0.50.0]
-
 ## [0.49.0] - 2026-04-27
 
 - fix(canvas): compose canvasSetTransform onto parent View transform (Codex P1 on #897) ([#906](https://github.com/danielraffel/pulp/pull/906))
@@ -773,6 +771,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.52.0]: https://github.com/danielraffel/pulp/releases/tag/v0.52.0
 [0.51.0]: https://github.com/danielraffel/pulp/releases/tag/v0.51.0
 [0.50.0]: https://github.com/danielraffel/pulp/releases/tag/v0.50.0
 [0.49.0]: https://github.com/danielraffel/pulp/releases/tag/v0.49.0
