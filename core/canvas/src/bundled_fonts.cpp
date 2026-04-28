@@ -101,10 +101,21 @@ ensure_registered(SkFontMgr* mgr) {
 
 sk_sp<SkTypeface> match_bundled_typeface(SkFontMgr* mgr,
                                          const std::string& family,
-                                         SkFontStyle /*style*/) {
+                                         SkFontStyle style) {
     const auto& cache = ensure_registered(mgr);
     auto it = cache.find(family);
     if (it == cache.end()) return nullptr;
+
+    // The bundle currently ships only Regular/Upright faces. If the caller
+    // wants something else (bold, italic, …) we MUST return nullptr so the
+    // skia_canvas typeface lookup keeps walking and lets
+    // SkFontMgr::matchFamilyStyle pick a system-installed bold/italic
+    // variant — otherwise #932 silently regresses #927's weight/slant
+    // honouring (Codex P2 on PR #956).
+    SkFontStyle have = it->second->fontStyle();
+    if (have.weight() != style.weight() || have.slant() != style.slant()) {
+        return nullptr;
+    }
     return it->second;
 }
 

@@ -587,6 +587,27 @@ TEST_CASE("Bundled fonts resolve via SkFontMgr::makeFromData (#932)",
                                                      "ThisFamilyDoesNotExist",
                                                      upright_normal);
     REQUIRE(miss == nullptr);
+
+    // Style-aware miss (Codex P2 on PR #956): the bundle currently ships
+    // only Regular/Upright Inter, but the system font catalogue does have
+    // a real Inter Bold and Italic. If a caller asks for Inter at
+    // weight=Bold, returning the bundled Regular face would mask the
+    // system Bold and silently regress #927's weight/slant honouring.
+    // match_bundled_typeface MUST return nullptr in that case so the
+    // skia_canvas lookup keeps walking to matchFamilyStyle().
+    SkFontStyle bold_normal{SkFontStyle::kBold_Weight,
+                            SkFontStyle::kNormal_Width,
+                            SkFontStyle::kUpright_Slant};
+    auto bold_miss = pulp::canvas::match_bundled_typeface(mgr.get(), "Inter",
+                                                           bold_normal);
+    REQUIRE(bold_miss == nullptr);
+
+    SkFontStyle italic{SkFontStyle::kNormal_Weight,
+                       SkFontStyle::kNormal_Width,
+                       SkFontStyle::kItalic_Slant};
+    auto italic_miss = pulp::canvas::match_bundled_typeface(mgr.get(), "Inter",
+                                                             italic);
+    REQUIRE(italic_miss == nullptr);
 }
 
 TEST_CASE("match_bundled_typeface is null-safe when no font mgr is available "
