@@ -85,6 +85,17 @@ if ! [[ "${THRESHOLD}" =~ ^[0-9]+$ ]]; then
     exit 1
 fi
 
+# Per-file exclusions from the same source-of-truth (kept in lockstep
+# with .github/workflows/coverage.yml). Read into an array of
+# `--exclude=PATH` flags so the diff-cover invocation below can splat
+# them with no escaping surprises.
+DIFF_COVER_EXCLUDE_ARGS=()
+if command -v jq >/dev/null 2>&1; then
+    while IFS= read -r excl; do
+        [ -n "${excl}" ] && DIFF_COVER_EXCLUDE_ARGS+=("--exclude=${excl}")
+    done < <(jq -r '.diff_cover_excludes // [] | .[]' "${CONFIG_JSON}")
+fi
+
 # ── Dependency preflight ────────────────────────────────────────────────────
 missing=()
 for tool in clang llvm-profdata llvm-cov cmake ctest python3 git; do
@@ -236,12 +247,17 @@ python3 "${LCOV_COBERTURA}" "${LCOV_FILE}" \
     --base-dir "${REPO_ROOT}"
 
 # ── Run diff-cover ──────────────────────────────────────────────────────────
-echo "=== diff-cover (--compare-branch=${COMPARE_BRANCH} --fail-under=${THRESHOLD}) ==="
+if [ ${#DIFF_COVER_EXCLUDE_ARGS[@]} -gt 0 ]; then
+    echo "=== diff-cover (--compare-branch=${COMPARE_BRANCH} --fail-under=${THRESHOLD} excludes=${#DIFF_COVER_EXCLUDE_ARGS[@]}) ==="
+else
+    echo "=== diff-cover (--compare-branch=${COMPARE_BRANCH} --fail-under=${THRESHOLD}) ==="
+fi
 set +e
 python3 -m diff_cover.diff_cover_tool \
     "${COBERTURA_XML}" \
     --compare-branch="${COMPARE_BRANCH}" \
     --fail-under="${THRESHOLD}" \
+    "${DIFF_COVER_EXCLUDE_ARGS[@]}" \
     --html-report="${HTML_REPORT}"
 rc=$?
 set -e

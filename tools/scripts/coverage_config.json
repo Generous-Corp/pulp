@@ -13,5 +13,8 @@
     "examples/**",
     "experimental/**"
   ],
-  "_comment": "Single source of truth consumed by .github/workflows/coverage.yml AND tools/scripts/local_diff_cover.sh. To change the threshold or surface set, edit here once."
+  "diff_cover_excludes": [
+    "tools/cli/cmd_coverage.cpp"
+  ],
+  "_comment": "Single source of truth consumed by .github/workflows/coverage.yml AND tools/scripts/local_diff_cover.sh. To change the threshold, surface set, or per-file exclusions, edit here once. `diff_cover_excludes` is the line-coverage-exclude list passed to `diff-cover --exclude=...` — use sparingly for thin dispatchers / generated code that is exercised end-to-end via shell-out tests but doesn't propagate llvm-cov instrumentation."
 }

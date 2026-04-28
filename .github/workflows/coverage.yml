@@ -746,11 +746,19 @@ jobs:
             echo "::error::Invalid diff_coverage_fail_under in tools/scripts/coverage_config.json: '${THRESHOLD}'"
             exit 1
           fi
-          echo "Diff-cover threshold from coverage_config.json: ${THRESHOLD}%"
+          # Per-file exclusions from the same source-of-truth: thin
+          # dispatchers / generated code that is exercised end-to-end via
+          # shell-out tests but doesn't propagate llvm-cov line data.
+          # Empty array → no --exclude flags emitted.
+          mapfile -t EXCLUDES < <(jq -r '.diff_cover_excludes // [] | .[]' tools/scripts/coverage_config.json)
+          EXCLUDE_ARGS=()
+          for e in "${EXCLUDES[@]}"; do EXCLUDE_ARGS+=("--exclude=$e"); done
+          echo "Diff-cover threshold from coverage_config.json: ${THRESHOLD}% (excludes: ${EXCLUDES[*]:-none})"
           python3 -m diff_cover.diff_cover_tool \
               "$xml" \
               --compare-branch="origin/${{ github.base_ref }}" \
               --fail-under="${THRESHOLD}" \
+              "${EXCLUDE_ARGS[@]}" \
               --markdown-report=coverage-diff.md
           rc=$?
           echo "exit_code=$rc" >> "$GITHUB_OUTPUT"

@@ -6,15 +6,14 @@
 // threshold + filters from tools/scripts/coverage_config.json, which
 // is also the source the CI workflow reads — single source of truth.
 //
-// Coverage exclusion: the actual diff-coverage logic lives in
-// tools/scripts/local_diff_cover.sh (covered by
-// tools/scripts/test_local_diff_cover.py) — this dispatcher is only
-// usage-banner + arg routing + exec, exercised end-to-end by the
-// `cli-coverage-help` and `cli-coverage-bogus-subcommand` ctest
-// shell-out tests. Mark LCOV_EXCL to keep the dispatcher out of
-// diff-coverage line accounting.
+// The actual diff-coverage logic lives in
+// tools/scripts/local_diff_cover.sh (covered end-to-end by
+// tools/scripts/test_local_diff_cover.py); this file is dispatcher-only
+// and is excluded from diff-coverage accounting via the
+// `diff_cover_excludes` array in coverage_config.json. The
+// `cli-coverage-help` + `cli-coverage-bogus-subcommand` ctest shell-out
+// tests still exercise the dispatch paths end-to-end.
 
-// LCOV_EXCL_START
 #include "cli_common.hpp"
 
 #include <iostream>
@@ -69,4 +68,3 @@ int cmd_coverage(const std::vector<std::string>& args) {
     print_coverage_usage();
     return 1;
 }
-// LCOV_EXCL_STOP
