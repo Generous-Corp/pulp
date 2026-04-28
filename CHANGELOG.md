@@ -8,14 +8,19 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v0560"></a>
+## [0.56.0] - 2026-04-28
+
+- feat(view): setBoxShadow JS bridge + draw_box_shadow Canvas primitive (#925) ([#936](https://github.com/danielraffel/pulp/pull/936))
+- feat(canvas): setBackdropFilter for frosted-glass overlays (#926) ([#937](https://github.com/danielraffel/pulp/pull/937))
+- fix(view): Label auto-grows to fit text content (#928) ([#935](https://github.com/danielraffel/pulp/pull/935))
+
 <a id="v0550"></a>
 ## [0.55.0] - 2026-04-28
 
 - feat(view): Label honors setFontFamily / setFontWeight / setLetterSpacing (#927) ([#938](https://github.com/danielraffel/pulp/pull/938))
 
 <a id="v0540"></a>
-## [0.55.0]
-
 ## [0.54.0] - 2026-04-28
 
 - feat(view): setTransform(id, a, b, c, d, e, f) on View — full 2D affine matrix (#930) ([#933](https://github.com/danielraffel/pulp/pull/933))
@@ -795,6 +800,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.56.0]: https://github.com/danielraffel/pulp/releases/tag/v0.56.0
 [0.55.0]: https://github.com/danielraffel/pulp/releases/tag/v0.55.0
 [0.54.0]: https://github.com/danielraffel/pulp/releases/tag/v0.54.0
 [0.53.0]: https://github.com/danielraffel/pulp/releases/tag/v0.53.0

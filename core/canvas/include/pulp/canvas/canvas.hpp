@@ -606,6 +606,22 @@ public:
         save();
     }
 
+    // ── Box shadow (issue-925) ─────────────────────────────────────────
+    /// Draw a CSS-style box shadow around (or inside, when inset) a
+    /// rounded rectangle anchored at (x, y, w, h). When `inset` is false
+    /// this is a drop shadow rendered outside the box; when true it is an
+    /// inner shadow rendered inside the box clipped to the box geometry.
+    /// Default implementation is a CPU fallback that approximates the
+    /// blur with stacked translucent rounded rects — Skia overrides with
+    /// SkImageFilters::DropShadowOnly for a true Gaussian shadow. The
+    /// out-of-line definition lives in core/canvas/src/recording_canvas.cpp
+    /// so the CPU fallback is exercised by the canvas-level tests during
+    /// coverage runs.
+    virtual void draw_box_shadow(float x, float y, float w, float h,
+                                 float dx, float dy, float blur, float spread,
+                                 Color color, bool inset = false,
+                                 float corner_radius = 0.0f);
+
     // ── Waveform (GPU-accelerated) ─────────────────────────────────────
     /// Draw a waveform using GPU shader (SDF anti-aliased line + fill).
     /// Samples are normalized -1 to 1. Default implementation falls back to polyline.
@@ -773,6 +789,13 @@ public:
                       int dx, int dy) override;
     void save_backdrop_filter(float x, float y, float w, float h,
                               float blur_radius) override;
+
+    // issue-925 — capture a single box-shadow command so JS-driven tests
+    // can assert on inset / color / offsets without having to walk the
+    // CPU-fallback rectangle stack.
+    void draw_box_shadow(float x, float y, float w, float h,
+                         float dx, float dy, float blur, float spread,
+                         Color color, bool inset, float corner_radius) override;
 
 private:
     std::vector<DrawCommand> commands_;

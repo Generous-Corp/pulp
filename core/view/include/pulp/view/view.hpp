@@ -257,18 +257,23 @@ public:
     void set_corner_radius_bl(float r) { corner_radii_[2] = r; has_corner_radii_ = true; }
     void set_corner_radius_br(float r) { corner_radii_[3] = r; has_corner_radii_ = true; }
 
-    /// Box shadow (CSS-like: offset, blur, spread, color)
+    /// Box shadow (CSS-like: offset, blur, spread, color, inset).
+    /// When `inset` is true, the shadow is drawn inside the box bounds (CSS
+    /// `inset` keyword); otherwise a drop shadow extends outside the bounds.
     struct BoxShadow {
         float offset_x = 0, offset_y = 2;
         float blur = 4;
         float spread = 0;
         Color color{0, 0, 0, 80};
+        bool inset = false;
     };
-    void set_box_shadow(float ox, float oy, float blur, float spread, Color c) {
-        shadow_ = {ox, oy, blur, spread, c}; has_shadow_ = true;
+    void set_box_shadow(float ox, float oy, float blur, float spread, Color c,
+                        bool inset = false) {
+        shadow_ = {ox, oy, blur, spread, c, inset}; has_shadow_ = true;
     }
     void clear_box_shadow() { has_shadow_ = false; }
     bool has_box_shadow() const { return has_shadow_; }
+    const BoxShadow& box_shadow() const { return shadow_; }
 
     /// Generic click callback (fires on mouse-down, if set).
     std::function<void()> on_click;

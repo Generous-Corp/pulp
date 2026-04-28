@@ -328,14 +328,27 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
             setZIndex(id, parseInt(resolved) || 0);
             break;
 
-        // Box shadow: "2px 4px 8px rgba(0,0,0,0.3)"
+        // Box shadow: "2px 4px 8px rgba(0,0,0,0.3)" or "inset 2px 4px 8px ..." (issue-925)
         case "boxShadow": {
-            if (resolved === "none") { /* clear shadow */ break; }
-            var sm = resolved.match(/(-?[\d.]+)px\s+(-?[\d.]+)px\s+([\d.]+)px(?:\s+([\d.]+)px)?\s+(.*)/);
+            if (resolved === "none" || resolved === "" || resolved == null) {
+                if (typeof clearBoxShadow === "function") clearBoxShadow(id);
+                break;
+            }
+            var work = String(resolved).trim();
+            var inset = false;
+            if (/^inset\s+/i.test(work)) {
+                inset = true;
+                work = work.replace(/^inset\s+/i, "");
+            } else if (/\s+inset\s*$/i.test(work)) {
+                inset = true;
+                work = work.replace(/\s+inset\s*$/i, "");
+            }
+            var sm = work.match(/(-?[\d.]+)px\s+(-?[\d.]+)px\s+([\d.]+)px(?:\s+(-?[\d.]+)px)?\s+(.*)/);
             if (sm) {
                 var sc = parseCSSColor(sm[5].trim());
                 setBoxShadow(id, parseFloat(sm[1]), parseFloat(sm[2]),
-                            parseFloat(sm[3]), parseFloat(sm[4] || 0), sc || sm[5].trim());
+                            parseFloat(sm[3]), parseFloat(sm[4] || 0),
+                            sc || sm[5].trim(), inset);
             }
             break;
         }

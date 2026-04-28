@@ -1746,3 +1746,151 @@ TEST_CASE("Canvas::save_backdrop_filter base default falls back to save()",
     canvas.restore();
     REQUIRE(canvas.count(DrawCommand::Type::restore) == 1);
 }
+
+// ── issue-925: setBoxShadow / clearBoxShadow JS bridge ─────────────────────
+TEST_CASE("WidgetBridge setBoxShadow stores offsets/blur/spread/color on widget",
+          "[view][bridge][issue-925]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script("createKnob('gain', 10, 10, 48, 48)");
+    bridge.load_script("setBoxShadow('gain', 0, 14, 40, 0, '#000000a0')");
+
+    auto* w = bridge.widget("gain");
+    REQUIRE(w != nullptr);
+    REQUIRE(w->has_box_shadow());
+    const auto& s = w->box_shadow();
+    REQUIRE_THAT(s.offset_x, WithinAbs(0.0f, 0.001f));
+    REQUIRE_THAT(s.offset_y, WithinAbs(14.0f, 0.001f));
+    REQUIRE_THAT(s.blur, WithinAbs(40.0f, 0.001f));
+    REQUIRE_THAT(s.spread, WithinAbs(0.0f, 0.001f));
+    REQUIRE_THAT(s.color.a, WithinAbs(160.0f / 255.0f, 0.01f));
+    REQUIRE(s.inset == false);
+}
+
+TEST_CASE("WidgetBridge setBoxShadow accepts inset flag (true / 'inset' / 1)",
+          "[view][bridge][issue-925]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script("createKnob('a', 0, 0, 32, 32)");
+    bridge.load_script("createKnob('b', 0, 0, 32, 32)");
+    bridge.load_script("createKnob('c', 0, 0, 32, 32)");
+    bridge.load_script("createKnob('d', 0, 0, 32, 32)");
+
+    bridge.load_script("setBoxShadow('a', 1, 2, 3, 4, '#112233ff', true)");
+    bridge.load_script("setBoxShadow('b', 1, 2, 3, 4, '#112233ff', 'inset')");
+    bridge.load_script("setBoxShadow('c', 1, 2, 3, 4, '#112233ff', 1)");
+    bridge.load_script("setBoxShadow('d', 1, 2, 3, 4, '#112233ff', false)");
+
+    REQUIRE(bridge.widget("a")->box_shadow().inset == true);
+    REQUIRE(bridge.widget("b")->box_shadow().inset == true);
+    REQUIRE(bridge.widget("c")->box_shadow().inset == true);
+    REQUIRE(bridge.widget("d")->box_shadow().inset == false);
+}
+
+TEST_CASE("WidgetBridge clearBoxShadow removes the shadow",
+          "[view][bridge][issue-925]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script("createKnob('panel', 0, 0, 32, 32)");
+    bridge.load_script("setBoxShadow('panel', 0, 14, 40, 0, '#00000099')");
+    REQUIRE(bridge.widget("panel")->has_box_shadow());
+
+    bridge.load_script("clearBoxShadow('panel')");
+    REQUIRE(bridge.widget("panel")->has_box_shadow() == false);
+}
+
+TEST_CASE("View::paint_all dispatches outset shadow before clip, "
+          "inset shadow after children",
+          "[view][canvas][issue-925]") {
+    using namespace pulp::canvas;
+
+    SECTION("outset shadow paints before clip_rect") {
+        View v;
+        v.set_bounds({0, 0, 100, 50});
+        v.set_box_shadow(0, 14, 40, 0, Color::rgba8(0, 0, 0, 160), /*inset=*/false);
+
+        RecordingCanvas rc;
+        v.paint_all(rc);
+
+        const auto& cmds = rc.commands();
+        // Find the box-shadow command and the clip_rect command — outset
+        // shadow must come first so the shadow's blur halo can extend
+        // beyond the box bounds.
+        size_t shadow_idx = SIZE_MAX, clip_idx = SIZE_MAX;
+        for (size_t i = 0; i < cmds.size(); ++i) {
+            if (cmds[i].type == DrawCommand::Type::draw_box_shadow && shadow_idx == SIZE_MAX)
+                shadow_idx = i;
+            if (cmds[i].type == DrawCommand::Type::clip_rect && clip_idx == SIZE_MAX)
+                clip_idx = i;
+        }
+        REQUIRE(shadow_idx != SIZE_MAX);
+        REQUIRE(clip_idx != SIZE_MAX);
+        REQUIRE(shadow_idx < clip_idx);
+
+        // Inset flag captured as 0
+        REQUIRE_THAT(cmds[shadow_idx].f[4], WithinAbs(0.0f, 0.001f));
+    }
+
+    SECTION("inset shadow paints inside the bounds clip") {
+        View v;
+        v.set_bounds({0, 0, 100, 50});
+        v.set_box_shadow(0, 4, 10, 0, Color::rgba8(0, 0, 0, 80), /*inset=*/true);
+
+        RecordingCanvas rc;
+        v.paint_all(rc);
+
+        const auto& cmds = rc.commands();
+        size_t shadow_idx = SIZE_MAX, clip_idx = SIZE_MAX;
+        for (size_t i = 0; i < cmds.size(); ++i) {
+            if (cmds[i].type == DrawCommand::Type::draw_box_shadow && shadow_idx == SIZE_MAX)
+                shadow_idx = i;
+            if (cmds[i].type == DrawCommand::Type::clip_rect && clip_idx == SIZE_MAX)
+                clip_idx = i;
+        }
+        REQUIRE(shadow_idx != SIZE_MAX);
+        REQUIRE(clip_idx != SIZE_MAX);
+        // Inset shadow paints AFTER the clip (inside the box silhouette).
+        REQUIRE(clip_idx < shadow_idx);
+
+        // Inset flag captured as 1
+        REQUIRE_THAT(cmds[shadow_idx].f[4], WithinAbs(1.0f, 0.001f));
+        // dx/dy/blur/spread captured in the floats payload.
+        REQUIRE(cmds[shadow_idx].floats.size() == 4);
+        REQUIRE_THAT(cmds[shadow_idx].floats[0], WithinAbs(0.0f, 0.001f));
+        REQUIRE_THAT(cmds[shadow_idx].floats[1], WithinAbs(4.0f, 0.001f));
+        REQUIRE_THAT(cmds[shadow_idx].floats[2], WithinAbs(10.0f, 0.001f));
+        REQUIRE_THAT(cmds[shadow_idx].floats[3], WithinAbs(0.0f, 0.001f));
+    }
+}
+
+TEST_CASE("Canvas::draw_box_shadow CPU fallback approximates shadow as "
+          "stacked rounded rects",
+          "[canvas][issue-925]") {
+    using namespace pulp::canvas;
+
+    RecordingCanvas backing;
+
+    // Wrap in a forwarder that re-routes draw_box_shadow to the base-class
+    // CPU fallback. RecordingCanvas overrides draw_box_shadow to record a
+    // single command, so we go via Canvas::draw_box_shadow explicitly.
+    backing.Canvas::draw_box_shadow(0, 0, 100, 50,
+                                     0, 14, 40, 0,
+                                     Color::rgba8(0, 0, 0, 160),
+                                     /*inset=*/false, /*corner_radius=*/8);
+
+    // Outset CPU fallback should emit several fill_rounded_rect calls
+    // (steps = ceil(blur/2) + 1 = 21 for blur=40).
+    REQUIRE(backing.count(DrawCommand::Type::fill_rounded_rect) >= 5);
+}
