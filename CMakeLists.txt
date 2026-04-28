@@ -789,6 +789,18 @@ install(FILES
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/Pulp
 )
 
+# pulp_add_binary_data resolves its Python encoder via
+# ${CMAKE_CURRENT_FUNCTION_LIST_DIR}/scripts/encode_binary_data.py — i.e.
+# adjacent to whichever PulpUtils.cmake is sourced. That works in the
+# source tree (tools/cmake/PulpUtils.cmake → tools/cmake/scripts/…) and
+# must keep working in the installed tree (lib/cmake/Pulp/PulpUtils.cmake
+# → lib/cmake/Pulp/scripts/…). Install the encoder alongside PulpUtils.cmake
+# so find_package(Pulp) consumers can use the function (issue-905 follow-up).
+install(FILES
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/scripts/encode_binary_data.py"
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/Pulp/scripts
+)
+
 # Templates for standalone project scaffolding
 install(DIRECTORY tools/templates/
     DESTINATION templates

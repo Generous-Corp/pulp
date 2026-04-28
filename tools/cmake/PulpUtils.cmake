@@ -1076,6 +1076,15 @@ function(pulp_add_binary_data target)
 
     set(_pulp_encoder
         "${CMAKE_CURRENT_FUNCTION_LIST_DIR}/scripts/encode_binary_data.py")
+    if(NOT EXISTS "${_pulp_encoder}")
+        message(FATAL_ERROR
+            "pulp_add_binary_data: encode_binary_data.py not found at "
+            "${_pulp_encoder}.\n"
+            "If you're consuming Pulp via find_package(Pulp), the SDK install "
+            "should have placed the encoder alongside PulpUtils.cmake under "
+            "lib/cmake/Pulp/scripts/. Re-install Pulp or report a packaging "
+            "regression (issue-905).")
+    endif()
 
     set(generated_hpp "${CMAKE_CURRENT_BINARY_DIR}/${target}_data.hpp")
 

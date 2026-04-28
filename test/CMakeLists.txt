@@ -40,6 +40,20 @@ set_tests_properties(cmake-pulp-add-binary-data-encoder PROPERTIES
     LABELS "cmake;binary-data;issue-898"
     TIMEOUT 60)
 
+# Install-layout regression for issue-905 follow-up: when the SDK is
+# installed via `cmake --install`, the Python encoder MUST be bundled
+# alongside PulpUtils.cmake so find_package(Pulp) consumers can call
+# pulp_add_binary_data without seeing a missing-script error. Runs
+# `cmake --install` against this build into a temp prefix and asserts
+# both PulpUtils.cmake and scripts/encode_binary_data.py are present.
+add_test(NAME cmake-pulp-install-layout
+    COMMAND ${CMAKE_COMMAND}
+        -DPULP_BUILD_DIR=${CMAKE_BINARY_DIR}
+        -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/test_pulp_install_layout.cmake)
+set_tests_properties(cmake-pulp-install-layout PROPERTIES
+    LABELS "cmake;binary-data;issue-905"
+    TIMEOUT 120)
+
 # retry_git_clone unit test (setup.sh helper). Guards the #425 P1
 # Codex fix — a partial clone target is scrubbed between retries so
 # attempt 2+ can actually re-run the network fetch.
