@@ -845,6 +845,51 @@ commands:
         description: Arguments after `--` are forwarded to the launched binary
     docs: reference/cli.md#dev
 
+  - name: loop
+    status: experimental
+    summary: Leveraged-prototype focus mode (#940) — explicit "single-platform iteration" switch. Persists a focus_platform marker in `~/.pulp/config.toml` under [loop] so subsequent invocations stay pinned, then drives the same watch + rebuild + screencap loop as `pulp dev` without paying the cross-platform configure cost. Pair with `shipyard pr` / `pulp pr` at land time to restore full cross-platform validation.
+    args:
+      - name: --platform
+        kind: option
+        description: "Override the auto-detected host platform. One of: macos, linux, windows."
+      - name: --off
+        kind: flag
+        description: Restore cross-platform mode by clearing the focus marker
+      - name: --status
+        kind: flag
+        description: Print the current focus state and exit
+      - name: --no-watch
+        kind: flag
+        description: Persist focus state and exit without entering the watch loop (CI/test friendly)
+      - name: --watch-issues
+        kind: option
+        description: "(Slice 3, deferred — issue #947) Poll `gh pr list` for state flips on PRs referencing the named issues. Today prints a deferred hint."
+      - name: --ar-swap-from
+        kind: option
+        description: "(Slice 2, deferred — issue #946) Validate header/library ABI and swap built `.o` files from another worktree into the pinned SDK's static archive. Today prints a deferred hint."
+      - name: --test
+        kind: flag
+        description: Run tests after each successful build
+      - name: --test-filter
+        kind: option
+        description: Run only tests matching PATTERN (implies --test)
+      - name: --validate
+        kind: flag
+        description: Run quick plugin dlopen validation after build
+      - name: --run
+        kind: option
+        description: Launch a build-dir binary and relaunch it on rebuild
+      - name: --target
+        kind: option
+        description: Pass --target to cmake --build
+      - name: --allow-unsupported-sdk
+        kind: flag
+        description: Bypass the CLI-vs-project SDK compatibility guard and continue anyway (unsupported)
+      - name: passthrough
+        kind: passthrough
+        description: Arguments after `--` are forwarded to the launched binary
+    docs: reference/cli.md#loop
+
   - name: scan
     status: usable
     summary: Walk the OS plug-in paths and print every VST3 / AU / AUv3 / CLAP / LV2 plug-in found. Mirrors pulp::host::PluginScanner.

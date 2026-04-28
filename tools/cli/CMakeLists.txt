@@ -57,6 +57,7 @@ add_executable(pulp-cli
     cmd_audio.cpp
     cmd_version.cpp
     cmd_dev.cpp
+    cmd_loop.cpp
     cmd_host.cpp
     cmd_pr.cpp
     cmd_inspect.cpp
@@ -259,6 +260,15 @@ if(PULP_BUILD_TESTS)
         WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
     set_tests_properties(cli-no-new-alias PROPERTIES
         PASS_REGULAR_EXPRESSION "Unknown command")
+
+    # Issue #940 Slice 1: `pulp loop --help` always renders the focus-mode
+    # help banner and exits 0. Behaviour-level tests for --status / --off
+    # / --platform live in test/test_cli_shellout.cpp under [issue-940].
+    add_test(NAME cli-loop-help
+        COMMAND pulp-cli loop --help
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+    set_tests_properties(cli-loop-help PROPERTIES
+        PASS_REGULAR_EXPRESSION "leveraged-prototype focus mode")
 
     # Issue #552 Slice 1b: `pulp projects` help path should always
     # print a usage banner listing list/add/remove. The test uses a

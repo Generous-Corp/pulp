@@ -722,6 +722,7 @@ Alphabetical. One line of purpose per skill. Each directory at `.agents/skills/<
 | `jsfx-subset` | Bounded JSFX subset — source-only examples, explicit exclusions (no `@gfx`), subset validation |
 | `mpe` | Build MPE-aware synths: descriptor opt-in, `MpeBuffer` consumption, `MpeVoiceAllocator` routing |
 | `packages` | Third-party audio package search, suggest, add, browse |
+| `prototype-loop` | Leveraged-prototype dev loop (`pulp loop`): single-platform watch + rebuild, AOT analyzer, ar-swap, PR-state monitor |
 | `sdf-text` | SDF / MSDF / PSDF glyph atlases: building, sampling via SkSL, shared text-layout helpers |
 | `ship` | Sign / notarize / package / distribute Pulp plugins and apps across macOS / Windows / Android |
 | `streams` | `pulp::runtime::AsyncStream` selection, async-callback wiring without deadlock, backpressure |
@@ -731,7 +732,7 @@ Alphabetical. One line of purpose per skill. Each directory at `.agents/skills/<
 | `vst3` | VST3 adapter: SingleComponentEffect, bus arrangement, param/MIDI routing, state, Steinberg SDK traps |
 | `webview-ui` | WebView UI: native bridge, embedded assets, directory-backed dev resources, WebView validation |
 
-24 skills as of 2026-04-22. When adding a new skill, append its row here and register the subsystem in `tools/scripts/skill_path_map.json`.
+25 skills as of 2026-04-27. When adding a new skill, append its row here and register the subsystem in `tools/scripts/skill_path_map.json`.
 
 ### Claude Code Plugin
 
