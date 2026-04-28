@@ -58,6 +58,7 @@ static const Command commands[] = {
     // it guards) completely unreachable. Restore so Codex's P1/P2
     // findings on cmd_config.cpp are actually observable behaviour.
     {"config",   "Read or write ~/.pulp/config.toml settings", cmd_config},
+    {"coverage", "Local coverage tooling (diff-cover gate mirror)", cmd_coverage},
 };
 
 static constexpr int command_count = sizeof(commands) / sizeof(commands[0]);

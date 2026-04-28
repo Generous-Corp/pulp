@@ -42,6 +42,7 @@ add_executable(pulp-cli
     cli_common.cpp
     cmd_build.cpp
     cmd_config.cpp
+    cmd_coverage.cpp
     cmd_create.cpp
     cmd_design.cpp
     cmd_doctor.cpp
