@@ -1188,6 +1188,11 @@ endif()
 # Canvas tests
 add_executable(pulp-test-canvas test_canvas.cpp)
 target_link_libraries(pulp-test-canvas PRIVATE pulp::canvas Catch2::Catch2WithMain)
+if(APPLE)
+    # CoreGraphicsCanvas tests (#929) build a CGBitmapContext directly to
+    # verify CGContextClearRect actually clears destination pixels.
+    target_link_libraries(pulp-test-canvas PRIVATE "-framework CoreGraphics")
+endif()
 catch_discover_tests(pulp-test-canvas)
 
 # SDF glyph atlas exploration (#76)

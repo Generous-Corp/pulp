@@ -15,6 +15,11 @@
 #include "include/core/SkSurface.h"
 #endif
 
+#ifdef __APPLE__
+#include <pulp/canvas/cg_canvas.hpp>
+#include <CoreGraphics/CoreGraphics.h>
+#endif
+
 using namespace pulp::canvas;
 
 TEST_CASE("RecordingCanvas captures commands", "[canvas]") {
@@ -447,3 +452,116 @@ TEST_CASE("SkiaCanvas::set_line_dash applies an SkDashPathEffect on stroke",
     REQUIRE(light > 8);
 }
 #endif
+
+// ── pulp #929 — Canvas::clear_rect default + CoreGraphics override ──────────
+
+namespace {
+
+// Minimal Canvas subclass that records every fill_rect / set_fill_color call
+// so we can assert the documented Canvas::clear_rect default behaviour
+// (delegates to set_fill_color(transparent) + fill_rect) without coupling to
+// any real GPU/CPU backend.
+class StubCanvas : public Canvas {
+public:
+    struct FillRectCall { float x, y, w, h; Color color; };
+    std::vector<FillRectCall> fills;
+    Color current_color = Color::rgba(1.0f, 1.0f, 1.0f, 1.0f);
+
+    void save() override {}
+    void restore() override {}
+    void translate(float, float) override {}
+    void scale(float, float) override {}
+    void rotate(float) override {}
+    void clip_rect(float, float, float, float) override {}
+    void set_fill_color(Color c) override { current_color = c; }
+    void set_stroke_color(Color) override {}
+    void set_line_width(float) override {}
+    void set_line_cap(LineCap) override {}
+    void set_line_join(LineJoin) override {}
+    void fill_rect(float x, float y, float w, float h) override {
+        fills.push_back({x, y, w, h, current_color});
+    }
+    void stroke_rect(float, float, float, float) override {}
+    void fill_rounded_rect(float, float, float, float, float) override {}
+    void stroke_rounded_rect(float, float, float, float, float) override {}
+    void fill_circle(float, float, float) override {}
+    void stroke_circle(float, float, float) override {}
+    void stroke_arc(float, float, float, float, float) override {}
+    void stroke_line(float, float, float, float) override {}
+    void set_font(const std::string&, float) override {}
+    void set_text_align(TextAlign) override {}
+    void fill_text(const std::string&, float, float) override {}
+    float measure_text(const std::string&) override { return 0.0f; }
+};
+
+}  // namespace
+
+TEST_CASE("Canvas::clear_rect default falls back to transparent fill_rect",
+          "[canvas][issue-929]") {
+    StubCanvas canvas;
+    canvas.set_fill_color(Color::rgba(1.0f, 0.0f, 0.0f, 1.0f));
+    canvas.clear_rect(5, 6, 7, 8);
+
+    REQUIRE(canvas.fills.size() == 1);
+    REQUIRE(canvas.fills[0].x == 5.0f);
+    REQUIRE(canvas.fills[0].y == 6.0f);
+    REQUIRE(canvas.fills[0].w == 7.0f);
+    REQUIRE(canvas.fills[0].h == 8.0f);
+    // Default fallback set the fill color to transparent before drawing.
+    REQUIRE(canvas.fills[0].color.a == 0.0f);
+    REQUIRE(canvas.current_color.a == 0.0f);
+}
+
+TEST_CASE("RecordingCanvas::clear_rect emits a dedicated clear_rect command",
+          "[canvas][issue-929]") {
+    RecordingCanvas rc;
+    rc.clear_rect(1, 2, 3, 4);
+
+    REQUIRE(rc.commands().size() == 1);
+    REQUIRE(rc.commands()[0].type == DrawCommand::Type::clear_rect);
+    REQUIRE(rc.commands()[0].f[0] == 1.0f);
+    REQUIRE(rc.commands()[0].f[1] == 2.0f);
+    REQUIRE(rc.commands()[0].f[2] == 3.0f);
+    REQUIRE(rc.commands()[0].f[3] == 4.0f);
+}
+
+#ifdef __APPLE__
+TEST_CASE("CoreGraphicsCanvas::clear_rect zeroes destination pixels",
+          "[canvas][cg][issue-929]") {
+    // Build a 16x16 RGBA8 CGBitmapContext, fill it with opaque red, then
+    // ask CoreGraphicsCanvas::clear_rect to clear the entire region. Read
+    // back the pixels — every byte should be zero (transparent black),
+    // proving CGContextClearRect actually replaces destination texels
+    // rather than SrcOver-ing a transparent fill.
+    constexpr int W = 16;
+    constexpr int H = 16;
+    std::vector<uint8_t> pixels(static_cast<size_t>(W) * H * 4u, 0u);
+    auto cs = CGColorSpaceCreateDeviceRGB();
+    REQUIRE(cs != nullptr);
+    const uint32_t bitmap_info =
+        static_cast<uint32_t>(kCGImageAlphaPremultipliedLast) |
+        static_cast<uint32_t>(kCGBitmapByteOrder32Big);
+    CGContextRef ctx = CGBitmapContextCreate(
+        pixels.data(), W, H, 8, W * 4u, cs, bitmap_info);
+    CGColorSpaceRelease(cs);
+    REQUIRE(ctx != nullptr);
+
+    // Pre-fill with opaque red via CG directly so the test doesn't rely on
+    // any CoreGraphicsCanvas method other than clear_rect.
+    CGContextSetRGBFillColor(ctx, 1.0f, 0.0f, 0.0f, 1.0f);
+    CGContextFillRect(ctx, CGRectMake(0, 0, W, H));
+
+    {
+        CoreGraphicsCanvas canvas(ctx, static_cast<float>(W),
+                                  static_cast<float>(H));
+        canvas.clear_rect(0, 0, W, H);
+    }
+    CGContextRelease(ctx);
+
+    // Every pixel byte must be zero after CGContextClearRect.
+    for (size_t i = 0; i < pixels.size(); ++i) {
+        INFO("Pixel byte " << i << " value=" << int(pixels[i]));
+        REQUIRE(pixels[i] == 0);
+    }
+}
+#endif  // __APPLE__
