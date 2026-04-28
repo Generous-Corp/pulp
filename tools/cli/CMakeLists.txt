@@ -187,6 +187,48 @@ if(PULP_BUILD_TESTS)
     set_tests_properties(cli-audio-help PROPERTIES
         PASS_REGULAR_EXPRESSION "pulp audio")
 
+    # Exercise the new `pulp coverage` dispatch (cmd_coverage.cpp).
+    # `pulp coverage` with no args prints the usage banner and exits 0;
+    # `pulp coverage bogus` prints the unknown-subcommand error and exits
+    # 1. Together these cover every branch in cmd_coverage's dispatch
+    # except `pulp coverage diff`, which would shell out to
+    # tools/scripts/local_diff_cover.sh — that is exercised separately by
+    # tools/scripts/test_local_diff_cover.py and (in CI) by the Coverage
+    # workflow itself, so the slow shell-out doesn't run in ctest.
+    add_test(NAME cli-coverage-help
+        COMMAND pulp-cli coverage
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+    set_tests_properties(cli-coverage-help PROPERTIES
+        PASS_REGULAR_EXPRESSION "pulp coverage")
+
+    add_test(NAME cli-coverage-help-flag
+        COMMAND pulp-cli coverage --help
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+    set_tests_properties(cli-coverage-help-flag PROPERTIES
+        PASS_REGULAR_EXPRESSION "diff \\[TARGET")
+
+    # `pulp coverage <bogus>` exits non-zero on the unknown-subcommand path.
+    # WILL_FAIL inverts the exit-code expectation — pass when the CLI exits
+    # with a non-zero code (which it does after printing the diagnostic and
+    # the usage banner).
+    add_test(NAME cli-coverage-unknown-subcommand
+        COMMAND pulp-cli coverage bogus-subcommand
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+    set_tests_properties(cli-coverage-unknown-subcommand PROPERTIES
+        WILL_FAIL TRUE)
+
+    # `pulp coverage diff` exercises the run_coverage_diff branch which
+    # shells out to tools/scripts/local_diff_cover.sh. Setting
+    # PULP_SKIP_DIFF_COVER=1 makes the script exit 0 immediately, so this
+    # test covers the dispatch + shell-out wiring without paying the
+    # configure+build cost.
+    add_test(NAME cli-coverage-diff-skip
+        COMMAND pulp-cli coverage diff
+        WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+    set_tests_properties(cli-coverage-diff-skip PROPERTIES
+        ENVIRONMENT "PULP_SKIP_DIFF_COVER=1"
+        PASS_REGULAR_EXPRESSION "skipped via PULP_SKIP_DIFF_COVER=1")
+
     add_test(NAME cli-audio-excerpt-find-invalid-top
         COMMAND "${CMAKE_COMMAND}"
             "-DCLI=$<TARGET_FILE:pulp-cli>"
