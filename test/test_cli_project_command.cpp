@@ -405,6 +405,76 @@ TEST_CASE("cmd_project undo reports missing and malformed batches",
     }
 }
 
+TEST_CASE("cmd_project undo reports stale, missing, and non-bumped batch entries",
+          "[cli][project-command][issue-643]") {
+    TempDir tmp;
+    auto home = tmp.path / "home";
+    auto stale = tmp.path / "Stale";
+    ScopedEnv pulp_home("PULP_HOME", home.string());
+    ScopedColorDisabled color;
+
+    make_fetchcontent_project(stale, "0.3.0");
+
+    pb::UndoBatch batch;
+    batch.timestamp = "undo-edge";
+    batch.target_version = "0.2.0";
+
+    pb::UndoEntry stale_entry;
+    stale_entry.project_path = stale;
+    stale_entry.project_name = "Stale";
+    stale_entry.old_pin = "v0.1.0";
+    stale_entry.old_pin_style_has_v = true;
+    stale_entry.pin_kind = pb::PinKind::FetchContentGitTag;
+    stale_entry.status = "bumped";
+    stale_entry.edits.push_back(pb::UndoEdit{
+        stale / "CMakeLists.txt",
+        pb::PinKind::FetchContentGitTag,
+        "v0.1.0",
+        "v0.2.0",
+        true,
+    });
+    batch.entries.push_back(stale_entry);
+
+    auto missing = tmp.path / "Missing";
+    pb::UndoEntry missing_entry;
+    missing_entry.project_path = missing;
+    missing_entry.project_name = "Missing";
+    missing_entry.old_pin = "v0.1.0";
+    missing_entry.old_pin_style_has_v = true;
+    missing_entry.pin_kind = pb::PinKind::FetchContentGitTag;
+    missing_entry.status = "bumped";
+    missing_entry.edits.push_back(pb::UndoEdit{
+        missing / "CMakeLists.txt",
+        pb::PinKind::FetchContentGitTag,
+        "v0.1.0",
+        "v0.2.0",
+        true,
+    });
+    batch.entries.push_back(missing_entry);
+
+    pb::UndoEntry skipped_entry;
+    skipped_entry.project_path = tmp.path / "Skipped";
+    skipped_entry.project_name = "Skipped";
+    skipped_entry.status = "skipped";
+    batch.entries.push_back(skipped_entry);
+
+    auto undo_path = pb::undo_batch_path(home, batch.timestamp);
+    REQUIRE(pb::write_undo_batch(undo_path, batch));
+
+    CapturedStreams capture;
+    REQUIRE(cmd_project({"undo", batch.timestamp}) == 1);
+
+    REQUIRE(capture.err.str().find("Stale  (current value no longer matches bumped value)")
+            != std::string::npos);
+    REQUIRE(capture.err.str().find("Missing  (missing ") != std::string::npos);
+    REQUIRE(capture.out.str().find("Summary: 0 reverted, 2 skipped, 1 failed")
+            != std::string::npos);
+    REQUIRE(capture.out.str().find("Undo file retained") != std::string::npos);
+    REQUIRE(fs::exists(undo_path));
+    REQUIRE(read_file_text(stale / "CMakeLists.txt").find("GIT_TAG v0.3.0")
+            != std::string::npos);
+}
+
 TEST_CASE("cmd_project bump rejects source checkout and non-project directories",
           "[project-command][issue-244]") {
     CapturedStreams source_capture;
@@ -435,6 +505,26 @@ TEST_CASE("cmd_project bump rejects targets newer than the installed CLI",
     }
     REQUIRE(capture.err.str().find("is newer than this pulp CLI") != std::string::npos);
     REQUIRE(capture.err.str().find("pulp upgrade 99.0.0") != std::string::npos);
+}
+
+TEST_CASE("cmd_project bump rejects invalid target versions before project resolution",
+          "[cli][project-command][issue-643]") {
+    TempDir tmp;
+    CapturedStreams capture;
+    {
+        ScopedCwd cwd(tmp.path);
+        REQUIRE(cmd_project({"bump", "--to=main"}) == 1);
+    }
+    REQUIRE(capture.err.str().find("invalid target version 'main'") != std::string::npos);
+    REQUIRE(capture.err.str().find("not inside a bumpable Pulp project") == std::string::npos);
+
+    CapturedStreams positional_capture;
+    {
+        ScopedCwd cwd(tmp.path);
+        REQUIRE(cmd_project({"bump", "0.2"}) == 1);
+    }
+    REQUIRE(positional_capture.err.str().find("invalid target version '0.2'")
+            != std::string::npos);
 }
 
 TEST_CASE("project command shell redirection helpers use platform null devices",
@@ -846,6 +936,87 @@ TEST_CASE("bump_one enforces the dirty gate and rewrites managed standalone sdk_
     REQUIRE(cmake.find("find_package(Pulp 0.2.0 REQUIRED)") != std::string::npos);
     REQUIRE(toml.find("sdk_version = \"0.2.0\"") != std::string::npos);
     REQUIRE(toml.find(local_sdk_cache_path("0.2.0").generic_string()) != std::string::npos);
+}
+
+TEST_CASE("bump_one leaves custom standalone sdk_path unchanged and reports the note",
+          "[cli][project-command][issue-643]") {
+    TempDir tmp;
+    auto project = tmp.path / "Clock";
+    auto custom_sdk = tmp.path / "custom-sdk";
+
+    make_standalone_project(project, "0.1.0", custom_sdk.generic_string());
+
+    BumpOptions opts;
+    auto bumped = bump_one(project, "0.2.0", opts, "Clock");
+
+    REQUIRE(bumped.status == "bumped");
+    REQUIRE(bumped.edits.size() == 2);
+    REQUIRE(bumped.notes.size() == 1);
+    REQUIRE(bumped.notes.front().find("custom sdk_path left unchanged")
+            != std::string::npos);
+
+    auto cmake = read_file_text(project / "CMakeLists.txt");
+    auto toml = read_file_text(project / "pulp.toml");
+    REQUIRE(cmake.find("find_package(Pulp 0.2.0 REQUIRED)") != std::string::npos);
+    REQUIRE(toml.find("sdk_version = \"0.2.0\"") != std::string::npos);
+    REQUIRE(toml.find("sdk_path = \"" + custom_sdk.generic_string() + "\"")
+            != std::string::npos);
+}
+
+TEST_CASE("bump_one reports malformed standalone and dynamic CMake pins",
+          "[cli][project-command][issue-643]") {
+    TempDir tmp;
+
+    auto standalone = tmp.path / "MalformedClock";
+    make_standalone_project(standalone, "main");
+
+    BumpOptions opts;
+    auto malformed = bump_one(standalone, "0.2.0", opts, "MalformedClock");
+    REQUIRE(malformed.status == "skipped");
+    REQUIRE(malformed.pin_kind == pb::PinKind::PulpTomlSdkVersion);
+    REQUIRE(malformed.old_pin == "main");
+    REQUIRE(malformed.failure_reason == "pulp.toml sdk_version doesn't parse as semver");
+    REQUIRE(malformed.edits.empty());
+
+    auto dynamic = tmp.path / "DynamicFetch";
+    fs::create_directories(dynamic);
+    write_file(dynamic / "CMakeLists.txt",
+               "cmake_minimum_required(VERSION 3.20)\n"
+               "include(FetchContent)\n"
+               "FetchContent_Declare(pulp\n"
+               "    GIT_REPOSITORY https://github.com/danielraffel/pulp.git\n"
+               "    GIT_TAG main)\n"
+               "FetchContent_MakeAvailable(pulp)\n");
+
+    auto skipped = bump_one(dynamic, "0.2.0", opts, "DynamicFetch");
+    REQUIRE(skipped.status == "skipped");
+    REQUIRE(skipped.pin_kind == pb::PinKind::FetchContentGitTag);
+    REQUIRE(skipped.old_pin == "main");
+    REQUIRE(skipped.failure_reason.find("dynamic pin") != std::string::npos);
+    REQUIRE(skipped.edits.empty());
+}
+
+TEST_CASE("bump_one distinguishes downgrades from explicit downgrade bumps",
+          "[cli][project-command][issue-643]") {
+    TempDir tmp;
+    auto project = tmp.path / "Clock";
+    make_fetchcontent_project(project, "0.3.0");
+
+    BumpOptions opts;
+    auto skipped = bump_one(project, "0.2.0", opts, "Clock");
+    REQUIRE(skipped.status == "skipped");
+    REQUIRE(skipped.pin_kind == pb::PinKind::FetchContentGitTag);
+    REQUIRE(skipped.failure_reason ==
+            "target version older than current pin (use --allow-downgrade to override)");
+    REQUIRE(read_file_text(project / "CMakeLists.txt").find("GIT_TAG v0.3.0")
+            != std::string::npos);
+
+    opts.allow_downgrade = true;
+    auto bumped = bump_one(project, "0.2.0", opts, "Clock");
+    REQUIRE(bumped.status == "bumped");
+    REQUIRE(bumped.edits.size() == 1);
+    REQUIRE(read_file_text(project / "CMakeLists.txt").find("GIT_TAG v0.2.0")
+            != std::string::npos);
 }
 
 TEST_CASE("bump_one rewrites non-standalone FetchContent pins",
