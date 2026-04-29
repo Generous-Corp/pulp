@@ -22,6 +22,34 @@ TEST_CASE("UmpBuffer sort + clear", "[midi][ump]") {
     REQUIRE(buf.empty());
 }
 
+TEST_CASE("UmpPacket helper factories mask groups channels and data fields",
+          "[midi][ump][helpers]") {
+    auto note = UmpPacket::note_on_2(0x2F, 0x1E, 0xFF, 0x1234, 0x8F, 0xABCD);
+    REQUIRE(note.word_count == 2);
+    REQUIRE(note.message_type() == UmpMessageType::Midi2ChannelVoice);
+    REQUIRE(note.group() == 0x0F);
+    REQUIRE(note.channel() == 0x0E);
+    REQUIRE(note.note_number() == 0x7F);
+    REQUIRE(note.attribute_type() == 0x8F);
+    REQUIRE(note.attribute_data() == 0xABCD);
+
+    auto per_note = UmpPacket::registered_per_note_cc(0x10, 0x11, 0xFE, 0xFF,
+                                                       0xCAFEBABEu);
+    REQUIRE(per_note.group() == 0);
+    REQUIRE(per_note.channel() == 1);
+    REQUIRE(per_note.note_number() == 0x7E);
+    REQUIRE(per_note.attribute_type() == 0x7F);
+    REQUIRE(per_note.data_32() == 0xCAFEBABEu);
+
+    auto midi1 = UmpPacket::midi1_note_on(0x12, 0x13, 0xFC, 0xFE);
+    REQUIRE(midi1.word_count == 1);
+    REQUIRE(midi1.message_type() == UmpMessageType::Midi1ChannelVoice);
+    REQUIRE(midi1.group() == 2);
+    REQUIRE(midi1.status() == 0x93);
+    REQUIRE(((midi1.words[0] >> 8) & 0xFFu) == 0x7Cu);
+    REQUIRE((midi1.words[0] & 0xFFu) == 0x7Eu);
+}
+
 TEST_CASE("Processor::supports_ump defaults to false", "[midi][ump]") {
     pulp::format::PluginDescriptor desc;
     REQUIRE_FALSE(desc.supports_ump);
