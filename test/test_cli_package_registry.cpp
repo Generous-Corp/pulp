@@ -10,11 +10,14 @@
 #include "../tools/cli/package_registry.hpp"
 
 #include <atomic>
+#include <cstdlib>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace fs = std::filesystem;
@@ -50,14 +53,40 @@ void write_file(const fs::path& path, const std::string& body) {
     f << body;
 }
 
+struct EnvVarGuard {
+    std::string name;
+    std::optional<std::string> previous;
+
+    EnvVarGuard(std::string key, std::optional<std::string> value)
+        : name(std::move(key)) {
+        if (auto* old = std::getenv(name.c_str())) previous = old;
+        set(value);
+    }
+
+    ~EnvVarGuard() { set(previous); }
+
+    void set(const std::optional<std::string>& value) const {
+#ifdef _WIN32
+        _putenv_s(name.c_str(), value ? value->c_str() : "");
+#else
+        if (value) {
+            setenv(name.c_str(), value->c_str(), 1);
+        } else {
+            unsetenv(name.c_str());
+        }
+#endif
+    }
+};
+
 std::vector<std::string> target_strings(const std::vector<PlatformTarget>& targets) {
     std::vector<std::string> out;
     for (const auto& t : targets) out.push_back(t.to_string());
     return out;
 }
 
-fs::path write_registry_fixture(const fs::path& root) {
-    auto path = root / "registry.json";
+fs::path write_registry_fixture(const fs::path& root,
+                                const std::string& filename = "registry.json") {
+    auto path = root / filename;
     write_file(path, R"({
   "registry_version": 2,
   "packages": {
@@ -226,6 +255,42 @@ TEST_CASE("package lock files round-trip escaped local package metadata",
     REQUIRE(missing.packages.empty());
 }
 
+TEST_CASE("remote registry helpers use environment cache paths and fresh cache hits",
+          "[cli][package-registry][remote][cache][issue-643]") {
+    TempDir tmp;
+
+#ifdef _WIN32
+    {
+        EnvVarGuard appdata("LOCALAPPDATA", tmp.path.string());
+        REQUIRE(default_cache_dir() == tmp.path / "Pulp");
+    }
+    {
+        EnvVarGuard no_appdata("LOCALAPPDATA", std::nullopt);
+        REQUIRE(default_cache_dir().filename() == "pulp-cache");
+    }
+#else
+    {
+        EnvVarGuard home("HOME", tmp.path.string());
+        REQUIRE(default_cache_dir() == tmp.path / ".pulp");
+    }
+    {
+        EnvVarGuard no_home("HOME", std::nullopt);
+        REQUIRE(default_cache_dir().filename() == "pulp-cache");
+    }
+#endif
+
+    auto cache_file = write_registry_fixture(tmp.path, "registry-cache.json");
+    REQUIRE(fs::exists(cache_file));
+
+    auto loaded = load_remote_registry(
+        "https://127.0.0.1:9/pulp-registry-should-not-be-fetched.json",
+        tmp.path,
+        24);
+    REQUIRE(loaded.error.empty());
+    REQUIRE(loaded.registry.packages.size() == 2);
+    REQUIRE(loaded.registry.packages.at("synth-core").name == "Core Synth");
+}
+
 TEST_CASE("project targets parse, default, expand platforms, and rewrite TOML",
           "[cli][package-registry][targets][issue-643]") {
     TempDir tmp;
@@ -275,6 +340,34 @@ name = "Demo"
             std::vector<std::string>{"Windows-x64"});
 }
 
+TEST_CASE("project target parsing falls back for malformed target TOML",
+          "[cli][package-registry][targets][issue-643]") {
+    TempDir invalid_values;
+    write_file(invalid_values.path / "pulp.toml", R"([project]
+targets = [
+  "BeOS-x64",
+  "macOS-mips"
+]
+)");
+    REQUIRE(target_strings(read_project_targets(invalid_values.path)) ==
+            std::vector<std::string>{"macOS-arm64", "Windows-x64", "Linux-x64"});
+
+    TempDir unterminated;
+    write_file(unterminated.path / "pulp.toml", R"([project]
+targets = [
+  "Linux-x64"
+)");
+    REQUIRE(target_strings(read_project_targets(unterminated.path)) ==
+            std::vector<std::string>{"macOS-arm64", "Windows-x64", "Linux-x64"});
+
+    TempDir wrong_section;
+    write_file(wrong_section.path / "pulp.toml", R"([plugin]
+targets = ["Linux-x64"]
+)");
+    REQUIRE(target_strings(read_project_targets(wrong_section.path)) ==
+            std::vector<std::string>{"macOS-arm64", "Windows-x64", "Linux-x64"});
+}
+
 TEST_CASE("licenses, semver, and quality scoring classify local registry metadata",
           "[cli][package-registry][quality][issue-643]") {
     REQUIRE(check_license("MIT") == LicenseVerdict::allowed);
@@ -283,11 +376,17 @@ TEST_CASE("licenses, semver, and quality scoring classify local registry metadat
     REQUIRE(check_license("GPL-3.0") == LicenseVerdict::rejected);
     REQUIRE(check_license("Proprietary") == LicenseVerdict::rejected);
     REQUIRE(std::string(license_verdict_label(LicenseVerdict::allowed)) == "allowed");
+    REQUIRE(std::string(license_verdict_label(LicenseVerdict::review_required)) ==
+            "review required");
+    REQUIRE(std::string(license_verdict_label(LicenseVerdict::rejected)) == "rejected");
+    REQUIRE(license_tier("Apache-2.0") == "allowed");
+    REQUIRE(license_tier("Custom-1.0") == "review");
     REQUIRE(license_tier("GPL-3.0") == "restricted");
     REQUIRE(license_tier("SSPL-1.0") == "rejected");
     REQUIRE(license_explanation("AGPL-3.0").find("network service") != std::string::npos);
     REQUIRE(license_explanation("LGPL-2.1").find("dynamic linking") != std::string::npos);
     REQUIRE(license_explanation("MPL-2.0").find("file-level copyleft") != std::string::npos);
+    REQUIRE(license_explanation("Custom-1.0").find("compatibility") != std::string::npos);
 
     auto parsed = SemVer::parse("v1.2.3-beta");
     REQUIRE(parsed);
@@ -296,6 +395,13 @@ TEST_CASE("licenses, semver, and quality scoring classify local registry metadat
     REQUIRE(parsed->patch == 3);
     REQUIRE(parsed->pre == "beta");
     REQUIRE(SemVer::parse("1.2"));
+    auto major_only = SemVer::parse("V2");
+    REQUIRE(major_only);
+    REQUIRE(major_only->major == 2);
+    REQUIRE(major_only->minor == 0);
+    REQUIRE(major_only->patch == 0);
+    REQUIRE(*major_only == *SemVer::parse("2.0.0"));
+    REQUIRE_FALSE(SemVer::parse(""));
     REQUIRE_FALSE(SemVer::parse("1.two.3"));
 
     auto release = *SemVer::parse("1.2.3");
@@ -349,6 +455,10 @@ TEST_CASE("package registry queries rank search hits and detect unsupported targ
     auto analysis_hits = search(loaded.registry, "analysis");
     REQUIRE_FALSE(analysis_hits.empty());
     REQUIRE(analysis_hits.front()->id == "filter-kit");
+
+    auto voice_hits = search(loaded.registry, "voice");
+    REQUIRE_FALSE(voice_hits.empty());
+    REQUIRE(voice_hits.front()->id == "synth-core");
 
     auto missing = search(loaded.registry, "does-not-exist");
     REQUIRE(missing.empty());
