@@ -1263,6 +1263,64 @@ TEST_CASE("WidgetBridge loadAssetSync covers embedded file and missing records",
     std::filesystem::remove(temp_path);
 }
 
+TEST_CASE("WidgetBridge loadAssetSync covers text mime variants and path normalization",
+          "[view][bridge][asset][coverage]")
+{
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    static const char kEmbeddedCss[] = "body { color: red; }\n";
+    static const char kEmbeddedSvg[] = "<svg><path d='M0 0h1v1z'/></svg>";
+    AssetManager::instance().register_embedded(
+        "coverage/widget-bridge-style.CSS",
+        reinterpret_cast<const uint8_t*>(kEmbeddedCss),
+        sizeof(kEmbeddedCss) - 1);
+    AssetManager::instance().register_embedded(
+        "coverage/widget-bridge-icon.svg",
+        reinterpret_cast<const uint8_t*>(kEmbeddedSvg),
+        sizeof(kEmbeddedSvg) - 1);
+
+    const auto script_path =
+        std::filesystem::temp_directory_path() / "pulp-widget-bridge-runtime-asset.mjs";
+    {
+        std::ofstream out(script_path, std::ios::binary);
+        out << "export const value = 3;\n";
+    }
+
+    const auto script_url = std::string("file://") + js_single_quoted(script_path.string());
+    bridge.load_script(
+        "var css_asset = __loadAssetSync__('pulp:////coverage/widget-bridge-style.CSS');"
+        "var svg_asset = __loadAssetSync__('coverage/widget-bridge-icon.svg');"
+        "var script_asset = __loadAssetSync__('" + script_url + "');");
+
+    REQUIRE(engine.evaluate("css_asset.ok").getWithDefault<bool>(false));
+    REQUIRE(std::string(engine.evaluate("css_asset.resolvedPath").getWithDefault<std::string_view>("")) ==
+            "coverage/widget-bridge-style.CSS");
+    REQUIRE(std::string(engine.evaluate("css_asset.contentType").getWithDefault<std::string_view>("")) ==
+            "text/css");
+    REQUIRE(std::string(engine.evaluate("css_asset.text").getWithDefault<std::string_view>("")) ==
+            kEmbeddedCss);
+    REQUIRE_FALSE(
+        std::string(engine.evaluate("css_asset.base64").getWithDefault<std::string_view>("")).empty());
+
+    REQUIRE(engine.evaluate("svg_asset.ok").getWithDefault<bool>(false));
+    REQUIRE(std::string(engine.evaluate("svg_asset.contentType").getWithDefault<std::string_view>("")) ==
+            "image/svg+xml");
+    REQUIRE(std::string(engine.evaluate("svg_asset.text").getWithDefault<std::string_view>("")) ==
+            kEmbeddedSvg);
+
+    REQUIRE(engine.evaluate("script_asset.ok").getWithDefault<bool>(false));
+    REQUIRE(std::string(engine.evaluate("script_asset.contentType").getWithDefault<std::string_view>("")) ==
+            "text/javascript");
+    REQUIRE(std::string(engine.evaluate("script_asset.text").getWithDefault<std::string_view>("")) ==
+            "export const value = 3;\n");
+
+    std::filesystem::remove(script_path);
+}
+
 TEST_CASE("WidgetBridge text editor escape dispatches JS handler", "[view][bridge][text]") {
     ScriptEngine engine;
     View root;
