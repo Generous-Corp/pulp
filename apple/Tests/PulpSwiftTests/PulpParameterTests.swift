@@ -30,6 +30,60 @@ final class PulpParameterTests: XCTestCase {
         XCTAssertEqual(store.parameter(id: 2)?.name, "Bypass")
     }
 
+    func testReloadReplacesParametersAfterBackendChanges() {
+        installBridge(parameters: [
+            .init(id: 1, name: "Input", unit: "dB", minValue: -24, maxValue: 24, defaultValue: 0, step: 0.1),
+            .init(id: 2, name: "Output", unit: "dB", minValue: -24, maxValue: 24, defaultValue: 0, step: 0.1),
+        ])
+        let store = PulpParameterStore()
+
+        bridge.parameters = [
+            .init(id: 3, name: "Mix", unit: "%", minValue: 0, maxValue: 100, defaultValue: 50, step: 0.1),
+        ]
+        bridge.values = [3: 50]
+        bridge.normalizedValues = [3: 0.5]
+
+        store.reload()
+
+        XCTAssertEqual(store.parameters.map(\.id), [3])
+        XCTAssertNil(store.parameter(id: 1))
+        XCTAssertEqual(store.parameter(id: 3)?.name, "Mix")
+    }
+
+    func testBridgeParameterInfoRejectsInvalidRequests() {
+        installBridge(parameters: [
+            .init(id: 9, name: "Pan", unit: "", minValue: -1, maxValue: 1, defaultValue: 0, step: 0.01),
+        ])
+        var info = PulpParamInfo(id: 123, min_value: -5, max_value: 5, default_value: 1, step: 0.5)
+
+        XCTAssertFalse(pulp_param_info(-1, &info))
+        XCTAssertEqual(info.id, 123)
+        XCTAssertEqual(info.min_value, -5)
+
+        XCTAssertFalse(pulp_param_info(1, &info))
+        XCTAssertEqual(info.id, 123)
+
+        XCTAssertFalse(pulp_param_info(0, nil))
+        XCTAssertEqual(info.id, 123)
+    }
+
+    func testBridgeParameterInfoWritesCStringFields() {
+        installBridge(parameters: [
+            .init(id: 4, name: "Cutoff", unit: "Hz", minValue: 20, maxValue: 20_000, defaultValue: 440, step: 1),
+        ])
+        var info = PulpParamInfo()
+
+        XCTAssertTrue(pulp_param_info(0, &info))
+
+        XCTAssertEqual(info.id, 4)
+        XCTAssertEqual(String(cString: info.name!), "Cutoff")
+        XCTAssertEqual(String(cString: info.unit!), "Hz")
+        XCTAssertEqual(info.min_value, 20)
+        XCTAssertEqual(info.max_value, 20_000)
+        XCTAssertEqual(info.default_value, 440)
+        XCTAssertEqual(info.step, 1)
+    }
+
     func testDisplayStringFormatsFractionalAndIntegralParameters() {
         installBridge(parameters: [
             .init(id: 1, name: "Gain", unit: "dB", minValue: -24, maxValue: 24, defaultValue: 0, step: 0.1),
