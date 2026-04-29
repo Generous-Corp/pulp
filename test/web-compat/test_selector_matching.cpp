@@ -72,6 +72,97 @@ TEST_CASE("Selector: removeWidget removes from lookup", "[events][selector]") {
     REQUIRE(env.widget("temp") == nullptr);
 }
 
+TEST_CASE("Selector: JS parser matches compound selectors", "[events][selector]") {
+    TestEnvironment env;
+    env.eval(R"JS(
+        var __selectorEl = document.createElement("button");
+        __selectorEl.id = "bypass";
+        __selectorEl.className = "control primary armed";
+        __selectorEl.setAttribute("data-role", "transport");
+        __selectorEl.setAttribute("aria-label", "Bypass Switch");
+    )JS");
+
+    auto matched = env.engine.evaluate(R"JS(
+        _matchesSelector(
+            __selectorEl,
+            _parseSelector("button#bypass.control.primary[data-role='transport'][aria-label^='Bypass']")
+        )
+    )JS");
+    REQUIRE(matched.getWithDefault<bool>(false) == true);
+
+    auto rejected = env.engine.evaluate(R"JS(
+        _matchesSelector(__selectorEl, _parseSelector("button#bypass.control.muted"))
+    )JS");
+    REQUIRE(rejected.getWithDefault<bool>(true) == false);
+}
+
+TEST_CASE("Selector: JS parser distinguishes child and descendant combinators", "[events][selector]") {
+    TestEnvironment env;
+    env.eval(R"JS(
+        var __selectorGrandparent = document.createElement("section");
+        var __selectorParent = document.createElement("div");
+        var __selectorChild = document.createElement("span");
+
+        __selectorGrandparent.className = "rack";
+        __selectorParent.className = "strip";
+        __selectorChild.className = "value";
+
+        __selectorGrandparent._children.push(__selectorParent);
+        __selectorParent._parentElement = __selectorGrandparent;
+        __selectorParent._children.push(__selectorChild);
+        __selectorChild._parentElement = __selectorParent;
+    )JS");
+
+    auto descendant = env.engine.evaluate(R"JS(
+        _matchesSelector(__selectorChild, _parseSelector("section.rack span.value"))
+    )JS");
+    REQUIRE(descendant.getWithDefault<bool>(false) == true);
+
+    auto direct = env.engine.evaluate(R"JS(
+        _matchesSelector(__selectorChild, _parseSelector("section.rack > span.value"))
+    )JS");
+    REQUIRE(direct.getWithDefault<bool>(true) == false);
+
+    auto immediate = env.engine.evaluate(R"JS(
+        _matchesSelector(__selectorChild, _parseSelector("div.strip > span.value"))
+    )JS");
+    REQUIRE(immediate.getWithDefault<bool>(false) == true);
+}
+
+TEST_CASE("Selector: JS querySelectorAll walks nested children", "[events][selector]") {
+    TestEnvironment env;
+    env.eval(R"JS(
+        var __selectorList = document.createElement("div");
+        var __selectorA = document.createElement("span");
+        var __selectorB = document.createElement("span");
+        var __selectorC = document.createElement("span");
+
+        __selectorA.className = "item";
+        __selectorB.className = "item selected";
+        __selectorC.className = "item";
+
+        __selectorList._children = [__selectorA, __selectorB, __selectorC];
+        __selectorA._parentElement = __selectorList;
+        __selectorB._parentElement = __selectorList;
+        __selectorC._parentElement = __selectorList;
+    )JS");
+
+    auto firstMatch = env.engine.evaluate(R"JS(
+        _querySelector(__selectorList, "span.selected") === __selectorB
+    )JS");
+    REQUIRE(firstMatch.getWithDefault<bool>(false) == true);
+
+    auto matchCount = env.engine.evaluate(R"JS(
+        _querySelectorAll(__selectorList, "span.item").length
+    )JS");
+    REQUIRE(matchCount.getWithDefault<int32_t>(0) == 3);
+
+    auto descendantCount = env.engine.evaluate(R"JS(
+        _querySelectorAll(__selectorList, "div span.item").length
+    )JS");
+    REQUIRE(descendantCount.getWithDefault<int32_t>(0) == 3);
+}
+
 TEST_CASE("Selector: parent() returns correct parent", "[events][selector]") {
     View root;
     auto child = std::make_unique<View>();
