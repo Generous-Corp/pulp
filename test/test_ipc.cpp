@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include <pulp/events/child_process_manager.hpp>
 #include <pulp/events/interprocess_connection.hpp>
 #include <pulp/runtime/temporary_file.hpp>
 #include <atomic>
@@ -86,6 +87,35 @@ TEST_CASE("IPC lambda callbacks settable", "[events][ipc]") {
 TEST_CASE("IPC server initial state", "[events][ipc]") {
     InterprocessConnectionServer server;
     REQUIRE_FALSE(server.is_running());
+}
+
+// ── Child process manager ───────────────────────────────────────────────
+
+TEST_CASE("ConnectedChildProcess default state is safe to tear down",
+          "[events][child-process][issue-642]") {
+    ConnectedChildProcess child;
+
+    REQUIRE_FALSE(child.is_running());
+    REQUIRE(child.pid() == -1);
+    REQUIRE_FALSE(child.send_message("not launched"));
+
+    child.kill();
+    REQUIRE(child.wait_for_exit(1) == -1);
+}
+
+TEST_CASE("ChildProcessManager empty lifecycle operations are no-ops",
+          "[events][child-process][issue-642]") {
+    ChildProcessManager manager;
+    int exit_callbacks = 0;
+    manager.on_child_exit = [&](ConnectedChildProcess*, int) { ++exit_callbacks; };
+
+    REQUIRE(manager.active_count() == 0);
+    manager.wait_all(1);
+    manager.kill_all();
+    manager.cleanup();
+
+    REQUIRE(manager.active_count() == 0);
+    REQUIRE(exit_callbacks == 0);
 }
 
 TEST_CASE("IPC socket server rejects malformed listen endpoints",
