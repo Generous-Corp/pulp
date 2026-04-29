@@ -2514,6 +2514,10 @@ TEST_CASE("View::paint_all dispatches outset shadow before clip, "
     SECTION("outset shadow paints before clip_rect") {
         View v;
         v.set_bounds({0, 0, 100, 50});
+        // pulp #972 — overflow now defaults to visible (no clip_rect).
+        // This test specifically asserts the shadow / clip_rect ordering
+        // contract, so opt-in to clipping explicitly.
+        v.set_overflow(View::Overflow::hidden);
         v.set_box_shadow(0, 14, 40, 0, Color::rgba8(0, 0, 0, 160), /*inset=*/false);
 
         RecordingCanvas rc;
@@ -2541,6 +2545,7 @@ TEST_CASE("View::paint_all dispatches outset shadow before clip, "
     SECTION("inset shadow paints inside the bounds clip") {
         View v;
         v.set_bounds({0, 0, 100, 50});
+        v.set_overflow(View::Overflow::hidden);  // pulp #972
         v.set_box_shadow(0, 4, 10, 0, Color::rgba8(0, 0, 0, 80), /*inset=*/true);
 
         RecordingCanvas rc;

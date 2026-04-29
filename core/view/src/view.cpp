@@ -95,7 +95,10 @@ void View::paint_all(canvas::Canvas& canvas) {
                                corner_radius_);
     }
 
-    // Clip only if overflow is hidden (default)
+    // Clip only when overflow:hidden is explicitly opted into. Default
+    // is overflow:visible (CSS default, pulp #972) so absolutely-
+    // positioned popover/dropdown children that extend outside the
+    // parent's content bounds still paint.
     if (overflow_ == Overflow::hidden)
         canvas.clip_rect(0, 0, bounds_.width, bounds_.height);
 
@@ -135,8 +138,15 @@ void View::paint_all(canvas::Canvas& canvas) {
     // Widget-specific painting
     paint(canvas);
 
-    // Paint children
-    for (auto& child : children_) {
+    // Paint children — pulp #972. CSS z-index ordering: stable-sort
+    // ascending by z_index() so siblings with equal z keep insertion
+    // order (CSS painting-order rule). Higher z paints later, ending
+    // up visually on top. The default z_index_ is 0, so views that
+    // never call set_z_index() retain insertion order — no behaviour
+    // change for legacy plugins. setZIndex() on the JS bridge has
+    // existed as a no-op until now; this hooks it up.
+    auto paint_order = sorted_children_by_z_index();
+    for (View* child : paint_order) {
         child->paint_all(canvas);
     }
 
@@ -298,12 +308,30 @@ std::unique_ptr<View> View::remove_child(View* child) {
     return owned;
 }
 
+std::vector<View*> View::sorted_children_by_z_index() const {
+    std::vector<View*> result;
+    result.reserve(children_.size());
+    for (const auto& child : children_) result.push_back(child.get());
+    // Stable sort so siblings with equal z_index() retain insertion
+    // order (CSS painting-order rule, pulp #972).
+    std::stable_sort(result.begin(), result.end(),
+        [](const View* a, const View* b) {
+            return a->z_index() < b->z_index();
+        });
+    return result;
+}
+
 View* View::hit_test(Point local_point) {
     if (!visible_ || !enabled_ || !hit_testable_) return nullptr;
 
-    // Check children in reverse order (topmost first)
-    for (auto it = children_.rbegin(); it != children_.rend(); ++it) {
-        auto& child = *it;
+    // Check children topmost-first (pulp #972). With z-index honored,
+    // "topmost" means highest z_index — and at equal z, latest insertion
+    // — so iterate the z-sorted paint order in reverse. Without this,
+    // a high-z popover could render on top yet have clicks fall through
+    // to siblings beneath it.
+    auto paint_order = sorted_children_by_z_index();
+    for (auto it = paint_order.rbegin(); it != paint_order.rend(); ++it) {
+        View* child = *it;
         if (!child->visible_) continue;
 
         Point child_point = {local_point.x - child->bounds_.x,

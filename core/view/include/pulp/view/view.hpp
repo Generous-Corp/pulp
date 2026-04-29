@@ -338,6 +338,12 @@ public:
     void set_z_index(int z) { z_index_ = z; }
     int z_index() const { return z_index_; }
 
+    /// pulp #972 — return children stably sorted by z_index() ascending.
+    /// paint_all paints in this order so higher-z siblings render on top;
+    /// hit_test walks the same order in reverse. Exposed so tests can
+    /// assert ordering directly without piping through the paint pipeline.
+    std::vector<View*> sorted_children_by_z_index() const;
+
     /// Overflow mode
     enum class Overflow { hidden, visible };
     void set_overflow(Overflow o) { overflow_ = o; }
@@ -493,7 +499,13 @@ private:
     float top_ = 0, right_ = 0, bottom_ = 0, left_ = 0;
     bool has_top_ = false, has_right_ = false, has_bottom_ = false, has_left_ = false;
     int z_index_ = 0;
-    Overflow overflow_ = Overflow::hidden;
+    // pulp #972 — default is `visible` to match CSS. Pulp previously
+    // defaulted to `hidden`, which clipped absolutely-positioned children
+    // (popovers, dropdowns, tooltips) to the parent's content bounds and
+    // made them invisible whenever they extended outside. Plugins that
+    // intentionally need clipping must call set_overflow(Overflow::hidden)
+    // explicitly — same opt-in as `overflow:hidden` in CSS.
+    Overflow overflow_ = Overflow::visible;
     BoxShadow shadow_{};
     bool has_shadow_ = false;
     float scale_ = 1.0f;
