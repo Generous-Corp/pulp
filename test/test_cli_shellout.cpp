@@ -112,6 +112,14 @@ std::string read_file(const fs::path& path) {
                        std::istreambuf_iterator<char>());
 }
 
+void write_text(const fs::path& path, const std::string& text) {
+    fs::create_directories(path.parent_path());
+    std::ofstream f(path);
+    REQUIRE(f.is_open());
+    f << text;
+    REQUIRE(f.good());
+}
+
 }  // namespace
 
 TEST_CASE("pulp help exits 0 with a usage banner on stdout",
@@ -453,6 +461,85 @@ TEST_CASE("pulp validate --strict is a recognized flag",
     REQUIRE(bogus.exit_code == 2);
     REQUIRE(bogus.stderr_output.find("unknown flag") != std::string::npos);
     REQUIRE(bogus.stderr_output.find("--this-flag-does-not-exist")
+            != std::string::npos);
+}
+
+TEST_CASE("pulp validate strict json report records missing VST3 validators",
+          "[cli][shellout][validate][issue-643]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    auto base = unique_temp_dir("pulp-validate-strict");
+    auto project = base / "Project";
+    auto build = project / "build";
+    auto report = base / "validation-report.json";
+    write_text(project / "CMakeLists.txt",
+               "cmake_minimum_required(VERSION 3.22)\n"
+               "project(ValidateFixture VERSION 1.2.3)\n");
+    write_text(project / "pulp.toml", "[pulp]\nsdk_version = \"1.2.3\"\n");
+    write_text(build / "CMakeCache.txt", "# fixture cache\n");
+    fs::create_directories(build / "VST3" / "Fixture.vst3");
+
+    ScopedEnvVar path("PATH");
+    path.set("");
+
+    const auto bin = fs::absolute(pulp_binary());
+    auto cwd_saver = fs::current_path();
+    fs::current_path(project);
+    auto r = exec(bin.string(),
+                  {"validate", "--strict", "--json", "--report", report.string()},
+                  10000);
+    fs::current_path(cwd_saver);
+
+    auto report_body = read_file(report);
+    fs::remove_all(base);
+
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 1);
+    REQUIRE(r.stdout_output.find("Validation Summary: 1 total")
+            != std::string::npos);
+    REQUIRE(r.stdout_output.find("\"status\": \"skip\"") != std::string::npos);
+    REQUIRE(r.stderr_output.find("ERROR: 1 validator(s) not installed")
+            != std::string::npos);
+    REQUIRE(r.stderr_output.find("pluginval") != std::string::npos);
+    REQUIRE(r.stderr_output.find("Skipped-because-missing-tool count: 1")
+            != std::string::npos);
+    REQUIRE(report_body.find("\"plugin_format\": \"vst3\"")
+            != std::string::npos);
+    REQUIRE(report_body.find("\"status\": \"skip\"") != std::string::npos);
+}
+
+TEST_CASE("pulp validate covers empty builds, report failures, and screenshots",
+          "[cli][shellout][validate][issue-643]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    auto base = unique_temp_dir("pulp-validate-empty");
+    auto project = base / "Project";
+    auto build = project / "build";
+    write_text(project / "CMakeLists.txt",
+               "cmake_minimum_required(VERSION 3.22)\n"
+               "project(ValidateEmpty VERSION 1.2.3)\n");
+    write_text(project / "pulp.toml", "[pulp]\nsdk_version = \"1.2.3\"\n");
+    write_text(build / "CMakeCache.txt", "# fixture cache\n");
+
+    ScopedEnvVar path("PATH");
+    path.set("");
+
+    const auto bin = fs::absolute(pulp_binary());
+    auto cwd_saver = fs::current_path();
+    fs::current_path(project);
+    auto r = exec(bin.string(),
+                  {"validate", "--screenshot", "--report", build.string()},
+                  10000);
+    fs::current_path(cwd_saver);
+    fs::remove_all(base);
+
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(r.stdout_output.find("Validation Summary: 0 total")
+            != std::string::npos);
+    REQUIRE(r.stdout_output.find("No plugin screenshots captured")
+            != std::string::npos);
+    REQUIRE(r.stderr_output.find("Failed to write report to")
             != std::string::npos);
 }
 
