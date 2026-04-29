@@ -1673,6 +1673,108 @@ TEST_CASE("WidgetBridge canvasGlobalCompositeOperation maps CSS strings to Blend
     REQUIRE(blendIndices[3] == static_cast<int>(BM::source_over));
 }
 
+TEST_CASE("WidgetBridge direct Canvas2D gap APIs replay expected canvas commands",
+          "[view][bridge][canvas][coverage]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        var c = document.createElement('canvas');
+        c.id = 'canvas-gap-api';
+        c.width = 200; c.height = 100;
+        document.body.appendChild(c);
+
+        canvasSetTextAlign(c._id, 'right');
+        canvasSetTextBaseline(c._id, 'middle');
+        canvasClearRect(c._id, 1, 2, 3, 4);
+        canvasClipRect(c._id, 5, 6, 7, 8);
+        canvasFillRoundedRect(c._id, 10, 11, 12, 13, 4, '#ff0000');
+        canvasStrokeRoundedRect(c._id, 20, 21, 22, 23, 6, '#00ff00', 2.5);
+        canvasStrokeCircle(c._id, 30, 31, 9, '#0000ff', 3);
+        canvasSetGlobalAlpha(c._id, 0.25);
+        canvasSetLineCap(c._id, 'square');
+        canvasSetLineJoin(c._id, 'bevel');
+        canvasArc(c._id, 40, 41, 10, 0.5, 1.5, '#abcdef', 2);
+        canvasSetBlendMode(c._id, 'copy');
+        canvasSetBlendMode(c._id, 'not-a-real-blend-mode');
+    )");
+    root.layout_children();
+
+    auto* canvas = canvasFromBridge(bridge, engine, "canvas-gap-api");
+    REQUIRE(canvas != nullptr);
+    REQUIRE(canvas->command_count() == 12);
+
+    pulp::canvas::RecordingCanvas rec;
+    canvas->paint(rec);
+
+    using DrawType = pulp::canvas::DrawCommand::Type;
+    auto first = [&](DrawType type) -> const pulp::canvas::DrawCommand* {
+        for (const auto& cmd : rec.commands()) {
+            if (cmd.type == type) return &cmd;
+        }
+        return nullptr;
+    };
+
+    const auto* align = first(DrawType::set_text_align);
+    REQUIRE(align != nullptr);
+    REQUIRE(align->f[0] == static_cast<float>(pulp::canvas::TextAlign::right));
+
+    const auto* clear = first(DrawType::clear_rect);
+    REQUIRE(clear != nullptr);
+    REQUIRE_THAT(clear->f[0], WithinAbs(1.0f, 1e-5f));
+    REQUIRE_THAT(clear->f[1], WithinAbs(2.0f, 1e-5f));
+    REQUIRE_THAT(clear->f[2], WithinAbs(3.0f, 1e-5f));
+    REQUIRE_THAT(clear->f[3], WithinAbs(4.0f, 1e-5f));
+
+    const auto* clip = first(DrawType::clip_rect);
+    REQUIRE(clip != nullptr);
+    REQUIRE_THAT(clip->f[0], WithinAbs(5.0f, 1e-5f));
+    REQUIRE_THAT(clip->f[1], WithinAbs(6.0f, 1e-5f));
+    REQUIRE_THAT(clip->f[2], WithinAbs(7.0f, 1e-5f));
+    REQUIRE_THAT(clip->f[3], WithinAbs(8.0f, 1e-5f));
+
+    const auto* fillRounded = first(DrawType::fill_rounded_rect);
+    REQUIRE(fillRounded != nullptr);
+    REQUIRE_THAT(fillRounded->f[0], WithinAbs(10.0f, 1e-5f));
+    REQUIRE_THAT(fillRounded->f[4], WithinAbs(4.0f, 1e-5f));
+
+    const auto* strokeRounded = first(DrawType::stroke_rounded_rect);
+    REQUIRE(strokeRounded != nullptr);
+    REQUIRE_THAT(strokeRounded->f[0], WithinAbs(20.0f, 1e-5f));
+    REQUIRE_THAT(strokeRounded->f[4], WithinAbs(6.0f, 1e-5f));
+
+    const auto* strokeCircle = first(DrawType::stroke_circle);
+    REQUIRE(strokeCircle != nullptr);
+    REQUIRE_THAT(strokeCircle->f[0], WithinAbs(30.0f, 1e-5f));
+    REQUIRE_THAT(strokeCircle->f[1], WithinAbs(31.0f, 1e-5f));
+    REQUIRE_THAT(strokeCircle->f[2], WithinAbs(9.0f, 1e-5f));
+
+    const auto* cap = first(DrawType::set_line_cap);
+    REQUIRE(cap != nullptr);
+    REQUIRE(cap->f[0] == static_cast<float>(pulp::canvas::LineCap::square));
+
+    const auto* join = first(DrawType::set_line_join);
+    REQUIRE(join != nullptr);
+    REQUIRE(join->f[0] == static_cast<float>(pulp::canvas::LineJoin::bevel));
+
+    const auto* arc = first(DrawType::stroke_arc);
+    REQUIRE(arc != nullptr);
+    REQUIRE_THAT(arc->f[0], WithinAbs(40.0f, 1e-5f));
+    REQUIRE_THAT(arc->f[1], WithinAbs(41.0f, 1e-5f));
+    REQUIRE_THAT(arc->f[2], WithinAbs(10.0f, 1e-5f));
+    REQUIRE_THAT(arc->f[3], WithinAbs(0.5f, 1e-5f));
+    REQUIRE_THAT(arc->f[4], WithinAbs(1.5f, 1e-5f));
+
+    REQUIRE(rec.count(DrawType::set_blend_mode) == 1);
+    const auto* blend = first(DrawType::set_blend_mode);
+    REQUIRE(blend != nullptr);
+    REQUIRE(blend->f[0] == static_cast<float>(static_cast<int>(pulp::canvas::Canvas::BlendMode::copy)));
+}
+
 // ───────────────────────────────────────────────────────────────────────────
 // pulp #899 — WidgetBridge auto-wires repaint_callback_ to the root view's
 // host invalidator so JS-driven UI changes (and rAF callbacks) actually
