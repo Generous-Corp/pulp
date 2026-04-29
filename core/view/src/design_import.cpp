@@ -2506,7 +2506,7 @@ Theme parse_figma_variables(const std::string& json) {
         }
     };
 
-    if (root.hasObjectMember("variables") && root["variables"].isArray())
+    if (root.isObject() && root.hasObjectMember("variables") && root["variables"].isArray())
         parse_vars(root["variables"]);
     else if (root.isArray())
         parse_vars(root);

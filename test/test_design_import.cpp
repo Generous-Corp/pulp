@@ -103,7 +103,7 @@ TEST_CASE("detect_audio_widget identifies widget types from names", "[view][impo
 // ── Figma JSON parsing ──────────────────────────────────────────────────
 
 TEST_CASE("parse_figma_json parses IR format", "[view][import]") {
-    auto json = R"({
+    auto json = R"json({
         "type": "frame",
         "name": "PluginUI",
         "layout": { "direction": "column", "gap": 16, "padding": 12 },
@@ -128,7 +128,7 @@ TEST_CASE("parse_figma_json parses IR format", "[view][import]") {
             "colors": { "bg.primary": "#1a1a2e", "accent.primary": "#e94560" },
             "dimensions": { "spacing.md": 16 }
         }
-    })";
+    })json";
 
     auto ir = parse_figma_json(json);
 
@@ -166,6 +166,126 @@ TEST_CASE("parse_figma_json parses IR format", "[view][import]") {
     REQUIRE(ir.tokens.colors["bg.primary"] == "#1a1a2e");
     REQUIRE(ir.tokens.dimensions.count("spacing.md") == 1);
     REQUIRE(ir.tokens.dimensions["spacing.md"] == 16.0f);
+}
+
+TEST_CASE("parse_figma_json covers layout style and audio shape metadata edges",
+          "[view][import][coverage]") {
+    auto json = R"json({
+        "type": "frame",
+        "name": "Rack",
+        "_layoutHeight": 144,
+        "_layoutWidth": 480,
+        "layout": {
+            "direction": "row",
+            "gap": 6,
+            "wrap": true,
+            "paddingTop": 2,
+            "paddingRight": 4,
+            "paddingBottom": 6,
+            "paddingLeft": 8,
+            "justify": "space-around",
+            "align": "center",
+            "widthMode": "fill",
+            "heightMode": "hug"
+        },
+        "style": {
+            "backgroundGradient": "linear-gradient(#111,#222)",
+            "opacity": 0.75,
+            "border": "1px solid #333333",
+            "boxShadow": "0 4px 12px #00000040",
+            "filter": "blur(2px)",
+            "fontFamily": "Inter",
+            "fontStyle": "italic",
+            "textAlign": "center",
+            "letterSpacing": 1.5,
+            "lineHeight": 1.2,
+            "textTransform": "uppercase",
+            "overflow": "hidden",
+            "cursor": "pointer",
+            "position": "absolute",
+            "top": 1,
+            "left": 2,
+            "right": 3,
+            "bottom": 4,
+            "zIndex": 9,
+            "transform": "rotate(2deg)",
+            "minWidth": 100,
+            "minHeight": 40,
+            "maxWidth": 640,
+            "maxHeight": 320
+        },
+        "children": [
+            {
+                "type": "text",
+                "name": "title",
+                "content": "Drive",
+                "fill": "#f5e0dc",
+                "fontSize": 13,
+                "fontWeight": "bold",
+                "fontFamily": "Inter Tight"
+            },
+            {
+                "type": "frame",
+                "name": "DriveKnob",
+                "width": 92,
+                "height": 110,
+                "children": [
+                    {
+                        "type": "ellipse",
+                        "name": "ring",
+                        "width": 64,
+                        "height": 64,
+                        "stroke": { "fill": "#cba6f7" }
+                    },
+                    { "type": "text", "name": "caption", "content": "Drive" },
+                    { "type": "text", "name": "value", "content": "72%" }
+                ]
+            },
+            {
+                "type": "frame",
+                "name": "NestedKnobContainer",
+                "children": [
+                    { "type": "frame", "name": "InnerKnob", "children": [] }
+                ]
+            }
+        ],
+        "tokens": {
+            "strings": { "copy.title": "Drive" }
+        }
+    })json";
+
+    auto ir = parse_figma_json(json);
+
+    REQUIRE(ir.root.attributes.at("_layoutHeight") == "144");
+    REQUIRE(ir.root.attributes.at("_layoutWidth") == "480");
+    REQUIRE(ir.root.layout.direction == LayoutDirection::row);
+    REQUIRE(ir.root.layout.wrap);
+    REQUIRE(ir.root.layout.justify == LayoutAlign::space_around);
+    REQUIRE(ir.root.layout.align == LayoutAlign::center);
+    REQUIRE(ir.root.layout.width_mode == SizingMode::fill);
+    REQUIRE(ir.root.layout.height_mode == SizingMode::hug);
+    REQUIRE(ir.root.layout.padding_left == 8.0f);
+    REQUIRE(ir.root.style.background_gradient == "linear-gradient(#111,#222)");
+    REQUIRE(ir.root.style.opacity == 0.75f);
+    REQUIRE(ir.root.style.box_shadow == "0 4px 12px #00000040");
+    REQUIRE(ir.root.style.z_index == 9);
+    REQUIRE(ir.tokens.strings["copy.title"] == "Drive");
+
+    const auto& title = ir.root.children[0];
+    REQUIRE(title.style.color == "#f5e0dc");
+    REQUIRE(title.style.font_size == 13.0f);
+    REQUIRE(title.style.font_weight == 700);
+    REQUIRE(title.style.font_family == "Inter Tight");
+
+    const auto& knob = ir.root.children[1];
+    REQUIRE(knob.audio_widget == AudioWidgetType::knob);
+    REQUIRE(knob.attributes.at("shape_width") == "64");
+    REQUIRE(knob.attributes.at("shape_height") == "64");
+    REQUIRE(knob.children[0].attributes.at("stroke_color") == "#cba6f7");
+
+    const auto& container = ir.root.children[2];
+    REQUIRE(container.audio_widget == AudioWidgetType::none);
+    REQUIRE(container.layout.direction == LayoutDirection::row);
 }
 
 // ── Code generation ─────────────────────────────────────────────────────
@@ -347,6 +467,209 @@ TEST_CASE("generate_pulp_js respects CodeGenOptions", "[view][import]") {
     opts.include_comments = false;
     auto no_comments = generate_pulp_js(ir, opts);
     REQUIRE(no_comments.find("// Generated") == std::string::npos);
+}
+
+TEST_CASE("generate_pulp_js native mode covers layout and audio widget edge branches",
+          "[view][import][coverage]") {
+    DesignIR ir;
+    ir.source = DesignSource::pencil;
+    ir.root.type = "frame";
+    ir.root.name = "Panel";
+    ir.root.layout.direction = LayoutDirection::row;
+    ir.root.layout.justify = LayoutAlign::space_between;
+    ir.root.layout.align = LayoutAlign::center;
+    ir.root.layout.gap = 10.0f;
+    ir.root.layout.padding_top = 2.0f;
+    ir.root.layout.padding_right = 4.0f;
+    ir.root.layout.padding_bottom = 6.0f;
+    ir.root.layout.padding_left = 8.0f;
+    ir.root.attributes["_layoutHeight"] = "180";
+    ir.root.attributes["_layoutWidth"] = "420";
+    ir.root.style.background_color = "#111111";
+    ir.root.style.border_radius = 6.0f;
+
+    IRNode left;
+    left.type = "text";
+    left.name = "left label";
+    left.text_content = "Left";
+    left.style.font_size = 12.0f;
+    left.style.color = "#ffffff";
+    ir.root.children.push_back(left);
+
+    IRNode right;
+    right.type = "text";
+    right.name = "right.label";
+    right.text_content = "Right";
+    right.style.font_weight = 600;
+    ir.root.children.push_back(right);
+
+    IRNode knob;
+    knob.type = "frame";
+    knob.name = "ToneKnob";
+    knob.audio_widget = AudioWidgetType::knob;
+    knob.audio_label = "Tone";
+    knob.audio_default = 0.33f;
+    knob.style.width = 90.0f;
+    knob.attributes["shape_width"] = "72";
+    knob.attributes["shape_height"] = "72";
+    IRNode ring;
+    ring.type = "ellipse";
+    ring.attributes["stroke_color"] = "#fab387";
+    knob.children.push_back(ring);
+    IRNode value;
+    value.type = "text";
+    value.text_content = "-6 dB";
+    knob.children.push_back(value);
+    ir.root.children.push_back(knob);
+
+    IRNode xy;
+    xy.type = "frame";
+    xy.name = "FilterXYPad";
+    xy.audio_widget = AudioWidgetType::xy_pad;
+    xy.style.width = 72.0f;
+    ir.root.children.push_back(xy);
+
+    IRNode waveform;
+    waveform.type = "frame";
+    waveform.name = "MainWaveform";
+    waveform.audio_widget = AudioWidgetType::waveform;
+    waveform.style.width = 180.0f;
+    waveform.style.height = 44.0f;
+    ir.root.children.push_back(waveform);
+
+    IRNode spectrum;
+    spectrum.type = "frame";
+    spectrum.name = "SpectrumAnalyzer";
+    spectrum.audio_widget = AudioWidgetType::spectrum;
+    spectrum.style.width = 160.0f;
+    spectrum.style.height = 48.0f;
+    ir.root.children.push_back(spectrum);
+
+    IRNode spacer;
+    spacer.type = "rectangle";
+    spacer.name = "divider";
+    spacer.style.height = 2.0f;
+    spacer.style.background_color = "#333333";
+    ir.root.children.push_back(spacer);
+
+    CodeGenOptions opts;
+    opts.mode = CodeGenMode::native;
+    opts.include_comments = false;
+    opts.preview_mode = true;
+    auto js = generate_pulp_js(ir, opts);
+
+    REQUIRE(js.find("createRow('root', '')") != std::string::npos);
+    REQUIRE(js.find("setFlex('root', 'height', 180)") != std::string::npos);
+    REQUIRE(js.find("setFlex('root', 'width', 420)") != std::string::npos);
+    REQUIRE(js.find("setFlex('root', 'padding_top', 2)") != std::string::npos);
+    REQUIRE(js.find("setFlex('root', 'padding_left', 8)") != std::string::npos);
+    REQUIRE(js.find("setFlex('root', 'justify_content', 'space-between')") != std::string::npos);
+    REQUIRE(js.find("setTextAlign('right_label1', 'right')") != std::string::npos);
+    REQUIRE(js.find("setCornerRadius('root', 'All', 6)") != std::string::npos);
+    REQUIRE(js.find("setWidgetStyle('ToneKnob2', 'minimal')") != std::string::npos);
+    REQUIRE(js.find("setBorder('ToneKnob2', '#fab387', 2.5, 36)") != std::string::npos);
+    REQUIRE(js.find("createLabel('ToneKnob2_val', '-6 dB'") != std::string::npos);
+    REQUIRE(js.find("createXYPad('FilterXYPad3'") != std::string::npos);
+    REQUIRE(js.find("createWaveform('MainWaveform4'") != std::string::npos);
+    REQUIRE(js.find("createSpectrum('SpectrumAnalyzer5'") != std::string::npos);
+    REQUIRE(js.find("createRow('divider6'") != std::string::npos);
+    REQUIRE(js.find("setBackground('divider6', '#333333')") != std::string::npos);
+}
+
+TEST_CASE("generate_pulp_js web compat emits extended style and layout properties",
+          "[view][import][coverage]") {
+    DesignIR ir;
+    ir.source = DesignSource::v0;
+    ir.root.type = "frame";
+    ir.root.name = "Root Panel";
+    ir.root.layout.direction = LayoutDirection::row;
+    ir.root.layout.gap = 2.5f;
+    ir.root.layout.padding_top = 1.0f;
+    ir.root.layout.padding_right = 2.0f;
+    ir.root.layout.padding_bottom = 3.0f;
+    ir.root.layout.padding_left = 4.0f;
+    ir.root.layout.justify = LayoutAlign::center;
+    ir.root.layout.align = LayoutAlign::center;
+    ir.root.layout.wrap = true;
+    ir.root.layout.width_mode = SizingMode::fill;
+    ir.root.layout.height_mode = SizingMode::fill;
+    ir.root.style.background_color = "#101010";
+    ir.root.style.background_gradient = "linear-gradient(#101010,#202020)";
+    ir.root.style.color = "#eeeeee";
+    ir.root.style.opacity = 0.5f;
+    ir.root.style.border_radius = 3.5f;
+    ir.root.style.border = "1px solid #444";
+    ir.root.style.box_shadow = "0 1px 2px #000";
+    ir.root.style.filter = "blur(1px)";
+    ir.root.style.font_family = "Inter";
+    ir.root.style.font_size = 15.0f;
+    ir.root.style.font_weight = 500;
+    ir.root.style.font_style = "italic";
+    ir.root.style.text_align = "center";
+    ir.root.style.letter_spacing = 0.5f;
+    ir.root.style.line_height = 1.3f;
+    ir.root.style.text_transform = "uppercase";
+    ir.root.style.overflow = "hidden";
+    ir.root.style.cursor = "grab";
+    ir.root.style.position = "absolute";
+    ir.root.style.top = 1.0f;
+    ir.root.style.left = 2.0f;
+    ir.root.style.right = 3.0f;
+    ir.root.style.bottom = 4.0f;
+    ir.root.style.z_index = 12;
+    ir.root.style.transform = "scale(1.1)";
+    ir.root.style.width = 200.0f;
+    ir.root.style.height = 100.0f;
+    ir.root.style.min_width = 80.0f;
+    ir.root.style.min_height = 30.0f;
+    ir.root.style.max_width = 400.0f;
+    ir.root.style.max_height = 160.0f;
+
+    IRNode button;
+    button.type = "button";
+    button.name = "Send Button";
+    button.text_content = "Send";
+    ir.root.children.push_back(button);
+
+    IRNode input;
+    input.type = "input";
+    input.name = "amount-input";
+    ir.root.children.push_back(input);
+
+    IRNode image;
+    image.type = "image";
+    image.name = "logo.png";
+    ir.root.children.push_back(image);
+
+    ir.tokens.strings["copy.cta"] = "Send";
+
+    CodeGenOptions opts;
+    opts.mode = CodeGenMode::web_compat;
+    opts.include_comments = false;
+    opts.root_variable = "panelRoot";
+    opts.indent_spaces = 4;
+    auto js = generate_pulp_js(ir, opts);
+
+    REQUIRE(js.find("const panelRoot = document.createElement('div')") != std::string::npos);
+    REQUIRE(js.find("panelRoot.style.flexDirection = 'row'") != std::string::npos);
+    REQUIRE(js.find("panelRoot.style.gap = '2.5px'") != std::string::npos);
+    REQUIRE(js.find("panelRoot.style.paddingTop = '1px'") != std::string::npos);
+    REQUIRE(js.find("panelRoot.style.paddingLeft = '4px'") != std::string::npos);
+    REQUIRE(js.find("panelRoot.style.justifyContent = 'center'") != std::string::npos);
+    REQUIRE(js.find("panelRoot.style.alignItems = 'center'") != std::string::npos);
+    REQUIRE(js.find("panelRoot.style.flexWrap = 'wrap'") != std::string::npos);
+    REQUIRE(js.find("panelRoot.style.flexGrow = '1'") != std::string::npos);
+    REQUIRE(js.find("panelRoot.style.background = 'linear-gradient(#101010,#202020)'") != std::string::npos);
+    REQUIRE(js.find("panelRoot.style.opacity = '0.5'") != std::string::npos);
+    REQUIRE(js.find("panelRoot.style.borderRadius = '3.5px'") != std::string::npos);
+    REQUIRE(js.find("panelRoot.style.boxShadow = '0 1px 2px #000'") != std::string::npos);
+    REQUIRE(js.find("panelRoot.style.zIndex = '12'") != std::string::npos);
+    REQUIRE(js.find("panelRoot.style.maxHeight = '160px'") != std::string::npos);
+    REQUIRE(js.find("document.createElement('button')") != std::string::npos);
+    REQUIRE(js.find("document.createElement('input')") != std::string::npos);
+    REQUIRE(js.find("document.createElement('img')") != std::string::npos);
+    REQUIRE(js.find("theme.strings[\"copy.cta\"] = 'Send'") != std::string::npos);
+    REQUIRE(js.find("document.body.appendChild(panelRoot)") != std::string::npos);
 }
 
 // ── W3C Design Tokens ───────────────────────────────────────────────────
@@ -553,6 +876,66 @@ TEST_CASE("parse_w3c_tokens resolves alias then evaluates math", "[view][import]
 
     // {spacing.base} resolves to "8", then "8 * 2" evaluates to 16
     REQUIRE(theme.dimensions["spacing.lg"] == 16.0f);
+}
+
+TEST_CASE("token parsers cover border composites inference and alternate sources",
+          "[view][import][coverage]") {
+    auto w3c = R"({
+        "border": {
+            "$type": "border",
+            "focus": {
+                "$value": {
+                    "color": "#ff00aa80",
+                    "width": "2px",
+                    "style": "dashed"
+                }
+            }
+        },
+        "misc": {
+            "implicitColor": { "$value": "#00ff00" },
+            "implicitNumber": { "$value": "42" },
+            "implicitString": { "$value": "not-a-number" },
+            "unknownComposite": { "$type": "custom", "$value": { "x": 1 } }
+        }
+    })";
+
+    auto theme = parse_w3c_tokens(w3c);
+    REQUIRE(theme.colors["border.focus.color"].a8() == 0x80);
+    REQUIRE(theme.dimensions["border.focus.width"] == 2.0f);
+    REQUIRE(theme.strings["border.focus.style"] == "dashed");
+    REQUIRE(theme.colors["misc.implicitColor"].g8() == 0xff);
+    REQUIRE(theme.dimensions["misc.implicitNumber"] == 42.0f);
+    REQUIRE(theme.strings["misc.implicitString"] == "not-a-number");
+    REQUIRE(theme.strings.count("misc.unknownComposite") == 1);
+
+    auto figma = R"([
+        { "name": "color/alpha", "type": "color", "value": "#11223344" },
+        { "name": "size/ratio", "type": "number", "value": "1.25" },
+        { "name": "copy/title", "type": "string", "value": "Hello" },
+        { "name": "inferred/color", "resolvedValue": "#abcdef" },
+        { "name": "inferred/number", "resolvedValue": "3.5" },
+        { "name": "inferred/string", "resolvedValue": "wide" },
+        { "type": "STRING", "resolvedValue": "missing name" }
+    ])";
+
+    auto figma_theme = parse_figma_variables(figma);
+    REQUIRE(figma_theme.colors["color.alpha"].a8() == 0x44);
+    REQUIRE(figma_theme.dimensions["size.ratio"] == 1.25f);
+    REQUIRE(figma_theme.strings["copy.title"] == "Hello");
+    REQUIRE(figma_theme.colors["inferred.color"].r8() == 0xab);
+    REQUIRE(figma_theme.dimensions["inferred.number"] == 3.5f);
+    REQUIRE(figma_theme.strings["inferred.string"] == "wide");
+
+    auto stitch = R"({
+        "colors": { "accent": "#12345678" },
+        "roundness": "full",
+        "spacing": 20
+    })";
+
+    auto stitch_theme = parse_stitch_design_system(stitch);
+    REQUIRE(stitch_theme.colors["color.accent"].a8() == 0x78);
+    REQUIRE(stitch_theme.dimensions["roundness"] == 999.0f);
+    REQUIRE(stitch_theme.dimensions["spacing.base"] == 20.0f);
 }
 
 // ── IR ↔ Theme conversion ───────────────────────────────────────────────
