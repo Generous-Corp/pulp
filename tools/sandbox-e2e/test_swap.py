@@ -523,19 +523,31 @@ def test_doctor_versions_parity_across_binaries(
 
 
 # -----------------------------------------------------------------------------
-# Scenario 7 — Library-linked command delegation
+# Scenario 7 — Subcommands that must fall through to pulp-cpp
 # -----------------------------------------------------------------------------
 #
-# pulp ship / validate / inspect / host / audio / import-design /
-# export-tokens / design-debug are C++-only. Post-swap they must route
-# from the Rust binary through the Phase 7 fallthrough wrapper to
-# pulp-cpp.
+# Two flavours, same fallthrough contract:
 #
-# We verify this with a stub pulp-cpp that tags its output. If the
-# Rust binary reaches the stub, we see the tag + exit 42.
+# 1. **Library-linked, C++-only by design**: pulp ship / validate /
+#    inspect / host / audio / import-design / export-tokens /
+#    design-debug. These will never be ported to Rust (they link Pulp's
+#    C++ libs directly). Post-swap they MUST route from the Rust binary
+#    through the Phase 7 fallthrough wrapper to pulp-cpp.
+#
+# 2. **New C++ subcommands not yet ported to Rust**: drift items where
+#    the C++ side gained a subcommand after the Rust port's last sync.
+#    The fallthrough is the safety net — even without a Rust port, the
+#    user-facing behavior must be unchanged. As of 2026-04-29: pulp loop
+#    (#940) and pulp coverage (#919) landed on main on Apr 28 and the
+#    Rust port hasn't absorbed them yet.
+#
+# We verify both classes the same way: stage a stub pulp-cpp that tags
+# its output. If the Rust binary reaches the stub, we see the tag +
+# exit 42.
 
 
 LIBRARY_LINKED_COMMANDS: tuple[tuple[str, ...], ...] = (
+    # By-design library-linked commands.
     ("ship", "check"),
     ("validate", "--help"),
     ("inspect", "--help"),
@@ -544,6 +556,13 @@ LIBRARY_LINKED_COMMANDS: tuple[tuple[str, ...], ...] = (
     ("import-design", "--help"),
     ("export-tokens", "--help"),
     ("design-debug", "--help"),
+    # Drift items — new C++ subcommands not yet ported to Rust. If a
+    # Rust port lands later, these tests still pass (Rust handles
+    # natively, exit 0, no fallthrough — but `--help` returns 0 so the
+    # stub-not-reached path fails differently). When a Rust port lands,
+    # move the entry to a parity test instead.
+    ("loop", "--help"),     # #940 — landed on main 2026-04-28
+    ("coverage", "--help"),  # #919 — landed on main 2026-04-28
 )
 
 
