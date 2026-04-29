@@ -190,6 +190,19 @@ TEST_CASE("base64 decode invalid", "[runtime][base64]") {
     REQUIRE_FALSE(result.has_value());
 }
 
+TEST_CASE("base64 decode rejects malformed padding", "[runtime][base64][issue-641]") {
+    REQUIRE_FALSE(base64_decode("A").has_value());
+    REQUIRE_FALSE(base64_decode("YQ=").has_value());
+    REQUIRE_FALSE(base64_decode("YQ==Z").has_value());
+    REQUIRE_FALSE(base64_decode("YQ===").has_value());
+}
+
+TEST_CASE("base64 decode permits whitespace around terminal padding", "[runtime][base64][issue-641]") {
+    auto decoded = base64_decode(" YQ = = \n");
+    REQUIRE(decoded.has_value());
+    REQUIRE(std::string(decoded->begin(), decoded->end()) == "a");
+}
+
 TEST_CASE("base64 binary round-trip", "[runtime][base64]") {
     std::vector<uint8_t> data = {0x00, 0xFF, 0x80, 0x7F, 0x01, 0xFE};
     auto encoded = base64_encode(data.data(), data.size());

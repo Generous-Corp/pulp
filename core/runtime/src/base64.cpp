@@ -55,15 +55,35 @@ std::string base64_encode(std::string_view input) {
 }
 
 std::optional<std::vector<uint8_t>> base64_decode(std::string_view input) {
-    // Strip whitespace and padding
+    // Strip whitespace while validating that padding, if present, is terminal.
     std::string clean;
     clean.reserve(input.size());
+    bool saw_padding = false;
+    size_t padding_count = 0;
     for (char c : input) {
-        if (c == '=') break;
-        if (c == ' ' || c == '\n' || c == '\r' || c == '\t') continue;
+        if (c == ' ' || c == '\n' || c == '\r' || c == '\t')
+            continue;
+        if (c == '=') {
+            saw_padding = true;
+            ++padding_count;
+            if (padding_count > 2)
+                return std::nullopt;
+            clean += c;
+            continue;
+        }
+        if (saw_padding)
+            return std::nullopt;
         if (static_cast<unsigned char>(c) >= 128 || kDecodeTable[static_cast<unsigned char>(c)] == 255)
             return std::nullopt;
         clean += c;
+    }
+
+    if (clean.size() % 4 == 1)
+        return std::nullopt;
+    if (padding_count > 0) {
+        if (clean.size() % 4 != 0 || padding_count > clean.size())
+            return std::nullopt;
+        clean.resize(clean.size() - padding_count);
     }
 
     std::vector<uint8_t> result;
