@@ -23,8 +23,8 @@ bool emit_ios_audio_session_event(const PulpIosAudioSessionEvent& event) {
     return true;
 }
 
-std::string_view to_string(PulpIosAudioEvent event) {
-    switch (event) {
+std::string_view to_string(int32_t event_code) {
+    switch (event_code) {
         case PULP_IOS_AUDIO_EVENT_NONE:               return "none";
         case PULP_IOS_AUDIO_EVENT_INTERRUPTION_BEGAN: return "interruption_began";
         case PULP_IOS_AUDIO_EVENT_INTERRUPTION_ENDED: return "interruption_ended";
@@ -36,6 +36,10 @@ std::string_view to_string(PulpIosAudioEvent event) {
             return "silence_secondary_audio_ended";
     }
     return "unknown";
+}
+
+std::string_view to_string(PulpIosAudioEvent event) {
+    return to_string(static_cast<int32_t>(event));
 }
 
 } // namespace pulp::format
