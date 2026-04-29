@@ -637,6 +637,130 @@ class GateFixtureTests(unittest.TestCase):
             )
         )
 
+    def test_version_config_loader_strips_metadata(self) -> None:
+        vbc = self._import_gate_module("version_bump_check")
+
+        cfg_path = self.tmp / "custom-versioning.json"
+        cfg_path.write_text(json.dumps({
+            "$schema": "https://example.invalid/schema.json",
+            "_comment": "ignored top-level metadata",
+            "generated_globs": ["build/**"],
+            "trailers": {"version_bump": "Custom-Bump"},
+            "surfaces": {
+                "sdk": {
+                    "_comment": "ignored surface metadata",
+                    "label": "SDK",
+                    "version_files": [{
+                        "_note": "ignored version-file metadata",
+                        "path": "CMakeLists.txt",
+                        "kind": "cmake_project_version",
+                    }],
+                    "trigger_paths": ["core/**"],
+                    "public_api_paths": ["core/**/include/**"],
+                    "internal_only_paths": ["core/**/src/**"],
+                    "changelog": "CHANGELOG.md",
+                },
+            },
+        }, indent=2) + "\n")
+
+        cfg = vbc.load_config(cfg_path)
+        self.assertEqual(cfg.generated_globs, ["build/**"])
+        self.assertEqual(cfg.trailer_version_bump, "Custom-Bump")
+        self.assertEqual(len(cfg.surfaces), 1)
+        self.assertEqual(cfg.surfaces[0].name, "sdk")
+        self.assertEqual(cfg.surfaces[0].version_files[0].path, "CMakeLists.txt")
+        self.assertEqual(cfg.surfaces[0].changelog, "CHANGELOG.md")
+
+    def test_version_helper_edges(self) -> None:
+        vbc = self._import_gate_module("version_bump_check")
+
+        self.assertEqual(
+            vbc.filter_generated(
+                ["build/out.cpp", "src/generated/foo.cpp", "src/live.cpp"],
+                ["build/**", "**/generated/**"],
+            ),
+            ["src/live.cpp"],
+        )
+        self.assertTrue(vbc.is_revert_commit("chore: undo", {"revert-of": ["abc"]}))
+        self.assertFalse(vbc.is_revert_commit("fix: ordinary change", {}))
+        self.assertEqual(vbc.max_level("patch", "minor", "major"), "major")
+        self.assertEqual(vbc.max_level("none", "patch"), "patch")
+
+    def test_apply_bumps_inserts_changelog_and_is_idempotent(self) -> None:
+        vbc = self._import_gate_module("version_bump_check")
+
+        cfg_path = self.tmp / "tools/scripts/versioning.json"
+        cfg = json.loads(cfg_path.read_text())
+        cfg["surfaces"]["sdk"]["changelog"] = "CHANGELOG.md"
+        cfg_path.write_text(json.dumps(cfg, indent=2) + "\n")
+        self.f.write("CHANGELOG.md", "# Changelog\n\n## [0.1.0]\n\n- Initial.\n")
+        self.f.commit("chore: add changelog config")
+        _git(self.tmp, "update-ref", "refs/remotes/origin/main", "HEAD")
+
+        path = self.tmp / "core/runtime/include/pulp/runtime/foo.hpp"
+        path.write_text("#pragma once\nvoid foo();\n")
+        self.f.commit("feat: change public foo signature")
+
+        previous_cwd = Path.cwd()
+        os.chdir(self.tmp)
+        try:
+            loaded = vbc.load_config(cfg_path)
+            changed = vbc.filter_generated(
+                vbc.git_diff_names("origin/main", "HEAD"),
+                loaded.generated_globs,
+            )
+            verdicts = vbc.assess_surfaces(
+                loaded,
+                changed,
+                "origin/main",
+                "HEAD",
+                self.tmp,
+            )
+            edited = vbc.apply_bumps(verdicts, "origin/main", self.tmp)
+            self.assertEqual(set(edited), {"CMakeLists.txt", "CHANGELOG.md"})
+
+            report, code = vbc.render_report(
+                vbc.assess_surfaces(loaded, changed, "origin/main", "HEAD", self.tmp),
+                "report",
+                "origin/main",
+                self.tmp,
+            )
+            self.assertEqual(code, 0, msg=report)
+            self.assertIn("bumped", report)
+
+            edited_again = vbc.apply_bumps(
+                vbc.assess_surfaces(loaded, changed, "origin/main", "HEAD", self.tmp),
+                "origin/main",
+                self.tmp,
+            )
+            self.assertEqual(edited_again, [])
+        finally:
+            os.chdir(previous_cwd)
+
+        self.assertIn("VERSION 0.2.0", (self.tmp / "CMakeLists.txt").read_text())
+        changelog = (self.tmp / "CHANGELOG.md").read_text()
+        self.assertLess(changelog.index("## [0.2.0]"), changelog.index("## [0.1.0]"))
+        status = subprocess.run(
+            ["git", "-C", str(self.tmp), "status", "--short"],
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout
+        self.assertIn("M  CMakeLists.txt", status)
+        self.assertIn("M  CHANGELOG.md", status)
+
+    def test_version_bump_missing_config_returns_usage_error(self) -> None:
+        code, out = _run(
+            [
+                "python3", str(VBC),
+                "--base", "origin/main",
+                "--config", str(self.tmp / "missing-versioning.json"),
+            ],
+            cwd=self.tmp,
+        )
+        self.assertEqual(code, 2, msg=out)
+        self.assertIn("config not found", out)
+
     def test_skill_sync_helper_paths_trailers_and_self_check(self) -> None:
         ssc = self._import_gate_module("skill_sync_check")
 
