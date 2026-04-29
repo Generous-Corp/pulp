@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/format/processor.hpp>
 #include <pulp/format/view_bridge.hpp>
+#include <pulp/runtime/message_channel.hpp>
 #include <pulp/state/store.hpp>
 #include <pulp/view/view.hpp>
 #include <functional>
@@ -94,6 +95,51 @@ TEST_CASE("ViewBridge honors custom create_view()", "[view_bridge]") {
     REQUIRE_FALSE(bridge.uses_script_ui());
 }
 
+TEST_CASE("ViewBridge primary helpers are idempotent and role-aware",
+          "[view_bridge][issue-493]") {
+    StubProcessor p;
+    state::StateStore store;
+    p.set_state_store(&store);
+    p.define_parameters(store);
+
+    auto custom = std::make_unique<view::View>();
+    auto* raw = custom.get();
+    p.custom_view = std::move(custom);
+
+    format::ViewBridge::Options options;
+    options.role = format::ViewRole::Inspector;
+    format::ViewBridge bridge(p, store, options);
+
+    REQUIRE(bridge.role() == format::ViewRole::Inspector);
+    REQUIRE(bridge.view_at(0) == nullptr);
+    REQUIRE(bridge.role_at(0) == format::ViewRole::Editor);
+
+    REQUIRE(bridge.open());
+    REQUIRE(bridge.view() == raw);
+    REQUIRE(bridge.view_count() == 1);
+    REQUIRE(bridge.role_at(0) == format::ViewRole::Inspector);
+    REQUIRE(bridge.view_at(1) == nullptr);
+    REQUIRE(bridge.role_at(1) == format::ViewRole::Editor);
+
+    p.custom_view = std::make_unique<view::View>();
+    REQUIRE(bridge.open());
+    REQUIRE(bridge.view() == raw);
+    REQUIRE(p.custom_view != nullptr);
+
+    auto released = bridge.release_view();
+    REQUIRE(released.get() == raw);
+    REQUIRE(bridge.view() == raw);
+    REQUIRE(bridge.view_count() == 1);
+
+    auto second_release = bridge.release_view();
+    REQUIRE(second_release == nullptr);
+
+    bridge.close();
+    REQUIRE_FALSE(bridge.is_open());
+    REQUIRE(bridge.view_count() == 0);
+    REQUIRE(p.closed_count == 0);
+}
+
 TEST_CASE("ViewBridge supports secondary views", "[view_bridge]") {
     StubProcessor p;
     state::StateStore store;
@@ -116,6 +162,40 @@ TEST_CASE("ViewBridge supports secondary views", "[view_bridge]") {
     REQUIRE(bridge.detach_secondary_view(insp));
     REQUIRE(bridge.view_count() == 1);
     REQUIRE_FALSE(bridge.detach_secondary_view(insp));
+}
+
+TEST_CASE("ViewBridge secondary helpers handle nulls, bounds, and close cleanup",
+          "[view_bridge][issue-493]") {
+    StubProcessor p;
+    state::StateStore store;
+    p.set_state_store(&store);
+    p.define_parameters(store);
+
+    format::ViewBridge bridge(p, store);
+    REQUIRE(bridge.attach_secondary_view(nullptr, format::ViewRole::Remote) == nullptr);
+    REQUIRE(bridge.view_count() == 0);
+
+    REQUIRE(bridge.open());
+    auto* primary = bridge.view();
+
+    auto secondary = std::make_unique<view::View>();
+    auto* secondary_raw = secondary.get();
+    auto* attached = bridge.attach_secondary_view(std::move(secondary), format::ViewRole::Remote);
+    REQUIRE(attached == secondary_raw);
+    REQUIRE(bridge.view_count() == 2);
+    REQUIRE(bridge.view_at(0) == primary);
+    REQUIRE(bridge.view_at(1) == secondary_raw);
+    REQUIRE(bridge.role_at(1) == format::ViewRole::Remote);
+    REQUIRE(bridge.view_at(2) == nullptr);
+    REQUIRE(bridge.role_at(2) == format::ViewRole::Editor);
+    REQUIRE_FALSE(bridge.detach_secondary_view(nullptr));
+
+    bridge.close();
+    REQUIRE_FALSE(bridge.is_open());
+    REQUIRE(bridge.view_count() == 0);
+    REQUIRE(bridge.view_at(0) == nullptr);
+    REQUIRE(bridge.role_at(0) == format::ViewRole::Editor);
+    REQUIRE_FALSE(bridge.detach_secondary_view(secondary_raw));
 }
 
 TEST_CASE("ViewBridge defers on_view_opened until notify_attached", "[view_bridge]") {
@@ -163,6 +243,26 @@ TEST_CASE("ViewBridge close without attach does not fire on_view_closed", "[view
 
     bridge.close();
     REQUIRE(p.closed_count == 0);
+}
+
+TEST_CASE("ViewBridge reports null remote channels without blocking later open",
+          "[view_bridge][issue-493]") {
+    StubProcessor p;
+    state::StateStore store;
+    p.set_state_store(&store);
+    p.define_parameters(store);
+
+    format::ViewBridge bridge(p, store);
+    REQUIRE(bridge.last_error().empty());
+
+    std::unique_ptr<runtime::MessageChannel> channel;
+    REQUIRE(bridge.attach_remote_channel(std::move(channel), "missing") == nullptr);
+    REQUIRE(bridge.last_error() == "attach_remote_channel: null channel");
+    REQUIRE_FALSE(bridge.detach_remote(nullptr));
+
+    REQUIRE(bridge.open());
+    REQUIRE(bridge.last_error().empty());
+    REQUIRE(bridge.is_open());
 }
 
 // Simulates each format adapter's call sequence against ViewBridge and
