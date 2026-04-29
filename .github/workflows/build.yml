@@ -199,6 +199,7 @@ jobs:
 
       - name: Install ccache (Windows)
         if: runner.os == 'Windows'
+        continue-on-error: true
         run: choco install ccache --no-progress -y
 
       # ── Caches (#420) ──────────────────────────────────────────────────
@@ -246,7 +247,12 @@ jobs:
 
       - name: Ccache stats
         if: always()
-        run: ccache --show-stats
+        run: |
+          if command -v ccache >/dev/null 2>&1; then
+            ccache --show-stats
+          else
+            echo "ccache not available; skipping stats"
+          fi
         shell: bash
 
       - name: Test (non-Windows)
