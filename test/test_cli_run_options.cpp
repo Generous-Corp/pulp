@@ -100,12 +100,19 @@ TEST_CASE("pulp run --frames sets the frame count and forwards it",
 }
 
 TEST_CASE("pulp run --frames rejects non-positive and non-integer values",
-          "[cli][run][issue-914]") {
+          "[cli][run][issue-914][issue-643]") {
     REQUIRE_FALSE(parse_run_options({"--frames", "0"}).error.empty());
     REQUIRE_FALSE(parse_run_options({"--frames", "-2"}).error.empty());
     REQUIRE_FALSE(parse_run_options({"--frames", "abc"}).error.empty());
+    REQUIRE_FALSE(parse_run_options({"--frames", "12x"}).error.empty());
+    REQUIRE_FALSE(parse_run_options({"--frames", "12.5"}).error.empty());
     REQUIRE_FALSE(parse_run_options({"--frames"}).error.empty());
     REQUIRE_FALSE(parse_run_options({"--frames=zero"}).error.empty());
+    REQUIRE_FALSE(parse_run_options({"--frames=12x"}).error.empty());
+    REQUIRE_FALSE(parse_run_options({"--frames=12.5"}).error.empty());
+
+    auto partial = parse_run_options({"--frames=12x"});
+    REQUIRE(partial.frames == 1);
 }
 
 TEST_CASE("pulp run --watch is recorded and composes with --headless",

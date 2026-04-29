@@ -6,10 +6,26 @@
 
 #include "cmd_run.hpp"
 
-#include <stdexcept>
+#include <charconv>
 #include <string>
+#include <system_error>
 
 namespace pulp_cli {
+
+namespace {
+
+bool parse_frame_count(const std::string& value, int& frames) {
+    if (value.empty()) return false;
+    int parsed = 0;
+    const char* first = value.data();
+    const char* last = first + value.size();
+    auto result = std::from_chars(first, last, parsed);
+    if (result.ec != std::errc{} || result.ptr != last) return false;
+    frames = parsed;
+    return true;
+}
+
+}  // namespace
 
 ParseRunResult parse_run_options(const std::vector<std::string>& args) {
     ParseRunResult r;
@@ -58,30 +74,28 @@ ParseRunResult parse_run_options(const std::vector<std::string>& args) {
         }
         if (a == "--frames") {
             if (i + 1 < args.size()) {
-                try {
-                    int n = std::stoi(args[i + 1]);
-                    if (n <= 0) { r.error = "--frames must be > 0"; return r; }
-                    r.frames = n;
-                    ++i;
-                    continue;
-                } catch (...) {
+                int n = 0;
+                if (!parse_frame_count(args[i + 1], n)) {
                     r.error = "--frames requires an integer argument";
                     return r;
                 }
+                if (n <= 0) { r.error = "--frames must be > 0"; return r; }
+                r.frames = n;
+                ++i;
+                continue;
             }
             r.error = "--frames requires an integer argument";
             return r;
         }
         if (a.rfind("--frames=", 0) == 0) {
-            try {
-                int n = std::stoi(a.substr(std::string("--frames=").size()));
-                if (n <= 0) { r.error = "--frames must be > 0"; return r; }
-                r.frames = n;
-                continue;
-            } catch (...) {
+            int n = 0;
+            if (!parse_frame_count(a.substr(std::string("--frames=").size()), n)) {
                 r.error = "--frames= requires an integer";
                 return r;
             }
+            if (n <= 0) { r.error = "--frames must be > 0"; return r; }
+            r.frames = n;
+            continue;
         }
         if (a == "--watch") {
             r.watch = true;
