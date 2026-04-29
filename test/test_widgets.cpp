@@ -771,6 +771,129 @@ TEST_CASE("SpectrumView empty renders background", "[view][widget]") {
     REQUIRE(canvas.count(DrawCommand::Type::fill_rect) == 0);
 }
 
+TEST_CASE("SpectrogramView auto-configures and paints pushed spectrum",
+          "[view][widget][coverage]") {
+    SpectrogramView spectrogram;
+    spectrogram.set_bounds({0, 0, 128, 32});
+
+    RecordingCanvas empty_canvas;
+    spectrogram.paint(empty_canvas);
+    REQUIRE(empty_canvas.count(DrawCommand::Type::fill_rect) == 1);
+
+    std::vector<float> magnitudes{-80.0f, -40.0f, 0.0f};
+    spectrogram.push_spectrum(magnitudes.data(), static_cast<int>(magnitudes.size()));
+
+    REQUIRE(spectrogram.history_columns() == 256);
+    REQUIRE(spectrogram.freq_rows() == 3);
+
+    RecordingCanvas painted_canvas;
+    spectrogram.paint(painted_canvas);
+
+    REQUIRE(painted_canvas.count(DrawCommand::Type::fill_rect) >
+            empty_canvas.count(DrawCommand::Type::fill_rect));
+    REQUIRE(painted_canvas.count(DrawCommand::Type::set_fill_color) >
+            empty_canvas.count(DrawCommand::Type::set_fill_color));
+}
+
+TEST_CASE("SpectrogramView explicit configuration controls painted grid size",
+          "[view][widget][coverage]") {
+    SpectrogramView spectrogram;
+    spectrogram.set_bounds({0, 0, 40, 20});
+    spectrogram.configure(4, 2, pulp::signal::ColorRamp::heat, -60.0f, -20.0f);
+    spectrogram.set_color_ramp(pulp::signal::ColorRamp::grayscale);
+    spectrogram.set_range(-90.0f, -30.0f);
+
+    std::vector<float> magnitudes{-90.0f, -30.0f};
+    spectrogram.push_spectrum(magnitudes.data(), static_cast<int>(magnitudes.size()));
+
+    REQUIRE(spectrogram.history_columns() == 4);
+    REQUIRE(spectrogram.freq_rows() == 2);
+
+    RecordingCanvas canvas;
+    spectrogram.paint(canvas);
+
+    REQUIRE(canvas.count(DrawCommand::Type::fill_rect) == 1 + 4 * 2);
+}
+
+TEST_CASE("MultiMeter paints vertical and horizontal channel indicators",
+          "[view][widget][coverage]") {
+    pulp::signal::MultiChannelMeterData data;
+    data.num_channels = 3;
+    data.channels[0].rms = 0.95f;
+    data.channels[0].peak = 0.98f;
+    data.channels[0].clipped = true;
+    data.channels[1].rms = 0.75f;
+    data.channels[1].peak = 0.82f;
+    data.channels[2].rms = 0.35f;
+    data.channels[2].peak = 0.42f;
+
+    MultiMeter vertical;
+    vertical.set_bounds({0, 0, 90, 120});
+    vertical.set_channel_count(20);
+    REQUIRE(vertical.channel_count() == pulp::signal::kMaxMeterChannels);
+
+    vertical.update(data, 0.1f);
+    REQUIRE(vertical.channel_count() == 3);
+    REQUIRE(vertical.ballistics().channels[0].clip_indicator);
+
+    RecordingCanvas vertical_canvas;
+    vertical.paint(vertical_canvas);
+
+    REQUIRE(vertical_canvas.count(DrawCommand::Type::fill_rounded_rect) == 1);
+    REQUIRE(vertical_canvas.count(DrawCommand::Type::fill_rect) >= 4);
+    REQUIRE(vertical_canvas.count(DrawCommand::Type::stroke_line) >= 6);
+
+    MultiMeter horizontal;
+    horizontal.set_bounds({0, 0, 120, 60});
+    horizontal.set_layout(MultiMeter::Layout::horizontal);
+    horizontal.update(data, 0.1f);
+
+    RecordingCanvas horizontal_canvas;
+    horizontal.paint(horizontal_canvas);
+
+    REQUIRE(horizontal.layout() == MultiMeter::Layout::horizontal);
+    REQUIRE(horizontal_canvas.count(DrawCommand::Type::fill_rounded_rect) == 1);
+    REQUIRE(horizontal_canvas.count(DrawCommand::Type::fill_rect) >= 4);
+    REQUIRE(horizontal_canvas.count(DrawCommand::Type::stroke_line) >= 6);
+}
+
+TEST_CASE("MultiMeter with no channels paints nothing",
+          "[view][widget][coverage]") {
+    MultiMeter meter;
+    meter.set_bounds({0, 0, 80, 40});
+
+    RecordingCanvas canvas;
+    meter.paint(canvas);
+
+    REQUIRE(canvas.command_count() == 0);
+}
+
+TEST_CASE("CorrelationMeter clamps updates and paints both polarities",
+          "[view][widget][coverage]") {
+    CorrelationMeter meter;
+    meter.set_bounds({0, 0, 100, 20});
+
+    meter.update(2.0f, 1.0f);
+    REQUIRE(meter.display_correlation() > 0.99f);
+
+    RecordingCanvas positive_canvas;
+    meter.paint(positive_canvas);
+
+    REQUIRE(positive_canvas.count(DrawCommand::Type::fill_rounded_rect) == 2);
+    REQUIRE(positive_canvas.count(DrawCommand::Type::stroke_line) == 3);
+    REQUIRE(positive_canvas.count(DrawCommand::Type::fill_rect) == 1);
+
+    meter.update(-2.0f, 1.0f);
+    REQUIRE(meter.display_correlation() < -0.99f);
+
+    RecordingCanvas negative_canvas;
+    meter.paint(negative_canvas);
+
+    REQUIRE(negative_canvas.count(DrawCommand::Type::fill_rounded_rect) == 2);
+    REQUIRE(negative_canvas.count(DrawCommand::Type::stroke_line) == 3);
+    REQUIRE(negative_canvas.count(DrawCommand::Type::fill_rect) == 1);
+}
+
 TEST_CASE("View paint_all paints children", "[view][widget]") {
     View root;
     root.set_bounds({0, 0, 300, 200});
