@@ -297,6 +297,110 @@ class LocalCiTests(unittest.TestCase):
             else:
                 os.environ["PULP_LOCAL_CI_CONFIG"] = original_override
 
+    def test_size_helpers_report_files_and_local_ci_state_footprint(self):
+        self.assertEqual(self.mod.format_size_bytes(None), "")
+        self.assertEqual(self.mod.format_size_bytes(""), "")
+        self.assertEqual(self.mod.format_size_bytes(512), "512 B")
+        self.assertEqual(self.mod.format_size_bytes(1536), "1.5 KB")
+        self.assertEqual(self.mod.path_size_bytes(self.state_dir / "missing"), 0)
+
+        bundle_dir = self.state_dir / "bundles"
+        bundle_dir.mkdir(parents=True)
+        (bundle_dir / "a.bundle").write_bytes(b"abc")
+        nested = bundle_dir / "nested"
+        nested.mkdir()
+        (nested / "b.bundle").write_bytes(b"defg")
+
+        self.assertEqual(self.mod.path_size_bytes(bundle_dir), 7)
+        footprint = self.mod.local_ci_state_footprint()
+        self.assertEqual(footprint["entries"]["bundles"]["size_bytes"], 7)
+        self.assertEqual(footprint["total_bytes"], 7)
+        self.assertEqual(self.mod.describe_path_for_cleanup(bundle_dir), "bundles")
+        outside = Path(self.tmpdir.name) / "outside"
+        self.assertEqual(self.mod.describe_path_for_cleanup(outside), str(outside))
+
+    def test_text_file_helpers_tail_trim_and_atomic_write(self):
+        log_path = self.state_dir / "logs" / "job" / "mac.log"
+        log_path.parent.mkdir(parents=True)
+        log_path.write_text("one\ntwo\nthree\n")
+
+        self.assertEqual(self.mod.tail_lines(self.state_dir / "missing.log"), [])
+        self.assertEqual(self.mod.tail_lines(log_path, limit=2), ["two\n", "three\n"])
+
+        target_path = self.state_dir / "results" / "result.txt"
+        self.mod.atomic_write_text(target_path, "first\n")
+        self.mod.atomic_write_text(target_path, "second\n")
+        self.assertEqual(target_path.read_text(), "second\n")
+
+        trimmed = self.mod.trim_line("  " + ("x" * 170) + "tail  ", max_len=12)
+        self.assertEqual(len(trimmed), 12)
+        self.assertTrue(trimmed.endswith("tail"))
+
+    def test_priority_and_target_helpers_normalize_inputs(self):
+        self.assertIsNone(self.mod.parse_targets_arg(""))
+        self.assertEqual(
+            self.mod.parse_targets_arg(" windows,mac,windows, ,ubuntu "),
+            ["mac", "ubuntu", "windows"],
+        )
+        self.assertEqual(self.mod.normalize_priority(" HIGH "), "high")
+        self.assertEqual(self.mod.priority_value(None), 50)
+        with self.assertRaisesRegex(ValueError, "Invalid priority"):
+            self.mod.normalize_priority("urgent")
+
+        config = {
+            "targets": {
+                "mac": {"enabled": True},
+                "ubuntu": {"enabled": True},
+                "windows": {"enabled": True},
+            },
+            "defaults": {"targets": "ubuntu,mac,ubuntu"},
+        }
+        self.assertEqual(self.mod.resolve_targets(config, None), ["mac", "ubuntu"])
+        self.assertEqual(self.mod.resolve_targets(config, ["windows", "mac", "windows"]), ["mac", "windows"])
+
+    def test_windows_checkout_path_helpers_join_and_detect_unsafe_roots(self):
+        self.assertEqual(
+            self.mod.windows_path_join(r"C:\Users\daniel\\", r"\Code\\", "pulp"),
+            r"C:\Users\daniel\Code\pulp",
+        )
+        self.assertEqual(self.mod.windows_default_repo_checkout_path(None), "pulp-validate")
+        self.assertEqual(
+            self.mod.windows_default_repo_checkout_path(r"C:\Users\daniel"),
+            r"C:\Users\daniel\pulp-validate",
+        )
+        self.assertTrue(self.mod.windows_repo_path_is_unsafe(None))
+        self.assertTrue(self.mod.windows_repo_path_is_unsafe(r"C:\\"))
+        self.assertTrue(
+            self.mod.windows_repo_path_is_unsafe(
+                r"C:\Users\daniel",
+                r"C:\Users\daniel",
+            )
+        )
+        self.assertFalse(
+            self.mod.windows_repo_path_is_unsafe(
+                r"C:\Users\daniel\pulp-validate",
+                r"C:\Users\daniel",
+            )
+        )
+
+    def test_image_change_summary_falls_back_to_hash_for_non_images(self):
+        before_path = Path(self.tmpdir.name) / "before.bin"
+        after_path = Path(self.tmpdir.name) / "after.bin"
+        diff_path = Path(self.tmpdir.name) / "diff" / "image.png"
+        before_path.write_bytes(b"same")
+        after_path.write_bytes(b"same")
+
+        unchanged = self.mod.image_change_summary(before_path, after_path, diff_output_path=diff_path)
+        self.assertFalse(unchanged["changed"])
+        self.assertEqual(unchanged["method"], "file-hash")
+        self.assertFalse(diff_path.exists())
+
+        after_path.write_bytes(b"different")
+        changed = self.mod.image_change_summary(before_path, after_path, diff_output_path=diff_path)
+        self.assertTrue(changed["changed"])
+        self.assertEqual(changed["method"], "file-hash")
+        self.assertFalse(diff_path.exists())
+
     def test_resolve_submission_options_uses_branch_tip_when_branch_is_explicit(self):
         args = SimpleNamespace(
             branch="feature/topic",
