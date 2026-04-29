@@ -284,6 +284,57 @@ TEST_CASE("cmd_target manages project targets from local pulp.toml",
     auto remove_last = run_in_project(tmp.path, [&] { return cmd_target({"remove", "macOS-arm64"}); });
     REQUIRE(remove_last.exit_code == 1);
     REQUIRE(remove_last.stderr_text.find("Cannot remove the last target") != std::string::npos);
+
+    auto add_missing_arg = run_in_project(tmp.path, [&] { return cmd_target({"add"}); });
+    REQUIRE(add_missing_arg.exit_code == 1);
+    REQUIRE(add_missing_arg.stderr_text.find("Usage: pulp target add") != std::string::npos);
+
+    auto remove_missing_arg = run_in_project(tmp.path, [&] { return cmd_target({"remove"}); });
+    REQUIRE(remove_missing_arg.exit_code == 1);
+    REQUIRE(remove_missing_arg.stderr_text.find("Usage: pulp target remove") != std::string::npos);
+
+    auto unknown = run_in_project(tmp.path, [&] { return cmd_target({"rename"}); });
+    REQUIRE(unknown.exit_code == 1);
+    REQUIRE(unknown.stderr_text.find("Unknown target subcommand") != std::string::npos);
+}
+
+TEST_CASE("package commands report project-root failures without remote work",
+          "[cli][package-commands][errors][issue-643]") {
+    TempDir tmp;
+    ScopedCurrentPath cwd(tmp.path);
+
+    {
+        StreamCapture capture;
+        REQUIRE(cmd_target({"list"}) == 1);
+        REQUIRE(capture.err.str().find("Not in a Pulp project") != std::string::npos);
+    }
+    {
+        StreamCapture capture;
+        REQUIRE(cmd_list({}) == 1);
+        REQUIRE(capture.err.str().find("Not in a Pulp project") != std::string::npos);
+    }
+    {
+        StreamCapture capture;
+        REQUIRE(cmd_update({}) == 1);
+        REQUIRE(capture.err.str().find("Not in a Pulp project") != std::string::npos);
+    }
+    {
+        StreamCapture capture;
+        REQUIRE(cmd_suggest({"--description", "filter"}) == 1);
+        REQUIRE(capture.err.str().find("Package registry not found") != std::string::npos);
+    }
+}
+
+TEST_CASE("cmd_target list shows source-checkout defaults without pulp.toml",
+          "[cli][package-commands][target][issue-643]") {
+    TempDir tmp;
+    write_file(tmp.path / "CMakeLists.txt", "cmake_minimum_required(VERSION 3.22)\n");
+    fs::create_directories(tmp.path / "core");
+
+    auto listed = run_in_project(tmp.path, [&] { return cmd_target({"list"}); });
+    REQUIRE(listed.exit_code == 0);
+    REQUIRE(listed.stdout_text.find("defaults") != std::string::npos);
+    REQUIRE(listed.stdout_text.find("macOS-arm64") != std::string::npos);
 }
 
 TEST_CASE("search, list, suggest, and audit commands use staged local data",
@@ -355,6 +406,103 @@ TEST_CASE("search, list, suggest, and audit commands use staged local data",
     REQUIRE(audit_licenses_result.stdout_text.find("MPL-2.0 REVIEW") != std::string::npos);
 }
 
+TEST_CASE("search, list, suggest, and audit commands cover empty and error modes",
+          "[cli][package-commands][registry][issue-643]") {
+    TempDir tmp;
+    write_project_scaffold(tmp.path);
+    write_registry_fixture(tmp.path);
+    REQUIRE(write_project_targets(tmp.path, {PlatformTarget{"macOS", "arm64"}}));
+
+    auto no_lock_list = run_in_project(tmp.path, [&] { return cmd_list({}); });
+    REQUIRE(no_lock_list.exit_code == 0);
+    REQUIRE(no_lock_list.stdout_text.find("No packages installed") != std::string::npos);
+
+    REQUIRE(save_lock_file(tmp.path / "packages.lock.json", make_lock({})));
+    auto empty_lock_list = run_in_project(tmp.path, [&] { return cmd_list({}); });
+    REQUIRE(empty_lock_list.exit_code == 0);
+    REQUIRE(empty_lock_list.stdout_text.find("No packages installed") != std::string::npos);
+
+    auto no_hits = run_in_project(tmp.path, [&] { return cmd_search({"zzzz-no-match"}); });
+    REQUIRE(no_hits.exit_code == 0);
+    REQUIRE(no_hits.stdout_text.find("No packages found matching") != std::string::npos);
+
+    auto suggest_help = run_in_project(tmp.path, [&] { return cmd_suggest({}); });
+    REQUIRE(suggest_help.exit_code == 0);
+    REQUIRE(suggest_help.stdout_text.find("Usage: pulp suggest") != std::string::npos);
+
+    auto suggest_json = run_in_project(tmp.path, [&] {
+        return cmd_suggest({"--description", "filter", "--format", "json"});
+    });
+    REQUIRE(suggest_json.exit_code == 0);
+    REQUIRE(suggest_json.stdout_text.find("\"id\": \"signalsmith-dsp\"") != std::string::npos);
+
+    auto suggest_empty_json = run_in_project(tmp.path, [&] {
+        return cmd_suggest({"--description", "zzzz-no-match", "--format", "json"});
+    });
+    REQUIRE(suggest_empty_json.exit_code == 0);
+    REQUIRE(suggest_empty_json.stdout_text.find("[]") != std::string::npos);
+
+    auto suggest_missing_file = run_in_project(tmp.path, [&] {
+        return cmd_suggest({"--analyze", "missing.cpp"});
+    });
+    REQUIRE(suggest_missing_file.exit_code == 1);
+    REQUIRE(suggest_missing_file.stderr_text.find("Cannot read file") != std::string::npos);
+
+    write_file(tmp.path / "unmatched.cpp", "#include <unrelated/header.hpp>\n");
+    auto suggest_unmatched = run_in_project(tmp.path, [&] {
+        return cmd_suggest({"--analyze", "unmatched.cpp"});
+    });
+    REQUIRE(suggest_unmatched.exit_code == 0);
+    REQUIRE(suggest_unmatched.stdout_text.find("No package suggestions") != std::string::npos);
+
+    auto suggest_missing_alternative = run_in_project(tmp.path, [&] {
+        return cmd_suggest({"--alternative", "missing-pkg"});
+    });
+    REQUIRE(suggest_missing_alternative.exit_code == 1);
+    REQUIRE(suggest_missing_alternative.stderr_text.find("not found") != std::string::npos);
+
+    auto suggest_no_mode = run_in_project(tmp.path, [&] { return cmd_suggest({"--format", "json"}); });
+    REQUIRE(suggest_no_mode.exit_code == 1);
+    REQUIRE(suggest_no_mode.stderr_text.find("Specify --description") != std::string::npos);
+
+    fs::remove(tmp.path / "packages.lock.json");
+    auto audit_no_packages = run_in_project(tmp.path, [&] { return audit_packages(tmp.path); });
+    REQUIRE(audit_no_packages.exit_code == 0);
+    REQUIRE(audit_no_packages.stdout_text.find("nothing to audit") != std::string::npos);
+
+    REQUIRE(save_lock_file(tmp.path / "packages.lock.json", make_lock({
+        {"signalsmith-dsp", {"1.2.0", "https://example.com/signalsmith.git", "", "v1.2.0"}},
+    })));
+    auto audit_packages_ok = run_in_project(tmp.path, [&] { return audit_packages(tmp.path); });
+    REQUIRE(audit_packages_ok.exit_code == 0);
+    REQUIRE(audit_packages_ok.stdout_text.find("0 issues") != std::string::npos);
+
+    auto audit_platforms_ok = run_in_project(tmp.path, [&] { return audit_platforms(tmp.path); });
+    REQUIRE(audit_platforms_ok.exit_code == 0);
+    REQUIRE(audit_platforms_ok.stdout_text.find("All packages support") != std::string::npos);
+
+    auto audit_licenses_ok = run_in_project(tmp.path, [&] { return audit_licenses(tmp.path); });
+    REQUIRE(audit_licenses_ok.exit_code == 0);
+    REQUIRE(audit_licenses_ok.stdout_text.find("MIT OK") != std::string::npos);
+
+    fs::remove(tmp.path / "tools" / "packages" / "registry.json");
+    auto audit_missing_registry = run_in_project(tmp.path, [&] { return audit_packages(tmp.path); });
+    REQUIRE(audit_missing_registry.exit_code == 1);
+    REQUIRE(audit_missing_registry.stderr_text.find("Package registry not found") != std::string::npos);
+
+    auto audit_platforms_missing_registry = run_in_project(tmp.path, [&] {
+        return audit_platforms(tmp.path);
+    });
+    REQUIRE(audit_platforms_missing_registry.exit_code == 1);
+    REQUIRE(audit_platforms_missing_registry.stderr_text.find("Registry not found") != std::string::npos);
+
+    auto audit_licenses_missing_registry = run_in_project(tmp.path, [&] {
+        return audit_licenses(tmp.path);
+    });
+    REQUIRE(audit_licenses_missing_registry.exit_code == 1);
+    REQUIRE(audit_licenses_missing_registry.stderr_text.find("Registry not found") != std::string::npos);
+}
+
 TEST_CASE("cmd_update updates only local lock and generated cmake",
           "[cli][package-commands][update][issue-643]") {
     TempDir tmp;
@@ -378,6 +526,30 @@ TEST_CASE("cmd_update updates only local lock and generated cmake",
     REQUIRE(apply.stdout_text.find("Updated packages") != std::string::npos);
     REQUIRE(load_lock_file(tmp.path / "packages.lock.json").packages["signalsmith-dsp"].version == "1.2.0");
     REQUIRE(read_file(tmp.path / "cmake" / "pulp-packages.cmake").find("signalsmith-dsp") != std::string::npos);
+}
+
+TEST_CASE("cmd_update reports no-op and missing-registry states",
+          "[cli][package-commands][update][issue-643]") {
+    TempDir tmp;
+    write_project_scaffold(tmp.path);
+    write_registry_fixture(tmp.path);
+    REQUIRE(write_project_targets(tmp.path, {PlatformTarget{"macOS", "arm64"}}));
+
+    auto no_lock = run_in_project(tmp.path, [&] { return cmd_update({}); });
+    REQUIRE(no_lock.exit_code == 0);
+    REQUIRE(no_lock.stdout_text.find("No packages installed") != std::string::npos);
+
+    REQUIRE(save_lock_file(tmp.path / "packages.lock.json", make_lock({
+        {"signalsmith-dsp", {"1.2.0", "https://example.com/signalsmith.git", "", "v1.2.0"}},
+    })));
+    auto no_updates = run_in_project(tmp.path, [&] { return cmd_update({}); });
+    REQUIRE(no_updates.exit_code == 0);
+    REQUIRE(no_updates.stdout_text.find("All packages are up to date") != std::string::npos);
+
+    fs::remove(tmp.path / "tools" / "packages" / "registry.json");
+    auto missing_registry = run_in_project(tmp.path, [&] { return cmd_update({}); });
+    REQUIRE(missing_registry.exit_code == 1);
+    REQUIRE(missing_registry.stderr_text.find("Package registry not found") != std::string::npos);
 }
 
 TEST_CASE("cmd_add and cmd_remove stay local on failure and success paths",
@@ -418,5 +590,78 @@ TEST_CASE("cmd_add and cmd_remove stay local on failure and success paths",
     auto remove_ok = run_in_project(tmp.path, [&] { return cmd_remove({"signalsmith-dsp"}); });
     REQUIRE(remove_ok.exit_code == 0);
     REQUIRE(remove_ok.stdout_text.find("Removed Signalsmith DSP") != std::string::npos);
+    REQUIRE(load_lock_file(tmp.path / "packages.lock.json").packages.empty());
+}
+
+TEST_CASE("cmd_add covers guarded installs and installed-version guards",
+          "[cli][package-commands][add-remove][issue-643]") {
+    TempDir tmp;
+    write_project_scaffold(tmp.path);
+    write_registry_fixture(tmp.path);
+    REQUIRE(write_project_targets(
+        tmp.path,
+        {PlatformTarget{"macOS", "arm64"}, PlatformTarget{"Windows", "x64"}, PlatformTarget{"Linux", "x64"}}));
+    REQUIRE(save_lock_file(tmp.path / "packages.lock.json", make_lock({})));
+
+    auto missing_id = run_in_project(tmp.path, [&] { return cmd_add({"--no-cmake"}); });
+    REQUIRE(missing_id.exit_code == 1);
+    REQUIRE(missing_id.stderr_text.find("No package specified") != std::string::npos);
+
+    auto license_mismatch = run_in_project(tmp.path, [&] {
+        return cmd_add({"gpl-filter", "--accept-license", "MIT"});
+    });
+    REQUIRE(license_mismatch.exit_code == 1);
+    REQUIRE(license_mismatch.stderr_text.find("does not match package license") != std::string::npos);
+
+    auto unsupported_without_guard = run_in_project(tmp.path, [&] {
+        return cmd_add({"mpl-analyzer"});
+    });
+    REQUIRE(unsupported_without_guard.exit_code == 1);
+    REQUIRE(unsupported_without_guard.stdout_text.find("Use --platform-guard") != std::string::npos);
+
+    auto guarded = run_in_project(tmp.path, [&] {
+        return cmd_add({"gpl-filter", "--accept-license", "GPL-3.0", "--platform-guard"});
+    });
+    REQUIRE(guarded.exit_code == 0);
+    REQUIRE(guarded.stdout_text.find("Installing GPL-3.0 package") != std::string::npos);
+    REQUIRE(guarded.stdout_text.find("Added GPL Filter v3.0.0") != std::string::npos);
+    auto cmake = read_file(tmp.path / "cmake" / "pulp-packages.cmake");
+    REQUIRE(cmake.find("if(") != std::string::npos);
+    REQUIRE(cmake.find("APPLE") != std::string::npos);
+    REQUIRE(cmake.find("WIN32") != std::string::npos);
+    REQUIRE(cmake.find("PULP_HAS_GPL_FILTER") != std::string::npos);
+    REQUIRE(read_file(tmp.path / "CMakeLists.txt").find("include(cmake/pulp-packages.cmake OPTIONAL)")
+            != std::string::npos);
+
+    auto already_current = run_in_project(tmp.path, [&] {
+        return cmd_add({"gpl-filter", "--accept-license", "GPL-3.0"});
+    });
+    REQUIRE(already_current.exit_code == 0);
+    REQUIRE(already_current.stdout_text.find("is already installed") != std::string::npos);
+
+    REQUIRE(save_lock_file(tmp.path / "packages.lock.json", make_lock({
+        {"signalsmith-dsp", {"1.0.0", "https://example.com/signalsmith.git", "", "v1.0.0"}},
+    })));
+    auto installed_old = run_in_project(tmp.path, [&] { return cmd_add({"signalsmith-dsp"}); });
+    REQUIRE(installed_old.exit_code == 0);
+    REQUIRE(installed_old.stdout_text.find("Use 'pulp update' to upgrade") != std::string::npos);
+}
+
+TEST_CASE("cmd_remove handles help and registry-free removal",
+          "[cli][package-commands][add-remove][issue-643]") {
+    TempDir tmp;
+    write_project_scaffold(tmp.path);
+    REQUIRE(write_project_targets(tmp.path, {PlatformTarget{"macOS", "arm64"}}));
+    REQUIRE(save_lock_file(tmp.path / "packages.lock.json", make_lock({
+        {"orphan-pkg", {"0.1.0", "https://example.com/orphan.git", "", "v0.1.0"}},
+    })));
+
+    auto help = run_in_project(tmp.path, [&] { return cmd_remove({}); });
+    REQUIRE(help.exit_code == 0);
+    REQUIRE(help.stdout_text.find("Usage: pulp remove") != std::string::npos);
+
+    auto removed = run_in_project(tmp.path, [&] { return cmd_remove({"orphan-pkg"}); });
+    REQUIRE(removed.exit_code == 0);
+    REQUIRE(removed.stdout_text.find("Removed orphan-pkg") != std::string::npos);
     REQUIRE(load_lock_file(tmp.path / "packages.lock.json").packages.empty());
 }
