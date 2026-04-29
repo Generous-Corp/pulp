@@ -54,6 +54,39 @@ TEST_CASE("Environment: empty listener subscription is inert",
     REQUIRE(s.color_scheme == ColorScheme::dark);
 }
 
+TEST_CASE("EnvironmentChange: any reflects individual flags",
+          "[environment][issue-640]") {
+    EnvironmentChange change;
+    REQUIRE_FALSE(change.any());
+
+    change.display = true;
+    REQUIRE(change.any());
+
+    change = {};
+    change.safe_area = true;
+    REQUIRE(change.any());
+
+    change = {};
+    change.keyboard = true;
+    REQUIRE(change.any());
+
+    change = {};
+    change.orientation = true;
+    REQUIRE(change.any());
+
+    change = {};
+    change.color_scheme = true;
+    REQUIRE(change.any());
+
+    change = {};
+    change.lifecycle = true;
+    REQUIRE(change.any());
+
+    change = {};
+    change.memory_pressure = true;
+    REQUIRE(change.any());
+}
+
 TEST_CASE("Environment: subscribe receives publish + correct change mask",
           "[environment]") {
     Environment::reset_for_test();
@@ -97,6 +130,25 @@ TEST_CASE("Environment: token RAII unsubscribes", "[environment]") {
 
     Environment::inject_for_test(make_state(ColorScheme::light));
     REQUIRE(calls == 1);
+}
+
+TEST_CASE("Environment: reset clears listeners held by live tokens",
+          "[environment][issue-640]") {
+    Environment::reset_for_test();
+    int calls = 0;
+    auto token = Environment::instance().subscribe(
+        [&](const EnvironmentState&, EnvironmentChange) { ++calls; });
+    REQUIRE(token.valid());
+
+    Environment::reset_for_test();
+    Environment::inject_for_test(make_state(ColorScheme::dark));
+    REQUIRE(calls == 0);
+
+    token.reset();
+    REQUIRE_FALSE(token.valid());
+
+    Environment::inject_for_test(make_state(ColorScheme::light));
+    REQUIRE(calls == 0);
 }
 
 TEST_CASE("Environment: token move transfers ownership", "[environment]") {
