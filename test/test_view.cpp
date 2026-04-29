@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
+#include <pulp/view/frame_clock.hpp>
 #include <pulp/view/plugin_view_host.hpp>
 #include <pulp/view/view.hpp>
 #include <pulp/view/window_host.hpp>
@@ -15,9 +16,11 @@ public:
     void show() override {}
     void hide() override {}
     bool is_visible() const override { return false; }
-    void repaint() override {}
+    void repaint() override { ++repaint_count; }
     void set_close_callback(std::function<void()>) override {}
     void run_event_loop() override {}
+
+    int repaint_count = 0;
 };
 
 class DummyPluginViewHost final : public PluginViewHost {
@@ -25,9 +28,11 @@ public:
     NativeViewHandle native_handle() override { return nullptr; }
     void attach_to_parent(NativeViewHandle) override {}
     void detach() override {}
-    void repaint() override {}
+    void repaint() override { ++repaint_count; }
     void set_size(uint32_t width, uint32_t height) override { size_ = {width, height}; }
     Size get_size() const override { return size_; }
+
+    int repaint_count = 0;
 
 private:
     Size size_{};
@@ -114,6 +119,21 @@ TEST_CASE("View child management", "[view]") {
     REQUIRE(removed->parent() == nullptr);
 }
 
+TEST_CASE("View child removal ignores unknown children", "[view][coverage]") {
+    View root;
+    auto child = std::make_unique<View>();
+    auto* child_ptr = child.get();
+    root.add_child(std::move(child));
+
+    View stranger;
+    auto removed = root.remove_child(&stranger);
+
+    REQUIRE(removed == nullptr);
+    REQUIRE(root.child_count() == 1);
+    REQUIRE(root.child_at(0) == child_ptr);
+    REQUIRE(child_ptr->parent() == &root);
+}
+
 TEST_CASE("View host references propagate across subtrees", "[view][hosts]") {
     View root;
 
@@ -177,6 +197,34 @@ TEST_CASE("View hit testing", "[view]") {
     REQUIRE(root.hit_test({50, 50}) == &root);
 }
 
+TEST_CASE("View hit testing honors disabled hit-testable and overflow states",
+          "[view][coverage]") {
+    View root;
+    root.set_bounds({0, 0, 160, 160});
+
+    auto child = std::make_unique<View>();
+    child->set_bounds({20, 20, 40, 20});
+    child->set_overflow(View::Overflow::visible);
+    auto* child_ptr = child.get();
+    auto grandchild = std::make_unique<View>();
+    grandchild->set_bounds({0, 30, 20, 20});
+    auto* grandchild_ptr = grandchild.get();
+    child->add_child(std::move(grandchild));
+    root.add_child(std::move(child));
+
+    REQUIRE(root.hit_test({30, 55}) == grandchild_ptr);
+
+    child_ptr->set_hit_testable(false);
+    REQUIRE(root.hit_test({30, 55}) == &root);
+
+    child_ptr->set_hit_testable(true);
+    child_ptr->set_enabled(false);
+    REQUIRE(root.hit_test({30, 55}) == &root);
+
+    child_ptr->set_enabled(true);
+    REQUIRE(root.hit_test({200, 200}) == nullptr);
+}
+
 TEST_CASE("View theme resolution", "[view][theme]") {
     View root;
     root.set_theme(Theme::dark());
@@ -203,6 +251,54 @@ TEST_CASE("View theme resolution", "[view][theme]") {
     auto c3 = child_ptr->resolve_color("text.primary");
     auto expected3 = Theme::dark().color("text.primary").value();
     REQUIRE(c3 == expected3);
+}
+
+TEST_CASE("View dimensions frame clock and repaint helpers resolve inherited state",
+          "[view][coverage]") {
+    class ResizedView : public View {
+    public:
+        void on_resized() override { ++resized_count; }
+        int resized_count = 0;
+    };
+
+    ResizedView resized;
+    resized.set_bounds({0, 0, 32, 24});
+    resized.set_bounds({0, 0, 32, 24});
+    resized.set_bounds({0, 0, 64, 24});
+    REQUIRE(resized.resized_count == 2);
+
+    View root;
+    Theme theme;
+    theme.dimensions["spacing.tight"] = 7.0f;
+    root.set_theme(theme);
+
+    auto child = std::make_unique<View>();
+    auto* child_ptr = child.get();
+    root.add_child(std::move(child));
+
+    REQUIRE_THAT(child_ptr->resolve_dimension("spacing.tight", 1.0f),
+                 WithinAbs(7.0f, 0.001));
+    REQUIRE_THAT(child_ptr->resolve_dimension("spacing.missing", 3.0f),
+                 WithinAbs(3.0f, 0.001));
+
+    FrameClock clock;
+    root.set_frame_clock(&clock);
+    REQUIRE(root.frame_clock() == &clock);
+    REQUIRE(child_ptr->frame_clock() == &clock);
+    REQUIRE(View{}.frame_clock() == nullptr);
+
+    DummyWindowHost window_host;
+    root.request_repaint();
+    REQUIRE(window_host.repaint_count == 0);
+    root.set_window_host(&window_host);
+    child_ptr->request_repaint();
+    REQUIRE(window_host.repaint_count == 1);
+
+    View plugin_root;
+    DummyPluginViewHost plugin_host;
+    plugin_root.set_plugin_view_host(&plugin_host);
+    plugin_root.request_repaint();
+    REQUIRE(plugin_host.repaint_count == 1);
 }
 
 TEST_CASE("View simulate_click dispatches to target", "[view][events]") {
@@ -245,6 +341,76 @@ TEST_CASE("View simulate_drag calls drag sequence", "[view][events]") {
 
     root.simulate_drag({10, 10}, {190, 190}, 5);
     REQUIRE(drag_count == 5);
+}
+
+TEST_CASE("View pointer capture hover and inspector hooks cover edge paths",
+          "[view][coverage]") {
+    View v;
+
+    v.set_pointer_capture(7);
+    v.set_pointer_capture(7);
+    REQUIRE(v.has_pointer_capture(7));
+    v.release_pointer_capture(3);
+    REQUIRE(v.has_pointer_capture(7));
+    v.release_pointer_capture(7);
+    REQUIRE_FALSE(v.has_pointer_capture(7));
+
+    int hover_enter = 0;
+    int hover_leave = 0;
+    v.on_hover_enter = [&] { ++hover_enter; };
+    v.on_hover_leave = [&] { ++hover_leave; };
+    v.set_hovered(true);
+    v.set_hovered(true);
+    v.set_hovered(false);
+    REQUIRE(hover_enter == 1);
+    REQUIRE(hover_leave == 1);
+
+    View::set_inspector_key_hook({});
+    View::set_inspector_mouse_hook({});
+    REQUIRE_FALSE(View::call_inspector_key_hook(KeyEvent{}));
+    REQUIRE_FALSE(View::call_inspector_mouse_hook(MouseEvent{}));
+
+    int key_calls = 0;
+    int mouse_calls = 0;
+    View::set_inspector_key_hook([&](const KeyEvent& event) {
+        ++key_calls;
+        return event.key == KeyCode::escape;
+    });
+    View::set_inspector_mouse_hook([&](const MouseEvent& event) {
+        ++mouse_calls;
+        return event.is_down;
+    });
+
+    REQUIRE(View::call_inspector_key_hook(KeyEvent{KeyCode::escape}));
+    REQUIRE(View::call_inspector_mouse_hook(MouseEvent{{}, {}, MouseButton::left, 0, 0, 1, true}));
+    REQUIRE(key_calls == 1);
+    REQUIRE(mouse_calls == 1);
+
+    int overlay_calls = 0;
+    int paint_hook_calls = 0;
+    View::overlay_queue().clear();
+    View::overlay_queue().push_back(View::OverlayRequest{
+        [&](pulp::canvas::Canvas& canvas) {
+            ++overlay_calls;
+            canvas.fill_rect(0, 0, 1, 1);
+        }
+    });
+    View::overlay_queue().push_back(View::OverlayRequest{});
+    View::set_inspector_paint_hook([&](pulp::canvas::Canvas& canvas) {
+        ++paint_hook_calls;
+        canvas.fill_rect(1, 1, 1, 1);
+    });
+
+    pulp::canvas::RecordingCanvas canvas;
+    View::paint_overlays(canvas);
+    REQUIRE(View::overlay_queue().empty());
+    REQUIRE(overlay_calls == 1);
+    REQUIRE(paint_hook_calls == 1);
+    REQUIRE(canvas.count(pulp::canvas::DrawCommand::Type::fill_rect) == 2);
+
+    View::set_inspector_key_hook({});
+    View::set_inspector_mouse_hook({});
+    View::set_inspector_paint_hook({});
 }
 
 TEST_CASE("View keyboard focus traversal", "[view][focus]") {
@@ -396,6 +562,25 @@ TEST_CASE("Flex layout with padding", "[view][layout]") {
     REQUIRE_THAT(child_ptr->bounds().y, WithinAbs(20.0, 0.1));
     REQUIRE_THAT(child_ptr->bounds().width, WithinAbs(160.0, 0.1));
     REQUIRE_THAT(child_ptr->bounds().height, WithinAbs(160.0, 0.1));
+}
+
+TEST_CASE("Grid layout with no columns leaves children unchanged",
+          "[view][layout][coverage]") {
+    View root;
+    root.set_bounds({0, 0, 120, 80});
+    root.set_layout_mode(LayoutMode::grid);
+
+    auto child = std::make_unique<View>();
+    child->set_bounds({5, 6, 7, 8});
+    auto* child_ptr = child.get();
+    root.add_child(std::move(child));
+
+    root.layout_children();
+
+    REQUIRE_THAT(child_ptr->bounds().x, WithinAbs(5.0f, 0.001));
+    REQUIRE_THAT(child_ptr->bounds().y, WithinAbs(6.0f, 0.001));
+    REQUIRE_THAT(child_ptr->bounds().width, WithinAbs(7.0f, 0.001));
+    REQUIRE_THAT(child_ptr->bounds().height, WithinAbs(8.0f, 0.001));
 }
 
 TEST_CASE("View compositing layer for opacity", "[view][layer]") {
