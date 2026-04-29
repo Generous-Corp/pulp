@@ -42,6 +42,21 @@ class PulpAudioEngineTest {
     }
 
     @Test
+    fun usesDefaultAudioConfigWhenPropertiesAreUnavailableOrMalformed() {
+        val context = mock<Context>()
+        val audioManager = mock<AudioManager>()
+        whenever(context.getSystemService(AudioManager::class.java)).thenReturn(audioManager)
+        whenever(audioManager.getProperty(AudioManager.PROPERTY_OUTPUT_SAMPLE_RATE))
+            .thenReturn("not-a-number")
+        whenever(audioManager.getProperty(AudioManager.PROPERTY_OUTPUT_FRAMES_PER_BUFFER))
+            .thenReturn(null)
+        val engine = PulpAudioEngine(context)
+
+        assertEquals(48000, engine.getOptimalSampleRate())
+        assertEquals(256, engine.getOptimalFramesPerBuffer())
+    }
+
+    @Test
     fun registerAndUnregisterDelegateToAudioManager() {
         val context = mock<Context>()
         val audioManager = mock<AudioManager>()
