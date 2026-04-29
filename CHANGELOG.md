@@ -9,6 +9,8 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
 <a id="v0630"></a>
+## [0.64.0]
+
 ## [0.63.0] - 2026-04-29
 
 - feat(view): CSS-style typography inheritance for Label (pulp #969) ([#1002](https://github.com/danielraffel/pulp/pull/1002))
