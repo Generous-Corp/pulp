@@ -392,6 +392,148 @@ TEST_CASE("Toggle renders switch", "[view][widget]") {
     REQUIRE(canvas.count(DrawCommand::Type::fill_text) >= 1);
 }
 
+TEST_CASE("Audio widgets render declarative schemas and invalid schema fallback",
+          "[view][widget][schema]") {
+    Knob knob;
+    knob.set_bounds({0, 0, 80, 80});
+    knob.set_value(0.5f);
+    knob.set_widget_schema(R"json({
+        "elements": [
+            { "type": "arc", "color": "control.fill", "radius": "80%", "width": 4,
+              "startAngle": -120, "sweepAngle": { "bind": "value", "range": [0, 240] } },
+            { "type": "circle", "color": "control.thumb", "radius": "25%" },
+            { "type": "line", "color": "text.primary", "innerRadius": "15%",
+              "outerRadius": "65%", "angle": { "bind": "value", "range": [-90, 90] } },
+            { "type": "rect", "color": "bg.surface", "cornerRadius": "5" },
+            { "type": "text", "color": "text.primary", "text": "dB", "fontSize": 12 }
+        ]
+    })json");
+
+    RecordingCanvas knob_canvas;
+    knob.paint(knob_canvas);
+    REQUIRE(knob_canvas.count(DrawCommand::Type::stroke_arc) == 1);
+    REQUIRE(knob_canvas.count(DrawCommand::Type::fill_circle) == 1);
+    REQUIRE(knob_canvas.count(DrawCommand::Type::stroke_line) == 1);
+    REQUIRE(knob_canvas.count(DrawCommand::Type::fill_rounded_rect) == 1);
+    REQUIRE(knob_canvas.count(DrawCommand::Type::fill_text) == 1);
+    REQUIRE(commands_of(knob_canvas, DrawCommand::Type::fill_text).front().text == "dB");
+
+    Fader fader;
+    fader.set_bounds({0, 0, 32, 120});
+    fader.set_value(0.25f);
+    fader.set_widget_schema(R"json({
+        "elements": [
+            { "type": "rect", "color": "control.track" },
+            { "type": "line", "color": "control.fill", "angle": 90,
+              "innerRadius": "4", "outerRadius": "24" }
+        ]
+    })json");
+
+    RecordingCanvas fader_canvas;
+    fader.paint(fader_canvas);
+    REQUIRE(fader_canvas.count(DrawCommand::Type::fill_rect) == 1);
+    REQUIRE(fader_canvas.count(DrawCommand::Type::stroke_line) == 1);
+
+    Toggle toggle;
+    toggle.set_bounds({0, 0, 64, 32});
+    toggle.set_on(true);
+    toggle.set_widget_schema(R"json({
+        "elements": [
+            { "type": "circle", "color": "accent.primary", "radius": "12" }
+        ]
+    })json");
+
+    RecordingCanvas toggle_canvas;
+    toggle.paint(toggle_canvas);
+    REQUIRE(toggle_canvas.count(DrawCommand::Type::fill_circle) == 1);
+
+    Knob invalid;
+    invalid.set_bounds({0, 0, 48, 48});
+    invalid.set_widget_schema("{ not valid json");
+
+    RecordingCanvas invalid_canvas;
+    invalid.paint(invalid_canvas);
+    REQUIRE(invalid_canvas.count(DrawCommand::Type::fill_rect) == 1);
+}
+
+TEST_CASE("Checkbox, toggle button, icons, and image placeholders cover widget paint edges",
+          "[view][widget][controls]") {
+    Checkbox checkbox;
+    checkbox.set_bounds({0, 0, 24, 24});
+
+    RecordingCanvas unchecked_canvas;
+    checkbox.paint(unchecked_canvas);
+    REQUIRE(unchecked_canvas.count(DrawCommand::Type::stroke_rounded_rect) == 1);
+
+    int checkbox_changes = 0;
+    bool last_checked = false;
+    checkbox.on_change = [&](bool checked) {
+        ++checkbox_changes;
+        last_checked = checked;
+    };
+    checkbox.on_mouse_down({12, 12});
+    REQUIRE(checkbox.is_checked());
+    REQUIRE(checkbox_changes == 1);
+    REQUIRE(last_checked);
+
+    RecordingCanvas checked_canvas;
+    checkbox.paint(checked_canvas);
+    REQUIRE(checked_canvas.count(DrawCommand::Type::fill_rounded_rect) == 1);
+    REQUIRE(checked_canvas.count(DrawCommand::Type::stroke_line) == 2);
+
+    ToggleButton button;
+    button.set_bounds({0, 0, 96, 32});
+    button.set_label("Latch");
+
+    RecordingCanvas off_canvas;
+    button.paint(off_canvas);
+    REQUIRE(off_canvas.count(DrawCommand::Type::fill_rounded_rect) == 1);
+    REQUIRE(off_canvas.count(DrawCommand::Type::stroke_rounded_rect) == 1);
+    REQUIRE(commands_of(off_canvas, DrawCommand::Type::fill_text).front().text == "Latch");
+
+    int toggle_count = 0;
+    bool toggle_state = false;
+    button.on_toggle = [&](bool on) {
+        ++toggle_count;
+        toggle_state = on;
+    };
+    button.on_mouse_down({4, 4});
+    REQUIRE(button.is_on());
+    REQUIRE(toggle_count == 1);
+    REQUIRE(toggle_state);
+
+    RecordingCanvas on_canvas;
+    button.paint(on_canvas);
+    REQUIRE(on_canvas.count(DrawCommand::Type::fill_rounded_rect) == 1);
+    REQUIRE(on_canvas.count(DrawCommand::Type::stroke_rounded_rect) == 0);
+
+    for (auto type : {Icon::Type::image_upload, Icon::Type::send,
+                      Icon::Type::search, Icon::Type::close}) {
+        Icon icon(type);
+        icon.set_bounds({0, 0, 32, 32});
+        RecordingCanvas icon_canvas;
+        icon.paint(icon_canvas);
+        REQUIRE(icon_canvas.command_count() > 0);
+    }
+
+    ImageView empty_image;
+    empty_image.set_bounds({0, 0, 96, 48});
+    RecordingCanvas empty_image_canvas;
+    empty_image.paint(empty_image_canvas);
+    REQUIRE(empty_image_canvas.count(DrawCommand::Type::fill_rounded_rect) == 1);
+    REQUIRE(commands_of(empty_image_canvas, DrawCommand::Type::fill_text).front().text == "IMG");
+
+    ImageView path_image;
+    path_image.set_bounds({0, 0, 120, 48});
+    path_image.set_image_path("/tmp/pulp-widget-preview.png");
+    REQUIRE(path_image.image_path() == "file:///tmp/pulp-widget-preview.png");
+
+    RecordingCanvas path_image_canvas;
+    path_image.paint(path_image_canvas);
+    REQUIRE(path_image_canvas.count(DrawCommand::Type::fill_rounded_rect) == 1);
+    REQUIRE(commands_of(path_image_canvas, DrawCommand::Type::fill_text).front().text == "pulp-widget-preview.png");
+}
+
 TEST_CASE("Meter set_level", "[view][widget]") {
     Meter meter;
     meter.set_bounds({0, 0, 12, 200});
