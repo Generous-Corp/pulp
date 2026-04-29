@@ -8,9 +8,81 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
-<a id="v0600"></a>
-## [0.61.0]
+<a id="v0610"></a>
+## [0.61.0] - 2026-04-29
 
+- framework/spectr parity 965 ([#991](https://github.com/danielraffel/pulp/pull/991))
+- test(cli): cover cached cli common helper paths ([#988](https://github.com/danielraffel/pulp/pull/988))
+- test(view): lock in transparent View+CanvasWidget contract (#964 / #967) ([#973](https://github.com/danielraffel/pulp/pull/973))
+- test(view): cover widget bridge canvas edge APIs ([#987](https://github.com/danielraffel/pulp/pull/987))
+- test(view): cover view core edge paths ([#985](https://github.com/danielraffel/pulp/pull/985))
+- test(view): cover widget bridge asset loading edges ([#986](https://github.com/danielraffel/pulp/pull/986))
+- test(view): cover audio widget meter edges ([#984](https://github.com/danielraffel/pulp/pull/984))
+- test(view): cover ui component interaction edges ([#983](https://github.com/danielraffel/pulp/pull/983))
+- test(view): cover widget bridge runtime helpers ([#982](https://github.com/danielraffel/pulp/pull/982))
+- test(view): cover design import codegen edges ([#981](https://github.com/danielraffel/pulp/pull/981))
+- test(view): cover widget schema paint edges ([#980](https://github.com/danielraffel/pulp/pull/980))
+- test(view): cover widget bridge event and style APIs ([#979](https://github.com/danielraffel/pulp/pull/979))
+- test(cli): cover validate command edge paths ([#978](https://github.com/danielraffel/pulp/pull/978))
+- test(cli): cover tool registry edge paths ([#977](https://github.com/danielraffel/pulp/pull/977))
+- test(cli): cover package command edge paths ([#976](https://github.com/danielraffel/pulp/pull/976))
+- test(cli): cover cli common edge helpers ([#975](https://github.com/danielraffel/pulp/pull/975))
+- test(inspect): cover inspector window and domain edges ([#974](https://github.com/danielraffel/pulp/pull/974))
+- docs: refresh coverage compliance handoff ([#774](https://github.com/danielraffel/pulp/pull/774))
+- test(signal): cover meter channel-count guards ([#851](https://github.com/danielraffel/pulp/pull/851))
+- test(audio): cover frame-fill invalid dimensions ([#853](https://github.com/danielraffel/pulp/pull/853))
+- test(ios): cover audio session event labels ([#886](https://github.com/danielraffel/pulp/pull/886))
+- test(tools): cover version bump helper paths ([#971](https://github.com/danielraffel/pulp/pull/971))
+- test(tools): cover runner resolver edge paths ([#850](https://github.com/danielraffel/pulp/pull/850))
+- test(bindings): cover embedded python state paths ([#867](https://github.com/danielraffel/pulp/pull/867))
+- test(view): cover label paint branches ([#849](https://github.com/danielraffel/pulp/pull/849))
+- test(cli): cover JSFX subset validation errors ([#871](https://github.com/danielraffel/pulp/pull/871))
+- test(format): cover host type policies ([#870](https://github.com/danielraffel/pulp/pull/870))
+- test(render): cover KTX2 decoder header edges ([#869](https://github.com/danielraffel/pulp/pull/869))
+- test(signal): cover processor duplicator edge paths ([#868](https://github.com/danielraffel/pulp/pull/868))
+- test(audio): cover excerpt window exact tails ([#866](https://github.com/danielraffel/pulp/pull/866))
+- test(android): cover audio engine default config ([#865](https://github.com/danielraffel/pulp/pull/865))
+- test(swift): cover bridge parameter edge paths ([#864](https://github.com/danielraffel/pulp/pull/864))
+- test(state): cover StateStore helper paths ([#863](https://github.com/danielraffel/pulp/pull/863))
+- test(tools): cover lcov cobertura utility ([#862](https://github.com/danielraffel/pulp/pull/862))
+- test(format): cover descriptor validation edges ([#861](https://github.com/danielraffel/pulp/pull/861))
+- test(midi): cover sysex accumulator abort edges ([#860](https://github.com/danielraffel/pulp/pull/860))
+- test(platform): cover progress parser edge cases ([#859](https://github.com/danielraffel/pulp/pull/859))
+- test(render): cover draw batcher edge cases ([#858](https://github.com/danielraffel/pulp/pull/858))
+- test(events): cover async helper edge cases ([#857](https://github.com/danielraffel/pulp/pull/857))
+- test(tools): cover lcov cobertura helper edges ([#856](https://github.com/danielraffel/pulp/pull/856))
+- test(signal): cover convolver edge paths ([#855](https://github.com/danielraffel/pulp/pull/855))
+- test(format): cover ViewBridge helper edges ([#854](https://github.com/danielraffel/pulp/pull/854))
+- test(canvas): cover rectangle list helper edges ([#852](https://github.com/danielraffel/pulp/pull/852))
+- test(runtime): cover base64 padding validation ([#848](https://github.com/danielraffel/pulp/pull/848))
+- test(events): cover NSD and async helper edges ([#847](https://github.com/danielraffel/pulp/pull/847))
+- test(audio): cover audio focus token edge paths ([#846](https://github.com/danielraffel/pulp/pull/846))
+- test(host): cover parameter event queue contracts ([#845](https://github.com/danielraffel/pulp/pull/845))
+- test(midi): cover MPE tracker UMP edge paths ([#843](https://github.com/danielraffel/pulp/pull/843))
+- test(events): cover child process manager edges ([#840](https://github.com/danielraffel/pulp/pull/840))
+- test(canvas): cover text layout cursor helpers ([#873](https://github.com/danielraffel/pulp/pull/873))
+- test(ship): cover NSIS uninstall metadata ([#875](https://github.com/danielraffel/pulp/pull/875))
+- test(osc): cover malformed codec argument guards ([#876](https://github.com/danielraffel/pulp/pull/876))
+- test(runtime): cover scope guard and string copy edges ([#877](https://github.com/danielraffel/pulp/pull/877))
+- test(inspect): cover audio inspector domain paths ([#878](https://github.com/danielraffel/pulp/pull/878))
+- test(tools): cover limitations helper ([#879](https://github.com/danielraffel/pulp/pull/879))
+- test: cover audio model missing checkpoint state ([#880](https://github.com/danielraffel/pulp/pull/880))
+- test(runtime): cover XML and gzip helper edges ([#881](https://github.com/danielraffel/pulp/pull/881))
+- test(platform): cover environment edge helpers ([#882](https://github.com/danielraffel/pulp/pull/882))
+- test(runtime): cover stream edge paths ([#883](https://github.com/danielraffel/pulp/pull/883))
+- test(web-compat): cover selector helper matching ([#884](https://github.com/danielraffel/pulp/pull/884))
+- test(state): cover properties file helper paths ([#885](https://github.com/danielraffel/pulp/pull/885))
+- test(ship): cover appcast helper edges ([#887](https://github.com/danielraffel/pulp/pull/887))
+- test(tools): cover skill sync helper paths ([#888](https://github.com/danielraffel/pulp/pull/888))
+- test(midi): cover UMP packet helper masking ([#889](https://github.com/danielraffel/pulp/pull/889))
+- test(view): cover accessibility tree range snapshots ([#890](https://github.com/danielraffel/pulp/pull/890))
+- test(android): cover accessibility delegate fallback ([#891](https://github.com/danielraffel/pulp/pull/891))
+- test(view): cover image cache failure edges ([#892](https://github.com/danielraffel/pulp/pull/892))
+- test(audio): cover buffering reader no-callback path ([#893](https://github.com/danielraffel/pulp/pull/893))
+- test(runtime): cover crypto helper edge cases ([#894](https://github.com/danielraffel/pulp/pull/894))
+- test(host): cover plugin bundle suffix helper ([#895](https://github.com/danielraffel/pulp/pull/895))
+
+<a id="v0600"></a>
 ## [0.60.0] - 2026-04-28
 
 - fix(canvas): CoreGraphicsCanvas::concat_transform composes onto CTM (Codex P1 on #933) ([#961](https://github.com/danielraffel/pulp/pull/961))
@@ -820,6 +892,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.61.0]: https://github.com/danielraffel/pulp/releases/tag/v0.61.0
 [0.60.0]: https://github.com/danielraffel/pulp/releases/tag/v0.60.0
 [0.59.0]: https://github.com/danielraffel/pulp/releases/tag/v0.59.0
 [0.58.0]: https://github.com/danielraffel/pulp/releases/tag/v0.58.0
