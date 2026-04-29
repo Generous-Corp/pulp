@@ -145,3 +145,24 @@ TEST_CASE("PluginFormat enum covers the 5 shipping formats",
         REQUIRE(p.format == f);
     }
 }
+
+TEST_CASE("PluginScanner identifies bundle suffixes for each host format",
+          "[host][plugin-info][format]") {
+    REQUIRE(PluginScanner::is_plugin_bundle("/Library/Audio/Plug-Ins/VST3/Test.vst3",
+                                            PluginFormat::VST3));
+    REQUIRE(PluginScanner::is_plugin_bundle("/Library/Audio/Plug-Ins/Components/Test.component",
+                                            PluginFormat::AudioUnit));
+    REQUIRE(PluginScanner::is_plugin_bundle("/Applications/Synth.app/PlugIns/Test.component",
+                                            PluginFormat::AudioUnitV3));
+    REQUIRE(PluginScanner::is_plugin_bundle("/Library/Audio/Plug-Ins/CLAP/Test.clap",
+                                            PluginFormat::CLAP));
+    REQUIRE(PluginScanner::is_plugin_bundle("/usr/lib/lv2/Test.lv2",
+                                            PluginFormat::LV2));
+
+    REQUIRE_FALSE(PluginScanner::is_plugin_bundle("/tmp/Test.vst3.backup",
+                                                  PluginFormat::VST3));
+    REQUIRE_FALSE(PluginScanner::is_plugin_bundle("/tmp/Test.component",
+                                                  PluginFormat::CLAP));
+    REQUIRE_FALSE(PluginScanner::is_plugin_bundle("/tmp/Test.clap",
+                                                  PluginFormat::LV2));
+}
