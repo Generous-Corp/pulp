@@ -9,6 +9,8 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
 <a id="v0640"></a>
+## [0.65.0]
+
 ## [0.64.0] - 2026-04-29
 
 - feat(view): RangeSlider widget for HTML <input type="range"> (#966) ([#1004](https://github.com/danielraffel/pulp/pull/1004))

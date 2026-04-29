@@ -593,3 +593,218 @@ TEST_CASE("Bare View with no setBackground emits no background fill",
     }
     REQUIRE(fill_rect_count == 0);
 }
+
+// ── pulp #968 — canvasRect must honour active fillStyle when no color arg ──
+//
+// The Canvas2D `ctx.fillRect(x,y,w,h)` API has no color argument — it paints
+// with whatever `ctx.fillStyle` (a CSS color OR a CanvasGradient) was set
+// most recently. The bridge's `canvasRect(id, x, y, w, h, color="#fff")`
+// previously baked in literal white when the caller omitted the color, which
+// makes a JS fillRect shim unable to honour the active fillStyle and breaks
+// gradient fills entirely (gradient is not a string color so the shim has
+// nothing to pass).
+//
+// Contract: when CanvasDrawCmd.use_active_style is true, the paint loop
+// must NOT call set_fill_color / set_stroke_color on the underlying canvas
+// before drawing — the previously-set fill/stroke state stays active.
+
+// Case 1 — fill_rect with use_active_style honours the active fill colour.
+TEST_CASE("CanvasWidget fill_rect with use_active_style preserves prior set_fill_color",
+          "[canvas_widget][issue-968]") {
+    RecordingCanvas rc;
+    CanvasWidget cw;
+    cw.set_bounds({0, 0, 100, 100});
+
+    // Active fill = magenta.
+    CanvasDrawCmd set_color;
+    set_color.type = CanvasDrawCmd::Type::set_fill_color;
+    set_color.color = pulp::canvas::Color::rgba8(255, 0, 255, 255);
+    cw.add_command(set_color);
+
+    // fillRect with no explicit colour (use_active_style = true). The
+    // baked-in cmd.color stays at its default of opaque white — the test
+    // asserts that white is NOT what the underlying canvas actually paints
+    // with.
+    CanvasDrawCmd r;
+    r.type = CanvasDrawCmd::Type::fill_rect;
+    r.x = 10; r.y = 10; r.w = 50; r.h = 50;
+    r.use_active_style = true;
+    cw.add_command(r);
+
+    cw.paint(rc);
+
+    // Walk the recorded stream tracking the most recent set_fill_color.
+    // For each fill_rect, the active fill at draw time is what the rect
+    // is painted with. We expect the magenta to still be active when the
+    // fill_rect is emitted — i.e. no intervening set_fill_color(white).
+    pulp::canvas::Color active_fill{};
+    bool saw_fill_rect = false;
+    pulp::canvas::Color fill_at_draw{};
+    for (const auto& cmd : rc.commands()) {
+        if (cmd.type == DrawCommand::Type::set_fill_color) {
+            active_fill = cmd.color;
+            continue;
+        }
+        if (cmd.type == DrawCommand::Type::fill_rect) {
+            // Match the rect we recorded (skip any incidental fills).
+            const bool matches = (cmd.f[0] == 10.0f && cmd.f[1] == 10.0f &&
+                                  cmd.f[2] == 50.0f && cmd.f[3] == 50.0f);
+            if (matches) {
+                saw_fill_rect = true;
+                fill_at_draw = active_fill;
+            }
+        }
+    }
+    REQUIRE(saw_fill_rect);
+    const bool is_magenta = (fill_at_draw.r8() == 255 && fill_at_draw.g8() == 0
+                          && fill_at_draw.b8() == 255 && fill_at_draw.a8() == 255);
+    REQUIRE(is_magenta);
+}
+
+// Case 2 — fill_rect with explicit colour (use_active_style = false) keeps
+// the legacy behaviour: cmd.color overrides whatever was set before.
+TEST_CASE("CanvasWidget fill_rect with explicit color overrides active fill",
+          "[canvas_widget][issue-968]") {
+    RecordingCanvas rc;
+    CanvasWidget cw;
+    cw.set_bounds({0, 0, 100, 100});
+
+    // Active fill = magenta.
+    CanvasDrawCmd set_color;
+    set_color.type = CanvasDrawCmd::Type::set_fill_color;
+    set_color.color = pulp::canvas::Color::rgba8(255, 0, 255, 255);
+    cw.add_command(set_color);
+
+    // fillRect with explicit cyan colour, use_active_style = false.
+    CanvasDrawCmd r;
+    r.type = CanvasDrawCmd::Type::fill_rect;
+    r.x = 10; r.y = 10; r.w = 50; r.h = 50;
+    r.color = pulp::canvas::Color::rgba8(0, 255, 255, 255);
+    r.use_active_style = false;
+    cw.add_command(r);
+
+    cw.paint(rc);
+
+    pulp::canvas::Color active_fill{};
+    bool saw_fill_rect = false;
+    pulp::canvas::Color fill_at_draw{};
+    for (const auto& cmd : rc.commands()) {
+        if (cmd.type == DrawCommand::Type::set_fill_color) {
+            active_fill = cmd.color;
+            continue;
+        }
+        if (cmd.type == DrawCommand::Type::fill_rect) {
+            const bool matches = (cmd.f[0] == 10.0f && cmd.f[1] == 10.0f &&
+                                  cmd.f[2] == 50.0f && cmd.f[3] == 50.0f);
+            if (matches) {
+                saw_fill_rect = true;
+                fill_at_draw = active_fill;
+            }
+        }
+    }
+    REQUIRE(saw_fill_rect);
+    const bool is_cyan = (fill_at_draw.r8() == 0 && fill_at_draw.g8() == 255
+                       && fill_at_draw.b8() == 255 && fill_at_draw.a8() == 255);
+    REQUIRE(is_cyan);
+}
+
+// Case 3 — fill_rect with use_active_style after a gradient set keeps the
+// gradient active. RecordingCanvas's default set_fill_gradient_linear falls
+// back to set_fill_color(colors[0]); we use that to verify no white-on-top
+// set_fill_color overwrites the gradient's first stop before the draw.
+TEST_CASE("CanvasWidget fill_rect with use_active_style preserves active gradient",
+          "[canvas_widget][issue-968]") {
+    RecordingCanvas rc;
+    CanvasWidget cw;
+    cw.set_bounds({0, 0, 100, 100});
+
+    // Active fill = linear gradient red→blue. RecordingCanvas's default
+    // overload of set_fill_gradient_linear records a set_fill_color of the
+    // first stop (red).
+    CanvasDrawCmd grad;
+    grad.type = CanvasDrawCmd::Type::set_fill_gradient_linear;
+    grad.x = 0; grad.y = 0; grad.x2 = 100; grad.y2 = 0;
+    grad.gradient_colors = {pulp::canvas::Color::rgba8(255, 0, 0, 255),
+                            pulp::canvas::Color::rgba8(0, 0, 255, 255)};
+    grad.gradient_positions = {0.0f, 1.0f};
+    cw.add_command(grad);
+
+    // fillRect with no explicit colour — use_active_style = true.
+    CanvasDrawCmd r;
+    r.type = CanvasDrawCmd::Type::fill_rect;
+    r.x = 10; r.y = 10; r.w = 50; r.h = 50;
+    r.use_active_style = true;
+    cw.add_command(r);
+
+    cw.paint(rc);
+
+    // The active fill at draw time must still be the gradient's first stop
+    // (red) — NOT white, which is what would have been overwritten if the
+    // paint loop had called set_fill_color(cmd.color) before fill_rect.
+    pulp::canvas::Color active_fill{};
+    bool saw_fill_rect = false;
+    pulp::canvas::Color fill_at_draw{};
+    for (const auto& cmd : rc.commands()) {
+        if (cmd.type == DrawCommand::Type::set_fill_color) {
+            active_fill = cmd.color;
+            continue;
+        }
+        if (cmd.type == DrawCommand::Type::fill_rect) {
+            const bool matches = (cmd.f[0] == 10.0f && cmd.f[1] == 10.0f &&
+                                  cmd.f[2] == 50.0f && cmd.f[3] == 50.0f);
+            if (matches) {
+                saw_fill_rect = true;
+                fill_at_draw = active_fill;
+            }
+        }
+    }
+    REQUIRE(saw_fill_rect);
+    const bool is_red = (fill_at_draw.r8() == 255 && fill_at_draw.g8() == 0
+                      && fill_at_draw.b8() == 0 && fill_at_draw.a8() == 255);
+    REQUIRE(is_red);
+}
+
+// Case 4 — stroke_rect mirrors fill_rect: with use_active_style the prior
+// strokeStyle stays active.
+TEST_CASE("CanvasWidget stroke_rect with use_active_style preserves prior set_stroke_color",
+          "[canvas_widget][issue-968]") {
+    RecordingCanvas rc;
+    CanvasWidget cw;
+    cw.set_bounds({0, 0, 100, 100});
+
+    CanvasDrawCmd set_color;
+    set_color.type = CanvasDrawCmd::Type::set_stroke_color;
+    set_color.color = pulp::canvas::Color::rgba8(0, 255, 0, 255); // green
+    cw.add_command(set_color);
+
+    CanvasDrawCmd r;
+    r.type = CanvasDrawCmd::Type::stroke_rect;
+    r.x = 5; r.y = 5; r.w = 40; r.h = 40;
+    r.extra = 2.0f;
+    r.use_active_style = true;
+    cw.add_command(r);
+
+    cw.paint(rc);
+
+    pulp::canvas::Color active_stroke{};
+    bool saw_stroke_rect = false;
+    pulp::canvas::Color stroke_at_draw{};
+    for (const auto& cmd : rc.commands()) {
+        if (cmd.type == DrawCommand::Type::set_stroke_color) {
+            active_stroke = cmd.color;
+            continue;
+        }
+        if (cmd.type == DrawCommand::Type::stroke_rect) {
+            const bool matches = (cmd.f[0] == 5.0f && cmd.f[1] == 5.0f &&
+                                  cmd.f[2] == 40.0f && cmd.f[3] == 40.0f);
+            if (matches) {
+                saw_stroke_rect = true;
+                stroke_at_draw = active_stroke;
+            }
+        }
+    }
+    REQUIRE(saw_stroke_rect);
+    const bool is_green = (stroke_at_draw.r8() == 0 && stroke_at_draw.g8() == 255
+                        && stroke_at_draw.b8() == 0 && stroke_at_draw.a8() == 255);
+    REQUIRE(is_green);
+}

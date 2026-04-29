@@ -55,6 +55,15 @@ struct CanvasDrawCmd {
     int int_val = 0;            // for enum values (text align, baseline, blend mode, cap, join)
     std::vector<canvas::Color> gradient_colors;    // for gradient stops
     std::vector<float> gradient_positions;          // gradient stop positions
+    /// pulp #968 — when true on a fill_rect / stroke_rect cmd, the paint
+    /// loop must NOT call set_fill_color / set_stroke_color from `color`
+    /// before drawing. The most recent set_fill_color, set_stroke_color,
+    /// or set_fill_gradient_* on the underlying canvas stays active.
+    /// Bridge sets this when the JS caller omitted the color arg
+    /// (e.g. `canvasRect(id, x, y, w, h)` — Canvas2D `ctx.fillRect()`
+    /// shim that relies on a previously-set `ctx.fillStyle`, including
+    /// gradients).
+    bool use_active_style = false;
 };
 
 /// A View whose paint() replays a list of recorded draw commands.

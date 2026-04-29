@@ -2767,3 +2767,181 @@ TEST_CASE("WidgetBridge setSvgFill 'none' disables fill",
     REQUIRE_FALSE(w->has_fill());
     REQUIRE(w->has_stroke());
 }
+
+// pulp #968 — canvasRect / canvasStrokeRect must honour the active fill /
+// stroke style when no color arg is passed. Validates the JS bridge path:
+//   1. five-arg canvasRect → fillStyle (color or gradient) wins
+//   2. six-arg canvasRect with explicit color → explicit color wins
+//   3. linear gradient set, then five-arg canvasRect → gradient wins
+//   4. five-arg canvasStrokeRect → strokeStyle wins
+TEST_CASE("WidgetBridge canvasRect with no color uses active fillStyle (issue-968)",
+          "[view][bridge][canvas][issue-968]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        var c = document.createElement('canvas');
+        c.id = 'fill-style-canvas';
+        c.width = 200; c.height = 100;
+        document.body.appendChild(c);
+
+        // Active fill = magenta. Then a five-arg canvasRect (no color).
+        canvasSetFillColor(c._id, '#ff00ff');
+        canvasRect(c._id, 10, 10, 50, 50);
+
+        // Explicit color (six-arg) — overrides active fill.
+        canvasSetFillColor(c._id, '#ff00ff');
+        canvasRect(c._id, 70, 10, 50, 50, '#00ffff');
+    )");
+    root.layout_children();
+
+    auto* canvas = canvasFromBridge(bridge, engine, "fill-style-canvas");
+    REQUIRE(canvas != nullptr);
+
+    pulp::canvas::RecordingCanvas rec;
+    canvas->paint(rec);
+
+    using DrawType = pulp::canvas::DrawCommand::Type;
+    pulp::canvas::Color active_fill{};
+    pulp::canvas::Color first_rect_fill{};
+    pulp::canvas::Color second_rect_fill{};
+    bool saw_first = false, saw_second = false;
+    for (const auto& cmd : rec.commands()) {
+        if (cmd.type == DrawType::set_fill_color) {
+            active_fill = cmd.color;
+            continue;
+        }
+        if (cmd.type == DrawType::fill_rect) {
+            const bool is_first  = (cmd.f[0] == 10.0f && cmd.f[1] == 10.0f &&
+                                    cmd.f[2] == 50.0f && cmd.f[3] == 50.0f);
+            const bool is_second = (cmd.f[0] == 70.0f && cmd.f[1] == 10.0f &&
+                                    cmd.f[2] == 50.0f && cmd.f[3] == 50.0f);
+            if (is_first  && !saw_first)  { saw_first  = true; first_rect_fill  = active_fill; }
+            if (is_second && !saw_second) { saw_second = true; second_rect_fill = active_fill; }
+        }
+    }
+    REQUIRE(saw_first);
+    REQUIRE(saw_second);
+    // First rect (no color arg) → magenta (the active fill at the time).
+    const bool first_is_magenta = (first_rect_fill.r8() == 255 &&
+                                   first_rect_fill.g8() == 0 &&
+                                   first_rect_fill.b8() == 255 &&
+                                   first_rect_fill.a8() == 255);
+    REQUIRE(first_is_magenta);
+    // Second rect (explicit color arg) → cyan, overriding the active fill.
+    const bool second_is_cyan = (second_rect_fill.r8() == 0 &&
+                                 second_rect_fill.g8() == 255 &&
+                                 second_rect_fill.b8() == 255 &&
+                                 second_rect_fill.a8() == 255);
+    REQUIRE(second_is_cyan);
+}
+
+TEST_CASE("WidgetBridge canvasRect with no color preserves active linear gradient (issue-968)",
+          "[view][bridge][canvas][issue-968]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    // Linear gradient red→blue along x. RecordingCanvas's default
+    // set_fill_gradient_linear records a set_fill_color of the first
+    // stop (red) — we use that as the proxy for "gradient is active".
+    bridge.load_script(R"(
+        var c = document.createElement('canvas');
+        c.id = 'grad-canvas';
+        c.width = 200; c.height = 100;
+        document.body.appendChild(c);
+
+        canvasSetLinearGradient(c._id, 0, 0, 100, 0, '#ff0000', 0, '#0000ff', 1);
+        canvasRect(c._id, 10, 10, 50, 50);
+    )");
+    root.layout_children();
+
+    auto* canvas = canvasFromBridge(bridge, engine, "grad-canvas");
+    REQUIRE(canvas != nullptr);
+
+    pulp::canvas::RecordingCanvas rec;
+    canvas->paint(rec);
+
+    using DrawType = pulp::canvas::DrawCommand::Type;
+    pulp::canvas::Color active_fill{};
+    bool saw_rect = false;
+    pulp::canvas::Color rect_fill{};
+    for (const auto& cmd : rec.commands()) {
+        if (cmd.type == DrawType::set_fill_color) {
+            active_fill = cmd.color;
+            continue;
+        }
+        if (cmd.type == DrawType::fill_rect) {
+            const bool matches = (cmd.f[0] == 10.0f && cmd.f[1] == 10.0f &&
+                                  cmd.f[2] == 50.0f && cmd.f[3] == 50.0f);
+            if (matches) {
+                saw_rect = true;
+                rect_fill = active_fill;
+            }
+        }
+    }
+    REQUIRE(saw_rect);
+    // The gradient's first stop (red) must still be the active fill —
+    // i.e. no white set_fill_color from a baked-in cmd.color was emitted
+    // between the gradient set and the fill_rect.
+    const bool is_red = (rect_fill.r8() == 255 && rect_fill.g8() == 0 &&
+                         rect_fill.b8() == 0 && rect_fill.a8() == 255);
+    REQUIRE(is_red);
+}
+
+TEST_CASE("WidgetBridge canvasStrokeRect with no color uses active strokeStyle (issue-968)",
+          "[view][bridge][canvas][issue-968]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        var c = document.createElement('canvas');
+        c.id = 'stroke-style-canvas';
+        c.width = 200; c.height = 100;
+        document.body.appendChild(c);
+
+        canvasSetStrokeColor(c._id, '#00ff00');
+        canvasStrokeRect(c._id, 5, 5, 40, 40);
+    )");
+    root.layout_children();
+
+    auto* canvas = canvasFromBridge(bridge, engine, "stroke-style-canvas");
+    REQUIRE(canvas != nullptr);
+
+    pulp::canvas::RecordingCanvas rec;
+    canvas->paint(rec);
+
+    using DrawType = pulp::canvas::DrawCommand::Type;
+    pulp::canvas::Color active_stroke{};
+    bool saw_rect = false;
+    pulp::canvas::Color stroke_at_draw{};
+    for (const auto& cmd : rec.commands()) {
+        if (cmd.type == DrawType::set_stroke_color) {
+            active_stroke = cmd.color;
+            continue;
+        }
+        if (cmd.type == DrawType::stroke_rect) {
+            const bool matches = (cmd.f[0] == 5.0f && cmd.f[1] == 5.0f &&
+                                  cmd.f[2] == 40.0f && cmd.f[3] == 40.0f);
+            if (matches) {
+                saw_rect = true;
+                stroke_at_draw = active_stroke;
+            }
+        }
+    }
+    REQUIRE(saw_rect);
+    const bool is_green = (stroke_at_draw.r8() == 0 && stroke_at_draw.g8() == 255 &&
+                           stroke_at_draw.b8() == 0 && stroke_at_draw.a8() == 255);
+    REQUIRE(is_green);
+}

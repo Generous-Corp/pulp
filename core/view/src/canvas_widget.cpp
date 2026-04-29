@@ -52,11 +52,20 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
             canvas.fill_rect(0, 0, bounds().width, bounds().height);
             break;
         case CanvasDrawCmd::Type::fill_rect:
-            canvas.set_fill_color(cmd.color);
+            // pulp #968 — when use_active_style is set the bridge's caller
+            // omitted the color arg (Canvas2D `ctx.fillRect(x,y,w,h)` shim),
+            // so honour the active fillStyle (color OR gradient set most
+            // recently on the canvas) instead of overwriting with cmd.color.
+            if (!cmd.use_active_style) {
+                canvas.set_fill_color(cmd.color);
+            }
             canvas.fill_rect(cmd.x, cmd.y, cmd.w, cmd.h);
             break;
         case CanvasDrawCmd::Type::stroke_rect:
-            canvas.set_stroke_color(cmd.color);
+            // pulp #968 — same fallback as fill_rect, applied to strokeStyle.
+            if (!cmd.use_active_style) {
+                canvas.set_stroke_color(cmd.color);
+            }
             canvas.set_line_width(cmd.extra);
             canvas.stroke_rect(cmd.x, cmd.y, cmd.w, cmd.h);
             break;

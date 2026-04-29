@@ -2461,7 +2461,19 @@ void WidgetBridge::register_api() {
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::fill_rect;
             cmd.x=(float)args.get<double>(1,0); cmd.y=(float)args.get<double>(2,0);
             cmd.w=(float)args.get<double>(3,0); cmd.h=(float)args.get<double>(4,0);
-            cmd.color = parseColor(args.get<std::string>(5, "#fff"));
+            // pulp #968 — when no color arg was passed (or it was the empty
+            // string), honour the active fillStyle (color OR gradient) on
+            // the canvas widget. This makes a JS shim like
+            //   fillRect(x,y,w,h) { call('canvasRect', id, x,y,w,h); }
+            // behave like the Canvas2D spec — `ctx.fillRect` paints with
+            // whatever `ctx.fillStyle` was last set to, including a
+            // CanvasGradient. With 6+ args the explicit color wins.
+            const std::string color_str = args.get<std::string>(5, "");
+            if (args.size() < 6 || color_str.empty()) {
+                cmd.use_active_style = true;
+            } else {
+                cmd.color = parseColor(color_str);
+            }
             c->add_command(cmd);
         }
         return choc::value::Value();
@@ -2472,7 +2484,14 @@ void WidgetBridge::register_api() {
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::stroke_rect;
             cmd.x=(float)args.get<double>(1,0); cmd.y=(float)args.get<double>(2,0);
             cmd.w=(float)args.get<double>(3,0); cmd.h=(float)args.get<double>(4,0);
-            cmd.color = parseColor(args.get<std::string>(5, "#fff"));
+            // pulp #968 — same active-style fallback as canvasRect, applied
+            // to strokeStyle. Width arg (index 6) is unaffected.
+            const std::string color_str = args.get<std::string>(5, "");
+            if (args.size() < 6 || color_str.empty()) {
+                cmd.use_active_style = true;
+            } else {
+                cmd.color = parseColor(color_str);
+            }
             cmd.extra = (float)args.get<double>(6, 1);
             c->add_command(cmd);
         }
