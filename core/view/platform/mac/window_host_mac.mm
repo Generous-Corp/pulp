@@ -282,6 +282,23 @@ static pulp::view::Point toLocal(pulp::view::Point pos, pulp::view::View* target
     return local;
 }
 
+// pulp #992 — confirm a cached View* is still attached to the live tree
+// before any dereference. Walks `root` and compares pointers only, so it's
+// safe to call with `needle` pointing into freed memory. Returns false if
+// `needle` was unparented or destroyed between the cached capture (e.g. at
+// mouseDown) and the next event (e.g. mouseUp). Does NOT detect the ABA
+// case where memory was freed and reused at the same address — see #992
+// follow-up issue if profiling shows that's hit; for now a tree walk
+// catches the React-unmount-during-click pattern that actually crashes.
+static bool view_is_in_tree(pulp::view::View* needle, pulp::view::View* root) {
+    if (!needle || !root) return false;
+    if (needle == root) return true;
+    for (size_t i = 0; i < root->child_count(); ++i) {
+        if (view_is_in_tree(needle, root->child_at(i))) return true;
+    }
+    return false;
+}
+
 static pulp::view::KeyCode keyCodeFromNS(unsigned short code) {
     using KC = pulp::view::KeyCode;
     switch (code) {
@@ -398,7 +415,16 @@ static pulp::view::KeyCode keyCodeFromNS(unsigned short code) {
 - (void)mouseDragged:(NSEvent*)event {
     @try {
         try {
+            // pulp #992 — _dragTarget is captured in mouseDown but the View
+            // it points to may be unmounted (and freed) before the next
+            // drag event arrives, e.g. when a click triggers a React state
+            // change that destroys the widget. Re-validate against the
+            // live tree before any deref.
             if (!_dragTarget || !self.rootView) return;
+            if (!view_is_in_tree(_dragTarget, self.rootView)) {
+                _dragTarget = nullptr;
+                return;
+            }
             auto pt = [self localPoint:event];
             auto local = toLocal(pt, _dragTarget, self.rootView);
             _dragTarget->on_mouse_drag(local);
@@ -420,6 +446,19 @@ static pulp::view::KeyCode keyCodeFromNS(unsigned short code) {
     @try {
         try {
             if (_dragTarget) {
+                // pulp #992 — _dragTarget may point at a freed View if
+                // the mouseDown handler triggered a React unmount of the
+                // clicked widget (every dropdown selection in Spectr does
+                // this — clicking a band-count item flushes the React
+                // tree and the popover Views are dropped before mouseUp
+                // ever arrives). Drop the up event silently if the
+                // captured pointer is no longer in the live tree, rather
+                // than dereference garbage memory and SIGSEGV.
+                if (!view_is_in_tree(_dragTarget, self.rootView)) {
+                    _dragTarget = nullptr;
+                    [self setNeedsDisplay:YES];
+                    return;
+                }
                 auto pt = [self localPoint:event];
                 auto local = toLocal(pt, _dragTarget, self.rootView);
                 auto released_target = self.rootView ? self.rootView->hit_test(pt) : nullptr;
