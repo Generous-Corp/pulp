@@ -268,6 +268,21 @@ TEST_CASE("AudioInspector: MIDI logging") {
     REQUIRE(events[0].description == "Note On C4");
 }
 
+TEST_CASE("AudioInspector: metering gates level snapshots") {
+    AudioInspector audio;
+
+    audio.report_levels({{0.5f, 0.25f}});
+    REQUIRE(audio.latest_levels().empty());
+
+    audio.set_metering_enabled(true);
+    audio.report_levels({{0.8f, 0.4f}, {0.25f, 0.1f}});
+
+    auto levels = audio.latest_levels();
+    REQUIRE(levels.size() == 2);
+    REQUIRE(levels[0].peak == 0.8f);
+    REQUIRE(levels[1].rms == 0.1f);
+}
+
 // ── DomainHandler ───────────────────────────────────────────────────────────
 
 #include <pulp/inspect/domain_handler.hpp>
@@ -311,4 +326,50 @@ TEST_CASE("DomainHandler: State.getParameters") {
     auto resp = handler.handle(make_request(1, "State.getParameters"));
     REQUIRE_FALSE(resp.is_error);
     REQUIRE(resp.params_json.find("Volume") != std::string::npos);
+}
+
+TEST_CASE("DomainHandler: Audio domain exposes config and MIDI log") {
+    AudioInspector audio;
+    AudioConfig cfg;
+    cfg.sample_rate = 48000;
+    cfg.buffer_size = 128;
+    cfg.input_channels = 1;
+    cfg.output_channels = 2;
+    cfg.latency_samples = 64;
+    audio.set_config(cfg);
+    audio.log_midi(0x90, 60, 100, "Note On C4");
+
+    DomainHandler handler;
+    handler.set_audio_inspector(&audio);
+
+    auto config = handler.handle(make_request(1, methods::kAudioGetConfig));
+    REQUIRE_FALSE(config.is_error);
+    REQUIRE(config.params_json.find("\"sample_rate\"") != std::string::npos);
+    REQUIRE(config.params_json.find("48000") != std::string::npos);
+    REQUIRE(config.params_json.find("\"buffer_size\"") != std::string::npos);
+    REQUIRE(config.params_json.find("128") != std::string::npos);
+    REQUIRE(config.params_json.find("\"latency_samples\"") != std::string::npos);
+    REQUIRE(config.params_json.find("64") != std::string::npos);
+
+    REQUIRE_FALSE(audio.metering_enabled());
+    auto metering = handler.handle(make_request(2, methods::kAudioEnableMetering));
+    REQUIRE_FALSE(metering.is_error);
+    REQUIRE(audio.metering_enabled());
+    REQUIRE(metering.params_json.find("\"metering\":true") != std::string::npos);
+
+    auto midi = handler.handle(make_request(3, methods::kAudioGetMidiLog));
+    REQUIRE_FALSE(midi.is_error);
+    REQUIRE(midi.params_json.find("\"status\"") != std::string::npos);
+    REQUIRE(midi.params_json.find("144") != std::string::npos);
+    REQUIRE(midi.params_json.find("\"data1\"") != std::string::npos);
+    REQUIRE(midi.params_json.find("60") != std::string::npos);
+    REQUIRE(midi.params_json.find("\"description\"") != std::string::npos);
+    REQUIRE(midi.params_json.find("Note On C4") != std::string::npos);
+
+    auto unknown = handler.handle(make_request(4, "Audio.unknown"));
+    REQUIRE(unknown.is_error);
+
+    DomainHandler missing_audio;
+    auto missing = missing_audio.handle(make_request(5, methods::kAudioGetConfig));
+    REQUIRE(missing.is_error);
 }
