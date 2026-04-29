@@ -8,9 +8,14 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
-<a id="v0610"></a>
-## [0.62.0]
+<a id="v0620"></a>
+## [0.62.0] - 2026-04-29
 
+- fix(view): honor z_index() and default overflow to visible (#972) ([#996](https://github.com/danielraffel/pulp/pull/996))
+- fix(view): validate _dragTarget against live tree before deref (#992) ([#1001](https://github.com/danielraffel/pulp/pull/1001))
+- test(ci): cover local ci pure helper paths ([#989](https://github.com/danielraffel/pulp/pull/989))
+
+<a id="v0610"></a>
 ## [0.61.0] - 2026-04-29
 
 - framework/spectr parity 965 ([#991](https://github.com/danielraffel/pulp/pull/991))
@@ -894,6 +899,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.62.0]: https://github.com/danielraffel/pulp/releases/tag/v0.62.0
 [0.61.0]: https://github.com/danielraffel/pulp/releases/tag/v0.61.0
 [0.60.0]: https://github.com/danielraffel/pulp/releases/tag/v0.60.0
 [0.59.0]: https://github.com/danielraffel/pulp/releases/tag/v0.59.0
