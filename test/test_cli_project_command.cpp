@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <iostream>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -98,6 +99,31 @@ struct CapturedStreams {
     ~CapturedStreams() {
         std::cout.rdbuf(old_out);
         std::cerr.rdbuf(old_err);
+    }
+};
+
+struct ScopedStdin {
+    std::istringstream input;
+    std::streambuf* old_in = nullptr;
+
+    explicit ScopedStdin(std::string text) : input(std::move(text)) {
+        old_in = std::cin.rdbuf(input.rdbuf());
+    }
+
+    ~ScopedStdin() {
+        std::cin.rdbuf(old_in);
+    }
+};
+
+struct ScopedColorDisabled {
+    bool old_color = g_color_enabled;
+
+    ScopedColorDisabled() {
+        g_color_enabled = false;
+    }
+
+    ~ScopedColorDisabled() {
+        g_color_enabled = old_color;
     }
 };
 
@@ -424,31 +450,48 @@ TEST_CASE("project command shell redirection helpers use platform null devices",
 
 TEST_CASE("cli common parses numeric arguments and normalizes strings",
           "[cli][common][issue-643]") {
+    CapturedStreams capture;
+
     std::size_t size = 0;
     REQUIRE(parse_size_arg("42", "--top", size));
     REQUIRE(size == 42);
+    REQUIRE(parse_size_arg("0", "--top", size));
+    REQUIRE(size == 0);
     REQUIRE_FALSE(parse_size_arg("", "--top", size));
     REQUIRE_FALSE(parse_size_arg("12x", "--top", size));
+    REQUIRE_FALSE(parse_size_arg("184467440737095516160", "--top", size));
 
     double value = 0.0;
     REQUIRE(parse_double_arg("0.125", "--min-score", value));
     REQUIRE(value == 0.125);
+    REQUIRE(parse_double_arg("-12.5", "--min-score", value));
+    REQUIRE(value == -12.5);
     REQUIRE_FALSE(parse_double_arg("", "--min-score", value));
     REQUIRE_FALSE(parse_double_arg("nan", "--min-score", value));
     REQUIRE_FALSE(parse_double_arg("inf", "--min-score", value));
+    REQUIRE_FALSE(parse_double_arg("1e309", "--min-score", value));
     REQUIRE_FALSE(parse_double_arg("3.5x", "--min-score", value));
 
     REQUIRE(trim(" \t hello \n") == "hello");
+    REQUIRE(trim("\r\n\t ") == "");
     REQUIRE(strip_quotes("\"quoted\"") == "quoted");
     REQUIRE(strip_quotes("'quoted'") == "quoted");
+    REQUIRE(strip_quotes("\"mismatched'") == "\"mismatched'");
     REQUIRE(strip_quotes("unquoted") == "unquoted");
     REQUIRE(replace_all_str("one two one", "one", "1") == "1 two 1");
+    TempDir tmp;
+    write_file(tmp.path / "contents.txt", "file body");
+    REQUIRE(read_file_contents(tmp.path / "contents.txt") == "file body");
     REQUIRE(icontains("Signalsmith DSP", "smith"));
     REQUIRE(icontains("Signalsmith DSP", "SIGNAL"));
+    REQUIRE(icontains("Signalsmith DSP", ""));
     REQUIRE_FALSE(icontains("Signalsmith DSP", "delay"));
     REQUIRE(yaml_value("  target: plugin  # comment", "target") == "plugin  # comment");
+    REQUIRE(yaml_value("target:", "target").empty());
+    REQUIRE(yaml_value("kind: guide", "target").empty());
     REQUIRE(sanitize_process_output(std::string("a\0b", 3)) == "ab");
     REQUIRE(truncate_message("abcdef", 4) == "abcd...");
+    REQUIRE(truncate_message("abcdef", 0) == "...");
     REQUIRE(truncate_message("abc", 4) == "abc");
 }
 
@@ -460,16 +503,23 @@ TEST_CASE("cli common path helpers find roots and constrain containment",
     fs::create_directories(child);
     fs::create_directories(repo / "core");
     write_file(repo / "CMakeLists.txt", "cmake_minimum_required(VERSION 3.20)\n");
+    auto cmake_file = repo / "CMakeLists.txt";
 
     auto standalone = tmp.path / "standalone" / "nested";
     fs::create_directories(standalone);
     write_file(tmp.path / "standalone" / "pulp.toml", "[pulp]\nsdk_version = \"1.2.3\"\n");
 
     REQUIRE(find_project_root_from(child) == repo);
+    REQUIRE(find_project_root_from(cmake_file) == repo);
     REQUIRE(find_project_root_from(tmp.path / "missing") == fs::path{});
+    {
+        ScopedCwd cwd(child);
+        REQUIRE(find_project_root_from({}) == repo);
+    }
     REQUIRE(path_is_within(child, repo));
     REQUIRE(path_is_within(repo, repo));
     REQUIRE_FALSE(path_is_within(tmp.path, repo));
+    REQUIRE_FALSE(path_is_within(tmp.path / "repo-sibling", repo));
 
     bool is_standalone = false;
     {
@@ -499,6 +549,35 @@ TEST_CASE("cli common config helpers honor PULP_HOME and project-dir overrides",
     REQUIRE(resolve_create_projects_base_dir(repo) == tmp.path / "projects");
 }
 
+TEST_CASE("cli common config fallback expands user and relative project directories",
+          "[cli][common][issue-643]") {
+    TempDir tmp;
+    ScopedEnv home_env("HOME", (tmp.path / "home").string());
+    ScopedEnv pulp_home_env("PULP_HOME", (tmp.path / "pulp-home").string());
+
+    {
+        ScopedEnv projects_dir("PULP_PROJECTS_DIR", "~/Pulp Projects");
+        REQUIRE(resolve_create_projects_base_dir(tmp.path / "repo")
+                == tmp.path / "home" / "Pulp Projects");
+    }
+
+    {
+        ScopedCwd cwd(tmp.path);
+        ScopedEnv projects_dir("PULP_PROJECTS_DIR", "relative-projects");
+        REQUIRE(resolve_create_projects_base_dir(tmp.path / "repo")
+                == fs::absolute("relative-projects"));
+    }
+
+    REQUIRE(write_user_config_value("create", "projects_dir", "~/Configured Projects"));
+    REQUIRE(resolve_create_projects_base_dir(tmp.path / "repo")
+            == tmp.path / "home" / "Configured Projects");
+
+    TempDir empty_config;
+    ScopedEnv empty_home("PULP_HOME", (empty_config.path / "empty-home").string());
+    ScopedCwd cwd(tmp.path);
+    REQUIRE(resolve_create_projects_base_dir({}) == tmp.path);
+}
+
 TEST_CASE("cli common format, AAX, quoting, and fuzzy helpers stay deterministic",
           "[cli][common][issue-643]") {
     // shell_quote is platform-divergent (#776): POSIX escapes both `\`
@@ -525,7 +604,190 @@ TEST_CASE("cli common format, AAX, quoting, and fuzzy helpers stay deterministic
 
     REQUIRE(fuzzy_score("package registry", "pgr") > 0);
     REQUIRE(fuzzy_score("package", "package") > fuzzy_score("package", "pkg"));
+    REQUIRE(fuzzy_score("abc", "") == 1);
+    REQUIRE(fuzzy_score("", "abc") == 0);
     REQUIRE(fuzzy_score("package", "zzz") == 0);
+}
+
+TEST_CASE("cli common project metadata and compatibility helpers cover edge paths",
+          "[cli][common][issue-643]") {
+    TempDir tmp;
+    auto project = tmp.path / "Clock";
+
+    REQUIRE(read_pulp_toml_value(project, "sdk_version").empty());
+    REQUIRE(read_sdk_version(project) == PULP_SDK_VERSION);
+    REQUIRE(read_sdk_path_hint(project).empty());
+    REQUIRE(read_sdk_checkout_hint(project).empty());
+    REQUIRE(read_project_cmake_version(project).empty());
+
+    write_file(project / "pulp.toml",
+               "[pulp]\n"
+               "sdk_version = \"0.2.0\"\n"
+               "sdk_path = \"/opt/pulp-sdk\"\n"
+               "sdk_checkout = \"/src/pulp\"\n");
+    REQUIRE(read_pulp_toml_value(project, "sdk_version") == "0.2.0");
+    REQUIRE(read_sdk_version(project) == "0.2.0");
+    REQUIRE(read_sdk_path_hint(project) == fs::path("/opt/pulp-sdk"));
+    REQUIRE(read_sdk_checkout_hint(project) == fs::path("/src/pulp"));
+
+    write_file(project / "CMakeLists.txt",
+               "cmake_minimum_required(VERSION 3.20)\n"
+               "project(Clock VERSION 1.2.3 LANGUAGES CXX)\n");
+    REQUIRE(read_project_cmake_version(project) == "1.2.3");
+
+    write_file(project / "pulp.toml", "[pulp]\nsdk_version = \"99.0.0\"\n");
+    REQUIRE(enforce_project_cli_compatibility(project, "pulp build", true));
+    CapturedStreams capture;
+    REQUIRE_FALSE(enforce_project_cli_compatibility(project, "pulp build", false));
+    REQUIRE(capture.err.str().find("requires a newer Pulp CLI") != std::string::npos);
+    REQUIRE(capture.err.str().find("pulp upgrade") != std::string::npos);
+
+    ScopedEnv skip_cache("PULP_SKIP_CACHE_PREFLIGHT", "1");
+    REQUIRE(cache_preflight_check(project, "pulp build"));
+    REQUIRE(cache_preflight_check({}, "pulp build"));
+}
+
+TEST_CASE("cli common standalone SDK resolution reports missing hints without materializing",
+          "[cli][common][issue-643]") {
+    TempDir tmp;
+    ScopedEnv pulp_home("PULP_HOME", (tmp.path / "home").string());
+
+    auto missing_path_project = tmp.path / "MissingPath";
+    make_standalone_project(missing_path_project, "0.4.0", (tmp.path / "missing-sdk").generic_string());
+    auto missing_path = resolve_standalone_sdk(missing_path_project, false);
+    REQUIRE(missing_path.sdk_path_hint == tmp.path / "missing-sdk");
+    REQUIRE_FALSE(missing_path.sdk_path_config_ready);
+    REQUIRE(missing_path.resolved_sdk_dir.empty());
+
+    auto checkout_project = tmp.path / "CheckoutOnly";
+    auto checkout = tmp.path / "checkout";
+    fs::create_directories(checkout);
+    make_standalone_project(checkout_project, "0.5.0", {}, checkout.generic_string());
+    auto checkout_only = resolve_standalone_sdk(checkout_project, false);
+    REQUIRE(checkout_only.sdk_checkout_hint == checkout);
+    REQUIRE(checkout_only.resolved_sdk_dir.empty());
+}
+
+TEST_CASE("cli common AAX helpers classify SDKs, bundles, and validator output",
+          "[cli][common][issue-643]") {
+    TempDir tmp;
+    REQUIRE_FALSE(looks_like_aax_sdk_root({}));
+
+    auto sdk = tmp.path / "sdk";
+    write_file(sdk / "Interfaces" / "AAX.h", "// fake\n");
+    write_file(sdk / "Interfaces" / "AAX_Exports.cpp", "// fake\n");
+    REQUIRE(looks_like_aax_sdk_root(sdk));
+    {
+        ScopedEnv aax_sdk("PULP_AAX_SDK_DIR", "\"" + sdk.string() + "\"");
+        REQUIRE(find_aax_sdk_root() == fs::absolute(sdk));
+    }
+
+    REQUIRE_FALSE(bundle_contains_payload({}));
+    auto loose = tmp.path / "Loose.aaxplugin";
+    write_file(loose, "binary");
+    REQUIRE(bundle_contains_payload(loose));
+
+    auto bundle = tmp.path / "Clock.aaxplugin";
+    write_file(bundle / "Contents" / "MacOS" / "Clock", "binary");
+    REQUIRE(bundle_contains_payload(bundle));
+
+    auto empty_bundle = tmp.path / "Empty.aaxplugin";
+    write_file(empty_bundle / "Contents" / "MacOS" / "Other", "binary");
+    REQUIRE_FALSE(bundle_contains_payload(empty_bundle));
+
+    auto validator = tmp.path / "validator";
+    auto commandline = validator / "CommandLineTools";
+    write_file(platform_executable(commandline / "dsh"), "");
+#ifdef __APPLE__
+    write_file(commandline / "Dishes" / "aaxval.dish" / "Contents" / "MacOS" / "aaxval", "");
+#else
+    fs::create_directories(commandline / "Dishes" / "aaxval.dish");
+#endif
+    {
+        ScopedEnv aax_validator("PULP_AAX_VALIDATOR_DIR", validator.string());
+        REQUIRE(find_aax_validator_root() == fs::absolute(validator));
+    }
+
+    REQUIRE(run_aax_validator_command({}, tmp.path / "Plugin.aaxplugin", false).empty());
+    REQUIRE(aax_validator_passed("result_status: E_COMPLETED_PASS"));
+    REQUIRE(aax_validator_passed("12 passed, 0 failed, 3 warnings, 0 cancelled"));
+    REQUIRE_FALSE(aax_validator_passed("12 passed, 1 failed, 0 warnings, 0 cancelled"));
+    REQUIRE_FALSE(aax_validator_passed("result_status: E_COMPLETED_FAIL"));
+    REQUIRE_FALSE(aax_validator_passed("failed to complete"));
+}
+
+TEST_CASE("cli common delegates fail cleanly before shelling out",
+          "[cli][common][issue-643]") {
+    TempDir tmp;
+
+    {
+        ScopedCwd cwd(tmp.path);
+        CapturedStreams capture;
+        REQUIRE(delegate_to_python_script("tools/missing.py", {}) == 1);
+        REQUIRE(capture.err.str().find("not in a Pulp project directory") != std::string::npos);
+    }
+
+    auto repo = tmp.path / "repo";
+    fs::create_directories(repo / "core");
+    write_file(repo / "CMakeLists.txt", "cmake_minimum_required(VERSION 3.20)\n");
+
+    {
+        ScopedCwd cwd(repo);
+        CapturedStreams capture;
+        REQUIRE(delegate_to_python_script("tools/missing.py", {"--flag"}) == 1);
+        REQUIRE(capture.err.str().find("script not found") != std::string::npos);
+    }
+
+    {
+        ScopedCwd cwd(repo);
+        CapturedStreams capture;
+        REQUIRE(delegate_to_build_binary("tools/missing-tool", {"--flag"}, "--prepend") == 1);
+        REQUIRE(capture.err.str().find("not built") != std::string::npos);
+    }
+}
+
+TEST_CASE("cli common interactive prompts accept defaults and parsed answers",
+          "[cli][common][issue-643]") {
+    ScopedColorDisabled color;
+    CapturedStreams capture;
+
+    {
+        ScopedStdin input("\n");
+        REQUIRE(cli::confirm("Continue?", true));
+    }
+    {
+        ScopedStdin input("\n");
+        REQUIRE_FALSE(cli::confirm("Continue?", false));
+    }
+    {
+        ScopedStdin input("yes\n");
+        REQUIRE(cli::confirm("Continue?", false));
+    }
+    {
+        ScopedStdin input("n\n");
+        REQUIRE_FALSE(cli::confirm("Continue?", true));
+    }
+    {
+        ScopedStdin input("2\n");
+        REQUIRE(cli::choose("Pick", {"one", "two", "three"}) == 1);
+    }
+    {
+        ScopedStdin input("bad\n");
+        REQUIRE(cli::choose("Pick", {"one", "two"}) == 0);
+    }
+    {
+        ScopedStdin input("\n");
+        REQUIRE(cli::choose("Pick", {"one", "two"}) == 0);
+    }
+    REQUIRE(cli::choose("Pick", {}) == -1);
+    {
+        ScopedStdin input("\n");
+        REQUIRE(cli::input("Name", "Clock") == "Clock");
+    }
+    {
+        ScopedStdin input("Delay\n");
+        REQUIRE(cli::input("Name", "Clock") == "Delay");
+    }
 }
 
 TEST_CASE("bump_one enforces the dirty gate and rewrites managed standalone sdk_path",
