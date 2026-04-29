@@ -668,6 +668,32 @@ TEST_CASE("cli common standalone SDK resolution reports missing hints without ma
     REQUIRE(checkout_only.resolved_sdk_dir.empty());
 }
 
+TEST_CASE("cli common cached SDK and build helpers return without shelling out",
+          "[cli][common][issue-643]") {
+    TempDir tmp;
+    ScopedEnv pulp_home("PULP_HOME", (tmp.path / "home").string());
+
+    make_fake_sdk(sdk_cache_path("0.8.0"), "0.8.0");
+    REQUIRE(ensure_sdk("0.8.0") == sdk_cache_path("0.8.0"));
+
+    auto repo = tmp.path / "repo";
+    fs::create_directories(repo / "core");
+    write_file(repo / "CMakeLists.txt",
+               "cmake_minimum_required(VERSION 3.24)\n"
+               "project(PulpFixture VERSION 0.8.0 LANGUAGES CXX)\n");
+
+    make_fake_sdk(local_sdk_cache_path("0.9.0"), "0.9.0");
+    REQUIRE(ensure_checkout_sdk(repo, "0.9.0") == local_sdk_cache_path("0.9.0"));
+
+    auto build = tmp.path / "build";
+    fs::create_directories(build);
+    write_file(build / "CMakeCache.txt",
+               "CMAKE_HOME_DIRECTORY:INTERNAL=" + repo.string() + "\n");
+
+    REQUIRE(cmake_home_directory(build) == repo);
+    REQUIRE(ensure_repo_build_configured(repo, build) == 0);
+}
+
 TEST_CASE("cli common AAX helpers classify SDKs, bundles, and validator output",
           "[cli][common][issue-643]") {
     TempDir tmp;
