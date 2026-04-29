@@ -157,7 +157,7 @@ TEST_CASE("ComboBox popup overlay paints separators hover and selection guards",
     REQUIRE(combo.is_open());
 
     MouseEvent separator_click;
-    separator_click.position = {48.0f, 42.0f};
+    separator_click.position = {48.0f, 66.0f};
     separator_click.is_down = true;
     combo.on_mouse_event(separator_click);
     REQUIRE_FALSE(combo.is_open());
