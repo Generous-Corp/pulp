@@ -410,6 +410,385 @@ TEST_CASE("WidgetBridge extended controls and visualization APIs round-trip JS t
     REQUIRE(engine.evaluate("list_activate").getWithDefault<int>(-1) == 2);
 }
 
+TEST_CASE("WidgetBridge pointer, gesture, capture, and shortcut APIs dispatch to JS",
+          "[view][bridge][events]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        var pointer_down_id = -1;
+        var pointer_down_type = '';
+        var pointer_down_primary = true;
+        var pointer_down_pressure = -1;
+        var pointer_down_client_x = -1;
+        var pointer_down_offset_x = -1;
+        var pointer_down_button = -1;
+        var pointer_down_mods = '';
+        var pointer_up_id = -1;
+        var pointer_cancel_id = -1;
+        var pointer_move_x = -1;
+        var pointer_move_y = -1;
+        var wheel_x = 0;
+        var wheel_y = 0;
+        var gesture_log = [];
+        var capture_log = [];
+        var shortcut_count = 0;
+        var global_key = -1;
+        var global_mods = -1;
+        function shortcutHit() { shortcut_count++; }
+
+        createLabel('surface', 'Surface', '');
+        on('surface', 'pointerdown', function(e) {
+            pointer_down_id = e.pointerId;
+            pointer_down_type = e.pointerType;
+            pointer_down_primary = e.isPrimary;
+            pointer_down_pressure = e.pressure;
+            pointer_down_client_x = e.clientX;
+            pointer_down_offset_x = e.offsetX;
+            pointer_down_button = e.button;
+            pointer_down_mods = [e.ctrlKey, e.shiftKey, e.altKey, e.metaKey].join(':');
+        });
+        on('surface', 'pointerup', function(e) { pointer_up_id = e.pointerId; });
+        on('surface', 'pointercancel', function(e) { pointer_cancel_id = e.pointerId; });
+        on('surface', 'pointermove', function(e) {
+            pointer_move_x = e.offsetX;
+            pointer_move_y = e.offsetY;
+        });
+        on('surface', 'wheel', function(dx, dy) {
+            wheel_x = dx;
+            wheel_y = dy;
+        });
+        on('surface', 'gesturestart', function(e) { gesture_log.push('start:' + e.scale); });
+        on('surface', 'gesturechange', function(e) { gesture_log.push('change:' + e.rotation); });
+        on('surface', 'gestureend', function(e) { gesture_log.push('end:' + e.clientX); });
+        on('surface', 'gotpointercapture', function(e) { capture_log.push('got:' + e.pointerId); });
+        on('surface', 'lostpointercapture', function(e) { capture_log.push('lost:' + e.pointerId); });
+        on('__global__', 'keydown', function(e) {
+            global_key = e.key;
+            global_mods = e.mods;
+        });
+
+        registerPointer('surface');
+        registerWheel('surface');
+        registerGesture('surface');
+        registerShortcut(65, 18, 'shortcutHit');
+    )");
+
+    auto* surface = bridge.widget("surface");
+    REQUIRE(surface != nullptr);
+    REQUIRE(surface->on_pointer_event);
+    REQUIRE(surface->on_drag);
+    REQUIRE(surface->on_gesture_cb);
+
+    MouseEvent down{};
+    down.is_down = true;
+    down.position = {7.0f, 9.0f};
+    down.window_position = {107.0f, 109.0f};
+    down.pointer_id = 3;
+    down.pointer_type = PointerType::pen;
+    down.pressure = 0.75f;
+    down.altitude_angle = 0.4f;
+    down.azimuth_angle = 1.2f;
+    down.button = MouseButton::right;
+    down.modifiers = static_cast<uint16_t>(kModCtrl | kModShift | kModAlt | kModCmd);
+    surface->on_mouse_event(down);
+
+    REQUIRE(engine.evaluate("pointer_down_id").getWithDefault<int>(-1) == 3);
+    REQUIRE(engine.evaluate("pointer_down_type").toString() == "pen");
+    REQUIRE_FALSE(engine.evaluate("pointer_down_primary").getWithDefault<bool>(true));
+    REQUIRE_THAT(engine.evaluate("pointer_down_pressure").getWithDefault<double>(0.0), WithinAbs(0.75, 0.001));
+    REQUIRE_THAT(engine.evaluate("pointer_down_client_x").getWithDefault<double>(0.0), WithinAbs(107.0, 0.001));
+    REQUIRE_THAT(engine.evaluate("pointer_down_offset_x").getWithDefault<double>(0.0), WithinAbs(7.0, 0.001));
+    REQUIRE(engine.evaluate("pointer_down_button").getWithDefault<int>(0) == 2);
+    REQUIRE(engine.evaluate("pointer_down_mods").toString() == "true:true:true:true");
+
+    MouseEvent up = down;
+    up.is_down = false;
+    surface->on_mouse_event(up);
+    REQUIRE(engine.evaluate("pointer_up_id").getWithDefault<int>(-1) == 3);
+
+    MouseEvent cancel = up;
+    cancel.is_cancelled = true;
+    surface->on_mouse_event(cancel);
+    REQUIRE(engine.evaluate("pointer_cancel_id").getWithDefault<int>(-1) == 3);
+
+    surface->on_drag({13.0f, 17.0f});
+    REQUIRE_THAT(engine.evaluate("pointer_move_x").getWithDefault<double>(0.0), WithinAbs(13.0, 0.001));
+    REQUIRE_THAT(engine.evaluate("pointer_move_y").getWithDefault<double>(0.0), WithinAbs(17.0, 0.001));
+
+    MouseEvent wheel{};
+    wheel.is_wheel = true;
+    wheel.scroll_delta_x = 2.5f;
+    wheel.scroll_delta_y = -7.0f;
+    surface->on_mouse_event(wheel);
+    REQUIRE_THAT(engine.evaluate("wheel_x").getWithDefault<double>(0.0), WithinAbs(2.5, 0.001));
+    REQUIRE_THAT(engine.evaluate("wheel_y").getWithDefault<double>(0.0), WithinAbs(-7.0, 0.001));
+
+    GestureEvent gesture{};
+    gesture.phase = GesturePhase::began;
+    gesture.scale = 1.25f;
+    gesture.position = {21.0f, 22.0f};
+    surface->on_gesture_event(gesture);
+    gesture.phase = GesturePhase::changed;
+    gesture.rotation = 0.5f;
+    surface->on_gesture_event(gesture);
+    gesture.phase = GesturePhase::cancelled;
+    surface->on_gesture_event(gesture);
+    REQUIRE(engine.evaluate("gesture_log.join('|')").toString() == "start:1.25|change:0.5|end:21");
+
+    bridge.load_script("nativeSetPointerCapture('surface', 42);");
+    REQUIRE(surface->has_pointer_capture(42));
+    bridge.load_script("nativeReleasePointerCapture('surface', 42);");
+    REQUIRE_FALSE(surface->has_pointer_capture(42));
+    REQUIRE(engine.evaluate("capture_log.join('|')").toString() == "got:42|lost:42");
+
+    bridge.forward_key_event(static_cast<int>(KeyCode::a),
+                             static_cast<uint16_t>(kModCtrl | kModCmd),
+                             true);
+    REQUIRE(engine.evaluate("shortcut_count").getWithDefault<int>(0) == 0);
+    REQUIRE(engine.evaluate("global_key").getWithDefault<int>(0) == static_cast<int>(KeyCode::a));
+    REQUIRE(engine.evaluate("global_mods").getWithDefault<int>(0) == static_cast<int>(kModCtrl | kModCmd));
+
+    bridge.forward_key_event(static_cast<int>(KeyCode::a),
+                             static_cast<uint16_t>(kModCtrl | kModCmd),
+                             false);
+    REQUIRE(engine.evaluate("shortcut_count").getWithDefault<int>(0) == 0);
+
+    bridge.forward_key_event(65, 18, true);
+    REQUIRE(engine.evaluate("shortcut_count").getWithDefault<int>(0) == 1);
+}
+
+TEST_CASE("WidgetBridge style and layout setters update native view state",
+          "[view][bridge][style][layout]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        setTheme('light');
+        createGrid('grid', '');
+        createPanel('panel', 'grid');
+        createLabel('title', 'Hello', 'panel');
+        createTextEditor('editor', 'panel');
+
+        setGrid('grid', 'template_columns', '1fr 2fr auto 100px');
+        setGrid('grid', 'template_rows', '40px auto');
+        setGrid('grid', 'gap', 8);
+        setGrid('panel', 'column_start', 2);
+        setGrid('panel', 'column_end', 4);
+        setGrid('panel', 'row_start', 1);
+        setGrid('panel', 'row_end', 3);
+
+        setFlex('panel', 'direction', 'row');
+        setFlex('panel', 'gap', 5);
+        setFlex('panel', 'padding', 11);
+        setFlex('panel', 'padding_top', 12);
+        setFlex('panel', 'padding_right', 13);
+        setFlex('panel', 'padding_bottom', 14);
+        setFlex('panel', 'padding_left', 15);
+        setFlex('panel', 'margin', 4);
+        setFlex('panel', 'margin_top', 1);
+        setFlex('panel', 'margin_right', 2);
+        setFlex('panel', 'margin_bottom', 3);
+        setFlex('panel', 'margin_left', 4);
+        setFlex('panel', 'flex_grow', 2);
+        setFlex('panel', 'flex_shrink', 0.25);
+        setFlex('panel', 'flex_basis', 88);
+        setFlex('panel', 'flex_wrap', 1);
+        setFlex('panel', 'order', 3);
+        setFlex('panel', 'width', 123);
+        setFlex('panel', 'height', 45);
+        setFlex('panel', 'min_width', 44);
+        setFlex('panel', 'min_height', 33);
+        setFlex('panel', 'max_width', 222);
+        setFlex('panel', 'max_height', 111);
+        setFlex('panel', 'row_gap', 6);
+        setFlex('panel', 'column_gap', 7);
+        setFlex('panel', 'align_items', 'center');
+        setFlex('panel', 'align_self', 'end');
+        setFlex('panel', 'justify_content', 'space-evenly');
+
+        setPointerEvents('panel', 'none');
+        setVisibility('panel', 'hidden');
+        setUserSelect('panel', 'none');
+        setPanelStyle('panel', 'bg.raised', 'accent.primary', 9, 2);
+        setBackground('panel', 'rgba(10, 20, 30, 0.5)');
+        setBorder('panel', 'hsl(120, 100%, 50%)', 2, 6);
+        setBorderSide('panel', 'top', 4, 'tomato');
+        setCornerRadius('panel', 'TopLeft', 3);
+        setOpacity('panel', 0.42);
+        setOverflow('panel', 'visible');
+        setEnabled('panel', 0);
+        setPosition('panel', 'sticky');
+        setTop('panel', 10);
+        setRight('panel', 20);
+        setBottom('panel', 30);
+        setLeft('panel', 40);
+        setZIndex('panel', 99);
+        setTransitionDuration('panel', 0.33);
+        setTranslate('panel', 12, 13);
+        setRotation('panel', 45);
+        setScale('panel', 1.5);
+        setTransformOrigin('panel', 0.25, 0.75);
+        setTextOverflow('panel', 'ellipsis');
+        setCursor('panel', 'grab');
+        setFilter('panel', 'blur(3.5px)');
+        setBackgroundGradient('panel', 'linear-gradient(to right, red, blue)');
+        setDebugPaint(1);
+        setColorToken('accent.tomato', 'tomato');
+        setDimensionToken('space.test', 19);
+
+        setWhiteSpace('title', 'pre-wrap');
+        setFontFamily('title', 'Inter Tight');
+        setFontWeight('title', 700);
+        setFontStyle('title', 'italic');
+        setLetterSpacing('title', 1.5);
+        setLineHeight('title', 22);
+        setTextAlign('title', 'right');
+        setFontSize('title', 18);
+        setTextColor('title', '#0f8');
+        setTextTransform('title', 'uppercase');
+        setTextDecoration('title', 'underline');
+        setText('title', 'Updated');
+        setMultiLine('title', 1);
+        setText('editor', 'typed');
+        setPlaceholder('editor', 'Enter value');
+        setMultiLine('editor', 1);
+        setFontSize('editor', 16);
+
+        setStyle('panel', 'noop');
+        defineKeyframes('pulse', [{ offset: 0, value: 1 }]);
+        setAnimation('panel', 'opacity', 1.0, 2, 'alternate');
+        beginPath();
+        drawPath('canvas-missing', 'M 0 0 L 10 10', '#fff', '#000', 1);
+
+        var saved_ok = saveStylePreset('Bridge Coverage Preset!', {
+            color: '#ffffff',
+            nested: { value: 3 }
+        });
+        var loaded_preset = loadStylePreset('Bridge Coverage Preset!');
+        var missing_preset_type = typeof loadStylePreset('missing-preset-for-coverage');
+    )");
+
+    auto* grid = bridge.widget("grid");
+    auto* panel = dynamic_cast<Panel*>(bridge.widget("panel"));
+    auto* title = dynamic_cast<Label*>(bridge.widget("title"));
+    auto* editor = dynamic_cast<TextEditor*>(bridge.widget("editor"));
+    REQUIRE(grid != nullptr);
+    REQUIRE(panel != nullptr);
+    REQUIRE(title != nullptr);
+    REQUIRE(editor != nullptr);
+    auto* panel_view = static_cast<View*>(panel);
+
+    REQUIRE(grid->layout_mode() == LayoutMode::grid);
+    REQUIRE(grid->grid().template_columns.size() == 4);
+    REQUIRE(grid->grid().template_rows.size() == 2);
+    REQUIRE_THAT(grid->grid().column_gap, WithinAbs(8.0f, 0.001f));
+    REQUIRE_THAT(grid->grid().row_gap, WithinAbs(8.0f, 0.001f));
+    REQUIRE(panel->grid().grid_column_start == 2);
+    REQUIRE(panel->grid().grid_column_end == 4);
+    REQUIRE(panel->grid().grid_row_start == 1);
+    REQUIRE(panel->grid().grid_row_end == 3);
+
+    const auto& flex = panel->flex();
+    REQUIRE(flex.direction == FlexDirection::row);
+    REQUIRE_THAT(flex.gap, WithinAbs(5.0f, 0.001f));
+    REQUIRE_THAT(flex.padding, WithinAbs(11.0f, 0.001f));
+    REQUIRE_THAT(flex.padding_top, WithinAbs(12.0f, 0.001f));
+    REQUIRE_THAT(flex.padding_right, WithinAbs(13.0f, 0.001f));
+    REQUIRE_THAT(flex.padding_bottom, WithinAbs(14.0f, 0.001f));
+    REQUIRE_THAT(flex.padding_left, WithinAbs(15.0f, 0.001f));
+    REQUIRE_THAT(flex.margin_t(), WithinAbs(1.0f, 0.001f));
+    REQUIRE_THAT(flex.margin_r(), WithinAbs(2.0f, 0.001f));
+    REQUIRE_THAT(flex.margin_b(), WithinAbs(3.0f, 0.001f));
+    REQUIRE_THAT(flex.margin_l(), WithinAbs(4.0f, 0.001f));
+    REQUIRE_THAT(flex.flex_grow, WithinAbs(2.0f, 0.001f));
+    REQUIRE_THAT(flex.flex_shrink, WithinAbs(0.25f, 0.001f));
+    REQUIRE_THAT(flex.flex_basis, WithinAbs(88.0f, 0.001f));
+    REQUIRE(flex.flex_wrap);
+    REQUIRE(flex.order == 3);
+    REQUIRE_THAT(flex.preferred_width, WithinAbs(123.0f, 0.001f));
+    REQUIRE_THAT(flex.preferred_height, WithinAbs(45.0f, 0.001f));
+    REQUIRE_THAT(flex.min_width, WithinAbs(44.0f, 0.001f));
+    REQUIRE_THAT(flex.min_height, WithinAbs(33.0f, 0.001f));
+    REQUIRE_THAT(flex.max_width, WithinAbs(222.0f, 0.001f));
+    REQUIRE_THAT(flex.max_height, WithinAbs(111.0f, 0.001f));
+    REQUIRE_THAT(flex.row_gap, WithinAbs(6.0f, 0.001f));
+    REQUIRE_THAT(flex.column_gap, WithinAbs(7.0f, 0.001f));
+    REQUIRE(flex.align_items == FlexAlign::center);
+    REQUIRE(flex.align_self == FlexAlign::end);
+    REQUIRE(flex.justify_content == FlexJustify::space_evenly);
+
+    REQUIRE_FALSE(panel->hit_testable());
+    REQUIRE(panel->background_token() == "bg.raised");
+    REQUIRE(panel->border_token() == "accent.primary");
+    REQUIRE_THAT(panel->corner_radius(), WithinAbs(9.0f, 0.001f));
+    REQUIRE_THAT(panel->border_width(), WithinAbs(2.0f, 0.001f));
+    REQUIRE(panel->has_background_color());
+    REQUIRE(panel->has_border());
+    REQUIRE_THAT(panel->background_color().r, WithinAbs(10.0f / 255.0f, 0.001f));
+    REQUIRE_THAT(panel->background_color().g, WithinAbs(20.0f / 255.0f, 0.001f));
+    REQUIRE_THAT(panel->background_color().b, WithinAbs(30.0f / 255.0f, 0.001f));
+    REQUIRE_THAT(panel->background_color().a, WithinAbs(0.5f, 0.001f));
+    REQUIRE_THAT(panel_view->border_width(), WithinAbs(2.0f, 0.001f));
+    REQUIRE_THAT(panel_view->corner_radius(), WithinAbs(6.0f, 0.001f));
+    REQUIRE_THAT(panel->opacity(), WithinAbs(0.42f, 0.001f));
+    REQUIRE_FALSE(panel->enabled());
+    REQUIRE(panel->position() == View::Position::sticky);
+    REQUIRE(panel->overflow() == View::Overflow::visible);
+    REQUIRE_THAT(panel->top(), WithinAbs(10.0f, 0.001f));
+    REQUIRE_THAT(panel->right(), WithinAbs(20.0f, 0.001f));
+    REQUIRE_THAT(panel->bottom(), WithinAbs(30.0f, 0.001f));
+    REQUIRE_THAT(panel->left(), WithinAbs(40.0f, 0.001f));
+    REQUIRE(panel->has_top());
+    REQUIRE(panel->has_right());
+    REQUIRE(panel->has_bottom());
+    REQUIRE(panel->has_left());
+    REQUIRE(panel->z_index() == 99);
+    REQUIRE_THAT(panel->theme().dimension("transition.duration").value_or(0.0f), WithinAbs(0.33f, 0.001f));
+    REQUIRE_THAT(panel->translate_x(), WithinAbs(12.0f, 0.001f));
+    REQUIRE_THAT(panel->translate_y(), WithinAbs(13.0f, 0.001f));
+    REQUIRE_THAT(panel->rotation(), WithinAbs(45.0f, 0.001f));
+    REQUIRE_THAT(panel->scale(), WithinAbs(1.5f, 0.001f));
+    REQUIRE_THAT(panel->transform_origin_x(), WithinAbs(0.25f, 0.001f));
+    REQUIRE_THAT(panel->transform_origin_y(), WithinAbs(0.75f, 0.001f));
+    REQUIRE(panel->text_overflow_ellipsis());
+    REQUIRE(panel->cursor() == View::CursorStyle::grab);
+    REQUIRE_THAT(panel->filter_blur(), WithinAbs(3.5f, 0.001f));
+    REQUIRE(panel->has_background_gradient());
+
+    REQUIRE_THAT(root.theme().dimension("debug.paint").value_or(0.0f), WithinAbs(1.0f, 0.001f));
+    REQUIRE(root.theme().color("accent.tomato").has_value());
+    REQUIRE(root.theme().dimension("space.test").value_or(0.0f) == 19.0f);
+
+    REQUIRE(title->text() == "Updated");
+    REQUIRE(title->multi_line());
+    REQUIRE(title->font_family() == "Inter Tight");
+    REQUIRE(title->font_weight() == 700);
+    REQUIRE(title->font_style() == 1);
+    REQUIRE_THAT(title->letter_spacing(), WithinAbs(1.5f, 0.001f));
+    REQUIRE_THAT(title->line_height(), WithinAbs(22.0f, 0.001f));
+    REQUIRE(title->text_align() == LabelAlign::right);
+    REQUIRE_THAT(title->font_size(), WithinAbs(18.0f, 0.001f));
+    REQUIRE(title->text_transform() == Label::TextTransform::uppercase);
+    REQUIRE(title->theme().color("text.primary").has_value());
+
+    REQUIRE(editor->text() == "typed");
+    REQUIRE(editor->placeholder == "Enter value");
+    REQUIRE(editor->multi_line);
+    REQUIRE_THAT(editor->font_size(), WithinAbs(16.0f, 0.001f));
+
+    REQUIRE(engine.evaluate("saved_ok").getWithDefault<bool>(false));
+    REQUIRE(engine.evaluate("loaded_preset.nested.value").getWithDefault<int>(0) == 3);
+    REQUIRE(engine.evaluate("missing_preset_type").toString() == "undefined");
+}
+
 // ── Bridge animation API tests ──────────────────────────────────────────────
 
 TEST_CASE("WidgetBridge setMotionToken from JS", "[view][bridge][animation]") {
