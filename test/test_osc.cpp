@@ -292,6 +292,20 @@ TEST_CASE("OSC decode of truncated int argument returns the int-typed default",
     REQUIRE(decoded.get_int(0) == 0);
 }
 
+TEST_CASE("OSC decode of truncated float argument returns the float-typed default",
+          "[osc][codec][decode-edge]") {
+    Message msg("/f");
+    msg.add(1.25f);
+    auto data = encode(msg);
+    REQUIRE(data.size() >= 4);
+    // Keep the float tag but remove the payload bytes.
+    auto truncated = std::vector<uint8_t>(data.begin(), data.end() - 4);
+    auto decoded = decode(truncated.data(), truncated.size());
+    REQUIRE(decoded.address == "/f");
+    REQUIRE(decoded.args.size() == 1);
+    REQUIRE(decoded.get_float(0) == 0.0f);
+}
+
 TEST_CASE("OSC decode of truncated blob payload yields empty blob",
           "[osc][codec][decode-edge]") {
     Message msg("/b");
@@ -301,6 +315,25 @@ TEST_CASE("OSC decode of truncated blob payload yields empty blob",
     auto truncated = std::vector<uint8_t>(data.begin(), data.begin() + (data.size() - 4));
     auto decoded = decode(truncated.data(), truncated.size());
     REQUIRE(decoded.address == "/b");
+    REQUIRE(decoded.args.size() == 1);
+    auto& blob = std::get<std::vector<uint8_t>>(decoded.args[0]);
+    REQUIRE(blob.empty());
+}
+
+TEST_CASE("OSC decode of negative blob size yields empty blob",
+          "[osc][codec][decode-edge]") {
+    std::vector<uint8_t> buf;
+    const char addr[] = "/bad-blob";
+    buf.insert(buf.end(), addr, addr + sizeof(addr));
+    while (buf.size() % 4 != 0) buf.push_back(0);
+    const char tags[] = ",b";
+    buf.insert(buf.end(), tags, tags + sizeof(tags));
+    while (buf.size() % 4 != 0) buf.push_back(0);
+    const uint8_t negative_size[] = {0xFF, 0xFF, 0xFF, 0xFF};
+    buf.insert(buf.end(), negative_size, negative_size + sizeof(negative_size));
+
+    auto decoded = decode(buf.data(), buf.size());
+    REQUIRE(decoded.address == "/bad-blob");
     REQUIRE(decoded.args.size() == 1);
     auto& blob = std::get<std::vector<uint8_t>>(decoded.args[0]);
     REQUIRE(blob.empty());
