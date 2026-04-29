@@ -942,6 +942,10 @@ add_executable(pulp-test-events test_events.cpp)
 target_link_libraries(pulp-test-events PRIVATE pulp::events Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-events)
 
+add_executable(pulp-test-events-async-helpers test_events_async_helpers.cpp)
+target_link_libraries(pulp-test-events-async-helpers PRIVATE pulp::events Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-events-async-helpers)
+
 # Audio file I/O tests
 add_executable(pulp-test-audio-file test_audio_file.cpp)
 target_link_libraries(pulp-test-audio-file PRIVATE pulp::audio Catch2::Catch2WithMain)
