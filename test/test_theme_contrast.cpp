@@ -58,6 +58,7 @@ TEST_CASE("Min contrast thresholds are correct", "[view][contrast]") {
     REQUIRE_THAT(min_contrast_for_level(ContrastLevel::aa_normal), WithinAbs(4.5, 0.01));
     REQUIRE_THAT(min_contrast_for_level(ContrastLevel::aa_large), WithinAbs(3.0, 0.01));
     REQUIRE_THAT(min_contrast_for_level(ContrastLevel::aaa_normal), WithinAbs(7.0, 0.01));
+    REQUIRE_THAT(min_contrast_for_level(ContrastLevel::aaa_large), WithinAbs(4.5, 0.01));
 }
 
 // ── Auto Contrast ───────────────────────────────────────────────────────────
@@ -115,6 +116,16 @@ TEST_CASE("Shift hue wraps around", "[view][contrast][hsl]") {
     REQUIRE_THAT(hsl.h, WithinAbs(120.0, 2.0));
 }
 
+TEST_CASE("Adjust lightness clamps at range bounds", "[view][contrast][hsl]") {
+    auto mid = Color::rgba8(128, 128, 128);
+
+    auto darker = adjust_lightness(mid, -2.0f);
+    REQUIRE_THAT(rgb_to_hsl(darker).l, WithinAbs(0.0, 0.001));
+
+    auto lighter = adjust_lightness(mid, 2.0f);
+    REQUIRE_THAT(rgb_to_hsl(lighter).l, WithinAbs(1.0, 0.001));
+}
+
 TEST_CASE("Blend colors at 0 returns first", "[view][contrast]") {
     auto a = Color::rgba8(255, 0, 0);
     auto b = Color::rgba8(0, 0, 255);
@@ -129,6 +140,31 @@ TEST_CASE("Blend colors at 1 returns second", "[view][contrast]") {
     auto result = blend_colors(a, b, 1.0f);
     REQUIRE(result.r8() == 0);
     REQUIRE(result.b8() == 255);
+}
+
+TEST_CASE("Blend colors clamps interpolation factor", "[view][contrast]") {
+    auto a = Color::rgba8(255, 0, 0);
+    auto b = Color::rgba8(0, 0, 255);
+
+    auto below = blend_colors(a, b, -1.0f);
+    REQUIRE(below.r8() == 255);
+    REQUIRE(below.b8() == 0);
+
+    auto above = blend_colors(a, b, 2.0f);
+    REQUIRE(above.r8() == 0);
+    REQUIRE(above.b8() == 255);
+}
+
+TEST_CASE("With alpha preserves rgb and applies alpha", "[view][contrast]") {
+    auto c = Color::rgba8(10, 20, 30);
+    auto translucent = with_alpha(c, 0.25f);
+    REQUIRE(translucent.r8() == 10);
+    REQUIRE(translucent.g8() == 20);
+    REQUIRE(translucent.b8() == 30);
+    REQUIRE_THAT(translucent.a, WithinAbs(0.25, 0.001));
+
+    auto opaque = with_alpha(c, 2.0f);
+    REQUIRE_THAT(opaque.a, WithinAbs(2.0, 0.001));
 }
 
 // ── Theme Contrast Validation ───────────────────────────────────────────────
