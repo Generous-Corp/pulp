@@ -9,6 +9,8 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
 <a id="v0600"></a>
+## [0.61.0]
+
 ## [0.60.0] - 2026-04-28
 
 - fix(canvas): CoreGraphicsCanvas::concat_transform composes onto CTM (Codex P1 on #933) ([#961](https://github.com/danielraffel/pulp/pull/961))
