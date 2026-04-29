@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/canvas/canvas.hpp>
+#include <pulp/view/asset_manager.hpp>
 #include <pulp/view/canvas_widget.hpp>
 #include <pulp/view/modal.hpp>
 #include <pulp/view/text_editor.hpp>
@@ -11,6 +12,8 @@
 #include <pulp/view/window_host.hpp>
 #include <pulp/view/plugin_view_host.hpp>
 #include <chrono>
+#include <filesystem>
+#include <fstream>
 #include <thread>
 
 using namespace pulp::view;
@@ -1162,6 +1165,102 @@ TEST_CASE("WidgetBridge execAsync completion is safe after bridge destruction", 
 
     std::this_thread::sleep_for(std::chrono::milliseconds(80));
     SUCCEED();
+}
+
+TEST_CASE("WidgetBridge timers and storage helpers run through native bridge",
+          "[view][bridge][runtime]")
+{
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        var timer_hits = 0;
+        var canceled_hits = 0;
+        var interval_hits = 0;
+
+        localStorage.removeItem('pulp-widget-bridge-runtime');
+        localStorage.setItem('pulp-widget-bridge-runtime', 'stored-value');
+
+        setTimeout(function () { timer_hits += 1; }, -4);
+        var canceled = setTimeout(function () { canceled_hits += 1; }, 25);
+        clearTimeout(canceled);
+
+        var interval_id = setInterval(function () {
+            interval_hits += 1;
+            if (interval_hits >= 2)
+                clearInterval(interval_id);
+        }, 1);
+    )");
+
+    for (int i = 0; i < 20; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        bridge.service_frame_callbacks();
+    }
+
+    auto stored = engine.evaluate("localStorage.getItem('pulp-widget-bridge-runtime')");
+    REQUIRE(std::string(stored.getWithDefault<std::string_view>("")) == "stored-value");
+    REQUIRE(engine.evaluate("timer_hits").getWithDefault<int>(0) == 1);
+    REQUIRE(engine.evaluate("canceled_hits").getWithDefault<int>(-1) == 0);
+    REQUIRE(engine.evaluate("interval_hits").getWithDefault<int>(0) >= 2);
+
+    bridge.load_script("localStorage.removeItem('pulp-widget-bridge-runtime')");
+}
+
+TEST_CASE("WidgetBridge loadAssetSync covers embedded file and missing records",
+          "[view][bridge][asset]")
+{
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    static const char kEmbeddedJson[] = "{\"label\":\"pulp\"}";
+    AssetManager::instance().register_embedded(
+        "coverage/widget-bridge-runtime.json",
+        reinterpret_cast<const uint8_t*>(kEmbeddedJson),
+        sizeof(kEmbeddedJson) - 1);
+
+    const auto temp_path =
+        std::filesystem::temp_directory_path() / "pulp-widget-bridge-runtime-asset.bin";
+    {
+        std::ofstream out(temp_path, std::ios::binary);
+        const char bytes[] = {'\0', '\1', '\2'};
+        out.write(bytes, sizeof(bytes));
+    }
+
+    const auto file_url = std::string("file://") + js_single_quoted(temp_path.string());
+    bridge.load_script(
+        "var embedded_asset = __loadAssetSync__('pulp://coverage/widget-bridge-runtime.json');"
+        "var file_asset = __loadAssetSync__('" + file_url + "');"
+        "var empty_asset = __loadAssetSync__('');"
+        "var missing_asset = __loadAssetSync__('pulp://coverage/missing.txt');");
+
+    REQUIRE(engine.evaluate("embedded_asset.ok").getWithDefault<bool>(false));
+    REQUIRE(engine.evaluate("embedded_asset.status").getWithDefault<int>(0) == 200);
+    REQUIRE(std::string(engine.evaluate("embedded_asset.contentType").getWithDefault<std::string_view>("")) ==
+            "application/json;charset=utf-8");
+    REQUIRE(std::string(engine.evaluate("embedded_asset.text").getWithDefault<std::string_view>("")) ==
+            kEmbeddedJson);
+    REQUIRE_FALSE(
+        std::string(engine.evaluate("embedded_asset.base64").getWithDefault<std::string_view>("")).empty());
+
+    REQUIRE(engine.evaluate("file_asset.ok").getWithDefault<bool>(false));
+    REQUIRE(engine.evaluate("file_asset.status").getWithDefault<int>(0) == 200);
+    REQUIRE(std::string(engine.evaluate("file_asset.contentType").getWithDefault<std::string_view>("")) ==
+            "application/octet-stream");
+    REQUIRE(std::string(engine.evaluate("file_asset.base64").getWithDefault<std::string_view>("")) == "AAEC");
+    REQUIRE(std::string(engine.evaluate("file_asset.text").getWithDefault<std::string_view>("")).empty());
+
+    REQUIRE_FALSE(engine.evaluate("empty_asset.ok").getWithDefault<bool>(true));
+    REQUIRE(engine.evaluate("empty_asset.status").getWithDefault<int>(0) == 400);
+    REQUIRE_FALSE(engine.evaluate("missing_asset.ok").getWithDefault<bool>(true));
+    REQUIRE(engine.evaluate("missing_asset.status").getWithDefault<int>(0) == 404);
+
+    std::filesystem::remove(temp_path);
 }
 
 TEST_CASE("WidgetBridge text editor escape dispatches JS handler", "[view][bridge][text]") {
