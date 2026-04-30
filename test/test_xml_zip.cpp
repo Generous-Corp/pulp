@@ -4,6 +4,8 @@
 #include <pulp/runtime/temporary_file.hpp>
 #include <fstream>
 #include <cstring>
+#include <string>
+#include <vector>
 
 using namespace pulp::runtime;
 
@@ -292,6 +294,54 @@ TEST_CASE("gzip_decompress rejects reserved RFC 1952 flag bits", "[runtime][zip]
     REQUIRE(compressed->size() >= 10);
 
     (*compressed)[3] = 0x20;
+    auto out = gzip_decompress(compressed->data(), compressed->size());
+    REQUIRE_FALSE(out.has_value());
+}
+
+TEST_CASE("gzip_decompress rejects malformed RFC 1952 optional headers", "[runtime][zip][issue-641]") {
+    auto header = [](uint8_t flags) {
+        return std::vector<uint8_t>{
+            0x1f, 0x8b, 0x08, flags,
+            0x00, 0x00, 0x00, 0x00,
+            0x00, 0xff,
+        };
+    };
+
+    std::vector<std::vector<uint8_t>> malformed;
+
+    auto bad_method = header(0x00);
+    bad_method[2] = 0x00;
+    malformed.push_back(bad_method);
+
+    malformed.push_back(header(0x04));  // FEXTRA set, but XLEN is missing.
+
+    auto oversized_extra = header(0x04);
+    oversized_extra.insert(oversized_extra.end(), {0xff, 0xff});
+    malformed.push_back(oversized_extra);
+
+    auto unterminated_name = header(0x08);
+    unterminated_name.insert(unterminated_name.end(), {'n', 'a', 'm', 'e'});
+    malformed.push_back(unterminated_name);
+
+    auto unterminated_comment = header(0x10);
+    unterminated_comment.insert(unterminated_comment.end(), {'n', 'o', 't', 'e'});
+    malformed.push_back(unterminated_comment);
+
+    malformed.push_back(header(0x02));  // FHCRC set, but the two CRC bytes are missing.
+
+    for (const auto& bytes : malformed) {
+        INFO("malformed gzip header length: " << bytes.size());
+        REQUIRE_FALSE(gzip_decompress(bytes.data(), bytes.size()).has_value());
+    }
+}
+
+TEST_CASE("gzip_decompress rejects gzip input with corrupt trailer ISIZE", "[runtime][zip][issue-641]") {
+    std::string original = "deterministic ISIZE check payload";
+    auto compressed = gzip_compress(original);
+    REQUIRE(compressed.has_value());
+    REQUIRE(compressed->size() >= 12);
+
+    (*compressed)[compressed->size() - 1] ^= 0x01;
     auto out = gzip_decompress(compressed->data(), compressed->size());
     REQUIRE_FALSE(out.has_value());
 }
