@@ -806,6 +806,7 @@ install(FILES
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpAAX.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpAppIcon.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpEmbedData.cmake"
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpFonts.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpGenerateMacIcns.cmake"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpGenerateWindowsIcon.ps1"
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/cmake/PulpUtils.cmake"
