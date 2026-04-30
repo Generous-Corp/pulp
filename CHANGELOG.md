@@ -9,6 +9,8 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
 <a id="v0681"></a>
+## [0.69.0]
+
 ## [0.68.1] - 2026-04-30
 
 - feat(view): RN style-prop bridge primitives (pulp #1026) ([#1044](https://github.com/danielraffel/pulp/pull/1044))
