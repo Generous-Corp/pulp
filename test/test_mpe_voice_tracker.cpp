@@ -48,6 +48,39 @@ TEST_CASE("MpeVoiceTracker note-off releases oldest matching note", "[midi][mpe]
     REQUIRE(tracker.active_count() == 0);
 }
 
+TEST_CASE("MpeVoiceTracker retrigger updates velocity and note id in place",
+          "[midi][mpe][issue-645]") {
+    MpeVoiceTracker tracker{MpeConfig::standard_lower(15)};
+
+    int note_on_callbacks = 0;
+    tracker.on_note_on = [&](const MpeNoteState&) { ++note_on_callbacks; };
+
+    REQUIRE(tracker.process(MidiEvent::note_on(1, 60, 64)));
+    const auto* first = tracker.find(1, 60);
+    REQUIRE(first != nullptr);
+    const auto first_id = first->note_id;
+
+    REQUIRE(tracker.process(MidiEvent::note_on(1, 60, 111)));
+    const auto* retriggered = tracker.find(1, 60);
+    REQUIRE(retriggered != nullptr);
+    REQUIRE(tracker.active_count() == 1);
+    REQUIRE(retriggered->velocity == 111);
+    REQUIRE(retriggered->note_id > first_id);
+    REQUIRE(note_on_callbacks == 2);
+}
+
+TEST_CASE("MpeVoiceTracker unmatched note-off is consumed without callback",
+          "[midi][mpe][issue-645]") {
+    MpeVoiceTracker tracker{MpeConfig::standard_lower(15)};
+
+    int note_off_callbacks = 0;
+    tracker.on_note_off = [&](const MpeNoteState&) { ++note_off_callbacks; };
+
+    REQUIRE(tracker.process(MidiEvent::note_off(1, 60)));
+    REQUIRE(tracker.active_count() == 0);
+    REQUIRE(note_off_callbacks == 0);
+}
+
 TEST_CASE("MpeVoiceTracker note-on velocity 0 counts as note-off", "[midi][mpe]") {
     MpeVoiceTracker tracker{MpeConfig::standard_lower(15)};
     tracker.process(MidiEvent::note_on(2, 64, 90));
@@ -222,6 +255,28 @@ TEST_CASE("MpeVoiceTracker manager pressure and timbre update both zone states",
     REQUIRE(tracker.upper_zone_state().timbre == Approx(100.0f / 127.0f).margin(1e-6f));
 }
 
+TEST_CASE("MpeVoiceTracker manager non-CC74 messages are consumed as no-ops",
+          "[midi][mpe][issue-645]") {
+    MpeVoiceTracker tracker{MpeConfig::dual(/*lower=*/3, /*upper=*/3)};
+
+    REQUIRE(tracker.process(MidiEvent::cc(0, 1, 127)));
+    REQUIRE(tracker.process(UmpPacket::cc_2(0, 15, 1, 0xFFFFFFFF)));
+
+    UmpPacket program_change;
+    program_change.word_count = 2;
+    program_change.words[0] = (0x4u << 28) | (uint32_t(0xC0) << 16);
+    program_change.words[1] = 0x12345678u;
+    REQUIRE(tracker.process(program_change));
+
+    REQUIRE(tracker.active_count() == 0);
+    REQUIRE(tracker.lower_zone_state().pitch_bend_semitones == Approx(0.0f));
+    REQUIRE(tracker.lower_zone_state().pressure == Approx(0.0f));
+    REQUIRE(tracker.lower_zone_state().timbre == Approx(0.0f));
+    REQUIRE(tracker.upper_zone_state().pitch_bend_semitones == Approx(0.0f));
+    REQUIRE(tracker.upper_zone_state().pressure == Approx(0.0f));
+    REQUIRE(tracker.upper_zone_state().timbre == Approx(0.0f));
+}
+
 TEST_CASE("MpeVoiceTracker member expression cache seeds later notes",
           "[midi][mpe][issue-645]") {
     MpeVoiceTracker tracker{MpeConfig::standard_lower(15)};
@@ -259,6 +314,15 @@ TEST_CASE("MpeVoiceTracker snapshot reports full count with bounded output",
         if (slot.active) ++active_slots;
     }
     REQUIRE(active_slots == 3);
+}
+
+TEST_CASE("MpeVoiceTracker zero-capacity snapshot still reports full active count",
+          "[midi][mpe][issue-645]") {
+    MpeVoiceTracker tracker{MpeConfig::standard_lower(15)};
+    tracker.process(MidiEvent::note_on(1, 60, 100));
+    tracker.process(MidiEvent::note_on(2, 64, 101));
+
+    REQUIRE(tracker.snapshot(nullptr, 0) == 2);
 }
 
 TEST_CASE("MpeVoiceTracker full table drops extra notes without callback",
