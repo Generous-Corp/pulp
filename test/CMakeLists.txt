@@ -861,6 +861,11 @@ add_executable(pulp-test-signal test_signal.cpp)
 target_link_libraries(pulp-test-signal PRIVATE pulp::signal Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-signal)
 
+# Biquad filter tests
+add_executable(pulp-test-biquad test_biquad.cpp)
+target_link_libraries(pulp-test-biquad PRIVATE pulp::signal Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-biquad)
+
 # Multi-channel meter edge tests (#645)
 add_executable(pulp-test-multi-channel-meter test_multi_channel_meter.cpp)
 target_link_libraries(pulp-test-multi-channel-meter PRIVATE pulp::signal Catch2::Catch2WithMain)
