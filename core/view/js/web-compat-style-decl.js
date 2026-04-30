@@ -25,7 +25,35 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
         // Display / flex direction
         case "display":
             if (resolved === "none") { setVisible(id, false); }
-            else if (resolved === "flex" || resolved === "block") { setVisible(id, true); }
+            else if (resolved === "flex" || resolved === "block") {
+                setVisible(id, true);
+                // CSS web-compat: `display: flex` defaults to flex-direction: row.
+                // Pulp's underlying widgets default to FlexDirection::column (RN
+                // convention), so we explicitly emit a row-direction here unless
+                // the consumer ALSO declared flexDirection / flex-direction —
+                // in which case the explicit declaration overrides this default
+                // either later in this flush (individual setters apply in order)
+                // or via _flushAll's iteration. See pulp #1147.
+                if (resolved === "flex") {
+                    var hasExplicitDirection =
+                        Object.prototype.hasOwnProperty.call(this._props, "flexDirection") ||
+                        Object.prototype.hasOwnProperty.call(this._props, "flex-direction");
+                    // flex-flow shorthand only counts as explicit when it
+                    // includes a direction token. `flexFlow: "wrap"` (or
+                    // "nowrap") leaves direction omitted, which per CSS
+                    // also defaults to row — so the display:flex default
+                    // still applies.
+                    if (!hasExplicitDirection) {
+                        var ff = this._props.flexFlow;
+                        if (typeof ff === "string" && /\b(row|column)\b/.test(ff)) {
+                            hasExplicitDirection = true;
+                        }
+                    }
+                    if (!hasExplicitDirection) {
+                        setFlex(id, "direction", "row");
+                    }
+                }
+            }
             else if (resolved === "grid") { /* grid mode set via gridTemplateColumns */ }
             break;
         case "flexDirection":
