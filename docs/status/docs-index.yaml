@@ -346,6 +346,11 @@ docs:
     kind: report
     summary: Durable tracker for the Codecov baseline, compliance tranche plan, issue trail, and control-plane invariants
 
+  - slug: phase3-codecov-queue-pause-ledger
+    path: reports/phase3-codecov-queue-pause-ledger.md
+    kind: report
+    summary: Phase 3 Codecov Namespace pause ledger with branches, head SHAs, cancelled run IDs, and resume instructions
+
   - slug: webgpu-compute-feasibility
     path: reports/webgpu-compute-feasibility.md
     kind: report
