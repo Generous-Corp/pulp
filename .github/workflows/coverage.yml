@@ -753,9 +753,18 @@ jobs:
           # dispatchers / generated code that is exercised end-to-end via
           # shell-out tests but doesn't propagate llvm-cov line data.
           # Empty array → no --exclude flags emitted.
+          # diff-cover's --exclude is nargs='+' with argparse default
+          # action — repeated `--exclude=foo --exclude=bar` keeps only
+          # the LAST. Pass all values under a single --exclude flag.
+          # Patterns must be basenames or globs (`**/file.cpp`); literal
+          # relative paths match nothing (matched only against basename
+          # and absolute path via fnmatch). See coverage_config.json
+          # _comment for the contract.
           mapfile -t EXCLUDES < <(jq -r '.diff_cover_excludes // [] | .[]' tools/scripts/coverage_config.json)
           EXCLUDE_ARGS=()
-          for e in "${EXCLUDES[@]}"; do EXCLUDE_ARGS+=("--exclude=$e"); done
+          if [ ${#EXCLUDES[@]} -gt 0 ]; then
+            EXCLUDE_ARGS=("--exclude" "${EXCLUDES[@]}")
+          fi
           echo "Diff-cover threshold from coverage_config.json: ${THRESHOLD}% (excludes: ${EXCLUDES[*]:-none})"
           python3 -m diff_cover.diff_cover_tool \
               "$xml" \

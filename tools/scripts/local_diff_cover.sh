@@ -86,14 +86,27 @@ if ! [[ "${THRESHOLD}" =~ ^[0-9]+$ ]]; then
 fi
 
 # Per-file exclusions from the same source-of-truth (kept in lockstep
-# with .github/workflows/coverage.yml). Read into an array of
-# `--exclude=PATH` flags so the diff-cover invocation below can splat
-# them with no escaping surprises.
+# with .github/workflows/coverage.yml). diff-cover's `--exclude` flag
+# uses argparse `nargs='+'` and matches via fnmatch against (a)
+# basename and (b) absolute path. TWO subtleties matter for callers:
+#   1. With repeated `--exclude=foo --exclude=bar`, argparse keeps
+#      only the LAST entry (default action; not 'append'). So we
+#      must pass ALL exclusions in a SINGLE `--exclude val1 val2 ...`
+#      flag.
+#   2. A literal relative path like `tools/cli/cmd_loop.cpp` matches
+#      NEITHER the basename (no slash to strip) NOR the absolute path
+#      (which has the repo prefix). Patterns must be a basename
+#      (`cmd_loop.cpp`) or a glob (`**/cmd_loop.cpp`) — that's the
+#      contract documented in coverage_config.json's _comment.
 DIFF_COVER_EXCLUDE_ARGS=()
 if command -v jq >/dev/null 2>&1; then
+    EXCLUDE_LIST=()
     while IFS= read -r excl; do
-        [ -n "${excl}" ] && DIFF_COVER_EXCLUDE_ARGS+=("--exclude=${excl}")
+        [ -n "${excl}" ] && EXCLUDE_LIST+=("${excl}")
     done < <(jq -r '.diff_cover_excludes // [] | .[]' "${CONFIG_JSON}")
+    if [ ${#EXCLUDE_LIST[@]} -gt 0 ]; then
+        DIFF_COVER_EXCLUDE_ARGS=("--exclude" "${EXCLUDE_LIST[@]}")
+    fi
 fi
 
 # ── Dependency preflight ────────────────────────────────────────────────────
