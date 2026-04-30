@@ -26,10 +26,12 @@ Layer 1 (fast, per-edit, agent-specific)
     hooks/scripts/cli-plugin-sync.sh, Claude Code PostToolUse hooks
     → advisory "hint" mode output only
 
-Layer 2 (pre-push, agent-agnostic, advisory)
+Layer 2 (pre-push, agent-agnostic, ENFORCING by default — issue #1144)
     .githooks/pre-push
-    → same scripts, "report" mode, warns by default
-    → PULP_ENFORCE_PREPUSH=1 upgrades to hard fail
+    → same scripts, "report" mode, BLOCKS the push on any failure
+    → PULP_DISABLE_PREPUSH_GATES=1 demotes failures to advisory (single push)
+    → PULP_DISABLE_PREPUSH_DIFF_COVER=1 demotes only the diff-cover gate
+    → PULP_SKIP_PREPUSH=1 full bypass (emergencies only)
 
 Layer 3 (PR gate, authoritative)
     .github/workflows/version-skill-check.yml
@@ -85,11 +87,31 @@ tools/scripts/install-githooks.sh
 git config core.hooksPath .githooks
 ```
 
-After that, every `git push` runs both scripts. By default warnings print but don't block — set `PULP_ENFORCE_PREPUSH=1` (CI does this) to upgrade to hard failures. Single-push bypass for emergencies:
+After that, every `git push` runs the gates. **Failures BLOCK the push by default** (issue #1144 — flipped from advisory-by-default after PR #1005's 7-iteration debugging cycle proved silent advisories were a footgun).
+
+Bypasses, ordered most → least scoped:
+
+| Env var | Effect |
+|---------|--------|
+| `PULP_DISABLE_PREPUSH_GATES=1 git push` | Demote all gate failures to advisory for one push. CI still enforces. |
+| `PULP_DISABLE_PREPUSH_DIFF_COVER=1 git push` | Demote only the diff-coverage gate (e.g. workflow-only PRs whose surface mapping is too coarse). |
+| `PULP_SKIP_PREPUSH=1 git push` | Full bypass — skip every gate. Emergencies only. |
+
+### Migration note (#1144)
+
+The legacy `PULP_ENFORCE_PREPUSH=1` knob inverted: under the old contract you opted **in** to enforcement; under the new contract enforcement is the default and you opt **out** with `PULP_DISABLE_PREPUSH_GATES=1`. The legacy var is still consumed internally by `compat_sync_check.py` (and read by CI via `version-skill-check.yml`) — but it is no longer the lever at the hook layer. Old shell rc files that still export `PULP_ENFORCE_PREPUSH=1` continue to work; they just no longer change behavior at the hook layer.
+
+### Standalone runner (recommended for agents)
+
+Agents and humans can invoke the same gates without `git push`:
 
 ```bash
-PULP_SKIP_PREPUSH=1 git push
+tools/scripts/run_prepush_gates.sh
+tools/scripts/run_prepush_gates.sh --base origin/develop
+tools/scripts/run_prepush_gates.sh --skip-diff-cover
 ```
+
+Output names each gate (`skill-sync`, `version-bump`, `compat-sync`, `deps-audit`, `diff-cover`) and prints exact remediation commands on failure. Same env-var contract as the hook.
 
 ---
 

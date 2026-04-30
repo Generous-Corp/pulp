@@ -482,7 +482,10 @@ Pulp versions three surfaces independently: SDK/CLI (`CMakeLists.txt`), Claude p
 **Enforcement (three layers, one source of truth):**
 
 1. **Agent hooks (Layer 1)** — `hooks/scripts/cli-plugin-sync.sh` runs `version_bump_check.py` and `skill_sync_check.py` in `--mode=hint` on every PostToolUse so you see drift while iterating. Advisory only.
-2. **Pre-push hook (Layer 2)** — `.githooks/pre-push` runs both scripts in `--mode=report`. Advisory by default; `PULP_ENFORCE_PREPUSH=1` upgrades to hard failure.
+2. **Pre-push hook (Layer 2)** — `.githooks/pre-push` runs the gates in `--mode=report` and **blocks the push by default** when any gate fails (issue #1144 — flipped from advisory-by-default after PR #1005's 7-iteration debugging cycle proved silent advisories were a footgun). Opt-outs:
+   - `PULP_DISABLE_PREPUSH_GATES=1` — demote all gate failures to advisory for one push (CI still enforces).
+   - `PULP_DISABLE_PREPUSH_DIFF_COVER=1` — demote only the diff-coverage gate (e.g. workflow-only PRs).
+   - `PULP_SKIP_PREPUSH=1` — full bypass (emergencies only).
 3. **CI + Shipyard (Layer 3, authoritative)** — `.github/workflows/version-skill-check.yml` and the `validation.gates` stage in `.shipyard/config.toml` both invoke the same scripts in `--mode=report` with `PULP_ENFORCE_PREPUSH=1`. No bypass other than the commit trailers below.
 
 **Shipping a PR** — when the user says any of "push a PR", "ship this", "ship it", "we're done", "merge this", or "push it", invoke `shipyard pr` (the existing `ci` skill routes through this). Never run `gh pr create` + `shipyard ship` separately; never run the version-bump or skill-sync scripts by hand. `shipyard pr` orchestrates:
@@ -611,8 +614,10 @@ pulp coverage diff pulp-test-widget-bridge
 The threshold + surface filters live in
 `tools/scripts/coverage_config.json` — edit there once and CI
 (`.github/workflows/coverage.yml`) plus this local script stay in
-sync. The pre-push hook runs this check advisory-by-default;
-`PULP_ENFORCE_PREPUSH_DIFF_COVER=1` upgrades it to a hard block.
+sync. The pre-push hook runs this check and **blocks the push by
+default** on a coverage failure (issue #1144);
+`PULP_DISABLE_PREPUSH_DIFF_COVER=1` demotes only the diff-coverage
+gate to advisory for one push.
 
 The Claude Code slash command `/coverage-diff` invokes the same
 script with the same args, so all four invocation surfaces share
@@ -673,6 +678,25 @@ git worktree add /tmp/pulp-audit origin/main
 - Primary tool for building deep context about the codebase
 - Use for code review, architecture questions, and cross-subsystem understanding
 - Context persists for follow-up questions
+
+### Pre-push gates (run before `git push`)
+
+Before pushing any branch, run the standalone pre-push gate runner and fix anything that fails. This is the same set of gates the `.githooks/pre-push` hook runs (and CI enforces), surfaced in a louder, agent-readable form:
+
+```bash
+tools/scripts/run_prepush_gates.sh
+```
+
+Per-gate output names the failing check (`skill-sync`, `version-bump`, `compat-sync`, `deps-audit`, `diff-cover`) and prints the exact remediation. Useful options:
+
+```bash
+tools/scripts/run_prepush_gates.sh --base origin/develop   # custom diff base
+tools/scripts/run_prepush_gates.sh --skip-diff-cover       # skip just the diff-cover gate
+PULP_DISABLE_PREPUSH_GATES=1 tools/scripts/run_prepush_gates.sh   # demote failures to advisory
+PULP_SKIP_PREPUSH=1 git push                              # full bypass (emergencies only)
+```
+
+Gate failures **block** the push by default (issue #1144 — see [Versioning & Skill-Sync Policy](#versioning--skill-sync-policy)). The legacy `PULP_ENFORCE_PREPUSH=1` knob is still consumed by some scripts but is no longer needed at the hook layer; the new opt-out is `PULP_DISABLE_PREPUSH_GATES=1`.
 
 ### General
 - AI tools are collaborators, not autopilots. Review all generated code.
