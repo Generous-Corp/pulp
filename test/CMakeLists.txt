@@ -1601,6 +1601,11 @@ add_executable(pulp-test-tree-view test_tree_view.cpp)
 target_link_libraries(pulp-test-tree-view PRIVATE pulp::view Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-tree-view)
 
+# File browser, file tree, and multi-document panel tests
+add_executable(pulp-test-file-browser test_file_browser.cpp)
+target_link_libraries(pulp-test-file-browser PRIVATE pulp::view Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-file-browser)
+
 # Undo manager tests
 add_executable(pulp-test-undo-manager test_undo_manager.cpp)
 target_link_libraries(pulp-test-undo-manager PRIVATE pulp::state Catch2::Catch2WithMain)
