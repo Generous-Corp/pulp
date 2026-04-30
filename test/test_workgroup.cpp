@@ -52,4 +52,61 @@ TEST_CASE("AudioWorkgroup non-Apple fallback join is idempotent",
     wg.leave();
     REQUIRE_FALSE(wg.is_joined());
 }
+
+TEST_CASE("AudioWorkgroup non-Apple fallback join can rejoin after leave",
+          "[audio][workgroup][issue-640]") {
+    AudioWorkgroup wg;
+    REQUIRE(wg.join_from_audio_thread());
+    REQUIRE(wg.is_joined());
+
+    wg.leave();
+    REQUIRE_FALSE(wg.is_joined());
+
+    REQUIRE(wg.join_from_audio_thread());
+    REQUIRE(wg.is_joined());
+
+    wg.leave();
+    REQUIRE_FALSE(wg.is_joined());
+}
+
+TEST_CASE("AudioWorkgroup non-Apple fallback instances track state independently",
+          "[audio][workgroup][issue-640]") {
+    AudioWorkgroup first;
+    AudioWorkgroup second;
+
+    REQUIRE(first.join_from_audio_thread());
+    REQUIRE(first.is_joined());
+    REQUIRE_FALSE(second.is_joined());
+
+    REQUIRE(second.join_from_audio_thread());
+    REQUIRE(second.is_joined());
+
+    first.leave();
+    REQUIRE_FALSE(first.is_joined());
+    REQUIRE(second.is_joined());
+
+    second.leave();
+    REQUIRE_FALSE(second.is_joined());
+}
+
+TEST_CASE("AudioWorkgroup non-Apple priority helpers report fallback success",
+          "[audio][workgroup][issue-640]") {
+    REQUIRE(AudioWorkgroup::set_high_priority());
+    REQUIRE(AudioWorkgroup::set_realtime_priority());
+}
+#else
+TEST_CASE("AudioWorkgroup Apple null workgroup uses safe fallback lifecycle",
+          "[audio][workgroup][issue-640]") {
+    AudioWorkgroup wg;
+    wg.set_workgroup(nullptr);
+    wg.leave();
+    REQUIRE_FALSE(wg.is_joined());
+
+    bool joined = wg.join_from_audio_thread();
+    if (joined) {
+        REQUIRE(wg.is_joined());
+        wg.leave();
+    }
+    REQUIRE_FALSE(wg.is_joined());
+}
 #endif
