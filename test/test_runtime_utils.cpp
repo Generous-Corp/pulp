@@ -6,6 +6,7 @@
 #include <pulp/runtime/child_process.hpp>
 #include <pulp/runtime/base64.hpp>
 #include <pulp/runtime/range.hpp>
+#include <pulp/runtime/text_diff.hpp>
 #include <fstream>
 #include <filesystem>
 
@@ -209,6 +210,56 @@ TEST_CASE("base64 binary round-trip", "[runtime][base64]") {
     auto decoded = base64_decode(encoded);
     REQUIRE(decoded.has_value());
     REQUIRE(*decoded == data);
+}
+
+// ── Text Diff ────────────────────────────────────────────────────────────
+
+TEST_CASE("text_diff handles empty inputs", "[runtime][text-diff][issue-641]") {
+    auto diff = text_diff("", "");
+    REQUIRE(diff.empty());
+    REQUIRE(format_diff(diff).empty());
+}
+
+TEST_CASE("text_diff reports pure inserts and deletes",
+          "[runtime][text-diff][issue-641]") {
+    auto inserted = text_diff("", "one\ntwo");
+    REQUIRE(inserted.size() == 2);
+    REQUIRE(inserted[0].op == DiffOp::Insert);
+    REQUIRE(inserted[0].text == "one");
+    REQUIRE(inserted[1].op == DiffOp::Insert);
+    REQUIRE(inserted[1].text == "two");
+
+    auto deleted = text_diff("one\ntwo", "");
+    REQUIRE(deleted.size() == 2);
+    REQUIRE(deleted[0].op == DiffOp::Delete);
+    REQUIRE(deleted[0].text == "one");
+    REQUIRE(deleted[1].op == DiffOp::Delete);
+    REQUIRE(deleted[1].text == "two");
+}
+
+TEST_CASE("text_diff preserves equal lines across replacements and appends",
+          "[runtime][text-diff][issue-641]") {
+    auto diff = text_diff("alpha\nbeta\ngamma\n",
+                          "alpha\ndelta\ngamma\nomega");
+
+    REQUIRE(diff.size() == 5);
+    REQUIRE(diff[0].op == DiffOp::Equal);
+    REQUIRE(diff[0].text == "alpha");
+    REQUIRE(diff[1].op == DiffOp::Delete);
+    REQUIRE(diff[1].text == "beta");
+    REQUIRE(diff[2].op == DiffOp::Insert);
+    REQUIRE(diff[2].text == "delta");
+    REQUIRE(diff[3].op == DiffOp::Equal);
+    REQUIRE(diff[3].text == "gamma");
+    REQUIRE(diff[4].op == DiffOp::Insert);
+    REQUIRE(diff[4].text == "omega");
+
+    REQUIRE(format_diff(diff) ==
+            "  alpha\n"
+            "- beta\n"
+            "+ delta\n"
+            "  gamma\n"
+            "+ omega\n");
 }
 
 // ── Range ───────────────────────────────────────────────────────────────
