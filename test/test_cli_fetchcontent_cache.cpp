@@ -239,6 +239,33 @@ TEST_CASE("discover: missing cache root returns empty and renders OK",
     CHECK(out.str().find("no entries") != std::string::npos);
 }
 
+TEST_CASE("discover: lstat miss reports Unknown and blocks preflight",
+          "[fetchcontent_cache][issue-643]") {
+    fs::path root = "/fake/cache";
+    fs::path entry = root / "choc-f0f5cdf5a938b8b779fea6c083571cce5ccab925";
+    MockState state;
+    state.children = {entry};
+
+    fcc::DeclaredRefs refs{
+        {"choc", "f0f5cdf5a938b8b779fea6c083571cce5ccab925"}};
+    auto env = make_mock_env(root, refs, state);
+
+    auto entries = fcc::discover_fetchcontent_cache(env);
+    REQUIRE(entries.size() == 1);
+    CHECK(entries[0].status == fcc::CacheStatus::Unknown);
+    CHECK_FALSE(entries[0].fixable);
+    CHECK(entries[0].reason == "lstat failed");
+    CHECK(entries[0].remediation.find("ls -la") != std::string::npos);
+    CHECK(fcc::any_unhealthy(entries));
+    CHECK(fcc::blocks_preflight(entries));
+
+    std::stringstream out;
+    int rc = fcc::render_preflight(entries, root, out);
+    CHECK(rc == 1);
+    CHECK(out.str().find("unknown") != std::string::npos);
+    CHECK(out.str().find("lstat failed") != std::string::npos);
+}
+
 // ── apply_fixes: dry-run skips real I/O ─────────────────────────────────────
 
 TEST_CASE("apply_fixes: dry-run reports DryRun for fixable entries",
@@ -563,6 +590,47 @@ TEST_CASE("render_report_json: healthy fixture reports healthy=true",
     CHECK(fcc::render_report_json(entries, root, out) == 0);
     CHECK_FALSE(fcc::any_unhealthy(entries));
     CHECK(out.str().find("\"healthy\": true") != std::string::npos);
+}
+
+TEST_CASE("render_report_json: escapes control characters in entry fields",
+          "[fetchcontent_cache][issue-643]") {
+    std::string weird = std::string("dep\n\t") + char(0x01) + "\"\\suffix";
+
+    fcc::CacheEntry e;
+    e.name = weird;
+    e.path = fs::path("/fake/cache") / weird;
+    e.status = fcc::CacheStatus::Dangling;
+    e.is_symlink = true;
+    e.resolved_target = fs::path("/tmp") / weird;
+    e.declared_ref = weird;
+    e.cached_ref = weird;
+    e.dep_name = weird;
+    e.reason = weird;
+    e.remediation = weird;
+    e.fixable = true;
+
+    std::stringstream out;
+    CHECK(fcc::render_report_json({e}, fs::path("/fake/cache") / weird, out) == 0);
+    auto s = out.str();
+
+    CHECK(s.find("\"cache_root\": \"/fake/cache/dep\\n\\t\\u0001\\\"\\\\suffix\"")
+          != std::string::npos);
+    CHECK(s.find("\"name\": \"dep\\n\\t\\u0001\\\"\\\\suffix\"")
+          != std::string::npos);
+    CHECK(s.find("\"path\": \"/fake/cache/dep\\n\\t\\u0001\\\"\\\\suffix\"")
+          != std::string::npos);
+    CHECK(s.find("\"resolved_target\": \"/tmp/dep\\n\\t\\u0001\\\"\\\\suffix\"")
+          != std::string::npos);
+    CHECK(s.find("\"declared_ref\": \"dep\\n\\t\\u0001\\\"\\\\suffix\"")
+          != std::string::npos);
+    CHECK(s.find("\"cached_ref\": \"dep\\n\\t\\u0001\\\"\\\\suffix\"")
+          != std::string::npos);
+    CHECK(s.find("\"dep_name\": \"dep\\n\\t\\u0001\\\"\\\\suffix\"")
+          != std::string::npos);
+    CHECK(s.find("\"reason\": \"dep\\n\\t\\u0001\\\"\\\\suffix\"")
+          != std::string::npos);
+    CHECK(s.find("\"remediation\": \"dep\\n\\t\\u0001\\\"\\\\suffix\"")
+          != std::string::npos);
 }
 
 // ── default_cache_root respects PULP_SHARED_FETCHCONTENT_SOURCE_DIR ────────
