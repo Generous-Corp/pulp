@@ -260,6 +260,35 @@ TEST_CASE("Range from_start_length", "[runtime][range]") {
     REQUIRE(r.length() == 10);
 }
 
+TEST_CASE("Range covers containment and equality edge paths",
+          "[runtime][range][coverage][issue-641]") {
+    IntRange outer(0, 10);
+
+    REQUIRE(outer.contains(IntRange(0, 10)));
+    REQUIRE(outer.contains(IntRange(2, 8)));
+    REQUIRE(outer.contains(IntRange(5, 5)));
+    REQUIRE_FALSE(outer.contains(IntRange(-1, 5)));
+    REQUIRE_FALSE(outer.contains(IntRange(5, 11)));
+
+    REQUIRE(outer == IntRange(0, 10));
+    REQUIRE(outer != IntRange(0, 9));
+}
+
+TEST_CASE("Range expands empty and non-empty intervals",
+          "[runtime][range][coverage][issue-641]") {
+    REQUIRE(IntRange(5, 5).expanded(8) == IntRange(8, 9));
+    REQUIRE(IntRange(3, 7).expanded(10) == IntRange(3, 11));
+    REQUIRE(IntRange(3, 7).expanded(-2) == IntRange(-2, 7));
+    REQUIRE(IntRange(3, 7).expanded(5) == IntRange(3, 7));
+}
+
+TEST_CASE("Range union handles empty operands",
+          "[runtime][range][coverage][issue-641]") {
+    REQUIRE(IntRange().enclosing_union(IntRange(4, 9)) == IntRange(4, 9));
+    REQUIRE(IntRange(4, 9).enclosing_union(IntRange()) == IntRange(4, 9));
+    REQUIRE(IntRange().enclosing_union(IntRange()) == IntRange());
+}
+
 TEST_CASE("FloatRange", "[runtime][range]") {
     FloatRange r(0.0f, 1.0f);
     REQUIRE(r.contains(0.5f));
