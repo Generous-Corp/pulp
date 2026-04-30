@@ -80,20 +80,28 @@ std::vector<PluginInfo> scan_clap_bundle_descriptors(const std::string& path) {
 
     auto binary = resolve_clap_binary(path);
     void* handle = dlopen(binary.c_str(), RTLD_LAZY | RTLD_LOCAL);
-    if (!handle) {
+    if (!handle) { // LCOV_EXCL_START
+        // Defensive #812 fallback. Triggered only when dlopen itself
+        // fails — a malformed/corrupt CLAP bundle. Same family as the
+        // try/catch blocks below: not reachable from a unit test that
+        // doesn't ship a deliberately-broken CLAP fixture. The user-
+        // visible surface is exercised by `pulp scan --no-load`
+        // (test_cli_shellout.cpp [issue-812]).
         runtime::log_warn("CLAP scan: dlopen failed for '{}': {}",
                           binary, dlerror() ? dlerror() : "unknown");
         results.push_back(make_filename_fallback(path));
         return results;
-    }
+    } // LCOV_EXCL_STOP
 
     auto* entry = static_cast<const clap_plugin_entry_t*>(dlsym(handle, "clap_entry"));
-    if (!entry || !entry->init || !entry->get_factory) {
+    if (!entry || !entry->init || !entry->get_factory) { // LCOV_EXCL_START
+        // Defensive #812 fallback — bundle dlopen'd OK but doesn't
+        // expose a valid clap_entry. Same rationale as above.
         runtime::log_warn("CLAP scan: no clap_entry in '{}'", binary);
         dlclose(handle);
         results.push_back(make_filename_fallback(path));
         return results;
-    }
+    } // LCOV_EXCL_STOP
 
     bool init_ok = false;
     try {
@@ -135,12 +143,15 @@ std::vector<PluginInfo> scan_clap_bundle_descriptors(const std::string& path) {
                           path);
     } // LCOV_EXCL_STOP
 
-    if (!factory || !factory->get_plugin_count || !factory->get_plugin_descriptor) {
-        try { entry->deinit(); } catch (...) {} // LCOV_EXCL_LINE
+    if (!factory || !factory->get_plugin_count || !factory->get_plugin_descriptor) { // LCOV_EXCL_START
+        // Defensive #812 fallback — factory pointer or its method
+        // table is unusable. Same rationale as the dlopen / clap_entry
+        // fallbacks above.
+        try { entry->deinit(); } catch (...) {}
         dlclose(handle);
         if (results.empty()) results.push_back(make_filename_fallback(path));
         return results;
-    }
+    } // LCOV_EXCL_STOP
 
     uint32_t count = 0;
     try {

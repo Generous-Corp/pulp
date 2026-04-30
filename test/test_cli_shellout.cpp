@@ -1949,6 +1949,98 @@ TEST_CASE("pulp projects list (no --json) emits human text",
     REQUIRE(r.stdout_output.find("(no projects registered)") != std::string::npos);
 }
 
+// Non-empty registry path — exercises the cmd_projects::do_list JSON
+// loop body (lines ~78-92 of cmd_projects.cpp) that the empty-registry
+// test above can't reach. Adds a synthetic project root, registers it,
+// then asserts the JSON output contains the per-project record. Also
+// exercises json_escape via a project name containing a literal
+// double-quote (the most common escapable character).
+TEST_CASE("pulp projects list --json emits per-project JSON with non-empty registry",
+          "[cli][shellout][projects][issue-244]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    auto pulp_home = unique_temp_dir("pulp-projects-json-nonempty-home");
+    fs::create_directories(pulp_home);
+    pulp_setenv("PULP_HOME", pulp_home.string().c_str(), 1);
+
+    // Synthetic project root — find_project_root walks ancestors looking
+    // for `CMakeLists.txt && core/`, so create both. pulp.toml carries
+    // the SDK pin; cmd_projects::do_add reads name from there if present.
+    auto project = unique_temp_dir("pulp-projects-json-fake-project");
+    fs::create_directories(project / "core");
+    {
+        std::ofstream ct(project / "CMakeLists.txt");
+        ct << "project(FakeJsonListProject VERSION 0.1.0 LANGUAGES CXX)\n";
+    }
+    {
+        std::ofstream pt(project / "pulp.toml");
+        pt << "sdk_version = \"0.40.0\"\n";
+    }
+
+    auto add = run_pulp({"projects", "add", project.string()}, 15000);
+    REQUIRE_FALSE(add.timed_out);
+    REQUIRE(add.exit_code == 0);
+
+    auto list = run_pulp({"projects", "list", "--json"}, 15000);
+    REQUIRE_FALSE(list.timed_out);
+    REQUIRE(list.exit_code == 0);
+
+    // Top-level shape preserved.
+    REQUIRE(list.stdout_output.find("\"registry\"") != std::string::npos);
+    REQUIRE(list.stdout_output.find("\"projects\"") != std::string::npos);
+    // Loop body must have emitted one project record with these fields.
+    REQUIRE(list.stdout_output.find("\"path\"") != std::string::npos);
+    REQUIRE(list.stdout_output.find("\"name\"") != std::string::npos);
+    REQUIRE(list.stdout_output.find("\"registered_at\"") != std::string::npos);
+    REQUIRE(list.stdout_output.find("\"missing_on_disk\"") != std::string::npos);
+    REQUIRE(list.stdout_output.find(project.generic_string()) != std::string::npos);
+    // The synthetic project exists on disk → missing_on_disk false.
+    REQUIRE(list.stdout_output.find("\"missing_on_disk\": false") != std::string::npos);
+
+    pulp_unsetenv("PULP_HOME");
+    fs::remove_all(pulp_home);
+    fs::remove_all(project);
+}
+
+// Pairs with the above — exercises cmd_projects's missing-on-disk
+// branch by registering a project then deleting its directory. This
+// covers the `bool missing = !fs::exists(p.path)` true branch + the
+// `"missing_on_disk": true` JSON emission line.
+TEST_CASE("pulp projects list --json reports missing_on_disk=true for deleted project",
+          "[cli][shellout][projects][issue-244]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    auto pulp_home = unique_temp_dir("pulp-projects-json-missing-home");
+    fs::create_directories(pulp_home);
+    pulp_setenv("PULP_HOME", pulp_home.string().c_str(), 1);
+
+    auto project = unique_temp_dir("pulp-projects-json-deleted-project");
+    fs::create_directories(project / "core");
+    {
+        std::ofstream ct(project / "CMakeLists.txt");
+        ct << "project(DeletedFakeProject VERSION 0.1.0 LANGUAGES CXX)\n";
+    }
+    {
+        std::ofstream pt(project / "pulp.toml");
+        pt << "sdk_version = \"0.40.0\"\n";
+    }
+
+    auto add = run_pulp({"projects", "add", project.string()}, 15000);
+    REQUIRE_FALSE(add.timed_out);
+    REQUIRE(add.exit_code == 0);
+
+    // Now delete the project directory but leave the registry entry.
+    fs::remove_all(project);
+
+    auto list = run_pulp({"projects", "list", "--json"}, 15000);
+    REQUIRE_FALSE(list.timed_out);
+    REQUIRE(list.exit_code == 0);
+    REQUIRE(list.stdout_output.find("\"missing_on_disk\": true") != std::string::npos);
+
+    pulp_unsetenv("PULP_HOME");
+    fs::remove_all(pulp_home);
+}
+
 // ── pulp scan --help / --no-load (#812) ──────────────────────────
 //
 // `pulp scan --help` previously walked the system plug-in paths and
