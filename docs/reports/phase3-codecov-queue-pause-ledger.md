@@ -38,6 +38,7 @@ not been pushed, PR'd, or dispatched to Namespace.
 | Branch | Head | Scope | Files | Local Validation | Resume Action |
 | --- | --- | --- | --- | --- | --- |
 | `local/phase3-docs-generate-coverage-643` | `1f1b0bbf` | #643 tooling tranche for `tools/docs_generate.py` paths | `tools/scripts/test_docs_generate.py` | `python3 tools/scripts/test_docs_generate.py`; `python3 tools/scripts/test_run_python_coverage.py`; skill-sync report; version-bump report; `git diff --check`. Full local Python coverage command blocked because this machine lacks `coverage.py >= 7.10`. | When capacity returns, rename/push as a feature branch, run `shipyard pr --skip-target mac --skip-target ubuntu --skip-target windows`, then dispatch Namespace with `shipyard cloud run build <branch> --require-sha HEAD`. |
+| `local/phase3-list-limitations-coverage-643` | `9040b518` | #643 tooling tranche for `tools/list_limitations.py` paths | `tools/scripts/test_list_limitations.py` | `python3 tools/scripts/test_list_limitations.py`; `python3 tools/test_list_limitations.py`; `python3 tools/scripts/test_run_python_coverage.py`; skill-sync report; version-bump report; `git diff --check`. Full local Python coverage command blocked because this machine lacks `coverage.py >= 7.10`. | When capacity returns, rename/push as a feature branch, run `shipyard pr --skip-target mac --skip-target ubuntu --skip-target windows`, then dispatch Namespace with `shipyard cloud run build <branch> --require-sha HEAD`. |
 
 ## Cancelled/Paused Runs
 
