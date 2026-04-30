@@ -2,6 +2,19 @@
 // HTMLCanvasElement + CanvasRenderingContext2D
 // ═══════════════════════════════════════════════════════════════════════════════
 
+// pulp #964 — CanvasGradient, returned by createLinearGradient /
+// createRadialGradient and assignable to ctx.fillStyle / ctx.strokeStyle.
+// Stops are accumulated via addColorStop and flushed to the bridge by
+// _applyFillStyle when the gradient is the active style.
+function CanvasGradient(kind, params) {
+    this._kind = kind;             // "linear" | "radial"
+    this._params = params || {};
+    this._stops = [];              // [{ offset, color }, ...]
+}
+CanvasGradient.prototype.addColorStop = function(offset, color) {
+    this._stops.push({ offset: Number(offset) || 0, color: String(color || "") });
+};
+
 function CanvasRenderingContext2D(canvasEl) {
     this.canvas = canvasEl;
     this._id = canvasEl._id;
@@ -9,23 +22,146 @@ function CanvasRenderingContext2D(canvasEl) {
     this.strokeStyle = "#000000";
     this.lineWidth = 1;
     this.font = "14px Inter";
+    // pulp #964 — Canvas2D state setters that the bridge accepts via dedicated
+    // canvas* functions. Tracked as plain fields and pushed to the bridge on
+    // demand by the _sync* helpers below.
+    this.textAlign = "left";
+    this.textBaseline = "top";
+    this.lineCap = "butt";
+    this.lineJoin = "miter";
+    this.miterLimit = 10;
+    this.lineDashOffset = 0;
+    this.globalAlpha = 1;
+    this.globalCompositeOperation = "source-over";
+    this.imageSmoothingEnabled = true;
+    this.imageSmoothingQuality = "low";
+    this.direction = "ltr";
+    this._lineDash = [];
+    // _activeFillKind tracks whether the most recently applied fillStyle was
+    // a "color" or a "gradient". When a gradient is active the next
+    // canvasFillRect / canvasFillPath uses the bridge's active gradient
+    // state (pulp #968 use_active_style path) — the shim does NOT call
+    // canvasSetFillColor before the draw or the gradient would be
+    // overwritten back to a solid colour.
+    this._activeFillKind = "color";
+    this._activeStrokeKind = "color";
+    // Cache of last-pushed font / textAlign / textBaseline / line* / global*
+    // state so we don't spam the bridge with redundant set_* commands.
+    this._sentFont = null;
+    this._sentTextAlign = null;
+    this._sentTextBaseline = null;
+    this._sentLineCap = null;
+    this._sentLineJoin = null;
+    this._sentGlobalAlpha = null;
+    this._sentGlobalCompositeOperation = null;
 }
 
 CanvasRenderingContext2D.prototype._applyFillStyle = function() {
-    if (typeof canvasSetFillColor === "function") canvasSetFillColor(this._id, this.fillStyle);
+    var fs = this.fillStyle;
+    if (fs && fs._kind === "linear" && typeof canvasSetLinearGradient === "function") {
+        var p = fs._params, s = fs._stops;
+        var args = [this._id, p.x0, p.y0, p.x1, p.y1];
+        for (var i = 0; i < s.length; ++i) { args.push(s[i].color); args.push(s[i].offset); }
+        canvasSetLinearGradient.apply(null, args);
+        this._activeFillKind = "gradient";
+        return;
+    }
+    if (fs && fs._kind === "radial" && typeof canvasSetRadialGradient === "function") {
+        var pr = fs._params, sr = fs._stops;
+        var ar = [this._id, pr.x1, pr.y1, pr.r1];
+        for (var j = 0; j < sr.length; ++j) { ar.push(sr[j].color); ar.push(sr[j].offset); }
+        canvasSetRadialGradient.apply(null, ar);
+        this._activeFillKind = "gradient";
+        return;
+    }
+    // Solid colour. Clear any active gradient so subsequent fills don't pick
+    // up a stale gradient (Canvas2D spec: assigning fillStyle replaces the
+    // previous style outright).
+    if (this._activeFillKind === "gradient" && typeof canvasClearGradient === "function") {
+        canvasClearGradient(this._id);
+    }
+    this._activeFillKind = "color";
+    if (typeof canvasSetFillColor === "function") canvasSetFillColor(this._id, String(fs == null ? "" : fs));
 };
 
 CanvasRenderingContext2D.prototype._applyStrokeStyle = function() {
-    if (typeof canvasSetStrokeColor === "function") canvasSetStrokeColor(this._id, this.strokeStyle);
+    // CanvasGradient on strokeStyle is rare in production code; the bridge
+    // doesn't currently expose a stroke-gradient setter, so we fall back to
+    // a solid colour pulled from the first stop. The common case (string
+    // colours) works exactly per spec.
+    var ss = this.strokeStyle;
+    var colorStr = "";
+    if (ss && (ss._kind === "linear" || ss._kind === "radial")) {
+        colorStr = (ss._stops && ss._stops.length > 0) ? ss._stops[0].color : "#fff";
+        this._activeStrokeKind = "gradient";
+    } else {
+        colorStr = String(ss == null ? "" : ss);
+        this._activeStrokeKind = "color";
+    }
+    if (typeof canvasSetStrokeColor === "function") canvasSetStrokeColor(this._id, colorStr);
     if (typeof canvasSetLineWidth === "function") canvasSetLineWidth(this._id, this.lineWidth);
 };
 
+// pulp #964 — push state-setter values to the bridge before any draw
+// that depends on them. Cheap (only sends what changed) and idempotent.
+CanvasRenderingContext2D.prototype._syncTextState = function() {
+    if (this._sentFont !== this.font) {
+        var fontStr = this.font || "14px Inter";
+        var sizeMatch = fontStr.match(/(\d+(?:\.\d+)?)px/);
+        var size = sizeMatch ? parseFloat(sizeMatch[1]) : 14;
+        var familyMatch = fontStr.match(/px\s+(.+)$/);
+        var family = familyMatch ? familyMatch[1].trim() : "Inter";
+        if (typeof canvasSetFont === "function") canvasSetFont(this._id, family, size);
+        this._sentFont = this.font;
+    }
+    if (this._sentTextAlign !== this.textAlign) {
+        if (typeof canvasSetTextAlign === "function") canvasSetTextAlign(this._id, this.textAlign);
+        this._sentTextAlign = this.textAlign;
+    }
+    if (this._sentTextBaseline !== this.textBaseline) {
+        if (typeof canvasSetTextBaseline === "function") canvasSetTextBaseline(this._id, this.textBaseline);
+        this._sentTextBaseline = this.textBaseline;
+    }
+};
+CanvasRenderingContext2D.prototype._syncLineState = function() {
+    if (this._sentLineCap !== this.lineCap) {
+        if (typeof canvasSetLineCap === "function") canvasSetLineCap(this._id, this.lineCap);
+        this._sentLineCap = this.lineCap;
+    }
+    if (this._sentLineJoin !== this.lineJoin) {
+        if (typeof canvasSetLineJoin === "function") canvasSetLineJoin(this._id, this.lineJoin);
+        this._sentLineJoin = this.lineJoin;
+    }
+};
+CanvasRenderingContext2D.prototype._syncGlobalState = function() {
+    if (this._sentGlobalAlpha !== this.globalAlpha) {
+        if (typeof canvasSetGlobalAlpha === "function") canvasSetGlobalAlpha(this._id, this.globalAlpha);
+        this._sentGlobalAlpha = this.globalAlpha;
+    }
+    if (this._sentGlobalCompositeOperation !== this.globalCompositeOperation) {
+        if (typeof canvasGlobalCompositeOperation === "function") {
+            canvasGlobalCompositeOperation(this._id, this.globalCompositeOperation);
+        } else if (typeof canvasSetBlendMode === "function") {
+            canvasSetBlendMode(this._id, this.globalCompositeOperation);
+        }
+        this._sentGlobalCompositeOperation = this.globalCompositeOperation;
+    }
+};
+
 CanvasRenderingContext2D.prototype.fillRect = function(x, y, w, h) {
+    this._syncGlobalState();
     this._applyFillStyle();
-    if (typeof canvasFillRect === "function") canvasFillRect(this._id, x, y, w, h);
+    // pulp #964 — the bridge function is `canvasRect`, NOT `canvasFillRect`.
+    // The 5-arg form (no color) honours the active fillStyle / gradient via
+    // pulp #968's use_active_style path on the C++ side. Calling `canvasRect`
+    // is correct; the previously-dead `canvasFillRect` reference silently
+    // dropped every `ctx.fillRect()` call (the typeof guard hid the typo).
+    if (typeof canvasRect === "function") canvasRect(this._id, x, y, w, h);
 };
 
 CanvasRenderingContext2D.prototype.strokeRect = function(x, y, w, h) {
+    this._syncGlobalState();
+    this._syncLineState();
     this._applyStrokeStyle();
     if (typeof canvasStrokeRect === "function") canvasStrokeRect(this._id, x, y, w, h);
 };
@@ -51,13 +187,254 @@ CanvasRenderingContext2D.prototype.closePath = function() {
 };
 
 CanvasRenderingContext2D.prototype.fill = function() {
+    this._syncGlobalState();
     this._applyFillStyle();
     if (typeof canvasFillPath === "function") canvasFillPath(this._id);
 };
 
 CanvasRenderingContext2D.prototype.stroke = function() {
+    this._syncGlobalState();
+    this._syncLineState();
     this._applyStrokeStyle();
     if (typeof canvasStrokePath === "function") canvasStrokePath(this._id);
+};
+
+// ── pulp #964 — Canvas2D state-stack methods (save/restore) ───────────────
+// FilterBank and most non-trivial Canvas2D code uses save()/restore() to
+// scope transforms and clip regions per draw subroutine. Without these
+// shims, ctx.save() is undefined and the very first call throws TypeError,
+// aborting the entire frame render. Once aborted, none of the subsequent
+// drawing commands record to the bridge — which is why the FilterBank repro
+// for #964 saw an empty canvas even though the early commands like
+// clearRect / setStrokeColor showed up in the dispatch log.
+CanvasRenderingContext2D.prototype.save = function() {
+    if (typeof canvasSave === "function") canvasSave(this._id);
+    // Locally invalidate the "what we've already pushed to the bridge"
+    // cache so the next state-using draw re-pushes (the bridge's save()
+    // captures these on the C++ side, but our JS-side shim doesn't know
+    // what was active across save/restore boundaries).
+    this._sentFont = this._sentTextAlign = this._sentTextBaseline = null;
+    this._sentLineCap = this._sentLineJoin = null;
+    this._sentGlobalAlpha = this._sentGlobalCompositeOperation = null;
+};
+
+CanvasRenderingContext2D.prototype.restore = function() {
+    if (typeof canvasRestore === "function") canvasRestore(this._id);
+    this._sentFont = this._sentTextAlign = this._sentTextBaseline = null;
+    this._sentLineCap = this._sentLineJoin = null;
+    this._sentGlobalAlpha = this._sentGlobalCompositeOperation = null;
+};
+
+// ── pulp #964 — Canvas2D transform methods ────────────────────────────────
+CanvasRenderingContext2D.prototype.translate = function(x, y) {
+    if (typeof canvasTranslate === "function") canvasTranslate(this._id, x, y);
+};
+CanvasRenderingContext2D.prototype.scale = function(sx, sy) {
+    if (typeof canvasScale === "function") canvasScale(this._id, sx, sy);
+};
+CanvasRenderingContext2D.prototype.rotate = function(radians) {
+    if (typeof canvasRotate === "function") canvasRotate(this._id, radians);
+};
+CanvasRenderingContext2D.prototype.setTransform = function(a, b, c, d, e, f) {
+    // CanvasRenderingContext2D.setTransform also accepts a single DOMMatrix
+    // argument (setTransform(matrix)). Detect that form and unpack.
+    if (arguments.length === 1 && a && typeof a === "object") {
+        var m = a;
+        b = m.b == null ? 0 : m.b;
+        c = m.c == null ? 0 : m.c;
+        d = m.d == null ? 1 : m.d;
+        e = m.e == null ? 0 : m.e;
+        f = m.f == null ? 0 : m.f;
+        a = m.a == null ? 1 : m.a;
+    }
+    if (typeof canvasSetTransform === "function") canvasSetTransform(this._id, a, b, c, d, e, f);
+};
+CanvasRenderingContext2D.prototype.resetTransform = function() {
+    if (typeof canvasSetTransform === "function") canvasSetTransform(this._id, 1, 0, 0, 1, 0, 0);
+};
+// transform(a,b,c,d,e,f) — multiply the current transform by the given
+// matrix (concat-on-right). The bridge currently exposes setTransform
+// (replace) but not concat for the canvas widget. For the common case of
+// a pure translation we forward to canvasTranslate; otherwise this is a
+// no-op (file a follow-up if a future plugin needs strict concat).
+CanvasRenderingContext2D.prototype.transform = function(a, b, c, d, e, f) {
+    if (a === 1 && b === 0 && c === 0 && d === 1 && typeof canvasTranslate === "function") {
+        canvasTranslate(this._id, e, f);
+    }
+};
+
+// ── pulp #964 — Path methods (arc / rect / curves) ────────────────────────
+CanvasRenderingContext2D.prototype.arc = function(cx, cy, radius, startAngle, endAngle, anticlockwise) {
+    // The bridge has canvasArc (immediate-mode stroke) but no path-mode
+    // arc primitive. Approximate as cubic-bezier segments so the
+    // resulting path participates in fill() / stroke() / clip().
+    if (typeof canvasMoveTo !== "function" || typeof canvasCubicTo !== "function") return;
+    var sweep = endAngle - startAngle;
+    if (anticlockwise) { if (sweep > 0) sweep -= 2 * Math.PI; }
+    else               { if (sweep < 0) sweep += 2 * Math.PI; }
+    var segments = Math.max(1, Math.ceil(Math.abs(sweep) / (Math.PI / 2)));
+    var segAngle = sweep / segments;
+    var k = (4 / 3) * Math.tan(segAngle / 4);
+    var theta = startAngle;
+    var x0 = cx + Math.cos(theta) * radius;
+    var y0 = cy + Math.sin(theta) * radius;
+    canvasMoveTo(this._id, x0, y0);
+    for (var i = 0; i < segments; ++i) {
+        var t1 = theta + segAngle;
+        var x1 = cx + Math.cos(t1) * radius;
+        var y1 = cy + Math.sin(t1) * radius;
+        var c1x = x0 - Math.sin(theta) * radius * k;
+        var c1y = y0 + Math.cos(theta) * radius * k;
+        var c2x = x1 + Math.sin(t1) * radius * k;
+        var c2y = y1 - Math.cos(t1) * radius * k;
+        canvasCubicTo(this._id, c1x, c1y, c2x, c2y, x1, y1);
+        theta = t1; x0 = x1; y0 = y1;
+    }
+};
+
+CanvasRenderingContext2D.prototype.arcTo = function(x1, y1, x2, y2, radius) {
+    // Conservative approximation: emit a lineTo to the corner, then a
+    // lineTo to the end-of-arc point. FilterBank uses arcTo only for
+    // rounded-rect corners on the marquee; the fidelity loss is minimal.
+    void radius;
+    if (typeof canvasLineTo !== "function") return;
+    canvasLineTo(this._id, x1, y1);
+    canvasLineTo(this._id, x2, y2);
+};
+
+CanvasRenderingContext2D.prototype.bezierCurveTo = function(c1x, c1y, c2x, c2y, x, y) {
+    if (typeof canvasCubicTo === "function") canvasCubicTo(this._id, c1x, c1y, c2x, c2y, x, y);
+};
+
+CanvasRenderingContext2D.prototype.quadraticCurveTo = function(cx, cy, x, y) {
+    if (typeof canvasQuadTo === "function") canvasQuadTo(this._id, cx, cy, x, y);
+};
+
+CanvasRenderingContext2D.prototype.rect = function(x, y, w, h) {
+    // rect() is a path-construction op (not a draw). Emit four lineTos
+    // back to the start point so the resulting subpath behaves like a
+    // closed rectangle for fill()/stroke()/clip().
+    if (typeof canvasMoveTo !== "function" || typeof canvasLineTo !== "function") return;
+    canvasMoveTo(this._id, x, y);
+    canvasLineTo(this._id, x + w, y);
+    canvasLineTo(this._id, x + w, y + h);
+    canvasLineTo(this._id, x, y + h);
+    canvasLineTo(this._id, x, y);
+};
+
+CanvasRenderingContext2D.prototype.ellipse = function(cx, cy, rx, ry, rotation, startAngle, endAngle, anticlockwise) {
+    // Best-effort: when rx === ry fall through to arc; otherwise emit a
+    // cheap 4-segment approximation. FilterBank doesn't use ellipse, so
+    // this is a thin shim for parity rather than a precise sweep.
+    void rotation;
+    if (rx === ry) { this.arc(cx, cy, rx, startAngle, endAngle, anticlockwise); return; }
+    if (typeof canvasMoveTo !== "function" || typeof canvasCubicTo !== "function") return;
+    var sweep = endAngle - startAngle;
+    if (anticlockwise) { if (sweep > 0) sweep -= 2 * Math.PI; }
+    else               { if (sweep < 0) sweep += 2 * Math.PI; }
+    var segments = Math.max(1, Math.ceil(Math.abs(sweep) / (Math.PI / 2)));
+    var segAngle = sweep / segments;
+    var theta = startAngle;
+    var x0 = cx + Math.cos(theta) * rx;
+    var y0 = cy + Math.sin(theta) * ry;
+    canvasMoveTo(this._id, x0, y0);
+    for (var i = 0; i < segments; ++i) {
+        var t1 = theta + segAngle;
+        var x1 = cx + Math.cos(t1) * rx;
+        var y1 = cy + Math.sin(t1) * ry;
+        canvasCubicTo(this._id, x0, y0, x1, y1, x1, y1);
+        theta = t1; x0 = x1; y0 = y1;
+    }
+};
+
+CanvasRenderingContext2D.prototype.roundRect = function(x, y, w, h, radii) {
+    // CSS Canvas API: radii can be a number or an array of 1/2/3/4 numbers.
+    // We honour the simple uniform case; non-uniform radii fall back to
+    // the largest single value.
+    var r = 0;
+    if (typeof radii === "number") r = radii;
+    else if (Array.isArray(radii) && radii.length > 0) r = Number(radii[0]) || 0;
+    if (typeof canvasMoveTo !== "function" || typeof canvasLineTo !== "function") return;
+    r = Math.min(r, w * 0.5, h * 0.5);
+    canvasMoveTo(this._id, x + r, y);
+    canvasLineTo(this._id, x + w - r, y);
+    this.arcTo(x + w, y, x + w, y + r, r);
+    canvasLineTo(this._id, x + w, y + h - r);
+    this.arcTo(x + w, y + h, x + w - r, y + h, r);
+    canvasLineTo(this._id, x + r, y + h);
+    this.arcTo(x, y + h, x, y + h - r, r);
+    canvasLineTo(this._id, x, y + r);
+    this.arcTo(x, y, x + r, y, r);
+};
+
+CanvasRenderingContext2D.prototype.clip = function(fillRule) {
+    // pulp #964 — match Canvas2D's clip() spec: intersect the current
+    // clip region with the current path. The bridge's canvasClip
+    // (issue-896) calls SkCanvas::clipPath; canvasClipRect is the older
+    // rect-only path. Prefer canvasClip when available.
+    void fillRule;
+    if (typeof canvasClip === "function") canvasClip(this._id);
+};
+
+// ── pulp #964 — Text drawing ──────────────────────────────────────────────
+CanvasRenderingContext2D.prototype.fillText = function(text, x, y, maxWidth) {
+    void maxWidth;
+    this._syncGlobalState();
+    this._syncTextState();
+    this._applyFillStyle();
+    // canvasFillText takes (id, text, x, y, size, color, family). When
+    // the active fillStyle is a gradient the bridge keeps the gradient
+    // active on the canvas; canvasFillText still records a colour, so
+    // pass the gradient's first stop as a graceful approximation.
+    var color = this.fillStyle;
+    if (color && color._kind) {
+        color = (color._stops && color._stops.length > 0) ? color._stops[0].color : "#fff";
+    }
+    var fontStr = this.font || "14px Inter";
+    var sizeMatch = fontStr.match(/(\d+(?:\.\d+)?)px/);
+    var size = sizeMatch ? parseFloat(sizeMatch[1]) : 14;
+    if (typeof canvasFillText === "function") {
+        canvasFillText(this._id, String(text == null ? "" : text), x, y, size, String(color));
+    }
+};
+
+CanvasRenderingContext2D.prototype.strokeText = function(text, x, y, maxWidth) {
+    // Pulp's bridge doesn't have a stroke-text command — fall back to
+    // fillText with the strokeStyle colour. Visually close enough for
+    // the FilterBank/HUD use case.
+    void maxWidth;
+    var savedFill = this.fillStyle;
+    this.fillStyle = this.strokeStyle;
+    try { this.fillText(text, x, y); }
+    finally { this.fillStyle = savedFill; }
+};
+
+// ── pulp #964 — Gradient factories ────────────────────────────────────────
+CanvasRenderingContext2D.prototype.createLinearGradient = function(x0, y0, x1, y1) {
+    return new CanvasGradient("linear", { x0: x0, y0: y0, x1: x1, y1: y1 });
+};
+
+CanvasRenderingContext2D.prototype.createRadialGradient = function(x0, y0, r0, x1, y1, r1) {
+    // Pulp's bridge currently models a single-circle radial gradient
+    // (centre + radius). Use the outer circle (x1, y1, r1) as the
+    // gradient origin — visually equivalent for FilterBank's typical
+    // "centre bloom" usage where x0===x1, y0===y1, r0===0.
+    void x0; void y0; void r0;
+    return new CanvasGradient("radial", { x1: x1, y1: y1, r1: r1 });
+};
+
+CanvasRenderingContext2D.prototype.createConicGradient = function() {
+    // Conic gradients need a Skia conic shader — not yet plumbed
+    // through Pulp's canvas. Return an empty linear so consumer code
+    // (assignment to fillStyle, addColorStop) doesn't throw.
+    return new CanvasGradient("linear", { x0: 0, y0: 0, x1: 1, y1: 0 });
+};
+
+CanvasRenderingContext2D.prototype.createPattern = function() {
+    // Patterns are rare in audio plugin UIs; per spec, returning null is
+    // permissible when the pattern source is unavailable. Callers must
+    // guard against null.
+    return null;
 };
 
 // ── Canvas2D API gap closures (issue-916) ────────────────────────────

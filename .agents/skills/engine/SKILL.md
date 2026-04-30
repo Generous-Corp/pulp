@@ -47,10 +47,11 @@ for React 18 dev. Add new files to `core/view/CMakeLists.txt`'s
 `core/view/src/widget_bridge.cpp` (`embed_js.cmake` only embeds the
 constants; the bridge constructor evaluates them).
 
-### Canvas2D surface coverage (issue-916)
+### Canvas2D surface coverage (issue-916, issue-964)
 
 `web-compat-canvas.js` exposes `CanvasRenderingContext2D.prototype`
-with the standard methods plus the gap-list closures from issue-916:
+with the standard methods plus the gap-list closures from issue-916
+and the FilterBank-parity additions from issue-964:
 
 | Method | Notes |
 |--------|-------|
@@ -59,6 +60,45 @@ with the standard methods plus the gap-list closures from issue-916:
 | `setLineDash([…])` / `getLineDash()` | Even-length patterns are taken verbatim; odd-length patterns are duplicated per the HTML5 spec. Phase comes from `lineDashOffset`. |
 | `getImageData(x,y,w,h)` | Returns `{data: Uint8ClampedArray, width, height}`. The bridge currently returns zero-filled pixels (no live surface handle from JS-call context); consumers that need real pixels should round-trip through a render-host integration. |
 | `putImageData(img, dx, dy)` | Decodes the typed array to base64 across the bridge and applies via `Canvas::write_pixels` on backends that implement it (Skia today). |
+| `save()` / `restore()` (#964) | Forward to `canvasSave` / `canvasRestore`. JS-side caches of last-pushed text/line/global state are invalidated on save so the next draw re-pushes — the bridge captures the matching state on the C++ side via SkCanvas::save. |
+| `translate` / `scale` / `rotate` / `setTransform` / `resetTransform` / `transform` (#964) | Forward to `canvasTranslate` / `canvasScale` / `canvasRotate` / `canvasSetTransform`. `transform` is best-effort: pure translation forwards to `canvasTranslate`; other matrices are silently dropped (the bridge has no concat primitive). `setTransform` accepts the (a,b,c,d,e,f) form and the single-DOMMatrix form. |
+| `arc(cx,cy,r,a0,a1,ccw)` / `ellipse` (#964) | Approximated as cubic-Bezier segments (4-segment unit-circle scaling) so the path participates in `fill()` / `stroke()` / `clip()`. `arcTo` is a conservative two-segment lineTo approximation — sufficient for rounded marquee corners, not fidelity-critical. |
+| `bezierCurveTo` / `quadraticCurveTo` / `rect` / `roundRect` (#964) | Forward to `canvasCubicTo` / `canvasQuadTo` / repeated `canvasLineTo`. `rect` emits an explicit closing lineTo back to the start so the resulting subpath is closed. `roundRect` honours the uniform-radius case; non-uniform `radii[]` falls back to `radii[0]`. |
+| `clip(fillRule)` (#964) | Calls `canvasClip` (issue-896 path-based clip). The fill rule is dropped — Pulp's bridge currently ignores even-odd vs nonzero, matching SkCanvas defaults. |
+| `fillText(text,x,y)` / `strokeText` (#964) | `fillText` syncs global / text state and forwards to `canvasFillText` with the active fillStyle's colour (or first gradient stop). `strokeText` falls back to `fillText` with the strokeStyle colour — Pulp's bridge has no stroke-text command. |
+| `createLinearGradient` / `createRadialGradient` / `createConicGradient` (#964) | Return a `CanvasGradient` object with `_kind`, `_params`, `_stops`, and an `addColorStop(offset, color)` method. Gradients are NOT pushed to the bridge until they're assigned to `fillStyle` / `strokeStyle` AND a draw fires — `_applyFillStyle()` flushes via `canvasSetLinearGradient` / `canvasSetRadialGradient`. Conic gradients return an empty linear placeholder (Skia conic-gradient plumbing not yet wired). |
+| `fillStyle` / `strokeStyle` (#964) | Plain fields. `_applyFillStyle()` runs before every fill draw and flushes either a string colour (via `canvasSetFillColor`) OR a gradient (via `canvasSetLinearGradient` / `canvasSetRadialGradient`), tracking `_activeFillKind` so a subsequent string assignment first calls `canvasClearGradient`. Stroke gradients fall back to the first colour stop (no stroke-gradient bridge today). |
+| `globalAlpha` / `globalCompositeOperation` / `font` / `textAlign` / `textBaseline` / `lineCap` / `lineJoin` (#964) | Plain fields. Pushed to the bridge via `_syncGlobalState` / `_syncTextState` / `_syncLineState` lazy helpers — they only emit a `canvas*` call when the value differs from the last-sent cache, and the cache is invalidated on `save()` / `restore()`. |
+| `createPattern` (#964) | Returns `null` per spec when patterns aren't available. Pulp's bridge has no pattern primitive yet; revisit when a plugin actually needs one. |
+
+#### Why the shim must export every Canvas2D method (#964)
+
+If any common method (`save`, `setTransform`, `createLinearGradient`,
+`globalAlpha` setter, …) is missing from `CanvasRenderingContext2D.prototype`,
+the very first call to it throws `TypeError: ... is not a function`. The
+exception unwinds the calling function — and in a React render boundary,
+the boundary swallows the throw and silently retries on the next commit.
+Net effect: only the *prefix* of canvas calls before the throw makes it
+to the bridge, and the rendered output is missing whatever the rest of
+the frame would have drawn. The Spectr FilterBank standalone displayed
+this exact symptom (a clean `clearRect` + nothing else, leaving the
+parent's dark navy bg showing through where canvas content should have
+been). The fix is shim coverage at the JS layer, not at the
+CanvasWidget/SkiaCanvas pipeline below.
+
+When adding a new Canvas2D method, audit:
+
+1. Does the bridge expose a matching `canvas*` function in
+   `core/view/src/widget_bridge.cpp`? If not, add it.
+2. Is the path expressed as path-construction (records into the
+   current Skia path) vs immediate-mode (draws now)? Match the spec —
+   `arc()` is path-construction, not a stroke.
+3. Does the new method need any of the cached state to flush (font /
+   textAlign / lineCap / globalAlpha)? Call the relevant `_sync*`
+   helper before forwarding to the bridge.
+4. Add a regression test in `test/test_canvas2d_shim.cpp` covering the
+   new method's existence + a representative end-to-end Skia render
+   (the FilterBank-style raster test pattern).
 
 ## Commands
 
