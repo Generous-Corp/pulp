@@ -14,6 +14,8 @@
 #include <pulp/view/plugin_manager_panel.hpp>
 
 using namespace pulp::view;
+using pulp::canvas::DrawCommand;
+using pulp::canvas::RecordingCanvas;
 using pulp::host::PluginFormat;
 
 namespace {
@@ -40,6 +42,17 @@ void populate_model(InMemoryPluginManagerModel& m) {
                                        "/plugins/Broken.clap");
     failed.reason = "SIGSEGV during scan";
     m.failed_rows = {failed};
+}
+
+bool has_text_command(const RecordingCanvas& canvas, const std::string& needle)
+{
+    for (const auto& cmd : canvas.commands()) {
+        if (cmd.type == DrawCommand::Type::fill_text &&
+            cmd.text.find(needle) != std::string::npos) {
+            return true;
+        }
+    }
+    return false;
 }
 
 } // namespace
@@ -140,6 +153,83 @@ TEST_CASE("PluginManagerPanel context menu drives per-row actions",
         REQUIRE(model.reveal_count == 1);
         REQUIRE(model.last_reveal_path == bass_path);
     }
+}
+
+TEST_CASE("PluginManagerPanel mouse events select rows and close empty menus",
+          "[view][plugin_manager][issue-493]")
+{
+    InMemoryPluginManagerModel model; populate_model(model);
+    PluginManagerPanel panel(model);
+    panel.set_bounds({0, 0, 900, 400});
+
+    PluginManagerBucket selected_bucket = PluginManagerBucket::blacklisted;
+    std::string selected_path;
+    panel.on_row_selected = [&](PluginManagerBucket bucket,
+                                const PluginManagerRow& row) {
+        selected_bucket = bucket;
+        selected_path = row.path;
+    };
+
+    MouseEvent select;
+    select.is_down = true;
+    select.button = MouseButton::left;
+    select.position = {12.0f, 63.0f};
+    panel.on_mouse_event(select);
+
+    REQUIRE(selected_bucket == PluginManagerBucket::scanned);
+    REQUIRE(selected_path == "/plugins/SolidBass.clap");
+
+    MouseEvent open_menu;
+    open_menu.is_down = true;
+    open_menu.button = MouseButton::right;
+    open_menu.position = {320.0f, 63.0f};
+    panel.on_mouse_event(open_menu);
+
+    REQUIRE(panel.context_menu_bucket() == PluginManagerBucket::failed);
+    REQUIRE(panel.context_menu_path() == "/plugins/Broken.clap");
+
+    MouseEvent off_row;
+    off_row.is_down = true;
+    off_row.button = MouseButton::left;
+    off_row.position = {320.0f, 180.0f};
+    panel.on_mouse_event(off_row);
+
+    REQUIRE(panel.context_menu_path().empty());
+}
+
+TEST_CASE("PluginManagerPanel paint records format labels and clamps progress",
+          "[view][plugin_manager][issue-493]")
+{
+    InMemoryPluginManagerModel model; populate_model(model);
+    model.scanned_rows.push_back(
+        make_row(PluginFormat::AudioUnitV3, "", "/plugins/Mobile.auv3"));
+    model.scanned_rows.push_back(
+        make_row(PluginFormat::LV2, "Room LV2", "/plugins/Room.lv2"));
+    model.scanning = true;
+    model.progress = 1.75f;
+
+    PluginManagerPanel panel(model);
+    panel.set_bounds({0, 0, 900, 240});
+
+    RecordingCanvas canvas;
+    panel.paint(canvas);
+
+    REQUIRE(has_text_command(canvas, "Scanning"));
+    REQUIRE(has_text_command(canvas, "AUv3  /plugins/Mobile.auv3"));
+    REQUIRE(has_text_command(canvas, "LV2  Room LV2"));
+
+    int progress_rects = 0;
+    bool saw_clamped_fill = false;
+    for (const auto& cmd : canvas.commands()) {
+        if (cmd.type != DrawCommand::Type::fill_rect) continue;
+        if (cmd.f[0] == 676.0f && cmd.f[1] == 10.0f && cmd.f[3] == 8.0f) {
+            ++progress_rects;
+            REQUIRE(cmd.f[2] <= 110.0f);
+            saw_clamped_fill = saw_clamped_fill || cmd.f[2] == 110.0f;
+        }
+    }
+    REQUIRE(progress_rects == 2);
+    REQUIRE(saw_clamped_fill);
 }
 
 TEST_CASE("PluginManagerPanel per-format search paths round-trip via the model",
