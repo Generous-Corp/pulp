@@ -2500,7 +2500,21 @@ void WidgetBridge::register_api() {
         return c;
     };
 
-    engine_.register_function("canvasRect", [this, parseColor](choc::javascript::ArgumentList args) {
+    // pulp #964 — Two registered names for the same handler:
+    //   * `canvasRect`     — legacy direct-bridge name used by hand-written
+    //                        examples (`canvasRect(id, x, y, w, h, "#fff")`).
+    //   * `canvasFillRect` — the name the HTML5 Canvas2D shim emits for
+    //                        `ctx.fillRect()` (see core/view/js/web-compat-canvas.js).
+    // Pre-#964 only `canvasRect` was registered, so every `ctx.fillRect()`
+    // from the web-compat shim silently no-op'd at the typeof guard
+    // (`if (typeof canvasFillRect === "function")`). That dropped every
+    // full-bounds opaque fillRect — e.g. the Spectr FilterBank's clear-to-
+    // background fill — without surfacing any error. Path-based draws
+    // (`canvasFillPath`, `canvasStrokePath`) and `canvasStrokeRect` happened
+    // to be wired correctly so they kept working, which is why the bug
+    // looked like "compositing eats the canvas surface" instead of
+    // "fillRect is silently dropped".
+    auto canvasRectHandler = [this, parseColor](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::fill_rect;
             cmd.x=(float)args.get<double>(1,0); cmd.y=(float)args.get<double>(2,0);
@@ -2508,7 +2522,7 @@ void WidgetBridge::register_api() {
             // pulp #968 — when no color arg was passed (or it was the empty
             // string), honour the active fillStyle (color OR gradient) on
             // the canvas widget. This makes a JS shim like
-            //   fillRect(x,y,w,h) { call('canvasRect', id, x,y,w,h); }
+            //   fillRect(x,y,w,h) { call('canvasFillRect', id, x,y,w,h); }
             // behave like the Canvas2D spec — `ctx.fillRect` paints with
             // whatever `ctx.fillStyle` was last set to, including a
             // CanvasGradient. With 6+ args the explicit color wins.
@@ -2521,7 +2535,9 @@ void WidgetBridge::register_api() {
             c->add_command(cmd);
         }
         return choc::value::Value();
-    });
+    };
+    engine_.register_function("canvasRect", canvasRectHandler);
+    engine_.register_function("canvasFillRect", canvasRectHandler);
 
     engine_.register_function("canvasStrokeRect", [this, parseColor](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
