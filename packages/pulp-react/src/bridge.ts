@@ -144,7 +144,7 @@ export function createMockBridge(): MockBridge {
         'setBorderSide', 'setOpacity', 'setVisible', 'setPosition',
         'setText', 'setTextColor', 'setTextAlign',
         'setSpectrumData', 'setWaveformData', 'setMeterLevel', 'setProgress',
-        'setValue', 'setTheme', 'layout', 'on',
+        'setValue', 'setTheme', 'layout', 'on', 'registerHover',
     ];
     const saved: Record<string, unknown> = {};
     return {

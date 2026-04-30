@@ -70,9 +70,28 @@ function eventNameFor(propName: string): string {
     return propName.slice(2).toLowerCase();
 }
 
+/// Hover/pointer events the bridge gates behind registerHover(id).
+/// onMouseEnter/onMouseLeave + their pointer-event aliases all map to
+/// the bridge's mouseenter/mouseleave dispatch path; without
+/// registerHover, the C++ side never fires the events even though the
+/// JS listener is installed (pulp #1149).
+function isHoverEvent(eventName: string): boolean {
+    return (
+        eventName === 'mouseenter' ||
+        eventName === 'mouseleave' ||
+        eventName === 'pointerenter' ||
+        eventName === 'pointerleave'
+    );
+}
+
 function applyEventHandler(id: string, key: string, value: unknown): void {
     if (typeof value !== 'function') return;
     const eventName = eventNameFor(key);
+    if (isHoverEvent(eventName)) {
+        // Arm the native hover dispatchers exactly once (idempotent on
+        // the bridge — re-registers replace the lambdas, same shape).
+        call('registerHover', id);
+    }
     // Wrap the React handler so the bridge's __dispatch__ can call it.
     // The bridge passes positional args after id+eventName; just forward.
     call('on', id, eventName, (...a: unknown[]) => (value as (...x: unknown[]) => void)(...a));
