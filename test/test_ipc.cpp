@@ -27,6 +27,35 @@ std::optional<uint16_t> start_socket_server_on_loopback(InterprocessConnectionSe
     return std::nullopt;
 }
 
+struct CapturingServer : InterprocessConnectionServer {
+    void client_connected(std::unique_ptr<InterprocessConnection> conn) override {
+        conn->on_message = [this](const void*, size_t size) {
+            std::lock_guard<std::mutex> lock(mutex);
+            ++binary_messages;
+            last_binary_size = size;
+            cv.notify_all();
+        };
+        conn->on_text_message = [this](std::string_view message) {
+            std::lock_guard<std::mutex> lock(mutex);
+            ++text_messages;
+            last_text.assign(message);
+            cv.notify_all();
+        };
+
+        std::lock_guard<std::mutex> lock(mutex);
+        accepted = std::move(conn);
+        cv.notify_all();
+    }
+
+    std::mutex mutex;
+    std::condition_variable cv;
+    std::unique_ptr<InterprocessConnection> accepted;
+    int binary_messages = 0;
+    int text_messages = 0;
+    size_t last_binary_size = 1;
+    std::string last_text = "unset";
+};
+
 }  // namespace
 
 // ── InterprocessConnection via named pipe ───────────────────────────────
@@ -121,6 +150,12 @@ TEST_CASE("ChildProcessManager empty lifecycle operations are no-ops",
 TEST_CASE("IPC socket server rejects malformed listen endpoints",
           "[events][ipc][socket]") {
     InterprocessConnectionServer server;
+    REQUIRE_FALSE(server.start("", IpcTransport::Socket));
+    REQUIRE_FALSE(server.is_running());
+
+    REQUIRE_FALSE(server.start("127.0.0.1:", IpcTransport::Socket));
+    REQUIRE_FALSE(server.is_running());
+
     REQUIRE_FALSE(server.start("127.0.0.1:not-a-port", IpcTransport::Socket));
     REQUIRE_FALSE(server.is_running());
 
@@ -128,7 +163,13 @@ TEST_CASE("IPC socket server rejects malformed listen endpoints",
     REQUIRE_FALSE(server.is_running());
 
     InterprocessConnection conn;
+    REQUIRE_FALSE(conn.connect("127.0.0.1:", IpcTransport::Socket));
+    REQUIRE(conn.state() == IpcState::Error);
+
     REQUIRE_FALSE(conn.create_server("127.0.0.1:not-a-port", IpcTransport::Socket));
+    REQUIRE(conn.state() == IpcState::Error);
+
+    REQUIRE_FALSE(conn.create_server("", IpcTransport::Socket));
     REQUIRE(conn.state() == IpcState::Error);
 }
 
@@ -226,6 +267,39 @@ TEST_CASE("IPC socket server accepts client and exchanges framed messages",
         std::lock_guard<std::mutex> lock(mutex);
         if (accepted) accepted->disconnect();
     }
+    server.stop();
+    REQUIRE_FALSE(server.is_running());
+}
+
+TEST_CASE("IPC socket server virtual callback accepts empty frames",
+          "[events][ipc][socket][issue-642]") {
+    CapturingServer server;
+    auto port = start_socket_server_on_loopback(server);
+    REQUIRE(port.has_value());
+
+    InterprocessConnection client;
+    REQUIRE(client.connect("127.0.0.1:" + std::to_string(*port), IpcTransport::Socket));
+
+    {
+        std::unique_lock<std::mutex> lock(server.mutex);
+        REQUIRE(server.cv.wait_for(lock, std::chrono::seconds(2), [&] {
+            return server.accepted != nullptr;
+        }));
+    }
+
+    REQUIRE(client.send_message(std::string_view{}));
+
+    {
+        std::unique_lock<std::mutex> lock(server.mutex);
+        REQUIRE(server.cv.wait_for(lock, std::chrono::seconds(2), [&] {
+            return server.binary_messages == 1 && server.text_messages == 1;
+        }));
+        REQUIRE(server.last_binary_size == 0);
+        REQUIRE(server.last_text.empty());
+    }
+
+    client.disconnect();
+    if (server.accepted) server.accepted->disconnect();
     server.stop();
     REQUIRE_FALSE(server.is_running());
 }
