@@ -2,6 +2,9 @@
 
 #ifdef __APPLE__
 
+#include <cctype>
+#include <cstddef>
+
 #import <CoreGraphics/CoreGraphics.h>
 #import <CoreText/CoreText.h>
 #import <Foundation/Foundation.h>
@@ -226,11 +229,88 @@ void CoreGraphicsCanvas::set_text_align(TextAlign align) {
     text_align_ = align;
 }
 
+// Generic CSS family keywords that should resolve to the platform default
+// rather than ever passing through CTFontCreateWithName (which would either
+// return null or — worse — match an unrelated installed face like a system
+// font that happens to share a substring).
+static bool cg_is_generic_family(const std::string& f) {
+    return f == "serif" || f == "sans-serif" || f == "monospace"
+        || f == "cursive" || f == "fantasy" || f == "system-ui"
+        || f == "ui-serif" || f == "ui-sans-serif" || f == "ui-monospace"
+        || f == "ui-rounded";
+}
+
+// pulp #1151 P1 (Codex review): `CTFontCreateWithName` is not a reliable
+// "is this family installed?" probe — CoreText silently substitutes a
+// fallback face when the name doesn't exist on the system, so it always
+// returns a non-null CTFontRef. To walk a fallback chain correctly we
+// match each candidate against the installed font catalogue via a
+// CTFontDescriptor and verify the resolver returned the family we asked
+// for. Only an actual installed family (case-insensitive compare) advances
+// past the probe.
+static bool cg_family_is_installed(const std::string& name) {
+    if (name.empty() || cg_is_generic_family(name)) return false;
+    @autoreleasepool {
+        NSString* ns_name = [NSString stringWithUTF8String:name.c_str()];
+        if (!ns_name) return false;
+
+        NSDictionary* attrs = @{
+            (__bridge NSString*)kCTFontFamilyNameAttribute: ns_name
+        };
+        CTFontDescriptorRef base = CTFontDescriptorCreateWithAttributes(
+            (__bridge CFDictionaryRef)attrs);
+        if (!base) return false;
+
+        CTFontDescriptorRef matched =
+            CTFontDescriptorCreateMatchingFontDescriptor(base, NULL);
+        CFRelease(base);
+        if (!matched) return false;
+
+        bool ok = false;
+        CFTypeRef resolved = CTFontDescriptorCopyAttribute(
+            matched, kCTFontFamilyNameAttribute);
+        if (resolved) {
+            if (CFGetTypeID(resolved) == CFStringGetTypeID()) {
+                CFStringRef rs = static_cast<CFStringRef>(resolved);
+                ok = (CFStringCompare(rs, (__bridge CFStringRef)ns_name,
+                                      kCFCompareCaseInsensitive) ==
+                      kCFCompareEqualTo);
+            }
+            CFRelease(resolved);
+        }
+        CFRelease(matched);
+        return ok;
+    }
+}
+
+// pulp #1151: `family` may be a ';'-joined fallback chain produced by the
+// web-compat JS layer (e.g. "JetBrains Mono;ui-monospace;monospace"). Walk
+// each candidate in order and return the first CTFont that resolves; if no
+// candidate matches, fall back to the platform's UI system font so the
+// caller never gets a null typeface.
 static CTFontRef create_font_with_fallback(const std::string& family, float size) {
-    NSString* ns_font = [NSString stringWithUTF8String:family.c_str()];
-    CTFontRef font = CTFontCreateWithName((__bridge CFStringRef)ns_font, size, NULL);
+    CTFontRef font = nullptr;
+    std::size_t start = 0;
+    while (start <= family.size() && !font) {
+        std::size_t sep = family.find(';', start);
+        std::size_t end = (sep == std::string::npos) ? family.size() : sep;
+        std::size_t lo = start;
+        std::size_t hi = end;
+        while (lo < hi && std::isspace(static_cast<unsigned char>(family[lo]))) ++lo;
+        while (hi > lo && std::isspace(static_cast<unsigned char>(family[hi - 1]))) --hi;
+        std::string candidate = family.substr(lo, hi - lo);
+        if (cg_family_is_installed(candidate)) {
+            NSString* ns_font = [NSString stringWithUTF8String:candidate.c_str()];
+            font = CTFontCreateWithName((__bridge CFStringRef)ns_font, size, NULL);
+        }
+        if (sep == std::string::npos) break;
+        start = sep + 1;
+    }
+
     if (!font) {
-        // Requested family not available — fall back to system font
+        // No named family was actually installed on the system (or every
+        // candidate was a CSS generic keyword). Fall back to the platform
+        // UI system font so the caller never gets a null typeface.
         font = CTFontCreateUIFontForLanguage(kCTFontUIFontSystem, size, NULL);
     }
     return font;

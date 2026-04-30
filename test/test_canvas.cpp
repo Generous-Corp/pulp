@@ -642,6 +642,55 @@ TEST_CASE("SkiaCanvas::measure_text_with_font picks up bundled "
     REQUIRE(a.width > 0.0f);
     REQUIRE(b.width > a.width);
 }
+
+// pulp #1151 — fontFamily fallback chains arrive here as a ';'-joined
+// string. The resolver must walk each candidate and pick the first one
+// that resolves, even when earlier candidates fail to match. Without this,
+// a fallback chain like "DefinitelyMissingFamily;JetBrains Mono;monospace"
+// would have produced a system-default-face measurement; with the fix it
+// must produce the same advance as a direct "JetBrains Mono" lookup.
+TEST_CASE("SkiaCanvas::measure_text_with_font walks fontFamily fallback chain "
+          "and picks bundled JetBrains Mono mid-chain (#1151)",
+          "[canvas][skia][fonts][issue-1151]") {
+    auto direct = SkiaCanvas::measure_text_with_font(
+        "JetBrains Mono", 18.0f, "Hello World");
+    REQUIRE(direct.width > 0.0f);
+
+    auto chained = SkiaCanvas::measure_text_with_font(
+        "DefinitelyMissingFamily-1151;JetBrains Mono;monospace",
+        18.0f, "Hello World");
+    REQUIRE(chained.width > 0.0f);
+    // Bit-exact equivalence — the chain walked past the missing first
+    // candidate and resolved the bundled JetBrains Mono face for the
+    // measurement, exactly as if the caller had passed the second
+    // candidate directly.
+    REQUIRE(chained.width == Catch::Approx(direct.width));
+    REQUIRE(chained.ascent == Catch::Approx(direct.ascent));
+    REQUIRE(chained.descent == Catch::Approx(direct.descent));
+}
+
+TEST_CASE("SkiaCanvas::measure_text_with_font generic-only chain falls through "
+          "to platform default (#1151)",
+          "[canvas][skia][fonts][issue-1151]") {
+    // A chain of CSS generic keywords ("monospace", "sans-serif", …) must
+    // not crash and must produce a positive width — the resolver should
+    // fall through to SkFontMgr::matchFamilyStyle(nullptr, …) so the
+    // platform's default face renders the text.
+    auto m = SkiaCanvas::measure_text_with_font(
+        "monospace;sans-serif", 16.0f, "abc");
+    REQUIRE(m.width > 0.0f);
+}
+
+TEST_CASE("SkiaCanvas::measure_text_with_font all-missing chain still produces "
+          "a positive width via platform default (#1151)",
+          "[canvas][skia][fonts][issue-1151]") {
+    // Every candidate in the chain is unknown. Falling through to the
+    // platform default keeps the previous behaviour where a single bogus
+    // family also produced *something* renderable instead of a hard error.
+    auto m = SkiaCanvas::measure_text_with_font(
+        "PulpMissingA-1151;PulpMissingB-1151", 16.0f, "abc");
+    REQUIRE(m.width > 0.0f);
+}
 #endif
 
 // ── pulp #929 — Canvas::clear_rect default + CoreGraphics override ──────────
@@ -717,6 +766,42 @@ TEST_CASE("RecordingCanvas::clear_rect emits a dedicated clear_rect command",
 }
 
 #ifdef __APPLE__
+// pulp #1151 — `set_font` may receive a ';'-joined fallback chain. The CG
+// backend must walk it and use the first installed family. Smoke test:
+// verify a chain like "DefinitelyMissing-1151;Helvetica" still produces a
+// positive measure_text result (which means CTFont resolution succeeded
+// without crashing). Going further to assert *which* family resolved is
+// platform-fragile — we'd need to inspect the CTFont post-creation —
+// but the Skia tests cover the equality semantics; this just guards the
+// chain-walk itself doesn't return null.
+TEST_CASE("CoreGraphicsCanvas::set_font accepts fallback chain (#1151)",
+          "[canvas][cg][issue-1151]") {
+    constexpr int W = 32;
+    constexpr int H = 16;
+    std::vector<uint8_t> pixels(static_cast<size_t>(W) * H * 4u, 0u);
+    auto cs = CGColorSpaceCreateDeviceRGB();
+    REQUIRE(cs != nullptr);
+    const uint32_t bitmap_info =
+        static_cast<uint32_t>(kCGImageAlphaPremultipliedLast) |
+        static_cast<uint32_t>(kCGBitmapByteOrder32Big);
+    CGContextRef ctx = CGBitmapContextCreate(
+        pixels.data(), W, H, 8, W * 4u, cs, bitmap_info);
+    CGColorSpaceRelease(cs);
+    REQUIRE(ctx != nullptr);
+
+    {
+        CoreGraphicsCanvas canvas(ctx, static_cast<float>(W),
+                                  static_cast<float>(H));
+        // First candidate is uninstalled, second is system-bundled on
+        // every macOS version we support, third is the CSS generic.
+        canvas.set_font("DefinitelyMissingFamily-1151;Helvetica;monospace",
+                         14.0f);
+        float w = canvas.measure_text("Hello");
+        REQUIRE(w > 0.0f);
+    }
+    CGContextRelease(ctx);
+}
+
 TEST_CASE("CoreGraphicsCanvas::clear_rect zeroes destination pixels",
           "[canvas][cg][issue-929]") {
     // Build a 16x16 RGBA8 CGBitmapContext, fill it with opaque red, then

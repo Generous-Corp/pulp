@@ -145,3 +145,16 @@ Don't refactor this into a "pure native" shape — there's no way to do it witho
 `setTimeout(fn, 0)` deliberately bypasses `__scheduleTimer__` and routes through `Promise.resolve().then(...)` so it drains on the next `pump_message_loop()` call. This matches React's scheduler expectations and makes tests deterministic (no host frame loop needed). Positive-delay timeouts go through the native deadline tracker and only fire when `service_frame_callbacks()` runs.
 
 If a consumer reports "my setTimeout(fn, 1) never fires", check that the host is actually calling `service_frame_callbacks()` from its frame loop — that's the drain hook for non-zero delays.
+
+### CSS font-family lists are joined with `;` across the JS↔C++ boundary (#1151)
+
+`web-compat-style-decl.js` parses a comma-separated CSS `font-family` value into an ordered candidate list, joins it with `;`, and hands the joined string to the existing `setFontFamily(id, family)` bridge call. The C++ side (`get_cached_typeface` in `core/canvas/src/skia_canvas.cpp` and `create_font_with_fallback` in `core/canvas/platform/mac/cg_canvas.mm`) splits on `;` and walks the chain.
+
+We use `;` (not `,`) because:
+
+1. `,` is a legal character inside CSS quoted family names (`"Foo, Bar"` is one family) and the C++ bridge has no way to know which commas were "list separators" vs "literal name characters" once the string crosses the boundary. The JS parser is the only layer that has full quoting context.
+2. `;` is *not* legal anywhere inside an unquoted CSS family name (per CSS Fonts grammar), so it's a safe delimiter.
+
+If you ever change the delimiter, change both sides in lockstep — the cache key in `get_cached_typeface` hashes the joined string verbatim, so a mismatch silently bypasses the cache and may also bypass the chain-walk entirely.
+
+The CG path additionally uses `CTFontDescriptorCreateMatchingFontDescriptor` to verify each candidate is *actually installed* before accepting it, because `CTFontCreateWithName` silently substitutes the system default for a missing name — that would short-circuit the chain walk to whatever CoreText guesses is closest.

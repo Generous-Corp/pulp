@@ -164,6 +164,89 @@ TEST_CASE("WebCompat: parseTransition", "[webcompat][parser]") {
     REQUIRE(std::string(result.getWithDefault<std::string_view>("")) == "opacity");
 }
 
+// pulp #1151 — _parseFontFamilyList must split on top-level commas, leave
+// commas inside quoted segments alone, strip outer quotes, and trim
+// whitespace. The previous behaviour passed the entire CSS value to
+// setFontFamily verbatim (after stripping quotes), so SkFontMgr never
+// matched any of the candidates in a fallback chain.
+TEST_CASE("WebCompat: parseFontFamilyList exists", "[webcompat][parser][issue-1151]") {
+    TestEnvironment env;
+    auto result = env.engine.evaluate("typeof _parseFontFamilyList");
+    REQUIRE(std::string(result.getWithDefault<std::string_view>("")) == "function");
+}
+
+TEST_CASE("WebCompat: parseFontFamilyList splits comma list", "[webcompat][parser][issue-1151]") {
+    TestEnvironment env;
+    auto result = env.engine.evaluate(
+        "JSON.stringify(_parseFontFamilyList(\"'JetBrains Mono', ui-monospace, monospace\"))");
+    REQUIRE(std::string(result.getWithDefault<std::string_view>("")) ==
+            "[\"JetBrains Mono\",\"ui-monospace\",\"monospace\"]");
+}
+
+TEST_CASE("WebCompat: parseFontFamilyList preserves comma in quotes", "[webcompat][parser][issue-1151]") {
+    TestEnvironment env;
+    auto result = env.engine.evaluate(
+        "JSON.stringify(_parseFontFamilyList('\"Foo, Bar\", monospace'))");
+    REQUIRE(std::string(result.getWithDefault<std::string_view>("")) ==
+            "[\"Foo, Bar\",\"monospace\"]");
+}
+
+TEST_CASE("WebCompat: parseFontFamilyList single name", "[webcompat][parser][issue-1151]") {
+    TestEnvironment env;
+    auto result = env.engine.evaluate(
+        "JSON.stringify(_parseFontFamilyList('Inter'))");
+    REQUIRE(std::string(result.getWithDefault<std::string_view>("")) ==
+            "[\"Inter\"]");
+}
+
+TEST_CASE("WebCompat: parseFontFamilyList strips outer single quotes", "[webcompat][parser][issue-1151]") {
+    TestEnvironment env;
+    auto result = env.engine.evaluate(
+        "JSON.stringify(_parseFontFamilyList(\"'Inter Tight'\"))");
+    REQUIRE(std::string(result.getWithDefault<std::string_view>("")) ==
+            "[\"Inter Tight\"]");
+}
+
+TEST_CASE("WebCompat: parseFontFamilyList trims whitespace", "[webcompat][parser][issue-1151]") {
+    TestEnvironment env;
+    auto result = env.engine.evaluate(
+        "JSON.stringify(_parseFontFamilyList('   Inter  ,   monospace   '))");
+    REQUIRE(std::string(result.getWithDefault<std::string_view>("")) ==
+            "[\"Inter\",\"monospace\"]");
+}
+
+TEST_CASE("WebCompat: parseFontFamilyList empty string", "[webcompat][parser][issue-1151]") {
+    TestEnvironment env;
+    auto result = env.engine.evaluate(
+        "JSON.stringify(_parseFontFamilyList(''))");
+    REQUIRE(std::string(result.getWithDefault<std::string_view>("")) == "[]");
+}
+
+TEST_CASE("WebCompat: parseFontFamilyList generic only", "[webcompat][parser][issue-1151]") {
+    TestEnvironment env;
+    auto result = env.engine.evaluate(
+        "JSON.stringify(_parseFontFamilyList('monospace'))");
+    REQUIRE(std::string(result.getWithDefault<std::string_view>("")) ==
+            "[\"monospace\"]");
+}
+
+TEST_CASE("WebCompat: parseFontFamilyList drops empty segments", "[webcompat][parser][issue-1151]") {
+    TestEnvironment env;
+    // Trailing comma + double comma should not produce empty entries.
+    auto result = env.engine.evaluate(
+        "JSON.stringify(_parseFontFamilyList('Inter,,monospace,'))");
+    REQUIRE(std::string(result.getWithDefault<std::string_view>("")) ==
+            "[\"Inter\",\"monospace\"]");
+}
+
+TEST_CASE("WebCompat: parseFontFamilyList double-quoted with internal comma keeps as one", "[webcompat][parser][issue-1151]") {
+    TestEnvironment env;
+    auto result = env.engine.evaluate(
+        "JSON.stringify(_parseFontFamilyList('\"Helvetica Neue, Bold\", \"Arial\"'))");
+    REQUIRE(std::string(result.getWithDefault<std::string_view>("")) ==
+            "[\"Helvetica Neue, Bold\",\"Arial\"]");
+}
+
 TEST_CASE("WebCompat: matchMedia min-width", "[webcompat][parser]") {
     TestEnvironment env(800, 600);
     auto result = env.engine.evaluate("typeof _matchMediaQuery === 'function' && _matchMediaQuery('(min-width: 600px)')");

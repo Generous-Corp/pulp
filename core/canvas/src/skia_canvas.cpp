@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <cctype>
 #include <unordered_map>
 #include <pulp/canvas/skia_canvas.hpp>
 #include <pulp/canvas/bundled_fonts.hpp>
@@ -105,10 +106,68 @@ static SkPaint make_stroke_paint(Color c, float width) {
     return paint;
 }
 
+// pulp #1151: a CSS font-family value may be a fallback chain. The web-compat
+// JS layer parses the chain and joins the candidates with ';' before handing
+// them to the bridge, so a value like
+//     "JetBrains Mono;ui-monospace;monospace"
+// arrives here as a single std::string. Splitting and walking happens at
+// resolve time (not in the cache key) so the cache can hash the original
+// joined string verbatim — repeated calls with the same chain stay O(1).
+
+// Try to resolve a single family name (no ';' chain). Returns nullptr when
+// no bundled or system match is available; the caller decides whether to
+// keep walking the chain or fall through to the platform default.
+//
+// Generic CSS keywords (`monospace`, `serif`, …) are intentionally allowed
+// to reach SkFontMgr::matchFamilyStyle: some platform managers know how to
+// map them to a platform-appropriate face. When the manager doesn't
+// recognise the keyword it returns nullptr and the chain walker (in
+// get_cached_typeface) eventually drops back to matchFamilyStyle(nullptr,
+// …) — which is the unconditional platform default.
+static sk_sp<SkTypeface> resolve_single_typeface(const std::string& family,
+                                                  SkFontStyle sk_style,
+                                                  int weight, int slant) {
+    sk_sp<SkTypeface> typeface;
+
+#if defined(__ANDROID__)
+    if (weight == 400 && slant == 0 &&
+        (family == "sans-serif" || family == "Roboto" || family.empty())) {
+        auto mgr = get_font_manager();
+        if (mgr) {
+            typeface = mgr->makeFromFile("/system/fonts/Roboto-Regular.ttf");
+        }
+    }
+#else
+    (void)weight; (void)slant;
+#endif
+
+    if (!typeface && !family.empty()) {
+        auto mgr = get_font_manager();
+        if (mgr) {
+            typeface = match_bundled_typeface(mgr.get(), family, sk_style);
+        }
+    }
+
+    if (!typeface && !family.empty()) {
+        auto mgr = get_font_manager();
+        if (mgr && mgr->countFamilies() > 0) {
+            typeface = mgr->matchFamilyStyle(family.c_str(), sk_style);
+        }
+    }
+
+    return typeface;
+}
+
 // Cached typeface loaded directly from a known path — bypasses family name
 // matching for deterministic metrics (Visage-style approach). Cache key
 // includes weight + slant so setFontWeight(700) actually returns a bold
 // typeface rather than the same Regular blob (pulp #927).
+//
+// pulp #1151: `family` may be a ';'-joined fallback chain. We split and
+// walk each candidate, returning the first typeface that resolves. If none
+// of the named candidates match we ask the platform font manager for its
+// default face (preserves the previous "always render something" behaviour
+// for unknown families).
 static sk_sp<SkTypeface> get_cached_typeface(const std::string& family,
                                              int weight, int slant) {
     struct Key { std::string family; int weight; int slant; };
@@ -138,41 +197,39 @@ static sk_sp<SkTypeface> get_cached_typeface(const std::string& family,
 
     sk_sp<SkTypeface> typeface;
 
-#if defined(__ANDROID__)
-    // Load Roboto directly from filesystem for deterministic rendering.
-    // This avoids the font manager's family matching which can return
-    // different fonts depending on the device/API level. Only the
-    // Regular/Upright path has a baked-in file; bold/italic still go
-    // through the family matcher below.
-    if (weight == 400 && slant == 0 &&
-        (family == "sans-serif" || family == "Roboto" || family.empty())) {
-        auto mgr = get_font_manager();
-        if (mgr) {
-            typeface = mgr->makeFromFile("/system/fonts/Roboto-Regular.ttf");
-        }
-    }
-#endif
-
-    // Bundled fonts take precedence over the system font manager so plugin
-    // UIs render the same on a stock machine as on a developer's machine
-    // with the same families installed (#932). Without this, calling
-    // canvas.set_font("JetBrains Mono", ...) on macOS-without-JetBrainsMono
-    // resolves to a null typeface and crashes the first time a non-ASCII
-    // glyph triggers SkFontMgr-driven fallback.
-    if (!typeface && !family.empty()) {
-        auto mgr = get_font_manager();
-        if (mgr) {
-            typeface = match_bundled_typeface(mgr.get(), family, sk_style);
+    // Walk the ';'-joined fallback chain produced by web-compat-style-decl.js.
+    // Single-family inputs (no ';') hit this loop once, so the no-chain code
+    // path stays a one-iteration walk.
+    {
+        std::size_t start = 0;
+        while (start <= family.size() && !typeface) {
+            std::size_t sep = family.find(';', start);
+            std::size_t end = (sep == std::string::npos) ? family.size() : sep;
+            // Trim leading/trailing ASCII whitespace inside each segment so
+            // a developer-friendly "Inter, monospace" (post-JS-split: just
+            // "Inter;monospace") survives a stray space introduced by some
+            // future code path.
+            std::size_t lo = start;
+            std::size_t hi = end;
+            while (lo < hi && std::isspace(static_cast<unsigned char>(family[lo]))) ++lo;
+            while (hi > lo && std::isspace(static_cast<unsigned char>(family[hi - 1]))) --hi;
+            std::string candidate = family.substr(lo, hi - lo);
+            if (!candidate.empty()) {
+                typeface = resolve_single_typeface(candidate, sk_style, weight, slant);
+            }
+            if (sep == std::string::npos) break;
+            start = sep + 1;
         }
     }
 
-    // Fall back to family name matching
+    // No named candidate matched — fall through to the platform default
+    // face so the caller still gets *some* typeface back. This mirrors
+    // the previous single-family behaviour where a missing family name
+    // also fell through to matchFamilyStyle(nullptr, ...).
     if (!typeface) {
         auto mgr = get_font_manager();
         if (mgr && mgr->countFamilies() > 0) {
-            typeface = mgr->matchFamilyStyle(family.c_str(), sk_style);
-            if (!typeface)
-                typeface = mgr->matchFamilyStyle(nullptr, sk_style);
+            typeface = mgr->matchFamilyStyle(nullptr, sk_style);
         }
     }
 

@@ -3230,3 +3230,82 @@ TEST_CASE("WidgetBridge per-side setBorder*Color / Width route to BorderSide",
     REQUIRE_THAT(w->border_bottom_width(), WithinAbs(7.0f, 1e-5f));
     REQUIRE(w->border_bottom_color().r8() == 0xff);
 }
+
+// pulp #1151 — el.style.fontFamily = "'JetBrains Mono', ui-monospace, monospace"
+// must propagate the full ordered fallback chain to Label::font_family() so
+// the canvas resolver can walk it. Before #1151 the bridge received the raw
+// comma-separated string with quotes stripped (e.g. "JetBrains Mono, ui-
+// monospace, monospace"), which SkFontMgr::matchFamilyStyle never matched.
+//
+// Widgets are looked up via their native bridge id (el._id), not the JS id
+// the test sets — mirrors the canvas-fillRect test pattern at line ~440.
+TEST_CASE("WidgetBridge fontFamily list propagates as joined chain (issue 1151)",
+          "[view][bridge][issue-1151]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        var label = document.createElement('span');
+        label.textContent = 'mono';
+        document.body.appendChild(label);
+        label.style.fontFamily = "'JetBrains Mono', ui-monospace, monospace";
+        var lblId = label._id;
+    )");
+
+    auto idValue = engine.evaluate("lblId");
+    auto nativeId = std::string(idValue.getWithDefault<std::string_view>(""));
+    auto* lbl = dynamic_cast<Label*>(bridge.widget(nativeId));
+    REQUIRE(lbl != nullptr);
+    // The bridge stores a ';'-joined chain so the canvas can split-and-walk.
+    REQUIRE(lbl->font_family() == "JetBrains Mono;ui-monospace;monospace");
+}
+
+TEST_CASE("WidgetBridge fontFamily quoted family with internal comma stays whole (issue 1151)",
+          "[view][bridge][issue-1151]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        var label = document.createElement('span');
+        label.textContent = 'mono';
+        document.body.appendChild(label);
+        label.style.fontFamily = '"Helvetica Neue, Bold", "Arial"';
+        var lblId = label._id;
+    )");
+
+    auto idValue = engine.evaluate("lblId");
+    auto nativeId = std::string(idValue.getWithDefault<std::string_view>(""));
+    auto* lbl = dynamic_cast<Label*>(bridge.widget(nativeId));
+    REQUIRE(lbl != nullptr);
+    REQUIRE(lbl->font_family() == "Helvetica Neue, Bold;Arial");
+}
+
+TEST_CASE("WidgetBridge fontFamily single quoted name unwraps quotes (issue 1151)",
+          "[view][bridge][issue-1151]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        var label = document.createElement('span');
+        label.textContent = 'x';
+        document.body.appendChild(label);
+        label.style.fontFamily = "'Inter Tight'";
+        var lblId = label._id;
+    )");
+
+    auto idValue = engine.evaluate("lblId");
+    auto nativeId = std::string(idValue.getWithDefault<std::string_view>(""));
+    auto* lbl = dynamic_cast<Label*>(bridge.widget(nativeId));
+    REQUIRE(lbl != nullptr);
+    // Single-name input — no ';' separator, just the bare family.
+    REQUIRE(lbl->font_family() == "Inter Tight");
+}

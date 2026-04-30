@@ -320,6 +320,46 @@ function _splitCalcArgs(str) {
     return args;
 }
 
+// Parse a CSS font-family value into an ordered candidate list, respecting
+// quoted segments (a quoted family with an internal comma is one name) and
+// stripping outer quotes / surrounding whitespace from each candidate.
+//
+// Example: `'JetBrains Mono', "Foo, Bar", ui-monospace, monospace`
+//   -> ["JetBrains Mono", "Foo, Bar", "ui-monospace", "monospace"]
+//
+// pulp #1151: this used to be a naïve `value.replace(/['"]/g, "")` which
+// passed the entire comma-separated list to setFontFamily verbatim, so
+// SkFontMgr::matchFamilyStyle never matched any of the candidates.
+function _parseFontFamilyList(value) {
+    var out = [];
+    if (value == null) return out;
+    var s = String(value);
+    var depth = 0;       // paren depth (defensive — font-family doesn't use them, but be safe)
+    var quote = "";      // active quote char, "" when outside a quoted segment
+    var current = "";
+    for (var i = 0; i < s.length; i++) {
+        var c = s.charAt(i);
+        if (quote) {
+            if (c === quote) { quote = ""; }
+            else { current += c; }
+            continue;
+        }
+        if (c === "'" || c === '"') { quote = c; continue; }
+        if (c === "(") depth++;
+        else if (c === ")") depth--;
+        if (c === "," && depth === 0) {
+            var t = current.replace(/^\s+|\s+$/g, "");
+            if (t.length > 0) out.push(t);
+            current = "";
+            continue;
+        }
+        current += c;
+    }
+    var tail = current.replace(/^\s+|\s+$/g, "");
+    if (tail.length > 0) out.push(tail);
+    return out;
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // matchMedia — responsive breakpoint queries
 // ═══════════════════════════════════════════════════════════════════════════════

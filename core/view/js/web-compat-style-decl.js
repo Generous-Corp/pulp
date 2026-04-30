@@ -460,9 +460,23 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
             if (typeof setPointerEvents === "function") setPointerEvents(id, resolved);
             break;
 
-        // font-family
+        // font-family — pulp #1151: split the comma-separated list into an
+        // ordered candidate list (preserving commas inside quoted families),
+        // then hand it to setFontFamily as a `;`-joined chain. The C++
+        // resolver walks each candidate via the existing typeface-lookup
+        // path and the first match wins; generic keywords (monospace,
+        // sans-serif, …) fall through to the platform default.
         case "fontFamily":
-            if (typeof setFontFamily === "function") setFontFamily(id, resolved.replace(/['"]/g, ""));
+            if (typeof setFontFamily === "function") {
+                var fams = _parseFontFamilyList(resolved);
+                if (fams.length === 0) {
+                    setFontFamily(id, "");
+                } else if (fams.length === 1) {
+                    setFontFamily(id, fams[0]);
+                } else {
+                    setFontFamily(id, fams.join(";"));
+                }
+            }
             break;
 
         // background-size: "cover", "contain", "100px 200px"
