@@ -209,7 +209,13 @@ std::vector<Project> read_registry(const fs::path& registry_json) {
                 while (true) {
                     j.skip_ws();
                     if (j.match(']')) break;
-                    if (!j.match('{')) { j.skip_value(); continue; }
+                    if (!j.match('{')) {
+                        j.skip_value();
+                        j.skip_ws();
+                        if (j.match(',')) continue;
+                        if (j.match(']')) break;
+                        continue;
+                    }
 
                     Project p;
                     while (true) {
