@@ -96,6 +96,9 @@ Fetched only when the corresponding CMake option or platform gate is enabled.
 | **Emscripten** | MIT | C++ to WebAssembly compiler (for WAMv2/WebCLAP) | [emscripten.org](https://emscripten.org) |
 | **node-addon-api** | MIT | Node.js bindings via Node-API | [github.com/nodejs/node-addon-api](https://github.com/nodejs/node-addon-api) |
 | **pybind11** | BSD-3-Clause | Python bindings for HeadlessHost | [github.com/pybind/pybind11](https://github.com/pybind/pybind11) |
+| **react** | MIT | Peer dependency of `@pulp/react` (packages/pulp-react); npm-installed by plugin authors, never bundled into Pulp itself | [github.com/facebook/react](https://github.com/facebook/react) |
+| **react-reconciler** | MIT | Reconciler runtime wrapped by `@pulp/react` to drive `pulp::view::WidgetBridge`; npm-installed alongside the package | [github.com/facebook/react](https://github.com/facebook/react) |
+| **scheduler** | MIT | Cooperative-scheduling runtime pulled in transitively by `react-reconciler` for `@pulp/react`; npm-installed | [github.com/facebook/react](https://github.com/facebook/react) |
 | **three.js** | MIT | Native WebGPU bridge demos and tests; fetched only when `PULP_BUILD_TESTS` and `PULP_ENABLE_GPU` are ON | [github.com/mrdoob/three.js](https://github.com/mrdoob/three.js) |
 
 ## Standards and Specifications

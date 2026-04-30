@@ -43,6 +43,9 @@ Entries are sorted alphabetically (case-insensitive) by name.
 | pybind11 | 2.13.6 | BSD-3-Clause | Python bindings for HeadlessHost (optional, FetchContent) | bindings/python | 2026-03-25 |
 | Pygments | transitive | BSD-2-Clause | Syntax highlighter used by mkdocs + pymdownx.highlight; redistributed as inline HTML/CSS in the generated docs site | docs | 2026-04-22 |
 | pymdown-extensions | >=10.7,<11 | MIT | Markdown extension bundle used by mkdocs-material (admonitions, tabs, superfences, highlight, emoji) | docs | 2026-04-22 |
+| react | ^18.2.0 | MIT | Peer dependency of `@pulp/react` (packages/pulp-react); plugin authors install it themselves alongside the package — never bundled into Pulp itself | packages/pulp-react | 2026-04-29 |
+| react-reconciler | ^0.29.2 | MIT | Reconciler runtime that `@pulp/react` (packages/pulp-react) wraps to drive `pulp::view::WidgetBridge`; npm-installed, not bundled into the C++ tree | packages/pulp-react | 2026-04-29 |
+| scheduler | ^0.23.2 | MIT | Cooperative-scheduling runtime pulled in transitively by react-reconciler for `@pulp/react`; npm-installed, not bundled into the C++ tree | packages/pulp-react | 2026-04-29 |
 | SDL3 | 3.2.12 | zlib | Cross-platform windowing, input, GPU context | pulp-view | 2026-03-25 |
 | Skia | chrome/m144 | BSD-3-Clause | GPU 2D rendering engine (pre-built via skia-builder). Call sites use the `SkSpan`-based `SkFont` API so Pulp compiles whether the Skia build defines `SK_SUPPORT_UNSPANNED_APIS` or not (#543). | pulp-canvas, pulp-render | 2026-03-25 |
 | three.js | 077dd13c0e86 | MIT | Native WebGPU bridge demos and tests (optional, fetched only when `PULP_BUILD_TESTS` and `PULP_ENABLE_GPU` are ON) | pulp-render | 2026-04-21 |

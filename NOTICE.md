@@ -600,6 +600,72 @@ superfences, highlight, emoji, etc.).
 
 ---
 
+## react
+
+Copyright (c) Meta Platforms, Inc. and affiliates.
+
+MIT License
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+Peer dependency of `@pulp/react` (packages/pulp-react). Plugin authors npm-
+install it themselves; Pulp never bundles `react` into its C++ tree or its
+shipped artifacts.
+
+---
+
+## react-reconciler
+
+Copyright (c) Meta Platforms, Inc. and affiliates.
+
+MIT License
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+Reconciler runtime wrapped by `@pulp/react` (packages/pulp-react) to drive
+`pulp::view::WidgetBridge`. npm-installed alongside the package; never
+bundled into Pulp's C++ tree.
+
+---
+
+## scheduler
+
+Copyright (c) Meta Platforms, Inc. and affiliates.
+
+MIT License
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+Cooperative-scheduling runtime pulled in transitively by react-reconciler
+for `@pulp/react`. npm-installed alongside the package; never bundled
+into Pulp's C++ tree.
+
+---
+
 ## SDL3
 
 Copyright (C) 1997-2026 Sam Lantinga <slouken@libsdl.org>

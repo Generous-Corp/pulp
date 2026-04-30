@@ -439,6 +439,51 @@
       ]
     },
     {
+      "name": "react",
+      "category": "packages/pulp-react",
+      "license": "MIT",
+      "version": "^18.2.0",
+      "source_kind": "npm",
+      "repository": "https://github.com/facebook/react",
+      "upstream": { "kind": "none" },
+      "documented_in_dependencies_md": true,
+      "documented_in_notice_md": true,
+      "notes": "Peer dependency of @pulp/react (packages/pulp-react). npm-installed by plugin authors; never bundled into Pulp itself. Added 2026-04-29 under #1042.",
+      "source_files": [
+        "packages/pulp-react/package.json"
+      ]
+    },
+    {
+      "name": "react-reconciler",
+      "category": "packages/pulp-react",
+      "license": "MIT",
+      "version": "^0.29.2",
+      "source_kind": "npm",
+      "repository": "https://github.com/facebook/react",
+      "upstream": { "kind": "none" },
+      "documented_in_dependencies_md": true,
+      "documented_in_notice_md": true,
+      "notes": "Reconciler runtime wrapped by @pulp/react to drive pulp::view::WidgetBridge. npm-installed alongside the package; never bundled into Pulp's C++ tree. Added 2026-04-29 under #1042.",
+      "source_files": [
+        "packages/pulp-react/package.json"
+      ]
+    },
+    {
+      "name": "scheduler",
+      "category": "packages/pulp-react",
+      "license": "MIT",
+      "version": "^0.23.2",
+      "source_kind": "npm",
+      "repository": "https://github.com/facebook/react",
+      "upstream": { "kind": "none" },
+      "documented_in_dependencies_md": true,
+      "documented_in_notice_md": true,
+      "notes": "Cooperative-scheduling runtime pulled in transitively by react-reconciler for @pulp/react. npm-installed; never bundled into Pulp's C++ tree. Added 2026-04-29 under #1042.",
+      "source_files": [
+        "packages/pulp-react/package.json"
+      ]
+    },
+    {
       "name": "SDL3",
       "category": "view",
       "license": "zlib",

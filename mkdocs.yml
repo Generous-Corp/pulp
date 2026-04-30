@@ -150,6 +150,8 @@ nav:
       - CLI Reference: reference/cli.md
       - CMake Reference: reference/cmake.md
       - API Reference: api-reference.md
+  - Packages:
+      - "@pulp/react": reference/pulp-react.md
   - Guides:
       - Web Plugins: guides/web-plugins.md
       - GPU Validation: guides/gpu-validation-checklist.md

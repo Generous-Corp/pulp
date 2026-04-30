@@ -1,0 +1,59 @@
+{
+  "name": "@pulp/react",
+  "version": "0.0.1",
+  "description": "React reconciler host config targeting pulp::view::WidgetBridge — render React JSX natively through Yoga + Skia + Dawn, no DOM, no browser",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json && esbuild src/index.ts --bundle --format=esm --outfile=dist/index.mjs --platform=neutral",
+    "build:embed": "esbuild src/index.ts --bundle --format=iife --global-name=pulpReact --outfile=dist/pulp-react.embed.js --platform=neutral",
+    "test": "vitest run"
+  },
+  "peerDependencies": {
+    "react": "^18.3.1"
+  },
+  "dependencies": {
+    "react-reconciler": "^0.29.2",
+    "scheduler": "^0.23.2"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.0",
+    "@types/react": "^18.2.0",
+    "@types/react-reconciler": "^0.28.0",
+    "esbuild": "^0.24.0",
+    "react": "^18.2.0",
+    "typescript": "^5.4.0",
+    "vitest": "^1.6.0"
+  },
+  "keywords": [
+    "react",
+    "reconciler",
+    "pulp",
+    "audio-plugin",
+    "skia",
+    "dawn",
+    "webgpu",
+    "yoga",
+    "no-dom"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/danielraffel/pulp",
+    "directory": "packages/pulp-react"
+  }
+}
