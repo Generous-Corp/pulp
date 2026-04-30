@@ -808,3 +808,128 @@ TEST_CASE("CanvasWidget stroke_rect with use_active_style preserves prior set_st
                         && stroke_at_draw.b8() == 0 && stroke_at_draw.a8() == 255);
     REQUIRE(is_green);
 }
+
+// ── pulp #964 — `ctx.fillRect()` from web-compat-canvas.js must reach the bridge ──
+//
+// Pre-#964, `core/view/js/web-compat-canvas.js` defined
+//   CanvasRenderingContext2D.prototype.fillRect = function(x, y, w, h) {
+//       this._applyFillStyle();
+//       if (typeof canvasFillRect === "function") canvasFillRect(this._id, x, y, w, h);
+//   };
+// but the WidgetBridge only registered `canvasRect`, not `canvasFillRect`.
+// The `typeof` guard then short-circuited every fillRect invocation — silently.
+// `canvasStrokeRect`, `canvasFillPath`, and `canvasStrokePath` were registered
+// under their natural names so they kept working, which is what made the bug
+// look like a Skia compositing failure: a Canvas2D scene that mixed paths
+// (visible) and fillRects (invisible) produced partial output.
+//
+// Contract: the bridge must register both `canvasFillRect` (the web-compat
+// shim's name) and `canvasRect` (the legacy direct-bridge name used by
+// hand-written examples) so neither path silently drops fills.
+
+#include <pulp/view/script_engine.hpp>
+#include <pulp/view/widget_bridge.hpp>
+
+TEST_CASE("WidgetBridge: canvasFillRect bridges ctx.fillRect to a fill_rect command",
+          "[canvas_widget][bridge][issue-964]") {
+    pulp::view::ScriptEngine engine;
+    pulp::view::View root;
+    root.set_bounds({0, 0, 200, 100});
+    pulp::state::StateStore store;
+    pulp::view::WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createCanvas('cv', '');
+        canvasFillRect('cv', 5, 7, 40, 30, '#ff0000');
+    )");
+
+    auto* cw = dynamic_cast<CanvasWidget*>(bridge.widget("cv"));
+    REQUIRE(cw != nullptr);
+    REQUIRE(cw->command_count() == 1);
+
+    // Replay onto a RecordingCanvas and verify a single fill_rect with the
+    // correct geometry and colour landed.
+    RecordingCanvas rc;
+    cw->paint(rc);
+
+    int fill_rect_count = 0;
+    pulp::canvas::Color last_fill{};
+    bool saw_correct_geom = false;
+    for (const auto& cmd : rc.commands()) {
+        if (cmd.type == DrawCommand::Type::set_fill_color) {
+            last_fill = cmd.color;
+            continue;
+        }
+        if (cmd.type == DrawCommand::Type::fill_rect) {
+            ++fill_rect_count;
+            const bool matches = (cmd.f[0] == 5.0f && cmd.f[1] == 7.0f &&
+                                  cmd.f[2] == 40.0f && cmd.f[3] == 30.0f);
+            if (matches) saw_correct_geom = true;
+        }
+    }
+    REQUIRE(fill_rect_count == 1);
+    REQUIRE(saw_correct_geom);
+    REQUIRE(last_fill.r8() == 255);
+    REQUIRE(last_fill.g8() == 0);
+    REQUIRE(last_fill.b8() == 0);
+    REQUIRE(last_fill.a8() == 255);
+}
+
+TEST_CASE("WidgetBridge: HTML5 ctx.fillRect via web-compat shim reaches the bridge",
+          "[canvas_widget][bridge][issue-964]") {
+    // The user-facing path: a JS author writes `ctx.fillRect(...)`. The
+    // web-compat-canvas.js prelude installs CanvasRenderingContext2D, the
+    // shim's fillRect calls canvasFillRect, the bridge dispatches to a
+    // CanvasDrawCmd::fill_rect on the widget. Pre-#964 this whole chain
+    // silently produced zero commands.
+    pulp::view::ScriptEngine engine;
+    pulp::view::View root;
+    root.set_bounds({0, 0, 200, 100});
+    pulp::state::StateStore store;
+    pulp::view::WidgetBridge bridge(engine, root, store);
+
+    // Build a minimal Canvas element via the DOM-ish bridge surface, then
+    // exercise the actual `ctx.fillRect()` path the FilterBank scenario
+    // hits in production.
+    bridge.load_script(R"JS(
+        // Manually create a CanvasWidget bridged element. createCanvas binds
+        // the C++ widget; the web-compat shim wraps it in a JS Element-like
+        // object so getContext('2d') returns a real CanvasRenderingContext2D.
+        createCanvas('cv', '');
+        // The web-compat layer expects an Element with _id; fabricate the
+        // smallest viable one so getContext('2d') and the prototype chain
+        // see the canvas widget.
+        var el = { _id: 'cv', tagName: 'CANVAS' };
+        // The Canvas2D shim references Element.prototype.getContext, so
+        // borrow the prototype method directly.
+        var ctx = Element.prototype.getContext.call(el, '2d');
+        ctx.fillStyle = '#00ff00';
+        ctx.fillRect(10, 10, 80, 40);
+    )JS");
+
+    auto* cw = dynamic_cast<CanvasWidget*>(bridge.widget("cv"));
+    REQUIRE(cw != nullptr);
+    // Pre-fix the shim's fillRect produces zero commands. The fix wires
+    // canvasFillRect at the bridge so the call is actually recorded.
+    REQUIRE(cw->command_count() >= 1);
+
+    RecordingCanvas rc;
+    cw->paint(rc);
+
+    bool saw_green_full_fill = false;
+    pulp::canvas::Color active_fill{};
+    for (const auto& cmd : rc.commands()) {
+        if (cmd.type == DrawCommand::Type::set_fill_color) {
+            active_fill = cmd.color;
+            continue;
+        }
+        if (cmd.type != DrawCommand::Type::fill_rect) continue;
+        const bool matches = (cmd.f[0] == 10.0f && cmd.f[1] == 10.0f &&
+                              cmd.f[2] == 80.0f && cmd.f[3] == 40.0f);
+        if (!matches) continue;
+        const bool is_green = (active_fill.r8() == 0 && active_fill.g8() == 255 &&
+                               active_fill.b8() == 0 && active_fill.a8() == 255);
+        if (is_green) saw_green_full_fill = true;
+    }
+    REQUIRE(saw_green_full_fill);
+}

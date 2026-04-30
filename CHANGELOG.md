@@ -8,6 +8,12 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v0660"></a>
+## [0.66.0] - 2026-04-30
+
+- fix(view): on(id,'click',fn) auto-wires View::on_click (pulp #1006) ([#1008](https://github.com/danielraffel/pulp/pull/1008)) — landed without a bump commit due to a `shipyard pr` short-circuit; this bump rolls it into the same release as #964
+- fix(view): register canvasFillRect bridge name so HTML5 ctx.fillRect() reaches the bridge (pulp #964) — JS-side bridge name mismatch; the web-compat shim called `canvasFillRect` but the bridge only registered `canvasRect`, so every `ctx.fillRect()` silently no-op'd. Both names now register the same handler.
+
 <a id="v0650"></a>
 ## [0.65.0] - 2026-04-29
 
