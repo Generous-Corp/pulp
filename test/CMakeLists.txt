@@ -1318,8 +1318,8 @@ add_executable(pulp-test-view test_view.cpp)
 target_link_libraries(pulp-test-view PRIVATE pulp::view Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-view)
 
-# DirtyTracker, GpuGraphRenderer, and DrawBatcher are header-only helpers; keep
-# their pure tests available in GPU-off sanitizer and local coverage builds.
+# DirtyTracker, GpuGraphRenderer, DrawBatcher, and RenderLoop timer-state tests
+# are pure helpers; keep them available in GPU-off sanitizer and coverage builds.
 add_executable(pulp-test-dirty-tracker test_dirty_tracker.cpp)
 target_include_directories(pulp-test-dirty-tracker PRIVATE
     ${CMAKE_SOURCE_DIR}/core/render/include)
@@ -1339,6 +1339,19 @@ target_link_libraries(pulp-test-draw-batcher PRIVATE
     pulp::canvas
     Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-draw-batcher)
+
+add_executable(pulp-test-render-loop
+    test_render_loop.cpp
+    ${CMAKE_SOURCE_DIR}/core/render/src/render_loop.cpp)
+target_compile_definitions(pulp-test-render-loop PRIVATE
+    PULP_RENDER_LOOP_FORCE_TIMER=1)
+target_include_directories(pulp-test-render-loop PRIVATE
+    ${CMAKE_SOURCE_DIR}/core/render/include
+    ${CMAKE_SOURCE_DIR}/core/render/src)
+target_link_libraries(pulp-test-render-loop PRIVATE
+    pulp::runtime
+    Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-render-loop)
 
 # GPU-stack tests — pulp::render only exists when PULP_ENABLE_GPU=ON.
 # The sanitizer matrix builds with GPU off; without the guard configure
