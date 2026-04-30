@@ -8,11 +8,18 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v0670"></a>
+## [0.67.0] - 2026-04-30
+
+- feat(cli): emit classnames.json from import-design --from claude (#1035) ([#1048](https://github.com/danielraffel/pulp/pull/1048))
+- framework: import @pulp/react package source into monorepo (#1042) ([#1050](https://github.com/danielraffel/pulp/pull/1050))
+- test(host): cover LV2 plugin slot happy path ([#1028](https://github.com/danielraffel/pulp/pull/1028))
+- test(view): cover plugin manager panel edges ([#1024](https://github.com/danielraffel/pulp/pull/1024))
+- test(events): cover IPC socket edge paths ([#1022](https://github.com/danielraffel/pulp/pull/1022))
+- test(cli): cover tooling edge paths ([#1016](https://github.com/danielraffel/pulp/pull/1016))
+- ci(release): three-layer guard against stranded fix/feat merges (#1009) ([#1013](https://github.com/danielraffel/pulp/pull/1013))
+
 <a id="v0660"></a>
-## [0.25.0]
-
-## [0.67.0]
-
 ## [0.66.0] - 2026-04-30
 
 - fix(view): register canvasFillRect bridge name (pulp #964) ([#1012](https://github.com/danielraffel/pulp/pull/1012))
@@ -931,6 +938,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.67.0]: https://github.com/danielraffel/pulp/releases/tag/v0.67.0
 [0.66.0]: https://github.com/danielraffel/pulp/releases/tag/v0.66.0
 [0.65.0]: https://github.com/danielraffel/pulp/releases/tag/v0.65.0
 [0.64.0]: https://github.com/danielraffel/pulp/releases/tag/v0.64.0
