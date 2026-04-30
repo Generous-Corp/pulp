@@ -99,6 +99,27 @@ PULP_SKIP_PREPUSH=1 git push
 
 There is deliberately no bypass in CI other than the commit trailers. The audit trail lives in git, not in GitHub labels or PR-body text.
 
+### fix/feat-needs-bump (issue #1009)
+
+On `pull_request` events, the workflow additionally runs
+`version_bump_check.py --require-bump-for-fix-feat`. This asserts that
+PRs whose title carries the Conventional Commits `fix:` or `feat:`
+prefix include either:
+
+- a commit with subject `chore: bump versions` in the diff range
+  (the canonical subject `pulp pr` writes when the bump was applied), OR
+- a top-level `Version-Bump: skip reason="..."` trailer (with non-empty
+  reason) on any commit in the range.
+
+Otherwise the check hard-fails with a message that suggests both fix
+paths. The motivating incident (PR #1008, 2026-04-30) merged a
+user-facing fix without a bump; the existing per-surface verdict
+heuristic classified the diff as patch-suggested (advisory), so nothing
+blocked the merge and `auto-release.yml` had nothing to tag.
+
+For full design + recommended branch protection see
+[docs/guides/release-watchdog.md](release-watchdog.md#fixfeat-needs-bump-pr-time-prevention-issue-1009).
+
 ---
 
 ## Shipyard stage

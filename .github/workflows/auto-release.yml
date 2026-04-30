@@ -30,6 +30,7 @@ concurrency:
 
 permissions:
   contents: write   # tag push
+  issues: write     # open the "stranded fix/feat" tracker (issue #1009)
 
 jobs:
   tag:
@@ -314,3 +315,154 @@ jobs:
       # sync from the binary build — if builds fail, CHANGELOG still
       # regens; if regen fails, builds aren't blocked. See shipyard
       # issue #53 + PR #73 for the full design.
+
+      # ── Stranded fix/feat detector (issue #1009) ─────────────────────
+      #
+      # When SHOULD_TAG=0 across both surfaces, auto-release.yml exits
+      # successfully without producing a tag. That is the *correct*
+      # outcome for the vast majority of merges (docs, tests, internal
+      # refactors, chore commits). It is the WRONG outcome when a
+      # user-facing fix/feat merged without an accompanying bump — the
+      # change is then stranded on main and consumers cannot reach it.
+      #
+      # Layer 1 (version-skill-check.yml) hard-fails on this case at PR
+      # time, but `gh pr merge` and force-push-then-`shipyard pr` paths
+      # have shown they can route around it. This step is the
+      # post-merge structural backstop:
+      #
+      #   1. Always emit a `::warning::` annotation visible in the
+      #      auto-release.yml run UI when a stranded fix/feat is
+      #      detected. Visible to anyone reviewing the run.
+      #   2. Open a tracking issue (`release-stuck` label, edit-in-place
+      #      semantics matching the watchdog pattern in
+      #      auto-release-watchdog.yml). Closed automatically by a
+      #      future fix-up PR's auto-release run.
+      #
+      # Skipped on `Release: skip` trailer / revert merges (the
+      # earlier guard step set `skip=1`). That keeps explicit opt-outs
+      # silent.
+      - name: Stranded fix/feat detector
+        if: steps.guard.outputs.skip == '0' && steps.versions.outputs.sdk_should_tag == '0' && steps.versions.outputs.plugin_should_tag == '0'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          # Inspect the merge commit's subject. We use the squash-commit
+          # subject (set by `gh pr merge --squash`) which carries the PR
+          # title verbatim. Conventional Commits prefix detection mirrors
+          # version_bump_check.py exactly so the two layers can never
+          # disagree on what counts as user-facing.
+          subject=$(git log -1 --format=%s "$HEAD_SHA")
+          echo "Tip subject: ${subject}"
+
+          # Bail early for non-fix/feat — the no-tag outcome is correct
+          # for those.
+          #
+          # Note: the heredoc body must be at column 1 (not the YAML
+          # indent level) because Python rejects leading whitespace on
+          # statements outside a block. This matches the existing
+          # `semver_cmp` heredoc pattern earlier in this file (#510 fix
+          # for the YAML/Python indent collision that broke #501).
+          if ! python3 - "$subject" <<'PYEOF'
+          import re, sys
+          # Same regex as tools/scripts/version_bump_check.py
+          # _FIX_FEAT_TITLE_RE — single source of truth lives in the
+          # script; we duplicate the literal here because shelling out
+          # to the script just for classification is overkill.
+          subject = sys.argv[1]
+          pat = re.compile(r"^(fix|feat)(\([^)]*\))?!?:\s")
+          sys.exit(0 if pat.match(subject.strip()) else 1)
+          PYEOF
+          then
+              echo "Tip is not a fix:/feat: — no-tag outcome is expected. Done."
+              exit 0
+          fi
+
+          # Try to find the PR number — `gh api` resolves merge commit
+          # → PR via the events API. Best-effort: if it fails, we
+          # still emit the warning annotation, just without the link.
+          pr_number=""
+          if pr_json=$(gh api "/repos/${GITHUB_REPOSITORY}/commits/${HEAD_SHA}/pulls" 2>/dev/null); then
+              pr_number=$(echo "$pr_json" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d[0]['number'] if d else '')" 2>/dev/null || true)
+          fi
+
+          pr_ref="${pr_number:+#${pr_number} }"
+          subject_safe="${subject//\"/\\\"}"
+
+          # Warning annotation — surfaces in the run UI and any
+          # downstream watchdog that scans warnings.
+          echo "::warning::PR ${pr_ref}appears user-facing (subject: ${subject_safe}) but no version bump landed; consumers are stuck. See issue #1009."
+
+          # Tracking issue with edit-in-place semantics. One issue per
+          # tip SHA so multiple stranded merges generate distinct
+          # trackers (good — each needs its own follow-up bump PR).
+          title="release: stuck — fix/feat merged without bump (${HEAD_SHA:0:8})"
+
+          # Look in OPEN+CLOSED state. If a tracker already exists for
+          # this SHA, skip — Layer 2's auto-release-watchdog reopen path
+          # is the one that handles re-fires.
+          existing=$(
+              gh issue list \
+                  --repo "$GITHUB_REPOSITORY" \
+                  --state all \
+                  --search "in:title \"${HEAD_SHA:0:8}\"" \
+                  --json number,title,state \
+                  --jq "[.[] | select(.title == \"${title}\")] | first | .number // empty" \
+                  2>/dev/null || true
+          )
+
+          if [ -n "${existing:-}" ]; then
+              echo "Tracker already exists for ${HEAD_SHA:0:8}: #${existing}. No-op."
+              exit 0
+          fi
+
+          run_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          {
+              echo "_Auto-generated by \`.github/workflows/auto-release.yml\` on $(date -u '+%Y-%m-%d %H:%M UTC')._"
+              echo
+              echo "**Symptom:** A user-facing fix/feat merged to \`main\` without"
+              echo "an accompanying \`chore: bump versions\` commit. \`auto-release.yml\`"
+              echo "ran (this run: ${run_url}), found no version movement, and"
+              echo "exited successfully without tagging. Consumers cannot reach"
+              echo "this change until a follow-up bump PR lands."
+              echo
+              echo "**Tip commit:** \`${HEAD_SHA}\`"
+              if [ -n "$pr_number" ]; then
+                  echo "**PR:** #${pr_number}"
+              fi
+              echo "**Subject:** \`${subject_safe}\`"
+              echo
+              echo "**Resolution:**"
+              echo
+              echo "1. Open a chore PR that bumps the affected surface(s):"
+              echo "   \`\`\`bash"
+              echo "   git checkout -b chore/bump-after-${HEAD_SHA:0:8}"
+              echo "   python3 tools/scripts/version_bump_check.py --mode=apply"
+              echo "   git commit -am 'chore: bump versions (catch-up after ${HEAD_SHA:0:8})'"
+              echo "   shipyard pr"
+              echo "   \`\`\`"
+              echo "2. After the catch-up PR merges, \`auto-release.yml\` will"
+              echo "   tag the new version and consumers can pull the fix."
+              echo
+              echo "**Background:** structural fix tracked in issue #1009. The"
+              echo "PR-time gate that should have blocked this merge lives in"
+              echo "\`.github/workflows/version-skill-check.yml\` (the"
+              echo "\`--require-bump-for-fix-feat\` flag on"
+              echo "\`tools/scripts/version_bump_check.py\`). If this tracker"
+              echo "fires, branch protection on \`main\` is the recommended"
+              echo "follow-up — see \`docs/guides/release-watchdog.md\`."
+          } > body.md
+
+          gh issue create \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "$title" \
+              --body-file body.md \
+              --label "bug,ci,blocks-release,release-stuck" \
+              2>&1 || \
+          gh issue create \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "$title" \
+              --body-file body.md

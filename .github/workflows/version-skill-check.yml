@@ -81,11 +81,28 @@ jobs:
               --mode=report
 
       - name: Version-bump check
+        # On pull_request events, ALSO require that fix:/feat: PR titles
+        # carry either a `chore: bump versions` commit or a top-level
+        # `Version-Bump: skip reason="..."` trailer. Structural fix for
+        # the 2026-04-30 incident (PR #1008 → issue #1009): a
+        # user-facing fix merged without a bump and consumers were
+        # stranded on main because auto-release.yml had nothing to tag.
+        #
+        # The flag is additive — the per-surface verdict pipeline runs
+        # exactly as before. Skipped on workflow_dispatch (no PR title
+        # to inspect), so this only fires on real PR triggers.
+        env:
+          GITHUB_PR_TITLE: ${{ github.event.pull_request.title }}
         run: |
+          extra=""
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+              extra="--require-bump-for-fix-feat"
+          fi
           python3 tools/scripts/version_bump_check.py \
               --base "${{ steps.base.outputs.ref }}" \
               --config tools/scripts/versioning.json \
-              --mode=report
+              --mode=report \
+              $extra
 
       - name: Gate-script fixture tests
         run: |

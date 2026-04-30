@@ -1,9 +1,10 @@
 # Release Watchdog
 
-Three layers of protection against silent release failures. All three use
-only standard, agent-agnostic tooling (GitHub Actions, `gh` CLI,
-`yamllint`, `actionlint`, Python) — any contributor or automation
-(Claude, Codex, a human) can understand and invoke them.
+Three layers of protection against silent release failures (plus a
+PR-time prevention layer added for issue #1009). All use only standard,
+agent-agnostic tooling (GitHub Actions, `gh` CLI, `yamllint`,
+`actionlint`, Python) — any contributor or automation (Claude, Codex,
+a human) can understand and invoke them.
 
 ## Why three layers
 
@@ -96,12 +97,93 @@ catch), a missing secret (neither of the above might catch), a
 forgotten manual step, or a GitHub outage — the invariant fires because
 the *symptom* (missing release) appears.
 
+## fix/feat-needs-bump (PR-time prevention, issue #1009)
+
+The watchdog layers above all *react* to a stranded release — a
+user-facing fix that merged without a bump. The structural fix is to
+catch it at PR time, before the merge ever happens. That lives in
+`.github/workflows/version-skill-check.yml` via the
+`--require-bump-for-fix-feat` flag on `tools/scripts/version_bump_check.py`.
+
+**What it does:** On PR triggers, parses `${{ github.event.pull_request.title }}`.
+If it matches the Conventional Commits prefix `^(fix|feat)(\([^)]*\))?!?:\s`,
+asserts that EITHER:
+
+1. A commit in the PR's diff range has subject `chore: bump versions`
+   (the canonical subject `pulp pr` writes when a bump was applied), OR
+2. A commit in the range carries a top-level
+   `Version-Bump: skip reason="..."` trailer (with non-empty reason).
+
+Otherwise hard-fails with a message that suggests both fix paths.
+
+**What it does NOT do:** the per-surface verdict pipeline is unchanged.
+Internal-only fixes whose heuristic verdict is "patch (advisory)" still
+get a bump injected by `pulp pr` — but if the merge bypasses `pulp pr`
+and the bump never lands, this check catches it.
+
+**Motivating incident:** 2026-04-30, PR #1008 (`fix(view): on(id,'click',fn)
+auto-wires View::on_click`) merged at 02:36:45Z via `gh pr merge` after
+a force-push had short-circuited `shipyard pr`'s version-bump step. The
+existing watchdogs all reported green: `auto-release.yml` decided
+`SHOULD_TAG=0` and exited successfully (correct outcome for a no-bump
+merge). The `release-cadence-check.yml` looks for bumps without tags,
+not the inverse. The fix landed on main but consumers couldn't reach it
+until the catch-up bump PR (#1011) merged.
+
+### Recommended branch protection
+
+The `version-skill-check` GitHub workflow runs the new check on every
+PR, but `gh pr merge` and admin-merge paths can bypass non-required
+checks. To make the check load-bearing, add it to branch protection on
+`main`:
+
+> **Required check:** `Versioning & Skill-Sync / Enforce version & skill sync`
+>
+> Configure via github.com/&lt;owner&gt;/pulp/settings/branches → branch
+> protection rule for `main` → "Require status checks to pass before
+> merging" → add `Enforce version & skill sync`.
+>
+> Alternatively via the API:
+> ```bash
+> gh api -X PUT repos/danielraffel/pulp/branches/main/protection \
+>     --input <(gh api repos/danielraffel/pulp/branches/main/protection \
+>                  | python3 -c 'import json,sys; d=json.load(sys.stdin); \
+>                                d["required_status_checks"]["contexts"].append("Enforce version & skill sync"); \
+>                                print(json.dumps(d))')
+> ```
+
+This is **documented but not enforced** — the user will choose when to
+flip the protection on. With it enabled, `gh pr merge` will refuse to
+merge any `fix:` / `feat:` PR without either the bump commit or the
+skip trailer, regardless of admin / squash / rebase merge mode.
+
+### Layer 3 backstop in `auto-release.yml`
+
+If the PR-time gate is bypassed somehow (force-push race, admin merge,
+unknown-unknown), `auto-release.yml` has a final backstop step
+(`Stranded fix/feat detector`) that runs after the tag-or-not decision.
+When `SDK_SHOULD_TAG=0` AND `PLUGIN_SHOULD_TAG=0` AND the merge
+commit's subject matches the same `fix:`/`feat:` regex, it:
+
+1. Emits a `::warning::` annotation visible in the workflow run UI.
+2. Opens a tracking issue titled `release: stuck — fix/feat merged
+   without bump (<sha>)` with the `release-stuck` label and
+   step-by-step recovery instructions.
+
+The tracker is keyed on the tip SHA so multiple stranded merges produce
+distinct issues — each needs its own catch-up bump PR.
+
 ## Manual override
 
-All three layers honor the standard `Release: skip reason="..."`
+All three watchdog layers honor the standard `Release: skip reason="..."`
 trailer already documented in `CLAUDE.md` — the skip flag makes the
 auto-release step decline to tag, Layer 2 treats the workflow run as
 a normal success, and Layer 3 sees no VERSION change so never fires.
+
+The fix/feat-needs-bump check is bypassed via a separate trailer
+(`Version-Bump: skip reason="..."`) so a single PR can opt into
+"don't tag this release" without also implying "this fix doesn't need
+a bump." The two trailers are deliberately distinct.
 
 ## Follow-up hooks (optional, not required)
 
@@ -112,6 +194,14 @@ contributors who touch CI workflows frequently.
 
 ## Related incidents
 
+- **2026-04-30 (PR #1008 → issue #1009)** — `fix(view): ...` merged via
+  `gh pr merge` after `shipyard pr` short-circuited its bump step
+  (force-push race). `auto-release.yml` saw no version movement and
+  exited successfully (`SHOULD_TAG=0`). All three watchdog layers
+  reported green because none of them watch for the inverse case
+  (success-without-tag after a user-facing merge). Fixed by the
+  fix/feat-needs-bump PR-time gate plus the `auto-release.yml`
+  backstop step documented above.
 - **2026-04-20 (PR #501 → #510)** — YAML indent bug rejected auto-release
   at workflow-file level; all 8 runs in the following day failed
   silently. Layer 1 would have caught this at PR review; Layer 2 would
