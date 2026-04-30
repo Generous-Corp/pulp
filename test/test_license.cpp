@@ -2,6 +2,9 @@
 #include <pulp/runtime/license.hpp>
 #include <pulp/runtime/big_integer.hpp>
 #include <pulp/runtime/base64.hpp>
+#include <pulp/runtime/temporary_file.hpp>
+
+#include <fstream>
 
 using namespace pulp::runtime;
 
@@ -86,6 +89,11 @@ TEST_CASE("LicenseValidator missing dot separator", "[crypto][license]") {
     REQUIRE(validator.validate("nodot") == LicenseStatus::InvalidFormat);
 }
 
+TEST_CASE("LicenseValidator rejects undecodable payload", "[crypto][license]") {
+    LicenseValidator validator;
+    REQUIRE(validator.validate("###.sig") == LicenseStatus::InvalidFormat);
+}
+
 TEST_CASE("LicenseValidator parse payload", "[crypto][license]") {
     LicenseValidator validator;
 
@@ -111,6 +119,16 @@ TEST_CASE("LicenseValidator validate_and_parse extracts info", "[crypto][license
     REQUIRE(info->edition == "pro");
 }
 
+TEST_CASE("LicenseValidator validate_and_parse rejects malformed payloads", "[crypto][license]") {
+    LicenseValidator validator;
+
+    REQUIRE_FALSE(validator.validate_and_parse("missing-dot").has_value());
+    REQUIRE_FALSE(validator.validate_and_parse("###.sig").has_value());
+
+    std::string missing_product = "{\"email\":\"user@example.com\",\"issued\":1700000000}";
+    REQUIRE_FALSE(validator.validate_and_parse(base64_encode(missing_product) + ".sig").has_value());
+}
+
 TEST_CASE("LicenseValidator is_valid_for_machine", "[crypto][license]") {
     LicenseValidator validator;
 
@@ -133,4 +151,32 @@ TEST_CASE("LicenseValidator is_valid_for_machine", "[crypto][license]") {
 TEST_CASE("LicenseValidator file not found", "[crypto][license]") {
     LicenseValidator validator;
     REQUIRE(validator.validate_file("/tmp/nonexistent_license_12345.key") == LicenseStatus::NotFound);
+}
+
+TEST_CASE("LicenseValidator validate_file trims line endings", "[crypto][license]") {
+    TemporaryFile tmp(".license");
+    std::string payload = "{\"product_id\":\"PulpSynth\",\"issued\":1700000000}";
+    std::string key = base64_encode(payload) + "." + base64_encode("signature") + "\r\n";
+
+    {
+        std::ofstream out(tmp.path());
+        REQUIRE(out.good());
+        out << key;
+    }
+
+    LicenseValidator validator;
+    REQUIRE(validator.validate_file(tmp.path_string()) == LicenseStatus::InvalidSignature);
+}
+
+TEST_CASE("LicenseGenerator requires a usable private key", "[crypto][license]") {
+    LicenseInfo info;
+    info.product_id = "PulpSynth";
+    info.user_email = "user@example.com";
+    info.issued_timestamp = 1700000000;
+
+    LicenseGenerator generator;
+    REQUIRE_FALSE(generator.generate(info).has_value());
+
+    generator.set_private_key("not a pem key");
+    REQUIRE_FALSE(generator.generate(info).has_value());
 }
