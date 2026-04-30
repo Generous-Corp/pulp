@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 #include <optional>
+#include <map>
 #include <unordered_map>
 #include <variant>
 
@@ -220,6 +221,41 @@ DesignIR parse_claude_html_with_runtime(const std::string& html,
 /// add_handler() registrations + an attach_webview() call so users have
 /// a runnable shape to fill in (pulp #709 acceptance criterion).
 std::string render_claude_bridge_scaffold(const std::string& generated_js_path);
+
+// ── Claude Design classname extraction (pulp #1035) ─────────────────────
+//
+// Spectr's `tools/extract-html-bundle/extract.mjs` walks every `<style>`
+// block in a Claude Design export and emits a `classnames.json` mapping
+// of `classname → { cssProp: cssValue, ... }` (camelCase keys, raw
+// values). The downstream `@pulp/css-adapt` layer consumes that map to
+// merge class-based styles into inline before forwarding to bridge
+// calls. Pulp's `pulp import-design --from claude` bakes that pass into
+// the import pipeline so plugin authors get the same artifact without
+// having to run a separate Node-side script.
+//
+// Result type: outer map keyed by classname (no leading dot), inner map
+// keyed by CSS property in camelCase (e.g. `font-family` → `fontFamily`).
+// Multiple `<style>` blocks in document order are merged; later blocks
+// override earlier ones for the same classname (mirrors browser
+// cascading order). `.scheme-*` rules are skipped — those are already
+// handled as theme-mode token overrides upstream.
+using ClaudeClassNameRules =
+    std::map<std::string, std::map<std::string, std::string>>;
+
+/// Extract classname → declaration map from a Claude Design HTML export.
+/// Walks every `<style>...</style>` block in document order. When a
+/// bundler `<script type="__bundler/template">` envelope is present, the
+/// inner unwrapped HTML is also walked (that's where the real CSS lives
+/// for self-bundled exports). Returns an empty map when no recognizable
+/// CSS rules are found — never throws.
+ClaudeClassNameRules extract_claude_classnames(const std::string& html);
+
+/// Serialize a `ClaudeClassNameRules` map to the JSON shape Spectr's
+/// `extract.mjs` produces. Keys are emitted in alphabetical order so the
+/// output is stable across runs (deterministic CI fixture comparison).
+/// CSS values are emitted verbatim — callers downstream of this artifact
+/// (e.g. `@pulp/css-adapt`) handle lowering to bridge calls.
+std::string serialize_claude_classnames(const ClaudeClassNameRules& rules);
 
 /// Detect audio widget type from a node name.
 AudioWidgetType detect_audio_widget(const std::string& name);

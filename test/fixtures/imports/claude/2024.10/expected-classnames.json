@@ -1,0 +1,25 @@
+{
+  "btn-primary": {
+    "border": "1px solid var(--fg)",
+    "cursor": "pointer"
+  },
+  "btn-secondary": {
+    "border": "1px solid var(--fg)",
+    "cursor": "pointer"
+  },
+  "card": {
+    "backgroundColor": "var(--bg)",
+    "borderRadius": "8px",
+    "color": "var(--fg)",
+    "padding": "16px 20px"
+  },
+  "mono": {
+    "fontFamily": "ui-monospace, SFMono-Regular, monospace"
+  },
+  "numeric": {
+    "fontFeatureSettings": "\"tnum\""
+  },
+  "tnum": {
+    "fontVariantNumeric": "tabular-nums"
+  }
+}

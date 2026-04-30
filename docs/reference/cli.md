@@ -842,7 +842,7 @@ This command delegates to `tools/screenshot/pulp-screenshot` in the active build
 
 **Status**: experimental
 
-Import designs from Figma, Stitch, v0, or Pencil source files into generated Pulp UI code.
+Import designs from Figma, Stitch, v0, Pencil, or Claude Design source files into generated Pulp UI code.
 
 ```bash
 pulp import-design --from figma --file frame.json
@@ -851,9 +851,18 @@ pulp import-design --from stitch --file screen.html --screen 'Main'
 pulp import-design --from v0 --url 'https://v0.dev/t/abc123' --output ui.js
 pulp import-design --from pencil --file ui.json --output ui.js --tokens tokens.json
 pulp import-design --from v0 --file card.tsx --dry-run
+pulp import-design --from claude --file design.html --classnames classnames.json
 ```
 
 Supports `--url` (fetches via curl), `--frame` (Figma frame selection), and `--screen` (Stitch screen selection). See [Design Import API Reference](design-import.md) for the full flag list.
+
+For `--from claude`, the CLI emits a `classnames.json` artifact alongside the generated JS view and `tokens.json`. The artifact maps `classname → { cssProp(camelCase): cssValue, ... }` for every `<style>` rule with a plain classname selector — `@pulp/css-adapt` (and downstream) consumes it to merge class-based styles into inline before forwarding to bridge calls. Mirrors the output of Spectr's `tools/extract-html-bundle/extract.mjs` (pulp #1035).
+
+| Flag | Description |
+|------|-------------|
+| `--classnames <path>` | Where to write the classname artifact (default: `classnames.json`). Only emitted for `--from claude`. |
+| `--emit classnames` | Force-emit `classnames.json` (default on for `--from claude`). |
+| `--no-emit-classnames` | Skip the classname artifact for the run. |
 
 ### export-tokens
 

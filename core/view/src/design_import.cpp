@@ -50,6 +50,249 @@ DesignIR parse_claude_html(const std::string& html) {
     return ir;
 }
 
+// ── Claude Design classname extraction (pulp #1035) ─────────────────────
+//
+// Mirrors Spectr's `tools/extract-html-bundle/extract.mjs` classname
+// pass: pull every `<style>...</style>` block, parse the CSS rules, and
+// emit `classname → { cssProp(camelCase): cssValue, ... }`. The
+// `@pulp/css-adapt` layer downstream consumes this map to merge
+// class-based styles into inline before forwarding to bridge calls.
+
+namespace {
+
+// Convert a CSS hyphen-cased property name (`font-family`) to a
+// JS-friendly camelCase key (`fontFamily`). Mirrors Spectr's
+// `parseDeclarationsToCamelCase` so the artifacts stay byte-compatible.
+// Pure string-ops — no allocation beyond the result.
+std::string css_prop_to_camel_case(const std::string& prop) {
+    std::string out;
+    out.reserve(prop.size());
+    bool upper_next = false;
+    for (char c : prop) {
+        if (c == '-') {
+            upper_next = true;
+        } else if (upper_next) {
+            out += static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+            upper_next = false;
+        } else {
+            out += c;
+        }
+    }
+    return out;
+}
+
+// Trim ASCII whitespace from both ends of a string view in place.
+std::string trim_ascii_ws(std::string_view sv) {
+    size_t i = 0, j = sv.size();
+    while (i < j && std::isspace(static_cast<unsigned char>(sv[i]))) ++i;
+    while (j > i && std::isspace(static_cast<unsigned char>(sv[j - 1]))) --j;
+    return std::string(sv.substr(i, j - i));
+}
+
+// Strip CSS `/* ... */` comments from a block. Multi-line safe. We
+// don't need to be a full CSS tokenizer — Claude Design exports use
+// vanilla rules, not CSS-in-JS or nested at-rules.
+std::string strip_css_comments(const std::string& css) {
+    std::string out;
+    out.reserve(css.size());
+    size_t i = 0;
+    while (i < css.size()) {
+        if (i + 1 < css.size() && css[i] == '/' && css[i + 1] == '*') {
+            auto end = css.find("*/", i + 2);
+            if (end == std::string::npos) break;  // unterminated — drop rest
+            i = end + 2;
+        } else {
+            out += css[i++];
+        }
+    }
+    return out;
+}
+
+// Parse a CSS declaration block body (the text between `{` and `}`)
+// into camelCase prop → value pairs. Splits on `;`, then on the first
+// `:` per declaration. Skips empty declarations and bare colons.
+std::map<std::string, std::string> parse_css_declarations(const std::string& body) {
+    std::map<std::string, std::string> out;
+    size_t i = 0;
+    while (i < body.size()) {
+        auto semi = body.find(';', i);
+        std::string decl = body.substr(i, (semi == std::string::npos ? body.size() : semi) - i);
+        i = (semi == std::string::npos) ? body.size() : semi + 1;
+        auto colon = decl.find(':');
+        if (colon == std::string::npos) continue;
+        auto prop = trim_ascii_ws(std::string_view(decl).substr(0, colon));
+        auto value = trim_ascii_ws(std::string_view(decl).substr(colon + 1));
+        if (prop.empty() || value.empty()) continue;
+        out[css_prop_to_camel_case(prop)] = value;
+    }
+    return out;
+}
+
+// Walk a CSS source string (the inside of one `<style>` block) and
+// merge every `.classname { ... }` rule into `into`. Skips at-rules
+// (anything that begins with `@`), `:root` blocks, descendant /
+// pseudo-class selectors (anything with whitespace, `:`, `>` or `,`
+// between the dot and the `{`), and `.scheme-*` selectors (those are
+// already handled as theme-mode token overrides upstream).
+//
+// We hand-walk character-by-character rather than regex because:
+//   1. CSS values can contain `{` (e.g. `linear-gradient(...)`) — but
+//      not at the top level of a declaration block.
+//   2. The selector list can include commas, so we need to split on
+//      `,` and apply the same body to every classname in the list.
+void collect_classnames_from_css(const std::string& css_in,
+                                 ClaudeClassNameRules& into) {
+    auto css = strip_css_comments(css_in);
+    size_t i = 0;
+    while (i < css.size()) {
+        // Skip whitespace.
+        while (i < css.size() && std::isspace(static_cast<unsigned char>(css[i]))) ++i;
+        if (i >= css.size()) break;
+
+        // Find the next `{` that opens a rule body. Anything between
+        // `i` and that brace is the selector list.
+        auto open = css.find('{', i);
+        if (open == std::string::npos) break;
+        std::string selector_list = css.substr(i, open - i);
+
+        // Find the matching `}`. Top-level only — declaration values
+        // never embed `{...}` braces in well-formed CSS.
+        auto close = css.find('}', open + 1);
+        if (close == std::string::npos) break;
+        std::string body = css.substr(open + 1, close - (open + 1));
+        i = close + 1;
+
+        // Skip at-rules (`@media`, `@font-face`, `@keyframes`, etc.).
+        // The first non-whitespace char of the selector tells us.
+        auto first_non_ws = selector_list.find_first_not_of(" \t\r\n");
+        if (first_non_ws == std::string::npos) continue;
+        if (selector_list[first_non_ws] == '@') continue;
+
+        // Split selector_list on top-level commas.
+        std::vector<std::string> selectors;
+        size_t s_start = 0;
+        for (size_t k = 0; k <= selector_list.size(); ++k) {
+            if (k == selector_list.size() || selector_list[k] == ',') {
+                selectors.push_back(trim_ascii_ws(
+                    std::string_view(selector_list).substr(s_start, k - s_start)));
+                s_start = k + 1;
+            }
+        }
+
+        // Parse the body once — every matching selector references the
+        // same map.
+        std::optional<std::map<std::string, std::string>> decls;
+
+        for (auto& sel : selectors) {
+            // Only accept simple `.classname` selectors. The classname
+            // grammar matches Spectr's regex: `[a-zA-Z][a-zA-Z0-9_-]*`.
+            // A trailing chained selector (`.foo .bar`, `.foo > .bar`,
+            // `.foo:hover`, `.foo[data-x]`) means this isn't a plain
+            // classname rule — skip it.
+            if (sel.empty() || sel[0] != '.') continue;
+            std::string name;
+            size_t k = 1;
+            if (k >= sel.size() || !(std::isalpha(static_cast<unsigned char>(sel[k])) || sel[k] == '_'))
+                continue;
+            while (k < sel.size() &&
+                   (std::isalnum(static_cast<unsigned char>(sel[k])) ||
+                    sel[k] == '_' || sel[k] == '-')) {
+                name += sel[k++];
+            }
+            // Anything left over → not a plain classname selector.
+            if (k != sel.size()) continue;
+            if (name.empty()) continue;
+            // Theme-scope selectors are handled upstream as token
+            // overrides, not classname rules.
+            if (name.rfind("scheme-", 0) == 0) continue;
+
+            if (!decls) decls = parse_css_declarations(body);
+            if (decls->empty()) continue;
+
+            // Cascade: later blocks override earlier ones for the same
+            // classname. Per-prop merge keeps unrelated declarations
+            // from being lost when two blocks define the same class.
+            auto& existing = into[name];
+            for (auto& [prop, val] : *decls) {
+                existing[prop] = val;
+            }
+        }
+    }
+}
+
+// Pull every `<style>...</style>` block out of an HTML string, in
+// document order. Skips `<style>` blocks whose first 200 chars contain
+// `font-face` (matches Spectr's filter — those carry only `@font-face`
+// rules, no classnames). Returns the inner CSS bodies.
+std::vector<std::string> extract_html_style_blocks(const std::string& html) {
+    std::vector<std::string> blocks;
+    static const std::regex style_re(
+        R"RX(<style\b[^>]*>([\s\S]*?)</style>)RX",
+        std::regex::icase);
+    auto begin = std::sregex_iterator(html.begin(), html.end(), style_re);
+    auto end = std::sregex_iterator();
+    for (auto it = begin; it != end; ++it) {
+        std::string body = (*it)[1].str();
+        // Spectr's filter: skip blocks whose head looks like @font-face.
+        // The head check (first 200 chars) keeps a normal classname
+        // block that happens to mention `font-face` later from being
+        // dropped.
+        std::string head = body.substr(0, std::min<size_t>(body.size(), 200));
+        std::transform(head.begin(), head.end(), head.begin(),
+            [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        if (head.find("font-face") != std::string::npos) continue;
+        blocks.push_back(std::move(body));
+    }
+    return blocks;
+}
+
+} // namespace
+
+ClaudeClassNameRules extract_claude_classnames(const std::string& html) {
+    ClaudeClassNameRules rules;
+
+    // Walk the raw HTML's <style> blocks first. For non-bundled
+    // exports (the `--no-bundle` flow, or hand-written test fixtures)
+    // this is the only source.
+    for (auto& css : extract_html_style_blocks(html)) {
+        collect_classnames_from_css(css, rules);
+    }
+
+    // For self-bundled Claude Design exports, the actual app CSS lives
+    // inside the `<script type="__bundler/template">` payload (a
+    // JSON-encoded HTML string). Unwrap and walk its <style> blocks
+    // too. parse_claude_bundle silently returns nullopt when the
+    // envelope is missing — that's the expected branch for hand-rolled
+    // fixtures, so we just fall through.
+    if (auto bundle = parse_claude_bundle(html)) {
+        for (auto& css : extract_html_style_blocks(bundle->template_html)) {
+            collect_classnames_from_css(css, rules);
+        }
+    }
+
+    return rules;
+}
+
+std::string serialize_claude_classnames(const ClaudeClassNameRules& rules) {
+    // Use choc::value::createObject for stable, well-escaped JSON. The
+    // outer map is a std::map so keys arrive in alphabetical order
+    // already; per-class declaration maps are also std::map for the
+    // same property-order guarantee. choc::json::toString preserves
+    // insertion order, so the resulting JSON is deterministic.
+    auto root = choc::value::createObject("");
+    for (const auto& [name, decls] : rules) {
+        auto obj = choc::value::createObject("");
+        for (const auto& [prop, val] : decls) {
+            obj.addMember(prop, val);
+        }
+        root.addMember(name, obj);
+    }
+    // Pretty-print with line breaks so the artifact is human-readable
+    // and diff-friendly (matches Spectr's `JSON.stringify(_, null, 2)`
+    // output shape for parity with the existing tooling).
+    return choc::json::toString(root, /*useLineBreaks=*/true);
+}
+
 // ── Claude Design bundle envelope (pulp #468) ───────────────────────────
 
 namespace {

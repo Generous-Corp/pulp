@@ -46,6 +46,10 @@ static void print_usage() {
     std::cout << "  --bridge-output <path>  Path to write bridge handler scaffold (default: bridge_handlers.cpp,\n";
     std::cout << "                          only emitted for --from claude)\n";
     std::cout << "  --no-bridge-scaffold    Skip bridge handler scaffold (claude only)\n";
+    std::cout << "  --classnames <path>     Output classname → style map (default: classnames.json,\n";
+    std::cout << "                          only emitted for --from claude — pulp #1035)\n";
+    std::cout << "  --emit classnames       Force-emit classnames.json (default on for --from claude)\n";
+    std::cout << "  --no-emit-classnames    Skip classname emission (claude only)\n";
     std::cout << "  --execute-bundle  Run the bundled React app in a headless JS engine and\n";
     std::cout << "                    walk the materialized DOM (--from claude only).\n";
     std::cout << "                    Falls back to the static parser on any harness failure.\n";
@@ -116,6 +120,8 @@ int main(int argc, char* argv[]) {
     std::string bridge_output = "bridge_handlers.cpp";  // claude scaffold output
     bool emit_bridge_scaffold = true;                    // default on for --from claude
     bool execute_bundle = false;                         // pulp #468 native-runtime path
+    std::string classnames_output = "classnames.json";   // pulp #1035 — claude classname map
+    bool emit_classnames = true;                          // default on for --from claude
 
     for (int i = 1; i < argc; ++i) {
         if (std::strcmp(argv[i], "--from") == 0 && i + 1 < argc) {
@@ -172,6 +178,17 @@ int main(int argc, char* argv[]) {
             emit_bridge_scaffold = false;
         } else if (std::strcmp(argv[i], "--execute-bundle") == 0) {
             execute_bundle = true;
+        } else if (std::strcmp(argv[i], "--classnames") == 0 && i + 1 < argc) {
+            classnames_output = argv[++i];
+        } else if (std::strcmp(argv[i], "--emit") == 0 && i + 1 < argc) {
+            // Currently only `--emit classnames` is recognized — additional
+            // emit targets (e.g. `--emit tokens`) can layer on later
+            // without changing the flag shape. Unknown values are
+            // silently no-ops to keep forward compatibility.
+            std::string what = argv[++i];
+            if (what == "classnames") emit_classnames = true;
+        } else if (std::strcmp(argv[i], "--no-emit-classnames") == 0) {
+            emit_classnames = false;
         } else if (std::strcmp(argv[i], "--help") == 0 || std::strcmp(argv[i], "-h") == 0) {
             print_usage();
             return 0;
@@ -354,6 +371,23 @@ int main(int argc, char* argv[]) {
         if (write_file(bridge_output, scaffold)) {
             std::cout << "Wrote " << bridge_output
                       << " (bridge handler scaffold — edit add_handler() entries to wire your editor's messages)\n";
+        }
+    }
+
+    // Classnames artifact for Claude Design imports (pulp #1035).
+    // Spectr's `tools/extract-html-bundle/extract.mjs` emits the same
+    // map by hand; pulling it into the CLI lets `@pulp/css-adapt`
+    // consume the file directly without a separate Node-side pass.
+    // Only emitted for --from claude; default on, opt-out via
+    // --no-emit-classnames.
+    if (*source == DesignSource::claude && emit_classnames) {
+        auto rules = extract_claude_classnames(content);
+        const auto classnames_json = serialize_claude_classnames(rules);
+        if (write_file(classnames_output, classnames_json)) {
+            std::cout << "Wrote " << classnames_output
+                      << " (" << rules.size() << " class rule"
+                      << (rules.size() == 1 ? "" : "s")
+                      << " — feed to @pulp/css-adapt or dom-adapter)\n";
         }
     }
 

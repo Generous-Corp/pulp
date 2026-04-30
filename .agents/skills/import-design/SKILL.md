@@ -190,7 +190,7 @@ pulp import-design --from figma --file design.json
 pulp import-design --from stitch --file screen.html
 pulp import-design --from v0 --file component.tsx
 pulp import-design --from pencil --file design.json
-pulp import-design --from claude --file design.html   # writes ui.js + bridge_handlers.cpp scaffold (static parser — loader-shell only)
+pulp import-design --from claude --file design.html   # writes ui.js + tokens.json + classnames.json + bridge_handlers.cpp (static parser — loader-shell only)
 pulp import-design --from claude --file design.html --execute-bundle   # runs the bundled React app in QuickJS, walks the materialized DOM (#468)
 
 # With validation
@@ -199,6 +199,10 @@ pulp import-design --from pencil --file design.json --validate --reference sourc
 # Override or skip the bridge scaffold (claude only)
 pulp import-design --from claude --file design.html --bridge-output editor/handlers.cpp
 pulp import-design --from claude --file design.html --no-bridge-scaffold
+
+# Override or skip the classnames artifact (claude only — pulp #1035)
+pulp import-design --from claude --file design.html --classnames editor/classnames.json
+pulp import-design --from claude --file design.html --no-emit-classnames
 ```
 
 Use `--dry-run` to preview without writing files.
@@ -213,5 +217,24 @@ For `--from claude`, the CLI emits a starter C++ file demonstrating how to wire 
 - For pulp #468's native-JS-runtime path, swap `attach_webview(...)` for `bridge_.attach_native_runtime(runtime, "<handler_name>")` once the runtime exposes its postMessage primitive.
 
 See `docs/reference/editor-bridge.md` for the full API and the standard envelope-level error vocabulary (`malformed_json`, `unknown_type`, `missing_field`, `wrong_type`, `internal_error`).
+
+## Classnames Artifact (Claude Design only — pulp #1035)
+
+For `--from claude`, the CLI also emits `classnames.json` mapping
+`classname → { cssProp(camelCase): cssValue, ... }` for every plain-classname `<style>` rule it finds in the export. Mirrors the output of Spectr's `tools/extract-html-bundle/extract.mjs` so downstream consumers (`@pulp/css-adapt`, `dom-adapter`) can merge class-based styles into inline before forwarding to bridge calls — no separate Node-side extraction script needed.
+
+What the extractor honours:
+
+- Bundler envelopes — when `<script type="__bundler/template">` is present, the extractor walks both the loader shell *and* the unwrapped template HTML's `<style>` blocks.
+- Multiple `<style>` blocks cascade: later blocks override earlier ones per-property; unrelated declarations from earlier blocks are preserved.
+- Comma-separated selector lists (`.btn-primary, .btn-secondary { ... }`) emit one entry per classname with identical declarations.
+- Hyphenated CSS properties are camelCased (`font-family` → `fontFamily`).
+
+What it skips:
+
+- `:root`, `.scheme-*` rules — those are theme-mode token overrides handled upstream as `tokens.json` artifacts.
+- Pseudo-classes (`.foo:hover`), attribute selectors (`.foo[data-x]`), descendant combinators (`.foo .bar`, `.foo > .bar`) — anything that isn't a plain `.classname { ... }` rule.
+- `@media` / `@keyframes` / other at-rule wrappers.
+- `<style>` blocks whose first 200 chars contain `@font-face` (those carry only font-face rules, no classnames).
 
 This skill must stay aligned with the `view-bridge` skill — `view-bridge` covers editor lifecycle (create_view, open/notify_attached/resize/close), this skill covers message dispatch over that lifecycle.

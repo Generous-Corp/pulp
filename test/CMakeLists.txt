@@ -1487,6 +1487,20 @@ target_link_libraries(pulp-test-design-import-claude-bundle
     PRIVATE pulp::view pulp::runtime Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-design-import-claude-bundle)
 
+# pulp #1035 — `pulp import-design --from claude` classnames.json
+# emission. Combines library-level fixture coverage (no binary
+# dependency) with a shell-out against the built CLI when available.
+add_executable(pulp-test-cli-import-design test_cli_import_design.cpp)
+target_link_libraries(pulp-test-cli-import-design
+    PRIVATE pulp::view pulp::platform Catch2::Catch2WithMain)
+target_compile_definitions(pulp-test-cli-import-design PRIVATE
+    PULP_REPO_ROOT="${CMAKE_SOURCE_DIR}")
+if(TARGET pulp-cli)
+    add_dependencies(pulp-test-cli-import-design pulp-cli)
+endif()
+catch_discover_tests(pulp-test-cli-import-design
+    PROPERTIES ENVIRONMENT "PULP_REPO_ROOT=${CMAKE_SOURCE_DIR}")
+
 # pulp #468 — `--execute-bundle` harness end-to-end. Boots the
 # ScriptEngine + WidgetBridge, builds a synthetic React-like bundle on
 # the fly, asserts the materialized DOM walker produces an IR deeper
