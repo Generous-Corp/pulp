@@ -288,9 +288,15 @@ def _git(cwd: Path, *args: str) -> None:
 
 
 def _run_script(cwd: Path, *args: str) -> tuple[int, str]:
+    # Drop PULP_ENFORCE_PREPUSH from the inherited env so advisory-mode
+    # tests (no --enforce flag) get a genuine advisory exit code.
+    # CI sets PULP_ENFORCE_PREPUSH=1 globally to harden the gate
+    # against drift; without scrubbing here, every advisory-mode test
+    # silently runs in enforce mode and false-fails on missing artifacts.
+    env = {k: v for k, v in os.environ.items() if k != "PULP_ENFORCE_PREPUSH"}
     result = subprocess.run(
         ["python3", str(SCRIPT), *args],
-        cwd=cwd, capture_output=True, text=True,
+        cwd=cwd, capture_output=True, text=True, env=env,
     )
     return result.returncode, result.stdout + result.stderr
 
