@@ -76,6 +76,42 @@ TEST_CASE("MidiEvent factory methods", "[midi][message]") {
     }
 }
 
+TEST_CASE("MidiEvent factory methods mask MIDI data-byte boundaries",
+          "[midi][message][issue-645]") {
+    SECTION("Channel values wrap to the low nibble") {
+        auto evt = MidiEvent::note_on(0x2F, 60, 100);
+        REQUIRE(evt.channel() == 15);
+        REQUIRE(evt.data()[0] == 0x9F);
+    }
+
+    SECTION("Note and velocity arguments stay in the 7-bit data range") {
+        auto on = MidiEvent::note_on(0, 0xC0, 0xFF);
+        REQUIRE(on.note() == 0x40);
+        REQUIRE(on.velocity() == 0x7F);
+
+        auto off = MidiEvent::note_off(1, 0x81, 0xFE);
+        REQUIRE(off.note() == 0x01);
+        REQUIRE(off.velocity() == 0x7E);
+    }
+
+    SECTION("Controller and program arguments stay in the 7-bit data range") {
+        auto cc = MidiEvent::cc(2, 0xF4, 0xC8);
+        REQUIRE(cc.cc_number() == 0x74);
+        REQUIRE(cc.cc_value() == 0x48);
+
+        auto pc = MidiEvent::program_change(3, 0xAA);
+        REQUIRE(pc.data()[1] == 0x2A);
+        REQUIRE(pc.data()[2] == 0);
+    }
+
+    SECTION("Pitch bend arguments stay in the 14-bit data range") {
+        auto evt = MidiEvent::pitch_bend(4, 0xFFFF);
+        REQUIRE(evt.data()[0] == 0xE4);
+        REQUIRE(evt.data()[1] == 0x7F);
+        REQUIRE(evt.data()[2] == 0x7F);
+    }
+}
+
 TEST_CASE("MidiBuffer operations", "[midi][buffer]") {
     MidiBuffer buf;
 

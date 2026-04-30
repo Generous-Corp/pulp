@@ -30,13 +30,17 @@ struct MidiEvent {
     /// @param velocity  Velocity (0-127).
     static MidiEvent note_on(uint8_t channel, uint8_t note, uint8_t velocity) {
         return {choc::midi::ShortMessage(
-            static_cast<uint8_t>(0x90 | (channel & 0x0F)), note, velocity), 0, 0.0};
+            static_cast<uint8_t>(0x90 | (channel & 0x0F)),
+            data_byte(note),
+            data_byte(velocity)), 0, 0.0};
     }
 
     /// Create a Note Off event.
     static MidiEvent note_off(uint8_t channel, uint8_t note, uint8_t velocity = 0) {
         return {choc::midi::ShortMessage(
-            static_cast<uint8_t>(0x80 | (channel & 0x0F)), note, velocity), 0, 0.0};
+            static_cast<uint8_t>(0x80 | (channel & 0x0F)),
+            data_byte(note),
+            data_byte(velocity)), 0, 0.0};
     }
 
     /// Create a Control Change event.
@@ -44,12 +48,15 @@ struct MidiEvent {
     /// @param value       CC value (0-127).
     static MidiEvent cc(uint8_t channel, uint8_t controller, uint8_t value) {
         return {choc::midi::ShortMessage(
-            static_cast<uint8_t>(0xB0 | (channel & 0x0F)), controller, value), 0, 0.0};
+            static_cast<uint8_t>(0xB0 | (channel & 0x0F)),
+            data_byte(controller),
+            data_byte(value)), 0, 0.0};
     }
 
     /// Create a Pitch Bend event.
     /// @param value  14-bit pitch bend value (0-16383, center = 8192).
     static MidiEvent pitch_bend(uint8_t channel, uint16_t value) {
+        value &= 0x3FFF;
         return {choc::midi::ShortMessage(
             static_cast<uint8_t>(0xE0 | (channel & 0x0F)),
             static_cast<uint8_t>(value & 0x7F),
@@ -59,7 +66,7 @@ struct MidiEvent {
     /// Create a Program Change event.
     static MidiEvent program_change(uint8_t channel, uint8_t program) {
         return {choc::midi::ShortMessage(
-            static_cast<uint8_t>(0xC0 | (channel & 0x0F)), program, 0), 0, 0.0};
+            static_cast<uint8_t>(0xC0 | (channel & 0x0F)), data_byte(program), 0), 0, 0.0};
     }
 
     bool is_note_on() const  { return message.isNoteOn(); }
@@ -74,6 +81,11 @@ struct MidiEvent {
     uint8_t velocity() const { return message.getVelocity(); }
     uint8_t cc_number() const { return message.getControllerNumber(); }
     uint8_t cc_value() const  { return message.getControllerValue(); }
+
+private:
+    static constexpr uint8_t data_byte(uint8_t value) {
+        return static_cast<uint8_t>(value & 0x7F);
+    }
 };
 
 } // namespace pulp::midi
