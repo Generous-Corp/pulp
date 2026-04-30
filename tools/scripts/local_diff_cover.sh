@@ -254,21 +254,34 @@ fi
 # Same pipeline scripts/run_coverage.sh uses — `llvm-cov export --format=lcov`
 # then the vendored lcov_cobertura.py converter.
 COVERAGE_IGNORE_REGEX='(^|/)(_deps|external|test|[Cc]atch2|build|build-cov|build-coverage|examples|fetchcontent-src|sandbox-e2e)/'
+LCOV_RAW="${BUILD_DIR}/coverage/coverage.raw.lcov"
 LCOV_FILE="${BUILD_DIR}/coverage/coverage.lcov"
 COBERTURA_XML="${BUILD_DIR}/coverage.cobertura.xml"
 LCOV_COBERTURA="${REPO_ROOT}/tools/scripts/lcov_cobertura.py"
+LCOV_STRIP_EXCL="${REPO_ROOT}/tools/scripts/lcov_strip_excl.py"
 
 if [ ! -f "${LCOV_COBERTURA}" ]; then
     echo "[local_diff_cover] missing converter: ${LCOV_COBERTURA}" >&2
     exit 1
 fi
+if [ ! -f "${LCOV_STRIP_EXCL}" ]; then
+    echo "[local_diff_cover] missing LCOV_EXCL stripper: ${LCOV_STRIP_EXCL}" >&2
+    exit 1
+fi
 
-echo "=== llvm-cov export → LCOV ==="
+echo "=== llvm-cov export → LCOV (raw) ==="
 llvm-cov export --format=lcov \
     "${BINARIES[@]}" \
     -instr-profile="${PROFDATA}" \
     -ignore-filename-regex="${COVERAGE_IGNORE_REGEX}" \
-    > "${LCOV_FILE}"
+    > "${LCOV_RAW}"
+
+# llvm-cov-export does NOT honor LCOV_EXCL_LINE / LCOV_EXCL_START..STOP
+# markers — those are a gcov/lcov convention. Without this strip step,
+# code wrapped in LCOV_EXCL still appears in the diff-cover "missing
+# lines" report (pulp #1058).
+echo "=== Strip LCOV_EXCL ranges → LCOV (filtered) ==="
+python3 "${LCOV_STRIP_EXCL}" "${LCOV_RAW}" "${LCOV_FILE}"
 
 echo "=== LCOV → Cobertura XML ==="
 python3 "${LCOV_COBERTURA}" "${LCOV_FILE}" \

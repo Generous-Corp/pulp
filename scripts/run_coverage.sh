@@ -318,21 +318,36 @@ llvm-cov show \
 # a vendored copy of https://github.com/eriwen/lcov-to-cobertura-xml
 # (Apache 2.0, MIT-compatible).
 COBERTURA_XML="${BUILD_DIR}/coverage.cobertura.xml"
+LCOV_RAW="${REPORT_DIR}/coverage.raw.lcov"
 LCOV_FILE="${REPORT_DIR}/coverage.lcov"
 LCOV_COBERTURA="${REPO_ROOT}/tools/scripts/lcov_cobertura.py"
+LCOV_STRIP_EXCL="${REPO_ROOT}/tools/scripts/lcov_strip_excl.py"
 
 if [[ ! -f "${LCOV_COBERTURA}" ]]; then
     echo "run_coverage.sh: missing ${LCOV_COBERTURA}" >&2
     echo "    (expected the vendored lcov→cobertura converter)" >&2
     exit 1
 fi
+if [[ ! -f "${LCOV_STRIP_EXCL}" ]]; then
+    echo "run_coverage.sh: missing ${LCOV_STRIP_EXCL}" >&2
+    echo "    (expected the LCOV_EXCL stripper — pulp #1058)" >&2
+    exit 1
+fi
 
-echo "=== llvm-cov export → LCOV ==="
+echo "=== llvm-cov export → LCOV (raw) ==="
 llvm-cov export --format=lcov \
     "${BINARIES[@]}" \
     -instr-profile="${PROFDATA}" \
     -ignore-filename-regex="${COVERAGE_IGNORE_REGEX}" \
-    > "${LCOV_FILE}"
+    > "${LCOV_RAW}"
+
+# llvm-cov-export does NOT honor LCOV_EXCL_LINE / LCOV_EXCL_START..STOP
+# markers — those are a gcov/lcov convention. Without this strip step,
+# code wrapped in LCOV_EXCL still appears in the diff-cover "missing
+# lines" report and in the Cobertura XML uploaded to Codecov
+# (pulp #1058).
+echo "=== Strip LCOV_EXCL ranges → LCOV (filtered) ==="
+python3 "${LCOV_STRIP_EXCL}" "${LCOV_RAW}" "${LCOV_FILE}"
 
 echo "=== LCOV → Cobertura XML ==="
 python3 "${LCOV_COBERTURA}" "${LCOV_FILE}" \
