@@ -69,7 +69,11 @@ fs::path pulp_binary() {
     if (const char* env = std::getenv("PULP_CLI_PATH"); env && *env) {
         return fs::path(env);
     }
+#if defined(PULP_CLI_BINARY)
+    return fs::path(PULP_CLI_BINARY);
+#else
     return fs::path(PULP_BUILD_DIR) / "tools" / "cli" / "pulp";
+#endif
 }
 
 pulp::platform::ProcessResult run_create(const std::vector<std::string>& args,

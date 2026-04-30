@@ -107,6 +107,11 @@ add_executable(pulp-test-cli-create-shellout test_cli_create_shellout.cpp)
 target_link_libraries(pulp-test-cli-create-shellout PRIVATE
     pulp::platform
     Catch2::Catch2WithMain)
+if(TARGET pulp-cli)
+    add_dependencies(pulp-test-cli-create-shellout pulp-cli)
+    target_compile_definitions(pulp-test-cli-create-shellout PRIVATE
+        PULP_CLI_BINARY="$<TARGET_FILE:pulp-cli>")
+endif()
 target_compile_definitions(pulp-test-cli-create-shellout PRIVATE
     PULP_BUILD_DIR="${CMAKE_BINARY_DIR}"
     PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
