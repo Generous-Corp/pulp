@@ -248,7 +248,9 @@ TEST_CASE("line callback buffers partial stdout without trailing newline",
     };
 
 #ifdef _WIN32
-    auto r = ChildProcess::run("cmd", {"/c", "<nul set /p dummy=partial"}, opts);
+    auto r = ChildProcess::run("cmd",
+        {"/c", "<nul set /p dummy=partial & exit /b 0"},
+        opts);
 #else
     auto r = ChildProcess::run("/bin/sh", {"-c", "printf partial"}, opts);
 #endif
