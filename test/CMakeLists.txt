@@ -975,6 +975,10 @@ add_executable(pulp-test-midi test_midi.cpp)
 target_link_libraries(pulp-test-midi PRIVATE pulp::midi Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-midi)
 
+add_executable(pulp-test-midi-file test_midi_file.cpp)
+target_link_libraries(pulp-test-midi-file PRIVATE pulp::midi Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-midi-file)
+
 # State tests
 add_executable(pulp-test-state test_state.cpp)
 target_link_libraries(pulp-test-state PRIVATE pulp::state Catch2::Catch2WithMain)
