@@ -1,0 +1,11 @@
+{
+  "compat-schema-version": "0.1",
+  "_comment": "Generated compat matrix per #1027. Do not hand-edit prop entries; the source of truth is the bridge / shim / adapter source files. Run `pulp compat regenerate` (planned in #1027) to refresh. This is a stub committed in #1029 so the compat-sync infrastructure (tools/scripts/compat_sync_check.py and friends) has something to enforce against. Empty sections are tolerated — the gate treats them as 'no requirement yet' so #1029 can land before #1027 populates the matrix data.",
+  "css": {},
+  "rn": {},
+  "yoga": {},
+  "react": {},
+  "html": {},
+  "canvas2d": {},
+  "imports": {}
+}

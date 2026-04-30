@@ -745,16 +745,18 @@ the live ruleset in isolation — the next scheduled drift run will fail.
 
 ## Versioning & Skill-Sync gates (Layer 3)
 
-`pulp pr` orchestrates the full shipping flow. CI enforces two gates on every PR to `main`:
+`pulp pr` orchestrates the full shipping flow. CI enforces three gates on every PR to `main`:
 
-- `.github/workflows/version-skill-check.yml` — runs `tools/scripts/version_bump_check.py` and `tools/scripts/skill_sync_check.py` in `--mode=report`. Failure blocks merge. No bypass except the commit trailers documented in `docs/guides/versioning.md`.
+- `.github/workflows/version-skill-check.yml` — runs `tools/scripts/version_bump_check.py`, `tools/scripts/skill_sync_check.py`, and (since #1029) `tools/scripts/compat_sync_check.py` in `--mode=report`. Failure blocks merge. No bypass except the commit trailers documented in `docs/guides/versioning.md` and `docs/guides/compat-sync.md`.
 - `.shipyard/config.toml` → `[validation.gates]` pipeline — same scripts via `shipyard run --pipeline gates`. Runs with `PULP_ENFORCE_PREPUSH=1` so warnings become errors.
 
 Locally:
 
-- `.githooks/pre-push` (install via `tools/scripts/install-githooks.sh`) runs both scripts advisory-by-default. `PULP_ENFORCE_PREPUSH=1` upgrades to hard fail; `PULP_SKIP_PREPUSH=1` is the single-push emergency bypass.
+- `.githooks/pre-push` (install via `tools/scripts/install-githooks.sh`) runs all three scripts advisory-by-default. `PULP_ENFORCE_PREPUSH=1` upgrades to hard fail; `PULP_SKIP_PREPUSH=1` is the single-push emergency bypass.
 
 **Gotcha:** changing anything under `.github/workflows/**`, `tools/shipyard.toml`, `.shipyard/**`, `.githooks/**`, `tools/install-shipyard.sh`, or `tools/scripts/install-githooks.sh` triggers the skill-sync gate for the `ci` skill — keep this file in sync when those paths move. The map lives at `tools/scripts/skill_path_map.json`.
+
+**Compat-sync (#1029):** `tools/scripts/compat_sync_check.py` is the new third leg, mirroring the skill-sync / version-bump shape for the `compat.json` matrix at the repo root. The bypass trailer is `Compat-Update: skip prefix=<section|*> reason="..."` (multiple lines allowed). Path map: `tools/scripts/compat_path_map.json`. Until #1027 ships the populated matrix, empty `compat.json` sections are tolerated. See `docs/guides/compat-sync.md` for the full design.
 
 **Auto-release:** `.github/workflows/auto-release.yml` fires on push to `main`. It diffs the two version-bearing files (`CMakeLists.txt` project version, `.claude-plugin/plugin.json` version) against the previous push range and creates the corresponding `v<x.y.z>` or `plugin-v<x.y.z>` tag. The existing tag-triggered release workflows (`release-cli.yml`, `sign-and-release.yml`) then build and publish. `Release: skip reason="..."` on the merging commit suppresses the tag.
 
