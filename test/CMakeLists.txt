@@ -1895,6 +1895,10 @@ add_executable(pulp-test-phase9-widgets test_phase9_widgets.cpp)
 target_link_libraries(pulp-test-phase9-widgets PRIVATE pulp::view Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-phase9-widgets)
 
+add_executable(pulp-test-property-list test_property_list.cpp)
+target_link_libraries(pulp-test-property-list PRIVATE pulp::view Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-property-list)
+
 # Asset manager and resource system
 add_executable(pulp-test-asset-manager test_asset_manager.cpp)
 target_link_libraries(pulp-test-asset-manager PRIVATE pulp::view Catch2::Catch2WithMain)
