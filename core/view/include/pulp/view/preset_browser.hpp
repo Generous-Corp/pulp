@@ -12,6 +12,7 @@
 #include <string>
 #include <vector>
 #include <algorithm>
+#include <cctype>
 
 namespace pulp::view {
 
@@ -75,6 +76,11 @@ public:
     /// Select previous preset in the filtered list.
     void select_previous() {
         if (filtered_.empty()) return;
+        if (selected_index_ < 0) {
+            selected_index_ = static_cast<int>(filtered_.size()) - 1;
+            notify_selection();
+            return;
+        }
         selected_index_ = (selected_index_ - 1 + static_cast<int>(filtered_.size()))
                           % static_cast<int>(filtered_.size());
         notify_selection();
@@ -251,14 +257,17 @@ private:
             if (!filter_text_.empty()) {
                 // Case-insensitive search in name and folder
                 std::string lower_name = p.name;
+                std::string lower_folder = p.folder;
                 std::string lower_filter = filter_text_;
                 std::transform(lower_name.begin(), lower_name.end(), lower_name.begin(),
+                    [](unsigned char c) { return std::tolower(c); });
+                std::transform(lower_folder.begin(), lower_folder.end(), lower_folder.begin(),
                     [](unsigned char c) { return std::tolower(c); });
                 std::transform(lower_filter.begin(), lower_filter.end(), lower_filter.begin(),
                     [](unsigned char c) { return std::tolower(c); });
 
                 if (lower_name.find(lower_filter) == std::string::npos &&
-                    p.folder.find(lower_filter) == std::string::npos) continue;
+                    lower_folder.find(lower_filter) == std::string::npos) continue;
             }
 
             filtered_.push_back(p);
