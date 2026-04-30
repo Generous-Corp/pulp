@@ -101,14 +101,18 @@ std::optional<Bundle> Bundle::deserialize(const uint8_t* data, size_t size) {
         // Nested bundle or message?
         if (elem_size >= 8 && std::memcmp(data + offset, "#bundle", 8) == 0) {
             auto nested = Bundle::deserialize(data + offset, elem_size);
-            if (nested) bundle.add(std::move(*nested));
+            if (!nested) return std::nullopt;
+            bundle.add(std::move(*nested));
         } else {
             auto msg = decode(data + offset, elem_size);
-            if (!msg.address.empty()) bundle.add(std::move(msg));
+            if (msg.address.empty()) return std::nullopt;
+            bundle.add(std::move(msg));
         }
 
         offset += elem_size;
     }
+
+    if (offset != size) return std::nullopt;
 
     return bundle;
 }
@@ -133,6 +137,7 @@ bool address_matches(std::string_view pattern, std::string_view address) {
             bool negate = pi < pattern.size() && pattern[pi] == '!';
             if (negate) ++pi;
             bool matched = false;
+            bool closed = false;
             while (pi < pattern.size() && pattern[pi] != ']') {
                 if (pi + 2 < pattern.size() && pattern[pi + 1] == '-') {
                     if (address[ai] >= pattern[pi] && address[ai] <= pattern[pi + 2])
@@ -143,13 +148,18 @@ bool address_matches(std::string_view pattern, std::string_view address) {
                     ++pi;
                 }
             }
-            if (pi < pattern.size()) ++pi;  // skip ']'
+            if (pi < pattern.size()) {
+                closed = true;
+                ++pi;  // skip ']'
+            }
+            if (!closed) return false;
             if (matched == negate) return false;
             ++ai;
         } else if (pc == '{') {
             // Alternatives: {foo,bar,baz}
             ++pi;
             bool found = false;
+            bool closed = false;
             while (pi < pattern.size() && pattern[pi] != '}') {
                 size_t start = pi;
                 while (pi < pattern.size() && pattern[pi] != ',' && pattern[pi] != '}') ++pi;
@@ -163,7 +173,11 @@ bool address_matches(std::string_view pattern, std::string_view address) {
                 }
                 if (pi < pattern.size() && pattern[pi] == ',') ++pi;
             }
-            if (pi < pattern.size()) ++pi;  // skip '}'
+            if (pi < pattern.size()) {
+                closed = true;
+                ++pi;  // skip '}'
+            }
+            if (!closed) return false;
             if (!found) return false;
         } else {
             if (pc != address[ai]) return false;
