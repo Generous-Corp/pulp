@@ -1,7 +1,12 @@
 #include <catch2/catch_test_macros.hpp>
+#include <pulp/runtime/dynamic_library.hpp>
 #include <pulp/runtime/runtime.hpp>
+#include <pulp/runtime/temporary_file.hpp>
 #include <cstdlib>
 #include <ctime>
+#include <filesystem>
+#include <fstream>
+#include <string>
 #include <thread>
 #include <utility>
 
@@ -150,4 +155,94 @@ TEST_CASE("Runtime C string copy handles degenerate buffers", "[runtime][system]
     REQUIRE(untouched == 'x');
 
     REQUIRE_NOTHROW(copy_c_string(nullptr, 4, "abc"));
+}
+
+TEST_CASE("TemporaryFile creates extensions and release preserves path", "[runtime][temporary_file]") {
+    std::filesystem::path kept_path;
+    {
+        TemporaryFile wav("wav");
+        REQUIRE(std::filesystem::exists(wav.path()));
+        REQUIRE(wav.path().extension() == ".wav");
+        REQUIRE(wav.path_string() == wav.path().string());
+
+        kept_path = wav.path();
+        wav.release();
+    }
+
+    REQUIRE(std::filesystem::exists(kept_path));
+    std::error_code ec;
+    std::filesystem::remove(kept_path, ec);
+    REQUIRE_FALSE(std::filesystem::exists(kept_path));
+
+    {
+        TemporaryFile json(".json");
+        REQUIRE(std::filesystem::exists(json.path()));
+        REQUIRE(json.path().extension() == ".json");
+    }
+}
+
+TEST_CASE("TemporaryFile move transfers cleanup ownership", "[runtime][temporary_file]") {
+    std::filesystem::path moved_path;
+    {
+        TemporaryFile original(".tmp");
+        moved_path = original.path();
+
+        TemporaryFile moved(std::move(original));
+        REQUIRE(moved.path() == moved_path);
+        REQUIRE(std::filesystem::exists(moved.path()));
+    }
+    REQUIRE_FALSE(std::filesystem::exists(moved_path));
+}
+
+TEST_CASE("TemporaryFile move assignment cleans previous file", "[runtime][temporary_file]") {
+    std::filesystem::path old_path;
+    std::filesystem::path new_path;
+    {
+        TemporaryFile old_file(".old");
+        TemporaryFile new_file(".new");
+        old_path = old_file.path();
+        new_path = new_file.path();
+
+        old_file = std::move(new_file);
+        REQUIRE_FALSE(std::filesystem::exists(old_path));
+        REQUIRE(old_file.path() == new_path);
+        REQUIRE(std::filesystem::exists(new_path));
+    }
+    REQUIRE_FALSE(std::filesystem::exists(new_path));
+}
+
+TEST_CASE("DynamicLibrary reports closed and failed lookup paths", "[runtime][dynamic_library]") {
+    DynamicLibrary library;
+    REQUIRE_FALSE(library.is_open());
+    REQUIRE(library.find_symbol("definitely_missing") == nullptr);
+    REQUIRE(library.error().empty());
+
+    auto missing_path = std::filesystem::temp_directory_path() / "pulp_missing_library_for_test";
+#ifdef _WIN32
+    missing_path += ".dll";
+#elif defined(__APPLE__)
+    missing_path += ".dylib";
+#else
+    missing_path += ".so";
+#endif
+
+    REQUIRE_FALSE(std::filesystem::exists(missing_path));
+    REQUIRE_FALSE(library.open(missing_path.string()));
+    REQUIRE_FALSE(library.is_open());
+    REQUIRE_FALSE(library.error().empty());
+
+    library.close();
+    REQUIRE_FALSE(library.is_open());
+}
+
+TEST_CASE("DynamicLibrary move keeps failed handles closed", "[runtime][dynamic_library]") {
+    DynamicLibrary first;
+    DynamicLibrary second;
+
+    REQUIRE_FALSE(first.open("/definitely/not/a/real/library"));
+    second = std::move(first);
+
+    REQUIRE_FALSE(first.is_open());
+    REQUIRE_FALSE(second.is_open());
+    REQUIRE_FALSE(second.error().empty());
 }
