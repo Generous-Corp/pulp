@@ -1068,6 +1068,70 @@ if(PULP_HAS_LV2)
         pulp::host
         lv2-headers
         Catch2::Catch2WithMain)
+
+    if(UNIX)
+        set(_pulp_lv2_slot_probe_bundle
+            "${CMAKE_CURRENT_BINARY_DIR}/Lv2SlotProbe.lv2")
+        set(_pulp_lv2_slot_probe_binary
+            "${_pulp_lv2_slot_probe_bundle}/lv2-slot-probe${CMAKE_SHARED_MODULE_SUFFIX}")
+
+        add_library(pulp-test-lv2-slot-probe MODULE
+            fixtures/lv2_slot_probe.cpp)
+        target_link_libraries(pulp-test-lv2-slot-probe PRIVATE lv2-headers)
+        set_target_properties(pulp-test-lv2-slot-probe PROPERTIES
+            PREFIX ""
+            OUTPUT_NAME "lv2-slot-probe"
+            LIBRARY_OUTPUT_DIRECTORY "${_pulp_lv2_slot_probe_bundle}")
+
+        file(MAKE_DIRECTORY "${_pulp_lv2_slot_probe_bundle}")
+        string(CONCAT _pulp_lv2_slot_probe_ttl [=[
+@prefix lv2: <http://lv2plug.in/ns/lv2core#> .
+
+<http://example.com/pulp/lv2-slot-probe>
+    a lv2:Plugin ;
+    lv2:binary <lv2-slot-probe]=]
+    "${CMAKE_SHARED_MODULE_SUFFIX}"
+    [=[> ;
+    lv2:port
+    [
+        a lv2:InputPort , lv2:AudioPort ;
+        lv2:index 0 ;
+        lv2:name "Input L"
+    ] ,
+    [
+        a lv2:InputPort , lv2:AudioPort ;
+        lv2:index 1 ;
+        lv2:name "Input R"
+    ] ,
+    [
+        a lv2:OutputPort , lv2:AudioPort ;
+        lv2:index 2 ;
+        lv2:name "Output L"
+    ] ,
+    [
+        a lv2:OutputPort , lv2:AudioPort ;
+        lv2:index 3 ;
+        lv2:name "Output R"
+    ] ,
+    [
+        a lv2:InputPort , lv2:ControlPort ;
+        lv2:index 4 ;
+        lv2:name "Probe Gain" ;
+        lv2:default 0.5 ;
+        lv2:minimum -2.0 ;
+        lv2:maximum 4.0
+    ] .
+]=])
+        file(WRITE "${_pulp_lv2_slot_probe_bundle}/plugin.ttl"
+            "${_pulp_lv2_slot_probe_ttl}")
+
+        add_dependencies(pulp-test-lv2-host-discovery
+            pulp-test-lv2-slot-probe)
+        target_compile_definitions(pulp-test-lv2-host-discovery PRIVATE
+            PULP_TEST_LV2_SLOT_PROBE_BUNDLE="${_pulp_lv2_slot_probe_bundle}"
+            PULP_TEST_LV2_SLOT_PROBE_BINARY="${_pulp_lv2_slot_probe_binary}")
+    endif()
+
     catch_discover_tests(pulp-test-lv2-host-discovery)
 endif()
 
