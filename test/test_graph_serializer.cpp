@@ -10,8 +10,13 @@
 
 #include <pulp/audio/buffer.hpp>
 #include <pulp/host/graph_serializer.hpp>
+#include <pulp/host/plugin_slot.hpp>
 #include <pulp/host/signal_graph.hpp>
 
+#include <cstdint>
+#include <memory>
+#include <string>
+#include <utility>
 #include <vector>
 
 using namespace pulp::host;
@@ -34,6 +39,63 @@ PluginInfo make_fake_plugin_info(const std::string& name,
     info.num_inputs = inputs;
     info.num_outputs = outputs;
     return info;
+}
+
+class SerializerSlot final : public PluginSlot {
+public:
+    static constexpr uint32_t kParamId = 42;
+
+    explicit SerializerSlot(PluginInfo info, std::vector<uint8_t> state = {})
+        : info_(std::move(info)), state_(std::move(state)) {}
+
+    const PluginInfo& info() const override { return info_; }
+    bool is_loaded() const override { return true; }
+    bool prepare(double, int) override { return true; }
+    void release() override {}
+
+    void process(pulp::audio::BufferView<float>&,
+                 const pulp::audio::BufferView<const float>&,
+                 const pulp::midi::MidiBuffer&,
+                 pulp::midi::MidiBuffer&,
+                 const ParameterEventQueue&,
+                 int) override {}
+
+    std::vector<HostParamInfo> parameters() const override {
+        HostParamInfo p;
+        p.id = kParamId;
+        p.name = "Drive";
+        p.min_value = -1.0f;
+        p.max_value = 1.0f;
+        p.flags.automatable = true;
+        return {p};
+    }
+
+    float get_parameter(uint32_t) const override { return 0.0f; }
+    void set_parameter(uint32_t, float) override {}
+    void set_bypass(bool) override {}
+    bool is_bypassed() const override { return false; }
+    std::vector<uint8_t> save_state() const override { return state_; }
+    bool restore_state(const std::vector<uint8_t>& data) override {
+        state_ = data;
+        return true;
+    }
+    bool has_editor() const override { return false; }
+    void* create_editor_view() override { return nullptr; }
+    void destroy_editor_view() override {}
+    int latency_samples() const override { return 0; }
+    int tail_samples() const override { return 0; }
+
+private:
+    PluginInfo info_;
+    std::vector<uint8_t> state_;
+};
+
+bool missing_plugins_contain(const GraphSerializer::LoadResult& result,
+                             const std::string& needle) {
+    for (const auto& entry : result.missing_plugins) {
+        if (entry.find(needle) != std::string::npos) return true;
+    }
+    return false;
 }
 
 } // namespace
@@ -157,6 +219,72 @@ TEST_CASE("GraphSerializer surfaces malformed JSON as a clean error",
     REQUIRE_FALSE(result.error.empty());
 }
 
+TEST_CASE("GraphSerializer rejects non-object roots and malformed field types",
+          "[host][serializer][issue-643]") {
+    SignalGraph root_dst;
+    auto root_result = GraphSerializer::from_json(root_dst, "[]");
+    REQUIRE_FALSE(root_result.ok);
+    REQUIRE(root_result.error == "root is not an object");
+    REQUIRE(root_dst.nodes().empty());
+
+    SignalGraph field_dst;
+    auto field_result = GraphSerializer::from_json(field_dst, R"({
+  "format_version": 1,
+  "nodes": [
+    {
+      "id": "not-an-integer",
+      "type": "gain",
+      "name": "Bad",
+      "num_input_ports": 2,
+      "num_output_ports": 2
+    }
+  ],
+  "connections": []
+})");
+    REQUIRE_FALSE(field_result.ok);
+    REQUIRE(field_result.error.find("field deserialization failed") != std::string::npos);
+    REQUIRE(field_dst.nodes().empty());
+}
+
+TEST_CASE("GraphSerializer serializes plugin formats and state blobs",
+          "[host][serializer][issue-643]") {
+    struct ExpectedFormat {
+        PluginFormat format;
+        const char* wire;
+        const char* uid;
+    };
+    const ExpectedFormat formats[] = {
+        {PluginFormat::VST3, "vst3", "pulp.test.vst3"},
+        {PluginFormat::AudioUnit, "au", "pulp.test.au"},
+        {PluginFormat::AudioUnitV3, "auv3", "pulp.test.auv3"},
+        {PluginFormat::CLAP, "clap", "pulp.test.clap"},
+        {PluginFormat::LV2, "lv2", "pulp.test.lv2"},
+    };
+
+    for (const auto& expected : formats) {
+        SignalGraph src;
+        auto info = make_fake_plugin_info(expected.wire, expected.uid,
+                                          expected.format, 1, 1);
+        src.add_plugin_node(
+            std::make_unique<SerializerSlot>(
+                info, std::vector<uint8_t>{0x00, 0x01, 0x02, 0xff}),
+            1, 1, expected.wire);
+
+        const auto json = GraphSerializer::to_json(src);
+        REQUIRE(json.find(std::string("\"format\": \"") + expected.wire + "\"") !=
+                std::string::npos);
+        REQUIRE(json.find(std::string("\"unique_id\": \"") + expected.uid + "\"") !=
+                std::string::npos);
+        REQUIRE(json.find("\"state_b64\": \"AAEC/w==\"") != std::string::npos);
+
+        SignalGraph dst;
+        auto result = GraphSerializer::from_json(dst, json);
+        REQUIRE(result.ok);
+        REQUIRE(missing_plugins_contain(
+            result, std::string(expected.wire) + ":" + expected.uid));
+    }
+}
+
 TEST_CASE("GraphSerializer round-trips MIDI routing", "[host][serializer]") {
     SignalGraph src;
     auto midi_in = src.add_midi_input_node();
@@ -178,6 +306,120 @@ TEST_CASE("GraphSerializer round-trips MIDI routing", "[host][serializer]") {
         if (c.midi) midi_edge_count++;
     }
     REQUIRE(midi_edge_count == 1);
+}
+
+TEST_CASE("GraphSerializer decodes feedback edges and integer layout coordinates",
+          "[host][serializer][issue-643]") {
+    SignalGraph dst;
+    auto result = GraphSerializer::from_json(dst, R"({
+  "format_version": 1,
+  "nodes": [
+    {
+      "id": 10,
+      "type": "audio_in",
+      "name": "Input",
+      "num_input_ports": 0,
+      "num_output_ports": 1,
+      "gain": 1,
+      "layout": {"x": 12, "y": 34}
+    },
+    {
+      "id": 11,
+      "type": "gain",
+      "name": "Loop",
+      "num_input_ports": 2,
+      "num_output_ports": 2,
+      "gain": 2,
+      "layout": {"x": 56.5, "y": 78}
+    },
+    {
+      "id": 12,
+      "type": "audio_out",
+      "name": "Output",
+      "num_input_ports": 1,
+      "num_output_ports": 0,
+      "gain": 1
+    }
+  ],
+  "connections": [
+    {
+      "source_node": 10,
+      "source_port": 0,
+      "dest_node": 11,
+      "dest_port": 0,
+      "feedback": false,
+      "midi": false,
+      "automation": false
+    },
+    {
+      "source_node": 11,
+      "source_port": 0,
+      "dest_node": 11,
+      "dest_port": 1,
+      "feedback": true,
+      "midi": false,
+      "automation": false
+    }
+  ]
+})");
+
+    REQUIRE(result.ok);
+    REQUIRE(result.error.empty());
+    REQUIRE(dst.nodes().size() == 3);
+    REQUIRE(result.editor_layout.size() == 2);
+
+    bool saw_input_layout = false;
+    bool saw_gain_layout = false;
+    for (const auto& [id, pos] : result.editor_layout) {
+        if (pos.first == 12.0f && pos.second == 34.0f) saw_input_layout = true;
+        if (pos.first == 56.5f && pos.second == 78.0f) saw_gain_layout = true;
+    }
+    REQUIRE(saw_input_layout);
+    REQUIRE(saw_gain_layout);
+
+    int feedback_edges = 0;
+    int audio_edges = 0;
+    for (const auto& c : dst.connections()) {
+        if (c.feedback) ++feedback_edges;
+        if (!c.feedback && !c.midi && !c.automation) ++audio_edges;
+    }
+    REQUIRE(feedback_edges == 1);
+    REQUIRE(audio_edges == 1);
+
+    bool saw_gain = false;
+    for (const auto& node : dst.nodes()) {
+        if (node.name == "Loop") {
+            saw_gain = true;
+            REQUIRE(node.gain == 2.0f);
+        }
+    }
+    REQUIRE(saw_gain);
+}
+
+TEST_CASE("GraphSerializer serializes and decodes automation connection fields",
+          "[host][serializer][issue-643]") {
+    SignalGraph src;
+    auto input = src.add_input_node(1, "Input");
+    auto info = make_fake_plugin_info("AutoTarget", "pulp.test.auto", PluginFormat::CLAP, 1, 1);
+    auto plugin = src.add_plugin_node(std::make_unique<SerializerSlot>(info), 1, 1,
+                                      "AutoTarget");
+    REQUIRE(src.connect_automation(input, 0, plugin, SerializerSlot::kParamId,
+                                   -1.0f, 1.0f, 12.5f, AutomationMix::Add));
+
+    const auto json = GraphSerializer::to_json(src);
+    REQUIRE(json.find("\"automation\": true") != std::string::npos);
+    REQUIRE(json.find("\"auto_param_id\": 42") != std::string::npos);
+    REQUIRE(json.find("\"auto_range_lo\": -1") != std::string::npos);
+    REQUIRE(json.find("\"auto_range_hi\": 1") != std::string::npos);
+    REQUIRE(json.find("\"auto_smoothing\": 12.5") != std::string::npos);
+    REQUIRE(json.find("\"auto_mix\": 1") != std::string::npos);
+
+    SignalGraph dst;
+    auto result = GraphSerializer::from_json(dst, json);
+    REQUIRE(result.ok);
+    REQUIRE(missing_plugins_contain(result, "clap:pulp.test.auto"));
+    REQUIRE(dst.nodes().size() == 2);
+    REQUIRE(dst.connections().empty());
 }
 
 // Issue #491 P2 bonus: when graph_serializer rehydrates a graph with a
