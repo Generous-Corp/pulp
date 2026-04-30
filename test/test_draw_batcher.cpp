@@ -140,3 +140,80 @@ TEST_CASE("DrawBatcher edge-touching blockers do not prevent same-key merge",
     REQUIRE(b.entries()[0].bounds.h == 10.0f);
     REQUIRE(b.entries()[1].state_key == 99);
 }
+
+TEST_CASE("DrawBatcher merges across incompatible draws outside combined bounds",
+          "[render][batcher][issue-646]") {
+    DrawBatcher b;
+
+    b.begin();
+    b.record({0, 0, 10, 10}, 4);
+    b.record({12, 14, 4, 4}, 99);
+    b.record({20, 0, 10, 10}, 4);
+    const auto stats = b.end();
+
+    REQUIRE(stats.draws_before == 3);
+    REQUIRE(stats.draws_after == 2);
+    REQUIRE(stats.batches_merged == 1);
+
+    REQUIRE(b.entries().size() == 2);
+    REQUIRE(b.entries()[0].state_key == 4);
+    REQUIRE(b.entries()[0].bounds.x == 0.0f);
+    REQUIRE(b.entries()[0].bounds.y == 0.0f);
+    REQUIRE(b.entries()[0].bounds.w == 30.0f);
+    REQUIRE(b.entries()[0].bounds.h == 10.0f);
+    REQUIRE(b.entries()[1].state_key == 99);
+}
+
+TEST_CASE("DrawBatcher blocker prevents one merge without stopping later compatible merges",
+          "[render][batcher][issue-646]") {
+    DrawBatcher b;
+
+    b.begin();
+    b.record({0, 0, 10, 10}, 5);
+    b.record({5, 0, 20, 10}, 99);
+    b.record({20, 0, 10, 10}, 5);
+    b.record({40, 0, 10, 10}, 5);
+    const auto stats = b.end();
+
+    REQUIRE(stats.draws_before == 4);
+    REQUIRE(stats.draws_after == 3);
+    REQUIRE(stats.batches_merged == 1);
+
+    REQUIRE(b.entries().size() == 3);
+    REQUIRE(b.entries()[0].state_key == 5);
+    REQUIRE(b.entries()[0].bounds.x == 0.0f);
+    REQUIRE(b.entries()[0].bounds.w == 10.0f);
+    REQUIRE(b.entries()[1].state_key == 99);
+    REQUIRE(b.entries()[2].state_key == 5);
+    REQUIRE(b.entries()[2].bounds.x == 20.0f);
+    REQUIRE(b.entries()[2].bounds.w == 30.0f);
+}
+
+TEST_CASE("DrawBatcher begin resets entries and stats after a blocked pass",
+          "[render][batcher][issue-646]") {
+    DrawBatcher b;
+
+    b.begin();
+    b.record({0, 0, 10, 10}, 6);
+    b.record({5, 0, 20, 10}, 99);
+    b.record({20, 0, 10, 10}, 6);
+    const auto blocked_stats = b.end();
+
+    REQUIRE(blocked_stats.draws_before == 3);
+    REQUIRE(blocked_stats.draws_after == 3);
+    REQUIRE(blocked_stats.batches_merged == 0);
+    REQUIRE(b.entries().size() == 3);
+
+    b.begin();
+    REQUIRE(b.entries().empty());
+    b.record({100, 20, 5, 5}, 6);
+    b.record({110, 20, 5, 5}, 6);
+    const auto reset_stats = b.end();
+
+    REQUIRE(reset_stats.draws_before == 2);
+    REQUIRE(reset_stats.draws_after == 1);
+    REQUIRE(reset_stats.batches_merged == 1);
+    REQUIRE(b.entries().size() == 1);
+    REQUIRE(b.entries().front().bounds.x == 100.0f);
+    REQUIRE(b.entries().front().bounds.w == 15.0f);
+}
