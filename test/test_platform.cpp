@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/platform/platform.hpp>
+#include <pulp/platform/win/registry.hpp>
 
 using namespace pulp::platform;
 
@@ -39,5 +40,24 @@ TEST_CASE("Apple-specific detection", "[platform]") {
     REQUIRE(is_apple);
     REQUIRE((is_macos || is_ios));
     REQUIRE((current_compiler == Compiler::AppleClang || current_compiler == Compiler::Clang));
+}
+#endif
+
+#if !defined(_WIN32)
+TEST_CASE("Windows registry helpers fail closed on non-Windows platforms",
+          "[platform][registry][issue-640]") {
+    using namespace pulp::platform::win;
+
+    REQUIRE_FALSE(registry_read_string("HKCU", "Software\\Pulp", "InstallDir").has_value());
+    REQUIRE_FALSE(registry_read_string("HKEY_LOCAL_MACHINE", "", "").has_value());
+    REQUIRE_FALSE(registry_read_dword("HKLM", "Software\\Pulp", "Version").has_value());
+    REQUIRE_FALSE(registry_read_dword("not-a-root", "", "").has_value());
+
+    REQUIRE_FALSE(registry_write_string("HKCU", "Software\\Pulp", "InstallDir", "C:\\Pulp"));
+    REQUIRE_FALSE(registry_write_string("not-a-root", "", "", ""));
+    REQUIRE_FALSE(registry_write_dword("HKLM", "Software\\Pulp", "Version", 42));
+    REQUIRE_FALSE(registry_write_dword("not-a-root", "", "", 0));
+    REQUIRE_FALSE(registry_delete_value("HKCU", "Software\\Pulp", "InstallDir"));
+    REQUIRE_FALSE(registry_delete_value("not-a-root", "", ""));
 }
 #endif
