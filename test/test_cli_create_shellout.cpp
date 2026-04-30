@@ -200,6 +200,6 @@ TEST_CASE("pulp create --in-tree rejects output paths outside examples",
     REQUIRE_FALSE(fs::exists(out_dir));
     REQUIRE(r.stderr_output.find("--in-tree projects must live under")
             != std::string::npos);
-    REQUIRE(r.stderr_output.find((source_root() / "examples").string())
+    REQUIRE(r.stderr_output.find(native_path_string(source_root() / "examples"))
             != std::string::npos);
 }
