@@ -8,6 +8,11 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v0660"></a>
+## [0.66.0] - 2026-04-30
+
+- fix(view): on(id,'click',fn) auto-wires View::on_click (pulp #1006) ([#1008](https://github.com/danielraffel/pulp/pull/1008)) — catch-up bump; the original PR landed without a `chore: bump versions` commit due to a `shipyard pr` short-circuit when the branch was force-pushed before the bump step ran. See #1009 for the hardening that prevents this gap.
+
 <a id="v0650"></a>
 ## [0.65.0] - 2026-04-29
 
