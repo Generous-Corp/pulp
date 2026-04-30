@@ -1,10 +1,12 @@
 #include <catch2/catch_test_macros.hpp>
+#include <pulp/canvas/canvas.hpp>
 #include <pulp/view/table.hpp>
 #include <pulp/view/toolbar.hpp>
 #include <pulp/view/concertina_panel.hpp>
 #include <pulp/view/buttons.hpp>
 #include <pulp/view/lasso.hpp>
 
+using namespace pulp::canvas;
 using namespace pulp::view;
 
 // ── SimpleTableModel ────────────────────────────────────────────────────
@@ -176,6 +178,60 @@ TEST_CASE("TextButton disabled doesn't fire", "[gui][button]") {
     REQUIRE_FALSE(clicked);
 }
 
+TEST_CASE("TextButton paint covers enabled hover and disabled states",
+          "[gui][button][coverage]") {
+    TextButton btn("Render");
+    btn.set_bounds({0, 0, 120, 36});
+
+    RecordingCanvas canvas;
+    btn.paint(canvas);
+    REQUIRE(canvas.count(DrawCommand::Type::fill_rounded_rect) == 1);
+    REQUIRE(canvas.count(DrawCommand::Type::stroke_rect) == 1);
+    REQUIRE(canvas.count(DrawCommand::Type::fill_text) == 1);
+
+    canvas.clear();
+    btn.on_mouse_enter();
+    btn.paint(canvas);
+    REQUIRE(canvas.count(DrawCommand::Type::fill_rounded_rect) == 1);
+
+    canvas.clear();
+    btn.on_mouse_leave();
+    btn.set_enabled(false);
+    btn.paint(canvas);
+    REQUIRE(canvas.count(DrawCommand::Type::fill_text) == 1);
+    REQUIRE_FALSE(btn.is_enabled());
+}
+
+TEST_CASE("HyperlinkButton paint underlines only while hovered",
+          "[gui][button][coverage]") {
+    HyperlinkButton link("Docs", "https://example.invalid/docs");
+    link.set_bounds({0, 0, 160, 24});
+    REQUIRE(link.text() == "Docs");
+    REQUIRE(link.url() == "https://example.invalid/docs");
+
+    link.set_text("Guide");
+    link.set_url("https://example.invalid/guide");
+    REQUIRE(link.text() == "Guide");
+    REQUIRE(link.url() == "https://example.invalid/guide");
+
+    RecordingCanvas canvas;
+    link.paint(canvas);
+    REQUIRE(canvas.count(DrawCommand::Type::fill_text) == 1);
+    REQUIRE(canvas.count(DrawCommand::Type::stroke_line) == 0);
+
+    canvas.clear();
+    link.on_mouse_enter();
+    link.paint(canvas);
+    REQUIRE(canvas.count(DrawCommand::Type::fill_text) == 1);
+    REQUIRE(canvas.count(DrawCommand::Type::stroke_line) == 1);
+
+    link.on_mouse_down({4, 4});
+    link.on_mouse_leave();
+    canvas.clear();
+    link.paint(canvas);
+    REQUIRE(canvas.count(DrawCommand::Type::stroke_line) == 0);
+}
+
 // ── ArrowButton ─────────────────────────────────────────────────────────
 
 TEST_CASE("ArrowButton direction and click", "[gui][button]") {
@@ -187,6 +243,139 @@ TEST_CASE("ArrowButton direction and click", "[gui][button]") {
 
     btn.on_mouse_down({0, 0});
     REQUIRE(clicked);
+}
+
+TEST_CASE("ArrowButton paint covers all directions", "[gui][button][coverage]") {
+    RecordingCanvas canvas;
+    ArrowButton btn;
+    btn.set_bounds({0, 0, 24, 24});
+
+    for (auto direction : {ArrowDirection::up, ArrowDirection::down,
+                           ArrowDirection::left, ArrowDirection::right}) {
+        btn.set_direction(direction);
+        REQUIRE(btn.direction() == direction);
+        canvas.clear();
+        btn.paint(canvas);
+        REQUIRE(canvas.count(DrawCommand::Type::set_fill_color) == 1);
+    }
+}
+
+TEST_CASE("ShapeButton reports hover and pressed states to draw callback",
+          "[gui][button][coverage]") {
+    ShapeButton btn;
+    btn.set_bounds({0, 0, 32, 20});
+
+    RecordingCanvas canvas;
+    btn.paint(canvas);
+    REQUIRE(canvas.command_count() == 0);
+
+    bool saw_hover = false;
+    bool saw_pressed = false;
+    float last_width = 0.0f;
+    float last_height = 0.0f;
+    btn.set_shape([&](Canvas& canvas, float width, float height,
+                      bool hovered, bool pressed) {
+        last_width = width;
+        last_height = height;
+        saw_hover = saw_hover || hovered;
+        saw_pressed = saw_pressed || pressed;
+        canvas.fill_rect(0, 0, width, height);
+    });
+
+    btn.paint(canvas);
+    REQUIRE(last_width == 32.0f);
+    REQUIRE(last_height == 20.0f);
+    REQUIRE(canvas.count(DrawCommand::Type::fill_rect) == 1);
+
+    bool clicked = false;
+    btn.on_click = [&]() { clicked = true; };
+    btn.on_mouse_enter();
+    btn.on_mouse_down({2, 3});
+    canvas.clear();
+    btn.paint(canvas);
+    REQUIRE(clicked);
+    REQUIRE(saw_hover);
+    REQUIRE(saw_pressed);
+
+    btn.on_mouse_leave();
+    saw_hover = true;
+    saw_pressed = false;
+    canvas.clear();
+    btn.paint(canvas);
+    REQUIRE_FALSE(saw_pressed);
+}
+
+TEST_CASE("ImageButton chooses normal hover and pressed image paths",
+          "[gui][button][coverage]") {
+    ImageButton btn;
+    btn.set_bounds({0, 0, 48, 24});
+
+    RecordingCanvas canvas;
+    btn.paint(canvas);
+    REQUIRE(canvas.count(DrawCommand::Type::draw_image) == 0);
+
+    btn.set_image("normal.png");
+    btn.set_hover_image("hover.png");
+    btn.set_pressed_image("pressed.png");
+
+    canvas.clear();
+    btn.paint(canvas);
+    REQUIRE(canvas.count(DrawCommand::Type::draw_image) == 1);
+    REQUIRE(canvas.commands().back().text == "normal.png");
+
+    btn.on_mouse_enter();
+    canvas.clear();
+    btn.paint(canvas);
+    REQUIRE(canvas.commands().back().text == "hover.png");
+
+    bool clicked = false;
+    btn.on_click = [&]() { clicked = true; };
+    btn.on_mouse_down({1, 1});
+    canvas.clear();
+    btn.paint(canvas);
+    REQUIRE(clicked);
+    REQUIRE(canvas.commands().back().text == "pressed.png");
+
+    btn.on_mouse_leave();
+    canvas.clear();
+    btn.paint(canvas);
+    REQUIRE(canvas.commands().back().text == "normal.png");
+
+    ImageButton fallback;
+    fallback.set_bounds({0, 0, 48, 24});
+    fallback.set_image("fallback.png");
+
+    fallback.on_mouse_enter();
+    canvas.clear();
+    fallback.paint(canvas);
+    REQUIRE(canvas.commands().back().text == "fallback.png");
+
+    fallback.on_mouse_down({1, 1});
+    canvas.clear();
+    fallback.paint(canvas);
+    REQUIRE(canvas.commands().back().text == "fallback.png");
+}
+
+TEST_CASE("ResizableCorner paints grip and reports drag deltas",
+          "[gui][button][coverage]") {
+    ResizableCorner corner;
+    corner.set_bounds({0, 0, 16, 16});
+
+    RecordingCanvas canvas;
+    corner.paint(canvas);
+    REQUIRE(canvas.count(DrawCommand::Type::stroke_line) == 3);
+
+    float dx = 0.0f;
+    float dy = 0.0f;
+    corner.on_resize = [&](float x, float y) {
+        dx = x;
+        dy = y;
+    };
+
+    corner.on_mouse_down({4, 5});
+    corner.on_mouse_drag({12, 2});
+    REQUIRE(dx == 8.0f);
+    REQUIRE(dy == -3.0f);
 }
 
 // ── LassoComponent ──────────────────────────────────────────────────────
