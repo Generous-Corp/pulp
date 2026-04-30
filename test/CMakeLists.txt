@@ -1453,6 +1453,11 @@ add_executable(pulp-test-ui-components test_ui_components.cpp)
 target_link_libraries(pulp-test-ui-components PRIVATE pulp::view Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-ui-components)
 
+# GraphEditorView tests
+add_executable(pulp-test-graph-editor-view test_graph_editor_view.cpp)
+target_link_libraries(pulp-test-graph-editor-view PRIVATE pulp::view Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-graph-editor-view)
+
 # Modal overlay tests
 add_executable(pulp-test-modal test_modal.cpp)
 target_link_libraries(pulp-test-modal PRIVATE pulp::view Catch2::Catch2WithMain)
