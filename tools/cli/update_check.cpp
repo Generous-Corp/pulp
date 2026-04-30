@@ -301,7 +301,9 @@ std::vector<std::string> split_lines(const std::string& s) {
 }
 
 bool line_is_section_header(const std::string& line, std::string* section_out) {
-    auto t = trim(line);
+    auto hash = line.find('#');
+    auto effective = (hash == std::string::npos) ? line : line.substr(0, hash);
+    auto t = trim(effective);
     if (t.size() < 2 || t.front() != '[' || t.back() != ']') return false;
     auto name = trim(t.substr(1, t.size() - 2));
     if (section_out) *section_out = name;

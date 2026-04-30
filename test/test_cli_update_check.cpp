@@ -176,6 +176,30 @@ TEST_CASE("parse_semver handles common shapes", "[cli][update-check][issue-547]"
     REQUIRE_FALSE(d.ok);
 }
 
+TEST_CASE("parse_semver tolerates release tag boundaries",
+          "[cli][update-check][issue-547][issue-643]") {
+    auto upper = uc::parse_semver("V2.4.6");
+    REQUIRE(upper.ok);
+    REQUIRE(upper.major == 2);
+    REQUIRE(upper.minor == 4);
+    REQUIRE(upper.patch == 6);
+
+    auto build = uc::parse_semver("1.2.3+build.7");
+    REQUIRE(build.ok);
+    REQUIRE(build.major == 1);
+    REQUIRE(build.minor == 2);
+    REQUIRE(build.patch == 3);
+
+    auto extra = uc::parse_semver("3.4.5.6");
+    REQUIRE(extra.ok);
+    REQUIRE(extra.major == 3);
+    REQUIRE(extra.minor == 4);
+    REQUIRE(extra.patch == 5);
+
+    REQUIRE_FALSE(uc::parse_semver("1.two.3").ok);
+    REQUIRE_FALSE(uc::parse_semver("1..3").ok);
+}
+
 TEST_CASE("is_newer compares correctly", "[cli][update-check][issue-547]") {
     REQUIRE(uc::is_newer("0.27.0", "0.28.0"));
     REQUIRE(uc::is_newer("0.27.0", "1.0.0"));
@@ -237,6 +261,32 @@ TEST_CASE("write_toml_key_in_section appends key to existing section",
     REQUIRE(uc::read_toml_key_in_section(out, "update", "check_interval_hours") == "12");
     REQUIRE(uc::read_toml_key_in_section(out, "update", "mode") == "prompt");
     REQUIRE(uc::read_toml_key_in_section(out, "create", "projects_dir") == "~/dev");
+}
+
+TEST_CASE("write_toml_key_in_section respects adjacent sections and inline section comments",
+          "[cli][update-check][issue-547][issue-643]") {
+    std::string src =
+        "[update] # user preferences\n"
+        "\n"
+        "[create]\n"
+        "projects_dir = \"~/dev\"\n";
+
+    auto out = uc::write_toml_key_in_section(src, "update", "mode", "manual");
+    REQUIRE(uc::read_toml_key_in_section(out, "update", "mode") == "manual");
+    REQUIRE(uc::read_toml_key_in_section(out, "create", "projects_dir") == "~/dev");
+
+    auto update_pos = out.find("[update]");
+    auto mode_pos = out.find("mode = \"manual\"");
+    auto create_pos = out.find("[create]");
+    REQUIRE(update_pos != std::string::npos);
+    REQUIRE(mode_pos != std::string::npos);
+    REQUIRE(create_pos != std::string::npos);
+    REQUIRE(update_pos < mode_pos);
+    REQUIRE(mode_pos < create_pos);
+
+    auto replaced = uc::write_toml_key_in_section(out, "update", "mode", "off");
+    REQUIRE(uc::read_toml_key_in_section(replaced, "update", "mode") == "off");
+    REQUIRE(replaced.find("mode = \"manual\"") == std::string::npos);
 }
 
 TEST_CASE("read_toml_key_in_section ignores commented examples",
