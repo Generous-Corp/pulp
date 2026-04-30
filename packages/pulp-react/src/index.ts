@@ -95,7 +95,7 @@ export type {
     ProgressProps, XYPadProps, CheckboxProps, ToggleProps, ComboProps,
     ListBoxProps, CanvasProps, ImageProps, IconProps,
     FlexDirection, FlexAlign, FlexAlignSelf, FlexJustify,
-    FlexProps, StyleProps, BaseProps,
+    FlexProps, StyleProps, HoverProps, BaseProps,
     IntrinsicElementMap, IntrinsicElementName,
     PulpContainer,
 } from './types.js';

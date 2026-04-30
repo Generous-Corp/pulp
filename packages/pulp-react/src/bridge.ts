@@ -108,6 +108,14 @@ declare global {
     // ── Theme ───────────────────────────────────────────────────────
     function setTheme(name: 'dark' | 'light' | 'pro_audio' | string): void;
 
+    // ── Event opt-in registrars ─────────────────────────────────────
+    /// Arm `mouseenter` / `mouseleave` dispatch on a widget. Must be
+    /// called once per widget that has an `onMouseEnter` / `onMouseLeave`
+    /// (or `onPointerEnter` / `onPointerLeave`) handler — otherwise the
+    /// listener registered via `on(id, 'mouseenter', fn)` stays dormant.
+    /// pulp #1149.
+    function registerHover(id: string): void;
+
     // ── Layout flush + frame service ────────────────────────────────
     /// Force a layout pass on the root container. Used in
     /// `resetAfterCommit` so the host config owns commit-time flush.
@@ -144,7 +152,7 @@ export function createMockBridge(): MockBridge {
         'setBorderSide', 'setOpacity', 'setVisible', 'setPosition',
         'setText', 'setTextColor', 'setTextAlign',
         'setSpectrumData', 'setWaveformData', 'setMeterLevel', 'setProgress',
-        'setValue', 'setTheme', 'layout', 'on',
+        'setValue', 'setTheme', 'layout', 'on', 'registerHover',
     ];
     const saved: Record<string, unknown> = {};
     return {

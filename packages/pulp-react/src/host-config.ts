@@ -18,7 +18,7 @@ import type {
     PulpContainer,
     IntrinsicElementName,
 } from './types.js';
-import { applyAllProps, applyChangedProps } from './prop-applier.js';
+import { applyAllProps, applyChangedProps, clearHoverFor } from './prop-applier.js';
 
 type Type = IntrinsicElementName;
 type Props = Record<string, unknown>;
@@ -173,7 +173,7 @@ export const PulpHostConfig: HostConfig<
         // (Codex + RepoPrompt review both flagged the original plan that
         // tried createX(id, parent) here as the wrong lifecycle point.)
         const id = (props.id as string) ?? autoId(rootContainer);
-        return {
+        const inst: Instance = {
             id,
             type,
             // parentId stays undefined until attached
@@ -182,6 +182,10 @@ export const PulpHostConfig: HostConfig<
             onBridge: false,
             pendingChildren: [],
         };
+        // Track the instance so removeChild can walk its subtree
+        // and clear hover bookkeeping for descendants (pulp #1149).
+        instanceById.set(id, inst);
+        return inst;
     },
 
     createTextInstance(
@@ -204,14 +208,16 @@ export const PulpHostConfig: HostConfig<
         // reconciler treats it as an opaque host-text type, but our
         // appendChild path will materialize it via createLabel + setText
         // when its parent attaches.
-        return {
+        const inst: Instance = {
             id,
             type: 'Label',
             props: { children: String(text), text: String(text) },
             childIds: [],
             onBridge: false,
             pendingChildren: [],
-        } as unknown as TextInstance;
+        };
+        instanceById.set(id, inst);
+        return inst as unknown as TextInstance;
     },
 
     shouldSetTextContent(type, _props) {
@@ -271,6 +277,10 @@ export const PulpHostConfig: HostConfig<
     removeChildFromContainer(_container, child) {
         // Detach from root and let the bridge clean up the subtree.
         if (typeof g.removeWidget === 'function') call('removeWidget', child.id);
+        // Mirror detach()'s hover bookkeeping cleanup (pulp #1149) —
+        // recursive because removeWidget destroys the whole subtree on
+        // the native side.
+        clearHoverForSubtree(child);
     },
 
     clearContainer(_container) {
@@ -404,8 +414,43 @@ function detach(parent: Instance, child: Instance): void {
     const idx = parent.childIds.indexOf(child.id);
     if (idx >= 0) parent.childIds.splice(idx, 1);
     if (typeof g.removeWidget === 'function') call('removeWidget', child.id);
+    // Clear hover-armed bookkeeping so a re-mount under the same id
+    // re-arms registerHover (pulp #1149). Native side already dropped
+    // its on_hover_enter/leave closures when removeWidget destroyed
+    // the View — there's no unregisterHover primitive needed.
+    // Recursive because removeWidget walks the whole subtree on the
+    // native side; descendants would otherwise be left with stale
+    // hoverArmed entries.
+    clearHoverForSubtree(child);
     child.parentId = undefined;
 }
+
+/// Recursively clear hover bookkeeping for a widget and all its
+/// descendants. React's commitDeletion only calls removeChild on the
+/// root of the deleted subtree — descendants are NOT torn down via
+/// per-child host-config calls — but native `removeWidget(parent)`
+/// recursively destroys child Views. So we must walk our own
+/// instance graph here to keep `hoverArmed` in sync (pulp #1149,
+/// Codex P1 review).
+function clearHoverForSubtree(node: Instance): void {
+    clearHoverFor(node.id);
+    for (const childId of node.childIds) {
+        const childInst = instanceById.get(childId);
+        if (childInst) clearHoverForSubtree(childInst);
+        else clearHoverFor(childId); // best-effort if descendant ref is gone
+    }
+    instanceById.delete(node.id);
+}
+
+/// id → Instance registry, populated at createInstance and cleared
+/// when an instance is detached. Lets us walk the subtree of a
+/// removed node so hover bookkeeping stays consistent with the
+/// native side's recursive removeWidget. Module-scope (single
+/// renderer per JS engine, matching the createReactReconciler call
+/// in index.ts) so test isolation between separate render() calls
+/// in the same engine does NOT cross-contaminate — but the entries
+/// live only as long as React keeps the corresponding instance.
+const instanceById: Map<string, Instance> = new Map();
 
 // ── Auto-ID generation ─────────────────────────────────────────────
 function autoId(container: Container): string {

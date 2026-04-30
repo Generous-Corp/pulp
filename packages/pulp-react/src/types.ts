@@ -61,7 +61,7 @@ export interface StyleProps {
 }
 
 // ── Common base props ──────────────────────────────────────────────
-export interface BaseProps extends FlexProps, StyleProps {
+export interface BaseProps extends FlexProps, StyleProps, HoverProps {
     /// Optional explicit ID. If omitted, an auto-incrementing ID is
     /// generated. Useful for testing + debugging the bridge log.
     id?: string;
@@ -69,6 +69,19 @@ export interface BaseProps extends FlexProps, StyleProps {
     key?: Key;
     /// Children — text or other intrinsics.
     children?: ReactNode;
+}
+
+// ── Hover / pointer-enter handlers ──────────────────────────────────
+// pulp #1149: any widget can opt into hover dispatch by attaching one
+// of these handlers. The prop-applier auto-arms `registerHover(id)` and
+// aliases the pointer-shaped names to mouseenter / mouseleave (the
+// native bridge only dispatches mouse-enter/leave, not pointer-enter/
+// leave).
+export interface HoverProps {
+    onMouseEnter?: () => void;
+    onMouseLeave?: () => void;
+    onPointerEnter?: () => void;
+    onPointerLeave?: () => void;
 }
 
 // ── Container intrinsics ────────────────────────────────────────────

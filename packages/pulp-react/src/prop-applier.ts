@@ -59,19 +59,81 @@ function isEventHandler(key: string): boolean {
     return key.startsWith('on') && key.length > 2 && key[2] === key[2]?.toUpperCase();
 }
 
+/// React-style hover-shaped handlers. When any of these is set, the
+/// native bridge needs `registerHover(id)` called once to arm the
+/// `mouseenter` / `mouseleave` dispatch (pulp #1149). The four prop
+/// names all share the SAME native dispatch — the bridge only fires
+/// `mouseenter` / `mouseleave`, so onPointerEnter / onPointerLeave
+/// must be aliased to those event names or the listener never runs.
+const HOVER_PROPS: Set<string> = new Set([
+    'onMouseEnter',
+    'onMouseLeave',
+    'onPointerEnter',
+    'onPointerLeave',
+]);
+
 /// Map a React-style on* prop to the bridge event name. The bridge
 /// dispatches:
 ///   on_click → 'click'        (Button, Panel, etc.)
 ///   on_change → 'change'      (Knob, Fader, Checkbox, TextEditor)
 ///   on_toggle → 'toggle'      (Toggle, ToggleButton)
-///   mouseenter / mouseleave   (Hover)
+///   mouseenter / mouseleave   (Hover; onPointerEnter / onPointerLeave
+///                              alias here too because registerHover
+///                              only dispatches mouseenter / mouseleave)
 ///   dismiss                   (Modal close)
 function eventNameFor(propName: string): string {
+    // pulp #1149: alias pointer-enter/leave to mouse-enter/leave so the
+    // listener key matches what __dispatch__ sends from registerHover.
+    if (propName === 'onPointerEnter') return 'mouseenter';
+    if (propName === 'onPointerLeave') return 'mouseleave';
     return propName.slice(2).toLowerCase();
+}
+
+/// Track which widget ids have already had `registerHover` called so
+/// we don't re-arm when a second hover-shaped handler (e.g. consumer
+/// sets both onMouseEnter AND onPointerEnter) lands on the same widget,
+/// or when applyChangedProps fires for an already-armed widget.
+///
+/// The bridge's JS preamble (widget_bridge.cpp:483-518) ALSO auto-arms
+/// `registerHover` from `on(id, 'mouseenter'|'mouseleave', fn)` via
+/// __ensureNativeRegistered__. Calling `registerHover` here is therefore
+/// idempotent on the native side (the C++ map assignment is a no-op
+/// rebind), and our local `hoverArmed` set just shaves the redundant
+/// JS→native call. Defensive armor: mock-bridge tests and any older
+/// preamble that lacks the auto-arm still get the correct behavior
+/// because we call registerHover explicitly.
+///
+/// Native cleanup is automatic — `removeWidget` destroys the View and
+/// its `on_hover_enter` / `on_hover_leave` closures with it. There is
+/// no `unregisterHover` primitive on the bridge today (filed as a
+/// follow-up; non-blocking because the closures don't outlive the
+/// widget). We clear the bookkeeping entry on unmount via `clearHoverFor`
+/// so a future re-mount under the same id (test harnesses, hot-reload)
+/// re-arms cleanly.
+const hoverArmed: Set<string> = new Set();
+
+function ensureHoverArmed(id: string): void {
+    if (hoverArmed.has(id)) return;
+    hoverArmed.add(id);
+    call('registerHover', id);
+}
+
+/// Drop the bookkeeping entry for a widget id. Called from the host
+/// config's removeChild path. The host config is responsible for
+/// recursing over its own subtree (it owns `childIds`); this function
+/// only clears the single id passed in.
+export function clearHoverFor(id: string): void {
+    hoverArmed.delete(id);
 }
 
 function applyEventHandler(id: string, key: string, value: unknown): void {
     if (typeof value !== 'function') return;
+    // Hover dispatch is opt-in on the native side: registering an
+    // 'on' listener for 'mouseenter' / 'mouseleave' is necessary but
+    // not sufficient — the bridge's `registerHover(id)` is what wires
+    // View::on_hover_enter / on_hover_leave to fire __dispatch__.
+    // Without this call the listener stays dormant (pulp #1149).
+    if (HOVER_PROPS.has(key)) ensureHoverArmed(id);
     const eventName = eventNameFor(key);
     // Wrap the React handler so the bridge's __dispatch__ can call it.
     // The bridge passes positional args after id+eventName; just forward.
