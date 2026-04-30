@@ -593,6 +593,48 @@ TEST_CASE("cmd_add and cmd_remove stay local on failure and success paths",
     REQUIRE(load_lock_file(tmp.path / "packages.lock.json").packages.empty());
 }
 
+TEST_CASE("cmd_add writes unguarded generated cmake and cmd_remove deletes last generated file",
+          "[cli][package-commands][add-remove][issue-643]") {
+    TempDir tmp;
+    write_project_scaffold(tmp.path);
+    write_registry_fixture(tmp.path);
+    REQUIRE(write_project_targets(
+        tmp.path,
+        {PlatformTarget{"macOS", "arm64"}, PlatformTarget{"Windows", "x64"}}));
+    REQUIRE(save_lock_file(tmp.path / "packages.lock.json", make_lock({})));
+
+    auto added = run_in_project(tmp.path, [&] { return cmd_add({"signalsmith-dsp"}); });
+    REQUIRE(added.exit_code == 0);
+    REQUIRE(added.stdout_text.find("Added Signalsmith DSP v1.2.0") != std::string::npos);
+    REQUIRE(added.stdout_text.find("target_link_libraries") != std::string::npos);
+
+    const auto cmake_path = tmp.path / "cmake" / "pulp-packages.cmake";
+    REQUIRE(fs::exists(cmake_path));
+    auto cmake = read_file(cmake_path);
+    REQUIRE(cmake.find("include(FetchContent)") != std::string::npos);
+    REQUIRE(cmake.find("FetchContent_Declare(signalsmith-dsp") != std::string::npos);
+    REQUIRE(cmake.find("GIT_REPOSITORY https://example.com/signalsmith.git") !=
+            std::string::npos);
+    REQUIRE(cmake.find("GIT_TAG        v1.2.0") != std::string::npos);
+    REQUIRE(cmake.find("add_library(signalsmith::dsp INTERFACE)") != std::string::npos);
+    REQUIRE(cmake.find("target_include_directories(signalsmith::dsp INTERFACE") !=
+            std::string::npos);
+    REQUIRE(read_file(tmp.path / "CMakeLists.txt")
+                .find("include(cmake/pulp-packages.cmake OPTIONAL)") != std::string::npos);
+    REQUIRE(load_lock_file(tmp.path / "packages.lock.json")
+                .packages.count("signalsmith-dsp") == 1);
+
+    auto removed = run_in_project(tmp.path, [&] { return cmd_remove({"signalsmith-dsp"}); });
+    REQUIRE(removed.exit_code == 0);
+    REQUIRE(removed.stdout_text.find("Removed Signalsmith DSP") != std::string::npos);
+    REQUIRE_FALSE(fs::exists(cmake_path));
+    REQUIRE(load_lock_file(tmp.path / "packages.lock.json").packages.empty());
+    REQUIRE(read_file(tmp.path / "DEPENDENCIES.md").find("Signalsmith DSP") ==
+            std::string::npos);
+    REQUIRE(read_file(tmp.path / "NOTICE.md").find("## Signalsmith DSP") ==
+            std::string::npos);
+}
+
 TEST_CASE("cmd_add covers guarded installs and installed-version guards",
           "[cli][package-commands][add-remove][issue-643]") {
     TempDir tmp;
