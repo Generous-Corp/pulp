@@ -193,14 +193,40 @@ TEST_CASE("base64 decode invalid", "[runtime][base64]") {
 TEST_CASE("base64 decode rejects malformed padding", "[runtime][base64][issue-641]") {
     REQUIRE_FALSE(base64_decode("A").has_value());
     REQUIRE_FALSE(base64_decode("YQ=").has_value());
+    REQUIRE_FALSE(base64_decode("Y=Q=").has_value());
     REQUIRE_FALSE(base64_decode("YQ==Z").has_value());
     REQUIRE_FALSE(base64_decode("YQ===").has_value());
+    REQUIRE_FALSE(base64_decode("====").has_value());
 }
 
 TEST_CASE("base64 decode permits whitespace around terminal padding", "[runtime][base64][issue-641]") {
     auto decoded = base64_decode(" YQ = = \n");
     REQUIRE(decoded.has_value());
     REQUIRE(std::string(decoded->begin(), decoded->end()) == "a");
+}
+
+TEST_CASE("base64 decode handles whitespace and unpadded tail groups", "[runtime][base64][issue-641]") {
+    auto empty = base64_decode(" \n\r\t");
+    REQUIRE(empty.has_value());
+    REQUIRE(empty->empty());
+
+    auto one_byte = base64_decode("YQ");
+    REQUIRE(one_byte.has_value());
+    REQUIRE(std::string(one_byte->begin(), one_byte->end()) == "a");
+
+    auto two_bytes = base64_decode("YWI");
+    REQUIRE(two_bytes.has_value());
+    REQUIRE(std::string(two_bytes->begin(), two_bytes->end()) == "ab");
+
+    auto with_whitespace = base64_decode(" SGV sbG8=\n");
+    REQUIRE(with_whitespace.has_value());
+    REQUIRE(std::string(with_whitespace->begin(), with_whitespace->end()) == "Hello");
+}
+
+TEST_CASE("base64 decode rejects non-ascii bytes", "[runtime][base64][issue-641]") {
+    std::string encoded = "YQ";
+    encoded.push_back(static_cast<char>(0x80));
+    REQUIRE_FALSE(base64_decode(encoded).has_value());
 }
 
 TEST_CASE("base64 binary round-trip", "[runtime][base64]") {
