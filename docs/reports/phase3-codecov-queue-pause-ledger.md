@@ -17,6 +17,19 @@ This local ledger records the open `codecov` PR validation runs paused to free N
 - Queued/in-progress Codecov-branch workflow runs selected for cancellation: 193
 - Selected workflows: Build and Test, Coverage, Sanitizer Tests
 
+## Cancellation Result
+
+- Cancellation pass completed on 2026-04-30 EDT.
+- Cancellation requests submitted successfully for all 193 recorded runs.
+- A few runs completed while cancellation was in flight; sticky queued
+  runs for #1133 and #1134 required a second cancellation request.
+- Final verification after GitHub settled: 0 queued or in-progress
+  workflow runs remained for the open `codecov` PR branches in this
+  snapshot.
+- Expected side effect: cancelled validation attempts may leave PRs
+  `BLOCKED` or `UNSTABLE` until the queue is reopened and fresh
+  validation runs are dispatched.
+
 ## Cancelled/Paused Runs
 
 | PR | State | Branch | Head | Runs | Title |
