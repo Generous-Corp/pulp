@@ -11,8 +11,15 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 <a id="v0660"></a>
 ## [0.66.0] - 2026-04-30
 
-- fix(view): on(id,'click',fn) auto-wires View::on_click (pulp #1006) ([#1008](https://github.com/danielraffel/pulp/pull/1008)) — landed without a bump commit due to a `shipyard pr` short-circuit; this bump rolls it into the same release as #964
-- fix(view): register canvasFillRect bridge name so HTML5 ctx.fillRect() reaches the bridge (pulp #964) — JS-side bridge name mismatch; the web-compat shim called `canvasFillRect` but the bridge only registered `canvasRect`, so every `ctx.fillRect()` silently no-op'd. Both names now register the same handler.
+- fix(view): register canvasFillRect bridge name (pulp #964) ([#1012](https://github.com/danielraffel/pulp/pull/1012))
+- test(host): cover graph serializer edge paths ([#1017](https://github.com/danielraffel/pulp/pull/1017))
+- test(cli): cover package cmake lifecycle ([#1019](https://github.com/danielraffel/pulp/pull/1019))
+- test(midi): cover mpe voice tracker tail cases ([#1018](https://github.com/danielraffel/pulp/pull/1018))
+- test(cli): cover update check parser edges ([#1014](https://github.com/danielraffel/pulp/pull/1014))
+- fix(cli): reject partial run frame counts ([#1000](https://github.com/danielraffel/pulp/pull/1000))
+- test(cli): cover project command edge paths ([#999](https://github.com/danielraffel/pulp/pull/999))
+- test(cli): cover package registry cache edges ([#997](https://github.com/danielraffel/pulp/pull/997))
+- fix(view): on(id,'click',fn) auto-wires View::on_click (pulp #1006) ([#1008](https://github.com/danielraffel/pulp/pull/1008))
 
 <a id="v0650"></a>
 ## [0.65.0] - 2026-04-29
@@ -920,6 +927,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.66.0]: https://github.com/danielraffel/pulp/releases/tag/v0.66.0
 [0.65.0]: https://github.com/danielraffel/pulp/releases/tag/v0.65.0
 [0.64.0]: https://github.com/danielraffel/pulp/releases/tag/v0.64.0
 [0.63.0]: https://github.com/danielraffel/pulp/releases/tag/v0.63.0
