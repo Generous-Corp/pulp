@@ -1299,6 +1299,21 @@ TEST_CASE("MultiChannelMeter clamps process channel count to prepared channels",
     REQUIRE_THAT(snap.channels[1].peak, WithinAbs(0.0f, 1e-6f));
 }
 
+TEST_CASE("MultiChannelMeter clamps negative process channel counts",
+          "[signal][meter][issue-645]") {
+    MultiChannelMeter meter;
+    meter.prepare(100.0f, 1);
+
+    float sample[] = {1.0f};
+    const float* channels[] = {sample};
+    meter.process(channels, -1, 1);
+
+    const auto& snap = meter.snapshot();
+    REQUIRE(snap.num_channels == 0);
+    REQUIRE_THAT(snap.channels[0].peak, WithinAbs(0.0f, 1e-6f));
+    REQUIRE_FALSE(snap.channels[0].clipped);
+}
+
 TEST_CASE("MultiChannelBallistics holds peaks and clip indicators", "[signal][meter]") {
     MultiChannelBallistics ballistics;
 
