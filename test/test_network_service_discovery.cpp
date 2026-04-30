@@ -323,6 +323,7 @@ TEST_CASE("NSD backend swap clears discoveries without lost callback",
     NetworkServiceDiscovery nsd;
     auto backend = std::make_unique<FakeBackend>();
     auto log = backend->log;
+
     nsd.install_backend(std::move(backend));
 
     NetworkServiceDiscovery::Service s;
@@ -337,6 +338,27 @@ TEST_CASE("NSD backend swap clears discoveries without lost callback",
     REQUIRE(log->stopped == 1);
     REQUIRE(nsd.has_backend());
     REQUIRE(nsd.discovered().empty());
+}
+
+TEST_CASE("NSD removing backend with no lost handler still clears cache",
+          "[events][service-discovery][lifecycle][issue-642]") {
+    NetworkServiceDiscovery nsd;
+    auto backend = std::make_unique<FakeBackend>();
+    auto log = backend->log;
+
+    nsd.install_backend(std::move(backend));
+
+    NetworkServiceDiscovery::Service s;
+    s.name = "alpha";
+    s.type = "_pulp._tcp";
+    s.port = 1;
+    nsd.notify_service_found(s);
+    REQUIRE(nsd.discovered().size() == 1);
+
+    nsd.install_backend(nullptr);
+    REQUIRE_FALSE(nsd.has_backend());
+    REQUIRE(nsd.discovered().empty());
+    REQUIRE(log->stopped == 1);
 }
 
 TEST_CASE("NSD keys discoveries and loss by service name plus type",
@@ -385,6 +407,17 @@ TEST_CASE("MountedVolumeListChangeDetector returns a sorted platform snapshot",
 
     auto volumes = MountedVolumeListChangeDetector::get_mounted_volumes();
     REQUIRE(std::is_sorted(volumes.begin(), volumes.end()));
+}
+
+TEST_CASE("MountedVolumeListChangeDetector stop before start is idempotent",
+          "[events][volume][lifecycle][issue-642]") {
+    MountedVolumeListChangeDetector detector;
+
+    REQUIRE_FALSE(detector.is_running());
+    detector.stop();
+    REQUIRE_FALSE(detector.is_running());
+    detector.stop();
+    REQUIRE_FALSE(detector.is_running());
 }
 
 TEST_CASE("MountedVolumeListChangeDetector start and stop are idempotent",
