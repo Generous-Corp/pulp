@@ -335,6 +335,18 @@ TEST_CASE("read_registry skips malformed and mixed-shape JSON entries",
         REQUIRE(list[0].path == fs::path("/tmp/unicode"));
         REQUIRE(list[0].name == "Unicode ?");
     }
+
+    {
+        auto reg = tmp.path / "terminal-non-object.json";
+        write_file(reg, R"({"projects": ["not an object"]})");
+        REQUIRE(read_registry(reg).empty());
+    }
+
+    {
+        auto reg = tmp.path / "bad-separator-after-non-object.json";
+        write_file(reg, R"({"projects": ["not an object": true]})");
+        REQUIRE(read_registry(reg).empty());
+    }
 }
 
 TEST_CASE("read_registry tolerates forward-compatible non-string fields",
