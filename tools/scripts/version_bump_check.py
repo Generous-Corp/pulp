@@ -11,6 +11,20 @@ needs a version bump (patch/minor/major). Three modes:
             Used by `pulp pr` to make bumps automatic.
     hint    advisory text only; always exits 0. Used by agent hooks.
 
+Additional flag:
+
+    --require-bump-for-fix-feat
+        When set, asserts that PRs whose title carries a Conventional
+        Commits `fix:` or `feat:` prefix (parsed from $GITHUB_PR_TITLE
+        or --pr-title) include either a `chore: bump versions` commit
+        in the diff range OR a `Version-Bump: skip reason="..."` trailer
+        on the tip commit. This is the structural fix for the 2026-04-30
+        incident where PR #1008 (a `fix(view):` user-facing fix) merged
+        without an accompanying bump and consumers got stuck on an
+        un-released main. Runs additively — the existing per-surface
+        verdict pipeline is unchanged. Independent of `--mode`; if
+        enabled it can fail even when the per-surface verdicts pass.
+
 Heuristics (per surface, deliberately conservative):
     - If only internal_only_paths changed       → patch-suggested
     - If any public_api_paths changed (non-comment/whitespace diff)
@@ -801,6 +815,130 @@ def apply_bumps(
     return edited
 
 
+# ── PR-title fix/feat-needs-bump check ─────────────────────────────────
+
+
+# Conventional Commits prefix for user-facing changes that must ship
+# with a version bump. We accept `fix:` and `feat:` (with optional
+# `(scope)` suffix) — `chore:`, `docs:`, `test:`, `refactor:`,
+# `perf:`, `style:`, `build:`, `ci:`, `revert:` are explicitly NOT
+# user-facing release events. `feat!:` and `fix!:` are still caught
+# (the `!` lives between `feat`/`fix` and the colon).
+_FIX_FEAT_TITLE_RE = re.compile(r"^(fix|feat)(\([^)]*\))?!?:\s")
+
+
+def _is_fix_or_feat_title(title: str) -> bool:
+    return bool(_FIX_FEAT_TITLE_RE.match(title.strip()))
+
+
+def _range_has_bump_commit(base: str, head: str) -> bool:
+    """True iff any commit in base..head has a subject starting with
+    `chore: bump versions`. This is the canonical subject `pulp pr`
+    writes when `version_bump_check.py --mode=apply` rewrote a version
+    file. Using subject prefix instead of trailer matching keeps the
+    check robust against squash-merge subject mangling.
+    """
+    for _sha, subject, _body in git_log_subjects_and_bodies(base, head):
+        s = subject.strip().lower()
+        if s.startswith("chore: bump versions") or s.startswith("chore(versions): bump"):
+            return True
+    return False
+
+
+def _range_has_version_bump_skip_trailer(base: str, head: str) -> bool:
+    """True iff ANY commit in base..head carries a top-level
+    `Version-Bump: skip reason="..."` trailer. Surface-specific skip
+    trailers (e.g. `sdk=skip`) are NOT honored here — to bypass the
+    fix/feat-needs-bump check entirely the author must say so
+    explicitly.
+
+    A non-empty reason is required; bare `Version-Bump: skip` is
+    rejected so the author has to record *why*.
+    """
+    trailers = git_range_trailers(base, head)
+    for value in trailers.get("version-bump", []):
+        # Accept `skip reason="..."` (no surface prefix) to opt out of
+        # the *entire* fix/feat check. Per-surface `<surface>=skip`
+        # trailers do NOT count — those are scoped to the per-surface
+        # verdict pipeline and should not silently bypass the
+        # user-facing-PR check.
+        m = re.match(r"^\s*skip\b(.*)$", value.strip(), re.IGNORECASE)
+        if not m:
+            continue
+        rest = m.group(1)
+        # Require a non-empty reason="..." (matching the documented
+        # bypass grammar — empty-reason bypasses are rejected).
+        rm = re.search(r'reason\s*=\s*"([^"]+)"', rest)
+        if rm and rm.group(1).strip():
+            return True
+    return False
+
+
+def check_fix_feat_requires_bump(
+    pr_title: str,
+    base: str,
+    head: str,
+) -> tuple[bool, str]:
+    """Returns (passed, message). `passed=True` means either:
+
+    - the PR title is not a `fix:` / `feat:` (no requirement), OR
+    - the title matches and the diff range contains a bump commit, OR
+    - the title matches and the tip commit carries a top-level
+      `Version-Bump: skip reason="..."` trailer.
+
+    Otherwise returns (False, error-with-suggestions).
+    """
+    if not pr_title or not pr_title.strip():
+        # Defensive: no title supplied means the workflow couldn't
+        # resolve $GITHUB_PR_TITLE. Don't false-fail the gate — the
+        # per-surface verdict is still authoritative.
+        return True, (
+            "fix/feat-needs-bump: PR title not provided; skipping check "
+            "(this is normal on push events and workflow_dispatch)."
+        )
+
+    if not _is_fix_or_feat_title(pr_title):
+        return True, (
+            f"fix/feat-needs-bump: PR title {pr_title!r} is not a "
+            "`fix:` or `feat:` user-facing change — no bump required."
+        )
+
+    if _range_has_bump_commit(base, head):
+        return True, (
+            f"fix/feat-needs-bump: PR title {pr_title!r} matches; "
+            "found `chore: bump versions` commit in the diff range — OK."
+        )
+
+    if _range_has_version_bump_skip_trailer(base, head):
+        return True, (
+            f"fix/feat-needs-bump: PR title {pr_title!r} matches; "
+            'no bump commit found, but a `Version-Bump: skip reason="..."` '
+            "trailer is present in the range — bypass honored."
+        )
+
+    return False, (
+        f"fix/feat-needs-bump: PR title {pr_title!r} is a user-facing "
+        "`fix:` / `feat:` change but the diff range contains NO commit "
+        "with subject `chore: bump versions` AND no top-level "
+        '`Version-Bump: skip reason="..."` trailer.\n'
+        "\n"
+        "User-facing fixes/features that land without a version bump "
+        "are stranded on main — `auto-release.yml` will not tag, and "
+        "consumers cannot reach the change. This is the structural "
+        "fix for the 2026-04-30 incident (PR #1008 → issue #1009).\n"
+        "\n"
+        "Resolution — pick one:\n"
+        "  • Run `shipyard pr` (or `pulp pr`) so version_bump_check "
+        "can apply the bump and append a `chore: bump versions` commit.\n"
+        "  • If the fix/feat is genuinely not user-facing (rare — "
+        "consider re-titling to `chore:` / `docs:` / `refactor:` "
+        "instead), add a top-level trailer to the tip commit:\n"
+        '      Version-Bump: skip reason="<why this fix doesn\'t need a release>"\n'
+        "  • Branch protection on `main` SHOULD make this an enforced "
+        "required check; see docs/guides/release-watchdog.md."
+    )
+
+
 # ── Main ────────────────────────────────────────────────────────────────
 
 
@@ -811,6 +949,26 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--config", default=None)
     parser.add_argument("--mode", choices=("report", "hint", "apply"), default="report")
     parser.add_argument("--repo-root", default=None)
+    parser.add_argument(
+        "--require-bump-for-fix-feat",
+        action="store_true",
+        help=(
+            "Additively require that PRs titled `fix:`/`feat:` (read "
+            "from $GITHUB_PR_TITLE or --pr-title) include either a "
+            '`chore: bump versions` commit or a `Version-Bump: skip '
+            'reason="..."` trailer. Hard-fails when violated. Wired '
+            "into version-skill-check.yml on PR triggers."
+        ),
+    )
+    parser.add_argument(
+        "--pr-title",
+        default=None,
+        help=(
+            "Override the PR title used by --require-bump-for-fix-feat. "
+            "Defaults to $GITHUB_PR_TITLE. Empty / unset means the "
+            "check is skipped (normal for push and workflow_dispatch)."
+        ),
+    )
     args = parser.parse_args(argv)
 
     root = Path(args.repo_root) if args.repo_root else repo_root()
@@ -837,11 +995,43 @@ def main(argv: list[str]) -> int:
                 print(f"  {e}")
         if text:
             print(text)
+        # `--require-bump-for-fix-feat` is meaningful in apply mode too:
+        # if `pulp pr` ran apply and didn't actually edit anything (no
+        # surface needed a bump), but the PR title is `fix:` / `feat:`,
+        # the check should still flag it — that means the heuristic
+        # found nothing actionable *and* the author didn't record a
+        # skip trailer. Better to fail here than at the CI gate.
+        if args.require_bump_for_fix_feat:
+            ff_passed, ff_msg = check_fix_feat_requires_bump(
+                args.pr_title if args.pr_title is not None
+                else os.environ.get("GITHUB_PR_TITLE", ""),
+                args.base, args.head,
+            )
+            print(ff_msg)
+            if not ff_passed:
+                return 1
         return code
 
     text, code = render_report(verdicts, args.mode, args.base, root)
     if text:
         print(text)
+
+    if args.require_bump_for_fix_feat:
+        # Hint mode keeps its "always exit 0" contract — the fix/feat
+        # check still prints its message, but never raises the exit code.
+        ff_passed, ff_msg = check_fix_feat_requires_bump(
+            args.pr_title if args.pr_title is not None
+            else os.environ.get("GITHUB_PR_TITLE", ""),
+            args.base, args.head,
+        )
+        # Print with a separator so the new check's output is easy to
+        # spot in CI logs.
+        print()
+        print("── fix/feat-needs-bump check ──────────────────────────")
+        print(ff_msg)
+        if not ff_passed and args.mode != "hint":
+            return 1
+
     return code
 
 
