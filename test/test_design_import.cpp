@@ -1263,3 +1263,120 @@ TEST_CASE("parse_pencil_json parses node tree", "[view][import]") {
     REQUIRE(ir.tokens.colors["primary"] == "#ff5500");
     REQUIRE(ir.tokens.dimensions["radius"] == 8.0f);
 }
+
+TEST_CASE("parse_pencil_json covers sizing layout padding and widget metadata edges",
+          "[view][import][coverage]") {
+    auto json = R"json({
+        "type": "frame",
+        "name": "PencilRack",
+        "layout": "horizontal",
+        "gap": 7,
+        "padding": [3, 5],
+        "justifyContent": "end",
+        "alignItems": "end",
+        "children": [
+            {
+                "type": "frame",
+                "name": "FillPanel",
+                "layout": "vertical",
+                "width": "fill_container",
+                "height": "fit_content(120)",
+                "padding": [1, 2, 3, 4],
+                "children": [
+                    {
+                        "type": "text",
+                        "name": "Readout",
+                        "content": "Ready",
+                        "fontSize": 10,
+                        "fontWeight": "600",
+                        "fontFamily": "Mono",
+                        "fill": "#eeeeee"
+                    }
+                ]
+            },
+            {
+                "type": "frame",
+                "name": "MainFader",
+                "width": 44,
+                "height": 120,
+                "children": [
+                    {
+                        "type": "rectangle",
+                        "name": "track",
+                        "width": 6,
+                        "height": 90,
+                        "stroke": { "fill": "#ff5500" }
+                    },
+                    { "type": "text", "name": "label", "content": "Level" }
+                ]
+            },
+            {
+                "type": "frame",
+                "name": "KnobRow",
+                "children": [
+                    { "type": "frame", "name": "DriveKnob", "children": [] }
+                ]
+            }
+        ]
+    })json";
+
+    auto ir = parse_pencil_json(json);
+
+    REQUIRE(ir.root.layout.direction == LayoutDirection::row);
+    REQUIRE(ir.root.layout.gap == 7.0f);
+    REQUIRE(ir.root.layout.padding_top == 3.0f);
+    REQUIRE(ir.root.layout.padding_bottom == 3.0f);
+    REQUIRE(ir.root.layout.padding_left == 5.0f);
+    REQUIRE(ir.root.layout.padding_right == 5.0f);
+    REQUIRE(ir.root.layout.justify == LayoutAlign::flex_end);
+    REQUIRE(ir.root.layout.align == LayoutAlign::flex_end);
+
+    const auto& fill_panel = ir.root.children[0];
+    REQUIRE(fill_panel.layout.direction == LayoutDirection::column);
+    REQUIRE(fill_panel.layout.width_mode == SizingMode::fill);
+    REQUIRE(fill_panel.layout.height_mode == SizingMode::hug);
+    REQUIRE(fill_panel.layout.padding_top == 1.0f);
+    REQUIRE(fill_panel.layout.padding_right == 2.0f);
+    REQUIRE(fill_panel.layout.padding_bottom == 3.0f);
+    REQUIRE(fill_panel.layout.padding_left == 4.0f);
+    REQUIRE(fill_panel.children[0].style.font_size == 10.0f);
+    REQUIRE(fill_panel.children[0].style.font_weight == 600);
+    REQUIRE(fill_panel.children[0].style.font_family == "Mono");
+    REQUIRE(fill_panel.children[0].style.color == "#eeeeee");
+
+    const auto& fader = ir.root.children[1];
+    REQUIRE(fader.audio_widget == AudioWidgetType::fader);
+    REQUIRE(fader.style.width == 44.0f);
+    REQUIRE(fader.style.height == 120.0f);
+    REQUIRE(fader.attributes.at("shape_width") == "6");
+    REQUIRE(fader.attributes.at("shape_height") == "90");
+    REQUIRE(fader.children[0].attributes.at("stroke_color") == "#ff5500");
+
+    const auto& knob_row = ir.root.children[2];
+    REQUIRE(knob_row.audio_widget == AudioWidgetType::none);
+    REQUIRE(knob_row.layout.direction == LayoutDirection::row);
+}
+
+TEST_CASE("generate_pulp_js native mode covers fill-height and leaf fallback branches",
+          "[view][import][coverage]") {
+    DesignIR ir;
+    ir.source = DesignSource::pencil;
+    ir.root.type = "frame";
+    ir.root.name = "FillRoot";
+    ir.root.layout.height_mode = SizingMode::fill;
+
+    IRNode leaf;
+    leaf.type = "rectangle";
+    leaf.name = "empty-divider";
+    ir.root.children.push_back(leaf);
+
+    CodeGenOptions opts;
+    opts.mode = CodeGenMode::native;
+    opts.include_comments = false;
+    auto js = generate_pulp_js(ir, opts);
+
+    REQUIRE(js.find("createCol('root', '')") != std::string::npos);
+    REQUIRE(js.find("setFlex('root', 'flex_grow', 1)") != std::string::npos);
+    REQUIRE(js.find("createRow('empty_divider0', 'root')") != std::string::npos);
+    REQUIRE(js.find("setFlex('empty_divider0', 'height', 1)") != std::string::npos);
+}
