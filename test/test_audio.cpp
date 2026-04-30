@@ -80,6 +80,32 @@ TEST_CASE("BufferView non-owning", "[audio][buffer]") {
     REQUIRE(ch0[0] == 99.0f);
 }
 
+TEST_CASE("BufferView clears external storage and supports const access",
+          "[audio][buffer][issue-640]") {
+    float ch0[3] = {1.0f, -2.0f, 3.0f};
+    float ch1[3] = {4.0f, -5.0f, 6.0f};
+    float* ptrs[2] = {ch0, ch1};
+
+    BufferView<float> view(ptrs, 2, 3);
+    REQUIRE_FALSE(view.empty());
+    REQUIRE(view.channel_ptr(0) == ch0);
+    REQUIRE(view.channel_ptr(1) == ch1);
+
+    view.clear();
+
+    const BufferView<float>& const_view = view;
+    REQUIRE(const_view.num_channels() == 2);
+    REQUIRE(const_view.num_samples() == 3);
+    REQUIRE(const_view.channel_ptr(0) == ch0);
+    REQUIRE(const_view.channel(1).data() == ch1);
+
+    for (std::size_t ch = 0; ch < const_view.num_channels(); ++ch) {
+        for (auto sample : const_view.channel(ch)) {
+            REQUIRE(sample == 0.0f);
+        }
+    }
+}
+
 TEST_CASE("Buffer resize and views expose contiguous channel storage",
           "[audio][buffer][issue-640]") {
     Buffer<float> empty;
