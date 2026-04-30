@@ -593,6 +593,18 @@ commands:
       - name: --debug
         kind: flag
         description: Output JSON report with metrics
+      - name: --detect-only
+        kind: flag
+        description: "Detect (source, format-version, parser-version) for --file or --directory <path> against compat.json without parsing (pulp #1031)"
+      - name: --directory
+        kind: option
+        description: Path to a directory export (alternative to --file)
+      - name: --compat
+        kind: option
+        description: "compat.json override (default: discover from cwd / repo root)"
+      - name: --report-new-format
+        kind: flag
+        description: Emit a fingerprint-diff JSON for a new compat.json[imports/<source>/detected-formats] entry. Implies --detect-only.
     docs: reference/design-import.md
 
   - name: export-tokens

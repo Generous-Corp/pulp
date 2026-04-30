@@ -292,6 +292,28 @@ target_link_libraries(pulp-test-cli-package-registry PRIVATE
     Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-cli-package-registry)
 
+# CLI versioned import-design detection (#1031): unit + fixture-driven
+# tests for the three-layer (parser-version, format-version,
+# compat-schema-version) detector behind `pulp import-design
+# --detect-only`. The detector module is deliberately self-contained
+# (no pulp::view / pulp::state link deps) so the tests compile fast
+# and don't drag the full design-import pipeline along.
+add_executable(pulp-test-cli-import-detect
+    test_cli_import_detect.cpp
+    ${CMAKE_SOURCE_DIR}/tools/import-design/import_detect.cpp
+)
+target_include_directories(pulp-test-cli-import-detect PRIVATE
+    ${CMAKE_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/tools/import-design
+    ${CMAKE_SOURCE_DIR}/tools/cli)
+target_link_libraries(pulp-test-cli-import-detect PRIVATE
+    Catch2::Catch2WithMain)
+# The fixture loop walks up from cwd to find compat.json — start the
+# tests from the repo root so the discovery works regardless of build
+# directory shape.
+catch_discover_tests(pulp-test-cli-import-detect
+    WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}")
+
 # CLI tool registry (#643): local-only coverage for registry parsing,
 # managed binary / Python wrapper discovery, deterministic install exits,
 # uninstall, and command dispatch branches. Avoids downloads, archive

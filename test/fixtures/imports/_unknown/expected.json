@@ -1,0 +1,10 @@
+{
+  "_comment": "Negative fixture — random HTML should NOT match any registered import format. Detector returns ok=true with empty source.",
+  "source": "",
+  "format-version": "",
+  "parser-version": "",
+  "matched-clauses": 0,
+  "total-clauses": 0,
+  "min-confidence-pct": 0,
+  "fingerprint-kinds": []
+}

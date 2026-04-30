@@ -1,6 +1,6 @@
 ---
 name: import-design
-description: Import designs from Figma, Stitch, v0, Pencil, or Claude Design into Pulp web-compat JS with automated visual validation. Claude Design imports also scaffold a pulp::view::EditorBridge handler file (pulp #709).
+description: Import designs from Figma, Stitch, v0, Pencil, or Claude Design into Pulp web-compat JS with automated visual validation. Claude Design imports also scaffold a pulp::view::EditorBridge handler file (pulp #709). Versioned (parser-version / format-version / compat-schema-version) detection lives behind `--detect-only` and `--report-new-format` (pulp #1031).
 ---
 
 # Import Design
@@ -238,3 +238,45 @@ What it skips:
 - `<style>` blocks whose first 200 chars contain `@font-face` (those carry only font-face rules, no classnames).
 
 This skill must stay aligned with the `view-bridge` skill — `view-bridge` covers editor lifecycle (create_view, open/notify_attached/resize/close), this skill covers message dispatch over that lifecycle.
+
+## Versioned Detection (pulp #1031)
+
+`pulp import-design` ships a three-layer version model so the CLI surface stays stable as external tools evolve their export formats:
+
+- **`parser-version`** — Pulp's parser implementation for a given source.
+- **`format-version`** — the export shape Pulp recognises.
+- **`compat-schema-version`** — the schema of `compat.json` itself.
+
+The matrix is declared in [`compat.json`](../../../compat.json) and consumed by `pulp import-design --detect-only`. See [`docs/reference/imports/index.md`](../../../docs/reference/imports/index.md) for the full vocabulary, recognized matrix, and "add a new format-version" workflow.
+
+### Detect-only flow
+
+When the user hands you an unknown export, run detection first before guessing the source:
+
+```bash
+# File or directory; --detect-only prints (source, format-version,
+# parser-version, match-count, confidence) and exits.
+pulp import-design --detect-only --file <path>
+pulp import-design --detect-only --directory <path>
+```
+
+Exit codes: `0` = match, `1` = usage error, `2` = no match.
+
+If confidence is below 80%, the CLI emits a warning and an invitation to run `--report-new-format`:
+
+```bash
+pulp import-design --file <path> --report-new-format > stitch-2026-XX.json
+```
+
+Hand-edit the resulting JSON into a new entry under `compat.json[imports/<source>/detected-formats]`. The `notes` field is mandatory — describe the upstream change in one line.
+
+### Adding a fixture
+
+Every new format-version needs a fixture so the detection gate covers it:
+
+1. `mkdir -p test/fixtures/imports/<source>/<format-version>/`
+2. Drop in the smallest representative export that triggers every fingerprint clause (synthetic is fine — clauses are content-addressed, not byte-addressed).
+3. Add an `expected.json` sidecar with the assertion shape from existing fixtures (`source`, `format-version`, `parser-version`, `matched-clauses`, `total-clauses`, `min-confidence-pct`, `fingerprint-kinds`).
+4. Run `ctest --test-dir build -R pulp-test-cli-import-detect` to confirm the fixture loop picks up the new row.
+
+The detector module lives at `tools/import-design/import_detect.{hpp,cpp}` and is intentionally free of `pulp::view` / `pulp::state` link deps so the test target compiles fast and the unit tests don't drag the full design-import pipeline along.

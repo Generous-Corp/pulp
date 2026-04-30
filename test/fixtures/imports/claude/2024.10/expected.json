@@ -1,0 +1,10 @@
+{
+  "_comment": "pulp #1031 detection expectations for the claude/2024.10 fixture.",
+  "source": "claude",
+  "format-version": "2024.10",
+  "parser-version": "2.1",
+  "matched-clauses": 1,
+  "total-clauses": 1,
+  "min-confidence-pct": 100,
+  "fingerprint-kinds": ["html-script-type"]
+}

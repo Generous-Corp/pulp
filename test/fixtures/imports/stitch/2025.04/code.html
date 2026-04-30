@@ -1,0 +1,27 @@
+<!--
+  Synthetic Stitch 2025.04 fixture — small representative slice of a
+  real export. The detector should match three fingerprint clauses:
+    1. directory-files: code.html, DESIGN.md, screen.png present
+    2. html-script-src: cdn.tailwindcss.com?plugins=forms,container-queries
+    3. tailwind-config-token: any-of "surface-container", "on-primary"
+-->
+<!DOCTYPE html>
+<html>
+<head>
+  <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            "primary": "#6750a4",
+            "on-primary": "#ffffff",
+            "surface-container": "#f3edf7"
+          }
+        }
+      }
+    }
+  </script>
+</head>
+<body><div class="bg-surface-container text-on-primary">hi</div></body>
+</html>
