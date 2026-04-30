@@ -260,6 +260,25 @@ TEST_CASE("Color HSV round-trip", "[canvas][color]") {
     REQUIRE(ghsv.v == Catch::Approx(0.5f).margin(0.01f));
 }
 
+TEST_CASE("Color HSV clamps channels and normalizes wrapped hues",
+          "[canvas][color][issue-641]") {
+    auto clamped = Color::rgba(1.5f, -0.25f, 0.5f).to_hsv();
+    REQUIRE(clamped.h == Catch::Approx(330.0f).margin(1.0f));
+    REQUIRE(clamped.s == Catch::Approx(1.0f).margin(0.01f));
+    REQUIRE(clamped.v == Catch::Approx(1.0f).margin(0.01f));
+
+    auto negative = Color::from_hsv({-60.0f, 1.0f, 1.0f}, 0.25f);
+    REQUIRE(negative.r == Catch::Approx(1.0f).margin(0.01f));
+    REQUIRE(negative.g == Catch::Approx(0.0f).margin(0.01f));
+    REQUIRE(negative.b == Catch::Approx(1.0f).margin(0.01f));
+    REQUIRE(negative.a == Catch::Approx(0.25f));
+
+    auto overflow = Color::from_hsv({420.0f, 2.0f, 2.0f});
+    REQUIRE(overflow.r == Catch::Approx(1.0f).margin(0.01f));
+    REQUIRE(overflow.g == Catch::Approx(1.0f).margin(0.01f));
+    REQUIRE(overflow.b == Catch::Approx(0.0f).margin(0.01f));
+}
+
 TEST_CASE("Color HSL round-trip", "[canvas][color]") {
     auto blue = Color::rgba(0.0f, 0.0f, 1.0f);
     auto hsl = blue.to_hsl();
@@ -269,6 +288,25 @@ TEST_CASE("Color HSL round-trip", "[canvas][color]") {
     auto back = Color::from_hsl(hsl);
     REQUIRE(back.b == Catch::Approx(1.0f).margin(0.01f));
     REQUIRE(back.r == Catch::Approx(0.0f).margin(0.01f));
+}
+
+TEST_CASE("Color HSL clamps channels and normalizes wrapped hues",
+          "[canvas][color][issue-641]") {
+    auto clamped = Color::rgba(-1.0f, 0.25f, 2.0f).to_hsl();
+    REQUIRE(clamped.h == Catch::Approx(225.0f).margin(1.0f));
+    REQUIRE(clamped.s == Catch::Approx(1.0f).margin(0.01f));
+    REQUIRE(clamped.l == Catch::Approx(0.5f).margin(0.01f));
+
+    auto negative = Color::from_hsl({-120.0f, 1.0f, 0.5f}, 0.4f);
+    REQUIRE(negative.r == Catch::Approx(0.0f).margin(0.01f));
+    REQUIRE(negative.g == Catch::Approx(0.0f).margin(0.01f));
+    REQUIRE(negative.b == Catch::Approx(1.0f).margin(0.01f));
+    REQUIRE(negative.a == Catch::Approx(0.4f));
+
+    auto gray = Color::from_hsl({45.0f, -1.0f, 2.0f});
+    REQUIRE(gray.r == Catch::Approx(1.0f));
+    REQUIRE(gray.g == Catch::Approx(1.0f));
+    REQUIRE(gray.b == Catch::Approx(1.0f));
 }
 
 TEST_CASE("Color OKLCH round-trip", "[canvas][color]") {
@@ -293,6 +331,20 @@ TEST_CASE("Color OKLCH round-trip", "[canvas][color]") {
     auto black = Color::rgba(0.0f, 0.0f, 0.0f);
     auto blch = black.to_oklch();
     REQUIRE(blch.L == Catch::Approx(0.0f).margin(0.01f));
+}
+
+TEST_CASE("Color OKLCH clamps out-of-gamut conversion inputs",
+          "[canvas][color][issue-641]") {
+    auto dark = Color::from_oklch({-0.5f, -0.25f, 90.0f}, 0.3f);
+    REQUIRE(dark.r8() == 0);
+    REQUIRE(dark.g8() == 0);
+    REQUIRE(dark.b8() == 0);
+    REQUIRE(dark.a == Catch::Approx(0.3f));
+
+    auto bright = Color::from_oklch({1.5f, 0.0f, 720.0f});
+    REQUIRE(bright.r8() == 255);
+    REQUIRE(bright.g8() == 255);
+    REQUIRE(bright.b8() == 255);
 }
 
 TEST_CASE("Color encode/decode round-trip", "[canvas][color]") {
