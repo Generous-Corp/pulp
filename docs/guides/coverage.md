@@ -292,6 +292,17 @@ Source → Gradle `testDebugUnitTest`
   `llvm-cov export --format=lcov` plus the vendored
   `tools/scripts/lcov_cobertura.py` converter emit Cobertura XML for
   Codecov + diff-cover.
+- **`LCOV_EXCL` markers**: `tools/scripts/lcov_strip_excl.py` runs
+  between `llvm-cov export` and `lcov_cobertura.py` (wired into both
+  `tools/scripts/local_diff_cover.sh` and `scripts/run_coverage.sh`).
+  llvm-cov itself does NOT honor `LCOV_EXCL_LINE` /
+  `LCOV_EXCL_START..STOP` (those are a gcov/lcov convention, not LLVM),
+  so without this strip pass the markers are documentation-only —
+  excluded code still appears in diff-cover's "missing lines" report
+  and in the Cobertura XML uploaded to Codecov. The Python helper
+  walks each `SF:<path>` record, drops `DA`/`BRDA`/`FN[A]`/`FNDA` rows
+  on excluded lines, and recomputes the `LF`/`LH`/`BRF`/`BRH`/`FNF`/`FNH`
+  counters so the output is internally consistent. See `#1058`.
 - **`-object` list**: llvm-cov only reports translation units linked
   into the binaries given via `-object`. The script passes every test
   executable **plus** every first-party static archive (`libpulp-*.a`)
