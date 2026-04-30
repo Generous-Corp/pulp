@@ -970,6 +970,11 @@ add_executable(pulp-test-audio-tools test_audio_tools.cpp)
 target_link_libraries(pulp-test-audio-tools PRIVATE pulp::tool-audio Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-audio-tools)
 
+# MCP server protocol tests
+add_executable(pulp-test-mcp-server test_mcp_server.cpp)
+target_link_libraries(pulp-test-mcp-server PRIVATE pulp::tool-audio Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-mcp-server)
+
 # MIDI tests
 add_executable(pulp-test-midi test_midi.cpp)
 target_link_libraries(pulp-test-midi PRIVATE pulp::midi Catch2::Catch2WithMain)
