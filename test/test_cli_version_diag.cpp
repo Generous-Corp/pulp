@@ -514,6 +514,53 @@ TEST_CASE("render_report_json exposes plugin_min_cli as a top-level field",
     REQUIRE(out.find("Claude plugin requires") != std::string::npos);
 }
 
+TEST_CASE("render_report returns non-zero and prints plugin/project warnings",
+          "[version-diag][issue-643]") {
+    VersionReport r;
+    r.cli = parse_semver("0.20.0");
+    r.plugin = parse_semver("0.8.0");
+    r.plugin_min_cli = parse_semver("0.31.0");
+    r.project_sdk = parse_semver("0.24.0");
+    r.project_cli_min = parse_semver("0.25.0");
+    r.project_root = "/tmp/pulp-render-warn";
+    r.plugin_json_path = "/tmp/pulp-render-warn/plugin.json";
+
+    std::stringstream capture;
+    auto* prev = std::cout.rdbuf(capture.rdbuf());
+    int rc = render_report(r);
+    std::cout.rdbuf(prev);
+
+    REQUIRE(rc == 1);
+    auto out = capture.str();
+    REQUIRE(out.find("Pulp Version Diagnostics") != std::string::npos);
+    REQUIRE(out.find("Plugin:") != std::string::npos);
+    REQUIRE(out.find("needs CLI >= v0.31.0") != std::string::npos);
+    REQUIRE(out.find("WARN") != std::string::npos);
+    REQUIRE(out.find("Claude plugin requires CLI >= v0.31.0") != std::string::npos);
+    REQUIRE(out.find("Project requires CLI >= v0.25.0") != std::string::npos);
+    REQUIRE(out.find("Project SDK is v0.24.0") != std::string::npos);
+    REQUIRE(out.find("3 warnings") != std::string::npos);
+}
+
+TEST_CASE("render_report returns zero for an empty comparable report",
+          "[version-diag][issue-643]") {
+    VersionReport r;
+    r.cli = parse_semver("0.31.0");
+
+    std::stringstream capture;
+    auto* prev = std::cout.rdbuf(capture.rdbuf());
+    int rc = render_report(r);
+    std::cout.rdbuf(prev);
+
+    REQUIRE(rc == 0);
+    auto out = capture.str();
+    REQUIRE(out.find("CLI:") != std::string::npos);
+    REQUIRE(out.find("v0.31.0") != std::string::npos);
+    REQUIRE(out.find("No version information to compare.") != std::string::npos);
+    REQUIRE(out.find("All checks passed.") != std::string::npos);
+    REQUIRE(out.find("WARN") == std::string::npos);
+}
+
 TEST_CASE("render_report_json emits JSON with projects[] and findings[]",
           "[version-diag][issue-552]") {
     // Capture std::cout via a redirected rdbuf so we can test without

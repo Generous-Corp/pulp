@@ -117,6 +117,14 @@ fs::path touch_file(const fs::path& path) {
     return path;
 }
 
+std::string system_shell_tool_id() {
+#ifdef _WIN32
+    return "cmd.exe";
+#else
+    return "sh";
+#endif
+}
+
 std::string quote_json(const std::string& s) {
     std::string out;
     out.reserve(s.size() + 2);
@@ -317,6 +325,13 @@ TEST_CASE("tool lookup prefers pulp-managed binaries and python wrappers",
     auto located_missing = locate_tool(missing);
     REQUIRE_FALSE(located_missing.found);
     REQUIRE(located_missing.source == "not-found");
+
+    ToolDescriptor system_shell;
+    system_shell.id = system_shell_tool_id();
+    auto located_system = locate_tool(system_shell);
+    REQUIRE(located_system.found);
+    REQUIRE(located_system.source == "system-path");
+    REQUIRE_FALSE(located_system.path.empty());
 }
 
 TEST_CASE("tool install helpers have deterministic local exits",
@@ -401,6 +416,29 @@ TEST_CASE("tool install helpers have deterministic local exits",
     REQUIRE(existing_py.ok);
     REQUIRE(existing_py.binary_path == wrapper);
     REQUIRE(existing_py.installed_version == py.pinned_version);
+
+    ToolRegistry uv_unavailable;
+    ToolDescriptor uv_without_source;
+    uv_without_source.id = "uv";
+    uv_without_source.display_name = "UV";
+    uv_without_source.install_method = "binary_download";
+    uv_without_source.pinned_version = "9.9.9";
+    uv_unavailable.tools["uv"] = uv_without_source;
+    {
+        ScopedEnv path{"PATH", tmp.path / "empty-path"};
+        ScopedOutput output;
+        auto uv_bootstrap_failed = install_python_tool(py, uv_unavailable, /*force=*/false);
+        REQUIRE_FALSE(uv_bootstrap_failed.ok);
+        REQUIRE(output.out.str().find("Installing UV") != std::string::npos);
+        REQUIRE(uv_bootstrap_failed.error.find("Failed to install UV: UV is not available for ") ==
+                0);
+    }
+
+    fs::remove(wrapper);
+    auto missing_wrapper = install_python_tool(py, with_uv, /*force=*/false);
+    REQUIRE_FALSE(missing_wrapper.ok);
+    REQUIRE(missing_wrapper.binary_path == wrapper);
+    REQUIRE(missing_wrapper.installed_version == py.pinned_version);
 }
 
 TEST_CASE("tool uninstall removes managed binary and python tool roots",
@@ -486,6 +524,12 @@ TEST_CASE("tool command handles local list path doctor and error branches",
 
     {
         ScopedOutput output;
+        REQUIRE(cmd_tool({"path", "missing-cmd"}) == 1);
+        REQUIRE(output.err.str().find("Tool 'missing-cmd' not found") != std::string::npos);
+    }
+
+    {
+        ScopedOutput output;
         REQUIRE(cmd_tool({"doctor"}) == 1);
         REQUIRE(output.out.str().find("Managed Command") != std::string::npos);
         REQUIRE(output.out.str().find(std::string("not available for ") + platform) !=
@@ -542,6 +586,62 @@ TEST_CASE("tool command handles local list path doctor and error branches",
     }
 }
 
+TEST_CASE("tool command reports and runs system path tools",
+          "[cli][tool-registry][command][issue-643]") {
+    TempDir tmp;
+    ScopedEnv home{"PULP_HOME", tmp.path / "home"};
+    fs::create_directories(tmp.path / "repo" / "tools" / "packages");
+    ScopedCurrentPath cwd{tmp.path / "repo"};
+
+    const auto shell_id = system_shell_tool_id();
+    write_file(tmp.path / "repo" / "tools" / "packages" / "tool-registry.json",
+               std::string(R"({
+  "schema_version": 1,
+  "tools": {
+    ")") + quote_json(shell_id) + R"(": {
+      "display_name": "System Shell",
+      "description": "Known shell on PATH",
+      "install_method": "binary_download",
+      "pinned_version": "1.0.0"
+    }
+  }
+}
+)");
+
+    {
+        ScopedOutput output;
+        REQUIRE(cmd_tool({"list"}) == 0);
+        REQUIRE(output.out.str().find("system (") != std::string::npos);
+        REQUIRE(output.out.str().find(shell_id) != std::string::npos);
+    }
+
+    {
+        ScopedOutput output;
+        REQUIRE(cmd_tool({"path", shell_id}) == 0);
+        REQUIRE(output.out.str().find(shell_id) != std::string::npos);
+    }
+
+    {
+        ScopedOutput output;
+        REQUIRE(cmd_tool({"doctor"}) == 0);
+        REQUIRE(output.out.str().find("System Shell") != std::string::npos);
+        REQUIRE(output.out.str().find("system-path") != std::string::npos);
+    }
+
+    {
+        ScopedOutput output;
+#ifdef _WIN32
+        REQUIRE(cmd_tool({"run", shell_id, "/c",
+                          "echo tool-system-out&& echo tool-system-err 1>&2&& exit /b 7"}) == 7);
+#else
+        REQUIRE(cmd_tool({"run", shell_id, "-c",
+                          "printf tool-system-out; printf tool-system-err >&2; exit 7"}) == 7);
+#endif
+        REQUIRE(output.out.str().find("tool-system-out") != std::string::npos);
+        REQUIRE(output.err.str().find("tool-system-err") != std::string::npos);
+    }
+}
+
 TEST_CASE("tool command reports registry and argument failures deterministically",
           "[cli][tool-registry][command][issue-643]") {
     TempDir tmp;
@@ -565,17 +665,32 @@ TEST_CASE("tool command reports registry and argument failures deterministically
                 std::string::npos);
     }
 
+    const auto platform = quote_json(current_platform_key());
     write_file(repo / "tools" / "packages" / "tool-registry.json",
                std::string(R"({
   "schema_version": 1,
   "tools": {
+    "needs-unavailable-dep": {
+      "display_name": "Needs Unavailable Dependency",
+      "description": "Dependency failure fixture",
+      "install_method": "binary_download",
+      "pinned_version": "1.0.0",
+      "requires_tools": ["unavailable-tool"],
+      "binary_sources": {
+        ")" + platform + R"(": {
+          "url_template": "https://example.invalid/needs-dep-${version}.tar.gz",
+          "archive_format": "tar.gz",
+          "binary_name": "needs-unavailable-dep"
+        }
+      }
+    },
     "available-tool-fixture": {
       "display_name": "Available Tool",
       "description": "Available but not installed",
       "install_method": "binary_download",
       "pinned_version": "1.0.0",
       "binary_sources": {
-        ")") + quote_json(current_platform_key()) + R"(": {
+        ")") + platform + R"(": {
           "url_template": "https://example.invalid/available-${version}.tar.gz",
           "archive_format": "tar.gz",
           "binary_name": "available-tool-fixture"
@@ -628,6 +743,17 @@ TEST_CASE("tool command reports registry and argument failures deterministically
         REQUIRE(output.err.str().find(std::string("is not available for ") +
                                       current_platform_key()) != std::string::npos);
     }
+    {
+        ScopedOutput output;
+        REQUIRE(cmd_tool({"install", "needs-unavailable-dep"}) == 1);
+        REQUIRE(output.err.str().find("Failed to install dependency unavailable-tool") !=
+                std::string::npos);
+    }
+    auto available_path = managed_binary_path(pulp_home(), "available-tool-fixture", "1.0.0",
+                                              "available-tool-fixture");
+    touch_file(available_path);
+    write_file(available_path.parent_path() / "manifest.json",
+               "{\"version\":\"1.0.0\",\"tool_id\":\"available-tool-fixture\"}\n");
     {
         ScopedOutput output;
         REQUIRE(cmd_tool({"install", "--all"}) == 1);
