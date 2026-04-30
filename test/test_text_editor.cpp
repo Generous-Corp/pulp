@@ -15,6 +15,14 @@ KeyEvent key_event(KeyCode key, uint16_t modifiers = 0) {
     return event;
 }
 
+uint16_t main_modifier() {
+#ifdef __APPLE__
+    return kModCmd;
+#else
+    return kModCtrl;
+#endif
+}
+
 } // namespace
 
 TEST_CASE("TextEditor set and get text", "[view][text_editor]") {
@@ -255,6 +263,81 @@ TEST_CASE("TextEditor multi-line Enter inserts a newline instead of returning", 
     REQUIRE(editor.on_key_event(key_event(KeyCode::enter)));
     REQUIRE(editor.text() == "alpha\n");
     REQUIRE_FALSE(returned);
+}
+
+TEST_CASE("TextEditor modified multi-line Enter triggers return callback",
+          "[view][text_editor][issue-493]") {
+    TextEditor editor;
+    editor.multi_line = true;
+    editor.on_focus_changed(true);
+    editor.set_text("alpha");
+
+    std::string returned;
+    editor.on_return = [&](const std::string& text) { returned = text; };
+
+    REQUIRE(editor.on_key_event(key_event(KeyCode::enter, main_modifier())));
+    REQUIRE(editor.text() == "alpha");
+    REQUIRE(returned == "alpha");
+}
+
+TEST_CASE("TextEditor Delete removes selected text and undo restores it",
+          "[view][text_editor][issue-493]") {
+    TextEditor editor;
+    editor.on_focus_changed(true);
+    editor.set_text("Delete me");
+    editor.select_all();
+
+    REQUIRE(editor.on_key_event(key_event(KeyCode::delete_)));
+    REQUIRE(editor.text().empty());
+    REQUIRE_FALSE(editor.has_selection());
+
+    REQUIRE(editor.undo());
+    REQUIRE(editor.text() == "Delete me");
+    REQUIRE(editor.caret_pos() == static_cast<int>(editor.text().size()));
+}
+
+TEST_CASE("TextEditor marked text replacement tracks the active range",
+          "[view][text_editor][ime][issue-493]") {
+    TextEditor editor;
+    editor.on_focus_changed(true);
+    editor.set_text("base");
+
+    editor.set_marked_text(" draft", 0, 0);
+    REQUIRE(editor.text() == "base draft");
+    REQUIRE(editor.has_marked_text());
+    REQUIRE(editor.marked_range() == std::pair<int, int>{4, 6});
+    REQUIRE(editor.caret_pos() == 10);
+
+    editor.set_marked_text(" final", 0, 0);
+    REQUIRE(editor.text() == "base final");
+    REQUIRE(editor.has_marked_text());
+    REQUIRE(editor.marked_range() == std::pair<int, int>{4, 6});
+    REQUIRE(editor.caret_pos() == 10);
+
+    editor.unmark_text();
+    REQUIRE_FALSE(editor.has_marked_text());
+    REQUIRE(editor.marked_range() == std::pair<int, int>{0, 0});
+    REQUIRE(editor.text() == "base final");
+}
+
+TEST_CASE("TextEditor multi-line paint renders placeholder when unfocused",
+          "[view][text_editor][paint][issue-493]") {
+    TextEditor editor;
+    editor.multi_line = true;
+    editor.placeholder = "Type notes";
+    editor.set_bounds({0, 0, 180, 64});
+
+    RecordingCanvas canvas;
+    editor.paint(canvas);
+
+    bool found = false;
+    for (const auto& cmd : canvas.commands()) {
+        if (cmd.type == DrawCommand::Type::fill_text && cmd.text == "Type notes") {
+            found = true;
+            break;
+        }
+    }
+    REQUIRE(found);
 }
 
 TEST_CASE("TextEditor paint produces draw commands", "[view][text_editor]") {
