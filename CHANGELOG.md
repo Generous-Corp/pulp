@@ -9,6 +9,8 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
 <a id="v0680"></a>
+## [0.69.0]
+
 ## [0.68.0] - 2026-04-30
 
 - fix(view): bubble click up to ancestor on_click handler (#1067) ([#1073](https://github.com/danielraffel/pulp/pull/1073))
