@@ -3027,3 +3027,206 @@ TEST_CASE("WidgetBridge canvasStrokeRect with no color uses active strokeStyle (
                            stroke_at_draw.b8() == 0 && stroke_at_draw.a8() == 255);
     REQUIRE(is_green);
 }
+
+// ── pulp #1026: React Native style-prop bridge primitives ──────────────────
+
+TEST_CASE("WidgetBridge setShadow lowers RN-shaped args onto setBoxShadow",
+          "[view][bridge][issue-1026]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script("createKnob('gain', 0, 0, 48, 48)");
+    // setShadow(id, color, offsetX, offsetY, opacity, radius). RN composes
+    // shadowOpacity into the alpha channel of shadowColor; with #000000ff
+    // and opacity 0.5 the resulting alpha is ~127/255.
+    bridge.load_script("setShadow('gain', '#000000ff', 4, 8, 0.5, 12)");
+
+    auto* w = bridge.widget("gain");
+    REQUIRE(w != nullptr);
+    REQUIRE(w->has_box_shadow());
+    const auto& s = w->box_shadow();
+    REQUIRE_THAT(s.offset_x, WithinAbs(4.0f, 1e-4f));
+    REQUIRE_THAT(s.offset_y, WithinAbs(8.0f, 1e-4f));
+    REQUIRE_THAT(s.blur, WithinAbs(12.0f, 1e-4f));
+    REQUIRE_THAT(s.spread, WithinAbs(0.0f, 1e-4f));
+    // alpha should be approximately 0.5 (1.0 * 0.5).
+    REQUIRE_THAT(s.color.a, WithinAbs(0.5f, 1e-3f));
+    REQUIRE(s.inset == false);
+}
+
+TEST_CASE("WidgetBridge setBackfaceVisibility plumbs the View flag",
+          "[view][bridge][issue-1026]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script("createKnob('k', 0, 0, 32, 32)");
+    auto* w = bridge.widget("k");
+    REQUIRE(w != nullptr);
+    REQUIRE(w->backface_visible());
+
+    bridge.load_script("setBackfaceVisibility('k', 'hidden')");
+    REQUIRE_FALSE(w->backface_visible());
+
+    bridge.load_script("setBackfaceVisibility('k', 'visible')");
+    REQUIRE(w->backface_visible());
+}
+
+TEST_CASE("WidgetBridge setPointerEvents routes 4-valued enum to View",
+          "[view][bridge][issue-1026]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script("createKnob('k', 0, 0, 32, 32)");
+    auto* w = bridge.widget("k");
+    REQUIRE(w != nullptr);
+    REQUIRE(w->pointer_events() == View::PointerEvents::auto_);
+
+    bridge.load_script("setPointerEvents('k', 'none')");
+    REQUIRE(w->pointer_events() == View::PointerEvents::none);
+    REQUIRE_FALSE(w->hit_testable());
+
+    bridge.load_script("setPointerEvents('k', 'box-only')");
+    REQUIRE(w->pointer_events() == View::PointerEvents::box_only);
+    REQUIRE(w->hit_testable());
+
+    bridge.load_script("setPointerEvents('k', 'box-none')");
+    REQUIRE(w->pointer_events() == View::PointerEvents::box_none);
+    REQUIRE(w->hit_testable());
+
+    bridge.load_script("setPointerEvents('k', 'auto')");
+    REQUIRE(w->pointer_events() == View::PointerEvents::auto_);
+    REQUIRE(w->hit_testable());
+}
+
+TEST_CASE("WidgetBridge setTransformOrigin sets normalized origin on View",
+          "[view][bridge][issue-1026]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script("createKnob('k', 0, 0, 32, 32)");
+    auto* w = bridge.widget("k");
+    REQUIRE(w != nullptr);
+    // Default is (0.5, 0.5).
+    REQUIRE_THAT(w->transform_origin_x(), WithinAbs(0.5f, 1e-5f));
+    REQUIRE_THAT(w->transform_origin_y(), WithinAbs(0.5f, 1e-5f));
+
+    bridge.load_script("setTransformOrigin('k', 0.0, 1.0)");
+    REQUIRE_THAT(w->transform_origin_x(), WithinAbs(0.0f, 1e-5f));
+    REQUIRE_THAT(w->transform_origin_y(), WithinAbs(1.0f, 1e-5f));
+}
+
+TEST_CASE("WidgetBridge setBorderColor / setBorderWidth / setBorderRadius granular setters",
+          "[view][bridge][issue-1026]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script("createKnob('k', 0, 0, 32, 32)");
+    auto* w = bridge.widget("k");
+    REQUIRE(w != nullptr);
+    REQUIRE_FALSE(w->has_border());
+
+    bridge.load_script("setBorderColor('k', '#ff8800')");
+    REQUIRE(w->has_border());
+    REQUIRE(w->border_color().r8() == 0xff);
+    REQUIRE(w->border_color().g8() == 0x88);
+    REQUIRE(w->border_color().b8() == 0x00);
+
+    bridge.load_script("setBorderWidth('k', 4.5)");
+    REQUIRE_THAT(w->border_width(), WithinAbs(4.5f, 1e-5f));
+
+    bridge.load_script("setBorderRadius('k', 9.0)");
+    REQUIRE_THAT(w->corner_radius(), WithinAbs(9.0f, 1e-5f));
+}
+
+TEST_CASE("WidgetBridge per-corner setBorder*Radius setters route to corner_radii",
+          "[view][bridge][issue-1026]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script("createKnob('k', 0, 0, 32, 32)");
+    auto* w = bridge.widget("k");
+    REQUIRE(w != nullptr);
+    REQUIRE_FALSE(w->has_corner_radii());
+
+    bridge.load_script("setBorderTopLeftRadius('k', 1.0)");
+    bridge.load_script("setBorderTopRightRadius('k', 2.0)");
+    bridge.load_script("setBorderBottomLeftRadius('k', 3.0)");
+    bridge.load_script("setBorderBottomRightRadius('k', 4.0)");
+
+    REQUIRE(w->has_corner_radii());
+    REQUIRE_THAT(w->corner_radius_tl(), WithinAbs(1.0f, 1e-5f));
+    REQUIRE_THAT(w->corner_radius_tr(), WithinAbs(2.0f, 1e-5f));
+    REQUIRE_THAT(w->corner_radius_bl(), WithinAbs(3.0f, 1e-5f));
+    REQUIRE_THAT(w->corner_radius_br(), WithinAbs(4.0f, 1e-5f));
+}
+
+TEST_CASE("WidgetBridge per-side setBorder*Color / Width route to BorderSide",
+          "[view][bridge][issue-1026]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script("createKnob('k', 0, 0, 32, 32)");
+    auto* w = bridge.widget("k");
+    REQUIRE(w != nullptr);
+
+    // Each setter sets its own per-side state without corrupting other
+    // sides. We assert each side's color and width round-trip.
+    bridge.load_script("setBorderTopColor('k', '#11ff00')");
+    bridge.load_script("setBorderTopWidth('k', 2.0)");
+    bridge.load_script("setBorderRightColor('k', '#0011ff')");
+    bridge.load_script("setBorderRightWidth('k', 3.0)");
+    bridge.load_script("setBorderBottomColor('k', '#ff0011')");
+    bridge.load_script("setBorderBottomWidth('k', 4.0)");
+    bridge.load_script("setBorderLeftColor('k', '#fefefe')");
+    bridge.load_script("setBorderLeftWidth('k', 5.0)");
+
+    REQUIRE(w->has_border_sides());
+    REQUIRE(w->border_top_color().r8() == 0x11);
+    REQUIRE(w->border_top_color().g8() == 0xff);
+    REQUIRE(w->border_top_color().b8() == 0x00);
+    REQUIRE_THAT(w->border_top_width(), WithinAbs(2.0f, 1e-5f));
+
+    REQUIRE(w->border_right_color().r8() == 0x00);
+    REQUIRE(w->border_right_color().g8() == 0x11);
+    REQUIRE(w->border_right_color().b8() == 0xff);
+    REQUIRE_THAT(w->border_right_width(), WithinAbs(3.0f, 1e-5f));
+
+    REQUIRE(w->border_bottom_color().r8() == 0xff);
+    REQUIRE(w->border_bottom_color().g8() == 0x00);
+    REQUIRE(w->border_bottom_color().b8() == 0x11);
+    REQUIRE_THAT(w->border_bottom_width(), WithinAbs(4.0f, 1e-5f));
+
+    REQUIRE(w->border_left_color().r8() == 0xfe);
+    REQUIRE_THAT(w->border_left_width(), WithinAbs(5.0f, 1e-5f));
+
+    // Now change ONLY the top color again — top width should be preserved.
+    bridge.load_script("setBorderTopColor('k', '#aabbcc')");
+    REQUIRE(w->border_top_color().r8() == 0xaa);
+    REQUIRE_THAT(w->border_top_width(), WithinAbs(2.0f, 1e-5f));
+
+    // And change ONLY the bottom width — bottom color should be preserved.
+    bridge.load_script("setBorderBottomWidth('k', 7.0)");
+    REQUIRE_THAT(w->border_bottom_width(), WithinAbs(7.0f, 1e-5f));
+    REQUIRE(w->border_bottom_color().r8() == 0xff);
+}
