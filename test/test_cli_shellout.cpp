@@ -1292,6 +1292,20 @@ TEST_CASE("pulp docs covers local reader index, search, open, and show paths",
                  r.stdout_output.find("docs/") != std::string::npos));
     }
 
+    SECTION("search reports fuzzy suggestions and empty results") {
+        auto fuzzy = run_pulp({"docs", "search", "gttngstrtd"});
+        REQUIRE(fuzzy.exit_code == 0);
+        REQUIRE_FALSE(fuzzy.timed_out);
+        REQUIRE(fuzzy.stdout_output.find("No exact matches") != std::string::npos);
+        REQUIRE(fuzzy.stdout_output.find("Did you mean") != std::string::npos);
+        REQUIRE(fuzzy.stdout_output.find("getting-started") != std::string::npos);
+
+        auto empty = run_pulp({"docs", "search", "zzzz-no-doc-match"});
+        REQUIRE(empty.exit_code == 0);
+        REQUIRE_FALSE(empty.timed_out);
+        REQUIRE(empty.stdout_output.find("No matches for") != std::string::npos);
+    }
+
     SECTION("show reads support, command, cmake, and style manifests") {
         auto support = run_pulp({"docs", "show", "support", "vst3"});
         REQUIRE(support.exit_code == 0);
@@ -1323,13 +1337,37 @@ TEST_CASE("pulp docs covers local reader index, search, open, and show paths",
         REQUIRE(search_usage.exit_code != 0);
         REQUIRE(search_usage.stderr_output.find("Usage: pulp docs search") != std::string::npos);
 
+        auto open_usage = run_pulp({"docs", "open"});
+        REQUIRE(open_usage.exit_code != 0);
+        REQUIRE(open_usage.stderr_output.find("Usage: pulp docs open") != std::string::npos);
+
         auto missing_slug = run_pulp({"docs", "open", "not-a-real-doc"});
         REQUIRE(missing_slug.exit_code != 0);
         REQUIRE(missing_slug.stderr_output.find("no doc found") != std::string::npos);
 
+        auto show_usage = run_pulp({"docs", "show"});
+        REQUIRE(show_usage.exit_code != 0);
+        REQUIRE(show_usage.stderr_output.find("Usage: pulp docs show") != std::string::npos);
+
+        auto support_usage = run_pulp({"docs", "show", "support"});
+        REQUIRE(support_usage.exit_code != 0);
+        REQUIRE(support_usage.stderr_output.find("Usage: pulp docs show support") != std::string::npos);
+
+        auto command_usage = run_pulp({"docs", "show", "command"});
+        REQUIRE(command_usage.exit_code != 0);
+        REQUIRE(command_usage.stderr_output.find("Usage: pulp docs show command") != std::string::npos);
+
+        auto cmake_usage = run_pulp({"docs", "show", "cmake"});
+        REQUIRE(cmake_usage.exit_code != 0);
+        REQUIRE(cmake_usage.stderr_output.find("Usage: pulp docs show cmake") != std::string::npos);
+
         auto unknown_show = run_pulp({"docs", "show", "widget"});
         REQUIRE(unknown_show.exit_code != 0);
         REQUIRE(unknown_show.stderr_output.find("Unknown show topic") != std::string::npos);
+
+        auto unknown_subcommand = run_pulp({"docs", "wat"});
+        REQUIRE(unknown_subcommand.exit_code != 0);
+        REQUIRE(unknown_subcommand.stderr_output.find("Unknown docs subcommand") != std::string::npos);
     }
 
     pulp_unsetenv("PULP_UPDATE_CHECK_DISABLED");
