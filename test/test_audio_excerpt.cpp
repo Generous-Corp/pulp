@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
+#include <pulp/audio/subsection_reader.hpp>
 #include <pulp/audio/window_enumerator.hpp>
 
 using namespace pulp::audio;
@@ -131,4 +132,63 @@ TEST_CASE("excerpt value types expose zero-rate and summary defaults",
     REQUIRE(summary.total_frames_scanned == 0);
     REQUIRE(summary.enumerated_window_count == 0);
     REQUIRE(summary.ranked_candidate_count == 0);
+}
+
+TEST_CASE("AudioSubsectionReader clamps ranges and exposes source metadata",
+          "[audio][subsection][issue-640]") {
+    AudioFileData audio;
+    audio.sample_rate = 48000;
+    audio.channels = {
+        {0.0f, 0.1f, 0.2f, 0.3f, 0.4f},
+        {1.0f, 1.1f, 1.2f, 1.3f, 1.4f},
+    };
+
+    AudioSubsectionReader reader(audio, 2, 10);
+    REQUIRE(reader.is_valid());
+    REQUIRE(reader.num_channels() == 2);
+    REQUIRE(reader.num_frames() == 3);
+    REQUIRE(reader.sample_rate() == 48000);
+    REQUIRE_THAT(reader.duration_seconds(), WithinAbs(3.0 / 48000.0, 0.000001));
+
+    REQUIRE_THAT(reader.sample(0, 0), WithinAbs(0.2f, 0.000001f));
+    REQUIRE_THAT(reader.sample(1, 2), WithinAbs(1.4f, 0.000001f));
+    REQUIRE(reader.sample(2, 0) == 0.0f);
+    REQUIRE(reader.sample(0, 3) == 0.0f);
+
+    float dest[] = {-1.0f, -1.0f, -1.0f};
+    reader.read_frames(dest, 1, 1, 8);
+    REQUIRE_THAT(dest[0], WithinAbs(1.3f, 0.000001f));
+    REQUIRE_THAT(dest[1], WithinAbs(1.4f, 0.000001f));
+    REQUIRE(dest[2] == -1.0f);
+
+    auto extracted = reader.extract();
+    REQUIRE(extracted.sample_rate == 48000);
+    REQUIRE(extracted.num_channels() == 2);
+    REQUIRE(extracted.num_frames() == 3);
+    REQUIRE_THAT(extracted.channels[0][0], WithinAbs(0.2f, 0.000001f));
+    REQUIRE_THAT(extracted.channels[1][2], WithinAbs(1.4f, 0.000001f));
+}
+
+TEST_CASE("AudioSubsectionReader handles empty and past-end ranges",
+          "[audio][subsection][issue-640]") {
+    AudioSubsectionReader empty;
+    REQUIRE_FALSE(empty.is_valid());
+    REQUIRE(empty.num_channels() == 0);
+    REQUIRE(empty.num_frames() == 0);
+    REQUIRE(empty.sample_rate() == 0);
+    REQUIRE(empty.duration_seconds() == 0.0);
+    REQUIRE(empty.sample(0, 0) == 0.0f);
+    REQUIRE(empty.extract().empty());
+
+    AudioFileData audio = make_audio(44100, 4);
+    AudioSubsectionReader past_end(audio, 99, 2);
+    REQUIRE_FALSE(past_end.is_valid());
+    REQUIRE(past_end.num_channels() == 1);
+    REQUIRE(past_end.num_frames() == 0);
+    REQUIRE(past_end.sample_rate() == 44100);
+
+    float dest[] = {7.0f, 8.0f};
+    past_end.read_frames(dest, 0, 0, 2);
+    REQUIRE(dest[0] == 7.0f);
+    REQUIRE(dest[1] == 8.0f);
 }
