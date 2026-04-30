@@ -2186,6 +2186,42 @@ TEST_CASE("WidgetBridge requestAnimationFrame triggers a host repaint (issue 921
     REQUIRE(id_value.getWithDefault<int>(-1) >= 1);
 }
 
+TEST_CASE("WidgetBridge cancelAnimationFrame removes the pending native frame",
+          "[view][bridge][async][issue-493]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+
+    CountingWindowHost host;
+    root.set_window_host(&host);
+
+    WidgetBridge bridge(engine, root, store);
+
+    const int baseline_repaints = host.repaint_calls;
+    bridge.load_script("var invalid_raf_id = window.requestAnimationFrame('not a callback');");
+    REQUIRE(engine.evaluate("invalid_raf_id").getWithDefault<int>(-1) == 0);
+    REQUIRE(host.repaint_calls == baseline_repaints);
+
+    bridge.load_script(R"(
+        var raf_hits = 0;
+        var canceled_raf_id = window.requestAnimationFrame(function () {
+            raf_hits += 1;
+        });
+        window.cancelAnimationFrame(canceled_raf_id);
+    )");
+
+    REQUIRE(engine.evaluate("canceled_raf_id").getWithDefault<int>(-1) >= 1);
+    REQUIRE(host.repaint_calls > baseline_repaints);
+
+    const int repaints_after_cancel = host.repaint_calls;
+    bridge.poll_async_results();
+    bridge.service_frame_callbacks();
+
+    REQUIRE(engine.evaluate("raf_hits").getWithDefault<int>(-1) == 0);
+    REQUIRE(host.repaint_calls == repaints_after_cancel);
+}
+
 TEST_CASE("WidgetBridge requestAnimationFrame chain keeps requesting paints (issue 921)",
           "[view][bridge][issue-921]") {
     // The Spectr FilterBank pattern: a draw() callback re-arms itself via
