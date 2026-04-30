@@ -14,6 +14,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <map>
@@ -55,6 +56,34 @@ fcc::DiscoveryEnv make_mock_env(const fs::path& root,
         return state.children;
     };
     return env;
+}
+
+std::string json_escape_for_test(const std::string& in) {
+    std::string out;
+    for (unsigned char c : in) {
+        switch (c) {
+            case '"': out += "\\\""; break;
+            case '\\': out += "\\\\"; break;
+            case '\n': out += "\\n"; break;
+            case '\r': out += "\\r"; break;
+            case '\t': out += "\\t"; break;
+            default:
+                if (c < 0x20) {
+                    char buf[8];
+                    std::snprintf(buf, sizeof(buf), "\\u%04x",
+                                  static_cast<unsigned int>(c));
+                    out += buf;
+                } else {
+                    out += static_cast<char>(c);
+                }
+        }
+    }
+    return out;
+}
+
+std::string json_field_fragment(const std::string& key,
+                                const std::string& value) {
+    return "\"" + key + "\": \"" + json_escape_for_test(value) + "\"";
 }
 
 }  // namespace
@@ -613,13 +642,15 @@ TEST_CASE("render_report_json: escapes control characters in entry fields",
     CHECK(fcc::render_report_json({e}, fs::path("/fake/cache") / weird, out) == 0);
     auto s = out.str();
 
-    CHECK(s.find("\"cache_root\": \"/fake/cache/dep\\n\\t\\u0001\\\"\\\\suffix\"")
+    CHECK(s.find(json_field_fragment("cache_root",
+                                     (fs::path("/fake/cache") / weird).string()))
           != std::string::npos);
     CHECK(s.find("\"name\": \"dep\\n\\t\\u0001\\\"\\\\suffix\"")
           != std::string::npos);
-    CHECK(s.find("\"path\": \"/fake/cache/dep\\n\\t\\u0001\\\"\\\\suffix\"")
+    CHECK(s.find(json_field_fragment("path", e.path.string()))
           != std::string::npos);
-    CHECK(s.find("\"resolved_target\": \"/tmp/dep\\n\\t\\u0001\\\"\\\\suffix\"")
+    CHECK(s.find(json_field_fragment("resolved_target",
+                                     e.resolved_target.string()))
           != std::string::npos);
     CHECK(s.find("\"declared_ref\": \"dep\\n\\t\\u0001\\\"\\\\suffix\"")
           != std::string::npos);
