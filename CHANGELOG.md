@@ -9,6 +9,8 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
 <a id="v0670"></a>
+## [0.68.0]
+
 ## [0.67.0] - 2026-04-30
 
 - feat(cli): emit classnames.json from import-design --from claude (#1035) ([#1048](https://github.com/danielraffel/pulp/pull/1048))
