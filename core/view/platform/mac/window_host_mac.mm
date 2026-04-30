@@ -462,8 +462,30 @@ static pulp::view::KeyCode keyCodeFromNS(unsigned short code) {
                 auto pt = [self localPoint:event];
                 auto local = toLocal(pt, _dragTarget, self.rootView);
                 auto released_target = self.rootView ? self.rootView->hit_test(pt) : nullptr;
-                auto click_handler = _dragTarget->on_click;
+                // pulp #1067 — DOM-style click bubbling. `hit_test` returns
+                // the deepest hit-testable view under the cursor, but the
+                // `onClick` handler (registered via `registerClick(id)`) may
+                // live on an ancestor. The classic reproducer: @pulp/react
+                // turns `<button onClick=...>Clear</button>` into a
+                // `<View onClick=...>` parent with a `<Label>Clear</Label>`
+                // child (Spectr's dom-adapter wraps string children in
+                // synthetic Labels). Clicking the visible "Clear" text
+                // hits the Label, which has no `on_click`, so #1006/#1008's
+                // capture-by-_dragTarget path silently dropped the click.
+                // Walk up the parent chain to find the nearest ancestor
+                // (including `_dragTarget` itself) with a registered
+                // handler — mirrors the browser behaviour @pulp/react users
+                // expect.
+                pulp::view::View* click_target = _dragTarget;
+                while (click_target && !click_target->on_click) {
+                    click_target = click_target->parent();
+                }
+                auto click_handler = click_target ? click_target->on_click : std::function<void()>{};
                 auto global_click = self.rootView ? self.rootView->on_global_click : std::function<void(const std::string&, uint16_t)>{};
+                // global_click reports the immediate hit (matches existing
+                // inspect-click behaviour: Cmd-click on a text label tells
+                // the inspector exactly which view was hit, not the
+                // bubbled-to ancestor).
                 auto clicked_id = _dragTarget->id();
                 auto modifiers = modifiersFromNSFlags(event.modifierFlags);
                 _dragTarget->on_mouse_up(local);

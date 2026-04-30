@@ -8,6 +8,11 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v0680"></a>
+## [0.68.0] - 2026-04-30
+
+- fix(view): bubble click up to ancestor on_click handler (pulp #1067) — the actual close on the React onClick chain. #1006/#1008's auto-wire put the handler on the right widget; this fix bubbles the click target up the parent chain so clicks on a Label child of a `<button>` find the parent's handler. Resolves the post-v0.66.0 symptom where clicks survived but never fired the React handler.
+
 <a id="v0670"></a>
 ## [0.67.0] - 2026-04-30
 

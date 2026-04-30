@@ -199,7 +199,16 @@ void View::simulate_click(Point root_pos) {
 
     target->on_mouse_down(local);
     target->on_mouse_up(local);
-    if (target->on_click) target->on_click();
+    // pulp #1067 — DOM-style click bubbling. `hit_test` returns the deepest
+    // hit-testable view, which for `<button onClick=...>Label</button>` is
+    // the inner Label child. Walk up the parent chain to find the nearest
+    // ancestor with a registered handler. Mirrors the same bubble pass the
+    // mac mouseUp path performs (see core/view/platform/mac/window_host_mac.mm).
+    View* click_target = target;
+    while (click_target && !click_target->on_click) {
+        click_target = click_target->parent();
+    }
+    if (click_target && click_target->on_click) click_target->on_click();
 }
 
 void View::simulate_drag(Point start, Point end, int steps) {
