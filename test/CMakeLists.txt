@@ -1929,6 +1929,11 @@ add_executable(pulp-test-property-list test_property_list.cpp)
 target_link_libraries(pulp-test-property-list PRIVATE pulp::view Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-property-list)
 
+# Focused SplitView and ConcertinaPanel coverage
+add_executable(pulp-test-view-layout-widgets test_view_layout_widgets.cpp)
+target_link_libraries(pulp-test-view-layout-widgets PRIVATE pulp::view Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-view-layout-widgets)
+
 # Asset manager and resource system
 add_executable(pulp-test-asset-manager test_asset_manager.cpp)
 target_link_libraries(pulp-test-asset-manager PRIVATE pulp::view Catch2::Catch2WithMain)
