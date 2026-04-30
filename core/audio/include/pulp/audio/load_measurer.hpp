@@ -28,6 +28,11 @@ public:
     /// @param sample_rate Current sample rate in Hz.
     void begin(int num_frames, float sample_rate) {
         start_time_ = clock::now();
+        if (num_frames <= 0 || !(sample_rate > 0.0f)) {
+            available_ns_ = 0;
+            return;
+        }
+
         available_ns_ = static_cast<int64_t>(
             static_cast<double>(num_frames) / static_cast<double>(sample_rate) * 1e9);
     }
