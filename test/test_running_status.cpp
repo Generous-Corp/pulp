@@ -202,6 +202,68 @@ TEST_CASE("empty sysex and unknown statuses are ignored",
     REQUIRE(shorts == std::vector<uint8_t>{0xF6});
 }
 
+TEST_CASE("undefined system statuses clear stale running state",
+          "[midi][running-status][issue-645]") {
+    auto v = parse({
+        0x90, 0x3C, 0x7F,  // establish note-on running status
+        0xF4,              // undefined system-common status cancels it
+        0x3D, 0x7F,        // would emit a stale note if not cleared
+        0x90, 0x40,        // partial note-on data
+        0xF5,              // undefined status also clears partial data
+        0x41,              // must not complete the interrupted note
+    });
+
+    REQUIRE(v.size() == 1);
+    REQUIRE(v[0].status == 0x90);
+    REQUIRE(v[0].d1 == 0x3C);
+    REQUIRE(v[0].d2 == 0x7F);
+}
+
+TEST_CASE("undefined system statuses cancel pending system common data",
+          "[midi][running-status][issue-645]") {
+    auto v = parse({
+        0xF2, 0x10,  // pending song-position pointer with one missing byte
+        0xF4,        // undefined system-common status cancels the pending F2
+        0x20,        // must not complete the interrupted F2
+        0xF1,        // pending MTC quarter-frame
+        0xF5,        // undefined system-common status cancels the pending F1
+        0x05,        // must not complete the interrupted F1
+        0x90, 0x3C, 0x7F,
+        0xF4,        // also cancels established channel running status
+        0x3D, 0x7F,
+    });
+
+    REQUIRE(v.size() == 1);
+    REQUIRE(v[0].status == 0x90);
+    REQUIRE(v[0].d1 == 0x3C);
+    REQUIRE(v[0].d2 == 0x7F);
+}
+
+TEST_CASE("system common interruption inside sysex is reprocessed",
+          "[midi][running-status][issue-645]") {
+    RunningStatusParser p;
+    std::vector<uint8_t> sx;
+    std::vector<Captured> shorts;
+    p.on_sysex([&](const uint8_t* d, std::size_t s) {
+        sx.assign(d, d + s);
+    });
+    p.on_short_message([&](const MidiEvent& e) {
+        const auto& m = e.message;
+        shorts.push_back({m.data()[0],
+                          m.length() > 1 ? m.data()[1] : uint8_t(0),
+                          m.length() > 2 ? m.data()[2] : uint8_t(0)});
+    });
+
+    std::vector<uint8_t> stream = {0xF0, 0x01, 0xF2, 0x10, 0x20};
+    p.feed(stream.data(), stream.size());
+
+    REQUIRE(sx.empty());
+    REQUIRE(shorts.size() == 1);
+    REQUIRE(shorts[0].status == 0xF2);
+    REQUIRE(shorts[0].d1 == 0x10);
+    REQUIRE(shorts[0].d2 == 0x20);
+}
+
 TEST_CASE("feed tolerates missing sinks and empty buffers",
           "[midi][running-status][issue-645]") {
     RunningStatusParser p;

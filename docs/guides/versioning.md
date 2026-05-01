@@ -231,9 +231,14 @@ All three bypass trailers live on the tip commit, never in the PR body. The audi
 |----------------|-----------------------------------------------------------|
 | Version bump   | `Version-Bump: <surface>=<patch|minor|major|skip> reason="..."` |
 | Skill update   | `Skill-Update: skip skill=<name> reason="..."`           |
+| Compat update  | `Compat-Update: skip prefix=<section\|*> reason="..."`    |
 | Auto-release   | `Release: skip reason="..."`                              |
 
 A bypass is a recorded admission that the author thought about the rule and decided it doesn't apply. Empty-reason bypasses are rejected.
+
+The compat-update gate uses the same three-layer pattern as the
+version-bump and skill-update gates; see [compat-sync.md](compat-sync.md)
+for the path map, requirement kinds, and rollout state (#1029 / #1027).
 
 ---
 

@@ -47,3 +47,32 @@ TEST_CASE("path_to_sdf: fully-filled mask yields all-inside",
     auto sdf = path_to_sdf(mask.data(), 16, 16, 4);
     for (auto v : sdf) REQUIRE(v > 200);
 }
+
+TEST_CASE("path_to_sdf: zero dimensions return an empty field",
+          "[canvas][sdf][path][issue-641]") {
+    std::uint8_t mask[1] = {255};
+    REQUIRE(path_to_sdf(mask, 0, 16, 4).empty());
+    REQUIRE(path_to_sdf(mask, 16, 0, 4).empty());
+}
+
+TEST_CASE("path_to_sdf: non-positive spread preserves output shape as zeroes",
+          "[canvas][sdf][path][issue-641]") {
+    std::uint8_t mask[4] = {255, 0, 0, 255};
+    auto zero_spread = path_to_sdf(mask, 2, 2, 0);
+    auto negative_spread = path_to_sdf(mask, 2, 2, -3);
+
+    REQUIRE(zero_spread.size() == 4);
+    REQUIRE(negative_spread.size() == 4);
+    for (auto v : zero_spread) REQUIRE(v == 0);
+    for (auto v : negative_spread) REQUIRE(v == 0);
+}
+
+TEST_CASE("path_to_sdf: mask threshold treats 127 outside and 128 inside",
+          "[canvas][sdf][path][issue-641]") {
+    std::uint8_t mask[2] = {127, 128};
+    auto sdf = path_to_sdf(mask, 2, 1, 1);
+
+    REQUIRE(sdf.size() == 2);
+    REQUIRE(sdf[0] == 0);
+    REQUIRE(sdf[1] == 255);
+}

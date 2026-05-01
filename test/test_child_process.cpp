@@ -238,6 +238,72 @@ TEST_CASE("stderr line callback fires independently",
     REQUIRE(trim_copy(stderr_lines[1]) == "err2");
 }
 
+TEST_CASE("line callback buffers partial stdout without trailing newline",
+          "[child_process][edge][issue-640]") {
+    std::vector<std::string> stdout_lines;
+    ProcessOptions opts;
+    opts.timeout_ms = 5000;
+    opts.on_stdout_line = [&](std::string_view line) {
+        stdout_lines.emplace_back(line);
+    };
+
+#ifdef _WIN32
+    auto r = ChildProcess::run("cmd",
+        {"/c", "set /p dummy=partial<nul& exit /b 0"},
+        opts);
+#else
+    auto r = ChildProcess::run("/bin/sh", {"-c", "printf partial"}, opts);
+#endif
+
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(r.stdout_output == "partial");
+    REQUIRE(stdout_lines.empty());
+}
+
+TEST_CASE("wait is idempotent after process completion",
+          "[child_process][edge][issue-640]") {
+    ChildProcess cp;
+
+#ifdef _WIN32
+    REQUIRE(cp.start("cmd", {"/c", "<nul set /p dummy=once & exit /b 7"}));
+#else
+    REQUIRE(cp.start("/bin/sh", {"-c", "printf once; exit 7"}));
+#endif
+
+    auto first = cp.wait();
+    auto second = cp.wait();
+
+    REQUIRE(first.exit_code == 7);
+    REQUIRE(second.exit_code == first.exit_code);
+    REQUIRE(second.stdout_output == first.stdout_output);
+    REQUIRE(second.stderr_output == first.stderr_output);
+    REQUIRE(second.timed_out == first.timed_out);
+    REQUIRE(second.was_cancelled == first.was_cancelled);
+    REQUIRE(first.stdout_output.find("once") != std::string::npos);
+}
+
+TEST_CASE("timeout preserves output emitted before termination",
+          "[child_process][edge][issue-640]") {
+    ProcessOptions opts;
+    opts.timeout_ms = 500;
+
+#ifdef _WIN32
+    auto r = ChildProcess::run(
+        "cmd",
+        {"/c", "echo before-timeout& ping -n 10 127.0.0.1 >nul"},
+        opts);
+#else
+    auto r = ChildProcess::run(
+        "/bin/sh",
+        {"-c", "printf before-timeout; sleep 10"},
+        opts);
+#endif
+
+    REQUIRE(r.timed_out);
+    REQUIRE(r.exit_code == -1);
+    REQUIRE(r.stdout_output.find("before-timeout") != std::string::npos);
+}
+
 TEST_CASE("wait preserves output after is_running observes fast exit",
           "[child_process][edge][issue-640]") {
     ChildProcess cp;

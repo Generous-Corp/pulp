@@ -13,6 +13,20 @@ MidiEvent channel_pressure(uint8_t channel, uint8_t value) {
         static_cast<uint8_t>(0xD0 | (channel & 0x0F)), value, 0), 0, 0.0};
 }
 
+MidiEvent short_message(uint8_t status, uint8_t data1 = 0, uint8_t data2 = 0) {
+    return {choc::midi::ShortMessage(status, data1, data2), 0, 0.0};
+}
+
+UmpPacket midi2_packet(uint8_t status, uint8_t channel, uint8_t byte2 = 0,
+                       uint8_t byte3 = 0, uint32_t data = 0) {
+    UmpPacket p;
+    p.word_count = 2;
+    p.words[0] = (0x4u << 28) | (uint32_t(status | (channel & 0x0F)) << 16)
+                 | (uint32_t(byte2 & 0x7F) << 8) | uint32_t(byte3 & 0x7F);
+    p.words[1] = data;
+    return p;
+}
+
 } // namespace
 
 TEST_CASE("MpeVoiceTracker allocates on member channel note-on", "[midi][mpe]") {
@@ -89,6 +103,31 @@ TEST_CASE("MpeVoiceTracker note-on velocity 0 counts as note-off", "[midi][mpe]"
     REQUIRE(tracker.active_count() == 0);
 }
 
+TEST_CASE("MpeVoiceTracker unmatched releases do not disturb duplicate pitches",
+          "[midi][mpe][issue-645]") {
+    MpeVoiceTracker tracker{MpeConfig::standard_lower(15)};
+
+    int off_callbacks = 0;
+    uint8_t released_channel = 0;
+    tracker.on_note_off = [&](const MpeNoteState& note) {
+        ++off_callbacks;
+        released_channel = note.channel;
+    };
+
+    REQUIRE(tracker.process(MidiEvent::note_on(1, 60, 100)));
+    REQUIRE(tracker.process(MidiEvent::note_on(2, 60, 101)));
+    REQUIRE(tracker.process(MidiEvent::note_off(3, 60)));
+
+    REQUIRE(tracker.active_count() == 2);
+    REQUIRE(off_callbacks == 0);
+
+    REQUIRE(tracker.process(MidiEvent::note_off(1, 60)));
+    REQUIRE(tracker.active_count() == 1);
+    REQUIRE(off_callbacks == 1);
+    REQUIRE(released_channel == 1);
+    REQUIRE(tracker.find(2, 60) != nullptr);
+}
+
 TEST_CASE("MpeVoiceTracker pitch bend applies per-note via channel", "[midi][mpe]") {
     MpeVoiceTracker tracker{MpeConfig::standard_lower(15)};
     tracker.set_member_bend_range(48.0f);
@@ -100,6 +139,26 @@ TEST_CASE("MpeVoiceTracker pitch bend applies per-note via channel", "[midi][mpe
     const auto* n = tracker.find(3, 72);
     REQUIRE(n != nullptr);
     REQUIRE(n->pitch_bend_semitones == Approx(48.0f).margin(0.01f));
+}
+
+TEST_CASE("MpeVoiceTracker bend normalization covers MIDI 1.0 and UMP extrema",
+          "[midi][mpe][ump][issue-645]") {
+    MpeVoiceTracker tracker{MpeConfig::standard_lower(15)};
+    tracker.set_member_bend_range(12.0f);
+    tracker.set_manager_bend_range(2.0f);
+
+    REQUIRE(tracker.process(MidiEvent::note_on(1, 60, 100)));
+    REQUIRE(tracker.process(MidiEvent::pitch_bend(1, 0)));
+    REQUIRE(tracker.find(1, 60)->pitch_bend_semitones == Approx(-12.0f).margin(0.01f));
+
+    REQUIRE(tracker.process(MidiEvent::pitch_bend(1, 8192)));
+    REQUIRE(tracker.find(1, 60)->pitch_bend_semitones == Approx(0.0f).margin(1e-6f));
+
+    REQUIRE(tracker.process(UmpPacket::pitch_bend_2(0, 1, 0xFFFFFFFF)));
+    REQUIRE(tracker.find(1, 60)->pitch_bend_semitones == Approx(12.0f).margin(0.01f));
+
+    REQUIRE(tracker.process(UmpPacket::pitch_bend_2(0, 0, 0xFFFFFFFF)));
+    REQUIRE(tracker.lower_zone_state().pitch_bend_semitones == Approx(2.0f).margin(0.01f));
 }
 
 TEST_CASE("MpeVoiceTracker channel pressure updates active note", "[midi][mpe]") {
@@ -142,6 +201,46 @@ TEST_CASE("MpeVoiceTracker upper zone note-on flagged correctly", "[midi][mpe]")
     const auto* n = tracker.find(12, 72);
     REQUIRE(n != nullptr);
     REQUIRE(n->is_upper_zone);
+}
+
+TEST_CASE("MpeVoiceTracker upper manager handles zone-wide MIDI 1.0 and UMP state",
+          "[midi][mpe][ump][issue-645]") {
+    MpeVoiceTracker tracker{MpeConfig::dual(/*lower=*/3, /*upper=*/4)};
+    tracker.set_manager_bend_range(7.0f);
+
+    REQUIRE(tracker.process(MidiEvent::pitch_bend(15, 16383)));
+    REQUIRE(tracker.process(channel_pressure(15, 96)));
+    REQUIRE(tracker.process(MidiEvent::cc(15, 74, 32)));
+
+    REQUIRE(tracker.upper_zone_state().pitch_bend_semitones == Approx(7.0f).margin(0.01f));
+    REQUIRE(tracker.upper_zone_state().pressure == Approx(96.0f / 127.0f).margin(1e-6f));
+    REQUIRE(tracker.upper_zone_state().timbre == Approx(32.0f / 127.0f).margin(1e-6f));
+
+    REQUIRE(tracker.process(UmpPacket::pitch_bend_2(0, 15, 0x00000000)));
+    REQUIRE(tracker.process(midi2_packet(0xD0, 15, 0, 0, 0xFFFFFFFF)));
+    REQUIRE(tracker.process(UmpPacket::cc_2(0, 15, 74, 0x80000000)));
+
+    REQUIRE(tracker.active_count() == 0);
+    REQUIRE(tracker.upper_zone_state().pitch_bend_semitones == Approx(-7.0f).margin(0.01f));
+    REQUIRE(tracker.upper_zone_state().pressure == Approx(1.0f).margin(1e-6f));
+    REQUIRE(tracker.upper_zone_state().timbre == Approx(0.5f).margin(0.001f));
+}
+
+TEST_CASE("MpeVoiceTracker manager precedence wins over overlapping member ranges",
+          "[midi][mpe][issue-645]") {
+    MpeVoiceTracker tracker{MpeConfig::dual(/*lower=*/15, /*upper=*/4)};
+
+    REQUIRE(tracker.process(MidiEvent::note_on(15, 60, 100)));
+    REQUIRE(tracker.active_count() == 0);
+    REQUIRE(tracker.find(15, 60) == nullptr);
+
+    REQUIRE(tracker.process(MidiEvent::cc(15, 74, 127)));
+    REQUIRE(tracker.upper_zone_state().timbre == Approx(1.0f).margin(1e-6f));
+
+    REQUIRE(tracker.process(MidiEvent::note_on(11, 72, 100)));
+    const auto* overlap = tracker.find(11, 72);
+    REQUIRE(overlap != nullptr);
+    REQUIRE_FALSE(overlap->is_upper_zone);
 }
 
 TEST_CASE("MpeVoiceTracker callbacks fire on lifecycle events", "[midi][mpe]") {
@@ -277,6 +376,39 @@ TEST_CASE("MpeVoiceTracker manager non-CC74 messages are consumed as no-ops",
     REQUIRE(tracker.upper_zone_state().timbre == Approx(0.0f));
 }
 
+TEST_CASE("MpeVoiceTracker unsupported in-zone MIDI statuses are consumed without callbacks",
+          "[midi][mpe][ump][issue-645]") {
+    MpeVoiceTracker tracker{MpeConfig::standard_lower(15)};
+
+    int bend_callbacks = 0;
+    int pressure_callbacks = 0;
+    int timbre_callbacks = 0;
+    tracker.on_pitch_bend = [&](const MpeNoteState&) { ++bend_callbacks; };
+    tracker.on_pressure = [&](const MpeNoteState&) { ++pressure_callbacks; };
+    tracker.on_timbre = [&](const MpeNoteState&) { ++timbre_callbacks; };
+
+    REQUIRE(tracker.process(MidiEvent::note_on(1, 60, 100)));
+    REQUIRE(tracker.process(short_message(0xA0 | 1, 60, 127)));
+    REQUIRE(tracker.process(short_message(0xC0 | 1, 12)));
+
+    REQUIRE(tracker.process(midi2_packet(0x10, 1, 60, 74, 0xFFFFFFFF)));
+    REQUIRE(tracker.process(midi2_packet(0x20, 1, 0, 0, 0xFFFFFFFF)));
+    REQUIRE(tracker.process(midi2_packet(0x30, 1, 0, 0, 0xFFFFFFFF)));
+    REQUIRE(tracker.process(midi2_packet(0x40, 1, 0, 0, 0xFFFFFFFF)));
+    REQUIRE(tracker.process(midi2_packet(0x50, 1, 0, 0, 0xFFFFFFFF)));
+    REQUIRE(tracker.process(midi2_packet(0xA0, 1, 60, 0, 0xFFFFFFFF)));
+    REQUIRE(tracker.process(midi2_packet(0xF0, 1, 60, 0, 0xFFFFFFFF)));
+
+    const auto* n = tracker.find(1, 60);
+    REQUIRE(n != nullptr);
+    REQUIRE(n->pitch_bend_semitones == Approx(0.0f).margin(1e-6f));
+    REQUIRE(n->pressure == Approx(0.0f).margin(1e-6f));
+    REQUIRE(n->timbre == Approx(0.0f).margin(1e-6f));
+    REQUIRE(bend_callbacks == 0);
+    REQUIRE(pressure_callbacks == 0);
+    REQUIRE(timbre_callbacks == 0);
+}
+
 TEST_CASE("MpeVoiceTracker member expression cache seeds later notes",
           "[midi][mpe][issue-645]") {
     MpeVoiceTracker tracker{MpeConfig::standard_lower(15)};
@@ -371,6 +503,43 @@ TEST_CASE("MpeVoiceTracker applies MIDI 2.0 per-note expression to the matching 
     REQUIRE(bent->timbre == Approx(1.0f).margin(1e-6f));
     REQUIRE(untouched->pitch_bend_semitones == Approx(0.0f).margin(1e-6f));
     REQUIRE(untouched->timbre == Approx(0.0f).margin(1e-6f));
+}
+
+TEST_CASE("MpeVoiceTracker per-note UMP callbacks target only matching duplicate pitch",
+          "[midi][mpe][ump][issue-645]") {
+    MpeVoiceTracker tracker{MpeConfig::standard_lower(15)};
+    tracker.set_member_bend_range(24.0f);
+
+    int bend_callbacks = 0;
+    int timbre_callbacks = 0;
+    uint8_t bend_channel = 0;
+    uint8_t timbre_channel = 0;
+    tracker.on_pitch_bend = [&](const MpeNoteState& note) {
+        ++bend_callbacks;
+        bend_channel = note.channel;
+    };
+    tracker.on_timbre = [&](const MpeNoteState& note) {
+        ++timbre_callbacks;
+        timbre_channel = note.channel;
+    };
+
+    REQUIRE(tracker.process(UmpPacket::note_on_2(0, 1, 60, 0xFFFF)));
+    REQUIRE(tracker.process(UmpPacket::note_on_2(0, 2, 60, 0xFFFF)));
+    REQUIRE(tracker.process(UmpPacket::per_note_pitch_bend(0, 2, 60, 0x00000000)));
+    REQUIRE(tracker.process(UmpPacket::registered_per_note_cc(0, 2, 60, 74, 0xFFFFFFFF)));
+
+    const auto* first = tracker.find(1, 60);
+    const auto* second = tracker.find(2, 60);
+    REQUIRE(first != nullptr);
+    REQUIRE(second != nullptr);
+    REQUIRE(first->pitch_bend_semitones == Approx(0.0f).margin(1e-6f));
+    REQUIRE(first->timbre == Approx(0.0f).margin(1e-6f));
+    REQUIRE(second->pitch_bend_semitones == Approx(-24.0f).margin(0.01f));
+    REQUIRE(second->timbre == Approx(1.0f).margin(1e-6f));
+    REQUIRE(bend_callbacks == 1);
+    REQUIRE(timbre_callbacks == 1);
+    REQUIRE(bend_channel == 2);
+    REQUIRE(timbre_channel == 2);
 }
 
 TEST_CASE("MpeVoiceTracker ignores unmatched MIDI 2.0 per-note expression without seeding channel state",

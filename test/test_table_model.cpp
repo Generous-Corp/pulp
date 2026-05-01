@@ -55,6 +55,21 @@ TEST_CASE("sort_by uses numeric key when provided", "[ui][table-model]") {
     REQUIRE(m.cell(3, 2).text == "10");
 }
 
+TEST_CASE("sort_by falls back to text when numeric keys are mixed",
+          "[ui][table-model][issue-493]") {
+    TableModel m;
+    m.add_column({"Value"});
+    m.add_row({{"10", 10.0}});
+    m.add_row({{"2"}});
+    m.add_row({{"1", 1.0}});
+
+    m.sort_by(0, TableSortOrder::Ascending);
+
+    REQUIRE(m.cell(0, 0).text == "1");
+    REQUIRE(m.cell(1, 0).text == "10");
+    REQUIRE(m.cell(2, 0).text == "2");
+}
+
 TEST_CASE("toggle_sort cycles ascending -> descending -> none",
           "[ui][table-model]") {
     auto m = make_preset_table();
@@ -89,6 +104,26 @@ TEST_CASE("non-sortable columns are ignored by toggle_sort",
     REQUIRE(m.cell(0, 0).text == "B");  // unchanged
 }
 
+TEST_CASE("out-of-range sort requests preserve state and row order",
+          "[ui][table-model][issue-493]") {
+    auto m = make_preset_table();
+    m.sort_by(0, TableSortOrder::Ascending);
+
+    m.sort_by(99, TableSortOrder::Descending);
+    REQUIRE(m.sort_column() == 0);
+    REQUIRE(m.sort_order() == TableSortOrder::Ascending);
+    REQUIRE(m.cell(0, 0).text == "Dreamy Pad");
+    REQUIRE(m.cell(1, 0).text == "Lush");
+    REQUIRE(m.cell(2, 0).text == "Stab");
+
+    m.toggle_sort(99);
+    REQUIRE(m.sort_column() == 0);
+    REQUIRE(m.sort_order() == TableSortOrder::Ascending);
+    REQUIRE(m.cell(0, 0).text == "Dreamy Pad");
+    REQUIRE(m.cell(1, 0).text == "Lush");
+    REQUIRE(m.cell(2, 0).text == "Stab");
+}
+
 TEST_CASE("clear_sort restores original insertion order",
           "[ui][table-model]") {
     auto m = make_preset_table();
@@ -118,4 +153,20 @@ TEST_CASE("adding rows after sort then clear_sort restores insertion order",
     REQUIRE(m.cell(2, 0).text == "Lush");
     REQUIRE(m.cell(3, 0).text == "Kick");
     REQUIRE(m.cell(4, 0).text == "Atlas");
+}
+
+TEST_CASE("add_column pads existing rows", "[ui][table-model][issue-493]") {
+    TableModel m;
+    m.add_column({"Name"});
+    m.add_row({{"Dreamy Pad"}});
+    m.add_row({{"Stab"}});
+
+    m.add_column({"Author"});
+
+    REQUIRE(m.column_count() == 2);
+    REQUIRE(m.row_count() == 2);
+    REQUIRE(m.cell(0, 0).text == "Dreamy Pad");
+    REQUIRE(m.cell(1, 0).text == "Stab");
+    REQUIRE(m.cell(0, 1).text.empty());
+    REQUIRE(m.cell(1, 1).text.empty());
 }
