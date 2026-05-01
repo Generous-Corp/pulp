@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <fstream>
 #include <chrono>
+#include <vector>
 
 #ifdef _WIN32
 #include <process.h>
@@ -29,6 +30,23 @@ uint64_t current_process_id() {
 std::string unique_plugin_name() {
     const auto now = std::chrono::steady_clock::now().time_since_epoch().count();
     return "BrowserTest-" + std::to_string(current_process_id()) + "-" + std::to_string(now);
+}
+
+MouseEvent mouse_down(float x, float y, int click_count = 1) {
+    MouseEvent event;
+    event.position = {x, y};
+    event.is_down = true;
+    event.click_count = click_count;
+    return event;
+}
+
+bool has_text_command(const RecordingCanvas& canvas, const std::string& text) {
+    for (const auto& cmd : canvas.commands()) {
+        if (cmd.type == DrawCommand::Type::fill_text && cmd.text == text) {
+            return true;
+        }
+    }
+    return false;
 }
 
 } // namespace
@@ -85,6 +103,37 @@ TEST_CASE("PresetBrowser filter is case-insensitive", "[view][preset_browser]") 
 
     browser.set_filter("BRIGHT");
     REQUIRE(browser.visible_count() == 1);
+}
+
+TEST_CASE("PresetBrowser filter matches folder case-insensitively", "[view][preset_browser]") {
+    TestPresetFixture f;
+    f.store.set_value(1, 3.0f);
+    REQUIRE(f.pm->save("Soft Pad", "Keys/Analog"));
+
+    PresetBrowser browser(*f.pm);
+    browser.set_filter("keys");
+
+    REQUIRE(browser.visible_count() == 1);
+    browser.select_next();
+    REQUIRE(browser.selected_preset() != nullptr);
+    REQUIRE(browser.selected_preset()->name == "Soft Pad");
+}
+
+TEST_CASE("PresetBrowser filtering clamps stale selection", "[view][preset_browser]") {
+    TestPresetFixture f;
+    PresetBrowser browser(*f.pm);
+
+    browser.select_next();
+    browser.select_next();
+    browser.select_next();
+    REQUIRE(browser.selected_index() == 2);
+
+    browser.set_filter("bass");
+
+    REQUIRE(browser.visible_count() == 1);
+    REQUIRE(browser.selected_index() == 0);
+    REQUIRE(browser.selected_preset() != nullptr);
+    REQUIRE(browser.selected_preset()->name == "Bass Heavy");
 }
 
 TEST_CASE("PresetBrowser select next/previous", "[view][preset_browser]") {
@@ -164,6 +213,120 @@ TEST_CASE("PresetBrowser show mode filters factory/user", "[view][preset_browser
     REQUIRE(browser.visible_count() == 3);
 }
 
+TEST_CASE("PresetBrowser empty filtered list ignores navigation and enter", "[view][preset_browser]") {
+    TestPresetFixture f;
+    PresetBrowser browser(*f.pm);
+
+    int selected_count = 0;
+    int activated_count = 0;
+    browser.on_preset_selected = [&](const PresetInfo&) { ++selected_count; };
+    browser.on_preset_activated = [&](const PresetInfo&) { ++activated_count; };
+
+    browser.set_show_mode(PresetBrowser::ShowMode::factory_only);
+    browser.select_next();
+    browser.select_previous();
+
+    KeyEvent enter;
+    enter.key = KeyCode::enter;
+    enter.is_down = true;
+
+    REQUIRE(browser.visible_count() == 0);
+    REQUIRE(browser.selected_index() == -1);
+    REQUIRE_FALSE(browser.on_key_event(enter));
+    REQUIRE(selected_count == 0);
+    REQUIRE(activated_count == 0);
+}
+
+TEST_CASE("PresetBrowser key release and unknown key are not handled", "[view][preset_browser]") {
+    TestPresetFixture f;
+    PresetBrowser browser(*f.pm);
+
+    KeyEvent release;
+    release.key = KeyCode::down;
+    release.is_down = false;
+    REQUIRE_FALSE(browser.on_key_event(release));
+
+    KeyEvent unknown;
+    unknown.key = KeyCode::escape;
+    unknown.is_down = true;
+    REQUIRE_FALSE(browser.on_key_event(unknown));
+}
+
+TEST_CASE("PresetBrowser enter activates selected preset", "[view][preset_browser]") {
+    TestPresetFixture f;
+    PresetBrowser browser(*f.pm);
+    browser.select_next();
+
+    std::string activated_name;
+    browser.on_preset_activated = [&](const PresetInfo& p) {
+        activated_name = p.name;
+    };
+
+    KeyEvent enter;
+    enter.key = KeyCode::enter;
+    enter.is_down = true;
+
+    REQUIRE(browser.on_key_event(enter));
+    REQUIRE(activated_name == "Bass Heavy");
+}
+
+TEST_CASE("PresetBrowser mouse header arrows navigate and activate", "[view][preset_browser]") {
+    TestPresetFixture f;
+    PresetBrowser browser(*f.pm);
+    browser.set_bounds({0, 0, 120, 160});
+
+    std::vector<std::string> activated;
+    browser.on_preset_activated = [&](const PresetInfo& p) {
+        activated.push_back(p.name);
+    };
+
+    MouseEvent release = mouse_down(8.0f, 12.0f);
+    release.is_down = false;
+    browser.on_mouse_event(release);
+    REQUIRE(activated.empty());
+    REQUIRE(browser.selected_index() == -1);
+
+    browser.on_mouse_event(mouse_down(8.0f, 12.0f));
+    REQUIRE(browser.selected_index() == 2);
+    REQUIRE(activated == std::vector<std::string>{"Clean"});
+
+    browser.on_mouse_event(mouse_down(110.0f, 12.0f));
+    REQUIRE(browser.selected_index() == 0);
+    REQUIRE(activated == std::vector<std::string>{"Clean", "Bass Heavy"});
+
+    browser.on_mouse_event(mouse_down(60.0f, 12.0f));
+    REQUIRE(browser.selected_index() == 0);
+    REQUIRE(activated.size() == 2);
+}
+
+TEST_CASE("PresetBrowser mouse list selects and double-click activates", "[view][preset_browser]") {
+    TestPresetFixture f;
+    PresetBrowser browser(*f.pm);
+    browser.set_bounds({0, 0, 160, 180});
+
+    std::string selected_name;
+    std::string activated_name;
+    browser.on_preset_selected = [&](const PresetInfo& p) {
+        selected_name = p.name;
+    };
+    browser.on_preset_activated = [&](const PresetInfo& p) {
+        activated_name = p.name;
+    };
+
+    browser.on_mouse_event(mouse_down(40.0f, 62.0f));
+    REQUIRE(browser.selected_index() == 1);
+    REQUIRE(selected_name == "Bright Lead");
+    REQUIRE(activated_name.empty());
+
+    browser.on_mouse_event(mouse_down(40.0f, 86.0f, 2));
+    REQUIRE(browser.selected_index() == 2);
+    REQUIRE(selected_name == "Clean");
+    REQUIRE(activated_name == "Clean");
+
+    browser.on_mouse_event(mouse_down(40.0f, 500.0f));
+    REQUIRE(browser.selected_index() == 2);
+}
+
 TEST_CASE("PresetBrowser paint produces draw commands", "[view][preset_browser]") {
     TestPresetFixture f;
     PresetBrowser browser(*f.pm);
@@ -174,6 +337,26 @@ TEST_CASE("PresetBrowser paint produces draw commands", "[view][preset_browser]"
 
     REQUIRE(canvas.count(DrawCommand::Type::fill_rounded_rect) > 0);
     REQUIRE(canvas.count(DrawCommand::Type::fill_text) > 0);
+}
+
+TEST_CASE("PresetBrowser paint includes filter and modified current preset text", "[view][preset_browser]") {
+    TestPresetFixture f;
+    f.pm->set_current_preset_name("Clean");
+    f.pm->mark_as_changed();
+
+    PresetBrowser browser(*f.pm);
+    browser.set_bounds({0, 0, 220, 140});
+    browser.set_filter("lead");
+    browser.select_next();
+
+    RecordingCanvas canvas;
+    browser.paint(canvas);
+
+    REQUIRE(has_text_command(canvas, "Clean *"));
+    REQUIRE(has_text_command(canvas, "Filter: lead"));
+    REQUIRE(has_text_command(canvas, "Bright Lead"));
+    REQUIRE(canvas.count(DrawCommand::Type::clip_rect) == 1);
+    REQUIRE(canvas.count(DrawCommand::Type::restore) == 1);
 }
 
 TEST_CASE("PresetBrowser refresh updates list", "[view][preset_browser]") {
