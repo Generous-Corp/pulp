@@ -141,6 +141,32 @@ TEST_CASE("StateTree child added listener", "[state][tree]") {
     REQUIRE(added_count == 2);
 }
 
+TEST_CASE("StateTree child listener removal stops callbacks", "[state][tree]") {
+    auto root = StateTree::create("root");
+    auto first = StateTree::create("first");
+    root->add_child(first);
+
+    int added_count = 0;
+    int removed_count = 0;
+    int added_id = root->add_child_added_listener(
+        [&](StateTree&, StateTree&, int) { added_count++; });
+    int removed_id = root->add_child_removed_listener(
+        [&](StateTree&, StateTree&, int) { removed_count++; });
+
+    root->add_child(StateTree::create("second"));
+    root->remove_child(first.get());
+    REQUIRE(added_count == 1);
+    REQUIRE(removed_count == 1);
+
+    root->remove_child_added_listener(added_id);
+    root->remove_child_removed_listener(removed_id);
+    root->add_child(StateTree::create("third"));
+    root->remove_child(0);
+
+    REQUIRE(added_count == 1);
+    REQUIRE(removed_count == 1);
+}
+
 TEST_CASE("StateTree remove listener", "[state][tree]") {
     auto tree = StateTree::create("test");
 
@@ -344,6 +370,16 @@ TEST_CASE("CachedProperty move transfers listener ownership", "[state][cached]")
     REQUIRE_FALSE(moved.get());
 }
 
+TEST_CASE("CachedProperty unbound set only updates local cache", "[state][cached]") {
+    CachedProperty<int64_t> size;
+
+    REQUIRE_FALSE(size.is_bound());
+    REQUIRE(size.get() == 0);
+
+    size.set(512);
+    REQUIRE(size.get() == 512);
+}
+
 // ── StateTreeSynchroniser ───────────────────────────────────────────────
 
 TEST_CASE("StateTreeSynchroniser records property and child deltas", "[state][sync]") {
@@ -381,10 +417,13 @@ TEST_CASE("StateTreeSynchroniser detach clears pending and stops recording", "[s
     sync.attach(tree);
 
     tree->set("name", std::string("before"));
+    tree->add_child(StateTree::create("before_child"));
     sync.detach();
     REQUIRE(sync.take_deltas().empty());
 
     tree->set("name", std::string("after"));
+    tree->add_child(StateTree::create("after_child"));
+    tree->remove_child(0);
     REQUIRE(sync.take_deltas().empty());
 }
 
