@@ -48,6 +48,12 @@ struct Polynomial {
     /// Returns complex roots (may be real with imag=0).
     static std::pair<std::complex<float>, std::complex<float>>
     roots_quadratic(float a, float b, float c) {
+        if (std::abs(a) < 1e-12f) {
+            if (std::abs(b) < 1e-12f) return {{0.0f, 0.0f}, {0.0f, 0.0f}};
+            const auto root = std::complex<float>{-c / b, 0.0f};
+            return {root, root};
+        }
+
         float disc = b * b - 4.0f * a * c;
         if (disc >= 0) {
             float sq = std::sqrt(disc);

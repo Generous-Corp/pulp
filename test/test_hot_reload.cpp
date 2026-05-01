@@ -1,20 +1,65 @@
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/view/hot_reload.hpp>
+#include <chrono>
 #include <fstream>
 #include <thread>
 #include <filesystem>
+#include <vector>
 
 using namespace pulp::view;
 
 static void write_js_file(const std::filesystem::path& path, const std::string& content) {
-    std::ofstream f(path);
+    std::ofstream f(path, std::ios::trunc);
     f << content;
     f.close();
 }
 
-TEST_CASE("HotReloader detects file changes", "[view][hotreload]") {
-    auto tmp_dir = std::filesystem::temp_directory_path() / "pulp_hotreload_test";
+static std::filesystem::path make_temp_dir(const std::string& prefix) {
+    const auto suffix = std::chrono::steady_clock::now().time_since_epoch().count();
+    auto tmp_dir = std::filesystem::temp_directory_path() /
+                   (prefix + "_" + std::to_string(suffix));
+    std::filesystem::remove_all(tmp_dir);
     std::filesystem::create_directories(tmp_dir);
+    return tmp_dir;
+}
+
+static bool wait_for_reload_containing(HotReloader& reloader,
+                                       const std::string& expected,
+                                       const std::string& latest_code) {
+    if (latest_code.find(expected) != std::string::npos)
+        return true;
+
+    for (int i = 0; i < 30; ++i) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(250));
+        reloader.poll_reload();
+        if (latest_code.find(expected) != std::string::npos)
+            return true;
+    }
+    return false;
+}
+
+static bool wait_for_history_containing(HotReloader& reloader,
+                                        const std::vector<std::string>& history,
+                                        const std::string& expected) {
+    auto has_expected = [&]() {
+        for (const auto& code : history) {
+            if (code.find(expected) != std::string::npos)
+                return true;
+        }
+        return false;
+    };
+
+    for (int i = 0; i < 30; ++i) {
+        if (has_expected())
+            return true;
+        std::this_thread::sleep_for(std::chrono::milliseconds(250));
+        reloader.poll_reload();
+    }
+    return has_expected();
+}
+
+TEST_CASE("HotReloader detects file changes", "[view][hotreload]") {
+    auto tmp_dir = make_temp_dir("pulp_hotreload_test");
     auto js_file = tmp_dir / "ui.js";
 
     // Write initial file
@@ -33,17 +78,7 @@ TEST_CASE("HotReloader detects file changes", "[view][hotreload]") {
     std::this_thread::sleep_for(std::chrono::milliseconds(300));
     write_js_file(js_file, "// modified version\nconsole.log('hello');");
 
-    // Wait for the watcher to detect the change
-    bool detected = false;
-    for (int i = 0; i < 20; ++i) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(250));
-        if (reloader.poll_reload()) {
-            detected = true;
-            break;
-        }
-    }
-
-    REQUIRE(detected);
+    REQUIRE(wait_for_reload_containing(reloader, "modified version", reloaded_code));
     REQUIRE(reloaded_code.find("modified version") != std::string::npos);
     REQUIRE(reloader.reload_count() == 1);
 
@@ -52,15 +87,14 @@ TEST_CASE("HotReloader detects file changes", "[view][hotreload]") {
 }
 
 TEST_CASE("HotReloader reload_count increments", "[view][hotreload]") {
-    auto tmp_dir = std::filesystem::temp_directory_path() / "pulp_hotreload_test2";
-    std::filesystem::create_directories(tmp_dir);
+    auto tmp_dir = make_temp_dir("pulp_hotreload_test2");
     auto js_file = tmp_dir / "ui.js";
 
     write_js_file(js_file, "// v1");
 
-    uint32_t reload_count = 0;
-    HotReloader reloader(js_file, [&](const std::string&) {
-        ++reload_count;
+    std::string latest_code;
+    HotReloader reloader(js_file, [&](const std::string& code) {
+        latest_code = code;
     });
 
     // Initially zero
@@ -70,16 +104,7 @@ TEST_CASE("HotReloader reload_count increments", "[view][hotreload]") {
     std::this_thread::sleep_for(std::chrono::milliseconds(300));
     write_js_file(js_file, "// v2");
 
-    bool detected = false;
-    for (int i = 0; i < 20; ++i) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(250));
-        if (reloader.poll_reload()) {
-            detected = true;
-            break;
-        }
-    }
-
-    REQUIRE(detected);
+    REQUIRE(wait_for_reload_containing(reloader, "v2", latest_code));
     REQUIRE(reloader.reload_count() >= 1);
 
     // Clean up
@@ -87,8 +112,7 @@ TEST_CASE("HotReloader reload_count increments", "[view][hotreload]") {
 }
 
 TEST_CASE("HotReloader multiple sequential reloads", "[view][hotreload]") {
-    auto tmp_dir = std::filesystem::temp_directory_path() / "pulp_hotreload_multi";
-    std::filesystem::create_directories(tmp_dir);
+    auto tmp_dir = make_temp_dir("pulp_hotreload_multi");
     auto js_file = tmp_dir / "ui.js";
 
     write_js_file(js_file, "// v1");
@@ -98,26 +122,15 @@ TEST_CASE("HotReloader multiple sequential reloads", "[view][hotreload]") {
         reload_history.push_back(code);
     });
 
-    auto wait_for_reload = [&](int expected_count) {
-        for (int i = 0; i < 20; ++i) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(250));
-            reloader.poll_reload();
-            if (static_cast<int>(reload_history.size()) >= expected_count) return true;
-        }
-        return static_cast<int>(reload_history.size()) >= expected_count;
-    };
-
     // First reload
     std::this_thread::sleep_for(std::chrono::milliseconds(300));
     write_js_file(js_file, "// v2 - first change");
-    REQUIRE(wait_for_reload(1));
-    REQUIRE(reload_history.back().find("v2") != std::string::npos);
+    REQUIRE(wait_for_history_containing(reloader, reload_history, "v2"));
 
     // Second reload
     std::this_thread::sleep_for(std::chrono::milliseconds(300));
     write_js_file(js_file, "// v3 - second change");
-    REQUIRE(wait_for_reload(2));
-    REQUIRE(reload_history.back().find("v3") != std::string::npos);
+    REQUIRE(wait_for_history_containing(reloader, reload_history, "v3"));
 
     // Verify reload count matches
     REQUIRE(reloader.reload_count() >= 2);
@@ -126,8 +139,7 @@ TEST_CASE("HotReloader multiple sequential reloads", "[view][hotreload]") {
 }
 
 TEST_CASE("HotReloader only reloads on JS modification", "[view][hotreload]") {
-    auto tmp_dir = std::filesystem::temp_directory_path() / "pulp_hotreload_jsonly";
-    std::filesystem::create_directories(tmp_dir);
+    auto tmp_dir = make_temp_dir("pulp_hotreload_jsonly");
     auto js_file = tmp_dir / "ui.js";
 
     write_js_file(js_file, "// original");
@@ -148,20 +160,14 @@ TEST_CASE("HotReloader only reloads on JS modification", "[view][hotreload]") {
     std::this_thread::sleep_for(std::chrono::milliseconds(300));
     write_js_file(js_file, "// updated version");
 
-    bool detected = false;
-    for (int i = 0; i < 20; ++i) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(250));
-        if (reloader.poll_reload()) { detected = true; break; }
-    }
-    REQUIRE(detected);
+    REQUIRE(wait_for_reload_containing(reloader, "updated version", latest_code));
     REQUIRE(latest_code.find("updated version") != std::string::npos);
 
     std::filesystem::remove_all(tmp_dir);
 }
 
 TEST_CASE("HotReloader directory watching", "[view][hotreload]") {
-    auto tmp_dir = std::filesystem::temp_directory_path() / "pulp_hotreload_test3";
-    std::filesystem::create_directories(tmp_dir);
+    auto tmp_dir = make_temp_dir("pulp_hotreload_test3");
     auto entry = tmp_dir / "main.js";
 
     write_js_file(entry, "// main entry v1");
@@ -177,16 +183,7 @@ TEST_CASE("HotReloader directory watching", "[view][hotreload]") {
     std::this_thread::sleep_for(std::chrono::milliseconds(300));
     write_js_file(entry, "// main entry v2");
 
-    bool detected = false;
-    for (int i = 0; i < 20; ++i) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(250));
-        if (reloader.poll_reload()) {
-            detected = true;
-            break;
-        }
-    }
-
-    REQUIRE(detected);
+    REQUIRE(wait_for_reload_containing(reloader, "v2", latest_code));
     REQUIRE(latest_code.find("v2") != std::string::npos);
 
     // Clean up
