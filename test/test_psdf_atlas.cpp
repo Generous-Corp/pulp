@@ -24,11 +24,14 @@ TEST_CASE("vector_fallback threshold picks SDF vs path rendering",
     REQUIRE_FALSE(should_use_vector_fallback(48.0f,  48.0f));
     REQUIRE_FALSE(should_use_vector_fallback(192.0f, 48.0f));
     REQUIRE      (should_use_vector_fallback(480.0f, 48.0f));
+    REQUIRE_FALSE(should_use_vector_fallback(384.0f, 48.0f));
 
     // Custom threshold.
     REQUIRE      (should_use_vector_fallback(200.0f, 48.0f, 2.0f));
+    REQUIRE_FALSE(should_use_vector_fallback(96.0f, 48.0f, 2.0f));
     REQUIRE_FALSE(should_use_vector_fallback(50.0f,  48.0f, 2.0f));
 
     // Degenerate base_size is never a fallback trigger.
     REQUIRE_FALSE(should_use_vector_fallback(100.0f, 0.0f));
+    REQUIRE_FALSE(should_use_vector_fallback(-100.0f, 48.0f));
 }

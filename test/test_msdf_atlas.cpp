@@ -12,6 +12,17 @@
 using pulp::canvas::MsdfAtlas;
 using pulp::canvas::MsdfGlyph;
 
+TEST_CASE("MsdfAtlas default state is empty", "[canvas][msdf][issue-641]") {
+    MsdfAtlas atlas;
+    REQUIRE(atlas.glyph_count() == 0);
+    REQUIRE(atlas.base_size() == 0);
+    REQUIRE(atlas.width() == 0);
+    REQUIRE(atlas.height() == 0);
+    REQUIRE(atlas.channels() == 3);
+    REQUIRE(atlas.pixels() == nullptr);
+    REQUIRE(atlas.glyph(U'A') == nullptr);
+}
+
 TEST_CASE("MsdfAtlas packs the requested glyphs", "[canvas][msdf]") {
     MsdfAtlas atlas;
     std::vector<char32_t> chars = {U'A', U'B', U'C', U'D'};
@@ -30,6 +41,46 @@ TEST_CASE("MsdfAtlas packs the requested glyphs", "[canvas][msdf]") {
         REQUIRE(g->height == 32);
     }
     REQUIRE(atlas.glyph(U'Z') == nullptr);
+}
+
+TEST_CASE("MsdfAtlas empty build records base size and channel mode",
+          "[canvas][msdf][issue-641]") {
+    MsdfAtlas atlas;
+    REQUIRE(atlas.build("stub", {}, 40, 5, 256, /*include_alpha*/ true));
+    REQUIRE(atlas.glyph_count() == 0);
+    REQUIRE(atlas.base_size() == 40);
+    REQUIRE(atlas.channels() == 4);
+    REQUIRE(atlas.width() == 0);
+    REQUIRE(atlas.height() == 0);
+}
+
+TEST_CASE("MsdfAtlas packs glyphs into deterministic tile coordinates",
+          "[canvas][msdf][issue-641]") {
+    MsdfAtlas atlas;
+    REQUIRE(atlas.build("stub", {U'A', U'B', U'C'}, 10, 1, 64));
+    REQUIRE(atlas.width() == 24);
+    REQUIRE(atlas.height() == 24);
+
+    const MsdfGlyph* a = atlas.glyph(U'A');
+    const MsdfGlyph* b = atlas.glyph(U'B');
+    const MsdfGlyph* c = atlas.glyph(U'C');
+    REQUIRE(a != nullptr);
+    REQUIRE(b != nullptr);
+    REQUIRE(c != nullptr);
+    REQUIRE(a->atlas_x == 1);
+    REQUIRE(a->atlas_y == 1);
+    REQUIRE(b->atlas_x == 13);
+    REQUIRE(b->atlas_y == 1);
+    REQUIRE(c->atlas_x == 1);
+    REQUIRE(c->atlas_y == 13);
+}
+
+TEST_CASE("MsdfAtlas duplicate codepoints share one lookup entry",
+          "[canvas][msdf][issue-641]") {
+    MsdfAtlas atlas;
+    REQUIRE(atlas.build("stub", {U'A', U'A'}, 16, 2, 128));
+    REQUIRE(atlas.glyph_count() == 1);
+    REQUIRE(atlas.glyph(U'A') != nullptr);
 }
 
 TEST_CASE("MsdfAtlas pixel buffer is RGB8 (3 bytes per texel)",
