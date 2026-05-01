@@ -35,6 +35,8 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - test(runtime): cover range edge paths ([#1034](https://github.com/danielraffel/pulp/pull/1034))
 
 <a id="v0680"></a>
+## [0.69.0]
+
 ## [0.68.0] - 2026-04-30
 
 - fix(view): bubble click up to ancestor on_click handler (#1067) ([#1073](https://github.com/danielraffel/pulp/pull/1073))
