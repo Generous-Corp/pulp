@@ -170,6 +170,16 @@ Namespace while #1190, #1191, and #1188 continue draining.
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | #1128 | `feature/audio-workgroup-coverage-640-next` | `494233c87fe0` | `25212496127` | `25212496120` | `25212496122` | `25212496131` | queued/in progress |
 
+### 2026-05-01 Batch 8: One-PR Refill
+
+#1127 had no active runs and only stale cancelled/failed contexts from an
+older base, so it was refreshed with `gh pr update-branch`. Hold further
+cloud refill while #1127, #1128, #1191, and #1188 drain.
+
+| PR | Branch | Refreshed Head | Build Run | Coverage Run | Sanitizer Run | IWYU Run | Status |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| #1127 | `feature/render-texture-atlas-coverage-646-next` | `310074265e45` | `25213360729` | `25213360744` | `25213360732` | `25213360752` | queued/in progress |
+
 ## Merge Waves While Queue Is In Flight
 
 These PRs were already green/mergeable when the paused queue was
@@ -666,7 +676,7 @@ not been pushed, PR'd, or dispatched to Namespace.
 | #1123 | UNKNOWN | `feature/host-scan-cache-coverage-493-next` | `c1792a45fe1b` | `Build and Test 25166249254`<br>`Sanitizer Tests 25166234957`<br>`Build and Test 25166234954`<br>`Coverage 25166234934` | test: cover host scan cache fallback paths |
 | #1125 | UNKNOWN | `feature/view-asset-manager-coverage-493-next` | `be13ce28b68f` | `Build and Test 25167200088`<br>`Coverage 25167178443`<br>`Sanitizer Tests 25167178429`<br>`Build and Test 25167178420` | test(view): cover asset manager edge paths |
 | #1126 | UNKNOWN | `feature/view-frame-clock-coverage-493-next` | `e8dca439b850` | `Build and Test 25167592036`<br>`Coverage 25167561161`<br>`Sanitizer Tests 25167561146`<br>`Build and Test 25167561113` | test(view): cover frame clock lifecycle edges |
-| #1127 | UNKNOWN | `feature/render-texture-atlas-coverage-646-next` | `7b6a7bfc4f8b` | `Build and Test 25167987526`<br>`Sanitizer Tests 25167952725`<br>`Coverage 25167952691`<br>`Build and Test 25167952688` | test(render): cover texture atlas full-capacity edges |
+| #1127 | BLOCKED | `feature/render-texture-atlas-coverage-646-next` | `310074265e45` | `Build and Test 25213360729`<br>`Coverage 25213360744`<br>`Sanitizer Tests 25213360732`<br>`IWYU advisory 25213360752` | test(render): cover texture atlas full-capacity edges |
 | #1128 | UNKNOWN | `feature/audio-workgroup-coverage-640-next` | `e4875168d49b` | `Build and Test 25168404842`<br>`Build and Test 25168364432`<br>`Coverage 25168364417`<br>`Sanitizer Tests 25168364375` | test(audio): cover workgroup fallback lifecycle |
 | #1129 | UNKNOWN | `feature/midi-sysex-accumulator-coverage-645-next` | `f81378693df2` | `Build and Test 25168440441`<br>`Build and Test 25168411404`<br>`Coverage 25168411387`<br>`Sanitizer Tests 25168411385` | test(midi): cover sysex accumulator tail paths |
 | #1131 | UNKNOWN | `feature/audio-window-enumerator-coverage-640-next` | `36d5bd605414` | `Build and Test 25169301265`<br>`Build and Test 25169274684`<br>`Coverage 25169274675`<br>`Sanitizer Tests 25169274591` | test(audio): cover excerpt window boundary arithmetic |
