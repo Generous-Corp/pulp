@@ -973,6 +973,10 @@ add_executable(pulp-test-audio test_audio.cpp)
 target_link_libraries(pulp-test-audio PRIVATE pulp::audio Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-audio)
 
+add_executable(pulp-test-system-volume test_system_volume.cpp)
+target_link_libraries(pulp-test-system-volume PRIVATE pulp::audio Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-system-volume)
+
 # Excerpt window enumeration tests
 add_executable(pulp-test-audio-excerpt test_audio_excerpt.cpp)
 target_link_libraries(pulp-test-audio-excerpt PRIVATE pulp::audio Catch2::Catch2WithMain)
