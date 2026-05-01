@@ -26,9 +26,9 @@ This local ledger records the open `codecov` PR validation runs paused to free N
 
 ## Current Watch Point
 
-Last live check: 2026-05-01 19:18:13 EDT.
+Last live check: 2026-05-01 19:24:13 EDT.
 
-- Open `codecov` PRs: 2.
+- Open `codecov` PRs: 3.
 - Merge state: #1211 merged cleanly as `827227339a0609358ba0371a86417a868ee9879e`.
   #1207 also merged cleanly as `9da7b03a522a2c08042bbfe6f3149612ed02bb82`
   after the long Windows release-path gate completed. #1212 merged
@@ -84,9 +84,19 @@ Last live check: 2026-05-01 19:18:13 EDT.
   tools/scripts/test_validate_hosts.py`, docs-sync, and diff/index
   cleanliness checks; focused coverage reported 100% for
   `tools/deps/validate_hosts.py`. No real SSH host validation was run.
-- GitHub Actions pressure: #1228-#1229 have PR-event Build/Coverage
+- Refill: opened #1230 from
+  `local/phase3-build-migration-index-extra-643`, branch
+  `feature/phase3-build-migration-index-extra-643`, head `bc37c17e8f92`.
+  Applied `codecov`, linked #641/#643, and PR-event checks are
+  queued/running. Local validation after rebasing onto `origin/main` at
+  `e495cdba0e02` included 7 base tests, 10 extra tests, venv-backed
+  `run_python_coverage.py --pattern tools/scripts/test_build_migration_index.py
+  --pattern tools/scripts/test_build_migration_index_extra.py`, sync checks,
+  and diff/index cleanliness checks; focused coverage reported 100% for
+  `tools/scripts/build_migration_index.py`.
+- GitHub Actions pressure: #1228-#1230 have PR-event Build/Coverage
   checks active or queued on Namespace-backed lanes and no failed checks.
-  Main changed after #1227 merged, so re-check mergeability for #1228-#1229
+  Main changed after #1227 merged, so re-check mergeability for #1228-#1230
   before merging any further PRs.
 - Local-only progress: `pulp-check-docs-status-extra-643` refreshed cleanly
   at `a5bcacaf` with 10 format-validation tests, 23 coverage-runner tests,
@@ -94,9 +104,6 @@ Last live check: 2026-05-01 19:18:13 EDT.
 - Local-only progress: `pulp-audit-top-level-coverage-643` refreshed cleanly
   at `339b79c8` with 9 tests and 100% target coverage for
   `tools/audit.py`.
-- Local-only progress: `pulp-build-migration-index-extra-643` refreshed
-  cleanly at `4af9ef22` with 7 base tests plus 10 extra tests and 100%
-  target coverage for `tools/scripts/build_migration_index.py`.
 - Local-only progress: `pulp-resolve-runs-on-extra-643` refreshed cleanly
   at `ac4e9157` with 18 base tests plus 2 extra tests and 100% target
   coverage for `tools/scripts/resolve_runs_on.py`.
@@ -505,8 +512,9 @@ Last live check: 2026-05-01 19:18:13 EDT.
   `run_python_coverage.py --pattern 'tools/scripts/test_compat_sync_check*.py'`
   passed and reported 100% for `tools/scripts/compat_sync_check.py`.
 - Local-only progress: `pulp-build-migration-index-extra-643` is
-  refreshed against current `origin/main` at `4af9ef22cc86` as a single
-  local feature commit and locally validated with 100% target coverage.
+  refreshed against current `origin/main` at `bc37c17e8f92` as a single
+  local feature commit, locally validated with 100% target coverage, and
+  queued remotely as #1230.
   Validation: `python3 tools/scripts/test_build_migration_index.py &&
   python3 tools/scripts/test_build_migration_index_extra.py` reported
   7 + 10 passing tests; venv-backed coverage over
@@ -1242,7 +1250,7 @@ not been pushed, PR'd, or dispatched to Namespace.
 | `feature/phase3-android-target-coverage-643` | `92135ab5` | #643 tooling tranche for `tools/local-ci/android_target.py` paths | `tools/scripts/test_android_target.py` | Rebased cleanly onto `origin/main` at `71267a71`; `python3 tools/scripts/test_android_target.py` passed with 16 tests; `uv run --with 'coverage>=7.10' python tools/scripts/run_python_coverage.py --pattern tools/scripts/test_android_target.py` passed and reported 100% for `tools/local-ci/android_target.py` with 69 statements, 0 misses, 28 branches, and 0 partials; `git diff --check origin/main...HEAD`, `git diff --exit-code`, and `git diff --cached --exit-code` passed; `shipyard pr --skip-target mac --skip-target ubuntu --skip-target windows` created #1227, then exited with no local targets remaining as expected for the Namespace-only route; #1227 was labeled `codecov`, linked from #641/#643, and merged as `e495cdba0e02b41bc14f1cd625274f3416346574` after PR-event Namespace and coverage gates were green. | Merged. |
 | `feature/phase3-validate-hosts-coverage-643` | `18363f59` | #643 tooling tranche for `tools/deps/validate_hosts.py` paths | `tools/scripts/test_validate_hosts.py` | Rebased cleanly onto `origin/main` at `2623a4b4`; `python3 tools/scripts/test_validate_hosts.py` passed with 9 tests and only mocked local/SSH command construction; venv-backed `run_python_coverage.py --pattern tools/scripts/test_validate_hosts.py` passed and reported 100% for `tools/deps/validate_hosts.py` with 61 statements, 0 misses, 14 branches, and 0 partials; docs-sync report passed; `git diff --check origin/main...HEAD`, `git diff --exit-code`, and `git diff --cached --exit-code` passed; `shipyard pr --skip-target mac --skip-target ubuntu --skip-target windows` created #1229, then exited with no local targets remaining as expected for the Namespace-only route; #1229 is labeled `codecov` and linked from #641/#643. No real SSH, VM, or remote validation was run. | Queued: monitor #1229 and merge once required gates are green. |
 | `feature/phase3-compat-sync-extra-643` | `48bf3b9e` | #643 tooling tranche for `tools/scripts/compat_sync_check.py` paths | `tools/scripts/test_compat_sync_check_extra.py` | Rebased cleanly onto current `origin/main`; venv-backed `tools/scripts/run_python_coverage.py --pattern tools/scripts/test_compat_sync_check.py --pattern tools/scripts/test_compat_sync_check_extra.py` passed with 30 base tests plus 31 extra tests and reported 100% for `tools/scripts/compat_sync_check.py` with 340 statements, 0 misses, 178 branches, and 0 partials; `python3 tools/scripts/compat_sync_check.py --mode=report --enforce --base origin/main --head HEAD` passed with no mapped paths touched; `git diff --check` passed; final tracked status clean and ahead 2; `shipyard pr --skip-target mac --skip-target ubuntu --skip-target windows` created #1225, then exited with no local targets remaining as expected for the Namespace-only route; #1225 was labeled `codecov`, linked from #641/#643, and merged as `26155037c6df284cf5bbbf29a104faf7368dcb37` after PR-event Namespace and coverage gates were green. | Merged. |
-| `local/phase3-build-migration-index-extra-643` | `4af9ef22` | #643 tooling tranche for `tools/scripts/build_migration_index.py` paths | `tools/scripts/test_build_migration_index_extra.py` | Rebased cleanly onto `origin/main` at `2623a4b4`; base test passed with 7 tests; extra test passed with 10 tests; venv-backed `run_python_coverage.py --pattern tools/scripts/test_build_migration_index.py --pattern tools/scripts/test_build_migration_index_extra.py` passed and reported 100% for `tools/scripts/build_migration_index.py` with 179 statements, 0 misses, 88 branches, and 0 partials; temp codegen smoke generated the migration index twice, byte-for-byte identical, non-empty, and containing `kMigrationIndexSize`; diff-cover and coverage-tier found no touched production lines because only an omitted test file changed; skill-sync, docs-sync, compat-sync, and diff checks passed; final tracked status clean and ahead 1. | Hold local-only while current Namespace batch drains; when capacity returns, rename/push as a feature branch, run `shipyard pr --skip-target mac --skip-target ubuntu --skip-target windows`; use PR-event Namespace checks unless a targeted diagnostic dispatch is needed. |
+| `feature/phase3-build-migration-index-extra-643` | `bc37c17e` | #643 tooling tranche for `tools/scripts/build_migration_index.py` paths | `tools/scripts/test_build_migration_index_extra.py` | Rebased cleanly onto `origin/main` at `e495cdba`; base test passed with 7 tests; extra test passed with 10 tests; venv-backed `run_python_coverage.py --pattern tools/scripts/test_build_migration_index.py --pattern tools/scripts/test_build_migration_index_extra.py` passed and reported 100% for `tools/scripts/build_migration_index.py` with 179 statements, 0 misses, 88 branches, and 0 partials; skill-sync, docs-sync, compat-sync, and diff/index checks passed. `shipyard pr --skip-target mac --skip-target ubuntu --skip-target windows` created #1230, then exited with no local targets remaining as expected for the Namespace-only route; #1230 is labeled `codecov` and linked from #641/#643. | Queued: monitor #1230 and merge once required gates are green. |
 | `feature/phase3-docs-sync-check-extra-643` | `6960c4d2` | #643 tooling tranche for `tools/scripts/docs_sync_check.py` paths and script entrypoint | `tools/scripts/test_docs_sync_check_extra.py` | Rebased onto current `origin/main` at `57527d75`; `PYTHONPATH=tools/scripts python3 -m unittest tools/scripts/test_docs_sync_check.py tools/scripts/test_docs_sync_check_extra.py` reports 28 tests; throwaway-venv `tools/scripts/run_python_coverage.py --pattern 'tools/scripts/test_docs_sync_check*.py'` passed and reported 100% for `tools/scripts/docs_sync_check.py` with 106 statements, 0 misses, 30 branches, and 0 partials; `git diff --check` passed; `shipyard pr --skip-target mac --skip-target ubuntu --skip-target windows` created #1218, then exited with no local targets remaining as expected for the Namespace-only route; #1218 is labeled `codecov` and linked from #641/#643. #1218 merged as `a147af718361001323755ac01da395d271fe4ee2` after required gates were green. | Merged. |
 | `local/phase3-coverage-tier-check-extra-643` | `2623a4b4` | #643 tooling tranche for `tools/scripts/coverage_tier_check.py` paths | none after rebase | Rebased onto current `origin/main`; Git skipped the previously applied local commit and left no diff; `python3 tools/scripts/test_coverage_tier_check.py` passed with 15 tests; `python3 tools/scripts/test_coverage_tier_check_extra.py` passed with 17 tests; targeted coverage reported 100% for `tools/scripts/coverage_tier_check.py`; `git diff --check` passed; final status clean. | No reopen action needed; tranche is already absorbed upstream. |
 | `local/phase3-skill-sync-extra-643` | `9d7f83be` | #643 tooling tranche for `tools/scripts/skill_sync_check.py` paths, reporting edges, and script entrypoint | `tools/scripts/test_skill_sync_check_extra.py` | Rebased cleanly onto `origin/main` at `2623a4b4`; `python3 tools/scripts/test_skill_sync_check.py` passed with 4 tests; `python3 tools/scripts/test_skill_sync_check_extra.py` passed with 20 tests; `python3 tools/scripts/test_gates.py` passed with 39 tests; venv-backed `run_python_coverage.py --pattern tools/scripts/test_skill_sync_check.py --pattern tools/scripts/test_skill_sync_check_extra.py` passed and reported 100% for `tools/scripts/skill_sync_check.py` with 239 statements, 0 misses, 106 branches, and 0 partials; skill-sync, docs-sync, compat-sync, version-bump, and diff checks passed; final tracked status clean and ahead 1. | Hold local-only while current Namespace batch drains; when capacity returns, rename/push as a feature branch, run `shipyard pr --skip-target mac --skip-target ubuntu --skip-target windows`; use PR-event Namespace checks unless a targeted diagnostic dispatch is needed. |
