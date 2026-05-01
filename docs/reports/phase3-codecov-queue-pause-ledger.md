@@ -150,10 +150,16 @@ Last live check: 2026-05-01 15:14:35 EDT.
   Validation: `python3 tools/scripts/test_audit_top_level.py` reported 9
   passing tests; a temporary venv coverage run over `tools/audit.py`
   passed `--fail-under=100`.
-- Local-only progress: `pulp-embed-js-coverage-643` and
-  `pulp-run-swift-coverage-extra-643` are refreshed against current
-  `origin/main` and locally validated; hold for the next remote refill
-  window.
+- Local-only progress: `pulp-embed-js-coverage-643` is refreshed against
+  current `origin/main` at `27293e8ff654` as a single local feature
+  commit and locally validated with 100% target coverage. Validation:
+  `python3 tools/scripts/test_embed_js.py` reported 6 passing tests;
+  venv-backed `run_python_coverage.py --pattern
+  tools/scripts/test_embed_js.py` passed and reported 100% for
+  `core/view/js/embed_js.py`.
+- Local-only progress: `pulp-run-swift-coverage-extra-643` is refreshed
+  against current `origin/main` and locally validated; hold for the next
+  remote refill window.
 - Local-only progress: `pulp-android-target-coverage-643` and
   `pulp-validate-hosts-coverage-643` are refreshed against current
   `origin/main` and locally validated; hold for the next remote refill
