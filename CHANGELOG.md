@@ -9,6 +9,8 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
 <a id="v0690"></a>
+## [0.26.0]
+
 ## [0.69.0] - 2026-04-30
 
 - feat(canvas): public font-registration API for plugins (pulp #1150) ([#1175](https://github.com/danielraffel/pulp/pull/1175))
