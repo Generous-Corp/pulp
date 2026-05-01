@@ -5,7 +5,9 @@
 #include <pulp/runtime/inter_process_lock.hpp>
 #include <pulp/runtime/child_process.hpp>
 #include <pulp/runtime/base64.hpp>
+#include <pulp/runtime/http.hpp>
 #include <pulp/runtime/range.hpp>
+#include <pulp/runtime/text_diff.hpp>
 #include <fstream>
 #include <filesystem>
 
@@ -193,8 +195,10 @@ TEST_CASE("base64 decode invalid", "[runtime][base64]") {
 TEST_CASE("base64 decode rejects malformed padding", "[runtime][base64][issue-641]") {
     REQUIRE_FALSE(base64_decode("A").has_value());
     REQUIRE_FALSE(base64_decode("YQ=").has_value());
+    REQUIRE_FALSE(base64_decode("Y=Q=").has_value());
     REQUIRE_FALSE(base64_decode("YQ==Z").has_value());
     REQUIRE_FALSE(base64_decode("YQ===").has_value());
+    REQUIRE_FALSE(base64_decode("====").has_value());
 }
 
 TEST_CASE("base64 decode permits whitespace around terminal padding", "[runtime][base64][issue-641]") {
@@ -203,12 +207,116 @@ TEST_CASE("base64 decode permits whitespace around terminal padding", "[runtime]
     REQUIRE(std::string(decoded->begin(), decoded->end()) == "a");
 }
 
+TEST_CASE("base64 decode handles whitespace and unpadded tail groups", "[runtime][base64][issue-641]") {
+    auto empty = base64_decode(" \n\r\t");
+    REQUIRE(empty.has_value());
+    REQUIRE(empty->empty());
+
+    auto one_byte = base64_decode("YQ");
+    REQUIRE(one_byte.has_value());
+    REQUIRE(std::string(one_byte->begin(), one_byte->end()) == "a");
+
+    auto two_bytes = base64_decode("YWI");
+    REQUIRE(two_bytes.has_value());
+    REQUIRE(std::string(two_bytes->begin(), two_bytes->end()) == "ab");
+
+    auto with_whitespace = base64_decode(" SGV sbG8=\n");
+    REQUIRE(with_whitespace.has_value());
+    REQUIRE(std::string(with_whitespace->begin(), with_whitespace->end()) == "Hello");
+}
+
+TEST_CASE("base64 decode rejects non-ascii bytes", "[runtime][base64][issue-641]") {
+    std::string encoded = "YQ";
+    encoded.push_back(static_cast<char>(0x80));
+    REQUIRE_FALSE(base64_decode(encoded).has_value());
+}
+
 TEST_CASE("base64 binary round-trip", "[runtime][base64]") {
     std::vector<uint8_t> data = {0x00, 0xFF, 0x80, 0x7F, 0x01, 0xFE};
     auto encoded = base64_encode(data.data(), data.size());
     auto decoded = base64_decode(encoded);
     REQUIRE(decoded.has_value());
     REQUIRE(*decoded == data);
+}
+
+// ── HTTP URL parsing ───────────────────────────────────────────────────
+
+TEST_CASE("HTTP helpers reject malformed URLs without transport work",
+          "[runtime][http][url][issue-641]") {
+    const auto get_response = http_get("ftp://example.com/file", 1);
+    REQUIRE(get_response.status_code == 0);
+    REQUIRE(get_response.error == "Invalid URL");
+
+    const auto post_response = http_post("http:///missing-host", "{}", "application/json", 1);
+    REQUIRE(post_response.status_code == 0);
+    REQUIRE(post_response.error == "Invalid URL");
+
+    REQUIRE_FALSE(http_download("example.com/no-scheme", "/tmp/pulp-url-invalid-download", 1));
+}
+
+TEST_CASE("HTTP helpers reject invalid numeric URL ports",
+          "[runtime][http][url][issue-641]") {
+    const auto zero_port = http_get("http://example.com:0/path", 1);
+    REQUIRE(zero_port.status_code == 0);
+    REQUIRE(zero_port.error == "Invalid URL");
+
+    const auto overflow_port = http_get("http://example.com:999999999999999999999/path", 1);
+    REQUIRE(overflow_port.status_code == 0);
+    REQUIRE(overflow_port.error == "Invalid URL");
+
+    const auto too_large_port = http_post("http://example.com:65536/path", "body", "text/plain", 1);
+    REQUIRE(too_large_port.status_code == 0);
+    REQUIRE(too_large_port.error == "Invalid URL");
+}
+
+// ── Text Diff ────────────────────────────────────────────────────────────
+
+TEST_CASE("text_diff handles empty inputs", "[runtime][text-diff][issue-641]") {
+    auto diff = text_diff("", "");
+    REQUIRE(diff.empty());
+    REQUIRE(format_diff(diff).empty());
+}
+
+TEST_CASE("text_diff reports pure inserts and deletes",
+          "[runtime][text-diff][issue-641]") {
+    auto inserted = text_diff("", "one\ntwo");
+    REQUIRE(inserted.size() == 2);
+    REQUIRE(inserted[0].op == DiffOp::Insert);
+    REQUIRE(inserted[0].text == "one");
+    REQUIRE(inserted[1].op == DiffOp::Insert);
+    REQUIRE(inserted[1].text == "two");
+
+    auto deleted = text_diff("one\ntwo", "");
+    REQUIRE(deleted.size() == 2);
+    REQUIRE(deleted[0].op == DiffOp::Delete);
+    REQUIRE(deleted[0].text == "one");
+    REQUIRE(deleted[1].op == DiffOp::Delete);
+    REQUIRE(deleted[1].text == "two");
+}
+
+TEST_CASE("text_diff preserves equal lines across replacements and appends",
+          "[runtime][text-diff][issue-641]") {
+    auto diff = text_diff("alpha\nbeta\ngamma\n",
+                          "alpha\ndelta\ngamma\nomega");
+
+    REQUIRE(diff.size() == 5);
+    REQUIRE(diff[0].op == DiffOp::Equal);
+    REQUIRE(diff[0].text == "alpha");
+    REQUIRE(diff[1].op == DiffOp::Delete);
+    REQUIRE(diff[1].text == "beta");
+    REQUIRE(diff[2].op == DiffOp::Insert);
+    REQUIRE(diff[2].text == "delta");
+    REQUIRE(diff[3].op == DiffOp::Equal);
+    REQUIRE(diff[3].text == "gamma");
+    REQUIRE(diff[4].op == DiffOp::Insert);
+    REQUIRE(diff[4].text == "omega");
+
+    REQUIRE(format_diff(diff) ==
+            "  alpha\n"
+            "- beta\n"
+            "+ delta\n"
+            "  gamma\n"
+            "+ omega\n");
 }
 
 // ── Range ───────────────────────────────────────────────────────────────
