@@ -5,8 +5,10 @@ from __future__ import annotations
 
 import importlib.util
 import pathlib
+import runpy
 import sys
 import tempfile
+import types
 import unittest
 from unittest import mock
 
@@ -32,6 +34,18 @@ class VersionGuardExtraTests(unittest.TestCase):
         fake_coverage = mock.Mock(__version__="local-dev")
         with mock.patch.object(rpc, "coverage", fake_coverage):
             rpc._require_supported_coverage()
+
+    def test_script_entrypoint_exits_with_main_status(self) -> None:
+        fake_coverage = types.SimpleNamespace(__version__="7.10.0")
+        with mock.patch.object(
+            sys,
+            "argv",
+            [str(SCRIPT), "--pattern", "tools/scripts/test_definitely_missing.py"],
+        ), mock.patch.dict(sys.modules, {"coverage": fake_coverage}):
+            with self.assertRaises(SystemExit) as ctx:
+                runpy.run_path(str(SCRIPT), run_name="__main__")
+
+        self.assertEqual(ctx.exception.code, 1)
 
 
 class DiscoveryExtraTests(unittest.TestCase):
