@@ -159,3 +159,67 @@ TEST_CASE("GpuBarRenderer null and zero data clear existing bars - issue-646",
     REQUIRE(b.count() == 0);
     REQUIRE(b.data().empty());
 }
+
+TEST_CASE("GpuGraphRenderer vector data is owned and replaceable - issue-646",
+          "[render][gpu-graph][issue-646]") {
+    GpuGraphRenderer g;
+
+    std::vector<float> source = {0.0f, 0.5f, 1.0f};
+    g.set_data(source);
+    source[1] = 99.0f;
+
+    REQUIRE(g.count() == 3);
+    REQUIRE(g.data()[1] == Catch::Approx(0.5f));
+
+    g.set_data(std::vector<float>{-1.0f, 1.0f});
+    REQUIRE(g.count() == 2);
+    REQUIRE(g.data().front() == Catch::Approx(-1.0f));
+    REQUIRE(g.data().back() == Catch::Approx(1.0f));
+
+    g.set_data(std::vector<float>{});
+    REQUIRE(g.empty());
+}
+
+TEST_CASE("GpuHeatMapRenderer replacement updates shape and clears stale cells - issue-646",
+          "[render][gpu-graph][issue-646]") {
+    GpuHeatMapRenderer h;
+
+    float first[] = {0.1f, 0.2f, 0.3f, 0.4f};
+    h.set_data(first, 2, 2);
+    REQUIRE(h.width() == 2);
+    REQUIRE(h.height() == 2);
+    REQUIRE(h.data().size() == 4);
+
+    float second[] = {-1.0f, 0.0f, 1.0f};
+    h.set_data(second, 1, 3);
+    REQUIRE(h.width() == 1);
+    REQUIRE(h.height() == 3);
+    REQUIRE(h.data().size() == 3);
+    REQUIRE(h.data()[0] == Catch::Approx(-1.0f));
+    REQUIRE(h.data()[2] == Catch::Approx(1.0f));
+
+    h.set_data(second, 1, 0);
+    REQUIRE(h.empty());
+    REQUIRE(h.width() == 0);
+    REQUIRE(h.height() == 0);
+}
+
+TEST_CASE("GpuBarRenderer clears samples without resetting layout properties - issue-646",
+          "[render][gpu-graph][issue-646]") {
+    GpuBarRenderer b;
+    b.set_bar_width(8.0f);
+    b.set_gap(3.0f);
+
+    float bars[] = {0.25f, 0.5f, 0.75f};
+    b.set_data(bars, 3);
+    REQUIRE(b.count() == 3);
+
+    b.set_data(nullptr, 99);
+    REQUIRE(b.count() == 0);
+    REQUIRE(b.bar_width() == Catch::Approx(8.0f));
+    REQUIRE(b.gap() == Catch::Approx(3.0f));
+
+    b.set_data(bars, 2);
+    REQUIRE(b.count() == 2);
+    REQUIRE(b.data()[1] == Catch::Approx(0.5f));
+}
