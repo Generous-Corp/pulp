@@ -364,6 +364,24 @@ coverage merges and is held for a branch refresh.
   `shipyard pr --skip-target mac --skip-target ubuntu --skip-target
   windows`, followed by the explicit Namespace dispatch above.
 
+### Refill Update 2026-05-01 05:21 EDT
+
+- #1186 opened from the text-layout worker tranche as
+  `feature/canvas-text-layout-coverage-641` at `d4d40aa77928`. It was
+  rechecked locally with `pulp-test-text-shaper`, focused text-shaper
+  CTest, skill-sync report, version-bump report, and `git diff --check`,
+  then labeled `codecov`. Explicit Namespace build dispatch
+  `25209419094` is queued/running.
+- #1187 opened from the SVG worker tranche as
+  `feature/canvas-svg-coverage-641` at `7e4e8c5fabdd`. It was rechecked
+  locally with `pulp-test-svg`, exact `^SvgImage ` CTest, skill-sync
+  report, version-bump report, and `git diff --check`, then labeled
+  `codecov`. Explicit Namespace build dispatch `25209443645` is
+  queued/running.
+- AssetManager worker output is held local-only because #1125 is already
+  open on `feature/view-asset-manager-coverage-493-next` for the same
+  surface.
+
 ## Real Diff-Gap Patch Queue
 
 These PRs were inspected after the pause. The failures are not just stale
@@ -467,6 +485,9 @@ not been pushed, PR'd, or dispatched to Namespace.
 | `feature/state-binding-coverage-641` | `c1e5bd59` | #641 state tranche for `core/state/include/pulp/state/binding.hpp` gesture, polling, reset, and undo edges | `test/test_binding.cpp` | Rebased cleanly onto `origin/main` at `ea731cbf`; `cmake --build build --target pulp-test-binding -j4`; `./build/test/pulp-test-binding` passed 55 assertions in 14 test cases; `ctest --test-dir build -R 'Binding' --output-on-failure` passed 13/13; skill-sync report; version-bump report; `git diff --check`. `shipyard pr --skip-target mac --skip-target ubuntu --skip-target windows` created #1185, and explicit Namespace build dispatch `25209337122` is queued/running. | Monitor #1185; merge when required wrappers, Codecov patch, and diff coverage are green, or patch if Namespace reports a failure. |
 | `local/phase3-system-volume-edges-640` | `4c8671ab` | #640 audio tranche for `core/audio/src/system_volume.cpp` Linux `amixer` command edges | `test/test_system_volume.cpp`, `test/CMakeLists.txt` | Created locally from `origin/main` at `ed34a23d`; added `pulp-test-system-volume`; `cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug`; `cmake --build build --target pulp-test-system-volume -j4`; `./build/test/pulp-test-system-volume` passed 4 local macOS assertions in 4 test cases; `ctest --test-dir build -R 'system volume\|system mute\|system-volume' --output-on-failure` passed 4/4; skill-sync report; version-bump report; `git diff --check`. The real fake-`amixer` assertions are Linux-gated and need Namespace before merge. | Rebase onto latest `origin/main` before queueing because #1071 advanced main after this local commit. When capacity returns, rename/push as a feature branch, run `shipyard pr --skip-target mac --skip-target ubuntu --skip-target windows`, then dispatch Namespace with `shipyard cloud run build <branch> --require-sha HEAD`. |
 | `feature/memory-message-channel-coverage-641` | `065ef90e` | #641 runtime tranche for `core/runtime/src/memory_message_channel.cpp` delivery, callback replacement, and close lifecycle edges | `test/test_memory_message_channel.cpp`, `test/CMakeLists.txt` | Rebased cleanly onto `origin/main` at `ea731cbf`; previous local validation: `cmake --build build --target pulp-test-memory-message-channel -j4`; `./build/test/pulp-test-memory-message-channel` passed 24 assertions in 6 test cases; `ctest --test-dir build -R 'MemoryMessageChannel\|memory-message-channel' --output-on-failure` passed 6/6; skill-sync report; version-bump report; `git diff --check`. `shipyard pr --skip-target mac --skip-target ubuntu --skip-target windows` created #1184, and explicit Namespace build dispatch `25209211899` is queued/running. | Monitor #1184; merge when required wrappers, Codecov patch, and diff coverage are green, or patch if Namespace reports a failure. |
+| `feature/canvas-text-layout-coverage-641` | `d4d40aa7` | #641 canvas tranche for `core/canvas/src/text_layout.cpp` fallback layout, hit-test, index-position, and parallelogram edges | `test/test_text_shaper.cpp` | Rebased/current with `origin/main`; `cmake --build build --target pulp-test-text-shaper -j4`; `./build/test/pulp-test-text-shaper` passed 62 assertions in 20 test cases; `ctest --test-dir build -R 'text-shaper\|TextShaper\|layout_paragraph\|GlyphArrangement\|Parallelogram' --output-on-failure` passed 19/19; skill-sync report; version-bump report; `git diff --check`. `shipyard pr --skip-target mac --skip-target ubuntu --skip-target windows` created #1186, and explicit Namespace build dispatch `25209419094` is queued/running. | Monitor #1186; merge when required wrappers, Codecov patch, and diff coverage are green, or patch if Namespace reports a failure. |
+| `feature/canvas-svg-coverage-641` | `7e4e8c5f` | #641 canvas tranche for `core/canvas/src/svg.cpp` file, invalid-rasterize, render, and move-assignment edges | `test/test_svg.cpp` | Rebased/current with `origin/main`; `cmake --build build-svg --target pulp-test-svg -j4`; `./build-svg/test/pulp-test-svg` passed 40 assertions in 10 test cases; `ctest --test-dir build-svg -R '^SvgImage ' --output-on-failure` passed 10/10; skill-sync report; version-bump report; `git diff --check`. `shipyard pr --skip-target mac --skip-target ubuntu --skip-target windows` created #1187, and explicit Namespace build dispatch `25209443645` is queued/running. | Monitor #1187; merge when required wrappers, Codecov patch, and diff coverage are green, or patch if Namespace reports a failure. |
+| `local/phase3-asset-manager-coverage-493` | `57106c8b` | #493 view tranche for `core/view/src/asset_manager.cpp` shader/blob/image cache and missing-resource edges | `test/test_asset_manager.cpp` | Worker validated locally with `cmake --build build --target pulp-test-asset-manager`; `./build/test/pulp-test-asset-manager` passed 66 assertions in 25 test cases; `ctest --test-dir build -R 'AssetManager\|Theme' --output-on-failure` passed 25/25; skill-sync report; version-bump report; `git diff --check origin/main..HEAD`. | Hold local-only until #1125 settles because #1125 is already open on the AssetManager surface. Use as follow-up or conflict-aware supplement if #1125 leaves gaps or fails. |
 
 ## Cancelled/Paused Runs
 
