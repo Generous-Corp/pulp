@@ -69,8 +69,29 @@ TEST_CASE("RectangleList subtract handles no-op and full-cover cases",
     REQUIRE(rl.size() == 1);
     REQUIRE(rl[0] == Rect{0, 0, 10, 10});
 
+    rl.subtract({10, 0, 5, 10});
+    REQUIRE(rl.size() == 1);
+    REQUIRE(rl[0] == Rect{0, 0, 10, 10});
+
     rl.subtract({-1, -1, 12, 12});
     REQUIRE(rl.empty());
+}
+
+TEST_CASE("RectangleList empty clip and subtract are no-ops",
+          "[canvas][rect][issue-641]") {
+    RectangleList rl;
+    rl.add({0, 0, 10, 10});
+
+    rl.subtract({});
+    REQUIRE(rl.size() == 1);
+    REQUIRE(rl[0] == Rect{0, 0, 10, 10});
+
+    auto clipped_empty = rl.clipped({});
+    REQUIRE(clipped_empty.empty());
+
+    RectangleList empty;
+    empty.subtract({0, 0, 1, 1});
+    REQUIRE(empty.empty());
 }
 
 TEST_CASE("RectangleList clear", "[canvas][rect]") {
@@ -151,4 +172,13 @@ TEST_CASE("Rect enclosing union", "[canvas][rect]") {
     REQUIRE(u.y == Catch::Approx(0.0f));
     REQUIRE(u.width == Catch::Approx(15.0f));
     REQUIRE(u.height == Catch::Approx(15.0f));
+}
+
+TEST_CASE("Rect enclosing union preserves non-empty side",
+          "[canvas][rect][issue-641]") {
+    Rect empty{};
+    Rect non_empty{3, 4, 5, 6};
+
+    REQUIRE(empty.enclosing_union(non_empty) == non_empty);
+    REQUIRE(non_empty.enclosing_union(empty) == non_empty);
 }
