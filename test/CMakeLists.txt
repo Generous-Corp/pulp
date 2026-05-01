@@ -781,6 +781,10 @@ add_executable(pulp-test-gui-components test_gui_components.cpp)
 target_link_libraries(pulp-test-gui-components PRIVATE pulp::view Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-gui-components)
 
+add_executable(pulp-test-table-list-box test_table_list_box.cpp)
+target_link_libraries(pulp-test-table-list-box PRIVATE pulp::view Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-table-list-box)
+
 # CodeEditor / FileBasedDocument / RecentlyOpenedFilesList tests
 add_executable(pulp-test-code-editor test_code_editor.cpp)
 target_link_libraries(pulp-test-code-editor PRIVATE pulp::view Catch2::Catch2WithMain)
@@ -975,10 +979,19 @@ add_executable(pulp-test-audio-tools test_audio_tools.cpp)
 target_link_libraries(pulp-test-audio-tools PRIVATE pulp::tool-audio Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-audio-tools)
 
+# MCP server protocol tests
+add_executable(pulp-test-mcp-server test_mcp_server.cpp)
+target_link_libraries(pulp-test-mcp-server PRIVATE pulp::tool-audio Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-mcp-server)
+
 # MIDI tests
 add_executable(pulp-test-midi test_midi.cpp)
 target_link_libraries(pulp-test-midi PRIVATE pulp::midi Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-midi)
+
+add_executable(pulp-test-midi-file test_midi_file.cpp)
+target_link_libraries(pulp-test-midi-file PRIVATE pulp::midi Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-midi-file)
 
 # State tests
 add_executable(pulp-test-state test_state.cpp)
@@ -1266,6 +1279,13 @@ if(APPLE)
     # verify CGContextClearRect actually clears destination pixels.
     target_link_libraries(pulp-test-canvas PRIVATE "-framework CoreGraphics")
 endif()
+# pulp #1150 — public font-registration API tests use a bundled .ttf as a
+# fixture. external/fonts/Inter-Regular.ttf is the canonical "always
+# available" font in the repo (also baked into pulp-canvas via
+# pulp_add_binary_data). Pass the absolute path through a compile def so
+# the test binary can find it regardless of CWD when run via ctest.
+target_compile_definitions(pulp-test-canvas PRIVATE
+    "PULP_TEST_FONT_PATH=\"${CMAKE_SOURCE_DIR}/external/fonts/Inter-Regular.ttf\"")
 catch_discover_tests(pulp-test-canvas)
 
 # SDF glyph atlas exploration (#76)
@@ -1457,6 +1477,11 @@ catch_discover_tests(pulp-test-panel)
 add_executable(pulp-test-ui-components test_ui_components.cpp)
 target_link_libraries(pulp-test-ui-components PRIVATE pulp::view Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-ui-components)
+
+# GraphEditorView tests
+add_executable(pulp-test-graph-editor-view test_graph_editor_view.cpp)
+target_link_libraries(pulp-test-graph-editor-view PRIVATE pulp::view Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-graph-editor-view)
 
 # Modal overlay tests
 add_executable(pulp-test-modal test_modal.cpp)
@@ -1899,6 +1924,15 @@ catch_discover_tests(pulp-test-appearance)
 add_executable(pulp-test-phase9-widgets test_phase9_widgets.cpp)
 target_link_libraries(pulp-test-phase9-widgets PRIVATE pulp::view Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-phase9-widgets)
+
+add_executable(pulp-test-property-list test_property_list.cpp)
+target_link_libraries(pulp-test-property-list PRIVATE pulp::view Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-property-list)
+
+# Focused SplitView and ConcertinaPanel coverage
+add_executable(pulp-test-view-layout-widgets test_view_layout_widgets.cpp)
+target_link_libraries(pulp-test-view-layout-widgets PRIVATE pulp::view Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-view-layout-widgets)
 
 # Asset manager and resource system
 add_executable(pulp-test-asset-manager test_asset_manager.cpp)
