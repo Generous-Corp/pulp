@@ -7,6 +7,7 @@ import contextlib
 import io
 import json
 import pathlib
+import runpy
 import subprocess
 import sys
 import tempfile
@@ -138,6 +139,15 @@ class ConfigAndGlobTests(unittest.TestCase):
         self.assertTrue(csc._matches_any("test/test_a.cpp", ["test/test_?.cpp"]))
         self.assertFalse(csc._matches_any("test/test_long.cpp", ["test/test_?.cpp"]))
 
+    def test_glob_translation_handles_existing_slash_before_starstar(self) -> None:
+        trailing = csc._glob_to_regex("core//**")
+        self.assertTrue(trailing.match("core/"))
+        self.assertTrue(trailing.match("core/view.cpp"))
+
+        middle = csc._glob_to_regex("core//**/widget.cpp")
+        self.assertTrue(middle.match("core/widget.cpp"))
+        self.assertTrue(middle.match("core/view/src/widget.cpp"))
+
     def test_parse_compat_update_ignores_non_skip_and_accepts_unquoted_reason(self) -> None:
         trailers = {
             "compat-update": [
@@ -224,6 +234,23 @@ class ResolutionAndApplyTests(unittest.TestCase):
         self.assertEqual(
             [f.resolved_prefix for f in findings if f.requirement.kind == "test"],
             ["css"],
+        )
+
+    def test_compute_findings_ignores_unknown_requirement_kind(self) -> None:
+        compat_map = csc.CompatMap(paths={
+            "src.cpp": [
+                csc.Requirement("mystery", None, None, None),
+            ],
+        })
+
+        self.assertEqual(
+            csc.compute_findings(
+                changed=["src.cpp"],
+                compat_map=compat_map,
+                compat_data={},
+                bypasses={},
+            ),
+            [],
         )
 
     def test_apply_stubs_creates_empty_file_sections_when_compat_json_missing(self) -> None:
@@ -576,6 +603,76 @@ class RenderAndMainTests(unittest.TestCase):
         self.assertNotIn("added stub sections", stdout.getvalue())
         self.assertIn("Compat-sync check FAILED", stdout.getvalue())
 
+    def test_main_apply_mode_prints_added_sections_and_reevaluates(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td)
+            cfg = root / "compat_path_map.json"
+            compat_json = root / "compat.json"
+            cfg.write_text(
+                json.dumps(
+                    {
+                        "paths": {
+                            "src.cpp": [
+                                {"kind": "compat-json", "prefix": "css"},
+                                {"kind": "doc", "path": "docs/css.md"},
+                            ]
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            compat_json.write_text("{}", encoding="utf-8")
+
+            stdout = io.StringIO()
+            with mock.patch.object(csc, "git_diff_names", return_value=["src.cpp"]), \
+                 mock.patch.object(csc, "git_range_trailers", return_value={}), \
+                 contextlib.redirect_stdout(stdout):
+                rc = csc.main(
+                    [
+                        "--repo-root",
+                        str(root),
+                        "--config",
+                        str(cfg),
+                        "--compat-json",
+                        str(compat_json),
+                        "--mode",
+                        "apply",
+                    ]
+                )
+
+        self.assertEqual(rc, 0)
+        self.assertIn("added stub sections", stdout.getvalue())
+        self.assertIn("compat.json modified in diff", stdout.getvalue())
+
+    def test_main_skips_empty_report_text_and_hint_returns_zero(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td)
+            cfg = root / "compat_path_map.json"
+            compat_json = root / "compat.json"
+            cfg.write_text('{"paths": {}}', encoding="utf-8")
+            compat_json.write_text("{}", encoding="utf-8")
+
+            stdout = io.StringIO()
+            with mock.patch.object(csc, "git_diff_names", return_value=[]), \
+                 mock.patch.object(csc, "git_range_trailers", return_value={}), \
+                 mock.patch.object(csc, "render_report", return_value=("", 7)), \
+                 contextlib.redirect_stdout(stdout):
+                rc = csc.main(
+                    [
+                        "--repo-root",
+                        str(root),
+                        "--config",
+                        str(cfg),
+                        "--compat-json",
+                        str(compat_json),
+                        "--mode",
+                        "hint",
+                    ]
+                )
+
+        self.assertEqual(rc, 0)
+        self.assertEqual(stdout.getvalue(), "")
+
     def test_main_uses_default_relpath_for_outside_compat_json(self) -> None:
         with tempfile.TemporaryDirectory() as td, tempfile.TemporaryDirectory() as outside:
             root = pathlib.Path(td)
@@ -601,6 +698,22 @@ class RenderAndMainTests(unittest.TestCase):
 
         self.assertEqual(rc, 0)
         self.assertIn("nothing to verify", stdout.getvalue())
+
+    def test_script_entrypoint_exits_with_main_result(self) -> None:
+        script = pathlib.Path(csc.__file__)
+        stderr = io.StringIO()
+        with mock.patch.object(sys, "argv", [str(script), "--mode", "hint"]), \
+             mock.patch.object(csc.subprocess, "run") as run, \
+             contextlib.redirect_stderr(stderr):
+            run.side_effect = [
+                subprocess.CompletedProcess([], 0, stdout="/repo\n"),
+                subprocess.CompletedProcess([], 0, stdout=""),
+                subprocess.CompletedProcess([], 0, stdout=""),
+            ]
+            with self.assertRaises(SystemExit) as cm:
+                runpy.run_path(str(script), run_name="__main__")
+
+        self.assertEqual(cm.exception.code, 2)
 
 
 if __name__ == "__main__":
