@@ -89,6 +89,25 @@ declare global {
         width: number,
         hexColor: string,
     ): void;
+    // pulp #1027 — per-attribute border setters (preserve unset siblings).
+    // The unified `setBorder` clobbers all three slots; these mutate one
+    // field at a time on the View. Optional at runtime so older bridges
+    // still link, hence the `const | undefined` shape.
+    const setBorderColor: ((id: string, hexColor: string) => void) | undefined;
+    const setBorderWidth: ((id: string, width: number) => void) | undefined;
+    const setBorderRadius: ((id: string, radius: number) => void) | undefined;
+    const setBorderTopColor: ((id: string, hexColor: string) => void) | undefined;
+    const setBorderRightColor: ((id: string, hexColor: string) => void) | undefined;
+    const setBorderBottomColor: ((id: string, hexColor: string) => void) | undefined;
+    const setBorderLeftColor: ((id: string, hexColor: string) => void) | undefined;
+    const setBorderTopWidth: ((id: string, width: number) => void) | undefined;
+    const setBorderRightWidth: ((id: string, width: number) => void) | undefined;
+    const setBorderBottomWidth: ((id: string, width: number) => void) | undefined;
+    const setBorderLeftWidth: ((id: string, width: number) => void) | undefined;
+    const setBorderTopLeftRadius: ((id: string, radius: number) => void) | undefined;
+    const setBorderTopRightRadius: ((id: string, radius: number) => void) | undefined;
+    const setBorderBottomLeftRadius: ((id: string, radius: number) => void) | undefined;
+    const setBorderBottomRightRadius: ((id: string, radius: number) => void) | undefined;
     function setOpacity(id: string, alpha: number): void;
     function setVisible(id: string, visible: boolean): void;
     function setPosition(id: string, top: number, left: number, right?: number, bottom?: number): void;
@@ -141,10 +160,19 @@ export function createMockBridge(): MockBridge {
         'createImage', 'createIcon', 'createProgress', 'createMeter', 'createXYPad',
         'createGrid', 'removeWidget', 'moveWidget', 'insertChild',
         'setFlex', 'setBackground', 'setBackgroundGradient', 'setBorder',
+        // pulp #1027 — per-attribute border setters needed for the audit
+        // PR #1166 finding-#4 fix (preserve unset siblings).
+        'setBorderColor', 'setBorderWidth', 'setBorderRadius',
+        'setBorderTopColor', 'setBorderRightColor',
+        'setBorderBottomColor', 'setBorderLeftColor',
+        'setBorderTopWidth', 'setBorderRightWidth',
+        'setBorderBottomWidth', 'setBorderLeftWidth',
+        'setBorderTopLeftRadius', 'setBorderTopRightRadius',
+        'setBorderBottomLeftRadius', 'setBorderBottomRightRadius',
         'setBorderSide', 'setOpacity', 'setVisible', 'setPosition',
         'setText', 'setTextColor', 'setTextAlign',
         'setSpectrumData', 'setWaveformData', 'setMeterLevel', 'setProgress',
-        'setValue', 'setTheme', 'layout', 'on',
+        'setValue', 'setTheme', 'layout', 'on', 'registerHover',
     ];
     const saved: Record<string, unknown> = {};
     return {
