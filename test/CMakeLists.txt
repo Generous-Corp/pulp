@@ -1419,7 +1419,8 @@ catch_discover_tests(pulp-test-widgets)
 # Hot-reload tests
 add_executable(pulp-test-hot-reload test_hot_reload.cpp)
 target_link_libraries(pulp-test-hot-reload PRIVATE pulp::view Catch2::Catch2WithMain)
-catch_discover_tests(pulp-test-hot-reload)
+catch_discover_tests(pulp-test-hot-reload
+    PROPERTIES RESOURCE_LOCK hot-reload-file-watcher)
 
 # Inspector tests — only when GPU is enabled (pulp-inspect requires GPU stack).
 if(PULP_ENABLE_GPU AND NOT ANDROID AND NOT IOS)
