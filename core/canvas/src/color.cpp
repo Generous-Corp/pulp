@@ -6,6 +6,18 @@
 
 namespace pulp::canvas {
 
+namespace {
+
+float normalize_hue_degrees(float h) {
+    h = std::fmod(h, 360.0f);
+    if (h < 0.0f) {
+        h += 360.0f;
+    }
+    return h;
+}
+
+}  // namespace
+
 // ── HSV Conversion ──────────────────────────────────────────────────────────
 
 Color::HSV Color::to_hsv() const {
@@ -35,7 +47,7 @@ Color::HSV Color::to_hsv() const {
 }
 
 Color Color::from_hsv(HSV hsv, float alpha) {
-    float h = std::fmod(hsv.h, 360.0f) / 60.0f;
+    float h = normalize_hue_degrees(hsv.h) / 60.0f;
     float s = std::clamp(hsv.s, 0.0f, 1.0f);
     float v = std::clamp(hsv.v, 0.0f, 1.0f);
 
@@ -105,7 +117,7 @@ Color Color::from_hsl(HSL hsl, float alpha) {
 
     float q = (l < 0.5f) ? l * (1.0f + s) : l + s - l * s;
     float p = 2.0f * l - q;
-    float h = std::fmod(hsl.h, 360.0f) / 360.0f;
+    float h = normalize_hue_degrees(hsl.h) / 360.0f;
 
     return rgba(
         std::clamp(hue2rgb(p, q, h + 1.0f / 3.0f), 0.0f, 1.0f),
