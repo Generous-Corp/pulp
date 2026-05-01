@@ -5,8 +5,10 @@
 #include <pulp/runtime/websocket_channel.hpp>
 
 #include <atomic>
+#include <array>
 #include <chrono>
 #include <condition_variable>
+#include <cstdint>
 #include <cstring>
 #include <memory>
 #include <mutex>
@@ -49,6 +51,21 @@ bool wait_until(Pred pred, std::chrono::milliseconds budget = 3s) {
         std::this_thread::sleep_for(1ms);
     }
     return pred();
+}
+
+std::string receive_http_headers(Socket& socket) {
+    std::string out;
+    std::uint8_t ch = 0;
+    while (out.size() < 16 * 1024) {
+        auto n = socket.receive(&ch, 1);
+        if (n <= 0) break;
+        out.push_back(static_cast<char>(ch));
+        if (out.size() >= 4 &&
+            out.compare(out.size() - 4, 4, "\r\n\r\n") == 0) {
+            break;
+        }
+    }
+    return out;
 }
 
 }  // namespace
@@ -209,6 +226,41 @@ TEST_CASE("WebSocketChannel connect fails gracefully on non-WS peer",
     server_thread.join();
 }
 
+TEST_CASE("WebSocketChannel rejects incorrect accept key",
+          "[websocket][handshake][issue-641]") {
+    Socket listener;
+    REQUIRE(listener.create(SocketType::TCP));
+    auto port = bind_loopback(listener, 47301);
+    if (!port) { SUCCEED("could not bind loopback; skipping"); return; }
+
+    std::atomic<bool> ready{false};
+    std::atomic<bool> saw_key{false};
+    std::thread server_thread([&] {
+        ready.store(true);
+        auto accepted = listener.accept();
+        if (!accepted) return;
+        auto request = receive_http_headers(*accepted);
+        saw_key.store(request.find("Sec-WebSocket-Key:") != std::string::npos);
+        const char response[] =
+            "HTTP/1.1 101 Switching Protocols\r\n"
+            "Upgrade: websocket\r\n"
+            "Connection: Upgrade\r\n"
+            "Sec-WebSocket-Accept: definitely-not-the-derived-key\r\n\r\n";
+        accepted->send(reinterpret_cast<const std::uint8_t*>(response),
+                       std::strlen(response));
+        accepted->close();
+    });
+    while (!ready.load()) std::this_thread::sleep_for(1ms);
+
+    auto tcp = std::make_unique<TcpStream>();
+    REQUIRE(tcp->connect("127.0.0.1", *port));
+    auto ws = WebSocketChannel::connect(std::move(tcp), "127.0.0.1", "/bad");
+
+    server_thread.join();
+    REQUIRE(saw_key.load());
+    REQUIRE(ws == nullptr);
+}
+
 TEST_CASE("WebSocketChannel close flips is_open to false",
           "[websocket][lifecycle]") {
     // Validate the close → is_open() transition via a real echo server
@@ -296,6 +348,175 @@ TEST_CASE("WebSocketChannel echoes a >126-byte message (16-bit payload length)",
         std::lock_guard<std::mutex> lock(mu);
         REQUIRE(seen[0].size() == 300);
         REQUIRE(seen[0] == big);
+    }
+
+    client->close();
+    if (server_ws) server_ws->close();
+    server_thread.join();
+}
+
+TEST_CASE("WebSocketChannel delivers binary send as binary message",
+          "[websocket][frame-kind][issue-641]") {
+    Socket listener;
+    REQUIRE(listener.create(SocketType::TCP));
+    auto port = bind_loopback(listener, 47401);
+    if (!port) { SUCCEED("could not bind loopback; skipping"); return; }
+
+    std::atomic<bool> ready{false};
+    std::atomic<bool> server_accept_done{false};
+    std::unique_ptr<WebSocketChannel> server_ws;
+    std::mutex mu;
+    std::vector<Message> seen;
+
+    std::thread server_thread([&] {
+        ready.store(true);
+        auto accepted = listener.accept();
+        if (!accepted) return;
+        auto server_tcp = std::make_unique<TcpStream>(std::move(*accepted));
+        server_ws = WebSocketChannel::accept(std::move(server_tcp));
+        if (!server_ws) return;
+        server_ws->on_message([&](const Message& m) {
+            std::lock_guard<std::mutex> lock(mu);
+            seen.push_back(m);
+        });
+        server_accept_done.store(true);
+    });
+    while (!ready.load()) std::this_thread::sleep_for(1ms);
+
+    auto client_tcp = std::make_unique<TcpStream>();
+    REQUIRE(client_tcp->connect("127.0.0.1", *port));
+    auto client = WebSocketChannel::connect(std::move(client_tcp), "127.0.0.1", "/binary");
+    REQUIRE(client != nullptr);
+    REQUIRE(wait_until([&] { return server_accept_done.load(); }));
+
+    const std::array<std::uint8_t, 4> payload{0x00, 0x7f, 0x80, 0xff};
+    REQUIRE(client->send(payload.data(), payload.size()));
+    REQUIRE(wait_until([&] {
+        std::lock_guard<std::mutex> lock(mu);
+        return !seen.empty();
+    }));
+
+    {
+        std::lock_guard<std::mutex> lock(mu);
+        REQUIRE(seen.size() == 1);
+        REQUIRE(seen[0].kind == MessageKind::Binary);
+        REQUIRE(seen[0].payload == std::vector<std::uint8_t>(payload.begin(), payload.end()));
+    }
+
+    client->close();
+    if (server_ws) server_ws->close();
+    server_thread.join();
+}
+
+TEST_CASE("WebSocketChannel receives 64-bit payload length frames",
+          "[websocket][frame-length][issue-641]") {
+    Socket listener;
+    REQUIRE(listener.create(SocketType::TCP));
+    auto port = bind_loopback(listener, 47501);
+    if (!port) { SUCCEED("could not bind loopback; skipping"); return; }
+
+    std::atomic<bool> ready{false};
+    std::atomic<bool> server_accept_done{false};
+    std::unique_ptr<WebSocketChannel> server_ws;
+    std::mutex mu;
+    std::size_t received_size = 0;
+    std::uint8_t first = 0;
+    std::uint8_t last = 0;
+
+    std::thread server_thread([&] {
+        ready.store(true);
+        auto accepted = listener.accept();
+        if (!accepted) return;
+        auto server_tcp = std::make_unique<TcpStream>(std::move(*accepted));
+        server_ws = WebSocketChannel::accept(std::move(server_tcp));
+        if (!server_ws) return;
+        server_ws->on_message([&](const Message& m) {
+            std::lock_guard<std::mutex> lock(mu);
+            received_size = m.payload.size();
+            if (!m.payload.empty()) {
+                first = m.payload.front();
+                last = m.payload.back();
+            }
+        });
+        server_accept_done.store(true);
+    });
+    while (!ready.load()) std::this_thread::sleep_for(1ms);
+
+    auto client_tcp = std::make_unique<TcpStream>();
+    REQUIRE(client_tcp->connect("127.0.0.1", *port));
+    auto client = WebSocketChannel::connect(std::move(client_tcp), "127.0.0.1", "/large");
+    REQUIRE(client != nullptr);
+    REQUIRE(wait_until([&] { return server_accept_done.load(); }));
+
+    std::vector<std::uint8_t> payload(70000, 0x5a);
+    payload.front() = 0x11;
+    payload.back() = 0xee;
+    REQUIRE(client->send(payload.data(), payload.size()));
+    REQUIRE(wait_until([&] {
+        std::lock_guard<std::mutex> lock(mu);
+        return received_size == payload.size();
+    }, 5s));
+
+    {
+        std::lock_guard<std::mutex> lock(mu);
+        REQUIRE(received_size == 70000);
+        REQUIRE(first == 0x11);
+        REQUIRE(last == 0xee);
+    }
+
+    client->close();
+    if (server_ws) server_ws->close();
+    server_thread.join();
+}
+
+TEST_CASE("WebSocketChannel rejects frames above max_payload",
+          "[websocket][frame-length][issue-641]") {
+    Socket listener;
+    REQUIRE(listener.create(SocketType::TCP));
+    auto port = bind_loopback(listener, 47601);
+    if (!port) { SUCCEED("could not bind loopback; skipping"); return; }
+
+    std::atomic<bool> ready{false};
+    std::atomic<bool> server_accept_done{false};
+    std::atomic<bool> closed{false};
+    std::mutex mu;
+    std::string error;
+    std::unique_ptr<WebSocketChannel> server_ws;
+
+    std::thread server_thread([&] {
+        ready.store(true);
+        auto accepted = listener.accept();
+        if (!accepted) return;
+        auto server_tcp = std::make_unique<TcpStream>(std::move(*accepted));
+        WebSocketOptions options;
+        options.max_payload = 8;
+        server_ws = WebSocketChannel::accept(std::move(server_tcp), options);
+        if (!server_ws) return;
+        server_ws->on_error([&](std::string_view reason) {
+            std::lock_guard<std::mutex> lock(mu);
+            error = std::string(reason);
+        });
+        server_ws->on_closed([&] { closed.store(true); });
+        server_accept_done.store(true);
+    });
+    while (!ready.load()) std::this_thread::sleep_for(1ms);
+
+    auto client_tcp = std::make_unique<TcpStream>();
+    REQUIRE(client_tcp->connect("127.0.0.1", *port));
+    auto client = WebSocketChannel::connect(std::move(client_tcp), "127.0.0.1", "/too-large");
+    REQUIRE(client != nullptr);
+    REQUIRE(wait_until([&] { return server_accept_done.load(); }));
+
+    std::string too_large(32, 'x');
+    REQUIRE(client->send_text(too_large));
+    REQUIRE(wait_until([&] {
+        std::lock_guard<std::mutex> lock(mu);
+        return !error.empty() && closed.load();
+    }));
+
+    {
+        std::lock_guard<std::mutex> lock(mu);
+        REQUIRE(error == "payload exceeds max_payload");
     }
 
     client->close();
