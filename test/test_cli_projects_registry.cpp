@@ -21,6 +21,12 @@
 #include <fstream>
 #include <string>
 
+#if defined(_WIN32)
+#  include <process.h>
+#else
+#  include <unistd.h>
+#endif
+
 namespace fs = std::filesystem;
 using namespace pulp::cli::projects_registry;
 
@@ -32,7 +38,14 @@ struct TempDir {
         auto base = fs::temp_directory_path();
         static std::atomic<int> seq{0};
         int n = seq.fetch_add(1);
+        int pid =
+#if defined(_WIN32)
+            _getpid();
+#else
+            getpid();
+#endif
         path = base / ("pulp-projects-registry-test-" +
+                       std::to_string(pid) + "-" +
                        std::to_string(reinterpret_cast<std::uintptr_t>(this)) +
                        "-" + std::to_string(n));
         fs::create_directories(path);

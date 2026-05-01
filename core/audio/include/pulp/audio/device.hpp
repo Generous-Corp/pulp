@@ -5,7 +5,9 @@
 #include <vector>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <cstdint>
+#include <utility>
 
 namespace pulp::audio {
 
@@ -84,12 +86,19 @@ public:
     /// when a change is detected. Backends with richer semantics can still
     /// override this entirely.
     virtual void set_device_change_callback(DeviceChangeCallback cb) {
-        device_change_callback_ = std::move(cb);
+        std::lock_guard<std::mutex> lock(device_change_callback_mutex_);
+        if (cb) {
+            device_change_callback_ = std::make_shared<DeviceChangeCallback>(std::move(cb));
+        } else {
+            device_change_callback_.reset();
+        }
     }
 
     /// Dispatch a stored device-change callback. Safe to call from any
     /// thread; the callback itself is responsible for UI-thread
     /// marshalling.
+    /// The callback is retained before invocation so it may unregister or
+    /// replace itself during dispatch without invalidating the in-flight call.
     ///
     /// **Must be public, not protected.** Platform notifiers
     /// (WasapiNotificationClient, Win32 MIDI DeviceWatcher, ALSA
@@ -104,15 +113,22 @@ public:
     /// lenient; making this public matches the design intent the
     /// doc comment always described.
     void fire_device_change() {
-        if (device_change_callback_) device_change_callback_();
+        std::shared_ptr<DeviceChangeCallback> callback;
+        {
+            std::lock_guard<std::mutex> lock(device_change_callback_mutex_);
+            callback = device_change_callback_;
+        }
+        if (callback && *callback) (*callback)();
     }
     /// Observe whether a caller registered a callback.
     bool has_device_change_callback() const {
-        return static_cast<bool>(device_change_callback_);
+        std::lock_guard<std::mutex> lock(device_change_callback_mutex_);
+        return static_cast<bool>(device_change_callback_ && *device_change_callback_);
     }
 
 private:
-    DeviceChangeCallback device_change_callback_;
+    mutable std::mutex device_change_callback_mutex_;
+    std::shared_ptr<DeviceChangeCallback> device_change_callback_;
 };
 
 // Create the platform-appropriate audio system

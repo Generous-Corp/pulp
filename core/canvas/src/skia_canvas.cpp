@@ -153,6 +153,14 @@ static sk_sp<SkTypeface> get_cached_typeface(const std::string& family,
     }
 #endif
 
+    // Plugin-registered fonts win over both bundled and platform fonts
+    // (pulp #1150). A plugin author who explicitly registered "MyBrand
+    // Display" expects that name to resolve to their own .ttf, even if the
+    // host machine happens to have an unrelated family with the same name.
+    if (!typeface && !family.empty()) {
+        typeface = match_registered_typeface(family, sk_style);
+    }
+
     // Bundled fonts take precedence over the system font manager so plugin
     // UIs render the same on a stock machine as on a developer's machine
     // with the same families installed (#932). Without this, calling
