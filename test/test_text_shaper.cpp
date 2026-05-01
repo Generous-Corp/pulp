@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
+#include <pulp/canvas/text_layout.hpp>
 #include <pulp/canvas/text_shaper.hpp>
 
 using namespace pulp::canvas;
@@ -150,4 +151,77 @@ TEST_CASE("Global text shaper singleton", "[canvas][text_shaper]") {
     auto& s1 = global_text_shaper();
     auto& s2 = global_text_shaper();
     REQUIRE(&s1 == &s2);
+}
+
+// ── GlyphArrangement / paragraph layout helpers ────────────────────────
+
+TEST_CASE("layout_paragraph handles empty text and newline-only text",
+          "[canvas][text_layout]") {
+    FontSpec font;
+    font.size = 10.0f;
+
+    auto empty = layout_paragraph("", font);
+    REQUIRE(empty.line_count() == 0);
+    REQUIRE_THAT(empty.total_width(), WithinAbs(0.0f, 1e-5f));
+    REQUIRE_THAT(empty.total_height(), WithinAbs(0.0f, 1e-5f));
+    REQUIRE(empty.hit_test(5.0f, 5.0f) == 0);
+    REQUIRE_THAT(empty.position_for_index(4), WithinAbs(0.0f, 1e-5f));
+
+    auto newline = layout_paragraph("\n", font);
+    REQUIRE(newline.line_count() == 1);
+    REQUIRE(newline.lines()[0].glyphs.empty());
+    REQUIRE_THAT(newline.lines()[0].width, WithinAbs(0.0f, 1e-5f));
+    REQUIRE_THAT(newline.total_height(), WithinAbs(10.0f, 1e-5f));
+    REQUIRE(newline.hit_test(100.0f, 100.0f) == 0);
+}
+
+TEST_CASE("layout_paragraph applies letter spacing before wrapping",
+          "[canvas][text_layout]") {
+    FontSpec font;
+    font.size = 10.0f;
+    font.letter_spacing = 2.0f;
+
+    auto unwrapped = layout_paragraph("abc", font);
+    REQUIRE(unwrapped.line_count() == 1);
+    REQUIRE(unwrapped.lines()[0].glyphs.size() == 3);
+    REQUIRE_THAT(unwrapped.lines()[0].glyphs[0].advance, WithinAbs(8.0f, 1e-5f));
+    REQUIRE_THAT(unwrapped.lines()[0].glyphs[1].x, WithinAbs(8.0f, 1e-5f));
+    REQUIRE_THAT(unwrapped.total_width(), WithinAbs(24.0f, 1e-5f));
+
+    auto wrapped = layout_paragraph("abc", font, 16.0f);
+    REQUIRE(wrapped.line_count() == 2);
+    REQUIRE(wrapped.lines()[0].glyphs.size() == 2);
+    REQUIRE(wrapped.lines()[1].glyphs.size() == 1);
+    REQUIRE_THAT(wrapped.lines()[0].width, WithinAbs(16.0f, 1e-5f));
+    REQUIRE_THAT(wrapped.lines()[1].width, WithinAbs(8.0f, 1e-5f));
+    REQUIRE_THAT(wrapped.total_width(), WithinAbs(16.0f, 1e-5f));
+}
+
+TEST_CASE("GlyphArrangement hit testing and index positioning cover line edges",
+          "[canvas][text_layout]") {
+    FontSpec font;
+    font.size = 10.0f;
+
+    auto layout = layout_paragraph("ab\ncd", font);
+    REQUIRE(layout.line_count() == 2);
+
+    REQUIRE(layout.hit_test(2.9f, 0.0f) == 0);
+    REQUIRE(layout.hit_test(3.1f, 0.0f) == 1);
+    REQUIRE(layout.hit_test(99.0f, 0.0f) == 2);
+    REQUIRE(layout.hit_test(0.0f, 11.0f) == 3);
+    REQUIRE(layout.hit_test(99.0f, 11.0f) == 5);
+
+    REQUIRE_THAT(layout.position_for_index(1), WithinAbs(6.0f, 1e-5f));
+    REQUIRE_THAT(layout.position_for_index(3), WithinAbs(0.0f, 1e-5f));
+    REQUIRE_THAT(layout.position_for_index(99), WithinAbs(12.0f, 1e-5f));
+}
+
+TEST_CASE("Parallelogram contains accepts interior and edge points",
+          "[canvas][text_layout]") {
+    auto para = Parallelogram::from_rect_shear(10.0f, 20.0f, 30.0f, 10.0f, 5.0f);
+
+    REQUIRE(para.contains(20.0f, 25.0f));
+    REQUIRE(para.contains(15.0f, 20.0f));
+    REQUIRE_FALSE(para.contains(9.0f, 25.0f));
+    REQUIRE_FALSE(para.contains(46.0f, 20.0f));
 }

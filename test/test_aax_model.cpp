@@ -2,6 +2,10 @@
 
 #include <pulp/format/aax_model.hpp>
 
+#include <memory>
+#include <string>
+#include <vector>
+
 namespace {
 
 class StereoEffect final : public pulp::format::Processor {
@@ -139,6 +143,83 @@ std::unique_ptr<pulp::format::Processor> make_invalid_sidechain() {
     return std::make_unique<InvalidSidechain>();
 }
 
+class ConfigurableProcessor final : public pulp::format::Processor {
+public:
+    pulp::format::PluginDescriptor descriptor() const override {
+        return descriptor_;
+    }
+
+    void define_parameters(pulp::state::StateStore& store) override {
+        for (const auto& param : parameters_) {
+            store.add_parameter(param);
+        }
+    }
+
+    void prepare(const pulp::format::PrepareContext&) override {}
+
+    void process(
+        pulp::audio::BufferView<float>&,
+        const pulp::audio::BufferView<const float>&,
+        pulp::midi::MidiBuffer&,
+        pulp::midi::MidiBuffer&,
+        const pulp::format::ProcessContext&) override
+    {}
+
+    int latency_samples() const override {
+        return latency_samples_;
+    }
+
+    static void configure(pulp::format::PluginDescriptor descriptor,
+                          std::vector<pulp::state::ParamInfo> parameters = {},
+                          int latency_samples = 0)
+    {
+        descriptor_ = std::move(descriptor);
+        parameters_ = std::move(parameters);
+        latency_samples_ = latency_samples;
+    }
+
+private:
+    static inline pulp::format::PluginDescriptor descriptor_{};
+    static inline std::vector<pulp::state::ParamInfo> parameters_{};
+    static inline int latency_samples_ = 0;
+};
+
+std::unique_ptr<pulp::format::Processor> make_configured_processor() {
+    return std::make_unique<ConfigurableProcessor>();
+}
+
+std::unique_ptr<pulp::format::Processor> make_null_processor() {
+    return nullptr;
+}
+
+pulp::format::aax::PluginCodes valid_codes() {
+    return {
+        .manufacturer_id = pulp::format::aax::fourcc("Pulp"),
+        .product_id = pulp::format::aax::fourcc("Test"),
+        .native_id_base = pulp::format::aax::fourcc("PTst"),
+    };
+}
+
+pulp::format::PluginDescriptor descriptor_with_buses(
+    std::vector<pulp::format::BusInfo> inputs,
+    std::vector<pulp::format::BusInfo> outputs,
+    pulp::format::PluginCategory category = pulp::format::PluginCategory::Effect,
+    bool accepts_midi = false,
+    bool produces_midi = false)
+{
+    return {
+        .name = "EdgeCase",
+        .manufacturer = "Pulp",
+        .bundle_id = "com.pulp.edge-case",
+        .version = "1.0.0",
+        .category = category,
+        .input_buses = std::move(inputs),
+        .output_buses = std::move(outputs),
+        .accepts_midi = accepts_midi,
+        .produces_midi = produces_midi,
+    };
+}
+
 } // namespace
 
 TEST_CASE("AAX model builds a stable parameter packet for stereo effects", "[aax][model]") {
@@ -199,4 +280,174 @@ TEST_CASE("AAX model rejects unsupported sidechain layouts", "[aax][model]") {
     auto result = pulp::format::aax::build_plugin_definition(make_invalid_sidechain, codes);
     REQUIRE_FALSE(result.ok);
     REQUIRE(result.error.find("mono optional bus") != std::string::npos);
+}
+
+TEST_CASE("AAX model rejects missing factories and plugin identifiers", "[aax][model]") {
+    auto codes = valid_codes();
+
+    auto null_factory = pulp::format::aax::build_plugin_definition(nullptr, codes);
+    REQUIRE_FALSE(null_factory.ok);
+    REQUIRE(null_factory.error.find("factory function is null") != std::string::npos);
+
+    auto null_processor = pulp::format::aax::build_plugin_definition(make_null_processor, codes);
+    REQUIRE_FALSE(null_processor.ok);
+    REQUIRE(null_processor.error.find("did not return a processor") != std::string::npos);
+
+    auto zero_codes = pulp::format::aax::build_plugin_definition(make_stereo_effect, {});
+    REQUIRE_FALSE(zero_codes.ok);
+    REQUIRE(zero_codes.error.find("non-zero") != std::string::npos);
+}
+
+TEST_CASE("AAX model rejects invalid output bus declarations", "[aax][model]") {
+    auto codes = valid_codes();
+
+    ConfigurableProcessor::configure(descriptor_with_buses({{"Main In", 2, false}}, {}));
+    auto no_output = pulp::format::aax::build_plugin_definition(make_configured_processor, codes);
+    REQUIRE_FALSE(no_output.ok);
+    REQUIRE(no_output.error.find("at least one declared output bus") != std::string::npos);
+
+    ConfigurableProcessor::configure(
+        descriptor_with_buses({{"Main In", 2, false}}, {{"Main Out", 2, false}, {"Aux Out", 2, true}}));
+    auto multiple_outputs = pulp::format::aax::build_plugin_definition(make_configured_processor, codes);
+    REQUIRE_FALSE(multiple_outputs.ok);
+    REQUIRE(multiple_outputs.error.find("exactly one output bus") != std::string::npos);
+
+    ConfigurableProcessor::configure(
+        descriptor_with_buses({{"Main In", 2, false}}, {{"Main Out", 2, true}}));
+    auto optional_output = pulp::format::aax::build_plugin_definition(make_configured_processor, codes);
+    REQUIRE_FALSE(optional_output.ok);
+    REQUIRE(optional_output.error.find("optional main output bus") != std::string::npos);
+}
+
+TEST_CASE("AAX model rejects invalid input and sidechain bus declarations", "[aax][model]") {
+    auto codes = valid_codes();
+
+    ConfigurableProcessor::configure(
+        descriptor_with_buses({{"Main In", 2, true}}, {{"Main Out", 2, false}}));
+    auto optional_input = pulp::format::aax::build_plugin_definition(make_configured_processor, codes);
+    REQUIRE_FALSE(optional_input.ok);
+    REQUIRE(optional_input.error.find("optional main input bus") != std::string::npos);
+
+    ConfigurableProcessor::configure(descriptor_with_buses(
+        {{"Main In", 2, false}, {"Sidechain", 1, true}, {"Aux", 1, true}},
+        {{"Main Out", 2, false}}));
+    auto too_many_inputs = pulp::format::aax::build_plugin_definition(make_configured_processor, codes);
+    REQUIRE_FALSE(too_many_inputs.ok);
+    REQUIRE(too_many_inputs.error.find("one main input bus and one optional mono sidechain") != std::string::npos);
+
+    ConfigurableProcessor::configure(descriptor_with_buses(
+        {{"Main In", 2, false}, {"Sidechain", 1, false}},
+        {{"Main Out", 2, false}}));
+    auto required_sidechain = pulp::format::aax::build_plugin_definition(make_configured_processor, codes);
+    REQUIRE_FALSE(required_sidechain.ok);
+    REQUIRE(required_sidechain.error.find("secondary input bus must be optional") != std::string::npos);
+}
+
+TEST_CASE("AAX model rejects unsupported channel counts", "[aax][model]") {
+    auto codes = valid_codes();
+
+    ConfigurableProcessor::configure(
+        descriptor_with_buses({{"Main In", 9, false}}, {{"Main Out", 2, false}}));
+    auto unsupported_input = pulp::format::aax::build_plugin_definition(make_configured_processor, codes);
+    REQUIRE_FALSE(unsupported_input.ok);
+    REQUIRE(unsupported_input.error.find("main input channel count") != std::string::npos);
+
+    ConfigurableProcessor::configure(
+        descriptor_with_buses({{"Main In", 2, false}}, {{"Main Out", 9, false}}));
+    auto unsupported_output = pulp::format::aax::build_plugin_definition(make_configured_processor, codes);
+    REQUIRE_FALSE(unsupported_output.ok);
+    REQUIRE(unsupported_output.error.find("main output channel count") != std::string::npos);
+}
+
+TEST_CASE("AAX model rejects category layouts that cannot run in AAX", "[aax][model]") {
+    auto codes = valid_codes();
+
+    ConfigurableProcessor::configure(descriptor_with_buses({}, {{"Main Out", 2, false}}));
+    auto effect_without_input = pulp::format::aax::build_plugin_definition(make_configured_processor, codes);
+    REQUIRE_FALSE(effect_without_input.ok);
+    REQUIRE(effect_without_input.error.find("effects require an audio input bus") != std::string::npos);
+
+    ConfigurableProcessor::configure(descriptor_with_buses(
+        {},
+        {{"Main Out", 2, false}},
+        pulp::format::PluginCategory::Instrument,
+        false));
+    auto instrument_without_midi = pulp::format::aax::build_plugin_definition(make_configured_processor, codes);
+    REQUIRE_FALSE(instrument_without_midi.ok);
+    REQUIRE(instrument_without_midi.error.find("instruments must declare MIDI input") != std::string::npos);
+
+    ConfigurableProcessor::configure(descriptor_with_buses(
+        {{"Main In", 0, false}},
+        {{"Main Out", 0, false}},
+        pulp::format::PluginCategory::MidiEffect,
+        false,
+        true));
+    auto midi_effect_without_midi = pulp::format::aax::build_plugin_definition(make_configured_processor, codes);
+    REQUIRE_FALSE(midi_effect_without_midi.ok);
+    REQUIRE(midi_effect_without_midi.error.find("MIDI effects must declare MIDI input") != std::string::npos);
+}
+
+TEST_CASE("AAX model validates fourcc and native plugin id derivation helpers", "[aax][model]") {
+    REQUIRE(pulp::format::aax::fourcc("") == 0);
+    REQUIRE(pulp::format::aax::fourcc("abc") == 0);
+    REQUIRE(pulp::format::aax::fourcc("abcde") == 0);
+    REQUIRE(pulp::format::aax::fourcc_string(pulp::format::aax::fourcc("Pulp")) == "Pulp");
+
+    const auto base = pulp::format::aax::fourcc("ABCD");
+    REQUIRE(pulp::format::aax::derive_native_plugin_id(base, 0) == base);
+    REQUIRE(pulp::format::aax::fourcc_string(pulp::format::aax::derive_native_plugin_id(base, 1)) == "ABC1");
+    REQUIRE(pulp::format::aax::fourcc_string(pulp::format::aax::derive_native_plugin_id(base, 61)) == "ABCz");
+
+    const auto hashed = pulp::format::aax::derive_native_plugin_id(base, 62);
+    REQUIRE(hashed == (base ^ static_cast<uint32_t>(62u * 0x45d9f3bu)));
+}
+
+TEST_CASE("AAX model exposes stem mapping helpers for supported and unknown layouts", "[aax][model]") {
+    REQUIRE(pulp::format::aax::stem_kind_for_channels(0) == pulp::format::aax::StemKind::none);
+    REQUIRE(pulp::format::aax::stem_kind_for_channels(1) == pulp::format::aax::StemKind::mono);
+    REQUIRE(pulp::format::aax::stem_kind_for_channels(2) == pulp::format::aax::StemKind::stereo);
+    REQUIRE(pulp::format::aax::stem_kind_for_channels(3) == pulp::format::aax::StemKind::lcr);
+    REQUIRE(pulp::format::aax::stem_kind_for_channels(4) == pulp::format::aax::StemKind::quad);
+    REQUIRE(pulp::format::aax::stem_kind_for_channels(5) == pulp::format::aax::StemKind::surround_5_0);
+    REQUIRE(pulp::format::aax::stem_kind_for_channels(6) == pulp::format::aax::StemKind::surround_5_1);
+    REQUIRE(pulp::format::aax::stem_kind_for_channels(7) == pulp::format::aax::StemKind::surround_6_1);
+    REQUIRE(pulp::format::aax::stem_kind_for_channels(8) == pulp::format::aax::StemKind::surround_7_1);
+    REQUIRE(pulp::format::aax::stem_kind_for_channels(9) == pulp::format::aax::StemKind::none);
+
+    REQUIRE(pulp::format::aax::stem_channel_count(pulp::format::aax::StemKind::stereo) == 2);
+    REQUIRE(std::string(pulp::format::aax::stem_signature(pulp::format::aax::StemKind::surround_5_1)) == "5.1");
+    REQUIRE(pulp::format::aax::stem_channel_count(pulp::format::aax::StemKind::lcrs) == 0);
+    REQUIRE(std::string(pulp::format::aax::stem_signature(pulp::format::aax::StemKind::lcrs)) == "unknown");
+}
+
+TEST_CASE("AAX model truncates long labels and falls back for empty parameter names", "[aax][model]") {
+    auto codes = valid_codes();
+    auto descriptor = descriptor_with_buses({{"Main In", 2, false}}, {{"Main Out", 2, false}});
+    descriptor.name = "ThisPluginNameIsDefinitelyLongerThanThirtyOneCharacters";
+
+    ConfigurableProcessor::configure(
+        std::move(descriptor),
+        {
+            {
+                .id = 0x1234,
+                .name = "ThisParameterNameIsDefinitelyLongerThanThirtyOneCharacters",
+                .unit = "Hz",
+                .range = {0.0f, 1.0f, 0.5f, 0.0f},
+            },
+            {
+                .id = 0xBEEF,
+                .name = "",
+                .unit = "",
+                .range = {0.0f, 10.0f, 1.0f, 0.0f},
+            },
+        });
+
+    auto result = pulp::format::aax::build_plugin_definition(make_configured_processor, codes);
+    REQUIRE(result.ok);
+    REQUIRE(result.definition.parameters.size() == 2);
+    REQUIRE(result.definition.parameters[0].name.size() == 31);
+    REQUIRE(result.definition.parameters[0].name == "ThisParameterNameIsDefinitelyLo");
+    REQUIRE(result.definition.parameters[1].name == "p0000BEEF");
+    REQUIRE(result.definition.components[0].short_name.size() == 31);
+    REQUIRE(result.definition.components[0].short_name == "ThisPluginNameIsDefinitelyLonge");
 }
