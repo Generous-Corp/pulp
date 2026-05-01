@@ -55,6 +55,16 @@ TEST_CASE("DescriptorValidation: empty name/manufacturer/bundle_id/version are e
     REQUIRE_FALSE(descriptor_is_valid(issues));
 }
 
+TEST_CASE("DescriptorValidation: empty version is an error",
+          "[format][descriptor-validation][coverage][issue-493]") {
+    auto d = well_formed_effect();
+    d.version.clear();
+
+    auto issues = validate_descriptor(d);
+    REQUIRE(has_error_on(issues, "version"));
+    REQUIRE_FALSE(descriptor_is_valid(issues));
+}
+
 TEST_CASE("DescriptorValidation: non-reverse-DNS bundle_id produces a warning only",
           "[format][descriptor-validation]") {
     auto d = well_formed_effect();
@@ -117,6 +127,16 @@ TEST_CASE("DescriptorValidation: negative bus channel counts are errors",
         REQUIRE(has_error_on(issues, "input_buses"));
         REQUIRE_FALSE(descriptor_is_valid(issues));
     }
+}
+
+TEST_CASE("DescriptorValidation: negative main input is an error",
+          "[format][descriptor-validation][coverage][issue-493]") {
+    auto d = well_formed_effect();
+    d.input_buses = {{"Invalid In", -2, false}};
+
+    auto issues = validate_descriptor(d);
+    REQUIRE(has_error_on(issues, "input_buses"));
+    REQUIRE_FALSE(descriptor_is_valid(issues));
 }
 
 TEST_CASE("DescriptorValidation: instrument with non-optional stereo input warns",
