@@ -59,6 +59,15 @@ std::string read_file(const std::filesystem::path& path) {
             std::istreambuf_iterator<char>()};
 }
 
+std::string prepend_path(const std::filesystem::path& dir) {
+    std::string value = dir.string();
+    if (const char* old = std::getenv("PATH")) {
+        value += ':';
+        value += old;
+    }
+    return value;
+}
+
 void write_fake_amixer(const std::filesystem::path& dir) {
     const auto script = dir / "amixer";
     std::ofstream f(script);
@@ -95,7 +104,7 @@ TEST_CASE("system volume Linux path parses amixer output",
     auto root = make_temp_root("pulp-system-volume");
     write_fake_amixer(root);
 
-    ScopedEnvVar path("PATH", root.string());
+    ScopedEnvVar path("PATH", prepend_path(root));
     ScopedEnvVar mode("PULP_FAKE_AMIXER_MODE", "");
 
     auto volume = pulp::audio::get_system_volume();
@@ -114,7 +123,7 @@ TEST_CASE("system volume Linux path rejects empty or malformed amixer output",
     auto root = make_temp_root("pulp-system-volume-empty");
     write_fake_amixer(root);
 
-    ScopedEnvVar path("PATH", root.string());
+    ScopedEnvVar path("PATH", prepend_path(root));
     {
         ScopedEnvVar mode("PULP_FAKE_AMIXER_MODE", "empty");
         REQUIRE_FALSE(pulp::audio::get_system_volume().has_value());
@@ -141,7 +150,7 @@ TEST_CASE("system volume Linux setter invokes amixer with integer percent",
     write_fake_amixer(root);
     const auto log = root / "amixer.log";
 
-    ScopedEnvVar path("PATH", root.string());
+    ScopedEnvVar path("PATH", prepend_path(root));
     ScopedEnvVar log_path("PULP_FAKE_AMIXER_LOG", log.string());
 
     {
