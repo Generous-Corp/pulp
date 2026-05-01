@@ -145,3 +145,18 @@ Don't refactor this into a "pure native" shape — there's no way to do it witho
 `setTimeout(fn, 0)` deliberately bypasses `__scheduleTimer__` and routes through `Promise.resolve().then(...)` so it drains on the next `pump_message_loop()` call. This matches React's scheduler expectations and makes tests deterministic (no host frame loop needed). Positive-delay timeouts go through the native deadline tracker and only fire when `service_frame_callbacks()` runs.
 
 If a consumer reports "my setTimeout(fn, 1) never fires", check that the host is actually calling `service_frame_callbacks()` from its frame loop — that's the drain hook for non-zero delays.
+
+### `display: flex` defaults to `flex-direction: row` (CSS web-compat, #1147)
+
+Pulp's underlying widgets default to `FlexDirection::column` (RN convention). The CSS web platform default for `display: flex` is `flex-direction: row` — children lay out horizontally. Imported / extracted designs assume the web default, so `web-compat-style-decl.js` explicitly emits `setFlex(id, 'direction', 'row')` whenever a `CSSStyleDeclaration` resolves `display: flex` and the consumer has NOT also declared `flexDirection`, `flex-direction`, or a `flexFlow` shorthand that includes a direction token.
+
+Order independence is intentional. Both of these end up column:
+```js
+el.style.flexDirection = 'column'; el.style.display = 'flex';
+el.style.display = 'flex'; el.style.flexDirection = 'column';
+```
+The setter trap stores into `_props` BEFORE `_applyProperty` runs, so the display handler can see a previously-declared direction and skip the row default. A later explicit `flexDirection` overrides the row default through the normal handler.
+
+`flexFlow` is content-aware: `flexFlow: 'wrap'` does NOT block the row default (CSS shorthand semantics — omitted `flex-direction` defaults to row), but `flexFlow: 'column wrap'` does. The check uses a `\b(row|column)\b` regex against `_props.flexFlow`.
+
+Not changed by this fix: `createCol` / `createRow` / `createPanel` C++ paths preserve their explicit direction; typed React props in `pulp-react/prop-applier.ts` route directly through bridge setters and don't touch `style`.
