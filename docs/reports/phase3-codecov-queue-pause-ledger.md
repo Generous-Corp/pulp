@@ -170,6 +170,7 @@ coverage merges and is held for a branch refresh.
 | #1110 | `02d32afb3fc1` | merged |
 | #1111 | `5841a31279e6` | merged |
 | #1112 | `fef94b10e89c` | merged |
+| #1141 | `49136be956d` | merged from `UNSTABLE`; required `linux`, `macos`, and `windows` contexts were green, only advisory macOS coverage/sanitizer lanes were still pending |
 
 ## Conflict And Failure Triage
 
@@ -179,6 +180,7 @@ coverage merges and is held for a branch refresh.
 | #1084 | `feature/runtime-text-diff-coverage-641` | `cb63e51416ed` | Conflict resolved and pushed; normal PR workflows are running. Local worker validated `pulp-test-runtime-utils "[runtime][text-diff]"` and matching CTest cases. |
 | #1089 | `feature/view-file-browser-coverage-493` | `86cbe4ca12e9` | Conflict resolved and pushed. The first refreshed run failed `Enforce version & skill sync`; a metadata-only empty commit added `Version-Bump: sdk=skip reason="test-only file browser coverage; no SDK release surface change"`. Local worker validated skill-sync, version-bump with required-bump enforcement, and `git diff --check origin/main...HEAD`. Fresh PR checks are queued. |
 | #1131 | `feature/audio-window-enumerator-coverage-640-next` | `f5af90f4f5af` | Pushed coverage-harness fix for Windows `.exe` object discovery in `scripts/run_coverage.sh`; `bash -n`, `test_run_coverage.py`, skill-sync report, version-bump report, and `git diff --check` passed. Local CMake validation was not rerun after the harness patch because the laptop filesystem had only about 150-211 MiB free; the earlier excerpt binary validation was already green and the platform-sensitive coverage fix now needs CI/Namespace. |
+| #1137 | `feature/audio-platform-helper-coverage-640-next` | `e4ea28dfc2e0` | Pushed a test isolation fix after macOS Namespace exposed a parallel CTest temp-dir collision in `test_cli_projects_registry.cpp`. Focused local `pulp-test-cli-projects-registry "add_project falls back to directory basename when no name hint"` passed; skill-sync/version-bump reports and `git diff --check` passed. Fresh PR checks are queued. |
 
 ## Real Diff-Gap Patch Queue
 
@@ -207,7 +209,7 @@ Additional local-only workers started while Namespace was saturated:
 | --- | --- | --- | --- |
 | `local/phase3-local-ci-extra-643` | `/Users/danielraffel/Code/pulp-local-ci-extra-643` | improve `tools/local-ci/local_ci.py` focused coverage via `tools/local-ci/test_local_ci_extra.py` | worker active; no push/CI |
 | `local/phase3-version-bump-extra-643` | `/Users/danielraffel/Code/pulp-version-bump-extra-643` | improve `tools/scripts/version_bump_check.py` focused coverage via `tools/scripts/test_version_bump_check_extra.py` | worker active; no push/CI |
-| `local/phase3-compat-sync-extra-643` | `/Users/danielraffel/Code/pulp-compat-sync-extra-643` | improve `tools/scripts/compat_sync_check.py` focused coverage via `tools/scripts/test_compat_sync_check_extra.py` | worker active; no push/CI |
+| `local/phase3-compat-sync-extra-643` | `/Users/danielraffel/Code/pulp-compat-sync-extra-643` | improve `tools/scripts/compat_sync_check.py` focused coverage via `tools/scripts/test_compat_sync_check_extra.py` | completed locally at `7107bacc732a`; focused coverage now reports 99%; no push/CI |
 
 Local disk note: after completed Codecov worktrees pushed their fixes, their
 generated `build/` directories plus stale generated build outputs from
