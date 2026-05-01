@@ -1524,6 +1524,123 @@ TEST_CASE("WidgetBridge loadAssetSync covers text mime variants and path normali
     std::filesystem::remove(script_path);
 }
 
+TEST_CASE("WidgetBridge registerDrop dispatches escaped payloads to JS",
+          "[view][bridge][dnd][coverage]")
+{
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        var drop_type = '';
+        var drop_data = '';
+        var drop_x = 0;
+        var drop_y = 0;
+        function handleDrop(type, data, x, y) {
+            drop_type = type;
+            drop_data = data;
+            drop_x = x;
+            drop_y = y;
+        }
+        createPanel('dropzone', '');
+        registerDrop('dropzone', 'handleDrop');
+    )");
+
+    auto* dropzone = bridge.widget("dropzone");
+    REQUIRE(dropzone != nullptr);
+    REQUIRE(static_cast<bool>(dropzone->on_drop));
+
+    dropzone->on_drop("text", "line one\nit's fine", 12.5f, 30.25f);
+
+    REQUIRE(engine.evaluate("drop_type").toString() == "text");
+    REQUIRE(engine.evaluate("drop_data").toString() == "line one\nit's fine");
+    REQUIRE_THAT(engine.evaluate("drop_x").getWithDefault<double>(0.0),
+                 WithinAbs(12.5, 1e-4));
+    REQUIRE_THAT(engine.evaluate("drop_y").getWithDefault<double>(0.0),
+                 WithinAbs(30.25, 1e-4));
+
+    bridge.load_script("registerDrop('dropzone', '')");
+    REQUIRE(static_cast<bool>(dropzone->on_drop));
+
+    bridge.load_script("createPanel('no-drop', ''); registerDrop('no-drop', '')");
+    auto* inert = bridge.widget("no-drop");
+    REQUIRE(inert != nullptr);
+    REQUIRE_FALSE(static_cast<bool>(inert->on_drop));
+}
+
+TEST_CASE("WidgetBridge registerContextMenu dispatches native menu position",
+          "[view][bridge][context-menu][coverage]")
+{
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        var menu_x = -1;
+        var menu_y = -1;
+        function handleMenu(x, y) {
+            menu_x = x;
+            menu_y = y;
+        }
+        createPanel('menu-target', '');
+        registerContextMenu('menu-target', 'handleMenu');
+    )");
+
+    auto* target = bridge.widget("menu-target");
+    REQUIRE(target != nullptr);
+    REQUIRE(static_cast<bool>(target->on_context_menu));
+
+    target->on_context_menu({42.5f, 19.25f});
+
+    REQUIRE_THAT(engine.evaluate("menu_x").getWithDefault<double>(0.0),
+                 WithinAbs(42.5, 1e-4));
+    REQUIRE_THAT(engine.evaluate("menu_y").getWithDefault<double>(0.0),
+                 WithinAbs(19.25, 1e-4));
+
+    bridge.load_script("createPanel('menu-inert', ''); registerContextMenu('menu-inert', '')");
+    auto* inert = bridge.widget("menu-inert");
+    REQUIRE(inert != nullptr);
+    REQUIRE_FALSE(static_cast<bool>(inert->on_context_menu));
+}
+
+TEST_CASE("WidgetBridge loadFont reports existing and missing paths",
+          "[view][bridge][font][coverage]")
+{
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    const auto unique = std::to_string(
+        std::chrono::steady_clock::now().time_since_epoch().count());
+    const auto font_path =
+        std::filesystem::temp_directory_path() /
+        ("pulp-widget-bridge-font-" + unique + ".ttf");
+    {
+        std::ofstream out(font_path, std::ios::binary);
+        out << "fake-font";
+    }
+
+    const auto existing = js_single_quoted(font_path.string());
+    const auto missing = js_single_quoted((font_path.string() + ".missing"));
+    bridge.load_script(
+        "var font_existing = loadFont('" + existing + "');"
+        "var font_missing = loadFont('" + missing + "');"
+        "var font_empty = loadFont('');");
+
+    REQUIRE(engine.evaluate("font_existing").getWithDefault<bool>(false));
+    REQUIRE_FALSE(engine.evaluate("font_missing").getWithDefault<bool>(true));
+    REQUIRE_FALSE(engine.evaluate("font_empty").getWithDefault<bool>(true));
+
+    std::error_code ec;
+    std::filesystem::remove(font_path, ec);
+}
+
 TEST_CASE("WidgetBridge text editor escape dispatches JS handler", "[view][bridge][text]") {
     ScriptEngine engine;
     View root;
