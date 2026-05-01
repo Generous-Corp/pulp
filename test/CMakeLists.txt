@@ -101,6 +101,22 @@ target_include_directories(pulp-test-cli-create-targets PRIVATE ${CMAKE_SOURCE_D
 target_link_libraries(pulp-test-cli-create-targets PRIVATE Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-cli-create-targets)
 
+# CLI create shell-out edge tests. These launch the built CLI but stay on
+# fail-fast paths that do not run doctor, configure, build, or network setup.
+add_executable(pulp-test-cli-create-shellout test_cli_create_shellout.cpp)
+target_link_libraries(pulp-test-cli-create-shellout PRIVATE
+    pulp::platform
+    Catch2::Catch2WithMain)
+if(TARGET pulp-cli)
+    add_dependencies(pulp-test-cli-create-shellout pulp-cli)
+    target_compile_definitions(pulp-test-cli-create-shellout PRIVATE
+        PULP_CLI_BINARY="$<TARGET_FILE:pulp-cli>")
+endif()
+target_compile_definitions(pulp-test-cli-create-shellout PRIVATE
+    PULP_BUILD_DIR="${CMAKE_BINARY_DIR}"
+    PULP_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+catch_discover_tests(pulp-test-cli-create-shellout)
+
 # pulp #914 — `pulp run` flag parser unit tests. Pure parser, no I/O,
 # no project resolution. The shell-out CLI behaviour for the same
 # flags lives in test_cli_shellout.cpp.
