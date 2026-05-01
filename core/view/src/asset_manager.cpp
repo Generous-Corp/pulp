@@ -1,4 +1,5 @@
 #include <pulp/view/asset_manager.hpp>
+#include <pulp/canvas/bundled_fonts.hpp>
 #include <algorithm>
 #include <fstream>
 #include <filesystem>
@@ -248,8 +249,35 @@ FontData AssetManager::load_font_embedded(const std::string& name) {
 }
 
 void AssetManager::register_font_family(const std::string& family, const std::string& path_or_name) {
-    std::lock_guard lock(mutex_);
-    font_registry_[family] = path_or_name;
+    // pulp #1150 — historically this was dead plumbing: the family→path
+    // mapping was stored but never consulted by SkFontMgr, so plugin code
+    // calling `register_font_family("MyFamily", "/path/to.ttf")` got a
+    // silent no-op from the renderer's perspective.
+    //
+    // Now we forward to the canonical canvas-side registry, which
+    // materialises the font via the platform SkFontMgr and makes it
+    // resolvable through `canvas.set_font()` / `setFontFamily()`. The
+    // legacy family→key map is still updated so existing
+    // `font_for_family()` callers (mostly internal asset_manager tests)
+    // keep working.
+    {
+        std::lock_guard lock(mutex_);
+        font_registry_[family] = path_or_name;
+    }
+
+    // Try the bridge: an embedded asset name first, then a file path.
+    // `register_font` returns false on non-Skia builds, on file-not-found,
+    // or when Skia rejects the bytes — that's fine, the legacy map above
+    // is still populated as a fallback for non-canvas consumers.
+    if (has_embedded(path_or_name)) {
+        auto blob = load_blob_embedded(path_or_name);
+        if (blob.valid()) {
+            pulp::canvas::register_font(blob.data.data(), blob.data.size(),
+                                        family);
+            return;
+        }
+    }
+    pulp::canvas::register_font_file(path_or_name, family);
 }
 
 FontData AssetManager::font_for_family(const std::string& family) const {

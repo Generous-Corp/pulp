@@ -47,6 +47,7 @@ static const Command commands[] = {
     {"version",  "Show, bump, or check version info",     cmd_version},
     {"dev",      "Unified dev loop: watch, build, test, run", cmd_dev},
     {"loop",     "Leveraged-prototype focus mode: single-platform watch + rebuild (#940)", cmd_loop},
+    {"inspect",  "Connect to a running plugin inspector", cmd_inspect},
     {"scan",     "Scan system paths for VST3 / AU / CLAP / LV2 plug-ins", cmd_scan},
     {"host",     "Load a plug-in and run a synthetic audio block through it", cmd_host},
     {"pr",       "One-shot push-a-PR: gates + bump + ship",   cmd_pr},
@@ -87,7 +88,6 @@ struct BinaryCommand {
 
 static const BinaryCommand binary_commands[] = {
     {"design-debug",  "tools/design/pulp-design-debug",            "Headless design debug runner", nullptr},
-    {"inspect",       "tools/screenshot/pulp-screenshot",          "Launch the component inspector", "--demo"},
     {"import-design", "tools/import-design/pulp-import-design",    "Import designs from Figma/Stitch/v0/Pencil", nullptr},
     {"export-tokens", "tools/import-design/pulp-import-design",    "Export theme as W3C Design Tokens", "--export-tokens"},
 };
