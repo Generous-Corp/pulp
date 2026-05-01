@@ -26,15 +26,15 @@ This local ledger records the open `codecov` PR validation runs paused to free N
 
 ## Current Watch Point
 
-Last live check: 2026-05-01 15:44:30 EDT.
+Last live check: 2026-05-01 16:01:38 EDT.
 
-- Open `codecov` PRs: 2.
+- Open `codecov` PRs: 3.
 - Merge state: #1207 remains open and blocked on `Windows MSVC
-  release-path gate`, with no current failure candidate. #1210 was opened
-  as the next small refill tranche and is running fresh validation.
-- GitHub Actions pressure: 5 active runs, with 1 queued and 4 in
+  release-path gate`, with no current failure candidate. #1210 and #1211
+  are running fresh validation.
+- GitHub Actions pressure: 6 active runs, with 2 queued and 4 in
   progress. This still includes duplicate `workflow_dispatch` Build and
-  Test run `25230061797` for #1210 while GitHub processes the cancellation
+  Test run `25230693088` for #1211 while GitHub processes the cancellation
   request.
 - Codecov dashboard watch: recent rapid main merges cancelled most older
   main-branch `Coverage` push runs. The newest surviving main coverage
@@ -101,6 +101,12 @@ Last live check: 2026-05-01 15:44:30 EDT.
   Applied `codecov`, linked #641/#643, and fresh PR-event Build and
   Coverage workflows are running. Local validation had passed with 100%
   target coverage before queueing.
+- Refill: opened #1211 from `local/phase3-embed-js-coverage-643`, branch
+  `feature/phase3-embed-js-coverage-643`, head `92d94f0431e2`.
+  Applied `codecov`, linked #641/#643, and fresh PR-event Build and
+  Coverage workflows are running. Local validation was rerun with
+  `python3 tools/scripts/test_embed_js.py` and reported 6 passing tests;
+  prepared coverage validation reported 100% target coverage.
 - Queue cleanup: requested cancellation of duplicate `workflow_dispatch`
   Build and Test runs `25227025413` (#1207) and `25227667875` (#1208)
   because the PR-event Build and Test workflows are already producing the
@@ -109,6 +115,8 @@ Last live check: 2026-05-01 15:44:30 EDT.
   Build and Test run `25228924648` (#1209) for the same reason.
 - Queue cleanup: requested cancellation of duplicate `workflow_dispatch`
   Build and Test run `25230061797` (#1210) for the same reason.
+- Queue cleanup: requested cancellation of duplicate `workflow_dispatch`
+  Build and Test run `25230693088` (#1211) for the same reason.
 - Merged #1078 as `81be4ee00e02e367feec32c3c6885d0785179efa`,
   #1196 as `dfae8e9f4a3b7b019b091dd8786f354612e8e4ae`, #1197 as
   `f1d06c6210c1ee81686b72d449ab3f40308e6e3e`, #1198 as
