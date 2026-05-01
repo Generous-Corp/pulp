@@ -26,23 +26,26 @@ This local ledger records the open `codecov` PR validation runs paused to free N
 
 ## Current Watch Point
 
-Last live check: 2026-05-01 17:18:10 EDT.
+Last live check: 2026-05-01 17:22:10 EDT.
 
-- Open `codecov` PRs: 2.
+- Open `codecov` PRs: 3.
 - Merge state: #1211 merged cleanly as `827227339a0609358ba0371a86417a868ee9879e`.
   #1207 also merged cleanly as `9da7b03a522a2c08042bbfe6f3149612ed02bb82`
   after the long Windows release-path gate completed. #1212 merged
   cleanly as `cb954187cc2e7cc00b6cd972f6f2767a9b01af58`. #1213 merged
   cleanly as `ea03a328ef3351eeaada61259321d9849f6f4fa4`. #1214 merged
   cleanly as `e1ef408071456dbe9a66297c912edb6dcca8523b`. #1216 merged
-  cleanly as `57527d7569f8ebd8882779d10e8ad5b7e92cf259`. #1217 is now
-  open from `feature/phase3-package-cli-extra-643` at `f2727c976227`.
-- GitHub Actions pressure: #1215 and #1217 have PR-event Build/Coverage
-  checks active. #1215 is waiting only on the rerun Linux
+  cleanly as `57527d7569f8ebd8882779d10e8ad5b7e92cf259`. #1217 is open
+  from `feature/phase3-package-cli-extra-643` at `f2727c976227`, and
+  #1218 is open from `feature/phase3-docs-sync-check-extra-643` at
+  `6960c4d280ee`.
+- GitHub Actions pressure: #1215, #1217, and #1218 have PR-event
+  Build/Coverage checks active. #1215 is waiting only on the rerun Linux
   Namespace Build job after the unrelated `BufferingReader restart clears
   finished state and stale buffered data` failure. #1217 has no failed
   checks and is still waiting on Linux/Windows Namespace Build plus Windows
-  coverage.
+  coverage. #1218 has fresh PR-event checks running on Namespace-backed
+  lanes.
 - Codecov dashboard watch: recent rapid main merges cancelled most older
   main-branch `Coverage` push runs. The main coverage run for #1213
   completed successfully at `ea03a328ef33`; #1214's merge should start
@@ -177,6 +180,18 @@ Last live check: 2026-05-01 17:18:10 EDT.
   tools/scripts/test_package_cli.py --pattern
   tools/scripts/test_package_cli_extra.py`, which reported 100% target
   coverage for `tools/scripts/package_cli.py`.
+- Refill: opened #1218 from
+  `local/phase3-docs-sync-check-extra-643`, branch
+  `feature/phase3-docs-sync-check-extra-643`, head `6960c4d280ee`.
+  Applied `codecov`, linked #641/#643, and PR-event Build and Coverage
+  workflows are running. Local validation was refreshed after rebasing
+  onto `origin/main` at `57527d7569f8` with
+  `PYTHONPATH=tools/scripts python3 -m unittest
+  tools/scripts/test_docs_sync_check.py
+  tools/scripts/test_docs_sync_check_extra.py` and venv-backed
+  `run_python_coverage.py --pattern 'tools/scripts/test_docs_sync_check*.py'`,
+  which reported 100% target coverage for
+  `tools/scripts/docs_sync_check.py`.
 - Queue cleanup: requested cancellation of duplicate `workflow_dispatch`
   Build and Test runs `25227025413` (#1207) and `25227667875` (#1208)
   because the PR-event Build and Test workflows are already producing the
@@ -314,7 +329,7 @@ Last live check: 2026-05-01 17:18:10 EDT.
   tools/scripts/test_build_migration_index_extra.py` passed and reported
   100% for `tools/scripts/build_migration_index.py`.
 - Local-only progress: `pulp-docs-sync-check-extra-643` advanced to
-  `231f1e9346ab` with entrypoint coverage for
+  `6960c4d280ee` after rebase with entrypoint coverage for
   `tools/scripts/docs_sync_check.py`. Validation:
   `PYTHONPATH=tools/scripts python3 -m unittest
   tools/scripts/test_docs_sync_check.py
@@ -1022,7 +1037,7 @@ not been pushed, PR'd, or dispatched to Namespace.
 | `local/phase3-validate-hosts-coverage-643` | `d3f7ef05` | #643 tooling tranche for `tools/deps/validate_hosts.py` paths | `tools/scripts/test_validate_hosts.py` | Refreshed against current `origin/main`; `python3 tools/scripts/test_validate_hosts.py` reports 9 tests and only mocked/local commands; venv-backed `tools/scripts/run_python_coverage.py --pattern tools/scripts/test_validate_hosts.py` passed and reported 100% for `tools/deps/validate_hosts.py`; skill-sync report; version-bump report; `git diff --check origin/main...HEAD`; final status clean and ahead 1. No SSH, VM, or remote validation work was run. | Hold local-only while Namespace pressure is high; when capacity returns, rename/push as a feature branch, run `shipyard pr --skip-target mac --skip-target ubuntu --skip-target windows`, then dispatch Namespace with `shipyard cloud run build <branch> --require-sha HEAD`. |
 | `local/phase3-compat-sync-extra-643` | `2bc36c4c` | #643 tooling tranche for `tools/scripts/compat_sync_check.py` paths | `tools/scripts/test_compat_sync_check_extra.py` | Refreshed against current `origin/main`; `python3 tools/scripts/test_compat_sync_check.py` reports 30 tests; `python3 tools/scripts/test_compat_sync_check_extra.py` reports 26 tests; venv-backed `tools/scripts/run_python_coverage.py --pattern 'tools/scripts/test_compat_sync_check*.py'` passed and reported 97% for `tools/scripts/compat_sync_check.py`; skill-sync report; version-bump report; `python3 tools/scripts/compat_sync_check.py --base origin/main --mode=report --enforce`; `git diff --check origin/main...HEAD`; final status clean and ahead 2. System `python3` lacked coverage, so the worker created `build-coverage/python-venv` with `coverage>=7.10` and `PyYAML`. | Hold local-only while Namespace pressure is high; when capacity returns, consider squashing the two local commits, rename/push as a feature branch, run `shipyard pr --skip-target mac --skip-target ubuntu --skip-target windows`, then dispatch Namespace with `shipyard cloud run build <branch> --require-sha HEAD`. |
 | `local/phase3-build-migration-index-extra-643` | `fcbfda52` | #643 tooling tranche for `tools/scripts/build_migration_index.py` paths | `tools/scripts/test_build_migration_index_extra.py` | Refreshed against current `origin/main`; `python3 tools/scripts/test_build_migration_index.py` reports 7 tests; `python3 tools/scripts/test_build_migration_index_extra.py` reports 9 tests; venv-backed `tools/scripts/run_python_coverage.py --pattern tools/scripts/test_build_migration_index.py --pattern tools/scripts/test_build_migration_index_extra.py` passed and reported 100% for `tools/scripts/build_migration_index.py`; skill-sync report; version-bump report; `git diff --check origin/main...HEAD`; `git diff --exit-code`; `git diff --cached --exit-code`; final status clean and ahead 1. CTest discovery skipped because this worktree has no `build/` directory. | Hold local-only while Namespace pressure is high; when capacity returns, rename/push as a feature branch, run `shipyard pr --skip-target mac --skip-target ubuntu --skip-target windows`, then dispatch Namespace with `shipyard cloud run build <branch> --require-sha HEAD`. |
-| `local/phase3-docs-sync-check-extra-643` | `231f1e93` | #643 tooling tranche for `tools/scripts/docs_sync_check.py` paths and script entrypoint | `tools/scripts/test_docs_sync_check_extra.py` | Refreshed locally; `PYTHONPATH=tools/scripts python3 -m unittest tools/scripts/test_docs_sync_check.py tools/scripts/test_docs_sync_check_extra.py` reports 28 tests; throwaway-venv `tools/scripts/run_python_coverage.py --pattern 'tools/scripts/test_docs_sync_check*.py'` passed and reported 100% for `tools/scripts/docs_sync_check.py` with 106 statements, 0 misses, 30 branches, and 0 partials; `git diff --check` passed; final tracked status clean. | Hold local-only while Namespace pressure is high; when capacity returns, rename/push as a feature branch, run `shipyard pr --skip-target mac --skip-target ubuntu --skip-target windows`; use PR-event Namespace checks unless a targeted diagnostic dispatch is needed. |
+| `feature/phase3-docs-sync-check-extra-643` | `6960c4d2` | #643 tooling tranche for `tools/scripts/docs_sync_check.py` paths and script entrypoint | `tools/scripts/test_docs_sync_check_extra.py` | Rebased onto current `origin/main` at `57527d75`; `PYTHONPATH=tools/scripts python3 -m unittest tools/scripts/test_docs_sync_check.py tools/scripts/test_docs_sync_check_extra.py` reports 28 tests; throwaway-venv `tools/scripts/run_python_coverage.py --pattern 'tools/scripts/test_docs_sync_check*.py'` passed and reported 100% for `tools/scripts/docs_sync_check.py` with 106 statements, 0 misses, 30 branches, and 0 partials; `git diff --check` passed; `shipyard pr --skip-target mac --skip-target ubuntu --skip-target windows` created #1218, then exited with no local targets remaining as expected for the Namespace-only route; #1218 is labeled `codecov` and linked from #641/#643. | Queued: monitor #1218 and merge once required gates are green. |
 | `local/phase3-coverage-tier-check-extra-643` | `f701c206` | #643 tooling tranche for `tools/scripts/coverage_tier_check.py` paths | `tools/scripts/test_coverage_tier_check_extra.py` | Refreshed against current `origin/main` at `99d852ec`; `python3 tools/scripts/test_coverage_tier_check.py` reports 15 tests; `python3 tools/scripts/test_coverage_tier_check_extra.py` reports 17 tests; temp-venv focused coverage over both tests passed and reported 100% for `tools/scripts/coverage_tier_check.py`; skill-sync report; version-bump report; `git diff --check origin/main...HEAD`; `git diff --exit-code`; final status clean and ahead 1. System `python3` lacked coverage, so the focused run used a temporary venv at `/tmp/pulp-cov-venv-643`. | Hold local-only while Namespace pressure is high; when capacity returns, rename/push as a feature branch, run `shipyard pr --skip-target mac --skip-target ubuntu --skip-target windows`, then dispatch Namespace with `shipyard cloud run build <branch> --require-sha HEAD`. |
 | `local/phase3-skill-sync-extra-643` | `0b2a0a9d` | #643 tooling tranche for `tools/scripts/skill_sync_check.py` paths, reporting edges, and script entrypoint | `tools/scripts/test_skill_sync_check_extra.py` | Refreshed locally; `python3 -m unittest tools/scripts/test_skill_sync_check.py tools/scripts/test_skill_sync_check_extra.py` reports 24 tests; venv-backed `run_python_coverage.py --pattern tools/scripts/test_skill_sync_check.py --pattern tools/scripts/test_skill_sync_check_extra.py` passed and reported 100% for `tools/scripts/skill_sync_check.py` with 239 statements, 0 misses, 106 branches, and 0 partials; `git diff --check` passed; final tracked status clean. | When capacity returns, rename/push as a feature branch, run `shipyard pr --skip-target mac --skip-target ubuntu --skip-target windows`; use PR-event Namespace checks unless a targeted diagnostic dispatch is needed. |
 | `local/phase3-version-bump-extra-643` | `61993790` | #643 tooling tranche for `tools/scripts/version_bump_check.py` paths, glob separator branches, apply-without-changelog behavior, and script entrypoint | `tools/scripts/test_version_bump_check_extra.py` | Rebased onto current `origin/main`; `python3 tools/scripts/test_gates.py` reports 39 tests; `python3 tools/scripts/test_version_bump_check_extra.py` reports 26 tests; `git diff --check` passed; throwaway-venv focused `run_python_coverage.py --pattern tools/scripts/test_gates.py --pattern tools/scripts/test_version_bump_check_extra.py` passed and reported 100% for `tools/scripts/version_bump_check.py` with 496 statements, 0 misses, 250 branches, and 0 partials; final tracked status clean. | When capacity returns, rename/push as a feature branch, run `shipyard pr --skip-target mac --skip-target ubuntu --skip-target windows`, then use PR-event Namespace checks unless a targeted diagnostic dispatch is needed. |
