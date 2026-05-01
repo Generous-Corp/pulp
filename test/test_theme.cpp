@@ -1,6 +1,8 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/view/theme.hpp>
+#include <filesystem>
+#include <fstream>
 
 using namespace pulp::view;
 using Catch::Matchers::WithinAbs;
@@ -105,6 +107,36 @@ TEST_CASE("Theme missing token returns nullopt", "[view][theme]") {
     REQUIRE_FALSE(empty.string_token("nonexistent").has_value());
 }
 
+TEST_CASE("Theme completeness reports missing required colors",
+          "[view][theme][issue-493]") {
+    Theme empty;
+    auto missing = empty.missing_tokens();
+    REQUIRE_FALSE(missing.empty());
+    REQUIRE_FALSE(empty.is_complete());
+
+    auto dark = Theme::dark();
+    REQUIRE(dark.missing_tokens().empty());
+    REQUIRE(dark.is_complete());
+}
+
+TEST_CASE("Theme fill_from keeps overrides and fills missing tokens",
+          "[view][theme][issue-493]") {
+    Theme partial;
+    partial.colors["bg.primary"] = color_from_hex(0x112233);
+    partial.dimensions["spacing.md"] = 42.0f;
+    partial.strings["font.family"] = "Custom";
+
+    partial.fill_from(Theme::dark());
+
+    REQUIRE(partial.is_complete());
+    REQUIRE(partial.color("bg.primary")->r8() == 0x11);
+    REQUIRE_THAT(partial.dimension("spacing.md").value(), WithinAbs(42.0f, 0.001));
+    REQUIRE(partial.string_token("font.family").value() == "Custom");
+    REQUIRE(partial.color("text.primary").has_value());
+    REQUIRE(partial.dimension("control.knob_size").has_value());
+    REQUIRE(partial.string_token("font.mono").has_value());
+}
+
 // ── Motion token tests ──────────────────────────────────────────────────────
 
 TEST_CASE("Dark theme has motion duration tokens", "[view][theme][motion]") {
@@ -182,4 +214,53 @@ TEST_CASE("Theme from_json with custom tokens", "[view][theme]") {
     REQUIRE(theme.color("custom.accent")->b8() == 0x00);
     REQUIRE_THAT(theme.dimension("custom.size").value(), WithinAbs(42.5, 0.001));
     REQUIRE(theme.string_token("custom.label").value() == "My Plugin");
+}
+
+TEST_CASE("Theme from_json maps malformed color strings to default color",
+          "[view][theme][issue-493]") {
+    auto theme = Theme::from_json(R"({
+        "colors": {
+            "bad.no_hash": "ff6600",
+            "bad.short": "#f60"
+        }
+    })");
+
+    REQUIRE(theme.color("bad.no_hash")->r8() == 0);
+    REQUIRE(theme.color("bad.no_hash")->g8() == 0);
+    REQUIRE(theme.color("bad.no_hash")->b8() == 0);
+    REQUIRE(theme.color("bad.no_hash")->a8() == 255);
+    REQUIRE(theme.color("bad.short").value() == Color{});
+}
+
+TEST_CASE("Theme load and save handle file edge cases",
+          "[view][theme][issue-493]") {
+    const auto path = std::filesystem::temp_directory_path() /
+        "pulp-theme-test.json";
+    const auto missing_path = path;
+    std::filesystem::remove(path);
+
+    auto missing = Theme::load_from_file(missing_path.string());
+    REQUIRE(missing.colors.empty());
+    REQUIRE(missing.dimensions.empty());
+    REQUIRE(missing.strings.empty());
+
+    {
+        std::ofstream empty_file(path);
+    }
+    auto empty = Theme::load_from_file(path.string());
+    REQUIRE(empty.colors.empty());
+    REQUIRE(empty.dimensions.empty());
+    REQUIRE(empty.strings.empty());
+
+    auto theme = Theme::dark();
+    REQUIRE(theme.save_to_file(path.string()));
+    auto loaded = Theme::load_from_file(path.string());
+    REQUIRE(loaded.is_complete());
+    REQUIRE(loaded.color("bg.primary").value() == theme.color("bg.primary").value());
+    REQUIRE_THAT(
+        loaded.dimension("spacing.md").value(),
+        WithinAbs(theme.dimension("spacing.md").value(), 0.001));
+    REQUIRE(loaded.string_token("font.family") == theme.string_token("font.family"));
+
+    std::filesystem::remove(path);
 }
