@@ -65,6 +65,7 @@ COVERAGE_SURFACES = (
     CoverageSurface(
         ("tools", "core/view/js"),
         (
+            "tools/test_check_format_validation.py",
             "tools/test_check_status_ladder.py",
             "tools/test_list_limitations.py",
         ),

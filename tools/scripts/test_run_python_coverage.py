@@ -92,7 +92,8 @@ class CoveragercTests(unittest.TestCase):
             ["tools/scripts", "tools/local-ci", "tools"],
         )
 
-    def test_default_test_globs_include_targeted_status_ladder_test(self) -> None:
+    def test_default_test_globs_include_targeted_top_level_tooling_tests(self) -> None:
+        self.assertIn("tools/test_check_format_validation.py", rpc.DEFAULT_TEST_GLOBS)
         self.assertIn("tools/test_check_status_ladder.py", rpc.DEFAULT_TEST_GLOBS)
         self.assertNotIn("tools/test_*.py", rpc.DEFAULT_TEST_GLOBS)
 
