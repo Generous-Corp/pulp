@@ -26,20 +26,18 @@ This local ledger records the open `codecov` PR validation runs paused to free N
 
 ## Current Watch Point
 
-Last live check: 2026-05-01 14:42:38 EDT.
+Last live check: 2026-05-01 15:08:06 EDT.
 
-- Open `codecov` PRs: 2.
-- Merge state: #1207 and #1208 are running fresh PR-event validation,
-  with no current failure candidate.
-- GitHub Actions pressure: 6 active runs, with 2 queued and 4 in
-  progress. This still includes duplicate `workflow_dispatch` Build and
-  Test runs `25227025413` and `25227667875` while GitHub processes the
-  cancellation requests.
+- Open `codecov` PRs: 1.
+- Merge state: #1207 remains open and blocked on `Windows MSVC
+  release-path gate`, with no current failure candidate. #1208 merged.
+- GitHub Actions pressure: 3 active runs, with 1 queued and 2 in
+  progress.
 - Codecov dashboard watch: recent rapid main merges cancelled most older
   main-branch `Coverage` push runs. The newest surviving main coverage
-  upload is run `25227196680` for `4ddee1e67e0c` (#1206), completed
-  successfully at 2026-05-01 14:40:51 EDT; after Codecov ingestion, the
-  project dashboard should reflect merged PRs through that main commit.
+  upload is run `25228714974` for `4d45182c7800` (#1208), currently
+  queued; after it completes and Codecov ingests it, the project
+  dashboard should reflect merged PRs through that main commit.
 - Just merged: #1117, #1204, #1199, #1194, #1125, #1116, #1113, #1104,
   #1097, #1088, #1203, #1115, #1195, #1083, #1096, #1200, #1205, #1078,
   #1196, #1197, #1198, #1202, and #1201 after required
@@ -83,7 +81,9 @@ Last live check: 2026-05-01 14:42:38 EDT.
   `92c88abff663`. Applied `codecov`, linked #641/#643, and fresh
   PR-event Build and Coverage workflows are running. Local validation
   previously reported 13 passing docs-generate tests, `docs_generate.py
-  check` passing, and 97% target coverage.
+  check` passing, and 97% target coverage. Merged as
+  `4d45182c7800ac61594db1cc48625b8129882751` after required gates were
+  green; no leftover branch runs were active after merge.
 - Queue cleanup: requested cancellation of duplicate `workflow_dispatch`
   Build and Test runs `25227025413` (#1207) and `25227667875` (#1208)
   because the PR-event Build and Test workflows are already producing the
@@ -173,8 +173,15 @@ Last live check: 2026-05-01 14:42:38 EDT.
   15 passing tests. Coverage harness did not run in that worktree because
   the default interpreter lacks `coverage.py >= 7.10`.
 - Local-only progress: `pulp-coverage-tier-check-extra-643` is refreshed
-  against current `origin/main` and locally validated; hold for the next
-  remote refill window.
+  against current `origin/main` at `e26e535306c8` as a single local
+  feature commit and locally validated with 100% target coverage.
+  Validation: `python3 tools/scripts/test_coverage_tier_check.py`
+  reported 15 passing tests; `python3
+  tools/scripts/test_coverage_tier_check_extra.py` reported 17 passing
+  tests; venv-backed `run_python_coverage.py --pattern
+  tools/scripts/test_coverage_tier_check.py --pattern
+  tools/scripts/test_coverage_tier_check_extra.py` passed and reported
+  100% for `tools/scripts/coverage_tier_check.py`.
 - Local-only progress: `pulp-skill-sync-extra-643` is refreshed against
   current `origin/main` at `07161e6a5a37` and locally validated with 94%
   target coverage; hold for the next remote refill window.
