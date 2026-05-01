@@ -257,6 +257,20 @@ struct AddOne {
     float process(float x) { return x + 1.0f; }
 };
 
+struct ResettableScale {
+    float factor = 2.0f;
+
+    float process(float x) { return x * factor; }
+    void reset() { factor = 1.0f; }
+};
+
+struct ResettableOffset {
+    float offset = 3.0f;
+
+    float process(float x) { return x + offset; }
+    void reset() { offset = 0.0f; }
+};
+
 TEST_CASE("ProcessorChain processes in order", "[signal][chain]") {
     ProcessorChain<ScaleBy2, AddOne> chain;
     // input=3: scale(3)=6, add(6)=7
@@ -290,6 +304,19 @@ TEST_CASE("ProcessorChain buffer processing", "[signal][chain]") {
     REQUIRE_THAT(buf[0], WithinAbs(2.0, 0.001));
     REQUIRE_THAT(buf[1], WithinAbs(4.0, 0.001));
     REQUIRE_THAT(buf[2], WithinAbs(6.0, 0.001));
+}
+
+TEST_CASE("ProcessorChain reset skips processors without reset methods",
+          "[signal][chain][issue-645]") {
+    ProcessorChain<ResettableScale, AddOne, ResettableOffset> chain;
+
+    REQUIRE_THAT(chain.process(2.0f), WithinAbs(8.0f, 1e-6f));
+
+    chain.reset();
+    const auto& const_chain = chain;
+    REQUIRE_THAT(const_chain.get<0>().factor, WithinAbs(1.0f, 1e-6f));
+    REQUIRE_THAT(const_chain.get<2>().offset, WithinAbs(0.0f, 1e-6f));
+    REQUIRE_THAT(chain.process(2.0f), WithinAbs(3.0f, 1e-6f));
 }
 
 // ── LookupTable ──────────────────────────────────────────────────────────

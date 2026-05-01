@@ -1,18 +1,22 @@
 ---
 name: inspect
-description: Inspect the view hierarchy and widget state
+description: Connect to a running Pulp inspector server
 ---
 
-Launch the component inspector to debug the view tree, widget state, and layout.
+Connect to a running plugin's inspector server to query the view tree,
+widget state, layout, and runtime diagnostics.
 
 ```bash
-./build/tools/cli/pulp inspect [script.js]
+./build/tools/cli/pulp inspect
+./build/tools/cli/pulp inspect --port 49152
+./build/tools/cli/pulp inspect --command DOM.getDocument
+./build/tools/cli/pulp inspect --command Capture.screenshot --output shot.json
 ```
 
-The inspector shows:
+The inspector exposes:
 - View hierarchy with bounds, flex properties, and styles
 - Widget state (values, labels, visibility)
 - Theme tokens and computed colors
 - Layout debug information
 
-Use this when UI rendering doesn't match expectations or to understand the view tree structure.
+Use `--port` when auto-discovery cannot find a running inspector.
