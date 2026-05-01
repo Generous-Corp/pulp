@@ -60,10 +60,11 @@ COVERAGE_SURFACES = (
     CoverageSurface(("tools/deps",), ("tools/deps/test_*.py",)),
     CoverageSurface(("tools/local-ci",), ("tools/local-ci/test_*.py",)),
     # Keep the broader first-party tooling roots represented while the
-    # executed test set stays on the established tooling test roots.
+    # executed test set stays on the established tooling roots plus
+    # targeted top-level tooling tests.
     CoverageSurface(
         ("tools", "core/view/js"),
-        (),
+        ("tools/test_check_status_ladder.py",),
         (
             "tools/test_*.py",
             "tools/scripts/test_*.py",
@@ -142,7 +143,7 @@ def _selected_surfaces(tests: list[Path]) -> list[CoverageSurface]:
         ):
             selected.append(surface)
     for surface in COVERAGE_SURFACES:
-        if surface.always_include:
+        if surface.always_include and surface not in selected:
             selected.append(surface)
     return selected
 

@@ -109,6 +109,8 @@ public:
     /// Listen for child added/removed
     int add_child_added_listener(ChildListener listener);
     int add_child_removed_listener(ChildListener listener);
+    void remove_child_added_listener(int id);
+    void remove_child_removed_listener(int id);
 
     // ── Serialization ───────────────────────────────────────────────────
 

@@ -104,7 +104,19 @@ jobs:
               --mode=report \
               $extra
 
+      - name: Compat-sync check (issue #1029)
+        # Authoritative gate (Layer 3) for the compat-matrix sync
+        # pattern. Mirrors the skill-sync / docs-sync stages above.
+        # PULP_ENFORCE_PREPUSH=1 is set at the job level → drift is
+        # a hard fail with no bypass other than the
+        # `Compat-Update: skip prefix=<...> reason="..."` trailer.
+        run: |
+          python3 tools/scripts/compat_sync_check.py \
+              --base "${{ steps.base.outputs.ref }}" \
+              --mode=report --enforce
+
       - name: Gate-script fixture tests
         run: |
           python3 tools/scripts/test_gates.py
           python3 tools/scripts/test_docs_sync_check.py
+          python3 tools/scripts/test_compat_sync_check.py

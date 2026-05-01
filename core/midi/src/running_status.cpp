@@ -85,7 +85,16 @@ void RunningStatusParser::feed(const uint8_t* data, std::size_t size) {
             }
             // Channel voice status or system common
             int expected = expected_data_bytes(b);
-            if (expected < 0) continue;  // unknown — drop
+            if (expected < 0) {
+                // Unknown non-realtime statuses are still status bytes.
+                // Drop them, but cancel any in-flight/running message so
+                // later stray data cannot complete under stale state.
+                running_status_ = 0;
+                current_system_common_ = 0;
+                data_expected_ = 0;
+                data_count_ = 0;
+                continue;
+            }
             if ((b & 0xF0) >= 0x80 && (b & 0xF0) <= 0xE0) {
                 // Channel voice — becomes running status
                 running_status_ = b;

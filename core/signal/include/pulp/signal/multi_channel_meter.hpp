@@ -148,7 +148,7 @@ public:
     /// Process a block of interleaved or deinterleaved audio.
     /// channels: array of channel pointers. num_samples: samples per channel.
     void process(const float* const* channels, int num_channels, int num_samples) {
-        num_channels = (std::min)(num_channels, num_channels_);
+        num_channels = std::clamp(num_channels, 0, num_channels_);
 
         for (int i = 0; i < num_samples; ++i) {
             for (int ch = 0; ch < num_channels; ++ch) {

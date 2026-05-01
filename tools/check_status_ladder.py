@@ -97,8 +97,9 @@ def walk_statuses(matrix_text: str):
                 k in PLATFORM_KEYS for _, k in stack
             )
 
-            # Scan following lines at deeper indent for notes:
+            # Scan following sibling lines within this entry for notes:
             notes = ""
+            entry_indent = stack[-1][0] if stack else -1
             j = i + 1
             while j < len(lines):
                 next_line = lines[j]
@@ -106,7 +107,7 @@ def walk_statuses(matrix_text: str):
                     j += 1
                     continue
                 next_indent = len(next_line) - len(next_line.lstrip(" "))
-                if next_indent <= indent:
+                if next_indent <= entry_indent:
                     break
                 m_notes = re.match(r"^\s*notes:\s*(.*)$", next_line)
                 if m_notes:

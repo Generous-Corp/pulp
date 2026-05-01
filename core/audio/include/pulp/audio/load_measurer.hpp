@@ -5,6 +5,9 @@
 
 #include <chrono>
 #include <algorithm>
+#include <cmath>
+#include <cstdint>
+#include <limits>
 
 namespace pulp::audio {
 
@@ -28,8 +31,22 @@ public:
     /// @param sample_rate Current sample rate in Hz.
     void begin(int num_frames, float sample_rate) {
         start_time_ = clock::now();
-        available_ns_ = static_cast<int64_t>(
-            static_cast<double>(num_frames) / static_cast<double>(sample_rate) * 1e9);
+
+        if (num_frames <= 0 || !(sample_rate > 0.0f)) {
+            available_ns_ = 0;
+            return;
+        }
+
+        const double available_ns =
+            static_cast<double>(num_frames) / static_cast<double>(sample_rate) * 1e9;
+
+        if (!std::isfinite(available_ns) || available_ns <= 0.0 ||
+            available_ns > static_cast<double>(std::numeric_limits<int64_t>::max())) {
+            available_ns_ = 0;
+            return;
+        }
+
+        available_ns_ = static_cast<int64_t>(available_ns);
     }
 
     /// Call at the end of the audio callback.
@@ -58,6 +75,8 @@ public:
     void reset() {
         load_ = 0.0f;
         peak_load_ = 0.0f;
+        available_ns_ = 0;
+        start_time_ = {};
     }
 
     /// Set smoothing factor (0 = no smoothing, 1 = no averaging).

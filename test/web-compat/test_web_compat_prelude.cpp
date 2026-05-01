@@ -642,3 +642,156 @@ TEST_CASE("WebCompat: StyleSheet applies to appended element", "[webcompat][dom]
     REQUIRE(w->flex().preferred_width == 150.0f);
     REQUIRE(w->flex().preferred_height == 75.0f);
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// display: flex row-default (pulp #1147)
+// CSS web-platform default for `display: flex` is `flex-direction: row`.
+// Pulp's underlying widgets default to FlexDirection::column (RN convention),
+// so web-compat-style-decl.js must override on `display: flex` unless the
+// consumer also declared flexDirection. These tests pin that behavior.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+TEST_CASE("WebCompat: display:flex defaults to flex-direction:row", "[webcompat][style][issue-1147]") {
+    TestEnvironment env;
+    env.eval("var __box = document.createElement('div');");
+    env.eval("document.body.appendChild(__box);");
+    env.eval("__box.style.display = 'flex';");
+    env.eval("__box.appendChild(document.createElement('div'));");
+    env.eval("__box.appendChild(document.createElement('div'));");
+    env.eval("var __id = __box._id;");
+    auto id = std::string(env.engine.evaluate("__id").getWithDefault<std::string_view>(""));
+    auto* w = env.widget(id);
+    REQUIRE(w != nullptr);
+    REQUIRE(w->flex().direction == FlexDirection::row);
+}
+
+TEST_CASE("WebCompat: display:flex with explicit flexDirection:column overrides default", "[webcompat][style][issue-1147]") {
+    TestEnvironment env;
+    env.eval("var __box = document.createElement('div');");
+    env.eval("document.body.appendChild(__box);");
+    env.eval("__box.style.display = 'flex';");
+    env.eval("__box.style.flexDirection = 'column';");
+    auto id = std::string(env.engine.evaluate("__box._id").getWithDefault<std::string_view>(""));
+    auto* w = env.widget(id);
+    REQUIRE(w != nullptr);
+    REQUIRE(w->flex().direction == FlexDirection::column);
+}
+
+TEST_CASE("WebCompat: display:flex with explicit flexDirection:row stays row", "[webcompat][style][issue-1147]") {
+    TestEnvironment env;
+    env.eval("var __box = document.createElement('div');");
+    env.eval("document.body.appendChild(__box);");
+    env.eval("__box.style.display = 'flex';");
+    env.eval("__box.style.flexDirection = 'row';");
+    auto id = std::string(env.engine.evaluate("__box._id").getWithDefault<std::string_view>(""));
+    auto* w = env.widget(id);
+    REQUIRE(w != nullptr);
+    REQUIRE(w->flex().direction == FlexDirection::row);
+}
+
+TEST_CASE("WebCompat: flexDirection set BEFORE display:flex still wins", "[webcompat][style][issue-1147]") {
+    // The user-declared direction must always win, regardless of which
+    // assignment happens first. Setting flexDirection before display:flex
+    // means _props.flexDirection is already populated when the display
+    // handler checks for an explicit override.
+    TestEnvironment env;
+    env.eval("var __box = document.createElement('div');");
+    env.eval("document.body.appendChild(__box);");
+    env.eval("__box.style.flexDirection = 'column';");
+    env.eval("__box.style.display = 'flex';");
+    auto id = std::string(env.engine.evaluate("__box._id").getWithDefault<std::string_view>(""));
+    auto* w = env.widget(id);
+    REQUIRE(w != nullptr);
+    REQUIRE(w->flex().direction == FlexDirection::column);
+}
+
+TEST_CASE("WebCompat: display:flex children lay out horizontally by default", "[webcompat][layout][issue-1147]") {
+    // End-to-end: <div style={{display:'flex'}}><a/><b/><c/></div> with each
+    // child sized 50px wide should produce x = 0, 50, 100 (row layout) — not
+    // y = 0, 50, 100 (column).
+    TestEnvironment env(400, 200);
+    env.eval("var __row = document.createElement('div');");
+    env.eval("__row.style.width = '300px';");
+    env.eval("__row.style.height = '100px';");
+    env.eval("document.body.appendChild(__row);");
+    env.eval("__row.style.display = 'flex';");
+
+    for (int i = 0; i < 3; ++i) {
+        env.eval("(function(){ var __c = document.createElement('div');"
+                 " __c.style.width = '50px'; __c.style.height = '50px';"
+                 " __row.appendChild(__c); })();");
+    }
+    env.eval("var __rowId = __row._id;");
+
+    env.root.layout_children();
+
+    auto id = std::string(env.engine.evaluate("__rowId").getWithDefault<std::string_view>(""));
+    auto* w = env.widget(id);
+    REQUIRE(w != nullptr);
+    REQUIRE(w->child_count() == 3);
+    // Row layout: each child at x=0,50,100 with same y
+    REQUIRE(w->child_at(0)->bounds().x == 0.0f);
+    REQUIRE(w->child_at(1)->bounds().x == 50.0f);
+    REQUIRE(w->child_at(2)->bounds().x == 100.0f);
+    REQUIRE(w->child_at(0)->bounds().y == w->child_at(1)->bounds().y);
+    REQUIRE(w->child_at(1)->bounds().y == w->child_at(2)->bounds().y);
+}
+
+TEST_CASE("WebCompat: display:none does not change flex direction", "[webcompat][style][issue-1147]") {
+    // The row-default override must trigger only on `display: flex`, not on
+    // `display: none` or other display values.
+    TestEnvironment env;
+    env.eval("var __box = document.createElement('div');");
+    env.eval("document.body.appendChild(__box);");
+    env.eval("__box.style.display = 'none';");
+    auto id = std::string(env.engine.evaluate("__box._id").getWithDefault<std::string_view>(""));
+    auto* w = env.widget(id);
+    REQUIRE(w != nullptr);
+    // __domAppend defaulted divs to column; display:none should not flip it.
+    REQUIRE(w->flex().direction == FlexDirection::column);
+}
+
+TEST_CASE("WebCompat: flexFlow:wrap before display:flex still defaults to row", "[webcompat][style][issue-1147]") {
+    // Codex review flag: `flex-flow: wrap` does NOT specify a direction —
+    // CSS shorthand semantics keep the default direction (row). Without the
+    // content-aware check, the display handler would treat any flexFlow as
+    // explicit and skip the row default, leaving the widget at column.
+    TestEnvironment env;
+    env.eval("var __box = document.createElement('div');");
+    env.eval("document.body.appendChild(__box);");
+    env.eval("__box.style.flexFlow = 'wrap';");
+    env.eval("__box.style.display = 'flex';");
+    auto id = std::string(env.engine.evaluate("__box._id").getWithDefault<std::string_view>(""));
+    auto* w = env.widget(id);
+    REQUIRE(w != nullptr);
+    REQUIRE(w->flex().direction == FlexDirection::row);
+}
+
+TEST_CASE("WebCompat: flexFlow:column before display:flex stays column", "[webcompat][style][issue-1147]") {
+    // Sanity check: flexFlow with an explicit direction token still wins.
+    TestEnvironment env;
+    env.eval("var __box = document.createElement('div');");
+    env.eval("document.body.appendChild(__box);");
+    env.eval("__box.style.flexFlow = 'column wrap';");
+    env.eval("__box.style.display = 'flex';");
+    auto id = std::string(env.engine.evaluate("__box._id").getWithDefault<std::string_view>(""));
+    auto* w = env.widget(id);
+    REQUIRE(w != nullptr);
+    REQUIRE(w->flex().direction == FlexDirection::column);
+}
+
+TEST_CASE("WebCompat: StyleSheet display:flex defaults to row", "[webcompat][style][issue-1147]") {
+    // Class-based path: StyleSheet rules walk _props by iteration order via
+    // _flushAll, not the per-property setter trap. The display:flex row
+    // default must still kick in.
+    TestEnvironment env;
+    env.eval("var __sheet = new StyleSheet({'.row-flex': { display: 'flex' }});");
+    env.eval("__sheet.attach();");
+    env.eval("var __el = document.createElement('div');");
+    env.eval("__el.className = 'row-flex';");
+    env.eval("document.body.appendChild(__el);");
+    auto id = std::string(env.engine.evaluate("__el._id").getWithDefault<std::string_view>(""));
+    auto* w = env.widget(id);
+    REQUIRE(w != nullptr);
+    REQUIRE(w->flex().direction == FlexDirection::row);
+}

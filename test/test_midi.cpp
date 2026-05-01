@@ -28,6 +28,15 @@ struct TempDir {
     }
 };
 
+void require_bytes(const MidiEvent& event,
+                   uint8_t status,
+                   uint8_t data1,
+                   uint8_t data2) {
+    REQUIRE(event.data()[0] == status);
+    REQUIRE(event.data()[1] == data1);
+    REQUIRE(event.data()[2] == data2);
+}
+
 } // namespace
 
 TEST_CASE("MidiEvent factory methods", "[midi][message]") {
@@ -39,6 +48,7 @@ TEST_CASE("MidiEvent factory methods", "[midi][message]") {
         REQUIRE(evt.note() == 60);
         REQUIRE(evt.velocity() == 100);
         REQUIRE(evt.size() == 3);
+        require_bytes(evt, 0x90, 60, 100);
     }
 
     SECTION("Note off") {
@@ -47,6 +57,7 @@ TEST_CASE("MidiEvent factory methods", "[midi][message]") {
         REQUIRE_FALSE(evt.is_note_on());
         REQUIRE(evt.channel() == 1);
         REQUIRE(evt.note() == 64);
+        require_bytes(evt, 0x81, 64, 0);
     }
 
     SECTION("Note on with velocity 0 is note off") {
@@ -61,18 +72,57 @@ TEST_CASE("MidiEvent factory methods", "[midi][message]") {
         REQUIRE(evt.channel() == 2);
         REQUIRE(evt.cc_number() == 74);
         REQUIRE(evt.cc_value() == 127);
+        require_bytes(evt, 0xB2, 74, 127);
     }
 
     SECTION("Pitch bend") {
         auto evt = MidiEvent::pitch_bend(0, 8192);
         REQUIRE(evt.is_pitch_bend());
         REQUIRE(evt.channel() == 0);
+        require_bytes(evt, 0xE0, 0, 64);
     }
 
     SECTION("Program change") {
         auto evt = MidiEvent::program_change(3, 42);
         REQUIRE(evt.is_program_change());
         REQUIRE(evt.channel() == 3);
+        require_bytes(evt, 0xC3, 42, 0);
+    }
+}
+
+TEST_CASE("MidiEvent factory methods mask MIDI data-byte boundaries",
+          "[midi][message][issue-645]") {
+    SECTION("Channel values wrap to the low nibble") {
+        auto evt = MidiEvent::note_on(0x2F, 60, 100);
+        REQUIRE(evt.channel() == 15);
+        require_bytes(evt, 0x9F, 60, 100);
+    }
+
+    SECTION("Note and velocity arguments stay in the 7-bit data range") {
+        auto on = MidiEvent::note_on(0, 0xC0, 0xFF);
+        REQUIRE(on.note() == 0x40);
+        REQUIRE(on.velocity() == 0x7F);
+        require_bytes(on, 0x90, 0x40, 0x7F);
+
+        auto off = MidiEvent::note_off(1, 0x81, 0xFE);
+        REQUIRE(off.note() == 0x01);
+        REQUIRE(off.velocity() == 0x7E);
+        require_bytes(off, 0x81, 0x01, 0x7E);
+    }
+
+    SECTION("Controller and program arguments stay in the 7-bit data range") {
+        auto cc = MidiEvent::cc(2, 0xF4, 0xC8);
+        REQUIRE(cc.cc_number() == 0x74);
+        REQUIRE(cc.cc_value() == 0x48);
+        require_bytes(cc, 0xB2, 0x74, 0x48);
+
+        auto pc = MidiEvent::program_change(3, 0xAA);
+        require_bytes(pc, 0xC3, 0x2A, 0);
+    }
+
+    SECTION("Pitch bend arguments stay in the 14-bit data range") {
+        auto evt = MidiEvent::pitch_bend(4, 0xFFFF);
+        require_bytes(evt, 0xE4, 0x7F, 0x7F);
     }
 }
 
