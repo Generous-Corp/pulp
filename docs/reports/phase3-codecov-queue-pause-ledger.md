@@ -191,6 +191,7 @@ coverage merges and is held for a branch refresh.
 | #1085 | `5aac29496436` | merged from `UNSTABLE`; required `linux`, `macos`, and `windows` contexts, diff coverage, and Codecov patch were green, only advisory macOS sanitizer lanes were still pending |
 | #1138 | `44cff0532848` | merged from `CLEAN`; durable coverage guide now codifies the no-idle Phase 3 loop and Namespace-default validation posture |
 | #1082 | `b0903cd8ed4b` | merged from `UNSTABLE`; required `linux`, `macos`, and `windows` contexts plus Codecov patch were green, only advisory macOS sanitizer/coverage lanes were still pending |
+| #1135 | `44e67d52cbfc` | merged from `UNSTABLE`; required `linux`, `macos`, and `windows` contexts plus Codecov patch/diff coverage were green, only advisory macOS sanitizer lanes were still pending |
 
 ## Conflict And Failure Triage
 
@@ -287,6 +288,14 @@ coverage merges and is held for a branch refresh.
   queued and 6 in progress. Do not add another Namespace/PR-event refill
   batch yet; continue local-only prep and merge monitoring.
 
+### Merge Update 2026-05-01 03:56 EDT
+
+- #1135 merged as `44e67d52cbfc` after required `linux`, `macos`,
+  and `windows` wrappers, Codecov patch, and diff coverage were green.
+  Advisory macOS sanitizer jobs were still queued at merge time.
+- Tracker comments posted to #641 and #645.
+- Open `codecov` PRs: 38 immediately after the merge.
+
 ## Real Diff-Gap Patch Queue
 
 These PRs were inspected after the pause. The failures are not just stale
@@ -374,6 +383,7 @@ not been pushed, PR'd, or dispatched to Namespace.
 | `local/phase3-rectangle-list-edges-641` | `b3804af8` | #641 canvas tranche for `core/canvas/include/pulp/canvas/rectangle_list.hpp` empty/no-op edges | `test/test_rectangle_list.cpp` | Created locally from `origin/main` at `b0903cd8`; `cmake --build build --target pulp-test-rectangle-list -j4`; `./build/test/pulp-test-rectangle-list`; `ctest --test-dir build -R 'rectangle-list\|RectangleList\|Rect ' --output-on-failure`; skill-sync report; version-bump report; `git diff --check`. | When capacity returns, rename/push as a feature branch, run `shipyard pr --skip-target mac --skip-target ubuntu --skip-target windows`, then dispatch Namespace with `shipyard cloud run build <branch> --require-sha HEAD`. |
 | `local/phase3-table-model-edges-493` | `3f774e36` | #493 view tranche for `core/view/src/table_model.cpp` and `core/view/include/pulp/view/table_model.hpp` bookkeeping edges | `test/test_table_model.cpp` | Created locally from `origin/main` at `b0903cd8`; `cmake --build build --target pulp-test-table-model -j4`; `./build/test/pulp-test-table-model`; `ctest --test-dir build -R 'table-model\|TableModel\|sort_by\|toggle_sort\|add_column' --output-on-failure`; skill-sync report; version-bump report; `git diff --check`. The CTest regex also matched nearby `SimpleTableModel` tests, but the direct `pulp-test-table-model` binary passed first. | When capacity returns, rename/push as a feature branch, run `shipyard pr --skip-target mac --skip-target ubuntu --skip-target windows`, then dispatch Namespace with `shipyard cloud run build <branch> --require-sha HEAD`. |
 | `local/phase3-theme-io-validation-493` | `0291169d` | #493 view tranche for `core/view/src/theme.cpp` and `core/view/include/pulp/view/theme.hpp` validation/file edge paths | `test/test_theme.cpp` | Created locally from `origin/main` at `b0903cd8`; `cmake --build build --target pulp-test-theme -j4`; `./build/test/pulp-test-theme`; `ctest --test-dir build -R '^Color from hex$|^Theme |^Dark theme|^Light theme|^Pro audio theme|^Motion tokens' --output-on-failure`; skill-sync report; version-bump report; `git diff --check`. An earlier parallel CTest saw the pre-rebuild binary; rerun after link passed cleanly. | When capacity returns, rename/push as a feature branch, run `shipyard pr --skip-target mac --skip-target ubuntu --skip-target windows`, then dispatch Namespace with `shipyard cloud run build <branch> --require-sha HEAD`. |
+| `local/phase3-websocket-channel-edges-641` | `1d5b71d9` | #641 runtime tranche for `core/runtime/src/websocket_channel.cpp` frame and handshake edge paths | `test/test_websocket_channel.cpp` | Created locally from `origin/main` at `b0903cd8`; `cmake --build build --target pulp-test-websocket-channel -j4`; `./build/test/pulp-test-websocket-channel`; `ctest --test-dir build -R 'websocket\|WebSocket' --output-on-failure`; skill-sync report; version-bump report; `git diff --check`. `origin/main` advanced to `44e67d52` after this local branch was committed. | Rebase onto current `origin/main` before opening; when capacity returns, rename/push as a feature branch, run `shipyard pr --skip-target mac --skip-target ubuntu --skip-target windows`, then dispatch Namespace with `shipyard cloud run build <branch> --require-sha HEAD`. |
 
 ## Cancelled/Paused Runs
 
