@@ -64,7 +64,10 @@ COVERAGE_SURFACES = (
     # targeted top-level tooling tests.
     CoverageSurface(
         ("tools", "core/view/js"),
-        ("tools/test_check_status_ladder.py",),
+        (
+            "tools/test_check_status_ladder.py",
+            "tools/test_list_limitations.py",
+        ),
         (
             "tools/test_*.py",
             "tools/scripts/test_*.py",
