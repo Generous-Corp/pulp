@@ -250,28 +250,40 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
             break;
 
         // Border
+        // pulp #1027 (audit PR #1166 finding #4) — these used to lower onto
+        // the unified `setBorder(id, color, width, radius)` which clobbers
+        // ALL three slots on every call. Setting `borderRadius` then
+        // `borderColor` would silently drop the radius back to 0. The
+        // per-attribute bridge setters `setBorderColor` / `setBorderWidth`
+        // / `setBorderRadius` mutate exactly one field on the View, so
+        // routing to them preserves the unset siblings — matching CSS
+        // semantics.
         case "borderRadius": {
             var br = parseCSSLength(resolved);
-            if (br) setBorder(id, "", 0, br.value);
+            if (br) setBorderRadius(id, br.value);
             break;
         }
         case "border": {
-            // "1px solid #333"
+            // "1px solid #333" — CSS `border` shorthand sets width/style/color
+            // but NOT border-radius (per CSS Backgrounds & Borders L3). We
+            // route to the per-attribute setters so a previously-set
+            // border-radius is preserved across a `border:` shorthand assignment.
             var bp = resolved.match(/([\d.]+)px\s+\w+\s+(.+)/);
             if (bp) {
                 var bc = parseCSSColor(bp[2].trim());
-                setBorder(id, bc || bp[2].trim(), parseFloat(bp[1]), 0);
+                setBorderColor(id, bc || bp[2].trim());
+                setBorderWidth(id, parseFloat(bp[1]));
             }
             break;
         }
         case "borderColor": {
             var bcc = parseCSSColor(resolved);
-            if (bcc) setBorder(id, bcc, 1, 0);
+            if (bcc) setBorderColor(id, bcc);
             break;
         }
         case "borderWidth": {
             var bw = parseCSSLength(resolved);
-            if (bw) setBorder(id, "", bw.value, 0);
+            if (bw) setBorderWidth(id, bw.value);
             break;
         }
 
@@ -520,18 +532,49 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
             }
             break;
         }
-        case "borderTopWidth": case "borderRightWidth": case "borderBottomWidth": case "borderLeftWidth": {
-            var side2 = key.replace("border", "").replace("Width", "").toLowerCase();
-            var bw2 = parseCSSLength(resolved);
-            if (bw2 && typeof setBorderSide === "function")
-                setBorderSide(id, side2, bw2.value, "");
+        // pulp #1027 (audit PR #1166 finding #4) — per-side flat props
+        // (RN parity). Route to setBorderTop/Right/Bottom/Left{Color,Width}
+        // which preserve the OTHER attribute on the View (see
+        // applyBorderSide in widget_bridge.cpp). Calling setBorderSide
+        // with a placeholder 0/"" for the unset slot would clobber it.
+        case "borderTopWidth": {
+            var bwT = parseCSSLength(resolved);
+            if (bwT && typeof setBorderTopWidth === "function") setBorderTopWidth(id, bwT.value);
             break;
         }
-        case "borderTopColor": case "borderRightColor": case "borderBottomColor": case "borderLeftColor": {
-            var side3 = key.replace("border", "").replace("Color", "").toLowerCase();
-            var bc3 = parseCSSColor(resolved);
-            if (bc3 && typeof setBorderSide === "function")
-                setBorderSide(id, side3, 0, bc3);
+        case "borderRightWidth": {
+            var bwR = parseCSSLength(resolved);
+            if (bwR && typeof setBorderRightWidth === "function") setBorderRightWidth(id, bwR.value);
+            break;
+        }
+        case "borderBottomWidth": {
+            var bwB = parseCSSLength(resolved);
+            if (bwB && typeof setBorderBottomWidth === "function") setBorderBottomWidth(id, bwB.value);
+            break;
+        }
+        case "borderLeftWidth": {
+            var bwL = parseCSSLength(resolved);
+            if (bwL && typeof setBorderLeftWidth === "function") setBorderLeftWidth(id, bwL.value);
+            break;
+        }
+        case "borderTopColor": {
+            var bcT = parseCSSColor(resolved);
+            if (bcT && typeof setBorderTopColor === "function") setBorderTopColor(id, bcT);
+            break;
+        }
+        case "borderRightColor": {
+            var bcR = parseCSSColor(resolved);
+            if (bcR && typeof setBorderRightColor === "function") setBorderRightColor(id, bcR);
+            break;
+        }
+        case "borderBottomColor": {
+            var bcB = parseCSSColor(resolved);
+            if (bcB && typeof setBorderBottomColor === "function") setBorderBottomColor(id, bcB);
+            break;
+        }
+        case "borderLeftColor": {
+            var bcL = parseCSSColor(resolved);
+            if (bcL && typeof setBorderLeftColor === "function") setBorderLeftColor(id, bcL);
             break;
         }
 
