@@ -6,6 +6,7 @@
 //
 // The API is identical — only the measurement accuracy differs.
 
+#include <pulp/canvas/bundled_fonts.hpp>
 #include <pulp/canvas/text_shaper.hpp>
 #include <algorithm>
 #include <cmath>
@@ -228,7 +229,15 @@ struct TextShaper::Impl {
         // is what regressed Label measurement in pulp #945.
         SkFont font;
         sk_sp<SkTypeface> typeface;
-        if (font_mgr && font_mgr->countFamilies() > 0) {
+        // pulp #1150 — plugin-registered typefaces win over the platform
+        // font manager so measurement matches paint (skia_canvas.cpp's
+        // get_cached_typeface honours the same precedence). Without this,
+        // a label using "MyBrand Display" would shape under whatever the
+        // platform fell back to and paint with the registered face,
+        // producing inconsistent line-break decisions.
+        typeface = match_registered_typeface(font_family,
+                                             SkFontStyle::Normal());
+        if (!typeface && font_mgr && font_mgr->countFamilies() > 0) {
             typeface = font_mgr->matchFamilyStyle(font_family.c_str(),
                                                   SkFontStyle::Normal());
             if (!typeface) {
