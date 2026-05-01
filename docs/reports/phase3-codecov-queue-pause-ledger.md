@@ -51,6 +51,23 @@ Next refill rule: when this batch drops below four active Codecov build
 runs, dispatch the next merge-ready paused PRs by pinned SHA and update
 this table before adding more local-only tranche PRs.
 
+### 2026-05-01 Batch 2: Build Gate Refill
+
+The first batch assigned cleanly on Namespace with no GitHub queued-run
+backlog, so a second four-PR batch was queued behind it. This keeps the
+active window warm without re-dispatching the full paused set.
+
+| PR | Branch | Head | Workflow | New Run | Status at Dispatch |
+| --- | --- | --- | --- | --- | --- |
+| #1136 | `feature/package-registry-cache-fallback-643-next` | `46854e04fcf2` | Build and Test | `25202718222` | queued |
+| #1137 | `feature/audio-platform-helper-coverage-640-next` | `5149c107a3ac` | Build and Test | `25202718230` | queued |
+| #1138 | `feature/coverage-no-idle-guidance-641` | `6fea2fa4686a` | Build and Test | `25202718329` | queued |
+| #1139 | `codex/events-phase3-coverage-tranche` | `a6237254b05d` | Build and Test | `25202718395` | queued |
+
+Note: `shipyard cloud run build` printed older saved run IDs for #1136
+and #1137, but `gh run list` confirmed the fresh workflow_dispatch run
+IDs above.
+
 ## Local-Only Work Prepared During Pause
 
 These branches were prepared after the Namespace pause began. They have
