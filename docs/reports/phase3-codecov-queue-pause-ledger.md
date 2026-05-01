@@ -571,6 +571,52 @@ generated `build/` directories plus stale generated build outputs from
 older Codecov worktrees were removed. Source worktrees and branches were
 left intact. Free space recovered from about `192 MiB` to about `4.7 GiB`.
 
+### Queue Refill 2026-05-01 09:01 EDT
+
+- Direct PR checks showed #1126, #1125, and #1122 were idle with no active
+  runs. Their blocking checks were stale cancelled/failure wrappers from
+  earlier runs, not current failures.
+- Refreshed the three branches with `gh pr update-branch`, producing fresh
+  heads and new PR-event workflows:
+  - #1126 `feature/view-frame-clock-coverage-493-next` -> `79f2d65046d0`;
+    queued Build and Test `25215188581`, Coverage `25215188580`, and
+    Sanitizer Tests `25215188559`; Versioning/Skill-Sync `25215188561` and
+    IWYU `25215188571` started.
+  - #1125 `feature/view-asset-manager-coverage-493-next` -> `33b2a33f0203`;
+    queued Build and Test `25215188302`, Coverage `25215188276`, and
+    Sanitizer Tests `25215188287`; Versioning/Skill-Sync `25215188284` and
+    IWYU `25215188293` started.
+  - #1122 `feature/render-draw-batcher-coverage-646-next` -> `dce6dcd7adc3`;
+    queued Build and Test `25215188316`, Coverage `25215188317`, and
+    Sanitizer Tests `25215188323`; Versioning/Skill-Sync `25215188321` and
+    IWYU `25215188319` started.
+
+### Queue Refill 2026-05-01 09:04 EDT
+
+- Subagent triage confirmed #1121 and #1118 were idle, behind current `main`,
+  and blocked only by stale cancelled/failed wrapper checks. Refreshed both:
+  - #1121 `feature/audio-buffering-reader-coverage-640-next` ->
+    `afdff6e1cc06`; queued Build and Test `25215267350`, Coverage
+    `25215267349`, and Sanitizer Tests `25215267373`; Versioning/Skill-Sync
+    `25215267345` and IWYU `25215267366` started.
+  - #1118 `feature/osc-bundle-coverage-641-next` -> `e85122359eb6`; queued
+    Build and Test `25215267166`, Coverage `25215267197`, and Sanitizer Tests
+    `25215267162`; Android Build `25215267158`, Versioning/Skill-Sync
+    `25215267156`, and IWYU `25215267163` started.
+
+### Queue Refill 2026-05-01 09:06 EDT
+
+- Subagent triage confirmed #1117, #1116, #1115, #1114, and #1113 were idle,
+  behind current `main`, and blocked only by stale wrapper checks. Refreshed the
+  batch:
+  - #1117 `feature/lcov-cobertura-coverage-643-next` -> `965cb2e06aa1`.
+  - #1116 `feature/signal-interpolator-coverage-645-next` -> `a100d78830bf`.
+  - #1115 `feature/runtime-license-analytics-coverage-641-next` ->
+    `bdfb46a9e4b0`.
+  - #1114 `feature/runtime-file-library-coverage-641-next` -> `18b36739bab5`.
+  - #1113 `feature/runtime-expression-coverage-641-next` -> `93c2aea2bd75`.
+- Fresh PR rollups show all five active with no current failed checks.
+
 ## Local-Only Work Prepared During Pause
 
 These branches were prepared after the Namespace pause began. They have
