@@ -78,6 +78,22 @@ TEST_CASE("FrameClock unsubscribe by ID", "[view][frame_clock]") {
     REQUIRE_FALSE(clock.has_active_subscribers());
 }
 
+TEST_CASE("FrameClock unsubscribe is idempotent for inactive or unknown IDs", "[view][frame_clock]") {
+    FrameClock clock;
+    int call_count = 0;
+
+    int id = clock.subscribe([&](float) { call_count++; return true; });
+    clock.unsubscribe(id);
+    clock.unsubscribe(id);
+    clock.unsubscribe(id + 100);
+
+    REQUIRE_FALSE(clock.has_active_subscribers());
+
+    clock.tick(0.016f);
+    REQUIRE(call_count == 0);
+    REQUIRE_FALSE(clock.has_active_subscribers());
+}
+
 TEST_CASE("FrameClock multiple subscribers", "[view][frame_clock]") {
     FrameClock clock;
     int a = 0, b = 0;
@@ -90,6 +106,32 @@ TEST_CASE("FrameClock multiple subscribers", "[view][frame_clock]") {
     REQUIRE(b == 1);
 }
 
+TEST_CASE("FrameClock subscriber can remove a later subscriber during tick", "[view][frame_clock]") {
+    FrameClock clock;
+    int first_calls = 0;
+    int second_calls = 0;
+    int second_id = 0;
+
+    clock.subscribe([&](float) {
+        first_calls++;
+        clock.unsubscribe(second_id);
+        return true;
+    });
+    second_id = clock.subscribe([&](float) {
+        second_calls++;
+        return true;
+    });
+
+    clock.tick(0.016f);
+    REQUIRE(first_calls == 1);
+    REQUIRE(second_calls == 0);
+    REQUIRE(clock.has_active_subscribers());
+
+    clock.tick(0.016f);
+    REQUIRE(first_calls == 2);
+    REQUIRE(second_calls == 0);
+}
+
 TEST_CASE("FrameClock reset clears all state", "[view][frame_clock]") {
     FrameClock clock;
     clock.subscribe([](float) { return true; });
@@ -99,6 +141,17 @@ TEST_CASE("FrameClock reset clears all state", "[view][frame_clock]") {
     REQUIRE_THAT(clock.time(), WithinAbs(0.0, 0.001));
     REQUIRE(clock.frame() == 0);
     REQUIRE_FALSE(clock.has_active_subscribers());
+}
+
+TEST_CASE("FrameClock reset restarts subscription IDs", "[view][frame_clock]") {
+    FrameClock clock;
+
+    int first_id = clock.subscribe([](float) { return true; });
+    REQUIRE(first_id == 1);
+
+    clock.reset();
+    int after_reset_id = clock.subscribe([](float) { return true; });
+    REQUIRE(after_reset_id == 1);
 }
 
 TEST_CASE("FrameClock negative dt clamped to zero", "[view][frame_clock]") {
