@@ -215,6 +215,7 @@ coverage merges and is held for a branch refresh.
 | #1071 | `160e76ec7c86` | merged from `UNSTABLE`; required `linux`, `macos`, and `windows` wrappers plus Codecov patch were green, only advisory macOS coverage/sanitizer lanes were still pending |
 | #1045 | `2e4a0ed2e256` | merged from `UNSTABLE`; required `linux`, `macos`, and `windows` wrappers plus Codecov patch were green, only advisory macOS coverage/sanitizer lanes were still pending |
 | #1137 | `ea731cbf365c` | merged from `UNSTABLE`; required `linux`, `macos`, and `windows` wrappers, Codecov patch, and diff coverage were green, only advisory macOS sanitizer lanes were still pending |
+| #1143 | `d36fddc2cd9f` | merged from `UNSTABLE`; required `linux`, `macos`, and `windows` wrappers, Codecov patch, diff coverage, and platform build/coverage lanes were green, only advisory macOS UBSan was still pending |
 
 ## Conflict And Failure Triage
 
@@ -381,6 +382,13 @@ coverage merges and is held for a branch refresh.
 - AssetManager worker output is held local-only because #1125 is already
   open on `feature/view-asset-manager-coverage-493-next` for the same
   surface.
+
+### Merge Update 2026-05-01 05:23 EDT
+
+- #1143 merged as `d36fddc2cd9f` after required `linux`, `macos`, and
+  `windows` wrappers, Codecov patch, diff coverage, and platform
+  build/coverage lanes were green. Pending macOS UBSan was advisory.
+- Tracker comments posted to #641 and #646.
 
 ## Real Diff-Gap Patch Queue
 
