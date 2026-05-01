@@ -107,6 +107,20 @@ started. Cancelled workflow_dispatch run IDs: `25202718222`,
 `25202718230`, `25202718329`, `25202718395`, `25202770455`,
 `25202770462`, `25202770509`, and `25202770726`.
 
+### 2026-05-01 Batch 4: PR-Event Branch Refresh
+
+After confirming the build-only dispatches were not merge-eligible
+evidence, the next refill batch used `gh pr update-branch` so GitHub
+created fresh required `pull_request` checks.
+
+| PR | Branch | Refreshed Head | Build Run | Coverage Run | Status |
+| --- | --- | --- | --- | --- | --- |
+| #1135 | `feature/signal-processor-chain-reset-coverage-645` | `bc32ea5904b6` | `25203513486` | `25203513496` | pending |
+| #1136 | `feature/package-registry-cache-fallback-643-next` | `476677d7b926` | `25203494171` | `25203494182` | pending |
+| #1137 | `feature/audio-platform-helper-coverage-640-next` | `cc7fcaf98be8` | `25203494454` | `25203494423` | pending |
+| #1138 | `feature/coverage-no-idle-guidance-641` | `72fa08f3553a` | `25203493849` | `25203493834` | pending |
+| #1139 | `codex/events-phase3-coverage-tranche` | `df3f376fa716` | `25203493795` | `25203493796` | pending |
+
 ## Merge Waves While Queue Is In Flight
 
 These PRs were already green/mergeable when the paused queue was
@@ -146,7 +160,7 @@ coverage merges and is held for a branch refresh.
 | --- | --- | --- | --- |
 | #1099 | `feature/view-layout-widgets-coverage-493` | `66decf5958e8` | Conflict resolved and pushed; normal PR workflows are running. Local worker validated `pulp-test-view-layout-widgets`, `pulp-test-phase9-widgets`, and `pulp-test-property-list` directly. |
 | #1084 | `feature/runtime-text-diff-coverage-641` | `cb63e51416ed` | Conflict resolved and pushed; normal PR workflows are running. Local worker validated `pulp-test-runtime-utils "[runtime][text-diff]"` and matching CTest cases. |
-| #1089 | `feature/view-file-browser-coverage-493` | `17a8471282d9` | Conflict resolved and pushed; normal PR workflows are running. `git diff --check` passed. Local CMake configure could not be completed because the laptop filesystem was full, so CI/Namespace is the validation source. Current blocker: `Enforce version & skill sync` failed on run `25203295740`; assigned for focused gate triage. |
+| #1089 | `feature/view-file-browser-coverage-493` | `86cbe4ca12e9` | Conflict resolved and pushed. The first refreshed run failed `Enforce version & skill sync`; a metadata-only empty commit added `Version-Bump: sdk=skip reason="test-only file browser coverage; no SDK release surface change"`. Local worker validated skill-sync, version-bump with required-bump enforcement, and `git diff --check origin/main...HEAD`. Fresh PR checks are queued. |
 | #1131 | `feature/audio-window-enumerator-coverage-640-next` | `f5af90f4f5af` | Pushed coverage-harness fix for Windows `.exe` object discovery in `scripts/run_coverage.sh`; `bash -n`, `test_run_coverage.py`, skill-sync report, version-bump report, and `git diff --check` passed. Local CMake validation was not rerun after the harness patch because the laptop filesystem had only about 150-211 MiB free; the earlier excerpt binary validation was already green and the platform-sensitive coverage fix now needs CI/Namespace. |
 
 ## Local-Only Work Prepared During Pause
