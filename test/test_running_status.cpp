@@ -219,6 +219,26 @@ TEST_CASE("undefined system statuses clear stale running state",
     REQUIRE(v[0].d2 == 0x7F);
 }
 
+TEST_CASE("undefined system statuses cancel pending system common data",
+          "[midi][running-status][issue-645]") {
+    auto v = parse({
+        0xF2, 0x10,  // pending song-position pointer with one missing byte
+        0xF4,        // undefined system-common status cancels the pending F2
+        0x20,        // must not complete the interrupted F2
+        0xF1,        // pending MTC quarter-frame
+        0xF5,        // undefined system-common status cancels the pending F1
+        0x05,        // must not complete the interrupted F1
+        0x90, 0x3C, 0x7F,
+        0xF4,        // also cancels established channel running status
+        0x3D, 0x7F,
+    });
+
+    REQUIRE(v.size() == 1);
+    REQUIRE(v[0].status == 0x90);
+    REQUIRE(v[0].d1 == 0x3C);
+    REQUIRE(v[0].d2 == 0x7F);
+}
+
 TEST_CASE("system common interruption inside sysex is reprocessed",
           "[midi][running-status][issue-645]") {
     RunningStatusParser p;
