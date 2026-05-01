@@ -28,6 +28,9 @@ TEST_CASE("ImageConvolutionKernel construction", "[canvas][convolution]") {
     // Size 0 forced to 1
     ImageConvolutionKernel k3(0);
     REQUIRE(k3.size() == 1);
+
+    ImageConvolutionKernel k4(-7);
+    REQUIRE(k4.size() == 1);
 }
 
 TEST_CASE("ImageConvolutionKernel set and get", "[canvas][convolution]") {
@@ -56,6 +59,43 @@ TEST_CASE("Identity kernel preserves image", "[canvas][convolution]") {
     for (size_t i = 0; i < pixels.size(); ++i) {
         REQUIRE(pixels[i] == original[i]);
     }
+}
+
+TEST_CASE("Identity kernel supports explicit row stride", "[canvas][convolution][issue-641]") {
+    ImageConvolutionKernel identity(3);
+    identity.set(1, 1, 1.0f);
+
+    constexpr int w = 2;
+    constexpr int h = 2;
+    constexpr int stride = w * 4;
+    std::vector<uint8_t> pixels = {
+        10, 20, 30, 40, 50, 60, 70, 80,
+        90, 100, 110, 120, 130, 140, 150, 160,
+    };
+    const auto original = pixels;
+
+    identity.apply(pixels.data(), w, h, stride);
+    REQUIRE(pixels == original);
+}
+
+TEST_CASE("ImageConvolutionKernel clamps color output", "[canvas][convolution][issue-641]") {
+    ImageConvolutionKernel boost(1);
+    boost.set(0, 0, 3.0f);
+    uint8_t bright[4] = {100, 120, 200, 77};
+    boost.apply(bright, 1, 1);
+    REQUIRE(bright[0] == 255);
+    REQUIRE(bright[1] == 255);
+    REQUIRE(bright[2] == 255);
+    REQUIRE(bright[3] == 77);
+
+    ImageConvolutionKernel invert(1);
+    invert.set(0, 0, -1.0f);
+    uint8_t dark[4] = {100, 120, 200, 88};
+    invert.apply(dark, 1, 1);
+    REQUIRE(dark[0] == 0);
+    REQUIRE(dark[1] == 0);
+    REQUIRE(dark[2] == 0);
+    REQUIRE(dark[3] == 88);
 }
 
 TEST_CASE("Gaussian blur smooths uniform image", "[canvas][convolution]") {
@@ -131,4 +171,23 @@ TEST_CASE("Standard kernels have correct size", "[canvas][convolution]") {
 TEST_CASE("Sharpen kernel center value is positive", "[canvas][convolution]") {
     auto k = ImageConvolutionKernel::sharpen();
     REQUIRE(k.get(1, 1) > 0.0f);  // center should amplify
+}
+
+TEST_CASE("Standard kernel weights cover blur edge and emboss paths",
+          "[canvas][convolution][issue-641]") {
+    auto blur5 = ImageConvolutionKernel::gaussian_blur_5();
+    float blur_sum = 0.0f;
+    for (int row = 0; row < blur5.size(); ++row) {
+        for (int col = 0; col < blur5.size(); ++col)
+            blur_sum += blur5.get(row, col);
+    }
+    REQUIRE(std::abs(blur_sum - 1.0f) < 0.0001f);
+
+    auto edge = ImageConvolutionKernel::edge_detect();
+    REQUIRE(edge.get(1, 1) == 8.0f);
+    REQUIRE(edge.get(0, 0) == -1.0f);
+
+    auto emboss = ImageConvolutionKernel::emboss();
+    REQUIRE(emboss.get(0, 0) == -2.0f);
+    REQUIRE(emboss.get(2, 2) == 2.0f);
 }
