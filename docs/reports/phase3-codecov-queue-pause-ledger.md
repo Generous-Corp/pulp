@@ -26,13 +26,19 @@ This local ledger records the open `codecov` PR validation runs paused to free N
 
 ## Current Watch Point
 
-Last live check: 2026-05-01 12:48:45 EDT.
+Last live check: 2026-05-01 12:43:22 EDT.
 
 - Open `codecov` PRs: 11.
 - Merge state: remaining open Codecov PRs are currently blocked on
   active/queued lanes, with no current failure candidate.
-- GitHub Actions pressure: 26 active runs, with 21 queued and 5 in
+- GitHub Actions pressure: 25 active runs, with 22 queued and 3 in
   progress.
+- Codecov dashboard watch: recent rapid main merges cancelled most older
+  main-branch `Coverage` push runs. The newest surviving main coverage
+  upload is run `25222615930` for `daa0aa704427` (#1115), currently
+  queued; when that run, or a newer main coverage run, completes and
+  Codecov ingests it, the project dashboard should reflect the merged
+  PRs through that main commit.
 - Just merged: #1117, #1204, #1199, #1194, #1125, #1116, #1113, #1104,
   #1097, #1088, #1203, and #1115 after required `linux`/`macos`/`windows`
   wrappers and Codecov patch gates were green.
@@ -56,6 +62,11 @@ Last live check: 2026-05-01 12:48:45 EDT.
   branch `feature/bench-diff-coverage-643`, head `6a190c5b7f45`.
   Applied `codecov`, linked #641/#643, and dispatched Namespace run
   `25222999092`.
+- Local-only progress: workers are refreshing the next two #643 tooling
+  candidates in separate worktrees,
+  `pulp-check-format-validation-coverage-643` and
+  `pulp-check-docs-consistency-coverage-643`, without pushing or
+  dispatching until queue capacity is clearer.
 - Operating mode: keep polling, merge PRs as soon as required
   `linux`/`macos`/`windows` wrappers are green, cancel leftover advisory
   PR-head runs after merge, and only refill when the active queue drains
