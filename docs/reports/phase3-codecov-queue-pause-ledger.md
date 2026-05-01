@@ -116,10 +116,16 @@ Last live check: 2026-05-01 14:42:38 EDT.
   tools/scripts/run_python_coverage.py --pattern
   tools/test_list_limitations.py` passed and reported 98% for
   `tools/list_limitations.py`.
-- Local-only progress: `pulp-mkdocs-hooks-coverage-643` and
-  `pulp-encode-binary-data-coverage-643` are refreshed against current
-  `origin/main` and locally validated; hold for the next remote refill
-  window.
+- Local-only progress: `pulp-mkdocs-hooks-coverage-643` is refreshed
+  against current `origin/main` at `26df9289915b` as a single local
+  feature commit and locally validated with 96% target coverage.
+  Validation: `python3 tools/scripts/test_mkdocs_hooks.py` reported 6
+  passing tests; venv-backed `run_python_coverage.py --pattern
+  tools/scripts/test_mkdocs_hooks.py` passed and reported 96% for
+  `tools/mkdocs_hooks.py`.
+- Local-only progress: `pulp-encode-binary-data-coverage-643` is
+  refreshed against current `origin/main` and locally validated; this
+  tranche is now queued remotely as #1207.
 - Local-only progress: `pulp-add-component-coverage-643` is refreshed
   against current `origin/main` and locally validated; hold for the next
   remote refill window.
