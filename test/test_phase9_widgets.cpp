@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
+#include <pulp/canvas/canvas.hpp>
 #include <pulp/view/eq_curve_view.hpp>
 #include <pulp/view/midi_keyboard.hpp>
 #include <pulp/view/color_picker.hpp>
@@ -412,4 +413,75 @@ TEST_CASE("Breadcrumb separator", "[view][breadcrumb]") {
     REQUIRE(bc.separator() == "/");
     bc.set_separator(">");
     REQUIRE(bc.separator() == ">");
+}
+
+TEST_CASE("Breadcrumb empty and out-of-range interactions are stable",
+          "[view][breadcrumb][coverage]") {
+    Breadcrumb bc;
+    auto empty = bc.pop();
+    REQUIRE(empty.label.empty());
+    REQUIRE(empty.id.empty());
+
+    bc.set_items({{"Home", "home"}, {"Settings", "settings"}});
+    bc.pop_to(99);
+    REQUIRE(bc.items().size() == 2);
+
+    int navigate_calls = 0;
+    bc.on_navigate = [&](size_t, const Breadcrumb::Item&) { ++navigate_calls; };
+    bc.on_mouse_down({200, 16});
+    REQUIRE(navigate_calls == 0);
+}
+
+TEST_CASE("Breadcrumb navigation targets later items and ignores separators",
+          "[view][breadcrumb][coverage]") {
+    Breadcrumb bc;
+    bc.set_separator(">");
+    bc.set_items({{"Home", "home"}, {"Settings", "settings"}, {"Audio", "audio"}});
+
+    size_t nav_idx = 999;
+    std::string nav_id;
+    int navigate_calls = 0;
+    bc.on_navigate = [&](size_t idx, const Breadcrumb::Item& item) {
+        nav_idx = idx;
+        nav_id = item.id;
+        ++navigate_calls;
+    };
+
+    bc.on_mouse_down({60, 16});
+    REQUIRE(navigate_calls == 1);
+    REQUIRE(nav_idx == 1);
+    REQUIRE(nav_id == "settings");
+
+    bc.on_mouse_down({45, 16});
+    REQUIRE(navigate_calls == 1);
+}
+
+TEST_CASE("Breadcrumb paint emits background, items, and separators",
+          "[view][breadcrumb][coverage]") {
+    Breadcrumb bc;
+    bc.set_bounds({0, 0, 240, 32});
+    bc.set_separator(">");
+    bc.set_items({{"Home", "home"}, {"Settings", "settings"}, {"Audio", "audio"}});
+
+    pulp::canvas::RecordingCanvas canvas;
+    bc.paint(canvas);
+
+    REQUIRE(canvas.count(pulp::canvas::DrawCommand::Type::fill_rounded_rect) == 1);
+    REQUIRE(canvas.count(pulp::canvas::DrawCommand::Type::set_font) == 1);
+    REQUIRE(canvas.count(pulp::canvas::DrawCommand::Type::set_text_align) == 1);
+    REQUIRE(canvas.count(pulp::canvas::DrawCommand::Type::fill_text) == 5);
+
+    int home_text = 0;
+    int separator_text = 0;
+    for (const auto& command : canvas.commands()) {
+        if (command.type != pulp::canvas::DrawCommand::Type::fill_text)
+            continue;
+        if (command.text == "Home")
+            ++home_text;
+        if (command.text == ">")
+            ++separator_text;
+    }
+
+    REQUIRE(home_text == 1);
+    REQUIRE(separator_text == 2);
 }
