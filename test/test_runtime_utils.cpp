@@ -5,6 +5,7 @@
 #include <pulp/runtime/inter_process_lock.hpp>
 #include <pulp/runtime/child_process.hpp>
 #include <pulp/runtime/base64.hpp>
+#include <pulp/runtime/http.hpp>
 #include <pulp/runtime/range.hpp>
 #include <fstream>
 #include <filesystem>
@@ -235,6 +236,36 @@ TEST_CASE("base64 binary round-trip", "[runtime][base64]") {
     auto decoded = base64_decode(encoded);
     REQUIRE(decoded.has_value());
     REQUIRE(*decoded == data);
+}
+
+// ── HTTP URL parsing ───────────────────────────────────────────────────
+
+TEST_CASE("HTTP helpers reject malformed URLs without transport work",
+          "[runtime][http][url][issue-641]") {
+    const auto get_response = http_get("ftp://example.com/file", 1);
+    REQUIRE(get_response.status_code == 0);
+    REQUIRE(get_response.error == "Invalid URL");
+
+    const auto post_response = http_post("http:///missing-host", "{}", "application/json", 1);
+    REQUIRE(post_response.status_code == 0);
+    REQUIRE(post_response.error == "Invalid URL");
+
+    REQUIRE_FALSE(http_download("example.com/no-scheme", "/tmp/pulp-url-invalid-download", 1));
+}
+
+TEST_CASE("HTTP helpers reject invalid numeric URL ports",
+          "[runtime][http][url][issue-641]") {
+    const auto zero_port = http_get("http://example.com:0/path", 1);
+    REQUIRE(zero_port.status_code == 0);
+    REQUIRE(zero_port.error == "Invalid URL");
+
+    const auto overflow_port = http_get("http://example.com:999999999999999999999/path", 1);
+    REQUIRE(overflow_port.status_code == 0);
+    REQUIRE(overflow_port.error == "Invalid URL");
+
+    const auto too_large_port = http_post("http://example.com:65536/path", "body", "text/plain", 1);
+    REQUIRE(too_large_port.status_code == 0);
+    REQUIRE(too_large_port.error == "Invalid URL");
 }
 
 // ── Range ───────────────────────────────────────────────────────────────
