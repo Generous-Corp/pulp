@@ -176,22 +176,26 @@ std::string HostScanCache::to_json() const {
 }
 
 bool HostScanCache::from_json(const std::string& json) {
-    entries_.clear();
     try {
         auto root = choc::json::parse(json);
         if (!root.isObject()) return false;
         if (!root.hasObjectMember("schema_version")) return false;
         if (root["schema_version"].getInt64() != kSchemaVersion) return false;
-        if (!root.hasObjectMember("entries")) return true;
+        std::unordered_map<std::string, ScanCacheEntry> parsed_entries;
+        if (!root.hasObjectMember("entries")) {
+            entries_ = std::move(parsed_entries);
+            return true;
+        }
         auto arr = root["entries"];
         if (!arr.isArray()) return false;
         for (uint32_t i = 0; i < arr.size(); ++i) {
             std::string path;
             ScanCacheEntry e;
             if (entry_from_json(arr[i], path, e)) {
-                entries_[path] = e;
+                parsed_entries[path] = e;
             }
         }
+        entries_ = std::move(parsed_entries);
         return true;
     } catch (...) {
         return false;

@@ -830,13 +830,24 @@ Remaining limitation:
 
 **Status**: experimental
 
-Launch the built component inspector binary with its demo surface.
+Connect to a running Pulp inspector server. With no `--port`, the CLI
+auto-discovers the newest `pulp-inspector-*.port` file in the system temp
+directory.
 
 ```bash
 pulp inspect
+pulp inspect --port 49152
+pulp inspect --command DOM.getDocument
+pulp inspect --command Capture.screenshot --output shot.json
 ```
 
-This command delegates to `tools/screenshot/pulp-screenshot` in the active build tree. Build the repo first if the binary is missing.
+Options:
+
+- `--host HOST` - connect to a host other than `127.0.0.1`
+- `--port PORT` - connect to an explicit inspector port
+- `--command METHOD` - send one inspector command and print the response
+- `--params JSON` - JSON params for `--command`
+- `--output FILE` - write a one-shot command response to a file
 
 ### import-design
 

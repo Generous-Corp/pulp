@@ -33,7 +33,8 @@ WindowEnumerationResult enumerate_excerpt_windows(const std::string& source_path
             .frame_count = query.window_frames,
         });
 
-        if (start > last_valid_start - query.hop_frames) {
+        const auto remaining_frames = last_valid_start - start;
+        if (remaining_frames <= query.hop_frames) {
             break;
         }
         start += query.hop_frames;
