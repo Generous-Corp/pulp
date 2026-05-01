@@ -15,6 +15,7 @@
 #include "../tools/cli/projects_registry.hpp"
 
 #include <atomic>
+#include <cstdlib>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -55,7 +56,68 @@ void write_file(const fs::path& p, const std::string& body) {
     f << body;
 }
 
+std::string read_file(const fs::path& p) {
+    std::ifstream f(p, std::ios::binary);
+    return std::string(std::istreambuf_iterator<char>(f),
+                       std::istreambuf_iterator<char>());
+}
+
+struct ScopedEnv {
+    std::string name;
+    bool had_old = false;
+    std::string old_value;
+
+    ScopedEnv(std::string env_name, const std::string& value)
+        : name(std::move(env_name)) {
+        if (auto* old = std::getenv(name.c_str())) {
+            had_old = true;
+            old_value = old;
+        }
+#if defined(_WIN32)
+        _putenv_s(name.c_str(), value.c_str());
+#else
+        setenv(name.c_str(), value.c_str(), 1);
+#endif
+    }
+
+    ~ScopedEnv() {
+#if defined(_WIN32)
+        _putenv_s(name.c_str(), had_old ? old_value.c_str() : "");
+#else
+        if (had_old) {
+            setenv(name.c_str(), old_value.c_str(), 1);
+        } else {
+            unsetenv(name.c_str());
+        }
+#endif
+    }
+};
+
+struct ScopedCwd {
+    fs::path old;
+
+    explicit ScopedCwd(const fs::path& path) : old(fs::current_path()) {
+        fs::current_path(path);
+    }
+
+    ~ScopedCwd() {
+        std::error_code ec;
+        fs::current_path(old, ec);
+    }
+};
+
 }  // namespace
+
+TEST_CASE("registry_path honors overrides and PULP_HOME",
+          "[projects-registry][issue-643]") {
+    TempDir tmp;
+
+    REQUIRE(registry_path(tmp.path) == tmp.path / "projects.json");
+
+    auto pulp_home = tmp.path / "pulp-home";
+    ScopedEnv env("PULP_HOME", pulp_home.string());
+    REQUIRE(registry_path() == pulp_home / "projects.json");
+}
 
 TEST_CASE("read_registry returns empty when file is missing",
           "[projects-registry][issue-552]") {
@@ -90,6 +152,31 @@ TEST_CASE("write_registry then read_registry round-trips entries",
     REQUIRE(out[0].registered_at == "2026-04-21T00:00:00Z");
     REQUIRE(out[0].path.filename() == "a");
     REQUIRE(out[1].path.filename() == "b");
+}
+
+TEST_CASE("write_registry escapes JSON string fields",
+          "[projects-registry][issue-643]") {
+    TempDir tmp;
+    auto reg = tmp.path / "projects.json";
+    auto project = tmp.path / "escaped";
+
+    std::vector<Project> in = {
+        {project, "Quote \" Slash \\ Newline\nTab\tControl\x01",
+         "2026-04-21T00:00:00Z"},
+    };
+    REQUIRE(write_registry(reg, in));
+
+    const auto raw = read_file(reg);
+    REQUIRE(raw.find("\\\"") != std::string::npos);
+    REQUIRE(raw.find("\\\\") != std::string::npos);
+    REQUIRE(raw.find("\\n") != std::string::npos);
+    REQUIRE(raw.find("\\t") != std::string::npos);
+    REQUIRE(raw.find("\\u0001") != std::string::npos);
+
+    auto out = read_registry(reg);
+    REQUIRE(out.size() == 1);
+    REQUIRE(out[0].name.find("Quote \" Slash \\ Newline\nTab\tControl") == 0);
+    REQUIRE(out[0].name.back() == '?');
 }
 
 TEST_CASE("add_project canonicalises and dedupes by path",
@@ -212,6 +299,56 @@ TEST_CASE("scan_parent_pulp_projects skips dirs without the pulp_add_* macro",
     }
 }
 
+TEST_CASE("read_registry skips malformed and mixed-shape JSON entries",
+          "[projects-registry][issue-643]") {
+    TempDir tmp;
+
+    {
+        auto reg = tmp.path / "not-object.json";
+        write_file(reg, R"(["not", "an", "object"])");
+        REQUIRE(read_registry(reg).empty());
+    }
+
+    {
+        auto reg = tmp.path / "missing-colon.json";
+        write_file(reg, R"({"projects" ["missing colon"]})");
+        REQUIRE(read_registry(reg).empty());
+    }
+
+    {
+        auto reg = tmp.path / "mixed.json";
+        write_file(reg, R"({
+  "schema": {"version": 2, "tags": ["alpha", "beta"]},
+  "enabled": true,
+  "projects": [
+    "not an object",
+    42,
+    {
+      "path": "/tmp/unicode",
+      "name": "Unicode \u2603",
+      "registered_at": "2026-04-21T10:00:00Z"
+    }
+  ]
+})");
+        auto list = read_registry(reg);
+        REQUIRE(list.size() == 1);
+        REQUIRE(list[0].path == fs::path("/tmp/unicode"));
+        REQUIRE(list[0].name == "Unicode ?");
+    }
+
+    {
+        auto reg = tmp.path / "terminal-non-object.json";
+        write_file(reg, R"({"projects": ["not an object"]})");
+        REQUIRE(read_registry(reg).empty());
+    }
+
+    {
+        auto reg = tmp.path / "bad-separator-after-non-object.json";
+        write_file(reg, R"({"projects": ["not an object": true]})");
+        REQUIRE(read_registry(reg).empty());
+    }
+}
+
 TEST_CASE("read_registry tolerates forward-compatible non-string fields",
           "[projects-registry][codex-563]") {
     // Codex 2026-04-21 wave 2 P1 on #563: the schema documents
@@ -303,4 +440,19 @@ TEST_CASE("now_iso8601_utc produces Z-suffixed timestamps",
     REQUIRE(s[4] == '-');
     REQUIRE(s[10] == 'T');
     REQUIRE(s[13] == ':');
+}
+
+TEST_CASE("scan_parent_pulp_projects uses current directory for empty starts",
+          "[projects-registry][issue-643]") {
+    TempDir tmp;
+    auto project = tmp.path / "current";
+    fs::create_directories(project);
+    write_file(project / "CMakeLists.txt",
+               "project(Current)\n"
+               "pulp_add_ios_auv3(CurrentAUv3)\n");
+
+    ScopedCwd cwd(project);
+    auto hits = scan_parent_pulp_projects({});
+    REQUIRE_FALSE(hits.empty());
+    REQUIRE(hits.front() == project);
 }

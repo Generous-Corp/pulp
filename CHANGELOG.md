@@ -8,6 +8,42 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v0690"></a>
+## [0.69.0] - 2026-04-30
+
+- feat(canvas): public font-registration API for plugins (pulp #1150) ([#1175](https://github.com/danielraffel/pulp/pull/1175))
+- fix(view): preserve unset border attributes when setting just one (audit PR #1166) ([#1169](https://github.com/danielraffel/pulp/pull/1169))
+- fix(view): wire prop-applier to call registerHover for hover handlers (pulp #1149) ([#1173](https://github.com/danielraffel/pulp/pull/1173))
+- fix(view): default display:flex to flex-direction:row to match CSS web compat (#1147) ([#1167](https://github.com/danielraffel/pulp/pull/1167))
+- audit(compat): populate compat.json from Yoga + RN + MDN spec walk (#1027) ([#1166](https://github.com/danielraffel/pulp/pull/1166))
+
+<a id="v0681"></a>
+## [0.68.1] - 2026-04-30
+
+- feat(view): RN style-prop bridge primitives (pulp #1026) ([#1044](https://github.com/danielraffel/pulp/pull/1044))
+- test(cli): cover mcp server protocol paths ([#1076](https://github.com/danielraffel/pulp/pull/1076))
+- test(view): cover button widget edge paths ([#1069](https://github.com/danielraffel/pulp/pull/1069))
+- fix(audio): make empty focus subscriptions inert ([#1032](https://github.com/danielraffel/pulp/pull/1032))
+- ci(compat): seed compat-sync gate (#1029) ([#1068](https://github.com/danielraffel/pulp/pull/1068))
+- test(render): cover gpu surface state edges ([#1046](https://github.com/danielraffel/pulp/pull/1046))
+- test(platform): cover child process edge paths ([#1021](https://github.com/danielraffel/pulp/pull/1021))
+- test(signal): cover biquad edge paths ([#1077](https://github.com/danielraffel/pulp/pull/1077))
+- test(cli): cover projects registry edge paths ([#1025](https://github.com/danielraffel/pulp/pull/1025))
+- test(render): cover atlas cache edge paths ([#1064](https://github.com/danielraffel/pulp/pull/1064))
+- test(cli): cover docs search edge paths ([#1063](https://github.com/danielraffel/pulp/pull/1063))
+- test(audio): cover subsection reader edges ([#1061](https://github.com/danielraffel/pulp/pull/1061))
+- test(runtime): cover range edge paths ([#1034](https://github.com/danielraffel/pulp/pull/1034))
+
+<a id="v0680"></a>
+## [0.69.0]
+
+## [0.68.0] - 2026-04-30
+
+- fix(view): bubble click up to ancestor on_click handler (#1067) ([#1073](https://github.com/danielraffel/pulp/pull/1073))
+- test(view): cover text editor edge paths ([#1023](https://github.com/danielraffel/pulp/pull/1023))
+- docs: codify phase 3 coverage operating loop ([#1030](https://github.com/danielraffel/pulp/pull/1030))
+- test(audio): cover BufferView clear accessors ([#1033](https://github.com/danielraffel/pulp/pull/1033))
+
 <a id="v0670"></a>
 ## [0.68.0]
 
@@ -940,6 +976,9 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.69.0]: https://github.com/danielraffel/pulp/releases/tag/v0.69.0
+[0.68.1]: https://github.com/danielraffel/pulp/releases/tag/v0.68.1
+[0.68.0]: https://github.com/danielraffel/pulp/releases/tag/v0.68.0
 [0.67.0]: https://github.com/danielraffel/pulp/releases/tag/v0.67.0
 [0.66.0]: https://github.com/danielraffel/pulp/releases/tag/v0.66.0
 [0.65.0]: https://github.com/danielraffel/pulp/releases/tag/v0.65.0

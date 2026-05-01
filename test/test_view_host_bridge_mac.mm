@@ -265,4 +265,123 @@ TEST_CASE("PulpView NSEvent click dispatches JS on(id,'click') subscriber",
     }
 }
 
+// pulp #1067 — #1006/#1008 wired `on(id, 'click', fn)` to the native
+// `View::on_click`, but the click still doesn't fire when the visible
+// hit target is a child of the registered widget. The classic shape:
+// `<button onClick=...>Clear</button>` lowers (via Spectr's dom-adapter
+// + @pulp/react host config) into a `<View onClick=...>` with a child
+// `<Label>Clear</Label>`. `hit_test` walks topmost-child-first and
+// returns the Label (the visible text covers the parent's bounds), but
+// `on_click` is registered on the parent View. Pre-#1067 the mac
+// mouseUp path captured `_dragTarget = label`, found `on_click ==
+// nullptr`, and silently dropped the click. Fix: walk up the parent
+// chain to find the nearest ancestor with a registered handler — DOM
+// click bubbling.
+TEST_CASE("PulpView NSEvent click bubbles up to ancestor on_click handler",
+          "[view][hosts][bridge][issue-1067]") {
+    @autoreleasepool {
+        [NSApplication sharedApplication];
+
+        View root;
+        WindowOptions opts;
+        opts.title = "PulpView issue-1067";
+        opts.width = 200.0f;
+        opts.height = 100.0f;
+        opts.resizable = false;
+        opts.use_gpu = false;
+
+        auto host = WindowHost::create(root, opts);
+        REQUIRE(host != nullptr);
+        root.set_bounds({0, 0, 200, 100});
+
+        pulp::state::StateStore store;
+        pulp::view::ScriptEngine engine;
+        pulp::view::WidgetBridge bridge(engine, root, store);
+
+        // Mirrors what @pulp/react + Spectr's dom-adapter emit for
+        // `<button onClick={fn}>Clear</button>`:
+        //   * a Panel (Button) with the click handler attached
+        //   * a Label child whose bounds cover the visible button area
+        // Pin the parent's bounds so hit_test lands on the Label child
+        // deterministically without depending on a paint pass.
+        bridge.load_script(R"(
+            var clicks = 0;
+            createPanel('btn', '');
+            setFlex('btn', 'width', 200);
+            setFlex('btn', 'height', 100);
+            createLabel('btn_l', 'Clear', 'btn');
+            setFlex('btn_l', 'width', 200);
+            setFlex('btn_l', 'height', 100);
+            on('btn', 'click', function() { clicks += 1; });
+        )");
+
+        auto* button = bridge.widget("btn");
+        auto* label  = bridge.widget("btn_l");
+        REQUIRE(button != nullptr);
+        REQUIRE(label  != nullptr);
+        REQUIRE(label->parent() == button);
+        // The handler is on the parent button.
+        REQUIRE(static_cast<bool>(button->on_click));
+        // The label has no handler of its own — that's the point.
+        REQUIRE_FALSE(static_cast<bool>(label->on_click));
+
+        host->show();
+        auto* nswindow = (__bridge NSWindow*)host->native_window_handle();
+        REQUIRE(nswindow != nil);
+        auto* contentView = nswindow.contentView;
+        REQUIRE(contentView != nil);
+
+        for (int i = 0; i < 20; ++i) {
+            [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.005]];
+        }
+
+        // Sanity: hit_test must find the Label child, not the Button
+        // parent (otherwise the test wouldn't be exercising the bubble
+        // path — it would be the trivial #1006 case).
+        {
+            auto* target = root.hit_test({40.0f, 50.0f});
+            REQUIRE(target == label);
+        }
+
+        const NSPoint local = NSMakePoint(40.0, 50.0);
+        const NSPoint window_pt = [contentView convertPoint:local toView:nil];
+
+        NSEvent* down = [NSEvent mouseEventWithType:NSEventTypeLeftMouseDown
+                                           location:window_pt
+                                      modifierFlags:0
+                                          timestamp:0
+                                       windowNumber:nswindow.windowNumber
+                                            context:nil
+                                        eventNumber:0
+                                         clickCount:1
+                                           pressure:1.0];
+        NSEvent* up = [NSEvent mouseEventWithType:NSEventTypeLeftMouseUp
+                                         location:window_pt
+                                    modifierFlags:0
+                                        timestamp:0
+                                     windowNumber:nswindow.windowNumber
+                                          context:nil
+                                      eventNumber:0
+                                       clickCount:1
+                                         pressure:0.0];
+
+        [contentView mouseDown:down];
+        [contentView mouseUp:up];
+
+        // mouseUp queues the click handler via dispatch_async on the
+        // main queue; drain the run loop until it fires (or we hit a
+        // generous timeout, in which case the bubble path is broken).
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+        int clicks = 0;
+        while (clicks == 0 && std::chrono::steady_clock::now() < deadline) {
+            [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.01]];
+            clicks = engine.evaluate("clicks").getWithDefault<int>(0);
+        }
+
+        REQUIRE(clicks == 1);
+
+        host->hide();
+    }
+}
+
 #endif

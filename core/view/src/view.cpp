@@ -7,6 +7,73 @@
 
 namespace pulp::view {
 
+namespace {
+
+// Build a per-corner rounded-rect path on the canvas (issue-1026). When any
+// of setBorderTopLeftRadius / TopRight / BottomLeft / BottomRight has been
+// called on the View, the four corners can have independent radii — which
+// the canvas's single-radius fill_rounded_rect / stroke_rounded_rect APIs
+// cannot express on their own. We approximate each corner with a single
+// cubic_to whose control magnitude is r * 0.55228 — the standard
+// "kappa" approximation of a quarter-circle by a Bezier. Subclasses of
+// Canvas that lack a real cubic_to fall back to line_to via the base class.
+//
+// Layout (TL, TR, BL, BR are clamped to half the box):
+//
+//      tl                 tr
+//        +---------------+
+//        |               |
+//      bl|               |br
+//        +---------------+
+void build_per_corner_rounded_rect_path(
+    pulp::canvas::Canvas& canvas,
+    float w, float h,
+    float tl, float tr, float bl, float br) {
+    const float half_w = w * 0.5f;
+    const float half_h = h * 0.5f;
+    auto clamp = [&](float r) {
+        const float lim = std::min(half_w, half_h);
+        return std::max(0.0f, std::min(r, lim));
+    };
+    tl = clamp(tl);
+    tr = clamp(tr);
+    bl = clamp(bl);
+    br = clamp(br);
+    // Cubic kappa for quarter-circle approximation.
+    constexpr float k = 0.5522847498f;
+
+    canvas.begin_path();
+    // Start at top edge after TL corner.
+    canvas.move_to(tl, 0.0f);
+    // Top edge → top-right corner.
+    canvas.line_to(w - tr, 0.0f);
+    if (tr > 0.0f)
+        canvas.cubic_to(w - tr + tr * k, 0.0f,
+                        w, tr - tr * k,
+                        w, tr);
+    // Right edge → bottom-right corner.
+    canvas.line_to(w, h - br);
+    if (br > 0.0f)
+        canvas.cubic_to(w, h - br + br * k,
+                        w - br + br * k, h,
+                        w - br, h);
+    // Bottom edge → bottom-left corner.
+    canvas.line_to(bl, h);
+    if (bl > 0.0f)
+        canvas.cubic_to(bl - bl * k, h,
+                        0.0f, h - bl + bl * k,
+                        0.0f, h - bl);
+    // Left edge → top-left corner.
+    canvas.line_to(0.0f, tl);
+    if (tl > 0.0f)
+        canvas.cubic_to(0.0f, tl - tl * k,
+                        tl - tl * k, 0.0f,
+                        tl, 0.0f);
+    canvas.close_path();
+}
+
+} // namespace
+
 void View::paint_all(canvas::Canvas& canvas) {
     if (!visible_) return;
 
@@ -47,10 +114,23 @@ void View::paint_all(canvas::Canvas& canvas) {
     // canvas matrix via concat_transform so parent transforms still apply
     // and children inherit. Used by setTransform(id,a,b,c,d,e,f) from JS,
     // primarily for translateX(-50%) centering and future animation.
+    //
+    // pulp #1026 — transform-origin now applies to the matrix path too,
+    // BUT only when the caller has explicitly called setTransformOrigin.
+    // Existing setTransform() call sites that never touched the origin
+    // continue to get a plain concat (backward-compat with #930). When
+    // an explicit origin is set, the canvas op equivalent of "transform
+    // around origin (ox, oy)" is
+    //   translate(ox, oy) ; concat(M) ; translate(-ox, -oy).
     if (has_transform_matrix_) {
+        const bool apply_origin = origin_explicit_;
+        const float ox = bounds_.width  * origin_x_;
+        const float oy = bounds_.height * origin_y_;
+        if (apply_origin) canvas.translate(ox, oy);
         canvas.concat_transform(transform_matrix_a_, transform_matrix_b_,
                                 transform_matrix_c_, transform_matrix_d_,
                                 transform_matrix_e_, transform_matrix_f_);
+        if (apply_origin) canvas.translate(-ox, -oy);
     }
 
     // CSS `backdrop-filter: blur(N)` (issue-926). A separate compositing layer
@@ -102,6 +182,14 @@ void View::paint_all(canvas::Canvas& canvas) {
     if (overflow_ == Overflow::hidden)
         canvas.clip_rect(0, 0, bounds_.width, bounds_.height);
 
+    // Per-corner border-radius (issue-1026): when any of the
+    // setBorderTopLeftRadius / TopRight / BottomLeft / BottomRight setters
+    // has been called we paint backgrounds and the border via a path
+    // approximating each corner independently. Otherwise we keep using the
+    // canvas's optimized fill_rounded_rect / stroke_rounded_rect with the
+    // uniform corner_radius_.
+    const bool use_per_corner = has_corner_radii_;
+
     // Paint background gradient if set (CSS background: linear-gradient)
     if (bg_gradient_type_ > 0 && !bg_gradient_colors_.empty()) {
         canvas.set_fill_gradient_linear(
@@ -109,30 +197,48 @@ void View::paint_all(canvas::Canvas& canvas) {
             bg_grad_x1_ * bounds_.width, bg_grad_y1_ * bounds_.height,
             bg_gradient_colors_.data(), bg_gradient_positions_.data(),
             static_cast<int>(bg_gradient_colors_.size()));
-        if (corner_radius_ > 0)
+        if (use_per_corner) {
+            build_per_corner_rounded_rect_path(canvas, bounds_.width, bounds_.height,
+                                               corner_radii_[0], corner_radii_[1],
+                                               corner_radii_[2], corner_radii_[3]);
+            canvas.fill_current_path();
+        } else if (corner_radius_ > 0) {
             canvas.fill_rounded_rect(0, 0, bounds_.width, bounds_.height, corner_radius_);
-        else
+        } else {
             canvas.fill_rect(0, 0, bounds_.width, bounds_.height);
+        }
         canvas.clear_fill_gradient();
     }
 
     // Paint background if set
     if (has_bg_ && bg_gradient_type_ == 0) {
         canvas.set_fill_color(bg_color_);
-        if (corner_radius_ > 0)
+        if (use_per_corner) {
+            build_per_corner_rounded_rect_path(canvas, bounds_.width, bounds_.height,
+                                               corner_radii_[0], corner_radii_[1],
+                                               corner_radii_[2], corner_radii_[3]);
+            canvas.fill_current_path();
+        } else if (corner_radius_ > 0) {
             canvas.fill_rounded_rect(0, 0, bounds_.width, bounds_.height, corner_radius_);
-        else
+        } else {
             canvas.fill_rect(0, 0, bounds_.width, bounds_.height);
+        }
     }
 
     // Paint border if set
     if (has_border_ && border_width_ > 0) {
         canvas.set_stroke_color(border_color_);
         canvas.set_line_width(border_width_);
-        if (corner_radius_ > 0)
+        if (use_per_corner) {
+            build_per_corner_rounded_rect_path(canvas, bounds_.width, bounds_.height,
+                                               corner_radii_[0], corner_radii_[1],
+                                               corner_radii_[2], corner_radii_[3]);
+            canvas.stroke_current_path();
+        } else if (corner_radius_ > 0) {
             canvas.stroke_rounded_rect(0, 0, bounds_.width, bounds_.height, corner_radius_);
-        else
+        } else {
             canvas.stroke_rect(0, 0, bounds_.width, bounds_.height);
+        }
     }
 
     // Widget-specific painting
@@ -199,7 +305,16 @@ void View::simulate_click(Point root_pos) {
 
     target->on_mouse_down(local);
     target->on_mouse_up(local);
-    if (target->on_click) target->on_click();
+    // pulp #1067 — DOM-style click bubbling. `hit_test` returns the deepest
+    // hit-testable view, which for `<button onClick=...>Label</button>` is
+    // the inner Label child. Walk up the parent chain to find the nearest
+    // ancestor with a registered handler. Mirrors the same bubble pass the
+    // mac mouseUp path performs (see core/view/platform/mac/window_host_mac.mm).
+    View* click_target = target;
+    while (click_target && !click_target->on_click) {
+        click_target = click_target->parent();
+    }
+    if (click_target && click_target->on_click) click_target->on_click();
 }
 
 void View::simulate_drag(Point start, Point end, int steps) {
@@ -324,36 +439,51 @@ std::vector<View*> View::sorted_children_by_z_index() const {
 View* View::hit_test(Point local_point) {
     if (!visible_ || !enabled_ || !hit_testable_) return nullptr;
 
+    // React Native pointerEvents (issue-1026):
+    //   none      — neither this view nor children intercept events.
+    //   box_none  — this view is invisible to hit-testing but children
+    //               can still receive events (descend, but never return self).
+    //   box_only  — this view receives events; children do NOT
+    //               (skip the descent below, then check own bounds).
+    //   auto_     — default behavior.
+    if (pointer_events_ == PointerEvents::none) return nullptr;
+
     // Check children topmost-first (pulp #972). With z-index honored,
     // "topmost" means highest z_index — and at equal z, latest insertion
     // — so iterate the z-sorted paint order in reverse. Without this,
     // a high-z popover could render on top yet have clicks fall through
     // to siblings beneath it.
-    auto paint_order = sorted_children_by_z_index();
-    for (auto it = paint_order.rbegin(); it != paint_order.rend(); ++it) {
-        View* child = *it;
-        if (!child->visible_) continue;
+    if (pointer_events_ != PointerEvents::box_only) {
+        auto paint_order = sorted_children_by_z_index();
+        for (auto it = paint_order.rbegin(); it != paint_order.rend(); ++it) {
+            View* child = *it;
+            if (!child->visible_) continue;
 
-        Point child_point = {local_point.x - child->bounds_.x,
-                            local_point.y - child->bounds_.y};
+            Point child_point = {local_point.x - child->bounds_.x,
+                                local_point.y - child->bounds_.y};
 
-        // For overflow:visible, expand the hit area to include content
-        // that extends beyond the child's bounds (e.g., dropdown menus)
-        bool in_bounds = child->local_bounds().contains(child_point);
-        if (!in_bounds && child->overflow() == Overflow::visible) {
-            // Allow hit testing up to 500px below the child (for dropdowns)
-            auto lb = child->local_bounds();
-            in_bounds = child_point.x >= lb.x && child_point.x <= lb.x + lb.width &&
-                       child_point.y >= lb.y && child_point.y <= lb.y + lb.height + 500;
-        }
+            // For overflow:visible, expand the hit area to include content
+            // that extends beyond the child's bounds (e.g., dropdown menus)
+            bool in_bounds = child->local_bounds().contains(child_point);
+            if (!in_bounds && child->overflow() == Overflow::visible) {
+                // Allow hit testing up to 500px below the child (for dropdowns)
+                auto lb = child->local_bounds();
+                in_bounds = child_point.x >= lb.x && child_point.x <= lb.x + lb.width &&
+                        child_point.y >= lb.y && child_point.y <= lb.y + lb.height + 500;
+            }
 
-        if (in_bounds) {
-            auto* hit = child->hit_test(child_point);
-            if (hit) return hit;
+            if (in_bounds) {
+                auto* hit = child->hit_test(child_point);
+                if (hit) return hit;
+            }
         }
     }
 
-    // No child was hit — return this view if the point is within bounds
+    // No child was hit — return this view if the point is within bounds.
+    // box_none suppresses self-targeting even when a child miss falls back
+    // here, matching RN's "container is just a layout pass-through" mode.
+    if (pointer_events_ == PointerEvents::box_none) return nullptr;
+
     if (local_bounds().contains(local_point))
         return this;
 

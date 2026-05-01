@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-29 02:10 EDT
+Last reviewed: 2026-04-30 02:20 EDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`.
@@ -73,31 +73,43 @@ snapshot include `canvas`, `events`, `runtime`, `state`, `osc`, and
 
 ## Queue State
 
-The active codecov code-PR queue has been drained. The only open PR with
-the `codecov` label at this review is this doc refresh:
+The active queue is intentionally fluid during Phase 3. Treat `#641`
+and the component tracker comments as the live source of truth, then
+verify with GitHub before reporting or merging:
 
-- `#774` - `docs: refresh coverage compliance handoff`
+```bash
+gh pr list --repo danielraffel/pulp --label codecov --state open \
+  --json number,title,headRefOid,mergeStateStatus,mergeable,updatedAt,url
+```
 
-Final code PRs merged during the 2026-04-29 drain:
+Do not preserve stale point-in-time queue lists in this document. When
+a queue snapshot is useful, post it as a tracker comment with concrete
+dates, PR numbers, and head SHAs.
 
-- `#849` view label paint coverage -
-  `4148c6723f3951c6861e13cdbd502b90111f8f5f`
-- `#867` embedded Python bindings state coverage -
-  `bd13a2add545b9cfa4db530c9f66171dfb8fb69e`
-- `#850` runner resolver coverage -
-  `55857f15361e591972eef58f955427745cec0198`
-- `#971` version bump helper coverage -
-  `dc4bc66e55f0d9f85fbc2c4f8d0910ca7224e032`
-- `#886` iOS audio-session event label coverage -
-  `0f260b812ed9d4a8b6bb76293d02f768fac046b7`
-- `#853` audio frame-fill invalid-dimension coverage -
-  `c05384aaef731ccee481c7f47e6089ba8ef42afe`
-- `#851` signal meter channel-count guard coverage -
-  `e9c994d1bb2c42f1a50e4775a5886b6348808fb0`
+## Phase 3 Operating Loop
 
-The previously listed stale open PR queue from `#840` through `#895`
-has been resolved; those code coverage tranches are no longer active
-open work.
+Phase 3 should not become a wait-for-CI loop. Keep this cycle running
+until the finish criteria below are met:
+
+1. Monitor open `codecov` PRs.
+2. If a PR is `CLEAN` and checks are complete, squash merge it manually,
+   delete the branch, and update `#641` plus the component tracker.
+3. If a check fails, inspect the failed job logs, patch the branch, push,
+   and comment with the root cause and fix.
+4. If all open PRs are only pending or queued, immediately continue the
+   next focused coverage tranche in a separate worktree.
+5. Keep tranche scope small: one subsystem slice, focused local
+   validation, Codecov patch/diff proof, tracker link, then PR.
+
+Namespace is the default validation lane for this program. Use
+`shipyard pr` as the PR orchestrator, and prefer Namespace-backed CI
+targets (`shipyard cloud run build <branch>` when invoking the cloud
+lane directly). Local VMs are fallback only when Namespace is
+unavailable; GitHub-hosted-only validation is last resort.
+
+Subagents are useful for this loop when their write scopes are
+disjoint. One agent can monitor merge/failure state while other agents
+prepare non-overlapping coverage tranches in separate worktrees.
 
 ## Phase 3 Finish Line
 

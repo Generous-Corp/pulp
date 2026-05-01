@@ -220,6 +220,19 @@ at a **75%** floor. Sub-threshold diff coverage hard-fails this check
 and blocks the merge — adding untested code means either adding tests
 or splitting the untested portion into its own PR.
 
+### Phase 3 PR cadence
+
+Phase 3 is tranche work, not a queue stall. While a Codecov remediation
+PR is pending and blocked only on CI, keep moving with another small,
+focused coverage tranche. Check the open PR list and GitHub checks
+before starting each tranche, watch them again after pushing it, debug
+new failures as soon as they appear, and manually merge PRs once they
+are green.
+
+Use Namespace-backed GitHub checks and Codecov comments as the default
+evidence path. Local VMs are a fallback for reproducing or isolating
+failures, not the normal proof that a tranche is ready.
+
 ## How the collection works
 
 ```

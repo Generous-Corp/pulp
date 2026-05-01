@@ -24,7 +24,9 @@ fi
 PYTHON="${PYTHON:-python3}"
 VBC="$ROOT/tools/scripts/version_bump_check.py"
 SSC="$ROOT/tools/scripts/skill_sync_check.py"
+CSC="$ROOT/tools/scripts/compat_sync_check.py"
 CFG="$ROOT/tools/scripts/versioning.json"
+COMPAT_MAP="$ROOT/tools/scripts/compat_path_map.json"
 
 if [ ! -f "$VBC" ] || [ ! -f "$SSC" ] || [ ! -f "$CFG" ]; then
     # Repo predates the gates; no-op so the hook doesn't block legitimate
@@ -50,6 +52,17 @@ case $? in
     1) fail=1 ;;
     *) echo "[pre-push] version_bump_check: internal error" >&2 ;;
 esac
+
+# Compat-sync (#1029). Advisory unless PULP_ENFORCE_PREPUSH=1 — the
+# script reads the env var directly, so just pass --mode=report.
+if [ -f "$CSC" ] && [ -f "$COMPAT_MAP" ]; then
+    "$PYTHON" "$CSC" --base "$BASE" --mode=report
+    case $? in
+        0) ;;
+        1) fail=1 ;;
+        *) echo "[pre-push] compat_sync_check: internal error" >&2 ;;
+    esac
+fi
 
 # Dependency attribution drift — fails if manifest entries are missing from
 # DEPENDENCIES.md, NOTICE.md, or docs/reference/licensing.md. Advisory by
