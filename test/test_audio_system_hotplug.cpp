@@ -7,6 +7,7 @@
 #include <pulp/audio/device.hpp>
 
 #include <atomic>
+#include <utility>
 
 using namespace pulp::audio;
 
@@ -24,17 +25,58 @@ public:
     DeviceInfo default_input_device() override { return {}; }
 };
 
+#if defined(_MSC_VER)
+#define PULP_TEST_NOINLINE __declspec(noinline)
+#elif defined(__GNUC__) || defined(__clang__)
+#define PULP_TEST_NOINLINE __attribute__((noinline))
+#else
+#define PULP_TEST_NOINLINE
+#endif
+
+PULP_TEST_NOINLINE void set_callback_via_base(AudioSystem& sys, AudioSystem::DeviceChangeCallback cb) {
+    sys.set_device_change_callback(std::move(cb));
+}
+
+PULP_TEST_NOINLINE void fire_via_base(AudioSystem& sys) {
+    sys.fire_device_change();
+}
+
+PULP_TEST_NOINLINE bool has_callback_via_base(const AudioSystem& sys) {
+    return sys.has_device_change_callback();
+}
+
+#undef PULP_TEST_NOINLINE
+
 } // namespace
 
 TEST_CASE("base class stores + fires the callback", "[audio][hotplug]") {
     StubSystem sys;
     std::atomic<int> calls{0};
-    REQUIRE_FALSE(sys.has_device_change_callback());
-    sys.set_device_change_callback([&] { ++calls; });
-    REQUIRE(sys.has_device_change_callback());
-    sys.fire_device_change();
-    sys.fire_device_change();
+    REQUIRE_FALSE(has_callback_via_base(sys));
+    set_callback_via_base(sys, [&] { ++calls; });
+    REQUIRE(has_callback_via_base(sys));
+    fire_via_base(sys);
+    fire_via_base(sys);
     REQUIRE(calls.load() == 2);
+}
+
+TEST_CASE("base callback slot can be set cleared and observed through AudioSystem", "[audio][hotplug]") {
+    StubSystem sys;
+    AudioSystem& base = sys;
+    int calls = 0;
+
+    REQUIRE_FALSE(has_callback_via_base(base));
+    fire_via_base(base);
+
+    set_callback_via_base(base, [&] { ++calls; });
+    REQUIRE(has_callback_via_base(base));
+    fire_via_base(base);
+    REQUIRE(calls == 1);
+
+    set_callback_via_base(base, AudioSystem::DeviceChangeCallback{});
+    REQUIRE_FALSE(has_callback_via_base(base));
+    fire_via_base(base);
+    REQUIRE(calls == 1);
 }
 
 TEST_CASE("registering a new callback replaces the previous callback", "[audio][hotplug]") {
