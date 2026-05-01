@@ -385,3 +385,43 @@ TEST_CASE("ExpressionEvaluator stateful", "[runtime][expression]") {
     REQUIRE(result.has_value());
     REQUIRE_THAT(*result, WithinAbs(880.0, 1e-10));
 }
+
+TEST_CASE("Expression handles numeric edge syntax and safe division", "[runtime][expression][issue-641]") {
+    REQUIRE_THAT(*pulp::runtime::evaluate("+1.5e2"), WithinAbs(150.0, 1e-10));
+    REQUIRE_THAT(*pulp::runtime::evaluate("6 / 0"), WithinAbs(0.0, 1e-10));
+    REQUIRE_THAT(*pulp::runtime::evaluate("2 +\n 3\t* 4"), WithinAbs(14.0, 1e-10));
+}
+
+TEST_CASE("Expression covers remaining built-in function branches", "[runtime][expression][issue-641]") {
+    REQUIRE_THAT(*pulp::runtime::evaluate("tan(0)"), WithinAbs(0.0, 1e-10));
+    REQUIRE_THAT(*pulp::runtime::evaluate("log(e)"), WithinAbs(1.0, 1e-10));
+    REQUIRE_THAT(*pulp::runtime::evaluate("log10(1000)"), WithinAbs(3.0, 1e-10));
+    REQUIRE_THAT(*pulp::runtime::evaluate("exp(0)"), WithinAbs(1.0, 1e-10));
+    REQUIRE_THAT(*pulp::runtime::evaluate("floor(3.9)"), WithinAbs(3.0, 1e-10));
+    REQUIRE_THAT(*pulp::runtime::evaluate("ceil(3.1)"), WithinAbs(4.0, 1e-10));
+    REQUIRE_THAT(*pulp::runtime::evaluate("round(3.5)"), WithinAbs(4.0, 1e-10));
+    REQUIRE_THAT(*pulp::runtime::evaluate("pow(2, 8)"), WithinAbs(256.0, 1e-10));
+    REQUIRE_THAT(*pulp::runtime::evaluate("clamp(12, 10)"), WithinAbs(10.0, 1e-10));
+    REQUIRE_THAT(*pulp::runtime::evaluate("clamp(-3, 10)"), WithinAbs(0.0, 1e-10));
+}
+
+TEST_CASE("Expression rejects malformed calls and trailing tokens", "[runtime][expression][issue-641]") {
+    REQUIRE_FALSE(pulp::runtime::evaluate("sqrt(16").has_value());
+    REQUIRE_FALSE(pulp::runtime::evaluate("unknown(1)").has_value());
+    REQUIRE_FALSE(pulp::runtime::evaluate("min(1)").has_value());
+    REQUIRE_FALSE(pulp::runtime::evaluate("1 2").has_value());
+}
+
+TEST_CASE("ExpressionEvaluator custom functions and clearing", "[runtime][expression][issue-641]") {
+    pulp::runtime::ExpressionEvaluator eval;
+    eval.set("x", 4.0);
+    eval.register_function("double_it", [](double value) { return value * 2.0; });
+
+    REQUIRE(eval.get("x").has_value());
+    REQUIRE_THAT(*eval.evaluate("double_it(x) + 1"), WithinAbs(9.0, 1e-10));
+
+    eval.clear_variables();
+    REQUIRE_FALSE(eval.get("x").has_value());
+    REQUIRE_FALSE(eval.evaluate("double_it(x)").has_value());
+    REQUIRE_THAT(*eval.evaluate("double_it(5)"), WithinAbs(10.0, 1e-10));
+}
