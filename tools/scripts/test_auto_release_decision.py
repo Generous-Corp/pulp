@@ -14,14 +14,21 @@ or without pytest:
 
 from __future__ import annotations
 
+import contextlib
 import importlib.util
+import io
+import json
 import pathlib
+import runpy
 import sys
 import unittest
+from unittest import mock
+
+SCRIPT = pathlib.Path(__file__).parent / "auto_release_decision.py"
 
 spec = importlib.util.spec_from_file_location(
     "auto_release_decision",
-    pathlib.Path(__file__).parent / "auto_release_decision.py",
+    SCRIPT,
 )
 ard = importlib.util.module_from_spec(spec)
 assert spec.loader is not None
@@ -50,6 +57,7 @@ class SemverCmpTests(unittest.TestCase):
     def test_malformed(self):
         # Not strictly required, but document behavior
         self.assertEqual(ard.semver_cmp("not.a.version", "0.1.0"), "lt")
+        self.assertEqual(ard.semver_cmp("0.1", "0.1.0"), "lt")
 
 
 class DecideTests(unittest.TestCase):
@@ -217,6 +225,83 @@ class HistoricalBugRegressions(unittest.TestCase):
             surface="sdk",
         )
         self.assertEqual(result["should_tag"], 1, "#513 v0.23.1 recovery regressed")
+
+
+class CliContractTests(unittest.TestCase):
+    """Exercise the JSON CLI used by auto-release.yml."""
+
+    def run_main(self, *args: str) -> tuple[int, dict]:
+        stdout = io.StringIO()
+        with mock.patch.object(sys, "argv", ["auto_release_decision.py", *args]), \
+             contextlib.redirect_stdout(stdout):
+            rc = ard.main()
+        return rc, json.loads(stdout.getvalue())
+
+    def test_cli_outputs_json_for_tagging_decision(self):
+        rc, result = self.run_main(
+            "--head-version", "0.24.0",
+            "--tag-version", "0.23.9",
+            "--bump-commit-has-skip", "0",
+            "--surface", "plugin",
+        )
+
+        self.assertEqual(rc, 0)
+        self.assertEqual(result["should_tag"], 1)
+        self.assertEqual(result["surface"], "plugin")
+        self.assertIn("tagging", result["reason"])
+
+    def test_cli_converts_skip_choice_to_bool(self):
+        rc, result = self.run_main(
+            "--head-version", "0.24.0",
+            "--tag-version", "0.23.9",
+            "--bump-commit-has-skip", "1",
+            "--surface", "sdk",
+        )
+
+        self.assertEqual(rc, 0)
+        self.assertEqual(result["should_tag"], 0)
+        self.assertIn("sticky skip", result["reason"])
+
+    def test_cli_defaults_to_missing_sdk_version(self):
+        rc, result = self.run_main()
+
+        self.assertEqual(rc, 0)
+        self.assertEqual(result["should_tag"], 0)
+        self.assertEqual(result["surface"], "sdk")
+        self.assertIn("no sdk version", result["reason"].lower())
+
+    def test_cli_rejects_non_binary_skip_choice(self):
+        stderr = io.StringIO()
+        with mock.patch.object(
+            sys,
+            "argv",
+            ["auto_release_decision.py", "--bump-commit-has-skip", "2"],
+        ), contextlib.redirect_stderr(stderr):
+            with self.assertRaises(SystemExit) as cm:
+                ard.main()
+
+        self.assertEqual(cm.exception.code, 2)
+        self.assertIn("invalid choice", stderr.getvalue())
+
+    def test_script_entrypoint_prints_json_and_exits_zero(self):
+        stdout = io.StringIO()
+        with mock.patch.object(
+            sys,
+            "argv",
+            [
+                str(SCRIPT),
+                "--head-version", "0.24.0",
+                "--tag-version", "0.23.9",
+                "--surface", "plugin",
+            ],
+        ), contextlib.redirect_stdout(stdout):
+            with self.assertRaises(SystemExit) as cm:
+                runpy.run_path(str(SCRIPT), run_name="__main__")
+
+        self.assertEqual(cm.exception.code, 0)
+        result = json.loads(stdout.getvalue())
+        self.assertEqual(result["should_tag"], 1)
+        self.assertEqual(result["surface"], "plugin")
 
 
 if __name__ == "__main__":
