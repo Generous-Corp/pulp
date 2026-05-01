@@ -66,6 +66,10 @@ def _read_ignore_regex() -> str:
     return match.group("pattern")
 
 
+def _script_contains(fragment: str) -> bool:
+    return fragment in SCRIPT.read_text()
+
+
 class IgnoreRegexTests(unittest.TestCase):
     """The regex excludes noisy paths and keeps our real source tree."""
 
@@ -128,6 +132,24 @@ class IgnoreRegexTests(unittest.TestCase):
         # 'test' substring match. We require the '/test/' component.
         self.assert_kept("core/runtime/src/attested_payload.cpp")
         self.assert_kept("core/protest/src/demo.cpp")
+
+
+class ObjectDiscoveryTests(unittest.TestCase):
+    """Regression guards for the llvm-cov object discovery passes."""
+
+    def test_windows_executables_are_included_without_unix_execute_bit(self) -> None:
+        self.assertTrue(
+            _script_contains("\\( -perm -u+x -o -name '*.exe' \\)"),
+            "Windows/MSYS test executables can lack a visible Unix "
+            "execute bit; run_coverage.sh must include *.exe explicitly.",
+        )
+
+    def test_test_static_libraries_are_not_added_as_primary_objects(self) -> None:
+        self.assertTrue(
+            _script_contains('! -path "${BUILD_DIR}/test/*"'),
+            "Test-local .lib archives can add zero-hit duplicate coverage "
+            "maps; production archives are enough for full-surface rows.",
+        )
 
 
 class StaleCacheTests(unittest.TestCase):

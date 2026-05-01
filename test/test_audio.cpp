@@ -195,6 +195,47 @@ TEST_CASE("ChannelSet speaker names and equality are deterministic",
     REQUIRE_FALSE(ChannelSet::stereo() == ChannelSet::quad());
 }
 
+TEST_CASE("ChannelSet discrete layouts use unnamed speaker slots",
+          "[audio][channel-set][issue-640]") {
+    auto empty = ChannelSet::discrete(0);
+    REQUIRE(empty.name == "Discrete 0");
+    REQUIRE(empty.speakers.empty());
+
+    auto custom = ChannelSet::discrete(4);
+    REQUIRE(custom.name == "Discrete 4");
+    REQUIRE(custom.size() == 4);
+    for (auto speaker : custom.speakers) {
+        REQUIRE(speaker == Speaker::Discrete);
+    }
+    REQUIRE_FALSE(custom == ChannelSet::from_channel_count(4));
+}
+
+TEST_CASE("ChannelSet from_name matching is exact and defaults to stereo speakers",
+          "[audio][channel-set][issue-640]") {
+    REQUIRE(ChannelSet::from_name("stereo") == ChannelSet::discrete(2));
+    REQUIRE(ChannelSet::from_name(" Stereo") == ChannelSet::discrete(2));
+    REQUIRE(ChannelSet::from_name("") == ChannelSet::discrete(2));
+    REQUIRE(ChannelSet::from_name("7.1.4 ") == ChannelSet::discrete(2));
+}
+
+TEST_CASE("ChannelSet immersive layout preserves documented speaker order",
+          "[audio][channel-set][issue-640]") {
+    auto atmos = ChannelSet::surround_7_1_4();
+    REQUIRE(atmos.size() == 12);
+    REQUIRE(atmos.speakers[0] == Speaker::FrontLeft);
+    REQUIRE(atmos.speakers[1] == Speaker::FrontRight);
+    REQUIRE(atmos.speakers[2] == Speaker::FrontCenter);
+    REQUIRE(atmos.speakers[3] == Speaker::LFE);
+    REQUIRE(atmos.speakers[4] == Speaker::BackLeft);
+    REQUIRE(atmos.speakers[5] == Speaker::BackRight);
+    REQUIRE(atmos.speakers[6] == Speaker::SideLeft);
+    REQUIRE(atmos.speakers[7] == Speaker::SideRight);
+    REQUIRE(atmos.speakers[8] == Speaker::TopFrontLeft);
+    REQUIRE(atmos.speakers[9] == Speaker::TopFrontRight);
+    REQUIRE(atmos.speakers[10] == Speaker::TopBackLeft);
+    REQUIRE(atmos.speakers[11] == Speaker::TopBackRight);
+}
+
 #if defined(__APPLE__) && !TARGET_OS_IPHONE
 TEST_CASE("CoreAudio system enumerates devices", "[audio][coreaudio]") {
     auto system = create_audio_system();

@@ -200,6 +200,79 @@ TEST_CASE("from_json rejects wrong schema version", "[scan_cache]") {
     REQUIRE_FALSE(b.from_json("not json"));
 }
 
+TEST_CASE("ScanCache from_json accepts schema-only blob as an empty cache",
+          "[scan_cache]") {
+    HostScanCache cache;
+    cache.put("/tmp/existing.vst3", sample_info());
+
+    REQUIRE(cache.from_json(R"({"schema_version": 1})"));
+    REQUIRE(cache.size() == 0);
+    REQUIRE(cache.entries().empty());
+}
+
+TEST_CASE("ScanCache from_json skips malformed entries while loading valid entries",
+          "[scan_cache]") {
+    HostScanCache c;
+    REQUIRE(c.from_json(R"({
+        "schema_version": 1,
+        "entries": [
+            {
+                "path": "/tmp/valid.vst3",
+                "mtime": 0,
+                "size": 0,
+                "name": "Valid",
+                "manufacturer": "Pulp",
+                "version": "1.0",
+                "plugin_path": "/tmp/valid.vst3",
+                "unique_id": "valid-id",
+                "format": "vst3",
+                "is_instrument": false,
+                "is_effect": true,
+                "num_inputs": 2,
+                "num_outputs": 2
+            },
+            {
+                "path": "/tmp/bad-format.vst3",
+                "format": "not-a-format"
+            },
+            "not an object"
+        ]
+    })"));
+
+    REQUIRE(c.size() == 1);
+    REQUIRE(c.entries().count("/tmp/valid.vst3") == 1);
+}
+
+TEST_CASE("ScanCache from_json keeps existing cache when blob is malformed",
+          "[scan_cache]") {
+    HostScanCache cache;
+    cache.put("/tmp/existing.vst3", sample_info());
+
+    REQUIRE_FALSE(cache.from_json("{"));
+    REQUIRE(cache.size() == 1);
+    REQUIRE(cache.entries().count("/tmp/existing.vst3") == 1);
+}
+
+TEST_CASE("ScanCache loaded stale entry does not satisfy get", "[scan_cache]") {
+    TempFile plugin;
+    plugin.write("plugin payload");
+
+    auto info = sample_info();
+    info.path = plugin.path.string();
+
+    HostScanCache fresh;
+    fresh.put(plugin.path.string(), info);
+    auto stale_json = fresh.to_json();
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(1100));
+    plugin.write("plugin payload with a new stamp");
+
+    HostScanCache loaded;
+    REQUIRE(loaded.from_json(stale_json));
+    REQUIRE(loaded.size() == 1);
+    REQUIRE_FALSE(loaded.get(plugin.path.string()).has_value());
+}
+
 TEST_CASE("save_to / load_from round-trip via disk", "[scan_cache]") {
     TempFile f;
     // Use the parent dir for the cache file so save_to creates it.
@@ -215,4 +288,34 @@ TEST_CASE("save_to / load_from round-trip via disk", "[scan_cache]") {
 
     std::error_code ec;
     fs::remove(cache_path, ec);
+}
+
+TEST_CASE("ScanCache load_from missing file keeps existing cache", "[scan_cache]") {
+    TempFile f;
+    auto cache_path = (f.path.parent_path() / (f.path.filename().string() + ".missing")).string();
+
+    HostScanCache cache;
+    cache.put("/tmp/existing.vst3", sample_info());
+
+    REQUIRE_FALSE(cache.load_from(cache_path));
+    REQUIRE(cache.size() == 1);
+    REQUIRE(cache.entries().count("/tmp/existing.vst3") == 1);
+}
+
+TEST_CASE("ScanCache load_from empty or malformed file keeps existing cache",
+          "[scan_cache]") {
+    TempFile f;
+
+    HostScanCache cache;
+    cache.put("/tmp/existing.vst3", sample_info());
+
+    f.write("");
+    REQUIRE_FALSE(cache.load_from(f.path.string()));
+    REQUIRE(cache.size() == 1);
+    REQUIRE(cache.entries().count("/tmp/existing.vst3") == 1);
+
+    f.write("{");
+    REQUIRE_FALSE(cache.load_from(f.path.string()));
+    REQUIRE(cache.size() == 1);
+    REQUIRE(cache.entries().count("/tmp/existing.vst3") == 1);
 }

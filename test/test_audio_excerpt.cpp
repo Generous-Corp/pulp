@@ -39,6 +39,16 @@ TEST_CASE("enumerate_excerpt_windows rejects empty or too-short audio", "[audio]
         AudioFileData empty;
         auto result = enumerate_excerpt_windows("loop.wav", empty, {.text = "snare", .window_frames = 1200, .hop_frames = 600});
         REQUIRE(result.status == WindowEnumerationStatus::empty_audio);
+        REQUIRE(result.source_frames == 0);
+        REQUIRE(result.windows.empty());
+    }
+
+    SECTION("zero sample rate with frames is treated as unusable audio") {
+        auto audio = make_audio(0, 1200);
+        auto result = enumerate_excerpt_windows("loop.wav", audio, {.text = "snare", .window_frames = 600, .hop_frames = 300});
+        REQUIRE(result.status == WindowEnumerationStatus::empty_audio);
+        REQUIRE(result.source_frames == 1200);
+        REQUIRE(result.windows.empty());
     }
 
     SECTION("audio shorter than window") {
@@ -61,6 +71,45 @@ TEST_CASE("enumerate_excerpt_windows uses deterministic overlap and tail coverag
     REQUIRE(result.windows[2].start_frame == 6);
     REQUIRE(result.windows[3].start_frame == 7);
     REQUIRE(result.windows.back().end_frame() == 11);
+}
+
+TEST_CASE("enumerate_excerpt_windows clamps boundary hops to valid starts",
+          "[audio][excerpt][issue-640]") {
+    SECTION("hop equal to window emits adjacent windows without an extra tail") {
+        auto audio = make_audio(48000, 12);
+        auto result = enumerate_excerpt_windows("loop.wav", audio, {.text = "snare", .window_frames = 4, .hop_frames = 4});
+
+        REQUIRE(result.status == WindowEnumerationStatus::ok);
+        REQUIRE(result.windows.size() == 3);
+        REQUIRE(result.windows[0].start_frame == 0);
+        REQUIRE(result.windows[1].start_frame == 4);
+        REQUIRE(result.windows[2].start_frame == 8);
+        REQUIRE(result.windows.back().end_frame() == result.source_frames);
+    }
+
+    SECTION("adjacent hops add a clamped overlapping tail when needed") {
+        auto audio = make_audio(48000, 10);
+        auto result = enumerate_excerpt_windows("loop.wav", audio, {.text = "snare", .window_frames = 4, .hop_frames = 4});
+
+        REQUIRE(result.status == WindowEnumerationStatus::ok);
+        REQUIRE(result.windows.size() == 3);
+        REQUIRE(result.windows[0].start_frame == 0);
+        REQUIRE(result.windows[1].start_frame == 4);
+        REQUIRE(result.windows[2].start_frame == 6);
+        REQUIRE(result.windows.back().end_frame() == result.source_frames);
+    }
+
+    SECTION("oversized hop still includes only the first window and final tail") {
+        auto audio = make_audio(48000, 10);
+        auto result = enumerate_excerpt_windows("loop.wav", audio, {.text = "snare", .window_frames = 4, .hop_frames = 20});
+
+        REQUIRE(result.status == WindowEnumerationStatus::ok);
+        REQUIRE(result.windows.size() == 2);
+        REQUIRE(result.windows[0].start_frame == 0);
+        REQUIRE(result.windows[0].end_frame() == 4);
+        REQUIRE(result.windows[1].start_frame == 6);
+        REQUIRE(result.windows[1].end_frame() == result.source_frames);
+    }
 }
 
 TEST_CASE("enumerate_excerpt_windows avoids duplicate tails on exact coverage",
@@ -88,6 +137,27 @@ TEST_CASE("enumerate_excerpt_windows avoids duplicate tails on exact coverage",
         REQUIRE(result.windows[0].sample_rate == 44100);
         REQUIRE(result.windows[0].start_frame == 0);
         REQUIRE(result.windows[0].frame_count == 4);
+    }
+}
+
+TEST_CASE("enumerate_excerpt_windows is deterministic across repeated calls",
+          "[audio][excerpt][issue-640]") {
+    auto audio = make_audio(48000, 9);
+    ExcerptQuery query{.text = "snare", .window_frames = 4, .hop_frames = 3};
+
+    auto first = enumerate_excerpt_windows("loop.wav", audio, query);
+    auto second = enumerate_excerpt_windows("loop.wav", audio, query);
+
+    REQUIRE(first.status == WindowEnumerationStatus::ok);
+    REQUIRE(second.status == WindowEnumerationStatus::ok);
+    REQUIRE(first.source_frames == second.source_frames);
+    REQUIRE(first.windows.size() == second.windows.size());
+
+    for (std::size_t i = 0; i < first.windows.size(); ++i) {
+        REQUIRE(first.windows[i].source_path == second.windows[i].source_path);
+        REQUIRE(first.windows[i].sample_rate == second.windows[i].sample_rate);
+        REQUIRE(first.windows[i].start_frame == second.windows[i].start_frame);
+        REQUIRE(first.windows[i].frame_count == second.windows[i].frame_count);
     }
 }
 

@@ -61,6 +61,69 @@ TEST_CASE("EditHistory redo cleared on new action", "[state][undo]") {
     REQUIRE_FALSE(history.can_redo());
 }
 
+TEST_CASE("EditHistory coalesces matching non-empty descriptions", "[state][undo]") {
+    EditHistory history;
+    int v = 0;
+
+    history.perform([&]() { v = 1; }, [&]() { v = 0; }, "Drag");
+    history.perform([&]() { v = 2; }, [&]() { v = 1; }, "Drag");
+
+    REQUIRE(v == 2);
+    REQUIRE(history.undo_count() == 1);
+    REQUIRE(history.undo_description() == "Drag");
+
+    REQUIRE(history.undo());
+    REQUIRE(v == 1);
+    REQUIRE_FALSE(history.can_undo());
+}
+
+TEST_CASE("EditHistory does not coalesce empty descriptions", "[state][undo]") {
+    EditHistory history;
+    int v = 0;
+
+    history.perform([&]() { v = 1; }, [&]() { v = 0; });
+    history.perform([&]() { v = 2; }, [&]() { v = 1; });
+
+    REQUIRE(v == 2);
+    REQUIRE(history.undo_count() == 2);
+    REQUIRE(history.undo_description().empty());
+}
+
+TEST_CASE("EditHistory coalescing can be disabled", "[state][undo]") {
+    EditHistory history;
+    int v = 0;
+    history.set_coalesce(false);
+
+    history.perform([&]() { v = 1; }, [&]() { v = 0; }, "Drag");
+    history.perform([&]() { v = 2; }, [&]() { v = 1; }, "Drag");
+
+    REQUIRE(v == 2);
+    REQUIRE(history.undo_count() == 2);
+
+    REQUIRE(history.undo());
+    REQUIRE(v == 1);
+    REQUIRE(history.can_undo());
+}
+
+TEST_CASE("EditHistory coalesced new action clears redo stack", "[state][undo]") {
+    EditHistory history;
+    int v = 0;
+
+    history.perform([&]() { v = 1; }, [&]() { v = 0; }, "Drag");
+    history.perform([&]() { v = 10; }, [&]() { v = 1; }, "Commit");
+    REQUIRE(history.undo());
+    REQUIRE(v == 1);
+    REQUIRE(history.can_redo());
+    REQUIRE(history.redo_count() == 1);
+
+    history.perform([&]() { v = 2; }, [&]() { v = 1; }, "Drag");
+
+    REQUIRE(v == 2);
+    REQUIRE(history.undo_count() == 1);
+    REQUIRE_FALSE(history.can_redo());
+    REQUIRE(history.redo_count() == 0);
+}
+
 TEST_CASE("EditHistory empty undo/redo returns false", "[state][undo]") {
     EditHistory history;
     REQUIRE_FALSE(history.undo());
