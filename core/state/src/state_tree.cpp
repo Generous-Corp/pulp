@@ -132,6 +132,20 @@ int StateTree::add_child_removed_listener(ChildListener listener) {
     return id;
 }
 
+void StateTree::remove_child_added_listener(int id) {
+    child_added_listeners_.erase(
+        std::remove_if(child_added_listeners_.begin(), child_added_listeners_.end(),
+                      [id](auto& e) { return e.first == id; }),
+        child_added_listeners_.end());
+}
+
+void StateTree::remove_child_removed_listener(int id) {
+    child_removed_listeners_.erase(
+        std::remove_if(child_removed_listeners_.begin(), child_removed_listeners_.end(),
+                      [id](auto& e) { return e.first == id; }),
+        child_removed_listeners_.end());
+}
+
 void StateTree::notify_property_changed(std::string_view name,
                                         const PropertyValue& old_val,
                                         const PropertyValue& new_val) {
