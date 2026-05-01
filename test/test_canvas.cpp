@@ -399,6 +399,144 @@ TEST_CASE("SDF shapes render via RecordingCanvas fallback", "[canvas][sdf]") {
     }
 }
 
+TEST_CASE("Canvas fallback gradients apply first stop only", "[canvas][fallback]") {
+    RecordingCanvas rc;
+    Color colors[] = {
+        Color::rgba8(10, 20, 30, 255),
+        Color::rgba8(200, 210, 220, 255),
+    };
+    float positions[] = {0.0f, 1.0f};
+
+    rc.set_fill_gradient_linear(0, 0, 10, 10, colors, positions, 2);
+    REQUIRE(rc.count(DrawCommand::Type::set_fill_color) == 1);
+    REQUIRE(rc.commands().back().color.r8() == 10);
+    REQUIRE(rc.commands().back().color.g8() == 20);
+    REQUIRE(rc.commands().back().color.b8() == 30);
+
+    rc.set_fill_gradient_radial(5, 5, 10, nullptr, nullptr, 0);
+    REQUIRE(rc.count(DrawCommand::Type::set_fill_color) == 1);
+
+    rc.set_fill_gradient_conic(5, 5, 0, colors + 1, positions, 1);
+    REQUIRE(rc.count(DrawCommand::Type::set_fill_color) == 2);
+    REQUIRE(rc.commands().back().color.r8() == 200);
+    REQUIRE(rc.commands().back().color.g8() == 210);
+    REQUIRE(rc.commands().back().color.b8() == 220);
+}
+
+TEST_CASE("Canvas fallback paths and waveform emit line segments",
+          "[canvas][fallback]") {
+    RecordingCanvas rc;
+    Canvas::Point2D points[] = {{0, 0}, {5, 10}, {10, 5}};
+
+    rc.stroke_path(points, 0);
+    rc.stroke_path(points, 1);
+    REQUIRE(rc.count(DrawCommand::Type::stroke_line) == 0);
+
+    rc.stroke_path(points, 3);
+    REQUIRE(rc.count(DrawCommand::Type::stroke_line) == 2);
+    REQUIRE(rc.commands()[0].f[0] == Catch::Approx(0.0f));
+    REQUIRE(rc.commands()[0].f[1] == Catch::Approx(0.0f));
+    REQUIRE(rc.commands()[0].f[2] == Catch::Approx(5.0f));
+    REQUIRE(rc.commands()[0].f[3] == Catch::Approx(10.0f));
+    REQUIRE(rc.commands()[1].f[0] == Catch::Approx(5.0f));
+    REQUIRE(rc.commands()[1].f[1] == Catch::Approx(10.0f));
+    REQUIRE(rc.commands()[1].f[2] == Catch::Approx(10.0f));
+    REQUIRE(rc.commands()[1].f[3] == Catch::Approx(5.0f));
+
+    rc.clear();
+    float samples[] = {-1.0f, 0.0f, 1.0f};
+    Canvas::WaveformStyle style;
+    style.line_thickness = 2.5f;
+    style.fill_center = 0.25f;
+
+    rc.draw_waveform(samples, 1, 10, 20, 40, 20, style);
+    REQUIRE(rc.command_count() == 0);
+
+    rc.draw_waveform(samples, 3, 10, 20, 40, 20, style);
+    REQUIRE(rc.count(DrawCommand::Type::set_stroke_color) == 1);
+    REQUIRE(rc.count(DrawCommand::Type::set_line_width) == 1);
+    REQUIRE(rc.count(DrawCommand::Type::stroke_line) == 2);
+    REQUIRE(rc.commands()[1].f[0] == Catch::Approx(2.5f));
+
+    const auto& first = rc.commands()[2];
+    REQUIRE(first.type == DrawCommand::Type::stroke_line);
+    REQUIRE(first.f[0] == Catch::Approx(10.0f));
+    REQUIRE(first.f[1] == Catch::Approx(35.0f));
+    REQUIRE(first.f[2] == Catch::Approx(30.0f));
+    REQUIRE(first.f[3] == Catch::Approx(25.0f));
+
+    const auto& second = rc.commands()[3];
+    REQUIRE(second.type == DrawCommand::Type::stroke_line);
+    REQUIRE(second.f[0] == Catch::Approx(30.0f));
+    REQUIRE(second.f[1] == Catch::Approx(25.0f));
+    REQUIRE(second.f[2] == Catch::Approx(50.0f));
+    REQUIRE(second.f[3] == Catch::Approx(15.0f));
+}
+
+TEST_CASE("Canvas fallbacks cover shader, clear, and shadow no-op paths",
+          "[canvas][fallback]") {
+    RecordingCanvas rc;
+
+    Canvas::ShaderUniforms uniforms;
+    REQUIRE_FALSE(rc.draw_with_sksl("ignored", 1, 2, 3, 4, uniforms));
+    REQUIRE(rc.count(DrawCommand::Type::set_fill_color) == 1);
+    REQUIRE(rc.count(DrawCommand::Type::fill_rect) == 1);
+    REQUIRE(rc.commands()[1].f[0] == Catch::Approx(1.0f));
+    REQUIRE(rc.commands()[1].f[1] == Catch::Approx(2.0f));
+    REQUIRE(rc.commands()[1].f[2] == Catch::Approx(3.0f));
+    REQUIRE(rc.commands()[1].f[3] == Catch::Approx(4.0f));
+
+    rc.clear();
+    uniforms.fill_color = Color::rgba8(11, 22, 33, 128);
+    REQUIRE_FALSE(rc.draw_with_sksl("ignored", 5, 6, 7, 8, uniforms));
+    REQUIRE(rc.commands()[0].color.r8() == 11);
+    REQUIRE(rc.commands()[0].color.g8() == 22);
+    REQUIRE(rc.commands()[0].color.b8() == 33);
+    REQUIRE(rc.commands()[0].color.a8() == 128);
+
+    rc.clear();
+    rc.Canvas::clear_rect(9, 10, 11, 12);
+    REQUIRE(rc.count(DrawCommand::Type::set_fill_color) == 1);
+    REQUIRE(rc.count(DrawCommand::Type::fill_rect) == 1);
+    REQUIRE(rc.commands()[0].color.a8() == 0);
+    REQUIRE(rc.commands()[1].f[0] == Catch::Approx(9.0f));
+    REQUIRE(rc.commands()[1].f[1] == Catch::Approx(10.0f));
+    REQUIRE(rc.commands()[1].f[2] == Catch::Approx(11.0f));
+    REQUIRE(rc.commands()[1].f[3] == Catch::Approx(12.0f));
+
+    rc.clear();
+    rc.Canvas::draw_box_shadow(0, 0, 10, 10, 0, 0, 4, 0,
+                               Color::rgba(0, 0, 0, 0), false, 2);
+    rc.Canvas::draw_box_shadow(0, 0, 0, 0, 0, 0, 4, 0,
+                               Color::rgba(0, 0, 0, 0.5f), false, 2);
+    REQUIRE(rc.command_count() == 0);
+}
+
+TEST_CASE("Canvas SDF fallback covers stroked shape variants",
+          "[canvas][sdf][fallback]") {
+    RecordingCanvas rc;
+    Canvas::SDFStyle style;
+    style.stroke_width = 3.0f;
+    style.stroke_color = Color::rgba8(1, 2, 3, 255);
+    style.corner_radius = 6.0f;
+
+    rc.draw_sdf_shape(Canvas::SDFShape::circle, 0, 0, 20, 10, style);
+    REQUIRE(rc.count(DrawCommand::Type::set_stroke_color) == 1);
+    REQUIRE(rc.count(DrawCommand::Type::set_line_width) == 1);
+    REQUIRE(rc.count(DrawCommand::Type::stroke_rounded_rect) == 1);
+    REQUIRE(rc.commands().back().f[4] == Catch::Approx(5.0f));
+
+    rc.clear();
+    rc.draw_sdf_shape(Canvas::SDFShape::rounded_rect, 1, 2, 30, 40, style);
+    REQUIRE(rc.commands().back().type == DrawCommand::Type::stroke_rounded_rect);
+    REQUIRE(rc.commands().back().f[4] == Catch::Approx(6.0f));
+
+    rc.clear();
+    rc.draw_sdf_shape(Canvas::SDFShape::diamond, 3, 4, 50, 60, style);
+    REQUIRE(rc.commands().back().type == DrawCommand::Type::stroke_rounded_rect);
+    REQUIRE(rc.commands().back().f[4] == Catch::Approx(0.0f));
+}
+
 #ifdef PULP_HAS_SKIA
 // Issue-897 P1 follow-up: ctx.setTransform must compose onto the parent
 // View's transform, not overwrite it. Without this, a CanvasWidget at
