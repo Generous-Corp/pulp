@@ -217,10 +217,24 @@ void MultiDocumentPanel::add_document(std::string title, std::unique_ptr<View> c
 
 void MultiDocumentPanel::remove_document(int index) {
     if (index < 0 || index >= static_cast<int>(documents_.size())) return;
+    const int previous_active = active_;
+    const bool removed_active = index == previous_active;
+    const bool removed_before_active = index < previous_active;
+
     documents_.erase(documents_.begin() + index);
-    if (active_ >= static_cast<int>(documents_.size()))
+    if (documents_.empty()) {
+        active_ = -1;
+    } else if (removed_before_active) {
+        active_ = previous_active - 1;
+    } else if (removed_active) {
+        active_ = std::min(index, static_cast<int>(documents_.size()) - 1);
+    } else if (active_ >= static_cast<int>(documents_.size())) {
         active_ = static_cast<int>(documents_.size()) - 1;
+    }
+
     if (on_close) on_close(index);
+    if ((removed_active || removed_before_active || active_ != previous_active) && on_active_changed)
+        on_active_changed(active_);
 }
 
 void MultiDocumentPanel::set_active(int index) {

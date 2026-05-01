@@ -37,6 +37,10 @@ std::vector<DescriptorIssue> validate_descriptor(const PluginDescriptor& d) {
         issues.push_back({DescriptorIssueSeverity::Error,
                           "manufacturer", "manufacturer is empty"});
     }
+    if (d.version.empty()) {
+        issues.push_back({DescriptorIssueSeverity::Error,
+                          "version", "version is empty"});
+    }
     if (d.bundle_id.empty()) {
         issues.push_back({DescriptorIssueSeverity::Error,
                           "bundle_id", "bundle_id is empty"});
@@ -53,12 +57,18 @@ std::vector<DescriptorIssue> validate_descriptor(const PluginDescriptor& d) {
     // and may legitimately skip audio output entirely.
     if (d.category != PluginCategory::MidiEffect) {
         if (d.output_buses.empty() ||
-            d.output_buses[0].default_channels == 0) {
+            d.output_buses[0].default_channels <= 0) {
             issues.push_back({DescriptorIssueSeverity::Error,
                               "output_buses",
                               "plugin must declare at least one audio "
                               "output bus with > 0 channels"});
         }
+    }
+
+    if (!d.input_buses.empty() && d.input_buses[0].default_channels < 0) {
+        issues.push_back({DescriptorIssueSeverity::Error,
+                          "input_buses",
+                          "input bus channel count must be >= 0"});
     }
 
     if (d.category == PluginCategory::Instrument &&

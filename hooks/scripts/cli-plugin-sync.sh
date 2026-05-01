@@ -54,10 +54,16 @@ done
 if [ -n "$REPO_ROOT" ]; then
     VBC="$REPO_ROOT/tools/scripts/version_bump_check.py"
     SSC="$REPO_ROOT/tools/scripts/skill_sync_check.py"
+    CSC="$REPO_ROOT/tools/scripts/compat_sync_check.py"
     if [ -x "$VBC" ]; then
         "$VBC" --base origin/main --config "$REPO_ROOT/tools/scripts/versioning.json" --mode=hint 2>/dev/null || true
     fi
     if [ -x "$SSC" ]; then
         "$SSC" --base origin/main --config "$REPO_ROOT/tools/scripts/versioning.json" --mode=hint 2>/dev/null || true
+    fi
+    # Compat-sync hint (#1029). Runs against tools/scripts/compat_path_map.json
+    # by default; advisory only — same shape as the version/skill hints.
+    if [ -x "$CSC" ]; then
+        "$CSC" --base origin/main --mode=hint 2>/dev/null || true
     fi
 fi

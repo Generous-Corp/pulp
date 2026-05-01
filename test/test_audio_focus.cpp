@@ -113,6 +113,18 @@ TEST_CASE("AudioFocusRegistry: default token reset is a no-op",
     REQUIRE(token.id() == 0);
 }
 
+TEST_CASE("AudioFocusRegistry: empty subscription is inert",
+          "[audio][focus][issue-640]") {
+    AudioFocusRegistry::instance().reset_for_test();
+
+    auto token = AudioFocusRegistry::instance().subscribe({});
+
+    REQUIRE(token.id() == 0);
+    REQUIRE_NOTHROW(
+        AudioFocusRegistry::instance().publish(AudioFocusState::duck));
+    REQUIRE(AudioFocusRegistry::instance().current() == AudioFocusState::duck);
+}
+
 TEST_CASE("AudioFocusRegistry: callback that drops its own token does not deadlock",
           "[audio][focus][issue-334]") {
     AudioFocusRegistry::instance().reset_for_test();

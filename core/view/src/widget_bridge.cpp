@@ -1767,11 +1767,46 @@ void WidgetBridge::register_api() {
     });
 
     // setPointerEvents(id, "none"|"auto") — CSS pointer-events: skip in hit_test
+    // pulp #1026 — RN-shaped 4-valued pointerEvents:
+    //   "auto"     — default, this view + children intercept events.
+    //   "none"     — neither this view nor descendants intercept events.
+    //   "box-only" — this view intercepts; children do NOT.
+    //   "box-none" — this view does NOT intercept; children do.
+    // Pre-#1026 the bridge only honored auto / none and routed through
+    // set_hit_testable(); we keep that mapping for the binary cases for
+    // back-compat with existing scripts and additionally route the new
+    // four-valued enum via View::set_pointer_events().
     engine_.register_function("setPointerEvents", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto mode = args.get<std::string>(1, "auto");
         auto* v = id.empty() ? &root_ : widget(id);
-        if (v) v->set_hit_testable(mode != "none");
+        if (!v) return choc::value::Value();
+        if (mode == "none") {
+            v->set_hit_testable(false);
+            v->set_pointer_events(View::PointerEvents::none);
+        } else if (mode == "box-only" || mode == "box_only") {
+            v->set_hit_testable(true);
+            v->set_pointer_events(View::PointerEvents::box_only);
+        } else if (mode == "box-none" || mode == "box_none") {
+            v->set_hit_testable(true);
+            v->set_pointer_events(View::PointerEvents::box_none);
+        } else {
+            v->set_hit_testable(true);
+            v->set_pointer_events(View::PointerEvents::auto_);
+        }
+        return choc::value::Value();
+    });
+
+    // pulp #1026 — RN backfaceVisibility ("visible"|"hidden"). Stored on
+    // the View for plumbing parity with @pulp/react. The flag is consumed
+    // by the paint path only when a 3D transform with negative Z is
+    // active; pulp's transform model is currently 2D-affine, so this is
+    // a no-op for painting today and reserved for future 3D support.
+    engine_.register_function("setBackfaceVisibility", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto mode = args.get<std::string>(1, "visible");
+        auto* v = id.empty() ? &root_ : widget(id);
+        if (v) v->set_backface_visible(mode != "hidden");
         return choc::value::Value();
     });
 
@@ -2417,6 +2452,190 @@ void WidgetBridge::register_api() {
             else if (corner == "BottomLeft") v->set_corner_radius_bl(r);
             else if (corner == "BottomRight") v->set_corner_radius_br(r);
         }
+        return choc::value::Value();
+    });
+
+    // pulp #1026 — Standalone border setters (RN parity). The shorthand
+    // setBorder(id, color, width, radius) is convenient for atomic style
+    // application but @pulp/react's prop-applier needs per-attribute
+    // setters so individual JSX style props (`borderColor`, `borderWidth`,
+    // `borderRadius`) can update without recomputing the others.
+    //
+    // setBorderColor(id, hex)
+    engine_.register_function("setBorderColor", [this, parseHexColor](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto hex = args.get<std::string>(1, "");
+        auto* v = id.empty() ? &root_ : widget(id);
+        if (v && !hex.empty()) v->set_border_color(parseHexColor(hex));
+        return choc::value::Value();
+    });
+
+    // setBorderWidth(id, width)
+    engine_.register_function("setBorderWidth", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto width = static_cast<float>(args.get<double>(1, 1.0));
+        auto* v = id.empty() ? &root_ : widget(id);
+        if (v) v->set_border_width(width);
+        return choc::value::Value();
+    });
+
+    // setBorderRadius(id, radius) — uniform corner radius. Per-corner
+    // setters (setBorderTopLeftRadius / TopRight / BottomLeft / BottomRight)
+    // override individual corners on top of the uniform value.
+    engine_.register_function("setBorderRadius", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto radius = static_cast<float>(args.get<double>(1, 0.0));
+        auto* v = id.empty() ? &root_ : widget(id);
+        if (v) v->set_border_radius(radius);
+        return choc::value::Value();
+    });
+
+    // pulp #1026 — Per-corner border-radius shorthands (RN parity).
+    // Equivalent to `setCornerRadius(id, "TopLeft", r)` but matches the
+    // RN style-prop name 1:1 so @pulp/react's prop-applier can bind them
+    // without a translation layer. Sets the `has_corner_radii_` flag on
+    // the View; paint_all() then routes background/border through the
+    // per-corner path builder rather than fill_rounded_rect.
+    engine_.register_function("setBorderTopLeftRadius", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto r = static_cast<float>(args.get<double>(1, 0.0));
+        auto* v = id.empty() ? &root_ : widget(id);
+        if (v) v->set_corner_radius_tl(r);
+        return choc::value::Value();
+    });
+    engine_.register_function("setBorderTopRightRadius", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto r = static_cast<float>(args.get<double>(1, 0.0));
+        auto* v = id.empty() ? &root_ : widget(id);
+        if (v) v->set_corner_radius_tr(r);
+        return choc::value::Value();
+    });
+    engine_.register_function("setBorderBottomLeftRadius", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto r = static_cast<float>(args.get<double>(1, 0.0));
+        auto* v = id.empty() ? &root_ : widget(id);
+        if (v) v->set_corner_radius_bl(r);
+        return choc::value::Value();
+    });
+    engine_.register_function("setBorderBottomRightRadius", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto r = static_cast<float>(args.get<double>(1, 0.0));
+        auto* v = id.empty() ? &root_ : widget(id);
+        if (v) v->set_corner_radius_br(r);
+        return choc::value::Value();
+    });
+
+    // pulp #1026 — Per-side border color/width shorthands (RN parity).
+    // RN exposes `borderTopColor`, `borderTopWidth`, etc. as separate
+    // style props; pulp's existing `setBorderSide(id, side, width, color)`
+    // sets both at once which is awkward for a prop-by-prop applier. The
+    // setBorderTop/Right/Bottom/Left{Color,Width} setters route through
+    // the per-side fields preserving whichever attribute the call doesn't
+    // specify.
+    auto applyBorderSide = [](View* v, const std::string& side,
+                              std::optional<canvas::Color> color,
+                              std::optional<float> width) {
+        if (!v) return;
+        // pulp #1026 — preserve the unrelated attribute when a per-side
+        // setter is called for only color OR only width, matching how
+        // RN's JSX prop-applier emits property updates one at a time.
+        canvas::Color cur_color{};
+        float cur_width = 0.0f;
+        if (side == "top")    { cur_color = v->border_top_color();    cur_width = v->border_top_width(); }
+        else if (side == "right") { cur_color = v->border_right_color();  cur_width = v->border_right_width(); }
+        else if (side == "bottom"){ cur_color = v->border_bottom_color(); cur_width = v->border_bottom_width(); }
+        else if (side == "left")  { cur_color = v->border_left_color();   cur_width = v->border_left_width(); }
+        canvas::Color c = color.value_or(cur_color);
+        float w = width.value_or(cur_width);
+        if (side == "top") v->set_border_top(c, w);
+        else if (side == "right") v->set_border_right(c, w);
+        else if (side == "bottom") v->set_border_bottom(c, w);
+        else if (side == "left") v->set_border_left(c, w);
+    };
+    engine_.register_function("setBorderTopColor", [this, parseHexColor, applyBorderSide](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto hex = args.get<std::string>(1, "");
+        auto* v = id.empty() ? &root_ : widget(id);
+        if (v && !hex.empty()) applyBorderSide(v, "top", parseHexColor(hex), std::nullopt);
+        return choc::value::Value();
+    });
+    engine_.register_function("setBorderRightColor", [this, parseHexColor, applyBorderSide](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto hex = args.get<std::string>(1, "");
+        auto* v = id.empty() ? &root_ : widget(id);
+        if (v && !hex.empty()) applyBorderSide(v, "right", parseHexColor(hex), std::nullopt);
+        return choc::value::Value();
+    });
+    engine_.register_function("setBorderBottomColor", [this, parseHexColor, applyBorderSide](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto hex = args.get<std::string>(1, "");
+        auto* v = id.empty() ? &root_ : widget(id);
+        if (v && !hex.empty()) applyBorderSide(v, "bottom", parseHexColor(hex), std::nullopt);
+        return choc::value::Value();
+    });
+    engine_.register_function("setBorderLeftColor", [this, parseHexColor, applyBorderSide](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto hex = args.get<std::string>(1, "");
+        auto* v = id.empty() ? &root_ : widget(id);
+        if (v && !hex.empty()) applyBorderSide(v, "left", parseHexColor(hex), std::nullopt);
+        return choc::value::Value();
+    });
+    engine_.register_function("setBorderTopWidth", [this, applyBorderSide](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto w = static_cast<float>(args.get<double>(1, 1.0));
+        auto* v = id.empty() ? &root_ : widget(id);
+        if (v) applyBorderSide(v, "top", std::nullopt, w);
+        return choc::value::Value();
+    });
+    engine_.register_function("setBorderRightWidth", [this, applyBorderSide](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto w = static_cast<float>(args.get<double>(1, 1.0));
+        auto* v = id.empty() ? &root_ : widget(id);
+        if (v) applyBorderSide(v, "right", std::nullopt, w);
+        return choc::value::Value();
+    });
+    engine_.register_function("setBorderBottomWidth", [this, applyBorderSide](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto w = static_cast<float>(args.get<double>(1, 1.0));
+        auto* v = id.empty() ? &root_ : widget(id);
+        if (v) applyBorderSide(v, "bottom", std::nullopt, w);
+        return choc::value::Value();
+    });
+    engine_.register_function("setBorderLeftWidth", [this, applyBorderSide](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto w = static_cast<float>(args.get<double>(1, 1.0));
+        auto* v = id.empty() ? &root_ : widget(id);
+        if (v) applyBorderSide(v, "left", std::nullopt, w);
+        return choc::value::Value();
+    });
+
+    // pulp #1026 — RN-shaped shadow primitive. RN's View style-prop names
+    // are { shadowColor, shadowOffset: {x,y}, shadowOpacity, shadowRadius }
+    // — none of which carries spread or inset. We lower these onto the
+    // existing pulp #925 box-shadow primitive (which carries spread+inset
+    // for CSS parity) by:
+    //   - hex carrying alpha 1.0 ('#RRGGBBff')
+    //   - composing shadowOpacity into the alpha channel (0..1)
+    //   - using shadowRadius as the blur, spread = 0, inset = false.
+    // The underlying setBoxShadow is left unchanged so CSS-style consumers
+    // keep working unaltered.
+    engine_.register_function("setShadow", [this, parseHexColor](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto hex = args.get<std::string>(1, "#000000ff");
+        auto ox = static_cast<float>(args.get<double>(2, 0.0));
+        auto oy = static_cast<float>(args.get<double>(3, 0.0));
+        auto opacity = static_cast<float>(args.get<double>(4, 1.0));
+        auto radius = static_cast<float>(args.get<double>(5, 0.0));
+        auto* v = id.empty() ? &root_ : widget(id);
+        if (!v) return choc::value::Value();
+        auto color = parseHexColor(hex);
+        opacity = std::clamp(opacity, 0.0f, 1.0f);
+        // RN composes opacity multiplicatively with whatever alpha came
+        // from shadowColor. Default shadowColor is opaque black, so
+        // opacity alone drives the final alpha for 99% of call sites.
+        color.a *= opacity;
+        v->set_box_shadow(ox, oy, /*blur=*/radius, /*spread=*/0.0f,
+                          color, /*inset=*/false);
         return choc::value::Value();
     });
 
