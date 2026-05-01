@@ -200,6 +200,16 @@ TEST_CASE("from_json rejects wrong schema version", "[scan_cache]") {
     REQUIRE_FALSE(b.from_json("not json"));
 }
 
+TEST_CASE("ScanCache from_json accepts schema-only blob as an empty cache",
+          "[scan_cache]") {
+    HostScanCache cache;
+    cache.put("/tmp/existing.vst3", sample_info());
+
+    REQUIRE(cache.from_json(R"({"schema_version": 1})"));
+    REQUIRE(cache.size() == 0);
+    REQUIRE(cache.entries().empty());
+}
+
 TEST_CASE("ScanCache from_json skips malformed entries while loading valid entries",
           "[scan_cache]") {
     HostScanCache c;
