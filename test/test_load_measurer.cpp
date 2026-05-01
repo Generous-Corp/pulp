@@ -178,7 +178,6 @@ TEST_CASE("AudioProcessLoadMeasurer ignores invalid begin timing inputs", "[audi
         {512, -44100.0f},
         {512, std::numeric_limits<float>::quiet_NaN()},
         {512, std::numeric_limits<float>::infinity()},
-        {std::numeric_limits<int>::max(), std::numeric_limits<float>::min()},
     };
 
     for (const auto& input : inputs) {
@@ -191,7 +190,31 @@ TEST_CASE("AudioProcessLoadMeasurer ignores invalid begin timing inputs", "[audi
     }
 }
 
-TEST_CASE("AudioProcessLoadMeasurer reset clears pending timing state", "[audio][load][issue-641]") {
+TEST_CASE("AudioProcessLoadMeasurer rejects overflow-sized available time", "[audio][load][issue-640]") {
+    AudioProcessLoadMeasurer m;
+    m.set_smoothing(1.0f);
+
+    m.begin(std::numeric_limits<int>::max(), std::numeric_limits<float>::min());
+    m.end();
+
+    REQUIRE_THAT(m.load(), WithinAbs(0.0f, 0.001f));
+    REQUIRE_THAT(m.peak_load(), WithinAbs(0.0f, 0.001f));
+}
+
+TEST_CASE("AudioProcessLoadMeasurer accepts valid available time", "[audio][load][issue-640]") {
+    AudioProcessLoadMeasurer m;
+    m.set_smoothing(1.0f);
+
+    m.begin(480, 48000.0f);
+    busy_wait_for(std::chrono::microseconds(1200));
+    m.end();
+
+    REQUIRE(m.load() > 0.0f);
+    REQUIRE(std::isfinite(m.load()));
+    REQUIRE_THAT(m.peak_load(), WithinAbs(m.load(), 0.001f));
+}
+
+TEST_CASE("AudioProcessLoadMeasurer reset clears pending timing state", "[audio][load][issue-640]") {
     AudioProcessLoadMeasurer m;
     m.set_smoothing(1.0f);
 
