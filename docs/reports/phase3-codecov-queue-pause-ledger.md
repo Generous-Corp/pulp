@@ -219,6 +219,7 @@ coverage merges and is held for a branch refresh.
 | #1075 | `c34f11f7138c` | merged from `UNSTABLE`; required `linux`, `macos`, and `windows` wrappers plus Codecov patch were green. Red Windows coverage job was advisory artifact-upload plumbing: tests, Cobertura existence check, and Codecov upload succeeded |
 | #1133 | `e1a22a1ffd93` | merged from `UNSTABLE`; required `linux`, `macos`, and `windows` wrappers, Codecov patch, diff coverage, and coverage/build lanes were green, only advisory macOS ASan/UBSan jobs were still pending |
 | #1086 | `0300ba207577` | merged from `UNSTABLE`; required `linux`, `macos`, and `windows` wrappers plus Codecov patch were green, Windows/Linux coverage and platform build lanes were green, pending macOS coverage/sanitizers were advisory |
+| #1074 | `5898bf057163` | merged from `UNSTABLE`; required `linux`, `macos`, and `windows` wrappers, Codecov patch, diff coverage, coverage lanes, and platform build lanes were green, only advisory macOS sanitizer jobs were still pending |
 
 ## Conflict And Failure Triage
 
@@ -440,6 +441,14 @@ coverage merges and is held for a branch refresh.
   coverage worktrees only, recovering local free disk from roughly
   248 MiB to roughly 3.7 GiB. Source worktrees and branches were left
   intact.
+
+### Merge Update 2026-05-01 06:01 EDT
+
+- #1074 merged as `5898bf057163` after required `linux`, `macos`, and
+  `windows` wrappers, Codecov patch, diff coverage, coverage lanes, and
+  platform build lanes were green. Pending macOS sanitizer jobs were
+  advisory.
+- Tracker comments posted to #641 and #640.
 
 ## Real Diff-Gap Patch Queue
 
