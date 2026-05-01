@@ -118,6 +118,35 @@ class ValidateRegistryTests(unittest.TestCase):
         self.assertEqual(len(warnings), 1)
         self.assertIn("custom-lib", warnings[0])
 
+    def test_schema_validation_reports_paths_and_skips_without_jsonschema(self) -> None:
+        class FakeError:
+            def __init__(self, path: list[str], message: str):
+                self.absolute_path = path
+                self.path = path
+                self.message = message
+
+        class FakeValidator:
+            def __init__(self, schema: dict):
+                self.schema = schema
+
+            def iter_errors(self, registry: dict):
+                return [
+                    FakeError(["packages", "bad"], "bad package"),
+                    FakeError([], "root problem"),
+                ]
+
+        fake_jsonschema = SimpleNamespace(Draft7Validator=FakeValidator)
+        with mock.patch.dict(sys.modules, {"jsonschema": fake_jsonschema}):
+            errors = vr.validate_schema({"packages": {}}, {})
+
+        self.assertEqual(errors, ["  (root): root problem", "  packages.bad: bad package"])
+
+        blocked_import = mock.patch("builtins.__import__", side_effect=ImportError("missing"))
+        err = io.StringIO()
+        with blocked_import, contextlib.redirect_stderr(err):
+            self.assertEqual(vr.validate_schema({}, {}), [])
+        self.assertIn("jsonschema not installed", err.getvalue())
+
     def test_main_valid_registry_reports_success(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             root = pathlib.Path(td)
@@ -155,6 +184,121 @@ class ValidateRegistryTests(unittest.TestCase):
             text = out.getvalue()
             self.assertIn("mobile-ready", text)
             self.assertIn("1 packages validated, 0 errors, 0 warnings", text)
+
+    def test_main_reports_schema_license_and_strict_warning_failures(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td)
+            registry_path = root / "registry.json"
+            schema_path = root / "schema.json"
+            registry_path.write_text(
+                json.dumps(
+                    {
+                        "registry_version": 2,
+                        "packages": {
+                            "warning-only": {
+                                "version": "1.0.0",
+                                "license": "Custom",
+                                "verification": {
+                                    "verified_version": "0.9.0",
+                                    "build_status": {"macOS-arm64": "pass"},
+                                },
+                                "platforms": {"iOS": {}},
+                            },
+                            "bad-license": {
+                                "version": "1.0.0",
+                                "license": "GPL-2.0-only",
+                                "verification": {
+                                    "verified_version": "1.0.0",
+                                    "build_status": {"macOS-arm64": "pass"},
+                                },
+                                "platforms": {"Android": {}},
+                            },
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            schema_path.write_text("{}", encoding="utf-8")
+
+            def fake_validate_schema(registry: dict, schema: dict) -> list[str]:
+                return ["  packages.bad-license: invalid for test"]
+
+            out = io.StringIO()
+            with module_attr(vr, "REGISTRY", registry_path), module_attr(vr, "SCHEMA", schema_path):
+                with mock.patch.object(vr, "validate_schema", fake_validate_schema):
+                    with argv(["validate_registry.py", "--strict", "--check-licenses"]):
+                        with contextlib.redirect_stdout(out):
+                            rc = vr.main()
+
+            text = out.getvalue()
+            self.assertEqual(rc, 1)
+            self.assertIn("Schema validation errors:", text)
+            self.assertIn("warning-only", text)
+            self.assertIn("Warnings:", text)
+            self.assertIn("License errors:", text)
+            self.assertIn("License warnings:", text)
+            self.assertIn("bad-license", text)
+
+            registry_path.write_text(
+                json.dumps(
+                    {
+                        "registry_version": 2,
+                        "packages": {
+                            "warning-only": {
+                                "version": "1.0.0",
+                                "license": "MIT",
+                                "verification": {
+                                    "verified_version": "0.9.0",
+                                    "build_status": {"macOS-arm64": "pass"},
+                                },
+                                "platforms": {"iOS": {}},
+                            }
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with module_attr(vr, "REGISTRY", registry_path), module_attr(vr, "SCHEMA", schema_path):
+                with mock.patch.object(vr, "validate_schema", return_value=[]):
+                    with argv(["validate_registry.py", "--strict"]):
+                        with contextlib.redirect_stdout(io.StringIO()):
+                            rc = vr.main()
+
+            self.assertEqual(rc, 1)
+
+    def test_main_reports_structural_errors(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = pathlib.Path(td)
+            registry_path = root / "registry.json"
+            schema_path = root / "schema.json"
+            registry_path.write_text(
+                json.dumps(
+                    {
+                        "registry_version": 2,
+                        "packages": {
+                            "bad": {
+                                "version": "1.0.0",
+                                "license": "MIT",
+                                "verification": {"verified_version": "1.0.0"},
+                                "platforms": {},
+                            }
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            schema_path.write_text("{}", encoding="utf-8")
+
+            out = io.StringIO()
+            with module_attr(vr, "REGISTRY", registry_path), module_attr(vr, "SCHEMA", schema_path):
+                with mock.patch.object(vr, "validate_schema", return_value=[]):
+                    with argv(["validate_registry.py"]):
+                        with contextlib.redirect_stdout(out):
+                            rc = vr.main()
+
+            self.assertEqual(rc, 1)
+            self.assertIn("Structural errors:", out.getvalue())
+            self.assertIn("bad: must have at least one platform", out.getvalue())
 
 
 class FreshnessCheckTests(unittest.TestCase):
@@ -209,6 +353,29 @@ class FreshnessCheckTests(unittest.TestCase):
         self.assertIn("Repository is archived", result.issues)
         self.assertTrue(any("Newer version available" in issue for issue in result.issues))
         self.assertTrue(any("License mismatch" in issue for issue in result.issues))
+
+    def test_check_package_falls_back_to_tags_and_ignores_noassertion_license(self) -> None:
+        responses = {
+            "repos/acme/tagged": {"archived": False, "pushed_at": ""},
+            "repos/acme/tagged/releases?per_page=1": [],
+            "repos/acme/tagged/tags?per_page=1": [{"name": "v1.2.0"}],
+            "repos/acme/tagged/license": {"license": {"spdx_id": "NOASSERTION"}},
+        }
+
+        with mock.patch.object(fc, "run_gh", side_effect=lambda args: responses[args[0]]):
+            result = fc.check_package(
+                "tagged",
+                {
+                    "version": "v1.0.0",
+                    "license": "MIT",
+                    "fetch": {"git_repository": "https://github.com/acme/tagged.git"},
+                },
+            )
+
+        self.assertEqual(result.latest_version, "v1.2.0")
+        self.assertIsNone(result.last_commit_date)
+        self.assertFalse(result.license_changed)
+        self.assertEqual(result.issues, ["Newer version available: v1.2.0 (pinned: v1.0.0)"])
 
     def test_check_package_handles_unparseable_and_unreachable_repositories(self) -> None:
         bad_url = fc.check_package(
@@ -272,6 +439,63 @@ class FreshnessCheckTests(unittest.TestCase):
 
             self.assertEqual(rc, 1)
             self.assertIn("not in registry", err.getvalue())
+
+    def test_main_emits_markdown_and_text_issue_summaries(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            registry_path = pathlib.Path(td) / "registry.json"
+            registry_path.write_text(
+                json.dumps(
+                    {
+                        "packages": {
+                            "ok": {"version": "1.0.0"},
+                            "stale": {"version": "1.0.0"},
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            def fake_check(slug: str, pkg: dict):
+                if slug == "stale":
+                    return fc.CheckResult(
+                        package=slug,
+                        pinned_version=pkg["version"],
+                        latest_version="2.0.0",
+                        last_commit_date="2026-04-02",
+                        issues=["Newer version available"],
+                    )
+                return fc.CheckResult(
+                    package=slug,
+                    pinned_version=pkg["version"],
+                    latest_version=pkg["version"],
+                    last_commit_date="2026-04-01",
+                )
+
+            out = io.StringIO()
+            err = io.StringIO()
+            with module_attr(fc, "REGISTRY", registry_path), mock.patch.object(fc, "check_package", fake_check):
+                with argv(["freshness_check.py", "--format", "markdown"]):
+                    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                        rc = fc.main()
+
+            self.assertEqual(rc, 1)
+            self.assertIn("| Package | Pinned | Latest | Last Commit | Issues |", out.getvalue())
+            self.assertIn("| stale | 1.0.0 | 2.0.0 | 2026-04-02 | Newer version available |", out.getvalue())
+            self.assertIn("2 packages checked, 1 issues", err.getvalue())
+
+            out = io.StringIO()
+            with module_attr(fc, "REGISTRY", registry_path), mock.patch.object(fc, "check_package", fake_check):
+                with argv(["freshness_check.py"]):
+                    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+                        rc = fc.main()
+
+            self.assertEqual(rc, 1)
+            text = out.getvalue()
+            self.assertIn("ok", text)
+            self.assertIn("OK", text)
+            self.assertIn("stale", text)
+            self.assertIn("ISSUES", text)
+            self.assertIn("- Newer version available", text)
 
 
 if __name__ == "__main__":

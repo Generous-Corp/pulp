@@ -10,6 +10,8 @@
 #include <iostream>
 #include <sstream>
 #include <string>
+#include <charconv>
+#include <system_error>
 #include <thread>
 #include <chrono>
 #include <atomic>
@@ -46,6 +48,37 @@ namespace {
 using namespace pulp::inspect;
 using namespace pulp::events;
 
+static bool parse_port_arg(const std::string& text, int& out) {
+    if (text.empty()) return false;
+
+    int value = 0;
+    const char* begin = text.data();
+    const char* end = begin + text.size();
+    auto [ptr, ec] = std::from_chars(begin, end, value);
+    if (ec != std::errc{} || ptr != end || value <= 0 || value > 65535) {
+        return false;
+    }
+
+    out = value;
+    return true;
+}
+
+static bool require_arg_value(const std::vector<std::string>& args,
+                              size_t& i,
+                              const char* flag,
+                              std::string& out) {
+    if (i + 1 >= args.size()) {
+        std::cerr << "Error: " << flag << " requires a value\n";
+        return false;
+    }
+    out = args[++i];
+    if (out.empty()) {
+        std::cerr << "Error: " << flag << " requires a non-empty value\n";
+        return false;
+    }
+    return true;
+}
+
 // Find the inspector port by reading discovery files
 static int discover_port() {
     std::string tmp_dir;
@@ -61,13 +94,23 @@ static int discover_port() {
     int found_port = 0;
     fs::file_time_type newest_time{};
 
-    for (auto& entry : fs::directory_iterator(tmp_dir)) {
+    std::error_code ec;
+    if (!fs::is_directory(tmp_dir, ec)) {
+        return 0;
+    }
+
+    fs::directory_iterator it(tmp_dir, ec);
+    fs::directory_iterator end;
+    for (; !ec && it != end; it.increment(ec)) {
+        const auto& entry = *it;
         auto name = entry.path().filename().string();
         if (name.find("pulp-inspector-") == 0 && name.find(".port") != std::string::npos) {
             std::ifstream f(entry.path());
             int port = 0;
             if (f >> port && port > 0) {
-                auto mtime = fs::last_write_time(entry.path());
+                std::error_code time_ec;
+                auto mtime = fs::last_write_time(entry.path(), time_ec);
+                if (time_ec) continue;
                 if (mtime > newest_time || found_port == 0) {
                     newest_time = mtime;
                     found_port = port;
@@ -104,6 +147,7 @@ int cmd_inspect(const std::vector<std::string>& args) {
     std::string one_shot_command;
     std::string one_shot_params = "{}";
     std::string output_file;
+    bool params_provided = false;
 
     for (size_t i = 0; i < args.size(); ++i) {
         if (args[i] == "--help" || args[i] == "-h") {
@@ -122,11 +166,36 @@ int cmd_inspect(const std::vector<std::string>& args) {
             std::cout << "  pulp inspect --host 192.168.1.42          # Remote debugging\n";
             return 0;
         }
-        if (args[i] == "--host" && i + 1 < args.size()) host = args[++i];
-        else if (args[i] == "--port" && i + 1 < args.size()) port = std::stoi(args[++i]);
-        else if (args[i] == "--command" && i + 1 < args.size()) one_shot_command = args[++i];
-        else if (args[i] == "--params" && i + 1 < args.size()) one_shot_params = args[++i];
-        else if (args[i] == "--output" && i + 1 < args.size()) output_file = args[++i];
+        if (args[i] == "--host") {
+            if (!require_arg_value(args, i, "--host", host)) return 2;
+        } else if (args[i] == "--port") {
+            std::string text;
+            if (!require_arg_value(args, i, "--port", text)) return 2;
+            if (!parse_port_arg(text, port)) {
+                std::cerr << "Error: invalid --port value: " << text << "\n";
+                return 2;
+            }
+        } else if (args[i] == "--command") {
+            if (!require_arg_value(args, i, "--command", one_shot_command)) return 2;
+        } else if (args[i] == "--params") {
+            if (!require_arg_value(args, i, "--params", one_shot_params)) return 2;
+            params_provided = true;
+        } else if (args[i] == "--output") {
+            if (!require_arg_value(args, i, "--output", output_file)) return 2;
+        } else {
+            std::cerr << "Error: unknown inspect argument: " << args[i] << "\n";
+            std::cerr << "Run `pulp inspect --help` for usage.\n";
+            return 2;
+        }
+    }
+
+    if (!output_file.empty() && one_shot_command.empty()) {
+        std::cerr << "Error: --output requires --command\n";
+        return 2;
+    }
+    if (params_provided && one_shot_command.empty()) {
+        std::cerr << "Error: --params requires --command\n";
+        return 2;
     }
 
     // Auto-discover port if not specified

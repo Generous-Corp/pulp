@@ -17,7 +17,7 @@ public:
     FileBrowser();
 
     /// Set the root directory to browse from.
-    void set_root(const std::filesystem::path& root) { root_ = root; refresh(); }
+    void set_root(const std::filesystem::path& root) { root_ = root; current_ = root; refresh(); }
     const std::filesystem::path& root() const { return root_; }
 
     /// Set the current directory.
