@@ -9,7 +9,8 @@ This local ledger records the open `codecov` PR validation runs paused to free N
 - Reopen Codecov validation in small batches; do not dump the full paused queue back into Namespace at once.
 - While a batch is in flight, continue local-only tranche preparation, review, and failure triage.
 - Merge `UNSTABLE` PRs only when GitHub branch protection shows all required checks are green and the PR can merge normally.
-- Dispatch by branch and pinned head SHA using `shipyard cloud run build <branch> --provider namespace --require-sha <sha> --no-wait` or the workflow-specific equivalent.
+- For merge eligibility after a pause, refresh PR branches with `gh pr update-branch <pr>` so GitHub creates fresh `pull_request` check suites.
+- Use `shipyard cloud run build <branch> --provider namespace --require-sha <sha> --no-wait` only as a Namespace smoke or targeted diagnostic; successful `workflow_dispatch` checks do not replace stale failed or cancelled `pull_request` contexts for branch protection.
 - If one lane is slow or stuck, prefer `shipyard cloud retarget`/`shipyard cloud add-lane` so existing useful runs are preserved instead of cancelled wholesale.
 
 ## Snapshot Summary
@@ -51,6 +52,19 @@ Next refill rule: when this batch drops below four active Codecov build
 runs, dispatch the next merge-ready paused PRs by pinned SHA and update
 this table before adding more local-only tranche PRs.
 
+Follow-up correction: these `workflow_dispatch` runs all passed, but they
+did not satisfy branch protection because stale failed or cancelled
+`pull_request` check runs with the same required context names remained on
+the PR head commits. The branches were then refreshed against `main` with
+`gh pr update-branch` to create merge-eligible PR-event check suites:
+
+| PR | Branch | Refreshed Head | Build Run | Coverage Run | Status |
+| --- | --- | --- | --- | --- | --- |
+| #1140 | `feature/status-ladder-coverage-643` | `f48a49e62ec3` | `25203370720` | `25203370713` | pending |
+| #1141 | `feature/ship-appcast-coverage-644-next` | `bccfec4797d5` | `25203371862` | `25203371864` | pending |
+| #1142 | `codex/package-tools-coverage-643` | `45dbdda453a3` | `25203373031` | `25203372990` | pending |
+| #1143 | `feature/render-compute-coverage-646` | `14098f98d57e` | `25203374251` | `25203374250` | pending |
+
 ### 2026-05-01 Batch 2: Build Gate Refill
 
 The first batch assigned cleanly on Namespace with no GitHub queued-run
@@ -85,6 +99,13 @@ Held for triage: #1131 `feature/audio-window-enumerator-coverage-640-next`
 has passing `codecov/patch` but failing `Diff coverage required`, so it
 likely needs a coverage workflow re-run or a patch rather than build-only
 refill.
+
+Follow-up correction: because build-only dispatches do not clear stale
+PR-event contexts, the queued or running build-only dispatches for
+#1132-#1139 were cancelled after the #1140-#1143 branch-refresh batch
+started. Cancelled workflow_dispatch run IDs: `25202718222`,
+`25202718230`, `25202718329`, `25202718395`, `25202770455`,
+`25202770462`, `25202770509`, and `25202770726`.
 
 ## Merge Waves While Queue Is In Flight
 
@@ -125,7 +146,7 @@ coverage merges and is held for a branch refresh.
 | --- | --- | --- | --- |
 | #1099 | `feature/view-layout-widgets-coverage-493` | `66decf5958e8` | Conflict resolved and pushed; normal PR workflows are running. Local worker validated `pulp-test-view-layout-widgets`, `pulp-test-phase9-widgets`, and `pulp-test-property-list` directly. |
 | #1084 | `feature/runtime-text-diff-coverage-641` | `cb63e51416ed` | Conflict resolved and pushed; normal PR workflows are running. Local worker validated `pulp-test-runtime-utils "[runtime][text-diff]"` and matching CTest cases. |
-| #1089 | `feature/view-file-browser-coverage-493` | `826a043f` | Conflict refresh assigned to a worker; waiting for pushed result. |
+| #1089 | `feature/view-file-browser-coverage-493` | `17a8471282d9` | Conflict resolved and pushed; normal PR workflows are running. `git diff --check` passed. Local CMake configure could not be completed because the laptop filesystem was full, so CI/Namespace is the validation source. Current blocker: `Enforce version & skill sync` failed on run `25203295740`; assigned for focused gate triage. |
 | #1131 | `feature/audio-window-enumerator-coverage-640-next` | `f5af90f4f5af` | Pushed coverage-harness fix for Windows `.exe` object discovery in `scripts/run_coverage.sh`; `bash -n`, `test_run_coverage.py`, skill-sync report, version-bump report, and `git diff --check` passed. Local CMake validation was not rerun after the harness patch because the laptop filesystem had only about 150-211 MiB free; the earlier excerpt binary validation was already green and the platform-sensitive coverage fix now needs CI/Namespace. |
 
 ## Local-Only Work Prepared During Pause
