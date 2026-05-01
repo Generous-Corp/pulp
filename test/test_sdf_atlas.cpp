@@ -18,6 +18,16 @@
 using pulp::canvas::SdfAtlas;
 using pulp::canvas::SdfGlyph;
 
+TEST_CASE("SdfAtlas default state is empty", "[canvas][sdf][issue-641]") {
+    SdfAtlas atlas;
+    REQUIRE(atlas.glyph_count() == 0);
+    REQUIRE(atlas.base_size() == 0);
+    REQUIRE(atlas.width() == 0);
+    REQUIRE(atlas.height() == 0);
+    REQUIRE(atlas.pixels() == nullptr);
+    REQUIRE(atlas.glyph(U'A') == nullptr);
+}
+
 TEST_CASE("SdfAtlas builds with the requested glyphs", "[canvas][sdf]") {
     SdfAtlas atlas;
     std::vector<char32_t> chars = {U'A', U'B', U'C', U'D'};
@@ -36,6 +46,54 @@ TEST_CASE("SdfAtlas builds with the requested glyphs", "[canvas][sdf]") {
         REQUIRE(g->height == 32);
     }
     REQUIRE(atlas.glyph(U'Z') == nullptr);
+}
+
+TEST_CASE("SdfAtlas rejects invalid build arguments without allocation",
+          "[canvas][sdf][issue-641]") {
+    SdfAtlas empty_chars;
+    REQUIRE_FALSE(empty_chars.build("stub", {}, 32, 4, 256));
+    REQUIRE(empty_chars.glyph_count() == 0);
+    REQUIRE(empty_chars.pixels() == nullptr);
+
+    SdfAtlas invalid_size;
+    REQUIRE_FALSE(invalid_size.build("stub", {U'A'}, 0, 4, 256));
+    REQUIRE(invalid_size.glyph_count() == 0);
+    REQUIRE(invalid_size.pixels() == nullptr);
+
+    SdfAtlas invalid_padding;
+    REQUIRE_FALSE(invalid_padding.build("stub", {U'A'}, 32, -1, 256));
+    REQUIRE(invalid_padding.glyph_count() == 0);
+    REQUIRE(invalid_padding.pixels() == nullptr);
+}
+
+TEST_CASE("SdfAtlas packs glyphs into deterministic tile coordinates",
+          "[canvas][sdf][issue-641]") {
+    SdfAtlas atlas;
+    REQUIRE(atlas.build("stub", {U'A', U'B', U'C'}, 10, 1, 24));
+    REQUIRE(atlas.width() == 24);
+    REQUIRE(atlas.height() == 24);
+
+    const SdfGlyph* a = atlas.glyph(U'A');
+    const SdfGlyph* b = atlas.glyph(U'B');
+    const SdfGlyph* c = atlas.glyph(U'C');
+    REQUIRE(a != nullptr);
+    REQUIRE(b != nullptr);
+    REQUIRE(c != nullptr);
+
+    REQUIRE(a->atlas_x == 1);
+    REQUIRE(a->atlas_y == 1);
+    REQUIRE(b->atlas_x == 13);
+    REQUIRE(b->atlas_y == 1);
+    REQUIRE(c->atlas_x == 1);
+    REQUIRE(c->atlas_y == 13);
+}
+
+TEST_CASE("SdfAtlas duplicate codepoints share one lookup entry",
+          "[canvas][sdf][issue-641]") {
+    SdfAtlas atlas;
+    REQUIRE(atlas.build("stub", {U'A', U'A'}, 16, 2, 128));
+    REQUIRE(atlas.glyph_count() == 1);
+    REQUIRE(atlas.glyph(U'A') != nullptr);
 }
 
 TEST_CASE("SdfAtlas SDF values: inside high, outside low", "[canvas][sdf]") {
