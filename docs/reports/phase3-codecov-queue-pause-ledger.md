@@ -26,21 +26,21 @@ This local ledger records the open `codecov` PR validation runs paused to free N
 
 ## Current Watch Point
 
-Last live check: 2026-05-01 13:03:28 EDT.
+Last live check: 2026-05-01 13:05:56 EDT.
 
-- Open `codecov` PRs: 10.
+- Open `codecov` PRs: 9.
 - Merge state: remaining open Codecov PRs are currently blocked on
   active/queued lanes, with no current failure candidate.
-- GitHub Actions pressure: 25 active runs, with 22 queued and 3 in
+- GitHub Actions pressure: 25 active runs, with 20 queued and 5 in
   progress.
 - Codecov dashboard watch: recent rapid main merges cancelled most older
   main-branch `Coverage` push runs. The newest surviving main coverage
-  upload is run `25222615930` for `daa0aa704427` (#1115), currently
+  upload is run `25224038348` for `c544a9ef221b` (#1096), currently
   queued; when that run, or a newer main coverage run, completes and
   Codecov ingests it, the project dashboard should reflect the merged
   PRs through that main commit.
 - Just merged: #1117, #1204, #1199, #1194, #1125, #1116, #1113, #1104,
-  #1097, #1088, #1203, #1115, and #1195 after required
+  #1097, #1088, #1203, #1115, #1195, #1083, and #1096 after required
   `linux`/`macos`/`windows` wrappers and Codecov patch gates were green.
 - Active triage: #1202 failed its first Linux Namespace build because the
   fake `amixer` test replaced `PATH` and hid `grep`/`head`/`tr`. Pushed
@@ -331,6 +331,7 @@ coverage merges and is held for a branch refresh.
 | #1115 | `daa0aa704427` | merged from `UNSTABLE`; required `linux`, `macos`, and `windows` wrappers plus Codecov patch were green, only advisory macOS coverage was still pending |
 | #1195 | `2c5135b05628` | merged from `CLEAN`; required `linux`, `macos`, and `windows` wrappers, Codecov patch, diff coverage, coverage lanes, and sanitizer lanes were green |
 | #1083 | `df3ca99d8052` | merged from `CLEAN`; required `linux`, `macos`, and `windows` wrappers, Namespace platform checks, Codecov patch, diff coverage, coverage lanes, and sanitizer lanes were green |
+| #1096 | `c544a9ef221b` | merged from `CLEAN`; required `linux`, `macos`, and `windows` wrappers, Namespace platform checks, Codecov patch, diff coverage, coverage lanes, and sanitizer lanes were green |
 
 ## Conflict And Failure Triage
 
