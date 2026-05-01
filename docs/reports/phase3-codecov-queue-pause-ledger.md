@@ -26,15 +26,15 @@ This local ledger records the open `codecov` PR validation runs paused to free N
 
 ## Current Watch Point
 
-Last live check: 2026-05-01 12:23:15 EDT.
+Last live check: 2026-05-01 12:28:05 EDT.
 
-- Open `codecov` PRs: 11.
-- Merge state: all 11 open Codecov PRs are currently `UNKNOWN` while
-  GitHub recomputes branch protection after the #1203 merge.
-- GitHub Actions pressure: 36 active runs, with 31 queued and 5 in
+- Open `codecov` PRs: 10.
+- Merge state: remaining open Codecov PRs are currently blocked on
+  active/queued lanes, with no current failure candidate.
+- GitHub Actions pressure: 33 active runs, with 24 queued and 8 in
   progress.
 - Just merged: #1117, #1204, #1199, #1194, #1125, #1116, #1113, #1104,
-  #1097, #1088, and #1203 after required `linux`/`macos`/`windows`
+  #1097, #1088, #1203, and #1115 after required `linux`/`macos`/`windows`
   wrappers and Codecov patch gates were green.
 - Active triage: #1202 failed its first Linux Namespace build because the
   fake `amixer` test replaced `PATH` and hid `grep`/`head`/`tr`. Pushed
@@ -290,6 +290,7 @@ coverage merges and is held for a branch refresh.
 | #1097 | `cd0f141fa708` | merged from `UNSTABLE`; required `linux`, `macos`, and `windows` wrappers plus Codecov patch were green, only advisory lanes were still pending |
 | #1088 | `80139f392047` | merged from `UNSTABLE`; required `linux`, `macos`, and `windows` wrappers plus Codecov patch were green, only advisory lanes were still pending |
 | #1203 | `9d1e7d661e8e` | merged from `UNSTABLE`; required `linux`, `macos`, and `windows` wrappers, diff coverage, and Codecov patch were green, only advisory macOS sanitizer lanes were still pending |
+| #1115 | `daa0aa704427` | merged from `UNSTABLE`; required `linux`, `macos`, and `windows` wrappers plus Codecov patch were green, only advisory macOS coverage was still pending |
 
 ## Conflict And Failure Triage
 
