@@ -51,6 +51,26 @@ TEST_CASE("EqCurveView band management", "[view][eq_curve]") {
         eq.set_selected_band(0);
         REQUIRE(eq.selected_band() == 0);
     }
+
+    SECTION("Invalid band operations are no-ops and range setters clamp") {
+        eq.add_band({500.0f, -3.0f, 0.8f, EqCurveView::FilterType::peak, true});
+
+        EqCurveView::Band replacement{2000.0f, 6.0f, 2.0f, EqCurveView::FilterType::notch, true};
+        eq.set_band(3, replacement);
+        eq.remove_band(9);
+        REQUIRE(eq.band_count() == 1);
+        REQUIRE_THAT(eq.bands()[0].frequency, WithinAbs(500.0, 0.1));
+        REQUIRE_THAT(eq.bands()[0].gain_db, WithinAbs(-3.0, 0.1));
+        REQUIRE_THAT(eq.bands()[0].q, WithinAbs(0.8, 0.01));
+
+        eq.set_frequency_range(-20.0f, -10.0f);
+        REQUIRE_THAT(eq.min_frequency(), WithinAbs(1.0, 0.001));
+        REQUIRE_THAT(eq.max_frequency(), WithinAbs(2.0, 0.001));
+
+        eq.set_gain_range(12.0f, 12.0f);
+        REQUIRE_THAT(eq.min_gain(), WithinAbs(12.0, 0.001));
+        REQUIRE_THAT(eq.max_gain(), WithinAbs(13.0, 0.001));
+    }
 }
 
 TEST_CASE("EqCurveView spectrum overlay", "[view][eq_curve]") {
@@ -59,6 +79,68 @@ TEST_CASE("EqCurveView spectrum overlay", "[view][eq_curve]") {
     eq.set_spectrum(spectrum.data(), spectrum.size());
     eq.clear_spectrum();
     // Should not crash
+}
+
+TEST_CASE("EqCurveView hit testing and drag callbacks", "[view][eq_curve][issue-493]") {
+    EqCurveView eq;
+    eq.set_bounds({0, 0, 200, 100});
+    eq.set_frequency_range(100.0f, 10000.0f);
+    eq.set_gain_range(-12.0f, 12.0f);
+    eq.add_band({1000.0f, 0.0f, 1.0f});
+
+    int selected_index = -1;
+    int selected_count = 0;
+    int changed_index = -1;
+    int changed_count = 0;
+    EqCurveView::Band changed_band{};
+    eq.on_band_selected = [&](size_t index) {
+        selected_index = static_cast<int>(index);
+        ++selected_count;
+    };
+    eq.on_band_changed = [&](size_t index, EqCurveView::Band band) {
+        changed_index = static_cast<int>(index);
+        changed_band = band;
+        ++changed_count;
+    };
+
+    eq.on_mouse_down({100, 50});
+    REQUIRE(eq.selected_band() == 0);
+    REQUIRE(selected_index == 0);
+    REQUIRE(selected_count == 1);
+
+    eq.on_mouse_drag({400, -100});
+    REQUIRE(changed_index == 0);
+    REQUIRE(changed_count == 1);
+    REQUIRE_THAT(eq.bands()[0].frequency, WithinAbs(10000.0, 0.1));
+    REQUIRE_THAT(eq.bands()[0].gain_db, WithinAbs(12.0, 0.001));
+    REQUIRE_THAT(changed_band.frequency, WithinAbs(10000.0, 0.1));
+    REQUIRE_THAT(changed_band.gain_db, WithinAbs(12.0, 0.001));
+
+    eq.on_mouse_up({400, -100});
+    eq.on_mouse_drag({0, 100});
+    REQUIRE(changed_count == 1);
+}
+
+TEST_CASE("EqCurveView empty hit does not start a drag", "[view][eq_curve][issue-493]") {
+    EqCurveView eq;
+    eq.set_bounds({0, 0, 200, 100});
+    eq.set_frequency_range(100.0f, 10000.0f);
+    eq.set_gain_range(-12.0f, 12.0f);
+    eq.add_band({1000.0f, 0.0f, 1.0f});
+
+    int selected_count = 0;
+    int changed_count = 0;
+    eq.on_band_selected = [&](size_t) { ++selected_count; };
+    eq.on_band_changed = [&](size_t, EqCurveView::Band) { ++changed_count; };
+
+    eq.on_mouse_down({5, 5});
+    REQUIRE(eq.selected_band() == -1);
+    REQUIRE(selected_count == 0);
+
+    eq.on_mouse_drag({200, 0});
+    REQUIRE(changed_count == 0);
+    REQUIRE_THAT(eq.bands()[0].frequency, WithinAbs(1000.0, 0.1));
+    REQUIRE_THAT(eq.bands()[0].gain_db, WithinAbs(0.0, 0.001));
 }
 
 // ── MidiKeyboard ────────────────────────────────────────────────────────────
