@@ -70,9 +70,28 @@ function eventNameFor(propName: string): string {
     return propName.slice(2).toLowerCase();
 }
 
+/// Hover/pointer events the bridge gates behind registerHover(id).
+/// onMouseEnter/onMouseLeave + their pointer-event aliases all map to
+/// the bridge's mouseenter/mouseleave dispatch path; without
+/// registerHover, the C++ side never fires the events even though the
+/// JS listener is installed (pulp #1149).
+function isHoverEvent(eventName: string): boolean {
+    return (
+        eventName === 'mouseenter' ||
+        eventName === 'mouseleave' ||
+        eventName === 'pointerenter' ||
+        eventName === 'pointerleave'
+    );
+}
+
 function applyEventHandler(id: string, key: string, value: unknown): void {
     if (typeof value !== 'function') return;
     const eventName = eventNameFor(key);
+    if (isHoverEvent(eventName)) {
+        // Arm the native hover dispatchers exactly once (idempotent on
+        // the bridge — re-registers replace the lambdas, same shape).
+        call('registerHover', id);
+    }
     // Wrap the React handler so the bridge's __dispatch__ can call it.
     // The bridge passes positional args after id+eventName; just forward.
     call('on', id, eventName, (...a: unknown[]) => (value as (...x: unknown[]) => void)(...a));
@@ -125,10 +144,33 @@ function applyOne(id: string, type: string, key: string, value: unknown): void {
             const b = value as { color: string; width?: number; radius?: number };
             return call('setBorder', id, b.color, b.width ?? 1, b.radius ?? 0);
         }
+        // pulp #1027 (audit PR #1166 finding #4) — RN-style flat border props.
+        // These MUST route through the per-attribute bridge setters so a
+        // commitUpdate that touches only one of them preserves the others.
+        // Lowering them onto the unified `setBorder(id, color, width, radius)`
+        // would clobber the unset slots back to 0/empty.
+        case 'borderColor':  return call('setBorderColor', id, value as string);
+        case 'borderWidth':  return call('setBorderWidth', id, value as number);
+        case 'borderRadius': return call('setBorderRadius', id, value as number);
         case 'borderTop':    { const b = value as { color: string; width: number }; return call('setBorderSide', id, 'top', b.width, b.color); }
         case 'borderRight':  { const b = value as { color: string; width: number }; return call('setBorderSide', id, 'right', b.width, b.color); }
         case 'borderBottom': { const b = value as { color: string; width: number }; return call('setBorderSide', id, 'bottom', b.width, b.color); }
         case 'borderLeft':   { const b = value as { color: string; width: number }; return call('setBorderSide', id, 'left', b.width, b.color); }
+        // RN per-side flat props — route to the per-side bridge setters
+        // that already preserve the unrelated attribute (see widget_bridge
+        // applyBorderSide helper introduced in pulp #1026).
+        case 'borderTopColor':       return call('setBorderTopColor', id, value as string);
+        case 'borderRightColor':     return call('setBorderRightColor', id, value as string);
+        case 'borderBottomColor':    return call('setBorderBottomColor', id, value as string);
+        case 'borderLeftColor':      return call('setBorderLeftColor', id, value as string);
+        case 'borderTopWidth':       return call('setBorderTopWidth', id, value as number);
+        case 'borderRightWidth':     return call('setBorderRightWidth', id, value as number);
+        case 'borderBottomWidth':    return call('setBorderBottomWidth', id, value as number);
+        case 'borderLeftWidth':      return call('setBorderLeftWidth', id, value as number);
+        case 'borderTopLeftRadius':     return call('setBorderTopLeftRadius', id, value as number);
+        case 'borderTopRightRadius':    return call('setBorderTopRightRadius', id, value as number);
+        case 'borderBottomLeftRadius':  return call('setBorderBottomLeftRadius', id, value as number);
+        case 'borderBottomRightRadius': return call('setBorderBottomRightRadius', id, value as number);
         case 'opacity':      return call('setOpacity', id, value as number);
         case 'visible':      return call('setVisible', id, value as boolean);
 
