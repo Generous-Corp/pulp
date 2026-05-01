@@ -7,6 +7,7 @@ import contextlib
 import importlib.util
 import io
 import pathlib
+import runpy
 import sys
 import tempfile
 import unittest
@@ -77,6 +78,19 @@ class ExtractLimitationsTests(unittest.TestCase):
     def test_extract_limitations_returns_empty_when_block_missing(self) -> None:
         self.assertEqual(ll.extract_limitations("runtime:\n  midi:\n"), [])
 
+    def test_extract_limitations_ignores_orphaned_tracking_rows(self) -> None:
+        matrix = """
+runtime:
+  midi:
+    status: stable
+
+limitations:
+  runtime.midi:
+      tracked_in: "https://example.test/issues/orphaned"
+"""
+
+        self.assertEqual(ll.extract_limitations(matrix), [("runtime.midi", [])])
+
 
 class CapabilityPathTests(unittest.TestCase):
     def test_capability_exists_walks_nested_yaml_keys(self) -> None:
@@ -144,6 +158,21 @@ class MainTests(unittest.TestCase):
         self.assertEqual(rc, 2)
         self.assertEqual(stdout, "")
         self.assertIn("Failed to read", stderr)
+
+    def test_script_entrypoint_exits_with_main_status(self) -> None:
+        stdout = io.StringIO()
+        with (
+            mock.patch.object(pathlib.Path, "read_text", return_value=MATRIX),
+            contextlib.redirect_stdout(stdout),
+            self.assertRaises(SystemExit) as raised,
+        ):
+            runpy.run_path(str(SCRIPT), run_name="__main__")
+
+        self.assertEqual(raised.exception.code, 0)
+        self.assertIn(
+            "Known limitations (3 items across 2 capabilities)",
+            stdout.getvalue(),
+        )
 
 
 if __name__ == "__main__":
