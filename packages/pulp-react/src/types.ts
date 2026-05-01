@@ -56,6 +56,24 @@ export interface StyleProps {
     borderRight?: { color: string; width: number };
     borderBottom?: { color: string; width: number };
     borderLeft?: { color: string; width: number };
+    // pulp #1027 — per-attribute (RN-style flat) border props. These map to
+    // the per-attribute bridge setters that mutate one slot in isolation,
+    // unlike `border:` which sets all three at once.
+    borderColor?: string;
+    borderWidth?: number;
+    borderRadius?: number;
+    borderTopColor?: string;
+    borderRightColor?: string;
+    borderBottomColor?: string;
+    borderLeftColor?: string;
+    borderTopWidth?: number;
+    borderRightWidth?: number;
+    borderBottomWidth?: number;
+    borderLeftWidth?: number;
+    borderTopLeftRadius?: number;
+    borderTopRightRadius?: number;
+    borderBottomLeftRadius?: number;
+    borderBottomRightRadius?: number;
     opacity?: number;
     visible?: boolean;
 }
