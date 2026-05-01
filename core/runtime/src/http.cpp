@@ -8,8 +8,9 @@
 
 #include <httplib.h>
 
-#include <regex>
+#include <charconv>
 #include <fstream>
+#include <regex>
 
 namespace pulp::runtime {
 
@@ -25,7 +26,18 @@ static bool parse_url(std::string_view url, std::string& scheme,
 
     scheme = match[1];
     host = match[2];
-    port = match[3].length() > 0 ? std::stoi(match[3]) : (scheme == "https" ? 443 : 80);
+    port = scheme == "https" ? 443 : 80;
+    if (match[3].length() > 0) {
+        const auto port_str = match[3].str();
+        int parsed_port = 0;
+        const auto* begin = port_str.data();
+        const auto* end = begin + port_str.size();
+        const auto result = std::from_chars(begin, end, parsed_port);
+        if (result.ec != std::errc{} || result.ptr != end || parsed_port < 1 || parsed_port > 65535)
+            return false;
+        port = parsed_port;
+    }
+
     path = match[4].length() > 0 ? match[4].str() : "/";
     return true;
 }
