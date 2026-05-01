@@ -16,6 +16,8 @@
 #include <pulp/view/svg_path_widget.hpp>
 #include <pulp/canvas/canvas.hpp>
 
+#include <cmath>
+
 using pulp::view::SvgPathWidget;
 using pulp::view::SvgPathSegment;
 using pulp::canvas::DrawCommand;
@@ -116,6 +118,42 @@ TEST_CASE("SvgPathWidget cubic C and smooth-cubic S reflection",
     REQUIRE(s[2].p[5] == 0.0f);
 }
 
+TEST_CASE("SvgPathWidget implicit-command repeat covers cubic curves",
+          "[svg_path][issue-965]") {
+    SvgPathWidget w;
+    w.set_path("M 0 0 C 1 0 2 0 3 0 4 0 5 0 6 0");
+    const auto& s = w.segments();
+    REQUIRE(s.size() == 3);
+    REQUIRE(s[1].op == SvgPathSegment::Op::cubic_to);
+    REQUIRE(s[2].op == SvgPathSegment::Op::cubic_to);
+    REQUIRE(s[2].p[0] == 4.0f);
+    REQUIRE(s[2].p[1] == 0.0f);
+    REQUIRE(s[2].p[2] == 5.0f);
+    REQUIRE(s[2].p[3] == 0.0f);
+    REQUIRE(s[2].p[4] == 6.0f);
+    REQUIRE(s[2].p[5] == 0.0f);
+}
+
+TEST_CASE("SvgPathWidget smooth curves fall back to current point after non-curve",
+          "[svg_path][issue-965]") {
+    SvgPathWidget w;
+    w.set_path("M 1 2 L 3 4 S 5 6 7 8 L 9 10 T 11 12");
+    const auto& s = w.segments();
+    REQUIRE(s.size() == 5);
+    REQUIRE(s[2].op == SvgPathSegment::Op::cubic_to);
+    REQUIRE(s[2].p[0] == 3.0f);
+    REQUIRE(s[2].p[1] == 4.0f);
+    REQUIRE(s[2].p[2] == 5.0f);
+    REQUIRE(s[2].p[3] == 6.0f);
+    REQUIRE(s[2].p[4] == 7.0f);
+    REQUIRE(s[2].p[5] == 8.0f);
+    REQUIRE(s[4].op == SvgPathSegment::Op::quad_to);
+    REQUIRE(s[4].p[0] == 9.0f);
+    REQUIRE(s[4].p[1] == 10.0f);
+    REQUIRE(s[4].p[2] == 11.0f);
+    REQUIRE(s[4].p[3] == 12.0f);
+}
+
 TEST_CASE("SvgPathWidget quadratic Q and smooth-quadratic T reflection",
           "[svg_path][issue-965]") {
     SvgPathWidget w;
@@ -181,6 +219,62 @@ TEST_CASE("SvgPathWidget arc A is converted to cubic-bezier segments",
     const auto& last = s.back();
     REQUIRE(std::abs(last.p[4] - 10.0f) < 1e-3f);
     REQUIRE(std::abs(last.p[5] -  0.0f) < 1e-3f);
+}
+
+TEST_CASE("SvgPathWidget arc flags parse without separators",
+          "[svg_path][issue-965]") {
+    SvgPathWidget w;
+    w.set_path("M0 0A5 5 0 0110 0");
+    const auto& s = w.segments();
+    REQUIRE(s.size() >= 2);
+    REQUIRE(s[0].op == SvgPathSegment::Op::move_to);
+    for (size_t i = 1; i < s.size(); ++i) {
+        REQUIRE(s[i].op == SvgPathSegment::Op::cubic_to);
+    }
+    const auto& last = s.back();
+    REQUIRE(std::abs(last.p[4] - 10.0f) < 1e-3f);
+    REQUIRE(std::abs(last.p[5] -  0.0f) < 1e-3f);
+}
+
+TEST_CASE("SvgPathWidget degenerate arcs either disappear or become lines",
+          "[svg_path][issue-965]") {
+    SvgPathWidget same_point;
+    same_point.set_path("M 2 3 A 5 5 0 0 1 2 3 L 4 5");
+    const auto& same = same_point.segments();
+    REQUIRE(same.size() == 2);
+    REQUIRE(same[0].op == SvgPathSegment::Op::move_to);
+    REQUIRE(same[1].op == SvgPathSegment::Op::line_to);
+    REQUIRE(same[1].p[0] == 4.0f);
+    REQUIRE(same[1].p[1] == 5.0f);
+
+    SvgPathWidget zero_radius;
+    zero_radius.set_path("M 0 0 A 0 5 0 0 1 6 7");
+    const auto& zero = zero_radius.segments();
+    REQUIRE(zero.size() == 2);
+    REQUIRE(zero[1].op == SvgPathSegment::Op::line_to);
+    REQUIRE(zero[1].p[0] == 6.0f);
+    REQUIRE(zero[1].p[1] == 7.0f);
+}
+
+TEST_CASE("SvgPathWidget parser keeps prior complete segments on truncated input",
+          "[svg_path][issue-965]") {
+    SvgPathWidget w;
+    w.set_path("M 0 0 L");
+    const auto& s = w.segments();
+    REQUIRE(s.size() == 1);
+    REQUIRE(s[0].op == SvgPathSegment::Op::move_to);
+    REQUIRE(s[0].p[0] == 0.0f);
+    REQUIRE(s[0].p[1] == 0.0f);
+}
+
+TEST_CASE("SvgPathWidget parser clears stale segments before reparsing malformed input",
+          "[svg_path][issue-965]") {
+    SvgPathWidget w;
+    w.set_path("M 0 0 L 1 1");
+    REQUIRE(w.segments().size() == 2);
+
+    w.set_path("M bad");
+    REQUIRE(w.segments().empty());
 }
 
 TEST_CASE("SvgPathWidget paint emits begin_path → path → fill in order",
