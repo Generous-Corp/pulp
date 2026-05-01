@@ -52,6 +52,7 @@ public:
     std::shared_ptr<Log> log = std::make_shared<Log>();
 
     NetworkServiceDiscovery* owner = nullptr;
+    bool register_result = true;
 
     void browse(std::string_view t, NetworkServiceDiscovery& o) override {
         log->browse_types.emplace_back(t);
@@ -60,7 +61,7 @@ public:
     void stop() override { log->stopped++; }
     bool register_service(std::string_view n, std::string_view t, uint16_t p) override {
         log->registered.emplace_back(std::string(n), std::string(t), p);
-        return true;
+        return register_result;
     }
     void unregister_service() override { log->unregistered++; }
 };
@@ -165,6 +166,42 @@ TEST_CASE("NSD forwards discovered services via on_service_found",
     // Lost again: no-op (not in list).
     nsd.notify_service_lost(s);
     REQUIRE(lost.size() == 1);
+}
+
+TEST_CASE("NSD preserves backend failure and no-callback discovery paths",
+          "[events][service-discovery][issue-642]") {
+    NetworkServiceDiscovery nsd;
+    auto backend = std::make_unique<FakeBackend>();
+    auto log = backend->log;
+    backend->register_result = false;
+    nsd.install_backend(std::move(backend));
+
+    REQUIRE_FALSE(nsd.register_service("svc", "_pulp._tcp", 5555));
+    REQUIRE(log->registered.size() == 1);
+    REQUIRE(std::get<0>(log->registered.front()) == "svc");
+    REQUIRE(std::get<1>(log->registered.front()) == "_pulp._tcp");
+    REQUIRE(std::get<2>(log->registered.front()) == 5555);
+
+    NetworkServiceDiscovery::Service s;
+    s.name = "pulpd";
+    s.type = "_pulp._tcp";
+    s.hostname = "old.local";
+    s.address = "10.0.0.1";
+    s.port = 2222;
+    nsd.notify_service_found(s);
+    REQUIRE(nsd.discovered().size() == 1);
+
+    s.hostname = "new.local";
+    s.address = "10.0.0.2";
+    s.port = 3333;
+    nsd.notify_service_found(s);
+    REQUIRE(nsd.discovered().size() == 1);
+    REQUIRE(nsd.discovered().front().hostname == "new.local");
+    REQUIRE(nsd.discovered().front().address == "10.0.0.2");
+    REQUIRE(nsd.discovered().front().port == 3333);
+
+    nsd.notify_service_lost(s);
+    REQUIRE(nsd.discovered().empty());
 }
 
 // Codex P2 on #310: re-announces with changed metadata must refresh
@@ -281,6 +318,49 @@ TEST_CASE("NSD removing backend stops old backend and evicts discoveries",
     REQUIRE_FALSE(nsd.register_service("svc", "_pulp._tcp", 1234));
 }
 
+TEST_CASE("NSD backend swap clears discoveries without lost callback",
+          "[events][service-discovery][issue-642]") {
+    NetworkServiceDiscovery nsd;
+    auto backend = std::make_unique<FakeBackend>();
+    auto log = backend->log;
+
+    nsd.install_backend(std::move(backend));
+
+    NetworkServiceDiscovery::Service s;
+    s.name = "alpha";
+    s.type = "_pulp._tcp";
+    s.hostname = "alpha.local";
+    s.port = 1;
+    nsd.notify_service_found(s);
+    REQUIRE(nsd.discovered().size() == 1);
+
+    nsd.install_backend(std::make_unique<FakeBackend>());
+    REQUIRE(log->stopped == 1);
+    REQUIRE(nsd.has_backend());
+    REQUIRE(nsd.discovered().empty());
+}
+
+TEST_CASE("NSD removing backend with no lost handler still clears cache",
+          "[events][service-discovery][lifecycle][issue-642]") {
+    NetworkServiceDiscovery nsd;
+    auto backend = std::make_unique<FakeBackend>();
+    auto log = backend->log;
+
+    nsd.install_backend(std::move(backend));
+
+    NetworkServiceDiscovery::Service s;
+    s.name = "alpha";
+    s.type = "_pulp._tcp";
+    s.port = 1;
+    nsd.notify_service_found(s);
+    REQUIRE(nsd.discovered().size() == 1);
+
+    nsd.install_backend(nullptr);
+    REQUIRE_FALSE(nsd.has_backend());
+    REQUIRE(nsd.discovered().empty());
+    REQUIRE(log->stopped == 1);
+}
+
 TEST_CASE("NSD keys discoveries and loss by service name plus type",
           "[events][service-discovery][issue-642]") {
     NetworkServiceDiscovery nsd;
@@ -327,6 +407,17 @@ TEST_CASE("MountedVolumeListChangeDetector returns a sorted platform snapshot",
 
     auto volumes = MountedVolumeListChangeDetector::get_mounted_volumes();
     REQUIRE(std::is_sorted(volumes.begin(), volumes.end()));
+}
+
+TEST_CASE("MountedVolumeListChangeDetector stop before start is idempotent",
+          "[events][volume][lifecycle][issue-642]") {
+    MountedVolumeListChangeDetector detector;
+
+    REQUIRE_FALSE(detector.is_running());
+    detector.stop();
+    REQUIRE_FALSE(detector.is_running());
+    detector.stop();
+    REQUIRE_FALSE(detector.is_running());
 }
 
 TEST_CASE("MountedVolumeListChangeDetector start and stop are idempotent",

@@ -1,0 +1,30 @@
+{
+  "compat-schema-version": "0.1",
+  "schema_version": 1,
+  "_comment": "Compat-sync map (#1029). Source path → required compat.json prefix(es) + doc(s) + test(s). When a diff touches any path matching a key, the corresponding requirement(s) must be satisfied in the same diff (compat.json prefix entry present + doc page touched + test glob matched), OR a `Compat-Update: skip prefix=<...> reason=\"...\"` trailer must appear on a commit in the range. Multiple skip lines allowed, one per prefix; bare `Compat-Update: skip` (no reason) is rejected.\n\nThe `*` prefix is a wildcard meaning the requirement applies regardless of which compat section the change touches — used when the source-path itself spans multiple sections (e.g. core/view/src/widget_bridge.cpp dispatches into css/, html/, canvas2d/ and rn/).\n\nNote: paired with tools/scripts/compat_sync_check.py and the (forthcoming, #1027) compat.json at the repo root. Until #1027 lands the populated compat.json, empty sections in the stub compat.json are tolerated — the gate treats `compat-json` requirements as satisfied when the named section exists but is empty so this infrastructure can land before the matrix data does.\n\nFuture extension: the `@pulp/react` and `@pulp/css-adapt` paths from the issue body live in separate npm packages NOT in this repo. Add entries here when those packages move into the monorepo.",
+  "paths": {
+    "core/view/src/widget_bridge.cpp": [
+      {"kind": "compat-json", "prefix": "*"},
+      {"kind": "doc", "path": "docs/reference/compat/{prefix}.md"},
+      {"kind": "test", "glob": "test/test_widget_bridge*.cpp"}
+    ],
+    "core/view/include/pulp/view/widget_bridge.hpp": [
+      {"kind": "compat-json", "prefix": "*"},
+      {"kind": "doc", "path": "docs/reference/compat/{prefix}.md"},
+      {"kind": "test", "glob": "test/test_widget_bridge*.cpp"}
+    ],
+    "core/view/js/web-compat-canvas.js": [
+      {"kind": "compat-json", "prefix": "canvas2d/"},
+      {"kind": "doc", "path": "docs/reference/compat/canvas2d.md"},
+      {"kind": "test", "glob": "test/test_canvas_widget*.cpp"}
+    ],
+    "core/view/js/web-compat-element.js": [
+      {"kind": "compat-json", "prefix": "html/"},
+      {"kind": "doc", "path": "docs/reference/compat/html.md"}
+    ],
+    "core/view/js/web-compat-style-decl.js": [
+      {"kind": "compat-json", "prefix": "css/"},
+      {"kind": "doc", "path": "docs/reference/compat/css.md"}
+    ]
+  }
+}

@@ -12,6 +12,8 @@ TEST_CASE("FastMath tanh approximation", "[signal][fast_math]") {
     REQUIRE_THAT(FastMath::tanh(1.0f), WithinAbs(std::tanh(1.0f), 0.001));
     REQUIRE_THAT(FastMath::tanh(-1.0f), WithinAbs(std::tanh(-1.0f), 0.001));
     REQUIRE_THAT(FastMath::tanh(3.0f), WithinAbs(std::tanh(3.0f), 0.01));
+    REQUIRE_THAT(FastMath::tanh(-4.0f), WithinAbs(std::tanh(-4.0f), 0.001));
+    REQUIRE_THAT(FastMath::tanh(4.0f), WithinAbs(std::tanh(4.0f), 0.001));
     REQUIRE_THAT(FastMath::tanh(-5.0f), WithinAbs(-1.0, 0.001));
     REQUIRE_THAT(FastMath::tanh(5.0f), WithinAbs(1.0, 0.001));
 }
@@ -44,6 +46,7 @@ TEST_CASE("FastMath exp2 approximation", "[signal][fast_math]") {
     REQUIRE_THAT(FastMath::exp2(1.0f), WithinAbs(2.0, 0.01));
     REQUIRE_THAT(FastMath::exp2(3.0f), WithinAbs(8.0, 0.05));
     REQUIRE_THAT(FastMath::exp2(-1.0f), WithinAbs(0.5, 0.01));
+    REQUIRE_THAT(FastMath::exp2(-1.5f), WithinAbs(std::exp2(-1.5f), 0.01));
     REQUIRE_THAT(FastMath::exp2(0.5f), WithinAbs(std::sqrt(2.0f), 0.01));
 }
 
@@ -100,6 +103,8 @@ TEST_CASE("FastMath rsqrt approximation", "[signal][fast_math]") {
 TEST_CASE("FastMath soft_clip", "[signal][fast_math]") {
     REQUIRE_THAT(FastMath::soft_clip(0.0f), WithinAbs(0.0, 0.001));
     REQUIRE_THAT(FastMath::soft_clip(0.5f), WithinAbs(0.481, 0.01));
+    REQUIRE_THAT(FastMath::soft_clip(1.5f), WithinAbs(1.0, 0.001));
+    REQUIRE_THAT(FastMath::soft_clip(-1.5f), WithinAbs(-1.0, 0.001));
     REQUIRE_THAT(FastMath::soft_clip(2.0f), WithinAbs(1.0, 0.001));
     REQUIRE_THAT(FastMath::soft_clip(-2.0f), WithinAbs(-1.0, 0.001));
     // Symmetry
@@ -107,6 +112,8 @@ TEST_CASE("FastMath soft_clip", "[signal][fast_math]") {
 }
 
 TEST_CASE("FastMath clamp_unit", "[signal][fast_math]") {
+    REQUIRE(FastMath::clamp_unit(1.0f) == 1.0f);
+    REQUIRE(FastMath::clamp_unit(-1.0f) == -1.0f);
     REQUIRE(FastMath::clamp_unit(0.5f) == 0.5f);
     REQUIRE(FastMath::clamp_unit(2.0f) == 1.0f);
     REQUIRE(FastMath::clamp_unit(-2.0f) == -1.0f);

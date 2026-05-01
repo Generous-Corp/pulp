@@ -38,6 +38,40 @@ The Phase 1 representation stack is rebaselined in
 `main` snapshot for Phase 2 ranking; do not rank ordinary tranche work
 from older pre-`#715` Codecov numbers.
 
+## Phase 3 operating loop
+
+Phase 3 is the measured gap-closure phase. The default loop is two
+lanes running together:
+
+1. Monitor the active `codecov` PR queue and merge only when branch
+   protection is green and `mergeStateStatus` is `CLEAN`.
+2. While checks are pending, keep moving the next small, non-overlapping
+   tranche from the tracker map instead of waiting idle.
+
+Each tranche should stay narrow: one subsystem slice, the smallest
+deterministic tests that exercise the missing path, focused local
+validation, a `codecov` label, and tracker comments on the relevant
+component issue plus `#641`. Before opening or refreshing a PR, inspect
+the active `codecov` queue and avoid files already owned by another
+open tranche.
+
+Use Namespace as the default outer validation target. For the current
+workflow, `shipyard pr` remains the PR orchestrator, but local VM lanes
+are deliberately skipped and the Namespace build is dispatched
+explicitly:
+
+```bash
+source "$(git rev-parse --show-toplevel)/tools/scripts/cli_version_check.sh"
+pulp_cli_version_check
+shipyard pr --skip-target mac --skip-target ubuntu --skip-target windows
+shipyard cloud run build <branch>
+```
+
+If `shipyard pr` creates or updates the PR and then exits because no
+local targets remain, that is expected for this Namespace-first loop.
+Only fall back to local VMs when Namespace is unavailable, and use
+GitHub-hosted lanes as the last fallback.
+
 ## Where the numbers live
 
 Coverage is reported to [Codecov](https://app.codecov.io/gh/danielraffel/pulp).
@@ -219,6 +253,19 @@ answers "of the lines this PR adds or modifies, how many are covered?"
 at a **75%** floor. Sub-threshold diff coverage hard-fails this check
 and blocks the merge — adding untested code means either adding tests
 or splitting the untested portion into its own PR.
+
+### Phase 3 PR cadence
+
+Phase 3 is tranche work, not a queue stall. While a Codecov remediation
+PR is pending and blocked only on CI, keep moving with another small,
+focused coverage tranche. Check the open PR list and GitHub checks
+before starting each tranche, watch them again after pushing it, debug
+new failures as soon as they appear, and manually merge PRs once they
+are green.
+
+Use Namespace-backed GitHub checks and Codecov comments as the default
+evidence path. Local VMs are a fallback for reproducing or isolating
+failures, not the normal proof that a tranche is ready.
 
 ## How the collection works
 

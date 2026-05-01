@@ -19,6 +19,8 @@ AudioFocusRegistry& AudioFocusRegistry::instance() {
 }
 
 AudioFocusRegistry::Token AudioFocusRegistry::subscribe(Callback cb) {
+    if (!cb) return Token{};
+
     std::lock_guard<std::mutex> lock(mtx_);
     int id = next_id_++;
     cbs_.emplace_back(id, std::move(cb));
@@ -49,7 +51,7 @@ void AudioFocusRegistry::publish(AudioFocusState state) {
         snapshot = cbs_;
     }
     for (auto& [id, cb] : snapshot) {
-        cb(state);
+        if (cb) cb(state);
     }
 }
 

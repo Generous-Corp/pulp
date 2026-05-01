@@ -99,6 +99,25 @@ TEST_CASE("next_pow2 returns the next power of two", "[render][gpu][pool]") {
     REQUIRE(next_pow2(4096) == 4096);
     REQUIRE(next_pow2(4097) == 8192);
     REQUIRE(next_pow2(1u << 20) == (1u << 20));
+    REQUIRE(next_pow2((1ull << 32) - 1ull) == (1ull << 32));
+    REQUIRE(next_pow2(1ull << 40) == (1ull << 40));
+}
+
+TEST_CASE("StagingBufferPool handles empty bookkeeping paths",
+          "[render][gpu][pool][issue-646]") {
+    StagingBufferPool pool({}, 0);
+
+    REQUIRE(pool.capacity() == 1);
+    REQUIRE(pool.free_count() == 0);
+    REQUIRE(pool.in_flight_count() == 0);
+
+    const wgpu::Buffer null_buffer{};
+    pool.release(null_buffer);
+    pool.discard(null_buffer);
+    pool.clear();
+
+    REQUIRE(pool.free_count() == 0);
+    REQUIRE(pool.in_flight_count() == 0);
 }
 
 // ── Pool hammer — repeated acquire/release bounds the allocation count ─
