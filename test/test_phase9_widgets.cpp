@@ -132,6 +132,25 @@ TEST_CASE("ColorPicker hex round-trip", "[view][color_picker]") {
     REQUIRE(picker.color().b8() == 0x00);
 }
 
+TEST_CASE("ColorPicker hex alpha and malformed input are stable",
+          "[view][color_picker][issue-493]") {
+    ColorPicker picker;
+    picker.set_hex("#33669980");
+    REQUIRE(picker.hex() == "#33669980");
+    REQUIRE(picker.color().r8() == 0x33);
+    REQUIRE(picker.color().g8() == 0x66);
+    REQUIRE(picker.color().b8() == 0x99);
+    REQUIRE(picker.color().a8() == 0x80);
+
+    const auto before = picker.hex();
+    picker.set_hex("336699");
+    REQUIRE(picker.hex() == before);
+    picker.set_hex("#3366991234");
+    REQUIRE(picker.hex() == before);
+    REQUIRE_NOTHROW(picker.set_hex("#zzzzzz"));
+    REQUIRE(picker.hex() == before);
+}
+
 TEST_CASE("ColorPicker HSL round-trip", "[view][color_picker]") {
     ColorPicker picker;
     HSL hsl{120.0f, 1.0f, 0.5f};
@@ -148,6 +167,69 @@ TEST_CASE("ColorPicker swatches", "[view][color_picker]") {
         Color::rgba8(0, 0, 255)
     });
     REQUIRE(picker.swatches().size() == 3);
+}
+
+TEST_CASE("ColorPicker mouse editing updates SL hue alpha and swatches",
+          "[view][color_picker][issue-493]") {
+    ColorPicker picker;
+    picker.set_bounds({0, 0, 200, 280});
+    picker.set_hex("#000000ff");
+
+    int changes = 0;
+    picker.on_change = [&](Color) { ++changes; };
+
+    picker.on_mouse_down({90, 90});
+    REQUIRE(changes == 1);
+    REQUIRE(picker.color().r8() > 0);
+
+    picker.on_mouse_down({176, 184});
+    REQUIRE(changes == 2);
+    REQUIRE_THAT(picker.hsl().h, WithinAbs(360.0, 0.1));
+
+    picker.set_show_alpha(true);
+    picker.on_mouse_down({4, 212});
+    REQUIRE(changes == 3);
+    REQUIRE(picker.color().a8() == 0);
+    picker.on_mouse_drag({176, 212});
+    REQUIRE(changes == 4);
+    REQUIRE(picker.color().a8() == 255);
+    picker.on_mouse_up({176, 212});
+    picker.on_mouse_drag({4, 212});
+    REQUIRE(changes == 4);
+
+    picker.set_show_alpha(false);
+    picker.set_swatches({
+        Color::rgba8(255, 0, 0),
+        Color::rgba8(0, 255, 0),
+    });
+
+    picker.on_mouse_down({32, 216});
+    REQUIRE(changes == 5);
+    REQUIRE(picker.color().g8() == 255);
+    REQUIRE(picker.color().r8() == 0);
+}
+
+TEST_CASE("ColorPicker paint positions alpha cursor from normalized alpha",
+          "[view][color_picker][issue-493]") {
+    ColorPicker picker;
+    picker.set_bounds({0, 0, 200, 280});
+    picker.set_show_alpha(true);
+    picker.set_hex("#33669980");
+
+    pulp::canvas::RecordingCanvas canvas;
+    picker.paint(canvas);
+
+    bool found_alpha_cursor = false;
+    for (const auto& command : canvas.commands()) {
+        if (command.type != pulp::canvas::DrawCommand::Type::fill_rect) continue;
+        if (command.f[1] < 209.0f || command.f[1] > 211.0f) continue;
+        if (command.f[2] != 4.0f || command.f[3] != 24.0f) continue;
+
+        found_alpha_cursor = true;
+        REQUIRE(command.f[0] > 86.0f);
+        REQUIRE(command.f[0] < 91.0f);
+    }
+    REQUIRE(found_alpha_cursor);
 }
 
 // ── FileDropZone ────────────────────────────────────────────────────────────
