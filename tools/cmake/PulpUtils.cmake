@@ -1032,3 +1032,10 @@ endfunction()
 # Pulp targets exist. The function definition is unchanged; this PulpUtils
 # include() preserves the existing public surface of `include(PulpUtils)`.
 include("${CMAKE_CURRENT_LIST_DIR}/PulpEmbedData.cmake")
+
+# pulp_register_font() — public font-registration macro for plugin authors
+# (pulp #1150). Lives in its own file so SDK consumers who only want
+# pulp_add_binary_data don't pay for the extra includes/parsing, and so the
+# install layout can ship the font macro alongside the rest of the Pulp
+# CMake helpers.
+include("${CMAKE_CURRENT_LIST_DIR}/PulpFonts.cmake")
