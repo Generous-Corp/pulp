@@ -119,6 +119,15 @@ coverage merges and is held for a branch refresh.
 | #1111 | `5841a31279e6` | merged |
 | #1112 | `fef94b10e89c` | merged |
 
+## Conflict And Failure Triage
+
+| PR | Branch | New Head | Status |
+| --- | --- | --- | --- |
+| #1099 | `feature/view-layout-widgets-coverage-493` | `66decf5958e8` | Conflict resolved and pushed; normal PR workflows are running. Local worker validated `pulp-test-view-layout-widgets`, `pulp-test-phase9-widgets`, and `pulp-test-property-list` directly. |
+| #1084 | `feature/runtime-text-diff-coverage-641` | `cb63e51416ed` | Conflict resolved and pushed; normal PR workflows are running. Local worker validated `pulp-test-runtime-utils "[runtime][text-diff]"` and matching CTest cases. |
+| #1089 | `feature/view-file-browser-coverage-493` | `826a043f` | Conflict refresh assigned to a worker; waiting for pushed result. |
+| #1131 | `feature/audio-window-enumerator-coverage-640-next` | `f5af90f4f5af` | Pushed coverage-harness fix for Windows `.exe` object discovery in `scripts/run_coverage.sh`; `bash -n`, `test_run_coverage.py`, skill-sync report, version-bump report, and `git diff --check` passed. Local CMake validation was not rerun after the harness patch because the laptop filesystem had only about 150-211 MiB free; the earlier excerpt binary validation was already green and the platform-sensitive coverage fix now needs CI/Namespace. |
+
 ## Local-Only Work Prepared During Pause
 
 These branches were prepared after the Namespace pause began. They have
