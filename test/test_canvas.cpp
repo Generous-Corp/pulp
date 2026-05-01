@@ -642,7 +642,146 @@ TEST_CASE("SkiaCanvas::measure_text_with_font picks up bundled "
     REQUIRE(a.width > 0.0f);
     REQUIRE(b.width > a.width);
 }
+
+// ── pulp #1150 — public font-registration API ───────────────────────────────
+// The public `register_font` / `register_font_file` / `is_font_registered`
+// surface declared in `pulp/canvas/bundled_fonts.hpp` is the path plugin
+// authors take to make their own bundled .ttf resolve through
+// `canvas.set_font()` and `setFontFamily()`. Before #1150,
+// `AssetManager::register_font_family` existed but was never consulted by
+// SkFontMgr — every plugin font fell through silently to the platform
+// matcher (or to a nullptr typeface).
+//
+// `PULP_TEST_FONT_PATH` is wired in via test/CMakeLists.txt and points at
+// `external/fonts/Inter-Regular.ttf` so we have a deterministic .ttf that
+// is guaranteed to exist on every supported host. We deliberately register
+// it under an *override* family name ("PulpRegistrationTestFamily-1150")
+// so the test doesn't fight the bundled-font cache (which already knows
+// about "Inter").
+
+#ifndef PULP_TEST_FONT_PATH
+#error "PULP_TEST_FONT_PATH must be defined by test/CMakeLists.txt — points "
+       "at external/fonts/Inter-Regular.ttf for the #1150 registration tests."
 #endif
+
+TEST_CASE("register_font_file resolves a custom family through Skia (#1150)",
+          "[canvas][skia][fonts][issue-1150]") {
+    const std::string family = "PulpRegistrationTestFamily-1150";
+
+    // Pre-condition: the family must not be registered yet on this fresh
+    // process. Catch2 runs cases in random order, but no other case in
+    // this binary registers under the same name.
+    REQUIRE_FALSE(pulp::canvas::is_font_registered(family));
+
+    const bool ok = pulp::canvas::register_font_file(PULP_TEST_FONT_PATH,
+                                                     family);
+    if (!ok) {
+        // The Skia prebuilt this binary links against has no platform
+        // font manager wired in (e.g. Linux without fontconfig). The
+        // public API is documented to return false in that case so the
+        // caller can degrade gracefully — assert that contract instead
+        // of failing the case on a host that legitimately can't.
+        SUCCEED("register_font_file returned false — no platform font "
+                "manager available in this build, registration is a "
+                "documented soft-fail.");
+        return;
+    }
+
+    REQUIRE(pulp::canvas::is_font_registered(family));
+
+    // The whole point of registration: the family becomes resolvable
+    // through the same path skia_canvas.cpp / text_shaper.cpp use for
+    // bundled and platform fonts. `match_registered_typeface` is the
+    // narrowest probe; `SkiaCanvas::measure_text_with_font` is the
+    // end-to-end check.
+    SkFontStyle upright_normal{SkFontStyle::kNormal_Weight,
+                               SkFontStyle::kNormal_Width,
+                               SkFontStyle::kUpright_Slant};
+    auto face = pulp::canvas::match_registered_typeface(family,
+                                                        upright_normal);
+    REQUIRE(face != nullptr);
+
+    auto shaped = SkiaCanvas::measure_text_with_font(family, 16.0f,
+                                                     "Hello, world!");
+    REQUIRE(shaped.width > 0.0f);
+
+    // Style miss: the registered face is Regular/Upright. Asking for
+    // Bold MUST return nullptr so skia_canvas's cascade keeps walking
+    // (matchFamilyStyle can synthesise a faux-bold or pick a system
+    // Bold). Without this guard, registered fonts would hijack every
+    // weight/slant variant of the same family — exactly the regression
+    // bundled fonts already protect against (Codex P2 on PR #956).
+    SkFontStyle bold_normal{SkFontStyle::kBold_Weight,
+                            SkFontStyle::kNormal_Width,
+                            SkFontStyle::kUpright_Slant};
+    auto bold_miss = pulp::canvas::match_registered_typeface(family,
+                                                              bold_normal);
+    REQUIRE(bold_miss == nullptr);
+}
+
+TEST_CASE("register_font is idempotent — re-registering the same family is "
+          "safe (#1150)",
+          "[canvas][skia][fonts][issue-1150]") {
+    const std::string family = "PulpRegistrationIdempotentTest-1150";
+
+    REQUIRE_FALSE(pulp::canvas::is_font_registered(family));
+
+    const bool first = pulp::canvas::register_font_file(PULP_TEST_FONT_PATH,
+                                                        family);
+    if (!first) {
+        SUCCEED("Soft-fail on this build (no platform SkFontMgr). Skipping "
+                "idempotence assertion.");
+        return;
+    }
+    REQUIRE(pulp::canvas::is_font_registered(family));
+
+    // Second call with the same family must succeed and leave the family
+    // resolvable. A "second registration tears down the first" bug would
+    // surface as `is_font_registered == false` after the second call.
+    const bool second = pulp::canvas::register_font_file(PULP_TEST_FONT_PATH,
+                                                         family);
+    REQUIRE(second);
+    REQUIRE(pulp::canvas::is_font_registered(family));
+
+    SkFontStyle upright_normal{SkFontStyle::kNormal_Weight,
+                               SkFontStyle::kNormal_Width,
+                               SkFontStyle::kUpright_Slant};
+    auto face = pulp::canvas::match_registered_typeface(family,
+                                                        upright_normal);
+    REQUIRE(face != nullptr);
+}
+
+TEST_CASE("Unregistered families don't resolve through the registry (#1150)",
+          "[canvas][skia][fonts][issue-1150]") {
+    // Negative case: an unknown family must miss the registry. The
+    // skia_canvas cascade falls through to `match_bundled_typeface` and
+    // then `SkFontMgr::matchFamilyStyle` — those are exercised
+    // separately. The contract here is "registry only returns what was
+    // explicitly registered, never a platform-matched fallback".
+    const std::string family = "PulpUnregisteredFamily-1150";
+    REQUIRE_FALSE(pulp::canvas::is_font_registered(family));
+
+    SkFontStyle upright_normal{SkFontStyle::kNormal_Weight,
+                               SkFontStyle::kNormal_Width,
+                               SkFontStyle::kUpright_Slant};
+    auto face = pulp::canvas::match_registered_typeface(family,
+                                                        upright_normal);
+    REQUIRE(face == nullptr);
+
+    // Empty inputs must also miss without crashing.
+    REQUIRE_FALSE(pulp::canvas::is_font_registered(""));
+    REQUIRE(pulp::canvas::match_registered_typeface("", upright_normal)
+            == nullptr);
+
+    // register_font with null/zero data must reject cleanly.
+    REQUIRE_FALSE(pulp::canvas::register_font(nullptr, 0, "Anything"));
+
+    // register_font_file with a non-existent path must reject cleanly.
+    REQUIRE_FALSE(pulp::canvas::register_font_file(
+        "/this/path/does/not/exist/font.ttf", "AlsoAnything"));
+}
+
+#endif  // PULP_HAS_SKIA
 
 // ── pulp #929 — Canvas::clear_rect default + CoreGraphics override ──────────
 

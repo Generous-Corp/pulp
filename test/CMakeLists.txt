@@ -1271,6 +1271,13 @@ if(APPLE)
     # verify CGContextClearRect actually clears destination pixels.
     target_link_libraries(pulp-test-canvas PRIVATE "-framework CoreGraphics")
 endif()
+# pulp #1150 — public font-registration API tests use a bundled .ttf as a
+# fixture. external/fonts/Inter-Regular.ttf is the canonical "always
+# available" font in the repo (also baked into pulp-canvas via
+# pulp_add_binary_data). Pass the absolute path through a compile def so
+# the test binary can find it regardless of CWD when run via ctest.
+target_compile_definitions(pulp-test-canvas PRIVATE
+    "PULP_TEST_FONT_PATH=\"${CMAKE_SOURCE_DIR}/external/fonts/Inter-Regular.ttf\"")
 catch_discover_tests(pulp-test-canvas)
 
 # SDF glyph atlas exploration (#76)
