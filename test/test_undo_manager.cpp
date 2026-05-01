@@ -66,6 +66,24 @@ TEST_CASE("UndoManager transaction groups actions", "[state][undo]") {
     REQUIRE(y == 0);
 }
 
+TEST_CASE("UndoManager empty transaction end and cancel are no-ops", "[state][undo]") {
+    UndoManager um;
+    int change_count = 0;
+    um.on_state_changed = [&] { ++change_count; };
+
+    um.begin_transaction("Empty end");
+    um.end_transaction();
+    REQUIRE_FALSE(um.can_undo());
+    REQUIRE(um.undo_count() == 0);
+    REQUIRE(change_count == 0);
+
+    um.begin_transaction("Empty cancel");
+    um.cancel_transaction();
+    REQUIRE_FALSE(um.can_undo());
+    REQUIRE(um.undo_count() == 0);
+    REQUIRE(change_count == 0);
+}
+
 TEST_CASE("UndoManager cancel_transaction reverts", "[state][undo]") {
     UndoManager um;
     int value = 0;
@@ -137,6 +155,49 @@ TEST_CASE("UndoManager on_state_changed callback", "[state][undo]") {
 
     um.redo();
     REQUIRE(change_count == 3);
+}
+
+TEST_CASE("UndoManager actions with missing callbacks are no-ops", "[state][undo]") {
+    UndoManager um;
+    int redo_count = 0;
+
+    um.perform(UndoAction::create("Redo only",
+        {},
+        [&] { ++redo_count; }));
+
+    REQUIRE(redo_count == 1);
+    REQUIRE(um.can_undo());
+    REQUIRE(um.undo());
+    REQUIRE(redo_count == 1);
+    REQUIRE(um.can_redo());
+    REQUIRE(um.redo());
+    REQUIRE(redo_count == 2);
+
+    um.perform(UndoAction::create("Undo only",
+        [&] { --redo_count; },
+        {}));
+
+    REQUIRE(redo_count == 2);
+    REQUIRE(um.undo());
+    REQUIRE(redo_count == 1);
+}
+
+TEST_CASE("UndoManager missing callbacks inside cancel_transaction are no-ops", "[state][undo]") {
+    UndoManager um;
+    int value = 0;
+
+    um.begin_transaction("Partial callbacks");
+    um.perform(UndoAction::create("Redo only",
+        {},
+        [&] { value = 7; }));
+    um.perform(UndoAction::create("Undo only",
+        [&] { value = 3; },
+        {}));
+
+    REQUIRE(value == 7);
+    um.cancel_transaction();
+    REQUIRE(value == 3);
+    REQUIRE_FALSE(um.can_undo());
 }
 
 TEST_CASE("UndoManager add_without_executing", "[state][undo]") {

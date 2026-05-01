@@ -218,6 +218,29 @@ public:
     bool hit_testable() const { return hit_testable_; }
     void set_hit_testable(bool h) { hit_testable_ = h; }
 
+    /// React Native pointerEvents (issue-1026). Four-valued enum that
+    /// mirrors RN's contract:
+    ///   auto      — default; this view AND children are interactive.
+    ///   none      — neither this view NOR descendants intercept events.
+    ///   box_only  — this view receives events; children do NOT.
+    ///   box_none  — this view does NOT receive events but children do.
+    /// hit_test() honors all four cases. set_hit_testable(false) is the
+    /// legacy two-valued knob and is preserved by also short-circuiting
+    /// hit_test() — set_pointer_events(PointerEvents::none) is the
+    /// idiomatic RN-shaped equivalent.
+    enum class PointerEvents { auto_, none, box_only, box_none };
+    void set_pointer_events(PointerEvents p) { pointer_events_ = p; }
+    PointerEvents pointer_events() const { return pointer_events_; }
+
+    /// React Native backfaceVisibility (issue-1026). Stored on the View
+    /// for plumbing parity with `@pulp/react`. The flag is consumed by
+    /// the paint path only when a 3D transform with negative Z is
+    /// active; pulp's transform model is currently 2D-affine, so this
+    /// is reserved for future 3D support and behaves as a no-op for
+    /// painting today.
+    bool backface_visible() const { return backface_visible_; }
+    void set_backface_visible(bool v) { backface_visible_ = v; }
+
     /// Mark layout as needing recalculation (auto-invalidation)
     void invalidate_layout() { layout_dirty_ = true; }
     bool layout_dirty() const { return layout_dirty_; }
@@ -286,17 +309,42 @@ public:
     float border_width() const { return border_width_; }
     float corner_radius() const { return corner_radius_; }
 
+    /// Standalone border setters (issue-1026, RN parity). Each setter
+    /// flips the has_border_ flag on so paint_all() actually emits the
+    /// stroke even when set_border() was never called.
+    void set_border_color(Color c) { border_color_ = c; has_border_ = true; }
+    void set_border_width(float w) { border_width_ = w; has_border_ = true; }
+    void set_border_radius(float r) { corner_radius_ = r; }
+
     /// Per-side borders (CSS border-top, border-right, etc.)
     void set_border_top(Color c, float w) { border_top_ = {c, w}; has_border_sides_ = true; }
     void set_border_right(Color c, float w) { border_right_ = {c, w}; has_border_sides_ = true; }
     void set_border_bottom(Color c, float w) { border_bottom_ = {c, w}; has_border_sides_ = true; }
     void set_border_left(Color c, float w) { border_left_ = {c, w}; has_border_sides_ = true; }
+    /// Per-side getters (issue-1026). The standalone setBorderTop/Right/...
+    /// {Color,Width} bridge calls need to preserve the unrelated attribute
+    /// when only one is being changed by a JSX prop diff.
+    Color border_top_color() const { return border_top_.color; }
+    float border_top_width() const { return border_top_.width; }
+    Color border_right_color() const { return border_right_.color; }
+    float border_right_width() const { return border_right_.width; }
+    Color border_bottom_color() const { return border_bottom_.color; }
+    float border_bottom_width() const { return border_bottom_.width; }
+    Color border_left_color() const { return border_left_.color; }
+    float border_left_width() const { return border_left_.width; }
+    bool has_border_sides() const { return has_border_sides_; }
 
     /// Per-corner border-radius (CSS border-top-left-radius, etc.)
     void set_corner_radius_tl(float r) { corner_radii_[0] = r; has_corner_radii_ = true; }
     void set_corner_radius_tr(float r) { corner_radii_[1] = r; has_corner_radii_ = true; }
     void set_corner_radius_bl(float r) { corner_radii_[2] = r; has_corner_radii_ = true; }
     void set_corner_radius_br(float r) { corner_radii_[3] = r; has_corner_radii_ = true; }
+    /// Per-corner radius accessors. corner_radii_[0..3] = TL, TR, BL, BR.
+    bool has_corner_radii() const { return has_corner_radii_; }
+    float corner_radius_tl() const { return corner_radii_[0]; }
+    float corner_radius_tr() const { return corner_radii_[1]; }
+    float corner_radius_bl() const { return corner_radii_[2]; }
+    float corner_radius_br() const { return corner_radii_[3]; }
 
     /// Box shadow (CSS-like: offset, blur, spread, color, inset).
     /// When `inset` is true, the shadow is drawn inside the box bounds (CSS
@@ -403,10 +451,17 @@ public:
 
     void set_skew(float x_deg, float y_deg) { skew_x_ = x_deg; skew_y_ = y_deg; }
 
-    /// Transform origin (0-1 normalized, default 0.5,0.5 = center)
-    void set_transform_origin(float x, float y) { origin_x_ = x; origin_y_ = y; }
+    /// Transform origin (0-1 normalized, default 0.5,0.5 = center).
+    /// pulp #1026 — also tracks an "explicitly set" flag so the affine
+    /// matrix path (issue-930 setTransform) only honors the origin when
+    /// the caller has actively chosen one. Without this, every existing
+    /// setTransform() call site would silently start anchoring at center.
+    void set_transform_origin(float x, float y) {
+        origin_x_ = x; origin_y_ = y; origin_explicit_ = true;
+    }
     float transform_origin_x() const { return origin_x_; }
     float transform_origin_y() const { return origin_y_; }
+    bool transform_origin_explicit() const { return origin_explicit_; }
 
     /// Full 2D affine transform matrix on the View (issue-930). Mirrors the
     /// CanvasRenderingContext2D.setTransform contract:
@@ -519,6 +574,8 @@ private:
     bool has_focus_ = false;
     bool hovered_ = false;
     bool hit_testable_ = true;
+    PointerEvents pointer_events_ = PointerEvents::auto_;
+    bool backface_visible_ = true;
     FrameClock* frame_clock_ = nullptr;
 
     // Visual properties
@@ -554,6 +611,7 @@ private:
     float rotation_deg_ = 0;
     float skew_x_ = 0, skew_y_ = 0;
     float origin_x_ = 0.5f, origin_y_ = 0.5f;  // transform-origin (normalized)
+    bool origin_explicit_ = false;  // pulp #1026 — has set_transform_origin been called?
     // Full 2D affine matrix (issue-930). Identity by default; only applied
     // when has_transform_matrix_ is true. Stored in CanvasRenderingContext2D
     // (a,b,c,d,e,f) order:  [a c e / b d f / 0 0 1].

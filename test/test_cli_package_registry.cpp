@@ -289,6 +289,20 @@ TEST_CASE("remote registry helpers use environment cache paths and fresh cache h
     REQUIRE(loaded.error.empty());
     REQUIRE(loaded.registry.packages.size() == 2);
     REQUIRE(loaded.registry.packages.at("synth-core").name == "Core Synth");
+
+    auto stale = load_remote_registry(
+        "https://127.0.0.1:9/pulp-registry-stale-cache-fallback.json",
+        tmp.path,
+        0);
+    REQUIRE(stale.error.empty());
+    REQUIRE(stale.registry.packages.size() == 2);
+
+    TempDir missing_cache;
+    auto refresh = refresh_remote_registry(
+        "https://127.0.0.1:9/pulp-registry-refresh-failure.json",
+        missing_cache.path);
+    REQUIRE(refresh.registry.packages.empty());
+    REQUIRE(refresh.error.find("Failed to fetch remote registry") != std::string::npos);
 }
 
 TEST_CASE("project targets parse, default, expand platforms, and rewrite TOML",

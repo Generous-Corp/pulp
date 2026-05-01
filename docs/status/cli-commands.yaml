@@ -534,7 +534,28 @@ commands:
 
   - name: inspect
     status: experimental
-    summary: Launch the component inspector binary from the active build tree.
+    summary: Connect to a running plugin inspector server.
+    args:
+      - name: --host
+        kind: option
+        required: false
+        description: Inspector host, defaulting to 127.0.0.1
+      - name: --port
+        kind: option
+        required: false
+        description: Inspector port; defaults to auto-discovery from a temp-file hint
+      - name: --command
+        kind: option
+        required: false
+        description: Inspector method to send once before exiting
+      - name: --params
+        kind: option
+        required: false
+        description: JSON params for --command
+      - name: --output
+        kind: option
+        required: false
+        description: File path for the one-shot command response
     docs: reference/cli.md#inspect
 
   - name: import-design

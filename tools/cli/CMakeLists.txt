@@ -188,6 +188,67 @@ if(PULP_BUILD_TESTS)
     set_tests_properties(cli-audio-help PROPERTIES
         PASS_REGULAR_EXPRESSION "pulp audio")
 
+    add_test(NAME cli-host-help
+        COMMAND "${CMAKE_COMMAND}"
+            "-DCLI=$<TARGET_FILE:pulp-cli>"
+            "-DWORKING_DIR=${CMAKE_SOURCE_DIR}"
+            "-DHELP_FLAG=--help"
+            "-DEXPECTED_EXIT=0"
+            "-DEXPECTED_REGEX=Usage: pulp host"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/check_cli_host_error.cmake")
+    set_tests_properties(cli-host-help PROPERTIES
+        PASS_REGULAR_EXPRESSION "verified CLI host contract")
+
+    add_test(NAME cli-host-missing-args
+        COMMAND "${CMAKE_COMMAND}"
+            "-DCLI=$<TARGET_FILE:pulp-cli>"
+            "-DWORKING_DIR=${CMAKE_SOURCE_DIR}"
+            "-DEXPECTED_EXIT=1"
+            "-DEXPECTED_REGEX=Usage: pulp host"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/check_cli_host_error.cmake")
+    set_tests_properties(cli-host-missing-args PROPERTIES
+        PASS_REGULAR_EXPRESSION "verified CLI host contract")
+
+    foreach(_pulp_host_format IN ITEMS clap vst3 au auv3 lv2)
+        add_test(NAME "cli-host-missing-path-${_pulp_host_format}"
+            COMMAND "${CMAKE_COMMAND}"
+                "-DCLI=$<TARGET_FILE:pulp-cli>"
+                "-DWORKING_DIR=${CMAKE_SOURCE_DIR}"
+                "-DPLUGIN_PATH=${CMAKE_BINARY_DIR}/test-tmp/missing-host-plugin-${_pulp_host_format}"
+                "-DFORMAT=${_pulp_host_format}"
+                "-DEXPECTED_EXIT=1"
+                "-DEXPECTED_REGEX=pulp host: failed to load"
+                -P "${CMAKE_CURRENT_SOURCE_DIR}/check_cli_host_error.cmake")
+        set_tests_properties("cli-host-missing-path-${_pulp_host_format}" PROPERTIES
+            PASS_REGULAR_EXPRESSION "verified CLI host contract")
+    endforeach()
+
+    add_test(NAME cli-host-missing-path-auv3-short-format
+        COMMAND "${CMAKE_COMMAND}"
+            "-DCLI=$<TARGET_FILE:pulp-cli>"
+            "-DWORKING_DIR=${CMAKE_SOURCE_DIR}"
+            "-DPLUGIN_PATH=${CMAKE_BINARY_DIR}/test-tmp/missing-host-plugin-auv3-short-format"
+            "-DFORMAT_FLAG=-f"
+            "-DFORMAT=AUv3"
+            "-DEXPECTED_EXIT=1"
+            "-DEXPECTED_REGEX=pulp host: failed to load"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/check_cli_host_error.cmake")
+    set_tests_properties(cli-host-missing-path-auv3-short-format PROPERTIES
+        PASS_REGULAR_EXPRESSION "verified CLI host contract")
+
+    add_test(NAME cli-host-missing-path-with-id
+        COMMAND "${CMAKE_COMMAND}"
+            "-DCLI=$<TARGET_FILE:pulp-cli>"
+            "-DWORKING_DIR=${CMAKE_SOURCE_DIR}"
+            "-DPLUGIN_PATH=${CMAKE_BINARY_DIR}/test-tmp/missing-host-plugin-with-id"
+            "-DUNIQUE_ID=com.example.Missing"
+            "-DFORMAT=clap"
+            "-DEXPECTED_EXIT=1"
+            "-DEXPECTED_REGEX=pulp host: failed to load"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/check_cli_host_error.cmake")
+    set_tests_properties(cli-host-missing-path-with-id PROPERTIES
+        PASS_REGULAR_EXPRESSION "verified CLI host contract")
+
     # Exercise the new `pulp coverage` dispatch (cmd_coverage.cpp).
     # `pulp coverage` with no args prints the usage banner and exits 0;
     # `pulp coverage bogus` prints the unknown-subcommand error and exits

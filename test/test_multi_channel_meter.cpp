@@ -3,6 +3,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
+#include <array>
 #include <cmath>
 #include <limits>
 
@@ -22,6 +23,20 @@ TEST_CASE("MultiChannelMeter process clamps to prepared channel count", "[signal
     REQUIRE(snap.num_channels == 1);
     REQUIRE_THAT(snap.channels[0].peak, WithinAbs(0.25f, 1e-6f));
     REQUIRE_THAT(snap.channels[1].peak, WithinAbs(0.0f, 1e-6f));
+}
+
+TEST_CASE("MultiChannelMeter process clamps negative channel count", "[signal][meter][issue-645]") {
+    MultiChannelMeter meter;
+    meter.prepare(100.0f, 1);
+
+    float sample[] = {1.0f};
+    const float* channels[] = {sample};
+    meter.process(channels, -1, 1);
+
+    const auto& snap = meter.snapshot();
+    REQUIRE(snap.num_channels == 0);
+    REQUIRE_THAT(snap.channels[0].peak, WithinAbs(0.0f, 1e-6f));
+    REQUIRE_FALSE(snap.channels[0].clipped);
 }
 
 TEST_CASE("MultiChannelMeter empty process leaves current snapshot untouched", "[signal][meter][issue-645]") {
@@ -76,6 +91,51 @@ TEST_CASE("MultiChannelMeter integrated LUFS averages multiple windows", "[signa
     REQUIRE_THAT(meter.snapshot().lufs_integrated, WithinAbs(expected, 1e-4f));
 }
 
+TEST_CASE("MultiChannelMeter prepare clamps channel count and reset clears snapshot", "[signal][meter][issue-645]") {
+    MultiChannelMeter meter;
+    meter.prepare(100.0f, kMaxMeterChannels + 4);
+
+    std::array<float, kMaxMeterChannels> samples{};
+    std::array<const float*, kMaxMeterChannels> channels{};
+    for (int ch = 0; ch < kMaxMeterChannels; ++ch) {
+        samples[ch] = 0.05f * static_cast<float>(ch + 1);
+        channels[ch] = &samples[ch];
+    }
+
+    meter.process(channels.data(), kMaxMeterChannels, 1);
+
+    const auto& snap = meter.snapshot();
+    REQUIRE(snap.num_channels == kMaxMeterChannels);
+    REQUIRE_THAT(snap.channels[0].peak, WithinAbs(0.05f, 1e-6f));
+    REQUIRE_THAT(snap.channels[kMaxMeterChannels - 1].peak, WithinAbs(0.8f, 1e-6f));
+
+    meter.reset();
+    REQUIRE(meter.snapshot().num_channels == 0);
+    REQUIRE_THAT(meter.snapshot().channels[0].peak, WithinAbs(0.0f, 1e-6f));
+    REQUIRE_THAT(meter.snapshot().correlation, WithinAbs(0.0f, 1e-6f));
+    REQUIRE(std::isinf(meter.snapshot().lufs_integrated));
+}
+
+TEST_CASE("MultiChannelMeter detects clips and handles silent stereo correlation", "[signal][meter][issue-645]") {
+    MultiChannelMeter meter;
+    meter.prepare(100.0f, 2);
+
+    float left[] = {0.0f};
+    float right[] = {0.0f};
+    const float* silent[] = {left, right};
+    meter.process(silent, 2, 1);
+    REQUIRE_THAT(meter.snapshot().correlation, WithinAbs(0.0f, 1e-6f));
+    REQUIRE_FALSE(meter.snapshot().channels[0].clipped);
+
+    left[0] = -1.0f;
+    right[0] = 0.25f;
+    meter.process(silent, 2, 1);
+
+    REQUIRE(meter.snapshot().channels[0].clipped);
+    REQUIRE_FALSE(meter.snapshot().channels[1].clipped);
+    REQUIRE_THAT(meter.snapshot().channels[0].peak, WithinAbs(1.0f, 1e-6f));
+}
+
 TEST_CASE("MultiChannelBallistics releases held values and clamps display floor", "[signal][meter][issue-645]") {
     MultiChannelBallistics ballistics;
     ballistics.peak_hold_time = 0.05f;
@@ -117,4 +177,34 @@ TEST_CASE("MultiChannelBallistics higher peak refreshes held peak", "[signal][me
     ballistics.update(data, 0.01f);
     REQUIRE_THAT(ballistics.channels[0].held_peak, WithinAbs(0.8f, 1e-6f));
     REQUIRE_THAT(ballistics.channels[0].hold_counter, WithinAbs(ballistics.peak_hold_time, 1e-6f));
+}
+
+TEST_CASE("MultiChannelBallistics clamps channel count and clears clip holds", "[signal][meter][issue-645]") {
+    MultiChannelBallistics ballistics;
+    ballistics.clip_hold_time = 0.5f;
+
+    MultiChannelMeterData data;
+    data.num_channels = kMaxMeterChannels + 8;
+    data.channels[0].clipped = true;
+    data.channels[0].peak = 1.0f;
+    ballistics.update(data, 0.01f);
+
+    REQUIRE(ballistics.num_channels == kMaxMeterChannels);
+    REQUIRE(ballistics.channels[0].clip_indicator);
+    REQUIRE_THAT(ballistics.channels[0].clip_hold_counter, WithinAbs(0.5f, 1e-6f));
+
+    data.channels[0].clipped = false;
+    ballistics.update(data, 0.25f);
+    REQUIRE(ballistics.channels[0].clip_indicator);
+
+    ballistics.update(data, 0.30f);
+    REQUIRE_FALSE(ballistics.channels[0].clip_indicator);
+
+    data.channels[0].clipped = true;
+    ballistics.update(data, 0.01f);
+    REQUIRE(ballistics.channels[0].clip_indicator);
+
+    ballistics.clear_clips();
+    REQUIRE_FALSE(ballistics.channels[0].clip_indicator);
+    REQUIRE_THAT(ballistics.channels[0].clip_hold_counter, WithinAbs(0.0f, 1e-6f));
 }

@@ -3,10 +3,11 @@
 
 #include <pulp/render/render_loop.hpp>
 #include <pulp/runtime/log.hpp>
+#include "render_loop_state.hpp"
 #include <thread>
 #include <chrono>
 
-#ifdef __APPLE__
+#if defined(__APPLE__) && !defined(PULP_RENDER_LOOP_FORCE_TIMER)
 #include <TargetConditionals.h>
 #if TARGET_OS_OSX
 #include <CoreVideo/CVDisplayLink.h>
@@ -18,16 +19,17 @@ namespace pulp::render {
 
 // ── macOS: CVDisplayLink ────────────────────────────────────────────────
 
-#if defined(__APPLE__) && TARGET_OS_OSX
+#if defined(__APPLE__) && !defined(PULP_RENDER_LOOP_FORCE_TIMER) && TARGET_OS_OSX
 
 class MacRenderLoop : public RenderLoop {
 public:
     ~MacRenderLoop() override { stop(); }
 
     void start(FrameCallback on_frame) override {
+        if (!state_.start()) {
+            return;
+        }
         callback_ = std::move(on_frame);
-        running_ = true;
-        needs_frame_ = true;
 
         CVDisplayLinkCreateWithActiveCGDisplays(&display_link_);
         CVDisplayLinkSetOutputCallback(display_link_, &display_link_callback, this);
@@ -35,7 +37,7 @@ public:
     }
 
     void stop() override {
-        running_ = false;
+        state_.stop();
         if (display_link_) {
             CVDisplayLinkStop(display_link_);
             CVDisplayLinkRelease(display_link_);
@@ -44,23 +46,22 @@ public:
     }
 
     void request_frame() override {
-        needs_frame_.store(true, std::memory_order_relaxed);
+        state_.request_frame();
     }
 
-    bool is_running() const override { return running_.load(); }
+    bool is_running() const override { return state_.is_running(); }
 
 private:
     CVDisplayLinkRef display_link_ = nullptr;
     FrameCallback callback_;
-    std::atomic<bool> running_{false};
-    std::atomic<bool> needs_frame_{false};
+    RenderLoopState state_;
 
     static CVReturn display_link_callback(CVDisplayLinkRef, const CVTimeStamp*,
         const CVTimeStamp*, CVOptionFlags, CVOptionFlags*, void* ctx) {
         auto* self = static_cast<MacRenderLoop*>(ctx);
-        if (self->needs_frame_.exchange(false, std::memory_order_relaxed)) {
+        if (self->state_.consume_frame_request()) {
             dispatch_async(dispatch_get_main_queue(), ^{
-                if (self->running_.load() && self->callback_) {
+                if (self->state_.is_running() && self->callback_) {
                     self->callback_();
                 }
             });
@@ -78,16 +79,17 @@ public:
     ~TimerRenderLoop() override { stop(); }
 
     void start(FrameCallback on_frame) override {
+        if (!state_.start()) {
+            return;
+        }
         callback_ = std::move(on_frame);
-        running_ = true;
-        needs_frame_ = true;
 
         thread_ = std::thread([this]() {
             using namespace std::chrono;
             auto frame_interval = microseconds(16667); // ~60Hz
-            while (running_.load()) {
+            while (state_.is_running()) {
                 auto start = steady_clock::now();
-                if (needs_frame_.exchange(false, std::memory_order_relaxed)) {
+                if (state_.consume_frame_request() && state_.is_running()) {
                     if (callback_) callback_();
                 }
                 auto elapsed = steady_clock::now() - start;
@@ -100,28 +102,27 @@ public:
     }
 
     void stop() override {
-        running_ = false;
+        state_.stop();
         if (thread_.joinable()) thread_.join();
     }
 
     void request_frame() override {
-        needs_frame_.store(true, std::memory_order_relaxed);
+        state_.request_frame();
     }
 
-    bool is_running() const override { return running_.load(); }
+    bool is_running() const override { return state_.is_running(); }
 
 private:
     std::thread thread_;
     FrameCallback callback_;
-    std::atomic<bool> running_{false};
-    std::atomic<bool> needs_frame_{false};
+    RenderLoopState state_;
 };
 
 // ── Factory ─────────────────────────────────────────────────────────────
 
 std::unique_ptr<RenderLoop> RenderLoop::create(void* native_handle) {
     (void)native_handle;
-#if defined(__APPLE__) && TARGET_OS_OSX
+#if defined(__APPLE__) && !defined(PULP_RENDER_LOOP_FORCE_TIMER) && TARGET_OS_OSX
     return std::make_unique<MacRenderLoop>();
 #else
     return std::make_unique<TimerRenderLoop>();
