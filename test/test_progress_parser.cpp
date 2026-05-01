@@ -62,6 +62,36 @@ TEST_CASE("ProgressParser preserves empty type and payload boundaries",
     REQUIRE(events[1].payload.empty());
 }
 
+TEST_CASE("ProgressParser preserves payload delimiters after the first colon",
+          "[progress_parser][edge][issue-640]") {
+    std::vector<ProgressEvent> events;
+    ProgressParser parser([&](const ProgressEvent& e) { events.push_back(e); });
+
+    parser.feed_line("PROGRESS:ERROR:5:Network timeout: retry queued");
+    parser.feed_line("PROGRESS:PATH:/tmp/audio:cache/sample.wav:");
+
+    REQUIRE(events.size() == 2);
+    REQUIRE(events[0].type == "ERROR");
+    REQUIRE(events[0].payload == "5:Network timeout: retry queued");
+    REQUIRE(events[1].type == "PATH");
+    REQUIRE(events[1].payload == "/tmp/audio:cache/sample.wav:");
+}
+
+TEST_CASE("ProgressParser emits repeated empty type-only events deterministically",
+          "[progress_parser][edge][issue-640]") {
+    std::vector<ProgressEvent> events;
+    ProgressParser parser([&](const ProgressEvent& e) { events.push_back(e); });
+
+    parser.feed_line("PROGRESS:");
+    parser.feed_line("PROGRESS:");
+
+    REQUIRE(events.size() == 2);
+    REQUIRE(events[0].type.empty());
+    REQUIRE(events[0].payload.empty());
+    REQUIRE(events[1].type.empty());
+    REQUIRE(events[1].payload.empty());
+}
+
 TEST_CASE("ProgressParser handles multiple events", "[progress_parser]") {
     std::vector<ProgressEvent> events;
     ProgressParser parser([&](const ProgressEvent& e) { events.push_back(e); });
