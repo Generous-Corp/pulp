@@ -1,5 +1,6 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include <pulp/runtime/ip_address.hpp>
 #include <pulp/runtime/network_stream.hpp>
 #include <pulp/runtime/socket.hpp>
 
@@ -22,6 +23,45 @@ std::optional<std::uint16_t> try_bind_loopback(Socket& server, std::uint16_t por
 }
 
 }  // namespace
+
+// ── IP address helpers ──────────────────────────────────────────────────
+
+TEST_CASE("IPv4 validation accepts boundary dotted quads",
+          "[network_stream][ip-address][issue-641]") {
+    REQUIRE(is_valid_ipv4("0.0.0.0"));
+    REQUIRE(is_valid_ipv4("127.0.0.1"));
+    REQUIRE(is_valid_ipv4("192.168.1.254"));
+    REQUIRE(is_valid_ipv4("255.255.255.255"));
+}
+
+TEST_CASE("IPv4 validation rejects malformed addresses",
+          "[network_stream][ip-address][issue-641]") {
+    REQUIRE_FALSE(is_valid_ipv4(""));
+    REQUIRE_FALSE(is_valid_ipv4("localhost"));
+    REQUIRE_FALSE(is_valid_ipv4("256.0.0.1"));
+    REQUIRE_FALSE(is_valid_ipv4("1.2.3"));
+    REQUIRE_FALSE(is_valid_ipv4("1.2.3.4.5"));
+    REQUIRE_FALSE(is_valid_ipv4(" 127.0.0.1"));
+}
+
+TEST_CASE("local IPv4 helpers return valid fallback or interface addresses",
+          "[network_stream][ip-address][issue-641]") {
+    auto addresses = local_ipv4_addresses();
+    for (const auto& address : addresses) {
+        REQUIRE(is_valid_ipv4(address));
+        REQUIRE(address != "127.0.0.1");
+    }
+
+    auto primary = local_ipv4_address();
+    REQUIRE(is_valid_ipv4(primary));
+    if (addresses.empty()) {
+        REQUIRE(primary == "127.0.0.1");
+    } else {
+        REQUIRE(primary == addresses.front());
+    }
+
+    REQUIRE(hostname().find('\0') == std::string::npos);
+}
 
 TEST_CASE("TcpStream round-trips bytes on loopback", "[network_stream]") {
     Socket server;
