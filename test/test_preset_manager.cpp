@@ -1,7 +1,11 @@
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_approx.hpp>
+#include "preset_test_sandbox.hpp"
 #include <pulp/state/preset_manager.hpp>
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <string_view>
 
 using namespace pulp::state;
 namespace fs = std::filesystem;
@@ -12,7 +16,28 @@ static void setup_test_store(StateStore& store) {
     store.add_parameter({.id = 2, .name = "Mix", .range = {0, 100, 50}});
 }
 
+static void write_text_file(const fs::path& path, std::string_view content) {
+    if (!path.parent_path().empty()) {
+        std::error_code ec;
+        fs::create_directories(path.parent_path(), ec);
+    }
+
+    std::ofstream file(path);
+    REQUIRE(file.is_open());
+    file << content;
+}
+
+static PresetInfo require_user_preset(PresetManager& manager, const std::string& name) {
+    auto presets = manager.user_presets();
+    auto it = std::find_if(presets.begin(), presets.end(), [&](const PresetInfo& preset) {
+        return preset.name == name;
+    });
+    REQUIRE(it != presets.end());
+    return *it;
+}
+
 TEST_CASE("PresetManager construction sets paths", "[state][preset]") {
+    pulp::test::PresetTestSandbox sandbox("pulp-preset-construction");
     StateStore store;
     setup_test_store(store);
     PresetManager pm(store, "TestCo", "TestPlugin");
@@ -23,12 +48,9 @@ TEST_CASE("PresetManager construction sets paths", "[state][preset]") {
 }
 
 TEST_CASE("PresetManager save and load round-trip", "[state][preset]") {
+    pulp::test::PresetTestSandbox sandbox("pulp-preset-roundtrip");
     StateStore store;
     setup_test_store(store);
-
-    // Use a temp directory for testing
-    auto tmp = fs::temp_directory_path() / "pulp_preset_test";
-    fs::create_directories(tmp);
 
     PresetManager pm(store, "TestCo", "TestPlugin");
 
@@ -54,16 +76,13 @@ TEST_CASE("PresetManager save and load round-trip", "[state][preset]") {
         }
     }
 
-    if (found) {
-        REQUIRE(store.get_value(1) < -5.0f); // approximately -6
-        REQUIRE(store.get_value(2) > 70.0f); // approximately 75
-    }
-
-    // Clean up
-    fs::remove_all(tmp);
+    REQUIRE(found);
+    REQUIRE(store.get_value(1) < -5.0f); // approximately -6
+    REQUIRE(store.get_value(2) > 70.0f); // approximately 75
 }
 
 TEST_CASE("PresetManager unsaved changes tracking", "[state][preset]") {
+    pulp::test::PresetTestSandbox sandbox("pulp-preset-unsaved");
     StateStore store;
     setup_test_store(store);
     PresetManager pm(store, "TestCo", "TestPlugin");
@@ -78,6 +97,7 @@ TEST_CASE("PresetManager unsaved changes tracking", "[state][preset]") {
 }
 
 TEST_CASE("PresetManager factory presets cannot be deleted", "[state][preset]") {
+    pulp::test::PresetTestSandbox sandbox("pulp-preset-factory-delete");
     StateStore store;
     setup_test_store(store);
     PresetManager pm(store, "TestCo", "TestPlugin");
@@ -91,6 +111,7 @@ TEST_CASE("PresetManager factory presets cannot be deleted", "[state][preset]") 
 }
 
 TEST_CASE("PresetManager factory presets cannot be renamed", "[state][preset]") {
+    pulp::test::PresetTestSandbox sandbox("pulp-preset-factory-rename");
     StateStore store;
     setup_test_store(store);
     PresetManager pm(store, "TestCo", "TestPlugin");
@@ -104,6 +125,7 @@ TEST_CASE("PresetManager factory presets cannot be renamed", "[state][preset]") 
 }
 
 TEST_CASE("PresetManager on_preset_loaded callback fires", "[state][preset]") {
+    pulp::test::PresetTestSandbox sandbox("pulp-preset-loaded-callback");
     StateStore store;
     setup_test_store(store);
     PresetManager pm(store, "TestCo", "TestPlugin");
@@ -128,6 +150,7 @@ TEST_CASE("PresetManager on_preset_loaded callback fires", "[state][preset]") {
 }
 
 TEST_CASE("PresetManager import nonexistent file returns nullopt", "[state][preset]") {
+    pulp::test::PresetTestSandbox sandbox("pulp-preset-import-missing");
     StateStore store;
     setup_test_store(store);
     PresetManager pm(store, "TestCo", "TestPlugin");
@@ -137,10 +160,171 @@ TEST_CASE("PresetManager import nonexistent file returns nullopt", "[state][pres
 }
 
 TEST_CASE("PresetManager refresh resets cache", "[state][preset]") {
+    pulp::test::PresetTestSandbox sandbox("pulp-preset-refresh");
     StateStore store;
     setup_test_store(store);
     PresetManager pm(store, "TestCo", "TestPlugin");
 
     // Just verify it doesn't crash
     pm.refresh();
+}
+
+TEST_CASE("PresetManager load rejects malformed files without changing dirty state", "[state][preset]") {
+    pulp::test::PresetTestSandbox sandbox("pulp-preset-load-reject");
+    StateStore store;
+    setup_test_store(store);
+    PresetManager pm(store, "TestCo", "TestPlugin");
+
+    pm.set_current_preset_name("DirtyPreset");
+    pm.mark_as_changed();
+
+    REQUIRE_FALSE(pm.load(sandbox.root / "missing.json"));
+    REQUIRE(pm.current_preset_name() == "DirtyPreset");
+    REQUIRE(pm.has_unsaved_changes());
+
+    const auto no_params = sandbox.root / "no-parameters.json";
+    write_text_file(no_params, R"json({"name":"NoParameters"})json");
+    REQUIRE_FALSE(pm.load(no_params));
+    REQUIRE(pm.current_preset_name() == "DirtyPreset");
+    REQUIRE(pm.has_unsaved_changes());
+
+    const auto no_brace = sandbox.root / "no-brace.json";
+    write_text_file(no_brace, R"json({"parameters": 42})json");
+    REQUIRE_FALSE(pm.load(no_brace));
+    REQUIRE(pm.current_preset_name() == "DirtyPreset");
+    REQUIRE(pm.has_unsaved_changes());
+}
+
+TEST_CASE("PresetManager load skips malformed parameter values", "[state][preset]") {
+    pulp::test::PresetTestSandbox sandbox("pulp-preset-load-partial");
+    StateStore store;
+    setup_test_store(store);
+    PresetManager pm(store, "TestCo", "TestPlugin");
+
+    store.set_value(1, -12.0f);
+    store.set_value(2, 40.0f);
+
+    const auto preset_path = sandbox.root / "Partial.json";
+    write_text_file(preset_path,
+                    R"json({"parameters":{"Gain":"not-a-number","Mix":25.5,"Ignored":99}})json");
+
+    int load_callbacks = 0;
+    pm.on_preset_loaded = [&](const PresetInfo& preset) {
+        ++load_callbacks;
+        REQUIRE(preset.name == "Partial");
+        REQUIRE(preset.path == preset_path);
+    };
+
+    REQUIRE(pm.load(preset_path));
+    REQUIRE(store.get_value(1) == Catch::Approx(-12.0f));
+    REQUIRE(store.get_value(2) == Catch::Approx(25.5f));
+    REQUIRE(pm.current_preset_name() == "Partial");
+    REQUIRE_FALSE(pm.has_unsaved_changes());
+    REQUIRE(load_callbacks == 1);
+}
+
+TEST_CASE("PresetManager save scans subfolders and reports list changes", "[state][preset]") {
+    pulp::test::PresetTestSandbox sandbox("pulp-preset-save-subfolder");
+    StateStore store;
+    setup_test_store(store);
+    PresetManager pm(store, "TestCo", "TestPlugin");
+
+    int list_changes = 0;
+    pm.on_list_changed = [&] { ++list_changes; };
+
+    REQUIRE(pm.save("Beta", "Bank"));
+    REQUIRE(list_changes == 1);
+
+    auto beta = require_user_preset(pm, "Beta");
+    REQUIRE(beta.folder == "Bank");
+    REQUIRE(beta.path.parent_path().filename() == "Bank");
+    REQUIRE(fs::exists(beta.path));
+
+    REQUIRE(pm.save("Alpha"));
+    REQUIRE(list_changes == 2);
+
+    auto presets = pm.all_presets();
+    REQUIRE(presets.size() == 2);
+    REQUIRE(presets[0].name == "Alpha");
+    REQUIRE(presets[1].name == "Beta");
+}
+
+TEST_CASE("PresetManager rename and delete update current preset and callbacks", "[state][preset]") {
+    pulp::test::PresetTestSandbox sandbox("pulp-preset-rename-delete");
+    StateStore store;
+    setup_test_store(store);
+    PresetManager pm(store, "TestCo", "TestPlugin");
+
+    REQUIRE(pm.save("OldName"));
+    auto old_preset = require_user_preset(pm, "OldName");
+
+    int list_changes = 0;
+    pm.on_list_changed = [&] { ++list_changes; };
+
+    REQUIRE(pm.rename(old_preset, "NewName"));
+    REQUIRE(list_changes == 1);
+    REQUIRE(pm.current_preset_name() == "NewName");
+    REQUIRE_FALSE(fs::exists(old_preset.path));
+
+    auto new_preset = require_user_preset(pm, "NewName");
+    REQUIRE(fs::exists(new_preset.path));
+
+    REQUIRE(pm.delete_preset(new_preset));
+    REQUIRE(list_changes == 2);
+    REQUIRE_FALSE(fs::exists(new_preset.path));
+    REQUIRE(pm.user_presets().empty());
+
+    REQUIRE_FALSE(pm.rename(new_preset, "Again"));
+    REQUIRE_FALSE(pm.delete_preset(new_preset));
+    REQUIRE(list_changes == 2);
+}
+
+TEST_CASE("PresetManager import copies external presets into the user directory", "[state][preset]") {
+    pulp::test::PresetTestSandbox sandbox("pulp-preset-import-copy");
+    StateStore store;
+    setup_test_store(store);
+    PresetManager pm(store, "TestCo", "TestPlugin");
+
+    const auto external = sandbox.root / "external-source" / "Imported.json";
+    write_text_file(external, R"json({"parameters":{"Gain":-18,"Mix":33}})json");
+
+    int list_changes = 0;
+    pm.on_list_changed = [&] { ++list_changes; };
+
+    auto imported = pm.import_file(external);
+    REQUIRE(imported.has_value());
+    REQUIRE(imported->name == "Imported");
+    REQUIRE(imported->path.parent_path() == pm.user_presets_dir());
+    REQUIRE_FALSE(imported->is_factory);
+    REQUIRE(fs::exists(imported->path));
+    REQUIRE(list_changes == 1);
+
+    auto listed = require_user_preset(pm, "Imported");
+    REQUIRE(listed.path == imported->path);
+}
+
+TEST_CASE("PresetManager navigation wraps sorted presets and handles missing current", "[state][preset]") {
+    pulp::test::PresetTestSandbox sandbox("pulp-preset-navigation");
+    StateStore store;
+    setup_test_store(store);
+    PresetManager pm(store, "TestCo", "TestPlugin");
+
+    store.set_value(1, -24.0f);
+    REQUIRE(pm.save("Alpha"));
+    store.set_value(1, -12.0f);
+    REQUIRE(pm.save("Beta"));
+
+    pm.set_current_preset_name("Missing");
+    store.set_value(1, 0.0f);
+
+    REQUIRE(pm.load_next());
+    REQUIRE(pm.current_preset_name() == "Alpha");
+    REQUIRE(store.get_value(1) == Catch::Approx(-24.0f));
+
+    REQUIRE(pm.load_previous());
+    REQUIRE(pm.current_preset_name() == "Beta");
+    REQUIRE(store.get_value(1) == Catch::Approx(-12.0f));
+
+    REQUIRE(pm.load_next());
+    REQUIRE(pm.current_preset_name() == "Alpha");
 }

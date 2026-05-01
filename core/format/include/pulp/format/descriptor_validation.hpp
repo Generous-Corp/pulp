@@ -6,9 +6,9 @@
 // Catches the common descriptor mistakes that otherwise surface as
 // mysterious host-side "plugin did not appear" / "factory returned
 // null" failures:
-//   - empty name / manufacturer / bundle_id
+//   - empty name / manufacturer / bundle_id / version
 //   - bundle_id that doesn't look like reverse-DNS
-//   - no output bus declared
+//   - no output bus declared, or invalid main bus channel counts
 //   - instrument category with 0-channel output
 //   - accepts_midi / supports_mpe / supports_ump on effect category
 //     without any MIDI capability setup (legal but usually a mistake)

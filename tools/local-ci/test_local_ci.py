@@ -6436,6 +6436,396 @@ class LocalCiTests(unittest.TestCase):
         self.assertEqual(timing["completed_at"], "")
         self.assertEqual(timing["duration_secs"], 15.0)
 
+    def test_parse_and_normalize_helpers_cover_invalid_edges(self):
+        self.assertTrue(self.mod.parse_config_bool(" On "))
+        self.assertTrue(self.mod.parse_config_bool(2))
+        self.assertFalse(self.mod.parse_config_bool(" no "))
+        self.assertFalse(self.mod.parse_config_bool(0))
+        with self.assertRaisesRegex(ValueError, "Invalid boolean value"):
+            self.mod.parse_config_bool("sometimes")
+
+        self.assertEqual(self.mod.normalize_validation_mode(None), "full")
+        self.assertEqual(self.mod.normalize_validation_mode(" SMOKE "), "smoke")
+        with self.assertRaisesRegex(ValueError, "Invalid validation mode"):
+            self.mod.normalize_validation_mode("quick")
+
+        self.assertEqual(self.mod.normalize_desktop_source_mode("exact_sha"), "exact-sha")
+        with self.assertRaisesRegex(ValueError, "Invalid desktop source mode"):
+            self.mod.normalize_desktop_source_mode("archive")
+
+        self.assertEqual(self.mod.normalize_publish_mode(" ISSUE-COMMENT "), "issue-comment")
+        with self.assertRaisesRegex(ValueError, "Invalid desktop publish mode"):
+            self.mod.normalize_publish_mode("rss")
+
+        self.assertEqual(
+            self.mod.normalize_runs_on_json('["self-hosted", "macOS"]', setting_name="runs-on"),
+            '["self-hosted", "macOS"]',
+        )
+        self.assertEqual(
+            self.mod.normalize_runs_on_json('"ubuntu-latest"', setting_name="runs-on"),
+            '"ubuntu-latest"',
+        )
+        with self.assertRaisesRegex(ValueError, "valid JSON"):
+            self.mod.normalize_runs_on_json("ubuntu-latest", setting_name="runs-on")
+        with self.assertRaisesRegex(ValueError, "string or array"):
+            self.mod.normalize_runs_on_json('{"label": "ubuntu"}', setting_name="runs-on")
+
+    def test_workflow_selector_helpers_resolve_config_repo_and_cli_values(self):
+        config = {
+            "github_actions": {
+                "defaults": {"provider": "namespace"},
+                "workflows": {
+                    "build": {
+                        "providers": {
+                            "namespace": {
+                                "linux_runner_selector_json": '"linux-config"',
+                            }
+                        }
+                    },
+                    "docs-check": {
+                        "providers": {
+                            "namespace": {},
+                        }
+                    },
+                },
+            }
+        }
+        repo_variables = {
+            "PULP_NAMESPACE_BUILD_WINDOWS_RUNS_ON_JSON": '"windows-repo"',
+            "PULP_NAMESPACE_BUILD_MACOS_RUNS_ON_JSON": '["self-hosted", "macOS"]',
+            "PULP_NAMESPACE_DOCS_CHECK_RUNS_ON_JSON": '"docs-repo"',
+        }
+        settings = self.mod.resolve_github_actions_settings(config)
+
+        build_summary = self.mod.summarize_workflow_provider_defaults(
+            config, repo_variables, settings, "build"
+        )
+        self.assertEqual(build_summary["provider"], "namespace")
+        self.assertEqual(
+            build_summary["dispatch_fields"],
+            {
+                "linux_runner_selector_json": '"linux-config"',
+                "windows_runner_selector_json": '"windows-repo"',
+                "macos_runner_selector_json": '["self-hosted", "macOS"]',
+            },
+        )
+        self.assertEqual(
+            build_summary["dispatch_sources"]["linux_runner_selector_json"],
+            "config github_actions.workflows.build.providers.namespace.linux_runner_selector_json",
+        )
+        self.assertEqual(
+            build_summary["dispatch_sources"]["windows_runner_selector_json"],
+            "repo variable PULP_NAMESPACE_BUILD_WINDOWS_RUNS_ON_JSON",
+        )
+
+        docs_summary = self.mod.summarize_workflow_provider_defaults(
+            config, repo_variables, settings, "docs-check"
+        )
+        self.assertEqual(docs_summary["selector_value"], '"docs-repo"')
+        self.assertEqual(
+            docs_summary["selector_source"],
+            "repo variable PULP_NAMESPACE_DOCS_CHECK_RUNS_ON_JSON",
+        )
+
+        cli_fields = self.mod.resolve_cli_dispatch_field_values(
+            SimpleNamespace(
+                linux_runner_selector_json='"linux-cli"',
+                windows_runner_selector_json=None,
+                macos_runner_selector_json=None,
+            ),
+            ["linux_runner_selector_json"],
+        )
+        self.assertEqual(cli_fields, {"linux_runner_selector_json": '"linux-cli"'})
+        with self.assertRaisesRegex(ValueError, "not supported"):
+            self.mod.resolve_cli_dispatch_field_values(
+                SimpleNamespace(
+                    linux_runner_selector_json='"linux-cli"',
+                    windows_runner_selector_json=None,
+                    macos_runner_selector_json=None,
+                ),
+                [],
+            )
+        with self.assertRaisesRegex(ValueError, "valid JSON"):
+            self.mod.resolve_cli_dispatch_field_values(
+                SimpleNamespace(
+                    linux_runner_selector_json="linux-cli",
+                    windows_runner_selector_json=None,
+                    macos_runner_selector_json=None,
+                ),
+                ["linux_runner_selector_json"],
+            )
+
+    def test_cloud_record_lookup_and_summary_helpers_cover_edge_statuses(self):
+        normalized = self.mod.normalize_cloud_record(
+            {
+                "dispatch_fields": [],
+                "jobs": {},
+                "provider_metadata": [],
+                "usage_summary": [],
+                "cost_summary": [],
+            }
+        )
+        self.assertEqual(normalized["dispatch_fields"], {})
+        self.assertEqual(normalized["jobs"], [])
+        self.assertEqual(normalized["provider_metadata"], {})
+        self.assertEqual(normalized["usage_summary"], {})
+        self.assertEqual(normalized["cost_summary"], {})
+
+        records = [
+            {"dispatch_id": "abc111", "run_id": 42},
+            {"dispatch_id": "abc222", "run_id": 42},
+            {"dispatch_id": "def333", "run_id": 99},
+        ]
+        self.assertIsNone(self.mod.find_cloud_record([], None))
+        self.assertIsNone(self.mod.find_cloud_record(records, "missing"))
+        with self.assertRaisesRegex(ValueError, "ambiguous"):
+            self.mod.find_cloud_record(records, "abc")
+        with self.assertRaisesRegex(ValueError, "matched multiple"):
+            self.mod.find_cloud_record(records, "42")
+
+        config = {
+            "telemetry": {
+                "billing": {
+                    "namespace_machine_shape_rates_per_hour": [
+                        {
+                            "os": "linux",
+                            "arch": "amd64",
+                            "virtual_cpu": 4,
+                            "memory_megabytes": 8192,
+                            "rate": 1.25,
+                        }
+                    ]
+                }
+            }
+        }
+        summary = self.mod.cloud_record_summary(
+            {
+                "dispatch_id": "sum123",
+                "workflow_key": "build",
+                "head_branch": "feature/cloud",
+                "provider_requested": "namespace",
+                "provider_resolved": "namespace",
+                "status": "completed",
+                "conclusion": "success",
+                "run_id": 123,
+                "runner_selector_json": '["self-hosted", "linux"]',
+                "duration_secs": 65.4,
+                "usage_summary": {"provider_runtime_secs": 3600},
+                "provider_metadata": {
+                    "namespace_instances": [
+                        {
+                            "os": "linux",
+                            "arch": "amd64",
+                            "virtual_cpu": 4,
+                            "memory_megabytes": 8192,
+                            "duration_secs": 7200,
+                        }
+                    ]
+                },
+            },
+            config,
+        )
+        self.assertIn("selector=self-hosted,linux", summary)
+        self.assertIn("gha#123", summary)
+        self.assertIn("duration=1m05s", summary)
+        self.assertIn("provider_time=1h00m00s", summary)
+        self.assertIn("cost=est $2.50", summary)
+
+        self.assertEqual(self.mod.summarize_runner_selector("{not-json"), "{not-json")
+        self.assertEqual(self.mod.summarize_runner_selector("123"), "123")
+        self.assertEqual(self.mod.normalize_github_timestamp("0001-01-01T00:00:00Z"), "")
+        self.assertIsNone(self.mod.duration_between("bad", "2026-04-04T12:00:00+00:00"))
+        self.assertEqual(
+            self.mod.duration_between(
+                "2026-04-04T12:00:10+00:00",
+                "2026-04-04T12:00:05+00:00",
+            ),
+            0.0,
+        )
+
+    def test_billing_estimation_and_report_helpers_cover_fallbacks(self):
+        self.assertEqual(self.mod.format_duration_secs(None), "")
+        self.assertEqual(self.mod.format_duration_secs("bad"), "")
+        self.assertEqual(self.mod.format_duration_secs(-1), "")
+        self.assertEqual(self.mod.format_duration_secs(1.25), "1.2s")
+        self.assertEqual(self.mod.format_duration_secs(3661), "1h01m01s")
+
+        self.assertEqual(self.mod.format_memory_megabytes("bad"), "")
+        self.assertEqual(self.mod.format_memory_megabytes(0), "")
+        self.assertEqual(self.mod.format_memory_megabytes(1536), "1.5 GB")
+        self.assertEqual(self.mod.render_selector_value('"macos"'), "macos")
+        self.assertIsNone(self.mod.parse_rate_value("-1"))
+        self.assertIsNone(self.mod.parse_rate_value("bad"))
+        self.assertTrue(self.mod.parse_optional_bool(True, "enabled"))
+        self.assertIsNone(self.mod.parse_optional_bool("", "enabled"))
+        with self.assertRaisesRegex(ValueError, "must be true or false"):
+            self.mod.parse_optional_bool("yes", "enabled")
+
+        config = {
+            "telemetry": {
+                "billing": {
+                    "currency": "eur",
+                    "billing_period_start_day": "15",
+                    "enable_provider_reported_totals": True,
+                    "github_hosted_job_os_rates_per_minute": {
+                        " Linux ": "0.02",
+                        "": "9.99",
+                        "macos": "-1",
+                    },
+                    "namespace_profile_tag_rates_per_hour": {
+                        "fast": "1.5",
+                        "": "9.99",
+                        "slow": "bad",
+                    },
+                    "namespace_machine_shape_rates_per_hour": [
+                        {
+                            "os": "Linux",
+                            "arch": "AMD64",
+                            "virtual_cpu": "8",
+                            "memory_megabytes": "16384",
+                            "rate": "2.0",
+                        },
+                        "ignored",
+                        {"rate": "-1"},
+                    ],
+                }
+            }
+        }
+        billing = self.mod.resolve_billing_settings(config)
+        self.assertEqual(billing["currency"], "EUR")
+        self.assertEqual(billing["billing_period_start_day"], 15)
+        self.assertTrue(billing["enable_provider_reported_totals"])
+        self.assertEqual(billing["github_hosted_job_os_rates_per_minute"], {"linux": 0.02})
+        self.assertEqual(billing["namespace_profile_tag_rates_per_hour"], {"fast": 1.5})
+        self.assertEqual(
+            billing["namespace_machine_shape_rates_per_hour"],
+            [
+                {
+                    "os": "linux",
+                    "arch": "amd64",
+                    "virtual_cpu": 8,
+                    "memory_megabytes": 16384,
+                    "rate": 2.0,
+                }
+            ],
+        )
+        with self.assertRaisesRegex(ValueError, "must be between 1 and 28"):
+            self.mod.resolve_billing_settings(
+                {"telemetry": {"billing": {"billing_period_start_day": 31}}}
+            )
+        with self.assertRaisesRegex(ValueError, "must be true or false"):
+            self.mod.resolve_billing_settings(
+                {"telemetry": {"billing": {"enable_provider_reported_totals": "yes"}}}
+            )
+
+        period_start, period_end = self.mod.billing_period_window(
+            15, now_dt=datetime(2026, 1, 10, tzinfo=timezone.utc)
+        )
+        self.assertEqual(period_start.isoformat(), "2025-12-15T00:00:00+00:00")
+        self.assertEqual(period_end.isoformat(), "2026-01-15T00:00:00+00:00")
+        self.assertEqual(
+            self.mod.iter_year_months(
+                datetime(2025, 12, 15, tzinfo=timezone.utc),
+                datetime(2026, 2, 15, tzinfo=timezone.utc),
+            ),
+            [(2025, 12), (2026, 1), (2026, 2)],
+        )
+        self.assertIsNone(self.mod.parse_iso_date(""))
+        self.assertIsNone(self.mod.parse_iso_date("2026-99-99"))
+        self.assertEqual(self.mod.parse_iso_date("2026-04-04").isoformat(), "2026-04-04")
+        self.assertEqual(self.mod.infer_job_os("build", "Windows (x64)"), "windows")
+        self.assertEqual(self.mod.infer_job_os("build", "macOS (ARM64)"), "macos")
+        self.assertEqual(self.mod.infer_job_os("build", "Ubuntu tests"), "linux")
+        self.assertEqual(self.mod.infer_job_os("docs-check", "Validate docs"), "linux")
+        self.assertEqual(self.mod.infer_job_os("build", "Resolve provider"), "")
+
+        github_cost = self.mod.estimate_github_hosted_cost(
+            {
+                "workflow_key": "build",
+                "jobs": [
+                    {"name": "resolve-provider"},
+                    {
+                        "name": "Linux (x64)",
+                        "started_at": "2026-04-04T12:00:00+00:00",
+                        "completed_at": "2026-04-04T12:02:00+00:00",
+                    },
+                    {"name": "Unknown job"},
+                ],
+            },
+            billing,
+        )
+        self.assertEqual(github_cost["status"], "estimated")
+        self.assertAlmostEqual(github_cost["estimated_total"], 0.04)
+
+        namespace_cost = self.mod.estimate_namespace_cost(
+            {
+                "usage_summary": {
+                    "machine_shapes": [
+                        {
+                            "os": "linux",
+                            "arch": "amd64",
+                            "virtual_cpu": 8,
+                            "memory_megabytes": 16384,
+                            "duration_secs": 1800,
+                        }
+                    ]
+                }
+            },
+            billing,
+        )
+        self.assertEqual(namespace_cost["status"], "estimated")
+        self.assertAlmostEqual(namespace_cost["estimated_total"], 1.0)
+        self.assertEqual(
+            self.mod.estimate_cloud_record_cost({"provider_requested": "other"}, config)["reason"],
+            "no estimator for provider 'other'",
+        )
+        self.assertEqual(self.mod.format_currency_amount(3.5, "eur"), "EUR 3.50")
+
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            self.mod.print_github_repo_billing_summary(
+                {"status": "unavailable", "reason": "missing scope"}, indent=""
+            )
+            self.mod.print_cloud_field_detail(
+                "runner_selector_json", '["self-hosted", "linux"]', "config", indent=""
+            )
+            self.mod.print_cloud_field_detail(
+                "plain", "", indent="", unset_note="missing"
+            )
+            self.mod.print_namespace_usage_summary(
+                {
+                    "usage_summary": {
+                        "instances_count": 1,
+                        "provider_runtime_secs": 0,
+                        "machine_shapes": [
+                            {
+                                "profile_tag": "",
+                                "count": 1,
+                                "duration_secs": 0,
+                            }
+                        ],
+                    },
+                    "cost_summary": {
+                        "status": "estimated",
+                        "estimated_total": 1.2,
+                        "currency": "EUR",
+                        "reason": "",
+                    },
+                }
+            )
+            self.mod.print_billing_period_summary(
+                {"status": "unavailable", "reason": "no rates"}, indent=""
+            )
+
+        output = buf.getvalue()
+        self.assertIn("github repo billing: unavailable (missing scope)", output)
+        self.assertIn("runner_selector_json: self-hosted,linux (config)", output)
+        self.assertIn("plain: unset (missing)", output)
+        self.assertIn("provider usage: 1 Namespace instance(s)", output)
+        self.assertIn("unlabeled: unknown x1", output)
+        self.assertIn("cost: est EUR 1.20; estimated; verify provider pricing", output)
+        self.assertIn("period cost: unavailable (no rates)", output)
+
     def test_cmd_cloud_workflows_lists_supported_providers(self):
         buf = io.StringIO()
         with redirect_stdout(buf):

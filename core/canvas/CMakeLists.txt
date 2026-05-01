@@ -19,6 +19,12 @@ target_sources(pulp-canvas PRIVATE
     src/msdf_atlas.cpp
     src/sdf_atlas_cache.cpp
     src/path_to_sdf.cpp
+    # font_registry_stubs.cpp provides non-Skia fallbacks for the public
+    # font-registration API (pulp #1150). The real implementations live in
+    # bundled_fonts.cpp, which is only compiled under PULP_HAS_SKIA. This
+    # stub TU lets plugin startup code call register_font(...) on non-GPU
+    # builds without guarding every call site.
+    src/font_registry_stubs.cpp
 )
 
 # Text shaping via SkParagraph (default ON when Skia available, can be disabled)
