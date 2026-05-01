@@ -7667,11 +7667,19 @@ class LocalCiTests(unittest.TestCase):
             }
         )
 
-        buf = io.StringIO()
-        with redirect_stdout(buf):
-            exit_code = self.mod.cmd_cloud_history(
-                SimpleNamespace(workflow=None, provider=None, limit=10)
-            )
+        original_billing_period_window = self.mod.billing_period_window
+        self.mod.billing_period_window = lambda start_day, now_dt=None: (
+            datetime(2026, 4, 1, tzinfo=timezone.utc),
+            datetime(2026, 5, 1, tzinfo=timezone.utc),
+        )
+        try:
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                exit_code = self.mod.cmd_cloud_history(
+                    SimpleNamespace(workflow=None, provider=None, limit=10)
+                )
+        finally:
+            self.mod.billing_period_window = original_billing_period_window
 
         output = buf.getvalue()
         self.assertEqual(exit_code, 0)
@@ -8061,9 +8069,14 @@ class LocalCiTests(unittest.TestCase):
         original_current_branch = self.mod.current_branch
         original_utm_status = self.mod.utmctl_vm_status
         original_ssh_reachable = self.mod.ssh_reachable
+        original_billing_period_window = self.mod.billing_period_window
         self.mod.current_branch = lambda: "feature/cloud"
         self.mod.utmctl_vm_status = lambda vm_name: "stopped"
         self.mod.ssh_reachable = lambda host, timeout=5: True
+        self.mod.billing_period_window = lambda start_day, now_dt=None: (
+            datetime(2026, 4, 1, tzinfo=timezone.utc),
+            datetime(2026, 5, 1, tzinfo=timezone.utc),
+        )
         try:
             buf = io.StringIO()
             with redirect_stdout(buf):
@@ -8072,6 +8085,7 @@ class LocalCiTests(unittest.TestCase):
             self.mod.current_branch = original_current_branch
             self.mod.utmctl_vm_status = original_utm_status
             self.mod.ssh_reachable = original_ssh_reachable
+            self.mod.billing_period_window = original_billing_period_window
 
         output = buf.getvalue()
         self.assertEqual(exit_code, 0)
