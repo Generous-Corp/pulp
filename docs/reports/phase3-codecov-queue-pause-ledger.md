@@ -159,6 +159,7 @@ coverage merges and is held for a branch refresh.
 | #1065 | `a428365ded95` | merged |
 | #1080 | `9c5a455d1cd9` | merged |
 | #1081 | `bb8e9ba00a32` | merged |
+| #1084 | `66c74123430a` | merged from `UNSTABLE`; required `linux`, `macos`, and `windows` contexts were green, only advisory macOS sanitizer lanes were still pending |
 | #1087 | `c89bd020f53c` | merged |
 | #1090 | `fd7ff5386993` | merged |
 | #1091 | `4210ff8f2c14` | merged |
@@ -187,7 +188,7 @@ coverage merges and is held for a branch refresh.
 | PR | Branch | New Head | Status |
 | --- | --- | --- | --- |
 | #1099 | `feature/view-layout-widgets-coverage-493` | `66decf5958e8` | Conflict resolved and pushed; normal PR workflows are running. Local worker validated `pulp-test-view-layout-widgets`, `pulp-test-phase9-widgets`, and `pulp-test-property-list` directly. |
-| #1084 | `feature/runtime-text-diff-coverage-641` | `cb63e51416ed` | Conflict resolved and pushed; normal PR workflows are running. Local worker validated `pulp-test-runtime-utils "[runtime][text-diff]"` and matching CTest cases. |
+| #1084 | `feature/runtime-text-diff-coverage-641` | `cb63e51416ed` | Merged as `66c74123430a` after required `linux`, `macos`, and `windows` wrappers passed; advisory macOS sanitizer lanes were still pending. |
 | #1089 | `feature/view-file-browser-coverage-493` | `86cbe4ca12e9` | Conflict resolved and pushed. The first refreshed run failed `Enforce version & skill sync`; a metadata-only empty commit added `Version-Bump: sdk=skip reason="test-only file browser coverage; no SDK release surface change"`. Local worker validated skill-sync, version-bump with required-bump enforcement, and `git diff --check origin/main...HEAD`. Fresh PR checks are queued. |
 | #1131 | `feature/audio-window-enumerator-coverage-640-next` | `f5af90f4f5af` | Pushed coverage-harness fix for Windows `.exe` object discovery in `scripts/run_coverage.sh`; `bash -n`, `test_run_coverage.py`, skill-sync report, version-bump report, and `git diff --check` passed. Local CMake validation was not rerun after the harness patch because the laptop filesystem had only about 150-211 MiB free; the earlier excerpt binary validation was already green and the platform-sensitive coverage fix now needs CI/Namespace. |
 | #1137 | `feature/audio-platform-helper-coverage-640-next` | `e4ea28dfc2e0` | Pushed a test isolation fix after macOS Namespace exposed a parallel CTest temp-dir collision in `test_cli_projects_registry.cpp`. Focused local `pulp-test-cli-projects-registry "add_project falls back to directory basename when no name hint"` passed; skill-sync/version-bump reports and `git diff --check` passed. Fresh PR checks are queued. |
