@@ -788,6 +788,44 @@ TEST_CASE("FormatRegistry exposes built-in audio codecs", "[audio][file][registr
     REQUIRE(contains_extension(write_extensions, ".aif"));
 }
 
+TEST_CASE("FormatRegistry rejects malformed compressed files through built-in readers",
+          "[audio][file][registry][issue-640]") {
+    auto flac_path = unique_temp_audio_path("_invalid.FLAC");
+    auto mp3_path = unique_temp_audio_path("_invalid.mp3");
+
+    {
+        const unsigned char bytes[] = {0x00, 0x11, 0x22, 0x33, 0x44};
+        std::ofstream file(flac_path, std::ios::binary);
+        file.write(reinterpret_cast<const char*>(bytes), sizeof(bytes));
+        REQUIRE(file.good());
+    }
+    {
+        const unsigned char bytes[] = {0x7F, 0x45, 0x4C, 0x46, 0x00};
+        std::ofstream file(mp3_path, std::ios::binary);
+        file.write(reinterpret_cast<const char*>(bytes), sizeof(bytes));
+        REQUIRE(file.good());
+    }
+
+    auto& registry = FormatRegistry::instance();
+    auto* flac_reader = registry.find_reader("FLAC");
+    auto* mp3_reader = registry.find_reader(".MP3");
+    REQUIRE(flac_reader != nullptr);
+    REQUIRE(mp3_reader != nullptr);
+
+    REQUIRE_FALSE(flac_reader->read_info(flac_path.string()).has_value());
+    REQUIRE_FALSE(flac_reader->read(flac_path.string()).has_value());
+    REQUIRE_FALSE(registry.read_info(flac_path.string()).has_value());
+    REQUIRE_FALSE(registry.read(flac_path.string()).has_value());
+
+    REQUIRE_FALSE(mp3_reader->read_info(mp3_path.string()).has_value());
+    REQUIRE_FALSE(mp3_reader->read(mp3_path.string()).has_value());
+    REQUIRE_FALSE(registry.read_info(mp3_path.string()).has_value());
+    REQUIRE_FALSE(registry.read(mp3_path.string()).has_value());
+
+    std::filesystem::remove(flac_path);
+    std::filesystem::remove(mp3_path);
+}
+
 TEST_CASE("FormatRegistry dispatches custom readers and writers through normalized paths",
           "[audio][file][registry][issue-640]") {
     auto& registry = FormatRegistry::instance();

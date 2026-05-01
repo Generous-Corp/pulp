@@ -1,4 +1,3 @@
-#include <algorithm>
 #include <pulp/view/color_picker.hpp>
 #include <algorithm>
 #include <cstdio>
@@ -21,8 +20,17 @@ void ColorPicker::set_hsl(HSL hsl) {
 }
 
 void ColorPicker::set_hex(const std::string& hex) {
-    if (hex.size() < 7 || hex[0] != '#') return;
-    auto val = std::stoul(hex.substr(1), nullptr, 16);
+    if ((hex.size() != 7 && hex.size() != 9) || hex[0] != '#') return;
+
+    std::size_t parsed = 0;
+    uint32_t val = 0;
+    try {
+        val = static_cast<uint32_t>(std::stoul(hex.substr(1), &parsed, 16));
+    } catch (...) {
+        return;
+    }
+    if (parsed != hex.size() - 1) return;
+
     if (hex.size() == 7)
         color_ = color_from_hex(static_cast<uint32_t>(val));
     else if (hex.size() == 9)
@@ -135,7 +143,7 @@ void ColorPicker::paint(canvas::Canvas& canvas) {
         }
         // Alpha cursor — inset by half cursor width to prevent edge clipping
         float alpha_cursor_w = 4.0f;
-        float alpha_x = ab.x + alpha_cursor_w * 0.5f + (static_cast<float>(color_.a) / 255.0f) * (ab.width - alpha_cursor_w);
+        float alpha_x = ab.x + alpha_cursor_w * 0.5f + color_.a * (ab.width - alpha_cursor_w);
         canvas.set_fill_color(Color::rgba8(255, 255, 255));
         canvas.fill_rect(alpha_x - 2, ab.y - 2, alpha_cursor_w, ab.height + 4);
     }

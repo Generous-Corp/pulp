@@ -24,6 +24,8 @@
 
 #pragma once
 
+#include <cstddef>
+#include <cstdint>
 #include <string>
 
 #ifdef PULP_HAS_SKIA
@@ -34,6 +36,55 @@ class SkTypeface;
 #endif
 
 namespace pulp::canvas {
+
+// ── Public font-registration API (pulp #1150) ───────────────────────────────
+// Plugin authors bundle their own .ttf/.otf files (e.g. via the CMake
+// `pulp_register_font(target NAME path/to/font.ttf [FAMILY "..."])` macro
+// or by hand-rolling pulp_add_binary_data) and call `register_font(...)`
+// during plugin startup so subsequent `canvas.set_font("My Family", ...)`
+// and `setFontFamily(label, "My Family")` calls resolve to the supplied
+// face instead of silently falling back to the platform font manager.
+//
+// These entry points are available regardless of `PULP_HAS_SKIA`. Without
+// Skia they degrade to a no-op that returns `false`, which lets plugin
+// startup code call them unconditionally.
+
+/// Register a font from raw TTF/OTF bytes. The supplied buffer is copied
+/// into a long-lived `SkData` so the caller may free `data` immediately.
+///
+/// If `family_override` is empty, the family name reported by the font's
+/// own name table (via Skia's `SkTypeface::getFamilyName`) is used. Pass
+/// a non-empty override when you want subsequent `setFontFamily("Foo")`
+/// calls to match a name that doesn't appear in the font file itself.
+///
+/// Returns `true` if Skia parsed the bytes into a usable `SkTypeface` and
+/// the registration was stored; `false` if Skia rejected the bytes, no
+/// platform font manager was available, the family name was empty (and
+/// no override was supplied), or `PULP_HAS_SKIA` is not defined.
+///
+/// Idempotent: calling `register_font` twice with the same family is
+/// safe — the second call replaces the first, but the typeface cache is
+/// invalidated so callers that already resolved the family see the new
+/// face on the next lookup. There is no `unregister_font` today; the
+/// expected lifetime is "process".
+bool register_font(const std::uint8_t* data, std::size_t size,
+                   const std::string& family_override = "");
+
+/// Convenience overload: register a font from a file on disk. Reads the
+/// entire file into memory, then forwards to the bytes-based overload.
+/// Returns `false` if the file cannot be opened, is empty, or Skia
+/// rejects the bytes.
+bool register_font_file(const std::string& path,
+                        const std::string& family_override = "");
+
+/// Returns true iff the requested family name was previously registered
+/// via `register_font` / `register_font_file`. Bundled families (Inter,
+/// JetBrains Mono) and platform-installed families are NOT covered by
+/// this query — use `is_font_family_available` for the cascading check.
+///
+/// Comparison is exact-string (case-sensitive) against the registered
+/// name (override-or-table-derived).
+bool is_font_registered(const std::string& family);
 
 #ifdef PULP_HAS_SKIA
 
@@ -54,6 +105,17 @@ namespace pulp::canvas {
 sk_sp<SkTypeface> match_bundled_typeface(SkFontMgr* mgr,
                                          const std::string& family,
                                          SkFontStyle style);
+
+/// Look up a plugin-registered typeface by family name (registered via the
+/// public `register_font` API). Returns `nullptr` if no matching family
+/// has been registered or the registered face does not satisfy `style`
+/// (a Regular face will not be returned for a Bold request, mirroring
+/// `match_bundled_typeface`).
+///
+/// Skia-aware variant; `core/view/` callers should prefer `is_font_registered`
+/// to avoid pulling Skia headers in.
+sk_sp<SkTypeface> match_registered_typeface(const std::string& family,
+                                            SkFontStyle style);
 
 /// Number of embedded bundled fonts compiled in. Useful for tests that want
 /// to assert "the build actually pulled in some .ttfs". Always returns the

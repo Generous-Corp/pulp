@@ -1,5 +1,6 @@
 #include <pulp/view/property_list.hpp>
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 
 namespace pulp::view {
@@ -103,8 +104,19 @@ void PropertyList::paint(canvas::Canvas& canvas) {
             else if constexpr (std::is_same_v<T, bool>)
                 value_str = val ? "true" : "false";
             else if constexpr (std::is_same_v<T, Color>) {
+                auto to_byte = [](float channel) {
+                    return static_cast<unsigned>(
+                        std::clamp(static_cast<int>(std::lround(channel * 255.0f)),
+                                   0,
+                                   255));
+                };
                 char buf[10];
-                snprintf(buf, sizeof(buf), "#%02x%02x%02x", val.r, val.g, val.b);
+                snprintf(buf,
+                         sizeof(buf),
+                         "#%02x%02x%02x",
+                         to_byte(val.r),
+                         to_byte(val.g),
+                         to_byte(val.b));
                 value_str = buf;
             }
         }, prop.value);
