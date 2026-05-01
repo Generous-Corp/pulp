@@ -29,27 +29,34 @@ struct MidiEvent {
     /// @param note      Note number (0-127).
     /// @param velocity  Velocity (0-127).
     static MidiEvent note_on(uint8_t channel, uint8_t note, uint8_t velocity) {
-        return {choc::midi::ShortMessage(
-            static_cast<uint8_t>(0x90 | (channel & 0x0F)), note, velocity), 0, 0.0};
+        const auto status = static_cast<uint8_t>(0x90 | (channel & 0x0F));
+        const auto note_byte = static_cast<uint8_t>(note & 0x7F);
+        const auto velocity_byte = static_cast<uint8_t>(velocity & 0x7F);
+        return {choc::midi::ShortMessage(status, note_byte, velocity_byte), 0, 0.0};
     }
 
     /// Create a Note Off event.
     static MidiEvent note_off(uint8_t channel, uint8_t note, uint8_t velocity = 0) {
-        return {choc::midi::ShortMessage(
-            static_cast<uint8_t>(0x80 | (channel & 0x0F)), note, velocity), 0, 0.0};
+        const auto status = static_cast<uint8_t>(0x80 | (channel & 0x0F));
+        const auto note_byte = static_cast<uint8_t>(note & 0x7F);
+        const auto velocity_byte = static_cast<uint8_t>(velocity & 0x7F);
+        return {choc::midi::ShortMessage(status, note_byte, velocity_byte), 0, 0.0};
     }
 
     /// Create a Control Change event.
     /// @param controller  CC number (0-127).
     /// @param value       CC value (0-127).
     static MidiEvent cc(uint8_t channel, uint8_t controller, uint8_t value) {
-        return {choc::midi::ShortMessage(
-            static_cast<uint8_t>(0xB0 | (channel & 0x0F)), controller, value), 0, 0.0};
+        const auto status = static_cast<uint8_t>(0xB0 | (channel & 0x0F));
+        const auto controller_byte = static_cast<uint8_t>(controller & 0x7F);
+        const auto value_byte = static_cast<uint8_t>(value & 0x7F);
+        return {choc::midi::ShortMessage(status, controller_byte, value_byte), 0, 0.0};
     }
 
     /// Create a Pitch Bend event.
     /// @param value  14-bit pitch bend value (0-16383, center = 8192).
     static MidiEvent pitch_bend(uint8_t channel, uint16_t value) {
+        value &= 0x3FFF;
         return {choc::midi::ShortMessage(
             static_cast<uint8_t>(0xE0 | (channel & 0x0F)),
             static_cast<uint8_t>(value & 0x7F),
@@ -58,8 +65,9 @@ struct MidiEvent {
 
     /// Create a Program Change event.
     static MidiEvent program_change(uint8_t channel, uint8_t program) {
-        return {choc::midi::ShortMessage(
-            static_cast<uint8_t>(0xC0 | (channel & 0x0F)), program, 0), 0, 0.0};
+        const auto status = static_cast<uint8_t>(0xC0 | (channel & 0x0F));
+        const auto program_byte = static_cast<uint8_t>(program & 0x7F);
+        return {choc::midi::ShortMessage(status, program_byte, 0), 0, 0.0};
     }
 
     bool is_note_on() const  { return message.isNoteOn(); }

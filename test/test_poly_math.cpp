@@ -37,6 +37,38 @@ TEST_CASE("Polynomial roots_quadratic complex roots", "[signal][poly]") {
     REQUIRE(std::abs(r1.imag()) > 0.9f);
 }
 
+TEST_CASE("Polynomial roots_quadratic handles degenerate coefficients",
+          "[signal][poly][issue-645]") {
+    auto [linear_a, linear_b] = Polynomial::roots_quadratic(0.0f, 2.0f, -8.0f);
+    REQUIRE_THAT(linear_a.real(), WithinAbs(4.0f, 0.001f));
+    REQUIRE_THAT(linear_a.imag(), WithinAbs(0.0f, 0.001f));
+    REQUIRE_THAT(linear_b.real(), WithinAbs(4.0f, 0.001f));
+    REQUIRE_THAT(linear_b.imag(), WithinAbs(0.0f, 0.001f));
+
+    auto [constant_a, constant_b] = Polynomial::roots_quadratic(0.0f, 0.0f, 5.0f);
+    REQUIRE_THAT(constant_a.real(), WithinAbs(0.0f, 0.001f));
+    REQUIRE_THAT(constant_a.imag(), WithinAbs(0.0f, 0.001f));
+    REQUIRE_THAT(constant_b.real(), WithinAbs(0.0f, 0.001f));
+    REQUIRE_THAT(constant_b.imag(), WithinAbs(0.0f, 0.001f));
+}
+
+TEST_CASE("Polynomial roots_quadratic handles approximately degenerate coefficients",
+          "[signal][poly][issue-645]") {
+    auto [near_constant_a, near_constant_b] =
+        Polynomial::roots_quadratic(1e-13f, -1e-13f, 5.0f);
+    REQUIRE_THAT(near_constant_a.real(), WithinAbs(0.0f, 0.001f));
+    REQUIRE_THAT(near_constant_a.imag(), WithinAbs(0.0f, 0.001f));
+    REQUIRE_THAT(near_constant_b.real(), WithinAbs(0.0f, 0.001f));
+    REQUIRE_THAT(near_constant_b.imag(), WithinAbs(0.0f, 0.001f));
+
+    auto [near_linear_a, near_linear_b] =
+        Polynomial::roots_quadratic(1e-13f, 4.0f, -10.0f);
+    REQUIRE_THAT(near_linear_a.real(), WithinAbs(2.5f, 0.001f));
+    REQUIRE_THAT(near_linear_a.imag(), WithinAbs(0.0f, 0.001f));
+    REQUIRE_THAT(near_linear_b.real(), WithinAbs(2.5f, 0.001f));
+    REQUIRE_THAT(near_linear_b.imag(), WithinAbs(0.0f, 0.001f));
+}
+
 TEST_CASE("Polynomial multiply", "[signal][poly]") {
     // (x + 1)(x + 2) = x^2 + 3x + 2
     auto result = Polynomial::multiply({1.0f, 1.0f}, {2.0f, 1.0f});

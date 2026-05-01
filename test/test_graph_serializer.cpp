@@ -246,6 +246,166 @@ TEST_CASE("GraphSerializer rejects non-object roots and malformed field types",
     REQUIRE(field_dst.nodes().empty());
 }
 
+TEST_CASE("GraphSerializer clears partially loaded graphs after connection field errors",
+          "[host][serializer][issue-493]") {
+    SignalGraph dst;
+    auto result = GraphSerializer::from_json(dst, R"({
+  "format_version": 1,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "audio_in",
+      "name": "Input",
+      "num_input_ports": 0,
+      "num_output_ports": 1,
+      "gain": 1
+    },
+    {
+      "id": 2,
+      "type": "audio_out",
+      "name": "Output",
+      "num_input_ports": 1,
+      "num_output_ports": 0,
+      "gain": 1
+    }
+  ],
+  "connections": [
+    {
+      "source_node": "not-an-integer",
+      "source_port": 0,
+      "dest_node": 2,
+      "dest_port": 0,
+      "feedback": false,
+      "midi": false,
+      "automation": false
+    }
+  ]
+})");
+
+    REQUIRE_FALSE(result.ok);
+    REQUIRE(result.error.find("field deserialization failed") != std::string::npos);
+    REQUIRE(dst.nodes().empty());
+    REQUIRE(dst.connections().empty());
+}
+
+TEST_CASE("GraphSerializer tolerates missing arrays and skips stale connection ids",
+          "[host][serializer][issue-493]") {
+    SignalGraph empty;
+    auto empty_result = GraphSerializer::from_json(empty, R"({
+  "format_version": 1
+})");
+    REQUIRE(empty_result.ok);
+    REQUIRE(empty.nodes().empty());
+    REQUIRE(empty.connections().empty());
+
+    SignalGraph dst;
+    auto result = GraphSerializer::from_json(dst, R"({
+  "format_version": 1,
+  "nodes": [
+    {
+      "id": 10,
+      "type": "audio_in",
+      "name": "Input",
+      "num_input_ports": 0,
+      "num_output_ports": 1,
+      "gain": 1
+    },
+    {
+      "id": 11,
+      "type": "audio_out",
+      "name": "Output",
+      "num_input_ports": 1,
+      "num_output_ports": 0,
+      "gain": 1
+    }
+  ],
+  "connections": [
+    {
+      "source_node": 99,
+      "source_port": 0,
+      "dest_node": 11,
+      "dest_port": 0,
+      "feedback": false,
+      "midi": false,
+      "automation": false
+    },
+    {
+      "source_node": 10,
+      "source_port": 0,
+      "dest_node": 98,
+      "dest_port": 0,
+      "feedback": false,
+      "midi": false,
+      "automation": false
+    },
+    {
+      "source_node": 10,
+      "source_port": 0,
+      "dest_node": 11,
+      "dest_port": 0,
+      "feedback": false,
+      "midi": false,
+      "automation": false
+    }
+  ]
+})");
+
+    REQUIRE(result.ok);
+    REQUIRE(dst.nodes().size() == 2);
+    REQUIRE(dst.connections().size() == 1);
+    REQUIRE_FALSE(dst.connections().front().feedback);
+    REQUIRE_FALSE(dst.connections().front().midi);
+    REQUIRE_FALSE(dst.connections().front().automation);
+}
+
+TEST_CASE("GraphSerializer decodes fallback wire values deterministically",
+          "[host][serializer][issue-493]") {
+    SignalGraph dst;
+    auto result = GraphSerializer::from_json(dst, R"({
+  "format_version": 1,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "future_node_type",
+      "name": "Future sink",
+      "num_input_ports": 1,
+      "num_output_ports": 0,
+      "gain": 1
+    },
+    {
+      "id": 2,
+      "type": "plugin",
+      "name": "Future plugin",
+      "num_input_ports": 1,
+      "num_output_ports": 1,
+      "gain": 1,
+      "plugin": {
+        "format": "future_format",
+        "unique_id": "pulp.test.future",
+        "name": "Future plugin",
+        "manufacturer": "PulpTest",
+        "version": "1.0.0",
+        "last_path": "/missing/future.plugin"
+      }
+    }
+  ],
+  "connections": []
+})");
+
+    REQUIRE(result.ok);
+    REQUIRE(dst.nodes().size() == 2);
+    REQUIRE(missing_plugins_contain(result, "lv2:pulp.test.future"));
+
+    bool saw_midi_output_fallback = false;
+    for (const auto& node : dst.nodes()) {
+        if (node.name == "Future sink") {
+            saw_midi_output_fallback = true;
+            REQUIRE(node.type == NodeType::MidiOutput);
+        }
+    }
+    REQUIRE(saw_midi_output_fallback);
+}
+
 TEST_CASE("GraphSerializer serializes plugin formats and state blobs",
           "[host][serializer][issue-643]") {
     struct ExpectedFormat {
