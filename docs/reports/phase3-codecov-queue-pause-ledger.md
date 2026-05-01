@@ -26,13 +26,12 @@ This local ledger records the open `codecov` PR validation runs paused to free N
 
 ## Current Watch Point
 
-Last live check: 2026-05-01 14:26:22 EDT.
+Last live check: 2026-05-01 14:29:01 EDT.
 
-- Open `codecov` PRs: 2.
-- Merge state: #1206 remains blocked on `macOS (ARM64) [namespace]`.
-  #1207 was opened as the next small refill tranche and is queued/running
-  fresh validation. Neither has a current failure candidate.
-- GitHub Actions pressure: 7 active runs, with 4 queued and 3 in
+- Open `codecov` PRs: 1.
+- Merge state: #1207 is the only remaining open Codecov PR and is
+  running fresh validation, with no current failure candidate.
+- GitHub Actions pressure: 6 active runs, with 2 queued and 4 in
   progress.
 - Codecov dashboard watch: recent rapid main merges cancelled most older
   main-branch `Coverage` push runs. The newest surviving main coverage
@@ -69,7 +68,9 @@ Last live check: 2026-05-01 14:26:22 EDT.
 - Refill: opened #1206 from `local/phase3-check-docs-consistency-coverage-643`,
   branch `feature/check-docs-consistency-coverage-643`, head
   `01c963a046a1`. Applied `codecov`, linked #641/#643, and dispatched
-  Namespace run `25223345260`.
+  Namespace run `25223345260`. Merged as
+  `4ddee1e67e0c1ae9b8cab32eda91ff3da3f4f083` after required gates were
+  green.
 - Refill: opened #1207 from `local/phase3-encode-binary-data-coverage-643`,
   branch `feature/encode-binary-data-coverage-643`, head
   `f151cf6b6c7b`. Applied `codecov`, linked #641/#643, and dispatched
@@ -95,10 +96,15 @@ Last live check: 2026-05-01 14:26:22 EDT.
   `pulp-encode-binary-data-coverage-643` are refreshed against current
   `origin/main` and locally validated; hold for the next remote refill
   window.
-- Local-only progress: `pulp-add-component-coverage-643` and
-  `pulp-audit-top-level-coverage-643` are refreshed against current
-  `origin/main` and locally validated; hold for the next remote refill
-  window.
+- Local-only progress: `pulp-add-component-coverage-643` is refreshed
+  against current `origin/main` and locally validated; hold for the next
+  remote refill window.
+- Local-only progress: `pulp-audit-top-level-coverage-643` is refreshed
+  against current `origin/main` at `9843a78f26f3` as a single local
+  feature commit and locally validated with 100% target coverage.
+  Validation: `python3 tools/scripts/test_audit_top_level.py` reported 9
+  passing tests; a temporary venv coverage run over `tools/audit.py`
+  passed `--fail-under=100`.
 - Local-only progress: `pulp-embed-js-coverage-643` and
   `pulp-run-swift-coverage-extra-643` are refreshed against current
   `origin/main` and locally validated; hold for the next remote refill
@@ -107,10 +113,18 @@ Last live check: 2026-05-01 14:26:22 EDT.
   `pulp-validate-hosts-coverage-643` are refreshed against current
   `origin/main` and locally validated; hold for the next remote refill
   window.
-- Local-only progress: `pulp-compat-sync-extra-643` and
-  `pulp-build-migration-index-extra-643` are refreshed against current
-  `origin/main` and locally validated; hold for the next remote refill
-  window.
+- Local-only progress: `pulp-compat-sync-extra-643` is refreshed against
+  current `origin/main` at `a424f549f574` as a single local feature
+  commit and locally validated. Validation:
+  `python3 tools/scripts/test_compat_sync_check_extra.py` reported 26
+  passing tests; `python3 tools/scripts/test_compat_sync_check.py`
+  reported 30 passing tests; `python3
+  tools/scripts/compat_sync_check.py --base origin/main --head HEAD --mode
+  report --enforce` passed with no mapped paths touched. Coverage was not
+  rerun because the system interpreter lacks `coverage.py`.
+- Local-only progress: `pulp-build-migration-index-extra-643` is
+  refreshed against current `origin/main` and locally validated; hold for
+  the next remote refill window.
 - Local-only progress: `pulp-docs-sync-check-extra-643` and
   `pulp-coverage-tier-check-extra-643` are refreshed against current
   `origin/main` and locally validated; hold for the next remote refill
