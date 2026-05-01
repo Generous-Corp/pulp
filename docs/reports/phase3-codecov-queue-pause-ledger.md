@@ -178,7 +178,7 @@ cloud refill while #1127, #1128, #1191, and #1188 drain.
 
 | PR | Branch | Refreshed Head | Build Run | Coverage Run | Sanitizer Run | IWYU Run | Status |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| #1127 | `feature/render-texture-atlas-coverage-646-next` | `310074265e45` | `25213360729` | `25213360744` | `25213360732` | `25213360752` | queued/in progress |
+| #1127 | `feature/render-texture-atlas-coverage-646-next` | `310074265e45` | `25213360729` | `25213360744` | `25213360732` | `25213360752` | merged as `8ccc4a151d4e`; queued advisory sanitizer run cancellation requested after merge |
 
 ## Merge Waves While Queue Is In Flight
 
@@ -756,7 +756,7 @@ not been pushed, PR'd, or dispatched to Namespace.
 | #1123 | UNKNOWN | `feature/host-scan-cache-coverage-493-next` | `c1792a45fe1b` | `Build and Test 25166249254`<br>`Sanitizer Tests 25166234957`<br>`Build and Test 25166234954`<br>`Coverage 25166234934` | test: cover host scan cache fallback paths |
 | #1125 | UNKNOWN | `feature/view-asset-manager-coverage-493-next` | `be13ce28b68f` | `Build and Test 25167200088`<br>`Coverage 25167178443`<br>`Sanitizer Tests 25167178429`<br>`Build and Test 25167178420` | test(view): cover asset manager edge paths |
 | #1126 | UNKNOWN | `feature/view-frame-clock-coverage-493-next` | `e8dca439b850` | `Build and Test 25167592036`<br>`Coverage 25167561161`<br>`Sanitizer Tests 25167561146`<br>`Build and Test 25167561113` | test(view): cover frame clock lifecycle edges |
-| #1127 | BLOCKED | `feature/render-texture-atlas-coverage-646-next` | `310074265e45` | `Build and Test 25213360729`<br>`Coverage 25213360744`<br>`Sanitizer Tests 25213360732`<br>`IWYU advisory 25213360752` | test(render): cover texture atlas full-capacity edges |
+| #1127 | MERGED | `feature/render-texture-atlas-coverage-646-next` | `310074265e45` | `Build and Test 25213360729`<br>`Coverage 25213360744`<br>`Sanitizer Tests 25213360732`<br>`IWYU advisory 25213360752` | Merged as `8ccc4a151d4ea722486320f49d78d54b14c57905`; queued advisory sanitizer run cancellation requested after merge. |
 | #1128 | UNKNOWN | `feature/audio-workgroup-coverage-640-next` | `e4875168d49b` | `Build and Test 25168404842`<br>`Build and Test 25168364432`<br>`Coverage 25168364417`<br>`Sanitizer Tests 25168364375` | test(audio): cover workgroup fallback lifecycle |
 | #1129 | UNKNOWN | `feature/midi-sysex-accumulator-coverage-645-next` | `f81378693df2` | `Build and Test 25168440441`<br>`Build and Test 25168411404`<br>`Coverage 25168411387`<br>`Sanitizer Tests 25168411385` | test(midi): cover sysex accumulator tail paths |
 | #1131 | UNKNOWN | `feature/audio-window-enumerator-coverage-640-next` | `36d5bd605414` | `Build and Test 25169301265`<br>`Build and Test 25169274684`<br>`Coverage 25169274675`<br>`Sanitizer Tests 25169274591` | test(audio): cover excerpt window boundary arithmetic |
