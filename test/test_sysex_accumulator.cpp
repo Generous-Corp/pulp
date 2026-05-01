@@ -184,6 +184,116 @@ TEST_CASE("SysexAccumulator: EOX passes through when idle",
     REQUIRE(e.aborted.empty());
 }
 
+TEST_CASE("SysexAccumulator: zero-length range feed is a no-op",
+          "[midi][sysex][issue-645]") {
+    SysexAccumulator acc;
+    Emit e;
+    auto cb = make_callback(e);
+    const std::uint8_t* no_bytes = nullptr;
+
+    acc.feed(no_bytes, 0, cb);
+    REQUIRE_FALSE(acc.in_progress());
+    REQUIRE(acc.partial_size() == 0);
+    REQUIRE(e.complete.empty());
+    REQUIRE(e.aborted.empty());
+
+    REQUIRE(acc.feed(0xF0, cb) == Classification::in_sysex);
+    REQUIRE(acc.feed(0x7D, cb) == Classification::in_sysex);
+
+    acc.feed(no_bytes, 0, cb);
+    REQUIRE(acc.in_progress());
+    REQUIRE(acc.partial_size() == 2);
+    REQUIRE(e.complete.empty());
+    REQUIRE(e.aborted.empty());
+
+    REQUIRE(acc.feed(0xF7, cb) == Classification::completed);
+    REQUIRE_FALSE(acc.in_progress());
+    REQUIRE(acc.partial_size() == 0);
+    REQUIRE(e.aborted.empty());
+    REQUIRE(e.complete.size() == 1);
+    REQUIRE((e.complete[0] == std::vector<std::uint8_t>{0xF0, 0x7D, 0xF7}));
+}
+
+TEST_CASE("SysexAccumulator: duplicate EOX tails stay idle",
+          "[midi][sysex][issue-645]") {
+    SysexAccumulator acc;
+    Emit e;
+    auto cb = make_callback(e);
+
+    std::uint8_t stream[] = {
+        0xF0, 0x7D, 0x01, 0xF7,
+        0xF7, 0xF7,
+        0xF0, 0x7E, 0x00, 0xF7
+    };
+
+    acc.feed(stream, sizeof(stream), cb);
+
+    REQUIRE(e.aborted.empty());
+    REQUIRE(e.complete.size() == 2);
+    REQUIRE((e.complete[0] ==
+             std::vector<std::uint8_t>{0xF0, 0x7D, 0x01, 0xF7}));
+    REQUIRE((e.complete[1] ==
+             std::vector<std::uint8_t>{0xF0, 0x7E, 0x00, 0xF7}));
+    REQUIRE_FALSE(acc.in_progress());
+    REQUIRE(acc.partial_size() == 0);
+}
+
+TEST_CASE("SysexAccumulator: system-common abort tail stays idle",
+          "[midi][sysex][issue-645]") {
+    SysexAccumulator acc;
+    Emit e;
+    auto cb = make_callback(e);
+
+    std::uint8_t stream[] = {
+        0xF0, 0x7D, 0x01,
+        0xF2, 0x34, 0x12, 0xF7,
+        0xF0, 0x7E, 0x7F, 0xF7
+    };
+
+    acc.feed(stream, sizeof(stream), cb);
+
+    REQUIRE(e.aborted.size() == 1);
+    REQUIRE((e.aborted[0] == std::vector<std::uint8_t>{0xF0, 0x7D, 0x01}));
+    REQUIRE(e.complete.size() == 1);
+    REQUIRE((e.complete[0] ==
+             std::vector<std::uint8_t>{0xF0, 0x7E, 0x7F, 0xF7}));
+    REQUIRE_FALSE(acc.in_progress());
+    REQUIRE(acc.partial_size() == 0);
+}
+
+TEST_CASE("SysexAccumulator: reset is idempotent after idle and abort",
+          "[midi][sysex][issue-645]") {
+    SysexAccumulator acc;
+    Emit e;
+    auto cb = make_callback(e);
+
+    acc.reset();
+    acc.reset();
+    REQUIRE_FALSE(acc.in_progress());
+    REQUIRE(acc.partial_size() == 0);
+    REQUIRE(e.complete.empty());
+    REQUIRE(e.aborted.empty());
+
+    REQUIRE(acc.feed(0xF0, cb) == Classification::in_sysex);
+    REQUIRE(acc.feed(0x7D, cb) == Classification::in_sysex);
+    REQUIRE(acc.feed(0x90, cb) == Classification::aborted);
+    REQUIRE(e.aborted.size() == 1);
+    REQUIRE((e.aborted[0] == std::vector<std::uint8_t>{0xF0, 0x7D}));
+
+    acc.reset();
+    acc.reset();
+    REQUIRE_FALSE(acc.in_progress());
+    REQUIRE(acc.partial_size() == 0);
+    REQUIRE(acc.feed(0xF7, cb) == Classification::passthrough);
+    REQUIRE(e.complete.empty());
+
+    std::uint8_t fresh[] = {0xF0, 0x7D, 0x02, 0xF7};
+    acc.feed(fresh, sizeof(fresh), cb);
+    REQUIRE(e.complete.size() == 1);
+    REQUIRE((e.complete[0] ==
+             std::vector<std::uint8_t>{0xF0, 0x7D, 0x02, 0xF7}));
+}
+
 TEST_CASE("SysexAccumulator: reset drops partial state",
           "[midi][sysex][issue-86]") {
     SysexAccumulator acc;

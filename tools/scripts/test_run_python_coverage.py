@@ -92,7 +92,8 @@ class CoveragercTests(unittest.TestCase):
             ["tools/scripts", "tools/local-ci", "tools"],
         )
 
-    def test_default_test_globs_keep_top_level_tools_tests_out_of_default_run(self) -> None:
+    def test_default_test_globs_include_targeted_status_ladder_test(self) -> None:
+        self.assertIn("tools/test_check_status_ladder.py", rpc.DEFAULT_TEST_GLOBS)
         self.assertNotIn("tools/test_*.py", rpc.DEFAULT_TEST_GLOBS)
 
     def test_normalized_source_roots_drop_nested_tools_paths(self) -> None:
@@ -394,6 +395,14 @@ class MainFlowTests(unittest.TestCase):
         self.assertEqual(
             [surface.source_roots for surface in surfaces],
             [("tools/scripts",), ("tools", "core/view/js")],
+        )
+
+    def test_broader_slice_is_not_duplicated_when_targeted_test_matches(self) -> None:
+        tests = [rpc.REPO_ROOT / "tools/test_check_status_ladder.py"]
+        surfaces = rpc._selected_surfaces(tests)
+        self.assertEqual(
+            [surface.source_roots for surface in surfaces],
+            [("tools", "core/view/js")],
         )
 
     def test_run_test_invokes_coverage_cli(self) -> None:

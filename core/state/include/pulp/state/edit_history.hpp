@@ -44,6 +44,9 @@ public:
     /// replaces it (merging rapid small changes into one undo step).
     void perform(std::unique_ptr<EditAction> action) {
         action->redo();
+        // A new edit invalidates redo history even when it coalesces into
+        // the current undo step.
+        redo_stack_.clear();
         // Coalesce: if same description as last action, replace it
         if (coalesce_ && !undo_stack_.empty() &&
             !action->description().empty() &&
@@ -51,8 +54,6 @@ public:
             undo_stack_.back() = std::move(action);
             return;
         }
-        // Clear any redo actions
-        redo_stack_.clear();
         undo_stack_.push_back(std::move(action));
         // Enforce depth limit
         while (undo_stack_.size() > max_depth_)

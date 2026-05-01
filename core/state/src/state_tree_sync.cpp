@@ -43,6 +43,10 @@ void StateTreeSynchroniser::attach(StateTree::Ptr tree) {
 void StateTreeSynchroniser::detach() {
     if (tree_ && listener_id_ >= 0)
         tree_->remove_listener(listener_id_);
+    if (tree_ && child_listener_ids_.size() >= 2) {
+        tree_->remove_child_added_listener(child_listener_ids_[0]);
+        tree_->remove_child_removed_listener(child_listener_ids_[1]);
+    }
     listener_id_ = -1;
     child_listener_ids_.clear();
     tree_ = nullptr;
