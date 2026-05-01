@@ -69,6 +69,17 @@ class RenderLimitationsTests(unittest.TestCase):
              mock.patch.object(dg.subprocess, "run", return_value=result):
             self.assertEqual(dg.render_limitations(), "| A | B |\n")
 
+    def test_success_keeps_content_without_nested_generated_comment(self) -> None:
+        result = subprocess.CompletedProcess(
+            args=["python3"],
+            returncode=0,
+            stdout="| A | B |\n",
+            stderr="",
+        )
+        with mock.patch.object(dg, "LIST_LIMITATIONS", SCRIPT), \
+             mock.patch.object(dg.subprocess, "run", return_value=result):
+            self.assertEqual(dg.render_limitations(), "| A | B |\n")
+
     def test_empty_success_reports_no_limitations(self) -> None:
         result = subprocess.CompletedProcess(
             args=["python3"],
@@ -202,6 +213,17 @@ class MainTests(unittest.TestCase):
         self.assertEqual(rc, 2)
         self.assertEqual(stdout, "")
         self.assertIn("Failed to read", stderr)
+
+    def test_script_entrypoint_runs_check_mode(self) -> None:
+        result = subprocess.run(
+            [sys.executable, str(SCRIPT), "check"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("docs-generate: OK", result.stdout)
 
 
 if __name__ == "__main__":
