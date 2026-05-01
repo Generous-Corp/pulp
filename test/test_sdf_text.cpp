@@ -15,8 +15,31 @@ using pulp::canvas::SdfAtlas;
 using pulp::canvas::SdfPenSnap;
 using pulp::canvas::SdfTextOptions;
 using pulp::canvas::build_text_quads;
+using pulp::canvas::fill_text_msdf;
+using pulp::canvas::fill_text_psdf;
+using pulp::canvas::fill_text_sdf;
 using pulp::canvas::snap_pen_x;
 using pulp::canvas::snap_pen_y;
+
+namespace {
+struct FakeGlyph {
+    int atlas_x = 0;
+    int atlas_y = 0;
+    int width = 0;
+    int height = 0;
+    float bearing_x = 0.0f;
+    float bearing_y = 0.0f;
+    float advance = 0.0f;
+};
+
+struct FakeAtlas {
+    int base = 10;
+    FakeGlyph glyph_a{3, 5, 5, 6, 0.25f, 3.0f, 4.0f};
+
+    int base_size() const { return base; }
+    const FakeGlyph* glyph(char32_t c) const { return c == U'A' ? &glyph_a : nullptr; }
+};
+}  // namespace
 
 TEST_CASE("snap_pen_x honours the pen-snap policy", "[canvas][sdf][snap]") {
     REQUIRE(snap_pen_x(3.7f, SdfPenSnap::Free)    == 3.7f);
@@ -27,6 +50,9 @@ TEST_CASE("snap_pen_x honours the pen-snap policy", "[canvas][sdf][snap]") {
             == Catch::Approx(3.6667f).margin(0.01f));
     REQUIRE(snap_pen_x(3.43f, SdfPenSnap::SubpixelThird)
             == Catch::Approx(3.3333f).margin(0.01f));
+    REQUIRE(snap_pen_x(-1.6f, SdfPenSnap::Nearest) == -2.0f);
+    REQUIRE(snap_pen_x(-1.4f, SdfPenSnap::SubpixelThird)
+            == Catch::Approx(-1.3333f).margin(0.01f));
 }
 
 TEST_CASE("snap_pen_y always snaps to integers when not Free",
@@ -34,6 +60,7 @@ TEST_CASE("snap_pen_y always snaps to integers when not Free",
     REQUIRE(snap_pen_y(2.3f, SdfPenSnap::Free)    == 2.3f);
     REQUIRE(snap_pen_y(2.3f, SdfPenSnap::Nearest) == 2.0f);
     REQUIRE(snap_pen_y(2.7f, SdfPenSnap::SubpixelThird) == 3.0f);
+    REQUIRE(snap_pen_y(-2.7f, SdfPenSnap::Nearest) == -3.0f);
 }
 
 TEST_CASE("build_text_quads emits one quad per resolvable glyph",
@@ -67,6 +94,51 @@ TEST_CASE("build_text_quads skips missing glyphs", "[canvas][sdf][layout]") {
     auto quads = build_text_quads(atlas, std::u32string(U"AXA"),
                                   0.0f, 0.0f, 32.0f);
     REQUIRE(quads.size() == 2);  // X is skipped.
+}
+
+TEST_CASE("build_text_quads returns empty when atlas base size is invalid",
+          "[canvas][sdf][layout][issue-641]") {
+    FakeAtlas atlas;
+    atlas.base = 0;
+    REQUIRE(build_text_quads(atlas, std::u32string(U"A"), 1.0f, 2.0f, 10.0f).empty());
+}
+
+TEST_CASE("build_text_quads applies snapping and scaled glyph metrics",
+          "[canvas][sdf][layout][issue-641]") {
+    FakeAtlas atlas;
+    SdfTextOptions opts;
+    opts.snap = SdfPenSnap::Nearest;
+
+    auto quads = build_text_quads(atlas, std::u32string(U"AZ"),
+                                  1.6f, 9.4f, 20.0f, opts);
+    REQUIRE(quads.size() == 1);
+
+    const auto& q = quads[0];
+    REQUIRE(q.codepoint == U'A');
+    REQUIRE(q.dst_x == 3.0f);
+    REQUIRE(q.dst_y == 3.0f);
+    REQUIRE(q.dst_w == 10.0f);
+    REQUIRE(q.dst_h == 12.0f);
+    REQUIRE(q.src_x == 3.0f);
+    REQUIRE(q.src_y == 5.0f);
+    REQUIRE(q.src_w == 5.0f);
+    REQUIRE(q.src_h == 6.0f);
+}
+
+TEST_CASE("named SDF text wrappers forward to shared quad builder",
+          "[canvas][sdf][layout][issue-641]") {
+    FakeAtlas atlas;
+
+    auto sdf = fill_text_sdf(atlas, std::u32string(U"A"), 0.0f, 0.0f, 10.0f);
+    auto msdf = fill_text_msdf(atlas, std::u32string(U"A"), 0.0f, 0.0f, 10.0f);
+    auto psdf = fill_text_psdf(atlas, std::u32string(U"A"), 0.0f, 0.0f, 10.0f);
+
+    REQUIRE(sdf.size() == 1);
+    REQUIRE(msdf.size() == 1);
+    REQUIRE(psdf.size() == 1);
+    REQUIRE(sdf[0].codepoint == U'A');
+    REQUIRE(msdf[0].codepoint == U'A');
+    REQUIRE(psdf[0].codepoint == U'A');
 }
 
 TEST_CASE("build_text_quads works against MsdfAtlas (shared surface)",
