@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import importlib.util
 import io
+import runpy
 import sys
 import tempfile
 import unittest
@@ -108,6 +109,43 @@ class WalkStatusTests(unittest.TestCase):
             [("root.feature", "usable", "tests exist", False)],
         )
 
+    def test_walk_statuses_handles_missing_notes_and_blank_block_lines(self) -> None:
+        matrix = dedent(
+            """\
+            root:
+              missing_notes:
+                status: usable
+
+              block_with_blank:
+                status: usable
+                notes: >
+                  First line
+
+                  headless validation.
+              empty_block:
+                status: usable
+                notes: |
+            """
+        )
+
+        rows = {
+            path: (status, notes, platform_scoped)
+            for path, status, notes, platform_scoped in csl.walk_statuses(matrix)
+        }
+
+        self.assertEqual(rows["root.missing_notes"], ("usable", "", False))
+        self.assertEqual(
+            rows["root.block_with_blank"],
+            ("usable", "First line  headless validation.", False),
+        )
+        self.assertEqual(rows["root.empty_block"], ("usable", "", False))
+
+    def test_walk_statuses_handles_status_as_final_line(self) -> None:
+        self.assertEqual(
+            list(csl.walk_statuses("root:\n  final:\n    status: usable")),
+            [("root.final", "usable", "", False)],
+        )
+
 
 class WaiverTests(unittest.TestCase):
     def test_load_waivers_strips_comments_and_blanks(self) -> None:
@@ -204,6 +242,64 @@ class MainTests(unittest.TestCase):
         self.assertEqual(rc, 2)
         self.assertEqual(stdout.getvalue(), "")
         self.assertIn("Failed to read", stderr.getvalue())
+
+    def test_warn_mode_truncates_long_violation_notes(self) -> None:
+        long_note = "Needs proof. " + "".join(f"{i:02d}" for i in range(50))
+        matrix = dedent(
+            f"""\
+            root:
+              long_note:
+                status: usable
+                notes: {long_note}
+            """
+        )
+
+        rc, stdout, stderr = self._run_main(matrix, mode="warn")
+
+        self.assertEqual(rc, 0)
+        self.assertEqual(stderr, "")
+        self.assertIn("1 violations (mode=warn)", stdout)
+        self.assertIn(long_note[:80] + "\u2026", stdout)
+        self.assertNotIn(long_note[81:], stdout)
+
+    def test_script_entrypoint_uses_default_warn_mode(self) -> None:
+        matrix = dedent(
+            """\
+            root:
+              clean:
+                status: usable
+                notes: tests exist
+            """
+        )
+        original_exists = Path.exists
+        original_read_text = Path.read_text
+
+        def fake_exists(path: Path) -> bool:
+            if path.name == ".status-ladder-waivers.txt":
+                return True
+            return original_exists(path)
+
+        def fake_read_text(path: Path, *args, **kwargs) -> str:
+            if path.name == "support-matrix.yaml":
+                return matrix
+            if path.name == ".status-ladder-waivers.txt":
+                return ""
+            return original_read_text(path, *args, **kwargs)
+
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with mock.patch.object(Path, "exists", fake_exists), \
+             mock.patch.object(Path, "read_text", fake_read_text), \
+             mock.patch.object(sys, "argv", ["check_status_ladder.py"]), \
+             contextlib.redirect_stdout(stdout), \
+             contextlib.redirect_stderr(stderr), \
+             self.assertRaises(SystemExit) as raised:
+            runpy.run_path(str(_HERE / "check_status_ladder.py"), run_name="__main__")
+
+        self.assertEqual(raised.exception.code, 0)
+        self.assertEqual(stderr.getvalue(), "")
+        self.assertIn("1 `usable` entries", stdout.getvalue())
+        self.assertIn("mode=warn", stdout.getvalue())
 
 
 class KeywordTests(unittest.TestCase):
