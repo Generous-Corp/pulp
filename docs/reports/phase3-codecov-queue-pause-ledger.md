@@ -121,6 +121,18 @@ created fresh required `pull_request` checks.
 | #1138 | `feature/coverage-no-idle-guidance-641` | `72fa08f3553a` | `25203493849` | `25203493834` | pending |
 | #1139 | `codex/events-phase3-coverage-tranche` | `df3f376fa716` | `25203493795` | `25203493796` | pending |
 
+### 2026-05-01 Batch 5: PR-Event Branch Refresh
+
+Namespace still had the earlier PR-event batch queued but not failing, so
+the next low-risk stale build-matrix PRs were refreshed in a small batch.
+
+| PR | Branch | Refreshed Head | Build Run | Coverage Run | Status |
+| --- | --- | --- | --- | --- | --- |
+| #1129 | `feature/midi-sysex-accumulator-coverage-645-next` | `a5ae96aa067c` | `25203575118` | `25203575127` | pending |
+| #1132 | `codex/midi-sysex-sidecar-tests` | `8b403641dfd4` | `25203575435` | `25203575450` | pending |
+| #1133 | `feature/audio-channel-set-coverage-640-next` | `a82513bedc13` | `25203575337` | `25203575346` | pending |
+| #1134 | `codex/coverage-phase3-tranche-20260430095455` | `8c91ac2d0315` | `25203575338` | `25203575315` | pending |
+
 ## Merge Waves While Queue Is In Flight
 
 These PRs were already green/mergeable when the paused queue was
