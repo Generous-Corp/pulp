@@ -88,10 +88,17 @@ Last live check: 2026-05-01 14:29:01 EDT.
   refreshed and locally validated, but held while the current queue
   drains because the validator itself reports pre-existing missing
   `production_validated` entries against current main.
-- Local-only progress: `pulp-docs-generate-coverage-643` and
-  `pulp-list-limitations-coverage-643` are refreshed against current
-  `origin/main` and locally validated; hold for the next remote refill
-  window.
+- Local-only progress: `pulp-docs-generate-coverage-643` is refreshed
+  against current `origin/main` at `92c88abff663` as a single local
+  feature commit and locally validated with 97% target coverage.
+  Validation: `python3 tools/scripts/test_docs_generate.py` reported 13
+  passing tests; `python3 tools/docs_generate.py check` passed; temporary
+  venv-backed `run_python_coverage.py --pattern
+  tools/scripts/test_docs_generate.py` passed and reported 97% for
+  `tools/docs_generate.py`.
+- Local-only progress: `pulp-list-limitations-coverage-643` is refreshed
+  against current `origin/main` and locally validated; hold for the next
+  remote refill window.
 - Local-only progress: `pulp-mkdocs-hooks-coverage-643` and
   `pulp-encode-binary-data-coverage-643` are refreshed against current
   `origin/main` and locally validated; hold for the next remote refill
