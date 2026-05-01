@@ -165,10 +165,16 @@ Last live check: 2026-05-01 14:42:38 EDT.
   tools/scripts/test_build_migration_index.py --pattern
   tools/scripts/test_build_migration_index_extra.py` passed and reported
   100% for `tools/scripts/build_migration_index.py`.
-- Local-only progress: `pulp-docs-sync-check-extra-643` and
-  `pulp-coverage-tier-check-extra-643` are refreshed against current
-  `origin/main` and locally validated; hold for the next remote refill
-  window.
+- Local-only progress: `pulp-docs-sync-check-extra-643` is refreshed
+  against current `origin/main` at `c06505c96de0` as a single local
+  feature commit and locally test-validated. Validation:
+  `python3 tools/scripts/test_docs_sync_check_extra.py` reported 12
+  passing tests; `python3 tools/scripts/test_docs_sync_check.py` reported
+  15 passing tests. Coverage harness did not run in that worktree because
+  the default interpreter lacks `coverage.py >= 7.10`.
+- Local-only progress: `pulp-coverage-tier-check-extra-643` is refreshed
+  against current `origin/main` and locally validated; hold for the next
+  remote refill window.
 - Local-only progress: `pulp-skill-sync-extra-643` is refreshed against
   current `origin/main` at `07161e6a5a37` and locally validated with 94%
   target coverage; hold for the next remote refill window.
