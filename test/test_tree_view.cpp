@@ -5,6 +5,25 @@
 using namespace pulp::view;
 using namespace pulp::canvas;
 
+namespace {
+
+MouseEvent mouse_down(float x, float y, int click_count = 1) {
+    MouseEvent e;
+    e.position = {x, y};
+    e.is_down = true;
+    e.click_count = click_count;
+    return e;
+}
+
+KeyEvent key_down(KeyCode key) {
+    KeyEvent e;
+    e.key = key;
+    e.is_down = true;
+    return e;
+}
+
+} // namespace
+
 TEST_CASE("TreeNode add children", "[view][tree]") {
     TreeNode root;
     auto& child1 = root.add_child("Synths");
@@ -50,13 +69,67 @@ TEST_CASE("TreeView on_select callback", "[view][tree]") {
 
     // Simulate click on the first visible item
     tree.set_bounds({0, 0, 300, 400});
-    MouseEvent e;
-    e.position = {50, 5}; // should hit "Synths"
-    e.is_down = true;
-    e.click_count = 1;
-    tree.on_mouse_event(e);
+    tree.on_mouse_event(mouse_down(50, 5)); // should hit "Synths"
 
     REQUIRE(selected_label == "Synths");
+}
+
+TEST_CASE("TreeView ignores mouse up and misses", "[view][tree]") {
+    TreeView tree;
+    tree.root().add_child("Synths");
+    tree.set_bounds({0, 0, 300, 400});
+
+    int selected_count = 0;
+    tree.on_select = [&](TreeNode&) { ++selected_count; };
+
+    auto up = mouse_down(50, 5);
+    up.is_down = false;
+    tree.on_mouse_event(up);
+    tree.on_mouse_event(mouse_down(50, 200));
+
+    REQUIRE(selected_count == 0);
+    REQUIRE(tree.selected_node() == nullptr);
+}
+
+TEST_CASE("TreeView triangle click toggles without selecting", "[view][tree]") {
+    TreeView tree;
+    auto& synths = tree.root().add_child("Synths");
+    synths.add_child("Bass");
+    tree.set_bounds({0, 0, 300, 400});
+
+    std::string toggled_label;
+    bool toggled_state = true;
+    int select_count = 0;
+    tree.on_toggle = [&](TreeNode& node, bool expanded) {
+        toggled_label = node.label;
+        toggled_state = expanded;
+    };
+    tree.on_select = [&](TreeNode&) { ++select_count; };
+
+    tree.on_mouse_event(mouse_down(4, 5));
+
+    REQUIRE(synths.expanded);
+    REQUIRE(toggled_label == "Synths");
+    REQUIRE(toggled_state);
+    REQUIRE(select_count == 0);
+    REQUIRE(tree.selected_node() == nullptr);
+}
+
+TEST_CASE("TreeView double click activates without selecting", "[view][tree]") {
+    TreeView tree;
+    tree.root().add_child("Synths");
+    tree.set_bounds({0, 0, 300, 400});
+
+    std::string activated_label;
+    int select_count = 0;
+    tree.on_activate = [&](TreeNode& node) { activated_label = node.label; };
+    tree.on_select = [&](TreeNode&) { ++select_count; };
+
+    tree.on_mouse_event(mouse_down(50, 5, 2));
+
+    REQUIRE(activated_label == "Synths");
+    REQUIRE(select_count == 0);
+    REQUIRE(tree.selected_node() == nullptr);
 }
 
 TEST_CASE("TreeView key right expands node", "[view][tree]") {
@@ -66,20 +139,62 @@ TEST_CASE("TreeView key right expands node", "[view][tree]") {
 
     // Select synths first
     tree.set_bounds({0, 0, 300, 400});
-    MouseEvent click;
-    click.position = {50, 5};
-    click.is_down = true;
-    click.click_count = 1;
-    tree.on_mouse_event(click);
+    tree.on_mouse_event(mouse_down(50, 5));
 
     REQUIRE(tree.selected_node() != nullptr);
     REQUIRE_FALSE(tree.selected_node()->expanded);
 
-    KeyEvent right;
-    right.key = KeyCode::right;
-    right.is_down = true;
-    REQUIRE(tree.on_key_event(right));
+    REQUIRE(tree.on_key_event(key_down(KeyCode::right)));
     REQUIRE(tree.selected_node()->expanded);
+}
+
+TEST_CASE("TreeView key left collapses expanded selection", "[view][tree]") {
+    TreeView tree;
+    auto& synths = tree.root().add_child("Synths");
+    synths.expanded = true;
+    synths.add_child("Bass");
+    tree.set_selected_node(&synths);
+
+    bool collapsed = false;
+    tree.on_toggle = [&](TreeNode& node, bool expanded) {
+        collapsed = node.label == "Synths" && !expanded;
+    };
+
+    REQUIRE(tree.on_key_event(key_down(KeyCode::left)));
+    REQUIRE_FALSE(synths.expanded);
+    REQUIRE(collapsed);
+}
+
+TEST_CASE("TreeView ignores unhandled key edges", "[view][tree]") {
+    TreeView tree;
+    auto& leaf = tree.root().add_child("Leaf");
+
+    REQUIRE_FALSE(tree.on_key_event(key_down(KeyCode::right)));
+
+    tree.set_selected_node(&leaf);
+    REQUIRE_FALSE(tree.on_key_event(key_down(KeyCode::right)));
+
+    auto left_up = key_down(KeyCode::left);
+    left_up.is_down = false;
+    REQUIRE_FALSE(tree.on_key_event(left_up));
+
+    REQUIRE_FALSE(tree.on_key_event(key_down(KeyCode::enter)));
+}
+
+TEST_CASE("TreeView user data lookup finds nested nodes only for non-null data",
+          "[view][tree]") {
+    TreeView tree;
+    int root_payload = 1;
+    int nested_payload = 2;
+
+    tree.root().user_data = &root_payload;
+    auto& group = tree.root().add_child("Group");
+    auto& nested = group.add_child("Nested");
+    nested.user_data = &nested_payload;
+
+    REQUIRE(tree.find_node_by_user_data(&nested_payload) == &nested);
+    REQUIRE(tree.find_node_by_user_data(nullptr) == nullptr);
+    REQUIRE(tree.find_node_by_user_data(&root_payload) == &tree.root());
 }
 
 TEST_CASE("TreeView paint produces draw commands", "[view][tree]") {

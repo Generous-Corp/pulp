@@ -187,9 +187,13 @@ find "${PROFRAW_DIR}" -name '*.profraw' -print0 \
 # they're built from third-party sources not instrumented by our flags.
 BINARIES=()
 
-# Test executables — first, these drive the actual coverage hits.
+# Test executables — first, these drive the actual coverage hits. On
+# Windows/MSYS, CTest can run `.exe` files whose Unix executable bit is
+# not visible to `find -perm -u+x`; include `.exe` explicitly so their
+# coverage maps reach llvm-cov.
 while IFS= read -r f; do BINARIES+=("-object" "$f"); done < <(
-    find "${BUILD_DIR}/test" -maxdepth 2 -type f -perm -u+x \
+    find "${BUILD_DIR}/test" -maxdepth 2 -type f \
+         \( -perm -u+x -o -name '*.exe' \) \
          ! -name '*.cmake' ! -name '*.txt' 2>/dev/null || true
 )
 
@@ -198,7 +202,9 @@ while IFS= read -r f; do BINARIES+=("-object" "$f"); done < <(
 # smoke target is built under bindings/python/, not build/test/, so
 # without this pass its profile data never contributes to report/show.
 while IFS= read -r f; do BINARIES+=("-object" "$f"); done < <(
-    find "${BUILD_DIR}" -type f -perm -u+x -name 'pulp-test-*' \
+    find "${BUILD_DIR}" -type f \
+         \( -perm -u+x -o -name '*.exe' \) \
+         -name 'pulp-test-*' \
          ! -path "${BUILD_DIR}/test/*" \
          ! -path '*/_deps/*' \
          ! -path '*/external/*' \
@@ -224,6 +230,7 @@ fi
 while IFS= read -r f; do BINARIES+=("-object" "$f"); done < <(
     find "${BUILD_DIR}" -type f \
          \( -name 'libpulp-*.a' -o -name 'pulp-*.lib' \) \
+         ! -path "${BUILD_DIR}/test/*" \
          2>/dev/null || true
 )
 
@@ -232,7 +239,8 @@ while IFS= read -r f; do BINARIES+=("-object" "$f"); done < <(
 # anything under /_deps/ or /external/ to avoid third-party objects.
 while IFS= read -r f; do BINARIES+=("-object" "$f"); done < <(
     find "${BUILD_DIR}/tools" "${BUILD_DIR}/inspect" \
-         -maxdepth 3 -type f -perm -u+x \
+         -maxdepth 3 -type f \
+         \( -perm -u+x -o -name '*.exe' \) \
          ! -name '*.cmake' ! -name '*.txt' ! -name '*.o' \
          2>/dev/null || true
 )
