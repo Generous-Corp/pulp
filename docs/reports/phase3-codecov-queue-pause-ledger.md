@@ -26,7 +26,7 @@ This local ledger records the open `codecov` PR validation runs paused to free N
 
 ## Current Watch Point
 
-Last live check: 2026-05-01 14:25:07 EDT.
+Last live check: 2026-05-01 14:26:22 EDT.
 
 - Open `codecov` PRs: 2.
 - Merge state: #1206 remains blocked on `macOS (ARM64) [namespace]`.
@@ -119,9 +119,13 @@ Last live check: 2026-05-01 14:25:07 EDT.
   current `origin/main` at `07161e6a5a37` and locally validated with 94%
   target coverage; hold for the next remote refill window.
 - Local-only progress: `pulp-version-bump-extra-643` is refreshed against
-  current `origin/main` at `fbb4d93e63e8` and locally validated with 92%
-  target coverage; it is ahead by two local commits, so squash before
-  queueing if we want a single feature commit.
+  current `origin/main` at `842ef5e244ea` as a single local feature
+  commit and locally validated with 92% target coverage. Validation:
+  `python3 tools/scripts/test_version_bump_check_extra.py` reported 19
+  passing tests; venv-backed `run_python_coverage.py --pattern
+  tools/scripts/test_gates.py --pattern
+  tools/scripts/test_version_bump_check_extra.py` passed and reported
+  92% for `tools/scripts/version_bump_check.py`.
 - Operating mode: keep polling, merge PRs as soon as required
   `linux`/`macos`/`windows` wrappers are green, cancel leftover advisory
   PR-head runs after merge, and only refill when the active queue drains
