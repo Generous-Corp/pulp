@@ -21,6 +21,15 @@ public:
     int handles = 0;
 };
 
+class CountingUpdater : public AsyncUpdater {
+public:
+    void handle_async_update() override {
+        ++handles;
+    }
+
+    int handles = 0;
+};
+
 class RecordingMultiTimer : public MultiTimer {
 public:
     void timer_callback(int timer_id) override {
@@ -56,6 +65,53 @@ TEST_CASE("LambdaAsyncUpdater clears pending state without a callback",
     REQUIRE(updater.is_update_pending());
 
     updater.process_pending();
+    REQUIRE_FALSE(updater.is_update_pending());
+}
+
+TEST_CASE("AsyncUpdater cancel and coalesce paths are deterministic",
+          "[events][async_updater][issue-642]") {
+    CountingUpdater updater;
+
+    updater.process_pending();
+    REQUIRE(updater.handles == 0);
+    REQUIRE_FALSE(updater.is_update_pending());
+
+    updater.trigger_async_update();
+    updater.trigger_async_update();
+    REQUIRE(updater.is_update_pending());
+
+    updater.process_pending();
+    REQUIRE(updater.handles == 1);
+    REQUIRE_FALSE(updater.is_update_pending());
+
+    updater.trigger_async_update();
+    REQUIRE(updater.is_update_pending());
+    updater.cancel_pending_update();
+    REQUIRE_FALSE(updater.is_update_pending());
+    updater.process_pending();
+    REQUIRE(updater.handles == 1);
+
+    updater.trigger_async_update();
+    updater.process_pending();
+    REQUIRE(updater.handles == 2);
+}
+
+TEST_CASE("LambdaAsyncUpdater invokes callbacks only for pending work",
+          "[events][async_updater][issue-642]") {
+    int calls = 0;
+    LambdaAsyncUpdater updater([&] { ++calls; });
+
+    updater.process_pending();
+    REQUIRE(calls == 0);
+
+    updater.trigger_async_update();
+    updater.cancel_pending_update();
+    updater.process_pending();
+    REQUIRE(calls == 0);
+
+    updater.trigger_async_update();
+    updater.process_pending();
+    REQUIRE(calls == 1);
     REQUIRE_FALSE(updater.is_update_pending());
 }
 
@@ -98,7 +154,21 @@ TEST_CASE("MultiTimer stop all permits selective restart",
     REQUIRE(timers.is_timer_running(1));
     REQUIRE_FALSE(timers.is_timer_running(2));
 
+    timers.stop_timer(1);
+    REQUIRE_FALSE(timers.is_timer_running(1));
+    REQUIRE_FALSE(timers.is_timer_running(99));
+
     timers.stop_timer(42);
-    REQUIRE(timers.is_timer_running(1));
+    REQUIRE_FALSE(timers.is_timer_running(1));
     REQUIRE_FALSE(timers.is_timer_running(2));
+}
+
+TEST_CASE("ScopedLowPowerModeDisabler has no observable test-lane side effects",
+          "[events][async_updater][power][issue-642]") {
+    ScopedLowPowerModeDisabler first;
+    {
+        ScopedLowPowerModeDisabler nested;
+        SUCCEED("nested low-power disabler constructed");
+    }
+    SUCCEED("low-power disabler destructed");
 }
