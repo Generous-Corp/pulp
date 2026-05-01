@@ -1290,13 +1290,18 @@ TEST_CASE("MultiChannelMeter clamps process channel count to prepared channels",
 
     float left[] = {0.25f};
     float ignored_right[] = {1.0f};
-    const float* channels[] = {left, ignored_right};
-    meter.process(channels, 2, 1);
+    std::vector<const float*> channels;
+    channels.push_back(left);
+    channels.push_back(ignored_right);
+    channels.push_back(nullptr);
+
+    meter.process(channels.data(), static_cast<int>(channels.size()), 1);
 
     const auto& snap = meter.snapshot();
     REQUIRE(snap.num_channels == 1);
     REQUIRE_THAT(snap.channels[0].peak, WithinAbs(0.25f, 1e-6f));
     REQUIRE_THAT(snap.channels[1].peak, WithinAbs(0.0f, 1e-6f));
+    REQUIRE_FALSE(snap.channels[1].clipped);
 }
 
 TEST_CASE("MultiChannelMeter clamps negative process channel counts",
