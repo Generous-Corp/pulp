@@ -127,8 +127,12 @@ Last live check: 2026-05-01 14:42:38 EDT.
   refreshed against current `origin/main` and locally validated; this
   tranche is now queued remotely as #1207.
 - Local-only progress: `pulp-add-component-coverage-643` is refreshed
-  against current `origin/main` and locally validated; hold for the next
-  remote refill window.
+  against current `origin/main` at `39f679759144` as a single local
+  feature commit and locally validated with 98% target coverage.
+  Validation: `python3 tools/scripts/test_add_component.py` reported 8
+  passing tests; venv-backed `run_python_coverage.py --pattern
+  tools/scripts/test_add_component.py` passed and reported 98% for
+  `tools/add-component.py`.
 - Local-only progress: `pulp-audit-top-level-coverage-643` is refreshed
   against current `origin/main` at `9843a78f26f3` as a single local
   feature commit and locally validated with 100% target coverage.
