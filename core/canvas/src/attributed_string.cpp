@@ -73,7 +73,8 @@ TextLayout layout_attributed_string(const AttributedString& text, float max_widt
 
             // Skip the space/newline
             pos = line_end;
-            if (pos < span.text.size() && (span.text[pos] == ' ' || span.text[pos] == '\n'))
+            if (pos < span.text.size()
+                && (span.text[pos] == ' ' || span.text[pos] == '\t' || span.text[pos] == '\n'))
                 ++pos;
         }
 
