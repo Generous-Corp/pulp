@@ -45,6 +45,8 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - test(audio): cover BufferView clear accessors ([#1033](https://github.com/danielraffel/pulp/pull/1033))
 
 <a id="v0670"></a>
+## [0.68.0]
+
 ## [0.67.0] - 2026-04-30
 
 - feat(cli): emit classnames.json from import-design --from claude (#1035) ([#1048](https://github.com/danielraffel/pulp/pull/1048))
