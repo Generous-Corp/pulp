@@ -1351,7 +1351,9 @@ target_include_directories(pulp-test-render-loop PRIVATE
 target_link_libraries(pulp-test-render-loop PRIVATE
     pulp::runtime
     Catch2::Catch2WithMain)
-catch_discover_tests(pulp-test-render-loop)
+catch_discover_tests(pulp-test-render-loop
+    PROPERTIES
+        LABELS coverage)
 
 # GPU-stack tests — pulp::render only exists when PULP_ENABLE_GPU=ON.
 # The sanitizer matrix builds with GPU off; without the guard configure
