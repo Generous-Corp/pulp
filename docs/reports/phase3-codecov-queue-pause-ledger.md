@@ -12,6 +12,11 @@ This local ledger records the open `codecov` PR validation runs paused to free N
 - For merge eligibility after a pause, refresh PR branches with `gh pr update-branch <pr>` so GitHub creates fresh `pull_request` check suites.
 - Use `shipyard cloud run build <branch> --provider namespace --require-sha <sha> --no-wait` only as a Namespace smoke or targeted diagnostic; successful `workflow_dispatch` checks do not replace stale failed or cancelled `pull_request` contexts for branch protection.
 - If one lane is slow or stuck, prefer `shipyard cloud retarget`/`shipyard cloud add-lane` so existing useful runs are preserved instead of cancelled wholesale.
+- Branch protection currently requires the lower-case `linux`, `macos`, and
+  `windows` contexts. The visible Namespace child jobs may appear as
+  `Linux (x64) [namespace]`, `macOS (ARM64) [namespace]`, and
+  `Windows (x64) [namespace]`; wait for the lower-case reusable-workflow
+  wrappers to settle before declaring a PR mergeable.
 
 ## Snapshot Summary
 
@@ -195,6 +200,13 @@ branches in separate worktrees.
 | #1062 | `codex/coverage-midi-edge-644` | `core/midi/include/pulp/midi/message.hpp` factory/masking lines | patched/pushed head `8a9bd9efc2ba`; CI queued |
 | #1051 | `feature/signal-poly-math-coverage-645` | `core/signal/include/pulp/signal/poly_math.hpp` lines `51-55` | patched/pushed head `0a202abb8816`; CI queued |
 | #1075 | `feature/cli-host-coverage-643` | diff gate passed; failure was Windows coverage summary upload plumbing | patched/pushed head `49d950e5e470`; CI queued. Worker made coverage summary artifact uploads advisory after confirming Windows coverage, Cobertura XML, Codecov upload, and diff gate had already completed. |
+
+Additional local-only workers started while Namespace was saturated:
+
+| Branch | Worktree | Scope | Status |
+| --- | --- | --- | --- |
+| `local/phase3-local-ci-extra-643` | `/Users/danielraffel/Code/pulp-local-ci-extra-643` | improve `tools/local-ci/local_ci.py` focused coverage via `tools/local-ci/test_local_ci_extra.py` | worker active; no push/CI |
+| `local/phase3-version-bump-extra-643` | `/Users/danielraffel/Code/pulp-version-bump-extra-643` | improve `tools/scripts/version_bump_check.py` focused coverage via `tools/scripts/test_version_bump_check_extra.py` | worker active; no push/CI |
 
 Local disk note: after completed Codecov worktrees pushed their fixes, their
 generated `build/` directories plus stale generated build outputs from
