@@ -37,24 +37,35 @@ bool has_warning_on(const std::vector<DescriptorIssue>& issues,
 
 } // namespace
 
-TEST_CASE("well-formed effect passes with no issues",
+TEST_CASE("DescriptorValidation: well-formed effect passes with no issues",
           "[format][descriptor-validation]") {
     auto issues = validate_descriptor(well_formed_effect());
     REQUIRE(issues.empty());
     REQUIRE(descriptor_is_valid(issues));
 }
 
-TEST_CASE("empty name/manufacturer/bundle_id are errors",
+TEST_CASE("DescriptorValidation: empty name/manufacturer/bundle_id/version are errors",
           "[format][descriptor-validation]") {
     PluginDescriptor d;
     auto issues = validate_descriptor(d);
     REQUIRE(has_error_on(issues, "name"));
     REQUIRE(has_error_on(issues, "manufacturer"));
     REQUIRE(has_error_on(issues, "bundle_id"));
+    REQUIRE(has_error_on(issues, "version"));
     REQUIRE_FALSE(descriptor_is_valid(issues));
 }
 
-TEST_CASE("non-reverse-DNS bundle_id produces a warning only",
+TEST_CASE("DescriptorValidation: empty version is an error",
+          "[format][descriptor-validation][coverage][issue-493]") {
+    auto d = well_formed_effect();
+    d.version.clear();
+
+    auto issues = validate_descriptor(d);
+    REQUIRE(has_error_on(issues, "version"));
+    REQUIRE_FALSE(descriptor_is_valid(issues));
+}
+
+TEST_CASE("DescriptorValidation: non-reverse-DNS bundle_id produces a warning only",
           "[format][descriptor-validation]") {
     auto d = well_formed_effect();
     d.bundle_id = "MyPlugin";   // no dots
@@ -63,7 +74,7 @@ TEST_CASE("non-reverse-DNS bundle_id produces a warning only",
     REQUIRE(descriptor_is_valid(issues));   // warnings don't fail the check
 }
 
-TEST_CASE("malformed reverse-DNS bundle_id segments warn only",
+TEST_CASE("DescriptorValidation: malformed reverse-DNS bundle_id segments warn only",
           "[format][descriptor-validation][coverage][issue-493]") {
     for (const auto* bundle_id : {
              ".example.plugin",
@@ -81,7 +92,7 @@ TEST_CASE("malformed reverse-DNS bundle_id segments warn only",
     }
 }
 
-TEST_CASE("missing output bus is an error",
+TEST_CASE("DescriptorValidation: missing output bus is an error",
           "[format][descriptor-validation]") {
     auto d = well_formed_effect();
     d.output_buses.clear();
@@ -89,7 +100,7 @@ TEST_CASE("missing output bus is an error",
     REQUIRE(has_error_on(issues, "output_buses"));
 }
 
-TEST_CASE("zero-channel main output is an error",
+TEST_CASE("DescriptorValidation: zero-channel main output is an error",
           "[format][descriptor-validation]") {
     auto d = well_formed_effect();
     d.output_buses = {{"Silent", 0, false}};
@@ -97,7 +108,38 @@ TEST_CASE("zero-channel main output is an error",
     REQUIRE(has_error_on(issues, "output_buses"));
 }
 
-TEST_CASE("instrument with non-optional stereo input warns",
+TEST_CASE("DescriptorValidation: negative bus channel counts are errors",
+          "[format][descriptor-validation][coverage][issue-493]") {
+    SECTION("negative main output") {
+        auto d = well_formed_effect();
+        d.output_buses = {{"Invalid Out", -1, false}};
+
+        auto issues = validate_descriptor(d);
+        REQUIRE(has_error_on(issues, "output_buses"));
+        REQUIRE_FALSE(descriptor_is_valid(issues));
+    }
+
+    SECTION("negative main input") {
+        auto d = well_formed_effect();
+        d.input_buses = {{"Invalid In", -2, false}};
+
+        auto issues = validate_descriptor(d);
+        REQUIRE(has_error_on(issues, "input_buses"));
+        REQUIRE_FALSE(descriptor_is_valid(issues));
+    }
+}
+
+TEST_CASE("DescriptorValidation: negative main input is an error",
+          "[format][descriptor-validation][coverage][issue-493]") {
+    auto d = well_formed_effect();
+    d.input_buses = {{"Invalid In", -2, false}};
+
+    auto issues = validate_descriptor(d);
+    REQUIRE(has_error_on(issues, "input_buses"));
+    REQUIRE_FALSE(descriptor_is_valid(issues));
+}
+
+TEST_CASE("DescriptorValidation: instrument with non-optional stereo input warns",
           "[format][descriptor-validation]") {
     auto d = well_formed_effect();
     d.category = PluginCategory::Instrument;
@@ -107,7 +149,7 @@ TEST_CASE("instrument with non-optional stereo input warns",
     REQUIRE(descriptor_is_valid(issues));
 }
 
-TEST_CASE("instrument optional or zero-channel inputs do not warn",
+TEST_CASE("DescriptorValidation: instrument optional or zero-channel inputs do not warn",
           "[format][descriptor-validation][coverage][issue-493]") {
     SECTION("optional stereo input") {
         auto d = well_formed_effect();
@@ -140,7 +182,7 @@ TEST_CASE("instrument optional or zero-channel inputs do not warn",
     }
 }
 
-TEST_CASE("MidiEffect without accepts_midi warns",
+TEST_CASE("DescriptorValidation: MidiEffect without accepts_midi warns",
           "[format][descriptor-validation]") {
     auto d = well_formed_effect();
     d.category = PluginCategory::MidiEffect;
@@ -149,7 +191,7 @@ TEST_CASE("MidiEffect without accepts_midi warns",
     REQUIRE(has_warning_on(issues, "accepts_midi"));
 }
 
-TEST_CASE("supports_mpe without accepts_midi warns",
+TEST_CASE("DescriptorValidation: supports_mpe without accepts_midi warns",
           "[format][descriptor-validation]") {
     auto d = well_formed_effect();
     d.supports_mpe = true;
@@ -158,7 +200,7 @@ TEST_CASE("supports_mpe without accepts_midi warns",
     REQUIRE(has_warning_on(issues, "accepts_midi"));
 }
 
-TEST_CASE("supports_ump follows the accepts_midi sidecar warning contract",
+TEST_CASE("DescriptorValidation: supports_ump follows the accepts_midi sidecar warning contract",
           "[format][descriptor-validation][coverage][issue-493]") {
     SECTION("UMP without MIDI input warns") {
         auto d = well_formed_effect();
@@ -181,7 +223,7 @@ TEST_CASE("supports_ump follows the accepts_midi sidecar warning contract",
     }
 }
 
-TEST_CASE("MidiEffect without audio output is valid",
+TEST_CASE("DescriptorValidation: MidiEffect without audio output is valid",
           "[format][descriptor-validation]") {
     auto d = well_formed_effect();
     d.category = PluginCategory::MidiEffect;
@@ -197,7 +239,7 @@ TEST_CASE("MidiEffect without audio output is valid",
     REQUIRE(descriptor_is_valid(issues));
 }
 
-TEST_CASE("reverse-DNS bundle_id passes",
+TEST_CASE("DescriptorValidation: reverse-DNS bundle_id passes",
           "[format][descriptor-validation]") {
     auto d = well_formed_effect();
     d.bundle_id = "com.example.sub.plugin";
