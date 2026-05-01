@@ -114,12 +114,14 @@ TEST_CASE("EditHistory coalesced new action clears redo stack", "[state][undo]")
     REQUIRE(history.undo());
     REQUIRE(v == 1);
     REQUIRE(history.can_redo());
+    REQUIRE(history.redo_count() == 1);
 
     history.perform([&]() { v = 2; }, [&]() { v = 1; }, "Drag");
 
     REQUIRE(v == 2);
     REQUIRE(history.undo_count() == 1);
     REQUIRE_FALSE(history.can_redo());
+    REQUIRE(history.redo_count() == 0);
 }
 
 TEST_CASE("EditHistory empty undo/redo returns false", "[state][undo]") {
