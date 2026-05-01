@@ -26,6 +26,7 @@ from __future__ import annotations
 import pathlib
 import unittest
 
+import run_python_coverage
 import yaml
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
@@ -67,6 +68,12 @@ class CodecovYamlStructure(unittest.TestCase):
         with CODECOV.open("r", encoding="utf-8") as fh:
             cls.doc = yaml.safe_load(fh)
 
+    def component_entries(self):
+        return self.doc["component_management"]["individual_components"]
+
+    def components_by_id(self):
+        return {entry["component_id"]: entry for entry in self.component_entries()}
+
     def test_ignore_is_top_level(self):
         # Codecov config schema: ignore MUST be a top-level key. If it
         # sits under `coverage:` the exclusions silently no-op.
@@ -99,6 +106,19 @@ class CodecovYamlStructure(unittest.TestCase):
             f"codecov.yml ignore missing required patterns: {sorted(missing)}",
         )
 
+    def test_ignore_covers_python_coverage_test_harness_omits(self):
+        # tools/sandbox-e2e is a test harness in both Codecov and the
+        # local Python coverage lane. Keep the broader Codecov glob in
+        # place when the coverage runner omits its Python files.
+        python_omits = {
+            omit
+            for surface in run_python_coverage.COVERAGE_SURFACES
+            for omit in surface.resolved_omit_globs()
+        }
+        self.assertIn("tools/sandbox-e2e/*.py", python_omits)
+        self.assertIn("tools/sandbox-e2e/**/*.py", python_omits)
+        self.assertIn("tools/sandbox-e2e/**", set(self.doc["ignore"]))
+
     def test_component_management_defines_all_axes(self):
         # Path-based slicing lives on components, not only on flags.
         # Every live top-level core/** module plus the platform/surface
@@ -122,6 +142,46 @@ class CodecovYamlStructure(unittest.TestCase):
             f"extra={ids - expected})",
         )
 
+    def test_component_ids_are_unique_named_and_path_scoped(self):
+        # Duplicate ids are hard to spot in YAML review and would make
+        # one component shadow another in downstream consumers.
+        entries = self.component_entries()
+        ids = [entry.get("component_id") for entry in entries]
+        self.assertEqual(
+            len(ids),
+            len(set(ids)),
+            f"component_id values must be unique: {ids}",
+        )
+
+        for entry in entries:
+            component_id = entry["component_id"]
+            self.assertEqual(
+                entry.get("name"),
+                component_id,
+                f"{component_id} component name must mirror component_id",
+            )
+            paths = entry.get("paths")
+            self.assertIsInstance(
+                paths,
+                list,
+                f"{component_id} component must declare a paths list",
+            )
+            self.assertGreater(
+                len(paths),
+                0,
+                f"{component_id} component must declare at least one path",
+            )
+            for path in paths:
+                self.assertIsInstance(
+                    path,
+                    str,
+                    f"{component_id} component path must be a string",
+                )
+                self.assertTrue(
+                    path.endswith("/**"),
+                    f"{component_id} component path must recurse with /**: {path}",
+                )
+
     def test_flags_stay_aligned_with_components_and_upload_axes(self):
         # Path-based flags must match component ids 1:1, with only the
         # explicit upload-axis os-* flags allowed as extras.
@@ -134,13 +194,103 @@ class CodecovYamlStructure(unittest.TestCase):
             "os-* flags — Codecov dashboard filters will be inconsistent.",
         )
 
+    def test_flags_have_expected_path_and_carryforward_shape(self):
+        flags = self.doc["flags"]
+        comp_ids = expected_component_ids()
+
+        for flag_name in sorted(comp_ids):
+            with self.subTest(flag=flag_name):
+                flag = flags[flag_name]
+                self.assertIs(
+                    flag.get("carryforward"),
+                    True,
+                    f"{flag_name} flag must carry forward coverage",
+                )
+                paths = flag.get("paths")
+                self.assertIsInstance(
+                    paths,
+                    list,
+                    f"{flag_name} flag must declare a paths list",
+                )
+                self.assertGreater(
+                    len(paths),
+                    0,
+                    f"{flag_name} flag must declare at least one path",
+                )
+                for path in paths:
+                    self.assertIsInstance(
+                        path,
+                        str,
+                        f"{flag_name} flag path must be a string",
+                    )
+                    self.assertTrue(
+                        path.endswith("/"),
+                        f"{flag_name} flag path must remain directory-scoped: {path}",
+                    )
+
+        for flag_name in sorted(EXPECTED_UPLOAD_ONLY_FLAGS):
+            with self.subTest(flag=flag_name):
+                flag = flags[flag_name]
+                self.assertIs(
+                    flag.get("carryforward"),
+                    True,
+                    f"{flag_name} upload flag must carry forward coverage",
+                )
+                self.assertNotIn(
+                    "paths",
+                    flag,
+                    f"{flag_name} upload flag must not be path-scoped",
+                )
+
+    def test_core_axes_use_canonical_directory_mappings(self):
+        # Core subsystem ids come directly from core/* and should map to
+        # exactly that directory in both flag and component declarations.
+        flags = self.doc["flags"]
+        components = self.components_by_id()
+
+        for entry in CORE_DIR.iterdir():
+            if not entry.is_dir():
+                continue
+            expected_flag_paths = [f"core/{entry.name}/"]
+            expected_component_paths = [f"core/{entry.name}/**"]
+            with self.subTest(component=entry.name):
+                self.assertEqual(flags[entry.name]["paths"], expected_flag_paths)
+                self.assertEqual(
+                    components[entry.name]["paths"],
+                    expected_component_paths,
+                )
+
+    def test_advisory_statuses_stay_informational(self):
+        # Phase 3 local checks should keep Codecov statuses advisory; the
+        # authoritative local gate lives outside Codecov status settings.
+        coverage_status = self.doc["coverage"]["status"]
+        self.assertIs(coverage_status["project"]["default"]["informational"], True)
+        self.assertEqual(coverage_status["project"]["default"]["target"], "auto")
+        self.assertEqual(coverage_status["project"]["default"]["threshold"], "1%")
+        self.assertIs(coverage_status["patch"]["default"]["informational"], True)
+        self.assertEqual(coverage_status["patch"]["default"]["target"], "75%")
+
+        component_statuses = (
+            self.doc["component_management"]["default_rules"]["statuses"]
+        )
+        self.assertEqual(len(component_statuses), 1)
+        self.assertEqual(
+            component_statuses[0],
+            {
+                "type": "project",
+                "target": "auto",
+                "threshold": "1%",
+                "informational": True,
+            },
+        )
+
     def test_platform_axes_keep_live_repo_path_conventions(self):
         # Regression: the repo's Windows sources live under `win/`,
         # not `windows/`, and the platform axes need the live naming.
         flags = self.doc["flags"]
         components = {
-            entry["component_id"]: set(entry.get("paths", []))
-            for entry in self.doc["component_management"]["individual_components"]
+            component_id: set(entry.get("paths", []))
+            for component_id, entry in self.components_by_id().items()
         }
 
         windows_paths = set(flags["windows"]["paths"]) | components["windows"]
@@ -185,12 +335,30 @@ class CodecovYamlStructure(unittest.TestCase):
         # uncategorized Codecov path.
         flags = self.doc["flags"]
         components = {
-            entry["component_id"]: set(entry.get("paths", []))
-            for entry in self.doc["component_management"]["individual_components"]
+            component_id: set(entry.get("paths", []))
+            for component_id, entry in self.components_by_id().items()
         }
 
         self.assertEqual(set(flags["inspect"]["paths"]), {"inspect/"})
         self.assertEqual(components["inspect"], {"inspect/**"})
+
+    def test_specific_tools_surface_precedes_broad_tools_surface(self):
+        # The CLI slice is more specific than tools/. Keep it before the
+        # broad tools slice anywhere YAML order affects dashboard grouping.
+        flag_order = list(self.doc["flags"].keys())
+        component_order = [
+            entry["component_id"]
+            for entry in self.component_entries()
+        ]
+
+        self.assertLess(flag_order.index("cli"), flag_order.index("tools"))
+        self.assertLess(component_order.index("cli"), component_order.index("tools"))
+
+    def test_comment_policy_requires_coverage_changes(self):
+        comment = self.doc["comment"]
+        self.assertEqual(comment["layout"], "reach, diff, flags, tree")
+        self.assertEqual(comment["behavior"], "default")
+        self.assertIs(comment["require_changes"], True)
 
 
 if __name__ == "__main__":
