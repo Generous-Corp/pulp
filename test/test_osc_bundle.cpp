@@ -15,6 +15,24 @@
 using namespace pulp::osc;
 using Catch::Matchers::WithinAbs;
 
+namespace {
+
+std::vector<uint8_t> make_empty_bundle_bytes() {
+    std::vector<uint8_t> buf;
+    const char header[] = "#bundle";
+    buf.insert(buf.end(), header, header + 8);
+    for (int i = 0; i < 8; ++i) buf.push_back(0);
+    return buf;
+}
+
+void append_u32(std::vector<uint8_t>& buf, uint32_t value) {
+    uint32_t net = htonl(value);
+    auto* p = reinterpret_cast<const uint8_t*>(&net);
+    buf.insert(buf.end(), p, p + 4);
+}
+
+}  // namespace
+
 // ── TimeTag ─────────────────────────────────────────────────────────────
 
 TEST_CASE("OSC TimeTag immediate", "[osc][bundle]") {
@@ -186,6 +204,47 @@ TEST_CASE("Bundle::deserialize rejects element size that walks past end",
     REQUIRE_FALSE(Bundle::deserialize(buf.data(), buf.size()).has_value());
 }
 
+TEST_CASE("Bundle::deserialize rejects trailing short bytes after bundle body",
+          "[osc][bundle][deserialize-edge]") {
+    auto buf = make_empty_bundle_bytes();
+    buf.push_back(0x12);
+    buf.push_back(0x34);
+    buf.push_back(0x56);
+
+    REQUIRE_FALSE(Bundle::deserialize(buf.data(), buf.size()).has_value());
+}
+
+TEST_CASE("Bundle::deserialize rejects malformed nested bundle element",
+          "[osc][bundle][deserialize-edge]") {
+    auto buf = make_empty_bundle_bytes();
+
+    std::vector<uint8_t> nested = {
+        '#', 'b', 'u', 'n', 'd', 'l', 'e', 0,
+        0, 0, 0, 0, 0, 0, 0, 1
+    };
+    nested.push_back(0xFF);  // trailing short byte in nested payload
+
+    append_u32(buf, static_cast<uint32_t>(nested.size()));
+    buf.insert(buf.end(), nested.begin(), nested.end());
+
+    REQUIRE_FALSE(Bundle::deserialize(buf.data(), buf.size()).has_value());
+}
+
+TEST_CASE("Bundle::deserialize rejects malformed message element",
+          "[osc][bundle][deserialize-edge]") {
+    auto buf = make_empty_bundle_bytes();
+
+    const std::vector<uint8_t> malformed_msg = {
+        'n', 'o', 's', 'l', 'a', 's', 'h', 0,
+        ',', 0, 0, 0
+    };
+
+    append_u32(buf, static_cast<uint32_t>(malformed_msg.size()));
+    buf.insert(buf.end(), malformed_msg.begin(), malformed_msg.end());
+
+    REQUIRE_FALSE(Bundle::deserialize(buf.data(), buf.size()).has_value());
+}
+
 // ── Bundle round-trip edges ────────────────────────────────────────────
 
 TEST_CASE("Empty Bundle serialize/deserialize round-trip",
@@ -309,4 +368,11 @@ TEST_CASE("Address pattern star bounded by path separator",
     // '*' matches any run of characters up to the next '/', not across.
     REQUIRE(address_matches("/*/bar", "/any/bar"));
     REQUIRE_FALSE(address_matches("/*/bar", "/any/thing/bar"));
+}
+
+TEST_CASE("Malformed address patterns fail closed",
+          "[osc][bundle][pattern]") {
+    REQUIRE_FALSE(address_matches("/note/[ab", "/note/a"));
+    REQUIRE_FALSE(address_matches("/note/[!0-9", "/note/a"));
+    REQUIRE_FALSE(address_matches("/{foo,bar/gain", "/foo/gain"));
 }
