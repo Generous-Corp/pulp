@@ -5,6 +5,7 @@
 #include <fstream>
 #include <filesystem>
 #include <utility>
+#include <vector>
 
 using namespace pulp::view;
 
@@ -121,6 +122,33 @@ TEST_CASE("AssetManager missing shader returns invalid", "[view][assets]") {
     auto& mgr = AssetManager::instance();
     auto shader = mgr.shader("nonexistent_shader_xyz");
     REQUIRE_FALSE(shader.valid());
+}
+
+TEST_CASE("AssetManager shader file cache survives missing source file", "[view][assets]") {
+    auto& mgr = AssetManager::instance();
+    mgr.clear_cache();
+
+    auto path = make_temp_asset_path("pulp-test-shader", ".sksl");
+    const std::string source = "half4 main(float2 coord) { return half4(1); }";
+    write_bytes(path, std::vector<uint8_t>(source.begin(), source.end()));
+
+    auto shader = mgr.load_shader(path.string());
+    REQUIRE(shader.valid());
+    REQUIRE(shader.source == source);
+    REQUIRE(mgr.cache_count() == 1);
+
+    std::error_code ec;
+    std::filesystem::remove(path, ec);
+
+    auto cached = mgr.load_shader(path.string());
+    REQUIRE(cached.valid());
+    REQUIRE(cached.source == source);
+    REQUIRE(mgr.cache_count() == 1);
+
+    mgr.clear_cache();
+    auto missing = mgr.load_shader(path.string());
+    REQUIRE_FALSE(missing.valid());
+    REQUIRE(missing.error.find(path.string()) != std::string::npos);
 }
 
 TEST_CASE("AssetManager embedded shader loads into shader cache", "[view][assets]") {
@@ -243,12 +271,49 @@ TEST_CASE("AssetManager load nonexistent file returns empty", "[view][assets]") 
     REQUIRE_FALSE(img.valid());
 }
 
+TEST_CASE("AssetManager display scale resolves and caches @2x image file", "[view][assets]") {
+    auto& mgr = AssetManager::instance();
+    const auto old_scale = mgr.display_scale();
+    const auto old_max = mgr.max_cache_size();
+    mgr.clear_cache();
+    mgr.set_max_cache_size(1024 * 1024);
+
+    auto base = make_temp_asset_path("pulp-test-icon", ".png");
+    auto retina = base;
+    retina.replace_filename(base.stem().string() + "@2x" + base.extension().string());
+
+    write_bytes(base, make_png_header(1, 1));
+    write_bytes(retina, make_png_header(2, 2));
+
+    mgr.set_display_scale(2.0f);
+    auto img = mgr.load_image(base.string());
+    REQUIRE(img.valid());
+    REQUIRE(img.width == 2);
+    REQUIRE(img.height == 2);
+    REQUIRE(mgr.cache_count() == 1);
+
+    std::error_code ec;
+    std::filesystem::remove(base, ec);
+    std::filesystem::remove(retina, ec);
+
+    auto cached = mgr.load_image(base.string());
+    REQUIRE(cached.valid());
+    REQUIRE(cached.width == 2);
+    REQUIRE(cached.height == 2);
+    REQUIRE(mgr.cache_count() == 1);
+
+    mgr.set_display_scale(old_scale);
+    mgr.clear_cache();
+    mgr.set_max_cache_size(old_max);
+}
+
 TEST_CASE("AssetManager async image load calls callback for missing file", "[view][assets]") {
     auto& mgr = AssetManager::instance();
+    auto missing = make_temp_asset_path("pulp-test-async-missing", ".png");
     bool called = false;
     ImageData callback_image;
 
-    mgr.load_image_async("/tmp/pulp_test_async_missing_file.png",
+    mgr.load_image_async(missing.string(),
                          [&](ImageData img) {
                              called = true;
                              callback_image = std::move(img);
@@ -256,6 +321,8 @@ TEST_CASE("AssetManager async image load calls callback for missing file", "[vie
 
     REQUIRE(called);
     REQUIRE_FALSE(callback_image.valid());
+
+    mgr.load_image_async(missing.string(), {});
 }
 
 // ── Data URI ────────────────────────────────────────────────────────────────
@@ -325,6 +392,48 @@ TEST_CASE("AssetManager blob from embedded", "[view][assets]") {
     auto blob = mgr.load_blob_embedded("test_json");
     REQUIRE(blob.valid());
     REQUIRE(blob.data.size() == sizeof(json_data) - 1);
+}
+
+TEST_CASE("AssetManager blob file cache and misses", "[view][assets]") {
+    auto& mgr = AssetManager::instance();
+    const auto old_max = mgr.max_cache_size();
+    mgr.clear_cache();
+    mgr.set_max_cache_size(1024 * 1024);
+
+    auto path = make_temp_asset_path("pulp-test-blob", ".bin");
+    const std::vector<uint8_t> payload = {0x10, 0x20, 0x30, 0x40};
+    write_bytes(path, payload);
+
+    auto blob = mgr.load_blob(path.string());
+    REQUIRE(blob.valid());
+    REQUIRE(blob.data == payload);
+    REQUIRE(mgr.cache_count() == 1);
+
+    std::error_code ec;
+    std::filesystem::remove(path, ec);
+
+    auto cached = mgr.load_blob(path.string());
+    REQUIRE(cached.valid());
+    REQUIRE(cached.data == payload);
+    REQUIRE(mgr.cache_count() == 1);
+
+    mgr.clear_cache();
+    auto missing_file = mgr.load_blob(path.string());
+    REQUIRE_FALSE(missing_file.valid());
+
+    auto empty_path = make_temp_asset_path("pulp-test-empty-blob", ".bin");
+    {
+        std::ofstream empty(empty_path, std::ios::binary);
+    }
+    auto empty_blob = mgr.load_blob(empty_path.string());
+    REQUIRE_FALSE(empty_blob.valid());
+    std::filesystem::remove(empty_path, ec);
+
+    auto missing_embedded = mgr.load_blob_embedded("phase3_missing_embedded_blob_asset");
+    REQUIRE_FALSE(missing_embedded.valid());
+
+    mgr.clear_cache();
+    mgr.set_max_cache_size(old_max);
 }
 
 // ── Theme Import/Export (file-based) ────────────────────────────────────────
