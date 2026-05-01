@@ -53,3 +53,87 @@ TEST_CASE("MidiBuffer::clear does not affect sysex sidecar",
     REQUIRE(buf.empty());
     REQUIRE(buf.sysex_size() == 1);
 }
+
+TEST_CASE("add_sysex preserves payload bytes and timing metadata",
+          "[midi][buffer][sysex][issue-493][issue-641][issue-645]") {
+    MidiBuffer buf;
+    std::vector<uint8_t> payload{0xF0, 0x7D, 0x00, 0x7F, 0xF7};
+
+    buf.add_sysex(std::move(payload), 240, 1.25);
+    REQUIRE(buf.sysex_size() == 1);
+    REQUIRE(buf.sysex()[0].data == std::vector<uint8_t>{0xF0, 0x7D, 0x00, 0x7F, 0xF7});
+    REQUIRE(buf.sysex()[0].sample_offset == 240);
+    REQUIRE(buf.sysex()[0].timestamp == 1.25);
+
+    buf.sysex()[0].sample_offset = 256;
+    buf.sysex()[0].timestamp = 1.5;
+    buf.sysex()[0].data.push_back(0x00);
+    REQUIRE(buf.sysex()[0].sample_offset == 256);
+    REQUIRE(buf.sysex()[0].timestamp == 1.5);
+    REQUIRE(buf.sysex()[0].data.back() == 0x00);
+}
+
+TEST_CASE("MidiBuffer::sort only orders short MIDI messages",
+          "[midi][buffer][sysex][issue-493][issue-641][issue-645]") {
+    MidiBuffer buf;
+    auto late = MidiEvent::note_on(0, 60, 100);
+    late.sample_offset = 96;
+    auto early = MidiEvent::note_off(0, 60, 0);
+    early.sample_offset = 12;
+
+    buf.add(late);
+    buf.add_sysex({0xF0, 0x7D, 0x01, 0xF7}, 128, 2.0);
+    buf.add(early);
+    buf.add_sysex({0xF0, 0x7D, 0x02, 0xF7}, 32, 0.5);
+
+    buf.sort();
+
+    REQUIRE(buf.size() == 2);
+    REQUIRE(buf[0].sample_offset == 12);
+    REQUIRE(buf[1].sample_offset == 96);
+    REQUIRE(buf.sysex_size() == 2);
+    REQUIRE(buf.sysex()[0].sample_offset == 128);
+    REQUIRE(buf.sysex()[0].timestamp == 2.0);
+    REQUIRE(buf.sysex()[0].data[2] == 0x01);
+    REQUIRE(buf.sysex()[1].sample_offset == 32);
+    REQUIRE(buf.sysex()[1].timestamp == 0.5);
+    REQUIRE(buf.sysex()[1].data[2] == 0x02);
+}
+
+TEST_CASE("clear_sysex is idempotent and sidecar accepts later events",
+          "[midi][buffer][sysex][issue-493][issue-641][issue-645]") {
+    MidiBuffer buf;
+    buf.add_sysex({0xF0, 0x7D, 0x01, 0xF7}, 4, 0.25);
+
+    buf.clear_sysex();
+    buf.clear_sysex();
+    REQUIRE(buf.sysex().empty());
+
+    buf.add_sysex({0xF0, 0xF7}, 8, 0.5);
+    REQUIRE(buf.sysex_size() == 1);
+    REQUIRE(buf.sysex()[0].data == std::vector<uint8_t>{0xF0, 0xF7});
+    REQUIRE(buf.sysex()[0].sample_offset == 8);
+    REQUIRE(buf.sysex()[0].timestamp == 0.5);
+}
+
+TEST_CASE("MidiBuffer copies sysex sidecar independently",
+          "[midi][buffer][sysex][issue-493][issue-641][issue-645]") {
+    MidiBuffer original;
+    original.add(MidiEvent::note_on(0, 64, 90));
+    original.add_sysex({0xF0, 0x7D, 0x03, 0xF7}, 48, 0.75);
+
+    MidiBuffer copy = original;
+    copy.sysex()[0].data[2] = 0x04;
+    copy.sysex()[0].sample_offset = 64;
+    copy.add(MidiEvent::note_off(0, 64, 0));
+
+    REQUIRE(original.size() == 1);
+    REQUIRE(original.sysex_size() == 1);
+    REQUIRE(original.sysex()[0].data == std::vector<uint8_t>{0xF0, 0x7D, 0x03, 0xF7});
+    REQUIRE(original.sysex()[0].sample_offset == 48);
+
+    REQUIRE(copy.size() == 2);
+    REQUIRE(copy.sysex_size() == 1);
+    REQUIRE(copy.sysex()[0].data == std::vector<uint8_t>{0xF0, 0x7D, 0x04, 0xF7});
+    REQUIRE(copy.sysex()[0].sample_offset == 64);
+}

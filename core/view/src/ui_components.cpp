@@ -423,9 +423,11 @@ void TabPanel::paint(canvas::Canvas& canvas) {
 
 void TabPanel::on_mouse_event(const MouseEvent& event) {
     if (!event.is_down) return;
+    if (tabs_.empty()) return;
     if (event.position.y > tab_height_) return; // click below tab bar
 
     float tab_w = tabs_.empty() ? 0 : local_bounds().width / static_cast<float>(tabs_.size());
+    if (tab_w <= 0.0f) return;
     int index = static_cast<int>(event.position.x / tab_w);
     set_active_tab(index);
 }

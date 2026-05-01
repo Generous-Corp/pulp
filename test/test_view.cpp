@@ -1040,3 +1040,220 @@ TEST_CASE("Absolute child positioned outside parent's bounds still paints",
     REQUIRE(saw_magenta_fill);
     REQUIRE_FALSE(saw_parent_clip);
 }
+
+// ── pulp #1026: React Native pointerEvents 4-valued enum ────────────────────
+
+TEST_CASE("View::hit_test honors pointerEvents == auto (default)",
+          "[view][hit_test][issue-1026]") {
+    View root;
+    root.set_bounds({0, 0, 200, 200});
+
+    auto child = std::make_unique<View>();
+    child->set_bounds({50, 50, 100, 100});
+    auto* child_ptr = child.get();
+    root.add_child(std::move(child));
+
+    // Default (auto_): both root and child are interactive.
+    REQUIRE(root.pointer_events() == View::PointerEvents::auto_);
+    REQUIRE(root.hit_test({75, 75}) == child_ptr);
+    REQUIRE(root.hit_test({10, 10}) == &root);
+}
+
+TEST_CASE("View::hit_test honors pointerEvents == none",
+          "[view][hit_test][issue-1026]") {
+    View root;
+    root.set_bounds({0, 0, 200, 200});
+
+    auto child = std::make_unique<View>();
+    child->set_bounds({50, 50, 100, 100});
+    root.add_child(std::move(child));
+
+    // none: neither this view NOR descendants intercept events.
+    root.set_pointer_events(View::PointerEvents::none);
+    REQUIRE(root.hit_test({75, 75}) == nullptr);
+    REQUIRE(root.hit_test({10, 10}) == nullptr);
+}
+
+TEST_CASE("View::hit_test honors pointerEvents == box-only",
+          "[view][hit_test][issue-1026]") {
+    View root;
+    root.set_bounds({0, 0, 200, 200});
+
+    auto child = std::make_unique<View>();
+    child->set_bounds({50, 50, 100, 100});
+    root.add_child(std::move(child));
+
+    // box_only: this view receives events; children do NOT — even when
+    // the point lands directly on a child, hit_test returns the parent.
+    root.set_pointer_events(View::PointerEvents::box_only);
+    REQUIRE(root.hit_test({75, 75}) == &root);
+    REQUIRE(root.hit_test({10, 10}) == &root);
+}
+
+TEST_CASE("View::hit_test honors pointerEvents == box-none",
+          "[view][hit_test][issue-1026]") {
+    View root;
+    root.set_bounds({0, 0, 200, 200});
+
+    auto child = std::make_unique<View>();
+    child->set_bounds({50, 50, 100, 100});
+    auto* child_ptr = child.get();
+    root.add_child(std::move(child));
+
+    // box_none: this view does NOT receive events but children do —
+    // the point on the child still resolves to the child, but a point
+    // inside the parent's bounds (not on the child) returns nullptr.
+    root.set_pointer_events(View::PointerEvents::box_none);
+    REQUIRE(root.hit_test({75, 75}) == child_ptr);
+    REQUIRE(root.hit_test({10, 10}) == nullptr);
+}
+
+// ── pulp #1026: backfaceVisibility plumbing ────────────────────────────────
+
+TEST_CASE("View backface_visible defaults to true and round-trips",
+          "[view][issue-1026]") {
+    View v;
+    REQUIRE(v.backface_visible());
+    v.set_backface_visible(false);
+    REQUIRE_FALSE(v.backface_visible());
+    v.set_backface_visible(true);
+    REQUIRE(v.backface_visible());
+}
+
+// ── pulp #1026: transform-origin applies to matrix path ────────────────────
+
+TEST_CASE("View::paint_all applies transform-origin around concat_transform",
+          "[view][transform][issue-1026]") {
+    using namespace pulp::canvas;
+
+    // When the View has a transform-origin offset and a transform-matrix,
+    // paint_all should bracket the concat with translate(ox,oy) and
+    // translate(-ox,-oy) so rotation/scale anchor at the requested point
+    // — same behaviour as the CSS-transform path.
+    RecordingCanvas rc;
+    View v;
+    v.set_bounds({0, 0, 100, 50});
+    // Origin (0.25, 0.75): pivot at (25, 37.5).
+    v.set_transform_origin(0.25f, 0.75f);
+    v.set_transform_matrix(2.0f, 0.0f, 0.0f, 2.0f, 0.0f, 0.0f);
+
+    v.paint_all(rc);
+
+    // Expected sequence around the concat:
+    //   translate(0,0)    — bounds_.x/y at (0,0)
+    //   translate(25, 37.5)
+    //   concat_transform(2,0,0,2,0,0)
+    //   translate(-25, -37.5)
+    bool saw_pre_origin = false, saw_concat = false, saw_post_origin = false;
+    int idx = 0;
+    int concat_at = -1;
+    for (auto& cmd : rc.commands()) {
+        if (cmd.type == DrawCommand::Type::concat_transform) {
+            concat_at = idx;
+            saw_concat = true;
+        }
+        ++idx;
+    }
+    REQUIRE(saw_concat);
+    REQUIRE(concat_at > 0);
+
+    // Search the immediate neighbours.
+    auto& cmds = rc.commands();
+    REQUIRE(cmds[(size_t)(concat_at - 1)].type == DrawCommand::Type::translate);
+    REQUIRE_THAT(cmds[(size_t)(concat_at - 1)].f[0], WithinAbs(25.0f, 1e-4f));
+    REQUIRE_THAT(cmds[(size_t)(concat_at - 1)].f[1], WithinAbs(37.5f, 1e-4f));
+    saw_pre_origin = true;
+
+    REQUIRE((size_t)(concat_at + 1) < cmds.size());
+    REQUIRE(cmds[(size_t)(concat_at + 1)].type == DrawCommand::Type::translate);
+    REQUIRE_THAT(cmds[(size_t)(concat_at + 1)].f[0], WithinAbs(-25.0f, 1e-4f));
+    REQUIRE_THAT(cmds[(size_t)(concat_at + 1)].f[1], WithinAbs(-37.5f, 1e-4f));
+    saw_post_origin = true;
+
+    REQUIRE(saw_pre_origin);
+    REQUIRE(saw_post_origin);
+}
+
+TEST_CASE("View::paint_all does NOT bracket concat when origin is unset (back-compat)",
+          "[view][transform][issue-1026]") {
+    using namespace pulp::canvas;
+
+    // pulp #1026 — only an EXPLICIT setTransformOrigin call activates the
+    // pre/post-origin translate bracket on the matrix path. Existing
+    // setTransform() call sites (no origin) keep the pre-#1026 single
+    // concat, preserving back-compat with the issue-930 contract.
+    RecordingCanvas rc;
+    View v;
+    v.set_bounds({0, 0, 100, 50});
+    REQUIRE_FALSE(v.transform_origin_explicit());
+    v.set_transform_matrix(2.0f, 0.0f, 0.0f, 2.0f, 0.0f, 0.0f);
+
+    v.paint_all(rc);
+
+    int translates = 0;
+    int concats = 0;
+    for (auto& cmd : rc.commands()) {
+        if (cmd.type == DrawCommand::Type::translate) ++translates;
+        if (cmd.type == DrawCommand::Type::concat_transform) ++concats;
+    }
+    // Only the 1 bounds translate; no origin bracket.
+    REQUIRE(translates == 1);
+    REQUIRE(concats == 1);
+}
+
+// ── pulp #1026: per-corner border-radius ──────────────────────────────────
+
+TEST_CASE("View per-corner radii setters flip has_corner_radii",
+          "[view][border][issue-1026]") {
+    View v;
+    REQUIRE_FALSE(v.has_corner_radii());
+
+    v.set_corner_radius_tl(8.0f);
+    REQUIRE(v.has_corner_radii());
+    REQUIRE_THAT(v.corner_radius_tl(), WithinAbs(8.0f, 1e-5f));
+    REQUIRE_THAT(v.corner_radius_tr(), WithinAbs(0.0f, 1e-5f));
+
+    v.set_corner_radius_tr(12.0f);
+    v.set_corner_radius_bl(4.0f);
+    v.set_corner_radius_br(2.0f);
+    REQUIRE_THAT(v.corner_radius_tr(), WithinAbs(12.0f, 1e-5f));
+    REQUIRE_THAT(v.corner_radius_bl(), WithinAbs(4.0f,  1e-5f));
+    REQUIRE_THAT(v.corner_radius_br(), WithinAbs(2.0f,  1e-5f));
+}
+
+TEST_CASE("View::paint_all routes background through path API when per-corner radii set",
+          "[view][border][issue-1026]") {
+    using namespace pulp::canvas;
+
+    // With a uniform corner_radius the bg uses fill_rounded_rect; with
+    // any per-corner setter the path API takes over (begin_path /
+    // line_to / cubic_to / close_path / fill_current_path).
+    {
+        RecordingCanvas rc;
+        View v;
+        v.set_bounds({0, 0, 100, 50});
+        v.set_background_color(Color::rgba8(255, 0, 0));
+        v.set_border(Color::rgba8(0, 0, 0), 1.0f, /*radius=*/8.0f);
+        v.paint_all(rc);
+        REQUIRE(rc.count(DrawCommand::Type::fill_rounded_rect) >= 1);
+        REQUIRE(rc.count(DrawCommand::Type::stroke_rounded_rect) >= 1);
+    }
+    {
+        RecordingCanvas rc;
+        View v;
+        v.set_bounds({0, 0, 100, 50});
+        v.set_background_color(Color::rgba8(255, 0, 0));
+        v.set_border(Color::rgba8(0, 0, 0), 1.0f);
+        v.set_corner_radius_tl(8.0f);
+        v.set_corner_radius_tr(8.0f);
+        v.set_corner_radius_bl(0.0f);
+        v.set_corner_radius_br(0.0f);
+        v.paint_all(rc);
+        // Per-corner path: at least begin_path + close_path appear, and
+        // fill_rounded_rect / stroke_rounded_rect do NOT.
+        REQUIRE(rc.count(DrawCommand::Type::fill_rounded_rect) == 0);
+        REQUIRE(rc.count(DrawCommand::Type::stroke_rounded_rect) == 0);
+        REQUIRE(rc.count(DrawCommand::Type::begin_path) >= 1);
+        REQUIRE(rc.count(DrawCommand::Type::close_path) >= 1);
+    }
+}
