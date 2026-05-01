@@ -24,6 +24,21 @@ This local ledger records the open `codecov` PR validation runs paused to free N
 - Queued/in-progress Codecov-branch workflow runs selected for cancellation: 193
 - Selected workflows: Build and Test, Coverage, Sanitizer Tests
 
+## Current Watch Point
+
+Last live check: 2026-05-01 10:15:53 EDT.
+
+- Open `codecov` PRs: 22.
+- Merge state: all 22 are currently `BLOCKED`; 0 PRs have failed check
+  conclusions in their current rollups.
+- GitHub Actions pressure: 80 active runs, with 73 queued and 7 in
+  progress.
+- Operating mode: hold further local builds while disk is about 2.6 GiB
+  free and Namespace is saturated; keep polling, merge PRs as soon as
+  required `linux`/`macos`/`windows` wrappers are green, cancel leftover
+  advisory PR-head runs after merge, and only refill when the active
+  queue drains or a high-confidence local tranche is already validated.
+
 ## Cancellation Result
 
 - Cancellation pass completed on 2026-04-30 EDT.
