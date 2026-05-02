@@ -50,6 +50,42 @@ TEST_CASE("UmpPacket helper factories mask groups channels and data fields",
     REQUIRE((midi1.words[0] & 0xFFu) == 0x7Eu);
 }
 
+TEST_CASE("UmpPacket remaining channel voice helpers encode masked fields",
+          "[midi][ump][helpers][issue-645]") {
+    auto off = UmpPacket::note_off_2(0x21, 0x2F, 0xFE, 0xCAFE);
+    REQUIRE(off.word_count == 2);
+    REQUIRE(off.message_type() == UmpMessageType::Midi2ChannelVoice);
+    REQUIRE(off.group() == 1);
+    REQUIRE(off.status() == 0x8F);
+    REQUIRE(off.channel() == 0x0F);
+    REQUIRE(off.note_number() == 0x7E);
+    REQUIRE(off.velocity_16() == 0xCAFE);
+
+    auto cc = UmpPacket::cc_2(0x3A, 0x2B, 0xFF, 0x12345678u);
+    REQUIRE(cc.word_count == 2);
+    REQUIRE(cc.group() == 0x0A);
+    REQUIRE(cc.status() == 0xBB);
+    REQUIRE(cc.channel() == 0x0B);
+    REQUIRE(cc.note_number() == 0x7F);
+    REQUIRE(cc.data_32() == 0x12345678u);
+
+    auto bend = UmpPacket::pitch_bend_2(0x1C, 0x1D, 0x87654321u);
+    REQUIRE(bend.word_count == 2);
+    REQUIRE(bend.group() == 0x0C);
+    REQUIRE(bend.status() == 0xED);
+    REQUIRE(bend.channel() == 0x0D);
+    REQUIRE(bend.data_32() == 0x87654321u);
+
+    auto per_note_bend = UmpPacket::per_note_pitch_bend(0x2E, 0x3F, 0xFD,
+                                                        0xABCDEF01u);
+    REQUIRE(per_note_bend.word_count == 2);
+    REQUIRE(per_note_bend.group() == 0x0E);
+    REQUIRE(per_note_bend.status() == 0x6F);
+    REQUIRE(per_note_bend.channel() == 0x0F);
+    REQUIRE(per_note_bend.note_number() == 0x7D);
+    REQUIRE(per_note_bend.data_32() == 0xABCDEF01u);
+}
+
 TEST_CASE("Processor::supports_ump defaults to false", "[midi][ump]") {
     pulp::format::PluginDescriptor desc;
     REQUIRE_FALSE(desc.supports_ump);
