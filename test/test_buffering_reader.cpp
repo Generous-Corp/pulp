@@ -146,7 +146,10 @@ TEST_CASE("BufferingReader restart clears finished state and stale buffered data
     std::atomic<int> emitted{0};
     reader.set_read_callback([&](float* dest, int frames, int channels) {
         const int start = emitted.load();
-        const int limit = phase.load() == 0 ? 2 : 4;
+        // Keep the restarted source longer than the ring buffer so the
+        // background thread cannot race back to EOF before the test observes
+        // that start() cleared the previous finished state.
+        const int limit = phase.load() == 0 ? 2 : 4096;
         const int frames_to_emit = std::min(frames, limit - start);
         const float base = phase.load() == 0 ? 100.0f : 200.0f;
         for (int frame = 0; frame < frames_to_emit; ++frame) {
@@ -170,7 +173,7 @@ TEST_CASE("BufferingReader restart clears finished state and stale buffered data
     emitted.store(0);
     reader.start(1, 2048);
     REQUIRE_FALSE(reader.is_finished());
-    REQUIRE(wait_until_finished_with_frames(reader, 4));
+    REQUIRE(wait_for_frames(reader, 4));
 
     std::array<float, 4> second{};
     REQUIRE(reader.read(second.data(), 4, 1) == 4);
