@@ -56,6 +56,22 @@ TEST_CASE("rebuilt plugin is not blacklisted", "[host][blacklist]") {
     REQUIRE_FALSE(bl.is_blacklisted(f.path.string()));
 }
 
+TEST_CASE("deleted plugin entry remains blacklisted", "[host][blacklist]") {
+    TempFile f;
+    f.write("original");
+    ScanBlacklist bl;
+    bl.blacklist(f.path.string(), "crash");
+    REQUIRE(bl.is_blacklisted(f.path.string()));
+
+    std::error_code ec;
+    fs::remove(f.path, ec);
+    REQUIRE_FALSE(ec);
+
+    auto e = bl.get(f.path.string());
+    REQUIRE(e.has_value());
+    REQUIRE(e->reason == "crash");
+}
+
 TEST_CASE("clear unconditionally removes", "[host][blacklist]") {
     TempFile f;
     f.write("x");
@@ -92,12 +108,14 @@ TEST_CASE("from_text skips malformed lines", "[host][blacklist]") {
         "/valid/path|100|200|ok\n"
         "not-enough-fields\n"
         "/another|abc|200|bad-mtime\n"
+        "/bad-size|100|not-a-size|bad-size\n"
         "/good|1|2|fine\n";
     ScanBlacklist bl;
     REQUIRE(bl.from_text(mixed));
     REQUIRE(bl.entries().count("/valid/path") == 1);
     REQUIRE(bl.entries().count("/good") == 1);
     REQUIRE(bl.entries().count("/another") == 0);
+    REQUIRE(bl.entries().count("/bad-size") == 0);
     REQUIRE(bl.entries().count("not-enough-fields") == 0);
 }
 
@@ -113,4 +131,15 @@ TEST_CASE("save_to + load_from via disk", "[host][blacklist]") {
     REQUIRE(b.size() == 1);
     std::error_code ec;
     fs::remove(out_path, ec);
+}
+
+TEST_CASE("load_from and save_to report unavailable paths",
+          "[host][blacklist]") {
+    TempFile f;
+    ScanBlacklist bl;
+
+    REQUIRE_FALSE(bl.load_from(f.path.string()));
+
+    fs::create_directories(f.path);
+    REQUIRE_FALSE(bl.save_to(f.path.string()));
 }
