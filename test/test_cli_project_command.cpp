@@ -142,6 +142,11 @@ std::string read_file_text(const fs::path& path) {
                        std::istreambuf_iterator<char>());
 }
 
+std::string normalize_newlines(std::string text) {
+    text.erase(std::remove(text.begin(), text.end(), '\r'), text.end());
+    return text;
+}
+
 std::string quote(const fs::path& path) {
     return shell_quote(path.string());
 }
@@ -880,7 +885,7 @@ TEST_CASE("cli common AAX helpers classify SDKs, bundles, and validator output",
     auto temp_note = write_temp_text_file("pulp-cli-common-test", "temporary note\n");
     REQUIRE(temp_note.filename().string().find("pulp-cli-common-test-") == 0);
     REQUIRE(temp_note.extension() == ".txt");
-    REQUIRE(read_file_text(temp_note) == "temporary note\n");
+    REQUIRE(normalize_newlines(read_file_text(temp_note)) == "temporary note\n");
     std::error_code remove_ec;
     fs::remove(temp_note, remove_ec);
 
