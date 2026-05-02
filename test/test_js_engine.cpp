@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 #include <pulp/view/js_engine.hpp>
+#include <pulp/view/js_engine_recommend.hpp>
 #include <pulp/view/script_engine.hpp>
 #include <string>
 #include <vector>
@@ -224,6 +225,96 @@ TEST_CASE("JsEngine availability", "[js_engine]") {
     } else {
         SUCCEED("V8 intentionally unavailable in this build");
     }
+}
+
+TEST_CASE("JsEngine script recommendation handles large-script threshold edge", "[js_engine][recommend]") {
+    constexpr size_t large_script_threshold = 512 * 1024;
+
+    std::string script_at_threshold(large_script_threshold, 'x');
+    auto threshold_rec = recommend_engine_for_script(script_at_threshold, JsEngineType::quickjs);
+    REQUIRE(threshold_rec.recommended == JsEngineType::quickjs);
+    REQUIRE_FALSE(threshold_rec.upgrade_advised);
+    REQUIRE(threshold_rec.reason.find("Standard UI script") != std::string::npos);
+
+    script_at_threshold.push_back('x');
+    auto large_rec = recommend_engine_for_script(script_at_threshold, JsEngineType::quickjs);
+    REQUIRE(large_rec.recommended == JsEngineType::v8);
+    REQUIRE(large_rec.upgrade_advised);
+    REQUIRE(large_rec.reason.find("Large script (512KB)") != std::string::npos);
+
+    if (!is_engine_available(JsEngineType::v8))
+        REQUIRE(large_rec.reason.find("V8 not available") != std::string::npos);
+}
+
+TEST_CASE("JsEngine script recommendation detects Three.js source patterns", "[js_engine][recommend]") {
+    const std::vector<std::string> scripts = {
+        "const scene = new THREE.Scene();",
+        "const renderer = new THREE.WebGLRenderer();",
+        "const camera = new THREE.PerspectiveCamera(75, 1, 0.1, 1000);",
+        "import * as THREE from 'three';",
+        "import { Scene } from 'three';",
+        "import { Scene } from \"three\";"
+    };
+
+    for (const auto& script : scripts) {
+        DYNAMIC_SECTION("script=" << script) {
+            auto rec = recommend_engine_for_script(script, JsEngineType::v8);
+            REQUIRE(rec.recommended == JsEngineType::v8);
+            REQUIRE_FALSE(rec.upgrade_advised);
+            REQUIRE(rec.reason.find("Three.js detected") != std::string::npos);
+
+            if (!is_engine_available(JsEngineType::v8))
+                REQUIRE(rec.reason.find("rebuild with --js-engine=v8") != std::string::npos);
+        }
+    }
+}
+
+TEST_CASE("JsEngine recommendation upgrade flag follows the current engine", "[js_engine][recommend]") {
+    auto standard_from_quickjs = recommend_engine_for_script("const gain = 0.5;", JsEngineType::quickjs);
+    REQUIRE(standard_from_quickjs.recommended == JsEngineType::quickjs);
+    REQUIRE_FALSE(standard_from_quickjs.upgrade_advised);
+
+    auto standard_from_jsc = recommend_engine_for_script("const gain = 0.5;", JsEngineType::jsc);
+    REQUIRE(standard_from_jsc.recommended == JsEngineType::quickjs);
+    REQUIRE(standard_from_jsc.upgrade_advised);
+
+    auto three_from_quickjs = recommend_engine_for_script("const scene = new THREE.Scene();", JsEngineType::quickjs);
+    REQUIRE(three_from_quickjs.recommended == JsEngineType::v8);
+    REQUIRE(three_from_quickjs.upgrade_advised);
+
+    auto three_from_v8 = recommend_engine_for_script("const scene = new THREE.Scene();", JsEngineType::v8);
+    REQUIRE(three_from_v8.recommended == JsEngineType::v8);
+    REQUIRE_FALSE(three_from_v8.upgrade_advised);
+}
+
+TEST_CASE("JsEngine workload recommendation handles precedence and platform fallback", "[js_engine][recommend]") {
+    auto three_apple = recommend_engine_for_workload("apple webgl scene", JsEngineType::quickjs);
+    REQUIRE(three_apple.recommended == JsEngineType::v8);
+    REQUIRE(three_apple.upgrade_advised);
+    REQUIRE(three_apple.reason.find("Three.js / 3D workloads") != std::string::npos);
+
+    if (!is_engine_available(JsEngineType::v8))
+        REQUIRE(three_apple.reason.find("V8 not available") != std::string::npos);
+
+    auto apple_rec = recommend_engine_for_workload("ios", JsEngineType::quickjs);
+    auto expected_apple_engine = is_engine_available(JsEngineType::jsc)
+        ? JsEngineType::jsc
+        : JsEngineType::quickjs;
+    REQUIRE(apple_rec.recommended == expected_apple_engine);
+    REQUIRE(apple_rec.upgrade_advised == (expected_apple_engine != JsEngineType::quickjs));
+
+    if (expected_apple_engine == JsEngineType::jsc)
+        REQUIRE(apple_rec.reason.find("Apple-only target") != std::string::npos);
+    else
+        REQUIRE(apple_rec.reason.find("JSC not available") != std::string::npos);
+
+    auto portable_from_quickjs = recommend_engine_for_workload("portable UI", JsEngineType::quickjs);
+    REQUIRE(portable_from_quickjs.recommended == JsEngineType::quickjs);
+    REQUIRE_FALSE(portable_from_quickjs.upgrade_advised);
+
+    auto portable_from_v8 = recommend_engine_for_workload("cross-platform UI", JsEngineType::v8);
+    REQUIRE(portable_from_v8.recommended == JsEngineType::quickjs);
+    REQUIRE(portable_from_v8.upgrade_advised);
 }
 
 TEST_CASE("JsEngine default engine creation", "[js_engine]") {
