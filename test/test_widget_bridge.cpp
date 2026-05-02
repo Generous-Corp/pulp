@@ -1843,6 +1843,79 @@ TEST_CASE("WidgetBridge __gpuComputeDispatchImpl tolerates malformed bufferDataB
     )"));
 }
 
+TEST_CASE("WidgetBridge GPU info and fallback canvas descriptors are scriptable",
+          "[view][bridge][gpu]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        globalThis.gpu_info = getGPUInfo();
+        globalThis.gpu_adapter = __describeNativeAdapterImpl();
+        globalThis.gpu_device = __describeNativeDeviceImpl();
+        globalThis.gpu_configured = __gpuCanvasConfigureImpl(
+            '', 0, -5, 'rgba8unorm', 7, 'premultiplied');
+        globalThis.gpu_texture = __gpuCanvasDescribeCurrentTextureImpl('');
+        globalThis.gpu_preferred = navigatorGPU.getPreferredCanvasFormat();
+    )");
+
+    REQUIRE(engine.evaluate("gpu_info.available").getWithDefault<bool>(false));
+    REQUIRE(engine.evaluate("gpu_info.backend").toString() == "Dawn/WebGPU");
+    REQUIRE_FALSE(engine.evaluate("gpu_info.nativeBridge").getWithDefault<bool>(true));
+    REQUIRE(engine.evaluate("gpu_info.preferredCanvasFormat").toString() == "bgra8unorm");
+    REQUIRE(engine.evaluate("gpu_preferred").toString() == "bgra8unorm");
+
+    REQUIRE(engine.evaluate("gpu_adapter.available").getWithDefault<bool>(false));
+    REQUIRE_FALSE(engine.evaluate("gpu_adapter.nativeBridge").getWithDefault<bool>(true));
+    REQUIRE_FALSE(engine.evaluate("gpu_device.nativeBridge").getWithDefault<bool>(true));
+
+    REQUIRE_FALSE(engine.evaluate("gpu_configured.configured").getWithDefault<bool>(true));
+    REQUIRE(engine.evaluate("gpu_configured.width").getWithDefault<int>(0) == 1);
+    REQUIRE(engine.evaluate("gpu_configured.height").getWithDefault<int>(0) == 1);
+    REQUIRE(engine.evaluate("gpu_configured.format").toString() == "rgba8unorm");
+    REQUIRE(engine.evaluate("gpu_configured.usage").getWithDefault<int>(0) == 7);
+    REQUIRE(engine.evaluate("gpu_configured.alphaMode").toString() == "premultiplied");
+
+    REQUIRE_FALSE(engine.evaluate("gpu_texture.nativeBridge").getWithDefault<bool>(true));
+    REQUIRE(engine.evaluate("gpu_texture.width").getWithDefault<int>(0) == 1);
+    REQUIRE(engine.evaluate("gpu_texture.height").getWithDefault<int>(0) == 1);
+    REQUIRE(engine.evaluate("gpu_texture.format").toString() == "bgra8unorm");
+    REQUIRE(engine.evaluate("gpu_texture.usage").getWithDefault<int>(-1) == 0);
+    REQUIRE(engine.evaluate("gpu_texture.label").toString() == "pulp-native-gpu-texture");
+}
+
+TEST_CASE("WidgetBridge applyShader reports results and marks targets active",
+          "[view][bridge][gpu][shader]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createLabel('shader-target', 'Shader', '');
+        globalThis.shader_ok = applyShader(
+            'shader-target',
+            'half4 main(float2 p) { return half4(1); }');
+        globalThis.shader_empty = applyShader('shader-target', '');
+        globalThis.shader_missing = applyShader(
+            'missing-target',
+            'half4 main(float2 p) { return half4(1); }');
+    )");
+
+    REQUIRE(engine.evaluate("shader_ok.success").getWithDefault<bool>(false));
+    REQUIRE_FALSE(engine.evaluate("shader_empty.success").getWithDefault<bool>(true));
+    REQUIRE(engine.evaluate("shader_missing.success").getWithDefault<bool>(false));
+    REQUIRE(engine.evaluate("shader_ok.error").toString().empty());
+
+    auto* target = bridge.widget("shader-target");
+    REQUIRE(target != nullptr);
+    REQUIRE_THAT(target->theme().dimension("shader.active").value_or(0.0f),
+                 WithinAbs(1.0f, 0.001f));
+}
+
 // ── canvasSetTransform / canvasClip / canvasGlobalCompositeOperation (issue-896) ──
 //
 // These three CanvasRenderingContext2D bridge functions are exercised end-to-end:
