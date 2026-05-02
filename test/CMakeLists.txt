@@ -1575,6 +1575,17 @@ endif()
 catch_discover_tests(pulp-test-cli-import-design
     PROPERTIES ENVIRONMENT "PULP_REPO_ROOT=${CMAKE_SOURCE_DIR}")
 
+# Direct shell-out coverage for the standalone import-design tool
+# executable. These tests hit tools/import-design/pulp_import_design.cpp
+# without going through the top-level pulp CLI delegate.
+add_executable(pulp-test-import-design-tool test_import_design_tool.cpp)
+target_link_libraries(pulp-test-import-design-tool
+    PRIVATE pulp::platform Catch2::Catch2WithMain)
+target_compile_definitions(pulp-test-import-design-tool PRIVATE
+    PULP_IMPORT_DESIGN_TOOL_PATH="$<TARGET_FILE:pulp-import-design>")
+add_dependencies(pulp-test-import-design-tool pulp-import-design)
+catch_discover_tests(pulp-test-import-design-tool)
+
 # pulp #468 — `--execute-bundle` harness end-to-end. Boots the
 # ScriptEngine + WidgetBridge, builds a synthetic React-like bundle on
 # the fly, asserts the materialized DOM walker produces an IR deeper
