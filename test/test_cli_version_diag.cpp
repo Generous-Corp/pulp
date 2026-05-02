@@ -119,6 +119,20 @@ TEST_CASE("read_plugin_version returns empty on missing file",
     REQUIRE(v.raw.empty());
 }
 
+TEST_CASE("read_plugin_version returns empty when manifest has no version field",
+          "[version-diag][coverage][issue-643]") {
+    TempDir tmp;
+    auto plugin_json = tmp.path / ".claude-plugin" / "plugin.json";
+    write_file(plugin_json, R"({
+        "name": "pulp",
+        "description": "test"
+    })");
+
+    auto v = read_plugin_version(plugin_json);
+    REQUIRE_FALSE(v.comparable);
+    REQUIRE(v.raw.empty());
+}
+
 TEST_CASE("locate_plugin_json prefers an explicit override",
           "[version-diag][issue-499]") {
     TempDir tmp;
@@ -265,6 +279,13 @@ TEST_CASE("read_project_cli_min_version returns empty when absent",
     write_file(toml, "[pulp]\nsdk_version = \"0.24.0\"\n");
     auto v = read_project_cli_min_version(tmp.path);
     REQUIRE_FALSE(v.comparable);
+}
+
+TEST_CASE("read_project_cli_min_version ignores an empty project root",
+          "[version-diag][coverage][issue-643]") {
+    auto v = read_project_cli_min_version({});
+    REQUIRE_FALSE(v.comparable);
+    REQUIRE(v.raw.empty());
 }
 
 // Codex 2026-04-21 review on #546: the earlier scanner treated any line
