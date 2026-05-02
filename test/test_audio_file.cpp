@@ -826,6 +826,47 @@ TEST_CASE("FormatRegistry rejects malformed compressed files through built-in re
     std::filesystem::remove(mp3_path);
 }
 
+#ifdef __APPLE__
+TEST_CASE("FormatRegistry routes CoreAudio compressed containers on Apple",
+          "[audio][file][registry][coreaudio][issue-640]") {
+    auto& registry = FormatRegistry::instance();
+
+    auto read_extensions = registry.supported_read_extensions();
+    REQUIRE(contains_extension(read_extensions, ".aac"));
+    REQUIRE(contains_extension(read_extensions, ".m4a"));
+    REQUIRE(contains_extension(read_extensions, ".alac"));
+    REQUIRE(contains_extension(read_extensions, ".caf"));
+
+    const std::array<std::string_view, 4> extensions = {
+        ".M4A",
+        ".aac",
+        ".ALAC",
+        ".caf",
+    };
+
+    for (auto ext : extensions) {
+        auto* reader = registry.find_reader(ext);
+        REQUIRE(reader != nullptr);
+        REQUIRE(reader->format_name() == "CoreAudio");
+
+        auto path = unique_temp_audio_path(std::string("_invalid") + std::string(ext));
+        {
+            const unsigned char bytes[] = {0x43, 0x41, 0x46, 0x46, 0x00, 0x01};
+            std::ofstream file(path, std::ios::binary);
+            file.write(reinterpret_cast<const char*>(bytes), sizeof(bytes));
+            REQUIRE(file.good());
+        }
+
+        REQUIRE_FALSE(reader->read_info(path.string()).has_value());
+        REQUIRE_FALSE(reader->read(path.string()).has_value());
+        REQUIRE_FALSE(registry.read_info(path.string()).has_value());
+        REQUIRE_FALSE(registry.read(path.string()).has_value());
+
+        std::filesystem::remove(path);
+    }
+}
+#endif
+
 TEST_CASE("FormatRegistry dispatches custom readers and writers through normalized paths",
           "[audio][file][registry][issue-640]") {
     auto& registry = FormatRegistry::instance();
