@@ -157,6 +157,53 @@ TEST_CASE("Canvas::draw_box_shadow inset CPU fallback clips to box",
     REQUIRE(canvas.count(DrawCommand::Type::fill_rect) >= 4);
 }
 
+TEST_CASE("Canvas fallback helpers record CPU-safe commands", "[canvas]") {
+    RecordingCanvas canvas;
+
+    canvas.set_font("Inter", 20.0f);
+    auto metrics = canvas.measure_text_full("abc");
+    REQUIRE(metrics.width == Catch::Approx(21.0f));
+    REQUIRE(metrics.ascent == Catch::Approx(15.0f));
+    REQUIRE(metrics.descent == Catch::Approx(5.0f));
+    REQUIRE(metrics.line_height == Catch::Approx(24.0f));
+
+    canvas.save_layer(1, 2, 3, 4, 0.5f, 6.0f);
+    REQUIRE(canvas.count(DrawCommand::Type::save) == 1);
+
+    Canvas::ShaderUniforms uniforms;
+    uniforms.fill_color = Color::rgba8(10, 20, 30, 40);
+    REQUIRE_FALSE(canvas.draw_with_sksl("half4 main(float2 p) { return half4(1); }",
+                                       4, 5, 6, 7, uniforms));
+
+    REQUIRE(canvas.count(DrawCommand::Type::fill_rect) == 1);
+    const auto& fill_rect = canvas.commands().back();
+    REQUIRE(fill_rect.type == DrawCommand::Type::fill_rect);
+    REQUIRE(fill_rect.f[0] == Catch::Approx(4.0f));
+    REQUIRE(fill_rect.f[1] == Catch::Approx(5.0f));
+    REQUIRE(fill_rect.f[2] == Catch::Approx(6.0f));
+    REQUIRE(fill_rect.f[3] == Catch::Approx(7.0f));
+}
+
+TEST_CASE("Canvas gradient fallbacks use first stop when present", "[canvas]") {
+    RecordingCanvas canvas;
+    const Color colors[] = {
+        Color::rgba8(12, 34, 56, 78),
+        Color::rgba8(90, 100, 110, 120),
+    };
+    const float positions[] = {0.0f, 1.0f};
+
+    canvas.set_fill_gradient_linear(0, 0, 10, 10, colors, positions, 2);
+    canvas.set_fill_gradient_radial(5, 5, 4, colors, positions, 2);
+    canvas.set_fill_gradient_conic(5, 5, 1.0f, colors, positions, 2);
+    canvas.set_fill_gradient_linear(0, 0, 10, 10, colors, positions, 0);
+
+    REQUIRE(canvas.count(DrawCommand::Type::set_fill_color) == 3);
+    for (const auto& command : canvas.commands()) {
+        REQUIRE(command.type == DrawCommand::Type::set_fill_color);
+        REQUIRE(command.color == colors[0]);
+    }
+}
+
 TEST_CASE("fill_text_sdf falls back to fill_text on RecordingCanvas", "[canvas][sdf]") {
     RecordingCanvas canvas;
     canvas.set_font("Inter", 14.0f);
