@@ -1,6 +1,8 @@
 #include <catch2/catch_test_macros.hpp>
 #include <pulp/format/detail/standalone_editor_chrome.hpp>
 
+#include <memory>
+#include <string>
 #include <vector>
 
 using namespace pulp::format;
@@ -64,6 +66,91 @@ struct StubBridge {
     }
 };
 
+class StubAudioSystem final : public pulp::audio::AudioSystem {
+public:
+    std::vector<pulp::audio::DeviceInfo> devices;
+    int enumerate_calls = 0;
+
+    std::vector<pulp::audio::DeviceInfo> enumerate_devices() override {
+        ++enumerate_calls;
+        return devices;
+    }
+
+    std::unique_ptr<pulp::audio::AudioDevice> create_device(const std::string&) override {
+        return nullptr;
+    }
+
+    pulp::audio::DeviceInfo default_output_device() override {
+        for (const auto& device : devices) {
+            if (device.is_default_output) return device;
+        }
+        return devices.empty() ? pulp::audio::DeviceInfo{} : devices.front();
+    }
+
+    pulp::audio::DeviceInfo default_input_device() override {
+        for (const auto& device : devices) {
+            if (device.is_default_input) return device;
+        }
+        return devices.empty() ? pulp::audio::DeviceInfo{} : devices.front();
+    }
+};
+
+class StubMidiSystem final : public pulp::midi::MidiSystem {
+public:
+    std::vector<pulp::midi::MidiPortInfo> inputs;
+    int enumerate_calls = 0;
+
+    std::vector<pulp::midi::MidiPortInfo> enumerate_inputs() override {
+        ++enumerate_calls;
+        return inputs;
+    }
+
+    std::vector<pulp::midi::MidiPortInfo> enumerate_outputs() override {
+        return {};
+    }
+
+    std::unique_ptr<pulp::midi::MidiInput> create_input() override {
+        return nullptr;
+    }
+
+    std::unique_ptr<pulp::midi::MidiOutput> create_output() override {
+        return nullptr;
+    }
+
+    void set_port_change_callback(PortChangeCallback cb) override {
+        port_change_callback_ = std::move(cb);
+    }
+
+    void fire_port_change() {
+        if (port_change_callback_) port_change_callback_();
+    }
+
+private:
+    PortChangeCallback port_change_callback_;
+};
+
+template <typename T>
+void collect_descendants(View& root, std::vector<T*>& out) {
+    if (auto* match = dynamic_cast<T*>(&root)) out.push_back(match);
+    for (size_t i = 0; i < root.child_count(); ++i) {
+        collect_descendants(*root.child_at(i), out);
+    }
+}
+
+template <typename T>
+std::vector<T*> descendants(View& root) {
+    std::vector<T*> out;
+    collect_descendants(root, out);
+    return out;
+}
+
+TabPanel& settings_tabs(SettingsPanel& panel) {
+    REQUIRE(panel.child_count() == 1);
+    auto* tabs = dynamic_cast<TabPanel*>(panel.child_at(0));
+    REQUIRE(tabs != nullptr);
+    return *tabs;
+}
+
 } // namespace
 
 TEST_CASE("Standalone settings callbacks rebind after successful apply",
@@ -122,6 +209,159 @@ TEST_CASE("Standalone settings callbacks skip rebind when apply fails",
 
     callbacks.on_config_apply(StandaloneConfig{});
     REQUIRE_FALSE(rebind_called);
+}
+
+TEST_CASE("SettingsPanel applies audio and MIDI selections",
+          "[standalone][settings][issue-493]") {
+    StubAudioSystem audio;
+    audio.devices = {
+        {.id = "builtin-out",
+         .name = "Built-in Output",
+         .max_output_channels = 2,
+         .sample_rates = {44100.0},
+         .buffer_sizes = {64},
+         .is_default_output = true},
+        {.id = "usb-out",
+         .name = "USB Output",
+         .max_output_channels = 2,
+         .sample_rates = {48000.0, 96000.0},
+         .buffer_sizes = {128, 256}},
+        {.id = "mic-in",
+         .name = "USB Mic",
+         .max_input_channels = 1,
+         .sample_rates = {48000.0},
+         .buffer_sizes = {128},
+         .is_default_input = true},
+    };
+
+    StubMidiSystem midi;
+    midi.inputs = {
+        {.id = "keys", .name = "Keys", .is_input = true},
+        {.id = "pads", .name = "Pads", .is_input = true},
+    };
+
+    SettingsPanel panel;
+    panel.bind_systems(&audio, &midi);
+
+    StandaloneConfig applied;
+    int apply_calls = 0;
+    panel.set_callbacks(SettingsPanelCallbacks{
+        .on_config_apply = [&](const StandaloneConfig& cfg) {
+            applied = cfg;
+            ++apply_calls;
+        },
+    });
+
+    auto& tabs = settings_tabs(panel);
+    REQUIRE(tabs.tab_count() == 2);
+    auto* audio_tab = tabs.child_at(0);
+    auto* midi_tab = tabs.child_at(1);
+    REQUIRE(audio_tab != nullptr);
+    REQUIRE(midi_tab != nullptr);
+
+    auto combos = descendants<ComboBox>(*audio_tab);
+    REQUIRE(combos.size() >= 5);
+    auto* output_combo = combos[0];
+    auto* input_combo = combos[1];
+    auto* sample_rate_combo = combos[2];
+    auto* buffer_size_combo = combos[3];
+
+    REQUIRE(output_combo->items().size() == 2);
+    REQUIRE(input_combo->items().size() == 2);
+
+    output_combo->set_selected(1);
+    REQUIRE(applied.audio_device_id == "usb-out");
+    REQUIRE(applied.sample_rate == 48000.0);
+    REQUIRE(applied.buffer_size == 128);
+
+    sample_rate_combo->set_selected(1);
+    buffer_size_combo->set_selected(1);
+    input_combo->set_selected(1);
+
+    REQUIRE(applied.audio_device_id == "usb-out");
+    REQUIRE(applied.input_channels == 1);
+    REQUIRE(applied.sample_rate == 96000.0);
+    REQUIRE(applied.buffer_size == 256);
+
+    auto lists = descendants<ListBox>(*midi_tab);
+    REQUIRE(lists.size() == 1);
+    REQUIRE(lists[0]->items().size() == 2);
+    lists[0]->set_selected(1);
+
+    REQUIRE(applied.midi_input_id == "pads");
+    REQUIRE(apply_calls >= 5);
+}
+
+TEST_CASE("SettingsPanel refreshes hotplug lists and test tone callbacks",
+          "[standalone][settings][issue-493]") {
+    StubAudioSystem audio;
+    audio.devices = {
+        {.id = "builtin-out",
+         .name = "Built-in Output",
+         .max_output_channels = 2,
+         .sample_rates = {44100.0},
+         .buffer_sizes = {64},
+         .is_default_output = true},
+    };
+
+    StubMidiSystem midi;
+    midi.inputs = {{.id = "keys", .name = "Keys", .is_input = true}};
+
+    SettingsPanel panel;
+    panel.bind_systems(&audio, &midi);
+
+    auto& tabs = settings_tabs(panel);
+    auto* audio_tab = tabs.child_at(0);
+    auto* midi_tab = tabs.child_at(1);
+    REQUIRE(audio_tab != nullptr);
+    REQUIRE(midi_tab != nullptr);
+
+    REQUIRE(audio.enumerate_calls == 1);
+    REQUIRE(midi.enumerate_calls == 1);
+
+    audio.devices.push_back({
+        .id = "usb-out",
+        .name = "USB Output",
+        .max_output_channels = 2,
+        .sample_rates = {48000.0},
+        .buffer_sizes = {128},
+    });
+    midi.inputs.push_back({.id = "pads", .name = "Pads", .is_input = true});
+
+    audio.fire_device_change();
+    midi.fire_port_change();
+    panel.poll();
+
+    auto combos = descendants<ComboBox>(*audio_tab);
+    auto lists = descendants<ListBox>(*midi_tab);
+    REQUIRE(combos.size() >= 5);
+    REQUIRE(lists.size() == 1);
+    REQUIRE(audio.enumerate_calls == 2);
+    REQUIRE(midi.enumerate_calls == 2);
+    REQUIRE(combos[0]->items().size() == 2);
+    REQUIRE(lists[0]->items().size() == 2);
+
+    TestSignalConfig last_signal;
+    int signal_calls = 0;
+    panel.set_callbacks(SettingsPanelCallbacks{
+        .on_test_signal_changed = [&](const TestSignalConfig& cfg) {
+            last_signal = cfg;
+            ++signal_calls;
+        },
+    });
+
+    auto toggles = descendants<Toggle>(*audio_tab);
+    REQUIRE(toggles.size() == 1);
+    toggles[0]->on_mouse_down({0, 0});
+
+    REQUIRE(signal_calls == 1);
+    REQUIRE(last_signal.type == TestSignalType::sine);
+    REQUIRE(last_signal.sine_frequency_hz == 440.0f);
+    REQUIRE(last_signal.sine_amplitude == 0.5f);
+
+    combos[4]->set_selected(2);
+    REQUIRE(signal_calls == 2);
+    REQUIRE(last_signal.sine_frequency_hz == 880.0f);
 }
 
 TEST_CASE("Standalone editor chrome keeps the editor root when settings are hidden",
