@@ -1508,6 +1508,52 @@ not been pushed, PR'd, or dispatched to Namespace.
 
 ## Cancelled/Paused Runs
 
+Reconciliation on 2026-05-02: GitHub now reports the older paused rows below as merged. Treat this reconciliation block as canonical for these PRs; the archival rows are retained only for the original cancelled-run IDs.
+
+| PR | Branch | Merge commit |
+| --- | --- | --- |
+| #1045 | `feature/events-service-discovery-coverage-642-next6` | `2e4a0ed2e2567bf8d2ae734c2f9df184e05997b0` |
+| #1051 | `feature/signal-poly-math-coverage-645` | `8f038e9b8150aa4514780d61948039d6aac9cb92` |
+| #1062 | `codex/coverage-midi-edge-644` | `2fbe9a6ce7a2b652589d327f69184a6889cf95d9` |
+| #1066 | `feature/signal-filter-meter-coverage-645` | `7b78de802f382564d2cbde69ea1ea74a57dde31e` |
+| #1071 | `feature/background-scanner-restart-coverage-493` | `160e76ec7c86df258bd7c90438da952f0b1f671a` |
+| #1074 | `feature/audio-format-registry-compressed-640` | `5898bf0571631347078a402a0f50d1e5a334da78` |
+| #1075 | `feature/cli-host-coverage-643` | `c34f11f7138cce81e2135c39a875125dff434508` |
+| #1078 | `feature/runtime-gzip-header-coverage-641` | `81be4ee00e02e367feec32c3c6885d0785179efa` |
+| #1079 | `feature/volume-detector-coverage-642` | `da004f90e21c99461891817bc7149d5db58d34b9` |
+| #1082 | `feature/render-loop-coverage-646` | `b0903cd8ed4b50e29ea6ec0220145573b3361a28` |
+| #1083 | `feature/platform-registry-coverage-640` | `df3ca99d8052d6a2a02661bc997cba5a824b99e6` |
+| #1084 | `feature/runtime-text-diff-coverage-641` | `66c74123430ad107721780443a18b2e08c7eb033` |
+| #1085 | `feature/audio-load-measurer-coverage-640` | `5aac29496436a4cd62ecb0e5ebbbc51ff7b3dd79` |
+| #1086 | `feature/audio-hotplug-coverage-640` | `0300ba207577c50cb2bbdd94c77a5639a590b978` |
+| #1088 | `feature/events-async-helper-coverage-642` | `80139f392047ef3561d23ae10b545059f91d1619` |
+| #1096 | `feature/render-pure-coverage-646` | `c544a9ef221b491ced9124ed1c9e69dd72db3f2d` |
+| #1097 | `feature/view-toolbar-coverage-493` | `cd0f141fa708f4b205a86a161733de1a36cd8bbd` |
+| #1102 | `feature/midi-running-status-coverage-645-next` | `a412d3c883161d0207cdc7f9859b8a5afd500db4` |
+| #1104 | `feature/cli-create-coverage-643` | `f46c83f5848d2f406d62ed743b4f4044ffc02f94` |
+| #1112 | `feature/state-properties-coverage-641-next2` | `fef94b10e89c7f555d57f07420d76f4286b4c970` |
+| #1113 | `feature/runtime-expression-coverage-641-next` | `93c2aea2bd75f72ac946d88e1ad4962bcca9c4f9` |
+| #1115 | `feature/runtime-license-analytics-coverage-641-next` | `daa0aa70442744c9452cd972a2c53b41b8459997` |
+| #1116 | `feature/signal-interpolator-coverage-645-next` | `a100d78830bff6d9089ec3562a2029233ba8188a` |
+| #1117 | `feature/lcov-cobertura-coverage-643-next` | `202943e61da7908d92ca8d7bbc40d8b09db841c4` |
+| #1119 | `feature/state-undo-history-coverage-641-next` | `0bf8f64aeb8b5e6d57871d1070bfbd832e3590f1` |
+| #1120 | `feature/descriptor-validation-coverage-493-next` | `dba48cb3f53c6ca8ccdd6cfa094033c9594e66cf` |
+| #1123 | `feature/host-scan-cache-coverage-493-next` | `57ac9d3c3a70feb77926984deba225baaf7b6492` |
+| #1125 | `feature/view-asset-manager-coverage-493-next` | `f1db8c29cc41924e5b1db34e7c4e160983136bbb` |
+| #1129 | `feature/midi-sysex-accumulator-coverage-645-next` | `a5ae96aa067c31b5efd0079dd620222f08fb357f` |
+| #1131 | `feature/audio-window-enumerator-coverage-640-next` | `0f4d38f6c30724bdcf2597e4bb30f4df46337d35` |
+| #1132 | `codex/midi-sysex-sidecar-tests` | `3d7fa34f380da6d5e0b98c91ecea7105b97ba811` |
+| #1133 | `feature/audio-channel-set-coverage-640-next` | `e1a22a1ffd93dc1cd51039d63985b522fc5cb655` |
+| #1134 | `codex/coverage-phase3-tranche-20260430095455` | `a01ca7410faa5a6cd61766f10fa5aff4f3649202` |
+| #1135 | `feature/signal-processor-chain-reset-coverage-645` | `44e67d52cbfc1970c3f3b3c133f98db6bdedba0c` |
+| #1136 | `feature/package-registry-cache-fallback-643-next` | `caf93e5f835f96ab19eadb4a6f056db54f463893` |
+| #1137 | `feature/audio-platform-helper-coverage-640-next` | `ea731cbf365ca109726014d11dd50daca206bb40` |
+| #1138 | `feature/coverage-no-idle-guidance-641` | `44cff053284862b498a177139a8499ac514612e1` |
+| #1139 | `codex/events-phase3-coverage-tranche` | `d701d4ae8d45753f8b5de60b24034f7a38923a2d` |
+| #1141 | `feature/ship-appcast-coverage-644-next` | `49136be956d7b24fc77717fa8c48774b56c51422` |
+| #1142 | `codex/package-tools-coverage-643` | `ed34a23d9e4d734dd75d22542f4046b5096fe8bb` |
+| #1143 | `feature/render-compute-coverage-646` | `d36fddc2cd9f56053aff6768739d02225e023201` |
+
 | PR | State | Branch | Head | Runs | Title |
 | --- | --- | --- | --- | --- | --- |
 | #1045 | UNKNOWN | `feature/events-service-discovery-coverage-642-next6` | `5783c552714e` | `Build and Test 25168056508`<br>`Coverage 25168033097`<br>`Sanitizer Tests 25168032974`<br>`Build and Test 25168032955` | test(events): cover service discovery edge paths |
