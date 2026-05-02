@@ -97,6 +97,79 @@ class MkdocsHooksTests(unittest.TestCase):
             ],
         )
 
+    def test_on_pre_build_skips_missing_docs_generate_check(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            missing_docs_generate = root / "docs_generate.py"
+            consistency = root / "check-docs-consistency.py"
+            consistency.write_text("# fake\n", encoding="utf-8")
+            calls: list[tuple[str, list[str]]] = []
+
+            with mock.patch.object(mh, "_DOCS_GENERATE", missing_docs_generate), \
+                 mock.patch.object(mh, "_CONSISTENCY", consistency), \
+                 mock.patch.object(
+                     mh,
+                     "_run_check",
+                     side_effect=lambda label, cmd: calls.append((label, cmd)),
+                 ):
+                mh.on_pre_build({})
+
+        self.assertEqual(
+            calls,
+            [
+                (
+                    "check-docs-consistency.py",
+                    [sys.executable, str(consistency)],
+                ),
+            ],
+        )
+
+    def test_on_pre_build_skips_missing_consistency_check(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            docs_generate = root / "docs_generate.py"
+            missing_consistency = root / "check-docs-consistency.py"
+            docs_generate.write_text("# fake\n", encoding="utf-8")
+            calls: list[tuple[str, list[str]]] = []
+
+            with mock.patch.object(mh, "_DOCS_GENERATE", docs_generate), \
+                 mock.patch.object(mh, "_CONSISTENCY", missing_consistency), \
+                 mock.patch.object(
+                     mh,
+                     "_run_check",
+                     side_effect=lambda label, cmd: calls.append((label, cmd)),
+                 ):
+                mh.on_pre_build({})
+
+        self.assertEqual(
+            calls,
+            [
+                (
+                    "docs_generate.py check",
+                    [sys.executable, str(docs_generate), "check"],
+                ),
+            ],
+        )
+
+    def test_on_pre_build_skips_when_checks_are_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+
+            with mock.patch.object(mh, "_DOCS_GENERATE", root / "docs_generate.py"), \
+                 mock.patch.object(mh, "_CONSISTENCY", root / "check-docs-consistency.py"), \
+                 mock.patch.object(mh, "_run_check") as run_check:
+                mh.on_pre_build({})
+
+        run_check.assert_not_called()
+
+    def test_run_check_returns_after_successful_process(self) -> None:
+        succeeded = subprocess.CompletedProcess(args=["fake"], returncode=0)
+
+        with mock.patch.object(mh.subprocess, "run", return_value=succeeded) as run:
+            mh._run_check("fake check", ["python3", "fake.py"])
+
+        run.assert_called_once_with(["python3", "fake.py"], cwd=mh._REPO_ROOT)
+
     def test_run_check_raises_system_exit_on_failed_process(self) -> None:
         failed = subprocess.CompletedProcess(args=["fake"], returncode=7)
 
