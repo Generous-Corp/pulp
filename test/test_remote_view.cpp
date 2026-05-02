@@ -9,7 +9,9 @@
 
 #include <atomic>
 #include <chrono>
+#include <string>
 #include <thread>
+#include <vector>
 
 using namespace pulp;
 
@@ -136,6 +138,92 @@ TEST_CASE("RemoteViewSession - host set_parameter notifies remote", "[remote_vie
     REQUIRE(last_payload.find("1") != std::string::npos);
 
     bridge.detach_remote(session);
+}
+
+TEST_CASE("RemoteViewSession - host get_parameter reads remote result", "[remote_view]") {
+    StubProcessor p;
+    state::StateStore store;
+    p.set_state_store(&store);
+    p.define_parameters(store);
+
+    format::ViewBridge bridge(p, store);
+    REQUIRE(bridge.open());
+
+    auto [host_chan, remote_chan] = runtime::MemoryMessageChannel::make_pair();
+    runtime::JsonRpcPeer remote_peer(*remote_chan);
+
+    std::string request_payload;
+    remote_peer.register_method("view.param_get",
+        [&](std::string_view params) -> runtime::JsonRpcResult {
+            request_payload = std::string{params};
+            return runtime::JsonRpcResult::ok(R"({"normalized":0.625})");
+        });
+
+    auto* session = bridge.attach_remote_channel(std::move(host_chan));
+    REQUIRE(session != nullptr);
+
+    auto value = session->get_parameter(1);
+    REQUIRE(value.has_value());
+    REQUIRE(*value == Catch::Approx(0.625f));
+    REQUIRE(request_payload.find("\"id\"") != std::string::npos);
+    REQUIRE(request_payload.find("1") != std::string::npos);
+
+    bridge.detach_remote(session);
+}
+
+TEST_CASE("RemoteViewSession - malformed remote param sets are ignored", "[remote_view]") {
+    StubProcessor p;
+    state::StateStore store;
+    p.set_state_store(&store);
+    p.define_parameters(store);
+
+    format::ViewBridge bridge(p, store);
+    REQUIRE(bridge.open());
+
+    auto [host_chan, remote_chan] = runtime::MemoryMessageChannel::make_pair();
+    runtime::JsonRpcPeer remote_peer(*remote_chan);
+
+    auto* session = bridge.attach_remote_channel(std::move(host_chan));
+    REQUIRE(session != nullptr);
+
+    store.set_normalized(1, 0.25f);
+    REQUIRE(store.get_normalized(1) == Catch::Approx(0.25f));
+
+    REQUIRE(remote_peer.notify("view.param_set", "not-json"));
+    REQUIRE(remote_peer.notify("view.param_set", R"({"id":1})"));
+    REQUIRE(remote_peer.notify("view.param_set", R"({"id":"1","normalized":0.9})"));
+    REQUIRE(remote_peer.notify("view.param_set", R"({"id":1,"normalized":"0.9"})"));
+    REQUIRE(store.get_normalized(1) == Catch::Approx(0.25f));
+
+    bridge.detach_remote(session);
+}
+
+TEST_CASE("RemoteViewSession - remote close shuts guards", "[remote_view]") {
+    StubProcessor p;
+    state::StateStore store;
+    p.set_state_store(&store);
+    p.define_parameters(store);
+
+    format::ViewBridge bridge(p, store);
+    REQUIRE(bridge.open());
+
+    auto [host_chan, remote_chan] = runtime::MemoryMessageChannel::make_pair();
+    runtime::JsonRpcPeer remote_peer(*remote_chan);
+
+    auto* session = bridge.attach_remote_channel(std::move(host_chan));
+    REQUIRE(session != nullptr);
+    REQUIRE(session->is_open());
+
+    REQUIRE(remote_peer.notify("view.close", R"({"reason":"remote_detach"})"));
+    REQUIRE(wait_for([&]{ return !session->is_open(); }));
+
+    REQUIRE_FALSE(session->set_parameter(1, 0.5f));
+    REQUIRE_FALSE(session->get_parameter(1).has_value());
+    REQUIRE_FALSE(session->send_input(R"({"kind":"click"})"));
+
+    session->close();
+    REQUIRE_FALSE(session->is_open());
+    REQUIRE(bridge.detach_remote(session));
 }
 
 TEST_CASE("RemoteViewSession - close detaches and closes underlying channel", "[remote_view]") {
