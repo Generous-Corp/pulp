@@ -1259,4 +1259,180 @@ TEST_CASE("CoreGraphicsCanvas::concat_transform scales + translates",
 
     REQUIRE(reference == via_concat);
 }
+
+// pulp #1322 — CoreGraphicsCanvas must implement Canvas2D-style path
+// building. The base Canvas defaults are no-ops, so a JS bundle that drives
+// draw via beginPath/moveTo/lineTo/closePath/fillPath silently produced
+// nothing on the CPU paint path used by Pulp's standalone host
+// (run_with_editor(use_gpu=false)), even though the bridge dutifully
+// dispatched ~1800 commands per frame. Spectr's FilterBank canvas is the
+// canonical repro — see issue thread.
+//
+// The test draws a 4-vertex diamond polygon via beginPath/moveTo/lineTo*3/
+// closePath/fill_current_path and asserts that filled red pixels actually
+// appear in the destination bitmap. Without the override the buffer stays
+// fully zero and the count of red pixels is 0.
+TEST_CASE("CoreGraphicsCanvas Canvas2D path API fills (issue 1322)",
+          "[canvas][cg][issue-1322]") {
+    constexpr int W = 32;
+    constexpr int H = 32;
+    std::vector<uint8_t> pixels(static_cast<size_t>(W) * H * 4u, 0u);
+    auto cs = CGColorSpaceCreateDeviceRGB();
+    REQUIRE(cs != nullptr);
+    const uint32_t bitmap_info =
+        static_cast<uint32_t>(kCGImageAlphaPremultipliedLast) |
+        static_cast<uint32_t>(kCGBitmapByteOrder32Big);
+    CGContextRef ctx = CGBitmapContextCreate(
+        pixels.data(), W, H, 8, W * 4u, cs, bitmap_info);
+    CGColorSpaceRelease(cs);
+    REQUIRE(ctx != nullptr);
+
+    {
+        CoreGraphicsCanvas canvas(ctx, static_cast<float>(W),
+                                  static_cast<float>(H));
+        canvas.set_fill_color(Color::rgba(1.0f, 0.0f, 0.0f, 1.0f));
+        // Diamond covering the centre of the bitmap (16,8)→(24,16)→(16,24)→(8,16).
+        canvas.begin_path();
+        canvas.move_to(16.0f, 8.0f);
+        canvas.line_to(24.0f, 16.0f);
+        canvas.line_to(16.0f, 24.0f);
+        canvas.line_to(8.0f, 16.0f);
+        canvas.close_path();
+        canvas.fill_current_path();
+    }
+    CGContextRelease(ctx);
+
+    int red_pixels = 0;
+    for (size_t i = 0; i + 3 < pixels.size(); i += 4) {
+        if (pixels[i] >= 200 && pixels[i + 1] <= 60 &&
+            pixels[i + 2] <= 60 && pixels[i + 3] >= 200) {
+            ++red_pixels;
+        }
+    }
+    INFO("red_pixels=" << red_pixels);
+    REQUIRE(red_pixels >= 16);  // diamond covers ~64 pixels at this size
+}
+
+// pulp #1322 — beziers (quadTo, cubicTo) must also accumulate into the
+// Canvas2D path. Same shape coverage check as the diamond test.
+TEST_CASE("CoreGraphicsCanvas Canvas2D path quad/cubic curves fill (issue 1322)",
+          "[canvas][cg][issue-1322]") {
+    constexpr int W = 32;
+    constexpr int H = 32;
+    std::vector<uint8_t> pixels(static_cast<size_t>(W) * H * 4u, 0u);
+    auto cs = CGColorSpaceCreateDeviceRGB();
+    const uint32_t bitmap_info =
+        static_cast<uint32_t>(kCGImageAlphaPremultipliedLast) |
+        static_cast<uint32_t>(kCGBitmapByteOrder32Big);
+    CGContextRef ctx = CGBitmapContextCreate(
+        pixels.data(), W, H, 8, W * 4u, cs, bitmap_info);
+    CGColorSpaceRelease(cs);
+    REQUIRE(ctx != nullptr);
+
+    {
+        CoreGraphicsCanvas canvas(ctx, static_cast<float>(W),
+                                  static_cast<float>(H));
+        canvas.set_fill_color(Color::rgba(0.0f, 0.0f, 1.0f, 1.0f));
+        canvas.begin_path();
+        canvas.move_to(8.0f, 16.0f);
+        canvas.quad_to(16.0f, 4.0f, 24.0f, 16.0f);
+        canvas.cubic_to(20.0f, 24.0f, 12.0f, 24.0f, 8.0f, 16.0f);
+        canvas.close_path();
+        canvas.fill_current_path();
+    }
+    CGContextRelease(ctx);
+
+    int blue_pixels = 0;
+    for (size_t i = 0; i + 3 < pixels.size(); i += 4) {
+        if (pixels[i] <= 60 && pixels[i + 1] <= 60 &&
+            pixels[i + 2] >= 200 && pixels[i + 3] >= 200) {
+            ++blue_pixels;
+        }
+    }
+    INFO("blue_pixels=" << blue_pixels);
+    REQUIRE(blue_pixels >= 16);
+}
+
+// pulp #1322 — Canvas2D path stroke must hit the destination too. Spectr
+// also draws spectrum traces via beginPath/moveTo/lineTo*N/strokePath, and
+// stroke_current_path was a no-op on CG before this fix.
+TEST_CASE("CoreGraphicsCanvas Canvas2D path stroke draws (issue 1322)",
+          "[canvas][cg][issue-1322]") {
+    constexpr int W = 32;
+    constexpr int H = 32;
+    std::vector<uint8_t> pixels(static_cast<size_t>(W) * H * 4u, 0u);
+    auto cs = CGColorSpaceCreateDeviceRGB();
+    const uint32_t bitmap_info =
+        static_cast<uint32_t>(kCGImageAlphaPremultipliedLast) |
+        static_cast<uint32_t>(kCGBitmapByteOrder32Big);
+    CGContextRef ctx = CGBitmapContextCreate(
+        pixels.data(), W, H, 8, W * 4u, cs, bitmap_info);
+    CGColorSpaceRelease(cs);
+    REQUIRE(ctx != nullptr);
+
+    {
+        CoreGraphicsCanvas canvas(ctx, static_cast<float>(W),
+                                  static_cast<float>(H));
+        canvas.set_stroke_color(Color::rgba(0.0f, 1.0f, 0.0f, 1.0f));
+        canvas.set_line_width(2.0f);
+        canvas.begin_path();
+        canvas.move_to(2.0f, 16.0f);
+        canvas.line_to(30.0f, 16.0f);
+        canvas.stroke_current_path();
+    }
+    CGContextRelease(ctx);
+
+    int green_pixels = 0;
+    for (size_t i = 0; i + 3 < pixels.size(); i += 4) {
+        if (pixels[i] <= 60 && pixels[i + 1] >= 200 &&
+            pixels[i + 2] <= 60 && pixels[i + 3] >= 200) {
+            ++green_pixels;
+        }
+    }
+    INFO("green_pixels=" << green_pixels);
+    REQUIRE(green_pixels >= 24);  // a 28-pixel-wide line at width=2
+}
+
+// pulp #1322 — set_fill_gradient_linear must paint a real gradient on CG;
+// the base Canvas fallback collapses to "set fill color = colors[0]" which
+// produces a single colour fill (Spectr's spectrum bg is gradient-driven).
+// Verify that two different colors actually appear in the output bitmap.
+TEST_CASE("CoreGraphicsCanvas linear gradient paints multiple colors (issue 1322)",
+          "[canvas][cg][issue-1322]") {
+    constexpr int W = 64;
+    constexpr int H = 16;
+    std::vector<uint8_t> pixels(static_cast<size_t>(W) * H * 4u, 0u);
+    auto cs = CGColorSpaceCreateDeviceRGB();
+    const uint32_t bitmap_info =
+        static_cast<uint32_t>(kCGImageAlphaPremultipliedLast) |
+        static_cast<uint32_t>(kCGBitmapByteOrder32Big);
+    CGContextRef ctx = CGBitmapContextCreate(
+        pixels.data(), W, H, 8, W * 4u, cs, bitmap_info);
+    CGColorSpaceRelease(cs);
+    REQUIRE(ctx != nullptr);
+
+    {
+        CoreGraphicsCanvas canvas(ctx, static_cast<float>(W),
+                                  static_cast<float>(H));
+        Color colors[2] = {
+            Color::rgba(1.0f, 0.0f, 0.0f, 1.0f),
+            Color::rgba(0.0f, 0.0f, 1.0f, 1.0f),
+        };
+        float positions[2] = {0.0f, 1.0f};
+        canvas.set_fill_gradient_linear(0, 0, static_cast<float>(W), 0,
+                                         colors, positions, 2);
+        canvas.fill_rect(0, 0, static_cast<float>(W), static_cast<float>(H));
+    }
+    CGContextRelease(ctx);
+
+    bool saw_red_dominant = false;
+    bool saw_blue_dominant = false;
+    for (size_t i = 0; i + 3 < pixels.size(); i += 4) {
+        if (pixels[i] >= 200 && pixels[i + 2] <= 60) saw_red_dominant = true;
+        if (pixels[i] <= 60 && pixels[i + 2] >= 200) saw_blue_dominant = true;
+    }
+    REQUIRE(saw_red_dominant);
+    REQUIRE(saw_blue_dominant);
+}
+
 #endif  // __APPLE__
