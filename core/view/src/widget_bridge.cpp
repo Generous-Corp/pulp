@@ -1724,7 +1724,13 @@ void WidgetBridge::register_api() {
                 return choc::value::Value();
             }
         }
-        // Create the appropriate widget type based on HTML tag
+        // Create the appropriate widget type based on HTML tag.
+        //
+        // pulp #1147 — this fast-path bypasses the JS-side `_ensureNative`
+        // for performance + QuickJS stack reasons, but it MUST mirror the
+        // tag→widget mapping in `web-compat-element.js` or web-compat
+        // semantics drift between the createElement+appendChild path and
+        // the React-style commit path that goes through here.
         std::unique_ptr<View> child;
         if (tag == "span" || tag == "p" || tag == "label" ||
             tag == "h1" || tag == "h2" || tag == "h3" ||
@@ -1745,6 +1751,11 @@ void WidgetBridge::register_api() {
             if (tag == "div" || tag == "section" || tag == "article" || tag == "aside" ||
                 tag == "header" || tag == "footer" || tag == "nav" || tag == "main")
                 v->flex().direction = FlexDirection::column;
+            // pulp #1147 — <svg> is a layout-leaf media element. Default
+            // direction stays column so child <path>/<g> attaches; the
+            // presentational width/height attributes are replayed via
+            // setFlex() on the JS side (see web-compat-element.js
+            // setAttribute() path).
             child = std::move(v);
         }
         widgets_[childId] = child.get();

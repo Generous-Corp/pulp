@@ -116,3 +116,20 @@ elseif(UNIX)
     target_link_options(pulp-test-headless-frame-pump PRIVATE -Wl,-z,stacksize=16777216)
 endif()
 catch_discover_tests(pulp-test-headless-frame-pump)
+
+# #1147 regression: nested-flex popover row template — inline <svg> with
+# width/height attributes must reserve layout space, and a <span> with
+# nested flex children must lay out those children instead of clobbering
+# them with the parent's text-only intrinsic measurement.
+add_executable(pulp-test-popover-row-template-1147 test_popover_row_template_1147.cpp)
+target_link_libraries(pulp-test-popover-row-template-1147 PRIVATE pulp::view Catch2::Catch2WithMain)
+target_include_directories(pulp-test-popover-row-template-1147 PRIVATE ${WEBCOMPAT_INCLUDE_DIR})
+target_compile_definitions(pulp-test-popover-row-template-1147 PRIVATE
+    PULP_TEST_SOURCE_DIR="${CMAKE_SOURCE_DIR}/test"
+)
+if(APPLE)
+    target_link_options(pulp-test-popover-row-template-1147 PRIVATE -Wl,-stack_size,0x2000000)
+elseif(UNIX)
+    target_link_options(pulp-test-popover-row-template-1147 PRIVATE -Wl,-z,stacksize=16777216)
+endif()
+catch_discover_tests(pulp-test-popover-row-template-1147)

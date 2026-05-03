@@ -56,6 +56,15 @@ Element.prototype._ensureNative = function() {
         createCol(id, "");
     } else if (tag === "span" || tag === "p" || tag === "label") {
         createLabel(id, "", "");
+    } else if (tag === "svg") {
+        // pulp #1147 — inline SVGs in web-compat code (Spectr's mode-icon
+        // popover rows, React-rendered icons) are leaf containers. We
+        // don't ship an SVG renderer, but we MUST honor the HTML
+        // `width`/`height` attributes so the flex parent reserves layout
+        // space. Without this the row collapses to height:0 and the
+        // sibling text paints over a blank gutter. Width/height attribute
+        // replay happens in the shared block below.
+        createCol(id, "");
     } else if (tag === "h1") {
         createLabel(id, "", "");
         setFontSize(id, 32); setFontWeight(id, 700);
@@ -110,7 +119,35 @@ Element.prototype._ensureNative = function() {
         // Unknown tag — create as container
         createCol(id, "");
     }
+
+    // pulp #1147 — presentational `width`/`height` HTML attributes are
+    // replayed via __replayMediaAttributes__ once the native widget is
+    // mounted (called from appendChild / insertBefore / _ensureNative).
+    if (typeof __replayMediaAttributes__ === "function") {
+        __replayMediaAttributes__(this);
+    }
 };
+
+// pulp #1147 — shared helper that maps presentational HTML attributes
+// (width, height) on layout-leaf media tags (<svg>, <img>, <canvas>,
+// <video>) to flex preferred sizing. Idempotent — safe to call from
+// _ensureNative (createElement-then-flushAll path) AND from appendChild
+// (React/JSX setAttribute-before-mount path). Inline `style.width` still
+// wins because `_flushAll()` runs AFTER this replay in dom-ops.
+function __replayMediaAttributes__(el) {
+    if (!el || !el._nativeCreated || !el._attributes) return;
+    var tag = el.tagName.toLowerCase();
+    if (tag !== "svg" && tag !== "img" && tag !== "canvas" && tag !== "video") return;
+    if (typeof setFlex !== "function") return;
+    var w = el._attributes.width;
+    var h = el._attributes.height;
+    if (w !== undefined) {
+        var pw = parseFloat(w); if (pw === pw) setFlex(el._id, "width", pw);
+    }
+    if (h !== undefined) {
+        var ph = parseFloat(h); if (ph === ph) setFlex(el._id, "height", ph);
+    }
+}
 
 // ── nodeType / nodeName (DOM Level 1 reconciler hooks) ──────────────────────
 //
@@ -389,6 +426,20 @@ Element.prototype.setAttribute = function(name, value) {
     else if (name === "class") this.className = value;
     else if (name.indexOf("data-") === 0) {
         this._dataset[_camelCase(name.slice(5))] = value;
+    }
+    // pulp #1147 — HTML `width`/`height` attributes on layout-leaf
+    // elements (<svg>, <img>, <canvas>, <video>) are presentational
+    // dimensions per the HTML spec. JSX/React encodes inline SVG sizes
+    // this way (`<svg width="28" height="20">`), so we MUST translate
+    // these to flex preferred sizing or the element collapses to 0
+    // and its row siblings have no anchor. The shared helper handles
+    // both paths (createElement-then-mount and setAttribute-before-mount)
+    // and is a no-op when the widget isn't created yet — appendChild
+    // re-runs the replay once the native node exists.
+    else if (name === "width" || name === "height") {
+        if (typeof __replayMediaAttributes__ === "function") {
+            __replayMediaAttributes__(this);
+        }
     }
 };
 
@@ -694,6 +745,12 @@ function _reparentNative(child, parentId) {
                tag === "h1" || tag === "h2" || tag === "h3" ||
                tag === "h4" || tag === "h5" || tag === "h6") {
         createLabel(id, child._textContent || "", parentId);
+    } else if (tag === "svg") {
+        // pulp #1147 — same reasoning as _ensureNative: keep the
+        // SVG node as a layout container so child elements still
+        // attach. The width/height attributes are replayed by the
+        // shared helper at the end of this function.
+        createCol(id, parentId);
     } else if (tag === "button") {
         createToggleButton(id, parentId);
     } else if (tag === "input") {
@@ -724,6 +781,12 @@ function _reparentNative(child, parentId) {
     }
 
     child._nativeCreated = true;
+
+    // pulp #1147 — replay presentational attributes after the native
+    // node is recreated so the new flex sizing matches the original.
+    if (typeof __replayMediaAttributes__ === "function") {
+        __replayMediaAttributes__(child);
+    }
 
     // Recursively reparent children
     for (var i = 0; i < child._children.length; i++) {

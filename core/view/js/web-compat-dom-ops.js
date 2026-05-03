@@ -38,6 +38,17 @@ if (!Element.prototype.appendChild ||
         __domAppend(this._id, child._id, child.tagName.toLowerCase());
         child._nativeCreated = true;
         if (child._textContent) setText(child._id, child._textContent);
+        // pulp #1147 — replay presentational `width`/`height` HTML
+        // attributes that were captured before mount. React/JSX commits
+        // setAttribute() before appendChild(), and the C++ __domAppend
+        // path doesn't see those attributes — so a fresh SVG arrives
+        // here as 0×0 and the row collapses. Style flushAll() doesn't
+        // cover attribute paths, only `style.*`. Apply only to layout-
+        // leaf media tags so semantic block elements aren't surprised
+        // by stale presentational hints.
+        if (typeof __replayMediaAttributes__ === "function") {
+            __replayMediaAttributes__(child);
+        }
         child.style._flushAll();
         child._reapplyStylesheets();
         return child;
