@@ -8,9 +8,14 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
-<a id="v0692"></a>
-## [0.70.0]
+<a id="v0700"></a>
+## [0.70.0] - 2026-05-03
 
+- fix(view, ci): Codex P2 sweep — 4 follow-ups bundled (closes #1171) ([#1296](https://github.com/danielraffel/pulp/pull/1296))
+- fix(pulp-react): externalize react/reconciler/scheduler in dist build (pulp #1292) ([#1295](https://github.com/danielraffel/pulp/pull/1295))
+- feat(view): @pulp/react SvgPath intrinsic (pulp #994) ([#1291](https://github.com/danielraffel/pulp/pull/1291))
+
+<a id="v0692"></a>
 ## [0.69.2] - 2026-05-03
 
 - fix(view): ScrollView::hit_test honors pointer_events (Codex P1, closes #1170) ([#1289](https://github.com/danielraffel/pulp/pull/1289))
@@ -1141,6 +1146,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.70.0]: https://github.com/danielraffel/pulp/releases/tag/v0.70.0
 [0.69.2]: https://github.com/danielraffel/pulp/releases/tag/v0.69.2
 [0.69.1]: https://github.com/danielraffel/pulp/releases/tag/v0.69.1
 [0.69.0]: https://github.com/danielraffel/pulp/releases/tag/v0.69.0
