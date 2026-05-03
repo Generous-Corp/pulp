@@ -1519,6 +1519,14 @@ add_executable(pulp-test-canvas-widget test_canvas_widget.cpp)
 target_link_libraries(pulp-test-canvas-widget PRIVATE pulp::view Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-canvas-widget)
 
+# pulp #964 — Canvas2D JS-shim coverage. Drives the full
+# web-compat-canvas.js → bridge → CanvasWidget path so a regression
+# that drops a save/restore/setTransform/createLinearGradient method
+# (and silently aborts FilterBank-style frame renders) gets caught.
+add_executable(pulp-test-canvas2d-shim test_canvas2d_shim.cpp)
+target_link_libraries(pulp-test-canvas2d-shim PRIVATE pulp::view Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-canvas2d-shim)
+
 # SvgPathWidget tests (issue-965)
 add_executable(pulp-test-svg-path-widget test_svg_path_widget.cpp)
 target_link_libraries(pulp-test-svg-path-widget PRIVATE pulp::view Catch2::Catch2WithMain)

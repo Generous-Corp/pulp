@@ -85,6 +85,11 @@ public:
     void clear_commands() { commands_.clear(); }
     void add_command(CanvasDrawCmd cmd) { commands_.push_back(std::move(cmd)); }
     size_t command_count() const { return commands_.size(); }
+    /// pulp #964 — accessor for tests asserting on the recorded JS command
+    /// stream. Read-only; the bridge owns mutation via add_command /
+    /// clear_commands. Callers must not retain the reference past the next
+    /// add_command / clear_commands call.
+    const std::vector<CanvasDrawCmd>& commands() const { return commands_; }
     bool last_native_gpu_texture_draw_succeeded() const { return last_native_gpu_texture_draw_succeeded_; }
     void set_native_gpu_texture_provider(NativeGpuTextureProvider provider) {
         native_gpu_texture_provider_ = std::move(provider);
