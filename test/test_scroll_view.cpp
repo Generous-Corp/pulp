@@ -153,3 +153,66 @@ TEST_CASE("ScrollView::hit_test box-none also suppresses scrollbar self-target (
     // and return self; box_none must suppress that.
     REQUIRE(sv.hit_test({195, 50}) == nullptr);
 }
+
+// ── pulp #1148 slice (a) — symmetric overflow:visible hit-test extension ──
+//
+// ScrollView::hit_test had the same right/down-only asymmetry as
+// View::hit_test. Lock the symmetric ±500px slack here too so left- or
+// up-extending popovers anchored inside a scroll container hit-test
+// correctly.
+//
+// Same fixture pattern as test_view.cpp: place a popover grandchild
+// outside an overflow:visible container in each direction, assert the
+// ScrollView routes the click into the popover via the symmetric slack.
+namespace {
+struct ScrollPopoverFixture {
+    ScrollView sv;
+    View* container{nullptr};
+    View* popover{nullptr};
+
+    ScrollPopoverFixture(float dx, float dy) {
+        sv.set_bounds({0, 0, 2000, 2000});
+        sv.set_content_size({2000, 2000});
+        auto c = std::make_unique<View>();
+        c->set_bounds({600, 600, 100, 100});
+        c->set_overflow(View::Overflow::visible);
+        container = c.get();
+
+        auto p = std::make_unique<View>();
+        p->set_bounds({dx, dy, 50, 50});
+        popover = p.get();
+        c->add_child(std::move(p));
+        sv.add_child(std::move(c));
+    }
+};
+} // namespace
+
+TEST_CASE("ScrollView::hit_test extends overflow:visible 500px to the LEFT",
+          "[scrollview][hit_test][issue-1148][overflow-symmetric]") {
+    ScrollPopoverFixture f(-200, 25);
+    REQUIRE(f.sv.hit_test({425, 650}) == f.popover);
+}
+
+TEST_CASE("ScrollView::hit_test extends overflow:visible 500px to the RIGHT",
+          "[scrollview][hit_test][issue-1148][overflow-symmetric]") {
+    ScrollPopoverFixture f(200, 25);
+    REQUIRE(f.sv.hit_test({825, 650}) == f.popover);
+}
+
+TEST_CASE("ScrollView::hit_test extends overflow:visible 500px UPWARD",
+          "[scrollview][hit_test][issue-1148][overflow-symmetric]") {
+    ScrollPopoverFixture f(25, -200);
+    REQUIRE(f.sv.hit_test({650, 425}) == f.popover);
+}
+
+TEST_CASE("ScrollView::hit_test extends overflow:visible 500px DOWNWARD",
+          "[scrollview][hit_test][issue-1148][overflow-symmetric]") {
+    ScrollPopoverFixture f(25, 200);
+    REQUIRE(f.sv.hit_test({650, 825}) == f.popover);
+}
+
+TEST_CASE("ScrollView::hit_test does NOT extend overflow:visible past 500px LEFT",
+          "[scrollview][hit_test][issue-1148][overflow-symmetric]") {
+    ScrollPopoverFixture f(-650, 25);
+    REQUIRE(f.sv.hit_test({0, 650}) != f.popover);
+}
