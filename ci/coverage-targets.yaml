@@ -48,6 +48,7 @@ tiers:
     line_target: 50
     paths:
       - core/events/**
+      - core/dsl/**          # pulp #1056 — DSL processor scaffolding (Faust wrapper headers)
       - core/runtime/**
       - core/state/**
       - core/canvas/**
