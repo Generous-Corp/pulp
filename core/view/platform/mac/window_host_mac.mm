@@ -209,6 +209,19 @@ static std::vector<uint8_t> capture_window_screencapture_png(NSWindow* window) {
     pulp::view::View* _focusedView;
 }
 
+- (instancetype)initWithFrame:(NSRect)frame {
+    self = [super initWithFrame:frame];
+    if (self) {
+        // pulp #1321: ensure the content view tracks the window's content rect
+        // so AppKit resizes our frame when the user drags the window edge.
+        // Without this, the view's bounds stay at the original frame and Yoga
+        // never reflows on resize.
+        self.autoresizesSubviews = YES;
+        self.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+    }
+    return self;
+}
+
 - (BOOL)isFlipped { return NO; }
 - (BOOL)acceptsFirstResponder { return YES; }
 - (BOOL)acceptsFirstMouse:(NSEvent*)e { (void)e; return YES; }
@@ -1024,6 +1037,20 @@ static pulp::view::KeyCode keyCodeFromNS(unsigned short code) {
     }
 }
 
+- (void)setFrameSize:(NSSize)newSize {
+    [super setFrameSize:newSize];
+    // pulp #1321: AppKit resizes us during a window resize. Push the new
+    // bounds into the root View immediately and relayout so hit testing,
+    // tracking-area updates, and the next paint all see the new geometry.
+    if (self.rootView) {
+        self.rootView->set_bounds({0, 0,
+            static_cast<float>(newSize.width),
+            static_cast<float>(newSize.height)});
+        self.rootView->layout_children();
+    }
+    [self setNeedsDisplay:YES];
+}
+
 - (void)dealloc {
     [self.animationTimer invalidate];
 }
@@ -1284,6 +1311,15 @@ public:
 
             delegate_ = [[PulpWindowDelegate alloc] init];
             delegate_.onResize = ^(float w, float h) {
+                // pulp #1321: belt-and-suspenders relayout — PulpView's
+                // setFrameSize: already pushes new bounds + relayouts when
+                // AppKit resizes the content view, but if a host changed
+                // the frame in some other path we still want the root view
+                // synced before the user's callback fires and before the
+                // next paint.
+                root_.set_bounds({0, 0, w, h});
+                root_.layout_children();
+                [view_ setNeedsDisplay:YES];
                 if (resize_callback_) {
                     resize_callback_(
                         static_cast<uint32_t>(std::max(0.0f, w)),
@@ -1764,6 +1800,12 @@ private:
                                    static_cast<uint32_t>(height),
                                    static_cast<float>(scale));
         }
+        // pulp #1321: relayout the root view synchronously so hit testing
+        // and any user resize callback both see the new geometry. paint_scene
+        // also calls set_bounds + layout_children, but that runs at the next
+        // vsync — too late for input handlers fired during the resize drag.
+        root_.set_bounds({0, 0, width, height});
+        root_.layout_children();
         if (resize_callback_) {
             resize_callback_(
                 static_cast<uint32_t>(std::max(0.0f, width)),

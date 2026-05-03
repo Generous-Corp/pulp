@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/catch_approx.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <pulp/view/frame_clock.hpp>
 #include <pulp/view/plugin_view_host.hpp>
@@ -1323,4 +1324,100 @@ TEST_CASE("View::paint_all routes background through path API when per-corner ra
         REQUIRE(rc.count(DrawCommand::Type::begin_path) >= 1);
         REQUIRE(rc.count(DrawCommand::Type::close_path) >= 1);
     }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// pulp #1321: window resize triggers root View Yoga relayout
+// ═══════════════════════════════════════════════════════════════════
+//
+// The macOS standalone window plumbs an NSWindow resize through to
+// PulpView::setFrameSize: and the PulpWindowDelegate's windowDidResize:
+// notification, both of which now call root.set_bounds(...) +
+// root.layout_children(). This Catch2 test exercises the same model
+// path that those AppKit hooks invoke, asserting that descendants
+// reflow when the root is given a new size.
+
+TEST_CASE("Window resize reflows Yoga layout (pulp #1321)",
+          "[view][layout][issue-1321]") {
+    View root;
+    root.flex().direction = FlexDirection::row;
+
+    auto child_a = std::make_unique<View>();
+    child_a->flex().flex_grow = 1.0f;
+    auto* child_a_ptr = child_a.get();
+    root.add_child(std::move(child_a));
+
+    auto child_b = std::make_unique<View>();
+    child_b->flex().flex_grow = 1.0f;
+    auto* child_b_ptr = child_b.get();
+    root.add_child(std::move(child_b));
+
+    // ── Initial layout at 1320×892 (Spectr default standalone size) ──
+    root.set_bounds({0, 0, 1320, 892});
+    root.layout_children();
+
+    REQUIRE(child_a_ptr->bounds().width == Catch::Approx(660.0f));
+    REQUIRE(child_b_ptr->bounds().width == Catch::Approx(660.0f));
+    REQUIRE(child_a_ptr->bounds().height == Catch::Approx(892.0f));
+
+    // ── Simulate the user dragging the window down to 800×500 ────────
+    // (matches the osascript repro in the issue body).
+    root.set_bounds({0, 0, 800, 500});
+    root.layout_children();
+
+    // Each flex:1 child must now occupy half of the new width and the
+    // full new height — i.e. Yoga reflowed against the new constraints
+    // rather than reusing the original 1320×892 root size.
+    REQUIRE(child_a_ptr->bounds().width == Catch::Approx(400.0f));
+    REQUIRE(child_b_ptr->bounds().width == Catch::Approx(400.0f));
+    REQUIRE(child_a_ptr->bounds().height == Catch::Approx(500.0f));
+    REQUIRE(child_b_ptr->bounds().height == Catch::Approx(500.0f));
+
+    // ── Resize back up — content reflows again, no hysteresis ────────
+    root.set_bounds({0, 0, 1600, 1000});
+    root.layout_children();
+    REQUIRE(child_a_ptr->bounds().width == Catch::Approx(800.0f));
+    REQUIRE(child_b_ptr->bounds().width == Catch::Approx(800.0f));
+    REQUIRE(child_a_ptr->bounds().height == Catch::Approx(1000.0f));
+}
+
+TEST_CASE("Window resize honors a fixed-size sibling next to a flex child "
+          "(pulp #1321)",
+          "[view][layout][issue-1321]") {
+    using namespace pulp::view;
+
+    // Mirrors a Spectr-style chrome layout: a stretchy content area
+    // followed by a fixed-height bottom toolbar. The toolbar must keep
+    // its 48px height regardless of the window's new height, and the
+    // content area must absorb the rest.
+    View root;
+    root.flex().direction = FlexDirection::column;
+
+    auto content = std::make_unique<View>();
+    content->flex().flex_grow = 1.0f;
+    auto* content_ptr = content.get();
+    root.add_child(std::move(content));
+
+    auto toolbar = std::make_unique<View>();
+    toolbar->flex().preferred_height = 48.0f;
+    auto* toolbar_ptr = toolbar.get();
+    root.add_child(std::move(toolbar));
+
+    root.set_bounds({0, 0, 1320, 892});
+    root.layout_children();
+    REQUIRE(toolbar_ptr->bounds().height == Catch::Approx(48.0f));
+    REQUIRE(content_ptr->bounds().height == Catch::Approx(844.0f));
+
+    // Shrink — toolbar still 48px, content absorbs the loss.
+    root.set_bounds({0, 0, 800, 500});
+    root.layout_children();
+    REQUIRE(toolbar_ptr->bounds().height == Catch::Approx(48.0f));
+    REQUIRE(content_ptr->bounds().height == Catch::Approx(452.0f));
+    REQUIRE(toolbar_ptr->bounds().width == Catch::Approx(800.0f));
+
+    // Grow — same invariants hold.
+    root.set_bounds({0, 0, 1600, 1000});
+    root.layout_children();
+    REQUIRE(toolbar_ptr->bounds().height == Catch::Approx(48.0f));
+    REQUIRE(content_ptr->bounds().height == Catch::Approx(952.0f));
 }
