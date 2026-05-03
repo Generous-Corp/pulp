@@ -529,6 +529,44 @@ bool View::call_inspector_mouse_hook(const MouseEvent& e) {
 // pulp #1148 — generalized overlay-click routing.
 View* View::active_overlay_ = nullptr;
 
+namespace {
+
+// pulp #1320 — recursively expand a child's painted-bounds contribution
+// up through any `overflow:visible` descendants. Returns the bounding
+// rect (in window coords) of `v` and every transitive descendant whose
+// chain back to `v` is entirely overflow:visible. A descendant inside
+// an `overflow:hidden` ancestor is clipped, so it stops contributing.
+//
+// `parent_abs_x` / `parent_abs_y` are the absolute window-coord origin
+// of `v->parent()`. The function consumes those, applies `v`'s own
+// `bounds().x/y`, and recurses.
+void accumulate_overflow_extent(const View* v,
+                                float parent_abs_x,
+                                float parent_abs_y,
+                                float& min_x,
+                                float& min_y,
+                                float& max_x,
+                                float& max_y) {
+    if (!v) return;
+    const float abs_x = parent_abs_x + v->bounds().x;
+    const float abs_y = parent_abs_y + v->bounds().y;
+    const auto lb = v->local_bounds();
+    if (abs_x < min_x) min_x = abs_x;
+    if (abs_y < min_y) min_y = abs_y;
+    if (abs_x + lb.width > max_x) max_x = abs_x + lb.width;
+    if (abs_y + lb.height > max_y) max_y = abs_y + lb.height;
+    // Only recurse through children whose own overflow is visible —
+    // that's the CSS rule. An `overflow:hidden` child clips its own
+    // descendants, so they don't contribute painted pixels above us.
+    if (v->overflow() != View::Overflow::visible) return;
+    for (size_t i = 0; i < v->child_count(); ++i) {
+        accumulate_overflow_extent(v->child_at(i), abs_x, abs_y,
+                                   min_x, min_y, max_x, max_y);
+    }
+}
+
+}  // namespace
+
 bool View::overlay_contains(Point window_pt) const {
     // Walk up to compute absolute origin in window/root coords. Same
     // arithmetic the mac window-host uses for ComboBox::active_popup_.
@@ -541,8 +579,35 @@ bool View::overlay_contains(Point window_pt) const {
     }
     const float w = local_bounds().width;
     const float h = local_bounds().height;
-    return window_pt.x >= abs_x && window_pt.x <= abs_x + w &&
-           window_pt.y >= abs_y && window_pt.y <= abs_y + h;
+    // Fast-path: own painted rect contains the point.
+    if (window_pt.x >= abs_x && window_pt.x <= abs_x + w &&
+        window_pt.y >= abs_y && window_pt.y <= abs_y + h) {
+        return true;
+    }
+
+    // pulp #1320 — extend the hit area to include the painted bounding
+    // box of any `overflow:visible` descendants. CSS `overflow:visible`
+    // semantics: a child painting outside the parent is still
+    // visible/clickable. Without this, a popover positioned via
+    // `position:absolute; top: 28; right: 0` extends LEFTWARD beyond
+    // its short trigger button — clicks on the leftward cells then
+    // miss `overlay_contains` and fall through to whatever sibling
+    // happens to occupy that pixel.
+    //
+    // Only meaningful when this overlay itself has overflow:visible
+    // (otherwise its own clip rect bounds the painted pixels).
+    if (overflow() != Overflow::visible) return false;
+
+    // Compute parent_abs_{x,y}: this->bounds().x/y were already added
+    // by the walk above, so subtract them to get the parent origin.
+    const float parent_abs_x = abs_x - bounds().x;
+    const float parent_abs_y = abs_y - bounds().y;
+    float min_x = abs_x, min_y = abs_y;
+    float max_x = abs_x + w, max_y = abs_y + h;
+    accumulate_overflow_extent(this, parent_abs_x, parent_abs_y,
+                               min_x, min_y, max_x, max_y);
+    return window_pt.x >= min_x && window_pt.x <= max_x &&
+           window_pt.y >= min_y && window_pt.y <= max_y;
 }
 
 void View::paint_overlays(canvas::Canvas& canvas) {
