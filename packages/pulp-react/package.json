@@ -20,7 +20,7 @@
     "README.md"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json && esbuild src/index.ts --bundle --format=esm --outfile=dist/index.mjs --platform=neutral",
+    "build": "tsc -p tsconfig.json && esbuild src/index.ts --bundle --format=esm --outfile=dist/index.mjs --platform=neutral --external:react --external:react-reconciler --external:react-reconciler/constants.js --external:scheduler",
     "build:embed": "esbuild src/index.ts --bundle --format=iife --global-name=pulpReact --outfile=dist/pulp-react.embed.js --platform=neutral",
     "test": "vitest run"
   },
