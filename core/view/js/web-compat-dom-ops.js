@@ -40,6 +40,20 @@ if (!Element.prototype.appendChild ||
         if (child._textContent) setText(child._id, child._textContent);
         child.style._flushAll();
         child._reapplyStylesheets();
+        // pulp #1323 — `<style>` elements receive CSS via either direct
+        // textContent assignment or child Text nodes (React's reconciler
+        // takes the second path). When a Text-bearing child lands under a
+        // `<style>` parent, route the aggregated text through the CSS
+        // translator so `:hover` rules get registered.
+        if ((this.tagName === "STYLE" || this._isStyleElement)
+                && typeof _processStyleElement === "function") {
+            var aggregated = "";
+            for (var ci = 0; ci < this._children.length; ci++) {
+                aggregated += this._children[ci]._textContent || "";
+            }
+            this._textContent = aggregated;
+            _processStyleElement(this);
+        }
         return child;
     };
     Element.prototype.appendChild.__pulp_dom_ops__ = true;

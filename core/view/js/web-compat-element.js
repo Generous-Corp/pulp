@@ -106,6 +106,17 @@ Element.prototype._ensureNative = function() {
     } else if (tag === "dialog") {
         createPanel(id, "");
         setVisible(id, false);
+    } else if (tag === "style") {
+        // pulp #1323 — `<style>` is a non-rendered CSS source. We still
+        // create a hidden native shell so DOM ops (appendChild,
+        // textContent flush, removeChild) keep working uniformly, but
+        // mark the element so its textContent / appended Text-node
+        // children are routed through the CSS-rule translator instead
+        // of `setText()`. The element itself never paints.
+        this._isStyleElement = true;
+        this._appliedSheet = null;
+        createCol(id, "");
+        setVisible(id, false);
     } else {
         // Unknown tag — create as container
         createCol(id, "");
@@ -241,6 +252,15 @@ Object.defineProperty(Element.prototype, "textContent", {
     get: function() { return this._textContent; },
     set: function(v) {
         this._textContent = v || "";
+        // pulp #1323 — `<style>` element textContent is CSS source, not
+        // a label. Route it through the rule translator. We deliberately
+        // skip `setText()` so the element stays invisible in the layout.
+        if (this.tagName === "STYLE" || this._isStyleElement) {
+            if (typeof _processStyleElement === "function") {
+                _processStyleElement(this);
+            }
+            return;
+        }
         if (this._nativeCreated) {
             setText(this._id, this._textContent);
         }

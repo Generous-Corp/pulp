@@ -42,12 +42,21 @@ add_executable(pulp-test-web-compat-events
     test_events_bubbling.cpp
     test_selector_matching.cpp
     test_element_api.cpp
+    test_css_hover_translation.cpp
 )
 target_link_libraries(pulp-test-web-compat-events PRIVATE pulp::view Catch2::Catch2WithMain)
 target_include_directories(pulp-test-web-compat-events PRIVATE ${WEBCOMPAT_INCLUDE_DIR})
 target_compile_definitions(pulp-test-web-compat-events PRIVATE
     PULP_TEST_SOURCE_DIR="${CMAKE_SOURCE_DIR}/test"
 )
+# pulp #1323 — CSS-hover tests do appendChild + StyleSheet attach;
+# match the prelude target's 16 MB stack so QuickJS↔C++ interleaving
+# inside _processStyleElement → _applyTo doesn't blow the default.
+if(APPLE)
+    target_link_options(pulp-test-web-compat-events PRIVATE -Wl,-stack_size,0x2000000)
+elseif(UNIX)
+    target_link_options(pulp-test-web-compat-events PRIVATE -Wl,-z,stacksize=16777216)
+endif()
 catch_discover_tests(pulp-test-web-compat-events)
 
 # Web-compat prelude tests (document, Element, style, parser, StyleSheet)

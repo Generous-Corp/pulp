@@ -72,20 +72,191 @@ function _applyStyles(el, props) {
 }
 
 function _setupPseudoHover(el, props) {
-    if (el._hoverSetup) return;
-    el._hoverSetup = true;
-    var savedProps = {};
+    // pulp #1323 — multiple `:hover` rules on the same element layer
+    // their property maps. We keep a per-element list so `mouseleave`
+    // restores the union of all hover-touched properties to their
+    // pre-hover values, even when a later rule introduced a new key.
+    // The list is keyed on the props *object identity* so repeated
+    // _applyTo() runs (e.g. from className mutation) don't grow the
+    // list — each rule object goes in exactly once per element.
+    var hoverState = el._hoverState;
+    if (!hoverState) {
+        hoverState = el._hoverState = {
+            propsList: [],
+            savedProps: {},
+            wired: false
+        };
+    }
 
+    // Append unique rules; idempotent across repeated _applyTo() runs.
+    var alreadyHave = false;
+    for (var pi = 0; pi < hoverState.propsList.length; pi++) {
+        if (hoverState.propsList[pi] === props) { alreadyHave = true; break; }
+    }
+    if (!alreadyHave) hoverState.propsList.push(props);
+
+    // pulp #1173 — registerHover(id) arms the native dispatcher. The C++
+    // side requires the widget to exist before the call lands, so we
+    // defer wiring until _nativeCreated. _applyTo() runs again from
+    // appendChild's _reapplyStylesheets() after _nativeCreated flips,
+    // giving us a second chance to wire even for elements that matched
+    // the rule pre-mount.
+    if (hoverState.wired) return;
+    if (!el._nativeCreated) return;
+    hoverState.wired = true;
+
+    // Use addEventListener (multi-callback __eventListeners__ map) so we
+    // coexist with JSX onMouseEnter / addEventListener('mouseenter')
+    // handlers the user may register independently. The lower-level
+    // `on()` channel is single-callback per (id, event) — using it here
+    // would clobber, or be clobbered by, any other mouseenter listener.
+    // addEventListener also routes through _registerNativeEvent which
+    // calls registerHover(id) for us — but only if _nativeCreated is
+    // already true on this code path, which we just asserted above.
     el.addEventListener("mouseenter", function() {
-        // Save current values
-        for (var k in props) savedProps[k] = el.style[k];
-        _applyStyles(el, props);
+        var list = hoverState.propsList;
+        // Snapshot the BEFORE state for every property any rule touches.
+        // Refreshed on every enter so a hover-after-className-change
+        // (or a JS-driven style mutation between hovers) still reverts
+        // to the pre-hover value rather than to a stale snapshot.
+        for (var i = 0; i < list.length; i++) {
+            var p = list[i];
+            for (var k in p) {
+                if (!Object.prototype.hasOwnProperty.call(hoverState.savedProps, k)) {
+                    hoverState.savedProps[k] = el.style[k];
+                }
+            }
+        }
+        // Layer rules in registration order — last write wins per
+        // property, which matches CSS specificity for equally-specific
+        // selectors (later rules in source order win).
+        for (var j = 0; j < list.length; j++) {
+            _applyStyles(el, list[j]);
+        }
     });
-
     el.addEventListener("mouseleave", function() {
-        // Restore
-        for (var k in savedProps) el.style[k] = savedProps[k];
+        for (var k in hoverState.savedProps) {
+            el.style[k] = hoverState.savedProps[k];
+        }
+        // Drop the snapshot so the next enter re-captures the current
+        // style (which may have been mutated by JS in between).
+        hoverState.savedProps = {};
     });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// CSS text → StyleSheet translator (pulp #1323)
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+// Converts the contents of a `<style>` element into a StyleSheet so the
+// existing rule-application path picks it up. We deliberately keep the
+// parser conservative: simple selectors (tag, .class, #id) optionally
+// suffixed with a single `:hover` / `:focus` / `:active` pseudo-class,
+// comma-separated selector lists, and `prop: value;` declarations.
+//
+// Out of scope for this slice (deferred follow-ups):
+//   - Descendant / child / sibling combinators in the CSS-text input
+//     (the underlying matcher supports them via `_parseSelector` but
+//     bringing them through the text parser opens a larger correctness
+//     surface — Spectr's editor.js sticks to flat selectors).
+//   - At-rules (@media, @keyframes, @supports, @import).
+//   - CSS variable resolution at parse time (handled by the existing
+//     style-decl path on apply).
+//   - `:active` pseudo-class wiring (#1149 part b explicit non-goal).
+
+function _stripCssComments(text) {
+    return text.replace(/\/\*[\s\S]*?\*\//g, "");
+}
+
+function _parseCssDeclarations(body) {
+    var props = {};
+    var decls = body.split(";");
+    for (var i = 0; i < decls.length; i++) {
+        var d = decls[i].trim();
+        if (!d) continue;
+        var colon = d.indexOf(":");
+        if (colon <= 0) continue;
+        var name = d.slice(0, colon).trim();
+        var value = d.slice(colon + 1).trim();
+        if (!name || !value) continue;
+        // CSS uses kebab-case; CSSStyleDeclaration._props expects camelCase.
+        // The setter side handles both, but normalize here so layered
+        // overrides on the same logical property collapse correctly.
+        var camel = name.replace(/-([a-z])/g, function(_, c) { return c.toUpperCase(); });
+        props[camel] = value;
+    }
+    return props;
+}
+
+function _parseCssText(text) {
+    // Returns an array of { selector, properties } records — array (not
+    // object) so duplicate selectors layer in source order.
+    var rules = [];
+    var src = _stripCssComments(text || "");
+    var i = 0;
+    while (i < src.length) {
+        // Skip whitespace and at-rule blocks (we don't support them; just
+        // jump over the matching brace pair so a stray @media doesn't
+        // poison the rest of the sheet).
+        var ch = src.charAt(i);
+        if (ch === " " || ch === "\t" || ch === "\n" || ch === "\r") { i++; continue; }
+        if (ch === "@") {
+            var depth = 0, found = false;
+            while (i < src.length) {
+                var c2 = src.charAt(i++);
+                if (c2 === "{") { depth++; found = true; }
+                else if (c2 === "}") { depth--; if (depth === 0 && found) break; }
+                else if (c2 === ";" && !found) { break; } // at-rule with no block
+            }
+            continue;
+        }
+        // Read selector list up to '{'
+        var brace = src.indexOf("{", i);
+        if (brace < 0) break;
+        var selectorList = src.slice(i, brace).trim();
+        var endBrace = src.indexOf("}", brace + 1);
+        if (endBrace < 0) break;
+        var body = src.slice(brace + 1, endBrace);
+        var props = _parseCssDeclarations(body);
+        // Split selector list on commas (top-level only; we don't support
+        // selectors with parenthesized commas in this slice).
+        var selectors = selectorList.split(",");
+        for (var s = 0; s < selectors.length; s++) {
+            var sel = selectors[s].trim();
+            if (!sel) continue;
+            rules.push({ selector: sel, properties: props });
+        }
+        i = endBrace + 1;
+    }
+    return rules;
+}
+
+function _processStyleElement(el) {
+    // Detach any previously-applied sheet so re-setting textContent
+    // (React commits, hot-reload) replaces rather than stacks.
+    if (el._appliedSheet && typeof el._appliedSheet.detach === "function") {
+        el._appliedSheet.detach();
+        el._appliedSheet = null;
+    }
+    var rules = _parseCssText(el._textContent || "");
+    if (rules.length === 0) return;
+    // StyleSheet's constructor takes { selector: properties }; we feed it
+    // a raw _parsedRules list to preserve duplicate selectors and
+    // source-order layering for `:hover` rules.
+    var sheet = Object.create(StyleSheet.prototype);
+    sheet._rules = {};
+    sheet._attached = false;
+    sheet._parsedRules = [];
+    for (var i = 0; i < rules.length; i++) {
+        var r = rules[i];
+        sheet._parsedRules.push({
+            selector: r.selector,
+            properties: r.properties,
+            parsed: _parseSelector(r.selector)
+        });
+    }
+    sheet.attach();
+    el._appliedSheet = sheet;
 }
 
 function _setupPseudoFocus(el, props) {
