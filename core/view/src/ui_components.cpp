@@ -576,6 +576,12 @@ View* ScrollView::hit_test(Point local_point) {
     if (!visible() || !enabled() || !hit_testable()) return nullptr;
     if (!local_bounds().contains(local_point)) return nullptr;
 
+    // React Native pointerEvents parity (pulp #1170 Codex P1 on #1044/#1026):
+    // ScrollView shadows the base View::hit_test, so without this honor the
+    // setPointerEvents(box-only/box-none/none) path silently no-ops on
+    // scrollables. Mirror View::hit_test's policy here.
+    if (pointer_events() == PointerEvents::none) return nullptr;
+
     auto b = local_bounds();
     float bar_w = bar_width_.value();
     bool in_v_bar = direction_ != Direction::horizontal &&
@@ -584,32 +590,40 @@ View* ScrollView::hit_test(Point local_point) {
     bool in_h_bar = direction_ != Direction::vertical &&
                     content_size_.width > b.width &&
                     local_point.y >= b.y + b.height - bar_w - 6;
-    if (in_v_bar || in_h_bar)
-        return this;
+    // Scrollbar hits target the ScrollView itself. box_none disables
+    // self-targeting; box_only still routes scrollbar interactions to
+    // self (the chrome belongs to the container, not its children).
+    if (in_v_bar || in_h_bar) {
+        return pointer_events() == PointerEvents::box_none ? nullptr : this;
+    }
 
     float sx = smooth_scroll_x_.value();
     float sy = smooth_scroll_y_.value();
 
-    for (size_t i = child_count(); i > 0; --i) {
-        auto* child = child_at(i - 1);
-        if (!child->visible()) continue;
+    if (pointer_events() != PointerEvents::box_only) {
+        for (size_t i = child_count(); i > 0; --i) {
+            auto* child = child_at(i - 1);
+            if (!child->visible()) continue;
 
-        Point child_point = {local_point.x + sx - child->bounds().x,
-                             local_point.y + sy - child->bounds().y};
+            Point child_point = {local_point.x + sx - child->bounds().x,
+                                 local_point.y + sy - child->bounds().y};
 
-        bool in_bounds = child->local_bounds().contains(child_point);
-        if (!in_bounds && child->overflow() == Overflow::visible) {
-            auto lb = child->local_bounds();
-            in_bounds = child_point.x >= lb.x && child_point.x <= lb.x + lb.width &&
-                        child_point.y >= lb.y && child_point.y <= lb.y + lb.height + 500;
-        }
+            bool in_bounds = child->local_bounds().contains(child_point);
+            if (!in_bounds && child->overflow() == Overflow::visible) {
+                auto lb = child->local_bounds();
+                in_bounds = child_point.x >= lb.x && child_point.x <= lb.x + lb.width &&
+                            child_point.y >= lb.y && child_point.y <= lb.y + lb.height + 500;
+            }
 
-        if (in_bounds) {
-            if (auto* hit = child->hit_test(child_point))
-                return hit;
+            if (in_bounds) {
+                if (auto* hit = child->hit_test(child_point))
+                    return hit;
+            }
         }
     }
 
+    // box_none suppresses self-targeting even when no child was hit.
+    if (pointer_events() == PointerEvents::box_none) return nullptr;
     return this;
 }
 

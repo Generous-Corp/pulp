@@ -84,3 +84,72 @@ TEST_CASE("ScrollView: hit testing follows scrolled content", "[scrollview]") {
     auto* hit = sv.hit_test({10, 30});
     REQUIRE(hit == label_ptr);
 }
+
+// ── pulp #1170: ScrollView honors React Native pointerEvents ───────────────
+//
+// Codex P1 follow-up on #1044 — ScrollView::hit_test shadowed View::hit_test
+// without honoring pointer_events(), so setPointerEvents("box-only"/"box-none"
+// /"none") was a silent no-op for any scrollable container.
+
+TEST_CASE("ScrollView::hit_test honors pointerEvents == none (#1170)",
+          "[scrollview][hit_test][issue-1170]") {
+    ScrollView sv;
+    sv.set_bounds({0, 0, 200, 200});
+    sv.set_content_size({200, 200});
+
+    auto child = std::make_unique<View>();
+    child->set_bounds({50, 50, 100, 100});
+    sv.add_child(std::move(child));
+
+    sv.set_pointer_events(View::PointerEvents::none);
+    REQUIRE(sv.hit_test({75, 75}) == nullptr);
+    REQUIRE(sv.hit_test({10, 10}) == nullptr);
+}
+
+TEST_CASE("ScrollView::hit_test honors pointerEvents == box-only (#1170)",
+          "[scrollview][hit_test][issue-1170]") {
+    ScrollView sv;
+    sv.set_bounds({0, 0, 200, 200});
+    sv.set_content_size({200, 200});
+
+    auto child = std::make_unique<View>();
+    child->set_bounds({50, 50, 100, 100});
+    sv.add_child(std::move(child));
+
+    // box_only: descent skipped — hits inside child bounds resolve to the
+    // ScrollView itself, not to the child.
+    sv.set_pointer_events(View::PointerEvents::box_only);
+    REQUIRE(sv.hit_test({75, 75}) == &sv);
+    REQUIRE(sv.hit_test({10, 10}) == &sv);
+}
+
+TEST_CASE("ScrollView::hit_test honors pointerEvents == box-none (#1170)",
+          "[scrollview][hit_test][issue-1170]") {
+    ScrollView sv;
+    sv.set_bounds({0, 0, 200, 200});
+    sv.set_content_size({200, 200});
+
+    auto child = std::make_unique<View>();
+    child->set_bounds({50, 50, 100, 100});
+    auto* child_ptr = child.get();
+    sv.add_child(std::move(child));
+
+    // box_none: child is hit-testable, but a point in the ScrollView's
+    // own bounds (not on a child) returns nullptr — never self.
+    sv.set_pointer_events(View::PointerEvents::box_none);
+    REQUIRE(sv.hit_test({75, 75}) == child_ptr);
+    REQUIRE(sv.hit_test({10, 10}) == nullptr);
+}
+
+TEST_CASE("ScrollView::hit_test box-none also suppresses scrollbar self-target (#1170)",
+          "[scrollview][hit_test][issue-1170]") {
+    ScrollView sv;
+    sv.set_bounds({0, 0, 200, 100});
+    // Content taller than view → vertical scrollbar appears at the right edge.
+    sv.set_content_size({200, 400});
+
+    sv.set_pointer_events(View::PointerEvents::box_none);
+    // Hit near the right edge would normally land on the v-scrollbar
+    // and return self; box_none must suppress that.
+    REQUIRE(sv.hit_test({195, 50}) == nullptr);
+}
