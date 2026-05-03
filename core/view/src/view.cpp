@@ -469,14 +469,19 @@ View* View::hit_test(Point local_point) {
             Point child_point = {local_point.x - child->bounds_.x,
                                 local_point.y - child->bounds_.y};
 
-            // For overflow:visible, expand the hit area to include content
-            // that extends beyond the child's bounds (e.g., dropdown menus)
+            // For overflow:visible, expand the hit area on all four sides
+            // to include content that extends beyond the child's bounds
+            // (e.g. dropdowns/popovers that grow downward, leftward, etc.).
+            // The 500px slack is symmetric so left-extending popovers
+            // (e.g. the Spectr bands picker) get hit-tested correctly —
+            // see pulp #1148 for the original right/down-only asymmetry.
             bool in_bounds = child->local_bounds().contains(child_point);
             if (!in_bounds && child->overflow() == Overflow::visible) {
-                // Allow hit testing up to 500px below the child (for dropdowns)
                 auto lb = child->local_bounds();
-                in_bounds = child_point.x >= lb.x && child_point.x <= lb.x + lb.width &&
-                        child_point.y >= lb.y && child_point.y <= lb.y + lb.height + 500;
+                in_bounds = child_point.x >= lb.x - 500 &&
+                            child_point.x <= lb.x + lb.width + 500 &&
+                            child_point.y >= lb.y - 500 &&
+                            child_point.y <= lb.y + lb.height + 500;
             }
 
             if (in_bounds) {

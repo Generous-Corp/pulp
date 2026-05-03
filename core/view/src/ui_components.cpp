@@ -608,11 +608,15 @@ View* ScrollView::hit_test(Point local_point) {
             Point child_point = {local_point.x + sx - child->bounds().x,
                                  local_point.y + sy - child->bounds().y};
 
+            // overflow:visible: expand hit area symmetrically on all four
+            // sides for popovers that extend in any direction (pulp #1148).
             bool in_bounds = child->local_bounds().contains(child_point);
             if (!in_bounds && child->overflow() == Overflow::visible) {
                 auto lb = child->local_bounds();
-                in_bounds = child_point.x >= lb.x && child_point.x <= lb.x + lb.width &&
-                            child_point.y >= lb.y && child_point.y <= lb.y + lb.height + 500;
+                in_bounds = child_point.x >= lb.x - 500 &&
+                            child_point.x <= lb.x + lb.width + 500 &&
+                            child_point.y >= lb.y - 500 &&
+                            child_point.y <= lb.y + lb.height + 500;
             }
 
             if (in_bounds) {

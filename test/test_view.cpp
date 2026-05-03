@@ -1421,3 +1421,86 @@ TEST_CASE("Window resize honors a fixed-size sibling next to a flex child "
     REQUIRE(toolbar_ptr->bounds().height == Catch::Approx(48.0f));
     REQUIRE(content_ptr->bounds().height == Catch::Approx(952.0f));
 }
+
+// ── pulp #1148 slice (a) — symmetric overflow:visible hit-test extension ──
+//
+// PR #1297 added overflow:visible hit-test extension so that absolutely-
+// positioned popovers / dropdowns whose content escapes their bounds box
+// still receive clicks. The original implementation only extended the box
+// 500px DOWNWARD, which broke left-extending popovers (e.g. Spectr's bands
+// picker that opens to the left of its trigger). This suite locks the
+// extension to ±500px on all four sides.
+//
+// Each direction places a "popover" grandchild positioned outside its
+// overflow:visible parent in the tested direction — overflow:visible
+// passes the click through to the parent's hit_test recursion, which
+// then matches the grandchild's local_bounds. Without symmetric slack,
+// the parent rejects the click before recursion happens for left/right/up.
+namespace {
+struct PopoverFixture {
+    View root;
+    View* container{nullptr};   // overflow:visible host
+    View* popover{nullptr};     // grandchild positioned outside container
+
+    // dx/dy are the popover's offset *relative to the container's local
+    // origin* — negative values escape the container in the −x/−y direction.
+    PopoverFixture(float dx, float dy) {
+        root.set_bounds({0, 0, 2000, 2000});
+        auto c = std::make_unique<View>();
+        c->set_bounds({600, 600, 100, 100});
+        c->set_overflow(View::Overflow::visible);
+        container = c.get();
+
+        auto p = std::make_unique<View>();
+        // 50x50 popover anchored at (dx, dy) inside container's local space.
+        p->set_bounds({dx, dy, 50, 50});
+        popover = p.get();
+        c->add_child(std::move(p));
+        root.add_child(std::move(c));
+    }
+};
+} // namespace
+
+TEST_CASE("View::hit_test extends overflow:visible 500px to the LEFT",
+          "[view][hit_test][issue-1148][overflow-symmetric]") {
+    // Popover at container-local (-200, 25) → root-space (400..450, 625..675).
+    // 100px to the LEFT of container.x=600 covers root.x = 425.
+    PopoverFixture f(-200, 25);
+    REQUIRE(f.root.hit_test({425, 650}) == f.popover);
+}
+
+TEST_CASE("View::hit_test extends overflow:visible 500px to the RIGHT",
+          "[view][hit_test][issue-1148][overflow-symmetric]") {
+    // Popover at container-local (200, 25) → root-space (800..850, 625..675).
+    // 100px to the RIGHT of container.right=700 covers root.x = 825.
+    PopoverFixture f(200, 25);
+    REQUIRE(f.root.hit_test({825, 650}) == f.popover);
+}
+
+TEST_CASE("View::hit_test extends overflow:visible 500px UPWARD",
+          "[view][hit_test][issue-1148][overflow-symmetric]") {
+    // Popover at container-local (25, -200) → root-space (625..675, 400..450).
+    // 100px ABOVE container.y=600 covers root.y = 425.
+    PopoverFixture f(25, -200);
+    REQUIRE(f.root.hit_test({650, 425}) == f.popover);
+}
+
+TEST_CASE("View::hit_test extends overflow:visible 500px DOWNWARD",
+          "[view][hit_test][issue-1148][overflow-symmetric]") {
+    // Popover at container-local (25, 200) → root-space (625..675, 800..850).
+    // 100px BELOW container.bottom=700 covers root.y = 825.
+    // This direction was already supported pre-#1148 — guards regression.
+    PopoverFixture f(25, 200);
+    REQUIRE(f.root.hit_test({650, 825}) == f.popover);
+}
+
+TEST_CASE("View::hit_test does NOT extend overflow:visible past 500px LEFT",
+          "[view][hit_test][issue-1148][overflow-symmetric]") {
+    // Popover anchored 600px LEFT of container — outside the symmetric
+    // ±500px slack, so the click must miss the popover entirely. With
+    // container x=600, popover at container-local x=-650 lands at
+    // root.x = -50..0; we probe root.x = 0 → container-local x = -600,
+    // beyond the -500 slack.
+    PopoverFixture f(-650, 25);
+    REQUIRE(f.root.hit_test({0, 650}) != f.popover);
+}
