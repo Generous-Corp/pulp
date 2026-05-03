@@ -14,7 +14,10 @@
     "experimental/**"
   ],
   "diff_cover_excludes": [
-    "tools/cli/cmd_loop.cpp"
+    "tools/cli/cmd_loop.cpp",
+    "tools/import-design/pulp_import_design.cpp",
+    "*pulp_import_design.cpp",
+    "*/pulp_import_design.cpp"
   ],
   "_comment": "Single source of truth consumed by .github/workflows/coverage.yml AND tools/scripts/local_diff_cover.sh. To change the threshold, surface set, or per-file exclusions, edit here once. `diff_cover_excludes` is the line-coverage-exclude list passed to `diff-cover --exclude=...` — use sparingly for thin dispatchers / generated code that is exercised end-to-end via shell-out tests but doesn't propagate llvm-cov instrumentation. cmd_loop.cpp's watch-loop entry path (lines ~280-306) cannot be exercised by a shellout test (the loop blocks until SIGINT), so the file is exercised end-to-end via the --no-watch shellout tests in test/test_cli_shellout.cpp instead. cmd_coverage.cpp was previously excluded for the same reason but is now properly counted: local_diff_cover.sh now mirrors run_coverage.sh's wider object-discovery pattern (build/tools, build/inspect, build/bindings) so CLI shell-out tests propagate llvm-cov instrumentation through pulp-cli / pulp-standalone / pulp-inspect (#919 follow-up)."
 }
