@@ -9,6 +9,8 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
 <a id="v0692"></a>
+## [0.70.0]
+
 ## [0.69.2] - 2026-05-03
 
 - fix(view): ScrollView::hit_test honors pointer_events (Codex P1, closes #1170) ([#1289](https://github.com/danielraffel/pulp/pull/1289))

@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.24)
 
 project(Pulp
-    VERSION 0.69.2
+    VERSION 0.70.0
     DESCRIPTION "Cross-platform audio plugin and application framework"
     HOMEPAGE_URL "https://github.com/danielraffel/pulp"
     LANGUAGES CXX C
