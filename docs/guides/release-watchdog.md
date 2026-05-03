@@ -180,10 +180,31 @@ trailer already documented in `CLAUDE.md` — the skip flag makes the
 auto-release step decline to tag, Layer 2 treats the workflow run as
 a normal success, and Layer 3 sees no VERSION change so never fires.
 
-The fix/feat-needs-bump check is bypassed via a separate trailer
-(`Version-Bump: skip reason="..."`) so a single PR can opt into
-"don't tag this release" without also implying "this fix doesn't need
-a bump." The two trailers are deliberately distinct.
+`Version-Bump: skip reason="..."` is also honored as a release-skip by
+the auto-release.yml guard (pulp #1308 follow-up). Authors use this
+trailer for fix/feat changes that legitimately don't bump SDK or plugin
+versions — typical cases:
+
+- JS-only changes to `packages/pulp-react/` (versions independently
+  via `packages/pulp-react/package.json` + `npm publish`)
+- Docs / refactors accidentally typed as `fix:` / `feat:`
+- Test-infra changes that mention a fix in their subject
+
+Without honoring this trailer here, the post-merge stranded-fix
+detector would fire on every such merge and demand a follow-up bump
+PR — even though the author already declared no SDK/plugin bump is
+needed. The PR-time gate (`version-skill-check.yml`) already accepts
+this trailer for the same reason; the post-merge layer now matches.
+
+The two trailers are still semantically distinct:
+
+- `Release: skip reason="..."` — opt out of *this* release tag (e.g.
+  the change is part of a multi-PR series; tag the last one).
+- `Version-Bump: skip reason="..."` — declare *no SDK/plugin bump
+  needed* (the change is genuinely not user-facing for those surfaces).
+
+In both cases, the auto-release guard now treats them as legitimate
+opt-outs and won't synthesize a stranded-fix tracker.
 
 ## Follow-up hooks (optional, not required)
 
