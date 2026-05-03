@@ -54,14 +54,16 @@ let defaultContainer: PulpContainer | null = null;
 export function render(element: ReactElement, container?: PulpContainer): PulpContainer {
     const c = container ?? (defaultContainer ??= createRoot(''));
     let rec = rootsByContainer.get(c);
+    const isFirstRender = !rec;
     if (!rec) {
         const fiberRoot = reconciler.createContainer(
             c,
             // LegacyRoot = synchronous mode. Matches the v0 architecture
-            // doc ("Concurrent mode: deferred for v0") and means each
-            // render() returns after the bridge calls have all been
-            // emitted — no microtask gap, which is what tests and
-            // AOT-bundled plugin code both expect.
+            // doc ("Concurrent mode: deferred for v0"). After the first
+            // render the dispatcher is bound and subsequent updates
+            // remain synchronous — render() returns after the bridge
+            // calls have all been emitted, which is what tests and
+            // AOT-bundled plugin code expect.
             LegacyRoot,
             null,
             false,
@@ -73,6 +75,38 @@ export function render(element: ReactElement, container?: PulpContainer): PulpCo
         rec = { container: c, fiberRoot };
         rootsByContainer.set(c, rec);
     }
+
+    // pulp #1292 P0 — on the FIRST render, defer the initial
+    // updateContainer to a microtask. createContainer leaves the
+    // reconciler's internal dispatcher slot in a transitional state;
+    // calling updateContainer immediately can race the dispatcher
+    // binding, causing function components to invoke `useState` /
+    // `useEffect` before `ReactCurrentDispatcher.current` is set
+    // (intermittent on cold starts — first launch in a session
+    // happened to win the race, subsequent ones lost it).
+    //
+    // Yielding one microtask gives the reconciler a chance to fully
+    // bind dispatchers before App() runs. Subsequent renders go
+    // through the synchronous path so test harnesses + AOT plugin
+    // code see the bridge-calls-before-return guarantee they expect.
+    if (isFirstRender) {
+        const r = rec;
+        // Use queueMicrotask when available (every modern JS engine —
+        // QuickJS, JSC, V8) and fall back to Promise.resolve().then().
+        const enqueue: (fn: () => void) => void =
+            (typeof queueMicrotask === 'function')
+                ? queueMicrotask
+                : (fn) => { void Promise.resolve().then(fn); };
+        enqueue(() => {
+            try {
+                reconciler.updateContainer(element, r.fiberRoot, null, null);
+            } catch (err) {
+                console.error('[@pulp/react] initial updateContainer failed:', err);
+            }
+        });
+        return c;
+    }
+
     reconciler.updateContainer(element, rec.fiberRoot, null, null);
     return c;
 }
