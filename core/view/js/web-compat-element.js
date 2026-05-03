@@ -389,6 +389,13 @@ Element.prototype.setAttribute = function(name, value) {
     else if (name === "class") this.className = value;
     else if (name.indexOf("data-") === 0) {
         this._dataset[_camelCase(name.slice(5))] = value;
+        // pulp #1148 (slice b) — `data-overlay="true"` is the explicit
+        // author hint for the auto-overlay heuristic. Re-evaluate now
+        // so the bridge sees the claim/release immediately rather than
+        // waiting for an unrelated style mutation to drive it.
+        if (name === "data-overlay" && this.style && this.style._reevaluateOverlay) {
+            this.style._reevaluateOverlay();
+        }
     }
 };
 
@@ -399,7 +406,17 @@ Element.prototype.getAttribute = function(name) {
 };
 
 Element.prototype.removeAttribute = function(name) {
+    var was = this._attributes[name];
     delete this._attributes[name];
+    if (name.indexOf("data-") === 0) {
+        delete this._dataset[_camelCase(name.slice(5))];
+        // pulp #1148 (slice b) — clearing `data-overlay` may release
+        // the auto-claim if no CSS shape still satisfies the heuristic.
+        if (name === "data-overlay" && was !== undefined &&
+            this.style && this.style._reevaluateOverlay) {
+            this.style._reevaluateOverlay();
+        }
+    }
 };
 
 Element.prototype.hasAttribute = function(name) {

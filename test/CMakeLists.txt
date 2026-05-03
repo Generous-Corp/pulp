@@ -1539,6 +1539,15 @@ add_executable(pulp-test-overlay-routing test_overlay_routing.cpp)
 target_link_libraries(pulp-test-overlay-routing PRIVATE pulp::view Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-overlay-routing)
 
+# pulp #1148 (slice b) — auto-claim active_overlay_ from CSS shape
+# (`position:absolute` + `z-index >= 10`) or `data-overlay` author hint
+# detected by the web-compat layer (web-compat-style-decl.js +
+# web-compat-element.js). Uses the real WidgetBridge so the heuristic
+# runs against the same prelude stack the runtime ships.
+add_executable(pulp-test-web-compat-overlay test_web_compat_overlay.cpp)
+target_link_libraries(pulp-test-web-compat-overlay PRIVATE pulp::view Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-web-compat-overlay)
+
 # Panel widget tests (styled containers)
 add_executable(pulp-test-panel test_panel.cpp)
 target_link_libraries(pulp-test-panel PRIVATE pulp::view Catch2::Catch2WithMain)
