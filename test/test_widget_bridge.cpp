@@ -3678,3 +3678,40 @@ TEST_CASE("CSS shim: 'border:' shorthand preserves border-radius",
     // Radius must survive the shorthand assignment.
     REQUIRE_THAT(w->corner_radius(), WithinAbs(10.0f, 1e-5f));
 }
+
+// pulp #1148 — generalized overlay-click routing. The bridge must expose
+// claimOverlay(id) / releaseOverlay(id) so @pulp/react's `<View overlay>`
+// JSX prop can opt a widget in as the active click-eligible overlay.
+TEST_CASE("WidgetBridge claimOverlay / releaseOverlay drive View::active_overlay_",
+          "[view][bridge][issue-1148]") {
+    // Reset state — other tests may leave the slot set.
+    pulp::view::View::active_overlay_ = nullptr;
+
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script("createPanel('popover', '')");
+    auto* popover = bridge.widget("popover");
+    REQUIRE(popover != nullptr);
+    REQUIRE(pulp::view::View::active_overlay_ == nullptr);
+
+    bridge.load_script("claimOverlay('popover')");
+    REQUIRE(pulp::view::View::active_overlay_ == popover);
+
+    bridge.load_script("releaseOverlay('popover')");
+    REQUIRE(pulp::view::View::active_overlay_ == nullptr);
+
+    // releaseOverlay on a non-holder is a silent no-op (does not null
+    // a different widget's claim).
+    bridge.load_script("createPanel('other', ''); claimOverlay('other')");
+    auto* other = bridge.widget("other");
+    REQUIRE(pulp::view::View::active_overlay_ == other);
+    bridge.load_script("releaseOverlay('popover')");
+    REQUIRE(pulp::view::View::active_overlay_ == other);
+
+    // Cleanup so the global state doesn't leak into the next test.
+    pulp::view::View::active_overlay_ = nullptr;
+}

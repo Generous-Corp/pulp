@@ -23,7 +23,13 @@ class FrameClock;
 class View {
 public:
     View() = default;
-    virtual ~View() = default;
+    virtual ~View() {
+        // pulp #1148 — clear the overlay slot if this dying View holds it.
+        // Without this, an unmounted React popover leaves a dangling
+        // pointer that the platform window host would dereference on
+        // the next click.
+        if (active_overlay_ == this) active_overlay_ = nullptr;
+    }
 
     View(const View&) = delete;
     View& operator=(const View&) = delete;
@@ -405,6 +411,39 @@ public:
     static void set_inspector_mouse_hook(std::function<bool(const MouseEvent&)> hook);
     static bool call_inspector_key_hook(const KeyEvent& e);
     static bool call_inspector_mouse_hook(const MouseEvent& e);
+
+    // ── Generalized overlay-click routing (pulp #1148) ───────────────────
+    //
+    // ComboBox already uses a `static ComboBox* active_popup_` pointer so
+    // the platform window-host layer can short-circuit hit-testing for
+    // paint-only overlays (the dropdown items render OUTSIDE the
+    // ComboBox's hit_test bounds). React popovers built from
+    // `<View position="absolute">` + nested buttons hit the same problem
+    // but have no widget-specific shortcut, so clicks fall through to
+    // whatever sibling/ancestor pixel is under the overlay.
+    //
+    // `active_overlay_` is the per-View opt-in equivalent: any View can
+    // claim itself as the global click-eligible overlay. The window host
+    // checks this AFTER `ComboBox::active_popup_` (so the ComboBox path
+    // stays exact-as-was) and BEFORE the regular tree hit_test. If the
+    // click falls inside the overlay's window-rect, it routes to the
+    // overlay; otherwise the overlay is auto-released and the click
+    // continues to the tree.
+    //
+    // The @pulp/react host config calls `claim_overlay()` from a JSX
+    // `<View overlay>` mount and `release_overlay()` from its unmount.
+    // The ComboBox path remains untouched and has its own state.
+    static View* active_overlay_;
+    void claim_overlay() { active_overlay_ = this; }
+    /// Clear the global overlay if (and only if) `this` currently holds it.
+    /// Idempotent — safe to call on unmount even if claim never happened.
+    void release_overlay() {
+        if (active_overlay_ == this) active_overlay_ = nullptr;
+    }
+    /// Bounds-test in window (root) coordinates. Walks the parent chain
+    /// to compute absolute origin and adds local_bounds(). Mirrors the
+    /// arithmetic the mac mouseDown path uses for the ComboBox dropdown.
+    bool overlay_contains(Point window_pt) const;
 
     /// Global click callback (fires on any view click with widget id). Set on root.
     std::function<void(const std::string& id, uint16_t modifiers)> on_global_click;

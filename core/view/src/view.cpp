@@ -526,6 +526,25 @@ bool View::call_inspector_mouse_hook(const MouseEvent& e) {
     return s_inspector_mouse_hook ? s_inspector_mouse_hook(e) : false;
 }
 
+// pulp #1148 — generalized overlay-click routing.
+View* View::active_overlay_ = nullptr;
+
+bool View::overlay_contains(Point window_pt) const {
+    // Walk up to compute absolute origin in window/root coords. Same
+    // arithmetic the mac window-host uses for ComboBox::active_popup_.
+    float abs_x = 0.0f, abs_y = 0.0f;
+    const View* v = this;
+    while (v) {
+        abs_x += v->bounds().x;
+        abs_y += v->bounds().y;
+        v = v->parent();
+    }
+    const float w = local_bounds().width;
+    const float h = local_bounds().height;
+    return window_pt.x >= abs_x && window_pt.x <= abs_x + w &&
+           window_pt.y >= abs_y && window_pt.y <= abs_y + h;
+}
+
 void View::paint_overlays(canvas::Canvas& canvas) {
     auto& queue = overlay_queue();
     for (auto& req : queue) {

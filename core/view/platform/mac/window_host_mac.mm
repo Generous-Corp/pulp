@@ -373,6 +373,55 @@ static pulp::view::KeyCode keyCodeFromNS(unsigned short code) {
             }
         }
 
+        // pulp #1148 — generalized overlay-click routing for React popovers.
+        // Any View that called `claim_overlay()` (e.g. via @pulp/react's
+        // `<View overlay>` JSX prop) is checked AFTER the ComboBox path
+        // (which stays exact-as-was per regression test in
+        // test_combo_dropdown.cpp [issue-overlay]) and BEFORE the regular
+        // tree hit_test. If the click falls inside the overlay's window
+        // rect we route it directly there so absolutely-positioned popover
+        // children get the click instead of whatever sibling/ancestor view
+        // happens to occupy that pixel.
+        if (auto* overlay = pulp::view::View::active_overlay_) {
+            if (view_is_in_tree(overlay, self.rootView) &&
+                overlay->overlay_contains({pt.x, pt.y})) {
+                // Hit-test inside the overlay subtree so nested buttons /
+                // labels still receive the click. Falls back to the
+                // overlay itself if no descendant claims the point.
+                auto local_to_overlay = toLocal(pt, overlay, self.rootView);
+                pulp::view::View* sub = overlay->hit_test(local_to_overlay);
+                _dragTarget = sub ? sub : overlay;
+                auto local = toLocal(pt, _dragTarget, self.rootView);
+
+                if (_dragTarget->focusable()) {
+                    if (_focusedView && _focusedView != _dragTarget)
+                        _focusedView->on_focus_changed(false);
+                    _focusedView = _dragTarget;
+                    _focusedView->on_focus_changed(true);
+                } else if (_focusedView) {
+                    _focusedView->on_focus_changed(false);
+                    _focusedView = nullptr;
+                }
+
+                pulp::view::MouseEvent me;
+                me.position = local;
+                me.window_position = pt;
+                me.button = pulp::view::MouseButton::left;
+                me.modifiers = modifiersFromNSFlags(event.modifierFlags);
+                me.is_down = true;
+                me.click_count = static_cast<int>(event.clickCount);
+                _dragTarget->on_mouse_event(me);
+                _dragTarget->on_mouse_down(local);
+                [self setNeedsDisplay:YES];
+                return;
+            }
+            // Click landed outside the overlay — auto-release so the
+            // overlay's "dismiss on outside click" semantics work without
+            // every JSX caller needing a global click listener. The next
+            // mount cycle will re-claim if the popover is still open.
+            overlay->release_overlay();
+        }
+
         _dragTarget = self.rootView->hit_test(pt);
         pulp::view::ComboBox::notify_global_click(_dragTarget);
 

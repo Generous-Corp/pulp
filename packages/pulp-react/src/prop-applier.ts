@@ -218,6 +218,16 @@ function applyOne(id: string, type: string, key: string, value: unknown): void {
             if (type === 'Meter')      return call('setMeterLevel', id, value as number);
             return call('setValue', id, value as number);
 
+        // pulp #1148 — generalized overlay-click routing. `overlay={true}`
+        // claims the view as the active click-eligible overlay so React
+        // popovers built on `<View position="absolute">` receive clicks
+        // even though hit_test would otherwise resolve to a sibling. The
+        // matching releaseOverlay is emitted by applyChangedProps when
+        // the prop flips off, and by detach() at unmount.
+        case 'overlay':
+            if (value) return call('claimOverlay', id);
+            return call('releaseOverlay', id);
+
         // SvgPath (pulp #994) — wires the SvgPathWidget bridge surface
         // (createSvgPath / setSvgPath / setSvgViewBox / setSvgFill /
         // setSvgStroke / setSvgStrokeWidth) through a typed JSX intrinsic.
@@ -290,6 +300,13 @@ export function applyChangedProps(
             // Specific resets we can do meaningfully
             if (key === 'visible')  { call('setVisible', id, true); mutated = true; }
             if (key === 'opacity')  { call('setOpacity', id, 1.0); mutated = true; }
+            // pulp #1148 — overlay flipped off (or simply removed from
+            // props) must release the global overlay slot, otherwise the
+            // platform host keeps routing clicks to a stale popover.
+            if (key === 'overlay' && oldProps[key]) {
+                call('releaseOverlay', id);
+                mutated = true;
+            }
             // Other setters: no-op — let the next mount cycle handle it
         }
     }

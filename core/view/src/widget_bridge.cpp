@@ -1429,6 +1429,29 @@ void WidgetBridge::register_api() {
         return choc::value::Value();
     });
 
+    // claimOverlay(id) / releaseOverlay(id) — pulp #1148 generalized overlay
+    // click routing. JSX `<View overlay>` calls claimOverlay on mount and
+    // releaseOverlay on unmount via the @pulp/react prop-applier; the platform
+    // window host then short-circuits hit-testing for clicks that land inside
+    // the named view's bounds. ComboBox keeps its own active_popup_ path —
+    // these handlers drive the per-View `View::active_overlay_` mechanism.
+    engine_.register_function("claimOverlay", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto it = widgets_.find(id);
+        if (it != widgets_.end() && it->second) {
+            it->second->claim_overlay();
+        }
+        return choc::value::Value();
+    });
+    engine_.register_function("releaseOverlay", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto it = widgets_.find(id);
+        if (it != widgets_.end() && it->second) {
+            it->second->release_overlay();
+        }
+        return choc::value::Value();
+    });
+
     // ── Pointer events (P2) ─────────────────────────────────────────────
 
     // Helper: build JS object literal for pointer event data from MouseEvent

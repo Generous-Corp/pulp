@@ -1534,6 +1534,11 @@ add_executable(pulp-test-combo-dropdown test_combo_dropdown.cpp)
 target_link_libraries(pulp-test-combo-dropdown PRIVATE pulp::view Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-combo-dropdown)
 
+# pulp #1148 — generalized overlay-click routing (View::active_overlay_)
+add_executable(pulp-test-overlay-routing test_overlay_routing.cpp)
+target_link_libraries(pulp-test-overlay-routing PRIVATE pulp::view Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-overlay-routing)
+
 # Panel widget tests (styled containers)
 add_executable(pulp-test-panel test_panel.cpp)
 target_link_libraries(pulp-test-panel PRIVATE pulp::view Catch2::Catch2WithMain)

@@ -87,6 +87,14 @@ export interface BaseProps extends FlexProps, StyleProps {
     key?: Key;
     /// Children — text or other intrinsics.
     children?: ReactNode;
+    /// pulp #1148 — opt this view in as the active click-eligible overlay.
+    /// When `true`, the prop-applier calls `claimOverlay(id)` on mount and
+    /// `releaseOverlay(id)` on unmount. The platform window host routes
+    /// any click that lands inside the view's window-rect to the overlay
+    /// subtree first, so absolutely-positioned popovers built from
+    /// `<View overlay style={{position: 'absolute', ...}}>` get clicks
+    /// instead of whatever sibling/ancestor view sits behind the popover.
+    overlay?: boolean;
 }
 
 // ── Container intrinsics ────────────────────────────────────────────

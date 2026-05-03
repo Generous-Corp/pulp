@@ -132,6 +132,16 @@ declare global {
     /// `resetAfterCommit` so the host config owns commit-time flush.
     /// Declared as a const so consumers can branch on `typeof layout`.
     const layout: (() => void) | undefined;
+
+    // ── Overlay click routing (pulp #1148) ──────────────────────────
+    /// Claim the view as the active click-eligible overlay so the
+    /// platform window host short-circuits hit-testing for clicks that
+    /// land inside the view's bounds. Optional at runtime so older
+    /// bridges still link.
+    const claimOverlay: ((id: string) => void) | undefined;
+    /// Release the named view if (and only if) it currently holds the
+    /// active overlay slot. Idempotent. Optional at runtime.
+    const releaseOverlay: ((id: string) => void) | undefined;
 }
 
 /// Test-only mock-bridge for unit tests. Replaces all the global
@@ -176,6 +186,8 @@ export function createMockBridge(): MockBridge {
         // pulp #994 — SvgPath intrinsic surface
         'createSvgPath', 'setSvgPath', 'setSvgViewBox',
         'setSvgFill', 'setSvgStroke', 'setSvgStrokeWidth',
+        // pulp #1148 — generalized overlay-click routing
+        'claimOverlay', 'releaseOverlay',
     ];
     const saved: Record<string, unknown> = {};
     return {
