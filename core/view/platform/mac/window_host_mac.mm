@@ -386,40 +386,63 @@ static pulp::view::KeyCode keyCodeFromNS(unsigned short code) {
             if (view_is_in_tree(overlay, self.rootView) &&
                 overlay->overlay_contains({pt.x, pt.y})) {
                 // Hit-test inside the overlay subtree so nested buttons /
-                // labels still receive the click. Falls back to the
-                // overlay itself if no descendant claims the point.
+                // labels still receive the click.
+                //
+                // pulp #1313 (Codex P1 on #1297) — only dispatch when
+                // hit_test returns a real view. If hit_test returns
+                // nullptr, the overlay (or some ancestor in its
+                // subtree) failed the visible / enabled / hit_testable
+                // / pointer_events check; force-dispatching to the
+                // overlay anyway would bypass those guards. Fall
+                // through to the standard hit_test below instead.
                 auto local_to_overlay = toLocal(pt, overlay, self.rootView);
-                pulp::view::View* sub = overlay->hit_test(local_to_overlay);
-                _dragTarget = sub ? sub : overlay;
-                auto local = toLocal(pt, _dragTarget, self.rootView);
+                if (auto* sub = overlay->hit_test(local_to_overlay)) {
+                    // pulp #1314 (Codex P2 on #1297) — when the
+                    // overlay handles a click, the standard ComboBox
+                    // outside-click notification at the bottom of
+                    // mouseDown: is bypassed via the early return
+                    // below. Run it here so an open ComboBox dropdown
+                    // still closes when the user clicks on a separate
+                    // active overlay.
+                    pulp::view::ComboBox::notify_global_click(sub);
 
-                if (_dragTarget->focusable()) {
-                    if (_focusedView && _focusedView != _dragTarget)
+                    _dragTarget = sub;
+                    auto local = toLocal(pt, _dragTarget, self.rootView);
+
+                    if (_dragTarget->focusable()) {
+                        if (_focusedView && _focusedView != _dragTarget)
+                            _focusedView->on_focus_changed(false);
+                        _focusedView = _dragTarget;
+                        _focusedView->on_focus_changed(true);
+                    } else if (_focusedView) {
                         _focusedView->on_focus_changed(false);
-                    _focusedView = _dragTarget;
-                    _focusedView->on_focus_changed(true);
-                } else if (_focusedView) {
-                    _focusedView->on_focus_changed(false);
-                    _focusedView = nullptr;
-                }
+                        _focusedView = nullptr;
+                    }
 
-                pulp::view::MouseEvent me;
-                me.position = local;
-                me.window_position = pt;
-                me.button = pulp::view::MouseButton::left;
-                me.modifiers = modifiersFromNSFlags(event.modifierFlags);
-                me.is_down = true;
-                me.click_count = static_cast<int>(event.clickCount);
-                _dragTarget->on_mouse_event(me);
-                _dragTarget->on_mouse_down(local);
-                [self setNeedsDisplay:YES];
-                return;
+                    pulp::view::MouseEvent me;
+                    me.position = local;
+                    me.window_position = pt;
+                    me.button = pulp::view::MouseButton::left;
+                    me.modifiers = modifiersFromNSFlags(event.modifierFlags);
+                    me.is_down = true;
+                    me.click_count = static_cast<int>(event.clickCount);
+                    _dragTarget->on_mouse_event(me);
+                    _dragTarget->on_mouse_down(local);
+                    [self setNeedsDisplay:YES];
+                    return;
+                }
+                // hit_test returned null — the overlay's guards rejected
+                // the click. Don't dispatch and don't release_overlay
+                // (the overlay is still mounted, just not currently
+                // interactive at this position). Fall through to the
+                // standard hit_test path below.
+            } else {
+                // Click landed outside the overlay — auto-release so the
+                // overlay's "dismiss on outside click" semantics work without
+                // every JSX caller needing a global click listener. The next
+                // mount cycle will re-claim if the popover is still open.
+                overlay->release_overlay();
             }
-            // Click landed outside the overlay — auto-release so the
-            // overlay's "dismiss on outside click" semantics work without
-            // every JSX caller needing a global click listener. The next
-            // mount cycle will re-claim if the popover is still open.
-            overlay->release_overlay();
         }
 
         _dragTarget = self.rootView->hit_test(pt);
