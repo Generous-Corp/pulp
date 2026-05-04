@@ -1639,6 +1639,185 @@ TEST_CASE("CoreGraphicsCanvas tracks save_count and restore_to_count",
     CGContextRelease(ctx);
 }
 
+// pulp #1371 — CoreGraphicsCanvas::set_blend_mode was a silent no-op (the
+// base Canvas virtual default `(void)mode;`). Skia honored every CSS
+// globalCompositeOperation; CG dropped them all and forced SrcOver. The
+// canonical repro is Spectr's filterbank: `ctx.globalCompositeOperation =
+// 'lighter'` paints a vivid blue→green→red rainbow gradient additively over
+// the dark canvas; without the override the gradient barely tinted the
+// backplate.
+//
+// Strategy: set up a CG bitmap context, paint an opaque red base layer, then
+// fill a second rect of equal extent with a different blend mode and assert
+// that the resulting destination pixel matches the chosen op's spec, NOT the
+// SrcOver default. Three coverage points:
+//
+//   * `BlendMode::multiply` — red(255,0,0) * blue(0,0,255) ≈ black; under
+//     SrcOver the dest would be plain blue.
+//   * `BlendMode::lighter` — kCGBlendModePlusLighter; the result must be
+//     strictly brighter than either input on every channel that contributed.
+//   * `BlendMode::copy` — kCGBlendModeCopy; replaces destination outright,
+//     proving non-default Porter-Duff modes also reach CG.
+//   * `BlendMode::xor_mode` — kCGBlendModeXOR; covers an additional CSS
+//     keyword path (issue-896 surface).
+TEST_CASE("CoreGraphicsCanvas::set_blend_mode honors all BlendMode values",
+          "[canvas][cg][blend][issue-1371]") {
+    constexpr int W = 8;
+    constexpr int H = 8;
+    auto build_ctx = [&](std::vector<uint8_t>& pixels) -> CGContextRef {
+        pixels.assign(static_cast<size_t>(W) * H * 4u, 0u);
+        auto cs = CGColorSpaceCreateDeviceRGB();
+        REQUIRE(cs != nullptr);
+        const uint32_t bitmap_info =
+            static_cast<uint32_t>(kCGImageAlphaPremultipliedLast) |
+            static_cast<uint32_t>(kCGBitmapByteOrder32Big);
+        CGContextRef ctx = CGBitmapContextCreate(
+            pixels.data(), W, H, 8, W * 4u, cs, bitmap_info);
+        CGColorSpaceRelease(cs);
+        REQUIRE(ctx != nullptr);
+        return ctx;
+    };
+
+    // Pixel at (W/2, H/2) is the center of the painted area — every test
+    // fills (0,0,W,H) twice so the center is always inside both rects.
+    auto sample_center = [&](const std::vector<uint8_t>& pixels) {
+        const size_t row = (H / 2);
+        const size_t col = (W / 2);
+        const size_t idx = (row * W + col) * 4u;
+        struct RGBA { uint8_t r, g, b, a; };
+        return RGBA{pixels[idx + 0], pixels[idx + 1],
+                    pixels[idx + 2], pixels[idx + 3]};
+    };
+
+    SECTION("multiply — red × blue ≈ black") {
+        std::vector<uint8_t> pixels;
+        CGContextRef ctx = build_ctx(pixels);
+        {
+            CoreGraphicsCanvas canvas(ctx, static_cast<float>(W),
+                                      static_cast<float>(H));
+            canvas.set_fill_color(Color::rgba(1.0f, 0.0f, 0.0f, 1.0f));
+            canvas.fill_rect(0, 0, W, H);
+            canvas.set_blend_mode(Canvas::BlendMode::multiply);
+            canvas.set_fill_color(Color::rgba(0.0f, 0.0f, 1.0f, 1.0f));
+            canvas.fill_rect(0, 0, W, H);
+        }
+        CGContextRelease(ctx);
+
+        auto px = sample_center(pixels);
+        // multiply(red, blue) per-channel: r*0=0, g*0=0, b*0=0 — pure black.
+        // Under SrcOver this would be (0,0,255) — plain blue. The bug fix
+        // gates on r AND b both being zero.
+        INFO("center pixel rgba=(" << int(px.r) << "," << int(px.g)
+             << "," << int(px.b) << "," << int(px.a) << ")");
+        REQUIRE(px.r < 8);
+        REQUIRE(px.g < 8);
+        REQUIRE(px.b < 8);
+        REQUIRE(px.a == 255);
+    }
+
+    SECTION("lighter (kCGBlendModePlusLighter) — additive sum") {
+        std::vector<uint8_t> pixels;
+        CGContextRef ctx = build_ctx(pixels);
+        {
+            CoreGraphicsCanvas canvas(ctx, static_cast<float>(W),
+                                      static_cast<float>(H));
+            // Half-strength red on black background.
+            canvas.set_fill_color(Color::rgba(0.5f, 0.0f, 0.0f, 1.0f));
+            canvas.fill_rect(0, 0, W, H);
+            canvas.set_blend_mode(Canvas::BlendMode::lighter);
+            // Add half-strength green — sum should be (0.5, 0.5, 0).
+            canvas.set_fill_color(Color::rgba(0.0f, 0.5f, 0.0f, 1.0f));
+            canvas.fill_rect(0, 0, W, H);
+        }
+        CGContextRelease(ctx);
+
+        auto px = sample_center(pixels);
+        INFO("center pixel rgba=(" << int(px.r) << "," << int(px.g)
+             << "," << int(px.b) << "," << int(px.a) << ")");
+        // lighter is additive — both red AND green channels must be
+        // present. Under SrcOver the second fill would replace red with
+        // pure green (r=0, g=128) — additive must keep red ≈ 128 too.
+        REQUIRE(px.r >= 96);   // ~0.5 * 255 = 128, allow rounding slack
+        REQUIRE(px.g >= 96);
+        REQUIRE(px.b < 16);
+    }
+
+    SECTION("copy (kCGBlendModeCopy) — replaces destination") {
+        std::vector<uint8_t> pixels;
+        CGContextRef ctx = build_ctx(pixels);
+        {
+            CoreGraphicsCanvas canvas(ctx, static_cast<float>(W),
+                                      static_cast<float>(H));
+            canvas.set_fill_color(Color::rgba(1.0f, 0.0f, 0.0f, 1.0f));
+            canvas.fill_rect(0, 0, W, H);
+            canvas.set_blend_mode(Canvas::BlendMode::copy);
+            // Half-transparent green — under copy the destination becomes
+            // exactly this premultiplied source, NOT the SrcOver blend.
+            canvas.set_fill_color(Color::rgba(0.0f, 1.0f, 0.0f, 0.5f));
+            canvas.fill_rect(0, 0, W, H);
+        }
+        CGContextRelease(ctx);
+
+        auto px = sample_center(pixels);
+        INFO("center pixel rgba=(" << int(px.r) << "," << int(px.g)
+             << "," << int(px.b) << "," << int(px.a) << ")");
+        // copy mode: destination = source. Red base must be gone (SrcOver
+        // would leave red ≈ 128 from blending with the half-alpha green).
+        REQUIRE(px.r < 16);
+        REQUIRE(px.a < 200);  // alpha is the half-alpha source, not 255
+    }
+
+    SECTION("xor_mode — issue-896 CSS keyword path reaches CG") {
+        std::vector<uint8_t> pixels;
+        CGContextRef ctx = build_ctx(pixels);
+        {
+            CoreGraphicsCanvas canvas(ctx, static_cast<float>(W),
+                                      static_cast<float>(H));
+            canvas.set_fill_color(Color::rgba(1.0f, 0.0f, 0.0f, 1.0f));
+            canvas.fill_rect(0, 0, W, H);
+            canvas.set_blend_mode(Canvas::BlendMode::xor_mode);
+            // Same opaque red on top — XOR of two opaque solids is fully
+            // transparent in spec, regardless of color.
+            canvas.set_fill_color(Color::rgba(1.0f, 0.0f, 0.0f, 1.0f));
+            canvas.fill_rect(0, 0, W, H);
+        }
+        CGContextRelease(ctx);
+
+        auto px = sample_center(pixels);
+        INFO("center pixel rgba=(" << int(px.r) << "," << int(px.g)
+             << "," << int(px.b) << "," << int(px.a) << ")");
+        // XOR of two fully-opaque (a=1) overlapping solids → alpha 0.
+        // Under SrcOver this would be opaque red (a=255).
+        REQUIRE(px.a < 32);
+    }
+
+    SECTION("normal (default) sanity — SrcOver still works after fix") {
+        // Guards against a regression where the new override broke the
+        // default path. With normal, an opaque blue rect drawn on top of
+        // an opaque red rect must produce blue.
+        std::vector<uint8_t> pixels;
+        CGContextRef ctx = build_ctx(pixels);
+        {
+            CoreGraphicsCanvas canvas(ctx, static_cast<float>(W),
+                                      static_cast<float>(H));
+            canvas.set_fill_color(Color::rgba(1.0f, 0.0f, 0.0f, 1.0f));
+            canvas.fill_rect(0, 0, W, H);
+            canvas.set_blend_mode(Canvas::BlendMode::normal);
+            canvas.set_fill_color(Color::rgba(0.0f, 0.0f, 1.0f, 1.0f));
+            canvas.fill_rect(0, 0, W, H);
+        }
+        CGContextRelease(ctx);
+
+        auto px = sample_center(pixels);
+        INFO("center pixel rgba=(" << int(px.r) << "," << int(px.g)
+             << "," << int(px.b) << "," << int(px.a) << ")");
+        REQUIRE(px.r < 16);
+        REQUIRE(px.g < 16);
+        REQUIRE(px.b > 240);
+        REQUIRE(px.a == 255);
+    }
+}
+
 #endif  // __APPLE__
 
 // pulp #1368 — Canvas's default save_count() / restore_to_count() impls

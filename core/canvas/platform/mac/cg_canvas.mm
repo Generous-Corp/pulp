@@ -209,6 +209,60 @@ void CoreGraphicsCanvas::set_line_join(LineJoin join) {
     CGContextSetLineJoin(ctx_, cg_join);
 }
 
+// pulp #1371 — map every BlendMode value to its CGBlendMode counterpart and
+// push it into the current GState. The base Canvas default for set_blend_mode
+// is a no-op `(void)mode;`, so without this override every CG-backed CPU paint
+// silently lost the requested compositing op. SkiaCanvas::set_blend_mode in
+// core/canvas/src/skia_canvas.cpp is the working reference implementation —
+// the indices here mirror its `map[]` table 1:1, and the CG enum values cover
+// the full HTML5 globalCompositeOperation surface (Apple ships a near-perfect
+// match — the only caveat is `lighter`, which is `kCGBlendModePlusLighter`).
+//
+// The GState stack semantics match Canvas2D save()/restore() — calling
+// CGContextSetBlendMode mutates the current GState, and a later GState pop
+// restores whatever blend mode was active in the parent frame, exactly as
+// the spec requires for ctx.save()/ctx.restore() pairs.
+static CGBlendMode to_cg_blend_mode(pulp::canvas::Canvas::BlendMode mode) {
+    using BM = pulp::canvas::Canvas::BlendMode;
+    switch (mode) {
+        // Indices 0..15 — advanced/W3C separable + non-separable blend modes.
+        case BM::normal:        return kCGBlendModeNormal;
+        case BM::multiply:      return kCGBlendModeMultiply;
+        case BM::screen:        return kCGBlendModeScreen;
+        case BM::overlay:       return kCGBlendModeOverlay;
+        case BM::darken:        return kCGBlendModeDarken;
+        case BM::lighten:       return kCGBlendModeLighten;
+        case BM::color_dodge:   return kCGBlendModeColorDodge;
+        case BM::color_burn:    return kCGBlendModeColorBurn;
+        case BM::hard_light:    return kCGBlendModeHardLight;
+        case BM::soft_light:    return kCGBlendModeSoftLight;
+        case BM::difference:    return kCGBlendModeDifference;
+        case BM::exclusion:     return kCGBlendModeExclusion;
+        case BM::hue:           return kCGBlendModeHue;
+        case BM::saturation:    return kCGBlendModeSaturation;
+        case BM::color:         return kCGBlendModeColor;
+        case BM::luminosity:    return kCGBlendModeLuminosity;
+        // Indices 16..26 — Porter-Duff compositing modes (issue-896).
+        case BM::source_over:        return kCGBlendModeNormal;
+        case BM::destination_over:   return kCGBlendModeDestinationOver;
+        case BM::source_in:          return kCGBlendModeSourceIn;
+        case BM::destination_in:     return kCGBlendModeDestinationIn;
+        case BM::source_out:         return kCGBlendModeSourceOut;
+        case BM::destination_out:    return kCGBlendModeDestinationOut;
+        case BM::source_atop:        return kCGBlendModeSourceAtop;
+        case BM::destination_atop:   return kCGBlendModeDestinationAtop;
+        case BM::xor_mode:           return kCGBlendModeXOR;
+        case BM::copy:               return kCGBlendModeCopy;
+        case BM::lighter:            return kCGBlendModePlusLighter;
+    }
+    // Unknown enum value — fall back to the spec default.
+    return kCGBlendModeNormal;
+}
+
+void CoreGraphicsCanvas::set_blend_mode(BlendMode mode) {
+    CGContextSetBlendMode(ctx_, to_cg_blend_mode(mode));
+}
+
 void CoreGraphicsCanvas::fill_rect(float x, float y, float w, float h) {
     if (has_gradient_) {
         CGContextSaveGState(ctx_);

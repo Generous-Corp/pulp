@@ -77,6 +77,16 @@ public:
     void save_layer(float x, float y, float w, float h,
                     float opacity, float blur_radius) override;
 
+    // pulp #1371 — Canvas2D globalCompositeOperation parity. Without this
+    // override the base Canvas no-op default silently dropped every blend
+    // request on the CPU paint path, so JS bundles using
+    // ctx.globalCompositeOperation = 'lighter'/'multiply'/etc. drew with the
+    // default SrcOver — Spectr's filterbank rainbow gradient is the canonical
+    // repro. CG's GState stack matches Canvas2D save()/restore() blend-mode
+    // semantics, so we just push the chosen CGBlendMode into the current GState
+    // and let CG carry it across draws + save/restore frames.
+    void set_blend_mode(BlendMode mode) override;
+
     void set_font(const std::string& family, float size) override;
     void set_text_align(TextAlign align) override;
     void fill_text(const std::string& text, float x, float y) override;
