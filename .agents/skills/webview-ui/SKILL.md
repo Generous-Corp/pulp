@@ -183,3 +183,14 @@ pretending the browser preview replaces native validation.
 For Monaco specifically:
 - browser-served proof page is useful to confirm bundling, workers, and CSS
 - native-host proof is still required before claiming the bridge is working
+
+## Canvas2D bridge gotchas (when the editor is on the @pulp/react native path, NOT WebView)
+
+When porting a WebView editor to the native bridge (translating browser `<canvas>` + Canvas2D code to pulp's `canvas*` bridge globals via a JS shim like Spectr's `canvas2d-shim.ts`), several browser idioms silently break. Authoritative reference is the **`import-design` skill's "Canvas2D Bridge Gotchas" section** — see that for the full rule set with example code. Top-of-mind summary:
+
+1. **`ctx.arc()` does not add to a path** — bridge `canvasArc` strokes immediately. Synthesize as ~32 `canvasLineTo` segments so `ctx.fill()` honors the active gradient. Same applies to `arcTo`, `ellipse`, `roundRect`.
+2. **Gradient stops must be spread as variadic `(color, pos)` pairs** — passing JSON makes the bridge parse zero stops → silent fall-through to default white fill. `canvasSetLinearGradient(id, x0, y0, x1, y1, c1, p1, c2, p2, ...)`.
+3. **Radial gradient bridge takes single outer circle** `(cx, cy, R)`, not the spec's two-circle form. Map `(x0,y0,r0,x1,y1,r1)` → `(x1, y1, r1)` (visually identical when `r0=0`, same center).
+4. **Per-canvas `save_layer` isolation** — only since pulp v0.74.1 (#1372). Pre-#1372, `ctx.clearRect()` on one canvas erased pixels another sibling just painted. Pin SDK `>= 0.74.1` for any multi-canvas editor.
+5. **SDK version floor for canvas2d parity** is v0.74.1 (sibling isolation) on top of v0.72.4 (gradient bridge) + v0.72.5 (gradient fills). Anything older has visible gaps.
+6. **Always pixel-sample** after rendering — uniform-fallback bugs (every gradient stop resolved to default white) look superficially "filled" at thumbnail scale but are structurally broken.

@@ -65,8 +65,6 @@ Ask the user or detect from context:
 
 **v0.69.0 closes 4 v0.68.0 audit symptoms automatically:** segmented-control vertical stacking (was the most-visible Spectr UX gap) is closed by `display:flex` defaulting to `flex-direction:row` (#1167); FilterBank canvas was already auto-resolved at v0.68.1+; App-root layout-bottom-strip is closed by the same flex-direction default; click-bubble dispatch fully closed in v0.68.0 (#1008/#1073). When auditing a freshly-imported plugin against an older SDK reference, run the WebView↔Native side-by-side at idle FIRST — many "broken" rows resolve via SDK upgrade alone with zero plugin-side work. Pattern documented in `spectr/planning/audit-2026-05-03-webview-vs-native-v0.69.1.md`.
 
-**ComboBox overlay-click routing pattern generalizes to all React popovers (pulp #1148 / #1297, learned 2026-05-03):** the April-18 commit `41c05c35` pinned a contract for ComboBox: the dropdown is a paint-only overlay (no view backing in hit-test tree); window-host `mouseDown` consults `pulp::view::ComboBox::active_popup_` and routes popup-bounds clicks directly to the combo BEFORE tree hit_test. PR #1297 (closes #1148) generalizes this via `View::active_overlay_` + `claimOverlay()`/`releaseOverlay()` bridge handlers + `<View overlay>` opt-in prop in @pulp/react. Any future plugin's React popover (`<View position="absolute">`) needs `overlay` to opt in. iOS host wasn't wired (touch path differs); only mac currently exercised. x11/win32 hosts don't exist on `origin/main` yet.
-
 **File-based fallback**:
 - Read the file and parse based on --from source type
 
@@ -288,3 +286,108 @@ Every new format-version needs a fixture so the detection gate covers it:
 4. Run `ctest --test-dir build -R pulp-test-cli-import-detect` to confirm the fixture loop picks up the new row.
 
 The detector module lives at `tools/import-design/import_detect.{hpp,cpp}` and is intentionally free of `pulp::view` / `pulp::state` link deps so the test target compiles fast and the unit tests don't drag the full design-import pipeline along.
+
+## Canvas2D Bridge Gotchas (importer + shim authors MUST follow)
+
+When translating browser `<canvas>` + Canvas2D code to Pulp's native bridge (`canvas*` globals), several spec-conforming browser idioms silently break against the bridge contract because the bridge surface is more limited and more direct than the HTML5 spec. The following rules were paid for in production debugging cycles on Spectr's analyzer port (pulp #1346/#1348/#1368/#1372 + Spectr `canvas2d-shim.ts`); the importer must emit code that respects them.
+
+### 1. `ctx.arc()` does NOT add to a path on its own — synthesize as line segments
+
+**Spec:** `ctx.arc()` adds an arc sub-path; subsequent `ctx.fill()` / `ctx.stroke()` operate on it.
+
+**Bridge reality:** `canvasArc(id, x, y, r, sa, ea, fillColor)` strokes immediately and returns. It does not contribute to the active path, so `ctx.beginPath() → ctx.arc() → ctx.fill()` renders a stroked outline ring (just the arc's stroke), not a filled circle. Radial-gradient cap-emission patterns degenerate into hollow ellipse outlines.
+
+**Importer rule:** when emitting `arc()` translation, emit a polyline approximation (~32 segments scaled by radius, 8..64) via `canvasLineTo`. This makes the sub-path closeable and `ctx.fill()` honors any active `fillStyle` / gradient.
+
+```ts
+arc(x, y, r, sa, ea, ccw) {
+    const segs = Math.max(8, Math.min(64, Math.ceil(r * 1.2)));
+    const sweep = ccw ? -((sa - ea + 2*Math.PI) % (2*Math.PI)) : ((ea - sa + 2*Math.PI) % (2*Math.PI));
+    for (let i = 0; i <= segs; i++) {
+        const a = sa + sweep * (i / segs);
+        canvasLineTo(id, x + Math.cos(a) * r, y + Math.sin(a) * r);
+    }
+}
+```
+
+Same applies to `arcTo()` (rounded-rect corners), `ellipse()`, and `roundRect()`.
+
+### 2. Gradient stops are individual `(color, pos)` args — NOT a JSON string
+
+**Spec:** `grad.addColorStop(pos, color)` accumulates stops; the gradient is opaquely passed via `ctx.fillStyle = grad`.
+
+**Bridge reality:** `canvasSetLinearGradient(id, x0, y0, x1, y1, color1, pos1, color2, pos2, ...)` and `canvasSetRadialGradient(id, cx, cy, radius, color1, pos1, ...)` read each pair via positional `args.get<>()`. Passing stops as a single JSON string makes `i+1 < args.numArgs` false on the first iteration → zero stops parsed → bridge dispatch skipped → `fillStyle = grad` falls through to `canvasSetFillColor(id, "[object Object]")` → parseColor returns default white → uniform white fill instead of the rainbow ramp.
+
+**Importer rule:** when serializing gradient stops, spread as variadic args:
+
+```ts
+const stopArgs: (string|number)[] = [];
+for (const s of grad.stops) stopArgs.push(s.color, s.offset);
+canvasSetLinearGradient(id, x0, y0, x1, y1, ...stopArgs);
+```
+
+### 3. Radial gradient: bridge takes single circle (cx, cy, R), not two-circle (x0,y0,r0,x1,y1,r1)
+
+**Spec:** `createRadialGradient(x0,y0,r0,x1,y1,r1)` — two circles, with the gradient interpolating in the cone between them.
+
+**Bridge reality:** `canvasSetRadialGradient(id, cx, cy, radius, ...stops)` only takes the single outer circle. Inner-circle / off-axis ring patterns degrade.
+
+**Importer rule:** map JS 6-numeric form to bridge's 3-numeric form using the OUTER circle (`x1, y1, r1`). For Spectr-style center-bloom (`r0=0`, same center) this is visually identical to the spec; for true two-point gradients, file a Pulp issue rather than emitting silently-wrong output.
+
+### 4. `ctx.clearRect()` was a parent-surface eraser pre-#1372
+
+**Reality (pre-pulp v0.74.1):** `ctx.clearRect()` used `SkBlendMode::kClear` / `CGContextClearRect` directly on the parent surface — NOT on a per-canvas backing layer. JS code that clears its own canvas would erase pixels another `<canvas>` sibling had just painted. Symptom: first sibling renders correctly, gets wiped by second sibling's clearRect at the start of its frame.
+
+**Now (pulp v0.74.1+):** each `CanvasWidget::paint` is wrapped in `save_layer`, isolating clearRect / Porter-Duff to that canvas's own buffer. Importer can emit `<canvas>` siblings without worrying about cross-erasure. Pin SDK `>= 0.74.1`.
+
+### 5. Other Canvas2D methods missing from the bridge
+
+- `ctx.measureText()` — bridge has `canvasMeasureText` but the shim should fall back to a per-char approximation (~6.5px for 10px monospace, ~px*0.6 for proportional) when not available
+- `ctx.strokeText()` — bridge has no stroke path; fall back to `canvasFillText` and accept the visual gap
+- `ctx.createPattern()` — not implemented; emit a solid-color fallback from the pattern's first stop
+- `ctx.createConicGradient()` — bridge has no `canvasSetConicGradient` registration even though `SkiaCanvas::set_fill_gradient_conic` exists; either file a Pulp follow-up or fall back to a flat solid
+
+### 6. SDK version requirements for canvas2d parity
+
+| Capability | Min SDK |
+|------------|---------|
+| `canvasSetLinearGradient` / `canvasSetRadialGradient` | v0.72.4 (pulp #1348) |
+| Gradient stops actually applied to fills | v0.72.5 (pulp #1353) |
+| `set_blend_mode` on Skia (GPU) honored | already wired; CG/CPU is silent no-op (pulp #1371) |
+| Per-canvas `save_layer` isolation (no sibling clearRect erase) | v0.74.1 (pulp #1372) |
+| Canvas paint instrumentation (`PULP_LOG_CANVAS_PAINT=1`) | v0.75.0 (pulp #1370) |
+
+Reject importer output that targets earlier SDK versions for canvas-heavy designs — the visual gaps will be silent and look like Pulp bugs.
+
+### 7. Validation discipline
+
+Always pixel-sample after rendering — visual inspection misses uniform-fallback bugs. A spectrum that renders "uniform light gray" instead of "rainbow gradient" looks roughly right at thumbnail scale but is structurally broken (every color stop resolved to white by the parseColor fallback). Sample horizontal cross-sections at the expected gradient axis and assert color variance > some threshold.
+
+### 8. Pointer events need explicit `registerPointer(id)` AND don't bubble
+
+**Spec:** `addEventListener('pointerdown', fn)` plus React synthetic-event bubbling: a click on a child reaches the parent's handler unless `stopPropagation` is called.
+
+**Bridge reality:** Pulp gates pointer dispatch behind an explicit `registerPointer(id)` call (parallel to `registerClick(id)` and `registerHover(id)`). `@pulp/react`'s prop-applier currently only wires `registerHover` for `mouseenter/leave`, so `onPointerDown/Move/Up` listeners are installed in the JS dispatch table but never fired by the native View — the JS handler appears registered (`on(id, 'pointerdown', fn)`) yet clicks never invoke it. Additionally, **pulp dispatches pointer events to the hit-test target only — there is no synthetic-event bubbling.** A handler on a parent `<div>` will not fire when the click lands on a child `<canvas>` that visually overlays it.
+
+This was the root cause of Spectr's "FilterBank renders rainbow but band drag is dead" symptom (spectr #32 / commit `b7ba2b8`). Confirmed by `__spectrLog` probe at the top of `onPointerDown`: handler does NOT fire on `cliclick c:600,400` even though `on(pr_3, pointerdown, ...)` is registered.
+
+**Importer rule:**
+
+1. Whenever the importer emits an `onPointerDown / onPointerMove / onPointerUp / onPointerLeave / onWheel` handler, also emit a `registerPointer(id)` call against the same widget. Do this in the ref-mount callback (or its equivalent post-mount hook) so the bridge wires `on_pointer_event` into the View. Idempotent on the bridge side; safe to call on every remount.
+2. **Do not assume bubbling.** If the design has a parent element with a pointer handler and child elements that visually cover it, mirror the same handler onto each direct child too. The handler can use the parent's `getBoundingClientRect()` for coord math so the same function works on every binding.
+
+```ts
+// Bind on parent + every interactive child:
+<wrap onPointerDown={onPD} onPointerMove={onPM} onPointerUp={onPU}>
+  <canvas onPointerDown={onPD} onPointerMove={onPM} onPointerUp={onPU} ... />
+  <canvas onPointerDown={onPD} onPointerMove={onPM} onPointerUp={onPU} ... />
+</wrap>
+```
+
+```ts
+// In the ref-mount callback:
+const id = inst.id;
+if (typeof globalThis.registerPointer === 'function') globalThis.registerPointer(id);
+```
+
+The cleaner long-term fix is for `@pulp/react`'s prop-applier to call `registerPointer` automatically when it sees any pointer-event prop (parallel to its existing `registerHover` wiring) — track that as a follow-up Pulp issue rather than an importer-side workaround if you encounter it on a fresh import.
