@@ -40,16 +40,37 @@ static YGJustify to_yg_justify(FlexJustify j) {
     }
 }
 
-// Apply FlexStyle to a YGNode
-static void apply_flex_style(YGNodeRef node, const FlexStyle& f) {
+// Apply FlexStyle to a YGNode.
+//
+// `is_absolute` is true when the owning View has position:absolute or
+// position:fixed. CSS / Yoga semantics: an out-of-flow box is taken out
+// of its parent's flex line, so flex_grow / flex_shrink / flex_basis
+// must NOT contribute to the parent's main-axis sizing — and crucially,
+// must not consume "remaining space" on the parent's flex line. Pulp's
+// FlexStyle defaults (flex_shrink = 1) would otherwise leak in and let
+// Yoga shrink an absolute-with-explicit-dimension child to fit a flex
+// neighbour's slot. See pulp #1379 / #998. Direction / align / justify
+// still describe the absolute box's OWN inner layout, so those stay.
+static void apply_flex_style(YGNodeRef node, const FlexStyle& f, bool is_absolute) {
     YGNodeStyleSetFlexDirection(node, to_yg_direction(f.direction));
     YGNodeStyleSetAlignItems(node, to_yg_align(f.align_items));
     YGNodeStyleSetAlignSelf(node, to_yg_align(f.align_self));
     YGNodeStyleSetJustifyContent(node, to_yg_justify(f.justify_content));
 
-    YGNodeStyleSetFlexGrow(node, f.flex_grow);
-    YGNodeStyleSetFlexShrink(node, f.flex_shrink);
-    if (f.flex_basis >= 0) YGNodeStyleSetFlexBasis(node, f.flex_basis);
+    if (!is_absolute) {
+        // In-flow only: grow/shrink/basis are flex-line participation knobs.
+        // Out-of-flow boxes should not carry them — they belong to the
+        // containing block sizing path, not the flex line.
+        YGNodeStyleSetFlexGrow(node, f.flex_grow);
+        YGNodeStyleSetFlexShrink(node, f.flex_shrink);
+        if (f.flex_basis >= 0) YGNodeStyleSetFlexBasis(node, f.flex_basis);
+    } else {
+        // Be explicit: zero them so a previously-set Yoga node (we don't
+        // recycle here today, but defensively) doesn't carry residue, and
+        // so Yoga's "absolute child has flex_basis" code path doesn't fire.
+        YGNodeStyleSetFlexGrow(node, 0.0f);
+        YGNodeStyleSetFlexShrink(node, 0.0f);
+    }
 
     YGNodeStyleSetFlexWrap(node, f.flex_wrap ? YGWrapWrap : YGWrapNoWrap);
 
@@ -143,8 +164,15 @@ static std::vector<View*> ordered_visible_children(View& parent) {
 }
 
 static void build_yoga_subtree(View& view, YGNodeRef node) {
-    apply_flex_style(node, view.flex());
+    // Position-type wins ordering: tell Yoga "this is absolute" BEFORE
+    // any flex-flow attributes are applied, so flex_grow/flex_shrink/
+    // flex_basis can be gated on absolute-ness in apply_flex_style and
+    // never contribute to the parent's flex line. (pulp #1379 / #998)
     apply_position_style(node, view);
+
+    const bool is_absolute = view.position() == View::Position::absolute
+                          || view.position() == View::Position::fixed;
+    apply_flex_style(node, view.flex(), is_absolute);
     YGNodeSetContext(node, &view);
 
     auto children = ordered_visible_children(view);
