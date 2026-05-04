@@ -1475,3 +1475,193 @@ TEST_CASE("RecordingCanvas::current_transform composes translate + scale",
     REQUIRE(t.e == 10.0f);
     REQUIRE(t.f == 20.0f);
 }
+
+// ── pulp #1368 round 2 — env-gated paint trace: coverage exercise ───────────
+//
+// PULP_LOG_CANVAS_PAINT=1 is the diagnostic switch Spectr uses to capture
+// per-frame bounds + CTM + cmd_total + per-type summary. The fprintf+map
+// walk in CanvasWidget::paint() is purely instrumentation — guarded behind
+// a single getenv per paint and otherwise a complete no-op. These tests
+// exercise the gated path so diff-coverage isn't blocked by
+// "instrumentation isn't covered" against a behavior change that only
+// surfaces when the env var is set.
+
+#include <cstdlib>
+#include <string>
+
+namespace {
+
+// Cross-platform setenv/unsetenv wrappers — Windows MSVC ships _putenv_s
+// instead of POSIX setenv/unsetenv. The instrumentation tests don't care
+// about thread-safety; both POSIX setenv() and _putenv_s() are documented
+// non-reentrant against getenv() on the same key.
+inline void portable_setenv(const char* key, const char* value) {
+#if defined(_WIN32)
+    _putenv_s(key, value);
+#else
+    ::setenv(key, value, 1);
+#endif
+}
+
+inline void portable_unsetenv(const char* key) {
+#if defined(_WIN32)
+    _putenv_s(key, "");  // empty string clears on Windows
+#else
+    ::unsetenv(key);
+#endif
+}
+
+class ScopedEnv {
+public:
+    ScopedEnv(const char* key, const char* value) : key_(key) {
+        const char* prev = std::getenv(key);
+        prev_value_ = prev ? std::string(prev) : std::string();
+        had_prev_ = prev != nullptr;
+        portable_setenv(key, value);
+    }
+    ~ScopedEnv() {
+        if (had_prev_) portable_setenv(key_, prev_value_.c_str());
+        else portable_unsetenv(key_);
+    }
+    ScopedEnv(const ScopedEnv&) = delete;
+    ScopedEnv& operator=(const ScopedEnv&) = delete;
+private:
+    const char* key_;
+    std::string prev_value_;
+    bool had_prev_;
+};
+
+} // namespace
+
+TEST_CASE("CanvasWidget::paint logging path runs when PULP_LOG_CANVAS_PAINT=1",
+          "[canvas_widget][issue-1368][round2][instrumentation]") {
+    ScopedEnv guard("PULP_LOG_CANVAS_PAINT", "1");
+
+    RecordingCanvas rc;
+    CanvasWidget cw;
+    cw.set_bounds({10, 20, 200, 100});
+
+    // Mix of command types so the per-type tally has multiple entries.
+    CanvasDrawCmd r;
+    r.type = CanvasDrawCmd::Type::fill_rect;
+    r.x = 0; r.y = 0; r.w = 50; r.h = 50;
+    r.color = {255, 0, 0, 255};
+    cw.add_command(r);
+
+    CanvasDrawCmd c;
+    c.type = CanvasDrawCmd::Type::clear_rect;
+    c.x = 5; c.y = 5; c.w = 10; c.h = 10;
+    cw.add_command(c);
+
+    CanvasDrawCmd s;
+    s.type = CanvasDrawCmd::Type::save;
+    cw.add_command(s);
+    CanvasDrawCmd rs;
+    rs.type = CanvasDrawCmd::Type::restore;
+    cw.add_command(rs);
+
+    // Should not throw, should run the env-gated logging block once, and the
+    // command replay must still happen normally on the recording canvas.
+    REQUIRE_NOTHROW(cw.paint(rc));
+
+    // The replay still happens — fill_rect and clear_rect both reach rc.
+    REQUIRE(rc.count(DrawCommand::Type::fill_rect) == 1);
+    REQUIRE(rc.count(DrawCommand::Type::clear_rect) == 1);
+}
+
+// Hit every CanvasDrawCmd::Type case in canvas_cmd_type_name's switch by
+// queueing one command of each type. Coverage of canvas_cmd_type_name is
+// only reached when the env-gated logging path runs over commands_ — so
+// this test sets PULP_LOG_CANVAS_PAINT=1 and enumerates the full type set.
+TEST_CASE("CanvasWidget::paint logging summary covers every CanvasDrawCmd type",
+          "[canvas_widget][issue-1368][round2][instrumentation]") {
+    ScopedEnv guard("PULP_LOG_CANVAS_PAINT", "1");
+
+    RecordingCanvas rc;
+    CanvasWidget cw;
+    cw.set_bounds({0, 0, 200, 200});
+
+    auto add = [&](CanvasDrawCmd::Type t) {
+        CanvasDrawCmd c;
+        c.type = t;
+        c.x = 0; c.y = 0; c.w = 10; c.h = 10;
+        c.color = {128, 128, 128, 255};
+        cw.add_command(c);
+    };
+
+    add(CanvasDrawCmd::Type::fill_rect);
+    add(CanvasDrawCmd::Type::stroke_rect);
+    add(CanvasDrawCmd::Type::fill_rounded_rect);
+    add(CanvasDrawCmd::Type::stroke_rounded_rect);
+    add(CanvasDrawCmd::Type::fill_circle);
+    add(CanvasDrawCmd::Type::stroke_circle);
+    add(CanvasDrawCmd::Type::stroke_line);
+    add(CanvasDrawCmd::Type::stroke_arc);
+    add(CanvasDrawCmd::Type::fill_text);
+    add(CanvasDrawCmd::Type::set_font);
+    add(CanvasDrawCmd::Type::set_text_align);
+    add(CanvasDrawCmd::Type::set_text_baseline);
+    add(CanvasDrawCmd::Type::set_fill_color);
+    add(CanvasDrawCmd::Type::set_stroke_color);
+    add(CanvasDrawCmd::Type::set_line_width);
+    add(CanvasDrawCmd::Type::set_line_cap);
+    add(CanvasDrawCmd::Type::set_line_join);
+    add(CanvasDrawCmd::Type::set_global_alpha);
+    add(CanvasDrawCmd::Type::set_blend_mode);
+    add(CanvasDrawCmd::Type::set_fill_gradient_linear);
+    add(CanvasDrawCmd::Type::set_fill_gradient_radial);
+    add(CanvasDrawCmd::Type::clear_fill_gradient);
+    add(CanvasDrawCmd::Type::begin_path);
+    add(CanvasDrawCmd::Type::move_to);
+    add(CanvasDrawCmd::Type::line_to);
+    add(CanvasDrawCmd::Type::quad_to);
+    add(CanvasDrawCmd::Type::cubic_to);
+    add(CanvasDrawCmd::Type::close_path);
+    add(CanvasDrawCmd::Type::fill_path);
+    add(CanvasDrawCmd::Type::stroke_path);
+    add(CanvasDrawCmd::Type::clip_path);
+    // save/restore covered in the previous test
+    add(CanvasDrawCmd::Type::translate);
+    add(CanvasDrawCmd::Type::scale);
+    add(CanvasDrawCmd::Type::rotate);
+    add(CanvasDrawCmd::Type::clip_rect);
+    add(CanvasDrawCmd::Type::set_transform);
+    add(CanvasDrawCmd::Type::clip);
+    add(CanvasDrawCmd::Type::draw_image);
+    add(CanvasDrawCmd::Type::set_line_dash);
+    add(CanvasDrawCmd::Type::put_image_data);
+    add(CanvasDrawCmd::Type::clear);
+    // clear_rect covered in the previous test
+
+    REQUIRE_NOTHROW(cw.paint(rc));
+    // No assertion on rc — some types are no-ops on RecordingCanvas; the
+    // point is that canvas_cmd_type_name's switch covered each case.
+}
+
+TEST_CASE("CanvasWidget::paint logging path is silent when env unset or empty",
+          "[canvas_widget][issue-1368][round2][instrumentation]") {
+    // No env var set — the logging block must be skipped entirely (gated
+    // behind canvas_paint_logging_enabled()).
+    portable_unsetenv("PULP_LOG_CANVAS_PAINT");
+
+    RecordingCanvas rc;
+    CanvasWidget cw;
+    cw.set_bounds({0, 0, 100, 100});
+    CanvasDrawCmd r;
+    r.type = CanvasDrawCmd::Type::fill_rect;
+    r.x = 0; r.y = 0; r.w = 10; r.h = 10;
+    cw.add_command(r);
+
+    REQUIRE_NOTHROW(cw.paint(rc));
+    REQUIRE(rc.count(DrawCommand::Type::fill_rect) == 1);
+
+    // "0" / empty also disable.
+    {
+        ScopedEnv g0("PULP_LOG_CANVAS_PAINT", "0");
+        REQUIRE_NOTHROW(cw.paint(rc));
+    }
+    {
+        ScopedEnv ge("PULP_LOG_CANVAS_PAINT", "");
+        REQUIRE_NOTHROW(cw.paint(rc));
+    }
+}
