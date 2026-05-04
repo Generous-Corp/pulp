@@ -1,12 +1,133 @@
 #include <pulp/view/canvas_widget.hpp>
 
+#include <cstdio>
+#include <cstdlib>
+#include <map>
+#include <string>
+
 #ifdef PULP_HAS_SKIA
 #include <pulp/canvas/skia_canvas.hpp>
 #endif
 
 namespace pulp::view {
 
+namespace {
+
+// pulp #1368 round 2 — env-gated paint trace. When `PULP_LOG_CANVAS_PAINT=1`
+// is exported the live process logs one grep-able line per CanvasWidget paint
+// to stderr with the widget id, its bounds, and the inbound canvas CTM. The
+// Spectr filterbank repro (#1368) shows pr_1's first-instruction fillRect
+// landing in the title-bar region above the visible window — this trace is
+// the diagnostic that lets us confirm whether bounds_.y / CTM are off-window
+// vs. the widget never being painted at all. Returns false when the variable
+// is unset / "0" / empty so production builds incur a single getenv lookup
+// per paint and nothing else.
+inline bool canvas_paint_logging_enabled() {
+    const char* v = std::getenv("PULP_LOG_CANVAS_PAINT");
+    if (!v || !*v) return false;
+    if (v[0] == '0' && v[1] == '\0') return false;
+    return true;
+}
+
+// pulp #1368 follow-up — translate CanvasDrawCmd::Type to a stable, grep-able
+// short string so the env-gated trace can summarise commands_ without dragging
+// a heavyweight reflection helper into the hot path. Names mirror the enum
+// labels exactly so a Spectr-side `grep fill_rect` lines up with the source.
+inline const char* canvas_cmd_type_name(CanvasDrawCmd::Type t) {
+    switch (t) {
+        case CanvasDrawCmd::Type::fill_rect: return "fill_rect";
+        case CanvasDrawCmd::Type::stroke_rect: return "stroke_rect";
+        case CanvasDrawCmd::Type::fill_rounded_rect: return "fill_rounded_rect";
+        case CanvasDrawCmd::Type::stroke_rounded_rect: return "stroke_rounded_rect";
+        case CanvasDrawCmd::Type::fill_circle: return "fill_circle";
+        case CanvasDrawCmd::Type::stroke_circle: return "stroke_circle";
+        case CanvasDrawCmd::Type::stroke_line: return "stroke_line";
+        case CanvasDrawCmd::Type::stroke_arc: return "stroke_arc";
+        case CanvasDrawCmd::Type::fill_text: return "fill_text";
+        case CanvasDrawCmd::Type::set_font: return "set_font";
+        case CanvasDrawCmd::Type::set_text_align: return "set_text_align";
+        case CanvasDrawCmd::Type::set_text_baseline: return "set_text_baseline";
+        case CanvasDrawCmd::Type::set_fill_color: return "set_fill_color";
+        case CanvasDrawCmd::Type::set_stroke_color: return "set_stroke_color";
+        case CanvasDrawCmd::Type::set_line_width: return "set_line_width";
+        case CanvasDrawCmd::Type::set_line_cap: return "set_line_cap";
+        case CanvasDrawCmd::Type::set_line_join: return "set_line_join";
+        case CanvasDrawCmd::Type::set_global_alpha: return "set_global_alpha";
+        case CanvasDrawCmd::Type::set_blend_mode: return "set_blend_mode";
+        case CanvasDrawCmd::Type::set_fill_gradient_linear: return "set_fill_gradient_linear";
+        case CanvasDrawCmd::Type::set_fill_gradient_radial: return "set_fill_gradient_radial";
+        case CanvasDrawCmd::Type::clear_fill_gradient: return "clear_fill_gradient";
+        case CanvasDrawCmd::Type::begin_path: return "begin_path";
+        case CanvasDrawCmd::Type::move_to: return "move_to";
+        case CanvasDrawCmd::Type::line_to: return "line_to";
+        case CanvasDrawCmd::Type::quad_to: return "quad_to";
+        case CanvasDrawCmd::Type::cubic_to: return "cubic_to";
+        case CanvasDrawCmd::Type::close_path: return "close_path";
+        case CanvasDrawCmd::Type::fill_path: return "fill_path";
+        case CanvasDrawCmd::Type::stroke_path: return "stroke_path";
+        case CanvasDrawCmd::Type::clip_path: return "clip_path";
+        case CanvasDrawCmd::Type::save: return "save";
+        case CanvasDrawCmd::Type::restore: return "restore";
+        case CanvasDrawCmd::Type::translate: return "translate";
+        case CanvasDrawCmd::Type::scale: return "scale";
+        case CanvasDrawCmd::Type::rotate: return "rotate";
+        case CanvasDrawCmd::Type::clip_rect: return "clip_rect";
+        case CanvasDrawCmd::Type::set_transform: return "set_transform";
+        case CanvasDrawCmd::Type::clip: return "clip";
+        case CanvasDrawCmd::Type::draw_image: return "draw_image";
+        case CanvasDrawCmd::Type::set_line_dash: return "set_line_dash";
+        case CanvasDrawCmd::Type::put_image_data: return "put_image_data";
+        case CanvasDrawCmd::Type::clear: return "clear";
+        case CanvasDrawCmd::Type::clear_rect: return "clear_rect";
+    }
+    return "unknown";
+}
+
+} // namespace
+
 void CanvasWidget::paint(canvas::Canvas& canvas) {
+    // pulp #1368 round 2 — env-gated paint trace. Logged at entry, BEFORE any
+    // baseline / save_count snapshots so the line reflects the matrix the
+    // parent View::paint_all chain handed us. Format is grep-able:
+    //   [pulp:canvas-paint] id=<id> bounds=(x,y,w,h) ctm=[a,b,c,d,e,f]
+    //       cmd_total=<N> cmds={fill_rect=42,stroke_path=15,...}
+    //
+    // pulp #1368 follow-up — Spectr-agent narrowed the diagnosis to per-canvas
+    // surface compositing (pr_1's painted content discarded between sibling
+    // paints). The per-type summary distinguishes "rich command list processed
+    // but never composited" (cmd_total>0, varied types) from "silently
+    // truncated" (cmd_total tiny or 0). Tally is allocation-light: a single
+    // std::map walk gated behind the same env var, so production paints incur
+    // a single getenv lookup and nothing else.
+    if (canvas_paint_logging_enabled()) {
+        const auto& b = bounds();
+        const auto m = canvas.current_transform();
+        std::map<int, int> type_counts;
+        for (const auto& cmd : commands_) {
+            ++type_counts[static_cast<int>(cmd.type)];
+        }
+        std::string summary;
+        summary.reserve(type_counts.size() * 24);
+        bool first = true;
+        for (const auto& [tk, count] : type_counts) {
+            if (count <= 0) continue;
+            if (!first) summary.push_back(',');
+            first = false;
+            summary.append(canvas_cmd_type_name(static_cast<CanvasDrawCmd::Type>(tk)));
+            summary.push_back('=');
+            summary.append(std::to_string(count));
+        }
+        std::fprintf(stderr,
+                     "[pulp:canvas-paint] id=%s bounds=(%g,%g,%g,%g) "
+                     "ctm=[%g,%g,%g,%g,%g,%g] cmd_total=%zu cmds={%s}\n",
+                     id().c_str(), b.x, b.y, b.width, b.height,
+                     static_cast<double>(m.a), static_cast<double>(m.b),
+                     static_cast<double>(m.c), static_cast<double>(m.d),
+                     static_cast<double>(m.e), static_cast<double>(m.f),
+                     commands_.size(), summary.c_str());
+        std::fflush(stderr);
+    }
+
     // Snapshot the inbound device matrix so JS-driven setTransform() composes
     // onto the parent View transform rather than overwriting it (issue-897
     // P1 follow-up to issue-896).

@@ -14,6 +14,8 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - fix(view): per-CanvasWidget save_layer for HTML <canvas> sibling isolation (closes pulp #1368) ([#1372](https://github.com/danielraffel/pulp/pull/1372))
 
 <a id="v0740"></a>
+## [0.75.0]
+
 ## [0.74.0] - 2026-05-04
 
 - fix(view): canvas widget paint balances save/restore (closes pulp #1368) ([#1369](https://github.com/danielraffel/pulp/pull/1369))

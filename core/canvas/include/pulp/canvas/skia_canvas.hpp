@@ -49,6 +49,7 @@ public:
     void capture_paint_baseline_transform() override;
     void concat_transform(float a, float b, float c,
                           float d, float e, float f) override;
+    AffineTransform2x3 current_transform() const override;
 
     // ── Clipping ─────────────────────────────────────────────────────────
     void clip_rect(float x, float y, float w, float h) override;

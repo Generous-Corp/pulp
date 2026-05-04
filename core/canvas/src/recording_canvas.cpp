@@ -1,6 +1,31 @@
 #include <pulp/canvas/canvas.hpp>
 
+#include <cmath>
+
 namespace pulp::canvas {
+
+namespace {
+
+// Right-multiply current = current * other. Matches the semantics of
+// SkCanvas::concat / CGContextConcatCTM where the supplied transform is
+// applied to user-space coordinates *before* the existing CTM, so points
+// flow current(other(p)). Layout matches CanvasRenderingContext2D affine:
+//   [ a c e ]
+//   [ b d f ]
+//   [ 0 0 1 ]
+inline Canvas::AffineTransform2x3 concat(const Canvas::AffineTransform2x3& cur,
+                                         const Canvas::AffineTransform2x3& m) {
+    Canvas::AffineTransform2x3 out;
+    out.a = cur.a * m.a + cur.c * m.b;
+    out.b = cur.b * m.a + cur.d * m.b;
+    out.c = cur.a * m.c + cur.c * m.d;
+    out.d = cur.b * m.c + cur.d * m.d;
+    out.e = cur.a * m.e + cur.c * m.f + cur.e;
+    out.f = cur.b * m.e + cur.d * m.f + cur.f;
+    return out;
+}
+
+} // namespace
 
 size_t RecordingCanvas::count(DrawCommand::Type type) const {
     size_t n = 0;
@@ -12,11 +37,16 @@ size_t RecordingCanvas::count(DrawCommand::Type type) const {
 void RecordingCanvas::save() {
     commands_.push_back({DrawCommand::Type::save});
     ++save_depth_;
+    ctm_stack_.push_back(ctm_);
 }
 
 void RecordingCanvas::restore() {
     commands_.push_back({DrawCommand::Type::restore});
     if (save_depth_ > 0) --save_depth_;
+    if (!ctm_stack_.empty()) {
+        ctm_ = ctm_stack_.back();
+        ctm_stack_.pop_back();
+    }
 }
 
 void RecordingCanvas::restore_to_count(int target) {
@@ -29,6 +59,10 @@ void RecordingCanvas::restore_to_count(int target) {
     while (save_depth_ > target) {
         commands_.push_back({DrawCommand::Type::restore});
         --save_depth_;
+        if (!ctm_stack_.empty()) {
+            ctm_ = ctm_stack_.back();
+            ctm_stack_.pop_back();
+        }
     }
 }
 
@@ -36,18 +70,26 @@ void RecordingCanvas::translate(float x, float y) {
     DrawCommand cmd{DrawCommand::Type::translate};
     cmd.f[0] = x; cmd.f[1] = y;
     commands_.push_back(cmd);
+    AffineTransform2x3 t{1, 0, 0, 1, x, y};
+    ctm_ = concat(ctm_, t);
 }
 
 void RecordingCanvas::scale(float sx, float sy) {
     DrawCommand cmd{DrawCommand::Type::scale};
     cmd.f[0] = sx; cmd.f[1] = sy;
     commands_.push_back(cmd);
+    AffineTransform2x3 t{sx, 0, 0, sy, 0, 0};
+    ctm_ = concat(ctm_, t);
 }
 
 void RecordingCanvas::rotate(float radians) {
     DrawCommand cmd{DrawCommand::Type::rotate};
     cmd.f[0] = radians;
     commands_.push_back(cmd);
+    float cs = std::cos(radians);
+    float sn = std::sin(radians);
+    AffineTransform2x3 t{cs, sn, -sn, cs, 0, 0};
+    ctm_ = concat(ctm_, t);
 }
 
 void RecordingCanvas::set_transform(float a, float b, float c,
@@ -56,6 +98,7 @@ void RecordingCanvas::set_transform(float a, float b, float c,
     cmd.f[0] = a; cmd.f[1] = b; cmd.f[2] = c;
     cmd.f[3] = d; cmd.f[4] = e; cmd.f[5] = f;
     commands_.push_back(cmd);
+    ctm_ = AffineTransform2x3{a, b, c, d, e, f};
 }
 
 void RecordingCanvas::capture_paint_baseline_transform() {
@@ -68,6 +111,12 @@ void RecordingCanvas::concat_transform(float a, float b, float c,
     cmd.f[0] = a; cmd.f[1] = b; cmd.f[2] = c;
     cmd.f[3] = d; cmd.f[4] = e; cmd.f[5] = f;
     commands_.push_back(cmd);
+    AffineTransform2x3 m{a, b, c, d, e, f};
+    ctm_ = concat(ctm_, m);
+}
+
+Canvas::AffineTransform2x3 RecordingCanvas::current_transform() const {
+    return ctm_;
 }
 
 void RecordingCanvas::clip_rect(float x, float y, float w, float h) {
