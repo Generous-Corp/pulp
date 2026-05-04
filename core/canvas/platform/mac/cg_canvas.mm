@@ -213,6 +213,17 @@ void CoreGraphicsCanvas::add_rounded_rect_path(float x, float y, float w, float 
 
 void CoreGraphicsCanvas::fill_rounded_rect(float x, float y, float w, float h, float radius) {
     add_rounded_rect_path(x, y, w, h, radius);
+    // pulp #1359 — gate on has_gradient_ so the active gradient paints the
+    // rounded rect, mirroring fill_rect / fill_current_path. Without this,
+    // a gradient set via set_fill_gradient_linear/_radial silently dropped
+    // back to apply_fill_color() (Spectr's CPU-mode FilterBank backplate).
+    if (has_gradient_) {
+        CGContextSaveGState(ctx_);
+        CGContextClip(ctx_);  // clip to the path we just built
+        fill_with_active_paint();
+        CGContextRestoreGState(ctx_);
+        return;
+    }
     apply_fill_color();
     CGContextFillPath(ctx_);
 }
@@ -224,8 +235,21 @@ void CoreGraphicsCanvas::stroke_rounded_rect(float x, float y, float w, float h,
 }
 
 void CoreGraphicsCanvas::fill_circle(float cx, float cy, float radius) {
+    const CGRect bounds = CGRectMake(cx - radius, cy - radius, radius * 2, radius * 2);
+    // pulp #1359 — when a gradient is active, build an ellipse path and clip
+    // to it so fill_with_active_paint() paints the gradient inside the circle.
+    // Mirrors fill_rect / fill_rounded_rect / fill_current_path.
+    if (has_gradient_) {
+        CGContextSaveGState(ctx_);
+        CGContextBeginPath(ctx_);
+        CGContextAddEllipseInRect(ctx_, bounds);
+        CGContextClip(ctx_);
+        fill_with_active_paint();
+        CGContextRestoreGState(ctx_);
+        return;
+    }
     apply_fill_color();
-    CGContextFillEllipseInRect(ctx_, CGRectMake(cx - radius, cy - radius, radius * 2, radius * 2));
+    CGContextFillEllipseInRect(ctx_, bounds);
 }
 
 void CoreGraphicsCanvas::stroke_circle(float cx, float cy, float radius) {
@@ -264,13 +288,23 @@ void CoreGraphicsCanvas::stroke_path(const Point2D* points, size_t count) {
 
 void CoreGraphicsCanvas::fill_path(const Point2D* points, size_t count) {
     if (count < 3) return;
-    apply_fill_color();
     CGContextSetShouldAntialias(ctx_, true);
     CGContextBeginPath(ctx_);
     CGContextMoveToPoint(ctx_, points[0].x, points[0].y);
     for (size_t i = 1; i < count; ++i)
         CGContextAddLineToPoint(ctx_, points[i].x, points[i].y);
     CGContextClosePath(ctx_);
+    // pulp #1359 — honor active gradient on closed point-array fills, the
+    // direct CG parallel of SkiaCanvas::fill_path (#1353). Without this,
+    // shapes drawn via the Point2D* overload silently dropped the gradient.
+    if (has_gradient_) {
+        CGContextSaveGState(ctx_);
+        CGContextClip(ctx_);  // clip to the path we just built
+        fill_with_active_paint();
+        CGContextRestoreGState(ctx_);
+        return;
+    }
+    apply_fill_color();
     CGContextFillPath(ctx_);
 }
 

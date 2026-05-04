@@ -1482,4 +1482,119 @@ TEST_CASE("CoreGraphicsCanvas linear gradient paints multiple colors (issue 1322
     REQUIRE(saw_blue_dominant);
 }
 
+// pulp #1359 — fill_rect already routes the active gradient through
+// fill_with_active_paint(), but fill_path / fill_circle / fill_rounded_rect
+// silently dropped the gradient and fell back to apply_fill_color(). This
+// is the direct CG parallel of pulp #1350/#1353 on the Skia side. Spectr's
+// CPU-mode FilterBank backplate is the canonical repro — it paints solid
+// white instead of the dark-gradient backplate without this fix.
+//
+// Verify a 64x8 rect filled with a red→green linear gradient produces a
+// red-dominant left endpoint and a green-dominant right endpoint.
+TEST_CASE("CoreGraphicsCanvas::fill_rect honors active linear gradient",
+          "[canvas][cg][gradient][issue-1359]") {
+    constexpr int W = 64;
+    constexpr int H = 8;
+    std::vector<uint8_t> pixels(static_cast<size_t>(W) * H * 4u, 0u);
+    auto cs = CGColorSpaceCreateDeviceRGB();
+    REQUIRE(cs != nullptr);
+    const uint32_t bitmap_info =
+        static_cast<uint32_t>(kCGImageAlphaPremultipliedLast) |
+        static_cast<uint32_t>(kCGBitmapByteOrder32Big);
+    CGContextRef ctx = CGBitmapContextCreate(
+        pixels.data(), W, H, 8, W * 4u, cs, bitmap_info);
+    CGColorSpaceRelease(cs);
+    REQUIRE(ctx != nullptr);
+
+    {
+        CoreGraphicsCanvas canvas(ctx, static_cast<float>(W),
+                                  static_cast<float>(H));
+        Color colors[2] = {
+            Color::rgba(1.0f, 0.0f, 0.0f, 1.0f),
+            Color::rgba(0.0f, 1.0f, 0.0f, 1.0f),
+        };
+        float positions[2] = {0.0f, 1.0f};
+        canvas.set_fill_gradient_linear(0, 0, static_cast<float>(W), 0,
+                                         colors, positions, 2);
+        canvas.fill_rect(0, 0, static_cast<float>(W), static_cast<float>(H));
+    }
+    CGContextRelease(ctx);
+
+    // Sample two pixels — one near the left edge, one near the right edge,
+    // both on a middle row to dodge any antialiasing along the top/bottom.
+    auto sample = [&](int x, int y) {
+        const size_t idx = (static_cast<size_t>(y) * W + x) * 4u;
+        return std::tuple<int, int, int, int>{pixels[idx], pixels[idx + 1],
+                                              pixels[idx + 2], pixels[idx + 3]};
+    };
+    auto [lr, lg, lb, la] = sample(2, H / 2);
+    auto [rr, rg, rb, rb_a] = sample(W - 3, H / 2);
+    INFO("left rgba=" << lr << "," << lg << "," << lb << "," << la);
+    INFO("right rgba=" << rr << "," << rg << "," << rb << "," << rb_a);
+    // Directional check: left endpoint must be more red than green; right
+    // endpoint must be more green than red. Tolerant of CG color-space drift.
+    REQUIRE(lr > lg);
+    REQUIRE(rg > rr);
+}
+
+// pulp #1359 — same test for fill_path. Build a triangle path and verify
+// at least two pixels inside the rendered triangle differ in color, proving
+// the gradient was actually painted (not a single solid colour).
+TEST_CASE("CoreGraphicsCanvas::fill_path honors active linear gradient",
+          "[canvas][cg][gradient][issue-1359]") {
+    constexpr int W = 64;
+    constexpr int H = 32;
+    std::vector<uint8_t> pixels(static_cast<size_t>(W) * H * 4u, 0u);
+    auto cs = CGColorSpaceCreateDeviceRGB();
+    REQUIRE(cs != nullptr);
+    const uint32_t bitmap_info =
+        static_cast<uint32_t>(kCGImageAlphaPremultipliedLast) |
+        static_cast<uint32_t>(kCGBitmapByteOrder32Big);
+    CGContextRef ctx = CGBitmapContextCreate(
+        pixels.data(), W, H, 8, W * 4u, cs, bitmap_info);
+    CGColorSpaceRelease(cs);
+    REQUIRE(ctx != nullptr);
+
+    {
+        CoreGraphicsCanvas canvas(ctx, static_cast<float>(W),
+                                  static_cast<float>(H));
+        Color colors[2] = {
+            Color::rgba(1.0f, 0.0f, 0.0f, 1.0f),
+            Color::rgba(0.0f, 1.0f, 0.0f, 1.0f),
+        };
+        float positions[2] = {0.0f, 1.0f};
+        canvas.set_fill_gradient_linear(0, 0, static_cast<float>(W), 0,
+                                         colors, positions, 2);
+
+        // Triangle covering most of the bitmap horizontally so the gradient
+        // is sampled across its full extent.
+        Canvas::Point2D tri[3] = {
+            {4.0f, 4.0f},
+            {static_cast<float>(W) - 4.0f, static_cast<float>(H) / 2.0f},
+            {4.0f, static_cast<float>(H) - 4.0f},
+        };
+        canvas.fill_path(tri, 3);
+    }
+    CGContextRelease(ctx);
+
+    // Walk the bitmap and count pixels that look red-dominant vs
+    // green-dominant. If fill_path dropped the gradient and fell back to
+    // apply_fill_color(), every painted pixel would be a single colour and
+    // exactly one of these counts would be non-zero.
+    int red_dominant = 0;
+    int green_dominant = 0;
+    for (size_t i = 0; i + 3 < pixels.size(); i += 4) {
+        const int r = pixels[i];
+        const int g = pixels[i + 1];
+        const int a = pixels[i + 3];
+        if (a < 10) continue;  // background
+        if (r >= 150 && g <= 60) ++red_dominant;
+        if (g >= 150 && r <= 60) ++green_dominant;
+    }
+    INFO("red_dominant=" << red_dominant
+         << " green_dominant=" << green_dominant);
+    REQUIRE(red_dominant > 0);
+    REQUIRE(green_dominant > 0);
+}
+
 #endif  // __APPLE__
