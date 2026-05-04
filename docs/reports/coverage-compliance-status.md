@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-04-30 02:20 EDT
+Last reviewed: 2026-05-04 16:09 PDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`.
@@ -85,6 +85,18 @@ gh pr list --repo danielraffel/pulp --label codecov --state open \
 Do not preserve stale point-in-time queue lists in this document. When
 a queue snapshot is useful, post it as a tracker comment with concrete
 dates, PR numbers, and head SHAs.
+
+## Namespace Pause Override
+
+As of 2026-05-04 16:09 PDT, the Phase 3 Codecov queue remains paused
+to keep Namespace capacity available for other projects. During the
+pause, do not dispatch CI, rerun workflows, update PR branches, push,
+or merge Codecov tranches. Continue only read-only queue checks, local
+validation in existing worktrees, and ledger reconciliation.
+
+Use `docs/reports/phase3-codecov-queue-pause-ledger.md` for the
+current paused queue snapshot and resume notes. The normal operating
+loop below resumes only after Namespace capacity returns.
 
 ## Phase 3 Operating Loop
 
