@@ -8,6 +8,13 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v0751"></a>
+## [0.75.1] - 2026-05-04
+
+- fix(view): UTF-8-safe JS prelude embedding (closes pulp #1382) ([#1383](https://github.com/danielraffel/pulp/pull/1383))
+- fix(ci): retry-on-fail Yoga priming + asset watchdog for release-cli (closes #1375) ([#1378](https://github.com/danielraffel/pulp/pull/1378))
+- docs(skills): codify Canvas2D bridge gotchas for importer + shim authors ([#1376](https://github.com/danielraffel/pulp/pull/1376))
+
 <a id="v0750"></a>
 ## [0.75.0] - 2026-05-04
 
@@ -1223,6 +1230,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.75.1]: https://github.com/danielraffel/pulp/releases/tag/v0.75.1
 [0.75.0]: https://github.com/danielraffel/pulp/releases/tag/v0.75.0
 [0.74.1]: https://github.com/danielraffel/pulp/releases/tag/v0.74.1
 [0.74.0]: https://github.com/danielraffel/pulp/releases/tag/v0.74.0
