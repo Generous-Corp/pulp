@@ -9,6 +9,7 @@
 // emitted setX sequence with one diff helper.
 
 import type { PulpInstance } from './types.js';
+import { makeSyntheticEvent } from './synthetic-event.js';
 
 // Bridge globals are looked up through globalThis at call time so the
 // mock-bridge install path picks them up. See host-config.ts for the
@@ -92,9 +93,21 @@ function applyEventHandler(id: string, key: string, value: unknown): void {
         // the bridge — re-registers replace the lambdas, same shape).
         call('registerHover', id);
     }
-    // Wrap the React handler so the bridge's __dispatch__ can call it.
-    // The bridge passes positional args after id+eventName; just forward.
-    call('on', id, eventName, (...a: unknown[]) => (value as (...x: unknown[]) => void)(...a));
+    // pulp #1352 — wrap the React handler in a synthetic-event factory so
+    // JSX consumers receive a React-DOM-shaped event object (with
+    // `currentTarget`, `target`, `preventDefault`, `nativeEvent.rawArgs`,
+    // and event-type-specific fields) instead of the bridge's raw
+    // positional args (e.g. literal `0` for mouseenter). Without this,
+    // idiomatic handlers like
+    //   onMouseEnter={e => e.currentTarget.style.background = 'rgba(...)'}
+    // crash with `Cannot read property 'style' of undefined`. See the
+    // synthetic-event module header for the full surface and the
+    // event-type → field-extraction routing.
+    const handler = value as (e: unknown) => void;
+    call('on', id, eventName, (...rawArgs: unknown[]) => {
+        const evt = makeSyntheticEvent(id, eventName, rawArgs);
+        handler(evt);
+    });
 }
 
 /// Apply a single prop to its corresponding bridge setter.
