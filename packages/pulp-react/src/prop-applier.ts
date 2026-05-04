@@ -85,6 +85,34 @@ function isHoverEvent(eventName: string): boolean {
     );
 }
 
+/// Pointer events the bridge gates behind registerPointer(id).
+/// onPointerDown / onPointerUp / onPointerCancel / onPointerMove map
+/// to the bridge's `on_pointer_event` callback path; without
+/// `registerPointer`, the C++ side never wires the callback into the
+/// View even though the JS listener is installed via
+/// `on(id, 'pointerdown', fn)`. Spectr's FilterBank band drag was the
+/// canonical repro — see import-design SKILL.md gotcha #8 (pulp #1381,
+/// parallel to the existing isHoverEvent gating for #1149).
+function isPointerEvent(eventName: string): boolean {
+    return (
+        eventName === 'pointerdown' ||
+        eventName === 'pointerup' ||
+        eventName === 'pointercancel' ||
+        eventName === 'pointermove'
+    );
+}
+
+/// Wheel events go through a separate `registerWheel(id)` bridge call
+/// because the C++ dispatch lambda for wheel filters on `me.is_wheel`
+/// (`registerPointer`'s lambda early-returns on `is_wheel`, and
+/// `registerWheel`'s lambda early-returns on `!is_wheel`). Both can
+/// coexist on the same widget since each chains to the previous
+/// `on_pointer_event` lambda. Spectr's FilterBank zoom (onWheel
+/// handler) needs this separate gate (pulp #1387 gap #4).
+function isWheelEvent(eventName: string): boolean {
+    return eventName === 'wheel';
+}
+
 function applyEventHandler(id: string, key: string, value: unknown): void {
     if (typeof value !== 'function') return;
     const eventName = eventNameFor(key);
@@ -92,6 +120,18 @@ function applyEventHandler(id: string, key: string, value: unknown): void {
         // Arm the native hover dispatchers exactly once (idempotent on
         // the bridge — re-registers replace the lambdas, same shape).
         call('registerHover', id);
+    }
+    if (isPointerEvent(eventName)) {
+        // pulp #1381 — without this call the bridge keeps the JS listener
+        // in its dispatch table but the View's on_pointer_event callback
+        // is never armed, and clicks never fire the React handler.
+        // Idempotent on the bridge side (replaces the lambda).
+        call('registerPointer', id);
+    }
+    if (isWheelEvent(eventName)) {
+        // pulp #1387 gap #4 — Spectr's zoom-via-onWheel doesn't fire
+        // unless we explicitly arm the wheel dispatch path.
+        call('registerWheel', id);
     }
     // pulp #1352 — wrap the React handler in a synthetic-event factory so
     // JSX consumers receive a React-DOM-shaped event object (with
@@ -186,6 +226,16 @@ function applyOne(id: string, type: string, key: string, value: unknown): void {
         case 'borderBottomRightRadius': return call('setBorderBottomRightRadius', id, value as number);
         case 'opacity':      return call('setOpacity', id, value as number);
         case 'visible':      return call('setVisible', id, value as boolean);
+        // pulp #1387 gap #1 — overflow was reachable via the DOM-lite
+        // path (web-compat-style-decl.js routes 'overflow' to setOverflow)
+        // but missing from the @pulp/react prop-applier, so JSX consumers
+        // setting `style={{ overflow: 'hidden' }}` silently dropped it.
+        // Spectr's dropdowns hit this — `width: 230 + overflow: hidden`
+        // on the dropdown row was being discarded, so the row grew to
+        // intrinsic content width and overflowed the container.
+        // Accepts the CSS keyword strings ('hidden' / 'visible' /
+        // 'scroll' / 'auto'); bridge maps to View::Overflow enum.
+        case 'overflow':     return call('setOverflow', id, value as string);
 
         // CSS-style positioning (pulp #779 follow-up; matches setPosition
         // + setTop/setLeft/setRight/setBottom on the bridge).
