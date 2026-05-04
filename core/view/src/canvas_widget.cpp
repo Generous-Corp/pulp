@@ -25,7 +25,34 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
     // overlay sibling kept working. Snapshot depth at entry, then pop
     // back to it after replay so the parent always sees the canvas at
     // the depth it expects.
+    //
+    // pulp #1368 (root cause, follow-up to the save/restore depth
+    // defense above) — the deeper bug behind the same issue: JS-driven
+    // `clearRect()` lowers to a kClear blend on the underlying surface
+    // (SkBlendMode::kClear / CGContextClearRect), which unconditionally
+    // zeros destination texels regardless of the source alpha. With
+    // multiple sibling CanvasWidgets sharing the parent View's paint
+    // surface, sibling-2's clearRect at the start of its draw replay
+    // erases pixels sibling-1 just painted. Concretely Spectr's main
+    // canvas painted, then the overlay canvas's clearRect at frame
+    // start blew it away again — visible only because the ratio of
+    // visible-frames to invisible-frames depended on JSX ordering.
+    //
+    // HTML <canvas> semantics give every canvas its own backing store,
+    // so clearRect on canvas A cannot affect canvas B. To match that,
+    // wrap each CanvasWidget's replay in `save_layer()` covering the
+    // local bounds. Inside the layer, kClear zeros only the layer's
+    // texels; the matching `restore()` blends the layer back into the
+    // parent surface using the default SrcOver, which is what the HTML
+    // spec demands. Skip the layer when bounds are degenerate so we
+    // don't open a zero-sized offscreen.
     const int saved_depth = canvas.save_count();
+    const auto& widget_bounds = bounds();
+    const bool open_layer = (widget_bounds.width > 0.0f && widget_bounds.height > 0.0f);
+    if (open_layer) {
+        canvas.save_layer(0.0f, 0.0f, widget_bounds.width, widget_bounds.height,
+                          /*opacity=*/1.0f, /*blur_radius=*/0.0f);
+    }
 
     // pulp #929 — Canvas widget paint contract:
     //   * The widget MUST NOT pre-fill its bounds with an opaque background
@@ -317,12 +344,28 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
         }
     }
 
-    // pulp #1368 — pop any leftover saves the JS draw script forgot to
-    // restore. The matching snapshot is at the top of this function. On
-    // backends without an introspectable save stack this is a no-op
-    // (default `restore_to_count` and `save_count() == 0`); the live
-    // SkiaCanvas / CoreGraphicsCanvas backends honor it. Tests use
-    // RecordingCanvas which models the same contract.
+    // pulp #1368 — restore back to the depth captured at entry. This
+    // single call unconditionally pops:
+    //   * any leftover `ctx.save()` the JS draw script forgot to match
+    //     with `ctx.restore()` (the original #1369 fix), AND
+    //   * the per-canvas `save_layer()` opened above, so the offscreen
+    //     layer is composited back into the parent surface via
+    //     SrcOver — matching HTML <canvas> per-element backing-store
+    //     semantics where one canvas's clearRect cannot affect any
+    //     sibling canvas. Without the layer the kClear blend in
+    //     clear_rect() (SkBlendMode::kClear / CGContextClearRect)
+    //     unconditionally zeros destination texels on the shared
+    //     parent surface, erasing pixels that sibling canvases just
+    //     painted. The single restore_to_count(N) handles both cases
+    //     uniformly: target N == pre-entry depth, so everything pushed
+    //     in this paint() — leftover JS saves + the save_layer — is
+    //     popped together.
+    //
+    // On backends without an introspectable save stack (default
+    // `restore_to_count` / `save_count() == 0` in the Canvas base) this
+    // is a no-op; the live SkiaCanvas / CoreGraphicsCanvas backends
+    // honor it. Tests use RecordingCanvas which models the same
+    // contract.
     canvas.restore_to_count(saved_depth);
 }
 

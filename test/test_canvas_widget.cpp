@@ -352,12 +352,22 @@ TEST_CASE("CanvasWidget partial fillRect leaves untouched pixels transparent",
     REQUIRE(outside.r == 0);
 }
 
-TEST_CASE("CanvasWidget clearRect actually clears Skia pixels",
-          "[canvas_widget][skia][issue-929]") {
-    // Pre-fill the surface with opaque white (simulates a parent's paint
-    // pass having already drawn the underlying area). A subsequent
-    // clearRect issued through CanvasWidget must replace those pixels
-    // with transparent black, not SrcOver-blend a transparent fill.
+TEST_CASE("CanvasWidget clearRect zeros its own backing store, not the parent",
+          "[canvas_widget][skia][issue-929][issue-1368]") {
+    // pulp #1368 contract update: each CanvasWidget paints into its own
+    // save_layer-backed offscreen so JS-driven clearRect (kClear blend)
+    // can only zero THIS canvas's backing store. The parent surface is
+    // untouched by the clear; on layer restore the empty layer composites
+    // back as a no-op SrcOver and the parent pixels survive.
+    //
+    // Pre-#1368, clearRect was emitted directly on the inbound parent
+    // surface, so it nuked sibling-painted pixels. The check we now want:
+    //
+    //   parent surface pre-painted white
+    //     → CanvasWidget with clearRect over its full bounds runs alone
+    //     → parent stays WHITE (HTML <canvas> spec — sibling canvases
+    //       have their own backing stores, so clear on canvas A cannot
+    //       affect the parent surface or canvas B's content).
     SkImageInfo info = SkImageInfo::Make(32, 32, kRGBA_8888_SkColorType,
                                          kPremul_SkAlphaType,
                                          SkColorSpace::MakeSRGB());
@@ -375,14 +385,17 @@ TEST_CASE("CanvasWidget clearRect actually clears Skia pixels",
     cw.add_command(c);
     cw.paint(canvas);
 
+    // The parent surface's white must be preserved because the clearRect
+    // landed inside the canvas widget's per-canvas backing store and the
+    // empty layer composited back as a SrcOver no-op.
     auto px = sample_pixel(surface.get(), 16, 16);
-    INFO("Cleared pixel rgba=("
+    INFO("Pixel after canvas clearRect rgba=("
          << int(px.r) << "," << int(px.g) << ","
          << int(px.b) << "," << int(px.a) << ")");
-    REQUIRE(px.a == 0);
-    REQUIRE(px.r == 0);
-    REQUIRE(px.g == 0);
-    REQUIRE(px.b == 0);
+    REQUIRE(px.a == 255);
+    REQUIRE(px.r == 255);
+    REQUIRE(px.g == 255);
+    REQUIRE(px.b == 255);
 }
 
 // pulp #949 — FilterBank-style repro: a parent View paints a dark navy
@@ -1060,3 +1073,337 @@ TEST_CASE("CanvasWidget::paint nested under a parent save still balances",
 
     REQUIRE(rc.save_count() == depth_at_root);
 }
+
+// ── pulp #1368 — per-canvas backing-store isolation via save_layer ─────
+//
+// Root cause beyond the save/restore depth defense above: JS-driven
+// `clearRect` lowers to a kClear blend (SkBlendMode::kClear /
+// CGContextClearRect) which unconditionally zeros destination texels
+// regardless of source alpha. Without per-canvas isolation the kClear
+// hits the shared parent surface and erases pixels that sibling
+// canvases just painted. HTML <canvas> semantics require each <canvas>
+// to have its own backing store; the fix wraps every CanvasWidget
+// paint in `save_layer()` over its local bounds so kClear can only
+// affect the layer, then `restore()` composites the layer back into
+// the parent via SrcOver — preserving sibling pixels.
+//
+// These tests assert the structural property at the recording-canvas
+// level (depth bracketing, save count contribution) so they run on
+// every platform without needing Skia. The pixel-level proof lives
+// in the [skia] tests below.
+
+TEST_CASE("CanvasWidget::paint opens a per-canvas save_layer over its bounds",
+          "[canvas_widget][issue-1368]") {
+    // The save_layer() default falls back to save() on RecordingCanvas,
+    // so the depth must rise by exactly one between entry and the JS
+    // replay. We sample the depth mid-replay using a draw command we
+    // queue between the entry point and the natural end of paint().
+    // RecordingCanvas tracks save_depth_ via save() / restore(), so the
+    // depth observable to a queued sub-command would be entry_depth + 1
+    // when the layer is open.
+    RecordingCanvas rc;
+    CanvasWidget cw;
+    cw.set_bounds({0, 0, 200, 100});
+
+    CanvasDrawCmd r;
+    r.type = CanvasDrawCmd::Type::fill_rect;
+    r.x = 0; r.y = 0; r.w = 50; r.h = 50;
+    r.color = {255, 0, 0, 255};
+    cw.add_command(r);
+
+    REQUIRE(rc.save_count() == 0);
+    cw.paint(rc);
+    // Post-paint depth returns to entry depth — bracketed correctly.
+    REQUIRE(rc.save_count() == 0);
+
+    // The recorded stream must contain exactly one save (the layer push)
+    // attributable to the canvas widget itself. Future state-tracking
+    // additions to paint() may add nested saves; but at minimum, paint()
+    // must contribute a leading save. Walk the recorded commands,
+    // verify a `save` appears before the queued fill_rect.
+    int save_idx = -1, fill_idx = -1;
+    int idx = 0;
+    for (const auto& cmd : rc.commands()) {
+        if (save_idx < 0 && cmd.type == DrawCommand::Type::save) save_idx = idx;
+        if (cmd.type == DrawCommand::Type::fill_rect) { fill_idx = idx; break; }
+        ++idx;
+    }
+    REQUIRE(save_idx >= 0);
+    REQUIRE(fill_idx > save_idx);
+}
+
+TEST_CASE("CanvasWidget::paint skips save_layer when bounds are degenerate",
+          "[canvas_widget][issue-1368]") {
+    // A zero-size canvas widget would open a degenerate layer if we
+    // unconditionally pushed save_layer. Skip the layer in that case
+    // — there is nothing to isolate, and Skia rejects zero-area
+    // saveLayer in some configurations. Confirm by asserting no `save`
+    // is emitted when the JS draw queue is empty AND bounds are 0.
+    RecordingCanvas rc;
+    CanvasWidget cw;
+    cw.set_bounds({0, 0, 0, 0});
+
+    cw.paint(rc);
+
+    // No layer push, no draws, no saves. Pre-fix this also held; the
+    // assertion now also holds post-fix because of the degenerate-bounds
+    // guard in CanvasWidget::paint.
+    int save_count_in_stream = 0;
+    for (const auto& cmd : rc.commands()) {
+        if (cmd.type == DrawCommand::Type::save) ++save_count_in_stream;
+    }
+    REQUIRE(save_count_in_stream == 0);
+}
+
+TEST_CASE("Two sibling CanvasWidgets each open their own backing store",
+          "[canvas_widget][issue-1368]") {
+    // Spectr filterbank scenario in command-stream form: two canvas
+    // widgets share a parent View and paint sequentially. Each one's
+    // paint() must contribute its own save (the per-canvas layer
+    // push). Without the fix sibling-2's clearRect would hit the
+    // parent surface; the structural guard here is "each canvas
+    // contributes the bracketing save" — pixel-level isolation is
+    // covered by the [skia] tests below.
+    RecordingCanvas rc;
+
+    View parent;
+    parent.set_bounds({0, 0, 64, 64});
+
+    auto cw1 = std::make_unique<CanvasWidget>();
+    cw1->set_bounds({0, 0, 64, 64});
+    {
+        CanvasDrawCmd r;
+        r.type = CanvasDrawCmd::Type::fill_rect;
+        r.x = 0; r.y = 0; r.w = 64; r.h = 64;
+        r.color = {255, 0, 0, 255};
+        cw1->add_command(r);
+    }
+
+    auto cw2 = std::make_unique<CanvasWidget>();
+    cw2->set_bounds({0, 0, 64, 64});
+    {
+        // Sibling 2 starts with a clearRect — the smoking-gun bug pattern.
+        CanvasDrawCmd c;
+        c.type = CanvasDrawCmd::Type::clear_rect;
+        c.x = 0; c.y = 0; c.w = 64; c.h = 64;
+        cw2->add_command(c);
+    }
+
+    parent.add_child(std::move(cw1));
+    parent.add_child(std::move(cw2));
+
+    parent.paint_all(rc);
+
+    // Count clear_rects and saves AFTER the first canvas's fill_rect
+    // landed. Because each canvas widget opens its own layer, the
+    // clear_rect must appear AFTER an additional save (the second
+    // canvas's layer push) and before the matching restores. If the
+    // layer were not pushed, the clear_rect would land on the parent
+    // surface — outside any save/restore bracket attributable to
+    // CanvasWidget::paint.
+    int first_fill = -1;
+    int clear_after_first_fill = -1;
+    int save_between = 0;
+    int idx = 0;
+    for (const auto& cmd : rc.commands()) {
+        if (first_fill < 0 && cmd.type == DrawCommand::Type::fill_rect) {
+            first_fill = idx;
+        } else if (first_fill >= 0 && cmd.type == DrawCommand::Type::save) {
+            ++save_between;
+        } else if (first_fill >= 0 && clear_after_first_fill < 0 &&
+                   cmd.type == DrawCommand::Type::clear_rect) {
+            clear_after_first_fill = idx;
+        }
+        ++idx;
+    }
+    REQUIRE(first_fill >= 0);
+    REQUIRE(clear_after_first_fill > first_fill);
+    // Between the first fill_rect and the second canvas's clear_rect,
+    // there must be at least one extra save — the second canvas's
+    // per-canvas backing store layer.
+    REQUIRE(save_between >= 1);
+}
+
+#ifdef PULP_HAS_SKIA
+
+// pulp #1368 — visual sibling isolation. Two CanvasWidgets paint
+// against a shared parent surface; sibling-2 starts its frame with
+// clearRect over its full bounds. Pre-fix, the clearRect zeroed the
+// shared parent texels and erased sibling-1's pixels. Post-fix, each
+// canvas paints into its own save_layer-backed offscreen so kClear
+// only affects the layer and sibling-1's draws survive.
+TEST_CASE("Sibling CanvasWidget clearRect does not erase prior sibling's pixels",
+          "[canvas_widget][skia][issue-1368]") {
+    SkImageInfo info = SkImageInfo::Make(64, 64, kRGBA_8888_SkColorType,
+                                         kPremul_SkAlphaType,
+                                         SkColorSpace::MakeSRGB());
+    auto surface = SkSurfaces::Raster(info);
+    REQUIRE(surface != nullptr);
+    pulp::canvas::SkiaCanvas canvas(surface->getCanvas());
+
+    View parent;
+    parent.set_bounds({0, 0, 64, 64});
+
+    // Sibling 1: paints opaque red across its bounds.
+    auto cw1 = std::make_unique<CanvasWidget>();
+    cw1->set_bounds({0, 0, 64, 64});
+    {
+        CanvasDrawCmd r;
+        r.type = CanvasDrawCmd::Type::fill_rect;
+        r.x = 0; r.y = 0; r.w = 64; r.h = 64;
+        r.color = pulp::canvas::Color::rgba8(255, 0, 0, 255);
+        cw1->add_command(r);
+    }
+
+    // Sibling 2: starts its frame with clearRect over its full bounds
+    // (mirrors a JS canvas idiom). Pre-fix this kClear nuked sibling 1's
+    // red on the shared parent. Post-fix, kClear is contained to
+    // sibling 2's own layer and the parent surface keeps sibling 1's red.
+    auto cw2 = std::make_unique<CanvasWidget>();
+    cw2->set_bounds({0, 0, 64, 64});
+    {
+        CanvasDrawCmd c;
+        c.type = CanvasDrawCmd::Type::clear_rect;
+        c.x = 0; c.y = 0; c.w = 64; c.h = 64;
+        cw2->add_command(c);
+    }
+
+    parent.add_child(std::move(cw1));
+    parent.add_child(std::move(cw2));
+    parent.paint_all(canvas);
+
+    auto px = sample_pixel(surface.get(), 32, 32);
+    INFO("Sibling-isolation pixel rgba=("
+         << int(px.r) << "," << int(px.g) << ","
+         << int(px.b) << "," << int(px.a) << ")");
+    // Sibling 1's red survived sibling 2's clearRect.
+    REQUIRE(px.a == 255);
+    REQUIRE(px.r == 255);
+    REQUIRE(px.g == 0);
+    REQUIRE(px.b == 0);
+}
+
+// pulp #1368 — destination-out compositing must also be contained.
+// `globalCompositeOperation = "destination-out"` punches alpha holes
+// in the destination. Without per-canvas isolation, sibling-2's
+// destination-out fill would punch a hole through sibling-1's pixels
+// on the shared parent surface. With the layer fix, the destination-
+// out lands inside sibling-2's own layer; sibling-1's pixels survive.
+TEST_CASE("Sibling CanvasWidget destination-out does not punch holes in siblings",
+          "[canvas_widget][skia][issue-1368]") {
+    SkImageInfo info = SkImageInfo::Make(64, 64, kRGBA_8888_SkColorType,
+                                         kPremul_SkAlphaType,
+                                         SkColorSpace::MakeSRGB());
+    auto surface = SkSurfaces::Raster(info);
+    REQUIRE(surface != nullptr);
+    pulp::canvas::SkiaCanvas canvas(surface->getCanvas());
+
+    View parent;
+    parent.set_bounds({0, 0, 64, 64});
+
+    auto cw1 = std::make_unique<CanvasWidget>();
+    cw1->set_bounds({0, 0, 64, 64});
+    {
+        CanvasDrawCmd r;
+        r.type = CanvasDrawCmd::Type::fill_rect;
+        r.x = 0; r.y = 0; r.w = 64; r.h = 64;
+        r.color = pulp::canvas::Color::rgba8(0, 200, 0, 255);  // green
+        cw1->add_command(r);
+    }
+
+    auto cw2 = std::make_unique<CanvasWidget>();
+    cw2->set_bounds({0, 0, 64, 64});
+    {
+        // Switch sibling 2 into destination-out mode and fill — without
+        // the layer this would punch holes through sibling-1's green
+        // on the shared parent surface.
+        CanvasDrawCmd mode;
+        mode.type = CanvasDrawCmd::Type::set_blend_mode;
+        // BlendMode enum value for destination-out — RecordingCanvas /
+        // SkiaCanvas both accept it via set_blend_mode(static_cast<
+        // BlendMode>(int_val)). The exact int doesn't matter for the
+        // test; we just need a punch-through compositing operator.
+        mode.int_val = static_cast<int>(pulp::canvas::Canvas::BlendMode::destination_out);
+        cw2->add_command(mode);
+        CanvasDrawCmd r;
+        r.type = CanvasDrawCmd::Type::fill_rect;
+        r.x = 0; r.y = 0; r.w = 64; r.h = 64;
+        r.color = pulp::canvas::Color::rgba8(0, 0, 0, 255);
+        cw2->add_command(r);
+    }
+
+    parent.add_child(std::move(cw1));
+    parent.add_child(std::move(cw2));
+    parent.paint_all(canvas);
+
+    auto px = sample_pixel(surface.get(), 32, 32);
+    INFO("destination-out isolation pixel rgba=("
+         << int(px.r) << "," << int(px.g) << ","
+         << int(px.b) << "," << int(px.a) << ")");
+    REQUIRE(px.a == 255);
+    REQUIRE(px.r == 0);
+    REQUIRE(px.g == 200);
+    REQUIRE(px.b == 0);
+}
+
+// pulp #1368 — single-canvas paints should not change output. The
+// per-canvas layer must be visually equivalent to direct-on-parent
+// painting for an isolated canvas; the layer's existence is a
+// correctness fix for the multi-canvas case, not a behaviour change
+// for single-canvas use.
+TEST_CASE("Single CanvasWidget paint is pixel-equivalent with the layer wrap",
+          "[canvas_widget][skia][issue-1368]") {
+    SkImageInfo info = SkImageInfo::Make(32, 32, kRGBA_8888_SkColorType,
+                                         kPremul_SkAlphaType,
+                                         SkColorSpace::MakeSRGB());
+    auto surface = SkSurfaces::Raster(info);
+    REQUIRE(surface != nullptr);
+    pulp::canvas::SkiaCanvas canvas(surface->getCanvas());
+
+    View parent;
+    parent.set_bounds({0, 0, 32, 32});
+    parent.set_background_color(pulp::canvas::Color::rgba8(8, 12, 24, 255));
+
+    auto cw = std::make_unique<CanvasWidget>();
+    cw->set_bounds({0, 0, 32, 32});
+    {
+        CanvasDrawCmd c;
+        c.type = CanvasDrawCmd::Type::clear_rect;
+        c.x = 0; c.y = 0; c.w = 32; c.h = 32;
+        cw->add_command(c);
+    }
+    {
+        CanvasDrawCmd r;
+        r.type = CanvasDrawCmd::Type::fill_rect;
+        r.x = 4; r.y = 4; r.w = 24; r.h = 24;
+        r.color = pulp::canvas::Color::rgba8(255, 0, 255, 255);
+        cw->add_command(r);
+    }
+    parent.add_child(std::move(cw));
+    parent.paint_all(canvas);
+
+    // Inside the painted rect: magenta. Pre- and post-#1368 both must
+    // produce magenta here because the layer composites the painted
+    // pixels back onto the parent.
+    auto inside = sample_pixel(surface.get(), 16, 16);
+    REQUIRE(inside.a == 255);
+    REQUIRE(inside.r == 255);
+    REQUIRE(inside.g == 0);
+    REQUIRE(inside.b == 255);
+
+    // In the cleared region (everything in the canvas widget bounds
+    // outside the small fill_rect), the layer is transparent and
+    // composites back over the parent's navy bg. The parent's navy
+    // therefore shows through. Pre-#1368 the kClear leaked onto the
+    // parent surface and would have produced (0,0,0,0) here instead.
+    auto cleared = sample_pixel(surface.get(), 1, 1);
+    INFO("Cleared-region pixel rgba=("
+         << int(cleared.r) << "," << int(cleared.g) << ","
+         << int(cleared.b) << "," << int(cleared.a) << ")");
+    REQUIRE(cleared.a == 255);
+    REQUIRE(cleared.r == 8);
+    REQUIRE(cleared.g == 12);
+    REQUIRE(cleared.b == 24);
+}
+
+#endif  // PULP_HAS_SKIA
