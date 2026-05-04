@@ -1673,6 +1673,25 @@ public:
         resize_callback_ = std::move(cb);
     }
 
+    // pulp #1387 gap #3 — wire the host's idle callback into the
+    // CVDisplayLink dispatch so JS rAF / setTimeout / async-result
+    // queues are pumped each vsync. Without this override the GPU
+    // host inherited the WindowHost base no-op, which dropped
+    // standalone's `scripted_ui->poll()` on the floor: every
+    // requestAnimationFrame() call would queue a callback, set
+    // needs_repaint_=true via request_repaint, render one frame —
+    // and then never fire the JS callback because nothing called
+    // poll_async_results to drain pending_frame_ids_. The CPU host
+    // has set_idle_callback wired to a 30Hz NSTimer (line ~1429);
+    // GPU is now wired vsync-aligned via the display link instead
+    // of a separate timer to keep pump cadence locked to the same
+    // frame the renderer is about to emit.
+    void set_idle_callback(std::function<void()> cb) override {
+        idle_callback_ = std::move(cb);
+        has_idle_callback_.store(static_cast<bool>(idle_callback_),
+                                  std::memory_order_release);
+    }
+
     void run_event_loop() override {
         @autoreleasepool {
             [NSApplication sharedApplication];
@@ -1769,6 +1788,11 @@ private:
     int frame_ok_count_ = 0;
     float width_ = 0, height_ = 0;
     ResizeCallback resize_callback_;
+    // pulp #1387 gap #3 — idle callback wiring. CVDisplayLink reads
+    // has_idle_callback_ on the display thread; idle_callback_ is
+    // invoked on main only.
+    std::function<void()> idle_callback_;
+    std::atomic<bool> has_idle_callback_{false};
 
     static bool view_needs_continuous_frames(View* view) {
         if (!view) return false;
@@ -1934,8 +1958,17 @@ private:
         CVOptionFlags, CVOptionFlags*, void* context)
     {
         auto* self = static_cast<MacGpuWindowHost*>(context);
+        // pulp #1387 gap #3 — guard now also fires when an idle
+        // callback is installed, so JS rAF / setTimeout / async-result
+        // queues get a vsync-paced pump even when no native widget is
+        // animating and no prior request_repaint set needs_repaint_.
+        // The idle pump (`scripted_ui->poll()` → `bridge.poll_async_results()`)
+        // drains pending_frame_ids_ via __flushFrames__ and re-arms
+        // needs_repaint_ for any frame that requested another paint.
+        const bool has_idle = self->has_idle_callback_.load(std::memory_order_acquire);
         if (self->needs_repaint_.load(std::memory_order_relaxed) ||
-            self->continuous_frames_.load(std::memory_order_relaxed)) {
+            self->continuous_frames_.load(std::memory_order_relaxed) ||
+            has_idle) {
             bool expected = false;
             if (!self->render_dispatch_queued_.compare_exchange_strong(expected, true,
                                                                        std::memory_order_acq_rel,
@@ -1945,6 +1978,13 @@ private:
             // Dispatch rendering to the main thread (required for Cocoa + Metal)
             dispatch_async(dispatch_get_main_queue(), ^{
                 @autoreleasepool {
+                    // Pump idle FIRST so JS rAF callbacks fire (and any
+                    // request_repaint they trigger arms needs_repaint_)
+                    // before we evaluate whether to render this frame.
+                    if (self->idle_callback_) {
+                        self->idle_callback_();
+                    }
+
                     bool animate = view_needs_continuous_frames(&self->root_);
                     bool tick_subscribers = self->frame_clock_.has_active_subscribers();
                     if (!self->needs_repaint_.load(std::memory_order_relaxed) && !animate && !tick_subscribers) {
