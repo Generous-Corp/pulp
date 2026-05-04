@@ -23,6 +23,7 @@ Each layer catches a different failure mode:
 |---|---|---|---|
 | 1. Workflow lint | PR review | bad YAML / bad `uses:` / bad shell | seconds (pre-merge) |
 | 2. Auto-release watchdog | `workflow_run` completion | runtime failure (any cause) | 1-2 minutes |
+| 2b. Release-CLI watchdog | `workflow_run` completion | per-tag missing SDK/CLI assets (#1375) | 1-2 minutes |
 | 3. Cadence check | `schedule` every 30 min | any outcome drift — even unknown-unknowns | ≤45 min |
 
 ## Layer 1 — Workflow lint (pre-merge)
@@ -73,6 +74,32 @@ the run's job count via `gh api` and classifies the outcome:
 Tracking issue title: `Auto-release workflow failed — RELEASES BLOCKED`.
 One issue, edited in place, auto-closed on recovery — mirrors the #475
 close-path pattern used by the orphan-branch and deps-drift sweeps.
+
+## Layer 2b — Release-CLI watchdog (per-tag asset check)
+
+**File:** `.github/workflows/release-cli-watchdog.yml`
+
+Triggers on `workflow_run` completion for `release-cli.yml`. Resolves
+the tag from `head_branch`, then queries the corresponding GitHub
+release for `pulp-sdk-*` and `pulp-{darwin,linux,windows}-*` assets
+via `gh release view`. Three alert classes:
+
+- `run_failure` — `release-cli` concluded `failure`. Most common cause
+  on Windows-arm64 is the shared-cache priming flake (#1375, exit 127
+  during Yoga priming). Tracker body suggests `gh workflow run
+  release-cli.yml --ref vX.Y.Z` to retrigger.
+- `success_with_missing_assets` — `release-cli` concluded `success`
+  but the release has 0 `pulp-sdk-*` tarballs. Matches the v0.74.0
+  pattern where `sign-and-release.yml` published plugin .pkg files but
+  `release-cli` failed mid-matrix and uploaded no SDK/CLI artifacts.
+- `no_release` — no GitHub release exists for the tag. The `release`
+  job in `release-cli.yml` runs only after `build-cli` and
+  `smoke-cli` clear, so this means the matrix gated the release out.
+
+Per-tag tracker title (`release-cli failed for vX.Y.Z — SDK/CLI
+artifacts may be missing`) so each stranded tag gets its own thread —
+backfills via `workflow_dispatch` are independent per tag.
+Auto-closes on the next run for the same tag if SDK assets land.
 
 ## Layer 3 — Release cadence check (invariant)
 
@@ -215,6 +242,18 @@ contributors who touch CI workflows frequently.
 
 ## Related incidents
 
+- **2026-05-03 (issue #1375)** — `release-cli.yml` runs for v0.74.0 and
+  v0.74.1 both died at the same point on `windows-arm64`: mid-`Priming
+  shared Yoga source cache...` with exit 127 (no further log output).
+  v0.74.0's GitHub release ended up with only the plugin .pkg files
+  (those come from `sign-and-release.yml`); v0.74.1 had no GitHub
+  release at all (`pulp sdk install --version 0.74.1` 404'd). No
+  watchdog alerted — both Layer 2 (auto-release) and Layer 3 (cadence)
+  reported green because auto-release.yml itself ran fine and a tag
+  existed for both. Fix: retry-on-failure around every shared-source
+  priming call in `setup.sh` (so a transient 127 doesn't strand a
+  release), plus a parallel Layer 2b watchdog
+  (`release-cli-watchdog.yml`) keyed on per-tag SDK-asset presence.
 - **2026-04-30 (PR #1008 → issue #1009)** — `fix(view): ...` merged via
   `gh pr merge` after `shipyard pr` short-circuited its bump step
   (force-push race). `auto-release.yml` saw no version movement and
