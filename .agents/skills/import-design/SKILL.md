@@ -362,3 +362,32 @@ Reject importer output that targets earlier SDK versions for canvas-heavy design
 ### 7. Validation discipline
 
 Always pixel-sample after rendering — visual inspection misses uniform-fallback bugs. A spectrum that renders "uniform light gray" instead of "rainbow gradient" looks roughly right at thumbnail scale but is structurally broken (every color stop resolved to white by the parseColor fallback). Sample horizontal cross-sections at the expected gradient axis and assert color variance > some threshold.
+
+### 8. Pointer events need explicit `registerPointer(id)` AND don't bubble
+
+**Spec:** `addEventListener('pointerdown', fn)` plus React synthetic-event bubbling: a click on a child reaches the parent's handler unless `stopPropagation` is called.
+
+**Bridge reality:** Pulp gates pointer dispatch behind an explicit `registerPointer(id)` call (parallel to `registerClick(id)` and `registerHover(id)`). `@pulp/react`'s prop-applier currently only wires `registerHover` for `mouseenter/leave`, so `onPointerDown/Move/Up` listeners are installed in the JS dispatch table but never fired by the native View — the JS handler appears registered (`on(id, 'pointerdown', fn)`) yet clicks never invoke it. Additionally, **pulp dispatches pointer events to the hit-test target only — there is no synthetic-event bubbling.** A handler on a parent `<div>` will not fire when the click lands on a child `<canvas>` that visually overlays it.
+
+This was the root cause of Spectr's "FilterBank renders rainbow but band drag is dead" symptom (spectr #32 / commit `b7ba2b8`). Confirmed by `__spectrLog` probe at the top of `onPointerDown`: handler does NOT fire on `cliclick c:600,400` even though `on(pr_3, pointerdown, ...)` is registered.
+
+**Importer rule:**
+
+1. Whenever the importer emits an `onPointerDown / onPointerMove / onPointerUp / onPointerLeave / onWheel` handler, also emit a `registerPointer(id)` call against the same widget. Do this in the ref-mount callback (or its equivalent post-mount hook) so the bridge wires `on_pointer_event` into the View. Idempotent on the bridge side; safe to call on every remount.
+2. **Do not assume bubbling.** If the design has a parent element with a pointer handler and child elements that visually cover it, mirror the same handler onto each direct child too. The handler can use the parent's `getBoundingClientRect()` for coord math so the same function works on every binding.
+
+```ts
+// Bind on parent + every interactive child:
+<wrap onPointerDown={onPD} onPointerMove={onPM} onPointerUp={onPU}>
+  <canvas onPointerDown={onPD} onPointerMove={onPM} onPointerUp={onPU} ... />
+  <canvas onPointerDown={onPD} onPointerMove={onPM} onPointerUp={onPU} ... />
+</wrap>
+```
+
+```ts
+// In the ref-mount callback:
+const id = inst.id;
+if (typeof globalThis.registerPointer === 'function') globalThis.registerPointer(id);
+```
+
+The cleaner long-term fix is for `@pulp/react`'s prop-applier to call `registerPointer` automatically when it sees any pointer-event prop (parallel to its existing `registerHover` wiring) — track that as a follow-up Pulp issue rather than an importer-side workaround if you encounter it on a fresh import.
