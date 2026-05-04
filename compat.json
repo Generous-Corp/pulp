@@ -5864,7 +5864,7 @@
       ],
       "unsupportedValues": [],
       "tests": [],
-      "notes": "PR #1348. Coverage of the Porter-Duff + blend-mode set depends on the canvas backend (Skia handles all; CG handles most).",
+      "notes": "PR #1348. Both backends now honor every value: Skia handles them via SkBlendMode; CG via CGContextSetBlendMode (pulp #1371 fixed a silent no-op in CoreGraphicsCanvas::set_blend_mode and added pixel-level coverage in test_canvas.cpp).",
       "issue": "1346"
     },
     "canvas2d/font": {
