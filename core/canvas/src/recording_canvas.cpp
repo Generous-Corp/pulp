@@ -11,10 +11,25 @@ size_t RecordingCanvas::count(DrawCommand::Type type) const {
 
 void RecordingCanvas::save() {
     commands_.push_back({DrawCommand::Type::save});
+    ++save_depth_;
 }
 
 void RecordingCanvas::restore() {
     commands_.push_back({DrawCommand::Type::restore});
+    if (save_depth_ > 0) --save_depth_;
+}
+
+void RecordingCanvas::restore_to_count(int target) {
+    // pulp #1368 — pop saves until depth matches `target`. Mirrors
+    // SkCanvas::restoreToCount semantics so CanvasWidget::paint() can
+    // defend against an unbalanced JS draw script. We record one
+    // DrawCommand::Type::restore per popped level so tests can assert
+    // on the count.
+    if (target < 0) target = 0;
+    while (save_depth_ > target) {
+        commands_.push_back({DrawCommand::Type::restore});
+        --save_depth_;
+    }
 }
 
 void RecordingCanvas::translate(float x, float y) {

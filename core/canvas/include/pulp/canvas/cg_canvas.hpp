@@ -21,6 +21,8 @@ public:
 
     void save() override;
     void restore() override;
+    int save_count() const override { return save_depth_; }
+    void restore_to_count(int target) override;
     void translate(float x, float y) override;
     void scale(float sx, float sy) override;
     void rotate(float radians) override;
@@ -113,6 +115,14 @@ private:
     // header doesn't pull <CoreGraphics/CoreGraphics.h>. Six-element layout:
     //   [a, b, c, d, tx, ty] (CGAffineTransform memory layout).
     double baseline_xform_[6] = {1, 0, 0, 1, 0, 0};
+
+    // pulp #1368 — manual GState depth tracking. CG doesn't expose a
+    // saveCount() API, so save() increments and restore() decrements
+    // this counter; restore_to_count() pops repeatedly until depth
+    // matches the requested target. CanvasWidget::paint() snapshots the
+    // depth at entry and pops back to it at exit so an unbalanced JS
+    // ctx.save() can't leak GState into the parent View's paint scope.
+    int save_depth_ = 0;
 
     void apply_fill_color();
     void apply_stroke_color();

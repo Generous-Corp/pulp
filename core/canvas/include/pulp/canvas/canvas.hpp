@@ -186,6 +186,23 @@ public:
     virtual void save() = 0;
     virtual void restore() = 0;
 
+    /// Return the current save-stack depth. Used by CanvasWidget::paint()
+    /// (pulp #1368) to defend against JS-driven `ctx.save()` / `ctx.restore()`
+    /// imbalance: snapshot the depth at paint entry, replay the queued
+    /// commands, then `restore_to_count(initial_depth)` to drop any leftover
+    /// saves. Mirrors SkCanvas::getSaveCount / CGContext save-stack depth.
+    /// Default returns 0 — backends without an introspectable stack rely on
+    /// the default `restore_to_count` no-op below to leave behavior unchanged.
+    virtual int save_count() const { return 0; }
+
+    /// Pop the save stack down to `target` (typically captured earlier via
+    /// `save_count()`). Backends that support it pop any leftover saves so an
+    /// unbalanced JS draw script can't leak a `ctx.save()` into the parent
+    /// View's paint scope (pulp #1368). Default is a no-op so non-tracking
+    /// backends keep their existing behavior; the CanvasWidget defense is
+    /// meaningful only on backends that override both methods.
+    virtual void restore_to_count(int target) { (void)target; }
+
     // ── Transform ────────────────────────────────────────────────────────
     virtual void translate(float x, float y) = 0;
     virtual void scale(float sx, float sy) = 0;
@@ -758,6 +775,8 @@ public:
 
     void save() override;
     void restore() override;
+    int save_count() const override { return save_depth_; }
+    void restore_to_count(int target) override;
     void translate(float x, float y) override;
     void scale(float sx, float sy) override;
     void rotate(float radians) override;
@@ -828,6 +847,12 @@ public:
 private:
     std::vector<DrawCommand> commands_;
     size_t baseline_capture_count_ = 0;
+    // pulp #1368 — track save/restore depth so RecordingCanvas can model
+    // the same save_count() / restore_to_count() contract as the live
+    // backends. This lets CanvasWidget::paint() unit tests assert that the
+    // outer save/restore wrapper drops any leftover saves emitted by an
+    // unbalanced JS draw script.
+    int save_depth_ = 0;
 };
 
 } // namespace pulp::canvas

@@ -26,13 +26,35 @@ void CoreGraphicsCanvas::release_path() {
     }
 }
 
-void CoreGraphicsCanvas::save() { CGContextSaveGState(ctx_); }
+void CoreGraphicsCanvas::save() {
+    CGContextSaveGState(ctx_);
+    ++save_depth_;
+}
 void CoreGraphicsCanvas::restore() {
     if (in_transparency_layer_ > 0) {
         CGContextEndTransparencyLayer(ctx_);
         --in_transparency_layer_;
     }
     CGContextRestoreGState(ctx_);
+    if (save_depth_ > 0) --save_depth_;
+}
+
+// pulp #1368 — pop GState frames repeatedly until depth matches `target`.
+// CanvasWidget::paint() captures save_count() at entry and calls this at
+// exit so an unbalanced JS draw script (one that emitted a `ctx.save()`
+// but never reached its `ctx.restore()` due to an early-return path)
+// can't leak GState — leftover transform/clip — into the parent View's
+// paint scope where it would silently corrupt subsequent siblings.
+void CoreGraphicsCanvas::restore_to_count(int target) {
+    if (target < 0) target = 0;
+    while (save_depth_ > target) {
+        if (in_transparency_layer_ > 0) {
+            CGContextEndTransparencyLayer(ctx_);
+            --in_transparency_layer_;
+        }
+        CGContextRestoreGState(ctx_);
+        --save_depth_;
+    }
 }
 
 void CoreGraphicsCanvas::translate(float x, float y) {

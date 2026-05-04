@@ -933,3 +933,130 @@ TEST_CASE("WidgetBridge: HTML5 ctx.fillRect via web-compat shim reaches the brid
     }
     REQUIRE(saw_green_full_fill);
 }
+
+// ── pulp #1368 — CanvasWidget::paint balances save/restore across frames ──
+//
+// Spectr's filterbank uses two `<canvas>` widgets in identical configuration.
+// One paints visibly, the other doesn't. The visible one (overlay sibling)
+// runs after the invisible one (main sibling). Fillrects on the invisible
+// canvas with huge bounds tinted the title-bar region above the canvas —
+// strongly suggesting a transform leak: an unrestored `ctx.save()` from a
+// prior frame's draw script left GState (transform, clip) on the canvas
+// stack, which the parent View's outer `canvas.restore()` can't pop because
+// it only pops one level.
+//
+// Defense: CanvasWidget::paint snapshots `save_count()` at entry and calls
+// `restore_to_count()` after the JS replay so any leftover save is dropped
+// and the parent always sees the canvas at the depth it expects.
+
+TEST_CASE("CanvasWidget::paint balances save/restore even when JS misses restore",
+          "[canvas_widget][issue-1368]") {
+    RecordingCanvas rc;
+    CanvasWidget cw;
+    cw.set_bounds({0, 0, 200, 100});
+
+    // Simulate an unbalanced JS draw script: ctx.save() + ctx.scale(2,2)
+    // followed by a fillRect, but the matching ctx.restore() is missing
+    // (e.g., the JS hit an early-return path).
+    CanvasDrawCmd s;
+    s.type = CanvasDrawCmd::Type::save;
+    cw.add_command(s);
+
+    CanvasDrawCmd sc;
+    sc.type = CanvasDrawCmd::Type::scale;
+    sc.x = 2.0f; sc.y = 2.0f;
+    cw.add_command(sc);
+
+    CanvasDrawCmd r;
+    r.type = CanvasDrawCmd::Type::fill_rect;
+    r.x = 0; r.y = 0; r.w = 50; r.h = 50;
+    r.color = {255, 0, 255, 255};
+    cw.add_command(r);
+    // NOTE: no matching restore command — JS bug.
+
+    const int depth_before = rc.save_count();
+    cw.paint(rc);
+    const int depth_after = rc.save_count();
+
+    // The whole point of the fix: even with an unbalanced draw script,
+    // the canvas's save-stack depth must return to where it started so
+    // the parent View's outer save/restore is balanced and no GState
+    // leaks onto sibling widgets.
+    REQUIRE(depth_after == depth_before);
+}
+
+TEST_CASE("CanvasWidget::paint twice with unbalanced JS does not accumulate depth",
+          "[canvas_widget][issue-1368]") {
+    // Same scenario painted twice — without the fix the second frame
+    // would land at depth 2 (1 leaked save per frame). Asserting depth
+    // stays at the entry baseline across multiple frames is the regression
+    // guard for the Spectr filterbank repro.
+    RecordingCanvas rc;
+    CanvasWidget cw;
+    cw.set_bounds({0, 0, 200, 100});
+
+    CanvasDrawCmd s; s.type = CanvasDrawCmd::Type::save; cw.add_command(s);
+    CanvasDrawCmd r;
+    r.type = CanvasDrawCmd::Type::fill_rect;
+    r.x = 0; r.y = 0; r.w = 10; r.h = 10;
+    r.color = {255, 0, 255, 255};
+    cw.add_command(r);
+    // Deliberately no restore.
+
+    const int depth_before = rc.save_count();
+    cw.paint(rc);
+    cw.paint(rc);
+    cw.paint(rc);
+    REQUIRE(rc.save_count() == depth_before);
+}
+
+TEST_CASE("CanvasWidget::paint preserves baseline depth even with extra restores",
+          "[canvas_widget][issue-1368]") {
+    // Inverse pathology: JS calls ctx.restore() more times than it
+    // ctx.save()'d. RecordingCanvas guards depth at zero so the over-pop
+    // doesn't underflow; CanvasWidget::paint must still leave the depth
+    // at exactly the captured entry depth, not below.
+    RecordingCanvas rc;
+    CanvasWidget cw;
+    cw.set_bounds({0, 0, 200, 100});
+
+    CanvasDrawCmd r1;
+    r1.type = CanvasDrawCmd::Type::restore;
+    cw.add_command(r1);
+    CanvasDrawCmd r2;
+    r2.type = CanvasDrawCmd::Type::restore;
+    cw.add_command(r2);
+
+    const int depth_before = rc.save_count();
+    cw.paint(rc);
+    REQUIRE(rc.save_count() == depth_before);
+}
+
+TEST_CASE("CanvasWidget::paint nested under a parent save still balances",
+          "[canvas_widget][issue-1368]") {
+    // Mimic View::paint_all wrapping: outer save → bounds translate → call
+    // CanvasWidget::paint → outer restore. With an unbalanced JS save
+    // inside paint(), the outer restore must still bring the canvas back
+    // to exactly the depth that existed before the wrapper's save() was
+    // pushed. This is the Spectr filterbank invariant — sibling widgets
+    // painted after this canvas must see a clean parent canvas state.
+    RecordingCanvas rc;
+    CanvasWidget cw;
+    cw.set_bounds({0, 0, 200, 100});
+
+    CanvasDrawCmd s; s.type = CanvasDrawCmd::Type::save; cw.add_command(s);
+    CanvasDrawCmd r;
+    r.type = CanvasDrawCmd::Type::fill_rect;
+    r.x = 0; r.y = 0; r.w = 50; r.h = 50;
+    r.color = {255, 0, 255, 255};
+    cw.add_command(r);
+    // No restore in the JS list — the unbalanced case.
+
+    const int depth_at_root = rc.save_count();
+    rc.save();                  // outer wrapper, mirrors View::paint_all
+    rc.translate(10.0f, 20.0f); // bounds translate
+    cw.paint(rc);
+    rc.restore();               // outer wrapper restore
+
+    REQUIRE(rc.save_count() == depth_at_root);
+}

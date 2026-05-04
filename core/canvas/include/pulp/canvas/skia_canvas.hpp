@@ -37,6 +37,8 @@ public:
     // ── State ────────────────────────────────────────────────────────────
     void save() override;
     void restore() override;
+    int save_count() const override;
+    void restore_to_count(int target) override;
 
     // ── Transform ────────────────────────────────────────────────────────
     void translate(float x, float y) override;

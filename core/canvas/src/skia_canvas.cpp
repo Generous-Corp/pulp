@@ -233,6 +233,26 @@ SkiaCanvas::~SkiaCanvas() = default;
 void SkiaCanvas::save() { GUARD_CANVAS; canvas_->save(); }
 void SkiaCanvas::restore() { GUARD_CANVAS; canvas_->restore(); }
 
+// pulp #1368 — expose Skia's save-stack depth so CanvasWidget::paint()
+// can snapshot it at entry and `restore_to_count()` back to baseline at
+// exit. Without this defense an unbalanced JS draw script (e.g. a
+// `ctx.save()` whose matching `ctx.restore()` is skipped on an
+// early-return path) leaks GState onto the parent View's paint scope
+// and silently corrupts subsequent siblings' transform/clip.
+int SkiaCanvas::save_count() const {
+    if (!canvas_) return 0;
+    return canvas_->getSaveCount();
+}
+
+void SkiaCanvas::restore_to_count(int target) {
+    GUARD_CANVAS;
+    // SkCanvas::restoreToCount pops down to and including `target`; we
+    // match that contract so a CanvasWidget that captured save_count()
+    // == 4 at entry and got back depth 7 (three leaked saves) returns
+    // to exactly 4 at exit. SkCanvas guards target == 0 internally.
+    canvas_->restoreToCount(target < 1 ? 1 : target);
+}
+
 void SkiaCanvas::translate(float x, float y) { GUARD_CANVAS; canvas_->translate(x, y); }
 void SkiaCanvas::scale(float sx, float sy) { GUARD_CANVAS; canvas_->scale(sx, sy); }
 void SkiaCanvas::rotate(float radians) {

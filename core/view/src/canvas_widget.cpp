@@ -13,6 +13,20 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
     canvas.capture_paint_baseline_transform();
     last_native_gpu_texture_draw_succeeded_ = false;
 
+    // pulp #1368 — defend against unbalanced JS save/restore. If the
+    // draw script reaches an early-return path that skips a matching
+    // `ctx.restore()`, the leftover save accumulates on the canvas's
+    // GState stack every frame. The parent `View::paint_all`'s outer
+    // `canvas.save()` / `canvas.restore()` only pops one level, so any
+    // surplus GState (transform, clip) leaks into sibling siblings'
+    // paint scopes and silently corrupts their drawing — concretely
+    // observed in pulp #1368 / Spectr filterbank where the main canvas
+    // child stopped painting visibly while an identically-configured
+    // overlay sibling kept working. Snapshot depth at entry, then pop
+    // back to it after replay so the parent always sees the canvas at
+    // the depth it expects.
+    const int saved_depth = canvas.save_count();
+
     // pulp #929 — Canvas widget paint contract:
     //   * The widget MUST NOT pre-fill its bounds with an opaque background
     //     before processing JS draw commands. The default state is fully
@@ -302,6 +316,14 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
         }
         }
     }
+
+    // pulp #1368 — pop any leftover saves the JS draw script forgot to
+    // restore. The matching snapshot is at the top of this function. On
+    // backends without an introspectable save stack this is a no-op
+    // (default `restore_to_count` and `save_count() == 0`); the live
+    // SkiaCanvas / CoreGraphicsCanvas backends honor it. Tests use
+    // RecordingCanvas which models the same contract.
+    canvas.restore_to_count(saved_depth);
 }
 
 } // namespace pulp::view
