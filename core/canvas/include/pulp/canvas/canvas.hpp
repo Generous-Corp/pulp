@@ -243,6 +243,31 @@ public:
         (void)a; (void)b; (void)c; (void)d; (void)e; (void)f;
     }
 
+    /// Affine 2x3 transform snapshot, six floats laid out as
+    /// CanvasRenderingContext2D.setTransform / DOMMatrix:
+    ///   [ a c e ]
+    ///   [ b d f ]
+    ///   [ 0 0 1 ]
+    /// Identity is `{1, 0, 0, 1, 0, 0}`.
+    struct AffineTransform2x3 {
+        float a = 1.0f, b = 0.0f;
+        float c = 0.0f, d = 1.0f;
+        float e = 0.0f, f = 0.0f;
+    };
+
+    /// Snapshot the current device matrix (CTM) without mutating canvas
+    /// state. Used by `CanvasWidget::paint()` diagnostics (pulp #1368) to
+    /// log the inbound transform per paint when `PULP_LOG_CANVAS_PAINT=1`
+    /// is set, so we can confirm whether a missing canvas paint is caused
+    /// by the CTM ending up off-window vs the widget never being painted
+    /// at all. Default returns identity for backends without an
+    /// introspectable matrix; SkiaCanvas (`getTotalMatrix`),
+    /// CoreGraphicsCanvas (`CGContextGetCTM`), and RecordingCanvas (manual
+    /// matrix tracking) override.
+    virtual AffineTransform2x3 current_transform() const {
+        return {};
+    }
+
     // ── Clipping ─────────────────────────────────────────────────────────
     virtual void clip_rect(float x, float y, float w, float h) = 0;
 
@@ -785,6 +810,7 @@ public:
     void capture_paint_baseline_transform() override;
     void concat_transform(float a, float b, float c,
                           float d, float e, float f) override;
+    AffineTransform2x3 current_transform() const override;
     void clip_rect(float x, float y, float w, float h) override;
     void clip() override;
     void set_blend_mode(BlendMode mode) override;
@@ -853,6 +879,13 @@ private:
     // outer save/restore wrapper drops any leftover saves emitted by an
     // unbalanced JS draw script.
     int save_depth_ = 0;
+    // pulp #1368 round 2 — track the current device matrix so
+    // current_transform() returns a faithful CTM in unit tests. The matrix
+    // is saved/restored alongside save_depth_, and translate/scale/rotate/
+    // set_transform/concat_transform mutate it. Layout in column-major
+    // CanvasRenderingContext2D order: [a, b, c, d, e, f].
+    AffineTransform2x3 ctm_{};
+    std::vector<AffineTransform2x3> ctm_stack_;
 };
 
 } // namespace pulp::canvas

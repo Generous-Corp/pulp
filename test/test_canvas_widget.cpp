@@ -1407,3 +1407,71 @@ TEST_CASE("Single CanvasWidget paint is pixel-equivalent with the layer wrap",
 }
 
 #endif  // PULP_HAS_SKIA
+// ── pulp #1368 round 2 — current_transform() snapshot for paint diagnostics ──
+//
+// The Spectr filterbank repro shows pr_1's first-instruction `fillRect(50,50,…)`
+// landing in the title-bar region above the canvas. Either bounds_.y is wrong
+// (Track B layout test) or the inbound CTM has a translation that pushes draws
+// off-window (Track A diagnostic).  Canvas::current_transform() is the new
+// virtual the env-gated `PULP_LOG_CANVAS_PAINT=1` trace reads to log the CTM
+// as it actually exists at paint() entry, so Spectr can paste a per-frame line
+// like
+//   [pulp:canvas-paint] id=pr_1 bounds=(0,0,1320,760) ctm=[1,0,0,1,0,-100]
+// into #1368.  The tests below pin the introspection contract on
+// RecordingCanvas (the only backend exercised in Catch2): identity at start,
+// updated by translate/scale, and reset across save/restore.
+
+TEST_CASE("RecordingCanvas::current_transform tracks identity at start",
+          "[canvas_widget][issue-1368][round2]") {
+    using namespace pulp::canvas;
+    RecordingCanvas rc;
+    auto t = rc.current_transform();
+    REQUIRE(t.a == 1.0f);
+    REQUIRE(t.b == 0.0f);
+    REQUIRE(t.c == 0.0f);
+    REQUIRE(t.d == 1.0f);
+    REQUIRE(t.e == 0.0f);
+    REQUIRE(t.f == 0.0f);
+}
+
+TEST_CASE("RecordingCanvas::current_transform reflects translate",
+          "[canvas_widget][issue-1368][round2]") {
+    using namespace pulp::canvas;
+    RecordingCanvas rc;
+    rc.translate(10.0f, 20.0f);
+    auto t = rc.current_transform();
+    REQUIRE(t.a == 1.0f);
+    REQUIRE(t.d == 1.0f);
+    REQUIRE(t.e == 10.0f);
+    REQUIRE(t.f == 20.0f);
+}
+
+TEST_CASE("RecordingCanvas::current_transform restores across save/restore",
+          "[canvas_widget][issue-1368][round2]") {
+    using namespace pulp::canvas;
+    RecordingCanvas rc;
+    rc.save();
+    rc.translate(50.0f, 60.0f);
+    auto inner = rc.current_transform();
+    REQUIRE(inner.e == 50.0f);
+    REQUIRE(inner.f == 60.0f);
+    rc.restore();
+    auto outer = rc.current_transform();
+    REQUIRE(outer.e == 0.0f);
+    REQUIRE(outer.f == 0.0f);
+}
+
+TEST_CASE("RecordingCanvas::current_transform composes translate + scale",
+          "[canvas_widget][issue-1368][round2]") {
+    using namespace pulp::canvas;
+    RecordingCanvas rc;
+    // CanvasRenderingContext2D semantics: translate THEN scale in user space
+    // means current = T * S, so a unit-square corner (1,1) maps to (10+2, 20+3).
+    rc.translate(10.0f, 20.0f);
+    rc.scale(2.0f, 3.0f);
+    auto t = rc.current_transform();
+    REQUIRE(t.a == 2.0f);
+    REQUIRE(t.d == 3.0f);
+    REQUIRE(t.e == 10.0f);
+    REQUIRE(t.f == 20.0f);
+}

@@ -136,6 +136,24 @@ void CoreGraphicsCanvas::capture_paint_baseline_transform() {
     has_baseline_ = true;
 }
 
+// pulp #1368 round 2 — diagnostic CTM snapshot for `PULP_LOG_CANVAS_PAINT=1`.
+// Returns the current device matrix in CanvasRenderingContext2D affine order
+// (a, b, c, d, e, f) so the env-gated CanvasWidget::paint logging can record
+// what transform the inbound canvas has when paint() runs. CGAffineTransform
+// already uses the same column-major convention as CanvasRenderingContext2D
+// so the field mapping is 1:1.
+CoreGraphicsCanvas::AffineTransform2x3 CoreGraphicsCanvas::current_transform() const {
+    AffineTransform2x3 out;
+    CGAffineTransform t = CGContextGetCTM(ctx_);
+    out.a = static_cast<float>(t.a);
+    out.b = static_cast<float>(t.b);
+    out.c = static_cast<float>(t.c);
+    out.d = static_cast<float>(t.d);
+    out.e = static_cast<float>(t.tx);
+    out.f = static_cast<float>(t.ty);
+    return out;
+}
+
 void CoreGraphicsCanvas::clip_rect(float x, float y, float w, float h) {
     CGContextClipToRect(ctx_, CGRectMake(x, y, w, h));
 }

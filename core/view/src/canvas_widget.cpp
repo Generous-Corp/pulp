@@ -1,12 +1,52 @@
 #include <pulp/view/canvas_widget.hpp>
 
+#include <cstdio>
+#include <cstdlib>
+
 #ifdef PULP_HAS_SKIA
 #include <pulp/canvas/skia_canvas.hpp>
 #endif
 
 namespace pulp::view {
 
+namespace {
+
+// pulp #1368 round 2 — env-gated paint trace. When `PULP_LOG_CANVAS_PAINT=1`
+// is exported the live process logs one grep-able line per CanvasWidget paint
+// to stderr with the widget id, its bounds, and the inbound canvas CTM. The
+// Spectr filterbank repro (#1368) shows pr_1's first-instruction fillRect
+// landing in the title-bar region above the visible window — this trace is
+// the diagnostic that lets us confirm whether bounds_.y / CTM are off-window
+// vs. the widget never being painted at all. Returns false when the variable
+// is unset / "0" / empty so production builds incur a single getenv lookup
+// per paint and nothing else.
+inline bool canvas_paint_logging_enabled() {
+    const char* v = std::getenv("PULP_LOG_CANVAS_PAINT");
+    if (!v || !*v) return false;
+    if (v[0] == '0' && v[1] == '\0') return false;
+    return true;
+}
+
+} // namespace
+
 void CanvasWidget::paint(canvas::Canvas& canvas) {
+    // pulp #1368 round 2 — env-gated paint trace. Logged at entry, BEFORE any
+    // baseline / save_count snapshots so the line reflects the matrix the
+    // parent View::paint_all chain handed us. Format is grep-able:
+    //   [pulp:canvas-paint] id=<id> bounds=(x,y,w,h) ctm=[a,b,c,d,e,f]
+    if (canvas_paint_logging_enabled()) {
+        const auto& b = bounds();
+        const auto m = canvas.current_transform();
+        std::fprintf(stderr,
+                     "[pulp:canvas-paint] id=%s bounds=(%g,%g,%g,%g) "
+                     "ctm=[%g,%g,%g,%g,%g,%g]\n",
+                     id().c_str(), b.x, b.y, b.width, b.height,
+                     static_cast<double>(m.a), static_cast<double>(m.b),
+                     static_cast<double>(m.c), static_cast<double>(m.d),
+                     static_cast<double>(m.e), static_cast<double>(m.f));
+        std::fflush(stderr);
+    }
+
     // Snapshot the inbound device matrix so JS-driven setTransform() composes
     // onto the parent View transform rather than overwriting it (issue-897
     // P1 follow-up to issue-896).

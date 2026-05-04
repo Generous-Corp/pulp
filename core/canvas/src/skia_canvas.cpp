@@ -298,6 +298,25 @@ void SkiaCanvas::concat_transform(float a, float b, float c,
     canvas_->concat(m);
 }
 
+// pulp #1368 round 2 — diagnostic CTM snapshot for `PULP_LOG_CANVAS_PAINT=1`.
+// Returns the current device matrix in CanvasRenderingContext2D affine order
+// so the env-gated CanvasWidget::paint logging can record what transform the
+// inbound canvas actually has when paint() runs.
+SkiaCanvas::AffineTransform2x3 SkiaCanvas::current_transform() const {
+    AffineTransform2x3 t;
+    if (!canvas_) return t;
+    SkMatrix m = canvas_->getTotalMatrix();
+    // SkMatrix is row-major (sx, kx, tx, ky, sy, ty, p0, p1, p2). Map to
+    // CanvasRenderingContext2D column-major (a, b, c, d, e, f).
+    t.a = m.getScaleX();
+    t.b = m.getSkewY();
+    t.c = m.getSkewX();
+    t.d = m.getScaleY();
+    t.e = m.getTranslateX();
+    t.f = m.getTranslateY();
+    return t;
+}
+
 void SkiaCanvas::clip_rect(float x, float y, float w, float h) {
     GUARD_CANVAS;
     canvas_->clipRect(SkRect::MakeXYWH(x, y, w, h));

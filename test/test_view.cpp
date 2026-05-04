@@ -1504,3 +1504,100 @@ TEST_CASE("View::hit_test does NOT extend overflow:visible past 500px LEFT",
     PopoverFixture f(-650, 25);
     REQUIRE(f.root.hit_test({0, 650}) != f.popover);
 }
+
+// ── pulp #1368 round 2 — absolute children with inset:0 + explicit height ──
+//
+// Spectr filterbank repro per round-2 investigation. Two `<canvas>` siblings
+// share the same wrap parent (1320×860) with `position: absolute; inset: 0`
+// (top/right/bottom/left = 0), but each has an explicit setFlex height —
+// pr_1 = 760, pr_2 = 860. The visible-rendering symptom on the live plugin
+// is consistent with pr_1's bounds_.y landing above the visible window
+// region, which would push every fillRect into the title-bar area via the
+// parent's translate(bounds_.x, bounds_.y) in View::paint_all.
+//
+// These tests pin the contract: when `position: absolute; inset: 0` is
+// combined with an explicit height that is SHORTER than the parent, the
+// child's resolved bounds_ must place its origin at (0, 0) — i.e. inset:0
+// wins over the explicit height for positioning. If a future Yoga / layout
+// change instead resolves y as `parent.height - explicit_height` (anchoring
+// the box to the bottom because inset top:0 + bottom:0 conflicts with the
+// explicit height), the Spectr symptom reappears.
+//
+// As of v0.74.0 this test is expected to FAIL when the resolved y is
+// non-zero — the FAIL is the round-2 reproduction.
+
+TEST_CASE("absolute child with inset:0 + explicit height resolves to (0,0)",
+          "[view][issue-1368][round2]") {
+    using P = View::Position;
+
+    View wrap;
+    wrap.set_bounds({0, 0, 1320, 860});
+
+    auto pr1 = std::make_unique<View>();
+    pr1->set_id("pr_1");
+    pr1->set_position(P::absolute);
+    pr1->set_top(0);
+    pr1->set_right(0);
+    pr1->set_bottom(0);
+    pr1->set_left(0);
+    pr1->flex().preferred_height = 760.0f;
+    auto* pr1_ptr = pr1.get();
+
+    auto pr2 = std::make_unique<View>();
+    pr2->set_id("pr_2");
+    pr2->set_position(P::absolute);
+    pr2->set_top(0);
+    pr2->set_right(0);
+    pr2->set_bottom(0);
+    pr2->set_left(0);
+    pr2->flex().preferred_height = 860.0f;
+    auto* pr2_ptr = pr2.get();
+
+    wrap.add_child(std::move(pr1));
+    wrap.add_child(std::move(pr2));
+
+    wrap.layout_children();
+
+    INFO("pr_1 bounds=(" << pr1_ptr->bounds().x << "," << pr1_ptr->bounds().y
+         << "," << pr1_ptr->bounds().width << "," << pr1_ptr->bounds().height << ")");
+    INFO("pr_2 bounds=(" << pr2_ptr->bounds().x << "," << pr2_ptr->bounds().y
+         << "," << pr2_ptr->bounds().width << "," << pr2_ptr->bounds().height << ")");
+
+    // Both children must paint flush with the parent's top-left. Negative or
+    // shifted y values reproduce the #1368 round-2 hypothesis: parent's
+    // translate(bounds_.x, bounds_.y) in View::paint_all pushes the canvas
+    // child off-window so fillRect at (50, 50) lands in the title-bar region.
+    REQUIRE(pr1_ptr->bounds().x == 0.0f);
+    REQUIRE(pr1_ptr->bounds().y == 0.0f);
+    REQUIRE(pr2_ptr->bounds().x == 0.0f);
+    REQUIRE(pr2_ptr->bounds().y == 0.0f);
+}
+
+TEST_CASE("absolute child with inset:0 fills parent ignoring explicit height",
+          "[view][issue-1368][round2]") {
+    // CSS spec: when both top:0 and bottom:0 are set on a position:absolute
+    // box, the box must stretch to fill the parent height — explicit
+    // `height: 760` is overconstrained and the spec says inset wins (the
+    // box gets parent.height = 860). Confirm Pulp/Yoga match that contract.
+    View wrap;
+    wrap.set_bounds({0, 0, 1320, 860});
+
+    auto pr1 = std::make_unique<View>();
+    pr1->set_position(View::Position::absolute);
+    pr1->set_top(0);
+    pr1->set_right(0);
+    pr1->set_bottom(0);
+    pr1->set_left(0);
+    pr1->flex().preferred_height = 760.0f;
+    auto* pr1_ptr = pr1.get();
+
+    wrap.add_child(std::move(pr1));
+    wrap.layout_children();
+
+    INFO("pr_1 bounds=(" << pr1_ptr->bounds().x << "," << pr1_ptr->bounds().y
+         << "," << pr1_ptr->bounds().width << "," << pr1_ptr->bounds().height << ")");
+
+    REQUIRE(pr1_ptr->bounds().y == 0.0f);
+    // Width should match the parent — inset left:0 + right:0 fills horizontally.
+    REQUIRE(pr1_ptr->bounds().width == 1320.0f);
+}
