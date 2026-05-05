@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-05-05 00:19 PDT
+Last reviewed: 2026-05-05 00:21 PDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`.
@@ -244,9 +244,10 @@ toggle state, generated knob display-format branches, and sync
 propagation to toggles and existing faders. It remains unpushed and
 undispatched.
 Additional #493 view progress is queued locally as
-`local/phase3-image-cache-trim-493` at `1afb279e`, covering
-ImageCache byte-budget lowering, least-recently-used trimming, and
-releaser behavior. It remains unpushed and undispatched.
+`local/phase3-image-cache-trim-493` at `312a008f`, refreshed from
+`1afb279e` onto current `origin/main` and covering ImageCache
+byte-budget lowering, least-recently-used trimming, and releaser
+behavior. It remains unpushed and undispatched.
 Additional #493 view progress is queued locally as
 `local/phase3-visualization-bridge-edges-493` at `10405bc2`, covering
 VisualizationBridge disabled-waveform, zero-channel, and waveform
