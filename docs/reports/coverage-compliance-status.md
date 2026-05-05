@@ -124,7 +124,8 @@ immediate stage, idle `note_off`, and reset edge paths, plus
 `local/phase3-noise-gate-edges-645` at `717067d6`, refreshed from
 `98f73bb8` onto current `origin/main` `0447498e`, covering NoiseGate
 range clamp, instant timing, reset, silence, and buffer paths, plus
-`local/phase3-modulation-reverb-edges-645` at `971488d5`, covering
+`local/phase3-modulation-reverb-edges-645` at `9cfcc171`, refreshed from
+`971488d5` onto current `origin/main` `0447498e`, covering
 Chorus dry/reset/phase-wrap behavior and Reverb zero-decay, damping
 clamp, dry-mix, and reset paths, plus `local/phase3-oscillator-edges-645`
 at `8f51cba4`, covering Oscillator reset, phase wrap, getter, and
