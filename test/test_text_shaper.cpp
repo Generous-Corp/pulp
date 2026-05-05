@@ -89,6 +89,49 @@ TEST_CASE("TextShaper layout_with_lines materializes text", "[canvas][text_shape
     REQUIRE(layout.lines[0].text.find("Hello") != std::string::npos);
 }
 
+// pulp #1410 — `white-space: nowrap` consumers pass max_lines=1 to
+// force a single-line layout regardless of `max_width`. Otherwise the
+// wrapping path fires before #1407's ellipsis truncation can engage.
+TEST_CASE("TextShaper layout with max_lines=1 forces single-line layout",
+          "[canvas][text_shaper][issue-1410]") {
+    TextShaper shaper;
+    auto prepared = shaper.prepare(
+        "This is a long sentence that should wrap to multiple lines", "system", 14);
+
+    auto wrapped = shaper.layout(prepared, 100.0f);
+    REQUIRE(wrapped.line_count > 1);
+
+    auto nowrap = shaper.layout(prepared, 100.0f, 0, /*max_lines=*/1);
+    REQUIRE(nowrap.line_count == 1);
+    REQUIRE(nowrap.total_width >= wrapped.lines.front().width);
+}
+
+TEST_CASE("TextShaper layout_with_lines max_lines=1 materializes the full string",
+          "[canvas][text_shaper][issue-1410]") {
+    TextShaper shaper;
+    auto prepared = shaper.prepare("alpha beta gamma delta", "system", 14);
+
+    auto nowrap = shaper.layout_with_lines(prepared, 50.0f, 0, /*max_lines=*/1);
+    REQUIRE(nowrap.line_count == 1);
+    REQUIRE(nowrap.lines[0].text.find("alpha") != std::string::npos);
+    REQUIRE(nowrap.lines[0].text.find("beta") != std::string::npos);
+    REQUIRE(nowrap.lines[0].text.find("gamma") != std::string::npos);
+    REQUIRE(nowrap.lines[0].text.find("delta") != std::string::npos);
+}
+
+TEST_CASE("TextShaper layout with max_lines=2 caps line count",
+          "[canvas][text_shaper][issue-1410]") {
+    TextShaper shaper;
+    auto prepared = shaper.prepare(
+        "alpha beta gamma delta epsilon zeta eta theta iota kappa", "system", 14);
+
+    auto unbounded = shaper.layout(prepared, 50.0f);
+    REQUIRE(unbounded.line_count > 2);
+
+    auto capped = shaper.layout(prepared, 50.0f, 0, /*max_lines=*/2);
+    REQUIRE(capped.line_count == 2);
+}
+
 TEST_CASE("TextShaper measure_height", "[canvas][text_shaper]") {
     TextShaper shaper;
     auto prepared = shaper.prepare("Line1\nLine2", "system", 14);

@@ -599,6 +599,15 @@ public:
     void set_text_overflow_ellipsis(bool e) { text_ellipsis_ = e; }
     bool text_overflow_ellipsis() const { return text_ellipsis_; }
 
+    /// White-space: nowrap (CSS `white-space: nowrap`). Pulp #1410. Generic
+    /// flag so non-Label widgets (Button, custom text-bearing views) and
+    /// text-shaper consumers can react to nowrap without dynamic_casting
+    /// to a specific widget type. Label keeps its `multi_line_` flag in
+    /// lock-step via WidgetBridge::setWhiteSpace, so existing callers keep
+    /// working.
+    void set_white_space_nowrap(bool n) { white_space_nowrap_ = n; }
+    bool white_space_nowrap() const { return white_space_nowrap_; }
+
     /// Cursor style hint (CSS cursor property)
     enum class CursorStyle {
         default_, pointer, crosshair, text, grab, grabbing, not_allowed,
@@ -702,6 +711,7 @@ private:
     std::vector<Color> bg_gradient_colors_;
     std::vector<float> bg_gradient_positions_;
     bool text_ellipsis_ = false;
+    bool white_space_nowrap_ = false;  // pulp #1410
     CursorStyle cursor_ = CursorStyle::default_;
 
     // Pointer capture: pointer_id → this view receives all events for that pointer
