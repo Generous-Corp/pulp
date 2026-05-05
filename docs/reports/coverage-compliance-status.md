@@ -247,8 +247,8 @@ toggle state, generated knob display-format branches, and sync
 propagation to toggles and existing faders. It remains unpushed and
 undispatched.
 Additional #493 view progress is queued locally as
-`local/phase3-image-cache-trim-493` at `d9a0fc92`, refreshed from
-`312a008f` onto current `origin/main` and covering ImageCache
+`local/phase3-image-cache-trim-493` at `a3ca7f7c`, refreshed from
+`d9a0fc92` onto current `origin/main` `0447498e` and covering ImageCache
 byte-budget lowering, least-recently-used trimming, and releaser
 behavior. It remains unpushed and undispatched.
 Additional #493 view progress is queued locally as
