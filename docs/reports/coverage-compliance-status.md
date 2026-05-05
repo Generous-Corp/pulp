@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-05-04 23:30 PDT
+Last reviewed: 2026-05-04 23:34 PDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`.
@@ -102,8 +102,9 @@ Latest local-only progress recorded during the pause: #645 signal
 tranche `local/phase3-linkwitz-riley-edges-645` at `385c51a7`, covering
 Linkwitz-Riley reset/history and cutoff boundary finite-output behavior,
 plus #493 format tranche `local/phase3-validation-harness-json-493` at
-`15fac4aa`, covering ValidationHarness report metadata and entry JSON
-escaping, plus #493 host tranche `local/phase3-signal-graph-guards-493`
+`974cf572`, refreshed from `15fac4aa` onto current `origin/main` and
+covering ValidationHarness report metadata and entry JSON escaping,
+plus #493 host tranche `local/phase3-signal-graph-guards-493`
 at `adcf5dcf`, covering SignalGraph guard/default behavior. All remain
 unpushed and undispatched. Additional #493 view progress is queued
 locally as `local/phase3-widgets-render-paths-493` at `fefb7e94`,
