@@ -2074,6 +2074,78 @@ TEST_CASE("pulp scan --no-load runs filesystem-only enumeration cleanly",
     REQUIRE(r.stderr_output.find("libc++abi: terminating") == std::string::npos);
 }
 
+TEST_CASE("pulp scan --no-load reports filename-derived CLAP entries from HOME",
+          "[cli][shellout][scan][issue-812]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+#if defined(_WIN32)
+    SUCCEED("Windows CLAP defaults do not derive from HOME");
+    return;
+#else
+    auto home = unique_temp_dir("pulp-scan-noload-home");
+    ScopedEnvVar scoped_home("HOME");
+    scoped_home.set(home.string());
+
+#if defined(__APPLE__)
+    auto clap_dir = home / "Library" / "Audio" / "Plug-Ins" / "CLAP";
+#else
+    auto clap_dir = home / ".clap";
+#endif
+    auto alpha_path = clap_dir / "Phase8Alpha.clap";
+    auto beta_path = clap_dir / "Phase8Beta.clap";
+    fs::create_directories(beta_path);
+    fs::create_directories(alpha_path);
+
+    auto r = run_pulp({"scan", "--no-load", "--format", "clap"},
+                      /*timeout_ms=*/30000);
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(r.stderr_output.find("libc++abi: terminating") == std::string::npos);
+    REQUIRE(r.stdout_output.find("[CLAP]") != std::string::npos);
+    REQUIRE(r.stdout_output.find(alpha_path.string()) != std::string::npos);
+    REQUIRE(r.stdout_output.find(beta_path.string()) != std::string::npos);
+
+    auto alpha = r.stdout_output.find("Phase8Alpha");
+    auto beta = r.stdout_output.find("Phase8Beta");
+    REQUIRE(alpha != std::string::npos);
+    REQUIRE(beta != std::string::npos);
+    REQUIRE(alpha < beta);
+
+    std::error_code ec;
+    fs::remove_all(home, ec);
+#endif
+}
+
+TEST_CASE("pulp scan --format lv2 reaches rich scanner path and exits cleanly",
+          "[cli][shellout][scan][issue-812]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    auto home = unique_temp_dir("pulp-scan-lv2-home");
+    ScopedEnvVar scoped_home("HOME");
+    scoped_home.set(home.string());
+
+#if defined(__linux__)
+    auto lv2_dir = home / ".lv2" / "Phase8Probe.lv2";
+    fs::create_directories(lv2_dir);
+    write_text(lv2_dir / "manifest.ttl",
+               "@prefix lv2: <http://lv2plug.in/ns/lv2core#> .\n"
+               "<http://example.org/phase8-probe> a lv2:Plugin .\n");
+#endif
+
+    auto r = run_pulp({"scan", "--format", "lv2"}, /*timeout_ms=*/30000);
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(r.stderr_output.find("libc++abi: terminating") == std::string::npos);
+#if defined(__linux__)
+    REQUIRE(r.stdout_output.find("Phase8Probe") != std::string::npos);
+#else
+    REQUIRE((r.stdout_output.find("[LV2]") != std::string::npos ||
+             r.stdout_output.find("No plugins found") != std::string::npos));
+#endif
+
+    std::error_code ec;
+    fs::remove_all(home, ec);
+}
+
 TEST_CASE("pulp scan --no-load --format clap restricts to one bucket",
           "[cli][shellout][scan][issue-812]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }

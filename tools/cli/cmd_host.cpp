@@ -22,6 +22,13 @@
 
 namespace {
 
+[[noreturn]] void finish_rich_scan_process() {
+    // Coverage runs need std::exit so LLVM can flush the child process's
+    // profile before termination. Normal `pulp scan` keeps the _Exit path
+    // that skips plugin static destructors.
+    std::getenv("LLVM_PROFILE_FILE") ? std::exit(0) : std::_Exit(0);
+}
+
 pulp::host::PluginFormat parse_format(std::string_view s,
                                       pulp::host::PluginFormat fallback) {
     if (s == "clap" || s == "CLAP") return pulp::host::PluginFormat::CLAP;
@@ -217,7 +224,7 @@ int cmd_scan(const std::vector<std::string>& args) {
         // from coverage. The outer behaviour (clean rc=0 on a host
         // with throw-prone CLAP plugins) is exercised end-to-end by
         // the `pulp scan` shellout test in test_cli_shellout.cpp.
-        std::_Exit(0);
+        finish_rich_scan_process();
         // LCOV_EXCL_STOP
     }
     return 0;
