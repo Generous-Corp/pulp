@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-05-05 01:56 PDT
+Last reviewed: 2026-05-05 02:02 PDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`.
@@ -285,8 +285,8 @@ DOM subtree moves, recursive DOM removal widget-map cleanup,
 root/missing layout helper paths, and the root-aware `getLayoutRect("")`
 registration fix. It remains unpushed and undispatched. Additional #643
 tools progress is queued locally as
-`local/phase3-harness-verifier-643` at `e9be30f6`, refreshed from
-`7b7cc19d` onto current `origin/main` and covering `tools/harness`
+`local/phase3-harness-verifier-643` at `b94b48c0`, refreshed from
+`e9be30f6` onto current `origin/main` and covering `tools/harness`
 status/verifier helper paths, current yoga and CSS harness baselines,
 adapter unit-test discovery from
 `test/harness/test_*.py` including the current RN adapter coverage,
