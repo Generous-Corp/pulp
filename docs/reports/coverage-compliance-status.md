@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-05-04 19:32 PDT
+Last reviewed: 2026-05-04 20:01 PDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`.
@@ -153,6 +153,16 @@ Additional #643 CLI/tools progress is queued locally as
 FetchContent cache fallback entry parsing, live symlink classification,
 file-backed declared-ref parsing, label fallbacks, and symlink removal
 without deleting targets. It remains unpushed and undispatched.
+Additional #493 view progress is queued locally as
+`local/phase3-ui-components-edges-493` at `33d5f737`, covering ComboBox
+popup handoff/typeahead no-op, ScrollView scrolled-child pointer-event
+hit testing and paint clipping/visibility, and ListBox boundary-key and
+out-of-range mouse guards. It remains unpushed and undispatched.
+Additional #493 view/widget progress is queued locally as
+`local/phase3-phase9-widget-edges-493` at `d5000a24`, covering
+SplitView drag minimum clamps, miss/drag guards, divider grip paint
+branches, and PropertyList boolean editing, category height/paint, and
+scalar value formatting paths. It remains unpushed and undispatched.
 
 ## Phase 3 Operating Loop
 
