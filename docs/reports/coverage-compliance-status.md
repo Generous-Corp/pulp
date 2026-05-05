@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-05-05 02:51 PDT
+Last reviewed: 2026-05-05 02:55 PDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`.
@@ -229,8 +229,8 @@ repeated lock callbacks and locked poll no-op behavior, plus ThemeManager
 locked-theme, locked-appearance callback, and unlock behavior. It remains
 unpushed and undispatched.
 Additional #493 view progress is queued locally as
-`local/phase3-tree-view-edges-493` at `94ddde56`, refreshed from
-`dc87d5fe` onto current `origin/main` and covering TreeView disclosure
+`local/phase3-tree-view-edges-493` at `de5d45ae`, refreshed from
+`94ddde56` onto current `origin/main` `0447498e` and covering TreeView disclosure
 collapse, left-key consumed-state behavior, selected-row paint highlight,
 and expanded/collapsed disclosure paint output. It remains unpushed and
 undispatched.
