@@ -21,8 +21,11 @@ This script is wired through the CLI as `pulp harness coverage`.
 from __future__ import annotations
 
 import argparse
+import importlib
 import json
+import logging
 import os
+import pkgutil
 import shutil
 import subprocess
 import sys
@@ -37,19 +40,70 @@ REPO_ROOT_GUESS = HERE.parent.parent
 if str(REPO_ROOT_GUESS) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT_GUESS))
 
+from tools.harness.adapters import base as adapters_base  # noqa: E402
 from tools.harness.adapters.base import CatalogEntry, Result  # noqa: E402
-from tools.harness.adapters.yoga import YogaAdapter  # noqa: E402
 from tools.harness.status import STATUS_ORDER, Status, StatusCounts  # noqa: E402
 
-# Surface -> Adapter class. New adapters land here. Surfaces present in
-# compat.json but absent from this map are reported as "not yet wired".
-ADAPTERS = {
-    "yoga": YogaAdapter,
-}
+logger = logging.getLogger("pulp.harness.verifier")
 
 # Surfaces tracked in compat.json that we know about. Used so we can call out
 # "not yet wired" cleanly when the user asks for `--all`.
 KNOWN_SURFACES = ["yoga", "css", "rn", "html", "canvas2d", "imports"]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Adapter auto-discovery (pulp #1401)
+#
+# Each adapter module under ``tools/harness/adapters/`` is imported in
+# alphabetical order. The :func:`tools.harness.adapters.base.register_adapter`
+# decorator side-effect populates :data:`adapters_base.ADAPTERS`. We expose
+# that dict as the module-level :data:`ADAPTERS` for backward compatibility
+# with anything that imported the symbol from the old hand-rolled registry.
+#
+# A broken adapter module (raises on import) is logged and skipped; it does
+# not crash the verifier or other surfaces. This is the property covered by
+# the issue's "verifier still works when one adapter throws on import" test.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _discover_adapters(reload: bool = False) -> dict[str, type]:
+    """Import every sibling module of :mod:`tools.harness.adapters` so the
+    ``@register_adapter`` decorators populate :data:`adapters_base.ADAPTERS`.
+
+    Returns the live registry dict (the same object as
+    :data:`adapters_base.ADAPTERS`) for callers that want to inspect it.
+
+    Modules whose name starts with ``_`` or that equal ``"base"`` are
+    skipped; everything else is imported. Import failures are logged at
+    WARNING and the offending surface is left out of the registry — they
+    do not propagate to the caller.
+    """
+    import tools.harness.adapters as adapters_pkg
+
+    for _, mod_name, _ in pkgutil.iter_modules(adapters_pkg.__path__):
+        if mod_name.startswith("_") or mod_name == "base":
+            continue
+        full_name = f"{adapters_pkg.__name__}.{mod_name}"
+        try:
+            if reload and full_name in sys.modules:
+                importlib.reload(sys.modules[full_name])
+            else:
+                importlib.import_module(full_name)
+        except Exception as e:  # noqa: BLE001 — we genuinely want to swallow
+            logger.warning(
+                "harness: adapter %r failed to load and will be skipped: %s",
+                mod_name,
+                e,
+            )
+    return adapters_base.ADAPTERS
+
+
+_discover_adapters()
+
+# Surface -> Adapter class. Populated at import time by
+# ``_discover_adapters``. Re-export so callers that did
+# ``from verifier import ADAPTERS`` keep working.
+ADAPTERS = adapters_base.ADAPTERS
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -22,7 +22,7 @@ import re
 from pathlib import Path
 
 from ..status import Status
-from .base import AdapterBase, CatalogEntry, Result
+from .base import AdapterBase, CatalogEntry, Result, register_adapter
 
 
 # Markers in the catalog `mapsTo` field that imply "no real binding".
@@ -58,6 +58,7 @@ NO_OP_MARKERS = (
 )
 
 
+@register_adapter("yoga")
 class YogaAdapter(AdapterBase):
     surface = "yoga"
 
