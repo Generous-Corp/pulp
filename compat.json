@@ -1356,8 +1356,8 @@
       "status": "supported",
       "mapsTo": "setFlex(id, 'justify_content', value)",
       "supportedValues": [
-        "flex-start (start)",
-        "flex-end (end)",
+        "flex-start",
+        "flex-end",
         "center",
         "space-between",
         "space-around",
@@ -1431,47 +1431,47 @@
       "issue": ""
     },
     "css/listStyle": {
-      "status": "wontfix",
+      "status": "missing",
       "mapsTo": "n/a",
       "supportedValues": [],
       "unsupportedValues": [
         "all"
       ],
       "tests": [],
-      "notes": "Pulp has no list intrinsic; lists are emulated with Col + Label children.",
+      "notes": "pulp #1434 batch 2: reclassified OOS \u2192 NOT-IMPL. list-style shorthand for <ul>/<ol>. Common in design-tool exports (Figma / v0 / Claude Design HTML); track for impl follow-up.",
       "issue": ""
     },
     "css/listStyleImage": {
-      "status": "wontfix",
+      "status": "missing",
       "mapsTo": "n/a",
       "supportedValues": [],
       "unsupportedValues": [
         "all"
       ],
       "tests": [],
-      "notes": "See listStyle.",
+      "notes": "pulp #1434 batch 2: reclassified OOS \u2192 NOT-IMPL. custom bullet image for <ul>/<ol>. Common in design-tool exports (Figma / v0 / Claude Design HTML); track for impl follow-up.",
       "issue": ""
     },
     "css/listStylePosition": {
-      "status": "wontfix",
+      "status": "missing",
       "mapsTo": "n/a",
       "supportedValues": [],
       "unsupportedValues": [
         "all"
       ],
       "tests": [],
-      "notes": "See listStyle.",
+      "notes": "pulp #1434 batch 2: reclassified OOS \u2192 NOT-IMPL. inside/outside bullet placement. Common in design-tool exports (Figma / v0 / Claude Design HTML); track for impl follow-up.",
       "issue": ""
     },
     "css/listStyleType": {
-      "status": "wontfix",
+      "status": "missing",
       "mapsTo": "n/a",
       "supportedValues": [],
       "unsupportedValues": [
         "all"
       ],
       "tests": [],
-      "notes": "See listStyle.",
+      "notes": "pulp #1434 batch 2: reclassified OOS \u2192 NOT-IMPL. 'none' / 'disc' / 'decimal' \u2014 `list-style-type: none` is the most common reset in design-tool HTML exports. Common in design-tool exports (Figma / v0 / Claude Design HTML); track for impl follow-up.",
       "issue": ""
     },
     "css/margin": {
@@ -1559,14 +1559,14 @@
       "issue": ""
     },
     "css/marginInlineStart": {
-      "status": "missing",
+      "status": "partial",
       "mapsTo": "case in switch is bare break (line 609); RTL untracked",
       "supportedValues": [],
       "unsupportedValues": [
-        "all"
+        "writing-direction-aware mapping (LTR-only today)"
       ],
       "tests": [],
-      "notes": "Not handled (bare break in switch).",
+      "notes": "pulp #1434 batch 1: status flipped missing \u2192 partial. CSS translator at web-compat-style-decl.js:784 maps to setFlex(margin_left) under LTR assumption; RTL not yet wired.",
       "issue": ""
     },
     "css/marginLeft": {
@@ -1728,25 +1728,26 @@
       "issue": ""
     },
     "css/outline": {
-      "status": "missing",
+      "status": "partial",
       "mapsTo": "web-compat calls setOutline if defined -- bridge does NOT register it",
       "supportedValues": [],
       "unsupportedValues": [
-        "all"
+        "outline-style values beyond solid",
+        "multi-keyword shorthand parsing"
       ],
       "tests": [],
-      "notes": "Silent no-op. Affects accessibility focus rings.",
+      "notes": "pulp #1434 batch 1: status flipped missing \u2192 partial. CSS translator at web-compat-style-decl.js:525 routes through setOutline. Single-keyword + length + color forms are wired.",
       "issue": ""
     },
     "css/outlineColor": {
-      "status": "missing",
+      "status": "partial",
       "mapsTo": "web-compat calls setOutline -- never registered",
       "supportedValues": [],
       "unsupportedValues": [
-        "all"
+        "currentColor keyword"
       ],
       "tests": [],
-      "notes": "Silent no-op.",
+      "notes": "pulp #1434 batch 1: status flipped missing \u2192 partial. CSS translator at web-compat-style-decl.js:538 routes through setOutline (color slot).",
       "issue": ""
     },
     "css/outlineOffset": {
@@ -1772,14 +1773,14 @@
       "issue": ""
     },
     "css/outlineWidth": {
-      "status": "missing",
+      "status": "partial",
       "mapsTo": "web-compat calls setOutline -- never registered",
       "supportedValues": [],
       "unsupportedValues": [
-        "all"
+        "thin/medium/thick keyword forms"
       ],
       "tests": [],
-      "notes": "Silent no-op.",
+      "notes": "pulp #1434 batch 1: status flipped missing \u2192 partial. CSS translator at web-compat-style-decl.js:533 routes through setOutline (width slot). Numeric px values supported.",
       "issue": ""
     },
     "css/overflow": {
@@ -2138,47 +2139,47 @@
       "issue": ""
     },
     "css/scrollBehavior": {
-      "status": "wontfix",
+      "status": "missing",
       "mapsTo": "n/a",
       "supportedValues": [],
       "unsupportedValues": [
         "all"
       ],
       "tests": [],
-      "notes": "ScrollView intrinsic handles its own scrolling.",
+      "notes": "pulp #1434 batch 2: reclassified OOS \u2192 NOT-IMPL. 'smooth' scroll on link / programmatic scroll. Common in design-tool exports (Figma / v0 / Claude Design HTML); track for impl follow-up.",
       "issue": ""
     },
     "css/scrollMargin": {
-      "status": "wontfix",
+      "status": "missing",
       "mapsTo": "n/a",
       "supportedValues": [],
       "unsupportedValues": [
         "all"
       ],
       "tests": [],
-      "notes": "Not in initial scope.",
+      "notes": "pulp #1434 batch 2: reclassified OOS \u2192 NOT-IMPL. scroll-snap landing area. Common in design-tool exports (Figma / v0 / Claude Design HTML); track for impl follow-up.",
       "issue": ""
     },
     "css/scrollPadding": {
-      "status": "wontfix",
+      "status": "missing",
       "mapsTo": "n/a",
       "supportedValues": [],
       "unsupportedValues": [
         "all"
       ],
       "tests": [],
-      "notes": "Not in initial scope.",
+      "notes": "pulp #1434 batch 2: reclassified OOS \u2192 NOT-IMPL. scroll-snap landing area. Common in design-tool exports (Figma / v0 / Claude Design HTML); track for impl follow-up.",
       "issue": ""
     },
     "css/scrollSnapType": {
-      "status": "wontfix",
+      "status": "missing",
       "mapsTo": "n/a",
       "supportedValues": [],
       "unsupportedValues": [
         "all"
       ],
       "tests": [],
-      "notes": "Not in initial scope.",
+      "notes": "pulp #1434 batch 2: reclassified OOS \u2192 NOT-IMPL. scroll-snap container; mobile carousel / hero gallery primitive. Common in design-tool exports (Figma / v0 / Claude Design HTML); track for impl follow-up.",
       "issue": ""
     },
     "css/tableLayout": {
@@ -2289,14 +2290,14 @@
       "issue": ""
     },
     "css/textShadow": {
-      "status": "missing",
+      "status": "partial",
       "mapsTo": "web-compat calls setTextShadow if defined -- bridge does NOT register it",
       "supportedValues": [],
       "unsupportedValues": [
-        "all"
+        "multi-shadow comma-separated lists"
       ],
       "tests": [],
-      "notes": "Silent no-op.",
+      "notes": "pulp #1434 batch 1: status flipped missing \u2192 partial. CSS translator at web-compat-style-decl.js:557 parses `Xpx Ypx Bpx <color>` and calls setTextShadow. Multi-shadow lists are not yet split.",
       "issue": ""
     },
     "css/textTransform": {
@@ -4119,16 +4120,18 @@
       "status": "supported",
       "mapsTo": "FlexStyle.justify_content (FlexJustify enum)",
       "supportedValues": [
+        "flex-start",
         "start",
-        "center",
+        "flex-end",
         "end",
+        "center",
         "space-between",
         "space-around",
         "space-evenly"
       ],
       "unsupportedValues": [],
       "tests": [],
-      "notes": "All 6 modes covered.",
+      "notes": "All 6 modes covered. Bridge accepts both CSS spelling (flex-start/flex-end) and Yoga spelling (start/end) \u2014 CSS translator _cssToFlex maps the former to the latter.",
       "issue": ""
     },
     "yoga/alignItems": {
@@ -4742,7 +4745,7 @@
       "issue": ""
     },
     "html/Element_addEventListener": {
-      "status": "supported",
+      "status": "partial",
       "mapsTo": "Element.addEventListener \u2014 registers click/mouseenter/mouseleave/pointerenter/pointerleave/pointerdown/move/up/cancel/gesturestart/change/focus/blur with the bridge. registerHover/registerClick/registerPointer/registerGesture are called as needed.",
       "supportedValues": [
         "click",
@@ -4770,7 +4773,7 @@
         "keydown/keyup/keypress (forwarded globally via __dispatch__)"
       ],
       "tests": [],
-      "notes": "Hover events fixed in PR #1173 (pulp #1149 part a) \u2014 registerHover is now called on hover-event registration so the C++ side actually fires.",
+      "notes": "Hover events fixed in PR #1173 (pulp #1149 part a) \u2014 registerHover is now called on hover-event registration so the C++ side actually fires. Status flipped to partial (pulp #1434 batch 1) \u2014 drag/wheel/keyboard event groups route through different surfaces.",
       "issue": "1149"
     },
     "html/Element_appendChild": {
@@ -4967,7 +4970,7 @@
       "issue": ""
     },
     "html/StyleSheet_inline": {
-      "status": "supported",
+      "status": "partial",
       "mapsTo": "Inline <style> elements parsed and applied to the document. Selectors: tag, .class, #id; combinators NOT supported. Properties routed through CSSStyleDeclaration._applyProperty (full css/* surface).",
       "supportedValues": [],
       "unsupportedValues": [
@@ -4979,7 +4982,7 @@
         "complex selectors"
       ],
       "tests": [],
-      "notes": "PR #1345 added :hover; otherwise unchanged from initial implementation.",
+      "notes": "PR #1345 added :hover; otherwise unchanged from initial implementation. Status flipped to partial (pulp #1434 batch 1) \u2014 at-rules and complex selectors are real gaps.",
       "issue": ""
     },
     "html/article": {
@@ -5075,12 +5078,12 @@
       "issue": ""
     },
     "html/document_createTextNode": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "document.createTextNode -> Text-like Element.",
       "supportedValues": [],
       "unsupportedValues": [],
       "tests": [],
-      "notes": "Used by React reconciler.",
+      "notes": "Used by React reconciler. Confirmed wired in web-compat-document.js (pulp #1434 batch 1).",
       "issue": ""
     },
     "html/document_getElementById": {
@@ -5218,14 +5221,14 @@
       "issue": ""
     },
     "html/label": {
-      "status": "supported",
+      "status": "partial",
       "mapsTo": "createLabel \u2014 same as span.",
       "supportedValues": [],
       "unsupportedValues": [
         "the `for` attribute (does not wire focus to a sibling input)"
       ],
       "tests": [],
-      "notes": "Confirmed 2026-05-04.",
+      "notes": "Confirmed 2026-05-04. Status flipped to partial (pulp #1434 batch 1) \u2014 `for` attribute is a real unsupported value, harness flagged DIVERGE.",
       "issue": ""
     },
     "html/main": {
@@ -5292,7 +5295,7 @@
       "issue": ""
     },
     "html/style": {
-      "status": "supported",
+      "status": "partial",
       "mapsTo": "Element('style')._ensureNative -> createCol + setVisible(false). textContent is routed through _processStyleElement (web-compat-document.js) which parses CSS rules incl. :hover. PR #1345.",
       "supportedValues": [
         "inline <style> with class/id/element selectors",
@@ -5304,7 +5307,7 @@
         "complex selectors (pseudo-class chains, combinators)"
       ],
       "tests": [],
-      "notes": "PR #1345 / pulp #1149 part b.",
+      "notes": "PR #1345 / pulp #1149 part b. Status flipped to partial (pulp #1434 batch 1) \u2014 @media/@keyframes/complex selectors are real gaps.",
       "issue": "1149"
     },
     "html/svg": {
