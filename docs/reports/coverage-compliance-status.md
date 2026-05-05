@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-05-05 02:07 PDT
+Last reviewed: 2026-05-05 02:09 PDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`.
@@ -132,11 +132,12 @@ Additional #640 audio progress is queued locally as
 AudioFocusRegistry inactive-listener skip behavior when a listener is
 removed or the registry is reset during dispatch. It remains unpushed and
 undispatched. Additional #643 tools progress is queued locally as
-`local/phase3-audio-tools-model-store-643` at `a88ddfe8`, covering
-`tools/audio` model registry URL resolution, legacy/malformed model
-metadata, model/bundle JSON serialization/defaults, and excerpt-find
-guard and unsupported-input paths. It remains unpushed and
-undispatched. Additional #640 platform progress is queued locally as
+`local/phase3-audio-tools-model-store-643` at `9743ccd7`, refreshed from
+`a88ddfe8` onto current `origin/main` `0447498e`, covering `tools/audio`
+model registry URL resolution, legacy/malformed model metadata,
+model/bundle JSON serialization/defaults, and excerpt-find guard and
+unsupported-input paths. It remains unpushed and undispatched.
+Additional #640 platform progress is queued locally as
 `local/phase3-platform-environment-dispatch-640` at `b271d2e6`,
 refreshed from `49d0611a` onto current `origin/main`, covering
 Environment token self-move, listener removal before dispatch, and
