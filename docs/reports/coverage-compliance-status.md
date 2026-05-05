@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-05-05 06:58 PDT
+Last reviewed: 2026-05-05 07:02 PDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`.
@@ -273,13 +273,14 @@ Additional #493 view/file-browser progress is queued locally as
 sorted-row paint clipping and MultiDocumentPanel active/inactive tab
 paint output. It remains unpushed and undispatched.
 Additional #493 view progress is reconciled locally on the #1285 resume
-path as `feature/phase3-splash-screen-coverage-493` at `7cba95e3`,
+path as `feature/phase3-splash-screen-coverage-493` at `6ee48b54`,
 refreshed from paused remote head `d3cd9f47` onto current `origin/main`
-`0447498e` and incorporating/superseding `local/phase3-splash-screen-493`
-(`1dd00e70`). It covers SplashScreen advance/dismiss callback behavior,
-dismiss-on-click gating, and text/image paint output. It remains unpushed
-and undispatched; #1285 still points at `d3cd9f47` until Namespace
-capacity returns.
+`50ff5822` and incorporating/superseding
+`local/phase3-splash-screen-493` (`1dd00e70`), after superseding local
+refresh `7cba95e3` on `0447498e`. It covers SplashScreen
+advance/dismiss callback behavior, dismiss-on-click gating, and
+text/image paint output. It remains unpushed and undispatched; #1285
+still points at `d3cd9f47` until Namespace capacity returns.
 Additional #493 view progress is queued locally as
 `local/phase3-appearance-manager-493` at `c0b6bece`, refreshed from
 `ceb05add` onto current `origin/main` `0447498e` and covering AppearanceTracker
