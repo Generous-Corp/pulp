@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-05-04 18:09 PDT
+Last reviewed: 2026-05-04 18:17 PDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`.
@@ -116,8 +116,11 @@ undispatched. Additional #645 signal progress is queued locally as
 `local/phase3-adsr-edges-645` at `e4844caa`, covering ADSR immediate
 stage, idle `note_off`, and reset edge paths, plus
 `local/phase3-noise-gate-edges-645` at `98f73bb8`, covering NoiseGate
-range clamp, instant timing, reset, silence, and buffer paths. Both
-remain unpushed and undispatched.
+range clamp, instant timing, reset, silence, and buffer paths, plus
+`local/phase3-modulation-reverb-edges-645` at `971488d5`, covering
+Chorus dry/reset/phase-wrap behavior and Reverb zero-decay, damping
+clamp, dry-mix, and reset paths. All three remain unpushed and
+undispatched.
 
 ## Phase 3 Operating Loop
 
