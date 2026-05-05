@@ -108,8 +108,8 @@ plus #493 host tranche `local/phase3-signal-graph-guards-493`
 at `9f33226f`, refreshed from `247be833` onto current `origin/main` `0447498e` and
 covering SignalGraph guard/default behavior. All remain unpushed and
 undispatched. Additional #493 view progress is queued locally as
-`local/phase3-widgets-render-paths-493` at `55a90f79`, refreshed from
-`fefb7e94` onto current `origin/main` and covering widget custom-shader
+`local/phase3-widgets-render-paths-493` at `812f84ce`, refreshed from
+`55a90f79` onto current `origin/main` `0447498e` and covering widget custom-shader
 fallbacks, minimal render-style branches, and knob/fader/toggle
 interaction edges, plus
 `local/phase3-audio-bridge-edges-493` at `cba288df`, refreshed from
