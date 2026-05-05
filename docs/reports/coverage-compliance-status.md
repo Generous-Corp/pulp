@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-05-04 22:16 PDT
+Last reviewed: 2026-05-04 22:34 PDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`.
@@ -254,7 +254,11 @@ Additional #493 view progress is queued locally as
 WidgetBridge native DOM subtree moves, recursive DOM removal widget-map
 cleanup, root/missing layout helper paths, and the root-aware
 `getLayoutRect("")` registration fix. It remains unpushed and
-undispatched.
+undispatched. Additional #643 tools progress is queued locally as
+`local/phase3-harness-verifier-643` at `51c0c8bf`, covering
+`tools/harness` status/verifier helper paths, the stale yoga
+auto-discovery baseline, and Python coverage-runner discovery/omit
+rules for harness tests. It remains unpushed and undispatched.
 
 ## Phase 3 Operating Loop
 
