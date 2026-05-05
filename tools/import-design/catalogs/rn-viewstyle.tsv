@@ -1,0 +1,50 @@
+backfaceVisibility	enum	visible, hidden
+backgroundColor	color
+borderBlockColor	color
+borderBlockEndColor	color
+borderBlockStartColor	color
+borderBottomColor	color
+borderBottomEndRadius	length-or-percentage
+borderBottomLeftRadius	length-or-percentage
+borderBottomRightRadius	length-or-percentage
+borderBottomStartRadius	length-or-percentage
+borderBottomWidth	length
+borderColor	color	shorthand for all edges
+borderCurve	enum	circular, continuous (iOS only)
+borderEndColor	color	writing-direction relative
+borderEndEndRadius	length-or-percentage	logical
+borderEndStartRadius	length-or-percentage	logical
+borderLeftColor	color
+borderLeftWidth	length
+borderRadius	length-or-percentage	shorthand
+borderRightColor	color
+borderRightWidth	length
+borderStartColor	color	writing-direction relative
+borderStartEndRadius	length-or-percentage	logical
+borderStartStartRadius	length-or-percentage	logical
+borderStyle	enum	solid, dotted, dashed
+borderTopColor	color
+borderTopEndRadius	length-or-percentage
+borderTopLeftRadius	length-or-percentage
+borderTopRightRadius	length-or-percentage
+borderTopStartRadius	length-or-percentage
+borderTopWidth	length
+borderWidth	length	shorthand for all edges
+boxShadow	string	New Architecture only; CSS box-shadow syntax
+cursor	enum	auto, pointer
+elevation	number	Android 5.0+ only; integer dp
+experimental_backgroundImage	string	linear-gradient, radial-gradient
+filter	string	New Architecture only; CSS filter syntax
+mixBlendMode	enum	normal, multiply, screen, overlay, darken, lighten, color-dodge, color-burn, hard-light, soft-light, difference, exclusion, hue, saturation, color, luminosity
+opacity	number	0..1
+outlineColor	color	New Architecture only
+outlineOffset	number	New Architecture only
+outlineStyle	enum	solid, dotted, dashed
+outlineWidth	number	New Architecture only
+pointerEvents	enum	auto, box-none, box-only, none
+shadowColor	color	iOS only (RN); maps to CSS box-shadow color on web
+shadowOffset	shadow-offset	iOS only; { width: number, height: number }
+shadowOpacity	number	iOS only; 0..1
+shadowRadius	number	iOS only
+transform	transform-array	[{ matrix }, { perspective }, { rotate }, { rotateX }, { rotateY }, { rotateZ }, { scale }, { scaleX }, { scaleY }, { translateX }, { translateY }, { skewX }, { skewY }]
+transformOrigin	string	default '50% 50% 0'
