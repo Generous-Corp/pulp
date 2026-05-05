@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-05-05 15:49 PDT
+Last reviewed: 2026-05-05 15:53 PDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`.
@@ -218,11 +218,12 @@ official Python coverage runner intentionally excludes
 `tools/scripts/test_*.py`, so this guard has no measured non-test source
 surface in that focused runner. It remains unpushed and undispatched.
 Additional #640 platform progress is queued locally as
-`local/phase3-platform-environment-dispatch-640` at `325604de`,
+`local/phase3-platform-environment-dispatch-640` at `1778b21c`,
 refreshed from `b271d2e6` to `422a64cc`, then onto current `origin/main`
 `bd036171`, then onto current `origin/main` `b7ec8f08`, then onto current
 `origin/main` `6c8b9920`, then to `96aba9de` on current
-`origin/main` `b567dbeb`, covering Environment token self-move, listener
+`origin/main` `b567dbeb`, then onto current `origin/main` `7e9795b4`,
+covering Environment token self-move, listener
 removal before dispatch, and reset-during-dispatch skip behavior. It
 remains unpushed and undispatched. Additional #640 platform progress is
 queued locally as
