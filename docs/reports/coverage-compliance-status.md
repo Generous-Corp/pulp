@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-05-04 16:09 PDT
+Last reviewed: 2026-05-04 17:03 PDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`.
@@ -97,6 +97,11 @@ validation in existing worktrees, and ledger reconciliation.
 Use `docs/reports/phase3-codecov-queue-pause-ledger.md` for the
 current paused queue snapshot and resume notes. The normal operating
 loop below resumes only after Namespace capacity returns.
+
+Latest local-only progress recorded during the pause: #645 signal
+tranche `local/phase3-linkwitz-riley-edges-645` at `385c51a7`, covering
+Linkwitz-Riley reset/history and cutoff boundary finite-output behavior.
+It remains unpushed and undispatched.
 
 ## Phase 3 Operating Loop
 
