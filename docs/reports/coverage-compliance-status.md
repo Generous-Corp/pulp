@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-05-05 04:54 PDT
+Last reviewed: 2026-05-05 05:11 PDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`.
@@ -208,7 +208,12 @@ paths. It remains unpushed and undispatched. Additional #493 host progress
 is queued locally as `local/phase3-background-scanner-restart-493` at
 `b109a24f`, created from current `origin/main` `0447498e`, covering
 BackgroundScanner restart after a completed-but-unjoined worker. It
-remains unpushed and undispatched.
+remains unpushed and undispatched. Additional #493 host progress is
+queued locally as `local/phase3-plugin-slot-dispatch-493` at
+`b6ef9689`, created from current `origin/main` `0447498e`, covering
+PluginSlot invalid descriptor fail-closed dispatch across CLAP, AU,
+AUv3, VST3, and LV2 loader paths. It remains unpushed and
+undispatched.
 Additional #643 CLI/tools progress is queued locally as
 `local/phase3-fetchcontent-cache-edges-643` at `e5b13514`, refreshed
 from `b056ca59` onto current `origin/main` `0447498e`, covering
