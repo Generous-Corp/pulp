@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-05-05 00:54 PDT
+Last reviewed: 2026-05-05 00:57 PDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`.
@@ -169,8 +169,8 @@ cache fallback entry parsing, live symlink classification, file-backed
 declared-ref parsing, label fallbacks, and symlink removal without
 deleting targets. It remains unpushed and undispatched.
 Additional #493 view progress is queued locally as
-`local/phase3-ui-components-edges-493` at `16cc8df1`, refreshed from
-`33d5f737` onto current `origin/main` and covering ComboBox popup
+`local/phase3-ui-components-edges-493` at `58940ee2`, refreshed from
+`16cc8df1` onto current `origin/main` and covering ComboBox popup
 handoff/typeahead no-op, ScrollView scrolled-child pointer-event hit
 testing and paint clipping/visibility, and ListBox boundary-key and
 out-of-range mouse guards. It remains unpushed and undispatched.
