@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-05-04 17:37 PDT
+Last reviewed: 2026-05-04 17:49 PDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`.
@@ -108,7 +108,10 @@ at `adcf5dcf`, covering SignalGraph guard/default behavior. All remain
 unpushed and undispatched. Additional #493 view progress is queued
 locally as `local/phase3-widgets-render-paths-493` at `fefb7e94`,
 covering widget custom-shader fallbacks, minimal render-style branches,
-and knob/fader/toggle interaction edges; it also remains unpushed and
+and knob/fader/toggle interaction edges, plus
+`local/phase3-audio-bridge-edges-493` at `255b0516`, covering
+AudioBridge first-pop, max-channel clamp, zero-sample analysis, and
+MeterBallistics tiny-value clamp paths. Both remain unpushed and
 undispatched.
 
 ## Phase 3 Operating Loop
