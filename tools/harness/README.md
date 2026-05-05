@@ -16,22 +16,26 @@ tools/harness/
 ├── adapters/
 │   ├── __init__.py
 │   ├── base.py                     CatalogEntry / Result dataclasses + AdapterBase
-│   └── yoga.py                     yoga/* surface adapter (Week 1)
+│   ├── yoga.py                     yoga/* surface adapter (Week 1)
+│   └── canvas2d.py                 canvas2d/* surface adapter (Week 1)
 └── oracles/
-    └── yoga/
+    ├── yoga/
+    │   ├── README.md               oracle definition + regeneration recipe
+    │   └── yoga-supported.json     reference list of Yoga properties + supported values
+    └── canvas2d/
         ├── README.md               oracle definition + regeneration recipe
-        └── yoga-supported.json     reference list of Yoga properties + supported values
+        └── canvas2d-supported.json reference table of HTML5 Canvas2D + bridge mapping
 ```
 
 ## Surfaces
 
-| Surface | Adapter           | Oracle                                       | Week |
-| ------- | ----------------- | -------------------------------------------- | ---- |
-| yoga    | `adapters/yoga.py`| `oracles/yoga/yoga-supported.json` (static)  | 1    |
-| css     | _planned_         | Chromium headless snapshots                  | 2-3  |
-| rn      | _planned_         | derived from CSS oracle + RN snapshot tests  | 3-4  |
-| canvas2d| _planned_         | Chromium headless capture                    | 4-5  |
-| html    | _planned_         | jsdom reference                              | 5-6  |
+| Surface | Adapter                | Oracle                                                | Week |
+| ------- | ---------------------- | ----------------------------------------------------- | ---- |
+| yoga    | `adapters/yoga.py`     | `oracles/yoga/yoga-supported.json` (static)           | 1    |
+| canvas2d| `adapters/canvas2d.py` | `oracles/canvas2d/canvas2d-supported.json` (static)   | 1    |
+| css     | _planned_              | Chromium headless snapshots                           | 2-3  |
+| rn      | _planned_              | derived from CSS oracle + RN snapshot tests           | 3-4  |
+| html    | _planned_              | jsdom reference                                       | 5-6  |
 
 ## Status taxonomy
 
