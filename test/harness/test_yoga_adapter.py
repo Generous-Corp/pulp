@@ -165,6 +165,159 @@ class YogaAdapterClassifyTest(unittest.TestCase):
         self.assertTrue(result.drifts)
 
 
+class YogaAdapterEnumNormalizeTest(unittest.TestCase):
+    """Annotated catalog values must normalize against bare oracle values.
+
+    Codex P1 follow-up on PR #1395 (issue #1413). The catalog frequently
+    decorates enum values with parenthetical context (``"flex (implicit)"``,
+    ``"none (via setVisible(false))"``). Before the fix, those entries
+    didn't string-equal the oracle's bare ``"flex"`` / ``"none"`` and were
+    misclassified as NOT-IMPL even when the adapter found a binding.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.adapter = YogaAdapter(REPO_ROOT)
+
+    # ── Pure helper: _normalize_enum_value ───────────────────────────
+
+    def test_normalize_strips_trailing_annotation(self):
+        self.assertEqual(YogaAdapter._normalize_enum_value("flex (implicit)"), "flex")
+        self.assertEqual(YogaAdapter._normalize_enum_value("row-reverse (RTL)"), "row-reverse")
+
+    def test_normalize_handles_nested_parens(self):
+        # The Codex P1 motivating example: yoga/display's "none (via setVisible(false))".
+        self.assertEqual(
+            YogaAdapter._normalize_enum_value("none (via setVisible(false))"),
+            "none",
+        )
+        self.assertEqual(
+            YogaAdapter._normalize_enum_value("foo (with (nested) parens)"),
+            "foo",
+        )
+
+    def test_normalize_passes_through_bare_values(self):
+        for v in ("flex", "none", "row", "row-reverse", "wrap-reverse"):
+            self.assertEqual(YogaAdapter._normalize_enum_value(v), v)
+
+    def test_normalize_is_idempotent(self):
+        once = YogaAdapter._normalize_enum_value("flex (implicit)")
+        twice = YogaAdapter._normalize_enum_value(once)
+        self.assertEqual(once, twice)
+
+    def test_normalize_only_strips_trailing_group(self):
+        """A parenthetical mid-string is NOT an annotation and must survive."""
+        self.assertEqual(
+            YogaAdapter._normalize_enum_value("mid (paren) inside"),
+            "mid (paren) inside",
+        )
+
+    def test_normalize_strips_exactly_one_trailing_group(self):
+        """Two consecutive trailing groups: only the outermost is stripped."""
+        self.assertEqual(YogaAdapter._normalize_enum_value("foo (a) (b)"), "foo (a)")
+
+    def test_normalize_leaves_unbalanced_input_alone(self):
+        self.assertEqual(YogaAdapter._normalize_enum_value("unbalanced ("), "unbalanced (")
+
+    def test_normalize_handles_empty_and_whitespace(self):
+        self.assertEqual(YogaAdapter._normalize_enum_value(""), "")
+        self.assertEqual(YogaAdapter._normalize_enum_value(None), "")
+        self.assertEqual(YogaAdapter._normalize_enum_value("   "), "")
+        self.assertEqual(YogaAdapter._normalize_enum_value("  flex  "), "flex")
+
+    # ── Adapter-level: classification of yoga/display ────────────────
+
+    def test_yoga_display_annotated_values_pass(self):
+        """yoga/display's annotated catalog values must match the bare oracle.
+
+        With the fix in place, this entry classifies as PASS (oracle =
+        {flex, none}, normalized supportedValues = {flex, none}).
+        """
+        e = CatalogEntry(
+            surface="yoga",
+            name="yoga/display",
+            status="partial",
+            maps_to="View::set_visible (binding via visibility)",
+            supported_values=["flex (implicit)", "none (via setVisible(false))"],
+            unsupported_values=[],
+        )
+        result = self.adapter.run(e)
+        self.assertEqual(result.status, Status.PASS, msg=result.detail)
+
+    def test_annotated_values_with_no_oracle_overlap_diverge(self):
+        """Annotation-stripping must not invent matches.
+
+        Catalog claims ``"foo (annotation)"``, oracle expects ``["bar"]``.
+        After normalization the supported set is ``{foo}`` which still has
+        no overlap with ``{bar}`` — verdict must be NOT_IMPL (binding-OK
+        path, no oracle value claimed) rather than a spurious PASS.
+        """
+        # Use a real prop so the binding lookup succeeds — then override
+        # the supported_values to force the no-overlap branch.
+        e = CatalogEntry(
+            surface="yoga",
+            name="yoga/flexDirection",
+            status="partial",
+            maps_to="FlexStyle.direction",
+            supported_values=["foo (annotation)"],
+            unsupported_values=[],
+        )
+        result = self.adapter.run(e)
+        # Oracle is {row, row-reverse, column, column-reverse}; 'foo' has
+        # zero overlap so no oracle value is claimed -> NOT_IMPL.
+        self.assertEqual(result.status, Status.NOT_IMPL, msg=result.detail)
+        self.assertNotIn("foo", result.unmatched_supported)
+
+    def test_unannotated_entries_classify_unchanged(self):
+        """Regression guard: pre-existing entries without annotations
+        classify the same as before the normalization patch."""
+        # flexDirection: partial, 2 of 4 oracle values supported -> DIVERGE.
+        e = CatalogEntry(
+            surface="yoga",
+            name="yoga/flexDirection",
+            status="partial",
+            maps_to="FlexStyle.direction",
+            supported_values=["row", "column"],
+            unsupported_values=["row-reverse", "column-reverse"],
+        )
+        result = self.adapter.run(e)
+        self.assertEqual(result.status, Status.DIVERGE)
+        self.assertEqual(set(result.matched_supported), {"row", "column"})
+
+        # flexGrow: numeric supported -> PASS (non-enum branch, untouched).
+        e2 = CatalogEntry(
+            surface="yoga",
+            name="yoga/flexGrow",
+            status="supported",
+            maps_to="FlexStyle.flex_grow (float)",
+            supported_values=["any number"],
+            unsupported_values=[],
+        )
+        self.assertEqual(self.adapter.run(e2).status, Status.PASS)
+
+    def test_unsupported_annotation_still_excludes_value(self):
+        """Annotated entries in unsupportedValues must also normalize.
+
+        If the catalog says ``unsupportedValues: ["row-reverse (TODO)"]``
+        and the oracle has ``"row-reverse"``, the harness must treat
+        ``row-reverse`` as un-supported, not as a phantom new token.
+        """
+        e = CatalogEntry(
+            surface="yoga",
+            name="yoga/flexDirection",
+            status="partial",
+            maps_to="FlexStyle.direction",
+            supported_values=["row", "column", "column-reverse"],
+            unsupported_values=["row-reverse (TODO RTL)"],
+        )
+        result = self.adapter.run(e)
+        self.assertEqual(result.status, Status.DIVERGE, msg=result.detail)
+        # row-reverse is normalized in BOTH directions: it's flagged as
+        # extra_unsupported (oracle ∩ unsup) AND missing from supported.
+        self.assertIn("row-reverse", result.extra_unsupported)
+        self.assertIn("row-reverse", result.unmatched_supported)
+
+
 class VerifierEndToEndTest(unittest.TestCase):
     """Full pipeline — compat.json -> all 53 yoga entries -> coverage report."""
 

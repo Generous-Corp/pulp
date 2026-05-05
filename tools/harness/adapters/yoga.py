@@ -144,6 +144,72 @@ class YogaAdapter(AdapterBase):
     def _camel_to_snake(name: str) -> str:
         return re.sub(r"(?<!^)(?=[A-Z])", "_", name).lower()
 
+    # ── Enum-value normalization ─────────────────────────────────────
+    #
+    # Catalog `supportedValues` entries are hand-edited and frequently carry
+    # human-readable annotations in trailing parentheses to explain the
+    # binding nuance, e.g.::
+    #
+    #     "flex (implicit)"
+    #     "none (via setVisible(false))"
+    #     "row-reverse (RTL)"
+    #
+    # The Yoga oracle stores bare CSS-style tokens (`flex`, `none`,
+    # `row-reverse`). Naive string equality between the two surfaces
+    # mis-classifies annotated catalog entries as NOT-IMPL even when the
+    # adapter found a binding, inflating the drift count (Codex P1 on
+    # PR #1395, tracked as #1413).
+    #
+    # Normalize by stripping a single trailing parenthetical group plus any
+    # surrounding whitespace. Apply on BOTH sides so the contract is
+    # symmetric — if the oracle ever grows annotations, comparison stays
+    # well-defined. We deliberately do NOT strip mid-string parentheses
+    # because no Yoga value contains them today; if that changes the rule
+    # widens at that point, not now.
+
+    @staticmethod
+    def _normalize_enum_value(v: str) -> str:
+        """Strip a trailing ``" (...)"`` annotation from a catalog/oracle value.
+
+        ``"flex (implicit)"`` -> ``"flex"``;
+        ``"none (via setVisible(false))"`` -> ``"none"`` (handles nested ``()``);
+        ``"row-reverse"`` -> ``"row-reverse"`` (unchanged);
+        ``"mid (paren) inside"`` -> ``"mid (paren) inside"`` (only trailing);
+        ``"unbalanced ("`` -> ``"unbalanced ("`` (no balanced group at end).
+        Empty / non-string inputs round-trip to ``""``.
+        """
+        if not v:
+            return ""
+        s = str(v).strip()
+        # Strip exactly ONE trailing balanced parenthetical group. We can't
+        # use a flat regex because annotations may themselves contain ``()``
+        # (e.g. ``"none (via setVisible(false))"``). Walk backward from the
+        # end maintaining a paren-depth counter; when depth returns to 0,
+        # we've found the matching opening ``(`` and can slice it off.
+        if s.endswith(")"):
+            depth = 0
+            for i in range(len(s) - 1, -1, -1):
+                c = s[i]
+                if c == ")":
+                    depth += 1
+                elif c == "(":
+                    depth -= 1
+                    if depth == 0:
+                        return s[:i].rstrip()
+            # Unbalanced — no opening paren found. Leave as-is rather than
+            # silently truncating; the catalog reviewer will spot it.
+        return s
+
+    @classmethod
+    def _normalize_enum_values(cls, values) -> set[str]:
+        """Return a set of normalized non-empty values, preserving uniqueness."""
+        out: set[str] = set()
+        for v in values or []:
+            n = cls._normalize_enum_value(v)
+            if n:
+                out.add(n)
+        return out
+
     # ── Main classification ──────────────────────────────────────────
 
     def run(self, entry: CatalogEntry) -> Result:
@@ -209,10 +275,13 @@ class YogaAdapter(AdapterBase):
             )
 
         # 4. Compare supportedValues vs the oracle's enum value set.
+        #    Normalize annotated values like "flex (implicit)" -> "flex" on
+        #    BOTH sides so the comparison is robust to either surface
+        #    growing parenthetical context. (Codex P1 on PR #1395 / #1413.)
         if kind == "enum" and oracle_values:
-            sup = set(entry.supported_values or [])
-            unsup = set(entry.unsupported_values or [])
-            oracle_set = set(oracle_values)
+            sup = self._normalize_enum_values(entry.supported_values)
+            unsup = self._normalize_enum_values(entry.unsupported_values)
+            oracle_set = self._normalize_enum_values(oracle_values)
 
             matched = sorted(oracle_set & sup)
             missing_from_supported = sorted(oracle_set - sup)
