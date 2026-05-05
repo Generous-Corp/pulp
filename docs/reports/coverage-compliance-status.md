@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-05-05 07:04 PDT
+Last reviewed: 2026-05-05 07:09 PDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`.
@@ -379,12 +379,13 @@ project/build-cache shellout path. The refreshed branch remains
 unpushed and undispatched; #1274 still points at the old remote head
 until Namespace capacity returns.
 Additional #643 CLI audio progress is refreshed locally as
-`feature/phase3-cli-audio-command-coverage-643` at `353a6afd`, rebased
+`feature/phase3-cli-audio-command-coverage-643` at `c88ec0f3`, rebased
 from the paused #1287 remote head `cb0a4acb` onto current `origin/main`
-`0447498e`, covering deterministic `pulp audio` usage/parser errors and
+`50ff5822` after superseding local refresh `353a6afd` on `0447498e`,
+covering deterministic `pulp audio` usage/parser errors and
 missing-bundle JSON behavior through real CLI shellout tests. The
-refreshed branch remains unpushed and undispatched; #1287 still points
-at the old remote head until Namespace capacity returns.
+refreshed branch remains unpushed and undispatched; #1287 still points at
+the old remote head until Namespace capacity returns.
 Additional #641 runtime progress is refreshed locally as
 `feature/phase3-named-pipe-coverage-641` at `eba02124`, rebased from the
 paused #1286 remote head `2d59c4c` onto current `origin/main` `0447498e`,
