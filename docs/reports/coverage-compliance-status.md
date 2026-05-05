@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-05-05 00:36 PDT
+Last reviewed: 2026-05-05 00:41 PDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`.
@@ -278,11 +278,12 @@ wheel/meta mouse helper paths, ended/cancelled gesture deltas, key
 release/repeat main-modifier checks, and missing pointer-capture
 release behavior. It remains unpushed and undispatched.
 Additional #493 view progress is queued locally as
-`local/phase3-widget-bridge-dom-493` at `40629315`, covering
-WidgetBridge native DOM subtree moves, recursive DOM removal widget-map
-cleanup, root/missing layout helper paths, and the root-aware
-`getLayoutRect("")` registration fix. It remains unpushed and
-undispatched. Additional #643 tools progress is queued locally as
+`local/phase3-widget-bridge-dom-493` at `df183299`, refreshed from
+`40629315` onto current `origin/main` and covering WidgetBridge native
+DOM subtree moves, recursive DOM removal widget-map cleanup,
+root/missing layout helper paths, and the root-aware `getLayoutRect("")`
+registration fix. It remains unpushed and undispatched. Additional #643
+tools progress is queued locally as
 `local/phase3-harness-verifier-643` at `7b7cc19d`, covering
 `tools/harness` status/verifier helper paths, the stale yoga
 auto-discovery baseline, adapter unit-test discovery from
