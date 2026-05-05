@@ -167,11 +167,12 @@ current `origin/main` `6c8b9920`, then onto current `origin/main`
 AudioFileData helper shape semantics and WAV writer first-channel-empty
 rejection. It remains unpushed and undispatched.
 Additional #640 audio progress is queued locally as
-`local/phase3-aiff-pcm-edges-640` at `6ff872ee`, created from current
+`local/phase3-aiff-pcm-edges-640` at `6965d8d8`, created from current
 `origin/main` `0447498e`, then refreshed onto current `origin/main`
 `8fa55f5e`, then onto current `origin/main` `b7ec8f08`, then onto
-current `origin/main` `6c8b9920`, covering AIFF invalid COMM metadata
-and unsupported PCM bit-depth rejection. It remains
+current `origin/main` `6c8b9920`, then onto current `origin/main`
+`b567dbeb`, covering AIFF invalid COMM metadata and unsupported PCM
+bit-depth rejection. It remains
 unpushed and undispatched. Additional
 #640 audio progress is queued locally as
 `local/phase3-streaming-writer-reopen-640` at `9875e436`, created from
