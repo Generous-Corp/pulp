@@ -33,6 +33,12 @@ specifics are out of scope.
 
 ## Recently changed
 
+- **2026-05-05 (pulp #1434 Triage #15)** — `css/boxShadow` status
+  flipped `supported` → `partial`. The single-shadow CSS-spec format
+  (`[inset] <dx>px <dy>px <blur>px [<spread>px] <color>`) has been
+  wired since issue-925 (`web-compat-style-decl.js:565`). Multi-shadow
+  comma-separated lists are deferred — single-shadow path covers the
+  bulk of Figma / Tailwind / v0 emissions. Drift cleared.
 - **2026-05-05 (pulp #1434 batch 6)** — `css/top`, `css/right`,
   `css/bottom`, `css/left` now accept percent values (`'50%'`). The
   CSS translator passes `'NN%'` strings verbatim to the bridge; the

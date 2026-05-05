@@ -108,6 +108,28 @@ export interface StyleProps {
     /// `'grid'`) flow through the CSS shim only — for RN-flavored JSX
     /// consumers, just `'flex'` / `'none'` are the meaningful values.
     display?: 'flex' | 'none' | string;
+    /// CSS / RN `box-shadow` (pulp #1434 Triage #15). Accepts:
+    /// - Object form (RN-style): `{ offsetX, offsetY, blur?, spread?, color, inset? }`.
+    /// - String form (CSS-spec single shadow): `'2px 4px 8px rgba(0,0,0,0.3)'`
+    ///   with optional `inset` keyword. Multi-shadow comma-separated
+    ///   lists are deferred — single-shadow path lands first.
+    /// `'none'` / `null` / `undefined` clears the slot.
+    boxShadow?: BoxShadow | string | null;
+}
+
+/// Object form of `boxShadow` for RN-flavored consumers (mirrors the
+/// `border` prop shape). pulp #1434 Triage #15.
+export interface BoxShadow {
+    offsetX: number;
+    offsetY: number;
+    /// Defaults to 4 if omitted (matches the bridge's setBoxShadow default).
+    blur?: number;
+    /// Defaults to 0.
+    spread?: number;
+    /// Hex / rgb / rgba / named CSS color string. Resolved via parseCSSColor.
+    color: string;
+    /// `true` renders the shadow inside the box (CSS `inset` keyword).
+    inset?: boolean;
 }
 
 // ── Common base props ──────────────────────────────────────────────

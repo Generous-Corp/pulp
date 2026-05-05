@@ -135,6 +135,44 @@ function _normalizeFontWeight(value: unknown): number {
     return Number.isFinite(n) ? n : 400;
 }
 
+// pulp #1434 (Triage #15) — parse a CSS-spec single-shadow `box-shadow`
+// string. Mirrors the regex in `core/view/js/web-compat-style-decl.js`
+// (the DOM-lite path) so the @pulp/react path produces identical
+// dispatch shape. Multi-shadow comma-separated lists are deferred.
+//
+// Format: `[inset] <dx>px <dy>px <blur>px [<spread>px] <color>`
+// Returns the parsed shape or null if the string doesn't match.
+interface _ParsedBoxShadow {
+    offsetX: number;
+    offsetY: number;
+    blur: number;
+    spread: number;
+    color: string;
+    inset: boolean;
+}
+function _parseBoxShadow(s: string): _ParsedBoxShadow | null {
+    let work = s.trim();
+    let inset = false;
+    if (/^inset\s+/i.test(work)) {
+        inset = true;
+        work = work.replace(/^inset\s+/i, '');
+    } else if (/\s+inset\s*$/i.test(work)) {
+        inset = true;
+        work = work.replace(/\s+inset\s*$/i, '');
+    }
+    // <dx>px <dy>px <blur>px [<spread>px] <color>
+    const m = work.match(/(-?[\d.]+)px\s+(-?[\d.]+)px\s+([\d.]+)px(?:\s+(-?[\d.]+)px)?\s+(.*)/);
+    if (!m) return null;
+    return {
+        offsetX: parseFloat(m[1]),
+        offsetY: parseFloat(m[2]),
+        blur: parseFloat(m[3]),
+        spread: parseFloat(m[4] ?? '0'),
+        color: m[5].trim(),
+        inset,
+    };
+}
+
 function applyEventHandler(id: string, key: string, value: unknown): void {
     if (typeof value !== 'function') return;
     const eventName = eventNameFor(key);
@@ -349,6 +387,33 @@ function applyOne(id: string, type: string, key: string, value: unknown, props?:
             if (sval === 'none') return call('setVisible', id, false);
             if (sval === 'flex') return call('setVisible', id, true);
             return; // unknown display value — leave View at current visibility
+        }
+        // pulp #1434 (Triage #15) — `boxShadow` accepts:
+        //  • `null` / `undefined` / `'none'` → clearBoxShadow
+        //  • String form (`'2px 4px 8px rgba(0,0,0,0.3)'` with optional
+        //    `inset`) — parsed inline below.
+        //  • Object form `{ offsetX, offsetY, blur?, spread?, color,
+        //    inset? }` — dispatched directly.
+        // Multi-shadow comma-separated lists are deferred.
+        case 'boxShadow': {
+            if (value == null || value === 'none' || value === '') {
+                return call('clearBoxShadow', id);
+            }
+            if (typeof value === 'object') {
+                const s = value as { offsetX: number; offsetY: number; blur?: number; spread?: number; color: string; inset?: boolean };
+                return call('setBoxShadow', id, s.offsetX, s.offsetY,
+                            s.blur ?? 4, s.spread ?? 0,
+                            s.color, !!s.inset);
+            }
+            if (typeof value === 'string') {
+                const parsed = _parseBoxShadow(value);
+                if (parsed) {
+                    return call('setBoxShadow', id, parsed.offsetX, parsed.offsetY,
+                                parsed.blur, parsed.spread, parsed.color, parsed.inset);
+                }
+                return; // unparseable — silently drop (matches CSS shim behavior)
+            }
+            return;
         }
         // pulp #1387 gap #1 — overflow was reachable via the DOM-lite
         // path (web-compat-style-decl.js routes 'overflow' to setOverflow)

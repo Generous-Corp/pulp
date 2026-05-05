@@ -27,6 +27,16 @@ Spec walk:
 
 ## Recently changed
 
+- **2026-05-05 (pulp #1434 Triage #15)** — `rn/boxShadow` surfaced at
+  the `@pulp/react` TS layer. The prop-applier accepts both the CSS
+  shorthand string (`'2px 4px 8px rgba(0,0,0,0.3)'`, with optional
+  spread + leading/trailing `inset`) and the RN object form
+  (`{offsetX, offsetY, blur, spread, color, inset}`). Both shapes
+  forward to the existing `setBoxShadow(id, dx, dy, blur, spread, color,
+  inset)` bridge that has shipped since pulp #925. Sentinel `'none'` /
+  `''` route to `clearBoxShadow`. Status flipped `missing` → `partial`:
+  multi-shadow comma-separated lists remain deferred — the single-
+  shadow path covers the bulk of Figma / Tailwind / v0 emissions.
 - **2026-05-05 (pulp #1434 Triage #12)** — `rn/display` now accepts
   `'flex'` and `'none'`. The `@pulp/react` prop-applier dispatches
   `display: 'flex'` → `setVisible(id, true)` and `display: 'none'` →

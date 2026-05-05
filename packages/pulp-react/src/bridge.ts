@@ -114,6 +114,22 @@ declare global {
     function setOpacity(id: string, alpha: number): void;
     function setVisible(id: string, visible: boolean): void;
     function setPosition(id: string, top: number, left: number, right?: number, bottom?: number): void;
+    // pulp #1434 (Triage #15) — surface the existing C++ setBoxShadow /
+    // clearBoxShadow bridge fns at the @pulp/react TS layer so RN-style
+    // JSX (`style={{ boxShadow: '0 2px 4px rgba(0,0,0,.1)' }}` or the
+    // object form) reaches View::set_box_shadow without going through
+    // the el.style proxy. Multi-shadow comma-separated lists are
+    // deferred (single-shadow path lands first).
+    function setBoxShadow(
+        id: string,
+        offsetX: number,
+        offsetY: number,
+        blur: number,
+        spread: number,
+        color: string,
+        inset?: boolean
+    ): void;
+    function clearBoxShadow(id: string): void;
 
     // ── Text ────────────────────────────────────────────────────────
     function setText(id: string, text: string): void;
@@ -183,6 +199,10 @@ export function createMockBridge(): MockBridge {
         'setBorderTopLeftRadius', 'setBorderTopRightRadius',
         'setBorderBottomLeftRadius', 'setBorderBottomRightRadius',
         'setBorderSide', 'setOpacity', 'setVisible', 'setPosition',
+        // pulp #1434 Triage #15 — boxShadow surfaced at the @pulp/react
+        // layer; mock-bridge captures both setBoxShadow (with the full
+        // 7-arg signature) and clearBoxShadow.
+        'setBoxShadow', 'clearBoxShadow',
         // pulp #1434 batch 6 — CSS positional setters (top/right/bottom/left)
         // need to be capturable so the percent-string forwarding test
         // can assert on the bridge call shape.

@@ -731,7 +731,7 @@
       "issue": "https://github.com/danielraffel/pulp/issues/1434"
     },
     "css/boxShadow": {
-      "status": "supported",
+      "status": "partial",
       "mapsTo": "regex parse -> setBoxShadow(id, dx, dy, blur, spread, color, inset)",
       "supportedValues": [
         "[inset] <dx>px <dy>px <blur>px [<spread>px] <color>"
@@ -740,7 +740,7 @@
         "multiple shadows (comma-separated)"
       ],
       "tests": [],
-      "notes": "Single-shadow only. Multiple comma-separated shadows are not split.",
+      "notes": "Single-shadow only. Multiple comma-separated shadows are not split. pulp #1434 Triage #15: catalog status flipped supported→partial — single-shadow with optional inset is wired (web-compat-style-decl.js:565); multi-shadow comma-separated lists are deferred.",
       "issue": ""
     },
     "css/boxSizing": {
@@ -2790,7 +2790,7 @@
         "lab()/lch()/oklab()/oklch() (modern color spaces)"
       ],
       "tests": [],
-      "notes": "pulp #1434: catalog hygiene \u2014 flipped missing \u2192 supported, claim the wired surface (#1396 was the wiring PR).",
+      "notes": "pulp #1434: catalog hygiene — flipped missing → supported, claim the wired surface (#1396 was the wiring PR).",
       "issue": ""
     },
     "rn/borderBottomLeftRadius": {
@@ -2804,7 +2804,7 @@
         "elliptical x/y"
       ],
       "tests": [],
-      "notes": "Same. pulp #1434: catalog hygiene \u2014 flipped missing \u2192 supported.",
+      "notes": "Same. pulp #1434: catalog hygiene — flipped missing → supported.",
       "issue": ""
     },
     "rn/borderBottomRightRadius": {
@@ -2818,7 +2818,7 @@
         "elliptical x/y"
       ],
       "tests": [],
-      "notes": "Same. pulp #1434: catalog hygiene \u2014 flipped missing \u2192 supported.",
+      "notes": "Same. pulp #1434: catalog hygiene — flipped missing → supported.",
       "issue": ""
     },
     "rn/borderBottomWidth": {
@@ -2833,7 +2833,7 @@
         "rem"
       ],
       "tests": [],
-      "notes": "RN prop is flat top-level, Pulp uses object shape. Convert: <View style={{borderBottomWidth: 2}} /> -> <View borderBottom={{color:'#000', width:2}} />. Awkward for RN ports. pulp #1434: catalog hygiene \u2014 flipped missing \u2192 supported.",
+      "notes": "RN prop is flat top-level, Pulp uses object shape. Convert: <View style={{borderBottomWidth: 2}} /> -> <View borderBottom={{color:'#000', width:2}} />. Awkward for RN ports. pulp #1434: catalog hygiene — flipped missing → supported.",
       "issue": ""
     },
     "rn/borderColor": {
@@ -2851,7 +2851,7 @@
         "lab()/lch()/oklab()/oklch() (modern color spaces)"
       ],
       "tests": [],
-      "notes": "pulp #1434: catalog hygiene \u2014 flipped missing \u2192 supported.",
+      "notes": "pulp #1434: catalog hygiene — flipped missing → supported.",
       "issue": ""
     },
     "rn/borderCurve": {
@@ -2892,7 +2892,7 @@
         "lab()/lch()/oklab()/oklch() (modern color spaces)"
       ],
       "tests": [],
-      "notes": "pulp #1434: catalog hygiene \u2014 flipped missing \u2192 supported, claim the wired surface (#1396 was the wiring PR).",
+      "notes": "pulp #1434: catalog hygiene — flipped missing → supported, claim the wired surface (#1396 was the wiring PR).",
       "issue": ""
     },
     "rn/borderLeftWidth": {
@@ -2907,7 +2907,7 @@
         "rem"
       ],
       "tests": [],
-      "notes": "Same as borderBottomWidth. pulp #1434: catalog hygiene \u2014 flipped missing \u2192 supported.",
+      "notes": "Same as borderBottomWidth. pulp #1434: catalog hygiene — flipped missing → supported.",
       "issue": ""
     },
     "rn/borderRadius": {
@@ -2921,7 +2921,7 @@
         "elliptical x/y"
       ],
       "tests": [],
-      "notes": "Workaround: <View border={{color:'transparent', width:0, radius:R}} />. pulp #1434: catalog hygiene \u2014 flipped missing \u2192 supported.",
+      "notes": "Workaround: <View border={{color:'transparent', width:0, radius:R}} />. pulp #1434: catalog hygiene — flipped missing → supported.",
       "issue": ""
     },
     "rn/borderRightColor": {
@@ -2939,7 +2939,7 @@
         "lab()/lch()/oklab()/oklch() (modern color spaces)"
       ],
       "tests": [],
-      "notes": "pulp #1434: catalog hygiene \u2014 flipped missing \u2192 supported, claim the wired surface (#1396 was the wiring PR).",
+      "notes": "pulp #1434: catalog hygiene — flipped missing → supported, claim the wired surface (#1396 was the wiring PR).",
       "issue": ""
     },
     "rn/borderRightWidth": {
@@ -2954,7 +2954,7 @@
         "rem"
       ],
       "tests": [],
-      "notes": "Same. pulp #1434: catalog hygiene \u2014 flipped missing \u2192 supported.",
+      "notes": "Same. pulp #1434: catalog hygiene — flipped missing → supported.",
       "issue": ""
     },
     "rn/borderStartWidth": {
@@ -2996,7 +2996,7 @@
         "lab()/lch()/oklab()/oklch() (modern color spaces)"
       ],
       "tests": [],
-      "notes": "pulp #1434: catalog hygiene \u2014 flipped missing \u2192 supported, claim the wired surface (#1396 was the wiring PR).",
+      "notes": "pulp #1434: catalog hygiene — flipped missing → supported, claim the wired surface (#1396 was the wiring PR).",
       "issue": ""
     },
     "rn/borderTopLeftRadius": {
@@ -3010,7 +3010,7 @@
         "elliptical x/y"
       ],
       "tests": [],
-      "notes": "Bridge has setBorderTopLeftRadius -- needs prop wiring. pulp #1434: catalog hygiene \u2014 flipped missing \u2192 supported.",
+      "notes": "Bridge has setBorderTopLeftRadius -- needs prop wiring. pulp #1434: catalog hygiene — flipped missing → supported.",
       "issue": ""
     },
     "rn/borderTopRightRadius": {
@@ -3024,7 +3024,7 @@
         "elliptical x/y"
       ],
       "tests": [],
-      "notes": "Same. pulp #1434: catalog hygiene \u2014 flipped missing \u2192 supported.",
+      "notes": "Same. pulp #1434: catalog hygiene — flipped missing → supported.",
       "issue": ""
     },
     "rn/borderTopWidth": {
@@ -3039,7 +3039,7 @@
         "rem"
       ],
       "tests": [],
-      "notes": "Same as borderBottomWidth. pulp #1434: catalog hygiene \u2014 flipped missing \u2192 supported.",
+      "notes": "Same as borderBottomWidth. pulp #1434: catalog hygiene — flipped missing → supported.",
       "issue": ""
     },
     "rn/borderWidth": {
@@ -3054,7 +3054,7 @@
         "rem"
       ],
       "tests": [],
-      "notes": "User can call <View border={{color:'#000', width:N}} /> as workaround. pulp #1434: catalog hygiene \u2014 flipped missing \u2192 supported.",
+      "notes": "User can call <View border={{color:'#000', width:N}} /> as workaround. pulp #1434: catalog hygiene — flipped missing → supported.",
       "issue": ""
     },
     "rn/bottom": {
@@ -3070,15 +3070,19 @@
       "issue": "https://github.com/danielraffel/pulp/issues/1434"
     },
     "rn/boxShadow": {
-      "status": "missing",
-      "mapsTo": "Bridge has setBoxShadow -- not yet exposed at @pulp/react TS surface.",
-      "supportedValues": [],
+      "status": "partial",
+      "mapsTo": "@pulp/react prop-applier dispatches `boxShadow` (string OR object form) to setBoxShadow / clearBoxShadow (prop-applier.ts:323+). String parser mirrors web-compat-style-decl.js.",
+      "supportedValues": [
+        "object form { offsetX, offsetY, blur?, spread?, color, inset? }",
+        "CSS-spec single-shadow string: [inset] <dx>px <dy>px <blur>px [<spread>px] <color>",
+        "'none' (clears)"
+      ],
       "unsupportedValues": [
-        "BoxShadowValue array",
-        "string"
+        "multi-shadow comma-separated lists",
+        "BoxShadowValue array"
       ],
       "tests": [],
-      "notes": "Could be exposed analogously to `border={...}` shape.",
+      "notes": "Could be exposed analogously to `border={...}` shape. pulp #1434 Triage #15: surfaced at the @pulp/react TS layer. Both string and object forms route to setBoxShadow; multi-shadow remains a deferred gap (single-shadow path covers the bulk of Figma / Tailwind / v0 emissions).",
       "issue": ""
     },
     "rn/boxSizing": {
@@ -3729,7 +3733,7 @@
         "scroll"
       ],
       "tests": [],
-      "notes": "Plumbing missing in prop-applier; ScrollView intrinsic exposes scroll. pulp #1434: catalog hygiene \u2014 flipped missing \u2192 supported. View::Overflow has only {visible, hidden}; scroll is a separate ScrollView container concern.",
+      "notes": "Plumbing missing in prop-applier; ScrollView intrinsic exposes scroll. pulp #1434: catalog hygiene — flipped missing → supported. View::Overflow has only {visible, hidden}; scroll is a separate ScrollView container concern.",
       "issue": ""
     },
     "rn/overlay": {
