@@ -173,6 +173,118 @@ function _parseBoxShadow(s: string): _ParsedBoxShadow | null {
     };
 }
 
+// pulp #1434 (Triage #9) — RN's `transform` is an array of single-property
+// objects (`[{translateX:10},{rotate:'45deg'},{scale:1.5}]`). Figma /
+// v0.dev / Claude Design exports emit this constantly. The bridge has
+// setTranslate / setRotation / setScale (uniform), so the array-walker
+// accumulates a per-render snapshot inside one pass and emits at most
+// three consolidated calls. Within-array merging means
+// `[{translateX:10},{translateY:20}]` produces ONE setTranslate(10,20)
+// instead of two clobbering ones (the latter would zero the unrelated
+// axis on each call). RN semantics also say each render's array is a
+// complete description — absent fields reset to identity, so we don't
+// carry state across renders.
+//
+// Bridge gaps (deferred — TODOs + follow-up issue):
+//   • `setSkew` is unregistered (View::set_skew exists but no bridge fn).
+//     skewX/skewY entries are stored on the snapshot but not dispatched.
+//   • setScale is uniform-only — independent scaleX/scaleY axes can't
+//     round-trip. We approximate: scale > scaleX > scaleY in priority,
+//     last-write-wins within the array; if scaleX≠scaleY we emit the
+//     last seen and document the limitation.
+//   • rotateX/rotateY/perspective/matrix — 3D / matrix transforms not
+//     modeled in pulp's 2D View (no perspective; rotation is Z-axis
+//     only). Silently dropped with TODO.
+interface _TransformSnapshot {
+    tx: number;
+    ty: number;
+    rotateDeg: number;
+    scale: number;
+    haveTranslate: boolean;
+    haveRotate: boolean;
+    haveScale: boolean;
+}
+
+// Parse `'45deg'` / `'0.785rad'` / `45` (numeric) → degrees.
+function _parseAngleDegrees(v: unknown): number {
+    if (typeof v === 'number') return v;
+    const s = String(v).trim();
+    const m = s.match(/^(-?[\d.]+)\s*(deg|rad|turn|grad)?$/i);
+    if (!m) return 0;
+    const n = parseFloat(m[1]);
+    const unit = (m[2] || 'deg').toLowerCase();
+    if (unit === 'rad')  return n * (180 / Math.PI);
+    if (unit === 'turn') return n * 360;
+    if (unit === 'grad') return n * 0.9;
+    return n;
+}
+
+// Walk the RN-style transform array. Returns a snapshot with `have*`
+// flags so the caller can dispatch only the operations the user
+// actually specified (translate dispatch is gated on haveTranslate, etc.).
+function _walkTransformArray(arr: ReadonlyArray<unknown>): _TransformSnapshot {
+    const snap: _TransformSnapshot = {
+        tx: 0, ty: 0,
+        rotateDeg: 0,
+        scale: 1,
+        haveTranslate: false,
+        haveRotate: false,
+        haveScale: false,
+    };
+    for (const op of arr) {
+        if (op == null || typeof op !== 'object') continue;
+        const o = op as Record<string, unknown>;
+        const keys = Object.keys(o);
+        if (keys.length === 0) continue;
+        const k = keys[0];
+        const v = o[k];
+        switch (k) {
+            case 'translateX':
+                snap.tx = typeof v === 'number' ? v : parseFloat(String(v));
+                snap.haveTranslate = true;
+                break;
+            case 'translateY':
+                snap.ty = typeof v === 'number' ? v : parseFloat(String(v));
+                snap.haveTranslate = true;
+                break;
+            case 'rotate':
+            case 'rotateZ':
+                snap.rotateDeg = _parseAngleDegrees(v);
+                snap.haveRotate = true;
+                break;
+            case 'scale':
+                snap.scale = typeof v === 'number' ? v : parseFloat(String(v));
+                snap.haveScale = true;
+                break;
+            case 'scaleX':
+            case 'scaleY':
+                // Bridge has uniform setScale only; last-write-wins.
+                // pulp follow-up will add setScaleXY for independent axes.
+                snap.scale = typeof v === 'number' ? v : parseFloat(String(v));
+                snap.haveScale = true;
+                break;
+            // skewX / skewY — View::set_skew exists in C++ but no bridge
+            // function is registered yet. Silently no-op until the bridge
+            // surface lands. pulp follow-up issue tracks the gap.
+            case 'skewX':
+            case 'skewY':
+                break;
+            // 3D / matrix ops — not modeled in pulp's 2D View. Silently
+            // drop. pulp follow-up tracks if/when 3D transforms are
+            // introduced.
+            case 'rotateX':
+            case 'rotateY':
+            case 'perspective':
+            case 'matrix':
+                break;
+            default:
+                // Unknown op — silently drop (matches CSS shim tolerance).
+                break;
+        }
+    }
+    return snap;
+}
+
 function applyEventHandler(id: string, key: string, value: unknown): void {
     if (typeof value !== 'function') return;
     const eventName = eventNameFor(key);
@@ -425,6 +537,32 @@ function applyOne(id: string, type: string, key: string, value: unknown, props?:
         // Accepts the CSS keyword strings ('hidden' / 'visible' /
         // 'scroll' / 'auto'); bridge maps to View::Overflow enum.
         case 'overflow':     return call('setOverflow', id, value as string);
+
+        // pulp #1434 Triage #9 — RN array transform.
+        // RN's transform is an array of single-property objects:
+        //   transform: [
+        //     { translateX: 10 }, { translateY: 20 },
+        //     { rotate: '45deg' }, { scale: 1.5 },
+        //   ]
+        // Walk-once accumulates the snapshot in one pass (so
+        // {translateX:10} and {translateY:20} as separate entries
+        // produce ONE setTranslate(10,20), not two clobbering calls),
+        // then emits only the operations the user specified.
+        // Within-array semantics: each render's array is a complete
+        // description; absent fields reset to identity. No cross-
+        // render state is maintained — passing `transform: undefined`
+        // (or removing the prop) goes through the standard prop-
+        // removal path and resets translate/rotate/scale on the next
+        // re-render that includes the prop.
+        case 'transform': {
+            if (value == null) return;
+            if (!Array.isArray(value)) return;  // CSS string form deferred
+            const snap = _walkTransformArray(value as ReadonlyArray<unknown>);
+            if (snap.haveTranslate) call('setTranslate', id, snap.tx, snap.ty);
+            if (snap.haveRotate)    call('setRotation', id, snap.rotateDeg);
+            if (snap.haveScale)     call('setScale', id, snap.scale);
+            return;
+        }
 
         // CSS-style positioning (pulp #779 follow-up; matches setPosition
         // + setTop/setLeft/setRight/setBottom on the bridge).

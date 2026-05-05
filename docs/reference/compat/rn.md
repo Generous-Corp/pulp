@@ -27,6 +27,30 @@ Spec walk:
 
 ## Recently changed
 
+- **2026-05-05 (pulp #1434 Triage #9)** — `rn/transform` now accepts
+  the RN array-of-objects shape:
+  ```js
+  style={{ transform: [
+    { translateX: 10 }, { translateY: 20 },
+    { rotate: '45deg' }, { scale: 1.5 },
+  ] }}
+  ```
+  The `@pulp/react` prop-applier walks the array in one pass,
+  accumulates a `{tx, ty, rotateDeg, scale}` snapshot, then dispatches
+  consolidated `setTranslate(id, x, y)` / `setRotation(id, deg)` /
+  `setScale(id, s)` calls. Within-array merging preserves unrelated
+  axes — `[{translateX:10},{translateY:20}]` produces ONE
+  `setTranslate(10, 20)` rather than two clobbering calls.
+  Wired ops: `translateX`, `translateY`, `rotate`, `rotateZ`, `scale`,
+  `scaleX`, `scaleY` (last-write-wins on the uniform bridge).
+  Angle units: `'45deg'`, `'0.785rad'`, `'0.5turn'`, `'50grad'`,
+  numeric (deg). Deferred (silent no-op): `skewX` / `skewY` (bridge fn
+  unregistered — `View::set_skew` exists), `rotateX` / `rotateY` /
+  `perspective` / `matrix` (no 3D model in the 2D View). CSS string
+  form (`'translateX(10px) rotate(45deg)'`) deferred — pass array.
+  Status flipped `missing` → `partial`. Highest-impact rn import-
+  readiness gap closed; Figma / v0 / Claude Design exports now port
+  verbatim.
 - **2026-05-05 (pulp #1434 Triage #11)** — `rn/textAlign` now accepts
   `auto` and `justify` alongside the existing `left`, `center`,
   `right`. `auto` is writing-direction-relative (LTR-only today —
@@ -79,20 +103,18 @@ Spec walk:
 
 ## Notable gaps
 
-1. `rn/transform` — `@pulp/react` has no `transform` prop at all today;
-   the RN array-of-objects shape is not surfaced.
-2. `rn/flex` shorthand — RN's `style={{flex: 1}}` is the most common
+1. `rn/flex` shorthand — RN's `style={{flex: 1}}` is the most common
    pattern in tutorials. `@pulp/react` users must type
    `flexGrow={1} flexShrink={1} flexBasis={0}`.
-3. `rn/marginStart` / `rn/marginEnd`, `rn/paddingStart` / `rn/paddingEnd`
+2. `rn/marginStart` / `rn/marginEnd`, `rn/paddingStart` / `rn/paddingEnd`
    — direction-aware logical props not wired (Yoga RTL is also
    unsupported).
-4. `rn/shadowColor` / `rn/shadowOffset` / `rn/shadowOpacity` /
+3. `rn/shadowColor` / `rn/shadowOffset` / `rn/shadowOpacity` /
    `rn/shadowRadius` — iOS shadow surface; routed via
    `boxShadow` instead.
-5. `rn/elevation` — Android-only; not modeled.
-6. `rn/borderCurve` — iOS 13+ continuous-corners; not modeled.
-7. `rn/mixBlendMode`, `rn/isolation` — not yet wired (Skia / CG can
+4. `rn/elevation` — Android-only; not modeled.
+5. `rn/borderCurve` — iOS 13+ continuous-corners; not modeled.
+6. `rn/mixBlendMode`, `rn/isolation` — not yet wired (Skia / CG can
    support; bridge plumbing absent).
 
 ## SvgPath (#994 / #1291)

@@ -131,6 +131,18 @@ declare global {
     ): void;
     function clearBoxShadow(id: string): void;
 
+    // pulp #1434 (Triage #9) — RN-style `transform: [{translateX: 10},
+    // {rotate: '45deg'}, {scale: 1.5}]` is dispatched by the prop-
+    // applier as a consolidated trio of bridge calls. setTranslate
+    // takes both axes at once (no axis-clobber); setRotation is
+    // degrees; setScale is uniform-only (independent scaleX/scaleY
+    // remains a deferred bridge-side gap). All three already exist
+    // on the C++ side via View::set_translate / set_rotation /
+    // set_scale and are registered in widget_bridge.cpp.
+    function setTranslate(id: string, x: number, y: number): void;
+    function setRotation(id: string, degrees: number): void;
+    function setScale(id: string, scale: number): void;
+
     // ── Text ────────────────────────────────────────────────────────
     function setText(id: string, text: string): void;
     function setTextColor(id: string, hexColor: string): void;
@@ -203,6 +215,10 @@ export function createMockBridge(): MockBridge {
         // layer; mock-bridge captures both setBoxShadow (with the full
         // 7-arg signature) and clearBoxShadow.
         'setBoxShadow', 'clearBoxShadow',
+        // pulp #1434 Triage #9 — transform array dispatches a
+        // consolidated trio of bridge calls; mock-bridge captures
+        // all three so vitest cases can assert on the args + arity.
+        'setTranslate', 'setRotation', 'setScale',
         // pulp #1434 batch 6 — CSS positional setters (top/right/bottom/left)
         // need to be capturable so the percent-string forwarding test
         // can assert on the bridge call shape.
