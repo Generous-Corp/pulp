@@ -36,6 +36,17 @@ function CanvasRenderingContext2D(canvasEl) {
     this.imageSmoothingEnabled = true;
     this.imageSmoothingQuality = "low";
     this.direction = "ltr";
+    // pulp #1434 batch 7 — Canvas2D drop-shadow state. Each property
+    // mirrors the spec defaults: shadow inactive (transparent black,
+    // zero blur, zero offset). Tracked locally so getters round-trip
+    // (the spec requires the most-recently-assigned value), and
+    // flushed to the bridge by `_syncShadowState` before any
+    // fill/stroke/text draw — same caching pattern the line / global
+    // setters use to avoid redundant bridge spam.
+    this.shadowColor = "rgba(0, 0, 0, 0)";
+    this.shadowBlur = 0;
+    this.shadowOffsetX = 0;
+    this.shadowOffsetY = 0;
     this._lineDash = [];
     // _activeFillKind tracks whether the most recently applied fillStyle was
     // a "color" or a "gradient". When a gradient is active the next
@@ -54,6 +65,10 @@ function CanvasRenderingContext2D(canvasEl) {
     this._sentLineJoin = null;
     this._sentGlobalAlpha = null;
     this._sentGlobalCompositeOperation = null;
+    this._sentShadowColor = null;
+    this._sentShadowBlur = null;
+    this._sentShadowOffsetX = null;
+    this._sentShadowOffsetY = null;
 }
 
 CanvasRenderingContext2D.prototype._applyFillStyle = function() {
@@ -148,8 +163,39 @@ CanvasRenderingContext2D.prototype._syncGlobalState = function() {
     }
 };
 
+// pulp #1434 batch 7 — flush Canvas2D shadow state to the bridge before
+// any fill/stroke/text draw. Sticky on the C++ side, so we only push
+// changed values. HTML5 spec: assigning a non-finite number must be
+// silently ignored; numeric coercion (`+x` for any value) returns NaN
+// for non-numerics which we treat as "no change" so getter round-trip
+// still reflects the latest valid value.
+CanvasRenderingContext2D.prototype._syncShadowState = function() {
+    if (this._sentShadowColor !== this.shadowColor) {
+        if (typeof canvasSetShadowColor === "function") {
+            canvasSetShadowColor(this._id, String(this.shadowColor || "rgba(0,0,0,0)"));
+        }
+        this._sentShadowColor = this.shadowColor;
+    }
+    var b = +this.shadowBlur;
+    if (isFinite(b) && b >= 0 && this._sentShadowBlur !== b) {
+        if (typeof canvasSetShadowBlur === "function") canvasSetShadowBlur(this._id, b);
+        this._sentShadowBlur = b;
+    }
+    var ox = +this.shadowOffsetX;
+    if (isFinite(ox) && this._sentShadowOffsetX !== ox) {
+        if (typeof canvasSetShadowOffsetX === "function") canvasSetShadowOffsetX(this._id, ox);
+        this._sentShadowOffsetX = ox;
+    }
+    var oy = +this.shadowOffsetY;
+    if (isFinite(oy) && this._sentShadowOffsetY !== oy) {
+        if (typeof canvasSetShadowOffsetY === "function") canvasSetShadowOffsetY(this._id, oy);
+        this._sentShadowOffsetY = oy;
+    }
+};
+
 CanvasRenderingContext2D.prototype.fillRect = function(x, y, w, h) {
     this._syncGlobalState();
+    this._syncShadowState();
     this._applyFillStyle();
     // pulp #964 — the bridge function is `canvasRect`, NOT `canvasFillRect`.
     // The 5-arg form (no color) honours the active fillStyle / gradient via
@@ -161,6 +207,7 @@ CanvasRenderingContext2D.prototype.fillRect = function(x, y, w, h) {
 
 CanvasRenderingContext2D.prototype.strokeRect = function(x, y, w, h) {
     this._syncGlobalState();
+    this._syncShadowState();
     this._syncLineState();
     this._applyStrokeStyle();
     if (typeof canvasStrokeRect === "function") canvasStrokeRect(this._id, x, y, w, h);
@@ -188,12 +235,14 @@ CanvasRenderingContext2D.prototype.closePath = function() {
 
 CanvasRenderingContext2D.prototype.fill = function() {
     this._syncGlobalState();
+    this._syncShadowState();
     this._applyFillStyle();
     if (typeof canvasFillPath === "function") canvasFillPath(this._id);
 };
 
 CanvasRenderingContext2D.prototype.stroke = function() {
     this._syncGlobalState();
+    this._syncShadowState();
     this._syncLineState();
     this._applyStrokeStyle();
     if (typeof canvasStrokePath === "function") canvasStrokePath(this._id);
@@ -216,6 +265,8 @@ CanvasRenderingContext2D.prototype.save = function() {
     this._sentFont = this._sentTextAlign = this._sentTextBaseline = null;
     this._sentLineCap = this._sentLineJoin = null;
     this._sentGlobalAlpha = this._sentGlobalCompositeOperation = null;
+    this._sentShadowColor = this._sentShadowBlur = null;
+    this._sentShadowOffsetX = this._sentShadowOffsetY = null;
 };
 
 CanvasRenderingContext2D.prototype.restore = function() {
@@ -223,6 +274,8 @@ CanvasRenderingContext2D.prototype.restore = function() {
     this._sentFont = this._sentTextAlign = this._sentTextBaseline = null;
     this._sentLineCap = this._sentLineJoin = null;
     this._sentGlobalAlpha = this._sentGlobalCompositeOperation = null;
+    this._sentShadowColor = this._sentShadowBlur = null;
+    this._sentShadowOffsetX = this._sentShadowOffsetY = null;
 };
 
 // ── pulp #964 — Canvas2D transform methods ────────────────────────────────
@@ -380,6 +433,7 @@ CanvasRenderingContext2D.prototype.clip = function(fillRule) {
 CanvasRenderingContext2D.prototype.fillText = function(text, x, y, maxWidth) {
     void maxWidth;
     this._syncGlobalState();
+    this._syncShadowState();
     this._syncTextState();
     this._applyFillStyle();
     // canvasFillText takes (id, text, x, y, size, color, family). When

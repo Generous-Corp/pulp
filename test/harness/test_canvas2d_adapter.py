@@ -124,7 +124,17 @@ class Canvas2dAdapterClassifyTest(unittest.TestCase):
         self.assertFalse(result.drifts, msg=result.detail)
 
     def test_oracle_missing_shadow_is_NOT_IMPL(self):
-        """shadowBlur — not implemented in shim or bridge."""
+        """Synthetic NOT-IMPL entry — uses an explicitly fabricated
+        catalog payload (status='missing', mapsTo='Not implemented.')
+        rather than the real shadow* entries which are now PASS after
+        issue-1434 batch 7.
+
+        The entry name is still `canvas2d/shadowBlur` only because that
+        used to be the canonical missing-entry exemplar; the adapter
+        only consults the oracle by name when the catalog payload says
+        the entry is missing — so this test keeps exercising the
+        NOT-IMPL classification path independently of the live catalog.
+        """
         e = CatalogEntry(
             surface="canvas2d",
             name="canvas2d/shadowBlur",
@@ -285,17 +295,17 @@ class VerifierEndToEndTest(unittest.TestCase):
                 )
 
     def test_known_unimpl_entries_classified_NOT_IMPL(self):
-        """The shadow*, filter, miterLimit, imageSmoothing*, conic, pattern,
-        direction entries must always be NOT-IMPL."""
+        """The filter, miterLimit, imageSmoothing*, conic, pattern,
+        direction entries must always be NOT-IMPL.
+
+        issue-1434 batch 7: shadowColor / shadowBlur / shadowOffsetX /
+        shadowOffsetY are now PASS — see
+        `test_known_pass_entries_classified_PASS`."""
         results = run_surface(REPO_ROOT, "canvas2d")
         by_name = {r.entry.name: r for r in results}
         for name in (
             "canvas2d/createConicGradient",
             "canvas2d/createPattern",
-            "canvas2d/shadowBlur",
-            "canvas2d/shadowColor",
-            "canvas2d/shadowOffsetX",
-            "canvas2d/shadowOffsetY",
             "canvas2d/filter",
             "canvas2d/miterLimit",
             "canvas2d/imageSmoothingEnabled",
@@ -308,6 +318,26 @@ class VerifierEndToEndTest(unittest.TestCase):
                     by_name[name].status,
                     Status.NOT_IMPL,
                     msg=f"{name} must be NOT-IMPL: {by_name[name].detail}",
+                )
+
+    def test_shadow_entries_classified_PASS(self):
+        """issue-1434 batch 7 — Canvas2D shadow* state setters are
+        wired through the bridge + shim + Skia + CG canvas backends.
+        Entries reclassify from NOT-IMPL → PASS."""
+        results = run_surface(REPO_ROOT, "canvas2d")
+        by_name = {r.entry.name: r for r in results}
+        for name in (
+            "canvas2d/shadowBlur",
+            "canvas2d/shadowColor",
+            "canvas2d/shadowOffsetX",
+            "canvas2d/shadowOffsetY",
+        ):
+            with self.subTest(entry=name):
+                self.assertIn(name, by_name)
+                self.assertEqual(
+                    by_name[name].status,
+                    Status.PASS,
+                    msg=f"{name} must be PASS post-batch-7: {by_name[name].detail}",
                 )
 
     def test_json_output_contains_all_entries(self):

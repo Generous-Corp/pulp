@@ -703,6 +703,57 @@ void CoreGraphicsCanvas::fill_with_active_paint() {
     CGGradientRelease(gradient);
 }
 
+// ── Canvas2D drop-shadow state (issue-1434 batch 7) ─────────────────────────
+//
+// CG owns the sticky shadow state via its GState stack — `CGContextSetShadowWithColor`
+// snapshots into the current GState, and a later `CGContextRestoreGState`
+// restores whatever shadow was active in the parent frame. This matches
+// Canvas2D save()/restore() semantics for `ctx.shadow*` exactly. We also
+// hold the values in member fields so a setter mutation can rebuild the
+// combined CG call (the API takes color + offset + blur in a single call,
+// so each individual setter has to forward all four).
+//
+// Gating: the shadow renders only when (color.a > 0) AND (blur > 0 OR
+// offset_x != 0 OR offset_y != 0). When inactive we explicitly clear the
+// CG state with `CGContextSetShadowWithColor(ctx, CGSizeZero, 0, NULL)`,
+// which is what Apple recommends for "turn off shadow".
+
+void CoreGraphicsCanvas::apply_shadow_to_context() {
+    const bool active = shadow_color_.a > 0.0f &&
+        (shadow_blur_ > 0.0f || shadow_offset_x_ != 0.0f ||
+         shadow_offset_y_ != 0.0f);
+    if (!active) {
+        CGContextSetShadowWithColor(ctx_, CGSizeZero, 0.0f, nullptr);
+        return;
+    }
+    CGFloat components[4] = {shadow_color_.r, shadow_color_.g,
+                             shadow_color_.b, shadow_color_.a};
+    CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
+    CGColorRef color = CGColorCreate(cs, components);
+    CGContextSetShadowWithColor(
+        ctx_, CGSizeMake(shadow_offset_x_, shadow_offset_y_),
+        shadow_blur_, color);
+    CGColorRelease(color);
+    CGColorSpaceRelease(cs);
+}
+
+void CoreGraphicsCanvas::set_shadow_color(Color color) {
+    shadow_color_ = color;
+    apply_shadow_to_context();
+}
+void CoreGraphicsCanvas::set_shadow_blur(float blur) {
+    shadow_blur_ = (blur > 0.0f) ? blur : 0.0f;
+    apply_shadow_to_context();
+}
+void CoreGraphicsCanvas::set_shadow_offset_x(float dx) {
+    shadow_offset_x_ = dx;
+    apply_shadow_to_context();
+}
+void CoreGraphicsCanvas::set_shadow_offset_y(float dy) {
+    shadow_offset_y_ = dy;
+    apply_shadow_to_context();
+}
+
 } // namespace pulp::canvas
 
 #endif // __APPLE__

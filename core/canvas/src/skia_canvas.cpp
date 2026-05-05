@@ -346,8 +346,42 @@ SkPaint SkiaCanvas::current_fill_paint() const {
     } else {
         paint.setColor4f(to_sk_color4f(fill_color_));
     }
+    apply_shadow_filter(paint);
     return paint;
 }
+
+// ── Canvas2D shadow* state (issue-1434 batch 7) ──────────────────────────────
+//
+// Sticky values set via `ctx.shadowColor` / `shadowBlur` /
+// `shadowOffsetX` / `shadowOffsetY`. Every subsequent fill/stroke draw
+// queries `apply_shadow_filter` and, when active, attaches an
+// `SkImageFilters::DropShadow` so the geometry emits both itself and a
+// blurred shadow underneath — mirroring WebKit / Blink. Sigma mapping is
+// the same `sigma = blur / 2` Chromium's Canvas2D implementation uses
+// (third_party/blink/.../canvas_rendering_context_2d.cc) and matches the
+// WebView reference within ~5px (same acceptance bar as #925).
+
+bool SkiaCanvas::shadow_is_active() const {
+    return shadow_color_.a > 0.0f &&
+           (shadow_blur_ > 0.0f || shadow_offset_x_ != 0.0f ||
+            shadow_offset_y_ != 0.0f);
+}
+
+void SkiaCanvas::apply_shadow_filter(SkPaint& paint) const {
+    if (!shadow_is_active()) return;
+    const float sigma = shadow_blur_ * 0.5f;
+    paint.setImageFilter(SkImageFilters::DropShadow(
+        shadow_offset_x_, shadow_offset_y_, sigma, sigma,
+        to_sk_color4f(shadow_color_), /*colorSpace=*/nullptr,
+        /*input=*/nullptr));
+}
+
+void SkiaCanvas::set_shadow_color(Color color) { shadow_color_ = color; }
+void SkiaCanvas::set_shadow_blur(float blur) {
+    shadow_blur_ = std::max(0.0f, blur);  // Spec: negative blur is invalid → ignored
+}
+void SkiaCanvas::set_shadow_offset_x(float dx) { shadow_offset_x_ = dx; }
+void SkiaCanvas::set_shadow_offset_y(float dy) { shadow_offset_y_ = dy; }
 
 void SkiaCanvas::set_fill_color(Color c) { fill_color_ = c; }
 void SkiaCanvas::set_stroke_color(Color c) { stroke_color_ = c; }
@@ -396,6 +430,7 @@ static void apply_line_dash(SkPaint& paint,
 void SkiaCanvas::stroke_rect(float x, float y, float w, float h) {
     GUARD_CANVAS; auto paint = make_stroke_paint(stroke_color_, line_width_);
     apply_line_dash(paint, line_dash_, line_dash_phase_);
+    apply_shadow_filter(paint);
     canvas_->drawRect(SkRect::MakeXYWH(x, y, w, h), paint);
 }
 
@@ -410,6 +445,7 @@ void SkiaCanvas::stroke_rounded_rect(float x, float y, float w, float h, float r
     rrect.setRectXY(SkRect::MakeXYWH(x, y, w, h), radius, radius);
     auto paint = make_stroke_paint(stroke_color_, line_width_);
     apply_line_dash(paint, line_dash_, line_dash_phase_);
+    apply_shadow_filter(paint);
     canvas_->drawRRect(rrect, paint);
 }
 
@@ -421,6 +457,7 @@ void SkiaCanvas::stroke_circle(float cx, float cy, float radius) {
     GUARD_CANVAS;
     auto paint = make_stroke_paint(stroke_color_, line_width_);
     apply_line_dash(paint, line_dash_, line_dash_phase_);
+    apply_shadow_filter(paint);
     canvas_->drawCircle(cx, cy, radius, paint);
 }
 
@@ -433,6 +470,7 @@ void SkiaCanvas::stroke_arc(float cx, float cy, float radius,
     if (canvas_) {
         auto paint = make_stroke_paint(stroke_color_, line_width_);
         apply_line_dash(paint, line_dash_, line_dash_phase_);
+        apply_shadow_filter(paint);
         canvas_->drawPath(path, paint);
     }
 }
@@ -441,6 +479,7 @@ void SkiaCanvas::stroke_line(float x0, float y0, float x1, float y1) {
     GUARD_CANVAS;
     auto paint = make_stroke_paint(stroke_color_, line_width_);
     apply_line_dash(paint, line_dash_, line_dash_phase_);
+    apply_shadow_filter(paint);
     canvas_->drawLine(x0, y0, x1, y1, paint);
 }
 
@@ -482,6 +521,13 @@ void SkiaCanvas::fill_text(const std::string& text, float x, float y) {
     // Text glyphs use solid color today; gradient text-fill is a separate
     // Canvas2D `fillText` path (#1350 scoped to shape fills only).
     auto paint = make_solid_fill_paint(fill_color_);
+    // issue-1434 batch 7 — Canvas2D shadow* applies to text fills too,
+    // matching the spec's "the shadow effect […] is applied to all
+    // [drawing] methods" language. Shape and stroke paths handle their
+    // own apply_shadow_filter call sites; text gets the same treatment
+    // here so `ctx.shadowBlur = 4; ctx.fillText(...)` produces a blurred
+    // text glow on the rasterised output.
+    apply_shadow_filter(paint);
 
 #ifdef PULP_HAS_TEXT_SHAPING
     // SkShaper path: full OpenType kerning + ligatures via HarfBuzz.
@@ -950,6 +996,7 @@ void SkiaCanvas::fill_current_path() {
         paint.setColor4f(to_sk_color4f(fill_color_));
     }
     paint.setBlendMode(blend_mode_);
+    apply_shadow_filter(paint);
     canvas_->drawPath(path_builder_->detach(), paint);
 }
 
@@ -962,6 +1009,7 @@ void SkiaCanvas::stroke_current_path() {
     paint.setStrokeWidth(line_width_);
     paint.setBlendMode(blend_mode_);
     apply_line_dash(paint, line_dash_, line_dash_phase_);
+    apply_shadow_filter(paint);
     canvas_->drawPath(path_builder_->detach(), paint);
 }
 

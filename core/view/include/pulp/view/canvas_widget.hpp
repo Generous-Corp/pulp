@@ -43,6 +43,11 @@ struct CanvasDrawCmd {
         // issue-916: Canvas2D API gap closures
         set_line_dash,             ///< pattern in `gradient_positions`, phase in `extra`
         put_image_data,            ///< RGBA pixels in `text` (binary), int_val=width, x2=height (as int)
+        // issue-1434 batch 7: Canvas2D shadow* sticky state setters
+        set_shadow_color,          ///< color in `color`
+        set_shadow_blur,           ///< blur (px) in `extra`
+        set_shadow_offset_x,       ///< dx (px) in `extra`
+        set_shadow_offset_y,       ///< dy (px) in `extra`
         // Clear
         clear, clear_rect
     };

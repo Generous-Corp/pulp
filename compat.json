@@ -6064,42 +6064,60 @@
       "issue": ""
     },
     "canvas2d/shadowColor": {
-      "status": "missing",
-      "mapsTo": "Not implemented.",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "Canvas2D shadow drop"
+      "status": "supported",
+      "mapsTo": "ctx.shadowColor -> canvasSetShadowColor (web-compat-canvas.js _syncShadowState). Sticky state on the C++ canvas; backends apply via SkImageFilters::DropShadow (Skia) or CGContextSetShadowWithColor (CoreGraphics).",
+      "supportedValues": [
+        "CSS color string (#rgb, #rrggbb, rgba(...), hsl(...), named colors, transparent)"
       ],
-      "tests": [],
-      "notes": "Bridge has no canvasShadow* setters. Box-shadow on the View widget is separate (#925).",
-      "issue": ""
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_canvas2d_shim.cpp [issue-1434-batch-7]",
+        "test/test_canvas_widget.cpp [issue-1434-batch-7]"
+      ],
+      "notes": "issue-1434 batch 7. Box-shadow on the View widget remains the separate setBoxShadow primitive (#925).",
+      "issue": "1434"
     },
     "canvas2d/shadowBlur": {
-      "status": "missing",
-      "mapsTo": "Not implemented.",
-      "supportedValues": [],
+      "status": "supported",
+      "mapsTo": "ctx.shadowBlur -> canvasSetShadowBlur (web-compat-canvas.js _syncShadowState). Skia maps blur radius to Gaussian sigma via sigma = blur/2.0 (Chromium's mapping); CG passes blur radius through directly.",
+      "supportedValues": [
+        "non-negative finite Number (CSS pixels)"
+      ],
       "unsupportedValues": [],
-      "tests": [],
-      "notes": "",
-      "issue": ""
+      "tests": [
+        "test/test_canvas2d_shim.cpp [issue-1434-batch-7]",
+        "test/test_canvas_widget.cpp [issue-1434-batch-7]"
+      ],
+      "notes": "issue-1434 batch 7. HTML5 spec: negative values are silently ignored at the shim/bridge boundary.",
+      "issue": "1434"
     },
     "canvas2d/shadowOffsetX": {
-      "status": "missing",
-      "mapsTo": "Not implemented.",
-      "supportedValues": [],
+      "status": "supported",
+      "mapsTo": "ctx.shadowOffsetX -> canvasSetShadowOffsetX (web-compat-canvas.js _syncShadowState). Combines with shadowOffsetY into the dx/dy components of the Skia DropShadow filter / CG shadow offset CGSize.",
+      "supportedValues": [
+        "finite Number (CSS pixels)"
+      ],
       "unsupportedValues": [],
-      "tests": [],
-      "notes": "",
-      "issue": ""
+      "tests": [
+        "test/test_canvas2d_shim.cpp [issue-1434-batch-7]",
+        "test/test_canvas_widget.cpp [issue-1434-batch-7]"
+      ],
+      "notes": "issue-1434 batch 7. Non-finite values are silently ignored by the shim.",
+      "issue": "1434"
     },
     "canvas2d/shadowOffsetY": {
-      "status": "missing",
-      "mapsTo": "Not implemented.",
-      "supportedValues": [],
+      "status": "supported",
+      "mapsTo": "ctx.shadowOffsetY -> canvasSetShadowOffsetY (web-compat-canvas.js _syncShadowState). Combines with shadowOffsetX; same Skia / CG mapping.",
+      "supportedValues": [
+        "finite Number (CSS pixels)"
+      ],
       "unsupportedValues": [],
-      "tests": [],
-      "notes": "",
-      "issue": ""
+      "tests": [
+        "test/test_canvas2d_shim.cpp [issue-1434-batch-7]",
+        "test/test_canvas_widget.cpp [issue-1434-batch-7]"
+      ],
+      "notes": "issue-1434 batch 7. Non-finite values are silently ignored by the shim.",
+      "issue": "1434"
     },
     "canvas2d/getContext_webgpu": {
       "status": "supported",

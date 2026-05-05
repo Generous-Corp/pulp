@@ -141,6 +141,16 @@ public:
                          float dx, float dy, float blur, float spread,
                          Color color, bool inset, float corner_radius) override;
 
+    // Canvas2D drop-shadow state (issue-1434 batch 7). Sticky values that
+    // attach an SkImageFilters::DropShadow to the active fill/stroke
+    // paints until cleared (color alpha == 0 or blur == 0 with both
+    // offsets == 0). See current_fill_paint() / current_stroke_paint()
+    // for the wrapping logic.
+    void set_shadow_color(Color color) override;
+    void set_shadow_blur(float blur) override;
+    void set_shadow_offset_x(float dx) override;
+    void set_shadow_offset_y(float dy) override;
+
     // Custom SkSL shader rendering (GPU-accelerated)
     bool draw_with_sksl(const std::string& sksl,
                         float x, float y, float w, float h,
@@ -174,6 +184,18 @@ private:
     // so shape fills (rect / rrect / circle / arc / oval / polygon) render
     // gradients consistently with `fill_current_path()` (#1350).
     SkPaint current_fill_paint() const;
+
+    // issue-1434 batch 7 — apply the sticky Canvas2D shadow* state to an
+    // arbitrary paint (typically a stroke paint built via the free
+    // `make_stroke_paint` helper). Members can't be reached from the
+    // free helper, so the call sites that build a stroke paint apply
+    // the shadow filter via this method before draw. No-op when shadow
+    // is inactive (alpha == 0 OR (blur == 0 AND offsets == 0)).
+    void apply_shadow_filter(SkPaint& paint) const;
+
+    // Predicate used by `apply_shadow_filter` AND `current_fill_paint`
+    // so the gating logic stays in one place.
+    bool shadow_is_active() const;
 
     SkCanvas* canvas_;        // Non-owning — owned by surface or caller
     skgpu::graphite::Recorder* recorder_ = nullptr; // Non-owning — owned by SkiaSurface
@@ -210,6 +232,18 @@ private:
     // each time stroke_color/line_width change.
     std::vector<float> line_dash_;
     float line_dash_phase_ = 0.0f;
+
+    // Canvas2D drop-shadow state (issue-1434 batch 7). Sticky — every
+    // draw helper queries `make_shadow_filter()` and, when a shadow is
+    // active, wraps its paint via `SkPaint::setImageFilter`. The shadow
+    // is gated on color.a > 0 AND (blur > 0 OR dx != 0 OR dy != 0) to
+    // match Canvas2D spec ("if all four shadow attributes are at their
+    // defaults, no shadow is rendered"). Default = transparent black
+    // shadow with zero blur + zero offset = inactive.
+    Color shadow_color_ = Color::rgba(0.0f, 0.0f, 0.0f, 0.0f);
+    float shadow_blur_     = 0.0f;
+    float shadow_offset_x_ = 0.0f;
+    float shadow_offset_y_ = 0.0f;
 };
 
 } // namespace pulp::canvas

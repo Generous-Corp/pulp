@@ -93,6 +93,16 @@ public:
     float measure_text(const std::string& text) override;
     TextMetrics measure_text_full(const std::string& text) override;
 
+    // Canvas2D drop-shadow state (issue-1434 batch 7). CGContext exposes
+    // sticky shadow state directly via CGContextSetShadowWithColor — we
+    // mirror Canvas2D's sticky `ctx.shadow*` semantics by translating
+    // each setter into a CG state mutation that hangs off the current
+    // GState (so save/restore correctly snapshots and pops the shadow).
+    void set_shadow_color(Color color) override;
+    void set_shadow_blur(float blur) override;
+    void set_shadow_offset_x(float dx) override;
+    void set_shadow_offset_y(float dy) override;
+
 private:
     CGContextRef ctx_;
     float width_, height_;
@@ -134,6 +144,17 @@ private:
     // depth at entry and pops back to it at exit so an unbalanced JS
     // ctx.save() can't leak GState into the parent View's paint scope.
     int save_depth_ = 0;
+
+    // Canvas2D shadow* state (issue-1434 batch 7). CGContext owns the
+    // sticky shadow via its GState stack, so save()/restore() naturally
+    // snapshots both ours and CG's. We hold the values here so a
+    // setter mutation re-pushes the combined state through
+    // CGContextSetShadowWithColor.
+    Color shadow_color_ = Color::rgba(0.0f, 0.0f, 0.0f, 0.0f);
+    float shadow_blur_     = 0.0f;
+    float shadow_offset_x_ = 0.0f;
+    float shadow_offset_y_ = 0.0f;
+    void apply_shadow_to_context();
 
     void apply_fill_color();
     void apply_stroke_color();

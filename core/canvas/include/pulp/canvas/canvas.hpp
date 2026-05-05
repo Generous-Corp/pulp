@@ -664,6 +664,27 @@ public:
                                  Color color, bool inset = false,
                                  float corner_radius = 0.0f);
 
+    // ── Canvas2D drop shadow state (issue-1434 batch 7) ────────────────
+    /// Sticky drop-shadow state that wraps subsequent draw operations,
+    /// matching the CanvasRenderingContext2D `shadowColor` / `shadowBlur`
+    /// / `shadowOffsetX` / `shadowOffsetY` properties. The shadow renders
+    /// only when `color.a > 0` AND (blur > 0 OR offset_x != 0 OR
+    /// offset_y != 0) — same gate Chromium / WebKit use. Setting color to
+    /// fully transparent (alpha == 0) effectively disables the shadow even
+    /// if blur/offset are non-zero, mirroring spec semantics.
+    ///
+    /// Backends that draw via SkPaint / CGContext layer the shadow onto
+    /// the next draw call by configuring an image filter (Skia
+    /// DropShadow) or `CGContextSetShadowWithColor` respectively. The
+    /// default implementation here is a no-op so backends that haven't
+    /// opted into shadow support compile unchanged; SkiaCanvas,
+    /// CoreGraphicsCanvas, and RecordingCanvas override to actually
+    /// honor (or capture) the state.
+    virtual void set_shadow_color(Color color) { (void)color; }
+    virtual void set_shadow_blur(float blur)   { (void)blur; }
+    virtual void set_shadow_offset_x(float dx) { (void)dx; }
+    virtual void set_shadow_offset_y(float dy) { (void)dy; }
+
     // ── Waveform (GPU-accelerated) ─────────────────────────────────────
     /// Draw a waveform using GPU shader (SDF anti-aliased line + fill).
     /// Samples are normalized -1 to 1. Default implementation falls back to polyline.
@@ -754,6 +775,13 @@ struct DrawCommand {
         write_pixels,       ///< RGBA bytes in `text` (binary), w/h in f[0..1], dst in f[2..3]
         // ── issue-925: setBoxShadow / draw_box_shadow ─────────────────
         draw_box_shadow,    ///< x/y/w/h in f[0..3], blur in f[4], spread/offsets via floats payload
+        // ── issue-1434 batch 7: Canvas2D shadow* state setters ────────
+        // Sticky state changes; the recording target captures one cmd
+        // per setter so tests can assert on the bridge's flush order.
+        set_shadow_color,    ///< color in `color`
+        set_shadow_blur,     ///< blur (px) in f[0]
+        set_shadow_offset_x, ///< dx (px) in f[0]
+        set_shadow_offset_y, ///< dy (px) in f[0]
         // ── issue-926: save_backdrop_filter for frosted-glass overlays ─
         save_backdrop_filter, ///< x/y/w/h in f[0..3], blur_radius in f[4]
         // ── issue-929: real clearRect that replaces pixels ────────────
@@ -855,6 +883,15 @@ public:
     void draw_box_shadow(float x, float y, float w, float h,
                          float dx, float dy, float blur, float spread,
                          Color color, bool inset, float corner_radius) override;
+
+    // issue-1434 batch 7 — capture sticky Canvas2D shadow state setters
+    // so tests can assert that JS `ctx.shadowColor = ...; ctx.shadowBlur =
+    // ...; ctx.fillRect(...)` flushes the shadow state through to the
+    // canvas before the geometry is recorded.
+    void set_shadow_color(Color color) override;
+    void set_shadow_blur(float blur) override;
+    void set_shadow_offset_x(float dx) override;
+    void set_shadow_offset_y(float dy) override;
 
     // issue-965 — Canvas2D path API recording. Each call appends one
     // DrawCommand so widget tests can assert on emit order and shape

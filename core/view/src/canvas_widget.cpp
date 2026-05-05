@@ -77,6 +77,10 @@ inline const char* canvas_cmd_type_name(CanvasDrawCmd::Type t) {
         case CanvasDrawCmd::Type::draw_image: return "draw_image";
         case CanvasDrawCmd::Type::set_line_dash: return "set_line_dash";
         case CanvasDrawCmd::Type::put_image_data: return "put_image_data";
+        case CanvasDrawCmd::Type::set_shadow_color: return "set_shadow_color";
+        case CanvasDrawCmd::Type::set_shadow_blur: return "set_shadow_blur";
+        case CanvasDrawCmd::Type::set_shadow_offset_x: return "set_shadow_offset_x";
+        case CanvasDrawCmd::Type::set_shadow_offset_y: return "set_shadow_offset_y";
         case CanvasDrawCmd::Type::clear: return "clear";
         case CanvasDrawCmd::Type::clear_rect: return "clear_rect";
     }
@@ -449,6 +453,23 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
             canvas.set_line_dash(cmd.gradient_positions.data(),
                                  static_cast<int>(cmd.gradient_positions.size()),
                                  cmd.extra);
+            break;
+
+        // Canvas2D shadow* state (issue-1434 batch 7). Sticky values that
+        // the underlying canvas honors on subsequent fill/stroke/text
+        // draws. Stored in `color` (set_shadow_color) or `extra`
+        // (set_shadow_blur / offset_x / offset_y) per the enum doc.
+        case CanvasDrawCmd::Type::set_shadow_color:
+            canvas.set_shadow_color(cmd.color);
+            break;
+        case CanvasDrawCmd::Type::set_shadow_blur:
+            canvas.set_shadow_blur(cmd.extra);
+            break;
+        case CanvasDrawCmd::Type::set_shadow_offset_x:
+            canvas.set_shadow_offset_x(cmd.extra);
+            break;
+        case CanvasDrawCmd::Type::set_shadow_offset_y:
+            canvas.set_shadow_offset_y(cmd.extra);
             break;
 
         // putImageData (issue-916). Pixels packed in cmd.text as

@@ -382,6 +382,40 @@ void RecordingCanvas::draw_box_shadow(float x, float y, float w, float h,
     commands_.push_back(std::move(cmd));
 }
 
+// ── issue-1434 batch 7: Canvas2D shadow* sticky state ──────────────────────
+// Each setter records one command so widget-level tests can assert that the
+// bridge flushed the JS-side `ctx.shadowColor` / `ctx.shadowBlur` /
+// `ctx.shadowOffsetX` / `ctx.shadowOffsetY` writes through to the canvas
+// before the next draw command. The sticky behavior — that the shadow
+// applies to subsequent draws until cleared — is observed by the live
+// SkiaCanvas / CoreGraphicsCanvas backends that consume the same setters
+// and translate them into per-paint SkImageFilters::DropShadow / CG shadow
+// state. RecordingCanvas only models the command stream, not the visual
+// effect.
+void RecordingCanvas::set_shadow_color(Color color) {
+    DrawCommand cmd{DrawCommand::Type::set_shadow_color};
+    cmd.color = color;
+    commands_.push_back(std::move(cmd));
+}
+
+void RecordingCanvas::set_shadow_blur(float blur) {
+    DrawCommand cmd{DrawCommand::Type::set_shadow_blur};
+    cmd.f[0] = blur;
+    commands_.push_back(std::move(cmd));
+}
+
+void RecordingCanvas::set_shadow_offset_x(float dx) {
+    DrawCommand cmd{DrawCommand::Type::set_shadow_offset_x};
+    cmd.f[0] = dx;
+    commands_.push_back(std::move(cmd));
+}
+
+void RecordingCanvas::set_shadow_offset_y(float dy) {
+    DrawCommand cmd{DrawCommand::Type::set_shadow_offset_y};
+    cmd.f[0] = dy;
+    commands_.push_back(std::move(cmd));
+}
+
 // ── issue-965: Canvas2D path API recording ──────────────────────────────────
 void RecordingCanvas::begin_path() {
     commands_.push_back({DrawCommand::Type::begin_path});

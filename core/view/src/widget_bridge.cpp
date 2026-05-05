@@ -4545,6 +4545,63 @@ void WidgetBridge::register_api() {
         return choc::value::Value();
     });
 
+    // ── Canvas2D shadow* state (issue-1434 batch 7) ─────────────────────────
+    //
+    // Sticky drop-shadow state that wraps subsequent fill/stroke/text
+    // draws — matching `CanvasRenderingContext2D.shadowColor` /
+    // `shadowBlur` / `shadowOffsetX` / `shadowOffsetY`. Each setter
+    // records one CanvasDrawCmd that the paint dispatch flushes through
+    // to the underlying canvas (Skia → SkImageFilters::DropShadow,
+    // CoreGraphics → CGContextSetShadowWithColor). The shadow is gated
+    // on color.a > 0 AND (blur > 0 OR offset_x != 0 OR offset_y != 0)
+    // by the canvas backends; the bridge captures every assignment so
+    // the state stays in lockstep with the JS-side `ctx.shadow*`
+    // properties even when one of them is set to 0/transparent.
+    //
+    // Shadow color is parsed via the shared `parseColor` helper used
+    // by `canvasSetFillStyle` etc., so all the CSS color forms
+    // (`#rgb`, `#rrggbb`, `rgba(...)`, `hsl(...)`, `transparent`,
+    // `red`, …) work uniformly.
+    engine_.register_function("canvasSetShadowColor", [this, parseColor](choc::javascript::ArgumentList args) {
+        if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
+            CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::set_shadow_color;
+            cmd.color = parseColor(args.get<std::string>(1, "rgba(0,0,0,0)"));
+            c->add_command(cmd);
+        }
+        return choc::value::Value();
+    });
+
+    engine_.register_function("canvasSetShadowBlur", [this](choc::javascript::ArgumentList args) {
+        if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
+            CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::set_shadow_blur;
+            // HTML5 spec: shadowBlur must be non-negative finite; reject
+            // negatives at the boundary so the canvas backends don't have
+            // to redo the validation.
+            double blur = args.get<double>(1, 0.0);
+            cmd.extra = static_cast<float>(blur >= 0.0 ? blur : 0.0);
+            c->add_command(cmd);
+        }
+        return choc::value::Value();
+    });
+
+    engine_.register_function("canvasSetShadowOffsetX", [this](choc::javascript::ArgumentList args) {
+        if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
+            CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::set_shadow_offset_x;
+            cmd.extra = static_cast<float>(args.get<double>(1, 0.0));
+            c->add_command(cmd);
+        }
+        return choc::value::Value();
+    });
+
+    engine_.register_function("canvasSetShadowOffsetY", [this](choc::javascript::ArgumentList args) {
+        if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
+            CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::set_shadow_offset_y;
+            cmd.extra = static_cast<float>(args.get<double>(1, 0.0));
+            c->add_command(cmd);
+        }
+        return choc::value::Value();
+    });
+
     // canvasGetImageData(id, x, y, w, h) →
     //   { width, height, data: <base64 string of RGBA bytes> }
     //

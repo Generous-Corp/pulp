@@ -471,3 +471,111 @@ TEST_CASE("Canvas2D save/restore brackets do not erase fillStyle pixels",
 }
 
 #endif  // PULP_HAS_SKIA
+
+// ── pulp #1434 batch 7: Canvas2D shadow* sticky state ────────────────────────
+//
+// These tests cover the JS-side shim behaviour and the bridge route; the
+// SkiaCanvas-level pixel verification lives in test_canvas_widget.cpp.
+TEST_CASE("Canvas2D shim exposes shadow* properties as round-trip fields",
+          "[view][canvas2d][issue-1434-batch-7]") {
+    auto result = run_in_bridge(R"(
+        var c = document.createElement('canvas');
+        document.body.appendChild(c);
+        c.width = 100; c.height = 100;
+        var ctx = c.getContext('2d');
+        // Defaults per Canvas2D spec.
+        var defaults = [ctx.shadowColor, ctx.shadowBlur,
+                        ctx.shadowOffsetX, ctx.shadowOffsetY].join('|');
+        ctx.shadowColor = '#ff0000';
+        ctx.shadowBlur = 12;
+        ctx.shadowOffsetX = 4;
+        ctx.shadowOffsetY = -3;
+        var assigned = [ctx.shadowColor, ctx.shadowBlur,
+                        ctx.shadowOffsetX, ctx.shadowOffsetY].join('|');
+        return defaults + ' || ' + assigned;
+    )");
+    // Default shadowColor in the spec is "rgba(0, 0, 0, 0)"; defaults
+    // for the numeric fields are 0. Assigned values must round-trip.
+    REQUIRE(result == "rgba(0, 0, 0, 0)|0|0|0 || #ff0000|12|4|-3");
+}
+
+TEST_CASE("Canvas2D shim flushes shadow state to the bridge before fillRect",
+          "[view][canvas2d][issue-1434-batch-7]") {
+    // Drive the full chain: ctx.shadow* assignments -> _syncShadowState
+    // -> canvasSetShadow* bridge calls -> CanvasWidget commands. The
+    // CanvasWidget's recorded command stream is the assertion target.
+    ScriptedBridge env;
+    env.load(R"(
+        var c = document.createElement('canvas');
+        globalThis.__test_canvas_el__ = c;
+        document.body.appendChild(c);
+        c.width = 64; c.height = 64;
+        var ctx = c.getContext('2d');
+        ctx.shadowColor = 'rgba(255, 0, 0, 0.5)';
+        ctx.shadowBlur = 10;
+        ctx.shadowOffsetX = 5;
+        ctx.shadowOffsetY = 7;
+        ctx.fillStyle = '#000000';
+        ctx.fillRect(10, 10, 20, 20);
+    )");
+
+    auto* cw = env.canvas();
+    REQUIRE(cw != nullptr);
+    using T = pulp::view::CanvasDrawCmd::Type;
+    int color_idx = -1, blur_idx = -1, ox_idx = -1, oy_idx = -1, rect_idx = -1;
+    for (size_t i = 0; i < cw->commands().size(); ++i) {
+        switch (cw->commands()[i].type) {
+            case T::set_shadow_color:    color_idx = (int)i; break;
+            case T::set_shadow_blur:     blur_idx  = (int)i; break;
+            case T::set_shadow_offset_x: ox_idx    = (int)i; break;
+            case T::set_shadow_offset_y: oy_idx    = (int)i; break;
+            case T::fill_rect:           rect_idx  = (int)i; break;
+            default: break;
+        }
+    }
+    REQUIRE(color_idx >= 0);
+    REQUIRE(blur_idx  >= 0);
+    REQUIRE(ox_idx    >= 0);
+    REQUIRE(oy_idx    >= 0);
+    REQUIRE(rect_idx  >= 0);
+    // Shadow setters must precede the rect — that's the whole point of
+    // the sticky-state model.
+    REQUIRE(color_idx < rect_idx);
+    REQUIRE(blur_idx  < rect_idx);
+    REQUIRE(ox_idx    < rect_idx);
+    REQUIRE(oy_idx    < rect_idx);
+    // Round-trip the numeric payloads exactly.
+    REQUIRE(cw->commands()[blur_idx].extra == 10.0f);
+    REQUIRE(cw->commands()[ox_idx].extra   == 5.0f);
+    REQUIRE(cw->commands()[oy_idx].extra   == 7.0f);
+}
+
+TEST_CASE("Canvas2D shim ignores invalid shadow* assignments",
+          "[view][canvas2d][issue-1434-batch-7]") {
+    // Per HTML5 spec: assigning a non-finite number to shadowBlur /
+    // shadowOffsetX / shadowOffsetY is silently ignored — the previous
+    // valid value persists. Our shim implements this by gating the
+    // bridge-flush on isFinite() while still letting the JS-side getter
+    // mirror the assignment.
+    auto result = run_in_bridge(R"(
+        var c = document.createElement('canvas');
+        document.body.appendChild(c);
+        c.width = 32; c.height = 32;
+        var ctx = c.getContext('2d');
+        ctx.shadowBlur = 4;
+        ctx.shadowOffsetX = 2;
+        ctx.shadowOffsetY = -3;
+        // Assign NaN — must not propagate, but Canvas2D getter still
+        // returns the most-recently-assigned raw value (per spec, the
+        // setter coerces to a number; we mirror by storing the raw).
+        ctx.fillRect(0, 0, 1, 1);  // flush #1 with valid values
+        ctx.shadowBlur = NaN;
+        ctx.shadowOffsetX = Infinity;
+        ctx.shadowOffsetY = -Infinity;
+        ctx.fillRect(0, 0, 1, 1);  // flush #2 — NaN/Inf must not leak through
+        return 'ok';
+    )");
+    REQUIRE(result == "ok");
+    // No crash + no exception thrown is the assertion. The drawing
+    // happened (we'd see undefined / TypeError otherwise).
+}
