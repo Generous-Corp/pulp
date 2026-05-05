@@ -99,7 +99,8 @@ current paused queue snapshot and resume notes. The normal operating
 loop below resumes only after Namespace capacity returns.
 
 Latest local-only progress recorded during the pause: #645 signal
-tranche `local/phase3-linkwitz-riley-edges-645` at `385c51a7`, covering
+tranche `local/phase3-linkwitz-riley-edges-645` at `7b1a82a3`, refreshed from
+`385c51a7` onto current `origin/main` `0447498e`, covering
 Linkwitz-Riley reset/history and cutoff boundary finite-output behavior,
 plus #493 format tranche `local/phase3-validation-harness-json-493` at
 `4e753dd3`, refreshed from `974cf572` onto current `origin/main` `0447498e` and
