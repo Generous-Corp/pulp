@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-05-05 10:04 PDT
+Last reviewed: 2026-05-05 10:10 PDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`.
@@ -99,8 +99,9 @@ current paused queue snapshot and resume notes. The normal operating
 loop below resumes only after Namespace capacity returns.
 
 Latest local-only progress recorded during the pause: #645 signal
-tranche `local/phase3-linkwitz-riley-edges-645` at `7b1a82a3`, refreshed from
-`385c51a7` onto current `origin/main` `0447498e`, covering
+tranche `local/phase3-linkwitz-riley-edges-645` at `3deafcfe`,
+refreshed from `385c51a7` to `7b1a82a3`, then onto current
+`origin/main` `bd036171`, covering
 Linkwitz-Riley reset/history and cutoff boundary finite-output behavior,
 plus #493 format tranche `local/phase3-validation-harness-json-493` at
 `4e753dd3`, refreshed from `974cf572` onto current `origin/main` `0447498e` and
