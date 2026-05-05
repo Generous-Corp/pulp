@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-05-05 16:52 PDT
+Last reviewed: 2026-05-05 16:55 PDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`.
@@ -539,10 +539,11 @@ through font-face-leading styles. The
 refreshed branch remains unpushed and undispatched; #1269 still points
 at the old remote head until Namespace capacity returns.
 Additional #640 audio progress is refreshed locally as
-`feature/phase3-mmap-reader-extra-640` at `092d2db7`, rebased from the
+`feature/phase3-mmap-reader-extra-640` at `c03d86f5`, rebased from the
 paused #1280 remote head `ed2ba7bf` onto current `origin/main`
 `50ff5822`, then onto current `origin/main` `b7ec8f08`, then onto current
-`origin/main` `6c8b9920`, then onto current `origin/main` `24047ba3`, covering
+`origin/main` `6c8b9920`, then onto current `origin/main` `24047ba3`,
+then onto current `origin/main` `df01f4f6`, covering
 `MemoryMappedAudioReader` unsupported-file fail-closed and EOF no-copy
 behavior. The refreshed branch remains unpushed and undispatched; #1280
 still points at the old remote head until Namespace capacity returns.
