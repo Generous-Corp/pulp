@@ -327,6 +327,29 @@ function applyOne(id: string, type: string, key: string, value: unknown, props?:
         case 'borderBottomRightRadius': return call('setBorderBottomRightRadius', id, value as number);
         case 'opacity':      return call('setOpacity', id, value as number);
         case 'visible':      return call('setVisible', id, value as boolean);
+        // pulp #1434 (rn batch — Triage #12) — `display: 'flex' | 'none'`.
+        // RN exports + Figma / v0 / Claude Design HTML routinely emit
+        // `style={{ display: 'flex' }}` (the implicit default in pulp,
+        // but the prop-applier shouldn't drop it as unknown) or
+        // `style={{ display: 'none' }}` to hide a subtree. The yoga
+        // surface wired this for the CSS shim in #1422; this branch
+        // makes the same path reachable from RN-flavored JSX without a
+        // round-trip through the el.style proxy.
+        //
+        // 'none'  → setVisible(id, false). View::visible() is the
+        //           canonical "skip render + don't lay out" signal.
+        // 'flex'  → setVisible(id, true). Yoga's flex layout is pulp's
+        //           default; explicit 'flex' just confirms it.
+        // Anything else (block / inline-block / inline-flex / grid)
+        // is silently ignored at this layer — the CSS shim handles
+        // those for the el.style path; for RN consumers, the typical
+        // emission is just 'flex' / 'none'.
+        case 'display': {
+            const sval = String(value);
+            if (sval === 'none') return call('setVisible', id, false);
+            if (sval === 'flex') return call('setVisible', id, true);
+            return; // unknown display value — leave View at current visibility
+        }
         // pulp #1387 gap #1 — overflow was reachable via the DOM-lite
         // path (web-compat-style-decl.js routes 'overflow' to setOverflow)
         // but missing from the @pulp/react prop-applier, so JSX consumers

@@ -27,6 +27,12 @@ Spec walk:
 
 ## Recently changed
 
+- **2026-05-05 (pulp #1434 Triage #12)** — `rn/display` now accepts
+  `'flex'` and `'none'`. The `@pulp/react` prop-applier dispatches
+  `display: 'flex'` → `setVisible(id, true)` and `display: 'none'` →
+  `setVisible(id, false)`. Mirrors the yoga side wired in #1422.
+  Reclassified `missing` → `partial` (`'contents'` remains unsupported
+  — Yoga has no equivalent).
 - **2026-05-05 (pulp #1434 batch 6)** — `rn/top`, `rn/right`,
   `rn/bottom`, `rn/left` now accept percent strings (`'50%'`)
   alongside numeric pixel values. The `@pulp/react` prop-applier

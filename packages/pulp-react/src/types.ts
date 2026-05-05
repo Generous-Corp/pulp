@@ -101,6 +101,13 @@ export interface StyleProps {
     borderBottomRightRadius?: number;
     opacity?: number;
     visible?: boolean;
+    /// CSS / RN `display` keyword (pulp #1434 Triage #12). `'none'`
+    /// hides the View (sets visible=false). `'flex'` is pulp's
+    /// implicit default and is accepted as a no-op confirmation. Other
+    /// keywords (`'block'` / `'inline-block'` / `'inline-flex'` /
+    /// `'grid'`) flow through the CSS shim only — for RN-flavored JSX
+    /// consumers, just `'flex'` / `'none'` are the meaningful values.
+    display?: 'flex' | 'none' | string;
 }
 
 // ── Common base props ──────────────────────────────────────────────

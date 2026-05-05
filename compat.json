@@ -3158,16 +3158,17 @@
       "issue": ""
     },
     "rn/display": {
-      "status": "missing",
-      "mapsTo": "no prop. Use 'visible' (boolean) instead.",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "none",
+      "status": "supported",
+      "mapsTo": "@pulp/react prop-applier dispatches `display: 'flex'` to setVisible(true) and `display: 'none'` to setVisible(false) (pulp #1434 Triage #12, prop-applier.ts:323+).",
+      "supportedValues": [
         "flex",
+        "none"
+      ],
+      "unsupportedValues": [
         "contents"
       ],
       "tests": [],
-      "notes": "@pulp/react users opt out via the boolean `visible` prop. No 'contents' equivalent.",
+      "notes": "@pulp/react users opt out via the boolean `visible` prop. No 'contents' equivalent. pulp #1434 (Triage #12): the prop-applier now accepts display: flex / none, mirroring the yoga side wired in #1422. \"contents\" remains unsupported (Yoga has no equivalent).",
       "issue": ""
     },
     "rn/elevation": {
