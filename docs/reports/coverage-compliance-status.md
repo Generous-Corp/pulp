@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-05-05 14:08 PDT
+Last reviewed: 2026-05-05 14:11 PDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`.
@@ -289,10 +289,11 @@ miss/drag guards, divider grip paint branches, and PropertyList boolean
 editing, category height/paint, and scalar value formatting paths. It
 remains unpushed and undispatched.
 Additional #493 view/gui progress is queued locally as
-`local/phase3-gui-components-edges-493` at `ad50c32d`, refreshed from
+`local/phase3-gui-components-edges-493` at `a37626d7`, refreshed from
 `7e94a781` onto current `origin/main` `0447498e`, then refreshed again
 onto current `origin/main` `50ff5822`, then refreshed again onto current
-`origin/main` `c18785c9`, covering TableListBox header sorting,
+`origin/main` `c18785c9`, then refreshed again onto current `origin/main`
+`83271a94`, covering TableListBox header sorting,
 selection and out-of-range row guards, scaled/aligned painting, and
 ConcertinaPanel invalid-index, content visibility/layout, paint, and
 mouse hit paths. It remains unpushed and undispatched.
