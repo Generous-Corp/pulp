@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-05-05 08:07 PDT
+Last reviewed: 2026-05-05 08:10 PDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`.
@@ -333,10 +333,11 @@ selection, visible-range, and playhead clamps, paint overlay output, key
 scroll/release handling, and mouse selection extension paths. It remains
 unpushed and undispatched.
 Additional #493 view progress is queued locally as
-`local/phase3-window-manager-edges-493` at `2ba38714`, refreshed from
-`49f96229` onto current `origin/main` `0447498e` and covering WindowManager
-unregister callback/missing-id cleanup, null host/root close behavior,
-and missing-handler send/broadcast paths. It remains unpushed and
+`local/phase3-window-manager-edges-493` at `8220c168`, refreshed from
+`49f96229` onto current `origin/main` `0447498e`, then refreshed again
+onto current `origin/main` `c18785c9`, covering WindowManager unregister
+callback/missing-id cleanup, null host/root close behavior, and
+missing-handler send/broadcast paths. It remains unpushed and
 undispatched.
 Additional #493 view progress is queued locally as
 `local/phase3-param-attachment-edges-493` at `c862cceb`, refreshed
