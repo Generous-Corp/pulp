@@ -121,7 +121,8 @@ undispatched. Additional #645 signal progress is queued locally as
 `local/phase3-adsr-edges-645` at `bd746f3c`, refreshed from
 `e4844caa` onto current `origin/main` `0447498e`, covering ADSR
 immediate stage, idle `note_off`, and reset edge paths, plus
-`local/phase3-noise-gate-edges-645` at `98f73bb8`, covering NoiseGate
+`local/phase3-noise-gate-edges-645` at `717067d6`, refreshed from
+`98f73bb8` onto current `origin/main` `0447498e`, covering NoiseGate
 range clamp, instant timing, reset, silence, and buffer paths, plus
 `local/phase3-modulation-reverb-edges-645` at `971488d5`, covering
 Chorus dry/reset/phase-wrap behavior and Reverb zero-decay, damping
