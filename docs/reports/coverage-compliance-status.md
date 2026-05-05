@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-05-04 21:28 PDT
+Last reviewed: 2026-05-04 21:34 PDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`.
@@ -220,6 +220,10 @@ Additional #493 view progress is queued locally as
 generated toggle state, generated knob display-format branches, and
 sync propagation to toggles and existing faders. It remains unpushed
 and undispatched.
+Additional #493 view progress is queued locally as
+`local/phase3-image-cache-trim-493` at `1afb279e`, covering
+ImageCache byte-budget lowering, least-recently-used trimming, and
+releaser behavior. It remains unpushed and undispatched.
 
 ## Phase 3 Operating Loop
 
