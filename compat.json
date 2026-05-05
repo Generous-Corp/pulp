@@ -5663,7 +5663,7 @@
       "issue": "1346"
     },
     "canvas2d/fill": {
-      "status": "supported",
+      "status": "partial",
       "mapsTo": "ctx.fill -> _syncGlobalState + _applyFillStyle + canvasFillPath.",
       "supportedValues": [],
       "unsupportedValues": [
@@ -5683,7 +5683,7 @@
       "issue": ""
     },
     "canvas2d/clip": {
-      "status": "supported",
+      "status": "partial",
       "mapsTo": "ctx.clip(fillRule) -> canvasClip (intersects current clip with current path). Falls back to no-op if canvasClip absent.",
       "supportedValues": [],
       "unsupportedValues": [
@@ -5770,7 +5770,7 @@
       "issue": "1346"
     },
     "canvas2d/fillText": {
-      "status": "supported",
+      "status": "partial",
       "mapsTo": "ctx.fillText(text,x,y,maxWidth) -> _syncGlobalState + _syncTextState + _applyFillStyle + canvasFillText(id, text, x, y, size, color). maxWidth is ignored; gradient fillStyle uses the first stop's color.",
       "supportedValues": [],
       "unsupportedValues": [
@@ -5932,7 +5932,7 @@
       "issue": ""
     },
     "canvas2d/fillStyle": {
-      "status": "supported",
+      "status": "partial",
       "mapsTo": "Settable to a CSS-color string OR a CanvasGradient object. Solid colors push via canvasSetFillColor; gradients push via canvasSetLinearGradient / canvasSetRadialGradient on the next draw.",
       "supportedValues": [
         "CSS color strings",
@@ -6052,7 +6052,7 @@
       "issue": "1346"
     },
     "canvas2d/font": {
-      "status": "supported",
+      "status": "partial",
       "mapsTo": "Locally tracked; canvasSetFont(id, family, size) on the next draw. Shim parses '<size>px <family>'.",
       "supportedValues": [
         "'<size>px <family>'"
