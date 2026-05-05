@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-05-05 10:20 PDT
+Last reviewed: 2026-05-05 10:23 PDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`.
@@ -134,9 +134,10 @@ NoiseGate range clamp, instant timing, reset, silence, and buffer paths, plus
 from `9cfcc171` onto current `origin/main` `4bebc7bf`, covering Chorus
 dry/reset/phase-wrap behavior and Reverb zero-decay, damping clamp,
 dry-mix, and reset paths, plus
-`local/phase3-oscillator-edges-645` at `8f2e043`, refreshed from
-`8f51cba4` onto current `origin/main` `0447498e`, covering
-Oscillator reset, phase wrap, getter, and PolyBLEP edge paths, plus
+`local/phase3-oscillator-edges-645` at `5e3a1db3`, refreshed from
+`8f51cba4` onto current `origin/main` `0447498e`, then refreshed again
+from `8f2e043` onto current `origin/main` `4bebc7bf`, covering Oscillator
+reset, phase wrap, getter, and PolyBLEP edge paths, plus
 `local/phase3-signal-helper-edges-645` at `be2d441f`, created from
 current `origin/main` `0447498e`, covering FirFilter empty-coefficient
 passthrough/reset, LookupTable indexed clamps and zero-length buffer
