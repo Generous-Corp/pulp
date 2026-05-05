@@ -217,11 +217,12 @@ refreshed from `b271d2e6` to `422a64cc`, then onto current `origin/main`
 Environment token self-move, listener removal before dispatch, and
 reset-during-dispatch skip behavior. It remains unpushed
 and undispatched. Additional #640 platform progress is queued locally as
-`local/phase3-child-process-read-output-640` at `16f53a6f`, refreshed
+`local/phase3-child-process-read-output-640` at `ca647d70`, refreshed
 from `55c46d02` to `4008bd73`, then onto current `origin/main`
-`bd036171`, then onto current `origin/main` `b7ec8f08`, covering
-`ChildProcess::read_available_output()` while stdout is available
-before process completion. It remains unpushed and undispatched.
+`bd036171`, then onto current `origin/main` `b7ec8f08`, then onto
+current `origin/main` `6c8b9920`, covering
+`ChildProcess::read_available_output()` while stdout is available before
+process completion. It remains unpushed and undispatched.
 Additional #645 MIDI progress is queued locally as
 `local/phase3-midi-ci-edges-645` at `6226f5af`, refreshed from
 `c3f7e68b` to `f66f0d4`, then onto current `origin/main`
