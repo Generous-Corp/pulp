@@ -81,9 +81,24 @@ manual on purpose to avoid baking a flaky scraper into CI.
 
 `compat.json` (at repo root) is the **implementation status matrix** —
 every prop that has a known mapping into pulp's bridge, with
-`supported / partial / missing / wontfix`. These TSVs are the
+`supported / partial / noop / missing / wontfix`. These TSVs are the
 **reference catalog** — every prop the spec says exists, regardless of
 whether pulp implements it.
+
+The five status values are distinguished as follows:
+
+- `supported` — full implementation; round-trips cleanly through the
+  harness.
+- `partial` — implemented but lacks coverage on some axis (missing
+  enum values, percent units, multi-value form, etc.).
+- `noop` — bridge entry point exists and accepts the value silently,
+  but the body is an intentional stub pending a future subsystem.
+  Distinct from `missing` because the registration is real; the no-op
+  is intentional, not an oversight. Added in pulp #1475.
+- `missing` — no implementation at all; no `case` in the JS-side router
+  and no bridge handler.
+- `wontfix` — explicitly out of scope (e.g. table-layout, page-break,
+  list-style-image — not relevant to audio plugin UI).
 
 The two are joined by `pulp-stress-bridge`:
 

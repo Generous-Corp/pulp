@@ -87,16 +87,27 @@ class StatusCounts:
 def map_catalog_status_to_expected(catalog_status: Optional[str]) -> Status:
     """Map the hand-edited compat.json `status` field onto the harness taxonomy.
 
-    Today's catalog uses `supported | partial | missing | wontfix`. We map:
+    The catalog uses `supported | partial | missing | wontfix | noop`. We map:
 
     * `supported` -> PASS  (claimed full implementation)
     * `partial`   -> DIVERGE  (claimed partial implementation)
+    * `noop`      -> NO_OP  (intentional stub — bridge accepts the value
+                              silently, e.g. `setAnimation` / `setTouchAction`
+                              before their subsystems land. Distinct from
+                              `missing` because the bridge entry exists.)
     * `missing`   -> NOT_IMPL  (claimed no implementation)
     * `wontfix`   -> OOS  (explicitly out of scope)
     * unknown / missing field -> NOT_IMPL
 
     The harness compares its verdict to this mapping. Disagreement is the
     drift signal we want to surface.
+
+    The `noop` status was added in pulp #1475 to close the vocabulary gap
+    discovered while triaging css/animation* and css/touchAction during
+    #1474: the bridge intentionally NO-OPs those properties (the animations
+    subsystem lands later), but no catalog status mapped to NO_OP, so every
+    css NO-OP entry registered as drift regardless of what the catalog
+    claimed.
     """
     if catalog_status is None:
         return Status.NOT_IMPL
@@ -105,6 +116,8 @@ def map_catalog_status_to_expected(catalog_status: Optional[str]) -> Status:
         return Status.PASS
     if s == "partial":
         return Status.DIVERGE
+    if s == "noop":
+        return Status.NO_OP
     if s == "missing":
         return Status.NOT_IMPL
     if s == "wontfix":

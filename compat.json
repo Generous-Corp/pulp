@@ -144,80 +144,80 @@
       "issue": ""
     },
     "css/animation": {
-      "status": "partial",
-      "mapsTo": "parseTransition + setAnimation -- but setAnimation is a TODO no-op",
+      "status": "noop",
+      "mapsTo": "parseTransition + setAnimation -- setAnimation is an intentional no-op stub pending the animations subsystem (Phase A2)",
       "supportedValues": [],
       "unsupportedValues": [
         "all"
       ],
       "tests": [],
-      "notes": "MAJOR GAP -- widget_bridge.cpp:3208 setAnimation is registered but the body is `(void)id; (void)prop;...` -- a stub. CSS @keyframes animations are silently dropped.",
+      "notes": "Intentional NO-OP: widget_bridge.cpp:3208 setAnimation is registered but the body is `(void)id; (void)prop;...` -- a stub. CSS @keyframes animations are silently accepted but produce no visual effect; full implementation lands with the animations subsystem (Phase A2). Re-statused 'partial' -> 'noop' in pulp #1475 to clear harness drift (the `noop` vocabulary entry was added in the same PR).",
       "issue": ""
     },
     "css/animationDelay": {
-      "status": "missing",
-      "mapsTo": "setAnimation stub",
+      "status": "noop",
+      "mapsTo": "setAnimation stub (intentional NO-OP pending Phase A2 animations subsystem)",
       "supportedValues": [],
       "unsupportedValues": [
         "all"
       ],
       "tests": [],
-      "notes": "Stub no-op.",
+      "notes": "Intentional NO-OP -- bridge accepts the value silently, no visual effect. Re-statused 'missing' -> 'noop' in pulp #1475.",
       "issue": ""
     },
     "css/animationDirection": {
-      "status": "missing",
-      "mapsTo": "setAnimation stub",
+      "status": "noop",
+      "mapsTo": "setAnimation stub (intentional NO-OP pending Phase A2 animations subsystem)",
       "supportedValues": [],
       "unsupportedValues": [
         "all"
       ],
       "tests": [],
-      "notes": "Stub no-op.",
+      "notes": "Intentional NO-OP -- bridge accepts the value silently, no visual effect. Re-statused 'missing' -> 'noop' in pulp #1475.",
       "issue": ""
     },
     "css/animationDuration": {
-      "status": "missing",
-      "mapsTo": "setAnimation stub",
+      "status": "noop",
+      "mapsTo": "setAnimation stub (intentional NO-OP pending Phase A2 animations subsystem)",
       "supportedValues": [],
       "unsupportedValues": [
         "all"
       ],
       "tests": [],
-      "notes": "Stub no-op.",
+      "notes": "Intentional NO-OP -- bridge accepts the value silently, no visual effect. Re-statused 'missing' -> 'noop' in pulp #1475.",
       "issue": ""
     },
     "css/animationFillMode": {
-      "status": "missing",
-      "mapsTo": "setAnimation stub",
+      "status": "noop",
+      "mapsTo": "setAnimation stub (intentional NO-OP pending Phase A2 animations subsystem)",
       "supportedValues": [],
       "unsupportedValues": [
         "all"
       ],
       "tests": [],
-      "notes": "Stub no-op.",
+      "notes": "Intentional NO-OP -- bridge accepts the value silently, no visual effect. Re-statused 'missing' -> 'noop' in pulp #1475.",
       "issue": ""
     },
     "css/animationIterationCount": {
-      "status": "missing",
-      "mapsTo": "setAnimation stub",
+      "status": "noop",
+      "mapsTo": "setAnimation stub (intentional NO-OP pending Phase A2 animations subsystem)",
       "supportedValues": [],
       "unsupportedValues": [
         "all"
       ],
       "tests": [],
-      "notes": "Stub no-op.",
+      "notes": "Intentional NO-OP -- bridge accepts the value silently, no visual effect. Re-statused 'missing' -> 'noop' in pulp #1475.",
       "issue": ""
     },
     "css/animationName": {
-      "status": "missing",
-      "mapsTo": "setAnimation stub",
+      "status": "noop",
+      "mapsTo": "setAnimation stub (intentional NO-OP pending Phase A2 animations subsystem)",
       "supportedValues": [],
       "unsupportedValues": [
         "all"
       ],
       "tests": [],
-      "notes": "Stub no-op.",
+      "notes": "Intentional NO-OP -- bridge accepts the value silently, no visual effect. Re-statused 'missing' -> 'noop' in pulp #1475.",
       "issue": ""
     },
     "css/animationPlayState": {
@@ -232,14 +232,14 @@
       "issue": ""
     },
     "css/animationTimingFunction": {
-      "status": "missing",
-      "mapsTo": "setAnimation stub",
+      "status": "noop",
+      "mapsTo": "setAnimation stub (intentional NO-OP pending Phase A2 animations subsystem)",
       "supportedValues": [],
       "unsupportedValues": [
         "all"
       ],
       "tests": [],
-      "notes": "Stub no-op.",
+      "notes": "Intentional NO-OP -- bridge accepts the value silently, no visual effect. Re-statused 'missing' -> 'noop' in pulp #1475.",
       "issue": ""
     },
     "css/aspectRatio": {
@@ -2414,8 +2414,8 @@
       "issue": "https://github.com/danielraffel/pulp/issues/1434"
     },
     "css/touchAction": {
-      "status": "partial",
-      "mapsTo": "stored on element instance; not propagated to bridge",
+      "status": "noop",
+      "mapsTo": "stored on element instance; not propagated to bridge (intentional NO-OP -- the C++ hit-test path does not consume touch-action today)",
       "supportedValues": [
         "any (stored verbatim)"
       ],
@@ -2423,7 +2423,7 @@
         "actually honored at hit-test"
       ],
       "tests": [],
-      "notes": "Set but not consumed by the C++ hit-test path.",
+      "notes": "Intentional NO-OP -- bridge accepts the value (stored on the element) but the hit-test layer does not consume it. Full honoring lands when the gesture-routing slice arrives. Re-statused 'partial' -> 'noop' in pulp #1475.",
       "issue": ""
     },
     "css/transform": {

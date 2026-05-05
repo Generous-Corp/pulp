@@ -39,13 +39,18 @@ tools/harness/
 
 ## Status taxonomy
 
-| Status     | Meaning                                                                              |
-| ---------- | ------------------------------------------------------------------------------------ |
-| PASS       | Implemented, matches reference behavior on all enumerated supported values.          |
-| DIVERGE    | Implemented but partial — some supported values match, others diverge or are missing.|
-| NO-OP      | Accepted silently (sometimes intentional — e.g. shadow* pre-blur).                   |
-| NOT-IMPL   | Falls through silently / has no implementation surface in pulp.                      |
-| OOS        | Explicitly out of scope (catalog `status: wontfix`).                                 |
+| Harness status | Meaning                                                                              | Catalog `status` mapping |
+| -------------- | ------------------------------------------------------------------------------------ | ------------------------ |
+| PASS           | Implemented, matches reference behavior on all enumerated supported values.          | `supported`              |
+| DIVERGE        | Implemented but partial — some supported values match, others diverge or are missing.| `partial`                |
+| NO-OP          | Accepted silently (intentional stub — bridge registration exists, body is empty).    | `noop`                   |
+| NOT-IMPL       | Falls through silently / has no implementation surface in pulp.                      | `missing`                |
+| OOS            | Explicitly out of scope.                                                             | `wontfix`                |
+
+The `noop` catalog status was added in pulp #1475 to close the
+vocabulary gap discovered while triaging css/animation* and
+css/touchAction during #1474. Without it, every intentional NO-OP
+registers as drift regardless of what the catalog claims.
 
 ## CLI
 

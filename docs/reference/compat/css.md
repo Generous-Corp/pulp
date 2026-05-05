@@ -45,10 +45,24 @@ specifics are out of scope.
   remain unregistered so the values silently drop at runtime, but the
   catalog status now matches the harness verdict (DIVERGE). Drift on
   these six entries is cleared. Nine remaining `css/animation*` and
-  `css/touchAction` entries continue to drift as harness `NO-OP`
-  because the catalog has no `status` value that maps to NO-OP — that
-  is a verifier-side classification gap (no catalog edit can clear it
-  today) and is tracked as a follow-up.
+  `css/touchAction` entries closed via #1475's `noop` vocabulary
+  extension (see next entry).
+- **2026-05-05 (pulp #1475)** — Catalog vocabulary extension. The harness
+  verifier (`tools/harness/status.py`) now recognizes a fifth catalog
+  status value, `noop`, which maps to the harness `NO_OP` outcome.
+  Distinct from `missing` (no implementation at all) and `partial`
+  (something is implemented but lacks coverage), `noop` says the bridge
+  has an explicit registration but the body is intentionally a stub
+  pending a future subsystem. Nine css entries flipped to the new
+  status: `css/animation`, `css/animationDelay`, `css/animationDirection`,
+  `css/animationDuration`, `css/animationFillMode`,
+  `css/animationIterationCount`, `css/animationName`,
+  `css/animationTimingFunction` (all pending the Phase A2 animations
+  subsystem) and `css/touchAction` (pending gesture routing in the
+  C++ hit-test path). css drift dropped by 9 entries (60 → 51).
+  `css/animationPlayState` stays `missing` because its `mapsTo` is
+  `"no branch"` — the bridge has no entry point for it at all, which
+  is NOT_IMPL semantics, not NO-OP.
 - **2026-05-05 (pulp #1434 Triage #11)** — `css/textAlign` now accepts
   `start`, `end`, `auto`, and `justify` alongside the existing `left`,
   `center`, `right`. `start`/`end` map symmetrically to `left`/`right`
