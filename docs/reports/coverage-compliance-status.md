@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-05-05 02:31 PDT
+Last reviewed: 2026-05-05 02:34 PDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`.
@@ -183,8 +183,8 @@ minimum clamps, miss/drag guards, divider grip paint branches, and
 PropertyList boolean editing, category height/paint, and scalar value
 formatting paths. It remains unpushed and undispatched.
 Additional #493 view/gui progress is queued locally as
-`local/phase3-gui-components-edges-493` at `7e94a781`, refreshed from
-`b26a0e5f` onto current `origin/main` and covering TableListBox header
+`local/phase3-gui-components-edges-493` at `b0e683e9`, refreshed from
+`7e94a781` onto current `origin/main` `0447498e` and covering TableListBox header
 sorting, selection and out-of-range row guards, scaled/aligned painting,
 and ConcertinaPanel invalid-index, content visibility/layout, paint, and
 mouse hit paths. It remains unpushed and undispatched.
