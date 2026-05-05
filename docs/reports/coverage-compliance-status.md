@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-05-05 02:16 PDT
+Last reviewed: 2026-05-05 02:19 PDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`.
@@ -159,7 +159,8 @@ releasing-steal invariant in the MPE skill, and covering unmatched
 MpeGlideDetector note-off/reset behavior. It remains unpushed and
 undispatched. Additional #493 host scanner progress is
 queued locally as `local/phase3-host-scanner-order-493` at `97d9f833`,
-refreshed from `c3b79d68` onto current `origin/main`, covering
+refreshed from `c3b79d68` onto current `origin/main`, then refreshed
+again to `1dfeb616` on `origin/main` `0447498e`, covering
 PluginScanner VST3/LV2 format-lane merging, final name ordering, LV2
 URI identity, VST3 stem fallback identity, and hermetic scanner fixture
 paths. It remains unpushed and undispatched.
