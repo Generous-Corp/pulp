@@ -33,6 +33,14 @@ specifics are out of scope.
 
 ## Recently changed
 
+- **2026-05-05 (pulp #1434 batch 6)** — `css/top`, `css/right`,
+  `css/bottom`, `css/left` now accept percent values (`'50%'`). The
+  CSS translator passes `'NN%'` strings verbatim to the bridge; the
+  bridge detects the `'%'` suffix and routes through Yoga's native
+  `YGNodeStyleSetPositionPercent` via `View::top_unit_` etc. `em`,
+  `rem`, `vh`, `vw` remain unsupported (entries stay DIVERGE on those
+  units). Mirrors PR #1426 (`width`/`height` percent) for the View
+  positional fields.
 - **2026-05-05 (pulp #1434 batch 4)** — added `css/marginHorizontal`,
   `css/marginVertical`, `css/paddingHorizontal`, `css/paddingVertical`
   RN-shorthand entries. The DOM-lite el.style adapter now recognizes

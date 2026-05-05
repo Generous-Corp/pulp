@@ -4380,3 +4380,117 @@ TEST_CASE("CSS width/height px paths unchanged by percent support",
     REQUIRE_THAT(child->bounds().width, WithinAbs(120.0f, 0.5f));
     REQUIRE_THAT(child->bounds().height, WithinAbs(80.0f, 0.5f));
 }
+
+// pulp #1434 batch 6 — `top: '50%'`, `right`, `bottom`, `left` percent
+// strings propagate through the CSS translator and bridge to Yoga's
+// `YGNodeStyleSetPositionPercent`. Mirrors the issue-1423 width/height
+// percent path; the four View positional fields previously dropped the
+// `%` suffix at the bridge boundary.
+TEST_CASE("CSS top/right/bottom/left percent strings propagate to Yoga",
+          "[view][bridge][css][issue-1434]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 200});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('child', '');
+        var stub = { _id: 'child', _nativeCreated: true };
+        var sd = new CSSStyleDeclaration(stub);
+        sd._applyProperty('position', 'absolute');
+        sd._applyProperty('top', '50%');
+        sd._applyProperty('left', '25%');
+        sd._applyProperty('right', '10%');
+        sd._applyProperty('bottom', '0%');
+    )");
+
+    auto* child = bridge.widget("child");
+    REQUIRE(child != nullptr);
+
+    // View::top_unit_ / etc. now carry the percent unit, so
+    // yoga_layout.cpp will emit YGNodeStyleSetPositionPercent.
+    REQUIRE(child->has_top());
+    REQUIRE(child->top_unit() == DimensionUnit::percent);
+    REQUIRE_THAT(child->top(), WithinAbs(50.0f, 0.001f));
+
+    REQUIRE(child->has_left());
+    REQUIRE(child->left_unit() == DimensionUnit::percent);
+    REQUIRE_THAT(child->left(), WithinAbs(25.0f, 0.001f));
+
+    REQUIRE(child->has_right());
+    REQUIRE(child->right_unit() == DimensionUnit::percent);
+    REQUIRE_THAT(child->right(), WithinAbs(10.0f, 0.001f));
+
+    REQUIRE(child->has_bottom());
+    REQUIRE(child->bottom_unit() == DimensionUnit::percent);
+    REQUIRE_THAT(child->bottom(), WithinAbs(0.0f, 0.001f));
+}
+
+// pulp #1434 batch 6 — px positional values still work after the
+// percent-aware refactor. Regression guard: the existing single-arg
+// View::set_top setter must keep top_unit_ at px so layout_children
+// uses YGNodeStyleSetPosition (not Percent).
+TEST_CASE("CSS top/right/bottom/left px paths unchanged by percent support",
+          "[view][bridge][css][issue-1434]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 200});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('child', '');
+        var stub = { _id: 'child', _nativeCreated: true };
+        var sd = new CSSStyleDeclaration(stub);
+        sd._applyProperty('position', 'absolute');
+        sd._applyProperty('top', '12px');
+        sd._applyProperty('left', '34px');
+        sd._applyProperty('right', '56px');
+        sd._applyProperty('bottom', '78px');
+    )");
+
+    auto* child = bridge.widget("child");
+    REQUIRE(child != nullptr);
+    REQUIRE(child->top_unit() == DimensionUnit::px);
+    REQUIRE_THAT(child->top(), WithinAbs(12.0f, 0.001f));
+    REQUIRE(child->left_unit() == DimensionUnit::px);
+    REQUIRE_THAT(child->left(), WithinAbs(34.0f, 0.001f));
+    REQUIRE(child->right_unit() == DimensionUnit::px);
+    REQUIRE_THAT(child->right(), WithinAbs(56.0f, 0.001f));
+    REQUIRE(child->bottom_unit() == DimensionUnit::px);
+    REQUIRE_THAT(child->bottom(), WithinAbs(78.0f, 0.001f));
+}
+
+// pulp #1434 batch 6 — direct bridge entry-point coverage. The CSS
+// translator path is exercised by the test above; this case calls the
+// bridge's setTop/setRight/setBottom/setLeft directly so the @pulp/react
+// JSX path (which forwards `'NN%'` strings without going through the
+// CSS translator) is also covered.
+TEST_CASE("setTop/setRight/setBottom/setLeft accept percent strings directly",
+          "[view][bridge][issue-1434]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 200});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('child', '');
+        setTop('child', '50%');
+        setRight('child', '25%');
+        setBottom('child', '10%');
+        setLeft('child', '0%');
+    )");
+
+    auto* child = bridge.widget("child");
+    REQUIRE(child != nullptr);
+    REQUIRE(child->top_unit() == DimensionUnit::percent);
+    REQUIRE_THAT(child->top(), WithinAbs(50.0f, 0.001f));
+    REQUIRE(child->right_unit() == DimensionUnit::percent);
+    REQUIRE_THAT(child->right(), WithinAbs(25.0f, 0.001f));
+    REQUIRE(child->bottom_unit() == DimensionUnit::percent);
+    REQUIRE_THAT(child->bottom(), WithinAbs(10.0f, 0.001f));
+    REQUIRE(child->left_unit() == DimensionUnit::percent);
+    REQUIRE_THAT(child->left(), WithinAbs(0.0f, 0.001f));
+}

@@ -40,6 +40,15 @@ which mirrors the upstream Yoga API.
 
 ## Recent updates
 
+- **2026-05-05 (pulp #1434 batch 6)** — `yoga/top`, `yoga/right`,
+  `yoga/bottom`, `yoga/left` now accept percentage values (`'50%'`).
+  The CSS translator and `@pulp/react` prop-applier pass `'NN%'`
+  strings verbatim to the bridge; `View::top_unit_` / `right_unit_` /
+  `bottom_unit_` / `left_unit_` carry the unit; `yoga_layout.cpp`
+  dispatches to Yoga's native `YGNodeStyleSetPositionPercent`. Mirrors
+  the `FlexStyle::dim_width` pattern from pulp #1423 (PR #1426) for
+  the View positional fields. Reclassified DIVERGE → PASS for all
+  four entries (yoga drift_count: 23 → 19).
 - **2026-05-05 (pulp #1434 batch 4)** — React Native shorthand aliases
   `yoga/marginHorizontal`, `yoga/marginVertical`, `yoga/paddingHorizontal`,
   `yoga/paddingVertical` now fan out to the existing per-edge FlexStyle

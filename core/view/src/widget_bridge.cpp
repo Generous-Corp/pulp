@@ -3310,21 +3310,72 @@ void WidgetBridge::register_api() {
         return choc::value::Value();
     });
 
-    // setTop/setRight/setBottom/setLeft(id, px) — CSS positioning offsets
+    // setTop/setRight/setBottom/setLeft(id, px-or-percent) — CSS positioning
+    // offsets. pulp #1434 batch 6 — accept either a number ("50" → px) or
+    // a percentage string ("50%" → percent of parent). The CSS translator
+    // and @pulp/react prop-applier pass the raw resolved string for these
+    // four keys when the value is a percent, so the unit survives the
+    // bridge boundary; Yoga's YGNodeStyleSetPositionPercent path is reached
+    // via View::top_unit_ / etc. in yoga_layout.cpp. Mirrors the
+    // FlexStyle::dim_width pattern from pulp #1423 (PR #1426) for width/height.
     engine_.register_function("setTop", [this](choc::javascript::ArgumentList args) {
-        auto* v = widget(args.get<std::string>(0, "")); if (v) v->set_top(static_cast<float>(args.get<double>(1, 0)));
+        auto* v = widget(args.get<std::string>(0, ""));
+        if (v) {
+            auto sval = args.get<std::string>(1, "");
+            if (!sval.empty() && sval.back() == '%') {
+                try {
+                    v->set_top(std::stof(sval.substr(0, sval.size() - 1)),
+                               pulp::view::DimensionUnit::percent);
+                } catch (...) { v->set_top(static_cast<float>(args.get<double>(1, 0))); }
+            } else {
+                v->set_top(static_cast<float>(args.get<double>(1, 0)));
+            }
+        }
         return choc::value::Value();
     });
     engine_.register_function("setRight", [this](choc::javascript::ArgumentList args) {
-        auto* v = widget(args.get<std::string>(0, "")); if (v) v->set_right(static_cast<float>(args.get<double>(1, 0)));
+        auto* v = widget(args.get<std::string>(0, ""));
+        if (v) {
+            auto sval = args.get<std::string>(1, "");
+            if (!sval.empty() && sval.back() == '%') {
+                try {
+                    v->set_right(std::stof(sval.substr(0, sval.size() - 1)),
+                                 pulp::view::DimensionUnit::percent);
+                } catch (...) { v->set_right(static_cast<float>(args.get<double>(1, 0))); }
+            } else {
+                v->set_right(static_cast<float>(args.get<double>(1, 0)));
+            }
+        }
         return choc::value::Value();
     });
     engine_.register_function("setBottom", [this](choc::javascript::ArgumentList args) {
-        auto* v = widget(args.get<std::string>(0, "")); if (v) v->set_bottom(static_cast<float>(args.get<double>(1, 0)));
+        auto* v = widget(args.get<std::string>(0, ""));
+        if (v) {
+            auto sval = args.get<std::string>(1, "");
+            if (!sval.empty() && sval.back() == '%') {
+                try {
+                    v->set_bottom(std::stof(sval.substr(0, sval.size() - 1)),
+                                  pulp::view::DimensionUnit::percent);
+                } catch (...) { v->set_bottom(static_cast<float>(args.get<double>(1, 0))); }
+            } else {
+                v->set_bottom(static_cast<float>(args.get<double>(1, 0)));
+            }
+        }
         return choc::value::Value();
     });
     engine_.register_function("setLeft", [this](choc::javascript::ArgumentList args) {
-        auto* v = widget(args.get<std::string>(0, "")); if (v) v->set_left(static_cast<float>(args.get<double>(1, 0)));
+        auto* v = widget(args.get<std::string>(0, ""));
+        if (v) {
+            auto sval = args.get<std::string>(1, "");
+            if (!sval.empty() && sval.back() == '%') {
+                try {
+                    v->set_left(std::stof(sval.substr(0, sval.size() - 1)),
+                                pulp::view::DimensionUnit::percent);
+                } catch (...) { v->set_left(static_cast<float>(args.get<double>(1, 0))); }
+            } else {
+                v->set_left(static_cast<float>(args.get<double>(1, 0)));
+            }
+        }
         return choc::value::Value();
     });
 
