@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-05-05 09:24 PDT
+Last reviewed: 2026-05-05 09:28 PDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`.
@@ -197,8 +197,9 @@ refreshed from `b271d2e6` to `422a64cc`, then onto current `origin/main`
 `bd036171`, covering Environment token self-move, listener removal before
 dispatch, and reset-during-dispatch skip behavior. It remains unpushed
 and undispatched. Additional #640 platform progress is queued locally as
-`local/phase3-child-process-read-output-640` at `4008bd73`, refreshed from
-`55c46d02` onto current `origin/main` `0447498e`, covering
+`local/phase3-child-process-read-output-640` at `a4fb3f1f`, refreshed
+from `55c46d02` to `4008bd73`, then onto current `origin/main`
+`bd036171`, covering
 `ChildProcess::read_available_output()` while stdout is available
 before process completion. It remains unpushed and undispatched.
 Additional #645 MIDI progress is queued locally as
