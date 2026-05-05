@@ -252,8 +252,8 @@ Additional #493 view progress is queued locally as
 byte-budget lowering, least-recently-used trimming, and releaser
 behavior. It remains unpushed and undispatched.
 Additional #493 view progress is queued locally as
-`local/phase3-visualization-bridge-edges-493` at `3e45d531`,
-refreshed from `dc41a698` onto current `origin/main` and covering
+`local/phase3-visualization-bridge-edges-493` at `a39f609c`,
+refreshed from `3e45d531` onto current `origin/main` `0447498e` and covering
 VisualizationBridge disabled-waveform, zero-channel, and waveform
 capture-length clamp paths. It remains unpushed and undispatched.
 Additional #493 view progress is queued locally as
