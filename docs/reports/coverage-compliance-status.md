@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-05-05 09:49 PDT
+Last reviewed: 2026-05-05 09:52 PDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`.
@@ -234,8 +234,9 @@ invalid descriptor fail-closed dispatch across CLAP, AU, AUv3, VST3,
 and LV2 loader paths. It remains unpushed and
 undispatched.
 Additional #643 CLI/tools progress is queued locally as
-`local/phase3-fetchcontent-cache-edges-643` at `e5b13514`, refreshed
-from `b056ca59` onto current `origin/main` `0447498e`, covering
+`local/phase3-fetchcontent-cache-edges-643` at `5cbf2d87`, refreshed
+from `b056ca59` to `e5b13514`, then onto current `origin/main`
+`bd036171`, covering
 FetchContent cache fallback entry parsing, live symlink classification,
 file-backed declared-ref parsing, label fallbacks, and symlink removal
 without deleting targets. It remains unpushed and undispatched.
