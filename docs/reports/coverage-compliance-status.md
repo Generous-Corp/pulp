@@ -439,11 +439,12 @@ missing-bundle JSON behavior through real CLI shellout tests. The
 refreshed branch remains unpushed and undispatched; #1287 still points at
 the old remote head until Namespace capacity returns.
 Additional #641 runtime progress is refreshed locally as
-`feature/phase3-named-pipe-coverage-641` at `e1dcf7af`, rebased from the
+`feature/phase3-named-pipe-coverage-641` at `c441dd79`, rebased from the
 paused #1286 remote head `2d59c4c` onto current `origin/main` `0447498e`,
-then refreshed again onto current `origin/main` `50ff5822`, covering
-NamedPipe closed/missing endpoint fail-closed behavior, POSIX FIFO
-round-trip, cleanup, move-ownership, and create-failure paths. The
+then refreshed again onto current `origin/main` `50ff5822`, then
+`b7ec8f08`, covering NamedPipe closed/missing endpoint fail-closed
+behavior, POSIX FIFO round-trip, cleanup, move-ownership, and
+create-failure paths. The
 refreshed branch remains unpushed and undispatched; #1286 still points at
 the old remote head until Namespace capacity returns.
 Additional #643 CLI helper progress is refreshed locally as
