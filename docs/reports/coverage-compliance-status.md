@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-05-05 06:49 PDT
+Last reviewed: 2026-05-05 06:51 PDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`.
@@ -391,16 +391,16 @@ FIFO round-trip, cleanup, move-ownership, and create-failure paths. The
 refreshed branch remains unpushed and undispatched; #1286 still points
 at the old remote head until Namespace capacity returns.
 Additional #643 CLI helper progress is refreshed locally as
-`feature/phase3-create-targets-coverage-643` at `79a3489c`, rebased from
+`feature/phase3-create-targets-coverage-643` at `ad7aebbe`, rebased from
 the paused #1271 remote head `62ca4512` onto current `origin/main`
-`0447498e`, covering create-target optional format suffixes, duplicate
+`50ff5822`, covering create-target optional format suffixes, duplicate
 suppression, and empty standalone app target filtering. The refreshed
 branch remains unpushed and undispatched; #1271 still points at the old
 remote head until Namespace capacity returns.
 Additional #493 CLI package progress is refreshed locally as
-`feature/phase3-package-commands-coverage-493` at `89e30728`, rebased
+`feature/phase3-package-commands-coverage-493` at `5fa859ab`, rebased
 from the paused #1273 remote head `c52cd486` onto current `origin/main`
-`0447498e`, covering package target compatibility warnings when an
+`50ff5822`, covering package target compatibility warnings when an
 installed package does not support a newly added target. The refreshed
 branch remains unpushed and undispatched; #1273 still points at the old
 remote head until Namespace capacity returns.
