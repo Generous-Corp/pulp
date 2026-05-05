@@ -51,20 +51,24 @@ cmake -S . -B build -DPULP_SANITIZER=address
 - CLAP → fetched automatically via CMake FetchContent
 - Skia → pre-built binaries in `external/skia-build/`
 
-**CLI tool:**
+**CLI tool (source tree):**
 ```bash
-./build/tools/cli/pulp build       # configure + build
-./build/tools/cli/pulp test        # run test suite
-./build/tools/cli/pulp validate    # run format validators (auval, clap-validator)
-./build/tools/cli/pulp ship sign --identity "Developer ID Application: ..."
-./build/tools/cli/pulp ship package --version 1.0.0
-./build/tools/cli/pulp ship check  # show signing status
-./build/tools/cli/pulp version             # show SDK and project version
-./build/tools/cli/pulp version bump patch  # bump version
-./build/tools/cli/pulp version check       # verify version consistency
-./build/tools/cli/pulp dev --test          # watch + rebuild + test loop
-./build/tools/cli/pulp build --watch       # watch + rebuild loop
+./build/pulp build       # configure + build
+./build/pulp test        # run test suite
+./build/pulp validate    # run format validators (auval, clap-validator)
+./build/pulp ship sign --identity "Developer ID Application: ..."
+./build/pulp ship package --version 1.0.0
+./build/pulp ship check  # show signing status
+./build/pulp version             # show SDK and project version
+./build/pulp version bump patch  # bump version
+./build/pulp version check       # verify version consistency
+./build/pulp dev --test          # watch + rebuild + test loop
+./build/pulp build --watch       # watch + rebuild loop
 ```
+
+After the Rust CLI cutover, source builds produce `./build/pulp` as
+the user-facing CLI and `./build/tools/cli/pulp-cpp` as the C++
+delegate for commands that still live in C++.
 
 **Note:** All plugin formats build and pass tests, including PulpSynth CLAP.
 

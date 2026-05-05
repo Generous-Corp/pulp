@@ -24,8 +24,8 @@ Help users discover, evaluate, and add third-party audio libraries to their Pulp
 Search the registry for packages matching a need:
 
 ```bash
-./build/tools/cli/pulp search "<query>"
-./build/tools/cli/pulp suggest --description "<what the user needs>"
+./build/pulp search "<query>"
+./build/pulp suggest --description "<what the user needs>"
 ```
 
 Or read the registry directly for full details:
@@ -46,7 +46,7 @@ cat tools/packages/registry.json | python3 -m json.tool
 ## Adding a Package
 
 ```bash
-./build/tools/cli/pulp add <package-id>
+./build/pulp add <package-id>
 ```
 
 This will:

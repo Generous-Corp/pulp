@@ -38,7 +38,7 @@ Run the docs consistency check locally at any time:
 
 ```bash
 # Via the CLI
-./build/tools/cli/pulp docs check
+./build/pulp docs check
 
 # Directly
 tools/check-docs.sh
