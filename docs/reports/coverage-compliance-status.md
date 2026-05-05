@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-05-05 07:21 PDT
+Last reviewed: 2026-05-05 07:24 PDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`.
@@ -109,8 +109,9 @@ plus #493 host tranche `local/phase3-signal-graph-guards-493`
 at `9f33226f`, refreshed from `247be833` onto current `origin/main` `0447498e` and
 covering SignalGraph guard/default behavior. All remain unpushed and
 undispatched. Additional #493 view progress is queued locally as
-`local/phase3-widgets-render-paths-493` at `812f84ce`, refreshed from
-`55a90f79` onto current `origin/main` `0447498e` and covering widget custom-shader
+`local/phase3-widgets-render-paths-493` at `15ca568b`, refreshed from
+`55a90f79` onto current `origin/main` `0447498e`, then refreshed again
+onto current `origin/main` `50ff5822`, and covering widget custom-shader
 fallbacks, minimal render-style branches, and knob/fader/toggle
 interaction edges, plus
 `local/phase3-audio-bridge-edges-493` at `2d00e9ac`, refreshed from
