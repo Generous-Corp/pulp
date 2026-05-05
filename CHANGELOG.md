@@ -8,6 +8,16 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v0760"></a>
+## [0.76.0] - 2026-05-04
+
+- feat(hooks): pre-push detects shipyard-vs-direct push origin (pulp #1406) ([#1406](https://github.com/danielraffel/pulp/pull/1406))
+- fix(view/ios): wire IOSGpuWindowHost::set_idle_callback into CADisplayLink (closes pulp #1402 — iOS slice) ([#1405](https://github.com/danielraffel/pulp/pull/1405))
+- feat(harness): yoga surface adapter + first machine-derived coverage (closes #1391, #1392 partial, #1393 partial, #1394 partial) ([#1395](https://github.com/danielraffel/pulp/pull/1395))
+- fix(view/mac): wire MacGpuWindowHost::set_idle_callback into CVDisplayLink (closes pulp #1387 gap #3) ([#1400](https://github.com/danielraffel/pulp/pull/1400))
+- fix(view/android): pump WidgetBridge idle each vsync (closes pulp #1402 — Android slice) ([#1404](https://github.com/danielraffel/pulp/pull/1404))
+- fix(view): NaN/±Inf defense in CanvasWidget::add_command (closes pulp #1387 gap #2) ([#1389](https://github.com/danielraffel/pulp/pull/1389))
+
 <a id="v0756"></a>
 ## [0.75.6] - 2026-05-04
 
@@ -1250,6 +1260,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.76.0]: https://github.com/danielraffel/pulp/releases/tag/v0.76.0
 [0.75.6]: https://github.com/danielraffel/pulp/releases/tag/v0.75.6
 [0.75.5]: https://github.com/danielraffel/pulp/releases/tag/v0.75.5
 [0.75.4]: https://github.com/danielraffel/pulp/releases/tag/v0.75.4
