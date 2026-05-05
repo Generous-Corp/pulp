@@ -57,13 +57,17 @@ inline std::size_t utf8_codepoint_count(std::string_view text) {
 /// Otherwise return the longest UTF-8 prefix of `text` that — appended
 /// with U+2026 — still fits. Falls back to "…" alone if no prefix fits.
 ///
+/// `available_width <= 0.0f` (zero / collapsed content-box) returns
+/// "…" rather than the original — leaking the full text on a tiny
+/// button defeats the whole point of the feature.
+///
 /// Uses binary search over codepoint indices, so cost is
 /// O(log N · measure_text). The caller is responsible for setting the
 /// canvas's font state before invoking; this helper only measures.
 inline std::string truncate_to_width(canvas::Canvas& canvas,
                                      std::string_view text,
                                      float available_width) {
-    if (available_width <= 0.0f) return std::string(text);
+    if (available_width <= 0.0f) return std::string(kEllipsis);
     if (canvas.measure_text(std::string(text)) <= available_width)
         return std::string(text);
 

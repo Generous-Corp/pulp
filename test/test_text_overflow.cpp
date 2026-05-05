@@ -71,6 +71,18 @@ TEST_CASE("truncate_to_width returns lone ellipsis when ellipsis itself doesn't 
     REQUIRE(out == kEllipsis);
 }
 
+TEST_CASE("truncate_to_width returns ellipsis when available_width is non-positive",
+          "[view][text-overflow][issue-1407]") {
+    // Codex post-merge sweep: a TextButton with width <= 16 px passes 0
+    // (or negative) here after subtracting its 8 px horizontal padding.
+    // Returning the original string would visibly leak the unwrapped
+    // label past the button's rounded background — exactly the symptom
+    // pulp #1407 is meant to eliminate.
+    RecordingCanvas canvas;
+    REQUIRE(truncate_to_width(canvas, "Mid-band attenuation", 0.0f) == kEllipsis);
+    REQUIRE(truncate_to_width(canvas, "anything", -3.0f) == kEllipsis);
+}
+
 TEST_CASE("utf8 helpers count and advance over leading bytes correctly",
           "[view][text-overflow][issue-1407]") {
     REQUIRE(utf8_codepoint_count("hello") == 5);

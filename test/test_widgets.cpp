@@ -356,6 +356,38 @@ TEST_CASE("Label truncates with center and right alignment too",
     }
 }
 
+// pulp #1407 (Codex post-merge sweep) — a decorated ellipsised Label
+// must draw its underline / strikethrough / overline at the truncated
+// width, not the original string's width. Otherwise the line escapes
+// past the visible glyphs into empty bounds.
+TEST_CASE("Label decoration line spans the truncated width when ellipsis truncates",
+          "[view][widget][issue-1407]") {
+    Label label("Mid-band attenuation with high-shelf compensation");
+    label.set_bounds({0, 0, 100, 24});
+    label.set_text_overflow_ellipsis(true);
+    label.set_text_decoration(Label::TextDecoration::underline);
+
+    RecordingCanvas canvas;
+    label.paint(canvas);
+
+    auto fills = commands_of(canvas, DrawCommand::Type::fill_text);
+    REQUIRE(fills.size() == 1);
+    const auto& drawn = fills.front().text;
+    const float drawn_width = canvas.measure_text(drawn);
+
+    auto lines = commands_of(canvas, DrawCommand::Type::stroke_line);
+    REQUIRE(lines.size() == 1);
+    // RecordingCanvas stroke_line stores x0,y0,x1,y1 in f[0..3]; its
+    // span is f[2] - f[0]. The decoration must NOT span the original
+    // (unwrapped) string's width — it must span the drawn-string width.
+    const float decoration_span = lines.front().f[2] - lines.front().f[0];
+    REQUIRE_THAT(decoration_span, WithinAbs(drawn_width, 0.001f));
+    // And that drawn_width is strictly less than what the full text
+    // would have measured — proves we're not falsely passing the test
+    // by accidentally matching the unwrapped width.
+    REQUIRE(drawn_width < canvas.measure_text("Mid-band attenuation with high-shelf compensation"));
+}
+
 TEST_CASE("Label without text-overflow draws full string even if it overflows",
           "[view][widget][issue-1407]") {
     Label label("Mid-band attenuation with high-shelf compensation");
