@@ -102,7 +102,7 @@ Latest local-only progress recorded during the pause: #645 signal
 tranche `local/phase3-linkwitz-riley-edges-645` at `385c51a7`, covering
 Linkwitz-Riley reset/history and cutoff boundary finite-output behavior,
 plus #493 format tranche `local/phase3-validation-harness-json-493` at
-`974cf572`, refreshed from `15fac4aa` onto current `origin/main` and
+`4e753dd3`, refreshed from `974cf572` onto current `origin/main` `0447498e` and
 covering ValidationHarness report metadata and entry JSON escaping,
 plus #493 host tranche `local/phase3-signal-graph-guards-493`
 at `247be833`, refreshed from `adcf5dcf` onto current `origin/main` and
