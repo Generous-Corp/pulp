@@ -200,3 +200,49 @@ The setter trap stores into `_props` BEFORE `_applyProperty` runs, so the displa
 `flexFlow` is content-aware: `flexFlow: 'wrap'` does NOT block the row default (CSS shorthand semantics — omitted `flex-direction` defaults to row), but `flexFlow: 'column wrap'` does. The check uses a `\b(row|column)\b` regex against `_props.flexFlow`.
 
 Not changed by this fix: `createCol` / `createRow` / `createPanel` C++ paths preserve their explicit direction; typed React props in `pulp-react/prop-applier.ts` route directly through bridge setters and don't touch `style`.
+
+### CSS-shim gap fills — translator vs. bridge contract (#1434)
+
+Three classes of "silent drop" recur in `web-compat-style-decl.js`. When
+adding a CSS property, walk all three before declaring done:
+
+1. **Missing `case "X":`** — the property is nowhere in the switch, so
+   `el.style.X = ...` writes to `_props[X]` and never reaches the
+   bridge. Harness verdict: NOT-IMPL. Examples: `backdropFilter`
+   (pulp #1434 batch 3 — bridge `setBackdropFilter` was wired by
+   pulp #1366, the JS route was the only missing piece).
+
+2. **Coalesced shorthand only** — the shorthand routes (e.g.
+   `textDecoration`) but the longhands (`textDecorationLine` /
+   `-Color` / `-Style`) silently no-op. Per-attribute longhands MUST
+   route to per-attribute bridge setters so a previously-set sibling
+   isn't clobbered — the same pattern as the per-side border fix
+   from PR #1166 finding #4. Don't try to coalesce three independent
+   property assignments into a single `setX(id, line, color, style)`
+   call; the JS shim iterates assignments in source order, so the
+   first call would always overwrite the next two with defaults.
+
+3. **Keyword-vs-numeric coercion** — CSS / RN accept both keyword
+   forms (`fontWeight: 'bold'`) and numeric (`fontWeight: 700`).
+   `parseInt('bold')` returns `NaN`, the `|| 400` fallback then
+   silently maps bold → normal. Translate before reaching the
+   bridge. The same translation lives in
+   `packages/pulp-react/src/prop-applier.ts` (`_normalizeFontWeight`)
+   for parity with React-Native style objects — both paths must
+   emit the same numeric weight.
+
+**`__cssProperties__` array gotcha:** properties also need an entry in
+the `__cssProperties__` array near the bottom of
+`web-compat-style-decl.js` for `el.style.X = ...` to set the trap.
+Properties only reachable via `setProperty('x-y', ...)` work without
+this because `setProperty` converts kebab to camel and goes through the
+same `_applyProperty` switch — but JSX consumers writing
+`style.backdropFilter = "blur(10px)"` need both the array entry AND the
+`case` block.
+
+**Verifier harness ground truth:** run
+`python3 tools/harness/verifier.py --surface=css --json` before and
+after a CSS-shim change. The JSON delta tells you which entries
+reclassified between NOT-IMPL → DIVERGE → PASS, and a `drift_count`
+that drops without manual `compat.json` edits is the sign that the
+catalog status was already correct and only the JS route was missing.

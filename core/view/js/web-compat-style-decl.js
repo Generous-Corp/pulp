@@ -296,7 +296,28 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
             break;
         }
         case "fontWeight":
-            setFontWeight(id, parseInt(resolved) || 400);
+            // pulp #1434 (batch 3) — translate CSS keyword forms to
+            // numeric weight before reaching the bridge. Numeric values
+            // ("400", "500") still flow through unchanged. The previous
+            // `parseInt` path returned NaN for keywords, which fell back
+            // to the `|| 400` default — silently mapping `"bold"` to
+            // `normal`. CSS spec values:
+            //   normal  → 400
+            //   bold    → 700
+            //   lighter → 300 (relative to inherited; pulp has no font
+            //                  inheritance cascade today, so a fixed
+            //                  "one step lighter than normal" is the
+            //                  closest safe default)
+            //   bolder  → 700 (likewise: "one step bolder than normal")
+            // Numeric keywords ("100".."900") parseInt cleanly.
+            var fwResolved = String(resolved).trim().toLowerCase();
+            var fwNumeric;
+            if (fwResolved === "normal") fwNumeric = 400;
+            else if (fwResolved === "bold") fwNumeric = 700;
+            else if (fwResolved === "lighter") fwNumeric = 300;
+            else if (fwResolved === "bolder") fwNumeric = 700;
+            else fwNumeric = parseInt(fwResolved, 10) || 400;
+            setFontWeight(id, fwNumeric);
             break;
         case "fontStyle":
             setFontStyle(id, resolved);
@@ -319,6 +340,28 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
             break;
         case "textDecoration":
             setTextDecoration(id, resolved);
+            break;
+        // pulp #1434 (batch 3) — text-decoration longhands. CSS exposes
+        // the shorthand `text-decoration` plus three independent
+        // longhands: `-line` / `-color` / `-style`. Routing each to its
+        // own bridge setter (instead of coalescing into a shorthand
+        // string) means a previously-set sibling longhand is preserved
+        // — matching the per-attribute border-color/width fix from PR
+        // #1166 finding #4. Same pattern, same reasoning.
+        case "textDecorationLine":
+            // Reuse the shorthand setter — same line keyword surface
+            // (underline / line-through / overline / none).
+            setTextDecoration(id, resolved);
+            break;
+        case "textDecorationColor": {
+            var tdc = parseCSSColor(resolved);
+            if (tdc && typeof setTextDecorationColor === "function")
+                setTextDecorationColor(id, tdc);
+            break;
+        }
+        case "textDecorationStyle":
+            if (typeof setTextDecorationStyle === "function")
+                setTextDecorationStyle(id, resolved);
             break;
         case "textOverflow":
             setTextOverflow(id, resolved);
@@ -480,6 +523,29 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
         case "filter":
             setFilter(id, resolved);
             break;
+
+        // pulp #1434 (batch 3) — backdrop-filter route. The bridge
+        // setter is numeric (`setBackdropFilter(id, blur_px)`), so we
+        // parse a `blur(Npx)` substring out of the CSS value. This
+        // matches what `setFilter` already does on the bridge side
+        // (see widget_bridge.cpp::setFilter — same blur-only surface).
+        // Any other filter function is intentionally ignored here;
+        // matching the `unsupportedValues: ["other filter functions"]`
+        // entry in compat.json. `none` / empty / 0 clears the slot.
+        case "backdropFilter": {
+            if (typeof setBackdropFilter !== "function") break;
+            var bdf = String(resolved).trim().toLowerCase();
+            if (bdf === "" || bdf === "none") {
+                setBackdropFilter(id, 0);
+                break;
+            }
+            // Match `blur(Npx)` or `blur(N)` (treat unitless as px).
+            var bdm = bdf.match(/blur\(\s*([\d.]+)\s*(px)?\s*\)/);
+            if (bdm) {
+                setBackdropFilter(id, parseFloat(bdm[1]) || 0);
+            }
+            break;
+        }
 
         // Background gradient
         case "backgroundImage":
@@ -881,7 +947,10 @@ var __cssProperties__ = [
     "paddingInline", "paddingBlock",
     "backgroundColor", "color",
     "fontSize", "fontWeight", "fontStyle", "fontFamily", "letterSpacing", "lineHeight",
-    "textAlign", "textTransform", "textDecoration", "textOverflow", "textShadow",
+    "textAlign", "textTransform",
+    // pulp #1434 (batch 3) — text-decoration shorthand + 3 longhands.
+    "textDecoration", "textDecorationLine", "textDecorationColor", "textDecorationStyle",
+    "textOverflow", "textShadow",
     "whiteSpace", "wordBreak", "overflowWrap", "wordWrap",
     "border", "borderColor", "borderWidth", "borderRadius",
     "borderTop", "borderRight", "borderBottom", "borderLeft",
@@ -896,7 +965,7 @@ var __cssProperties__ = [
     "animation", "animationName", "animationDuration", "animationTimingFunction",
     "animationDelay", "animationIterationCount", "animationDirection", "animationFillMode",
     "position", "top", "right", "bottom", "left", "zIndex", "inset",
-    "boxShadow", "filter", "background", "backgroundImage",
+    "boxShadow", "filter", "backdropFilter", "background", "backgroundImage",
     "backgroundSize", "backgroundPosition", "backgroundRepeat",
     "gridTemplateColumns", "gridTemplateRows", "gridColumn", "gridRow",
     "lineClamp", "webkitLineClamp"

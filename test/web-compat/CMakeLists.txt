@@ -136,6 +136,25 @@ elseif(UNIX)
 endif()
 catch_discover_tests(pulp-test-headless-frame-pump)
 
+# pulp #1434 batch 3 — CSS translator gap fills: backdropFilter,
+# textDecoration{Line,Color,Style}, fontWeight keyword translation.
+# Exercises the JS shim → bridge round trip via
+# document.createElement / appendChild / style.X = ... — same DOM-shim
+# stack-depth profile as the prelude / aspect-ratio targets, so match
+# the 16 MB stack the rest of the web-compat suite uses.
+add_executable(pulp-test-css-translator-gaps-1434 test_css_translator_gaps_1434.cpp)
+target_link_libraries(pulp-test-css-translator-gaps-1434 PRIVATE pulp::view Catch2::Catch2WithMain)
+target_include_directories(pulp-test-css-translator-gaps-1434 PRIVATE ${WEBCOMPAT_INCLUDE_DIR})
+target_compile_definitions(pulp-test-css-translator-gaps-1434 PRIVATE
+    PULP_TEST_SOURCE_DIR="${CMAKE_SOURCE_DIR}/test"
+)
+if(APPLE)
+    target_link_options(pulp-test-css-translator-gaps-1434 PRIVATE -Wl,-stack_size,0x2000000)
+elseif(UNIX)
+    target_link_options(pulp-test-css-translator-gaps-1434 PRIVATE -Wl,-z,stacksize=16777216)
+endif()
+catch_discover_tests(pulp-test-css-translator-gaps-1434)
+
 # #1147 regression: nested-flex popover row template — inline <svg> with
 # width/height attributes must reserve layout space, and a <span> with
 # nested flex children must lay out those children instead of clobbering

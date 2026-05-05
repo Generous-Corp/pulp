@@ -254,21 +254,24 @@
       "tests": [
         "test/web-compat/test_layout_aspect_ratio.cpp"
       ],
-      "notes": "pulp #1434 — three value forms accepted: plain number ('1.5'), 'width / height' ratio ('16/9' -> 1.778), and 'auto' (clears slot). Both 'aspectRatio' (camelCase) and 'aspect-ratio' (kebab-case) work; setProperty auto-converts kebab to camel.",
+      "notes": "pulp #1434 \u2014 three value forms accepted: plain number ('1.5'), 'width / height' ratio ('16/9' -> 1.778), and 'auto' (clears slot). Both 'aspectRatio' (camelCase) and 'aspect-ratio' (kebab-case) work; setProperty auto-converts kebab to camel.",
       "issue": "1434"
     },
     "css/backdropFilter": {
-      "status": "supported",
-      "mapsTo": "setBackdropFilter(id, blur_px)",
+      "status": "partial",
+      "mapsTo": "parses blur(Npx) \u2192 setBackdropFilter(id, blur_px)",
       "supportedValues": [
-        "blur(<px>)"
+        "blur(<px>)",
+        "none"
       ],
       "unsupportedValues": [
         "other filter functions"
       ],
-      "tests": [],
-      "notes": "Blur-only.",
-      "issue": ""
+      "tests": [
+        "test/web-compat/test_css_translator_gaps_1434.cpp [issue-1434-batch-3]"
+      ],
+      "notes": "Blur-only. CSS shim parses the blur(Npx) substring; non-matching filter functions are ignored. None / empty clears the slot.",
+      "issue": "1434"
     },
     "css/backfaceVisibility": {
       "status": "supported",
@@ -1172,19 +1175,21 @@
     },
     "css/fontWeight": {
       "status": "supported",
-      "mapsTo": "parseInt -> setFontWeight(id, n)",
+      "mapsTo": "translate keyword/numeric \u2192 setFontWeight(id, n)",
       "supportedValues": [
-        "100..900 (numeric)"
-      ],
-      "unsupportedValues": [
+        "100..900 (numeric)",
         "normal",
         "bold",
         "lighter",
         "bolder"
       ],
-      "tests": [],
-      "notes": "Keyword 'bold' parses as NaN -> 400. Should map: normal->400, bold->700.",
-      "issue": ""
+      "unsupportedValues": [],
+      "tests": [
+        "test/web-compat/test_css_translator_gaps_1434.cpp [issue-1434-batch-3]",
+        "packages/pulp-react/test/prop-applier-fontweight.test.ts"
+      ],
+      "notes": "Keyword-to-numeric: normal\u2192400, bold\u2192700, lighter\u2192300, bolder\u2192700. Numeric keywords parse unchanged. Mirrored in @pulp/react prop-applier (_normalizeFontWeight).",
+      "issue": "1434"
     },
     "css/gap": {
       "status": "supported",
@@ -2232,41 +2237,50 @@
       "issue": ""
     },
     "css/textDecorationColor": {
-      "status": "missing",
-      "mapsTo": "no branch",
-      "supportedValues": [],
-      "unsupportedValues": [
+      "status": "supported",
+      "mapsTo": "setTextDecorationColor(id, color)",
+      "supportedValues": [
         "any color"
       ],
-      "tests": [],
-      "notes": "Not handled.",
-      "issue": ""
+      "unsupportedValues": [],
+      "tests": [
+        "test/web-compat/test_css_translator_gaps_1434.cpp [issue-1434-batch-3]"
+      ],
+      "notes": "Bridge calls Label::set_text_decoration_color. Painted color falls back to the text color when unset.",
+      "issue": "1434"
     },
     "css/textDecorationLine": {
-      "status": "missing",
-      "mapsTo": "no branch",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "supported",
+      "mapsTo": "setTextDecoration(id, line)",
+      "supportedValues": [
+        "underline",
+        "line-through",
+        "overline",
+        "none"
       ],
-      "tests": [],
-      "notes": "RN distinguishes textDecoration[Line/Style/Color]; we collapse to one.",
-      "issue": ""
+      "unsupportedValues": [],
+      "tests": [
+        "test/web-compat/test_css_translator_gaps_1434.cpp [issue-1434-batch-3]"
+      ],
+      "notes": "Routes to the same Label::TextDecoration setter as the shorthand. Per-attribute longhand preserves any previously-set sibling longhand (color/style). The deprecated 'blink' value is intentionally not supported (matches modern UA behavior).",
+      "issue": "1434"
     },
     "css/textDecorationStyle": {
-      "status": "missing",
-      "mapsTo": "no branch",
-      "supportedValues": [],
-      "unsupportedValues": [
+      "status": "supported",
+      "mapsTo": "setTextDecorationStyle(id, style)",
+      "supportedValues": [
         "solid",
         "double",
         "dotted",
         "dashed",
         "wavy"
       ],
-      "tests": [],
-      "notes": "Not handled.",
-      "issue": ""
+      "unsupportedValues": [],
+      "tests": [
+        "test/web-compat/test_css_translator_gaps_1434.cpp [issue-1434-batch-3]"
+      ],
+      "notes": "CSS shim + bridge accept all 5 spec values and store them on Label. Paint path renders solid regardless today; non-solid styles fall back to solid (spec-allowed).",
+      "issue": "1434"
     },
     "css/textIndent": {
       "status": "missing",
@@ -2674,7 +2688,7 @@
         "packages/pulp-react/test/prop-applier-aspect-ratio.test.ts",
         "test/web-compat/test_layout_aspect_ratio.cpp"
       ],
-      "notes": "pulp #1434 — JSX surface accepts numeric aspectRatio (RN parity per oracle 'kind: number'). String forms ('16/9', 'auto') reach FlexStyle through the CSS shim path (web-compat-style-decl.js), not the @pulp/react TS surface.",
+      "notes": "pulp #1434 \u2014 JSX surface accepts numeric aspectRatio (RN parity per oracle 'kind: number'). String forms ('16/9', 'auto') reach FlexStyle through the CSS shim path (web-compat-style-decl.js), not the @pulp/react TS surface.",
       "issue": "1434"
     },
     "rn/backfaceVisibility": {
@@ -4274,7 +4288,7 @@
       "tests": [
         "test/web-compat/test_layout_aspect_ratio.cpp"
       ],
-      "notes": "pulp #1434 — added FlexStyle.aspect_ratio + Yoga dispatch + bridge setFlex 'aspect_ratio' branch + @pulp/react aspectRatio prop. CSS shim accepts plain numbers ('1.5'), 'width/height' ratios ('16/9'), and 'auto' (clears slot).",
+      "notes": "pulp #1434 \u2014 added FlexStyle.aspect_ratio + Yoga dispatch + bridge setFlex 'aspect_ratio' branch + @pulp/react aspectRatio prop. CSS shim accepts plain numbers ('1.5'), 'width/height' ratios ('16/9'), and 'auto' (clears slot).",
       "issue": "1434"
     },
     "yoga/margin": {

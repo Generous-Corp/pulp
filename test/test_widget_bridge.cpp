@@ -2926,6 +2926,83 @@ TEST_CASE("WidgetBridge setTransform stores affine matrix on the target View",
     REQUIRE_FALSE(v->has_transform_matrix());
 }
 
+// ── pulp #1434 batch 3: text-decoration longhands ────────────────────────────
+
+TEST_CASE("WidgetBridge setTextDecorationColor stores color on Label",
+          "[view][bridge][issue-1434-batch-3]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script("createLabel('lab', 'hello', '')");
+    auto* lab = dynamic_cast<Label*>(bridge.widget("lab"));
+    REQUIRE(lab != nullptr);
+    REQUIRE_FALSE(lab->has_text_decoration_color());
+
+    bridge.load_script("setTextDecorationColor('lab', '#ff0000')");
+    REQUIRE(lab->has_text_decoration_color());
+    REQUIRE(lab->text_decoration_color().r8() == 255);
+    REQUIRE(lab->text_decoration_color().g8() == 0);
+    REQUIRE(lab->text_decoration_color().b8() == 0);
+}
+
+TEST_CASE("WidgetBridge setTextDecorationStyle stores enum on Label",
+          "[view][bridge][issue-1434-batch-3]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script("createLabel('lab', 'hello', '')");
+    auto* lab = dynamic_cast<Label*>(bridge.widget("lab"));
+    REQUIRE(lab != nullptr);
+    // Default is solid.
+    REQUIRE(lab->text_decoration_style() == Label::TextDecorationStyle::solid);
+
+    bridge.load_script("setTextDecorationStyle('lab', 'dashed')");
+    REQUIRE(lab->text_decoration_style() == Label::TextDecorationStyle::dashed);
+
+    bridge.load_script("setTextDecorationStyle('lab', 'wavy')");
+    REQUIRE(lab->text_decoration_style() == Label::TextDecorationStyle::wavy);
+
+    bridge.load_script("setTextDecorationStyle('lab', 'dotted')");
+    REQUIRE(lab->text_decoration_style() == Label::TextDecorationStyle::dotted);
+
+    bridge.load_script("setTextDecorationStyle('lab', 'double')");
+    REQUIRE(lab->text_decoration_style() == Label::TextDecorationStyle::double_);
+
+    // Unknown value → solid (defensive default).
+    bridge.load_script("setTextDecorationStyle('lab', 'wat')");
+    REQUIRE(lab->text_decoration_style() == Label::TextDecorationStyle::solid);
+}
+
+TEST_CASE("WidgetBridge text-decoration longhand setters preserve siblings",
+          "[view][bridge][issue-1434-batch-3]") {
+    // Mirrors the per-attribute border-fix from PR #1166 finding #4 —
+    // setting one longhand must not clobber a previously-set sibling.
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createLabel('lab', 'hello', '');
+        setTextDecoration('lab', 'underline');
+        setTextDecorationColor('lab', '#00ff00');
+        setTextDecorationStyle('lab', 'wavy');
+    )");
+    auto* lab = dynamic_cast<Label*>(bridge.widget("lab"));
+    REQUIRE(lab != nullptr);
+    REQUIRE(lab->text_decoration() == Label::TextDecoration::underline);
+    REQUIRE(lab->has_text_decoration_color());
+    REQUIRE(lab->text_decoration_color().g8() == 255);
+    REQUIRE(lab->text_decoration_style() == Label::TextDecorationStyle::wavy);
+}
+
 // ── issue-926: setBackdropFilter ─────────────────────────────────────────────
 
 TEST_CASE("WidgetBridge setBackdropFilter sets backdrop_blur on the View",

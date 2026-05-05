@@ -113,6 +113,28 @@ function isWheelEvent(eventName: string): boolean {
     return eventName === 'wheel';
 }
 
+// pulp #1434 (batch 3) — translate CSS / React-Native fontWeight keyword
+// values to numeric weights before reaching the bridge. Mirrors the same
+// logic in the JS CSS shim (`web-compat-style-decl.js`). Numeric values
+// (`400`, `'500'`) flow through unchanged. The previous `Number(value)`
+// fallback returned NaN for keywords like `'bold'`, which the bridge
+// then coerced to 400 — silently mapping bold to normal. CSS spec:
+//   normal  → 400
+//   bold    → 700
+//   lighter → 300 (no font cascade in pulp; safe lower default)
+//   bolder  → 700 (no font cascade in pulp; "one step bolder than
+//                  normal" lands on bold)
+function _normalizeFontWeight(value: unknown): number {
+    if (typeof value === 'number') return value;
+    const s = String(value).trim().toLowerCase();
+    if (s === 'normal') return 400;
+    if (s === 'bold') return 700;
+    if (s === 'lighter') return 300;
+    if (s === 'bolder') return 700;
+    const n = Number(s);
+    return Number.isFinite(n) ? n : 400;
+}
+
 function applyEventHandler(id: string, key: string, value: unknown): void {
     if (typeof value !== 'function') return;
     const eventName = eventNameFor(key);
@@ -307,7 +329,7 @@ function applyOne(id: string, type: string, key: string, value: unknown, props?:
         // bundle's chrome layout (especially Label widths under #935 auto-grow)
         // depends on letter-spacing and font-size being set correctly.
         case 'fontSize':        return call('setFontSize', id, value as number);
-        case 'fontWeight':      return call('setFontWeight', id, typeof value === 'number' ? value : Number(value));
+        case 'fontWeight':      return call('setFontWeight', id, _normalizeFontWeight(value));
         case 'fontStyle':       return call('setFontStyle', id, value as string);
         case 'letterSpacing':   return call('setLetterSpacing', id, value as number);
         case 'lineHeight':      return call('setLineHeight', id, value as number);

@@ -184,6 +184,19 @@ export function createMockBridge(): MockBridge {
         'setBorderBottomLeftRadius', 'setBorderBottomRightRadius',
         'setBorderSide', 'setOpacity', 'setVisible', 'setPosition',
         'setText', 'setTextColor', 'setTextAlign',
+        // pulp #1434 batch 3 — typography keyword translation needs the
+        // mock bridge to capture setFontWeight calls so the prop-applier
+        // fontWeight test can assert on the numeric value handed off
+        // post-translation. Same surface for fontSize / fontStyle /
+        // letterSpacing / lineHeight / fontFamily / textTransform /
+        // textDecoration which the prop-applier already dispatches.
+        'setFontSize', 'setFontWeight', 'setFontStyle', 'setFontFamily',
+        'setLetterSpacing', 'setLineHeight',
+        'setTextTransform', 'setTextDecoration',
+        // pulp #1434 batch 3 — text-decoration longhands.
+        'setTextDecorationColor', 'setTextDecorationStyle',
+        // pulp #1366 / #1434 — backdrop-filter (numeric blur arg).
+        'setBackdropFilter',
         'setSpectrumData', 'setWaveformData', 'setMeterLevel', 'setProgress',
         'setValue', 'setTheme', 'layout', 'on', 'registerHover',
         // pulp #1381 — registerPointer arms the bridge's on_pointer_event

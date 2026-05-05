@@ -3257,6 +3257,45 @@ void WidgetBridge::register_api() {
         return choc::value::Value();
     });
 
+    // pulp #1434 (batch 3) — text-decoration longhands. CSS shorthand
+    // `text-decoration` historically routed through `setTextDecoration`
+    // above (line keyword only). The longhand triplet
+    // `text-decoration-line` / `-color` / `-style` reaches each setter
+    // independently so authors can build the decoration up piece-by-piece
+    // without losing previously-set siblings (mirrors the per-attribute
+    // border-fix from PR #1166 finding #4).
+
+    // setTextDecorationColor(id, "#rrggbb"|color-token)
+    engine_.register_function("setTextDecorationColor",
+        [this, parseHexColor](choc::javascript::ArgumentList args) {
+            auto* v = widget(args.get<std::string>(0, ""));
+            auto hex = args.get<std::string>(1, "");
+            if (auto* l = dynamic_cast<Label*>(v); l && !hex.empty()) {
+                l->set_text_decoration_color(parseHexColor(hex));
+            }
+            return choc::value::Value();
+        });
+
+    // setTextDecorationStyle(id, "solid"|"double"|"dotted"|"dashed"|"wavy")
+    // The paint path renders `solid` regardless today, but the value is
+    // stored on the Label so future paint logic can honor it without an
+    // API break — and so the JS shim's longhand → setter route doesn't
+    // silently drop the property (which was the catalog's `missing`
+    // status before this PR).
+    engine_.register_function("setTextDecorationStyle",
+        [this](choc::javascript::ArgumentList args) {
+            auto* v = widget(args.get<std::string>(0, ""));
+            auto s = args.get<std::string>(1, "solid");
+            if (auto* l = dynamic_cast<Label*>(v)) {
+                if (s == "double") l->set_text_decoration_style(Label::TextDecorationStyle::double_);
+                else if (s == "dotted") l->set_text_decoration_style(Label::TextDecorationStyle::dotted);
+                else if (s == "dashed") l->set_text_decoration_style(Label::TextDecorationStyle::dashed);
+                else if (s == "wavy") l->set_text_decoration_style(Label::TextDecorationStyle::wavy);
+                else l->set_text_decoration_style(Label::TextDecorationStyle::solid);
+            }
+            return choc::value::Value();
+        });
+
     // setPosition(id, "static"/"relative"/"absolute"/"fixed") — CSS position
     engine_.register_function("setPosition", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");

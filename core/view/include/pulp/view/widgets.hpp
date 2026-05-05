@@ -79,7 +79,20 @@ public:
     /// CSS text-decoration: none, underline, line-through, overline
     enum class TextDecoration { none, underline, line_through, overline };
     void set_text_decoration(TextDecoration d) { text_decoration_ = d; }
+    TextDecoration text_decoration() const { return text_decoration_; }
     void set_text_decoration_color(canvas::Color c) { decoration_color_ = c; has_decoration_color_ = true; }
+    canvas::Color text_decoration_color() const { return decoration_color_; }
+    bool has_text_decoration_color() const { return has_decoration_color_; }
+
+    /// CSS text-decoration-style: solid, double, dotted, dashed, wavy.
+    /// pulp #1434 — accepted via the JS CSS shim and the bridge so authors
+    /// can express the per-style longhand. Today the paint path always
+    /// renders as `solid`; the value is stored so future paint logic can
+    /// honor it without an API break (matches the spec's optional fallback
+    /// to solid for renderers that don't implement non-solid styles).
+    enum class TextDecorationStyle { solid, double_, dotted, dashed, wavy };
+    void set_text_decoration_style(TextDecorationStyle s) { text_decoration_style_ = s; }
+    TextDecorationStyle text_decoration_style() const { return text_decoration_style_; }
 
     void paint(canvas::Canvas& canvas) override;
 
@@ -111,6 +124,7 @@ private:
     TextDecoration text_decoration_ = TextDecoration::none;
     canvas::Color decoration_color_{};
     bool has_decoration_color_ = false;
+    TextDecorationStyle text_decoration_style_ = TextDecorationStyle::solid;
     canvas::TextDirection text_direction_ = canvas::TextDirection::left_to_right;
     canvas::TextVerticalAlign vertical_align_ = canvas::TextVerticalAlign::top;
     // issue-969: explicit-vs-inherited tracking. Fields keep their default
