@@ -1668,7 +1668,19 @@ void WidgetBridge::register_api() {
         if (!v) return choc::value::Value();
         auto& f = v->flex();
         auto val = args.get<double>(2, 0);
-        if (key == "direction") f.direction = (args.get<std::string>(2,"col")=="row") ? FlexDirection::row : FlexDirection::column;
+        // pulp #1434 (rn batch B) — accept all five flexDirection
+        // spellings: 'row' / 'column' (CSS / RN canonical), 'col' (legacy
+        // pulp shorthand emitted by web-compat-style-decl.js's
+        // setFlex(direction)), plus the reverse modes 'row-reverse' /
+        // 'column-reverse'. Anything else falls through to column
+        // (matches the prior default behavior for unknown values).
+        if (key == "direction") {
+            auto dir = args.get<std::string>(2, "col");
+            if (dir == "row")                 f.direction = FlexDirection::row;
+            else if (dir == "row-reverse")    f.direction = FlexDirection::row_reverse;
+            else if (dir == "column-reverse") f.direction = FlexDirection::column_reverse;
+            else                              f.direction = FlexDirection::column;
+        }
         else if (key == "gap") f.gap = (float)val;
         else if (key == "padding") f.padding = (float)val;
         else if (key == "padding_top") f.padding_top = (float)val;
@@ -1817,30 +1829,42 @@ void WidgetBridge::register_api() {
         // Directional gap
         else if (key == "row_gap") f.row_gap = (float)val;
         else if (key == "column_gap") f.column_gap = (float)val;
-        // Alignment
+        // Alignment.
+        // pulp #1434 (rn batch B) — accept both bare `start`/`end`
+        // (Yoga / pulp short forms) and the `flex-start`/`flex-end`
+        // CSS / RN canonical spellings. The CSS shim's _cssToFlex
+        // already maps the prefixed forms to the bare ones for the
+        // CSS path, but @pulp/react's prop-applier passes RN values
+        // through verbatim — so the bridge has to accept both.
+        // FlexAlign has no `baseline` variant yet (separate gap;
+        // would need YGAlignBaseline plumbing); falls through to
+        // stretch / auto_ as before.
         else if (key == "align_items") {
             auto a = args.get<std::string>(2,"stretch");
-            if (a=="start") f.align_items=FlexAlign::start;
-            else if (a=="center") f.align_items=FlexAlign::center;
-            else if (a=="end") f.align_items=FlexAlign::end;
-            else f.align_items=FlexAlign::stretch;
+            if (a=="start" || a=="flex-start") f.align_items=FlexAlign::start;
+            else if (a=="center")              f.align_items=FlexAlign::center;
+            else if (a=="end" || a=="flex-end") f.align_items=FlexAlign::end;
+            else if (a=="baseline")            f.align_items=FlexAlign::baseline;
+            else                               f.align_items=FlexAlign::stretch;
         }
         else if (key == "align_self") {
             auto a = args.get<std::string>(2,"auto");
-            if (a=="start") f.align_self=FlexAlign::start;
-            else if (a=="center") f.align_self=FlexAlign::center;
-            else if (a=="end") f.align_self=FlexAlign::end;
-            else if (a=="stretch") f.align_self=FlexAlign::stretch;
-            else f.align_self=FlexAlign::auto_;
+            if (a=="start" || a=="flex-start") f.align_self=FlexAlign::start;
+            else if (a=="center")              f.align_self=FlexAlign::center;
+            else if (a=="end" || a=="flex-end") f.align_self=FlexAlign::end;
+            else if (a=="stretch")             f.align_self=FlexAlign::stretch;
+            else if (a=="baseline")            f.align_self=FlexAlign::baseline;
+            else                               f.align_self=FlexAlign::auto_;
         }
         else if (key == "justify_content") {
             auto j = args.get<std::string>(2,"start");
-            if (j=="center") f.justify_content=FlexJustify::center;
-            else if (j=="end") f.justify_content=FlexJustify::end_;
+            if (j=="start" || j=="flex-start")               f.justify_content=FlexJustify::start;
+            else if (j=="center")                            f.justify_content=FlexJustify::center;
+            else if (j=="end" || j=="flex-end")              f.justify_content=FlexJustify::end_;
             else if (j=="space-between"||j=="space_between") f.justify_content=FlexJustify::space_between;
-            else if (j=="space-around"||j=="space_around") f.justify_content=FlexJustify::space_around;
-            else if (j=="space-evenly"||j=="space_evenly") f.justify_content=FlexJustify::space_evenly;
-            else f.justify_content=FlexJustify::start;
+            else if (j=="space-around"||j=="space_around")   f.justify_content=FlexJustify::space_around;
+            else if (j=="space-evenly"||j=="space_evenly")   f.justify_content=FlexJustify::space_evenly;
+            else                                              f.justify_content=FlexJustify::start;
         }
         v->invalidate_layout();  // auto-invalidation on flex property change
         return choc::value::Value();

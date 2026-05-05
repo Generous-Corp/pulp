@@ -96,38 +96,37 @@
       "issue": ""
     },
     "css/alignItems": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "setFlex(id, 'align_items', value)",
       "supportedValues": [
         "flex-start",
         "flex-end",
         "center",
-        "stretch"
+        "stretch",
+        "baseline"
       ],
       "unsupportedValues": [
-        "baseline",
         "first baseline",
         "last baseline"
       ],
       "tests": [],
-      "notes": "FlexAlign enum has {start, center, end, stretch, auto_} -- no baseline support.",
+      "notes": "FlexAlign enum has {start, center, end, stretch, auto_} -- no baseline support. pulp #1434 rn batch B: baseline now wired via FlexAlign::baseline \u2192 YGAlignBaseline.",
       "issue": ""
     },
     "css/alignSelf": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "setFlex(id, 'align_self', value)",
       "supportedValues": [
         "auto",
         "flex-start",
         "flex-end",
         "center",
-        "stretch"
-      ],
-      "unsupportedValues": [
+        "stretch",
         "baseline"
       ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "Same enum as align-items.",
+      "notes": "Same enum as align-items. pulp #1434 rn batch B: baseline wired.",
       "issue": ""
     },
     "css/all": {
@@ -1040,18 +1039,17 @@
       "issue": ""
     },
     "css/flexDirection": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "setFlex(id, 'direction', 'row' | 'col')",
       "supportedValues": [
         "row",
-        "column"
-      ],
-      "unsupportedValues": [
+        "column",
         "row-reverse",
         "column-reverse"
       ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "MAJOR GAP -- Pulp's FlexDirection enum (geometry.hpp:61) only has {row, column}. Reverse modes silently fall through to default 'col'.",
+      "notes": "MAJOR GAP -- Pulp's FlexDirection enum (geometry.hpp:61) only has {row, column}. Reverse modes silently fall through to default 'col'. pulp #1434 rn batch B: row-reverse/column-reverse now route to YGFlexDirectionRowReverse/ColumnReverse via the CSS shim + bridge.",
       "issue": ""
     },
     "css/flexFlow": {
@@ -2707,18 +2705,17 @@
       "status": "supported",
       "mapsTo": "prop-applier.ts -> setFlex(id, 'align_items', value)",
       "supportedValues": [
-        "start",
-        "center",
-        "end",
-        "stretch"
-      ],
-      "unsupportedValues": [
-        "baseline",
         "flex-start",
-        "flex-end (long forms)"
+        "start",
+        "flex-end",
+        "end",
+        "center",
+        "stretch",
+        "baseline"
       ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "Pulp's FlexAlign type takes short forms only ({start, center, end, stretch}). RN documentation uses 'flex-start'/'flex-end' which prop-applier passes through verbatim -- these would not match the C++ enum names. Style decl converts 'flex-start'->'start' but @pulp/react does not.",
+      "notes": "Pulp's FlexAlign type takes short forms only ({start, center, end, stretch}). RN documentation uses 'flex-start'/'flex-end' which prop-applier passes through verbatim -- these would not match the C++ enum names. Style decl converts 'flex-start'->'start' but @pulp/react does not. pulp #1434 rn batch B: bridge now accepts flex-start/flex-end/baseline; @pulp/react prop-applier passes through verbatim.",
       "issue": ""
     },
     "rn/alignSelf": {
@@ -2726,18 +2723,17 @@
       "mapsTo": "prop-applier.ts -> setFlex(id, 'align_self', value)",
       "supportedValues": [
         "auto",
+        "flex-start",
         "start",
-        "center",
+        "flex-end",
         "end",
-        "stretch"
+        "center",
+        "stretch",
+        "baseline"
       ],
-      "unsupportedValues": [
-        "baseline",
-        "flex-start (long form)",
-        "flex-end (long form)"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "Same long-form/short-form mismatch as alignItems.",
+      "notes": "Same long-form/short-form mismatch as alignItems. pulp #1434 rn batch B: same alias support as alignItems.",
       "issue": ""
     },
     "rn/aspectRatio": {
@@ -3255,19 +3251,17 @@
       "issue": ""
     },
     "rn/flexDirection": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "prop-applier 'direction' -> setFlex(id, 'direction', value); but RN says 'row'|'row-reverse'|'column'|'column-reverse'",
       "supportedValues": [
         "row",
-        "col"
-      ],
-      "unsupportedValues": [
         "column",
         "row-reverse",
         "column-reverse"
       ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "ALSO MAJOR -- types.ts FlexDirection = 'row' | 'col'. Pulp uses 'col' instead of 'column' (RN convention) -- porting RN code requires renaming. And no reverse modes.",
+      "notes": "ALSO MAJOR -- types.ts FlexDirection = 'row' | 'col'. Pulp uses 'col' instead of 'column' (RN convention) -- porting RN code requires renaming. And no reverse modes. pulp #1434 rn batch B: column added (RN canonical) alongside the legacy col shorthand; reverse modes route to Yoga.",
       "issue": ""
     },
     "rn/flexGrow": {
@@ -3453,19 +3447,18 @@
       "status": "supported",
       "mapsTo": "setFlex(id, 'justify_content', value)",
       "supportedValues": [
+        "flex-start",
         "start",
-        "center",
+        "flex-end",
         "end",
+        "center",
         "space-between",
         "space-around",
         "space-evenly"
       ],
-      "unsupportedValues": [
-        "flex-start (long form)",
-        "flex-end (long form)"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "Long-form RN names not auto-converted -- same trap as alignItems.",
+      "notes": "Long-form RN names not auto-converted -- same trap as alignItems. pulp #1434 rn batch B: bridge accepts flex-start/flex-end CSS aliases via the same alias table.",
       "issue": ""
     },
     "rn/left": {
@@ -4212,18 +4205,17 @@
   },
   "yoga": {
     "yoga/flexDirection": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "FlexStyle.direction",
       "supportedValues": [
         "row",
-        "column"
-      ],
-      "unsupportedValues": [
+        "column",
         "row-reverse",
         "column-reverse"
       ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "FlexDirection enum at geometry.hpp:61 has only 2 values. Yoga upstream has 4.",
+      "notes": "pulp #1434 rn batch B: FlexDirection extended with row_reverse/column_reverse; yoga_layout.cpp dispatches to YGFlexDirectionRowReverse/ColumnReverse.",
       "issue": ""
     },
     "yoga/flexWrap": {
@@ -4292,40 +4284,42 @@
       ],
       "unsupportedValues": [],
       "tests": [],
-      "notes": "All 6 modes covered. Bridge accepts both CSS spelling (flex-start/flex-end) and Yoga spelling (start/end) — CSS translator _cssToFlex maps the former to the latter.",
+      "notes": "All 6 modes covered. Bridge accepts both CSS spelling (flex-start/flex-end) and Yoga spelling (start/end) \u2014 CSS translator _cssToFlex maps the former to the latter. pulp #1434 rn batch B: confirmed bridge accepts flex-start/flex-end aliases too via @pulp/react prop-applier path.",
       "issue": ""
     },
     "yoga/alignItems": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "FlexStyle.align_items (FlexAlign enum)",
       "supportedValues": [
+        "flex-start",
         "start",
-        "center",
+        "flex-end",
         "end",
-        "stretch"
-      ],
-      "unsupportedValues": [
+        "center",
+        "stretch",
         "baseline"
       ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "Yoga has YGAlignBaseline; Pulp does not.",
+      "notes": "pulp #1434 rn batch B: bridge accepts both CSS (flex-start/flex-end/baseline) and Yoga (start/end) spellings; FlexAlign extended with baseline \u2192 YGAlignBaseline.",
       "issue": ""
     },
     "yoga/alignSelf": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "FlexStyle.align_self (FlexAlign + auto_)",
       "supportedValues": [
         "auto",
+        "flex-start",
         "start",
-        "center",
+        "flex-end",
         "end",
-        "stretch"
-      ],
-      "unsupportedValues": [
+        "center",
+        "stretch",
         "baseline"
       ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "Same as alignItems.",
+      "notes": "pulp #1434 rn batch B: bridge accepts both CSS and Yoga spellings; FlexAlign::baseline added.",
       "issue": ""
     },
     "yoga/alignContent": {

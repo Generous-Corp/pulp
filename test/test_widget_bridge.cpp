@@ -4601,3 +4601,135 @@ TEST_CASE("max_width percent caps the child at the resolved pixel size",
     root.layout_children();
     REQUIRE(child->bounds().width <= 200.5f);
 }
+
+// ── pulp #1434 (rn batch B) — yoga value-aliasing ───────────────────────────
+//
+// The bridge's setFlex value mapper now accepts the CSS / RN canonical
+// spellings (`flex-start` / `flex-end` for align*+justify; `column` /
+// `row-reverse` / `column-reverse` for direction) alongside the Yoga /
+// pulp short forms. The CSS shim's `_cssToFlex` already mapped the
+// prefixed forms to bare ones for the CSS path, but @pulp/react's
+// prop-applier passes RN values through verbatim — so bridge-side
+// acceptance is the cross-surface fix.
+
+TEST_CASE("setFlex direction accepts row / row-reverse / column / column-reverse / col",
+          "[view][bridge][css][issue-1434-rn-batch-b]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 200, 200});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('a', '');
+        createPanel('b', '');
+        createPanel('c', '');
+        createPanel('d', '');
+        createPanel('e', '');
+        setFlex('a', 'direction', 'row');
+        setFlex('b', 'direction', 'row-reverse');
+        setFlex('c', 'direction', 'column');
+        setFlex('d', 'direction', 'column-reverse');
+        setFlex('e', 'direction', 'col');
+    )");
+
+    auto get_dir = [&](const std::string& id) {
+        return bridge.widget(id)->flex().direction;
+    };
+
+    REQUIRE(get_dir("a") == FlexDirection::row);
+    REQUIRE(get_dir("b") == FlexDirection::row_reverse);
+    REQUIRE(get_dir("c") == FlexDirection::column);
+    REQUIRE(get_dir("d") == FlexDirection::column_reverse);
+    REQUIRE(get_dir("e") == FlexDirection::column);  // legacy 'col' alias
+}
+
+TEST_CASE("setFlex align_items accepts start / flex-start / end / flex-end / center / stretch",
+          "[view][bridge][css][issue-1434-rn-batch-b]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('a','');  setFlex('a','align_items','start');
+        createPanel('b','');  setFlex('b','align_items','flex-start');
+        createPanel('c','');  setFlex('c','align_items','end');
+        createPanel('d','');  setFlex('d','align_items','flex-end');
+        createPanel('e','');  setFlex('e','align_items','center');
+        createPanel('f','');  setFlex('f','align_items','stretch');
+    )");
+
+    auto al = [&](const std::string& id) { return bridge.widget(id)->flex().align_items; };
+    REQUIRE(al("a") == FlexAlign::start);
+    REQUIRE(al("b") == FlexAlign::start);
+    REQUIRE(al("c") == FlexAlign::end);
+    REQUIRE(al("d") == FlexAlign::end);
+    REQUIRE(al("e") == FlexAlign::center);
+    REQUIRE(al("f") == FlexAlign::stretch);
+}
+
+TEST_CASE("setFlex align_self accepts the alias set",
+          "[view][bridge][css][issue-1434-rn-batch-b]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('a','');  setFlex('a','align_self','start');
+        createPanel('b','');  setFlex('b','align_self','flex-start');
+        createPanel('c','');  setFlex('c','align_self','end');
+        createPanel('d','');  setFlex('d','align_self','flex-end');
+        createPanel('e','');  setFlex('e','align_self','auto');
+    )");
+    auto sl = [&](const std::string& id) { return bridge.widget(id)->flex().align_self; };
+    REQUIRE(sl("a") == FlexAlign::start);
+    REQUIRE(sl("b") == FlexAlign::start);
+    REQUIRE(sl("c") == FlexAlign::end);
+    REQUIRE(sl("d") == FlexAlign::end);
+    REQUIRE(sl("e") == FlexAlign::auto_);
+}
+
+TEST_CASE("setFlex justify_content accepts the alias set",
+          "[view][bridge][css][issue-1434-rn-batch-b]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('a','');  setFlex('a','justify_content','start');
+        createPanel('b','');  setFlex('b','justify_content','flex-start');
+        createPanel('c','');  setFlex('c','justify_content','end');
+        createPanel('d','');  setFlex('d','justify_content','flex-end');
+        createPanel('e','');  setFlex('e','justify_content','center');
+        createPanel('f','');  setFlex('f','justify_content','space-between');
+    )");
+    auto jc = [&](const std::string& id) { return bridge.widget(id)->flex().justify_content; };
+    REQUIRE(jc("a") == FlexJustify::start);
+    REQUIRE(jc("b") == FlexJustify::start);
+    REQUIRE(jc("c") == FlexJustify::end_);
+    REQUIRE(jc("d") == FlexJustify::end_);
+    REQUIRE(jc("e") == FlexJustify::center);
+    REQUIRE(jc("f") == FlexJustify::space_between);
+}
+
+TEST_CASE("CSSStyleDeclaration forwards flex-direction reverse modes verbatim",
+          "[view][bridge][css][issue-1434-rn-batch-b]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('a','');  createPanel('b','');
+        var sa = new CSSStyleDeclaration({ _id: 'a', _nativeCreated: true });
+        var sb = new CSSStyleDeclaration({ _id: 'b', _nativeCreated: true });
+        sa._applyProperty('flexDirection', 'row-reverse');
+        sb._applyProperty('flexDirection', 'column-reverse');
+    )");
+
+    REQUIRE(bridge.widget("a")->flex().direction == FlexDirection::row_reverse);
+    REQUIRE(bridge.widget("b")->flex().direction == FlexDirection::column_reverse);
+}

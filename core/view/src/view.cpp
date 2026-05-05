@@ -925,7 +925,11 @@ float View::intrinsic_height() const {
     // Containers: sum visible children's heights + gaps (CSS auto height behavior)
     if (children_.empty()) return 0;
 
-    bool is_col = flex_.direction == FlexDirection::column;
+    // pulp #1434 (rn batch B) — column_reverse is still a column-axis
+    // container for the auto-height calculation; only true row
+    // containers skip child-summed height.
+    bool is_col = (flex_.direction == FlexDirection::column ||
+                   flex_.direction == FlexDirection::column_reverse);
     if (!is_col) return 0;  // Row containers don't auto-height from children
 
     float total = 0;
@@ -975,7 +979,10 @@ void View::layout_children() {
     float pl = flex_.padding_left >= 0 ? flex_.padding_left : flex_.padding;
     area = {area.x + pl, area.y + pt, area.width - pl - pr, area.height - pt - pb};
 
-    bool is_row = flex_.direction == FlexDirection::row;
+    // pulp #1434 (rn batch B) — row_reverse is still a row-axis
+    // container; only the visual order of children is reversed.
+    bool is_row = (flex_.direction == FlexDirection::row ||
+                   flex_.direction == FlexDirection::row_reverse);
     float main_size = is_row ? area.width : area.height;
     float cross_size = is_row ? area.height : area.width;
     float gap = flex_.effective_gap(flex_.direction);
@@ -1131,6 +1138,13 @@ void View::layout_children() {
                 break;
             case FlexAlign::end:
                 cross_pos += avail_cross - l.cross_size;
+                break;
+            // pulp #1434 (rn batch B) — baseline alignment in the manual
+            // (non-Yoga) layout fallback approximates as start since
+            // glyph baseline metrics aren't surfaced here. Yoga's
+            // YGAlignBaseline path is the correct rendering when
+            // PULP_HAS_YOGA is on (the default).
+            case FlexAlign::baseline:
                 break;
         }
 

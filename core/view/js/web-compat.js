@@ -1098,7 +1098,14 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
             else if (resolved === "grid") { /* grid mode set via gridTemplateColumns */ }
             break;
         case "flexDirection":
-            setFlex(id, "direction", resolved === "row" ? "row" : "col");
+            // pulp #1434 (rn batch B) — forward all four CSS values
+            // verbatim so the bridge can route to YGFlexDirectionRow /
+            // RowReverse / Column / ColumnReverse.
+            setFlex(id, "direction",
+                resolved === "row" ? "row" :
+                resolved === "row-reverse" ? "row-reverse" :
+                resolved === "column-reverse" ? "column-reverse" :
+                "col");
             break;
         case "flexWrap":
             setFlex(id, "flex_wrap", resolved === "wrap" ? 1 : 0);

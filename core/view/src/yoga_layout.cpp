@@ -10,19 +10,30 @@
 
 namespace pulp::view {
 
-// Map Pulp FlexDirection to Yoga
+// Map Pulp FlexDirection to Yoga.
+// pulp #1434 (rn batch B) — row_reverse / column_reverse now route
+// to YGFlexDirectionRowReverse / ColumnReverse. Before, the ternary
+// silently mapped them to YGFlexDirectionColumn (the false branch).
 static YGFlexDirection to_yg_direction(FlexDirection d) {
-    return d == FlexDirection::row ? YGFlexDirectionRow : YGFlexDirectionColumn;
+    switch (d) {
+        case FlexDirection::row:            return YGFlexDirectionRow;
+        case FlexDirection::row_reverse:    return YGFlexDirectionRowReverse;
+        case FlexDirection::column:         return YGFlexDirectionColumn;
+        case FlexDirection::column_reverse: return YGFlexDirectionColumnReverse;
+    }
+    return YGFlexDirectionColumn;
 }
 
-// Map Pulp FlexAlign to Yoga
+// Map Pulp FlexAlign to Yoga.
+// pulp #1434 (rn batch B) — `baseline` added.
 static YGAlign to_yg_align(FlexAlign a) {
     switch (a) {
-        case FlexAlign::start:   return YGAlignFlexStart;
-        case FlexAlign::center:  return YGAlignCenter;
-        case FlexAlign::end:     return YGAlignFlexEnd;
-        case FlexAlign::stretch: return YGAlignStretch;
-        case FlexAlign::auto_:   return YGAlignAuto;
+        case FlexAlign::start:    return YGAlignFlexStart;
+        case FlexAlign::center:   return YGAlignCenter;
+        case FlexAlign::end:      return YGAlignFlexEnd;
+        case FlexAlign::stretch:  return YGAlignStretch;
+        case FlexAlign::auto_:    return YGAlignAuto;
+        case FlexAlign::baseline: return YGAlignBaseline;
         default: return YGAlignStretch;
     }
 }

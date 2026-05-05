@@ -58,11 +58,18 @@ struct Rect {
 // Layout mode
 enum class LayoutMode { flex, grid };
 
-// Flex layout direction
-enum class FlexDirection { row, column };
+// Flex layout direction.
+// pulp #1434 (rn batch B) — added row_reverse / column_reverse so RN
+// exports that emit `flexDirection: 'row-reverse' | 'column-reverse'`
+// route to YGFlexDirectionRowReverse / ColumnReverse instead of falling
+// through to YGFlexDirectionColumn.
+enum class FlexDirection { row, column, row_reverse, column_reverse };
 
-// Flex alignment (auto_ = inherit from parent's align_items)
-enum class FlexAlign { start, center, end, stretch, auto_ };
+// Flex alignment (auto_ = inherit from parent's align_items).
+// pulp #1434 (rn batch B) — added `baseline`. Yoga has YGAlignBaseline
+// natively; before this batch, RN exports emitting
+// `alignItems: 'baseline'` silently fell through to stretch.
+enum class FlexAlign { start, center, end, stretch, auto_, baseline };
 
 /// Justify content modes (main axis space distribution)
 enum class FlexJustify {
@@ -214,9 +221,13 @@ struct FlexStyle {
     float margin_b() const { return margin_bottom >= 0 ? margin_bottom : margin; }
     float margin_l() const { return margin_left >= 0 ? margin_left : margin; }
 
-    // Helper: resolve directional gap
+    // Helper: resolve directional gap.
+    // pulp #1434 (rn batch B) — row_reverse counts as a row-axis
+    // container; the visual reversal doesn't change which gap edge
+    // (column-gap) sits between siblings.
     float effective_gap(FlexDirection dir) const {
-        if (dir == FlexDirection::row) return column_gap >= 0 ? column_gap : gap;
+        if (dir == FlexDirection::row || dir == FlexDirection::row_reverse)
+            return column_gap >= 0 ? column_gap : gap;
         return row_gap >= 0 ? row_gap : gap;
     }
 
