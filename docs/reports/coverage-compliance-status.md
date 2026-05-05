@@ -471,12 +471,12 @@ bundled classname extraction through font-face-leading styles. The
 refreshed branch remains unpushed and undispatched; #1269 still points
 at the old remote head until Namespace capacity returns.
 Additional #640 audio progress is refreshed locally as
-`feature/phase3-mmap-reader-extra-640` at `815ab8b3`, rebased from the
+`feature/phase3-mmap-reader-extra-640` at `3698bbe7`, rebased from the
 paused #1280 remote head `ed2ba7bf` onto current `origin/main`
-`50ff5822`, covering `MemoryMappedAudioReader` unsupported-file
-fail-closed and EOF no-copy behavior. The refreshed branch remains
-unpushed and undispatched; #1280 still points at the old remote head
-until Namespace capacity returns.
+`50ff5822`, then onto current `origin/main` `b7ec8f08`, covering
+`MemoryMappedAudioReader` unsupported-file fail-closed and EOF no-copy
+behavior. The refreshed branch remains unpushed and undispatched; #1280
+still points at the old remote head until Namespace capacity returns.
 Additional #493 view progress is refreshed locally as
 `feature/view-text-editor-coverage-493-next` at `40606e1d`, rebased from
 the paused #1282 remote head `03e5e3cd` onto current `origin/main`
