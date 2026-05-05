@@ -183,6 +183,10 @@ export function createMockBridge(): MockBridge {
         'setBorderTopLeftRadius', 'setBorderTopRightRadius',
         'setBorderBottomLeftRadius', 'setBorderBottomRightRadius',
         'setBorderSide', 'setOpacity', 'setVisible', 'setPosition',
+        // pulp #1434 batch 6 — CSS positional setters (top/right/bottom/left)
+        // need to be capturable so the percent-string forwarding test
+        // can assert on the bridge call shape.
+        'setTop', 'setRight', 'setBottom', 'setLeft', 'setZIndex',
         'setText', 'setTextColor', 'setTextAlign',
         // pulp #1434 batch 3 — typography keyword translation needs the
         // mock bridge to capture setFontWeight calls so the prop-applier

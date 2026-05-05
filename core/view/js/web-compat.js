@@ -1384,10 +1384,28 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
         case "position":
             setPosition(id, resolved);
             break;
-        case "top": { var tv = parseCSSLength(resolved); if (tv) setTop(id, tv.value); break; }
-        case "right": { var rv = parseCSSLength(resolved); if (rv) setRight(id, rv.value); break; }
-        case "bottom": { var bv = parseCSSLength(resolved); if (bv) setBottom(id, bv.value); break; }
-        case "left": { var lv = parseCSSLength(resolved); if (lv) setLeft(id, lv.value); break; }
+        // pulp #1434 batch 6 — top/right/bottom/left forward percent
+        // values verbatim so the bridge can route to Yoga's percent API.
+        case "top": {
+            var tv = parseCSSLength(resolved); if (!tv) break;
+            if (tv.unit === "%") setTop(id, tv.value + "%"); else setTop(id, tv.value);
+            break;
+        }
+        case "right": {
+            var rv = parseCSSLength(resolved); if (!rv) break;
+            if (rv.unit === "%") setRight(id, rv.value + "%"); else setRight(id, rv.value);
+            break;
+        }
+        case "bottom": {
+            var bv = parseCSSLength(resolved); if (!bv) break;
+            if (bv.unit === "%") setBottom(id, bv.value + "%"); else setBottom(id, bv.value);
+            break;
+        }
+        case "left": {
+            var lv = parseCSSLength(resolved); if (!lv) break;
+            if (lv.unit === "%") setLeft(id, lv.value + "%"); else setLeft(id, lv.value);
+            break;
+        }
 
         // z-index
         case "zIndex":

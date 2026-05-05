@@ -334,11 +334,20 @@ function applyOne(id: string, type: string, key: string, value: unknown, props?:
 
         // CSS-style positioning (pulp #779 follow-up; matches setPosition
         // + setTop/setLeft/setRight/setBottom on the bridge).
+        // pulp #1434 batch 6 — top/right/bottom/left accept either a number
+        // ('50' → px) or a percent string ('50%' → percent of parent).
+        // Mirrors PR #1426 (width/height percent) for the four View
+        // positional fields. Figma absolute-positioned overlays, v0.dev
+        // hero anchors, and Claude Design sticky elements all emit
+        // `top:'50%'` etc. routinely; without percent forwarding the
+        // layout collapses to numeric 0 silently. The bridge inspects
+        // arg index 1 as a string, detects the '%' suffix, and routes to
+        // Yoga's YGNodeStyleSetPositionPercent path via View::top_unit_.
         case 'position':     return call('setPosition', id, value as string);
-        case 'top':          return call('setTop', id, value as number);
-        case 'left':         return call('setLeft', id, value as number);
-        case 'right':        return call('setRight', id, value as number);
-        case 'bottom':       return call('setBottom', id, value as number);
+        case 'top':          return call('setTop', id, value as number | string);
+        case 'left':         return call('setLeft', id, value as number | string);
+        case 'right':        return call('setRight', id, value as number | string);
+        case 'bottom':       return call('setBottom', id, value as number | string);
         case 'zIndex':       return call('setZIndex', id, value as number);
 
         // Text

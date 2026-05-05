@@ -148,10 +148,40 @@ static void apply_position_style(YGNodeRef node, const View& view) {
             break;
     }
 
-    if (view.has_top()) YGNodeStyleSetPosition(node, YGEdgeTop, view.top());
-    if (view.has_right()) YGNodeStyleSetPosition(node, YGEdgeRight, view.right());
-    if (view.has_bottom()) YGNodeStyleSetPosition(node, YGEdgeBottom, view.bottom());
-    if (view.has_left()) YGNodeStyleSetPosition(node, YGEdgeLeft, view.left());
+    // pulp #1434 batch 6 — dispatch on per-edge unit so top/right/bottom/left
+    // accept percent values. The bridge's setTop / setRight / setBottom /
+    // setLeft path populates View::top_unit_ / etc. with the unit info; this
+    // adapter routes percent values to Yoga's native percent API instead of
+    // treating "50%" as 50 px. Mirrors the FlexStyle::dim_width path from
+    // pulp #1423 (PR #1426) for the View positional fields.
+    if (view.has_top()) {
+        if (view.top_unit() == DimensionUnit::percent) {
+            YGNodeStyleSetPositionPercent(node, YGEdgeTop, view.top());
+        } else {
+            YGNodeStyleSetPosition(node, YGEdgeTop, view.top());
+        }
+    }
+    if (view.has_right()) {
+        if (view.right_unit() == DimensionUnit::percent) {
+            YGNodeStyleSetPositionPercent(node, YGEdgeRight, view.right());
+        } else {
+            YGNodeStyleSetPosition(node, YGEdgeRight, view.right());
+        }
+    }
+    if (view.has_bottom()) {
+        if (view.bottom_unit() == DimensionUnit::percent) {
+            YGNodeStyleSetPositionPercent(node, YGEdgeBottom, view.bottom());
+        } else {
+            YGNodeStyleSetPosition(node, YGEdgeBottom, view.bottom());
+        }
+    }
+    if (view.has_left()) {
+        if (view.left_unit() == DimensionUnit::percent) {
+            YGNodeStyleSetPositionPercent(node, YGEdgeLeft, view.left());
+        } else {
+            YGNodeStyleSetPosition(node, YGEdgeLeft, view.left());
+        }
+    }
 }
 
 // Measure callback for widgets with intrinsic size

@@ -27,6 +27,15 @@ Spec walk:
 
 ## Recently changed
 
+- **2026-05-05 (pulp #1434 batch 6)** — `rn/top`, `rn/right`,
+  `rn/bottom`, `rn/left` now accept percent strings (`'50%'`)
+  alongside numeric pixel values. The `@pulp/react` prop-applier
+  forwards the value verbatim to `setTop` / `setRight` / `setBottom` /
+  `setLeft`; the bridge detects the `'%'` suffix and routes through
+  Yoga's `YGNodeStyleSetPositionPercent`. Mirrors PR #1426
+  (`width`/`height` percent) for the View positional fields. RN code
+  using `style={{top:'50%'}}` for absolute-positioned overlays now
+  ports verbatim. drift_count: 32 → 31.
 - **2026-05-05 (pulp #1434 batch 4)** — RN shorthand aliases
   `rn/marginHorizontal`, `rn/marginVertical`, `rn/paddingHorizontal`,
   `rn/paddingVertical` are now surfaced at the `@pulp/react` JSX

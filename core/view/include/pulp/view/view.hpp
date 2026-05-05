@@ -471,14 +471,28 @@ public:
     void set_position(Position p) { position_ = p; }
     Position position() const { return position_; }
 
-    void set_top(float v) { top_ = v; has_top_ = true; }
-    void set_right(float v) { right_ = v; has_right_ = true; }
-    void set_bottom(float v) { bottom_ = v; has_bottom_ = true; }
-    void set_left(float v) { left_ = v; has_left_ = true; }
+    // pulp #1434 batch 6 — top/right/bottom/left accept either a px
+     // value (the historical path, single-arg setter) or a percent value
+     // (new, two-arg setter that records the unit). The Yoga adapter
+     // dispatches on `top_unit_` / etc. and routes percent values through
+     // YGNodeStyleSetPositionPercent. Mirrors the FlexStyle::dim_width
+     // pattern from pulp #1423 (PR #1426) for the View positional fields.
+    void set_top(float v) { top_ = v; has_top_ = true; top_unit_ = DimensionUnit::px; }
+    void set_right(float v) { right_ = v; has_right_ = true; right_unit_ = DimensionUnit::px; }
+    void set_bottom(float v) { bottom_ = v; has_bottom_ = true; bottom_unit_ = DimensionUnit::px; }
+    void set_left(float v) { left_ = v; has_left_ = true; left_unit_ = DimensionUnit::px; }
+    void set_top(float v, DimensionUnit unit) { top_ = v; has_top_ = true; top_unit_ = unit; }
+    void set_right(float v, DimensionUnit unit) { right_ = v; has_right_ = true; right_unit_ = unit; }
+    void set_bottom(float v, DimensionUnit unit) { bottom_ = v; has_bottom_ = true; bottom_unit_ = unit; }
+    void set_left(float v, DimensionUnit unit) { left_ = v; has_left_ = true; left_unit_ = unit; }
     float top() const { return top_; }
     float right() const { return right_; }
     float bottom() const { return bottom_; }
     float left() const { return left_; }
+    DimensionUnit top_unit() const { return top_unit_; }
+    DimensionUnit right_unit() const { return right_unit_; }
+    DimensionUnit bottom_unit() const { return bottom_unit_; }
+    DimensionUnit left_unit() const { return left_unit_; }
     bool has_top() const { return has_top_; }
     bool has_right() const { return has_right_; }
     bool has_bottom() const { return has_bottom_; }
@@ -677,6 +691,14 @@ private:
     Position position_ = Position::static_;
     float top_ = 0, right_ = 0, bottom_ = 0, left_ = 0;
     bool has_top_ = false, has_right_ = false, has_bottom_ = false, has_left_ = false;
+    // pulp #1434 batch 6 — per-edge inset unit. `px` is the historical
+    // default; `percent` flows through to YGNodeStyleSetPositionPercent
+    // in yoga_layout.cpp. Other DimensionUnit values (vw/vh/etc.) round
+    // down to px at the bridge boundary today (no consumer demand).
+    DimensionUnit top_unit_ = DimensionUnit::px;
+    DimensionUnit right_unit_ = DimensionUnit::px;
+    DimensionUnit bottom_unit_ = DimensionUnit::px;
+    DimensionUnit left_unit_ = DimensionUnit::px;
     int z_index_ = 0;
     // pulp #972 — default is `visible` to match CSS. Pulp previously
     // defaulted to `hidden`, which clipped absolutely-positioned children
