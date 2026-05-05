@@ -11,7 +11,15 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 <a id="v0780"></a>
 ## [0.78.0] - 2026-05-05
 
-- feat(cli): make the Rust CLI the default `pulp` binary and ship the C++ delegate as `pulp-cpp` in release artifacts.
+- feature/phase8 default flip prepped ([#1450](https://github.com/danielraffel/pulp/pull/1450))
+- fix(rn): wire display: flex / none to existing visible/yoga path (refs pulp #1434) ([#1456](https://github.com/danielraffel/pulp/pull/1456))
+- fix(rn): forward percent strings + 'auto' for width/height/min/max/flexBasis (rn Batch C, refs pulp #1434) ([#1455](https://github.com/danielraffel/pulp/pull/1455))
+- fix(view/css): yoga top/right/bottom/left percent (closes pulp #1434 batch 6) ([#1451](https://github.com/danielraffel/pulp/pull/1451))
+- fix(harness/rn): catalog hygiene for stale NOT-IMPL entries (refs pulp #1434) ([#1449](https://github.com/danielraffel/pulp/pull/1449))
+- feat(canvas2d): sticky shadow cluster — color/blur/offsetX/offsetY (closes pulp #1434 batch 7) ([#1446](https://github.com/danielraffel/pulp/pull/1446))
+- validate/phase8 integrated ([#1005](https://github.com/danielraffel/pulp/pull/1005))
+- fix(view/css): yoga RN-alias fan-out (closes pulp #1434 batch 4) ([#1445](https://github.com/danielraffel/pulp/pull/1445))
+- fix(view/css): wire backdropFilter, textDecoration longhands, and fontWeight keywords (pulp #1434 batch 3) ([#1444](https://github.com/danielraffel/pulp/pull/1444))
 
 <a id="v0770"></a>
 ## [0.77.0] - 2026-05-05
@@ -1285,6 +1293,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.78.0]: https://github.com/danielraffel/pulp/releases/tag/v0.78.0
 [0.77.0]: https://github.com/danielraffel/pulp/releases/tag/v0.77.0
 [0.76.0]: https://github.com/danielraffel/pulp/releases/tag/v0.76.0
 [0.75.6]: https://github.com/danielraffel/pulp/releases/tag/v0.75.6
