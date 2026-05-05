@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-05-04 23:10 PDT
+Last reviewed: 2026-05-04 23:17 PDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`.
@@ -123,10 +123,11 @@ clamp, dry-mix, and reset paths, plus `local/phase3-oscillator-edges-645`
 at `8f51cba4`, covering Oscillator reset, phase wrap, getter, and
 PolyBLEP edge paths. All four remain unpushed and undispatched.
 Additional #640 audio progress is queued locally as
-`local/phase3-audio-focus-dispatch-640` at `3c36343d`, covering
-AudioFocusRegistry inactive-listener skip behavior when a listener is
-removed or the registry is reset during dispatch. It remains unpushed
-and undispatched. Additional #643 tools progress is queued locally as
+`local/phase3-audio-focus-dispatch-640` at `1ab6e24b`, refreshed from
+`3c36343d` onto current `origin/main`, covering AudioFocusRegistry
+inactive-listener skip behavior when a listener is removed or the
+registry is reset during dispatch. It remains unpushed and
+undispatched. Additional #643 tools progress is queued locally as
 `local/phase3-audio-tools-model-store-643` at `a88ddfe8`, covering
 `tools/audio` model registry URL resolution, legacy/malformed model
 metadata, model/bundle JSON serialization/defaults, and excerpt-find
