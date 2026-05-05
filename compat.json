@@ -2780,58 +2780,82 @@
       "issue": ""
     },
     "rn/borderBottomColor": {
-      "status": "missing",
-      "mapsTo": "Bridge has setBorderBottomColor -- not surfaced.",
-      "supportedValues": [],
+      "status": "partial",
+      "mapsTo": "@pulp/react prop-applier dispatches `borderBottomColor` to `setBorderBottomColor(id, color)` (prop-applier.ts:310-313 since #1396).",
+      "supportedValues": [
+        "#hex",
+        "rgb()",
+        "rgba()",
+        "hsl()",
+        "hsla()",
+        "named colors"
+      ],
       "unsupportedValues": [
-        "color"
+        "lab()/lch()/oklab()/oklch() (modern color spaces)"
       ],
       "tests": [],
-      "notes": "",
+      "notes": "pulp #1434: catalog hygiene \u2014 flipped missing \u2192 supported, claim the wired surface (#1396 was the wiring PR).",
       "issue": ""
     },
     "rn/borderBottomLeftRadius": {
-      "status": "missing",
-      "mapsTo": "no branch",
-      "supportedValues": [],
+      "status": "partial",
+      "mapsTo": "@pulp/react prop-applier dispatches `borderBottomLeftRadius` to `setBorderBottomLeftRadius(id, n)` (prop-applier.ts:318-321 since #1396).",
+      "supportedValues": [
+        "number (px)"
+      ],
       "unsupportedValues": [
-        "number"
+        "%",
+        "elliptical x/y"
       ],
       "tests": [],
-      "notes": "Same.",
+      "notes": "Same. pulp #1434: catalog hygiene \u2014 flipped missing \u2192 supported.",
       "issue": ""
     },
     "rn/borderBottomRightRadius": {
-      "status": "missing",
-      "mapsTo": "no branch",
-      "supportedValues": [],
+      "status": "partial",
+      "mapsTo": "@pulp/react prop-applier dispatches `borderBottomRightRadius` to `setBorderBottomRightRadius(id, n)` (prop-applier.ts:318-321 since #1396).",
+      "supportedValues": [
+        "number (px)"
+      ],
       "unsupportedValues": [
-        "number"
+        "%",
+        "elliptical x/y"
       ],
       "tests": [],
-      "notes": "Same.",
+      "notes": "Same. pulp #1434: catalog hygiene \u2014 flipped missing \u2192 supported.",
       "issue": ""
     },
     "rn/borderBottomWidth": {
-      "status": "missing",
-      "mapsTo": "no prop-applier case (border is handled as { color, width, radius } object)",
-      "supportedValues": [],
+      "status": "partial",
+      "mapsTo": "@pulp/react prop-applier dispatches `borderBottomWidth` to `setBorderBottomWidth(id, n)` (prop-applier.ts:314-317 since #1396).",
+      "supportedValues": [
+        "number (px)"
+      ],
       "unsupportedValues": [
-        "number"
+        "%",
+        "em",
+        "rem"
       ],
       "tests": [],
-      "notes": "RN prop is flat top-level, Pulp uses object shape. Convert: <View style={{borderBottomWidth: 2}} /> -> <View borderBottom={{color:'#000', width:2}} />. Awkward for RN ports.",
+      "notes": "RN prop is flat top-level, Pulp uses object shape. Convert: <View style={{borderBottomWidth: 2}} /> -> <View borderBottom={{color:'#000', width:2}} />. Awkward for RN ports. pulp #1434: catalog hygiene \u2014 flipped missing \u2192 supported.",
       "issue": ""
     },
     "rn/borderColor": {
-      "status": "missing",
-      "mapsTo": "Bridge has setBorderColor -- not surfaced as flat prop.",
-      "supportedValues": [],
+      "status": "partial",
+      "mapsTo": "@pulp/react prop-applier dispatches `borderColor` to `setBorderColor(id, ...)` (prop-applier.ts:300-302).",
+      "supportedValues": [
+        "#hex",
+        "rgb()",
+        "rgba()",
+        "hsl()",
+        "hsla()",
+        "named colors"
+      ],
       "unsupportedValues": [
-        "color"
+        "lab()/lch()/oklab()/oklch() (modern color spaces)"
       ],
       "tests": [],
-      "notes": "",
+      "notes": "pulp #1434: catalog hygiene \u2014 flipped missing \u2192 supported.",
       "issue": ""
     },
     "rn/borderCurve": {
@@ -2858,58 +2882,83 @@
       "issue": ""
     },
     "rn/borderLeftColor": {
-      "status": "missing",
-      "mapsTo": "Bridge has setBorderLeftColor -- not surfaced.",
-      "supportedValues": [],
+      "status": "partial",
+      "mapsTo": "@pulp/react prop-applier dispatches `borderLeftColor` to `setBorderLeftColor(id, color)` (prop-applier.ts:310-313 since #1396).",
+      "supportedValues": [
+        "#hex",
+        "rgb()",
+        "rgba()",
+        "hsl()",
+        "hsla()",
+        "named colors"
+      ],
       "unsupportedValues": [
-        "color"
+        "lab()/lch()/oklab()/oklch() (modern color spaces)"
       ],
       "tests": [],
-      "notes": "",
+      "notes": "pulp #1434: catalog hygiene \u2014 flipped missing \u2192 supported, claim the wired surface (#1396 was the wiring PR).",
       "issue": ""
     },
     "rn/borderLeftWidth": {
-      "status": "missing",
-      "mapsTo": "no branch",
-      "supportedValues": [],
+      "status": "partial",
+      "mapsTo": "@pulp/react prop-applier dispatches `borderLeftWidth` to `setBorderLeftWidth(id, n)` (prop-applier.ts:314-317 since #1396).",
+      "supportedValues": [
+        "number (px)"
+      ],
       "unsupportedValues": [
-        "number"
+        "%",
+        "em",
+        "rem"
       ],
       "tests": [],
-      "notes": "Same as borderBottomWidth.",
+      "notes": "Same as borderBottomWidth. pulp #1434: catalog hygiene \u2014 flipped missing \u2192 supported.",
       "issue": ""
     },
     "rn/borderRadius": {
-      "status": "missing",
-      "mapsTo": "Bridge has setBorderRadius, but @pulp/react does not surface it as a flat prop.",
-      "supportedValues": [],
+      "status": "partial",
+      "mapsTo": "@pulp/react prop-applier dispatches `borderRadius` to `setBorderRadius(id, ...)` (prop-applier.ts:300-302).",
+      "supportedValues": [
+        "number (px)"
+      ],
       "unsupportedValues": [
-        "number"
+        "%",
+        "elliptical x/y"
       ],
       "tests": [],
-      "notes": "Workaround: <View border={{color:'transparent', width:0, radius:R}} />.",
+      "notes": "Workaround: <View border={{color:'transparent', width:0, radius:R}} />. pulp #1434: catalog hygiene \u2014 flipped missing \u2192 supported.",
       "issue": ""
     },
     "rn/borderRightColor": {
-      "status": "missing",
-      "mapsTo": "Bridge has setBorderRightColor -- not surfaced.",
-      "supportedValues": [],
+      "status": "partial",
+      "mapsTo": "@pulp/react prop-applier dispatches `borderRightColor` to `setBorderRightColor(id, color)` (prop-applier.ts:310-313 since #1396).",
+      "supportedValues": [
+        "#hex",
+        "rgb()",
+        "rgba()",
+        "hsl()",
+        "hsla()",
+        "named colors"
+      ],
       "unsupportedValues": [
-        "color"
+        "lab()/lch()/oklab()/oklch() (modern color spaces)"
       ],
       "tests": [],
-      "notes": "",
+      "notes": "pulp #1434: catalog hygiene \u2014 flipped missing \u2192 supported, claim the wired surface (#1396 was the wiring PR).",
       "issue": ""
     },
     "rn/borderRightWidth": {
-      "status": "missing",
-      "mapsTo": "no branch",
-      "supportedValues": [],
+      "status": "partial",
+      "mapsTo": "@pulp/react prop-applier dispatches `borderRightWidth` to `setBorderRightWidth(id, n)` (prop-applier.ts:314-317 since #1396).",
+      "supportedValues": [
+        "number (px)"
+      ],
       "unsupportedValues": [
-        "number"
+        "%",
+        "em",
+        "rem"
       ],
       "tests": [],
-      "notes": "Same.",
+      "notes": "Same. pulp #1434: catalog hygiene \u2014 flipped missing \u2192 supported.",
       "issue": ""
     },
     "rn/borderStartWidth": {
@@ -2937,58 +2986,79 @@
       "issue": ""
     },
     "rn/borderTopColor": {
-      "status": "missing",
-      "mapsTo": "Bridge has setBorderTopColor -- not surfaced.",
-      "supportedValues": [],
+      "status": "partial",
+      "mapsTo": "@pulp/react prop-applier dispatches `borderTopColor` to `setBorderTopColor(id, color)` (prop-applier.ts:310-313 since #1396).",
+      "supportedValues": [
+        "#hex",
+        "rgb()",
+        "rgba()",
+        "hsl()",
+        "hsla()",
+        "named colors"
+      ],
       "unsupportedValues": [
-        "color"
+        "lab()/lch()/oklab()/oklch() (modern color spaces)"
       ],
       "tests": [],
-      "notes": "",
+      "notes": "pulp #1434: catalog hygiene \u2014 flipped missing \u2192 supported, claim the wired surface (#1396 was the wiring PR).",
       "issue": ""
     },
     "rn/borderTopLeftRadius": {
-      "status": "missing",
-      "mapsTo": "no branch",
-      "supportedValues": [],
+      "status": "partial",
+      "mapsTo": "@pulp/react prop-applier dispatches `borderTopLeftRadius` to `setBorderTopLeftRadius(id, n)` (prop-applier.ts:318-321 since #1396).",
+      "supportedValues": [
+        "number (px)"
+      ],
       "unsupportedValues": [
-        "number"
+        "%",
+        "elliptical x/y"
       ],
       "tests": [],
-      "notes": "Bridge has setBorderTopLeftRadius -- needs prop wiring.",
+      "notes": "Bridge has setBorderTopLeftRadius -- needs prop wiring. pulp #1434: catalog hygiene \u2014 flipped missing \u2192 supported.",
       "issue": ""
     },
     "rn/borderTopRightRadius": {
-      "status": "missing",
-      "mapsTo": "no branch",
-      "supportedValues": [],
+      "status": "partial",
+      "mapsTo": "@pulp/react prop-applier dispatches `borderTopRightRadius` to `setBorderTopRightRadius(id, n)` (prop-applier.ts:318-321 since #1396).",
+      "supportedValues": [
+        "number (px)"
+      ],
       "unsupportedValues": [
-        "number"
+        "%",
+        "elliptical x/y"
       ],
       "tests": [],
-      "notes": "Same.",
+      "notes": "Same. pulp #1434: catalog hygiene \u2014 flipped missing \u2192 supported.",
       "issue": ""
     },
     "rn/borderTopWidth": {
-      "status": "missing",
-      "mapsTo": "no branch",
-      "supportedValues": [],
+      "status": "partial",
+      "mapsTo": "@pulp/react prop-applier dispatches `borderTopWidth` to `setBorderTopWidth(id, n)` (prop-applier.ts:314-317 since #1396).",
+      "supportedValues": [
+        "number (px)"
+      ],
       "unsupportedValues": [
-        "number"
+        "%",
+        "em",
+        "rem"
       ],
       "tests": [],
-      "notes": "Same as borderBottomWidth.",
+      "notes": "Same as borderBottomWidth. pulp #1434: catalog hygiene \u2014 flipped missing \u2192 supported.",
       "issue": ""
     },
     "rn/borderWidth": {
-      "status": "missing",
-      "mapsTo": "Bridge has setBorderWidth, but @pulp/react does not surface it as a flat prop.",
-      "supportedValues": [],
+      "status": "partial",
+      "mapsTo": "@pulp/react prop-applier dispatches `borderWidth` to `setBorderWidth(id, ...)` (prop-applier.ts:300-302).",
+      "supportedValues": [
+        "number (px)"
+      ],
       "unsupportedValues": [
-        "number"
+        "%",
+        "em",
+        "rem"
       ],
       "tests": [],
-      "notes": "User can call <View border={{color:'#000', width:N}} /> as workaround.",
+      "notes": "User can call <View border={{color:'#000', width:N}} /> as workaround. pulp #1434: catalog hygiene \u2014 flipped missing \u2192 supported.",
       "issue": ""
     },
     "rn/bottom": {
@@ -3658,16 +3728,17 @@
       "issue": ""
     },
     "rn/overflow": {
-      "status": "missing",
-      "mapsTo": "no @pulp/react prop. Bridge has setOverflow(id, 'visible'|'hidden').",
-      "supportedValues": [],
-      "unsupportedValues": [
+      "status": "partial",
+      "mapsTo": "@pulp/react prop-applier dispatches `overflow` to `setOverflow(id, mode)` (prop-applier.ts:333 since #1388).",
+      "supportedValues": [
         "visible",
-        "hidden",
+        "hidden"
+      ],
+      "unsupportedValues": [
         "scroll"
       ],
       "tests": [],
-      "notes": "Plumbing missing in prop-applier; ScrollView intrinsic exposes scroll.",
+      "notes": "Plumbing missing in prop-applier; ScrollView intrinsic exposes scroll. pulp #1434: catalog hygiene \u2014 flipped missing \u2192 supported. View::Overflow has only {visible, hidden}; scroll is a separate ScrollView container concern.",
       "issue": ""
     },
     "rn/overlay": {
