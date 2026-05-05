@@ -6,6 +6,7 @@
 
 #include <pulp/view/view.hpp>
 #include <pulp/canvas/canvas.hpp>
+#include <cmath>
 #include <functional>
 #include <string>
 #include <vector>
@@ -83,7 +84,34 @@ public:
     CanvasWidget() = default;
 
     void clear_commands() { commands_.clear(); }
-    void add_command(CanvasDrawCmd cmd) { commands_.push_back(std::move(cmd)); }
+    /// pulp #1387 gap #2 — NaN / ±Infinity defense at the recording
+    /// boundary. JS callers can produce non-finite numerics from any
+    /// arithmetic mishap (divide-by-zero on a zero parent rect during a
+    /// transient layout, NaN bubbling through pointer-event coords, etc).
+    /// If a non-finite reaches Skia or CoreGraphics, it can taint the
+    /// entire CGContext / Skia surface for the rest of the frame —
+    /// Spectr saw this as bands rendering as solid grey blobs after an
+    /// off-screen drag produced one NaN coord. Sanitize each cmd's
+    /// numeric fields to 0 on non-finite. The fields cover every coord
+    /// path the dispatch table consumes (move_to, line_to, quad/cubic,
+    /// rects, circles, arcs, text, transforms, clip, image draw).
+    /// Color / int_val / text fields are unaffected. Sanitizing at the
+    /// recording boundary means every backend (Skia GPU, CG CPU,
+    /// RecordingCanvas, headless capture) gets clean numerics without
+    /// a per-backend retrofit.
+    void add_command(CanvasDrawCmd cmd) {
+        cmd.x       = sanitize_finite(cmd.x);
+        cmd.y       = sanitize_finite(cmd.y);
+        cmd.w       = sanitize_finite(cmd.w);
+        cmd.h       = sanitize_finite(cmd.h);
+        cmd.x2      = sanitize_finite(cmd.x2);
+        cmd.y2      = sanitize_finite(cmd.y2);
+        cmd.x3      = sanitize_finite(cmd.x3);
+        cmd.y3      = sanitize_finite(cmd.y3);
+        cmd.extra   = sanitize_finite(cmd.extra);
+        for (auto& p : cmd.gradient_positions) p = sanitize_finite(p);
+        commands_.push_back(std::move(cmd));
+    }
     size_t command_count() const { return commands_.size(); }
     /// pulp #964 — accessor for tests asserting on the recorded JS command
     /// stream. Read-only; the bridge owns mutation via add_command /
@@ -98,6 +126,14 @@ public:
     void paint(canvas::Canvas& canvas) override;
 
 private:
+    /// pulp #1387 gap #2 — return 0 on NaN / ±Infinity, value otherwise.
+    /// Inlined helper kept in the header so the compiler folds it into
+    /// the move-constructor copy in add_command. <cmath>'s std::isfinite
+    /// is constexpr-safe and consteval-eligible on C++20 toolchains.
+    static float sanitize_finite(float v) noexcept {
+        return std::isfinite(v) ? v : 0.0f;
+    }
+
     std::vector<CanvasDrawCmd> commands_;
     NativeGpuTextureProvider native_gpu_texture_provider_;
     bool last_native_gpu_texture_draw_succeeded_ = false;
