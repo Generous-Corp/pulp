@@ -4733,3 +4733,84 @@ TEST_CASE("CSSStyleDeclaration forwards flex-direction reverse modes verbatim",
     REQUIRE(bridge.widget("a")->flex().direction == FlexDirection::row_reverse);
     REQUIRE(bridge.widget("b")->flex().direction == FlexDirection::column_reverse);
 }
+
+// ── pulp #1434 Triage #11 — textAlign 'auto' + 'justify' ────────────────────
+//
+// Bridge accepts five textAlign values now. The CSS shim and
+// @pulp/react prop-applier pass values through verbatim; bridge maps
+// to LabelAlign. `auto` resolves at paint-time (LTR-only today).
+// `justify` reaches canvas TextAlign::justify; SkParagraph kJustify
+// integration lands in a follow-up.
+
+TEST_CASE("setTextAlign accepts left / center / right / start / end / auto / justify",
+          "[view][bridge][issue-1434-textalign-11]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createLabel('a','left text',  '');  setTextAlign('a','left');
+        createLabel('b','center text','');  setTextAlign('b','center');
+        createLabel('c','right text', '');  setTextAlign('c','right');
+        createLabel('d','start text', '');  setTextAlign('d','start');
+        createLabel('e','end text',   '');  setTextAlign('e','end');
+        createLabel('f','auto text',  '');  setTextAlign('f','auto');
+        createLabel('g','justify text','');  setTextAlign('g','justify');
+    )");
+
+    auto al = [&](const std::string& id) {
+        return dynamic_cast<Label*>(bridge.widget(id))->text_align();
+    };
+
+    REQUIRE(al("a") == LabelAlign::left);
+    REQUIRE(al("b") == LabelAlign::center);
+    REQUIRE(al("c") == LabelAlign::right);
+    REQUIRE(al("d") == LabelAlign::left);  // 'start' alias for left under LTR
+    REQUIRE(al("e") == LabelAlign::right); // 'end' alias for right under LTR
+    REQUIRE(al("f") == LabelAlign::auto_);
+    REQUIRE(al("g") == LabelAlign::justify);
+}
+
+TEST_CASE("Label paints text with TextAlign::justify when textAlign='justify'",
+          "[view][widget][issue-1434-textalign-11]") {
+    Label label("the quick brown fox");
+    label.set_bounds({0, 0, 200, 24});
+    label.set_text_align(LabelAlign::justify);
+
+    pulp::canvas::RecordingCanvas canvas;
+    label.paint(canvas);
+
+    // The recorded set_text_align command must be the justify variant.
+    bool saw_justify = false;
+    for (const auto& cmd : canvas.commands()) {
+        if (cmd.type == pulp::canvas::DrawCommand::Type::set_text_align) {
+            const auto enc = static_cast<pulp::canvas::TextAlign>(static_cast<int>(cmd.f[0]));
+            if (enc == pulp::canvas::TextAlign::justify) saw_justify = true;
+        }
+    }
+    REQUIRE(saw_justify);
+}
+
+TEST_CASE("Label paints with TextAlign::left when textAlign='auto' (LTR fallback)",
+          "[view][widget][issue-1434-textalign-11]") {
+    // pulp doesn't model RTL writing direction yet, so 'auto' degrades
+    // to left at paint time. This test guards the fallback so a future
+    // RTL slice flagging this assertion as a failure is the intended
+    // signal to wire writing-direction context into the resolution.
+    Label label("auto-aligned text");
+    label.set_bounds({0, 0, 200, 24});
+    label.set_text_align(LabelAlign::auto_);
+
+    pulp::canvas::RecordingCanvas canvas;
+    label.paint(canvas);
+
+    bool saw_left = false;
+    for (const auto& cmd : canvas.commands()) {
+        if (cmd.type == pulp::canvas::DrawCommand::Type::set_text_align) {
+            const auto enc = static_cast<pulp::canvas::TextAlign>(static_cast<int>(cmd.f[0]));
+            if (enc == pulp::canvas::TextAlign::left) saw_left = true;
+        }
+    }
+    REQUIRE(saw_left);
+}

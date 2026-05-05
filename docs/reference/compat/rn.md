@@ -27,6 +27,14 @@ Spec walk:
 
 ## Recently changed
 
+- **2026-05-05 (pulp #1434 Triage #11)** — `rn/textAlign` now accepts
+  `auto` and `justify` alongside the existing `left`, `center`,
+  `right`. `auto` is writing-direction-relative (LTR-only today —
+  degrades to `left` until pulp's RTL slice lands). `justify` reaches
+  canvas `TextAlign::justify`; SkParagraph kJustify rendering is a
+  follow-up (backends approximate as left until then). The `@pulp/react`
+  prop-applier widens `textAlign?: 'left' | 'center' | 'right'` to
+  also cover `'auto' | 'justify'`. Reclassified DIVERGE → PASS.
 - **2026-05-05 (pulp #1434 Triage #15)** — `rn/boxShadow` surfaced at
   the `@pulp/react` TS layer. The prop-applier accepts both the CSS
   shorthand string (`'2px 4px 8px rgba(0,0,0,0.3)'`, with optional

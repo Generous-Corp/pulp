@@ -2269,16 +2269,17 @@
       "supportedValues": [
         "left",
         "center",
-        "right"
-      ],
-      "unsupportedValues": [
-        "justify",
+        "right",
         "start",
         "end",
+        "auto",
+        "justify"
+      ],
+      "unsupportedValues": [
         "match-parent"
       ],
       "tests": [],
-      "notes": "RN supports auto/justify; we don't.",
+      "notes": "RN supports auto/justify; we don't. pulp #1434 Triage #11: bridge accepts start/end (LTR-only aliases for left/right), auto (LTR fallback), and justify. start/end map symmetrically; auto/justify mirror the rn surface wiring.",
       "issue": ""
     },
     "css/textDecoration": {
@@ -3989,14 +3990,13 @@
       "supportedValues": [
         "left",
         "center",
-        "right"
-      ],
-      "unsupportedValues": [
+        "right",
         "auto",
         "justify"
       ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "",
+      "notes": "pulp #1434 Triage #11: bridge accepts auto + justify; \"auto\" resolves to left under LTR (pulp doesn't model RTL yet); \"justify\" routes through canvas TextAlign::justify (full SkParagraph kJustify rendering follows up).",
       "issue": ""
     },
     "rn/textAlignVertical": {

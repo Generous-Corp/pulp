@@ -165,7 +165,12 @@ export type ModalProps = BaseProps & { open?: boolean };
 export interface LabelProps extends BaseProps {
     text?: string;
     textColor?: string;
-    textAlign?: 'left' | 'center' | 'right';
+    /// CSS / RN `text-align`. `'auto'` and `'justify'` added in
+    /// pulp #1434. `'auto'` is writing-direction-relative (LTR-only
+    /// today). `'justify'` reaches canvas `TextAlign::justify`;
+    /// SkParagraph kJustify wiring is a follow-up — backends
+    /// approximate as left until then.
+    textAlign?: 'left' | 'center' | 'right' | 'auto' | 'justify';
 }
 
 export interface ButtonProps extends LabelProps {

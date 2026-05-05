@@ -18,8 +18,15 @@ namespace pulp::view {
 // ── Label ────────────────────────────────────────────────────────────────────
 // Static or dynamic text display
 
-/// Text alignment for Label
-enum class LabelAlign { left, center, right };
+/// Text alignment for Label.
+/// pulp #1434 — `auto_` resolves at paint time to left (LTR) or right
+/// (RTL); pulp doesn't model RTL yet so `auto_` currently degrades to
+/// `left`. `justify` wires through to the canvas `TextAlign::justify`
+/// enum value; SkParagraph kJustify rendering lands in a follow-up —
+/// existing canvas backends treat it as `left` until then. Both values
+/// are claimed in the rn/css catalog (Figma exports + Tailwind classes
+/// emit `auto` and `justify` routinely).
+enum class LabelAlign { left, center, right, auto_, justify };
 
 class Label : public View {
 public:

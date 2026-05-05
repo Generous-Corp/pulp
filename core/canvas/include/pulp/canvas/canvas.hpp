@@ -170,7 +170,14 @@ using Paint = std::variant<Color, LinearGradient, RadialGradient, ConicGradient>
 
 enum class LineCap { butt, round, square };
 enum class LineJoin { miter, round, bevel };
-enum class TextAlign { left, center, right };
+// pulp #1434 — added `justify` for CSS / RN `text-align: justify`.
+// SkiaCanvas dispatches `kJustify` via SkParagraph when the backend
+// supports it; CG / RecordingCanvas back-ends approximate as `left`
+// (no kerning-controlled space distribution) until full SkParagraph
+// integration lands. `auto` (writing-direction-relative) is resolved
+// at the widget layer before reaching the canvas — Label::paint
+// translates `auto` → `left` (LTR) or `right` (RTL).
+enum class TextAlign { left, center, right, justify };
 enum class TextVerticalAlign { top, center, bottom, baseline };
 enum class TextBaseline { top, middle, bottom };
 enum class TextDirection { left_to_right, right_to_left, top_to_bottom, bottom_to_top };

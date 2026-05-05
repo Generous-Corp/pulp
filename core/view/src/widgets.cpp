@@ -437,13 +437,25 @@ void Label::paint(canvas::Canvas& canvas) {
             int v = inh.value();
             if (v == 1) effective_text_align = LabelAlign::center;
             else if (v == 2) effective_text_align = LabelAlign::right;
+            else if (v == 3) effective_text_align = LabelAlign::auto_;
+            else if (v == 4) effective_text_align = LabelAlign::justify;
             else effective_text_align = LabelAlign::left;
         }
+    }
+
+    // pulp #1434 — resolve `auto` at paint time. `auto` is CSS
+    // writing-direction-relative: LTR → left, RTL → right. Pulp doesn't
+    // model RTL yet (yoga/direction is still NOT-IMPL), so `auto`
+    // currently degrades to `left`. When RTL lands, this becomes a
+    // lookup against the writing-direction context.
+    if (effective_text_align == LabelAlign::auto_) {
+        effective_text_align = LabelAlign::left;
     }
 
     float x = 0;
     switch (effective_text_align) {
         case LabelAlign::left:
+        case LabelAlign::auto_: // unreachable — resolved above; keeps switch exhaustive
             canvas.set_text_align(canvas::TextAlign::left);
             break;
         case LabelAlign::center:
@@ -453,6 +465,15 @@ void Label::paint(canvas::Canvas& canvas) {
         case LabelAlign::right:
             canvas.set_text_align(canvas::TextAlign::right);
             x = bounds().width;
+            break;
+        case LabelAlign::justify:
+            // pulp #1434 — emit canvas TextAlign::justify so backends
+            // that wire SkParagraph kJustify can render true justified
+            // text. RecordingCanvas / CG fall back to left-alignment
+            // semantics (no kerning-controlled space distribution).
+            // Anchor x at 0 so the first line's leading edge matches a
+            // left-aligned label.
+            canvas.set_text_align(canvas::TextAlign::justify);
             break;
     }
 

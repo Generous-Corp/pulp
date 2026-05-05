@@ -447,7 +447,12 @@ function applyOne(id: string, type: string, key: string, value: unknown, props?:
         // Text
         case 'text':            return call('setText', id, String(value));
         case 'textColor':       return call('setTextColor', id, value as string);
-        case 'textAlign':       return call('setTextAlign', id, value as 'left' | 'center' | 'right');
+        // pulp #1434 — widen to include `'auto'` and `'justify'` (CSS /
+        // RN canonical). `'auto'` is writing-direction-relative
+        // (LTR-only today, degrades to `'left'`); `'justify'` flows to
+        // canvas TextAlign::justify (SkParagraph kJustify wiring is a
+        // follow-up — backends approximate as left for now).
+        case 'textAlign':       return call('setTextAlign', id, value as string);
         // Typography — Label widgets honor these via setX bridge fns.
         // Note: fontFamily NOT dispatched today — SkFontMgr font registration
         // (pulp#932) blocks proper resolution and would force Skia to return

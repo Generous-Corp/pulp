@@ -2291,15 +2291,31 @@ void WidgetBridge::register_api() {
         auto* v = widget(args.get<std::string>(0, ""));
         auto a = args.get<std::string>(1, "left");
         if (!v) return choc::value::Value();
-        // Map "left"/"center"/"right" → 0/1/2 (matches LabelAlign enum order).
-        int aligned = (a == "center") ? 1 : (a == "right") ? 2 : 0;
+        // pulp #1434 — accept all five CSS / RN textAlign values:
+        //   "left"/"start"   → LabelAlign::left   (0)
+        //   "center"         → LabelAlign::center (1)
+        //   "right"/"end"    → LabelAlign::right  (2)
+        //   "auto"           → LabelAlign::auto_  (3, paint-time resolved
+        //                      to left under LTR; pulp doesn't model RTL
+        //                      yet so this is currently equivalent to left)
+        //   "justify"        → LabelAlign::justify (4, canvas TextAlign::
+        //                      justify; SkParagraph kJustify lands in a
+        //                      follow-up — backends fall back to left-
+        //                      alignment math today)
+        int aligned;
+        LabelAlign label_a;
+        if      (a == "center")               { aligned = 1; label_a = LabelAlign::center; }
+        else if (a == "right" || a == "end")  { aligned = 2; label_a = LabelAlign::right; }
+        else if (a == "auto")                 { aligned = 3; label_a = LabelAlign::auto_; }
+        else if (a == "justify")              { aligned = 4; label_a = LabelAlign::justify; }
+        else                                  { aligned = 0; label_a = LabelAlign::left; }
         if (auto* l = dynamic_cast<Label*>(v)) {
-            if (aligned == 1) l->set_text_align(LabelAlign::center);
-            else if (aligned == 2) l->set_text_align(LabelAlign::right);
-            else l->set_text_align(LabelAlign::left);
+            l->set_text_align(label_a);
         } else {
             // issue-969: container Views store the alignment in the
-            // inheritable slot for descendant Labels.
+            // inheritable slot for descendant Labels. Encoding extends
+            // 0..4 to cover the new auto / justify cases — Label::paint
+            // decodes the slot via the same numeric mapping.
             v->set_inheritable_text_align(aligned);
         }
         return choc::value::Value();

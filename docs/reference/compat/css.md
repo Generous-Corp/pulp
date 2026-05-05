@@ -33,6 +33,14 @@ specifics are out of scope.
 
 ## Recently changed
 
+- **2026-05-05 (pulp #1434 Triage #11)** — `css/textAlign` now accepts
+  `start`, `end`, `auto`, and `justify` alongside the existing `left`,
+  `center`, `right`. `start`/`end` map symmetrically to `left`/`right`
+  (LTR-only today). `auto` resolves at paint time to `left` (degrades
+  gracefully until pulp's RTL slice lands). `justify` reaches canvas
+  `TextAlign::justify`; full SkParagraph kJustify rendering is a
+  follow-up (backends approximate as left until then). `match-parent`
+  remains unsupported. Reclassified DIVERGE → PASS.
 - **2026-05-05 (pulp #1434 Triage #15)** — `css/boxShadow` status
   flipped `supported` → `partial`. The single-shadow CSS-spec format
   (`[inset] <dx>px <dy>px <blur>px [<spread>px] <color>`) has been
