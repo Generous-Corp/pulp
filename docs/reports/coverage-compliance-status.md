@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-05-05 03:01 PDT
+Last reviewed: 2026-05-05 03:56 PDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`.
@@ -127,9 +127,11 @@ range clamp, instant timing, reset, silence, and buffer paths, plus
 `local/phase3-modulation-reverb-edges-645` at `9cfcc171`, refreshed from
 `971488d5` onto current `origin/main` `0447498e`, covering
 Chorus dry/reset/phase-wrap behavior and Reverb zero-decay, damping
-clamp, dry-mix, and reset paths, plus `local/phase3-oscillator-edges-645`
-at `8f51cba4`, covering Oscillator reset, phase wrap, getter, and
-PolyBLEP edge paths. All four remain unpushed and undispatched.
+clamp, dry-mix, and reset paths, plus
+`local/phase3-oscillator-edges-645` at `8f2e043`, refreshed from
+`8f51cba4` onto current `origin/main` `0447498e`, covering
+Oscillator reset, phase wrap, getter, and PolyBLEP edge paths. All four
+remain unpushed and undispatched.
 Additional #640 audio progress is queued locally as
 `local/phase3-audio-focus-dispatch-640` at `d766f4b9`, refreshed from
 `1ab6e24b` onto current `origin/main` `0447498e`, covering
