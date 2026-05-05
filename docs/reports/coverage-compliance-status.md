@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-05-05 07:50 PDT
+Last reviewed: 2026-05-05 07:53 PDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`.
@@ -287,8 +287,9 @@ advance/dismiss callback behavior, dismiss-on-click gating, and
 text/image paint output. It remains unpushed and undispatched; #1285
 still points at `d3cd9f47` until Namespace capacity returns.
 Additional #493 view progress is queued locally as
-`local/phase3-appearance-manager-493` at `c0b6bece`, refreshed from
-`ceb05add` onto current `origin/main` `0447498e` and covering AppearanceTracker
+`local/phase3-appearance-manager-493` at `3a0fae19`, refreshed from
+`ceb05add` onto current `origin/main` `0447498e`, then refreshed again
+onto current `origin/main` `c18785c9`, covering AppearanceTracker
 repeated lock callbacks and locked poll no-op behavior, plus ThemeManager
 locked-theme, locked-appearance callback, and unlock behavior. It remains
 unpushed and undispatched.
