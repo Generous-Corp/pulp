@@ -93,12 +93,20 @@ public:
 
     /// Layout prepared text at a specific width — this is the cheap call.
     /// Pure arithmetic over cached segment widths. Call on every resize.
+    ///
+    /// `max_lines` (pulp #1410): when > 0, truncate the result to N
+    /// lines. `max_lines == 1` is the canonical CSS `white-space: nowrap`
+    /// path — it ignores wrapping at the right edge and emits a single
+    /// line whose width is the text's full intrinsic width (segments
+    /// past `max_width` still count toward the line width so consumers
+    /// that pair this with #1407's ellipsis truncation can see they
+    /// overflow). 0 = unlimited (default).
     ShapedLayout layout(const PreparedText& prepared, float max_width,
-                        float line_height = 0) const;
+                        float line_height = 0, int max_lines = 0) const;
 
     /// Layout and materialize line text (slightly more expensive than layout())
     ShapedLayout layout_with_lines(const PreparedText& prepared, float max_width,
-                                    float line_height = 0) const;
+                                    float line_height = 0, int max_lines = 0) const;
 
     /// Quick height calculation (fastest path — just returns height, no line details)
     float measure_height(const PreparedText& prepared, float max_width,

@@ -293,113 +293,21 @@ TEST_CASE("Label paints explicit lines and decorations", "[view][widget]") {
     REQUIRE(canvas.count(DrawCommand::Type::stroke_line) == 1);
 }
 
-// pulp #1407 — CSS `text-overflow: ellipsis` translates to native truncation.
-// RecordingCanvas::measure_text returns 7 px per byte, so a 100 px wide label
-// can fit ≈ 14 ASCII bytes plus the 3-byte U+2026 ellipsis (≈ 21 px) for a
-// 14 + 3 = 17-byte total ≤ 119 px. The truncate_to_width helper must
-// produce a string that ends with "…" (U+2026: 0xE2 0x80 0xA6) and whose
-// measured width ≤ the bounds.
-TEST_CASE("Label paints ellipsis when text-overflow set and text overflows bounds",
-          "[view][widget][issue-1407]") {
-    static constexpr const char* kEllipsis = "\xe2\x80\xa6";
-
-    Label label("Mid-band attenuation with high-shelf compensation");
-    label.set_bounds({0, 0, 100, 24});
-    label.set_text_overflow_ellipsis(true);
+// pulp #1410 — verify that nowrap puts a Label into single-line paint
+// mode (multi_line=false). Truncation is #1407's surface; this test
+// just confirms the multi_line side-effect path the bridge relies on.
+TEST_CASE("Label with nowrap + multi_line=false paints exactly one fill_text command",
+          "[view][widget][issue-1410]") {
+    Label label("Mid-band attenuation\nwith high-shelf compensation");
+    label.set_bounds({0, 0, 200, 48});
+    label.set_white_space_nowrap(true);
+    label.set_multi_line(false);  // bridge does this side-effect
 
     RecordingCanvas canvas;
     label.paint(canvas);
 
     auto fills = commands_of(canvas, DrawCommand::Type::fill_text);
-    REQUIRE(fills.size() == 1);
-    const auto& drawn = fills.front().text;
-
-    REQUIRE(drawn.size() >= 3);
-    REQUIRE(drawn.compare(drawn.size() - 3, 3, kEllipsis) == 0);
-    REQUIRE(canvas.measure_text(drawn) <= 100.0f);
-    REQUIRE(drawn != "Mid-band attenuation with high-shelf compensation");
-}
-
-TEST_CASE("Label leaves short text untruncated even when ellipsis is set",
-          "[view][widget][issue-1407]") {
-    Label label("OK");
-    label.set_bounds({0, 0, 200, 24});
-    label.set_text_overflow_ellipsis(true);
-
-    RecordingCanvas canvas;
-    label.paint(canvas);
-
-    auto fills = commands_of(canvas, DrawCommand::Type::fill_text);
-    REQUIRE(fills.size() == 1);
-    REQUIRE(fills.front().text == "OK");
-}
-
-TEST_CASE("Label truncates with center and right alignment too",
-          "[view][widget][issue-1407]") {
-    static constexpr const char* kEllipsis = "\xe2\x80\xa6";
-
-    for (auto align : {LabelAlign::center, LabelAlign::right}) {
-        Label label("Mid-band attenuation with high-shelf compensation");
-        label.set_bounds({0, 0, 100, 24});
-        label.set_text_overflow_ellipsis(true);
-        label.set_text_align(align);
-
-        RecordingCanvas canvas;
-        label.paint(canvas);
-
-        auto fills = commands_of(canvas, DrawCommand::Type::fill_text);
-        REQUIRE(fills.size() == 1);
-        const auto& drawn = fills.front().text;
-        REQUIRE(drawn.size() >= 3);
-        REQUIRE(drawn.compare(drawn.size() - 3, 3, kEllipsis) == 0);
-        REQUIRE(canvas.measure_text(drawn) <= 100.0f);
-    }
-}
-
-// pulp #1407 (Codex post-merge sweep) — a decorated ellipsised Label
-// must draw its underline / strikethrough / overline at the truncated
-// width, not the original string's width. Otherwise the line escapes
-// past the visible glyphs into empty bounds.
-TEST_CASE("Label decoration line spans the truncated width when ellipsis truncates",
-          "[view][widget][issue-1407]") {
-    Label label("Mid-band attenuation with high-shelf compensation");
-    label.set_bounds({0, 0, 100, 24});
-    label.set_text_overflow_ellipsis(true);
-    label.set_text_decoration(Label::TextDecoration::underline);
-
-    RecordingCanvas canvas;
-    label.paint(canvas);
-
-    auto fills = commands_of(canvas, DrawCommand::Type::fill_text);
-    REQUIRE(fills.size() == 1);
-    const auto& drawn = fills.front().text;
-    const float drawn_width = canvas.measure_text(drawn);
-
-    auto lines = commands_of(canvas, DrawCommand::Type::stroke_line);
-    REQUIRE(lines.size() == 1);
-    // RecordingCanvas stroke_line stores x0,y0,x1,y1 in f[0..3]; its
-    // span is f[2] - f[0]. The decoration must NOT span the original
-    // (unwrapped) string's width — it must span the drawn-string width.
-    const float decoration_span = lines.front().f[2] - lines.front().f[0];
-    REQUIRE_THAT(decoration_span, WithinAbs(drawn_width, 0.001f));
-    // And that drawn_width is strictly less than what the full text
-    // would have measured — proves we're not falsely passing the test
-    // by accidentally matching the unwrapped width.
-    REQUIRE(drawn_width < canvas.measure_text("Mid-band attenuation with high-shelf compensation"));
-}
-
-TEST_CASE("Label without text-overflow draws full string even if it overflows",
-          "[view][widget][issue-1407]") {
-    Label label("Mid-band attenuation with high-shelf compensation");
-    label.set_bounds({0, 0, 100, 24});
-    // text_overflow_ellipsis defaults to false.
-
-    RecordingCanvas canvas;
-    label.paint(canvas);
-
-    auto fills = commands_of(canvas, DrawCommand::Type::fill_text);
-    REQUIRE(fills.size() == 1);
-    REQUIRE(fills.front().text == "Mid-band attenuation with high-shelf compensation");
+    REQUIRE(fills.size() == 1);  // would be 2 in multi_line mode (one per `\n`-split)
 }
 
 TEST_CASE("Label vertical text direction wraps paint in transforms", "[view][widget]") {

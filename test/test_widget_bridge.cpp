@@ -4156,3 +4156,81 @@ TEST_CASE("WidgetBridge SvgRect uses parent for hierarchy attachment",
     REQUIRE(preview != nullptr);
     REQUIRE(preview->child_count() == 3);
 }
+
+// pulp #1410 — setWhiteSpace must (a) flip the generic
+// `View::white_space_nowrap()` flag for ANY widget (not just Label) so
+// non-Label text-bearing surfaces can react, and (b) keep
+// `Label::set_multi_line` in lock-step so existing callers / the #1407
+// ellipsis path keep working when only one of the flags is set.
+TEST_CASE("WidgetBridge setWhiteSpace flips View flag and Label multi_line for both modes",
+          "[view][bridge][css][issue-1410]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createLabel('mylabel', 'long preset name', '');
+        createPanel('mypanel', '');
+        setWhiteSpace('mylabel', 'nowrap');
+        setWhiteSpace('mypanel', 'nowrap');
+    )");
+
+    auto* label = dynamic_cast<Label*>(bridge.widget("mylabel"));
+    auto* panel = bridge.widget("mypanel");
+    REQUIRE(label != nullptr);
+    REQUIRE(panel != nullptr);
+
+    // Generic flag is set on BOTH the Label and the non-Label Panel —
+    // before #1410 only the Label dynamic_cast branch handled it.
+    REQUIRE(label->white_space_nowrap());
+    REQUIRE(panel->white_space_nowrap());
+    // Label's multi_line side-effect stays in lock-step.
+    REQUIRE_FALSE(label->multi_line());
+
+    // Toggle back to normal.
+    bridge.load_script(R"(
+        setWhiteSpace('mylabel', 'normal');
+        setWhiteSpace('mypanel', 'normal');
+    )");
+    REQUIRE_FALSE(label->white_space_nowrap());
+    REQUIRE_FALSE(panel->white_space_nowrap());
+    REQUIRE(label->multi_line());
+}
+
+// pulp #1410 — CSS translator side. style.whiteSpace = 'nowrap' must
+// route through CSSStyleDeclaration._applyProperty to setWhiteSpace,
+// which then sets the View flag.
+TEST_CASE("CSSStyleDeclaration translates whiteSpace to setWhiteSpace bridge call",
+          "[view][bridge][css][issue-1410]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        globalThis.__wsCalls = [];
+        var __native_setWhiteSpace = setWhiteSpace;
+        setWhiteSpace = function(id, mode) {
+            globalThis.__wsCalls.push(id + '|' + mode);
+            return __native_setWhiteSpace(id, mode);
+        };
+        createLabel('mylabel', 'long preset name', '');
+        var stub_el = { _id: 'mylabel', _nativeCreated: true };
+        var sd = new CSSStyleDeclaration(stub_el);
+        sd._applyProperty('whiteSpace', 'nowrap');
+    )");
+
+    auto count = engine.evaluate("globalThis.__wsCalls.length")
+                       .getWithDefault<double>(-1);
+    REQUIRE(count == 1);
+    auto recorded = engine.evaluate("globalThis.__wsCalls[0]")
+                          .getWithDefault<std::string>("");
+    REQUIRE(recorded == "mylabel|nowrap");
+
+    auto* label = dynamic_cast<Label*>(bridge.widget("mylabel"));
+    REQUIRE(label != nullptr);
+    REQUIRE(label->white_space_nowrap());
+}

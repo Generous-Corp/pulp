@@ -1876,11 +1876,22 @@ void WidgetBridge::register_api() {
     });
 
     // setWhiteSpace(id, "normal"|"nowrap"|"pre"|"pre-wrap")
+    //
+    // pulp #1410 — sets a generic `View::white_space_nowrap()` flag so
+    // ANY widget with a textual surface (Button, custom text-bearing
+    // views, future TextEditor surfaces) and `TextShaper` consumers can
+    // observe nowrap without dynamic_casting to Label. The original
+    // Label::set_multi_line side-effect stays in lock-step so existing
+    // single-line Label paint paths (incl. #1407 ellipsis truncation)
+    // keep working when only one of the flags is set.
     engine_.register_function("setWhiteSpace", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto ws = args.get<std::string>(1, "normal");
+        const bool nowrap = (ws == "nowrap");
+        auto* v = id.empty() ? &root_ : widget(id);
+        if (v) v->set_white_space_nowrap(nowrap);
         if (auto* l = dynamic_cast<Label*>(widget(id)))
-            l->set_multi_line(ws != "nowrap");
+            l->set_multi_line(!nowrap);
         return choc::value::Value();
     });
 
