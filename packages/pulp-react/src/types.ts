@@ -26,11 +26,24 @@ export interface FlexProps {
     paddingRight?: number;
     paddingBottom?: number;
     paddingLeft?: number;
+    /// pulp #1434 batch 4 — `paddingHorizontal` fans out to `paddingLeft` +
+    /// `paddingRight`.
+    paddingHorizontal?: number;
+    /// pulp #1434 batch 4 — `paddingVertical` fans out to `paddingTop` +
+    /// `paddingBottom`.
+    paddingVertical?: number;
     margin?: number;
     marginTop?: number;
     marginRight?: number;
     marginBottom?: number;
     marginLeft?: number;
+    /// pulp #1434 batch 4 — React Native shorthand alias. `marginHorizontal`
+    /// fans out to `marginLeft` + `marginRight` in the prop-applier; same
+    /// value applied to both edges. Useful for porting RN code as-is.
+    marginHorizontal?: number;
+    /// pulp #1434 batch 4 — `marginVertical` fans out to `marginTop` +
+    /// `marginBottom`.
+    marginVertical?: number;
     flexGrow?: number;
     flexShrink?: number;
     flexBasis?: number;

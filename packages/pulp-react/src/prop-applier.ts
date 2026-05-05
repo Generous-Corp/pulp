@@ -218,6 +218,30 @@ function applyOne(id: string, type: string, key: string, value: unknown, props?:
         case 'marginRight':     return call('setFlex', id, 'margin_right', value as number);
         case 'marginBottom':    return call('setFlex', id, 'margin_bottom', value as number);
         case 'marginLeft':      return call('setFlex', id, 'margin_left', value as number);
+        // pulp #1434 batch 4 — React Native shorthand aliases. RN code
+        // commonly writes `style={{ marginHorizontal: 8 }}` and expects
+        // it to fan out to marginLeft + marginRight on the underlying
+        // layout. Same pattern for marginVertical / paddingHorizontal /
+        // paddingVertical. We dispatch to the existing per-edge bridge
+        // setters so the value reaches the same FlexStyle slot whether
+        // it arrived through this alias or through the explicit edge
+        // prop. No FlexStyle field change required.
+        case 'marginHorizontal':
+            call('setFlex', id, 'margin_left', value as number);
+            call('setFlex', id, 'margin_right', value as number);
+            return;
+        case 'marginVertical':
+            call('setFlex', id, 'margin_top', value as number);
+            call('setFlex', id, 'margin_bottom', value as number);
+            return;
+        case 'paddingHorizontal':
+            call('setFlex', id, 'padding_left', value as number);
+            call('setFlex', id, 'padding_right', value as number);
+            return;
+        case 'paddingVertical':
+            call('setFlex', id, 'padding_top', value as number);
+            call('setFlex', id, 'padding_bottom', value as number);
+            return;
         case 'flexGrow':        return call('setFlex', id, 'flex_grow', value as number);
         case 'flexShrink':      return call('setFlex', id, 'flex_shrink', value as number);
         case 'flexBasis':       return call('setFlex', id, 'flex_basis', value as number);

@@ -31,10 +31,11 @@
     "_notes_on_consumer_surfaces": "The same prop can have different status across consumer surfaces. 'css/*' tracks what core/view/js/web-compat-style-decl.js (the DOM-lite el.style adapter) routes; 'rn/*' tracks what packages/pulp-react/src/prop-applier.ts (the React renderer for @pulp/react JSX intrinsics) routes; 'yoga/*' tracks the underlying Yoga-shaped layout surface in core/view/include/pulp/view/geometry.hpp::FlexStyle; 'canvas2d/*' tracks the Canvas2D shim in web-compat-canvas.js paired with the canvas* family in widget_bridge.cpp + the Skia/CG backends in core/canvas/; 'html/*' tracks the DOM-lite Element / HTMLElement surface in web-compat-element.js + web-compat-document.js. Where a prop is supported by one consumer but not another, both are noted explicitly in 'notes'.",
     "_changelog": {
       "2026-04-30": "Initial population \u2014 361 entries across css/, rn/, yoga/. react/, html/, canvas2d/ stubbed. PR #1166.",
-      "2026-05-04": "Refresh after PRs #1167, #1169, #1173, #1174, #1291, #1297, #1344, #1345, #1347, #1348, #1353. Populated canvas2d/ (~60 entries) and html/ (~30 entries). Added rn/d, rn/viewBox, rn/fill, rn/stroke, rn/strokeWidth, rn/overlay (SvgPath + overlay-routing). Updated css/border, css/borderRadius, css/borderColor, css/fontFamily status to reflect per-attribute setter routing. Added css/_hover_pseudo for :hover stylesheet support."
+      "2026-05-04": "Refresh after PRs #1167, #1169, #1173, #1174, #1291, #1297, #1344, #1345, #1347, #1348, #1353. Populated canvas2d/ (~60 entries) and html/ (~30 entries). Added rn/d, rn/viewBox, rn/fill, rn/stroke, rn/strokeWidth, rn/overlay (SvgPath + overlay-routing). Updated css/border, css/borderRadius, css/borderColor, css/fontFamily status to reflect per-attribute setter routing. Added css/_hover_pseudo for :hover stylesheet support.",
+      "2026-05-05": "pulp #1434 batch 4: React Native shorthand aliases marginHorizontal / marginVertical / paddingHorizontal / paddingVertical now fan out at the JS-side translators (web-compat-style-decl.js + prop-applier.ts) to the existing per-edge bridge setters. Reclassified rn/* + yoga/* entries from missing -> supported and added new css/* entries (4 new keys; css count 195 -> 199)."
     },
     "counts": {
-      "css": 195,
+      "css": 199,
       "rn": 120,
       "yoga": 53,
       "react": 0,
@@ -1540,6 +1541,22 @@
       "notes": "",
       "issue": ""
     },
+    "css/marginHorizontal": {
+      "status": "supported",
+      "mapsTo": "marginHorizontal -> setFlex(margin_left, px) + setFlex(margin_right, px)",
+      "supportedValues": [
+        "px"
+      ],
+      "unsupportedValues": [
+        "%",
+        "auto"
+      ],
+      "tests": [
+        "packages/pulp-react/test/prop-applier-rn-aliases.test.ts"
+      ],
+      "notes": "pulp #1434 batch 4: React Native shorthand alias surfaced through the DOM-lite el.style adapter so RN snippets ported verbatim work in the CSS surface too. Web CSS does not define this property; provided for cross-tool import-readiness.",
+      "issue": ""
+    },
     "css/marginInline": {
       "status": "supported",
       "mapsTo": "expandShorthand -> setFlex(id, 'margin_left'/'margin_right', px)",
@@ -1613,6 +1630,22 @@
       ],
       "tests": [],
       "notes": "",
+      "issue": ""
+    },
+    "css/marginVertical": {
+      "status": "supported",
+      "mapsTo": "marginVertical -> setFlex(margin_top, px) + setFlex(margin_bottom, px)",
+      "supportedValues": [
+        "px"
+      ],
+      "unsupportedValues": [
+        "%",
+        "auto"
+      ],
+      "tests": [
+        "packages/pulp-react/test/prop-applier-rn-aliases.test.ts"
+      ],
+      "notes": "pulp #1434 batch 4: React Native shorthand alias surfaced through the DOM-lite el.style adapter so RN snippets ported verbatim work in the CSS surface too. Web CSS does not define this property; provided for cross-tool import-readiness.",
       "issue": ""
     },
     "css/mask": {
@@ -1907,6 +1940,21 @@
       "notes": "",
       "issue": ""
     },
+    "css/paddingHorizontal": {
+      "status": "supported",
+      "mapsTo": "paddingHorizontal -> setFlex(padding_left, px) + setFlex(padding_right, px)",
+      "supportedValues": [
+        "px"
+      ],
+      "unsupportedValues": [
+        "%"
+      ],
+      "tests": [
+        "packages/pulp-react/test/prop-applier-rn-aliases.test.ts"
+      ],
+      "notes": "pulp #1434 batch 4: React Native shorthand alias surfaced through the DOM-lite el.style adapter so RN snippets ported verbatim work in the CSS surface too. Web CSS does not define this property; provided for cross-tool import-readiness.",
+      "issue": ""
+    },
     "css/paddingInline": {
       "status": "supported",
       "mapsTo": "expandShorthand -> setFlex(id, 'padding_left/right', px)",
@@ -1977,6 +2025,21 @@
       ],
       "tests": [],
       "notes": "",
+      "issue": ""
+    },
+    "css/paddingVertical": {
+      "status": "supported",
+      "mapsTo": "paddingVertical -> setFlex(padding_top, px) + setFlex(padding_bottom, px)",
+      "supportedValues": [
+        "px"
+      ],
+      "unsupportedValues": [
+        "%"
+      ],
+      "tests": [
+        "packages/pulp-react/test/prop-applier-rn-aliases.test.ts"
+      ],
+      "notes": "pulp #1434 batch 4: React Native shorthand alias surfaced through the DOM-lite el.style adapter so RN snippets ported verbatim work in the CSS surface too. Web CSS does not define this property; provided for cross-tool import-readiness.",
       "issue": ""
     },
     "css/pageBreakAfter": {
@@ -3393,14 +3456,16 @@
       "issue": ""
     },
     "rn/marginHorizontal": {
-      "status": "missing",
-      "mapsTo": "no branch",
-      "supportedValues": [],
-      "unsupportedValues": [
+      "status": "supported",
+      "mapsTo": "prop-applier.ts: marginHorizontal -> setFlex(margin_left) + setFlex(margin_right)",
+      "supportedValues": [
         "number"
       ],
-      "tests": [],
-      "notes": "RN-specific shorthand for marginLeft + marginRight.",
+      "unsupportedValues": [],
+      "tests": [
+        "packages/pulp-react/test/prop-applier-rn-aliases.test.ts"
+      ],
+      "notes": "pulp #1434 batch 4: RN shorthand fans out to the per-edge bridge setters at the @pulp/react entry point.",
       "issue": ""
     },
     "rn/marginLeft": {
@@ -3448,14 +3513,16 @@
       "issue": ""
     },
     "rn/marginVertical": {
-      "status": "missing",
-      "mapsTo": "no branch",
-      "supportedValues": [],
-      "unsupportedValues": [
+      "status": "supported",
+      "mapsTo": "prop-applier.ts: marginVertical -> setFlex(margin_top) + setFlex(margin_bottom)",
+      "supportedValues": [
         "number"
       ],
-      "tests": [],
-      "notes": "RN-specific shorthand for marginTop + marginBottom.",
+      "unsupportedValues": [],
+      "tests": [
+        "packages/pulp-react/test/prop-applier-rn-aliases.test.ts"
+      ],
+      "notes": "pulp #1434 batch 4: RN shorthand fans out to the per-edge bridge setters at the @pulp/react entry point.",
       "issue": ""
     },
     "rn/maxHeight": {
@@ -3637,14 +3704,16 @@
       "issue": ""
     },
     "rn/paddingHorizontal": {
-      "status": "missing",
-      "mapsTo": "no branch",
-      "supportedValues": [],
-      "unsupportedValues": [
+      "status": "supported",
+      "mapsTo": "prop-applier.ts: paddingHorizontal -> setFlex(padding_left) + setFlex(padding_right)",
+      "supportedValues": [
         "number"
       ],
-      "tests": [],
-      "notes": "Common RN pattern; awkward to port.",
+      "unsupportedValues": [],
+      "tests": [
+        "packages/pulp-react/test/prop-applier-rn-aliases.test.ts"
+      ],
+      "notes": "pulp #1434 batch 4: RN shorthand fans out to the per-edge bridge setters at the @pulp/react entry point.",
       "issue": ""
     },
     "rn/paddingLeft": {
@@ -3692,14 +3761,16 @@
       "issue": ""
     },
     "rn/paddingVertical": {
-      "status": "missing",
-      "mapsTo": "no branch",
-      "supportedValues": [],
-      "unsupportedValues": [
+      "status": "supported",
+      "mapsTo": "prop-applier.ts: paddingVertical -> setFlex(padding_top) + setFlex(padding_bottom)",
+      "supportedValues": [
         "number"
       ],
-      "tests": [],
-      "notes": "Common RN pattern; awkward to port.",
+      "unsupportedValues": [],
+      "tests": [
+        "packages/pulp-react/test/prop-applier-rn-aliases.test.ts"
+      ],
+      "notes": "pulp #1434 batch 4: RN shorthand fans out to the per-edge bridge setters at the @pulp/react entry point.",
       "issue": ""
     },
     "rn/pointerEvents": {
@@ -4365,25 +4436,33 @@
       "issue": ""
     },
     "yoga/marginHorizontal": {
-      "status": "missing",
-      "mapsTo": "no field",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "supported",
+      "mapsTo": "translator fan-out -> FlexStyle.margin_left + FlexStyle.margin_right (web-compat-style-decl.js + prop-applier.ts)",
+      "supportedValues": [
+        "px"
       ],
-      "tests": [],
-      "notes": "Yoga shorthand.",
+      "unsupportedValues": [
+        "auto"
+      ],
+      "tests": [
+        "packages/pulp-react/test/prop-applier-rn-aliases.test.ts"
+      ],
+      "notes": "pulp #1434 batch 4: RN shorthand. No dedicated FlexStyle field; the JS-side translators (DOM-lite + @pulp/react) decompose to the existing per-edge slots before reaching the bridge. Inherits the per-edge yoga gap on auto (same as yoga/marginLeft).",
       "issue": ""
     },
     "yoga/marginVertical": {
-      "status": "missing",
-      "mapsTo": "no field",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "supported",
+      "mapsTo": "translator fan-out -> FlexStyle.margin_top + FlexStyle.margin_bottom (web-compat-style-decl.js + prop-applier.ts)",
+      "supportedValues": [
+        "px"
       ],
-      "tests": [],
-      "notes": "Yoga shorthand.",
+      "unsupportedValues": [
+        "auto"
+      ],
+      "tests": [
+        "packages/pulp-react/test/prop-applier-rn-aliases.test.ts"
+      ],
+      "notes": "pulp #1434 batch 4: RN shorthand. No dedicated FlexStyle field; the JS-side translators (DOM-lite + @pulp/react) decompose to the existing per-edge slots before reaching the bridge. Inherits the per-edge yoga gap on auto (same as yoga/marginTop).",
       "issue": ""
     },
     "yoga/padding": {
@@ -4474,25 +4553,33 @@
       "issue": ""
     },
     "yoga/paddingHorizontal": {
-      "status": "missing",
-      "mapsTo": "no field",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "supported",
+      "mapsTo": "translator fan-out -> FlexStyle.padding_left + FlexStyle.padding_right (web-compat-style-decl.js + prop-applier.ts)",
+      "supportedValues": [
+        "px"
       ],
-      "tests": [],
-      "notes": "",
+      "unsupportedValues": [
+        "%"
+      ],
+      "tests": [
+        "packages/pulp-react/test/prop-applier-rn-aliases.test.ts"
+      ],
+      "notes": "pulp #1434 batch 4: RN shorthand. No dedicated FlexStyle field; the JS-side translators (DOM-lite + @pulp/react) decompose to the existing per-edge slots before reaching the bridge. Inherits the per-edge yoga gap on % (same as yoga/paddingLeft).",
       "issue": ""
     },
     "yoga/paddingVertical": {
-      "status": "missing",
-      "mapsTo": "no field",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "supported",
+      "mapsTo": "translator fan-out -> FlexStyle.padding_top + FlexStyle.padding_bottom (web-compat-style-decl.js + prop-applier.ts)",
+      "supportedValues": [
+        "px"
       ],
-      "tests": [],
-      "notes": "",
+      "unsupportedValues": [
+        "%"
+      ],
+      "tests": [
+        "packages/pulp-react/test/prop-applier-rn-aliases.test.ts"
+      ],
+      "notes": "pulp #1434 batch 4: RN shorthand. No dedicated FlexStyle field; the JS-side translators (DOM-lite + @pulp/react) decompose to the existing per-edge slots before reaching the bridge. Inherits the per-edge yoga gap on % (same as yoga/paddingTop).",
       "issue": ""
     },
     "yoga/borderWidth": {

@@ -245,6 +245,31 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
             setFlex(id, "margin_left", ms[3]);
             break;
         }
+        // pulp #1434 batch 4 — React Native shorthand aliases. RN code
+        // commonly writes `style={{ marginHorizontal: 8 }}` which CSS
+        // doesn't recognize, but the DOM-lite el.style adapter sees the
+        // raw key when consumers port RN snippets verbatim. Fan out to
+        // the same per-edge bridge calls the CSS marginInline / margin
+        // shorthand uses so the behavior is identical regardless of the
+        // entry surface. `auto` is a no-op for now (parseCSSLength returns
+        // null for non-numeric input); numeric and percent paths route
+        // through the same setFlex per-edge dispatch as marginLeft etc.
+        case "marginHorizontal": {
+            var mhv = parseCSSLength(resolved);
+            if (mhv) {
+                setFlex(id, "margin_left", mhv.value);
+                setFlex(id, "margin_right", mhv.value);
+            }
+            break;
+        }
+        case "marginVertical": {
+            var mvv = parseCSSLength(resolved);
+            if (mvv) {
+                setFlex(id, "margin_top", mvv.value);
+                setFlex(id, "margin_bottom", mvv.value);
+            }
+            break;
+        }
 
         // Padding (individual)
         case "paddingTop": {
@@ -274,6 +299,26 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
             setFlex(id, "padding_right", ps[1]);
             setFlex(id, "padding_bottom", ps[2]);
             setFlex(id, "padding_left", ps[3]);
+            break;
+        }
+        // pulp #1434 batch 4 — React Native shorthand aliases for padding.
+        // Same fan-out pattern as marginHorizontal / marginVertical above
+        // — paddingHorizontal sets padding_left + padding_right to the
+        // same value, paddingVertical sets padding_top + padding_bottom.
+        case "paddingHorizontal": {
+            var phv = parseCSSLength(resolved);
+            if (phv) {
+                setFlex(id, "padding_left", phv.value);
+                setFlex(id, "padding_right", phv.value);
+            }
+            break;
+        }
+        case "paddingVertical": {
+            var pvv = parseCSSLength(resolved);
+            if (pvv) {
+                setFlex(id, "padding_top", pvv.value);
+                setFlex(id, "padding_bottom", pvv.value);
+            }
             break;
         }
 
@@ -877,8 +922,11 @@ var __cssProperties__ = [
     "aspectRatio", "boxSizing",
     "margin", "marginTop", "marginRight", "marginBottom", "marginLeft",
     "marginInline", "marginBlock",
+    // pulp #1434 batch 4 — React Native shorthand aliases.
+    "marginHorizontal", "marginVertical",
     "padding", "paddingTop", "paddingRight", "paddingBottom", "paddingLeft",
     "paddingInline", "paddingBlock",
+    "paddingHorizontal", "paddingVertical",
     "backgroundColor", "color",
     "fontSize", "fontWeight", "fontStyle", "fontFamily", "letterSpacing", "lineHeight",
     "textAlign", "textTransform", "textDecoration", "textOverflow", "textShadow",
