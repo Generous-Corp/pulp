@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-05-04 20:01 PDT
+Last reviewed: 2026-05-04 20:09 PDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`.
@@ -163,6 +163,12 @@ Additional #493 view/widget progress is queued locally as
 SplitView drag minimum clamps, miss/drag guards, divider grip paint
 branches, and PropertyList boolean editing, category height/paint, and
 scalar value formatting paths. It remains unpushed and undispatched.
+Additional #493 view/gui progress is queued locally as
+`local/phase3-gui-components-edges-493` at `30d414ea`, covering
+TableListBox header sorting, selection and out-of-range row guards,
+scaled/aligned painting, and ConcertinaPanel invalid-index, content
+visibility/layout, paint, and mouse hit paths. It remains unpushed and
+undispatched.
 
 ## Phase 3 Operating Loop
 
