@@ -183,6 +183,17 @@ export function createMockBridge(): MockBridge {
         'setText', 'setTextColor', 'setTextAlign',
         'setSpectrumData', 'setWaveformData', 'setMeterLevel', 'setProgress',
         'setValue', 'setTheme', 'layout', 'on', 'registerHover',
+        // pulp #1381 — registerPointer arms the bridge's on_pointer_event
+        // callback for pointer-down/up/move/cancel events. Wheel goes
+        // through a separate registerWheel because the bridge's wheel
+        // lambda filters on me.is_wheel (registerPointer's lambda
+        // early-returns on is_wheel; registerWheel's on !is_wheel).
+        'registerPointer', 'registerWheel',
+        // pulp #1387 gap #1 — `overflow` prop missing from prop-applier.
+        // DOM-lite path (web-compat-style-decl.js) already routed
+        // overflow:hidden to setOverflow, but JSX consumers setting
+        // `style={{ overflow: 'hidden' }}` silently dropped it.
+        'setOverflow',
         // pulp #994 — SvgPath intrinsic surface
         'createSvgPath', 'setSvgPath', 'setSvgViewBox',
         'setSvgFill', 'setSvgStroke', 'setSvgStrokeWidth',
