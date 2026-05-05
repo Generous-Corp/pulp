@@ -110,7 +110,7 @@
         "last baseline"
       ],
       "tests": [],
-      "notes": "FlexAlign enum has {start, center, end, stretch, auto_} -- no baseline support. pulp #1434 rn batch B: baseline now wired via FlexAlign::baseline \u2192 YGAlignBaseline.",
+      "notes": "FlexAlign enum has {start, center, end, stretch, auto_} -- no baseline support. pulp #1434 rn batch B: baseline now wired via FlexAlign::baseline → YGAlignBaseline.",
       "issue": ""
     },
     "css/alignSelf": {
@@ -1684,7 +1684,7 @@
         "calc()"
       ],
       "tests": [],
-      "notes": "Same as max-width. pulp #1434 rn batch C: % values now route through FlexStyle::dim_*.unit \u2192 Yoga percent API.",
+      "notes": "Same as max-width. pulp #1434 rn batch C: % values now route through FlexStyle::dim_*.unit → Yoga percent API.",
       "issue": ""
     },
     "css/maxWidth": {
@@ -1698,7 +1698,7 @@
         "calc()"
       ],
       "tests": [],
-      "notes": "0 = no maximum (semantic differs from CSS where unspecified = none). pulp #1434 rn batch C: % values now route through FlexStyle::dim_*.unit \u2192 Yoga percent API.",
+      "notes": "0 = no maximum (semantic differs from CSS where unspecified = none). pulp #1434 rn batch C: % values now route through FlexStyle::dim_*.unit → Yoga percent API.",
       "issue": ""
     },
     "css/minHeight": {
@@ -1712,7 +1712,7 @@
         "calc()"
       ],
       "tests": [],
-      "notes": "pulp #1434 rn batch C: % values now route through FlexStyle::dim_*.unit \u2192 Yoga percent API.",
+      "notes": "pulp #1434 rn batch C: % values now route through FlexStyle::dim_*.unit → Yoga percent API.",
       "issue": ""
     },
     "css/minWidth": {
@@ -1726,7 +1726,7 @@
         "calc()"
       ],
       "tests": [],
-      "notes": "pulp #1434 rn batch C: % values now route through FlexStyle::dim_*.unit \u2192 Yoga percent API.",
+      "notes": "pulp #1434 rn batch C: % values now route through FlexStyle::dim_*.unit → Yoga percent API.",
       "issue": ""
     },
     "css/mixBlendMode": {
@@ -3618,7 +3618,7 @@
       ],
       "unsupportedValues": [],
       "tests": [],
-      "notes": "pulp #1434 rn batch C: prop-applier forwards string|number; bridge dispatches percent via FlexStyle::dim_max_height.unit; yoga_layout.cpp routes to YGNodeStyleSetMaxHeightPercent. pulp #1434 rn batch C: prop-applier forwards string|number; bridge dispatches percent via FlexStyle::dim_max_height.unit \u2192 YGNodeStyleSetMaxHeightPercent.",
+      "notes": "pulp #1434 rn batch C: prop-applier forwards string|number; bridge dispatches percent via FlexStyle::dim_max_height.unit; yoga_layout.cpp routes to YGNodeStyleSetMaxHeightPercent. pulp #1434 rn batch C: prop-applier forwards string|number; bridge dispatches percent via FlexStyle::dim_max_height.unit → YGNodeStyleSetMaxHeightPercent.",
       "issue": ""
     },
     "rn/maxWidth": {
@@ -3630,7 +3630,7 @@
       ],
       "unsupportedValues": [],
       "tests": [],
-      "notes": "pulp #1434 rn batch C: prop-applier forwards string|number; bridge dispatches percent via FlexStyle::dim_max_width.unit; yoga_layout.cpp routes to YGNodeStyleSetMaxWidthPercent. pulp #1434 rn batch C: prop-applier forwards string|number; bridge dispatches percent via FlexStyle::dim_max_width.unit \u2192 YGNodeStyleSetMaxWidthPercent.",
+      "notes": "pulp #1434 rn batch C: prop-applier forwards string|number; bridge dispatches percent via FlexStyle::dim_max_width.unit; yoga_layout.cpp routes to YGNodeStyleSetMaxWidthPercent. pulp #1434 rn batch C: prop-applier forwards string|number; bridge dispatches percent via FlexStyle::dim_max_width.unit → YGNodeStyleSetMaxWidthPercent.",
       "issue": ""
     },
     "rn/minHeight": {
@@ -3642,7 +3642,7 @@
       ],
       "unsupportedValues": [],
       "tests": [],
-      "notes": "pulp #1434 rn batch C: prop-applier forwards string|number; bridge dispatches percent via FlexStyle::dim_min_height.unit; yoga_layout.cpp routes to YGNodeStyleSetMinHeightPercent. pulp #1434 rn batch C: prop-applier forwards string|number; bridge dispatches percent via FlexStyle::dim_min_height.unit \u2192 YGNodeStyleSetMinHeightPercent.",
+      "notes": "pulp #1434 rn batch C: prop-applier forwards string|number; bridge dispatches percent via FlexStyle::dim_min_height.unit; yoga_layout.cpp routes to YGNodeStyleSetMinHeightPercent. pulp #1434 rn batch C: prop-applier forwards string|number; bridge dispatches percent via FlexStyle::dim_min_height.unit → YGNodeStyleSetMinHeightPercent.",
       "issue": ""
     },
     "rn/minWidth": {
@@ -3654,7 +3654,7 @@
       ],
       "unsupportedValues": [],
       "tests": [],
-      "notes": "pulp #1434 rn batch C: prop-applier forwards string|number; bridge dispatches percent via FlexStyle::dim_min_width.unit; yoga_layout.cpp routes to YGNodeStyleSetMinWidthPercent. pulp #1434 rn batch C: prop-applier forwards string|number; bridge dispatches percent via FlexStyle::dim_min_width.unit \u2192 YGNodeStyleSetMinWidthPercent.",
+      "notes": "pulp #1434 rn batch C: prop-applier forwards string|number; bridge dispatches percent via FlexStyle::dim_min_width.unit; yoga_layout.cpp routes to YGNodeStyleSetMinWidthPercent. pulp #1434 rn batch C: prop-applier forwards string|number; bridge dispatches percent via FlexStyle::dim_min_width.unit → YGNodeStyleSetMinWidthPercent.",
       "issue": ""
     },
     "rn/mixBlendMode": {
@@ -4109,14 +4109,25 @@
       "issue": "https://github.com/danielraffel/pulp/issues/1434"
     },
     "rn/transform": {
-      "status": "missing",
-      "mapsTo": "no @pulp/react prop. CSS surface routes through setScale/setRotation/setTranslate but with reduced function set.",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "array of {scale|rotate|translate|...}"
+      "status": "partial",
+      "mapsTo": "@pulp/react prop-applier walks the array and dispatches setTranslate(id, x, y) / setRotation(id, deg) / setScale(id, s) per the within-array merged snapshot (prop-applier.ts:175+ since pulp #1434 Triage #9). Within-array axis merging — [{translateX:10},{translateY:20}] produces ONE setTranslate(10,20).",
+      "supportedValues": [
+        "array of {translateX|translateY|rotate|rotateZ|scale|scaleX|scaleY}",
+        "rotate/rotateZ accepts \"45deg\" / \"0.785rad\" / 45 / \"0.5turn\" / \"50grad\"",
+        "translate values in px",
+        "multi-op arrays merge axes correctly (e.g. [{translateX:10},{translateY:20}] dispatches one setTranslate(10,20))"
       ],
-      "tests": [],
-      "notes": "MAJOR -- RN's transform is an array of objects; @pulp/react has none of it.",
+      "unsupportedValues": [
+        "skewX / skewY (bridge fn unregistered — View::set_skew exists; pulp follow-up)",
+        "independent scaleX != scaleY (bridge setScale is uniform only — last-write-wins; pulp follow-up)",
+        "rotateX / rotateY (2D View has no 3D surface)",
+        "perspective / matrix",
+        "CSS string form \"translateX(10px) rotate(45deg)\" — pass array instead"
+      ],
+      "tests": [
+        "packages/pulp-react/test/prop-applier-transform.test.ts"
+      ],
+      "notes": "pulp #1434 Triage #9 — Figma/v0/Claude Design transition states emit this constantly; was the largest single import-readiness gap on rn surface.",
       "issue": ""
     },
     "rn/transformOrigin": {
@@ -4289,7 +4300,7 @@
       ],
       "unsupportedValues": [],
       "tests": [],
-      "notes": "All 6 modes covered. Bridge accepts both CSS spelling (flex-start/flex-end) and Yoga spelling (start/end) \u2014 CSS translator _cssToFlex maps the former to the latter. pulp #1434 rn batch B: confirmed bridge accepts flex-start/flex-end aliases too via @pulp/react prop-applier path.",
+      "notes": "All 6 modes covered. Bridge accepts both CSS spelling (flex-start/flex-end) and Yoga spelling (start/end) — CSS translator _cssToFlex maps the former to the latter. pulp #1434 rn batch B: confirmed bridge accepts flex-start/flex-end aliases too via @pulp/react prop-applier path.",
       "issue": ""
     },
     "yoga/alignItems": {
@@ -4306,7 +4317,7 @@
       ],
       "unsupportedValues": [],
       "tests": [],
-      "notes": "pulp #1434 rn batch B: bridge accepts both CSS (flex-start/flex-end/baseline) and Yoga (start/end) spellings; FlexAlign extended with baseline \u2192 YGAlignBaseline.",
+      "notes": "pulp #1434 rn batch B: bridge accepts both CSS (flex-start/flex-end/baseline) and Yoga (start/end) spellings; FlexAlign extended with baseline → YGAlignBaseline.",
       "issue": ""
     },
     "yoga/alignSelf": {

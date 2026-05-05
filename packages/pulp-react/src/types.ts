@@ -115,7 +115,39 @@ export interface StyleProps {
     ///   lists are deferred — single-shadow path lands first.
     /// `'none'` / `null` / `undefined` clears the slot.
     boxShadow?: BoxShadow | string | null;
+    /// RN-style transform array (pulp #1434 Triage #9). An array of
+    /// single-property objects — Figma / v0.dev / Claude Design exports
+    /// emit this constantly. Wired ops:
+    ///   • `translateX`, `translateY` — number, px
+    ///   • `rotate`, `rotateZ` — `'45deg'` / `'1rad'` / numeric (deg)
+    ///   • `scale` — uniform scalar
+    ///   • `scaleX`, `scaleY` — last-write-wins (bridge has uniform
+    ///     setScale only; independent axes deferred)
+    /// Deferred (silently no-op):
+    ///   • `skewX`, `skewY` — bridge fn unregistered; follow-up
+    ///   • `rotateX`, `rotateY`, `perspective`, `matrix` — 2D View
+    ///     model has no 3D / matrix surface
+    /// CSS-string form (`'translateX(10px) rotate(45deg)'`) is deferred
+    /// — pass the array shape instead.
+    transform?: TransformOp[];
 }
+
+/// One entry in a `transform` array. RN spec: a single-property object
+/// per entry (you don't combine ops in one entry). pulp #1434 Triage #9.
+export type TransformOp =
+    | { translateX: number }
+    | { translateY: number }
+    | { rotate: string | number }
+    | { rotateZ: string | number }
+    | { scale: number }
+    | { scaleX: number }
+    | { scaleY: number }
+    | { skewX: string | number }
+    | { skewY: string | number }
+    | { rotateX: string | number }
+    | { rotateY: string | number }
+    | { perspective: number }
+    | { matrix: ReadonlyArray<number> };
 
 /// Object form of `boxShadow` for RN-flavored consumers (mirrors the
 /// `border` prop shape). pulp #1434 Triage #15.
