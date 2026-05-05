@@ -902,3 +902,41 @@ Gotchas surfaced while landing the four-phase SignalGraph follow-up:
   `ship` SKILL.md § "`sign-and-release.yml` must declare …" for the
   full gotcha; pulp #720 + #724 for the history. When adding a new
   release-time workflow, add the same block.
+
+### Shipyard-drift detection — pre-push hook logs push origin (pulp #1406)
+
+`.githooks/pre-push` writes every push to `.git/.shipyard-drift-log`
+(tab-separated: timestamp, branch, sha, origin) so we can audit when
+PRs went up via `shipyard pr` (the canonical full-validation path)
+versus a direct `git push` (which silently bypasses skill-sync,
+version-bump, diff-coverage, and SSH-host validation, turning CI
+into the discovery channel).
+
+**Origin signals** (any one marks the push as supervised):
+- `SHIPYARD_PR_RUNNING=1` — set by shipyard's wrapper when it
+  invokes git push internally. Upstream feature request open at
+  the shipyard CLI repo to make this canonical.
+- `PULP_VIA_SHIPYARD=1` — user-set fallback marker for supervised
+  direct pushes (e.g. inside a `shipyard ship` retry, or when
+  using `git push` deliberately under shipyard tooling that
+  doesn't expose the env var yet).
+
+**Behavior**:
+- Push proceeds either way (escape hatches need to keep working).
+- When neither var is set, hook prints a loud warning with the
+  recovery checklist (rate-limit / shipyard-bug / SSH-down).
+- The drift log is append-only and gitignored.
+
+**When to suppress the warning** (acceptable temporary fallback):
+1. GraphQL rate limit exhausted — verify with
+   `gh api rate_limit --jq .resources.graphql.remaining` and
+   note the reset time.
+2. Shipyard tool itself fails — file an issue at the shipyard CLI
+   repo, link it in the PR description.
+3. SSH host unreachable — prefer `shipyard pr --skip-target NAME`
+   (deliberate skip) over direct push.
+
+In all three cases, set `PULP_VIA_SHIPYARD=1` on the direct-push
+command to record the push as supervised AND suppress the warning.
+
+After the obstacle clears, resume `shipyard pr` on the next PR.
