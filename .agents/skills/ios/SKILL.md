@@ -297,6 +297,16 @@ Builds the `.appex` only. The App Store container host-app target is authored se
 
 Touched here because `core/format/src/au_view_controller_ios.mm` is dual-owned by `ios` + `auv3` + `view-bridge`. The view controller's ivars `_bridge`, `_viewHost`, `_fallbackView` are destroyed in REVERSE declaration order by the runtime; the resulting sequence (host destroyed before bridge) is what makes the `root_.set_plugin_view_host(nullptr)` call in `~PluginViewHost` safe. Calling `_bridge->close()` explicitly in `dealloc` reverses that order, frees the View first, and the host's destructor then dereferences a dangling reference — crashes AUv3 editor close. Codex P1 review on PR #653. Full rationale lives in the `auv3` skill under "PulpAUViewController::dealloc — never call `_bridge->close()` explicitly".
 
+### iOS GPU host must run idle_callback inside the CADisplayLink tick (pulp #1402)
+
+`IOSGpuWindowHost::tick()` (in `core/view/platform/ios/window_host_ios.mm`) is the per-vsync entry point and MUST invoke `idle_callback_()` BEFORE the `needs_repaint` check. Without this, JS `requestAnimationFrame` / `setTimeout` / async-result queues never fire on iOS GPU because `set_idle_callback` was inheriting the `WindowHost` base class no-op (parallel gap to the macOS one fixed in PR #1400 and the Android one in #1404).
+
+The fix is two pieces:
+1. Override `set_idle_callback` to store the callback in a non-atomic field (CADisplayLink fires on `mainRunLoop` so the read-and-invoke happens on main only — no atomic guard needed unlike macOS GPU's CV thread).
+2. In `tick()`, run `idle_callback_()` first; the callback can `request_repaint`, which arms `needs_repaint_` and triggers `render_frame()` in the same tick.
+
+CPU iOS host (`IOSWindowHost`) has the same gap but no display link; `repaint()` just calls `[root_view_ setNeedsDisplay]` and UIKit drives `drawRect:` only on user interaction. A separate CADisplayLink-on-CPU-path fix is owed; not blocking AUv3 use cases since AUv3 host apps go through the GPU path.
+
 ## See Also
 
 - `android` skill — parallel structure for Android NDK.
