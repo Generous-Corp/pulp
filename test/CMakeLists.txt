@@ -1537,6 +1537,11 @@ add_executable(pulp-test-svg-path-widget test_svg_path_widget.cpp)
 target_link_libraries(pulp-test-svg-path-widget PRIVATE pulp::view Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-svg-path-widget)
 
+# SvgRect + SvgLine widget tests (issue-1416)
+add_executable(pulp-test-svg-rect-widget test_svg_rect_widget.cpp)
+target_link_libraries(pulp-test-svg-rect-widget PRIVATE pulp::view Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-svg-rect-widget)
+
 # ScrollView tests
 add_executable(pulp-test-scroll-view test_scroll_view.cpp)
 target_link_libraries(pulp-test-scroll-view PRIVATE pulp::view Catch2::Catch2WithMain)

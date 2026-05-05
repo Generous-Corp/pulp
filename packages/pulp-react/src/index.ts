@@ -94,6 +94,7 @@ export type {
     KnobProps, FaderProps, SpectrumProps, WaveformProps, MeterProps,
     ProgressProps, XYPadProps, CheckboxProps, ToggleProps, ComboProps,
     ListBoxProps, CanvasProps, ImageProps, IconProps, SvgPathProps,
+    SvgRectProps, SvgLineProps,
     FlexDirection, FlexAlign, FlexAlignSelf, FlexJustify,
     FlexProps, StyleProps, BaseProps,
     IntrinsicElementMap, IntrinsicElementName,

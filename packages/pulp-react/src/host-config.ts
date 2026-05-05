@@ -100,6 +100,8 @@ function createWidget(type: Type, id: string, parentId: string, props: Props): v
         case 'Image':       call('createImage', id, parentId); return;
         case 'Icon':        call('createIcon', id, parentId); return;
         case 'SvgPath':     call('createSvgPath', id, parentId); return;
+        case 'SvgRect':     call('createSvgRect', id, parentId); return;
+        case 'SvgLine':     call('createSvgLine', id, parentId); return;
         default: {
             // Should be unreachable thanks to the typed intrinsics in types.ts.
             const _exhaustive: never = type;

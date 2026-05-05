@@ -217,6 +217,47 @@ export interface SvgPathProps extends BaseProps {
     strokeWidth?: number;
 }
 
+/// Inline SVG `<rect>` widget (pulp #1416). Renders a rectangle with
+/// the configured x/y/width/height + fill/stroke. Pairs with SvgLine
+/// for chart-style and band-shape thumbnail UIs (Spectr [G] preset
+/// manager).
+export interface SvgRectProps extends BaseProps {
+    /// Rect origin x in widget-local units. Defaults to 0.
+    x?: number;
+    /// Rect origin y in widget-local units. Defaults to 0.
+    y?: number;
+    /// Rect width in widget-local units. Defaults to 0 (invisible).
+    width?: number;
+    /// Rect height in widget-local units. Defaults to 0 (invisible).
+    height?: number;
+    /// Fill color as hex (`#rrggbb` / `#rrggbbaa`) or `"none"`. Default
+    /// is opaque black (matches SVG `<rect>` default of `fill="black"`).
+    fill?: string;
+    /// Stroke color as hex or `"none"`. Default: no stroke.
+    stroke?: string;
+    /// Stroke width in widget-local units. Default 1.
+    strokeWidth?: number;
+}
+
+/// Inline SVG `<line>` widget (pulp #1416). Renders a 1-D line from
+/// (x1, y1) to (x2, y2) with the configured stroke + width. SVG
+/// `<line>` has no fill; for API consistency with `<rect>` and
+/// `<path>` the bridge exposes `fill` but it's a no-op for lines.
+export interface SvgLineProps extends BaseProps {
+    /// Start endpoint x in widget-local units. Defaults to 0.
+    x1?: number;
+    /// Start endpoint y in widget-local units. Defaults to 0.
+    y1?: number;
+    /// End endpoint x in widget-local units. Defaults to 0.
+    x2?: number;
+    /// End endpoint y in widget-local units. Defaults to 0.
+    y2?: number;
+    /// Stroke color as hex or `"none"`. Default: opaque black.
+    stroke?: string;
+    /// Stroke width in widget-local units. Default 1.
+    strokeWidth?: number;
+}
+
 // ── Element-name → intrinsic-props map ──────────────────────────────
 // The host config consults this implicitly; tests assert names against it.
 export interface IntrinsicElementMap {
@@ -244,6 +285,8 @@ export interface IntrinsicElementMap {
     Image: ImageProps;
     Icon: IconProps;
     SvgPath: SvgPathProps;
+    SvgRect: SvgRectProps;
+    SvgLine: SvgLineProps;
 }
 
 export type IntrinsicElementName = keyof IntrinsicElementMap;

@@ -197,6 +197,9 @@ export function createMockBridge(): MockBridge {
         // pulp #994 — SvgPath intrinsic surface
         'createSvgPath', 'setSvgPath', 'setSvgViewBox',
         'setSvgFill', 'setSvgStroke', 'setSvgStrokeWidth',
+        // pulp #1416 — SvgRect + SvgLine intrinsic surface
+        'createSvgRect', 'setSvgRect',
+        'createSvgLine', 'setSvgLine',
         // pulp #1148 — generalized overlay-click routing
         'claimOverlay', 'releaseOverlay',
     ];

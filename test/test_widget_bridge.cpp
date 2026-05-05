@@ -3969,3 +3969,190 @@ TEST_CASE("CSSStyleDeclaration display routes none/flex/block/inline-block/inlin
     REQUIRE(p_inline_flex->visible());
     REQUIRE_FALSE(p_none->visible());
 }
+
+// ── pulp #1416 — SvgRectWidget + SvgLineWidget JS bridge integration ─────────
+//
+// Mirrors the #965 SvgPath bridge tests. Closes Spectr [G] preset
+// manager band-shape thumbnails: MiniPreview renders <svg><rect> per
+// band + <line> separators, which dom-adapter routes to <View> with
+// SVG attribute props. Without these bridge handlers the geometry is
+// dropped on the floor and the tiles render blank.
+
+#include <pulp/view/widgets/svg_line.hpp>
+#include <pulp/view/widgets/svg_rect.hpp>
+
+TEST_CASE("WidgetBridge createSvgRect produces a SvgRectWidget the bridge can address",
+          "[view][bridge][issue-1416]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script("createSvgRect('bar', '')");
+    bridge.load_script("setSvgRect('bar', 10, 20, 50, 30)");
+    bridge.load_script("setSvgFill('bar', '#ff0000')");
+    bridge.load_script("setSvgStroke('bar', '#000000')");
+    bridge.load_script("setSvgStrokeWidth('bar', 2.0)");
+
+    auto* w = dynamic_cast<SvgRectWidget*>(bridge.widget("bar"));
+    REQUIRE(w != nullptr);
+    REQUIRE(w->rect_x() == 10.0f);
+    REQUIRE(w->rect_y() == 20.0f);
+    REQUIRE(w->rect_width() == 50.0f);
+    REQUIRE(w->rect_height() == 30.0f);
+    REQUIRE(w->has_fill());
+    REQUIRE(w->has_stroke());
+    REQUIRE(w->stroke_width() == 2.0f);
+    REQUIRE(w->fill_color().r8() == 255);
+    REQUIRE(w->fill_color().g8() == 0);
+    REQUIRE(w->fill_color().b8() == 0);
+}
+
+TEST_CASE("WidgetBridge setSvgFill 'none' disables fill on SvgRectWidget",
+          "[view][bridge][issue-1416]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script("createSvgRect('a', '')");
+    bridge.load_script("setSvgRect('a', 0, 0, 10, 10)");
+    bridge.load_script("setSvgFill('a', 'none')");
+    bridge.load_script("setSvgStroke('a', '#222222')");
+    bridge.load_script("setSvgStrokeWidth('a', 1.5)");
+
+    auto* w = dynamic_cast<SvgRectWidget*>(bridge.widget("a"));
+    REQUIRE(w != nullptr);
+    REQUIRE_FALSE(w->has_fill());
+    REQUIRE(w->has_stroke());
+    REQUIRE(w->stroke_width() == 1.5f);
+}
+
+TEST_CASE("WidgetBridge createSvgRect + paint produces fill_rect at expected geometry",
+          "[view][bridge][issue-1416]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script("createSvgRect('bar', '')");
+    bridge.load_script("setSvgRect('bar', 5, 6, 40, 8)");
+    bridge.load_script("setSvgFill('bar', '#00ff00')");
+
+    auto* w = dynamic_cast<SvgRectWidget*>(bridge.widget("bar"));
+    REQUIRE(w != nullptr);
+
+    pulp::canvas::RecordingCanvas rc;
+    w->paint(rc);
+
+    bool saw_fill = false;
+    for (const auto& cmd : rc.commands()) {
+        if (cmd.type == pulp::canvas::DrawCommand::Type::fill_rect) {
+            REQUIRE(cmd.f[0] == 5.0f);
+            REQUIRE(cmd.f[1] == 6.0f);
+            REQUIRE(cmd.f[2] == 40.0f);
+            REQUIRE(cmd.f[3] == 8.0f);
+            saw_fill = true;
+        }
+    }
+    REQUIRE(saw_fill);
+}
+
+TEST_CASE("WidgetBridge createSvgLine produces a SvgLineWidget the bridge can address",
+          "[view][bridge][issue-1416]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script("createSvgLine('sep', '')");
+    bridge.load_script("setSvgLine('sep', 0, 10, 100, 10)");
+    bridge.load_script("setSvgStroke('sep', '#0000ff')");
+    bridge.load_script("setSvgStrokeWidth('sep', 1.5)");
+
+    auto* w = dynamic_cast<SvgLineWidget*>(bridge.widget("sep"));
+    REQUIRE(w != nullptr);
+    REQUIRE(w->x1() == 0.0f);
+    REQUIRE(w->y1() == 10.0f);
+    REQUIRE(w->x2() == 100.0f);
+    REQUIRE(w->y2() == 10.0f);
+    REQUIRE(w->has_stroke());
+    REQUIRE(w->stroke_width() == 1.5f);
+    REQUIRE(w->stroke_color().r8() == 0);
+    REQUIRE(w->stroke_color().g8() == 0);
+    REQUIRE(w->stroke_color().b8() == 255);
+}
+
+TEST_CASE("WidgetBridge setSvgStroke 'none' disables stroke on SvgLineWidget",
+          "[view][bridge][issue-1416]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script("createSvgLine('l', '')");
+    bridge.load_script("setSvgLine('l', 0, 0, 10, 10)");
+    bridge.load_script("setSvgStroke('l', 'none')");
+
+    auto* w = dynamic_cast<SvgLineWidget*>(bridge.widget("l"));
+    REQUIRE(w != nullptr);
+    REQUIRE_FALSE(w->has_stroke());
+}
+
+TEST_CASE("WidgetBridge createSvgLine + paint emits stroke_line at endpoints",
+          "[view][bridge][issue-1416]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script("createSvgLine('sep', '')");
+    bridge.load_script("setSvgLine('sep', 1, 2, 11, 12)");
+    bridge.load_script("setSvgStroke('sep', '#ff00ff')");
+    bridge.load_script("setSvgStrokeWidth('sep', 2.5)");
+
+    auto* w = dynamic_cast<SvgLineWidget*>(bridge.widget("sep"));
+    REQUIRE(w != nullptr);
+
+    pulp::canvas::RecordingCanvas rc;
+    w->paint(rc);
+
+    bool saw_line = false;
+    for (const auto& cmd : rc.commands()) {
+        if (cmd.type == pulp::canvas::DrawCommand::Type::stroke_line) {
+            REQUIRE(cmd.f[0] == 1.0f);
+            REQUIRE(cmd.f[1] == 2.0f);
+            REQUIRE(cmd.f[2] == 11.0f);
+            REQUIRE(cmd.f[3] == 12.0f);
+            saw_line = true;
+        }
+    }
+    REQUIRE(saw_line);
+}
+
+TEST_CASE("WidgetBridge SvgRect uses parent for hierarchy attachment",
+          "[view][bridge][issue-1416]") {
+    // The createSvgRect bridge handler accepts a parent_id so JSX can
+    // mount band thumbnails inside their MiniPreview row.
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script("createCol('preview', '')");
+    bridge.load_script("createSvgRect('band1', 'preview')");
+    bridge.load_script("createSvgRect('band2', 'preview')");
+    bridge.load_script("createSvgLine('axis', 'preview')");
+
+    REQUIRE(bridge.widget("band1") != nullptr);
+    REQUIRE(bridge.widget("band2") != nullptr);
+    REQUIRE(bridge.widget("axis") != nullptr);
+    auto* preview = bridge.widget("preview");
+    REQUIRE(preview != nullptr);
+    REQUIRE(preview->child_count() == 3);
+}

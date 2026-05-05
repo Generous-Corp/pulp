@@ -5,6 +5,8 @@
 #include <pulp/view/text_editor.hpp>
 #include <pulp/view/canvas_widget.hpp>
 #include <pulp/view/svg_path_widget.hpp>
+#include <pulp/view/widgets/svg_rect.hpp>
+#include <pulp/view/widgets/svg_line.hpp>
 #include <pulp/view/modal.hpp>
 #include <pulp/view/asset_manager.hpp>
 #include <pulp/view/design_import.hpp>
@@ -2427,28 +2429,41 @@ void WidgetBridge::register_api() {
         return choc::value::Value();
     });
 
+    // pulp #1416 — setSvgFill / setSvgStroke / setSvgStrokeWidth are
+    // polymorphic across all SVG-primitive widgets so JSX consumers see
+    // a uniform fill/stroke surface. SvgPathWidget is the legacy path
+    // (#965 / #994); SvgRectWidget and SvgLineWidget mirror the API with
+    // the same hex / "none" / strokeWidth semantics.
     engine_.register_function("setSvgFill", [this, parseHexColor](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto hex = args.get<std::string>(1, "");
+        const bool clear = hex.empty() || hex == "none";
         if (auto* w = dynamic_cast<SvgPathWidget*>(widget(id))) {
-            if (hex.empty() || hex == "none") {
-                w->clear_fill();
-            } else {
-                w->set_fill_color(parseHexColor(hex));
-            }
+            if (clear) w->clear_fill();
+            else       w->set_fill_color(parseHexColor(hex));
+        } else if (auto* r = dynamic_cast<SvgRectWidget*>(widget(id))) {
+            if (clear) r->clear_fill();
+            else       r->set_fill_color(parseHexColor(hex));
         }
+        // SvgLineWidget has no fill semantics — the call is intentionally
+        // a no-op for line widgets so JSX consumers can pass `fill="none"`
+        // without bridge-level dispatch failures.
         return choc::value::Value();
     });
 
     engine_.register_function("setSvgStroke", [this, parseHexColor](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto hex = args.get<std::string>(1, "");
+        const bool clear = hex.empty() || hex == "none";
         if (auto* w = dynamic_cast<SvgPathWidget*>(widget(id))) {
-            if (hex.empty() || hex == "none") {
-                w->clear_stroke();
-            } else {
-                w->set_stroke_color(parseHexColor(hex));
-            }
+            if (clear) w->clear_stroke();
+            else       w->set_stroke_color(parseHexColor(hex));
+        } else if (auto* r = dynamic_cast<SvgRectWidget*>(widget(id))) {
+            if (clear) r->clear_stroke();
+            else       r->set_stroke_color(parseHexColor(hex));
+        } else if (auto* l = dynamic_cast<SvgLineWidget*>(widget(id))) {
+            if (clear) l->clear_stroke();
+            else       l->set_stroke_color(parseHexColor(hex));
         }
         return choc::value::Value();
     });
@@ -2456,8 +2471,65 @@ void WidgetBridge::register_api() {
     engine_.register_function("setSvgStrokeWidth", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
         auto width = args.get<double>(1, 1.0);
+        const float fw = static_cast<float>(width);
         if (auto* w = dynamic_cast<SvgPathWidget*>(widget(id))) {
-            w->set_stroke_width(static_cast<float>(width));
+            w->set_stroke_width(fw);
+        } else if (auto* r = dynamic_cast<SvgRectWidget*>(widget(id))) {
+            r->set_stroke_width(fw);
+        } else if (auto* l = dynamic_cast<SvgLineWidget*>(widget(id))) {
+            l->set_stroke_width(fw);
+        }
+        return choc::value::Value();
+    });
+
+    // pulp #1416 — SvgRectWidget bridge. Mirrors createSvgPath /
+    // setSvgPath. Geometry is local to the widget origin (NOT
+    // bounds()-translated). x/y default to 0, w/h default to 0 so an
+    // un-set rect is invisible by default.
+    engine_.register_function("createSvgRect", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto pid = args.get<std::string>(1, "");
+        auto w = std::make_unique<SvgRectWidget>();
+        w->set_id(id);
+        widgets_[id] = w.get();
+        resolve_parent(pid)->add_child(std::move(w));
+        return choc::value::createString(id);
+    });
+
+    engine_.register_function("setSvgRect", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto x = args.get<double>(1, 0.0);
+        auto y = args.get<double>(2, 0.0);
+        auto width = args.get<double>(3, 0.0);
+        auto height = args.get<double>(4, 0.0);
+        if (auto* w = dynamic_cast<SvgRectWidget*>(widget(id))) {
+            w->set_rect(static_cast<float>(x), static_cast<float>(y),
+                        static_cast<float>(width), static_cast<float>(height));
+        }
+        return choc::value::Value();
+    });
+
+    // pulp #1416 — SvgLineWidget bridge. Mirrors createSvgPath /
+    // setSvgRect. Endpoints are local to the widget origin.
+    engine_.register_function("createSvgLine", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto pid = args.get<std::string>(1, "");
+        auto w = std::make_unique<SvgLineWidget>();
+        w->set_id(id);
+        widgets_[id] = w.get();
+        resolve_parent(pid)->add_child(std::move(w));
+        return choc::value::createString(id);
+    });
+
+    engine_.register_function("setSvgLine", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto x1 = args.get<double>(1, 0.0);
+        auto y1 = args.get<double>(2, 0.0);
+        auto x2 = args.get<double>(3, 0.0);
+        auto y2 = args.get<double>(4, 0.0);
+        if (auto* w = dynamic_cast<SvgLineWidget*>(widget(id))) {
+            w->set_line(static_cast<float>(x1), static_cast<float>(y1),
+                        static_cast<float>(x2), static_cast<float>(y2));
         }
         return choc::value::Value();
     });

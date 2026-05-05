@@ -180,6 +180,8 @@ target_sources(pulp-view PRIVATE
     src/app_framework.cpp
     src/canvas_widget.cpp
     src/svg_path_widget.cpp
+    src/widgets/svg_rect.cpp
+    src/widgets/svg_line.cpp
     src/visualization_bridge.cpp
     src/frame_clock.cpp
     src/window_manager.cpp

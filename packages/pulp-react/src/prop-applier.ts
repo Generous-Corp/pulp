@@ -150,13 +150,56 @@ function applyEventHandler(id: string, key: string, value: unknown): void {
     });
 }
 
+/// pulp #1416 — emit one setSvgRect call carrying the full geometry
+/// (x, y, width, height). Driven by applyOne when ANY of the four
+/// geometry props change so the bridge never sees a partial update
+/// that would clobber unset axes back to zero. Reads current values
+/// from `props` (the live React props snapshot) and falls back to 0
+/// for un-set axes — matches SVG `<rect>` defaults.
+function emitSvgRectGeometry(id: string, props: Record<string, unknown>): void {
+    const x = typeof props.x === 'number' ? props.x as number : 0;
+    const y = typeof props.y === 'number' ? props.y as number : 0;
+    const w = typeof props.width === 'number' ? props.width as number : 0;
+    const h = typeof props.height === 'number' ? props.height as number : 0;
+    call('setSvgRect', id, x, y, w, h);
+}
+
+/// pulp #1416 — emit one setSvgLine call carrying the full geometry
+/// (x1, y1, x2, y2). Same partial-update guard as emitSvgRectGeometry.
+function emitSvgLineGeometry(id: string, props: Record<string, unknown>): void {
+    const x1 = typeof props.x1 === 'number' ? props.x1 as number : 0;
+    const y1 = typeof props.y1 === 'number' ? props.y1 as number : 0;
+    const x2 = typeof props.x2 === 'number' ? props.x2 as number : 0;
+    const y2 = typeof props.y2 === 'number' ? props.y2 as number : 0;
+    call('setSvgLine', id, x1, y1, x2, y2);
+}
+
 /// Apply a single prop to its corresponding bridge setter.
-function applyOne(id: string, type: string, key: string, value: unknown): void {
+function applyOne(id: string, type: string, key: string, value: unknown, props?: Record<string, unknown>): void {
     if (value === undefined || value === null) {
         // No-op — Pulp has no "unset" for most setters; rely on React
         // unmount + recreate for full clears. Selective resets can be
         // added per-prop here if a regression appears.
         return;
+    }
+
+    // pulp #1416 — SvgRect / SvgLine geometry props collide with View
+    // flex props (width/height) and event/positioning props (x/y), so
+    // dispatch on `type` BEFORE the generic flex routing. The geometry
+    // setters are atomic — one bridge call per rect/line carries the
+    // full quad of coords — to avoid partial updates clobbering the
+    // unset axes back to zero.
+    if (type === 'SvgRect') {
+        if (key === 'x' || key === 'y' || key === 'width' || key === 'height') {
+            if (props) emitSvgRectGeometry(id, props);
+            return;
+        }
+    }
+    if (type === 'SvgLine') {
+        if (key === 'x1' || key === 'y1' || key === 'x2' || key === 'y2') {
+            if (props) emitSvgLineGeometry(id, props);
+            return;
+        }
     }
 
     switch (key) {
@@ -319,6 +362,22 @@ function applyOne(id: string, type: string, key: string, value: unknown): void {
 export function applyAllProps(instance: PulpInstance): void {
     const { id, type, props } = instance;
     logApply('applyAll', id, type, Object.keys(props).length);
+    // pulp #1416 — for SvgRect / SvgLine, emit the geometry call once
+    // up-front from the full props snapshot, then skip the per-prop
+    // dispatch for the four geometry keys (otherwise we'd issue four
+    // identical setSvgRect / setSvgLine calls during the loop).
+    let svgGeometryEmitted = false;
+    if (type === 'SvgRect') {
+        if (('x' in props) || ('y' in props) || ('width' in props) || ('height' in props)) {
+            emitSvgRectGeometry(id, props);
+            svgGeometryEmitted = true;
+        }
+    } else if (type === 'SvgLine') {
+        if (('x1' in props) || ('y1' in props) || ('x2' in props) || ('y2' in props)) {
+            emitSvgLineGeometry(id, props);
+            svgGeometryEmitted = true;
+        }
+    }
     for (const key of Object.keys(props)) {
         if (isReactInternal(key)) continue;
         if (key === 'children') continue;  // text children handled by caller
@@ -326,7 +385,11 @@ export function applyAllProps(instance: PulpInstance): void {
             applyEventHandler(id, key, props[key]);
             continue;
         }
-        applyOne(id, type, key, props[key]);
+        if (svgGeometryEmitted) {
+            if (type === 'SvgRect' && (key === 'x' || key === 'y' || key === 'width' || key === 'height')) continue;
+            if (type === 'SvgLine' && (key === 'x1' || key === 'y1' || key === 'x2' || key === 'y2')) continue;
+        }
+        applyOne(id, type, key, props[key], props);
     }
 }
 
@@ -340,15 +403,44 @@ export function applyChangedProps(
     const { id, type } = instance;
     let mutated = false;
 
+    // pulp #1416 — coalesce SvgRect / SvgLine geometry changes into a
+    // single setSvgRect / setSvgLine call sourced from the post-update
+    // props snapshot. Without this, four separate prop diffs would each
+    // try to emit a partial geometry update.
+    const svgRectGeoChanged = type === 'SvgRect' && (
+        oldProps.x !== newProps.x ||
+        oldProps.y !== newProps.y ||
+        oldProps.width !== newProps.width ||
+        oldProps.height !== newProps.height
+    );
+    const svgLineGeoChanged = type === 'SvgLine' && (
+        oldProps.x1 !== newProps.x1 ||
+        oldProps.y1 !== newProps.y1 ||
+        oldProps.x2 !== newProps.x2 ||
+        oldProps.y2 !== newProps.y2
+    );
+    if (svgRectGeoChanged) {
+        emitSvgRectGeometry(id, newProps);
+        mutated = true;
+    }
+    if (svgLineGeoChanged) {
+        emitSvgLineGeometry(id, newProps);
+        mutated = true;
+    }
+
     // Walk new props — set anything that changed value
     for (const key of Object.keys(newProps)) {
         if (isReactInternal(key)) continue;
         if (key === 'children') continue;
+        // SvgRect / SvgLine geometry already emitted above; skip the
+        // per-prop dispatch so we don't double-fire bridge calls.
+        if (svgRectGeoChanged && type === 'SvgRect' && (key === 'x' || key === 'y' || key === 'width' || key === 'height')) continue;
+        if (svgLineGeoChanged && type === 'SvgLine' && (key === 'x1' || key === 'y1' || key === 'x2' || key === 'y2')) continue;
         if (oldProps[key] !== newProps[key]) {
             if (isEventHandler(key)) {
                 applyEventHandler(id, key, newProps[key]);
             } else {
-                applyOne(id, type, key, newProps[key]);
+                applyOne(id, type, key, newProps[key], newProps);
             }
             mutated = true;
         }
