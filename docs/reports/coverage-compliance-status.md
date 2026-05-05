@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-05-04 21:34 PDT
+Last reviewed: 2026-05-04 21:42 PDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`.
@@ -224,6 +224,10 @@ Additional #493 view progress is queued locally as
 `local/phase3-image-cache-trim-493` at `1afb279e`, covering
 ImageCache byte-budget lowering, least-recently-used trimming, and
 releaser behavior. It remains unpushed and undispatched.
+Additional #493 view progress is queued locally as
+`local/phase3-visualization-bridge-edges-493` at `10405bc2`, covering
+VisualizationBridge disabled-waveform, zero-channel, and waveform
+capture-length clamp paths. It remains unpushed and undispatched.
 
 ## Phase 3 Operating Loop
 
