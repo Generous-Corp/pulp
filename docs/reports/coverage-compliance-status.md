@@ -477,9 +477,10 @@ through font-face-leading styles. The
 refreshed branch remains unpushed and undispatched; #1269 still points
 at the old remote head until Namespace capacity returns.
 Additional #640 audio progress is refreshed locally as
-`feature/phase3-mmap-reader-extra-640` at `3698bbe7`, rebased from the
+`feature/phase3-mmap-reader-extra-640` at `35ea8ae0`, rebased from the
 paused #1280 remote head `ed2ba7bf` onto current `origin/main`
-`50ff5822`, then onto current `origin/main` `b7ec8f08`, covering
+`50ff5822`, then onto current `origin/main` `b7ec8f08`, then onto current
+`origin/main` `6c8b9920`, covering
 `MemoryMappedAudioReader` unsupported-file fail-closed and EOF no-copy
 behavior. The refreshed branch remains unpushed and undispatched; #1280
 still points at the old remote head until Namespace capacity returns.
