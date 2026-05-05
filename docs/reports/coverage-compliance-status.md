@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-05-05 06:39 PDT
+Last reviewed: 2026-05-05 06:43 PDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`.
@@ -396,6 +396,13 @@ the paused #1271 remote head `62ca4512` onto current `origin/main`
 `0447498e`, covering create-target optional format suffixes, duplicate
 suppression, and empty standalone app target filtering. The refreshed
 branch remains unpushed and undispatched; #1271 still points at the old
+remote head until Namespace capacity returns.
+Additional #493 CLI package progress is refreshed locally as
+`feature/phase3-package-commands-coverage-493` at `89e30728`, rebased
+from the paused #1273 remote head `c52cd486` onto current `origin/main`
+`0447498e`, covering package target compatibility warnings when an
+installed package does not support a newly added target. The refreshed
+branch remains unpushed and undispatched; #1273 still points at the old
 remote head until Namespace capacity returns.
 Additional #640 audio progress is refreshed locally as
 `feature/phase3-mmap-reader-extra-640` at `84470694`, rebased from the
