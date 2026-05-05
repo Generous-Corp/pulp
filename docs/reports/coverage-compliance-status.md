@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-05-04 23:39 PDT
+Last reviewed: 2026-05-04 23:41 PDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`.
@@ -112,9 +112,10 @@ undispatched. Additional #493 view progress is queued locally as
 `fefb7e94` onto current `origin/main` and covering widget custom-shader
 fallbacks, minimal render-style branches, and knob/fader/toggle
 interaction edges, plus
-`local/phase3-audio-bridge-edges-493` at `255b0516`, covering
-AudioBridge first-pop, max-channel clamp, zero-sample analysis, and
-MeterBallistics tiny-value clamp paths. Both remain unpushed and
+`local/phase3-audio-bridge-edges-493` at `cba288df`, refreshed from
+`255b0516` onto current `origin/main` and covering AudioBridge
+first-pop, max-channel clamp, zero-sample analysis, and MeterBallistics
+tiny-value clamp paths. Both remain unpushed and
 undispatched. Additional #645 signal progress is queued locally as
 `local/phase3-adsr-edges-645` at `e4844caa`, covering ADSR immediate
 stage, idle `note_off`, and reset edge paths, plus
