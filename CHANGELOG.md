@@ -8,6 +8,11 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v0781"></a>
+## [0.78.1] - 2026-05-05
+
+- fix(cli): bake SDK version into Rust release binary
+
 <a id="v0780"></a>
 ## [0.78.0] - 2026-05-05
 
@@ -1293,6 +1298,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.78.1]: https://github.com/danielraffel/pulp/releases/tag/v0.78.1
 [0.78.0]: https://github.com/danielraffel/pulp/releases/tag/v0.78.0
 [0.77.0]: https://github.com/danielraffel/pulp/releases/tag/v0.77.0
 [0.76.0]: https://github.com/danielraffel/pulp/releases/tag/v0.76.0
