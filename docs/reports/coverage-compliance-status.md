@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-05-05 13:39 PDT
+Last reviewed: 2026-05-05 13:44 PDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`.
@@ -377,9 +377,10 @@ onto current `origin/main` `c18785c9`, then onto current `origin/main`
 lowering, least-recently-used trimming, and releaser behavior. It
 remains unpushed and undispatched.
 Additional #493 view progress is queued locally as
-`local/phase3-visualization-bridge-edges-493` at `bc8a0cfe`,
+`local/phase3-visualization-bridge-edges-493` at `453a19e7`,
 refreshed from `3e45d531` onto current `origin/main` `0447498e`, then
-refreshed again onto current `origin/main` `c18785c9`, covering
+refreshed again onto current `origin/main` `c18785c9`, then onto current
+`origin/main` `83271a94`, covering
 VisualizationBridge disabled-waveform, zero-channel, and waveform
 capture-length clamp paths. It remains unpushed and undispatched.
 Additional #493 view progress is queued locally as
