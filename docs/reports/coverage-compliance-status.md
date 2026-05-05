@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-05-05 02:38 PDT
+Last reviewed: 2026-05-05 02:41 PDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`.
@@ -201,8 +201,8 @@ Additional #493 view/code-editor progress is queued locally as
 successful load/save-as dirty-state behavior and RecentlyOpenedFilesList
 remove/missing-path behavior. It remains unpushed and undispatched.
 Additional #493 view/graph-editor progress is queued locally as
-`local/phase3-graph-editor-paint-493` at `2d21c893`, refreshed from
-`31d8d7cc` onto current `origin/main` and covering GraphEditorView
+`local/phase3-graph-editor-paint-493` at `d9ade421`, refreshed from
+`2d21c893` onto current `origin/main` `0447498e` and covering GraphEditorView
 auto-layout/manual-position preservation, unnamed node/multi-port
 painting, and feedback/MIDI edge paint colors. It remains unpushed and
 undispatched.
