@@ -347,9 +347,10 @@ repeated lock callbacks and locked poll no-op behavior, plus ThemeManager
 locked-theme, locked-appearance callback, and unlock behavior. It remains
 unpushed and undispatched.
 Additional #493 view progress is queued locally as
-`local/phase3-tree-view-edges-493` at `5444a6c5`, refreshed from
+`local/phase3-tree-view-edges-493` at `656158c8`, refreshed from
 `94ddde56` onto current `origin/main` `0447498e`, then refreshed again
-onto current `origin/main` `c18785c9`, covering TreeView disclosure
+onto current `origin/main` `c18785c9`, then onto current `origin/main`
+`24047ba3`, covering TreeView disclosure
 collapse, left-key consumed-state behavior, selected-row paint highlight,
 and expanded/collapsed disclosure paint output. It remains unpushed and
 undispatched.
