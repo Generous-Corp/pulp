@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-05-05 06:15 PDT
+Last reviewed: 2026-05-05 06:18 PDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`.
@@ -380,6 +380,14 @@ paused #1280 remote head `ed2ba7bf` onto current `origin/main`
 fail-closed and EOF no-copy behavior. The refreshed branch remains
 unpushed and undispatched; #1280 still points at the old remote head
 until Namespace capacity returns.
+Additional #493 view progress is refreshed locally as
+`feature/view-text-editor-coverage-493-next` at `f377ef5c`, rebased from
+the paused #1282 remote head `03e5e3cd` onto current `origin/main`
+`0447498e`, covering TextEditor key-up/unhandled-key, modifier/word and
+shift navigation, delete/redo, shift-click, and exact double-click word
+selection paths. The refreshed branch remains unpushed and undispatched;
+#1282 still points at the old remote head until Namespace capacity
+returns.
 
 ## Phase 3 Operating Loop
 
