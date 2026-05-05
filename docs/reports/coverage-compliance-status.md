@@ -479,12 +479,13 @@ paused #1280 remote head `ed2ba7bf` onto current `origin/main`
 behavior. The refreshed branch remains unpushed and undispatched; #1280
 still points at the old remote head until Namespace capacity returns.
 Additional #493 view progress is refreshed locally as
-`feature/view-text-editor-coverage-493-next` at `40606e1d`, rebased from
+`feature/view-text-editor-coverage-493-next` at `6e97178e`, rebased from
 the paused #1282 remote head `03e5e3cd` onto current `origin/main`
-`50ff5822` after superseding local refresh `f377ef5c` on `0447498e`,
-covering TextEditor key-up/unhandled-key, modifier/word and shift
-navigation, delete/redo, shift-click, and exact double-click word
-selection paths. The refreshed branch remains unpushed and
+`50ff5822`, then onto `b7ec8f08`, then `cf5ea658`, after superseding
+local refresh `f377ef5c` on `0447498e`, covering TextEditor
+key-up/unhandled-key, modifier/word and shift navigation, delete/redo,
+shift-click, and exact double-click word selection paths. The refreshed
+branch remains unpushed and
 undispatched; #1282 still points at the old remote head until Namespace
 capacity returns.
 
