@@ -35,8 +35,8 @@ When the user says any of: **"push to main"**, **"ship this"**, **"ship it"**,
 **"we're done"**, **"merge this"**, **"push it"**, **"run CI"**, **"push a PR"** —
 run `shipyard pr` (not `gh pr create` + `shipyard ship` separately).
 
-`shipyard pr` is the single orchestrator (Shipyard v0.19.1+; pinned at
-v0.29.0 in `tools/shipyard.toml`). It:
+`shipyard pr` is the single orchestrator (Shipyard v0.19.1+; currently pinned
+in `tools/shipyard.toml`). It:
 
 1. Calls `tools/scripts/skill_sync_check.py` (resolved via Shipyard's
    `[validation]` path-discovery, explicit in `.shipyard/config.toml`) and
@@ -62,7 +62,11 @@ Backward compatibility: raw `shipyard ship` / `shipyard run` still work for
 diagnostics, experimental branches, or when `shipyard pr` itself is being
 debugged. Do not use them as the primary ship path.
 
-### Behaviour notes at the current pin (v0.29.0)
+### Shipyard pin and behaviour notes
+
+Pin bumps must go through `shipyard pin bump --to vX.Y.Z`, not a hand edit.
+Shipyard v0.50.0+ is Rust-backed and macOS ships as an Apple-Silicon-only
+signed/notarized `.dmg`, so the version and asset metadata must move together.
 
 - **Release SDKs are expected to include desktop WebView symbols**
   (pulp #695). `.github/workflows/release-cli.yml` now configures the

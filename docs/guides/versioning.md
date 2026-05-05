@@ -256,8 +256,14 @@ dependency-pin update, not a Pulp-versioning event:
 
 ```bash
 python3 tools/deps/audit.py --strict --check-upstream --format markdown
-# edit tools/shipyard.toml
+shipyard pin bump --to vX.Y.Z
 python3 tools/deps/validate_hosts.py
 ```
+
+Prefer `shipyard pin bump` over hand-editing `tools/shipyard.toml`. It owns
+the stale-worktree, downgrade, redundant-main-pin, version, and release-asset
+guards. This matters for Rust Shipyard releases because v0.50.0+ changed the
+macOS distribution shape to Apple-Silicon-only signed `.dmg` assets; the pin
+and asset metadata should move together.
 
 See [CLAUDE.md § Dependency Update Workflow](https://github.com/danielraffel/pulp/blob/main/CLAUDE.md#dependency-update-workflow) for the full procedure. The `ci` skill's path map catches the file change and demands a SKILL.md review.

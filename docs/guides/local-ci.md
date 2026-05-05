@@ -13,10 +13,17 @@ Pulp validates branches on macOS (local), Ubuntu (SSH), and Windows (SSH) before
 
 ```bash
 ./tools/install-shipyard.sh              # install pinned version
+./tools/install-shipyard.sh --status     # compare installed vs pinned
 shipyard run                              # validate current branch
 shipyard ship                             # PR + validate + merge on green
 shipyard cloud run build <branch>         # dispatch to Namespace
 ```
+
+Pulp intentionally pins Shipyard in `tools/shipyard.toml` even if your daily
+global `shipyard` is newer. Use `shipyard pin bump --to vX.Y.Z` for pin
+updates instead of hand-editing the file; newer Rust Shipyard releases changed
+the macOS asset shape to a signed/notarized `.dmg`, and the bump command keeps
+the version and asset metadata in sync.
 
 ### Shipping a PR: `pulp pr`
 
