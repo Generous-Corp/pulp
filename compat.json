@@ -334,22 +334,22 @@
       "mapsTo": "parseCSSColor -> setBackground(id, hex)",
       "supportedValues": [
         "#hex",
+        "#rgba",
         "rgb()",
         "rgba()",
         "hsl()",
         "hsla()",
+        "oklch()",
+        "oklab()",
+        "lch()",
+        "lab()",
+        "color(srgb|srgb-linear|display-p3)",
+        "transparent",
         "named colors"
       ],
-      "unsupportedValues": [
-        "color()",
-        "lab()",
-        "lch()",
-        "oklab()",
-        "oklch()",
-        "color-mix()"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "Modern color spaces not supported by parseCSSColor.",
+      "notes": "pulp #1434 Triage #8 — modern CSS color spaces (oklch, oklab, lch, lab, color() with srgb/srgb-linear/display-p3) now wired through parseCSSColor (css-parser.js). Spike-quality: converts to sRGB hex at parse time; deep wide-gamut path (Skia SkColor4f) is a follow-up. color-mix() and currentColor remain unsupported (deferred); wide-gamut HDR via Skia SkColor4f is a follow-up — current path converts to sRGB hex.",
       "issue": ""
     },
     "css/backgroundImage": {
@@ -517,13 +517,23 @@
       "status": "supported",
       "mapsTo": "web-compat-style-decl.js: 'borderColor' -> setBorderColor(id, color) — per-attribute, preserves width and radius.",
       "supportedValues": [
-        "any css color"
+        "#hex",
+        "#rgba",
+        "rgb()",
+        "rgba()",
+        "hsl()",
+        "hsla()",
+        "oklch()",
+        "oklab()",
+        "lch()",
+        "lab()",
+        "color(srgb|srgb-linear|display-p3)",
+        "transparent",
+        "named colors"
       ],
-      "unsupportedValues": [
-        "currentColor"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "Fixed 2026-04-26 (#1169). Previously routed onto the unified setBorder which clobbered radius. Now uses the dedicated setBorderColor bridge fn.",
+      "notes": "Fixed 2026-04-26 (#1169). Previously routed onto the unified setBorder which clobbered radius. Now uses the dedicated setBorderColor bridge fn. pulp #1434 Triage #8 — modern CSS color spaces (oklch, oklab, lch, lab, color() with srgb/srgb-linear/display-p3) now wired through parseCSSColor (css-parser.js). Spike-quality: converts to sRGB hex at parse time; deep wide-gamut path (Skia SkColor4f) is a follow-up. color-mix() and currentColor remain unsupported (deferred); wide-gamut HDR via Skia SkColor4f is a follow-up — current path converts to sRGB hex.",
       "issue": "1166"
     },
     "css/borderLeft": {
@@ -797,17 +807,22 @@
       "mapsTo": "parseCSSColor -> setTextColor(id, hex)",
       "supportedValues": [
         "#hex",
+        "#rgba",
         "rgb()",
         "rgba()",
         "hsl()",
         "hsla()",
-        "named"
+        "oklch()",
+        "oklab()",
+        "lch()",
+        "lab()",
+        "color(srgb|srgb-linear|display-p3)",
+        "transparent",
+        "named colors"
       ],
-      "unsupportedValues": [
-        "lab/lch/oklab/oklch/color-mix"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "",
+      "notes": "pulp #1434 Triage #8 — modern CSS color spaces (oklch, oklab, lch, lab, color() with srgb/srgb-linear/display-p3) now wired through parseCSSColor (css-parser.js). Spike-quality: converts to sRGB hex at parse time; deep wide-gamut path (Skia SkColor4f) is a follow-up. color-mix() and currentColor remain unsupported (deferred); wide-gamut HDR via Skia SkColor4f is a follow-up — current path converts to sRGB hex.",
       "issue": ""
     },
     "css/columnCount": {
@@ -2773,31 +2788,46 @@
       "status": "supported",
       "mapsTo": "background prop -> setBackground",
       "supportedValues": [
-        "#hex string"
-      ],
-      "unsupportedValues": [
-        "any non-hex"
-      ],
-      "tests": [],
-      "notes": "TS type for `background` is `string` (hex-only by convention).",
-      "issue": ""
-    },
-    "rn/borderBottomColor": {
-      "status": "partial",
-      "mapsTo": "@pulp/react prop-applier dispatches `borderBottomColor` to `setBorderBottomColor(id, color)` (prop-applier.ts:310-313 since #1396).",
-      "supportedValues": [
         "#hex",
+        "#rgba",
         "rgb()",
         "rgba()",
         "hsl()",
         "hsla()",
+        "oklch()",
+        "oklab()",
+        "lch()",
+        "lab()",
+        "color(srgb|srgb-linear|display-p3)",
+        "transparent",
         "named colors"
       ],
-      "unsupportedValues": [
-        "lab()/lch()/oklab()/oklch() (modern color spaces)"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "pulp #1434: catalog hygiene — flipped missing → supported, claim the wired surface (#1396 was the wiring PR).",
+      "notes": "pulp #1434 Triage #8 — modern CSS color spaces (oklch, oklab, lch, lab, color() with srgb/srgb-linear/display-p3) now wired through parseCSSColor (css-parser.js). Spike-quality: converts to sRGB hex at parse time; deep wide-gamut path (Skia SkColor4f) is a follow-up.",
+      "issue": ""
+    },
+    "rn/borderBottomColor": {
+      "status": "supported",
+      "mapsTo": "@pulp/react prop-applier dispatches `borderBottomColor` to `setBorderBottomColor(id, color)` (prop-applier.ts:310-313 since #1396).",
+      "supportedValues": [
+        "#hex",
+        "#rgba",
+        "rgb()",
+        "rgba()",
+        "hsl()",
+        "hsla()",
+        "oklch()",
+        "oklab()",
+        "lch()",
+        "lab()",
+        "color(srgb|srgb-linear|display-p3)",
+        "transparent",
+        "named colors"
+      ],
+      "unsupportedValues": [],
+      "tests": [],
+      "notes": "pulp #1434 Triage #8 — modern CSS color spaces (oklch, oklab, lch, lab, color() with srgb/srgb-linear/display-p3) now wired through parseCSSColor (css-parser.js). Spike-quality: converts to sRGB hex at parse time; deep wide-gamut path (Skia SkColor4f) is a follow-up.",
       "issue": ""
     },
     "rn/borderBottomLeftRadius": {
@@ -2844,21 +2874,26 @@
       "issue": ""
     },
     "rn/borderColor": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "@pulp/react prop-applier dispatches `borderColor` to `setBorderColor(id, ...)` (prop-applier.ts:300-302).",
       "supportedValues": [
         "#hex",
+        "#rgba",
         "rgb()",
         "rgba()",
         "hsl()",
         "hsla()",
+        "oklch()",
+        "oklab()",
+        "lch()",
+        "lab()",
+        "color(srgb|srgb-linear|display-p3)",
+        "transparent",
         "named colors"
       ],
-      "unsupportedValues": [
-        "lab()/lch()/oklab()/oklch() (modern color spaces)"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "pulp #1434: catalog hygiene — flipped missing → supported.",
+      "notes": "pulp #1434 Triage #8 — modern CSS color spaces (oklch, oklab, lch, lab, color() with srgb/srgb-linear/display-p3) now wired through parseCSSColor (css-parser.js). Spike-quality: converts to sRGB hex at parse time; deep wide-gamut path (Skia SkColor4f) is a follow-up.",
       "issue": ""
     },
     "rn/borderCurve": {
@@ -2885,21 +2920,26 @@
       "issue": ""
     },
     "rn/borderLeftColor": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "@pulp/react prop-applier dispatches `borderLeftColor` to `setBorderLeftColor(id, color)` (prop-applier.ts:310-313 since #1396).",
       "supportedValues": [
         "#hex",
+        "#rgba",
         "rgb()",
         "rgba()",
         "hsl()",
         "hsla()",
+        "oklch()",
+        "oklab()",
+        "lch()",
+        "lab()",
+        "color(srgb|srgb-linear|display-p3)",
+        "transparent",
         "named colors"
       ],
-      "unsupportedValues": [
-        "lab()/lch()/oklab()/oklch() (modern color spaces)"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "pulp #1434: catalog hygiene — flipped missing → supported, claim the wired surface (#1396 was the wiring PR).",
+      "notes": "pulp #1434 Triage #8 — modern CSS color spaces (oklch, oklab, lch, lab, color() with srgb/srgb-linear/display-p3) now wired through parseCSSColor (css-parser.js). Spike-quality: converts to sRGB hex at parse time; deep wide-gamut path (Skia SkColor4f) is a follow-up.",
       "issue": ""
     },
     "rn/borderLeftWidth": {
@@ -2932,21 +2972,26 @@
       "issue": ""
     },
     "rn/borderRightColor": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "@pulp/react prop-applier dispatches `borderRightColor` to `setBorderRightColor(id, color)` (prop-applier.ts:310-313 since #1396).",
       "supportedValues": [
         "#hex",
+        "#rgba",
         "rgb()",
         "rgba()",
         "hsl()",
         "hsla()",
+        "oklch()",
+        "oklab()",
+        "lch()",
+        "lab()",
+        "color(srgb|srgb-linear|display-p3)",
+        "transparent",
         "named colors"
       ],
-      "unsupportedValues": [
-        "lab()/lch()/oklab()/oklch() (modern color spaces)"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "pulp #1434: catalog hygiene — flipped missing → supported, claim the wired surface (#1396 was the wiring PR).",
+      "notes": "pulp #1434 Triage #8 — modern CSS color spaces (oklch, oklab, lch, lab, color() with srgb/srgb-linear/display-p3) now wired through parseCSSColor (css-parser.js). Spike-quality: converts to sRGB hex at parse time; deep wide-gamut path (Skia SkColor4f) is a follow-up.",
       "issue": ""
     },
     "rn/borderRightWidth": {
@@ -2989,21 +3034,26 @@
       "issue": ""
     },
     "rn/borderTopColor": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "@pulp/react prop-applier dispatches `borderTopColor` to `setBorderTopColor(id, color)` (prop-applier.ts:310-313 since #1396).",
       "supportedValues": [
         "#hex",
+        "#rgba",
         "rgb()",
         "rgba()",
         "hsl()",
         "hsla()",
+        "oklch()",
+        "oklab()",
+        "lch()",
+        "lab()",
+        "color(srgb|srgb-linear|display-p3)",
+        "transparent",
         "named colors"
       ],
-      "unsupportedValues": [
-        "lab()/lch()/oklab()/oklch() (modern color spaces)"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "pulp #1434: catalog hygiene — flipped missing → supported, claim the wired surface (#1396 was the wiring PR).",
+      "notes": "pulp #1434 Triage #8 — modern CSS color spaces (oklch, oklab, lch, lab, color() with srgb/srgb-linear/display-p3) now wired through parseCSSColor (css-parser.js). Spike-quality: converts to sRGB hex at parse time; deep wide-gamut path (Skia SkColor4f) is a follow-up.",
       "issue": ""
     },
     "rn/borderTopLeftRadius": {
@@ -3108,13 +3158,23 @@
       "status": "supported",
       "mapsTo": "textColor prop -> setTextColor",
       "supportedValues": [
-        "hex"
+        "#hex",
+        "#rgba",
+        "rgb()",
+        "rgba()",
+        "hsl()",
+        "hsla()",
+        "oklch()",
+        "oklab()",
+        "lch()",
+        "lab()",
+        "color(srgb|srgb-linear|display-p3)",
+        "transparent",
+        "named colors"
       ],
-      "unsupportedValues": [
-        "modern color spaces"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "Pulp prop name is `textColor` (LabelProps), not `color`.",
+      "notes": "pulp #1434 Triage #8 — modern CSS color spaces (oklch, oklab, lch, lab, color() with srgb/srgb-linear/display-p3) now wired through parseCSSColor (css-parser.js). Spike-quality: converts to sRGB hex at parse time; deep wide-gamut path (Skia SkColor4f) is a follow-up.",
       "issue": ""
     },
     "rn/columnGap": {

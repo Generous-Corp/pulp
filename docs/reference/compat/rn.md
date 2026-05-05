@@ -43,6 +43,17 @@ Spec walk:
   port verbatim. Catalog accuracy update — these entries were PASS
   already, but `supportedValues` now correctly enumerates the
   broadened type vocabulary.
+- **2026-05-05 (pulp #1434 Triage #8)** — `rn/backgroundColor`,
+  `rn/color`, and the per-edge `rn/border{Top,Right,Bottom,Left}Color`
+  + `rn/borderColor` entries now accept the CSS Color Module Level 4
+  modern color spaces: `oklch()`, `oklab()`, `lch()`, `lab()`, and
+  `color(srgb|srgb-linear|display-p3 ...)`. The shared `parseCSSColor`
+  helper (in `core/view/js/css-parser.js`, used by both the DOM-lite
+  path and any RN style consumer that resolves color strings)
+  converts to gamma-encoded sRGB hex at parse time. Reclassified
+  DIVERGE / partial → PASS for 7 `rn/*Color` entries. RN `style={{
+  color: 'oklch(0.7 0.18 240)' }}` ports verbatim from Figma copy-CSS,
+  v0.dev hero color tokens, and Claude Design transition states.
 - **2026-05-05 (pulp #1434 Triage #9)** — `rn/transform` now accepts
   the RN array-of-objects shape:
   ```js

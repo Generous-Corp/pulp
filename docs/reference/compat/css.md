@@ -49,6 +49,23 @@ specifics are out of scope.
   Reclassified DIVERGE → PASS for 8 per-edge + 4 alias entries.
   Mirrors PR #1426 (width/height %) and PR #1451
   (top/right/bottom/left %). Net: css drift_count -12, pass +12.
+- **2026-05-05 (pulp #1434 Triage #8)** — `parseCSSColor`
+  (`core/view/js/css-parser.js`) now recognizes the CSS Color Module
+  Level 4 modern color spaces: `oklch(L C H [/ A])`,
+  `oklab(L a b [/ A])`, `lch(L C H [/ A])`, `lab(L a b [/ A])`, and
+  `color(<space> r g b [/ A])` where `<space>` is one of `srgb`,
+  `srgb-linear`, `display-p3`. Spike-quality: components are converted
+  at parse time to gamma-encoded sRGB hex (`#rrggbb[aa]`) so the
+  existing Skia hex pipeline works unchanged. OKLab uses Björn
+  Ottosson's published matrices; CIE Lab uses D50→D65 Bradford
+  adaptation; display-P3 uses the standard P3→XYZ→linear sRGB matrix
+  product. Out-of-gamut values are clamped at the hex boundary.
+  Wide-gamut HDR via `SkColor4f` is a deferred follow-up;
+  `color-mix()` and `currentColor` are also deferred. Reclassified
+  DIVERGE → PASS for `css/backgroundColor`, `css/color`,
+  `css/borderColor` (plus seven matching `rn/*Color` entries). Figma
+  copy-CSS has been emitting `oklch(...)` since 2024; v0.dev, Tailwind,
+  and Claude Design emit `lab()`/`lch()` constantly.
 - **2026-05-05 (pulp #1434 css catalog hygiene)** — eight catalog-only
   refreshes: `css/width` and `css/height` now list `%` in
   `supportedValues` (mirroring `yoga/width` / `yoga/height` post-#1426 —
