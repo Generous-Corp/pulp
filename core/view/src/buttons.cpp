@@ -1,5 +1,7 @@
 #include <pulp/view/buttons.hpp>
 #include <pulp/canvas/canvas.hpp>
+#include <pulp/view/text_overflow.hpp>
+#include <algorithm>
 
 namespace pulp::view {
 
@@ -20,12 +22,18 @@ void TextButton::paint(canvas::Canvas& canvas) {
     canvas.set_line_width(1.0f);
     canvas.stroke_rect(0, 0, w, h);
 
-    // Label
+    // Label — pulp #1407 honors CSS text-overflow: ellipsis when set on
+    // the button via setTextOverflow(id, "ellipsis"). Reserves a small
+    // horizontal padding so the ellipsis doesn't touch the rounded edge.
     auto text_color = enabled_ ? canvas::Color::rgba(220, 220, 230) : canvas::Color::rgba(120, 120, 130);
     canvas.set_fill_color(text_color);
     canvas.set_font("system", 14.0f);
-    float text_w = canvas.measure_text(label_);
-    canvas.fill_text(label_, (w - text_w) / 2.0f, h * 0.65f);
+    constexpr float kButtonHPad = 8.0f;
+    std::string draw_label = text_overflow_ellipsis()
+        ? truncate_to_width(canvas, label_, std::max(0.0f, w - kButtonHPad * 2.0f))
+        : label_;
+    float text_w = canvas.measure_text(draw_label);
+    canvas.fill_text(draw_label, (w - text_w) / 2.0f, h * 0.65f);
 }
 
 void TextButton::on_mouse_down(Point) {

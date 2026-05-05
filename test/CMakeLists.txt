@@ -1489,6 +1489,11 @@ add_executable(pulp-test-typography-inheritance test_typography_inheritance.cpp)
 target_link_libraries(pulp-test-typography-inheritance PRIVATE pulp::view Catch2::Catch2WithMain)
 catch_discover_tests(pulp-test-typography-inheritance)
 
+# Text-overflow ellipsis helper — pulp #1407
+add_executable(pulp-test-text-overflow test_text_overflow.cpp)
+target_link_libraries(pulp-test-text-overflow PRIVATE pulp::view Catch2::Catch2WithMain)
+catch_discover_tests(pulp-test-text-overflow)
+
 # Editor bridge tests (pulp #709 — renderer-agnostic envelope/dispatcher)
 add_executable(pulp-test-editor-bridge test_editor_bridge.cpp)
 target_link_libraries(pulp-test-editor-bridge PRIVATE pulp::view Catch2::Catch2WithMain)

@@ -3771,3 +3771,41 @@ TEST_CASE("WidgetBridge claimOverlay installs dismiss callback that fires "
 
     pulp::view::View::active_overlay_ = nullptr;
 }
+
+// pulp #1407 — CSS translator must route `style.textOverflow = 'ellipsis'`
+// through the `setTextOverflow` bridge call. Stubs the bridge function in
+// JS-land to record the call (ID + mode) so the test verifies BOTH
+// directions: the CSS-translator emits the call AND the resolved value
+// makes it through to the native View flag.
+TEST_CASE("CSSStyleDeclaration translates textOverflow to setTextOverflow bridge call",
+          "[view][bridge][css][issue-1407]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        globalThis.__textOverflowCalls = [];
+        var __native_setTextOverflow = setTextOverflow;
+        setTextOverflow = function(id, mode) {
+            globalThis.__textOverflowCalls.push(id + '|' + mode);
+            return __native_setTextOverflow(id, mode);
+        };
+        createLabel('mytitle', 'long string that will be truncated', '');
+        var stub_el = { _id: 'mytitle', _nativeCreated: true };
+        var sd = new CSSStyleDeclaration(stub_el);
+        sd._applyProperty('textOverflow', 'ellipsis');
+    )");
+
+    auto count = engine.evaluate("globalThis.__textOverflowCalls.length")
+                       .getWithDefault<double>(-1);
+    REQUIRE(count == 1);
+    auto recorded = engine.evaluate("globalThis.__textOverflowCalls[0]")
+                          .getWithDefault<std::string>("");
+    REQUIRE(recorded == "mytitle|ellipsis");
+
+    auto* label = dynamic_cast<Label*>(bridge.widget("mytitle"));
+    REQUIRE(label != nullptr);
+    REQUIRE(label->text_overflow_ellipsis());
+}

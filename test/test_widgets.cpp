@@ -293,6 +293,83 @@ TEST_CASE("Label paints explicit lines and decorations", "[view][widget]") {
     REQUIRE(canvas.count(DrawCommand::Type::stroke_line) == 1);
 }
 
+// pulp #1407 — CSS `text-overflow: ellipsis` translates to native truncation.
+// RecordingCanvas::measure_text returns 7 px per byte, so a 100 px wide label
+// can fit ≈ 14 ASCII bytes plus the 3-byte U+2026 ellipsis (≈ 21 px) for a
+// 14 + 3 = 17-byte total ≤ 119 px. The truncate_to_width helper must
+// produce a string that ends with "…" (U+2026: 0xE2 0x80 0xA6) and whose
+// measured width ≤ the bounds.
+TEST_CASE("Label paints ellipsis when text-overflow set and text overflows bounds",
+          "[view][widget][issue-1407]") {
+    static constexpr const char* kEllipsis = "\xe2\x80\xa6";
+
+    Label label("Mid-band attenuation with high-shelf compensation");
+    label.set_bounds({0, 0, 100, 24});
+    label.set_text_overflow_ellipsis(true);
+
+    RecordingCanvas canvas;
+    label.paint(canvas);
+
+    auto fills = commands_of(canvas, DrawCommand::Type::fill_text);
+    REQUIRE(fills.size() == 1);
+    const auto& drawn = fills.front().text;
+
+    REQUIRE(drawn.size() >= 3);
+    REQUIRE(drawn.compare(drawn.size() - 3, 3, kEllipsis) == 0);
+    REQUIRE(canvas.measure_text(drawn) <= 100.0f);
+    REQUIRE(drawn != "Mid-band attenuation with high-shelf compensation");
+}
+
+TEST_CASE("Label leaves short text untruncated even when ellipsis is set",
+          "[view][widget][issue-1407]") {
+    Label label("OK");
+    label.set_bounds({0, 0, 200, 24});
+    label.set_text_overflow_ellipsis(true);
+
+    RecordingCanvas canvas;
+    label.paint(canvas);
+
+    auto fills = commands_of(canvas, DrawCommand::Type::fill_text);
+    REQUIRE(fills.size() == 1);
+    REQUIRE(fills.front().text == "OK");
+}
+
+TEST_CASE("Label truncates with center and right alignment too",
+          "[view][widget][issue-1407]") {
+    static constexpr const char* kEllipsis = "\xe2\x80\xa6";
+
+    for (auto align : {LabelAlign::center, LabelAlign::right}) {
+        Label label("Mid-band attenuation with high-shelf compensation");
+        label.set_bounds({0, 0, 100, 24});
+        label.set_text_overflow_ellipsis(true);
+        label.set_text_align(align);
+
+        RecordingCanvas canvas;
+        label.paint(canvas);
+
+        auto fills = commands_of(canvas, DrawCommand::Type::fill_text);
+        REQUIRE(fills.size() == 1);
+        const auto& drawn = fills.front().text;
+        REQUIRE(drawn.size() >= 3);
+        REQUIRE(drawn.compare(drawn.size() - 3, 3, kEllipsis) == 0);
+        REQUIRE(canvas.measure_text(drawn) <= 100.0f);
+    }
+}
+
+TEST_CASE("Label without text-overflow draws full string even if it overflows",
+          "[view][widget][issue-1407]") {
+    Label label("Mid-band attenuation with high-shelf compensation");
+    label.set_bounds({0, 0, 100, 24});
+    // text_overflow_ellipsis defaults to false.
+
+    RecordingCanvas canvas;
+    label.paint(canvas);
+
+    auto fills = commands_of(canvas, DrawCommand::Type::fill_text);
+    REQUIRE(fills.size() == 1);
+    REQUIRE(fills.front().text == "Mid-band attenuation with high-shelf compensation");
+}
+
 TEST_CASE("Label vertical text direction wraps paint in transforms", "[view][widget]") {
     Label label("Gain");
     label.set_bounds({0, 0, 32, 80});

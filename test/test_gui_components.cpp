@@ -333,6 +333,31 @@ TEST_CASE("TextButton paint covers enabled hover and disabled states",
     REQUIRE_FALSE(btn.is_enabled());
 }
 
+// pulp #1407 — CSS `text-overflow: ellipsis` on a TextButton truncates the
+// painted label so a long string never bleeds past the rounded background.
+TEST_CASE("TextButton paint truncates long labels with U+2026 when text-overflow set",
+          "[gui][button][issue-1407]") {
+    static constexpr const char* kEllipsis = "\xe2\x80\xa6";
+
+    TextButton btn("Mid-band attenuation with high-shelf compensation");
+    btn.set_bounds({0, 0, 80, 28});
+    btn.set_text_overflow_ellipsis(true);
+
+    RecordingCanvas canvas;
+    btn.paint(canvas);
+
+    std::string drawn;
+    int fill_text_count = 0;
+    for (const auto& cmd : canvas.commands()) {
+        if (cmd.type == DrawCommand::Type::fill_text) { drawn = cmd.text; ++fill_text_count; }
+    }
+    REQUIRE(fill_text_count == 1);
+    REQUIRE(drawn.size() >= 3);
+    REQUIRE(drawn.compare(drawn.size() - 3, 3, kEllipsis) == 0);
+    // Drawn label fits inside the button minus its 8 px horizontal padding.
+    REQUIRE(canvas.measure_text(drawn) <= 80.0f - 16.0f);
+}
+
 TEST_CASE("HyperlinkButton paint underlines only while hovered",
           "[gui][button][coverage]") {
     HyperlinkButton link("Docs", "https://example.invalid/docs");
