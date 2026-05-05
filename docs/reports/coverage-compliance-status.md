@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-05-04 17:22 PDT
+Last reviewed: 2026-05-04 17:37 PDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`.
@@ -105,7 +105,11 @@ plus #493 format tranche `local/phase3-validation-harness-json-493` at
 `15fac4aa`, covering ValidationHarness report metadata and entry JSON
 escaping, plus #493 host tranche `local/phase3-signal-graph-guards-493`
 at `adcf5dcf`, covering SignalGraph guard/default behavior. All remain
-unpushed and undispatched.
+unpushed and undispatched. Additional #493 view progress is queued
+locally as `local/phase3-widgets-render-paths-493` at `fefb7e94`,
+covering widget custom-shader fallbacks, minimal render-style branches,
+and knob/fader/toggle interaction edges; it also remains unpushed and
+undispatched.
 
 ## Phase 3 Operating Loop
 
