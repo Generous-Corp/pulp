@@ -339,9 +339,10 @@ advance/dismiss callback behavior, dismiss-on-click gating, and
 text/image paint output. It remains unpushed and undispatched; #1285
 still points at `d3cd9f47` until Namespace capacity returns.
 Additional #493 view progress is queued locally as
-`local/phase3-appearance-manager-493` at `3a0fae19`, refreshed from
+`local/phase3-appearance-manager-493` at `ce479305`, refreshed from
 `ceb05add` onto current `origin/main` `0447498e`, then refreshed again
-onto current `origin/main` `c18785c9`, covering AppearanceTracker
+onto current `origin/main` `c18785c9`, then onto current `origin/main`
+`24047ba3`, covering AppearanceTracker
 repeated lock callbacks and locked poll no-op behavior, plus ThemeManager
 locked-theme, locked-appearance callback, and unlock behavior. It remains
 unpushed and undispatched.
