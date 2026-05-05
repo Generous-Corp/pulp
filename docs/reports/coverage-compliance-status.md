@@ -211,12 +211,13 @@ official Python coverage runner intentionally excludes
 `tools/scripts/test_*.py`, so this guard has no measured non-test source
 surface in that focused runner. It remains unpushed and undispatched.
 Additional #640 platform progress is queued locally as
-`local/phase3-platform-environment-dispatch-640` at `7f2cf371`,
+`local/phase3-platform-environment-dispatch-640` at `325604de`,
 refreshed from `b271d2e6` to `422a64cc`, then onto current `origin/main`
-`bd036171`, then onto current `origin/main` `b7ec8f08`, covering
-Environment token self-move, listener removal before dispatch, and
-reset-during-dispatch skip behavior. It remains unpushed
-and undispatched. Additional #640 platform progress is queued locally as
+`bd036171`, then onto current `origin/main` `b7ec8f08`, then onto current
+`origin/main` `6c8b9920`, covering Environment token self-move, listener
+removal before dispatch, and reset-during-dispatch skip behavior. It
+remains unpushed and undispatched. Additional #640 platform progress is
+queued locally as
 `local/phase3-child-process-read-output-640` at `ca647d70`, refreshed
 from `55c46d02` to `4008bd73`, then onto current `origin/main`
 `bd036171`, then onto current `origin/main` `b7ec8f08`, then onto
