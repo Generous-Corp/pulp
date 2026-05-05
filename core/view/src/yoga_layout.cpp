@@ -101,9 +101,21 @@ static void apply_flex_style(YGNodeRef node, const FlexStyle& f, bool is_absolut
     if (mb > 0) YGNodeStyleSetMargin(node, YGEdgeBottom, mb);
     if (ml > 0) YGNodeStyleSetMargin(node, YGEdgeLeft, ml);
 
-    // Dimensions
-    if (f.preferred_width > 0) YGNodeStyleSetWidth(node, f.preferred_width);
-    if (f.preferred_height > 0) YGNodeStyleSetHeight(node, f.preferred_height);
+    // Dimensions — pulp #1423 dispatches on dim_*.unit so width/height
+    // accept percentage values. The bridge's setFlex(width|height, ...)
+    // path populates dim_width / dim_height with the unit info; this
+    // adapter routes percent values to Yoga's native percent API
+    // instead of treating "100%" as 100 px.
+    if (f.dim_width.unit == DimensionUnit::percent && f.dim_width.value > 0) {
+        YGNodeStyleSetWidthPercent(node, f.dim_width.value);
+    } else if (f.preferred_width > 0) {
+        YGNodeStyleSetWidth(node, f.preferred_width);
+    }
+    if (f.dim_height.unit == DimensionUnit::percent && f.dim_height.value > 0) {
+        YGNodeStyleSetHeightPercent(node, f.dim_height.value);
+    } else if (f.preferred_height > 0) {
+        YGNodeStyleSetHeight(node, f.preferred_height);
+    }
     if (f.min_width > 0) YGNodeStyleSetMinWidth(node, f.min_width);
     if (f.min_height > 0) YGNodeStyleSetMinHeight(node, f.min_height);
     if (f.max_width > 0) YGNodeStyleSetMaxWidth(node, f.max_width);

@@ -1680,8 +1680,40 @@ void WidgetBridge::register_api() {
         else if (key == "flex_basis") f.flex_basis = (float)val;
         else if (key == "flex_wrap") f.flex_wrap = val > 0;
         else if (key == "order") f.order = (int)val;
-        else if (key == "width") f.preferred_width = (float)val;
-        else if (key == "height") f.preferred_height = (float)val;
+        // pulp #1423 — width/height accept either a number ("100" → px)
+        // or a percentage string ("100%" → percent of parent). The CSS
+        // translator passes the raw resolved string for these two keys
+        // so the unit survives the bridge boundary; Yoga's native
+        // YGNodeStyleSet{Width,Height}Percent path is reached via
+        // FlexStyle::dim_width / dim_height in yoga_layout.cpp.
+        else if (key == "width") {
+            auto sval = args.get<std::string>(2, "");
+            if (!sval.empty() && sval.back() == '%') {
+                try {
+                    f.dim_width.value = std::stof(sval.substr(0, sval.size() - 1));
+                    f.dim_width.unit = pulp::view::DimensionUnit::percent;
+                    f.preferred_width = 0;  // disambiguate: percent path
+                } catch (...) { /* keep current state on parse fail */ }
+            } else {
+                f.preferred_width = (float)val;
+                f.dim_width.value = (float)val;
+                f.dim_width.unit = pulp::view::DimensionUnit::px;
+            }
+        }
+        else if (key == "height") {
+            auto sval = args.get<std::string>(2, "");
+            if (!sval.empty() && sval.back() == '%') {
+                try {
+                    f.dim_height.value = std::stof(sval.substr(0, sval.size() - 1));
+                    f.dim_height.unit = pulp::view::DimensionUnit::percent;
+                    f.preferred_height = 0;
+                } catch (...) { /* keep current state on parse fail */ }
+            } else {
+                f.preferred_height = (float)val;
+                f.dim_height.value = (float)val;
+                f.dim_height.unit = pulp::view::DimensionUnit::px;
+            }
+        }
         else if (key == "min_width") f.min_width = (float)val;
         else if (key == "min_height") f.min_height = (float)val;
         else if (key == "max_width") f.max_width = (float)val;

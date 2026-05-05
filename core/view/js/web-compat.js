@@ -1149,15 +1149,20 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
             break;
         }
 
-        // Dimensions
+        // Dimensions — pulp #1423 forwards percent values verbatim so
+        // the bridge can route to Yoga's percent API.
         case "width": {
             var w = parseCSSLength(resolved);
-            if (w) setFlex(id, "width", w.value);
+            if (!w) break;
+            if (w.unit === "%") setFlex(id, "width", w.value + "%");
+            else setFlex(id, "width", w.value);
             break;
         }
         case "height": {
             var h = parseCSSLength(resolved);
-            if (h) setFlex(id, "height", h.value);
+            if (!h) break;
+            if (h.unit === "%") setFlex(id, "height", h.value + "%");
+            else setFlex(id, "height", h.value);
             break;
         }
         case "minWidth": {

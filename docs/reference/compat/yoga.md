@@ -38,6 +38,21 @@ which mirrors the upstream Yoga API.
 5. `yoga/alignItems` / `yoga/alignSelf` `baseline` — `FlexAlign` enum
    has no baseline variant.
 
+## Recent updates
+
+- **2026-05-05 (pulp #1423)** — `yoga/width` and `yoga/height` now
+  accept percentage values (`'100%'`, `'50%'`). The CSS translator
+  passes `'NN%'` strings verbatim to the bridge; `FlexStyle.dim_width`
+  / `dim_height` carry the unit; `yoga_layout.cpp` dispatches to
+  Yoga's native `YGNodeStyleSetWidthPercent` / `HeightPercent`. `auto`
+  remains unsupported (deferred). Drift cleared on both entries
+  (drift_count: 23 → 21).
+- **2026-05-05 (pulp #1420)** — `yoga/display` catalog claims `flex`
+  and `none` cleanly; reclassified NOT-IMPL → PASS. Bonus:
+  `inline-block` ≡ `block`, `inline-flex` ≡ `flex` in the CSS
+  translator (matches RN + CSS spec for non-text-flowing formatting
+  contexts).
+
 ## Direction (RTL) support
 
 `yoga/direction` is `missing`. Pulp does not currently model RTL

@@ -4234,3 +4234,72 @@ TEST_CASE("CSSStyleDeclaration translates whiteSpace to setWhiteSpace bridge cal
     REQUIRE(label != nullptr);
     REQUIRE(label->white_space_nowrap());
 }
+
+// pulp #1423 — `width: '100%'` and `height: '100%'` propagate through the
+// CSS translator and bridge to Yoga's percent API. Spectr uses the
+// `width:'100%'` form at spectr-editor-extracted.js:2377 and :3414.
+TEST_CASE("CSS width/height percent strings propagate to Yoga via setFlex",
+          "[view][bridge][css][issue-1423]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 200});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('child', '');
+        var stub = { _id: 'child', _nativeCreated: true };
+        var sd = new CSSStyleDeclaration(stub);
+        sd._applyProperty('width', '100%');
+        sd._applyProperty('height', '50%');
+    )");
+
+    auto* child = bridge.widget("child");
+    REQUIRE(child != nullptr);
+
+    // FlexStyle.dim_width / dim_height now carry the percent unit, so
+    // yoga_layout.cpp will emit YGNodeStyleSetWidthPercent/HeightPercent.
+    const auto& f = child->flex();
+    REQUIRE(f.dim_width.unit == DimensionUnit::percent);
+    REQUIRE_THAT(f.dim_width.value, WithinAbs(100.0f, 0.001f));
+    REQUIRE(f.dim_height.unit == DimensionUnit::percent);
+    REQUIRE_THAT(f.dim_height.value, WithinAbs(50.0f, 0.001f));
+
+    // After layout against the 400x200 root, the child should be laid
+    // out as 400 wide (100% of parent) and 100 tall (50% of parent).
+    root.layout_children();
+    REQUIRE_THAT(child->bounds().width, WithinAbs(400.0f, 0.5f));
+    REQUIRE_THAT(child->bounds().height, WithinAbs(100.0f, 0.5f));
+}
+
+// pulp #1423 — px values still work after the percent-aware refactor.
+// Regression guard: the old code path stored only `preferred_width`;
+// the new path also stores into `dim_width.unit = px`. Layout must keep
+// using the px size when no percent was specified.
+TEST_CASE("CSS width/height px paths unchanged by percent support",
+          "[view][bridge][css][issue-1423]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 200});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('child', '');
+        var stub = { _id: 'child', _nativeCreated: true };
+        var sd = new CSSStyleDeclaration(stub);
+        sd._applyProperty('width', '120px');
+        sd._applyProperty('height', '80px');
+    )");
+
+    auto* child = bridge.widget("child");
+    REQUIRE(child != nullptr);
+    const auto& f = child->flex();
+    REQUIRE(f.dim_width.unit == DimensionUnit::px);
+    REQUIRE_THAT(f.preferred_width, WithinAbs(120.0f, 0.001f));
+    REQUIRE_THAT(f.preferred_height, WithinAbs(80.0f, 0.001f));
+
+    root.layout_children();
+    REQUIRE_THAT(child->bounds().width, WithinAbs(120.0f, 0.5f));
+    REQUIRE_THAT(child->bounds().height, WithinAbs(80.0f, 0.5f));
+}

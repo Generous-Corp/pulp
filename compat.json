@@ -4185,32 +4185,32 @@
       "issue": ""
     },
     "yoga/width": {
-      "status": "supported",
-      "mapsTo": "FlexStyle.preferred_width (float)",
+      "status": "partial",
+      "mapsTo": "FlexStyle.preferred_width (px) + FlexStyle.dim_width (percent)",
       "supportedValues": [
-        "px (number)"
+        "px",
+        "%"
       ],
       "unsupportedValues": [
-        "%",
         "auto"
       ],
       "tests": [],
-      "notes": "Internal Dimension struct supports vw/vh/% but is not exposed via the setFlex bridge.",
-      "issue": ""
+      "notes": "pulp #1423: percent values route through FlexStyle.dim_width (DimensionUnit::percent) and yoga_layout.cpp calls YGNodeStyleSetWidthPercent. CSS translator passes 'NN%' strings verbatim to the bridge. `auto` remains unsupported (deferred follow-up).",
+      "issue": "https://github.com/danielraffel/pulp/issues/1423"
     },
     "yoga/height": {
-      "status": "supported",
-      "mapsTo": "FlexStyle.preferred_height (float)",
+      "status": "partial",
+      "mapsTo": "FlexStyle.preferred_height (px) + FlexStyle.dim_height (percent)",
       "supportedValues": [
-        "px"
+        "px",
+        "%"
       ],
       "unsupportedValues": [
-        "%",
         "auto"
       ],
       "tests": [],
-      "notes": "Same as width.",
-      "issue": ""
+      "notes": "pulp #1423: same as width (YGNodeStyleSetHeightPercent path via FlexStyle.dim_height). `auto` remains unsupported (deferred follow-up).",
+      "issue": "https://github.com/danielraffel/pulp/issues/1423"
     },
     "yoga/minWidth": {
       "status": "supported",

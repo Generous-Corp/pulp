@@ -174,14 +174,24 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
         }
 
         // Dimensions
+        // pulp #1423 — pass the resolved string verbatim for width/height
+        // when it is a percent value. The bridge's setFlex(width|height,
+        // ...) inspects the third arg as a string and detects '%' suffix.
+        // This keeps the existing px path numeric (no JS-side regression)
+        // while letting "100%" survive through to Yoga's native
+        // YGNodeStyleSet{Width,Height}Percent path.
         case "width": {
             var w = parseCSSLength(resolved);
-            if (w) setFlex(id, "width", w.value);
+            if (!w) break;
+            if (w.unit === "%") setFlex(id, "width", w.value + "%");
+            else setFlex(id, "width", w.value);
             break;
         }
         case "height": {
             var h = parseCSSLength(resolved);
-            if (h) setFlex(id, "height", h.value);
+            if (!h) break;
+            if (h.unit === "%") setFlex(id, "height", h.value + "%");
+            else setFlex(id, "height", h.value);
             break;
         }
         case "minWidth": {
