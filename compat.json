@@ -32,12 +32,13 @@
     "_changelog": {
       "2026-04-30": "Initial population — 361 entries across css/, rn/, yoga/. react/, html/, canvas2d/ stubbed. PR #1166.",
       "2026-05-04": "Refresh after PRs #1167, #1169, #1173, #1174, #1291, #1297, #1344, #1345, #1347, #1348, #1353. Populated canvas2d/ (~60 entries) and html/ (~30 entries). Added rn/d, rn/viewBox, rn/fill, rn/stroke, rn/strokeWidth, rn/overlay (SvgPath + overlay-routing). Updated css/border, css/borderRadius, css/borderColor, css/fontFamily status to reflect per-attribute setter routing. Added css/_hover_pseudo for :hover stylesheet support.",
-      "2026-05-05": "pulp #1434 batch 4: React Native shorthand aliases marginHorizontal / marginVertical / paddingHorizontal / paddingVertical now fan out at the JS-side translators (web-compat-style-decl.js + prop-applier.ts) to the existing per-edge bridge setters. Reclassified rn/* + yoga/* entries from missing -> supported and added new css/* entries (4 new keys; css count 195 -> 199)."
+      "2026-05-05": "pulp #1434 batch 4: React Native shorthand aliases marginHorizontal / marginVertical / paddingHorizontal / paddingVertical now fan out at the JS-side translators (web-compat-style-decl.js + prop-applier.ts) to the existing per-edge bridge setters. Reclassified rn/* + yoga/* entries from missing -> supported and added new css/* entries (4 new keys; css count 195 -> 199).",
+      "2026-05-06": "pulp #1544: Added yoga/flex and yoga/flexFlow catalog entries documenting the unsupported CSS shorthand surface on the Yoga side (yoga count 53 -> 55). PR #1563."
     },
     "counts": {
       "css": 199,
       "rn": 120,
-      "yoga": 53,
+      "yoga": 55,
       "react": 0,
       "html": 59,
       "canvas2d": 63,
@@ -4617,6 +4618,40 @@
       ],
       "tests": [],
       "notes": "Yoga upstream supports YGAuto / percent; Pulp accepts only px float. pulp #1434 rn batch C: bridge accepts NN% and the \"auto\" keyword; FlexStyle::dim_flex_basis drives YGNodeStyleSetFlexBasis{,Percent,Auto}. content remains unsupported.",
+      "issue": ""
+    },
+    "yoga/flex": {
+      "status": "supported",
+      "mapsTo": "web-compat-style-decl.js case 'flex' shorthand parser splits on whitespace and dispatches setFlex(id, 'flex_grow', ...) + optional setFlex(id, 'flex_shrink', ...) + optional setFlex(id, 'flex_basis', ...) onto FlexStyle.flex_grow/flex_shrink/flex_basis.",
+      "supportedValues": [
+        "<grow>",
+        "<grow> <shrink>",
+        "<grow> <shrink> <basis>"
+      ],
+      "unsupportedValues": [
+        "'auto'",
+        "'none'",
+        "'initial'"
+      ],
+      "tests": [
+        "test/web-compat/test_popover_row_template_1147.cpp"
+      ],
+      "notes": "pulp #1544 — catalog promotion. Already wired through `web-compat-style-decl.js` shorthand parser; mirrors `css/flex`. Keyword forms (auto/none/initial) parse as NaN and silently set flex_grow=0 — same divergence as the css surface.",
+      "issue": ""
+    },
+    "yoga/flexFlow": {
+      "status": "supported",
+      "mapsTo": "web-compat-style-decl.js case 'flexFlow' tokenizes the shorthand and dispatches setFlex(id, 'direction', ...) + setFlex(id, 'flex_wrap', ...) onto FlexStyle.direction / FlexStyle.flex_wrap.",
+      "supportedValues": [
+        "row|column|row-reverse|column-reverse",
+        "nowrap|no-wrap|wrap|wrap-reverse",
+        "combined two-token shorthand (e.g. \"row wrap-reverse\")"
+      ],
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp::\"flex-flow shorthand recognizes wrap-reverse\""
+      ],
+      "notes": "pulp #1544 — catalog promotion. Already wired through `web-compat-style-decl.js` shorthand parser (pulp #1434 Triage #14 extended it to cover `-reverse` modes); mirrors `css/flexFlow`.",
       "issue": ""
     },
     "yoga/justifyContent": {
