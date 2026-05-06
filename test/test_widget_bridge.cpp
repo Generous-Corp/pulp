@@ -917,7 +917,7 @@ TEST_CASE("WidgetBridge style and layout setters update native view state",
     REQUIRE_THAT(flex.flex_grow, WithinAbs(2.0f, 0.001f));
     REQUIRE_THAT(flex.flex_shrink, WithinAbs(0.25f, 0.001f));
     REQUIRE_THAT(flex.flex_basis, WithinAbs(88.0f, 0.001f));
-    REQUIRE(flex.flex_wrap);
+    REQUIRE(flex.flex_wrap == FlexWrap::wrap);
     REQUIRE(flex.order == 3);
     REQUIRE_THAT(flex.preferred_width, WithinAbs(123.0f, 0.001f));
     REQUIRE_THAT(flex.preferred_height, WithinAbs(45.0f, 0.001f));
@@ -4972,6 +4972,127 @@ TEST_CASE("CSSStyleDeclaration forwards marginTop percent + auto verbatim",
     REQUIRE(fb.dim_margin_right.unit == DimensionUnit::auto_);
 }
 
+// ── pulp #1434 small-wins bundle (Triage #7 + #14) ──────────────────────
+//
+// Triage #7: cursor enum fan-out — extended setCursor case ladder maps
+// the full CSS cursor keyword set to the existing View::CursorStyle
+// slots (axis-aligned + diagonal resize aliases, move/all-scroll →
+// multi-directional, none/hidden → invisible).
+//
+// Triage #14: flexWrap reverse — flex_wrap is now a tri-state enum
+// (no_wrap / wrap / wrap_reverse) routed through Yoga's
+// YGWrapWrapReverse for the previously-inexpressible CSS
+// `flex-wrap: wrap-reverse` mode. Bridge accepts the keyword strings
+// alongside the legacy 0/1 numeric path.
+
+TEST_CASE("setCursor maps the full CSS keyword set",
+          "[view][bridge][css][issue-1434-bundle]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('a', '');  setCursor('a', 'col-resize');
+        createPanel('b', '');  setCursor('b', 'row-resize');
+        createPanel('c', '');  setCursor('c', 'nwse-resize');
+        createPanel('d', '');  setCursor('d', 'nesw-resize');
+        createPanel('e', '');  setCursor('e', 'move');
+        createPanel('f', '');  setCursor('f', 'not-allowed');
+        createPanel('g', '');  setCursor('g', 'grabbing');
+        createPanel('h', '');  setCursor('h', 'none');
+        createPanel('i', '');  setCursor('i', 'all-scroll');
+        createPanel('j', '');  setCursor('j', 'parchment-curl'); // unknown → default
+    )");
+
+    using CS = View::CursorStyle;
+    REQUIRE(bridge.widget("a")->cursor() == CS::horizontal_resize);
+    REQUIRE(bridge.widget("b")->cursor() == CS::vertical_resize);
+    REQUIRE(bridge.widget("c")->cursor() == CS::top_left_resize);
+    REQUIRE(bridge.widget("d")->cursor() == CS::top_right_resize);
+    REQUIRE(bridge.widget("e")->cursor() == CS::multi_directional_resize);
+    REQUIRE(bridge.widget("f")->cursor() == CS::not_allowed);
+    REQUIRE(bridge.widget("g")->cursor() == CS::grabbing);
+    REQUIRE(bridge.widget("h")->cursor() == CS::invisible);
+    REQUIRE(bridge.widget("i")->cursor() == CS::multi_directional_resize);
+    REQUIRE(bridge.widget("j")->cursor() == CS::default_);
+}
+
+TEST_CASE("setCursor accepts axis-aligned aliases",
+          "[view][bridge][css][issue-1434-bundle]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        createPanel('e', ''); setCursor('e', 'e-resize');
+        createPanel('w', ''); setCursor('w', 'w-resize');
+        createPanel('n', ''); setCursor('n', 'n-resize');
+        createPanel('s', ''); setCursor('s', 's-resize');
+        createPanel('ns',''); setCursor('ns', 'ns-resize');
+        createPanel('ew',''); setCursor('ew', 'ew-resize');
+    )");
+    using CS = View::CursorStyle;
+    REQUIRE(bridge.widget("e")->cursor()  == CS::horizontal_resize);
+    REQUIRE(bridge.widget("w")->cursor()  == CS::horizontal_resize);
+    REQUIRE(bridge.widget("ew")->cursor() == CS::horizontal_resize);
+    REQUIRE(bridge.widget("n")->cursor()  == CS::vertical_resize);
+    REQUIRE(bridge.widget("s")->cursor()  == CS::vertical_resize);
+    REQUIRE(bridge.widget("ns")->cursor() == CS::vertical_resize);
+}
+
+TEST_CASE("setFlex flex_wrap accepts wrap-reverse keyword",
+          "[view][bridge][css][issue-1434-bundle]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        createPanel('a', ''); setFlex('a', 'flex_wrap', 'wrap-reverse');
+        createPanel('b', ''); setFlex('b', 'flex_wrap', 'wrap');
+        createPanel('c', ''); setFlex('c', 'flex_wrap', 'nowrap');
+        createPanel('d', ''); setFlex('d', 'flex_wrap', 'no-wrap');
+        createPanel('e', ''); setFlex('e', 'flex_wrap', 1);  // legacy numeric
+        createPanel('f', ''); setFlex('f', 'flex_wrap', 0);
+    )");
+    REQUIRE(bridge.widget("a")->flex().flex_wrap == FlexWrap::wrap_reverse);
+    REQUIRE(bridge.widget("b")->flex().flex_wrap == FlexWrap::wrap);
+    REQUIRE(bridge.widget("c")->flex().flex_wrap == FlexWrap::no_wrap);
+    REQUIRE(bridge.widget("d")->flex().flex_wrap == FlexWrap::no_wrap);
+    REQUIRE(bridge.widget("e")->flex().flex_wrap == FlexWrap::wrap);
+    REQUIRE(bridge.widget("f")->flex().flex_wrap == FlexWrap::no_wrap);
+}
+
+TEST_CASE("CSSStyleDeclaration forwards flex-wrap: wrap-reverse",
+          "[view][bridge][css][issue-1434-bundle]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        createPanel('a', '');
+        var sa = new CSSStyleDeclaration({ _id: 'a', _nativeCreated: true });
+        sa._applyProperty('flexWrap', 'wrap-reverse');
+    )");
+    REQUIRE(bridge.widget("a")->flex().flex_wrap == FlexWrap::wrap_reverse);
+}
+
+TEST_CASE("flex-flow shorthand recognizes wrap-reverse",
+          "[view][bridge][css][issue-1434-bundle]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        createPanel('a', '');
+        var sa = new CSSStyleDeclaration({ _id: 'a', _nativeCreated: true });
+        sa._applyProperty('flexFlow', 'row wrap-reverse');
+    )");
+    const auto& f = bridge.widget("a")->flex();
+    REQUIRE(f.flex_wrap == FlexWrap::wrap_reverse);
+    REQUIRE(f.direction == FlexDirection::row);
+}
+
 // ── pulp #1434 Triage #10 — borderStyle dashed/dotted ─────────────────────
 //
 // Bridge maps the CSS border-style keyword to View::BorderStyle. Skia
@@ -5259,4 +5380,330 @@ TEST_CASE("filter chain triggers save_layer_with_filters at paint",
         if (cmd.type == pulp::canvas::DrawCommand::Type::save) ++save_count;
     }
     REQUIRE(save_count > 0);
+}
+
+// ── pulp #1434 — canvasSetFontFull bridge fn ─────────────────────────────
+//
+// The Canvas2D shim's full CSS font shorthand parser dispatches through
+// `canvasSetFontFull(id, family, size, weight, slant, letterSpacing)`.
+// Cover the bridge fn directly to lock in the recorded
+// CanvasDrawCmd::set_font_full payload field-for-field, independent of
+// the JS-side parse layer covered in test_canvas2d_shim.cpp.
+TEST_CASE("WidgetBridge canvasSetFontFull records weight/slant verbatim",
+          "[view][bridge][canvas][issue-1434]") {
+    // Drive the bridge fn directly (bypassing the JS parser) and assert
+    // the recorded CanvasDrawCmd carries the full payload.
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        var c = document.createElement('canvas');
+        c.id = 'font-full-canvas';
+        c.width = 100; c.height = 50;
+        document.body.appendChild(c);
+        // Bypass the JS parser — call the bridge fn directly with each
+        // payload field so the recorded CanvasDrawCmd round-trips
+        // verbatim.
+        canvasSetFontFull(c._id, 'Inter', 18.0, 700, 1, 0.5);
+    )");
+
+    auto* canvas = canvasFromBridge(bridge, engine, "font-full-canvas");
+    REQUIRE(canvas != nullptr);
+    REQUIRE(canvas->command_count() == 1);
+
+    const auto& cmd = canvas->commands().front();
+    REQUIRE(cmd.type == pulp::view::CanvasDrawCmd::Type::set_font_full);
+    REQUIRE(cmd.text == "Inter");
+    REQUIRE_THAT(cmd.extra, WithinAbs(18.0f, 1e-5f));   // size
+    REQUIRE_THAT(cmd.x,     WithinAbs(700.0f, 1e-5f));  // weight
+    REQUIRE_THAT(cmd.y,     WithinAbs(1.0f, 1e-5f));    // slant=italic
+    REQUIRE_THAT(cmd.x2,    WithinAbs(0.5f, 1e-5f));    // letter_spacing
+}
+
+TEST_CASE("WidgetBridge canvasSetFontFull replays through Canvas::set_font_full",
+          "[view][bridge][canvas][issue-1434]") {
+    // Drive a CanvasWidget paint onto a RecordingCanvas and assert the
+    // backend received both the legacy set_font (back-compat) AND the
+    // rich set_font_full carrying weight/slant. RecordingCanvas's
+    // set_font_full override emits both per the existing #927 contract.
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        var c = document.createElement('canvas');
+        c.id = 'font-full-replay';
+        c.width = 100; c.height = 50;
+        document.body.appendChild(c);
+        canvasSetFontFull(c._id, 'Helvetica', 14.0, 300, 0, 0);
+    )");
+    root.layout_children();
+
+    auto* canvas = canvasFromBridge(bridge, engine, "font-full-replay");
+    REQUIRE(canvas != nullptr);
+
+    pulp::canvas::RecordingCanvas rec;
+    canvas->paint(rec);
+
+    using DrawType = pulp::canvas::DrawCommand::Type;
+    const pulp::canvas::DrawCommand* full = nullptr;
+    for (const auto& c : rec.commands()) {
+        if (c.type == DrawType::set_font_full) { full = &c; break; }
+    }
+    REQUIRE(full != nullptr);
+    REQUIRE(full->text == "Helvetica");
+    REQUIRE_THAT(full->f[0], WithinAbs(14.0f, 1e-5f));   // size
+    REQUIRE_THAT(full->f[1], WithinAbs(300.0f, 1e-5f));  // weight
+    REQUIRE_THAT(full->f[2], WithinAbs(0.0f, 1e-5f));    // slant=upright
+}
+
+// pulp #1434 (sub-agent #12 follow-up) — align_content multi-line
+// flex cross-axis distribution. Yoga supports it natively via
+// YGNodeStyleSetAlignContent; the gap was a missing FlexStyle field
+// + setter wiring. Round-trip every value the bridge accepts so a
+// regression in either the parser, the FlexStyle field, or the
+// space-* sibling enum gets caught here rather than silently
+// reverting Yoga to the default FlexStart.
+TEST_CASE("setFlex align_content accepts start / end / center / stretch / space-* aliases",
+          "[view][bridge][css][issue-1434-aligncontent]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('a','');  setFlex('a','align_content','start');
+        createPanel('b','');  setFlex('b','align_content','flex-start');
+        createPanel('c','');  setFlex('c','align_content','end');
+        createPanel('d','');  setFlex('d','align_content','flex-end');
+        createPanel('e','');  setFlex('e','align_content','center');
+        createPanel('f','');  setFlex('f','align_content','stretch');
+        createPanel('g','');  setFlex('g','align_content','space-between');
+        createPanel('h','');  setFlex('h','align_content','space-around');
+        createPanel('i','');  setFlex('i','align_content','space-evenly');
+    )");
+
+    using AcSpace = FlexStyle::AlignContentSpace;
+    auto ac = [&](const std::string& id) { return bridge.widget(id)->flex().align_content; };
+    auto sp = [&](const std::string& id) { return bridge.widget(id)->flex().align_content_space; };
+
+    REQUIRE(ac("a") == FlexAlign::start);    REQUIRE(sp("a") == AcSpace::none);
+    REQUIRE(ac("b") == FlexAlign::start);    REQUIRE(sp("b") == AcSpace::none);
+    REQUIRE(ac("c") == FlexAlign::end);      REQUIRE(sp("c") == AcSpace::none);
+    REQUIRE(ac("d") == FlexAlign::end);      REQUIRE(sp("d") == AcSpace::none);
+    REQUIRE(ac("e") == FlexAlign::center);   REQUIRE(sp("e") == AcSpace::none);
+    REQUIRE(ac("f") == FlexAlign::stretch);  REQUIRE(sp("f") == AcSpace::none);
+    REQUIRE(sp("g") == AcSpace::space_between);
+    REQUIRE(sp("h") == AcSpace::space_around);
+    REQUIRE(sp("i") == AcSpace::space_evenly);
+}
+
+// pulp #1434 (sub-agent #12 follow-up) — width: 'auto' routes through
+// the bridge's setFlex string path to FlexStyle.dim_width.unit =
+// DimensionUnit::auto_. yoga_layout.cpp dispatches on that to
+// YGNodeStyleSetWidthAuto. The percent path remains intact, and
+// numeric values still flow through the px branch.
+TEST_CASE("setFlex width accepts 'auto' keyword and routes to dim_width.auto_",
+          "[view][bridge][css][issue-1434-auto]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('a','');  setFlex('a','width','auto');
+        createPanel('b','');  setFlex('b','width', 120);
+        createPanel('c','');  setFlex('c','width', '50%');
+    )");
+
+    const auto& fa = bridge.widget("a")->flex();
+    REQUIRE(fa.dim_width.unit == DimensionUnit::auto_);
+    REQUIRE(fa.preferred_width == 0.0f);
+
+    const auto& fb = bridge.widget("b")->flex();
+    REQUIRE(fb.dim_width.unit == DimensionUnit::px);
+    REQUIRE_THAT(fb.preferred_width, WithinAbs(120.0f, 0.001f));
+
+    const auto& fc = bridge.widget("c")->flex();
+    REQUIRE(fc.dim_width.unit == DimensionUnit::percent);
+    REQUIRE_THAT(fc.dim_width.value, WithinAbs(50.0f, 0.001f));
+}
+
+TEST_CASE("setFlex height accepts 'auto' keyword and routes to dim_height.auto_",
+          "[view][bridge][css][issue-1434-auto]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('a','');  setFlex('a','height','auto');
+        createPanel('b','');  setFlex('b','height', 80);
+        createPanel('c','');  setFlex('c','height', '25%');
+    )");
+
+    const auto& fa = bridge.widget("a")->flex();
+    REQUIRE(fa.dim_height.unit == DimensionUnit::auto_);
+    REQUIRE(fa.preferred_height == 0.0f);
+
+    const auto& fb = bridge.widget("b")->flex();
+    REQUIRE(fb.dim_height.unit == DimensionUnit::px);
+    REQUIRE_THAT(fb.preferred_height, WithinAbs(80.0f, 0.001f));
+
+    const auto& fc = bridge.widget("c")->flex();
+    REQUIRE(fc.dim_height.unit == DimensionUnit::percent);
+    REQUIRE_THAT(fc.dim_height.value, WithinAbs(25.0f, 0.001f));
+}
+
+// pulp #1434 (sub-agent #12 follow-up) — verify the CSS shim path
+// also forwards 'auto' for width/height. The DOM-lite el.style
+// adapter must produce the same FlexStyle.dim_*.unit = auto_ result
+// as the direct setFlex(id, 'width', 'auto') path.
+TEST_CASE("CSSStyleDeclaration forwards width/height auto to bridge",
+          "[view][bridge][css][issue-1434-auto]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('a', '');
+        var sa = new CSSStyleDeclaration({ _id: 'a', _nativeCreated: true });
+        sa._applyProperty('width', 'auto');
+        sa._applyProperty('height', 'auto');
+    )");
+
+    const auto& fa = bridge.widget("a")->flex();
+    REQUIRE(fa.dim_width.unit  == DimensionUnit::auto_);
+    REQUIRE(fa.dim_height.unit == DimensionUnit::auto_);
+}
+
+// ── pulp #1434 Phase A2-2 — CSS Grid extended surface ──────────────────
+//
+// PR 1 of the multi-PR ladder. Builds on Pulp's existing grid layout
+// (template_columns/rows + per-child column/row spans + col/row gaps)
+// to add: grid-auto-columns, grid-auto-rows, grid-auto-flow,
+// grid-template-areas (named-area parsing), grid-area shorthand
+// (named token vs `row / col / row / col` numeric form).
+
+TEST_CASE("setGrid auto_columns / auto_rows / auto_flow",
+          "[view][bridge][css][issue-1434-grid]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        createPanel('a', '');
+        setGrid('a', 'auto_columns', '1fr');
+        setGrid('a', 'auto_rows', '50px');
+        setGrid('a', 'auto_flow', 'column dense');
+    )");
+    const auto& g = bridge.widget("a")->grid();
+    REQUIRE(g.auto_columns.type == GridTrack::Type::fr);
+    REQUIRE_THAT(g.auto_columns.value, WithinAbs(1.0f, 0.001f));
+    REQUIRE(g.auto_rows.type == GridTrack::Type::fixed);
+    REQUIRE_THAT(g.auto_rows.value, WithinAbs(50.0f, 0.001f));
+    REQUIRE(g.auto_flow == GridStyle::AutoFlow::column_dense);
+}
+
+TEST_CASE("parse_template_areas: simple 3x3 grid",
+          "[view][bridge][css][issue-1434-grid]") {
+    auto areas = GridStyle::parse_template_areas(
+        "'h h h' 'm c c' 'f f f'");
+    // Three named areas: h (header), m (main), c (content), f (footer).
+    REQUIRE(areas.size() == 4);
+    auto find = [&](const std::string& n) -> const GridStyle::NamedArea* {
+        for (const auto& a : areas) if (a.name == n) return &a;
+        return nullptr;
+    };
+    auto* h = find("h");
+    REQUIRE(h != nullptr);
+    REQUIRE(h->row_start == 1);
+    REQUIRE(h->col_start == 1);
+    REQUIRE(h->row_end == 2);
+    REQUIRE(h->col_end == 4);
+    auto* c = find("c");
+    REQUIRE(c != nullptr);
+    REQUIRE(c->row_start == 2);
+    REQUIRE(c->col_start == 2);
+    REQUIRE(c->row_end == 3);
+    REQUIRE(c->col_end == 4);
+    auto* f = find("f");
+    REQUIRE(f != nullptr);
+    REQUIRE(f->row_start == 3);
+    REQUIRE(f->col_end == 4);
+}
+
+TEST_CASE("parse_template_areas: '.' is the spacer token",
+          "[view][bridge][css][issue-1434-grid]") {
+    auto areas = GridStyle::parse_template_areas("'a . b'");
+    REQUIRE(areas.size() == 2);
+    REQUIRE(areas[0].name == "a");
+    REQUIRE(areas[1].name == "b");
+}
+
+TEST_CASE("setGrid template_areas via bridge",
+          "[view][bridge][css][issue-1434-grid]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        createPanel('a', '');
+        setGrid('a', 'template_areas', "'h h' 'm c'");
+    )");
+    REQUIRE(bridge.widget("a")->grid().template_areas.size() == 3);
+}
+
+TEST_CASE("setGrid grid_area: named-token form references a named area",
+          "[view][bridge][css][issue-1434-grid]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        createPanel('a', '');
+        setGrid('a', 'grid_area', 'header');
+    )");
+    REQUIRE(bridge.widget("a")->grid().grid_area_name == "header");
+}
+
+TEST_CASE("setGrid grid_area: numeric '1 / 2 / 3 / 4' form sets bounds",
+          "[view][bridge][css][issue-1434-grid]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        createPanel('a', '');
+        setGrid('a', 'grid_area', '1 / 2 / 3 / 4');
+    )");
+    const auto& g = bridge.widget("a")->grid();
+    REQUIRE(g.grid_row_start == 1);
+    REQUIRE(g.grid_column_start == 2);
+    REQUIRE(g.grid_row_end == 3);
+    REQUIRE(g.grid_column_end == 4);
+}
+
+TEST_CASE("CSSStyleDeclaration forwards gridTemplateAreas",
+          "[view][bridge][css][issue-1434-grid]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        createPanel('a', '');
+        var s = new CSSStyleDeclaration({ _id: 'a', _nativeCreated: true });
+        s._applyProperty('gridTemplateAreas', "'h h' 'm c'");
+        s._applyProperty('gridAutoFlow', 'column');
+    )");
+    REQUIRE(bridge.widget("a")->grid().template_areas.size() == 3);
+    REQUIRE(bridge.widget("a")->grid().auto_flow == GridStyle::AutoFlow::column);
 }

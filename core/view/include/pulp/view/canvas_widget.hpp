@@ -23,6 +23,20 @@ struct CanvasDrawCmd {
         stroke_line, stroke_arc,
         // Text
         fill_text, set_font, set_text_align, set_text_baseline,
+        // pulp #1434 — Canvas2D `ctx.font` full CSS font shorthand. The
+        // legacy `set_font` only carries family + size; the JS shim now
+        // parses `[<style>] [<variant>] [<weight>] <size>[/<lineHeight>]
+        // <family>`. `set_font_full` carries the parsed weight / slant
+        // through to `Canvas::set_font_full`, which Skia honours via
+        // `make_font(family, size, weight, slant)`. CG falls back to
+        // family+size (no slant override) — same as the base
+        // `set_font_full` default. Layout in CanvasDrawCmd:
+        //   text  = family
+        //   extra = size (px)
+        //   x     = weight (100..900, cast to int)
+        //   y     = slant (0=upright, 1=italic/oblique)
+        //   x2    = letter_spacing (0 from shorthand; reserved)
+        set_font_full,
         // Style
         set_fill_color, set_stroke_color, set_line_width,
         set_line_cap, set_line_join,
@@ -34,6 +48,13 @@ struct CanvasDrawCmd {
         // gradient_colors / gradient_positions (same shape as the
         // linear / radial entries above).
         set_fill_gradient_conic,
+        // pulp #1434 bridge-thin gap-fill — Canvas2D ctx.createPattern.
+        // Image source path / data URI in `text`, tile modes packed into
+        // `int_val` (bit 0 = x, bit 1 = y; 0 = repeat, 1 = no-repeat).
+        // Skia routes through SkShader::MakeImage; CG degrades to the
+        // active fill colour (no CGPattern dance — file a follow-up if
+        // a CG-targeted plugin actually needs tiled patterns).
+        set_fill_pattern, set_stroke_pattern,
         // Path
         begin_path, move_to, line_to, quad_to, cubic_to, close_path,
         fill_path, stroke_path, clip_path,

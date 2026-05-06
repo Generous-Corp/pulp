@@ -493,10 +493,18 @@ Pulp versions three surfaces independently: SDK/CLI (`CMakeLists.txt`), Claude p
 
 1. `skill_sync_check.py --mode=report` — hard-fails on missing SKILL.md updates.
 2. `version_bump_check.py --mode=apply` — rewrites version files and CHANGELOG stub.
-3. `git commit` + `gh pr create` + `shipyard ship` — one command, merges on green.
+3. Branch push, PR creation, Shipyard state recording, and cross-platform validation — one command, merges on green.
 4. `.github/workflows/auto-release.yml` — on merge to main, tags the new version(s) and the existing tag-triggered release workflows build + publish binaries.
 
-Shipyard v0.19.1+ (pinned as v0.29.0 in `tools/shipyard.toml`) auto-discovers Pulp's `tools/scripts/` layout; `.shipyard/config.toml [validation]` additionally pins the paths explicitly for reproducibility.
+Direct `gh pr create` is an emergency/manual bypass only. If it is used because the user explicitly asked for it or Shipyard is broken, call out that the PR may not be visible in Shipyard-managed state until it is reconciled or re-shipped through Shipyard.
+
+`pulp pr` defaults to the same Shipyard path. A human can opt out in their
+local checkout with `pulp config set pr.workflow github` or `manual`, or
+temporarily with `PULP_PR_WORKFLOW` / `--workflow`, but agents should not
+select those workflows unless the user explicitly requests that bypass.
+`pulp status` reports the effective PR workflow and local tool health.
+
+Shipyard is pinned in `tools/shipyard.toml` and auto-discovers Pulp's `tools/scripts/` layout; `.shipyard/config.toml [validation]` additionally pins the paths explicitly for reproducibility.
 
 **Bypass trailers** (tip commit, never PR body — audit trail lives in git):
 
@@ -760,14 +768,14 @@ shipyard pr --skip-bump plugin --bump-reason="test-only change"
 shipyard pr --skip-skill-update ci --skill-reason="docs-only"
 shipyard pr --skip-target ubuntu                # deliberate lane skip
 
-# `pulp pr` is a Pulp-side wrapper; it still works and delegates to shipyard pr.
-# Use either — agents should prefer `shipyard pr` for directness.
+# `pulp pr` is a Pulp-side wrapper; it defaults to shipyard pr and reports
+# opt-out workflows via `pulp status`. Agents should prefer `shipyard pr`.
 pulp pr
 
 # Lower-level Shipyard commands — use only for diagnostics or recovery, NOT as the
 # default ship path:
 shipyard run                              # validate current branch
-shipyard ship                             # PR + validate + merge on green
+shipyard ship                             # resume/operate on an existing Shipyard-managed PR
 shipyard cloud run build <branch>         # dispatch to Namespace
 
 # SSH preflight (v0.20.0+ / Shipyard #106): exit codes are distinct.
@@ -784,8 +792,8 @@ shipyard cloud run build <branch>         # dispatch to Namespace
 The CI skill (`.agents/skills/ci/SKILL.md`) is the single source of truth for landing code. Normal ship cycle:
 
 1. Run `shipyard pr` — never `gh pr create` + `shipyard ship` separately (that bypasses the skill-sync and version-bump gates)
-2. The orchestrator runs skill-sync + version-bump gates, commits any bumps, pushes, opens a PR, and invokes `shipyard ship`
-3. `shipyard ship` validates on macOS (locally), Ubuntu (SSH), and Windows (SSH)
+2. The orchestrator runs skill-sync + version-bump gates, commits any bumps, pushes, opens/tracks the PR, and invokes Shipyard validation
+3. Shipyard validates on macOS (locally), Ubuntu (SSH), and Windows (SSH)
 4. Merges only when ALL targets pass
 5. Posts a closeout comment
 

@@ -171,14 +171,51 @@ describe('prop-applier transform array (pulp #1434 Triage #9)', () => {
         expect(callsOf(bridge, 'setScale')).toHaveLength(0);
     });
 
-    it('skewX / skewY entries are silently dropped (bridge fn unregistered)', () => {
+    it('skewX + skewY accumulate into ONE setSkew (Triage #9 fan-out)', () => {
+        // pulp #1434 Triage #9 fan-out — setSkew is now a registered
+        // bridge fn; the walker accumulates both axes and emits one
+        // consolidated call. Previously this entry asserted silent
+        // drop because the bridge fn didn't exist.
+        const bcalls = (b: MockBridge, fn: string) => b.calls.filter((c) => c.fn === fn);
         applyChangedProps(makeInstance(), {}, {
             transform: [{ skewX: '10deg' }, { skewY: '5deg' }],
         });
-        // None of the wired dispatchers should fire for skew-only.
+        const skewCalls = bcalls(bridge, 'setSkew');
+        expect(skewCalls).toHaveLength(1);
+        expect(skewCalls[0].args).toEqual(['k', 10, 5]);
+        // Other axes are not touched.
         expect(callsOf(bridge, 'setTranslate')).toHaveLength(0);
         expect(callsOf(bridge, 'setRotation')).toHaveLength(0);
         expect(callsOf(bridge, 'setScale')).toHaveLength(0);
+    });
+
+    it('skewX with rad unit converts to degrees', () => {
+        const bcalls = (b: MockBridge, fn: string) => b.calls.filter((c) => c.fn === fn);
+        applyChangedProps(makeInstance(), {}, {
+            transform: [{ skewX: '1rad' }],
+        });
+        const skewCalls = bcalls(bridge, 'setSkew');
+        expect(skewCalls).toHaveLength(1);
+        // 1 rad ≈ 57.2958°; second arg (skewY) defaults to 0.
+        expect((skewCalls[0].args[1] as number)).toBeCloseTo(180 / Math.PI, 4);
+        expect(skewCalls[0].args[2]).toBe(0);
+    });
+
+    it('skew + translate + rotate + scale all dispatch as separate consolidated calls', () => {
+        const bcalls = (b: MockBridge, fn: string) => b.calls.filter((c) => c.fn === fn);
+        applyChangedProps(makeInstance(), {}, {
+            transform: [
+                { translateX: 5 }, { translateY: 15 },
+                { rotate: '30deg' },
+                { scale: 1.2 },
+                { skewX: '8deg' }, { skewY: '4deg' },
+            ],
+        });
+        expect(callsOf(bridge, 'setTranslate')).toHaveLength(1);
+        expect(callsOf(bridge, 'setRotation')).toHaveLength(1);
+        expect(callsOf(bridge, 'setScale')).toHaveLength(1);
+        expect(bcalls(bridge, 'setSkew')).toHaveLength(1);
+        expect(bcalls(bridge, 'setSkew')[0].args).toEqual(['k', 8, 4]);
     });
 
     it('rotateX / rotateY / perspective / matrix silently no-op (no 3D in 2D View)', () => {

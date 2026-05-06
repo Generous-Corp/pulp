@@ -99,6 +99,6 @@ The install scripts are hosted on the same Pages site. The docs-deploy workflow 
     cp tools/install/install.ps1 build/site/install.ps1
 ```
 
-This means `curl -fsSL https://www.generouscorp.com/pulp/install.sh | sh` works as the one-liner installer. The scripts download pre-built CLI binaries from GitHub Releases (built by `.github/workflows/release-cli.yml`).
+This means `curl -fsSL https://www.generouscorp.com/pulp/install.sh | sh` works as the one-liner installer. The scripts download pre-built CLI binaries from GitHub Releases (built by `.github/workflows/release-cli.yml`). They install Pulp only; they must not install Shipyard, GitHub CLI (`gh`), or other source-checkout contributor tooling.
 
 All install script references must use `https://www.generouscorp.com/pulp/install.sh` (with `www.`).

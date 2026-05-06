@@ -36,6 +36,29 @@ Spec walk:
   full chain and routes to Skia's `SkImageFilters::Compose` +
   `SkColorFilters::Matrix` via the new
   `canvas.save_layer_with_filters(...)` API.
+- **2026-05-05 (pulp #1434 small-wins bundle, Triage #7+#12+#13+#14)** —
+  the `@pulp/react` prop-applier now forwards `cursor`, `userSelect`,
+  and `pointerEvents` to the matching bridge fns (previously these
+  three RN-style props had no prop-applier dispatch despite the
+  bridge fns existing). Status on `rn/cursor`, `rn/userSelect`, and
+  `rn/pointerEvents` flipped `missing` → `partial` / `supported`,
+  matching the css surface coverage. `rn/flexWrap` now accepts the
+  CSS keyword string set (`'wrap'` / `'wrap-reverse'` / `'nowrap'` /
+  `'no-wrap'`) alongside the legacy boolean — the bridge routes
+  `wrap-reverse` through Yoga's `YGWrapWrapReverse` (Triage #14).
+- **2026-05-05 (pulp #1434 rn logical-edge bundle, sub-agent #27 finding)** —
+  11 RN logical-flow props wired through the `@pulp/react` prop-applier
+  with an LTR-only fast path: `marginStart` / `marginEnd` /
+  `paddingStart` / `paddingEnd` route to the matching `*Left` /
+  `*Right` per-edge bridge calls; `borderStartWidth` /
+  `borderEndWidth` route to `setBorderLeftWidth` / `setBorderRightWidth`;
+  `start` / `end` route to `setLeft` / `setRight`. The CSS `inset`
+  shorthand fans out to top/right/bottom/left with the standard
+  1/2/3/4-token expansion (numeric or percent strings forward
+  verbatim). `insetBlock` → top + bottom; `insetInline` → left +
+  right. All 11 entries flipped `missing` → `partial` — the LTR
+  assumption is the honest `unsupportedValues` caveat (true RTL bidi
+  defers to a future direction system).
 - **2026-05-05 (pulp #1434 rn bridge-wires bundle, sub-agent #27 finding)** —
   7 RN-style props that already had C++ bridge fns registered but no
   `@pulp/react` JSX dispatch. TS-only PR (no C++ touched): wired
@@ -47,8 +70,7 @@ Spec walk:
   coordinates before dispatch. Status flips: `backfaceVisibility`,
   `pointerEvents`, `textTransform`, `transformOrigin`, `filter` →
   `supported`; `cursor`, `userSelect` → `partial` (CSS spec covers
-  more values than the bridge's enum). rn pass 49 → 54 (+5);
-  progress 60.83% → 66.67% (+5.84pp). Highest-leverage single rn
+  more values than the bridge's enum). Highest-leverage single rn
   PR remaining in the umbrella; closes 7 entries with zero C++ work.
 - **2026-05-05 (pulp #1434 Triage #10)** — `rn/borderStyle` surfaced
   at the `@pulp/react` JSX layer with the full keyword set: `solid`,
@@ -61,6 +83,22 @@ Spec walk:
   skip the stroke entirely. Reclassified missing → supported. RN
   exports / Figma motion borders / v0.dev card outlines now port
   verbatim.
+- **2026-05-05 (pulp #1434 sub-agent #12 follow-up)** — three deferred
+  `rn/*` entries closed in one slice. `rn/alignContent` flipped
+  NOT-IMPL → PASS: `@pulp/react`'s `FlexProps` now exposes
+  `alignContent` (new `FlexAlignContent` type) and the prop-applier
+  forwards verbatim to `setFlex(id, 'align_content', value)`. Bridge
+  routes through `FlexStyle::align_content` /
+  `align_content_space` to Yoga's `YGNodeStyleSetAlignContent`;
+  accepts both bare and prefixed CSS spellings plus the three
+  space-* values. `rn/width` and `rn/height` flipped DIVERGE → PASS
+  for `'auto'` (Yoga "hug contents") — the TS surface already typed
+  these as `number | string` from the percent batch, so the change
+  is bridge-side: `FlexStyle::dim_*.unit == auto_` dispatches to
+  `YGNodeStyleSetWidthAuto` / `SetHeightAuto`. RN snippets emitting
+  `style={{ flexWrap: 'wrap', alignContent: 'space-between' }}` or
+  `style={{ width: 'auto' }}` (Figma auto-layout exports, v0.dev,
+  Claude Design) now port verbatim.
 - **2026-05-05 (pulp #1434 cross-surface mega-batch)** — per-edge
   `margin{Top,Right,Bottom,Left}` and `padding{Top,Right,Bottom,Left}`
   on the `@pulp/react` JSX surface now accept `number | string`
@@ -88,6 +126,16 @@ Spec walk:
   DIVERGE / partial → PASS for 7 `rn/*Color` entries. RN `style={{
   color: 'oklch(0.7 0.18 240)' }}` ports verbatim from Figma copy-CSS,
   v0.dev hero color tokens, and Claude Design transition states.
+- **2026-05-05 (pulp #1434 Triage #9 fan-out)** — `rn/transform` array
+  walker now dispatches `skewX` / `skewY` (previously stored on the
+  snapshot but silently dropped because the bridge fn wasn't
+  registered). `setSkew(id, x_deg, y_deg)` is newly registered;
+  `View::set_skew` had existed in C++ since the 2D slot landed.
+  `[{skewX:'10deg'},{skewY:'5deg'}]` produces ONE consolidated
+  `setSkew(10, 5)` call thanks to the within-array axis merging.
+  Status flipped `partial` → `supported`. Deferred (still silent
+  no-op): `rotateX` / `rotateY` / `perspective` / `matrix` — pulp's
+  2D View has no 3D rotation storage; tracked for a follow-up.
 - **2026-05-05 (pulp #1434 Triage #9)** — `rn/transform` now accepts
   the RN array-of-objects shape:
   ```js

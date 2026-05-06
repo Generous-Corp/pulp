@@ -8,6 +8,22 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      next regen as long as they land in the right release's bullet block. See
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
+<a id="v0782"></a>
+## [0.78.2] - 2026-05-06
+
+- feat(import-ir): Phase 1 spike — IR types + Claude Design HTML adapter + 5-scenario harness (closes pulp #1486 phase 1) ([#1499](https://github.com/danielraffel/pulp/pull/1499))
+- feat(view): yoga alignContent + width/height auto (sub-agent #12 followup, refs pulp #1434) ([#1494](https://github.com/danielraffel/pulp/pull/1494))
+- fix(rn): wire backfaceVisibility / cursor / filter / pointerEvents / textTransform / transformOrigin / userSelect (refs pulp #1434, sub-agent #27 finding) ([#1497](https://github.com/danielraffel/pulp/pull/1497))
+- feat(view): borderStyle dashed/dotted/double/groove/ridge renderer (refs pulp #1434, Triage #10/#13) ([#1490](https://github.com/danielraffel/pulp/pull/1490))
+- feat(view/css): parse oklch / oklab / lch / lab / color() (refs pulp #1434, Triage #8) ([#1481](https://github.com/danielraffel/pulp/pull/1481))
+- feat(view): yoga per-edge margin/padding accept percent + auto (cross-surface, refs pulp #1434) ([#1477](https://github.com/danielraffel/pulp/pull/1477))
+- feat(canvas2d): wire conicGradient + imageSmoothing + miterLimit bridge setters (refs pulp #1434) ([#1480](https://github.com/danielraffel/pulp/pull/1480))
+- feat(harness): add 'noop' catalog status — close css/animation* drift (closes pulp #1475) ([#1478](https://github.com/danielraffel/pulp/pull/1478))
+- fix(harness): html catalog cleanup — push surface to 100% (refs pulp #1434) ([#1479](https://github.com/danielraffel/pulp/pull/1479))
+- fix(harness): css catalog hygiene — 8 stale entries, drift 60 → 54 (refs pulp #1434) ([#1474](https://github.com/danielraffel/pulp/pull/1474))
+- fix(harness): canvas2d catalog hygiene — flip 5 over-claimed entries to partial (refs pulp #1434) ([#1472](https://github.com/danielraffel/pulp/pull/1472))
+- feat(rn): walk transform array → bridge translate/rotate/scale calls (refs pulp #1434, Triage #9) ([#1468](https://github.com/danielraffel/pulp/pull/1468))
+
 <a id="v0781"></a>
 ## [0.78.1] - 2026-05-05
 
@@ -1301,6 +1317,7 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
 - Phase 1 follow-up: glTF textures, NSIS fixes, issue #3 crash/mirror/run ([#4](https://github.com/danielraffel/pulp/pull/4))
 - Phase 1: Commercial readiness — convolver, image rendering, packaging, MSVC fix ([#2](https://github.com/danielraffel/pulp/pull/2))
 
+[0.78.2]: https://github.com/danielraffel/pulp/releases/tag/v0.78.2
 [0.78.1]: https://github.com/danielraffel/pulp/releases/tag/v0.78.1
 [0.78.0]: https://github.com/danielraffel/pulp/releases/tag/v0.78.0
 [0.77.0]: https://github.com/danielraffel/pulp/releases/tag/v0.77.0

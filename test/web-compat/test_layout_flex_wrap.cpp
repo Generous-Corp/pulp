@@ -15,7 +15,7 @@ TEST_CASE("Flex Wrap: no wrap keeps all in one line", "[layout][flex][wrap]") {
     View root;
     root.set_bounds({0, 0, 200, 100});
     root.flex().direction = FlexDirection::row;
-    root.flex().flex_wrap = false;
+    root.flex().flex_wrap = FlexWrap::no_wrap;
     root.add_child(make_box(80, 40));
     root.add_child(make_box(80, 40));
     root.add_child(make_box(80, 40));
@@ -29,17 +29,17 @@ TEST_CASE("Flex Wrap: no wrap keeps all in one line", "[layout][flex][wrap]") {
 
 TEST_CASE("Flex Wrap: wrap flag is stored", "[layout][flex][wrap]") {
     View root;
-    root.flex().flex_wrap = true;
-    REQUIRE(root.flex().flex_wrap == true);
-    root.flex().flex_wrap = false;
-    REQUIRE(root.flex().flex_wrap == false);
+    root.flex().flex_wrap = FlexWrap::wrap;
+    REQUIRE(root.flex().flex_wrap == FlexWrap::wrap);
+    root.flex().flex_wrap = FlexWrap::no_wrap;
+    REQUIRE(root.flex().flex_wrap == FlexWrap::no_wrap);
 }
 
 TEST_CASE("Flex Wrap: all items fit = single row", "[layout][flex][wrap]") {
     View root;
     root.set_bounds({0, 0, 300, 100});
     root.flex().direction = FlexDirection::row;
-    root.flex().flex_wrap = true;
+    root.flex().flex_wrap = FlexWrap::wrap;
     root.add_child(make_box(80, 40));
     root.add_child(make_box(80, 40));
     root.add_child(make_box(80, 40));
@@ -55,7 +55,7 @@ TEST_CASE("Flex Wrap: overflow items wrap to next line", "[layout][flex][wrap]")
     View root;
     root.set_bounds({0, 0, 200, 200});
     root.flex().direction = FlexDirection::row;
-    root.flex().flex_wrap = true;
+    root.flex().flex_wrap = FlexWrap::wrap;
     root.add_child(make_box(80, 40));
     root.add_child(make_box(80, 40));
     root.add_child(make_box(80, 40));
@@ -74,7 +74,7 @@ TEST_CASE("Flex Wrap: gap with wrap reduces available space", "[layout][flex][wr
     View root;
     root.set_bounds({0, 0, 200, 200});
     root.flex().direction = FlexDirection::row;
-    root.flex().flex_wrap = true;
+    root.flex().flex_wrap = FlexWrap::wrap;
     root.flex().gap = 10;
     root.add_child(make_box(80, 40));
     root.add_child(make_box(80, 40));
@@ -90,7 +90,7 @@ TEST_CASE("Flex Wrap: wrap with single item", "[layout][flex][wrap]") {
     View root;
     root.set_bounds({0, 0, 200, 200});
     root.flex().direction = FlexDirection::row;
-    root.flex().flex_wrap = true;
+    root.flex().flex_wrap = FlexWrap::wrap;
     root.add_child(make_box(80, 40));
     root.layout_children();
 
@@ -102,7 +102,7 @@ TEST_CASE("Flex Wrap: many items in row still layout", "[layout][flex][wrap]") {
     View root;
     root.set_bounds({0, 0, 150, 300});
     root.flex().direction = FlexDirection::row;
-    root.flex().flex_wrap = true;
+    root.flex().flex_wrap = FlexWrap::wrap;
 
     for (int i = 0; i < 5; ++i)
         root.add_child(make_box(60, 30));
@@ -118,7 +118,7 @@ TEST_CASE("Flex Wrap: column direction with wrap flag", "[layout][flex][wrap]") 
     View root;
     root.set_bounds({0, 0, 300, 100});
     root.flex().direction = FlexDirection::column;
-    root.flex().flex_wrap = true;
+    root.flex().flex_wrap = FlexWrap::wrap;
     root.add_child(make_box(60, 50));
     root.add_child(make_box(60, 50));
     root.add_child(make_box(60, 50));

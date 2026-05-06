@@ -15,7 +15,7 @@ Pulp validates branches on macOS (local), Ubuntu (SSH), and Windows (SSH) before
 ./tools/install-shipyard.sh              # install pinned version
 ./tools/install-shipyard.sh --status     # compare installed vs pinned
 shipyard run                              # validate current branch
-shipyard ship                             # PR + validate + merge on green
+shipyard pr                               # create, track, validate, and merge on green
 shipyard cloud run build <branch>         # dispatch to Namespace
 ```
 
@@ -25,30 +25,44 @@ updates instead of hand-editing the file; newer Rust Shipyard releases changed
 the macOS asset shape to a signed/notarized `.dmg`, and the bump command keeps
 the version and asset metadata in sync.
 
-### Shipping a PR: `pulp pr`
+The public Pulp installer does not install Shipyard or GitHub CLI (`gh`).
+That is intentional: ordinary Pulp users do not need either tool to create,
+build, run, or upgrade projects. They are source-checkout contributor tools.
+`pulp pr` defaults to Shipyard and fails with install/switch guidance if
+Shipyard is missing; contributors who prefer their own PR flow can set
+`pulp config set pr.workflow github` or `manual`. The `github` workflow uses
+`gh` directly and requires it to be installed and authenticated. Run
+`pulp status` to see the effective workflow and local tool health.
 
-`pulp pr` is the single "ship this" orchestrator. Agents and humans should
-route every normal ship cycle through it rather than running `gh pr create`
-+ `shipyard ship` separately. It:
+### Shipping a PR: `shipyard pr`
+
+`shipyard pr` is the single "ship this" orchestrator. Agents and humans should
+route every normal ship cycle through it rather than pairing `gh pr create`
+with `shipyard ship` manually. It:
 
 1. Runs `tools/scripts/skill_sync_check.py` (hard-fails on missing SKILL.md updates).
 2. Runs `tools/scripts/version_bump_check.py --mode=apply` to bump SDK / Claude plugin / marketplace versions consistently.
 3. Commits the bump (if any) as `chore: bump <surfaces>`.
-4. `gh pr create` with a generated body.
-5. `shipyard ship` for cross-platform validate + merge on green.
+4. Pushes the branch, creates the PR, and records Shipyard tracking state.
+5. Runs cross-platform validate + merge on green.
 6. The auto-release workflow tags and publishes binaries on merge.
 
 ```bash
-pulp pr                                  # primary ship path (delegates to shipyard pr)
-pulp pr --base develop/package-manager   # ship to a develop branch
-pulp pr --title "..."                    # override PR title
-pulp pr --no-ship                        # open the PR but skip shipyard ship
-pulp pr --dry-run                        # print the plan without executing
+shipyard pr                              # primary ship path
+shipyard pr --base develop/package-manager # ship to a develop branch
+shipyard pr --title "..."                # override PR title
+shipyard pr --dry-run                    # print the plan without executing
 ```
 
-If `pulp pr` itself is broken (for example, a dylib load failure after a
-release bump), the equivalent fallback is to invoke `shipyard pr` directly —
-it runs the same gates + PR + ship flow.
+`pulp pr` is a compatibility wrapper that delegates to `shipyard pr` by
+default; it is valid, but guidance should name `shipyard pr` directly so
+humans and agents understand where PR tracking state lives. Its `github` and
+`manual` workflows are explicit local opt-outs and do not create Shipyard
+tracking state.
+
+Direct `gh pr create` is an emergency/manual bypass only. If it is used, call
+out that the PR may not appear in Shipyard-managed state until it is reconciled
+or re-shipped through Shipyard.
 
 ### Shipyard v0.3.0 workflow surface
 
@@ -103,10 +117,10 @@ pack.
 Every change to `main` must go through this workflow — no exceptions:
 
 1. **Branch** — work on `feature/*` or `fix/*`, never directly on main
-2. **Ship** — run `pulp pr` (which wraps `shipyard ship`) to create the PR, validate on macOS + Ubuntu + Windows, and merge on green
+2. **Ship** — run `shipyard pr` to create and track the PR, validate on macOS + Ubuntu + Windows, and merge on green
 3. **GitHub Actions** — PR also triggers build+test CI on all 3 platforms (redundant safety net)
 
-The `ci` skill (`.agents/skills/ci/SKILL.md`) captures this as the authoritative trigger list — natural-language phrases like "ship this", "push a PR", "we're done", and "run CI" all route through `pulp pr`.
+The `ci` skill (`.agents/skills/ci/SKILL.md`) captures this as the authoritative trigger list — natural-language phrases like "ship this", "push a PR", "we're done", and "run CI" all route through `shipyard pr`.
 
 ## Legacy: pulp ci-local
 
