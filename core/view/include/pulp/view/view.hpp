@@ -626,6 +626,23 @@ public:
     void set_backdrop_blur(float radius) { backdrop_blur_ = radius; }
     float backdrop_blur() const { return backdrop_blur_; }
 
+    /// CSS background sub-properties (pulp #1517). These slots store the
+    /// keyword for round-tripping; paint impact is partial — see notes:
+    ///   • background-attachment: only `scroll` is conformant in pulp's
+    ///     non-scrolling layout model. `fixed` / `local` need a scroll-
+    ///     context coupling we don't have. Catalog: noop.
+    ///   • background-clip: `text` would clip the bg paint to text glyphs
+    ///     via SkBlendMode::kSrcIn — deferred to a later PR. Other values
+    ///     are no-ops on solid bg. Catalog: partial.
+    ///   • background-origin: relevant only for repeating gradients (which
+    ///     we don't paint per-tile). Catalog: noop.
+    void set_background_attachment(std::string kw) { background_attachment_ = std::move(kw); }
+    const std::string& background_attachment() const { return background_attachment_; }
+    void set_background_clip(std::string kw)       { background_clip_ = std::move(kw); }
+    const std::string& background_clip() const     { return background_clip_; }
+    void set_background_origin(std::string kw)     { background_origin_ = std::move(kw); }
+    const std::string& background_origin() const   { return background_origin_; }
+
     /// Force this View's subtree to render into a compositing layer.
     /// Useful for caching, post-effects, or explicit layer isolation.
     void set_needs_layer(bool v) { needs_layer_ = v; }
@@ -783,6 +800,9 @@ private:
     bool has_transform_matrix_ = false;
     float filter_blur_ = 0;
     float backdrop_blur_ = 0;
+    std::string background_attachment_;  // pulp #1517 — noop today
+    std::string background_clip_;        // pulp #1517 — partial (text deferred)
+    std::string background_origin_;      // pulp #1517 — noop today
     bool needs_layer_ = false;
     WindowHost* window_host_ = nullptr;
     PluginViewHost* plugin_view_host_ = nullptr;

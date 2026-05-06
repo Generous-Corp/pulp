@@ -27,6 +27,15 @@ Spec walk:
 
 ## Recently changed
 
+- **2026-05-06 (pulp #1518)** — `rn/flex` shorthand wired through the
+  `@pulp/react` prop-applier. RN-style numeric `flex={n}` now expands
+  to `{flexGrow: n, flexShrink: 1, flexBasis: 0}` (positive `n`),
+  `(0, 0, 'auto')` (zero), or `(0, 1, 'auto')` (negative). Previously
+  `<View flex={1} />` silently dropped the prop and consumers had to
+  fan it out manually. Pure adapter aliasing — no bridge or C++ work
+  needed; underlying `flex_grow` / `flex_shrink` / `flex_basis` were
+  already stable. Closes the most-cited rn gap (the doc had this
+  under "notable gaps" since the rn surface was first inventoried).
 - **2026-05-06 (pulp #1519)** — RN outline cluster surfaced at the
   `@pulp/react` JSX layer: `outlineColor`, `outlineOffset`,
   `outlineStyle`, `outlineWidth` all flipped `missing` → `supported`.
@@ -228,18 +237,15 @@ Spec walk:
 
 ## Notable gaps
 
-1. `rn/flex` shorthand — RN's `style={{flex: 1}}` is the most common
-   pattern in tutorials. `@pulp/react` users must type
-   `flexGrow={1} flexShrink={1} flexBasis={0}`.
-2. `rn/marginStart` / `rn/marginEnd`, `rn/paddingStart` / `rn/paddingEnd`
+1. `rn/marginStart` / `rn/marginEnd`, `rn/paddingStart` / `rn/paddingEnd`
    — direction-aware logical props not wired (Yoga RTL is also
    unsupported).
-3. `rn/shadowColor` / `rn/shadowOffset` / `rn/shadowOpacity` /
+2. `rn/shadowColor` / `rn/shadowOffset` / `rn/shadowOpacity` /
    `rn/shadowRadius` — iOS shadow surface; routed via
    `boxShadow` instead.
-4. `rn/elevation` — Android-only; not modeled.
-5. `rn/borderCurve` — iOS 13+ continuous-corners; not modeled.
-6. `rn/mixBlendMode`, `rn/isolation` — not yet wired (Skia / CG can
+3. `rn/elevation` — Android-only; not modeled.
+4. `rn/borderCurve` — iOS 13+ continuous-corners; not modeled.
+5. `rn/mixBlendMode`, `rn/isolation` — not yet wired (Skia / CG can
    support; bridge plumbing absent).
 
 ## SvgPath (#994 / #1291)

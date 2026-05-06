@@ -116,6 +116,11 @@ public:
                                    const Color* colors, const float* positions, int count) override;
     void set_fill_gradient_radial(float cx, float cy, float radius,
                                    const Color* colors, const float* positions, int count) override;
+    /// pulp #1524 — true two-circle radial gradient via SkGradientShader::MakeTwoPointConical.
+    void set_fill_gradient_radial_two_circles(
+        float x0, float y0, float r0,
+        float x1, float y1, float r1,
+        const Color* colors, const float* positions, int count) override;
     void set_fill_gradient_conic(float cx, float cy, float start_angle,
                                   const Color* colors, const float* positions, int count) override;
     void clear_fill_gradient() override;
