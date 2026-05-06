@@ -1878,3 +1878,264 @@ TEST_CASE("Canvas2D direction + filter cache invalidates on save/restore",
     REQUIRE(filter_count == 3);
     REQUIRE(dir_count    == 3);
 }
+
+// ── pulp #1527 — getTransform / resetTransform ───────────────────────────
+//
+// HTML5 spec: ctx.getTransform() returns a DOMMatrix-shaped object whose
+// `a, b, c, d, e, f` mirror the current 2D affine transform. The shim
+// keeps a JS-side mirror updated by translate / scale / rotate /
+// setTransform / transform / save / restore so the read can answer
+// synchronously without a bridge round-trip.
+TEST_CASE("Canvas2D getTransform returns identity by default",
+          "[view][canvas2d][issue-1527]") {
+    auto result = run_in_bridge(R"(
+        var c = document.createElement('canvas');
+        c.id = 'probe';
+        document.body.appendChild(c);
+        var ctx = c.getContext('2d');
+        var m = ctx.getTransform();
+        return [m.a, m.b, m.c, m.d, m.e, m.f, m.is2D, m.isIdentity].join(',');
+    )");
+    REQUIRE(result == "1,0,0,1,0,0,true,true");
+}
+
+TEST_CASE("Canvas2D getTransform reflects translate / scale / rotate",
+          "[view][canvas2d][issue-1527]") {
+    auto result = run_in_bridge(R"(
+        var c = document.createElement('canvas');
+        c.id = 'probe';
+        document.body.appendChild(c);
+        var ctx = c.getContext('2d');
+        ctx.translate(10, 20);
+        ctx.scale(2, 3);
+        var m = ctx.getTransform();
+        return [m.a, m.b, m.c, m.d, m.e, m.f].join(',');
+    )");
+    // After translate(10,20) then scale(2,3) on identity: a=2,b=0,c=0,d=3,e=10,f=20.
+    REQUIRE(result == "2,0,0,3,10,20");
+}
+
+TEST_CASE("Canvas2D setTransform replaces current transform",
+          "[view][canvas2d][issue-1527]") {
+    auto result = run_in_bridge(R"(
+        var c = document.createElement('canvas');
+        c.id = 'probe';
+        document.body.appendChild(c);
+        var ctx = c.getContext('2d');
+        ctx.translate(99, 99);
+        ctx.setTransform(1, 0, 0, 1, 5, 7);
+        var m = ctx.getTransform();
+        return [m.a, m.b, m.c, m.d, m.e, m.f, m.isIdentity].join(',');
+    )");
+    REQUIRE(result == "1,0,0,1,5,7,false");
+}
+
+TEST_CASE("Canvas2D resetTransform returns matrix to identity",
+          "[view][canvas2d][issue-1527]") {
+    auto result = run_in_bridge(R"(
+        var c = document.createElement('canvas');
+        c.id = 'probe';
+        document.body.appendChild(c);
+        var ctx = c.getContext('2d');
+        ctx.translate(50, 60);
+        ctx.scale(3, 4);
+        ctx.resetTransform();
+        var m = ctx.getTransform();
+        return [m.a, m.b, m.c, m.d, m.e, m.f, m.isIdentity].join(',');
+    )");
+    REQUIRE(result == "1,0,0,1,0,0,true");
+}
+
+TEST_CASE("Canvas2D save/restore restores prior transform",
+          "[view][canvas2d][issue-1527]") {
+    auto result = run_in_bridge(R"(
+        var c = document.createElement('canvas');
+        c.id = 'probe';
+        document.body.appendChild(c);
+        var ctx = c.getContext('2d');
+        ctx.translate(10, 20);
+        ctx.save();
+        ctx.translate(100, 200);
+        var inner = ctx.getTransform();
+        ctx.restore();
+        var outer = ctx.getTransform();
+        return [inner.e, inner.f, outer.e, outer.f].join(',');
+    )");
+    REQUIRE(result == "110,220,10,20");
+}
+
+TEST_CASE("Canvas2D getTransform returns independent copy",
+          "[view][canvas2d][issue-1527]") {
+    // Spec: mutating the returned DOMMatrix must not affect the live ctx
+    // transform. Confirm by mutating m.a and reading the next getTransform.
+    auto result = run_in_bridge(R"(
+        var c = document.createElement('canvas');
+        c.id = 'probe';
+        document.body.appendChild(c);
+        var ctx = c.getContext('2d');
+        ctx.translate(5, 7);
+        var m = ctx.getTransform();
+        m.a = 999; m.e = 999;
+        var m2 = ctx.getTransform();
+        return [m2.a, m2.e].join(',');
+    )");
+    REQUIRE(result == "1,5");
+}
+
+TEST_CASE("Canvas2D getTransform DOMMatrix-shaped fields",
+          "[view][canvas2d][issue-1527]") {
+    auto result = run_in_bridge(R"(
+        var c = document.createElement('canvas');
+        c.id = 'probe';
+        document.body.appendChild(c);
+        var ctx = c.getContext('2d');
+        ctx.setTransform(2, 0, 0, 3, 4, 5);
+        var m = ctx.getTransform();
+        // m11/m12/m21/m22/m41/m42 are the DOMMatrix aliases for a/b/c/d/e/f.
+        return [m.m11, m.m12, m.m21, m.m22, m.m41, m.m42, m.is2D].join(',');
+    )");
+    REQUIRE(result == "2,0,0,3,4,5,true");
+}
+
+// ── pulp #1527 — isPointInPath / isPointInStroke ─────────────────────────
+TEST_CASE("Canvas2D isPointInPath: point inside rect path",
+          "[view][canvas2d][issue-1527]") {
+    auto result = run_in_bridge(R"(
+        var c = document.createElement('canvas');
+        c.id = 'probe';
+        document.body.appendChild(c);
+        var ctx = c.getContext('2d');
+        ctx.beginPath();
+        ctx.rect(10, 10, 100, 50);
+        return ctx.isPointInPath(50, 30);
+    )");
+    REQUIRE(result == "true");
+}
+
+TEST_CASE("Canvas2D isPointInPath: point outside rect path",
+          "[view][canvas2d][issue-1527]") {
+    auto result = run_in_bridge(R"(
+        var c = document.createElement('canvas');
+        c.id = 'probe';
+        document.body.appendChild(c);
+        var ctx = c.getContext('2d');
+        ctx.beginPath();
+        ctx.rect(10, 10, 100, 50);
+        return ctx.isPointInPath(5, 5);
+    )");
+    REQUIRE(result == "false");
+}
+
+TEST_CASE("Canvas2D isPointInPath: works with moveTo + lineTo polygon",
+          "[view][canvas2d][issue-1527]") {
+    auto result = run_in_bridge(R"(
+        var c = document.createElement('canvas');
+        c.id = 'probe';
+        document.body.appendChild(c);
+        var ctx = c.getContext('2d');
+        // Triangle (0,0) -> (100,0) -> (50,100).
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(100, 0);
+        ctx.lineTo(50, 100);
+        ctx.closePath();
+        return [ctx.isPointInPath(50, 30),    // central, low y — inside
+                ctx.isPointInPath(10, 80),    // near left base — outside (sloped)
+                ctx.isPointInPath(-5, 50)].join(',');
+    )");
+    // Triangle vertices (0,0)-(100,0)-(50,100). At y=80 the left edge
+    // crosses at x=40, so x=10 is outside. Origin-side x=-5 is outside.
+    REQUIRE(result == "true,false,false");
+}
+
+TEST_CASE("Canvas2D beginPath resets path mirror",
+          "[view][canvas2d][issue-1527]") {
+    // After beginPath, prior geometry must not contribute to hit tests.
+    auto result = run_in_bridge(R"(
+        var c = document.createElement('canvas');
+        c.id = 'probe';
+        document.body.appendChild(c);
+        var ctx = c.getContext('2d');
+        ctx.beginPath();
+        ctx.rect(0, 0, 100, 100);
+        var hit1 = ctx.isPointInPath(50, 50);
+        ctx.beginPath();
+        ctx.rect(200, 200, 50, 50);
+        var hit2 = ctx.isPointInPath(50, 50);
+        return [hit1, hit2].join(',');
+    )");
+    REQUIRE(result == "true,false");
+}
+
+TEST_CASE("Canvas2D isPointInPath rejects non-finite coordinates",
+          "[view][canvas2d][issue-1527]") {
+    auto result = run_in_bridge(R"(
+        var c = document.createElement('canvas');
+        c.id = 'probe';
+        document.body.appendChild(c);
+        var ctx = c.getContext('2d');
+        ctx.beginPath();
+        ctx.rect(0, 0, 100, 100);
+        return [ctx.isPointInPath(NaN, 50),
+                ctx.isPointInPath(50, Infinity)].join(',');
+    )");
+    REQUIRE(result == "false,false");
+}
+
+TEST_CASE("Canvas2D isPointInStroke: point on stroke edge",
+          "[view][canvas2d][issue-1527]") {
+    auto result = run_in_bridge(R"(
+        var c = document.createElement('canvas');
+        c.id = 'probe';
+        document.body.appendChild(c);
+        var ctx = c.getContext('2d');
+        ctx.lineWidth = 4;  // half-width = 2px
+        ctx.beginPath();
+        ctx.moveTo(0, 50);
+        ctx.lineTo(100, 50);
+        return [ctx.isPointInStroke(50, 50),     // on the line
+                ctx.isPointInStroke(50, 51),     // 1px below — inside half-width
+                ctx.isPointInStroke(50, 60)].join(','); // 10px below — outside
+    )");
+    REQUIRE(result == "true,true,false");
+}
+
+TEST_CASE("Canvas2D isPointInStroke respects lineWidth changes",
+          "[view][canvas2d][issue-1527]") {
+    auto result = run_in_bridge(R"(
+        var c = document.createElement('canvas');
+        c.id = 'probe';
+        document.body.appendChild(c);
+        var ctx = c.getContext('2d');
+        ctx.beginPath();
+        ctx.moveTo(0, 50);
+        ctx.lineTo(100, 50);
+        ctx.lineWidth = 2;  // half-width = 1px
+        var thin = ctx.isPointInStroke(50, 53);
+        ctx.lineWidth = 20; // half-width = 10px
+        var thick = ctx.isPointInStroke(50, 53);
+        return [thin, thick].join(',');
+    )");
+    REQUIRE(result == "false,true");
+}
+
+TEST_CASE("Canvas2D isPointInPath / isPointInStroke survive save/restore",
+          "[view][canvas2d][issue-1527]") {
+    // The path mirror is part of the save/restore snapshot, so a save()
+    // of an empty path followed by appending geometry, then restore(),
+    // must roll back the path so isPointInPath returns false.
+    auto result = run_in_bridge(R"(
+        var c = document.createElement('canvas');
+        c.id = 'probe';
+        document.body.appendChild(c);
+        var ctx = c.getContext('2d');
+        ctx.beginPath();          // empty path
+        ctx.save();
+        ctx.rect(0, 0, 100, 100);
+        var inside = ctx.isPointInPath(50, 50);
+        ctx.restore();
+        var afterRestore = ctx.isPointInPath(50, 50);
+        return [inside, afterRestore].join(',');
+    )");
+    REQUIRE(result == "true,false");
+}

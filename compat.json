@@ -6081,6 +6081,36 @@
       "notes": "Backed by SkCanvas::clipPath. (issue-896 added canvasClip; older canvasClipRect is the rect-only path.)",
       "issue": ""
     },
+    "canvas2d/isPointInPath": {
+      "status": "partial",
+      "mapsTo": "ctx.isPointInPath(x, y[, fillRule]) -> JS-side ray-cast against the path mirror. Each path-construction method (moveTo / lineTo / rect / roundRect / arc / arcTo / ellipse / bezierCurveTo / quadraticCurveTo / closePath) appends to `_pathSubpaths` in addition to forwarding to the bridge. Curve segments sample to ~16 line pieces — accurate enough for spec-compliant hit testing.",
+      "supportedValues": [
+        "isPointInPath(x, y) on rect / lineTo polygon / arc / curve paths",
+        "rolls back across save / restore via the path-mirror snapshot"
+      ],
+      "unsupportedValues": [
+        "Path2D-object first argument (shim returns a 2-arg form result; standalone Path2D not yet modeled)",
+        "fillRule difference for self-intersecting paths — the JS ray-cast returns the same answer for 'nonzero' and 'evenodd'"
+      ],
+      "tests": [],
+      "notes": "pulp #1527 bridge-thin gap-fill. Synchronous return — no bridge round-trip; the bridge owns the canonical SkPath but it's not queryable from JS until paint time.",
+      "issue": "1527"
+    },
+    "canvas2d/isPointInStroke": {
+      "status": "partial",
+      "mapsTo": "ctx.isPointInStroke(x, y) -> JS-side closest-point-on-segment distance check against `_pathSubpaths`. Returns true when the test point's distance to any path segment is ≤ lineWidth / 2.",
+      "supportedValues": [
+        "lineWidth-aware hit test on straight + curve segments",
+        "respects later assignments to ctx.lineWidth"
+      ],
+      "unsupportedValues": [
+        "lineCap / lineJoin geometry (square caps, miter spikes — approximated as round caps because we test distance to the segment)",
+        "Path2D-object first argument"
+      ],
+      "tests": [],
+      "notes": "pulp #1527 bridge-thin gap-fill. Pairs with isPointInPath; uses the same JS path mirror.",
+      "issue": "1527"
+    },
     "canvas2d/save": {
       "status": "supported",
       "mapsTo": "ctx.save -> canvasSave (Skia/CG canvas state stack).",
@@ -6137,12 +6167,28 @@
     },
     "canvas2d/resetTransform": {
       "status": "supported",
-      "mapsTo": "ctx.resetTransform -> canvasSetTransform(id, 1, 0, 0, 1, 0, 0).",
+      "mapsTo": "ctx.resetTransform -> canvasSetTransform(id, 1, 0, 0, 1, 0, 0). Also resets the JS-side _currentTransform mirror (pulp #1527) so getTransform reads back the identity.",
       "supportedValues": [],
       "unsupportedValues": [],
       "tests": [],
-      "notes": "PR #1348.",
+      "notes": "PR #1348. Mirror update added in pulp #1527.",
       "issue": "1346"
+    },
+    "canvas2d/getTransform": {
+      "status": "supported",
+      "mapsTo": "ctx.getTransform() -> returns a DOMMatrix-shaped object reflecting the JS-mirrored 2D affine transform. The shim tracks `_currentTransform` via translate / scale / rotate / setTransform / transform / save / restore so the read is synchronous (no bridge round-trip; the bridge replays draws at paint time and has no queryable 'current matrix' from JS).",
+      "supportedValues": [
+        "a, b, c, d, e, f (live)",
+        "m11/m12/m21/m22/m41/m42 DOMMatrix aliases",
+        "is2D, isIdentity flags",
+        "toFloat32Array / toFloat64Array readers"
+      ],
+      "unsupportedValues": [
+        "DOMMatrix mutation methods (multiplySelf, scaleSelf, etc.) — the returned object is a snapshot, not a live binding"
+      ],
+      "tests": [],
+      "notes": "pulp #1527 bridge-thin gap-fill. Mutating the returned matrix does NOT affect the live ctx (spec-compliant — getTransform returns a NEW DOMMatrix per call).",
+      "issue": "1527"
     },
     "canvas2d/transform": {
       "status": "partial",

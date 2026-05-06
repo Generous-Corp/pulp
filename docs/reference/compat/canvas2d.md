@@ -194,6 +194,40 @@ backend stores the values but renders unfiltered today (Skia-only
 filter chain); a CG follow-up can route through `CGContextSetShadow`
 + `CGImage`-backed colour-matrix passes when needed.
 
+### Recently changed (pulp #1527)
+
+The bridge-thin gap-fill PR closed the three remaining
+synchronous-return Canvas2D entries — the underlying Skia/CG paths
+were already there; the gap was the JS-side mirror needed for spec
+semantics.
+
+- **`getTransform()`** — returns a DOMMatrix-shaped object reflecting
+  the current 2D affine transform. The shim mirrors `_currentTransform`
+  via `translate` / `scale` / `rotate` / `setTransform` / `transform`
+  and the `save` / `restore` stack so the read is synchronous (the
+  bridge replays draws at paint time and has no queryable "current
+  matrix" from JS). The returned object exposes `a, b, c, d, e, f`,
+  the `m11..m44` DOMMatrix aliases, `is2D`, `isIdentity`, and
+  `toFloat32Array` / `toFloat64Array`. Mutating the returned matrix
+  does NOT affect the live ctx (spec-compliant — `getTransform`
+  returns a NEW DOMMatrix per call).
+- **`isPointInPath(x, y[, fillRule])`** — JS-side ray-cast against the
+  path mirror. Each path-construction method (`moveTo`, `lineTo`,
+  `rect`, `roundRect`, `arc`, `arcTo`, `ellipse`, `bezierCurveTo`,
+  `quadraticCurveTo`, `closePath`) appends to `_pathSubpaths` in
+  addition to forwarding to the bridge. Curve segments sample to ~16
+  line pieces — accurate enough for spec-compliant hit testing without
+  pulling a real bezier solver into JS. The path mirror is part of the
+  `save` / `restore` snapshot. Path2D-object first argument and
+  fillRule="evenodd" semantics for self-intersecting paths are
+  out-of-scope (the ray-cast returns the same answer for both rules
+  on simple non-self-intersecting paths).
+- **`isPointInStroke(x, y)`** — closest-point-on-segment distance check
+  against the same path mirror; returns `true` when the test point's
+  distance to any path segment is ≤ `lineWidth / 2`. Respects later
+  assignments to `ctx.lineWidth`. Approximates as round-cap geometry;
+  square caps and miter spikes are not modelled.
+
 ## Partial / approximated
 
 1. **`arcTo`** — currently emits `lineTo(x1,y1) + lineTo(x2,y2)`,
