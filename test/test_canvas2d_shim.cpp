@@ -205,6 +205,47 @@ TEST_CASE("Canvas2D createRadialGradient returns CanvasGradient",
     REQUIRE(result == "radial|2|60");
 }
 
+// pulp #1524 — createRadialGradient with distinct inner+outer circles
+// flushes via the new two-circle bridge fn (canvasSetRadialGradientTwoCircles)
+// and the resulting CanvasDrawCmd carries BOTH circles. Pre-fix, the JS shim
+// stored only the outer circle and dropped (x0, y0, r0) silently.
+TEST_CASE("Canvas2D createRadialGradient flushes two circles via the new bridge fn",
+          "[view][canvas2d][issue-1524]") {
+    ScriptedBridge env;
+    env.load(R"(
+        var c = document.createElement('canvas');
+        globalThis.__test_canvas_el__ = c;
+        document.body.appendChild(c);
+        c.width = 100; c.height = 100;
+        var ctx = c.getContext('2d');
+        var g = ctx.createRadialGradient(20, 30, 5, 80, 70, 50);
+        g.addColorStop(0, '#ff0000');
+        g.addColorStop(1, '#0000ff');
+        ctx.fillStyle = g;
+        ctx.fillRect(0, 0, 100, 100);
+    )");
+
+    auto* cw = env.canvas();
+    REQUIRE(cw != nullptr);
+    bool saw_two_circles = false;
+    for (const auto& cmd : cw->commands()) {
+        if (cmd.type == CanvasDrawCmd::Type::set_fill_gradient_radial_two_circles) {
+            saw_two_circles = true;
+            // Inner circle (x0=20, y0=30, r0=5) packed as (x, y, extra).
+            REQUIRE(cmd.x      == Catch::Approx(20.0f));
+            REQUIRE(cmd.y      == Catch::Approx(30.0f));
+            REQUIRE(cmd.extra  == Catch::Approx(5.0f));
+            // Outer circle (x1=80, y1=70, r1=50) packed as (x2, y2, w).
+            REQUIRE(cmd.x2     == Catch::Approx(80.0f));
+            REQUIRE(cmd.y2     == Catch::Approx(70.0f));
+            REQUIRE(cmd.w      == Catch::Approx(50.0f));
+            REQUIRE(cmd.gradient_colors.size() == 2);
+            REQUIRE(cmd.gradient_positions.size() == 2);
+        }
+    }
+    REQUIRE(saw_two_circles);
+}
+
 // ── FilterBank-style command stream records via the shim ─────────────────
 //
 // JS calls ctx.save(); ctx.translate(); ctx.fillStyle = grad; ctx.fillRect();
@@ -1590,3 +1631,511 @@ TEST_CASE("Canvas2D pattern set_fill_pattern reaches Skia without throwing",
     REQUIRE(any_painted);
 }
 #endif  // PULP_HAS_SKIA
+
+// ── pulp #1520 — Canvas2D ctx.direction / ctx.filter ────────────────────
+//
+// canvas2d/direction and canvas2d/filter were the last two NOT-IMPL
+// entries in compat.json's canvas2d catalog. This block flips them to
+// `partial` by routing the JS shim through the bridge and into Skia's
+// SkShaper / SkImageFilter chain. The tests below exercise:
+//   * round-trip getter/setter on the JS shim
+//   * defensive coercion of unknown direction strings
+//   * sticky flush of direction setter before fillText
+//   * round-trip getter/setter on filter (raw string)
+//   * sticky flush of filter setter before fill / drawImage
+//   * cache invalidation across save/restore
+// SkImageFilter chain rasterisation parity is intentionally not asserted
+// here — the parser is exercised by the [issue-1520] subset; full visual
+// parity with Chrome is a follow-up shared with #1503's element-side
+// CSS filter parser.
+
+TEST_CASE("Canvas2D shim exposes direction property as round-trip field",
+          "[view][canvas2d][issue-1520]") {
+    auto result = run_in_bridge(R"(
+        var c = document.createElement('canvas');
+        document.body.appendChild(c);
+        c.width = 32; c.height = 32;
+        var ctx = c.getContext('2d');
+        // Spec default: "ltr".
+        var initial = ctx.direction;
+        ctx.direction = 'rtl';
+        var rtl = ctx.direction;
+        ctx.direction = 'inherit';
+        var inh = ctx.direction;
+        return [initial, rtl, inh].join('|');
+    )");
+    REQUIRE(result == "ltr|rtl|inherit");
+}
+
+TEST_CASE("Canvas2D shim coerces unknown direction strings on the bridge flush",
+          "[view][canvas2d][issue-1520]") {
+    // Per spec, assigning an unknown string is a no-op (the previous
+    // valid value persists). Our shim mirrors the assigned string in
+    // the JS getter (matching the spec's "store the IDL value" rule)
+    // but coerces to "ltr" on the bridge flush — there's no enum value
+    // for "garbage" downstream. The test asserts the recorded command
+    // stream sees a valid (ltr) enum.
+    ScriptedBridge env;
+    env.load(R"(
+        var c = document.createElement('canvas');
+        globalThis.__test_canvas_el__ = c;
+        document.body.appendChild(c);
+        c.width = 32; c.height = 32;
+        var ctx = c.getContext('2d');
+        ctx.direction = 'sideways';
+        ctx.fillText('x', 0, 0);
+    )");
+
+    auto* cw = env.canvas();
+    REQUIRE(cw != nullptr);
+    bool saw_direction = false;
+    for (const auto& cmd : cw->commands()) {
+        if (cmd.type == CanvasDrawCmd::Type::set_direction) {
+            saw_direction = true;
+            // Coerced to ltr enum (0).
+            REQUIRE(cmd.int_val == 0);
+        }
+    }
+    REQUIRE(saw_direction);
+}
+
+TEST_CASE("Canvas2D direction flushes via canvasSetDirection bridge fn before fillText",
+          "[view][canvas2d][issue-1520]") {
+    ScriptedBridge env;
+    env.load(R"(
+        var c = document.createElement('canvas');
+        globalThis.__test_canvas_el__ = c;
+        document.body.appendChild(c);
+        c.width = 100; c.height = 100;
+        var ctx = c.getContext('2d');
+        ctx.direction = 'rtl';
+        ctx.font = '14px Inter';
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText('Hello', 50, 50);
+    )");
+
+    auto* cw = env.canvas();
+    REQUIRE(cw != nullptr);
+    using T = pulp::view::CanvasDrawCmd::Type;
+    int dir_idx = -1, text_idx = -1;
+    for (size_t i = 0; i < cw->commands().size(); ++i) {
+        if (cw->commands()[i].type == T::set_direction) dir_idx = (int)i;
+        if (cw->commands()[i].type == T::fill_text)     text_idx = (int)i;
+    }
+    REQUIRE(dir_idx >= 0);
+    REQUIRE(text_idx >= 0);
+    // Sticky-state contract: setter must precede the consuming draw.
+    REQUIRE(dir_idx < text_idx);
+    // RTL = enum value 1.
+    REQUIRE(cw->commands()[dir_idx].int_val == 1);
+}
+
+TEST_CASE("Canvas2D shim exposes filter property as round-trip field",
+          "[view][canvas2d][issue-1520]") {
+    auto result = run_in_bridge(R"(
+        var c = document.createElement('canvas');
+        document.body.appendChild(c);
+        c.width = 32; c.height = 32;
+        var ctx = c.getContext('2d');
+        // Spec default: "none".
+        var initial = ctx.filter;
+        ctx.filter = 'blur(5px) sepia(80%)';
+        var assigned = ctx.filter;
+        // Reset.
+        ctx.filter = 'none';
+        var reset = ctx.filter;
+        return [initial, assigned, reset].join('||');
+    )");
+    REQUIRE(result == "none||blur(5px) sepia(80%)||none");
+}
+
+TEST_CASE("Canvas2D filter flushes via canvasSetFilter bridge fn before fillRect",
+          "[view][canvas2d][issue-1520]") {
+    ScriptedBridge env;
+    env.load(R"(
+        var c = document.createElement('canvas');
+        globalThis.__test_canvas_el__ = c;
+        document.body.appendChild(c);
+        c.width = 100; c.height = 100;
+        var ctx = c.getContext('2d');
+        ctx.filter = 'blur(4px) grayscale(50%)';
+        ctx.fillStyle = '#ff0000';
+        ctx.fillRect(0, 0, 50, 50);
+    )");
+
+    auto* cw = env.canvas();
+    REQUIRE(cw != nullptr);
+    using T = pulp::view::CanvasDrawCmd::Type;
+    int filter_idx = -1, rect_idx = -1;
+    for (size_t i = 0; i < cw->commands().size(); ++i) {
+        if (cw->commands()[i].type == T::set_filter)  filter_idx = (int)i;
+        if (cw->commands()[i].type == T::fill_rect)   rect_idx   = (int)i;
+    }
+    REQUIRE(filter_idx >= 0);
+    REQUIRE(rect_idx >= 0);
+    REQUIRE(filter_idx < rect_idx);
+    // Raw CSS string round-trips through the bridge unchanged.
+    REQUIRE(cw->commands()[filter_idx].text == "blur(4px) grayscale(50%)");
+}
+
+TEST_CASE("Canvas2D filter flushes only on change (sticky-state cache)",
+          "[view][canvas2d][issue-1520]") {
+    // Cache contract: assigning the same filter twice is a no-op on
+    // the bridge side — the second fillRect must not produce a second
+    // set_filter command. Mirrors the same caching shape shadowColor
+    // / miterLimit / imageSmoothing already use.
+    ScriptedBridge env;
+    env.load(R"(
+        var c = document.createElement('canvas');
+        globalThis.__test_canvas_el__ = c;
+        document.body.appendChild(c);
+        c.width = 64; c.height = 64;
+        var ctx = c.getContext('2d');
+        ctx.filter = 'blur(2px)';
+        ctx.fillRect(0, 0, 10, 10);
+        ctx.filter = 'blur(2px)';   // identical assignment — no flush
+        ctx.fillRect(20, 0, 10, 10);
+        ctx.filter = 'sepia(100%)'; // changed — must flush
+        ctx.fillRect(40, 0, 10, 10);
+    )");
+
+    auto* cw = env.canvas();
+    REQUIRE(cw != nullptr);
+    int filter_count = 0;
+    for (const auto& cmd : cw->commands()) {
+        if (cmd.type == pulp::view::CanvasDrawCmd::Type::set_filter) ++filter_count;
+    }
+    // First assignment + the change to sepia = 2 flushes total.
+    REQUIRE(filter_count == 2);
+}
+
+TEST_CASE("Canvas2D filter flushes before drawImage so sticky chain wraps the bitmap",
+          "[view][canvas2d][issue-1520]") {
+    ScriptedBridge env;
+    env.load(R"(
+        var c = document.createElement('canvas');
+        globalThis.__test_canvas_el__ = c;
+        document.body.appendChild(c);
+        c.width = 100; c.height = 100;
+        var ctx = c.getContext('2d');
+        ctx.filter = 'invert(100%)';
+        ctx.drawImage('does-not-exist.png', 0, 0, 50, 50);
+    )");
+
+    auto* cw = env.canvas();
+    REQUIRE(cw != nullptr);
+    using T = pulp::view::CanvasDrawCmd::Type;
+    int filter_idx = -1, draw_idx = -1;
+    for (size_t i = 0; i < cw->commands().size(); ++i) {
+        if (cw->commands()[i].type == T::set_filter) filter_idx = (int)i;
+        if (cw->commands()[i].type == T::draw_image) draw_idx   = (int)i;
+    }
+    REQUIRE(filter_idx >= 0);
+    REQUIRE(draw_idx >= 0);
+    REQUIRE(filter_idx < draw_idx);
+    REQUIRE(cw->commands()[filter_idx].text == "invert(100%)");
+}
+
+TEST_CASE("Canvas2D direction + filter cache invalidates on save/restore",
+          "[view][canvas2d][issue-1520]") {
+    // The JS-side shim invalidates its sticky-flush cache across
+    // ctx.save() / ctx.restore() because the C++ canvas pops the
+    // GState back to the saved snapshot, including any direction /
+    // filter state. Without invalidation the next draw after restore
+    // would skip the flush thinking the value matched cache.
+    ScriptedBridge env;
+    env.load(R"(
+        var c = document.createElement('canvas');
+        globalThis.__test_canvas_el__ = c;
+        document.body.appendChild(c);
+        c.width = 64; c.height = 64;
+        var ctx = c.getContext('2d');
+        ctx.filter = 'blur(2px)';
+        ctx.direction = 'rtl';
+        ctx.fillText('a', 0, 10);
+        ctx.save();
+        // Inside save scope: change values, draw, restore.
+        ctx.filter = 'sepia(100%)';
+        ctx.direction = 'ltr';
+        ctx.fillText('b', 0, 20);
+        ctx.restore();
+        // Re-assign to the OUTER values. Cache is invalidated by
+        // restore(), so the bridge MUST emit setters again.
+        ctx.filter = 'blur(2px)';
+        ctx.direction = 'rtl';
+        ctx.fillText('c', 0, 30);
+    )");
+
+    auto* cw = env.canvas();
+    REQUIRE(cw != nullptr);
+    int filter_count = 0, dir_count = 0;
+    for (const auto& cmd : cw->commands()) {
+        if (cmd.type == pulp::view::CanvasDrawCmd::Type::set_filter)    ++filter_count;
+        if (cmd.type == pulp::view::CanvasDrawCmd::Type::set_direction) ++dir_count;
+    }
+    // 3 distinct flushes per setter: outer pre-save, inner change,
+    // and the post-restore re-assignment.
+    REQUIRE(filter_count == 3);
+    REQUIRE(dir_count    == 3);
+}
+
+// ── pulp #1527 — getTransform / resetTransform ───────────────────────────
+//
+// HTML5 spec: ctx.getTransform() returns a DOMMatrix-shaped object whose
+// `a, b, c, d, e, f` mirror the current 2D affine transform. The shim
+// keeps a JS-side mirror updated by translate / scale / rotate /
+// setTransform / transform / save / restore so the read can answer
+// synchronously without a bridge round-trip.
+TEST_CASE("Canvas2D getTransform returns identity by default",
+          "[view][canvas2d][issue-1527]") {
+    auto result = run_in_bridge(R"(
+        var c = document.createElement('canvas');
+        c.id = 'probe';
+        document.body.appendChild(c);
+        var ctx = c.getContext('2d');
+        var m = ctx.getTransform();
+        return [m.a, m.b, m.c, m.d, m.e, m.f, m.is2D, m.isIdentity].join(',');
+    )");
+    REQUIRE(result == "1,0,0,1,0,0,true,true");
+}
+
+TEST_CASE("Canvas2D getTransform reflects translate / scale / rotate",
+          "[view][canvas2d][issue-1527]") {
+    auto result = run_in_bridge(R"(
+        var c = document.createElement('canvas');
+        c.id = 'probe';
+        document.body.appendChild(c);
+        var ctx = c.getContext('2d');
+        ctx.translate(10, 20);
+        ctx.scale(2, 3);
+        var m = ctx.getTransform();
+        return [m.a, m.b, m.c, m.d, m.e, m.f].join(',');
+    )");
+    // After translate(10,20) then scale(2,3) on identity: a=2,b=0,c=0,d=3,e=10,f=20.
+    REQUIRE(result == "2,0,0,3,10,20");
+}
+
+TEST_CASE("Canvas2D setTransform replaces current transform",
+          "[view][canvas2d][issue-1527]") {
+    auto result = run_in_bridge(R"(
+        var c = document.createElement('canvas');
+        c.id = 'probe';
+        document.body.appendChild(c);
+        var ctx = c.getContext('2d');
+        ctx.translate(99, 99);
+        ctx.setTransform(1, 0, 0, 1, 5, 7);
+        var m = ctx.getTransform();
+        return [m.a, m.b, m.c, m.d, m.e, m.f, m.isIdentity].join(',');
+    )");
+    REQUIRE(result == "1,0,0,1,5,7,false");
+}
+
+TEST_CASE("Canvas2D resetTransform returns matrix to identity",
+          "[view][canvas2d][issue-1527]") {
+    auto result = run_in_bridge(R"(
+        var c = document.createElement('canvas');
+        c.id = 'probe';
+        document.body.appendChild(c);
+        var ctx = c.getContext('2d');
+        ctx.translate(50, 60);
+        ctx.scale(3, 4);
+        ctx.resetTransform();
+        var m = ctx.getTransform();
+        return [m.a, m.b, m.c, m.d, m.e, m.f, m.isIdentity].join(',');
+    )");
+    REQUIRE(result == "1,0,0,1,0,0,true");
+}
+
+TEST_CASE("Canvas2D save/restore restores prior transform",
+          "[view][canvas2d][issue-1527]") {
+    auto result = run_in_bridge(R"(
+        var c = document.createElement('canvas');
+        c.id = 'probe';
+        document.body.appendChild(c);
+        var ctx = c.getContext('2d');
+        ctx.translate(10, 20);
+        ctx.save();
+        ctx.translate(100, 200);
+        var inner = ctx.getTransform();
+        ctx.restore();
+        var outer = ctx.getTransform();
+        return [inner.e, inner.f, outer.e, outer.f].join(',');
+    )");
+    REQUIRE(result == "110,220,10,20");
+}
+
+TEST_CASE("Canvas2D getTransform returns independent copy",
+          "[view][canvas2d][issue-1527]") {
+    // Spec: mutating the returned DOMMatrix must not affect the live ctx
+    // transform. Confirm by mutating m.a and reading the next getTransform.
+    auto result = run_in_bridge(R"(
+        var c = document.createElement('canvas');
+        c.id = 'probe';
+        document.body.appendChild(c);
+        var ctx = c.getContext('2d');
+        ctx.translate(5, 7);
+        var m = ctx.getTransform();
+        m.a = 999; m.e = 999;
+        var m2 = ctx.getTransform();
+        return [m2.a, m2.e].join(',');
+    )");
+    REQUIRE(result == "1,5");
+}
+
+TEST_CASE("Canvas2D getTransform DOMMatrix-shaped fields",
+          "[view][canvas2d][issue-1527]") {
+    auto result = run_in_bridge(R"(
+        var c = document.createElement('canvas');
+        c.id = 'probe';
+        document.body.appendChild(c);
+        var ctx = c.getContext('2d');
+        ctx.setTransform(2, 0, 0, 3, 4, 5);
+        var m = ctx.getTransform();
+        // m11/m12/m21/m22/m41/m42 are the DOMMatrix aliases for a/b/c/d/e/f.
+        return [m.m11, m.m12, m.m21, m.m22, m.m41, m.m42, m.is2D].join(',');
+    )");
+    REQUIRE(result == "2,0,0,3,4,5,true");
+}
+
+// ── pulp #1527 — isPointInPath / isPointInStroke ─────────────────────────
+TEST_CASE("Canvas2D isPointInPath: point inside rect path",
+          "[view][canvas2d][issue-1527]") {
+    auto result = run_in_bridge(R"(
+        var c = document.createElement('canvas');
+        c.id = 'probe';
+        document.body.appendChild(c);
+        var ctx = c.getContext('2d');
+        ctx.beginPath();
+        ctx.rect(10, 10, 100, 50);
+        return ctx.isPointInPath(50, 30);
+    )");
+    REQUIRE(result == "true");
+}
+
+TEST_CASE("Canvas2D isPointInPath: point outside rect path",
+          "[view][canvas2d][issue-1527]") {
+    auto result = run_in_bridge(R"(
+        var c = document.createElement('canvas');
+        c.id = 'probe';
+        document.body.appendChild(c);
+        var ctx = c.getContext('2d');
+        ctx.beginPath();
+        ctx.rect(10, 10, 100, 50);
+        return ctx.isPointInPath(5, 5);
+    )");
+    REQUIRE(result == "false");
+}
+
+TEST_CASE("Canvas2D isPointInPath: works with moveTo + lineTo polygon",
+          "[view][canvas2d][issue-1527]") {
+    auto result = run_in_bridge(R"(
+        var c = document.createElement('canvas');
+        c.id = 'probe';
+        document.body.appendChild(c);
+        var ctx = c.getContext('2d');
+        // Triangle (0,0) -> (100,0) -> (50,100).
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(100, 0);
+        ctx.lineTo(50, 100);
+        ctx.closePath();
+        return [ctx.isPointInPath(50, 30),    // central, low y — inside
+                ctx.isPointInPath(10, 80),    // near left base — outside (sloped)
+                ctx.isPointInPath(-5, 50)].join(',');
+    )");
+    // Triangle vertices (0,0)-(100,0)-(50,100). At y=80 the left edge
+    // crosses at x=40, so x=10 is outside. Origin-side x=-5 is outside.
+    REQUIRE(result == "true,false,false");
+}
+
+TEST_CASE("Canvas2D beginPath resets path mirror",
+          "[view][canvas2d][issue-1527]") {
+    // After beginPath, prior geometry must not contribute to hit tests.
+    auto result = run_in_bridge(R"(
+        var c = document.createElement('canvas');
+        c.id = 'probe';
+        document.body.appendChild(c);
+        var ctx = c.getContext('2d');
+        ctx.beginPath();
+        ctx.rect(0, 0, 100, 100);
+        var hit1 = ctx.isPointInPath(50, 50);
+        ctx.beginPath();
+        ctx.rect(200, 200, 50, 50);
+        var hit2 = ctx.isPointInPath(50, 50);
+        return [hit1, hit2].join(',');
+    )");
+    REQUIRE(result == "true,false");
+}
+
+TEST_CASE("Canvas2D isPointInPath rejects non-finite coordinates",
+          "[view][canvas2d][issue-1527]") {
+    auto result = run_in_bridge(R"(
+        var c = document.createElement('canvas');
+        c.id = 'probe';
+        document.body.appendChild(c);
+        var ctx = c.getContext('2d');
+        ctx.beginPath();
+        ctx.rect(0, 0, 100, 100);
+        return [ctx.isPointInPath(NaN, 50),
+                ctx.isPointInPath(50, Infinity)].join(',');
+    )");
+    REQUIRE(result == "false,false");
+}
+
+TEST_CASE("Canvas2D isPointInStroke: point on stroke edge",
+          "[view][canvas2d][issue-1527]") {
+    auto result = run_in_bridge(R"(
+        var c = document.createElement('canvas');
+        c.id = 'probe';
+        document.body.appendChild(c);
+        var ctx = c.getContext('2d');
+        ctx.lineWidth = 4;  // half-width = 2px
+        ctx.beginPath();
+        ctx.moveTo(0, 50);
+        ctx.lineTo(100, 50);
+        return [ctx.isPointInStroke(50, 50),     // on the line
+                ctx.isPointInStroke(50, 51),     // 1px below — inside half-width
+                ctx.isPointInStroke(50, 60)].join(','); // 10px below — outside
+    )");
+    REQUIRE(result == "true,true,false");
+}
+
+TEST_CASE("Canvas2D isPointInStroke respects lineWidth changes",
+          "[view][canvas2d][issue-1527]") {
+    auto result = run_in_bridge(R"(
+        var c = document.createElement('canvas');
+        c.id = 'probe';
+        document.body.appendChild(c);
+        var ctx = c.getContext('2d');
+        ctx.beginPath();
+        ctx.moveTo(0, 50);
+        ctx.lineTo(100, 50);
+        ctx.lineWidth = 2;  // half-width = 1px
+        var thin = ctx.isPointInStroke(50, 53);
+        ctx.lineWidth = 20; // half-width = 10px
+        var thick = ctx.isPointInStroke(50, 53);
+        return [thin, thick].join(',');
+    )");
+    REQUIRE(result == "false,true");
+}
+
+TEST_CASE("Canvas2D isPointInPath / isPointInStroke survive save/restore",
+          "[view][canvas2d][issue-1527]") {
+    // The path mirror is part of the save/restore snapshot, so a save()
+    // of an empty path followed by appending geometry, then restore(),
+    // must roll back the path so isPointInPath returns false.
+    auto result = run_in_bridge(R"(
+        var c = document.createElement('canvas');
+        c.id = 'probe';
+        document.body.appendChild(c);
+        var ctx = c.getContext('2d');
+        ctx.beginPath();          // empty path
+        ctx.save();
+        ctx.rect(0, 0, 100, 100);
+        var inside = ctx.isPointInPath(50, 50);
+        ctx.restore();
+        var afterRestore = ctx.isPointInPath(50, 50);
+        return [inside, afterRestore].join(',');
+    )");
+    REQUIRE(result == "true,false");
+}

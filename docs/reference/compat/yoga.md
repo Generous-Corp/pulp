@@ -15,14 +15,19 @@ Spec walk: [Yoga Layout — Styling](https://www.yogalayout.dev/docs/styling/),
 cross-checked against [RN Layout Props](https://reactnative.dev/docs/layout-props)
 which mirrors the upstream Yoga API.
 
-## Counts (2026-05-04)
+## Counts (2026-05-06)
 
 | Status | Count |
 |--------|------:|
-| supported | 28 |
+| supported | 35 |
 | partial | 7 |
-| missing | 18 |
+| missing | 11 |
 | wontfix | 0 |
+
+pulp #1542 lifted the seven logical-edge / direction NOT-IMPLs
+(`yoga/marginStart`, `yoga/marginEnd`, `yoga/paddingStart`,
+`yoga/paddingEnd`, `yoga/start`, `yoga/end`, `yoga/direction`) from
+`missing` → `supported`.
 
 ## Major gaps (parser routes, FlexStyle has no field)
 
@@ -38,6 +43,29 @@ which mirrors the upstream Yoga API.
 
 ## Recent updates
 
+- **2026-05-06 (pulp #1542)** — yoga logical-edge fan-out. The six
+  logical edges (`marginStart` / `marginEnd` / `paddingStart` /
+  `paddingEnd` / `start` / `end`) and the writing-direction prop
+  (`yoga/direction`) now reach Yoga directly. `FlexStyle` gained six
+  `Dimension` fields (`dim_margin_start` / `dim_margin_end` /
+  `dim_padding_start` / `dim_padding_end` / `dim_start` / `dim_end`)
+  plus a `WritingDirection { inherit, ltr, rtl }` enum.
+  `yoga_layout.cpp` dispatches each logical edge through Yoga's
+  `YGEdgeStart` / `YGEdgeEnd` and pipes the writing direction to
+  `YGNodeStyleSetDirection` (per-node) and the root's
+  `YGNodeCalculateLayout` direction argument (so the root's own
+  direction propagates instead of being hard-coded to LTR). The
+  bridge accepts the new sub-keys `margin_start` / `margin_end` /
+  `padding_start` / `padding_end` / `start` / `end` and a separate
+  `direction_writing` key (the existing `direction` key is taken by
+  flex-direction). Same value coverage as the per-side siblings: px
+  number, percent string, plus `auto` for margin only — Yoga's
+  padding and position have no `auto` API, matching the existing
+  per-side dispatch invariants. The pre-existing `@pulp/react`
+  shortcut wired in PR #1498 (LTR-only fan-out from `marginStart`
+  → `margin_left` etc.) remains as the fast path; an RN-side
+  migration to the new yoga route is a follow-up. Reclassified
+  NOT-IMPL → PASS for 7 entries (yoga drift_count: 18 → 11).
 - **2026-05-05 (pulp #1434 Triage #14)** — `yoga/flexWrap` now claims
   `wrap-reverse` alongside `wrap` and `nowrap`. `FlexStyle::flex_wrap`
   was converted from `bool` to a tri-state `FlexWrap` enum
@@ -116,7 +144,12 @@ which mirrors the upstream Yoga API.
 
 ## Direction (RTL) support
 
-`yoga/direction` is `missing`. Pulp does not currently model RTL
-layout — `direction: ltr | rtl | inherit` on the View has no effect.
-Logical-property props (`marginStart`, `paddingEnd`, `start`, `end`,
-`insetInlineStart`, etc.) all degrade to a single direction.
+`yoga/direction` is `supported` as of pulp #1542.
+`FlexStyle::writing_direction` (`inherit` / `ltr` / `rtl`) drives
+`YGNodeStyleSetDirection` per-node and the root's
+`YGNodeCalculateLayout` direction argument. The six logical-edge
+props (`marginStart` / `marginEnd` / `paddingStart` / `paddingEnd`
+/ `start` / `end`) flip with the parent's writing direction —
+verified end-to-end by the layout asserts in
+`test/test_widget_bridge.cpp [issue-1542]`. The CSS `inset-inline-*`
+shorthands and bidi-aware text shaping are tracked separately.

@@ -246,3 +246,37 @@ after a CSS-shim change. The JSON delta tells you which entries
 reclassified between NOT-IMPL → DIVERGE → PASS, and a `drift_count`
 that drops without manual `compat.json` edits is the sign that the
 catalog status was already correct and only the JS route was missing.
+
+**Sticky-state setters (Canvas2D shadow / direction / filter / …):**
+when wiring a new `ctx.X` setter that the bridge captures as sticky
+state, follow this checklist or you'll land a silent no-op:
+
+1. **Local field + spec default** on `CanvasRenderingContext2D` —
+   numeric `0` for shadowBlur, string `"none"` for filter, etc.
+2. **`_sentX` cache field** initialised to `null`; the
+   `_syncXState` helper only flushes when the value differs.
+3. **`_syncXState` helper** — coerce defensively (unknown strings
+   → spec default), gate `isFinite()` for numeric fields per HTML5
+   ("non-finite assignments are silently ignored"), then call the
+   bridge fn and update the cache.
+4. **Wire `_syncXState()` into every consuming draw** — fillRect,
+   stroke, fillText, drawImage, etc. The fillRect set is the
+   minimum; text + image draws need it too if the state visually
+   affects them.
+5. **Invalidate the cache in save() and restore()** — the C++
+   GState pops the value, so the post-restore draw must re-flush.
+   Forgetting this is a one-frame lag invisible in single-frame
+   tests.
+6. **Bridge fn registration** in `core/view/src/widget_bridge.cpp`
+   — record a `CanvasDrawCmd` with the right `int_val` / `extra`
+   / `text` field per the enum docstring.
+7. **Dispatch + `cmd_type_to_string`** in
+   `core/view/src/canvas_widget.cpp` — add to the paint switch AND
+   the trace-logger name table at the top of the file.
+8. **`Canvas` base virtual + `RecordingCanvas` capture** — even
+   when Skia / CG have nothing to do, RecordingCanvas is what the
+   canvas2d-shim tests assert against.
+
+This pattern landed for shadow* (#1434), miter / image-smoothing
+(#1434 bridge-thin), and direction / filter (#1520). Copy the same
+shape for the next canvas2d catalog setter.

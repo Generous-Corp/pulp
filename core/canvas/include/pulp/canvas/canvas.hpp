@@ -334,6 +334,20 @@ public:
         if (count > 0) set_fill_color(colors[0]);
     }
 
+    /// pulp #1524 — Canvas2D `ctx.createRadialGradient(x0,y0,r0,x1,y1,r1)`
+    /// two-circle form. (x0,y0,r0) is the inner / start circle, (x1,y1,r1)
+    /// is the outer / end circle. Backends with a real two-circle shader
+    /// (Skia `MakeTwoPointConical`, CG `CGContextDrawRadialGradient`)
+    /// override; the default forwards to the single-circle overload using
+    /// the outer circle so older fallbacks still get a usable gradient.
+    virtual void set_fill_gradient_radial_two_circles(
+            float x0, float y0, float r0,
+            float x1, float y1, float r1,
+            const Color* colors, const float* positions, int count) {
+        (void)x0; (void)y0; (void)r0;
+        set_fill_gradient_radial(x1, y1, r1, colors, positions, count);
+    }
+
     /// Set a conic (sweep) gradient as the fill paint.
     virtual void set_fill_gradient_conic(float cx, float cy, float start_angle,
                                           const Color* colors, const float* positions,
@@ -751,6 +765,35 @@ public:
     virtual void set_shadow_offset_x(float dx) { (void)dx; }
     virtual void set_shadow_offset_y(float dy) { (void)dy; }
 
+    // ── Canvas2D direction / filter (pulp #1520) ───────────────────────
+    /// Canvas2D `ctx.direction`. Sticky text-shaping direction that
+    /// applies to subsequent fillText / strokeText calls. Spec values:
+    ///   ltr     — left-to-right (default; matches SkShaper leftToRight=true)
+    ///   rtl     — right-to-left (HarfBuzz buffer direction RTL)
+    ///   inherit — pulled from the canvas element / document writing
+    ///             direction. On backends without a per-View writing
+    ///             direction yet, treated as ltr (the most common case).
+    /// Default no-op so backends without a real bidi/HarfBuzz path
+    /// remain unaffected; SkiaCanvas overrides to wire through to the
+    /// SkShaper invocation flag, RecordingCanvas captures one
+    /// `set_direction` command per setter so canvas2d harness tests
+    /// can assert flush order. Real bidi support (mixed-script
+    /// paragraphs requiring the Bidi algorithm) tracks separately.
+    enum class TextDirection { ltr, rtl, inherit };
+    virtual void set_direction(TextDirection direction) { (void)direction; }
+
+    /// Canvas2D `ctx.filter`. Sticky CSS <filter-function-list> string
+    /// applied to subsequent fill / stroke / text / image draws. Spec
+    /// supports: blur, brightness, contrast, drop-shadow, grayscale,
+    /// hue-rotate, invert, opacity, saturate, sepia. The default is
+    /// "none". SkiaCanvas parses the string into an SkImageFilter chain
+    /// and applies via SkPaint::setImageFilter; CG and other backends
+    /// can store the value but render unfiltered. RecordingCanvas
+    /// captures the raw string. Distinct from CSS `filter` on a View
+    /// (#1503) — that filter applies to the View element, this one
+    /// applies to the per-context Canvas2D paints inside it.
+    virtual void set_filter(const std::string& filter) { (void)filter; }
+
     // ── Waveform (GPU-accelerated) ─────────────────────────────────────
     /// Draw a waveform using GPU shader (SDF anti-aliased line + fill).
     /// Samples are normalized -1 to 1. Default implementation falls back to polyline.
@@ -853,6 +896,14 @@ struct DrawCommand {
         // the canvas2d bridge harness can assert flush order.
         set_miter_limit,     ///< limit in f[0]
         set_image_smoothing, ///< enabled in f[0] (0/1), quality in f[1] (0=low,1=med,2=high)
+        // pulp #1520 — Canvas2D ctx.direction / ctx.filter sticky setters.
+        // Direction enum (0=ltr, 1=rtl, 2=inherit) packed into f[0];
+        // filter raw CSS <filter-function-list> string (e.g.
+        // "blur(5px) sepia(80%)") in `text`. RecordingCanvas captures
+        // each setter so tests can assert the JS shim flushed the
+        // sticky state before the next text/image/fill draw.
+        set_direction,
+        set_filter,
         // pulp #1434 bridge-thin gap-fill — Canvas2D ctx.createPattern.
         // image source path / data URI in `text`, tile modes packed into
         // f[0] (x) and f[1] (y) — 0 = repeat, 1 = no_repeat.
@@ -976,6 +1027,10 @@ public:
     void set_miter_limit(float limit) override;
     void set_image_smoothing(bool enabled,
                              ImageSmoothingQuality quality) override;
+
+    // pulp #1520 — Canvas2D ctx.direction / ctx.filter capture.
+    void set_direction(TextDirection direction) override;
+    void set_filter(const std::string& filter) override;
 
     // pulp #1434 bridge-thin gap-fill — capture pattern setter intents
     // so canvas2d harness tests can assert flush order without needing

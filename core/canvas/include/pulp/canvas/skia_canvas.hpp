@@ -19,6 +19,7 @@ class SkPathBuilder;
 #include <vector>
 class SkShader;
 class SkPathEffect;
+class SkImageFilter;
 
 namespace skgpu::graphite {
 class Recorder;
@@ -115,6 +116,11 @@ public:
                                    const Color* colors, const float* positions, int count) override;
     void set_fill_gradient_radial(float cx, float cy, float radius,
                                    const Color* colors, const float* positions, int count) override;
+    /// pulp #1524 — true two-circle radial gradient via SkGradientShader::MakeTwoPointConical.
+    void set_fill_gradient_radial_two_circles(
+        float x0, float y0, float r0,
+        float x1, float y1, float r1,
+        const Color* colors, const float* positions, int count) override;
     void set_fill_gradient_conic(float cx, float cy, float start_angle,
                                   const Color* colors, const float* positions, int count) override;
     void clear_fill_gradient() override;
@@ -169,6 +175,15 @@ public:
     void set_shadow_blur(float blur) override;
     void set_shadow_offset_x(float dx) override;
     void set_shadow_offset_y(float dy) override;
+
+    // pulp #1520 — Canvas2D ctx.direction / ctx.filter sticky state.
+    // Direction selects SkShaper's leftToRight flag (and, future-state,
+    // the HarfBuzz buffer direction for proper bidi mixed-script). The
+    // filter parses a CSS <filter-function-list> string ("blur(5px)
+    // sepia(80%) ...") into an SkImageFilter chain that wraps each
+    // subsequent paint via current_fill_paint() / apply_stroke_state.
+    void set_direction(TextDirection direction) override;
+    void set_filter(const std::string& filter) override;
 
     // Custom SkSL shader rendering (GPU-accelerated)
     bool draw_with_sksl(const std::string& sksl,
@@ -290,6 +305,26 @@ private:
     float shadow_blur_     = 0.0f;
     float shadow_offset_x_ = 0.0f;
     float shadow_offset_y_ = 0.0f;
+
+    // pulp #1520 — Canvas2D ctx.direction sticky state. Defaults to ltr
+    // (matches the previous hard-coded SkShaper leftToRight=true). rtl
+    // flips the shaper flag; inherit currently behaves as ltr until a
+    // per-View writing-direction lookup lands (#1506).
+    TextDirection direction_ = TextDirection::ltr;
+
+    // pulp #1520 — Canvas2D ctx.filter sticky state. Stored as the raw
+    // CSS string for round-trip diagnostics; the parsed SkImageFilter
+    // chain caches alongside so we don't re-parse on every draw. Both
+    // are reset together by set_filter(). When `filter_image_filter_`
+    // is null we skip the wrap entirely (the "none" / no-op path).
+    std::string filter_source_ = "none";
+    sk_sp<SkImageFilter> filter_image_filter_;
+
+    // pulp #1520 — wrap an arbitrary paint with the active ctx.filter
+    // SkImageFilter chain (no-op when filter is "none" or unparsable).
+    // Centralised so fill / stroke / text / image draws can opt in
+    // without touching every call site.
+    void apply_filter(SkPaint& paint) const;
 };
 
 } // namespace pulp::canvas
