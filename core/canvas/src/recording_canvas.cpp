@@ -433,6 +433,26 @@ void RecordingCanvas::set_image_smoothing(bool enabled,
     commands_.push_back(cmd);
 }
 
+// pulp #1520 — capture Canvas2D ctx.direction. Enum packed into f[0]
+// (0=ltr, 1=rtl, 2=inherit). RecordingCanvas doesn't shape text — it
+// models the bridge intent so tests can assert the JS shim flushed
+// the direction setter at the right point in the command stream.
+void RecordingCanvas::set_direction(TextDirection direction) {
+    DrawCommand cmd{DrawCommand::Type::set_direction};
+    cmd.f[0] = static_cast<float>(direction);
+    commands_.push_back(cmd);
+}
+
+// pulp #1520 — capture Canvas2D ctx.filter raw CSS string. The Skia
+// backend parses this into an SkImageFilter chain at draw time;
+// RecordingCanvas stores the source string verbatim so harness tests
+// can round-trip the bridge value without depending on a parser.
+void RecordingCanvas::set_filter(const std::string& filter) {
+    DrawCommand cmd{DrawCommand::Type::set_filter};
+    cmd.text = filter;
+    commands_.push_back(std::move(cmd));
+}
+
 // pulp #1434 bridge-thin gap-fill — capture Canvas2D ctx.createPattern
 // flushes. Image source string lives in `text`; tile modes go in
 // f[0] (x) and f[1] (y) as 0 = repeat, 1 = no_repeat. RecordingCanvas

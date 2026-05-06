@@ -1327,7 +1327,13 @@ target_link_libraries(pulp-test-canvas PRIVATE pulp::canvas Catch2::Catch2WithMa
 if(APPLE)
     # CoreGraphicsCanvas tests (#929) build a CGBitmapContext directly to
     # verify CGContextClearRect actually clears destination pixels.
-    target_link_libraries(pulp-test-canvas PRIVATE "-framework CoreGraphics")
+    # pulp #1524 adds ImageIO for CGImageDestinationCreateWithURL (PNG
+    # encode of a pattern fixture) and CoreServices for the public.png UTI.
+    target_link_libraries(pulp-test-canvas PRIVATE
+        "-framework CoreGraphics"
+        "-framework ImageIO"
+        "-framework CoreServices"
+    )
 endif()
 # pulp #1150 — public font-registration API tests use a bundled .ttf as a
 # fixture. external/fonts/Inter-Regular.ttf is the canonical "always

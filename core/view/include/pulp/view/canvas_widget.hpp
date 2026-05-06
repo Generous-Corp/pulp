@@ -43,6 +43,12 @@ struct CanvasDrawCmd {
         set_global_alpha, set_blend_mode,
         // Gradient
         set_fill_gradient_linear, set_fill_gradient_radial, clear_fill_gradient,
+        /// pulp #1524 — Canvas2D `ctx.createRadialGradient(x0,y0,r0,x1,y1,r1)`
+        /// two-circle form. Inner circle (x0,y0,r0) packed as (x, y, extra),
+        /// outer circle (x1,y1,r1) packed as (x2, y2, w). Routes to
+        /// `set_fill_gradient_radial_two_circles` (Skia: MakeTwoPointConical;
+        /// CG: full CGContextDrawRadialGradient with both circles).
+        set_fill_gradient_radial_two_circles,
         // pulp #1434 bridge-thin gap-fill — Canvas2D ctx.createConicGradient.
         // cx/cy in (x, y), start_angle in `extra`, stops in
         // gradient_colors / gradient_positions (same shape as the
@@ -79,6 +85,13 @@ struct CanvasDrawCmd {
         // the JS shim before the next stroke / drawImage.
         set_miter_limit,           ///< limit in `extra`
         set_image_smoothing,       ///< enabled in `int_val` (0/1), quality in `extra` (0=low,1=med,2=high)
+        // pulp #1520 — Canvas2D ctx.direction / ctx.filter sticky state.
+        // direction enum (0=ltr, 1=rtl, 2=inherit) in `int_val`; filter
+        // raw CSS <filter-function-list> string in `text`. Pushed by
+        // the JS shim before fillText / strokeText / fill / stroke /
+        // drawImage so the backend can wrap the next paint.
+        set_direction,
+        set_filter,
         // Clear
         clear, clear_rect
     };

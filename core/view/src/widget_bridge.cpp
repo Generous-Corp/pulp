@@ -2019,6 +2019,104 @@ void WidgetBridge::register_api() {
                 f.dim_margin_left.unit = pulp::view::DimensionUnit::px;
             }
         }
+        // pulp #1542 — yoga logical-edge fan-out. `margin_start` /
+        // `margin_end` / `padding_start` / `padding_end` / `start` /
+        // `end` route to Yoga's YGEdgeStart / YGEdgeEnd which flip
+        // with the writing direction (set via `direction_writing` —
+        // the existing `direction` key is taken by flex-direction).
+        // Same value coverage as the per-side _left/_right siblings:
+        // px (number), percent string, plus `auto` for margin.
+        else if (key == "margin_start") {
+            auto sval = args.get<std::string>(2, "");
+            if (sval == "auto") {
+                f.dim_margin_start.unit = pulp::view::DimensionUnit::auto_;
+                f.dim_margin_start.value = 0;
+            } else if (!sval.empty() && sval.back() == '%') {
+                try {
+                    f.dim_margin_start.value = std::stof(sval.substr(0, sval.size() - 1));
+                    f.dim_margin_start.unit = pulp::view::DimensionUnit::percent;
+                } catch (...) { /* keep current */ }
+            } else {
+                f.dim_margin_start.value = (float)val;
+                f.dim_margin_start.unit = pulp::view::DimensionUnit::px;
+            }
+        }
+        else if (key == "margin_end") {
+            auto sval = args.get<std::string>(2, "");
+            if (sval == "auto") {
+                f.dim_margin_end.unit = pulp::view::DimensionUnit::auto_;
+                f.dim_margin_end.value = 0;
+            } else if (!sval.empty() && sval.back() == '%') {
+                try {
+                    f.dim_margin_end.value = std::stof(sval.substr(0, sval.size() - 1));
+                    f.dim_margin_end.unit = pulp::view::DimensionUnit::percent;
+                } catch (...) { /* keep current */ }
+            } else {
+                f.dim_margin_end.value = (float)val;
+                f.dim_margin_end.unit = pulp::view::DimensionUnit::px;
+            }
+        }
+        else if (key == "padding_start") {
+            // Padding has no `auto` API (Yoga); reject the keyword and
+            // fall through to the px path with a parsed value (or 0
+            // on parse failure) — same behavior as the per-side
+            // padding_top/right/bottom/left handlers above.
+            auto sval = args.get<std::string>(2, "");
+            if (!sval.empty() && sval.back() == '%') {
+                try {
+                    f.dim_padding_start.value = std::stof(sval.substr(0, sval.size() - 1));
+                    f.dim_padding_start.unit = pulp::view::DimensionUnit::percent;
+                } catch (...) { /* keep current */ }
+            } else {
+                f.dim_padding_start.value = (float)val;
+                f.dim_padding_start.unit = pulp::view::DimensionUnit::px;
+            }
+        }
+        else if (key == "padding_end") {
+            auto sval = args.get<std::string>(2, "");
+            if (!sval.empty() && sval.back() == '%') {
+                try {
+                    f.dim_padding_end.value = std::stof(sval.substr(0, sval.size() - 1));
+                    f.dim_padding_end.unit = pulp::view::DimensionUnit::percent;
+                } catch (...) { /* keep current */ }
+            } else {
+                f.dim_padding_end.value = (float)val;
+                f.dim_padding_end.unit = pulp::view::DimensionUnit::px;
+            }
+        }
+        else if (key == "start") {
+            auto sval = args.get<std::string>(2, "");
+            if (!sval.empty() && sval.back() == '%') {
+                try {
+                    f.dim_start.value = std::stof(sval.substr(0, sval.size() - 1));
+                    f.dim_start.unit = pulp::view::DimensionUnit::percent;
+                } catch (...) { /* keep current */ }
+            } else {
+                f.dim_start.value = (float)val;
+                f.dim_start.unit = pulp::view::DimensionUnit::px;
+            }
+        }
+        else if (key == "end") {
+            auto sval = args.get<std::string>(2, "");
+            if (!sval.empty() && sval.back() == '%') {
+                try {
+                    f.dim_end.value = std::stof(sval.substr(0, sval.size() - 1));
+                    f.dim_end.unit = pulp::view::DimensionUnit::percent;
+                } catch (...) { /* keep current */ }
+            } else {
+                f.dim_end.value = (float)val;
+                f.dim_end.unit = pulp::view::DimensionUnit::px;
+            }
+        }
+        // pulp #1542 — node writing direction. Distinct from
+        // `direction` (which is flex-direction). Accepts `'ltr'`,
+        // `'rtl'`, `'inherit'`. Anything else reverts to `inherit`.
+        else if (key == "direction_writing") {
+            auto a = args.get<std::string>(2, "inherit");
+            if (a == "ltr")      f.writing_direction = pulp::view::FlexStyle::WritingDirection::ltr;
+            else if (a == "rtl") f.writing_direction = pulp::view::FlexStyle::WritingDirection::rtl;
+            else                 f.writing_direction = pulp::view::FlexStyle::WritingDirection::inherit;
+        }
         // Directional gap
         else if (key == "row_gap") f.row_gap = (float)val;
         else if (key == "column_gap") f.column_gap = (float)val;
@@ -2468,7 +2566,45 @@ void WidgetBridge::register_api() {
     engine_.register_function("setFontFamily", [this](choc::javascript::ArgumentList args) {
         auto* v = widget(args.get<std::string>(0, ""));
         auto family = args.get<std::string>(1, "");
-        if (auto* l = dynamic_cast<Label*>(v)) l->set_font_family(std::move(family));
+        if (!v) return choc::value::Value();
+        // pulp #1434 Phase A2-5 — comma-separated family list per CSS
+        // spec: split on commas, strip outer quotes, pick the first
+        // non-empty family name. The full SkFontMgr-backed resolver
+        // (which walks the list and picks the first registered family)
+        // is gated on pulp #932 — when that lands the same parsed list
+        // can be passed through verbatim. Today the bridge picks the
+        // first entry as the canonical family name; downstream font
+        // resolution (currently a no-op on Label) sees a clean string.
+        std::string first;
+        {
+            size_t i = 0;
+            while (i < family.size()) {
+                while (i < family.size() && std::isspace(static_cast<unsigned char>(family[i]))) ++i;
+                if (i >= family.size()) break;
+                size_t comma = family.find(',', i);
+                std::string seg = family.substr(i, (comma == std::string::npos ? family.size() : comma) - i);
+                while (!seg.empty() && std::isspace(static_cast<unsigned char>(seg.back()))) seg.pop_back();
+                // Strip outer quotes (CSS spec: quoted family names).
+                if (seg.size() >= 2
+                    && (seg.front() == '"' || seg.front() == '\'')
+                    && seg.back() == seg.front()) {
+                    seg = seg.substr(1, seg.size() - 2);
+                }
+                if (!seg.empty()) { first = std::move(seg); break; }
+                if (comma == std::string::npos) break;
+                i = comma + 1;
+            }
+        }
+        if (auto* l = dynamic_cast<Label*>(v)) {
+            l->set_font_family(first);
+        } else {
+            // pulp #1434 Phase A2-5 — inheritable cascade. Mirrors the
+            // setFontWeight / setLetterSpacing pattern so a container
+            // View's font-family flows down to descendant Labels.
+            // Requires View::set_inheritable_font_family which lands
+            // alongside this PR.
+            v->set_inheritable_font_family(first);
+        }
         return choc::value::Value();
     });
 
@@ -3016,6 +3152,65 @@ void WidgetBridge::register_api() {
         else if (s == "none")     v->set_border_style(View::BorderStyle::none);
         else if (s == "hidden")   v->set_border_style(View::BorderStyle::hidden);
         else                      v->set_border_style(View::BorderStyle::solid);
+        return choc::value::Value();
+    });
+
+    // pulp #1519 — CSS / RN outline cluster. Outline is paint-time only:
+    // it does NOT take up Yoga layout space (parent never reserves room
+    // for it). Each setter mutates one slot in isolation so a JSX prop
+    // diff that touches only `outlineColor` doesn't clobber `outlineWidth`.
+    // Skia paint inflates the box by (offset + width/2) and strokes with
+    // the standard borderStyle dash effect for dashed/dotted; other named
+    // styles (double/groove/ridge/inset/outset) currently degrade to solid
+    // — same paint-side gap as borderStyle.
+    //
+    // setOutlineColor(id, hex) — accepts the same color forms as
+    // setBackground / setBorderColor (#hex / rgb() / named).
+    engine_.register_function("setOutlineColor", [this, parseHexColor](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto hex = args.get<std::string>(1, "");
+        auto* v = id.empty() ? &root_ : widget(id);
+        if (v && !hex.empty()) v->set_outline_color(parseHexColor(hex));
+        return choc::value::Value();
+    });
+
+    // setOutlineOffset(id, px) — gap between border-box edge and outline.
+    engine_.register_function("setOutlineOffset", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto offset = static_cast<float>(args.get<double>(1, 0.0));
+        auto* v = id.empty() ? &root_ : widget(id);
+        if (v) v->set_outline_offset(offset);
+        return choc::value::Value();
+    });
+
+    // setOutlineStyle(id, "solid"|"dashed"|...) — same keyword set as
+    // setBorderStyle. Reuses View::BorderStyle since the CSS spec lists
+    // the same line-style values for both properties.
+    engine_.register_function("setOutlineStyle", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto s = args.get<std::string>(1, "solid");
+        auto* v = id.empty() ? &root_ : widget(id);
+        if (!v) return choc::value::Value();
+        if (s == "dashed")        v->set_outline_style(View::BorderStyle::dashed);
+        else if (s == "dotted")   v->set_outline_style(View::BorderStyle::dotted);
+        else if (s == "double")   v->set_outline_style(View::BorderStyle::double_);
+        else if (s == "groove")   v->set_outline_style(View::BorderStyle::groove);
+        else if (s == "ridge")    v->set_outline_style(View::BorderStyle::ridge);
+        else if (s == "inset")    v->set_outline_style(View::BorderStyle::inset);
+        else if (s == "outset")   v->set_outline_style(View::BorderStyle::outset);
+        else if (s == "none")     v->set_outline_style(View::BorderStyle::none);
+        else if (s == "hidden")   v->set_outline_style(View::BorderStyle::hidden);
+        else                      v->set_outline_style(View::BorderStyle::solid);
+        return choc::value::Value();
+    });
+
+    // setOutlineWidth(id, px) — outline stroke thickness. width<=0 or
+    // outline_style==none/hidden short-circuits the paint.
+    engine_.register_function("setOutlineWidth", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto width = static_cast<float>(args.get<double>(1, 0.0));
+        auto* v = id.empty() ? &root_ : widget(id);
+        if (v) v->set_outline_width(width);
         return choc::value::Value();
     });
 
@@ -4092,6 +4287,36 @@ void WidgetBridge::register_api() {
             return choc::value::Value();
         });
 
+    // pulp #1517 — background sub-property setters. Storage-only today;
+    // see View::set_background_{attachment,clip,origin}() doc for the
+    // partial-vs-noop semantics. Wiring them here unblocks the JS shim
+    // path and lets the catalog honestly report `noop` / `partial`
+    // instead of `missing`.
+    engine_.register_function("setBackgroundAttachment",
+        [this](choc::javascript::ArgumentList args) {
+            auto id = args.get<std::string>(0, "");
+            auto kw = args.get<std::string>(1, "");
+            auto* v = id.empty() ? &root_ : widget(id);
+            if (v) v->set_background_attachment(kw);
+            return choc::value::Value();
+        });
+    engine_.register_function("setBackgroundClip",
+        [this](choc::javascript::ArgumentList args) {
+            auto id = args.get<std::string>(0, "");
+            auto kw = args.get<std::string>(1, "");
+            auto* v = id.empty() ? &root_ : widget(id);
+            if (v) v->set_background_clip(kw);
+            return choc::value::Value();
+        });
+    engine_.register_function("setBackgroundOrigin",
+        [this](choc::javascript::ArgumentList args) {
+            auto id = args.get<std::string>(0, "");
+            auto kw = args.get<std::string>(1, "");
+            auto* v = id.empty() ? &root_ : widget(id);
+            if (v) v->set_background_origin(kw);
+            return choc::value::Value();
+        });
+
     // setBackgroundGradient(id, "linear-gradient(to right, #ff0000, #0000ff)")
     engine_.register_function("setBackgroundGradient", [this, parseColor](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
@@ -4755,6 +4980,34 @@ void WidgetBridge::register_api() {
         return choc::value::Value();
     });
 
+    // pulp #1524 — true two-circle radial gradient. Skia routes through
+    // SkGradientShader::MakeTwoPointConical; CG routes through
+    // CGContextDrawRadialGradient with both circles wired (the prior
+    // single-circle bridge silently dropped (x0, y0, r0) which broke
+    // offset / sized inner-circle gradients on both backends).
+    // Args: (id, x0, y0, r0, x1, y1, r1, color1, pos1, color2, pos2, ...)
+    engine_.register_function("canvasSetRadialGradientTwoCircles",
+            [this, parseColor](choc::javascript::ArgumentList args) {
+        if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
+            CanvasDrawCmd cmd;
+            cmd.type = CanvasDrawCmd::Type::set_fill_gradient_radial_two_circles;
+            // Inner circle (x0, y0, r0) → (x, y, extra).
+            cmd.x = (float)args.get<double>(1, 0);
+            cmd.y = (float)args.get<double>(2, 0);
+            cmd.extra = (float)args.get<double>(3, 0);
+            // Outer circle (x1, y1, r1) → (x2, y2, w).
+            cmd.x2 = (float)args.get<double>(4, 0);
+            cmd.y2 = (float)args.get<double>(5, 0);
+            cmd.w  = (float)args.get<double>(6, 50);
+            for (int i = 7; i + 1 < static_cast<int>(args.numArgs); i += 2) {
+                cmd.gradient_colors.push_back(parseColor(args.get<std::string>(i, "#fff")));
+                cmd.gradient_positions.push_back((float)args.get<double>(i + 1, 0));
+            }
+            c->add_command(cmd);
+        }
+        return choc::value::Value();
+    });
+
     engine_.register_function("canvasClearGradient", [this](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::clear_fill_gradient;
@@ -4854,6 +5107,39 @@ void WidgetBridge::register_api() {
             if (q == "medium") qi = 1;
             else if (q == "high") qi = 2;
             cmd.extra = static_cast<float>(qi);
+            c->add_command(cmd);
+        }
+        return choc::value::Value();
+    });
+
+    // pulp #1520 — Canvas2D ctx.direction. Sticky text-shaping state
+    // honoured by the SkShaper / HarfBuzz path on the next fillText
+    // / strokeText. The shim coerces unknown strings to "ltr" before
+    // hitting the bridge, so we accept the resolved enum directly.
+    // Args: (id, enumVal) where enumVal ∈ 0=ltr | 1=rtl | 2=inherit.
+    engine_.register_function("canvasSetDirection", [this](choc::javascript::ArgumentList args) {
+        if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
+            CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::set_direction;
+            int v = static_cast<int>(args.get<double>(1, 0.0));
+            if (v < 0 || v > 2) v = 0;
+            cmd.int_val = v;
+            c->add_command(cmd);
+        }
+        return choc::value::Value();
+    });
+
+    // pulp #1520 — Canvas2D ctx.filter. Sticky CSS <filter-function-list>
+    // string applied to subsequent fill/stroke/text/image draws. Skia
+    // parses into an SkImageFilter chain (blur, grayscale, sepia, …);
+    // RecordingCanvas captures the raw string for harness assertions;
+    // CG / minimal backends store the value but render unfiltered until
+    // a follow-up wires the parser through (#1503 owns the View-side
+    // parser; canvas2d shares it as it lands).
+    // Args: (id, cssFilterString) — "none" disables.
+    engine_.register_function("canvasSetFilter", [this](choc::javascript::ArgumentList args) {
+        if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
+            CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::set_filter;
+            cmd.text = args.get<std::string>(1, "none");
             c->add_command(cmd);
         }
         return choc::value::Value();

@@ -54,6 +54,10 @@ function makeStyleProxy(id: string): Record<string, unknown> {
         // Text
         color: (v) => callBridge('setTextColor', id, String(v)),
         fontSize: (v) => callBridge('setFontSize', id, Number(v)),
+        // pulp #1434 Phase A2-5 — bridge forwards comma-separated CSS
+        // family lists; first non-empty wins. Whole-list resolution is
+        // gated on pulp #932.
+        fontFamily: (v) => callBridge('setFontFamily', id, String(v)),
         // Layout — minimal subset; matches what setFlex accepts.
         width: (v) => callBridge('setFlex', id, 'width', Number(v)),
         height: (v) => callBridge('setFlex', id, 'height', Number(v)),

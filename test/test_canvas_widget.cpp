@@ -2017,3 +2017,61 @@ TEST_CASE("SkiaCanvas skips shadow when fully transparent or zero",
     REQUIRE(px.b == 255);
 }
 #endif  // PULP_HAS_SKIA
+
+// ── pulp #1520 — Canvas2D ctx.direction / ctx.filter dispatch ────────────
+//
+// Asserts that the CanvasWidget paint loop forwards the new
+// `set_direction` / `set_filter` commands through to the underlying
+// canvas (here, RecordingCanvas) so the JS shim's setter intent reaches
+// the active backend on every frame.
+
+TEST_CASE("CanvasWidget paint dispatches set_direction to the canvas",
+          "[canvas_widget][issue-1520]") {
+    CanvasWidget cw;
+    cw.set_bounds({0, 0, 100, 100});
+
+    CanvasDrawCmd dir;
+    dir.type = CanvasDrawCmd::Type::set_direction;
+    dir.int_val = 1; // rtl
+    cw.add_command(dir);
+
+    RecordingCanvas rec;
+    cw.paint(rec);
+
+    int direction_cmds = 0;
+    float observed_value = -1.0f;
+    for (const auto& cmd : rec.commands()) {
+        if (cmd.type == DrawCommand::Type::set_direction) {
+            ++direction_cmds;
+            observed_value = cmd.f[0];
+        }
+    }
+    REQUIRE(direction_cmds == 1);
+    REQUIRE(observed_value == static_cast<float>(
+        pulp::canvas::Canvas::TextDirection::rtl));
+}
+
+TEST_CASE("CanvasWidget paint dispatches set_filter to the canvas",
+          "[canvas_widget][issue-1520]") {
+    CanvasWidget cw;
+    cw.set_bounds({0, 0, 100, 100});
+
+    CanvasDrawCmd filt;
+    filt.type = CanvasDrawCmd::Type::set_filter;
+    filt.text = "blur(5px) sepia(60%)";
+    cw.add_command(filt);
+
+    RecordingCanvas rec;
+    cw.paint(rec);
+
+    bool saw_filter = false;
+    std::string observed_string;
+    for (const auto& cmd : rec.commands()) {
+        if (cmd.type == DrawCommand::Type::set_filter) {
+            saw_filter = true;
+            observed_string = cmd.text;
+        }
+    }
+    REQUIRE(saw_filter);
+    REQUIRE(observed_string == "blur(5px) sepia(60%)");
+}

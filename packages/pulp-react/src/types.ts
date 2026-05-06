@@ -89,6 +89,12 @@ export interface FlexProps {
     insetBlock?: number | string;
     /// CSS `inset-inline` → left + right (LTR).
     insetInline?: number | string;
+    /// pulp #1518 — RN-style `flex: <number>` shorthand. Positive `n`
+    /// expands to `{flexGrow: n, flexShrink: 1, flexBasis: 0}`; `0`
+    /// to `(0, 0, 'auto')`; negative to `(0, 1, 'auto')`. Matches RN
+    /// semantics, which is what JSX `<View flex={1} />` consumers
+    /// expect.
+    flex?: number;
     flexGrow?: number;
     flexShrink?: number;
     /// pulp #1434 (rn batch C) — accepts number (px), percentage string
@@ -130,6 +136,12 @@ export interface FlexProps {
 export interface StyleProps {
     background?: string;            // hex; maps to setBackground
     backgroundGradient?: string;    // CSS-string; maps to setBackgroundGradient
+    /// pulp #1517 — CSS background sub-properties. Stored on the View
+    /// for round-tripping; paint impact partial today (see compat.json
+    /// css/backgroundAttachment / Clip / Origin).
+    backgroundAttachment?: 'scroll' | 'fixed' | 'local';
+    backgroundClip?: 'border-box' | 'padding-box' | 'content-box' | 'text';
+    backgroundOrigin?: 'border-box' | 'padding-box' | 'content-box';
     border?: { color: string; width?: number; radius?: number };  // setBorder
     borderTop?: { color: string; width: number };                  // setBorderSide
     borderRight?: { color: string; width: number };
@@ -160,6 +172,18 @@ export interface StyleProps {
     borderTopRightRadius?: number;
     borderBottomLeftRadius?: number;
     borderBottomRightRadius?: number;
+    /// pulp #1519 — CSS / RN outline cluster. Outline is paint-only:
+    /// it draws OUTSIDE the border-box and does NOT take up Yoga
+    /// layout space. Style keyword set mirrors borderStyle (CSS spec
+    /// identical). dashed/dotted install SkDashPathEffect at stroke
+    /// time; double/groove/ridge/inset/outset currently degrade to
+    /// solid (paint-side gap, same as borderStyle); none/hidden /
+    /// zero-width skip the stroke.
+    outlineColor?: string;
+    outlineOffset?: number;
+    outlineStyle?: 'solid' | 'dashed' | 'dotted' | 'double' | 'groove'
+                | 'ridge' | 'inset' | 'outset' | 'none' | 'hidden';
+    outlineWidth?: number;
     opacity?: number;
     visible?: boolean;
     /// pulp #1434 rn bridge-wires bundle — 7 props that already had C++

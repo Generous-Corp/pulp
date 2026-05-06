@@ -231,6 +231,38 @@ struct FlexStyle {
     Dimension dim_padding_bottom;
     Dimension dim_padding_left;
 
+    /// pulp #1542 — yoga logical-edge fan-out. CSS / RN logical edges
+    /// (`marginStart` / `marginEnd` / `paddingStart` / `paddingEnd` /
+    /// `start` / `end`) flip with the writing direction: in LTR, `start`
+    /// is the left edge; in RTL, `start` is the right edge. Yoga
+    /// resolves this natively via `YGEdgeStart` / `YGEdgeEnd` once the
+    /// node's writing direction is set (see `writing_direction` below).
+    /// yoga_layout.cpp dispatches on `dim_*.unit`:
+    ///   • px      → YGNodeStyleSetMargin/Padding/Position(YGEdgeStart|End)
+    ///   • percent → YGNodeStyleSetMargin/Padding/PositionPercent(...)
+    ///   • auto_   → YGNodeStyleSetMarginAuto(...) (margin only; Yoga
+    ///                does not support auto on padding or position)
+    /// These fields supplement, not replace, the per-side
+    /// `dim_margin_left` / `dim_margin_right` etc. — yoga applies both
+    /// and the *_start/end pair wins for the resolved start/end edge.
+    Dimension dim_margin_start;
+    Dimension dim_margin_end;
+    Dimension dim_padding_start;
+    Dimension dim_padding_end;
+    Dimension dim_start;
+    Dimension dim_end;
+
+    /// pulp #1542 — node writing direction. Controls how Yoga resolves
+    /// `YGEdgeStart` / `YGEdgeEnd` (and how it lays out row-axis
+    /// children when no explicit start/end edge is set). Defaults to
+    /// `inherit` so the layout root's direction propagates down. The
+    /// bridge accepts the `direction_writing` sub-key on `setFlex`
+    /// (avoids collision with the existing `direction` key for
+    /// `flex-direction`) and the canonical CSS / RN values
+    /// `'ltr'` / `'rtl'` / `'inherit'`.
+    enum class WritingDirection { inherit, ltr, rtl };
+    WritingDirection writing_direction = WritingDirection::inherit;
+
     /// Resolve viewport-relative dimensions and apply to float fields.
     /// Call before layout pass with the viewport size.
     void resolve_dimensions(float parent_w, float parent_h,

@@ -315,29 +315,37 @@
       "issue": ""
     },
     "css/backgroundAttachment": {
-      "status": "missing",
-      "mapsTo": "no branch",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "noop",
+      "mapsTo": "web-compat-style-decl.js -> setBackgroundAttachment(id, kw); bridge stores keyword on View::background_attachment_ slot. No paint impact today.",
+      "supportedValues": [
+        "scroll (conformant default — pulp's layout is non-scrolling so the spec behavior coincides with our render path)"
       ],
-      "tests": [],
-      "notes": "Not handled.",
-      "issue": ""
+      "unsupportedValues": [
+        "fixed (needs viewport-relative paint origin; no scroll-context model)",
+        "local (needs scroll-context coupling; no scroll-context model)"
+      ],
+      "tests": [
+        "test/test_widget_bridge.cpp — [issue-1517]"
+      ],
+      "notes": "pulp #1517 — accepts the keyword without crashing; paint impact is exactly zero because pulp doesn't model scroll contexts. `scroll` is the spec-conformant default for our case. Status `noop` means the property is wired through but has no rendered effect.",
+      "issue": "1517"
     },
     "css/backgroundClip": {
-      "status": "missing",
-      "mapsTo": "no branch",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "border-box",
-        "padding-box",
-        "content-box",
-        "text"
+      "status": "partial",
+      "mapsTo": "web-compat-style-decl.js -> setBackgroundClip(id, kw); bridge stores keyword on View::background_clip_ slot.",
+      "supportedValues": [
+        "border-box (default; pulp paints bg edge-to-edge — same as the spec default)",
+        "padding-box (no-op on solid bg; same visual as border-box)",
+        "content-box (no-op on solid bg; same visual as border-box)"
       ],
-      "tests": [],
-      "notes": "Not handled.",
-      "issue": ""
+      "unsupportedValues": [
+        "text (paint-time SkBlendMode::kSrcIn against text glyphs; deferred to a future PR — slot stores the value so the wiring is ready)"
+      ],
+      "tests": [
+        "test/test_widget_bridge.cpp — [issue-1517]"
+      ],
+      "notes": "pulp #1517 — keyword stored on View; the box-flavor variants are visual no-ops on solid backgrounds (which is what pulp paints today). The `text` variant requires real paint-chain composition and is deferred.",
+      "issue": "1517"
     },
     "css/backgroundColor": {
       "status": "supported",
@@ -380,15 +388,17 @@
       "issue": ""
     },
     "css/backgroundOrigin": {
-      "status": "missing",
-      "mapsTo": "no branch",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "noop",
+      "mapsTo": "web-compat-style-decl.js -> setBackgroundOrigin(id, kw); bridge stores keyword on View::background_origin_ slot. No paint impact today.",
+      "supportedValues": [
+        "border-box / padding-box / content-box — all accepted, all stored, all paint identically because pulp doesn't paint repeating gradient tiles (the only case where this would matter)"
       ],
-      "tests": [],
-      "notes": "Not handled.",
-      "issue": ""
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp — [issue-1517]"
+      ],
+      "notes": "pulp #1517 — value stored for round-tripping; paint impact is zero because the property only matters for repeating gradient tiles. When pulp adds gradient-tile paint, the slot is already populated.",
+      "issue": "1517"
     },
     "css/backgroundPosition": {
       "status": "partial",
@@ -1178,16 +1188,19 @@
       "issue": ""
     },
     "css/fontFamily": {
-      "status": "supported",
-      "mapsTo": "web-compat-style-decl.js: 'fontFamily' -> splits on commas, trims, strips matching outer quotes, picks the first non-empty token, calls setFontFamily(id, name). PR #1174.",
+      "status": "partial",
+      "mapsTo": "web-compat-style-decl.js + widget_bridge.cpp setFontFamily — both layers split CSS lists on commas, trim, strip outer quotes, and pick the first non-empty family. Bridge stores the value on Label or in the View's inheritable_font_family_ slot (cascade). PR #1174 + pulp #1434 Phase A2-5.",
       "supportedValues": [
-        "single font name (quoted or not)"
+        "single font name (quoted or not)",
+        "comma-separated font lists ('JetBrains Mono', ui-monospace, monospace) — first non-empty family wins"
       ],
       "unsupportedValues": [
-        "comma-separated font lists ('JetBrains Mono', monospace)"
+        "whole-list fallback chain (gated on pulp #932 — Skia SkFontMgr font registration). Today only the first family is consulted; if it isn't registered with Skia, fall through is to the platform default rather than the next family in the list."
       ],
-      "tests": [],
-      "notes": "Fixed 2026-04-29 (#1174 / pulp #1151). Generic fallbacks ('monospace', 'ui-monospace', 'sans-serif') are not specially recognized — Skia falls back to the platform default if SkFontMgr can't resolve any of the named families.",
+      "tests": [
+        "test/test_widget_bridge.cpp — [issue-1434-fontfamily]"
+      ],
+      "notes": "Phase A2-5 (pulp #1434) added @pulp/react JSX dispatch and a bridge-side list parser so direct setFontFamily('id', 'A, B, C') calls are now correct (previously the whole comma list was passed verbatim to SkFontMgr, never matched, silent platform fallback). The cascade slot on container Views means container-level fontFamily reaches descendant Labels via parent-walk (mirrors letter_spacing / font_weight). Still partial because the spec-correct fallback chain (try family A, then B, then C) requires SkFontMgr font registration in pulp #932.",
       "issue": "1151"
     },
     "css/fontSize": {
@@ -1878,59 +1891,80 @@
       "issue": ""
     },
     "css/outline": {
-      "status": "partial",
-      "mapsTo": "web-compat calls setOutline if defined -- bridge does NOT register it",
-      "supportedValues": [],
+      "status": "supported",
+      "mapsTo": "web-compat shorthand parser fans out to setOutlineWidth + setOutlineStyle + setOutlineColor (web-compat-style-decl.js:851 since pulp #1519).",
+      "supportedValues": [
+        "<width> <style> <color> shorthand"
+      ],
       "unsupportedValues": [
-        "outline-style values beyond solid",
-        "multi-keyword shorthand parsing"
+        "thin/medium/thick keyword for width",
+        "double/groove/ridge/inset/outset (degrade to solid at paint time, same as borderStyle)"
       ],
       "tests": [],
-      "notes": "pulp #1434 batch 1: status flipped missing → partial. CSS translator at web-compat-style-decl.js:525 routes through setOutline. Single-keyword + length + color forms are wired.",
+      "notes": "pulp #1519 — outline cluster now bridge-backed. Shorthand parses `<width>px <style> <color>` and dispatches to the per-attribute setters.",
       "issue": ""
     },
     "css/outlineColor": {
-      "status": "partial",
-      "mapsTo": "web-compat calls setOutline -- never registered",
-      "supportedValues": [],
+      "status": "supported",
+      "mapsTo": "setOutlineColor(id, color) — registered in widget_bridge.cpp since pulp #1519. CSS translator at web-compat-style-decl.js:864 routes through it.",
+      "supportedValues": [
+        "#hex",
+        "#rgba",
+        "rgb()",
+        "rgba()",
+        "named colors"
+      ],
       "unsupportedValues": [
         "currentColor keyword"
       ],
       "tests": [],
-      "notes": "pulp #1434 batch 1: status flipped missing → partial. CSS translator at web-compat-style-decl.js:538 routes through setOutline (color slot).",
+      "notes": "pulp #1519 — outline color now writes to View::outline_color_; Skia paint strokes the inflated rect with this color.",
       "issue": ""
     },
     "css/outlineOffset": {
-      "status": "missing",
-      "mapsTo": "no branch",
-      "supportedValues": [],
+      "status": "supported",
+      "mapsTo": "setOutlineOffset(id, px) — registered in widget_bridge.cpp since pulp #1519. CSS translator at web-compat-style-decl.js routes through it.",
+      "supportedValues": [
+        "<length>px"
+      ],
       "unsupportedValues": [
-        "all"
+        "em/rem/% units (pulp's outline is paint-only and length is resolved at the bridge boundary)"
       ],
       "tests": [],
-      "notes": "Not handled.",
+      "notes": "pulp #1519 — gap between border-box edge and outline. Skia inflates the stroke rect by (offset + width/2).",
       "issue": ""
     },
     "css/outlineStyle": {
-      "status": "missing",
-      "mapsTo": "no branch",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "supported",
+      "mapsTo": "setOutlineStyle(id, keyword) — registered in widget_bridge.cpp since pulp #1519. CSS translator at web-compat-style-decl.js routes through it; keyword set mirrors borderStyle.",
+      "supportedValues": [
+        "solid",
+        "dashed",
+        "dotted",
+        "none",
+        "hidden",
+        "double (degrades to solid)",
+        "groove (degrades to solid)",
+        "ridge (degrades to solid)",
+        "inset (degrades to solid)",
+        "outset (degrades to solid)"
       ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "Not handled.",
+      "notes": "pulp #1519 — line-style enum reused from View::BorderStyle (CSS spec is identical). Skia installs SkDashPathEffect for dashed/dotted at outline-stroke time. Other named styles currently degrade to solid (paint-side gap, same as borderStyle).",
       "issue": ""
     },
     "css/outlineWidth": {
-      "status": "partial",
-      "mapsTo": "web-compat calls setOutline -- never registered",
-      "supportedValues": [],
+      "status": "supported",
+      "mapsTo": "setOutlineWidth(id, px) — registered in widget_bridge.cpp since pulp #1519. CSS translator at web-compat-style-decl.js:859 routes through it.",
+      "supportedValues": [
+        "<length>px"
+      ],
       "unsupportedValues": [
         "thin/medium/thick keyword forms"
       ],
       "tests": [],
-      "notes": "pulp #1434 batch 1: status flipped missing → partial. CSS translator at web-compat-style-decl.js:533 routes through setOutline (width slot). Numeric px values supported.",
+      "notes": "pulp #1519 — outline stroke thickness. width<=0 short-circuits the paint.",
       "issue": ""
     },
     "css/overflow": {
@@ -3425,15 +3459,17 @@
       "issue": ""
     },
     "rn/flex": {
-      "status": "missing",
-      "mapsTo": "no shorthand prop in @pulp/react. Components must use flexGrow/flexShrink/flexBasis individually.",
-      "supportedValues": [],
-      "unsupportedValues": [
+      "status": "supported",
+      "mapsTo": "prop-applier.ts case 'flex': fans the numeric value out to setFlex(id, 'flex_grow', n) + setFlex(id, 'flex_shrink', 1) + setFlex(id, 'flex_basis', 0) for positive n; (0,0,'auto') for n=0; (0,1,'auto') for negative n. Matches RN's bare-number shorthand semantics.",
+      "supportedValues": [
         "number"
       ],
-      "tests": [],
-      "notes": "Common RN pattern; awkward to port.",
-      "issue": ""
+      "unsupportedValues": [],
+      "tests": [
+        "packages/pulp-react/test/prop-applier-flex.test.ts"
+      ],
+      "notes": "pulp #1518 closed the gap. Bare-number `flex={n}` is the canonical RN-flavored shorthand; `flex` as an object/string is not a thing in RN, so no further forms are needed. Underlying bridge wires were already stable (flex_grow / flex_shrink / flex_basis) — this is purely an adapter aliasing.",
+      "issue": "1518"
     },
     "rn/flexBasis": {
       "status": "partial",
@@ -3504,15 +3540,19 @@
       "issue": ""
     },
     "rn/fontFamily": {
-      "status": "missing",
-      "mapsTo": "intentionally NOT dispatched in prop-applier.ts (line 152 comment) -- pending #932 SkFontMgr fix",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "string"
+      "status": "partial",
+      "mapsTo": "prop-applier.ts case 'fontFamily' -> setFontFamily(id, value). Bridge parses CSS list (first non-empty family wins). Container Views fall through to inheritable_font_family_ for cascade.",
+      "supportedValues": [
+        "string (single family or comma-separated list — first non-empty wins)"
       ],
-      "tests": [],
-      "notes": "Documented gap in prop-applier; reflects pulp#932 / pulp#927.",
-      "issue": ""
+      "unsupportedValues": [
+        "whole-list fallback chain — gated on pulp #932 SkFontMgr registration"
+      ],
+      "tests": [
+        "test/test_widget_bridge.cpp — [issue-1434-fontfamily]"
+      ],
+      "notes": "pulp #1434 Phase A2-5 wired the @pulp/react JSX dispatch and the bridge-side list parser. Cross-engine ready: when pulp #932 lands the registry resolution, no consumer change is needed — the same name flows through.",
+      "issue": "1434"
     },
     "rn/fontSize": {
       "status": "supported",
@@ -3925,47 +3965,70 @@
       "issue": ""
     },
     "rn/outlineColor": {
-      "status": "missing",
-      "mapsTo": "no bridge support",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "supported",
+      "mapsTo": "@pulp/react prop-applier dispatches outlineColor to setOutlineColor (prop-applier.ts since pulp #1519). Bridge writes to View::outline_color_.",
+      "supportedValues": [
+        "#hex",
+        "#rgba",
+        "rgb()",
+        "rgba()",
+        "named colors"
       ],
-      "tests": [],
-      "notes": "setOutline never registered.",
+      "unsupportedValues": [
+        "currentColor keyword"
+      ],
+      "tests": [
+        "packages/pulp-react/test/prop-applier-outline.test.ts"
+      ],
+      "notes": "pulp #1519 — RN outline cluster. Outline is paint-time only and does NOT affect Yoga layout (parent never reserves space). Skia paint inflates the box by (offset + width/2) and strokes with the parsed color.",
       "issue": ""
     },
     "rn/outlineOffset": {
-      "status": "missing",
-      "mapsTo": "no bridge support",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "number"
+      "status": "supported",
+      "mapsTo": "@pulp/react prop-applier dispatches outlineOffset to setOutlineOffset (prop-applier.ts since pulp #1519). Bridge writes to View::outline_offset_.",
+      "supportedValues": [
+        "number (px)"
       ],
-      "tests": [],
-      "notes": "",
+      "unsupportedValues": [],
+      "tests": [
+        "packages/pulp-react/test/prop-applier-outline.test.ts"
+      ],
+      "notes": "pulp #1519 — gap between border-box edge and outline. Paint-only; no Yoga layout impact.",
       "issue": ""
     },
     "rn/outlineStyle": {
-      "status": "missing",
-      "mapsTo": "no bridge support",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "supported",
+      "mapsTo": "@pulp/react prop-applier dispatches outlineStyle to setOutlineStyle (prop-applier.ts since pulp #1519). Bridge maps the CSS keyword to View::BorderStyle (reused — CSS spec is identical for outline + border).",
+      "supportedValues": [
+        "solid",
+        "dashed",
+        "dotted",
+        "none",
+        "hidden",
+        "double (degrades to solid)",
+        "groove (degrades to solid)",
+        "ridge (degrades to solid)",
+        "inset (degrades to solid)",
+        "outset (degrades to solid)"
       ],
-      "tests": [],
-      "notes": "",
+      "unsupportedValues": [],
+      "tests": [
+        "packages/pulp-react/test/prop-applier-outline.test.ts"
+      ],
+      "notes": "pulp #1519 — Skia installs SkDashPathEffect for dashed/dotted at outline-stroke time. Other named styles currently degrade to solid (paint-side gap, same as borderStyle). none/hidden/zero-width short-circuit the stroke.",
       "issue": ""
     },
     "rn/outlineWidth": {
-      "status": "missing",
-      "mapsTo": "no bridge support",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "number"
+      "status": "supported",
+      "mapsTo": "@pulp/react prop-applier dispatches outlineWidth to setOutlineWidth (prop-applier.ts since pulp #1519). Bridge writes to View::outline_width_.",
+      "supportedValues": [
+        "number (px)"
       ],
-      "tests": [],
-      "notes": "",
+      "unsupportedValues": [],
+      "tests": [
+        "packages/pulp-react/test/prop-applier-outline.test.ts"
+      ],
+      "notes": "pulp #1519 — outline stroke thickness. width<=0 short-circuits the paint. Paint-only; no Yoga layout impact.",
       "issue": ""
     },
     "rn/overflow": {
@@ -4799,26 +4862,34 @@
       "issue": ""
     },
     "yoga/marginStart": {
-      "status": "missing",
-      "mapsTo": "no field",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "supported",
+      "mapsTo": "FlexStyle.dim_margin_start (yoga_layout.cpp dispatches to YGNodeStyleSetMargin/Percent/Auto on YGEdgeStart)",
+      "supportedValues": [
+        "number (px)",
+        "percent string (\"5%\")",
+        "auto"
       ],
-      "tests": [],
-      "notes": "Logical edge.",
-      "issue": ""
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1542]"
+      ],
+      "notes": "pulp #1542 — yoga logical-edge fan-out. YGEdgeStart resolves to the left edge in LTR and the right edge in RTL; the new FlexStyle::writing_direction field plus YGNodeStyleSetDirection drives the flip.",
+      "issue": "https://github.com/danielraffel/pulp/issues/1542"
     },
     "yoga/marginEnd": {
-      "status": "missing",
-      "mapsTo": "no field",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "supported",
+      "mapsTo": "FlexStyle.dim_margin_end (yoga_layout.cpp dispatches to YGNodeStyleSetMargin/Percent/Auto on YGEdgeEnd)",
+      "supportedValues": [
+        "number (px)",
+        "percent string (\"10%\")",
+        "auto"
       ],
-      "tests": [],
-      "notes": "Logical edge.",
-      "issue": ""
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1542]"
+      ],
+      "notes": "pulp #1542 — yoga logical-edge fan-out. YGEdgeEnd resolves to the right edge in LTR and the left edge in RTL.",
+      "issue": "https://github.com/danielraffel/pulp/issues/1542"
     },
     "yoga/marginHorizontal": {
       "status": "supported",
@@ -4920,26 +4991,36 @@
       "issue": ""
     },
     "yoga/paddingStart": {
-      "status": "missing",
-      "mapsTo": "no field",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "supported",
+      "mapsTo": "FlexStyle.dim_padding_start (yoga_layout.cpp dispatches to YGNodeStyleSetPadding/Percent on YGEdgeStart)",
+      "supportedValues": [
+        "number (px)",
+        "percent string (\"15%\")"
       ],
-      "tests": [],
-      "notes": "Logical edge.",
-      "issue": ""
+      "unsupportedValues": [
+        "auto"
+      ],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1542]"
+      ],
+      "notes": "pulp #1542 — yoga logical-edge fan-out. YGEdgeStart resolves to the left edge in LTR and the right edge in RTL. Yoga padding has no `auto` API (margin only) — bridge falls through to px.",
+      "issue": "https://github.com/danielraffel/pulp/issues/1542"
     },
     "yoga/paddingEnd": {
-      "status": "missing",
-      "mapsTo": "no field",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "supported",
+      "mapsTo": "FlexStyle.dim_padding_end (yoga_layout.cpp dispatches to YGNodeStyleSetPadding/Percent on YGEdgeEnd)",
+      "supportedValues": [
+        "number (px)",
+        "percent string (\"25%\")"
       ],
-      "tests": [],
-      "notes": "Logical edge.",
-      "issue": ""
+      "unsupportedValues": [
+        "auto"
+      ],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1542]"
+      ],
+      "notes": "pulp #1542 — yoga logical-edge fan-out. YGEdgeEnd resolves to the right edge in LTR and the left edge in RTL.",
+      "issue": "https://github.com/danielraffel/pulp/issues/1542"
     },
     "yoga/paddingHorizontal": {
       "status": "supported",
@@ -5088,26 +5169,36 @@
       "issue": "https://github.com/danielraffel/pulp/issues/1434"
     },
     "yoga/start": {
-      "status": "missing",
-      "mapsTo": "no field",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "supported",
+      "mapsTo": "FlexStyle.dim_start (yoga_layout.cpp dispatches to YGNodeStyleSetPosition/Percent on YGEdgeStart)",
+      "supportedValues": [
+        "number (px)",
+        "percent string (\"12%\")"
       ],
-      "tests": [],
-      "notes": "Logical position.",
-      "issue": ""
+      "unsupportedValues": [
+        "auto"
+      ],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1542]"
+      ],
+      "notes": "pulp #1542 — yoga logical-edge fan-out. YGEdgeStart resolves to the left edge in LTR and the right edge in RTL. Yoga position has no `auto` API.",
+      "issue": "https://github.com/danielraffel/pulp/issues/1542"
     },
     "yoga/end": {
-      "status": "missing",
-      "mapsTo": "no field",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "supported",
+      "mapsTo": "FlexStyle.dim_end (yoga_layout.cpp dispatches to YGNodeStyleSetPosition/Percent on YGEdgeEnd)",
+      "supportedValues": [
+        "number (px)",
+        "percent string (\"8%\")"
       ],
-      "tests": [],
-      "notes": "Logical position.",
-      "issue": ""
+      "unsupportedValues": [
+        "auto"
+      ],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1542]"
+      ],
+      "notes": "pulp #1542 — yoga logical-edge fan-out. YGEdgeEnd resolves to the right edge in LTR and the left edge in RTL.",
+      "issue": "https://github.com/danielraffel/pulp/issues/1542"
     },
     "yoga/gap": {
       "status": "supported",
@@ -5182,17 +5273,19 @@
       "issue": ""
     },
     "yoga/direction": {
-      "status": "missing",
-      "mapsTo": "no field",
-      "supportedValues": [],
-      "unsupportedValues": [
+      "status": "supported",
+      "mapsTo": "FlexStyle.writing_direction (yoga_layout.cpp dispatches to YGNodeStyleSetDirection / YGNodeCalculateLayout root direction)",
+      "supportedValues": [
         "ltr",
         "rtl",
         "inherit"
       ],
-      "tests": [],
-      "notes": "Yoga supports direction for RTL; Pulp does not.",
-      "issue": ""
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1542]"
+      ],
+      "notes": "pulp #1542 — bridge accepts `direction_writing` sub-key on setFlex (distinct from `direction` for flex-direction). FlexStyle::writing_direction { inherit, ltr, rtl } drives both YGNodeStyleSetDirection on the per-node call and the root's YGNodeCalculateLayout direction argument. Required for yoga's logical-edge resolution (start/end, marginStart, etc.).",
+      "issue": "https://github.com/danielraffel/pulp/issues/1542"
     }
   },
   "react": {
@@ -5994,6 +6087,36 @@
       "notes": "Backed by SkCanvas::clipPath. (issue-896 added canvasClip; older canvasClipRect is the rect-only path.)",
       "issue": ""
     },
+    "canvas2d/isPointInPath": {
+      "status": "partial",
+      "mapsTo": "ctx.isPointInPath(x, y[, fillRule]) -> JS-side ray-cast against the path mirror. Each path-construction method (moveTo / lineTo / rect / roundRect / arc / arcTo / ellipse / bezierCurveTo / quadraticCurveTo / closePath) appends to `_pathSubpaths` in addition to forwarding to the bridge. Curve segments sample to ~16 line pieces — accurate enough for spec-compliant hit testing.",
+      "supportedValues": [
+        "isPointInPath(x, y) on rect / lineTo polygon / arc / curve paths",
+        "rolls back across save / restore via the path-mirror snapshot"
+      ],
+      "unsupportedValues": [
+        "Path2D-object first argument (shim returns a 2-arg form result; standalone Path2D not yet modeled)",
+        "fillRule difference for self-intersecting paths — the JS ray-cast returns the same answer for 'nonzero' and 'evenodd'"
+      ],
+      "tests": [],
+      "notes": "pulp #1527 bridge-thin gap-fill. Synchronous return — no bridge round-trip; the bridge owns the canonical SkPath but it's not queryable from JS until paint time.",
+      "issue": "1527"
+    },
+    "canvas2d/isPointInStroke": {
+      "status": "partial",
+      "mapsTo": "ctx.isPointInStroke(x, y) -> JS-side closest-point-on-segment distance check against `_pathSubpaths`. Returns true when the test point's distance to any path segment is ≤ lineWidth / 2.",
+      "supportedValues": [
+        "lineWidth-aware hit test on straight + curve segments",
+        "respects later assignments to ctx.lineWidth"
+      ],
+      "unsupportedValues": [
+        "lineCap / lineJoin geometry (square caps, miter spikes — approximated as round caps because we test distance to the segment)",
+        "Path2D-object first argument"
+      ],
+      "tests": [],
+      "notes": "pulp #1527 bridge-thin gap-fill. Pairs with isPointInPath; uses the same JS path mirror.",
+      "issue": "1527"
+    },
     "canvas2d/save": {
       "status": "supported",
       "mapsTo": "ctx.save -> canvasSave (Skia/CG canvas state stack).",
@@ -6050,12 +6173,28 @@
     },
     "canvas2d/resetTransform": {
       "status": "supported",
-      "mapsTo": "ctx.resetTransform -> canvasSetTransform(id, 1, 0, 0, 1, 0, 0).",
+      "mapsTo": "ctx.resetTransform -> canvasSetTransform(id, 1, 0, 0, 1, 0, 0). Also resets the JS-side _currentTransform mirror (pulp #1527) so getTransform reads back the identity.",
       "supportedValues": [],
       "unsupportedValues": [],
       "tests": [],
-      "notes": "PR #1348.",
+      "notes": "PR #1348. Mirror update added in pulp #1527.",
       "issue": "1346"
+    },
+    "canvas2d/getTransform": {
+      "status": "supported",
+      "mapsTo": "ctx.getTransform() -> returns a DOMMatrix-shaped object reflecting the JS-mirrored 2D affine transform. The shim tracks `_currentTransform` via translate / scale / rotate / setTransform / transform / save / restore so the read is synchronous (no bridge round-trip; the bridge replays draws at paint time and has no queryable 'current matrix' from JS).",
+      "supportedValues": [
+        "a, b, c, d, e, f (live)",
+        "m11/m12/m21/m22/m41/m42 DOMMatrix aliases",
+        "is2D, isIdentity flags",
+        "toFloat32Array / toFloat64Array readers"
+      ],
+      "unsupportedValues": [
+        "DOMMatrix mutation methods (multiplySelf, scaleSelf, etc.) — the returned object is a snapshot, not a live binding"
+      ],
+      "tests": [],
+      "notes": "pulp #1527 bridge-thin gap-fill. Mutating the returned matrix does NOT affect the live ctx (spec-compliant — getTransform returns a NEW DOMMatrix per call).",
+      "issue": "1527"
     },
     "canvas2d/transform": {
       "status": "partial",
@@ -6158,51 +6297,51 @@
       "issue": "964"
     },
     "canvas2d/createRadialGradient": {
-      "status": "partial",
-      "mapsTo": "ctx.createRadialGradient(x0,y0,r0,x1,y1,r1) -> CanvasGradient with kind='radial'. Bridge models a single-circle radial gradient (centre + radius); shim uses the OUTER circle (x1,y1,r1).",
+      "status": "supported",
+      "mapsTo": "ctx.createRadialGradient(x0,y0,r0,x1,y1,r1) -> CanvasGradient with kind='radial'. Both circles are wired through to the backend: Skia routes through SkGradientShader::MakeTwoPointConical, CG routes through CGContextDrawRadialGradient(start_centre, start_radius, end_centre, end_radius). The bridge dispatches via canvasSetRadialGradientTwoCircles when both circles differ.",
       "supportedValues": [
-        "centre-bloom usage where x0===x1, y0===y1, r0===0"
+        "centre-bloom (x0===x1, y0===y1, r0===0)",
+        "true two-circle radial with offset / sized inner circle"
       ],
-      "unsupportedValues": [
-        "true two-circle radial gradient (inner + outer with separate radii)"
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_canvas.cpp [canvas][cg][issue-1524]",
+        "test/test_canvas2d_shim.cpp [view][canvas2d][issue-1524]"
       ],
-      "tests": [],
-      "notes": "PR #1348. Visually equivalent for FilterBank's typical centre-bloom; file follow-up if a plugin needs the offset-inner-circle form.",
-      "issue": "964"
+      "notes": "pulp #1524. Two-circle support: Skia MakeTwoPointConical, CG full CGContextDrawRadialGradient with both circles. Inner circle (x0,y0,r0) packed in CanvasDrawCmd as (x, y, extra), outer (x1,y1,r1) as (x2, y2, w).",
+      "issue": "1524"
     },
     "canvas2d/createConicGradient": {
-      "status": "partial",
-      "mapsTo": "ctx.createConicGradient(startAngle, x, y) -> CanvasGradient with _kind='conic'; flushed via canvasSetConicGradient when assigned to fillStyle. Skia routes through SkGradientShader::MakeSweep (real sweep). CG degrades to first-stop colour (no native conic shader).",
+      "status": "supported",
+      "mapsTo": "ctx.createConicGradient(startAngle, x, y) -> CanvasGradient with _kind='conic'; flushed via canvasSetConicGradient when assigned to fillStyle. Skia routes through SkGradientShader::MakeSweep (real sweep). CG software-rasterises a CGImage of the active clip's bounding box (per-pixel atan2 sweep + colour-stop interpolation) and paints it via CGContextDrawImage.",
       "supportedValues": [
         "Skia backend: real conic sweep with multiple stops",
-        "CG backend: first-stop colour fallback (visually degraded)"
+        "CG backend: software-rasterised conic with multiple stops (atan2 sweep + linear interpolation between stops, premultiplied RGBA8)"
       ],
-      "unsupportedValues": [
-        "CG backend: true conic sweep (no CGContextDrawConicGradient API)"
-      ],
+      "unsupportedValues": [],
       "tests": [
+        "test/test_canvas.cpp [canvas][cg][issue-1524]",
         "test/test_canvas2d_shim.cpp [issue-1434][bridge-thin]"
       ],
-      "notes": "pulp #1434 bridge-thin gap-fill. Skia path is fully spec-compliant; CG path silently degrades — file a follow-up if a CG-targeted plugin needs the sweep.",
-      "issue": "1434"
+      "notes": "pulp #1524. Skia uses MakeSweep; CG falls back to a software rasteriser that rebuilds the conic CGImage when the clip-bounding-box changes (caches across repeated fills with the same clip).",
+      "issue": "1524"
     },
     "canvas2d/createPattern": {
-      "status": "partial",
-      "mapsTo": "ctx.createPattern(image, repetition) -> CanvasPattern handle, flushed via canvasSetFillPattern / canvasSetStrokePattern. Skia routes through SkShader::MakeImage with SkTileMode per axis (real tiled fill); CG degrades to the active solid colour.",
+      "status": "supported",
+      "mapsTo": "ctx.createPattern(image, repetition) -> CanvasPattern handle, flushed via canvasSetFillPattern / canvasSetStrokePattern. Skia routes through SkShader::MakeImage with SkTileMode per axis (real tiled fill); CG routes through CGPatternCreate + CGPatternCallbacks (image-tile draw callback) and CGContextSetFillPattern.",
       "supportedValues": [
         "repeat",
         "repeat-x",
         "repeat-y",
         "no-repeat"
       ],
-      "unsupportedValues": [
-        "CG backend (macOS) renders solid fallback — no native CGPattern shader plumbed yet"
-      ],
+      "unsupportedValues": [],
       "tests": [
+        "test/test_canvas.cpp [canvas][cg][issue-1524]",
         "test/test_canvas2d_shim.cpp [issue-1434][bridge-thin]"
       ],
-      "notes": "pulp #1434 bridge-thin gap-fill (sub-agent #24, follow-up to #1480). Skia path is fully spec-compliant for all four repetition values; CG path silently degrades to the previous solid fill. File a follow-up if a CG-targeted plugin actually needs tiled patterns (CGPattern callback dance).",
-      "issue": "1434"
+      "notes": "pulp #1524. Skia uses SkShader::MakeImage; CG uses CGPatternCreate with a draw callback that emits one tile via CGContextDrawImage. `no_repeat` axes blow up the tile step beyond the clip bbox so only the seed tile lands. Image source decoded via ImageIO (CGImageSourceCreateWithData / WithURL) for both file paths and `data:` URLs. Note: CG stroke patterns are still a no-op (strokes continue with stroke_color_) — file a follow-up if a CG-targeted plugin needs tiled stroke patterns; this entry is for the createPattern fill surface.",
+      "issue": "1524"
     },
     "canvas2d/addColorStop": {
       "status": "supported",
@@ -6450,26 +6589,47 @@
       "issue": "1434"
     },
     "canvas2d/direction": {
-      "status": "missing",
-      "mapsTo": "Tracked locally; not pushed to bridge.",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "text rendering direction (ltr/rtl) on Canvas2D"
+      "status": "partial",
+      "mapsTo": "ctx.direction -> canvasSetDirection (web-compat-canvas.js _syncDirectionState, flushed before fillText/strokeText). Skia: SkShaper leftToRight flag flipped per direction (RTL emits glyphs in visual order via HarfBuzz). Stored on the canvas state and consumed by both fill_text() and recording capture. inherit currently maps to ltr until per-View writing-direction lookup lands (#1506).",
+      "supportedValues": [
+        "ltr (default, leftToRight shaping)",
+        "rtl (HarfBuzz buffer direction RTL via SkShaper leftToRight=false)",
+        "inherit (treated as ltr; per-View resolution tracked under #1506)"
       ],
-      "tests": [],
-      "notes": "Silent no-op. Yoga RTL is also unsupported (yoga/direction missing).",
-      "issue": ""
+      "unsupportedValues": [
+        "Full Unicode Bidi Algorithm for mixed-script paragraphs (deferred to SkParagraph plumbing under #1506)"
+      ],
+      "tests": [
+        "test/test_canvas2d_shim.cpp [issue-1520]"
+      ],
+      "notes": "pulp #1520 — JS shim + bridge + SkShaper direction flag. Real bidi (mixed LTR/RTL paragraphs) shares plumbing with #1506.",
+      "issue": "1520"
     },
     "canvas2d/filter": {
-      "status": "missing",
-      "mapsTo": "Not implemented in shim or bridge.",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "Canvas2D filter chains (blur, brightness, etc.)"
+      "status": "partial",
+      "mapsTo": "ctx.filter -> canvasSetFilter (web-compat-canvas.js _syncFilterState, flushed before fill/stroke/text/image draws). Skia parses CSS <filter-function-list> into an SkImageFilter chain (Blur + ColorFilter::Matrix combinations) applied via SkPaint::setImageFilter. Distinct from CSS `filter` on the View element (#1503) — this is per-2D-context state and stacks with save()/restore().",
+      "supportedValues": [
+        "blur(<length>)",
+        "brightness(<num|%>)",
+        "contrast(<num|%>)",
+        "grayscale(<num|%>)",
+        "hue-rotate(<angle>)",
+        "invert(<num|%>)",
+        "opacity(<num|%>)",
+        "saturate(<num|%>)",
+        "sepia(<num|%>)",
+        "none (default; clears any active chain)"
       ],
-      "tests": [],
-      "notes": "Distinct from CSS `filter` on the View — this is the per-context Canvas2D filter. Not yet implemented.",
-      "issue": ""
+      "unsupportedValues": [
+        "drop-shadow(...) (deferred — needs offset+blur+color tuple parsing)",
+        "url(#filter-id) (SVG filter references)",
+        "CG backend renders unfiltered (Skia-only today)"
+      ],
+      "tests": [
+        "test/test_canvas2d_shim.cpp [issue-1520]"
+      ],
+      "notes": "pulp #1520 — JS shim + bridge + Skia parser/chain. Parser is local to skia_canvas.cpp; #1503's CSS filter on View elements is a parallel parser to be unified in a follow-up.",
+      "issue": "1520"
     },
     "canvas2d/shadowColor": {
       "status": "supported",
