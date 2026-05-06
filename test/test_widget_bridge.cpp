@@ -5092,3 +5092,365 @@ TEST_CASE("flex-flow shorthand recognizes wrap-reverse",
     REQUIRE(f.flex_wrap == FlexWrap::wrap_reverse);
     REQUIRE(f.direction == FlexDirection::row);
 }
+
+// ── pulp #1434 Triage #10 — borderStyle dashed/dotted ─────────────────────
+//
+// Bridge maps the CSS border-style keyword to View::BorderStyle. Skia
+// installs SkDashPathEffect at stroke time for `dashed` / `dotted`;
+// other named styles currently degrade to solid (paint-side gap).
+// `none` / `hidden` short-circuit the stroke entirely.
+
+TEST_CASE("setBorderStyle maps each keyword to the right enum",
+          "[view][bridge][css][issue-1434-borderstyle]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('a', '');  setBorderStyle('a', 'solid');
+        createPanel('b', '');  setBorderStyle('b', 'dashed');
+        createPanel('c', '');  setBorderStyle('c', 'dotted');
+        createPanel('d', '');  setBorderStyle('d', 'double');
+        createPanel('e', '');  setBorderStyle('e', 'groove');
+        createPanel('f', '');  setBorderStyle('f', 'ridge');
+        createPanel('g', '');  setBorderStyle('g', 'inset');
+        createPanel('h', '');  setBorderStyle('h', 'outset');
+        createPanel('i', '');  setBorderStyle('i', 'none');
+        createPanel('j', '');  setBorderStyle('j', 'hidden');
+    )");
+
+    REQUIRE(bridge.widget("a")->border_style() == View::BorderStyle::solid);
+    REQUIRE(bridge.widget("b")->border_style() == View::BorderStyle::dashed);
+    REQUIRE(bridge.widget("c")->border_style() == View::BorderStyle::dotted);
+    REQUIRE(bridge.widget("d")->border_style() == View::BorderStyle::double_);
+    REQUIRE(bridge.widget("e")->border_style() == View::BorderStyle::groove);
+    REQUIRE(bridge.widget("f")->border_style() == View::BorderStyle::ridge);
+    REQUIRE(bridge.widget("g")->border_style() == View::BorderStyle::inset);
+    REQUIRE(bridge.widget("h")->border_style() == View::BorderStyle::outset);
+    REQUIRE(bridge.widget("i")->border_style() == View::BorderStyle::none);
+    REQUIRE(bridge.widget("j")->border_style() == View::BorderStyle::hidden);
+}
+
+TEST_CASE("setBorderStyle unknown keyword falls back to solid",
+          "[view][bridge][css][issue-1434-borderstyle]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        createPanel('x', '');
+        setBorderStyle('x', 'parchment-curl');
+    )");
+    REQUIRE(bridge.widget("x")->border_style() == View::BorderStyle::solid);
+}
+
+TEST_CASE("dashed border emits set_line_dash command then clears it",
+          "[view][widget][issue-1434-borderstyle]") {
+    // Recording-canvas inspection: the paint sequence for a dashed
+    // border must include set_line_dash with a 2-entry pattern, the
+    // stroke call, and a final set_line_dash(intervals=null) reset
+    // so subsequent strokes don't inherit the dash.
+    View v;
+    v.set_bounds({0, 0, 100, 80});
+    v.set_border({0xff, 0, 0, 0xff}, 2.0f, 0.0f);
+    v.set_border_style(View::BorderStyle::dashed);
+
+    pulp::canvas::RecordingCanvas canvas;
+    v.paint_all(canvas);
+
+    int set_dash_count = 0;
+    bool saw_stroke = false;
+    bool stroke_after_first_dash = false;
+    bool dash_reset_after_stroke = false;
+    size_t first_intervals_count = 0;
+    size_t last_intervals_count = 999;
+    for (const auto& cmd : canvas.commands()) {
+        if (cmd.type == pulp::canvas::DrawCommand::Type::set_line_dash) {
+            set_dash_count++;
+            if (set_dash_count == 1) first_intervals_count = cmd.floats.size();
+            last_intervals_count = cmd.floats.size();
+            if (saw_stroke) dash_reset_after_stroke = true;
+        }
+        if (cmd.type == pulp::canvas::DrawCommand::Type::stroke_rect) {
+            saw_stroke = true;
+            if (set_dash_count > 0) stroke_after_first_dash = true;
+        }
+    }
+    REQUIRE(saw_stroke);
+    REQUIRE(stroke_after_first_dash);
+    REQUIRE(dash_reset_after_stroke);
+    REQUIRE(first_intervals_count == 2u);  // [on, off]
+    REQUIRE(last_intervals_count == 0u);   // reset
+}
+
+TEST_CASE("solid border does NOT emit set_line_dash",
+          "[view][widget][issue-1434-borderstyle]") {
+    View v;
+    v.set_bounds({0, 0, 100, 80});
+    v.set_border({0xff, 0, 0, 0xff}, 2.0f, 0.0f);
+    // Default style is solid — no dash should be installed.
+    pulp::canvas::RecordingCanvas canvas;
+    v.paint_all(canvas);
+    for (const auto& cmd : canvas.commands()) {
+        REQUIRE(cmd.type != pulp::canvas::DrawCommand::Type::set_line_dash);
+    }
+}
+
+TEST_CASE("border-style: none short-circuits the stroke",
+          "[view][widget][issue-1434-borderstyle]") {
+    View v;
+    v.set_bounds({0, 0, 100, 80});
+    v.set_border({0xff, 0, 0, 0xff}, 2.0f, 0.0f);
+    v.set_border_style(View::BorderStyle::none);
+    pulp::canvas::RecordingCanvas canvas;
+    v.paint_all(canvas);
+    for (const auto& cmd : canvas.commands()) {
+        REQUIRE(cmd.type != pulp::canvas::DrawCommand::Type::stroke_rect);
+        REQUIRE(cmd.type != pulp::canvas::DrawCommand::Type::stroke_rounded_rect);
+    }
+}
+
+// pulp #1434 (sub-agent #12 follow-up) — align_content multi-line
+// flex cross-axis distribution. Yoga supports it natively via
+// YGNodeStyleSetAlignContent; the gap was a missing FlexStyle field
+// + setter wiring. Round-trip every value the bridge accepts so a
+// regression in either the parser, the FlexStyle field, or the
+// space-* sibling enum gets caught here rather than silently
+// reverting Yoga to the default FlexStart.
+TEST_CASE("setFlex align_content accepts start / end / center / stretch / space-* aliases",
+          "[view][bridge][css][issue-1434-aligncontent]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('a','');  setFlex('a','align_content','start');
+        createPanel('b','');  setFlex('b','align_content','flex-start');
+        createPanel('c','');  setFlex('c','align_content','end');
+        createPanel('d','');  setFlex('d','align_content','flex-end');
+        createPanel('e','');  setFlex('e','align_content','center');
+        createPanel('f','');  setFlex('f','align_content','stretch');
+        createPanel('g','');  setFlex('g','align_content','space-between');
+        createPanel('h','');  setFlex('h','align_content','space-around');
+        createPanel('i','');  setFlex('i','align_content','space-evenly');
+    )");
+
+    using AcSpace = FlexStyle::AlignContentSpace;
+    auto ac = [&](const std::string& id) { return bridge.widget(id)->flex().align_content; };
+    auto sp = [&](const std::string& id) { return bridge.widget(id)->flex().align_content_space; };
+
+    REQUIRE(ac("a") == FlexAlign::start);    REQUIRE(sp("a") == AcSpace::none);
+    REQUIRE(ac("b") == FlexAlign::start);    REQUIRE(sp("b") == AcSpace::none);
+    REQUIRE(ac("c") == FlexAlign::end);      REQUIRE(sp("c") == AcSpace::none);
+    REQUIRE(ac("d") == FlexAlign::end);      REQUIRE(sp("d") == AcSpace::none);
+    REQUIRE(ac("e") == FlexAlign::center);   REQUIRE(sp("e") == AcSpace::none);
+    REQUIRE(ac("f") == FlexAlign::stretch);  REQUIRE(sp("f") == AcSpace::none);
+    REQUIRE(sp("g") == AcSpace::space_between);
+    REQUIRE(sp("h") == AcSpace::space_around);
+    REQUIRE(sp("i") == AcSpace::space_evenly);
+}
+
+// pulp #1434 (sub-agent #12 follow-up) — width: 'auto' routes through
+// the bridge's setFlex string path to FlexStyle.dim_width.unit =
+// DimensionUnit::auto_. yoga_layout.cpp dispatches on that to
+// YGNodeStyleSetWidthAuto. The percent path remains intact, and
+// numeric values still flow through the px branch.
+TEST_CASE("setFlex width accepts 'auto' keyword and routes to dim_width.auto_",
+          "[view][bridge][css][issue-1434-auto]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('a','');  setFlex('a','width','auto');
+        createPanel('b','');  setFlex('b','width', 120);
+        createPanel('c','');  setFlex('c','width', '50%');
+    )");
+
+    const auto& fa = bridge.widget("a")->flex();
+    REQUIRE(fa.dim_width.unit == DimensionUnit::auto_);
+    REQUIRE(fa.preferred_width == 0.0f);
+
+    const auto& fb = bridge.widget("b")->flex();
+    REQUIRE(fb.dim_width.unit == DimensionUnit::px);
+    REQUIRE_THAT(fb.preferred_width, WithinAbs(120.0f, 0.001f));
+
+    const auto& fc = bridge.widget("c")->flex();
+    REQUIRE(fc.dim_width.unit == DimensionUnit::percent);
+    REQUIRE_THAT(fc.dim_width.value, WithinAbs(50.0f, 0.001f));
+}
+
+TEST_CASE("setFlex height accepts 'auto' keyword and routes to dim_height.auto_",
+          "[view][bridge][css][issue-1434-auto]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('a','');  setFlex('a','height','auto');
+        createPanel('b','');  setFlex('b','height', 80);
+        createPanel('c','');  setFlex('c','height', '25%');
+    )");
+
+    const auto& fa = bridge.widget("a")->flex();
+    REQUIRE(fa.dim_height.unit == DimensionUnit::auto_);
+    REQUIRE(fa.preferred_height == 0.0f);
+
+    const auto& fb = bridge.widget("b")->flex();
+    REQUIRE(fb.dim_height.unit == DimensionUnit::px);
+    REQUIRE_THAT(fb.preferred_height, WithinAbs(80.0f, 0.001f));
+
+    const auto& fc = bridge.widget("c")->flex();
+    REQUIRE(fc.dim_height.unit == DimensionUnit::percent);
+    REQUIRE_THAT(fc.dim_height.value, WithinAbs(25.0f, 0.001f));
+}
+
+// pulp #1434 (sub-agent #12 follow-up) — verify the CSS shim path
+// also forwards 'auto' for width/height. The DOM-lite el.style
+// adapter must produce the same FlexStyle.dim_*.unit = auto_ result
+// as the direct setFlex(id, 'width', 'auto') path.
+TEST_CASE("CSSStyleDeclaration forwards width/height auto to bridge",
+          "[view][bridge][css][issue-1434-auto]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('a', '');
+        var sa = new CSSStyleDeclaration({ _id: 'a', _nativeCreated: true });
+        sa._applyProperty('width', 'auto');
+        sa._applyProperty('height', 'auto');
+    )");
+
+    const auto& fa = bridge.widget("a")->flex();
+    REQUIRE(fa.dim_width.unit  == DimensionUnit::auto_);
+    REQUIRE(fa.dim_height.unit == DimensionUnit::auto_);
+}
+
+// ── pulp #1434 Phase A2-2 — CSS Grid extended surface ──────────────────
+//
+// PR 1 of the multi-PR ladder. Builds on Pulp's existing grid layout
+// (template_columns/rows + per-child column/row spans + col/row gaps)
+// to add: grid-auto-columns, grid-auto-rows, grid-auto-flow,
+// grid-template-areas (named-area parsing), grid-area shorthand
+// (named token vs `row / col / row / col` numeric form).
+
+TEST_CASE("setGrid auto_columns / auto_rows / auto_flow",
+          "[view][bridge][css][issue-1434-grid]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        createPanel('a', '');
+        setGrid('a', 'auto_columns', '1fr');
+        setGrid('a', 'auto_rows', '50px');
+        setGrid('a', 'auto_flow', 'column dense');
+    )");
+    const auto& g = bridge.widget("a")->grid();
+    REQUIRE(g.auto_columns.type == GridTrack::Type::fr);
+    REQUIRE_THAT(g.auto_columns.value, WithinAbs(1.0f, 0.001f));
+    REQUIRE(g.auto_rows.type == GridTrack::Type::fixed);
+    REQUIRE_THAT(g.auto_rows.value, WithinAbs(50.0f, 0.001f));
+    REQUIRE(g.auto_flow == GridStyle::AutoFlow::column_dense);
+}
+
+TEST_CASE("parse_template_areas: simple 3x3 grid",
+          "[view][bridge][css][issue-1434-grid]") {
+    auto areas = GridStyle::parse_template_areas(
+        "'h h h' 'm c c' 'f f f'");
+    // Three named areas: h (header), m (main), c (content), f (footer).
+    REQUIRE(areas.size() == 4);
+    auto find = [&](const std::string& n) -> const GridStyle::NamedArea* {
+        for (const auto& a : areas) if (a.name == n) return &a;
+        return nullptr;
+    };
+    auto* h = find("h");
+    REQUIRE(h != nullptr);
+    REQUIRE(h->row_start == 1);
+    REQUIRE(h->col_start == 1);
+    REQUIRE(h->row_end == 2);
+    REQUIRE(h->col_end == 4);
+    auto* c = find("c");
+    REQUIRE(c != nullptr);
+    REQUIRE(c->row_start == 2);
+    REQUIRE(c->col_start == 2);
+    REQUIRE(c->row_end == 3);
+    REQUIRE(c->col_end == 4);
+    auto* f = find("f");
+    REQUIRE(f != nullptr);
+    REQUIRE(f->row_start == 3);
+    REQUIRE(f->col_end == 4);
+}
+
+TEST_CASE("parse_template_areas: '.' is the spacer token",
+          "[view][bridge][css][issue-1434-grid]") {
+    auto areas = GridStyle::parse_template_areas("'a . b'");
+    REQUIRE(areas.size() == 2);
+    REQUIRE(areas[0].name == "a");
+    REQUIRE(areas[1].name == "b");
+}
+
+TEST_CASE("setGrid template_areas via bridge",
+          "[view][bridge][css][issue-1434-grid]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        createPanel('a', '');
+        setGrid('a', 'template_areas', "'h h' 'm c'");
+    )");
+    REQUIRE(bridge.widget("a")->grid().template_areas.size() == 3);
+}
+
+TEST_CASE("setGrid grid_area: named-token form references a named area",
+          "[view][bridge][css][issue-1434-grid]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        createPanel('a', '');
+        setGrid('a', 'grid_area', 'header');
+    )");
+    REQUIRE(bridge.widget("a")->grid().grid_area_name == "header");
+}
+
+TEST_CASE("setGrid grid_area: numeric '1 / 2 / 3 / 4' form sets bounds",
+          "[view][bridge][css][issue-1434-grid]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        createPanel('a', '');
+        setGrid('a', 'grid_area', '1 / 2 / 3 / 4');
+    )");
+    const auto& g = bridge.widget("a")->grid();
+    REQUIRE(g.grid_row_start == 1);
+    REQUIRE(g.grid_column_start == 2);
+    REQUIRE(g.grid_row_end == 3);
+    REQUIRE(g.grid_column_end == 4);
+}
+
+TEST_CASE("CSSStyleDeclaration forwards gridTemplateAreas",
+          "[view][bridge][css][issue-1434-grid]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        createPanel('a', '');
+        var s = new CSSStyleDeclaration({ _id: 'a', _nativeCreated: true });
+        s._applyProperty('gridTemplateAreas', "'h h' 'm c'");
+        s._applyProperty('gridAutoFlow', 'column');
+    )");
+    REQUIRE(bridge.widget("a")->grid().template_areas.size() == 3);
+    REQUIRE(bridge.widget("a")->grid().auto_flow == GridStyle::AutoFlow::column);
+}

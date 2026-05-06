@@ -26,16 +26,14 @@ which mirrors the upstream Yoga API.
 
 ## Major gaps (parser routes, FlexStyle has no field)
 
-1. `yoga/alignContent` — multi-line cross-axis distribution. CSS shim
-   parses; `setFlex` switch has no `align_content` branch.
-2. `yoga/aspectRatio` — both shim layers parse; `FlexStyle` has no
+1. `yoga/aspectRatio` — both shim layers parse; `FlexStyle` has no
    `aspect_ratio` field. Silently dropped at the C++ boundary.
-3. `yoga/flexDirection` reverse modes — `FlexDirection` enum has only
+2. `yoga/flexDirection` reverse modes — `FlexDirection` enum has only
    `{row, col}`; `row-reverse` and `column-reverse` silently fall
    through to `col`.
-4. `yoga/flexWrap` `wrap-reverse` — `FlexStyle.flex_wrap` is a bool;
+3. `yoga/flexWrap` `wrap-reverse` — `FlexStyle.flex_wrap` is a bool;
    `wrap-reverse` is inexpressible.
-5. `yoga/alignItems` / `yoga/alignSelf` `baseline` — `FlexAlign` enum
+4. `yoga/alignItems` / `yoga/alignSelf` `baseline` — `FlexAlign` enum
    has no baseline variant.
 
 ## Recent updates
@@ -47,6 +45,28 @@ which mirrors the upstream Yoga API.
   through `YGWrapNoWrap` / `YGWrapWrap` / `YGWrapWrapReverse`. CSS
   `flex-wrap: wrap-reverse` and the `flex-flow` shorthand
   (`row wrap-reverse` etc.) now route correctly.
+- **2026-05-05 (pulp #1434 sub-agent #12 follow-up)** — three deferred
+  yoga gaps closed in one slice. `yoga/alignContent` was previously
+  labelled "MAJOR — unimplementable"; that was a misread. Yoga
+  supports it natively via `YGNodeStyleSetAlignContent`; the only
+  gap was a missing `FlexStyle::align_content` field plus a
+  `setFlex(id, 'align_content', ...)` case on the bridge. Bridge
+  accepts both bare (`start`/`end`) and prefixed (`flex-start`/
+  `flex-end`) spellings plus the three space-* values
+  (`space-between` / `space-around` / `space-evenly`). The space-*
+  variants live on a sibling `FlexStyle::AlignContentSpace` enum
+  because `FlexAlign` has no space variants — those don't make sense
+  for `align_items` / `align_self`. `yoga/width` and `yoga/height`
+  gained `'auto'` (Yoga "hug contents" via
+  `YGNodeStyleSetWidthAuto` / `SetHeightAuto`) — Figma auto-layout,
+  v0.dev intrinsic-sizing cards, and Claude Design responsive
+  containers all emit this. The CSS translator (`web-compat-style-
+  decl.js`) and `@pulp/react` prop-applier forward `'auto'` strings
+  verbatim to the bridge; `FlexStyle::dim_width` / `dim_height` carry
+  the unit; `yoga_layout.cpp` routes on `dim.unit == auto_`.
+  Reclassified NOT-IMPL → PASS for `alignContent`; DIVERGE → PASS
+  for `width` / `height` (the percent path was already PASS post-
+  #1426).
 - **2026-05-05 (pulp #1434 cross-surface mega-batch)** — per-edge
   `margin_*` and `padding_*` accept percent strings; margin also
   accepts `'auto'`. `FlexStyle` gains `dim_margin_{top,right,bottom,

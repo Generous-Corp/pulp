@@ -855,3 +855,307 @@ TEST_CASE("Canvas2D conic gradient renders distinct colours via Skia sweep",
     REQUIRE(right != below);
 }
 #endif  // PULP_HAS_SKIA
+
+// ── pulp #1434 bridge-thin gap-fill — createPattern (sub-agent #24) ─────
+//
+// `ctx.createPattern(image, repetition)` returns a CanvasPattern handle
+// the shim assigns to fillStyle / strokeStyle. The shim then flushes
+// via canvasSetFillPattern / canvasSetStrokePattern. Skia routes through
+// SkShader::MakeImage with SkTileMode per axis (real tiled fill); CG
+// degrades to the active solid colour (no native pattern shader without
+// a CGPattern callback dance).
+
+TEST_CASE("Canvas2D createPattern returns CanvasPattern with pattern kind",
+          "[view][canvas2d][issue-1434][bridge-thin]") {
+    auto result = run_in_bridge(R"(
+        var c = document.createElement('canvas');
+        document.body.appendChild(c);
+        var ctx = c.getContext('2d');
+        var p = ctx.createPattern('texture.png', 'repeat');
+        return [typeof p, p._kind, p._src, p._tileX, p._tileY].join('|');
+    )");
+    REQUIRE(result == "object|pattern|texture.png|repeat|repeat");
+}
+
+TEST_CASE("Canvas2D createPattern supports all four spec repetition values",
+          "[view][canvas2d][issue-1434][bridge-thin]") {
+    // Spec values: "repeat", "repeat-x", "repeat-y", "no-repeat".
+    // Shim maps them to (tile_x, tile_y) pairs the bridge consumes.
+    auto result = run_in_bridge(R"(
+        var c = document.createElement('canvas');
+        document.body.appendChild(c);
+        var ctx = c.getContext('2d');
+        var p1 = ctx.createPattern('a.png', 'repeat');
+        var p2 = ctx.createPattern('a.png', 'repeat-x');
+        var p3 = ctx.createPattern('a.png', 'repeat-y');
+        var p4 = ctx.createPattern('a.png', 'no-repeat');
+        return [
+            p1._tileX, p1._tileY,
+            p2._tileX, p2._tileY,
+            p3._tileX, p3._tileY,
+            p4._tileX, p4._tileY
+        ].join('|');
+    )");
+    REQUIRE(result == "repeat|repeat|repeat|no-repeat|no-repeat|repeat|no-repeat|no-repeat");
+}
+
+TEST_CASE("Canvas2D createPattern with null/empty repetition defaults to repeat",
+          "[view][canvas2d][issue-1434][bridge-thin]") {
+    // Per spec, null / undefined / empty string defaults to "repeat".
+    auto result = run_in_bridge(R"(
+        var c = document.createElement('canvas');
+        document.body.appendChild(c);
+        var ctx = c.getContext('2d');
+        var p1 = ctx.createPattern('a.png', null);
+        var p2 = ctx.createPattern('a.png', undefined);
+        var p3 = ctx.createPattern('a.png', '');
+        return [p1._tileX, p2._tileX, p3._tileX].join('|');
+    )");
+    REQUIRE(result == "repeat|repeat|repeat");
+}
+
+TEST_CASE("Canvas2D createPattern returns null for empty image source",
+          "[view][canvas2d][issue-1434][bridge-thin]") {
+    // Per spec, returning null is permissible when source is unavailable.
+    auto result = run_in_bridge(R"(
+        var c = document.createElement('canvas');
+        document.body.appendChild(c);
+        var ctx = c.getContext('2d');
+        var p = ctx.createPattern('', 'repeat');
+        return String(p === null);
+    )");
+    REQUIRE(result == "true");
+}
+
+TEST_CASE("Canvas2D createPattern accepts image-like objects with .src",
+          "[view][canvas2d][issue-1434][bridge-thin]") {
+    // drawImage normalises image arguments by reading .src / ._src;
+    // createPattern should mirror that so plugins can pass real Image
+    // instances or shim DOM image objects interchangeably.
+    auto result = run_in_bridge(R"(
+        var c = document.createElement('canvas');
+        document.body.appendChild(c);
+        var ctx = c.getContext('2d');
+        var imgLike = { src: 'foo.png' };
+        var p = ctx.createPattern(imgLike, 'repeat-x');
+        return [p._src, p._tileX, p._tileY].join('|');
+    )");
+    REQUIRE(result == "foo.png|repeat|no-repeat");
+}
+
+TEST_CASE("Canvas2D pattern flushes via canvasSetFillPattern bridge fn",
+          "[view][canvas2d][issue-1434][bridge-thin]") {
+    // ctx.fillStyle = pattern -> canvasSetFillPattern -> set_fill_pattern
+    // command on the CanvasWidget. The fill_rect that follows MUST land
+    // after the pattern setter so the active fill paint stays current.
+    ScriptedBridge env;
+    env.load(R"(
+        var c = document.createElement('canvas');
+        globalThis.__test_canvas_el__ = c;
+        document.body.appendChild(c);
+        c.width = 100; c.height = 100;
+        var ctx = c.getContext('2d');
+        var p = ctx.createPattern('texture.png', 'repeat');
+        ctx.fillStyle = p;
+        ctx.fillRect(0, 0, 100, 100);
+    )");
+
+    auto* cw = env.canvas();
+    REQUIRE(cw != nullptr);
+    bool saw_pattern = false;
+    bool saw_fill_rect_after_pattern = false;
+    bool seen_pattern = false;
+    for (const auto& cmd : cw->commands()) {
+        if (cmd.type == CanvasDrawCmd::Type::set_fill_pattern) {
+            saw_pattern = true;
+            seen_pattern = true;
+            REQUIRE(cmd.text == "texture.png");
+            // tile_x = repeat (bit 0 = 0), tile_y = repeat (bit 1 = 0)
+            REQUIRE(cmd.int_val == 0);
+        }
+        if (seen_pattern && cmd.type == CanvasDrawCmd::Type::fill_rect) {
+            saw_fill_rect_after_pattern = true;
+        }
+    }
+    INFO("set_fill_pattern recorded: " << saw_pattern);
+    REQUIRE(saw_pattern);
+    REQUIRE(saw_fill_rect_after_pattern);
+}
+
+TEST_CASE("Canvas2D pattern repeat-x packs tile modes correctly",
+          "[view][canvas2d][issue-1434][bridge-thin]") {
+    // repeat-x => (repeat, no-repeat) => int_val bit0=0 (x:repeat), bit1=1 (y:no-repeat) => 0b10 = 2
+    ScriptedBridge env;
+    env.load(R"(
+        var c = document.createElement('canvas');
+        globalThis.__test_canvas_el__ = c;
+        document.body.appendChild(c);
+        var ctx = c.getContext('2d');
+        ctx.fillStyle = ctx.createPattern('a.png', 'repeat-x');
+        ctx.fillRect(0, 0, 50, 50);
+    )");
+
+    auto* cw = env.canvas();
+    REQUIRE(cw != nullptr);
+    bool found = false;
+    for (const auto& cmd : cw->commands()) {
+        if (cmd.type == CanvasDrawCmd::Type::set_fill_pattern) {
+            found = true;
+            REQUIRE(cmd.int_val == 0b10);  // bit0 = repeat (0), bit1 = no_repeat (1)
+        }
+    }
+    REQUIRE(found);
+}
+
+TEST_CASE("Canvas2D pattern repeat-y packs tile modes correctly",
+          "[view][canvas2d][issue-1434][bridge-thin]") {
+    // repeat-y => (no-repeat, repeat) => int_val bit0=1, bit1=0 => 0b01 = 1
+    ScriptedBridge env;
+    env.load(R"(
+        var c = document.createElement('canvas');
+        globalThis.__test_canvas_el__ = c;
+        document.body.appendChild(c);
+        var ctx = c.getContext('2d');
+        ctx.fillStyle = ctx.createPattern('a.png', 'repeat-y');
+        ctx.fillRect(0, 0, 50, 50);
+    )");
+
+    auto* cw = env.canvas();
+    REQUIRE(cw != nullptr);
+    bool found = false;
+    for (const auto& cmd : cw->commands()) {
+        if (cmd.type == CanvasDrawCmd::Type::set_fill_pattern) {
+            found = true;
+            REQUIRE(cmd.int_val == 0b01);  // bit0 = no_repeat, bit1 = repeat
+        }
+    }
+    REQUIRE(found);
+}
+
+TEST_CASE("Canvas2D pattern no-repeat packs tile modes correctly",
+          "[view][canvas2d][issue-1434][bridge-thin]") {
+    // no-repeat => (no-repeat, no-repeat) => int_val 0b11 = 3
+    ScriptedBridge env;
+    env.load(R"(
+        var c = document.createElement('canvas');
+        globalThis.__test_canvas_el__ = c;
+        document.body.appendChild(c);
+        var ctx = c.getContext('2d');
+        ctx.fillStyle = ctx.createPattern('a.png', 'no-repeat');
+        ctx.fillRect(0, 0, 50, 50);
+    )");
+
+    auto* cw = env.canvas();
+    REQUIRE(cw != nullptr);
+    bool found = false;
+    for (const auto& cmd : cw->commands()) {
+        if (cmd.type == CanvasDrawCmd::Type::set_fill_pattern) {
+            found = true;
+            REQUIRE(cmd.int_val == 0b11);
+        }
+    }
+    REQUIRE(found);
+}
+
+TEST_CASE("Canvas2D pattern strokeStyle flushes via canvasSetStrokePattern",
+          "[view][canvas2d][issue-1434][bridge-thin]") {
+    // ctx.strokeStyle = pattern -> canvasSetStrokePattern -> set_stroke_pattern
+    ScriptedBridge env;
+    env.load(R"(
+        var c = document.createElement('canvas');
+        globalThis.__test_canvas_el__ = c;
+        document.body.appendChild(c);
+        c.width = 100; c.height = 100;
+        var ctx = c.getContext('2d');
+        ctx.strokeStyle = ctx.createPattern('stroke.png', 'repeat');
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(50, 50);
+        ctx.stroke();
+    )");
+
+    auto* cw = env.canvas();
+    REQUIRE(cw != nullptr);
+    bool saw_stroke_pattern = false;
+    for (const auto& cmd : cw->commands()) {
+        if (cmd.type == CanvasDrawCmd::Type::set_stroke_pattern) {
+            saw_stroke_pattern = true;
+            REQUIRE(cmd.text == "stroke.png");
+        }
+    }
+    REQUIRE(saw_stroke_pattern);
+}
+
+// ── Skia raster sanity test (gated, runs only with PULP_HAS_SKIA) ─────
+#ifdef PULP_HAS_SKIA
+TEST_CASE("Canvas2D pattern set_fill_pattern reaches Skia without throwing",
+          "[view][canvas2d][issue-1434][bridge-thin][skia]") {
+    // Smoke test mirroring the conic raster guard (#1446 pattern). With
+    // the pattern bridge wired, an unresolvable image source must NOT
+    // crash — SkiaCanvas::set_fill_pattern fails the decode and clears
+    // the gradient shader so the fill falls back to the previous solid
+    // colour. The fillRect MUST still rasterize successfully (no crash,
+    // no exception) and produce SOME painted pixels for the previous
+    // solid-fill setting.
+    //
+    // We deliberately use a non-existent image path because there's no
+    // production image-resource pipeline to depend on in the test
+    // harness; the assertion is that the unresolved decode doesn't
+    // poison the rest of the paint pass.
+    ScriptedBridge env;
+    env.load(R"(
+        var c = document.createElement('canvas');
+        globalThis.__test_canvas_el__ = c;
+        document.body.appendChild(c);
+        c.width = 32; c.height = 32;
+        var ctx = c.getContext('2d');
+        ctx.fillStyle = '#ff0000';
+        ctx.fillRect(0, 0, 32, 32);
+        // Now set a pattern with a missing source. Skia clears the
+        // gradient shader, fillRect falls back to the previously-set
+        // solid red colour, raster output stays painted.
+        var p = ctx.createPattern('non-existent-file.png', 'repeat');
+        ctx.fillStyle = p;
+        ctx.fillRect(0, 0, 32, 32);
+    )");
+
+    auto* cw = env.canvas();
+    REQUIRE(cw != nullptr);
+
+    // Confirm the pattern setter reached the command stream.
+    bool saw_pattern = false;
+    for (const auto& cmd : cw->commands()) {
+        if (cmd.type == CanvasDrawCmd::Type::set_fill_pattern) {
+            saw_pattern = true;
+            REQUIRE(cmd.text == "non-existent-file.png");
+        }
+    }
+    REQUIRE(saw_pattern);
+
+    // Rasterize via SkSurface — assertion is "no crash, surface paints".
+    auto info = SkImageInfo::Make(32, 32, kRGBA_8888_SkColorType,
+                                  kPremul_SkAlphaType,
+                                  SkColorSpace::MakeSRGB());
+    auto surface = SkSurfaces::Raster(info);
+    REQUIRE(surface);
+    pulp::canvas::SkiaCanvas skia_canvas(surface->getCanvas());
+    cw->set_bounds({0, 0, 32, 32});
+    cw->paint(skia_canvas);
+    SkPixmap pm;
+    REQUIRE(surface->peekPixels(&pm));
+    // Surface must have non-zero alpha somewhere — the first fillRect
+    // (red) painted, even though the second pattern fill degraded.
+    auto sample = [&](int x, int y) {
+        return *static_cast<const uint32_t*>(pm.addr(x, y));
+    };
+    bool any_painted = false;
+    for (int y = 0; y < 32 && !any_painted; ++y) {
+        for (int x = 0; x < 32; ++x) {
+            uint32_t px = sample(x, y);
+            if ((px >> 24) != 0) { any_painted = true; break; }
+        }
+    }
+    INFO("any pixel painted: " << any_painted);
+    REQUIRE(any_painted);
+}
+#endif  // PULP_HAS_SKIA

@@ -1,14 +1,17 @@
 // cmd_pr.cpp — `pulp pr` subcommand.
 //
-// Primary behavior: delegate to `shipyard pr` when shipyard is installed.
-// Shipyard is Pulp's single-source-of-truth ship orchestrator; keeping a
-// parallel native implementation in two tools is how drift starts. See
-// issue #352.
+// Primary behavior: delegate to `shipyard pr` when the effective PR
+// workflow is `shipyard` (the default) and Shipyard is installed.
+// Shipyard is Pulp's single-source-of-truth ship orchestrator; keeping
+// a parallel native implementation in two tools is how drift starts.
+// See issue #352.
 //
-// Fallback: if shipyard is not on PATH, print a concise install guide
-// (tools/install-shipyard.sh + PATH hint) and exit 2. `--native` forces
-// the in-CLI implementation below, which stays as a diagnostic fallback
-// when shipyard itself is broken or under debug.
+// If Shipyard is unavailable while the shipyard workflow is selected,
+// print a concise install/switch guide and exit 2. `--workflow github`
+// selects the explicit GitHub CLI (`gh`) path. `--workflow manual`
+// prints the intended manual steps and exits without mutating PR state.
+// `--native` forces the in-CLI implementation below, which stays as a
+// diagnostic fallback when shipyard itself is broken or under debug.
 //
 // The in-CLI fallback does the same 4 steps shipyard pr does:
 //
@@ -238,16 +241,64 @@ struct Options {
     bool no_push = false;       // stop before pushing branch
 };
 
+struct WorkflowArgs {
+    std::vector<std::string> stripped;
+    std::string cli_override;
+    std::string error;
+};
+
+void print_usage();
+
+WorkflowArgs consume_workflow_args(const std::vector<std::string>& args) {
+    WorkflowArgs out;
+    out.stripped.reserve(args.size());
+    for (size_t i = 0; i < args.size(); ++i) {
+        const auto& a = args[i];
+        if (a == "--workflow") {
+            if (i + 1 >= args.size()) {
+                out.error = "pulp pr: --workflow requires a value";
+                return out;
+            }
+            out.cli_override = args[++i];
+            continue;
+        }
+        const std::string prefix = "--workflow=";
+        if (a.rfind(prefix, 0) == 0) {
+            out.cli_override = a.substr(prefix.size());
+            continue;
+        }
+        out.stripped.push_back(a);
+    }
+    return out;
+}
+
+enum class ParseStatus { ok, help, error };
+
+ParseStatus parse_native_options(const std::vector<std::string>& args, Options& opt) {
+    for (size_t i = 0; i < args.size(); ++i) {
+        const auto& a = args[i];
+        if (a == "--help" || a == "-h") { print_usage(); return ParseStatus::help; }
+        else if (a == "--dry-run") opt.dry_run = true;
+        else if (a == "--no-ship") opt.no_ship = true;
+        else if (a == "--no-push") opt.no_push = true;
+        else if (a == "--base"  && i + 1 < args.size()) opt.base  = args[++i];
+        else if (a == "--title" && i + 1 < args.size()) opt.title = args[++i];
+        else { std::cerr << "pulp pr: unknown option '" << a << "'\n"; print_usage(); return ParseStatus::error; }
+    }
+    return ParseStatus::ok;
+}
+
 void print_usage() {
     std::cout <<
         "Usage: pulp pr [options]\n"
         "\n"
-        "One-shot PR orchestrator: skill-sync check -> version-bump apply ->\n"
-        "commit -> push -> gh pr create -> shipyard ship.\n"
+        "One-shot PR orchestrator. Default workflow delegates to `shipyard pr`.\n"
+        "Explicit github/manual workflows are opt-in local bypasses.\n"
         "\n"
         "Options:\n"
         "  --base <ref>    Diff base (default: origin/main)\n"
         "  --title <s>     PR title (default: tip commit subject)\n"
+        "  --workflow <m>  Override PR workflow: shipyard | github | manual\n"
         "  --no-ship       Create the PR but skip `shipyard ship`\n"
         "  --no-push       Stop after the bump commit; don't push or PR\n"
         "  --dry-run       Print the plan without running steps\n"
@@ -260,18 +311,16 @@ void print_usage() {
 
 namespace {
 
-// Resolve `shipyard` on PATH without depending on platform shell helpers.
-// Honours PATH env; matches how `find_on_path` works in platform/, but
-// local so cmd_pr.cpp keeps no new link-level dependencies.
-std::string locate_shipyard() {
+std::string locate_tool_on_path(const std::string& name) {
     const char* path = std::getenv("PATH");
     if (!path) return {};
 #if defined(_WIN32)
     const char sep = ';';
-    const char* exe = "shipyard.exe";
+    std::vector<std::string> names{name};
+    if (name.find('.') == std::string::npos) names.push_back(name + ".exe");
 #else
     const char sep = ':';
-    const char* exe = "shipyard";
+    std::vector<std::string> names{name};
 #endif
     std::string pathstr(path);
     std::string::size_type start = 0;
@@ -279,10 +328,12 @@ std::string locate_shipyard() {
         auto end = pathstr.find(sep, start);
         auto dir = pathstr.substr(start, end - start);
         if (!dir.empty()) {
-            fs::path candidate = fs::path(dir) / exe;
-            std::error_code ec;
-            if (fs::exists(candidate, ec) && !ec) {
-                return candidate.string();
+            for (const auto& exe : names) {
+                fs::path candidate = fs::path(dir) / exe;
+                std::error_code ec;
+                if (fs::exists(candidate, ec) && !ec) {
+                    return candidate.string();
+                }
             }
         }
         if (end == std::string::npos) break;
@@ -297,65 +348,72 @@ void print_install_shipyard_hint() {
         "of truth across pulp + shipyard.\n\n"
         "Install shipyard in a Pulp checkout:\n"
         "  ./tools/install-shipyard.sh           # downloads the pinned binary\n"
-        "  export PATH=\"$HOME/.pulp/bin:$PATH\"   # add to your shell rc once\n\n"
-        "Re-run `pulp pr` after install. If you're debugging the native\n"
-        "pulp-cli implementation of the same flow, re-run with:\n"
+        "  export PATH=\"$HOME/.local/bin:$PATH\"  # add to your shell rc once\n\n"
+        "Re-run `pulp pr` after install. If you prefer not to use Shipyard,\n"
+        "choose an explicit workflow instead:\n"
+        "  pulp config set pr.workflow github   # direct GitHub CLI (`gh`) PR flow\n"
+        "  pulp config set pr.workflow manual   # print manual PR steps only\n"
+        "  PULP_PR_WORKFLOW=github pulp pr      # one-off override\n\n"
+        "If you're debugging the native pulp-cli implementation of the same\n"
+        "flow, re-run with:\n"
         "  pulp pr --native\n";
+}
+
+void print_install_gh_hint() {
+    std::cerr <<
+        "pulp pr: PR workflow is `github`, but the GitHub CLI (`gh`) is not on PATH.\n\n"
+        "`github` is Pulp's direct GitHub workflow name; `gh` is the command-line\n"
+        "tool it uses to authenticate, push metadata, and create the PR.\n\n"
+        "Install and authenticate `gh`, then retry:\n"
+        "  brew install gh        # macOS/Homebrew example\n"
+        "  gh auth login\n\n"
+        "Or switch workflows:\n"
+        "  pulp config set pr.workflow shipyard\n"
+        "  pulp config set pr.workflow manual\n";
+}
+
+int print_manual_workflow_plan(const std::vector<std::string>& args) {
+    Options opt;
+    auto parsed = parse_native_options(args, opt);
+    if (parsed == ParseStatus::help) return 0;
+    if (parsed == ParseStatus::error) return 2;
+
+    auto root = find_project_root();
+    if (root.empty()) {
+        std::cerr << "pulp pr: not inside a pulp source checkout (no CMakeLists.txt + core/ found)\n";
+        return 2;
+    }
+
+    auto branch = current_branch(root);
+    if (branch.empty()) branch = "<feature-branch>";
+    auto title = opt.title.empty() ? default_pr_title(root) : opt.title;
+
+    std::cout
+        << "pulp pr: manual PR workflow selected; no commands were run.\n\n"
+        << "Suggested manual sequence for this checkout:\n"
+        << "  cd " << shell_quote(root) << "\n"
+        << "  python3 tools/scripts/skill_sync_check.py --base " << shell_quote(opt.base)
+        << " --mode=report\n"
+        << "  python3 tools/scripts/version_bump_check.py --base " << shell_quote(opt.base)
+        << " --mode=apply\n"
+        << "  git status --short\n"
+        << "  git push -u origin " << shell_quote(branch) << "\n"
+        << "  gh pr create --title " << shell_quote(title) << "\n\n"
+        << "Manual and GitHub workflows do not create Shipyard tracking state.\n"
+        << "Switch back with: pulp config set pr.workflow shipyard\n";
+    return 0;
 }
 
 int exec_shipyard_pr(const std::string& shipyard_bin,
                      const std::vector<std::string>& args) {
     std::ostringstream cmd;
-    // Quote the binary path in case it sits under a space-containing path.
-    cmd << '\'' << shipyard_bin << "' pr";
+    cmd << shell_quote(shipyard_bin) << " pr";
     for (const auto& a : args) {
-        cmd << " '" << a << '\'';
+        cmd << " " << shell_quote(a);
     }
     // run_passthrough streams stdio through the shell so the user sees
     // shipyard's colored output live.
     return run_passthrough(cmd.str());
-}
-
-// ── Version guard ──────────────────────────────────────────────────────
-// Read the pinned `version = "vX.Y.Z"` line from tools/shipyard.toml.
-// Returns the bare "vX.Y.Z" (keeps the leading v so it compares
-// apples-to-apples with `shipyard --version` output we normalise below).
-// Returns empty on any failure — caller treats that as "can't verify,
-// proceed" so a missing pin file doesn't wedge offline work.
-std::string read_pinned_shipyard_version(const fs::path& root) {
-    std::ifstream f(root / "tools" / "shipyard.toml");
-    if (!f) return {};
-    std::string line;
-    while (std::getline(f, line)) {
-        auto t = trim(line);
-        if (t.rfind("version", 0) != 0) continue;
-        auto eq = t.find('=');
-        if (eq == std::string::npos) continue;
-        auto rhs = trim(t.substr(eq + 1));
-        if (rhs.size() >= 2 && rhs.front() == '"' && rhs.back() == '"') {
-            return rhs.substr(1, rhs.size() - 2);
-        }
-        return rhs;
-    }
-    return {};
-}
-
-// Parse `shipyard --version` output — shipyard prints:
-//     shipyard, version 0.21.1
-// Return the bare semver with a leading v so it matches the pin format.
-std::string capture_shipyard_version(const std::string& shipyard_bin) {
-    auto r = run_capture("'" + shipyard_bin + "' --version 2>&1");
-    if (r.exit_code != 0) return {};
-    auto out = trim(r.stdout_text);
-    auto pos = out.find("version");
-    if (pos == std::string::npos) return {};
-    auto after = trim(out.substr(pos + 7));
-    // Strip trailing punctuation/whitespace the parser might keep.
-    while (!after.empty() && (after.back() == ')' || after.back() == ',' || std::isspace(static_cast<unsigned char>(after.back())))) {
-        after.pop_back();
-    }
-    if (after.empty()) return {};
-    return after.front() == 'v' ? after : ("v" + after);
 }
 
 // Exact-equality guard. Returns 0 (pass) or 2 (fail + printed error).
@@ -384,7 +442,7 @@ int enforce_shipyard_version_pin(const fs::path& root,
               << "  resolved from                 : " << shipyard_bin << "\n"
               << "\n"
               << "Fix one of:\n"
-              << "  (a) Reinstall the pinned binary to $HOME/.pulp/bin and\n"
+              << "  (a) Reinstall the pinned binary to $HOME/.local/bin and\n"
               << "      guarantee it's first on PATH:\n"
               << "          ./tools/install-shipyard.sh\n"
               << "  (b) Remove the stale binary at the path above:\n"
@@ -404,49 +462,85 @@ int cmd_pr(const std::vector<std::string>& args) {
     // Filter out `--native` before any other option lookup so the shim
     // decision is independent of the native parser's flags.
     bool force_native = false;
-    std::vector<std::string> forward;
-    forward.reserve(args.size());
+    std::vector<std::string> without_native;
+    without_native.reserve(args.size());
     for (const auto& a : args) {
         if (a == "--native") { force_native = true; continue; }
-        forward.push_back(a);
+        without_native.push_back(a);
     }
 
+    auto workflow_args = consume_workflow_args(without_native);
+    if (!workflow_args.error.empty()) {
+        std::cerr << workflow_args.error << "\n";
+        return 2;
+    }
+
+    auto workflow = resolve_pr_workflow(workflow_args.cli_override);
+    if (!workflow.error.empty()) {
+        std::cerr << "pulp pr: invalid PR workflow '" << workflow.workflow
+                  << "' from " << workflow.source << "\n"
+                  << "         " << workflow.error << "\n";
+        return 2;
+    }
+
+    auto forward = workflow_args.stripped;
     if (!force_native) {
         if (!forward.empty() && (forward[0] == "--help" || forward[0] == "-h")) {
             // `pulp pr --help` always shows the shim's help too, so the
             // user learns about --native. Then fall through to shipyard's
-            // own help when available.
+            // own help when the selected workflow is Shipyard.
             std::cout <<
-                "Usage: pulp pr [--native] [<shipyard pr options>]\n"
+                "Usage: pulp pr [--native] [--workflow shipyard|github|manual] [options]\n"
                 "\n"
-                "By default this delegates to `shipyard pr`, the canonical\n"
-                "push-a-PR orchestrator. Pass --native to run the in-CLI\n"
-                "fallback implementation instead (for diagnostics).\n\n";
+                "Default workflow: shipyard. Override once with --workflow or\n"
+                "PULP_PR_WORKFLOW, or persist with `pulp config set pr.workflow ...`.\n"
+                "Pass --native to run the in-CLI fallback implementation instead\n"
+                "(for diagnostics).\n\n";
         }
-        auto shipyard = locate_shipyard();
-        if (!shipyard.empty()) {
-            if (auto root = find_project_root(); !root.empty()) {
-                if (int rc = enforce_shipyard_version_pin(root, shipyard); rc != 0) {
-                    return rc;
+
+        if (workflow.workflow == "shipyard") {
+            auto shipyard = locate_tool_on_path("shipyard");
+            if (!shipyard.empty()) {
+                if (auto root = find_project_root(); !root.empty()) {
+                    if (int rc = enforce_shipyard_version_pin(root, shipyard); rc != 0) {
+                        return rc;
+                    }
                 }
+                return exec_shipyard_pr(shipyard, forward);
             }
-            return exec_shipyard_pr(shipyard, forward);
+            print_install_shipyard_hint();
+            return 2;
         }
-        print_install_shipyard_hint();
-        return 2;
+
+        if (workflow.workflow == "manual") {
+            return print_manual_workflow_plan(forward);
+        }
     }
 
-    // ── Native fallback (pre-shipyard behaviour) ────────────────────────
+    const bool github_workflow = !force_native && workflow.workflow == "github";
+
+    // ── Native fallback / explicit GitHub workflow ──────────────────────
     Options opt;
-    for (size_t i = 0; i < forward.size(); ++i) {
-        const auto& a = forward[i];
-        if (a == "--help" || a == "-h") { print_usage(); return 0; }
-        else if (a == "--dry-run") opt.dry_run = true;
-        else if (a == "--no-ship") opt.no_ship = true;
-        else if (a == "--no-push") opt.no_push = true;
-        else if (a == "--base"  && i + 1 < forward.size()) opt.base  = forward[++i];
-        else if (a == "--title" && i + 1 < forward.size()) opt.title = forward[++i];
-        else { std::cerr << "pulp pr: unknown option '" << a << "'\n"; print_usage(); return 2; }
+    auto parsed = parse_native_options(forward, opt);
+    if (parsed == ParseStatus::help) return 0;
+    if (parsed == ParseStatus::error) return 2;
+
+    if (github_workflow) {
+        opt.no_ship = true;
+        if (!opt.dry_run && !opt.no_push && locate_tool_on_path("gh").empty()) {
+            print_install_gh_hint();
+            return 2;
+        }
+        std::cerr << color::yellow()
+                  << "pulp pr: using github workflow via `gh`; Shipyard tracking "
+                     "and merge validation are disabled.\n"
+                  << color::reset();
+    }
+
+    if (force_native && !opt.dry_run && !opt.no_push && !opt.no_ship &&
+        locate_tool_on_path("shipyard").empty()) {
+        print_install_shipyard_hint();
+        return 2;
     }
 
     auto root = find_project_root();
@@ -558,6 +652,9 @@ int cmd_pr(const std::vector<std::string>& args) {
 
     if (opt.no_ship) {
         std::cout << "\npulp pr: --no-ship set; PR is open but not yet merged.\n";
+        if (github_workflow) {
+            std::cout << "pulp pr: github workflow leaves Shipyard tracking disabled.\n";
+        }
         return 0;
     }
 

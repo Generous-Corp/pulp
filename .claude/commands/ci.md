@@ -7,30 +7,44 @@ Use the `ci` skill for all CI workflows. This is the primary gate for landing co
 
 ## Ship (branch → PR → CI → merge)
 
-1. Ensure all changes are committed
-2. Push the branch to origin
-3. Create a PR: `gh pr create`
-4. Run local CI: `python3 tools/local-ci/local_ci.py run <branch>`
-5. If ALL targets pass (mac, ubuntu, windows) → merge: `gh pr merge <PR#> --squash --delete-branch`
-6. If ANY target fails → report failures, fix, rerun
+Use Shipyard-managed PR flow:
+
+```bash
+shipyard pr
+```
+
+`shipyard pr` is the canonical path for PR creation, tracking, validation,
+and merge-on-green. It runs the repo gates, pushes the branch, opens the PR,
+records Shipyard state for the macOS GUI / `shipyard ship-state`, validates
+macOS + Linux + Windows, and merges only after all required evidence is green.
+
+Do not use `gh pr create` for normal work. Treat direct GitHub PR creation as
+an explicit emergency/manual bypass only; if it is used, report the Shipyard
+tracking gap and reconcile by resuming or re-shipping through Shipyard where
+possible.
+
+`pulp pr` defaults to this same Shipyard path. Humans can opt out locally with
+`pulp config set pr.workflow github` or `manual`, but agents should only use
+those workflows when the user explicitly asks for that bypass. `pulp status`
+shows the effective workflow and whether its local tool is available.
 
 ## Just validate (no PR)
 
 ```bash
-python3 tools/local-ci/local_ci.py run [branch]
-python3 tools/local-ci/local_ci.py run [branch] --smoke
+shipyard run
+shipyard run --smoke
 ```
 
 ## Check status
 
 ```bash
-python3 tools/local-ci/local_ci.py status
+shipyard ship-state list
 ```
 
 ## Cloud CI
 
 ```bash
-python3 tools/local-ci/local_ci.py cloud run build <branch>
+shipyard cloud run build <branch>
 ```
 
 See `.agents/skills/ci/SKILL.md` for the full workflow reference.

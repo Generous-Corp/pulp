@@ -34,6 +34,13 @@ struct CanvasDrawCmd {
         // gradient_colors / gradient_positions (same shape as the
         // linear / radial entries above).
         set_fill_gradient_conic,
+        // pulp #1434 bridge-thin gap-fill — Canvas2D ctx.createPattern.
+        // Image source path / data URI in `text`, tile modes packed into
+        // `int_val` (bit 0 = x, bit 1 = y; 0 = repeat, 1 = no-repeat).
+        // Skia routes through SkShader::MakeImage; CG degrades to the
+        // active fill colour (no CGPattern dance — file a follow-up if
+        // a CG-targeted plugin actually needs tiled patterns).
+        set_fill_pattern, set_stroke_pattern,
         // Path
         begin_path, move_to, line_to, quad_to, cubic_to, close_path,
         fill_path, stroke_path, clip_path,

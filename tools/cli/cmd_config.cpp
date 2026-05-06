@@ -1,9 +1,11 @@
 // cmd_config.cpp — `pulp config get/set` thin wrappers
 //
 // Release-discovery Slice 2 (#547 / parent #499). Surfaces the
-// `[update]` section of ~/.pulp/config.toml so users can toggle modes
-// without hand-editing TOML:
+// `[update]` and `[pr]` sections of ~/.pulp/config.toml so users can
+// toggle modes without hand-editing TOML:
 //
+//   pulp config get pr.workflow
+//   pulp config set pr.workflow github
 //   pulp config get update.mode
 //   pulp config set update.mode manual
 //   pulp config set update.check_interval_hours 24
@@ -54,6 +56,9 @@ bool split_dotted_key(const std::string& in,
 // doesn't silently introduce a typo'd key. Add entries here when new
 // slices need new knobs.
 bool is_allowed_key(const std::string& section, const std::string& key) {
+    if (section == "pr") {
+        return key == "workflow";
+    }
     if (section == "update") {
         return key == "mode" ||
                key == "check_interval_hours" ||
@@ -73,6 +78,10 @@ bool is_allowed_key(const std::string& section, const std::string& key) {
 std::string validate_value(const std::string& section,
                            const std::string& key,
                            const std::string& value) {
+    if (section == "pr" && key == "workflow") {
+        if (is_valid_pr_workflow(value)) return {};
+        return "pr.workflow must be one of: shipyard, github, manual";
+    }
     if (section == "update" && key == "mode") {
         if (value == "auto" || value == "prompt" ||
             value == "manual" || value == "off") return {};
@@ -104,7 +113,9 @@ int usage() {
     std::cout << "Commands:\n";
     std::cout << "  get <section.key>           Print the value (empty if unset)\n";
     std::cout << "  set <section.key> <value>   Write the value atomically\n";
-    std::cout << "  list                        Dump current update.* settings\n";
+    std::cout << "  list                        Dump current supported settings\n";
+    std::cout << "\nSupported keys (pr section):\n";
+    std::cout << "  pr.workflow                  shipyard | github | manual     (default: shipyard)\n";
     std::cout << "\nSupported keys (update section):\n";
     std::cout << "  update.mode                   auto | prompt | manual | off  (default: prompt)\n";
     std::cout << "  update.check_interval_hours   default: 24\n";
@@ -112,6 +123,7 @@ int usage() {
     std::cout << "  update.bump_projects          prompt | auto | off           (default: prompt)\n";
     std::cout << "                                [reserved — Slice 7 (#564) implements the behavior]\n";
     std::cout << "\nExamples:\n";
+    std::cout << "  pulp config set pr.workflow github\n";
     std::cout << "  pulp config set update.mode manual\n";
     std::cout << "  pulp config get update.mode\n";
     std::cout << "\nNotes:\n";
@@ -229,16 +241,17 @@ int cmd_config(const std::vector<std::string>& args) {
             buf << f.rdbuf();
             contents = buf.str();
         }
-        auto show = [&](const char* key, const char* default_value) {
-            auto v = uc::read_toml_key_in_section(contents, "update", key);
+        auto show = [&](const char* section, const char* key, const char* default_value) {
+            auto v = uc::read_toml_key_in_section(contents, section, key);
             if (v.empty()) v = default_value;
-            std::cout << "  update." << key << " = " << v << "\n";
+            std::cout << "  " << section << "." << key << " = " << v << "\n";
         };
         std::cout << "Pulp config (" << path.string() << "):\n";
-        show("mode", "prompt");
-        show("check_interval_hours", "24");
-        show("channel", "stable");
-        show("bump_projects", "prompt");
+        show("pr", "workflow", "shipyard");
+        show("update", "mode", "prompt");
+        show("update", "check_interval_hours", "24");
+        show("update", "channel", "stable");
+        show("update", "bump_projects", "prompt");
         return 0;
     }
 

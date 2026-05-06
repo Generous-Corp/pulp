@@ -15,6 +15,18 @@ export type FlexDirection = 'row' | 'col';
 export type FlexAlign = 'start' | 'center' | 'end' | 'stretch';
 export type FlexAlignSelf = 'start' | 'center' | 'end' | 'stretch' | 'auto';
 export type FlexJustify = 'start' | 'center' | 'end' | 'space-between' | 'space-around' | 'space-evenly';
+/// pulp #1434 (sub-agent #12 follow-up) — align-content controls
+/// multi-line flex cross-axis distribution. Yoga supports it natively
+/// via YGNodeStyleSetAlignContent. Accepts bare and prefixed CSS / RN
+/// spellings (`flex-start` / `flex-end`) plus the three space-*
+/// distributions (which only make sense on align-content, not
+/// align-items / align-self).
+export type FlexAlignContent =
+    | 'start' | 'flex-start'
+    | 'center'
+    | 'end' | 'flex-end'
+    | 'stretch'
+    | 'space-between' | 'space-around' | 'space-evenly';
 
 export interface FlexProps {
     direction?: FlexDirection;
@@ -55,6 +67,28 @@ export interface FlexProps {
     /// pulp #1434 batch 4 — `marginVertical` fans out to `marginTop` +
     /// `marginBottom`.
     marginVertical?: number | string;
+    /// pulp #1434 rn logical-edge bundle (sub-agent #27 finding) —
+    /// CSS-spec-equivalent flow props. LTR-only fast path:
+    /// Start → Left, End → Right. RTL deferred to a future direction
+    /// system. Values are number (px), percent string, or `'auto'` on
+    /// margin (matches the per-edge surface).
+    marginStart?: number | string;
+    marginEnd?: number | string;
+    paddingStart?: number | string;
+    paddingEnd?: number | string;
+    borderStartWidth?: number;
+    borderEndWidth?: number;
+    /// CSS positional logical aliases. LTR: start → left, end → right.
+    start?: number | string;
+    end?: number | string;
+    /// CSS `inset` shorthand: `'10px'`, `'10px 20px'`, etc. Fans out
+    /// to top/right/bottom/left via the same expansion rules as
+    /// `margin` / `padding`.
+    inset?: number | string;
+    /// CSS `inset-block` → top + bottom.
+    insetBlock?: number | string;
+    /// CSS `inset-inline` → left + right (LTR).
+    insetInline?: number | string;
     flexGrow?: number;
     flexShrink?: number;
     /// pulp #1434 (rn batch C) — accepts number (px), percentage string
@@ -78,6 +112,12 @@ export interface FlexProps {
     maxHeight?: number | string;
     alignItems?: FlexAlign;
     alignSelf?: FlexAlignSelf;
+    /// pulp #1434 (sub-agent #12 follow-up) — multi-line flex cross-
+    /// axis distribution. Maps to `setFlex(id, 'align_content', ...)`
+    /// → Yoga's `YGNodeStyleSetAlignContent`. Only meaningful on a
+    /// flex container with `flexWrap: true`; on a single-line container
+    /// it has no visible effect.
+    alignContent?: FlexAlignContent;
     justifyContent?: FlexJustify;
     /// pulp #1434 — width/height ratio for the cross axis. RN-compatible.
     /// When set on a View with `width: 100, aspectRatio: 1.5`, the layout
@@ -101,6 +141,13 @@ export interface StyleProps {
     borderColor?: string;
     borderWidth?: number;
     borderRadius?: number;
+    /// pulp #1434 Triage #10 — CSS / RN border-style keyword. Skia
+    /// installs SkDashPathEffect for `'dashed'` / `'dotted'`; other
+    /// named styles (`'double'`, `'groove'`, `'ridge'`, `'inset'`,
+    /// `'outset'`) currently degrade to solid (paint-side gap).
+    /// `'none'` / `'hidden'` skip the stroke entirely.
+    borderStyle?: 'solid' | 'dashed' | 'dotted' | 'double' | 'groove'
+                | 'ridge' | 'inset' | 'outset' | 'none' | 'hidden';
     borderTopColor?: string;
     borderRightColor?: string;
     borderBottomColor?: string;
@@ -115,12 +162,44 @@ export interface StyleProps {
     borderBottomRightRadius?: number;
     opacity?: number;
     visible?: boolean;
-    /// pulp #1434 small-wins bundle — cursor / userSelect / pointerEvents
-    /// forwarding. Bridge maps each keyword to a View enum; partial
-    /// spec coverage documented in the catalog (Triage #7 / #12 / #13).
+    /// pulp #1434 rn bridge-wires bundle — 7 props that already had C++
+    /// bridge fns but no @pulp/react JSX dispatch. Each forwards the
+    /// keyword / string straight through to the matching setter.
+    /// (cursor / pointerEvents / userSelect superset of the small-wins
+    /// bundle (Triage #7 / #12 / #13) — types kept trimmed to the
+    /// actual bridge surface; broader CSS spec values are documented as
+    /// over-claims in the catalog.)
+    backfaceVisibility?: 'hidden' | 'visible';
     cursor?: string;
-    userSelect?: 'none' | 'text' | 'all' | 'auto' | 'contain';
+    filter?: string;
     pointerEvents?: 'auto' | 'none' | 'box-only' | 'box-none';
+    textTransform?: 'none' | 'uppercase' | 'lowercase' | 'capitalize';
+    /// CSS transform-origin: `'NN% NN%'`, `'NNpx NNpx'`, `'center'`,
+    /// or two-keyword combos (`'left top'`). Bridge expects fractional
+    /// 0..1 coordinates; the prop-applier parses the string before
+    /// dispatching.
+    transformOrigin?: string;
+    userSelect?: 'none' | 'text' | 'all';
+    /// pulp #1434 Phase A2-2 — CSS Grid surface. Grid props live on
+    /// StyleProps so JSX can express `display: grid` layouts directly.
+    /// Bridge handles template-track parsing, named-area parsing, and
+    /// the grid-area shorthand.
+    gridTemplateColumns?: string;
+    gridTemplateRows?: string;
+    gridTemplateAreas?: string;
+    gridAutoColumns?: string;
+    gridAutoRows?: string;
+    gridAutoFlow?: 'row' | 'column' | 'row dense' | 'column dense' | 'dense';
+    gridArea?: string;
+    gridColumn?: string;
+    gridRow?: string;
+    gridColumnStart?: number;
+    gridColumnEnd?: number;
+    gridRowStart?: number;
+    gridRowEnd?: number;
+    gridGap?: number;
+    gridColumnGap?: number;
+    gridRowGap?: number;
     /// CSS / RN `display` keyword (pulp #1434 Triage #12). `'none'`
     /// hides the View (sets visible=false). `'flex'` is pulp's
     /// implicit default and is accepted as a no-op confirmation. Other

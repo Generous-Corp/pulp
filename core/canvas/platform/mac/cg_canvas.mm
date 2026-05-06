@@ -689,6 +689,35 @@ void CoreGraphicsCanvas::clear_fill_gradient() {
     grad_positions_.clear();
 }
 
+// pulp #1434 bridge-thin gap-fill — Canvas2D ctx.createPattern. CG
+// has no first-class pattern shader without a CGPattern dance (custom
+// callback closure + bbox + tile transform), and supporting that
+// faithfully across the four spec repetition modes is out of scope for
+// the bridge-thin gap-fill PR. Degrade to the active fill / stroke
+// colour — same fallback shape `set_fill_gradient_conic` took before
+// its real impl. Subsequent fill_rect / fill_current_path paints with
+// the existing solid colour rather than rendering garbage.
+//
+// The Skia backend renders the real tiled pattern via
+// SkShader::MakeImage; the canvas2d catalog flags this as PASS for
+// Skia paths and DIVERGE-by-platform on macOS only — the harness keeps
+// the CG fallback documented.
+void CoreGraphicsCanvas::set_fill_pattern(const std::string& image_src,
+                                           PatternTileMode tile_x,
+                                           PatternTileMode tile_y) {
+    (void)image_src; (void)tile_x; (void)tile_y;
+    // Drop any active gradient so the next fill paints with the solid
+    // fill_color_ rather than an out-of-date gradient shader.
+    clear_fill_gradient();
+}
+
+void CoreGraphicsCanvas::set_stroke_pattern(const std::string& image_src,
+                                             PatternTileMode tile_x,
+                                             PatternTileMode tile_y) {
+    (void)image_src; (void)tile_x; (void)tile_y;
+    // No-op — strokes continue with the existing stroke_color_.
+}
+
 // pulp #1434 bridge-thin gap-fill — Canvas2D ctx.miterLimit.
 // CGContextSetMiterLimit attaches the value to the current GState, so
 // save()/restore() snapshots and pops it naturally. Spec: non-positive

@@ -129,6 +129,10 @@ pulp status
 
 `pulp status` reports which mode you are in so external projects never silently depend on a random checkout and repo/examples never silently pick up a cached SDK.
 In SDK mode it also reports the pinned SDK version plus the resolved SDK path and checkout hints when present.
+In source-tree mode it also reports the effective PR workflow (`shipyard`,
+`github`, or `manual`) and whether the selected workflow's local tool is
+available. Public Pulp installs do not install Shipyard or GitHub CLI; those
+are contributor/source-checkout tools checked when the PR workflow needs them.
 On macOS and Windows it also reports whether an optional AAX SDK is detected. On
 Linux and Ubuntu it reports AAX as unsupported.
 
@@ -516,7 +520,7 @@ a `pulp project bump --all` hint after a successful CLI upgrade.
 
 **Status**: legacy (prefer [Shipyard](https://github.com/danielraffel/Shipyard))
 
-> **Note:** For most CI workflows, use `shipyard run` and `shipyard ship` instead of `pulp ci-local`. Shipyard is Pulp's primary CI tool as of v0.3.0 and provides the same target matrix with evidence-gated merges. `pulp ci-local` remains available as an advanced fallback — see issue #120 for removal timeline.
+> **Note:** For most CI workflows, use `shipyard run` for validation and `shipyard pr` for PR creation/shipping/tracking instead of `pulp ci-local`. Shipyard is Pulp's primary CI tool and provides the same target matrix with evidence-gated merges. `pulp ci-local` remains available as an advanced fallback — see issue #120 for removal timeline.
 
 Local-first CI control plane for Pulp. This is the shared operator surface for:
 
@@ -672,19 +676,24 @@ pulp ship check
 
 Create, validate, and merge a PR through the canonical ship flow.
 
-`pulp pr` is the primary "ship this" orchestrator referenced by the CI skill.
-By default it delegates to `shipyard pr` (single source of truth for ship
-orchestration). Use `--native` only for diagnostics when debugging the
-CLI-side fallback path. Natural-language triggers in agent conversations
+`shipyard pr` is the primary "ship this" orchestrator referenced by the CI
+skill. `pulp pr` remains a compatibility wrapper that delegates to
+`shipyard pr` by default, with explicit `github` and `manual` workflows for
+humans who opt out of Shipyard in their local checkout. Use `--native` only
+for diagnostics when debugging the CLI-side fallback path. Natural-language
+triggers in agent conversations
 ("push to main", "ship this", "ship it", "we're done", "merge this",
 "push it", "run CI", "push a PR") all route here — see the
 [CI skill](../../.agents/skills/ci/SKILL.md) (`.agents/skills/ci/SKILL.md`)
 for the authoritative trigger list.
 
 ```bash
+shipyard pr
 pulp pr
 pulp pr --base origin/main
 pulp pr --title "feat(cli): document pulp pr and sync CI policy"
+pulp pr --workflow github
+pulp pr --workflow manual
 pulp pr --no-ship
 pulp pr --no-push
 pulp pr --dry-run
@@ -700,7 +709,8 @@ Flags:
 |------|-------------|
 | `--base <ref>` | Diff base (default: `origin/main`) |
 | `--title <s>` | PR title (default: tip commit subject) |
-| `--no-ship` | Create PR but skip `shipyard ship` |
+| `--workflow <m>` | One-shot workflow override: `shipyard`, `github`, or `manual` |
+| `--no-ship` | Diagnostics-only native fallback flag; do not use as the normal PR path |
 | `--no-push` | Stop after bump commit; do not push or create PR |
 | `--dry-run` | Print the plan without executing steps |
 | `-h`, `--help` | Show help |
@@ -710,9 +720,22 @@ Notes:
 - Default behavior is shim delegation to `shipyard pr` — the single source
   of truth for ship orchestration. Do not treat `gh pr create` + `shipyard ship`
   as a substitute; that sequence bypasses the skill-sync and version-bump
-  gates `pulp pr` runs first.
+  gates and can leave a PR outside Shipyard's tracked state.
+- The PR workflow is resolved in this order: `--workflow`, then
+  `PULP_PR_WORKFLOW`, then `~/.pulp/config.toml` `[pr] workflow`, then the
+  default `shipyard`.
+- `github` means direct GitHub CLI mode through `gh`; it requires an installed
+  and authenticated `gh` and does not create Shipyard tracking state.
+- `manual` prints the intended commands and exits before pushing or creating a
+  PR. It is for people who want to use the GitHub UI, forks, or other tooling.
+- `shipyard` is intentionally not silently downgraded to `github` when the
+  Shipyard binary is missing. Install the pinned source-checkout tool with
+  `./tools/install-shipyard.sh`, or choose another workflow explicitly.
 - `--native` runs an in-CLI fallback that performs the same gates + PR flow
   without delegating to Shipyard. Diagnostic use only.
+- Direct `gh pr create` is an explicit emergency/manual bypass only. If used,
+  document the Shipyard tracking gap and reconcile by resuming or re-shipping
+  through Shipyard when possible.
 - For the canonical list of natural-language ship triggers and the full
   policy, see the [CI skill](../../.agents/skills/ci/SKILL.md)
   (`.agents/skills/ci/SKILL.md`).
@@ -1116,13 +1139,22 @@ Downloads the release from GitHub, replaces the current binary, and verifies. Re
 Read or write `~/.pulp/config.toml` settings. Release-discovery Slice 2 (#547) + Slice 5 (#550).
 
 ```bash
+pulp config get pr.workflow
+pulp config set pr.workflow github
 pulp config get update.mode
 pulp config set update.mode manual
 pulp config set update.check_interval_hours 12
 pulp config list
 ```
 
-Supported keys (all under `[update]`):
+Supported PR workflow key:
+
+- `pr.workflow` — one of `shipyard | github | manual` (default `shipyard`).
+  `shipyard` delegates to the pinned Shipyard contributor tool, `github` uses
+  the GitHub CLI (`gh`) directly, and `manual` prints instructions without
+  mutating PR state. `PULP_PR_WORKFLOW` overrides this value for one command.
+
+Supported update keys:
 
 - `update.mode` — one of `auto | prompt | manual | off` (default `prompt`). Slice 5 (#550) wires all four modes into the invocation path:
     - `auto` — silently stages the new release via `~/.pulp/pending-upgrade`; the swap completes on the next invocation.

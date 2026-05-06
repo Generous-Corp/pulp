@@ -99,6 +99,14 @@ declare global {
     const setBorderColor: ((id: string, hexColor: string) => void) | undefined;
     const setBorderWidth: ((id: string, width: number) => void) | undefined;
     const setBorderRadius: ((id: string, radius: number) => void) | undefined;
+    // pulp #1434 Triage #10 — border-style keyword. Bridge maps to
+    // View::BorderStyle; Skia installs SkDashPathEffect for dashed/
+    // dotted at stroke time. Other named styles degrade to solid.
+    const setBorderStyle: ((id: string, style: string) => void) | undefined;
+    /// pulp #1434 Phase A2-2 — CSS Grid bridge fn. The C++ side parses
+    /// template-track strings, named-area strings, and the grid-area
+    /// shorthand (named token vs `row / col / row / col` numeric form).
+    const setGrid: ((id: string, key: string, value: string | number) => void) | undefined;
     const setBorderTopColor: ((id: string, hexColor: string) => void) | undefined;
     const setBorderRightColor: ((id: string, hexColor: string) => void) | undefined;
     const setBorderBottomColor: ((id: string, hexColor: string) => void) | undefined;
@@ -142,6 +150,11 @@ declare global {
     function setTranslate(id: string, x: number, y: number): void;
     function setRotation(id: string, degrees: number): void;
     function setScale(id: string, scale: number): void;
+    // pulp #1434 Triage #9 fan-out — setSkew dispatches both axes at
+    // once. View::set_skew has existed since the 2D slot was added;
+    // the bridge fn registration landed alongside this prop-applier
+    // walker extension so skewX/skewY now reaches the View.
+    function setSkew(id: string, x_deg: number, y_deg: number): void;
 
     // ── Text ────────────────────────────────────────────────────────
     function setText(id: string, text: string): void;
@@ -203,7 +216,7 @@ export function createMockBridge(): MockBridge {
         'setFlex', 'setBackground', 'setBackgroundGradient', 'setBorder',
         // pulp #1027 — per-attribute border setters needed for the audit
         // PR #1166 finding-#4 fix (preserve unset siblings).
-        'setBorderColor', 'setBorderWidth', 'setBorderRadius',
+        'setBorderColor', 'setBorderWidth', 'setBorderRadius', 'setBorderStyle',
         'setBorderTopColor', 'setBorderRightColor',
         'setBorderBottomColor', 'setBorderLeftColor',
         'setBorderTopWidth', 'setBorderRightWidth',
@@ -218,7 +231,7 @@ export function createMockBridge(): MockBridge {
         // pulp #1434 Triage #9 — transform array dispatches a
         // consolidated trio of bridge calls; mock-bridge captures
         // all three so vitest cases can assert on the args + arity.
-        'setTranslate', 'setRotation', 'setScale',
+        'setTranslate', 'setRotation', 'setScale', 'setSkew',
         // pulp #1434 batch 6 — CSS positional setters (top/right/bottom/left)
         // need to be capturable so the percent-string forwarding test
         // can assert on the bridge call shape.
@@ -237,6 +250,12 @@ export function createMockBridge(): MockBridge {
         'setTextDecorationColor', 'setTextDecorationStyle',
         // pulp #1366 / #1434 — backdrop-filter (numeric blur arg).
         'setBackdropFilter',
+        // pulp #1434 rn bridge-wires bundle (sub-agent #27 finding) —
+        // 7 setX bridge fns now reachable from @pulp/react JSX. The
+        // C++ side has had these registered for a while; the gap was
+        // purely on the prop-applier dispatch.
+        'setBackfaceVisibility', 'setCursor', 'setFilter',
+        'setPointerEvents', 'setTransformOrigin', 'setUserSelect',
         'setSpectrumData', 'setWaveformData', 'setMeterLevel', 'setProgress',
         'setValue', 'setTheme', 'layout', 'on', 'registerHover',
         // pulp #1381 — registerPointer arms the bridge's on_pointer_event
@@ -250,6 +269,8 @@ export function createMockBridge(): MockBridge {
         // overflow:hidden to setOverflow, but JSX consumers setting
         // `style={{ overflow: 'hidden' }}` silently dropped it.
         'setOverflow',
+        // pulp #1434 Phase A2-2 — CSS Grid bridge surface.
+        'setGrid',
         // pulp #994 — SvgPath intrinsic surface
         'createSvgPath', 'setSvgPath', 'setSvgViewBox',
         'setSvgFill', 'setSvgStroke', 'setSvgStrokeWidth',

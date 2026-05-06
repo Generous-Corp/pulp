@@ -38,6 +38,21 @@ static YGAlign to_yg_align(FlexAlign a) {
     }
 }
 
+// pulp #1434 (sub-agent #12 follow-up) — align-content has a wider
+// value vocabulary than align-items / align-self because the space-*
+// distributions (space-between / space-around / space-evenly) are
+// meaningful here but not on the per-item alignment axis. We carry
+// the space variant on a sibling FlexStyle::AlignContentSpace enum
+// and dispatch here so the rest of the flow stays uniform with the
+// existing FlexAlign enum.
+static YGAlign to_yg_align_content(FlexAlign a, FlexStyle::AlignContentSpace s) {
+    using AcSpace = FlexStyle::AlignContentSpace;
+    if (s == AcSpace::space_between) return YGAlignSpaceBetween;
+    if (s == AcSpace::space_around)  return YGAlignSpaceAround;
+    if (s == AcSpace::space_evenly)  return YGAlignSpaceEvenly;
+    return to_yg_align(a);
+}
+
 // Map Pulp FlexJustify to Yoga
 static YGJustify to_yg_justify(FlexJustify j) {
     switch (j) {
@@ -66,6 +81,11 @@ static void apply_flex_style(YGNodeRef node, const FlexStyle& f, bool is_absolut
     YGNodeStyleSetFlexDirection(node, to_yg_direction(f.direction));
     YGNodeStyleSetAlignItems(node, to_yg_align(f.align_items));
     YGNodeStyleSetAlignSelf(node, to_yg_align(f.align_self));
+    // pulp #1434 (sub-agent #12 follow-up) — multi-line flex cross-axis
+    // distribution. Routes to YGNodeStyleSetAlignContent. Default
+    // (FlexAlign::start, AlignContentSpace::none) maps to YGAlignFlexStart
+    // which matches Yoga's default.
+    YGNodeStyleSetAlignContent(node, to_yg_align_content(f.align_content, f.align_content_space));
     YGNodeStyleSetJustifyContent(node, to_yg_justify(f.justify_content));
 
     if (!is_absolute) {
@@ -151,12 +171,25 @@ static void apply_flex_style(YGNodeRef node, const FlexStyle& f, bool is_absolut
     // path populates dim_width / dim_height with the unit info; this
     // adapter routes percent values to Yoga's native percent API
     // instead of treating "100%" as 100 px.
-    if (f.dim_width.unit == DimensionUnit::percent && f.dim_width.value > 0) {
+    // pulp #1434 (sub-agent #12 follow-up) — `width: 'auto'` /
+    // `height: 'auto'` route to Yoga's YGNodeStyleSetWidthAuto /
+    // SetHeightAuto so the node sizes to its content (Figma "hug
+    // contents", v0 intrinsic-sizing cards, Claude Design responsive
+    // containers). Without this branch the bridge's preferred_width
+    // = 0 fallback left the node with Yoga's default (auto) by
+    // accident; the explicit Auto API matches the user intent and
+    // ensures a previously-set explicit dimension on a recycled node
+    // gets cleared.
+    if (f.dim_width.unit == DimensionUnit::auto_) {
+        YGNodeStyleSetWidthAuto(node);
+    } else if (f.dim_width.unit == DimensionUnit::percent && f.dim_width.value > 0) {
         YGNodeStyleSetWidthPercent(node, f.dim_width.value);
     } else if (f.preferred_width > 0) {
         YGNodeStyleSetWidth(node, f.preferred_width);
     }
-    if (f.dim_height.unit == DimensionUnit::percent && f.dim_height.value > 0) {
+    if (f.dim_height.unit == DimensionUnit::auto_) {
+        YGNodeStyleSetHeightAuto(node);
+    } else if (f.dim_height.unit == DimensionUnit::percent && f.dim_height.value > 0) {
         YGNodeStyleSetHeightPercent(node, f.dim_height.value);
     } else if (f.preferred_height > 0) {
         YGNodeStyleSetHeight(node, f.preferred_height);

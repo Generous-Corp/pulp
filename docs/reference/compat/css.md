@@ -69,6 +69,59 @@ specifics are out of scope.
     `flex-flow` shorthand parser now also recognizes
     `wrap-reverse` and `row-reverse` / `column-reverse`. Status
     flipped to `supported`.
+- **2026-05-06 (pulp #1434 Phase A2-2 PR 1)** — CSS Grid surface
+  extension. `GridStyle` gains `auto_columns` / `auto_rows`
+  (implicit-track sizing for items overflowing the explicit grid),
+  `auto_flow` (`row` / `column` / `row dense` / `column dense`),
+  `template_areas` (`std::vector<NamedArea>` populated by
+  `parse_template_areas("'h h h' 'm c c' 'f f f'")`), and per-child
+  `grid_area_name` (resolved against the parent's template-areas
+  map). The `setGrid` bridge fn picks up: `auto_columns`,
+  `auto_rows`, `auto_flow`, `template_areas`, `grid_area` (named
+  token or `row / col / row / col` numeric form). The CSS shim
+  cases for `gridAutoColumns` / `gridAutoRows` / `gridAutoFlow` /
+  `gridTemplateAreas` / `gridArea` forward verbatim. The
+  `@pulp/react` prop-applier exposes `gridTemplateColumns` /
+  `gridTemplateRows` / `gridTemplateAreas` / `gridAutoColumns` /
+  `gridAutoRows` / `gridAutoFlow` / `gridArea` / `gridColumn` /
+  `gridRow` / per-side starts/ends + gap variants. Reclassified
+  9 entries to `supported`. PRs 2-3 of the A2-2 ladder wire
+  auto-flow dense-packing + named-area resolution into the
+  existing `layout_grid` algorithm. css drift -9.
+- **2026-05-05 (pulp #1434 Triage #10)** — `css/borderStyle` now
+  honors the keyword at paint time. New `View::BorderStyle` enum
+  (`solid` / `dashed` / `dotted` / `double` / `groove` / `ridge` /
+  `inset` / `outset` / `none` / `hidden`) stored on each View; the
+  paint pass installs `SkDashPathEffect` via
+  `canvas.set_line_dash(...)` for `dashed` (3w/3w on/off) and
+  `dotted` (1w/2w on/off) before stroking, and resets the pattern
+  afterward so subsequent strokes aren't dashed inadvertently.
+  `none` / `hidden` short-circuit the stroke entirely. Other named
+  styles (`double` / `groove` / `ridge` / `inset` / `outset`)
+  currently degrade to solid — Skia compositions for those are a
+  follow-up. CG canvas inherits the canvas-base no-op
+  `set_line_dash` so dashed / dotted on the macOS native path
+  silently render as solid (Skia path effect not yet plumbed
+  through CG). `setBorderStyle` is a newly registered bridge fn;
+  the CSS shim's `borderStyle` case forwards the keyword verbatim.
+  Reclassified missing → supported.
+- **2026-05-05 (pulp #1434 sub-agent #12 follow-up)** — three deferred
+  CSS surface entries closed in one slice. `css/alignContent` flipped
+  NOT-IMPL → PASS: the JS translator (`web-compat-style-decl.js`)
+  was already routing `setFlex(id, 'align_content', ...)`, but the
+  bridge had no `align_content` case — values silently dropped.
+  Bridge now accepts the standard CSS values (`flex-start`,
+  `flex-end`, `center`, `stretch`, `space-between`, `space-around`,
+  `space-evenly`) and routes through `FlexStyle::align_content` /
+  `align_content_space` to Yoga's `YGNodeStyleSetAlignContent`.
+  `css/width` and `css/height` flipped DIVERGE → PASS for the
+  `'auto'` keyword (Yoga "hug contents" via
+  `YGNodeStyleSetWidthAuto` / `SetHeightAuto`); the CSS translator
+  forwards the literal string and the bridge dispatches on
+  `FlexStyle::dim_*.unit == auto_`. `first baseline` /
+  `last baseline` / `normal` for `alignContent` and `min-content` /
+  `max-content` / `fit-content` / `em` / `rem` for width / height
+  remain unsupported.
 - **2026-05-05 (pulp #1434 cross-surface mega-batch)** — per-edge
   `margin{Top,Right,Bottom,Left}` and `padding{Top,Right,Bottom,Left}`
   accept percent values (`'5%'`); margin also accepts `'auto'`
@@ -102,6 +155,29 @@ specifics are out of scope.
   `css/borderColor` (plus seven matching `rn/*Color` entries). Figma
   copy-CSS has been emitting `oklch(...)` since 2024; v0.dev, Tailwind,
   and Claude Design emit `lab()`/`lch()` constantly.
+- **2026-05-05 (pulp #1434 Triage #9 fan-out)** — `css/transform` now
+  supports the full CSS function set:
+  `translate(x,y)`, `translateX`, `translateY`, `rotate`, `rotateZ`,
+  `scale(n)` / `scale(x,y)`, `scaleX`, `scaleY`, `skewX`, `skewY`,
+  `matrix(a,b,c,d,tx,ty)`, plus the full angle-unit set (`deg`, `rad`,
+  `turn`, `grad`). The CSS shim's `transform` dispatcher (in
+  `web-compat-style-decl.js`) is now a walk-once accumulator that
+  merges within-string axes into one consolidated bridge call per
+  axis-of-transform: `translateX(10) translateY(20)` produces ONE
+  `setTranslate(10, 20)` rather than two clobbering ones. `setSkew`
+  is newly registered as a bridge fn (`View::set_skew` had existed
+  in C++ since the 2D slot landed; this surface just hadn't been
+  wired). `matrix(a,b,c,d,tx,ty)` dispatches via the existing
+  `setTransform(id, a, b, c, d, e, f)` bridge fn — preserves the
+  full 6-component 2D affine matrix verbatim (per Codex post-merge
+  audit P1 — earlier draft decomposed to translate+uniform-scale+
+  rotate which silently dropped `c`/`d` skew components on rotation
+  matrices like `matrix(0.866, 0.5, -0.5, 0.866, 100, 50)`).
+  Deferred (silent no-op): `rotateX` / `rotateY` / `matrix3d` /
+  `perspective` — pulp's 2D View has no 3D rotation storage;
+  tracked for a follow-up. Reclassified DIVERGE → PASS. Figma
+  motion exports + v0.dev hero animations + Tailwind utility
+  classes routinely emit the previously-unsupported function set.
 - **2026-05-05 (pulp #1434 css catalog hygiene)** — eight catalog-only
   refreshes: `css/width` and `css/height` now list `%` in
   `supportedValues` (mirroring `yoga/width` / `yoga/height` post-#1426 —

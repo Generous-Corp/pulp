@@ -150,6 +150,18 @@ bool cache_preflight_check(const fs::path& project_root,
                            const std::string& command_name);
 std::string read_user_config_value(const std::string& section, const std::string& key);
 
+struct PrWorkflowSelection {
+    std::string workflow;  // shipyard | github | manual
+    std::string source;    // cli | env:PULP_PR_WORKFLOW | config:pr.workflow | default
+    std::string error;     // non-empty when the selected value is invalid
+};
+
+bool is_valid_pr_workflow(const std::string& workflow);
+std::string normalize_pr_workflow(std::string workflow);
+PrWorkflowSelection resolve_pr_workflow(const std::string& cli_override = {});
+std::string read_pinned_shipyard_version(const fs::path& root);
+std::string capture_shipyard_version(const std::string& shipyard_bin);
+
 // Write/update `key = "value"` under `[section]` in ~/.pulp/config.toml.
 // Creates the file if missing. Preserves all other content verbatim.
 // Release-discovery Slice 2 (#547) surface — used by `pulp config set`

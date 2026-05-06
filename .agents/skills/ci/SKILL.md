@@ -46,8 +46,8 @@ in `tools/shipyard.toml`). It:
    Claude plugin, and marketplace versions consistently, honoring any
    `Version-Bump:` trailers.
 3. Commits the bump (if any) as `chore: bump <surfaces>`.
-4. `gh pr create` with a generated body.
-5. `shipyard ship` for cross-platform validate + merge on green.
+4. Pushes the branch, creates the PR, and records Shipyard tracking state.
+5. Runs cross-platform validate + merge on green.
 6. Auto-release workflow (`.github/workflows/auto-release.yml`) tags and
    publishes binaries on merge.
 
@@ -55,12 +55,22 @@ Never run `gh pr create` + `shipyard ship` separately for a normal ship
 cycle. Never invoke the two version/skill scripts by hand — `shipyard pr`
 wires them together with the right flags.
 
+Direct `gh pr create` is an explicit emergency/manual bypass only. If the
+user asks for that path, state the tracking gap up front: the PR may not
+appear in Shipyard-managed state or the macOS GUI until it is reconciled or
+re-shipped through Shipyard.
+
 `pulp pr` is a Pulp-side wrapper that delegates to `shipyard pr`; both are
-valid, agents should prefer `shipyard pr` for directness.
+valid, agents should prefer `shipyard pr` for directness. Humans can opt out
+of Shipyard for their own checkout with `pulp config set pr.workflow github`
+or `manual`, but agents should not choose those workflows unless the user
+explicitly asks for a manual/emergency bypass. `pulp status` reports the
+effective workflow and whether its required local tool is installed.
 
 Backward compatibility: raw `shipyard ship` / `shipyard run` still work for
-diagnostics, experimental branches, or when `shipyard pr` itself is being
-debugged. Do not use them as the primary ship path.
+diagnostics, experimental branches, existing Shipyard-managed PRs, or when
+`shipyard pr` itself is being debugged. Do not use them as the primary ship
+path.
 
 ### Shipyard pin and behaviour notes
 
@@ -178,7 +188,7 @@ period (see danielraffel/pulp#120).
 ```bash
 # Primary: Shipyard
 shipyard run                              # validate current branch
-shipyard ship                             # PR + validate + merge on green
+shipyard pr                               # create, track, validate, and merge on green
 shipyard ship --resume                    # pick up an interrupted ship (v0.3.0+)
 shipyard ship --no-resume                 # discard stale state, start fresh
 shipyard ship-state list                  # in-flight ships (title, url, sha)
@@ -338,10 +348,16 @@ To install Shipyard locally for the first time:
 ```bash
 ./tools/install-shipyard.sh           # download + verify pinned binary
 ./tools/install-shipyard.sh --status  # show installed vs pinned version
-export PATH="$HOME/.pulp/bin:$PATH"   # add ~/.pulp/bin to PATH (one-time)
+export PATH="$HOME/.local/bin:$PATH"  # add ~/.local/bin to PATH (one-time)
 ```
 
-After install, every Pulp checkout that has `~/.pulp/bin` on PATH gets
+The public Pulp installer intentionally does not install Shipyard or GitHub
+CLI (`gh`). Ordinary Pulp users can create, build, run, and upgrade projects
+without either tool. Treat them as source-checkout contributor dependencies
+for PR/CI work; `gh` is required only for GitHub-facing maintenance commands
+and the explicit `pr.workflow=github` bypass.
+
+After install, every Pulp checkout that has `~/.local/bin` on PATH gets
 the same pinned Shipyard version automatically. The pin lives in
 `tools/shipyard.toml` and is bumped via PR after each Shipyard release
 that passes Pulp's CI matrix. Use `shipyard pin bump --to vX.Y.Z`
@@ -361,7 +377,8 @@ Before running any CI command, verify the required tooling AND provider config e
 ```bash
 # Required
 test -f tools/local-ci/local_ci.py || echo "ERROR: local CI not found — is this a recent checkout?"
-command -v gh >/dev/null || echo "ERROR: gh CLI not installed (brew install gh)"
+command -v shipyard >/dev/null || echo "ERROR: shipyard not installed (run ./tools/install-shipyard.sh)"
+command -v gh >/dev/null || echo "WARNING: gh CLI not installed; GitHub-facing fallback/triage commands will be unavailable"
 
 # Preferred (shared machine-global local CI config)
 test -f "$HOME/Library/Application Support/Pulp/local-ci/config.json" || echo "WARNING: no shared local CI config — copy tools/local-ci/config.example.json there"
@@ -444,20 +461,17 @@ restored.
 
 ## Commands
 
-### `ship [branch]` — The main workflow
+### Legacy `local_ci.py ship [branch]`
 
-Creates a PR, runs CI, and merges on green. This is the default when someone says "ship this" or "push to main".
+Historical fallback only. The normal workflow for "ship this" or "push to
+main" is `shipyard pr`, which owns PR creation, Shipyard tracking state,
+validation, and merge-on-green.
 
-1. Ensure all changes are committed
-2. Push the branch to origin with `-u`
-3. Create a PR via `gh pr create` (to main, or to a develop branch if specified)
-4. Run local CI: `python3 tools/local-ci/local_ci.py run <branch>`
-5. If ALL targets pass → `gh pr merge <PR#> --squash --delete-branch`
-6. If ANY target fails → report failures, leave PR open
-7. Notify when done (terminal bell)
+Use this only when debugging the legacy local CI controller itself. It does
+not provide the same Shipyard state discipline as `shipyard pr`.
 
 ```bash
-# Ship to main (default)
+# Legacy fallback only
 python3 tools/local-ci/local_ci.py ship [branch]
 
 # Ship to a develop branch (for multi-piece features)
