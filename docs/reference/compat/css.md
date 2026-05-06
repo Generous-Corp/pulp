@@ -33,6 +33,21 @@ specifics are out of scope.
 
 ## Recently changed
 
+- **2026-05-06 (pulp #1552)** — `line-clamp` / `-webkit-line-clamp` /
+  `background-repeat` wired end-to-end. `setLineClamp` and
+  `setBackgroundRepeat` now register in `widget_bridge.cpp`; the JS
+  shim cases that already routed through them (and the matching
+  `@pulp/react` prop-applier dispatch) now reach C++. Label grew a
+  `line_clamp_` slot; `paint()` emits at most N lines and appends
+  U+2026 to the last visible line if any source lines were dropped.
+  Setting `line-clamp >= 1` implicitly enables `multi_line_` so the
+  paint path takes the multi-line branch (without that, the
+  single-line path runs and the clamp is a no-op). View grew
+  `background_repeat_` (storage-only — paint-time honoring lands
+  with the `background-image: url(...)` / repeating-gradient work).
+  Reclassified `css/lineClamp` and `css/webkitLineClamp` to
+  `supported`; `css/backgroundRepeat` stays `partial` with the
+  honest "storage-only" caveat.
 - **2026-05-06 (pulp #1519)** — CSS outline cluster fully bridge-backed.
   `setOutlineColor` / `setOutlineOffset` / `setOutlineStyle` /
   `setOutlineWidth` now register in `widget_bridge.cpp`; the CSS
