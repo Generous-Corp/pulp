@@ -134,7 +134,11 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
                 "col");
             break;
         case "flexWrap":
-            setFlex(id, "flex_wrap", resolved === "wrap" ? 1 : 0);
+            // pulp #1434 Triage #14 — forward the keyword verbatim so the
+            // bridge can route `wrap-reverse` through Yoga's
+            // YGWrapWrapReverse path. Previous behavior coerced to 0/1
+            // and silently dropped wrap-reverse to plain wrap.
+            setFlex(id, "flex_wrap", resolved);
             break;
         case "flexGrow":
             setFlex(id, "flex_grow", parseFloat(resolved) || 0);
@@ -1027,12 +1031,21 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
 
         // flex-flow shorthand
         case "flexFlow": {
+            // pulp #1434 Triage #14 — recognize the full direction +
+            // wrap vocabulary including `row-reverse` / `column-reverse`
+            // (already-wired but missing from this shorthand path) and
+            // `wrap-reverse` (newly wired through the bridge).
             var ffp = resolved.split(/\s+/);
             for (var ffi = 0; ffi < ffp.length; ffi++) {
-                if (ffp[ffi] === "row" || ffp[ffi] === "column")
-                    setFlex(id, "direction", ffp[ffi] === "row" ? "row" : "col");
-                else if (ffp[ffi] === "wrap" || ffp[ffi] === "nowrap")
-                    setFlex(id, "flex_wrap", ffp[ffi] === "wrap" ? 1 : 0);
+                var tok = ffp[ffi];
+                if (tok === "row" || tok === "column"
+                        || tok === "row-reverse" || tok === "column-reverse") {
+                    setFlex(id, "direction", tok === "row" ? "row" : tok);
+                }
+                else if (tok === "wrap" || tok === "nowrap"
+                        || tok === "no-wrap" || tok === "wrap-reverse") {
+                    setFlex(id, "flex_wrap", tok);
+                }
             }
             break;
         }

@@ -33,6 +33,42 @@ specifics are out of scope.
 
 ## Recently changed
 
+- **2026-05-05 (pulp #1434 small-wins bundle, Triage #7+#12+#13+#14)** —
+  four catalog/translator items combined into one PR.
+  * **Triage #7 cursor enum fan-out** — `setCursor` case ladder now
+    maps the full CSS keyword set to `View::CursorStyle`. Wired:
+    `pointer`, `crosshair`, `text` / `vertical-text`, `grab`,
+    `grabbing`, `not-allowed` / `no-drop`, `none` / `hidden`
+    (invisible), `col-resize` / `ew-resize` / `e-resize` /
+    `w-resize` (horizontal), `row-resize` / `ns-resize` / `n-resize`
+    / `s-resize` (vertical), `nwse-resize` / `nw-resize` /
+    `se-resize` (top-left diagonal), `nesw-resize` / `ne-resize` /
+    `sw-resize` (top-right diagonal), `move` / `all-scroll`
+    (multi-directional). Catalog flipped to `partial` — the eight
+    CSS values without a `CursorStyle` slot today (`alias`, `copy`,
+    `cell`, `zoom-in/out`, `help`, `wait`, `progress`,
+    `context-menu`) fall back to `default` and are tracked for a
+    follow-up that adds dedicated slots + platform glyphs.
+  * **Triage #12 userSelect catalog trim** — `supportedValues`
+    trimmed to `none` / `text` / `all` (the actual bridge surface);
+    CSS-spec `auto` and `contain` were over-claimed and would
+    silently drop. Status flipped `supported` → `partial`.
+  * **Triage #13 pointerEvents catalog trim** — `supportedValues`
+    trimmed to `auto` / `none` / `box-only` / `box-none` (the
+    `View::PointerEvents` enum). The CSS SVG-spec values
+    (`visible-painted` / `visible-fill` / `visible-stroke` /
+    `painted` / `fill` / `stroke`) are over-claims (pulp doesn't
+    render SVG via the renderer surface; SVG is layout-leaf via
+    `SvgPath` widgets). Status flipped to `partial`.
+  * **Triage #14 flex-wrap reverse modes** — `FlexStyle::flex_wrap`
+    converted from `bool` to a tri-state `FlexWrap` enum
+    (`no_wrap` / `wrap` / `wrap_reverse`) so Yoga's
+    `YGWrapWrapReverse` becomes reachable. Bridge accepts the
+    keyword strings (`'wrap'` / `'wrap-reverse'` / `'nowrap'` /
+    `'no-wrap'`) and the legacy 0/1 numeric path. The CSS
+    `flex-flow` shorthand parser now also recognizes
+    `wrap-reverse` and `row-reverse` / `column-reverse`. Status
+    flipped to `supported`.
 - **2026-05-06 (pulp #1434 Phase A2-2 PR 1)** — CSS Grid surface
   extension. `GridStyle` gains `auto_columns` / `auto_rows`
   (implicit-track sizing for items overflowing the explicit grid),

@@ -917,7 +917,7 @@ TEST_CASE("WidgetBridge style and layout setters update native view state",
     REQUIRE_THAT(flex.flex_grow, WithinAbs(2.0f, 0.001f));
     REQUIRE_THAT(flex.flex_shrink, WithinAbs(0.25f, 0.001f));
     REQUIRE_THAT(flex.flex_basis, WithinAbs(88.0f, 0.001f));
-    REQUIRE(flex.flex_wrap);
+    REQUIRE(flex.flex_wrap == FlexWrap::wrap);
     REQUIRE(flex.order == 3);
     REQUIRE_THAT(flex.preferred_width, WithinAbs(123.0f, 0.001f));
     REQUIRE_THAT(flex.preferred_height, WithinAbs(45.0f, 0.001f));
@@ -4970,6 +4970,127 @@ TEST_CASE("CSSStyleDeclaration forwards marginTop percent + auto verbatim",
     const auto& fb = bridge.widget("b")->flex();
     REQUIRE(fb.dim_margin_left.unit  == DimensionUnit::auto_);
     REQUIRE(fb.dim_margin_right.unit == DimensionUnit::auto_);
+}
+
+// ── pulp #1434 small-wins bundle (Triage #7 + #14) ──────────────────────
+//
+// Triage #7: cursor enum fan-out — extended setCursor case ladder maps
+// the full CSS cursor keyword set to the existing View::CursorStyle
+// slots (axis-aligned + diagonal resize aliases, move/all-scroll →
+// multi-directional, none/hidden → invisible).
+//
+// Triage #14: flexWrap reverse — flex_wrap is now a tri-state enum
+// (no_wrap / wrap / wrap_reverse) routed through Yoga's
+// YGWrapWrapReverse for the previously-inexpressible CSS
+// `flex-wrap: wrap-reverse` mode. Bridge accepts the keyword strings
+// alongside the legacy 0/1 numeric path.
+
+TEST_CASE("setCursor maps the full CSS keyword set",
+          "[view][bridge][css][issue-1434-bundle]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('a', '');  setCursor('a', 'col-resize');
+        createPanel('b', '');  setCursor('b', 'row-resize');
+        createPanel('c', '');  setCursor('c', 'nwse-resize');
+        createPanel('d', '');  setCursor('d', 'nesw-resize');
+        createPanel('e', '');  setCursor('e', 'move');
+        createPanel('f', '');  setCursor('f', 'not-allowed');
+        createPanel('g', '');  setCursor('g', 'grabbing');
+        createPanel('h', '');  setCursor('h', 'none');
+        createPanel('i', '');  setCursor('i', 'all-scroll');
+        createPanel('j', '');  setCursor('j', 'parchment-curl'); // unknown → default
+    )");
+
+    using CS = View::CursorStyle;
+    REQUIRE(bridge.widget("a")->cursor() == CS::horizontal_resize);
+    REQUIRE(bridge.widget("b")->cursor() == CS::vertical_resize);
+    REQUIRE(bridge.widget("c")->cursor() == CS::top_left_resize);
+    REQUIRE(bridge.widget("d")->cursor() == CS::top_right_resize);
+    REQUIRE(bridge.widget("e")->cursor() == CS::multi_directional_resize);
+    REQUIRE(bridge.widget("f")->cursor() == CS::not_allowed);
+    REQUIRE(bridge.widget("g")->cursor() == CS::grabbing);
+    REQUIRE(bridge.widget("h")->cursor() == CS::invisible);
+    REQUIRE(bridge.widget("i")->cursor() == CS::multi_directional_resize);
+    REQUIRE(bridge.widget("j")->cursor() == CS::default_);
+}
+
+TEST_CASE("setCursor accepts axis-aligned aliases",
+          "[view][bridge][css][issue-1434-bundle]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        createPanel('e', ''); setCursor('e', 'e-resize');
+        createPanel('w', ''); setCursor('w', 'w-resize');
+        createPanel('n', ''); setCursor('n', 'n-resize');
+        createPanel('s', ''); setCursor('s', 's-resize');
+        createPanel('ns',''); setCursor('ns', 'ns-resize');
+        createPanel('ew',''); setCursor('ew', 'ew-resize');
+    )");
+    using CS = View::CursorStyle;
+    REQUIRE(bridge.widget("e")->cursor()  == CS::horizontal_resize);
+    REQUIRE(bridge.widget("w")->cursor()  == CS::horizontal_resize);
+    REQUIRE(bridge.widget("ew")->cursor() == CS::horizontal_resize);
+    REQUIRE(bridge.widget("n")->cursor()  == CS::vertical_resize);
+    REQUIRE(bridge.widget("s")->cursor()  == CS::vertical_resize);
+    REQUIRE(bridge.widget("ns")->cursor() == CS::vertical_resize);
+}
+
+TEST_CASE("setFlex flex_wrap accepts wrap-reverse keyword",
+          "[view][bridge][css][issue-1434-bundle]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        createPanel('a', ''); setFlex('a', 'flex_wrap', 'wrap-reverse');
+        createPanel('b', ''); setFlex('b', 'flex_wrap', 'wrap');
+        createPanel('c', ''); setFlex('c', 'flex_wrap', 'nowrap');
+        createPanel('d', ''); setFlex('d', 'flex_wrap', 'no-wrap');
+        createPanel('e', ''); setFlex('e', 'flex_wrap', 1);  // legacy numeric
+        createPanel('f', ''); setFlex('f', 'flex_wrap', 0);
+    )");
+    REQUIRE(bridge.widget("a")->flex().flex_wrap == FlexWrap::wrap_reverse);
+    REQUIRE(bridge.widget("b")->flex().flex_wrap == FlexWrap::wrap);
+    REQUIRE(bridge.widget("c")->flex().flex_wrap == FlexWrap::no_wrap);
+    REQUIRE(bridge.widget("d")->flex().flex_wrap == FlexWrap::no_wrap);
+    REQUIRE(bridge.widget("e")->flex().flex_wrap == FlexWrap::wrap);
+    REQUIRE(bridge.widget("f")->flex().flex_wrap == FlexWrap::no_wrap);
+}
+
+TEST_CASE("CSSStyleDeclaration forwards flex-wrap: wrap-reverse",
+          "[view][bridge][css][issue-1434-bundle]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        createPanel('a', '');
+        var sa = new CSSStyleDeclaration({ _id: 'a', _nativeCreated: true });
+        sa._applyProperty('flexWrap', 'wrap-reverse');
+    )");
+    REQUIRE(bridge.widget("a")->flex().flex_wrap == FlexWrap::wrap_reverse);
+}
+
+TEST_CASE("flex-flow shorthand recognizes wrap-reverse",
+          "[view][bridge][css][issue-1434-bundle]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        createPanel('a', '');
+        var sa = new CSSStyleDeclaration({ _id: 'a', _nativeCreated: true });
+        sa._applyProperty('flexFlow', 'row wrap-reverse');
+    )");
+    const auto& f = bridge.widget("a")->flex();
+    REQUIRE(f.flex_wrap == FlexWrap::wrap_reverse);
+    REQUIRE(f.direction == FlexDirection::row);
 }
 
 // ── pulp #1434 Triage #10 — borderStyle dashed/dotted ─────────────────────

@@ -483,7 +483,17 @@ function applyOne(id: string, type: string, key: string, value: unknown, props?:
         // arg as a string and detects '%' / 'auto' suffix; otherwise
         // it falls back to the numeric path.
         case 'flexBasis':       return call('setFlex', id, 'flex_basis', value as number | string);
-        case 'flexWrap':        return call('setFlex', id, 'flex_wrap', value ? 1 : 0);
+        // pulp #1434 Triage #14 — flexWrap accepts boolean (legacy
+        // true/false) or the CSS keyword strings (`"wrap"` /
+        // `"wrap-reverse"` / `"nowrap"`). Forward strings verbatim
+        // so the bridge can route wrap-reverse through Yoga's
+        // YGWrapWrapReverse.
+        case 'flexWrap': {
+            if (typeof value === 'string') {
+                return call('setFlex', id, 'flex_wrap', value);
+            }
+            return call('setFlex', id, 'flex_wrap', value ? 1 : 0);
+        }
         case 'order':           return call('setFlex', id, 'order', value as number);
         case 'width':           return call('setFlex', id, 'width', value as number | string);
         case 'height':          return call('setFlex', id, 'height', value as number | string);

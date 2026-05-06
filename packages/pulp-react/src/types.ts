@@ -96,7 +96,10 @@ export interface FlexProps {
     /// `YGNodeStyleSetFlexBasisAuto`; percent maps to
     /// `YGNodeStyleSetFlexBasisPercent`.
     flexBasis?: number | string;
-    flexWrap?: boolean;
+    /// pulp #1434 Triage #14 — accept boolean (legacy true/false) or
+    /// the CSS keyword string. `"wrap-reverse"` routes through Yoga's
+    /// YGWrapWrapReverse path; previously coerced to plain `wrap`.
+    flexWrap?: boolean | 'wrap' | 'nowrap' | 'no-wrap' | 'wrap-reverse';
     order?: number;
     /// pulp #1434 (rn batch C) — number (px) or percent string
     /// (`'100%'`). Yoga's percent API is dispatched on
@@ -162,6 +165,10 @@ export interface StyleProps {
     /// pulp #1434 rn bridge-wires bundle — 7 props that already had C++
     /// bridge fns but no @pulp/react JSX dispatch. Each forwards the
     /// keyword / string straight through to the matching setter.
+    /// (cursor / pointerEvents / userSelect superset of the small-wins
+    /// bundle (Triage #7 / #12 / #13) — types kept trimmed to the
+    /// actual bridge surface; broader CSS spec values are documented as
+    /// over-claims in the catalog.)
     backfaceVisibility?: 'hidden' | 'visible';
     cursor?: string;
     filter?: string;

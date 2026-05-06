@@ -65,6 +65,13 @@ enum class LayoutMode { flex, grid };
 // through to YGFlexDirectionColumn.
 enum class FlexDirection { row, column, row_reverse, column_reverse };
 
+/// pulp #1434 Triage #14 — flex-wrap tri-state. Yoga has YGWrapNoWrap /
+/// YGWrapWrap / YGWrapWrapReverse natively. Before this slice, the
+/// FlexStyle field was a bool, so the wrap-reverse case was
+/// inexpressible — `flex-wrap: wrap-reverse` silently fell through
+/// to plain wrap.
+enum class FlexWrap { no_wrap, wrap, wrap_reverse };
+
 // Flex alignment (auto_ = inherit from parent's align_items).
 // pulp #1434 (rn batch B) — added `baseline`. Yoga has YGAlignBaseline
 // natively; before this batch, RN exports emitting
@@ -238,7 +245,14 @@ struct FlexStyle {
             min_height = dim_min_height.resolve(parent_h, viewport_w, viewport_h, dpi);
     }
 
-    bool flex_wrap = false;     ///< Wrap to next line when main axis overflows
+    /// pulp #1434 Triage #14 — tri-state wrap. CSS / RN allow
+    /// `wrap-reverse` (overflows wrap UP instead of DOWN, or RIGHT
+    /// instead of LEFT depending on flex-direction). Yoga has
+    /// YGWrapWrapReverse for this; previously flex_wrap was a bool
+    /// expressible only as wrap / no-wrap. Bridge accepts numeric (0/1
+    /// for backward compat) and the CSS keyword strings ("wrap" /
+    /// "wrap-reverse" / "nowrap" / "no-wrap").
+    FlexWrap flex_wrap = FlexWrap::no_wrap;
     int order = 0;              ///< Layout order (lower values first, default 0)
 
     /// Aspect ratio (width / height). When set, Yoga sizes the cross axis

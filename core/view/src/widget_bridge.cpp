@@ -1809,7 +1809,16 @@ void WidgetBridge::register_api() {
                 f.dim_flex_basis.unit = pulp::view::DimensionUnit::px;
             }
         }
-        else if (key == "flex_wrap") f.flex_wrap = val > 0;
+        else if (key == "flex_wrap") {
+            // pulp #1434 Triage #14 — accept numeric (legacy 0/1) and
+            // the CSS keyword strings, including the previously-
+            // inexpressible `wrap-reverse`.
+            auto sval = args.get<std::string>(2, "");
+            if (sval == "wrap-reverse")        f.flex_wrap = FlexWrap::wrap_reverse;
+            else if (sval == "wrap")           f.flex_wrap = FlexWrap::wrap;
+            else if (sval == "nowrap" || sval == "no-wrap") f.flex_wrap = FlexWrap::no_wrap;
+            else                                f.flex_wrap = (val > 0) ? FlexWrap::wrap : FlexWrap::no_wrap;
+        }
         else if (key == "order") f.order = (int)val;
         // pulp #1423 — width/height accept either a number ("100" → px)
         // or a percentage string ("100%" → percent of parent). The CSS
@@ -3903,11 +3912,46 @@ void WidgetBridge::register_api() {
         auto c = args.get<std::string>(1, "default");
         auto* v = id.empty() ? &root_ : widget(id);
         if (!v) return choc::value::Value();
-        if (c == "pointer") v->set_cursor(View::CursorStyle::pointer);
-        else if (c == "crosshair") v->set_cursor(View::CursorStyle::crosshair);
-        else if (c == "text") v->set_cursor(View::CursorStyle::text);
-        else if (c == "grab") v->set_cursor(View::CursorStyle::grab);
-        else v->set_cursor(View::CursorStyle::default_);
+        // pulp #1434 Triage #7 — cursor enum fan-out. Map the full CSS
+        // cursor keyword set to the View::CursorStyle slots that exist
+        // today (4 base + 7 resize + invisible + multi-directional =
+        // ~12 distinct visuals). Where multiple CSS keywords map to the
+        // same visual (n/s/e/w-resize all map to the axis-aligned
+        // resize cursor; help/wait/progress all alias to default until
+        // OS-specific glyphs are wired), we collapse to the closest
+        // existing slot. CSS keywords with no semantic match (alias,
+        // copy, no-drop, all-scroll, zoom-*, cell, vertical-text,
+        // context-menu) currently fall back to default — tracked for a
+        // follow-up that adds dedicated CursorStyle slots and
+        // platform-specific glyph dispatch.
+        using CS = View::CursorStyle;
+        if (c == "pointer")              v->set_cursor(CS::pointer);
+        else if (c == "crosshair")       v->set_cursor(CS::crosshair);
+        else if (c == "text")            v->set_cursor(CS::text);
+        else if (c == "vertical-text")   v->set_cursor(CS::text);
+        else if (c == "grab")            v->set_cursor(CS::grab);
+        else if (c == "grabbing")        v->set_cursor(CS::grabbing);
+        else if (c == "not-allowed")     v->set_cursor(CS::not_allowed);
+        else if (c == "no-drop")         v->set_cursor(CS::not_allowed);
+        else if (c == "none" || c == "hidden") v->set_cursor(CS::invisible);
+        else if (c == "col-resize" || c == "ew-resize"
+                 || c == "e-resize" || c == "w-resize") {
+            v->set_cursor(CS::horizontal_resize);
+        }
+        else if (c == "row-resize" || c == "ns-resize"
+                 || c == "n-resize" || c == "s-resize") {
+            v->set_cursor(CS::vertical_resize);
+        }
+        else if (c == "nwse-resize" || c == "nw-resize" || c == "se-resize") {
+            v->set_cursor(CS::top_left_resize);
+        }
+        else if (c == "nesw-resize" || c == "ne-resize" || c == "sw-resize") {
+            v->set_cursor(CS::top_right_resize);
+        }
+        else if (c == "move" || c == "all-scroll") {
+            v->set_cursor(CS::multi_directional_resize);
+        }
+        else                             v->set_cursor(CS::default_);
         return choc::value::Value();
     });
 
