@@ -103,6 +103,10 @@ declare global {
     // View::BorderStyle; Skia installs SkDashPathEffect for dashed/
     // dotted at stroke time. Other named styles degrade to solid.
     const setBorderStyle: ((id: string, style: string) => void) | undefined;
+    /// pulp #1434 Phase A2-2 — CSS Grid bridge fn. The C++ side parses
+    /// template-track strings, named-area strings, and the grid-area
+    /// shorthand (named token vs `row / col / row / col` numeric form).
+    const setGrid: ((id: string, key: string, value: string | number) => void) | undefined;
     const setBorderTopColor: ((id: string, hexColor: string) => void) | undefined;
     const setBorderRightColor: ((id: string, hexColor: string) => void) | undefined;
     const setBorderBottomColor: ((id: string, hexColor: string) => void) | undefined;
@@ -260,6 +264,8 @@ export function createMockBridge(): MockBridge {
         // overflow:hidden to setOverflow, but JSX consumers setting
         // `style={{ overflow: 'hidden' }}` silently dropped it.
         'setOverflow',
+        // pulp #1434 Phase A2-2 — CSS Grid bridge surface.
+        'setGrid',
         // pulp #994 — SvgPath intrinsic surface
         'createSvgPath', 'setSvgPath', 'setSvgViewBox',
         'setSvgFill', 'setSvgStroke', 'setSvgStrokeWidth',

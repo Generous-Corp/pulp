@@ -151,6 +151,26 @@ export interface StyleProps {
     /// dispatching.
     transformOrigin?: string;
     userSelect?: 'none' | 'text' | 'all';
+    /// pulp #1434 Phase A2-2 — CSS Grid surface. Grid props live on
+    /// StyleProps so JSX can express `display: grid` layouts directly.
+    /// Bridge handles template-track parsing, named-area parsing, and
+    /// the grid-area shorthand.
+    gridTemplateColumns?: string;
+    gridTemplateRows?: string;
+    gridTemplateAreas?: string;
+    gridAutoColumns?: string;
+    gridAutoRows?: string;
+    gridAutoFlow?: 'row' | 'column' | 'row dense' | 'column dense' | 'dense';
+    gridArea?: string;
+    gridColumn?: string;
+    gridRow?: string;
+    gridColumnStart?: number;
+    gridColumnEnd?: number;
+    gridRowStart?: number;
+    gridRowEnd?: number;
+    gridGap?: number;
+    gridColumnGap?: number;
+    gridRowGap?: number;
     /// CSS / RN `display` keyword (pulp #1434 Triage #12). `'none'`
     /// hides the View (sets visible=false). `'flex'` is pulp's
     /// implicit default and is accepted as a no-op confirmation. Other

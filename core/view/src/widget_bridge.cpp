@@ -1414,6 +1414,45 @@ void WidgetBridge::register_api() {
         } else if (key == "row_end") {
             v->grid().grid_row_end = static_cast<int>(args.get<double>(2, 0));
         }
+        // pulp #1434 Phase A2-2 — extended grid surface.
+        else if (key == "auto_columns") {
+            auto tracks = GridStyle::parse_template(args.get<std::string>(2, "auto"));
+            if (!tracks.empty()) v->grid().auto_columns = tracks[0];
+        } else if (key == "auto_rows") {
+            auto tracks = GridStyle::parse_template(args.get<std::string>(2, "auto"));
+            if (!tracks.empty()) v->grid().auto_rows = tracks[0];
+        } else if (key == "auto_flow") {
+            v->grid().auto_flow = GridStyle::parse_auto_flow(args.get<std::string>(2, "row"));
+        } else if (key == "template_areas") {
+            v->grid().template_areas = GridStyle::parse_template_areas(args.get<std::string>(2, ""));
+        } else if (key == "grid_area") {
+            // CSS: `grid-area: header` references a named area on the
+            // parent. CSS also accepts `grid-area: 1 / 2 / 3 / 4`
+            // (row-start / col-start / row-end / col-end). Distinguish
+            // by checking for digits + slashes.
+            auto val = args.get<std::string>(2, "");
+            if (val.find('/') != std::string::npos) {
+                std::vector<int> nums;
+                std::string acc;
+                for (char c : val) {
+                    if (c == '/') {
+                        try { nums.push_back(std::stoi(acc)); } catch (...) {}
+                        acc.clear();
+                    } else if (!std::isspace(static_cast<unsigned char>(c))) acc += c;
+                }
+                if (!acc.empty()) {
+                    try { nums.push_back(std::stoi(acc)); } catch (...) {}
+                }
+                if (nums.size() >= 4) {
+                    v->grid().grid_row_start = nums[0];
+                    v->grid().grid_column_start = nums[1];
+                    v->grid().grid_row_end = nums[2];
+                    v->grid().grid_column_end = nums[3];
+                }
+            } else {
+                v->grid().grid_area_name = val;
+            }
+        }
         return choc::value::Value();
     });
 

@@ -590,6 +590,38 @@ function applyOne(id: string, type: string, key: string, value: unknown, props?:
         // 'scroll' / 'auto'); bridge maps to View::Overflow enum.
         case 'overflow':     return call('setOverflow', id, value as string);
 
+        // pulp #1434 Phase A2-2 — CSS Grid surface. Forwards each
+        // property verbatim to setGrid; the C++ bridge handles
+        // template-track parsing, named-area parsing, and the
+        // grid-area shorthand (named token vs `row / col / row / col`
+        // numeric form).
+        case 'gridTemplateColumns': return call('setGrid', id, 'template_columns', value as string);
+        case 'gridTemplateRows':    return call('setGrid', id, 'template_rows',    value as string);
+        case 'gridTemplateAreas':   return call('setGrid', id, 'template_areas',   value as string);
+        case 'gridAutoColumns':     return call('setGrid', id, 'auto_columns',     value as string);
+        case 'gridAutoRows':        return call('setGrid', id, 'auto_rows',        value as string);
+        case 'gridAutoFlow':        return call('setGrid', id, 'auto_flow',        value as string);
+        case 'gridArea':            return call('setGrid', id, 'grid_area',        value as string);
+        case 'gridColumn': {
+            const parts = String(value).split('/').map((s) => parseInt(s.trim(), 10));
+            if (parts[0]) call('setGrid', id, 'column_start', parts[0]);
+            if (parts[1]) call('setGrid', id, 'column_end', parts[1]);
+            return;
+        }
+        case 'gridRow': {
+            const parts = String(value).split('/').map((s) => parseInt(s.trim(), 10));
+            if (parts[0]) call('setGrid', id, 'row_start', parts[0]);
+            if (parts[1]) call('setGrid', id, 'row_end', parts[1]);
+            return;
+        }
+        case 'gridColumnStart': return call('setGrid', id, 'column_start', value as number);
+        case 'gridColumnEnd':   return call('setGrid', id, 'column_end',   value as number);
+        case 'gridRowStart':    return call('setGrid', id, 'row_start',    value as number);
+        case 'gridRowEnd':      return call('setGrid', id, 'row_end',      value as number);
+        case 'gridGap':         return call('setGrid', id, 'gap',          value as number);
+        case 'gridColumnGap':   return call('setGrid', id, 'column_gap',   value as number);
+        case 'gridRowGap':      return call('setGrid', id, 'row_gap',      value as number);
+
         // pulp #1434 rn bridge-wires bundle (sub-agent #27 finding) —
         // 7 RN-style props that already had C++ bridge fns registered
         // but no `@pulp/react` prop-applier dispatch. Each forwards
