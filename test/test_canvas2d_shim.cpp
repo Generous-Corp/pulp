@@ -205,6 +205,47 @@ TEST_CASE("Canvas2D createRadialGradient returns CanvasGradient",
     REQUIRE(result == "radial|2|60");
 }
 
+// pulp #1524 — createRadialGradient with distinct inner+outer circles
+// flushes via the new two-circle bridge fn (canvasSetRadialGradientTwoCircles)
+// and the resulting CanvasDrawCmd carries BOTH circles. Pre-fix, the JS shim
+// stored only the outer circle and dropped (x0, y0, r0) silently.
+TEST_CASE("Canvas2D createRadialGradient flushes two circles via the new bridge fn",
+          "[view][canvas2d][issue-1524]") {
+    ScriptedBridge env;
+    env.load(R"(
+        var c = document.createElement('canvas');
+        globalThis.__test_canvas_el__ = c;
+        document.body.appendChild(c);
+        c.width = 100; c.height = 100;
+        var ctx = c.getContext('2d');
+        var g = ctx.createRadialGradient(20, 30, 5, 80, 70, 50);
+        g.addColorStop(0, '#ff0000');
+        g.addColorStop(1, '#0000ff');
+        ctx.fillStyle = g;
+        ctx.fillRect(0, 0, 100, 100);
+    )");
+
+    auto* cw = env.canvas();
+    REQUIRE(cw != nullptr);
+    bool saw_two_circles = false;
+    for (const auto& cmd : cw->commands()) {
+        if (cmd.type == CanvasDrawCmd::Type::set_fill_gradient_radial_two_circles) {
+            saw_two_circles = true;
+            // Inner circle (x0=20, y0=30, r0=5) packed as (x, y, extra).
+            REQUIRE(cmd.x      == Catch::Approx(20.0f));
+            REQUIRE(cmd.y      == Catch::Approx(30.0f));
+            REQUIRE(cmd.extra  == Catch::Approx(5.0f));
+            // Outer circle (x1=80, y1=70, r1=50) packed as (x2, y2, w).
+            REQUIRE(cmd.x2     == Catch::Approx(80.0f));
+            REQUIRE(cmd.y2     == Catch::Approx(70.0f));
+            REQUIRE(cmd.w      == Catch::Approx(50.0f));
+            REQUIRE(cmd.gradient_colors.size() == 2);
+            REQUIRE(cmd.gradient_positions.size() == 2);
+        }
+    }
+    REQUIRE(saw_two_circles);
+}
+
 // ── FilterBank-style command stream records via the shim ─────────────────
 //
 // JS calls ctx.save(); ctx.translate(); ctx.fillStyle = grad; ctx.fillRect();

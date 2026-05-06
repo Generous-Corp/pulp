@@ -121,13 +121,26 @@ CanvasRenderingContext2D.prototype._applyFillStyle = function() {
         this._activeFillKind = "gradient";
         return;
     }
-    if (fs && fs._kind === "radial" && typeof canvasSetRadialGradient === "function") {
+    if (fs && fs._kind === "radial") {
         var pr = fs._params, sr = fs._stops;
-        var ar = [this._id, pr.x1, pr.y1, pr.r1];
-        for (var j = 0; j < sr.length; ++j) { ar.push(sr[j].color); ar.push(sr[j].offset); }
-        canvasSetRadialGradient.apply(null, ar);
-        this._activeFillKind = "gradient";
-        return;
+        // pulp #1524 — prefer the two-circle bridge. Both Skia (MakeTwoPointConical)
+        // and CG (CGContextDrawRadialGradient with both circles) honour the inner
+        // circle. Older binaries without the new bridge fall through to the
+        // single-circle outer-only path so JS hot-reload doesn't crash.
+        if (typeof canvasSetRadialGradientTwoCircles === "function") {
+            var arx = [this._id, pr.x0, pr.y0, pr.r0, pr.x1, pr.y1, pr.r1];
+            for (var jj = 0; jj < sr.length; ++jj) { arx.push(sr[jj].color); arx.push(sr[jj].offset); }
+            canvasSetRadialGradientTwoCircles.apply(null, arx);
+            this._activeFillKind = "gradient";
+            return;
+        }
+        if (typeof canvasSetRadialGradient === "function") {
+            var ar = [this._id, pr.x1, pr.y1, pr.r1];
+            for (var j = 0; j < sr.length; ++j) { ar.push(sr[j].color); ar.push(sr[j].offset); }
+            canvasSetRadialGradient.apply(null, ar);
+            this._activeFillKind = "gradient";
+            return;
+        }
     }
     // pulp #1434 bridge-thin gap-fill — ctx.createConicGradient. Skia
     // routes through SkGradientShader::MakeSweep; CG degrades to the
@@ -768,12 +781,16 @@ CanvasRenderingContext2D.prototype.createLinearGradient = function(x0, y0, x1, y
 };
 
 CanvasRenderingContext2D.prototype.createRadialGradient = function(x0, y0, r0, x1, y1, r1) {
-    // Pulp's bridge currently models a single-circle radial gradient
-    // (centre + radius). Use the outer circle (x1, y1, r1) as the
-    // gradient origin — visually equivalent for FilterBank's typical
-    // "centre bloom" usage where x0===x1, y0===y1, r0===0.
-    void x0; void y0; void r0;
-    return new CanvasGradient("radial", { x1: x1, y1: y1, r1: r1 });
+    // pulp #1524 — true two-circle radial gradient. Carry both circles in
+    // the gradient handle; the fillStyle flush picks the two-circle bridge
+    // (canvasSetRadialGradientTwoCircles) when available and falls back to
+    // the single-circle outer-only path on older binaries. Skia routes
+    // through SkGradientShader::MakeTwoPointConical; CG routes through
+    // CGContextDrawRadialGradient with both circles.
+    return new CanvasGradient("radial", {
+        x0: +x0 || 0, y0: +y0 || 0, r0: +r0 || 0,
+        x1: +x1 || 0, y1: +y1 || 0, r1: +r1 || 0
+    });
 };
 
 CanvasRenderingContext2D.prototype.createConicGradient = function(startAngle, cx, cy) {
