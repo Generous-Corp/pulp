@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-05-05 19:31 PDT
+Last reviewed: 2026-05-05 19:35 PDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`.
@@ -502,14 +502,15 @@ The refreshed branch remains
 unpushed and undispatched; #1274 still points at the old remote head
 until Namespace capacity returns.
 Additional #643 CLI audio progress is refreshed locally as
-`feature/phase3-cli-audio-command-coverage-643` at `4bd88249`, rebased
+`feature/phase3-cli-audio-command-coverage-643` at `95c6fc6e`, rebased
 from the paused #1287 remote head `cb0a4acb` onto current `origin/main`
 `50ff5822` after superseding local refresh `353a6afd` on `0447498e`,
 then onto current `origin/main` `b7ec8f08`, then onto current
 `origin/main` `cf5ea658`, then onto current `origin/main` `24047ba3`,
 then onto current `origin/main` `7e9795b4`, then onto current
 `origin/main` `df01f4f6`, then onto current `origin/main` `42bacd19`,
-then onto current `origin/main` `a8c4c16`, covering deterministic
+then onto current `origin/main` `a8c4c16`, then onto current
+`origin/main` `d191cdca`, covering deterministic
 `pulp audio` usage/parser errors and
 missing-bundle JSON behavior through real CLI shellout tests. The
 refreshed branch remains unpushed and undispatched; #1287 still points at
