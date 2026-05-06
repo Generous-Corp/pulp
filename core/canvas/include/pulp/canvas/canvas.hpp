@@ -419,6 +419,52 @@ public:
                           float x, float y) {
         (void)cp1x; (void)cp1y; (void)cp2x; (void)cp2y; line_to(x, y);
     }
+    /// pulp #1521 — native arc subpath. Maps to Canvas2D
+    /// `ctx.arc(cx, cy, r, startAngle, endAngle, anticlockwise)` and to
+    /// SkPath::arcTo(SkRect, startDeg, sweepDeg, false) on Skia. Replaces
+    /// the JS shim's bezier approximation. The default fallback emits a
+    /// quadrant-segmented cubic-bezier polyline so capture-only backends
+    /// (RecordingCanvas) still produce a meaningful command stream when
+    /// they choose not to override.
+    virtual void arc(float cx, float cy, float radius,
+                     float start_angle, float end_angle,
+                     bool anticlockwise) {
+        (void)cx; (void)cy; (void)radius;
+        (void)start_angle; (void)end_angle; (void)anticlockwise;
+    }
+    /// pulp #1521 — native arcTo. Maps to Canvas2D
+    /// `ctx.arcTo(x1, y1, x2, y2, radius)` and to
+    /// SkPath::arcTo(p1, p2, radius) on Skia (the 5-arg overload that
+    /// computes the tangent arc between the current point, p1, and p2).
+    virtual void arc_to(float x1, float y1, float x2, float y2, float radius) {
+        (void)x1; (void)y1; (void)x2; (void)y2; (void)radius;
+    }
+    /// pulp #1521 — native ellipse subpath. Maps to Canvas2D
+    /// `ctx.ellipse(cx, cy, rx, ry, rotation, startAngle, endAngle,
+    /// anticlockwise)`. Honours `rotation` (rx/ry axis rotation in
+    /// radians) by transforming the arc through SkMatrix on Skia.
+    virtual void ellipse(float cx, float cy, float rx, float ry,
+                         float rotation,
+                         float start_angle, float end_angle,
+                         bool anticlockwise) {
+        (void)cx; (void)cy; (void)rx; (void)ry; (void)rotation;
+        (void)start_angle; (void)end_angle; (void)anticlockwise;
+    }
+    /// pulp #1521 — native rounded-rectangle subpath with per-corner
+    /// radii. Maps to Canvas2D `ctx.roundRect(x, y, w, h, radii)` and to
+    /// SkRRect::MakeRectRadii on Skia. Radii layout matches the CSS
+    /// 8-value form: top-left x/y, top-right x/y, bottom-right x/y,
+    /// bottom-left x/y. The JS shim normalizes the 1/2/3/4-value forms
+    /// to 8 floats before crossing the bridge.
+    virtual void round_rect(float x, float y, float w, float h,
+                            float tl_x, float tl_y,
+                            float tr_x, float tr_y,
+                            float br_x, float br_y,
+                            float bl_x, float bl_y) {
+        (void)x; (void)y; (void)w; (void)h;
+        (void)tl_x; (void)tl_y; (void)tr_x; (void)tr_y;
+        (void)br_x; (void)br_y; (void)bl_x; (void)bl_y;
+    }
     /// Close the current path subpath.
     virtual void close_path() {}
     /// Fill the current path.
@@ -873,7 +919,16 @@ struct DrawCommand {
         cubic_to,             ///< (cp1x, cp1y, cp2x, cp2y, x, y) in f[0..5]
         close_path,           ///< no payload
         fill_current_path,    ///< no payload — uses last set_fill_color
-        stroke_current_path   ///< no payload — uses last set_stroke_color + set_line_width
+        stroke_current_path,  ///< no payload — uses last set_stroke_color + set_line_width
+        // ── pulp #1521: native arc subpaths (replace JS bezier approx) ─
+        // Captured so widgets that emit native arc commands can be
+        // asserted at the command-stream level without a Skia raster
+        // surface. Maps 1:1 to the new Canvas::arc / arc_to / ellipse /
+        // round_rect virtual methods.
+        arc,                  ///< (cx, cy, r, start, end, anticlockwise as 0/1) in f[0..5]
+        arc_to,               ///< (x1, y1, x2, y2, radius) in f[0..4]
+        ellipse,              ///< (cx, cy, rx, ry, rotation, start) in f[0..5]; (end, anticlockwise as 0/1) extras tracked in `floats[0..1]`
+        round_rect            ///< (x, y, w, h, tl_x, tl_y) in f[0..5]; tr/br/bl x/y in `floats[0..5]`
     };
 
     Type type;
@@ -1000,6 +1055,23 @@ public:
     void close_path() override;
     void fill_current_path() override;
     void stroke_current_path() override;
+
+    // pulp #1521 — native arc subpaths (recorded as DrawCommands so
+    // widget tests can assert emit order without a raster surface).
+    void arc(float cx, float cy, float radius,
+             float start_angle, float end_angle,
+             bool anticlockwise) override;
+    void arc_to(float x1, float y1, float x2, float y2,
+                float radius) override;
+    void ellipse(float cx, float cy, float rx, float ry,
+                 float rotation,
+                 float start_angle, float end_angle,
+                 bool anticlockwise) override;
+    void round_rect(float x, float y, float w, float h,
+                    float tl_x, float tl_y,
+                    float tr_x, float tr_y,
+                    float br_x, float br_y,
+                    float bl_x, float bl_y) override;
 
 private:
     std::vector<DrawCommand> commands_;

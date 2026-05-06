@@ -144,6 +144,22 @@ public:
     void fill_current_path() override;
     void stroke_current_path() override;
 
+    // pulp #1521 — native arc subpaths via SkPath::arcTo / SkRRect.
+    void arc(float cx, float cy, float radius,
+             float start_angle, float end_angle,
+             bool anticlockwise) override;
+    void arc_to(float x1, float y1, float x2, float y2,
+                float radius) override;
+    void ellipse(float cx, float cy, float rx, float ry,
+                 float rotation,
+                 float start_angle, float end_angle,
+                 bool anticlockwise) override;
+    void round_rect(float x, float y, float w, float h,
+                    float tl_x, float tl_y,
+                    float tr_x, float tr_y,
+                    float br_x, float br_y,
+                    float bl_x, float bl_y) override;
+
     // SDF shapes
     void draw_sdf_shape(SDFShape shape, float x, float y, float w, float h,
                         const SDFStyle& style) override;

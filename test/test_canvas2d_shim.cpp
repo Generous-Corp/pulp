@@ -1589,4 +1589,162 @@ TEST_CASE("Canvas2D pattern set_fill_pattern reaches Skia without throwing",
     INFO("any pixel painted: " << any_painted);
     REQUIRE(any_painted);
 }
-#endif  // PULP_HAS_SKIA
+#endif  // PULP_HAS_SKIA (closing the gradient/pattern test block above)
+
+// ── pulp #1521 — arc-as-path cluster (DIVERGE → PASS) ────────────────────
+//
+// The JS shim now routes ctx.arc / arcTo / ellipse / roundRect through the
+// new canvasPathArc / canvasPathArcTo / canvasPathEllipse /
+// canvasPathRoundRect bridge fns. Before this PR the shim emitted
+// canvasMoveTo + canvasCubicTo (arc / ellipse) or canvasLineTo (arcTo /
+// roundRect) — N approximation segments per arc. After this PR each call
+// emits exactly one path_arc / path_arc_to / path_ellipse /
+// path_round_rect command, and the cubic_to / line_to fallbacks no
+// longer fire from the arc family.
+TEST_CASE("Canvas2D arc shim emits path_arc, not bezier approximation",
+          "[view][canvas2d][issue-1521]") {
+    ScriptedBridge env;
+    env.load(R"(
+        var c = document.createElement('canvas');
+        globalThis.__test_canvas_el__ = c;
+        document.body.appendChild(c);
+        c.width = 100; c.height = 100;
+        var ctx = c.getContext('2d');
+        ctx.beginPath();
+        ctx.arc(50, 50, 30, 0, Math.PI * 2);
+        ctx.stroke();
+    )");
+    auto* cw = env.canvas();
+    REQUIRE(cw != nullptr);
+    int saw_arc = 0, saw_cubic = 0, saw_move = 0;
+    for (const auto& cmd : cw->commands()) {
+        if (cmd.type == CanvasDrawCmd::Type::path_arc) ++saw_arc;
+        if (cmd.type == CanvasDrawCmd::Type::cubic_to) ++saw_cubic;
+        if (cmd.type == CanvasDrawCmd::Type::move_to) ++saw_move;
+    }
+    INFO("path_arc=" << saw_arc << " cubic_to=" << saw_cubic
+         << " move_to=" << saw_move);
+    REQUIRE(saw_arc == 1);
+    REQUIRE(saw_cubic == 0); // old shim emitted N cubic_to per arc
+    REQUIRE(saw_move == 0);  // old shim emitted a move_to per arc
+}
+
+TEST_CASE("Canvas2D arcTo shim emits path_arc_to with radius preserved",
+          "[view][canvas2d][issue-1521]") {
+    ScriptedBridge env;
+    env.load(R"(
+        var c = document.createElement('canvas');
+        globalThis.__test_canvas_el__ = c;
+        document.body.appendChild(c);
+        c.width = 100; c.height = 100;
+        var ctx = c.getContext('2d');
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.arcTo(50, 0, 50, 50, 12);
+        ctx.stroke();
+    )");
+    auto* cw = env.canvas();
+    REQUIRE(cw != nullptr);
+    bool saw_arc_to = false;
+    for (const auto& cmd : cw->commands()) {
+        if (cmd.type == CanvasDrawCmd::Type::path_arc_to) {
+            saw_arc_to = true;
+            REQUIRE(cmd.x == Catch::Approx(50.0f));
+            REQUIRE(cmd.y == Catch::Approx(0.0f));
+            REQUIRE(cmd.x2 == Catch::Approx(50.0f));
+            REQUIRE(cmd.y2 == Catch::Approx(50.0f));
+            REQUIRE(cmd.extra == Catch::Approx(12.0f));
+        }
+    }
+    REQUIRE(saw_arc_to);
+}
+
+TEST_CASE("Canvas2D ellipse shim emits path_ellipse with rotation",
+          "[view][canvas2d][issue-1521]") {
+    ScriptedBridge env;
+    env.load(R"(
+        var c = document.createElement('canvas');
+        globalThis.__test_canvas_el__ = c;
+        document.body.appendChild(c);
+        c.width = 100; c.height = 100;
+        var ctx = c.getContext('2d');
+        ctx.beginPath();
+        ctx.ellipse(50, 50, 40, 20, Math.PI / 4, 0, Math.PI * 2);
+        ctx.fill();
+    )");
+    auto* cw = env.canvas();
+    REQUIRE(cw != nullptr);
+    bool saw_ellipse = false;
+    for (const auto& cmd : cw->commands()) {
+        if (cmd.type == CanvasDrawCmd::Type::path_ellipse) {
+            saw_ellipse = true;
+            REQUIRE(cmd.w == Catch::Approx(40.0f));   // rx
+            REQUIRE(cmd.h == Catch::Approx(20.0f));   // ry
+            REQUIRE(cmd.extra == Catch::Approx(0.7853982f).margin(1e-5)); // rotation
+        }
+    }
+    REQUIRE(saw_ellipse);
+}
+
+TEST_CASE("Canvas2D roundRect shim emits path_round_rect with 4 distinct radii",
+          "[view][canvas2d][issue-1521]") {
+    ScriptedBridge env;
+    env.load(R"(
+        var c = document.createElement('canvas');
+        globalThis.__test_canvas_el__ = c;
+        document.body.appendChild(c);
+        c.width = 100; c.height = 100;
+        var ctx = c.getContext('2d');
+        ctx.beginPath();
+        ctx.roundRect(10, 20, 80, 40, [2, 4, 6, 8]);
+        ctx.fill();
+    )");
+    auto* cw = env.canvas();
+    REQUIRE(cw != nullptr);
+    bool saw_rr = false;
+    for (const auto& cmd : cw->commands()) {
+        if (cmd.type == CanvasDrawCmd::Type::path_round_rect) {
+            saw_rr = true;
+            REQUIRE(cmd.x == Catch::Approx(10.0f));
+            REQUIRE(cmd.y == Catch::Approx(20.0f));
+            REQUIRE(cmd.w == Catch::Approx(80.0f));
+            REQUIRE(cmd.h == Catch::Approx(40.0f));
+            REQUIRE(cmd.gradient_positions.size() == 8u);
+            REQUIRE(cmd.gradient_positions[0] == Catch::Approx(2.0f)); // tl_x
+            REQUIRE(cmd.gradient_positions[2] == Catch::Approx(4.0f)); // tr_x
+            REQUIRE(cmd.gradient_positions[4] == Catch::Approx(6.0f)); // br_x
+            REQUIRE(cmd.gradient_positions[6] == Catch::Approx(8.0f)); // bl_x
+        }
+    }
+    REQUIRE(saw_rr);
+}
+
+TEST_CASE("Canvas2D roundRect shim accepts {x,y} elliptical corner",
+          "[view][canvas2d][issue-1521]") {
+    ScriptedBridge env;
+    env.load(R"(
+        var c = document.createElement('canvas');
+        globalThis.__test_canvas_el__ = c;
+        document.body.appendChild(c);
+        c.width = 100; c.height = 100;
+        var ctx = c.getContext('2d');
+        ctx.beginPath();
+        ctx.roundRect(0, 0, 50, 50, [{x: 4, y: 8}]);
+        ctx.fill();
+    )");
+    auto* cw = env.canvas();
+    REQUIRE(cw != nullptr);
+    bool saw_rr = false;
+    for (const auto& cmd : cw->commands()) {
+        if (cmd.type == CanvasDrawCmd::Type::path_round_rect) {
+            saw_rr = true;
+            REQUIRE(cmd.gradient_positions.size() == 8u);
+            // [{x:4,y:8}] expands to all four corners with rx=4, ry=8.
+            REQUIRE(cmd.gradient_positions[0] == Catch::Approx(4.0f)); // tl_x
+            REQUIRE(cmd.gradient_positions[1] == Catch::Approx(8.0f)); // tl_y
+            REQUIRE(cmd.gradient_positions[6] == Catch::Approx(4.0f)); // bl_x
+            REQUIRE(cmd.gradient_positions[7] == Catch::Approx(8.0f)); // bl_y
+        }
+    }
+    REQUIRE(saw_rr);
+}

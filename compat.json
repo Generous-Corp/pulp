@@ -5890,41 +5890,39 @@
       "issue": "1346"
     },
     "canvas2d/roundRect": {
-      "status": "partial",
-      "mapsTo": "ctx.roundRect(x,y,w,h,radii) -> moveTo + lineTos + arcTos. Uniform-corner case only.",
+      "status": "supported",
+      "mapsTo": "ctx.roundRect(x,y,w,h,radii) -> canvasPathRoundRect with 4-corner radii. Skia: SkRRect::MakeRectRadii. CG: 8-segment per-corner layout.",
       "supportedValues": [
-        "uniform radius (number, or array[1])"
+        "number (uniform)",
+        "{x, y} object (elliptical corner)",
+        "array [r] / [r1,r2] / [r1,r2,r3] / [r1,r2,r3,r4] (CSS spec)"
       ],
-      "unsupportedValues": [
-        "non-uniform radii (4 distinct corners) — falls back to largest single value"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "PR #1348. arcTo approximation is conservative — see canvas2d/arcTo.",
-      "issue": "1346"
+      "notes": "pulp #1521 promotion. Native per-corner radii via SkRRect (Skia) / CGPath layout (CG). Replaces the uniform-only approximation.",
+      "issue": "1521"
     },
     "canvas2d/arc": {
-      "status": "partial",
-      "mapsTo": "ctx.arc(cx,cy,r,start,end,anticlockwise) -> path-mode emit as cubic-bezier segments via canvasMoveTo + canvasCubicTo. Bridge has immediate-mode canvasArc but no path-mode arc primitive.",
+      "status": "supported",
+      "mapsTo": "ctx.arc(cx,cy,r,start,end,anticlockwise) -> canvasPathArc. Skia: SkPath::arcTo(oval, startDeg, sweepDeg, false). CG: CGPathAddArc.",
       "supportedValues": [
         "any arc"
       ],
       "unsupportedValues": [],
       "tests": [],
-      "notes": "PR #1348. The bezier approximation is per-quadrant (k = (4/3)·tan(θ/4)); fidelity is visually exact for fill/stroke/clip use cases.",
-      "issue": "1346"
+      "notes": "pulp #1521 promotion. Native SkPath::arcTo (Skia) / CGPathAddArc (CG). Replaces the per-quadrant cubic-bezier approximation; full circles and half circles are now closed-form correct.",
+      "issue": "1521"
     },
     "canvas2d/arcTo": {
-      "status": "partial",
-      "mapsTo": "ctx.arcTo(x1,y1,x2,y2,r) -> conservative lineTo(x1,y1) + lineTo(x2,y2). Radius is currently ignored.",
+      "status": "supported",
+      "mapsTo": "ctx.arcTo(x1,y1,x2,y2,r) -> canvasPathArcTo. Skia: SkPath::arcTo(p1, p2, radius). CG: CGPathAddArcToPoint.",
       "supportedValues": [
-        "any arcTo (radius ignored)"
+        "any arcTo (radius honoured)"
       ],
-      "unsupportedValues": [
-        "geometrically-correct arcTo with the proper radius-tangent computation"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "PR #1348. Used by roundRect and FilterBank's marquee corners; fidelity loss is minimal for those use cases. File a follow-up if a plugin needs spec-compliant arcTo.",
-      "issue": "1346"
+      "notes": "pulp #1521 promotion. Native tangent-arc; radius is no longer ignored. Degenerate (collinear / zero-radius) cases collapse to lineTo per spec.",
+      "issue": "1521"
     },
     "canvas2d/bezierCurveTo": {
       "status": "supported",
@@ -5945,17 +5943,15 @@
       "issue": ""
     },
     "canvas2d/ellipse": {
-      "status": "partial",
-      "mapsTo": "ctx.ellipse(cx,cy,rx,ry,rotation,start,end,anticlockwise) -> rotation IGNORED; if rx===ry falls through to arc; otherwise emits a 4-segment cubic approximation.",
+      "status": "supported",
+      "mapsTo": "ctx.ellipse(cx,cy,rx,ry,rotation,start,end,anticlockwise) -> canvasPathEllipse. Skia: SkPath::arcTo on a temporary oval, rotated through SkMatrix. CG: CGPathAddArc through CGAffineTransform.",
       "supportedValues": [
-        "axis-aligned ellipses (rotation ignored)"
+        "any ellipse (rotation honoured)"
       ],
-      "unsupportedValues": [
-        "non-zero rotation"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "PR #1348. FilterBank doesn't use ellipse — this is a thin parity shim.",
-      "issue": "1346"
+      "notes": "pulp #1521 promotion. Rotation is now honoured — previously ignored.",
+      "issue": "1521"
     },
     "canvas2d/fill": {
       "status": "partial",

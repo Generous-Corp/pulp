@@ -89,6 +89,11 @@ inline const char* canvas_cmd_type_name(CanvasDrawCmd::Type t) {
         case CanvasDrawCmd::Type::set_image_smoothing: return "set_image_smoothing";
         case CanvasDrawCmd::Type::clear: return "clear";
         case CanvasDrawCmd::Type::clear_rect: return "clear_rect";
+        // pulp #1521 — native arc subpaths.
+        case CanvasDrawCmd::Type::path_arc: return "path_arc";
+        case CanvasDrawCmd::Type::path_arc_to: return "path_arc_to";
+        case CanvasDrawCmd::Type::path_ellipse: return "path_ellipse";
+        case CanvasDrawCmd::Type::path_round_rect: return "path_round_rect";
     }
     return "unknown";
 }
@@ -380,6 +385,42 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
             canvas.set_line_width(cmd.extra);
             canvas.stroke_arc(cmd.x, cmd.y, cmd.w, cmd.x2, cmd.y2); // cx, cy, radius, start, end
             break;
+
+        // pulp #1521 — native arc subpaths.
+        case CanvasDrawCmd::Type::path_arc:
+            canvas.arc(cmd.x, cmd.y, cmd.extra,
+                       cmd.x2, cmd.y2,
+                       cmd.int_val != 0);
+            break;
+        case CanvasDrawCmd::Type::path_arc_to:
+            canvas.arc_to(cmd.x, cmd.y, cmd.x2, cmd.y2, cmd.extra);
+            break;
+        case CanvasDrawCmd::Type::path_ellipse:
+            // x=cx, y=cy, w=rx, h=ry, extra=rotation, x2=startAngle,
+            // y2=endAngle, int_val=anticlockwise
+            canvas.ellipse(cmd.x, cmd.y, cmd.w, cmd.h,
+                           cmd.extra,
+                           cmd.x2, cmd.y2,
+                           cmd.int_val != 0);
+            break;
+        case CanvasDrawCmd::Type::path_round_rect: {
+            // gradient_positions packed [tl_x,tl_y, tr_x,tr_y,
+            // br_x,br_y, bl_x,bl_y]. If the JS shim only sent 1/2/4
+            // values the bridge has already normalized to 8.
+            const auto& r = cmd.gradient_positions;
+            float tl_x = r.size() > 0 ? r[0] : 0.0f;
+            float tl_y = r.size() > 1 ? r[1] : 0.0f;
+            float tr_x = r.size() > 2 ? r[2] : 0.0f;
+            float tr_y = r.size() > 3 ? r[3] : 0.0f;
+            float br_x = r.size() > 4 ? r[4] : 0.0f;
+            float br_y = r.size() > 5 ? r[5] : 0.0f;
+            float bl_x = r.size() > 6 ? r[6] : 0.0f;
+            float bl_y = r.size() > 7 ? r[7] : 0.0f;
+            canvas.round_rect(cmd.x, cmd.y, cmd.w, cmd.h,
+                              tl_x, tl_y, tr_x, tr_y,
+                              br_x, br_y, bl_x, bl_y);
+            break;
+        }
 
         // Text alignment and baseline
         case CanvasDrawCmd::Type::set_text_align:

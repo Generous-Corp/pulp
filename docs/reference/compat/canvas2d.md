@@ -148,28 +148,38 @@ Skia canvas but never applied to the actual paint. `lineCap` and
 The Canvas2D `shadowColor` / `shadowBlur` / `shadowOffsetX` /
 `shadowOffsetY` quartet landed in pulp #1434 batch 7 (separate slice).
 
+## Recently promoted (pulp #1521 — arc-as-path cluster)
+
+The 2026-05-06 cluster lifted four arc-related entries out of the
+"partial" bucket. The legacy JS shim approximated each via cubic-bezier
+or polyline segments — closed-form-correct geometry was always
+available behind `SkPath::arcTo` / `SkRRect` (Skia) and `CGPathAddArc`
+/ `CGPathAddArcToPoint` (CG). The new `canvasPathArc` / `canvasPathArcTo`
+/ `canvasPathEllipse` / `canvasPathRoundRect` bridge calls hand the
+arc parameters through directly:
+
+- **`arc(cx, cy, r, start, end, anticlockwise)`** — Skia: `SkPath::arcTo(oval, startDeg, sweepDeg, false)`. CG: `CGPathAddArc`. Full circles and half circles are now closed-form correct.
+- **`arcTo(x1, y1, x2, y2, radius)`** — Skia: `SkPath::arcTo(p1, p2, radius)` (the 5-arg overload). CG: `CGPathAddArcToPoint`. Radius is honoured. Degenerate (collinear / zero-radius) cases collapse to `lineTo` per spec.
+- **`ellipse(cx, cy, rx, ry, rotation, start, end, anticlockwise)`** — Skia: arc on an axis-aligned oval, transformed through `SkMatrix::RotateRad`. CG: `CGPathAddArc` through a `CGAffineTransform` carrying translate + rotate + non-uniform scale. Rotation is honoured.
+- **`roundRect(x, y, w, h, radii)`** — Skia: `SkRRect::MakeRectRadii` (4-corner). CG: 8-segment per-corner layout with adjacent-corner clamping. Supports the full CSS spec radii forms (number, [r], [r1,r2], [r1,r2,r3], [r1,r2,r3,r4], `{x, y}` elliptical corner).
+
 ## Partial / approximated
 
-1. **`arcTo`** — currently emits `lineTo(x1,y1) + lineTo(x2,y2)`,
-   ignoring the radius. Used by `roundRect` and FilterBank's marquee
-   corners; fidelity loss is minimal for those use cases.
-2. **`ellipse`** — ignores `rotation`; falls through to `arc` when
-   `rx === ry`; otherwise emits a 4-segment cubic approximation.
-3. **`transform`** (concat-on-right) — bridge only exposes `setTransform`
+1. **`transform`** (concat-on-right) — bridge only exposes `setTransform`
    (replace). Pure-translation matrices fall through to `translate`;
    anything else is a no-op.
-4. **`strokeText`** — falls back to `fillText` with the stroke color
+2. **`strokeText`** — falls back to `fillText` with the stroke color
    (bridge has no stroke-text command).
-5. **`createRadialGradient`** — bridge models a single-circle radial
+3. **`createRadialGradient`** — bridge models a single-circle radial
    gradient; shim uses the outer circle. Visually equivalent for
    centre-bloom usage where `x0 === x1`, `y0 === y1`, `r0 === 0`.
-6. **`drawImage`** 9-arg form — sprite-sheet slicing
+4. **`drawImage`** 9-arg form — sprite-sheet slicing
    (`sx, sy, sw, sh`) is currently ignored.
-7. **`putImageData`** sub-rect form — `dirtyX/Y/W/H` ignored.
-8. **`setLineDash`** — odd-length spec-doubling is bridge-side; shim
+5. **`putImageData`** sub-rect form — `dirtyX/Y/W/H` ignored.
+6. **`setLineDash`** — odd-length spec-doubling is bridge-side; shim
    passes verbatim. `lineDashOffset` mutation between draws is not
    re-pushed (must re-call `setLineDash`).
-9. **`strokeStyle = gradient`** — bridge has no stroke-gradient setter;
+7. **`strokeStyle = gradient`** — bridge has no stroke-gradient setter;
    degrades to the first stop's color.
 
 ## WebGPU surface
