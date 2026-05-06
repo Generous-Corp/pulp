@@ -434,7 +434,17 @@ function applyOne(id: string, type: string, key: string, value: unknown, props?:
         // arg as a string and detects '%' / 'auto' suffix; otherwise
         // it falls back to the numeric path.
         case 'flexBasis':       return call('setFlex', id, 'flex_basis', value as number | string);
-        case 'flexWrap':        return call('setFlex', id, 'flex_wrap', value ? 1 : 0);
+        // pulp #1434 Triage #14 — flexWrap accepts boolean (legacy
+        // true/false) or the CSS keyword strings (`"wrap"` /
+        // `"wrap-reverse"` / `"nowrap"`). Forward strings verbatim
+        // so the bridge can route wrap-reverse through Yoga's
+        // YGWrapWrapReverse.
+        case 'flexWrap': {
+            if (typeof value === 'string') {
+                return call('setFlex', id, 'flex_wrap', value);
+            }
+            return call('setFlex', id, 'flex_wrap', value ? 1 : 0);
+        }
         case 'order':           return call('setFlex', id, 'order', value as number);
         case 'width':           return call('setFlex', id, 'width', value as number | string);
         case 'height':          return call('setFlex', id, 'height', value as number | string);
@@ -548,6 +558,16 @@ function applyOne(id: string, type: string, key: string, value: unknown, props?:
         // Accepts the CSS keyword strings ('hidden' / 'visible' /
         // 'scroll' / 'auto'); bridge maps to View::Overflow enum.
         case 'overflow':     return call('setOverflow', id, value as string);
+
+        // pulp #1434 small-wins bundle — pass-through forwarding for
+        // cursor / userSelect / pointerEvents. The bridge maps each
+        // keyword to a View enum; partial spec coverage (auto /
+        // contain on userSelect; SVG-spec values on pointerEvents;
+        // 8 CSS values without a CursorStyle slot) is documented in
+        // the catalog notes.
+        case 'cursor':       return call('setCursor', id, value as string);
+        case 'userSelect':   return call('setUserSelect', id, value as string);
+        case 'pointerEvents':return call('setPointerEvents', id, value as string);
 
         // pulp #1434 Triage #9 — RN array transform.
         // RN's transform is an array of single-property objects:

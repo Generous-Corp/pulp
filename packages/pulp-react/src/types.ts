@@ -62,7 +62,10 @@ export interface FlexProps {
     /// `YGNodeStyleSetFlexBasisAuto`; percent maps to
     /// `YGNodeStyleSetFlexBasisPercent`.
     flexBasis?: number | string;
-    flexWrap?: boolean;
+    /// pulp #1434 Triage #14 — accept boolean (legacy true/false) or
+    /// the CSS keyword string. `"wrap-reverse"` routes through Yoga's
+    /// YGWrapWrapReverse path; previously coerced to plain `wrap`.
+    flexWrap?: boolean | 'wrap' | 'nowrap' | 'no-wrap' | 'wrap-reverse';
     order?: number;
     /// pulp #1434 (rn batch C) — number (px) or percent string
     /// (`'100%'`). Yoga's percent API is dispatched on
@@ -112,6 +115,12 @@ export interface StyleProps {
     borderBottomRightRadius?: number;
     opacity?: number;
     visible?: boolean;
+    /// pulp #1434 small-wins bundle — cursor / userSelect / pointerEvents
+    /// forwarding. Bridge maps each keyword to a View enum; partial
+    /// spec coverage documented in the catalog (Triage #7 / #12 / #13).
+    cursor?: string;
+    userSelect?: 'none' | 'text' | 'all' | 'auto' | 'contain';
+    pointerEvents?: 'auto' | 'none' | 'box-only' | 'box-none';
     /// CSS / RN `display` keyword (pulp #1434 Triage #12). `'none'`
     /// hides the View (sets visible=false). `'flex'` is pulp's
     /// implicit default and is accepted as a no-op confirmation. Other

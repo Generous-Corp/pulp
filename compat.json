@@ -938,19 +938,42 @@
       "issue": ""
     },
     "css/cursor": {
-      "status": "supported",
-      "mapsTo": "setCursor(id, value)",
+      "status": "partial",
+      "mapsTo": "setCursor(id, value) — widget_bridge.cpp maps the full CSS keyword set to View::CursorStyle. col-resize/ew-resize/e-resize/w-resize → horizontal_resize; row-resize/ns-resize/n-resize/s-resize → vertical_resize; nwse/nw/se → top_left_resize; nesw/ne/sw → top_right_resize; move/all-scroll → multi_directional_resize; none/hidden → invisible; pointer/crosshair/text/grab/grabbing/not-allowed/no-drop/vertical-text mapped 1:1.",
       "supportedValues": [
-        "auto",
-        "pointer",
         "default",
-        "etc. -- passed through to setCursor"
+        "pointer",
+        "crosshair",
+        "text",
+        "vertical-text",
+        "grab",
+        "grabbing",
+        "not-allowed",
+        "no-drop",
+        "col-resize",
+        "row-resize",
+        "ew-resize",
+        "ns-resize",
+        "nwse-resize",
+        "nesw-resize",
+        "n-resize",
+        "s-resize",
+        "e-resize",
+        "w-resize",
+        "nw-resize",
+        "ne-resize",
+        "sw-resize",
+        "se-resize",
+        "move",
+        "all-scroll",
+        "none",
+        "hidden"
       ],
-      "unsupportedValues": [
-        "url()"
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp::\"setCursor maps the full CSS keyword set\""
       ],
-      "tests": [],
-      "notes": "View::CursorStyle enum lists supported values.",
+      "notes": "pulp #1434 Triage #7 — cursor enum fan-out. Unknown keywords fall back to default. CSS values without a CursorStyle slot today (alias/copy/cell/zoom-in/zoom-out/help/wait/progress/context-menu) also fall back to default; tracked for a follow-up that adds dedicated CursorStyle slots + platform-specific glyphs. url() cursor images are not supported (browser-specific feature).",
       "issue": ""
     },
     "css/direction": {
@@ -1068,18 +1091,18 @@
       "issue": ""
     },
     "css/flexFlow": {
-      "status": "partial",
-      "mapsTo": "expanded into setFlex 'direction' + 'flex_wrap'",
+      "status": "supported",
+      "mapsTo": "web-compat-style-decl.js shorthand parser fans out into setFlex(direction, ...) and setFlex(flex_wrap, ...) — supports row / column / row-reverse / column-reverse and wrap / nowrap / wrap-reverse.",
       "supportedValues": [
-        "row|column nowrap|wrap"
+        "row|column|row-reverse|column-reverse",
+        "nowrap|no-wrap|wrap|wrap-reverse",
+        "combined two-token shorthand (e.g. \"row wrap-reverse\")"
       ],
-      "unsupportedValues": [
-        "row-reverse",
-        "column-reverse",
-        "wrap-reverse"
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp::\"flex-flow shorthand recognizes wrap-reverse\""
       ],
-      "tests": [],
-      "notes": "Inherits the underlying flexDirection/flexWrap limitations.",
+      "notes": "pulp #1434 Triage #14 — extended shorthand parser to recognize -reverse modes.",
       "issue": ""
     },
     "css/flexGrow": {
@@ -1105,17 +1128,19 @@
       "issue": ""
     },
     "css/flexWrap": {
-      "status": "partial",
-      "mapsTo": "setFlex(id, 'flex_wrap', 0|1)",
+      "status": "supported",
+      "mapsTo": "web-compat-style-decl.js forwards the keyword verbatim to setFlex(flex_wrap, 'wrap'|'wrap-reverse'|'nowrap'); FlexStyle.flex_wrap is now a tri-state FlexWrap enum; yoga_layout.cpp dispatches via YGWrapWrap / YGWrapWrapReverse / YGWrapNoWrap.",
       "supportedValues": [
         "nowrap",
-        "wrap"
-      ],
-      "unsupportedValues": [
+        "no-wrap",
+        "wrap",
         "wrap-reverse"
       ],
-      "tests": [],
-      "notes": "FlexStyle.flex_wrap is a bool -- wrap-reverse cannot be expressed.",
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp::\"setFlex flex_wrap accepts wrap-reverse keyword\""
+      ],
+      "notes": "pulp #1434 Triage #14 — FlexStyle.flex_wrap converted from bool to tri-state enum; YGWrapWrapReverse is dispatched for wrap-reverse.",
       "issue": ""
     },
     "css/float": {
@@ -2131,7 +2156,7 @@
       "issue": ""
     },
     "css/pointerEvents": {
-      "status": "supported",
+      "status": "partial",
       "mapsTo": "setPointerEvents(id, mode)",
       "supportedValues": [
         "auto",
@@ -2139,13 +2164,9 @@
         "box-only",
         "box-none"
       ],
-      "unsupportedValues": [
-        "visible-painted",
-        "visible-fill",
-        "etc. (SVG)"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "View::PointerEvents enum.",
+      "notes": "pulp #1434 Triage #13 — catalog trim. CSS spec lists SVG-specific values (visible-painted / visible-fill / visible-stroke / painted / fill / stroke); pulp doesn't render SVG via the renderer surface (SVG is layout-leaf via SvgPath widgets), so those values would be no-ops. Trimmed from the catalog.",
       "issue": ""
     },
     "css/position": {
@@ -2558,19 +2579,16 @@
       "issue": ""
     },
     "css/userSelect": {
-      "status": "supported",
+      "status": "partial",
       "mapsTo": "setUserSelect(id, value)",
       "supportedValues": [
         "none",
         "text",
         "all"
       ],
-      "unsupportedValues": [
-        "contain",
-        "auto"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "",
+      "notes": "pulp #1434 Triage #12 — catalog trim. CSS spec also lists `auto` and `contain`; pulp's bridge routes only none/text/all to View::UserSelect. Future bridge expansion can broaden this; for now the catalog is honest about what's wired.",
       "issue": ""
     },
     "css/verticalAlign": {
@@ -3189,14 +3207,16 @@
       "issue": ""
     },
     "rn/cursor": {
-      "status": "missing",
-      "mapsTo": "Bridge has setCursor -- not surfaced in @pulp/react TS.",
+      "status": "partial",
+      "mapsTo": "@pulp/react prop-applier dispatches to setCursor / setUserSelect / setPointerEvents bridge fns; partial status matches the css surface.",
       "supportedValues": [],
       "unsupportedValues": [
         "auto",
         "pointer"
       ],
-      "tests": [],
+      "tests": [
+        "packages/pulp-react/test/prop-applier-bundle.test.ts"
+      ],
       "notes": "Easy add.",
       "issue": ""
     },
@@ -3359,17 +3379,20 @@
       "issue": ""
     },
     "rn/flexWrap": {
-      "status": "partial",
-      "mapsTo": "setFlex(id, 'flex_wrap', value ? 1 : 0)",
+      "status": "supported",
+      "mapsTo": "@pulp/react prop-applier forwards string ('wrap' / 'wrap-reverse' / 'nowrap') verbatim to setFlex(flex_wrap, ...); legacy boolean still accepted (true → 1, false → 0).",
       "supportedValues": [
-        "true=wrap",
-        "false=nowrap"
-      ],
-      "unsupportedValues": [
+        "boolean (legacy)",
+        "nowrap",
+        "no-wrap",
+        "wrap",
         "wrap-reverse"
       ],
-      "tests": [],
-      "notes": "TS type is `boolean` -- RN's enum has 'wrap-reverse' which we cannot express.",
+      "unsupportedValues": [],
+      "tests": [
+        "packages/pulp-react/test/prop-applier-bundle.test.ts"
+      ],
+      "notes": "pulp #1434 Triage #14 — broadened flexWrap type to boolean | string (CSS keywords). RN spec accepts the same string vocabulary; routing same as css/flexWrap.",
       "issue": ""
     },
     "rn/fontFamily": {
@@ -3955,17 +3978,19 @@
       "issue": ""
     },
     "rn/pointerEvents": {
-      "status": "missing",
-      "mapsTo": "Bridge has setPointerEvents -- not surfaced in @pulp/react TS.",
-      "supportedValues": [],
-      "unsupportedValues": [
+      "status": "supported",
+      "mapsTo": "@pulp/react prop-applier dispatches to setCursor / setUserSelect / setPointerEvents bridge fns; partial status matches the css surface.",
+      "supportedValues": [
         "auto",
         "none",
-        "box-none",
-        "box-only"
+        "box-only",
+        "box-none"
       ],
-      "tests": [],
-      "notes": "Easy add.",
+      "unsupportedValues": [],
+      "tests": [
+        "packages/pulp-react/test/prop-applier-bundle.test.ts"
+      ],
+      "notes": "Easy add. pulp #1434 Triage #13 — trimmed SVG-specific values (pulp doesn't render SVG via renderer surface).",
       "issue": ""
     },
     "rn/position": {
@@ -4242,18 +4267,18 @@
       "issue": ""
     },
     "rn/userSelect": {
-      "status": "missing",
-      "mapsTo": "Bridge has setUserSelect -- not surfaced.",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "auto",
-        "text",
+      "status": "partial",
+      "mapsTo": "@pulp/react prop-applier dispatches to setCursor / setUserSelect / setPointerEvents bridge fns; partial status matches the css surface.",
+      "supportedValues": [
         "none",
-        "contain",
+        "text",
         "all"
       ],
-      "tests": [],
-      "notes": "",
+      "unsupportedValues": [],
+      "tests": [
+        "packages/pulp-react/test/prop-applier-bundle.test.ts"
+      ],
+      "notes": " pulp #1434 Triage #12 — trimmed to actual bridge coverage.",
       "issue": ""
     },
     "rn/verticalAlign": {
@@ -4335,17 +4360,16 @@
       "issue": ""
     },
     "yoga/flexWrap": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "FlexStyle.flex_wrap (bool)",
       "supportedValues": [
+        "nowrap",
         "wrap",
-        "nowrap"
-      ],
-      "unsupportedValues": [
         "wrap-reverse"
       ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "Bool can only express two states.",
+      "notes": "pulp #1434 Triage #14 — FlexStyle.flex_wrap is now FlexWrap enum (no_wrap/wrap/wrap_reverse); yoga_layout.cpp dispatches all three through YGNodeStyleSetFlexWrap with YGWrapNoWrap / YGWrapWrap / YGWrapWrapReverse.",
       "issue": ""
     },
     "yoga/flexGrow": {
