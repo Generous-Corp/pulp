@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-05-05 17:23 PDT
+Last reviewed: 2026-05-05 17:26 PDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`.
@@ -154,11 +154,12 @@ native-surface validity and null-window fallback behavior. It has no
 remote branch ref and remains unpushed and
 undispatched.
 Additional #640 audio progress is queued locally as
-`local/phase3-audio-focus-dispatch-640` at `27c21311`, refreshed from
+`local/phase3-audio-focus-dispatch-640` at `440d1838`, refreshed from
 `1ab6e24b` to `d766f4b9`, then onto current `origin/main` `bd036171`,
 then onto current `origin/main` `b7ec8f08`, then onto current
 `origin/main` `6c8b9920`, then to `e61d430c` on current
 `origin/main` `b567dbeb`, then onto current `origin/main` `7e9795b4`,
+then onto current `origin/main` `42bacd19`,
 covering AudioFocusRegistry inactive-listener
 skip behavior when a listener is removed or the registry is reset during
 dispatch. It remains unpushed and undispatched. Additional #640 audio
