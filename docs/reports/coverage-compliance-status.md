@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-05-05 17:08 PDT
+Last reviewed: 2026-05-05 17:11 PDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`.
@@ -531,11 +531,12 @@ branch remains unpushed and
 undispatched; #1273 still points at the old remote head until Namespace
 capacity returns.
 Additional #493 design-import progress is refreshed locally as
-`feature/phase3-design-import-bundle-coverage-493` at `5e1fcbd2`,
+`feature/phase3-design-import-bundle-coverage-493` at `9b2f2ed0`,
 rebased from the paused #1269 remote head `923b04f1` onto current
 `origin/main` `50ff5822`, then onto current `origin/main` `cf5ea658`,
 then onto current `origin/main` `24047ba3`, then onto current
-`origin/main` `df01f4f6`, covering Claude bundle malformed template/manifest handling, malformed
+`origin/main` `df01f4f6`, then onto current `origin/main` `d11f530e`,
+covering Claude bundle malformed template/manifest handling, malformed
 asset skips, referenced-JS indexing, and bundled classname extraction
 through font-face-leading styles. The
 refreshed branch remains unpushed and undispatched; #1269 still points
@@ -550,11 +551,12 @@ then onto current `origin/main` `df01f4f6`, covering
 behavior. The refreshed branch remains unpushed and undispatched; #1280
 still points at the old remote head until Namespace capacity returns.
 Additional #493 view progress is refreshed locally as
-`feature/view-text-editor-coverage-493-next` at `25570a36`, rebased from
+`feature/view-text-editor-coverage-493-next` at `426ffe57`, rebased from
 the paused #1282 remote head `03e5e3cd` onto current `origin/main`
 `50ff5822`, then onto `b7ec8f08`, then `cf5ea658`, then onto current
 `origin/main` `24047ba3`, then onto current `origin/main` `df01f4f6`,
-after superseding local refresh `f377ef5c` on `0447498e`, covering TextEditor
+then onto current `origin/main` `d11f530e`, after superseding local
+refresh `f377ef5c` on `0447498e`, covering TextEditor
 key-up/unhandled-key, modifier/word and shift navigation, delete/redo,
 shift-click, and exact double-click word selection paths. The refreshed
 branch remains unpushed and
