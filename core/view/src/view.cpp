@@ -760,6 +760,12 @@ std::optional<int> View::inheritable_font_weight() const {
     return std::nullopt;
 }
 
+std::optional<std::string> View::inheritable_font_family() const {
+    if (inh_font_family_.has_value()) return inh_font_family_;
+    if (parent_) return parent_->inheritable_font_family();
+    return std::nullopt;
+}
+
 std::optional<int> View::inheritable_text_align() const {
     if (inh_text_align_.has_value()) return inh_text_align_;
     if (parent_) return parent_->inheritable_text_align();

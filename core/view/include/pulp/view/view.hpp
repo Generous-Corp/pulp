@@ -110,6 +110,14 @@ public:
     void clear_inheritable_font_weight() { inh_font_weight_.reset(); }
     std::optional<int> inheritable_font_weight() const;
 
+    /// pulp #1434 Phase A2-5 — inheritable font-family cascade. Mirrors
+    /// the font-weight pattern; Labels read this when set_font_family
+    /// hasn't been called directly. Final SkFontMgr resolution is
+    /// gated on pulp #932 — the cascade plumbing is independent.
+    void set_inheritable_font_family(std::string f) { inh_font_family_ = std::move(f); }
+    void clear_inheritable_font_family() { inh_font_family_.reset(); }
+    std::optional<std::string> inheritable_font_family() const;
+
     /// 0 = left, 1 = center, 2 = right (matches LabelAlign).
     void set_inheritable_text_align(int a) { inh_text_align_ = a; }
     void clear_inheritable_text_align() { inh_text_align_.reset(); }
@@ -799,6 +807,7 @@ private:
     std::optional<float> inh_letter_spacing_;
     std::optional<int>   inh_font_weight_;
     std::optional<int>   inh_text_align_;
+    std::optional<std::string> inh_font_family_;  // pulp #1434 Phase A2-5
 };
 
 } // namespace pulp::view

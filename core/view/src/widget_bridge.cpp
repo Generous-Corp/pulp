@@ -2468,7 +2468,45 @@ void WidgetBridge::register_api() {
     engine_.register_function("setFontFamily", [this](choc::javascript::ArgumentList args) {
         auto* v = widget(args.get<std::string>(0, ""));
         auto family = args.get<std::string>(1, "");
-        if (auto* l = dynamic_cast<Label*>(v)) l->set_font_family(std::move(family));
+        if (!v) return choc::value::Value();
+        // pulp #1434 Phase A2-5 — comma-separated family list per CSS
+        // spec: split on commas, strip outer quotes, pick the first
+        // non-empty family name. The full SkFontMgr-backed resolver
+        // (which walks the list and picks the first registered family)
+        // is gated on pulp #932 — when that lands the same parsed list
+        // can be passed through verbatim. Today the bridge picks the
+        // first entry as the canonical family name; downstream font
+        // resolution (currently a no-op on Label) sees a clean string.
+        std::string first;
+        {
+            size_t i = 0;
+            while (i < family.size()) {
+                while (i < family.size() && std::isspace(static_cast<unsigned char>(family[i]))) ++i;
+                if (i >= family.size()) break;
+                size_t comma = family.find(',', i);
+                std::string seg = family.substr(i, (comma == std::string::npos ? family.size() : comma) - i);
+                while (!seg.empty() && std::isspace(static_cast<unsigned char>(seg.back()))) seg.pop_back();
+                // Strip outer quotes (CSS spec: quoted family names).
+                if (seg.size() >= 2
+                    && (seg.front() == '"' || seg.front() == '\'')
+                    && seg.back() == seg.front()) {
+                    seg = seg.substr(1, seg.size() - 2);
+                }
+                if (!seg.empty()) { first = std::move(seg); break; }
+                if (comma == std::string::npos) break;
+                i = comma + 1;
+            }
+        }
+        if (auto* l = dynamic_cast<Label*>(v)) {
+            l->set_font_family(first);
+        } else {
+            // pulp #1434 Phase A2-5 — inheritable cascade. Mirrors the
+            // setFontWeight / setLetterSpacing pattern so a container
+            // View's font-family flows down to descendant Labels.
+            // Requires View::set_inheritable_font_family which lands
+            // alongside this PR.
+            v->set_inheritable_font_family(first);
+        }
         return choc::value::Value();
     });
 

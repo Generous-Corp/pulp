@@ -5592,6 +5592,84 @@ TEST_CASE("CSSStyleDeclaration forwards width/height auto to bridge",
     REQUIRE(fa.dim_height.unit == DimensionUnit::auto_);
 }
 
+// pulp #1434 Phase A2-5 — fontFamily accepts a CSS comma-separated
+// list and picks the first non-empty family. Outer quotes (single or
+// double) are stripped per CSS spec. Whitespace is trimmed.
+TEST_CASE("setFontFamily parses comma-separated list and strips quotes",
+          "[view][bridge][css][issue-1434-fontfamily]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createLabel('t1', 'a');
+        createLabel('t2', 'b');
+        createLabel('t3', 'c');
+        createLabel('t4', 'd');
+        setFontFamily('t1', 'Inter Tight, system-ui, sans-serif');
+        setFontFamily('t2', '"JetBrains Mono", Menlo');
+        setFontFamily('t3', "'Helvetica Neue', Arial");
+        setFontFamily('t4', '   ,  Roboto  , Arial');
+    )");
+
+    auto* l1 = dynamic_cast<Label*>(bridge.widget("t1"));
+    auto* l2 = dynamic_cast<Label*>(bridge.widget("t2"));
+    auto* l3 = dynamic_cast<Label*>(bridge.widget("t3"));
+    auto* l4 = dynamic_cast<Label*>(bridge.widget("t4"));
+    REQUIRE(l1); REQUIRE(l2); REQUIRE(l3); REQUIRE(l4);
+    REQUIRE(l1->font_family() == "Inter Tight");
+    REQUIRE(l2->font_family() == "JetBrains Mono");
+    REQUIRE(l3->font_family() == "Helvetica Neue");
+    // Empty leading segment is skipped; first non-empty wins.
+    REQUIRE(l4->font_family() == "Roboto");
+}
+
+// pulp #1434 Phase A2-5 — when fontFamily is set on a non-Label
+// container View, the value lands in the inheritable_font_family_
+// slot so child Labels can read it via the parent walk. Mirrors the
+// existing letter_spacing / font_weight cascade pattern.
+TEST_CASE("setFontFamily on container View populates inheritable slot",
+          "[view][bridge][css][issue-1434-fontfamily]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('p', '');
+        setFontFamily('p', '"Custom Display", sans-serif');
+    )");
+
+    auto* panel = bridge.widget("p");
+    REQUIRE(panel != nullptr);
+    auto inh = panel->inheritable_font_family();
+    REQUIRE(inh.has_value());
+    REQUIRE(*inh == "Custom Display");
+}
+
+// pulp #1434 Phase A2-5 — CSS shim el.style.fontFamily forwards the
+// comma-separated list straight through to the bridge fn, where the
+// list-parsing happens. Verifies the @pulp/react CSS shim wires the
+// new prop without dropping it.
+TEST_CASE("CSSStyleDeclaration forwards font-family to bridge",
+          "[view][bridge][css][issue-1434-fontfamily]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createLabel('lbl', 'hi');
+        var s = new CSSStyleDeclaration({ _id: 'lbl', _nativeCreated: true });
+        s._applyProperty('fontFamily', '"Atkinson Hyperlegible", Georgia, serif');
+    )");
+
+    auto* lbl = dynamic_cast<Label*>(bridge.widget("lbl"));
+    REQUIRE(lbl != nullptr);
+    REQUIRE(lbl->font_family() == "Atkinson Hyperlegible");
+}
+
 // ── pulp #1434 Phase A2-2 — CSS Grid extended surface ──────────────────
 //
 // PR 1 of the multi-PR ladder. Builds on Pulp's existing grid layout

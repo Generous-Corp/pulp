@@ -1175,16 +1175,19 @@
       "issue": ""
     },
     "css/fontFamily": {
-      "status": "supported",
-      "mapsTo": "web-compat-style-decl.js: 'fontFamily' -> splits on commas, trims, strips matching outer quotes, picks the first non-empty token, calls setFontFamily(id, name). PR #1174.",
+      "status": "partial",
+      "mapsTo": "web-compat-style-decl.js + widget_bridge.cpp setFontFamily — both layers split CSS lists on commas, trim, strip outer quotes, and pick the first non-empty family. Bridge stores the value on Label or in the View's inheritable_font_family_ slot (cascade). PR #1174 + pulp #1434 Phase A2-5.",
       "supportedValues": [
-        "single font name (quoted or not)"
+        "single font name (quoted or not)",
+        "comma-separated font lists ('JetBrains Mono', ui-monospace, monospace) — first non-empty family wins"
       ],
       "unsupportedValues": [
-        "comma-separated font lists ('JetBrains Mono', monospace)"
+        "whole-list fallback chain (gated on pulp #932 — Skia SkFontMgr font registration). Today only the first family is consulted; if it isn't registered with Skia, fall through is to the platform default rather than the next family in the list."
       ],
-      "tests": [],
-      "notes": "Fixed 2026-04-29 (#1174 / pulp #1151). Generic fallbacks ('monospace', 'ui-monospace', 'sans-serif') are not specially recognized — Skia falls back to the platform default if SkFontMgr can't resolve any of the named families.",
+      "tests": [
+        "test/test_widget_bridge.cpp — [issue-1434-fontfamily]"
+      ],
+      "notes": "Phase A2-5 (pulp #1434) added @pulp/react JSX dispatch and a bridge-side list parser so direct setFontFamily('id', 'A, B, C') calls are now correct (previously the whole comma list was passed verbatim to SkFontMgr, never matched, silent platform fallback). The cascade slot on container Views means container-level fontFamily reaches descendant Labels via parent-walk (mirrors letter_spacing / font_weight). Still partial because the spec-correct fallback chain (try family A, then B, then C) requires SkFontMgr font registration in pulp #932.",
       "issue": "1151"
     },
     "css/fontSize": {
@@ -3519,15 +3522,19 @@
       "issue": ""
     },
     "rn/fontFamily": {
-      "status": "missing",
-      "mapsTo": "intentionally NOT dispatched in prop-applier.ts (line 152 comment) -- pending #932 SkFontMgr fix",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "string"
+      "status": "partial",
+      "mapsTo": "prop-applier.ts case 'fontFamily' -> setFontFamily(id, value). Bridge parses CSS list (first non-empty family wins). Container Views fall through to inheritable_font_family_ for cascade.",
+      "supportedValues": [
+        "string (single family or comma-separated list — first non-empty wins)"
       ],
-      "tests": [],
-      "notes": "Documented gap in prop-applier; reflects pulp#932 / pulp#927.",
-      "issue": ""
+      "unsupportedValues": [
+        "whole-list fallback chain — gated on pulp #932 SkFontMgr registration"
+      ],
+      "tests": [
+        "test/test_widget_bridge.cpp — [issue-1434-fontfamily]"
+      ],
+      "notes": "pulp #1434 Phase A2-5 wired the @pulp/react JSX dispatch and the bridge-side list parser. Cross-engine ready: when pulp #932 lands the registry resolution, no consumer change is needed — the same name flows through.",
+      "issue": "1434"
     },
     "rn/fontSize": {
       "status": "supported",
