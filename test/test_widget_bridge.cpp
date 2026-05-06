@@ -4971,3 +4971,121 @@ TEST_CASE("CSSStyleDeclaration forwards marginTop percent + auto verbatim",
     REQUIRE(fb.dim_margin_left.unit  == DimensionUnit::auto_);
     REQUIRE(fb.dim_margin_right.unit == DimensionUnit::auto_);
 }
+
+// ── pulp #1434 Triage #10 — borderStyle dashed/dotted ─────────────────────
+//
+// Bridge maps the CSS border-style keyword to View::BorderStyle. Skia
+// installs SkDashPathEffect at stroke time for `dashed` / `dotted`;
+// other named styles currently degrade to solid (paint-side gap).
+// `none` / `hidden` short-circuit the stroke entirely.
+
+TEST_CASE("setBorderStyle maps each keyword to the right enum",
+          "[view][bridge][css][issue-1434-borderstyle]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('a', '');  setBorderStyle('a', 'solid');
+        createPanel('b', '');  setBorderStyle('b', 'dashed');
+        createPanel('c', '');  setBorderStyle('c', 'dotted');
+        createPanel('d', '');  setBorderStyle('d', 'double');
+        createPanel('e', '');  setBorderStyle('e', 'groove');
+        createPanel('f', '');  setBorderStyle('f', 'ridge');
+        createPanel('g', '');  setBorderStyle('g', 'inset');
+        createPanel('h', '');  setBorderStyle('h', 'outset');
+        createPanel('i', '');  setBorderStyle('i', 'none');
+        createPanel('j', '');  setBorderStyle('j', 'hidden');
+    )");
+
+    REQUIRE(bridge.widget("a")->border_style() == View::BorderStyle::solid);
+    REQUIRE(bridge.widget("b")->border_style() == View::BorderStyle::dashed);
+    REQUIRE(bridge.widget("c")->border_style() == View::BorderStyle::dotted);
+    REQUIRE(bridge.widget("d")->border_style() == View::BorderStyle::double_);
+    REQUIRE(bridge.widget("e")->border_style() == View::BorderStyle::groove);
+    REQUIRE(bridge.widget("f")->border_style() == View::BorderStyle::ridge);
+    REQUIRE(bridge.widget("g")->border_style() == View::BorderStyle::inset);
+    REQUIRE(bridge.widget("h")->border_style() == View::BorderStyle::outset);
+    REQUIRE(bridge.widget("i")->border_style() == View::BorderStyle::none);
+    REQUIRE(bridge.widget("j")->border_style() == View::BorderStyle::hidden);
+}
+
+TEST_CASE("setBorderStyle unknown keyword falls back to solid",
+          "[view][bridge][css][issue-1434-borderstyle]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        createPanel('x', '');
+        setBorderStyle('x', 'parchment-curl');
+    )");
+    REQUIRE(bridge.widget("x")->border_style() == View::BorderStyle::solid);
+}
+
+TEST_CASE("dashed border emits set_line_dash command then clears it",
+          "[view][widget][issue-1434-borderstyle]") {
+    // Recording-canvas inspection: the paint sequence for a dashed
+    // border must include set_line_dash with a 2-entry pattern, the
+    // stroke call, and a final set_line_dash(intervals=null) reset
+    // so subsequent strokes don't inherit the dash.
+    View v;
+    v.set_bounds({0, 0, 100, 80});
+    v.set_border({0xff, 0, 0, 0xff}, 2.0f, 0.0f);
+    v.set_border_style(View::BorderStyle::dashed);
+
+    pulp::canvas::RecordingCanvas canvas;
+    v.paint_all(canvas);
+
+    int set_dash_count = 0;
+    bool saw_stroke = false;
+    bool stroke_after_first_dash = false;
+    bool dash_reset_after_stroke = false;
+    size_t first_intervals_count = 0;
+    size_t last_intervals_count = 999;
+    for (const auto& cmd : canvas.commands()) {
+        if (cmd.type == pulp::canvas::DrawCommand::Type::set_line_dash) {
+            set_dash_count++;
+            if (set_dash_count == 1) first_intervals_count = cmd.floats.size();
+            last_intervals_count = cmd.floats.size();
+            if (saw_stroke) dash_reset_after_stroke = true;
+        }
+        if (cmd.type == pulp::canvas::DrawCommand::Type::stroke_rect) {
+            saw_stroke = true;
+            if (set_dash_count > 0) stroke_after_first_dash = true;
+        }
+    }
+    REQUIRE(saw_stroke);
+    REQUIRE(stroke_after_first_dash);
+    REQUIRE(dash_reset_after_stroke);
+    REQUIRE(first_intervals_count == 2u);  // [on, off]
+    REQUIRE(last_intervals_count == 0u);   // reset
+}
+
+TEST_CASE("solid border does NOT emit set_line_dash",
+          "[view][widget][issue-1434-borderstyle]") {
+    View v;
+    v.set_bounds({0, 0, 100, 80});
+    v.set_border({0xff, 0, 0, 0xff}, 2.0f, 0.0f);
+    // Default style is solid — no dash should be installed.
+    pulp::canvas::RecordingCanvas canvas;
+    v.paint_all(canvas);
+    for (const auto& cmd : canvas.commands()) {
+        REQUIRE(cmd.type != pulp::canvas::DrawCommand::Type::set_line_dash);
+    }
+}
+
+TEST_CASE("border-style: none short-circuits the stroke",
+          "[view][widget][issue-1434-borderstyle]") {
+    View v;
+    v.set_bounds({0, 0, 100, 80});
+    v.set_border({0xff, 0, 0, 0xff}, 2.0f, 0.0f);
+    v.set_border_style(View::BorderStyle::none);
+    pulp::canvas::RecordingCanvas canvas;
+    v.paint_all(canvas);
+    for (const auto& cmd : canvas.commands()) {
+        REQUIRE(cmd.type != pulp::canvas::DrawCommand::Type::stroke_rect);
+        REQUIRE(cmd.type != pulp::canvas::DrawCommand::Type::stroke_rounded_rect);
+    }
+}

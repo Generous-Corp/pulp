@@ -98,6 +98,13 @@ export interface StyleProps {
     borderColor?: string;
     borderWidth?: number;
     borderRadius?: number;
+    /// pulp #1434 Triage #10 — CSS / RN border-style keyword. Skia
+    /// installs SkDashPathEffect for `'dashed'` / `'dotted'`; other
+    /// named styles (`'double'`, `'groove'`, `'ridge'`, `'inset'`,
+    /// `'outset'`) currently degrade to solid (paint-side gap).
+    /// `'none'` / `'hidden'` skip the stroke entirely.
+    borderStyle?: 'solid' | 'dashed' | 'dotted' | 'double' | 'groove'
+                | 'ridge' | 'inset' | 'outset' | 'none' | 'hidden';
     borderTopColor?: string;
     borderRightColor?: string;
     borderBottomColor?: string;

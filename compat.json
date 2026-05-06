@@ -633,18 +633,26 @@
       "issue": ""
     },
     "css/borderStyle": {
-      "status": "missing",
-      "mapsTo": "no branch",
-      "supportedValues": [],
-      "unsupportedValues": [
+      "status": "supported",
+      "mapsTo": "web-compat-style-decl.js forwards the keyword verbatim to setBorderStyle (widget_bridge.cpp); View::BorderStyle stores the enum; view.cpp paint installs SkDashPathEffect via canvas.set_line_dash(...) for dashed/dotted at stroke time.",
+      "supportedValues": [
         "solid",
         "dashed",
         "dotted",
-        "double",
-        "etc."
+        "none",
+        "hidden",
+        "double (degrades to solid)",
+        "groove (degrades to solid)",
+        "ridge (degrades to solid)",
+        "inset (degrades to solid)",
+        "outset (degrades to solid)"
       ],
-      "tests": [],
-      "notes": "Renderer always paints solid.",
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp::\"setBorderStyle maps each keyword to the right enum\"",
+        "test/test_widget_bridge.cpp::\"dashed border emits set_line_dash command then clears it\""
+      ],
+      "notes": "pulp #1434 Triage #10 — Skia paint installs SkDashPathEffect for dashed/dotted (CG falls through to solid via the canvas-base no-op set_line_dash). View::BorderStyle enum stores the keyword; bridge maps strings; Skia honors at stroke time. Other named styles (double/groove/ridge/inset/outset) currently degrade to solid — paint-side compositions are a follow-up. none/hidden short-circuit the stroke entirely.",
       "issue": ""
     },
     "css/borderTop": {
@@ -3021,16 +3029,25 @@
       "issue": ""
     },
     "rn/borderStyle": {
-      "status": "missing",
-      "mapsTo": "no bridge support (renderer is solid-only)",
-      "supportedValues": [],
-      "unsupportedValues": [
+      "status": "supported",
+      "mapsTo": "@pulp/react prop-applier dispatches borderStyle to setBorderStyle. Bridge + Skia path same as css/borderStyle.",
+      "supportedValues": [
         "solid",
+        "dashed",
         "dotted",
-        "dashed"
+        "none",
+        "hidden",
+        "double (degrades to solid)",
+        "groove (degrades to solid)",
+        "ridge (degrades to solid)",
+        "inset (degrades to solid)",
+        "outset (degrades to solid)"
       ],
-      "tests": [],
-      "notes": "Renderer always solid.",
+      "unsupportedValues": [],
+      "tests": [
+        "packages/pulp-react/test/prop-applier-border-style.test.ts"
+      ],
+      "notes": "pulp #1434 Triage #10 — Skia paint installs SkDashPathEffect for dashed/dotted (CG falls through to solid via the canvas-base no-op set_line_dash). View::BorderStyle enum stores the keyword; bridge maps strings; Skia honors at stroke time. Other named styles (double/groove/ridge/inset/outset) currently degrade to solid — paint-side compositions are a follow-up. none/hidden short-circuit the stroke entirely.",
       "issue": ""
     },
     "rn/borderTopColor": {

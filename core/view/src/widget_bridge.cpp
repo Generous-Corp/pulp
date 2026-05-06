@@ -2904,6 +2904,30 @@ void WidgetBridge::register_api() {
         return choc::value::Value();
     });
 
+    // setBorderStyle(id, "solid"|"dashed"|"dotted"|...) — pulp #1434
+    // Triage #10. Maps the CSS border-style keyword to View::BorderStyle.
+    // Skia paint installs the dashed / dotted SkDashPathEffect at stroke
+    // time; double / groove / ridge / inset / outset currently degrade
+    // to solid (paint-side gap, tracked for follow-up). none / hidden
+    // short-circuit the stroke entirely.
+    engine_.register_function("setBorderStyle", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto s = args.get<std::string>(1, "solid");
+        auto* v = id.empty() ? &root_ : widget(id);
+        if (!v) return choc::value::Value();
+        if (s == "dashed")        v->set_border_style(View::BorderStyle::dashed);
+        else if (s == "dotted")   v->set_border_style(View::BorderStyle::dotted);
+        else if (s == "double")   v->set_border_style(View::BorderStyle::double_);
+        else if (s == "groove")   v->set_border_style(View::BorderStyle::groove);
+        else if (s == "ridge")    v->set_border_style(View::BorderStyle::ridge);
+        else if (s == "inset")    v->set_border_style(View::BorderStyle::inset);
+        else if (s == "outset")   v->set_border_style(View::BorderStyle::outset);
+        else if (s == "none")     v->set_border_style(View::BorderStyle::none);
+        else if (s == "hidden")   v->set_border_style(View::BorderStyle::hidden);
+        else                      v->set_border_style(View::BorderStyle::solid);
+        return choc::value::Value();
+    });
+
     // setBorderRadius(id, radius) — uniform corner radius. Per-corner
     // setters (setBorderTopLeftRadius / TopRight / BottomLeft / BottomRight)
     // override individual corners on top of the uniform value.

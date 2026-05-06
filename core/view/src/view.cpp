@@ -226,9 +226,30 @@ void View::paint_all(canvas::Canvas& canvas) {
     }
 
     // Paint border if set
-    if (has_border_ && border_width_ > 0) {
+    // pulp #1434 Triage #10 — border-style honored at paint time.
+    // `none` / `hidden` short-circuit; `dashed` / `dotted` install a
+    // SkDashPathEffect via canvas.set_line_dash(...) before stroking.
+    // Other named styles (`double` / `groove` / `ridge` / `inset` /
+    // `outset`) currently degrade to solid — Skia / CG plumbing for
+    // those is a follow-up paint slice.
+    if (has_border_ && border_width_ > 0
+            && border_style_ != BorderStyle::none
+            && border_style_ != BorderStyle::hidden) {
         canvas.set_stroke_color(border_color_);
         canvas.set_line_width(border_width_);
+
+        // Install dash pattern for dashed / dotted. Pattern values are
+        // a function of the stroke width so the visible cadence scales
+        // with the border thickness — matches how CSS UAs render these.
+        const float w = border_width_;
+        if (border_style_ == BorderStyle::dashed) {
+            const float dashed[2] = { 3.0f * w, 3.0f * w };
+            canvas.set_line_dash(dashed, 2, 0.0f);
+        } else if (border_style_ == BorderStyle::dotted) {
+            const float dotted[2] = { 1.0f * w, 2.0f * w };
+            canvas.set_line_dash(dotted, 2, 0.0f);
+        }
+
         if (use_per_corner) {
             build_per_corner_rounded_rect_path(canvas, bounds_.width, bounds_.height,
                                                corner_radii_[0], corner_radii_[1],
@@ -238,6 +259,14 @@ void View::paint_all(canvas::Canvas& canvas) {
             canvas.stroke_rounded_rect(0, 0, bounds_.width, bounds_.height, corner_radius_);
         } else {
             canvas.stroke_rect(0, 0, bounds_.width, bounds_.height);
+        }
+
+        // Reset dash pattern so subsequent strokes (per-side borders,
+        // children) aren't dashed inadvertently. Empty intervals array
+        // disables the path effect on Skia and is a no-op on CG.
+        if (border_style_ == BorderStyle::dashed
+                || border_style_ == BorderStyle::dotted) {
+            canvas.set_line_dash(nullptr, 0, 0.0f);
         }
     }
 

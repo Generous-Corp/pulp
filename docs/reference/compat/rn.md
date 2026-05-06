@@ -27,6 +27,17 @@ Spec walk:
 
 ## Recently changed
 
+- **2026-05-05 (pulp #1434 Triage #10)** — `rn/borderStyle` surfaced
+  at the `@pulp/react` JSX layer with the full keyword set: `solid`,
+  `dashed`, `dotted`, `double`, `groove`, `ridge`, `inset`, `outset`,
+  `none`, `hidden`. The prop-applier dispatches the keyword to the
+  newly-registered `setBorderStyle` bridge fn; `View::BorderStyle`
+  stores the enum and the Skia paint installs `SkDashPathEffect`
+  for `dashed` / `dotted` at stroke time. Other named styles
+  currently degrade to solid (paint-side gap). `none` / `hidden`
+  skip the stroke entirely. Reclassified missing → supported. RN
+  exports / Figma motion borders / v0.dev card outlines now port
+  verbatim.
 - **2026-05-05 (pulp #1434 cross-surface mega-batch)** — per-edge
   `margin{Top,Right,Bottom,Left}` and `padding{Top,Right,Bottom,Left}`
   on the `@pulp/react` JSX surface now accept `number | string`

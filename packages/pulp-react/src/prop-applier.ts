@@ -467,6 +467,11 @@ function applyOne(id: string, type: string, key: string, value: unknown, props?:
         case 'borderColor':  return call('setBorderColor', id, value as string);
         case 'borderWidth':  return call('setBorderWidth', id, value as number);
         case 'borderRadius': return call('setBorderRadius', id, value as number);
+        // pulp #1434 Triage #10 — borderStyle keyword passes verbatim
+        // to setBorderStyle. Bridge maps to View::BorderStyle. Skia
+        // installs the dash effect for `dashed` / `dotted`; other
+        // named styles currently degrade to solid.
+        case 'borderStyle':  return call('setBorderStyle', id, value as string);
         case 'borderTop':    { const b = value as { color: string; width: number }; return call('setBorderSide', id, 'top', b.width, b.color); }
         case 'borderRight':  { const b = value as { color: string; width: number }; return call('setBorderSide', id, 'right', b.width, b.color); }
         case 'borderBottom': { const b = value as { color: string; width: number }; return call('setBorderSide', id, 'bottom', b.width, b.color); }

@@ -506,6 +506,16 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
             if (bw) setBorderWidth(id, bw.value);
             break;
         }
+        // pulp #1434 Triage #10 — borderStyle keyword passes verbatim to
+        // setBorderStyle. The bridge maps to View::BorderStyle. Skia
+        // installs SkDashPathEffect for dashed/dotted; other named
+        // styles currently degrade to solid (paint-side gap).
+        case "borderStyle": {
+            if (typeof setBorderStyle !== "undefined") {
+                setBorderStyle(id, resolved);
+            }
+            break;
+        }
 
         // Opacity
         case "opacity":

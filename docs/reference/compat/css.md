@@ -33,6 +33,23 @@ specifics are out of scope.
 
 ## Recently changed
 
+- **2026-05-05 (pulp #1434 Triage #10)** — `css/borderStyle` now
+  honors the keyword at paint time. New `View::BorderStyle` enum
+  (`solid` / `dashed` / `dotted` / `double` / `groove` / `ridge` /
+  `inset` / `outset` / `none` / `hidden`) stored on each View; the
+  paint pass installs `SkDashPathEffect` via
+  `canvas.set_line_dash(...)` for `dashed` (3w/3w on/off) and
+  `dotted` (1w/2w on/off) before stroking, and resets the pattern
+  afterward so subsequent strokes aren't dashed inadvertently.
+  `none` / `hidden` short-circuit the stroke entirely. Other named
+  styles (`double` / `groove` / `ridge` / `inset` / `outset`)
+  currently degrade to solid — Skia compositions for those are a
+  follow-up. CG canvas inherits the canvas-base no-op
+  `set_line_dash` so dashed / dotted on the macOS native path
+  silently render as solid (Skia path effect not yet plumbed
+  through CG). `setBorderStyle` is a newly registered bridge fn;
+  the CSS shim's `borderStyle` case forwards the keyword verbatim.
+  Reclassified missing → supported.
 - **2026-05-05 (pulp #1434 cross-surface mega-batch)** — per-edge
   `margin{Top,Right,Bottom,Left}` and `padding{Top,Right,Bottom,Left}`
   accept percent values (`'5%'`); margin also accepts `'auto'`

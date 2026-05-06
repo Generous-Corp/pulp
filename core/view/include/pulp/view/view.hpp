@@ -322,6 +322,28 @@ public:
     void set_border_width(float w) { border_width_ = w; has_border_ = true; }
     void set_border_radius(float r) { corner_radius_ = r; }
 
+    /// CSS / RN border-style. pulp #1434 Triage #10 — Skia path effect
+    /// dispatches on style at paint time. CG falls through to solid
+    /// (the cg_canvas.mm path inherits the canvas-base no-op
+    /// set_line_dash). Values that pulp doesn't render natively
+    /// (`double` / `groove` / `ridge` / `inset` / `outset`) degrade to
+    /// solid — documented as a paint-time gap in the catalog. `none` /
+    /// `hidden` skip the stroke entirely (paint() short-circuits).
+    enum class BorderStyle {
+        solid,    ///< Default — single continuous line.
+        dashed,   ///< SkDashPathEffect with 3w/3w on/off pattern.
+        dotted,   ///< SkDashPathEffect with w/2w on/off pattern (round caps).
+        double_,  ///< Two parallel lines — degrades to solid for now.
+        groove,   ///< Carved-in look — degrades to solid for now.
+        ridge,    ///< Raised look — degrades to solid for now.
+        inset,    ///< 3D-shaded inset — degrades to solid for now.
+        outset,   ///< 3D-shaded outset — degrades to solid for now.
+        none,     ///< No border drawn (paint short-circuits).
+        hidden,   ///< Same as none for paint purposes.
+    };
+    void set_border_style(BorderStyle s) { border_style_ = s; }
+    BorderStyle border_style() const { return border_style_; }
+
     /// Per-side borders (CSS border-top, border-right, etc.)
     void set_border_top(Color c, float w) { border_top_ = {c, w}; has_border_sides_ = true; }
     void set_border_right(Color c, float w) { border_right_ = {c, w}; has_border_sides_ = true; }
@@ -681,6 +703,7 @@ private:
     float border_width_ = 0;
     float corner_radius_ = 0;
     bool has_border_ = false;
+    BorderStyle border_style_ = BorderStyle::solid;
     // Per-side borders
     struct BorderSide { Color color{}; float width = 0; };
     BorderSide border_top_{}, border_right_{}, border_bottom_{}, border_left_{};

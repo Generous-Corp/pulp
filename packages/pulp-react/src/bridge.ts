@@ -99,6 +99,10 @@ declare global {
     const setBorderColor: ((id: string, hexColor: string) => void) | undefined;
     const setBorderWidth: ((id: string, width: number) => void) | undefined;
     const setBorderRadius: ((id: string, radius: number) => void) | undefined;
+    // pulp #1434 Triage #10 — border-style keyword. Bridge maps to
+    // View::BorderStyle; Skia installs SkDashPathEffect for dashed/
+    // dotted at stroke time. Other named styles degrade to solid.
+    const setBorderStyle: ((id: string, style: string) => void) | undefined;
     const setBorderTopColor: ((id: string, hexColor: string) => void) | undefined;
     const setBorderRightColor: ((id: string, hexColor: string) => void) | undefined;
     const setBorderBottomColor: ((id: string, hexColor: string) => void) | undefined;
@@ -203,7 +207,7 @@ export function createMockBridge(): MockBridge {
         'setFlex', 'setBackground', 'setBackgroundGradient', 'setBorder',
         // pulp #1027 — per-attribute border setters needed for the audit
         // PR #1166 finding-#4 fix (preserve unset siblings).
-        'setBorderColor', 'setBorderWidth', 'setBorderRadius',
+        'setBorderColor', 'setBorderWidth', 'setBorderRadius', 'setBorderStyle',
         'setBorderTopColor', 'setBorderRightColor',
         'setBorderBottomColor', 'setBorderLeftColor',
         'setBorderTopWidth', 'setBorderRightWidth',
