@@ -245,14 +245,25 @@ function parseFragment(src: string, preserveRawSource: boolean): BuildNode[] {
     while (i < src.length) {
         // Skip leading whitespace between tags but preserve text-runs.
         if (src[i] === '<' && src[i + 1] !== '/') {
-            const node = buildFromTag(src, i, src.length, preserveRawSource);
-            if (!node) {
+            // Compute the consumed length from the parser's view of the
+            // tag's outer slice — independent of whether `node.rawHtml`
+            // is retained on the BuildNode. When `preserveRawSource`
+            // is false, `makeNode` deliberately stores `rawHtml: ''`,
+            // so reading `node.rawHtml.length` would advance by 0 and
+            // loop forever on any tag-shaped input. Compute consumed
+            // length from the same outer-slice the builder uses.
+            const consumed = consumeTagOuterLength(src, i);
+            if (consumed <= 0) {
                 i++;
                 continue;
             }
-            // Advance past the consumed range. node.rawHtml is the
-            // outer slice — find it from `i`.
-            const consumed = node.rawHtml.length;
+            const node = buildFromTag(src, i, src.length, preserveRawSource);
+            if (!node) {
+                // Malformed but had a tag-shaped opener — skip past the
+                // opener so we don't loop forever on the same byte.
+                i += consumed;
+                continue;
+            }
             i += consumed;
             children.push(node);
             continue;
@@ -270,9 +281,41 @@ function parseFragment(src: string, preserveRawSource: boolean): BuildNode[] {
                 confidence: 'PASS',
             });
         }
-        i = textEnd;
+        // Guarantee forward progress even if textEnd === i (e.g. when
+        // `<` appears immediately at the cursor and the open-tag branch
+        // above bailed without consuming).
+        i = textEnd === i ? i + 1 : textEnd;
     }
     return children;
+}
+
+/**
+ * Compute the length of the outer-tag slice starting at `start` in
+ * `src`, mirroring the structural traversal `buildFromTag` performs.
+ * Returns 0 if `src[start]` doesn't begin a tag we can parse.
+ *
+ * This duplicates a bit of `buildFromTag`'s parsing because we need
+ * the consumed length BEFORE constructing a BuildNode whose `rawHtml`
+ * may have been intentionally cleared by `makeNode` when
+ * `preserveRawSource` is false.
+ */
+function consumeTagOuterLength(src: string, start: number): number {
+    const slice = src.slice(start);
+    const openMatch = slice.match(/^<([a-zA-Z][a-zA-Z0-9-]*)((?:\s+[a-zA-Z-]+="[^"]*")*)\s*(\/?)>/);
+    if (!openMatch) return 0;
+    const [openText, tagName, , selfClose] = openMatch;
+    if (selfClose === '/') {
+        return openText.length;
+    }
+    const contentStart = start + openText.length;
+    const closeIdx = findMatchingCloseTag(src, contentStart, tagName);
+    if (closeIdx < 0) {
+        // Malformed — `buildFromTag` treats this as self-closing on
+        // the whole remainder; mirror that so we don't loop.
+        return src.length - start;
+    }
+    const closeTag = `</${tagName}>`;
+    return closeIdx + closeTag.length - start;
 }
 
 function extractDirectTextContent(innerSrc: string): string | undefined {
