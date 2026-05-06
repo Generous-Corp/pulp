@@ -48,6 +48,18 @@ specifics are out of scope.
   Reclassified `css/lineClamp` and `css/webkitLineClamp` to
   `supported`; `css/backgroundRepeat` stays `partial` with the
   honest "storage-only" caveat.
+- **2026-05-06 (pulp #1517)** — Background sub-properties wired through
+  the JS shim and bridge: `backgroundAttachment` / `backgroundClip` /
+  `backgroundOrigin` flipped from `missing` to `noop` / `partial` /
+  `noop`. New thin bridge fns `setBackgroundAttachment` /
+  `setBackgroundClip` / `setBackgroundOrigin` store the keyword on
+  the View. Paint impact today is partial: `backgroundClip: text`
+  (paint-time SkBlendMode::kSrcIn against text glyphs) is the only
+  variant that needs real paint work and is deferred; box-flavor
+  variants are no-ops on solid backgrounds (which is what pulp
+  paints), and `backgroundAttachment: scroll` is the conformant
+  default for our non-scrolling layout. Wiring is complete so that
+  when the paint-side variants land, the slot is already populated.
 - **2026-05-06 (pulp #1519)** — CSS outline cluster fully bridge-backed.
   `setOutlineColor` / `setOutlineOffset` / `setOutlineStyle` /
   `setOutlineWidth` now register in `widget_bridge.cpp`; the CSS
