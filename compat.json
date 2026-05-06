@@ -4371,36 +4371,51 @@
       "issue": ""
     },
     "rn/textShadowColor": {
-      "status": "missing",
-      "mapsTo": "no bridge (setTextShadow not registered)",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "supported",
+      "mapsTo": "@pulp/react prop-applier dispatches textShadowColor to setTextShadowColor (prop-applier.ts since pulp #1548). Bridge writes to View::text_shadow_color_; Label::paint plumbs the alpha-gated color into canvas.set_shadow_color around fill_text.",
+      "supportedValues": [
+        "#hex",
+        "#rgba",
+        "rgb()",
+        "rgba()",
+        "named colors"
       ],
-      "tests": [],
-      "notes": "",
+      "unsupportedValues": [
+        "currentColor keyword"
+      ],
+      "tests": [
+        "test/test_widget_bridge.cpp",
+        "packages/pulp-react/test/prop-applier-text-shadow.test.ts"
+      ],
+      "notes": "pulp #1548 — RN textShadow cluster. Paint-time only on Label glyphs (canvas shadow set before fill_text, cleared after). Default alpha=0 keeps the path a no-op until JS opts in. Skia backend installs a SkBlurMaskFilter via apply_shadow_filter (same code path canvas2d shadows use, #1446).",
       "issue": ""
     },
     "rn/textShadowOffset": {
-      "status": "missing",
-      "mapsTo": "no bridge",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "supported",
+      "mapsTo": "@pulp/react prop-applier splits RN `{ width, height }` into two scalars and dispatches to setTextShadowOffset (prop-applier.ts since pulp #1548). Bridge writes both scalars to View::text_shadow_offset_x_/y_.",
+      "supportedValues": [
+        "{ width: number, height: number }"
       ],
-      "tests": [],
-      "notes": "",
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp",
+        "packages/pulp-react/test/prop-applier-text-shadow.test.ts"
+      ],
+      "notes": "pulp #1548 — RN textShadow cluster. Negative offsets are valid (shift shadow up-and-left) and pass through verbatim.",
       "issue": ""
     },
     "rn/textShadowRadius": {
-      "status": "missing",
-      "mapsTo": "no bridge",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "supported",
+      "mapsTo": "@pulp/react prop-applier dispatches textShadowRadius to setTextShadowRadius (prop-applier.ts since pulp #1548). Bridge writes to View::text_shadow_radius_; Label::paint maps it to canvas.set_shadow_blur which SkiaCanvas halves to derive the SkImage filter sigma.",
+      "supportedValues": [
+        "number (px)"
       ],
-      "tests": [],
-      "notes": "",
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp",
+        "packages/pulp-react/test/prop-applier-text-shadow.test.ts"
+      ],
+      "notes": "pulp #1548 — RN textShadow cluster. Radius 0 with non-zero offset still emits a sharp drop shadow (matches CSS box-shadow blur=0).",
       "issue": ""
     },
     "rn/textTransform": {

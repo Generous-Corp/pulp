@@ -3116,6 +3116,50 @@ void WidgetBridge::register_api() {
         return choc::value::Value();
     });
 
+    // pulp #1548 — RN textShadow* cluster (color / offset / radius).
+    // Each setter writes one slot in isolation so a JSX prop diff that
+    // touches only `textShadowRadius` does not clobber the previously-set
+    // color or offset. Label::paint translates the trio into the existing
+    // canvas shadow API (set_shadow_color / blur / offset_x / offset_y)
+    // around fill_text, which on the Skia backend installs a
+    // SkBlurMaskFilter via apply_shadow_filter — same code path canvas2d
+    // shadows already use (#1446).
+    //
+    // setTextShadowColor(id, hex) — accepts the same color forms as the
+    // background / border / outline color setters (#hex / rgb() / named).
+    engine_.register_function("setTextShadowColor", [this, parseHexColor](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto hex = args.get<std::string>(1, "");
+        auto* v = id.empty() ? &root_ : widget(id);
+        if (v && !hex.empty()) v->set_text_shadow_color(parseHexColor(hex));
+        return choc::value::Value();
+    });
+
+    // setTextShadowOffset(id, dx, dy) — RN's textShadowOffset arrives at
+    // the @pulp/react prop-applier as `{ width, height }` and is split
+    // into two scalars before dispatch. Negative values are valid (offset
+    // can shift the shadow up-and-left) and are passed through verbatim.
+    engine_.register_function("setTextShadowOffset", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto dx = static_cast<float>(args.get<double>(1, 0.0));
+        auto dy = static_cast<float>(args.get<double>(2, 0.0));
+        auto* v = id.empty() ? &root_ : widget(id);
+        if (v) v->set_text_shadow_offset(dx, dy);
+        return choc::value::Value();
+    });
+
+    // setTextShadowRadius(id, px) — blur radius. RN spec models this as
+    // a scalar; Label::paint converts it to canvas.set_shadow_blur which
+    // SkiaCanvas::apply_shadow_filter then halves to derive the SkImage
+    // filter sigma (matches CSS box-shadow blur semantics).
+    engine_.register_function("setTextShadowRadius", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto r = static_cast<float>(args.get<double>(1, 0.0));
+        auto* v = id.empty() ? &root_ : widget(id);
+        if (v) v->set_text_shadow_radius(r);
+        return choc::value::Value();
+    });
+
     // setBorderRadius(id, radius) — uniform corner radius. Per-corner
     // setters (setBorderTopLeftRadius / TopRight / BottomLeft / BottomRight)
     // override individual corners on top of the uniform value.

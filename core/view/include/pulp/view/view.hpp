@@ -371,6 +371,23 @@ public:
     BorderStyle outline_style() const { return outline_style_; }
     float outline_width() const { return outline_width_; }
 
+    /// RN textShadow* cluster (pulp #1548). Three independent paint-time
+    /// slots applied to text glyphs only (Label::paint plumbs them through
+    /// canvas.set_shadow_* before fill_text). Defaults are zeroed so Label
+    /// short-circuits the shadow when nothing is set (color alpha == 0). The
+    /// cluster maps verbatim to RN's flat textShadow{Color,Offset,Radius}
+    /// style props; offset arrives as `{ width, height }` from RN and is
+    /// dispatched as two scalars by @pulp/react's prop-applier.
+    void set_text_shadow_color(Color c) { text_shadow_color_ = c; }
+    void set_text_shadow_offset(float dx, float dy) {
+        text_shadow_offset_x_ = dx; text_shadow_offset_y_ = dy;
+    }
+    void set_text_shadow_radius(float r) { text_shadow_radius_ = r; }
+    Color text_shadow_color() const { return text_shadow_color_; }
+    float text_shadow_offset_x() const { return text_shadow_offset_x_; }
+    float text_shadow_offset_y() const { return text_shadow_offset_y_; }
+    float text_shadow_radius() const { return text_shadow_radius_; }
+
     /// Per-side borders (CSS border-top, border-right, etc.)
     void set_border_top(Color c, float w) { border_top_ = {c, w}; has_border_sides_ = true; }
     void set_border_right(Color c, float w) { border_right_ = {c, w}; has_border_sides_ = true; }
@@ -740,6 +757,17 @@ private:
     float outline_offset_ = 0.0f;
     float outline_width_ = 0.0f;
     BorderStyle outline_style_ = BorderStyle::none;
+    // pulp #1548 — RN textShadow* cluster. Defaults zeroed so Label::paint
+    // short-circuits the shadow path when no JS setter has been called.
+    // Color defaults to fully-transparent (alpha=0) so the alpha gate in
+    // Label::paint (alpha > 0 AND (radius > 0 OR offset != 0)) keeps the
+    // canvas shadow filter inactive — same shape as SkiaCanvas's own
+    // shadow_is_active() guard. The default Color{} struct has a=1.0
+    // (canvas spec) so the alpha-zero override is explicit here.
+    Color text_shadow_color_{0.0f, 0.0f, 0.0f, 0.0f};
+    float text_shadow_offset_x_ = 0.0f;
+    float text_shadow_offset_y_ = 0.0f;
+    float text_shadow_radius_ = 0.0f;
     // Per-side borders
     struct BorderSide { Color color{}; float width = 0; };
     BorderSide border_top_{}, border_right_{}, border_bottom_{}, border_left_{};

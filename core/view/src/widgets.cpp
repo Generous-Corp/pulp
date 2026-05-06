@@ -477,6 +477,25 @@ void Label::paint(canvas::Canvas& canvas) {
             break;
     }
 
+    // pulp #1548 — RN textShadow* cluster. Apply the View's text-shadow
+    // slots to the canvas shadow state before the fill_text call(s) below,
+    // then restore the previous shadow state afterwards so the decoration
+    // strokes (and any subsequent siblings) don't inherit the shadow.
+    // SkiaCanvas::apply_shadow_filter activates only when alpha > 0 AND
+    // (blur > 0 OR offsets != 0) — leaving the shadow color zero-alpha
+    // makes the path a no-op for views that never opt in.
+    bool text_shadow_active = (text_shadow_color().a > 0) &&
+                              (text_shadow_radius() > 0.0f ||
+                               text_shadow_offset_x() != 0.0f ||
+                               text_shadow_offset_y() != 0.0f);
+    if (text_shadow_active) {
+        auto sc = text_shadow_color();
+        canvas.set_shadow_color({sc.r, sc.g, sc.b, sc.a});
+        canvas.set_shadow_blur(text_shadow_radius());
+        canvas.set_shadow_offset_x(text_shadow_offset_x());
+        canvas.set_shadow_offset_y(text_shadow_offset_y());
+    }
+
     // pulp #1407 — track the actually-painted single-line string so the
     // decoration block below measures the truncated text, not the
     // original. Multi-line keeps using display_text since it paints the
@@ -500,6 +519,17 @@ void Label::paint(canvas::Canvas& canvas) {
             y += lh;
             pos = nl + 1;
         }
+    }
+
+    // pulp #1548 — clear text-shadow back to no-op state so decoration
+    // strokes (underline / line-through) and downstream siblings don't
+    // inherit the glyph shadow. Resetting alpha to 0 deactivates the
+    // shadow filter regardless of blur / offset.
+    if (text_shadow_active) {
+        canvas.set_shadow_color({0, 0, 0, 0});
+        canvas.set_shadow_blur(0.0f);
+        canvas.set_shadow_offset_x(0.0f);
+        canvas.set_shadow_offset_y(0.0f);
     }
 
     // Text decoration (underline, line-through, overline)

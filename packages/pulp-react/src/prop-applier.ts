@@ -565,6 +565,20 @@ function applyOne(id: string, type: string, key: string, value: unknown, props?:
         case 'outlineOffset': return call('setOutlineOffset', id, value as number);
         case 'outlineStyle':  return call('setOutlineStyle',  id, value as string);
         case 'outlineWidth':  return call('setOutlineWidth',  id, value as number);
+        // pulp #1548 — RN textShadow* cluster. Three independent paint-time
+        // slots that Label::paint applies to glyphs only (the canvas
+        // shadow state is set just before fill_text and cleared after).
+        // RN's textShadowOffset arrives as `{ width, height }`; the bridge
+        // takes two scalars so we split here. Color/Radius pass through
+        // verbatim. The cluster is a no-op when alpha == 0 (default).
+        case 'textShadowColor':  return call('setTextShadowColor',  id, value as string);
+        case 'textShadowOffset': {
+            const o = value as { width?: number; height?: number } | null | undefined;
+            const dx = (o && typeof o.width === 'number') ? o.width : 0;
+            const dy = (o && typeof o.height === 'number') ? o.height : 0;
+            return call('setTextShadowOffset', id, dx, dy);
+        }
+        case 'textShadowRadius': return call('setTextShadowRadius', id, value as number);
         case 'opacity':      return call('setOpacity', id, value as number);
         case 'visible':      return call('setVisible', id, value as boolean);
         // pulp #1434 (rn batch — Triage #12) — `display: 'flex' | 'none'`.
@@ -991,6 +1005,16 @@ export function applyChangedProps(
                 call('releaseOverlay', id);
                 mutated = true;
             }
+            // pulp #1548 (Codex P2) — textShadow cluster reset path. Each
+            // slot has an inverse "neutral" value that the bridge already
+            // accepts (transparent color → alpha 0; zero offset / radius →
+            // no visible shadow). Without these resets, a Label that once
+            // had `textShadowColor: '#000'` would keep rendering the
+            // shadow after the prop is deleted on a later render — common
+            // toggle scenario with conditional style objects.
+            if (key === 'textShadowColor')  { call('setTextShadowColor', id, 'transparent'); mutated = true; }
+            if (key === 'textShadowOffset') { call('setTextShadowOffset', id, 0, 0);          mutated = true; }
+            if (key === 'textShadowRadius') { call('setTextShadowRadius', id, 0);             mutated = true; }
             // Other setters: no-op — let the next mount cycle handle it
         }
     }

@@ -172,6 +172,14 @@ export interface StyleProps {
     outlineStyle?: 'solid' | 'dashed' | 'dotted' | 'double' | 'groove'
                 | 'ridge' | 'inset' | 'outset' | 'none' | 'hidden';
     outlineWidth?: number;
+    /// pulp #1548 — RN textShadow cluster. Paint-time only; applies to
+    /// glyphs (Label::paint plumbs the trio into canvas.set_shadow_*
+    /// around fill_text). textShadowOffset uses RN's `{ width, height }`
+    /// shape; the prop-applier splits it into two scalars before
+    /// dispatch. Default alpha=0 makes the path a no-op until JS opts in.
+    textShadowColor?: string;
+    textShadowOffset?: { width: number; height: number };
+    textShadowRadius?: number;
     opacity?: number;
     visible?: boolean;
     /// pulp #1434 rn bridge-wires bundle — 7 props that already had C++

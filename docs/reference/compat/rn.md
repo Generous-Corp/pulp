@@ -27,6 +27,24 @@ Spec walk:
 
 ## Recently changed
 
+- **2026-05-06 (pulp #1548)** — RN textShadow cluster surfaced at the
+  `@pulp/react` JSX layer: `textShadowColor`, `textShadowOffset`, and
+  `textShadowRadius` all flipped `missing` → `supported`. Each prop
+  routes through its own per-attribute bridge fn (`setTextShadowColor`
+  / `setTextShadowOffset` / `setTextShadowRadius`) so a JSX prop diff
+  that touches one slot does not clobber the others. The View grew
+  four new slots (`text_shadow_color_`, `text_shadow_offset_x_`,
+  `text_shadow_offset_y_`, `text_shadow_radius_`); RN's
+  `textShadowOffset` arrives as `{ width, height }` and the prop-applier
+  splits it into two scalars before bridge dispatch. `Label::paint` is
+  the consumer — it copies the trio onto the canvas shadow state
+  (`set_shadow_color` / `set_shadow_blur` / `set_shadow_offset_x` /
+  `set_shadow_offset_y`) just before `fill_text` and clears them right
+  after, so glyph shadows don't leak into decoration strokes
+  (underline / line-through) or downstream siblings. The Skia backend
+  installs a `SkBlurMaskFilter` via `apply_shadow_filter` — same code
+  path canvas2d shadows already use (#1446). Default alpha=0 makes the
+  whole path a no-op until JS opts in.
 - **2026-05-06 (pulp #1519)** — RN outline cluster surfaced at the
   `@pulp/react` JSX layer: `outlineColor`, `outlineOffset`,
   `outlineStyle`, `outlineWidth` all flipped `missing` → `supported`.

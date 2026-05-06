@@ -5919,3 +5919,157 @@ TEST_CASE("WidgetBridge canvasSetFilter chain replays through to the recording c
     REQUIRE(saw_filter);
     REQUIRE(saw_direction);
 }
+
+// ── pulp #1548 — RN textShadow cluster ─────────────────────────────────────
+//
+// Three independent paint-time slots (color / offset / radius) that
+// Label::paint plumbs into the canvas shadow API around fill_text. Each
+// bridge fn writes one slot in isolation; defaults are zeroed so paint
+// short-circuits the shadow path until JS opts in.
+
+TEST_CASE("WidgetBridge setTextShadowColor / Offset / Radius round-trip",
+          "[view][bridge][issue-1548]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script("createLabel('lab', 'hello', '')");
+    auto* w = bridge.widget("lab");
+    REQUIRE(w != nullptr);
+
+    // Defaults: color zero-alpha, offset zero, radius zero — shadow is
+    // entirely inactive (alpha gate plus zero offset/blur).
+    REQUIRE_THAT(w->text_shadow_color().a, WithinAbs(0.0f, 1e-5f));
+    REQUIRE(w->text_shadow_offset_x() == 0.0f);
+    REQUIRE(w->text_shadow_offset_y() == 0.0f);
+    REQUIRE(w->text_shadow_radius() == 0.0f);
+
+    bridge.load_script("setTextShadowColor('lab', '#3366ff')");
+    REQUIRE(w->text_shadow_color().r8() == 0x33);
+    REQUIRE(w->text_shadow_color().g8() == 0x66);
+    REQUIRE(w->text_shadow_color().b8() == 0xff);
+    // After setTextShadowColor the alpha should be fully opaque.
+    REQUIRE_THAT(w->text_shadow_color().a, WithinAbs(1.0f, 1e-5f));
+
+    bridge.load_script("setTextShadowOffset('lab', 2.0, -3.0)");
+    REQUIRE_THAT(w->text_shadow_offset_x(), WithinAbs( 2.0f, 1e-5f));
+    REQUIRE_THAT(w->text_shadow_offset_y(), WithinAbs(-3.0f, 1e-5f));
+
+    bridge.load_script("setTextShadowRadius('lab', 4.5)");
+    REQUIRE_THAT(w->text_shadow_radius(), WithinAbs(4.5f, 1e-5f));
+
+    // Touching one slot must NOT clobber siblings (per-attribute setters).
+    bridge.load_script("setTextShadowColor('lab', '#ff0000')");
+    REQUIRE(w->text_shadow_color().r8() == 0xff);
+    REQUIRE_THAT(w->text_shadow_offset_x(), WithinAbs( 2.0f, 1e-5f));
+    REQUIRE_THAT(w->text_shadow_offset_y(), WithinAbs(-3.0f, 1e-5f));
+    REQUIRE_THAT(w->text_shadow_radius(),   WithinAbs( 4.5f, 1e-5f));
+}
+
+TEST_CASE("Label::paint emits set_shadow_* commands when textShadow is active",
+          "[view][widget][issue-1548]") {
+    // The canvas shadow state must be set BEFORE fill_text and cleared
+    // AFTER so glyph shadows don't leak into decoration strokes or
+    // downstream siblings. The recording canvas captures the shadow
+    // setters as their own command types, which is what we assert here.
+    Label label("shadowed");
+    label.set_bounds({0, 0, 200, 24});
+    label.set_text_shadow_color({0xff, 0x80, 0x00, 0xff});
+    label.set_text_shadow_offset(2.0f, 3.0f);
+    label.set_text_shadow_radius(4.0f);
+
+    pulp::canvas::RecordingCanvas canvas;
+    label.paint(canvas);
+
+    using DT = pulp::canvas::DrawCommand::Type;
+    int set_shadow_color_count = 0;
+    int set_shadow_blur_count = 0;
+    int set_shadow_offset_x_count = 0;
+    int set_shadow_offset_y_count = 0;
+    int fill_text_count = 0;
+    bool saw_color_before_fill = false;
+    bool saw_blur_before_fill = false;
+    bool saw_clear_after_fill = false;
+    int last_blur_idx = -1;
+    int last_color_idx = -1;
+    int first_fill_idx = -1;
+    int idx = 0;
+    for (const auto& cmd : canvas.commands()) {
+        if (cmd.type == DT::set_shadow_color) {
+            set_shadow_color_count++;
+            last_color_idx = idx;
+            if (first_fill_idx < 0 && set_shadow_color_count == 1)
+                saw_color_before_fill = true;
+        }
+        if (cmd.type == DT::set_shadow_blur) {
+            set_shadow_blur_count++;
+            last_blur_idx = idx;
+            if (first_fill_idx < 0 && set_shadow_blur_count == 1)
+                saw_blur_before_fill = true;
+        }
+        if (cmd.type == DT::set_shadow_offset_x) set_shadow_offset_x_count++;
+        if (cmd.type == DT::set_shadow_offset_y) set_shadow_offset_y_count++;
+        if (cmd.type == DT::fill_text) {
+            fill_text_count++;
+            if (first_fill_idx < 0) first_fill_idx = idx;
+        }
+        ++idx;
+    }
+    REQUIRE(fill_text_count >= 1);
+    // Set once before fill_text, clear once after — two of each.
+    REQUIRE(set_shadow_color_count == 2);
+    REQUIRE(set_shadow_blur_count == 2);
+    REQUIRE(set_shadow_offset_x_count == 2);
+    REQUIRE(set_shadow_offset_y_count == 2);
+    REQUIRE(saw_color_before_fill);
+    REQUIRE(saw_blur_before_fill);
+    // Last shadow command is after the fill_text — i.e. the clear-pass.
+    REQUIRE(last_color_idx > first_fill_idx);
+    REQUIRE(last_blur_idx > first_fill_idx);
+    saw_clear_after_fill = true;
+    REQUIRE(saw_clear_after_fill);
+}
+
+TEST_CASE("Label::paint emits NO shadow commands when textShadow is unset (default)",
+          "[view][widget][issue-1548]") {
+    // A Label with no setTextShadow* setters called must not emit any
+    // canvas shadow state changes — otherwise we'd silently force every
+    // glyph through the SkBlurMaskFilter path with alpha=0.
+    Label label("plain");
+    label.set_bounds({0, 0, 200, 24});
+
+    pulp::canvas::RecordingCanvas canvas;
+    label.paint(canvas);
+
+    using DT = pulp::canvas::DrawCommand::Type;
+    for (const auto& cmd : canvas.commands()) {
+        REQUIRE(cmd.type != DT::set_shadow_color);
+        REQUIRE(cmd.type != DT::set_shadow_blur);
+        REQUIRE(cmd.type != DT::set_shadow_offset_x);
+        REQUIRE(cmd.type != DT::set_shadow_offset_y);
+    }
+}
+
+TEST_CASE("Label::paint emits NO shadow commands when alpha==0 even with offset/radius",
+          "[view][widget][issue-1548]") {
+    // The active gate is `color.a > 0 && (radius>0 || offset!=0)`. A
+    // transparent shadow color disables the path even if the author
+    // accidentally sets offset/radius — matches how SkiaCanvas's
+    // apply_shadow_filter gates its mask filter install.
+    Label label("invisible-shadow");
+    label.set_bounds({0, 0, 200, 24});
+    label.set_text_shadow_color({0xff, 0x00, 0x00, 0x00}); // alpha 0
+    label.set_text_shadow_offset(2.0f, 2.0f);
+    label.set_text_shadow_radius(4.0f);
+
+    pulp::canvas::RecordingCanvas canvas;
+    label.paint(canvas);
+
+    using DT = pulp::canvas::DrawCommand::Type;
+    for (const auto& cmd : canvas.commands()) {
+        REQUIRE(cmd.type != DT::set_shadow_color);
+        REQUIRE(cmd.type != DT::set_shadow_blur);
+    }
+}
