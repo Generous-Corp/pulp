@@ -1,6 +1,6 @@
 # Coverage Compliance Status
 
-Last reviewed: 2026-05-05 20:34 PDT
+Last reviewed: 2026-05-05 20:38 PDT
 
 This is the durable tracker for the repo-wide coverage compliance
 program under `#641`.
@@ -146,11 +146,12 @@ passthrough/reset, LookupTable indexed clamps and zero-length buffer
 no-ops, and LadderFilter buffer/reset/resonance-clamp finite-output
 paths. All five remain unpushed and undispatched.
 Additional #646 render progress is queued locally as
-`feature/phase3-sdl3-surface-fallback-646` at `cc9b6358`, refreshed
+`feature/phase3-sdl3-surface-fallback-646` at `d81b03cc`, refreshed
 from `908b3a49` to `1dc45105`, then onto current `origin/main`
 `bd036171`, then onto current `origin/main` `7e9795b4`, then onto
 current `origin/main` `df01f4f6`, then onto current `origin/main`
-`42bacd19`, then onto current `origin/main` `a8c4c16`, covering SDL3
+`42bacd19`, then onto current `origin/main` `a8c4c16`, then onto
+current `origin/main` `92e83b37`, covering SDL3
 native-surface validity and null-window fallback behavior. It has no
 remote branch ref and remains unpushed and
 undispatched.
