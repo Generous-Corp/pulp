@@ -3260,8 +3260,8 @@
       "issue": "https://github.com/danielraffel/pulp/issues/1434"
     },
     "rn/boxShadow": {
-      "status": "partial",
-      "mapsTo": "@pulp/react prop-applier dispatches `boxShadow` (string OR object form) to setBoxShadow / clearBoxShadow (prop-applier.ts:323+). String parser mirrors web-compat-style-decl.js.",
+      "status": "supported",
+      "mapsTo": "@pulp/react prop-applier dispatches `boxShadow` (string OR object form) to setBoxShadow / clearBoxShadow (prop-applier.ts:600+). String parser mirrors web-compat-style-decl.js.",
       "supportedValues": [
         "object form { offsetX, offsetY, blur?, spread?, color, inset? }",
         "CSS-spec single-shadow string: [inset] <dx>px <dy>px <blur>px [<spread>px] <color>",
@@ -3271,8 +3271,10 @@
         "multi-shadow comma-separated lists",
         "BoxShadowValue array"
       ],
-      "tests": [],
-      "notes": "Could be exposed analogously to `border={...}` shape. pulp #1434 Triage #15: surfaced at the @pulp/react TS layer. Both string and object forms route to setBoxShadow; multi-shadow remains a deferred gap (single-shadow path covers the bulk of Figma / Tailwind / v0 emissions).",
+      "tests": [
+        "packages/pulp-react/test/prop-applier-box-shadow.test.ts"
+      ],
+      "notes": "pulp #1550 catalog hygiene: flipped partial → supported. Single-shadow string + object form + 'none' (clear) all dispatch through the prop-applier and exercise the C++ bridge. Multi-shadow / BoxShadowValue array remain the only RN-extension gaps and are tracked under unsupportedValues. pulp #1434 Triage #15: surfaced at the @pulp/react TS layer. Both string and object forms route to setBoxShadow; multi-shadow remains a deferred gap (single-shadow path covers the bulk of Figma / Tailwind / v0 emissions).",
       "issue": ""
     },
     "rn/boxSizing": {
@@ -3322,22 +3324,52 @@
       "issue": ""
     },
     "rn/cursor": {
-      "status": "partial",
-      "mapsTo": "@pulp/react prop-applier forwards keyword to setCursor (widget_bridge.cpp:3753); bridge maps the CSS keyword set to View::CursorStyle.",
+      "status": "supported",
+      "mapsTo": "@pulp/react prop-applier forwards keyword to setCursor (prop-applier.ts:749 → widget_bridge.cpp:4007); bridge maps CSS keywords onto View::CursorStyle slots.",
       "supportedValues": [
         "default",
         "pointer",
         "crosshair",
         "text",
+        "vertical-text",
         "grab",
         "grabbing",
-        "not-allowed"
+        "not-allowed",
+        "no-drop",
+        "none",
+        "hidden",
+        "col-resize",
+        "row-resize",
+        "ew-resize",
+        "ns-resize",
+        "nwse-resize",
+        "nesw-resize",
+        "n-resize",
+        "s-resize",
+        "e-resize",
+        "w-resize",
+        "nw-resize",
+        "ne-resize",
+        "sw-resize",
+        "se-resize",
+        "move",
+        "all-scroll"
       ],
-      "unsupportedValues": [],
+      "unsupportedValues": [
+        "wait",
+        "help",
+        "progress",
+        "alias",
+        "copy",
+        "zoom-in",
+        "zoom-out",
+        "cell",
+        "context-menu"
+      ],
       "tests": [
         "packages/pulp-react/test/prop-applier-rn-wires.test.ts"
       ],
-      "notes": "pulp #1434 rn bridge-wires bundle (sub-agent #27 finding) — bridge fn was registered in widget_bridge.cpp; @pulp/react prop-applier dispatch wired in this PR. Status `partial` because CursorStyle does not yet have slots for every CSS keyword (see Triage #7 follow-up).",
+      "notes": "pulp #1550 catalog hygiene: flipped partial → supported. Triage #7 fan-out (#1434 small-wins bundle) wired the CSS cursor keyword set onto View::CursorStyle. RN's spec ViewStyle accepts only {auto, pointer}; Pulp accepts the full CSS cursor enum because the same prop-applier path serves both rn/cursor and css/cursor. Keywords without a dedicated visual (wait / help / progress / alias / copy / zoom-* / cell / context-menu) fall through to `default` — they're listed in unsupportedValues for catalog accuracy.",
       "issue": ""
     },
     "rn/d": {
@@ -4014,8 +4046,8 @@
       "issue": ""
     },
     "rn/overflow": {
-      "status": "partial",
-      "mapsTo": "@pulp/react prop-applier dispatches `overflow` to `setOverflow(id, mode)` (prop-applier.ts:333 since #1388).",
+      "status": "supported",
+      "mapsTo": "@pulp/react prop-applier dispatches `overflow` to `setOverflow(id, mode)` (prop-applier.ts:629 since #1388).",
       "supportedValues": [
         "visible",
         "hidden"
@@ -4023,8 +4055,10 @@
       "unsupportedValues": [
         "scroll"
       ],
-      "tests": [],
-      "notes": "Plumbing missing in prop-applier; ScrollView intrinsic exposes scroll. pulp #1434: catalog hygiene — flipped missing → supported. View::Overflow has only {visible, hidden}; scroll is a separate ScrollView container concern.",
+      "tests": [
+        "packages/pulp-react/test/prop-applier-pointer.test.ts"
+      ],
+      "notes": "pulp #1550 catalog hygiene: flipped partial → supported. The two RN ViewStyle keywords that View::Overflow models — `visible` and `hidden` — both round-trip through the prop-applier and the C++ bridge. `scroll` is intentionally excluded: ScrollView is a separate container intrinsic, not a View::Overflow mode. Spectr dropdowns + Figma overflow:hidden cards now port verbatim (#1387 gap #1).",
       "issue": ""
     },
     "rn/overlay": {
@@ -4467,17 +4501,19 @@
     },
     "rn/userSelect": {
       "status": "partial",
-      "mapsTo": "@pulp/react prop-applier forwards keyword to setUserSelect (widget_bridge.cpp:2176); bridge maps to View::UserSelect.",
-      "supportedValues": [
+      "mapsTo": "@pulp/react prop-applier forwards keyword to setUserSelect (prop-applier.ts:753); the bridge currently registers setUserSelect as a no-op stash (widget_bridge.cpp:2267) — the JSX → prop-applier → bridge round-trip is wired but no semantic effect lands until the View::UserSelect path is implemented.",
+      "supportedValues": [],
+      "unsupportedValues": [
+        "auto",
         "none",
         "text",
-        "all"
+        "all",
+        "contain"
       ],
-      "unsupportedValues": [],
       "tests": [
         "packages/pulp-react/test/prop-applier-rn-wires.test.ts"
       ],
-      "notes": "pulp #1434 rn bridge-wires bundle (sub-agent #27 finding) — bridge fn was registered in widget_bridge.cpp; @pulp/react prop-applier dispatch wired in this PR.",
+      "notes": "pulp #1550 catalog hygiene: kept partial (does NOT meet the catalog-hygiene supported bar). Bridge fn is a registered no-op — accepts the value to keep prop-applier dispatch quiet, but there is no View::UserSelect storage and no native text-selection suppression path. Promotion blocked until the bridge actually applies the mode. Tests cover prop-applier dispatch only.",
       "issue": ""
     },
     "rn/verticalAlign": {
