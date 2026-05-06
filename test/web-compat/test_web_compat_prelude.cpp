@@ -795,3 +795,170 @@ TEST_CASE("WebCompat: StyleSheet display:flex defaults to row", "[webcompat][sty
     REQUIRE(w != nullptr);
     REQUIRE(w->flex().direction == FlexDirection::row);
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Modern CSS color spaces (pulp #1434 Triage #8)
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+// Spike-quality oklch / oklab / lch / lab / color() → sRGB hex.
+// Tolerances are intentionally generous (±2 hex levels per channel)
+// because the conversion math involves Bradford adaptation + matrix
+// products + gamma encode; the goal is "reasonably close round-trip"
+// not "bit-exact reference". Reference values cross-checked against
+// the CSS Color 4 reference implementation
+// (https://www.w3.org/TR/css-color-4/) for sanity but allowing for
+// the slight divergence of double-precision arithmetic.
+
+namespace {
+    // Helper: extract decimal channel values from a "#rrggbb[aa]" hex
+    // string. Returns {r, g, b, a} in [0, 255] (a defaults to 255).
+    struct Rgba { int r, g, b, a; };
+    Rgba parseHex(const std::string& hex) {
+        Rgba out{0, 0, 0, 255};
+        if (hex.size() < 7 || hex[0] != '#') return out;
+        auto h2 = [&](size_t i) -> int {
+            return std::stoi(hex.substr(i, 2), nullptr, 16);
+        };
+        out.r = h2(1);
+        out.g = h2(3);
+        out.b = h2(5);
+        if (hex.size() >= 9) out.a = h2(7);
+        return out;
+    }
+}
+
+TEST_CASE("WebCompat: parseCSSColor oklch returns hex", "[webcompat][parser][issue-1434-color]") {
+    TestEnvironment env;
+    auto result = env.engine.evaluate("parseCSSColor('oklch(0.7 0.18 240)')");
+    auto hex = std::string(result.getWithDefault<std::string_view>(""));
+    REQUIRE(hex.size() >= 7);
+    REQUIRE(hex[0] == '#');
+    auto rgba = parseHex(hex);
+    // oklch(0.7 0.18 240) is a saturated blue — blue channel dominates
+    // and red is moderately damped.
+    REQUIRE(rgba.b > rgba.r);
+    REQUIRE(rgba.b > rgba.g);
+}
+
+TEST_CASE("WebCompat: parseCSSColor oklab black returns near-black", "[webcompat][parser][issue-1434-color]") {
+    TestEnvironment env;
+    auto result = env.engine.evaluate("parseCSSColor('oklab(0 0 0)')");
+    auto rgba = parseHex(std::string(result.getWithDefault<std::string_view>("")));
+    REQUIRE(rgba.r <= 4);
+    REQUIRE(rgba.g <= 4);
+    REQUIRE(rgba.b <= 4);
+}
+
+TEST_CASE("WebCompat: parseCSSColor oklab white returns near-white", "[webcompat][parser][issue-1434-color]") {
+    TestEnvironment env;
+    auto result = env.engine.evaluate("parseCSSColor('oklab(1 0 0)')");
+    auto rgba = parseHex(std::string(result.getWithDefault<std::string_view>("")));
+    REQUIRE(rgba.r >= 250);
+    REQUIRE(rgba.g >= 250);
+    REQUIRE(rgba.b >= 250);
+}
+
+TEST_CASE("WebCompat: parseCSSColor oklch with percent L", "[webcompat][parser][issue-1434-color]") {
+    TestEnvironment env;
+    // 70% L should round-trip to the same color as 0.7 L.
+    auto a = env.engine.evaluate("parseCSSColor('oklch(70% 0.18 240)')");
+    auto b = env.engine.evaluate("parseCSSColor('oklch(0.7 0.18 240)')");
+    REQUIRE(std::string(a.getWithDefault<std::string_view>("")) ==
+            std::string(b.getWithDefault<std::string_view>("")));
+}
+
+TEST_CASE("WebCompat: parseCSSColor oklch with alpha", "[webcompat][parser][issue-1434-color]") {
+    TestEnvironment env;
+    auto result = env.engine.evaluate("parseCSSColor('oklch(0.7 0.18 240 / 50%)')");
+    auto rgba = parseHex(std::string(result.getWithDefault<std::string_view>("")));
+    // 50% alpha should be ~127 ± 1.
+    REQUIRE(rgba.a >= 126);
+    REQUIRE(rgba.a <= 128);
+}
+
+TEST_CASE("WebCompat: parseCSSColor lab returns hex", "[webcompat][parser][issue-1434-color]") {
+    TestEnvironment env;
+    auto result = env.engine.evaluate("parseCSSColor('lab(50 -40 60)')");
+    auto hex = std::string(result.getWithDefault<std::string_view>(""));
+    REQUIRE(hex.size() >= 7);
+    REQUIRE(hex[0] == '#');
+    auto rgba = parseHex(hex);
+    // lab(50 -40 60) — green-shifted, yellow-shifted: green > red, green > blue.
+    REQUIRE(rgba.g > rgba.b);
+}
+
+TEST_CASE("WebCompat: parseCSSColor lch white", "[webcompat][parser][issue-1434-color]") {
+    TestEnvironment env;
+    auto result = env.engine.evaluate("parseCSSColor('lch(100 0 0)')");
+    auto rgba = parseHex(std::string(result.getWithDefault<std::string_view>("")));
+    // L=100 with zero chroma should be near-white.
+    REQUIRE(rgba.r >= 250);
+    REQUIRE(rgba.g >= 250);
+    REQUIRE(rgba.b >= 250);
+}
+
+TEST_CASE("WebCompat: parseCSSColor color(srgb) passthrough", "[webcompat][parser][issue-1434-color]") {
+    TestEnvironment env;
+    auto result = env.engine.evaluate("parseCSSColor('color(srgb 1 0 0)')");
+    auto rgba = parseHex(std::string(result.getWithDefault<std::string_view>("")));
+    REQUIRE(rgba.r == 255);
+    REQUIRE(rgba.g == 0);
+    REQUIRE(rgba.b == 0);
+}
+
+TEST_CASE("WebCompat: parseCSSColor color(srgb-linear) gamma encodes", "[webcompat][parser][issue-1434-color]") {
+    TestEnvironment env;
+    // Linear 0.5 → sRGB gamma-encoded ≈ 188.
+    auto result = env.engine.evaluate("parseCSSColor('color(srgb-linear 0.5 0.5 0.5)')");
+    auto rgba = parseHex(std::string(result.getWithDefault<std::string_view>("")));
+    REQUIRE(rgba.r >= 186);
+    REQUIRE(rgba.r <= 190);
+    REQUIRE(rgba.g == rgba.r);
+    REQUIRE(rgba.b == rgba.r);
+}
+
+TEST_CASE("WebCompat: parseCSSColor color(display-p3) maps to sRGB", "[webcompat][parser][issue-1434-color]") {
+    TestEnvironment env;
+    // P3 red is wider than sRGB red; clamping should yield max-red sRGB.
+    auto result = env.engine.evaluate("parseCSSColor('color(display-p3 1 0 0)')");
+    auto rgba = parseHex(std::string(result.getWithDefault<std::string_view>("")));
+    REQUIRE(rgba.r == 255);
+    REQUIRE(rgba.g <= 5);
+    REQUIRE(rgba.b <= 5);
+}
+
+TEST_CASE("WebCompat: parseCSSColor color(display-p3) gray passes through", "[webcompat][parser][issue-1434-color]") {
+    TestEnvironment env;
+    // P3 (0.5, 0.5, 0.5) gamma-encoded = sRGB (0.5, 0.5, 0.5) — gray
+    // is invariant across same-white-point spaces (D65 == D65).
+    auto result = env.engine.evaluate("parseCSSColor('color(display-p3 0.5 0.5 0.5)')");
+    auto rgba = parseHex(std::string(result.getWithDefault<std::string_view>("")));
+    REQUIRE(rgba.r >= 125);
+    REQUIRE(rgba.r <= 130);
+    REQUIRE(std::abs(rgba.r - rgba.g) <= 1);
+    REQUIRE(std::abs(rgba.g - rgba.b) <= 1);
+}
+
+TEST_CASE("WebCompat: parseCSSColor oklch radians", "[webcompat][parser][issue-1434-color]") {
+    TestEnvironment env;
+    // 4.18879rad ≈ 240deg — should match the 240deg path.
+    auto a = env.engine.evaluate("parseCSSColor('oklch(0.7 0.18 4.18879rad)')");
+    auto b = env.engine.evaluate("parseCSSColor('oklch(0.7 0.18 240)')");
+    auto ra = parseHex(std::string(a.getWithDefault<std::string_view>("")));
+    auto rb = parseHex(std::string(b.getWithDefault<std::string_view>("")));
+    REQUIRE(std::abs(ra.r - rb.r) <= 2);
+    REQUIRE(std::abs(ra.g - rb.g) <= 2);
+    REQUIRE(std::abs(ra.b - rb.b) <= 2);
+}
+
+TEST_CASE("WebCompat: parseCSSColor unknown color() space returns null", "[webcompat][parser][issue-1434-color]") {
+    TestEnvironment env;
+    auto result = env.engine.evaluate("parseCSSColor('color(rec2020 0.5 0.5 0.5)') === null");
+    REQUIRE(result.getWithDefault<bool>(false) == true);
+}
+
+TEST_CASE("WebCompat: parseCSSColor malformed oklch returns null", "[webcompat][parser][issue-1434-color]") {
+    TestEnvironment env;
+    auto result = env.engine.evaluate("parseCSSColor('oklch(banana)') === null");
+    REQUIRE(result.getWithDefault<bool>(false) == true);
+}
