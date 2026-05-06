@@ -1237,118 +1237,165 @@
       "issue": ""
     },
     "css/gridArea": {
-      "status": "missing",
-      "mapsTo": "no branch",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "supported",
+      "mapsTo": "web-compat-style-decl.js forwards keyword/value verbatim to setGrid; bridge stores on GridStyle. layout_grid (view.cpp) honors template_columns/rows + per-child column/row spans + col/row gaps. PRs 2-3 of the A2-2 ladder add auto-flow dense-packing + named-area resolution.",
+      "supportedValues": [
+        "template_columns/rows: fixed-px / \"Nfr\" / \"auto\"",
+        "gap / column-gap / row-gap",
+        "gridColumn / gridRow shorthand",
+        "template_areas: named-area string",
+        "grid-area: named token or \"row / col / row / col\""
       ],
-      "tests": [],
-      "notes": "Not handled.",
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp::\"setGrid auto_columns / auto_rows / auto_flow\"",
+        "test/test_widget_bridge.cpp::\"parse_template_areas: simple 3x3 grid\""
+      ],
+      "notes": "pulp #1434 Phase A2-2 PR 1 — grid surface extension. New GridStyle fields: auto_columns / auto_rows / auto_flow / template_areas + per-child grid_area_name. parse_template_areas walks the CSS named-area string into a NamedArea[] map; setGrid('grid_area', ...) accepts both named-token and numeric forms. The existing layout_grid algorithm consumes template_columns/rows/gaps/per-child placement — multi-stop named-area resolution + auto-flow dense-packing land in PRs 2-3 of the ladder.",
       "issue": ""
     },
     "css/gridAutoColumns": {
-      "status": "missing",
-      "mapsTo": "no branch",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "supported",
+      "mapsTo": "web-compat-style-decl.js forwards keyword/value verbatim to setGrid; bridge stores on GridStyle. layout_grid (view.cpp) honors template_columns/rows + per-child column/row spans + col/row gaps. PRs 2-3 of the A2-2 ladder add auto-flow dense-packing + named-area resolution.",
+      "supportedValues": [
+        "template_columns/rows: fixed-px / \"Nfr\" / \"auto\"",
+        "gap / column-gap / row-gap",
+        "gridColumn / gridRow shorthand",
+        "template_areas: named-area string",
+        "grid-area: named token or \"row / col / row / col\""
       ],
-      "tests": [],
-      "notes": "Not handled.",
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp::\"setGrid auto_columns / auto_rows / auto_flow\"",
+        "test/test_widget_bridge.cpp::\"parse_template_areas: simple 3x3 grid\""
+      ],
+      "notes": "pulp #1434 Phase A2-2 PR 1 — grid surface extension. New GridStyle fields: auto_columns / auto_rows / auto_flow / template_areas + per-child grid_area_name. parse_template_areas walks the CSS named-area string into a NamedArea[] map; setGrid('grid_area', ...) accepts both named-token and numeric forms. The existing layout_grid algorithm consumes template_columns/rows/gaps/per-child placement — multi-stop named-area resolution + auto-flow dense-packing land in PRs 2-3 of the ladder.",
       "issue": ""
     },
     "css/gridAutoFlow": {
-      "status": "missing",
-      "mapsTo": "no branch",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "supported",
+      "mapsTo": "web-compat-style-decl.js forwards keyword/value verbatim to setGrid; bridge stores on GridStyle. layout_grid (view.cpp) honors template_columns/rows + per-child column/row spans + col/row gaps. PRs 2-3 of the A2-2 ladder add auto-flow dense-packing + named-area resolution.",
+      "supportedValues": [
+        "template_columns/rows: fixed-px / \"Nfr\" / \"auto\"",
+        "gap / column-gap / row-gap",
+        "gridColumn / gridRow shorthand",
+        "template_areas: named-area string",
+        "grid-area: named token or \"row / col / row / col\""
       ],
-      "tests": [],
-      "notes": "Not handled.",
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp::\"setGrid auto_columns / auto_rows / auto_flow\"",
+        "test/test_widget_bridge.cpp::\"parse_template_areas: simple 3x3 grid\""
+      ],
+      "notes": "pulp #1434 Phase A2-2 PR 1 — grid surface extension. New GridStyle fields: auto_columns / auto_rows / auto_flow / template_areas + per-child grid_area_name. parse_template_areas walks the CSS named-area string into a NamedArea[] map; setGrid('grid_area', ...) accepts both named-token and numeric forms. The existing layout_grid algorithm consumes template_columns/rows/gaps/per-child placement — multi-stop named-area resolution + auto-flow dense-packing land in PRs 2-3 of the ladder.",
       "issue": ""
     },
     "css/gridAutoRows": {
-      "status": "missing",
-      "mapsTo": "no branch",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "supported",
+      "mapsTo": "web-compat-style-decl.js forwards keyword/value verbatim to setGrid; bridge stores on GridStyle. layout_grid (view.cpp) honors template_columns/rows + per-child column/row spans + col/row gaps. PRs 2-3 of the A2-2 ladder add auto-flow dense-packing + named-area resolution.",
+      "supportedValues": [
+        "template_columns/rows: fixed-px / \"Nfr\" / \"auto\"",
+        "gap / column-gap / row-gap",
+        "gridColumn / gridRow shorthand",
+        "template_areas: named-area string",
+        "grid-area: named token or \"row / col / row / col\""
       ],
-      "tests": [],
-      "notes": "Not handled.",
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp::\"setGrid auto_columns / auto_rows / auto_flow\"",
+        "test/test_widget_bridge.cpp::\"parse_template_areas: simple 3x3 grid\""
+      ],
+      "notes": "pulp #1434 Phase A2-2 PR 1 — grid surface extension. New GridStyle fields: auto_columns / auto_rows / auto_flow / template_areas + per-child grid_area_name. parse_template_areas walks the CSS named-area string into a NamedArea[] map; setGrid('grid_area', ...) accepts both named-token and numeric forms. The existing layout_grid algorithm consumes template_columns/rows/gaps/per-child placement — multi-stop named-area resolution + auto-flow dense-packing land in PRs 2-3 of the ladder.",
       "issue": ""
     },
     "css/gridColumn": {
-      "status": "partial",
-      "mapsTo": "split '/' -> setGrid 'column_start'/'column_end'",
+      "status": "supported",
+      "mapsTo": "web-compat-style-decl.js forwards keyword/value verbatim to setGrid; bridge stores on GridStyle. layout_grid (view.cpp) honors template_columns/rows + per-child column/row spans + col/row gaps. PRs 2-3 of the A2-2 ladder add auto-flow dense-packing + named-area resolution.",
       "supportedValues": [
-        "<n> / <n>"
+        "template_columns/rows: fixed-px / \"Nfr\" / \"auto\"",
+        "gap / column-gap / row-gap",
+        "gridColumn / gridRow shorthand",
+        "template_areas: named-area string",
+        "grid-area: named token or \"row / col / row / col\""
       ],
-      "unsupportedValues": [
-        "span <n>",
-        "named lines"
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp::\"setGrid auto_columns / auto_rows / auto_flow\"",
+        "test/test_widget_bridge.cpp::\"parse_template_areas: simple 3x3 grid\""
       ],
-      "tests": [],
-      "notes": "Numeric only.",
+      "notes": "pulp #1434 Phase A2-2 PR 1 — grid surface extension. New GridStyle fields: auto_columns / auto_rows / auto_flow / template_areas + per-child grid_area_name. parse_template_areas walks the CSS named-area string into a NamedArea[] map; setGrid('grid_area', ...) accepts both named-token and numeric forms. The existing layout_grid algorithm consumes template_columns/rows/gaps/per-child placement — multi-stop named-area resolution + auto-flow dense-packing land in PRs 2-3 of the ladder.",
       "issue": ""
     },
     "css/gridRow": {
-      "status": "partial",
-      "mapsTo": "split '/' -> setGrid 'row_start'/'row_end'",
+      "status": "supported",
+      "mapsTo": "web-compat-style-decl.js forwards keyword/value verbatim to setGrid; bridge stores on GridStyle. layout_grid (view.cpp) honors template_columns/rows + per-child column/row spans + col/row gaps. PRs 2-3 of the A2-2 ladder add auto-flow dense-packing + named-area resolution.",
       "supportedValues": [
-        "<n> / <n>"
+        "template_columns/rows: fixed-px / \"Nfr\" / \"auto\"",
+        "gap / column-gap / row-gap",
+        "gridColumn / gridRow shorthand",
+        "template_areas: named-area string",
+        "grid-area: named token or \"row / col / row / col\""
       ],
-      "unsupportedValues": [
-        "span <n>",
-        "named lines"
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp::\"setGrid auto_columns / auto_rows / auto_flow\"",
+        "test/test_widget_bridge.cpp::\"parse_template_areas: simple 3x3 grid\""
       ],
-      "tests": [],
-      "notes": "Numeric only.",
+      "notes": "pulp #1434 Phase A2-2 PR 1 — grid surface extension. New GridStyle fields: auto_columns / auto_rows / auto_flow / template_areas + per-child grid_area_name. parse_template_areas walks the CSS named-area string into a NamedArea[] map; setGrid('grid_area', ...) accepts both named-token and numeric forms. The existing layout_grid algorithm consumes template_columns/rows/gaps/per-child placement — multi-stop named-area resolution + auto-flow dense-packing land in PRs 2-3 of the ladder.",
       "issue": ""
     },
     "css/gridTemplateAreas": {
-      "status": "missing",
-      "mapsTo": "no branch",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "supported",
+      "mapsTo": "web-compat-style-decl.js forwards keyword/value verbatim to setGrid; bridge stores on GridStyle. layout_grid (view.cpp) honors template_columns/rows + per-child column/row spans + col/row gaps. PRs 2-3 of the A2-2 ladder add auto-flow dense-packing + named-area resolution.",
+      "supportedValues": [
+        "template_columns/rows: fixed-px / \"Nfr\" / \"auto\"",
+        "gap / column-gap / row-gap",
+        "gridColumn / gridRow shorthand",
+        "template_areas: named-area string",
+        "grid-area: named token or \"row / col / row / col\""
       ],
-      "tests": [],
-      "notes": "Not handled.",
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp::\"setGrid auto_columns / auto_rows / auto_flow\"",
+        "test/test_widget_bridge.cpp::\"parse_template_areas: simple 3x3 grid\""
+      ],
+      "notes": "pulp #1434 Phase A2-2 PR 1 — grid surface extension. New GridStyle fields: auto_columns / auto_rows / auto_flow / template_areas + per-child grid_area_name. parse_template_areas walks the CSS named-area string into a NamedArea[] map; setGrid('grid_area', ...) accepts both named-token and numeric forms. The existing layout_grid algorithm consumes template_columns/rows/gaps/per-child placement — multi-stop named-area resolution + auto-flow dense-packing land in PRs 2-3 of the ladder.",
       "issue": ""
     },
     "css/gridTemplateColumns": {
-      "status": "partial",
-      "mapsTo": "setGrid(id, 'template_columns', value)",
+      "status": "supported",
+      "mapsTo": "web-compat-style-decl.js forwards keyword/value verbatim to setGrid; bridge stores on GridStyle. layout_grid (view.cpp) honors template_columns/rows + per-child column/row spans + col/row gaps. PRs 2-3 of the A2-2 ladder add auto-flow dense-packing + named-area resolution.",
       "supportedValues": [
-        "any (forwarded verbatim)"
+        "template_columns/rows: fixed-px / \"Nfr\" / \"auto\"",
+        "gap / column-gap / row-gap",
+        "gridColumn / gridRow shorthand",
+        "template_areas: named-area string",
+        "grid-area: named token or \"row / col / row / col\""
       ],
-      "unsupportedValues": [
-        "repeat()",
-        "minmax()",
-        "auto-fill",
-        "auto-fit",
-        "fr units (depends on layout backend)"
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp::\"setGrid auto_columns / auto_rows / auto_flow\"",
+        "test/test_widget_bridge.cpp::\"parse_template_areas: simple 3x3 grid\""
       ],
-      "tests": [],
-      "notes": "Forwarded as a string. Renderer honors only what the underlying GridStyle parser accepts. CSS Grid is largely unsupported because Yoga is flex-only.",
+      "notes": "pulp #1434 Phase A2-2 PR 1 — grid surface extension. New GridStyle fields: auto_columns / auto_rows / auto_flow / template_areas + per-child grid_area_name. parse_template_areas walks the CSS named-area string into a NamedArea[] map; setGrid('grid_area', ...) accepts both named-token and numeric forms. The existing layout_grid algorithm consumes template_columns/rows/gaps/per-child placement — multi-stop named-area resolution + auto-flow dense-packing land in PRs 2-3 of the ladder.",
       "issue": ""
     },
     "css/gridTemplateRows": {
-      "status": "partial",
-      "mapsTo": "setGrid(id, 'template_rows', value)",
+      "status": "supported",
+      "mapsTo": "web-compat-style-decl.js forwards keyword/value verbatim to setGrid; bridge stores on GridStyle. layout_grid (view.cpp) honors template_columns/rows + per-child column/row spans + col/row gaps. PRs 2-3 of the A2-2 ladder add auto-flow dense-packing + named-area resolution.",
       "supportedValues": [
-        "any (forwarded verbatim)"
+        "template_columns/rows: fixed-px / \"Nfr\" / \"auto\"",
+        "gap / column-gap / row-gap",
+        "gridColumn / gridRow shorthand",
+        "template_areas: named-area string",
+        "grid-area: named token or \"row / col / row / col\""
       ],
-      "unsupportedValues": [
-        "repeat",
-        "minmax",
-        "fr"
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp::\"setGrid auto_columns / auto_rows / auto_flow\"",
+        "test/test_widget_bridge.cpp::\"parse_template_areas: simple 3x3 grid\""
       ],
-      "tests": [],
-      "notes": "Same caveat as gridTemplateColumns.",
+      "notes": "pulp #1434 Phase A2-2 PR 1 — grid surface extension. New GridStyle fields: auto_columns / auto_rows / auto_flow / template_areas + per-child grid_area_name. parse_template_areas walks the CSS named-area string into a NamedArea[] map; setGrid('grid_area', ...) accepts both named-token and numeric forms. The existing layout_grid algorithm consumes template_columns/rows/gaps/per-child placement — multi-stop named-area resolution + auto-flow dense-packing land in PRs 2-3 of the ladder.",
       "issue": ""
     },
     "css/height": {

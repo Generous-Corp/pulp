@@ -719,6 +719,24 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
             if (gr[1]) setGrid(id, "row_end", gr[1]);
             break;
         }
+        // pulp #1434 Phase A2-2 — extended grid surface
+        case "gridAutoColumns":
+            setGrid(id, "auto_columns", resolved);
+            break;
+        case "gridAutoRows":
+            setGrid(id, "auto_rows", resolved);
+            break;
+        case "gridAutoFlow":
+            setGrid(id, "auto_flow", resolved);
+            break;
+        case "gridTemplateAreas":
+            setGrid(id, "template_areas", resolved);
+            break;
+        case "gridArea":
+            // Pass through verbatim — bridge distinguishes name vs.
+            // numeric "row / col / row / col" form.
+            setGrid(id, "grid_area", resolved);
+            break;
 
         // ── P1: New CSS properties ──────────────────────────────────────
 

@@ -33,6 +33,25 @@ specifics are out of scope.
 
 ## Recently changed
 
+- **2026-05-06 (pulp #1434 Phase A2-2 PR 1)** — CSS Grid surface
+  extension. `GridStyle` gains `auto_columns` / `auto_rows`
+  (implicit-track sizing for items overflowing the explicit grid),
+  `auto_flow` (`row` / `column` / `row dense` / `column dense`),
+  `template_areas` (`std::vector<NamedArea>` populated by
+  `parse_template_areas("'h h h' 'm c c' 'f f f'")`), and per-child
+  `grid_area_name` (resolved against the parent's template-areas
+  map). The `setGrid` bridge fn picks up: `auto_columns`,
+  `auto_rows`, `auto_flow`, `template_areas`, `grid_area` (named
+  token or `row / col / row / col` numeric form). The CSS shim
+  cases for `gridAutoColumns` / `gridAutoRows` / `gridAutoFlow` /
+  `gridTemplateAreas` / `gridArea` forward verbatim. The
+  `@pulp/react` prop-applier exposes `gridTemplateColumns` /
+  `gridTemplateRows` / `gridTemplateAreas` / `gridAutoColumns` /
+  `gridAutoRows` / `gridAutoFlow` / `gridArea` / `gridColumn` /
+  `gridRow` / per-side starts/ends + gap variants. Reclassified
+  9 entries to `supported`. PRs 2-3 of the A2-2 ladder wire
+  auto-flow dense-packing + named-area resolution into the
+  existing `layout_grid` algorithm. css drift -9.
 - **2026-05-05 (pulp #1434 Triage #10)** — `css/borderStyle` now
   honors the keyword at paint time. New `View::BorderStyle` enum
   (`solid` / `dashed` / `dotted` / `double` / `groove` / `ridge` /

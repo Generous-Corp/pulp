@@ -287,21 +287,79 @@ struct GridTrack {
     static GridTrack auto_size() { return {Type::auto_, 0}; }
 };
 
-/// Grid layout properties (CSS Grid Level 1 subset)
+/// Grid layout properties (CSS Grid Level 1 subset).
+///
+/// pulp #1434 Phase A2-2 extends the existing infrastructure with:
+///   • grid-auto-columns / grid-auto-rows  — implicit-track sizing
+///   • grid-auto-flow                       — row / column / dense
+///   • grid-template-areas                  — named-area string parser
+///   • grid-area shorthand                  — single token reference
+///     into the named-area map (resolves to the matching cell range)
 struct GridStyle {
     std::vector<GridTrack> template_columns;  ///< grid-template-columns
     std::vector<GridTrack> template_rows;     ///< grid-template-rows
+
+    /// pulp #1434 Phase A2-2 — implicit-track sizing for auto-placed
+    /// items that overflow the explicit grid. CSS spec: a single
+    /// track template that's repeated for every implicit row/column.
+    GridTrack auto_columns = GridTrack::auto_size();
+    GridTrack auto_rows    = GridTrack::auto_size();
+
+    /// pulp #1434 Phase A2-2 — auto-flow direction.
+    enum class AutoFlow {
+        row,           ///< default; fill rows left-to-right then wrap
+        column,        ///< fill columns top-to-bottom then wrap
+        row_dense,     ///< row + dense-packing (fill earlier holes)
+        column_dense,  ///< column + dense-packing
+    };
+    AutoFlow auto_flow = AutoFlow::row;
+
     float column_gap = 0;                     ///< grid-column-gap
     float row_gap = 0;                        ///< grid-row-gap
+
+    /// pulp #1434 Phase A2-2 — named-area grid. Each entry is
+    /// `{name, col_start, col_end, row_start, row_end}` (1-based,
+    /// matching CSS line-numbering). Populated by
+    /// `parse_template_areas("'h h h' 'm c c' 'f f f'")`. The
+    /// per-child `grid_area` field below references one of these
+    /// names to resolve placement.
+    struct NamedArea {
+        std::string name;
+        int col_start = 1;
+        int col_end = 1;
+        int row_start = 1;
+        int row_end = 1;
+    };
+    std::vector<NamedArea> template_areas;
 
     // Per-child grid placement
     int grid_column_start = 0;  ///< 0 = auto placement
     int grid_column_end = 0;    ///< 0 = span 1
     int grid_row_start = 0;
     int grid_row_end = 0;
+    /// pulp #1434 Phase A2-2 — `grid-area: header` references the
+    /// parent's NamedArea by name. Empty string means "no named-area
+    /// reference; use the explicit start/end fields above."
+    std::string grid_area_name;
 
     /// Parse "1fr 2fr auto 100px" into track list
     static std::vector<GridTrack> parse_template(const std::string& tmpl);
+
+    /// pulp #1434 Phase A2-2 — parse the CSS named-area grid string
+    /// (e.g. `"'h h h' 'm c c' 'f f f'"`) into the NamedArea list.
+    /// Each row is wrapped in single quotes; cells within a row are
+    /// space-separated. Cells that share a name across adjacent rows
+    /// or columns merge into a single rectangular area. `'.'` is the
+    /// CSS spec spacer token (skipped entirely).
+    static std::vector<NamedArea> parse_template_areas(const std::string& css);
+
+    /// Parse the auto-flow keyword string. Unrecognized → row.
+    static AutoFlow parse_auto_flow(const std::string& s) {
+        if (s == "column")             return AutoFlow::column;
+        if (s == "dense" || s == "row dense") return AutoFlow::row_dense;
+        if (s == "column dense")       return AutoFlow::column_dense;
+        return AutoFlow::row;
+    }
 };
 
 } // namespace pulp::view

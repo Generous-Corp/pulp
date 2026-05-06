@@ -808,6 +808,69 @@ std::vector<GridTrack> GridStyle::parse_template(const std::string& tmpl) {
     return tracks;
 }
 
+std::vector<GridStyle::NamedArea> GridStyle::parse_template_areas(const std::string& css) {
+    // pulp #1434 Phase A2-2 — parse CSS grid-template-areas:
+    //   "'header header header' 'main side side' 'footer footer footer'"
+    // Each single-quoted segment is one row; cells are space-separated.
+    // Adjacent cells with the same name (in the same row OR across
+    // adjacent rows in the same column) merge into one rectangle.
+    // `'.'` is the CSS spec spacer — skipped entirely.
+    std::vector<std::vector<std::string>> rows;
+    {
+        std::string s = css;
+        // Trim whitespace.
+        while (!s.empty() && std::isspace(static_cast<unsigned char>(s.front()))) s.erase(0, 1);
+        while (!s.empty() && std::isspace(static_cast<unsigned char>(s.back()))) s.pop_back();
+        // Walk single-quoted runs.
+        size_t i = 0;
+        while (i < s.size()) {
+            if (s[i] == '\'') {
+                size_t end = s.find('\'', i + 1);
+                if (end == std::string::npos) break;
+                std::string row_str = s.substr(i + 1, end - i - 1);
+                std::vector<std::string> cells;
+                std::istringstream iss(row_str);
+                std::string tok;
+                while (iss >> tok) cells.push_back(tok);
+                rows.push_back(std::move(cells));
+                i = end + 1;
+            } else {
+                ++i;
+            }
+        }
+    }
+    if (rows.empty()) return {};
+
+    // Build a name → bounding-rect map. Each cell contributes to the
+    // rectangle if it shares the name. CSS spec requires the area to
+    // be rectangular; non-rectangular shapes are technically invalid
+    // but we accept them as the bounding rect (lenient at the IR layer).
+    std::vector<NamedArea> out;
+    auto find = [&](const std::string& name) -> NamedArea* {
+        for (auto& a : out) if (a.name == name) return &a;
+        return nullptr;
+    };
+    for (size_t r = 0; r < rows.size(); ++r) {
+        for (size_t c = 0; c < rows[r].size(); ++c) {
+            const std::string& name = rows[r][c];
+            if (name == "." || name.empty()) continue;
+            int row1 = static_cast<int>(r) + 1; // CSS line numbers are 1-based
+            int col1 = static_cast<int>(c) + 1;
+            int row2 = row1 + 1;
+            int col2 = col1 + 1;
+            if (auto* existing = find(name)) {
+                existing->col_start = std::min(existing->col_start, col1);
+                existing->row_start = std::min(existing->row_start, row1);
+                existing->col_end   = std::max(existing->col_end,   col2);
+                existing->row_end   = std::max(existing->row_end,   row2);
+            } else {
+                out.push_back({name, col1, col2, row1, row2});
+            }
+        }
+    }
+    return out;
+}
+
 // ── Grid layout algorithm ───────────────────────────────────────────────────
 
 static void layout_grid(View& parent) {
