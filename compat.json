@@ -4321,54 +4321,70 @@
       "issue": ""
     },
     "rn/textAlignVertical": {
-      "status": "missing",
-      "mapsTo": "no branch",
-      "supportedValues": [],
-      "unsupportedValues": [
+      "status": "partial",
+      "mapsTo": "setFlex(id, 'align_items', mapped) — top→flex-start, center→center, bottom→flex-end, auto→auto",
+      "supportedValues": [
         "auto",
         "top",
         "bottom",
         "center"
       ],
-      "tests": [],
-      "notes": "Android-only in RN; could map to flex align.",
-      "issue": ""
+      "unsupportedValues": [],
+      "tests": [
+        "packages/pulp-react/test/prop-applier-text-decoration.test.ts"
+      ],
+      "notes": "Android-only in RN with no CSS analogue. RN's spec applies WITHIN a text container; pulp's flex-only View model has no inline text-block concept, so we map to alignItems on the owning View — closest semantic. A View with one text child gets the same visual top/center/bottom alignment.",
+      "issue": "1547"
     },
     "rn/textDecorationColor": {
-      "status": "missing",
-      "mapsTo": "no branch",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "supported",
+      "mapsTo": "setTextDecorationColor(id, color)",
+      "supportedValues": [
+        "any color"
       ],
-      "tests": [],
-      "notes": "Not modeled.",
-      "issue": ""
+      "unsupportedValues": [],
+      "tests": [
+        "packages/pulp-react/test/prop-applier-text-decoration.test.ts"
+      ],
+      "notes": "Bridge setter has been registered since #1434. pulp #1547 wired the @pulp/react JSX dispatch.",
+      "issue": "1547"
     },
     "rn/textDecorationLine": {
-      "status": "missing",
-      "mapsTo": "no branch (use textDecoration in CSS surface only)",
-      "supportedValues": [],
-      "unsupportedValues": [
+      "status": "supported",
+      "mapsTo": "setTextDecoration(id, line)",
+      "supportedValues": [
         "none",
         "underline",
         "line-through",
-        "underline line-through"
+        "overline",
+        "underline line-through",
+        "underline overline",
+        "overline line-through",
+        "underline overline line-through"
       ],
-      "tests": [],
-      "notes": "Use bridge setTextDecoration via CSS surface; @pulp/react does not surface.",
-      "issue": ""
+      "unsupportedValues": [],
+      "tests": [
+        "packages/pulp-react/test/prop-applier-text-decoration.test.ts"
+      ],
+      "notes": "Routes to the same Label::TextDecoration setter as the CSS shorthand. The bridge setter only honors a single decoration line today; RN's compound multi-line forms (e.g. 'underline line-through') are normalized on the JS side by picking the first recognized single token, so the value renders as that single decoration rather than the fully combined RN appearance. Codex post-merge audit, PR #1564.",
+      "issue": "1547"
     },
     "rn/textDecorationStyle": {
-      "status": "missing",
-      "mapsTo": "no branch",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "supported",
+      "mapsTo": "setTextDecorationStyle(id, style)",
+      "supportedValues": [
+        "solid",
+        "double",
+        "dotted",
+        "dashed",
+        "wavy"
       ],
-      "tests": [],
-      "notes": "Not modeled.",
-      "issue": ""
+      "unsupportedValues": [],
+      "tests": [
+        "packages/pulp-react/test/prop-applier-text-decoration.test.ts"
+      ],
+      "notes": "Bridge accepts all 5 spec values and stores them on Label. Paint path renders solid regardless today; non-solid styles fall back to solid (spec-allowed).",
+      "issue": "1547"
     },
     "rn/textShadowColor": {
       "status": "missing",
