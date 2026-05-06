@@ -377,13 +377,34 @@ function parseTransform(str) {
         var fn = m[1];
         var rawArgs = m[2].split(",").map(function(s) { return s.trim(); });
         var args = rawArgs.map(function(a) {
-            if (a.indexOf("deg") >= 0) return parseFloat(a);
+            // pulp #1434 Triage #9 — handle rad / turn / grad alongside
+            // deg. Plain numbers in rotate-family functions are degrees;
+            // numeric scale-family / matrix args pass through.
+            var ang = _parseTransformAngle(a);
+            if (ang !== null) return ang;
             var l = parseCSSLength(a);
             return l ? l.value : parseFloat(a) || 0;
         });
         result.push({ fn: fn, args: args });
     }
     return result;
+}
+
+// Parse a CSS angle to degrees. Returns null if the token isn't an
+// angle (so callers can fall back to length / numeric parsing).
+function _parseTransformAngle(t) {
+    if (!t) return null;
+    var s = String(t).trim();
+    var m = s.match(/^(-?[\d.]+)(deg|rad|turn|grad)$/);
+    if (!m) return null;
+    var n = parseFloat(m[1]);
+    if (isNaN(n)) return null;
+    var u = m[2];
+    if (u === "deg") return n;
+    if (u === "rad") return n * 180 / Math.PI;
+    if (u === "turn") return n * 360;
+    if (u === "grad") return n * 0.9;
+    return null;
 }
 
 // Parse CSS transition shorthand: "all 0.3s ease-out 0.1s"

@@ -95,6 +95,16 @@ Spec walk:
   DIVERGE / partial → PASS for 7 `rn/*Color` entries. RN `style={{
   color: 'oklch(0.7 0.18 240)' }}` ports verbatim from Figma copy-CSS,
   v0.dev hero color tokens, and Claude Design transition states.
+- **2026-05-05 (pulp #1434 Triage #9 fan-out)** — `rn/transform` array
+  walker now dispatches `skewX` / `skewY` (previously stored on the
+  snapshot but silently dropped because the bridge fn wasn't
+  registered). `setSkew(id, x_deg, y_deg)` is newly registered;
+  `View::set_skew` had existed in C++ since the 2D slot landed.
+  `[{skewX:'10deg'},{skewY:'5deg'}]` produces ONE consolidated
+  `setSkew(10, 5)` call thanks to the within-array axis merging.
+  Status flipped `partial` → `supported`. Deferred (still silent
+  no-op): `rotateX` / `rotateY` / `perspective` / `matrix` — pulp's
+  2D View has no 3D rotation storage; tracked for a follow-up.
 - **2026-05-05 (pulp #1434 Triage #9)** — `rn/transform` now accepts
   the RN array-of-objects shape:
   ```js

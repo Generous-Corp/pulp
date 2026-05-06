@@ -146,6 +146,11 @@ declare global {
     function setTranslate(id: string, x: number, y: number): void;
     function setRotation(id: string, degrees: number): void;
     function setScale(id: string, scale: number): void;
+    // pulp #1434 Triage #9 fan-out — setSkew dispatches both axes at
+    // once. View::set_skew has existed since the 2D slot was added;
+    // the bridge fn registration landed alongside this prop-applier
+    // walker extension so skewX/skewY now reaches the View.
+    function setSkew(id: string, x_deg: number, y_deg: number): void;
 
     // ── Text ────────────────────────────────────────────────────────
     function setText(id: string, text: string): void;
@@ -222,7 +227,7 @@ export function createMockBridge(): MockBridge {
         // pulp #1434 Triage #9 — transform array dispatches a
         // consolidated trio of bridge calls; mock-bridge captures
         // all three so vitest cases can assert on the args + arity.
-        'setTranslate', 'setRotation', 'setScale',
+        'setTranslate', 'setRotation', 'setScale', 'setSkew',
         // pulp #1434 batch 6 — CSS positional setters (top/right/bottom/left)
         // need to be capturable so the percent-string forwarding test
         // can assert on the bridge call shape.

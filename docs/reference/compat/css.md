@@ -100,6 +100,29 @@ specifics are out of scope.
   `css/borderColor` (plus seven matching `rn/*Color` entries). Figma
   copy-CSS has been emitting `oklch(...)` since 2024; v0.dev, Tailwind,
   and Claude Design emit `lab()`/`lch()` constantly.
+- **2026-05-05 (pulp #1434 Triage #9 fan-out)** — `css/transform` now
+  supports the full CSS function set:
+  `translate(x,y)`, `translateX`, `translateY`, `rotate`, `rotateZ`,
+  `scale(n)` / `scale(x,y)`, `scaleX`, `scaleY`, `skewX`, `skewY`,
+  `matrix(a,b,c,d,tx,ty)`, plus the full angle-unit set (`deg`, `rad`,
+  `turn`, `grad`). The CSS shim's `transform` dispatcher (in
+  `web-compat-style-decl.js`) is now a walk-once accumulator that
+  merges within-string axes into one consolidated bridge call per
+  axis-of-transform: `translateX(10) translateY(20)` produces ONE
+  `setTranslate(10, 20)` rather than two clobbering ones. `setSkew`
+  is newly registered as a bridge fn (`View::set_skew` had existed
+  in C++ since the 2D slot landed; this surface just hadn't been
+  wired). `matrix(a,b,c,d,tx,ty)` dispatches via the existing
+  `setTransform(id, a, b, c, d, e, f)` bridge fn — preserves the
+  full 6-component 2D affine matrix verbatim (per Codex post-merge
+  audit P1 — earlier draft decomposed to translate+uniform-scale+
+  rotate which silently dropped `c`/`d` skew components on rotation
+  matrices like `matrix(0.866, 0.5, -0.5, 0.866, 100, 50)`).
+  Deferred (silent no-op): `rotateX` / `rotateY` / `matrix3d` /
+  `perspective` — pulp's 2D View has no 3D rotation storage;
+  tracked for a follow-up. Reclassified DIVERGE → PASS. Figma
+  motion exports + v0.dev hero animations + Tailwind utility
+  classes routinely emit the previously-unsupported function set.
 - **2026-05-05 (pulp #1434 css catalog hygiene)** — eight catalog-only
   refreshes: `css/width` and `css/height` now list `%` in
   `supportedValues` (mirroring `yoga/width` / `yoga/height` post-#1426 —

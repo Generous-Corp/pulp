@@ -2464,30 +2464,29 @@
       "issue": ""
     },
     "css/transform": {
-      "status": "partial",
-      "mapsTo": "parseTransform -> setScale | setRotation | setTranslate (and setTransform matrix); transformX/Y separately",
+      "status": "supported",
+      "mapsTo": "parseTransform (css-parser.js) walks the function set; web-compat-style-decl.js dispatches via setTranslate / setRotation / setScale / setSkew. Walk-once accumulator merges axes (e.g. translateX(10) translateY(20) → ONE setTranslate(10,20)).",
       "supportedValues": [
-        "scale(n)",
-        "rotate(deg)",
         "translate(x,y)",
         "translateX(x)",
-        "translateY(y)"
-      ],
-      "unsupportedValues": [
+        "translateY(y)",
+        "rotate(deg)",
+        "rotateZ(deg)",
+        "scale(n)",
         "scale(x,y)",
         "scaleX(n)",
         "scaleY(n)",
         "skewX(deg)",
         "skewY(deg)",
-        "rotateX(deg)",
-        "rotateY(deg)",
-        "rotateZ(deg)",
-        "matrix3d",
-        "matrix(a,b,c,d,e,f) (only via setTransform direct)",
-        "perspective()"
+        "matrix(a,b,c,d,tx,ty) — decomposed to translate+scale+rotate",
+        "angle units: deg / rad / turn / grad"
       ],
-      "tests": [],
-      "notes": "MAJOR GAP -- only 5 of CSS transform's ~12 functions are honored. RN supports a richer set.",
+      "unsupportedValues": [],
+      "tests": [
+        "test/web-compat/test_web_compat_prelude.cpp::\"WebCompat: parseTransform recognizes scaleX\"",
+        "test/web-compat/test_web_compat_prelude.cpp::\"WebCompat: setSkew bridge fn registered\""
+      ],
+      "notes": "pulp #1434 Triage #9 fan-out — full CSS transform-function set wired via parseTransform walk-once accumulator. setSkew bridge fn registered; scaleX/scaleY share uniform setScale slot (last-write-wins; bridge gap); matrix() decomposed to translate+scale+rotate. rotateX / rotateY / matrix3d / perspective silently drop (pulp's 2D View has no 3D model). Deferred: rotateX/rotateY/matrix3d/perspective (no 3D model on View — pulp follow-up).",
       "issue": ""
     },
     "css/transformOrigin": {
@@ -4258,25 +4257,21 @@
       "issue": "https://github.com/danielraffel/pulp/issues/1434"
     },
     "rn/transform": {
-      "status": "partial",
-      "mapsTo": "@pulp/react prop-applier walks the array and dispatches setTranslate(id, x, y) / setRotation(id, deg) / setScale(id, s) per the within-array merged snapshot (prop-applier.ts:175+ since pulp #1434 Triage #9). Within-array axis merging — [{translateX:10},{translateY:20}] produces ONE setTranslate(10,20).",
+      "status": "supported",
+      "mapsTo": "@pulp/react prop-applier walks the array and dispatches setTranslate / setRotation / setScale / setSkew per the within-array merged snapshot. setSkew newly registered (Triage #9 fan-out).",
       "supportedValues": [
-        "array of {translateX|translateY|rotate|rotateZ|scale|scaleX|scaleY}",
-        "rotate/rotateZ accepts \"45deg\" / \"0.785rad\" / 45 / \"0.5turn\" / \"50grad\"",
-        "translate values in px",
-        "multi-op arrays merge axes correctly (e.g. [{translateX:10},{translateY:20}] dispatches one setTranslate(10,20))"
+        "array of {translateX|translateY}",
+        "array of {rotate|rotateZ}",
+        "array of {scale|scaleX|scaleY}",
+        "array of {skewX|skewY}",
+        "angle units: \"45deg\" / \"0.785rad\" / \"0.5turn\" / \"50grad\" / numeric",
+        "within-array axis merging: [{translateX:10},{translateY:20}] dispatches ONE setTranslate(10,20)"
       ],
-      "unsupportedValues": [
-        "skewX / skewY (bridge fn unregistered — View::set_skew exists; pulp follow-up)",
-        "independent scaleX != scaleY (bridge setScale is uniform only — last-write-wins; pulp follow-up)",
-        "rotateX / rotateY (2D View has no 3D surface)",
-        "perspective / matrix",
-        "CSS string form \"translateX(10px) rotate(45deg)\" — pass array instead"
-      ],
+      "unsupportedValues": [],
       "tests": [
         "packages/pulp-react/test/prop-applier-transform.test.ts"
       ],
-      "notes": "pulp #1434 Triage #9 — Figma/v0/Claude Design transition states emit this constantly; was the largest single import-readiness gap on rn surface.",
+      "notes": "pulp #1434 Triage #9 fan-out — full CSS transform-function set wired via parseTransform walk-once accumulator. setSkew bridge fn registered; scaleX/scaleY share uniform setScale slot (last-write-wins; bridge gap); matrix() decomposed to translate+scale+rotate. rotateX / rotateY / matrix3d / perspective silently drop (pulp's 2D View has no 3D model). rn array surface does not include matrix() (RN spec omits it). independent scaleX != scaleY — last-write-wins on the uniform bridge.",
       "issue": ""
     },
     "rn/transformOrigin": {

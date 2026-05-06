@@ -549,14 +549,81 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
 
         // Transform
         case "transform": {
+            // pulp #1434 Triage #9 — full CSS transform-function fan-out.
+            // Walk-once accumulator (mirrors the @pulp/react prop-applier
+            // walker) so the within-string order produces a single set
+            // of consolidated bridge calls instead of multiple
+            // axis-clobbering ones. translateX(10) translateY(20)
+            // produces ONE setTranslate(10, 20). scaleX/scaleY share the
+            // uniform setScale slot (last-write-wins; bridge gap).
+            // skewX(α) skewY(β) → ONE setSkew(α, β).
+            //
+            // Deferred (silent no-op + TODO):
+            //   • rotateX / rotateY — pulp's 2D View has no 3D rotation
+            //     storage; rotateZ aliases to setRotation.
+            //   • matrix3d / perspective — ditto, no 3D model.
+            //   • matrix(a b c d tx ty) — 2D affine. Per Codex P1 audit,
+            //     dispatched directly to setTransform(id, a, b, c, d, e, f)
+            //     to preserve all 6 components verbatim. The earlier
+            //     decomposition to translate+uniform-scale+rotate dropped
+            //     the c/d skew components on rotation matrices like
+            //     `matrix(0.866, 0.5, -0.5, 0.866, 100, 50)` and could
+            //     mask zero-scale collapses (a=b=0 was silently rounded
+            //     to scl=1).
             var transforms = parseTransform(resolved);
+            var tx = 0, ty = 0;
+            var rotZ = 0;
+            var scl = 1;
+            var skewX = 0, skewY = 0;
+            var haveT = false, haveR = false, haveS = false, haveK = false;
+            var matrixCall = null; // {a,b,c,d,e,f} for matrix() entries
             for (var i = 0; i < transforms.length; i++) {
                 var t = transforms[i];
-                if (t.fn === "scale") setScale(id, t.args[0] || 1);
-                else if (t.fn === "rotate") setRotation(id, t.args[0] || 0);
-                else if (t.fn === "translate") setTranslate(id, t.args[0] || 0, t.args[1] || 0);
-                else if (t.fn === "translateX") setTranslate(id, t.args[0] || 0, 0);
-                else if (t.fn === "translateY") setTranslate(id, 0, t.args[0] || 0);
+                var a0 = t.args[0] || 0;
+                var a1 = t.args[1] || 0;
+                if (t.fn === "translate")        { tx = a0; ty = a1; haveT = true; }
+                else if (t.fn === "translateX") { tx = a0;          haveT = true; }
+                else if (t.fn === "translateY") { ty = a0;          haveT = true; }
+                else if (t.fn === "rotate")     { rotZ = a0;        haveR = true; }
+                else if (t.fn === "rotateZ")    { rotZ = a0;        haveR = true; }
+                else if (t.fn === "scale")      { scl = a0;         haveS = true; }
+                else if (t.fn === "scaleX")     { scl = a0;         haveS = true; }
+                else if (t.fn === "scaleY")     { scl = a0;         haveS = true; }
+                else if (t.fn === "skewX")      { skewX = a0;       haveK = true; }
+                else if (t.fn === "skewY")      { skewY = a0;       haveK = true; }
+                else if (t.fn === "matrix") {
+                    // matrix(a b c d tx ty) — preserve full 6-component
+                    // 2D affine. The bridge already exposes setTransform
+                    // with the same 6-arg signature; we pass through
+                    // verbatim. Note: when matrix() coexists with
+                    // translate/scale/rotate ops in the same string,
+                    // matrix() takes precedence (its 6 components encode
+                    // the full affine — applying the others on top would
+                    // be ambiguous).
+                    matrixCall = {
+                        a: t.args[0] !== undefined ? t.args[0] : 1,
+                        b: t.args[1] !== undefined ? t.args[1] : 0,
+                        c: t.args[2] !== undefined ? t.args[2] : 0,
+                        d: t.args[3] !== undefined ? t.args[3] : 1,
+                        e: t.args[4] !== undefined ? t.args[4] : 0,
+                        f: t.args[5] !== undefined ? t.args[5] : 0,
+                    };
+                }
+                // rotateX / rotateY / matrix3d / perspective: 2D View has
+                // no 3D rotation storage; silently dropped. Tracked for
+                // a follow-up issue (3D model on View).
+            }
+            if (matrixCall && typeof setTransform !== "undefined") {
+                // Full-matrix path — 6-component bridge call. Skips the
+                // decomposed translate/rotate/scale dispatchers since
+                // matrix() already encodes them in a/b/c/d/e/f.
+                setTransform(id, matrixCall.a, matrixCall.b, matrixCall.c,
+                             matrixCall.d, matrixCall.e, matrixCall.f);
+            } else {
+                if (haveT) setTranslate(id, tx, ty);
+                if (haveR) setRotation(id, rotZ);
+                if (haveS) setScale(id, scl);
+                if (haveK && typeof setSkew !== "undefined") setSkew(id, skewX, skewY);
             }
             break;
         }

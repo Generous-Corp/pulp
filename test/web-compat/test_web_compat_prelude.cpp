@@ -3,6 +3,7 @@
 // and DOM operations (appendChild, removeChild, getElementById, etc.).
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include "test_helpers.hpp"
 #include <pulp/view/asset_manager.hpp>
 #include <fstream>
@@ -961,4 +962,144 @@ TEST_CASE("WebCompat: parseCSSColor malformed oklch returns null", "[webcompat][
     TestEnvironment env;
     auto result = env.engine.evaluate("parseCSSColor('oklch(banana)') === null");
     REQUIRE(result.getWithDefault<bool>(false) == true);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Modern transform fan-out (pulp #1434 Triage #9)
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+// CSS transform string: scaleX/Y, skewX/Y, rotateX/Y/Z, matrix, plus
+// rad/turn/grad angle units. Bridge: setSkew newly registered;
+// rotateX/Y + matrix3d + perspective silently drop (pulp's 2D View
+// has no 3D model); scaleX/Y last-write-wins (uniform setScale only).
+
+TEST_CASE("WebCompat: parseTransform handles rad units", "[webcompat][parser][issue-1434-tx]") {
+    TestEnvironment env;
+    auto result = env.engine.evaluate("parseTransform('rotate(1rad)')[0].args[0]");
+    REQUIRE(result.getWithDefault<double>(0) > 57.0);  // 1 rad ≈ 57.3°
+    REQUIRE(result.getWithDefault<double>(0) < 58.0);
+}
+
+TEST_CASE("WebCompat: parseTransform handles turn units", "[webcompat][parser][issue-1434-tx]") {
+    TestEnvironment env;
+    auto result = env.engine.evaluate("parseTransform('rotate(0.5turn)')[0].args[0]");
+    REQUIRE(result.getWithDefault<double>(0) == 180.0);
+}
+
+TEST_CASE("WebCompat: parseTransform handles grad units", "[webcompat][parser][issue-1434-tx]") {
+    TestEnvironment env;
+    auto result = env.engine.evaluate("parseTransform('rotate(100grad)')[0].args[0]");
+    REQUIRE(result.getWithDefault<double>(0) == 90.0);  // 100 grad = 90°
+}
+
+TEST_CASE("WebCompat: parseTransform recognizes scaleX", "[webcompat][parser][issue-1434-tx]") {
+    TestEnvironment env;
+    auto fn = env.engine.evaluate("parseTransform('scaleX(2)')[0].fn");
+    REQUIRE(std::string(fn.getWithDefault<std::string_view>("")) == "scaleX");
+    auto val = env.engine.evaluate("parseTransform('scaleX(2)')[0].args[0]");
+    REQUIRE(val.getWithDefault<double>(0) == 2.0);
+}
+
+TEST_CASE("WebCompat: parseTransform recognizes skewX/skewY", "[webcompat][parser][issue-1434-tx]") {
+    TestEnvironment env;
+    auto fn1 = env.engine.evaluate("parseTransform('skewX(10deg)')[0].fn");
+    REQUIRE(std::string(fn1.getWithDefault<std::string_view>("")) == "skewX");
+    auto fn2 = env.engine.evaluate("parseTransform('skewY(5deg)')[0].fn");
+    REQUIRE(std::string(fn2.getWithDefault<std::string_view>("")) == "skewY");
+}
+
+TEST_CASE("WebCompat: parseTransform recognizes rotateZ", "[webcompat][parser][issue-1434-tx]") {
+    TestEnvironment env;
+    auto fn = env.engine.evaluate("parseTransform('rotateZ(45deg)')[0].fn");
+    REQUIRE(std::string(fn.getWithDefault<std::string_view>("")) == "rotateZ");
+}
+
+TEST_CASE("WebCompat: parseTransform recognizes matrix(a b c d tx ty)", "[webcompat][parser][issue-1434-tx]") {
+    TestEnvironment env;
+    auto fn = env.engine.evaluate("parseTransform('matrix(1, 0, 0, 1, 50, 30)')[0].fn");
+    REQUIRE(std::string(fn.getWithDefault<std::string_view>("")) == "matrix");
+    auto len = env.engine.evaluate("parseTransform('matrix(1, 0, 0, 1, 50, 30)')[0].args.length");
+    REQUIRE(len.getWithDefault<double>(0) == 6.0);
+}
+
+TEST_CASE("WebCompat: parseTransform multi-op walk", "[webcompat][parser][issue-1434-tx]") {
+    TestEnvironment env;
+    auto len = env.engine.evaluate("parseTransform('translateX(10px) rotate(45deg) scaleX(2) skewX(5deg)').length");
+    REQUIRE(len.getWithDefault<double>(0) == 4.0);
+}
+
+TEST_CASE("WebCompat: setSkew bridge fn registered", "[webcompat][bridge][issue-1434-tx]") {
+    // pulp #1434 Triage #9 — setSkew is now a registered bridge fn.
+    // Earlier, View::set_skew existed in C++ but was unreachable from
+    // JS; the parser stored skewX/skewY on the snapshot but couldn't
+    // dispatch.
+    TestEnvironment env;
+    auto result = env.engine.evaluate("typeof setSkew");
+    REQUIRE(std::string(result.getWithDefault<std::string_view>("")) == "function");
+}
+
+// pulp #1434 Triage #9 P1 fix (Codex post-merge audit) —
+// matrix(a,b,c,d,tx,ty) must dispatch to setTransform with all 6
+// components verbatim, NOT decompose to translate+uniform-scale+rotate
+// (which silently dropped c/d skew components on rotation matrices and
+// could mask zero-scale collapses).
+
+TEST_CASE("WebCompat: matrix() preserves all 6 components verbatim",
+          "[webcompat][bridge][issue-1434-tx][issue-1434-tx-p1]") {
+    TestEnvironment env;
+    // Install a recorder for setTransform so we can inspect args.
+    // The element must be attached (`_nativeCreated`) before style
+    // assignments forward to the bridge — match the pattern from
+    // existing CSSStyleDeclaration tests.
+    env.engine.evaluate(R"JS(
+        var __setTransformCalls = [];
+        setTransform = function(id, a, b, c, d, e, f) {
+            __setTransformCalls.push([id, a, b, c, d, e, f]);
+        };
+        var el = document.createElement('div');
+        document.body.appendChild(el);
+        el.style.transform = 'matrix(0.866, 0.5, -0.5, 0.866, 100, 50)';
+    )JS");
+
+    auto numCalls = env.engine.evaluate("__setTransformCalls.length");
+    REQUIRE(numCalls.getWithDefault<double>(0) == 1.0);
+
+    // Verify all 6 components round-trip.
+    auto a = env.engine.evaluate("__setTransformCalls[0][1]").getWithDefault<double>(0);
+    auto b = env.engine.evaluate("__setTransformCalls[0][2]").getWithDefault<double>(0);
+    auto c = env.engine.evaluate("__setTransformCalls[0][3]").getWithDefault<double>(0);
+    auto d = env.engine.evaluate("__setTransformCalls[0][4]").getWithDefault<double>(0);
+    auto e = env.engine.evaluate("__setTransformCalls[0][5]").getWithDefault<double>(0);
+    auto f = env.engine.evaluate("__setTransformCalls[0][6]").getWithDefault<double>(0);
+    REQUIRE_THAT(a, Catch::Matchers::WithinAbs(0.866, 0.001));
+    REQUIRE_THAT(b, Catch::Matchers::WithinAbs(0.5,   0.001));
+    REQUIRE_THAT(c, Catch::Matchers::WithinAbs(-0.5,  0.001));
+    REQUIRE_THAT(d, Catch::Matchers::WithinAbs(0.866, 0.001));
+    REQUIRE_THAT(e, Catch::Matchers::WithinAbs(100.0, 0.001));
+    REQUIRE_THAT(f, Catch::Matchers::WithinAbs(50.0,  0.001));
+}
+
+TEST_CASE("WebCompat: matrix() with zero scale (a=b=0) preserves the collapse",
+          "[webcompat][bridge][issue-1434-tx][issue-1434-tx-p2]") {
+    // P2 fix: an intentional zero-scale collapse (a=b=0) used to be
+    // masked by the decomposition computing sx=1 fallback. With direct
+    // setTransform passthrough, a=b=0 reaches the bridge unchanged.
+    TestEnvironment env;
+    env.engine.evaluate(R"JS(
+        var __setTransformCalls = [];
+        setTransform = function(id, a, b, c, d, e, f) {
+            __setTransformCalls.push([id, a, b, c, d, e, f]);
+        };
+        var el = document.createElement('div');
+        document.body.appendChild(el);
+        el.style.transform = 'matrix(0, 0, 0, 0, 100, 50)';
+    )JS");
+    auto a = env.engine.evaluate("__setTransformCalls[0][1]").getWithDefault<double>(-1.0);
+    auto b = env.engine.evaluate("__setTransformCalls[0][2]").getWithDefault<double>(-1.0);
+    auto c = env.engine.evaluate("__setTransformCalls[0][3]").getWithDefault<double>(-1.0);
+    auto d = env.engine.evaluate("__setTransformCalls[0][4]").getWithDefault<double>(-1.0);
+    REQUIRE_THAT(a, Catch::Matchers::WithinAbs(0.0, 0.001));
+    REQUIRE_THAT(b, Catch::Matchers::WithinAbs(0.0, 0.001));
+    REQUIRE_THAT(c, Catch::Matchers::WithinAbs(0.0, 0.001));
+    REQUIRE_THAT(d, Catch::Matchers::WithinAbs(0.0, 0.001));
 }

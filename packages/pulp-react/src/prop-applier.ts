@@ -186,23 +186,34 @@ function _parseBoxShadow(s: string): _ParsedBoxShadow | null {
 // carry state across renders.
 //
 // Bridge gaps (deferred — TODOs + follow-up issue):
-//   • `setSkew` is unregistered (View::set_skew exists but no bridge fn).
-//     skewX/skewY entries are stored on the snapshot but not dispatched.
 //   • setScale is uniform-only — independent scaleX/scaleY axes can't
 //     round-trip. We approximate: scale > scaleX > scaleY in priority,
 //     last-write-wins within the array; if scaleX≠scaleY we emit the
 //     last seen and document the limitation.
-//   • rotateX/rotateY/perspective/matrix — 3D / matrix transforms not
+//   • rotateX/rotateY/perspective/matrix3d — 3D / matrix transforms not
 //     modeled in pulp's 2D View (no perspective; rotation is Z-axis
 //     only). Silently dropped with TODO.
+//   • matrix(a b c d tx ty) — 2D affine; the CSS shim decomposes to
+//     translate + uniform-scale + rotate components. The @pulp/react
+//     RN array surface doesn't have a matrix entry today (RN spec:
+//     only translateX/Y, scale, scaleX/Y, rotate/Z, skewX/Y), so the
+//     walker just silently drops `matrix`/`matrix3d` for parity.
+//
+// Triage #9 fan-out (this PR) — `setSkew` is now a registered bridge
+// function (View::set_skew has existed since the 2D slot was added).
+// The walker dispatches skewX/skewY by accumulating both axes and
+// emitting one consolidated setSkew(id, x_deg, y_deg) call.
 interface _TransformSnapshot {
     tx: number;
     ty: number;
     rotateDeg: number;
     scale: number;
+    skewX: number;
+    skewY: number;
     haveTranslate: boolean;
     haveRotate: boolean;
     haveScale: boolean;
+    haveSkew: boolean;
 }
 
 // Parse `'45deg'` / `'0.785rad'` / `45` (numeric) → degrees.
@@ -257,9 +268,11 @@ function _walkTransformArray(arr: ReadonlyArray<unknown>): _TransformSnapshot {
         tx: 0, ty: 0,
         rotateDeg: 0,
         scale: 1,
+        skewX: 0, skewY: 0,
         haveTranslate: false,
         haveRotate: false,
         haveScale: false,
+        haveSkew: false,
     };
     for (const op of arr) {
         if (op == null || typeof op !== 'object') continue;
@@ -293,11 +306,17 @@ function _walkTransformArray(arr: ReadonlyArray<unknown>): _TransformSnapshot {
                 snap.scale = typeof v === 'number' ? v : parseFloat(String(v));
                 snap.haveScale = true;
                 break;
-            // skewX / skewY — View::set_skew exists in C++ but no bridge
-            // function is registered yet. Silently no-op until the bridge
-            // surface lands. pulp follow-up issue tracks the gap.
+            // pulp #1434 Triage #9 fan-out — skewX / skewY now reach the
+            // bridge via the freshly-registered setSkew(id, x_deg, y_deg).
+            // Both axes accumulate independently; one consolidated call
+            // emits at dispatch time.
             case 'skewX':
+                snap.skewX = _parseAngleDegrees(v);
+                snap.haveSkew = true;
+                break;
             case 'skewY':
+                snap.skewY = _parseAngleDegrees(v);
+                snap.haveSkew = true;
                 break;
             // 3D / matrix ops — not modeled in pulp's 2D View. Silently
             // drop. pulp follow-up tracks if/when 3D transforms are
@@ -632,6 +651,10 @@ function applyOne(id: string, type: string, key: string, value: unknown, props?:
             if (snap.haveTranslate) call('setTranslate', id, snap.tx, snap.ty);
             if (snap.haveRotate)    call('setRotation', id, snap.rotateDeg);
             if (snap.haveScale)     call('setScale', id, snap.scale);
+            // pulp #1434 Triage #9 fan-out — setSkew is now a registered
+            // bridge fn; emit one consolidated call that captures both
+            // axes accumulated in the walker.
+            if (snap.haveSkew)      call('setSkew', id, snap.skewX, snap.skewY);
             return;
         }
 

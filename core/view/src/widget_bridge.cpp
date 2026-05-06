@@ -3807,6 +3807,26 @@ void WidgetBridge::register_api() {
         return choc::value::Value();
     });
 
+    // setSkew(id, x_deg, y_deg) — CSS transform: skewX() / skewY().
+    // pulp #1434 Triage #9 (transform fan-out) — View::set_skew has
+    // existed since the 2D View slot was added; this surface just
+    // hadn't been registered as a JS bridge fn until now. The CSS
+    // shim's parseTransform dispatches each axis independently
+    // (skewX(α) → setSkew(id, α, 0); skewY(β) → setSkew(id, 0, β));
+    // when both appear in the same transform string the second
+    // call's arg-pattern preserves the axis the first call set
+    // (caller-side accumulation since within-string order is
+    // canonical CSS application order). The @pulp/react prop-applier
+    // walker accumulates skewX/skewY in its snapshot the same way.
+    engine_.register_function("setSkew", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto x = static_cast<float>(args.get<double>(1, 0.0));
+        auto y = static_cast<float>(args.get<double>(2, 0.0));
+        auto* v = id.empty() ? &root_ : widget(id);
+        if (v) v->set_skew(x, y);
+        return choc::value::Value();
+    });
+
     // setTextOverflow(id, "ellipsis"|"clip") — CSS text-overflow
     engine_.register_function("setTextOverflow", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
