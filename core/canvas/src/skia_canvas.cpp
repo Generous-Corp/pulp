@@ -10,6 +10,7 @@
 #include "include/core/SkPaint.h"
 #include "include/core/SkPath.h"
 #include "include/core/SkPathBuilder.h"
+#include "include/utils/SkParsePath.h"
 #include "include/core/SkFont.h"
 #include "include/core/SkFontMetrics.h"
 #include "include/core/SkFontMgr.h"
@@ -328,6 +329,20 @@ void SkiaCanvas::clip() {
     // Snapshot the path (don't detach — Canvas2D allows continued use of
     // the same path after clip()) and intersect with the current clip.
     canvas_->clipPath(path_builder_->snapshot(), /*doAntiAlias=*/true);
+}
+
+void SkiaCanvas::clip_path_svg(const std::string& svg_path_d) {
+    // CSS `clip-path: path("...")` (pulp #1515). Parse the SVG-path-d
+    // string via Skia's SVG path parser and install it as the canvas
+    // clip. Caller owns save()/restore() balancing; we install the
+    // clip on the current Skia clip stack so a paired restore() lifts
+    // it. Unparseable / empty strings are silently ignored — same
+    // graceful-degrade contract as the other paint-time clip helpers.
+    GUARD_CANVAS;
+    if (svg_path_d.empty()) return;
+    SkPath path;
+    if (!SkParsePath::FromSVGString(svg_path_d.c_str(), &path)) return;
+    canvas_->clipPath(path, /*doAntiAlias=*/true);
 }
 
 // pulp #1350 — single source of truth for shape-fill paints. Mirrors

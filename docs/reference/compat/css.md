@@ -33,6 +33,26 @@ specifics are out of scope.
 
 ## Recently changed
 
+- **2026-05-06 (pulp #1515)** — CSS `clip-path` + `mask` cluster.
+  Three catalog items flipped `missing` → `partial`.
+  * **`css/clipPath`** — bridge fn `setClipPath(id, svg_path_d)`
+    stores the value on `View::clip_path_`; `View::paint_all` calls
+    `Canvas::clip_path_svg` after the overflow clip and before
+    children paint. `SkiaCanvas` parses via
+    `SkPath::FromSVGString` and intersects the canvas clip;
+    `RecordingCanvas` captures a `clip_path_svg` command for tests;
+    other backends silently no-op (path parsing is Skia-side).
+    Only the `path("...")` form is honored — URL refs (`url(#id)`)
+    and named shape forms (`circle()`, `inset()`, `polygon()`,
+    `ellipse()`) are deferred to a follow-up paint slice.
+  * **`css/mask`** + **`css/maskImage`** — bridge fns `setMask` /
+    `setMaskImage` round-trip the value through `View::mask_` /
+    `View::mask_image_`. The shorthand parser in
+    `web-compat-style-decl.js` extracts the first `url(...)` or
+    `*-gradient(...)` substring and forwards it to
+    `setMaskImage` alongside the verbatim shorthand. Storage-only
+    today — the saveLayer + `SkBlendMode::kDstIn` shader composite
+    that consumes `mask_image_` is the follow-up paint slice.
 - **2026-05-05 (pulp #1434 small-wins bundle, Triage #7+#12+#13+#14)** —
   four catalog/translator items combined into one PR.
   * **Triage #7 cursor enum fan-out** — `setCursor` case ladder now

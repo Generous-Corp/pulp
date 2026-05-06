@@ -599,6 +599,30 @@ public:
     void set_backdrop_blur(float radius) { backdrop_blur_ = radius; }
     float backdrop_blur() const { return backdrop_blur_; }
 
+    /// CSS `clip-path: path("...")` (pulp #1515). Stores an SVG-path-d
+    /// string; paint_all() installs it as a canvas clip via
+    /// `Canvas::clip_path_svg` before painting children. Empty string
+    /// clears the slot. URL refs (`url(#id)`) and named shape forms
+    /// (`circle()`, `inset()`, `polygon()`) are deferred — only the
+    /// `path("...")` form is honored today.
+    void set_clip_path(const std::string& svg_path_d) { clip_path_ = svg_path_d; }
+    const std::string& clip_path() const { return clip_path_; }
+    bool has_clip_path() const { return !clip_path_.empty(); }
+
+    /// CSS `mask-image: ...` (pulp #1515). Storage-only today; the
+    /// paint pipeline does not yet composite a shader mask onto a
+    /// saveLayer (image-URL fetch + SkBlendMode::kDstIn is the
+    /// follow-up paint slice). Solid-color and `none` are tracked so
+    /// the value round-trips through View slots and the bridge.
+    void set_mask_image(const std::string& value) { mask_image_ = value; }
+    const std::string& mask_image() const { return mask_image_; }
+
+    /// CSS `mask` shorthand (pulp #1515). Stored verbatim alongside
+    /// `mask_image_`; the longhand fan-out in the JS shim populates
+    /// the image slot from this string. Storage-only today.
+    void set_mask(const std::string& value) { mask_ = value; }
+    const std::string& mask() const { return mask_; }
+
     /// Force this View's subtree to render into a compositing layer.
     /// Useful for caching, post-effects, or explicit layer isolation.
     void set_needs_layer(bool v) { needs_layer_ = v; }
@@ -747,6 +771,14 @@ private:
     bool has_transform_matrix_ = false;
     float filter_blur_ = 0;
     float backdrop_blur_ = 0;
+    // pulp #1515 — CSS clip-path / mask storage. Paint-time consumption
+    // for clip_path_ via Canvas::clip_path_svg (SkPath::FromSVGString
+    // on Skia, no-op fallback elsewhere). mask_image_ / mask_ are
+    // storage-only today; the saveLayer + SkBlendMode::kDstIn shader
+    // composite is a follow-up paint slice.
+    std::string clip_path_;
+    std::string mask_image_;
+    std::string mask_;
     bool needs_layer_ = false;
     WindowHost* window_host_ = nullptr;
     PluginViewHost* plugin_view_host_ = nullptr;

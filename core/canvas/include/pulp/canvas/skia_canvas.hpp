@@ -54,6 +54,7 @@ public:
     // ── Clipping ─────────────────────────────────────────────────────────
     void clip_rect(float x, float y, float w, float h) override;
     void clip() override;
+    void clip_path_svg(const std::string& svg_path_d) override;
 
     // ── Fill and stroke ──────────────────────────────────────────────────
     void set_fill_color(Color c) override;
