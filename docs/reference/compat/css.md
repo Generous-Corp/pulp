@@ -50,6 +50,23 @@ specifics are out of scope.
   through CG). `setBorderStyle` is a newly registered bridge fn;
   the CSS shim's `borderStyle` case forwards the keyword verbatim.
   Reclassified missing → supported.
+- **2026-05-05 (pulp #1434 sub-agent #12 follow-up)** — three deferred
+  CSS surface entries closed in one slice. `css/alignContent` flipped
+  NOT-IMPL → PASS: the JS translator (`web-compat-style-decl.js`)
+  was already routing `setFlex(id, 'align_content', ...)`, but the
+  bridge had no `align_content` case — values silently dropped.
+  Bridge now accepts the standard CSS values (`flex-start`,
+  `flex-end`, `center`, `stretch`, `space-between`, `space-around`,
+  `space-evenly`) and routes through `FlexStyle::align_content` /
+  `align_content_space` to Yoga's `YGNodeStyleSetAlignContent`.
+  `css/width` and `css/height` flipped DIVERGE → PASS for the
+  `'auto'` keyword (Yoga "hug contents" via
+  `YGNodeStyleSetWidthAuto` / `SetHeightAuto`); the CSS translator
+  forwards the literal string and the bridge dispatches on
+  `FlexStyle::dim_*.unit == auto_`. `first baseline` /
+  `last baseline` / `normal` for `alignContent` and `min-content` /
+  `max-content` / `fit-content` / `em` / `rem` for width / height
+  remain unsupported.
 - **2026-05-05 (pulp #1434 cross-surface mega-batch)** — per-edge
   `margin{Top,Right,Bottom,Left}` and `padding{Top,Right,Bottom,Left}`
   accept percent values (`'5%'`); margin also accepts `'auto'`

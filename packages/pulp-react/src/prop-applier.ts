@@ -444,6 +444,12 @@ function applyOne(id: string, type: string, key: string, value: unknown, props?:
         case 'maxHeight':       return call('setFlex', id, 'max_height', value as number | string);
         case 'alignItems':      return call('setFlex', id, 'align_items', value as string);
         case 'alignSelf':       return call('setFlex', id, 'align_self', value as string);
+        // pulp #1434 (sub-agent #12 follow-up) — multi-line flex
+        // cross-axis distribution. Yoga supports it natively via
+        // YGNodeStyleSetAlignContent; the bridge accepts both bare
+        // (`start`/`end`) and prefixed (`flex-start`/`flex-end`)
+        // spellings plus the space-* values.
+        case 'alignContent':    return call('setFlex', id, 'align_content', value as string);
         case 'justifyContent':  return call('setFlex', id, 'justify_content', value as string);
         // pulp #1434 — aspectRatio routes through setFlex like the other
         // flex props. Accepts a finite positive number (RN-style); strings

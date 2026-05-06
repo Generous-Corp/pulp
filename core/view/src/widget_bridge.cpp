@@ -1780,7 +1780,17 @@ void WidgetBridge::register_api() {
         // FlexStyle::dim_width / dim_height in yoga_layout.cpp.
         else if (key == "width") {
             auto sval = args.get<std::string>(2, "");
-            if (!sval.empty() && sval.back() == '%') {
+            // pulp #1434 (sub-agent #12 follow-up) — accept the keyword
+            // `'auto'` for "hug contents" sizing. Yoga supports this
+            // natively via YGNodeStyleSetWidthAuto. Figma auto-layout,
+            // v0 intrinsic-sizing cards, and Claude Design responsive
+            // containers all emit this. The dispatch path in
+            // yoga_layout.cpp keys on `dim_width.unit == auto_`.
+            if (sval == "auto") {
+                f.dim_width.unit = pulp::view::DimensionUnit::auto_;
+                f.dim_width.value = 0;
+                f.preferred_width = 0;
+            } else if (!sval.empty() && sval.back() == '%') {
                 try {
                     f.dim_width.value = std::stof(sval.substr(0, sval.size() - 1));
                     f.dim_width.unit = pulp::view::DimensionUnit::percent;
@@ -1794,7 +1804,11 @@ void WidgetBridge::register_api() {
         }
         else if (key == "height") {
             auto sval = args.get<std::string>(2, "");
-            if (!sval.empty() && sval.back() == '%') {
+            if (sval == "auto") {
+                f.dim_height.unit = pulp::view::DimensionUnit::auto_;
+                f.dim_height.value = 0;
+                f.preferred_height = 0;
+            } else if (!sval.empty() && sval.back() == '%') {
                 try {
                     f.dim_height.value = std::stof(sval.substr(0, sval.size() - 1));
                     f.dim_height.unit = pulp::view::DimensionUnit::percent;
@@ -1986,6 +2000,35 @@ void WidgetBridge::register_api() {
             else if (a=="stretch")             f.align_self=FlexAlign::stretch;
             else if (a=="baseline")            f.align_self=FlexAlign::baseline;
             else                               f.align_self=FlexAlign::auto_;
+        }
+        // pulp #1434 (sub-agent #12 follow-up) — align_content controls
+        // multi-line flex cross-axis distribution. Yoga supports this
+        // natively via YGNodeStyleSetAlignContent. Accepts both bare
+        // `start`/`end` (Yoga / pulp short forms) and `flex-start` /
+        // `flex-end` (CSS / RN canonical). Space-* values (space-between
+        // / space-around / space-evenly) live on a sibling enum field
+        // (FlexStyle::align_content_space) because FlexAlign has no
+        // space variants — those don't make sense for align_items /
+        // align_self, only for align_content.
+        else if (key == "align_content") {
+            auto a = args.get<std::string>(2,"start");
+            using AcSpace = pulp::view::FlexStyle::AlignContentSpace;
+            // Reset space slot first; only the space-* branches set it.
+            f.align_content_space = AcSpace::none;
+            if (a=="start" || a=="flex-start")     f.align_content=FlexAlign::start;
+            else if (a=="center")                  f.align_content=FlexAlign::center;
+            else if (a=="end" || a=="flex-end")    f.align_content=FlexAlign::end;
+            else if (a=="stretch")                 f.align_content=FlexAlign::stretch;
+            else if (a=="space-between"||a=="space_between") {
+                f.align_content_space = AcSpace::space_between;
+            }
+            else if (a=="space-around"||a=="space_around") {
+                f.align_content_space = AcSpace::space_around;
+            }
+            else if (a=="space-evenly"||a=="space_evenly") {
+                f.align_content_space = AcSpace::space_evenly;
+            }
+            else                                   f.align_content=FlexAlign::start;
         }
         else if (key == "justify_content") {
             auto j = args.get<std::string>(2,"start");

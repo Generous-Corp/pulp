@@ -85,15 +85,25 @@
       "issue": ""
     },
     "css/alignContent": {
-      "status": "missing",
-      "mapsTo": "web-compat calls setFlex(id, 'align_content', ...) but setFlex switch has NO 'align_content' branch",
-      "supportedValues": [],
+      "status": "supported",
+      "mapsTo": "setFlex(id, 'align_content', value) -> FlexStyle.align_content + align_content_space -> YGNodeStyleSetAlignContent",
+      "supportedValues": [
+        "flex-start",
+        "flex-end",
+        "center",
+        "stretch",
+        "space-between",
+        "space-around",
+        "space-evenly"
+      ],
       "unsupportedValues": [
-        "all"
+        "first baseline",
+        "last baseline",
+        "normal"
       ],
       "tests": [],
-      "notes": "MAJOR GAP -- silently dropped. Multi-line flex layouts have no cross-axis alignment control.",
-      "issue": ""
+      "notes": "pulp #1434 (sub-agent #12 follow-up): bridge gained 'align_content' setFlex case + FlexStyle.align_content/align_content_space fields. The CSS translator already routed via setFlex(id, 'align_content', _cssToFlex(resolved)) — just needed the bridge backend. Multi-line flex (`flexWrap: 'wrap'`) cross-axis distribution now works.",
+      "issue": "https://github.com/danielraffel/pulp/issues/1434"
     },
     "css/alignItems": {
       "status": "supported",
@@ -1342,23 +1352,23 @@
       "issue": ""
     },
     "css/height": {
-      "status": "partial",
-      "mapsTo": "setFlex(id, 'height', px) for numeric, setFlex(id, 'height', 'NN%') for percent (yoga/height path via FlexStyle.dim_height)",
+      "status": "supported",
+      "mapsTo": "setFlex(id, 'height', px) for numeric, 'NN%' for percent, 'auto' for hug-contents (yoga/height path via FlexStyle.dim_height)",
       "supportedValues": [
         "px (number)",
-        "%"
+        "%",
+        "auto"
       ],
       "unsupportedValues": [
         "em",
         "rem",
-        "auto",
         "min-content",
         "max-content",
         "fit-content"
       ],
       "tests": [],
-      "notes": "pulp #1434 batch (catalog hygiene): mirrors yoga/height post-#1426. The CSS translator at web-compat-style-decl.js:199 detects `'NN%'` strings and forwards them verbatim; the bridge dispatches to FlexStyle.dim_height (DimensionUnit::percent) and YGNodeStyleSetHeightPercent. Numeric values still flow through FlexStyle.preferred_height. `auto` and relative units (em/rem/vh/vw) remain deferred follow-ups.",
-      "issue": "https://github.com/danielraffel/pulp/issues/1423"
+      "notes": "pulp #1423 wired px + %; pulp #1434 (sub-agent #12 follow-up) wired 'auto' end-to-end (CSS translator forwards 'auto' verbatim; bridge populates FlexStyle.dim_height.unit = auto_; yoga_layout.cpp dispatches to YGNodeStyleSetHeightAuto). Relative units (em/rem/vh/vw) remain deferred.",
+      "issue": "https://github.com/danielraffel/pulp/issues/1434"
     },
     "css/inset": {
       "status": "supported",
@@ -2635,24 +2645,24 @@
       "issue": ""
     },
     "css/width": {
-      "status": "partial",
-      "mapsTo": "setFlex(id, 'width', px) for numeric, setFlex(id, 'width', 'NN%') for percent (yoga/width path via FlexStyle.dim_width)",
+      "status": "supported",
+      "mapsTo": "setFlex(id, 'width', px) for numeric, 'NN%' for percent, 'auto' for hug-contents (yoga/width path via FlexStyle.dim_width)",
       "supportedValues": [
         "px (number)",
-        "%"
+        "%",
+        "auto"
       ],
       "unsupportedValues": [
         "em",
         "rem",
-        "auto",
         "min-content",
         "max-content",
         "fit-content",
         "calc()"
       ],
       "tests": [],
-      "notes": "pulp #1434 batch (catalog hygiene): mirrors yoga/width post-#1426. The CSS translator at web-compat-style-decl.js:192 detects `'NN%'` strings and forwards them verbatim to the bridge, which routes to FlexStyle.dim_width (DimensionUnit::percent) and YGNodeStyleSetWidthPercent. Numeric values still go through FlexStyle.preferred_width. `auto` and relative units (em/rem/calc) remain deferred follow-ups.",
-      "issue": "https://github.com/danielraffel/pulp/issues/1423"
+      "notes": "pulp #1423 wired px + %; pulp #1434 (sub-agent #12 follow-up) wired 'auto' end-to-end (CSS translator forwards 'auto' verbatim; bridge populates FlexStyle.dim_width.unit = auto_; yoga_layout.cpp dispatches to YGNodeStyleSetWidthAuto). Relative units (em/rem/calc) remain deferred.",
+      "issue": "https://github.com/danielraffel/pulp/issues/1434"
     },
     "css/willChange": {
       "status": "wontfix",
@@ -2721,15 +2731,23 @@
   },
   "rn": {
     "rn/alignContent": {
-      "status": "missing",
-      "mapsTo": "@pulp/react does not expose alignContent on FlexProps",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "supported",
+      "mapsTo": "prop-applier.ts -> setFlex(id, 'align_content', value) -> FlexStyle.align_content + align_content_space -> YGNodeStyleSetAlignContent",
+      "supportedValues": [
+        "flex-start",
+        "start",
+        "flex-end",
+        "end",
+        "center",
+        "stretch",
+        "space-between",
+        "space-around",
+        "space-evenly"
       ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "Symmetric with css/alignContent -- also missing in the @pulp/react TS surface (types.ts FlexProps).",
-      "issue": ""
+      "notes": "pulp #1434 (sub-agent #12 follow-up): @pulp/react FlexProps now exposes alignContent (FlexAlignContent type); prop-applier forwards verbatim to the bridge's new setFlex 'align_content' case. Yoga's YGNodeStyleSetAlignContent supports all RN values natively.",
+      "issue": "https://github.com/danielraffel/pulp/issues/1434"
     },
     "rn/alignItems": {
       "status": "supported",
@@ -3462,19 +3480,19 @@
       "issue": ""
     },
     "rn/height": {
-      "status": "partial",
-      "mapsTo": "setFlex(id, 'height', n)",
+      "status": "supported",
+      "mapsTo": "setFlex(id, 'height', n) — number=px, '50%'=percent, 'auto'=hug-contents",
       "supportedValues": [
         "number (px)",
-        "string % (e.g. '50%')"
+        "string % (e.g. '50%')",
+        "string 'auto'"
       ],
       "unsupportedValues": [
-        "string vh",
-        "auto"
+        "string vh"
       ],
       "tests": [],
-      "notes": "TS type is `number` only. pulp #1434 rn batch C: prop-applier forwards string|number; bridge dispatches percent via FlexStyle::dim_height.unit. auto remains a follow-up.",
-      "issue": ""
+      "notes": "pulp #1434 rn batch C wired number + %; pulp #1434 (sub-agent #12 follow-up) wired 'auto' end-to-end. TS type accepts `number | string`; prop-applier forwards verbatim; bridge dispatches via FlexStyle::dim_height.unit (px / percent / auto_) and yoga_layout.cpp routes to YGNodeStyleSetHeight{,Percent,Auto}.",
+      "issue": "https://github.com/danielraffel/pulp/issues/1434"
     },
     "rn/includeFontPadding": {
       "status": "wontfix",
@@ -4298,18 +4316,17 @@
       "issue": "994"
     },
     "rn/width": {
-      "status": "partial",
-      "mapsTo": "setFlex(id, 'width', n)",
+      "status": "supported",
+      "mapsTo": "setFlex(id, 'width', n) — number=px, '50%'=percent, 'auto'=hug-contents",
       "supportedValues": [
         "number (px)",
-        "string % (e.g. '50%')"
+        "string % (e.g. '50%')",
+        "string 'auto'"
       ],
-      "unsupportedValues": [
-        "auto"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "pulp #1434 rn batch C: prop-applier forwards string|number; bridge dispatches percent via FlexStyle::dim_width.unit (#1426 path). auto remains a follow-up.",
-      "issue": ""
+      "notes": "pulp #1434 rn batch C wired number + %; pulp #1434 (sub-agent #12 follow-up) wired 'auto' end-to-end. TS type accepts `number | string`; bridge dispatches via FlexStyle::dim_width.unit (px / percent / auto_) and yoga_layout.cpp routes to YGNodeStyleSetWidth{,Percent,Auto}.",
+      "issue": "https://github.com/danielraffel/pulp/issues/1434"
     },
     "rn/writingDirection": {
       "status": "missing",
@@ -4456,43 +4473,49 @@
       "issue": ""
     },
     "yoga/alignContent": {
-      "status": "missing",
-      "mapsTo": "no field on FlexStyle and no setFlex case for 'align_content'",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "supported",
+      "mapsTo": "FlexStyle.align_content (FlexAlign) + FlexStyle.align_content_space (AlignContentSpace) -> YGNodeStyleSetAlignContent",
+      "supportedValues": [
+        "flex-start",
+        "start",
+        "flex-end",
+        "end",
+        "center",
+        "stretch",
+        "space-between",
+        "space-around",
+        "space-evenly"
       ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "MAJOR -- multi-line flex cross-axis distribution unimplementable.",
-      "issue": ""
+      "notes": "pulp #1434 (sub-agent #12 follow-up): multi-line flex cross-axis distribution. Yoga supports it natively via YGNodeStyleSetAlignContent; gap was a missing FlexStyle field + setter wiring. Bridge accepts both bare and prefixed CSS spellings plus the three space-* values. align_content_space encodes space-between / space-around / space-evenly because FlexAlign has no space variants (those don't make sense on align_items / align_self).",
+      "issue": "https://github.com/danielraffel/pulp/issues/1434"
     },
     "yoga/width": {
-      "status": "partial",
-      "mapsTo": "FlexStyle.preferred_width (px) + FlexStyle.dim_width (percent)",
+      "status": "supported",
+      "mapsTo": "FlexStyle.preferred_width (px) + FlexStyle.dim_width (percent / auto)",
       "supportedValues": [
         "px",
-        "%"
-      ],
-      "unsupportedValues": [
+        "%",
         "auto"
       ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "pulp #1423: percent values route through FlexStyle.dim_width (DimensionUnit::percent) and yoga_layout.cpp calls YGNodeStyleSetWidthPercent. CSS translator passes 'NN%' strings verbatim to the bridge. `auto` remains unsupported (deferred follow-up).",
-      "issue": "https://github.com/danielraffel/pulp/issues/1423"
+      "notes": "pulp #1423 wired px + %; pulp #1434 (sub-agent #12 follow-up) wired 'auto'. percent values route through FlexStyle.dim_width (DimensionUnit::percent) -> YGNodeStyleSetWidthPercent; 'auto' routes through DimensionUnit::auto_ -> YGNodeStyleSetWidthAuto (Figma hug-contents, v0 intrinsic-sizing, Claude Design responsive containers). CSS translator and @pulp/react prop-applier pass 'NN%' / 'auto' strings verbatim to the bridge.",
+      "issue": "https://github.com/danielraffel/pulp/issues/1434"
     },
     "yoga/height": {
-      "status": "partial",
-      "mapsTo": "FlexStyle.preferred_height (px) + FlexStyle.dim_height (percent)",
+      "status": "supported",
+      "mapsTo": "FlexStyle.preferred_height (px) + FlexStyle.dim_height (percent / auto)",
       "supportedValues": [
         "px",
-        "%"
-      ],
-      "unsupportedValues": [
+        "%",
         "auto"
       ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "pulp #1423: same as width (YGNodeStyleSetHeightPercent path via FlexStyle.dim_height). `auto` remains unsupported (deferred follow-up).",
-      "issue": "https://github.com/danielraffel/pulp/issues/1423"
+      "notes": "pulp #1423 wired px + %; pulp #1434 (sub-agent #12 follow-up) wired 'auto' (YGNodeStyleSetHeightAuto via FlexStyle.dim_height.unit == auto_). Same shape as width.",
+      "issue": "https://github.com/danielraffel/pulp/issues/1434"
     },
     "yoga/minWidth": {
       "status": "supported",

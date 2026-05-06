@@ -190,16 +190,23 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
         // while letting "100%" survive through to Yoga's native
         // YGNodeStyleSet{Width,Height}Percent path.
         case "width": {
+            // pulp #1434 (sub-agent #12 follow-up) — forward `'auto'`
+            // verbatim so the bridge can route to YGNodeStyleSetWidthAuto
+            // ("hug contents"). Mirrors the percent path.
+            if (resolved === "auto") { setFlex(id, "width", "auto"); break; }
             var w = parseCSSLength(resolved);
             if (!w) break;
-            if (w.unit === "%") setFlex(id, "width", w.value + "%");
+            if (w.unit === "auto") setFlex(id, "width", "auto");
+            else if (w.unit === "%") setFlex(id, "width", w.value + "%");
             else setFlex(id, "width", w.value);
             break;
         }
         case "height": {
+            if (resolved === "auto") { setFlex(id, "height", "auto"); break; }
             var h = parseCSSLength(resolved);
             if (!h) break;
-            if (h.unit === "%") setFlex(id, "height", h.value + "%");
+            if (h.unit === "auto") setFlex(id, "height", "auto");
+            else if (h.unit === "%") setFlex(id, "height", h.value + "%");
             else setFlex(id, "height", h.value);
             break;
         }
