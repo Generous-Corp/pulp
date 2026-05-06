@@ -397,7 +397,18 @@ static void build_yoga_subtree(View& view, YGNodeRef node) {
             case View::WritingDirection::rtl: ydir = YGDirectionRTL; break;
             case View::WritingDirection::auto_:
             default:
-                ydir = view.parent() ? YGDirectionInherit : YGDirectionLTR;
+                // pulp #1542 — when View::direction is auto_, fall back to the
+                // FlexStyle::writing_direction set via the bridge's
+                // direction_writing sub-key. If both are unset, inherit from
+                // parent (or LTR at root).
+                switch (view.flex().writing_direction) {
+                    case FlexStyle::WritingDirection::ltr: ydir = YGDirectionLTR; break;
+                    case FlexStyle::WritingDirection::rtl: ydir = YGDirectionRTL; break;
+                    case FlexStyle::WritingDirection::inherit:
+                    default:
+                        ydir = view.parent() ? YGDirectionInherit : YGDirectionLTR;
+                        break;
+                }
                 break;
         }
         YGNodeStyleSetDirection(node, ydir);
