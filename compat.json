@@ -962,15 +962,19 @@
       "issue": ""
     },
     "css/direction": {
-      "status": "missing",
-      "mapsTo": "no branch",
-      "supportedValues": [],
-      "unsupportedValues": [
+      "status": "supported",
+      "mapsTo": "web-compat-style-decl.js forwards `direction` keyword verbatim to setDirection (widget_bridge.cpp); View::WritingDirection stores the enum; yoga_layout.cpp dispatches via YGNodeStyleSetDirection.",
+      "supportedValues": [
         "ltr",
-        "rtl"
+        "rtl",
+        "inherit"
       ],
-      "tests": [],
-      "notes": "RTL writing direction not modeled. Affects logical inset/margin/padding mapping (currently always LTR).",
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp::\"setDirection maps each keyword to the right enum\"",
+        "test/test_widget_bridge.cpp::\"CSSStyleDeclaration forwards 'direction: rtl'\""
+      ],
+      "notes": "pulp #1434 Phase A2-3 — writing direction. View::WritingDirection enum + setDirection bridge fn; Yoga dispatch via YGNodeStyleSetDirection; CSS shim + @pulp/react prop-applier forward keyword. Skia paragraph_style.setTextDirection wiring + RN logical-edge RTL-aware mapping are follow-ups (this slice establishes the substrate). RTL flips Yoga flow (flexDirection: row visually reverses) — confirmed via YGDirectionRTL dispatch.",
       "issue": ""
     },
     "css/display": {
@@ -3238,16 +3242,18 @@
       "issue": "994"
     },
     "rn/direction": {
-      "status": "missing",
-      "mapsTo": "no prop",
-      "supportedValues": [],
-      "unsupportedValues": [
+      "status": "partial",
+      "mapsTo": "@pulp/react prop-applier forwards `direction` keyword verbatim to setDirection. Same bridge path as css/direction.",
+      "supportedValues": [
         "ltr",
         "rtl",
         "inherit"
       ],
-      "tests": [],
-      "notes": "RTL not modeled.",
+      "unsupportedValues": [],
+      "tests": [
+        "packages/pulp-react/test/prop-applier-direction.test.ts"
+      ],
+      "notes": "pulp #1434 Phase A2-3 — writing direction. View::WritingDirection enum + setDirection bridge fn; Yoga dispatch via YGNodeStyleSetDirection; CSS shim + @pulp/react prop-applier forward keyword. Skia paragraph_style.setTextDirection wiring + RN logical-edge RTL-aware mapping are follow-ups (this slice establishes the substrate).",
       "issue": ""
     },
     "rn/display": {
@@ -4331,16 +4337,19 @@
       "issue": ""
     },
     "rn/writingDirection": {
-      "status": "missing",
-      "mapsTo": "no branch",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "auto",
+      "status": "wontfix",
+      "mapsTo": "@pulp/react prop-applier `writingDirection` is an alias for `direction`; both forward to setDirection.",
+      "supportedValues": [
         "ltr",
-        "rtl"
+        "rtl",
+        "auto",
+        "inherit"
       ],
-      "tests": [],
-      "notes": "RTL not modeled.",
+      "unsupportedValues": [],
+      "tests": [
+        "packages/pulp-react/test/prop-applier-direction.test.ts"
+      ],
+      "notes": "pulp #1434 Phase A2-3 — writing direction. View::WritingDirection enum + setDirection bridge fn; Yoga dispatch via YGNodeStyleSetDirection; CSS shim + @pulp/react prop-applier forward keyword. Skia paragraph_style.setTextDirection wiring + RN logical-edge RTL-aware mapping are follow-ups (this slice establishes the substrate). iOS-only RN prop; cross-platform OOS. Pulp accepts both writingDirection and direction at the @pulp/react JSX layer (both alias to setDirection); the OOS classification reflects the RN spec, not pulp coverage.",
       "issue": ""
     },
     "rn/zIndex": {
@@ -5035,16 +5044,18 @@
       "issue": ""
     },
     "yoga/direction": {
-      "status": "missing",
-      "mapsTo": "no field",
-      "supportedValues": [],
-      "unsupportedValues": [
+      "status": "supported",
+      "mapsTo": "yoga_layout.cpp dispatches View::WritingDirection through YGNodeStyleSetDirection (LTR / RTL / Inherit).",
+      "supportedValues": [
         "ltr",
         "rtl",
         "inherit"
       ],
-      "tests": [],
-      "notes": "Yoga supports direction for RTL; Pulp does not.",
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp::\"setDirection maps each keyword to the right enum\""
+      ],
+      "notes": "pulp #1434 Phase A2-3 — writing direction. View::WritingDirection enum + setDirection bridge fn; Yoga dispatch via YGNodeStyleSetDirection; CSS shim + @pulp/react prop-applier forward keyword. Skia paragraph_style.setTextDirection wiring + RN logical-edge RTL-aware mapping are follow-ups (this slice establishes the substrate).",
       "issue": ""
     }
   },

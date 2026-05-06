@@ -40,6 +40,12 @@ which mirrors the upstream Yoga API.
 
 ## Recent updates
 
+- **2026-05-06 (pulp #1434 Phase A2-3)** — `yoga/direction` wired.
+  `View::WritingDirection` enum (ltr / rtl / auto_) propagated to
+  Yoga via `YGNodeStyleSetDirection(node, YGDirectionLTR | RTL |
+  Inherit)` in `yoga_layout.cpp`. RTL flips Yoga's row-axis flow —
+  flexDirection 'row' visually reverses under RTL. Reclassified
+  missing → supported.
 - **2026-05-05 (pulp #1434 cross-surface mega-batch)** — per-edge
   `margin_*` and `padding_*` accept percent strings; margin also
   accepts `'auto'`. `FlexStyle` gains `dim_margin_{top,right,bottom,

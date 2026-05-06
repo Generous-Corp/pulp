@@ -584,6 +584,14 @@ function applyOne(id: string, type: string, key: string, value: unknown, props?:
         // 'scroll' / 'auto'); bridge maps to View::Overflow enum.
         case 'overflow':     return call('setOverflow', id, value as string);
 
+        // pulp #1434 Phase A2-3 — writing direction (RN ViewStyle uses
+        // `writingDirection` for this — CSS uses `direction`, but the
+        // pulp prop name `direction` already routes to FlexProps via
+        // setFlex above. The CSS-string-form `style.direction = 'rtl'`
+        // path goes through the el.style adapter's `direction` case
+        // which calls setDirection directly).
+        case 'writingDirection': return call('setDirection', id, value as string);
+
         // pulp #1434 rn bridge-wires bundle (sub-agent #27 finding) —
         // 7 RN-style props that already had C++ bridge fns registered
         // but no `@pulp/react` prop-applier dispatch. Each forwards

@@ -275,6 +275,28 @@ static void build_yoga_subtree(View& view, YGNodeRef node) {
     const bool is_absolute = view.position() == View::Position::absolute
                           || view.position() == View::Position::fixed;
     apply_flex_style(node, view.flex(), is_absolute);
+    // pulp #1434 Phase A2-3 — writing direction propagates into Yoga's
+    // YGDirection (controls how `start`/`end` resolve and whether
+    // flexDirection: row visually reverses under RTL). Use the raw
+    // `direction()` (not `resolved_direction()`, which collapses
+    // `auto_` to LTR unconditionally) so that:
+    //   - explicit ltr/rtl on a node maps to YGDirectionLTR/RTL,
+    //   - `auto_` on a non-root maps to YGDirectionInherit, allowing
+    //     descendants to actually pick up an RTL ancestor,
+    //   - `auto_` on the root falls back to LTR (no parent to inherit
+    //     from; first-strong-character heuristic is a follow-up).
+    {
+        YGDirection ydir;
+        switch (view.direction()) {
+            case View::WritingDirection::ltr: ydir = YGDirectionLTR; break;
+            case View::WritingDirection::rtl: ydir = YGDirectionRTL; break;
+            case View::WritingDirection::auto_:
+            default:
+                ydir = view.parent() ? YGDirectionInherit : YGDirectionLTR;
+                break;
+        }
+        YGNodeStyleSetDirection(node, ydir);
+    }
     YGNodeSetContext(node, &view);
 
     auto children = ordered_visible_children(view);

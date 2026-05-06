@@ -103,6 +103,9 @@ declare global {
     // View::BorderStyle; Skia installs SkDashPathEffect for dashed/
     // dotted at stroke time. Other named styles degrade to solid.
     const setBorderStyle: ((id: string, style: string) => void) | undefined;
+    /// pulp #1434 Phase A2-3 — writing direction. Maps to
+    /// View::WritingDirection; Yoga + Skia honor at layout / text shape.
+    const setDirection: ((id: string, dir: 'ltr' | 'rtl' | 'inherit' | string) => void) | undefined;
     const setBorderTopColor: ((id: string, hexColor: string) => void) | undefined;
     const setBorderRightColor: ((id: string, hexColor: string) => void) | undefined;
     const setBorderBottomColor: ((id: string, hexColor: string) => void) | undefined;
@@ -260,6 +263,8 @@ export function createMockBridge(): MockBridge {
         // overflow:hidden to setOverflow, but JSX consumers setting
         // `style={{ overflow: 'hidden' }}` silently dropped it.
         'setOverflow',
+        // pulp #1434 Phase A2-3 — writing direction.
+        'setDirection',
         // pulp #994 — SvgPath intrinsic surface
         'createSvgPath', 'setSvgPath', 'setSvgViewBox',
         'setSvgFill', 'setSvgStroke', 'setSvgStrokeWidth',

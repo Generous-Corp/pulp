@@ -5089,3 +5089,131 @@ TEST_CASE("border-style: none short-circuits the stroke",
         REQUIRE(cmd.type != pulp::canvas::DrawCommand::Type::stroke_rounded_rect);
     }
 }
+
+// ── pulp #1434 Phase A2-3 — RTL writing direction ─────────────────────
+//
+// setDirection maps the CSS keyword to View::WritingDirection. Yoga
+// honors at layout (YGNodeStyleSetDirection); Skia paragraph_style
+// honors at text shape time (Phase A2-3 follow-up). LTR-only fast
+// path on the @pulp/react logical-edge bundle (#1497) stays in effect
+// until a separate slice plumbs the direction resolver into the
+// prop-applier; this PR establishes the View enum + bridge fn + Yoga
+// dispatch substrate.
+
+TEST_CASE("setDirection maps each keyword to the right enum",
+          "[view][bridge][css][issue-1434-rtl]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        createPanel('a', '');  setDirection('a', 'ltr');
+        createPanel('b', '');  setDirection('b', 'rtl');
+        createPanel('c', '');  setDirection('c', 'inherit');
+        createPanel('d', '');  setDirection('d', 'parchment-curl');
+    )");
+    using D = View::WritingDirection;
+    REQUIRE(bridge.widget("a")->direction() == D::ltr);
+    REQUIRE(bridge.widget("b")->direction() == D::rtl);
+    // Anything other than ltr/rtl falls back to auto_ (inherit).
+    REQUIRE(bridge.widget("c")->direction() == D::auto_);
+    REQUIRE(bridge.widget("d")->direction() == D::auto_);
+}
+
+TEST_CASE("View::resolved_direction defaults auto_ to ltr",
+          "[view][bridge][css][issue-1434-rtl]") {
+    View v;
+    REQUIRE(v.resolved_direction() == View::WritingDirection::ltr);
+    v.set_direction(View::WritingDirection::rtl);
+    REQUIRE(v.resolved_direction() == View::WritingDirection::rtl);
+    v.set_direction(View::WritingDirection::auto_);
+    REQUIRE(v.resolved_direction() == View::WritingDirection::ltr);
+}
+
+TEST_CASE("CSSStyleDeclaration forwards 'direction: rtl'",
+          "[view][bridge][css][issue-1434-rtl]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        createPanel('a', '');
+        var sa = new CSSStyleDeclaration({ _id: 'a', _nativeCreated: true });
+        sa._applyProperty('direction', 'rtl');
+    )");
+    REQUIRE(bridge.widget("a")->direction() == View::WritingDirection::rtl);
+}
+
+// pulp #1434 Phase A2-3 — Codex P1 (PR #1506, comment 3196031661):
+// `auto_` on a non-root view must map to YGDirectionInherit so an
+// RTL ancestor actually flows into descendants. Previously,
+// build_yoga_subtree called view.resolved_direction() which collapses
+// `auto_` to ltr unconditionally, so the descendant's yoga node was
+// pinned to YGDirectionLTR and any grandchildren flowed LTR even when
+// the grandparent was set to RTL.
+//
+// Verification path:
+//   grandparent (rtl, row)
+//     └── parent  (auto_, row) ← intermediate node; bug pinned LTR here
+//           ├── a (width 50)
+//           └── b (width 60)
+// Under RTL flow inside `parent`, sibling `a` (declared first) should
+// sit on the right and `b` to its left. With the bug, parent's yoga
+// direction is LTR so `a` ends up on the left and `b` on the right.
+TEST_CASE("auto_ direction inherits RTL from grandparent through yoga",
+          "[view][bridge][css][issue-1434-rtl]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 200, 100});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('grand',  '');
+        createPanel('mid',    'grand');
+        createPanel('a',      'mid');
+        createPanel('b',      'mid');
+
+        // Grandparent: row layout with explicit RTL flow.
+        setFlex('grand', 'direction', 'row');
+        setDirection('grand', 'rtl');
+
+        // Mid-level: row layout but DEFAULT (auto_) direction. The bug
+        // would pin this to LTR; the fix lets it inherit RTL.
+        setFlex('mid', 'direction', 'row');
+
+        // Sizes so the grandparent fills the root and 'mid' fills it.
+        var sg = new CSSStyleDeclaration({ _id: 'grand', _nativeCreated: true });
+        sg._applyProperty('width',  '200px');
+        sg._applyProperty('height', '100px');
+        var sm = new CSSStyleDeclaration({ _id: 'mid', _nativeCreated: true });
+        sm._applyProperty('width',  '200px');
+        sm._applyProperty('height', '100px');
+        var sa = new CSSStyleDeclaration({ _id: 'a', _nativeCreated: true });
+        sa._applyProperty('width',  '50px');
+        sa._applyProperty('height', '100px');
+        var sb = new CSSStyleDeclaration({ _id: 'b', _nativeCreated: true });
+        sb._applyProperty('width',  '60px');
+        sb._applyProperty('height', '100px');
+    )");
+
+    auto* mid = bridge.widget("mid");
+    auto* a   = bridge.widget("a");
+    auto* b   = bridge.widget("b");
+    REQUIRE(mid != nullptr);
+    REQUIRE(a   != nullptr);
+    REQUIRE(b   != nullptr);
+    // Mid-level direction is the default; the test depends on yoga
+    // INHERITING rtl from the grandparent rather than mid's enum
+    // resolving to ltr at build time.
+    REQUIRE(mid->direction() == View::WritingDirection::auto_);
+
+    root.layout_children();
+
+    // Under correct RTL flow inside `mid`, the first child 'a' sits on
+    // the right edge (x = 200 - 50 = 150) and 'b' (60 wide) sits to
+    // its left (x = 150 - 60 = 90). If the bug returns, `mid` flows
+    // LTR and 'a' lands at x=0 with 'b' at x=50.
+    REQUIRE_THAT(a->bounds().x, WithinAbs(150.0f, 0.5f));
+    REQUIRE_THAT(b->bounds().x, WithinAbs(90.0f,  0.5f));
+}

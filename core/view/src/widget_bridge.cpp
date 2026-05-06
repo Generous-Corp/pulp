@@ -3787,6 +3787,24 @@ void WidgetBridge::register_api() {
         return choc::value::Value();
     });
 
+    // pulp #1434 Phase A2-3 — writing direction. Maps the CSS keyword
+    // to View::WritingDirection. Yoga's flow honors direction for
+    // flexDirection 'row' (which visually reverses under RTL); Skia's
+    // paragraph_style.setTextDirection picks up the same value at
+    // shape time. Logical-edge mapping in the @pulp/react prop-applier
+    // currently stays LTR-only (per #1497 fast-path note); a future
+    // slice will make it direction-aware via a shared resolver.
+    engine_.register_function("setDirection", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto d = args.get<std::string>(1, "ltr");
+        auto* v = id.empty() ? &root_ : widget(id);
+        if (!v) return choc::value::Value();
+        if (d == "rtl")        v->set_direction(View::WritingDirection::rtl);
+        else if (d == "ltr")   v->set_direction(View::WritingDirection::ltr);
+        else                   v->set_direction(View::WritingDirection::auto_);
+        return choc::value::Value();
+    });
+
     // setFilter(id, "blur(4px)") — CSS filter property
     engine_.register_function("setFilter", [this](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
