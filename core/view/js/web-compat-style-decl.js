@@ -224,25 +224,42 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
             break;
         }
 
-        // Margin (individual)
+        // Margin (individual) — pulp #1434 cross-surface mega-batch:
+        // forward `'NN%'` and `'auto'` strings verbatim so the bridge can
+        // route through Yoga's YGNodeStyleSetMargin{Percent,Auto} APIs.
+        // Numeric values flow through parseCSSLength as before. `auto`
+        // is the canonical centering idiom (e.g. `marginLeft: auto;
+        // marginRight: auto`) — Yoga supports it on margin only.
         case "marginTop": {
+            if (resolved === "auto") { setFlex(id, "margin_top", "auto"); break; }
             var mt = parseCSSLength(resolved);
-            if (mt) setFlex(id, "margin_top", mt.value);
+            if (!mt) break;
+            if (mt.unit === "%") setFlex(id, "margin_top", mt.value + "%");
+            else setFlex(id, "margin_top", mt.value);
             break;
         }
         case "marginRight": {
+            if (resolved === "auto") { setFlex(id, "margin_right", "auto"); break; }
             var mr = parseCSSLength(resolved);
-            if (mr) setFlex(id, "margin_right", mr.value);
+            if (!mr) break;
+            if (mr.unit === "%") setFlex(id, "margin_right", mr.value + "%");
+            else setFlex(id, "margin_right", mr.value);
             break;
         }
         case "marginBottom": {
+            if (resolved === "auto") { setFlex(id, "margin_bottom", "auto"); break; }
             var mb = parseCSSLength(resolved);
-            if (mb) setFlex(id, "margin_bottom", mb.value);
+            if (!mb) break;
+            if (mb.unit === "%") setFlex(id, "margin_bottom", mb.value + "%");
+            else setFlex(id, "margin_bottom", mb.value);
             break;
         }
         case "marginLeft": {
+            if (resolved === "auto") { setFlex(id, "margin_left", "auto"); break; }
             var ml = parseCSSLength(resolved);
-            if (ml) setFlex(id, "margin_left", ml.value);
+            if (!ml) break;
+            if (ml.unit === "%") setFlex(id, "margin_left", ml.value + "%");
+            else setFlex(id, "margin_left", ml.value);
             break;
         }
         // Margin shorthand
@@ -264,41 +281,67 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
         // null for non-numeric input); numeric and percent paths route
         // through the same setFlex per-edge dispatch as marginLeft etc.
         case "marginHorizontal": {
-            var mhv = parseCSSLength(resolved);
-            if (mhv) {
-                setFlex(id, "margin_left", mhv.value);
-                setFlex(id, "margin_right", mhv.value);
+            // pulp #1434 cross-surface mega-batch — forward %/auto through
+            // the per-edge fan-out so RN snippets like
+            // `style={{ marginHorizontal: '5%' }}` or
+            // `style={{ marginHorizontal: 'auto' }}` route correctly.
+            if (resolved === "auto") {
+                setFlex(id, "margin_left",  "auto");
+                setFlex(id, "margin_right", "auto");
+                break;
             }
+            var mhv = parseCSSLength(resolved);
+            if (!mhv) break;
+            var mhArg = mhv.unit === "%" ? mhv.value + "%" : mhv.value;
+            setFlex(id, "margin_left",  mhArg);
+            setFlex(id, "margin_right", mhArg);
             break;
         }
         case "marginVertical": {
-            var mvv = parseCSSLength(resolved);
-            if (mvv) {
-                setFlex(id, "margin_top", mvv.value);
-                setFlex(id, "margin_bottom", mvv.value);
+            if (resolved === "auto") {
+                setFlex(id, "margin_top",    "auto");
+                setFlex(id, "margin_bottom", "auto");
+                break;
             }
+            var mvv = parseCSSLength(resolved);
+            if (!mvv) break;
+            var mvArg = mvv.unit === "%" ? mvv.value + "%" : mvv.value;
+            setFlex(id, "margin_top",    mvArg);
+            setFlex(id, "margin_bottom", mvArg);
             break;
         }
 
-        // Padding (individual)
+        // Padding (individual) — pulp #1434 cross-surface mega-batch:
+        // forward `'NN%'` strings verbatim (Yoga's
+        // YGNodeStyleSetPaddingPercent). Yoga's padding does NOT support
+        // `auto` (only margin does), so the keyword is silently dropped
+        // here.
         case "paddingTop": {
             var pt = parseCSSLength(resolved);
-            if (pt) setFlex(id, "padding_top", pt.value);
+            if (!pt) break;
+            if (pt.unit === "%") setFlex(id, "padding_top", pt.value + "%");
+            else setFlex(id, "padding_top", pt.value);
             break;
         }
         case "paddingRight": {
             var pr = parseCSSLength(resolved);
-            if (pr) setFlex(id, "padding_right", pr.value);
+            if (!pr) break;
+            if (pr.unit === "%") setFlex(id, "padding_right", pr.value + "%");
+            else setFlex(id, "padding_right", pr.value);
             break;
         }
         case "paddingBottom": {
             var pb = parseCSSLength(resolved);
-            if (pb) setFlex(id, "padding_bottom", pb.value);
+            if (!pb) break;
+            if (pb.unit === "%") setFlex(id, "padding_bottom", pb.value + "%");
+            else setFlex(id, "padding_bottom", pb.value);
             break;
         }
         case "paddingLeft": {
             var pl = parseCSSLength(resolved);
-            if (pl) setFlex(id, "padding_left", pl.value);
+            if (!pl) break;
+            if (pl.unit === "%") setFlex(id, "padding_left", pl.value + "%");
+            else setFlex(id, "padding_left", pl.value);
             break;
         }
         // Padding shorthand
@@ -315,19 +358,24 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
         // — paddingHorizontal sets padding_left + padding_right to the
         // same value, paddingVertical sets padding_top + padding_bottom.
         case "paddingHorizontal": {
+            // pulp #1434 cross-surface mega-batch — forward percent through
+            // the per-edge fan-out so RN snippets like
+            // `style={{ paddingHorizontal: '5%' }}` route correctly.
+            // Yoga's padding does NOT support 'auto', so the keyword is
+            // a no-op (unlike the marginHorizontal alias).
             var phv = parseCSSLength(resolved);
-            if (phv) {
-                setFlex(id, "padding_left", phv.value);
-                setFlex(id, "padding_right", phv.value);
-            }
+            if (!phv) break;
+            var phArg = phv.unit === "%" ? phv.value + "%" : phv.value;
+            setFlex(id, "padding_left",  phArg);
+            setFlex(id, "padding_right", phArg);
             break;
         }
         case "paddingVertical": {
             var pvv = parseCSSLength(resolved);
-            if (pvv) {
-                setFlex(id, "padding_top", pvv.value);
-                setFlex(id, "padding_bottom", pvv.value);
-            }
+            if (!pvv) break;
+            var pvArg = pvv.unit === "%" ? pvv.value + "%" : pvv.value;
+            setFlex(id, "padding_top",    pvArg);
+            setFlex(id, "padding_bottom", pvArg);
             break;
         }
 

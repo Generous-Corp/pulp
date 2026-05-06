@@ -40,6 +40,19 @@ which mirrors the upstream Yoga API.
 
 ## Recent updates
 
+- **2026-05-05 (pulp #1434 cross-surface mega-batch)** — per-edge
+  `margin_*` and `padding_*` accept percent strings; margin also
+  accepts `'auto'`. `FlexStyle` gains `dim_margin_{top,right,bottom,
+  left}` and `dim_padding_{top,right,bottom,left}` `Dimension`
+  fields; `yoga_layout.cpp` dispatches on `dim.unit` to
+  `YGNodeStyleSetMargin{Percent,Auto}` /
+  `YGNodeStyleSetPaddingPercent`. Yoga's padding has no `auto` API
+  (margin only). Mirrors the dimension/percent pattern from
+  pulp #1426 (width/height) and #1451 (top/right/bottom/left).
+  Reclassified DIVERGE → PASS for the 8 per-edge entries
+  (`yoga/marginTop` through `yoga/paddingLeft`) plus the 4 RN-style
+  shorthand aliases (`yoga/marginHorizontal` etc.). Net: yoga
+  drift_count -12, pass +12.
 - **2026-05-05 (pulp #1434 batch 6)** — `yoga/top`, `yoga/right`,
   `yoga/bottom`, `yoga/left` now accept percentage values (`'50%'`).
   The CSS translator and `@pulp/react` prop-applier pass `'NN%'`

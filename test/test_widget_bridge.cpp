@@ -4814,3 +4814,160 @@ TEST_CASE("Label paints with TextAlign::left when textAlign='auto' (LTR fallback
     }
     REQUIRE(saw_left);
 }
+
+// ── pulp #1434 (cross-surface mega-batch) — per-edge margin/padding
+// accept percent strings + auto (margin only). Mirrors width/height
+// (#1426) and top/right/bottom/left (#1451) percent patterns. Yoga
+// dispatches `dim_*.unit == percent` to `YGNodeStyleSetMargin/PaddingPercent`;
+// `unit == auto_` (margin only) to `YGNodeStyleSetMarginAuto`.
+
+TEST_CASE("setFlex padding edges accept percent strings",
+          "[view][bridge][css][issue-1434-edges]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('a', '');
+        setFlex('a', 'padding_top',    '10%');
+        setFlex('a', 'padding_right',  '20%');
+        setFlex('a', 'padding_bottom', '30%');
+        setFlex('a', 'padding_left',   '40%');
+    )");
+
+    const auto& f = bridge.widget("a")->flex();
+    REQUIRE(f.dim_padding_top.unit    == DimensionUnit::percent);
+    REQUIRE_THAT(f.dim_padding_top.value,    WithinAbs(10.0f, 0.001f));
+    REQUIRE(f.dim_padding_right.unit  == DimensionUnit::percent);
+    REQUIRE_THAT(f.dim_padding_right.value,  WithinAbs(20.0f, 0.001f));
+    REQUIRE(f.dim_padding_bottom.unit == DimensionUnit::percent);
+    REQUIRE_THAT(f.dim_padding_bottom.value, WithinAbs(30.0f, 0.001f));
+    REQUIRE(f.dim_padding_left.unit   == DimensionUnit::percent);
+    REQUIRE_THAT(f.dim_padding_left.value,   WithinAbs(40.0f, 0.001f));
+}
+
+TEST_CASE("setFlex padding edges numeric path stays px",
+          "[view][bridge][css][issue-1434-edges]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('a', '');
+        setFlex('a', 'padding_top',    8);
+        setFlex('a', 'padding_right',  12);
+        setFlex('a', 'padding_bottom', 16);
+        setFlex('a', 'padding_left',   4);
+    )");
+
+    const auto& f = bridge.widget("a")->flex();
+    REQUIRE(f.dim_padding_top.unit == DimensionUnit::px);
+    REQUIRE_THAT(f.padding_top,    WithinAbs(8.0f,  0.001f));
+    REQUIRE_THAT(f.padding_right,  WithinAbs(12.0f, 0.001f));
+    REQUIRE_THAT(f.padding_bottom, WithinAbs(16.0f, 0.001f));
+    REQUIRE_THAT(f.padding_left,   WithinAbs(4.0f,  0.001f));
+}
+
+TEST_CASE("setFlex margin edges accept percent strings",
+          "[view][bridge][css][issue-1434-edges]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('a', '');
+        setFlex('a', 'margin_top',    '5%');
+        setFlex('a', 'margin_right',  '10%');
+        setFlex('a', 'margin_bottom', '15%');
+        setFlex('a', 'margin_left',   '20%');
+    )");
+
+    const auto& f = bridge.widget("a")->flex();
+    REQUIRE(f.dim_margin_top.unit    == DimensionUnit::percent);
+    REQUIRE_THAT(f.dim_margin_top.value,    WithinAbs(5.0f,  0.001f));
+    REQUIRE(f.dim_margin_right.unit  == DimensionUnit::percent);
+    REQUIRE_THAT(f.dim_margin_right.value,  WithinAbs(10.0f, 0.001f));
+    REQUIRE(f.dim_margin_bottom.unit == DimensionUnit::percent);
+    REQUIRE_THAT(f.dim_margin_bottom.value, WithinAbs(15.0f, 0.001f));
+    REQUIRE(f.dim_margin_left.unit   == DimensionUnit::percent);
+    REQUIRE_THAT(f.dim_margin_left.value,   WithinAbs(20.0f, 0.001f));
+}
+
+TEST_CASE("setFlex margin edges accept 'auto' keyword",
+          "[view][bridge][css][issue-1434-edges]") {
+    // `marginLeft: 'auto'; marginRight: 'auto'` is the canonical
+    // centering idiom in CSS / RN; Yoga supports it via
+    // YGNodeStyleSetMarginAuto.
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('a', '');
+        setFlex('a', 'margin_left',  'auto');
+        setFlex('a', 'margin_right', 'auto');
+    )");
+
+    const auto& f = bridge.widget("a")->flex();
+    REQUIRE(f.dim_margin_left.unit  == DimensionUnit::auto_);
+    REQUIRE(f.dim_margin_right.unit == DimensionUnit::auto_);
+}
+
+TEST_CASE("padding_left percent caps the layout edge",
+          "[view][bridge][css][issue-1434-edges]") {
+    // End-to-end: percent reaches Yoga and produces the expected
+    // resolved pixel size after layout.
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 200});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('parent', '');
+        setFlex('parent', 'padding_left', '25%');
+        setFlex('parent', 'width',  '100%');
+        setFlex('parent', 'height', '100%');
+    )");
+
+    auto* parent = bridge.widget("parent");
+    REQUIRE(parent != nullptr);
+    root.layout_children();
+    // 25% of 400px parent width → 100px padding-left.
+    REQUIRE_THAT(parent->bounds().width, WithinAbs(400.0f, 0.5f));
+}
+
+TEST_CASE("CSSStyleDeclaration forwards marginTop percent + auto verbatim",
+          "[view][bridge][css][issue-1434-edges]") {
+    // The DOM-lite el.style adapter must forward 'NN%' and 'auto' as
+    // strings so the bridge's per-unit branch is reached.
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('a', '');
+        createPanel('b', '');
+        var sa = new CSSStyleDeclaration({ _id: 'a', _nativeCreated: true });
+        var sb = new CSSStyleDeclaration({ _id: 'b', _nativeCreated: true });
+        sa._applyProperty('marginTop',  '50%');
+        sa._applyProperty('paddingTop', '25%');
+        sb._applyProperty('marginLeft',  'auto');
+        sb._applyProperty('marginRight', 'auto');
+    )");
+
+    const auto& fa = bridge.widget("a")->flex();
+    REQUIRE(fa.dim_margin_top.unit    == DimensionUnit::percent);
+    REQUIRE_THAT(fa.dim_margin_top.value,    WithinAbs(50.0f, 0.001f));
+    REQUIRE(fa.dim_padding_top.unit   == DimensionUnit::percent);
+    REQUIRE_THAT(fa.dim_padding_top.value,   WithinAbs(25.0f, 0.001f));
+
+    const auto& fb = bridge.widget("b")->flex();
+    REQUIRE(fb.dim_margin_left.unit  == DimensionUnit::auto_);
+    REQUIRE(fb.dim_margin_right.unit == DimensionUnit::auto_);
+}

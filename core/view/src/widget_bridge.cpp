@@ -1683,10 +1683,68 @@ void WidgetBridge::register_api() {
         }
         else if (key == "gap") f.gap = (float)val;
         else if (key == "padding") f.padding = (float)val;
-        else if (key == "padding_top") f.padding_top = (float)val;
-        else if (key == "padding_right") f.padding_right = (float)val;
-        else if (key == "padding_bottom") f.padding_bottom = (float)val;
-        else if (key == "padding_left") f.padding_left = (float)val;
+        // pulp #1434 (cross-surface mega-batch) — per-edge padding accepts
+        // either a number ("10" → px) or a percentage string ("5%" →
+        // percent of parent main-axis size). Yoga's padding does NOT
+        // support "auto" (only margin does), so unrecognized strings fall
+        // through to the px path with the parsed numeric value (or 0 on
+        // total parse failure). Mirrors width/height/min/max patterns.
+        else if (key == "padding_top") {
+            auto sval = args.get<std::string>(2, "");
+            if (!sval.empty() && sval.back() == '%') {
+                try {
+                    f.dim_padding_top.value = std::stof(sval.substr(0, sval.size() - 1));
+                    f.dim_padding_top.unit = pulp::view::DimensionUnit::percent;
+                    f.padding_top = -1; // sentinel
+                } catch (...) { /* keep current */ }
+            } else {
+                f.padding_top = (float)val;
+                f.dim_padding_top.value = (float)val;
+                f.dim_padding_top.unit = pulp::view::DimensionUnit::px;
+            }
+        }
+        else if (key == "padding_right") {
+            auto sval = args.get<std::string>(2, "");
+            if (!sval.empty() && sval.back() == '%') {
+                try {
+                    f.dim_padding_right.value = std::stof(sval.substr(0, sval.size() - 1));
+                    f.dim_padding_right.unit = pulp::view::DimensionUnit::percent;
+                    f.padding_right = -1;
+                } catch (...) { /* keep current */ }
+            } else {
+                f.padding_right = (float)val;
+                f.dim_padding_right.value = (float)val;
+                f.dim_padding_right.unit = pulp::view::DimensionUnit::px;
+            }
+        }
+        else if (key == "padding_bottom") {
+            auto sval = args.get<std::string>(2, "");
+            if (!sval.empty() && sval.back() == '%') {
+                try {
+                    f.dim_padding_bottom.value = std::stof(sval.substr(0, sval.size() - 1));
+                    f.dim_padding_bottom.unit = pulp::view::DimensionUnit::percent;
+                    f.padding_bottom = -1;
+                } catch (...) { /* keep current */ }
+            } else {
+                f.padding_bottom = (float)val;
+                f.dim_padding_bottom.value = (float)val;
+                f.dim_padding_bottom.unit = pulp::view::DimensionUnit::px;
+            }
+        }
+        else if (key == "padding_left") {
+            auto sval = args.get<std::string>(2, "");
+            if (!sval.empty() && sval.back() == '%') {
+                try {
+                    f.dim_padding_left.value = std::stof(sval.substr(0, sval.size() - 1));
+                    f.dim_padding_left.unit = pulp::view::DimensionUnit::percent;
+                    f.padding_left = -1;
+                } catch (...) { /* keep current */ }
+            } else {
+                f.padding_left = (float)val;
+                f.dim_padding_left.value = (float)val;
+                f.dim_padding_left.unit = pulp::view::DimensionUnit::px;
+            }
+        }
         else if (key == "flex_grow") f.flex_grow = (float)val;
         else if (key == "flex_shrink") f.flex_shrink = (float)val;
         // pulp #1434 (rn batch C) — flex_basis accepts a number ("100"
@@ -1822,10 +1880,83 @@ void WidgetBridge::register_api() {
         }
         // Margin
         else if (key == "margin") f.margin = (float)val;
-        else if (key == "margin_top") f.margin_top = (float)val;
-        else if (key == "margin_right") f.margin_right = (float)val;
-        else if (key == "margin_bottom") f.margin_bottom = (float)val;
-        else if (key == "margin_left") f.margin_left = (float)val;
+        // pulp #1434 (cross-surface mega-batch) — per-edge margin accepts
+        // a number ("10" → px), a percentage string ("5%" → percent of
+        // parent main-axis size), or the keyword "auto" (Yoga
+        // YGNodeStyleSetMarginAuto — used for centering with
+        // `marginLeft: 'auto'; marginRight: 'auto'` etc.). Yoga supports
+        // `auto` on margin only, not padding. yoga_layout.cpp dispatches
+        // on dim_margin_*.unit; the legacy float field is kept (-1
+        // sentinel) so consumers still using uniform `margin` work
+        // unchanged.
+        else if (key == "margin_top") {
+            auto sval = args.get<std::string>(2, "");
+            if (sval == "auto") {
+                f.dim_margin_top.unit = pulp::view::DimensionUnit::auto_;
+                f.margin_top = -1;
+            } else if (!sval.empty() && sval.back() == '%') {
+                try {
+                    f.dim_margin_top.value = std::stof(sval.substr(0, sval.size() - 1));
+                    f.dim_margin_top.unit = pulp::view::DimensionUnit::percent;
+                    f.margin_top = -1;
+                } catch (...) { /* keep current */ }
+            } else {
+                f.margin_top = (float)val;
+                f.dim_margin_top.value = (float)val;
+                f.dim_margin_top.unit = pulp::view::DimensionUnit::px;
+            }
+        }
+        else if (key == "margin_right") {
+            auto sval = args.get<std::string>(2, "");
+            if (sval == "auto") {
+                f.dim_margin_right.unit = pulp::view::DimensionUnit::auto_;
+                f.margin_right = -1;
+            } else if (!sval.empty() && sval.back() == '%') {
+                try {
+                    f.dim_margin_right.value = std::stof(sval.substr(0, sval.size() - 1));
+                    f.dim_margin_right.unit = pulp::view::DimensionUnit::percent;
+                    f.margin_right = -1;
+                } catch (...) { /* keep current */ }
+            } else {
+                f.margin_right = (float)val;
+                f.dim_margin_right.value = (float)val;
+                f.dim_margin_right.unit = pulp::view::DimensionUnit::px;
+            }
+        }
+        else if (key == "margin_bottom") {
+            auto sval = args.get<std::string>(2, "");
+            if (sval == "auto") {
+                f.dim_margin_bottom.unit = pulp::view::DimensionUnit::auto_;
+                f.margin_bottom = -1;
+            } else if (!sval.empty() && sval.back() == '%') {
+                try {
+                    f.dim_margin_bottom.value = std::stof(sval.substr(0, sval.size() - 1));
+                    f.dim_margin_bottom.unit = pulp::view::DimensionUnit::percent;
+                    f.margin_bottom = -1;
+                } catch (...) { /* keep current */ }
+            } else {
+                f.margin_bottom = (float)val;
+                f.dim_margin_bottom.value = (float)val;
+                f.dim_margin_bottom.unit = pulp::view::DimensionUnit::px;
+            }
+        }
+        else if (key == "margin_left") {
+            auto sval = args.get<std::string>(2, "");
+            if (sval == "auto") {
+                f.dim_margin_left.unit = pulp::view::DimensionUnit::auto_;
+                f.margin_left = -1;
+            } else if (!sval.empty() && sval.back() == '%') {
+                try {
+                    f.dim_margin_left.value = std::stof(sval.substr(0, sval.size() - 1));
+                    f.dim_margin_left.unit = pulp::view::DimensionUnit::percent;
+                    f.margin_left = -1;
+                } catch (...) { /* keep current */ }
+            } else {
+                f.margin_left = (float)val;
+                f.dim_margin_left.value = (float)val;
+                f.dim_margin_left.unit = pulp::view::DimensionUnit::px;
+            }
+        }
         // Directional gap
         else if (key == "row_gap") f.row_gap = (float)val;
         else if (key == "column_gap") f.column_gap = (float)val;

@@ -22,28 +22,39 @@ export interface FlexProps {
     rowGap?: number;
     columnGap?: number;
     padding?: number;
-    paddingTop?: number;
-    paddingRight?: number;
-    paddingBottom?: number;
-    paddingLeft?: number;
+    /// pulp #1434 (cross-surface mega-batch) — per-edge padding accepts
+    /// either a number (px) or a percent string ('5%' → percent of parent
+    /// main-axis size). Yoga padding does NOT support 'auto'.
+    paddingTop?: number | string;
+    paddingRight?: number | string;
+    paddingBottom?: number | string;
+    paddingLeft?: number | string;
     /// pulp #1434 batch 4 — `paddingHorizontal` fans out to `paddingLeft` +
     /// `paddingRight`.
-    paddingHorizontal?: number;
+    /// pulp #1434 cross-surface mega-batch — accepts number (px) or
+    /// percent string ('5%'). Yoga padding has no 'auto' API.
+    paddingHorizontal?: number | string;
     /// pulp #1434 batch 4 — `paddingVertical` fans out to `paddingTop` +
     /// `paddingBottom`.
-    paddingVertical?: number;
+    paddingVertical?: number | string;
     margin?: number;
-    marginTop?: number;
-    marginRight?: number;
-    marginBottom?: number;
-    marginLeft?: number;
+    /// pulp #1434 (cross-surface mega-batch) — per-edge margin accepts a
+    /// number (px), percent string ('5%' → percent of parent main-axis
+    /// size), or the keyword 'auto' (Yoga YGNodeStyleSetMarginAuto —
+    /// used for centering with `marginLeft: 'auto'` + `marginRight: 'auto'`).
+    marginTop?: number | string;
+    marginRight?: number | string;
+    marginBottom?: number | string;
+    marginLeft?: number | string;
     /// pulp #1434 batch 4 — React Native shorthand alias. `marginHorizontal`
     /// fans out to `marginLeft` + `marginRight` in the prop-applier; same
     /// value applied to both edges. Useful for porting RN code as-is.
-    marginHorizontal?: number;
+    /// pulp #1434 cross-surface mega-batch — accepts number (px),
+    /// percent string ('5%'), or 'auto' (Yoga centering).
+    marginHorizontal?: number | string;
     /// pulp #1434 batch 4 — `marginVertical` fans out to `marginTop` +
     /// `marginBottom`.
-    marginVertical?: number;
+    marginVertical?: number | string;
     flexGrow?: number;
     flexShrink?: number;
     /// pulp #1434 (rn batch C) — accepts number (px), percentage string

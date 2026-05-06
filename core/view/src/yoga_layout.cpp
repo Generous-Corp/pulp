@@ -101,25 +101,45 @@ static void apply_flex_style(YGNodeRef node, const FlexStyle& f, bool is_absolut
     if (rg > 0) YGNodeStyleSetGap(node, YGGutterRow, rg);
     if (cg > 0) YGNodeStyleSetGap(node, YGGutterColumn, cg);
 
-    // Padding
-    float pt = f.padding_top >= 0 ? f.padding_top : f.padding;
-    float pr = f.padding_right >= 0 ? f.padding_right : f.padding;
-    float pb = f.padding_bottom >= 0 ? f.padding_bottom : f.padding;
-    float pl = f.padding_left >= 0 ? f.padding_left : f.padding;
-    if (pt > 0) YGNodeStyleSetPadding(node, YGEdgeTop, pt);
-    if (pr > 0) YGNodeStyleSetPadding(node, YGEdgeRight, pr);
-    if (pb > 0) YGNodeStyleSetPadding(node, YGEdgeBottom, pb);
-    if (pl > 0) YGNodeStyleSetPadding(node, YGEdgeLeft, pl);
+    // Padding — pulp #1434 (cross-surface mega-batch) dispatches on
+    // dim_padding_*.unit when set. percent → YGNodeStyleSetPaddingPercent.
+    // Yoga's padding does NOT support `auto` (only margin does), so the
+    // auto_ unit is treated as no-op here (the bridge already rejects
+    // 'auto' on padding edges, but defensive belt-and-suspenders).
+    auto apply_padding = [&](YGEdge edge, const Dimension& dim, float legacy_per_edge, float uniform) {
+        if (dim.unit == DimensionUnit::percent && dim.value > 0) {
+            YGNodeStyleSetPaddingPercent(node, edge, dim.value);
+            return;
+        }
+        float v = legacy_per_edge >= 0 ? legacy_per_edge : uniform;
+        if (v > 0) YGNodeStyleSetPadding(node, edge, v);
+    };
+    apply_padding(YGEdgeTop,    f.dim_padding_top,    f.padding_top,    f.padding);
+    apply_padding(YGEdgeRight,  f.dim_padding_right,  f.padding_right,  f.padding);
+    apply_padding(YGEdgeBottom, f.dim_padding_bottom, f.padding_bottom, f.padding);
+    apply_padding(YGEdgeLeft,   f.dim_padding_left,   f.padding_left,   f.padding);
 
-    // Margin
-    float mt = f.margin_top >= 0 ? f.margin_top : f.margin;
-    float mr = f.margin_right >= 0 ? f.margin_right : f.margin;
-    float mb = f.margin_bottom >= 0 ? f.margin_bottom : f.margin;
-    float ml = f.margin_left >= 0 ? f.margin_left : f.margin;
-    if (mt > 0) YGNodeStyleSetMargin(node, YGEdgeTop, mt);
-    if (mr > 0) YGNodeStyleSetMargin(node, YGEdgeRight, mr);
-    if (mb > 0) YGNodeStyleSetMargin(node, YGEdgeBottom, mb);
-    if (ml > 0) YGNodeStyleSetMargin(node, YGEdgeLeft, ml);
+    // Margin — pulp #1434 (cross-surface mega-batch) dispatches on
+    // dim_margin_*.unit. percent → YGNodeStyleSetMarginPercent;
+    // auto_ → YGNodeStyleSetMarginAuto (used for centering with
+    // `marginLeft: 'auto'; marginRight: 'auto'` etc.). px or unset
+    // falls through to the legacy per-edge / uniform float path.
+    auto apply_margin = [&](YGEdge edge, const Dimension& dim, float legacy_per_edge, float uniform) {
+        if (dim.unit == DimensionUnit::auto_) {
+            YGNodeStyleSetMarginAuto(node, edge);
+            return;
+        }
+        if (dim.unit == DimensionUnit::percent && dim.value != 0) {
+            YGNodeStyleSetMarginPercent(node, edge, dim.value);
+            return;
+        }
+        float v = legacy_per_edge >= 0 ? legacy_per_edge : uniform;
+        if (v > 0) YGNodeStyleSetMargin(node, edge, v);
+    };
+    apply_margin(YGEdgeTop,    f.dim_margin_top,    f.margin_top,    f.margin);
+    apply_margin(YGEdgeRight,  f.dim_margin_right,  f.margin_right,  f.margin);
+    apply_margin(YGEdgeBottom, f.dim_margin_bottom, f.margin_bottom, f.margin);
+    apply_margin(YGEdgeLeft,   f.dim_margin_left,   f.margin_left,   f.margin);
 
     // Dimensions — pulp #1423 dispatches on dim_*.unit so width/height
     // accept percentage values. The bridge's setFlex(width|height, ...)

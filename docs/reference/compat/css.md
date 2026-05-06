@@ -33,6 +33,22 @@ specifics are out of scope.
 
 ## Recently changed
 
+- **2026-05-05 (pulp #1434 cross-surface mega-batch)** — per-edge
+  `margin{Top,Right,Bottom,Left}` and `padding{Top,Right,Bottom,Left}`
+  accept percent values (`'5%'`); margin also accepts `'auto'`
+  (Yoga centering — `marginLeft: auto; marginRight: auto`). The CSS
+  translator forwards `'NN%'` / `'auto'` strings verbatim; the bridge
+  populates `FlexStyle::dim_margin_*` / `dim_padding_*` and routes
+  through Yoga's native `YGNodeStyleSetMargin{Percent,Auto}` /
+  `YGNodeStyleSetPaddingPercent` APIs. Yoga's padding has no `auto`
+  API (margin only). The RN-style shorthand aliases
+  (`marginHorizontal`/`marginVertical` /
+  `paddingHorizontal`/`paddingVertical`) fan out the same coverage
+  to the per-edge dispatchers. `em` / `rem` / `vh` / `vw` / `calc()`
+  remain unsupported on lengths (parseCSSLength is px-only).
+  Reclassified DIVERGE → PASS for 8 per-edge + 4 alias entries.
+  Mirrors PR #1426 (width/height %) and PR #1451
+  (top/right/bottom/left %). Net: css drift_count -12, pass +12.
 - **2026-05-05 (pulp #1434 css catalog hygiene)** — eight catalog-only
   refreshes: `css/width` and `css/height` now list `%` in
   `supportedValues` (mirroring `yoga/width` / `yoga/height` post-#1426 —

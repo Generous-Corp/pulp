@@ -1532,32 +1532,32 @@
     },
     "css/marginBottom": {
       "status": "supported",
-      "mapsTo": "setFlex(id, 'margin_bottom', px)",
+      "mapsTo": "web-compat-style-decl.js forwards \"NN%\" / \"auto\" / numeric verbatim to setFlex(margin_*); bridge routes via dim_margin_*.unit to Yoga (cross-surface mega-batch).",
       "supportedValues": [
-        "px"
-      ],
-      "unsupportedValues": [
+        "px",
         "%",
         "auto"
       ],
-      "tests": [],
-      "notes": "",
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp::\"CSSStyleDeclaration forwards marginTop percent + auto verbatim\""
+      ],
+      "notes": "pulp #1434 cross-surface mega-batch — accepts px / % / auto. CSS-spec em/rem/vh/vw/calc() not wired (parseCSSLength is px-only); pass numeric values for those.",
       "issue": ""
     },
     "css/marginHorizontal": {
       "status": "supported",
       "mapsTo": "marginHorizontal -> setFlex(margin_left, px) + setFlex(margin_right, px)",
       "supportedValues": [
-        "px"
-      ],
-      "unsupportedValues": [
-        "%",
+        "number (px)",
+        "percent string (\"5%\")",
         "auto"
       ],
+      "unsupportedValues": [],
       "tests": [
         "packages/pulp-react/test/prop-applier-rn-aliases.test.ts"
       ],
-      "notes": "pulp #1434 batch 4: React Native shorthand alias surfaced through the DOM-lite el.style adapter so RN snippets ported verbatim work in the CSS surface too. Web CSS does not define this property; provided for cross-tool import-readiness.",
+      "notes": "pulp #1434 cross-surface mega-batch — alias fans out to per-edge keys; same value coverage as the per-edge entries.",
       "issue": ""
     },
     "css/marginInline": {
@@ -1595,60 +1595,62 @@
     },
     "css/marginLeft": {
       "status": "supported",
-      "mapsTo": "setFlex(id, 'margin_left', px)",
+      "mapsTo": "web-compat-style-decl.js forwards \"NN%\" / \"auto\" / numeric verbatim to setFlex(margin_*); bridge routes via dim_margin_*.unit to Yoga (cross-surface mega-batch).",
       "supportedValues": [
-        "px"
-      ],
-      "unsupportedValues": [
+        "px",
         "%",
         "auto"
       ],
-      "tests": [],
-      "notes": "",
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp::\"CSSStyleDeclaration forwards marginTop percent + auto verbatim\""
+      ],
+      "notes": "pulp #1434 cross-surface mega-batch — accepts px / % / auto. CSS-spec em/rem/vh/vw/calc() not wired (parseCSSLength is px-only); pass numeric values for those.",
       "issue": ""
     },
     "css/marginRight": {
       "status": "supported",
-      "mapsTo": "setFlex(id, 'margin_right', px)",
+      "mapsTo": "web-compat-style-decl.js forwards \"NN%\" / \"auto\" / numeric verbatim to setFlex(margin_*); bridge routes via dim_margin_*.unit to Yoga (cross-surface mega-batch).",
       "supportedValues": [
-        "px"
-      ],
-      "unsupportedValues": [
+        "px",
         "%",
         "auto"
       ],
-      "tests": [],
-      "notes": "",
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp::\"CSSStyleDeclaration forwards marginTop percent + auto verbatim\""
+      ],
+      "notes": "pulp #1434 cross-surface mega-batch — accepts px / % / auto. CSS-spec em/rem/vh/vw/calc() not wired (parseCSSLength is px-only); pass numeric values for those.",
       "issue": ""
     },
     "css/marginTop": {
       "status": "supported",
-      "mapsTo": "setFlex(id, 'margin_top', px)",
+      "mapsTo": "web-compat-style-decl.js forwards \"NN%\" / \"auto\" / numeric verbatim to setFlex(margin_*); bridge routes via dim_margin_*.unit to Yoga (cross-surface mega-batch).",
       "supportedValues": [
-        "px"
-      ],
-      "unsupportedValues": [
+        "px",
         "%",
         "auto"
       ],
-      "tests": [],
-      "notes": "",
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp::\"CSSStyleDeclaration forwards marginTop percent + auto verbatim\""
+      ],
+      "notes": "pulp #1434 cross-surface mega-batch — accepts px / % / auto. CSS-spec em/rem/vh/vw/calc() not wired (parseCSSLength is px-only); pass numeric values for those.",
       "issue": ""
     },
     "css/marginVertical": {
       "status": "supported",
       "mapsTo": "marginVertical -> setFlex(margin_top, px) + setFlex(margin_bottom, px)",
       "supportedValues": [
-        "px"
-      ],
-      "unsupportedValues": [
-        "%",
+        "number (px)",
+        "percent string (\"5%\")",
         "auto"
       ],
+      "unsupportedValues": [],
       "tests": [
         "packages/pulp-react/test/prop-applier-rn-aliases.test.ts"
       ],
-      "notes": "pulp #1434 batch 4: React Native shorthand alias surfaced through the DOM-lite el.style adapter so RN snippets ported verbatim work in the CSS surface too. Web CSS does not define this property; provided for cross-tool import-readiness.",
+      "notes": "pulp #1434 cross-surface mega-batch — alias fans out to per-edge keys; same value coverage as the per-edge entries.",
       "issue": ""
     },
     "css/mask": {
@@ -1932,30 +1934,30 @@
     },
     "css/paddingBottom": {
       "status": "supported",
-      "mapsTo": "setFlex(id, 'padding_bottom', px)",
+      "mapsTo": "web-compat-style-decl.js forwards \"NN%\" / numeric verbatim to setFlex(padding_*); bridge routes via dim_padding_*.unit to Yoga.",
       "supportedValues": [
-        "px"
-      ],
-      "unsupportedValues": [
+        "px",
         "%"
       ],
-      "tests": [],
-      "notes": "",
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp::\"setFlex padding edges accept percent strings\""
+      ],
+      "notes": "pulp #1434 cross-surface mega-batch — accepts px / %. CSS-spec auto is inexpressible (Yoga has no padding-auto API); em/rem/vh/vw/calc() not wired.",
       "issue": ""
     },
     "css/paddingHorizontal": {
       "status": "supported",
       "mapsTo": "paddingHorizontal -> setFlex(padding_left, px) + setFlex(padding_right, px)",
       "supportedValues": [
-        "px"
+        "number (px)",
+        "percent string (\"5%\")"
       ],
-      "unsupportedValues": [
-        "%"
-      ],
+      "unsupportedValues": [],
       "tests": [
         "packages/pulp-react/test/prop-applier-rn-aliases.test.ts"
       ],
-      "notes": "pulp #1434 batch 4: React Native shorthand alias surfaced through the DOM-lite el.style adapter so RN snippets ported verbatim work in the CSS surface too. Web CSS does not define this property; provided for cross-tool import-readiness.",
+      "notes": "pulp #1434 cross-surface mega-batch — alias fans out to per-edge keys; same value coverage as the per-edge entries.",
       "issue": ""
     },
     "css/paddingInline": {
@@ -1993,56 +1995,58 @@
     },
     "css/paddingLeft": {
       "status": "supported",
-      "mapsTo": "setFlex(id, 'padding_left', px)",
+      "mapsTo": "web-compat-style-decl.js forwards \"NN%\" / numeric verbatim to setFlex(padding_*); bridge routes via dim_padding_*.unit to Yoga.",
       "supportedValues": [
-        "px"
-      ],
-      "unsupportedValues": [
+        "px",
         "%"
       ],
-      "tests": [],
-      "notes": "",
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp::\"setFlex padding edges accept percent strings\""
+      ],
+      "notes": "pulp #1434 cross-surface mega-batch — accepts px / %. CSS-spec auto is inexpressible (Yoga has no padding-auto API); em/rem/vh/vw/calc() not wired.",
       "issue": ""
     },
     "css/paddingRight": {
       "status": "supported",
-      "mapsTo": "setFlex(id, 'padding_right', px)",
+      "mapsTo": "web-compat-style-decl.js forwards \"NN%\" / numeric verbatim to setFlex(padding_*); bridge routes via dim_padding_*.unit to Yoga.",
       "supportedValues": [
-        "px"
-      ],
-      "unsupportedValues": [
+        "px",
         "%"
       ],
-      "tests": [],
-      "notes": "",
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp::\"setFlex padding edges accept percent strings\""
+      ],
+      "notes": "pulp #1434 cross-surface mega-batch — accepts px / %. CSS-spec auto is inexpressible (Yoga has no padding-auto API); em/rem/vh/vw/calc() not wired.",
       "issue": ""
     },
     "css/paddingTop": {
       "status": "supported",
-      "mapsTo": "setFlex(id, 'padding_top', px)",
+      "mapsTo": "web-compat-style-decl.js forwards \"NN%\" / numeric verbatim to setFlex(padding_*); bridge routes via dim_padding_*.unit to Yoga.",
       "supportedValues": [
-        "px"
-      ],
-      "unsupportedValues": [
+        "px",
         "%"
       ],
-      "tests": [],
-      "notes": "",
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp::\"setFlex padding edges accept percent strings\""
+      ],
+      "notes": "pulp #1434 cross-surface mega-batch — accepts px / %. CSS-spec auto is inexpressible (Yoga has no padding-auto API); em/rem/vh/vw/calc() not wired.",
       "issue": ""
     },
     "css/paddingVertical": {
       "status": "supported",
       "mapsTo": "paddingVertical -> setFlex(padding_top, px) + setFlex(padding_bottom, px)",
       "supportedValues": [
-        "px"
+        "number (px)",
+        "percent string (\"5%\")"
       ],
-      "unsupportedValues": [
-        "%"
-      ],
+      "unsupportedValues": [],
       "tests": [
         "packages/pulp-react/test/prop-applier-rn-aliases.test.ts"
       ],
-      "notes": "pulp #1434 batch 4: React Native shorthand alias surfaced through the DOM-lite el.style adapter so RN snippets ported verbatim work in the CSS surface too. Web CSS does not define this property; provided for cross-tool import-readiness.",
+      "notes": "pulp #1434 cross-surface mega-batch — alias fans out to per-edge keys; same value coverage as the per-edge entries.",
       "issue": ""
     },
     "css/pageBreakAfter": {
@@ -3521,13 +3525,17 @@
     },
     "rn/marginBottom": {
       "status": "supported",
-      "mapsTo": "setFlex(id, 'margin_bottom', n)",
+      "mapsTo": "@pulp/react prop-applier passes number | string verbatim to setFlex(margin_*); bridge routes via dim_margin_*.unit. (cross-surface mega-batch)",
       "supportedValues": [
-        "number"
+        "number (px)",
+        "percent string (\"50%\")",
+        "auto"
       ],
       "unsupportedValues": [],
-      "tests": [],
-      "notes": "",
+      "tests": [
+        "packages/pulp-react/test/prop-applier-edges.test.ts"
+      ],
+      "notes": "pulp #1434 cross-surface mega-batch — per-edge accepts number, percent string, auto.",
       "issue": ""
     },
     "rn/marginEnd": {
@@ -3545,35 +3553,45 @@
       "status": "supported",
       "mapsTo": "prop-applier.ts: marginHorizontal -> setFlex(margin_left) + setFlex(margin_right)",
       "supportedValues": [
-        "number"
+        "number (px)",
+        "percent string (\"5%\")",
+        "auto"
       ],
       "unsupportedValues": [],
       "tests": [
         "packages/pulp-react/test/prop-applier-rn-aliases.test.ts"
       ],
-      "notes": "pulp #1434 batch 4: RN shorthand fans out to the per-edge bridge setters at the @pulp/react entry point.",
+      "notes": "pulp #1434 cross-surface mega-batch — alias fans out to per-edge keys; same value coverage as the per-edge entries.",
       "issue": ""
     },
     "rn/marginLeft": {
       "status": "supported",
-      "mapsTo": "setFlex(id, 'margin_left', n)",
+      "mapsTo": "@pulp/react prop-applier passes number | string verbatim to setFlex(margin_*); bridge routes via dim_margin_*.unit. (cross-surface mega-batch)",
       "supportedValues": [
-        "number"
+        "number (px)",
+        "percent string (\"50%\")",
+        "auto"
       ],
       "unsupportedValues": [],
-      "tests": [],
-      "notes": "",
+      "tests": [
+        "packages/pulp-react/test/prop-applier-edges.test.ts"
+      ],
+      "notes": "pulp #1434 cross-surface mega-batch — per-edge accepts number, percent string, auto.",
       "issue": ""
     },
     "rn/marginRight": {
       "status": "supported",
-      "mapsTo": "setFlex(id, 'margin_right', n)",
+      "mapsTo": "@pulp/react prop-applier passes number | string verbatim to setFlex(margin_*); bridge routes via dim_margin_*.unit. (cross-surface mega-batch)",
       "supportedValues": [
-        "number"
+        "number (px)",
+        "percent string (\"50%\")",
+        "auto"
       ],
       "unsupportedValues": [],
-      "tests": [],
-      "notes": "",
+      "tests": [
+        "packages/pulp-react/test/prop-applier-edges.test.ts"
+      ],
+      "notes": "pulp #1434 cross-surface mega-batch — per-edge accepts number, percent string, auto.",
       "issue": ""
     },
     "rn/marginStart": {
@@ -3589,26 +3607,32 @@
     },
     "rn/marginTop": {
       "status": "supported",
-      "mapsTo": "setFlex(id, 'margin_top', n)",
+      "mapsTo": "@pulp/react prop-applier passes number | string verbatim to setFlex(margin_*); bridge routes via dim_margin_*.unit. (cross-surface mega-batch)",
       "supportedValues": [
-        "number"
+        "number (px)",
+        "percent string (\"50%\")",
+        "auto"
       ],
       "unsupportedValues": [],
-      "tests": [],
-      "notes": "",
+      "tests": [
+        "packages/pulp-react/test/prop-applier-edges.test.ts"
+      ],
+      "notes": "pulp #1434 cross-surface mega-batch — per-edge accepts number, percent string, auto.",
       "issue": ""
     },
     "rn/marginVertical": {
       "status": "supported",
       "mapsTo": "prop-applier.ts: marginVertical -> setFlex(margin_top) + setFlex(margin_bottom)",
       "supportedValues": [
-        "number"
+        "number (px)",
+        "percent string (\"5%\")",
+        "auto"
       ],
       "unsupportedValues": [],
       "tests": [
         "packages/pulp-react/test/prop-applier-rn-aliases.test.ts"
       ],
-      "notes": "pulp #1434 batch 4: RN shorthand fans out to the per-edge bridge setters at the @pulp/react entry point.",
+      "notes": "pulp #1434 cross-surface mega-batch — alias fans out to per-edge keys; same value coverage as the per-edge entries.",
       "issue": ""
     },
     "rn/maxHeight": {
@@ -3766,13 +3790,16 @@
     },
     "rn/paddingBottom": {
       "status": "supported",
-      "mapsTo": "setFlex(id, 'padding_bottom', n)",
+      "mapsTo": "@pulp/react prop-applier passes number | string verbatim to setFlex(padding_*); bridge routes via dim_padding_*.unit.",
       "supportedValues": [
-        "number"
+        "number (px)",
+        "percent string (\"50%\")"
       ],
       "unsupportedValues": [],
-      "tests": [],
-      "notes": "",
+      "tests": [
+        "packages/pulp-react/test/prop-applier-edges.test.ts"
+      ],
+      "notes": "pulp #1434 cross-surface mega-batch — accepts number (px) or percent string. RN spec also lists `auto` for padding but it is inexpressible (Yoga has no padding-auto API).",
       "issue": ""
     },
     "rn/paddingEnd": {
@@ -3790,35 +3817,42 @@
       "status": "supported",
       "mapsTo": "prop-applier.ts: paddingHorizontal -> setFlex(padding_left) + setFlex(padding_right)",
       "supportedValues": [
-        "number"
+        "number (px)",
+        "percent string (\"5%\")"
       ],
       "unsupportedValues": [],
       "tests": [
         "packages/pulp-react/test/prop-applier-rn-aliases.test.ts"
       ],
-      "notes": "pulp #1434 batch 4: RN shorthand fans out to the per-edge bridge setters at the @pulp/react entry point.",
+      "notes": "pulp #1434 cross-surface mega-batch — alias fans out to per-edge keys; same value coverage as the per-edge entries.",
       "issue": ""
     },
     "rn/paddingLeft": {
       "status": "supported",
-      "mapsTo": "setFlex(id, 'padding_left', n)",
+      "mapsTo": "@pulp/react prop-applier passes number | string verbatim to setFlex(padding_*); bridge routes via dim_padding_*.unit.",
       "supportedValues": [
-        "number"
+        "number (px)",
+        "percent string (\"50%\")"
       ],
       "unsupportedValues": [],
-      "tests": [],
-      "notes": "",
+      "tests": [
+        "packages/pulp-react/test/prop-applier-edges.test.ts"
+      ],
+      "notes": "pulp #1434 cross-surface mega-batch — accepts number (px) or percent string. RN spec also lists `auto` for padding but it is inexpressible (Yoga has no padding-auto API).",
       "issue": ""
     },
     "rn/paddingRight": {
       "status": "supported",
-      "mapsTo": "setFlex(id, 'padding_right', n)",
+      "mapsTo": "@pulp/react prop-applier passes number | string verbatim to setFlex(padding_*); bridge routes via dim_padding_*.unit.",
       "supportedValues": [
-        "number"
+        "number (px)",
+        "percent string (\"50%\")"
       ],
       "unsupportedValues": [],
-      "tests": [],
-      "notes": "",
+      "tests": [
+        "packages/pulp-react/test/prop-applier-edges.test.ts"
+      ],
+      "notes": "pulp #1434 cross-surface mega-batch — accepts number (px) or percent string. RN spec also lists `auto` for padding but it is inexpressible (Yoga has no padding-auto API).",
       "issue": ""
     },
     "rn/paddingStart": {
@@ -3834,26 +3868,30 @@
     },
     "rn/paddingTop": {
       "status": "supported",
-      "mapsTo": "setFlex(id, 'padding_top', n)",
+      "mapsTo": "@pulp/react prop-applier passes number | string verbatim to setFlex(padding_*); bridge routes via dim_padding_*.unit.",
       "supportedValues": [
-        "number"
+        "number (px)",
+        "percent string (\"50%\")"
       ],
       "unsupportedValues": [],
-      "tests": [],
-      "notes": "",
+      "tests": [
+        "packages/pulp-react/test/prop-applier-edges.test.ts"
+      ],
+      "notes": "pulp #1434 cross-surface mega-batch — accepts number (px) or percent string. RN spec also lists `auto` for padding but it is inexpressible (Yoga has no padding-auto API).",
       "issue": ""
     },
     "rn/paddingVertical": {
       "status": "supported",
       "mapsTo": "prop-applier.ts: paddingVertical -> setFlex(padding_top) + setFlex(padding_bottom)",
       "supportedValues": [
-        "number"
+        "number (px)",
+        "percent string (\"5%\")"
       ],
       "unsupportedValues": [],
       "tests": [
         "packages/pulp-react/test/prop-applier-rn-aliases.test.ts"
       ],
-      "notes": "pulp #1434 batch 4: RN shorthand fans out to the per-edge bridge setters at the @pulp/react entry point.",
+      "notes": "pulp #1434 cross-surface mega-batch — alias fans out to per-edge keys; same value coverage as the per-edge entries.",
       "issue": ""
     },
     "rn/pointerEvents": {
@@ -4455,54 +4493,66 @@
     },
     "yoga/marginTop": {
       "status": "supported",
-      "mapsTo": "FlexStyle.margin_top",
+      "mapsTo": "setFlex(margin_top, N|\"NN%\"|\"auto\") routed via FlexStyle::dim_margin_top to YGNodeStyleSetMargin{,Percent,Auto}. yoga_layout.cpp dispatches on dim.unit (cross-surface mega-batch).",
       "supportedValues": [
-        "px"
-      ],
-      "unsupportedValues": [
+        "px",
+        "%",
         "auto"
       ],
-      "tests": [],
-      "notes": "",
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp::\"setFlex margin edges accept percent strings\"",
+        "test/test_widget_bridge.cpp::\"setFlex margin edges accept 'auto' keyword\""
+      ],
+      "notes": "pulp #1434 cross-surface mega-batch — per-edge accepts number, percent string, auto.",
       "issue": ""
     },
     "yoga/marginRight": {
       "status": "supported",
-      "mapsTo": "FlexStyle.margin_right",
+      "mapsTo": "setFlex(margin_right, N|\"NN%\"|\"auto\") routed via FlexStyle::dim_margin_right to YGNodeStyleSetMargin{,Percent,Auto}. yoga_layout.cpp dispatches on dim.unit (cross-surface mega-batch).",
       "supportedValues": [
-        "px"
-      ],
-      "unsupportedValues": [
+        "px",
+        "%",
         "auto"
       ],
-      "tests": [],
-      "notes": "",
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp::\"setFlex margin edges accept percent strings\"",
+        "test/test_widget_bridge.cpp::\"setFlex margin edges accept 'auto' keyword\""
+      ],
+      "notes": "pulp #1434 cross-surface mega-batch — per-edge accepts number, percent string, auto.",
       "issue": ""
     },
     "yoga/marginBottom": {
       "status": "supported",
-      "mapsTo": "FlexStyle.margin_bottom",
+      "mapsTo": "setFlex(margin_bottom, N|\"NN%\"|\"auto\") routed via FlexStyle::dim_margin_bottom to YGNodeStyleSetMargin{,Percent,Auto}. yoga_layout.cpp dispatches on dim.unit (cross-surface mega-batch).",
       "supportedValues": [
-        "px"
-      ],
-      "unsupportedValues": [
+        "px",
+        "%",
         "auto"
       ],
-      "tests": [],
-      "notes": "",
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp::\"setFlex margin edges accept percent strings\"",
+        "test/test_widget_bridge.cpp::\"setFlex margin edges accept 'auto' keyword\""
+      ],
+      "notes": "pulp #1434 cross-surface mega-batch — per-edge accepts number, percent string, auto.",
       "issue": ""
     },
     "yoga/marginLeft": {
       "status": "supported",
-      "mapsTo": "FlexStyle.margin_left",
+      "mapsTo": "setFlex(margin_left, N|\"NN%\"|\"auto\") routed via FlexStyle::dim_margin_left to YGNodeStyleSetMargin{,Percent,Auto}. yoga_layout.cpp dispatches on dim.unit (cross-surface mega-batch).",
       "supportedValues": [
-        "px"
-      ],
-      "unsupportedValues": [
+        "px",
+        "%",
         "auto"
       ],
-      "tests": [],
-      "notes": "",
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp::\"setFlex margin edges accept percent strings\"",
+        "test/test_widget_bridge.cpp::\"setFlex margin edges accept 'auto' keyword\""
+      ],
+      "notes": "pulp #1434 cross-surface mega-batch — per-edge accepts number, percent string, auto.",
       "issue": ""
     },
     "yoga/marginStart": {
@@ -4531,30 +4581,30 @@
       "status": "supported",
       "mapsTo": "translator fan-out -> FlexStyle.margin_left + FlexStyle.margin_right (web-compat-style-decl.js + prop-applier.ts)",
       "supportedValues": [
-        "px"
-      ],
-      "unsupportedValues": [
+        "number (px)",
+        "percent string (\"5%\")",
         "auto"
       ],
+      "unsupportedValues": [],
       "tests": [
         "packages/pulp-react/test/prop-applier-rn-aliases.test.ts"
       ],
-      "notes": "pulp #1434 batch 4: RN shorthand. No dedicated FlexStyle field; the JS-side translators (DOM-lite + @pulp/react) decompose to the existing per-edge slots before reaching the bridge. Inherits the per-edge yoga gap on auto (same as yoga/marginLeft).",
+      "notes": "pulp #1434 cross-surface mega-batch — alias fans out to per-edge keys; same value coverage as the per-edge entries.",
       "issue": ""
     },
     "yoga/marginVertical": {
       "status": "supported",
       "mapsTo": "translator fan-out -> FlexStyle.margin_top + FlexStyle.margin_bottom (web-compat-style-decl.js + prop-applier.ts)",
       "supportedValues": [
-        "px"
-      ],
-      "unsupportedValues": [
+        "number (px)",
+        "percent string (\"5%\")",
         "auto"
       ],
+      "unsupportedValues": [],
       "tests": [
         "packages/pulp-react/test/prop-applier-rn-aliases.test.ts"
       ],
-      "notes": "pulp #1434 batch 4: RN shorthand. No dedicated FlexStyle field; the JS-side translators (DOM-lite + @pulp/react) decompose to the existing per-edge slots before reaching the bridge. Inherits the per-edge yoga gap on auto (same as yoga/marginTop).",
+      "notes": "pulp #1434 cross-surface mega-batch — alias fans out to per-edge keys; same value coverage as the per-edge entries.",
       "issue": ""
     },
     "yoga/padding": {
@@ -4572,54 +4622,58 @@
     },
     "yoga/paddingTop": {
       "status": "supported",
-      "mapsTo": "FlexStyle.padding_top",
+      "mapsTo": "setFlex(padding_top, N|\"NN%\") routed via FlexStyle::dim_padding_top to YGNodeStyleSetPadding{,Percent}. Yoga has no padding-auto API.",
       "supportedValues": [
-        "px"
-      ],
-      "unsupportedValues": [
+        "px",
         "%"
       ],
-      "tests": [],
-      "notes": "",
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp::\"setFlex padding edges accept percent strings\""
+      ],
+      "notes": "pulp #1434 cross-surface mega-batch — Yoga padding accepts px and percent. `auto` is a Yoga-side gap (Yoga has no YGNodeStyleSetPaddingAuto API).",
       "issue": ""
     },
     "yoga/paddingRight": {
       "status": "supported",
-      "mapsTo": "FlexStyle.padding_right",
+      "mapsTo": "setFlex(padding_right, N|\"NN%\") routed via FlexStyle::dim_padding_right to YGNodeStyleSetPadding{,Percent}. Yoga has no padding-auto API.",
       "supportedValues": [
-        "px"
-      ],
-      "unsupportedValues": [
+        "px",
         "%"
       ],
-      "tests": [],
-      "notes": "",
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp::\"setFlex padding edges accept percent strings\""
+      ],
+      "notes": "pulp #1434 cross-surface mega-batch — Yoga padding accepts px and percent. `auto` is a Yoga-side gap (Yoga has no YGNodeStyleSetPaddingAuto API).",
       "issue": ""
     },
     "yoga/paddingBottom": {
       "status": "supported",
-      "mapsTo": "FlexStyle.padding_bottom",
+      "mapsTo": "setFlex(padding_bottom, N|\"NN%\") routed via FlexStyle::dim_padding_bottom to YGNodeStyleSetPadding{,Percent}. Yoga has no padding-auto API.",
       "supportedValues": [
-        "px"
-      ],
-      "unsupportedValues": [
+        "px",
         "%"
       ],
-      "tests": [],
-      "notes": "",
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp::\"setFlex padding edges accept percent strings\""
+      ],
+      "notes": "pulp #1434 cross-surface mega-batch — Yoga padding accepts px and percent. `auto` is a Yoga-side gap (Yoga has no YGNodeStyleSetPaddingAuto API).",
       "issue": ""
     },
     "yoga/paddingLeft": {
       "status": "supported",
-      "mapsTo": "FlexStyle.padding_left",
+      "mapsTo": "setFlex(padding_left, N|\"NN%\") routed via FlexStyle::dim_padding_left to YGNodeStyleSetPadding{,Percent}. Yoga has no padding-auto API.",
       "supportedValues": [
-        "px"
-      ],
-      "unsupportedValues": [
+        "px",
         "%"
       ],
-      "tests": [],
-      "notes": "",
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp::\"setFlex padding edges accept percent strings\""
+      ],
+      "notes": "pulp #1434 cross-surface mega-batch — Yoga padding accepts px and percent. `auto` is a Yoga-side gap (Yoga has no YGNodeStyleSetPaddingAuto API).",
       "issue": ""
     },
     "yoga/paddingStart": {
@@ -4648,30 +4702,28 @@
       "status": "supported",
       "mapsTo": "translator fan-out -> FlexStyle.padding_left + FlexStyle.padding_right (web-compat-style-decl.js + prop-applier.ts)",
       "supportedValues": [
-        "px"
+        "number (px)",
+        "percent string (\"5%\")"
       ],
-      "unsupportedValues": [
-        "%"
-      ],
+      "unsupportedValues": [],
       "tests": [
         "packages/pulp-react/test/prop-applier-rn-aliases.test.ts"
       ],
-      "notes": "pulp #1434 batch 4: RN shorthand. No dedicated FlexStyle field; the JS-side translators (DOM-lite + @pulp/react) decompose to the existing per-edge slots before reaching the bridge. Inherits the per-edge yoga gap on % (same as yoga/paddingLeft).",
+      "notes": "pulp #1434 cross-surface mega-batch — alias fans out to per-edge keys; same value coverage as the per-edge entries.",
       "issue": ""
     },
     "yoga/paddingVertical": {
       "status": "supported",
       "mapsTo": "translator fan-out -> FlexStyle.padding_top + FlexStyle.padding_bottom (web-compat-style-decl.js + prop-applier.ts)",
       "supportedValues": [
-        "px"
+        "number (px)",
+        "percent string (\"5%\")"
       ],
-      "unsupportedValues": [
-        "%"
-      ],
+      "unsupportedValues": [],
       "tests": [
         "packages/pulp-react/test/prop-applier-rn-aliases.test.ts"
       ],
-      "notes": "pulp #1434 batch 4: RN shorthand. No dedicated FlexStyle field; the JS-side translators (DOM-lite + @pulp/react) decompose to the existing per-edge slots before reaching the bridge. Inherits the per-edge yoga gap on % (same as yoga/paddingTop).",
+      "notes": "pulp #1434 cross-surface mega-batch — alias fans out to per-edge keys; same value coverage as the per-edge entries.",
       "issue": ""
     },
     "yoga/borderWidth": {

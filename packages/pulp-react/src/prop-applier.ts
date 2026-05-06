@@ -381,15 +381,22 @@ function applyOne(id: string, type: string, key: string, value: unknown, props?:
         case 'rowGap':          return call('setFlex', id, 'row_gap', value as number);
         case 'columnGap':       return call('setFlex', id, 'column_gap', value as number);
         case 'padding':         return call('setFlex', id, 'padding', value as number);
-        case 'paddingTop':      return call('setFlex', id, 'padding_top', value as number);
-        case 'paddingRight':    return call('setFlex', id, 'padding_right', value as number);
-        case 'paddingBottom':   return call('setFlex', id, 'padding_bottom', value as number);
-        case 'paddingLeft':     return call('setFlex', id, 'padding_left', value as number);
+        // pulp #1434 (cross-surface mega-batch) — per-edge padding accepts
+        // either a number (px) or a percent string ('5%' → percent of
+        // parent main-axis size). Yoga padding does NOT support 'auto'.
+        case 'paddingTop':      return call('setFlex', id, 'padding_top',    value as number | string);
+        case 'paddingRight':    return call('setFlex', id, 'padding_right',  value as number | string);
+        case 'paddingBottom':   return call('setFlex', id, 'padding_bottom', value as number | string);
+        case 'paddingLeft':     return call('setFlex', id, 'padding_left',   value as number | string);
         case 'margin':          return call('setFlex', id, 'margin', value as number);
-        case 'marginTop':       return call('setFlex', id, 'margin_top', value as number);
-        case 'marginRight':     return call('setFlex', id, 'margin_right', value as number);
-        case 'marginBottom':    return call('setFlex', id, 'margin_bottom', value as number);
-        case 'marginLeft':      return call('setFlex', id, 'margin_left', value as number);
+        // pulp #1434 (cross-surface mega-batch) — per-edge margin accepts
+        // a number (px), percent string ('5%'), or the keyword 'auto'
+        // (Yoga's YGNodeStyleSetMarginAuto — used for centering with
+        // marginLeft:'auto' + marginRight:'auto').
+        case 'marginTop':       return call('setFlex', id, 'margin_top',    value as number | string);
+        case 'marginRight':     return call('setFlex', id, 'margin_right',  value as number | string);
+        case 'marginBottom':    return call('setFlex', id, 'margin_bottom', value as number | string);
+        case 'marginLeft':      return call('setFlex', id, 'margin_left',   value as number | string);
         // pulp #1434 batch 4 — React Native shorthand aliases. RN code
         // commonly writes `style={{ marginHorizontal: 8 }}` and expects
         // it to fan out to marginLeft + marginRight on the underlying
@@ -398,21 +405,25 @@ function applyOne(id: string, type: string, key: string, value: unknown, props?:
         // setters so the value reaches the same FlexStyle slot whether
         // it arrived through this alias or through the explicit edge
         // prop. No FlexStyle field change required.
+        // pulp #1434 cross-surface mega-batch — RN aliases now forward
+        // percent strings (and 'auto' for margin) through the per-edge
+        // fan-out. The per-edge keys `margin_*` / `padding_*` accept
+        // number | string at the bridge boundary.
         case 'marginHorizontal':
-            call('setFlex', id, 'margin_left', value as number);
-            call('setFlex', id, 'margin_right', value as number);
+            call('setFlex', id, 'margin_left',  value as number | string);
+            call('setFlex', id, 'margin_right', value as number | string);
             return;
         case 'marginVertical':
-            call('setFlex', id, 'margin_top', value as number);
-            call('setFlex', id, 'margin_bottom', value as number);
+            call('setFlex', id, 'margin_top',    value as number | string);
+            call('setFlex', id, 'margin_bottom', value as number | string);
             return;
         case 'paddingHorizontal':
-            call('setFlex', id, 'padding_left', value as number);
-            call('setFlex', id, 'padding_right', value as number);
+            call('setFlex', id, 'padding_left',  value as number | string);
+            call('setFlex', id, 'padding_right', value as number | string);
             return;
         case 'paddingVertical':
-            call('setFlex', id, 'padding_top', value as number);
-            call('setFlex', id, 'padding_bottom', value as number);
+            call('setFlex', id, 'padding_top',    value as number | string);
+            call('setFlex', id, 'padding_bottom', value as number | string);
             return;
         case 'flexGrow':        return call('setFlex', id, 'flex_grow', value as number);
         case 'flexShrink':      return call('setFlex', id, 'flex_shrink', value as number);

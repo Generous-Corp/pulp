@@ -186,6 +186,23 @@ struct FlexStyle {
     Dimension dim_max_height;
     Dimension dim_flex_basis;
 
+    /// pulp #1434 (cross-surface mega-batch) — per-edge margin / padding
+    /// accept percent strings (and `auto` for margin only). Mirrors the
+    /// width/height (#1426) and top/right/bottom/left (#1451) percent
+    /// patterns. yoga_layout.cpp dispatches on `dim_*.unit` to
+    /// `YGNodeStyleSetMargin{Percent,Auto}` /
+    /// `YGNodeStyleSetPaddingPercent` for the non-px paths. Yoga's
+    /// padding does not support `auto` (only margin does — see Yoga
+    /// docs), so the bridge rejects `auto` on padding edges.
+    Dimension dim_margin_top;
+    Dimension dim_margin_right;
+    Dimension dim_margin_bottom;
+    Dimension dim_margin_left;
+    Dimension dim_padding_top;
+    Dimension dim_padding_right;
+    Dimension dim_padding_bottom;
+    Dimension dim_padding_left;
+
     /// Resolve viewport-relative dimensions and apply to float fields.
     /// Call before layout pass with the viewport size.
     void resolve_dimensions(float parent_w, float parent_h,

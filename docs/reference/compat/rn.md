@@ -27,6 +27,22 @@ Spec walk:
 
 ## Recently changed
 
+- **2026-05-05 (pulp #1434 cross-surface mega-batch)** — per-edge
+  `margin{Top,Right,Bottom,Left}` and `padding{Top,Right,Bottom,Left}`
+  on the `@pulp/react` JSX surface now accept `number | string`
+  rather than just `number`: numeric values are still px, but
+  percent strings (`'5%'`) and `'auto'` (margin only) now flow
+  through. The RN-style shorthand aliases (`marginHorizontal` /
+  `marginVertical` / `paddingHorizontal` / `paddingVertical`) accept
+  the same broadened type. Bridge dispatch routes through
+  `FlexStyle::dim_margin_*` / `dim_padding_*` to Yoga's
+  `YGNodeStyleSetMargin{Percent,Auto}` /
+  `YGNodeStyleSetPaddingPercent` APIs. Yoga's padding has no `auto`
+  API. RN exports / Figma transition states / v0.dev hero margins
+  using `'auto'` for centering or percent for fluid layouts now
+  port verbatim. Catalog accuracy update — these entries were PASS
+  already, but `supportedValues` now correctly enumerates the
+  broadened type vocabulary.
 - **2026-05-05 (pulp #1434 Triage #9)** — `rn/transform` now accepts
   the RN array-of-objects shape:
   ```js
