@@ -16,6 +16,10 @@ curl -fsSL https://www.generouscorp.com/pulp/install.sh | sh
 irm https://www.generouscorp.com/pulp/install.ps1 | iex
 ```
 
+The installer installs Pulp CLI artifacts only. It does not install Shipyard
+or GitHub CLI (`gh`); ordinary Pulp users do not need either tool to create,
+build, run, or upgrade a plugin project.
+
 Then create your first plugin:
 
 ```bash

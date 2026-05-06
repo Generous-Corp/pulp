@@ -2,6 +2,20 @@
 
 Pulp includes a Claude Code plugin that provides commands, skills, and hooks for the full audio plugin development lifecycle. If you're using Claude Code, we highly recommend installing it.
 
+## CLI expectations
+
+As of Pulp v0.78.1, the user-facing `pulp` CLI is the Rust binary. Source
+builds produce `./build/pulp`, while release installers place `pulp` and the
+C++ fallthrough delegate `pulp-cpp` side by side. Slash commands and skills
+should use `pulp` on PATH, or `./build/pulp` inside a source build. Use
+`pulp-cpp` only for rollback/debug comparisons.
+
+For PR/shipping workflows, agents and humans should use `shipyard pr`. Direct
+`gh pr create` is a manual bypass only because it can leave the PR outside
+Shipyard-managed tracking state. `pulp pr` defaults to Shipyard, while
+`pulp config set pr.workflow github` and `manual` are explicit local opt-outs
+for humans who do not want Shipyard in their checkout.
+
 ## Installation
 
 ### From a local clone (current method)
@@ -57,7 +71,7 @@ Skills activate automatically based on context. You don't need to invoke them ex
 
 | Skill | Activates when you... |
 |-------|-----------------------|
-| **ci** | Say "ship this", "create a PR", "run CI", "merge to main" — uses Shipyard for cross-platform validation (macOS + Linux + Windows) |
+| **ci** | Say "ship this", "create a PR", "run CI", "merge to main" — uses `shipyard pr` for PR creation, tracking, cross-platform validation, and merge-on-green |
 | **engine** | Ask about JS engines, Three.js performance, switching to V8/JSC |
 | **import-design** | Want to import a design from Figma or other tools |
 | **webview-ui** | Want to build a WebView-based UI panel |

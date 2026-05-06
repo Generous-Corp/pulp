@@ -23,8 +23,8 @@ Canonical command surface for this slash-command: `pulp version`
 ```bash
 if command -v pulp >/dev/null 2>&1; then
     sdk_version=$(pulp version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
-elif [ -x ./build/tools/cli/pulp ]; then
-    sdk_version=$(./build/tools/cli/pulp version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+elif [ -x ./build/pulp ]; then
+    sdk_version=$(./build/pulp version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
 else
     sdk_version=$(grep -E "project\(Pulp VERSION" CMakeLists.txt | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
 fi

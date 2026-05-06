@@ -197,6 +197,62 @@ TEST_CASE("pulp config <unknown-subcommand> exits non-zero with a diagnostic",
     REQUIRE(r.stderr_output.find("Unknown config subcommand") != std::string::npos);
 }
 
+TEST_CASE("pulp config supports pr.workflow",
+          "[cli][shellout][pr-workflow]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    auto tmp_home = unique_temp_dir("pulp-pr-workflow-config");
+    fs::create_directories(tmp_home);
+    pulp_setenv("PULP_HOME", tmp_home.string().c_str(), 1);
+    pulp_setenv("PULP_UPDATE_CHECK_DISABLED", "1", 1);
+
+    auto set = run_pulp({"config", "set", "pr.workflow", "github"});
+    auto get = run_pulp({"config", "get", "pr.workflow"});
+    auto list = run_pulp({"config", "list"});
+    auto bad = run_pulp({"config", "set", "pr.workflow", "svn"});
+
+    pulp_unsetenv("PULP_UPDATE_CHECK_DISABLED");
+    pulp_unsetenv("PULP_HOME");
+    fs::remove_all(tmp_home);
+
+    REQUIRE_FALSE(set.timed_out);
+    REQUIRE(set.exit_code == 0);
+    REQUIRE_FALSE(get.timed_out);
+    REQUIRE(get.exit_code == 0);
+    REQUIRE(get.stdout_output.find("github") != std::string::npos);
+    REQUIRE_FALSE(list.timed_out);
+    REQUIRE(list.exit_code == 0);
+    REQUIRE(list.stdout_output.find("pr.workflow = github") != std::string::npos);
+    REQUIRE_FALSE(bad.timed_out);
+    REQUIRE(bad.exit_code != 0);
+    REQUIRE(bad.stderr_output.find("pr.workflow must be one of") != std::string::npos);
+}
+
+TEST_CASE("pulp status reports effective PR workflow",
+          "[cli][shellout][pr-workflow]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    auto tmp_home = unique_temp_dir("pulp-pr-workflow-status");
+    fs::create_directories(tmp_home);
+    {
+        std::ofstream cfg(tmp_home / "config.toml");
+        cfg << "[pr]\nworkflow = \"manual\"\n"
+            << "[update]\nmode = \"off\"\n";
+    }
+
+    pulp_setenv("PULP_HOME", tmp_home.string().c_str(), 1);
+    pulp_setenv("PULP_UPDATE_CHECK_DISABLED", "1", 1);
+    auto r = run_pulp({"status"});
+    pulp_unsetenv("PULP_UPDATE_CHECK_DISABLED");
+    pulp_unsetenv("PULP_HOME");
+    fs::remove_all(tmp_home);
+
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(r.stdout_output.find("PR workflow: manual (config:pr.workflow)") != std::string::npos);
+    REQUIRE(r.stdout_output.find("Shipyard tracking: disabled by pr.workflow=manual") != std::string::npos);
+}
+
 TEST_CASE("pulp version subcommand runs and mentions the SDK",
           "[cli][shellout][version]") {
     if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
@@ -1085,6 +1141,38 @@ TEST_CASE("pulp pr without shipyard prints install guidance",
     REQUIRE(combined.find("shipyard is not on PATH") != std::string::npos);
     REQUIRE(combined.find("./tools/install-shipyard.sh") != std::string::npos);
     REQUIRE(combined.find("pulp pr --native") != std::string::npos);
+}
+
+TEST_CASE("pulp pr github workflow requires gh instead of falling back from shipyard",
+          "[cli][shellout][pr][pr-workflow]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    ScopedEnvVar path("PATH");
+    ScopedEnvVar workflow("PULP_PR_WORKFLOW");
+    path.set("");
+    workflow.set("github");
+
+    auto r = run_pulp({"pr"});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 2);
+
+    auto combined = r.stdout_output + r.stderr_output;
+    REQUIRE(combined.find("GitHub CLI (`gh`) is not on PATH") != std::string::npos);
+    REQUIRE(combined.find("shipyard is not on PATH") == std::string::npos);
+}
+
+TEST_CASE("pulp pr manual workflow does not require shipyard",
+          "[cli][shellout][pr][pr-workflow]") {
+    if (!binary_exists()) { SUCCEED("skipped: pulp not built"); return; }
+
+    ScopedEnvVar path("PATH");
+    path.set("");
+
+    auto r = run_pulp({"pr", "--workflow", "manual", "--help"});
+    REQUIRE_FALSE(r.timed_out);
+    REQUIRE(r.exit_code == 0);
+    REQUIRE(r.stdout_output.find("Usage: pulp pr [options]") != std::string::npos);
+    REQUIRE(r.stderr_output.find("shipyard is not on PATH") == std::string::npos);
 }
 
 TEST_CASE("pulp pr native help stays available without shipyard",

@@ -16,6 +16,62 @@
 #include <pulp/platform/win32_sane.hpp>
 #endif
 
+namespace {
+
+void print_pr_workflow_status(const fs::path& root, bool source_tree_mode) {
+    auto workflow = resolve_pr_workflow();
+    if (!workflow.error.empty()) {
+        std::cout << "PR workflow: invalid (" << workflow.source << ")\n";
+        std::cout << "PR workflow detail: " << workflow.error << "\n";
+        return;
+    }
+
+    if (!source_tree_mode) {
+        std::cout << "PR workflow: project-owned (Pulp source ship flow not active)\n";
+        return;
+    }
+
+    std::cout << "PR workflow: " << workflow.workflow << " (" << workflow.source << ")\n";
+
+    if (workflow.workflow == "shipyard") {
+        auto shipyard = find_executable_in_path("shipyard");
+        auto pinned = read_pinned_shipyard_version(root);
+        if (shipyard.empty()) {
+            std::cout << "Shipyard: missing (run `./tools/install-shipyard.sh` in this checkout)\n";
+            if (!pinned.empty()) {
+                std::cout << "Shipyard pinned: " << pinned << "\n";
+            }
+            return;
+        }
+
+        auto actual = capture_shipyard_version(shipyard);
+        std::cout << "Shipyard: " << shipyard;
+        if (!actual.empty()) std::cout << " (" << actual << ")";
+        if (!pinned.empty()) {
+            std::cout << " pinned " << pinned;
+            if (!actual.empty() && actual != pinned) std::cout << " [pin mismatch]";
+        }
+        std::cout << "\n";
+        return;
+    }
+
+    if (workflow.workflow == "github") {
+        auto gh = find_executable_in_path("gh");
+        if (gh.empty()) {
+            std::cout << "GitHub CLI: missing (`gh` required for github workflow)\n";
+        } else {
+            std::cout << "GitHub CLI: " << gh << "\n";
+        }
+        std::cout << "Shipyard tracking: disabled by pr.workflow=github\n";
+        return;
+    }
+
+    std::cout << "PR automation: manual (no push or PR creation by `pulp pr`)\n";
+    std::cout << "Shipyard tracking: disabled by pr.workflow=manual\n";
+}
+
+}  // namespace
+
 // ── cmd_test ────────────────────────────────────────────────────────────────
 
 int cmd_test(const std::vector<std::string>& args) {
@@ -83,6 +139,7 @@ int cmd_status([[maybe_unused]] const std::vector<std::string>& args) {
     } else {
         std::cout << "Build: not configured (run `pulp build`)\n";
     }
+    print_pr_workflow_status(root, !standalone_mode);
 
     if (standalone_mode) {
         const auto version = read_sdk_version(root);
@@ -306,4 +363,3 @@ int cmd_cache(const std::vector<std::string>& args) {
     std::cerr << "Run `pulp cache` for usage.\n";
     return 1;
 }
-

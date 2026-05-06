@@ -130,7 +130,7 @@ For full design + recommended branch protection see
 
 ## Shipyard stage
 
-`tools/shipyard.toml` gains a `version-skill-check` stage that mirrors the CI workflow. This keeps `shipyard ship` (the primary merge path) in lockstep with GitHub Actions.
+`tools/shipyard.toml` gains a `version-skill-check` stage that mirrors the CI workflow. This keeps `shipyard pr` (the primary PR/shipping path) in lockstep with GitHub Actions.
 
 Note: **Shipyard configuration changes** (the `tools/shipyard.toml` file itself, `tools/install-shipyard.sh`, and everything under `.github/workflows/`) are mapped to the `ci` skill in `skill_path_map.json`. That means editing the merge workflow automatically demands a `ci` SKILL.md review — the skill-sync gate catches shipyard-config drift the same way it catches subsystem-code drift.
 
@@ -138,16 +138,16 @@ Note: **Shipyard configuration changes** (the `tools/shipyard.toml` file itself,
 
 ## "Push a PR" — the one-command path
 
-Typing `pulp pr` (or saying "push a PR" / "ship this" / "we're done" to an agent configured with this policy in `CLAUDE.md`) runs the full pipeline:
+Typing `shipyard pr` (or saying "push a PR" / "ship this" / "we're done" to an agent configured with this policy in `CLAUDE.md`) runs the full pipeline:
 
 1. `skill_sync_check.py --mode=report` — hard-fails here if a mapped path is touched without a SKILL.md update. The only reason to bounce back to you is to add a gotcha or a bypass trailer.
 2. `version_bump_check.py --mode=apply` — applies the required bump(s) to `CMakeLists.txt` / `plugin.json` / `marketplace.json`, staging them. Appends a CHANGELOG stub.
 3. `git commit` — single "chore: bump ..." commit.
-4. `gh pr create` — PR body auto-populated with the bump verdict.
-5. `shipyard ship` — cross-platform validation + merge on green.
+4. Branch push + PR creation + Shipyard state recording.
+5. Cross-platform validation + merge on green.
 6. On merge, `.github/workflows/auto-release.yml` diffs the version files against the previous push, creates the matching tag(s), and the existing tag-triggered release workflows publish binaries.
 
-Never type `gh pr create` + `shipyard ship` separately. Never run the version-bump scripts by hand unless debugging.
+Never type `gh pr create` + `shipyard ship` separately. Never run the version-bump scripts by hand unless debugging. Direct `gh pr create` is a manual bypass only and can leave a PR outside Shipyard's tracked state until reconciled.
 
 ---
 
@@ -187,7 +187,7 @@ Two artifacts have to stay in lockstep after every release: the **GitHub Release
 
 **Division of labor:**
 
-- **Shipyard** — pre-merge. Runs `shipyard ship` to validate + merge PRs on green across macOS + Linux + Windows. Stops when the PR lands on main. Does not touch tags, CHANGELOG.md, or the Release page.
+- **Shipyard** — pre-merge. Runs `shipyard pr` to create/track PRs, validate, and merge on green across macOS + Linux + Windows. Stops when the PR lands on main. Does not touch tags, CHANGELOG.md, or the Release page.
 - **Pulp's `.github/workflows/auto-release.yml`** — post-merge. On push to main, diffs version files and, if an SDK version moved, creates the `vX.Y.Z` tag. CHANGELOG regeneration is handled separately by `post-tag-sync.yml` (below) so binary builds and docs sync can fail independently.
 - **Shipyard's `.github/workflows/post-tag-sync.yml`** — post-tag (installed by `shipyard release-bot hook install`). On tag push, runs `shipyard changelog regenerate` to rewrite `CHANGELOG.md`, commits as `pulp-release-bot` with `[skip ci]` and the three bypass trailers, and pushes back to main (rebase-retry loop handles races).
 - **Pulp's `.github/workflows/release-cli.yml`** — post-tag. On `vX.Y.Z` push, builds binaries and creates the GitHub Release with body populated via `shipyard changelog regenerate --release-notes vX.Y.Z` (same generator as `CHANGELOG.md`, so the two cannot drift).
@@ -195,7 +195,7 @@ Two artifacts have to stay in lockstep after every release: the **GitHub Release
 **End-to-end sequence:**
 
 ```
-pulp pr  (shipyard ship merges the bump PR on green)
+shipyard pr  (Shipyard merges the bump PR on green)
        ↓
 auto-release.yml  (diffs version files, pushes vX.Y.Z tag)
        ↓

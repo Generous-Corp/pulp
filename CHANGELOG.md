@@ -9,6 +9,8 @@ to its [GitHub Release](https://github.com/danielraffel/pulp/releases).
      docs/guides/versioning.md § Release pipeline for the full end-to-end flow. -->
 
 <a id="v0781"></a>
+## [0.29.0]
+
 ## [0.78.1] - 2026-05-05
 
 - fix(cli): bake SDK version into Rust release binary ([#1466](https://github.com/danielraffel/pulp/pull/1466))
