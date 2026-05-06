@@ -495,13 +495,13 @@ project/build-cache shellout path. The refreshed branch remains
 unpushed and undispatched; #1274 still points at the old remote head
 until Namespace capacity returns.
 Additional #643 CLI audio progress is refreshed locally as
-`feature/phase3-cli-audio-command-coverage-643` at `87699869`, rebased
+`feature/phase3-cli-audio-command-coverage-643` at `490b4a36`, rebased
 from the paused #1287 remote head `cb0a4acb` onto current `origin/main`
 `50ff5822` after superseding local refresh `353a6afd` on `0447498e`,
 then onto current `origin/main` `b7ec8f08`, then onto current
 `origin/main` `cf5ea658`, then onto current `origin/main` `24047ba3`,
 then onto current `origin/main` `7e9795b4`, then onto current
-`origin/main` `df01f4f6`,
+`origin/main` `df01f4f6`, then onto current `origin/main` `42bacd19`,
 covering deterministic
 `pulp audio` usage/parser errors and
 missing-bundle JSON behavior through real CLI shellout tests. The
