@@ -5090,6 +5090,88 @@ TEST_CASE("border-style: none short-circuits the stroke",
     }
 }
 
+// ── pulp #1434 — canvasSetFontFull bridge fn ─────────────────────────────
+//
+// The Canvas2D shim's full CSS font shorthand parser dispatches through
+// `canvasSetFontFull(id, family, size, weight, slant, letterSpacing)`.
+// Cover the bridge fn directly to lock in the recorded
+// CanvasDrawCmd::set_font_full payload field-for-field, independent of
+// the JS-side parse layer covered in test_canvas2d_shim.cpp.
+TEST_CASE("WidgetBridge canvasSetFontFull records weight/slant verbatim",
+          "[view][bridge][canvas][issue-1434]") {
+    // Drive the bridge fn directly (bypassing the JS parser) and assert
+    // the recorded CanvasDrawCmd carries the full payload.
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        var c = document.createElement('canvas');
+        c.id = 'font-full-canvas';
+        c.width = 100; c.height = 50;
+        document.body.appendChild(c);
+        // Bypass the JS parser — call the bridge fn directly with each
+        // payload field so the recorded CanvasDrawCmd round-trips
+        // verbatim.
+        canvasSetFontFull(c._id, 'Inter', 18.0, 700, 1, 0.5);
+    )");
+
+    auto* canvas = canvasFromBridge(bridge, engine, "font-full-canvas");
+    REQUIRE(canvas != nullptr);
+    REQUIRE(canvas->command_count() == 1);
+
+    const auto& cmd = canvas->commands().front();
+    REQUIRE(cmd.type == pulp::view::CanvasDrawCmd::Type::set_font_full);
+    REQUIRE(cmd.text == "Inter");
+    REQUIRE_THAT(cmd.extra, WithinAbs(18.0f, 1e-5f));   // size
+    REQUIRE_THAT(cmd.x,     WithinAbs(700.0f, 1e-5f));  // weight
+    REQUIRE_THAT(cmd.y,     WithinAbs(1.0f, 1e-5f));    // slant=italic
+    REQUIRE_THAT(cmd.x2,    WithinAbs(0.5f, 1e-5f));    // letter_spacing
+}
+
+TEST_CASE("WidgetBridge canvasSetFontFull replays through Canvas::set_font_full",
+          "[view][bridge][canvas][issue-1434]") {
+    // Drive a CanvasWidget paint onto a RecordingCanvas and assert the
+    // backend received both the legacy set_font (back-compat) AND the
+    // rich set_font_full carrying weight/slant. RecordingCanvas's
+    // set_font_full override emits both per the existing #927 contract.
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        var c = document.createElement('canvas');
+        c.id = 'font-full-replay';
+        c.width = 100; c.height = 50;
+        document.body.appendChild(c);
+        canvasSetFontFull(c._id, 'Helvetica', 14.0, 300, 0, 0);
+    )");
+    root.layout_children();
+
+    auto* canvas = canvasFromBridge(bridge, engine, "font-full-replay");
+    REQUIRE(canvas != nullptr);
+
+    pulp::canvas::RecordingCanvas rec;
+    canvas->paint(rec);
+
+    using DrawType = pulp::canvas::DrawCommand::Type;
+    const pulp::canvas::DrawCommand* full = nullptr;
+    for (const auto& c : rec.commands()) {
+        if (c.type == DrawType::set_font_full) { full = &c; break; }
+    }
+    REQUIRE(full != nullptr);
+    REQUIRE(full->text == "Helvetica");
+    REQUIRE_THAT(full->f[0], WithinAbs(14.0f, 1e-5f));   // size
+    REQUIRE_THAT(full->f[1], WithinAbs(300.0f, 1e-5f));  // weight
+    REQUIRE_THAT(full->f[2], WithinAbs(0.0f, 1e-5f));    // slant=upright
+}
+
 // pulp #1434 (sub-agent #12 follow-up) — align_content multi-line
 // flex cross-axis distribution. Yoga supports it natively via
 // YGNodeStyleSetAlignContent; the gap was a missing FlexStyle field

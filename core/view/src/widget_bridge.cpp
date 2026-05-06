@@ -3380,6 +3380,28 @@ void WidgetBridge::register_api() {
         return choc::value::Value();
     });
 
+    // pulp #1434 — Canvas2D `ctx.font` full CSS font shorthand. The JS
+    // shim parses `[<style>] [<variant>] [<weight>] <size>[/<lineHeight>]
+    // <family>` and dispatches here when the parse extracts more than the
+    // legacy size+family. Args: (id, family, size, weight, slant,
+    // letter_spacing). Slant: 0 = upright, 1 = italic/oblique. Weight:
+    // 100..900 (normal=400, bold=700). The `set_font_full` cmd routes to
+    // `Canvas::set_font_full` on replay; Skia honours weight/slant via
+    // `make_font(family, size, weight, slant)`. CG falls through to the
+    // base default (family+size only).
+    engine_.register_function("canvasSetFontFull", [this](choc::javascript::ArgumentList args) {
+        if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
+            CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::set_font_full;
+            cmd.text  = args.get<std::string>(1, "Inter");
+            cmd.extra = (float)args.get<double>(2, 14);
+            cmd.x     = (float)args.get<double>(3, 400);   // weight
+            cmd.y     = (float)args.get<double>(4, 0);     // slant
+            cmd.x2    = (float)args.get<double>(5, 0);     // letter_spacing
+            c->add_command(cmd);
+        }
+        return choc::value::Value();
+    });
+
     // Path operations
     engine_.register_function("canvasBeginPath", [this](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {

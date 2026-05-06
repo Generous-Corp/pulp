@@ -55,7 +55,7 @@ in #1353. CG counterpart in #1359 / PR #1360 (merged 2026-05-03).
 
 These were wired before #1348 and remain stable:
 `fillRect`, `strokeRect`, `clearRect`, `beginPath`, `closePath`,
-`moveTo`, `lineTo`, `fill`, `stroke`, `lineWidth`, `font`, `textAlign`,
+`moveTo`, `lineTo`, `fill`, `stroke`, `lineWidth`, `textAlign`,
 `textBaseline`, `fillStyle`, `strokeStyle`, `measureText`,
 `drawImage`, `getImageData`, `putImageData`. Pulp-specific bridge
 conveniences: `canvasFillCircle`, `canvasFillRoundedRect`,
@@ -66,6 +66,49 @@ conveniences: `canvasFillCircle`, `canvasFillRoundedRect`,
 1. **`filter`** — Canvas2D per-context filter chains are not wired.
 2. **`direction`** — text rendering direction (ltr/rtl) tracked locally
    but never pushed.
+
+## Recently expanded — full CSS `font` shorthand (pulp #1434)
+
+The Canvas2D `ctx.font` setter previously only parsed the legacy
+`'<size>px <family>'` form, so every Figma copy-CSS value of the shape
+`'italic small-caps bold 14px/1.4 "Inter", sans-serif'` collapsed to
+`14px sans-serif` (size + first family token only). The 2026-05-05
+shim parser now walks the full CSS Fonts Module Level 4 grammar:
+
+```
+font: [<font-style>] [<font-variant>] [<font-weight>] [<font-stretch>]
+      <font-size>[/<line-height>] <font-family>
+```
+
+Plumbing:
+
+- `canvasSetFontFull(id, family, size, weight, slant, letterSpacing)` —
+  new bridge fn that records a `set_font_full` cmd carrying weight and
+  slant. Replays through `Canvas::set_font_full`, which Skia honours via
+  `SkFontStyle(weight, kNormal_Width, italic_or_upright)`. CG falls
+  through to family + size (the base default).
+- `canvasSetFont(id, family, size)` — kept as the legacy fallback for
+  hosts that pre-date this PR.
+
+Supported tokens:
+
+- Style: `normal`, `italic`, `oblique` (slant flag).
+- Variant: `small-caps` parsed and tracked locally; not yet plumbed to
+  Skia/CG (no canvas-API surface for variant).
+- Weight: keywords `normal`/`bold`/`bolder`/`lighter`, and 3-digit
+  numeric `100`..`900`.
+- Stretch keywords: parsed and dropped (no canvas-API surface).
+- Size: `<n>px` (mandatory). `pt`/`em`/`rem` accepted by the regex but
+  the bridge expects px — non-px tokens silently keep the default 14.
+- Line-height: number, length, or `normal`. Per Canvas2D spec, the
+  parsed value is ignored — canvas always uses the font's own metrics.
+  Tracked on `_parsedLineHeight` for round-tripping.
+- Family: comma-separated lists pass through verbatim. Single-family
+  strings have surrounding `"`/`'` quotes unwrapped.
+
+The `font` getter still returns the originally-assigned string verbatim,
+so the spec round-trip (`ctx.font = 'italic 14px Inter'; ctx.font`)
+returns the same string.
 
 ## Recently wired (pulp #1434 bridge-thin gap-fill)
 

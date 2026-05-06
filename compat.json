@@ -6343,16 +6343,25 @@
     },
     "canvas2d/font": {
       "status": "partial",
-      "mapsTo": "Locally tracked; canvasSetFont(id, family, size) on the next draw. Shim parses '<size>px <family>'.",
+      "mapsTo": "Locally tracked; the shim's _parseFontShorthand walks the full CSS font shorthand ([style] [variant] [weight] [stretch] <size>[/<lineHeight>] <family>) and dispatches canvasSetFontFull(id, family, size, weight, slant, letterSpacing) when the host registered it (post pulp #1434), falling back to canvasSetFont(id, family, size) otherwise. Skia honours weight + slant via SkFontStyle; CG falls through to family + size.",
       "supportedValues": [
-        "'<size>px <family>'"
+        "'<size>px <family>'",
+        "'<weight> <size>px <family>' (e.g. 'bold 14px Inter')",
+        "'<style> <size>px <family>' (e.g. 'italic 14px Inter')",
+        "'<style> <weight> <size>px <family>'",
+        "'<style> <variant> <weight> <size>px/<lineHeight> <family>' (full shorthand)",
+        "weight keywords: normal/bold/bolder/lighter",
+        "weight numerics: 100..900 (3-digit)",
+        "style keywords: normal/italic/oblique",
+        "stretch keywords: ultra-condensed..ultra-expanded (parsed, dropped)",
+        "lineHeight: number / length / 'normal' (parsed, ignored per Canvas2D spec — canvas uses the font's own line metrics)"
       ],
       "unsupportedValues": [
-        "full CSS font shorthand (style/variant/stretch — only size+family extracted)"
+        "font-variant 'small-caps' (parsed and tracked, but Skia/CG fonts in the canvas pipeline don't honour it — Canvas::set_font_full has no variant field)"
       ],
       "tests": [],
-      "notes": "",
-      "issue": ""
+      "notes": "pulp #1434 expanded shim parser to full CSS font shorthand. Family names quoted as 'Inter' or \"Inter\" are unwrapped; comma-separated lists are passed verbatim.",
+      "issue": "1434"
     },
     "canvas2d/textAlign": {
       "status": "supported",

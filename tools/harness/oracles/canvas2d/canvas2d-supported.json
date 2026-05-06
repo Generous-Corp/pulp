@@ -49,7 +49,7 @@
     "lineJoin":             {"kind": "attribute", "bridge": ["canvasSetLineJoin"], "values": ["miter", "round", "bevel"]},
     "miterLimit":           {"kind": "attribute", "bridge": ["canvasSetMiterLimit"], "notes": "pulp #1434 bridge-thin gap-fill. Sticky stroke state. Skia: SkPaint::setStrokeMiter. CG: CGContextSetMiterLimit. Spec: ≤0/NaN/Infinity ignored at the shim."},
     "lineDashOffset":       {"kind": "attribute", "bridge": ["canvasSetLineDash"], "expectedStatus": "partial", "notes": "Mutating doesn't re-flush — only re-passed on next setLineDash."},
-    "font":                 {"kind": "attribute", "bridge": ["canvasSetFont"], "notes": "Shim parses '<size>px <family>'; full CSS font shorthand NOT supported."},
+    "font":                 {"kind": "attribute", "bridge": ["canvasSetFont", "canvasSetFontFull"], "notes": "pulp #1434 — shim parses the full CSS font shorthand ([style] [variant] [weight] [stretch] <size>[/<lineHeight>] <family>). canvasSetFontFull plumbs weight + slant; small-caps variant is parsed but not honoured in the Skia/CG pipeline."},
     "textAlign":            {"kind": "attribute", "bridge": ["canvasSetTextAlign"], "values": ["start", "end", "left", "right", "center"]},
     "textBaseline":         {"kind": "attribute", "bridge": ["canvasSetTextBaseline"], "values": ["top", "hanging", "middle", "alphabetic", "ideographic", "bottom"]},
     "globalAlpha":          {"kind": "attribute", "bridge": ["canvasSetGlobalAlpha"]},

@@ -856,6 +856,437 @@ TEST_CASE("Canvas2D conic gradient renders distinct colours via Skia sweep",
 }
 #endif  // PULP_HAS_SKIA
 
+// ── pulp #1434 — full CSS `font` shorthand parser ──────────────────────────
+//
+// Pre-fix: the shim only parsed `'<size>px <family>'`, so any Figma
+// copy-CSS value of the shape `'italic small-caps bold 14px/1.4 "Inter",
+// sans-serif'` collapsed to size + family, dropping every other token.
+// Post-fix: `_parseFontShorthand` walks the CSS Fonts Module Level 4
+// grammar and dispatches `canvasSetFontFull(id, family, size, weight,
+// slant, letterSpacing)` so Skia's `set_font_full` honours weight + slant.
+//
+// These tests cover both the JS-level parse round-trip and the bridge
+// command stream, asserting on the recorded `set_font_full` cmd's fields.
+
+TEST_CASE("Canvas2D _parseFontShorthand: legacy '<size>px <family>'",
+          "[view][canvas2d][issue-1434]") {
+    // Baseline — the existing form must keep working with all defaults.
+    auto result = run_in_bridge(R"(
+        var p = CanvasRenderingContext2D._parseFontShorthand('14px Inter');
+        return [p.family, p.size, p.weight, p.slant,
+                p.variant, String(p.lineHeight)].join('|');
+    )");
+    REQUIRE(result == "Inter|14|400|0|normal|null");
+}
+
+TEST_CASE("Canvas2D _parseFontShorthand: weight + size + family",
+          "[view][canvas2d][issue-1434]") {
+    auto result = run_in_bridge(R"(
+        var p = CanvasRenderingContext2D._parseFontShorthand('bold 14px Inter');
+        return [p.family, p.size, p.weight, p.slant].join('|');
+    )");
+    REQUIRE(result == "Inter|14|700|0");
+}
+
+TEST_CASE("Canvas2D _parseFontShorthand: style + size + family",
+          "[view][canvas2d][issue-1434]") {
+    auto result = run_in_bridge(R"(
+        var p = CanvasRenderingContext2D._parseFontShorthand('italic 14px Inter');
+        return [p.family, p.size, p.weight, p.slant].join('|');
+    )");
+    REQUIRE(result == "Inter|14|400|1");
+}
+
+TEST_CASE("Canvas2D _parseFontShorthand: style + weight + size + family",
+          "[view][canvas2d][issue-1434]") {
+    auto result = run_in_bridge(R"(
+        var p = CanvasRenderingContext2D._parseFontShorthand('italic bold 14px Inter');
+        return [p.family, p.size, p.weight, p.slant].join('|');
+    )");
+    REQUIRE(result == "Inter|14|700|1");
+}
+
+TEST_CASE("Canvas2D _parseFontShorthand: full Figma-style shorthand",
+          "[view][canvas2d][issue-1434]") {
+    // The canonical Figma copy-CSS value: every token category present.
+    auto result = run_in_bridge(R"(
+        var p = CanvasRenderingContext2D._parseFontShorthand(
+            'italic small-caps bold 14px/1.4 "Inter", sans-serif');
+        return [p.family, p.size, p.weight, p.slant,
+                p.variant, p.lineHeight].join('|');
+    )");
+    // Multi-family list passes through verbatim (with the leading quote
+    // intact — the shim only unwraps quotes on single-family strings).
+    REQUIRE(result == "\"Inter\", sans-serif|14|700|1|small-caps|1.4");
+}
+
+TEST_CASE("Canvas2D _parseFontShorthand: 'normal' defaults round-trip",
+          "[view][canvas2d][issue-1434]") {
+    auto result = run_in_bridge(R"(
+        var p = CanvasRenderingContext2D._parseFontShorthand('normal 16px sans-serif');
+        return [p.family, p.size, p.weight, p.slant, p.variant].join('|');
+    )");
+    REQUIRE(result == "sans-serif|16|400|0|normal");
+}
+
+TEST_CASE("Canvas2D _parseFontShorthand: numeric weight",
+          "[view][canvas2d][issue-1434]") {
+    auto result = run_in_bridge(R"(
+        var p1 = CanvasRenderingContext2D._parseFontShorthand('100 16px Inter');
+        var p2 = CanvasRenderingContext2D._parseFontShorthand('500 16px Inter');
+        var p3 = CanvasRenderingContext2D._parseFontShorthand('900 16px Inter');
+        return [p1.weight, p2.weight, p3.weight].join('|');
+    )");
+    REQUIRE(result == "100|500|900");
+}
+
+TEST_CASE("Canvas2D _parseFontShorthand: weight keywords",
+          "[view][canvas2d][issue-1434]") {
+    auto result = run_in_bridge(R"(
+        var bo = CanvasRenderingContext2D._parseFontShorthand('bolder 16px X');
+        var li = CanvasRenderingContext2D._parseFontShorthand('lighter 16px X');
+        var no = CanvasRenderingContext2D._parseFontShorthand('normal 16px X');
+        return [bo.weight, li.weight, no.weight].join('|');
+    )");
+    REQUIRE(result == "700|300|400");
+}
+
+TEST_CASE("Canvas2D _parseFontShorthand: oblique maps to slant=1",
+          "[view][canvas2d][issue-1434]") {
+    auto result = run_in_bridge(R"(
+        var p = CanvasRenderingContext2D._parseFontShorthand('oblique 14px Inter');
+        return [p.slant, p.variant].join('|');
+    )");
+    REQUIRE(result == "1|normal");
+}
+
+TEST_CASE("Canvas2D _parseFontShorthand: line-height variants",
+          "[view][canvas2d][issue-1434]") {
+    // Number, length, %, and 'normal' — all must parse without
+    // throwing. Per Canvas2D spec, the line-height value is parsed
+    // but ignored at render time.
+    auto result = run_in_bridge(R"(
+        var a = CanvasRenderingContext2D._parseFontShorthand('14px/1.5 Inter');
+        var b = CanvasRenderingContext2D._parseFontShorthand('14px/24px Inter');
+        var c = CanvasRenderingContext2D._parseFontShorthand('14px/normal Inter');
+        return [a.lineHeight, b.lineHeight, String(c.lineHeight)].join('|');
+    )");
+    REQUIRE(result == "1.5|24|null");
+}
+
+TEST_CASE("Canvas2D _parseFontShorthand: single-family quote stripping",
+          "[view][canvas2d][issue-1434]") {
+    auto result = run_in_bridge(R"(
+        var dq = CanvasRenderingContext2D._parseFontShorthand('14px "Inter"');
+        var sq = CanvasRenderingContext2D._parseFontShorthand("14px 'Inter'");
+        // Multi-family list keeps quotes intact.
+        var ml = CanvasRenderingContext2D._parseFontShorthand('14px "Inter", sans-serif');
+        return [dq.family, sq.family, ml.family].join('|');
+    )");
+    REQUIRE(result == "Inter|Inter|\"Inter\", sans-serif");
+}
+
+TEST_CASE("Canvas2D _parseFontShorthand: stretch keywords are dropped",
+          "[view][canvas2d][issue-1434]") {
+    // 'condensed' is a stretch keyword. It's parsed and silently
+    // dropped (no canvas-API surface for stretch). The parser must
+    // NOT mistake it for a family or fall over.
+    auto result = run_in_bridge(R"(
+        var p = CanvasRenderingContext2D._parseFontShorthand('bold condensed 14px Inter');
+        return [p.family, p.size, p.weight].join('|');
+    )");
+    REQUIRE(result == "Inter|14|700");
+}
+
+TEST_CASE("Canvas2D _parseFontShorthand: empty / family-only fallback",
+          "[view][canvas2d][issue-1434]") {
+    auto result = run_in_bridge(R"(
+        // No '<size>px' token — treat as family-only, keep default 14.
+        var p = CanvasRenderingContext2D._parseFontShorthand('Helvetica');
+        return [p.family, p.size, p.weight, p.slant].join('|');
+    )");
+    REQUIRE(result == "Helvetica|14|400|0");
+}
+
+TEST_CASE("Canvas2D ctx.font setter dispatches canvasSetFontFull with weight + slant",
+          "[view][canvas2d][issue-1434]") {
+    // End-to-end JS → bridge: assigning the full shorthand to ctx.font
+    // and triggering a draw must record a `set_font_full` cmd carrying
+    // the parsed weight + slant on the CanvasWidget.
+    ScriptedBridge env;
+    env.load(R"(
+        var c = document.createElement('canvas');
+        globalThis.__test_canvas_el__ = c;
+        document.body.appendChild(c);
+        c.width = 100; c.height = 100;
+        var ctx = c.getContext('2d');
+        ctx.font = 'italic bold 18px Inter';
+        ctx.fillText('hi', 5, 20);
+    )");
+
+    auto* cw = env.canvas();
+    REQUIRE(cw != nullptr);
+
+    // Find the most recent set_font_full cmd in the recorded stream.
+    using T = CanvasDrawCmd::Type;
+    bool saw_full = false;
+    std::string family;
+    float size = 0, weight = 0, slant = 0;
+    for (const auto& cmd : cw->commands()) {
+        if (cmd.type == T::set_font_full) {
+            saw_full = true;
+            family = cmd.text;
+            size   = cmd.extra;
+            weight = cmd.x;
+            slant  = cmd.y;
+        }
+    }
+    INFO("family=" << family << " size=" << size
+         << " weight=" << weight << " slant=" << slant);
+    REQUIRE(saw_full);
+    REQUIRE(family == "Inter");
+    REQUIRE(size == Catch::Approx(18.0f));
+    REQUIRE(weight == Catch::Approx(700.0f));
+    REQUIRE(slant == Catch::Approx(1.0f));
+}
+
+TEST_CASE("Canvas2D ctx.font setter: legacy 'Npx Family' still routes",
+          "[view][canvas2d][issue-1434]") {
+    // Pre-PR pipeline: the shim only parsed '<size>px <family>' and
+    // dispatched canvasSetFont. Post-PR with no leading tokens we still
+    // expect canvasSetFontFull (preferred when registered) to record
+    // weight=400, slant=0 — i.e. spec-correct defaults.
+    ScriptedBridge env;
+    env.load(R"(
+        var c = document.createElement('canvas');
+        globalThis.__test_canvas_el__ = c;
+        document.body.appendChild(c);
+        c.width = 100; c.height = 100;
+        var ctx = c.getContext('2d');
+        ctx.font = '12px Helvetica';
+        ctx.fillText('legacy', 0, 12);
+    )");
+
+    auto* cw = env.canvas();
+    REQUIRE(cw != nullptr);
+
+    using T = CanvasDrawCmd::Type;
+    bool saw_full = false;
+    std::string family;
+    float size = 0, weight = 0, slant = 0;
+    for (const auto& cmd : cw->commands()) {
+        if (cmd.type == T::set_font_full) {
+            saw_full = true;
+            family = cmd.text; size = cmd.extra;
+            weight = cmd.x; slant = cmd.y;
+        }
+    }
+    REQUIRE(saw_full);
+    REQUIRE(family == "Helvetica");
+    REQUIRE(size == Catch::Approx(12.0f));
+    REQUIRE(weight == Catch::Approx(400.0f));
+    REQUIRE(slant == Catch::Approx(0.0f));
+}
+
+TEST_CASE("Canvas2D ctx.font getter round-trips assigned shorthand verbatim",
+          "[view][canvas2d][issue-1434]") {
+    // Spec: the Canvas2D `font` IDL attribute must return the most
+    // recently-assigned string. The shim stores the raw assignment on
+    // `this.font`, so multi-token shorthand round-trips intact even
+    // though only size + family + weight + slant make it to the bridge.
+    auto result = run_in_bridge(R"(
+        var c = document.createElement('canvas');
+        document.body.appendChild(c);
+        var ctx = c.getContext('2d');
+        ctx.font = 'italic small-caps bold 14px/1.4 "Inter", sans-serif';
+        return ctx.font;
+    )");
+    REQUIRE(result == "italic small-caps bold 14px/1.4 \"Inter\", sans-serif");
+}
+
+TEST_CASE("Canvas2D measureText reads the parsed shorthand size + family",
+          "[view][canvas2d][issue-1434]") {
+    // Pre-PR `measureText` ran its own ad-hoc regex that only matched
+    // '<size>px <family>' — `'italic 18px Inter'` would parse the size
+    // (18) but `familyMatch` matched the substring after `px ` so it
+    // worked accidentally. With the shared parser the family field is
+    // canonicalised; assert measureText doesn't throw and returns a
+    // numeric width.
+    auto result = run_in_bridge(R"(
+        var c = document.createElement('canvas');
+        document.body.appendChild(c);
+        var ctx = c.getContext('2d');
+        ctx.font = 'italic bold 18px Inter';
+        var m = ctx.measureText('hello');
+        return [typeof m, typeof m.width, m.width >= 0].join('|');
+    )");
+    REQUIRE(result == "object|number|true");
+}
+
+// ─── Codex audit fixes (PR #1495) ─────────────────────────────────────────────
+
+TEST_CASE("Canvas2D _parseFontShorthand: pt unit converts to px (1pt = 4/3 px)",
+          "[view][canvas2d][issue-1434]") {
+    // Codex P2 audit (PR #1495 comment 3192815904): `12pt Inter` must NOT
+    // be treated as `12px Inter`. CSS specifies 1pt = 1/72in and the canvas
+    // shim resolves at the conventional 96dpi root, so 1pt = 4/3 px.
+    // 12pt → 16px exactly.
+    auto result = run_in_bridge(R"(
+        var p = CanvasRenderingContext2D._parseFontShorthand('12pt Inter');
+        return [p.family, p.size].join('|');
+    )");
+    REQUIRE(result == "Inter|16");
+}
+
+TEST_CASE("Canvas2D _parseFontShorthand: em unit converts to px (1em = 16px)",
+          "[view][canvas2d][issue-1434]") {
+    // Codex P2 audit (PR #1495 comment 3192815904): `1.2em Inter` was
+    // parsed as `1.2px Inter`, producing severely undersized text and
+    // wrong measureText widths. Canvas2D has no DOM cascade, so em
+    // resolves against a fixed 16px root — same default browsers + every
+    // headless Canvas2D shim use. 1.2em → 19.2px.
+    auto result = run_in_bridge(R"(
+        var p = CanvasRenderingContext2D._parseFontShorthand('1.2em Inter');
+        return [p.family, p.size].join('|');
+    )");
+    REQUIRE(result == "Inter|19.2");
+}
+
+TEST_CASE("Canvas2D _parseFontShorthand: rem unit converts to px (1rem = 16px)",
+          "[view][canvas2d][issue-1434]") {
+    // Codex P2 audit (PR #1495 comment 3192815904): `1rem Inter` was
+    // parsed as `1px Inter`. rem resolves against the document root,
+    // which canvas2d doesn't have — fall back to the conventional 16px
+    // root font size. 1rem → 16px; 2rem → 32px.
+    auto result = run_in_bridge(R"(
+        var a = CanvasRenderingContext2D._parseFontShorthand('1rem Inter');
+        var b = CanvasRenderingContext2D._parseFontShorthand('2rem Inter');
+        return [a.size, b.size].join('|');
+    )");
+    REQUIRE(result == "16|32");
+}
+
+TEST_CASE("Canvas2D _parseFontShorthand: pt + bold + family round-trip",
+          "[view][canvas2d][issue-1434]") {
+    // Combined leading tokens + non-px size: `bold 18pt Helvetica` should
+    // resolve to weight=700, size=24 (18 * 4/3), family=Helvetica.
+    auto result = run_in_bridge(R"(
+        var p = CanvasRenderingContext2D._parseFontShorthand('bold 18pt Helvetica');
+        return [p.family, p.size, p.weight].join('|');
+    )");
+    REQUIRE(result == "Helvetica|24|700");
+}
+
+TEST_CASE("Canvas2D fill_text replay preserves rich set_font_full state",
+          "[view][canvas2d][issue-1434]") {
+    // Codex P1 audit (PR #1495 comment 3192815903): the legacy fill_text
+    // replay path in CanvasWidget::paint() called canvas.set_font(family,
+    // size) immediately before drawing, which reset weight/slant to
+    // normal/upright (SkiaCanvas::set_font(), canvas.cpp:567-575). That
+    // clobbered the rich state captured by the immediately-prior
+    // set_font_full cmd, so `ctx.font = "italic bold 18px Inter"`
+    // followed by `ctx.fillText(...)` rendered as plain Regular upright
+    // text. Fix: drop the canvas.set_font() call in fill_text replay —
+    // the JS shim's _syncTextState already pushes a set_font_full
+    // (or legacy set_font) cmd ahead of every fill_text.
+    //
+    // Verify by replaying through a RecordingCanvas: the recorded cmd
+    // sequence between set_font_full and fill_text must NOT contain a
+    // legacy set_font call that would have reset the rich state.
+    ScriptedBridge env;
+    env.load(R"(
+        var c = document.createElement('canvas');
+        globalThis.__test_canvas_el__ = c;
+        document.body.appendChild(c);
+        c.width = 100; c.height = 100;
+        var ctx = c.getContext('2d');
+        ctx.font = 'italic bold 18px Inter';
+        ctx.fillText('hi', 5, 20);
+    )");
+
+    auto* cw = env.canvas();
+    REQUIRE(cw != nullptr);
+    cw->set_bounds({0, 0, 100, 100});
+
+    pulp::canvas::RecordingCanvas rc;
+    cw->paint(rc);
+
+    // Walk the replayed stream. Find the set_font_full and the
+    // immediately-following fill_text. Between those two, there must
+    // NOT be a legacy set_font cmd (RecordingCanvas captures one for
+    // each Canvas::set_font call but explicitly doesn't emit a
+    // legacy set_font during set_font_full's capture path inside
+    // fill_text).
+    using DT = pulp::canvas::DrawCommand::Type;
+    int idx_full = -1, idx_fill = -1, idx_legacy_after_full = -1;
+    for (size_t i = 0; i < rc.commands().size(); ++i) {
+        auto t = rc.commands()[i].type;
+        if (t == DT::set_font_full && idx_full < 0)
+            idx_full = static_cast<int>(i);
+        else if (t == DT::set_font && idx_full >= 0 && idx_fill < 0)
+            idx_legacy_after_full = static_cast<int>(i);
+        else if (t == DT::fill_text && idx_full >= 0 && idx_fill < 0)
+            idx_fill = static_cast<int>(i);
+    }
+    INFO("idx_full=" << idx_full
+         << " idx_legacy_after_full=" << idx_legacy_after_full
+         << " idx_fill=" << idx_fill
+         << " total=" << rc.commands().size());
+    REQUIRE(idx_full >= 0);
+    REQUIRE(idx_fill > idx_full);
+
+    // The set_font_full cmd carried weight=700, slant=1.
+    const auto& ff = rc.commands()[idx_full];
+    REQUIRE(ff.text == "Inter");
+    REQUIRE(ff.f[0] == Catch::Approx(18.0f));
+    REQUIRE(ff.f[1] == Catch::Approx(700.0f));  // weight
+    REQUIRE(ff.f[2] == Catch::Approx(1.0f));    // slant
+
+    // CRITICAL: between idx_full and idx_fill there must be NO legacy
+    // set_font (RecordingCanvas captures a side-channel set_font as
+    // part of its set_font_full implementation, which appears at
+    // index < idx_full because both are pushed by the SAME
+    // set_font_full call; the bug we are guarding against is a
+    // SEPARATE canvas.set_font(family, size) call inside the
+    // fill_text replay branch).
+    bool found_clobber = false;
+    for (int i = idx_full + 1; i < idx_fill; ++i) {
+        if (rc.commands()[i].type == DT::set_font) {
+            found_clobber = true;
+            break;
+        }
+    }
+    INFO("If found_clobber=true the fill_text replay clobbers set_font_full's rich state.");
+    REQUIRE_FALSE(found_clobber);
+}
+
+TEST_CASE("Canvas2D ctx.font with em produces correctly-scaled set_font_full size",
+          "[view][canvas2d][issue-1434]") {
+    // Codex P2 end-to-end: `ctx.font = "1.5em Inter"` should record a
+    // set_font_full with size = 1.5 * 16 = 24, NOT size=1.5.
+    ScriptedBridge env;
+    env.load(R"(
+        var c = document.createElement('canvas');
+        globalThis.__test_canvas_el__ = c;
+        document.body.appendChild(c);
+        c.width = 100; c.height = 100;
+        var ctx = c.getContext('2d');
+        ctx.font = '1.5em Inter';
+        ctx.fillText('hi', 5, 20);
+    )");
+    auto* cw = env.canvas();
+    REQUIRE(cw != nullptr);
+
+    using T = CanvasDrawCmd::Type;
+    bool saw = false;
+    float size = -1.0f;
+    for (const auto& cmd : cw->commands()) {
+        if (cmd.type == T::set_font_full) { saw = true; size = cmd.extra; }
+    }
+    REQUIRE(saw);
+    REQUIRE(size == Catch::Approx(24.0f));
+}
+
 // ── pulp #1434 bridge-thin gap-fill — createPattern (sub-agent #24) ─────
 //
 // `ctx.createPattern(image, repetition)` returns a CanvasPattern handle

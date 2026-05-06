@@ -177,16 +177,165 @@ CanvasRenderingContext2D.prototype._applyStrokeStyle = function() {
     if (typeof canvasSetLineWidth === "function") canvasSetLineWidth(this._id, this.lineWidth);
 };
 
+// pulp #1434 — Parse the CSS Fonts Module Level 4 `font` shorthand:
+//
+//   [<font-style>] [<font-variant>] [<font-weight>] [<font-stretch>]
+//   <font-size>[/<line-height>] <font-family>
+//
+// where <font-size> is the one mandatory token and <font-family> the
+// other (everything else is optional, can appear in any order before
+// size, and any number of leading tokens can be `normal`).
+//
+// This is the canonical Figma copy-CSS shape, e.g.
+//
+//   ctx.font = "italic small-caps bold 14px/1.4 'Inter', sans-serif";
+//
+// Returns an object:
+//
+//   {
+//     family:      "Inter, sans-serif",
+//     size:        14,                  // px
+//     weight:      700,                 // 100..900 (CSS keyword → number)
+//     slant:       1,                   // 0=upright, 1=italic/oblique
+//     variant:     "small-caps",        // tracked but not yet plumbed
+//     lineHeight:  1.4,                 // null when omitted; not plumbed
+//     letterSpacing: 0                  // shorthand has no letter-spacing
+//   }
+//
+// Unknown tokens are silently dropped — matches browser behaviour where
+// the entire shorthand is rejected on a hard parse error, but ours is a
+// best-effort parser tuned for real-world copy-CSS values.
+//
+// Exposed as a static helper so both _syncTextState and measureText can
+// share the parse without round-tripping the regex twice.
+CanvasRenderingContext2D._parseFontShorthand = function(fontStr) {
+    var out = {
+        family: "Inter",
+        size: 14,
+        weight: 400,
+        slant: 0,
+        variant: "normal",
+        lineHeight: null,
+        letterSpacing: 0
+    };
+    if (!fontStr || typeof fontStr !== "string") return out;
+    var s = fontStr.trim();
+    if (!s) return out;
+
+    // Locate the size token. The size token is the first whitespace-
+    // separated token that begins with a digit (or `.`) and ends in a
+    // CSS length unit (`px`, `pt`, `em`, `rem`).
+    //
+    // Match `<size><unit>` optionally followed by `/<line-height>` (a
+    // number or a length). After the match, everything before is the
+    // optional leading-token list, everything after is the family list.
+    var sizeRegex = /(^|\s)(\d+(?:\.\d+)?)(px|pt|em|rem)(?:\s*\/\s*([\d.]+(?:px|pt|em|rem|%)?|normal))?(?=\s|$)/i;
+    var m = s.match(sizeRegex);
+    if (!m) {
+        // No `<size><unit>` token — treat the whole string as a family
+        // list, keep the default 14 size.
+        out.family = s.replace(/^["']|["']$/g, "");
+        return out;
+    }
+    var sizeNum = parseFloat(m[2]);
+    // pulp #1434 P2 — convert non-px units to px so values like
+    // `1.2em Inter`, `12pt Inter`, `1rem Inter` produce sane sizes
+    // instead of being treated as `1.2px / 12px / 1px`. Canvas2D has no
+    // DOM cascade, so em/rem resolve against a fixed 16px root — same
+    // default that browsers use at the document root and what every
+    // headless Canvas2D shim (jsdom, node-canvas) uses.
+    //   px  → as-is
+    //   pt  → * (4/3)         (1pt = 1/72in = 4/3 px at 96dpi)
+    //   em  → * 16            (no inherited font-size in canvas)
+    //   rem → * 16            (no document root in canvas)
+    var sizeUnit = (m[3] || "px").toLowerCase();
+    if (sizeUnit === "pt")       sizeNum *= 4 / 3;
+    else if (sizeUnit === "em")  sizeNum *= 16;
+    else if (sizeUnit === "rem") sizeNum *= 16;
+    if (isFinite(sizeNum) && sizeNum > 0) out.size = sizeNum;
+    if (m[4]) {
+        // Line-height: either a unitless number, a length, a %, or `normal`.
+        var lh = String(m[4]);
+        if (lh === "normal") {
+            out.lineHeight = null;
+        } else {
+            var lhNum = parseFloat(lh);
+            if (isFinite(lhNum) && lhNum > 0) out.lineHeight = lhNum;
+        }
+    }
+
+    var sizeStart = m.index + (m[1] ? m[1].length : 0);
+    var sizeEnd   = m.index + m[0].length;
+    var leading = s.substring(0, sizeStart).trim();
+    var family  = s.substring(sizeEnd).trim();
+    if (family) {
+        // Strip leading/trailing surrounding quotes from a single-family
+        // string (`"Inter"` → `Inter`); preserve quoted entries inside a
+        // multi-family list verbatim because the bridge takes the family
+        // string as-is and the OS font lookup tolerates either form.
+        if (family.indexOf(",") < 0) {
+            family = family.replace(/^["']|["']$/g, "");
+        }
+        out.family = family;
+    }
+
+    // Walk the leading tokens (style / variant / weight / stretch). Each
+    // is whitespace-separated; bare keywords map to known buckets, anything
+    // numeric maps to weight.
+    if (leading) {
+        var tokens = leading.split(/\s+/);
+        for (var i = 0; i < tokens.length; ++i) {
+            var t = tokens[i].toLowerCase();
+            if (!t || t === "normal") continue;
+            // Style
+            if (t === "italic" || t === "oblique") { out.slant = 1; continue; }
+            // Variant
+            if (t === "small-caps") { out.variant = "small-caps"; continue; }
+            // Weight (keyword → numeric)
+            if (t === "bold")    { out.weight = 700; continue; }
+            if (t === "bolder")  { out.weight = 700; continue; }
+            if (t === "lighter") { out.weight = 300; continue; }
+            // Weight (numeric 100..900)
+            if (/^\d{3}$/.test(t)) {
+                var w = parseInt(t, 10);
+                if (w >= 100 && w <= 900) { out.weight = w; continue; }
+            }
+            // Stretch keywords — accepted but currently dropped (no
+            // bridge plumbing); same fate as variant. Listed explicitly
+            // so we don't fall into the "treat as family" trap.
+            if (t === "ultra-condensed" || t === "extra-condensed" ||
+                t === "condensed" || t === "semi-condensed" ||
+                t === "semi-expanded" || t === "expanded" ||
+                t === "extra-expanded" || t === "ultra-expanded") {
+                continue;
+            }
+            // Unknown token: silently dropped — see header comment.
+        }
+    }
+    return out;
+};
+
 // pulp #964 — push state-setter values to the bridge before any draw
 // that depends on them. Cheap (only sends what changed) and idempotent.
 CanvasRenderingContext2D.prototype._syncTextState = function() {
     if (this._sentFont !== this.font) {
-        var fontStr = this.font || "14px Inter";
-        var sizeMatch = fontStr.match(/(\d+(?:\.\d+)?)px/);
-        var size = sizeMatch ? parseFloat(sizeMatch[1]) : 14;
-        var familyMatch = fontStr.match(/px\s+(.+)$/);
-        var family = familyMatch ? familyMatch[1].trim() : "Inter";
-        if (typeof canvasSetFont === "function") canvasSetFont(this._id, family, size);
+        var parsed = CanvasRenderingContext2D._parseFontShorthand(
+            this.font || "14px Inter");
+        // Stash the parsed line-height + variant for measureText round-tripping
+        // and for any future bridge plumbing (CSS line-height is currently a
+        // shim-side concern; variant has no canvas-API surface yet).
+        this._parsedLineHeight = parsed.lineHeight;
+        this._parsedFontVariant = parsed.variant;
+        // Prefer the rich bridge fn when the host registered it (canvas
+        // widgets only — see widget_bridge.cpp). Falls back to the legacy
+        // canvasSetFont(id, family, size) on hosts that pre-date pulp #1434.
+        if (typeof canvasSetFontFull === "function") {
+            canvasSetFontFull(this._id, parsed.family, parsed.size,
+                              parsed.weight, parsed.slant,
+                              parsed.letterSpacing);
+        } else if (typeof canvasSetFont === "function") {
+            canvasSetFont(this._id, parsed.family, parsed.size);
+        }
         this._sentFont = this.font;
     }
     if (this._sentTextAlign !== this.textAlign) {
@@ -529,11 +678,13 @@ CanvasRenderingContext2D.prototype.fillText = function(text, x, y, maxWidth) {
     if (color && color._kind) {
         color = (color._stops && color._stops.length > 0) ? color._stops[0].color : "#fff";
     }
-    var fontStr = this.font || "14px Inter";
-    var sizeMatch = fontStr.match(/(\d+(?:\.\d+)?)px/);
-    var size = sizeMatch ? parseFloat(sizeMatch[1]) : 14;
+    // pulp #1434 — parse `<size>` from the full CSS font shorthand. The
+    // family/weight/slant already flowed through canvasSetFontFull during
+    // _syncTextState; canvasFillText only needs the size for its own
+    // baseline math.
+    var parsed = CanvasRenderingContext2D._parseFontShorthand(this.font || "14px Inter");
     if (typeof canvasFillText === "function") {
-        canvasFillText(this._id, String(text == null ? "" : text), x, y, size, String(color));
+        canvasFillText(this._id, String(text == null ? "" : text), x, y, parsed.size, String(color));
     }
 };
 
@@ -621,8 +772,11 @@ CanvasRenderingContext2D.prototype.createPattern = function(image, repetition) {
 CanvasRenderingContext2D.prototype.measureText = function(text) {
     if (typeof canvasMeasureText !== "function") {
         // Coarse estimate — avoids returning undefined/null which would
-        // break callers that destructure the result.
-        var px = parseFloat(this.font) || 14;
+        // break callers that destructure the result. pulp #1434 — pull
+        // size out of the parsed shorthand so multi-token strings don't
+        // collapse to 14 by way of `parseFloat("italic bold")`.
+        var fb = CanvasRenderingContext2D._parseFontShorthand(this.font || "14px Inter");
+        var px = fb.size || 14;
         var w = String(text == null ? "" : text).length * px * 0.6;
         return {
             width: w,
@@ -634,14 +788,11 @@ CanvasRenderingContext2D.prototype.measureText = function(text) {
             fontBoundingBoxDescent: px * 0.25
         };
     }
-    // Parse "<size>px <family>" font strings — the spec allows much
-    // more, but the typical Pulp usage is the simple form.
-    var fontStr = this.font || "14px Inter";
-    var sizeMatch = fontStr.match(/(\d+(?:\.\d+)?)px/);
-    var size = sizeMatch ? parseFloat(sizeMatch[1]) : 14;
-    var familyMatch = fontStr.match(/px\s+(.+)$/);
-    var family = familyMatch ? familyMatch[1].trim() : "Inter";
-    return canvasMeasureText(this._id, String(text == null ? "" : text), family, size);
+    // pulp #1434 — share the full CSS font shorthand parser with
+    // _syncTextState so multi-token strings (`'italic bold 14px Inter'`)
+    // measure with the same size+family the bridge actually rendered.
+    var parsed = CanvasRenderingContext2D._parseFontShorthand(this.font || "14px Inter");
+    return canvasMeasureText(this._id, String(text == null ? "" : text), parsed.family, parsed.size);
 };
 
 // drawImage(img, dx, dy) / drawImage(img, dx, dy, dw, dh) /
