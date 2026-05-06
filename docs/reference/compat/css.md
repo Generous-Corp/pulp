@@ -33,6 +33,22 @@ specifics are out of scope.
 
 ## Recently changed
 
+- **2026-05-05 (pulp #1434 css catalog hygiene)** — eight catalog-only
+  refreshes: `css/width` and `css/height` now list `%` in
+  `supportedValues` (mirroring `yoga/width` / `yoga/height` post-#1426 —
+  the CSS translator forwards `'NN%'` strings verbatim and the bridge
+  routes them via `FlexStyle.dim_*` / `YGNodeStyleSet*Percent`).
+  `css/backgroundSize`, `css/backgroundPosition`, `css/backgroundRepeat`,
+  `css/lineClamp`, `css/webkitLineClamp`, and `css/wordWrap` flipped
+  `missing` → `partial` to reflect that the JS translator (in
+  `web-compat-style-decl.js`) already routes them; the bridge functions
+  remain unregistered so the values silently drop at runtime, but the
+  catalog status now matches the harness verdict (DIVERGE). Drift on
+  these six entries is cleared. Nine remaining `css/animation*` and
+  `css/touchAction` entries continue to drift as harness `NO-OP`
+  because the catalog has no `status` value that maps to NO-OP — that
+  is a verifier-side classification gap (no catalog edit can clear it
+  today) and is tracked as a follow-up.
 - **2026-05-05 (pulp #1434 Triage #11)** — `css/textAlign` now accepts
   `start`, `end`, `auto`, and `justify` alongside the existing `left`,
   `center`, `right`. `start`/`end` map symmetrically to `left`/`right`

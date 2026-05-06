@@ -381,7 +381,7 @@
       "issue": ""
     },
     "css/backgroundPosition": {
-      "status": "missing",
+      "status": "partial",
       "mapsTo": "web-compat calls setBackgroundPosition if defined -- bridge does NOT register it",
       "supportedValues": [],
       "unsupportedValues": [
@@ -390,11 +390,11 @@
         "px/%"
       ],
       "tests": [],
-      "notes": "Silent no-op.",
+      "notes": "pulp #1434 batch (catalog hygiene): status flipped missing -> partial. CSS translator at web-compat-style-decl.js:794 routes through setBackgroundPosition. Bridge function is not yet registered, so values are silently dropped at runtime.",
       "issue": ""
     },
     "css/backgroundRepeat": {
-      "status": "missing",
+      "status": "partial",
       "mapsTo": "web-compat calls setBackgroundRepeat if defined -- bridge does NOT register it",
       "supportedValues": [],
       "unsupportedValues": [
@@ -406,11 +406,11 @@
         "round"
       ],
       "tests": [],
-      "notes": "Silent no-op.",
+      "notes": "pulp #1434 batch (catalog hygiene): status flipped missing -> partial. CSS translator at web-compat-style-decl.js:994 routes through setBackgroundRepeat. Bridge function is not yet registered, so values are silently dropped at runtime.",
       "issue": ""
     },
     "css/backgroundSize": {
-      "status": "missing",
+      "status": "partial",
       "mapsTo": "web-compat calls setBackgroundSize if defined -- bridge does NOT register it",
       "supportedValues": [],
       "unsupportedValues": [
@@ -421,7 +421,7 @@
         "%"
       ],
       "tests": [],
-      "notes": "Silent no-op. Tied to backgroundImage url() which is also missing.",
+      "notes": "pulp #1434 batch (catalog hygiene): status flipped missing -> partial. CSS translator at web-compat-style-decl.js:789 routes through setBackgroundSize. Bridge function is not yet registered, so values are silently dropped at runtime; tied to backgroundImage url() which is also missing.",
       "issue": ""
     },
     "css/border": {
@@ -1320,12 +1320,12 @@
     },
     "css/height": {
       "status": "partial",
-      "mapsTo": "setFlex(id, 'height', px)",
+      "mapsTo": "setFlex(id, 'height', px) for numeric, setFlex(id, 'height', 'NN%') for percent (yoga/height path via FlexStyle.dim_height)",
       "supportedValues": [
-        "px (number)"
+        "px (number)",
+        "%"
       ],
       "unsupportedValues": [
-        "%",
         "em",
         "rem",
         "auto",
@@ -1334,8 +1334,8 @@
         "fit-content"
       ],
       "tests": [],
-      "notes": "Same as width. dim_height supports DimensionUnit::vw/vh/percent/vmin/vmax internally but the setFlex bridge only accepts a single double.",
-      "issue": ""
+      "notes": "pulp #1434 batch (catalog hygiene): mirrors yoga/height post-#1426. The CSS translator at web-compat-style-decl.js:199 detects `'NN%'` strings and forwards them verbatim; the bridge dispatches to FlexStyle.dim_height (DimensionUnit::percent) and YGNodeStyleSetHeightPercent. Numeric values still flow through FlexStyle.preferred_height. `auto` and relative units (em/rem/vh/vw) remain deferred follow-ups.",
+      "issue": "https://github.com/danielraffel/pulp/issues/1423"
     },
     "css/inset": {
       "status": "supported",
@@ -1412,14 +1412,14 @@
       "issue": ""
     },
     "css/lineClamp": {
-      "status": "missing",
+      "status": "partial",
       "mapsTo": "web-compat calls setLineClamp if defined -- bridge does NOT register it",
       "supportedValues": [],
       "unsupportedValues": [
         "integer"
       ],
       "tests": [],
-      "notes": "Silent no-op. Both 'line-clamp' and '-webkit-line-clamp' route here.",
+      "notes": "pulp #1434 batch (catalog hygiene): status flipped missing -> partial. CSS translator at web-compat-style-decl.js:988-990 parses an integer via parseInt and routes through setLineClamp. Both 'line-clamp' and '-webkit-line-clamp' funnel through the same shared case. Bridge function is not yet registered, so values are silently dropped at runtime.",
       "issue": ""
     },
     "css/lineHeight": {
@@ -2580,14 +2580,14 @@
       "issue": ""
     },
     "css/webkitLineClamp": {
-      "status": "missing",
+      "status": "partial",
       "mapsTo": "same as lineClamp",
       "supportedValues": [],
       "unsupportedValues": [
         "integer"
       ],
       "tests": [],
-      "notes": "Silent no-op.",
+      "notes": "pulp #1434 batch (catalog hygiene): status flipped missing -> partial. CSS translator at web-compat-style-decl.js:988 funnels '-webkit-line-clamp' through the same setLineClamp case as 'line-clamp'. Bridge function is not yet registered, so values are silently dropped at runtime.",
       "issue": ""
     },
     "css/whiteSpace": {
@@ -2609,12 +2609,12 @@
     },
     "css/width": {
       "status": "partial",
-      "mapsTo": "setFlex(id, 'width', px)",
+      "mapsTo": "setFlex(id, 'width', px) for numeric, setFlex(id, 'width', 'NN%') for percent (yoga/width path via FlexStyle.dim_width)",
       "supportedValues": [
-        "px (number)"
+        "px (number)",
+        "%"
       ],
       "unsupportedValues": [
-        "%",
         "em",
         "rem",
         "auto",
@@ -2624,8 +2624,8 @@
         "calc()"
       ],
       "tests": [],
-      "notes": "FlexStyle.preferred_width is a float. Yoga in upstream supports % and auto, but Pulp's C++ port loses that on the JSON wire -- only floats are accepted by setFlex.",
-      "issue": ""
+      "notes": "pulp #1434 batch (catalog hygiene): mirrors yoga/width post-#1426. The CSS translator at web-compat-style-decl.js:192 detects `'NN%'` strings and forwards them verbatim to the bridge, which routes to FlexStyle.dim_width (DimensionUnit::percent) and YGNodeStyleSetWidthPercent. Numeric values still go through FlexStyle.preferred_width. `auto` and relative units (em/rem/calc) remain deferred follow-ups.",
+      "issue": "https://github.com/danielraffel/pulp/issues/1423"
     },
     "css/willChange": {
       "status": "wontfix",
@@ -2653,14 +2653,16 @@
       "issue": ""
     },
     "css/wordWrap": {
-      "status": "missing",
+      "status": "partial",
       "mapsTo": "same as wordBreak -- never registered",
       "supportedValues": [],
       "unsupportedValues": [
-        "all"
+        "break-word",
+        "normal",
+        "anywhere"
       ],
       "tests": [],
-      "notes": "Legacy alias of overflow-wrap. Silent no-op.",
+      "notes": "pulp #1434 batch (catalog hygiene): status flipped missing -> partial. CSS translator at web-compat-style-decl.js:728-729 funnels `wordWrap`, `overflowWrap`, and `wordBreak` through the same setWordBreak case. Bridge function is not yet registered, so values are silently dropped at runtime. Legacy alias of overflow-wrap.",
       "issue": ""
     },
     "css/writingMode": {
