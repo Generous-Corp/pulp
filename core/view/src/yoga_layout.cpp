@@ -166,6 +166,85 @@ static void apply_flex_style(YGNodeRef node, const FlexStyle& f, bool is_absolut
     apply_margin(YGEdgeBottom, f.dim_margin_bottom, f.margin_bottom, f.margin);
     apply_margin(YGEdgeLeft,   f.dim_margin_left,   f.margin_left,   f.margin);
 
+    // pulp #1542 — yoga logical-edge fan-out. CSS / RN
+    // `marginStart` / `marginEnd` / `paddingStart` / `paddingEnd` /
+    // `start` / `end` translate to Yoga's `YGEdgeStart` / `YGEdgeEnd`
+    // which Yoga resolves against the node's writing direction (set
+    // below via YGNodeStyleSetDirection).
+    //
+    // pulp #1542 (Codex P1 follow-up) — gate dispatch on the explicit
+    // `is_set` flag, NOT `value != 0`. The earlier `value != 0` guard
+    // could not distinguish "user explicitly wrote 0" from "default /
+    // unset", which broke common reset cases like
+    //   padding: 20; padding_start: 0;   →  the start-side override was
+    //                                        dropped, leaving 20px.
+    //   margin_left: 12; margin_start: 0; → same drop, left margin
+    //                                        stays at 12 even though
+    //                                        start-side (= left in LTR)
+    //                                        was explicitly cleared.
+    // With `is_set`, an explicit 0 reaches Yoga and overrides the
+    // resolved left/right side, matching CSS / RN logical-edge semantics.
+    auto apply_logical_margin = [&](YGEdge edge, const Dimension& dim) {
+        if (!dim.is_set) return;
+        if (dim.unit == DimensionUnit::auto_) {
+            YGNodeStyleSetMarginAuto(node, edge);
+            return;
+        }
+        if (dim.unit == DimensionUnit::percent) {
+            YGNodeStyleSetMarginPercent(node, edge, dim.value);
+            return;
+        }
+        // px (or any other unit fall-through; bridge currently emits
+        // only px / percent / auto for logical edges).
+        YGNodeStyleSetMargin(node, edge, dim.value);
+    };
+    auto apply_logical_padding = [&](YGEdge edge, const Dimension& dim) {
+        // Yoga padding has no `auto` API (margin only); the bridge
+        // already rejects 'auto' on padding edges. Be defensive — drop
+        // any auto that slips through here.
+        if (!dim.is_set) return;
+        if (dim.unit == DimensionUnit::auto_) return;
+        if (dim.unit == DimensionUnit::percent) {
+            YGNodeStyleSetPaddingPercent(node, edge, dim.value);
+            return;
+        }
+        YGNodeStyleSetPadding(node, edge, dim.value);
+    };
+    auto apply_logical_position = [&](YGEdge edge, const Dimension& dim) {
+        // Yoga position has no `auto` API; drop auto silently.
+        if (!dim.is_set) return;
+        if (dim.unit == DimensionUnit::auto_) return;
+        if (dim.unit == DimensionUnit::percent) {
+            YGNodeStyleSetPositionPercent(node, edge, dim.value);
+            return;
+        }
+        YGNodeStyleSetPosition(node, edge, dim.value);
+    };
+    apply_logical_margin (YGEdgeStart, f.dim_margin_start);
+    apply_logical_margin (YGEdgeEnd,   f.dim_margin_end);
+    apply_logical_padding(YGEdgeStart, f.dim_padding_start);
+    apply_logical_padding(YGEdgeEnd,   f.dim_padding_end);
+    apply_logical_position(YGEdgeStart, f.dim_start);
+    apply_logical_position(YGEdgeEnd,   f.dim_end);
+
+    // pulp #1542 — node writing direction (CSS `direction` / RN
+    // I18nManager). Controls how Yoga resolves `YGEdgeStart` /
+    // `YGEdgeEnd` and how it orders row-axis children. `inherit`
+    // (default) lets the layout-root's direction propagate, so a
+    // node inside an RTL root resolves start as the right edge.
+    switch (f.writing_direction) {
+        case FlexStyle::WritingDirection::ltr:
+            YGNodeStyleSetDirection(node, YGDirectionLTR);
+            break;
+        case FlexStyle::WritingDirection::rtl:
+            YGNodeStyleSetDirection(node, YGDirectionRTL);
+            break;
+        case FlexStyle::WritingDirection::inherit:
+        default:
+            YGNodeStyleSetDirection(node, YGDirectionInherit);
+            break;
+    }
+
     // Dimensions — pulp #1423 dispatches on dim_*.unit so width/height
     // accept percentage values. The bridge's setFlex(width|height, ...)
     // path populates dim_width / dim_height with the unit info; this
@@ -365,7 +444,20 @@ void yoga_layout(View& root) {
     YGNodeStyleSetHeight(ygRoot, rootBounds.height);
     build_yoga_subtree(root, ygRoot);
 
-    YGNodeCalculateLayout(ygRoot, rootBounds.width, rootBounds.height, YGDirectionLTR);
+    // pulp #1542 — root direction follows the View's own
+    // writing_direction. When `inherit` (the default), Yoga falls back
+    // to LTR at the root, matching CSS / RN where `dir=auto` resolves
+    // to LTR for unknown content. Setting `rtl` on the root flips the
+    // row-axis layout and resolves YGEdgeStart to the right edge for
+    // every descendant that also inherits.
+    YGDirection rootDir = YGDirectionLTR;
+    switch (root.flex().writing_direction) {
+        case FlexStyle::WritingDirection::rtl:    rootDir = YGDirectionRTL; break;
+        case FlexStyle::WritingDirection::ltr:    rootDir = YGDirectionLTR; break;
+        case FlexStyle::WritingDirection::inherit:
+        default:                                   rootDir = YGDirectionLTR; break;
+    }
+    YGNodeCalculateLayout(ygRoot, rootBounds.width, rootBounds.height, rootDir);
     apply_yoga_results(root, ygRoot);
 
     YGNodeFreeRecursive(ygRoot);

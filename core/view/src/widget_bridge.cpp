@@ -2019,6 +2019,113 @@ void WidgetBridge::register_api() {
                 f.dim_margin_left.unit = pulp::view::DimensionUnit::px;
             }
         }
+        // pulp #1542 — yoga logical-edge fan-out. `margin_start` /
+        // `margin_end` / `padding_start` / `padding_end` / `start` /
+        // `end` route to Yoga's YGEdgeStart / YGEdgeEnd which flip
+        // with the writing direction (set via `direction_writing` —
+        // the existing `direction` key is taken by flex-direction).
+        // Same value coverage as the per-side _left/_right siblings:
+        // px (number), percent string, plus `auto` for margin.
+        else if (key == "margin_start") {
+            auto sval = args.get<std::string>(2, "");
+            if (sval == "auto") {
+                f.dim_margin_start.unit = pulp::view::DimensionUnit::auto_;
+                f.dim_margin_start.value = 0;
+            } else if (!sval.empty() && sval.back() == '%') {
+                try {
+                    f.dim_margin_start.value = std::stof(sval.substr(0, sval.size() - 1));
+                    f.dim_margin_start.unit = pulp::view::DimensionUnit::percent;
+                } catch (...) { /* keep current */ }
+            } else {
+                f.dim_margin_start.value = (float)val;
+                f.dim_margin_start.unit = pulp::view::DimensionUnit::px;
+            }
+            // pulp #1542 (Codex P1) — explicit user write, even when value
+            // is 0 (e.g. `margin_start: 0` to clear an inherited / per-side
+            // margin). The yoga dispatcher gates on `is_set` to honor zeros.
+            f.dim_margin_start.is_set = true;
+        }
+        else if (key == "margin_end") {
+            auto sval = args.get<std::string>(2, "");
+            if (sval == "auto") {
+                f.dim_margin_end.unit = pulp::view::DimensionUnit::auto_;
+                f.dim_margin_end.value = 0;
+            } else if (!sval.empty() && sval.back() == '%') {
+                try {
+                    f.dim_margin_end.value = std::stof(sval.substr(0, sval.size() - 1));
+                    f.dim_margin_end.unit = pulp::view::DimensionUnit::percent;
+                } catch (...) { /* keep current */ }
+            } else {
+                f.dim_margin_end.value = (float)val;
+                f.dim_margin_end.unit = pulp::view::DimensionUnit::px;
+            }
+            f.dim_margin_end.is_set = true;
+        }
+        else if (key == "padding_start") {
+            // Padding has no `auto` API (Yoga); reject the keyword and
+            // fall through to the px path with a parsed value (or 0
+            // on parse failure) — same behavior as the per-side
+            // padding_top/right/bottom/left handlers above.
+            auto sval = args.get<std::string>(2, "");
+            if (!sval.empty() && sval.back() == '%') {
+                try {
+                    f.dim_padding_start.value = std::stof(sval.substr(0, sval.size() - 1));
+                    f.dim_padding_start.unit = pulp::view::DimensionUnit::percent;
+                } catch (...) { /* keep current */ }
+            } else {
+                f.dim_padding_start.value = (float)val;
+                f.dim_padding_start.unit = pulp::view::DimensionUnit::px;
+            }
+            f.dim_padding_start.is_set = true;
+        }
+        else if (key == "padding_end") {
+            auto sval = args.get<std::string>(2, "");
+            if (!sval.empty() && sval.back() == '%') {
+                try {
+                    f.dim_padding_end.value = std::stof(sval.substr(0, sval.size() - 1));
+                    f.dim_padding_end.unit = pulp::view::DimensionUnit::percent;
+                } catch (...) { /* keep current */ }
+            } else {
+                f.dim_padding_end.value = (float)val;
+                f.dim_padding_end.unit = pulp::view::DimensionUnit::px;
+            }
+            f.dim_padding_end.is_set = true;
+        }
+        else if (key == "start") {
+            auto sval = args.get<std::string>(2, "");
+            if (!sval.empty() && sval.back() == '%') {
+                try {
+                    f.dim_start.value = std::stof(sval.substr(0, sval.size() - 1));
+                    f.dim_start.unit = pulp::view::DimensionUnit::percent;
+                } catch (...) { /* keep current */ }
+            } else {
+                f.dim_start.value = (float)val;
+                f.dim_start.unit = pulp::view::DimensionUnit::px;
+            }
+            f.dim_start.is_set = true;
+        }
+        else if (key == "end") {
+            auto sval = args.get<std::string>(2, "");
+            if (!sval.empty() && sval.back() == '%') {
+                try {
+                    f.dim_end.value = std::stof(sval.substr(0, sval.size() - 1));
+                    f.dim_end.unit = pulp::view::DimensionUnit::percent;
+                } catch (...) { /* keep current */ }
+            } else {
+                f.dim_end.value = (float)val;
+                f.dim_end.unit = pulp::view::DimensionUnit::px;
+            }
+            f.dim_end.is_set = true;
+        }
+        // pulp #1542 — node writing direction. Distinct from
+        // `direction` (which is flex-direction). Accepts `'ltr'`,
+        // `'rtl'`, `'inherit'`. Anything else reverts to `inherit`.
+        else if (key == "direction_writing") {
+            auto a = args.get<std::string>(2, "inherit");
+            if (a == "ltr")      f.writing_direction = pulp::view::FlexStyle::WritingDirection::ltr;
+            else if (a == "rtl") f.writing_direction = pulp::view::FlexStyle::WritingDirection::rtl;
+            else                 f.writing_direction = pulp::view::FlexStyle::WritingDirection::inherit;
+        }
         // Directional gap
         else if (key == "row_gap") f.row_gap = (float)val;
         else if (key == "column_gap") f.column_gap = (float)val;

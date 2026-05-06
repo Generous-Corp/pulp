@@ -111,6 +111,16 @@ enum class DimensionUnit {
 struct Dimension {
     float value = 0.0f;
     DimensionUnit unit = DimensionUnit::px;
+    /// pulp #1542 (Codex P1 follow-up) — distinguish "user explicitly set
+    /// this dimension" from "default / unset". The default state
+    /// `{value=0, unit=px, is_set=false}` is indistinguishable from an
+    /// explicit `0px` if dispatchers gate on `value != 0`. The logical
+    /// edge dispatcher (`apply_logical_*` in yoga_layout.cpp) needs the
+    /// distinction so that an explicit `padding_start: 0` clears the
+    /// previously-applied uniform / per-side padding instead of being
+    /// dropped as "no value". Bridge sites must set `is_set = true`
+    /// whenever they write the field explicitly.
+    bool is_set = false;
 
     float resolve(float parent_size, float viewport_w, float viewport_h,
                   float dpi_scale = 1.0f) const {
@@ -127,7 +137,7 @@ struct Dimension {
     }
 
     static Dimension parse(const std::string& str) {
-        if (str == "auto") return {0, DimensionUnit::auto_};
+        if (str == "auto") return {0, DimensionUnit::auto_, true};
         Dimension d;
         size_t pos = 0;
         try { d.value = std::stof(str, &pos); } catch (...) { return d; }
@@ -138,6 +148,7 @@ struct Dimension {
         else if (suffix == "vmax") d.unit = DimensionUnit::vmax;
         else if (suffix == "%") d.unit = DimensionUnit::percent;
         else d.unit = DimensionUnit::px;
+        d.is_set = true;
         return d;
     }
 };
@@ -230,6 +241,38 @@ struct FlexStyle {
     Dimension dim_padding_right;
     Dimension dim_padding_bottom;
     Dimension dim_padding_left;
+
+    /// pulp #1542 — yoga logical-edge fan-out. CSS / RN logical edges
+    /// (`marginStart` / `marginEnd` / `paddingStart` / `paddingEnd` /
+    /// `start` / `end`) flip with the writing direction: in LTR, `start`
+    /// is the left edge; in RTL, `start` is the right edge. Yoga
+    /// resolves this natively via `YGEdgeStart` / `YGEdgeEnd` once the
+    /// node's writing direction is set (see `writing_direction` below).
+    /// yoga_layout.cpp dispatches on `dim_*.unit`:
+    ///   • px      → YGNodeStyleSetMargin/Padding/Position(YGEdgeStart|End)
+    ///   • percent → YGNodeStyleSetMargin/Padding/PositionPercent(...)
+    ///   • auto_   → YGNodeStyleSetMarginAuto(...) (margin only; Yoga
+    ///                does not support auto on padding or position)
+    /// These fields supplement, not replace, the per-side
+    /// `dim_margin_left` / `dim_margin_right` etc. — yoga applies both
+    /// and the *_start/end pair wins for the resolved start/end edge.
+    Dimension dim_margin_start;
+    Dimension dim_margin_end;
+    Dimension dim_padding_start;
+    Dimension dim_padding_end;
+    Dimension dim_start;
+    Dimension dim_end;
+
+    /// pulp #1542 — node writing direction. Controls how Yoga resolves
+    /// `YGEdgeStart` / `YGEdgeEnd` (and how it lays out row-axis
+    /// children when no explicit start/end edge is set). Defaults to
+    /// `inherit` so the layout root's direction propagates down. The
+    /// bridge accepts the `direction_writing` sub-key on `setFlex`
+    /// (avoids collision with the existing `direction` key for
+    /// `flex-direction`) and the canonical CSS / RN values
+    /// `'ltr'` / `'rtl'` / `'inherit'`.
+    enum class WritingDirection { inherit, ltr, rtl };
+    WritingDirection writing_direction = WritingDirection::inherit;
 
     /// Resolve viewport-relative dimensions and apply to float fields.
     /// Call before layout pass with the viewport size.

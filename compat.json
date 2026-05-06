@@ -4844,26 +4844,34 @@
       "issue": ""
     },
     "yoga/marginStart": {
-      "status": "missing",
-      "mapsTo": "no field",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "supported",
+      "mapsTo": "FlexStyle.dim_margin_start (yoga_layout.cpp dispatches to YGNodeStyleSetMargin/Percent/Auto on YGEdgeStart)",
+      "supportedValues": [
+        "number (px)",
+        "percent string (\"5%\")",
+        "auto"
       ],
-      "tests": [],
-      "notes": "Logical edge.",
-      "issue": ""
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1542]"
+      ],
+      "notes": "pulp #1542 — yoga logical-edge fan-out. YGEdgeStart resolves to the left edge in LTR and the right edge in RTL; the new FlexStyle::writing_direction field plus YGNodeStyleSetDirection drives the flip.",
+      "issue": "https://github.com/danielraffel/pulp/issues/1542"
     },
     "yoga/marginEnd": {
-      "status": "missing",
-      "mapsTo": "no field",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "supported",
+      "mapsTo": "FlexStyle.dim_margin_end (yoga_layout.cpp dispatches to YGNodeStyleSetMargin/Percent/Auto on YGEdgeEnd)",
+      "supportedValues": [
+        "number (px)",
+        "percent string (\"10%\")",
+        "auto"
       ],
-      "tests": [],
-      "notes": "Logical edge.",
-      "issue": ""
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1542]"
+      ],
+      "notes": "pulp #1542 — yoga logical-edge fan-out. YGEdgeEnd resolves to the right edge in LTR and the left edge in RTL.",
+      "issue": "https://github.com/danielraffel/pulp/issues/1542"
     },
     "yoga/marginHorizontal": {
       "status": "supported",
@@ -4965,26 +4973,36 @@
       "issue": ""
     },
     "yoga/paddingStart": {
-      "status": "missing",
-      "mapsTo": "no field",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "supported",
+      "mapsTo": "FlexStyle.dim_padding_start (yoga_layout.cpp dispatches to YGNodeStyleSetPadding/Percent on YGEdgeStart)",
+      "supportedValues": [
+        "number (px)",
+        "percent string (\"15%\")"
       ],
-      "tests": [],
-      "notes": "Logical edge.",
-      "issue": ""
+      "unsupportedValues": [
+        "auto"
+      ],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1542]"
+      ],
+      "notes": "pulp #1542 — yoga logical-edge fan-out. YGEdgeStart resolves to the left edge in LTR and the right edge in RTL. Yoga padding has no `auto` API (margin only) — bridge falls through to px.",
+      "issue": "https://github.com/danielraffel/pulp/issues/1542"
     },
     "yoga/paddingEnd": {
-      "status": "missing",
-      "mapsTo": "no field",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "supported",
+      "mapsTo": "FlexStyle.dim_padding_end (yoga_layout.cpp dispatches to YGNodeStyleSetPadding/Percent on YGEdgeEnd)",
+      "supportedValues": [
+        "number (px)",
+        "percent string (\"25%\")"
       ],
-      "tests": [],
-      "notes": "Logical edge.",
-      "issue": ""
+      "unsupportedValues": [
+        "auto"
+      ],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1542]"
+      ],
+      "notes": "pulp #1542 — yoga logical-edge fan-out. YGEdgeEnd resolves to the right edge in LTR and the left edge in RTL.",
+      "issue": "https://github.com/danielraffel/pulp/issues/1542"
     },
     "yoga/paddingHorizontal": {
       "status": "supported",
@@ -5133,26 +5151,36 @@
       "issue": "https://github.com/danielraffel/pulp/issues/1434"
     },
     "yoga/start": {
-      "status": "missing",
-      "mapsTo": "no field",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "supported",
+      "mapsTo": "FlexStyle.dim_start (yoga_layout.cpp dispatches to YGNodeStyleSetPosition/Percent on YGEdgeStart)",
+      "supportedValues": [
+        "number (px)",
+        "percent string (\"12%\")"
       ],
-      "tests": [],
-      "notes": "Logical position.",
-      "issue": ""
+      "unsupportedValues": [
+        "auto"
+      ],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1542]"
+      ],
+      "notes": "pulp #1542 — yoga logical-edge fan-out. YGEdgeStart resolves to the left edge in LTR and the right edge in RTL. Yoga position has no `auto` API.",
+      "issue": "https://github.com/danielraffel/pulp/issues/1542"
     },
     "yoga/end": {
-      "status": "missing",
-      "mapsTo": "no field",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "supported",
+      "mapsTo": "FlexStyle.dim_end (yoga_layout.cpp dispatches to YGNodeStyleSetPosition/Percent on YGEdgeEnd)",
+      "supportedValues": [
+        "number (px)",
+        "percent string (\"8%\")"
       ],
-      "tests": [],
-      "notes": "Logical position.",
-      "issue": ""
+      "unsupportedValues": [
+        "auto"
+      ],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1542]"
+      ],
+      "notes": "pulp #1542 — yoga logical-edge fan-out. YGEdgeEnd resolves to the right edge in LTR and the left edge in RTL.",
+      "issue": "https://github.com/danielraffel/pulp/issues/1542"
     },
     "yoga/gap": {
       "status": "supported",
@@ -5227,17 +5255,19 @@
       "issue": ""
     },
     "yoga/direction": {
-      "status": "missing",
-      "mapsTo": "no field",
-      "supportedValues": [],
-      "unsupportedValues": [
+      "status": "supported",
+      "mapsTo": "FlexStyle.writing_direction (yoga_layout.cpp dispatches to YGNodeStyleSetDirection / YGNodeCalculateLayout root direction)",
+      "supportedValues": [
         "ltr",
         "rtl",
         "inherit"
       ],
-      "tests": [],
-      "notes": "Yoga supports direction for RTL; Pulp does not.",
-      "issue": ""
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp [issue-1542]"
+      ],
+      "notes": "pulp #1542 — bridge accepts `direction_writing` sub-key on setFlex (distinct from `direction` for flex-direction). FlexStyle::writing_direction { inherit, ltr, rtl } drives both YGNodeStyleSetDirection on the per-node call and the root's YGNodeCalculateLayout direction argument. Required for yoga's logical-edge resolution (start/end, marginStart, etc.).",
+      "issue": "https://github.com/danielraffel/pulp/issues/1542"
     }
   },
   "react": {
