@@ -527,6 +527,42 @@ function applyOne(id: string, type: string, key: string, value: unknown, props?:
         // installs the dash effect for `dashed` / `dotted`; other
         // named styles currently degrade to solid.
         case 'borderStyle':  return call('setBorderStyle', id, value as string);
+        // pulp #1514 — list-style cluster. Pulp doesn't model
+        // <li>/<ul>/<ol> semantics, so the bridge stores the value
+        // verbatim on the View and a future paint pass renders the
+        // marker. Today the catalog is `partial` (stored, not
+        // painted). The shorthand `listStyle` parses on the JS side
+        // into the 3 longhands; consumers MAY emit any combo of
+        // type / position / image keywords (CSS spec: any order).
+        case 'listStyle': {
+            const sval = String(value).trim();
+            const tokens = sval.split(/\s+/);
+            const typeSet: Record<string, true> = {
+                none: true, disc: true, circle: true, square: true, decimal: true,
+            };
+            const posSet: Record<string, true> = { inside: true, outside: true };
+            let sawType = false, sawImage = false;
+            for (const tok of tokens) {
+                if (tok.indexOf('url(') === 0) {
+                    call('setListStyleImage', id, tok);
+                    sawImage = true;
+                } else if (posSet[tok]) {
+                    call('setListStylePosition', id, tok);
+                } else if (typeSet[tok]) {
+                    if (tok === 'none' && sawType && !sawImage) {
+                        call('setListStyleImage', id, 'none');
+                        sawImage = true;
+                    } else {
+                        call('setListStyleType', id, tok);
+                        sawType = true;
+                    }
+                }
+            }
+            return;
+        }
+        case 'listStyleType':     return call('setListStyleType', id, value as string);
+        case 'listStyleImage':    return call('setListStyleImage', id, value as string);
+        case 'listStylePosition': return call('setListStylePosition', id, value as string);
         case 'borderTop':    { const b = value as { color: string; width: number }; return call('setBorderSide', id, 'top', b.width, b.color); }
         case 'borderRight':  { const b = value as { color: string; width: number }; return call('setBorderSide', id, 'right', b.width, b.color); }
         case 'borderBottom': { const b = value as { color: string; width: number }; return call('setBorderSide', id, 'bottom', b.width, b.color); }

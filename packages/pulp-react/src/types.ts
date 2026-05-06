@@ -145,6 +145,16 @@ export interface StyleProps {
     /// `'none'` / `'hidden'` skip the stroke entirely.
     borderStyle?: 'solid' | 'dashed' | 'dotted' | 'double' | 'groove'
                 | 'ridge' | 'inset' | 'outset' | 'none' | 'hidden';
+    /// pulp #1514 — CSS list-style cluster. Pulp doesn't model
+    /// HTML `<li>` / `<ul>` / `<ol>` semantics, so these props
+    /// round-trip the value to View slots without painting a
+    /// marker glyph today (catalog: `partial`). Marker glyph
+    /// rendering is the follow-up. `listStyle` is the shorthand
+    /// (`'<type> <position> <image>'` in any order).
+    listStyle?: string;
+    listStyleType?: 'none' | 'disc' | 'circle' | 'square' | 'decimal';
+    listStyleImage?: string;
+    listStylePosition?: 'inside' | 'outside';
     borderTopColor?: string;
     borderRightColor?: string;
     borderBottomColor?: string;

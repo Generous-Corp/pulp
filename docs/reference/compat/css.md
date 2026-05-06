@@ -33,6 +33,21 @@ specifics are out of scope.
 
 ## Recently changed
 
+- **2026-05-06 (pulp #1514)** — `css/listStyle` cluster (4 entries)
+  flipped `missing` → `partial`. New `View::ListStyleType` enum
+  (`none` / `disc` / `circle` / `square` / `decimal`),
+  `View::ListStylePosition` enum (`outside` / `inside`), and a
+  `list_style_image_` URL slot. Three new bridge fns —
+  `setListStyleType`, `setListStyleImage`, `setListStylePosition`.
+  The CSS shim parses the `list-style` shorthand into the 3
+  longhands (any token order: type / position / image). The
+  `@pulp/react` prop-applier exposes the same 4 props with the
+  same shorthand parser. The catalog status is `partial`, not
+  `supported`, because pulp doesn't model `<li>` / `<ul>` /
+  `<ol>` semantics yet — values round-trip to View slots but
+  marker glyphs aren't painted today (and `decimal` additionally
+  needs sibling-index resolution from the parent's children).
+  Marker glyph rendering is the follow-up. css drift -4.
 - **2026-05-06 (pulp #1434 Phase A2-2 PR 1)** — CSS Grid surface
   extension. `GridStyle` gains `auto_columns` / `auto_rows`
   (implicit-track sizing for items overflowing the explicit grid),

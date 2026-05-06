@@ -72,6 +72,14 @@
       "values": ["flex-start", "flex-end", "center", "space-between", "space-around", "space-evenly"],
       "default": "flex-start"
     },
+    "listStylePosition": {
+      "values": ["inside", "outside"],
+      "default": "outside"
+    },
+    "listStyleType": {
+      "values": ["none", "disc", "circle", "square", "decimal"],
+      "default": "disc"
+    },
     "overflow": {
       "values": ["visible", "hidden", "scroll", "auto", "clip"],
       "default": "visible"

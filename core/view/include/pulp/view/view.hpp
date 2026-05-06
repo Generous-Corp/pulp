@@ -344,6 +344,29 @@ public:
     void set_border_style(BorderStyle s) { border_style_ = s; }
     BorderStyle border_style() const { return border_style_; }
 
+    /// CSS / RN list-style cluster (pulp #1514). Pulp doesn't model
+    /// HTML <li>/<ul>/<ol> semantics — these slots store the values
+    /// the consumer set so an external paint pass (or future <li>
+    /// semantic surface) can honor them. The bridge round-trips the
+    /// keyword/url; paint-time marker rendering is the follow-up.
+    enum class ListStyleType {
+        none,     ///< No marker.
+        disc,     ///< Filled circle (default for <ul>).
+        circle,   ///< Hollow circle.
+        square,   ///< Filled square.
+        decimal,  ///< Numeric (default for <ol>) — needs sibling-index, not painted yet.
+    };
+    enum class ListStylePosition {
+        outside,  ///< Marker hangs in the margin (CSS default).
+        inside,   ///< Marker is part of the content box.
+    };
+    void set_list_style_type(ListStyleType t) { list_style_type_ = t; }
+    ListStyleType list_style_type() const { return list_style_type_; }
+    void set_list_style_image(std::string url) { list_style_image_ = std::move(url); }
+    const std::string& list_style_image() const { return list_style_image_; }
+    void set_list_style_position(ListStylePosition p) { list_style_position_ = p; }
+    ListStylePosition list_style_position() const { return list_style_position_; }
+
     /// Per-side borders (CSS border-top, border-right, etc.)
     void set_border_top(Color c, float w) { border_top_ = {c, w}; has_border_sides_ = true; }
     void set_border_right(Color c, float w) { border_right_ = {c, w}; has_border_sides_ = true; }
@@ -704,6 +727,12 @@ private:
     float corner_radius_ = 0;
     bool has_border_ = false;
     BorderStyle border_style_ = BorderStyle::solid;
+    // pulp #1514 — list-style cluster slots. Stored verbatim; paint-
+    // time marker rendering is deferred. Defaults match CSS spec
+    // (`disc` for the type, `outside` for the position, empty image).
+    ListStyleType list_style_type_ = ListStyleType::disc;
+    std::string list_style_image_{};
+    ListStylePosition list_style_position_ = ListStylePosition::outside;
     // Per-side borders
     struct BorderSide { Color color{}; float width = 0; };
     BorderSide border_top_{}, border_right_{}, border_bottom_{}, border_left_{};

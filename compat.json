@@ -1519,48 +1519,76 @@
       "issue": ""
     },
     "css/listStyle": {
-      "status": "missing",
-      "mapsTo": "n/a",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "partial",
+      "mapsTo": "web-compat-style-decl.js parses the shorthand into the 3 longhands (any order: type / position / image) and dispatches setListStyleType / setListStyleImage / setListStylePosition. Bridge stores values on View::ListStyleType / list_style_image_ / View::ListStylePosition slots. Paint-time marker rendering is deferred — values are stored but not yet drawn.",
+      "supportedValues": [
+        "shorthand parsing into 3 longhands"
       ],
-      "tests": [],
-      "notes": "pulp #1434 batch 2: reclassified OOS → NOT-IMPL. list-style shorthand for <ul>/<ol>. Common in design-tool exports (Figma / v0 / Claude Design HTML); track for impl follow-up.",
-      "issue": ""
+      "unsupportedValues": [
+        "marker glyph rendering (stored-but-not-painted)"
+      ],
+      "tests": [
+        "test/test_widget_bridge.cpp::\"setListStyleType maps each keyword to the right enum (issue-1514)\"",
+        "packages/pulp-react/test/prop-applier-list-style.test.ts"
+      ],
+      "notes": "pulp #1514 — list-style cluster. Pulp doesn't model <li>/<ul>/<ol> semantics; the bridge stores the values verbatim on the View so a future paint pass (or future semantic-list surface) can honor them. Paint-time marker rendering is the follow-up.",
+      "issue": "1514"
     },
     "css/listStyleImage": {
-      "status": "missing",
-      "mapsTo": "n/a",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "partial",
+      "mapsTo": "web-compat-style-decl.js forwards the resolved string to setListStyleImage; bridge stores on View::list_style_image_. URL fetch + image decode + bullet-image paint are deferred (same caveat as backgroundImage URLs).",
+      "supportedValues": [
+        "url(...) string stored",
+        "none clears the slot"
       ],
-      "tests": [],
-      "notes": "pulp #1434 batch 2: reclassified OOS → NOT-IMPL. custom bullet image for <ul>/<ol>. Common in design-tool exports (Figma / v0 / Claude Design HTML); track for impl follow-up.",
-      "issue": ""
+      "unsupportedValues": [
+        "bullet image rendering (stored-but-not-painted)"
+      ],
+      "tests": [
+        "test/test_widget_bridge.cpp::\"setListStyleImage stores url and clears on 'none' (issue-1514)\"",
+        "packages/pulp-react/test/prop-applier-list-style.test.ts"
+      ],
+      "notes": "pulp #1514 — Bridge round-trips the URL string. Image fetch + decode + paint is the follow-up.",
+      "issue": "1514"
     },
     "css/listStylePosition": {
-      "status": "missing",
-      "mapsTo": "n/a",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "partial",
+      "mapsTo": "web-compat-style-decl.js forwards the keyword to setListStylePosition; bridge stores View::ListStylePosition (inside / outside). Paint-time marker offset is deferred.",
+      "supportedValues": [
+        "inside",
+        "outside"
       ],
-      "tests": [],
-      "notes": "pulp #1434 batch 2: reclassified OOS → NOT-IMPL. inside/outside bullet placement. Common in design-tool exports (Figma / v0 / Claude Design HTML); track for impl follow-up.",
-      "issue": ""
+      "unsupportedValues": [
+        "marker offset rendering (stored-but-not-painted)"
+      ],
+      "tests": [
+        "test/test_widget_bridge.cpp::\"setListStylePosition maps each keyword to the right enum (issue-1514)\"",
+        "packages/pulp-react/test/prop-applier-list-style.test.ts"
+      ],
+      "notes": "pulp #1514 — Bridge stores the position; marker rendering is the follow-up.",
+      "issue": "1514"
     },
     "css/listStyleType": {
-      "status": "missing",
-      "mapsTo": "n/a",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "partial",
+      "mapsTo": "web-compat-style-decl.js forwards the keyword to setListStyleType; bridge stores View::ListStyleType (none / disc / circle / square / decimal). Marker glyph paint is deferred — `decimal` additionally needs sibling-index resolution from the parent's children.",
+      "supportedValues": [
+        "none",
+        "disc",
+        "circle",
+        "square",
+        "decimal (stored only)"
       ],
-      "tests": [],
-      "notes": "pulp #1434 batch 2: reclassified OOS → NOT-IMPL. 'none' / 'disc' / 'decimal' — `list-style-type: none` is the most common reset in design-tool HTML exports. Common in design-tool exports (Figma / v0 / Claude Design HTML); track for impl follow-up.",
-      "issue": ""
+      "unsupportedValues": [
+        "marker glyph rendering (stored-but-not-painted)",
+        "decimal sibling-index resolution",
+        "lower-roman / upper-roman / lower-alpha / etc. (not in enum)"
+      ],
+      "tests": [
+        "test/test_widget_bridge.cpp::\"setListStyleType maps each keyword to the right enum (issue-1514)\"",
+        "packages/pulp-react/test/prop-applier-list-style.test.ts"
+      ],
+      "notes": "pulp #1514 — Bridge stores the type keyword; marker glyph rendering is the follow-up. Pulp doesn't model HTML <li> semantics yet.",
+      "issue": "1514"
     },
     "css/margin": {
       "status": "supported",

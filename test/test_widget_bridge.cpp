@@ -5090,6 +5090,138 @@ TEST_CASE("border-style: none short-circuits the stroke",
     }
 }
 
+// ── pulp #1514 — list-style cluster bridge round-trip ────────────────────
+//
+// Pulp doesn't model HTML <li>/<ul>/<ol> semantics; the bridge stores
+// the list-style values verbatim on the View so a future paint pass
+// (or a future semantic-list surface) can honor them. The catalog
+// status is `partial` (stored, not painted) — these tests prove the
+// JS → bridge → View slot round-trip works for every keyword.
+
+TEST_CASE("setListStyleType maps each keyword to the right enum (issue-1514)",
+          "[view][bridge][css][issue-1514]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('a', '');  setListStyleType('a', 'none');
+        createPanel('b', '');  setListStyleType('b', 'disc');
+        createPanel('c', '');  setListStyleType('c', 'circle');
+        createPanel('d', '');  setListStyleType('d', 'square');
+        createPanel('e', '');  setListStyleType('e', 'decimal');
+    )");
+
+    REQUIRE(bridge.widget("a")->list_style_type() == View::ListStyleType::none);
+    REQUIRE(bridge.widget("b")->list_style_type() == View::ListStyleType::disc);
+    REQUIRE(bridge.widget("c")->list_style_type() == View::ListStyleType::circle);
+    REQUIRE(bridge.widget("d")->list_style_type() == View::ListStyleType::square);
+    REQUIRE(bridge.widget("e")->list_style_type() == View::ListStyleType::decimal);
+}
+
+TEST_CASE("setListStyleType unknown keyword falls back to disc (issue-1514)",
+          "[view][bridge][css][issue-1514]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        createPanel('x', '');
+        setListStyleType('x', 'lower-roman');
+    )");
+    // 'lower-roman' isn't in the supported set; bridge defaults to disc
+    // (the CSS spec default for <ul>).
+    REQUIRE(bridge.widget("x")->list_style_type() == View::ListStyleType::disc);
+}
+
+TEST_CASE("setListStyleImage stores url and clears on 'none' (issue-1514)",
+          "[view][bridge][css][issue-1514]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('a', '');  setListStyleImage('a', 'url(bullet.png)');
+        createPanel('b', '');  setListStyleImage('b', 'none');
+    )");
+
+    REQUIRE(bridge.widget("a")->list_style_image() == "url(bullet.png)");
+    REQUIRE(bridge.widget("b")->list_style_image() == "");
+}
+
+TEST_CASE("setListStylePosition maps each keyword to the right enum (issue-1514)",
+          "[view][bridge][css][issue-1514]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('a', '');  setListStylePosition('a', 'inside');
+        createPanel('b', '');  setListStylePosition('b', 'outside');
+    )");
+
+    REQUIRE(bridge.widget("a")->list_style_position() == View::ListStylePosition::inside);
+    REQUIRE(bridge.widget("b")->list_style_position() == View::ListStylePosition::outside);
+}
+
+TEST_CASE("setListStylePosition unknown keyword falls back to outside (issue-1514)",
+          "[view][bridge][css][issue-1514]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+    bridge.load_script(R"(
+        createPanel('x', '');
+        setListStylePosition('x', 'middle');
+    )");
+    REQUIRE(bridge.widget("x")->list_style_position() == View::ListStylePosition::outside);
+}
+
+TEST_CASE("listStyle shorthand parses type / position / image in any order (issue-1514)",
+          "[view][bridge][css][issue-1514]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('a', '');
+        createPanel('b', '');
+        createPanel('c', '');
+    )");
+
+    // Drive the actual web-compat-style-decl.js path with three orderings:
+    //   a: type position image
+    //   b: image type position  (CSS spec allows any order)
+    //   c: just "none"          (the most common reset)
+    bridge.load_script(R"(
+        var __ea = { _id: 'a', _nativeCreated: true };
+        var __sda = new CSSStyleDeclaration(__ea);
+        __sda._applyProperty('listStyle', 'square inside url(bullet.png)');
+
+        var __eb = { _id: 'b', _nativeCreated: true };
+        var __sdb = new CSSStyleDeclaration(__eb);
+        __sdb._applyProperty('listStyle', 'url(dot.png) circle outside');
+
+        var __ec = { _id: 'c', _nativeCreated: true };
+        var __sdc = new CSSStyleDeclaration(__ec);
+        __sdc._applyProperty('listStyle', 'none');
+    )");
+
+    REQUIRE(bridge.widget("a")->list_style_type() == View::ListStyleType::square);
+    REQUIRE(bridge.widget("a")->list_style_position() == View::ListStylePosition::inside);
+    REQUIRE(bridge.widget("a")->list_style_image() == "url(bullet.png)");
+
+    REQUIRE(bridge.widget("b")->list_style_type() == View::ListStyleType::circle);
+    REQUIRE(bridge.widget("b")->list_style_position() == View::ListStylePosition::outside);
+    REQUIRE(bridge.widget("b")->list_style_image() == "url(dot.png)");
+
+    REQUIRE(bridge.widget("c")->list_style_type() == View::ListStyleType::none);
+}
+
 // pulp #1434 (sub-agent #12 follow-up) — align_content multi-line
 // flex cross-axis distribution. Yoga supports it natively via
 // YGNodeStyleSetAlignContent; the gap was a missing FlexStyle field

@@ -103,6 +103,13 @@ declare global {
     // View::BorderStyle; Skia installs SkDashPathEffect for dashed/
     // dotted at stroke time. Other named styles degrade to solid.
     const setBorderStyle: ((id: string, style: string) => void) | undefined;
+    // pulp #1514 — list-style cluster. Pulp doesn't model
+    // <li>/<ul>/<ol> semantics; the bridge stores the value
+    // verbatim on the View. Marker glyph rendering is deferred —
+    // catalog status is `partial` (stored, not painted).
+    const setListStyleType: ((id: string, type: string) => void) | undefined;
+    const setListStyleImage: ((id: string, url: string) => void) | undefined;
+    const setListStylePosition: ((id: string, pos: string) => void) | undefined;
     /// pulp #1434 Phase A2-2 — CSS Grid bridge fn. The C++ side parses
     /// template-track strings, named-area strings, and the grid-area
     /// shorthand (named token vs `row / col / row / col` numeric form).
@@ -217,6 +224,10 @@ export function createMockBridge(): MockBridge {
         // pulp #1027 — per-attribute border setters needed for the audit
         // PR #1166 finding-#4 fix (preserve unset siblings).
         'setBorderColor', 'setBorderWidth', 'setBorderRadius', 'setBorderStyle',
+        // pulp #1514 — list-style cluster mock-bridge fns. The bridge
+        // stores the value on the View; paint-time marker rendering
+        // is deferred (catalog: `partial`).
+        'setListStyleType', 'setListStyleImage', 'setListStylePosition',
         'setBorderTopColor', 'setBorderRightColor',
         'setBorderBottomColor', 'setBorderLeftColor',
         'setBorderTopWidth', 'setBorderRightWidth',

@@ -3010,6 +3010,51 @@ void WidgetBridge::register_api() {
         return choc::value::Value();
     });
 
+    // pulp #1514 — list-style cluster (listStyle / listStyleType /
+    // listStyleImage / listStylePosition). Pulp doesn't model
+    // <li>/<ul>/<ol> semantics, so the bridge stores the values
+    // verbatim on the View so a later paint pass (or a future
+    // semantic-list surface) can honor them. Marker glyph rendering
+    // is the follow-up; this PR flips the catalog out of `missing`
+    // by wiring the round-trip + JS shorthand parsing.
+    //
+    // setListStyleType(id, "disc"|"circle"|"square"|"decimal"|"none").
+    engine_.register_function("setListStyleType", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto s = args.get<std::string>(1, "disc");
+        auto* v = id.empty() ? &root_ : widget(id);
+        if (!v) return choc::value::Value();
+        if (s == "none")          v->set_list_style_type(View::ListStyleType::none);
+        else if (s == "circle")   v->set_list_style_type(View::ListStyleType::circle);
+        else if (s == "square")   v->set_list_style_type(View::ListStyleType::square);
+        else if (s == "decimal")  v->set_list_style_type(View::ListStyleType::decimal);
+        else                      v->set_list_style_type(View::ListStyleType::disc);
+        return choc::value::Value();
+    });
+
+    // setListStyleImage(id, "url(...)" or "none"). Stored verbatim;
+    // bullet-image rendering is deferred (same caveat as backgroundImage).
+    engine_.register_function("setListStyleImage", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto url = args.get<std::string>(1, "");
+        auto* v = id.empty() ? &root_ : widget(id);
+        if (!v) return choc::value::Value();
+        if (url == "none") v->set_list_style_image("");
+        else               v->set_list_style_image(url);
+        return choc::value::Value();
+    });
+
+    // setListStylePosition(id, "outside"|"inside").
+    engine_.register_function("setListStylePosition", [this](choc::javascript::ArgumentList args) {
+        auto id = args.get<std::string>(0, "");
+        auto s = args.get<std::string>(1, "outside");
+        auto* v = id.empty() ? &root_ : widget(id);
+        if (!v) return choc::value::Value();
+        if (s == "inside") v->set_list_style_position(View::ListStylePosition::inside);
+        else               v->set_list_style_position(View::ListStylePosition::outside);
+        return choc::value::Value();
+    });
+
     // setBorderRadius(id, radius) — uniform corner radius. Per-corner
     // setters (setBorderTopLeftRadius / TopRight / BottomLeft / BottomRight)
     // override individual corners on top of the uniform value.
