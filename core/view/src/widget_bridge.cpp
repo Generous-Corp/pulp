@@ -2019,6 +2019,104 @@ void WidgetBridge::register_api() {
                 f.dim_margin_left.unit = pulp::view::DimensionUnit::px;
             }
         }
+        // pulp #1542 — yoga logical-edge fan-out. `margin_start` /
+        // `margin_end` / `padding_start` / `padding_end` / `start` /
+        // `end` route to Yoga's YGEdgeStart / YGEdgeEnd which flip
+        // with the writing direction (set via `direction_writing` —
+        // the existing `direction` key is taken by flex-direction).
+        // Same value coverage as the per-side _left/_right siblings:
+        // px (number), percent string, plus `auto` for margin.
+        else if (key == "margin_start") {
+            auto sval = args.get<std::string>(2, "");
+            if (sval == "auto") {
+                f.dim_margin_start.unit = pulp::view::DimensionUnit::auto_;
+                f.dim_margin_start.value = 0;
+            } else if (!sval.empty() && sval.back() == '%') {
+                try {
+                    f.dim_margin_start.value = std::stof(sval.substr(0, sval.size() - 1));
+                    f.dim_margin_start.unit = pulp::view::DimensionUnit::percent;
+                } catch (...) { /* keep current */ }
+            } else {
+                f.dim_margin_start.value = (float)val;
+                f.dim_margin_start.unit = pulp::view::DimensionUnit::px;
+            }
+        }
+        else if (key == "margin_end") {
+            auto sval = args.get<std::string>(2, "");
+            if (sval == "auto") {
+                f.dim_margin_end.unit = pulp::view::DimensionUnit::auto_;
+                f.dim_margin_end.value = 0;
+            } else if (!sval.empty() && sval.back() == '%') {
+                try {
+                    f.dim_margin_end.value = std::stof(sval.substr(0, sval.size() - 1));
+                    f.dim_margin_end.unit = pulp::view::DimensionUnit::percent;
+                } catch (...) { /* keep current */ }
+            } else {
+                f.dim_margin_end.value = (float)val;
+                f.dim_margin_end.unit = pulp::view::DimensionUnit::px;
+            }
+        }
+        else if (key == "padding_start") {
+            // Padding has no `auto` API (Yoga); reject the keyword and
+            // fall through to the px path with a parsed value (or 0
+            // on parse failure) — same behavior as the per-side
+            // padding_top/right/bottom/left handlers above.
+            auto sval = args.get<std::string>(2, "");
+            if (!sval.empty() && sval.back() == '%') {
+                try {
+                    f.dim_padding_start.value = std::stof(sval.substr(0, sval.size() - 1));
+                    f.dim_padding_start.unit = pulp::view::DimensionUnit::percent;
+                } catch (...) { /* keep current */ }
+            } else {
+                f.dim_padding_start.value = (float)val;
+                f.dim_padding_start.unit = pulp::view::DimensionUnit::px;
+            }
+        }
+        else if (key == "padding_end") {
+            auto sval = args.get<std::string>(2, "");
+            if (!sval.empty() && sval.back() == '%') {
+                try {
+                    f.dim_padding_end.value = std::stof(sval.substr(0, sval.size() - 1));
+                    f.dim_padding_end.unit = pulp::view::DimensionUnit::percent;
+                } catch (...) { /* keep current */ }
+            } else {
+                f.dim_padding_end.value = (float)val;
+                f.dim_padding_end.unit = pulp::view::DimensionUnit::px;
+            }
+        }
+        else if (key == "start") {
+            auto sval = args.get<std::string>(2, "");
+            if (!sval.empty() && sval.back() == '%') {
+                try {
+                    f.dim_start.value = std::stof(sval.substr(0, sval.size() - 1));
+                    f.dim_start.unit = pulp::view::DimensionUnit::percent;
+                } catch (...) { /* keep current */ }
+            } else {
+                f.dim_start.value = (float)val;
+                f.dim_start.unit = pulp::view::DimensionUnit::px;
+            }
+        }
+        else if (key == "end") {
+            auto sval = args.get<std::string>(2, "");
+            if (!sval.empty() && sval.back() == '%') {
+                try {
+                    f.dim_end.value = std::stof(sval.substr(0, sval.size() - 1));
+                    f.dim_end.unit = pulp::view::DimensionUnit::percent;
+                } catch (...) { /* keep current */ }
+            } else {
+                f.dim_end.value = (float)val;
+                f.dim_end.unit = pulp::view::DimensionUnit::px;
+            }
+        }
+        // pulp #1542 — node writing direction. Distinct from
+        // `direction` (which is flex-direction). Accepts `'ltr'`,
+        // `'rtl'`, `'inherit'`. Anything else reverts to `inherit`.
+        else if (key == "direction_writing") {
+            auto a = args.get<std::string>(2, "inherit");
+            if (a == "ltr")      f.writing_direction = pulp::view::FlexStyle::WritingDirection::ltr;
+            else if (a == "rtl") f.writing_direction = pulp::view::FlexStyle::WritingDirection::rtl;
+            else                 f.writing_direction = pulp::view::FlexStyle::WritingDirection::inherit;
+        }
         // Directional gap
         else if (key == "row_gap") f.row_gap = (float)val;
         else if (key == "column_gap") f.column_gap = (float)val;
@@ -4079,6 +4177,36 @@ void WidgetBridge::register_api() {
             return choc::value::Value();
         });
 
+    // pulp #1517 — background sub-property setters. Storage-only today;
+    // see View::set_background_{attachment,clip,origin}() doc for the
+    // partial-vs-noop semantics. Wiring them here unblocks the JS shim
+    // path and lets the catalog honestly report `noop` / `partial`
+    // instead of `missing`.
+    engine_.register_function("setBackgroundAttachment",
+        [this](choc::javascript::ArgumentList args) {
+            auto id = args.get<std::string>(0, "");
+            auto kw = args.get<std::string>(1, "");
+            auto* v = id.empty() ? &root_ : widget(id);
+            if (v) v->set_background_attachment(kw);
+            return choc::value::Value();
+        });
+    engine_.register_function("setBackgroundClip",
+        [this](choc::javascript::ArgumentList args) {
+            auto id = args.get<std::string>(0, "");
+            auto kw = args.get<std::string>(1, "");
+            auto* v = id.empty() ? &root_ : widget(id);
+            if (v) v->set_background_clip(kw);
+            return choc::value::Value();
+        });
+    engine_.register_function("setBackgroundOrigin",
+        [this](choc::javascript::ArgumentList args) {
+            auto id = args.get<std::string>(0, "");
+            auto kw = args.get<std::string>(1, "");
+            auto* v = id.empty() ? &root_ : widget(id);
+            if (v) v->set_background_origin(kw);
+            return choc::value::Value();
+        });
+
     // setBackgroundGradient(id, "linear-gradient(to right, #ff0000, #0000ff)")
     engine_.register_function("setBackgroundGradient", [this, parseColor](choc::javascript::ArgumentList args) {
         auto id = args.get<std::string>(0, "");
@@ -4734,6 +4862,34 @@ void WidgetBridge::register_api() {
             cmd.x = (float)args.get<double>(1, 0); cmd.y = (float)args.get<double>(2, 0);
             cmd.extra = (float)args.get<double>(3, 50); // radius
             for (int i = 4; i + 1 < static_cast<int>(args.numArgs); i += 2) {
+                cmd.gradient_colors.push_back(parseColor(args.get<std::string>(i, "#fff")));
+                cmd.gradient_positions.push_back((float)args.get<double>(i + 1, 0));
+            }
+            c->add_command(cmd);
+        }
+        return choc::value::Value();
+    });
+
+    // pulp #1524 — true two-circle radial gradient. Skia routes through
+    // SkGradientShader::MakeTwoPointConical; CG routes through
+    // CGContextDrawRadialGradient with both circles wired (the prior
+    // single-circle bridge silently dropped (x0, y0, r0) which broke
+    // offset / sized inner-circle gradients on both backends).
+    // Args: (id, x0, y0, r0, x1, y1, r1, color1, pos1, color2, pos2, ...)
+    engine_.register_function("canvasSetRadialGradientTwoCircles",
+            [this, parseColor](choc::javascript::ArgumentList args) {
+        if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
+            CanvasDrawCmd cmd;
+            cmd.type = CanvasDrawCmd::Type::set_fill_gradient_radial_two_circles;
+            // Inner circle (x0, y0, r0) → (x, y, extra).
+            cmd.x = (float)args.get<double>(1, 0);
+            cmd.y = (float)args.get<double>(2, 0);
+            cmd.extra = (float)args.get<double>(3, 0);
+            // Outer circle (x1, y1, r1) → (x2, y2, w).
+            cmd.x2 = (float)args.get<double>(4, 0);
+            cmd.y2 = (float)args.get<double>(5, 0);
+            cmd.w  = (float)args.get<double>(6, 50);
+            for (int i = 7; i + 1 < static_cast<int>(args.numArgs); i += 2) {
                 cmd.gradient_colors.push_back(parseColor(args.get<std::string>(i, "#fff")));
                 cmd.gradient_positions.push_back((float)args.get<double>(i + 1, 0));
             }
