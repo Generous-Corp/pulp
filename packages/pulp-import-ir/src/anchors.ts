@@ -68,8 +68,18 @@ export interface PreAnchorIRNode {
 /**
  * Generate a stable_anchor_id for `node` according to `strategy`.
  *
- * - `content-hash`: hash of (tag, role, normalized text, depth).
- *   Survives reorder; brittle to text edits.
+ * - `content-hash`: hash of (tag, role, normalized text, depth,
+ *   indexAmongSameSignatureSiblings). The duplicate-sibling discriminator is
+ *   the Nth-occurrence of this exact `{tag, role, text}` triple within the
+ *   parent's child list — that index is stable across re-imports of the
+ *   SAME source HTML (the Nth duplicate is still the Nth duplicate even if
+ *   non-matching siblings are reordered) and disambiguates repeated labels
+ *   / buttons that previously collided on a single anchor. Reordering of
+ *   *same-signature* siblings still rotates the Nth-of-each, which is the
+ *   inherent limit of content-hash without parent context — designers who
+ *   need stricter stability across reorder of duplicates should opt into
+ *   the `path` strategy instead.
+ *   Survives reorder of unrelated siblings; brittle to text edits.
  * - `path`: `Tag[idx]/Tag[idx]/...` from root.
  *   Survives text edits; brittle to reorder + sibling insert.
  * - `adapter`: `<adapter-name>:<source_node_id>`.
@@ -83,6 +93,7 @@ export function generateAnchorId(
     strategy: AnchorStrategy,
     parentAnchorId: string = '',
     siblingTagCounter: Map<string, number> = new Map(),
+    indexAmongSameSignatureSiblings: number = 0,
 ): string {
     if (node.meta?.anchor_id_override) {
         return node.meta.anchor_id_override;
@@ -107,7 +118,28 @@ export function generateAnchorId(
     const tag = node.tag;
     const role = node.meta?.role ?? '';
     const text = (node.text?.text ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
-    return hashCodeAsString({ tag, role, text, depth });
+    return hashCodeAsString({
+        tag,
+        role,
+        text,
+        depth,
+        sigIndex: indexAmongSameSignatureSiblings,
+    });
+}
+
+/**
+ * Compute the normalized content-hash signature key for a node — exactly
+ * the {tag, role, text} triple the hash uses, so siblings with the same
+ * triple can be counted before walking. Kept private to the module since
+ * it must mirror the field set used inside `generateAnchorId`.
+ */
+function contentHashSignatureKey(node: PreAnchorIRNode): string {
+    const tag = node.tag;
+    const role = node.meta?.role ?? '';
+    const text = (node.text?.text ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
+    // JSON-encode each field so collisions like {tag:'ab', role:''} vs.
+    // {tag:'a', role:'b'} cannot collapse to the same key.
+    return JSON.stringify([tag, role, text]);
 }
 
 /**
@@ -135,6 +167,7 @@ function walk<T extends PreAnchorIRNode>(
     parentAnchor: string,
     out: Map<T, string>,
     strategy: AnchorStrategy,
+    sigIndex: number = 0,
 ): void {
     const id = generateAnchorId(
         node,
@@ -147,6 +180,7 @@ function walk<T extends PreAnchorIRNode>(
         // children — we re-build it per child-index so the count
         // matches "previous siblings of the same tag".
         countSiblingTags(parent, parentChildIndex),
+        sigIndex,
     );
     out.set(node, id);
 
@@ -155,9 +189,24 @@ function walk<T extends PreAnchorIRNode>(
     // generate independently.
     const childParentAnchor = strategy === 'path' ? id : '';
 
+    // For content-hash, count how many earlier siblings share the same
+    // {tag, role, text} signature so each duplicate gets a distinct
+    // discriminator. The Nth duplicate stays the Nth duplicate across
+    // re-imports of the same source HTML, which is exactly the
+    // stability property we need.
+    const sigCounts = new Map<string, number>();
     for (let i = 0; i < node.children.length; i++) {
         const c = node.children[i] as T;
-        walk(c, node, i, depth + 1, childParentAnchor, out, strategy);
+        const childSigIndex =
+            strategy === 'content-hash'
+                ? (() => {
+                      const key = contentHashSignatureKey(c);
+                      const n = sigCounts.get(key) ?? 0;
+                      sigCounts.set(key, n + 1);
+                      return n;
+                  })()
+                : 0;
+        walk(c, node, i, depth + 1, childParentAnchor, out, strategy, childSigIndex);
     }
 }
 

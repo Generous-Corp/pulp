@@ -67,6 +67,28 @@ export interface FlexProps {
     /// pulp #1434 batch 4 — `marginVertical` fans out to `marginTop` +
     /// `marginBottom`.
     marginVertical?: number | string;
+    /// pulp #1434 rn logical-edge bundle (sub-agent #27 finding) —
+    /// CSS-spec-equivalent flow props. LTR-only fast path:
+    /// Start → Left, End → Right. RTL deferred to a future direction
+    /// system. Values are number (px), percent string, or `'auto'` on
+    /// margin (matches the per-edge surface).
+    marginStart?: number | string;
+    marginEnd?: number | string;
+    paddingStart?: number | string;
+    paddingEnd?: number | string;
+    borderStartWidth?: number;
+    borderEndWidth?: number;
+    /// CSS positional logical aliases. LTR: start → left, end → right.
+    start?: number | string;
+    end?: number | string;
+    /// CSS `inset` shorthand: `'10px'`, `'10px 20px'`, etc. Fans out
+    /// to top/right/bottom/left via the same expansion rules as
+    /// `margin` / `padding`.
+    inset?: number | string;
+    /// CSS `inset-block` → top + bottom.
+    insetBlock?: number | string;
+    /// CSS `inset-inline` → left + right (LTR).
+    insetInline?: number | string;
     flexGrow?: number;
     flexShrink?: number;
     /// pulp #1434 (rn batch C) — accepts number (px), percentage string
@@ -74,7 +96,10 @@ export interface FlexProps {
     /// `YGNodeStyleSetFlexBasisAuto`; percent maps to
     /// `YGNodeStyleSetFlexBasisPercent`.
     flexBasis?: number | string;
-    flexWrap?: boolean;
+    /// pulp #1434 Triage #14 — accept boolean (legacy true/false) or
+    /// the CSS keyword string. `"wrap-reverse"` routes through Yoga's
+    /// YGWrapWrapReverse path; previously coerced to plain `wrap`.
+    flexWrap?: boolean | 'wrap' | 'nowrap' | 'no-wrap' | 'wrap-reverse';
     order?: number;
     /// pulp #1434 (rn batch C) — number (px) or percent string
     /// (`'100%'`). Yoga's percent API is dispatched on
@@ -140,6 +165,10 @@ export interface StyleProps {
     /// pulp #1434 rn bridge-wires bundle — 7 props that already had C++
     /// bridge fns but no @pulp/react JSX dispatch. Each forwards the
     /// keyword / string straight through to the matching setter.
+    /// (cursor / pointerEvents / userSelect superset of the small-wins
+    /// bundle (Triage #7 / #12 / #13) — types kept trimmed to the
+    /// actual bridge surface; broader CSS spec values are documented as
+    /// over-claims in the catalog.)
     backfaceVisibility?: 'hidden' | 'visible';
     cursor?: string;
     filter?: string;
@@ -151,6 +180,26 @@ export interface StyleProps {
     /// dispatching.
     transformOrigin?: string;
     userSelect?: 'none' | 'text' | 'all';
+    /// pulp #1434 Phase A2-2 — CSS Grid surface. Grid props live on
+    /// StyleProps so JSX can express `display: grid` layouts directly.
+    /// Bridge handles template-track parsing, named-area parsing, and
+    /// the grid-area shorthand.
+    gridTemplateColumns?: string;
+    gridTemplateRows?: string;
+    gridTemplateAreas?: string;
+    gridAutoColumns?: string;
+    gridAutoRows?: string;
+    gridAutoFlow?: 'row' | 'column' | 'row dense' | 'column dense' | 'dense';
+    gridArea?: string;
+    gridColumn?: string;
+    gridRow?: string;
+    gridColumnStart?: number;
+    gridColumnEnd?: number;
+    gridRowStart?: number;
+    gridRowEnd?: number;
+    gridGap?: number;
+    gridColumnGap?: number;
+    gridRowGap?: number;
     /// CSS / RN `display` keyword (pulp #1434 Triage #12). `'none'`
     /// hides the View (sets visible=false). `'flex'` is pulp's
     /// implicit default and is accepted as a no-op confirmation. Other

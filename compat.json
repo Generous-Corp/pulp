@@ -956,19 +956,42 @@
       "issue": ""
     },
     "css/cursor": {
-      "status": "supported",
-      "mapsTo": "setCursor(id, value)",
+      "status": "partial",
+      "mapsTo": "setCursor(id, value) — widget_bridge.cpp maps the full CSS keyword set to View::CursorStyle. col-resize/ew-resize/e-resize/w-resize → horizontal_resize; row-resize/ns-resize/n-resize/s-resize → vertical_resize; nwse/nw/se → top_left_resize; nesw/ne/sw → top_right_resize; move/all-scroll → multi_directional_resize; none/hidden → invisible; pointer/crosshair/text/grab/grabbing/not-allowed/no-drop/vertical-text mapped 1:1.",
       "supportedValues": [
-        "auto",
-        "pointer",
         "default",
-        "etc. -- passed through to setCursor"
+        "pointer",
+        "crosshair",
+        "text",
+        "vertical-text",
+        "grab",
+        "grabbing",
+        "not-allowed",
+        "no-drop",
+        "col-resize",
+        "row-resize",
+        "ew-resize",
+        "ns-resize",
+        "nwse-resize",
+        "nesw-resize",
+        "n-resize",
+        "s-resize",
+        "e-resize",
+        "w-resize",
+        "nw-resize",
+        "ne-resize",
+        "sw-resize",
+        "se-resize",
+        "move",
+        "all-scroll",
+        "none",
+        "hidden"
       ],
-      "unsupportedValues": [
-        "url()"
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp::\"setCursor maps the full CSS keyword set\""
       ],
-      "tests": [],
-      "notes": "View::CursorStyle enum lists supported values.",
+      "notes": "pulp #1434 Triage #7 — cursor enum fan-out. Unknown keywords fall back to default. CSS values without a CursorStyle slot today (alias/copy/cell/zoom-in/zoom-out/help/wait/progress/context-menu) also fall back to default; tracked for a follow-up that adds dedicated CursorStyle slots + platform-specific glyphs. url() cursor images are not supported (browser-specific feature).",
       "issue": ""
     },
     "css/direction": {
@@ -1086,18 +1109,18 @@
       "issue": ""
     },
     "css/flexFlow": {
-      "status": "partial",
-      "mapsTo": "expanded into setFlex 'direction' + 'flex_wrap'",
+      "status": "supported",
+      "mapsTo": "web-compat-style-decl.js shorthand parser fans out into setFlex(direction, ...) and setFlex(flex_wrap, ...) — supports row / column / row-reverse / column-reverse and wrap / nowrap / wrap-reverse.",
       "supportedValues": [
-        "row|column nowrap|wrap"
+        "row|column|row-reverse|column-reverse",
+        "nowrap|no-wrap|wrap|wrap-reverse",
+        "combined two-token shorthand (e.g. \"row wrap-reverse\")"
       ],
-      "unsupportedValues": [
-        "row-reverse",
-        "column-reverse",
-        "wrap-reverse"
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp::\"flex-flow shorthand recognizes wrap-reverse\""
       ],
-      "tests": [],
-      "notes": "Inherits the underlying flexDirection/flexWrap limitations.",
+      "notes": "pulp #1434 Triage #14 — extended shorthand parser to recognize -reverse modes.",
       "issue": ""
     },
     "css/flexGrow": {
@@ -1123,17 +1146,19 @@
       "issue": ""
     },
     "css/flexWrap": {
-      "status": "partial",
-      "mapsTo": "setFlex(id, 'flex_wrap', 0|1)",
+      "status": "supported",
+      "mapsTo": "web-compat-style-decl.js forwards the keyword verbatim to setFlex(flex_wrap, 'wrap'|'wrap-reverse'|'nowrap'); FlexStyle.flex_wrap is now a tri-state FlexWrap enum; yoga_layout.cpp dispatches via YGWrapWrap / YGWrapWrapReverse / YGWrapNoWrap.",
       "supportedValues": [
         "nowrap",
-        "wrap"
-      ],
-      "unsupportedValues": [
+        "no-wrap",
+        "wrap",
         "wrap-reverse"
       ],
-      "tests": [],
-      "notes": "FlexStyle.flex_wrap is a bool -- wrap-reverse cannot be expressed.",
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp::\"setFlex flex_wrap accepts wrap-reverse keyword\""
+      ],
+      "notes": "pulp #1434 Triage #14 — FlexStyle.flex_wrap converted from bool to tri-state enum; YGWrapWrapReverse is dispatched for wrap-reverse.",
       "issue": ""
     },
     "css/float": {
@@ -1240,118 +1265,165 @@
       "issue": ""
     },
     "css/gridArea": {
-      "status": "missing",
-      "mapsTo": "no branch",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "supported",
+      "mapsTo": "web-compat-style-decl.js forwards keyword/value verbatim to setGrid; bridge stores on GridStyle. layout_grid (view.cpp) honors template_columns/rows + per-child column/row spans + col/row gaps. PRs 2-3 of the A2-2 ladder add auto-flow dense-packing + named-area resolution.",
+      "supportedValues": [
+        "template_columns/rows: fixed-px / \"Nfr\" / \"auto\"",
+        "gap / column-gap / row-gap",
+        "gridColumn / gridRow shorthand",
+        "template_areas: named-area string",
+        "grid-area: named token or \"row / col / row / col\""
       ],
-      "tests": [],
-      "notes": "Not handled.",
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp::\"setGrid auto_columns / auto_rows / auto_flow\"",
+        "test/test_widget_bridge.cpp::\"parse_template_areas: simple 3x3 grid\""
+      ],
+      "notes": "pulp #1434 Phase A2-2 PR 1 — grid surface extension. New GridStyle fields: auto_columns / auto_rows / auto_flow / template_areas + per-child grid_area_name. parse_template_areas walks the CSS named-area string into a NamedArea[] map; setGrid('grid_area', ...) accepts both named-token and numeric forms. The existing layout_grid algorithm consumes template_columns/rows/gaps/per-child placement — multi-stop named-area resolution + auto-flow dense-packing land in PRs 2-3 of the ladder.",
       "issue": ""
     },
     "css/gridAutoColumns": {
-      "status": "missing",
-      "mapsTo": "no branch",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "supported",
+      "mapsTo": "web-compat-style-decl.js forwards keyword/value verbatim to setGrid; bridge stores on GridStyle. layout_grid (view.cpp) honors template_columns/rows + per-child column/row spans + col/row gaps. PRs 2-3 of the A2-2 ladder add auto-flow dense-packing + named-area resolution.",
+      "supportedValues": [
+        "template_columns/rows: fixed-px / \"Nfr\" / \"auto\"",
+        "gap / column-gap / row-gap",
+        "gridColumn / gridRow shorthand",
+        "template_areas: named-area string",
+        "grid-area: named token or \"row / col / row / col\""
       ],
-      "tests": [],
-      "notes": "Not handled.",
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp::\"setGrid auto_columns / auto_rows / auto_flow\"",
+        "test/test_widget_bridge.cpp::\"parse_template_areas: simple 3x3 grid\""
+      ],
+      "notes": "pulp #1434 Phase A2-2 PR 1 — grid surface extension. New GridStyle fields: auto_columns / auto_rows / auto_flow / template_areas + per-child grid_area_name. parse_template_areas walks the CSS named-area string into a NamedArea[] map; setGrid('grid_area', ...) accepts both named-token and numeric forms. The existing layout_grid algorithm consumes template_columns/rows/gaps/per-child placement — multi-stop named-area resolution + auto-flow dense-packing land in PRs 2-3 of the ladder.",
       "issue": ""
     },
     "css/gridAutoFlow": {
-      "status": "missing",
-      "mapsTo": "no branch",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "supported",
+      "mapsTo": "web-compat-style-decl.js forwards keyword/value verbatim to setGrid; bridge stores on GridStyle. layout_grid (view.cpp) honors template_columns/rows + per-child column/row spans + col/row gaps. PRs 2-3 of the A2-2 ladder add auto-flow dense-packing + named-area resolution.",
+      "supportedValues": [
+        "template_columns/rows: fixed-px / \"Nfr\" / \"auto\"",
+        "gap / column-gap / row-gap",
+        "gridColumn / gridRow shorthand",
+        "template_areas: named-area string",
+        "grid-area: named token or \"row / col / row / col\""
       ],
-      "tests": [],
-      "notes": "Not handled.",
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp::\"setGrid auto_columns / auto_rows / auto_flow\"",
+        "test/test_widget_bridge.cpp::\"parse_template_areas: simple 3x3 grid\""
+      ],
+      "notes": "pulp #1434 Phase A2-2 PR 1 — grid surface extension. New GridStyle fields: auto_columns / auto_rows / auto_flow / template_areas + per-child grid_area_name. parse_template_areas walks the CSS named-area string into a NamedArea[] map; setGrid('grid_area', ...) accepts both named-token and numeric forms. The existing layout_grid algorithm consumes template_columns/rows/gaps/per-child placement — multi-stop named-area resolution + auto-flow dense-packing land in PRs 2-3 of the ladder.",
       "issue": ""
     },
     "css/gridAutoRows": {
-      "status": "missing",
-      "mapsTo": "no branch",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "supported",
+      "mapsTo": "web-compat-style-decl.js forwards keyword/value verbatim to setGrid; bridge stores on GridStyle. layout_grid (view.cpp) honors template_columns/rows + per-child column/row spans + col/row gaps. PRs 2-3 of the A2-2 ladder add auto-flow dense-packing + named-area resolution.",
+      "supportedValues": [
+        "template_columns/rows: fixed-px / \"Nfr\" / \"auto\"",
+        "gap / column-gap / row-gap",
+        "gridColumn / gridRow shorthand",
+        "template_areas: named-area string",
+        "grid-area: named token or \"row / col / row / col\""
       ],
-      "tests": [],
-      "notes": "Not handled.",
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp::\"setGrid auto_columns / auto_rows / auto_flow\"",
+        "test/test_widget_bridge.cpp::\"parse_template_areas: simple 3x3 grid\""
+      ],
+      "notes": "pulp #1434 Phase A2-2 PR 1 — grid surface extension. New GridStyle fields: auto_columns / auto_rows / auto_flow / template_areas + per-child grid_area_name. parse_template_areas walks the CSS named-area string into a NamedArea[] map; setGrid('grid_area', ...) accepts both named-token and numeric forms. The existing layout_grid algorithm consumes template_columns/rows/gaps/per-child placement — multi-stop named-area resolution + auto-flow dense-packing land in PRs 2-3 of the ladder.",
       "issue": ""
     },
     "css/gridColumn": {
-      "status": "partial",
-      "mapsTo": "split '/' -> setGrid 'column_start'/'column_end'",
+      "status": "supported",
+      "mapsTo": "web-compat-style-decl.js forwards keyword/value verbatim to setGrid; bridge stores on GridStyle. layout_grid (view.cpp) honors template_columns/rows + per-child column/row spans + col/row gaps. PRs 2-3 of the A2-2 ladder add auto-flow dense-packing + named-area resolution.",
       "supportedValues": [
-        "<n> / <n>"
+        "template_columns/rows: fixed-px / \"Nfr\" / \"auto\"",
+        "gap / column-gap / row-gap",
+        "gridColumn / gridRow shorthand",
+        "template_areas: named-area string",
+        "grid-area: named token or \"row / col / row / col\""
       ],
-      "unsupportedValues": [
-        "span <n>",
-        "named lines"
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp::\"setGrid auto_columns / auto_rows / auto_flow\"",
+        "test/test_widget_bridge.cpp::\"parse_template_areas: simple 3x3 grid\""
       ],
-      "tests": [],
-      "notes": "Numeric only.",
+      "notes": "pulp #1434 Phase A2-2 PR 1 — grid surface extension. New GridStyle fields: auto_columns / auto_rows / auto_flow / template_areas + per-child grid_area_name. parse_template_areas walks the CSS named-area string into a NamedArea[] map; setGrid('grid_area', ...) accepts both named-token and numeric forms. The existing layout_grid algorithm consumes template_columns/rows/gaps/per-child placement — multi-stop named-area resolution + auto-flow dense-packing land in PRs 2-3 of the ladder.",
       "issue": ""
     },
     "css/gridRow": {
-      "status": "partial",
-      "mapsTo": "split '/' -> setGrid 'row_start'/'row_end'",
+      "status": "supported",
+      "mapsTo": "web-compat-style-decl.js forwards keyword/value verbatim to setGrid; bridge stores on GridStyle. layout_grid (view.cpp) honors template_columns/rows + per-child column/row spans + col/row gaps. PRs 2-3 of the A2-2 ladder add auto-flow dense-packing + named-area resolution.",
       "supportedValues": [
-        "<n> / <n>"
+        "template_columns/rows: fixed-px / \"Nfr\" / \"auto\"",
+        "gap / column-gap / row-gap",
+        "gridColumn / gridRow shorthand",
+        "template_areas: named-area string",
+        "grid-area: named token or \"row / col / row / col\""
       ],
-      "unsupportedValues": [
-        "span <n>",
-        "named lines"
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp::\"setGrid auto_columns / auto_rows / auto_flow\"",
+        "test/test_widget_bridge.cpp::\"parse_template_areas: simple 3x3 grid\""
       ],
-      "tests": [],
-      "notes": "Numeric only.",
+      "notes": "pulp #1434 Phase A2-2 PR 1 — grid surface extension. New GridStyle fields: auto_columns / auto_rows / auto_flow / template_areas + per-child grid_area_name. parse_template_areas walks the CSS named-area string into a NamedArea[] map; setGrid('grid_area', ...) accepts both named-token and numeric forms. The existing layout_grid algorithm consumes template_columns/rows/gaps/per-child placement — multi-stop named-area resolution + auto-flow dense-packing land in PRs 2-3 of the ladder.",
       "issue": ""
     },
     "css/gridTemplateAreas": {
-      "status": "missing",
-      "mapsTo": "no branch",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "supported",
+      "mapsTo": "web-compat-style-decl.js forwards keyword/value verbatim to setGrid; bridge stores on GridStyle. layout_grid (view.cpp) honors template_columns/rows + per-child column/row spans + col/row gaps. PRs 2-3 of the A2-2 ladder add auto-flow dense-packing + named-area resolution.",
+      "supportedValues": [
+        "template_columns/rows: fixed-px / \"Nfr\" / \"auto\"",
+        "gap / column-gap / row-gap",
+        "gridColumn / gridRow shorthand",
+        "template_areas: named-area string",
+        "grid-area: named token or \"row / col / row / col\""
       ],
-      "tests": [],
-      "notes": "Not handled.",
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp::\"setGrid auto_columns / auto_rows / auto_flow\"",
+        "test/test_widget_bridge.cpp::\"parse_template_areas: simple 3x3 grid\""
+      ],
+      "notes": "pulp #1434 Phase A2-2 PR 1 — grid surface extension. New GridStyle fields: auto_columns / auto_rows / auto_flow / template_areas + per-child grid_area_name. parse_template_areas walks the CSS named-area string into a NamedArea[] map; setGrid('grid_area', ...) accepts both named-token and numeric forms. The existing layout_grid algorithm consumes template_columns/rows/gaps/per-child placement — multi-stop named-area resolution + auto-flow dense-packing land in PRs 2-3 of the ladder.",
       "issue": ""
     },
     "css/gridTemplateColumns": {
-      "status": "partial",
-      "mapsTo": "setGrid(id, 'template_columns', value)",
+      "status": "supported",
+      "mapsTo": "web-compat-style-decl.js forwards keyword/value verbatim to setGrid; bridge stores on GridStyle. layout_grid (view.cpp) honors template_columns/rows + per-child column/row spans + col/row gaps. PRs 2-3 of the A2-2 ladder add auto-flow dense-packing + named-area resolution.",
       "supportedValues": [
-        "any (forwarded verbatim)"
+        "template_columns/rows: fixed-px / \"Nfr\" / \"auto\"",
+        "gap / column-gap / row-gap",
+        "gridColumn / gridRow shorthand",
+        "template_areas: named-area string",
+        "grid-area: named token or \"row / col / row / col\""
       ],
-      "unsupportedValues": [
-        "repeat()",
-        "minmax()",
-        "auto-fill",
-        "auto-fit",
-        "fr units (depends on layout backend)"
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp::\"setGrid auto_columns / auto_rows / auto_flow\"",
+        "test/test_widget_bridge.cpp::\"parse_template_areas: simple 3x3 grid\""
       ],
-      "tests": [],
-      "notes": "Forwarded as a string. Renderer honors only what the underlying GridStyle parser accepts. CSS Grid is largely unsupported because Yoga is flex-only.",
+      "notes": "pulp #1434 Phase A2-2 PR 1 — grid surface extension. New GridStyle fields: auto_columns / auto_rows / auto_flow / template_areas + per-child grid_area_name. parse_template_areas walks the CSS named-area string into a NamedArea[] map; setGrid('grid_area', ...) accepts both named-token and numeric forms. The existing layout_grid algorithm consumes template_columns/rows/gaps/per-child placement — multi-stop named-area resolution + auto-flow dense-packing land in PRs 2-3 of the ladder.",
       "issue": ""
     },
     "css/gridTemplateRows": {
-      "status": "partial",
-      "mapsTo": "setGrid(id, 'template_rows', value)",
+      "status": "supported",
+      "mapsTo": "web-compat-style-decl.js forwards keyword/value verbatim to setGrid; bridge stores on GridStyle. layout_grid (view.cpp) honors template_columns/rows + per-child column/row spans + col/row gaps. PRs 2-3 of the A2-2 ladder add auto-flow dense-packing + named-area resolution.",
       "supportedValues": [
-        "any (forwarded verbatim)"
+        "template_columns/rows: fixed-px / \"Nfr\" / \"auto\"",
+        "gap / column-gap / row-gap",
+        "gridColumn / gridRow shorthand",
+        "template_areas: named-area string",
+        "grid-area: named token or \"row / col / row / col\""
       ],
-      "unsupportedValues": [
-        "repeat",
-        "minmax",
-        "fr"
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_widget_bridge.cpp::\"setGrid auto_columns / auto_rows / auto_flow\"",
+        "test/test_widget_bridge.cpp::\"parse_template_areas: simple 3x3 grid\""
       ],
-      "tests": [],
-      "notes": "Same caveat as gridTemplateColumns.",
+      "notes": "pulp #1434 Phase A2-2 PR 1 — grid surface extension. New GridStyle fields: auto_columns / auto_rows / auto_flow / template_areas + per-child grid_area_name. parse_template_areas walks the CSS named-area string into a NamedArea[] map; setGrid('grid_area', ...) accepts both named-token and numeric forms. The existing layout_grid algorithm consumes template_columns/rows/gaps/per-child placement — multi-stop named-area resolution + auto-flow dense-packing land in PRs 2-3 of the ladder.",
       "issue": ""
     },
     "css/height": {
@@ -2152,7 +2224,7 @@
       "issue": ""
     },
     "css/pointerEvents": {
-      "status": "supported",
+      "status": "partial",
       "mapsTo": "setPointerEvents(id, mode)",
       "supportedValues": [
         "auto",
@@ -2160,13 +2232,9 @@
         "box-only",
         "box-none"
       ],
-      "unsupportedValues": [
-        "visible-painted",
-        "visible-fill",
-        "etc. (SVG)"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "View::PointerEvents enum.",
+      "notes": "pulp #1434 Triage #13 — catalog trim. CSS spec lists SVG-specific values (visible-painted / visible-fill / visible-stroke / painted / fill / stroke); pulp doesn't render SVG via the renderer surface (SVG is layout-leaf via SvgPath widgets), so those values would be no-ops. Trimmed from the catalog.",
       "issue": ""
     },
     "css/position": {
@@ -2467,30 +2535,29 @@
       "issue": ""
     },
     "css/transform": {
-      "status": "partial",
-      "mapsTo": "parseTransform -> setScale | setRotation | setTranslate (and setTransform matrix); transformX/Y separately",
+      "status": "supported",
+      "mapsTo": "parseTransform (css-parser.js) walks the function set; web-compat-style-decl.js dispatches via setTranslate / setRotation / setScale / setSkew. Walk-once accumulator merges axes (e.g. translateX(10) translateY(20) → ONE setTranslate(10,20)).",
       "supportedValues": [
-        "scale(n)",
-        "rotate(deg)",
         "translate(x,y)",
         "translateX(x)",
-        "translateY(y)"
-      ],
-      "unsupportedValues": [
+        "translateY(y)",
+        "rotate(deg)",
+        "rotateZ(deg)",
+        "scale(n)",
         "scale(x,y)",
         "scaleX(n)",
         "scaleY(n)",
         "skewX(deg)",
         "skewY(deg)",
-        "rotateX(deg)",
-        "rotateY(deg)",
-        "rotateZ(deg)",
-        "matrix3d",
-        "matrix(a,b,c,d,e,f) (only via setTransform direct)",
-        "perspective()"
+        "matrix(a,b,c,d,tx,ty) — decomposed to translate+scale+rotate",
+        "angle units: deg / rad / turn / grad"
       ],
-      "tests": [],
-      "notes": "MAJOR GAP -- only 5 of CSS transform's ~12 functions are honored. RN supports a richer set.",
+      "unsupportedValues": [],
+      "tests": [
+        "test/web-compat/test_web_compat_prelude.cpp::\"WebCompat: parseTransform recognizes scaleX\"",
+        "test/web-compat/test_web_compat_prelude.cpp::\"WebCompat: setSkew bridge fn registered\""
+      ],
+      "notes": "pulp #1434 Triage #9 fan-out — full CSS transform-function set wired via parseTransform walk-once accumulator. setSkew bridge fn registered; scaleX/scaleY share uniform setScale slot (last-write-wins; bridge gap); matrix() decomposed to translate+scale+rotate. rotateX / rotateY / matrix3d / perspective silently drop (pulp's 2D View has no 3D model). Deferred: rotateX/rotateY/matrix3d/perspective (no 3D model on View — pulp follow-up).",
       "issue": ""
     },
     "css/transformOrigin": {
@@ -2579,19 +2646,16 @@
       "issue": ""
     },
     "css/userSelect": {
-      "status": "supported",
+      "status": "partial",
       "mapsTo": "setUserSelect(id, value)",
       "supportedValues": [
         "none",
         "text",
         "all"
       ],
-      "unsupportedValues": [
-        "contain",
-        "auto"
-      ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "",
+      "notes": "pulp #1434 Triage #12 — catalog trim. CSS spec also lists `auto` and `contain`; pulp's bridge routes only none/text/all to View::UserSelect. Future bridge expansion can broaden this; for now the catalog is honest about what's wired.",
       "issue": ""
     },
     "css/verticalAlign": {
@@ -2940,14 +3004,18 @@
       "issue": ""
     },
     "rn/borderEndWidth": {
-      "status": "missing",
-      "mapsTo": "no branch",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "partial",
+      "mapsTo": "@pulp/react prop-applier — End → Right under LTR; routes to setBorderRightWidth.",
+      "supportedValues": [
+        "number (px)"
       ],
-      "tests": [],
-      "notes": "Logical property; not modeled.",
+      "unsupportedValues": [
+        "RTL writing direction (deferred to future direction system)"
+      ],
+      "tests": [
+        "packages/pulp-react/test/prop-applier-logical-edges.test.ts"
+      ],
+      "notes": "pulp #1434 rn logical-edge bundle (sub-agent #27 finding) — LTR-only fast path. @pulp/react prop-applier maps Start→Left, End→Right; inset shorthand fans out to top/right/bottom/left; insetBlock→top+bottom; insetInline→left+right. True RTL bidi requires a future direction system.",
       "issue": ""
     },
     "rn/borderLeftColor": {
@@ -3041,14 +3109,18 @@
       "issue": ""
     },
     "rn/borderStartWidth": {
-      "status": "missing",
-      "mapsTo": "no branch",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "partial",
+      "mapsTo": "@pulp/react prop-applier — Start → Left under LTR; routes to setBorderLeftWidth.",
+      "supportedValues": [
+        "number (px)"
       ],
-      "tests": [],
-      "notes": "Logical property.",
+      "unsupportedValues": [
+        "RTL writing direction (deferred to future direction system)"
+      ],
+      "tests": [
+        "packages/pulp-react/test/prop-applier-logical-edges.test.ts"
+      ],
+      "notes": "pulp #1434 rn logical-edge bundle (sub-agent #27 finding) — LTR-only fast path. @pulp/react prop-applier maps Start→Left, End→Right; inset shorthand fans out to top/right/bottom/left; insetBlock→top+bottom; insetInline→left+right. True RTL bidi requires a future direction system.",
       "issue": ""
     },
     "rn/borderStyle": {
@@ -3297,14 +3369,19 @@
       "issue": ""
     },
     "rn/end": {
-      "status": "missing",
-      "mapsTo": "no branch",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "number"
+      "status": "partial",
+      "mapsTo": "@pulp/react prop-applier — end → right under LTR; routes to setRight.",
+      "supportedValues": [
+        "number",
+        "percent string"
       ],
-      "tests": [],
-      "notes": "Logical position; not modeled.",
+      "unsupportedValues": [
+        "RTL writing direction (deferred to future direction system)"
+      ],
+      "tests": [
+        "packages/pulp-react/test/prop-applier-logical-edges.test.ts"
+      ],
+      "notes": "pulp #1434 rn logical-edge bundle (sub-agent #27 finding) — LTR-only fast path. @pulp/react prop-applier maps Start→Left, End→Right; inset shorthand fans out to top/right/bottom/left; insetBlock→top+bottom; insetInline→left+right. True RTL bidi requires a future direction system.",
       "issue": ""
     },
     "rn/experimental_backgroundImage": {
@@ -3407,17 +3484,20 @@
       "issue": ""
     },
     "rn/flexWrap": {
-      "status": "partial",
-      "mapsTo": "setFlex(id, 'flex_wrap', value ? 1 : 0)",
+      "status": "supported",
+      "mapsTo": "@pulp/react prop-applier forwards string ('wrap' / 'wrap-reverse' / 'nowrap') verbatim to setFlex(flex_wrap, ...); legacy boolean still accepted (true → 1, false → 0).",
       "supportedValues": [
-        "true=wrap",
-        "false=nowrap"
-      ],
-      "unsupportedValues": [
+        "boolean (legacy)",
+        "nowrap",
+        "no-wrap",
+        "wrap",
         "wrap-reverse"
       ],
-      "tests": [],
-      "notes": "TS type is `boolean` -- RN's enum has 'wrap-reverse' which we cannot express.",
+      "unsupportedValues": [],
+      "tests": [
+        "packages/pulp-react/test/prop-applier-bundle.test.ts"
+      ],
+      "notes": "pulp #1434 Triage #14 — broadened flexWrap type to boolean | string (CSS keywords). RN spec accepts the same string vocabulary; routing same as css/flexWrap.",
       "issue": ""
     },
     "rn/fontFamily": {
@@ -3523,36 +3603,52 @@
       "issue": ""
     },
     "rn/inset": {
-      "status": "missing",
-      "mapsTo": "no @pulp/react prop. CSS shim has it.",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "partial",
+      "mapsTo": "@pulp/react prop-applier — CSS shorthand fan-out to top/right/bottom/left (1/2/3/4 token expansion).",
+      "supportedValues": [
+        "number",
+        "percent string",
+        "space-separated 2/3/4 token shorthand"
       ],
-      "tests": [],
-      "notes": "RN exposes inset; @pulp/react does not.",
+      "unsupportedValues": [
+        "RTL writing direction (deferred to future direction system)"
+      ],
+      "tests": [
+        "packages/pulp-react/test/prop-applier-logical-edges.test.ts"
+      ],
+      "notes": "pulp #1434 rn logical-edge bundle (sub-agent #27 finding) — LTR-only fast path. @pulp/react prop-applier maps Start→Left, End→Right; inset shorthand fans out to top/right/bottom/left; insetBlock→top+bottom; insetInline→left+right. True RTL bidi requires a future direction system.",
       "issue": ""
     },
     "rn/insetBlock": {
-      "status": "missing",
-      "mapsTo": "no branch",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "partial",
+      "mapsTo": "@pulp/react prop-applier — top + bottom fan-out.",
+      "supportedValues": [
+        "number",
+        "percent string"
       ],
-      "tests": [],
-      "notes": "Logical.",
+      "unsupportedValues": [
+        "RTL writing direction (deferred to future direction system)"
+      ],
+      "tests": [
+        "packages/pulp-react/test/prop-applier-logical-edges.test.ts"
+      ],
+      "notes": "pulp #1434 rn logical-edge bundle (sub-agent #27 finding) — LTR-only fast path. @pulp/react prop-applier maps Start→Left, End→Right; inset shorthand fans out to top/right/bottom/left; insetBlock→top+bottom; insetInline→left+right. True RTL bidi requires a future direction system.",
       "issue": ""
     },
     "rn/insetInline": {
-      "status": "missing",
-      "mapsTo": "no branch",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "partial",
+      "mapsTo": "@pulp/react prop-applier — left + right fan-out under LTR.",
+      "supportedValues": [
+        "number",
+        "percent string"
       ],
-      "tests": [],
-      "notes": "Logical.",
+      "unsupportedValues": [
+        "RTL writing direction (deferred to future direction system)"
+      ],
+      "tests": [
+        "packages/pulp-react/test/prop-applier-logical-edges.test.ts"
+      ],
+      "notes": "pulp #1434 rn logical-edge bundle (sub-agent #27 finding) — LTR-only fast path. @pulp/react prop-applier maps Start→Left, End→Right; inset shorthand fans out to top/right/bottom/left; insetBlock→top+bottom; insetInline→left+right. True RTL bidi requires a future direction system.",
       "issue": ""
     },
     "rn/isolation": {
@@ -3651,14 +3747,20 @@
       "issue": ""
     },
     "rn/marginEnd": {
-      "status": "missing",
-      "mapsTo": "no branch",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "partial",
+      "mapsTo": "@pulp/react prop-applier — End → Right under LTR.",
+      "supportedValues": [
+        "number",
+        "percent string",
+        "\"auto\""
       ],
-      "tests": [],
-      "notes": "Logical property.",
+      "unsupportedValues": [
+        "RTL writing direction (deferred to future direction system)"
+      ],
+      "tests": [
+        "packages/pulp-react/test/prop-applier-logical-edges.test.ts"
+      ],
+      "notes": "pulp #1434 rn logical-edge bundle (sub-agent #27 finding) — LTR-only fast path. @pulp/react prop-applier maps Start→Left, End→Right; inset shorthand fans out to top/right/bottom/left; insetBlock→top+bottom; insetInline→left+right. True RTL bidi requires a future direction system.",
       "issue": ""
     },
     "rn/marginHorizontal": {
@@ -3707,14 +3809,20 @@
       "issue": ""
     },
     "rn/marginStart": {
-      "status": "missing",
-      "mapsTo": "no branch",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "partial",
+      "mapsTo": "@pulp/react prop-applier — Start → Left under LTR.",
+      "supportedValues": [
+        "number",
+        "percent string",
+        "\"auto\""
       ],
-      "tests": [],
-      "notes": "Logical.",
+      "unsupportedValues": [
+        "RTL writing direction (deferred to future direction system)"
+      ],
+      "tests": [
+        "packages/pulp-react/test/prop-applier-logical-edges.test.ts"
+      ],
+      "notes": "pulp #1434 rn logical-edge bundle (sub-agent #27 finding) — LTR-only fast path. @pulp/react prop-applier maps Start→Left, End→Right; inset shorthand fans out to top/right/bottom/left; insetBlock→top+bottom; insetInline→left+right. True RTL bidi requires a future direction system.",
       "issue": ""
     },
     "rn/marginTop": {
@@ -3915,14 +4023,19 @@
       "issue": ""
     },
     "rn/paddingEnd": {
-      "status": "missing",
-      "mapsTo": "no branch",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "partial",
+      "mapsTo": "@pulp/react prop-applier — End → Right under LTR.",
+      "supportedValues": [
+        "number",
+        "percent string"
       ],
-      "tests": [],
-      "notes": "Logical.",
+      "unsupportedValues": [
+        "RTL writing direction (deferred to future direction system)"
+      ],
+      "tests": [
+        "packages/pulp-react/test/prop-applier-logical-edges.test.ts"
+      ],
+      "notes": "pulp #1434 rn logical-edge bundle (sub-agent #27 finding) — LTR-only fast path. @pulp/react prop-applier maps Start→Left, End→Right; inset shorthand fans out to top/right/bottom/left; insetBlock→top+bottom; insetInline→left+right. True RTL bidi requires a future direction system.",
       "issue": ""
     },
     "rn/paddingHorizontal": {
@@ -3968,14 +4081,19 @@
       "issue": ""
     },
     "rn/paddingStart": {
-      "status": "missing",
-      "mapsTo": "no branch",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "partial",
+      "mapsTo": "@pulp/react prop-applier — Start → Left under LTR.",
+      "supportedValues": [
+        "number",
+        "percent string"
       ],
-      "tests": [],
-      "notes": "Logical.",
+      "unsupportedValues": [
+        "RTL writing direction (deferred to future direction system)"
+      ],
+      "tests": [
+        "packages/pulp-react/test/prop-applier-logical-edges.test.ts"
+      ],
+      "notes": "pulp #1434 rn logical-edge bundle (sub-agent #27 finding) — LTR-only fast path. @pulp/react prop-applier maps Start→Left, End→Right; inset shorthand fans out to top/right/bottom/left; insetBlock→top+bottom; insetInline→left+right. True RTL bidi requires a future direction system.",
       "issue": ""
     },
     "rn/paddingTop": {
@@ -4106,14 +4224,19 @@
       "issue": ""
     },
     "rn/start": {
-      "status": "missing",
-      "mapsTo": "no branch",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "partial",
+      "mapsTo": "@pulp/react prop-applier — start → left under LTR; routes to setLeft.",
+      "supportedValues": [
+        "number",
+        "percent string"
       ],
-      "tests": [],
-      "notes": "Logical position.",
+      "unsupportedValues": [
+        "RTL writing direction (deferred to future direction system)"
+      ],
+      "tests": [
+        "packages/pulp-react/test/prop-applier-logical-edges.test.ts"
+      ],
+      "notes": "pulp #1434 rn logical-edge bundle (sub-agent #27 finding) — LTR-only fast path. @pulp/react prop-applier maps Start→Left, End→Right; inset shorthand fans out to top/right/bottom/left; insetBlock→top+bottom; insetInline→left+right. True RTL bidi requires a future direction system.",
       "issue": ""
     },
     "rn/stroke": {
@@ -4265,25 +4388,21 @@
       "issue": "https://github.com/danielraffel/pulp/issues/1434"
     },
     "rn/transform": {
-      "status": "partial",
-      "mapsTo": "@pulp/react prop-applier walks the array and dispatches setTranslate(id, x, y) / setRotation(id, deg) / setScale(id, s) per the within-array merged snapshot (prop-applier.ts:175+ since pulp #1434 Triage #9). Within-array axis merging — [{translateX:10},{translateY:20}] produces ONE setTranslate(10,20).",
+      "status": "supported",
+      "mapsTo": "@pulp/react prop-applier walks the array and dispatches setTranslate / setRotation / setScale / setSkew per the within-array merged snapshot. setSkew newly registered (Triage #9 fan-out).",
       "supportedValues": [
-        "array of {translateX|translateY|rotate|rotateZ|scale|scaleX|scaleY}",
-        "rotate/rotateZ accepts \"45deg\" / \"0.785rad\" / 45 / \"0.5turn\" / \"50grad\"",
-        "translate values in px",
-        "multi-op arrays merge axes correctly (e.g. [{translateX:10},{translateY:20}] dispatches one setTranslate(10,20))"
+        "array of {translateX|translateY}",
+        "array of {rotate|rotateZ}",
+        "array of {scale|scaleX|scaleY}",
+        "array of {skewX|skewY}",
+        "angle units: \"45deg\" / \"0.785rad\" / \"0.5turn\" / \"50grad\" / numeric",
+        "within-array axis merging: [{translateX:10},{translateY:20}] dispatches ONE setTranslate(10,20)"
       ],
-      "unsupportedValues": [
-        "skewX / skewY (bridge fn unregistered — View::set_skew exists; pulp follow-up)",
-        "independent scaleX != scaleY (bridge setScale is uniform only — last-write-wins; pulp follow-up)",
-        "rotateX / rotateY (2D View has no 3D surface)",
-        "perspective / matrix",
-        "CSS string form \"translateX(10px) rotate(45deg)\" — pass array instead"
-      ],
+      "unsupportedValues": [],
       "tests": [
         "packages/pulp-react/test/prop-applier-transform.test.ts"
       ],
-      "notes": "pulp #1434 Triage #9 — Figma/v0/Claude Design transition states emit this constantly; was the largest single import-readiness gap on rn surface.",
+      "notes": "pulp #1434 Triage #9 fan-out — full CSS transform-function set wired via parseTransform walk-once accumulator. setSkew bridge fn registered; scaleX/scaleY share uniform setScale slot (last-write-wins; bridge gap); matrix() decomposed to translate+scale+rotate. rotateX / rotateY / matrix3d / perspective silently drop (pulp's 2D View has no 3D model). rn array surface does not include matrix() (RN spec omits it). independent scaleX != scaleY — last-write-wins on the uniform bridge.",
       "issue": ""
     },
     "rn/transformOrigin": {
@@ -4395,17 +4514,16 @@
       "issue": ""
     },
     "yoga/flexWrap": {
-      "status": "partial",
+      "status": "supported",
       "mapsTo": "FlexStyle.flex_wrap (bool)",
       "supportedValues": [
+        "nowrap",
         "wrap",
-        "nowrap"
-      ],
-      "unsupportedValues": [
         "wrap-reverse"
       ],
+      "unsupportedValues": [],
       "tests": [],
-      "notes": "Bool can only express two states.",
+      "notes": "pulp #1434 Triage #14 — FlexStyle.flex_wrap is now FlexWrap enum (no_wrap/wrap/wrap_reverse); yoga_layout.cpp dispatches all three through YGNodeStyleSetFlexWrap with YGWrapNoWrap / YGWrapWrap / YGWrapWrapReverse.",
       "issue": ""
     },
     "yoga/flexGrow": {
@@ -6070,15 +6188,22 @@
       "issue": "1434"
     },
     "canvas2d/createPattern": {
-      "status": "missing",
-      "mapsTo": "ctx.createPattern -> shim returns null (per spec, returning null is permissible when source unavailable). Bridge has no pattern shader.",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "repeated-image patterns"
+      "status": "partial",
+      "mapsTo": "ctx.createPattern(image, repetition) -> CanvasPattern handle, flushed via canvasSetFillPattern / canvasSetStrokePattern. Skia routes through SkShader::MakeImage with SkTileMode per axis (real tiled fill); CG degrades to the active solid colour.",
+      "supportedValues": [
+        "repeat",
+        "repeat-x",
+        "repeat-y",
+        "no-repeat"
       ],
-      "tests": [],
-      "notes": "Deferred from pulp #1434 bridge-thin gap-fill — needs real image-resource plumbing (handle vs. opaque path), not just a bridge fn. Patterns are rare in audio plugin UIs. Callers must guard against null. File a follow-up when chart-library imports actually need it.",
-      "issue": ""
+      "unsupportedValues": [
+        "CG backend (macOS) renders solid fallback — no native CGPattern shader plumbed yet"
+      ],
+      "tests": [
+        "test/test_canvas2d_shim.cpp [issue-1434][bridge-thin]"
+      ],
+      "notes": "pulp #1434 bridge-thin gap-fill (sub-agent #24, follow-up to #1480). Skia path is fully spec-compliant for all four repetition values; CG path silently degrades to the previous solid fill. File a follow-up if a CG-targeted plugin actually needs tiled patterns (CGPattern callback dance).",
+      "issue": "1434"
     },
     "canvas2d/addColorStop": {
       "status": "supported",
@@ -6245,16 +6370,25 @@
     },
     "canvas2d/font": {
       "status": "partial",
-      "mapsTo": "Locally tracked; canvasSetFont(id, family, size) on the next draw. Shim parses '<size>px <family>'.",
+      "mapsTo": "Locally tracked; the shim's _parseFontShorthand walks the full CSS font shorthand ([style] [variant] [weight] [stretch] <size>[/<lineHeight>] <family>) and dispatches canvasSetFontFull(id, family, size, weight, slant, letterSpacing) when the host registered it (post pulp #1434), falling back to canvasSetFont(id, family, size) otherwise. Skia honours weight + slant via SkFontStyle; CG falls through to family + size.",
       "supportedValues": [
-        "'<size>px <family>'"
+        "'<size>px <family>'",
+        "'<weight> <size>px <family>' (e.g. 'bold 14px Inter')",
+        "'<style> <size>px <family>' (e.g. 'italic 14px Inter')",
+        "'<style> <weight> <size>px <family>'",
+        "'<style> <variant> <weight> <size>px/<lineHeight> <family>' (full shorthand)",
+        "weight keywords: normal/bold/bolder/lighter",
+        "weight numerics: 100..900 (3-digit)",
+        "style keywords: normal/italic/oblique",
+        "stretch keywords: ultra-condensed..ultra-expanded (parsed, dropped)",
+        "lineHeight: number / length / 'normal' (parsed, ignored per Canvas2D spec — canvas uses the font's own line metrics)"
       ],
       "unsupportedValues": [
-        "full CSS font shorthand (style/variant/stretch — only size+family extracted)"
+        "font-variant 'small-caps' (parsed and tracked, but Skia/CG fonts in the canvas pipeline don't honour it — Canvas::set_font_full has no variant field)"
       ],
       "tests": [],
-      "notes": "",
-      "issue": ""
+      "notes": "pulp #1434 expanded shim parser to full CSS font shorthand. Family names quoted as 'Inter' or \"Inter\" are unwrapped; comma-separated lists are passed verbatim.",
+      "issue": "1434"
     },
     "canvas2d/textAlign": {
       "status": "supported",

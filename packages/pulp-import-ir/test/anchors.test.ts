@@ -138,4 +138,115 @@ describe('assignAnchors', () => {
         expect(childAnchors[1]).toBe('View[0]/Button[1]');
         expect(childAnchors[2]).toBe('View[0]/Button[2]');
     });
+
+    // pulp #1499 follow-up — Codex P1: duplicate-sibling content-hash
+    // collision. Two siblings with identical {tag, role, text} (and
+    // therefore identical depth) used to produce the same anchor,
+    // which silently broke tweak routing and made `diff()` lossy.
+    // The discriminator is the Nth occurrence of the same signature
+    // among earlier siblings — stable across re-imports of the same
+    // source HTML, distinct for each duplicate.
+    it('content-hash disambiguates duplicate siblings (#1499 follow-up)', () => {
+        const root = {
+            tag: 'View',
+            children: [
+                {
+                    tag: 'Button',
+                    text: { text: 'Save' },
+                    meta: { role: 'cta' },
+                    children: [],
+                },
+                {
+                    tag: 'Button',
+                    text: { text: 'Save' },
+                    meta: { role: 'cta' },
+                    children: [],
+                },
+                {
+                    tag: 'Button',
+                    text: { text: 'Save' },
+                    meta: { role: 'cta' },
+                    children: [],
+                },
+            ],
+        };
+        const anchors = assignAnchors(root, 'content-hash');
+        const a0 = anchors.get(root.children[0]);
+        const a1 = anchors.get(root.children[1]);
+        const a2 = anchors.get(root.children[2]);
+        expect(a0).toBeDefined();
+        expect(a1).toBeDefined();
+        expect(a2).toBeDefined();
+        expect(a0).not.toBe(a1);
+        expect(a1).not.toBe(a2);
+        expect(a0).not.toBe(a2);
+    });
+
+    it('content-hash duplicate-sibling discriminator is stable across re-imports', () => {
+        const make = () => ({
+            tag: 'View',
+            children: [
+                { tag: 'Label', text: { text: 'Hello' }, children: [] },
+                { tag: 'Label', text: { text: 'Hello' }, children: [] },
+            ],
+        });
+        const a = assignAnchors(make(), 'content-hash');
+        const b = assignAnchors(make(), 'content-hash');
+        const aRoot = [...a.entries()];
+        const bRoot = [...b.entries()];
+        // Same N-th-duplicate gets same anchor across re-imports.
+        expect(aRoot[1][1]).toBe(bRoot[1][1]); // first Label
+        expect(aRoot[2][1]).toBe(bRoot[2][1]); // second Label
+        // The two duplicates remain distinct from each other.
+        expect(aRoot[1][1]).not.toBe(aRoot[2][1]);
+    });
+
+    it('content-hash preserves single-child anchors when ancestor siblings reorder', () => {
+        // Root has [header, section] both lowering to View. The single
+        // unique-signature button under section should stay anchored
+        // even though header and section are duplicate-signature
+        // siblings — its hash inputs (depth + signature + sigIndex
+        // among same-signature siblings) are identical in both
+        // orderings.
+        const make = (sectionFirst: boolean) => ({
+            tag: 'View',
+            children: sectionFirst
+                ? [
+                      {
+                          tag: 'View',
+                          children: [
+                              { tag: 'Button', text: { text: 'Subscribe' }, children: [] },
+                          ],
+                      },
+                      { tag: 'View', children: [] },
+                  ]
+                : [
+                      { tag: 'View', children: [] },
+                      {
+                          tag: 'View',
+                          children: [
+                              { tag: 'Button', text: { text: 'Subscribe' }, children: [] },
+                          ],
+                      },
+                  ],
+        });
+        const v1 = make(false);
+        const v5 = make(true);
+        const a1 = assignAnchors(v1, 'content-hash');
+        const a5 = assignAnchors(v5, 'content-hash');
+        // Find each Button by walking and matching text.
+        const findButton = (
+            node: { tag: string; text?: { text?: string }; children: unknown[] },
+        ): unknown => {
+            if (node.tag === 'Button') return node;
+            for (const c of node.children) {
+                const f = findButton(c as never);
+                if (f) return f;
+            }
+            return null;
+        };
+        const b1 = findButton(v1)!;
+        const b5 = findButton(v5)!;
+        expect(a1.get(b1 as never)).toBe(a5.get(b5 as never));
+    });
 });
