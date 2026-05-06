@@ -9,6 +9,8 @@
 // Forward declare CG types
 typedef struct CGContext* CGContextRef;
 typedef struct CGPath* CGMutablePathRef;
+typedef struct CGImage* CGImageRef;
+typedef struct CGPattern* CGPatternRef;
 
 namespace pulp::canvas {
 
@@ -56,6 +58,13 @@ public:
     void set_fill_gradient_radial(float cx, float cy, float radius,
                                    const Color* colors, const float* positions,
                                    int count) override;
+    /// pulp #1524 — true two-circle radial gradient via
+    /// CGContextDrawRadialGradient(inner_center, inner_r, outer_center, outer_r).
+    /// The single-circle override silently dropped (x0,y0,r0); this honours both.
+    void set_fill_gradient_radial_two_circles(
+        float x0, float y0, float r0,
+        float x1, float y1, float r1,
+        const Color* colors, const float* positions, int count) override;
     void set_fill_gradient_conic(float cx, float cy, float start_angle,
                                   const Color* colors, const float* positions,
                                   int count) override;
@@ -147,12 +156,43 @@ private:
     // has_gradient_ is true. Mirrors the SkiaCanvas split between solid
     // fill and shader-based fill so JS-driven gradient fills paint instead
     // of falling back to a single color.
+    //
+    // pulp #1524 — gradient_kind_ identifies which Draw* call to issue from
+    // fill_with_active_paint(). `radial_two_circles` is the spec-correct
+    // two-circle form (inner + outer centres, inner_r in grad_radius_inner_,
+    // outer_r in grad_radius_); `conic_image` is a software-rasterised
+    // CGImage that we paint via CGContextDrawImage inside the active clip.
+    enum class GradientKind { none, linear, radial, radial_two_circles, conic_image };
     bool has_gradient_ = false;
-    bool gradient_is_radial_ = false;
+    GradientKind gradient_kind_ = GradientKind::none;
+    bool gradient_is_radial_ = false;  // legacy mirror of (kind == radial), kept for older inline checks
     float grad_x0_ = 0, grad_y0_ = 0, grad_x1_ = 0, grad_y1_ = 0;
-    float grad_radius_ = 0;
+    float grad_radius_ = 0;        // outer / single radius
+    float grad_radius_inner_ = 0;  // pulp #1524 — inner radius for two-circle radial
     std::vector<Color> grad_colors_;
     std::vector<float> grad_positions_;
+
+    // pulp #1524 — software-rasterised conic gradient. CG has no native
+    // conic shader, so set_fill_gradient_conic walks every pixel of a
+    // bounding-box bitmap, computes the angle from the centre, interpolates
+    // the colour stops, and stores the resulting CGImage here. fill_with_active_paint
+    // paints it via CGContextDrawImage inside the active clip. The image is
+    // released in clear_fill_gradient / dtor / on next gradient set.
+    CGImageRef conic_image_ = nullptr;
+    float conic_image_x_ = 0, conic_image_y_ = 0;
+    float conic_image_w_ = 0, conic_image_h_ = 0;
+    void release_conic_image();
+
+    // pulp #1524 — tiled-pattern fill state. CG exposes patterns via
+    // CGPatternCreate + a draw callback; we hold the decoded image (so
+    // the callback can render a tile) and the tile dimensions / repetition
+    // mode here. has_pattern_ short-circuits fill_with_active_paint onto
+    // CGContextSetFillPattern + CGContextFillRect/CGContextFillPath.
+    bool has_pattern_ = false;
+    CGImageRef pattern_image_ = nullptr;
+    PatternTileMode pattern_tile_x_ = PatternTileMode::repeat;
+    PatternTileMode pattern_tile_y_ = PatternTileMode::repeat;
+    void release_pattern_image();
 
     // Paint-baseline transform captured at CanvasWidget::paint() entry,
     // matching SkiaCanvas so JS-supplied setTransform() composes onto the

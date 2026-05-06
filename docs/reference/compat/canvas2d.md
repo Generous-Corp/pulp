@@ -117,8 +117,12 @@ that were blocked only on a missing bridge fn — Skia and CG already
 exposed the underlying capability:
 
 - **`createConicGradient(startAngle, x, y)`** — Skia routes through
-  `SkGradientShader::MakeSweep` (real conic sweep). CG degrades to the
-  first-stop colour (no native conic shader).
+  `SkGradientShader::MakeSweep` (real conic sweep). CG previously
+  degraded to the first-stop colour; **pulp #1524** software-rasterises
+  a `CGImage` of the active clip's bounding box (per-pixel `atan2`
+  sweep + colour-stop interpolation) and paints it via
+  `CGContextDrawImage`, so both backends now render real multi-stop
+  sweeps.
 - **`miterLimit`** — `SkPaint::setStrokeMiter` (Skia) /
   `CGContextSetMiterLimit` (CG). Sticky stroke state. Spec: non-positive
   / non-finite values silently ignored.
@@ -131,14 +135,32 @@ exposed the underlying capability:
 
 The follow-up bridge-thin slice wired `createPattern` — deferred from
 the original #1480 PR because pattern handling needs an image-resource
-identifier shape, not just a bridge fn. Now PASS / partial:
+identifier shape, not just a bridge fn:
 
 - **`createPattern(image, repetition)`** — Skia routes through
   `SkShader::MakeImage` with `SkTileMode::kRepeat` / `SkTileMode::kDecal`
   per axis. All four spec repetition values are supported:
-  `"repeat"`, `"repeat-x"`, `"repeat-y"`, `"no-repeat"`. CG degrades to
-  the active fill colour (no first-class CG pattern shader without a
-  CGPattern callback dance).
+  `"repeat"`, `"repeat-x"`, `"repeat-y"`, `"no-repeat"`. **pulp #1524**
+  promoted the CG path from solid-fill fallback to a real
+  `CGPatternCreate` + `CGPatternCallbacks` (image-tile draw callback)
+  + `CGContextSetFillPattern` flow; `no_repeat` axes blow up the tile
+  step beyond the clip bounding box so only the seed tile lands.
+
+### Promotion: pulp #1524 — CG-degraded gradient/pattern cluster
+
+3 entries previously DIVERGE on the CG backend now PASS on both Skia
+and CG:
+
+- **`createRadialGradient(x0,y0,r0,x1,y1,r1)`** — full two-circle form.
+  Skia routes through `SkGradientShader::MakeTwoPointConical`; CG
+  routes through `CGContextDrawRadialGradient(start_centre, start_radius,
+  end_centre, end_radius)` with both circles wired. The JS shim
+  flushes via the new `canvasSetRadialGradientTwoCircles` bridge fn
+  (single-circle path retained for legacy hot-reloaded bundles).
+- **`createConicGradient(startAngle, x, y)`** — CG software-rasterises
+  the sweep into a `CGImage` (see above).
+- **`createPattern(image, repetition)`** — CG installs a real
+  `CGPattern` (see above).
 
 Side effect: the same PR plumbed `setStrokeCap` and `setStrokeJoin`
 through `SkPaint` — `line_cap_` and `line_join_` were stored on the
@@ -160,16 +182,13 @@ The Canvas2D `shadowColor` / `shadowBlur` / `shadowOffsetX` /
    anything else is a no-op.
 4. **`strokeText`** — falls back to `fillText` with the stroke color
    (bridge has no stroke-text command).
-5. **`createRadialGradient`** — bridge models a single-circle radial
-   gradient; shim uses the outer circle. Visually equivalent for
-   centre-bloom usage where `x0 === x1`, `y0 === y1`, `r0 === 0`.
-6. **`drawImage`** 9-arg form — sprite-sheet slicing
+5. **`drawImage`** 9-arg form — sprite-sheet slicing
    (`sx, sy, sw, sh`) is currently ignored.
-7. **`putImageData`** sub-rect form — `dirtyX/Y/W/H` ignored.
-8. **`setLineDash`** — odd-length spec-doubling is bridge-side; shim
+6. **`putImageData`** sub-rect form — `dirtyX/Y/W/H` ignored.
+7. **`setLineDash`** — odd-length spec-doubling is bridge-side; shim
    passes verbatim. `lineDashOffset` mutation between draws is not
    re-pushed (must re-call `setLineDash`).
-9. **`strokeStyle = gradient`** — bridge has no stroke-gradient setter;
+8. **`strokeStyle = gradient`** — bridge has no stroke-gradient setter;
    degrades to the first stop's color.
 
 ## WebGPU surface

@@ -6152,51 +6152,51 @@
       "issue": "964"
     },
     "canvas2d/createRadialGradient": {
-      "status": "partial",
-      "mapsTo": "ctx.createRadialGradient(x0,y0,r0,x1,y1,r1) -> CanvasGradient with kind='radial'. Bridge models a single-circle radial gradient (centre + radius); shim uses the OUTER circle (x1,y1,r1).",
+      "status": "supported",
+      "mapsTo": "ctx.createRadialGradient(x0,y0,r0,x1,y1,r1) -> CanvasGradient with kind='radial'. Both circles are wired through to the backend: Skia routes through SkGradientShader::MakeTwoPointConical, CG routes through CGContextDrawRadialGradient(start_centre, start_radius, end_centre, end_radius). The bridge dispatches via canvasSetRadialGradientTwoCircles when both circles differ.",
       "supportedValues": [
-        "centre-bloom usage where x0===x1, y0===y1, r0===0"
+        "centre-bloom (x0===x1, y0===y1, r0===0)",
+        "true two-circle radial with offset / sized inner circle"
       ],
-      "unsupportedValues": [
-        "true two-circle radial gradient (inner + outer with separate radii)"
+      "unsupportedValues": [],
+      "tests": [
+        "test/test_canvas.cpp [canvas][cg][issue-1524]",
+        "test/test_canvas2d_shim.cpp [view][canvas2d][issue-1524]"
       ],
-      "tests": [],
-      "notes": "PR #1348. Visually equivalent for FilterBank's typical centre-bloom; file follow-up if a plugin needs the offset-inner-circle form.",
-      "issue": "964"
+      "notes": "pulp #1524. Two-circle support: Skia MakeTwoPointConical, CG full CGContextDrawRadialGradient with both circles. Inner circle (x0,y0,r0) packed in CanvasDrawCmd as (x, y, extra), outer (x1,y1,r1) as (x2, y2, w).",
+      "issue": "1524"
     },
     "canvas2d/createConicGradient": {
-      "status": "partial",
-      "mapsTo": "ctx.createConicGradient(startAngle, x, y) -> CanvasGradient with _kind='conic'; flushed via canvasSetConicGradient when assigned to fillStyle. Skia routes through SkGradientShader::MakeSweep (real sweep). CG degrades to first-stop colour (no native conic shader).",
+      "status": "supported",
+      "mapsTo": "ctx.createConicGradient(startAngle, x, y) -> CanvasGradient with _kind='conic'; flushed via canvasSetConicGradient when assigned to fillStyle. Skia routes through SkGradientShader::MakeSweep (real sweep). CG software-rasterises a CGImage of the active clip's bounding box (per-pixel atan2 sweep + colour-stop interpolation) and paints it via CGContextDrawImage.",
       "supportedValues": [
         "Skia backend: real conic sweep with multiple stops",
-        "CG backend: first-stop colour fallback (visually degraded)"
+        "CG backend: software-rasterised conic with multiple stops (atan2 sweep + linear interpolation between stops, premultiplied RGBA8)"
       ],
-      "unsupportedValues": [
-        "CG backend: true conic sweep (no CGContextDrawConicGradient API)"
-      ],
+      "unsupportedValues": [],
       "tests": [
+        "test/test_canvas.cpp [canvas][cg][issue-1524]",
         "test/test_canvas2d_shim.cpp [issue-1434][bridge-thin]"
       ],
-      "notes": "pulp #1434 bridge-thin gap-fill. Skia path is fully spec-compliant; CG path silently degrades — file a follow-up if a CG-targeted plugin needs the sweep.",
-      "issue": "1434"
+      "notes": "pulp #1524. Skia uses MakeSweep; CG falls back to a software rasteriser that rebuilds the conic CGImage when the clip-bounding-box changes (caches across repeated fills with the same clip).",
+      "issue": "1524"
     },
     "canvas2d/createPattern": {
-      "status": "partial",
-      "mapsTo": "ctx.createPattern(image, repetition) -> CanvasPattern handle, flushed via canvasSetFillPattern / canvasSetStrokePattern. Skia routes through SkShader::MakeImage with SkTileMode per axis (real tiled fill); CG degrades to the active solid colour.",
+      "status": "supported",
+      "mapsTo": "ctx.createPattern(image, repetition) -> CanvasPattern handle, flushed via canvasSetFillPattern / canvasSetStrokePattern. Skia routes through SkShader::MakeImage with SkTileMode per axis (real tiled fill); CG routes through CGPatternCreate + CGPatternCallbacks (image-tile draw callback) and CGContextSetFillPattern.",
       "supportedValues": [
         "repeat",
         "repeat-x",
         "repeat-y",
         "no-repeat"
       ],
-      "unsupportedValues": [
-        "CG backend (macOS) renders solid fallback — no native CGPattern shader plumbed yet"
-      ],
+      "unsupportedValues": [],
       "tests": [
+        "test/test_canvas.cpp [canvas][cg][issue-1524]",
         "test/test_canvas2d_shim.cpp [issue-1434][bridge-thin]"
       ],
-      "notes": "pulp #1434 bridge-thin gap-fill (sub-agent #24, follow-up to #1480). Skia path is fully spec-compliant for all four repetition values; CG path silently degrades to the previous solid fill. File a follow-up if a CG-targeted plugin actually needs tiled patterns (CGPattern callback dance).",
-      "issue": "1434"
+      "notes": "pulp #1524. Skia uses SkShader::MakeImage; CG uses CGPatternCreate with a draw callback that emits one tile via CGContextDrawImage. `no_repeat` axes blow up the tile step beyond the clip bbox so only the seed tile lands. Image source decoded via ImageIO (CGImageSourceCreateWithData / WithURL) for both file paths and `data:` URLs. Note: CG stroke patterns are still a no-op (strokes continue with stroke_color_) — file a follow-up if a CG-targeted plugin needs tiled stroke patterns; this entry is for the createPattern fill surface.",
+      "issue": "1524"
     },
     "canvas2d/addColorStop": {
       "status": "supported",

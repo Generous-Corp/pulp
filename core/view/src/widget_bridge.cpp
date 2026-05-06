@@ -4645,6 +4645,34 @@ void WidgetBridge::register_api() {
         return choc::value::Value();
     });
 
+    // pulp #1524 — true two-circle radial gradient. Skia routes through
+    // SkGradientShader::MakeTwoPointConical; CG routes through
+    // CGContextDrawRadialGradient with both circles wired (the prior
+    // single-circle bridge silently dropped (x0, y0, r0) which broke
+    // offset / sized inner-circle gradients on both backends).
+    // Args: (id, x0, y0, r0, x1, y1, r1, color1, pos1, color2, pos2, ...)
+    engine_.register_function("canvasSetRadialGradientTwoCircles",
+            [this, parseColor](choc::javascript::ArgumentList args) {
+        if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
+            CanvasDrawCmd cmd;
+            cmd.type = CanvasDrawCmd::Type::set_fill_gradient_radial_two_circles;
+            // Inner circle (x0, y0, r0) → (x, y, extra).
+            cmd.x = (float)args.get<double>(1, 0);
+            cmd.y = (float)args.get<double>(2, 0);
+            cmd.extra = (float)args.get<double>(3, 0);
+            // Outer circle (x1, y1, r1) → (x2, y2, w).
+            cmd.x2 = (float)args.get<double>(4, 0);
+            cmd.y2 = (float)args.get<double>(5, 0);
+            cmd.w  = (float)args.get<double>(6, 50);
+            for (int i = 7; i + 1 < static_cast<int>(args.numArgs); i += 2) {
+                cmd.gradient_colors.push_back(parseColor(args.get<std::string>(i, "#fff")));
+                cmd.gradient_positions.push_back((float)args.get<double>(i + 1, 0));
+            }
+            c->add_command(cmd);
+        }
+        return choc::value::Value();
+    });
+
     engine_.register_function("canvasClearGradient", [this](choc::javascript::ArgumentList args) {
         if (auto* c = dynamic_cast<CanvasWidget*>(widget(args.get<std::string>(0, "")))) {
             CanvasDrawCmd cmd; cmd.type = CanvasDrawCmd::Type::clear_fill_gradient;
