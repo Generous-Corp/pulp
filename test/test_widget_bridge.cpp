@@ -3005,6 +3005,59 @@ TEST_CASE("WidgetBridge text-decoration longhand setters preserve siblings",
 
 // ── issue-926: setBackdropFilter ─────────────────────────────────────────────
 
+// pulp #1517 — background sub-properties round-trip through the bridge
+// onto storage-only View slots. Paint impact today is partial (only
+// the keyword is stored; the box-clip / scroll-attachment paint paths
+// haven't landed). The test asserts the wire-through, not paint.
+TEST_CASE("WidgetBridge background sub-properties round-trip onto View slots",
+          "[view][bridge][issue-1517]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('p', '');
+        setBackgroundAttachment('p', 'scroll');
+        setBackgroundClip('p', 'text');
+        setBackgroundOrigin('p', 'padding-box');
+    )");
+
+    auto* p = bridge.widget("p");
+    REQUIRE(p != nullptr);
+    REQUIRE(p->background_attachment() == "scroll");
+    REQUIRE(p->background_clip() == "text");
+    REQUIRE(p->background_origin() == "padding-box");
+
+    // Subsequent writes overwrite (storage-only, no merge logic).
+    bridge.load_script("setBackgroundClip('p', 'border-box')");
+    REQUIRE(p->background_clip() == "border-box");
+}
+
+// pulp #1517 — CSSStyleDeclaration shim forwards camelCase background
+// sub-properties to the bridge setters.
+TEST_CASE("CSSStyleDeclaration forwards background sub-props to bridge",
+          "[view][bridge][css][issue-1517]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('p', '');
+        var s = new CSSStyleDeclaration({ _id: 'p', _nativeCreated: true });
+        s.backgroundAttachment = 'scroll';
+        s.backgroundClip        = 'border-box';
+        s.backgroundOrigin      = 'content-box';
+    )");
+
+    auto* p = bridge.widget("p");
+    REQUIRE(p != nullptr);
+    REQUIRE(p->background_attachment() == "scroll");
+    REQUIRE(p->background_clip() == "border-box");
+    REQUIRE(p->background_origin() == "content-box");
+}
+
 TEST_CASE("WidgetBridge setBackdropFilter sets backdrop_blur on the View",
           "[view][bridge][issue-926]") {
     ScriptEngine engine;
@@ -5211,6 +5264,184 @@ TEST_CASE("border-style: none short-circuits the stroke",
     }
 }
 
+// ── pulp #1519 — RN outline cluster (Color/Offset/Style/Width) ────────────
+//
+// Outline differs from border: it doesn't take Yoga layout space and
+// it paints OUTSIDE the border-box. Each setter mutates one View slot
+// in isolation; Skia paint inflates the box by (offset + width/2) and
+// strokes with the standard borderStyle dash plumbing.
+
+TEST_CASE("WidgetBridge setOutlineColor / Offset / Style / Width round-trip",
+          "[view][bridge][issue-1519]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 300});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script("createKnob('k', 0, 0, 32, 32)");
+    auto* w = bridge.widget("k");
+    REQUIRE(w != nullptr);
+    // Defaults: outline is paint-suppressed (style=none, width=0).
+    REQUIRE(w->outline_style() == View::BorderStyle::none);
+    REQUIRE(w->outline_width() == 0.0f);
+    REQUIRE(w->outline_offset() == 0.0f);
+
+    bridge.load_script("setOutlineColor('k', '#ff8800')");
+    REQUIRE(w->outline_color().r8() == 0xff);
+    REQUIRE(w->outline_color().g8() == 0x88);
+    REQUIRE(w->outline_color().b8() == 0x00);
+
+    bridge.load_script("setOutlineOffset('k', 4.0)");
+    REQUIRE_THAT(w->outline_offset(), WithinAbs(4.0f, 1e-5f));
+
+    bridge.load_script("setOutlineWidth('k', 2.5)");
+    REQUIRE_THAT(w->outline_width(), WithinAbs(2.5f, 1e-5f));
+
+    bridge.load_script("setOutlineStyle('k', 'dashed')");
+    REQUIRE(w->outline_style() == View::BorderStyle::dashed);
+}
+
+TEST_CASE("setOutlineStyle maps each keyword to the right enum",
+          "[view][bridge][issue-1519]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('a', '');  setOutlineStyle('a', 'solid');
+        createPanel('b', '');  setOutlineStyle('b', 'dashed');
+        createPanel('c', '');  setOutlineStyle('c', 'dotted');
+        createPanel('d', '');  setOutlineStyle('d', 'double');
+        createPanel('e', '');  setOutlineStyle('e', 'groove');
+        createPanel('f', '');  setOutlineStyle('f', 'ridge');
+        createPanel('g', '');  setOutlineStyle('g', 'inset');
+        createPanel('h', '');  setOutlineStyle('h', 'outset');
+        createPanel('i', '');  setOutlineStyle('i', 'none');
+        createPanel('j', '');  setOutlineStyle('j', 'hidden');
+        createPanel('k', '');  setOutlineStyle('k', 'parchment-curl');
+    )");
+
+    REQUIRE(bridge.widget("a")->outline_style() == View::BorderStyle::solid);
+    REQUIRE(bridge.widget("b")->outline_style() == View::BorderStyle::dashed);
+    REQUIRE(bridge.widget("c")->outline_style() == View::BorderStyle::dotted);
+    REQUIRE(bridge.widget("d")->outline_style() == View::BorderStyle::double_);
+    REQUIRE(bridge.widget("e")->outline_style() == View::BorderStyle::groove);
+    REQUIRE(bridge.widget("f")->outline_style() == View::BorderStyle::ridge);
+    REQUIRE(bridge.widget("g")->outline_style() == View::BorderStyle::inset);
+    REQUIRE(bridge.widget("h")->outline_style() == View::BorderStyle::outset);
+    REQUIRE(bridge.widget("i")->outline_style() == View::BorderStyle::none);
+    REQUIRE(bridge.widget("j")->outline_style() == View::BorderStyle::hidden);
+    // Unknown keyword falls back to solid (mirrors setBorderStyle).
+    REQUIRE(bridge.widget("k")->outline_style() == View::BorderStyle::solid);
+}
+
+TEST_CASE("outline paints AFTER border around an inflated rect",
+          "[view][widget][issue-1519]") {
+    // Verify: the outline stroke is geometrically OUTSIDE the border-box.
+    // The recording canvas should show a stroke_rect whose origin is
+    // negative (i.e. above-and-left of the view's local origin) and
+    // whose size exceeds bounds_ by 2 * (offset + width/2).
+    View v;
+    v.set_bounds({0, 0, 100, 80});
+    v.set_outline_color({0, 0xff, 0, 0xff});
+    v.set_outline_offset(3.0f);
+    v.set_outline_width(2.0f);
+    v.set_outline_style(View::BorderStyle::solid);
+
+    pulp::canvas::RecordingCanvas canvas;
+    v.paint_all(canvas);
+
+    // Find the stroke_rect emitted for the outline. With no border
+    // (set_border was never called), there should be exactly one
+    // stroke_rect — the outline.
+    int stroke_rects_seen = 0;
+    float ox = 0, oy = 0, ow = 0, oh = 0;
+    for (const auto& cmd : canvas.commands()) {
+        if (cmd.type == pulp::canvas::DrawCommand::Type::stroke_rect) {
+            stroke_rects_seen++;
+            ox = cmd.f[0];
+            oy = cmd.f[1];
+            ow = cmd.f[2];
+            oh = cmd.f[3];
+        }
+    }
+    REQUIRE(stroke_rects_seen == 1);
+
+    // inflate = offset + width/2 = 3 + 1 = 4
+    const float inflate = 4.0f;
+    REQUIRE_THAT(ox, WithinAbs(-inflate, 1e-5f));
+    REQUIRE_THAT(oy, WithinAbs(-inflate, 1e-5f));
+    REQUIRE_THAT(ow, WithinAbs(100.0f + 2.0f * inflate, 1e-5f));
+    REQUIRE_THAT(oh, WithinAbs(80.0f + 2.0f * inflate, 1e-5f));
+}
+
+TEST_CASE("outline-style: none/hidden short-circuit the stroke",
+          "[view][widget][issue-1519]") {
+    for (auto s : { View::BorderStyle::none, View::BorderStyle::hidden }) {
+        View v;
+        v.set_bounds({0, 0, 100, 80});
+        v.set_outline_color({0, 0xff, 0, 0xff});
+        v.set_outline_width(2.0f);
+        v.set_outline_style(s);
+        pulp::canvas::RecordingCanvas canvas;
+        v.paint_all(canvas);
+        for (const auto& cmd : canvas.commands()) {
+            REQUIRE(cmd.type != pulp::canvas::DrawCommand::Type::stroke_rect);
+            REQUIRE(cmd.type != pulp::canvas::DrawCommand::Type::stroke_rounded_rect);
+        }
+    }
+}
+
+TEST_CASE("outline default state emits no paint (style=none, width=0)",
+          "[view][widget][issue-1519]") {
+    // A view with NO outline-* setters called must not emit any
+    // outline-related stroke. Belt-and-braces against accidental
+    // always-on outline regression.
+    View v;
+    v.set_bounds({0, 0, 100, 80});
+    pulp::canvas::RecordingCanvas canvas;
+    v.paint_all(canvas);
+    for (const auto& cmd : canvas.commands()) {
+        REQUIRE(cmd.type != pulp::canvas::DrawCommand::Type::stroke_rect);
+    }
+}
+
+TEST_CASE("dashed outline emits set_line_dash then resets it",
+          "[view][widget][issue-1519]") {
+    View v;
+    v.set_bounds({0, 0, 100, 80});
+    v.set_outline_color({0xff, 0, 0, 0xff});
+    v.set_outline_width(2.0f);
+    v.set_outline_offset(0.0f);
+    v.set_outline_style(View::BorderStyle::dashed);
+
+    pulp::canvas::RecordingCanvas canvas;
+    v.paint_all(canvas);
+
+    int set_dash_count = 0;
+    bool saw_stroke = false;
+    bool dash_reset_after_stroke = false;
+    size_t first_intervals_count = 0;
+    size_t last_intervals_count = 999;
+    for (const auto& cmd : canvas.commands()) {
+        if (cmd.type == pulp::canvas::DrawCommand::Type::set_line_dash) {
+            set_dash_count++;
+            if (set_dash_count == 1) first_intervals_count = cmd.floats.size();
+            last_intervals_count = cmd.floats.size();
+            if (saw_stroke) dash_reset_after_stroke = true;
+        }
+        if (cmd.type == pulp::canvas::DrawCommand::Type::stroke_rect)
+            saw_stroke = true;
+    }
+    REQUIRE(saw_stroke);
+    REQUIRE(set_dash_count >= 2);
+    REQUIRE(first_intervals_count == 2u);
+    REQUIRE(last_intervals_count == 0u);  // reset to empty
+    REQUIRE(dash_reset_after_stroke);
+}
+
 // ── pulp #1434 — canvasSetFontFull bridge fn ─────────────────────────────
 //
 // The Canvas2D shim's full CSS font shorthand parser dispatches through
@@ -5414,6 +5645,84 @@ TEST_CASE("CSSStyleDeclaration forwards width/height auto to bridge",
     REQUIRE(fa.dim_height.unit == DimensionUnit::auto_);
 }
 
+// pulp #1434 Phase A2-5 — fontFamily accepts a CSS comma-separated
+// list and picks the first non-empty family. Outer quotes (single or
+// double) are stripped per CSS spec. Whitespace is trimmed.
+TEST_CASE("setFontFamily parses comma-separated list and strips quotes",
+          "[view][bridge][css][issue-1434-fontfamily]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createLabel('t1', 'a');
+        createLabel('t2', 'b');
+        createLabel('t3', 'c');
+        createLabel('t4', 'd');
+        setFontFamily('t1', 'Inter Tight, system-ui, sans-serif');
+        setFontFamily('t2', '"JetBrains Mono", Menlo');
+        setFontFamily('t3', "'Helvetica Neue', Arial");
+        setFontFamily('t4', '   ,  Roboto  , Arial');
+    )");
+
+    auto* l1 = dynamic_cast<Label*>(bridge.widget("t1"));
+    auto* l2 = dynamic_cast<Label*>(bridge.widget("t2"));
+    auto* l3 = dynamic_cast<Label*>(bridge.widget("t3"));
+    auto* l4 = dynamic_cast<Label*>(bridge.widget("t4"));
+    REQUIRE(l1); REQUIRE(l2); REQUIRE(l3); REQUIRE(l4);
+    REQUIRE(l1->font_family() == "Inter Tight");
+    REQUIRE(l2->font_family() == "JetBrains Mono");
+    REQUIRE(l3->font_family() == "Helvetica Neue");
+    // Empty leading segment is skipped; first non-empty wins.
+    REQUIRE(l4->font_family() == "Roboto");
+}
+
+// pulp #1434 Phase A2-5 — when fontFamily is set on a non-Label
+// container View, the value lands in the inheritable_font_family_
+// slot so child Labels can read it via the parent walk. Mirrors the
+// existing letter_spacing / font_weight cascade pattern.
+TEST_CASE("setFontFamily on container View populates inheritable slot",
+          "[view][bridge][css][issue-1434-fontfamily]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('p', '');
+        setFontFamily('p', '"Custom Display", sans-serif');
+    )");
+
+    auto* panel = bridge.widget("p");
+    REQUIRE(panel != nullptr);
+    auto inh = panel->inheritable_font_family();
+    REQUIRE(inh.has_value());
+    REQUIRE(*inh == "Custom Display");
+}
+
+// pulp #1434 Phase A2-5 — CSS shim el.style.fontFamily forwards the
+// comma-separated list straight through to the bridge fn, where the
+// list-parsing happens. Verifies the @pulp/react CSS shim wires the
+// new prop without dropping it.
+TEST_CASE("CSSStyleDeclaration forwards font-family to bridge",
+          "[view][bridge][css][issue-1434-fontfamily]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createLabel('lbl', 'hi');
+        var s = new CSSStyleDeclaration({ _id: 'lbl', _nativeCreated: true });
+        s._applyProperty('fontFamily', '"Atkinson Hyperlegible", Georgia, serif');
+    )");
+
+    auto* lbl = dynamic_cast<Label*>(bridge.widget("lbl"));
+    REQUIRE(lbl != nullptr);
+    REQUIRE(lbl->font_family() == "Atkinson Hyperlegible");
+}
+
 // ── pulp #1434 Phase A2-2 — CSS Grid extended surface ──────────────────
 //
 // PR 1 of the multi-PR ladder. Builds on Pulp's existing grid layout
@@ -5535,4 +5844,436 @@ TEST_CASE("CSSStyleDeclaration forwards gridTemplateAreas",
     )");
     REQUIRE(bridge.widget("a")->grid().template_areas.size() == 3);
     REQUIRE(bridge.widget("a")->grid().auto_flow == GridStyle::AutoFlow::column);
+}
+
+// ── pulp #1520 — canvasSetDirection / canvasSetFilter bridge fns ────────
+//
+// These two register_function entries are the only direct surface
+// between the Canvas2D ctx.direction / ctx.filter setters and the
+// underlying canvas state. The shim's own coverage lives in
+// test_canvas2d_shim.cpp; this test asserts the bridge fn → canvas
+// command record path with no JS-side caching in the way.
+
+TEST_CASE("WidgetBridge canvasSetDirection records direction enum on the canvas command stream",
+          "[view][bridge][canvas][issue-1520]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 200, 100});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        var c = document.createElement('canvas');
+        c.id = 'dir-canvas';
+        c.width = 200; c.height = 100;
+        document.body.appendChild(c);
+        // Drive the bridge fn directly so the cache in the JS shim
+        // can't suppress the call.
+        canvasSetDirection(c._id, 1);  // rtl
+        canvasSetDirection(c._id, 2);  // inherit
+        canvasSetDirection(c._id, 0);  // ltr
+        canvasSetDirection(c._id, 99); // invalid → coerced to ltr
+    )");
+    root.layout_children();
+
+    auto* canvas = canvasFromBridge(bridge, engine, "dir-canvas");
+    REQUIRE(canvas != nullptr);
+    using T = pulp::view::CanvasDrawCmd::Type;
+    std::vector<int> values;
+    for (const auto& cmd : canvas->commands()) {
+        if (cmd.type == T::set_direction) values.push_back(cmd.int_val);
+    }
+    REQUIRE(values.size() == 4);
+    REQUIRE(values[0] == 1);
+    REQUIRE(values[1] == 2);
+    REQUIRE(values[2] == 0);
+    REQUIRE(values[3] == 0); // out-of-range coerced to ltr
+}
+
+TEST_CASE("WidgetBridge canvasSetFilter records the raw CSS filter string",
+          "[view][bridge][canvas][issue-1520]") {
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 200, 100});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        var c = document.createElement('canvas');
+        c.id = 'filter-canvas';
+        c.width = 200; c.height = 100;
+        document.body.appendChild(c);
+        // Bypass the JS-side _syncFilterState cache; drive the bridge
+        // fn directly so each call records.
+        canvasSetFilter(c._id, 'blur(5px)');
+        canvasSetFilter(c._id, 'sepia(80%) hue-rotate(45deg)');
+        canvasSetFilter(c._id, 'none');
+    )");
+    root.layout_children();
+
+    auto* canvas = canvasFromBridge(bridge, engine, "filter-canvas");
+    REQUIRE(canvas != nullptr);
+    using T = pulp::view::CanvasDrawCmd::Type;
+    std::vector<std::string> sources;
+    for (const auto& cmd : canvas->commands()) {
+        if (cmd.type == T::set_filter) sources.push_back(cmd.text);
+    }
+    REQUIRE(sources.size() == 3);
+    REQUIRE(sources[0] == "blur(5px)");
+    REQUIRE(sources[1] == "sepia(80%) hue-rotate(45deg)");
+    REQUIRE(sources[2] == "none");
+}
+
+TEST_CASE("WidgetBridge canvasSetFilter chain replays through to the recording canvas",
+          "[view][bridge][canvas][issue-1520]") {
+    // End-to-end: bridge fn → CanvasWidget command → RecordingCanvas
+    // capture. Asserts the dispatch table in canvas_widget.cpp wires
+    // set_filter through to Canvas::set_filter() and that the
+    // RecordingCanvas captures the same string.
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 200, 100});
+    root.set_theme(Theme::dark());
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        var c = document.createElement('canvas');
+        c.id = 'filter-replay-canvas';
+        c.width = 200; c.height = 100;
+        document.body.appendChild(c);
+        canvasSetFilter(c._id, 'blur(3px) sepia(50%)');
+        canvasSetDirection(c._id, 1);
+    )");
+    root.layout_children();
+
+    auto* canvas = canvasFromBridge(bridge, engine, "filter-replay-canvas");
+    REQUIRE(canvas != nullptr);
+
+    pulp::canvas::RecordingCanvas rec;
+    canvas->paint(rec);
+
+    using DT = pulp::canvas::DrawCommand::Type;
+    bool saw_filter = false, saw_direction = false;
+    for (const auto& cmd : rec.commands()) {
+        if (cmd.type == DT::set_filter) {
+            saw_filter = true;
+            REQUIRE(cmd.text == "blur(3px) sepia(50%)");
+        }
+        if (cmd.type == DT::set_direction) {
+            saw_direction = true;
+            // RTL = enum value 1 (TextDirection::rtl).
+            REQUIRE(cmd.f[0] == static_cast<float>(
+                pulp::canvas::Canvas::TextDirection::rtl));
+        }
+    }
+    REQUIRE(saw_filter);
+    REQUIRE(saw_direction);
+}
+
+// ── pulp #1542 — yoga logical-edge fan-out ──────────────────────────────
+//
+// The 6 logical-edge keys (margin_start / margin_end / padding_start /
+// padding_end / start / end) plumb through `setFlex` to FlexStyle's new
+// `dim_*_start` / `dim_*_end` / `dim_start` / `dim_end` fields, then
+// reach Yoga via `YGEdgeStart` / `YGEdgeEnd`. Yoga resolves the logical
+// edge against the node's writing direction (set via the new
+// `direction_writing` sub-key, distinct from the existing flex-direction
+// `direction` key). LTR maps start↔left and end↔right; RTL flips them.
+//
+// Coverage:
+//   • Round-trip: bridge stores the value with the right unit
+//   • Layout (LTR): margin_start lays out 10px from the LEFT edge
+//   • Layout (RTL): margin_start lays out 10px from the RIGHT edge
+//   • Same for padding (start/end) — verified via parent->bounds and
+//     content-area placement of a fixed-size child
+//   • Same for absolute position (start/end)
+//   • Percent path round-trips with unit::percent
+//   • px path stays unit::px
+
+TEST_CASE("setFlex logical-edge keys round-trip with px / percent / auto units",
+          "[view][bridge][issue-1542]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('a', '');
+        setFlex('a', 'margin_start',  10);
+        setFlex('a', 'margin_end',    20);
+        setFlex('a', 'padding_start', 8);
+        setFlex('a', 'padding_end',   12);
+        setFlex('a', 'start',         4);
+        setFlex('a', 'end',           6);
+
+        createPanel('b', '');
+        setFlex('b', 'margin_start',  '5%');
+        setFlex('b', 'margin_end',    '10%');
+        setFlex('b', 'padding_start', '15%');
+        setFlex('b', 'padding_end',   '25%');
+        setFlex('b', 'start',         '12%');
+        setFlex('b', 'end',           '8%');
+
+        createPanel('c', '');
+        setFlex('c', 'margin_start', 'auto');
+        setFlex('c', 'margin_end',   'auto');
+    )");
+
+    const auto& fa = bridge.widget("a")->flex();
+    REQUIRE(fa.dim_margin_start.unit  == DimensionUnit::px);
+    REQUIRE_THAT(fa.dim_margin_start.value,  WithinAbs(10.0f, 0.001f));
+    REQUIRE(fa.dim_margin_end.unit    == DimensionUnit::px);
+    REQUIRE_THAT(fa.dim_margin_end.value,    WithinAbs(20.0f, 0.001f));
+    REQUIRE(fa.dim_padding_start.unit == DimensionUnit::px);
+    REQUIRE_THAT(fa.dim_padding_start.value, WithinAbs(8.0f, 0.001f));
+    REQUIRE(fa.dim_padding_end.unit   == DimensionUnit::px);
+    REQUIRE_THAT(fa.dim_padding_end.value,   WithinAbs(12.0f, 0.001f));
+    REQUIRE(fa.dim_start.unit         == DimensionUnit::px);
+    REQUIRE_THAT(fa.dim_start.value,         WithinAbs(4.0f, 0.001f));
+    REQUIRE(fa.dim_end.unit           == DimensionUnit::px);
+    REQUIRE_THAT(fa.dim_end.value,           WithinAbs(6.0f, 0.001f));
+
+    const auto& fb = bridge.widget("b")->flex();
+    REQUIRE(fb.dim_margin_start.unit  == DimensionUnit::percent);
+    REQUIRE_THAT(fb.dim_margin_start.value,  WithinAbs(5.0f, 0.001f));
+    REQUIRE(fb.dim_margin_end.unit    == DimensionUnit::percent);
+    REQUIRE_THAT(fb.dim_margin_end.value,    WithinAbs(10.0f, 0.001f));
+    REQUIRE(fb.dim_padding_start.unit == DimensionUnit::percent);
+    REQUIRE_THAT(fb.dim_padding_start.value, WithinAbs(15.0f, 0.001f));
+    REQUIRE(fb.dim_padding_end.unit   == DimensionUnit::percent);
+    REQUIRE_THAT(fb.dim_padding_end.value,   WithinAbs(25.0f, 0.001f));
+    REQUIRE(fb.dim_start.unit         == DimensionUnit::percent);
+    REQUIRE_THAT(fb.dim_start.value,         WithinAbs(12.0f, 0.001f));
+    REQUIRE(fb.dim_end.unit           == DimensionUnit::percent);
+    REQUIRE_THAT(fb.dim_end.value,           WithinAbs(8.0f, 0.001f));
+
+    const auto& fc = bridge.widget("c")->flex();
+    REQUIRE(fc.dim_margin_start.unit == DimensionUnit::auto_);
+    REQUIRE(fc.dim_margin_end.unit   == DimensionUnit::auto_);
+}
+
+TEST_CASE("setFlex direction_writing round-trips ltr / rtl / inherit",
+          "[view][bridge][issue-1542]") {
+    ScriptEngine engine;
+    View root;
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('ltr', '');
+        setFlex('ltr', 'direction_writing', 'ltr');
+        createPanel('rtl', '');
+        setFlex('rtl', 'direction_writing', 'rtl');
+        createPanel('inh', '');
+        setFlex('inh', 'direction_writing', 'inherit');
+        // unrecognized values → inherit (defensive default)
+        createPanel('bad', '');
+        setFlex('bad', 'direction_writing', 'bogus');
+    )");
+
+    using WD = pulp::view::FlexStyle::WritingDirection;
+    REQUIRE(bridge.widget("ltr")->flex().writing_direction == WD::ltr);
+    REQUIRE(bridge.widget("rtl")->flex().writing_direction == WD::rtl);
+    REQUIRE(bridge.widget("inh")->flex().writing_direction == WD::inherit);
+    REQUIRE(bridge.widget("bad")->flex().writing_direction == WD::inherit);
+}
+
+TEST_CASE("logical-edge margin_start lays out from left in LTR, right in RTL",
+          "[view][bridge][issue-1542]") {
+    // Parent is 400 wide, row-direction. Child is 80 wide with
+    // margin_start: 10. In LTR, child's left edge = 10. In RTL, child's
+    // right edge = parent.right - 10 → child.x = 400 - 80 - 10 = 310.
+    auto build = [](pulp::view::FlexStyle::WritingDirection dir) {
+        ScriptEngine engine;
+        View root;
+        root.set_bounds({0, 0, 400, 100});
+        StateStore store;
+        WidgetBridge bridge(engine, root, store);
+
+        bridge.load_script(R"(
+            createPanel('parent', '');
+            setFlex('parent', 'direction', 'row');
+            setFlex('parent', 'width', 400);
+            setFlex('parent', 'height', 100);
+            createPanel('child', 'parent');
+            setFlex('child', 'width',  80);
+            setFlex('child', 'height', 50);
+            setFlex('child', 'margin_start', 10);
+        )");
+        // Set writing direction on the parent so the child inherits.
+        bridge.widget("parent")->flex().writing_direction = dir;
+        root.layout_children();
+        return std::make_pair(bridge.widget("parent")->bounds(),
+                              bridge.widget("child")->bounds());
+    };
+
+    {
+        auto [pb, cb] = build(pulp::view::FlexStyle::WritingDirection::ltr);
+        // LTR: child sits 10px from the left edge of the parent.
+        REQUIRE_THAT(cb.x - pb.x, WithinAbs(10.0f, 0.5f));
+    }
+    {
+        auto [pb, cb] = build(pulp::view::FlexStyle::WritingDirection::rtl);
+        // RTL: child sits 10px from the right edge — child's right edge
+        // is at parent.right - 10, so child.x = parent.right - 10 - 80.
+        float expected_x = pb.right() - 10.0f - 80.0f - pb.x;
+        REQUIRE_THAT(cb.x - pb.x, WithinAbs(expected_x, 0.5f));
+    }
+}
+
+TEST_CASE("logical-edge padding_start increases inset on the start edge",
+          "[view][bridge][issue-1542]") {
+    // Parent 400 wide, padding_start: 25. LTR: first child sits at
+    // parent.x + 25. RTL: first child's right edge sits at
+    // parent.right - 25.
+    auto build = [](pulp::view::FlexStyle::WritingDirection dir) {
+        ScriptEngine engine;
+        View root;
+        root.set_bounds({0, 0, 400, 100});
+        StateStore store;
+        WidgetBridge bridge(engine, root, store);
+
+        bridge.load_script(R"(
+            createPanel('p', '');
+            setFlex('p', 'direction', 'row');
+            setFlex('p', 'width',  400);
+            setFlex('p', 'height', 100);
+            setFlex('p', 'padding_start', 25);
+            createPanel('c', 'p');
+            setFlex('c', 'width',  60);
+            setFlex('c', 'height', 50);
+        )");
+        bridge.widget("p")->flex().writing_direction = dir;
+        root.layout_children();
+        return std::make_pair(bridge.widget("p")->bounds(),
+                              bridge.widget("c")->bounds());
+    };
+
+    {
+        auto [pb, cb] = build(pulp::view::FlexStyle::WritingDirection::ltr);
+        // LTR padding-start = padding-left → child.x = parent.x + 25.
+        REQUIRE_THAT(cb.x - pb.x, WithinAbs(25.0f, 0.5f));
+    }
+    {
+        auto [pb, cb] = build(pulp::view::FlexStyle::WritingDirection::rtl);
+        // RTL padding-start = padding-right → child sits flush against
+        // (parent.right - 25), so child.x = parent.right - 25 - 60.
+        float expected_offset = pb.width - 25.0f - 60.0f;
+        REQUIRE_THAT(cb.x - pb.x, WithinAbs(expected_offset, 0.5f));
+    }
+}
+
+TEST_CASE("logical-edge start/end position shifts absolute-positioned child",
+          "[view][bridge][issue-1542]") {
+    // An absolutely positioned child with `start: 30` is 30px from the
+    // start edge of its containing block. LTR: child.x = parent.x + 30.
+    // RTL: child's right edge = parent.right - 30.
+    auto build = [](pulp::view::FlexStyle::WritingDirection dir) {
+        ScriptEngine engine;
+        View root;
+        root.set_bounds({0, 0, 400, 200});
+        StateStore store;
+        WidgetBridge bridge(engine, root, store);
+
+        bridge.load_script(R"(
+            createPanel('p', '');
+            setFlex('p', 'width',  400);
+            setFlex('p', 'height', 200);
+            createPanel('c', 'p');
+            setFlex('c', 'width',  50);
+            setFlex('c', 'height', 40);
+            setFlex('c', 'start',  30);
+        )");
+        bridge.widget("p")->flex().writing_direction = dir;
+        // Absolute position so start/end pin the child.
+        bridge.widget("c")->set_position(View::Position::absolute);
+        root.layout_children();
+        return std::make_pair(bridge.widget("p")->bounds(),
+                              bridge.widget("c")->bounds());
+    };
+
+    {
+        auto [pb, cb] = build(pulp::view::FlexStyle::WritingDirection::ltr);
+        REQUIRE_THAT(cb.x - pb.x, WithinAbs(30.0f, 0.5f));
+    }
+    {
+        auto [pb, cb] = build(pulp::view::FlexStyle::WritingDirection::rtl);
+        // RTL: child.right = parent.right - 30 → child.x = pb.width - 30 - 50.
+        float expected_offset = pb.width - 30.0f - 50.0f;
+        REQUIRE_THAT(cb.x - pb.x, WithinAbs(expected_offset, 0.5f));
+    }
+}
+
+TEST_CASE("logical-edge percent values reach Yoga as percent units",
+          "[view][bridge][issue-1542]") {
+    // Layout-level smoke: 10% of a 400-wide parent should produce ~40px
+    // of margin/padding regardless of LTR/RTL. We assert the resolved
+    // unit on the FlexStyle and a coarse layout check.
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 100});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('p', '');
+        setFlex('p', 'direction', 'row');
+        setFlex('p', 'width',  400);
+        setFlex('p', 'height', 100);
+        setFlex('p', 'padding_start', '10%');
+        createPanel('c', 'p');
+        setFlex('c', 'width',  80);
+        setFlex('c', 'height', 50);
+        setFlex('c', 'margin_start', '5%');
+    )");
+    auto& pf = bridge.widget("p")->flex();
+    auto& cf = bridge.widget("c")->flex();
+    REQUIRE(pf.dim_padding_start.unit == DimensionUnit::percent);
+    REQUIRE_THAT(pf.dim_padding_start.value, WithinAbs(10.0f, 0.001f));
+    REQUIRE(cf.dim_margin_start.unit == DimensionUnit::percent);
+    REQUIRE_THAT(cf.dim_margin_start.value, WithinAbs(5.0f, 0.001f));
+
+    root.layout_children();
+    auto pb = bridge.widget("p")->bounds();
+    auto cb = bridge.widget("c")->bounds();
+    // LTR (default for inherit): child.x = parent.x + padding-start + margin-start.
+    // Yoga resolves padding percent against parent width (40) and margin
+    // percent against parent content-area width (~360 → 18). The exact
+    // resolution depends on Yoga's containing-block math for margin
+    // percent; we only care that BOTH dispatched as percent and the
+    // child sits well past the padding edge — i.e. the start-side
+    // logical-edge code actually reached Yoga.
+    REQUIRE((cb.x - pb.x) > 40.0f);  // past the padding-start
+    REQUIRE((cb.x - pb.x) < 80.0f);  // less than a doubled inset
+}
+
+TEST_CASE("logical-edge unset slots don't override per-side margin/padding",
+          "[view][bridge][issue-1542]") {
+    // Regression guard: when a node sets only margin_left (legacy
+    // per-side path) and not margin_start, the start-side dispatch
+    // must not zero out the left edge. The new apply_logical_margin
+    // lambda guards on `value != 0`.
+    ScriptEngine engine;
+    View root;
+    root.set_bounds({0, 0, 400, 100});
+    StateStore store;
+    WidgetBridge bridge(engine, root, store);
+
+    bridge.load_script(R"(
+        createPanel('p', '');
+        setFlex('p', 'direction', 'row');
+        setFlex('p', 'width',  400);
+        setFlex('p', 'height', 100);
+        createPanel('c', 'p');
+        setFlex('c', 'width',  60);
+        setFlex('c', 'height', 50);
+        setFlex('c', 'margin_left', 12);
+    )");
+    root.layout_children();
+    auto pb = bridge.widget("p")->bounds();
+    auto cb = bridge.widget("c")->bounds();
+    REQUIRE_THAT(cb.x - pb.x, WithinAbs(12.0f, 0.5f));
 }

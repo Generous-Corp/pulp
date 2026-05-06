@@ -110,6 +110,14 @@ public:
     void clear_inheritable_font_weight() { inh_font_weight_.reset(); }
     std::optional<int> inheritable_font_weight() const;
 
+    /// pulp #1434 Phase A2-5 — inheritable font-family cascade. Mirrors
+    /// the font-weight pattern; Labels read this when set_font_family
+    /// hasn't been called directly. Final SkFontMgr resolution is
+    /// gated on pulp #932 — the cascade plumbing is independent.
+    void set_inheritable_font_family(std::string f) { inh_font_family_ = std::move(f); }
+    void clear_inheritable_font_family() { inh_font_family_.reset(); }
+    std::optional<std::string> inheritable_font_family() const;
+
     /// 0 = left, 1 = center, 2 = right (matches LabelAlign).
     void set_inheritable_text_align(int a) { inh_text_align_ = a; }
     void clear_inheritable_text_align() { inh_text_align_.reset(); }
@@ -343,6 +351,25 @@ public:
     };
     void set_border_style(BorderStyle s) { border_style_ = s; }
     BorderStyle border_style() const { return border_style_; }
+
+    /// CSS / RN outline cluster (pulp #1519). Outline is a paint-time
+    /// ring drawn OUTSIDE the border-box; it does NOT affect Yoga layout
+    /// (no parent space reserved). Slotting mirrors border-* but lives
+    /// in its own quartet of fields so a JSX prop diff that touches one
+    /// outline-* prop preserves the others. Reuses View::BorderStyle for
+    /// the line-style enum since CSS keyword sets are identical (solid /
+    /// dashed / dotted / double / groove / ridge / inset / outset / none /
+    /// hidden). The Skia paint inflates the box by `outline_offset_ +
+    /// outline_width_ / 2` and strokes; CG falls through (set_line_dash
+    /// canvas-base no-op) for dashed/dotted same as border-style.
+    void set_outline_color(Color c) { outline_color_ = c; }
+    void set_outline_offset(float px) { outline_offset_ = px; }
+    void set_outline_style(BorderStyle s) { outline_style_ = s; }
+    void set_outline_width(float px) { outline_width_ = px; }
+    Color outline_color() const { return outline_color_; }
+    float outline_offset() const { return outline_offset_; }
+    BorderStyle outline_style() const { return outline_style_; }
+    float outline_width() const { return outline_width_; }
 
     /// Per-side borders (CSS border-top, border-right, etc.)
     void set_border_top(Color c, float w) { border_top_ = {c, w}; has_border_sides_ = true; }
@@ -599,6 +626,23 @@ public:
     void set_backdrop_blur(float radius) { backdrop_blur_ = radius; }
     float backdrop_blur() const { return backdrop_blur_; }
 
+    /// CSS background sub-properties (pulp #1517). These slots store the
+    /// keyword for round-tripping; paint impact is partial — see notes:
+    ///   • background-attachment: only `scroll` is conformant in pulp's
+    ///     non-scrolling layout model. `fixed` / `local` need a scroll-
+    ///     context coupling we don't have. Catalog: noop.
+    ///   • background-clip: `text` would clip the bg paint to text glyphs
+    ///     via SkBlendMode::kSrcIn — deferred to a later PR. Other values
+    ///     are no-ops on solid bg. Catalog: partial.
+    ///   • background-origin: relevant only for repeating gradients (which
+    ///     we don't paint per-tile). Catalog: noop.
+    void set_background_attachment(std::string kw) { background_attachment_ = std::move(kw); }
+    const std::string& background_attachment() const { return background_attachment_; }
+    void set_background_clip(std::string kw)       { background_clip_ = std::move(kw); }
+    const std::string& background_clip() const     { return background_clip_; }
+    void set_background_origin(std::string kw)     { background_origin_ = std::move(kw); }
+    const std::string& background_origin() const   { return background_origin_; }
+
     /// Force this View's subtree to render into a compositing layer.
     /// Useful for caching, post-effects, or explicit layer isolation.
     void set_needs_layer(bool v) { needs_layer_ = v; }
@@ -704,6 +748,15 @@ private:
     float corner_radius_ = 0;
     bool has_border_ = false;
     BorderStyle border_style_ = BorderStyle::solid;
+    // CSS / RN outline cluster (pulp #1519). Defaults: outline_style_
+    // is `none` so paint short-circuits unless JS opts in via
+    // setOutlineStyle. width=0 also short-circuits as a belt-and-braces
+    // guard. Color defaults to fully-transparent black; bridge writes
+    // the parsed setter value before paint.
+    Color outline_color_{};
+    float outline_offset_ = 0.0f;
+    float outline_width_ = 0.0f;
+    BorderStyle outline_style_ = BorderStyle::none;
     // Per-side borders
     struct BorderSide { Color color{}; float width = 0; };
     BorderSide border_top_{}, border_right_{}, border_bottom_{}, border_left_{};
@@ -747,6 +800,9 @@ private:
     bool has_transform_matrix_ = false;
     float filter_blur_ = 0;
     float backdrop_blur_ = 0;
+    std::string background_attachment_;  // pulp #1517 — noop today
+    std::string background_clip_;        // pulp #1517 — partial (text deferred)
+    std::string background_origin_;      // pulp #1517 — noop today
     bool needs_layer_ = false;
     WindowHost* window_host_ = nullptr;
     PluginViewHost* plugin_view_host_ = nullptr;
@@ -771,6 +827,7 @@ private:
     std::optional<float> inh_letter_spacing_;
     std::optional<int>   inh_font_weight_;
     std::optional<int>   inh_text_align_;
+    std::optional<std::string> inh_font_family_;  // pulp #1434 Phase A2-5
 };
 
 } // namespace pulp::view

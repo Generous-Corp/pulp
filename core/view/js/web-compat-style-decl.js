@@ -771,6 +771,38 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
             break;
         }
 
+        // pulp #1517 — background sub-props.
+        // - backgroundAttachment: only `scroll` is the conformant default in
+        //   pulp's non-scrolling layout model. `fixed` / `local` need a
+        //   scroll-context coupling we don't model — accept verbatim and
+        //   no-op so consumers don't crash. Catalog is `noop`.
+        // - backgroundClip: `text` is the only interesting form (paint-time
+        //   SkBlendMode::kSrcIn against text glyphs). Others are no-ops on
+        //   our solid-bg surface. The bridge slot stores the keyword so
+        //   future paint logic can honor it; catalog is `partial` because
+        //   `text` isn't fully wired through the paint chain yet.
+        // - backgroundOrigin: positions the bg-paint origin relative to the
+        //   border / padding / content box. Pulp paints bg edge-to-edge,
+        //   so all three keywords no-op for a solid color and matter only
+        //   for repeating gradients (deferred). Catalog is `noop`.
+        case "backgroundAttachment":
+            // Stored on the View's bg-attachment slot via a thin bridge
+            // setter that just records the keyword — no paint impact today.
+            if (typeof setBackgroundAttachment === "function") {
+                setBackgroundAttachment(id, resolved);
+            }
+            break;
+        case "backgroundClip":
+            if (typeof setBackgroundClip === "function") {
+                setBackgroundClip(id, resolved);
+            }
+            break;
+        case "backgroundOrigin":
+            if (typeof setBackgroundOrigin === "function") {
+                setBackgroundOrigin(id, resolved);
+            }
+            break;
+
         // Grid
         case "gridTemplateColumns":
             setGrid(id, "template_columns", resolved);
@@ -851,23 +883,50 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
             else setOpacity(id, 1);
             break;
 
-        // outline: "2px solid blue"
+        // outline: "2px solid blue" — fan-out to the per-attribute
+        // bridge fns introduced in pulp #1519 (setOutlineColor /
+        // setOutlineStyle / setOutlineWidth). Falls back to legacy
+        // setOutline if the new ones aren't registered (older bridge).
         case "outline": {
-            var op = resolved.match(/([\d.]+)px\s+\w+\s+(.+)/);
+            var op = resolved.match(/([\d.]+)px\s+(\w+)\s+(.+)/);
             if (op) {
-                var oc = parseCSSColor(op[2].trim());
-                if (typeof setOutline === "function") setOutline(id, parseFloat(op[1]), oc || op[2].trim());
+                var oc = parseCSSColor(op[3].trim());
+                if (typeof setOutlineWidth === "function") {
+                    setOutlineWidth(id, parseFloat(op[1]));
+                    if (typeof setOutlineStyle === "function") setOutlineStyle(id, op[2]);
+                    if (typeof setOutlineColor === "function") setOutlineColor(id, oc || op[3].trim());
+                } else if (typeof setOutline === "function") {
+                    setOutline(id, parseFloat(op[1]), oc || op[3].trim());
+                }
             }
             break;
         }
         case "outlineWidth": {
             var ow = parseCSSLength(resolved);
-            if (ow && typeof setOutline === "function") setOutline(id, ow.value, "");
+            if (ow) {
+                if (typeof setOutlineWidth === "function") setOutlineWidth(id, ow.value);
+                else if (typeof setOutline === "function") setOutline(id, ow.value, "");
+            }
             break;
         }
         case "outlineColor": {
             var occ = parseCSSColor(resolved);
-            if (occ && typeof setOutline === "function") setOutline(id, 0, occ);
+            if (occ) {
+                if (typeof setOutlineColor === "function") setOutlineColor(id, occ);
+                else if (typeof setOutline === "function") setOutline(id, 0, occ);
+            }
+            break;
+        }
+        // pulp #1519 — outline-offset / outline-style now have dedicated
+        // bridge setters. Outline doesn't take Yoga layout space, so the
+        // CSS path mirrors borderStyle keyword set verbatim.
+        case "outlineOffset": {
+            var oo = parseCSSLength(resolved);
+            if (oo && typeof setOutlineOffset === "function") setOutlineOffset(id, oo.value);
+            break;
+        }
+        case "outlineStyle": {
+            if (typeof setOutlineStyle === "function") setOutlineStyle(id, resolved);
             break;
         }
 
@@ -1199,7 +1258,7 @@ var __cssProperties__ = [
     "borderTopWidth", "borderRightWidth", "borderBottomWidth", "borderLeftWidth",
     "borderTopColor", "borderRightColor", "borderBottomColor", "borderLeftColor",
     "borderTopLeftRadius", "borderTopRightRadius", "borderBottomLeftRadius", "borderBottomRightRadius",
-    "outline", "outlineWidth", "outlineColor",
+    "outline", "outlineWidth", "outlineColor", "outlineOffset", "outlineStyle",
     "opacity", "overflow", "cursor", "visibility",
     "userSelect", "pointerEvents",
     "transform", "transformOrigin",
@@ -1209,6 +1268,9 @@ var __cssProperties__ = [
     "position", "top", "right", "bottom", "left", "zIndex", "inset",
     "boxShadow", "filter", "backdropFilter", "background", "backgroundImage",
     "backgroundSize", "backgroundPosition", "backgroundRepeat",
+    // pulp #1517 — background sub-props (mostly noop / partial in pulp's
+    // layout model; see _applyProperty for the per-prop semantics).
+    "backgroundAttachment", "backgroundClip", "backgroundOrigin",
     "gridTemplateColumns", "gridTemplateRows", "gridColumn", "gridRow",
     "lineClamp", "webkitLineClamp"
 ];

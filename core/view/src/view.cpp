@@ -297,6 +297,51 @@ void View::paint_all(canvas::Canvas& canvas) {
                                corner_radius_);
     }
 
+    // CSS / RN outline (pulp #1519). Paints OUTSIDE the border-box and
+    // does NOT take up Yoga layout space (parent never reserves room
+    // for it). The stroke is centered on the inflated rect, so the
+    // visual outline edge lies at offset (outline_offset + outline_width)
+    // beyond the border-box. Reuses border_style enum + dash plumbing —
+    // CSS spec lists the same line-style keyword set for outline.
+    // none/hidden/zero-width short-circuit. Paints after children so
+    // it stays on top of everything inside the box.
+    if (outline_width_ > 0
+            && outline_style_ != BorderStyle::none
+            && outline_style_ != BorderStyle::hidden) {
+        canvas.set_stroke_color(outline_color_);
+        canvas.set_line_width(outline_width_);
+
+        const float w = outline_width_;
+        if (outline_style_ == BorderStyle::dashed) {
+            const float dashed[2] = { 3.0f * w, 3.0f * w };
+            canvas.set_line_dash(dashed, 2, 0.0f);
+        } else if (outline_style_ == BorderStyle::dotted) {
+            const float dotted[2] = { 1.0f * w, 2.0f * w };
+            canvas.set_line_dash(dotted, 2, 0.0f);
+        }
+
+        // Inflate around all four sides: stroke center at offset+w/2.
+        const float inflate = outline_offset_ + outline_width_ * 0.5f;
+        const float ox = -inflate;
+        const float oy = -inflate;
+        const float ow = bounds_.width + 2.0f * inflate;
+        const float oh = bounds_.height + 2.0f * inflate;
+        // Outline corner radius mirrors the border-box corner radius
+        // expanded by the same inflate distance — matches CSS UA
+        // behavior where the outline follows the box's corner curvature.
+        if (corner_radius_ > 0) {
+            canvas.stroke_rounded_rect(ox, oy, ow, oh,
+                                       corner_radius_ + inflate);
+        } else {
+            canvas.stroke_rect(ox, oy, ow, oh);
+        }
+
+        if (outline_style_ == BorderStyle::dashed
+                || outline_style_ == BorderStyle::dotted) {
+            canvas.set_line_dash(nullptr, 0, 0.0f);
+        }
+    }
+
     // Focus ring — only show on text input widgets, not sliders/toggles/meters
     // Matches CSS :focus-visible behavior (keyboard focus on text inputs)
     if (has_focus_ && focusable_ &&
@@ -712,6 +757,12 @@ std::optional<float> View::inheritable_letter_spacing() const {
 std::optional<int> View::inheritable_font_weight() const {
     if (inh_font_weight_.has_value()) return inh_font_weight_;
     if (parent_) return parent_->inheritable_font_weight();
+    return std::nullopt;
+}
+
+std::optional<std::string> View::inheritable_font_family() const {
+    if (inh_font_family_.has_value()) return inh_font_family_;
+    if (parent_) return parent_->inheritable_font_family();
     return std::nullopt;
 }
 
