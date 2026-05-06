@@ -89,6 +89,12 @@ export interface FlexProps {
     insetBlock?: number | string;
     /// CSS `inset-inline` → left + right (LTR).
     insetInline?: number | string;
+    /// pulp #1518 — RN-style `flex: <number>` shorthand. Positive `n`
+    /// expands to `{flexGrow: n, flexShrink: 1, flexBasis: 0}`; `0`
+    /// to `(0, 0, 'auto')`; negative to `(0, 1, 'auto')`. Matches RN
+    /// semantics, which is what JSX `<View flex={1} />` consumers
+    /// expect.
+    flex?: number;
     flexGrow?: number;
     flexShrink?: number;
     /// pulp #1434 (rn batch C) — accepts number (px), percentage string

@@ -3401,15 +3401,17 @@
       "issue": ""
     },
     "rn/flex": {
-      "status": "missing",
-      "mapsTo": "no shorthand prop in @pulp/react. Components must use flexGrow/flexShrink/flexBasis individually.",
-      "supportedValues": [],
-      "unsupportedValues": [
+      "status": "supported",
+      "mapsTo": "prop-applier.ts case 'flex': fans the numeric value out to setFlex(id, 'flex_grow', n) + setFlex(id, 'flex_shrink', 1) + setFlex(id, 'flex_basis', 0) for positive n; (0,0,'auto') for n=0; (0,1,'auto') for negative n. Matches RN's bare-number shorthand semantics.",
+      "supportedValues": [
         "number"
       ],
-      "tests": [],
-      "notes": "Common RN pattern; awkward to port.",
-      "issue": ""
+      "unsupportedValues": [],
+      "tests": [
+        "packages/pulp-react/test/prop-applier-flex.test.ts"
+      ],
+      "notes": "pulp #1518 closed the gap. Bare-number `flex={n}` is the canonical RN-flavored shorthand; `flex` as an object/string is not a thing in RN, so no further forms are needed. Underlying bridge wires were already stable (flex_grow / flex_shrink / flex_basis) — this is purely an adapter aliasing.",
+      "issue": "1518"
     },
     "rn/flexBasis": {
       "status": "partial",

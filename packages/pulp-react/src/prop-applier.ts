@@ -476,6 +476,31 @@ function applyOne(id: string, type: string, key: string, value: unknown, props?:
             return;
         case 'flexGrow':        return call('setFlex', id, 'flex_grow', value as number);
         case 'flexShrink':      return call('setFlex', id, 'flex_shrink', value as number);
+        // pulp #1434 (#1518) — RN-style `flex: <number>` shorthand.
+        // RN spec: `flex: positive` → `{flexGrow: n, flexShrink: 1, flexBasis: 0}`;
+        // `flex: 0` → no growth / no shrink at intrinsic basis;
+        // `flex: -1` (or any negative) → no growth, can shrink at auto basis.
+        // CSS spec is more nuanced (bare number is `flex: <n> 1 0`), but RN's
+        // narrow contract is what consumers passing JSX `flex={1}` expect;
+        // our adapter is RN-flavored so we honor RN semantics.
+        case 'flex': {
+            const n = value as number;
+            if (typeof n !== 'number' || !Number.isFinite(n)) return;
+            if (n > 0) {
+                call('setFlex', id, 'flex_grow', n);
+                call('setFlex', id, 'flex_shrink', 1);
+                call('setFlex', id, 'flex_basis', 0);
+            } else if (n === 0) {
+                call('setFlex', id, 'flex_grow', 0);
+                call('setFlex', id, 'flex_shrink', 0);
+                call('setFlex', id, 'flex_basis', 'auto');
+            } else {
+                call('setFlex', id, 'flex_grow', 0);
+                call('setFlex', id, 'flex_shrink', 1);
+                call('setFlex', id, 'flex_basis', 'auto');
+            }
+            return;
+        }
         // pulp #1434 (rn batch C) — dimension keys forward
         // `number | string` so the bridge sees `'50%'` / `'auto'`
         // verbatim. Numeric values still flow through unchanged.
