@@ -16,7 +16,7 @@ this file is the Claude Code surface that wires the pieces together.
 ```bash
 command -v pulp >/dev/null 2>&1 || {
   echo "pulp CLI not found on PATH."
-  echo "Install with: curl -fsSL https://raw.githubusercontent.com/danielraffel/pulp/main/install.sh | sh"
+  echo "Install with: curl -fsSL https://www.generouscorp.com/pulp/install.sh | sh"
   exit 1
 }
 ```

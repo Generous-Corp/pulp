@@ -1108,7 +1108,9 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
                 "col");
             break;
         case "flexWrap":
-            setFlex(id, "flex_wrap", resolved === "wrap" ? 1 : 0);
+            // pulp #1434 Triage #14 — forward keyword verbatim so the
+            // bridge can route wrap-reverse through YGWrapWrapReverse.
+            setFlex(id, "flex_wrap", resolved);
             break;
         case "flexGrow":
             setFlex(id, "flex_grow", parseFloat(resolved) || 0);

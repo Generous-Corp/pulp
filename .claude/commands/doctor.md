@@ -15,7 +15,7 @@ Environment
 Then run the full doctor:
 
 ```bash
-./build/tools/cli/pulp doctor
+pulp doctor
 ```
 
 Options:

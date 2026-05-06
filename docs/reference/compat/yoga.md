@@ -38,6 +38,13 @@ which mirrors the upstream Yoga API.
 
 ## Recent updates
 
+- **2026-05-05 (pulp #1434 Triage #14)** — `yoga/flexWrap` now claims
+  `wrap-reverse` alongside `wrap` and `nowrap`. `FlexStyle::flex_wrap`
+  was converted from `bool` to a tri-state `FlexWrap` enum
+  (`no_wrap` / `wrap` / `wrap_reverse`); `yoga_layout.cpp` dispatches
+  through `YGWrapNoWrap` / `YGWrapWrap` / `YGWrapWrapReverse`. CSS
+  `flex-wrap: wrap-reverse` and the `flex-flow` shorthand
+  (`row wrap-reverse` etc.) now route correctly.
 - **2026-05-05 (pulp #1434 sub-agent #12 follow-up)** — three deferred
   yoga gaps closed in one slice. `yoga/alignContent` was previously
   labelled "MAJOR — unimplementable"; that was a misread. Yoga

@@ -403,7 +403,7 @@ TEST_CASE("CSS Value: flex_wrap on", "[parser][value]") {
         createPanel("box");
         setFlex("box", "flex_wrap", 1);
     )JS");
-    REQUIRE(env.widget("box")->flex().flex_wrap == true);
+    REQUIRE(env.widget("box")->flex().flex_wrap == FlexWrap::wrap);
 }
 
 TEST_CASE("CSS Value: flex_wrap off", "[parser][value]") {
@@ -412,7 +412,7 @@ TEST_CASE("CSS Value: flex_wrap off", "[parser][value]") {
         createPanel("box");
         setFlex("box", "flex_wrap", 0);
     )JS");
-    REQUIRE(env.widget("box")->flex().flex_wrap == false);
+    REQUIRE(env.widget("box")->flex().flex_wrap == FlexWrap::no_wrap);
 }
 
 TEST_CASE("CSS Value: order", "[parser][value]") {

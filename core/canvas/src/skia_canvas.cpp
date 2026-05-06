@@ -441,6 +441,11 @@ void SkiaCanvas::apply_stroke_state(SkPaint& paint) const {
     }
     paint.setStrokeJoin(sk_join);
     paint.setStrokeMiter(miter_limit_);
+    // pulp #1434 bridge-thin gap-fill — Canvas2D ctx.createPattern on
+    // strokeStyle. Wins over the solid stroke colour when present.
+    if (stroke_shader_) {
+        paint.setShader(stroke_shader_);
+    }
 }
 
 // pulp #1434 bridge-thin gap-fill — translate Canvas2D
@@ -1001,6 +1006,76 @@ void SkiaCanvas::set_fill_gradient_conic(float cx, float cy, float start_angle,
 void SkiaCanvas::clear_fill_gradient() {
     gradient_shader_ = nullptr;
     has_gradient_ = false;
+}
+
+// ── Patterns (pulp #1434 bridge-thin gap-fill) ──────────────────────────────
+//
+// Canvas2D `ctx.createPattern(image, repetition)` returns a CanvasPattern
+// the shim assigns to fillStyle / strokeStyle. The shim then invokes
+// `canvasSetFillPattern` / `canvasSetStrokePattern` which lands here as
+// `set_fill_pattern` / `set_stroke_pattern`. We decode the source via the
+// same `SkData` paths `draw_image_from_*` use, build an `SkShader::MakeImage`
+// with the requested tile mode per axis, and stash it on
+// `gradient_shader_` (for fills — already wired into `current_fill_paint`)
+// or `stroke_shader_` (for strokes — picked up by `apply_stroke_state`).
+//
+// Falling back: if the image fails to decode (missing file, malformed
+// data URI), we clear the active fill so the canvas degrades to the
+// previous solid colour rather than rendering garbage.
+
+namespace {
+
+SkTileMode to_sk_tile_mode(pulp::canvas::Canvas::PatternTileMode mode) {
+    using Tile = pulp::canvas::Canvas::PatternTileMode;
+    return mode == Tile::repeat ? SkTileMode::kRepeat : SkTileMode::kDecal;
+}
+
+// Decode a pattern image source (file path or "data:" URL). Returns
+// nullptr on failure; callers fall back to clearing the pattern.
+sk_sp<SkImage> decode_pattern_image(const std::string& src) {
+    if (src.empty()) return nullptr;
+    constexpr std::string_view kDataPrefix = "data:";
+    if (src.rfind(kDataPrefix, 0) == 0) {
+        // The bridge already validated and decoded data URIs before
+        // recording, so we don't see them here in practice — but keep
+        // a guard so we don't accidentally feed a base64 blob to
+        // SkData::MakeFromFileName.
+        return nullptr;
+    }
+    auto data = SkData::MakeFromFileName(src.c_str());
+    if (!data) return nullptr;
+    return SkImages::DeferredFromEncodedData(data);
+}
+
+} // namespace
+
+void SkiaCanvas::set_fill_pattern(const std::string& image_src,
+                                   PatternTileMode tile_x,
+                                   PatternTileMode tile_y) {
+    auto image = decode_pattern_image(image_src);
+    if (!image) {
+        clear_fill_gradient();
+        return;
+    }
+    gradient_shader_ = image->makeShader(to_sk_tile_mode(tile_x),
+                                          to_sk_tile_mode(tile_y),
+                                          sampling_options_for_image_smoothing(),
+                                          nullptr);
+    has_gradient_ = gradient_shader_ != nullptr;
+}
+
+void SkiaCanvas::set_stroke_pattern(const std::string& image_src,
+                                     PatternTileMode tile_x,
+                                     PatternTileMode tile_y) {
+    auto image = decode_pattern_image(image_src);
+    if (!image) {
+        stroke_shader_ = nullptr;
+        return;
+    }
+    stroke_shader_ = image->makeShader(to_sk_tile_mode(tile_x),
+                                        to_sk_tile_mode(tile_y),
+                                        sampling_options_for_image_smoothing(),
+                                        nullptr);
 }
 
 // ── Blend modes ─────────────────────────────────────────────────────────────

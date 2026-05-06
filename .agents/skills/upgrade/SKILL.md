@@ -69,7 +69,7 @@ the Pulp source checkout as a consumer project.
 
 The skill shells out to `pulp` — no hardcoded paths, no env-var
 requirement. If `pulp` is not on PATH, tell the user to install first
-(`curl -fsSL https://raw.githubusercontent.com/danielraffel/pulp/main/install.sh | sh`)
+(`curl -fsSL https://www.generouscorp.com/pulp/install.sh | sh`)
 and stop.
 
 ### Plugin ↔ CLI skew banner (Slice 6, #551)

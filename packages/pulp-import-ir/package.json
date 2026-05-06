@@ -1,0 +1,32 @@
+{
+  "name": "@pulp/import-ir",
+  "version": "0.0.1",
+  "description": "Pulp design-import IR — typed intermediate representation that survives reimport. Adapters lower source formats (Figma / Mitosis / HTML / etc.) into IRNode trees keyed by stable_anchor_id; tweaks layer survives source regeneration. Phase 1 spike — Claude Design HTML adapter + 5-scenario harness (closes pulp #1486 phase 1).",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json && esbuild src/index.ts --bundle --format=esm --outfile=dist/index.mjs --platform=neutral --external:node:*",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.0",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.4.0",
+    "vitest": "^1.6.0"
+  }
+}
