@@ -81,6 +81,10 @@ A cross-platform audio plugin and application framework. MIT licensed, C++20 cor
 curl -fsSL https://www.generouscorp.com/pulp/install.sh | sh
 ```
 
+The public installer installs Pulp CLI artifacts only. It does not install
+Shipyard or GitHub CLI (`gh`); those are optional source-checkout contributor
+tools for PR/CI workflows.
+
 **Create and run your first plugin:**
 ```bash
 pulp create my-plugin
@@ -178,10 +182,10 @@ Every change goes through: **branch → CI → PR → merge on green**. Pulp acc
 ```bash
 # Validate on macOS + Ubuntu + Windows before creating a PR
 shipyard run                              # validate current branch
-shipyard ship                             # PR + validate + merge on green
+shipyard pr                               # create, track, validate, and merge on green
 ```
 
-Pulp uses [Shipyard](https://github.com/danielraffel/Shipyard) for cross-platform CI — it validates on macOS (local), Linux (SSH), and Windows (SSH), and gates merges on per-SHA evidence across all three platforms. Install with `./tools/install-shipyard.sh`. See [docs/guides/local-ci.md](docs/guides/local-ci.md) for setup and [CONTRIBUTING.md](CONTRIBUTING.md) for the full contributor expectations.
+Pulp uses [Shipyard](https://github.com/danielraffel/Shipyard) for cross-platform CI — it validates on macOS (local), Linux (SSH), and Windows (SSH), and gates merges on per-SHA evidence across all three platforms. Public Pulp installs include the Pulp CLI only. Source-checkout contributors install the pinned Shipyard tool with `./tools/install-shipyard.sh`; GitHub CLI (`gh`) is only needed for GitHub-facing contributor workflows. See [docs/guides/local-ci.md](docs/guides/local-ci.md) for setup and [CONTRIBUTING.md](CONTRIBUTING.md) for the full contributor expectations.
 
 ### Security & CI policy
 

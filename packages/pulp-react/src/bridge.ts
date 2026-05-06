@@ -106,6 +106,10 @@ declare global {
     /// pulp #1434 Phase A2-3 — writing direction. Maps to
     /// View::WritingDirection; Yoga + Skia honor at layout / text shape.
     const setDirection: ((id: string, dir: 'ltr' | 'rtl' | 'inherit' | string) => void) | undefined;
+    /// pulp #1434 Phase A2-2 — CSS Grid bridge fn. The C++ side parses
+    /// template-track strings, named-area strings, and the grid-area
+    /// shorthand (named token vs `row / col / row / col` numeric form).
+    const setGrid: ((id: string, key: string, value: string | number) => void) | undefined;
     const setBorderTopColor: ((id: string, hexColor: string) => void) | undefined;
     const setBorderRightColor: ((id: string, hexColor: string) => void) | undefined;
     const setBorderBottomColor: ((id: string, hexColor: string) => void) | undefined;
@@ -149,6 +153,11 @@ declare global {
     function setTranslate(id: string, x: number, y: number): void;
     function setRotation(id: string, degrees: number): void;
     function setScale(id: string, scale: number): void;
+    // pulp #1434 Triage #9 fan-out — setSkew dispatches both axes at
+    // once. View::set_skew has existed since the 2D slot was added;
+    // the bridge fn registration landed alongside this prop-applier
+    // walker extension so skewX/skewY now reaches the View.
+    function setSkew(id: string, x_deg: number, y_deg: number): void;
 
     // ── Text ────────────────────────────────────────────────────────
     function setText(id: string, text: string): void;
@@ -225,7 +234,7 @@ export function createMockBridge(): MockBridge {
         // pulp #1434 Triage #9 — transform array dispatches a
         // consolidated trio of bridge calls; mock-bridge captures
         // all three so vitest cases can assert on the args + arity.
-        'setTranslate', 'setRotation', 'setScale',
+        'setTranslate', 'setRotation', 'setScale', 'setSkew',
         // pulp #1434 batch 6 — CSS positional setters (top/right/bottom/left)
         // need to be capturable so the percent-string forwarding test
         // can assert on the bridge call shape.
@@ -265,6 +274,8 @@ export function createMockBridge(): MockBridge {
         'setOverflow',
         // pulp #1434 Phase A2-3 — writing direction.
         'setDirection',
+        // pulp #1434 Phase A2-2 — CSS Grid bridge surface.
+        'setGrid',
         // pulp #994 — SvgPath intrinsic surface
         'createSvgPath', 'setSvgPath', 'setSvgViewBox',
         'setSvgFill', 'setSvgStroke', 'setSvgStrokeWidth',

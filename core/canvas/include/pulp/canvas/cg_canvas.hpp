@@ -61,6 +61,20 @@ public:
                                   int count) override;
     void clear_fill_gradient() override;
 
+    // pulp #1434 bridge-thin gap-fill — Canvas2D ctx.createPattern. CG
+    // has no first-class pattern shader (CGPattern requires a custom
+    // CGPatternRef + tiling closure dance), so degrade silently to the
+    // active fill / stroke colour. Same shape as the conic-gradient
+    // fallback: the call records the intent, but visually the canvas
+    // continues with the previous solid paint. File a follow-up if a
+    // CG-targeted plugin actually needs tiled image patterns.
+    void set_fill_pattern(const std::string& image_src,
+                          PatternTileMode tile_x,
+                          PatternTileMode tile_y) override;
+    void set_stroke_pattern(const std::string& image_src,
+                            PatternTileMode tile_x,
+                            PatternTileMode tile_y) override;
+
     void fill_rect(float x, float y, float w, float h) override;
     void clear_rect(float x, float y, float w, float h) override;
     void stroke_rect(float x, float y, float w, float h) override;

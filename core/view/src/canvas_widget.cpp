@@ -45,6 +45,7 @@ inline const char* canvas_cmd_type_name(CanvasDrawCmd::Type t) {
         case CanvasDrawCmd::Type::stroke_arc: return "stroke_arc";
         case CanvasDrawCmd::Type::fill_text: return "fill_text";
         case CanvasDrawCmd::Type::set_font: return "set_font";
+        case CanvasDrawCmd::Type::set_font_full: return "set_font_full";
         case CanvasDrawCmd::Type::set_text_align: return "set_text_align";
         case CanvasDrawCmd::Type::set_text_baseline: return "set_text_baseline";
         case CanvasDrawCmd::Type::set_fill_color: return "set_fill_color";
@@ -57,6 +58,8 @@ inline const char* canvas_cmd_type_name(CanvasDrawCmd::Type t) {
         case CanvasDrawCmd::Type::set_fill_gradient_linear: return "set_fill_gradient_linear";
         case CanvasDrawCmd::Type::set_fill_gradient_radial: return "set_fill_gradient_radial";
         case CanvasDrawCmd::Type::set_fill_gradient_conic: return "set_fill_gradient_conic";
+        case CanvasDrawCmd::Type::set_fill_pattern: return "set_fill_pattern";
+        case CanvasDrawCmd::Type::set_stroke_pattern: return "set_stroke_pattern";
         case CanvasDrawCmd::Type::clear_fill_gradient: return "clear_fill_gradient";
         case CanvasDrawCmd::Type::begin_path: return "begin_path";
         case CanvasDrawCmd::Type::move_to: return "move_to";
@@ -265,12 +268,38 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
         // Text
         case CanvasDrawCmd::Type::fill_text:
             canvas.set_fill_color(cmd.color);
-            canvas.set_font(cmd.text.empty() ? "Inter" : "", cmd.extra);
-            canvas.set_text_align(canvas::TextAlign::left);
+            // pulp #1434 P1 — do NOT call canvas.set_font() / set_text_align
+            // here. The JS shim's fillText path runs `_syncTextState()`
+            // BEFORE canvasFillText, which records a `set_font` (legacy) or
+            // `set_font_full` (rich CSS shorthand) cmd plus a
+            // `set_text_align` cmd ahead of this fill_text cmd. Re-setting
+            // the font here clobbers the rich state — Skia's
+            // SkiaCanvas::set_font() resets weight/slant to normal/upright
+            // (canvas.cpp:567-575), so `ctx.font = "italic bold 18px Inter"`
+            // would record set_font_full(weight=700, slant=1) and then
+            // immediately have weight/slant reset to 400/0 here, rendering
+            // the text as plain upright Regular even though the rich state
+            // was correctly captured. Same logic for text alignment: the
+            // prior set_text_align cmd already configured the canvas; the
+            // hard-coded TextAlign::left below would force every JS draw
+            // back to left-align. Drop both calls — the prior state cmds
+            // own the font + alignment.
             canvas.fill_text(cmd.text, cmd.x, cmd.y);
             break;
         case CanvasDrawCmd::Type::set_font:
             canvas.set_font(cmd.text, cmd.extra);
+            break;
+        case CanvasDrawCmd::Type::set_font_full:
+            // pulp #1434 — full CSS font shorthand. Weight stored in
+            // `cmd.x`, slant in `cmd.y`, letter_spacing in `cmd.x2`.
+            // Skia's set_font_full honours weight / slant; CG falls
+            // through to family+size via the base default.
+            canvas.set_font_full(
+                cmd.text,
+                cmd.extra,
+                static_cast<int>(cmd.x),
+                static_cast<int>(cmd.y),
+                cmd.x2);
             break;
 
         // Style
@@ -408,6 +437,24 @@ void CanvasWidget::paint(canvas::Canvas& canvas) {
         case CanvasDrawCmd::Type::clear_fill_gradient:
             canvas.clear_fill_gradient();
             break;
+        // pulp #1434 bridge-thin gap-fill — ctx.createPattern. Skia routes
+        // through SkShader::MakeImage with SkTileMode per axis (real tiled
+        // fill); CG degrades to the active fill colour (no native pattern
+        // shader). tile_x = bit 0, tile_y = bit 1: 0 = repeat, 1 = no-repeat.
+        case CanvasDrawCmd::Type::set_fill_pattern: {
+            using Tile = canvas::Canvas::PatternTileMode;
+            Tile tx = (cmd.int_val & 0x1) ? Tile::no_repeat : Tile::repeat;
+            Tile ty = (cmd.int_val & 0x2) ? Tile::no_repeat : Tile::repeat;
+            canvas.set_fill_pattern(cmd.text, tx, ty);
+            break;
+        }
+        case CanvasDrawCmd::Type::set_stroke_pattern: {
+            using Tile = canvas::Canvas::PatternTileMode;
+            Tile tx = (cmd.int_val & 0x1) ? Tile::no_repeat : Tile::repeat;
+            Tile ty = (cmd.int_val & 0x2) ? Tile::no_repeat : Tile::repeat;
+            canvas.set_stroke_pattern(cmd.text, tx, ty);
+            break;
+        }
 
         // Clear rect (pulp #929) — replace pixels with transparent black, do
         // not SrcOver-blend a transparent fill (which is a no-op). The

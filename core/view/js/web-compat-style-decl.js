@@ -134,7 +134,11 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
                 "col");
             break;
         case "flexWrap":
-            setFlex(id, "flex_wrap", resolved === "wrap" ? 1 : 0);
+            // pulp #1434 Triage #14 — forward the keyword verbatim so the
+            // bridge can route `wrap-reverse` through Yoga's
+            // YGWrapWrapReverse path. Previous behavior coerced to 0/1
+            // and silently dropped wrap-reverse to plain wrap.
+            setFlex(id, "flex_wrap", resolved);
             break;
         case "flexGrow":
             setFlex(id, "flex_grow", parseFloat(resolved) || 0);
@@ -190,16 +194,23 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
         // while letting "100%" survive through to Yoga's native
         // YGNodeStyleSet{Width,Height}Percent path.
         case "width": {
+            // pulp #1434 (sub-agent #12 follow-up) — forward `'auto'`
+            // verbatim so the bridge can route to YGNodeStyleSetWidthAuto
+            // ("hug contents"). Mirrors the percent path.
+            if (resolved === "auto") { setFlex(id, "width", "auto"); break; }
             var w = parseCSSLength(resolved);
             if (!w) break;
-            if (w.unit === "%") setFlex(id, "width", w.value + "%");
+            if (w.unit === "auto") setFlex(id, "width", "auto");
+            else if (w.unit === "%") setFlex(id, "width", w.value + "%");
             else setFlex(id, "width", w.value);
             break;
         }
         case "height": {
+            if (resolved === "auto") { setFlex(id, "height", "auto"); break; }
             var h = parseCSSLength(resolved);
             if (!h) break;
-            if (h.unit === "%") setFlex(id, "height", h.value + "%");
+            if (h.unit === "auto") setFlex(id, "height", "auto");
+            else if (h.unit === "%") setFlex(id, "height", h.value + "%");
             else setFlex(id, "height", h.value);
             break;
         }
@@ -552,14 +563,81 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
 
         // Transform
         case "transform": {
+            // pulp #1434 Triage #9 — full CSS transform-function fan-out.
+            // Walk-once accumulator (mirrors the @pulp/react prop-applier
+            // walker) so the within-string order produces a single set
+            // of consolidated bridge calls instead of multiple
+            // axis-clobbering ones. translateX(10) translateY(20)
+            // produces ONE setTranslate(10, 20). scaleX/scaleY share the
+            // uniform setScale slot (last-write-wins; bridge gap).
+            // skewX(α) skewY(β) → ONE setSkew(α, β).
+            //
+            // Deferred (silent no-op + TODO):
+            //   • rotateX / rotateY — pulp's 2D View has no 3D rotation
+            //     storage; rotateZ aliases to setRotation.
+            //   • matrix3d / perspective — ditto, no 3D model.
+            //   • matrix(a b c d tx ty) — 2D affine. Per Codex P1 audit,
+            //     dispatched directly to setTransform(id, a, b, c, d, e, f)
+            //     to preserve all 6 components verbatim. The earlier
+            //     decomposition to translate+uniform-scale+rotate dropped
+            //     the c/d skew components on rotation matrices like
+            //     `matrix(0.866, 0.5, -0.5, 0.866, 100, 50)` and could
+            //     mask zero-scale collapses (a=b=0 was silently rounded
+            //     to scl=1).
             var transforms = parseTransform(resolved);
+            var tx = 0, ty = 0;
+            var rotZ = 0;
+            var scl = 1;
+            var skewX = 0, skewY = 0;
+            var haveT = false, haveR = false, haveS = false, haveK = false;
+            var matrixCall = null; // {a,b,c,d,e,f} for matrix() entries
             for (var i = 0; i < transforms.length; i++) {
                 var t = transforms[i];
-                if (t.fn === "scale") setScale(id, t.args[0] || 1);
-                else if (t.fn === "rotate") setRotation(id, t.args[0] || 0);
-                else if (t.fn === "translate") setTranslate(id, t.args[0] || 0, t.args[1] || 0);
-                else if (t.fn === "translateX") setTranslate(id, t.args[0] || 0, 0);
-                else if (t.fn === "translateY") setTranslate(id, 0, t.args[0] || 0);
+                var a0 = t.args[0] || 0;
+                var a1 = t.args[1] || 0;
+                if (t.fn === "translate")        { tx = a0; ty = a1; haveT = true; }
+                else if (t.fn === "translateX") { tx = a0;          haveT = true; }
+                else if (t.fn === "translateY") { ty = a0;          haveT = true; }
+                else if (t.fn === "rotate")     { rotZ = a0;        haveR = true; }
+                else if (t.fn === "rotateZ")    { rotZ = a0;        haveR = true; }
+                else if (t.fn === "scale")      { scl = a0;         haveS = true; }
+                else if (t.fn === "scaleX")     { scl = a0;         haveS = true; }
+                else if (t.fn === "scaleY")     { scl = a0;         haveS = true; }
+                else if (t.fn === "skewX")      { skewX = a0;       haveK = true; }
+                else if (t.fn === "skewY")      { skewY = a0;       haveK = true; }
+                else if (t.fn === "matrix") {
+                    // matrix(a b c d tx ty) — preserve full 6-component
+                    // 2D affine. The bridge already exposes setTransform
+                    // with the same 6-arg signature; we pass through
+                    // verbatim. Note: when matrix() coexists with
+                    // translate/scale/rotate ops in the same string,
+                    // matrix() takes precedence (its 6 components encode
+                    // the full affine — applying the others on top would
+                    // be ambiguous).
+                    matrixCall = {
+                        a: t.args[0] !== undefined ? t.args[0] : 1,
+                        b: t.args[1] !== undefined ? t.args[1] : 0,
+                        c: t.args[2] !== undefined ? t.args[2] : 0,
+                        d: t.args[3] !== undefined ? t.args[3] : 1,
+                        e: t.args[4] !== undefined ? t.args[4] : 0,
+                        f: t.args[5] !== undefined ? t.args[5] : 0,
+                    };
+                }
+                // rotateX / rotateY / matrix3d / perspective: 2D View has
+                // no 3D rotation storage; silently dropped. Tracked for
+                // a follow-up issue (3D model on View).
+            }
+            if (matrixCall && typeof setTransform !== "undefined") {
+                // Full-matrix path — 6-component bridge call. Skips the
+                // decomposed translate/rotate/scale dispatchers since
+                // matrix() already encodes them in a/b/c/d/e/f.
+                setTransform(id, matrixCall.a, matrixCall.b, matrixCall.c,
+                             matrixCall.d, matrixCall.e, matrixCall.f);
+            } else {
+                if (haveT) setTranslate(id, tx, ty);
+                if (haveR) setRotation(id, rotZ);
+                if (haveS) setScale(id, scl);
+                if (haveK && typeof setSkew !== "undefined") setSkew(id, skewX, skewY);
             }
             break;
         }
@@ -722,6 +800,24 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
             if (gr[1]) setGrid(id, "row_end", gr[1]);
             break;
         }
+        // pulp #1434 Phase A2-2 — extended grid surface
+        case "gridAutoColumns":
+            setGrid(id, "auto_columns", resolved);
+            break;
+        case "gridAutoRows":
+            setGrid(id, "auto_rows", resolved);
+            break;
+        case "gridAutoFlow":
+            setGrid(id, "auto_flow", resolved);
+            break;
+        case "gridTemplateAreas":
+            setGrid(id, "template_areas", resolved);
+            break;
+        case "gridArea":
+            // Pass through verbatim — bridge distinguishes name vs.
+            // numeric "row / col / row / col" form.
+            setGrid(id, "grid_area", resolved);
+            break;
 
         // ── P1: New CSS properties ──────────────────────────────────────
 
@@ -945,12 +1041,21 @@ CSSStyleDeclaration.prototype._applyProperty = function(key, value) {
 
         // flex-flow shorthand
         case "flexFlow": {
+            // pulp #1434 Triage #14 — recognize the full direction +
+            // wrap vocabulary including `row-reverse` / `column-reverse`
+            // (already-wired but missing from this shorthand path) and
+            // `wrap-reverse` (newly wired through the bridge).
             var ffp = resolved.split(/\s+/);
             for (var ffi = 0; ffi < ffp.length; ffi++) {
-                if (ffp[ffi] === "row" || ffp[ffi] === "column")
-                    setFlex(id, "direction", ffp[ffi] === "row" ? "row" : "col");
-                else if (ffp[ffi] === "wrap" || ffp[ffi] === "nowrap")
-                    setFlex(id, "flex_wrap", ffp[ffi] === "wrap" ? 1 : 0);
+                var tok = ffp[ffi];
+                if (tok === "row" || tok === "column"
+                        || tok === "row-reverse" || tok === "column-reverse") {
+                    setFlex(id, "direction", tok === "row" ? "row" : tok);
+                }
+                else if (tok === "wrap" || tok === "nowrap"
+                        || tok === "no-wrap" || tok === "wrap-reverse") {
+                    setFlex(id, "flex_wrap", tok);
+                }
             }
             break;
         }
