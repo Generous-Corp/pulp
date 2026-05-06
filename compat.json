@@ -2917,14 +2917,18 @@
       "issue": ""
     },
     "rn/borderEndWidth": {
-      "status": "missing",
-      "mapsTo": "no branch",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "partial",
+      "mapsTo": "@pulp/react prop-applier — End → Right under LTR; routes to setBorderRightWidth.",
+      "supportedValues": [
+        "number (px)"
       ],
-      "tests": [],
-      "notes": "Logical property; not modeled.",
+      "unsupportedValues": [
+        "RTL writing direction (deferred to future direction system)"
+      ],
+      "tests": [
+        "packages/pulp-react/test/prop-applier-logical-edges.test.ts"
+      ],
+      "notes": "pulp #1434 rn logical-edge bundle (sub-agent #27 finding) — LTR-only fast path. @pulp/react prop-applier maps Start→Left, End→Right; inset shorthand fans out to top/right/bottom/left; insetBlock→top+bottom; insetInline→left+right. True RTL bidi requires a future direction system.",
       "issue": ""
     },
     "rn/borderLeftColor": {
@@ -3018,14 +3022,18 @@
       "issue": ""
     },
     "rn/borderStartWidth": {
-      "status": "missing",
-      "mapsTo": "no branch",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "partial",
+      "mapsTo": "@pulp/react prop-applier — Start → Left under LTR; routes to setBorderLeftWidth.",
+      "supportedValues": [
+        "number (px)"
       ],
-      "tests": [],
-      "notes": "Logical property.",
+      "unsupportedValues": [
+        "RTL writing direction (deferred to future direction system)"
+      ],
+      "tests": [
+        "packages/pulp-react/test/prop-applier-logical-edges.test.ts"
+      ],
+      "notes": "pulp #1434 rn logical-edge bundle (sub-agent #27 finding) — LTR-only fast path. @pulp/react prop-applier maps Start→Left, End→Right; inset shorthand fans out to top/right/bottom/left; insetBlock→top+bottom; insetInline→left+right. True RTL bidi requires a future direction system.",
       "issue": ""
     },
     "rn/borderStyle": {
@@ -3267,14 +3275,19 @@
       "issue": ""
     },
     "rn/end": {
-      "status": "missing",
-      "mapsTo": "no branch",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "number"
+      "status": "partial",
+      "mapsTo": "@pulp/react prop-applier — end → right under LTR; routes to setRight.",
+      "supportedValues": [
+        "number",
+        "percent string"
       ],
-      "tests": [],
-      "notes": "Logical position; not modeled.",
+      "unsupportedValues": [
+        "RTL writing direction (deferred to future direction system)"
+      ],
+      "tests": [
+        "packages/pulp-react/test/prop-applier-logical-edges.test.ts"
+      ],
+      "notes": "pulp #1434 rn logical-edge bundle (sub-agent #27 finding) — LTR-only fast path. @pulp/react prop-applier maps Start→Left, End→Right; inset shorthand fans out to top/right/bottom/left; insetBlock→top+bottom; insetInline→left+right. True RTL bidi requires a future direction system.",
       "issue": ""
     },
     "rn/experimental_backgroundImage": {
@@ -3488,36 +3501,52 @@
       "issue": ""
     },
     "rn/inset": {
-      "status": "missing",
-      "mapsTo": "no @pulp/react prop. CSS shim has it.",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "partial",
+      "mapsTo": "@pulp/react prop-applier — CSS shorthand fan-out to top/right/bottom/left (1/2/3/4 token expansion).",
+      "supportedValues": [
+        "number",
+        "percent string",
+        "space-separated 2/3/4 token shorthand"
       ],
-      "tests": [],
-      "notes": "RN exposes inset; @pulp/react does not.",
+      "unsupportedValues": [
+        "RTL writing direction (deferred to future direction system)"
+      ],
+      "tests": [
+        "packages/pulp-react/test/prop-applier-logical-edges.test.ts"
+      ],
+      "notes": "pulp #1434 rn logical-edge bundle (sub-agent #27 finding) — LTR-only fast path. @pulp/react prop-applier maps Start→Left, End→Right; inset shorthand fans out to top/right/bottom/left; insetBlock→top+bottom; insetInline→left+right. True RTL bidi requires a future direction system.",
       "issue": ""
     },
     "rn/insetBlock": {
-      "status": "missing",
-      "mapsTo": "no branch",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "partial",
+      "mapsTo": "@pulp/react prop-applier — top + bottom fan-out.",
+      "supportedValues": [
+        "number",
+        "percent string"
       ],
-      "tests": [],
-      "notes": "Logical.",
+      "unsupportedValues": [
+        "RTL writing direction (deferred to future direction system)"
+      ],
+      "tests": [
+        "packages/pulp-react/test/prop-applier-logical-edges.test.ts"
+      ],
+      "notes": "pulp #1434 rn logical-edge bundle (sub-agent #27 finding) — LTR-only fast path. @pulp/react prop-applier maps Start→Left, End→Right; inset shorthand fans out to top/right/bottom/left; insetBlock→top+bottom; insetInline→left+right. True RTL bidi requires a future direction system.",
       "issue": ""
     },
     "rn/insetInline": {
-      "status": "missing",
-      "mapsTo": "no branch",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "partial",
+      "mapsTo": "@pulp/react prop-applier — left + right fan-out under LTR.",
+      "supportedValues": [
+        "number",
+        "percent string"
       ],
-      "tests": [],
-      "notes": "Logical.",
+      "unsupportedValues": [
+        "RTL writing direction (deferred to future direction system)"
+      ],
+      "tests": [
+        "packages/pulp-react/test/prop-applier-logical-edges.test.ts"
+      ],
+      "notes": "pulp #1434 rn logical-edge bundle (sub-agent #27 finding) — LTR-only fast path. @pulp/react prop-applier maps Start→Left, End→Right; inset shorthand fans out to top/right/bottom/left; insetBlock→top+bottom; insetInline→left+right. True RTL bidi requires a future direction system.",
       "issue": ""
     },
     "rn/isolation": {
@@ -3616,14 +3645,20 @@
       "issue": ""
     },
     "rn/marginEnd": {
-      "status": "missing",
-      "mapsTo": "no branch",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "partial",
+      "mapsTo": "@pulp/react prop-applier — End → Right under LTR.",
+      "supportedValues": [
+        "number",
+        "percent string",
+        "\"auto\""
       ],
-      "tests": [],
-      "notes": "Logical property.",
+      "unsupportedValues": [
+        "RTL writing direction (deferred to future direction system)"
+      ],
+      "tests": [
+        "packages/pulp-react/test/prop-applier-logical-edges.test.ts"
+      ],
+      "notes": "pulp #1434 rn logical-edge bundle (sub-agent #27 finding) — LTR-only fast path. @pulp/react prop-applier maps Start→Left, End→Right; inset shorthand fans out to top/right/bottom/left; insetBlock→top+bottom; insetInline→left+right. True RTL bidi requires a future direction system.",
       "issue": ""
     },
     "rn/marginHorizontal": {
@@ -3672,14 +3707,20 @@
       "issue": ""
     },
     "rn/marginStart": {
-      "status": "missing",
-      "mapsTo": "no branch",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "partial",
+      "mapsTo": "@pulp/react prop-applier — Start → Left under LTR.",
+      "supportedValues": [
+        "number",
+        "percent string",
+        "\"auto\""
       ],
-      "tests": [],
-      "notes": "Logical.",
+      "unsupportedValues": [
+        "RTL writing direction (deferred to future direction system)"
+      ],
+      "tests": [
+        "packages/pulp-react/test/prop-applier-logical-edges.test.ts"
+      ],
+      "notes": "pulp #1434 rn logical-edge bundle (sub-agent #27 finding) — LTR-only fast path. @pulp/react prop-applier maps Start→Left, End→Right; inset shorthand fans out to top/right/bottom/left; insetBlock→top+bottom; insetInline→left+right. True RTL bidi requires a future direction system.",
       "issue": ""
     },
     "rn/marginTop": {
@@ -3880,14 +3921,19 @@
       "issue": ""
     },
     "rn/paddingEnd": {
-      "status": "missing",
-      "mapsTo": "no branch",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "partial",
+      "mapsTo": "@pulp/react prop-applier — End → Right under LTR.",
+      "supportedValues": [
+        "number",
+        "percent string"
       ],
-      "tests": [],
-      "notes": "Logical.",
+      "unsupportedValues": [
+        "RTL writing direction (deferred to future direction system)"
+      ],
+      "tests": [
+        "packages/pulp-react/test/prop-applier-logical-edges.test.ts"
+      ],
+      "notes": "pulp #1434 rn logical-edge bundle (sub-agent #27 finding) — LTR-only fast path. @pulp/react prop-applier maps Start→Left, End→Right; inset shorthand fans out to top/right/bottom/left; insetBlock→top+bottom; insetInline→left+right. True RTL bidi requires a future direction system.",
       "issue": ""
     },
     "rn/paddingHorizontal": {
@@ -3933,14 +3979,19 @@
       "issue": ""
     },
     "rn/paddingStart": {
-      "status": "missing",
-      "mapsTo": "no branch",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "partial",
+      "mapsTo": "@pulp/react prop-applier — Start → Left under LTR.",
+      "supportedValues": [
+        "number",
+        "percent string"
       ],
-      "tests": [],
-      "notes": "Logical.",
+      "unsupportedValues": [
+        "RTL writing direction (deferred to future direction system)"
+      ],
+      "tests": [
+        "packages/pulp-react/test/prop-applier-logical-edges.test.ts"
+      ],
+      "notes": "pulp #1434 rn logical-edge bundle (sub-agent #27 finding) — LTR-only fast path. @pulp/react prop-applier maps Start→Left, End→Right; inset shorthand fans out to top/right/bottom/left; insetBlock→top+bottom; insetInline→left+right. True RTL bidi requires a future direction system.",
       "issue": ""
     },
     "rn/paddingTop": {
@@ -4069,14 +4120,19 @@
       "issue": ""
     },
     "rn/start": {
-      "status": "missing",
-      "mapsTo": "no branch",
-      "supportedValues": [],
-      "unsupportedValues": [
-        "all"
+      "status": "partial",
+      "mapsTo": "@pulp/react prop-applier — start → left under LTR; routes to setLeft.",
+      "supportedValues": [
+        "number",
+        "percent string"
       ],
-      "tests": [],
-      "notes": "Logical position.",
+      "unsupportedValues": [
+        "RTL writing direction (deferred to future direction system)"
+      ],
+      "tests": [
+        "packages/pulp-react/test/prop-applier-logical-edges.test.ts"
+      ],
+      "notes": "pulp #1434 rn logical-edge bundle (sub-agent #27 finding) — LTR-only fast path. @pulp/react prop-applier maps Start→Left, End→Right; inset shorthand fans out to top/right/bottom/left; insetBlock→top+bottom; insetInline→left+right. True RTL bidi requires a future direction system.",
       "issue": ""
     },
     "rn/stroke": {

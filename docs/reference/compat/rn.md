@@ -27,6 +27,20 @@ Spec walk:
 
 ## Recently changed
 
+- **2026-05-05 (pulp #1434 rn logical-edge bundle, sub-agent #27 finding)** —
+  11 RN logical-flow props wired through the `@pulp/react` prop-applier
+  with an LTR-only fast path: `marginStart` / `marginEnd` /
+  `paddingStart` / `paddingEnd` route to the matching `*Left` /
+  `*Right` per-edge bridge calls; `borderStartWidth` /
+  `borderEndWidth` route to `setBorderLeftWidth` / `setBorderRightWidth`;
+  `start` / `end` route to `setLeft` / `setRight`. The CSS `inset`
+  shorthand fans out to top/right/bottom/left with the standard
+  1/2/3/4-token expansion (numeric or percent strings forward
+  verbatim). `insetBlock` → top + bottom; `insetInline` → left +
+  right. All 11 entries flipped `missing` → `partial` — the LTR
+  assumption is the honest `unsupportedValues` caveat (true RTL bidi
+  defers to a future direction system). rn progress 61.67% → 70.83%
+  (+9.16pp).
 - **2026-05-05 (pulp #1434 Triage #10)** — `rn/borderStyle` surfaced
   at the `@pulp/react` JSX layer with the full keyword set: `solid`,
   `dashed`, `dotted`, `double`, `groove`, `ridge`, `inset`, `outset`,

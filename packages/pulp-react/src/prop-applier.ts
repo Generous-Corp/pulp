@@ -554,6 +554,87 @@ function applyOne(id: string, type: string, key: string, value: unknown, props?:
         // 'scroll' / 'auto'); bridge maps to View::Overflow enum.
         case 'overflow':     return call('setOverflow', id, value as string);
 
+        // pulp #1434 rn logical-edge bundle (sub-agent #27 finding) —
+        // RN's CSS-spec-equivalent logical-flow props. LTR-only fast
+        // path: Start → Left, End → Right, inset shorthand expands to
+        // top/right/bottom/left, insetBlock → top+bottom,
+        // insetInline → left+right (LTR). True RTL bidi requires a
+        // future direction system — tracked as a separate big project.
+        // The 11 entries here close the missing-on-rn gap with the
+        // honest LTR-only caveat documented in the catalog.
+        case 'marginStart': {
+            return call('setFlex', id, 'margin_left', value as number | string);
+        }
+        case 'marginEnd': {
+            return call('setFlex', id, 'margin_right', value as number | string);
+        }
+        case 'paddingStart': {
+            return call('setFlex', id, 'padding_left', value as number | string);
+        }
+        case 'paddingEnd': {
+            return call('setFlex', id, 'padding_right', value as number | string);
+        }
+        case 'borderStartWidth': {
+            // Routes to the per-side bridge setter that preserves the
+            // unrelated attribute (color) — same pattern as borderLeftWidth.
+            return call('setBorderLeftWidth', id, value as number);
+        }
+        case 'borderEndWidth': {
+            return call('setBorderRightWidth', id, value as number);
+        }
+        case 'start': {
+            return call('setLeft', id, value as number | string);
+        }
+        case 'end': {
+            return call('setRight', id, value as number | string);
+        }
+        // CSS `inset` shorthand: 1 / 2 / 3 / 4 values fan out to
+        // top / right / bottom / left (CSS spec — same expansion as
+        // `margin` / `padding` shorthands). Numeric or percent strings.
+        case 'inset': {
+            const v = value as number | string;
+            if (typeof v === 'number') {
+                call('setTop',    id, v);
+                call('setRight',  id, v);
+                call('setBottom', id, v);
+                call('setLeft',   id, v);
+                return;
+            }
+            const tokens = String(v).trim().split(/\s+/);
+            const t = tokens[0] ?? 0;
+            const r = tokens[1] ?? t;
+            const b = tokens[2] ?? t;
+            const l = tokens[3] ?? r;
+            // Each token may be a number or a percent string — forward
+            // verbatim so the bridge can route through Yoga's
+            // YGNodeStyleSetPositionPercent path for percent values.
+            const coerce = (tok: string | number) => {
+                if (typeof tok === 'number') return tok;
+                if (tok.endsWith('%')) return tok;
+                const n = parseFloat(tok);
+                return Number.isFinite(n) ? n : tok;
+            };
+            call('setTop',    id, coerce(t));
+            call('setRight',  id, coerce(r));
+            call('setBottom', id, coerce(b));
+            call('setLeft',   id, coerce(l));
+            return;
+        }
+        case 'insetBlock': {
+            // CSS insetBlock shorthand → top + bottom.
+            const v = value as number | string;
+            call('setTop',    id, v);
+            call('setBottom', id, v);
+            return;
+        }
+        case 'insetInline': {
+            // CSS insetInline shorthand → left + right (LTR).
+            const v = value as number | string;
+            call('setLeft',  id, v);
+            call('setRight', id, v);
+            return;
+        }
+
         // pulp #1434 Triage #9 — RN array transform.
         // RN's transform is an array of single-property objects:
         //   transform: [

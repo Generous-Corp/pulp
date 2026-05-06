@@ -55,6 +55,28 @@ export interface FlexProps {
     /// pulp #1434 batch 4 — `marginVertical` fans out to `marginTop` +
     /// `marginBottom`.
     marginVertical?: number | string;
+    /// pulp #1434 rn logical-edge bundle (sub-agent #27 finding) —
+    /// CSS-spec-equivalent flow props. LTR-only fast path:
+    /// Start → Left, End → Right. RTL deferred to a future direction
+    /// system. Values are number (px), percent string, or `'auto'` on
+    /// margin (matches the per-edge surface).
+    marginStart?: number | string;
+    marginEnd?: number | string;
+    paddingStart?: number | string;
+    paddingEnd?: number | string;
+    borderStartWidth?: number;
+    borderEndWidth?: number;
+    /// CSS positional logical aliases. LTR: start → left, end → right.
+    start?: number | string;
+    end?: number | string;
+    /// CSS `inset` shorthand: `'10px'`, `'10px 20px'`, etc. Fans out
+    /// to top/right/bottom/left via the same expansion rules as
+    /// `margin` / `padding`.
+    inset?: number | string;
+    /// CSS `inset-block` → top + bottom.
+    insetBlock?: number | string;
+    /// CSS `inset-inline` → left + right (LTR).
+    insetInline?: number | string;
     flexGrow?: number;
     flexShrink?: number;
     /// pulp #1434 (rn batch C) — accepts number (px), percentage string
